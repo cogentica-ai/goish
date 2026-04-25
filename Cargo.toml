@@ -1,0 +1,31 @@
+[workspace]
+members = ["goish-macros"]
+resolver = "2"
+
+[package]
+name = "goish"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+authors = ["Chanwit Kaewkasi <chanwit@gmail.com>"]
+description = "Goish v1 — Go-style stdlib for Rust, no_std and no glibc, built on raw Linux syscalls."
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+goish-macros = { path = "goish-macros", version = "0.1" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+strip = true
+codegen-units = 1
+
+[[example]]
+name = "hello"
+path = "examples/hello.rs"
