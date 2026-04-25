@@ -12,6 +12,12 @@
 #![cfg_attr(not(test), no_main)]
 #![allow(non_snake_case, non_upper_case_globals)]
 
+// Pull in `alloc` so Vec / String / Box are available across all of
+// goish, backed by our mmap allocator (registered as #[global_allocator]
+// in runtime::heap). User crates that want these types should also add
+// `extern crate alloc;` to their root.
+extern crate alloc;
+
 pub mod builtin;
 pub mod runtime;
 pub mod syscall;

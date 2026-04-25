@@ -28,6 +28,18 @@ pub const STDIN: i32 = 0;
 pub const STDOUT: i32 = 1;
 pub const STDERR: i32 = 2;
 
+// ─── mmap flags / prot bits ────────────────────────────────────────────
+pub const PROT_NONE: i32 = 0;
+pub const PROT_READ: i32 = 1;
+pub const PROT_WRITE: i32 = 2;
+pub const PROT_EXEC: i32 = 4;
+
+pub const MAP_PRIVATE: i32 = 0x02;
+pub const MAP_ANONYMOUS: i32 = 0x20;
+
+/// Sentinel returned by `mmap(2)` on failure (`(void*) -1`).
+pub const MAP_FAILED: *mut u8 = !0usize as *mut u8;
+
 // ─── raw syscall wrappers (x86-64) ─────────────────────────────────────
 
 /// 1-argument syscall.
@@ -115,4 +127,32 @@ pub fn Exit(code: i32) -> ! {
         // exit_group never returns; tell the optimizer.
         core::hint::unreachable_unchecked()
     }
+}
+
+/// `mmap(2)` — map anonymous memory pages. Returns `MAP_FAILED` on error.
+///
+/// Goish uses this as the sole source of heap memory: `runtime::alloc`
+/// hands out chunks of mmap'd regions, never calling into libc malloc.
+#[allow(non_snake_case)]
+pub fn Mmap(addr: *mut u8, length: usize, prot: i32, flags: i32, fd: i32, offset: i64) -> *mut u8 {
+    let ret = unsafe {
+        syscall6(
+            SYS_MMAP,
+            addr as usize,
+            length,
+            prot as usize,
+            flags as usize,
+            fd as usize,        // -1 for anonymous; kernel ignores
+            offset as usize,
+        )
+    };
+    // Return is either the address (positive) or -errno (negative). Cast
+    // back to a pointer; callers compare against MAP_FAILED.
+    ret as *mut u8
+}
+
+/// `munmap(2)` — release a previously mapped region.
+#[allow(non_snake_case)]
+pub fn Munmap(addr: *mut u8, length: usize) -> isize {
+    unsafe { syscall3(SYS_MUNMAP, addr as usize, length, 0) }
 }

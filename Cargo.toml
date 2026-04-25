@@ -16,6 +16,10 @@ path = "src/lib.rs"
 
 [dependencies]
 goish-macros = { path = "goish-macros", version = "0.1" }
+# dlmalloc-rs: leaf allocator. Pure Rust port of Doug Lea's malloc, used
+# by Rust itself for the wasm target. We supply our own mmap-backed
+# Allocator impl so it never touches libc.
+dlmalloc = { version = "0.2", default-features = false }
 
 [profile.dev]
 panic = "abort"
@@ -29,3 +33,7 @@ codegen-units = 1
 [[example]]
 name = "hello"
 path = "examples/hello.rs"
+
+[[example]]
+name = "alloc_smoke"
+path = "examples/alloc_smoke.rs"

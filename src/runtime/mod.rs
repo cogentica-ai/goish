@@ -15,6 +15,11 @@
 
 use crate::syscall;
 
+mod heap;
+mod mem;
+mod spin;
+pub use heap::{alloc, free, realloc};
+
 /// First Rust code to run after the kernel hands control to `_start`.
 /// `_start` (emitted by `#[goish::main]`) reads argc/argv off the stack,
 /// loads them into rdi/rsi per SysV, then `call`s here.
