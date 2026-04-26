@@ -16,11 +16,12 @@
 use crate::syscall;
 
 pub mod args;
-mod heap;
+pub mod heap;
+pub mod mcentral;
 pub mod mheap;
 mod mem;
 pub mod spin;
-pub use heap::{alloc, free, realloc};
+pub use heap::{alloc, free, mheap_alloc_pages, mheap_free_pages, realloc};
 
 /// First Rust code to run after the kernel hands control to `_start`.
 /// `_start` (emitted by `#[goish::main]`) reads argc/argv off the stack,
@@ -36,6 +37,15 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // every alloc routes through dlmalloc (MHEAP_READY = false). After
     // this, large allocs route through mheap.
     unsafe { heap::mheap_init() }
+
+    // Bring mcentral online so small allocs route through size-class
+    // spans backed by mheap rather than dlmalloc. Must follow
+    // mheap_init since mcentral draws spans from mheap.
+    unsafe {
+        // Pull arena base from mheap to set up mcentral's page→span map.
+        let arena_base = heap::mheap_arena_base();
+        mcentral::mcentral_init(arena_base);
+    }
 
     // Hand off to the user's main. The proc-macro #[goish::main]
     // generates a #[no_mangle] extern "C" fn __goish_main wrapping the

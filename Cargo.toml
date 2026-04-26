@@ -205,3 +205,7 @@ path = "examples/alloc_mheap.rs"
 [[example]]
 name = "alloc_mheap_stress"
 path = "examples/alloc_mheap_stress.rs"
+
+[[example]]
+name = "mcentral_smoke"
+path = "examples/mcentral_smoke.rs"

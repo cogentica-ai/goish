@@ -149,19 +149,40 @@ fn pages_for(size: usize) -> usize {
     (size + PAGE_SIZE - 1) / PAGE_SIZE
 }
 
-/// Allocate via mheap. Returns null on OOM.
-unsafe fn mheap_alloc(layout: Layout) -> *mut u8 {
-    let bytes = layout.size().max(layout.align());
-    let npages = pages_for(bytes);
+/// Returns the virtual base address of the mheap arena. Used by
+/// mcentral to translate raw pointers into per-page indices for the
+/// `page_to_span` reverse map.
+pub fn mheap_arena_base() -> usize {
+    let g = MHEAP.lock();
+    g.as_ref().map(|p| p.arena_base).unwrap_or(0)
+}
+
+/// Page-grain mheap alloc. Public so mcentral can draw spans from
+/// the same heap. Returns `ALLOC_FAILED` on OOM.
+pub unsafe fn mheap_alloc_pages(npages: usize) -> usize {
     let mut g = MHEAP.lock();
     let h = g.as_mut().unwrap_or_else(|| {
         const MSG: &[u8] = b"goish: mheap: alloc before init\n";
         syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
         syscall::Exit(2);
     });
-    let addr = h.alloc(npages);
+    h.alloc(npages)
+}
+
+/// Page-grain mheap free. Public so mcentral can return empty spans.
+pub unsafe fn mheap_free_pages(base: usize, npages: usize) {
+    let mut g = MHEAP.lock();
+    if let Some(h) = g.as_mut() {
+        h.free(base, npages);
+    }
+}
+
+/// Allocate via mheap. Returns null on OOM.
+unsafe fn mheap_alloc(layout: Layout) -> *mut u8 {
+    let bytes = layout.size().max(layout.align());
+    let npages = pages_for(bytes);
+    let addr = mheap_alloc_pages(npages);
     if addr == ALLOC_FAILED {
-        // Out of arena. 2b'-γ panics; later phases will grow the arena.
         const MSG: &[u8] = b"goish: mheap: arena exhausted\n";
         syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
         syscall::Exit(2);
@@ -173,16 +194,22 @@ unsafe fn mheap_alloc(layout: Layout) -> *mut u8 {
 unsafe fn mheap_free(ptr: *mut u8, layout: Layout) {
     let bytes = layout.size().max(layout.align());
     let npages = pages_for(bytes);
-    let mut g = MHEAP.lock();
-    if let Some(h) = g.as_mut() {
-        h.free(ptr as usize, npages);
-    }
+    mheap_free_pages(ptr as usize, npages);
 }
 
-/// True if `layout` should be served by mheap.
+/// True if `layout` should be served by mheap directly (large path).
 #[inline]
 fn route_to_mheap(layout: Layout) -> bool {
     MHEAP_READY.load(Ordering::Acquire) && layout.size() > LARGE_THRESHOLD
+}
+
+/// True if `layout` should be served by mcentral (small path).
+#[inline]
+fn route_to_mcentral(layout: Layout) -> bool {
+    crate::runtime::mcentral::ready()
+        && layout.size() > 0
+        && layout.size() <= LARGE_THRESHOLD
+        && layout.align() <= PAGE_SIZE
 }
 
 // ─── Go-shaped public API ──────────────────────────────────────────────
@@ -193,64 +220,53 @@ pub unsafe fn alloc(size: usize, align: usize) -> *mut u8 {
     let layout = Layout::from_size_align_unchecked(size, align);
     if route_to_mheap(layout) {
         mheap_alloc(layout)
+    } else if route_to_mcentral(layout) {
+        let p = crate::runtime::mcentral::alloc(size, align);
+        if !p.is_null() {
+            return p;
+        }
+        // mcentral can't serve (e.g. couldn't get a span); fall back.
+        SMALL_HEAP.lock().malloc(size, align)
     } else {
         SMALL_HEAP.lock().malloc(size, align)
     }
 }
 
 /// Reallocate, preserving the first `min(old_size, new_size)` bytes.
-/// Cross-tier resizes (small→large or large→small) go through
-/// alloc + memcpy + free.
+/// Cross-tier resizes go through alloc + memcpy + free.
 pub unsafe fn realloc(ptr: *mut u8, old_size: usize, new_size: usize, align: usize) -> *mut u8 {
-    let old = Layout::from_size_align_unchecked(old_size, align);
-    let new = Layout::from_size_align_unchecked(new_size, align);
-    let old_large = route_to_mheap(old);
-    let new_large = route_to_mheap(new);
-    if old_large == new_large {
-        // Same-tier resize.
-        if old_large {
-            // Both via mheap — alloc+copy+free for now (in-place
-            // grow within a span lands in 2c with size classes).
-            let dst = mheap_alloc(new);
-            if !dst.is_null() {
-                let n = old_size.min(new_size);
-                core::ptr::copy_nonoverlapping(ptr, dst, n);
-                mheap_free(ptr, old);
-            }
-            dst
-        } else {
-            // Both via dlmalloc.
-            SMALL_HEAP.lock().realloc(ptr, old_size, align, new_size)
-        }
-    } else {
-        // Cross-tier: alloc in new tier, copy, free in old tier.
-        let dst = if new_large {
-            mheap_alloc(new)
-        } else {
-            SMALL_HEAP.lock().malloc(new_size, align)
-        };
-        if !dst.is_null() {
-            let n = old_size.min(new_size);
-            core::ptr::copy_nonoverlapping(ptr, dst, n);
-            if old_large {
-                mheap_free(ptr, old);
-            } else {
-                SMALL_HEAP.lock().free(ptr, old_size, align);
-            }
-        }
-        dst
+    // Fast path: same dlmalloc tier on both ends → use dlmalloc's
+    // in-place realloc when possible. Otherwise generic copy.
+    let dst = alloc(new_size, align);
+    if dst.is_null() {
+        return dst;
     }
+    let n = old_size.min(new_size);
+    core::ptr::copy_nonoverlapping(ptr, dst, n);
+    dealloc_routed(ptr, old_size, align);
+    dst
 }
 
 /// Free a previously allocated block. `size` must match the original
 /// allocation.
 pub unsafe fn free(ptr: *mut u8, size: usize) {
-    let layout = Layout::from_size_align_unchecked(size, 8);
+    dealloc_routed(ptr, size, 8);
+}
+
+/// Internal dealloc dispatch consulting all three tiers in order:
+/// mheap (large), mcentral (small/owned), dlmalloc (fallback).
+unsafe fn dealloc_routed(ptr: *mut u8, size: usize, align: usize) {
+    let layout = Layout::from_size_align_unchecked(size, align);
     if route_to_mheap(layout) {
         mheap_free(ptr, layout);
-    } else {
-        SMALL_HEAP.lock().free(ptr, size, 8);
+        return;
     }
+    // mcentral_free returns true if it owns the pointer (i.e. ptr is
+    // inside a tracked span). Otherwise this is a dlmalloc-tier alloc.
+    if crate::runtime::mcentral::ready() && crate::runtime::mcentral::free(ptr) {
+        return;
+    }
+    SMALL_HEAP.lock().free(ptr, size, align);
 }
 
 // ─── #[global_allocator] adapter ───────────────────────────────────────
@@ -262,6 +278,13 @@ unsafe impl GlobalAlloc for GoishAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         if route_to_mheap(layout) {
             mheap_alloc(layout)
+        } else if route_to_mcentral(layout) {
+            let p = crate::runtime::mcentral::alloc(layout.size(), layout.align());
+            if !p.is_null() {
+                p
+            } else {
+                SMALL_HEAP.lock().malloc(layout.size(), layout.align())
+            }
         } else {
             SMALL_HEAP.lock().malloc(layout.size(), layout.align())
         }
@@ -271,11 +294,14 @@ unsafe impl GlobalAlloc for GoishAllocator {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         if route_to_mheap(layout) {
             mheap_free(ptr, layout);
-        } else {
-            SMALL_HEAP
-                .lock()
-                .free(ptr, layout.size(), layout.align());
+            return;
         }
+        if crate::runtime::mcentral::ready() && crate::runtime::mcentral::free(ptr) {
+            return;
+        }
+        SMALL_HEAP
+            .lock()
+            .free(ptr, layout.size(), layout.align());
     }
 
     #[inline]
