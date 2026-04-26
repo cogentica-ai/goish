@@ -34,6 +34,10 @@
 
 extern crate alloc;
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+
+use crate::goslice::slice;
 use crate::gostring::string;
 use crate::types::{byte, float32, float64, int, rune, uint};
 
@@ -295,6 +299,241 @@ impl Type {
     }
 }
 
+// ─── Value ────────────────────────────────────────────────────────────
+//
+// Read-only value introspection. Unlike Go's `reflect.Value` (fat
+// pointer over the original storage), goish's `Value` is a deep-cloned
+// enum — every `ValueOf(&x)` walks `x` once and copies its data into
+// the variant. Trade: copies on construction; gain: no unsafe pointer
+// arithmetic, no offset_of needed, lifetime-free at the user surface.
+//
+// Mutation (`SetBool`, `SetString`, etc.) requires the pointer-form and
+// is deferred to a later iteration.
+
+/// Mirrors `reflect.Value` (read-only).
+#[derive(Clone)]
+pub enum Value {
+    Invalid,
+    Bool(bool),
+    Int(int),
+    Int8(i8),
+    Int16(i16),
+    Int32(i32), // covers rune
+    Uint(uint),
+    Uint8(u8), // covers byte
+    Uint16(u16),
+    Uint32(u32),
+    Float32(float32),
+    Float64(float64),
+    String(string),
+    Slice {
+        elem_type: fn() -> Type,
+        items: Vec<Value>,
+    },
+    Struct {
+        ty: Type,
+        fields: Vec<Value>,
+    },
+    Pointer(Box<Value>),
+}
+
+impl Value {
+    /// `Kind()` — runtime tag.
+    pub fn Kind(&self) -> Kind {
+        match self {
+            Value::Invalid => Kind::Invalid,
+            Value::Bool(_) => Kind::Bool,
+            Value::Int(_) => Kind::Int,
+            Value::Int8(_) => Kind::Int8,
+            Value::Int16(_) => Kind::Int16,
+            Value::Int32(_) => Kind::Int32,
+            Value::Uint(_) => Kind::Uint,
+            Value::Uint8(_) => Kind::Uint8,
+            Value::Uint16(_) => Kind::Uint16,
+            Value::Uint32(_) => Kind::Uint32,
+            Value::Float32(_) => Kind::Float32,
+            Value::Float64(_) => Kind::Float64,
+            Value::String(_) => Kind::String,
+            Value::Slice { .. } => Kind::Slice,
+            Value::Struct { .. } => Kind::Struct,
+            Value::Pointer(_) => Kind::Pointer,
+        }
+    }
+
+    /// `Type()` — descriptor of this value's type.
+    pub fn Type(&self) -> Type {
+        match self {
+            Value::Struct { ty, .. } => *ty,
+            Value::Slice { .. } => Type::__new(Kind::Slice, "", &[]),
+            _ => Type::__new(self.Kind(), self.Kind().__static_name(), &[]),
+        }
+        .__with_elem(match self {
+            Value::Slice { elem_type, .. } => Some(*elem_type),
+            _ => None,
+        })
+    }
+
+    /// `IsValid()` — false for the zero-Value (`Value::Invalid`).
+    pub fn IsValid(&self) -> bool {
+        !matches!(self, Value::Invalid)
+    }
+
+    /// `IsZero()` — true if the value is its type's zero value. Mirrors
+    /// Go's `reflect.Value.IsZero`.
+    pub fn IsZero(&self) -> bool {
+        match self {
+            Value::Invalid => true,
+            Value::Bool(b) => !*b,
+            Value::Int(n) => *n == 0,
+            Value::Int8(n) => *n == 0,
+            Value::Int16(n) => *n == 0,
+            Value::Int32(n) => *n == 0,
+            Value::Uint(n) => *n == 0,
+            Value::Uint8(n) => *n == 0,
+            Value::Uint16(n) => *n == 0,
+            Value::Uint32(n) => *n == 0,
+            Value::Float32(f) => *f == 0.0,
+            Value::Float64(f) => *f == 0.0,
+            Value::String(s) => s.as_bytes().is_empty(),
+            Value::Slice { items, .. } => items.is_empty(),
+            Value::Struct { fields, .. } => fields.iter().all(Value::IsZero),
+            Value::Pointer(_) => false,
+        }
+    }
+
+    /// `Bool()` — panics if Kind != Bool.
+    pub fn Bool(&self) -> bool {
+        match self {
+            Value::Bool(b) => *b,
+            _ => panic!("reflect.Value.Bool of non-bool"),
+        }
+    }
+
+    /// `Int()` — typed accessor for any signed-int kind. Panics otherwise.
+    pub fn Int(&self) -> int {
+        match self {
+            Value::Int(n) => *n,
+            Value::Int8(n) => *n as int,
+            Value::Int16(n) => *n as int,
+            Value::Int32(n) => *n as int,
+            _ => panic!("reflect.Value.Int of non-int"),
+        }
+    }
+
+    /// `Uint()` — any unsigned-int kind. Panics otherwise.
+    pub fn Uint(&self) -> uint {
+        match self {
+            Value::Uint(n) => *n,
+            Value::Uint8(n) => *n as uint,
+            Value::Uint16(n) => *n as uint,
+            Value::Uint32(n) => *n as uint,
+            _ => panic!("reflect.Value.Uint of non-uint"),
+        }
+    }
+
+    /// `Float()` — float32 or float64. Panics otherwise.
+    pub fn Float(&self) -> float64 {
+        match self {
+            Value::Float32(f) => *f as float64,
+            Value::Float64(f) => *f,
+            _ => panic!("reflect.Value.Float of non-float"),
+        }
+    }
+
+    /// `String()` — string value, or kind label for non-strings (matches
+    /// Go: `reflect.Value.String` returns `"<int Value>"` for non-string).
+    pub fn String(&self) -> string {
+        match self {
+            Value::String(s) => s.clone(),
+            _ => self.Kind().String(),
+        }
+    }
+
+    /// `Len()` — element count for slice/string. Panics for other kinds.
+    pub fn Len(&self) -> int {
+        match self {
+            Value::Slice { items, .. } => items.len() as int,
+            Value::String(s) => s.as_bytes().len() as int,
+            _ => panic!("reflect.Value.Len of non-slice/string"),
+        }
+    }
+
+    /// `Index(i)` — i-th element of a slice. Panics if not Slice.
+    pub fn Index(&self, i: int) -> Value {
+        match self {
+            Value::Slice { items, .. } => items[i as usize].clone(),
+            _ => panic!("reflect.Value.Index of non-slice"),
+        }
+    }
+
+    /// `NumField()` — struct field count. Panics if not Struct.
+    pub fn NumField(&self) -> int {
+        match self {
+            Value::Struct { ty, .. } => ty.NumField(),
+            _ => panic!("reflect.Value.NumField of non-struct"),
+        }
+    }
+
+    /// `Field(i)` — i-th field of a struct. Panics if not Struct.
+    pub fn Field(&self, i: int) -> Value {
+        match self {
+            Value::Struct { fields, .. } => fields[i as usize].clone(),
+            _ => panic!("reflect.Value.Field of non-struct"),
+        }
+    }
+
+    /// `FieldByName(name)` — looks up by name. Returns `Value::Invalid`
+    /// if not found.
+    pub fn FieldByName(&self, name: &str) -> Value {
+        match self {
+            Value::Struct { ty, fields } => {
+                for i in 0..ty.fields.len() {
+                    if ty.fields[i].Name.as_bytes() == name.as_bytes() {
+                        return fields[i].clone();
+                    }
+                }
+                Value::Invalid
+            }
+            _ => panic!("reflect.Value.FieldByName of non-struct"),
+        }
+    }
+}
+
+// Tiny helper so Value::Type() can stitch in elem fn pointer for slices.
+impl Type {
+    #[doc(hidden)]
+    pub const fn __with_elem(self, _e: Option<fn() -> Type>) -> Self {
+        // v1: slice element type is conveyed via Value::Slice's elem_type
+        // field, not via Type. This stub keeps the call site clean for
+        // future expansion (Go's Type.Elem() lives on Type, not Value).
+        self
+    }
+}
+
+impl Kind {
+    fn __static_name(&self) -> &'static str {
+        match self {
+            Kind::Invalid => "",
+            Kind::Bool => "bool",
+            Kind::Int => "int",
+            Kind::Int8 => "int8",
+            Kind::Int16 => "int16",
+            Kind::Int32 => "int32",
+            Kind::Uint => "uint",
+            Kind::Uint8 => "uint8",
+            Kind::Uint16 => "uint16",
+            Kind::Uint32 => "uint32",
+            Kind::Float32 => "float32",
+            Kind::Float64 => "float64",
+            Kind::String => "string",
+            Kind::Slice => "",
+            Kind::Map => "",
+            Kind::Struct => "",
+            Kind::Pointer => "",
+        }
+    }
+}
+
 // ─── Reflect trait ────────────────────────────────────────────────────
 
 /// Trait implemented by every type whose `reflect.TypeOf` is supported.
@@ -303,6 +542,10 @@ impl Type {
 pub trait Reflect {
     /// Returns the descriptor by value. Cheap — just a few words.
     fn __reflect_type() -> Type;
+
+    /// Returns a deep-cloned `Value` mirror of `self`. Used by
+    /// `reflect::ValueOf` and tag-driven `json.Marshal`.
+    fn __reflect_value(&self) -> Value;
 }
 
 /// `reflect.TypeOf(v)` — descriptor for `v`'s static type.
@@ -310,31 +553,76 @@ pub fn TypeOf<T: Reflect + ?Sized>(_: &T) -> Type {
     T::__reflect_type()
 }
 
+/// `reflect.ValueOf(v)` — read-only `Value` mirror of `v`.
+pub fn ValueOf<T: Reflect + ?Sized>(v: &T) -> Value {
+    v.__reflect_value()
+}
+
 // ─── Built-in Reflect impls ───────────────────────────────────────────
 
 macro_rules! impl_primitive_reflect {
-    ($t:ty, $kind:expr, $name:literal) => {
+    ($t:ty, $kind:expr, $name:literal, $variant:ident, $($conv:tt)*) => {
         impl Reflect for $t {
             #[inline]
             fn __reflect_type() -> Type {
                 Type::__new($kind, $name, &[])
             }
+            #[inline]
+            fn __reflect_value(&self) -> Value {
+                Value::$variant($($conv)*(*self))
+            }
         }
     };
 }
 
-impl_primitive_reflect!(bool, Kind::Bool, "bool");
-impl_primitive_reflect!(int, Kind::Int, "int"); // i64
-impl_primitive_reflect!(i8, Kind::Int8, "int8");
-impl_primitive_reflect!(i16, Kind::Int16, "int16");
+// Identity conversion (no-op).
+fn id<T>(x: T) -> T { x }
+
+impl_primitive_reflect!(bool, Kind::Bool, "bool", Bool, id);
+impl_primitive_reflect!(int, Kind::Int, "int", Int, id);
+impl_primitive_reflect!(i8, Kind::Int8, "int8", Int8, id);
+impl_primitive_reflect!(i16, Kind::Int16, "int16", Int16, id);
 // rune = i32, so the i32 impl covers both the explicit-int32 and the
 // rune use — same as Go where `type rune = int32` shares Kind::Int32.
-impl_primitive_reflect!(rune, Kind::Int32, "int32");
-impl_primitive_reflect!(uint, Kind::Uint, "uint"); // u64
+impl_primitive_reflect!(rune, Kind::Int32, "int32", Int32, id);
+impl_primitive_reflect!(uint, Kind::Uint, "uint", Uint, id);
 // byte = u8, mirrors Go (`type byte = uint8`).
-impl_primitive_reflect!(byte, Kind::Uint8, "uint8");
-impl_primitive_reflect!(u16, Kind::Uint16, "uint16");
-impl_primitive_reflect!(u32, Kind::Uint32, "uint32");
-impl_primitive_reflect!(float32, Kind::Float32, "float32");
-impl_primitive_reflect!(float64, Kind::Float64, "float64");
-impl_primitive_reflect!(string, Kind::String, "string");
+impl_primitive_reflect!(byte, Kind::Uint8, "uint8", Uint8, id);
+impl_primitive_reflect!(u16, Kind::Uint16, "uint16", Uint16, id);
+impl_primitive_reflect!(u32, Kind::Uint32, "uint32", Uint32, id);
+impl_primitive_reflect!(float32, Kind::Float32, "float32", Float32, id);
+impl_primitive_reflect!(float64, Kind::Float64, "float64", Float64, id);
+
+// `string` doesn't fit the macro (Clone, not Copy); spell it out.
+impl Reflect for string {
+    #[inline]
+    fn __reflect_type() -> Type {
+        Type::__new(Kind::String, "string", &[])
+    }
+    #[inline]
+    fn __reflect_value(&self) -> Value {
+        Value::String(self.clone())
+    }
+}
+
+// ─── slice<T: Reflect> — generic Reflect impl ─────────────────────────
+//
+// The Type descriptor itself doesn't carry the element kind in v1
+// (kept off Type to avoid generic-static issues). The element's `Type`
+// is reachable via the Slice variant's `elem_type` fn pointer.
+
+impl<T: Reflect + Clone> Reflect for slice<T> {
+    fn __reflect_type() -> Type {
+        Type::__new(Kind::Slice, "", &[])
+    }
+    fn __reflect_value(&self) -> Value {
+        let mut items: Vec<Value> = Vec::with_capacity(self.Len() as usize);
+        for i in 0..self.Len() {
+            items.push((self[i]).__reflect_value());
+        }
+        Value::Slice {
+            elem_type: <T as Reflect>::__reflect_type,
+            items,
+        }
+    }
+}

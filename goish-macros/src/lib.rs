@@ -135,6 +135,29 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
         parsed.name
     );
     impl_text.push_str("    }\n");
+
+    // __reflect_value: deep-clone each field into a Value, package as
+    // Value::Struct.
+    impl_text.push_str(
+        "    fn __reflect_value(&self) -> ::goish::reflect::Value {\n",
+    );
+    impl_text.push_str(
+        "        let mut __fields: ::goish::__macro_alloc::Vec<::goish::reflect::Value> = ::goish::__macro_alloc::Vec::new();\n",
+    );
+    for f in &parsed.fields {
+        let _ = write!(
+            impl_text,
+            "        __fields.push(<{} as ::goish::reflect::Reflect>::__reflect_value(&self.{}));\n",
+            f.ty, f.name
+        );
+    }
+    impl_text.push_str(
+        "        ::goish::reflect::Value::Struct {\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20ty: <Self as ::goish::reflect::Reflect>::__reflect_type(),\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20fields: __fields,\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20}\n",
+    );
+    impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
 
     let mut out: TokenStream = struct_text

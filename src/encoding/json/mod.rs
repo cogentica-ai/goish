@@ -180,6 +180,186 @@ pub fn MarshalIndent(v: &Value, prefix: &str, indent: &str) -> (slice<byte>, err
     (slice::__from_vec(out), nil)
 }
 
+// ─── Reflect-driven Marshal (tag-driven) ──────────────────────────────
+//
+// Walks any `T: reflect::Reflect` and emits JSON. Struct field names are
+// rewritten via `Tag.Get("json")`; the `omitempty` option skips zero
+// values. Arrays/slices map to JSON arrays. This is the Go-shape path:
+//
+//   #[goish::reflect]
+//   pub struct Person {
+//       #[tag(r#"json:"name""#)]                   Name: string,
+//       #[tag(r#"json:"age,omitempty""#)]          Age: int,
+//   }
+//   let p = Person { Name: string("alice"), Age: 30 };
+//   let (b, err) = json::MarshalReflect(&p);
+//
+// Will be unified under `Marshal` once `reflect::Value` grows a Map
+// variant and `json::Value` impls `Reflect`.
+
+use crate::reflect;
+
+/// `json.Marshal(any)` over any `Reflect` type — tag-driven.
+pub fn MarshalReflect<T: reflect::Reflect + ?Sized>(v: &T) -> (slice<byte>, error) {
+    let rv = reflect::ValueOf(v);
+    let mut out: Vec<byte> = Vec::new();
+    encode_reflect(&mut out, &rv);
+    (slice::__from_vec(out), nil)
+}
+
+/// `json.MarshalIndent` over any `Reflect` type — tag-driven, with indent.
+pub fn MarshalIndentReflect<T: reflect::Reflect + ?Sized>(
+    v: &T,
+    prefix: &str,
+    indent: &str,
+) -> (slice<byte>, error) {
+    let rv = reflect::ValueOf(v);
+    let mut out: Vec<byte> = Vec::new();
+    let cfg = IndentCfg { prefix, indent };
+    encode_reflect_indent(&mut out, &rv, &cfg, 0);
+    (slice::__from_vec(out), nil)
+}
+
+fn encode_reflect(out: &mut Vec<byte>, v: &reflect::Value) {
+    use reflect::Kind as K;
+    match v.Kind() {
+        K::Invalid => out.extend_from_slice(b"null"),
+        K::Bool => out.extend_from_slice(if v.Bool() { b"true" } else { b"false" }),
+        K::Int | K::Int8 | K::Int16 | K::Int32 => {
+            let s = strconv::FormatInt(v.Int(), 10);
+            out.extend_from_slice(s.as_bytes());
+        }
+        K::Uint | K::Uint8 | K::Uint16 | K::Uint32 => {
+            let s = strconv::FormatUint(v.Uint(), 10);
+            out.extend_from_slice(s.as_bytes());
+        }
+        K::Float32 | K::Float64 => encode_number(out, v.Float()),
+        K::String => encode_string(out, v.String().as_bytes()),
+        K::Slice => {
+            let n = v.Len();
+            if n == 0 {
+                out.extend_from_slice(b"[]");
+                return;
+            }
+            out.push(b'[');
+            for i in 0..n {
+                if i > 0 {
+                    out.push(b',');
+                }
+                encode_reflect(out, &v.Index(i));
+            }
+            out.push(b']');
+        }
+        K::Struct => encode_struct(out, v, None, 0),
+        _ => out.extend_from_slice(b"null"),
+    }
+}
+
+fn encode_reflect_indent(
+    out: &mut Vec<byte>,
+    v: &reflect::Value,
+    cfg: &IndentCfg,
+    depth: usize,
+) {
+    use reflect::Kind as K;
+    match v.Kind() {
+        K::Slice => {
+            let n = v.Len();
+            if n == 0 {
+                out.extend_from_slice(b"[]");
+                return;
+            }
+            out.push(b'[');
+            for i in 0..n {
+                if i > 0 {
+                    out.push(b',');
+                }
+                write_newline_indent(out, cfg, depth + 1);
+                encode_reflect_indent(out, &v.Index(i), cfg, depth + 1);
+            }
+            write_newline_indent(out, cfg, depth);
+            out.push(b']');
+        }
+        K::Struct => encode_struct(out, v, Some(cfg), depth),
+        _ => encode_reflect(out, v),
+    }
+}
+
+fn encode_struct(out: &mut Vec<byte>, v: &reflect::Value, cfg: Option<&IndentCfg>, depth: usize) {
+    let ty = match v {
+        reflect::Value::Struct { ty, .. } => *ty,
+        _ => unreachable!("encode_struct on non-struct"),
+    };
+    let n = ty.NumField();
+
+    // Resolve effective name + omitempty for each field; collect those
+    // that should be emitted.
+    let mut keys: Vec<(string, reflect::Value)> = Vec::with_capacity(n as usize);
+    for i in 0..n {
+        let f = ty.Field(i);
+        let tag = f.Tag.Get("json");
+        let raw = tag.as_bytes();
+        // "-" alone means skip entirely.
+        if raw == b"-" {
+            continue;
+        }
+        // Split on ',' — first segment is name, rest are options.
+        let (name_seg, opts) = split_first_comma(raw);
+        let mut omitempty = false;
+        for opt in opts {
+            if opt == b"omitempty" {
+                omitempty = true;
+            }
+        }
+        let key: string = if name_seg.is_empty() {
+            string::from_static(f.Name)
+        } else {
+            string::from_bytes(name_seg)
+        };
+        let fv = v.Field(i);
+        if omitempty && fv.IsZero() {
+            continue;
+        }
+        keys.push((key, fv));
+    }
+
+    if keys.is_empty() {
+        out.extend_from_slice(b"{}");
+        return;
+    }
+    out.push(b'{');
+    let inner = depth + 1;
+    for (i, (k, fv)) in keys.iter().enumerate() {
+        if i > 0 {
+            out.push(b',');
+        }
+        if let Some(c) = cfg {
+            write_newline_indent(out, c, inner);
+        }
+        encode_string(out, k.as_bytes());
+        out.push(b':');
+        if cfg.is_some() {
+            out.push(b' ');
+        }
+        match cfg {
+            Some(c) => encode_reflect_indent(out, fv, c, inner),
+            None => encode_reflect(out, fv),
+        }
+    }
+    if let Some(c) = cfg {
+        write_newline_indent(out, c, depth);
+    }
+    out.push(b'}');
+}
+
+/// Split `b"name,opt1,opt2"` → `(b"name", [b"opt1", b"opt2"])`.
+fn split_first_comma(s: &[u8]) -> (&[u8], alloc::vec::Vec<&[u8]>) {
+    let mut iter = s.split(|&c| c == b',');
+    let first = iter.next().unwrap_or(&[]);
+    let rest: alloc::vec::Vec<&[u8]> = iter.collect();
+    (first, rest)
+}
+
 struct IndentCfg<'a> {
     prefix: &'a str,
     indent: &'a str,

@@ -157,3 +157,7 @@ path = "examples/bufio_rw_smoke.rs"
 [[example]]
 name = "reflect_smoke"
 path = "examples/reflect_smoke.rs"
+
+[[example]]
+name = "reflect_json"
+path = "examples/reflect_json.rs"
