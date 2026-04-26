@@ -18,7 +18,14 @@
 
 /// Sentinel index meaning "no span" (head/tail of a list, or
 /// "uninitialized" in the page → span map).
-pub const NIL_SPAN: u16 = u16::MAX;
+///
+/// We use `0` rather than `u16::MAX` so that the static `MCentral`
+/// instance — which contains a 4096-entry `[Span; 4096]` array —
+/// stays in BSS (zero-initialized) rather than being lifted into the
+/// data segment because of non-zero `next`/`prev` defaults. As a
+/// consequence, span index `0` of the pool is reserved/unused; live
+/// span indices start at `1`.
+pub const NIL_SPAN: u16 = 0;
 
 /// Maximum number of bits in a span's allocation bitmap. Matches
 /// Go's `MaxObjsPerSpan = 1024`.

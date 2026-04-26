@@ -71,7 +71,7 @@ fn main() {
 }
 
 fn run_tests(arena_base: usize) {
-    let mut p = PageAlloc::new(arena_base, 1);
+    let mut p = PageAlloc::new(arena_base, 1, 1);
     check(p.allocated_pages() == 0, b"fresh: nonzero alloc\n");
 
     // ─── Single-page allocation ─────────────────────────────────────

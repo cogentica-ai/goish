@@ -65,7 +65,7 @@ fn main() {
     let base = raw as usize;
     let arena_base = (base + PALLOC_CHUNK_BYTES - 1) & !(PALLOC_CHUNK_BYTES - 1);
 
-    let mut p = PageAlloc::new(arena_base, 1);
+    let mut p = PageAlloc::new(arena_base, 1, 1);
 
     // Live allocations: parallel arrays of (base, npages, marker).
     // Cap at 200 — plenty to fragment a 512-page chunk.

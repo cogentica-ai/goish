@@ -77,8 +77,15 @@ pub struct MCentral {
 }
 
 impl MCentral {
-    /// `const` constructor for static placement. Initialized fully
-    /// in `mcentral_init()` once mheap is up.
+    /// `const` constructor for static placement. With `NIL_SPAN = 0`
+    /// and every other field zero-valued, the entire ~700 KiB
+    /// static lands in BSS rather than the data segment, keeping
+    /// the on-disk binary size identical to pre-mcentral builds.
+    ///
+    /// Span index 0 is reserved as the sentinel; `alloc_span_idx`
+    /// returns indices `1..MAX_SPANS`. Equivalently, `spans_bump`
+    /// is the number of slots allocated so far, and the next
+    /// allocation gets index `spans_bump + 1`.
     pub const fn new() -> Self {
         MCentral {
             partial: [NIL_SPAN; NUM_SIZE_CLASSES],
@@ -92,7 +99,10 @@ impl MCentral {
     }
 
     /// Acquire a free slot in the `spans` array — either via the
-    /// freelist (returned slots) or the bump pointer.
+    /// freelist (returned slots) or the bump pointer. `spans_bump`
+    /// counts how many slots have been bump-allocated; the next
+    /// returned index is `spans_bump + 1` (slot 0 is reserved as
+    /// the `NIL_SPAN` sentinel).
     fn alloc_span_idx(&mut self) -> u16 {
         if self.spans_free_head != NIL_SPAN {
             let idx = self.spans_free_head;
@@ -100,12 +110,12 @@ impl MCentral {
             self.spans[idx as usize] = Span::EMPTY;
             return idx;
         }
-        if (self.spans_bump as usize) < MAX_SPANS {
-            let idx = self.spans_bump;
-            self.spans_bump += 1;
-            return idx;
+        let idx = self.spans_bump + 1;
+        if (idx as usize) >= MAX_SPANS {
+            oom(b"goish: mcentral: span table exhausted\n");
         }
-        oom(b"goish: mcentral: span table exhausted\n");
+        self.spans_bump += 1;
+        idx
     }
 
     /// Return a span slot to the freelist after the span has been
@@ -335,10 +345,12 @@ pub unsafe fn free(ptr: *mut u8) -> bool {
 
 /// Stress-test only: number of currently in-use slots across all
 /// classes. Used by the smoke example.
+///
+/// Reads slots `1..=spans_bump` since slot 0 is the reserved sentinel.
 pub fn live_slots() -> usize {
     let g = MCENTRAL.lock();
     let mut n = 0;
-    for s in &g.spans[..g.spans_bump as usize] {
+    for s in &g.spans[1..=(g.spans_bump as usize)] {
         n += s.alloc_count as usize;
     }
     n

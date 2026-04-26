@@ -28,3 +28,35 @@ pub mod consts;
 pub mod page_alloc;
 pub mod palloc_bits;
 pub mod palloc_sum;
+
+use crate::syscall;
+
+/// `mmap` an anonymous, zero-filled, read/write region of `bytes`
+/// bytes. Used by `PageAlloc::new` to back its summary and chunks
+/// metadata directly, bypassing the `GlobalAlloc` trait — that's the
+/// crucial detail that lets `PageAlloc::new` run during mheap
+/// bootstrap without recursing through the global allocator.
+///
+/// The kernel guarantees anonymous mmap pages start zero-filled, so
+/// returned regions are immediately ready for `PallocSum` /
+/// `PallocBits` data (both of which encode "all-zero" as their
+/// "empty"/"all-free" sentinel).
+///
+/// Aborts the process with `Exit(2)` on mmap failure — there's
+/// nothing meaningful we can do at this stage.
+pub(crate) unsafe fn mmap_zeroed(bytes: usize) -> *mut u8 {
+    let p = syscall::Mmap(
+        core::ptr::null_mut(),
+        bytes,
+        syscall::PROT_READ | syscall::PROT_WRITE,
+        syscall::MAP_PRIVATE | syscall::MAP_ANONYMOUS,
+        -1,
+        0,
+    );
+    if p == syscall::MAP_FAILED {
+        const MSG: &[u8] = b"goish: mheap: mmap_zeroed failed\n";
+        syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+        syscall::Exit(2);
+    }
+    p
+}

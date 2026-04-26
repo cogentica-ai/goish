@@ -58,7 +58,7 @@ fn main() {
 
 fn test_multi_chunk_init() {
     let arena_base = reserve_arena(4);
-    let p = PageAlloc::new(arena_base, 4);
+    let p = PageAlloc::new(arena_base, 4, 4);
     check(p.allocated_pages() == 0, b"multi-init: nonzero alloc\n");
     // 4 chunks × 512 pages = 2048 free pages.
     let total_pages = 4 * PALLOC_CHUNK_PAGES;
@@ -76,7 +76,7 @@ fn test_multi_chunk_init() {
 
 fn test_cross_chunk_alloc() {
     let arena_base = reserve_arena(4);
-    let mut p = PageAlloc::new(arena_base, 4);
+    let mut p = PageAlloc::new(arena_base, 4, 4);
 
     // 1000 pages = ~7.8 MiB → spans 2 chunks (chunks 0 and 1).
     let span = 1000;
@@ -127,7 +127,7 @@ fn test_cross_chunk_alloc() {
 
 fn test_grow_extends_heap() {
     let arena_base = reserve_arena(4);
-    let mut p = PageAlloc::new(arena_base, 1);
+    let mut p = PageAlloc::new(arena_base, 1, 4);
     check(
         p.free_pages() == PALLOC_CHUNK_PAGES,
         b"grow-pre: free_pages != one chunk\n",
@@ -147,7 +147,7 @@ fn test_grow_extends_heap() {
 
 fn test_grow_then_alloc_in_grown_region() {
     let arena_base = reserve_arena(4);
-    let mut p = PageAlloc::new(arena_base, 2);
+    let mut p = PageAlloc::new(arena_base, 2, 4);
 
     // Pre-fill chunk 0 entirely so the next allocation must use
     // chunks 1+. This exercises the radix-tree's first-fit being

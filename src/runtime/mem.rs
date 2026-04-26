@@ -64,3 +64,15 @@ pub unsafe extern "C" fn memcmp(a: *const u8, b: *const u8, n: usize) -> i32 {
 pub unsafe extern "C" fn bcmp(a: *const u8, b: *const u8, n: usize) -> i32 {
     memcmp(a, b, n)
 }
+
+// strlen — was previously satisfied by dlmalloc-rs's transitive deps;
+// after dropping that dependency, compiler-generated CStr/format paths
+// that emit a strlen call need it from us.
+#[no_mangle]
+pub unsafe extern "C" fn strlen(p: *const u8) -> usize {
+    let mut n = 0;
+    while *p.add(n) != 0 {
+        n += 1;
+    }
+    n
+}
