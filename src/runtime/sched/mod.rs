@@ -52,5 +52,5 @@ mod stack;
 
 pub use g::{GStatus, G};
 pub use gobuf::{make_context, swap_context, Gobuf};
-pub use scheduler::{newproc, runq_len, schedule, Gosched};
+pub use scheduler::{current_g, gopark, goready, newproc, runq_len, schedule, Gosched};
 pub use stack::Stack;

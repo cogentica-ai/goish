@@ -222,3 +222,95 @@ pub fn schedule() {
 pub fn runq_len() -> usize {
     SCHED.lock().runq.len()
 }
+
+/// Pointer to the currently-executing goroutine, or `None` if called
+/// from outside any goroutine (e.g. on the scheduler thread itself).
+/// Higher layers (channels, sync) need this to identify which G to
+/// park or wake.
+pub fn current_g() -> Option<NonNull<G>> {
+    SCHED.lock().current
+}
+
+/// Suspend the current goroutine in the `Waiting` state. The G will
+/// not be re-scheduled until something calls `goready(g)` on it.
+/// Mirrors Go's `runtime.gopark` (proc.go:443) plus the `park_m`
+/// continuation (proc.go:4229).
+///
+/// The `unlockf` callback runs *after* the G has been transitioned
+/// to `Waiting`. This is the standard atomic-park pattern: a caller
+/// that has just enqueued the G onto a wait list (under some lock)
+/// uses `unlockf` to release that lock once the G is safely
+/// parked, so a concurrent waker observing the wait list still
+/// sees the G in `Waiting` state and the wakeup is not lost.
+///
+/// If `unlockf` returns `false`, the park is cancelled — the G is
+/// transitioned back to `Running` and the call returns immediately.
+/// Channels use this to abort a park when a competing receiver/
+/// sender materialises before `unlockf` runs.
+///
+/// In single-threaded goish today the race the pattern guards
+/// against can't occur, but the pattern is preserved verbatim
+/// because channels (M16d) and sync (M16g) lean on it directly,
+/// and the same code will run unchanged once M17a introduces
+/// multi-M concurrency.
+pub fn gopark<F: FnOnce() -> bool>(unlockf: F) {
+    // Identify the current G. If we're not inside a goroutine,
+    // there's nothing to park.
+    let g_ptr = match SCHED.lock().current {
+        Some(p) => p,
+        None => return,
+    };
+
+    // Transition to Waiting *before* running unlockf. Any concurrent
+    // waker that consults g.status as part of its enqueue logic
+    // (per Go's semantic; not yet exercised in single-thread goish)
+    // will see Waiting and correctly enqueue.
+    unsafe {
+        (*g_ptr.as_ptr()).status = GStatus::Waiting;
+    }
+
+    let park = unlockf();
+    if !park {
+        // unlockf bailed out — abort the park.
+        unsafe {
+            (*g_ptr.as_ptr()).status = GStatus::Running;
+        }
+        return;
+    }
+
+    // Park: hand control back to the scheduler. Capture the
+    // pointers before dropping the lock.
+    let buf_from = unsafe { &mut (*g_ptr.as_ptr()).gobuf as *mut Gobuf };
+    let buf_to = {
+        let s = SCHED.lock();
+        &s.sched_buf as *const Gobuf
+    };
+    unsafe {
+        swap_context(buf_from, buf_to);
+    }
+
+    // Resumed: a `goready` set our status to `Runnable` and the
+    // scheduler picked us up. Transition back to `Running`.
+    unsafe {
+        (*g_ptr.as_ptr()).status = GStatus::Running;
+    }
+}
+
+/// Wake a goroutine previously parked via `gopark`. Mirrors Go's
+/// `runtime.goready` (proc.go:479).
+///
+/// The G is transitioned from `Waiting` to `Runnable` and pushed
+/// onto the run queue. The next dispatch will swap into it,
+/// resuming it from inside `gopark`.
+pub fn goready(g_ptr: NonNull<G>) {
+    let mut s = SCHED.lock();
+    unsafe {
+        debug_assert_eq!(
+            (*g_ptr.as_ptr()).status,
+            GStatus::Waiting,
+            "goready: target G is not parked"
+        );
+        (*g_ptr.as_ptr()).status = GStatus::Runnable;
+    }
+    s.runq.push_back(g_ptr);
+}

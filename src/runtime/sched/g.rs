@@ -30,6 +30,9 @@ pub enum GStatus {
     Runnable,
     /// Currently executing on an M.
     Running,
+    /// Suspended via `gopark`. Will return to `Runnable` only when
+    /// something calls `goready` on this G.
+    Waiting,
     /// Finished — the entry closure returned. Scheduler will drop
     /// the G and free its stack on next dispatch.
     Dead,

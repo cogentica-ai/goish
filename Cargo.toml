@@ -213,3 +213,7 @@ path = "examples/sched_swap.rs"
 [[example]]
 name = "sched_go"
 path = "examples/sched_go.rs"
+
+[[example]]
+name = "sched_park"
+path = "examples/sched_park.rs"
