@@ -141,3 +141,11 @@ path = "examples/json_pretty.rs"
 [[example]]
 name = "json_smoke"
 path = "examples/json_smoke.rs"
+
+[[example]]
+name = "polish_smoke"
+path = "examples/polish_smoke.rs"
+
+[[example]]
+name = "log_smoke"
+path = "examples/log_smoke.rs"

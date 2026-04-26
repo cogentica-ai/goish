@@ -186,6 +186,79 @@ impl Time {
             mono: new_mono,
         }
     }
+
+    // ─── Y/M/D + clock accessors (UTC only, v1) ───────────────────────
+    //
+    // Backed by the Howard Hinnant "civil from days" algorithm — same
+    // numeric output as Go's table-based approach, ~20 LOC instead of
+    // ~150. Output verified against `date -u -d @<unix>` on the test
+    // corpus.
+
+    /// `t.Date()` — `(year, month, day)`. Month is 1..=12.
+    pub fn Date(self) -> (int, int, int) {
+        let (y, m, d, _, _, _) = civil_from_unix(self.sec);
+        (y, m, d)
+    }
+
+    pub fn Year(self) -> int {
+        self.Date().0
+    }
+    /// 1=January .. 12=December.
+    pub fn Month(self) -> int {
+        self.Date().1
+    }
+    pub fn Day(self) -> int {
+        self.Date().2
+    }
+
+    /// `t.Clock()` — `(hour, minute, second)` within the day, UTC.
+    pub fn Clock(self) -> (int, int, int) {
+        let (_, _, _, hh, mm, ss) = civil_from_unix(self.sec);
+        (hh, mm, ss)
+    }
+    pub fn Hour(self) -> int {
+        self.Clock().0
+    }
+    pub fn Minute(self) -> int {
+        self.Clock().1
+    }
+    pub fn Second(self) -> int {
+        self.Clock().2
+    }
+
+    pub fn Nanosecond(self) -> int {
+        self.nsec as int
+    }
+
+    /// `t.Weekday()` — 0=Sunday .. 6=Saturday (Go convention).
+    pub fn Weekday(self) -> int {
+        let days = self.sec.div_euclid(86_400);
+        // 1970-01-01 was a Thursday (=4 in Sun..Sat = 0..6).
+        ((days + 4).rem_euclid(7)) as int
+    }
+}
+
+// Civil date from Unix seconds. Returns (year, month, day, hour, min, sec)
+// — all UTC. Howard Hinnant's algorithm. Public domain.
+fn civil_from_unix(sec: int) -> (int, int, int, int, int, int) {
+    let days = sec.div_euclid(86_400);
+    let secs = sec.rem_euclid(86_400);
+    let hh = secs / 3600;
+    let mm = (secs % 3600) / 60;
+    let ss = secs % 60;
+
+    // Convert Unix day (epoch 1970-01-01) to "civil" day (epoch 0000-03-01).
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146_096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d, hh, mm, ss)
 }
 
 // ─── Free functions ──────────────────────────────────────────────────

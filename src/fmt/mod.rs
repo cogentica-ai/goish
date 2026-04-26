@@ -406,6 +406,41 @@ fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> 
             f.push(b'%');
             break;
         }
+
+        // Parse optional flags: '-' (left align), '0' (zero pad).
+        let mut left_align = false;
+        let mut zero_pad = false;
+        loop {
+            if i >= format.len() {
+                break;
+            }
+            match format[i] {
+                b'-' => {
+                    left_align = true;
+                    i += 1;
+                }
+                b'0' => {
+                    zero_pad = true;
+                    i += 1;
+                }
+                _ => break,
+            }
+        }
+        // Parse optional width digits.
+        let mut width: usize = 0;
+        let mut has_width = false;
+        while i < format.len() && format[i] >= b'1' && format[i] <= b'9'
+            || (i < format.len() && has_width && format[i] >= b'0' && format[i] <= b'9')
+        {
+            width = width * 10 + (format[i] - b'0') as usize;
+            has_width = true;
+            i += 1;
+        }
+        if i >= format.len() {
+            // Trailing width without verb — emit raw.
+            f.push(b'%');
+            break;
+        }
         let verb = format[i];
         i += 1;
         if verb == b'%' {
@@ -435,7 +470,33 @@ fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> 
         }
         // Regular verb.
         if arg_idx < args.len() {
-            args[arg_idx].write(verb, f);
+            if has_width {
+                // Format into a temp buffer, then pad.
+                let mut tmp = FmtBuf::new();
+                args[arg_idx].write(verb, &mut tmp);
+                let bytes = tmp.into_bytes();
+                let pad_count = width.saturating_sub(bytes.len());
+                let pad_byte = if zero_pad && !left_align {
+                    // Zero-pad only for numeric verbs in Go; we apply
+                    // it whenever requested for simplicity.
+                    b'0'
+                } else {
+                    b' '
+                };
+                if !left_align {
+                    for _ in 0..pad_count {
+                        f.push(pad_byte);
+                    }
+                }
+                f.extend(&bytes);
+                if left_align {
+                    for _ in 0..pad_count {
+                        f.push(b' ');
+                    }
+                }
+            } else {
+                args[arg_idx].write(verb, f);
+            }
             arg_idx += 1;
         } else {
             f.extend(b"%!");

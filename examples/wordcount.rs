@@ -27,10 +27,8 @@ fn main() {
     let mut keys = counts.Keys();
     slices::Sort!(keys);
 
-    // Note: fmt's %d width specifier (`%6d`) isn't implemented yet —
-    // M8 fmt covers verbs only. Simplest portable form for now:
     for (_, k) in range!(keys) {
         let n = counts[k.clone()];
-        Printf!("%d %s\n", n, k.clone());
+        Printf!("%6d %s\n", n, k.clone());
     }
 }
