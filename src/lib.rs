@@ -39,6 +39,7 @@ pub mod io;
 pub mod os;
 pub mod range;
 pub mod runtime;
+pub mod slices;
 pub mod strconv;
 pub mod strings;
 pub mod syscall;

@@ -85,3 +85,11 @@ path = "examples/strconv_smoke.rs"
 [[example]]
 name = "defer_smoke"
 path = "examples/defer_smoke.rs"
+
+[[example]]
+name = "uniq_sort"
+path = "examples/uniq_sort.rs"
+
+[[example]]
+name = "slices_lib_smoke"
+path = "examples/slices_lib_smoke.rs"
