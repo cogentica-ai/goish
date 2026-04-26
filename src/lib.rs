@@ -45,6 +45,7 @@ pub mod io;
 pub mod log;
 pub mod os;
 pub mod range;
+pub mod reflect;
 pub mod runtime;
 pub mod slices;
 pub mod strconv;
@@ -70,3 +71,7 @@ pub use types::{byte, float32, float64, int, rune, uint};
 
 // Re-export the entry-point attribute so users write `#[goish::main]`.
 pub use goish_macros::main;
+// Re-export the reflect attribute so users write `#[goish::reflect]`.
+// (The `goish::reflect` module path coexists — attributes and modules
+// occupy different namespaces, just like `goish::main` doesn't conflict.)
+pub use goish_macros::reflect;

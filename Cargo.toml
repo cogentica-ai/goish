@@ -153,3 +153,7 @@ path = "examples/log_smoke.rs"
 [[example]]
 name = "bufio_rw_smoke"
 path = "examples/bufio_rw_smoke.rs"
+
+[[example]]
+name = "reflect_smoke"
+path = "examples/reflect_smoke.rs"

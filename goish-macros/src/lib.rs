@@ -7,6 +7,12 @@
 //   2. wrap the user's body in `#[no_mangle] extern "C" fn __goish_main`,
 //      the symbol the runtime's rt0 hands control to.
 //
+// `#[goish::reflect]` decorates a struct definition. It re-emits the
+// struct verbatim and appends an `impl reflect::Reflect` whose
+// `__reflect_type()` returns a static descriptor. Per-field
+// `#[tag(r#"json:"name""#)]` attributes are captured verbatim into
+// the descriptor's `StructField.Tag`, mirroring Go's backtick tags.
+//
 // No `syn`/`quote`/`proc-macro2` deps — we work with raw `proc_macro`
 // tokens. The user's body is preserved as a `TokenTree::Group` (never
 // stringified) so non-ASCII char literals like `'é'` round-trip cleanly.
@@ -14,6 +20,7 @@
 extern crate proc_macro;
 
 use proc_macro::{Delimiter, TokenStream, TokenTree};
+use std::fmt::Write as _;
 
 #[proc_macro_attribute]
 pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -63,4 +70,251 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
     out.extend(prefix);
     out.extend(body_stream);
     out
+}
+
+// ─── #[goish::reflect] ───────────────────────────────────────────────
+
+/// `#[goish::reflect]` — emit `impl reflect::Reflect` for a struct.
+///
+/// Captures `#[tag(r#"json:..."#)]` field attributes and bakes the tag
+/// strings into the descriptor. The struct itself is re-emitted verbatim
+/// (minus the `#[tag(...)]` attributes, which the Rust compiler doesn't
+/// recognize on plain fields).
+#[proc_macro_attribute]
+pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let parsed = parse_struct(item);
+
+    // Re-emit the struct without the #[tag(...)] attributes (those are
+    // private to the goish reflect macro; rustc doesn't know them).
+    let mut struct_text = String::new();
+    if let Some(vis) = &parsed.vis {
+        struct_text.push_str(vis);
+        struct_text.push(' ');
+    }
+    struct_text.push_str("struct ");
+    struct_text.push_str(&parsed.name);
+    struct_text.push_str(" {\n");
+    for f in &parsed.fields {
+        if let Some(vis) = &f.vis {
+            struct_text.push_str(vis);
+            struct_text.push(' ');
+        }
+        struct_text.push_str(&f.name);
+        struct_text.push_str(": ");
+        struct_text.push_str(&f.ty);
+        struct_text.push_str(",\n");
+    }
+    struct_text.push_str("}\n");
+
+    // Build the static field array + impl Reflect.
+    let mut impl_text = String::new();
+    let _ = write!(impl_text, "impl ::goish::reflect::Reflect for {} {{\n", parsed.name);
+    impl_text.push_str("    fn __reflect_type() -> ::goish::reflect::Type {\n");
+    impl_text.push_str(
+        "        static FIELDS: &[::goish::reflect::StructField] = &[\n",
+    );
+    for f in &parsed.fields {
+        // `tag` is the verbatim literal text from the user's source —
+        // already a `"..."` or `r#"..."#` string literal — or `""` if
+        // the field has no #[tag(...)].
+        let tag = f.tag.clone().unwrap_or_else(|| "\"\"".to_string());
+        let _ = write!(
+            impl_text,
+            "            ::goish::reflect::StructField {{\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20Name: \"{}\",\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20Tag: ::goish::reflect::StructTag::__new({}),\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20Type: <{} as ::goish::reflect::Reflect>::__reflect_type,\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}},\n",
+            f.name, tag, f.ty
+        );
+    }
+    impl_text.push_str("        ];\n");
+    let _ = write!(
+        impl_text,
+        "        ::goish::reflect::Type::__new(::goish::reflect::Kind::Struct, \"{}\", FIELDS)\n",
+        parsed.name
+    );
+    impl_text.push_str("    }\n");
+    impl_text.push_str("}\n");
+
+    let mut out: TokenStream = struct_text
+        .parse()
+        .expect("goish::reflect: failed to re-emit struct");
+    let impl_ts: TokenStream = impl_text
+        .parse()
+        .expect("goish::reflect: failed to emit impl");
+    out.extend(impl_ts);
+    out
+}
+
+// ─── manual struct parser ────────────────────────────────────────────
+
+struct Parsed {
+    vis: Option<String>,
+    name: String,
+    fields: Vec<ParsedField>,
+}
+
+struct ParsedField {
+    vis: Option<String>,
+    name: String,
+    ty: String,
+    /// `r#"json:"name""#` literal text, exactly as written by the user.
+    /// `None` = no `#[tag(...)]` attribute on this field.
+    tag: Option<String>,
+}
+
+fn parse_struct(item: TokenStream) -> Parsed {
+    let mut iter = item.into_iter().peekable();
+
+    // Skip outer attributes (e.g. doc comments) — `# [ ... ]`.
+    loop {
+        match iter.peek() {
+            Some(TokenTree::Punct(p)) if p.as_char() == '#' => {
+                iter.next();
+                iter.next(); // bracket group
+            }
+            _ => break,
+        }
+    }
+
+    // Optional visibility: `pub`, `pub(crate)`, `pub(super)`, `pub(in path)`.
+    let vis = consume_visibility(&mut iter);
+
+    // `struct`
+    match iter.next() {
+        Some(TokenTree::Ident(i)) if i.to_string() == "struct" => {}
+        other => panic!(
+            "#[goish::reflect] expects `struct Name {{ ... }}`, got token {:?}",
+            other
+        ),
+    }
+
+    // struct name
+    let name = match iter.next() {
+        Some(TokenTree::Ident(i)) => i.to_string(),
+        _ => panic!("#[goish::reflect]: expected struct name"),
+    };
+
+    // body
+    let body = match iter.next() {
+        Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => g,
+        _ => panic!("#[goish::reflect]: expected struct body `{{ ... }}`"),
+    };
+
+    let fields = parse_fields(body.stream());
+    Parsed { vis, name, fields }
+}
+
+fn consume_visibility<I>(iter: &mut std::iter::Peekable<I>) -> Option<String>
+where
+    I: Iterator<Item = TokenTree>,
+{
+    if let Some(TokenTree::Ident(i)) = iter.peek() {
+        if i.to_string() == "pub" {
+            let mut s = String::from("pub");
+            iter.next();
+            // optional `(crate)` / `(super)` / `(in path)`
+            if let Some(TokenTree::Group(g)) = iter.peek() {
+                if g.delimiter() == Delimiter::Parenthesis {
+                    s.push('(');
+                    s.push_str(&g.stream().to_string());
+                    s.push(')');
+                    iter.next();
+                }
+            }
+            return Some(s);
+        }
+    }
+    None
+}
+
+fn parse_fields(body: TokenStream) -> Vec<ParsedField> {
+    let mut fields = Vec::new();
+    let mut iter = body.into_iter().peekable();
+
+    loop {
+        if iter.peek().is_none() {
+            break;
+        }
+
+        // Pending attributes — capture #[tag(...)], skip everything else
+        // (e.g. doc comments).
+        let mut tag: Option<String> = None;
+        loop {
+            match iter.peek() {
+                Some(TokenTree::Punct(p)) if p.as_char() == '#' => {
+                    iter.next();
+                    let g = match iter.next() {
+                        Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Bracket => g,
+                        _ => panic!("#[goish::reflect]: malformed field attribute"),
+                    };
+                    let mut ai = g.stream().into_iter();
+                    if let Some(TokenTree::Ident(name)) = ai.next() {
+                        if name.to_string() == "tag" {
+                            // `tag(<literal>)`
+                            if let Some(TokenTree::Group(inner)) = ai.next() {
+                                if inner.delimiter() == Delimiter::Parenthesis {
+                                    if let Some(TokenTree::Literal(lit)) =
+                                        inner.stream().into_iter().next()
+                                    {
+                                        tag = Some(lit.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        // Visibility
+        let vis = consume_visibility(&mut iter);
+
+        // Field name
+        let name = match iter.next() {
+            Some(TokenTree::Ident(i)) => i.to_string(),
+            None => break,
+            other => panic!("#[goish::reflect]: expected field name, got {:?}", other),
+        };
+
+        // Colon
+        match iter.next() {
+            Some(TokenTree::Punct(p)) if p.as_char() == ':' => {}
+            other => panic!(
+                "#[goish::reflect]: expected ':' after field {}, got {:?}",
+                name, other
+            ),
+        }
+
+        // Type tokens up to comma at angle-depth 0.
+        let mut depth: i32 = 0;
+        let mut ty_tokens: Vec<TokenTree> = Vec::new();
+        loop {
+            match iter.peek() {
+                Some(TokenTree::Punct(p)) if p.as_char() == ',' && depth == 0 => {
+                    iter.next();
+                    break;
+                }
+                Some(TokenTree::Punct(p)) if p.as_char() == '<' => {
+                    depth += 1;
+                    ty_tokens.push(iter.next().unwrap());
+                }
+                Some(TokenTree::Punct(p)) if p.as_char() == '>' => {
+                    depth -= 1;
+                    ty_tokens.push(iter.next().unwrap());
+                }
+                None => break,
+                _ => ty_tokens.push(iter.next().unwrap()),
+            }
+        }
+
+        let ts: TokenStream = ty_tokens.into_iter().collect();
+        let ty = ts.to_string();
+
+        fields.push(ParsedField { vis, name, ty, tag });
+    }
+
+    fields
 }
