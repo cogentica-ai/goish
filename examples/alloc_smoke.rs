@@ -3,7 +3,7 @@
 // Verifies two paths into the same mmap-backed bump heap:
 //
 //   1. Direct: `runtime::alloc(size, align)` — Go-style raw allocation.
-//      Used by future GoString/GoSlice internals if they ever need it.
+//      Used by string/slice internals if they ever need raw allocation.
 //   2. Via #[global_allocator]: Rust's `Vec` (from `alloc` crate) draws
 //      from the same heap because GoishAllocator is registered. This
 //      proves Vec/String/Box can be used safely with no libc.

@@ -7,7 +7,7 @@
 //   Go              goish
 //   ─────────────   ─────────────
 //   len(s)          len(s)        ← free function, signed result
-//   cap(s)          cap(s)        ← (added when GoSlice lands)
+//   cap(s)          cap(s)        ← (slice<T>::Cap)
 
 use crate::types::int;
 

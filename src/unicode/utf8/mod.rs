@@ -11,12 +11,12 @@
 //   n := utf8.RuneCountInString(s)         let n = utf8::RuneCountInString(&s);
 //   if utf8.ValidRune(r) { ... }           if utf8::ValidRune(r) { ... }
 //
-// Byte-slice arguments take `&[byte]` (Rust borrow); since `GoSlice<T>`
+// Byte-slice arguments take `&[byte]` (Rust borrow); since `slice<T>`
 // derefs to `[T]`, callers pass `&xs` and Rust's auto-deref does the
-// rest. String arguments take `&GoString` (cheap — just a borrow of an
+// rest. String arguments take `&string` (cheap — just a borrow of an
 // `Arc<[u8]>` handle).
 
-use crate::gostring::GoString;
+use crate::gostring::string;
 use crate::types::{byte, int, rune};
 
 extern crate alloc;
@@ -106,7 +106,7 @@ pub fn DecodeRune(p: &[byte]) -> (rune, int) {
 
 /// Decode the first rune in `s`. Same semantics as `DecodeRune`.
 #[allow(non_snake_case)]
-pub fn DecodeRuneInString(s: &GoString) -> (rune, int) {
+pub fn DecodeRuneInString(s: &string) -> (rune, int) {
     DecodeRune(s.as_bytes())
 }
 
@@ -139,7 +139,7 @@ pub fn DecodeLastRune(p: &[byte]) -> (rune, int) {
 }
 
 #[allow(non_snake_case)]
-pub fn DecodeLastRuneInString(s: &GoString) -> (rune, int) {
+pub fn DecodeLastRuneInString(s: &string) -> (rune, int) {
     DecodeLastRune(s.as_bytes())
 }
 
@@ -189,7 +189,7 @@ pub fn RuneLen(r: rune) -> int {
 
 /// Append the UTF-8 encoding of `r` to `p`, returning the extended slice.
 #[allow(non_snake_case)]
-pub fn AppendRune(p: crate::goslice::GoSlice<byte>, r: rune) -> crate::goslice::GoSlice<byte> {
+pub fn AppendRune(p: crate::goslice::slice<byte>, r: rune) -> crate::goslice::slice<byte> {
     let r = if !ValidRune(r) { RuneError } else { r };
     let mut v: Vec<byte> = p.into_vec();
     if r < 0x80 {
@@ -207,7 +207,7 @@ pub fn AppendRune(p: crate::goslice::GoSlice<byte>, r: rune) -> crate::goslice::
         v.push(0x80 | ((r >> 6) as byte & 0x3F));
         v.push(0x80 | (r as byte & 0x3F));
     }
-    crate::goslice::GoSlice::from_vec(v)
+    crate::goslice::slice::from_vec(v)
 }
 
 // ─── Counting / validation ─────────────────────────────────────────────
@@ -230,7 +230,7 @@ pub fn RuneCount(p: &[byte]) -> int {
 }
 
 #[allow(non_snake_case)]
-pub fn RuneCountInString(s: &GoString) -> int {
+pub fn RuneCountInString(s: &string) -> int {
     RuneCount(s.as_bytes())
 }
 
@@ -259,7 +259,7 @@ pub fn Valid(p: &[byte]) -> bool {
 }
 
 #[allow(non_snake_case)]
-pub fn ValidString(s: &GoString) -> bool {
+pub fn ValidString(s: &string) -> bool {
     Valid(s.as_bytes())
 }
 
@@ -294,6 +294,6 @@ pub fn FullRune(p: &[byte]) -> bool {
 }
 
 #[allow(non_snake_case)]
-pub fn FullRuneInString(s: &GoString) -> bool {
+pub fn FullRuneInString(s: &string) -> bool {
     FullRune(s.as_bytes())
 }

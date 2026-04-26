@@ -16,57 +16,57 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::goslice::GoSlice;
-use crate::gostring::GoString;
+use crate::goslice::slice;
+use crate::gostring::string;
 use crate::types::{byte, rune};
 use crate::unicode::utf8;
 
 // ─── string(x) ────────────────────────────────────────────────────────
 
-pub trait ToGoString {
-    fn __to_string(self) -> GoString;
+pub trait __StringConv {
+    fn __to_string(self) -> string;
 }
 
 #[allow(non_snake_case)]
 #[inline]
-pub fn string<T: ToGoString>(x: T) -> GoString {
+pub fn string<T: __StringConv>(x: T) -> string {
     x.__to_string()
 }
 
-impl ToGoString for GoString {
+impl __StringConv for string {
     #[inline]
-    fn __to_string(self) -> GoString {
+    fn __to_string(self) -> string {
         self
     }
 }
 
-impl ToGoString for &'static str {
+impl __StringConv for &'static str {
     #[inline]
-    fn __to_string(self) -> GoString {
-        GoString::from_static(self)
+    fn __to_string(self) -> string {
+        string::from_static(self)
     }
 }
 
-impl ToGoString for rune {
+impl __StringConv for rune {
     /// Go's `string(i rune)` — encode a single rune to UTF-8 (1..4 bytes).
     /// Note: this is the Go gotcha where `string(65)` == `"A"`, not `"65"`.
-    fn __to_string(self) -> GoString {
+    fn __to_string(self) -> string {
         let mut buf = [0u8; 4];
         let n = utf8::EncodeRune(&mut buf, self);
-        GoString::from_bytes(&buf[..n as usize])
+        string::from_bytes(&buf[..n as usize])
     }
 }
 
-impl ToGoString for GoSlice<byte> {
+impl __StringConv for slice<byte> {
     /// Go's `string(b []byte)` — copy bytes into a fresh string.
-    fn __to_string(self) -> GoString {
-        GoString::from_bytes(&self)
+    fn __to_string(self) -> string {
+        string::from_bytes(&self)
     }
 }
 
-impl ToGoString for GoSlice<rune> {
+impl __StringConv for slice<rune> {
     /// Go's `string(rs []rune)` — encode each rune to UTF-8.
-    fn __to_string(self) -> GoString {
+    fn __to_string(self) -> string {
         // Pre-size pessimistically (1 byte per rune → grows for non-ASCII).
         let mut v: Vec<byte> = Vec::with_capacity(self.Len() as usize);
         let mut buf = [0u8; 4];
@@ -74,48 +74,48 @@ impl ToGoString for GoSlice<rune> {
             let n = utf8::EncodeRune(&mut buf, r);
             v.extend_from_slice(&buf[..n as usize]);
         }
-        GoString::from_vec(v)
+        string::from_vec(v)
     }
 }
 
 // ─── bytes(s) — []byte(s) ─────────────────────────────────────────────
 
-pub trait ToGoBytes {
-    fn __to_bytes(self) -> GoSlice<byte>;
+pub trait __BytesConv {
+    fn __to_bytes(self) -> slice<byte>;
 }
 
 #[allow(non_snake_case)]
 #[inline]
-pub fn bytes<T: ToGoBytes>(x: T) -> GoSlice<byte> {
+pub fn bytes<T: __BytesConv>(x: T) -> slice<byte> {
     x.__to_bytes()
 }
 
-impl ToGoBytes for GoString {
-    fn __to_bytes(self) -> GoSlice<byte> {
-        GoSlice::from_vec(self.as_bytes().to_vec())
+impl __BytesConv for string {
+    fn __to_bytes(self) -> slice<byte> {
+        slice::from_vec(self.as_bytes().to_vec())
     }
 }
 
-impl ToGoBytes for &'static str {
-    fn __to_bytes(self) -> GoSlice<byte> {
-        GoSlice::from_vec(self.as_bytes().to_vec())
+impl __BytesConv for &'static str {
+    fn __to_bytes(self) -> slice<byte> {
+        slice::from_vec(self.as_bytes().to_vec())
     }
 }
 
 // ─── runes(s) — []rune(s) ─────────────────────────────────────────────
 
-pub trait ToGoRunes {
-    fn __to_runes(self) -> GoSlice<rune>;
+pub trait __RunesConv {
+    fn __to_runes(self) -> slice<rune>;
 }
 
 #[allow(non_snake_case)]
 #[inline]
-pub fn runes<T: ToGoRunes>(x: T) -> GoSlice<rune> {
+pub fn runes<T: __RunesConv>(x: T) -> slice<rune> {
     x.__to_runes()
 }
 
-impl ToGoRunes for GoString {
-    fn __to_runes(self) -> GoSlice<rune> {
+impl __RunesConv for string {
+    fn __to_runes(self) -> slice<rune> {
         let bytes = self.as_bytes();
         let mut v: Vec<rune> = Vec::with_capacity(bytes.len()); // upper bound
         let mut i: usize = 0;
@@ -126,12 +126,12 @@ impl ToGoRunes for GoString {
             // (RuneError, 1) on invalid bytes), so no infinite loop.
             i += sz as usize;
         }
-        GoSlice::from_vec(v)
+        slice::from_vec(v)
     }
 }
 
-impl ToGoRunes for &'static str {
-    fn __to_runes(self) -> GoSlice<rune> {
-        runes(GoString::from_static(self))
+impl __RunesConv for &'static str {
+    fn __to_runes(self) -> slice<rune> {
+        runes(string::from_static(self))
     }
 }

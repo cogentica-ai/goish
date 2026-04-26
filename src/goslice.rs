@@ -2,17 +2,24 @@
 //
 //   Go                                   goish
 //   ──────────────────────────────────   ──────────────────────────────────
-//   xs := []int{1, 2, 3}                 let xs = ...                ← M5: make!/slice!
+//   var xs []int                         let xs: slice<int> = ...
+//   xs := []int{1, 2, 3}                 let xs = ...               ← M5: make!/slice!
 //   len(xs), cap(xs)                     len(xs), cap(xs)
-//   xs[i]                                xs[i]                       ← Index<int>
-//   xs[low:high]                         xs.slice(low, high)         ← copy semantics
+//   xs[i]                                xs[i]                      ← Index<int>
+//   xs[low:high]                         xs.slice(low, high)        ← copy semantics
 //   for i, v := range xs                 for (i, v) in range!(xs)
-//   xs = append(xs, x)                   xs = append(xs, x)          ← M5
+//   xs = append(xs, x)                   xs = append(xs, x)         ← M5
+//
+// The struct is named lowercase `slice` to match Go's type. The
+// generic parameter T means call sites read `slice<int>`, `slice<byte>`,
+// etc., mirroring Go's `[]int`, `[]byte`.
 //
 // Backing: `Vec<T>`. Subslicing **copies** rather than aliasing the
 // backing array (the documented v1 deviation from Go semantics — see
 // ROADMAP.md). This buys Rust's borrow-checker safety; the cost is a
 // copy on `xs[low:high]`, which is uncommon in idiomatic Go anyway.
+
+#![allow(non_camel_case_types)]
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -22,11 +29,11 @@ use crate::builtin::Len as LenTrait;
 use crate::types::int;
 
 #[derive(Clone)]
-pub struct GoSlice<T> {
+pub struct slice<T> {
     inner: Vec<T>,
 }
 
-impl<T> GoSlice<T> {
+impl<T> slice<T> {
     /// Empty slice. Matches Go's `nil` slice for length/cap purposes;
     /// goish slices are never literally nil — empty owned Vec instead.
     pub fn new() -> Self {
@@ -57,7 +64,7 @@ impl<T> GoSlice<T> {
     }
 }
 
-impl<T: Clone> GoSlice<T> {
+impl<T: Clone> slice<T> {
     /// `xs[low:high]` — Go's subslicing.
     ///
     /// **v1 deviation**: returns an *independent copy*, not a view into
@@ -72,7 +79,7 @@ impl<T: Clone> GoSlice<T> {
     }
 }
 
-impl<T> Default for GoSlice<T> {
+impl<T> Default for slice<T> {
     fn default() -> Self {
         Self::new()
     }
@@ -80,7 +87,7 @@ impl<T> Default for GoSlice<T> {
 
 // ─── builtin len(xs) / cap(xs) — see builtin.rs for `len` ─────────────
 
-impl<T> LenTrait for GoSlice<T> {
+impl<T> LenTrait for slice<T> {
     #[inline]
     fn __len(&self) -> int {
         self.inner.len() as int
@@ -89,7 +96,7 @@ impl<T> LenTrait for GoSlice<T> {
 
 // ─── xs[i] — Go-faithful indexing (panics on out-of-range) ────────────
 
-impl<T> Index<int> for GoSlice<T> {
+impl<T> Index<int> for slice<T> {
     type Output = T;
     fn index(&self, i: int) -> &T {
         &self.inner[i as usize]
@@ -99,10 +106,10 @@ impl<T> Index<int> for GoSlice<T> {
 // ─── &xs auto-derefs to &[T] for low-level helpers (utf8, etc.) ───────
 //
 // `Deref` is a Rust internal — users never see it directly. It just
-// makes `&[T]`-taking helpers accept `&GoSlice<T>` without ceremony,
+// makes `&[T]`-taking helpers accept `&slice<T>` without ceremony,
 // matching Go's habit of treating slices as their underlying arrays.
 
-impl<T> Deref for GoSlice<T> {
+impl<T> Deref for slice<T> {
     type Target = [T];
     #[inline]
     fn deref(&self) -> &[T] {

@@ -1,4 +1,4 @@
-// Milestone 3 smoke test: GoString, range!, unicode/utf8, conversions.
+// Milestone 3 smoke test: string, slice, range!, unicode/utf8, conversions.
 //
 // Exercises every public surface introduced in M3 and writes "strings:
 // ok\n" if every check passes. On any failure, prints a marker to
@@ -11,7 +11,7 @@
 #![no_main]
 
 use goish::unicode::utf8;
-use goish::{bytes, byte, len, range, rune, runes, string, syscall, GoSlice, GoString};
+use goish::{byte, bytes, len, range, rune, runes, slice, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -27,7 +27,7 @@ fn check(cond: bool, msg: &[u8]) {
 #[goish::main]
 fn main() {
     // (1) Construction + byte-level len matches Go.
-    let s: GoString = string("héllo, 世界");
+    let s: string = string("héllo, 世界");
     check(len(&s) == 14, b"strings: len(s) wrong\n");
 
     // (2) Indexing returns a byte (Go-faithful), not a rune.
@@ -61,8 +61,8 @@ fn main() {
     }
     check(idx == 9, b"strings: range!(s) too few iters\n");
 
-    // (5) Concat — `s + t` returns a fresh GoString.
-    let greeting: GoString = s.clone() + "!";
+    // (5) Concat — `s + t` returns a fresh `string`.
+    let greeting: string = s.clone() + "!";
     check(len(&greeting) == 15, b"strings: concat length wrong\n");
     check(greeting[14] == b'!', b"strings: concat last byte wrong\n");
 
@@ -71,13 +71,13 @@ fn main() {
     check(s == s2, b"strings: == clone failed\n");
     check(s == "héllo, 世界", b"strings: == &str failed\n");
 
-    // (7) bytes(s) — copies into independent GoSlice<byte>.
-    let b: GoSlice<byte> = bytes(s.clone());
+    // (7) bytes(s) — copies into independent slice<byte>.
+    let b: slice<byte> = bytes(s.clone());
     check(b.Len() == 14, b"strings: bytes(s).Len wrong\n");
     check(b[0] == b'h' && b[8] == 0xE4, b"strings: bytes(s) content wrong\n");
 
-    // (8) runes(s) — UTF-8 decode into GoSlice<rune>.
-    let rs: GoSlice<rune> = runes(s.clone());
+    // (8) runes(s) — UTF-8 decode into slice<rune>.
+    let rs: slice<rune> = runes(s.clone());
     check(rs.Len() == 9, b"strings: runes(s).Len wrong\n");
     check(rs[1] == 'é' as rune, b"strings: runes(s)[1] mismatch\n");
     check(rs[8] == '界' as rune, b"strings: runes(s)[8] mismatch\n");
@@ -87,7 +87,7 @@ fn main() {
     check(len(&one_char) == 3, b"strings: string(rune) length wrong\n");
     check(one_char == "世", b"strings: string(rune) bytes wrong\n");
 
-    // (10) string(GoSlice<rune>) — round-trip.
+    // (10) string(slice<rune>) — round-trip.
     let s3 = string(rs);
     check(s3 == s, b"strings: string(runes(s)) round-trip failed\n");
 

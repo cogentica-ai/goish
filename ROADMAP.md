@@ -10,8 +10,8 @@ bottom-up, the way Go's stdlib layers itself.
 
 ## Phase 2 · Core types & I/O
 
-- **M3**  `GoString` — `Arc<[u8]>` backing, immutable
-- **M4**  `GoSlice<T>` — `Vec<T>` backing, subslicing **copies** (see below)
+- **M3**  `string` — `Arc<[u8]>` backing, immutable
+- **M4**  `slice<T>` — `Vec<T>` backing, subslicing **copies** (see below)
 - **M5**  `builtin` — `len`, `cap`, `make`, `append`, `copy`, `new` as Go-shaped free functions
 - **M6**  `io` — `Reader`, `Writer` traits + `Copy`, `EOF`
 - **M7**  `os` — `File`, `Stdin/Stdout/Stderr`, `Args`, `Exit`, `Open/Create`
@@ -56,7 +56,7 @@ no stop-the-world. What replaces each Go pattern:
 | Go pattern | goish v1 |
 |------------|----------|
 | Owned heap value | `Vec` / `Box`, dropped automatically |
-| Shared immutable string | `Arc<[u8]>` inside `GoString` |
+| Shared immutable string | `Arc<[u8]>` inside `string` |
 | Closure captured by goroutine | Rust `move` + `Send` (compile-time) |
 | `chan T` | `T: Send`, sender moves ownership |
 | `interface{}` | `Box<dyn Trait>` / `Box<dyn Any + Send>` |
@@ -64,10 +64,10 @@ no stop-the-world. What replaces each Go pattern:
 
 ### Slice subslicing semantics
 Go's `t := s[1:3]` shares backing memory with `s`. goish-v1's
-`GoSlice::slice(low, high)` returns an **independent copy**. Most Go
+`slice::slice(low, high)` returns an **independent copy**. Most Go
 idioms (read, append) work identically; mutation-propagation through
 a subslice must be written explicitly. One-line semantic note in the
-`GoSlice` docs, in exchange for keeping Rust's borrow-checker safety.
+`slice<T>` docs, in exchange for keeping Rust's borrow-checker safety.
 
 ### `defer`
 Rust's `Drop` already gives RAII. We add a `defer!{}` macro for

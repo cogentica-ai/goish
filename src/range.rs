@@ -13,8 +13,8 @@
 //   // Go:    for i, r := range s
 //   // goish: for (i, r) in range!(s)
 
-use crate::goslice::GoSlice;
-use crate::gostring::GoString;
+use crate::goslice::slice;
+use crate::gostring::string;
 use crate::types::{int, rune};
 use crate::unicode::utf8;
 
@@ -31,7 +31,7 @@ macro_rules! range {
     };
 }
 
-// ─── slices / arrays / GoSlice → (int, &T) ─────────────────────────────
+// ─── slices / arrays / slice → (int, &T) ─────────────────────────────
 
 pub struct SliceRangeIter<'a, T> {
     slice: &'a [T],
@@ -67,7 +67,7 @@ impl<'a, T, const N: usize> RangeIter for &'a [T; N] {
     }
 }
 
-impl<'a, T> RangeIter for &'a GoSlice<T> {
+impl<'a, T> RangeIter for &'a slice<T> {
     type Item = (int, &'a T);
     type Iter = SliceRangeIter<'a, T>;
     fn range(self) -> Self::Iter {
@@ -78,7 +78,7 @@ impl<'a, T> RangeIter for &'a GoSlice<T> {
     }
 }
 
-// ─── GoString → (int byte-offset, rune) — UTF-8 decode per step ───────
+// ─── string → (int byte-offset, rune) — UTF-8 decode per step ───────
 
 pub struct StringRangeIter<'a> {
     bytes: &'a [u8],
@@ -100,7 +100,7 @@ impl<'a> Iterator for StringRangeIter<'a> {
     }
 }
 
-impl<'a> RangeIter for &'a GoString {
+impl<'a> RangeIter for &'a string {
     type Item = (int, rune);
     type Iter = StringRangeIter<'a>;
     fn range(self) -> Self::Iter {
@@ -113,7 +113,7 @@ impl<'a> RangeIter for &'a GoString {
 
 // Bonus: byte-string literal `b"..."` is `&[u8; N]`, already covered
 // by the &[T; N] impl above. Plain &'static str maps to a UTF-8 walk
-// like GoString — reuse the StringRangeIter.
+// like string — reuse the StringRangeIter.
 
 impl<'a> RangeIter for &'a &str {
     type Item = (int, rune);

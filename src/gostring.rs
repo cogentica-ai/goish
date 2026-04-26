@@ -2,6 +2,7 @@
 //
 //   Go                                   goish
 //   ──────────────────────────────────   ──────────────────────────────────
+//   var s string                         let s: string = ...
 //   s := "hello"                         let s = string("hello");
 //   len(s)                               len(s)
 //   s[i]                                 s[i]            ← byte (Index<int>)
@@ -9,9 +10,15 @@
 //   s == t                               s == t          ← PartialEq
 //   for i, r := range s                  for (i, r) in range!(s)
 //
+// The struct is named lowercase `string` to match Go's type. Lives in
+// the type namespace; the conversion function `string(x)` (in convert.rs)
+// lives in the value namespace, so they coexist — same as Go.
+//
 // Backing: `Arc<[u8]>`. Immutable like Go. Cheap clone (atomic refcount).
 // Like Go's string, it holds raw bytes — UTF-8 only by convention, not
-// invariant. A GoString may be empty, but never "nil".
+// invariant. A `string` may be empty, but never "nil".
+
+#![allow(non_camel_case_types)]
 
 extern crate alloc;
 use alloc::sync::Arc;
@@ -24,11 +31,11 @@ use crate::builtin::Len as LenTrait;
 use crate::types::{byte, int};
 
 #[derive(Clone)]
-pub struct GoString {
+pub struct string {
     bytes: Arc<[u8]>,
 }
 
-impl GoString {
+impl string {
     /// Empty string. Matches Go's zero value `""`.
     pub fn new() -> Self {
         Self {
@@ -45,7 +52,7 @@ impl GoString {
     }
 
     /// From a borrowed byte sequence. Copies. Used by `string(b)` for
-    /// `GoSlice<byte>` and by internal callers (utf8 encoders).
+    /// `slice<byte>` and by internal callers (utf8 encoders).
     pub fn from_bytes(b: &[u8]) -> Self {
         Self { bytes: Arc::from(b) }
     }
@@ -66,13 +73,13 @@ impl GoString {
 
     /// Internal byte access for utf8/range/comparison machinery. Public
     /// users get bytes via the `bytes(s)` builtin, which copies into a
-    /// `GoSlice<byte>` (Go-faithful semantics).
+    /// `slice<byte>` (Go-faithful semantics).
     pub(crate) fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }
 }
 
-impl Default for GoString {
+impl Default for string {
     fn default() -> Self {
         Self::new()
     }
@@ -80,7 +87,7 @@ impl Default for GoString {
 
 // ─── builtin len(s) ────────────────────────────────────────────────────
 
-impl LenTrait for GoString {
+impl LenTrait for string {
     #[inline]
     fn __len(&self) -> int {
         self.bytes.len() as int
@@ -89,7 +96,7 @@ impl LenTrait for GoString {
 
 // ─── s[i] — byte indexing, Go-faithful ────────────────────────────────
 
-impl Index<int> for GoString {
+impl Index<int> for string {
     type Output = byte;
     fn index(&self, i: int) -> &byte {
         // Bounds check matches Go: panics on out-of-range, byte access
@@ -100,56 +107,56 @@ impl Index<int> for GoString {
 
 // ─── s + t — concat ───────────────────────────────────────────────────
 
-impl Add<GoString> for GoString {
-    type Output = GoString;
-    fn add(self, rhs: GoString) -> GoString {
+impl Add<string> for string {
+    type Output = string;
+    fn add(self, rhs: string) -> string {
         let mut v = Vec::with_capacity(self.bytes.len() + rhs.bytes.len());
         v.extend_from_slice(&self.bytes);
         v.extend_from_slice(&rhs.bytes);
-        GoString::from_vec(v)
+        string::from_vec(v)
     }
 }
 
-impl Add<&str> for GoString {
-    type Output = GoString;
-    fn add(self, rhs: &str) -> GoString {
+impl Add<&str> for string {
+    type Output = string;
+    fn add(self, rhs: &str) -> string {
         let mut v = Vec::with_capacity(self.bytes.len() + rhs.len());
         v.extend_from_slice(&self.bytes);
         v.extend_from_slice(rhs.as_bytes());
-        GoString::from_vec(v)
+        string::from_vec(v)
     }
 }
 
 // ─── equality / hash / ordering — byte-wise (Go-faithful) ─────────────
 
-impl PartialEq for GoString {
+impl PartialEq for string {
     fn eq(&self, other: &Self) -> bool {
         // Fast path: same Arc → same bytes (covers literals shared via
         // clone). Falls through to byte compare otherwise.
         Arc::ptr_eq(&self.bytes, &other.bytes) || *self.bytes == *other.bytes
     }
 }
-impl Eq for GoString {}
+impl Eq for string {}
 
-impl PartialEq<&str> for GoString {
+impl PartialEq<&str> for string {
     fn eq(&self, other: &&str) -> bool {
         &*self.bytes == other.as_bytes()
     }
 }
 
-impl Hash for GoString {
+impl Hash for string {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // Hash the bytes, not the Arc identity — matches Go map semantics.
         self.bytes.hash(state);
     }
 }
 
-impl PartialOrd for GoString {
+impl PartialOrd for string {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
-impl Ord for GoString {
+impl Ord for string {
     fn cmp(&self, other: &Self) -> Ordering {
         (*self.bytes).cmp(&*other.bytes)
     }

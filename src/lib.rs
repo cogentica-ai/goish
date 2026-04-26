@@ -2,7 +2,7 @@
 //
 // no_std + no glibc. Built bottom-up like Go's standard library:
 //
-//   syscall (raw asm)  →  runtime (alloc + rt0)  →  GoString / GoSlice
+//   syscall (raw asm)  →  runtime (alloc + rt0)  →  string / slice<T>
 //                     →  io  →  fmt
 //
 // User binaries opt in by adding `#![no_std]`, `#![no_main]`, and
@@ -31,9 +31,13 @@ pub mod unicode;
 // Re-export Go's predeclared identifiers at the crate root so a single
 // `use goish::{len, string, ...}` mirrors Go's always-available builtins.
 pub use builtin::len;
+// Both `string` (the type, in gostring) and `string` (the conversion
+// function, in convert) are re-exported here. They occupy different
+// namespaces (type vs value), exactly like Go's `string` type and
+// `string(...)` conversion. Same for `slice<T>`.
 pub use convert::{bytes, runes, string};
-pub use goslice::GoSlice;
-pub use gostring::GoString;
+pub use goslice::slice;
+pub use gostring::string;
 pub use types::{byte, int, rune, uint};
 
 // Re-export the entry-point attribute so users write `#[goish::main]`.
