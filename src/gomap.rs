@@ -35,6 +35,7 @@
 #![allow(non_camel_case_types)]
 
 extern crate alloc;
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use core::borrow::Borrow;
 use core::ops::{Index, IndexMut};
@@ -50,9 +51,28 @@ where
     V: Default,
 {
     inner: BTreeMap<K, V>,
-    /// Sentinel returned from `Index::index` when key is missing.
-    /// Built once per map at construction; never mutated externally.
-    zero: V,
+    /// Sentinel returned from `Index::index` when key is missing. Built
+    /// once per map at construction; never mutated. Boxed so that
+    /// `V` may itself transitively contain `map<K, V>` (e.g.,
+    /// `json::Value` recursive enum) — a non-Box `V` field would make
+    /// the type infinite-sized.
+    zero: Box<V>,
+}
+
+// Clone implemented manually so the struct's trait bounds stay minimal
+// (just `K: Ord`, `V: Default`); cloning additionally requires
+// `K: Clone, V: Clone`.
+impl<K, V> Clone for map<K, V>
+where
+    K: Ord + Clone,
+    V: Default + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            zero: self.zero.clone(),
+        }
+    }
 }
 
 impl<K, V> map<K, V>
@@ -64,7 +84,7 @@ where
     pub fn new() -> Self {
         Self {
             inner: BTreeMap::new(),
-            zero: V::default(),
+            zero: Box::new(V::default()),
         }
     }
 
@@ -166,7 +186,7 @@ where
 {
     type Output = V;
     fn index(&self, key: K) -> &V {
-        self.inner.get(&key).unwrap_or(&self.zero)
+        self.inner.get(&key).unwrap_or(&*self.zero)
     }
 }
 
@@ -196,7 +216,7 @@ where
         // BTreeMap::get takes `&Q where K: Borrow<Q>`. K=string, Q=[u8].
         match (&self.inner as &BTreeMap<string, V>).get(lookup) {
             Some(v) => v,
-            None => &self.zero,
+            None => &*self.zero,
         }
     }
 }

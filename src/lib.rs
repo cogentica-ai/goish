@@ -33,6 +33,7 @@ pub mod builtin_macros;
 pub mod bytes;
 pub mod convert;
 pub mod defer;
+pub mod encoding;
 pub mod errors;
 pub mod fmt;
 pub mod gomap;

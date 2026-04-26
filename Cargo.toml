@@ -133,3 +133,11 @@ path = "examples/stats.rs"
 [[example]]
 name = "floats_smoke"
 path = "examples/floats_smoke.rs"
+
+[[example]]
+name = "json_pretty"
+path = "examples/json_pretty.rs"
+
+[[example]]
+name = "json_smoke"
+path = "examples/json_smoke.rs"
