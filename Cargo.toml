@@ -161,3 +161,7 @@ path = "examples/reflect_smoke.rs"
 [[example]]
 name = "reflect_json"
 path = "examples/reflect_json.rs"
+
+[[example]]
+name = "reflect_v_set"
+path = "examples/reflect_v_set.rs"

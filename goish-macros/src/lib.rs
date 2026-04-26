@@ -218,6 +218,60 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
 
+    // ── impl fmt::Format for the struct ────────────────────────────
+    // %v / %+v / %s on this type walks reflect.Value and emits Go-
+    // faithful default formatting. Conflicts with a manual impl
+    // Stringer for the same type — pick one.
+    impl_text.push_str("impl ::goish::fmt::Format for ");
+    impl_text.push_str(&parsed.name);
+    impl_text.push_str(" {\n");
+    impl_text.push_str(
+        "    fn fmt(&self, __verb: ::goish::byte, __f: &mut ::goish::fmt::FmtBuf) {\n",
+    );
+    impl_text.push_str("        ::goish::fmt::reflect_fmt_to(self, __verb, __f);\n");
+    impl_text.push_str("    }\n");
+    impl_text.push_str("}\n");
+    // Borrow form so callers can pass `&p` directly to Printf! without
+    // moving — non-Copy structs need this. A blanket `impl Format for &T`
+    // would conflict with the Stringer blanket, hence per-type emission.
+    impl_text.push_str("impl ::goish::fmt::Format for &");
+    impl_text.push_str(&parsed.name);
+    impl_text.push_str(" {\n");
+    impl_text.push_str(
+        "    fn fmt(&self, __verb: ::goish::byte, __f: &mut ::goish::fmt::FmtBuf) {\n",
+    );
+    impl_text.push_str("        ::goish::fmt::reflect_fmt_to(*self, __verb, __f);\n");
+    impl_text.push_str("    }\n");
+    impl_text.push_str("}\n");
+
+    // ── impl reflect::Settable for the struct ──────────────────────
+    // Dispatches index → field write via FromReflectValue. Composite
+    // field types must impl FromReflectValue (built-in primitives do;
+    // user nested structs would need their own impl).
+    impl_text.push_str("impl ::goish::reflect::Settable for ");
+    impl_text.push_str(&parsed.name);
+    impl_text.push_str(" {\n");
+    impl_text.push_str(
+        "    fn __reflect_set_field(&mut self, __idx: ::goish::int, __v: ::goish::reflect::Value) -> ::goish::error {\n",
+    );
+    impl_text.push_str("        match __idx {\n");
+    for (i, f) in parsed.fields.iter().enumerate() {
+        let _ = write!(impl_text, "            {} => {{\n", i);
+        let _ = write!(
+            impl_text,
+            "                let (__val, __err) = <{} as ::goish::reflect::FromReflectValue>::from_reflect_value(__v);\n",
+            f.ty
+        );
+        impl_text.push_str("                if __err != ::goish::nil { return __err; }\n");
+        let _ = write!(impl_text, "                self.{} = __val;\n", f.name);
+        impl_text.push_str("                ::goish::nil\n");
+        impl_text.push_str("            }\n");
+    }
+    impl_text.push_str("            _ => ::goish::errors::New(\"reflect.SetField: index out of range\"),\n");
+    impl_text.push_str("        }\n");
+    impl_text.push_str("    }\n");
+    impl_text.push_str("}\n");
+
     let mut out: TokenStream = struct_text
         .parse()
         .expect("goish::reflect: failed to re-emit struct");

@@ -66,6 +66,10 @@ impl<T: Stringer + ?Sized> Format for T {
     }
 }
 
+// (No blanket `impl<T: Format> Format for &T` — it overlaps with the
+// `impl<T: Stringer> Format for T` blanket above. The `#[goish::reflect]`
+// macro instead emits `impl Format for &MyStruct` per type.)
+
 // ─── FmtBuf — the byte accumulator ────────────────────────────────────
 
 pub struct FmtBuf {
@@ -407,9 +411,11 @@ fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> 
             break;
         }
 
-        // Parse optional flags: '-' (left align), '0' (zero pad).
+        // Parse optional flags: '-' (left align), '0' (zero pad), '+'
+        // (Go's "show field names" for %+v / "show sign" for numerics).
         let mut left_align = false;
         let mut zero_pad = false;
+        let mut plus_flag = false;
         loop {
             if i >= format.len() {
                 break;
@@ -421,6 +427,10 @@ fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> 
                 }
                 b'0' => {
                     zero_pad = true;
+                    i += 1;
+                }
+                b'+' => {
+                    plus_flag = true;
                     i += 1;
                 }
                 _ => break,
@@ -441,11 +451,17 @@ fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> 
             f.push(b'%');
             break;
         }
-        let verb = format[i];
+        let mut verb = format[i];
         i += 1;
         if verb == b'%' {
             f.push(b'%');
             continue;
+        }
+        // `%+v` is encoded as the synthetic verb 'V' so existing Format
+        // impls don't need a flags channel. The reflect-driven printer
+        // dispatches on 'v' vs 'V'.
+        if plus_flag && verb == b'v' {
+            verb = b'V';
         }
         // %w handling — substitute the wrapped error's text and capture
         // the first %w as the wrap target (Go's fmt.Errorf semantics).
@@ -505,6 +521,100 @@ fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> 
         }
     }
     wrap_target
+}
+
+// ─── reflect-driven %v / %+v printer ──────────────────────────────────
+//
+// Called by `#[goish::reflect]`-emitted `impl Format for T`. Walks the
+// `reflect::Value` tree and emits Go-faithful default formatting:
+//
+//   bool      → true|false
+//   int*/uint → decimal
+//   float*    → shortest round-trip
+//   string    → unquoted bytes (matches %v, not %q)
+//   slice     → [v1 v2 v3]   (space-separated)
+//   map       → map[k1:v1 k2:v2]   (BTreeMap-sorted keys)
+//   struct    → {v1 v2 v3}    (or {Name:v1 Age:v2} when verb == 'V'
+//                              for %+v)
+//   pointer   → recurse into target
+//   invalid   → <nil>
+
+/// Format a `reflect::Value` into `f` using `verb` (`'v'` or `'V'`).
+/// Public so `#[goish::reflect]`-generated `impl Format` bodies can
+/// call it directly without round-tripping through ValueOf.
+pub fn reflect_fmt_to<T: crate::reflect::Reflect + ?Sized>(
+    v: &T,
+    verb: byte,
+    f: &mut FmtBuf,
+) {
+    let rv = crate::reflect::ValueOf(v);
+    write_reflect_value(&rv, verb == b'V', f);
+}
+
+fn write_reflect_value(v: &crate::reflect::Value, plus: bool, f: &mut FmtBuf) {
+    use crate::reflect::Kind as K;
+    use crate::reflect::Value as RV;
+    match v.Kind() {
+        K::Invalid => f.extend(b"<nil>"),
+        K::Bool => f.extend(if v.Bool() { b"true" } else { b"false" }),
+        K::Int | K::Int8 | K::Int16 | K::Int32 => {
+            format_signed(v.Int() as i64, b'd', f);
+        }
+        K::Uint | K::Uint8 | K::Uint16 | K::Uint32 => {
+            format_unsigned(v.Uint() as u64, b'd', f);
+        }
+        K::Float32 | K::Float64 => {
+            let s = crate::strconv::FormatFloat(v.Float(), b'g', -1, 64);
+            f.extend(s.as_bytes());
+        }
+        K::String => f.extend(v.String().as_bytes()),
+        K::Slice => {
+            f.push(b'[');
+            let n = v.Len();
+            for i in 0..n {
+                if i > 0 {
+                    f.push(b' ');
+                }
+                write_reflect_value(&v.Index(i), plus, f);
+            }
+            f.push(b']');
+        }
+        K::Map => {
+            f.extend(b"map[");
+            let keys = v.MapKeys();
+            for (i, k) in keys.iter().enumerate() {
+                if i > 0 {
+                    f.push(b' ');
+                }
+                write_reflect_value(k, plus, f);
+                f.push(b':');
+                let val = v.MapIndex(k);
+                write_reflect_value(&val, plus, f);
+            }
+            f.push(b']');
+        }
+        K::Struct => {
+            f.push(b'{');
+            let n = v.NumField();
+            let ty = v.Type();
+            for i in 0..n {
+                if i > 0 {
+                    f.push(b' ');
+                }
+                if plus {
+                    f.extend(ty.Field(i).Name.as_bytes());
+                    f.push(b':');
+                }
+                write_reflect_value(&v.Field(i), plus, f);
+            }
+            f.push(b'}');
+        }
+        K::Pointer => {
+            if let RV::Pointer(inner) = v {
+                write_reflect_value(inner, plus, f);
+            }
+        }
+    }
 }
 
 // ─── Public entry points (called by macros) ───────────────────────────

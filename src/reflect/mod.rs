@@ -603,6 +603,108 @@ pub fn ValueOf<T: Reflect + ?Sized>(v: &T) -> Value {
     v.__reflect_value()
 }
 
+// ─── FromReflectValue — typed setter dispatch ─────────────────────────
+//
+// Mirrors `json::FromValue` but over `reflect::Value`. Used by macro-
+// emitted `Settable::__reflect_set_field` implementations to safely
+// extract the typed payload from a Value at runtime.
+
+pub trait FromReflectValue: Sized {
+    fn from_reflect_value(v: Value) -> (Self, crate::errors::error);
+}
+
+macro_rules! impl_from_reflect {
+    ($t:ty, $variant:ident, $name:expr) => {
+        impl FromReflectValue for $t {
+            fn from_reflect_value(v: Value) -> (Self, crate::errors::error) {
+                match v {
+                    Value::$variant(x) => (x, crate::nil),
+                    _ => (
+                        <$t as Default>::default(),
+                        crate::errors::New(concat!("reflect: expected ", $name)),
+                    ),
+                }
+            }
+        }
+    };
+}
+
+impl_from_reflect!(bool, Bool, "bool");
+impl_from_reflect!(int, Int, "int");
+impl_from_reflect!(i8, Int8, "int8");
+impl_from_reflect!(i16, Int16, "int16");
+impl_from_reflect!(rune, Int32, "int32");
+impl_from_reflect!(uint, Uint, "uint");
+impl_from_reflect!(byte, Uint8, "uint8");
+impl_from_reflect!(u16, Uint16, "uint16");
+impl_from_reflect!(u32, Uint32, "uint32");
+impl_from_reflect!(float32, Float32, "float32");
+impl_from_reflect!(float64, Float64, "float64");
+impl_from_reflect!(string, String, "string");
+
+impl<T: FromReflectValue + Clone + Default> FromReflectValue for slice<T> {
+    fn from_reflect_value(v: Value) -> (Self, crate::errors::error) {
+        match v {
+            Value::Slice { items, .. } => {
+                let mut out: Vec<T> = Vec::with_capacity(items.len());
+                for item in items {
+                    let (elem, err) = T::from_reflect_value(item);
+                    if err != crate::nil {
+                        return (slice::__from_vec(Vec::new()), err);
+                    }
+                    out.push(elem);
+                }
+                (slice::__from_vec(out), crate::nil)
+            }
+            _ => (
+                slice::__from_vec(Vec::new()),
+                crate::errors::New("reflect: expected slice"),
+            ),
+        }
+    }
+}
+
+// ─── Mutation: SetField / SetFieldByName ──────────────────────────────
+//
+// Goish doesn't expose Go's `Value.Field(i).SetInt(99)` chain directly
+// (that requires per-field offsets + bounded unsafe). Instead, the
+// `#[goish::reflect]` macro emits a `Settable` impl per struct that
+// dispatches a typed setter per field index. The free functions below
+// route through that protocol — type-checked, no unsafe.
+//
+//   reflect::SetField(&mut p, 1, Value::Int(99))
+//   reflect::SetFieldByName(&mut p, "Name", Value::String(string("a")))
+
+/// Trait emitted by `#[goish::reflect]` for user structs. Allows
+/// runtime "write field i with this Value" without unsafe.
+pub trait Settable {
+    /// Assigns `v` into the i-th field. Returns `nil` on success or a
+    /// type-mismatch / out-of-range error.
+    fn __reflect_set_field(&mut self, idx: int, v: Value) -> crate::errors::error;
+}
+
+/// `reflect.SetField(&mut t, idx, v)` — write `v` into the i-th field.
+pub fn SetField<T: Settable>(target: &mut T, idx: int, v: Value) -> crate::errors::error {
+    target.__reflect_set_field(idx, v)
+}
+
+/// `reflect.SetFieldByName(&mut t, name, v)` — look up the field by
+/// declared name and write `v` into it. Returns an error if the field
+/// is not found.
+pub fn SetFieldByName<T: Settable + Reflect>(
+    target: &mut T,
+    name: &str,
+    v: Value,
+) -> crate::errors::error {
+    let ty = T::__reflect_type();
+    for i in 0..ty.NumField() {
+        if ty.Field(i).Name.as_bytes() == name.as_bytes() {
+            return target.__reflect_set_field(i, v);
+        }
+    }
+    crate::errors::New("reflect.SetFieldByName: field not found")
+}
+
 /// `reflect.DeepEqual(x, y)` — structural equality between any two
 /// reflectable values. Mirrors Go 1.25 `reflect.DeepEqual`:
 ///
