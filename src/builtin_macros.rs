@@ -56,8 +56,23 @@ macro_rules! slice {
 ///
 /// `make!([]T, 0)` and `make!([]T, 0, cap)` — empty slices (no
 /// `Default` needed).
+///
+/// `make!(map[K]V)` / `make!(map[K]V, hint)` — Go's `make(map[K]V)`.
+/// Hint is ignored for v1 (BTreeMap doesn't reserve); reserved for the
+/// hashmap port.
 #[macro_export]
 macro_rules! make {
+    // make!(map[K]V) — empty map (V: Default required at construction).
+    (map[$kt:ty]$vt:ty) => {
+        $crate::gomap::map::<$kt, $vt>::new()
+    };
+    // make!(map[K]V, hint) — hint accepted for parity, currently ignored.
+    (map[$kt:ty]$vt:ty, $hint:expr) => {
+        {
+            let _ = $hint;
+            $crate::gomap::map::<$kt, $vt>::new()
+        }
+    };
     // make!([]T, 0)  — empty, no Default needed.
     ([] $t:ty, 0) => {
         {
@@ -130,5 +145,18 @@ macro_rules! copy {
         let __n = ::core::cmp::min(__dst.len(), __src.len());
         __dst[..__n].clone_from_slice(&__src[..__n]);
         __n as $crate::int
+    }};
+}
+
+// ─── delete!(m, k) — Go's `delete(m, k)` builtin ──────────────────────
+
+/// `delete!(m, k)` — remove key `k` from map `m`. Mirrors Go's
+/// `delete(m, k)`. The macro takes `m` by name and applies `&mut`
+/// internally to keep the call site bare.
+#[macro_export]
+macro_rules! delete {
+    ($m:expr, $k:expr) => {{
+        let __m = &mut $m;
+        __m.Delete($k);
     }};
 }

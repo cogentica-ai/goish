@@ -125,3 +125,19 @@ impl<'a> RangeIter for &'a &str {
         }
     }
 }
+
+// ─── map<K, V> → (&K, &V) — sorted by K (BTreeMap order) ──────────────
+
+use crate::gomap::map;
+
+impl<'a, K, V> RangeIter for &'a map<K, V>
+where
+    K: Ord,
+    V: Default,
+{
+    type Item = (&'a K, &'a V);
+    type Iter = alloc::collections::btree_map::Iter<'a, K, V>;
+    fn range(self) -> Self::Iter {
+        self.__iter()
+    }
+}

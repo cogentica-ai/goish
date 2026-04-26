@@ -35,8 +35,10 @@ pub mod convert;
 pub mod defer;
 pub mod errors;
 pub mod fmt;
+pub mod gomap;
 pub mod goslice;
 pub mod gostring;
+pub mod maps;
 pub mod io;
 pub mod os;
 pub mod range;
@@ -58,6 +60,7 @@ pub use builtin::{cap, len};
 // `string(...)` conversion. Same for `slice<T>`.
 pub use convert::{bytes, runes, string};
 pub use errors::{error, nil};
+pub use gomap::map;
 pub use goslice::slice;
 pub use gostring::string;
 pub use types::{byte, int, rune, uint};

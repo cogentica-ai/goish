@@ -88,10 +88,29 @@ impl Default for string {
 }
 
 // ─── From<&str> — enables slice!([]string{"a", "b"}) via .into() ─────
+//
+// Generalized from `&'static str` to any `&str` so non-static borrowed
+// strings (e.g., from `bufio::Scanner.Text()` chains, or `&str` keys in
+// `map<string, V>` index impls) can flow into a `string` without the
+// caller needing to think about lifetimes.
 
-impl From<&'static str> for string {
-    fn from(s: &'static str) -> Self {
-        string::from_static(s)
+impl From<&str> for string {
+    fn from(s: &str) -> Self {
+        string::from_bytes(s.as_bytes())
+    }
+}
+
+// ─── Borrow<[u8]> — lets BTreeMap<string, V> look up by &[u8] / &str ──
+//
+// Required so the `map<string, V>` Index<&str> specialization can
+// delegate to `BTreeMap::get(key.as_bytes())` without allocating a fresh
+// `string` for each read. Borrow's invariant (Hash/Ord must agree) is
+// satisfied: our `string` Ord/PartialEq/Hash all operate byte-wise.
+
+impl core::borrow::Borrow<[u8]> for string {
+    #[inline]
+    fn borrow(&self) -> &[u8] {
+        &self.bytes
     }
 }
 

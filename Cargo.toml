@@ -117,3 +117,11 @@ path = "examples/stopwatch.rs"
 [[example]]
 name = "time_smoke"
 path = "examples/time_smoke.rs"
+
+[[example]]
+name = "wordcount"
+path = "examples/wordcount.rs"
+
+[[example]]
+name = "map_smoke"
+path = "examples/map_smoke.rs"
