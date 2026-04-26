@@ -44,7 +44,7 @@ fn read_all<R: goish::io::Reader>(mut r: R) -> slice<byte> {
 fn main() {
     let raw = read_all(os::Stdin());
     let raw_bytes: &[byte] = &raw;
-    let (v, err) = json::Unmarshal(raw_bytes);
+    let mut v = json::Value::Null; let err = json::Unmarshal(raw_bytes, &mut v);
     if err != nil {
         let mut e = os::Stderr();
         Fprintln!(e, "parse:", err);

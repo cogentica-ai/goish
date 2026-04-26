@@ -160,6 +160,64 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
 
+    // ── impl json::FromValue for the struct ────────────────────────
+    // Walks the parsed json::Value::Object, maps each json key (from
+    // Tag.Get("json") or the field name) to the matching field via
+    // recursive FromValue dispatch. Missing fields stay at their
+    // per-field zero (each field type must impl ::core::default::Default).
+    impl_text.push_str("impl ::goish::encoding::json::FromValue for ");
+    impl_text.push_str(&parsed.name);
+    impl_text.push_str(" {\n");
+    impl_text.push_str("    fn from_value(__v: &::goish::encoding::json::Value) -> (Self, ::goish::error) {\n");
+    // Helper closure: build a fresh "zero" Self via per-field defaults.
+    impl_text.push_str("        let __zero = || -> Self { Self {\n");
+    for f in &parsed.fields {
+        let _ = write!(
+            impl_text,
+            "            {}: <{} as ::core::default::Default>::default(),\n",
+            f.name, f.ty
+        );
+    }
+    impl_text.push_str("        } };\n");
+    impl_text.push_str("        let __obj = match __v {\n");
+    impl_text.push_str("            ::goish::encoding::json::Value::Object(o) => o,\n");
+    impl_text.push_str("            ::goish::encoding::json::Value::Null => return (__zero(), ::goish::nil),\n");
+    impl_text.push_str("            _ => return (__zero(), ::goish::errors::New(\"json: cannot unmarshal into struct\")),\n");
+    impl_text.push_str("        };\n");
+    impl_text.push_str("        let mut __out = __zero();\n");
+    impl_text.push_str("        let __ty = <Self as ::goish::reflect::Reflect>::__reflect_type();\n");
+    for (i, f) in parsed.fields.iter().enumerate() {
+        impl_text.push_str("        {\n");
+        let _ = write!(
+            impl_text,
+            "            let __field = __ty.Field({} as ::goish::int);\n",
+            i
+        );
+        impl_text.push_str("            let __raw_tag = __field.Tag.Get(\"json\");\n");
+        impl_text.push_str("            let (__key_seg, __skip) = ::goish::encoding::json::__parse_json_tag(&__raw_tag);\n");
+        impl_text.push_str("            if !__skip {\n");
+        impl_text.push_str("                let __key_str: ::goish::string = if __key_seg.Len() == 0 {\n");
+        impl_text.push_str("                    ::goish::string::from_static(__field.Name)\n");
+        impl_text.push_str("                } else {\n");
+        impl_text.push_str("                    __key_seg\n");
+        impl_text.push_str("                };\n");
+        impl_text.push_str("                let (__sub, __present) = __obj.Get(__key_str);\n");
+        impl_text.push_str("                if __present {\n");
+        let _ = write!(
+            impl_text,
+            "                    let (__val, __err) = <{} as ::goish::encoding::json::FromValue>::from_value(&__sub);\n",
+            f.ty
+        );
+        impl_text.push_str("                    if __err != ::goish::nil { return (__out, __err); }\n");
+        let _ = write!(impl_text, "                    __out.{} = __val;\n", f.name);
+        impl_text.push_str("                }\n");
+        impl_text.push_str("            }\n");
+        impl_text.push_str("        }\n");
+    }
+    impl_text.push_str("        (__out, ::goish::nil)\n");
+    impl_text.push_str("    }\n");
+    impl_text.push_str("}\n");
+
     let mut out: TokenStream = struct_text
         .parse()
         .expect("goish::reflect: failed to re-emit struct");

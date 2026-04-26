@@ -147,6 +147,172 @@ pub fn ErrUnexpectedEnd() -> error {
     cached_error(&SLOT, || errors::New("json: unexpected end of input"))
 }
 
+// ─── Internal helpers ─────────────────────────────────────────────────
+
+/// Internal helper used by `#[goish::reflect]`'s generated `FromValue`
+/// impl. Parses a raw `json:"foo,opt1,opt2"` tag value into
+/// `(effective_key, skip)`. `skip == true` if the tag is `"-"`. When
+/// `effective_key` is empty, the macro falls back to the field name.
+#[doc(hidden)]
+pub fn __parse_json_tag(tag: &string) -> (string, bool) {
+    let raw = tag.as_bytes();
+    if raw == b"-" {
+        return (string::new(), true);
+    }
+    let name_seg: &[u8] = match raw.iter().position(|&c| c == b',') {
+        Some(i) => &raw[..i],
+        None => raw,
+    };
+    if name_seg == b"-" {
+        return (string::new(), true);
+    }
+    (string::from_bytes(name_seg), false)
+}
+
+// ─── FromValue — typed Unmarshal protocol ─────────────────────────────
+//
+// `json.Unmarshal(data, &mut dest)` parses to a dynamic `Value`, then
+// dispatches to `FromValue::from_value` to convert into the target.
+// Built-in impls cover primitives, `Value` (identity for the dynamic
+// case), `slice<T>`, and `map<string, V>`. The `#[goish::reflect]` proc-
+// macro emits the impl for user structs, walking each field with its
+// JSON tag-derived key.
+
+pub trait FromValue: Sized {
+    /// Convert a JSON `Value` into `Self`. Returns `(Self, error)` —
+    /// typical Go-shape, with the second value carrying the type-mismatch
+    /// or out-of-range error if any.
+    fn from_value(v: &Value) -> (Self, error);
+}
+
+// Identity — lets `Unmarshal(data, &mut json::Value)` work for the
+// dynamic case (replacing the old `(Value, error)` shape).
+impl FromValue for Value {
+    fn from_value(v: &Value) -> (Self, error) {
+        (v.clone(), nil)
+    }
+}
+
+impl FromValue for bool {
+    fn from_value(v: &Value) -> (Self, error) {
+        match v {
+            Value::Bool(b) => (*b, nil),
+            _ => (false, errors::New("json: cannot unmarshal into bool")),
+        }
+    }
+}
+
+impl FromValue for crate::types::int {
+    fn from_value(v: &Value) -> (Self, error) {
+        match v {
+            Value::Number(n) => (*n as crate::types::int, nil),
+            _ => (0, errors::New("json: cannot unmarshal into int")),
+        }
+    }
+}
+
+impl FromValue for crate::types::uint {
+    fn from_value(v: &Value) -> (Self, error) {
+        match v {
+            Value::Number(n) if *n >= 0.0 => (*n as crate::types::uint, nil),
+            _ => (0, errors::New("json: cannot unmarshal into uint")),
+        }
+    }
+}
+
+impl FromValue for crate::types::float64 {
+    fn from_value(v: &Value) -> (Self, error) {
+        match v {
+            Value::Number(n) => (*n, nil),
+            _ => (0.0, errors::New("json: cannot unmarshal into float64")),
+        }
+    }
+}
+
+impl FromValue for crate::types::float32 {
+    fn from_value(v: &Value) -> (Self, error) {
+        match v {
+            Value::Number(n) => (*n as crate::types::float32, nil),
+            _ => (0.0, errors::New("json: cannot unmarshal into float32")),
+        }
+    }
+}
+
+impl FromValue for crate::types::byte {
+    fn from_value(v: &Value) -> (Self, error) {
+        match v {
+            Value::Number(n) if *n >= 0.0 && *n <= 255.0 => (*n as crate::types::byte, nil),
+            _ => (0, errors::New("json: cannot unmarshal into byte")),
+        }
+    }
+}
+
+impl FromValue for crate::types::rune {
+    fn from_value(v: &Value) -> (Self, error) {
+        match v {
+            Value::Number(n) => (*n as crate::types::rune, nil),
+            _ => (0, errors::New("json: cannot unmarshal into rune")),
+        }
+    }
+}
+
+impl FromValue for string {
+    fn from_value(v: &Value) -> (Self, error) {
+        match v {
+            Value::String(s) => (s.clone(), nil),
+            _ => (string::new(), errors::New("json: cannot unmarshal into string")),
+        }
+    }
+}
+
+impl<T: FromValue + Default + Clone> FromValue for slice<T> {
+    fn from_value(v: &Value) -> (Self, error) {
+        match v {
+            Value::Array(items) => {
+                let mut out: Vec<T> = Vec::with_capacity(items.Len() as usize);
+                for i in 0..items.Len() {
+                    let (elem, err) = T::from_value(&items[i]);
+                    if err != nil {
+                        return (slice::__from_vec(Vec::new()), err);
+                    }
+                    out.push(elem);
+                }
+                (slice::__from_vec(out), nil)
+            }
+            Value::Null => (slice::__from_vec(Vec::new()), nil),
+            _ => (
+                slice::__from_vec(Vec::new()),
+                errors::New("json: cannot unmarshal into slice"),
+            ),
+        }
+    }
+}
+
+// Map: string-keyed only for v1. Non-string keys would need
+// strconv-style parsing to mirror Go.
+impl<V: FromValue + Default + Clone> FromValue for map<string, V> {
+    fn from_value(v: &Value) -> (Self, error) {
+        match v {
+            Value::Object(o) => {
+                let mut out = map::<string, V>::new();
+                for (k, val) in o.__iter() {
+                    let (vv, err) = V::from_value(val);
+                    if err != nil {
+                        return (out, err);
+                    }
+                    out.Set(k.clone(), vv);
+                }
+                (out, nil)
+            }
+            Value::Null => (map::<string, V>::new(), nil),
+            _ => (
+                map::<string, V>::new(),
+                errors::New("json: cannot unmarshal into map"),
+            ),
+        }
+    }
+}
+
 // ─── Marshaler / Unmarshaler traits ────────────────────────────────────
 
 pub trait Marshaler {
@@ -546,8 +712,31 @@ fn write_newline_indent(out: &mut Vec<byte>, cfg: &IndentCfg, depth: usize) {
 }
 
 // ─── Unmarshal — recursive-descent parser ──────────────────────────────
+//
+// Goish form mirrors Go: `Unmarshal(data, &v)`. The destination may be
+// any `T: FromValue` — `json::Value` for the dynamic case, or a typed
+// struct produced by `#[goish::reflect]`. The macro emits a tag-driven
+// `FromValue` impl that walks the parsed `Value::Object` and assigns
+// fields by `Tag.Get("json")` (falling back to the field name).
 
-pub fn Unmarshal(data: &[byte]) -> (Value, error) {
+/// `json.Unmarshal(data, &v)` — typed unmarshal. The destination type
+/// chooses how the parsed JSON is interpreted.
+pub fn Unmarshal<T: FromValue>(data: &[byte], dest: &mut T) -> error {
+    let (raw, err) = parse_to_value(data);
+    if err != nil {
+        return err;
+    }
+    let (v, err) = T::from_value(&raw);
+    if err != nil {
+        return err;
+    }
+    *dest = v;
+    nil
+}
+
+/// Internal: parse bytes into a dynamic `Value`. Used by `Unmarshal`
+/// and by `Decoder.Decode`. Mirrors Go's package-private parsing path.
+fn parse_to_value(data: &[byte]) -> (Value, error) {
     let mut p = Parser { data, pos: 0 };
     p.skip_ws();
     let (v, err) = p.parse_value();
@@ -948,6 +1137,6 @@ impl<R: io::Reader> Decoder<R> {
                 break;
             }
         }
-        Unmarshal(&self.buf)
+        parse_to_value(&self.buf)
     }
 }

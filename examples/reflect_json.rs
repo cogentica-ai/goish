@@ -136,6 +136,56 @@ fn main() {
         check(got == r#"{"k":"v","n":3.5}"#, b"reflect-json: Value path\n");
     }
 
+    // ─── Unmarshal: tag-driven into a typed struct ───────────────────
+    {
+        let mut p = Person { Name: string::new(), Age: 0, Hidden: 0 };
+        let err = json::Unmarshal(br#"{"name":"alice","age":30}"#, &mut p);
+        check(err == goish::nil, b"reflect-json: unmarshal err\n");
+        check(p.Name == "alice", b"reflect-json: unmarshal Name\n");
+        check(p.Age == 30, b"reflect-json: unmarshal Age\n");
+    }
+
+    // ─── Unmarshal: missing fields stay at zero ──────────────────────
+    {
+        let mut p = Person { Name: string::new(), Age: 0, Hidden: 0 };
+        let err = json::Unmarshal(br#"{"name":"bob"}"#, &mut p);
+        check(err == goish::nil, b"reflect-json: missing-field err\n");
+        check(p.Name == "bob", b"reflect-json: missing-field Name\n");
+        check(p.Age == 0, b"reflect-json: missing-field Age zero\n");
+    }
+
+    // ─── Unmarshal: "-" tag drops fields on input too ────────────────
+    {
+        let mut p = Person { Name: string::new(), Age: 0, Hidden: 0 };
+        let err = json::Unmarshal(br#"{"name":"x","Hidden":99}"#, &mut p);
+        check(err == goish::nil, b"reflect-json: dash err\n");
+        // Hidden has json:"-" — must NOT be populated.
+        check(p.Hidden == 0, b"reflect-json: dash Hidden zero\n");
+    }
+
+    // ─── Unmarshal: nested slice<string> field ───────────────────────
+    {
+        let mut bag = Bag { Items: goish::slice!([]string{}), Count: 0 };
+        let err = json::Unmarshal(
+            br#"{"items":["x","y","z"],"count":3}"#,
+            &mut bag,
+        );
+        check(err == goish::nil, b"reflect-json: bag err\n");
+        check(bag.Count == 3, b"reflect-json: bag Count\n");
+        check(bag.Items.Len() == 3, b"reflect-json: bag Items len\n");
+        check(bag.Items[0] == "x", b"reflect-json: bag Items[0]\n");
+    }
+
+    // ─── Unmarshal: round-trip via dynamic Value (FromValue identity) ─
+    {
+        let mut v = json::Value::Null;
+        let err = json::Unmarshal(br#"{"a":1,"b":[2,3]}"#, &mut v);
+        check(err == goish::nil, b"reflect-json: dynamic err\n");
+        let (b, _) = json::Marshal(&v);
+        let got = string::from_bytes(&b.__into_vec());
+        check(got == r#"{"a":1,"b":[2,3]}"#, b"reflect-json: dynamic round-trip\n");
+    }
+
     const OK: &[u8] = b"reflect-json: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());
 }

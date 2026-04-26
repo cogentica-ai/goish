@@ -22,53 +22,53 @@ fn check(cond: bool, msg: &[u8]) {
 fn main() {
     // ─── Unmarshal — primitives ───────────────────────────────────────
 
-    let (v, err) = json::Unmarshal(b"null");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"null", &mut v);
     check(err == nil && v.IsNull(), b"json: null wrong\n");
 
-    let (v, err) = json::Unmarshal(b"true");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"true", &mut v);
     check(err == nil && v.AsBool() == Some(true), b"json: true wrong\n");
 
-    let (v, err) = json::Unmarshal(b"false");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"false", &mut v);
     check(err == nil && v.AsBool() == Some(false), b"json: false wrong\n");
 
-    let (v, err) = json::Unmarshal(b"42");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"42", &mut v);
     check(err == nil && v.AsNumber() == Some(42.0), b"json: number int wrong\n");
 
-    let (v, err) = json::Unmarshal(b"-3.14");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"-3.14", &mut v);
     check(err == nil && v.AsNumber() == Some(-3.14), b"json: number neg-float wrong\n");
 
-    let (v, err) = json::Unmarshal(b"1.5e2");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"1.5e2", &mut v);
     check(err == nil && v.AsNumber() == Some(150.0), b"json: number sci wrong\n");
 
     // ─── Unmarshal — strings (with escapes) ──────────────────────────
 
-    let (v, err) = json::Unmarshal(b"\"hi\"");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"\"hi\"", &mut v);
     check(err == nil && v.AsString().unwrap().clone() == "hi", b"json: string wrong\n");
 
-    let (v, err) = json::Unmarshal(b"\"a\\nb\"");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"\"a\\nb\"", &mut v);
     check(err == nil && v.AsString().unwrap().clone() == "a\nb", b"json: \\n escape wrong\n");
 
-    let (v, err) = json::Unmarshal(b"\"q\\\"q\"");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"\"q\\\"q\"", &mut v);
     check(err == nil && v.AsString().unwrap().clone() == "q\"q", b"json: \\\" escape wrong\n");
 
-    let (v, err) = json::Unmarshal(b"\"\\u0041\"");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"\"\\u0041\"", &mut v);
     check(err == nil && v.AsString().unwrap().clone() == "A", b"json: \\u escape wrong\n");
 
     // ─── Unmarshal — arrays ──────────────────────────────────────────
 
-    let (v, err) = json::Unmarshal(b"[]");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"[]", &mut v);
     check(err == nil, b"json: empty array err\n");
     let arr = v.AsArray().unwrap();
     check(arr.Len() == 0, b"json: empty array len\n");
 
-    let (v, err) = json::Unmarshal(b"[1, 2, 3]");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"[1, 2, 3]", &mut v);
     check(err == nil, b"json: number array err\n");
     let arr = v.AsArray().unwrap();
     check(arr.Len() == 3, b"json: number array len\n");
     check(arr[0].AsNumber() == Some(1.0), b"json: array[0] wrong\n");
     check(arr[2].AsNumber() == Some(3.0), b"json: array[2] wrong\n");
 
-    let (v, err) = json::Unmarshal(b"[\"a\", true, null]");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"[\"a\", true, null]", &mut v);
     check(err == nil, b"json: mixed array err\n");
     let arr = v.AsArray().unwrap();
     check(arr.Len() == 3, b"json: mixed array len\n");
@@ -78,10 +78,10 @@ fn main() {
 
     // ─── Unmarshal — objects ─────────────────────────────────────────
 
-    let (v, err) = json::Unmarshal(b"{}");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"{}", &mut v);
     check(err == nil && v.AsObject().unwrap().Len() == 0, b"json: empty obj wrong\n");
 
-    let (v, err) = json::Unmarshal(b"{\"name\":\"alice\",\"count\":3}");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"{\"name\":\"alice\",\"count\":3}", &mut v);
     check(err == nil, b"json: obj err\n");
     let obj = v.AsObject().unwrap();
     check(obj.Len() == 2, b"json: obj len wrong\n");
@@ -93,7 +93,7 @@ fn main() {
     // ─── Unmarshal — nested ──────────────────────────────────────────
 
     let nested = b"{\"a\":[1,{\"b\":\"c\"}]}";
-    let (v, err) = json::Unmarshal(nested);
+    let mut v = json::Value::Null; let err = json::Unmarshal(nested, &mut v);
     check(err == nil, b"json: nested err\n");
     let obj = v.AsObject().unwrap();
     let (a, _) = obj.Get(string("a"));
@@ -105,7 +105,7 @@ fn main() {
 
     // ─── Unmarshal — whitespace tolerance ────────────────────────────
 
-    let (v, err) = json::Unmarshal(b"  {  \"k\"  :  42  }  ");
+    let mut v = json::Value::Null; let err = json::Unmarshal(b"  {  \"k\"  :  42  }  ", &mut v);
     check(err == nil, b"json: whitespace err\n");
     let obj = v.AsObject().unwrap();
     let (k, _) = obj.Get(string("k"));
@@ -113,13 +113,13 @@ fn main() {
 
     // ─── Unmarshal — errors ──────────────────────────────────────────
 
-    let (_, err) = json::Unmarshal(b"{");
+    let mut _v = json::Value::Null; let err = json::Unmarshal(b"{", &mut _v);
     check(err != nil, b"json: truncated obj must err\n");
 
-    let (_, err) = json::Unmarshal(b"abc");
+    let mut _v = json::Value::Null; let err = json::Unmarshal(b"abc", &mut _v);
     check(err != nil, b"json: garbage must err\n");
 
-    let (_, err) = json::Unmarshal(b"[1,]");
+    let mut _v = json::Value::Null; let err = json::Unmarshal(b"[1,]", &mut _v);
     check(err != nil, b"json: trailing comma must err\n");
 
     // ─── Marshal — primitives ────────────────────────────────────────
@@ -180,10 +180,10 @@ fn main() {
         b"{\"a\":1,\"b\":[true,null]}",
     ];
     for input in inputs {
-        let (v, err) = json::Unmarshal(*input);
+        let mut v = json::Value::Null; let err = json::Unmarshal(*input, &mut v);
         check(err == nil, b"json: round-trip parse err\n");
         let (out, _) = json::Marshal(&v);
-        let (v2, err) = json::Unmarshal(&out);
+        let mut v2 = json::Value::Null; let err = json::Unmarshal(&out, &mut v2);
         check(err == nil, b"json: round-trip re-parse err\n");
         check(v == v2, b"json: round-trip mismatch\n");
     }
