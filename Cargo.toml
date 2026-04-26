@@ -57,3 +57,7 @@ path = "examples/greet_m9.rs"
 [[example]]
 name = "iolib"
 path = "examples/iolib.rs"
+
+[[example]]
+name = "os"
+path = "examples/os.rs"

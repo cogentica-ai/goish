@@ -34,6 +34,7 @@ pub mod errors;
 pub mod goslice;
 pub mod gostring;
 pub mod io;
+pub mod os;
 pub mod range;
 pub mod runtime;
 pub mod syscall;

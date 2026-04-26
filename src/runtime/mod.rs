@@ -15,6 +15,7 @@
 
 use crate::syscall;
 
+pub mod args;
 mod heap;
 mod mem;
 pub mod spin;
@@ -26,9 +27,9 @@ pub use heap::{alloc, free, realloc};
 ///
 /// `extern "C"` so the asm stub can call us with the C ABI.
 #[no_mangle]
-pub extern "C" fn __goish_rt0(_argc: i32, _argv: *const *const u8) -> ! {
-    // TODO(milestone 2): init_allocator() — mmap the heap.
-    // TODO(milestone 3+): args::set(argc, argv) for os::Args().
+pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
+    // Stash argc/argv so os::Args() can decode them lazily on first use.
+    args::__set(argc, argv);
 
     // Hand off to the user's main. The proc-macro #[goish::main]
     // generates a #[no_mangle] extern "C" fn __goish_main wrapping the
