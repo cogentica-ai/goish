@@ -45,6 +45,7 @@ pub mod slices;
 pub mod strconv;
 pub mod strings;
 pub mod syscall;
+pub mod time;
 pub mod types;
 pub mod unicode;
 

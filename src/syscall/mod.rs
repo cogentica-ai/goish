@@ -21,7 +21,21 @@ pub const SYS_OPEN: usize = 2;
 pub const SYS_CLOSE: usize = 3;
 pub const SYS_MMAP: usize = 9;
 pub const SYS_MUNMAP: usize = 11;
+pub const SYS_NANOSLEEP: usize = 35;
+pub const SYS_CLOCK_GETTIME: usize = 228;
 pub const SYS_EXIT_GROUP: usize = 231;
+
+// ─── clock_gettime clock IDs ───────────────────────────────────────────
+pub const CLOCK_REALTIME: i32 = 0;
+pub const CLOCK_MONOTONIC: i32 = 1;
+
+/// `struct timespec` — matches Linux's two-field representation.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct Timespec {
+    pub tv_sec: i64,
+    pub tv_nsec: i64,
+}
 
 // ─── standard fds ──────────────────────────────────────────────────────
 pub const STDIN: i32 = 0;
@@ -155,4 +169,35 @@ pub fn Mmap(addr: *mut u8, length: usize, prot: i32, flags: i32, fd: i32, offset
 #[allow(non_snake_case)]
 pub fn Munmap(addr: *mut u8, length: usize) -> isize {
     unsafe { syscall3(SYS_MUNMAP, addr as usize, length, 0) }
+}
+
+/// `clock_gettime(2)` — read the value of `clk` into `tp`. Returns 0 on
+/// success or `-errno`.
+#[allow(non_snake_case)]
+pub fn ClockGettime(clk: i32, tp: *mut Timespec) -> isize {
+    unsafe { syscall2(SYS_CLOCK_GETTIME, clk as usize, tp as usize) }
+}
+
+/// `nanosleep(2)` — sleep for the requested duration. `rem` may be null.
+/// Does not retry on `EINTR` for v1; callers needing precise sleep over
+/// signal interruptions should re-call manually.
+#[allow(non_snake_case)]
+pub fn Nanosleep(req: *const Timespec, rem: *mut Timespec) -> isize {
+    unsafe { syscall2(SYS_NANOSLEEP, req as usize, rem as usize) }
+}
+
+/// 2-argument syscall — used by `clock_gettime` / `nanosleep`.
+#[inline]
+pub unsafe fn syscall2(n: usize, a1: usize, a2: usize) -> isize {
+    let ret: isize;
+    asm!(
+        "syscall",
+        inlateout("rax") n => ret,
+        in("rdi") a1,
+        in("rsi") a2,
+        out("rcx") _,
+        out("r11") _,
+        options(nostack, preserves_flags),
+    );
+    ret
 }

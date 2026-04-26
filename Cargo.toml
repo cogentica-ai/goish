@@ -109,3 +109,11 @@ path = "examples/bytestack.rs"
 [[example]]
 name = "bytes_lib_smoke"
 path = "examples/bytes_lib_smoke.rs"
+
+[[example]]
+name = "stopwatch"
+path = "examples/stopwatch.rs"
+
+[[example]]
+name = "time_smoke"
+path = "examples/time_smoke.rs"
