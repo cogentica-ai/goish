@@ -1,11 +1,18 @@
-// strconv — Go's strconv package, ported. M11a subset.
+// strconv — Go's strconv package, ported. M11a + M11b-A.
 //
-// Includes: Atoi, Itoa, ParseInt, ParseUint, FormatInt, FormatUint,
-// AppendInt, AppendUint, ParseBool, FormatBool, AppendBool, NumError
-// (public fields), sentinels ErrSyntax / ErrRange.
+// Includes (M11a — integers / bool):
+//   Atoi, Itoa, ParseInt, ParseUint, FormatInt, FormatUint, AppendInt,
+//   AppendUint, ParseBool, FormatBool, AppendBool, NumError (public
+//   fields), sentinels ErrSyntax / ErrRange.
+//
+// Includes (M11b-A — floats, slow-path port of Go's atof.go / ftoa.go /
+// decimal.go, no Eisel-Lemire / Ryu yet):
+//   ParseFloat, FormatFloat, AppendFloat. Verbs: 'b', 'e', 'E', 'f',
+//   'g', 'G', 'x', 'X' — same as Go.
 //
 // Deferred:
-//   * ParseFloat / FormatFloat / AppendFloat — M11b (Ryu, Eisel-Lemire).
+//   * M11b-B — Ryu fast-path for FormatFloat shortest round-trip.
+//   * M11b-C — Eisel-Lemire fast-path for ParseFloat.
 //   * Quote / Unquote / IsPrint / IsGraphic — M11c (unicode print tables).
 //   * ParseComplex / FormatComplex — no `complex` type yet.
 //
@@ -30,6 +37,13 @@ use crate::goslice::slice;
 use crate::gostring::string;
 use crate::runtime::spin::SpinLock;
 use crate::types::{byte, int, uint};
+
+mod atof;
+mod decimal;
+mod ftoa;
+
+pub use atof::ParseFloat;
+pub use ftoa::{AppendFloat, FormatFloat};
 
 // ─── Constants ────────────────────────────────────────────────────────
 
@@ -213,6 +227,13 @@ fn format_uint_string(mut u: u64, base: int, neg: bool) -> string {
 
 // Internal: write base-10 digits of `n` to the END of `buf` (LSB-first),
 // return the digit count written. Caller reads `buf[buf.len() - n..]`.
+//
+// Re-exposed under `format_int_into_lib` so the `ftoa` submodule can
+// reuse it for `%b` exponent printing.
+pub(crate) fn format_int_into_lib(buf: &mut [u8; 24], n: i64) -> usize {
+    format_int_into(buf, n)
+}
+
 fn format_int_into(buf: &mut [u8; 24], n: int) -> usize {
     let neg = n < 0;
     let mut u = if neg {

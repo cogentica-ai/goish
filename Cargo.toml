@@ -125,3 +125,11 @@ path = "examples/wordcount.rs"
 [[example]]
 name = "map_smoke"
 path = "examples/map_smoke.rs"
+
+[[example]]
+name = "stats"
+path = "examples/stats.rs"
+
+[[example]]
+name = "floats_smoke"
+path = "examples/floats_smoke.rs"

@@ -201,6 +201,45 @@ macro_rules! impl_format_for_unsigned {
 impl_format_for_signed!(i8, i16, i32, i64, isize);
 impl_format_for_unsigned!(u16, u32, u64, usize);
 
+// Floats — route through strconv::FormatFloat. %v defaults to 'g' with
+// shortest round-trip (prec=-1). Width/precision flags from the verb
+// scanner aren't yet honored for floats; FormatFloat takes its own prec.
+impl Format for f64 {
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        let (fmt, prec) = match verb {
+            b'f' | b'F' => (b'f', -1i64),
+            b'e' => (b'e', -1i64),
+            b'E' => (b'E', -1i64),
+            b'g' | b'v' => (b'g', -1i64),
+            b'G' => (b'G', -1i64),
+            b'x' => (b'x', -1i64),
+            b'X' => (b'X', -1i64),
+            b'b' => (b'b', -1i64),
+            _ => (b'g', -1i64),
+        };
+        let s = crate::strconv::FormatFloat(*self, fmt, prec, 64);
+        f.extend(s.as_bytes());
+    }
+}
+
+impl Format for f32 {
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        let (fmt, prec) = match verb {
+            b'f' | b'F' => (b'f', -1i64),
+            b'e' => (b'e', -1i64),
+            b'E' => (b'E', -1i64),
+            b'g' | b'v' => (b'g', -1i64),
+            b'G' => (b'G', -1i64),
+            b'x' => (b'x', -1i64),
+            b'X' => (b'X', -1i64),
+            b'b' => (b'b', -1i64),
+            _ => (b'g', -1i64),
+        };
+        let s = crate::strconv::FormatFloat(*self as f64, fmt, prec, 32);
+        f.extend(s.as_bytes());
+    }
+}
+
 // byte = u8 — special-case so %c renders ASCII char, %d the number.
 impl Format for u8 {
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
