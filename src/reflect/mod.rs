@@ -236,14 +236,16 @@ pub struct StructField {
 
 // ─── Type ─────────────────────────────────────────────────────────────
 
-/// Mirrors `reflect.Type`. v1 surface: Name, Kind, NumField, Field,
-/// FieldByName. The struct is value-typed; `TypeOf` returns it by value
-/// (cheap — just an enum tag, two pointers, one slice fat pointer).
+/// Mirrors `reflect.Type`. The struct is value-typed; `TypeOf` returns
+/// it by value (cheap — a few words). `elem` and `key` carry late-bound
+/// element/key descriptors for Slice / Map / Pointer kinds.
 #[derive(Clone, Copy)]
 pub struct Type {
     kind: Kind,
     name: &'static str,
     fields: &'static [StructField],
+    elem: Option<fn() -> Type>,
+    key: Option<fn() -> Type>,
 }
 
 impl Type {
@@ -254,7 +256,25 @@ impl Type {
         name: &'static str,
         fields: &'static [StructField],
     ) -> Self {
-        Self { kind, name, fields }
+        Self {
+            kind,
+            name,
+            fields,
+            elem: None,
+            key: None,
+        }
+    }
+
+    /// Builder hook for slice/pointer/map element types.
+    #[doc(hidden)]
+    pub const fn __with_elem(self, e: fn() -> Type) -> Self {
+        Self { elem: Some(e), ..self }
+    }
+
+    /// Builder hook for map key types.
+    #[doc(hidden)]
+    pub const fn __with_key(self, k: fn() -> Type) -> Self {
+        Self { key: Some(k), ..self }
     }
 
     /// `Name()` — declared type name, or `""` for unnamed types.
@@ -296,6 +316,113 @@ impl Type {
             },
             false,
         )
+    }
+
+    /// `Elem()` — element type for Slice / Map / Pointer. Panics for
+    /// other kinds, mirroring Go.
+    pub fn Elem(&self) -> Type {
+        match self.elem {
+            Some(f) => f(),
+            None => panic!("reflect: Elem of type that has no element"),
+        }
+    }
+
+    /// `Key()` — key type for Map. Panics for other kinds.
+    pub fn Key(&self) -> Type {
+        match self.key {
+            Some(f) => f(),
+            None => panic!("reflect: Key of non-map type"),
+        }
+    }
+
+    /// `Comparable()` — Go semantics. Primitives + Pointer + (Struct of
+    /// comparables) are comparable; Slice and Map are not.
+    pub fn Comparable(&self) -> bool {
+        match self.kind {
+            Kind::Bool
+            | Kind::Int
+            | Kind::Int8
+            | Kind::Int16
+            | Kind::Int32
+            | Kind::Uint
+            | Kind::Uint8
+            | Kind::Uint16
+            | Kind::Uint32
+            | Kind::Float32
+            | Kind::Float64
+            | Kind::String
+            | Kind::Pointer => true,
+            Kind::Slice | Kind::Map => false,
+            Kind::Struct => self.fields.iter().all(|f| (f.Type)().Comparable()),
+            Kind::Invalid => false,
+        }
+    }
+
+    /// `AssignableTo(u)` — v1 simplification: Kind must match; for named
+    /// types Name must match; for slice/map element & key types must be
+    /// recursively assignable. (Go's full interface-satisfaction logic
+    /// is out of scope until goish gains an interface type.)
+    pub fn AssignableTo(&self, u: &Type) -> bool {
+        if self.kind != u.kind {
+            return false;
+        }
+        if !self.name.is_empty() || !u.name.is_empty() {
+            return self.name == u.name;
+        }
+        match self.kind {
+            Kind::Slice => {
+                if self.elem.is_none() || u.elem.is_none() {
+                    return false;
+                }
+                self.Elem().AssignableTo(&u.Elem())
+            }
+            Kind::Map => {
+                if self.elem.is_none() || u.elem.is_none() || self.key.is_none() || u.key.is_none() {
+                    return false;
+                }
+                self.Key().AssignableTo(&u.Key()) && self.Elem().AssignableTo(&u.Elem())
+            }
+            _ => true,
+        }
+    }
+
+    /// `String()` — readable type name. `[]int`, `map[string]int`,
+    /// `*Person`, `Person`, `int`, etc. Mirrors Go's `Type.String()`.
+    pub fn String(&self) -> string {
+        match self.kind {
+            Kind::Slice => {
+                let mut out: alloc::vec::Vec<u8> = b"[]".to_vec();
+                if let Some(e) = self.elem {
+                    out.extend_from_slice(e().String().as_bytes());
+                }
+                string::__from_vec(out)
+            }
+            Kind::Map => {
+                let mut out: alloc::vec::Vec<u8> = b"map[".to_vec();
+                if let Some(k) = self.key {
+                    out.extend_from_slice(k().String().as_bytes());
+                }
+                out.push(b']');
+                if let Some(e) = self.elem {
+                    out.extend_from_slice(e().String().as_bytes());
+                }
+                string::__from_vec(out)
+            }
+            Kind::Pointer => {
+                let mut out: alloc::vec::Vec<u8> = b"*".to_vec();
+                if let Some(e) = self.elem {
+                    out.extend_from_slice(e().String().as_bytes());
+                }
+                string::__from_vec(out)
+            }
+            _ => {
+                if self.name.is_empty() {
+                    self.kind.String()
+                } else {
+                    string::from_static(self.name)
+                }
+            }
+        }
     }
 }
 
@@ -373,8 +500,12 @@ impl Value {
     pub fn Type(&self) -> Type {
         match self {
             Value::Struct { ty, .. } => *ty,
-            Value::Slice { .. } => Type::__new(Kind::Slice, "", &[]),
-            Value::Map { .. } => Type::__new(Kind::Map, "", &[]),
+            Value::Slice { elem_type, .. } => {
+                Type::__new(Kind::Slice, "", &[]).__with_elem(*elem_type)
+            }
+            Value::Map { key_type, value_type, .. } => Type::__new(Kind::Map, "", &[])
+                .__with_key(*key_type)
+                .__with_elem(*value_type),
             _ => Type::__new(self.Kind(), self.Kind().__static_name(), &[]),
         }
     }
@@ -464,6 +595,78 @@ impl Value {
             Value::Map { entries, .. } => entries.len() as int,
             _ => panic!("reflect.Value.Len of non-slice/string/map"),
         }
+    }
+
+    /// `Cap()` — capacity for slice. Goish slices are deep-cloned and
+    /// don't track capacity separately from length, so `Cap == Len`.
+    /// Panics for non-slice (matches Go for non-Array/Chan/Slice).
+    pub fn Cap(&self) -> int {
+        match self {
+            Value::Slice { items, .. } => items.len() as int,
+            _ => panic!("reflect.Value.Cap of non-slice"),
+        }
+    }
+
+    /// `IsNil()` — Go semantics for nil-able kinds:
+    ///   * Pointer: inner is `Value::Invalid`
+    ///   * Slice / Map: always `false` in goish v1 (we don't track nil
+    ///     vs empty distinctly; an empty slice is non-nil-empty)
+    ///   * Other kinds: panic
+    pub fn IsNil(&self) -> bool {
+        match self {
+            Value::Slice { .. } => false,
+            Value::Map { .. } => false,
+            Value::Pointer(inner) => matches!(**inner, Value::Invalid),
+            _ => panic!("reflect.Value.IsNil: type does not allow nil"),
+        }
+    }
+
+    /// `Bytes()` — convert a `Value::Slice` whose element kind is
+    /// `Uint8` into a `slice<byte>`. Panics otherwise.
+    pub fn Bytes(&self) -> slice<byte> {
+        match self {
+            Value::Slice { items, elem_type } if elem_type().Kind() == Kind::Uint8 => {
+                let mut out: Vec<byte> = Vec::with_capacity(items.len());
+                for item in items {
+                    out.push(match item {
+                        Value::Uint8(b) => *b,
+                        _ => 0,
+                    });
+                }
+                slice::__from_vec(out)
+            }
+            _ => panic!("reflect.Value.Bytes of non-byte slice"),
+        }
+    }
+
+    /// `Slice(low, high)` — sub-slice via reflect. Mirrors Go's
+    /// `Value.Slice` for slice/string. Panics for other kinds.
+    pub fn Slice(&self, low: int, high: int) -> Value {
+        match self {
+            Value::Slice { elem_type, items } => {
+                let lo = low as usize;
+                let hi = high as usize;
+                let sub = items[lo..hi].to_vec();
+                Value::Slice {
+                    elem_type: *elem_type,
+                    items: sub,
+                }
+            }
+            Value::String(s) => {
+                let bytes = s.as_bytes();
+                let lo = low as usize;
+                let hi = high as usize;
+                Value::String(string::from_bytes(&bytes[lo..hi]))
+            }
+            _ => panic!("reflect.Value.Slice of non-slice/string"),
+        }
+    }
+
+    /// `Slice3(low, high, max)` — explicit-cap variant. Goish slices are
+    /// deep-cloned, so the cap argument is ignored; semantically
+    /// identical to `Slice(low, high)`.
+    pub fn Slice3(&self, low: int, high: int, _max: int) -> Value {
+        self.Slice(low, high)
     }
 
     /// `MapKeys()` — keys in stable (sorted) order. Panics if not Map.
@@ -883,7 +1086,7 @@ impl Reflect for string {
 
 impl<T: Reflect + Clone> Reflect for slice<T> {
     fn __reflect_type() -> Type {
-        Type::__new(Kind::Slice, "", &[])
+        Type::__new(Kind::Slice, "", &[]).__with_elem(<T as Reflect>::__reflect_type)
     }
     fn __reflect_value(&self) -> Value {
         let mut items: Vec<Value> = Vec::with_capacity(self.Len() as usize);
@@ -912,6 +1115,8 @@ where
 {
     fn __reflect_type() -> Type {
         Type::__new(Kind::Map, "", &[])
+            .__with_key(<K as Reflect>::__reflect_type)
+            .__with_elem(<V as Reflect>::__reflect_type)
     }
     fn __reflect_value(&self) -> Value {
         let mut entries: Vec<(Value, Value)> = Vec::with_capacity(self.Len() as usize);

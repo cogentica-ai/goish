@@ -173,3 +173,7 @@ path = "examples/reflect_nested.rs"
 [[example]]
 name = "reflect_collections"
 path = "examples/reflect_collections.rs"
+
+[[example]]
+name = "reflect_tier1"
+path = "examples/reflect_tier1.rs"
