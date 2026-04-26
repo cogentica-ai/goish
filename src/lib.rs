@@ -38,6 +38,7 @@ pub mod encoding;
 pub mod errors;
 pub mod flag;
 pub mod fmt;
+pub mod gochan;
 pub mod gomap;
 pub mod goslice;
 pub mod gostring;

@@ -62,6 +62,10 @@ macro_rules! slice {
 /// hashmap port.
 #[macro_export]
 macro_rules! make {
+    // make!(chan T) — unbuffered channel.
+    (chan $t:ty) => {
+        $crate::gochan::chan::<$t>::new_unbuffered()
+    };
     // make!(map[K]V) — empty map (V: Default required at construction).
     (map[$kt:ty]$vt:ty) => {
         $crate::gomap::map::<$kt, $vt>::new()
@@ -182,5 +186,18 @@ macro_rules! delete {
 macro_rules! go {
     ($closure:expr) => {{
         $crate::runtime::sched::newproc($crate::__macro_alloc::Box::new($closure));
+    }};
+}
+
+// ─── close!(ch) — close a channel ────────────────────────────────────
+
+/// `close!(ch)` — Go's `close(ch)`. Closes the channel: parked
+/// receivers wake with `(zero, false)`, parked senders panic, and
+/// future operations behave per Go's semantics. Panics if `ch` is
+/// already closed.
+#[macro_export]
+macro_rules! close {
+    ($ch:expr) => {{
+        ($ch).Close()
     }};
 }
