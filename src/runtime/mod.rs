@@ -32,6 +32,11 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // Stash argc/argv so os::Args() can decode them lazily on first use.
     args::__set(argc, argv);
 
+    // Bring mheap online before user code runs. Until this finishes,
+    // every alloc routes through dlmalloc (MHEAP_READY = false). After
+    // this, large allocs route through mheap.
+    unsafe { heap::mheap_init() }
+
     // Hand off to the user's main. The proc-macro #[goish::main]
     // generates a #[no_mangle] extern "C" fn __goish_main wrapping the
     // user's body, so the linker resolves this `extern` block to it.

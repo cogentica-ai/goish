@@ -1,25 +1,55 @@
-// runtime::heap — leaf allocator: dlmalloc-rs over our mmap.
+// runtime::heap — global allocator routing.
 //
-// `alloc`, `realloc`, `free` are the Go-shaped public API (re-exported
-// from `runtime`). They delegate to `dlmalloc::Dlmalloc<MmapAllocator>`.
-// dlmalloc is a pure-Rust port of Doug Lea's malloc, used by Rust's
-// own wasm target in production. We supply our own `Allocator` impl
-// backed by `syscall::Mmap` so libc is never touched.
+// Two tiers cooperate:
 //
-// `GoishAllocator` (registered as `#[global_allocator]`) routes
-// `Vec`/`String`/`Box` allocations through the same heap.
+//   - **mheap** (Go-style page allocator from runtime::mheap) handles
+//     allocations larger than 32 KiB or with alignment requirements
+//     beyond what dlmalloc satisfies cheaply. It hands out
+//     page-aligned spans of contiguous pages drawn from a fixed-size
+//     mmap'd arena.
 //
-// Concurrency: single SpinLock around the dlmalloc state. Single-
-// threaded today, so contention is zero. When goroutines arrive, the
-// per-thread tcache (phase 2d) will absorb the hot path and only cold
-// fills will touch this lock.
+//   - **dlmalloc-rs** continues to serve the small path. mcentral
+//     (2c) and mcache (2d) will subsume this; for 2b'-γ dlmalloc
+//     stays put.
+//
+// The threshold mirrors Go's `gc.MaxSmallSize = 32768`. The
+// `GlobalAlloc` impl and the lower-level `alloc/free/realloc` API
+// share the same routing so every allocation path agrees on which
+// tier owns a given block.
+//
+// Bootstrap (chicken-and-egg): `PageAlloc::new` itself allocates the
+// summary `Vec`s through the global allocator. If routing checked
+// the size and tried to use mheap before mheap exists, init would
+// recurse. We avoid this with `MHEAP_READY: AtomicBool`. Set to
+// `false` at startup so every alloc routes to dlmalloc until
+// `mheap_init` finishes; flipped to `true` at the very end of init.
+//
+// Concurrency: single SpinLock around mheap state. Single-threaded
+// today; goroutines/Ms will arrive in M16/M17. Per-P mcache (2d)
+// will absorb 99% of small allocations without ever touching this
+// lock.
 
+use crate::runtime::mheap::consts::{PAGE_SIZE, PALLOC_CHUNK_BYTES};
+use crate::runtime::mheap::page_alloc::{PageAlloc, ALLOC_FAILED};
 use crate::runtime::spin::SpinLock;
 use crate::syscall;
 use core::alloc::{GlobalAlloc, Layout};
+use core::sync::atomic::{AtomicBool, Ordering};
 use dlmalloc::{Allocator, Dlmalloc};
 
-// ─── Allocator (dlmalloc's "system" trait) backed by mmap ──────────────
+// ─── Tunables ──────────────────────────────────────────────────────────
+
+/// Allocations strictly above this threshold (in bytes) go through
+/// mheap. Below or equal go through dlmalloc. Mirrors Go's
+/// `gc.MaxSmallSize` (`internal/runtime/gc/sizeclasses.go:86`).
+pub const LARGE_THRESHOLD: usize = 32 * 1024;
+
+/// Initial mheap arena size. 64 MiB = 16 chunks. Linux demand-paging
+/// means RSS is bounded by actual usage, so an oversized initial
+/// arena costs only address space (cheap).
+const INITIAL_ARENA_CHUNKS: usize = 16;
+
+// ─── dlmalloc leaf allocator (small path) ──────────────────────────────
 
 struct MmapAllocator;
 
@@ -40,8 +70,6 @@ unsafe impl Allocator for MmapAllocator {
         }
     }
 
-    // We don't expose mremap (no SYS_MREMAP wrapper yet); dlmalloc will
-    // fall back to alloc+copy+free, which is fine.
     fn remap(&self, _ptr: *mut u8, _oldsize: usize, _newsize: usize, _can_move: bool) -> *mut u8 {
         core::ptr::null_mut()
     }
@@ -59,7 +87,6 @@ unsafe impl Allocator for MmapAllocator {
     }
 
     fn allocates_zeros(&self) -> bool {
-        // mmap'd anonymous pages are zero-filled by the kernel.
         true
     }
 
@@ -68,55 +95,193 @@ unsafe impl Allocator for MmapAllocator {
     }
 }
 
-// ─── Heap singleton ────────────────────────────────────────────────────
-
-static HEAP: SpinLock<Dlmalloc<MmapAllocator>> =
+static SMALL_HEAP: SpinLock<Dlmalloc<MmapAllocator>> =
     SpinLock::new(Dlmalloc::new_with_allocator(MmapAllocator));
+
+// ─── mheap (large path) ───────────────────────────────────────────────
+
+static MHEAP_READY: AtomicBool = AtomicBool::new(false);
+static MHEAP: SpinLock<Option<PageAlloc>> = SpinLock::new(None);
+
+/// Map a chunk-aligned arena of `n_chunks` chunks.
+unsafe fn map_arena(n_chunks: usize) -> usize {
+    // Over-reserve by one chunk so we can always trim down to a
+    // chunk-aligned base.
+    let total = n_chunks * PALLOC_CHUNK_BYTES + PALLOC_CHUNK_BYTES;
+    let raw = syscall::Mmap(
+        core::ptr::null_mut(),
+        total,
+        syscall::PROT_READ | syscall::PROT_WRITE,
+        syscall::MAP_PRIVATE | syscall::MAP_ANONYMOUS,
+        -1,
+        0,
+    );
+    if raw == syscall::MAP_FAILED {
+        // OOM during init — fatal.
+        const MSG: &[u8] = b"goish: mheap: mmap arena failed\n";
+        syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+        syscall::Exit(2);
+    }
+    let base = raw as usize;
+    (base + PALLOC_CHUNK_BYTES - 1) & !(PALLOC_CHUNK_BYTES - 1)
+}
+
+/// One-time mheap initialization. Called from `__goish_rt0` *before*
+/// user main runs. Idempotent — calling twice is a no-op.
+///
+/// During this function, every allocation routes to dlmalloc because
+/// `MHEAP_READY` is still `false`; that breaks the recursion that
+/// would otherwise occur when `PageAlloc::new` allocates its summary
+/// Vec backing.
+pub unsafe fn mheap_init() {
+    if MHEAP_READY.load(Ordering::Acquire) {
+        return;
+    }
+    let arena_base = map_arena(INITIAL_ARENA_CHUNKS);
+    let pages = PageAlloc::new(arena_base, INITIAL_ARENA_CHUNKS);
+    *MHEAP.lock() = Some(pages);
+    MHEAP_READY.store(true, Ordering::Release);
+}
+
+/// Round `size` (in bytes) up to whole pages.
+#[inline]
+fn pages_for(size: usize) -> usize {
+    (size + PAGE_SIZE - 1) / PAGE_SIZE
+}
+
+/// Allocate via mheap. Returns null on OOM.
+unsafe fn mheap_alloc(layout: Layout) -> *mut u8 {
+    let bytes = layout.size().max(layout.align());
+    let npages = pages_for(bytes);
+    let mut g = MHEAP.lock();
+    let h = g.as_mut().unwrap_or_else(|| {
+        const MSG: &[u8] = b"goish: mheap: alloc before init\n";
+        syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+        syscall::Exit(2);
+    });
+    let addr = h.alloc(npages);
+    if addr == ALLOC_FAILED {
+        // Out of arena. 2b'-γ panics; later phases will grow the arena.
+        const MSG: &[u8] = b"goish: mheap: arena exhausted\n";
+        syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+        syscall::Exit(2);
+    }
+    addr as *mut u8
+}
+
+/// Free a span previously returned by `mheap_alloc`.
+unsafe fn mheap_free(ptr: *mut u8, layout: Layout) {
+    let bytes = layout.size().max(layout.align());
+    let npages = pages_for(bytes);
+    let mut g = MHEAP.lock();
+    if let Some(h) = g.as_mut() {
+        h.free(ptr as usize, npages);
+    }
+}
+
+/// True if `layout` should be served by mheap.
+#[inline]
+fn route_to_mheap(layout: Layout) -> bool {
+    MHEAP_READY.load(Ordering::Acquire) && layout.size() > LARGE_THRESHOLD
+}
 
 // ─── Go-shaped public API ──────────────────────────────────────────────
 
 /// Allocate `size` bytes at `align` alignment. Returns a null pointer
 /// on failure. `align` must be a power of two.
 pub unsafe fn alloc(size: usize, align: usize) -> *mut u8 {
-    HEAP.lock().malloc(size, align)
+    let layout = Layout::from_size_align_unchecked(size, align);
+    if route_to_mheap(layout) {
+        mheap_alloc(layout)
+    } else {
+        SMALL_HEAP.lock().malloc(size, align)
+    }
 }
 
 /// Reallocate, preserving the first `min(old_size, new_size)` bytes.
-/// dlmalloc may grow in place when possible; otherwise it allocates +
-/// copies + frees the old block.
+/// Cross-tier resizes (small→large or large→small) go through
+/// alloc + memcpy + free.
 pub unsafe fn realloc(ptr: *mut u8, old_size: usize, new_size: usize, align: usize) -> *mut u8 {
-    HEAP.lock().realloc(ptr, old_size, align, new_size)
+    let old = Layout::from_size_align_unchecked(old_size, align);
+    let new = Layout::from_size_align_unchecked(new_size, align);
+    let old_large = route_to_mheap(old);
+    let new_large = route_to_mheap(new);
+    if old_large == new_large {
+        // Same-tier resize.
+        if old_large {
+            // Both via mheap — alloc+copy+free for now (in-place
+            // grow within a span lands in 2c with size classes).
+            let dst = mheap_alloc(new);
+            if !dst.is_null() {
+                let n = old_size.min(new_size);
+                core::ptr::copy_nonoverlapping(ptr, dst, n);
+                mheap_free(ptr, old);
+            }
+            dst
+        } else {
+            // Both via dlmalloc.
+            SMALL_HEAP.lock().realloc(ptr, old_size, align, new_size)
+        }
+    } else {
+        // Cross-tier: alloc in new tier, copy, free in old tier.
+        let dst = if new_large {
+            mheap_alloc(new)
+        } else {
+            SMALL_HEAP.lock().malloc(new_size, align)
+        };
+        if !dst.is_null() {
+            let n = old_size.min(new_size);
+            core::ptr::copy_nonoverlapping(ptr, dst, n);
+            if old_large {
+                mheap_free(ptr, old);
+            } else {
+                SMALL_HEAP.lock().free(ptr, old_size, align);
+            }
+        }
+        dst
+    }
 }
 
-/// Free a previously allocated block. `size` and `align` must match the
-/// values originally passed to `alloc`/`realloc`.
+/// Free a previously allocated block. `size` must match the original
+/// allocation.
 pub unsafe fn free(ptr: *mut u8, size: usize) {
-    // Alignment isn't tracked by callers; pass dlmalloc's default
-    // alignment, which is the same value `malloc(size, 1)` would store.
-    HEAP.lock().free(ptr, size, 8)
+    let layout = Layout::from_size_align_unchecked(size, 8);
+    if route_to_mheap(layout) {
+        mheap_free(ptr, layout);
+    } else {
+        SMALL_HEAP.lock().free(ptr, size, 8);
+    }
 }
 
 // ─── #[global_allocator] adapter ───────────────────────────────────────
-//
-// Lets `extern crate alloc;` consumers (Vec, Box, String) draw from the
-// same heap. Without this, `Vec::push` either fails to link or — on
-// std builds — would call libc malloc, which is exactly what we are
-// avoiding.
 
 struct GoishAllocator;
 
 unsafe impl GlobalAlloc for GoishAllocator {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        HEAP.lock().malloc(layout.size(), layout.align())
+        if route_to_mheap(layout) {
+            mheap_alloc(layout)
+        } else {
+            SMALL_HEAP.lock().malloc(layout.size(), layout.align())
+        }
     }
+
     #[inline]
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        HEAP.lock().free(ptr, layout.size(), layout.align())
+        if route_to_mheap(layout) {
+            mheap_free(ptr, layout);
+        } else {
+            SMALL_HEAP
+                .lock()
+                .free(ptr, layout.size(), layout.align());
+        }
     }
+
     #[inline]
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        HEAP.lock().realloc(ptr, layout.size(), layout.align(), new_size)
+        // Delegate to the size-passing realloc above.
+        realloc(ptr, layout.size(), new_size, layout.align())
     }
 }
 
