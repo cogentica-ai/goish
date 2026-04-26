@@ -657,3 +657,380 @@ impl io::Writer for Builder {
         (n, nil)
     }
 }
+
+// ─── M15: completeness pass ───────────────────────────────────────────
+
+/// `strings.Cut(s, sep)` — split on first `sep`. Returns
+/// `(before, after, found)`. Mirrors Go 1.18+.
+pub fn Cut<S1: Into<string>, S2: Into<string>>(s: S1, sep: S2) -> (string, string, bool) {
+    let s = s.into();
+    let sep = sep.into();
+    let i = Index(s.clone(), sep.clone());
+    if i < 0 {
+        return (s, string::new(), false);
+    }
+    let before = sub(&s, 0, i);
+    let after = sub(&s, i + sep.Len(), s.Len());
+    (before, after, true)
+}
+
+/// `strings.CutPrefix(s, prefix)` — strip `prefix`, report whether it
+/// was present. Returns `(after, found)`.
+pub fn CutPrefix<S1: Into<string>, S2: Into<string>>(
+    s: S1,
+    prefix: S2,
+) -> (string, bool) {
+    let s = s.into();
+    let prefix = prefix.into();
+    if HasPrefix(s.clone(), prefix.clone()) {
+        return (sub(&s, prefix.Len(), s.Len()), true);
+    }
+    (s, false)
+}
+
+/// `strings.CutSuffix(s, suffix)` — strip `suffix`. Returns `(before, found)`.
+pub fn CutSuffix<S1: Into<string>, S2: Into<string>>(
+    s: S1,
+    suffix: S2,
+) -> (string, bool) {
+    let s = s.into();
+    let suffix = suffix.into();
+    if HasSuffix(s.clone(), suffix.clone()) {
+        return (sub(&s, 0, s.Len() - suffix.Len()), true);
+    }
+    (s, false)
+}
+
+/// `strings.Compare(a, b)` — `-1`/`0`/`+1`. Goish provides `==` and
+/// `<`/`>` on `string` directly; this exists for API parity with Go.
+pub fn Compare<S1: Into<string>, S2: Into<string>>(a: S1, b: S2) -> int {
+    let a = a.into();
+    let b = b.into();
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    if ab < bb {
+        -1
+    } else if ab > bb {
+        1
+    } else {
+        0
+    }
+}
+
+/// `strings.Clone(s)` — fresh, independent copy. For our `Arc<[u8]>`
+/// backing this forces a non-shared allocation.
+pub fn Clone<S: Into<string>>(s: S) -> string {
+    let s = s.into();
+    string::from_bytes(s.as_bytes())
+}
+
+/// `strings.ContainsAny(s, chars)` — true if any byte of `chars`
+/// appears in `s`. ASCII byte-wise scan in v1.
+pub fn ContainsAny<S1: Into<string>, S2: Into<string>>(s: S1, chars: S2) -> bool {
+    IndexAny(s, chars) >= 0
+}
+
+/// `strings.ContainsFunc(s, f)` — true if any rune in `s` satisfies `f`.
+pub fn ContainsFunc<S: Into<string>, F: Fn(rune) -> bool>(s: S, f: F) -> bool {
+    IndexFunc(s, f) >= 0
+}
+
+/// `strings.IndexAny(s, chars)` — index of first byte in `s` that
+/// matches any byte in `chars`, or `-1`.
+pub fn IndexAny<S1: Into<string>, S2: Into<string>>(s: S1, chars: S2) -> int {
+    let s = s.into();
+    let chars = chars.into();
+    let cb = chars.as_bytes();
+    if cb.is_empty() {
+        return -1;
+    }
+    for (i, &b) in s.as_bytes().iter().enumerate() {
+        for &c in cb {
+            if b == c {
+                return i as int;
+            }
+        }
+    }
+    -1
+}
+
+/// `strings.LastIndexAny(s, chars)` — last-occurrence variant.
+pub fn LastIndexAny<S1: Into<string>, S2: Into<string>>(s: S1, chars: S2) -> int {
+    let s = s.into();
+    let chars = chars.into();
+    let cb = chars.as_bytes();
+    if cb.is_empty() {
+        return -1;
+    }
+    let sb = s.as_bytes();
+    let mut i = sb.len();
+    while i > 0 {
+        i -= 1;
+        for &c in cb {
+            if sb[i] == c {
+                return i as int;
+            }
+        }
+    }
+    -1
+}
+
+/// `strings.LastIndexByte(s, c)` — last index of byte `c`, or `-1`.
+pub fn LastIndexByte<S: Into<string>>(s: S, c: byte) -> int {
+    let s = s.into();
+    let sb = s.as_bytes();
+    let mut i = sb.len();
+    while i > 0 {
+        i -= 1;
+        if sb[i] == c {
+            return i as int;
+        }
+    }
+    -1
+}
+
+/// `strings.IndexFunc(s, f)` — index (in bytes) of first rune in `s`
+/// satisfying `f`, or `-1`.
+pub fn IndexFunc<S: Into<string>, F: Fn(rune) -> bool>(s: S, f: F) -> int {
+    let s = s.into();
+    let mut i = 0;
+    let bytes = s.as_bytes();
+    while i < bytes.len() {
+        let (r, w) = utf8::DecodeRune(&bytes[i..]);
+        if f(r) {
+            return i as int;
+        }
+        if w == 0 {
+            break;
+        }
+        i += w as usize;
+    }
+    -1
+}
+
+/// `strings.LastIndexFunc(s, f)` — index of last rune satisfying `f`.
+pub fn LastIndexFunc<S: Into<string>, F: Fn(rune) -> bool>(s: S, f: F) -> int {
+    let s = s.into();
+    let bytes = s.as_bytes();
+    let mut i = bytes.len();
+    while i > 0 {
+        let (r, w) = utf8::DecodeLastRune(&bytes[..i]);
+        if w == 0 {
+            return -1;
+        }
+        i -= w as usize;
+        if f(r) {
+            return i as int;
+        }
+    }
+    -1
+}
+
+/// `strings.Fields(s)` — split on runs of `unicode.IsSpace`. Empty
+/// elements between consecutive whitespace are dropped.
+pub fn Fields<S: Into<string>>(s: S) -> slice<string> {
+    FieldsFunc(s, crate::unicode::IsSpace)
+}
+
+/// `strings.FieldsFunc(s, f)` — split at every run of code points
+/// satisfying `f`. Empty fields are dropped.
+pub fn FieldsFunc<S: Into<string>, F: Fn(rune) -> bool>(s: S, f: F) -> slice<string> {
+    let s = s.into();
+    let bytes = s.as_bytes();
+    let mut out: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+    let mut start: Option<usize> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        let (r, w) = utf8::DecodeRune(&bytes[i..]);
+        let w = w as usize;
+        if f(r) {
+            if let Some(s_idx) = start {
+                out.push(string::from_bytes(&bytes[s_idx..i]));
+                start = None;
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+        if w == 0 {
+            break;
+        }
+        i += w;
+    }
+    if let Some(s_idx) = start {
+        out.push(string::from_bytes(&bytes[s_idx..]));
+    }
+    slice::__from_vec(out)
+}
+
+/// `strings.TrimFunc(s, f)` — strip leading + trailing runes satisfying `f`.
+pub fn TrimFunc<S: Into<string>, F: Fn(rune) -> bool + Copy>(s: S, f: F) -> string {
+    TrimRightFunc(TrimLeftFunc(s, f), f)
+}
+
+/// `strings.TrimLeftFunc(s, f)` — strip leading runes satisfying `f`.
+pub fn TrimLeftFunc<S: Into<string>, F: Fn(rune) -> bool>(s: S, f: F) -> string {
+    let s = s.into();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let (r, w) = utf8::DecodeRune(&bytes[i..]);
+        if !f(r) {
+            break;
+        }
+        if w == 0 {
+            break;
+        }
+        i += w as usize;
+    }
+    string::from_bytes(&bytes[i..])
+}
+
+/// `strings.TrimRightFunc(s, f)` — strip trailing runes satisfying `f`.
+pub fn TrimRightFunc<S: Into<string>, F: Fn(rune) -> bool>(s: S, f: F) -> string {
+    let s = s.into();
+    let bytes = s.as_bytes();
+    let mut end = bytes.len();
+    while end > 0 {
+        let (r, w) = utf8::DecodeLastRune(&bytes[..end]);
+        if w == 0 || !f(r) {
+            break;
+        }
+        end -= w as usize;
+    }
+    string::from_bytes(&bytes[..end])
+}
+
+/// `strings.Map(mapping, s)` — per-rune transform. Negative-rune
+/// outputs drop the character (matches Go).
+pub fn Map<S: Into<string>, F: Fn(rune) -> rune>(mapping: F, s: S) -> string {
+    let s = s.into();
+    let bytes = s.as_bytes();
+    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    let mut tmp = [0u8; 4];
+    while i < bytes.len() {
+        let (r, w) = utf8::DecodeRune(&bytes[i..]);
+        let nr = mapping(r);
+        if nr >= 0 {
+            let n = utf8::EncodeRune(&mut tmp, nr) as usize;
+            out.extend_from_slice(&tmp[..n]);
+        }
+        if w == 0 {
+            break;
+        }
+        i += w as usize;
+    }
+    string::__from_vec(out)
+}
+
+/// `strings.SplitAfter(s, sep)` — split *retaining* the separator at
+/// the end of each segment.
+pub fn SplitAfter<S1: Into<string>, S2: Into<string>>(s: S1, sep: S2) -> slice<string> {
+    SplitAfterN(s, sep, -1)
+}
+
+/// `strings.SplitAfterN(s, sep, n)` — count-bounded `SplitAfter`.
+pub fn SplitAfterN<S1: Into<string>, S2: Into<string>>(
+    s: S1,
+    sep: S2,
+    n: int,
+) -> slice<string> {
+    let s = s.into();
+    let sep = sep.into();
+    let mut out: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+    if sep.Len() == 0 {
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let (_, w) = utf8::DecodeRune(&bytes[i..]);
+            if w == 0 {
+                break;
+            }
+            let w = w as usize;
+            out.push(string::from_bytes(&bytes[i..i + w]));
+            i += w;
+            if n > 0 && out.len() as int == n - 1 {
+                if i < bytes.len() {
+                    out.push(string::from_bytes(&bytes[i..]));
+                }
+                return slice::__from_vec(out);
+            }
+        }
+        return slice::__from_vec(out);
+    }
+    let mut start: int = 0;
+    loop {
+        if n > 0 && out.len() as int == n - 1 {
+            break;
+        }
+        let rest = sub(&s, start, s.Len());
+        let i = Index(rest.clone(), sep.clone());
+        if i < 0 {
+            break;
+        }
+        let end = start + i + sep.Len();
+        out.push(sub(&s, start, end));
+        start = end;
+    }
+    if start <= s.Len() {
+        out.push(sub(&s, start, s.Len()));
+    }
+    slice::__from_vec(out)
+}
+
+// Internal helper: substring by [low, high).
+fn sub(s: &string, low: int, high: int) -> string {
+    let bytes = s.as_bytes();
+    string::from_bytes(&bytes[low as usize..high as usize])
+}
+
+// ─── strings.Reader ───────────────────────────────────────────────────
+
+/// `strings.Reader` — `io.Reader` over an immutable string. Mirrors
+/// Go's `strings.Reader` (read-only).
+pub struct Reader {
+    s: string,
+    i: int,
+}
+
+impl Reader {
+    pub fn Len(&self) -> int {
+        if self.i >= self.s.Len() {
+            return 0;
+        }
+        self.s.Len() - self.i
+    }
+
+    pub fn Size(&self) -> int {
+        self.s.Len()
+    }
+
+    pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        if self.i >= self.s.Len() {
+            return (0, io::EOF());
+        }
+        let want = (p.Len() as usize).min((self.s.Len() - self.i) as usize);
+        let bytes = self.s.as_bytes();
+        for k in 0..want {
+            p[k as int] = bytes[self.i as usize + k];
+        }
+        self.i += want as int;
+        (want as int, nil)
+    }
+
+    pub fn Reset<S: Into<string>>(&mut self, s: S) {
+        self.s = s.into();
+        self.i = 0;
+    }
+}
+
+impl io::Reader for Reader {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        Reader::Read(self, p)
+    }
+}
+
+/// `strings.NewReader(s)` — `Reader` over `s`.
+pub fn NewReader<S: Into<string>>(s: S) -> Reader {
+    Reader { s: s.into(), i: 0 }
+}

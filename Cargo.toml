@@ -181,3 +181,7 @@ path = "examples/reflect_tier1.rs"
 [[example]]
 name = "reflect_tier2"
 path = "examples/reflect_tier2.rs"
+
+[[example]]
+name = "strings_completeness"
+path = "examples/strings_completeness.rs"

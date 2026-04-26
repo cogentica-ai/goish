@@ -788,3 +788,311 @@ pub fn NewReader(b: slice<byte>) -> Reader {
         i: 0,
     }
 }
+
+// ─── M15: completeness pass ───────────────────────────────────────────
+
+/// `bytes.Cut(s, sep)` — split on first `sep`. `(before, after, found)`.
+pub fn Cut<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(
+    s: S1,
+    sep: S2,
+) -> (slice<byte>, slice<byte>, bool) {
+    let s = s.into();
+    let sep = sep.into();
+    let i = Index(s.clone(), sep.clone());
+    if i < 0 {
+        return (s, slice::__from_vec(alloc::vec::Vec::new()), false);
+    }
+    let i = i as usize;
+    let sl = sep.Len() as usize;
+    let sb = s.__into_vec();
+    let before = slice::__from_vec(sb[..i].to_vec());
+    let after = slice::__from_vec(sb[i + sl..].to_vec());
+    (before, after, true)
+}
+
+/// `bytes.CutPrefix(s, prefix)` — `(after, found)`.
+pub fn CutPrefix<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(
+    s: S1,
+    prefix: S2,
+) -> (slice<byte>, bool) {
+    let s = s.into();
+    let prefix = prefix.into();
+    if HasPrefix(s.clone(), prefix.clone()) {
+        let pl = prefix.Len() as usize;
+        let sb = s.__into_vec();
+        return (slice::__from_vec(sb[pl..].to_vec()), true);
+    }
+    (s, false)
+}
+
+/// `bytes.CutSuffix(s, suffix)` — `(before, found)`.
+pub fn CutSuffix<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(
+    s: S1,
+    suffix: S2,
+) -> (slice<byte>, bool) {
+    let s = s.into();
+    let suffix = suffix.into();
+    if HasSuffix(s.clone(), suffix.clone()) {
+        let sl = s.Len() as usize - suffix.Len() as usize;
+        let sb = s.__into_vec();
+        return (slice::__from_vec(sb[..sl].to_vec()), true);
+    }
+    (s, false)
+}
+
+/// `bytes.ContainsAny(s, chars)` — true if any byte of `chars` is in `s`.
+pub fn ContainsAny<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, chars: S2) -> bool {
+    IndexAny(s, chars) >= 0
+}
+
+/// `bytes.ContainsFunc(s, f)` — true if any rune in `s` satisfies `f`.
+pub fn ContainsFunc<S: Into<slice<byte>>, F: Fn(rune) -> bool>(s: S, f: F) -> bool {
+    IndexFunc(s, f) >= 0
+}
+
+/// `bytes.IndexAny(s, chars)` — first byte in `s` matching any of `chars`.
+pub fn IndexAny<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, chars: S2) -> int {
+    let s = s.into();
+    let chars = chars.into();
+    if chars.Len() == 0 {
+        return -1;
+    }
+    let sb: &[byte] = &s;
+    let cb: &[byte] = &chars;
+    for (i, b) in sb.iter().enumerate() {
+        for c in cb {
+            if *b == *c {
+                return i as int;
+            }
+        }
+    }
+    -1
+}
+
+/// `bytes.LastIndexAny(s, chars)` — last byte in `s` matching any of `chars`.
+pub fn LastIndexAny<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, chars: S2) -> int {
+    let s = s.into();
+    let chars = chars.into();
+    if chars.Len() == 0 {
+        return -1;
+    }
+    let sb: &[byte] = &s;
+    let cb: &[byte] = &chars;
+    let mut i = sb.len();
+    while i > 0 {
+        i -= 1;
+        for c in cb {
+            if sb[i] == *c {
+                return i as int;
+            }
+        }
+    }
+    -1
+}
+
+/// `bytes.IndexFunc(s, f)` — index of first rune in `s` satisfying `f`.
+pub fn IndexFunc<S: Into<slice<byte>>, F: Fn(rune) -> bool>(s: S, f: F) -> int {
+    let s = s.into();
+    let bytes: alloc::vec::Vec<byte> = s.__into_vec();
+    let mut i = 0;
+    while i < bytes.len() {
+        let (r, w) = utf8::DecodeRune(&bytes[i..]);
+        if f(r) {
+            return i as int;
+        }
+        if w == 0 {
+            break;
+        }
+        i += w as usize;
+    }
+    -1
+}
+
+/// `bytes.LastIndexFunc(s, f)` — index of last rune satisfying `f`.
+pub fn LastIndexFunc<S: Into<slice<byte>>, F: Fn(rune) -> bool>(s: S, f: F) -> int {
+    let s = s.into();
+    let bytes: alloc::vec::Vec<byte> = s.__into_vec();
+    let mut i = bytes.len();
+    while i > 0 {
+        let (r, w) = utf8::DecodeLastRune(&bytes[..i]);
+        if w == 0 {
+            return -1;
+        }
+        i -= w as usize;
+        if f(r) {
+            return i as int;
+        }
+    }
+    -1
+}
+
+/// `bytes.Fields(s)` — split on runs of `unicode.IsSpace`.
+pub fn Fields<S: Into<slice<byte>>>(s: S) -> slice<slice<byte>> {
+    FieldsFunc(s, crate::unicode::IsSpace)
+}
+
+/// `bytes.FieldsFunc(s, f)` — split at every run of code points satisfying `f`.
+pub fn FieldsFunc<S: Into<slice<byte>>, F: Fn(rune) -> bool>(
+    s: S,
+    f: F,
+) -> slice<slice<byte>> {
+    let s = s.into();
+    let bytes: alloc::vec::Vec<byte> = s.__into_vec();
+    let mut out: alloc::vec::Vec<slice<byte>> = alloc::vec::Vec::new();
+    let mut start: Option<usize> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        let (r, w) = utf8::DecodeRune(&bytes[i..]);
+        let w = w as usize;
+        if f(r) {
+            if let Some(s_idx) = start {
+                out.push(slice::__from_vec(bytes[s_idx..i].to_vec()));
+                start = None;
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+        if w == 0 {
+            break;
+        }
+        i += w;
+    }
+    if let Some(s_idx) = start {
+        out.push(slice::__from_vec(bytes[s_idx..].to_vec()));
+    }
+    slice::__from_vec(out)
+}
+
+/// `bytes.TrimFunc(s, f)` — strip leading + trailing runes satisfying `f`.
+pub fn TrimFunc<S: Into<slice<byte>>, F: Fn(rune) -> bool + Copy>(s: S, f: F) -> slice<byte> {
+    TrimRightFunc(TrimLeftFunc(s, f), f)
+}
+
+/// `bytes.TrimLeftFunc(s, f)` — strip leading runes satisfying `f`.
+pub fn TrimLeftFunc<S: Into<slice<byte>>, F: Fn(rune) -> bool>(s: S, f: F) -> slice<byte> {
+    let s = s.into();
+    let bytes: alloc::vec::Vec<byte> = s.__into_vec();
+    let mut i = 0;
+    while i < bytes.len() {
+        let (r, w) = utf8::DecodeRune(&bytes[i..]);
+        if !f(r) {
+            break;
+        }
+        if w == 0 {
+            break;
+        }
+        i += w as usize;
+    }
+    slice::__from_vec(bytes[i..].to_vec())
+}
+
+/// `bytes.TrimRightFunc(s, f)` — strip trailing runes satisfying `f`.
+pub fn TrimRightFunc<S: Into<slice<byte>>, F: Fn(rune) -> bool>(s: S, f: F) -> slice<byte> {
+    let s = s.into();
+    let bytes: alloc::vec::Vec<byte> = s.__into_vec();
+    let mut end = bytes.len();
+    while end > 0 {
+        let (r, w) = utf8::DecodeLastRune(&bytes[..end]);
+        if w == 0 || !f(r) {
+            break;
+        }
+        end -= w as usize;
+    }
+    slice::__from_vec(bytes[..end].to_vec())
+}
+
+/// `bytes.Map(mapping, s)` — per-rune transform; negative-rune drops.
+pub fn Map<S: Into<slice<byte>>, F: Fn(rune) -> rune>(mapping: F, s: S) -> slice<byte> {
+    let s = s.into();
+    let bytes: alloc::vec::Vec<byte> = s.__into_vec();
+    let mut out: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    let mut tmp = [0u8; 4];
+    while i < bytes.len() {
+        let (r, w) = utf8::DecodeRune(&bytes[i..]);
+        let nr = mapping(r);
+        if nr >= 0 {
+            let n = utf8::EncodeRune(&mut tmp, nr) as usize;
+            out.extend_from_slice(&tmp[..n]);
+        }
+        if w == 0 {
+            break;
+        }
+        i += w as usize;
+    }
+    slice::__from_vec(out)
+}
+
+/// `bytes.SplitAfter(s, sep)` — split keeping `sep` at end of each segment.
+pub fn SplitAfter<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(
+    s: S1,
+    sep: S2,
+) -> slice<slice<byte>> {
+    SplitAfterN(s, sep, -1)
+}
+
+/// `bytes.SplitAfterN(s, sep, n)` — count-bounded `SplitAfter`.
+pub fn SplitAfterN<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(
+    s: S1,
+    sep: S2,
+    n: int,
+) -> slice<slice<byte>> {
+    let s = s.into();
+    let sep = sep.into();
+    let mut out: alloc::vec::Vec<slice<byte>> = alloc::vec::Vec::new();
+    let bytes: alloc::vec::Vec<byte> = s.__into_vec();
+    let sep_bytes: alloc::vec::Vec<byte> = sep.__into_vec();
+    if sep_bytes.is_empty() {
+        let mut i = 0;
+        while i < bytes.len() {
+            let (_, w) = utf8::DecodeRune(&bytes[i..]);
+            if w == 0 {
+                break;
+            }
+            let w = w as usize;
+            out.push(slice::__from_vec(bytes[i..i + w].to_vec()));
+            i += w;
+            if n > 0 && out.len() as int == n - 1 {
+                if i < bytes.len() {
+                    out.push(slice::__from_vec(bytes[i..].to_vec()));
+                }
+                return slice::__from_vec(out);
+            }
+        }
+        return slice::__from_vec(out);
+    }
+    let mut start: usize = 0;
+    loop {
+        if n > 0 && out.len() as int == n - 1 {
+            break;
+        }
+        let i = bytes_index(&bytes[start..], &sep_bytes);
+        if i < 0 {
+            break;
+        }
+        let end = start + i as usize + sep_bytes.len();
+        out.push(slice::__from_vec(bytes[start..end].to_vec()));
+        start = end;
+    }
+    if start <= bytes.len() {
+        out.push(slice::__from_vec(bytes[start..].to_vec()));
+    }
+    slice::__from_vec(out)
+}
+
+fn bytes_index(haystack: &[byte], needle: &[byte]) -> int {
+    if needle.is_empty() {
+        return 0;
+    }
+    if needle.len() > haystack.len() {
+        return -1;
+    }
+    let mut i = 0;
+    while i + needle.len() <= haystack.len() {
+        if &haystack[i..i + needle.len()] == needle {
+            return i as int;
+        }
+        i += 1;
+    }
+    -1
+}
