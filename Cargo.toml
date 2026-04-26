@@ -61,3 +61,11 @@ path = "examples/iolib.rs"
 [[example]]
 name = "os"
 path = "examples/os.rs"
+
+[[example]]
+name = "fmt"
+path = "examples/fmt.rs"
+
+[[example]]
+name = "greet"
+path = "examples/greet.rs"

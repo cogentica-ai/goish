@@ -31,6 +31,7 @@ pub mod builtin;
 pub mod builtin_macros;
 pub mod convert;
 pub mod errors;
+pub mod fmt;
 pub mod goslice;
 pub mod gostring;
 pub mod io;
