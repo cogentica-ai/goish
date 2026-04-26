@@ -53,6 +53,31 @@ pub trait Closer {
     fn Close(&mut self) -> error;
 }
 
+// Blanket impls so `&mut R` and `&mut W` satisfy the trait without
+// transferring ownership. Mirrors Go's "any pointer-receiver method
+// promotes through a `*T`" — lets callers do
+// `bufio.NewWriter(&mut buf)` and keep `buf` alive after.
+impl<R: Reader + ?Sized> Reader for &mut R {
+    #[inline]
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        (**self).Read(p)
+    }
+}
+
+impl<W: Writer + ?Sized> Writer for &mut W {
+    #[inline]
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        (**self).Write(p)
+    }
+}
+
+impl<C: Closer + ?Sized> Closer for &mut C {
+    #[inline]
+    fn Close(&mut self) -> error {
+        (**self).Close()
+    }
+}
+
 // ─── Sentinel errors ───────────────────────────────────────────────────
 //
 // Go pattern: `var EOF = errors.New("EOF")` — a single Arc value used

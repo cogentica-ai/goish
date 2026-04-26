@@ -149,3 +149,7 @@ path = "examples/polish_smoke.rs"
 [[example]]
 name = "log_smoke"
 path = "examples/log_smoke.rs"
+
+[[example]]
+name = "bufio_rw_smoke"
+path = "examples/bufio_rw_smoke.rs"
