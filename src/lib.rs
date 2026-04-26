@@ -30,6 +30,7 @@ pub mod __macro_alloc {
 pub mod builtin;
 pub mod builtin_macros;
 pub mod convert;
+pub mod defer;
 pub mod errors;
 pub mod fmt;
 pub mod goslice;
