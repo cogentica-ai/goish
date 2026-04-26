@@ -184,6 +184,26 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
 
+    // ── impl Clone for the struct ──────────────────────────────────
+    // Go-faithful: every struct is field-wise copyable. Lets reflect
+    // structs flow through `slice<T>`, `map<K,V>`, `Vec<T>` and other
+    // containers without the user writing #[derive(Clone)].
+    impl_text.push_str("impl ::core::clone::Clone for ");
+    impl_text.push_str(&parsed.name);
+    impl_text.push_str(" {\n");
+    impl_text.push_str("    fn clone(&self) -> Self {\n");
+    impl_text.push_str("        Self {\n");
+    for f in &parsed.fields {
+        let _ = write!(
+            impl_text,
+            "            {}: <{} as ::core::clone::Clone>::clone(&self.{}),\n",
+            f.name, f.ty, f.name
+        );
+    }
+    impl_text.push_str("        }\n");
+    impl_text.push_str("    }\n");
+    impl_text.push_str("}\n");
+
     // ── impl json::FromValue for the struct ────────────────────────
     // Walks the parsed json::Value::Object, maps each json key (from
     // Tag.Get("json") or the field name) to the matching field via

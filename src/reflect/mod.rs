@@ -664,6 +664,36 @@ impl<T: FromReflectValue + Clone + Default> FromReflectValue for slice<T> {
     }
 }
 
+impl<K, V> FromReflectValue for crate::gomap::map<K, V>
+where
+    K: FromReflectValue + Ord + Default + Clone,
+    V: FromReflectValue + Default + Clone,
+{
+    fn from_reflect_value(v: Value) -> (Self, crate::errors::error) {
+        match v {
+            Value::Map { entries, .. } => {
+                let mut out = crate::gomap::map::<K, V>::new();
+                for (kv, vv) in entries {
+                    let (k, err) = K::from_reflect_value(kv);
+                    if err != crate::nil {
+                        return (crate::gomap::map::<K, V>::new(), err);
+                    }
+                    let (v, err) = V::from_reflect_value(vv);
+                    if err != crate::nil {
+                        return (crate::gomap::map::<K, V>::new(), err);
+                    }
+                    out.Set(k, v);
+                }
+                (out, crate::nil)
+            }
+            _ => (
+                crate::gomap::map::<K, V>::new(),
+                crate::errors::New("reflect: expected map"),
+            ),
+        }
+    }
+}
+
 // ─── Mutation: SetField / SetFieldByName ──────────────────────────────
 //
 // Goish doesn't expose Go's `Value.Field(i).SetInt(99)` chain directly
