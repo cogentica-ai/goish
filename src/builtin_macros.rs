@@ -66,6 +66,10 @@ macro_rules! make {
     (chan $t:ty) => {
         $crate::gochan::chan::<$t>::new_unbuffered()
     };
+    // make!(chan T, cap) — buffered channel.
+    (chan $t:ty, $cap:expr) => {
+        $crate::gochan::chan::<$t>::new_buffered($crate::builtin::__make_size($cap))
+    };
     // make!(map[K]V) — empty map (V: Default required at construction).
     (map[$kt:ty]$vt:ty) => {
         $crate::gomap::map::<$kt, $vt>::new()

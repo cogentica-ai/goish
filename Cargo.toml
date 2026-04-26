@@ -221,3 +221,7 @@ path = "examples/sched_park.rs"
 [[example]]
 name = "chan_unbuffered"
 path = "examples/chan_unbuffered.rs"
+
+[[example]]
+name = "chan_buffered"
+path = "examples/chan_buffered.rs"
