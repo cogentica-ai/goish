@@ -19,12 +19,22 @@
 extern crate alloc;
 
 pub mod builtin;
+pub mod convert;
+pub mod goslice;
+pub mod gostring;
+pub mod range;
 pub mod runtime;
 pub mod syscall;
+pub mod types;
+pub mod unicode;
 
 // Re-export Go's predeclared identifiers at the crate root so a single
-// `use goish::{len, ...}` mirrors Go's always-available builtins.
+// `use goish::{len, string, ...}` mirrors Go's always-available builtins.
 pub use builtin::len;
+pub use convert::{bytes, runes, string};
+pub use goslice::GoSlice;
+pub use gostring::GoString;
+pub use types::{byte, int, rune, uint};
 
 // Re-export the entry-point attribute so users write `#[goish::main]`.
 pub use goish_macros::main;
