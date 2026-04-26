@@ -73,3 +73,11 @@ path = "examples/greet.rs"
 [[example]]
 name = "tags"
 path = "examples/tags.rs"
+
+[[example]]
+name = "sumargs"
+path = "examples/sumargs.rs"
+
+[[example]]
+name = "strconv_smoke"
+path = "examples/strconv_smoke.rs"
