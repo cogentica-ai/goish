@@ -191,7 +191,7 @@ pub fn RuneLen(r: rune) -> int {
 #[allow(non_snake_case)]
 pub fn AppendRune(p: crate::goslice::slice<byte>, r: rune) -> crate::goslice::slice<byte> {
     let r = if !ValidRune(r) { RuneError } else { r };
-    let mut v: Vec<byte> = p.into_vec();
+    let mut v: Vec<byte> = p.__into_vec();
     if r < 0x80 {
         v.push(r as byte);
     } else if r < 0x800 {
@@ -207,7 +207,7 @@ pub fn AppendRune(p: crate::goslice::slice<byte>, r: rune) -> crate::goslice::sl
         v.push(0x80 | ((r >> 6) as byte & 0x3F));
         v.push(0x80 | (r as byte & 0x3F));
     }
-    crate::goslice::slice::from_vec(v)
+    crate::goslice::slice::__from_vec(v)
 }
 
 // ─── Counting / validation ─────────────────────────────────────────────

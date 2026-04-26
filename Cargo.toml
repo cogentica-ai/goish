@@ -41,3 +41,7 @@ path = "examples/alloc_smoke.rs"
 [[example]]
 name = "strings"
 path = "examples/strings.rs"
+
+[[example]]
+name = "slices"
+path = "examples/slices.rs"

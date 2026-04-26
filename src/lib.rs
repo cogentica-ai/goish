@@ -18,7 +18,17 @@
 // `extern crate alloc;` to their root.
 extern crate alloc;
 
+// Hidden re-export so `make!`/`slice!`/`append!` macros can reach Vec
+// from inside user binaries that haven't added `extern crate alloc;`.
+// Users never write this path directly.
+#[doc(hidden)]
+pub mod __macro_alloc {
+    pub use alloc::vec::Vec;
+    pub use alloc::vec;
+}
+
 pub mod builtin;
+pub mod builtin_macros;
 pub mod convert;
 pub mod goslice;
 pub mod gostring;
@@ -30,7 +40,7 @@ pub mod unicode;
 
 // Re-export Go's predeclared identifiers at the crate root so a single
 // `use goish::{len, string, ...}` mirrors Go's always-available builtins.
-pub use builtin::len;
+pub use builtin::{cap, len};
 // Both `string` (the type, in gostring) and `string` (the conversion
 // function, in convert) are re-exported here. They occupy different
 // namespaces (type vs value), exactly like Go's `string` type and

@@ -59,8 +59,10 @@ impl string {
 
     /// Internal hand-off when an owned `Vec<u8>` is already prepared
     /// (concat, rune encoding). Avoids one copy that `from_bytes` would
-    /// do. `pub(crate)` because `Vec` is an implementation detail.
-    pub(crate) fn from_vec(v: Vec<u8>) -> Self {
+    /// do. Dunder + `#[doc(hidden)]` mark it "do not call directly" —
+    /// public so macros can reach it via path resolution.
+    #[doc(hidden)]
+    pub fn __from_vec(v: Vec<u8>) -> Self {
         Self { bytes: Arc::from(v) }
     }
 
@@ -82,6 +84,14 @@ impl string {
 impl Default for string {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ─── From<&str> — enables slice!([]string{"a", "b"}) via .into() ─────
+
+impl From<&'static str> for string {
+    fn from(s: &'static str) -> Self {
+        string::from_static(s)
     }
 }
 
@@ -113,7 +123,7 @@ impl Add<string> for string {
         let mut v = Vec::with_capacity(self.bytes.len() + rhs.bytes.len());
         v.extend_from_slice(&self.bytes);
         v.extend_from_slice(&rhs.bytes);
-        string::from_vec(v)
+        string::__from_vec(v)
     }
 }
 
@@ -123,7 +133,7 @@ impl Add<&str> for string {
         let mut v = Vec::with_capacity(self.bytes.len() + rhs.len());
         v.extend_from_slice(&self.bytes);
         v.extend_from_slice(rhs.as_bytes());
-        string::from_vec(v)
+        string::__from_vec(v)
     }
 }
 

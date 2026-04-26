@@ -23,9 +23,9 @@
 
 extern crate alloc;
 use alloc::vec::Vec;
-use core::ops::{Deref, Index};
+use core::ops::{Deref, DerefMut, Index};
 
-use crate::builtin::Len as LenTrait;
+use crate::builtin::{Cap as CapTrait, Len as LenTrait};
 use crate::types::int;
 
 #[derive(Clone)]
@@ -40,14 +40,18 @@ impl<T> slice<T> {
         Self { inner: Vec::new() }
     }
 
-    /// Hand-off when an owned `Vec<T>` is already prepared (utf8
-    /// builders, range collectors). `pub(crate)` because `Vec` is an
-    /// implementation detail.
-    pub(crate) fn from_vec(v: Vec<T>) -> Self {
+    /// Internal hook used by `slice!`/`make!`/`append!` macros and by
+    /// utf8 builders. Dunder + `#[doc(hidden)]` mark it "do not call
+    /// directly" — public only because macros need a path that resolves
+    /// at user call sites.
+    #[doc(hidden)]
+    pub fn __from_vec(v: Vec<T>) -> Self {
         Self { inner: v }
     }
 
-    pub(crate) fn into_vec(self) -> Vec<T> {
+    /// Internal hook for `append!`. Same caveats as `__from_vec`.
+    #[doc(hidden)]
+    pub fn __into_vec(self) -> Vec<T> {
         self.inner
     }
 
@@ -94,6 +98,13 @@ impl<T> LenTrait for slice<T> {
     }
 }
 
+impl<T> CapTrait for slice<T> {
+    #[inline]
+    fn __cap(&self) -> int {
+        self.inner.capacity() as int
+    }
+}
+
 // ─── xs[i] — Go-faithful indexing (panics on out-of-range) ────────────
 
 impl<T> Index<int> for slice<T> {
@@ -114,5 +125,14 @@ impl<T> Deref for slice<T> {
     #[inline]
     fn deref(&self) -> &[T] {
         &self.inner
+    }
+}
+
+// `DerefMut` enables `copy!(dst, src)` to take `&mut dst` (auto-deref to
+// `&mut [T]`) without leaking Rust borrow syntax to the user.
+impl<T> DerefMut for slice<T> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut [T] {
+        &mut self.inner
     }
 }

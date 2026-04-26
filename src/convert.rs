@@ -70,11 +70,11 @@ impl __StringConv for slice<rune> {
         // Pre-size pessimistically (1 byte per rune → grows for non-ASCII).
         let mut v: Vec<byte> = Vec::with_capacity(self.Len() as usize);
         let mut buf = [0u8; 4];
-        for r in self.into_vec() {
+        for r in self.__into_vec() {
             let n = utf8::EncodeRune(&mut buf, r);
             v.extend_from_slice(&buf[..n as usize]);
         }
-        string::from_vec(v)
+        string::__from_vec(v)
     }
 }
 
@@ -92,13 +92,13 @@ pub fn bytes<T: __BytesConv>(x: T) -> slice<byte> {
 
 impl __BytesConv for string {
     fn __to_bytes(self) -> slice<byte> {
-        slice::from_vec(self.as_bytes().to_vec())
+        slice::__from_vec(self.as_bytes().to_vec())
     }
 }
 
 impl __BytesConv for &'static str {
     fn __to_bytes(self) -> slice<byte> {
-        slice::from_vec(self.as_bytes().to_vec())
+        slice::__from_vec(self.as_bytes().to_vec())
     }
 }
 
@@ -126,7 +126,7 @@ impl __RunesConv for string {
             // (RuneError, 1) on invalid bytes), so no infinite loop.
             i += sz as usize;
         }
-        slice::from_vec(v)
+        slice::__from_vec(v)
     }
 }
 
