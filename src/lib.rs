@@ -30,6 +30,7 @@ pub mod __macro_alloc {
 pub mod builtin;
 pub mod builtin_macros;
 pub mod convert;
+pub mod errors;
 pub mod goslice;
 pub mod gostring;
 pub mod range;
@@ -46,6 +47,7 @@ pub use builtin::{cap, len};
 // namespaces (type vs value), exactly like Go's `string` type and
 // `string(...)` conversion. Same for `slice<T>`.
 pub use convert::{bytes, runes, string};
+pub use errors::{error, nil};
 pub use goslice::slice;
 pub use gostring::string;
 pub use types::{byte, int, rune, uint};

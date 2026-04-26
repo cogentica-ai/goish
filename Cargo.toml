@@ -45,3 +45,11 @@ path = "examples/strings.rs"
 [[example]]
 name = "slices"
 path = "examples/slices.rs"
+
+[[example]]
+name = "errors"
+path = "examples/errors.rs"
+
+[[example]]
+name = "greet_m9"
+path = "examples/greet_m9.rs"
