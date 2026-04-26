@@ -5,7 +5,7 @@
 #![no_std]
 #![no_main]
 
-use goish::{int, reflect, string, syscall};
+use goish::{int, make, reflect, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -102,6 +102,53 @@ fn main() {
     let tag = reflect::StructTag::__new(r#"foo:"a\"b" bar:"\nhello""#);
     check(tag.Get("foo") == "a\"b", b"reflect: tag escape \"\n");
     check(tag.Get("bar") == "\nhello", b"reflect: tag escape n\n");
+
+    // ─── DeepEqual ───────────────────────────────────────────────────
+
+    // Primitives.
+    check(reflect::DeepEqual(&1i64, &1i64), b"DeepEqual: int eq\n");
+    check(!reflect::DeepEqual(&1i64, &2i64), b"DeepEqual: int neq\n");
+    check(reflect::DeepEqual(&string("hi"), &string("hi")), b"DeepEqual: str eq\n");
+    check(!reflect::DeepEqual(&string("hi"), &string("ho")), b"DeepEqual: str neq\n");
+    check(reflect::DeepEqual(&true, &true), b"DeepEqual: bool eq\n");
+
+    // NaN ≠ NaN, matching Go.
+    let nan: goish::float64 = goish::float64::NAN;
+    check(!reflect::DeepEqual(&nan, &nan), b"DeepEqual: NaN != NaN\n");
+
+    // Different Kinds — false.
+    check(!reflect::DeepEqual(&1i64, &string("hi")), b"DeepEqual: kind mismatch\n");
+
+    // Struct: same name + equal fields → true.
+    let p1 = Person { Name: string("alice"), Age: 30, secret: 7 };
+    let p2 = Person { Name: string("alice"), Age: 30, secret: 7 };
+    let p3 = Person { Name: string("alice"), Age: 31, secret: 7 };
+    check(reflect::DeepEqual(&p1, &p2), b"DeepEqual: struct eq\n");
+    check(!reflect::DeepEqual(&p1, &p3), b"DeepEqual: struct neq (field)\n");
+
+    // Distinct struct types — false even with similar shapes.
+    let pt = Point { X: 1, Y: 2 };
+    check(!reflect::DeepEqual(&p1, &pt), b"DeepEqual: distinct struct types\n");
+
+    // Slice: element-wise.
+    let s1 = goish::slice!([]int{1, 2, 3});
+    let s2 = goish::slice!([]int{1, 2, 3});
+    let s3 = goish::slice!([]int{1, 2, 4});
+    check(reflect::DeepEqual(&s1, &s2), b"DeepEqual: slice eq\n");
+    check(!reflect::DeepEqual(&s1, &s3), b"DeepEqual: slice neq\n");
+
+    // Map: key-by-key match (order-independent at the API).
+    let mut m1 = make!(map[string]int);
+    m1.Set(string("a"), 1);
+    m1.Set(string("b"), 2);
+    let mut m2 = make!(map[string]int);
+    m2.Set(string("b"), 2);
+    m2.Set(string("a"), 1);
+    let mut m3 = make!(map[string]int);
+    m3.Set(string("a"), 1);
+    m3.Set(string("b"), 9);
+    check(reflect::DeepEqual(&m1, &m2), b"DeepEqual: map eq (insertion order)\n");
+    check(!reflect::DeepEqual(&m1, &m3), b"DeepEqual: map neq (value)\n");
 
     const OK: &[u8] = b"reflect: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

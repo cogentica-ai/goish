@@ -603,6 +603,99 @@ pub fn ValueOf<T: Reflect + ?Sized>(v: &T) -> Value {
     v.__reflect_value()
 }
 
+/// `reflect.DeepEqual(x, y)` — structural equality between any two
+/// reflectable values. Mirrors Go 1.25 `reflect.DeepEqual`:
+///
+///   * primitives compare with `==` (NaN != NaN, matching Go)
+///   * slices: same length + element-wise DeepEqual
+///   * maps: same length + every key has a deeply-equal value
+///   * structs: same struct name + element-wise DeepEqual
+///   * Invalid == Invalid
+///   * different Kinds → unequal
+///
+/// Goish's `Value` is an acyclic deep-clone, so the visited-set
+/// short-circuit Go's implementation needs (for cyclic pointer/map
+/// graphs) is unnecessary here.
+pub fn DeepEqual<T, U>(x: &T, y: &U) -> bool
+where
+    T: Reflect + ?Sized,
+    U: Reflect + ?Sized,
+{
+    deep_value_equal(&ValueOf(x), &ValueOf(y))
+}
+
+fn deep_value_equal(a: &Value, b: &Value) -> bool {
+    if a.Kind() != b.Kind() {
+        return false;
+    }
+    match (a, b) {
+        (Value::Invalid, Value::Invalid) => true,
+        (Value::Bool(x), Value::Bool(y)) => x == y,
+        (Value::Int(x), Value::Int(y)) => x == y,
+        (Value::Int8(x), Value::Int8(y)) => x == y,
+        (Value::Int16(x), Value::Int16(y)) => x == y,
+        (Value::Int32(x), Value::Int32(y)) => x == y,
+        (Value::Uint(x), Value::Uint(y)) => x == y,
+        (Value::Uint8(x), Value::Uint8(y)) => x == y,
+        (Value::Uint16(x), Value::Uint16(y)) => x == y,
+        (Value::Uint32(x), Value::Uint32(y)) => x == y,
+        // NaN != NaN, matching Go.
+        (Value::Float32(x), Value::Float32(y)) => x == y,
+        (Value::Float64(x), Value::Float64(y)) => x == y,
+        (Value::String(x), Value::String(y)) => x == y,
+        (Value::Slice { items: ai, .. }, Value::Slice { items: bi, .. }) => {
+            if ai.len() != bi.len() {
+                return false;
+            }
+            ai.iter()
+                .zip(bi.iter())
+                .all(|(x, y)| deep_value_equal(x, y))
+        }
+        (Value::Map { entries: ae, .. }, Value::Map { entries: be, .. }) => {
+            if ae.len() != be.len() {
+                return false;
+            }
+            // Go semantics: each key in a must map to a deeply-equal value
+            // in b. Keys are sorted in our representation, but matching
+            // by lookup keeps us correct even if invariants drift.
+            for (ka, va) in ae {
+                let mut matched = false;
+                for (kb, vb) in be {
+                    if deep_value_equal(ka, kb) {
+                        if !deep_value_equal(va, vb) {
+                            return false;
+                        }
+                        matched = true;
+                        break;
+                    }
+                }
+                if !matched {
+                    return false;
+                }
+            }
+            true
+        }
+        (
+            Value::Struct { fields: af, ty: ta },
+            Value::Struct { fields: bf, ty: tb },
+        ) => {
+            // Distinct named struct types are never deeply equal — even
+            // if their field shapes coincide.
+            if ta.Name() != tb.Name() {
+                return false;
+            }
+            if af.len() != bf.len() {
+                return false;
+            }
+            af.iter()
+                .zip(bf.iter())
+                .all(|(x, y)| deep_value_equal(x, y))
+        }
+        (Value::Pointer(pa), Value::Pointer(pb)) => deep_value_equal(pa, pb),
+        _ => false,
+    }
+}
+
 // ─── Built-in Reflect impls ───────────────────────────────────────────
 
 macro_rules! impl_primitive_reflect {
