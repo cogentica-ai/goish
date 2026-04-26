@@ -165,3 +165,7 @@ path = "examples/reflect_json.rs"
 [[example]]
 name = "reflect_v_set"
 path = "examples/reflect_v_set.rs"
+
+[[example]]
+name = "reflect_nested"
+path = "examples/reflect_nested.rs"

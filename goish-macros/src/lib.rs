@@ -135,6 +135,7 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
         parsed.name
     );
     impl_text.push_str("    }\n");
+    // (close __reflect_type body — __reflect_value continues below)
 
     // __reflect_value: deep-clone each field into a Value, package as
     // Value::Struct.
@@ -157,6 +158,29 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20fields: __fields,\n\
          \x20\x20\x20\x20\x20\x20\x20\x20}\n",
     );
+    impl_text.push_str("    }\n");
+    impl_text.push_str("}\n");
+
+    // ── impl Default for the struct ────────────────────────────────
+    // Auto-Default mirrors Go's "structs are zero-initializable by
+    // default". Every field type must already impl Default (built-in
+    // primitives do, slice<T> does, and any nested #[goish::reflect]
+    // struct gets one of these from its own attribute). With this in
+    // place, FromValue / FromReflectValue / Settable can all rely on
+    // `<Self as Default>::default()` for the zero state.
+    impl_text.push_str("impl ::core::default::Default for ");
+    impl_text.push_str(&parsed.name);
+    impl_text.push_str(" {\n");
+    impl_text.push_str("    fn default() -> Self {\n");
+    impl_text.push_str("        Self {\n");
+    for f in &parsed.fields {
+        let _ = write!(
+            impl_text,
+            "            {}: <{} as ::core::default::Default>::default(),\n",
+            f.name, f.ty
+        );
+    }
+    impl_text.push_str("        }\n");
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
 
@@ -244,10 +268,52 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
 
+    // ── impl reflect::FromReflectValue for the struct ─────────────
+    // Lets this struct be used as a field type within another reflect
+    // struct (nested structs, SetField with a struct payload, etc.).
+    // Walks Value::Struct positionally, dispatching FromReflectValue
+    // per field.
+    impl_text.push_str("impl ::goish::reflect::FromReflectValue for ");
+    impl_text.push_str(&parsed.name);
+    impl_text.push_str(" {\n");
+    impl_text.push_str(
+        "    fn from_reflect_value(__v: ::goish::reflect::Value) -> (Self, ::goish::error) {\n",
+    );
+    // Helper: zero-Self via per-field defaults.
+    impl_text.push_str("        let __zero = || -> Self { Self {\n");
+    for f in &parsed.fields {
+        let _ = write!(
+            impl_text,
+            "            {}: <{} as ::core::default::Default>::default(),\n",
+            f.name, f.ty
+        );
+    }
+    impl_text.push_str("        } };\n");
+    impl_text.push_str("        let __fields = match __v {\n");
+    impl_text.push_str("            ::goish::reflect::Value::Struct { fields, .. } => fields,\n");
+    impl_text.push_str("            _ => return (__zero(), ::goish::errors::New(\"reflect: expected struct\")),\n");
+    impl_text.push_str("        };\n");
+    let _ = write!(
+        impl_text,
+        "        if __fields.len() != {} {{\n            return (__zero(), ::goish::errors::New(\"reflect: field count mismatch\"));\n        }}\n",
+        parsed.fields.len()
+    );
+    impl_text.push_str("        let mut __out = __zero();\n");
+    for (i, f) in parsed.fields.iter().enumerate() {
+        let _ = write!(
+            impl_text,
+            "        {{\n            let (__val, __err) = <{} as ::goish::reflect::FromReflectValue>::from_reflect_value(__fields[{}].clone());\n            if __err != ::goish::nil {{ return (__zero(), __err); }}\n            __out.{} = __val;\n        }}\n",
+            f.ty, i, f.name
+        );
+    }
+    impl_text.push_str("        (__out, ::goish::nil)\n");
+    impl_text.push_str("    }\n");
+    impl_text.push_str("}\n");
+
     // ── impl reflect::Settable for the struct ──────────────────────
     // Dispatches index → field write via FromReflectValue. Composite
     // field types must impl FromReflectValue (built-in primitives do;
-    // user nested structs would need their own impl).
+    // user nested structs now do too via the impl above).
     impl_text.push_str("impl ::goish::reflect::Settable for ");
     impl_text.push_str(&parsed.name);
     impl_text.push_str(" {\n");
