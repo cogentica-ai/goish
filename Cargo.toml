@@ -93,3 +93,11 @@ path = "examples/uniq_sort.rs"
 [[example]]
 name = "slices_lib_smoke"
 path = "examples/slices_lib_smoke.rs"
+
+[[example]]
+name = "uppercase"
+path = "examples/uppercase.rs"
+
+[[example]]
+name = "bufio_smoke"
+path = "examples/bufio_smoke.rs"

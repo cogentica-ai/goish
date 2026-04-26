@@ -27,6 +27,7 @@ pub mod __macro_alloc {
     pub use alloc::vec;
 }
 
+pub mod bufio;
 pub mod builtin;
 pub mod builtin_macros;
 pub mod convert;
