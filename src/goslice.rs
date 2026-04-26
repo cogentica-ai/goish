@@ -23,7 +23,7 @@
 
 extern crate alloc;
 use alloc::vec::Vec;
-use core::ops::{Deref, DerefMut, Index};
+use core::ops::{Deref, DerefMut, Index, IndexMut};
 
 use crate::builtin::{Cap as CapTrait, Len as LenTrait};
 use crate::types::int;
@@ -111,6 +111,12 @@ impl<T> Index<int> for slice<T> {
     type Output = T;
     fn index(&self, i: int) -> &T {
         &self.inner[i as usize]
+    }
+}
+
+impl<T> IndexMut<int> for slice<T> {
+    fn index_mut(&mut self, i: int) -> &mut T {
+        &mut self.inner[i as usize]
     }
 }
 

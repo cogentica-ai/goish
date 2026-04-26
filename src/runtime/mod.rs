@@ -17,7 +17,7 @@ use crate::syscall;
 
 mod heap;
 mod mem;
-mod spin;
+pub mod spin;
 pub use heap::{alloc, free, realloc};
 
 /// First Rust code to run after the kernel hands control to `_start`.
