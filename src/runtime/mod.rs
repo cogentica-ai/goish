@@ -20,6 +20,7 @@ pub mod heap;
 pub mod mcentral;
 pub mod mheap;
 mod mem;
+pub mod sched;
 pub mod spin;
 pub use heap::{alloc, free, mheap_alloc_pages, mheap_free_pages, realloc};
 
