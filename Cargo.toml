@@ -101,3 +101,11 @@ path = "examples/uppercase.rs"
 [[example]]
 name = "bufio_smoke"
 path = "examples/bufio_smoke.rs"
+
+[[example]]
+name = "bytestack"
+path = "examples/bytestack.rs"
+
+[[example]]
+name = "bytes_lib_smoke"
+path = "examples/bytes_lib_smoke.rs"

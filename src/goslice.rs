@@ -89,6 +89,38 @@ impl<T> Default for slice<T> {
     }
 }
 
+// ─── From<&[T]> / From<&[T; N]> — let byte literals flow ──────────────
+//
+// `b","` has type `&'static [u8; 1]`; these impls let it flow into any
+// `Into<slice<byte>>`-bound argument. Generic over T so the same impls
+// also cover `&[i64]`, `&[string]`, etc., which composes with `slice!`
+// macro internals (we never go through here for those, but it's safe).
+
+impl<T: Clone> From<&'static [T]> for slice<T> {
+    #[inline]
+    fn from(b: &'static [T]) -> Self {
+        slice::__from_vec(b.to_vec())
+    }
+}
+
+impl<T: Clone, const N: usize> From<&'static [T; N]> for slice<T> {
+    #[inline]
+    fn from(arr: &'static [T; N]) -> Self {
+        slice::__from_vec(arr.to_vec())
+    }
+}
+
+// Pass-by-shared-reference flow: `&slice<T>` clones into `slice<T>`.
+// Lets read-only function arguments accept either a borrowed handle or
+// an owned value uniformly, matching how Go's slice-typed args feel
+// "shared" at the call site.
+impl<T: Clone> From<&slice<T>> for slice<T> {
+    #[inline]
+    fn from(s: &slice<T>) -> Self {
+        s.clone()
+    }
+}
+
 // ─── builtin len(xs) / cap(xs) — see builtin.rs for `len` ─────────────
 
 impl<T> LenTrait for slice<T> {
