@@ -177,3 +177,7 @@ path = "examples/reflect_collections.rs"
 [[example]]
 name = "reflect_tier1"
 path = "examples/reflect_tier1.rs"
+
+[[example]]
+name = "reflect_tier2"
+path = "examples/reflect_tier2.rs"

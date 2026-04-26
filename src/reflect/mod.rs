@@ -386,6 +386,98 @@ impl Type {
         }
     }
 
+    /// `FieldByIndex(index)` — nested field by index path. Mirrors
+    /// Go's `Type.FieldByIndex`. Panics on out-of-range.
+    pub fn FieldByIndex(&self, index: &[int]) -> StructField {
+        let mut t = *self;
+        let mut f: Option<StructField> = None;
+        for (i, &x) in index.iter().enumerate() {
+            if i > 0 {
+                t = match f {
+                    Some(ff) => (ff.Type)(),
+                    None => t,
+                };
+            }
+            f = Some(t.Field(x));
+        }
+        f.expect("reflect: FieldByIndex with empty index")
+    }
+
+    /// `FieldByIndexErr(index)` — `(field, error)` form. In goish this
+    /// is equivalent to `FieldByIndex` (we don't traverse pointers, so
+    /// the "indirection through nil" error case Go raises doesn't
+    /// arise). Provided for API parity.
+    pub fn FieldByIndexErr(&self, index: &[int]) -> (StructField, crate::errors::error) {
+        (self.FieldByIndex(index), crate::nil)
+    }
+
+    /// `FieldByNameFunc(match)` — find first field whose name satisfies
+    /// `match`. Returns `(field, ok)`.
+    pub fn FieldByNameFunc<F: Fn(&str) -> bool>(&self, m: F) -> (StructField, bool) {
+        for f in self.fields {
+            if m(f.Name) {
+                return (*f, true);
+            }
+        }
+        (
+            StructField {
+                Name: "",
+                Tag: StructTag::__new(""),
+                Type: || Type::__new(Kind::Invalid, "", &[]),
+            },
+            false,
+        )
+    }
+
+    /// `OverflowInt(x)` — true if `x` is out of range for this signed-int
+    /// type. Panics for non-int kinds.
+    pub fn OverflowInt(&self, x: int) -> bool {
+        let bit_size = match self.kind {
+            Kind::Int => 64,
+            Kind::Int8 => 8,
+            Kind::Int16 => 16,
+            Kind::Int32 => 32,
+            _ => panic!("reflect.Type.OverflowInt of non-int"),
+        };
+        if bit_size == 64 {
+            return false;
+        }
+        let shift = 64 - bit_size;
+        let trunc = (x << shift) >> shift;
+        x != trunc
+    }
+
+    /// `OverflowUint(x)` — true if `x` is out of range for this
+    /// unsigned-int type.
+    pub fn OverflowUint(&self, x: uint) -> bool {
+        let bit_size = match self.kind {
+            Kind::Uint => 64,
+            Kind::Uint8 => 8,
+            Kind::Uint16 => 16,
+            Kind::Uint32 => 32,
+            _ => panic!("reflect.Type.OverflowUint of non-uint"),
+        };
+        if bit_size == 64 {
+            return false;
+        }
+        let shift = 64 - bit_size;
+        let trunc = (x << shift) >> shift;
+        x != trunc
+    }
+
+    /// `OverflowFloat(x)` — true if `x` cannot be represented in this
+    /// float type without losing magnitude.
+    pub fn OverflowFloat(&self, x: float64) -> bool {
+        match self.kind {
+            Kind::Float64 => false,
+            Kind::Float32 => {
+                let ax = if x < 0.0 { -x } else { x };
+                ax > float32::MAX as float64
+            }
+            _ => panic!("reflect.Type.OverflowFloat of non-float"),
+        }
+    }
+
     /// `String()` — readable type name. `[]int`, `map[string]int`,
     /// `*Person`, `Person`, `int`, etc. Mirrors Go's `Type.String()`.
     pub fn String(&self) -> string {
@@ -669,6 +761,79 @@ impl Value {
         self.Slice(low, high)
     }
 
+    /// `Elem()` — for Pointer: the inner Value. For other kinds, panics
+    /// (matches Go's reflect.Value.Elem semantics for the cases goish
+    /// supports — Interface kind is out-of-scope).
+    pub fn Elem(&self) -> Value {
+        match self {
+            Value::Pointer(inner) => (**inner).clone(),
+            _ => panic!("reflect.Value.Elem: not a pointer"),
+        }
+    }
+
+    /// `FieldByIndex(index)` — nested field access by index path.
+    /// Mirrors Go's `Value.FieldByIndex`. Walks struct → struct → ...
+    pub fn FieldByIndex(&self, index: &[int]) -> Value {
+        let mut v = self.clone();
+        for (i, &x) in index.iter().enumerate() {
+            if i > 0 {
+                if let Value::Pointer(_) = v {
+                    v = v.Elem();
+                }
+            }
+            v = v.Field(x);
+        }
+        v
+    }
+
+    /// `OverflowInt(x)` — true if `x` cannot be represented in this
+    /// signed-int Value's type. Mirrors Go's bit-shift truncation test.
+    pub fn OverflowInt(&self, x: int) -> bool {
+        let bit_size = match self.Kind() {
+            Kind::Int => 64,
+            Kind::Int8 => 8,
+            Kind::Int16 => 16,
+            Kind::Int32 => 32,
+            _ => panic!("reflect.Value.OverflowInt of non-int"),
+        };
+        if bit_size == 64 {
+            return false;
+        }
+        let shift = 64 - bit_size;
+        let trunc = (x << shift) >> shift;
+        x != trunc
+    }
+
+    /// `OverflowUint(x)` — counterpart of `OverflowInt` for unsigned.
+    pub fn OverflowUint(&self, x: uint) -> bool {
+        let bit_size = match self.Kind() {
+            Kind::Uint => 64,
+            Kind::Uint8 => 8,
+            Kind::Uint16 => 16,
+            Kind::Uint32 => 32,
+            _ => panic!("reflect.Value.OverflowUint of non-uint"),
+        };
+        if bit_size == 64 {
+            return false;
+        }
+        let shift = 64 - bit_size;
+        let trunc = (x << shift) >> shift;
+        x != trunc
+    }
+
+    /// `OverflowFloat(x)` — true if `x` cannot be represented in this
+    /// float Value's type without loss of magnitude.
+    pub fn OverflowFloat(&self, x: float64) -> bool {
+        match self.Kind() {
+            Kind::Float64 => false,
+            Kind::Float32 => {
+                let ax = if x < 0.0 { -x } else { x };
+                ax > float32::MAX as float64
+            }
+            _ => panic!("reflect.Value.OverflowFloat of non-float"),
+        }
+    }
+
     /// `MapKeys()` — keys in stable (sorted) order. Panics if not Map.
     pub fn MapKeys(&self) -> Vec<Value> {
         match self {
@@ -936,6 +1101,53 @@ pub fn SetFieldByName<T: Settable + Reflect>(
         }
     }
     crate::errors::New("reflect.SetFieldByName: field not found")
+}
+
+/// `reflect.Indirect(v)` — if `v` is a `Pointer`, returns the inner
+/// value; otherwise returns `v` unchanged. Mirrors Go's `Indirect`.
+pub fn Indirect(v: Value) -> Value {
+    match v {
+        Value::Pointer(_) => v.Elem(),
+        _ => v,
+    }
+}
+
+/// `reflect.Append(s, x...)` — append values to a `Value::Slice`.
+/// Returns a new Value (goish slices are deep-cloned, so the caller
+/// receives an independent copy).
+pub fn Append(s: Value, items: &[Value]) -> Value {
+    match s {
+        Value::Slice { elem_type, items: mut existing } => {
+            existing.reserve(items.len());
+            for x in items {
+                existing.push(x.clone());
+            }
+            Value::Slice { elem_type, items: existing }
+        }
+        _ => panic!("reflect.Append: not a slice"),
+    }
+}
+
+/// `reflect.AppendSlice(s, t)` — append all of `t`'s items to `s`.
+/// `t` must also be a `Value::Slice`.
+pub fn AppendSlice(s: Value, t: Value) -> Value {
+    let extra = match t {
+        Value::Slice { items, .. } => items,
+        _ => panic!("reflect.AppendSlice: src is not a slice"),
+    };
+    Append(s, &extra)
+}
+
+/// `reflect.VisibleFields(t)` — flat field list. In Go this walks
+/// embedded fields BFS; goish v1 has no embedded fields, so this is
+/// the same as iterating `Field(0..NumField())`.
+pub fn VisibleFields(t: Type) -> alloc::vec::Vec<StructField> {
+    let n = t.NumField();
+    let mut out: alloc::vec::Vec<StructField> = alloc::vec::Vec::with_capacity(n as usize);
+    for i in 0..n {
+        out.push(t.Field(i));
+    }
+    out
 }
 
 /// `reflect.DeepEqual(x, y)` — structural equality between any two
