@@ -115,6 +115,84 @@ fn main() {
     let want: slice<int> = slice!([]int{ 1, 3, 5, 8 });
     check(slices::Equal(&ys, &want), b"slices: Sort! after append! wrong\n");
 
+    // ─── Func variants ────────────────────────────────────────────────
+
+    // SortFunc with descending comparator (b - a).
+    let mut zs: slice<int> = slice!([]int{ 3, 1, 4, 1, 5, 9, 2 });
+    slices::SortFunc!(zs, |a: &int, b: &int| *b - *a);
+    let want: slice<int> = slice!([]int{ 9, 5, 4, 3, 2, 1, 1 });
+    check(slices::Equal(&zs, &want), b"slices: SortFunc desc wrong\n");
+
+    // SortStableFunc keeps relative order of equal-keyed elements.
+    let mut ws: slice<int> = slice!([]int{ 3, 1, 4, 1, 5, 9, 2 });
+    slices::SortStableFunc!(ws, |a: &int, b: &int| *a - *b);
+    let want: slice<int> = slice!([]int{ 1, 1, 2, 3, 4, 5, 9 });
+    check(slices::Equal(&ws, &want), b"slices: SortStableFunc asc wrong\n");
+
+    // IsSortedFunc with custom comparator.
+    check(
+        slices::IsSortedFunc(&zs, |a: &int, b: &int| *b - *a),
+        b"slices: IsSortedFunc desc wrong\n",
+    );
+
+    // MinFunc / MaxFunc by absolute value.
+    let abs: slice<int> = slice!([]int{ -5, 3, -2, 4, -1 });
+    let smallest_abs = slices::MinFunc(&abs, |a: &int, b: &int| {
+        let aa = if *a < 0 { -*a } else { *a };
+        let bb = if *b < 0 { -*b } else { *b };
+        aa - bb
+    });
+    check(smallest_abs == -1, b"slices: MinFunc by |x| wrong\n");
+    let largest_abs = slices::MaxFunc(&abs, |a: &int, b: &int| {
+        let aa = if *a < 0 { -*a } else { *a };
+        let bb = if *b < 0 { -*b } else { *b };
+        aa - bb
+    });
+    check(largest_abs == -5, b"slices: MaxFunc by |x| wrong\n");
+
+    // BinarySearchFunc — descending sorted slice.
+    let desc: slice<int> = slice!([]int{ 9, 7, 5, 3, 1 });
+    let (i, ok) = slices::BinarySearchFunc(&desc, &5, |e: &int, t: &int| *t - *e);
+    check(ok && i == 2, b"slices: BinarySearchFunc hit wrong\n");
+    let (i, ok) = slices::BinarySearchFunc(&desc, &4, |e: &int, t: &int| *t - *e);
+    // Insertion of 4 in [9,7,5,3,1] yields [9,7,5,4,3,1] → index 3.
+    check(!ok && i == 3, b"slices: BinarySearchFunc miss wrong\n");
+
+    // EqualFunc — two slices equal under case-fold (use ASCII xor 0x20).
+    let p: slice<int> = slice!([]int{ 65, 66, 67 });    // A B C
+    let q: slice<int> = slice!([]int{ 97, 98, 99 });    // a b c
+    let case_eq = |a: &int, b: &int| (*a | 32) == (*b | 32);
+    check(slices::EqualFunc(&p, &q, case_eq), b"slices: EqualFunc case-fold wrong\n");
+
+    // CompareFunc — by absolute value.
+    let a: slice<int> = slice!([]int{ -3, 5 });
+    let b: slice<int> = slice!([]int{ 3, -5 });
+    let by_abs = |x: &int, y: &int| {
+        let xa = if *x < 0 { -*x } else { *x };
+        let ya = if *y < 0 { -*y } else { *y };
+        xa - ya
+    };
+    check(slices::CompareFunc(&a, &b, by_abs) == 0, b"slices: CompareFunc by-abs wrong\n");
+
+    // IndexFunc / ContainsFunc — first element > 5.
+    let xs: slice<int> = slice!([]int{ 1, 3, 5, 7, 9 });
+    check(slices::IndexFunc(&xs, |e: &int| *e > 5) == 3, b"slices: IndexFunc wrong\n");
+    check(slices::ContainsFunc(&xs, |e: &int| *e > 100) == false, b"slices: ContainsFunc miss wrong\n");
+    check(slices::ContainsFunc(&xs, |e: &int| *e == 5), b"slices: ContainsFunc hit wrong\n");
+
+    // DeleteFunc — drop odd numbers.
+    let xs: slice<int> = slice!([]int{ 1, 2, 3, 4, 5, 6 });
+    let evens = slices::DeleteFunc(xs, |e: &int| *e % 2 != 0);
+    let want: slice<int> = slice!([]int{ 2, 4, 6 });
+    check(slices::Equal(&evens, &want), b"slices: DeleteFunc wrong\n");
+
+    // CompactFunc — adjacent same-sign duplicates collapsed.
+    let xs: slice<int> = slice!([]int{ 1, 2, -3, -4, 5, -6, -7 });
+    let same_sign = |a: &int, b: &int| (*a >= 0) == (*b >= 0);
+    let c = slices::CompactFunc(xs, same_sign);
+    let want: slice<int> = slice!([]int{ 1, -3, 5, -6 });
+    check(slices::Equal(&c, &want), b"slices: CompactFunc wrong\n");
+
     const OK: &[u8] = b"slices: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());
 }
