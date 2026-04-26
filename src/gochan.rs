@@ -33,6 +33,25 @@
 // sender beats non-empty buffer" preference is what makes buffered
 // channels with full buffers act like unbuffered ones from the
 // receiver's perspective.
+//
+// ─── Internal layout for select! ──────────────────────────────────
+//
+// `Send`/`Recv` are thin wrappers over five lower-level helpers that
+// the upcoming `select!` macro composes:
+//
+//   __try_send(v)        try-without-park; Ok | Err(v) | panic
+//   __try_recv()         try-without-park; Some((v,ok)) | None
+//   __register_send(sg)  enqueue parked sender; false on closed
+//   __register_recv(sg)  enqueue parked receiver; Err on closed-empty
+//   __cancel_send(sg)    drop a no-longer-needed sudog from sendq
+//   __cancel_recv(sg)    drop a no-longer-needed sudog from recvq
+//
+// Helpers acquire the chan's lock for the duration of one operation
+// only. In cooperative single-M scheduling, no other goroutine runs
+// between successive helper calls on the same channel, so a
+// select-pass-1 loop calling __try_* across N chans is race-free
+// without holding all locks simultaneously. (Multi-M support — M17a —
+// will need a global lock-order sort, see M16f-β.)
 
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
@@ -42,22 +61,107 @@ extern crate alloc;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use core::ptr::NonNull;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::runtime::sched::{current_g, gopark, goready, G};
 use crate::runtime::spin::SpinLock;
 use crate::syscall;
 
+/// Per-`select!` shared coordination state. Lives on the parking
+/// goroutine's stack frame for the lifetime of one select. Every
+/// sudog registered by that select carries a `NonNull<SelectCoord>`
+/// pointing here; plain `Send`/`Recv` sudogs use `coord = None`.
+///
+/// The `done` flag is the winner-take-all latch: the first waker
+/// that pops a select sudog and CAS-flips `done` from `false` to
+/// `true` is the unique case that fires. Subsequent wakers that pop
+/// stale select sudogs from other channels see `done == true`,
+/// discard the sudog, and continue scanning their queue (or fall
+/// through to buffer/closed paths).
+///
+/// Mirrors the role of `gp.selectDone` in Go's runtime/select.go,
+/// just relocated from the G to the per-select struct because goish
+/// doesn't carry a free wakeup slot on G (sudogs are stack-owned by
+/// the parking G, so the wakee identifies the winner by scanning
+/// its own sudogs' `success` bits — no `gp.param` needed).
+#[doc(hidden)] pub struct SelectCoord {
+    #[doc(hidden)] pub done: AtomicBool,
+}
+
+impl SelectCoord {
+    #[allow(dead_code)] // wired up in M16f-α step 4 (select! macro)
+    #[doc(hidden)] pub fn new() -> Self {
+        SelectCoord {
+            done: AtomicBool::new(false),
+        }
+    }
+}
+
 /// Wait-list entry for a parked goroutine. Lives on the stack of
 /// the goroutine that's parking.
-struct Sudog<T> {
-    g: NonNull<G>,
+#[doc(hidden)] pub struct Sudog<T> {
+    #[doc(hidden)] pub g: NonNull<G>,
     /// Send sudog: starts `Some(value)`, taken by a matching
     /// receiver. Recv sudog: starts `None`, filled by a matching
     /// sender.
-    value: Option<T>,
+    #[doc(hidden)] pub value: Option<T>,
     /// True on a successful handoff; false on a close-induced
     /// wakeup.
-    success: bool,
+    #[doc(hidden)] pub success: bool,
+    /// `Some(coord)` if this sudog belongs to a `select!`; `None`
+    /// for plain `Send`/`Recv`. Wakers consult `coord.done` via CAS
+    /// before firing; on a stale sudog the CAS fails and the waker
+    /// must skip this entry and try the next.
+    #[doc(hidden)] pub coord: Option<NonNull<SelectCoord>>,
+}
+
+impl<T> Sudog<T> {
+    /// Build a non-select send sudog carrying `v`.
+    #[doc(hidden)] pub fn new_send(g: NonNull<G>, v: T) -> Self {
+        Sudog {
+            g,
+            value: Some(v),
+            success: false,
+            coord: None,
+        }
+    }
+
+    /// Build a non-select recv sudog (empty value slot).
+    #[doc(hidden)] pub fn new_recv(g: NonNull<G>) -> Self {
+        Sudog {
+            g,
+            value: None,
+            success: false,
+            coord: None,
+        }
+    }
+
+    /// Build a select-bound send sudog carrying `v`. The waker that
+    /// pops this sudog must succeed at `coord.done` CAS to fire it.
+    #[allow(dead_code)] // wired up in M16f-α step 4 (select! macro)
+    #[doc(hidden)] pub fn new_send_select(
+        g: NonNull<G>,
+        v: T,
+        coord: NonNull<SelectCoord>,
+    ) -> Self {
+        Sudog {
+            g,
+            value: Some(v),
+            success: false,
+            coord: Some(coord),
+        }
+    }
+
+    /// Build a select-bound recv sudog. CAS-gated like its send peer.
+    #[allow(dead_code)] // wired up in M16f-α step 4 (select! macro)
+    #[doc(hidden)] pub fn new_recv_select(g: NonNull<G>, coord: NonNull<SelectCoord>) -> Self {
+        Sudog {
+            g,
+            value: None,
+            success: false,
+            coord: Some(coord),
+        }
+    }
 }
 
 unsafe impl<T> Send for Sudog<T> {}
@@ -136,60 +240,211 @@ fn fatal(msg: &[u8]) -> ! {
     syscall::Exit(2);
 }
 
+/// CAS-claim a sudog before firing it. Returns `true` if this waker
+/// is allowed to proceed with the handoff, `false` if the sudog is a
+/// stale `select!` entry (another case in the same select already
+/// won) and the waker must discard it.
+///
+/// AcqRel on success ensures any subsequent writes to the sudog
+/// (`value`, `success`) and the subsequent `goready` happen-after the
+/// claim is observed under M17a multi-M; on the failure path we use
+/// Acquire so we observe the winning waker's state if we want to
+/// inspect the sudog (we don't, but it's the conservative choice).
+///
+/// For non-select sudogs (`coord == None`) the CAS is skipped and
+/// the waker always succeeds.
+#[inline]
+fn try_claim_sudog<T>(sg: NonNull<Sudog<T>>) -> bool {
+    let coord_opt = unsafe { (*sg.as_ptr()).coord };
+    let coord = match coord_opt {
+        None => return true, // plain Send/Recv — always claim
+        Some(c) => c,
+    };
+    let done_ref = unsafe { &(*coord.as_ptr()).done };
+    done_ref
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+// ─── Internal helpers (composed by Send/Recv and by select!) ───────
+
+impl<T> chan<T> {
+    /// Try to send `v` without parking. Returns `Ok(())` on success
+    /// (handed off to a parked receiver, or pushed into the buffer).
+    /// Returns `Err(v)` if the operation would block (no parked
+    /// receiver, buffer full, chan unbuffered with no waiter).
+    /// Panics on closed chan — Go semantics for `c <- v`.
+    #[doc(hidden)] pub fn __try_send(&self, v: T) -> Result<(), T> {
+        let mut s = self.inner.state.lock();
+        if s.closed {
+            drop(s);
+            fatal(b"goish: chan: send on closed channel\n");
+        }
+
+        // Scan recvq in FIFO order. CAS-claim each candidate; on a
+        // stale select sudog (claim fails), leave it in place — the
+        // parking G's pass-3 will cancel it. Removing it here would
+        // hide the loser from `__cancel_recv`'s "is it still in the
+        // queue?" check that distinguishes winner from loser.
+        let mut i = 0;
+        while i < s.recvq.len() {
+            let recv_ptr = s.recvq[i];
+            if !try_claim_sudog(recv_ptr) {
+                i += 1;
+                continue;
+            }
+            // Claim succeeded — remove from queue and hand off.
+            s.recvq.remove(i);
+            unsafe {
+                (*recv_ptr.as_ptr()).value = Some(v);
+                (*recv_ptr.as_ptr()).success = true;
+            }
+            let recv_g = unsafe { (*recv_ptr.as_ptr()).g };
+            drop(s);
+            goready(recv_g);
+            return Ok(());
+        }
+
+        // Buffer has room — push and return.
+        if s.buf.len() < s.cap {
+            s.buf.push_back(v);
+            return Ok(());
+        }
+
+        // Would block.
+        Err(v)
+    }
+
+    /// Try to recv without parking. Returns `Some((v, ok))` if a
+    /// value (or close-and-empty terminator) is immediately
+    /// available. Returns `None` if the operation would block.
+    #[doc(hidden)] pub fn __try_recv(&self) -> Option<(T, bool)>
+    where
+        T: Default,
+    {
+        let mut s = self.inner.state.lock();
+
+        // closed-and-empty → (zero, false)
+        if s.closed && s.buf.is_empty() {
+            drop(s);
+            return Some((T::default(), false));
+        }
+
+        // Parked sender beats non-empty buffer (rotates buf if cap>0).
+        // Peek + CAS-claim; only remove a sudog from sendq once we
+        // successfully claim it. Stale select sudogs stay in place
+        // for pass-3 cleanup by the parking G.
+        let mut i = 0;
+        while i < s.sendq.len() {
+            let send_ptr = s.sendq[i];
+            if !try_claim_sudog(send_ptr) {
+                i += 1;
+                continue;
+            }
+            s.sendq.remove(i);
+            let sender_v = unsafe {
+                (*send_ptr.as_ptr())
+                    .value
+                    .take()
+                    .expect("recv: sender sudog empty")
+            };
+            let v = if s.cap == 0 {
+                sender_v
+            } else {
+                let head = s
+                    .buf
+                    .pop_front()
+                    .expect("recv: buf empty with parked sender");
+                s.buf.push_back(sender_v);
+                head
+            };
+            unsafe {
+                (*send_ptr.as_ptr()).success = true;
+            }
+            let send_g = unsafe { (*send_ptr.as_ptr()).g };
+            drop(s);
+            goready(send_g);
+            return Some((v, true));
+        }
+
+        // Non-empty buffer.
+        if let Some(v) = s.buf.pop_front() {
+            return Some((v, true));
+        }
+
+        None
+    }
+
+    /// Enqueue a send-direction sudog on `sendq`. Caller is
+    /// responsible for `gopark`-ing afterwards and inspecting
+    /// `sg.success` on wake. Returns `false` if the chan is closed
+    /// (caller should panic before parking).
+    #[doc(hidden)] pub fn __register_send(&self, sg: &mut Sudog<T>) -> bool {
+        let mut s = self.inner.state.lock();
+        if s.closed {
+            return false;
+        }
+        s.sendq.push_back(NonNull::from(sg));
+        true
+    }
+
+    /// Enqueue a recv-direction sudog on `recvq`. Returns `Err(())`
+    /// if the chan is already closed-and-empty (caller should
+    /// return `(zero, false)` and not park).
+    #[doc(hidden)] pub fn __register_recv(&self, sg: &mut Sudog<T>) -> Result<(), ()> {
+        let mut s = self.inner.state.lock();
+        if s.closed && s.buf.is_empty() {
+            return Err(());
+        }
+        s.recvq.push_back(NonNull::from(sg));
+        Ok(())
+    }
+
+    /// Drop a previously-registered send sudog from `sendq`. Returns
+    /// `true` if the sudog was found and removed (this case lost the
+    /// select), `false` if it was already gone (this case won — the
+    /// firing waker had popped it out of the queue).
+    ///
+    /// Used by `select!` pass-3 to (a) clean up losing cases and
+    /// (b) identify the winning case in one pass.
+    #[doc(hidden)] pub fn __cancel_send(&self, sg: NonNull<Sudog<T>>) -> bool {
+        let mut s = self.inner.state.lock();
+        let before = s.sendq.len();
+        s.sendq.retain(|p| *p != sg);
+        s.sendq.len() != before
+    }
+
+    /// Drop a previously-registered recv sudog from `recvq`. Same
+    /// winner/loser convention as `__cancel_send`.
+    #[doc(hidden)] pub fn __cancel_recv(&self, sg: NonNull<Sudog<T>>) -> bool {
+        let mut s = self.inner.state.lock();
+        let before = s.recvq.len();
+        s.recvq.retain(|p| *p != sg);
+        s.recvq.len() != before
+    }
+}
+
+// ─── Public Send / Recv / Close — thin wrappers over helpers ───────
+
 impl<T> chan<T> {
     /// `c <- v` — send `v` on the channel. Blocks if no receiver
     /// is ready and the buffer is full (or the channel is
     /// unbuffered with no parked receiver). Panics on closed
     /// channels.
     pub fn Send(&self, v: T) {
-        // Phase 1: try the fast paths under the lock.
-        let v_to_park = {
-            let mut s = self.inner.state.lock();
-            if s.closed {
-                drop(s);
-                fatal(b"goish: chan: send on closed channel\n");
-            }
-
-            // Parked receiver beats buffer space — direct handoff.
-            if let Some(recv_ptr) = s.recvq.pop_front() {
-                unsafe {
-                    (*recv_ptr.as_ptr()).value = Some(v);
-                    (*recv_ptr.as_ptr()).success = true;
-                }
-                let recv_g = unsafe { (*recv_ptr.as_ptr()).g };
-                drop(s);
-                goready(recv_g);
-                return;
-            }
-
-            // Buffer has room — push and return.
-            if s.buf.len() < s.cap {
-                s.buf.push_back(v);
-                return;
-            }
-
-            // Buffer full (or cap=0). Carry `v` into the park phase.
-            v
+        // Phase 1: try the non-blocking fast paths.
+        let v = match self.__try_send(v) {
+            Ok(()) => return,
+            Err(v) => v,
         };
 
         // Phase 2: park on sendq with our value.
         let g = current_g().unwrap_or_else(|| {
             fatal(b"goish: chan: Send outside of any goroutine\n")
         });
-        let mut my_sudog = Sudog::<T> {
-            g,
-            value: Some(v_to_park),
-            success: false,
-        };
-        let sudog_ptr = NonNull::from(&mut my_sudog);
-        {
-            let mut s = self.inner.state.lock();
-            // Re-check closed since we briefly dropped the lock.
-            if s.closed {
-                drop(s);
-                fatal(b"goish: chan: send on closed channel\n");
-            }
-            s.sendq.push_back(sudog_ptr);
+        let mut my_sudog = Sudog::new_send(g, v);
+        if !self.__register_send(&mut my_sudog) {
+            fatal(b"goish: chan: send on closed channel\n");
         }
         gopark(|| true);
 
@@ -209,64 +464,18 @@ impl<T> chan<T> {
     where
         T: Default,
     {
-        // Phase 1: try the fast paths under the lock.
-        {
-            let mut s = self.inner.state.lock();
-
-            if s.closed && s.buf.is_empty() {
-                drop(s);
-                return (T::default(), false);
-            }
-
-            if let Some(send_ptr) = s.sendq.pop_front() {
-                let sender_v = unsafe {
-                    (*send_ptr.as_ptr())
-                        .value
-                        .take()
-                        .expect("recv: sender sudog empty")
-                };
-                let v = if s.cap == 0 {
-                    sender_v
-                } else {
-                    // Buffered with parked sender ⇒ buffer was full.
-                    // Pop the head for the receiver, push sender's
-                    // value to the tail to fill the freed slot.
-                    let head = s.buf.pop_front().expect("recv: buf empty with parked sender");
-                    s.buf.push_back(sender_v);
-                    head
-                };
-                unsafe {
-                    (*send_ptr.as_ptr()).success = true;
-                }
-                let send_g = unsafe { (*send_ptr.as_ptr()).g };
-                drop(s);
-                goready(send_g);
-                return (v, true);
-            }
-
-            if let Some(v) = s.buf.pop_front() {
-                return (v, true);
-            }
+        // Phase 1: try the non-blocking fast paths.
+        if let Some(result) = self.__try_recv() {
+            return result;
         }
 
         // Phase 2: park on recvq.
         let g = current_g().unwrap_or_else(|| {
             fatal(b"goish: chan: Recv outside of any goroutine\n")
         });
-        let mut my_sudog = Sudog::<T> {
-            g,
-            value: None,
-            success: false,
-        };
-        let sudog_ptr = NonNull::from(&mut my_sudog);
-        {
-            let mut s = self.inner.state.lock();
-            // Re-check closed-and-empty since we briefly dropped the lock.
-            if s.closed && s.buf.is_empty() {
-                drop(s);
-                return (T::default(), false);
-            }
-            s.recvq.push_back(sudog_ptr);
+        let mut my_sudog = Sudog::new_recv(g);
+        if self.__register_recv(&mut my_sudog).is_err() {
+            return (T::default(), false);
         }
         gopark(|| true);
 
@@ -286,6 +495,12 @@ impl<T> chan<T> {
     /// the channel is already closed. Buffered values remain in
     /// the buffer and are drained by future `Recv` calls before
     /// they start returning `(zero, false)`.
+    ///
+    /// Stale `select!` sudogs (whose select already won via another
+    /// case) fail the CAS-claim and are left in the queue; the
+    /// owning goroutine's pass-3 will cancel them when it resumes.
+    /// This keeps "close on multiple chans of one select" from
+    /// firing more than one case of that select.
     pub fn Close(&self) {
         let mut s = self.inner.state.lock();
         if s.closed {
@@ -294,7 +509,14 @@ impl<T> chan<T> {
         }
         s.closed = true;
 
-        while let Some(recv_ptr) = s.recvq.pop_front() {
+        let mut i = 0;
+        while i < s.recvq.len() {
+            let recv_ptr = s.recvq[i];
+            if !try_claim_sudog(recv_ptr) {
+                i += 1;
+                continue;
+            }
+            s.recvq.remove(i);
             unsafe {
                 (*recv_ptr.as_ptr()).success = false;
                 (*recv_ptr.as_ptr()).value = None;
@@ -302,7 +524,14 @@ impl<T> chan<T> {
             let recv_g = unsafe { (*recv_ptr.as_ptr()).g };
             goready(recv_g);
         }
-        while let Some(send_ptr) = s.sendq.pop_front() {
+        let mut i = 0;
+        while i < s.sendq.len() {
+            let send_ptr = s.sendq[i];
+            if !try_claim_sudog(send_ptr) {
+                i += 1;
+                continue;
+            }
+            s.sendq.remove(i);
             unsafe {
                 (*send_ptr.as_ptr()).success = false;
             }

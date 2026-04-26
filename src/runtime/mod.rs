@@ -20,6 +20,7 @@ pub mod heap;
 pub mod mcentral;
 pub mod mheap;
 mod mem;
+pub mod rand;
 pub mod sched;
 pub mod spin;
 pub use heap::{alloc, free, mheap_alloc_pages, mheap_free_pages, realloc};
@@ -33,6 +34,10 @@ pub use heap::{alloc, free, mheap_alloc_pages, mheap_free_pages, realloc};
 pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // Stash argc/argv so os::Args() can decode them lazily on first use.
     args::__set(argc, argv);
+
+    // Seed the cheaprand state from rdtsc so each process run starts
+    // with a different select fairness sequence.
+    rand::init();
 
     // Bring mheap online before user code runs. Until this finishes,
     // every alloc routes through dlmalloc (MHEAP_READY = false). After

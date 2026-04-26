@@ -225,3 +225,15 @@ path = "examples/chan_unbuffered.rs"
 [[example]]
 name = "chan_buffered"
 path = "examples/chan_buffered.rs"
+
+[[example]]
+name = "rand_smoke"
+path = "examples/rand_smoke.rs"
+
+[[example]]
+name = "select_handcoded"
+path = "examples/select_handcoded.rs"
+
+[[example]]
+name = "select_smoke"
+path = "examples/select_smoke.rs"

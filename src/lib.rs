@@ -49,6 +49,7 @@ pub mod os;
 pub mod range;
 pub mod reflect;
 pub mod runtime;
+pub mod select_macro;
 pub mod slices;
 pub mod strconv;
 pub mod strings;
