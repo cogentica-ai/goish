@@ -13,10 +13,7 @@
 #![no_std]
 #![no_main]
 
-use goish::{
-    error, errors, fmt, len, nil, os, range, slice, string, syscall, Eprintln, Errorf, Fprintf,
-    Fprintln, Println, Sprintf,
-};
+use goish::{error, errors, len, nil, os, range, string, Fprintf, Fprintln, Println, Sprintf};
 
 // Stand-in for `strings::ToUpper` (M10). Just uppercases ASCII letters,
 // leaves the rest alone — fine for this demo's input.

@@ -85,9 +85,6 @@ impl FmtBuf {
     fn into_bytes(self) -> Vec<byte> {
         self.buf
     }
-    fn len(&self) -> usize {
-        self.buf.len()
-    }
 }
 
 // ─── FmtArg — the autoref-spec dispatch envelope ──────────────────────

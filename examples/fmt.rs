@@ -7,7 +7,7 @@
 #![no_main]
 
 use goish::fmt::Stringer;
-use goish::{errors, fmt, int, nil, os, rune, string, syscall, Errorf, Fprintf, Fprintln, Println, Printf, Sprintf};
+use goish::{errors, int, nil, os, rune, string, syscall, Errorf, Fprintf, Fprintln, Println, Printf, Sprintf};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());

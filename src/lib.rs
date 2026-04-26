@@ -38,6 +38,7 @@ pub mod io;
 pub mod os;
 pub mod range;
 pub mod runtime;
+pub mod strings;
 pub mod syscall;
 pub mod types;
 pub mod unicode;

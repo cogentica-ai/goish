@@ -69,3 +69,7 @@ path = "examples/fmt.rs"
 [[example]]
 name = "greet"
 path = "examples/greet.rs"
+
+[[example]]
+name = "tags"
+path = "examples/tags.rs"
