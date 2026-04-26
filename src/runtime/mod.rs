@@ -17,6 +17,7 @@ use crate::syscall;
 
 pub mod args;
 mod heap;
+pub mod mheap;
 mod mem;
 pub mod spin;
 pub use heap::{alloc, free, realloc};

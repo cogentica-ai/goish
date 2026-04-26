@@ -185,3 +185,11 @@ path = "examples/reflect_tier2.rs"
 [[example]]
 name = "strings_completeness"
 path = "examples/strings_completeness.rs"
+
+[[example]]
+name = "mheap_palloc"
+path = "examples/mheap_palloc.rs"
+
+[[example]]
+name = "mheap_palloc_stress"
+path = "examples/mheap_palloc_stress.rs"
