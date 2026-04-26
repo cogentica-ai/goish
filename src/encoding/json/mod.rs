@@ -167,58 +167,79 @@ impl Marshaler for Value {
     }
 }
 
+// json::Value impls reflect::Reflect so it can flow through the
+// generic `Marshal<T: Reflect>` path. Object → reflect::Value::Map
+// (string keys), Array → reflect::Value::Slice, Number → Float64.
+// Null collapses to reflect::Value::Invalid (encoded as "null").
+impl crate::reflect::Reflect for Value {
+    fn __reflect_type() -> crate::reflect::Type {
+        crate::reflect::Type::__new(crate::reflect::Kind::Invalid, "", &[])
+    }
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        use crate::reflect::Value as RV;
+        match self {
+            Value::Null => RV::Invalid,
+            Value::Bool(b) => RV::Bool(*b),
+            Value::Number(n) => RV::Float64(*n),
+            Value::String(s) => RV::String(s.clone()),
+            Value::Array(a) => {
+                let mut items: Vec<RV> = Vec::with_capacity(a.Len() as usize);
+                for i in 0..a.Len() {
+                    items.push(<Value as crate::reflect::Reflect>::__reflect_value(&a[i]));
+                }
+                RV::Slice {
+                    elem_type: <Value as crate::reflect::Reflect>::__reflect_type,
+                    items,
+                }
+            }
+            Value::Object(o) => {
+                let mut entries: Vec<(RV, RV)> = Vec::with_capacity(o.Len() as usize);
+                for (k, v) in o.__iter() {
+                    entries.push((
+                        RV::String(k.clone()),
+                        <Value as crate::reflect::Reflect>::__reflect_value(v),
+                    ));
+                }
+                RV::Map {
+                    key_type: <string as crate::reflect::Reflect>::__reflect_type,
+                    value_type: <Value as crate::reflect::Reflect>::__reflect_type,
+                    entries,
+                }
+            }
+        }
+    }
+}
+
 // ─── Marshal / MarshalIndent ───────────────────────────────────────────
 
-pub fn Marshal(v: &Value) -> (slice<byte>, error) {
-    v.MarshalJSON()
-}
-
-pub fn MarshalIndent(v: &Value, prefix: &str, indent: &str) -> (slice<byte>, error) {
-    let mut out: Vec<byte> = Vec::new();
-    let cfg = IndentCfg { prefix, indent };
-    encode_value(&mut out, v, Some(&cfg), prefix, 0);
-    (slice::__from_vec(out), nil)
-}
-
-// ─── Reflect-driven Marshal (tag-driven) ──────────────────────────────
-//
-// Walks any `T: reflect::Reflect` and emits JSON. Struct field names are
-// rewritten via `Tag.Get("json")`; the `omitempty` option skips zero
-// values. Arrays/slices map to JSON arrays. This is the Go-shape path:
-//
-//   #[goish::reflect]
-//   pub struct Person {
-//       #[tag(r#"json:"name""#)]                   Name: string,
-//       #[tag(r#"json:"age,omitempty""#)]          Age: int,
-//   }
-//   let p = Person { Name: string("alice"), Age: 30 };
-//   let (b, err) = json::MarshalReflect(&p);
-//
-// Will be unified under `Marshal` once `reflect::Value` grows a Map
-// variant and `json::Value` impls `Reflect`.
-
-use crate::reflect;
-
-/// `json.Marshal(any)` over any `Reflect` type — tag-driven.
-pub fn MarshalReflect<T: reflect::Reflect + ?Sized>(v: &T) -> (slice<byte>, error) {
-    let rv = reflect::ValueOf(v);
+/// `json.Marshal(v)` — encode any `Reflect` value as JSON. Struct
+/// fields are renamed via `Tag.Get("json")` (with `omitempty` and `-`
+/// support); maps with string keys become JSON objects in sorted-key
+/// order; slices become arrays. The Go `Marshaler` trait is honored
+/// for `json::Value` directly via this generic path.
+pub fn Marshal<T: crate::reflect::Reflect + ?Sized>(v: &T) -> (slice<byte>, error) {
+    let rv = crate::reflect::ValueOf(v);
     let mut out: Vec<byte> = Vec::new();
     encode_reflect(&mut out, &rv);
     (slice::__from_vec(out), nil)
 }
 
-/// `json.MarshalIndent` over any `Reflect` type — tag-driven, with indent.
-pub fn MarshalIndentReflect<T: reflect::Reflect + ?Sized>(
+/// `json.MarshalIndent(v, prefix, indent)` — pretty-printed variant.
+pub fn MarshalIndent<T: crate::reflect::Reflect + ?Sized>(
     v: &T,
     prefix: &str,
     indent: &str,
 ) -> (slice<byte>, error) {
-    let rv = reflect::ValueOf(v);
+    let rv = crate::reflect::ValueOf(v);
     let mut out: Vec<byte> = Vec::new();
     let cfg = IndentCfg { prefix, indent };
     encode_reflect_indent(&mut out, &rv, &cfg, 0);
     (slice::__from_vec(out), nil)
 }
+
+// ─── Reflect-driven encoder (used by Marshal / MarshalIndent) ─────────
+
+use crate::reflect;
 
 fn encode_reflect(out: &mut Vec<byte>, v: &reflect::Value) {
     use reflect::Kind as K;
@@ -250,6 +271,7 @@ fn encode_reflect(out: &mut Vec<byte>, v: &reflect::Value) {
             }
             out.push(b']');
         }
+        K::Map => encode_map(out, v, None, 0),
         K::Struct => encode_struct(out, v, None, 0),
         _ => out.extend_from_slice(b"null"),
     }
@@ -280,9 +302,50 @@ fn encode_reflect_indent(
             write_newline_indent(out, cfg, depth);
             out.push(b']');
         }
+        K::Map => encode_map(out, v, Some(cfg), depth),
         K::Struct => encode_struct(out, v, Some(cfg), depth),
         _ => encode_reflect(out, v),
     }
+}
+
+fn encode_map(out: &mut Vec<byte>, v: &reflect::Value, cfg: Option<&IndentCfg>, depth: usize) {
+    let keys = v.MapKeys();
+    if keys.is_empty() {
+        out.extend_from_slice(b"{}");
+        return;
+    }
+    out.push(b'{');
+    let inner = depth + 1;
+    for (i, k) in keys.iter().enumerate() {
+        if i > 0 {
+            out.push(b',');
+        }
+        if let Some(c) = cfg {
+            write_newline_indent(out, c, inner);
+        }
+        // String-keyed maps emit the key as-is. Non-string keys would
+        // need stringification (Go calls `json.Marshaler` or `TextMarshaler`
+        // on the key). v1 just emits the kind label as a string so output
+        // stays valid JSON; later iterations will handle this faithfully.
+        let key_str = match k {
+            reflect::Value::String(s) => s.clone(),
+            _ => k.Kind().String(),
+        };
+        encode_string(out, key_str.as_bytes());
+        out.push(b':');
+        if cfg.is_some() {
+            out.push(b' ');
+        }
+        let fv = v.MapIndex(k);
+        match cfg {
+            Some(c) => encode_reflect_indent(out, &fv, c, inner),
+            None => encode_reflect(out, &fv),
+        }
+    }
+    if let Some(c) = cfg {
+        write_newline_indent(out, c, depth);
+    }
+    out.push(b'}');
 }
 
 fn encode_struct(out: &mut Vec<byte>, v: &reflect::Value, cfg: Option<&IndentCfg>, depth: usize) {

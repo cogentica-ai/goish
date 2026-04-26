@@ -330,6 +330,14 @@ pub enum Value {
         elem_type: fn() -> Type,
         items: Vec<Value>,
     },
+    Map {
+        key_type: fn() -> Type,
+        value_type: fn() -> Type,
+        /// (key, value) pairs in stable order. Goish's `map<K,V>` is
+        /// BTreeMap-backed, so this list is key-sorted; that's also the
+        /// order we use for json.Marshal output.
+        entries: Vec<(Value, Value)>,
+    },
     Struct {
         ty: Type,
         fields: Vec<Value>,
@@ -355,6 +363,7 @@ impl Value {
             Value::Float64(_) => Kind::Float64,
             Value::String(_) => Kind::String,
             Value::Slice { .. } => Kind::Slice,
+            Value::Map { .. } => Kind::Map,
             Value::Struct { .. } => Kind::Struct,
             Value::Pointer(_) => Kind::Pointer,
         }
@@ -365,12 +374,9 @@ impl Value {
         match self {
             Value::Struct { ty, .. } => *ty,
             Value::Slice { .. } => Type::__new(Kind::Slice, "", &[]),
+            Value::Map { .. } => Type::__new(Kind::Map, "", &[]),
             _ => Type::__new(self.Kind(), self.Kind().__static_name(), &[]),
         }
-        .__with_elem(match self {
-            Value::Slice { elem_type, .. } => Some(*elem_type),
-            _ => None,
-        })
     }
 
     /// `IsValid()` — false for the zero-Value (`Value::Invalid`).
@@ -396,6 +402,7 @@ impl Value {
             Value::Float64(f) => *f == 0.0,
             Value::String(s) => s.as_bytes().is_empty(),
             Value::Slice { items, .. } => items.is_empty(),
+            Value::Map { entries, .. } => entries.is_empty(),
             Value::Struct { fields, .. } => fields.iter().all(Value::IsZero),
             Value::Pointer(_) => false,
         }
@@ -449,12 +456,38 @@ impl Value {
         }
     }
 
-    /// `Len()` — element count for slice/string. Panics for other kinds.
+    /// `Len()` — element count for slice/string/map. Panics otherwise.
     pub fn Len(&self) -> int {
         match self {
             Value::Slice { items, .. } => items.len() as int,
             Value::String(s) => s.as_bytes().len() as int,
-            _ => panic!("reflect.Value.Len of non-slice/string"),
+            Value::Map { entries, .. } => entries.len() as int,
+            _ => panic!("reflect.Value.Len of non-slice/string/map"),
+        }
+    }
+
+    /// `MapKeys()` — keys in stable (sorted) order. Panics if not Map.
+    pub fn MapKeys(&self) -> Vec<Value> {
+        match self {
+            Value::Map { entries, .. } => entries.iter().map(|(k, _)| k.clone()).collect(),
+            _ => panic!("reflect.Value.MapKeys of non-map"),
+        }
+    }
+
+    /// `MapIndex(key)` — value for key, or `Value::Invalid` if absent.
+    /// Linear scan for v1 (entries are sorted; we could binary-search
+    /// over comparable keys, but v1 keeps it straightforward).
+    pub fn MapIndex(&self, key: &Value) -> Value {
+        match self {
+            Value::Map { entries, .. } => {
+                for (k, v) in entries {
+                    if value_eq(k, key) {
+                        return v.clone();
+                    }
+                }
+                Value::Invalid
+            }
+            _ => panic!("reflect.Value.MapIndex of non-map"),
         }
     }
 
@@ -499,14 +532,26 @@ impl Value {
     }
 }
 
-// Tiny helper so Value::Type() can stitch in elem fn pointer for slices.
-impl Type {
-    #[doc(hidden)]
-    pub const fn __with_elem(self, _e: Option<fn() -> Type>) -> Self {
-        // v1: slice element type is conveyed via Value::Slice's elem_type
-        // field, not via Type. This stub keeps the call site clean for
-        // future expansion (Go's Type.Elem() lives on Type, not Value).
-        self
+/// Structural equality for use by `MapIndex`. Compares by Kind and
+/// payload. Sufficient for json-shaped lookups (string keys); for
+/// general use the `reflect.DeepEqual` port (later iteration) will be
+/// the public API.
+fn value_eq(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Invalid, Value::Invalid) => true,
+        (Value::Bool(x), Value::Bool(y)) => x == y,
+        (Value::Int(x), Value::Int(y)) => x == y,
+        (Value::Int8(x), Value::Int8(y)) => x == y,
+        (Value::Int16(x), Value::Int16(y)) => x == y,
+        (Value::Int32(x), Value::Int32(y)) => x == y,
+        (Value::Uint(x), Value::Uint(y)) => x == y,
+        (Value::Uint8(x), Value::Uint8(y)) => x == y,
+        (Value::Uint16(x), Value::Uint16(y)) => x == y,
+        (Value::Uint32(x), Value::Uint32(y)) => x == y,
+        (Value::Float32(x), Value::Float32(y)) => x == y,
+        (Value::Float64(x), Value::Float64(y)) => x == y,
+        (Value::String(x), Value::String(y)) => x == y,
+        _ => false,
     }
 }
 
@@ -623,6 +668,35 @@ impl<T: Reflect + Clone> Reflect for slice<T> {
         Value::Slice {
             elem_type: <T as Reflect>::__reflect_type,
             items,
+        }
+    }
+}
+
+// ─── map<K, V: Reflect> — generic Reflect impl ────────────────────────
+//
+// Goish's map<K,V> is BTreeMap-backed, so __iter() walks keys in sorted
+// order. We preserve that order in the Map variant, which means
+// json.Marshal output is deterministic for free.
+
+use crate::gomap::map as gomap_map;
+
+impl<K, V> Reflect for gomap_map<K, V>
+where
+    K: Reflect + Ord + Default + Clone,
+    V: Reflect + Default + Clone,
+{
+    fn __reflect_type() -> Type {
+        Type::__new(Kind::Map, "", &[])
+    }
+    fn __reflect_value(&self) -> Value {
+        let mut entries: Vec<(Value, Value)> = Vec::with_capacity(self.Len() as usize);
+        for (k, v) in self.__iter() {
+            entries.push((k.__reflect_value(), v.__reflect_value()));
+        }
+        Value::Map {
+            key_type: <K as Reflect>::__reflect_type,
+            value_type: <V as Reflect>::__reflect_type,
+            entries,
         }
     }
 }
