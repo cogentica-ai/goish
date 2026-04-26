@@ -193,3 +193,7 @@ path = "examples/mheap_palloc.rs"
 [[example]]
 name = "mheap_palloc_stress"
 path = "examples/mheap_palloc_stress.rs"
+
+[[example]]
+name = "mheap_palloc_multi"
+path = "examples/mheap_palloc_multi.rs"

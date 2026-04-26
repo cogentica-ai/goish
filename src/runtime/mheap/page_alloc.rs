@@ -372,6 +372,88 @@ impl PageAlloc {
         self.update(base, npages);
     }
 
+    /// `(*pageAlloc).grow` — extend the heap by `n_more` chunks of
+    /// fresh memory contiguous with the existing arena. The caller is
+    /// responsible for ensuring the new range is mmap'd and writable.
+    /// Phase 2b'-β: contiguous extension only; non-contiguous arenas
+    /// (Go's `inUse` ranges) land later if needed.
+    ///
+    /// Mirrors Go's `(*pageAlloc).grow`: a `grow` is treated as a
+    /// `free` operation — newly-mapped pages are added to the page
+    /// heap as available.
+    pub fn grow(&mut self, n_more: usize) {
+        if n_more == 0 {
+            return;
+        }
+        let old_count = self.end_chunk;
+        let new_count = old_count + n_more;
+
+        // Extend the per-chunk bitmap storage. New chunks start
+        // entirely free (all-zero bitmap).
+        self.chunks.reserve(n_more);
+        for _ in 0..n_more {
+            self.chunks.push(PallocBits::zero());
+        }
+        self.end_chunk = new_count;
+
+        // Re-size each summary level. summary[0] already covers a
+        // full root block (1 << LEVEL_BITS[0] entries), so it never
+        // needs to grow in this single-arena setup. Levels 1..4
+        // grow to cover the new chunk range, padded up to the
+        // parent block size at that level.
+        for l in 1..SUMMARY_LEVELS {
+            let level_bits_total: u32 = LEVEL_BITS[l..].iter().sum::<u32>();
+            let shift = level_bits_total - LEVEL_BITS[l];
+            let entries_for_heap = ((new_count + (1usize << shift) - 1) >> shift).max(1);
+            let block = 1usize << LEVEL_BITS[l];
+            let needed = entries_for_heap.div_ceil(block) * block;
+            if self.summary[l].len() < needed {
+                self.summary[l].resize(needed, PallocSum::empty());
+            }
+        }
+
+        // Populate new leaf summaries from the freshly-zeroed bitmaps.
+        for ci in old_count..new_count {
+            self.summary[SUMMARY_LEVELS - 1][ci] = self.chunks[ci].summarize();
+        }
+
+        // Bubble up. The grow only added chunks at the high end,
+        // so we need to refresh all parent entries whose children
+        // include the new range. For simplicity (and matching Go's
+        // approach of `update(base, size, contig=true, alloc=false)`)
+        // we re-merge across the affected branches.
+        //
+        // The leaf-level range affected is `[old_count, new_count)`;
+        // at each higher level, the affected parent index range
+        // contracts by the level's fanout.
+        let mut lo_chunk = old_count;
+        let mut hi_chunk = new_count;
+        for l in (0..SUMMARY_LEVELS - 1).rev() {
+            let log_entries_per_block = LEVEL_BITS[l + 1];
+            let log_max_pages = LEVEL_LOG_PAGES[l + 1];
+            let entries_per_block = 1usize << log_entries_per_block;
+            // Parent index range at this level.
+            let parent_lo = lo_chunk >> log_entries_per_block;
+            let parent_hi = (hi_chunk + entries_per_block - 1) >> log_entries_per_block;
+            for i in parent_lo..parent_hi {
+                let child_lo = i << log_entries_per_block;
+                let child_hi = child_lo + entries_per_block;
+                if child_hi > self.summary[l + 1].len() {
+                    continue;
+                }
+                let merged = merge_summaries(
+                    &self.summary[l + 1][child_lo..child_hi],
+                    log_max_pages,
+                );
+                if i < self.summary[l].len() {
+                    self.summary[l][i] = merged;
+                }
+            }
+            lo_chunk = parent_lo;
+            hi_chunk = parent_hi;
+        }
+    }
+
     /// Total free pages in the arena, computed from the root summary.
     /// Useful for tests.
     pub fn free_pages(&self) -> usize {
