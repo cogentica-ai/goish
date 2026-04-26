@@ -56,6 +56,12 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     }
     unsafe { __goish_main() }
 
+    // Drain any goroutines spawned with go!() that are still
+    // runnable. Mirrors Go's runtime.main() draining loop: after
+    // main.main returns, the runtime keeps dispatching goroutines
+    // until the queue empties.
+    sched::schedule();
+
     // Normal termination — Go's runtime.exit(0) equivalent.
     syscall::Exit(0)
 }

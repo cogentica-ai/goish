@@ -209,3 +209,7 @@ path = "examples/mcentral_smoke.rs"
 [[example]]
 name = "sched_swap"
 path = "examples/sched_swap.rs"
+
+[[example]]
+name = "sched_go"
+path = "examples/sched_go.rs"

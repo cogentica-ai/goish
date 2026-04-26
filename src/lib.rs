@@ -23,6 +23,7 @@ extern crate alloc;
 // Users never write this path directly.
 #[doc(hidden)]
 pub mod __macro_alloc {
+    pub use alloc::boxed::Box;
     pub use alloc::vec::Vec;
     pub use alloc::vec;
 }

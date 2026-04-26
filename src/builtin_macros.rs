@@ -160,3 +160,27 @@ macro_rules! delete {
         __m.Delete($k);
     }};
 }
+
+// ─── go!(closure) — spawn a goroutine ────────────────────────────────
+
+/// `go!(closure)` — Go's `go f()` statement. Schedules `closure` to
+/// run as a new goroutine; returns immediately. The closure runs
+/// when the scheduler dispatches it (cooperatively, on yield points
+/// or after main returns).
+///
+/// Examples:
+///
+///   go!(|| {
+///       println!("from a goroutine");
+///   });
+///
+///   let x = 42;
+///   go!(move || {
+///       println!("captured x = {}", x);
+///   });
+#[macro_export]
+macro_rules! go {
+    ($closure:expr) => {{
+        $crate::runtime::sched::newproc($crate::__macro_alloc::Box::new($closure));
+    }};
+}
