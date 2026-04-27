@@ -56,6 +56,7 @@ pub mod strconv;
 pub mod strings;
 pub mod sync;
 pub mod syscall;
+pub mod testing;
 pub mod time;
 pub mod types;
 pub mod unicode;

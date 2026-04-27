@@ -92,6 +92,14 @@ impl string {
     }
 }
 
+/// Crate-internal accessor for byte content. Called from sibling
+/// modules (e.g., `testing`, `fmt`) that need byte-level access
+/// without copying.
+#[inline]
+pub(crate) fn __crate_as_bytes(s: &string) -> &[u8] {
+    s.as_bytes()
+}
+
 impl Default for string {
     fn default() -> Self {
         Self::new()
