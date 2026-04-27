@@ -44,35 +44,27 @@ use core::ptr::NonNull;
 
 use super::g::{GStatus, G};
 use super::gobuf::{make_context, swap_context, Gobuf};
+use super::m::current_m;
 use crate::runtime::spin::SpinLock;
 
-/// Scheduler state.
+/// Globally-shared scheduler state. After M17a-β1, this only carries
+/// the (still-global) run queue; per-thread state — currently-running
+/// G, scheduler-side gobuf — moved to `super::m::M` so it can be
+/// per-thread once multi-M lands. M17b will further split the run
+/// queue per-P for work stealing.
 pub struct Sched {
     /// FIFO of runnable goroutines.
     runq: VecDeque<NonNull<G>>,
-    /// Saved register set when the scheduler is suspended (i.e.
-    /// when a G is running). `swap_context(&mut sched_buf, &g.gobuf)`
-    /// transfers control from the scheduler thread to the G;
-    /// `swap_context(&mut g.gobuf, &sched_buf)` transfers it back.
-    sched_buf: Gobuf,
-    /// Currently-executing G, or `None` when on the scheduler.
-    current: Option<NonNull<G>>,
 }
 
 impl Sched {
     pub const fn new() -> Self {
         Sched {
             runq: VecDeque::new(),
-            sched_buf: Gobuf::new(),
-            current: None,
         }
     }
 }
 
-// `NonNull<G>` is not `Send` by default. The Sched is accessed via
-// SpinLock, which requires its inner type be `Send` for `Sync`-ness.
-// In single-threaded use this is moot; we'll revisit when M17a
-// introduces real concurrency.
 unsafe impl Send for Sched {}
 
 static SCHED: SpinLock<Sched> = SpinLock::new(Sched::new());
@@ -93,26 +85,24 @@ pub fn newproc(closure: Box<dyn FnOnce()>) {
 /// scheduler thread itself), this is a no-op.
 #[allow(non_snake_case)]
 pub fn Gosched() {
-    let mut s = SCHED.lock();
-    let g_ptr = match s.current {
+    let g_ptr = match current_m().lock().current_g {
         Some(p) => p,
         None => return,
     };
-    // Push ourselves back onto the queue; status stays `Running`
-    // until we resume, but for clarity we mark Runnable here.
     unsafe {
         (*g_ptr.as_ptr()).status = GStatus::Runnable;
     }
-    s.runq.push_back(g_ptr);
-    // Capture pointers before releasing the lock — Sched is in a
-    // static SpinLock, so the addresses are stable.
+    SCHED.lock().runq.push_back(g_ptr);
+    // Capture pointers before releasing locks — both `MAIN_M` (M17a-β1)
+    // and `SCHED` are static, so the addresses are stable.
     let buf_from = unsafe { &mut (*g_ptr.as_ptr()).gobuf as *mut Gobuf };
-    let buf_to = &s.sched_buf as *const Gobuf;
-    drop(s);
+    let buf_to = {
+        let m = current_m().lock();
+        &m.sched_buf as *const Gobuf
+    };
     unsafe {
         swap_context(buf_from, buf_to);
     }
-    // When we resume, status is back to Running.
     unsafe {
         (*g_ptr.as_ptr()).status = GStatus::Running;
     }
@@ -122,18 +112,18 @@ pub fn Gosched() {
 /// dead and swaps back to the scheduler. Equivalent to Go's
 /// `runtime.goexit1` (proc.go:4431).
 fn goexit() -> ! {
-    let s = SCHED.lock();
-    let g_ptr = s.current.expect("goexit: no current G");
+    let g_ptr = current_m().lock().current_g.expect("goexit: no current G");
     unsafe {
         (*g_ptr.as_ptr()).status = GStatus::Dead;
     }
     let buf_from = unsafe { &mut (*g_ptr.as_ptr()).gobuf as *mut Gobuf };
-    let buf_to = &s.sched_buf as *const Gobuf;
-    drop(s);
+    let buf_to = {
+        let m = current_m().lock();
+        &m.sched_buf as *const Gobuf
+    };
     unsafe {
         swap_context(buf_from, buf_to);
     }
-    // The scheduler should never resume a dead G.
     unreachable_dead()
 }
 
@@ -146,20 +136,17 @@ fn unreachable_dead() -> ! {
 }
 
 /// Asm-trampoline target every G first jumps to via `make_context`.
-/// Picks up the G's entry closure (from a global lookup, since we
-/// can't pass it as an argument across `swap_context`'s
-/// register-only ABI) and invokes it. When the closure returns,
+/// Picks up the G's entry closure (the M's `current_g` knows which
+/// goroutine just resumed) and invokes it. When the closure returns,
 /// chain to `goexit`.
 extern "C" fn g_entry() -> ! {
-    // Take the entry closure out of the current G. This drops the
-    // `Box` slot to `None` so we don't try to call it twice.
     let entry = {
-        let s = SCHED.lock();
-        let g_ptr = s.current.expect("g_entry: no current G");
+        let g_ptr = current_m()
+            .lock()
+            .current_g
+            .expect("g_entry: no current G");
         unsafe { (*g_ptr.as_ptr()).entry.take().expect("g_entry: empty entry") }
     };
-    // Run the user's closure — outside the lock so it can spawn
-    // more goroutines, yield, etc.
     entry();
     goexit();
 }
@@ -173,15 +160,12 @@ extern "C" fn g_entry() -> ! {
 /// with main-thread work.
 pub fn schedule() {
     loop {
-        // Pop a G; release lock immediately.
         let g_opt = SCHED.lock().runq.pop_front();
         let mut g_ptr = match g_opt {
             Some(p) => p,
             None => return,
         };
 
-        // First-time entry needs the gobuf set up to start at
-        // `g_entry`. Subsequent entries just resume at the saved PC.
         let g = unsafe { g_ptr.as_mut() };
         if g.status == GStatus::Idle {
             unsafe {
@@ -190,28 +174,23 @@ pub fn schedule() {
         }
         g.status = GStatus::Running;
 
-        // Mark current and capture pointers before releasing lock.
-        {
-            let mut s = SCHED.lock();
-            s.current = Some(g_ptr);
-        }
-        let buf_to = &g.gobuf as *const Gobuf;
+        // Mark this M's current G; capture buf_from pointer before
+        // dropping the M lock. M's address is stable (static MAIN_M
+        // in β1, TLS-resolved in β2) so the `&mut sched_buf` raw
+        // pointer survives the lock release.
         let buf_from = {
-            let mut s = SCHED.lock();
-            &mut s.sched_buf as *mut Gobuf
+            let mut m = current_m().lock();
+            m.current_g = Some(g_ptr);
+            &mut m.sched_buf as *mut Gobuf
         };
+        let buf_to = &g.gobuf as *const Gobuf;
         unsafe {
             swap_context(buf_from, buf_to);
         }
 
-        // Resumed: G yielded or exited.
-        {
-            let mut s = SCHED.lock();
-            s.current = None;
-        }
+        current_m().lock().current_g = None;
+
         if g.status == GStatus::Dead {
-            // Reconstruct the `Box<G>` (we leaked it in `newproc`)
-            // and drop it. `Drop` on `Stack` munmaps the stack.
             let _ = unsafe { Box::from_raw(g_ptr.as_ptr()) };
         }
     }
@@ -223,12 +202,12 @@ pub fn runq_len() -> usize {
     SCHED.lock().runq.len()
 }
 
-/// Pointer to the currently-executing goroutine, or `None` if called
-/// from outside any goroutine (e.g. on the scheduler thread itself).
-/// Higher layers (channels, sync) need this to identify which G to
-/// park or wake.
+/// Pointer to the currently-executing goroutine on the calling M, or
+/// `None` if called from outside any goroutine (e.g. on the M's
+/// scheduler stack itself). Higher layers (channels, sync) need this
+/// to identify which G to park or wake.
 pub fn current_g() -> Option<NonNull<G>> {
-    SCHED.lock().current
+    current_m().lock().current_g
 }
 
 /// Suspend the current goroutine in the `Waiting` state. The G will
@@ -254,17 +233,15 @@ pub fn current_g() -> Option<NonNull<G>> {
 /// and the same code will run unchanged once M17a introduces
 /// multi-M concurrency.
 pub fn gopark<F: FnOnce() -> bool>(unlockf: F) {
-    // Identify the current G. If we're not inside a goroutine,
-    // there's nothing to park.
-    let g_ptr = match SCHED.lock().current {
+    let g_ptr = match current_m().lock().current_g {
         Some(p) => p,
         None => return,
     };
 
-    // Transition to Waiting *before* running unlockf. Any concurrent
-    // waker that consults g.status as part of its enqueue logic
-    // (per Go's semantic; not yet exercised in single-thread goish)
-    // will see Waiting and correctly enqueue.
+    // Transition to Waiting *before* running unlockf — atomic park
+    // pattern (Go runtime/proc.go:443). Any concurrent waker that
+    // consults g.status as part of its enqueue logic will see
+    // Waiting and correctly enqueue.
     unsafe {
         (*g_ptr.as_ptr()).status = GStatus::Waiting;
     }
@@ -278,19 +255,14 @@ pub fn gopark<F: FnOnce() -> bool>(unlockf: F) {
         return;
     }
 
-    // Park: hand control back to the scheduler. Capture the
-    // pointers before dropping the lock.
     let buf_from = unsafe { &mut (*g_ptr.as_ptr()).gobuf as *mut Gobuf };
     let buf_to = {
-        let s = SCHED.lock();
-        &s.sched_buf as *const Gobuf
+        let m = current_m().lock();
+        &m.sched_buf as *const Gobuf
     };
     unsafe {
         swap_context(buf_from, buf_to);
     }
-
-    // Resumed: a `goready` set our status to `Runnable` and the
-    // scheduler picked us up. Transition back to `Running`.
     unsafe {
         (*g_ptr.as_ptr()).status = GStatus::Running;
     }
@@ -310,7 +282,7 @@ pub fn gopark<F: FnOnce() -> bool>(unlockf: F) {
 /// the matching lock acquisitions before populating this list and
 /// calling `gopark(selparkcommit)`.
 pub fn selparkcommit() -> bool {
-    let g_ptr = match SCHED.lock().current {
+    let g_ptr = match current_m().lock().current_g {
         Some(p) => p,
         None => return true,
     };
