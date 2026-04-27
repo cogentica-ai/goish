@@ -296,6 +296,37 @@ pub fn gopark<F: FnOnce() -> bool>(unlockf: F) {
     }
 }
 
+/// `selparkcommit` — gopark commit fn used by the multi-M-correct
+/// `select!` (M16f-β). Releases all chan locks held by the parking
+/// goroutine, in the order they appear in `g.select_wait` (which is
+/// already lock-order, deduped).
+///
+/// Mirrors Go's runtime/select.go:63-101 minus the GC-related
+/// `activeStackChans` / `parkingOnChan` bookkeeping (goish has no
+/// stack-shrinking yet).
+///
+/// Safety: each entry of `g.select_wait[..g.select_wait_len]` must
+/// be a live `*const AtomicBool` of a held SpinLock. The macro emits
+/// the matching lock acquisitions before populating this list and
+/// calling `gopark(selparkcommit)`.
+pub fn selparkcommit() -> bool {
+    let g_ptr = match SCHED.lock().current {
+        Some(p) => p,
+        None => return true,
+    };
+    unsafe {
+        let g = &mut *g_ptr.as_ptr();
+        let n = g.select_wait_len as usize;
+        for i in 0..n {
+            crate::runtime::spin::raw_unlock(g.select_wait[i]);
+        }
+        // Clear so a later non-select gopark on this G doesn't try
+        // to walk stale pointers. Reset at next select pass-2.
+        g.select_wait_len = 0;
+    }
+    true
+}
+
 /// Wake a goroutine previously parked via `gopark`. Mirrors Go's
 /// `runtime.goready` (proc.go:479).
 ///

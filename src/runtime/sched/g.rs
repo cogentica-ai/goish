@@ -16,9 +16,16 @@
 //     and drop the storage afterwards.
 
 use alloc::boxed::Box;
+use core::sync::atomic::AtomicBool;
 
 use super::gobuf::Gobuf;
 use super::stack::Stack;
+
+/// Maximum number of distinct chans a single `select!` can hold locks
+/// on. Mirrors the cap on case count from `select_macro.rs` (32).
+/// Locked-chan list is deduped at register time so it can be shorter
+/// than the case count when several cases share a chan.
+pub const SELECT_WAIT_MAX: usize = 32;
 
 /// Lifecycle states a `G` can be in.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -48,6 +55,18 @@ pub struct G {
     /// it begins executing rather than holding it for the G's
     /// lifetime.
     pub entry: Option<Box<dyn FnOnce()>>,
+    /// `select!` (M16f-β) per-G wait-list of distinct chan-lock
+    /// `AtomicBool` pointers, in lock-acquire order, populated when
+    /// the goroutine parks on a select with no default. The select-
+    /// macro fills these in pass-2 right before `gopark`; the
+    /// commit fn (`runtime::sched::selparkcommit`) walks this slice
+    /// and releases each lock under the park transition. Mirrors
+    /// Go's `gp.waiting` (runtime/select.go:84) but stored as a
+    /// flat slice of lock atoms instead of an intrusive sudog
+    /// linked list (sudogs in goish are typed per case and can't
+    /// share a heterogeneous link list cleanly).
+    pub select_wait: [*const AtomicBool; SELECT_WAIT_MAX],
+    pub select_wait_len: u8,
 }
 
 impl G {
@@ -60,6 +79,8 @@ impl G {
             stack: Stack::new(),
             status: GStatus::Idle,
             entry: Some(entry),
+            select_wait: [core::ptr::null(); SELECT_WAIT_MAX],
+            select_wait_len: 0,
         }
     }
 }

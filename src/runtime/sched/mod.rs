@@ -50,7 +50,9 @@ mod gobuf;
 mod scheduler;
 mod stack;
 
-pub use g::{GStatus, G};
+pub use g::{GStatus, SELECT_WAIT_MAX, G};
 pub use gobuf::{make_context, swap_context, Gobuf};
-pub use scheduler::{current_g, gopark, goready, newproc, runq_len, schedule, Gosched};
+pub use scheduler::{
+    current_g, gopark, goready, newproc, runq_len, schedule, selparkcommit, Gosched,
+};
 pub use stack::Stack;

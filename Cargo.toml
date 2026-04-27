@@ -237,3 +237,7 @@ path = "examples/select_handcoded.rs"
 [[example]]
 name = "select_smoke"
 path = "examples/select_smoke.rs"
+
+[[example]]
+name = "select_lockorder"
+path = "examples/select_lockorder.rs"

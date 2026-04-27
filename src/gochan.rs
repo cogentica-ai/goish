@@ -168,7 +168,8 @@ unsafe impl<T> Send for Sudog<T> {}
 unsafe impl<T> Sync for Sudog<T> {}
 
 /// Lock-protected channel state.
-struct HchanState<T> {
+#[doc(hidden)]
+pub struct HchanState<T> {
     closed: bool,
     /// Buffer capacity. 0 = unbuffered.
     cap: usize,
@@ -232,6 +233,140 @@ impl<T> chan<T> {
     /// `cap(ch)` — buffer capacity (0 for unbuffered).
     pub fn Cap(&self) -> usize {
         self.inner.state.lock().cap
+    }
+
+    // ─── Raw lock access (M16f-β) ─────────────────────────────────
+    //
+    // Multi-M-correct `select!` (M16f-β) needs to lock several chans
+    // at once via the pre-sorted lock-order, then access each chan's
+    // state without holding a typed `Guard<HchanState<T>>` (because
+    // multiple chans of different `T` can't coexist in a typed list).
+    // These accessors expose the raw atom + an unchecked deref to
+    // bridge the gap. All `unsafe`; only `select!`'s expansion uses
+    // them, and the macro emits the lock/unlock pairing.
+
+    /// Pointer to the chan's underlying `AtomicBool` lock. Used as
+    /// the lock-order sort key (Arc-stable across the chan's
+    /// lifetime) and as the operand to `runtime::spin::raw_lock` /
+    /// `raw_unlock` in the select macro.
+    #[doc(hidden)]
+    #[inline]
+    pub fn __lock_atom(&self) -> *const core::sync::atomic::AtomicBool {
+        self.inner.state.lock_atom()
+    }
+
+    /// Access the locked state. **Caller must hold the lock** via
+    /// `runtime::spin::raw_lock(self.__lock_atom())`.
+    #[doc(hidden)]
+    #[inline]
+    pub unsafe fn __state_unchecked(&self) -> &mut HchanState<T> {
+        self.inner.state.data_unchecked()
+    }
+}
+
+// ─── Locked-state helpers — same logic as __try_*/__register_*/
+//     __cancel_*, but operating on an already-held HchanState.
+//     The caller (the select macro) holds all relevant chan locks
+//     across pass-1 + pass-2 register, so these helpers must not
+//     re-lock.
+
+impl<T> chan<T> {
+    /// Locked-state recv. Same semantics as `__try_recv` minus the
+    /// chan-lock acquisition. Caller holds `s`'s lock.
+    #[doc(hidden)]
+    pub fn __try_recv_locked(s: &mut HchanState<T>) -> Option<(T, bool)>
+    where
+        T: Default,
+    {
+        if s.closed && s.buf.is_empty() {
+            return Some((T::default(), false));
+        }
+        let mut i = 0;
+        while i < s.sendq.len() {
+            let send_ptr = s.sendq[i];
+            if !try_claim_sudog(send_ptr) {
+                i += 1;
+                continue;
+            }
+            s.sendq.remove(i);
+            let sender_v = unsafe {
+                (*send_ptr.as_ptr())
+                    .value
+                    .take()
+                    .expect("recv-locked: sender sudog empty")
+            };
+            let v = if s.cap == 0 {
+                sender_v
+            } else {
+                let head = s
+                    .buf
+                    .pop_front()
+                    .expect("recv-locked: buf empty with parked sender");
+                s.buf.push_back(sender_v);
+                head
+            };
+            unsafe {
+                (*send_ptr.as_ptr()).success = true;
+            }
+            let send_g = unsafe { (*send_ptr.as_ptr()).g };
+            goready(send_g);
+            return Some((v, true));
+        }
+        if let Some(v) = s.buf.pop_front() {
+            return Some((v, true));
+        }
+        None
+    }
+
+    /// Locked-state send. Same semantics as `__try_send` minus the
+    /// chan-lock acquisition.
+    #[doc(hidden)]
+    pub fn __try_send_locked(s: &mut HchanState<T>, v: T) -> Result<(), T> {
+        if s.closed {
+            fatal(b"goish: chan: send on closed channel\n");
+        }
+        let mut i = 0;
+        while i < s.recvq.len() {
+            let recv_ptr = s.recvq[i];
+            if !try_claim_sudog(recv_ptr) {
+                i += 1;
+                continue;
+            }
+            s.recvq.remove(i);
+            unsafe {
+                (*recv_ptr.as_ptr()).value = Some(v);
+                (*recv_ptr.as_ptr()).success = true;
+            }
+            let recv_g = unsafe { (*recv_ptr.as_ptr()).g };
+            goready(recv_g);
+            return Ok(());
+        }
+        if s.buf.len() < s.cap {
+            s.buf.push_back(v);
+            return Ok(());
+        }
+        Err(v)
+    }
+
+    /// Locked-state register a recv sudog. Caller holds the chan
+    /// lock. Returns `Err(())` if the chan is closed-and-empty.
+    #[doc(hidden)]
+    pub fn __register_recv_locked(s: &mut HchanState<T>, sg: &mut Sudog<T>) -> Result<(), ()> {
+        if s.closed && s.buf.is_empty() {
+            return Err(());
+        }
+        s.recvq.push_back(NonNull::from(sg));
+        Ok(())
+    }
+
+    /// Locked-state register a send sudog. Returns `false` on closed.
+    #[doc(hidden)]
+    pub fn __register_send_locked(s: &mut HchanState<T>, sg: &mut Sudog<T>) -> bool {
+        if s.closed {
+            return false;
+        }
+        s.sendq.push_back(NonNull::from(sg));
+        true
     }
 }
 

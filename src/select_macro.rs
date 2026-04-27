@@ -290,14 +290,16 @@ macro_rules! __select_parse {
     };
 }
 
-// ─── emit phase ────────────────────────────────────────────────────
+// ─── emit phase (M16f-β) ──────────────────────────────────────────
 //
-// Single arm — all per-case repetitions live inside one macro
-// body, so identifier hygiene is preserved across passes.
-// The `[$($d:tt)?]` would be ideal for "0 or 1 default" but `?`
-// in macro_rules patterns isn't allowed for tts-blocks; we use
-// `[$($d:tt)*]` (0 or more) and a sub-helper to dispatch on
-// presence/absence of a default arm.
+// Multi-M-correct codegen: lock all chans up front (in sorted lock
+// order, deduped), hold them across pass-1 + sudog-register, release
+// via `selparkcommit` from inside `gopark`. Pass-3 (cancel + dispatch)
+// is unchanged from α — each `__cancel_*` re-acquires its chan lock
+// individually.
+//
+// Single arm so all per-case repetitions live inside one macro body
+// (hygiene preservation — see file-level docs).
 
 #[doc(hidden)]
 #[macro_export]
@@ -319,16 +321,65 @@ macro_rules! __select_emit {
         $( let mut $s_vn: ::core::option::Option<_> =
                 ::core::option::Option::Some($s_val); )*
 
-        // Suppress "value never read" / "unused mut" lints for
-        // recv val-name slots that aren't a send case. The val_name
-        // for recv cases is reserved by the parser but never used
-        // in emit; just discard it via `_`.
+        // Suppress lints on parser-allocated val slots that aren't
+        // populated for recv cases.
         $( let _ = stringify!($br_vn); )*
         $( let _ = stringify!($pr_vn); )*
 
         // ─── case count (compile-time) ───────────────────────────
         const __SELECT_N: usize =
             <[u8]>::len(&[ $($br_idx,)* $($pr_idx,)* $($s_idx,)* ]);
+
+        // ─── lock-order: collect lock atoms, sort, dedup ─────────
+        //
+        // M16f-β. Each chan's lock_atom is the address of its
+        // SpinLock's `locked: AtomicBool` — Arc-stable for the
+        // chan's lifetime. We sort distinct chans by atom address
+        // and acquire all in that order before pass-1 even starts;
+        // this is Go's runtime/select.go:206-240 lock-order sort.
+        //
+        // Insertion sort is O(N²) but N ≤ 32 and array is on the
+        // stack; no allocation, fits in cache.
+        let mut __sel_atoms: [*const ::core::sync::atomic::AtomicBool; __SELECT_N] = [
+            $( $br_cn.__lock_atom(), )*
+            $( $pr_cn.__lock_atom(), )*
+            $( $s_cn.__lock_atom(),  )*
+        ];
+        {
+            let mut __i: usize = 1;
+            while __i < __SELECT_N {
+                let mut __j: usize = __i;
+                while __j > 0
+                    && (__sel_atoms[__j - 1] as usize) > (__sel_atoms[__j] as usize)
+                {
+                    __sel_atoms.swap(__j - 1, __j);
+                    __j -= 1;
+                }
+                __i += 1;
+            }
+        }
+        // Compact distinct atoms to the front; track count.
+        let mut __sel_unique: usize = 0;
+        if __SELECT_N > 0 {
+            __sel_unique = 1;
+            let mut __i: usize = 1;
+            while __i < __SELECT_N {
+                if __sel_atoms[__i] != __sel_atoms[__sel_unique - 1] {
+                    __sel_atoms[__sel_unique] = __sel_atoms[__i];
+                    __sel_unique += 1;
+                }
+                __i += 1;
+            }
+        }
+
+        // Acquire all distinct chan locks in sort order.
+        {
+            let mut __i: usize = 0;
+            while __i < __sel_unique {
+                unsafe { $crate::runtime::spin::raw_lock(__sel_atoms[__i]); }
+                __i += 1;
+            }
+        }
 
         // ─── random poll order (Fisher-Yates inside-out) ─────────
         let mut __select_order: [u8; __SELECT_N] = [0u8; __SELECT_N];
@@ -345,16 +396,20 @@ macro_rules! __select_emit {
 
         // ─── single labeled loop for the whole select ────────────
         let __select_out = 'select_blk: loop {
-            // Pass-1: try each case in random order.
+            // Pass-1: try each case in random order, under the
+            // already-held chan locks. Use *_locked variants that
+            // don't re-acquire.
             let mut __k: usize = 0;
             while __k < __SELECT_N {
                 let __idx_val: u8 = __select_order[__k];
 
                 $(
                     if __idx_val == $br_idx {
+                        let __s = unsafe { $br_cn.__state_unchecked() };
                         if let ::core::option::Option::Some((__v, __ok)) =
-                            $br_cn.__try_recv()
+                            $crate::gochan::chan::__try_recv_locked(__s)
                         {
+                            $crate::__select_release_all!(__sel_unique, __sel_atoms);
                             let _ = __ok;
                             let $br_v = __v;
                             break 'select_blk $br_body;
@@ -364,9 +419,11 @@ macro_rules! __select_emit {
 
                 $(
                     if __idx_val == $pr_idx {
+                        let __s = unsafe { $pr_cn.__state_unchecked() };
                         if let ::core::option::Option::Some((__v, __ok)) =
-                            $pr_cn.__try_recv()
+                            $crate::gochan::chan::__try_recv_locked(__s)
                         {
+                            $crate::__select_release_all!(__sel_unique, __sel_atoms);
                             let ($($pr_p)+) = (__v, __ok);
                             break 'select_blk $pr_body;
                         }
@@ -378,9 +435,12 @@ macro_rules! __select_emit {
                         let __take = $s_vn
                             .take()
                             .expect("goish: select pass-1 send value missing");
-                        match $s_cn.__try_send(__take) {
-                            ::core::result::Result::Ok(()) =>
-                                break 'select_blk $s_body,
+                        let __s = unsafe { $s_cn.__state_unchecked() };
+                        match $crate::gochan::chan::__try_send_locked(__s, __take) {
+                            ::core::result::Result::Ok(()) => {
+                                $crate::__select_release_all!(__sel_unique, __sel_atoms);
+                                break 'select_blk $s_body;
+                            }
                             ::core::result::Result::Err(__returned) => {
                                 $s_vn = ::core::option::Option::Some(__returned);
                             }
@@ -391,16 +451,13 @@ macro_rules! __select_emit {
                 __k += 1;
             }
 
-            // Pass-2: default body if any case in [$($d)*] was parsed,
-            // else park + pass-3.
+            // Pass-2: default body if present, else register-and-park.
             $crate::__select_default_or_park!(
                 'select_blk,
+                __sel_unique, __sel_atoms,
                 [ $( $d_body )* ],
-                // bare-recv
                 [ $( ($br_idx $br_cn $br_sn $br_v ($br_body)) )* ]
-                // pat-recv
                 [ $( ($pr_idx $pr_cn $pr_sn ($($pr_p)+) ($pr_body)) )* ]
-                // send
                 [ $( ($s_idx $s_cn $s_vn $s_sn ($s_body)) )* ]
             );
         };
@@ -408,31 +465,52 @@ macro_rules! __select_emit {
     }};
 }
 
+// ─── helper: release every distinct chan lock ─────────────────────
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __select_release_all {
+    ($count:ident, $atoms:ident) => {{
+        let mut __ui: usize = 0;
+        while __ui < $count {
+            unsafe { $crate::runtime::spin::raw_unlock($atoms[__ui]); }
+            __ui += 1;
+        }
+    }};
+}
+
 // ─── pass-2 dispatch: default present (1 expr) vs not (0 exprs) ──
 //
-// macro_rules can match "exactly one" via a literal arm and "zero"
-// via another. We bracket the default body list `[ $($d:tt)* ]` and
-// use two arms.
+// β: arm signature now also takes the unique-locked atoms (for
+// release-all-on-default and for populating G.select_wait under
+// no-default's gopark commit).
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __select_default_or_park {
     // ─── default present ─────────────────────────────────────────
-    ( $blk:lifetime, [ $d_body:expr ],
+    ( $blk:lifetime,
+      $sel_unique:ident, $sel_atoms:ident,
+      [ $d_body:expr ],
       [ $( ($br_idx:tt $br_cn:ident $br_sn:ident $br_v:tt ($br_body:expr)) )* ]
       [ $( ($pr_idx:tt $pr_cn:ident $pr_sn:ident ($($pr_p:tt)+) ($pr_body:expr)) )* ]
       [ $( ($s_idx:tt $s_cn:ident $s_vn:ident $s_sn:ident ($s_body:expr)) )* ]
     ) => {
+        $crate::__select_release_all!($sel_unique, $sel_atoms);
         break $blk $d_body;
     };
 
-    // ─── no default → register sudogs, park, pass-3 ──────────────
-    ( $blk:lifetime, [],
+    // ─── no default → register sudogs (under held locks), then
+    //     gopark with selparkcommit (which releases all chan locks
+    //     atomically with the park transition).
+    ( $blk:lifetime,
+      $sel_unique:ident, $sel_atoms:ident,
+      [],
       [ $( ($br_idx:tt $br_cn:ident $br_sn:ident $br_v:tt ($br_body:expr)) )* ]
       [ $( ($pr_idx:tt $pr_cn:ident $pr_sn:ident ($($pr_p:tt)+) ($pr_body:expr)) )* ]
       [ $( ($s_idx:tt $s_cn:ident $s_vn:ident $s_sn:ident ($s_body:expr)) )* ]
     ) => {
-        // Per-select shared coordination state on the stack.
+        // Per-select coord on the stack.
         let __select_coord = $crate::gochan::SelectCoord::new();
         let __select_coord_ptr = ::core::ptr::NonNull::from(&__select_coord);
         let __select_g = $crate::runtime::sched::current_g()
@@ -457,32 +535,70 @@ macro_rules! __select_default_or_park {
                 );
         )*
 
-        // Register each sudog. Cooperative invariant: register must
-        // succeed (pass-1 already caught any closed chan); panic if
-        // it doesn't.
+        // Register each sudog using the *_locked* helpers — we hold
+        // every chan's lock from pass-1. β multi-M invariant: under
+        // held locks, no other M can change a chan's state, so a
+        // failure here means the chan was already closed before we
+        // entered the select. In cooperative single-M this is
+        // unreachable (pass-1 caught it); in multi-M it's a real
+        // diagnostic. Panic with a clear message either way; future
+        // refinement can synthesize the case-fired path.
         $(
-            if $br_cn.__register_recv(&mut $br_sn).is_err() {
-                ::core::panic!(
-                    "goish: select pass-2 saw closed-and-empty (cooperative invariant)"
-                );
+            {
+                let __s = unsafe { $br_cn.__state_unchecked() };
+                if $crate::gochan::chan::__register_recv_locked(__s, &mut $br_sn).is_err() {
+                    $crate::__select_release_all!($sel_unique, $sel_atoms);
+                    ::core::panic!(
+                        "goish: select pass-2 saw closed-and-empty under held lock"
+                    );
+                }
             }
         )*
         $(
-            if $pr_cn.__register_recv(&mut $pr_sn).is_err() {
-                ::core::panic!(
-                    "goish: select pass-2 saw closed-and-empty (cooperative invariant)"
-                );
+            {
+                let __s = unsafe { $pr_cn.__state_unchecked() };
+                if $crate::gochan::chan::__register_recv_locked(__s, &mut $pr_sn).is_err() {
+                    $crate::__select_release_all!($sel_unique, $sel_atoms);
+                    ::core::panic!(
+                        "goish: select pass-2 saw closed-and-empty under held lock"
+                    );
+                }
             }
         )*
         $(
-            if !$s_cn.__register_send(&mut $s_sn) {
-                ::core::panic!(
-                    "goish: select pass-2 saw closed send chan (cooperative invariant)"
-                );
+            {
+                let __s = unsafe { $s_cn.__state_unchecked() };
+                if !$crate::gochan::chan::__register_send_locked(__s, &mut $s_sn) {
+                    $crate::__select_release_all!($sel_unique, $sel_atoms);
+                    ::core::panic!(
+                        "goish: select pass-2 saw closed send chan under held lock"
+                    );
+                }
             }
         )*
 
-        $crate::runtime::sched::gopark(|| true);
+        // Populate G.select_wait with the deduped, sorted atoms so
+        // selparkcommit can release them in order during the park
+        // transition. The slice-copy is unsafe because we're
+        // touching G's internals through a raw pointer; that's fine
+        // because we own the G as the parking goroutine.
+        unsafe {
+            let __g = &mut *__select_g.as_ptr();
+            let __cap = $crate::runtime::sched::SELECT_WAIT_MAX;
+            let __take_n = if $sel_unique > __cap { __cap } else { $sel_unique };
+            let mut __i: usize = 0;
+            while __i < __take_n {
+                __g.select_wait[__i] = $sel_atoms[__i];
+                __i += 1;
+            }
+            __g.select_wait_len = __take_n as u8;
+        }
+
+        // Park. The commit fn (selparkcommit) walks G.select_wait
+        // and releases every chan lock — this is the linearization
+        // point at which our G is observably parked AND the chan
+        // locks are released, so wakers can claim sudogs.
+        $crate::runtime::sched::gopark($crate::runtime::sched::selparkcommit);
 
         // Pass-3 step 1 — cancel every sudog. `__cancel_*` returns
         // `false` iff the sudog was already removed from its queue
