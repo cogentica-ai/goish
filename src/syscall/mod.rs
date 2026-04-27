@@ -23,6 +23,7 @@ pub const SYS_MMAP: usize = 9;
 pub const SYS_MUNMAP: usize = 11;
 pub const SYS_CLONE: usize = 56;
 pub const SYS_EXIT: usize = 60; // per-thread exit (vs SYS_EXIT_GROUP)
+pub const SYS_SCHED_YIELD: usize = 24;
 pub const SYS_NANOSLEEP: usize = 35;
 pub const SYS_ARCH_PRCTL: usize = 158;
 pub const SYS_GETTID: usize = 186;
@@ -236,6 +237,14 @@ pub unsafe fn syscall2(n: usize, a1: usize, a2: usize) -> isize {
 #[allow(non_snake_case)]
 pub fn Gettid() -> i32 {
     unsafe { syscall1(SYS_GETTID, 0) as i32 }
+}
+
+/// `sched_yield(2)` — voluntary yield to other runnable threads.
+/// Used by idle Ms after a bounded spin when their run queue is
+/// empty (M17a-γ). M17c will replace this with a futex wait.
+#[allow(non_snake_case)]
+pub fn SchedYield() -> isize {
+    unsafe { syscall1(SYS_SCHED_YIELD, 0) }
 }
 
 /// `arch_prctl(code, addr)` — amd64-specific thread-state op. We use

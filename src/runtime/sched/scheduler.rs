@@ -41,6 +41,7 @@
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use core::ptr::NonNull;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use super::g::{GStatus, G};
 use super::gobuf::{make_context, swap_context, Gobuf};
@@ -69,6 +70,16 @@ unsafe impl Send for Sched {}
 
 static SCHED: SpinLock<Sched> = SpinLock::new(Sched::new());
 
+/// Count of goroutines that exist but haven't yet reached `goexit`.
+/// `newproc` increments on `go!()`; `dispatch_one_g` decrements when
+/// a G's status is observed `Dead`. Worker Ms (M17a-δ onward) read
+/// this to decide whether to ExitThread on an empty runq —
+/// `live==0 + runq empty` means everything is genuinely done.
+///
+/// Atomic (not under SCHED's lock) so workers polling for shutdown
+/// don't contend with newproc/dispatch on the runq lock.
+static LIVE_G_COUNT: AtomicUsize = AtomicUsize::new(0);
+
 /// Spawn a new goroutine running `closure`. Returns immediately
 /// after enqueueing the G; the closure does not run until the
 /// scheduler dispatches.
@@ -77,6 +88,7 @@ static SCHED: SpinLock<Sched> = SpinLock::new(Sched::new());
 pub fn newproc(closure: Box<dyn FnOnce()>) {
     let g = Box::leak(Box::new(G::new(closure)));
     let g_ptr = NonNull::from(&mut *g);
+    LIVE_G_COUNT.fetch_add(1, Ordering::AcqRel);
     SCHED.lock().runq.push_back(g_ptr);
 }
 
@@ -151,49 +163,106 @@ extern "C" fn g_entry() -> ! {
     goexit();
 }
 
+/// Dispatch a single goroutine on the calling M, wait for it to
+/// yield or exit, then return. Internal helper shared by `schedule`
+/// (main M's drain) and `m_schedule_loop` (worker M's loop).
+fn dispatch_one_g(mut g_ptr: NonNull<G>) {
+    let g = unsafe { g_ptr.as_mut() };
+    if g.status == GStatus::Idle {
+        unsafe {
+            make_context(&mut g.gobuf, g.stack.top(), g_entry);
+        }
+    }
+    g.status = GStatus::Running;
+
+    // Capture buf_from from this M's storage. M's address is stable
+    // (static MAIN_M for the main thread, leaked Box for workers),
+    // so the &mut sched_buf raw pointer outlives the lock release.
+    let buf_from = {
+        let mut m = current_m().lock();
+        m.current_g = Some(g_ptr);
+        &mut m.sched_buf as *mut Gobuf
+    };
+    let buf_to = &g.gobuf as *const Gobuf;
+    unsafe {
+        swap_context(buf_from, buf_to);
+    }
+
+    current_m().lock().current_g = None;
+
+    if g.status == GStatus::Dead {
+        LIVE_G_COUNT.fetch_sub(1, Ordering::AcqRel);
+        let _ = unsafe { Box::from_raw(g_ptr.as_ptr()) };
+    }
+}
+
 /// Drain the run queue. For each runnable G, swap into it and wait
 /// for it to yield or exit. Returns when the queue is empty.
 ///
-/// Called from `__goish_rt0` after the user's `fn main()` returns
-/// so any goroutines spawned with `go!()` get to run. User code
-/// can also call this explicitly to interleave goroutine execution
-/// with main-thread work.
+/// Called from `__goish_rt0` after the user's `fn main()` returns,
+/// so any goroutines spawned with `go!()` get to run. User code can
+/// also call this explicitly to interleave goroutine execution with
+/// main-thread work.
+///
+/// **Single-M semantic**: returns when the runq is empty even if
+/// goroutines are still parked elsewhere. Worker Ms (M17a-δ) use
+/// `m_schedule_loop` instead, which loops until *all* goroutines
+/// have terminated.
 pub fn schedule() {
     loop {
         let g_opt = SCHED.lock().runq.pop_front();
-        let mut g_ptr = match g_opt {
-            Some(p) => p,
+        match g_opt {
+            Some(g) => dispatch_one_g(g),
             None => return,
-        };
-
-        let g = unsafe { g_ptr.as_mut() };
-        if g.status == GStatus::Idle {
-            unsafe {
-                make_context(&mut g.gobuf, g.stack.top(), g_entry);
-            }
-        }
-        g.status = GStatus::Running;
-
-        // Mark this M's current G; capture buf_from pointer before
-        // dropping the M lock. M's address is stable (static MAIN_M
-        // in β1, TLS-resolved in β2) so the `&mut sched_buf` raw
-        // pointer survives the lock release.
-        let buf_from = {
-            let mut m = current_m().lock();
-            m.current_g = Some(g_ptr);
-            &mut m.sched_buf as *mut Gobuf
-        };
-        let buf_to = &g.gobuf as *const Gobuf;
-        unsafe {
-            swap_context(buf_from, buf_to);
-        }
-
-        current_m().lock().current_g = None;
-
-        if g.status == GStatus::Dead {
-            let _ = unsafe { Box::from_raw(g_ptr.as_ptr()) };
         }
     }
+}
+
+/// Bounded spin then `sched_yield(2)`. Used by `m_schedule_loop` on
+/// an empty run queue to give other threads CPU. M17c will replace
+/// with a futex park/unpark pair.
+#[inline(never)]
+fn spin_or_yield() {
+    const SPIN_LIMIT: u32 = 32;
+    let mut spins = 0u32;
+    while spins < SPIN_LIMIT {
+        core::hint::spin_loop();
+        spins += 1;
+    }
+    let _ = crate::syscall::SchedYield();
+}
+
+/// Worker M dispatch loop. Never returns under normal flow — when
+/// `LIVE_G_COUNT == 0` and the runq is observed empty, the calling
+/// thread terminates via `ExitThread(0)`.
+///
+/// Spawned worker threads (M17a-δ) call this from their `mstart`.
+/// The shutdown predicate (`live == 0 && runq empty`) is intentionally
+/// approximate: a tiny race window between observing `live == 0` and
+/// re-checking is harmless because `live == 0` already means all
+/// goroutines have called `goexit`, so no future `newproc` is in
+/// flight from existing Gs. A shutdown caller (`Exit` from main) is
+/// the only thing that could still racily push more work, and by
+/// then exit_group has already replaced this thread anyway.
+pub fn m_schedule_loop() -> ! {
+    loop {
+        let g_opt = SCHED.lock().runq.pop_front();
+        match g_opt {
+            Some(g) => dispatch_one_g(g),
+            None => {
+                if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
+                    crate::syscall::ExitThread(0);
+                }
+                spin_or_yield();
+            }
+        }
+    }
+}
+
+/// Number of live goroutines (created via `newproc`, not yet exited).
+/// Useful for diagnostics; not part of Go's public API.
+pub fn live_g_count() -> usize {
+    LIVE_G_COUNT.load(Ordering::Acquire)
 }
 
 /// Number of goroutines currently in the run queue. Useful for
