@@ -24,6 +24,8 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
+use crate::gostring::string;
+
 /// Big-endian (network) byte order. Byte 0 is the most-significant.
 /// Mirrors `binary.BigEndian` (binary.go:64).
 #[derive(Copy, Clone)]
@@ -95,8 +97,8 @@ impl BigEndian {
     }
 
     /// Mirrors `String() string` from the ByteOrder interface.
-    pub fn String(self) -> &'static str {
-        "BigEndian"
+    pub fn String(self) -> string {
+        string::from_static("BigEndian")
     }
 }
 
@@ -154,7 +156,7 @@ impl LittleEndian {
         b[7] = (v >> 56) as u8;
     }
 
-    pub fn String(self) -> &'static str {
-        "LittleEndian"
+    pub fn String(self) -> string {
+        string::from_static("LittleEndian")
     }
 }

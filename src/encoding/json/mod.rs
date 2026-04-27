@@ -1079,11 +1079,16 @@ pub fn NewEncoder<W: io::Writer>(w: W) -> Encoder<W> {
 }
 
 impl<W: io::Writer> Encoder<W> {
-    pub fn SetIndent(&mut self, prefix: &str, indent: &str) {
+    pub fn SetIndent(&mut self, prefix: &string, indent: &string) {
         self.prefix.clear();
-        self.prefix.push_str(prefix);
-        self.indent.clear();
-        self.indent.push_str(indent);
+        // SAFETY: `string` carries valid UTF-8 by construction.
+        unsafe {
+            self.prefix
+                .push_str(core::str::from_utf8_unchecked(crate::gostring::__crate_as_bytes(prefix)));
+            self.indent.clear();
+            self.indent
+                .push_str(core::str::from_utf8_unchecked(crate::gostring::__crate_as_bytes(indent)));
+        }
     }
 
     pub fn Encode(&mut self, v: &Value) -> error {

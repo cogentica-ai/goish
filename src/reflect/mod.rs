@@ -115,6 +115,12 @@ impl StructTag {
 
     /// `Get(key)` — value for `key`, empty string if missing.
     /// Mirrors Go's `StructTag.Get`.
+    ///
+    /// Takes `key: &str` (not `&string`) because tag lookups are
+    /// almost universally called with a string literal — forcing
+    /// users to write `string::from_static("json")` per call would
+    /// add noise without value. This is the "&str unavoidable"
+    /// carve-out from priority #2 in CLAUDE.md.
     pub fn Get(&self, key: &str) -> string {
         let (v, _) = self.Lookup(key);
         v
@@ -122,8 +128,10 @@ impl StructTag {
 
     /// `Lookup(key)` — `(value, ok)`. `ok` distinguishes "absent" from
     /// "present with empty value". Verbatim port of Go 1.25
-    /// `reflect.StructTag.Lookup` (reflect/type.go:1056).
+    /// `reflect.StructTag.Lookup` (reflect/type.go:1056). See `Get`
+    /// for the `&str` rationale.
     pub fn Lookup(&self, key: &str) -> (string, bool) {
+        let key_bytes = key.as_bytes();
         let mut tag = self.raw.as_bytes();
 
         while !tag.is_empty() {
@@ -167,7 +175,7 @@ impl StructTag {
             let qvalue = &tag[..i + 1];
             tag = &tag[i + 1..];
 
-            if key.as_bytes() == name {
+            if key_bytes == name {
                 if let Some(v) = unquote_tag_value(qvalue) {
                     return (v, true);
                 }
@@ -306,6 +314,9 @@ impl Type {
     }
 
     /// `FieldByName(name)` — `(field, ok)`. Linear scan.
+    ///
+    /// Takes `name: &str` for the same literal-friendliness reason as
+    /// `StructTag::Get`.
     pub fn FieldByName(&self, name: &str) -> (StructField, bool) {
         for f in self.fields {
             if f.Name.as_bytes() == name.as_bytes() {
