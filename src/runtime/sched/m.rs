@@ -39,6 +39,20 @@ use super::gobuf::Gobuf;
 use crate::runtime::spin::SpinLock;
 use crate::syscall;
 
+/// Park-commit function pointer. Invoked by the scheduler **after**
+/// `swap_context` has saved the parking G's gobuf and the M has
+/// dropped the G (Go's `park_m` step at proc.go:4259). Returns
+/// `true` to commit the park (G stays in `Waiting` until something
+/// calls `goready`); `false` to abort (G is requeued as `Runnable`
+/// for the next dispatch on this M).
+///
+/// Mirrors Go's `func(*g, unsafe.Pointer) bool` in
+/// `runtime.gopark`'s second arg (proc.go:420). Goish stashes the
+/// `unsafe.Pointer` analog in `M::waitlock` rather than passing it
+/// at the call site, so the pointer-typed signature here is just
+/// `unsafe fn(NonNull<G>) -> bool`.
+pub type ParkCommit = unsafe fn(NonNull<G>) -> bool;
+
 /// One OS thread's scheduler-visible state.
 pub struct M {
     /// Logical M id assigned by the scheduler. Main M is 0; workers
@@ -56,6 +70,17 @@ pub struct M {
     /// into the goroutine; `swap_context(&mut g.gobuf, &sched_buf)`
     /// transfers it back.
     pub sched_buf: Gobuf,
+    /// Park-commit fn populated by `gopark` and consumed by
+    /// `dispatch_one_g` post-swap (see `scheduler::dispatch_one_g`).
+    /// `Some(_)` between the gopark call site and the commit
+    /// invocation; `None` otherwise. Mirrors Go's `m.waitunlockf`
+    /// (runtime/runtime2.go:566).
+    pub waitunlockf: Option<ParkCommit>,
+    /// Opaque lock pointer published by the parking G for its commit
+    /// fn to release. For chan parks: the chan's `lock_atom`. For
+    /// select parks: null (selparkcommit walks `g.select_wait`).
+    /// Mirrors Go's `m.waitlock` (runtime/runtime2.go:567).
+    pub waitlock: *const AtomicBool,
     /// M17c will use this for futex-based idle parking. Currently
     /// unused (β2 doesn't park Ms — schedule() returns when runq
     /// drains).
@@ -73,6 +98,8 @@ impl M {
             procid: AtomicI32::new(0),
             current_g: None,
             sched_buf: Gobuf::new(),
+            waitunlockf: None,
+            waitlock: core::ptr::null(),
             parked: AtomicBool::new(false),
         }
     }

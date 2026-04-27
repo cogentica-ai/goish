@@ -25,6 +25,19 @@ use goish::go;
 use goish::runtime::sched::{current_g, gopark, goready, schedule, Gosched, G};
 use goish::syscall;
 
+unsafe fn always_park(_g: NonNull<G>) -> bool {
+    UNLOCKF_CALLS_T1.fetch_add(1, Ordering::Relaxed);
+    true
+}
+
+unsafe fn never_park(_g: NonNull<G>) -> bool {
+    UNLOCKF_CALLS_T2.fetch_add(1, Ordering::Relaxed);
+    false
+}
+
+static UNLOCKF_CALLS_T1: AtomicUsize = AtomicUsize::new(0);
+static UNLOCKF_CALLS_T2: AtomicUsize = AtomicUsize::new(0);
+
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
     syscall::Exit(1);
@@ -58,7 +71,7 @@ fn test_park_and_wake() {
         A_BEFORE_PARK.store(true, Ordering::Relaxed);
         let g = current_g().expect("current_g in goroutine");
         SLEEPER_PTR.store(g.as_ptr(), Ordering::Release);
-        gopark(|| true);
+        gopark(always_park, core::ptr::null());
         A_AFTER_WAKE.store(true, Ordering::Relaxed);
     });
 
@@ -96,21 +109,18 @@ fn test_park_and_wake() {
 
 fn test_park_rejected() {
     static REACHED_AFTER: AtomicUsize = AtomicUsize::new(0);
-    static UNLOCKF_CALLS: AtomicUsize = AtomicUsize::new(0);
 
     go!(|| {
-        gopark(|| {
-            UNLOCKF_CALLS.fetch_add(1, Ordering::Relaxed);
-            false // reject the park
-        });
-        // Should reach here immediately because unlockf returned false.
+        gopark(never_park, core::ptr::null());
+        // Should reach here after the rejected park is requeued and
+        // the scheduler dispatches us again.
         REACHED_AFTER.fetch_add(1, Ordering::Relaxed);
     });
 
     schedule();
 
     check(
-        UNLOCKF_CALLS.load(Ordering::Relaxed) == 1,
+        UNLOCKF_CALLS_T2.load(Ordering::Relaxed) == 1,
         b"park-rejected: unlockf not called\n",
     );
     check(

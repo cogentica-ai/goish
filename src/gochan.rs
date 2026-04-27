@@ -63,8 +63,8 @@ use alloc::sync::Arc;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::runtime::sched::{current_g, gopark, goready, G};
-use crate::runtime::spin::SpinLock;
+use crate::runtime::sched::{chan_park_commit, current_g, gopark, goready, G};
+use crate::runtime::spin::{raw_lock, raw_unlock, SpinLock};
 use crate::syscall;
 
 /// Per-`select!` shared coordination state. Lives on the parking
@@ -566,22 +566,48 @@ impl<T> chan<T> {
     /// is ready and the buffer is full (or the channel is
     /// unbuffered with no parked receiver). Panics on closed
     /// channels.
+    ///
+    /// **Multi-M correctness**. The chan lock is held continuously
+    /// across pass-1 (try fast paths) and the sudog enqueue, and is
+    /// released only inside `chan_park_commit` — which `gopark`
+    /// schedules to run on the scheduler's stack *after*
+    /// `swap_context` has committed the parker's gobuf. This mirrors
+    /// Go's chanparkcommit pattern (chan.go:748-766; see invariant
+    /// comment at chan.go:759-763). A waker on a different M cannot
+    /// observe our sudog without holding the chan lock, so by the
+    /// time it can `goready` us our gobuf is already a valid
+    /// suspended snapshot.
     pub fn Send(&self, v: T) {
-        // Phase 1: try the non-blocking fast paths.
-        let v = match self.__try_send(v) {
-            Ok(()) => return,
+        let lock_atom = self.inner.state.lock_atom();
+        unsafe { raw_lock(lock_atom); }
+        let s = unsafe { self.inner.state.data_unchecked() };
+
+        // Phase 1: try the non-blocking fast paths under held lock.
+        let v = match Self::__try_send_locked(s, v) {
+            Ok(()) => {
+                unsafe { raw_unlock(lock_atom); }
+                return;
+            }
             Err(v) => v,
         };
 
-        // Phase 2: park on sendq with our value.
+        // Phase 2: register-and-park, lock still held.
         let g = current_g().unwrap_or_else(|| {
+            unsafe { raw_unlock(lock_atom); }
             fatal(b"goish: chan: Send outside of any goroutine\n")
         });
         let mut my_sudog = Sudog::new_send(g, v);
-        if !self.__register_send(&mut my_sudog) {
+        if !Self::__register_send_locked(s, &mut my_sudog) {
+            unsafe { raw_unlock(lock_atom); }
             fatal(b"goish: chan: send on closed channel\n");
         }
-        gopark(|| true);
+
+        // gopark stashes (chan_park_commit, lock_atom) on the M and
+        // calls swap_context. dispatch_one_g runs the commit
+        // post-swap, which is what unlocks the chan. From here we
+        // resume only after some peer has matched our sudog and
+        // called goready on our G.
+        gopark(chan_park_commit, lock_atom);
 
         if !my_sudog.success {
             fatal(b"goish: chan: send on closed channel (woken with !success)\n");
@@ -595,24 +621,35 @@ impl<T> chan<T> {
     ///   2. parked sender → take value (rotating buffer if cap>0)
     ///   3. non-empty buffer → pop from head
     ///   4. otherwise park
+    ///
+    /// Same multi-M lock discipline as `Send` — see the comment
+    /// there.
     pub fn Recv(&self) -> (T, bool)
     where
         T: Default,
     {
-        // Phase 1: try the non-blocking fast paths.
-        if let Some(result) = self.__try_recv() {
+        let lock_atom = self.inner.state.lock_atom();
+        unsafe { raw_lock(lock_atom); }
+        let s = unsafe { self.inner.state.data_unchecked() };
+
+        // Phase 1: try the non-blocking fast paths under held lock.
+        if let Some(result) = Self::__try_recv_locked(s) {
+            unsafe { raw_unlock(lock_atom); }
             return result;
         }
 
-        // Phase 2: park on recvq.
+        // Phase 2: register-and-park.
         let g = current_g().unwrap_or_else(|| {
+            unsafe { raw_unlock(lock_atom); }
             fatal(b"goish: chan: Recv outside of any goroutine\n")
         });
         let mut my_sudog = Sudog::new_recv(g);
-        if self.__register_recv(&mut my_sudog).is_err() {
+        if Self::__register_recv_locked(s, &mut my_sudog).is_err() {
+            unsafe { raw_unlock(lock_atom); }
             return (T::default(), false);
         }
-        gopark(|| true);
+
+        gopark(chan_park_commit, lock_atom);
 
         if !my_sudog.success {
             return (T::default(), false);

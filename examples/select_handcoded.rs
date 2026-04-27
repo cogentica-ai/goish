@@ -27,7 +27,7 @@ use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use goish::gochan::{chan, SelectCoord, Sudog};
 use goish::runtime::rand::cheaprandn;
-use goish::runtime::sched::{current_g, gopark, schedule};
+use goish::runtime::sched::{current_g, gopark, schedule, selparkcommit};
 use goish::{go, make, syscall};
 
 fn die(msg: &[u8]) -> ! {
@@ -115,7 +115,10 @@ fn handcoded_select(ch_recv: &chan<i64>, ch_send: &chan<i64>, send_val: i64) -> 
     let send_reg = ch_send.__register_send(&mut sd_send);
     check(send_reg, b"handcoded: __register_send unexpected closed\n");
 
-    gopark(|| true);
+    // Single-M handcoded test — no locks to release on park.
+    // selparkcommit walks G.select_wait which we never populate
+    // here, so it's effectively `|| true` for our purposes.
+    gopark(selparkcommit, core::ptr::null());
 
     // Phase 4 (pass-3 cleanup): cancel each sudog. The one whose
     // cancel returns `false` (already gone from the queue) is the

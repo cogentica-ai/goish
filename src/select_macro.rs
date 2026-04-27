@@ -598,7 +598,12 @@ macro_rules! __select_default_or_park {
         // and releases every chan lock — this is the linearization
         // point at which our G is observably parked AND the chan
         // locks are released, so wakers can claim sudogs.
-        $crate::runtime::sched::gopark($crate::runtime::sched::selparkcommit);
+        // lock_atom is null: selparkcommit doesn't use M.waitlock
+        // (it walks G.select_wait instead).
+        $crate::runtime::sched::gopark(
+            $crate::runtime::sched::selparkcommit,
+            ::core::ptr::null(),
+        );
 
         // Pass-3 step 1 — cancel every sudog. `__cancel_*` returns
         // `false` iff the sudog was already removed from its queue

@@ -41,11 +41,11 @@
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::g::{GStatus, G};
 use super::gobuf::{make_context, swap_context, Gobuf};
-use super::m::current_m;
+use super::m::{current_m, ParkCommit};
 use crate::runtime::spin::SpinLock;
 
 /// Globally-shared scheduler state. After M17a-β1, this only carries
@@ -166,6 +166,18 @@ extern "C" fn g_entry() -> ! {
 /// Dispatch a single goroutine on the calling M, wait for it to
 /// yield or exit, then return. Internal helper shared by `schedule`
 /// (main M's drain) and `m_schedule_loop` (worker M's loop).
+///
+/// **Park-commit invariant**. If the G yielded via `gopark`, it left
+/// `waitunlockf` populated in this M. After `swap_context` returns —
+/// at which point the parker's gobuf is fully written by the asm and
+/// the parker is no longer running on this M — we set the G's status
+/// to `Waiting`, drop the G from the M, then invoke `waitunlockf`.
+/// That callback is what releases the chan/select lock(s) the parker
+/// was holding. Mirrors Go's `park_m` (proc.go:4229–4280): casgstatus
+/// → dropg → unlockf → schedule. The release order is load-bearing
+/// for cross-M correctness — the chan lock must NOT be released until
+/// the parker's gobuf is committed and the M no longer claims the G.
+/// See chan.go:759-763 in Go 1.25 for the verbatim invariant.
 fn dispatch_one_g(mut g_ptr: NonNull<G>) {
     let g = unsafe { g_ptr.as_mut() };
     if g.status == GStatus::Idle {
@@ -186,6 +198,30 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
     let buf_to = &g.gobuf as *const Gobuf;
     unsafe {
         swap_context(buf_from, buf_to);
+    }
+
+    // ── post-swap: if G parked, run its commit fn (Go's park_m). ──
+    let commit = current_m().lock().waitunlockf.take();
+    if let Some(f) = commit {
+        // Status flip to Waiting — strictly AFTER gobuf was written
+        // by swap_context (above) and BEFORE the commit fn releases
+        // the lock that gates remote-M discovery of this G's sudog.
+        g.status = GStatus::Waiting;
+        // dropg analog: M no longer owns G (proc.go:4256).
+        current_m().lock().current_g = None;
+
+        let parked = unsafe { f(g_ptr) };
+        if !parked {
+            // unlockf returned false — abort the park. Mirror
+            // proc.go:4262-4273: status → Runnable, re-enqueue so
+            // the next dispatch picks G up again.
+            g.status = GStatus::Runnable;
+            SCHED.lock().runq.push_back(g_ptr);
+            return;
+        }
+        // Committed park. G stays in Waiting until something calls
+        // goready(g) on it. M stays free for the next iteration.
+        return;
     }
 
     current_m().lock().current_g = None;
@@ -284,44 +320,38 @@ pub fn current_g() -> Option<NonNull<G>> {
 /// Mirrors Go's `runtime.gopark` (proc.go:443) plus the `park_m`
 /// continuation (proc.go:4229).
 ///
-/// The `unlockf` callback runs *after* the G has been transitioned
-/// to `Waiting`. This is the standard atomic-park pattern: a caller
-/// that has just enqueued the G onto a wait list (under some lock)
-/// uses `unlockf` to release that lock once the G is safely
-/// parked, so a concurrent waker observing the wait list still
-/// sees the G in `Waiting` state and the wakeup is not lost.
+/// **Cross-M correctness contract.** The caller is expected to be
+/// holding some external lock (the chan lock, or several chan locks
+/// for `select!`) that gates remote Ms' ability to discover this G
+/// and call `goready` on it. `gopark` records `commit` and
+/// `lock_atom` on this M, then calls `swap_context`, which writes
+/// the G's gobuf in assembly **before** switching to the scheduler
+/// stack. The scheduler (in `dispatch_one_g`) sees `waitunlockf` is
+/// populated, transitions the G to `Waiting`, severs ownership from
+/// this M, then invokes `commit` — which is what finally releases
+/// the lock(s). By the time any waker M can take the chan lock, the
+/// parker's gobuf is a valid suspended snapshot.
 ///
-/// If `unlockf` returns `false`, the park is cancelled — the G is
-/// transitioned back to `Running` and the call returns immediately.
-/// Channels use this to abort a park when a competing receiver/
-/// sender materialises before `unlockf` runs.
+/// Mirror of Go's chanparkcommit pattern (chan.go:748–766; see also
+/// the load-bearing comment at chan.go:759–763 spelling out why the
+/// lock release must happen after the park transition).
 ///
-/// In single-threaded goish today the race the pattern guards
-/// against can't occur, but the pattern is preserved verbatim
-/// because channels (M16d) and sync (M16g) lean on it directly,
-/// and the same code will run unchanged once M17a introduces
-/// multi-M concurrency.
-pub fn gopark<F: FnOnce() -> bool>(unlockf: F) {
+/// `commit` returns `true` to commit the park, `false` to abort —
+/// the abort path requeues the G as `Runnable` so the next dispatch
+/// picks it up. `lock_atom` may be null when the commit fn doesn't
+/// need it (e.g. `selparkcommit` walks `g.select_wait` instead).
+pub fn gopark(commit: ParkCommit, lock_atom: *const AtomicBool) {
     let g_ptr = match current_m().lock().current_g {
         Some(p) => p,
         None => return,
     };
 
-    // Transition to Waiting *before* running unlockf — atomic park
-    // pattern (Go runtime/proc.go:443). Any concurrent waker that
-    // consults g.status as part of its enqueue logic will see
-    // Waiting and correctly enqueue.
-    unsafe {
-        (*g_ptr.as_ptr()).status = GStatus::Waiting;
-    }
-
-    let park = unlockf();
-    if !park {
-        // unlockf bailed out — abort the park.
-        unsafe {
-            (*g_ptr.as_ptr()).status = GStatus::Running;
-        }
-        return;
+    // Stash commit + lock pointer on the M. dispatch_one_g picks
+    // them up post-swap and runs commit on the scheduler stack.
+    {
+        let mut m = current_m().lock();
+        m.waitunlockf = Some(commit);
+        m.waitlock = lock_atom;
     }
 
     let buf_from = unsafe { &mut (*g_ptr.as_ptr()).gobuf as *mut Gobuf };
@@ -332,9 +362,33 @@ pub fn gopark<F: FnOnce() -> bool>(unlockf: F) {
     unsafe {
         swap_context(buf_from, buf_to);
     }
+
+    // Resumed (or commit returned false). dispatch_one_g already set
+    // status appropriately; the next dispatch into us via
+    // dispatch_one_g restored Running before swap_context returned
+    // here, so this assignment is defensive but harmless.
     unsafe {
         (*g_ptr.as_ptr()).status = GStatus::Running;
     }
+}
+
+/// `chan_park_commit` — gopark commit fn used by `chan::Send`/`Recv`
+/// when parking on a single chan. Reads the chan lock atom from
+/// `M::waitlock` (where `gopark` stashed it) and releases it.
+///
+/// Mirrors Go's `chanparkcommit` (chan.go:748). Always returns
+/// `true` (channel parks never abort — by the time the parker
+/// reaches gopark, the sudog is already enqueued under the chan
+/// lock, so any peer that arrives is just the waker).
+///
+/// Safety: caller (`gopark`) must have stashed a valid chan
+/// `lock_atom` in `M::waitlock` and the calling thread must hold
+/// that lock at entry.
+pub unsafe fn chan_park_commit(_g: NonNull<G>) -> bool {
+    let atom = current_m().lock().waitlock;
+    debug_assert!(!atom.is_null(), "chan_park_commit: no waitlock");
+    crate::runtime::spin::raw_unlock(atom);
+    true
 }
 
 /// `selparkcommit` — gopark commit fn used by the multi-M-correct
@@ -346,25 +400,22 @@ pub fn gopark<F: FnOnce() -> bool>(unlockf: F) {
 /// `activeStackChans` / `parkingOnChan` bookkeeping (goish has no
 /// stack-shrinking yet).
 ///
+/// Always returns `true`: select parks never abort once pass-2 has
+/// registered all sudogs under held locks.
+///
 /// Safety: each entry of `g.select_wait[..g.select_wait_len]` must
 /// be a live `*const AtomicBool` of a held SpinLock. The macro emits
 /// the matching lock acquisitions before populating this list and
-/// calling `gopark(selparkcommit)`.
-pub fn selparkcommit() -> bool {
-    let g_ptr = match current_m().lock().current_g {
-        Some(p) => p,
-        None => return true,
-    };
-    unsafe {
-        let g = &mut *g_ptr.as_ptr();
-        let n = g.select_wait_len as usize;
-        for i in 0..n {
-            crate::runtime::spin::raw_unlock(g.select_wait[i]);
-        }
-        // Clear so a later non-select gopark on this G doesn't try
-        // to walk stale pointers. Reset at next select pass-2.
-        g.select_wait_len = 0;
+/// calling `gopark(selparkcommit, _)`.
+pub unsafe fn selparkcommit(g_ptr: NonNull<G>) -> bool {
+    let g = &mut *g_ptr.as_ptr();
+    let n = g.select_wait_len as usize;
+    for i in 0..n {
+        crate::runtime::spin::raw_unlock(g.select_wait[i]);
     }
+    // Clear so a later non-select gopark on this G doesn't try
+    // to walk stale pointers. Reset at next select pass-2.
+    g.select_wait_len = 0;
     true
 }
 
