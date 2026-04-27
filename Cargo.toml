@@ -281,3 +281,7 @@ path = "examples/sync_once.rs"
 [[example]]
 name = "sync_rwmutex"
 path = "examples/sync_rwmutex.rs"
+
+[[example]]
+name = "time_sleep"
+path = "examples/time_sleep.rs"

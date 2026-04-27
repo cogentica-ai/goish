@@ -284,17 +284,32 @@ pub fn Now() -> Time {
     }
 }
 
-/// `time.Sleep(d)` — sleep for `d` nanoseconds via `nanosleep(2)`.
-/// Negative or zero `d` returns immediately.
+/// `time.Sleep(d)` — pause the current goroutine for at least `d`.
+/// Negative or zero `d` returns immediately. Mirrors `time.Sleep`
+/// (sleep.go:14).
+///
+/// Implementation (M18a): pushes a (deadline, current G) entry on
+/// the runtime's timer heap and `gopark`s until sysmon wakes it.
+/// This releases the M to run other goroutines — unlike a raw
+/// `nanosleep(2)` which would block the OS thread.
+///
+/// Outside of any goroutine (e.g., from within `__goish_rt0`
+/// before main launches goroutines), this falls back to
+/// `nanosleep(2)` since there's no G to park.
 pub fn Sleep(d: Duration) {
     if d.0 <= 0 {
         return;
     }
-    let req = Timespec {
-        tv_sec: d.0 / 1_000_000_000,
-        tv_nsec: d.0 % 1_000_000_000,
-    };
-    let _ = syscall::Nanosleep(&req, core::ptr::null_mut());
+    if crate::runtime::sched::current_g().is_none() {
+        // No goroutine context — fall back to thread-blocking sleep.
+        let req = Timespec {
+            tv_sec: d.0 / 1_000_000_000,
+            tv_nsec: d.0 % 1_000_000_000,
+        };
+        let _ = syscall::Nanosleep(&req, core::ptr::null_mut());
+        return;
+    }
+    crate::runtime::sysmon::timer_park(d.0);
 }
 
 /// `time.Since(t)` — `Now().Sub(t)`. Common idiom for elapsed time.

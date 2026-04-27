@@ -24,6 +24,7 @@ pub mod note;
 pub mod rand;
 pub mod sched;
 pub mod spin;
+pub mod sysmon;
 pub use heap::{alloc, free, mheap_alloc_pages, mheap_free_pages, realloc};
 
 /// First Rust code to run after the kernel hands control to `_start`.
@@ -73,6 +74,12 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // worker thread has its own MStorage with a fresh fs base; the
     // main M shares the global SCHED runq with them.
     sched::bootstrap_workers();
+
+    // Spawn the sysmon thread (M18a). Owns the global timer heap;
+    // wakes timer-parked goroutines via `time::Sleep`. Must come
+    // after bootstrap_workers so register_m_storage's allocator is
+    // up.
+    sysmon::start_sysmon();
 
     // Hand off to the user's main. The proc-macro #[goish::main]
     // generates a #[no_mangle] extern "C" fn __goish_main wrapping the

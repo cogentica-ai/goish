@@ -385,11 +385,14 @@ pub unsafe extern "C" fn Clone(
         // and rsp = child_stack-8 (kernel set rsp from rsi).
         "testq %rax, %rax",
         "jnz 2f",
-        // CHILD: pop child_entry off the stack and jmp to it. fs is
-        // already set (kernel did it via CLONE_SETTLS) if tls was
-        // nonzero, so the entry function can call current_m()
-        // immediately.
-        "popq %rax",
+        // CHILD: load child_entry off the stack (without popping —
+        // we want rsp at stack_top-8 when entry runs, so that
+        // rsp+8 is 16-aligned, matching SysV's "after-CALL"
+        // convention. Go's clone trampoline does this implicitly
+        // by using `CALL R12` instead of JMP. fs is already set by
+        // CLONE_SETTLS, so the entry function can call
+        // current_m() immediately.
+        "movq (%rsp), %rax",
         "jmpq *%rax",
         // PARENT: rax holds child_pid; just return.
         "2:",
