@@ -305,3 +305,7 @@ path = "examples/bench_string_slice.rs"
 [[example]]
 name = "testing_smoke"
 path = "examples/testing_smoke.rs"
+
+[[example]]
+name = "signal_smoke"
+path = "examples/signal_smoke.rs"

@@ -24,6 +24,7 @@ mod mem;
 pub mod note;
 pub mod rand;
 pub mod sched;
+pub mod signal;
 pub mod spin;
 pub mod sysmon;
 pub use debug::{NumCPU, NumGoroutine, GOMAXPROCS};

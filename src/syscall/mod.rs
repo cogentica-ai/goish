@@ -31,6 +31,39 @@ pub const SYS_CLOCK_GETTIME: usize = 228;
 pub const SYS_EXIT_GROUP: usize = 231;
 pub const SYS_SCHED_GETAFFINITY: usize = 204;
 pub const SYS_FUTEX: usize = 202;
+pub const SYS_RT_SIGACTION: usize = 13;
+pub const SYS_RT_SIGRETURN: usize = 15;
+pub const SYS_GETPID: usize = 39;
+pub const SYS_KILL: usize = 62;
+pub const SYS_TGKILL: usize = 234;
+
+// Signal numbers (Linux). Mirror /usr/include/asm-generic/signal.h.
+pub const SIGHUP: i32 = 1;
+pub const SIGINT: i32 = 2;
+pub const SIGQUIT: i32 = 3;
+pub const SIGILL: i32 = 4;
+pub const SIGTRAP: i32 = 5;
+pub const SIGABRT: i32 = 6;
+pub const SIGFPE: i32 = 8;
+pub const SIGKILL: i32 = 9;
+pub const SIGUSR1: i32 = 10;
+pub const SIGSEGV: i32 = 11;
+pub const SIGUSR2: i32 = 12;
+pub const SIGPIPE: i32 = 13;
+pub const SIGALRM: i32 = 14;
+pub const SIGTERM: i32 = 15;
+pub const SIGCHLD: i32 = 17;
+pub const SIGURG: i32 = 23;
+pub const SIGXCPU: i32 = 24;
+pub const SIGXFSZ: i32 = 25;
+
+// sigaction flags. SA_RESTORER tells the kernel to use the
+// userspace-provided sigreturn trampoline (mandatory on amd64
+// since glibc's removal — without it, signal handler return
+// crashes with "default action" because the kernel has no stub).
+pub const SA_RESTORER: u64 = 0x04000000;
+pub const SA_SIGINFO: u64 = 0x00000004;
+pub const SA_RESTART: u64 = 0x10000000;
 
 // futex(2) ops. PRIVATE flag (128) is set when only intra-process
 // threads share the address — Linux can use a faster wait-list.
@@ -246,6 +279,87 @@ pub unsafe fn syscall2(n: usize, a1: usize, a2: usize) -> isize {
 #[allow(non_snake_case)]
 pub fn Gettid() -> i32 {
     unsafe { syscall1(SYS_GETTID, 0) as i32 }
+}
+
+/// `getpid(2)` — process id (tgid).
+#[allow(non_snake_case)]
+pub fn Getpid() -> i32 {
+    unsafe { syscall1(SYS_GETPID, 0) as i32 }
+}
+
+/// `kill(2)` — send a signal to a process. Use `Getpid()` for the
+/// target to send a signal to ourselves (the test pattern).
+#[allow(non_snake_case)]
+pub fn Kill(pid: i32, sig: i32) -> isize {
+    unsafe { syscall2(SYS_KILL, pid as usize, sig as usize) }
+}
+
+/// `tgkill(2)` — send a signal to a specific thread.
+#[allow(non_snake_case)]
+pub fn Tgkill(tgid: i32, tid: i32, sig: i32) -> isize {
+    unsafe { syscall3(SYS_TGKILL, tgid as usize, tid as usize, sig as usize) }
+}
+
+/// Linux kernel `struct sigaction` layout (amd64). Note: this is
+/// the **kernel** layout, not glibc's — they differ. Kernel layout:
+///
+///   sa_handler   (8 bytes)  — handler fn pointer
+///   sa_flags     (8 bytes)
+///   sa_restorer  (8 bytes)  — trampoline that issues rt_sigreturn
+///   sa_mask      (8 bytes)  — kernel sigset_t (single u64)
+///
+/// Mirrors Go runtime/defs_linux_amd64.go:`type sigactiont`.
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct Sigaction {
+    pub sa_handler: usize,
+    pub sa_flags: u64,
+    pub sa_restorer: usize,
+    pub sa_mask: u64,
+}
+
+/// `rt_sigaction(2)` — install or query a signal handler. The
+/// last argument is `sizeof(sa_mask)` which the kernel uses to
+/// distinguish 32-bit from 64-bit sigsets; for amd64 this is 8.
+///
+/// **Safety**: `new` and `old` must point to valid `Sigaction`s
+/// or be null. The handler in `new.sa_handler` must be an
+/// `extern "C" fn(i32)` for the simple case (no SA_SIGINFO).
+#[allow(non_snake_case)]
+pub unsafe fn RtSigaction(
+    sig: i32,
+    new: *const Sigaction,
+    old: *mut Sigaction,
+) -> isize {
+    syscall6(
+        SYS_RT_SIGACTION,
+        sig as usize,
+        new as usize,
+        old as usize,
+        8, // sizeof(kernel sigset_t) on amd64
+        0,
+        0,
+    )
+}
+
+/// Sigreturn trampoline. The kernel jumps here when a signal
+/// handler returns; this issues `rt_sigreturn(2)` which restores
+/// the pre-signal context. Mandatory on amd64 (kernel has no
+/// default stub since glibc dropped libgcc-style restorers).
+///
+/// Naked asm: just two instructions, no prologue/epilogue.
+/// Mirrors Go runtime `sigreturn__sigaction`
+/// (sys_linux_amd64.s:470).
+#[unsafe(naked)]
+#[allow(non_snake_case)]
+pub unsafe extern "C" fn SigreturnTrampoline() {
+    core::arch::naked_asm!(
+        "movq $15, %rax",   // SYS_rt_sigreturn
+        "syscall",
+        // Should never return; if it does, INT3.
+        "int3",
+        options(att_syntax),
+    )
 }
 
 /// `sched_yield(2)` — voluntary yield to other runnable threads.

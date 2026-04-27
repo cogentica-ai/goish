@@ -97,6 +97,20 @@ static TIMER_HEAP: SpinLock<BinaryHeap<Reverse<TimerEntry>>> =
 // any in-flight futex_wait sample.
 static SYSMON_PARK: AtomicU32 = AtomicU32::new(0);
 
+/// Wake sysmon if it's currently napping. Bumps the seqcount
+/// (so any in-flight futex_wait against the previous value
+/// returns -EAGAIN immediately) and delivers a futex_wake in
+/// case sysmon is mid-wait. Async-signal-safe: only an atomic
+/// fetch_add and a raw futex syscall — callable from signal
+/// handler context. Used by `runtime::signal::goish_sigtramp`
+/// to ensure pending signals dispatch promptly even when
+/// sysmon's nap timeout is far in the future.
+pub fn wake() {
+    SYSMON_PARK.fetch_add(1, Ordering::Release);
+    let addr = &SYSMON_PARK as *const AtomicU32 as *const u32;
+    Futex(addr, FUTEX_WAKE_PRIVATE, 1, core::ptr::null());
+}
+
 /// Push the calling G onto the timer heap with deadline
 /// `now + ns`, then `gopark` until sysmon wakes it. Heap lock is
 /// held continuously across enqueue → swap so sysmon cannot
@@ -162,6 +176,12 @@ extern "C" fn sysmon_main() -> ! {
         // time.Sleep that bumps the seqcount after this point
         // invalidates our upcoming futex_wait against the sample.
         let sample = SYSMON_PARK.load(Ordering::Acquire);
+
+        // M23: drain any signals delivered since the last poll
+        // and forward them to registered channels. Non-blocking;
+        // signal handler did the work of bumping the per-sig
+        // counter from async context.
+        crate::runtime::signal::dispatch_pending();
 
         let now = monotonic_ns();
 

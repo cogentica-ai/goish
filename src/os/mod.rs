@@ -23,6 +23,8 @@
 
 #![allow(non_snake_case)]
 
+pub mod signal;
+
 use crate::errors::error;
 use crate::goslice::slice;
 // `crate::string` resolves both the type (gostring) and the function
