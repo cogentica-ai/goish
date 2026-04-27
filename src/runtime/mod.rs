@@ -59,6 +59,12 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
         mcentral::mcentral_init(arena_base);
     }
 
+    // Bootstrap N-1 worker Ms (M17a-δ.1) so the worker pool is
+    // already dispatching by the time `__goish_main` runs. Each
+    // worker thread has its own MStorage with a fresh fs base; the
+    // main M shares the global SCHED runq with them.
+    sched::bootstrap_workers();
+
     // Hand off to the user's main. The proc-macro #[goish::main]
     // generates a #[no_mangle] extern "C" fn __goish_main wrapping the
     // user's body, so the linker resolves this `extern` block to it.

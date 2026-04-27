@@ -55,7 +55,7 @@ pub use g::{GStatus, SELECT_WAIT_MAX, G};
 pub use gobuf::{make_context, swap_context, Gobuf};
 pub use m::{current_m, setup_main_tls, MStorage, ParkCommit, M, MAIN_M};
 pub use scheduler::{
-    chan_park_commit, current_g, gopark, goready, live_g_count, m_schedule_loop, newproc,
-    runq_len, schedule, selparkcommit, Gosched,
+    bootstrap_workers, chan_park_commit, current_g, gopark, goready, live_g_count,
+    m_schedule_loop, newproc, num_cpus, runq_len, schedule, selparkcommit, Gosched,
 };
 pub use stack::Stack;

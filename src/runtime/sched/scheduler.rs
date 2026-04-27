@@ -232,31 +232,41 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
     }
 }
 
-/// Drain the run queue. For each runnable G, swap into it and wait
-/// for it to yield or exit. Returns when the queue is empty.
+/// Drain the run queue. Returns when **all live goroutines** have
+/// terminated (`LIVE_G_COUNT == 0`).
 ///
 /// Called from `__goish_rt0` after the user's `fn main()` returns,
 /// so any goroutines spawned with `go!()` get to run. User code can
 /// also call this explicitly to interleave goroutine execution with
 /// main-thread work.
 ///
-/// **Single-M semantic**: returns when the runq is empty even if
-/// goroutines are still parked elsewhere. Worker Ms (M17a-δ) use
-/// `m_schedule_loop` instead, which loops until *all* goroutines
-/// have terminated.
+/// In multi-M mode (M17a-δ.1+) the main M participates in dispatch
+/// alongside worker Ms — same code path. Workers call
+/// `m_schedule_loop` instead, which mirrors this loop but exits via
+/// `ExitThread(0)` when done.
+///
+/// **Liveness assumption**: this loop won't return if there are
+/// parked goroutines with no waker (a user-program deadlock). Go's
+/// runtime detects this via `checkdead` (proc.go:5566); goish v1
+/// will hang in that case until M18b lands.
 pub fn schedule() {
     loop {
         let g_opt = SCHED.lock().runq.pop_front();
         match g_opt {
             Some(g) => dispatch_one_g(g),
-            None => return,
+            None => {
+                if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
+                    return;
+                }
+                spin_or_yield();
+            }
         }
     }
 }
 
-/// Bounded spin then `sched_yield(2)`. Used by `m_schedule_loop` on
-/// an empty run queue to give other threads CPU. M17c will replace
-/// with a futex park/unpark pair.
+/// Bounded spin then `sched_yield(2)`. Used by `schedule` /
+/// `m_schedule_loop` on an empty run queue to give other threads
+/// CPU. M17c will replace with a futex park/unpark pair.
 #[inline(never)]
 fn spin_or_yield() {
     const SPIN_LIMIT: u32 = 32;
@@ -299,6 +309,113 @@ pub fn m_schedule_loop() -> ! {
 /// Useful for diagnostics; not part of Go's public API.
 pub fn live_g_count() -> usize {
     LIVE_G_COUNT.load(Ordering::Acquire)
+}
+
+/// Number of CPUs available to this process via the calling thread's
+/// affinity mask. Returns 1 on syscall failure or zero-CPU mask.
+///
+/// Mirrors Go's `runtime.getCPUCount` (os_linux.go:104). 8 KiB
+/// affinity buffer is generous enough for any plausible host
+/// (65 536 CPUs); a popcount over the returned bytes gives the
+/// effective parallelism.
+pub fn num_cpus() -> usize {
+    const MAX_CPUS: usize = 64 * 1024;
+    let mut buf = [0u8; MAX_CPUS / 8];
+    let r = crate::syscall::SchedGetaffinity(0, buf.len(), buf.as_mut_ptr());
+    if r <= 0 {
+        return 1;
+    }
+    let n = (r as usize).min(buf.len());
+    let mut count: usize = 0;
+    for &v in &buf[..n] {
+        count += v.count_ones() as usize;
+    }
+    if count == 0 {
+        1
+    } else {
+        count
+    }
+}
+
+/// Worker M entry point. Spawned by `spawn_worker_m` via `clone(2)`
+/// with `CLONE_SETTLS` already pointing at the worker's `MStorage`.
+/// Records the kernel tid in `M::procid`, then enters
+/// `m_schedule_loop`. Never returns — terminates via `ExitThread(0)`
+/// from inside the loop when `LIVE_G_COUNT == 0`.
+///
+/// Mirrors Go's `runtime.mstart1` (proc.go:1689) minus the GC and
+/// signal-handling pieces we don't carry yet.
+extern "C" fn mstart() -> ! {
+    let tid = crate::syscall::Gettid();
+    {
+        let m = super::m::current_m().lock();
+        m.procid.store(tid, Ordering::Release);
+    }
+    m_schedule_loop()
+}
+
+/// Per-worker stack size — 64 KiB. Larger than goroutine stacks
+/// (which goroutines own) because the M's scheduler stack handles
+/// interrupts, panic paths, and dispatch overhead. Matches the
+/// minimum Go uses for `g0` stack on Linux (proc.go: stackGuard
+/// constants).
+const WORKER_M_STACK: usize = 64 * 1024;
+
+/// Allocate one new worker M with the given id, mmap its scheduler
+/// stack, then `clone(2)` a fresh thread to run `mstart()` on it
+/// with `CLONE_SETTLS` pointing at the new M's TLS slot.
+///
+/// The MStorage is `Box::leak`'d so its address is stable for the
+/// thread's lifetime (TLS reads return `&storage.m`). The stack is
+/// also leaked — process exit (`exit_group`) reclaims everything.
+///
+/// Returns the kernel tid the kernel assigned to the new thread.
+fn spawn_worker_m(id: u32) -> i64 {
+    use crate::syscall;
+
+    let storage: &'static super::m::MStorage =
+        Box::leak(Box::new(super::m::MStorage::new(id)));
+    storage.init_tls_self();
+
+    let stack_base = syscall::Mmap(
+        core::ptr::null_mut(),
+        WORKER_M_STACK,
+        syscall::PROT_READ | syscall::PROT_WRITE,
+        syscall::MAP_PRIVATE | syscall::MAP_ANONYMOUS,
+        -1,
+        0,
+    );
+    if stack_base == syscall::MAP_FAILED {
+        const MSG: &[u8] = b"goish: spawn_worker_m: mmap failed\n";
+        syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+        syscall::Exit(2);
+    }
+    let stack_top = unsafe { stack_base.add(WORKER_M_STACK) };
+
+    unsafe {
+        syscall::Clone(
+            syscall::CLONE_THREAD_FLAGS,
+            stack_top,
+            mstart,
+            storage.fs_base() as u64,
+        )
+    }
+}
+
+/// Bootstrap N-1 worker Ms (one per CPU beyond the main M). Called
+/// from `__goish_rt0` after `setup_main_tls()` and before user code
+/// runs, so by the time `__goish_main()` is entered the worker pool
+/// is already dispatching.
+///
+/// Mirrors Go's `runtime.schedinit` + `runtime.startTheWorld` for
+/// the GOMAXPROCS-sized M creation, minus the per-P machinery (M17b
+/// adds Ps; for now everything shares one global runq).
+pub fn bootstrap_workers() {
+    let n = num_cpus();
+    // Spawn one worker per CPU beyond the main M (id=0).
+    for i in 1..n {
+        let _ = spawn_worker_m(i as u32);
+    }
 }
 
 /// Number of goroutines currently in the run queue. Useful for

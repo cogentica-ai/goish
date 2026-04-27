@@ -29,6 +29,7 @@ pub const SYS_ARCH_PRCTL: usize = 158;
 pub const SYS_GETTID: usize = 186;
 pub const SYS_CLOCK_GETTIME: usize = 228;
 pub const SYS_EXIT_GROUP: usize = 231;
+pub const SYS_SCHED_GETAFFINITY: usize = 204;
 
 // ─── arch_prctl(2) op codes (M17a-β2) ──────────────────────────────────
 //
@@ -245,6 +246,21 @@ pub fn Gettid() -> i32 {
 #[allow(non_snake_case)]
 pub fn SchedYield() -> isize {
     unsafe { syscall1(SYS_SCHED_YIELD, 0) }
+}
+
+/// `sched_getaffinity(2)` — fetch the calling thread's CPU affinity
+/// mask. `pid = 0` means "this thread". `mask` points at a buffer of
+/// at least `cpusetsize` bytes (must be a multiple of `sizeof(long)`,
+/// i.e. 8 on amd64); on success the kernel returns the number of
+/// bytes written, on failure a negative `-errno`.
+///
+/// Used by `runtime::sched::num_cpus()` to size the worker M pool —
+/// the GOMAXPROCS default. Mirrors Go's `sched_getaffinity` (asm
+/// definition at runtime/sys_linux_amd64.s:658) used by
+/// `runtime.getCPUCount` (os_linux.go:104).
+#[allow(non_snake_case)]
+pub fn SchedGetaffinity(pid: i32, cpusetsize: usize, mask: *mut u8) -> isize {
+    unsafe { syscall3(SYS_SCHED_GETAFFINITY, pid as usize, cpusetsize, mask as usize) }
 }
 
 /// `arch_prctl(code, addr)` — amd64-specific thread-state op. We use
