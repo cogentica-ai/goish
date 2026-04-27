@@ -277,9 +277,13 @@ impl Type {
         Self { key: Some(k), ..self }
     }
 
-    /// `Name()` — declared type name, or `""` for unnamed types.
-    pub fn Name(&self) -> &'static str {
-        self.name
+    /// `Name()` — declared type name as goish `string`, or empty
+    /// string for unnamed types. (Internal: the underlying field is
+    /// `&'static str` since the name comes from the
+    /// `#[goish::reflect]` proc-macro at compile time; we wrap it
+    /// in a `string` at the API boundary.)
+    pub fn Name(&self) -> crate::gostring::string {
+        crate::gostring::string::from_static(self.name)
     }
 
     /// `Kind()` — kind tag.
@@ -834,10 +838,14 @@ impl Value {
         }
     }
 
-    /// `MapKeys()` — keys in stable (sorted) order. Panics if not Map.
-    pub fn MapKeys(&self) -> Vec<Value> {
+    /// `MapKeys()` — keys in stable (sorted) order, as `slice<Value>`
+    /// (Go's `[]Value`). Panics if not Map.
+    pub fn MapKeys(&self) -> crate::goslice::slice<Value> {
         match self {
-            Value::Map { entries, .. } => entries.iter().map(|(k, _)| k.clone()).collect(),
+            Value::Map { entries, .. } => {
+                let v: Vec<Value> = entries.iter().map(|(k, _)| k.clone()).collect();
+                crate::goslice::slice::__from_vec(v)
+            }
             _ => panic!("reflect.Value.MapKeys of non-map"),
         }
     }
@@ -1138,16 +1146,17 @@ pub fn AppendSlice(s: Value, t: Value) -> Value {
     Append(s, &extra)
 }
 
-/// `reflect.VisibleFields(t)` — flat field list. In Go this walks
-/// embedded fields BFS; goish v1 has no embedded fields, so this is
-/// the same as iterating `Field(0..NumField())`.
-pub fn VisibleFields(t: Type) -> alloc::vec::Vec<StructField> {
+/// `reflect.VisibleFields(t)` — flat field list as `slice<StructField>`
+/// (Go's `[]StructField`). In Go this walks embedded fields BFS;
+/// goish v1 has no embedded fields, so this is the same as iterating
+/// `Field(0..NumField())`.
+pub fn VisibleFields(t: Type) -> crate::goslice::slice<StructField> {
     let n = t.NumField();
     let mut out: alloc::vec::Vec<StructField> = alloc::vec::Vec::with_capacity(n as usize);
     for i in 0..n {
         out.push(t.Field(i));
     }
-    out
+    crate::goslice::slice::__from_vec(out)
 }
 
 /// `reflect.DeepEqual(x, y)` — structural equality between any two

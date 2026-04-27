@@ -25,8 +25,11 @@ use crate::os;
 use crate::time;
 use crate::types::{byte, int};
 
-#[doc(hidden)]
-pub fn write_prefix(buf: &mut Vec<byte>) {
+// Internal — used only by `write_prefix_to_stderr` below. The `Vec`
+// parameter is a per-call scratch buffer that never crosses the
+// module boundary, so it doesn't violate the public-API rule
+// against Rust container types.
+pub(crate) fn write_prefix(buf: &mut Vec<byte>) {
     let t = time::Now();
     let (y, m, d) = t.Date();
     let (hh, mm, ss) = t.Clock();
