@@ -47,6 +47,7 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use super::g::{GStatus, G};
 use super::gobuf::{make_context, swap_context, Gobuf};
 use super::m::{acquirem, current_m, current_m_storage, releasem, MStorage, ParkCommit};
+use super::p::current_p;
 use crate::runtime::spin::SpinLock;
 
 /// Globally-shared scheduler state. After M17a-β1, this only carries
@@ -71,6 +72,53 @@ unsafe impl Send for Sched {}
 
 static SCHED: SpinLock<Sched> = SpinLock::new(Sched::new());
 
+/// Push a batch of goroutines onto the global runq. Called by
+/// `P::runqputslow` (M17b-β) when a P's local runq is full and half
+/// of it spills to global. Pointers are passed as `*mut G`; null
+/// entries are skipped (defensive — `runqputslow` does not produce
+/// nulls in practice).
+///
+/// Mirrors a slim subset of Go's `globrunqputbatch` (proc.go).
+pub(crate) fn globrunqput_batch(batch: &[*mut G]) {
+    let mut s = SCHED.lock();
+    for &g in batch {
+        if let Some(g_ptr) = NonNull::new(g) {
+            s.runq.push_back(g_ptr);
+        }
+    }
+}
+
+/// Pop one G off the global runq, returning `None` if empty.
+/// Used by `findrunnable_local_then_global` as the second-tier
+/// fallback when the M's local P runq is empty.
+fn globrunqget_one() -> Option<NonNull<G>> {
+    SCHED.lock().runq.pop_front()
+}
+
+/// Find the next runnable G for the calling M. Drain order
+/// (M17b-β): local P runq → global runq. γ adds work-stealing as
+/// the third tier.
+fn find_runnable() -> Option<NonNull<G>> {
+    if let Some(p) = current_p() {
+        if let Some(g) = unsafe { p.runqget() } {
+            return Some(g);
+        }
+    }
+    globrunqget_one()
+}
+
+/// True when this M has any work it can dispatch — either on its
+/// bound P's local runq or on the global runq. Used by the idle-park
+/// re-check under MIDLE lock so we don't sleep through a producer.
+fn has_local_or_global_work() -> bool {
+    if let Some(p) = current_p() {
+        if p.runq_has_work() {
+            return true;
+        }
+    }
+    !SCHED.lock().runq.is_empty()
+}
+
 /// Count of goroutines that exist but haven't yet reached `goexit`.
 /// `newproc` increments on `go!()`; `dispatch_one_g` decrements when
 /// a G's status is observed `Dead`. Worker Ms (M17a-δ onward) read
@@ -81,6 +129,27 @@ static SCHED: SpinLock<Sched> = SpinLock::new(Sched::new());
 /// don't contend with newproc/dispatch on the runq lock.
 static LIVE_G_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+/// Push a goroutine onto the runnable set, routing through the bound
+/// P's runq (M17b-β) when available, otherwise to the global runq.
+///
+/// `next=true` puts the G into P's `runnext` slot — the LIFO-prefer
+/// fastpath used by `goready` (chan-waker, mutex-waker) so the
+/// freshly-resumed G keeps any cache locality it had with the waker.
+///
+/// `next=false` appends to the runq tail — the FIFO path used by
+/// `newproc` (fresh spawn) and `Gosched` (voluntary yield). Without
+/// work-stealing (γ), `next=true` for newproc would let the most
+/// recent spawn dominate `runnext` and starve earlier ones; `next=false`
+/// keeps spawn order deterministic. We can revisit once γ ships.
+fn enqueue_runnable(g_ptr: NonNull<G>, next: bool) {
+    if let Some(p) = current_p() {
+        unsafe { p.runqput(g_ptr, next) };
+    } else {
+        SCHED.lock().runq.push_back(g_ptr);
+    }
+    wake_idle_m();
+}
+
 /// Spawn a new goroutine running `closure`. Returns immediately
 /// after enqueueing the G; the closure does not run until the
 /// scheduler dispatches.
@@ -90,9 +159,7 @@ pub fn newproc(closure: Box<dyn FnOnce()>) {
     let g = Box::leak(Box::new(G::new(closure)));
     let g_ptr = NonNull::from(&mut *g);
     LIVE_G_COUNT.fetch_add(1, Ordering::AcqRel);
-    SCHED.lock().runq.push_back(g_ptr);
-    // M17c: a fresh runnable G — wake one parked M to dispatch.
-    wake_idle_m();
+    enqueue_runnable(g_ptr, false);
 }
 
 /// Voluntarily yield the CPU. Equivalent to Go's `runtime.Gosched()`
@@ -107,7 +174,15 @@ pub fn Gosched() {
     unsafe {
         (*g_ptr.as_ptr()).status = GStatus::Runnable;
     }
-    SCHED.lock().runq.push_back(g_ptr);
+    // M17b-β: yielding G goes back to the local P's runq tail
+    // (next=false), mirroring Go's `goschedImpl → runqput(_p_, gp, false)`
+    // (proc.go:4400). Falling back to the global runq when this M holds
+    // no P (shouldn't occur on the dispatch path, but safe).
+    if let Some(p) = current_p() {
+        unsafe { p.runqput(g_ptr, false) };
+    } else {
+        SCHED.lock().runq.push_back(g_ptr);
+    }
     // Capture pointers before releasing locks — both `MAIN_M` (M17a-β1)
     // and `SCHED` are static, so the addresses are stable.
     let buf_from = unsafe { &mut (*g_ptr.as_ptr()).gobuf as *mut Gobuf };
@@ -242,9 +317,11 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
         if !parked {
             // unlockf returned false — abort the park. Mirror
             // proc.go:4262-4273: status → Runnable, re-enqueue so
-            // the next dispatch picks G up again.
+            // the next dispatch picks G up again. Route through the
+            // current P's runq when bound (M17b-β); else global.
+            // `next=true` keeps the aborted G hot on this P.
             g.status = GStatus::Runnable;
-            SCHED.lock().runq.push_back(g_ptr);
+            enqueue_runnable(g_ptr, true);
             return;
         }
         // Committed park. G stays in Waiting until something calls
@@ -286,8 +363,7 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
 /// will hang in that case until M18b lands.
 pub fn schedule() {
     loop {
-        let g_opt = SCHED.lock().runq.pop_front();
-        match g_opt {
+        match find_runnable() {
             Some(g) => dispatch_one_g(g),
             None => {
                 if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
@@ -300,7 +376,7 @@ pub fn schedule() {
                 if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
                     return;
                 }
-                if SCHED.lock().runq.is_empty() {
+                if !has_local_or_global_work() {
                     park_m_idle();
                 }
             }
@@ -421,8 +497,10 @@ fn park_m_idle() {
     // before we re-check. Go does this under `sched.lock`.
     {
         let mut midle = MIDLE.lock();
-        // Re-check conditions under the lock.
-        if !SCHED.lock().runq.is_empty() {
+        // Re-check conditions under the lock. M17b-β: cover both
+        // local P runq and global runq; either has work blocks
+        // the park.
+        if has_local_or_global_work() {
             return;
         }
         if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
@@ -485,8 +563,7 @@ fn wake_all_idle_m() {
 /// then exit_group has already replaced this thread anyway.
 pub fn m_schedule_loop() -> ! {
     loop {
-        let g_opt = SCHED.lock().runq.pop_front();
-        match g_opt {
+        match find_runnable() {
             Some(g) => dispatch_one_g(g),
             None => {
                 if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
@@ -499,7 +576,7 @@ pub fn m_schedule_loop() -> ! {
                 if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
                     crate::syscall::ExitThread(0);
                 }
-                if SCHED.lock().runq.is_empty() {
+                if !has_local_or_global_work() {
                     park_m_idle();
                 }
             }
@@ -786,21 +863,20 @@ pub unsafe fn selparkcommit(g_ptr: NonNull<G>) -> bool {
 /// `runtime.goready` (proc.go:479).
 ///
 /// The G is transitioned from `Waiting` to `Runnable` and pushed
-/// onto the run queue. The next dispatch will swap into it,
-/// resuming it from inside `gopark`.
+/// onto the local P's runq (M17b-β) — falling back to the global
+/// runq when the caller holds no P (e.g. sysmon-driven wakers or
+/// pre-bootstrap callers). `wake_idle_m` ensures a parked M picks
+/// up the work whether it's local or global.
 pub fn goready(g_ptr: NonNull<G>) {
-    {
-        let mut s = SCHED.lock();
-        unsafe {
-            debug_assert_eq!(
-                (*g_ptr.as_ptr()).status,
-                GStatus::Waiting,
-                "goready: target G is not parked"
-            );
-            (*g_ptr.as_ptr()).status = GStatus::Runnable;
-        }
-        s.runq.push_back(g_ptr);
+    unsafe {
+        debug_assert_eq!(
+            (*g_ptr.as_ptr()).status,
+            GStatus::Waiting,
+            "goready: target G is not parked"
+        );
+        (*g_ptr.as_ptr()).status = GStatus::Runnable;
     }
-    // M17c: a runnable G is now in the queue — wake an idle M.
-    wake_idle_m();
+    // next=true: chan-waker / sync-waker fastpath — the just-readied G
+    // gets `runnext` priority on the local P.
+    enqueue_runnable(g_ptr, true);
 }

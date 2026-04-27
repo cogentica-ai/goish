@@ -278,8 +278,184 @@ pub fn current_p() -> Option<&'static P> {
     }
 }
 
-// Suppress unused warning; phase β will reference G.
-const _: fn() = || {
-    let _: *mut G = core::ptr::null_mut();
-    let _: Option<NonNull<G>> = None;
-};
+// ─── runq operations (M17b-β) ────────────────────────────────────────
+//
+// Lock-free SPMC ring discipline ported verbatim from Go's runtime
+// (proc.go:7058,7178,7104). The owner P (the bound M's thread) is the
+// sole writer of `runqtail` and the ring slots; other Ms (steal scans
+// in γ) only CAS `runqhead` forward and read slots after acquire-load
+// of the matching tail.
+//
+// Memory ordering:
+//   - `runqhead`: load-acquire by readers (owner pop, stealers),
+//                 CAS-release for advancement.
+//   - `runqtail`: store-release by owner after writing the slot,
+//                 load-acquire by stealers before reading slots.
+//   - `runnext` : compare-exchange (AcqRel) — both owner and stealers
+//                 race for it.
+//
+// Slot mutation goes through the UnsafeCell. Synchronization is
+// provided exclusively by the head/tail atomics; the slot itself is
+// a plain `*mut G` write whose visibility piggybacks on the
+// store-release of `runqtail` (write before release-store ⇒ visible
+// to any thread that acquires-load the same atomic). This mirrors
+// Go's `pp.runq[t%N].set(gp)` followed by `atomic.StoreRel(&pp.runqtail, t+1)`.
+
+impl P {
+    /// Try to put `gp` on the local runnable queue. If the queue is
+    /// full, kicks half of it (plus `gp`) onto the global queue via
+    /// `runqputslow`. `next=true` puts `gp` into the `runnext` slot,
+    /// kicking any prior runnext to the ring tail.
+    ///
+    /// Mirrors `runqput` (proc.go:7058). Executed only by the owner P.
+    pub unsafe fn runqput(&self, gp: NonNull<G>, next: bool) {
+        let mut gp_ptr = gp.as_ptr();
+
+        if next {
+            // Set runnext, kicking the prior one to the ring.
+            loop {
+                let oldnext = self.runnext.load(Ordering::Relaxed);
+                if self
+                    .runnext
+                    .compare_exchange_weak(
+                        oldnext,
+                        gp_ptr,
+                        Ordering::AcqRel,
+                        Ordering::Relaxed,
+                    )
+                    .is_ok()
+                {
+                    if oldnext.is_null() {
+                        return;
+                    }
+                    // Prior runnext gets pushed to the ring instead.
+                    gp_ptr = oldnext;
+                    break;
+                }
+            }
+        }
+
+        loop {
+            let h = self.runqhead.load(Ordering::Acquire);
+            let t = self.runqtail.load(Ordering::Relaxed);
+            if t.wrapping_sub(h) < LOCAL_RUNQ_SIZE as u32 {
+                // Room in the ring.
+                let slot = (t as usize) % LOCAL_RUNQ_SIZE;
+                (*self.runq.get())[slot] = gp_ptr;
+                self.runqtail
+                    .store(t.wrapping_add(1), Ordering::Release);
+                return;
+            }
+            // Full — try to overflow half + this G to global.
+            let g_to_push = NonNull::new_unchecked(gp_ptr);
+            if self.runqputslow(g_to_push, h, t) {
+                return;
+            }
+            // CAS lost — queue may have drained; retry the put.
+        }
+    }
+
+    /// Spill half the local runq plus `gp` to the global runq.
+    /// Returns true on success, false if the head CAS lost a race
+    /// (owner P should retry the put).
+    ///
+    /// Mirrors `runqputslow` (proc.go:7104).
+    fn runqputslow(&self, gp: NonNull<G>, h: u32, t: u32) -> bool {
+        const HALF: usize = LOCAL_RUNQ_SIZE / 2;
+        let mut batch: [*mut G; HALF + 1] = [core::ptr::null_mut(); HALF + 1];
+        let n = t.wrapping_sub(h) / 2;
+        // Sanity: this path is only entered with t-h == LOCAL_RUNQ_SIZE.
+        // n must be HALF.
+        debug_assert_eq!(n as usize, HALF, "runqputslow: queue not full");
+        for i in 0..n {
+            let slot = (h.wrapping_add(i) as usize) % LOCAL_RUNQ_SIZE;
+            batch[i as usize] = unsafe { (*self.runq.get())[slot] };
+        }
+        if self
+            .runqhead
+            .compare_exchange(
+                h,
+                h.wrapping_add(n),
+                Ordering::Release,
+                Ordering::Relaxed,
+            )
+            .is_err()
+        {
+            return false;
+        }
+        batch[n as usize] = gp.as_ptr();
+        super::scheduler::globrunqput_batch(&batch[..(n as usize) + 1]);
+        true
+    }
+
+    /// Pop the next G from the local runnable queue, examining
+    /// `runnext` first then the ring. Returns `None` if both are empty.
+    ///
+    /// Mirrors `runqget` (proc.go:7178). Executed only by the owner P.
+    pub unsafe fn runqget(&self) -> Option<NonNull<G>> {
+        let next = self.runnext.load(Ordering::Acquire);
+        if !next.is_null() {
+            // Only the owner P can publish a new runnext; only
+            // stealers (γ) can race to clear it. So a single CAS
+            // attempt is sufficient.
+            if self
+                .runnext
+                .compare_exchange(next, core::ptr::null_mut(), Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
+                return Some(NonNull::new_unchecked(next));
+            }
+        }
+        loop {
+            let h = self.runqhead.load(Ordering::Acquire);
+            let t = self.runqtail.load(Ordering::Acquire);
+            if t == h {
+                return None;
+            }
+            let slot = (h as usize) % LOCAL_RUNQ_SIZE;
+            let gp = (*self.runq.get())[slot];
+            if self
+                .runqhead
+                .compare_exchange_weak(
+                    h,
+                    h.wrapping_add(1),
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                if gp.is_null() {
+                    // Stale slot from a previous wrap — skip and retry.
+                    continue;
+                }
+                return Some(NonNull::new_unchecked(gp));
+            }
+        }
+    }
+
+    /// Cheap, racy "is there work for me here?" check used by the
+    /// schedule loops post-park to decide whether to dispatch or
+    /// re-park. False negatives are harmless: a `wake_idle_m` from
+    /// the producer will catch us. False positives just turn into a
+    /// `runqget == None` on the next iteration.
+    pub fn runq_has_work(&self) -> bool {
+        if !self.runnext.load(Ordering::Acquire).is_null() {
+            return true;
+        }
+        let h = self.runqhead.load(Ordering::Acquire);
+        let t = self.runqtail.load(Ordering::Acquire);
+        h != t
+    }
+
+    /// Approximate count of Gs in the local runq + runnext. Diagnostic
+    /// only — racy across multiple Ms.
+    pub fn runq_len(&self) -> usize {
+        let mut n = 0usize;
+        if !self.runnext.load(Ordering::Relaxed).is_null() {
+            n += 1;
+        }
+        let h = self.runqhead.load(Ordering::Relaxed);
+        let t = self.runqtail.load(Ordering::Relaxed);
+        n + t.wrapping_sub(h) as usize
+    }
+}

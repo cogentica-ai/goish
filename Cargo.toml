@@ -329,3 +329,7 @@ path = "examples/path_smoke.rs"
 [[example]]
 name = "sched_p_alpha"
 path = "examples/sched_p_alpha.rs"
+
+[[example]]
+name = "sched_p_beta"
+path = "examples/sched_p_beta.rs"
