@@ -265,3 +265,19 @@ path = "examples/chan_multiconsumer.rs"
 [[example]]
 name = "chan_nil"
 path = "examples/chan_nil.rs"
+
+[[example]]
+name = "sync_mutex"
+path = "examples/sync_mutex.rs"
+
+[[example]]
+name = "sync_waitgroup"
+path = "examples/sync_waitgroup.rs"
+
+[[example]]
+name = "sync_once"
+path = "examples/sync_once.rs"
+
+[[example]]
+name = "sync_rwmutex"
+path = "examples/sync_rwmutex.rs"

@@ -53,6 +53,7 @@ pub mod select_macro;
 pub mod slices;
 pub mod strconv;
 pub mod strings;
+pub mod sync;
 pub mod syscall;
 pub mod time;
 pub mod types;
