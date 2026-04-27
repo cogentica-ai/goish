@@ -47,6 +47,7 @@ pub mod maps;
 pub mod io;
 pub mod log;
 pub mod os;
+pub mod path;
 pub mod range;
 pub mod reflect;
 pub mod runtime;
