@@ -30,6 +30,14 @@ pub const SYS_GETTID: usize = 186;
 pub const SYS_CLOCK_GETTIME: usize = 228;
 pub const SYS_EXIT_GROUP: usize = 231;
 pub const SYS_SCHED_GETAFFINITY: usize = 204;
+pub const SYS_FUTEX: usize = 202;
+
+// futex(2) ops. PRIVATE flag (128) is set when only intra-process
+// threads share the address — Linux can use a faster wait-list.
+// Mirrors Go runtime/os_linux.go:55-58.
+pub const FUTEX_PRIVATE_FLAG: i32 = 128;
+pub const FUTEX_WAIT_PRIVATE: i32 = 0 | FUTEX_PRIVATE_FLAG;
+pub const FUTEX_WAKE_PRIVATE: i32 = 1 | FUTEX_PRIVATE_FLAG;
 
 // ─── arch_prctl(2) op codes (M17a-β2) ──────────────────────────────────
 //
@@ -246,6 +254,38 @@ pub fn Gettid() -> i32 {
 #[allow(non_snake_case)]
 pub fn SchedYield() -> isize {
     unsafe { syscall1(SYS_SCHED_YIELD, 0) }
+}
+
+/// `futex(2)` — Linux address-based wait/wake primitive.
+///
+/// `op = FUTEX_WAIT_PRIVATE`: if `*addr == val`, sleep until woken
+/// (or `ts` elapses; `ts == null` means forever). Returns 0 on
+/// wake, `-EAGAIN` if `*addr != val`, `-ETIMEDOUT` on timeout.
+///
+/// `op = FUTEX_WAKE_PRIVATE`: wake up to `val` threads sleeping on
+/// `addr`. Returns the number woken (0 if none).
+///
+/// Mirrors Go's `runtime.futex` (os_linux.go:44, asm at
+/// sys_linux_amd64.s for SYS_FUTEX = 202). `addr2` and `val3` are
+/// only used by REQUEUE/CMP_REQUEUE; we always pass null/0.
+#[allow(non_snake_case)]
+pub fn Futex(
+    addr: *const u32,
+    op: i32,
+    val: u32,
+    ts: *const Timespec,
+) -> isize {
+    unsafe {
+        syscall6(
+            SYS_FUTEX,
+            addr as usize,
+            op as usize,
+            val as usize,
+            ts as usize,
+            0, // addr2
+            0, // val3
+        )
+    }
 }
 
 /// `sched_getaffinity(2)` — fetch the calling thread's CPU affinity

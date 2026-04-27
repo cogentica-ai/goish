@@ -40,12 +40,13 @@
 
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
+use alloc::vec::Vec;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::g::{GStatus, G};
 use super::gobuf::{make_context, swap_context, Gobuf};
-use super::m::{current_m, ParkCommit};
+use super::m::{current_m, current_m_storage, MStorage, ParkCommit};
 use crate::runtime::spin::SpinLock;
 
 /// Globally-shared scheduler state. After M17a-β1, this only carries
@@ -90,6 +91,8 @@ pub fn newproc(closure: Box<dyn FnOnce()>) {
     let g_ptr = NonNull::from(&mut *g);
     LIVE_G_COUNT.fetch_add(1, Ordering::AcqRel);
     SCHED.lock().runq.push_back(g_ptr);
+    // M17c: a fresh runnable G — wake one parked M to dispatch.
+    wake_idle_m();
 }
 
 /// Voluntarily yield the CPU. Equivalent to Go's `runtime.Gosched()`
@@ -227,8 +230,15 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
     current_m().lock().current_g = None;
 
     if g.status == GStatus::Dead {
-        LIVE_G_COUNT.fetch_sub(1, Ordering::AcqRel);
+        let prev = LIVE_G_COUNT.fetch_sub(1, Ordering::AcqRel);
         let _ = unsafe { Box::from_raw(g_ptr.as_ptr()) };
+        if prev == 1 {
+            // Last live goroutine just exited. Any Ms parked on
+            // futex_wait need a signal so they observe
+            // LIVE_G_COUNT == 0 and exit (workers via ExitThread,
+            // main M via schedule() return).
+            wake_all_idle_m();
+        }
     }
 }
 
@@ -258,15 +268,24 @@ pub fn schedule() {
                 if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
                     return;
                 }
+                // Brief spin (~32 PAUSE) to absorb producer
+                // latency, then futex-park. Mirrors Go's
+                // `runtime.findRunnable` spin-then-stop pattern.
                 spin_or_yield();
+                if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
+                    return;
+                }
+                if SCHED.lock().runq.is_empty() {
+                    park_m_idle();
+                }
             }
         }
     }
 }
 
-/// Bounded spin then `sched_yield(2)`. Used by `schedule` /
-/// `m_schedule_loop` on an empty run queue to give other threads
-/// CPU. M17c will replace with a futex park/unpark pair.
+/// Bounded spin then `sched_yield(2)`. Brief — used as a stepping
+/// stone before `park_m_idle` futex-waits. The spin gives a hot
+/// producer time to push work and avoid the syscall round-trip.
 #[inline(never)]
 fn spin_or_yield() {
     const SPIN_LIMIT: u32 = 32;
@@ -276,6 +295,123 @@ fn spin_or_yield() {
         spins += 1;
     }
     let _ = crate::syscall::SchedYield();
+}
+
+// ─── M17c: idle M parking via futex ────────────────────────────────
+//
+// Modeled after Go's `stopm`/`startm`/`mPark` (runtime/proc.go) +
+// `note`/`futexsleep`/`futexwakeup` (runtime/lock_futex.go).
+//
+// Two state primitives:
+//
+//   1. `MIDLE`: the global idle-M list. Each entry is a parked M.
+//      mput pushes self before sleeping; mget pops one to wake.
+//      Mirrors Go's `sched.midle`.
+//
+//   2. `MStorage.park`: a one-shot `Note` per M. Cleared before
+//      each park-cycle, signaled exactly once by the waker, then
+//      cleared again by the sleeper after wake. Mirrors Go's
+//      `m.park`.
+//
+// Park sequence (`park_m_idle`, modeling Go's `stopm`):
+//   1. Lock MIDLE.
+//   2. Re-check runq + LIVE under MIDLE lock (atomicity with wake).
+//   3. If work or shutdown, drop lock and return.
+//   4. Else: clear our note, push self onto MIDLE, drop lock.
+//   5. note.sleep() — blocks until a waker calls note.wakeup().
+//
+// Wake sequence (`wake_idle_m`, modeling Go's `startm`-on-wakep):
+//   1. Lock MIDLE.
+//   2. Pop one MStorage. Drop lock.
+//   3. Call note.wakeup() on the popped M.
+//
+// Race-free invariant:
+//   - "M is in MIDLE" ⟺ "M is parked or about to park".
+//   - Push/pop on MIDLE are serialized by the SpinLock.
+//   - mput happens BEFORE note.sleep, so any waker that pops us
+//     and calls note.wakeup before our sleep starts has set
+//     note.key = 1 — sleep's load-loop sees it and returns
+//     without entering futex_wait.
+//   - The runq re-check under MIDLE lock is what closes the race
+//     against new work arriving between the previous pop and our
+//     park decision.
+
+/// Global idle-M list. Mirrors Go's `sched.midle`. Linked
+/// implicitly via Vec ordering (LIFO push/pop, matches Go's stack
+/// behavior).
+static MIDLE: SpinLock<Vec<&'static MStorage>> = SpinLock::new(Vec::new());
+
+/// Register an MStorage as known. In Go this is `allm`. Goish
+/// doesn't actually need an "all Ms" list — only an idle list —
+/// but `register_m_storage` is kept for API compatibility with the
+/// previous design and to give a hook for future per-M
+/// initialization. No-op in v1.
+pub fn register_m_storage(_storage: &'static MStorage) {
+    // Intentionally empty. The idle-M list (MIDLE) is populated
+    // dynamically by park_m_idle's mput, not at registration time.
+}
+
+/// Park the calling M until a waker pops it from MIDLE and signals
+/// its note. Used by `m_schedule_loop` and `schedule` when the run
+/// queue is empty and goroutines are still alive.
+///
+/// Mirror of Go's `stopm` (proc.go:2997) → `mPark` (proc.go:1972).
+fn park_m_idle() {
+    let storage = current_m_storage();
+
+    // mput + park-decision under MIDLE lock — atomicity ensures
+    // wakers either see us in MIDLE (and pop us) or push runq
+    // before we re-check. Go does this under `sched.lock`.
+    {
+        let mut midle = MIDLE.lock();
+        // Re-check conditions under the lock.
+        if !SCHED.lock().runq.is_empty() {
+            return;
+        }
+        if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
+            return;
+        }
+        // Clear note BEFORE mput so a waker that pops us
+        // immediately sees a fresh note. Order matters: clear
+        // happens-before any wakeup that targets this cycle.
+        storage.park.clear();
+        midle.push(storage);
+    }
+
+    // notesleep — blocks in futex_wait(key, 0) until note.wakeup()
+    // sets key = 1. If the wakeup raced ahead of the sleep entry,
+    // sleep's load-loop sees key != 0 and returns without syscall.
+    storage.park.sleep();
+
+    // Note: clear() will run at the start of the *next* park-cycle
+    // (above). Leaving key = 1 between cycles is fine — the next
+    // clear() resets it before the next mput.
+}
+
+/// Wake one idle M, if any. Called by code that pushes new work
+/// to the run queue (`newproc`, `goready`).
+///
+/// Mirror of Go's `wakep` (proc.go:3217) + `startm`-on-wakep
+/// (proc.go:3040).
+pub fn wake_idle_m() {
+    let storage = match MIDLE.lock().pop() {
+        Some(s) => s,
+        None => return,
+    };
+    storage.park.wakeup();
+}
+
+/// Wake every idle M. Used at shutdown when the last live
+/// goroutine exits — parked Ms need a signal to observe
+/// `LIVE_G_COUNT == 0` and exit.
+fn wake_all_idle_m() {
+    loop {
+        let storage = match MIDLE.lock().pop() {
+            Some(s) => s,
+            None => break,
+        };
+        storage.park.wakeup();
+    }
 }
 
 /// Worker M dispatch loop. Never returns under normal flow — when
@@ -299,7 +435,16 @@ pub fn m_schedule_loop() -> ! {
                 if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
                     crate::syscall::ExitThread(0);
                 }
+                // Brief spin then futex-park (M17c). spin_or_yield
+                // first so a producer pushing inflight work right
+                // now can avoid the syscall round-trip.
                 spin_or_yield();
+                if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
+                    crate::syscall::ExitThread(0);
+                }
+                if SCHED.lock().runq.is_empty() {
+                    park_m_idle();
+                }
             }
         }
     }
@@ -376,6 +521,8 @@ fn spawn_worker_m(id: u32) -> i64 {
     let storage: &'static super::m::MStorage =
         Box::leak(Box::new(super::m::MStorage::new(id)));
     storage.init_tls_self();
+    // M17c: register so wake_idle_m can scan for parked workers.
+    register_m_storage(storage);
 
     let stack_base = syscall::Mmap(
         core::ptr::null_mut(),
@@ -562,14 +709,18 @@ pub unsafe fn selparkcommit(g_ptr: NonNull<G>) -> bool {
 /// onto the run queue. The next dispatch will swap into it,
 /// resuming it from inside `gopark`.
 pub fn goready(g_ptr: NonNull<G>) {
-    let mut s = SCHED.lock();
-    unsafe {
-        debug_assert_eq!(
-            (*g_ptr.as_ptr()).status,
-            GStatus::Waiting,
-            "goready: target G is not parked"
-        );
-        (*g_ptr.as_ptr()).status = GStatus::Runnable;
+    {
+        let mut s = SCHED.lock();
+        unsafe {
+            debug_assert_eq!(
+                (*g_ptr.as_ptr()).status,
+                GStatus::Waiting,
+                "goready: target G is not parked"
+            );
+            (*g_ptr.as_ptr()).status = GStatus::Runnable;
+        }
+        s.runq.push_back(g_ptr);
     }
-    s.runq.push_back(g_ptr);
+    // M17c: a runnable G is now in the queue — wake an idle M.
+    wake_idle_m();
 }

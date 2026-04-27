@@ -20,6 +20,7 @@ pub mod heap;
 pub mod mcentral;
 pub mod mheap;
 mod mem;
+pub mod note;
 pub mod rand;
 pub mod sched;
 pub mod spin;
@@ -58,6 +59,14 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
         let arena_base = heap::mheap_arena_base();
         mcentral::mcentral_init(arena_base);
     }
+
+    // Now that the allocator is up, register the main M with the
+    // global M_LIST so wakers can find it (M17c). Main M parks via
+    // futex when its runq drains; without registration the
+    // wake_idle_m scan would skip it. Deferred from setup_main_tls
+    // because registration push()es to a Vec, which alloc-traps if
+    // mheap isn't online yet.
+    sched::register_m_storage(&sched::MAIN_M);
 
     // Bootstrap N-1 worker Ms (M17a-δ.1) so the worker pool is
     // already dispatching by the time `__goish_main` runs. Each

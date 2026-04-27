@@ -36,6 +36,7 @@ use core::sync::atomic::{AtomicBool, AtomicI32};
 
 use super::g::G;
 use super::gobuf::Gobuf;
+use crate::runtime::note::Note;
 use crate::runtime::spin::SpinLock;
 use crate::syscall;
 
@@ -81,10 +82,6 @@ pub struct M {
     /// select parks: null (selparkcommit walks `g.select_wait`).
     /// Mirrors Go's `m.waitlock` (runtime/runtime2.go:567).
     pub waitlock: *const AtomicBool,
-    /// M17c will use this for futex-based idle parking. Currently
-    /// unused (β2 doesn't park Ms — schedule() returns when runq
-    /// drains).
-    pub parked: AtomicBool,
 }
 
 unsafe impl Send for M {}
@@ -100,14 +97,17 @@ impl M {
             sched_buf: Gobuf::new(),
             waitunlockf: None,
             waitlock: core::ptr::null(),
-            parked: AtomicBool::new(false),
         }
     }
 }
 
-/// Per-thread storage that holds both the M and the TLS self-pointer
-/// at offset 0. `#[repr(C)]` pins `tls_self` to offset 0 so
+/// Per-thread storage that holds the M, the TLS self-pointer, and
+/// the M's park note. `#[repr(C)]` pins `tls_self` to offset 0 so
 /// `mov %fs:0, _` reads it back as a `*const SpinLock<M>`.
+///
+/// `park` is a `Note` — Go's one-shot wait/wake primitive
+/// (lock_futex.go). Mirrors `m.park` (runtime2.go). Its address is
+/// the futex word the kernel binds wait/wake to.
 #[repr(C)]
 pub struct MStorage {
     /// Self-pointer to `m`. Read by `current_m()` via `mov %fs:0`.
@@ -118,6 +118,12 @@ pub struct MStorage {
     /// practice — only this M's own thread accesses it) field
     /// reads/writes the borrow checker would otherwise reject.
     pub m: SpinLock<M>,
+    /// One-shot park signal. M17c idle-parking flow:
+    ///   1. M pushes itself onto the global midle list.
+    ///   2. M calls `park.sleep()` — blocks in futex_wait until
+    ///      a waker calls `park.wakeup()`.
+    ///   3. M calls `park.clear()` to reset for the next cycle.
+    pub park: Note,
 }
 
 // MStorage holds a raw pointer in UnsafeCell. We assert thread-
@@ -134,6 +140,7 @@ impl MStorage {
         MStorage {
             tls_self: UnsafeCell::new(core::ptr::null()),
             m: SpinLock::new(M::new(id)),
+            park: Note::new(),
         }
     }
 
@@ -171,6 +178,13 @@ pub fn setup_main_tls() {
         syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
         syscall::Exit(2);
     }
+    // Note: main M is NOT registered with the M_LIST. Registration
+    // would push to a Vec, which calls into the allocator — and
+    // setup_main_tls runs before `mheap_init()` in `__goish_rt0`
+    // (chan/scheduler ops need current_m() before mheap is up).
+    // Main M never parks idle (it's the supervisor — terminates
+    // via Exit when LIVE_G_COUNT==0), so wakers don't need to find
+    // it. Worker Ms are registered in `spawn_worker_m`.
 }
 
 /// Pointer to the currently-running M's `SpinLock<M>`, read from the
@@ -191,4 +205,20 @@ pub fn current_m() -> &'static SpinLock<M> {
         );
         &*ptr
     }
+}
+
+/// Pointer to the calling thread's `MStorage`. Recovers the storage
+/// address from the inner `&SpinLock<M>` via `container_of`-style
+/// offset arithmetic, which is well-defined because `MStorage` is
+/// `#[repr(C)]` and `m` is at the offset returned by
+/// `core::mem::offset_of!`.
+///
+/// Used by M17c's idle-park path to access `parked` (the futex word
+/// outside the SpinLock).
+#[inline]
+pub fn current_m_storage() -> &'static MStorage {
+    let m_lock = current_m() as *const SpinLock<M>;
+    let m_offset = core::mem::offset_of!(MStorage, m);
+    let storage_ptr = (m_lock as usize - m_offset) as *const MStorage;
+    unsafe { &*storage_ptr }
 }
