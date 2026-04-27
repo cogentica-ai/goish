@@ -32,6 +32,33 @@ use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
 
+// ─── m.locks discipline (M18b-α phase A) ───────────────────────────
+//
+// Holding a SpinLock means we are in a non-yielding critical section
+// from the scheduler's perspective: the M must not be async-preempted
+// while it holds, because the SIGURG trampoline would re-enter Rust
+// and could try to take the same lock (deadlock) or, worse, observe
+// half-mutated state. Mirrors the role of `lockWithRank`/`unlock` in
+// Go's runtime/lock_futex.go, which bump and decrement `m.locks`
+// around every internal lock acquisition.
+//
+// Calls are routed through small helpers so this file stays free of
+// `crate::runtime::sched` imports at the static-init level (the
+// spin module has callers that exist before the sched module is
+// usable). The helpers themselves short-circuit while TLS is not
+// ready, so it is safe to take SpinLocks during early `__goish_rt0`
+// (`args::__set`, etc.) without touching `fs:0`.
+
+#[inline]
+fn bump_m_locks() {
+    crate::runtime::sched::acquirem();
+}
+
+#[inline]
+fn drop_m_locks() {
+    crate::runtime::sched::releasem();
+}
+
 #[repr(C)]
 pub struct SpinLock<T> {
     /// Lock state. Repr(C) puts this at offset 0 so `&SpinLock<T>`
@@ -63,6 +90,10 @@ impl<T> SpinLock<T> {
         {
             core::hint::spin_loop();
         }
+        // Bump m.locks AFTER acquiring so the increment happens-after
+        // the acquire fence — no reordering can place runtime work
+        // outside the locked region.
+        bump_m_locks();
         Guard { lock: self }
     }
 
@@ -100,6 +131,7 @@ pub unsafe fn raw_lock(atom: *const AtomicBool) {
     {
         core::hint::spin_loop();
     }
+    bump_m_locks();
 }
 
 /// Release a `SpinLock` previously acquired via `raw_lock`.
@@ -108,6 +140,9 @@ pub unsafe fn raw_lock(atom: *const AtomicBool) {
 /// `raw_lock` call.
 #[inline]
 pub unsafe fn raw_unlock(atom: *const AtomicBool) {
+    // Drop m.locks BEFORE releasing the lock so the decrement is
+    // observably inside the locked region.
+    drop_m_locks();
     (*atom).store(false, Ordering::Release);
 }
 
@@ -129,6 +164,7 @@ impl<'a, T> DerefMut for Guard<'a, T> {
 impl<'a, T> Drop for Guard<'a, T> {
     #[inline]
     fn drop(&mut self) {
+        drop_m_locks();
         self.lock.locked.store(false, Ordering::Release);
     }
 }

@@ -32,7 +32,7 @@
 
 use core::cell::UnsafeCell;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicBool, AtomicI32};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 
 use super::g::G;
 use super::gobuf::Gobuf;
@@ -124,6 +124,14 @@ pub struct MStorage {
     ///      a waker calls `park.wakeup()`.
     ///   3. M calls `park.clear()` to reset for the next cycle.
     pub park: Note,
+    /// Non-yielding-section depth counter. Incremented by
+    /// `acquirem()` (and auto-bumped by SpinLock acquisition);
+    /// decremented by `releasem()`. M18b's SIGURG preempt handler
+    /// reads this lock-free and skips injection while > 0. Mirrors
+    /// Go's `m.locks` (runtime2.go:546). Per-M and only mutated by
+    /// the M's own thread, so accesses are race-free at the hardware
+    /// level on x86-64; AtomicU32 is for lint compliance.
+    pub locks: AtomicU32,
 }
 
 // MStorage holds a raw pointer in UnsafeCell. We assert thread-
@@ -141,6 +149,7 @@ impl MStorage {
             tls_self: UnsafeCell::new(core::ptr::null()),
             m: SpinLock::new(M::new(id)),
             park: Note::new(),
+            locks: AtomicU32::new(0),
         }
     }
 
@@ -163,6 +172,77 @@ impl MStorage {
 /// `setup_main_tls()`; subsequent `current_m()` reads are TLS-backed.
 pub static MAIN_M: MStorage = MStorage::new(0);
 
+/// Process-wide flag: `true` once the main thread has planted its
+/// `fs` base via `setup_main_tls`. Before this point, `current_m()`
+/// reads from `fs:0` would dereference an unset segment register;
+/// `acquirem`/`releasem` consult this flag and become no-ops while
+/// it is `false` so SpinLocks taken during pre-TLS init (e.g.
+/// `args::__set`) don't crash.
+///
+/// Workers see `true` from their first instruction because their
+/// `fs` base is planted by `clone(2)` with `CLONE_SETTLS` atomically
+/// with thread creation, before any user code on the worker runs.
+static TLS_READY: AtomicBool = AtomicBool::new(false);
+
+/// Mark TLS as ready. Called once from `setup_main_tls` after
+/// `arch_prctl(ARCH_SET_FS, …)` succeeds. Idempotent.
+#[inline]
+pub fn mark_tls_ready() {
+    TLS_READY.store(true, Ordering::Release);
+}
+
+/// True iff this thread can safely call `current_m()` /
+/// `current_m_storage()`. The main thread answers `true` after
+/// `setup_main_tls`; workers answer `true` from their entry point.
+#[inline]
+pub fn is_tls_ready() -> bool {
+    TLS_READY.load(Ordering::Acquire)
+}
+
+/// Increment the calling M's non-yielding-section depth counter.
+/// Pairs with `releasem` (LIFO). No-op while TLS is not yet ready
+/// (early init on the main thread). Mirrors Go's `acquirem`
+/// (runtime/runtime1.go:631).
+///
+/// **Why not RAII**: gopark's protocol requires `releasem` *before*
+/// the swap_context that yields the goroutine — see Go's
+/// proc.go:419. An RAII guard whose Drop runs after the function
+/// returns would post-date the yield. Free functions match the
+/// surgical placement Go uses.
+#[inline]
+pub fn acquirem() {
+    if !is_tls_ready() {
+        return;
+    }
+    current_m_storage()
+        .locks
+        .fetch_add(1, Ordering::Relaxed);
+}
+
+/// Decrement the calling M's non-yielding-section depth counter.
+/// Pairs with `acquirem`. Mirrors Go's `releasem`
+/// (runtime/runtime1.go:638).
+#[inline]
+pub fn releasem() {
+    if !is_tls_ready() {
+        return;
+    }
+    current_m_storage()
+        .locks
+        .fetch_sub(1, Ordering::Relaxed);
+}
+
+/// Read the calling M's `locks` count without touching it. Used by
+/// the SIGURG handler (M18b phase B+) for the `canPreemptM`
+/// predicate. Returns 0 while TLS is not yet ready.
+#[inline]
+pub fn current_m_locks() -> u32 {
+    if !is_tls_ready() {
+        return 0;
+    }
+    current_m_storage().locks.load(Ordering::Relaxed)
+}
+
 /// Initialize the main thread's TLS slot and plant `fs`.
 ///
 /// **Must be called exactly once, very early in `__goish_rt0`** —
@@ -178,6 +258,11 @@ pub fn setup_main_tls() {
         syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
         syscall::Exit(2);
     }
+    // Activate `acquirem` / `releasem` after fs is planted; before
+    // this they short-circuit to keep pre-TLS SpinLock callers
+    // (e.g. `args::__set`) from dereferencing an uninitialized
+    // segment.
+    mark_tls_ready();
     // Note: main M is NOT registered with the M_LIST. Registration
     // would push to a Vec, which calls into the allocator — and
     // setup_main_tls runs before `mheap_init()` in `__goish_rt0`

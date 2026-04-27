@@ -53,7 +53,10 @@ mod stack;
 
 pub use g::{GStatus, SELECT_WAIT_MAX, G};
 pub use gobuf::{make_context, swap_context, Gobuf};
-pub use m::{current_m, setup_main_tls, MStorage, ParkCommit, M, MAIN_M};
+pub use m::{
+    acquirem, current_m, current_m_locks, current_m_storage, is_tls_ready, releasem,
+    setup_main_tls, MStorage, ParkCommit, M, MAIN_M,
+};
 pub use scheduler::{
     block_forever_commit, bootstrap_workers, chan_park_commit, current_g, gopark, goready,
     live_g_count, m_schedule_loop, newproc, num_cpus, register_m_storage, runq_len, schedule,

@@ -46,7 +46,7 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::g::{GStatus, G};
 use super::gobuf::{make_context, swap_context, Gobuf};
-use super::m::{current_m, current_m_storage, MStorage, ParkCommit};
+use super::m::{acquirem, current_m, current_m_storage, releasem, MStorage, ParkCommit};
 use crate::runtime::spin::SpinLock;
 
 /// Globally-shared scheduler state. After M17a-β1, this only carries
@@ -115,6 +115,10 @@ pub fn Gosched() {
         let m = current_m().lock();
         &m.sched_buf as *const Gobuf
     };
+    // No m.locks bump needed: by this point status = Runnable, so
+    // M18b's SIGURG handler filters this G via the
+    // `curg.status == Running` predicate (Theorem in design notes:
+    // status filter dominates lock-counter for non-Running G).
     unsafe {
         swap_context(buf_from, buf_to);
     }
@@ -126,6 +130,13 @@ pub fn Gosched() {
 /// Internal: invoked when a G's entry closure returns. Marks the G
 /// dead and swaps back to the scheduler. Equivalent to Go's
 /// `runtime.goexit1` (proc.go:4431).
+///
+/// **m.locks**: not bumped here. Once status is `Dead`, the SIGURG
+/// preempt handler filters on `curg.status == Running` and skips
+/// injection — the only PC-window where the handler could reach us
+/// is the swap_context asm itself, covered by phase-C's PC-range
+/// guard. A balanced bump pair is impossible because the swap_context
+/// here never returns to this stack.
 fn goexit() -> ! {
     let g_ptr = current_m().lock().current_g.expect("goexit: no current G");
     unsafe {
@@ -610,6 +621,21 @@ pub fn gopark(commit: ParkCommit, lock_atom: *const AtomicBool) {
         None => return,
     };
 
+    // Hold m.locks > 0 across the setup → swap window. Unlike
+    // Gosched/goexit, gopark's G has status == Running until
+    // dispatch_one_g flips it to Waiting *post*-swap (the commit-fn
+    // pattern), so the SIGURG handler's status filter does NOT cover
+    // this body. Only the lock counter does.
+    //
+    // Discipline mirrors Go's gopark (proc.go:419):
+    //   acquirem → setup → releasem → mcall(park_m)
+    // i.e. the matching releasem runs *before* the context switch so
+    // the +1 / -1 are accounted on the same M (the parker's M may
+    // differ from the resuming M after multi-M migration). The
+    // residual window between releasem and swap_context entry is
+    // covered by phase-C's PC-range guard (`is_in_runtime_text`).
+    acquirem();
+
     // Stash commit + lock pointer on the M. dispatch_one_g picks
     // them up post-swap and runs commit on the scheduler stack.
     {
@@ -623,6 +649,7 @@ pub fn gopark(commit: ParkCommit, lock_atom: *const AtomicBool) {
         let m = current_m().lock();
         &m.sched_buf as *const Gobuf
     };
+    releasem();
     unsafe {
         swap_context(buf_from, buf_to);
     }
