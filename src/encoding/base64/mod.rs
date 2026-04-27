@@ -8,7 +8,7 @@
 //   base64::URLEncoding.EncodeToString(&src)        // "-_=" alphabet
 //   base64::RawStdEncoding.EncodeToString(&src)     // no '=' padding
 //   base64::RawURLEncoding.EncodeToString(&src)     // no '=' padding
-//   base64::StdEncoding.DecodeString(&s) -> (Vec<u8>, error)
+//   base64::StdEncoding.DecodeString(&s) -> (slice<byte>, error)
 //
 // All four are values of type `Encoding`. The alphabet + padding
 // flag are stored in the Encoding; methods are dispatched on it.
@@ -23,8 +23,9 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::errors::{error, ErrorTrait};
+use crate::goslice::slice;
 use crate::gostring::string;
-use crate::types::int;
+use crate::types::{byte, int};
 
 const STD_ALPHABET: &[u8; 64] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -153,16 +154,17 @@ impl Encoding {
         }
     }
 
-    /// Decode `s` (a base64 string) into bytes. Mirrors
+    /// Decode `s` (a base64 string) into bytes. Returns
+    /// `(slice<byte>, error)` — Go's `[]byte` shape. Mirrors
     /// `Encoding.DecodeString` (base64.go).
-    pub fn DecodeString(&self, s: &str) -> (Vec<u8>, error) {
+    pub fn DecodeString(&self, s: &str) -> (slice<byte>, error) {
         let src = s.as_bytes();
         // Estimate; trim once we know exact length.
         let max_len = self.DecodedLen(src.len() as int) as usize + 3;
-        let mut dst = vec![0u8; max_len];
+        let mut dst: Vec<u8> = vec![0u8; max_len];
         let (n, err) = self.decode_into(&mut dst, src);
         dst.truncate(n as usize);
-        (dst, err)
+        (slice::__from_vec(dst), err)
     }
 
     fn decode_into(&self, dst: &mut [u8], src: &[u8]) -> (int, error) {

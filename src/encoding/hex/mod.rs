@@ -5,7 +5,7 @@
 // Public API:
 //
 //   hex::EncodeToString(&src) -> string
-//   hex::DecodeString(&s) -> Result<Vec<u8>, error>
+//   hex::DecodeString(&s)     -> (slice<byte>, error)
 //   hex::Encode(&mut dst, &src) -> int   // bytes written = 2 * len(src)
 //   hex::Decode(&mut dst, &src) -> (int, error)
 //   hex::EncodedLen(n) -> int
@@ -21,8 +21,9 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::errors::{error, ErrorTrait};
+use crate::goslice::slice;
 use crate::gostring::string;
-use crate::types::int;
+use crate::types::{byte, int};
 
 const HEX_TABLE: &[u8; 16] = b"0123456789abcdef";
 
@@ -129,12 +130,13 @@ pub fn Decode(dst: &mut [u8], src: &[u8]) -> (int, error) {
     (i as int, crate::errors::nil)
 }
 
-/// `hex.DecodeString(s)` — decode a hex string into bytes. Mirrors
+/// `hex.DecodeString(s)` — decode a hex string into bytes. Returns
+/// `(slice<byte>, error)` — Go's `[]byte` shape. Mirrors
 /// `DecodeString` (hex.go:138).
-pub fn DecodeString(s: &str) -> (Vec<u8>, error) {
+pub fn DecodeString(s: &str) -> (slice<byte>, error) {
     let src = s.as_bytes();
-    let mut dst = vec![0u8; src.len() / 2];
+    let mut dst: Vec<u8> = vec![0u8; src.len() / 2];
     let (n, err) = Decode(&mut dst, src);
     dst.truncate(n as usize);
-    (dst, err)
+    (slice::__from_vec(dst), err)
 }

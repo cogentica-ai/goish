@@ -106,7 +106,7 @@ fn test_hex() {
     // Round-trip
     let (decoded, err) = hex::DecodeString("48656c6c6f20576f726c64"); // "Hello World"
     check(err.IsNil(), b"hex: DecodeString returned err\n");
-    check(decoded.as_slice() == b"Hello World", b"hex: round-trip wrong\n");
+    check(&*decoded == b"Hello World".as_slice(), b"hex: round-trip wrong\n");
 
     // Invalid byte detection
     let (_, err2) = hex::DecodeString("zz");
@@ -133,7 +133,7 @@ fn test_base64() {
     );
     let (decoded, err) = base64::StdEncoding.DecodeString("SGVsbG8sIFdvcmxkIQ==");
     check(err.IsNil(), b"std: DecodeString err\n");
-    check(decoded.as_slice() == src, b"std: round-trip wrong\n");
+    check(&*decoded == src, b"std: round-trip wrong\n");
 
     // RawStdEncoding (no padding)
     let raw = base64::RawStdEncoding.EncodeToString(src);
@@ -143,7 +143,7 @@ fn test_base64() {
     );
     let (decoded2, err2) = base64::RawStdEncoding.DecodeString("SGVsbG8sIFdvcmxkIQ");
     check(err2.IsNil(), b"rawstd: DecodeString err\n");
-    check(decoded2.as_slice() == src, b"rawstd: round-trip\n");
+    check(&*decoded2 == src, b"rawstd: round-trip\n");
 
     // URLEncoding (uses -/_ instead of +//): encode bytes that
     // would produce + or / under StdEncoding.
