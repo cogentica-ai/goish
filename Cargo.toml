@@ -245,3 +245,7 @@ path = "examples/select_lockorder.rs"
 [[example]]
 name = "clone_smoke"
 path = "examples/clone_smoke.rs"
+
+[[example]]
+name = "tls_smoke"
+path = "examples/tls_smoke.rs"

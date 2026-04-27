@@ -78,7 +78,7 @@ fn main() {
     // Clone needs the stack TOP. Stack grows downward.
     let stack_top = unsafe { stack.add(STACK_SIZE) };
 
-    let child_tid = unsafe { syscall::Clone(syscall::CLONE_THREAD_FLAGS, stack_top, child_entry) };
+    let child_tid = unsafe { syscall::Clone(syscall::CLONE_THREAD_FLAGS, stack_top, child_entry, 0) };
     check(child_tid > 0, b"clone returned non-positive tid\n");
     check(child_tid as i32 != parent_tid, b"child tid == parent tid\n");
 
@@ -121,7 +121,7 @@ fn main() {
         );
         check(s != syscall::MAP_FAILED, b"multi: mmap failed\n");
         let top = unsafe { s.add(STACK_SIZE) };
-        let tid = unsafe { syscall::Clone(syscall::CLONE_THREAD_FLAGS, top, multi_child_entry) };
+        let tid = unsafe { syscall::Clone(syscall::CLONE_THREAD_FLAGS, top, multi_child_entry, 0) };
         check(tid > 0, b"multi: clone failed\n");
     }
     // Wait for all 4 to publish.

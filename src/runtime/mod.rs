@@ -35,6 +35,12 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // Stash argc/argv so os::Args() can decode them lazily on first use.
     args::__set(argc, argv);
 
+    // Plant the main M's TLS slot. After this, `current_m()` reads
+    // `&MAIN_M.m` via `mov %fs:0, _` instead of the (legacy β1)
+    // static-pointer return. Must come before any code that calls
+    // current_m() — chan ops, scheduler, gopark/goready all do.
+    sched::setup_main_tls();
+
     // Seed the cheaprand state from rdtsc so each process run starts
     // with a different select fairness sequence.
     rand::init();

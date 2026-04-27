@@ -6,28 +6,38 @@
 // scheduler-side gobuf for context switches, M id and Linux tid —
 // through it.
 //
-// ─── β1 (this file) ──────────────────────────────────────────────
+// ─── TLS layout (M17a-β2) ────────────────────────────────────────
 //
-// Only the main thread exists today. `MAIN_M` holds the single M,
-// wrapped in a `SpinLock` for the same reason `SCHED` is locked:
-// keeps the borrow checker honest at no extra cost in single-M
-// (one uncontended CAS per access). `current_m()` returns the static
-// `&MAIN_M` unconditionally.
+// Each M is wrapped in an `MStorage`:
 //
-// ─── β2 (next task #69) ──────────────────────────────────────────
+//     #[repr(C)]
+//     struct MStorage {
+//         tls_self: UnsafeCell<*const SpinLock<M>>,  // offset 0
+//         m: SpinLock<M>,                            // offset 8
+//     }
 //
-// `arch_prctl(ARCH_SET_FS, &m.tls_self_ptr)` makes `fs:[0]` read
-// back `&m`, so `current_m()` becomes a one-instruction
-// `mov %fs:0, _`. Worker Ms (M17a-δ) clone with `CLONE_SETTLS` and
-// land on their own M. The `tls_self_ptr` field below is reserved
-// for that wiring; β1 leaves it null.
+// At init, we plant `&storage.m` into `storage.tls_self`. Then
+// `arch_prctl(ARCH_SET_FS, &storage.tls_self)` makes the calling
+// thread's `fs` segment base equal `&storage.tls_self`, so a
+// `mov %fs:0, _` reads back `&storage.m` — the SpinLock guarding
+// this thread's M. `current_m()` does exactly that.
+//
+// For workers, `clone(2)` with `CLONE_SETTLS` and `tls = &storage
+// .tls_self` sets the child's fs base atomically with thread
+// creation; the child's first `current_m()` already returns its
+// own M.
+//
+// The `#[repr(C)]` attribute on `MStorage` and the tls_self field
+// at offset 0 are load-bearing — `mov %fs:0` reads from offset 0.
 
+use core::cell::UnsafeCell;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, AtomicI32};
 
 use super::g::G;
 use super::gobuf::Gobuf;
 use crate::runtime::spin::SpinLock;
+use crate::syscall;
 
 /// One OS thread's scheduler-visible state.
 pub struct M {
@@ -47,24 +57,16 @@ pub struct M {
     /// transfers it back.
     pub sched_buf: Gobuf,
     /// M17c will use this for futex-based idle parking. Currently
-    /// unused (β1 doesn't park Ms — schedule() returns when runq
+    /// unused (β2 doesn't park Ms — schedule() returns when runq
     /// drains).
     pub parked: AtomicBool,
-    /// Self-pointer used by β2's TLS wiring: `arch_prctl` will set
-    /// `fs` to point at this field, so `mov %fs:0, _` reads back the
-    /// M's address. Null in β1 (no TLS yet).
-    pub tls_self_ptr: *const M,
 }
 
-// Same justification as `Sched`: `M` holds raw pointers (`NonNull<G>`,
-// `*const M`) and atomics that aren't auto-`Send`. Single-M today;
-// multi-M (M17a-δ) only ever accesses an M from its own thread, so
-// no cross-thread borrowing of `&M` happens in practice.
 unsafe impl Send for M {}
 
 impl M {
     /// Build an empty M. `id` should be unique across all Ms in the
-    /// process; β1 only allocates `MAIN_M` with id=0.
+    /// process; the main M uses id=0; M17a-δ assigns 1..N to workers.
     pub const fn new(id: u32) -> Self {
         M {
             id,
@@ -72,21 +74,94 @@ impl M {
             current_g: None,
             sched_buf: Gobuf::new(),
             parked: AtomicBool::new(false),
-            tls_self_ptr: core::ptr::null(),
         }
     }
 }
 
-/// The main thread's M. Always present. β2 will additionally wire up
-/// `fs:[0]` to point at this static so `current_m()` can switch from
-/// "always &MAIN_M" to a TLS-backed read.
-pub static MAIN_M: SpinLock<M> = SpinLock::new(M::new(0));
+/// Per-thread storage that holds both the M and the TLS self-pointer
+/// at offset 0. `#[repr(C)]` pins `tls_self` to offset 0 so
+/// `mov %fs:0, _` reads it back as a `*const SpinLock<M>`.
+#[repr(C)]
+pub struct MStorage {
+    /// Self-pointer to `m`. Read by `current_m()` via `mov %fs:0`.
+    /// Written exactly once at init, then immutable for the
+    /// lifetime of the storage.
+    pub tls_self: UnsafeCell<*const SpinLock<M>>,
+    /// The actual M. Locking serializes the (uncontended in
+    /// practice — only this M's own thread accesses it) field
+    /// reads/writes the borrow checker would otherwise reject.
+    pub m: SpinLock<M>,
+}
 
-/// Pointer to the currently-running M.
+// MStorage holds a raw pointer in UnsafeCell. We assert thread-
+// locality of access (each thread only ever touches its own MStorage
+// through TLS) so the inner field doesn't actually need
+// synchronization beyond the SpinLock on `m`.
+unsafe impl Sync for MStorage {}
+
+impl MStorage {
+    /// Const-initialize an MStorage with a null tls_self. Caller
+    /// must call `init_tls_self` exactly once before any
+    /// `current_m()` read on the corresponding thread.
+    pub const fn new(id: u32) -> Self {
+        MStorage {
+            tls_self: UnsafeCell::new(core::ptr::null()),
+            m: SpinLock::new(M::new(id)),
+        }
+    }
+
+    /// Plant the self-pointer. Idempotent: writes the address of
+    /// `self.m` into `self.tls_self`.
+    pub fn init_tls_self(&'static self) {
+        unsafe { *self.tls_self.get() = &self.m; }
+    }
+
+    /// Address that `arch_prctl(ARCH_SET_FS, _)` should be called
+    /// with, or that `clone(2)` should pass as `tls`. This is the
+    /// address of the `tls_self` field — `fs:[0]` will read its
+    /// stored pointer (= `&self.m`).
+    pub fn fs_base(&self) -> usize {
+        self.tls_self.get() as usize
+    }
+}
+
+/// The main thread's M storage. Initialized in `__goish_rt0` via
+/// `setup_main_tls()`; subsequent `current_m()` reads are TLS-backed.
+pub static MAIN_M: MStorage = MStorage::new(0);
+
+/// Initialize the main thread's TLS slot and plant `fs`.
 ///
-/// β1: returns `&MAIN_M` unconditionally. Single-M only.
-/// β2: rewrites to read `fs:[0]` via inline asm — multi-M-correct.
+/// **Must be called exactly once, very early in `__goish_rt0`** —
+/// before any code that reads `current_m()` (chans, scheduler, etc.).
+/// After this call, every subsequent `current_m()` on the main
+/// thread reads `&MAIN_M.m` via `mov %fs:0`.
+pub fn setup_main_tls() {
+    MAIN_M.init_tls_self();
+    let fs_base = MAIN_M.fs_base();
+    let r = syscall::ArchPrctl(syscall::ARCH_SET_FS, fs_base);
+    if r != 0 {
+        const MSG: &[u8] = b"goish: arch_prctl(ARCH_SET_FS) failed\n";
+        syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+        syscall::Exit(2);
+    }
+}
+
+/// Pointer to the currently-running M's `SpinLock<M>`, read from the
+/// thread's `fs` register. Each thread's fs base was planted at init
+/// (main: `setup_main_tls`; workers: `CLONE_SETTLS` + per-thread
+/// `MStorage`), so this is a single instruction on the hot path.
+///
+/// **Must not be called before `setup_main_tls()`** — fs is
+/// uninitialized at process entry; reading it would yield garbage.
 #[inline]
 pub fn current_m() -> &'static SpinLock<M> {
-    &MAIN_M
+    let ptr: *const SpinLock<M>;
+    unsafe {
+        core::arch::asm!(
+            "mov %fs:0, {0}",
+            out(reg) ptr,
+            options(nostack, preserves_flags, att_syntax),
+        );
+        &*ptr
+    }
 }
