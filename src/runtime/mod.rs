@@ -73,6 +73,16 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // mheap isn't online yet.
     sched::register_m_storage(&sched::MAIN_M);
 
+    // M17b-α: bootstrap GOMAXPROCS Ps and bind P[0] to the main M.
+    // Must follow the allocator coming online (Ps are leaked Box<P>)
+    // and precede `bootstrap_workers` (each worker `acquirep`s
+    // P[id] in its `mstart`).
+    let nprocs = sched::num_cpus();
+    sched::bootstrap_ps(nprocs);
+    if let Some(p0) = sched::p_at(0) {
+        sched::acquirep(p0);
+    }
+
     // Bootstrap N-1 worker Ms (M17a-δ.1) so the worker pool is
     // already dispatching by the time `__goish_main` runs. Each
     // worker thread has its own MStorage with a fresh fs base; the

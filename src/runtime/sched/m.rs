@@ -32,10 +32,11 @@
 
 use core::cell::UnsafeCell;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicPtr, AtomicU32, Ordering};
 
 use super::g::G;
 use super::gobuf::Gobuf;
+use super::p::P;
 use crate::runtime::note::Note;
 use crate::runtime::spin::SpinLock;
 use crate::syscall;
@@ -150,6 +151,11 @@ pub struct MStorage {
     /// detect goroutines that have been running too long without
     /// yielding.
     pub start_running_ns: AtomicI64,
+    /// Bound P, or null when this M holds no P. Mirrors Go's `m.p`
+    /// (runtime/runtime2.go:561). Atomic so other threads (steal
+    /// scans, sysmon) can read it lock-free; written exclusively by
+    /// the owning M's thread via `acquirep` / `releasep`.
+    pub current_p: AtomicPtr<P>,
 }
 
 // MStorage holds a raw pointer in UnsafeCell. We assert thread-
@@ -170,6 +176,7 @@ impl MStorage {
             locks: AtomicU32::new(0),
             preempt_resume_pc: UnsafeCell::new(0),
             start_running_ns: AtomicI64::new(0),
+            current_p: AtomicPtr::new(core::ptr::null_mut()),
         }
     }
 

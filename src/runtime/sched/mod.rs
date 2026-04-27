@@ -48,6 +48,7 @@
 mod g;
 mod gobuf;
 mod m;
+mod p;
 mod scheduler;
 mod stack;
 
@@ -56,6 +57,10 @@ pub use gobuf::{make_context, swap_context, Gobuf};
 pub use m::{
     acquirem, current_m, current_m_locks, current_m_storage, is_tls_ready, releasem,
     setup_main_tls, MStorage, ParkCommit, M, MAIN_M,
+};
+pub use p::{
+    acquirep, bootstrap_ps, current_p, for_each_p, num_ps, p_at, releasep, LOCAL_RUNQ_SIZE,
+    MAX_PS, P, P_DEAD, P_IDLE, P_RUNNING, P_SYSCALL,
 };
 pub use scheduler::{
     block_forever_commit, bootstrap_workers, chan_park_commit, current_g, for_each_m, gopark,

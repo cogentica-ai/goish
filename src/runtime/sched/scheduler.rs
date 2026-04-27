@@ -549,9 +549,16 @@ pub fn num_cpus() -> usize {
 /// signal-handling pieces we don't carry yet.
 extern "C" fn mstart() -> ! {
     let tid = crate::syscall::Gettid();
-    {
+    let id = {
         let m = super::m::current_m().lock();
         m.procid.store(tid, Ordering::Release);
+        m.id as usize
+    };
+    // M17b-α: each worker M acquires its corresponding P. Worker id
+    // matches P id by construction (`bootstrap_workers` spawns id=1..N
+    // and `bootstrap_ps(N)` populates P slots 0..N).
+    if let Some(p) = super::p::p_at(id) {
+        super::p::acquirep(p);
     }
     m_schedule_loop()
 }
