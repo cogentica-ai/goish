@@ -125,7 +125,7 @@ pub fn Seconds(n: int) -> Duration {
 /// `mono == 0` means "no monotonic component" (e.g., constructed via
 /// `time::Unix(...)`); `Now()` always sets it. `Sub` prefers monotonic
 /// when both sides have it.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Time {
     sec: int,
     nsec: i32,
@@ -320,6 +320,131 @@ pub fn Since(t: Time) -> Duration {
 /// `time.Until(t)` — `t.Sub(Now())`.
 pub fn Until(t: Time) -> Duration {
     t.Sub(Now())
+}
+
+// ─── Timer / Ticker / After (M18a-+) ────────────────────────────────
+//
+// Channel-based timers built on `Sleep`. Each timer owns a goroutine
+// that sleeps the deadline then non-blocking-sends on the chan. Stop
+// is an atomic cancel flag checked just before the send.
+//
+// Mirror of Go's time/sleep.go: After == NewTimer(d).C; NewTimer
+// returns a Timer with public C field and Stop method. Ticker
+// likewise but periodic.
+//
+// Goish v1 limitations vs Go:
+//   - Reset is not implemented (would need to wake the sleeper).
+//   - Timer's chan is buffered cap=1 (matches Go's pre-1.23
+//     behavior; post-1.23 sync mode is not faithful here).
+//   - AfterFunc is not implemented (use `go!()` with Sleep instead).
+
+use alloc::sync::Arc;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+use crate::gochan::chan;
+
+/// `time.Timer` — single-fire timer that sends on `C` after a
+/// duration. Mirror of `time.Timer` (sleep.go).
+pub struct Timer {
+    /// `<-chan Time` — receives one `Time` value when the timer
+    /// fires (unless `Stop` cancelled it first).
+    pub C: chan<Time>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Timer {
+    /// Stop prevents the Timer from firing. Returns `true` if the
+    /// call stops the timer, `false` if it has already expired or
+    /// been stopped. Mirrors `Timer.Stop` (sleep.go:107).
+    ///
+    /// Note: Stop does not close the channel. After Stop, no value
+    /// will be sent on C.
+    pub fn Stop(&self) -> bool {
+        // swap returns OLD value. If old was false (timer was
+        // active), we successfully cancelled — return true.
+        !self.cancel.swap(true, Ordering::AcqRel)
+    }
+}
+
+/// `time.NewTimer(d)` — create a Timer that fires after `d`.
+/// Mirrors `NewTimer` (sleep.go:143).
+#[allow(non_snake_case)]
+pub fn NewTimer(d: Duration) -> Timer {
+    let c: chan<Time> = crate::make!(chan Time, 1);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let c_inner = c.clone();
+    let cancel_inner = cancel.clone();
+    crate::go!(move || {
+        Sleep(d);
+        if cancel_inner.load(Ordering::Acquire) {
+            return;
+        }
+        // Non-blocking send: matches Go's sendTime
+        // (sleep.go:179) which uses select+default to avoid
+        // blocking when the chan buffer is full.
+        crate::select! {
+            c_inner.Send(Now()) => {},
+            default => {},
+        }
+    });
+    Timer { C: c, cancel }
+}
+
+/// `time.After(d)` — equivalent to `NewTimer(d).C`. Mirrors
+/// `After` (sleep.go:202). Useful for timeouts in `select!`:
+///
+///   select! {
+///       let v = ch.Recv()       => handle(v),
+///       let _ = (After(...)).Recv() => timeout(),
+///   }
+#[allow(non_snake_case)]
+pub fn After(d: Duration) -> chan<Time> {
+    NewTimer(d).C
+}
+
+/// `time.Ticker` — periodic timer. Mirrors `time.Ticker`.
+pub struct Ticker {
+    /// `<-chan Time` — receives a `Time` value approximately every
+    /// `d` duration.
+    pub C: chan<Time>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Ticker {
+    /// Stop turns off a ticker. After Stop, no more ticks will
+    /// be sent on C. Stop does not close the channel.
+    pub fn Stop(&self) {
+        self.cancel.store(true, Ordering::Release);
+    }
+}
+
+/// `time.NewTicker(d)` — fires roughly every `d`. Mirrors
+/// `NewTicker`.
+#[allow(non_snake_case)]
+pub fn NewTicker(d: Duration) -> Ticker {
+    if d.0 <= 0 {
+        // Go panics; we abort.
+        const MSG: &[u8] = b"goish: time: non-positive interval for NewTicker\n";
+        syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+        syscall::Exit(2);
+    }
+    let c: chan<Time> = crate::make!(chan Time, 1);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let c_inner = c.clone();
+    let cancel_inner = cancel.clone();
+    crate::go!(move || {
+        loop {
+            Sleep(d);
+            if cancel_inner.load(Ordering::Acquire) {
+                return;
+            }
+            crate::select! {
+                c_inner.Send(Now()) => {},
+                default => {},
+            }
+        }
+    });
+    Ticker { C: c, cancel }
 }
 
 /// `time.Unix(sec, nsec)` — construct a Time from a Unix timestamp.
