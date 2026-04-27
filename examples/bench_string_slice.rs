@@ -28,11 +28,30 @@ fn main() {
     const HEADER: &[u8] = b"\n=== bench: goish vs native (smaller ns/op = faster) ===\n\n";
     syscall::Write(syscall::STDOUT, HEADER.as_ptr(), HEADER.len());
 
+    // Global warmup: prime clock_gettime, allocator, and CPU caches
+    // before any timed measurement. Without this, the FIRST benchmark
+    // in the sequence eats the first-call cost of every subsystem
+    // and looks 50%+ slower than identical operations later.
+    global_warmup();
+
     bench_string();
     bench_slice();
 
     const FOOTER: &[u8] = b"\nbench_string_slice: ok\n";
     syscall::Write(syscall::STDOUT, FOOTER.as_ptr(), FOOTER.len());
+}
+
+fn global_warmup() {
+    let sample: &[u8] = b"warmup payload for cache and allocator priming";
+    for _ in 0..10_000 {
+        let _ = black_box(goish_string::from_bytes(sample));
+        let _ = black_box(String::from_utf8_lossy(sample).into_owned());
+        let v: Vec<i64> = (0..256).collect();
+        let _ = black_box(goish_slice::__from_vec(v.clone()));
+        let _ = black_box(v);
+    }
+    // Read clock once to warm up clock_gettime path.
+    let _ = Now();
 }
 
 // ─── timing helper ────────────────────────────────────────────────
@@ -77,11 +96,15 @@ fn bench_string() {
         25,
     );
 
-    // 1. Construction from byte slice.
+    // 1. Construction from byte slice. goish::string is Arc<[u8]>;
+    // Arc has a slightly larger allocation (header + payload) than
+    // Vec/String's bare buffer, so goish trades ~10-20 ns of
+    // construction cost for O(1) clone (refcount bump) instead of
+    // String's O(n) full copy.
     let g1 = bench(b"goish::string::from_bytes", N, || {
         let _ = black_box(goish_string::from_bytes(SAMPLE));
     });
-    let n1 = bench(b"alloc::String::from_utf8_lossy", N, || {
+    let n1 = bench(b"alloc::String::from_utf8_lossy.into_owned()", N, || {
         let _ = black_box(String::from_utf8_lossy(SAMPLE).into_owned());
     });
     ratio_print(g1, n1);

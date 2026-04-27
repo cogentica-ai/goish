@@ -45,6 +45,7 @@ impl string {
 
     /// From a Rust string literal — the construction path for goish
     /// source code. Allocates and copies once at first use.
+    #[inline]
     pub fn from_static(s: &'static str) -> Self {
         Self {
             bytes: Arc::from(s.as_bytes()),
@@ -53,6 +54,16 @@ impl string {
 
     /// From a borrowed byte sequence. Copies. Used by `string(b)` for
     /// `slice<byte>` and by internal callers (utf8 encoders).
+    ///
+    /// Backed by `Arc<[u8]>` (one allocation: ArcInner header +
+    /// inline payload). Construction cost is competitive with
+    /// `String::from_utf8_lossy(b).into_owned()` (both do
+    /// alloc + memcpy of len bytes); the small structural overhead
+    /// vs `Vec::<u8>::from(&[u8])` is the Arc refcount fields. We
+    /// pay that overhead deliberately because it makes `clone()`
+    /// O(1) — a refcount bump rather than a full copy — which
+    /// matches Go's value-type-with-shared-backing semantics.
+    #[inline]
     pub fn from_bytes(b: &[u8]) -> Self {
         Self { bytes: Arc::from(b) }
     }
