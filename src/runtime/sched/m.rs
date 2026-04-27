@@ -132,6 +132,17 @@ pub struct MStorage {
     /// the M's own thread, so accesses are race-free at the hardware
     /// level on x86-64; AtomicU32 is for lint compliance.
     pub locks: AtomicU32,
+    /// Preempt scratch slot — user PC the trampoline must jump back
+    /// to when the preempted G is resumed. Written by
+    /// `goish_preempt_sigtramp` before each injection. The
+    /// trampoline reads this **once at entry** and snapshots the
+    /// value onto the G's stack; the per-M slot is then free to be
+    /// overwritten by subsequent preempts on this M without
+    /// affecting the in-flight trampoline. The handler's write and
+    /// the trampoline's first read happen on the same thread with
+    /// SIGURG masked between them (kernel default mask), so the
+    /// snapshot sees a stable value.
+    pub preempt_resume_pc: UnsafeCell<u64>,
 }
 
 // MStorage holds a raw pointer in UnsafeCell. We assert thread-
@@ -150,6 +161,7 @@ impl MStorage {
             m: SpinLock::new(M::new(id)),
             park: Note::new(),
             locks: AtomicU32::new(0),
+            preempt_resume_pc: UnsafeCell::new(0),
         }
     }
 

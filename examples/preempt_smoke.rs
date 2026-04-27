@@ -1,13 +1,16 @@
-// Smoke test: M18b-α phase B — SIGURG decision-only handler.
+// Smoke test: M18b-α phase C — full async preempt via SIGURG.
 //
-// Validates that the SIGURG handler:
-//   1. Fires when SIGURG is delivered (`invocations() > 0`).
-//   2. Decides "yes, would inject" at least once when the signal
-//      arrives on a worker M running a CPU-bound goroutine
-//      (`decisions() > 0`).
-//   3. Does not modify the user goroutine's behavior — phase B is
-//      decision-only, so the spinners' final values must match the
-//      iteration counts exactly (no register corruption).
+// Validates that:
+//   1. The SIGURG handler fires (`invocations() > 0`).
+//   2. The handler injects at least once when SIGURG arrives on a
+//      worker M running a CPU-bound goroutine (`injections() > 0`).
+//   3. Each preempted goroutine resumes at the correct PC with its
+//      register state bit-identical — verified by checking that
+//      every spinner's accumulated sum equals
+//      `(0..ITERS).fold(0, |a,k| a.wrapping_add(k))` exactly. Any
+//      drift means register corruption (the trampoline mis-restored
+//      a GPR/XMM across the swap-and-yield cycle) or PC corruption
+//      (the trampoline jumped to the wrong location).
 //
 // Setup:
 //   - Spawn N CPU-spinner goroutines that increment a per-G atomic
@@ -104,44 +107,43 @@ fn main() {
         DONE.store(1, Ordering::Release);
     });
     goish::runtime::sched::schedule();
-    check(DONE.load(Ordering::Acquire) == 1, b"preempt_decide: WG.Wait didn't return\n");
+    check(DONE.load(Ordering::Acquire) == 1, b"preempt_smoke: WG.Wait didn't return\n");
     check(
         SIGNAL_DONE.load(Ordering::Acquire) == 1,
-        b"preempt_decide: signaler didn't finish\n",
+        b"preempt_smoke: signaler didn't finish\n",
     );
 
-    // Verify spinners produced correct results — phase B must not
-    // modify user-visible behavior.
+    // Verify spinners produced correct results — phase C must
+    // preserve register state bit-exactly across each preempt event.
+    // Any wrong sum means the trampoline corrupted GPR/XMM/RFLAGS.
     let expected: u64 = (0..ITERS).fold(0u64, |a, k| a.wrapping_add(k));
     for i in 0..N_SPINNERS {
         let got = SPINNER_RESULTS[i].load(Ordering::Acquire);
-        check(got == expected, b"preempt_decide: spinner result wrong\n");
+        check(got == expected, b"preempt_smoke: spinner result wrong (register corruption)\n");
     }
 
-    // Verify the handler fired and at least once decided "would
-    // inject."
+    // Verify the handler fired and actually injected at least once.
     let inv = preempt::invocations();
-    let dec = preempt::decisions();
-    let (l, n, r, sp) = preempt::skip_breakdown();
+    let inj = preempt::injections();
+    let (l, t, p, n, r, sp) = preempt::skip_breakdown();
 
-    // Use a tiny stderr printf — goish has no Println on stderr in
-    // no_std without pulling in fmt; raw write of a number via a
-    // small helper.
     print_diag(b"invocations=", inv);
-    print_diag(b" decisions=", dec);
+    print_diag(b" injections=", inj);
     print_diag(b" skip_locks=", l);
+    print_diag(b" skip_trampoline=", t);
+    print_diag(b" skip_parking=", p);
     print_diag(b" skip_no_curg=", n);
     print_diag(b" skip_not_running=", r);
     print_diag(b" skip_sp_range=", sp);
     syscall::Write(syscall::STDOUT, b"\n".as_ptr(), 1);
 
-    check(inv > 0, b"preempt_decide: handler never fired\n");
+    check(inv > 0, b"preempt_smoke: handler never fired\n");
     check(
-        dec > 0,
-        b"preempt_decide: handler never decided to inject (worker never observed mid-spin)\n",
+        inj > 0,
+        b"preempt_smoke: handler never injected (no async preempt observed)\n",
     );
 
-    const OK: &[u8] = b"preempt_decide: ok\n";
+    const OK: &[u8] = b"preempt_smoke: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());
 }
 

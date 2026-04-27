@@ -315,5 +315,5 @@ name = "leak_proof"
 path = "examples/leak_proof.rs"
 
 [[example]]
-name = "preempt_decide"
-path = "examples/preempt_decide.rs"
+name = "preempt_smoke"
+path = "examples/preempt_smoke.rs"

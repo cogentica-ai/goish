@@ -99,6 +99,17 @@ pub unsafe extern "C" fn swap_context(_from: *mut Gobuf, _to: *const Gobuf) {
         // Resume target context — pops the saved PC from its
         // stack and jumps.
         "ret",
+        // M18b-α phase C: mark the end of `swap_context`'s text so
+        // the SIGURG preempt handler can refuse to inject when PC
+        // falls anywhere inside this asm. SIGURG arriving mid-swap
+        // (after `mov rsp, [rsi+0x00]` but before `ret`) would have
+        // the kernel-saved RSP pointing at the *target* G's stack
+        // while the target's user PC has not yet been popped — a
+        // hijacked injection there would make the trampoline
+        // resume at a non-PC byte and crash the worker.
+        ".globl goish_swap_context_end",
+        "goish_swap_context_end:",
+        "int3",
     )
 }
 
