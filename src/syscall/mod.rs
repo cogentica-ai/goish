@@ -21,9 +21,29 @@ pub const SYS_OPEN: usize = 2;
 pub const SYS_CLOSE: usize = 3;
 pub const SYS_MMAP: usize = 9;
 pub const SYS_MUNMAP: usize = 11;
+pub const SYS_CLONE: usize = 56;
+pub const SYS_EXIT: usize = 60; // per-thread exit (vs SYS_EXIT_GROUP)
 pub const SYS_NANOSLEEP: usize = 35;
+pub const SYS_GETTID: usize = 186;
 pub const SYS_CLOCK_GETTIME: usize = 228;
 pub const SYS_EXIT_GROUP: usize = 231;
+
+// ─── clone(2) flags (M17a) ─────────────────────────────────────────────
+//
+// Mirrors Go 1.25 runtime/os_linux.go:133-150. We use the same
+// composite flags Go uses for `newm`/`newosproc` minus CLONE_SETTLS
+// (added by M17a-β when per-M TLS lands).
+pub const CLONE_VM: u64 = 0x100;
+pub const CLONE_FS: u64 = 0x200;
+pub const CLONE_FILES: u64 = 0x400;
+pub const CLONE_SIGHAND: u64 = 0x800;
+pub const CLONE_THREAD: u64 = 0x10000;
+pub const CLONE_SYSVSEM: u64 = 0x40000;
+pub const CLONE_SETTLS: u64 = 0x80000;
+
+/// Default flags for spawning a worker M (no TLS yet — α only).
+pub const CLONE_THREAD_FLAGS: u64 =
+    CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_SYSVSEM | CLONE_THREAD;
 
 // ─── clock_gettime clock IDs ───────────────────────────────────────────
 pub const CLOCK_REALTIME: i32 = 0;
@@ -200,4 +220,91 @@ pub unsafe fn syscall2(n: usize, a1: usize, a2: usize) -> isize {
         options(nostack, preserves_flags),
     );
     ret
+}
+
+/// `gettid(2)` — kernel thread id. Linux makes each clone(2)'d thread
+/// have its own tid (vs the shared tgid). Used as the M's identity
+/// (`m.procid`) in M17a-β.
+#[allow(non_snake_case)]
+pub fn Gettid() -> i32 {
+    unsafe { syscall1(SYS_GETTID, 0) as i32 }
+}
+
+/// `exit(2)` — per-thread exit. Different from `Exit`/`exit_group`
+/// which kills the whole process. Used by worker M shutdown paths
+/// where the main thread shouldn't terminate.
+#[allow(non_snake_case)]
+pub fn ExitThread(code: i32) -> ! {
+    unsafe {
+        syscall1(SYS_EXIT, code as usize);
+        core::hint::unreachable_unchecked()
+    }
+}
+
+/// `clone(2)` — spawn a new OS thread sharing the parent's address
+/// space. The child begins execution at `child_entry` on a fresh
+/// stack pointed at by `child_stack` (which must point at the **top**
+/// of an mmap'd region of at least 64 KiB). `child_entry` must be
+/// `extern "C"` and never return; it should call `ExitThread` when
+/// done.
+///
+/// Returns the child TID on the parent path. Never returns directly
+/// in the child — the child immediately tail-jumps to `child_entry`.
+///
+/// **ABI** (matches Go runtime/sys_linux_amd64.s:561-619 minus the
+/// TLS setup, which M17a-β adds):
+///   rdi = flags (typically `CLONE_THREAD_FLAGS`)
+///   rsi = child_stack (top — kernel decrements as child uses)
+///   rdx = child_entry (saved on the new stack before the syscall
+///                       so we can jmp to it after the syscall
+///                       clobbers our scratch regs)
+///
+/// **Safety**: caller must keep `child_stack`'s mmap'd region alive
+/// for the lifetime of the child thread; passing a stale stack will
+/// SIGSEGV the child.
+#[allow(non_snake_case)]
+#[unsafe(naked)]
+pub unsafe extern "C" fn Clone(
+    _flags: u64,
+    _child_stack: *mut u8,
+    _child_entry: extern "C" fn() -> !,
+) -> i64 {
+    core::arch::naked_asm!(
+        // SysV register-passed args at function entry:
+        //   rdi = flags, rsi = child_stack, rdx = child_entry
+        //
+        // We can't keep child_entry in rdx across the syscall (rdx
+        // is clobbered as the ptid arg), so stash it on the new
+        // stack first. The child finds it at (rsp) and jmps to it.
+        "subq $8, %rsi",            // reserve 1 slot at child_stack top
+        "movq %rdx, (%rsi)",        // *new_top = child_entry
+        // Set up clone(2) syscall:
+        //   rax = 56 (SYS_clone)
+        //   rdi = flags     (already)
+        //   rsi = stack     (already, decremented)
+        //   rdx = ptid (0)
+        //   r10 = ctid (0)
+        //   r8  = newtls (0; M17a-β will pass per-M TLS pointer)
+        "movq $56, %rax",
+        "xorq %rdx, %rdx",
+        "xorq %r10, %r10",
+        "xorq %r8, %r8",
+        "syscall",
+        // Both threads continue here. Parent: rax = child_pid > 0.
+        // Child: rax = 0 and rsp = child_stack-8 (kernel set rsp
+        // from rsi at syscall time).
+        "testq %rax, %rax",
+        "jnz 2f",                   // parent: skip child trampoline
+        // CHILD path: pop child_entry from the stack and jmp to it.
+        // After popq, rsp is back at child_stack (clean top). The
+        // entry must be `-> !` because there's no return address
+        // below it — `ret` would pop garbage.
+        "popq %rax",
+        "jmpq *%rax",
+        // PARENT path: rax already holds child_pid (the syscall
+        // return), so just return.
+        "2:",
+        "retq",
+        options(att_syntax),
+    )
 }
