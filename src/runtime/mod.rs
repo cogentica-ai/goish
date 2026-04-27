@@ -22,6 +22,7 @@ pub mod mcentral;
 pub mod mheap;
 mod mem;
 pub mod note;
+pub mod preempt;
 pub mod rand;
 pub mod sched;
 pub mod signal;
@@ -83,6 +84,11 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // after bootstrap_workers so register_m_storage's allocator is
     // up.
     sysmon::start_sysmon();
+
+    // Install the SIGURG preempt handler (M18b-α phase B).
+    // Decision-only: counts would-be preempts but does not modify
+    // ucontext yet. Phase C wires the asyncPreempt trampoline.
+    preempt::install();
 
     // Hand off to the user's main. The proc-macro #[goish::main]
     // generates a #[no_mangle] extern "C" fn __goish_main wrapping the

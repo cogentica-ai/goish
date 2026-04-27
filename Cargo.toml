@@ -313,3 +313,7 @@ path = "examples/signal_smoke.rs"
 [[example]]
 name = "leak_proof"
 path = "examples/leak_proof.rs"
+
+[[example]]
+name = "preempt_decide"
+path = "examples/preempt_decide.rs"
