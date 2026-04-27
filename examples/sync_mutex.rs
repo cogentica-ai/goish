@@ -39,39 +39,55 @@ fn main() {
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());
 }
 
-// ── Test 1: uncontended Lock/Unlock from a single goroutine ────────
+// ── Test 1: uncontended Lock/Unlock from a single goroutine.
+// Demonstrates the Go-shape `LockManual` + `Unlock` pair (matches
+// `m.Lock(); ...; m.Unlock()` verbatim from Go code).
 
 fn test_lock_unlock_uncontended() {
-    static MU: Mutex = Mutex::new();
+    static MU: Mutex = Mutex::new(());
     static RAN: AtomicUsize = AtomicUsize::new(0);
 
     go!(|| {
-        MU.Lock();
+        MU.LockManual();
         RAN.fetch_add(1, Ordering::Relaxed);
         MU.Unlock();
 
         // Re-lock to confirm Unlock fully released.
-        MU.Lock();
+        MU.LockManual();
         RAN.fetch_add(1, Ordering::Relaxed);
         MU.Unlock();
     });
     schedule();
 
     check(RAN.load(Ordering::Relaxed) == 2, b"uncontended: didn't run twice\n");
-    check(MU.TryLock(), b"uncontended: TryLock failed after Unlock\n");
+    check(MU.TryLockManual(), b"uncontended: TryLock failed after Unlock\n");
     MU.Unlock();
 }
 
-// ── Test 2: TryLock fast paths ─────────────────────────────────────
+// ── Test 2: TryLock fast paths (both Manual and RAII forms) ───────
 
 fn test_trylock() {
-    static MU: Mutex = Mutex::new();
+    static MU: Mutex = Mutex::new(());
 
-    check(MU.TryLock(), b"trylock: fresh mutex, TryLock failed\n");
-    check(!MU.TryLock(), b"trylock: locked mutex, TryLock succeeded\n");
+    // Manual (Go-shape, returns bool):
+    check(MU.TryLockManual(), b"trylock: fresh mutex, TryLockManual failed\n");
+    check(!MU.TryLockManual(), b"trylock: locked mutex, TryLockManual succeeded\n");
     MU.Unlock();
-    check(MU.TryLock(), b"trylock: after Unlock, TryLock failed\n");
-    MU.Unlock();
+
+    // RAII (returns Option<MutexGuard>):
+    {
+        let g = MU.TryLock();
+        check(g.is_some(), b"trylock: fresh mutex, TryLock returned None\n");
+        check(MU.TryLock().is_none(), b"trylock: TryLock should fail under guard\n");
+        // g drops at end of block -> unlocks.
+    }
+
+    // After the guard scope, the lock is free again.
+    {
+        let g = MU.TryLock();
+        check(g.is_some(), b"trylock: after guard drop, TryLock failed\n");
+        // g drops at end of block.
+    }
 }
 
 // ── Test 3: contended counter — N goroutines each do K increments
@@ -81,7 +97,7 @@ fn test_contended_counter() {
     const N_GS: i64 = 32;
     const N_INCREMENTS: i64 = 1_000;
 
-    static MU: Mutex = Mutex::new();
+    static MU: Mutex = Mutex::new(());
     static SHARED: AtomicI64 = AtomicI64::new(0);
     static GS_DONE: AtomicUsize = AtomicUsize::new(0);
 
@@ -92,12 +108,12 @@ fn test_contended_counter() {
     for _ in 0..N_GS {
         go!(move || {
             for _ in 0..N_INCREMENTS {
-                MU.Lock();
+                let _g = MU.Lock();
                 // Read-modify-write under lock; if Mutex were broken,
                 // updates would be lost under multi-M contention.
                 let v = SHARED.load(Ordering::Relaxed);
                 SHARED.store(v + 1, Ordering::Relaxed);
-                MU.Unlock();
+                // _g drops -> unlocks at end of iteration.
             }
             GS_DONE.fetch_add(1, Ordering::Relaxed);
         });
@@ -112,7 +128,7 @@ fn test_contended_counter() {
 // ── Test 4: cross-goroutine handoff — one G locks, another unlocks.
 
 fn test_cross_g_handoff() {
-    static MU: Mutex = Mutex::new();
+    static MU: Mutex = Mutex::new(());
     static A_LOCKED: AtomicUsize = AtomicUsize::new(0);
     static B_UNLOCKED: AtomicUsize = AtomicUsize::new(0);
     static C_GOT_LOCK: AtomicUsize = AtomicUsize::new(0);
@@ -123,8 +139,9 @@ fn test_cross_g_handoff() {
     C_GOT_LOCK.store(0, Ordering::Relaxed);
 
     // G A: take the lock, signal, then exit (without unlocking).
+    // Use the manual API since Lock+Unlock cross goroutine boundaries.
     go!(|| {
-        MU.Lock();
+        MU.LockManual();
         A_LOCKED.store(1, Ordering::Release);
     });
 
@@ -142,7 +159,7 @@ fn test_cross_g_handoff() {
         while B_UNLOCKED.load(Ordering::Acquire) == 0 {
             goish::runtime::sched::Gosched();
         }
-        MU.Lock();
+        MU.LockManual();
         C_GOT_LOCK.store(1, Ordering::Release);
         MU.Unlock();
     });

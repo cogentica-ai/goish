@@ -289,3 +289,7 @@ path = "examples/time_sleep.rs"
 [[example]]
 name = "time_timer"
 path = "examples/time_timer.rs"
+
+[[example]]
+name = "context_basic"
+path = "examples/context_basic.rs"

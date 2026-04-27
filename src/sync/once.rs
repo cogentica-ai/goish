@@ -27,7 +27,7 @@ impl Once {
     pub const fn new() -> Self {
         Once {
             done: AtomicBool::new(false),
-            m: Mutex::new(),
+            m: Mutex::new(()),
         }
     }
 
@@ -54,7 +54,7 @@ impl Once {
     #[cold]
     #[inline(never)]
     fn do_slow<F: FnOnce()>(&self, f: F) {
-        self.m.Lock();
+        let _g = self.m.Lock();
         // Re-check under the lock — another goroutine may have run
         // f while we were waiting for the mutex.
         if !self.done.load(Ordering::Relaxed) {
@@ -62,7 +62,7 @@ impl Once {
             // Release: pair with the Acquire in Do's fast path.
             self.done.store(true, Ordering::Release);
         }
-        self.m.Unlock();
+        // _g drops -> unlocks
     }
 }
 

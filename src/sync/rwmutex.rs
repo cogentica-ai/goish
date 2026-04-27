@@ -51,7 +51,7 @@ unsafe impl Sync for RWMutex {}
 impl RWMutex {
     pub const fn new() -> Self {
         RWMutex {
-            w: Mutex::new(),
+            w: Mutex::new(()),
             writer_sem: Sema::new(),
             reader_sem: Sema::new(),
             reader_count: AtomicI32::new(0),
@@ -113,8 +113,9 @@ impl RWMutex {
     /// or another writer, blocks. Mirrors `RWMutex.Lock`
     /// (rwmutex.go:144).
     pub fn Lock(&self) {
-        // First, resolve writer-vs-writer.
-        self.w.Lock();
+        // First, resolve writer-vs-writer. Manual lock — the
+        // matching Unlock happens in our `Unlock` method.
+        self.w.LockManual();
         // Announce a pending writer to readers. fetch_sub returns the
         // OLD readerCount, which equals the number of active readers
         // at the moment of the flip (since prior to the flip the
@@ -137,7 +138,7 @@ impl RWMutex {
     /// TryLock tries to acquire a write lock without blocking.
     /// Mirrors `RWMutex.TryLock` (rwmutex.go:169).
     pub fn TryLock(&self) -> bool {
-        if !self.w.TryLock() {
+        if !self.w.TryLockManual() {
             return false;
         }
         if self

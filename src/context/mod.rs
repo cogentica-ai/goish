@@ -1,0 +1,264 @@
+// context — Go's `context` package.
+//
+// Reference: /share/go/src/context/context.go.
+//
+// User-facing API surface (Goish v1):
+//
+//   trait Context {
+//       fn Deadline(&self) -> Option<time::Time>;
+//       fn Done(&self) -> chan<()>;
+//       fn Err(&self) -> errors::error;
+//   }
+//
+//   fn Background() -> Arc<dyn Context>;
+//   fn TODO()       -> Arc<dyn Context>;
+//   fn WithCancel(parent)         -> (Arc<dyn Context>, CancelFunc);
+//   fn WithDeadline(parent, time) -> (Arc<dyn Context>, CancelFunc);
+//   fn WithTimeout(parent, dur)   -> (Arc<dyn Context>, CancelFunc);
+//
+//   static Canceled: error           // "context canceled"
+//   static DeadlineExceeded: error   // "context deadline exceeded"
+//
+// Done() returns a `chan<()>` that is **closed** when the context is
+// cancelled. For Background/TODO (never-cancellable), Done() returns
+// a nil chan — `select!` skips nil-chan cases, matching Go's
+// `<-ctx.Done()` blocking-forever semantic for non-cancellable
+// contexts.
+//
+// Cancellation propagation: every derived context that has a
+// non-nil parent.Done() spawns a watcher goroutine that does
+// `parent.Done().Recv()` then cancels self. This is the simpler
+// equivalent of Go's `propagateCancel` (context.go) — Go's runtime
+// has a fast path that registers the child on the parent's children
+// list when the parent is itself a *cancelCtx, avoiding the watcher
+// goroutine. Goish v1 always uses the watcher; the cost (one
+// goroutine per derived context) is acceptable at v1 scale.
+//
+// What v1 does NOT include:
+//   - WithValue / Value(key)
+//   - WithCancelCause / WithDeadlineCause / WithTimeoutCause / Cause
+//   - AfterFunc
+//   - WithoutCancel
+
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
+
+extern crate alloc;
+
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+
+use crate::errors::{error, ErrorTrait};
+use crate::gochan::chan;
+use crate::gostring::string;
+use crate::sync::Mutex;
+use crate::time::{Duration, Now, Time};
+
+// ─── sentinel errors ─────────────────────────────────────────────
+
+struct CanceledError;
+impl ErrorTrait for CanceledError {
+    fn Error(&self) -> string {
+        string::from("context canceled")
+    }
+}
+
+struct DeadlineExceededError;
+impl ErrorTrait for DeadlineExceededError {
+    fn Error(&self) -> string {
+        string::from("context deadline exceeded")
+    }
+}
+
+/// `context.Canceled` — the error returned by `Err()` when a
+/// context is cancelled by `cancel()`. Mirrors `context.Canceled`
+/// (context.go:167).
+pub fn Canceled() -> error {
+    crate::errors::Wrap(CanceledError)
+}
+
+/// `context.DeadlineExceeded` — the error returned by `Err()` when
+/// a context is cancelled by deadline expiry. Mirrors
+/// `context.DeadlineExceeded` (context.go:171).
+pub fn DeadlineExceeded() -> error {
+    crate::errors::Wrap(DeadlineExceededError)
+}
+
+// ─── Context trait ───────────────────────────────────────────────
+
+/// `context.Context` — carries deadline + cancellation signal.
+/// Mirrors `context.Context` (context.go:71).
+pub trait Context: Send + Sync {
+    /// Deadline returns the time at which work should be cancelled,
+    /// if a deadline is set. None = no deadline.
+    fn Deadline(&self) -> Option<Time>;
+
+    /// Done returns a chan<()> that is closed when the context is
+    /// cancelled. For non-cancellable contexts (Background/TODO)
+    /// Done returns a nil chan — receives on it block forever, and
+    /// `select!` filters the case out.
+    fn Done(&self) -> chan<()>;
+
+    /// Err returns nil while Done is open; returns Canceled or
+    /// DeadlineExceeded after cancellation.
+    fn Err(&self) -> error;
+}
+
+/// `CancelFunc` — boxed cancel closure. Calling it cancels the
+/// associated context (and its children); subsequent calls are
+/// no-ops. Mirrors `context.CancelFunc` (context.go:231).
+pub type CancelFunc = Box<dyn Fn() + Send + Sync>;
+
+// ─── empty context (Background / TODO) ───────────────────────────
+
+struct EmptyCtx;
+
+impl Context for EmptyCtx {
+    fn Deadline(&self) -> Option<Time> {
+        None
+    }
+    fn Done(&self) -> chan<()> {
+        // nil chan: blocks forever, filtered by select!.
+        chan::<()>::nil()
+    }
+    fn Err(&self) -> error {
+        crate::errors::nil
+    }
+}
+
+/// `context.Background()` — the root context. Never cancellable,
+/// no deadline. Use as the top-level for main / init / tests.
+/// Mirrors `Background()` (context.go:215).
+pub fn Background() -> Arc<dyn Context> {
+    Arc::new(EmptyCtx)
+}
+
+/// `context.TODO()` — placeholder when it's not yet clear which
+/// context to use. Semantically identical to Background. Mirrors
+/// `TODO()` (context.go:223).
+pub fn TODO() -> Arc<dyn Context> {
+    Arc::new(EmptyCtx)
+}
+
+// ─── cancel context (WithCancel / WithDeadline / WithTimeout) ────
+
+struct CancelState {
+    err: error,
+}
+
+struct CancelCtx {
+    parent_deadline: Option<Time>,
+    own_deadline: Option<Time>,
+    done: chan<()>,
+    /// Verbatim Go-shape: a `sync.Mutex` wrapping the protected
+    /// `CancelState`. Mirrors `cancelCtx { mu Mutex; err error }`.
+    state: Mutex<CancelState>,
+}
+
+impl CancelCtx {
+    fn cancel(&self, err: error) {
+        {
+            let mut s = self.state.Lock();
+            if !s.err.IsNil() {
+                return; // already cancelled
+            }
+            s.err = err;
+            // Drop the guard before Close so any G that wakes from
+            // Done.Recv and immediately calls Err() doesn't contend.
+        }
+        // Closing the chan wakes every Recv (and select!) on Done.
+        self.done.Close();
+    }
+}
+
+impl Context for CancelCtx {
+    fn Deadline(&self) -> Option<Time> {
+        // Own deadline (if set) overrides parent's, but only if
+        // strictly earlier. WithDeadline does this check at
+        // construction; here we just return the effective one.
+        self.own_deadline.or(self.parent_deadline)
+    }
+    fn Done(&self) -> chan<()> {
+        self.done.clone()
+    }
+    fn Err(&self) -> error {
+        self.state.Lock().err.clone()
+    }
+}
+
+fn build_cancel_ctx(parent: &Arc<dyn Context>, own_deadline: Option<Time>) -> Arc<CancelCtx> {
+    let me = Arc::new(CancelCtx {
+        parent_deadline: parent.Deadline(),
+        own_deadline,
+        done: crate::make!(chan ()),
+        state: Mutex::new(CancelState {
+            err: crate::errors::nil,
+        }),
+    });
+
+    // Watcher: if parent is cancellable, propagate cancellation.
+    let parent_done = parent.Done();
+    if !parent_done.is_nil() {
+        let me_for_watch = me.clone();
+        let parent_for_watch = parent.clone();
+        crate::go!(move || {
+            let _ = parent_done.Recv();
+            // Parent was cancelled — adopt its err.
+            let perr = parent_for_watch.Err();
+            let cancel_err = if perr.IsNil() { Canceled() } else { perr };
+            me_for_watch.cancel(cancel_err);
+        });
+    }
+
+    me
+}
+
+/// `WithCancel(parent)` — derive a context that can be cancelled
+/// explicitly via the returned CancelFunc. Mirrors
+/// `WithCancel` (context.go:240).
+pub fn WithCancel(parent: Arc<dyn Context>) -> (Arc<dyn Context>, CancelFunc) {
+    let ctx = build_cancel_ctx(&parent, None);
+    let ctx_clone = ctx.clone();
+    let cancel = Box::new(move || ctx_clone.cancel(Canceled()));
+    (ctx, cancel)
+}
+
+/// `WithDeadline(parent, d)` — derive a context that auto-cancels
+/// at time `d` (or earlier if cancel() is called). If parent has
+/// an earlier deadline, returns WithCancel(parent) (no override).
+/// Mirrors `WithDeadline` (context.go:625).
+pub fn WithDeadline(parent: Arc<dyn Context>, d: Time) -> (Arc<dyn Context>, CancelFunc) {
+    if let Some(parent_d) = parent.Deadline() {
+        if !d.After(parent_d) {
+            // Parent has earlier-or-equal deadline; just inherit.
+            return WithCancel(parent);
+        }
+    }
+
+    let ctx = build_cancel_ctx(&parent, Some(d));
+
+    // Schedule a deadline-fire goroutine. If d has already passed,
+    // cancel now; else spawn a Sleep + cancel goroutine.
+    let now = Now();
+    let until: Duration = d.Sub(now);
+    if until.0 <= 0 {
+        ctx.cancel(DeadlineExceeded());
+    } else {
+        let ctx_for_timer = ctx.clone();
+        crate::go!(move || {
+            crate::time::Sleep(until);
+            ctx_for_timer.cancel(DeadlineExceeded());
+        });
+    }
+
+    let ctx_clone = ctx.clone();
+    let cancel = Box::new(move || ctx_clone.cancel(Canceled()));
+    (ctx, cancel)
+}
+
+/// `WithTimeout(parent, d)` — `WithDeadline(parent, Now() + d)`.
+/// Mirrors `WithTimeout` (context.go:703).
+pub fn WithTimeout(parent: Arc<dyn Context>, d: Duration) -> (Arc<dyn Context>, CancelFunc) {
+    let deadline = Now().Add(d);
+    WithDeadline(parent, deadline)
+}
