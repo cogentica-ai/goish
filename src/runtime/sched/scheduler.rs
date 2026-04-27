@@ -209,10 +209,24 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
         m.current_g = Some(g_ptr);
         &mut m.sched_buf as *mut Gobuf
     };
+    // M18b-β: stamp the start time so sysmon's force-preempt scan
+    // can compute elapsed runtime. Lock-free atomic so sysmon reads
+    // without blocking. Must be SET before the swap (sysmon needs
+    // a non-zero value the moment the G starts running) and CLEARED
+    // after the swap returns (so a parked-G's stale value doesn't
+    // make sysmon target this M while it's idle).
+    current_m_storage()
+        .start_running_ns
+        .store(crate::runtime::sysmon::monotonic_ns(), Ordering::Release);
+    DISPATCH_STAMP_COUNT.fetch_add(1, Ordering::Relaxed);
     let buf_to = &g.gobuf as *const Gobuf;
     unsafe {
         swap_context(buf_from, buf_to);
     }
+    // Clear the start-time stamp now that no G is running.
+    current_m_storage()
+        .start_running_ns
+        .store(0, Ordering::Release);
 
     // ── post-swap: if G parked, run its commit fn (Go's park_m). ──
     let commit = current_m().lock().waitunlockf.take();
@@ -352,15 +366,47 @@ fn spin_or_yield() {
 /// behavior).
 static MIDLE: SpinLock<Vec<&'static MStorage>> = SpinLock::new(Vec::new());
 
-/// Register an MStorage as known. In Go this is `allm`. Goish
-/// doesn't actually need an "all Ms" list — only an idle list —
-/// but `register_m_storage` is kept for API compatibility with the
-/// previous design and to give a hook for future per-M
-/// initialization. No-op in v1.
-pub fn register_m_storage(_storage: &'static MStorage) {
-    // Intentionally empty. The idle-M list (MIDLE) is populated
-    // dynamically by park_m_idle's mput, not at registration time.
+/// Global registry of all M storages, in the order they were
+/// registered. Mirrors Go's `sched.allm` (proc.go). Populated by
+/// `register_m_storage` from the main thread during bootstrap; not
+/// modified after `bootstrap_workers` returns. Workers and sysmon
+/// only read it.
+///
+/// Used by M18b-β's `for_each_m` so sysmon's force-preempt scan
+/// can iterate every M's `start_running_ns` and `current_g` without
+/// holding any per-M lock.
+static ALL_MS: SpinLock<Vec<&'static MStorage>> = SpinLock::new(Vec::new());
+
+/// Register an MStorage globally so M18b-β's sysmon scan can find
+/// it. Mirrors Go's `allm` registration. Called from the main
+/// thread for `MAIN_M` and for each worker M during
+/// `bootstrap_workers`, *and* for sysmon's own M storage from
+/// `start_sysmon`. Allocator must be up.
+pub fn register_m_storage(storage: &'static MStorage) {
+    ALL_MS.lock().push(storage);
 }
+
+/// Iterate every registered M storage. Safe to call after
+/// `bootstrap_workers` finishes (the registry is read-only from
+/// then on; bootstrap and sysmon registration both happen on the
+/// main thread before any worker reads it).
+pub fn for_each_m<F: FnMut(&'static MStorage)>(mut f: F) {
+    let ms = ALL_MS.lock();
+    for &m in ms.iter() {
+        f(m);
+    }
+}
+
+/// Number of registered Ms. Diagnostic; tests use it to verify
+/// `register_m_storage` was called the expected number of times.
+pub fn registered_m_count() -> usize {
+    ALL_MS.lock().len()
+}
+
+/// Debug counter — bumped every time `dispatch_one_g` stamps a
+/// fresh start-running timestamp on its M. Confirms the M18b-β
+/// stamp path is exercised.
+pub static DISPATCH_STAMP_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// Park the calling M until a waker pops it from MIDLE and signals
 /// its note. Used by `m_schedule_loop` and `schedule` when the run

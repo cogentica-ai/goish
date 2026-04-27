@@ -58,8 +58,8 @@ pub use m::{
     setup_main_tls, MStorage, ParkCommit, M, MAIN_M,
 };
 pub use scheduler::{
-    block_forever_commit, bootstrap_workers, chan_park_commit, current_g, gopark, goready,
-    live_g_count, m_schedule_loop, newproc, num_cpus, register_m_storage, runq_len, schedule,
-    selparkcommit, Gosched,
+    block_forever_commit, bootstrap_workers, chan_park_commit, current_g, for_each_m, gopark,
+    goready, live_g_count, m_schedule_loop, newproc, num_cpus, register_m_storage,
+    registered_m_count, runq_len, schedule, selparkcommit, Gosched, DISPATCH_STAMP_COUNT,
 };
 pub use stack::Stack;

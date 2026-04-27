@@ -317,3 +317,7 @@ path = "examples/leak_proof.rs"
 [[example]]
 name = "preempt_smoke"
 path = "examples/preempt_smoke.rs"
+
+[[example]]
+name = "preempt_sysmon"
+path = "examples/preempt_sysmon.rs"

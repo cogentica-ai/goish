@@ -549,6 +549,12 @@ extern "C" fn goish_preempt_sigtramp(
         (*ctx).uc_mcontext.gregs[REG_RIP] = goish_async_preempt as u64;
     }
 
+    // Clear the cooperative-preempt flag (M18b-β/γ): we're about to
+    // honor the request asynchronously, so the next safe-point check
+    // doesn't need to fire again. Sysmon will re-set it on its next
+    // tick if the G is still hogging the M.
+    g_ref.preempt.store(false, Ordering::Release);
+
     PREEMPT_INJECTIONS.fetch_add(1, Ordering::Relaxed);
 }
 

@@ -67,6 +67,13 @@ pub struct G {
     /// share a heterogeneous link list cleanly).
     pub select_wait: [*const AtomicBool; SELECT_WAIT_MAX],
     pub select_wait_len: u8,
+    /// Asynchronous-preempt request flag. Sysmon's
+    /// `check_force_preempt` (M18b-β) sets this on Gs that have
+    /// been running for too long; the SIGURG handler clears it on
+    /// successful injection, and `raw_unlock`'s cooperative path
+    /// (M18b-γ) clears it when calling `Gosched` post-unlock.
+    /// Mirrors Go's `g.preempt` (runtime/runtime2.go).
+    pub preempt: AtomicBool,
 }
 
 impl G {
@@ -81,9 +88,11 @@ impl G {
             entry: Some(entry),
             select_wait: [core::ptr::null(); SELECT_WAIT_MAX],
             select_wait_len: 0,
+            preempt: AtomicBool::new(false),
         }
     }
 }
+
 
 // `Box<dyn FnOnce()>` is `Send` only when the closure is `Send`. For
 // M16b we don't move Gs across threads, so the marker isn't needed

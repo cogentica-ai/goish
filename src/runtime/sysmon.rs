@@ -39,7 +39,7 @@ use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::runtime::sched::{
-    chan_park_commit, current_g, gopark, goready, register_m_storage, G,
+    chan_park_commit, current_g, for_each_m, gopark, goready, register_m_storage, G,
 };
 use crate::runtime::spin::{raw_lock, SpinLock};
 use crate::syscall::{
@@ -161,6 +161,84 @@ pub fn timer_park(ns: i64) {
 /// belt-and-suspenders) still get serviced.
 const SYSMON_IDLE_NS: i64 = 60 * 1_000_000_000; // 60 s
 
+/// Max nap between force-preempt scans (M18b-β). Caps the sysmon
+/// nap so a goroutine that has been running for more than
+/// FORCE_PREEMPT_NS gets a SIGURG within roughly this period.
+/// Mirrors Go's sysmon `forcePreemptNS = 10 * 1e6` quantum
+/// (proc.go:6280) — we use the same 10 ms cadence.
+const FORCE_PREEMPT_NS: i64 = 10 * 1_000_000; // 10 ms
+
+// ─── M18b-β: force-preempt scan ──────────────────────────────────
+//
+// Once every sysmon tick, walk every registered M. For each one
+// whose `current_g` has been Running for longer than
+// `FORCE_PREEMPT_NS`, set `g.preempt = true` and `tgkill(SIGURG)`
+// the M's Linux thread. The SIGURG handler in `runtime::preempt`
+// then injects via the asyncPreempt trampoline. If the M was in a
+// runtime critical section (`m.locks > 0`) the handler skips, but
+// `g.preempt` stays set — the cooperative path (M18b-γ) catches
+// the G when it next releases its last lock. Sysmon retries on
+// every subsequent tick until either the G yields or the M shows a
+// fresh `start_running_ns` (because the previous G already yielded
+// and a different one is now running).
+//
+// Mirrors the role of Go's `retake` (proc.go:6275) +
+// `preemptone` (proc.go:6398) without the per-P bookkeeping that
+// goish v1 doesn't carry.
+
+// Diagnostic counters (read by tests).
+static SYSMON_SCAN_TICKS: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(0);
+static SYSMON_FORCE_PREEMPTS: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(0);
+
+/// Number of times sysmon ran its force-preempt scan loop.
+pub fn force_preempt_scan_ticks() -> u64 {
+    SYSMON_SCAN_TICKS.load(Ordering::Relaxed)
+}
+
+/// Number of times sysmon issued a tgkill SIGURG to force-preempt
+/// a long-running G.
+pub fn force_preempt_signals_sent() -> u64 {
+    SYSMON_FORCE_PREEMPTS.load(Ordering::Relaxed)
+}
+
+fn check_force_preempt(now: i64) {
+    SYSMON_SCAN_TICKS.fetch_add(1, Ordering::Relaxed);
+    let pid = syscall::Getpid();
+    for_each_m(|storage| {
+        let start = storage.start_running_ns.load(Ordering::Acquire);
+        if start == 0 {
+            return; // M is idle / between dispatches
+        }
+        if now.wrapping_sub(start) < FORCE_PREEMPT_NS {
+            return; // hasn't been running long enough
+        }
+        // Read curg lock-free under the same Theorem 1 invariant
+        // the SIGURG handler relies on. We're on a *different*
+        // thread here (sysmon), so this is a cross-thread read —
+        // but `current_g` is only written under `m.locks > 0` and
+        // x86-64 makes a naturally aligned 8-byte load atomic, so
+        // the value we observe is either the previous committed
+        // pointer or the freshly committed one. Either is safe to
+        // act on (we just ask the handler to consider it).
+        let m = unsafe { storage.m.data_unchecked() };
+        let g_ptr = match m.current_g {
+            Some(p) => p,
+            None => return,
+        };
+        let g_ref = unsafe { g_ptr.as_ref() };
+        // Set preempt flag for cooperative-side rescue (M18b-γ).
+        g_ref.preempt.store(true, Ordering::Release);
+        // Send SIGURG to the M's thread.
+        let tid = m.procid.load(Ordering::Acquire);
+        if tid > 0 {
+            SYSMON_FORCE_PREEMPTS.fetch_add(1, Ordering::Relaxed);
+            syscall::Tgkill(pid, tid, syscall::SIGURG);
+        }
+    });
+}
+
 /// Process all expired timers, then sleep until the next deadline
 /// or until signaled. Never returns. Spawned on its own OS thread.
 extern "C" fn sysmon_main() -> ! {
@@ -185,6 +263,10 @@ extern "C" fn sysmon_main() -> ! {
 
         let now = monotonic_ns();
 
+        // M18b-β: scan Ms for goroutines that have been running
+        // too long and force-preempt them via SIGURG.
+        check_force_preempt(now);
+
         // Fire all expired timers.
         let mut to_wake: Vec<NonNull<G>> = Vec::new();
         let next_deadline: Option<i64> = {
@@ -203,11 +285,14 @@ extern "C" fn sysmon_main() -> ! {
             goready(g);
         }
 
-        // Sleep until next deadline (or default poll).
+        // Sleep until next deadline (or default poll). Capped at
+        // FORCE_PREEMPT_NS so the next force-preempt scan fires
+        // within ~10 ms regardless of timer activity.
         let nap_ns = match next_deadline {
             Some(d) => (d - now).max(1_000),
             None => SYSMON_IDLE_NS,
-        };
+        }
+        .min(FORCE_PREEMPT_NS);
         let ts = Timespec {
             tv_sec: nap_ns / 1_000_000_000,
             tv_nsec: nap_ns % 1_000_000_000,

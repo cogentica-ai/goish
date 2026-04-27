@@ -32,7 +32,7 @@
 
 use core::cell::UnsafeCell;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32, Ordering};
 
 use super::g::G;
 use super::gobuf::Gobuf;
@@ -143,6 +143,13 @@ pub struct MStorage {
     /// SIGURG masked between them (kernel default mask), so the
     /// snapshot sees a stable value.
     pub preempt_resume_pc: UnsafeCell<u64>,
+    /// CLOCK_MONOTONIC nanosecond timestamp when the M last
+    /// transitioned `current_g` from None to Some(g). 0 means "no G
+    /// is currently running on this M" (between dispatches, or when
+    /// parked idle). M18b-β's sysmon scan reads this lock-free to
+    /// detect goroutines that have been running too long without
+    /// yielding.
+    pub start_running_ns: AtomicI64,
 }
 
 // MStorage holds a raw pointer in UnsafeCell. We assert thread-
@@ -162,6 +169,7 @@ impl MStorage {
             park: Note::new(),
             locks: AtomicU32::new(0),
             preempt_resume_pc: UnsafeCell::new(0),
+            start_running_ns: AtomicI64::new(0),
         }
     }
 
@@ -275,6 +283,12 @@ pub fn setup_main_tls() {
     // (e.g. `args::__set`) from dereferencing an uninitialized
     // segment.
     mark_tls_ready();
+    // Stamp the main thread's tid into MAIN_M's `procid` so M18b-β
+    // sysmon's `tgkill(tid, SIGURG)` can target it. Workers do this
+    // in their own `mstart` after `clone(2)`; the main thread has
+    // no equivalent entry, so we do it here.
+    let tid = syscall::Gettid();
+    MAIN_M.m.lock().procid.store(tid, Ordering::Release);
     // Note: main M is NOT registered with the M_LIST. Registration
     // would push to a Vec, which calls into the allocator — and
     // setup_main_tls runs before `mheap_init()` in `__goish_rt0`

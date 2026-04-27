@@ -59,6 +59,41 @@ fn drop_m_locks() {
     crate::runtime::sched::releasem();
 }
 
+/// M18b-γ cooperative-preempt safe point. Called by `raw_unlock`
+/// (and indirectly by `Guard::drop` via the same path) **after**
+/// the SpinLock atom has been released. If
+///   - this M's `m.locks` has reached 0 (we're truly out of
+///     runtime-internal critical sections), and
+///   - the M owns a current G (we're not on g0/scheduler stack),
+///     and
+///   - that G's `preempt` flag is set (sysmon flagged it),
+/// then yield via `Gosched`. The flag is `swap(false)`-ed so a
+/// follow-up release on this G doesn't double-yield.
+///
+/// **No-op fast path**: most `raw_unlock` calls happen on Gs that
+/// haven't been flagged. The check is two atomic loads + a branch
+/// when the flag is unset. The cost on the hot path (e.g. every
+/// chan op) is one cache-resident load on `current_m_storage`'s
+/// `locks` field plus one load on `current_m`'s `current_g`.
+#[inline]
+fn cooperative_preempt_check() {
+    if !crate::runtime::sched::is_tls_ready() {
+        return;
+    }
+    if crate::runtime::sched::current_m_locks() != 0 {
+        return;
+    }
+    let m = unsafe { crate::runtime::sched::current_m().data_unchecked() };
+    let g_ptr = match m.current_g {
+        Some(p) => p,
+        None => return,
+    };
+    let g_ref = unsafe { g_ptr.as_ref() };
+    if g_ref.preempt.swap(false, Ordering::AcqRel) {
+        crate::runtime::sched::Gosched();
+    }
+}
+
 #[repr(C)]
 pub struct SpinLock<T> {
     /// Lock state. Repr(C) puts this at offset 0 so `&SpinLock<T>`
@@ -144,6 +179,14 @@ pub unsafe fn raw_unlock(atom: *const AtomicBool) {
     // observably inside the locked region.
     drop_m_locks();
     (*atom).store(false, Ordering::Release);
+    // M18b-γ: cooperative-preempt safe point. After releasing the
+    // last lock on this M, check whether sysmon has flagged the
+    // current G for preemption (e.g. because async preempt was
+    // skipped while m.locks > 0). Catches CPU-bound goroutines that
+    // dip into the runtime for a chan/sema op — they yield as soon
+    // as the critical section exits, even if every async attempt
+    // landed inside m.locks > 0.
+    cooperative_preempt_check();
 }
 
 impl<'a, T> Deref for Guard<'a, T> {
@@ -166,5 +209,6 @@ impl<'a, T> Drop for Guard<'a, T> {
     fn drop(&mut self) {
         drop_m_locks();
         self.lock.locked.store(false, Ordering::Release);
+        cooperative_preempt_check();
     }
 }
