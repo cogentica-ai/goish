@@ -338,12 +338,19 @@ macro_rules! __select_emit {
         // and acquire all in that order before pass-1 even starts;
         // this is Go's runtime/select.go:206-240 lock-order sort.
         //
+        // Nil chans contribute a null pointer to the array; the
+        // sort floats nulls to the front and dedup compresses them
+        // (at most one null after dedup). The lock-acquire loop
+        // skips nulls — nil chans have no lock to take. Mirrors
+        // Go's "Omit cases without channels from the poll and lock
+        // orders" filter at runtime/select.go:173-177.
+        //
         // Insertion sort is O(N²) but N ≤ 32 and array is on the
         // stack; no allocation, fits in cache.
         let mut __sel_atoms: [*const ::core::sync::atomic::AtomicBool; __SELECT_N] = [
-            $( $br_cn.__lock_atom(), )*
-            $( $pr_cn.__lock_atom(), )*
-            $( $s_cn.__lock_atom(),  )*
+            $( if $br_cn.is_nil() { ::core::ptr::null() } else { $br_cn.__lock_atom() }, )*
+            $( if $pr_cn.is_nil() { ::core::ptr::null() } else { $pr_cn.__lock_atom() }, )*
+            $( if $s_cn.is_nil()  { ::core::ptr::null() } else { $s_cn.__lock_atom()  }, )*
         ];
         {
             let mut __i: usize = 1;
@@ -372,11 +379,15 @@ macro_rules! __select_emit {
             }
         }
 
-        // Acquire all distinct chan locks in sort order.
+        // Acquire all distinct chan locks in sort order. Skip nulls
+        // (nil chans).
         {
             let mut __i: usize = 0;
             while __i < __sel_unique {
-                unsafe { $crate::runtime::spin::raw_lock(__sel_atoms[__i]); }
+                let __atom = __sel_atoms[__i];
+                if !__atom.is_null() {
+                    unsafe { $crate::runtime::spin::raw_lock(__atom); }
+                }
                 __i += 1;
             }
         }
@@ -404,7 +415,7 @@ macro_rules! __select_emit {
                 let __idx_val: u8 = __select_order[__k];
 
                 $(
-                    if __idx_val == $br_idx {
+                    if __idx_val == $br_idx && !$br_cn.is_nil() {
                         let __s = unsafe { $br_cn.__state_unchecked() };
                         if let ::core::option::Option::Some((__v, __ok)) =
                             $crate::gochan::chan::__try_recv_locked(__s)
@@ -418,7 +429,7 @@ macro_rules! __select_emit {
                 )*
 
                 $(
-                    if __idx_val == $pr_idx {
+                    if __idx_val == $pr_idx && !$pr_cn.is_nil() {
                         let __s = unsafe { $pr_cn.__state_unchecked() };
                         if let ::core::option::Option::Some((__v, __ok)) =
                             $crate::gochan::chan::__try_recv_locked(__s)
@@ -431,7 +442,7 @@ macro_rules! __select_emit {
                 )*
 
                 $(
-                    if __idx_val == $s_idx {
+                    if __idx_val == $s_idx && !$s_cn.is_nil() {
                         let __take = $s_vn
                             .take()
                             .expect("goish: select pass-1 send value missing");
@@ -473,7 +484,10 @@ macro_rules! __select_release_all {
     ($count:ident, $atoms:ident) => {{
         let mut __ui: usize = 0;
         while __ui < $count {
-            unsafe { $crate::runtime::spin::raw_unlock($atoms[__ui]); }
+            let __atom = $atoms[__ui];
+            if !__atom.is_null() {
+                unsafe { $crate::runtime::spin::raw_unlock(__atom); }
+            }
             __ui += 1;
         }
     }};
@@ -543,36 +557,54 @@ macro_rules! __select_default_or_park {
         // unreachable (pass-1 caught it); in multi-M it's a real
         // diagnostic. Panic with a clear message either way; future
         // refinement can synthesize the case-fired path.
+        //
+        // Nil chans are skipped: their cases never register a sudog
+        // and contribute no atom to the held-lock set. Pass-3 cancel
+        // also skips them.
         $(
-            {
+            if !$br_cn.is_nil() {
                 let __s = unsafe { $br_cn.__state_unchecked() };
-                if $crate::gochan::chan::__register_recv_locked(__s, &mut $br_sn).is_err() {
-                    $crate::__select_release_all!($sel_unique, $sel_atoms);
-                    ::core::panic!(
-                        "goish: select pass-2 saw closed-and-empty under held lock"
-                    );
+                match $crate::gochan::chan::__register_recv_locked(__s, &mut $br_sn) {
+                    $crate::gochan::RegisterStatus::Registered => {}
+                    $crate::gochan::RegisterStatus::Closed => {
+                        $crate::__select_release_all!($sel_unique, $sel_atoms);
+                        ::core::panic!(
+                            "goish: select pass-2 saw closed-and-empty under held lock"
+                        );
+                    }
+                    $crate::gochan::RegisterStatus::Skip => {
+                        // unreachable — nil chans guarded above
+                    }
                 }
             }
         )*
         $(
-            {
+            if !$pr_cn.is_nil() {
                 let __s = unsafe { $pr_cn.__state_unchecked() };
-                if $crate::gochan::chan::__register_recv_locked(__s, &mut $pr_sn).is_err() {
-                    $crate::__select_release_all!($sel_unique, $sel_atoms);
-                    ::core::panic!(
-                        "goish: select pass-2 saw closed-and-empty under held lock"
-                    );
+                match $crate::gochan::chan::__register_recv_locked(__s, &mut $pr_sn) {
+                    $crate::gochan::RegisterStatus::Registered => {}
+                    $crate::gochan::RegisterStatus::Closed => {
+                        $crate::__select_release_all!($sel_unique, $sel_atoms);
+                        ::core::panic!(
+                            "goish: select pass-2 saw closed-and-empty under held lock"
+                        );
+                    }
+                    $crate::gochan::RegisterStatus::Skip => {}
                 }
             }
         )*
         $(
-            {
+            if !$s_cn.is_nil() {
                 let __s = unsafe { $s_cn.__state_unchecked() };
-                if !$crate::gochan::chan::__register_send_locked(__s, &mut $s_sn) {
-                    $crate::__select_release_all!($sel_unique, $sel_atoms);
-                    ::core::panic!(
-                        "goish: select pass-2 saw closed send chan under held lock"
-                    );
+                match $crate::gochan::chan::__register_send_locked(__s, &mut $s_sn) {
+                    $crate::gochan::RegisterStatus::Registered => {}
+                    $crate::gochan::RegisterStatus::Closed => {
+                        $crate::__select_release_all!($sel_unique, $sel_atoms);
+                        ::core::panic!(
+                            "goish: select pass-2 saw closed send chan under held lock"
+                        );
+                    }
+                    $crate::gochan::RegisterStatus::Skip => {}
                 }
             }
         )*
@@ -616,12 +648,24 @@ macro_rules! __select_default_or_park {
         // array is local to this macro expansion. Indexes are
         // declaration-order u8s that fit in [0, __SELECT_N).
         let mut __select_winners: [bool; __SELECT_N] = [false; __SELECT_N];
-        $( __select_winners[$br_idx as usize] =
-                !$br_cn.__cancel_recv(::core::ptr::NonNull::from(&$br_sn)); )*
-        $( __select_winners[$pr_idx as usize] =
-                !$pr_cn.__cancel_recv(::core::ptr::NonNull::from(&$pr_sn)); )*
-        $( __select_winners[$s_idx as usize]  =
-                !$s_cn.__cancel_send(::core::ptr::NonNull::from(&$s_sn)); )*
+        // Skip nil-chan cases: no sudog was registered, so they
+        // can never be the winner. cancel_* on them would also be
+        // a no-op but we'd misread the result.
+        $( if !$br_cn.is_nil() {
+                __select_winners[$br_idx as usize] =
+                    !$br_cn.__cancel_recv(::core::ptr::NonNull::from(&$br_sn));
+            }
+        )*
+        $( if !$pr_cn.is_nil() {
+                __select_winners[$pr_idx as usize] =
+                    !$pr_cn.__cancel_recv(::core::ptr::NonNull::from(&$pr_sn));
+            }
+        )*
+        $( if !$s_cn.is_nil() {
+                __select_winners[$s_idx as usize] =
+                    !$s_cn.__cancel_send(::core::ptr::NonNull::from(&$s_sn));
+            }
+        )*
 
         // Pass-3 step 2 — dispatch the unique winner. Exactly one
         // case has its winner-bit set; the macro emits an if-chain

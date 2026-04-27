@@ -249,3 +249,19 @@ path = "examples/clone_smoke.rs"
 [[example]]
 name = "tls_smoke"
 path = "examples/tls_smoke.rs"
+
+[[example]]
+name = "chan_select_stress"
+path = "examples/chan_select_stress.rs"
+
+[[example]]
+name = "chan_self_select"
+path = "examples/chan_self_select.rs"
+
+[[example]]
+name = "chan_multiconsumer"
+path = "examples/chan_multiconsumer.rs"
+
+[[example]]
+name = "chan_nil"
+path = "examples/chan_nil.rs"

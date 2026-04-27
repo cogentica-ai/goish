@@ -489,6 +489,18 @@ pub fn gopark(commit: ParkCommit, lock_atom: *const AtomicBool) {
     }
 }
 
+/// `block_forever_commit` — gopark commit fn for nil-chan send/recv.
+/// Returns `true` (commit the park) but releases nothing; the G is
+/// never goready'd by anyone, so this is a permanent park.
+///
+/// Mirrors Go's `gopark(nil, nil, waitReasonChanSendNilChan,
+/// traceBlockForever, 2)` (chan.go:181, 536). Used only by `Send`/
+/// `Recv` on a nil chan; in `select!` nil cases are filtered before
+/// the lock-order pass and never reach gopark.
+pub unsafe fn block_forever_commit(_g: NonNull<G>) -> bool {
+    true
+}
+
 /// `chan_park_commit` — gopark commit fn used by `chan::Send`/`Recv`
 /// when parking on a single chan. Reads the chan lock atom from
 /// `M::waitlock` (where `gopark` stashed it) and releases it.
@@ -528,7 +540,14 @@ pub unsafe fn selparkcommit(g_ptr: NonNull<G>) -> bool {
     let g = &mut *g_ptr.as_ptr();
     let n = g.select_wait_len as usize;
     for i in 0..n {
-        crate::runtime::spin::raw_unlock(g.select_wait[i]);
+        let atom = g.select_wait[i];
+        // Skip nulls: nil chans contribute null atoms to the
+        // dedup'd select_wait list. Null entries get sorted to the
+        // front by the macro's address-sort and survive dedup as a
+        // single null head; we ignore them here (no lock to release).
+        if !atom.is_null() {
+            crate::runtime::spin::raw_unlock(atom);
+        }
     }
     // Clear so a later non-select gopark on this G doesn't try
     // to walk stale pointers. Reset at next select pass-2.

@@ -63,7 +63,9 @@ use alloc::sync::Arc;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::runtime::sched::{chan_park_commit, current_g, gopark, goready, G};
+use crate::runtime::sched::{
+    block_forever_commit, chan_park_commit, current_g, gopark, goready, G,
+};
 use crate::runtime::spin::{raw_lock, raw_unlock, SpinLock};
 use crate::syscall;
 
@@ -167,6 +169,26 @@ impl<T> Sudog<T> {
 unsafe impl<T> Send for Sudog<T> {}
 unsafe impl<T> Sync for Sudog<T> {}
 
+/// Outcome of `__register_send_locked` / `__register_recv_locked`.
+/// `select!` pass-2 dispatches on this to decide whether to plant a
+/// sudog, treat the case as permanently dormant (nil chan), or
+/// signal a closed-chan race.
+#[doc(hidden)]
+pub enum RegisterStatus {
+    /// Sudog enqueued on the chan's wait queue. Pass-3 must cancel
+    /// it after wake.
+    Registered,
+    /// Chan is nil — case is permanently not-ready; no sudog
+    /// enqueued, no cancel needed in pass-3.
+    Skip,
+    /// Chan is closed. For send: panic-worthy. For recv: should
+    /// have been caught in pass-1 try_recv (closed-and-empty);
+    /// reaching here in pass-2 indicates a multi-M race where the
+    /// chan was closed under the held lock — unreachable in
+    /// practice since the lock is held continuously.
+    Closed,
+}
+
 /// Lock-protected channel state.
 #[doc(hidden)]
 pub struct HchanState<T> {
@@ -182,7 +204,14 @@ pub struct HchanState<T> {
 }
 
 /// Public channel descriptor.
+///
+/// `nil` is set at construction and never mutates. It corresponds to
+/// Go's `var c chan T` zero-value: send/recv block forever; in
+/// `select!` the case is filtered out (skipped from lock order, poll
+/// order, and pass-2 register). Mirrors runtime/chan.go:177-183 and
+/// runtime/select.go:173-177.
 pub struct Hchan<T> {
+    nil: bool,
     state: SpinLock<HchanState<T>>,
 }
 
@@ -213,6 +242,7 @@ impl<T> chan<T> {
     pub fn new_buffered(cap: usize) -> Self {
         chan {
             inner: Arc::new(Hchan {
+                nil: false,
                 state: SpinLock::new(HchanState {
                     closed: false,
                     cap,
@@ -224,14 +254,47 @@ impl<T> chan<T> {
         }
     }
 
+    /// `var c chan T` — Go's nil chan zero value. Send/Recv block
+    /// forever; in `select!` cases referencing a nil chan are
+    /// silently skipped (filtered out of the lock order and poll
+    /// order). Mirrors runtime/chan.go:177-183.
+    pub fn nil() -> Self {
+        chan {
+            inner: Arc::new(Hchan {
+                nil: true,
+                state: SpinLock::new(HchanState {
+                    closed: false,
+                    cap: 0,
+                    buf: VecDeque::new(),
+                    sendq: VecDeque::new(),
+                    recvq: VecDeque::new(),
+                }),
+            }),
+        }
+    }
+
+    /// `c == nil` predicate. Lock-free; the `nil` flag is set at
+    /// construction and never mutates.
+    #[doc(hidden)]
+    #[inline]
+    pub fn is_nil(&self) -> bool {
+        self.inner.nil
+    }
+
     /// `len(ch)` — number of values currently in the buffer. Always
-    /// 0 for unbuffered channels.
+    /// 0 for unbuffered channels and nil chans.
     pub fn Len(&self) -> usize {
+        if self.inner.nil {
+            return 0;
+        }
         self.inner.state.lock().buf.len()
     }
 
-    /// `cap(ch)` — buffer capacity (0 for unbuffered).
+    /// `cap(ch)` — buffer capacity (0 for unbuffered and nil).
     pub fn Cap(&self) -> usize {
+        if self.inner.nil {
+            return 0;
+        }
         self.inner.state.lock().cap
     }
 
@@ -273,6 +336,12 @@ impl<T> chan<T> {
 impl<T> chan<T> {
     /// Locked-state recv. Same semantics as `__try_recv` minus the
     /// chan-lock acquisition. Caller holds `s`'s lock.
+    ///
+    /// **Note**: only invoked for non-nil chans by `select!` (the
+    /// macro filters nil cases at the dispatch site, so nothing
+    /// here special-cases nil). Plain `Recv` never reaches the
+    /// locked path on nil chans either (the `nil` early-return
+    /// happens before lock acquisition).
     #[doc(hidden)]
     pub fn __try_recv_locked(s: &mut HchanState<T>) -> Option<(T, bool)>
     where
@@ -349,24 +418,28 @@ impl<T> chan<T> {
     }
 
     /// Locked-state register a recv sudog. Caller holds the chan
-    /// lock. Returns `Err(())` if the chan is closed-and-empty.
+    /// lock. Returns `RegisterStatus::Closed` on closed-and-empty,
+    /// `Registered` otherwise. `Skip` is unreachable here (nil
+    /// chans don't reach the locked path).
     #[doc(hidden)]
-    pub fn __register_recv_locked(s: &mut HchanState<T>, sg: &mut Sudog<T>) -> Result<(), ()> {
+    pub fn __register_recv_locked(s: &mut HchanState<T>, sg: &mut Sudog<T>) -> RegisterStatus {
         if s.closed && s.buf.is_empty() {
-            return Err(());
+            return RegisterStatus::Closed;
         }
         s.recvq.push_back(NonNull::from(sg));
-        Ok(())
+        RegisterStatus::Registered
     }
 
-    /// Locked-state register a send sudog. Returns `false` on closed.
+    /// Locked-state register a send sudog. Returns
+    /// `RegisterStatus::Closed` on closed chan, `Registered`
+    /// otherwise.
     #[doc(hidden)]
-    pub fn __register_send_locked(s: &mut HchanState<T>, sg: &mut Sudog<T>) -> bool {
+    pub fn __register_send_locked(s: &mut HchanState<T>, sg: &mut Sudog<T>) -> RegisterStatus {
         if s.closed {
-            return false;
+            return RegisterStatus::Closed;
         }
         s.sendq.push_back(NonNull::from(sg));
-        true
+        RegisterStatus::Registered
     }
 }
 
@@ -578,6 +651,15 @@ impl<T> chan<T> {
     /// time it can `goready` us our gobuf is already a valid
     /// suspended snapshot.
     pub fn Send(&self, v: T) {
+        // nil chan — block forever (Go runtime/chan.go:177-183).
+        // No lock to acquire, no commit fn touches state.
+        if self.inner.nil {
+            let _ = v;
+            gopark(block_forever_commit, core::ptr::null());
+            // gopark on a nil chan never goready's — unreachable.
+            unsafe { core::hint::unreachable_unchecked() }
+        }
+
         let lock_atom = self.inner.state.lock_atom();
         unsafe { raw_lock(lock_atom); }
         let s = unsafe { self.inner.state.data_unchecked() };
@@ -597,9 +679,13 @@ impl<T> chan<T> {
             fatal(b"goish: chan: Send outside of any goroutine\n")
         });
         let mut my_sudog = Sudog::new_send(g, v);
-        if !Self::__register_send_locked(s, &mut my_sudog) {
-            unsafe { raw_unlock(lock_atom); }
-            fatal(b"goish: chan: send on closed channel\n");
+        match Self::__register_send_locked(s, &mut my_sudog) {
+            RegisterStatus::Registered => {}
+            RegisterStatus::Closed => {
+                unsafe { raw_unlock(lock_atom); }
+                fatal(b"goish: chan: send on closed channel\n");
+            }
+            RegisterStatus::Skip => unsafe { core::hint::unreachable_unchecked() },
         }
 
         // gopark stashes (chan_park_commit, lock_atom) on the M and
@@ -628,6 +714,12 @@ impl<T> chan<T> {
     where
         T: Default,
     {
+        // nil chan — block forever (Go runtime/chan.go:532-538).
+        if self.inner.nil {
+            gopark(block_forever_commit, core::ptr::null());
+            unsafe { core::hint::unreachable_unchecked() }
+        }
+
         let lock_atom = self.inner.state.lock_atom();
         unsafe { raw_lock(lock_atom); }
         let s = unsafe { self.inner.state.data_unchecked() };
@@ -644,9 +736,13 @@ impl<T> chan<T> {
             fatal(b"goish: chan: Recv outside of any goroutine\n")
         });
         let mut my_sudog = Sudog::new_recv(g);
-        if Self::__register_recv_locked(s, &mut my_sudog).is_err() {
-            unsafe { raw_unlock(lock_atom); }
-            return (T::default(), false);
+        match Self::__register_recv_locked(s, &mut my_sudog) {
+            RegisterStatus::Registered => {}
+            RegisterStatus::Closed => {
+                unsafe { raw_unlock(lock_atom); }
+                return (T::default(), false);
+            }
+            RegisterStatus::Skip => unsafe { core::hint::unreachable_unchecked() },
         }
 
         gopark(chan_park_commit, lock_atom);
@@ -674,6 +770,10 @@ impl<T> chan<T> {
     /// This keeps "close on multiple chans of one select" from
     /// firing more than one case of that select.
     pub fn Close(&self) {
+        // close(nil chan) panics per Go (runtime/chan.go closechan).
+        if self.inner.nil {
+            fatal(b"goish: chan: close of nil channel\n");
+        }
         let mut s = self.inner.state.lock();
         if s.closed {
             drop(s);
