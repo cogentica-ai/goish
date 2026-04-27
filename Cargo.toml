@@ -297,3 +297,7 @@ path = "examples/context_basic.rs"
 [[example]]
 name = "m20_smoke"
 path = "examples/m20_smoke.rs"
+
+[[example]]
+name = "bench_string_slice"
+path = "examples/bench_string_slice.rs"
