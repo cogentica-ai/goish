@@ -197,16 +197,28 @@ fn build_cancel_ctx(parent: &Arc<dyn Context>, own_deadline: Option<Time>) -> Ar
     });
 
     // Watcher: if parent is cancellable, propagate cancellation.
+    // Mirrors context.go:522-528 — select on BOTH parent.Done() and
+    // own done. Without the own-done branch the watcher hangs forever
+    // when the user cancels via the returned CancelFunc (parent never
+    // fires), holding Arc<dyn Context> + Arc<CancelCtx> alive until
+    // process exit.
     let parent_done = parent.Done();
     if !parent_done.is_nil() {
         let me_for_watch = me.clone();
         let parent_for_watch = parent.clone();
+        let own_done = me.done.clone();
         crate::go!(move || {
-            let _ = parent_done.Recv();
-            // Parent was cancelled — adopt its err.
-            let perr = parent_for_watch.Err();
-            let cancel_err = if perr.IsNil() { Canceled() } else { perr };
-            me_for_watch.cancel(cancel_err);
+            crate::select! {
+                let _ = parent_done.Recv() => {
+                    // Parent was cancelled — adopt its err.
+                    let perr = parent_for_watch.Err();
+                    let cancel_err = if perr.IsNil() { Canceled() } else { perr };
+                    me_for_watch.cancel(cancel_err);
+                },
+                let _ = own_done.Recv() => {
+                    // Child cancelled first; exit, releasing both Arcs.
+                },
+            }
         });
     }
 

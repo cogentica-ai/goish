@@ -349,7 +349,15 @@ pub struct Timer {
     /// `<-chan Time` — receives one `Time` value when the timer
     /// fires (unless `Stop` cancelled it first).
     pub C: chan<Time>,
-    cancel: Arc<AtomicBool>,
+    /// Set once on Stop; gates the cap=1 stop_chan send so
+    /// repeat Stop() calls are idempotent.
+    stopped: Arc<AtomicBool>,
+    /// Cap=1 chan. Stop sends `()`; the watcher's outer select
+    /// races this against the timer fire — first arrival wins
+    /// and the watcher exits. Replaces the previous "set flag and
+    /// hope the post-Sleep check sees it" pattern, which never
+    /// actually shortened the watcher's lifetime.
+    stop_chan: chan<()>,
 }
 
 impl Timer {
@@ -360,10 +368,35 @@ impl Timer {
     /// Note: Stop does not close the channel. After Stop, no value
     /// will be sent on C.
     pub fn Stop(&self) -> bool {
-        // swap returns OLD value. If old was false (timer was
-        // active), we successfully cancelled — return true.
-        !self.cancel.swap(true, Ordering::AcqRel)
+        let was = self.stopped.swap(true, Ordering::AcqRel);
+        if !was {
+            // First Stop: poke the watcher. Cap=1, so the send
+            // never blocks — there's always slot for the first
+            // Stop, and only the first Stop reaches this branch.
+            let stop = self.stop_chan.clone();
+            crate::select! {
+                stop.Send(()) => {},
+                default => {},
+            }
+        }
+        !was
     }
+}
+
+/// Internal helper: spawn a fire-and-forget gor that sleeps `d`
+/// then signals on the returned chan. Used by both NewTimer and
+/// NewTicker watchers as the "timer fired" leg of a select. Lives
+/// at the bottom of the timer-call graph so callers can't recurse
+/// into `NewTimer`/`After` and explode.
+fn spawn_fire(d: Duration) -> chan<()> {
+    let fire: chan<()> = crate::make!(chan (), 1);
+    let inner = fire.clone();
+    crate::go!(move || {
+        Sleep(d);
+        // Cap=1, fresh chan; first __try_send always slots in.
+        let _ = inner.__try_send(());
+    });
+    fire
 }
 
 /// `time.NewTimer(d)` — create a Timer that fires after `d`.
@@ -371,27 +404,37 @@ impl Timer {
 #[allow(non_snake_case)]
 pub fn NewTimer(d: Duration) -> Timer {
     let c: chan<Time> = crate::make!(chan Time, 1);
-    let cancel = Arc::new(AtomicBool::new(false));
+    let stop_chan: chan<()> = crate::make!(chan (), 1);
     let c_inner = c.clone();
-    let cancel_inner = cancel.clone();
+    let stop_inner = stop_chan.clone();
     crate::go!(move || {
-        Sleep(d);
-        if cancel_inner.load(Ordering::Acquire) {
-            return;
-        }
-        // Non-blocking send: matches Go's sendTime
-        // (sleep.go:179) which uses select+default to avoid
-        // blocking when the chan buffer is full.
+        // spawn_fire spawns the actual sleeper. Its gor lives ≤ d
+        // regardless of Stop. Our outer select races that against
+        // the stop chan — when Stop fires, this outer watcher
+        // exits IMMEDIATELY, releasing both Arc<chan> handles.
+        // Worst-case leak after Stop: the spawn_fire gor's ≤ d.
+        let fire = spawn_fire(d);
         crate::select! {
-            c_inner.Send(Now()) => {},
-            default => {},
+            let _ = fire.Recv() => {
+                // Non-blocking — Go's sendTime (sleep.go:179).
+                let _ = c_inner.__try_send(Now());
+            },
+            let _ = stop_inner.Recv() => {
+                // Stopped before fire — exit, drop both chans.
+            },
         }
     });
-    Timer { C: c, cancel }
+    Timer {
+        C: c,
+        stopped: Arc::new(AtomicBool::new(false)),
+        stop_chan,
+    }
 }
 
-/// `time.After(d)` — equivalent to `NewTimer(d).C`. Mirrors
-/// `After` (sleep.go:202). Useful for timeouts in `select!`:
+/// `time.After(d)` — equivalent to `NewTimer(d).C` semantically,
+/// but implemented standalone so it's the leaf of the timer-call
+/// graph and can be used inside `NewTimer`/`NewTicker` watchers
+/// without recursion. Mirrors `After` (sleep.go:202).
 ///
 ///   select! {
 ///       let v = ch.Recv()       => handle(v),
@@ -399,7 +442,13 @@ pub fn NewTimer(d: Duration) -> Timer {
 ///   }
 #[allow(non_snake_case)]
 pub fn After(d: Duration) -> chan<Time> {
-    NewTimer(d).C
+    let c: chan<Time> = crate::make!(chan Time, 1);
+    let c_inner = c.clone();
+    crate::go!(move || {
+        Sleep(d);
+        let _ = c_inner.__try_send(Now());
+    });
+    c
 }
 
 /// `time.Ticker` — periodic timer. Mirrors `time.Ticker`.
@@ -407,14 +456,27 @@ pub struct Ticker {
     /// `<-chan Time` — receives a `Time` value approximately every
     /// `d` duration.
     pub C: chan<Time>,
-    cancel: Arc<AtomicBool>,
+    /// One-shot stop flag, gates the cap=1 stop_chan send.
+    stopped: Arc<AtomicBool>,
+    /// Stop poke. The watcher loop selects on this against each
+    /// tick's After(d), so Stop exits the OUTER loop on the very
+    /// next iteration boundary. Without this, an unstoppable
+    /// `loop { Sleep(d); … }` could run forever if the user
+    /// dropped the Ticker without calling Stop.
+    stop_chan: chan<()>,
 }
 
 impl Ticker {
     /// Stop turns off a ticker. After Stop, no more ticks will
     /// be sent on C. Stop does not close the channel.
     pub fn Stop(&self) {
-        self.cancel.store(true, Ordering::Release);
+        if !self.stopped.swap(true, Ordering::AcqRel) {
+            let stop = self.stop_chan.clone();
+            crate::select! {
+                stop.Send(()) => {},
+                default => {},
+            }
+        }
     }
 }
 
@@ -429,22 +491,33 @@ pub fn NewTicker(d: Duration) -> Ticker {
         syscall::Exit(2);
     }
     let c: chan<Time> = crate::make!(chan Time, 1);
-    let cancel = Arc::new(AtomicBool::new(false));
+    let stop_chan: chan<()> = crate::make!(chan (), 1);
     let c_inner = c.clone();
-    let cancel_inner = cancel.clone();
+    let stop_inner = stop_chan.clone();
     crate::go!(move || {
         loop {
-            Sleep(d);
-            if cancel_inner.load(Ordering::Acquire) {
-                return;
-            }
+            // Per-tick spawn_fire — its inner gor lives ≤ d. The
+            // outer loop's select races against stop_chan: when
+            // Stop fires, the loop exits at this scheduling
+            // boundary, releasing both Arc<chan> handles. Worst-
+            // case leak after Stop: the in-flight spawn_fire gor
+            // for ≤ d.
+            let fire = spawn_fire(d);
             crate::select! {
-                c_inner.Send(Now()) => {},
-                default => {},
+                let _ = fire.Recv() => {
+                    let _ = c_inner.__try_send(Now());
+                },
+                let _ = stop_inner.Recv() => {
+                    return;
+                },
             }
         }
     });
-    Ticker { C: c, cancel }
+    Ticker {
+        C: c,
+        stopped: Arc::new(AtomicBool::new(false)),
+        stop_chan,
+    }
 }
 
 /// `time.Unix(sec, nsec)` — construct a Time from a Unix timestamp.
