@@ -16,6 +16,7 @@
 use crate::syscall;
 
 pub mod args;
+pub mod debug;
 pub mod heap;
 pub mod mcentral;
 pub mod mheap;
@@ -25,6 +26,7 @@ pub mod rand;
 pub mod sched;
 pub mod spin;
 pub mod sysmon;
+pub use debug::{NumCPU, NumGoroutine, GOMAXPROCS};
 pub use heap::{alloc, free, mheap_alloc_pages, mheap_free_pages, realloc};
 
 /// First Rust code to run after the kernel hands control to `_start`.

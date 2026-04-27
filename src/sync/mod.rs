@@ -19,13 +19,14 @@
 
 #![allow(non_snake_case)]
 
+pub mod atomic;
 mod mutex;
 mod once;
 mod rwmutex;
 mod sema;
 mod waitgroup;
 
-pub use mutex::Mutex;
+pub use mutex::{Mutex, MutexGuard};
 pub use once::Once;
 pub use rwmutex::RWMutex;
 pub use waitgroup::WaitGroup;

@@ -293,3 +293,7 @@ path = "examples/time_timer.rs"
 [[example]]
 name = "context_basic"
 path = "examples/context_basic.rs"
+
+[[example]]
+name = "m20_smoke"
+path = "examples/m20_smoke.rs"
