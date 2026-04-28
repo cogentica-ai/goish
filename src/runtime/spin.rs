@@ -98,6 +98,32 @@ fn cooperative_preempt_check() {
         None => return,
     };
     let g_ref = unsafe { g_ptr.as_ref() };
+    // M17b-δ: dispatch_one_g sets `m.current_g = Some(g)` BEFORE
+    // `swap_context` jumps to G's stack. The Guard<M> drop at the
+    // end of that block runs `raw_unlock`, which calls us. If we
+    // fired Gosched here we would overwrite g.gobuf with M's
+    // scheduler-stack context (saved by Gosched's own swap_context)
+    // and re-enqueue the G that's about to be dispatched. The next
+    // dispatch would then load the corrupted gobuf and "resume" on
+    // the M's stale sched stack.
+    //
+    // Discriminator: cooperative yield is only safe when we are
+    // actually running on G's user stack. Read RSP and compare
+    // against `g.stack.base..g.stack.top`; if not in range, we're
+    // still on M's scheduler stack — skip the yield.
+    let rsp: usize;
+    unsafe {
+        core::arch::asm!(
+            "mov {}, rsp",
+            out(reg) rsp,
+            options(nomem, nostack, preserves_flags),
+        );
+    }
+    let stack_base = g_ref.stack.base();
+    let stack_top = g_ref.stack.top();
+    if rsp < stack_base || rsp >= stack_top {
+        return;
+    }
     if g_ref.preempt.swap(false, Ordering::AcqRel) {
         crate::runtime::sched::Gosched();
     }
