@@ -397,3 +397,7 @@ path = "examples/preempt_slot_offline_proof.rs"
 [[example]]
 name = "sigaltstack_offline_proof"
 path = "examples/sigaltstack_offline_proof.rs"
+
+[[example]]
+name = "chan_micro_select_send_only_handcoded"
+path = "examples/chan_micro_select_send_only_handcoded.rs"
