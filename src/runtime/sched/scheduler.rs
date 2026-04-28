@@ -770,6 +770,13 @@ static WORKERS_PRIMED: AtomicUsize = AtomicUsize::new(0);
 /// Mirrors Go's `runtime.mstart1` (proc.go:1689) minus the GC and
 /// signal-handling pieces we don't carry yet.
 extern "C" fn mstart() -> ! {
+    // M18b-δ.3: register this worker's per-thread alt signal stack
+    // first, before any other work. Sysmon may be live by the time
+    // we reach `WORKERS_PRIMED.fetch_add`, and the SIGURG handler is
+    // installed with `SA_ONSTACK` — so the alt stack must already be
+    // in place before any SIGURG can land on this thread.
+    super::m::install_signal_stack();
+
     let tid = crate::syscall::Gettid();
     let id = {
         let m = super::m::current_m().lock();
@@ -783,8 +790,10 @@ extern "C" fn mstart() -> ! {
         super::p::acquirep(p);
     }
     // Signal `bootstrap_workers` that this worker has finished
-    // wiring itself up. Done after `acquirep` so the bootstrap-side
-    // wait observes a fully-bound P, not a merely runnable thread.
+    // wiring itself up. Done after `acquirep` (and after
+    // `install_signal_stack`) so the bootstrap-side wait observes a
+    // fully-bound P AND a thread that's ready to receive signals on
+    // its alt stack.
     WORKERS_PRIMED.fetch_add(1, Ordering::Release);
     m_schedule_loop()
 }

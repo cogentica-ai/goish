@@ -46,7 +46,7 @@ use core::arch::naked_asm;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::runtime::sched::{
-    current_g, current_m, current_m_locks, current_m_storage, Gosched, GStatus, MStorage,
+    current_g, current_m, current_m_locks, Gosched, GStatus,
 };
 use crate::syscall;
 
@@ -294,13 +294,15 @@ pub unsafe extern "C" fn goish_async_preempt() {
         // below the red zone, leaving leaf-fn locals untouched.
         "sub rsp, 128",                              // rsp = SP_user-136
 
-        // Step 2: snapshot the per-M `preempt_resume_pc` slot onto
-        // the G's stack BEFORE any other action that could yield
-        // (which would let another preempt overwrite the per-M
-        // slot). After this push, our resume PC lives at a
-        // per-call-private location (`[SP_user-144]`) that no
-        // subsequent preempt can clobber.
-        "push qword ptr fs:[{resume_pc_offset}]",    // [SP_user-144] = resume_pc snapshot
+        // Step 2 (M18b-δ.3): advance RSP past the resume-PC slot —
+        // the handler has *already* written the resume PC to
+        // [SP_user-144] (see goish_preempt_sigtramp). With the
+        // SIGURG handler running on the per-M alt signal stack
+        // (SA_ONSTACK + sigaltstack), the kernel never touches the
+        // user G's stack during signal delivery, so the handler's
+        // write is the only writer for this slot until the epilogue
+        // reads it.
+        "sub rsp, 8",                                // rsp = SP_user-144 (slot written by handler)
 
         // Step 3: standard frame pointer.
         "push rbp",                                  // [SP_user-152] = user BP
@@ -433,7 +435,6 @@ pub unsafe extern "C" fn goish_async_preempt() {
         "int3",
 
         async_preempt2 = sym goish_async_preempt2,
-        resume_pc_offset = const core::mem::offset_of!(MStorage, preempt_resume_pc),
     )
 }
 
@@ -540,15 +541,33 @@ extern "C" fn goish_preempt_sigtramp(
 
     // ── Inject ──
     //
-    // Stash user PC for the trampoline epilogue's `jmp qword ptr
-    // fs:[resume_pc_offset]`. Then point ucontext at the trampoline
-    // and shift RSP down by 8 — exactly Go's `pushCall` shape
-    // (signal_amd64.go:80) but with the resume PC carried in MStorage
-    // rather than on the user's stack, so we don't write to the red
-    // zone and don't depend on `-C no-redzone`.
-    let storage = current_m_storage();
+    // **M18b-δ.3 — handler-direct G-stack write (SA_ONSTACK variant).**
+    // Stash the resume PC directly onto G's stack at `[sp - 144]`,
+    // the same slot the trampoline epilogue's final `jmp qword ptr
+    // [rsp - 144]` reads. This eliminates the per-M
+    // `MStorage.preempt_resume_pc` intermediate (and the trampoline's
+    // earlier `push qword fs:[…]` snapshot of it).
+    //
+    // **Why this is safe**: the SIGURG handler is installed with
+    // `SA_ONSTACK`, and every M registers a per-thread alt signal
+    // stack via `sigaltstack(2)` at startup
+    // (`runtime::sched::m::install_signal_stack`, called from
+    // `setup_main_tls` and `mstart`). The kernel therefore allocates
+    // the rt_sigframe and the handler frame on the alt stack — the
+    // user G's stack is *not touched at all* by the kernel during
+    // signal delivery. Writing to `[sp - 144]` from the handler is
+    // guaranteed to land on the user G's own stack, in territory
+    // that no other writer (kernel sigframe, other Gs, other Ms)
+    // can reach.
+    //
+    // The 128-byte SysV red zone is preserved: -144 is below the
+    // red zone at `[sp - 128, sp)`.
+    //
+    // RSP is shifted down by 8 so the trampoline's prologue offsets
+    // (`sub rsp, 128; sub rsp, 8; push rbp; …`) land at the same
+    // physical addresses they did under the δ.2 layout.
     unsafe {
-        *storage.preempt_resume_pc.get() = pc;
+        ((sp - 144) as *mut u64).write(pc);
         (*ctx).uc_mcontext.gregs[REG_RSP] = (sp - 8) as u64;
         (*ctx).uc_mcontext.gregs[REG_RIP] = goish_async_preempt as u64;
     }
@@ -572,9 +591,20 @@ extern "C" fn goish_preempt_sigtramp(
 /// `SigreturnTrampoline` complete the kernel's mandated sigreturn
 /// path.
 pub fn install() {
+    // `SA_ONSTACK`: every M has registered a per-thread alt signal
+    // stack via `sigaltstack(2)` at startup
+    // (`runtime::sched::m::install_signal_stack`). With this flag,
+    // the kernel allocates the rt_sigframe and runs the handler on
+    // that alt stack rather than on the user G's stack. M18b-δ.3's
+    // handler-direct write to `[user_rsp - 144]` depends on this:
+    // without SA_ONSTACK, the kernel's sigframe could overlap the
+    // slot (FPU xstate size is host-CPU dependent).
     let sa = syscall::Sigaction {
         sa_handler: goish_preempt_sigtramp as usize,
-        sa_flags: syscall::SA_SIGINFO | syscall::SA_RESTORER | syscall::SA_RESTART,
+        sa_flags: syscall::SA_SIGINFO
+            | syscall::SA_RESTORER
+            | syscall::SA_RESTART
+            | syscall::SA_ONSTACK,
         sa_restorer: syscall::SigreturnTrampoline as usize,
         sa_mask: 0,
     };

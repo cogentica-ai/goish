@@ -133,17 +133,6 @@ pub struct MStorage {
     /// the M's own thread, so accesses are race-free at the hardware
     /// level on x86-64; AtomicU32 is for lint compliance.
     pub locks: AtomicU32,
-    /// Preempt scratch slot — user PC the trampoline must jump back
-    /// to when the preempted G is resumed. Written by
-    /// `goish_preempt_sigtramp` before each injection. The
-    /// trampoline reads this **once at entry** and snapshots the
-    /// value onto the G's stack; the per-M slot is then free to be
-    /// overwritten by subsequent preempts on this M without
-    /// affecting the in-flight trampoline. The handler's write and
-    /// the trampoline's first read happen on the same thread with
-    /// SIGURG masked between them (kernel default mask), so the
-    /// snapshot sees a stable value.
-    pub preempt_resume_pc: UnsafeCell<u64>,
     /// CLOCK_MONOTONIC nanosecond timestamp when the M last
     /// transitioned `current_g` from None to Some(g). 0 means "no G
     /// is currently running on this M" (between dispatches, or when
@@ -174,7 +163,6 @@ impl MStorage {
             m: SpinLock::new(M::new(id)),
             park: Note::new(),
             locks: AtomicU32::new(0),
-            preempt_resume_pc: UnsafeCell::new(0),
             start_running_ns: AtomicI64::new(0),
             current_p: AtomicPtr::new(core::ptr::null_mut()),
         }
@@ -270,6 +258,60 @@ pub fn current_m_locks() -> u32 {
     current_m_storage().locks.load(Ordering::Relaxed)
 }
 
+/// Per-M signal stack size (M18b-δ.3 — SA_ONSTACK). 32 KiB is well
+/// above MINSIGSTKSZ on every Linux x86-64 host, including AVX-512
+/// where the kernel's xstate area can approach 4 KiB. Mirrors Go's
+/// `gsignal.stack` allocation in `runtime/proc.go:mpreinit`.
+const SIGNAL_STACK_SIZE: usize = 32 * 1024;
+
+/// Allocate and register a per-thread alt signal stack.
+///
+/// **Why**: without `SA_ONSTACK` + a registered alt stack, the kernel
+/// allocates the rt_sigframe immediately below the user G's red zone
+/// on the user G's own stack. Whether this collides with a slot we
+/// might want to write from the handler (e.g. `[ucontext.RSP - 144]`
+/// for the resume-PC) depends on FPU xstate size (host-CPU dependent).
+/// To eliminate the dependence entirely, every M registers a
+/// dedicated alt stack at startup; from then on SIGURG is always
+/// delivered there.
+///
+/// **When**: must be called on the same thread that will later
+/// receive signals — sigaltstack is a per-thread setting. Main M
+/// calls this from `setup_main_tls`; workers call it at the very top
+/// of `mstart`, before signaling readiness via `WORKERS_PRIMED`.
+///
+/// **Mmap is leaked**: each thread keeps its alt stack for its
+/// lifetime; process exit reclaims everything.
+pub fn install_signal_stack() {
+    let p = syscall::Mmap(
+        core::ptr::null_mut(),
+        SIGNAL_STACK_SIZE,
+        syscall::PROT_READ | syscall::PROT_WRITE,
+        syscall::MAP_PRIVATE | syscall::MAP_ANONYMOUS,
+        -1,
+        0,
+    );
+    if p == syscall::MAP_FAILED {
+        const MSG: &[u8] = b"goish: install_signal_stack: mmap failed\n";
+        syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+        syscall::Exit(2);
+    }
+    let st = syscall::SigaltstackT {
+        ss_sp: p as usize,
+        ss_flags: 0,
+        _pad0: 0,
+        ss_size: SIGNAL_STACK_SIZE,
+    };
+    let r = unsafe {
+        syscall::Sigaltstack(&st as *const _, core::ptr::null_mut())
+    };
+    if r != 0 {
+        const MSG: &[u8] = b"goish: install_signal_stack: sigaltstack failed\n";
+        syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+        syscall::Exit(2);
+    }
+}
+
 /// Initialize the main thread's TLS slot and plant `fs`.
 ///
 /// **Must be called exactly once, very early in `__goish_rt0`** —
@@ -296,6 +338,12 @@ pub fn setup_main_tls() {
     // no equivalent entry, so we do it here.
     let tid = syscall::Gettid();
     MAIN_M.m.lock().procid.store(tid, Ordering::Release);
+    // M18b-δ.3: register the main thread's per-thread alt signal
+    // stack BEFORE `preempt::install` arms the SIGURG handler with
+    // `SA_ONSTACK`. Without this, the very first SIGURG delivered to
+    // the main M would land on the user G's stack (kernel falls
+    // back when SA_ONSTACK is set but no alt stack is registered).
+    install_signal_stack();
     // Note: main M is NOT registered with the M_LIST. Registration
     // would push to a Vec, which calls into the allocator — and
     // setup_main_tls runs before `mheap_init()` in `__goish_rt0`

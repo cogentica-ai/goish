@@ -36,6 +36,7 @@ pub const SYS_RT_SIGRETURN: usize = 15;
 pub const SYS_GETPID: usize = 39;
 pub const SYS_KILL: usize = 62;
 pub const SYS_TGKILL: usize = 234;
+pub const SYS_SIGALTSTACK: usize = 131;
 
 // Signal numbers (Linux). Mirror /usr/include/asm-generic/signal.h.
 pub const SIGHUP: i32 = 1;
@@ -64,6 +65,13 @@ pub const SIGXFSZ: i32 = 25;
 pub const SA_RESTORER: u64 = 0x04000000;
 pub const SA_SIGINFO: u64 = 0x00000004;
 pub const SA_RESTART: u64 = 0x10000000;
+/// `SA_ONSTACK` — handler runs on the alt stack registered via
+/// `sigaltstack(2)`. Mirrors the role of Go's signal-handler flag at
+/// runtime/signal_unix.go (where `setSignalstackSP` + `signalstack`
+/// + SA_ONSTACK ensure the handler's frame and the kernel's
+/// rt_sigframe live on the per-M `gsignal` stack rather than the
+/// user goroutine's stack).
+pub const SA_ONSTACK: u64 = 0x08000000;
 
 // futex(2) ops. PRIVATE flag (128) is set when only intra-process
 // threads share the address — Linux can use a faster wait-list.
@@ -340,6 +348,39 @@ pub unsafe fn RtSigaction(
         0,
         0,
     )
+}
+
+/// Linux kernel `stack_t` layout (amd64). Used as the argument to
+/// `sigaltstack(2)`. Mirrors `runtime/defs_linux_amd64.go:type stackt`.
+///
+///   ss_sp     (8 bytes)  — base of the alt stack (lowest address).
+///   ss_flags  (4 bytes)  — 0, SS_DISABLE (2), or SS_ONSTACK (1).
+///   _pad      (4 bytes)
+///   ss_size   (8 bytes)  — size of the alt stack in bytes.
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct SigaltstackT {
+    pub ss_sp: usize,
+    pub ss_flags: i32,
+    pub _pad0: i32,
+    pub ss_size: usize,
+}
+
+/// `sigaltstack(2)` — register/inspect the calling thread's alt
+/// signal stack. With `SA_ONSTACK` set on a sigaction, the kernel
+/// switches RSP to the alt stack before delivering the signal,
+/// so the rt_sigframe and handler frame live there rather than on
+/// the user goroutine's stack. Goish uses this so the M18b-δ.3
+/// handler can write a resume-PC slot directly to the user G stack
+/// at `[ucontext.RSP - 144]` without colliding with the kernel's
+/// sigframe.
+///
+/// **Safety**: `new` and `old` must point to valid `SigaltstackT`s
+/// or be null. The alt stack memory must remain mapped and writable
+/// for as long as it is the registered alt stack.
+#[allow(non_snake_case)]
+pub unsafe fn Sigaltstack(new: *const SigaltstackT, old: *mut SigaltstackT) -> isize {
+    syscall2(SYS_SIGALTSTACK, new as usize, old as usize)
 }
 
 /// Sigreturn trampoline. The kernel jumps here when a signal

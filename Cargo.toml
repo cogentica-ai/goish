@@ -389,3 +389,11 @@ path = "examples/sched_p_beta.rs"
 [[example]]
 name = "sched_p_gamma"
 path = "examples/sched_p_gamma.rs"
+
+[[example]]
+name = "preempt_slot_offline_proof"
+path = "examples/preempt_slot_offline_proof.rs"
+
+[[example]]
+name = "sigaltstack_offline_proof"
+path = "examples/sigaltstack_offline_proof.rs"
