@@ -534,6 +534,15 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
     }
     g.status = GStatus::Running;
 
+    // M17b-δ: clear g.preempt at dispatch entry. Belt-and-braces
+    // with the rsp-range guard in `cooperative_preempt_check`: even
+    // if some unforeseen path calls the check while on M's
+    // scheduler stack with `m.current_g` pointing to this G,
+    // `preempt.swap(false)` will return `false` and skip Gosched.
+    // Without this, a sysmon-flagged preempt bit set during the
+    // G's previous run would still be live across re-dispatch.
+    g.preempt.store(false, Ordering::Relaxed);
+
     // Capture buf_from from this M's storage. M's address is stable
     // (static MAIN_M for the main thread, leaked Box for workers),
     // so the &mut sched_buf raw pointer outlives the lock release.
