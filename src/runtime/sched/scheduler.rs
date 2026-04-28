@@ -377,9 +377,155 @@ extern "C" fn g_entry() -> ! {
 /// for cross-M correctness — the chan lock must NOT be released until
 /// the parker's gobuf is committed and the M no longer claims the G.
 /// See chan.go:759-763 in Go 1.25 for the verbatim invariant.
+// ─── M18b-δ.4 — G use-after-free / double-dispatch trap ─────────────
+//
+// Catches the case where `dispatch_one_g` is handed a G pointer whose
+// memory has been freed and (typically) zeroed by the allocator. The
+// existing chan_micro_send_only_segvinfo dumps show this in
+// "Pattern C": SEGV at 0x20c8bc inside `make_context(&g.gobuf,
+// g.stack.top(), …)` with `si_addr = -8`, meaning `g.stack.base + g.stack.size = 0`.
+//
+// Validates the G's stack invariants (each goroutine stack is a
+// dedicated 64 KiB mmap, see runtime::sched::stack). If the
+// invariants are violated, dump the G's memory + nearby diagnostic
+// state and exit cleanly so we can root-cause from the dump rather
+// than chasing a generic SEGV inside make_context.
+//
+// Tagged `goish_rt_text` so the SIGURG handler refuses to inject
+// here (PC-range filter).
+
+#[inline(never)]
+#[link_section = "goish_rt_text"]
+fn dispatch_g_trap_dump(label: &[u8], g_ptr: NonNull<G>) -> ! {
+    use crate::syscall;
+    let stderr = syscall::STDERR;
+
+    let dump_str = |s: &[u8]| {
+        syscall::Write(stderr, s.as_ptr(), s.len());
+    };
+    let dump_hex = |label: &[u8], v: u64| {
+        syscall::Write(stderr, label.as_ptr(), label.len());
+        let mut buf = [0u8; 18];
+        buf[0] = b'0';
+        buf[1] = b'x';
+        for i in 0..16 {
+            let nib = ((v >> ((15 - i) * 4)) & 0xf) as u8;
+            buf[2 + i] = if nib < 10 {
+                b'0' + nib
+            } else {
+                b'a' + (nib - 10)
+            };
+        }
+        syscall::Write(stderr, buf.as_ptr(), buf.len());
+        syscall::Write(stderr, b"\n".as_ptr(), 1);
+    };
+
+    dump_str(b"\n=== goish: dispatch_one_g received bad G ===\n");
+    dump_str(label);
+    dump_str(b"\n");
+    dump_hex(b"  g_ptr        = ", g_ptr.as_ptr() as u64);
+
+    // G fields. Read the stack base/top via volatile to avoid the
+    // compiler folding a stale snapshot.
+    let g_ref = unsafe { g_ptr.as_ref() };
+    let stack_base = g_ref.stack.base() as u64;
+    let stack_top = g_ref.stack.top() as u64;
+    dump_hex(b"  stack.base   = ", stack_base);
+    dump_hex(b"  stack.top    = ", stack_top);
+    dump_hex(b"  stack.size   = ", stack_top.wrapping_sub(stack_base));
+
+    // Status byte read raw to avoid GStatus enum UB on bad values.
+    let status_raw = unsafe {
+        let p = (g_ptr.as_ptr() as *const u8)
+            .add(core::mem::offset_of!(G, status));
+        p.read_volatile()
+    };
+    dump_hex(b"  status_raw   = ", status_raw as u64);
+
+    dump_hex(b"  LIVE_G_COUNT = ", LIVE_G_COUNT.load(Ordering::Relaxed) as u64);
+    dump_hex(
+        b"  DISPATCH_CT  = ",
+        DISPATCH_STAMP_COUNT.load(Ordering::Relaxed) as u64,
+    );
+    let (locks, tramp, parking, no_curg, not_running, sp_range) =
+        crate::runtime::preempt::skip_breakdown();
+    dump_hex(b"  preempt_inv  = ", crate::runtime::preempt::invocations());
+    dump_hex(b"  preempt_inj  = ", crate::runtime::preempt::injections());
+    dump_hex(b"  skip_locks   = ", locks);
+    dump_hex(b"  skip_tramp   = ", tramp);
+    dump_hex(b"  skip_parking = ", parking);
+    dump_hex(b"  skip_nocurg  = ", no_curg);
+    dump_hex(b"  skip_notrun  = ", not_running);
+    dump_hex(b"  skip_sprange = ", sp_range);
+
+    // Hex-dump first 384 bytes of G memory — covers select_wait
+    // (0x000..0x100), stack (0x100..0x110), entry (0x110..0x120),
+    // gobuf (0x120..0x158), status+padding+select_wait_len+preempt
+    // (0x158..0x180). If the allocator zeroed the page, this should
+    // be all zeros.
+    dump_str(b"  G memory:\n");
+    for off in (0usize..384).step_by(16) {
+        let p = unsafe { (g_ptr.as_ptr() as *const u8).add(off) };
+        let lo = unsafe { (p as *const u64).read_volatile() };
+        let hi = unsafe { (p.add(8) as *const u64).read_volatile() };
+        // "  +0xNNN = "
+        let mut prefix = [0u8; 12];
+        prefix[0] = b' ';
+        prefix[1] = b' ';
+        prefix[2] = b'+';
+        prefix[3] = b'0';
+        prefix[4] = b'x';
+        let nib2 = ((off >> 8) & 0xf) as u8;
+        let nib1 = ((off >> 4) & 0xf) as u8;
+        let nib0 = (off & 0xf) as u8;
+        prefix[5] = if nib2 < 10 { b'0' + nib2 } else { b'a' + (nib2 - 10) };
+        prefix[6] = if nib1 < 10 { b'0' + nib1 } else { b'a' + (nib1 - 10) };
+        prefix[7] = if nib0 < 10 { b'0' + nib0 } else { b'a' + (nib0 - 10) };
+        prefix[8] = b' ';
+        prefix[9] = b'=';
+        prefix[10] = b' ';
+        syscall::Write(stderr, prefix.as_ptr(), 11);
+        // dump lo and hi as two qwords.
+        let mut buf = [0u8; 36];
+        buf[0] = b'0'; buf[1] = b'x';
+        for i in 0..16 {
+            let nib = ((lo >> ((15 - i) * 4)) & 0xf) as u8;
+            buf[2 + i] = if nib < 10 { b'0' + nib } else { b'a' + (nib - 10) };
+        }
+        buf[18] = b' ';
+        buf[19] = b'0'; buf[20] = b'x';
+        for i in 0..16 {
+            let nib = ((hi >> ((15 - i) * 4)) & 0xf) as u8;
+            buf[21 + i] = if nib < 10 { b'0' + nib } else { b'a' + (nib - 10) };
+        }
+        syscall::Write(stderr, buf.as_ptr(), 37);
+        syscall::Write(stderr, b"\n".as_ptr(), 1);
+    }
+
+    syscall::Exit(139);
+}
+
+#[inline(never)]
+#[link_section = "goish_rt_text"]
+fn dispatch_validate_g(g_ptr: NonNull<G>) {
+    // Each goroutine stack is exactly STACK_SIZE = 64 KiB (see
+    // runtime::sched::stack). Anything that doesn't match this
+    // invariant means the G was freed (and likely zeroed) before
+    // we got here.
+    const STACK_SIZE: usize = 64 * 1024;
+    let g_ref = unsafe { g_ptr.as_ref() };
+    let base = g_ref.stack.base();
+    let top = g_ref.stack.top();
+    if top > base && top - base == STACK_SIZE && base != 0 {
+        return;
+    }
+    dispatch_g_trap_dump(b"  reason       : stack invariants violated", g_ptr)
+}
+
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 fn dispatch_one_g(mut g_ptr: NonNull<G>) {
+    dispatch_validate_g(g_ptr);
     let g = unsafe { g_ptr.as_mut() };
     if g.status == GStatus::Idle {
         unsafe {
