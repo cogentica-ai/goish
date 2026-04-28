@@ -46,8 +46,7 @@ use core::arch::naked_asm;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::runtime::sched::{
-    current_g, current_m, current_m_locks, current_m_storage, goready, gopark,
-    GStatus, MStorage, ParkCommit,
+    current_g, current_m, current_m_locks, current_m_storage, Gosched, GStatus, MStorage,
 };
 use crate::syscall;
 
@@ -213,49 +212,33 @@ fn is_in_swap_context(pc: u64) -> bool {
 // `goschedImpl(gp, true)` step shape — a yield that the *scheduler*
 // (not the parker) marks runnable so other Ms can dispatch it.
 
-/// gopark commit fn for async preempt — re-readies the G immediately
-/// so it goes back into the runq for the next dispatch. Returns
-/// true (commit park) so dispatch_one_g leaves the M to find more
-/// work; the matching `goready` puts the G on a tail-of-queue runq
-/// slot. Mirrors Go's `goschedImpl(gp, true)` (proc.go:4283).
-#[inline(never)]
-#[link_section = "goish_rt_text"]
-unsafe fn preempt_park_commit(g_ptr: core::ptr::NonNull<crate::runtime::sched::G>) -> bool {
-    // Push back onto the runq so any M can pick it up. We're on g0;
-    // the parker is still claimed by this M's slot which dispatch_one_g
-    // is about to clear via dropg-equivalent.
-    goready(g_ptr);
-    true
-}
-
 #[no_mangle]
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 extern "C" fn goish_async_preempt2() {
-    // From this point through the matching `locks.fetch_sub` below,
-    // the SIGURG handler's `m.locks > 0` predicate filters THIS M
-    // out of preemption.
+    // **Yield via Gosched, not gopark+commit.**
     //
-    // **Migration-safe bookkeeping**. `gopark` below may resume on
-    // a *different* M because `preempt_park_commit` `goready`s the
-    // G into the local P's runnext, where another P's M can steal
-    // it on the last steal-try (p.rs:`runqgrab` `steal_runnext_g`).
-    // Using `acquirem()` / `releasem()` (which read
-    // `current_m_storage()`) would land the increment on M_a but
-    // the decrement on M_b — leaving M_a.locks permanently +1 and
-    // M_b.locks underflowed. Both Ms then appear "always locked"
-    // to the SIGURG handler and the cooperative-preempt check,
-    // killing future preemption on those Ms.
+    // Earlier versions used `gopark(preempt_park_commit, _)` where
+    // the commit fn called `goready` to immediately re-make the G
+    // runnable. That mirrored *the shape* of Go's `goschedImpl(gp,
+    // true)` but added a transient `Waiting` state and a same-M
+    // `dispatch_one_g→commit→goready` round-trip — neither of
+    // which Go's path has. Go's `mcall(gopreempt_m)` switches to
+    // g0, sets status `Running→Runnable`, dropg, globrunqput,
+    // schedule(): no Waiting, no commit fn.
     //
-    // Capture the originating MStorage and operate on its `locks`
-    // field directly, so the matching decrement always lands on
-    // the same M as the increment regardless of which M dispatches
-    // the resumed G.
-    let storage = current_m_storage();
-    storage.locks.fetch_add(1, Ordering::Relaxed);
+    // `Gosched()` is goish's equivalent: status flip
+    // `Running→Runnable`, enqueue on local runq tail (`next=false`,
+    // FIFO — matches Go's `globrunqput` semantics), swap to the
+    // scheduler stack, on resume status flip back to `Running`.
+    // No commit fn, no Waiting transition, no `goready` call. The
+    // m.locks bookkeeping inside Gosched stays self-contained on
+    // the originating M (the swap_context happens before any
+    // migration window opens), so the migration imbalance the
+    // earlier `acquirem`/`releasem` workaround addressed cannot
+    // occur on this path.
     let _ = current_g();
-    gopark(preempt_park_commit as ParkCommit, core::ptr::null());
-    storage.locks.fetch_sub(1, Ordering::Relaxed);
+    Gosched();
 }
 
 // ─── goish_async_preempt: the asm trampoline ───────────────────────
