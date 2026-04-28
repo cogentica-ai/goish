@@ -132,9 +132,40 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
 // unrecoverable conditions; we print a short marker and exit(2).
 
 #[panic_handler]
-fn on_panic(_info: &core::panic::PanicInfo) -> ! {
+fn on_panic(info: &core::panic::PanicInfo) -> ! {
     const MSG: &[u8] = b"goish: panic\n";
     syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+    // Best-effort: dump the panic message text + location so post-
+    // mortem diagnosis (and rr replay) can identify which panic
+    // fired without disassembly.
+    if let Some(loc) = info.location() {
+        const AT: &[u8] = b"  at ";
+        syscall::Write(syscall::STDERR, AT.as_ptr(), AT.len());
+        let f = loc.file().as_bytes();
+        syscall::Write(syscall::STDERR, f.as_ptr(), f.len());
+        const COLON: &[u8] = b":";
+        syscall::Write(syscall::STDERR, COLON.as_ptr(), COLON.len());
+        let mut buf = [0u8; 12];
+        let mut n = loc.line();
+        let mut i = buf.len();
+        if n == 0 {
+            i -= 1;
+            buf[i] = b'0';
+        } else {
+            while n > 0 {
+                i -= 1;
+                buf[i] = b'0' + (n % 10) as u8;
+                n /= 10;
+            }
+        }
+        syscall::Write(syscall::STDERR, buf[i..].as_ptr(), buf.len() - i);
+        const NL: &[u8] = b"\n";
+        syscall::Write(syscall::STDERR, NL.as_ptr(), NL.len());
+    }
+    // The PanicInfo's message itself isn't directly extractable as
+    // bytes in no_std without `core::fmt`. We can at least emit the
+    // message via the Display trait through a fixed buffer. For now,
+    // location-only is enough to identify the panic site.
     syscall::Exit(2)
 }
 

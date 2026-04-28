@@ -591,6 +591,33 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
 
     if g.status == GStatus::Dead {
         let prev = LIVE_G_COUNT.fetch_sub(1, Ordering::AcqRel);
+        // ── M18b-δ.4: gobuf poison at G free (KASAN-style beacon) ──
+        //
+        // Overwrite the gobuf (Gobuf has no Drop — 7 plain u64 fields)
+        // with `0xDEADBEEFDEADBEEF` BEFORE `Box::from_raw` runs the
+        // remaining drops. If anything later does
+        // `swap_context(_, &dead_g.gobuf)` via a stale pointer, the
+        // load `mov rsp, [rsi+0x00]` reads 0xDEADBEEFDEADBEEF as RSP
+        // and the resulting fault address is unmistakable in core
+        // dumps and rr replays.
+        //
+        // Limited to gobuf because other G fields (stack: Stack,
+        // entry: Option<Box<dyn FnOnce()>>) have Drop impls; corrupting
+        // those would crash Box::from_raw itself. Gobuf alone is
+        // enough to catch dispatch-after-free, since
+        // `dispatch_one_g → swap_context` is the load-bearing
+        // dereference path.
+        unsafe {
+            const POISON: u64 = 0xDEADBEEF_DEADBEEF;
+            let gbuf_off = core::mem::offset_of!(G, gobuf);
+            let g_bytes = g_ptr.as_ptr() as *mut u8;
+            let gobuf_size = core::mem::size_of::<Gobuf>();
+            let mut off = 0usize;
+            while off < gobuf_size {
+                (g_bytes.add(gbuf_off + off) as *mut u64).write_volatile(POISON);
+                off += 8;
+            }
+        }
         let _ = unsafe { Box::from_raw(g_ptr.as_ptr()) };
         if prev == 1 {
             // Last live goroutine just exited. Any Ms parked on

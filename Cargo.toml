@@ -26,6 +26,15 @@ lto = true
 strip = true
 codegen-units = 1
 
+# `cargo build --release --profile=rrdbg` for an rr-friendly build:
+# release optimizations + full debug info, no LTO (so symbols survive),
+# no strip. Trace size grows, but rr replay shows source-level frames.
+[profile.rrdbg]
+inherits = "release"
+debug = "full"
+strip = false
+lto = false
+
 [[example]]
 name = "hello"
 path = "examples/hello.rs"
