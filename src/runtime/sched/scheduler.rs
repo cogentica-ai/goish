@@ -279,29 +279,31 @@ pub fn Gosched() {
         Some(p) => p,
         None => return,
     };
+    // M17b-δ: do NOT runqput before swap_context. Mirroring Go's
+    // mcall(gosched_m), the order must be:
+    //   1. swap_context — saves G's gobuf, transfers to scheduler.
+    //   2. Scheduler (post-swap on M's sched stack) re-enqueues G.
+    //
+    // The previous order (status flip → runqput → swap) opens a
+    // race: between runqput and swap, another M can steal G from
+    // the runq, dispatch_one_g it, and `swap_context(_, &g.gobuf)`
+    // — but g.gobuf has not yet been written by the in-flight
+    // swap. M_other reads STALE gobuf (still holds the previous
+    // yield's saved state) and resumes G at that stale PC/RSP
+    // while M_orig is still walking through Gosched on G's user
+    // stack. Two Ms then write to the same G stack — corruption.
+    //
+    // Status flip stays here (cheap, atomic-store), but the actual
+    // visibility-to-runq is deferred to the post-swap path in
+    // `dispatch_one_g`.
     unsafe {
         (*g_ptr.as_ptr()).status = GStatus::Runnable;
     }
-    // M17b-β: yielding G goes back to the local P's runq tail
-    // (next=false), mirroring Go's `goschedImpl → runqput(_p_, gp, false)`
-    // (proc.go:4400). Falling back to the global runq when this M holds
-    // no P (shouldn't occur on the dispatch path, but safe).
-    if let Some(p) = current_p() {
-        unsafe { p.runqput(g_ptr, false) };
-    } else {
-        SCHED.lock().runq.push_back(g_ptr);
-    }
-    // Capture pointers before releasing locks — both `MAIN_M` (M17a-β1)
-    // and `SCHED` are static, so the addresses are stable.
     let buf_from = unsafe { &mut (*g_ptr.as_ptr()).gobuf as *mut Gobuf };
     let buf_to = {
         let m = current_m().lock();
         &m.sched_buf as *const Gobuf
     };
-    // No m.locks bump needed: by this point status = Runnable, so
-    // M18b's SIGURG handler filters this G via the
-    // `curg.status == Running` predicate (Theorem in design notes:
-    // status filter dominates lock-counter for non-Running G).
     unsafe {
         swap_context(buf_from, buf_to);
     }
@@ -597,6 +599,19 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
     }
 
     current_m().lock().current_g = None;
+
+    // M17b-δ: post-swap re-enqueue for `Gosched`. Gosched flips
+    // status to Runnable and swaps to us without touching the
+    // runq — that's deliberate, to avoid the runqput→swap race
+    // where another M could read a not-yet-saved g.gobuf. Now
+    // that swap_context has written g.gobuf and we've cleared
+    // m.current_g, the G is safe to expose to other Ms via the
+    // runq. `next=false` matches Go's `goschedImpl(_, false)`
+    // (proc.go:4400) — Gosched yields to the back of the queue.
+    if g.status == GStatus::Runnable {
+        enqueue_runnable(g_ptr, false);
+        return;
+    }
 
     if g.status == GStatus::Dead {
         let prev = LIVE_G_COUNT.fetch_sub(1, Ordering::AcqRel);
