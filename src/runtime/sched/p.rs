@@ -312,6 +312,8 @@ impl P {
     /// kicking any prior runnext to the ring tail.
     ///
     /// Mirrors `runqput` (proc.go:7058). Executed only by the owner P.
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
     pub unsafe fn runqput(&self, gp: NonNull<G>, next: bool) {
         let mut gp_ptr = gp.as_ptr();
 
@@ -364,6 +366,8 @@ impl P {
     /// (owner P should retry the put).
     ///
     /// Mirrors `runqputslow` (proc.go:7104).
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
     fn runqputslow(&self, gp: NonNull<G>, h: u32, t: u32) -> bool {
         const HALF: usize = LOCAL_RUNQ_SIZE / 2;
         let mut batch: [*mut G; HALF + 1] = [core::ptr::null_mut(); HALF + 1];
@@ -396,6 +400,8 @@ impl P {
     /// `runnext` first then the ring. Returns `None` if both are empty.
     ///
     /// Mirrors `runqget` (proc.go:7178). Executed only by the owner P.
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
     pub unsafe fn runqget(&self) -> Option<NonNull<G>> {
         let next = self.runnext.load(Ordering::Acquire);
         if !next.is_null() {
@@ -515,6 +521,8 @@ impl P {
     /// owned by the caller's P, and the caller must hold the
     /// single-writer invariant on those slots (i.e. caller is the M
     /// bound to the destination P).
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
     pub unsafe fn runqgrab(
         &self,
         dst: *mut [*mut G; LOCAL_RUNQ_SIZE],
@@ -600,6 +608,8 @@ impl P {
     /// Safety: caller must be the M bound to `self`. The
     /// single-writer invariant on `self.runq[]` slots and
     /// `self.runqtail` is what makes the SPMC ring lock-free.
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
     pub unsafe fn runqsteal(
         &self,
         target: &P,

@@ -255,6 +255,58 @@ name = "chan_select_stress"
 path = "examples/chan_select_stress.rs"
 
 [[example]]
+name = "chan_micro_send_recv"
+path = "examples/chan_micro_send_recv.rs"
+
+[[example]]
+name = "chan_micro_no_select"
+path = "examples/chan_micro_no_select.rs"
+
+[[example]]
+name = "chan_micro_select_only"
+path = "examples/chan_micro_select_only.rs"
+
+[[example]]
+name = "chan_micro_select_2chan"
+path = "examples/chan_micro_select_2chan.rs"
+
+[[example]]
+name = "chan_micro_select_3chan"
+path = "examples/chan_micro_select_3chan.rs"
+
+[[example]]
+name = "chan_micro_select_3unbuf"
+path = "examples/chan_micro_select_3unbuf.rs"
+
+[[example]]
+name = "chan_micro_select_send_only"
+path = "examples/chan_micro_select_send_only.rs"
+
+[[example]]
+name = "rt_section_smoke"
+path = "examples/rt_section_smoke.rs"
+
+[[example]]
+name = "chan_micro_send_only_segvinfo"
+path = "examples/chan_micro_send_only_segvinfo.rs"
+
+[[example]]
+name = "chan_micro_select_send_small"
+path = "examples/chan_micro_select_send_small.rs"
+
+[[example]]
+name = "chan_micro_select_recv_only"
+path = "examples/chan_micro_select_recv_only.rs"
+
+[[example]]
+name = "chan_micro_select_diag"
+path = "examples/chan_micro_select_diag.rs"
+
+[[example]]
+name = "chan_micro_select_dump"
+path = "examples/chan_micro_select_dump.rs"
+
+[[example]]
 name = "chan_self_select"
 path = "examples/chan_self_select.rs"
 

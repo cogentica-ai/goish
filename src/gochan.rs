@@ -343,6 +343,8 @@ impl<T> chan<T> {
     /// locked path on nil chans either (the `nil` early-return
     /// happens before lock acquisition).
     #[doc(hidden)]
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
     pub fn __try_recv_locked(s: &mut HchanState<T>) -> Option<(T, bool)>
     where
         T: Default,
@@ -390,6 +392,8 @@ impl<T> chan<T> {
     /// Locked-state send. Same semantics as `__try_send` minus the
     /// chan-lock acquisition.
     #[doc(hidden)]
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
     pub fn __try_send_locked(s: &mut HchanState<T>, v: T) -> Result<(), T> {
         if s.closed {
             fatal(b"goish: chan: send on closed channel\n");
@@ -461,7 +465,8 @@ fn fatal(msg: &[u8]) -> ! {
 ///
 /// For non-select sudogs (`coord == None`) the CAS is skipped and
 /// the waker always succeeds.
-#[inline]
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 fn try_claim_sudog<T>(sg: NonNull<Sudog<T>>) -> bool {
     let coord_opt = unsafe { (*sg.as_ptr()).coord };
     let coord = match coord_opt {
@@ -482,7 +487,10 @@ impl<T> chan<T> {
     /// Returns `Err(v)` if the operation would block (no parked
     /// receiver, buffer full, chan unbuffered with no waiter).
     /// Panics on closed chan — Go semantics for `c <- v`.
-    #[doc(hidden)] pub fn __try_send(&self, v: T) -> Result<(), T> {
+    #[doc(hidden)]
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
+    pub fn __try_send(&self, v: T) -> Result<(), T> {
         let mut s = self.inner.state.lock();
         if s.closed {
             drop(s);
@@ -526,7 +534,10 @@ impl<T> chan<T> {
     /// Try to recv without parking. Returns `Some((v, ok))` if a
     /// value (or close-and-empty terminator) is immediately
     /// available. Returns `None` if the operation would block.
-    #[doc(hidden)] pub fn __try_recv(&self) -> Option<(T, bool)>
+    #[doc(hidden)]
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
+    pub fn __try_recv(&self) -> Option<(T, bool)>
     where
         T: Default,
     {
@@ -615,7 +626,10 @@ impl<T> chan<T> {
     ///
     /// Used by `select!` pass-3 to (a) clean up losing cases and
     /// (b) identify the winning case in one pass.
-    #[doc(hidden)] pub fn __cancel_send(&self, sg: NonNull<Sudog<T>>) -> bool {
+    #[doc(hidden)]
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
+    pub fn __cancel_send(&self, sg: NonNull<Sudog<T>>) -> bool {
         let mut s = self.inner.state.lock();
         let before = s.sendq.len();
         s.sendq.retain(|p| *p != sg);
@@ -624,7 +638,10 @@ impl<T> chan<T> {
 
     /// Drop a previously-registered recv sudog from `recvq`. Same
     /// winner/loser convention as `__cancel_send`.
-    #[doc(hidden)] pub fn __cancel_recv(&self, sg: NonNull<Sudog<T>>) -> bool {
+    #[doc(hidden)]
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
+    pub fn __cancel_recv(&self, sg: NonNull<Sudog<T>>) -> bool {
         let mut s = self.inner.state.lock();
         let before = s.recvq.len();
         s.recvq.retain(|p| *p != sg);
@@ -650,6 +667,8 @@ impl<T> chan<T> {
     /// observe our sudog without holding the chan lock, so by the
     /// time it can `goready` us our gobuf is already a valid
     /// suspended snapshot.
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
     pub fn Send(&self, v: T) {
         // nil chan — block forever (Go runtime/chan.go:177-183).
         // No lock to acquire, no commit fn touches state.
@@ -710,6 +729,8 @@ impl<T> chan<T> {
     ///
     /// Same multi-M lock discipline as `Send` — see the comment
     /// there.
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
     pub fn Recv(&self) -> (T, bool)
     where
         T: Default,
@@ -769,6 +790,8 @@ impl<T> chan<T> {
     /// owning goroutine's pass-3 will cancel them when it resumes.
     /// This keeps "close on multiple chans of one select" from
     /// firing more than one case of that select.
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
     pub fn Close(&self) {
         // close(nil chan) panics per Go (runtime/chan.go closechan).
         if self.inner.nil {

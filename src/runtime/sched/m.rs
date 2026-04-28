@@ -236,7 +236,7 @@ pub fn is_tls_ready() -> bool {
 /// proc.go:419. An RAII guard whose Drop runs after the function
 /// returns would post-date the yield. Free functions match the
 /// surgical placement Go uses.
-#[inline]
+#[inline(always)]
 pub fn acquirem() {
     if !is_tls_ready() {
         return;

@@ -75,8 +75,17 @@ fn drop_m_locks() {
 /// when the flag is unset. The cost on the hot path (e.g. every
 /// chan op) is one cache-resident load on `current_m_storage`'s
 /// `locks` field plus one load on `current_m`'s `current_g`.
-#[inline]
+// `#[inline(never)]` + `#[link_section]`: keep this function out of
+// callers so its PC range is well-defined; the SIGURG handler's
+// `is_in_runtime` filter (rt_section.rs) refuses injection on PCs
+// inside `goish_rt_text`. Mirrors Go's runtime-prefix check at
+// preempt.go:420.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 fn cooperative_preempt_check() {
+    if !crate::runtime::flags::COOP_PREEMPT.load(core::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
     if !crate::runtime::sched::is_tls_ready() {
         return;
     }
@@ -117,6 +126,15 @@ impl<T> SpinLock<T> {
         }
     }
 
+    /// `#[inline(never)]` + `#[link_section]`: tagged so the SIGURG
+    /// handler refuses to inject when RIP falls inside this fn. The
+    /// brief window between the CAS-acquire success and the
+    /// `bump_m_locks()` call is otherwise preempt-eligible despite
+    /// holding the atom — a misfire would yield with the lock held.
+    /// Note this is generic: each monomorphization gets its own copy
+    /// in `goish_rt_text` (the attribute applies per instantiation).
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
     pub fn lock(&self) -> Guard<'_, T> {
         while self
             .locked
@@ -157,7 +175,8 @@ impl<T> SpinLock<T> {
 /// **Safety**: `atom` must point to the `locked: AtomicBool` of a
 /// live `SpinLock`. Once acquired, the caller must release via
 /// `raw_unlock(atom)` exactly once before the SpinLock is dropped.
-#[inline]
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 pub unsafe fn raw_lock(atom: *const AtomicBool) {
     let atom = &*atom;
     while atom
@@ -173,7 +192,8 @@ pub unsafe fn raw_lock(atom: *const AtomicBool) {
 ///
 /// **Safety**: `atom` must be the same pointer used in the matching
 /// `raw_lock` call.
-#[inline]
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 pub unsafe fn raw_unlock(atom: *const AtomicBool) {
     // Drop m.locks BEFORE releasing the lock so the decrement is
     // observably inside the locked region.
@@ -205,7 +225,14 @@ impl<'a, T> DerefMut for Guard<'a, T> {
 }
 
 impl<'a, T> Drop for Guard<'a, T> {
-    #[inline]
+    /// `#[inline(never)]` + `#[link_section]`: the drop body has the
+    /// same drop_m_locks/atom-store/coop-check sequence as raw_unlock
+    /// and the same preempt-unsafe window. Tagged to keep its PC in
+    /// `goish_rt_text` so the SIGURG handler refuses injection.
+    /// Generic — each monomorphization gets its own copy in the
+    /// section.
+    #[inline(never)]
+    #[link_section = "goish_rt_text"]
     fn drop(&mut self) {
         drop_m_locks();
         self.lock.locked.store(false, Ordering::Release);

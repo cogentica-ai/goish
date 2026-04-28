@@ -204,6 +204,9 @@ pub fn force_preempt_signals_sent() -> u64 {
 }
 
 fn check_force_preempt(now: i64) {
+    if !crate::runtime::flags::ASYNC_PREEMPT.load(Ordering::Relaxed) {
+        return;
+    }
     SYSMON_SCAN_TICKS.fetch_add(1, Ordering::Relaxed);
     let pid = syscall::Getpid();
     for_each_m(|storage| {

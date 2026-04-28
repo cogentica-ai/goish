@@ -17,6 +17,7 @@ use crate::syscall;
 
 pub mod args;
 pub mod debug;
+pub mod flags;
 pub mod heap;
 pub mod mcentral;
 pub mod mheap;
@@ -24,6 +25,7 @@ mod mem;
 pub mod note;
 pub mod preempt;
 pub mod rand;
+pub mod rt_section;
 pub mod sched;
 pub mod signal;
 pub mod spin;
@@ -40,6 +42,11 @@ pub use heap::{alloc, free, mheap_alloc_pages, mheap_free_pages, realloc};
 pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // Stash argc/argv so os::Args() can decode them lazily on first use.
     args::__set(argc, argv);
+
+    // Parse GOISH_* env vars before any goroutine code runs. The kernel
+    // ELF stack layout puts envp right after argv's null terminator,
+    // so we recover envp = argv + argc + 1 here.
+    unsafe { flags::init_from_argv(argc, argv); }
 
     // Plant the main M's TLS slot. After this, `current_m()` reads
     // `&MAIN_M.m` via `mov %fs:0, _` instead of the (legacy β1)

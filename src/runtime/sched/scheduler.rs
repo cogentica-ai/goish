@@ -105,6 +105,8 @@ fn globrunqget_one() -> Option<NonNull<G>> {
 /// step (3) is unconditional rather than gated on `mp.spinning`.
 /// The simplification is safe (more contention, never less
 /// correctness) per proof §9.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 fn find_runnable() -> Option<NonNull<G>> {
     if let Some(p) = current_p() {
         if let Some(g) = unsafe { p.runqget() } {
@@ -127,13 +129,20 @@ fn find_runnable() -> Option<NonNull<G>> {
 /// On success returns the "head" G of the stolen batch — the rest
 /// (if any) was published into the calling M's local runq by
 /// `runqsteal`. Returns `None` if four full passes turn up empty.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 fn steal_work() -> Option<NonNull<G>> {
+    if !crate::runtime::flags::WORK_STEALING.load(Ordering::Relaxed) {
+        return None;
+    }
     let pp = current_p()?;
     super::p::STEAL_PASSES.fetch_add(1, Ordering::Relaxed);
 
     const STEAL_TRIES: u32 = 4;
+    let allow_runnext_steal =
+        crate::runtime::flags::STEAL_RUNNEXT.load(Ordering::Relaxed);
     for i in 0..STEAL_TRIES {
-        let steal_runnext_g = i == STEAL_TRIES - 1;
+        let steal_runnext_g = allow_runnext_steal && (i == STEAL_TRIES - 1);
         let mut e = super::p::STEAL_ORDER.start(crate::runtime::rand::cheaprand());
         while !e.done() {
             let pos = e.position() as usize;
@@ -185,6 +194,8 @@ fn steal_work() -> Option<NonNull<G>> {
 /// producers' `wake_idle_m` will block until our scan completes —
 /// either we find work and don't park, or we push to MIDLE and the
 /// producer's subsequent `wake_idle_m` pops us.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 fn has_local_or_global_work() -> bool {
     if let Some(p) = current_p() {
         if p.runq_has_work() {
@@ -234,6 +245,8 @@ static LIVE_G_COUNT: AtomicUsize = AtomicUsize::new(0);
 /// work-stealing (γ), `next=true` for newproc would let the most
 /// recent spawn dominate `runnext` and starve earlier ones; `next=false`
 /// keeps spawn order deterministic. We can revisit once γ ships.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 fn enqueue_runnable(g_ptr: NonNull<G>, next: bool) {
     if let Some(p) = current_p() {
         unsafe { p.runqput(g_ptr, next) };
@@ -259,6 +272,8 @@ pub fn newproc(closure: Box<dyn FnOnce()>) {
 /// (proc.go:387). If called from outside any goroutine (i.e. on the
 /// scheduler thread itself), this is a no-op.
 #[allow(non_snake_case)]
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 pub fn Gosched() {
     let g_ptr = match current_m().lock().current_g {
         Some(p) => p,
@@ -305,6 +320,8 @@ pub fn Gosched() {
 /// is the swap_context asm itself, covered by phase-C's PC-range
 /// guard. A balanced bump pair is impossible because the swap_context
 /// here never returns to this stack.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 fn goexit() -> ! {
     let g_ptr = current_m().lock().current_g.expect("goexit: no current G");
     unsafe {
@@ -360,6 +377,8 @@ extern "C" fn g_entry() -> ! {
 /// for cross-M correctness — the chan lock must NOT be released until
 /// the parker's gobuf is committed and the M no longer claims the G.
 /// See chan.go:759-763 in Go 1.25 for the verbatim invariant.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 fn dispatch_one_g(mut g_ptr: NonNull<G>) {
     let g = unsafe { g_ptr.as_mut() };
     if g.status == GStatus::Idle {
@@ -454,6 +473,8 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
 /// parked goroutines with no waker (a user-program deadlock). Go's
 /// runtime detects this via `checkdead` (proc.go:5566); goish v1
 /// will hang in that case until M18b lands.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 pub fn schedule() {
     loop {
         match find_runnable() {
@@ -582,6 +603,8 @@ pub static DISPATCH_STAMP_COUNT: AtomicUsize = AtomicUsize::new(0);
 /// queue is empty and goroutines are still alive.
 ///
 /// Mirror of Go's `stopm` (proc.go:2997) → `mPark` (proc.go:1972).
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 fn park_m_idle() {
     let storage = current_m_storage();
 
@@ -621,6 +644,8 @@ fn park_m_idle() {
 ///
 /// Mirror of Go's `wakep` (proc.go:3217) + `startm`-on-wakep
 /// (proc.go:3040).
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 pub fn wake_idle_m() {
     let storage = match MIDLE.lock().pop() {
         Some(s) => s,
@@ -654,6 +679,8 @@ fn wake_all_idle_m() {
 /// flight from existing Gs. A shutdown caller (`Exit` from main) is
 /// the only thing that could still racily push more work, and by
 /// then exit_group has already replaced this thread anyway.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 pub fn m_schedule_loop() -> ! {
     loop {
         match find_runnable() {
@@ -877,6 +904,8 @@ pub fn current_g() -> Option<NonNull<G>> {
 /// the abort path requeues the G as `Runnable` so the next dispatch
 /// picks it up. `lock_atom` may be null when the commit fn doesn't
 /// need it (e.g. `selparkcommit` walks `g.select_wait` instead).
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 pub fn gopark(commit: ParkCommit, lock_atom: *const AtomicBool) {
     let g_ptr = match current_m().lock().current_g {
         Some(p) => p,
@@ -933,6 +962,8 @@ pub fn gopark(commit: ParkCommit, lock_atom: *const AtomicBool) {
 /// traceBlockForever, 2)` (chan.go:181, 536). Used only by `Send`/
 /// `Recv` on a nil chan; in `select!` nil cases are filtered before
 /// the lock-order pass and never reach gopark.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 pub unsafe fn block_forever_commit(_g: NonNull<G>) -> bool {
     true
 }
@@ -949,6 +980,8 @@ pub unsafe fn block_forever_commit(_g: NonNull<G>) -> bool {
 /// Safety: caller (`gopark`) must have stashed a valid chan
 /// `lock_atom` in `M::waitlock` and the calling thread must hold
 /// that lock at entry.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 pub unsafe fn chan_park_commit(_g: NonNull<G>) -> bool {
     let atom = current_m().lock().waitlock;
     debug_assert!(!atom.is_null(), "chan_park_commit: no waitlock");
@@ -972,6 +1005,8 @@ pub unsafe fn chan_park_commit(_g: NonNull<G>) -> bool {
 /// be a live `*const AtomicBool` of a held SpinLock. The macro emits
 /// the matching lock acquisitions before populating this list and
 /// calling `gopark(selparkcommit, _)`.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 pub unsafe fn selparkcommit(g_ptr: NonNull<G>) -> bool {
     let g = &mut *g_ptr.as_ptr();
     let n = g.select_wait_len as usize;
@@ -999,6 +1034,8 @@ pub unsafe fn selparkcommit(g_ptr: NonNull<G>) -> bool {
 /// runq when the caller holds no P (e.g. sysmon-driven wakers or
 /// pre-bootstrap callers). `wake_idle_m` ensures a parked M picks
 /// up the work whether it's local or global.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 pub fn goready(g_ptr: NonNull<G>) {
     unsafe {
         debug_assert_eq!(
@@ -1009,6 +1046,8 @@ pub fn goready(g_ptr: NonNull<G>) {
         (*g_ptr.as_ptr()).status = GStatus::Runnable;
     }
     // next=true: chan-waker / sync-waker fastpath — the just-readied G
-    // gets `runnext` priority on the local P.
-    enqueue_runnable(g_ptr, true);
+    // gets `runnext` priority on the local P. Toggled by GOISH_RUNNEXT
+    // (debug feature flag).
+    let next = crate::runtime::flags::RUNNEXT_FASTPATH.load(Ordering::Relaxed);
+    enqueue_runnable(g_ptr, next);
 }

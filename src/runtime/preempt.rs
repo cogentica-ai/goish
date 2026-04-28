@@ -46,8 +46,8 @@ use core::arch::naked_asm;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::runtime::sched::{
-    acquirem, current_g, current_m, current_m_locks, current_m_storage, goready, gopark,
-    releasem, GStatus, MStorage, ParkCommit,
+    current_g, current_m, current_m_locks, current_m_storage, goready, gopark,
+    GStatus, MStorage, ParkCommit,
 };
 use crate::syscall;
 
@@ -218,6 +218,8 @@ fn is_in_swap_context(pc: u64) -> bool {
 /// true (commit park) so dispatch_one_g leaves the M to find more
 /// work; the matching `goready` puts the G on a tail-of-queue runq
 /// slot. Mirrors Go's `goschedImpl(gp, true)` (proc.go:4283).
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 unsafe fn preempt_park_commit(g_ptr: core::ptr::NonNull<crate::runtime::sched::G>) -> bool {
     // Push back onto the runq so any M can pick it up. We're on g0;
     // the parker is still claimed by this M's slot which dispatch_one_g
@@ -227,28 +229,33 @@ unsafe fn preempt_park_commit(g_ptr: core::ptr::NonNull<crate::runtime::sched::G
 }
 
 #[no_mangle]
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 extern "C" fn goish_async_preempt2() {
-    // From this point through the matching `releasem` below, the
-    // SIGURG handler's `m.locks > 0` predicate filters this M out
-    // of preemption — covering the body of async_preempt2 itself
-    // (which holds SpinLocks and walks scheduler state).
-    acquirem();
-    // Park-and-immediately-ready: dispatch_one_g sees a commit fn
-    // (preempt_park_commit) post-swap, transitions G to Waiting,
-    // dropgs, calls commit. Commit calls goready(g) which puts G
-    // back on the runq.
+    // From this point through the matching `locks.fetch_sub` below,
+    // the SIGURG handler's `m.locks > 0` predicate filters THIS M
+    // out of preemption.
     //
-    // gopark requires releasem to happen *before* swap_context so
-    // accounting is on the same M (multi-M migration safe). gopark
-    // already does this: see scheduler.rs's gopark — it calls
-    // releasem before swap_context. We bumped m.locks here; gopark
-    // bumps once more, and releasem-before-swap drops gopark's
-    // bump. dispatch_one_g sees commit (which doesn't touch
-    // m.locks). On resume, gopark returns; we then releasem to drop
-    // our outer bump.
+    // **Migration-safe bookkeeping**. `gopark` below may resume on
+    // a *different* M because `preempt_park_commit` `goready`s the
+    // G into the local P's runnext, where another P's M can steal
+    // it on the last steal-try (p.rs:`runqgrab` `steal_runnext_g`).
+    // Using `acquirem()` / `releasem()` (which read
+    // `current_m_storage()`) would land the increment on M_a but
+    // the decrement on M_b — leaving M_a.locks permanently +1 and
+    // M_b.locks underflowed. Both Ms then appear "always locked"
+    // to the SIGURG handler and the cooperative-preempt check,
+    // killing future preemption on those Ms.
+    //
+    // Capture the originating MStorage and operate on its `locks`
+    // field directly, so the matching decrement always lands on
+    // the same M as the increment regardless of which M dispatches
+    // the resumed G.
+    let storage = current_m_storage();
+    storage.locks.fetch_add(1, Ordering::Relaxed);
     let _ = current_g();
     gopark(preempt_park_commit as ParkCommit, core::ptr::null());
-    releasem();
+    storage.locks.fetch_sub(1, Ordering::Relaxed);
 }
 
 // ─── goish_async_preempt: the asm trampoline ───────────────────────
@@ -487,6 +494,20 @@ extern "C" fn goish_preempt_sigtramp(
     // would corrupt scheduler state.
     if is_in_trampoline(pc) || is_in_swap_context(pc) {
         SKIP_TRAMPOLINE.fetch_add(1, Ordering::Relaxed);
+        return;
+    }
+
+    // 2b. PC ∈ goish runtime text section. Mirrors Go's
+    // `name.HasPrefix("runtime.")` filter (preempt.go:420). Runtime
+    // functions have brief windows where `m.locks == 0` but the
+    // scheduler / lock primitive / wake-protocol state is
+    // half-mutated; injecting there yields the G with that state
+    // visible to other Ms, causing corruption (SEGV) or stuck
+    // wakeups (hang). The cooperative path catches these Gs at the
+    // next `raw_unlock` safe point — no forward-progress loss.
+    if crate::runtime::rt_section::is_in_runtime(pc) {
+        crate::runtime::rt_section::SKIP_RUNTIME_PC
+            .fetch_add(1, Ordering::Relaxed);
         return;
     }
 
