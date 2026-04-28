@@ -108,10 +108,18 @@ fn test_pass1_recv_tuple() {
     static GOT_V: AtomicI64 = AtomicI64::new(-1);
     static GOT_OK: AtomicUsize = AtomicUsize::new(99);
 
-    {
-        let c = ch.clone();
-        go!(move || c.Send(123));
-    }
+    // Pre-fill the buffered slot synchronously. Spawning a sender
+    // goroutine here is racy under M17b-γ work-stealing: a worker
+    // M can steal the selector and run its `select!` *before* the
+    // sender goroutine executes, causing the `default` arm to fire
+    // spuriously. Go's runtime documents this class of test bug at
+    // proc.go:7042-7050 — assertions that rely on goroutine spawn
+    // order are "poorly-written tests". Since `Send` on an empty
+    // 1-buffer is non-blocking, deposit the value directly from
+    // main M; the test's intent (pass-1 hit on tuple-binding recv)
+    // is preserved without the order assumption.
+    ch.Send(123);
+
     {
         let c = ch.clone();
         go!(move || {
@@ -286,10 +294,35 @@ fn test_many_iterations() {
     check(send_fires == 50, b"t8: send_fires != 50\n");
     check(recv_fires == 50, b"t8: recv_fires != 50\n");
 
-    let expected_send: i64 = (0..N as i64).filter(|i| i % 2 == 0).sum();
-    check(SEND_SUM.load(Ordering::Relaxed) == expected_send, b"t8: send sum\n");
+    // RECV_SUM is deterministic: the 50 cr-senders deliver 50
+    // distinct odd-i values (1001, 1003, …, 1099), and exactly 50
+    // selectors fire their recv branch — the sum of all values
+    // pulled from `cr` is therefore fixed, regardless of which
+    // selectors won the race.
     let expected_recv: i64 = (0..N as i64).filter(|i| i % 2 == 1).map(|i| i + 1000).sum();
     check(RECV_SUM.load(Ordering::Relaxed) == expected_recv, b"t8: recv sum\n");
+
+    // SEND_SUM is NOT deterministic. With M17b-γ work-stealing the
+    // 100 selectors run in parallel across worker Ms; *which* 50
+    // selectors fire their send branch depends on race timing —
+    // any 50 of the 100 can win. The original assertion
+    // `SEND_SUM == 0+2+4+…+98 = 2450` silently assumed selectors
+    // i=0,2,…,98 fire send, which only held under the single-M
+    // pre-γ scheduler. proc.go:7042-7050 documents this class of
+    // test bug:
+    //
+    //   "we introduce some randomness into scheduling decisions
+    //    when running with the race detector. … breaking many
+    //    poorly-written tests."
+    //
+    // The invariant we *can* assert is the bound:
+    // SEND_SUM ∈ [0, sum(0..N)] = [0, 4950].
+    let send_sum = SEND_SUM.load(Ordering::Relaxed);
+    let upper: i64 = (0..N as i64).sum();
+    check(
+        send_sum >= 0 && send_sum <= upper,
+        b"t8: send sum out of range\n",
+    );
 }
 
 // ─── Test 9: paren-expr fallback for chan ─────────────────────────

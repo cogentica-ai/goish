@@ -333,3 +333,7 @@ path = "examples/sched_p_alpha.rs"
 [[example]]
 name = "sched_p_beta"
 path = "examples/sched_p_beta.rs"
+
+[[example]]
+name = "sched_p_gamma"
+path = "examples/sched_p_gamma.rs"

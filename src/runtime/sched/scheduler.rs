@@ -96,27 +96,120 @@ fn globrunqget_one() -> Option<NonNull<G>> {
 }
 
 /// Find the next runnable G for the calling M. Drain order
-/// (M17b-β): local P runq → global runq. γ adds work-stealing as
-/// the third tier.
+/// (M17b-γ): local P runq → global runq → steal from another P.
+/// Returns `None` if all three tiers come up empty.
+///
+/// Mirrors a slim subset of Go's `findRunnable` (proc.go:3377).
+/// Goish does not carry the spinning-M / nmspinning state machine,
+/// the idlepMask, the trace/GC/finalizer hooks, or netpoll —
+/// step (3) is unconditional rather than gated on `mp.spinning`.
+/// The simplification is safe (more contention, never less
+/// correctness) per proof §9.
 fn find_runnable() -> Option<NonNull<G>> {
     if let Some(p) = current_p() {
         if let Some(g) = unsafe { p.runqget() } {
             return Some(g);
         }
     }
-    globrunqget_one()
+    if let Some(g) = globrunqget_one() {
+        return Some(g);
+    }
+    steal_work()
 }
 
-/// True when this M has any work it can dispatch — either on its
-/// bound P's local runq or on the global runq. Used by the idle-park
-/// re-check under MIDLE lock so we don't sleep through a producer.
+/// Attempt to steal a runnable G from another P. Mirrors a slim
+/// subset of Go's `stealWork` (proc.go:3816): four tries × random
+/// permutation of all Ps via `stealOrder.start(cheaprand())`; the
+/// last try also permits stealing from each target's `runnext`
+/// slot (with the `usleep(3)`/SchedYield anti-thrash backoff
+/// applied inside `runqgrab`).
+///
+/// On success returns the "head" G of the stolen batch — the rest
+/// (if any) was published into the calling M's local runq by
+/// `runqsteal`. Returns `None` if four full passes turn up empty.
+fn steal_work() -> Option<NonNull<G>> {
+    let pp = current_p()?;
+    super::p::STEAL_PASSES.fetch_add(1, Ordering::Relaxed);
+
+    const STEAL_TRIES: u32 = 4;
+    for i in 0..STEAL_TRIES {
+        let steal_runnext_g = i == STEAL_TRIES - 1;
+        let mut e = super::p::STEAL_ORDER.start(crate::runtime::rand::cheaprand());
+        while !e.done() {
+            let pos = e.position() as usize;
+            if let Some(p2) = super::p::p_at(pos) {
+                // Skip self.
+                if !core::ptr::eq(p2 as *const _, pp as *const _) {
+                    // Cheap pre-check: skip empty targets unless
+                    // we're also authorized to steal runnext.
+                    // Mirrors Go's `idlepMask.read(...)` early exit
+                    // (proc.go:3879). Goish does not carry an
+                    // idlepMask; `runqempty` is the right check at
+                    // this layer.
+                    let has_work = !p2.runqempty()
+                        || (steal_runnext_g
+                            && !p2.runnext.load(Ordering::Acquire).is_null());
+                    if has_work {
+                        if let Some(g) =
+                            unsafe { pp.runqsteal(p2, steal_runnext_g) }
+                        {
+                            super::p::STEAL_HITS.fetch_add(1, Ordering::Relaxed);
+                            return Some(g);
+                        }
+                    }
+                }
+            }
+            e.next();
+        }
+    }
+    None
+}
+
+/// True when this M has any work it can dispatch — on its bound P's
+/// local runq, on the global runq, or stealable from another P
+/// (M17b-γ). Used by the idle-park re-check under MIDLE lock so we
+/// don't sleep through a producer.
+///
+/// **The all-Ps scan is critical for γ.** Without it, a producer
+/// that pushed work to its own P calls `wake_idle_m` before the
+/// to-be-parked worker reaches MIDLE.push, so the wake hits an
+/// empty MIDLE and is lost. The worker then parks on a runq that
+/// *appears* empty (self.P empty, global empty) but actually has
+/// stealable work elsewhere — and never wakes again until the
+/// next unrelated `wake_idle_m`. Mirrors a slim subset of Go's
+/// "delicate dance" in `findRunnable` (proc.go:3635-3713) where
+/// the spinning M re-checks all P runqs after dropping
+/// `nmspinning` and before truly parking.
+///
+/// Held under MIDLE lock from `park_m_idle`, so concurrent
+/// producers' `wake_idle_m` will block until our scan completes —
+/// either we find work and don't park, or we push to MIDLE and the
+/// producer's subsequent `wake_idle_m` pops us.
 fn has_local_or_global_work() -> bool {
     if let Some(p) = current_p() {
         if p.runq_has_work() {
             return true;
         }
     }
-    !SCHED.lock().runq.is_empty()
+    if !SCHED.lock().runq.is_empty() {
+        return true;
+    }
+    let me = current_p();
+    let mut found = false;
+    super::p::for_each_p(|p2| {
+        if found {
+            return;
+        }
+        if let Some(s) = me {
+            if core::ptr::eq(p2 as *const _, s as *const _) {
+                return;
+            }
+        }
+        if !p2.runqempty() {
+            found = true;
+        }
+    });
+    found
 }
 
 /// Count of goroutines that exist but haven't yet reached `goexit`.
@@ -566,16 +659,23 @@ pub fn m_schedule_loop() -> ! {
         match find_runnable() {
             Some(g) => dispatch_one_g(g),
             None => {
-                if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
-                    crate::syscall::ExitThread(0);
-                }
                 // Brief spin then futex-park (M17c). spin_or_yield
                 // first so a producer pushing inflight work right
                 // now can avoid the syscall round-trip.
+                //
+                // M17b-γ: workers do *not* self-exit on
+                // `LIVE_G_COUNT == 0`. Mirroring Go's `stopm`
+                // (proc.go:2997) → `mPark` (proc.go:1972), an M
+                // that finds nothing runnable parks via notesleep
+                // until a producer's `wakep` revives it. The
+                // pre-γ `ExitThread(0)` was a M17a optimization
+                // that does not appear in Go and prevents
+                // `find_runnable`'s steal pass from finding any
+                // alive Ms to participate. Process exit is
+                // handled by main M's `runtime.exit(0)` in
+                // `__goish_rt0`, which calls `exit_group(2)` and
+                // reaps every parked worker atomically.
                 spin_or_yield();
-                if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
-                    crate::syscall::ExitThread(0);
-                }
                 if !has_local_or_global_work() {
                     park_m_idle();
                 }
@@ -616,11 +716,29 @@ pub fn num_cpus() -> usize {
     }
 }
 
+/// Number of worker Ms that have completed `acquirep` and entered
+/// `m_schedule_loop`. `bootstrap_workers` waits on this so that, by
+/// the time the runtime hands control to user `main()`, every P has
+/// its M bound. `clone(2)` returns asynchronously (the new thread
+/// is *runnable* but may not have *run* yet), so without this
+/// barrier `for_each_p` from the main M can briefly observe a P
+/// with `bound_m() == None` — observable in `sched_p_alpha`'s
+/// "every P bound" assertion under stress.
+///
+/// Mirrors the post-condition of Go's `procresize` (proc.go:5904):
+/// after that returns, every P has been assigned to an M (or to the
+/// idle list, which goish doesn't carry yet — workers acquirep
+/// directly at startup).
+static WORKERS_PRIMED: AtomicUsize = AtomicUsize::new(0);
+
 /// Worker M entry point. Spawned by `spawn_worker_m` via `clone(2)`
 /// with `CLONE_SETTLS` already pointing at the worker's `MStorage`.
-/// Records the kernel tid in `M::procid`, then enters
-/// `m_schedule_loop`. Never returns — terminates via `ExitThread(0)`
-/// from inside the loop when `LIVE_G_COUNT == 0`.
+/// Records the kernel tid in `M::procid`, acquires its P, signals
+/// `bootstrap_workers`, then enters `m_schedule_loop`.
+///
+/// Never returns: the M parks (futex-waits) when no work is found,
+/// and `exit_group(2)` from main M's `runtime.exit` reaps every
+/// parked worker at process termination.
 ///
 /// Mirrors Go's `runtime.mstart1` (proc.go:1689) minus the GC and
 /// signal-handling pieces we don't carry yet.
@@ -637,6 +755,10 @@ extern "C" fn mstart() -> ! {
     if let Some(p) = super::p::p_at(id) {
         super::p::acquirep(p);
     }
+    // Signal `bootstrap_workers` that this worker has finished
+    // wiring itself up. Done after `acquirep` so the bootstrap-side
+    // wait observes a fully-bound P, not a merely runnable thread.
+    WORKERS_PRIMED.fetch_add(1, Ordering::Release);
     m_schedule_loop()
 }
 
@@ -703,6 +825,16 @@ pub fn bootstrap_workers() {
     // Spawn one worker per CPU beyond the main M (id=0).
     for i in 1..n {
         let _ = spawn_worker_m(i as u32);
+    }
+    // Wait until every spawned worker has completed `acquirep`.
+    // Each worker increments `WORKERS_PRIMED` after binding its P,
+    // so this load reaching `n - 1` means every P[1..n] has its
+    // bound M. Bounded wait: each worker only executes a handful
+    // of instructions between `clone(2)` returning and `acquirep`,
+    // typically resolving in microseconds.
+    let want = n.saturating_sub(1);
+    while WORKERS_PRIMED.load(Ordering::Acquire) < want {
+        let _ = crate::syscall::SchedYield();
     }
 }
 

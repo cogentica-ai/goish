@@ -173,6 +173,10 @@ pub fn bootstrap_ps(n: usize) {
         ALL_PS[i].store(p as *const P as *mut P, Ordering::Release);
     }
     NUM_PS.store(n as u32, Ordering::Release);
+    // M17b-γ: prime the coprime table for randomized steal scans.
+    // Mirrors `procresize`'s `stealOrder.reset(uint32(nprocs))`
+    // (proc.go:5999).
+    STEAL_ORDER.reset(n as u32);
 }
 
 /// Number of bootstrapped Ps. 0 before `bootstrap_ps`.
@@ -458,4 +462,307 @@ impl P {
         let t = self.runqtail.load(Ordering::Relaxed);
         n + t.wrapping_sub(h) as usize
     }
+
+    // ─── M17b-γ: work-stealing primitives (verbatim port) ──────────
+    //
+    // Each function below mirrors its Go counterpart with proof of
+    // line-for-line equivalence in `doc/M17b-gamma-proof.md`. The
+    // memory-ordering refinement is: every Go `atomic.LoadAcq` /
+    // `atomic.StoreRel` / `atomic.CasRel` ↔ Rust `Acquire` /
+    // `Release` / `Release`-on-success-CAS, and every plain Go field
+    // read on a single-writer field is `Relaxed` in Goish (still
+    // safe because the same single-writer invariant holds).
+
+    /// Race-free emptiness check usable from any P. Verbatim port of
+    /// `runqempty` (proc.go:7027). Defends against the runnext-window
+    /// race (Go's comment, lines 7028-7031): if `head == tail` is
+    /// observed but `runnext` was non-nil and got kicked into the
+    /// ring between the head and runnext loads, a naive read returns
+    /// false. The double-tail-load loop forces a re-snapshot until
+    /// `tail` is stable across the runnext read.
+    pub fn runqempty(&self) -> bool {
+        loop {
+            let head = self.runqhead.load(Ordering::Acquire);
+            let tail = self.runqtail.load(Ordering::Acquire);
+            let runnext = self.runnext.load(Ordering::Acquire);
+            if tail == self.runqtail.load(Ordering::Acquire) {
+                return head == tail && runnext.is_null();
+            }
+        }
+    }
+
+    /// Grab a half-batch of Gs from `self`'s runq into the caller's
+    /// runq slot array, returning the count grabbed. Verbatim port of
+    /// `runqgrab` (proc.go:7242).
+    ///
+    /// Argument mapping:
+    ///   - `self`         ⟷ Go `pp *p`        (target P being raided)
+    ///   - `dst`          ⟷ Go `batch *[256]guintptr` (caller's runq)
+    ///   - `batch_head`   ⟷ Go `batchHead uint32`     (caller's tail)
+    ///   - `steal_runnext_g` ⟷ Go `stealRunNextG bool`
+    ///
+    /// Memory-ordering equivalence (proof §5):
+    ///   - LoadAcq on `runqhead`, `runqtail` (G1)
+    ///   - LoadAcq on `runnext` for the n=0 fallback (G3a)
+    ///   - CAS-Release on `runqhead` to commit consume (G5)
+    ///   - CAS-AcqRel on `runnext` for the runnext steal (G3c)
+    ///
+    /// `usleep(3)` (Go) substitutes as `SchedYield()` here — it is a
+    /// liveness optimization (anti-thrash), not a safety property
+    /// (G3b).
+    ///
+    /// Safety: `dst` must be a valid `[*mut G; LOCAL_RUNQ_SIZE]`
+    /// owned by the caller's P, and the caller must hold the
+    /// single-writer invariant on those slots (i.e. caller is the M
+    /// bound to the destination P).
+    pub unsafe fn runqgrab(
+        &self,
+        dst: *mut [*mut G; LOCAL_RUNQ_SIZE],
+        batch_head: u32,
+        steal_runnext_g: bool,
+    ) -> u32 {
+        loop {
+            let h = self.runqhead.load(Ordering::Acquire);
+            let t = self.runqtail.load(Ordering::Acquire);
+            let mut n = t.wrapping_sub(h);
+            n = n - n / 2;
+            if n == 0 {
+                if !steal_runnext_g {
+                    return 0;
+                }
+                let next = self.runnext.load(Ordering::Acquire);
+                if next.is_null() {
+                    return 0;
+                }
+                if self.status.load(Ordering::Acquire) == P_RUNNING {
+                    // Anti-thrash backoff: give the target a chance
+                    // to schedule its own runnext before we snipe it.
+                    // Go uses usleep(3) at proc.go:7263; without a
+                    // low-resolution-timer integration in goish, a
+                    // single SchedYield is the closest analog and
+                    // preserves the "yield once" liveness intent.
+                    let _ = crate::syscall::SchedYield();
+                }
+                if self
+                    .runnext
+                    .compare_exchange(
+                        next,
+                        core::ptr::null_mut(),
+                        Ordering::AcqRel,
+                        Ordering::Relaxed,
+                    )
+                    .is_err()
+                {
+                    continue;
+                }
+                let slot = (batch_head as usize) % LOCAL_RUNQ_SIZE;
+                (*dst)[slot] = next;
+                return 1;
+            }
+            // Defensive: torn (h, t) read can yield n > cap/2.
+            // Mirrors Go's "read inconsistent h and t" guard
+            // (proc.go:7281).
+            if n > (LOCAL_RUNQ_SIZE / 2) as u32 {
+                continue;
+            }
+            for i in 0..n {
+                let src_slot = (h.wrapping_add(i) as usize) % LOCAL_RUNQ_SIZE;
+                let g = (*self.runq.get())[src_slot];
+                let dst_slot = (batch_head.wrapping_add(i) as usize) % LOCAL_RUNQ_SIZE;
+                (*dst)[dst_slot] = g;
+            }
+            if self
+                .runqhead
+                .compare_exchange(
+                    h,
+                    h.wrapping_add(n),
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                return n;
+            }
+            // CAS lost — slot copies into `dst` are dead writes
+            // (caller has not yet StoreRel'd its tail), so loop and
+            // retry.
+        }
+    }
+
+    /// Steal half of `target`'s runnable Gs into `self`'s runq,
+    /// returning one stolen G for immediate dispatch. Remaining
+    /// stolen Gs (if any) are published to `self`'s runq via
+    /// `StoreRel(runqtail)`. Verbatim port of `runqsteal`
+    /// (proc.go:7297).
+    ///
+    /// Returns `None` if `runqgrab` came back with 0.
+    ///
+    /// Safety: caller must be the M bound to `self`. The
+    /// single-writer invariant on `self.runq[]` slots and
+    /// `self.runqtail` is what makes the SPMC ring lock-free.
+    pub unsafe fn runqsteal(
+        &self,
+        target: &P,
+        steal_runnext_g: bool,
+    ) -> Option<NonNull<G>> {
+        // Single-writer read: only `self`'s owner M writes
+        // `self.runqtail`, and that owner is the caller.
+        let t = self.runqtail.load(Ordering::Relaxed);
+        let n = target.runqgrab(self.runq.get(), t, steal_runnext_g);
+        if n == 0 {
+            return None;
+        }
+        let n = n - 1;
+        // Caller takes the *last-grabbed* G at index t+n
+        // (proc.go:7304).
+        let last_slot = (t.wrapping_add(n) as usize) % LOCAL_RUNQ_SIZE;
+        let gp = (*self.runq.get())[last_slot];
+        if n == 0 {
+            // Exactly one stolen — caller takes it, runqtail
+            // unchanged.
+            return NonNull::new(gp);
+        }
+        let h = self.runqhead.load(Ordering::Acquire);
+        debug_assert!(
+            t.wrapping_sub(h).wrapping_add(n) < LOCAL_RUNQ_SIZE as u32,
+            "runqsteal: runq overflow"
+        );
+        // Publish the n remaining stolen Gs at indices [t, t+n).
+        self.runqtail
+            .store(t.wrapping_add(n), Ordering::Release);
+        NonNull::new(gp)
+    }
 }
+
+// ─── stealOrder — coprime-based pseudo-random P enumeration ─────────
+//
+// Verbatim port of Go's `randomOrder` / `randomEnum` (proc.go:7560+).
+// The enumeration uses the fact that for X coprime to N, the sequence
+// (i + X) mod N visits every value in [0, N) exactly once. Different
+// seeds (cheaprand) pick different X, giving each steal pass a fresh
+// permutation without explicit shuffling.
+//
+// Goish stores the coprimes in a fixed-size array (no Vec at static
+// init) — capacity bound is `MAX_PS` since coprimes-of-N is always
+// < N ≤ MAX_PS.
+
+/// Steal-scan order. `reset(n)` is called from `bootstrap_ps` after
+/// the P count is known, mirroring Go's `procresize`'s
+/// `stealOrder.reset(uint32(nprocs))` (proc.go:5999). Read from any
+/// M via `start(seed)`.
+pub static STEAL_ORDER: RandomOrder = RandomOrder::new();
+
+pub struct RandomOrder {
+    /// Number of Ps. 0 before `reset`.
+    count: AtomicU32,
+    /// Number of valid entries in `coprimes`.
+    coprime_count: AtomicU32,
+    /// Coprimes of `count` in ascending order. Capacity `MAX_PS`,
+    /// in-use range `[0, coprime_count)`.
+    coprimes: UnsafeCell<[u32; MAX_PS]>,
+}
+
+unsafe impl Sync for RandomOrder {}
+
+impl RandomOrder {
+    pub const fn new() -> Self {
+        Self {
+            count: AtomicU32::new(0),
+            coprime_count: AtomicU32::new(0),
+            coprimes: UnsafeCell::new([0; MAX_PS]),
+        }
+    }
+
+    /// Reconfigure for `count` Ps. Mirrors `randomOrder.reset`
+    /// (proc.go:7578). Called once from `bootstrap_ps` on the main
+    /// thread, before any worker M exists — so no concurrent reader
+    /// can observe partial state. The Release-stores on
+    /// `coprime_count` then `count` publish the array writes in
+    /// dependency order: any later `Acquire`-load of `count` that
+    /// sees a non-zero value transitively sees a consistent
+    /// `coprimes[0..coprime_count]`.
+    pub fn reset(&self, count: u32) {
+        let count = count.min(MAX_PS as u32);
+        let mut k = 0u32;
+        let buf = unsafe { &mut *self.coprimes.get() };
+        let mut i = 1u32;
+        while i <= count && (k as usize) < MAX_PS {
+            if gcd(i, count) == 1 {
+                buf[k as usize] = i;
+                k += 1;
+            }
+            i += 1;
+        }
+        self.coprime_count.store(k, Ordering::Release);
+        self.count.store(count, Ordering::Release);
+    }
+
+    /// Begin a fresh enumeration. Mirrors `randomOrder.start`
+    /// (proc.go:7588). Returns an empty enumeration if `reset`
+    /// hasn't run yet.
+    pub fn start(&self, seed: u32) -> RandomEnum {
+        let count = self.count.load(Ordering::Acquire);
+        let coprime_count = self.coprime_count.load(Ordering::Acquire);
+        if count == 0 || coprime_count == 0 {
+            return RandomEnum {
+                i: 0,
+                count: 0,
+                pos: 0,
+                inc: 1,
+            };
+        }
+        let pos = seed % count;
+        let coprime_idx = (seed / count) % coprime_count;
+        let inc = unsafe { (*self.coprimes.get())[coprime_idx as usize] };
+        RandomEnum {
+            i: 0,
+            count,
+            pos,
+            inc,
+        }
+    }
+}
+
+pub struct RandomEnum {
+    i: u32,
+    count: u32,
+    pos: u32,
+    inc: u32,
+}
+
+impl RandomEnum {
+    /// Mirrors `randomEnum.done` (proc.go:7596).
+    #[inline]
+    pub fn done(&self) -> bool {
+        self.i == self.count
+    }
+    /// Mirrors `randomEnum.next` (proc.go:7600).
+    #[inline]
+    pub fn next(&mut self) {
+        self.i += 1;
+        self.pos = (self.pos + self.inc) % self.count;
+    }
+    /// Mirrors `randomEnum.position` (proc.go:7605).
+    #[inline]
+    pub fn position(&self) -> u32 {
+        self.pos
+    }
+}
+
+/// Euclidean GCD. Mirrors Go's `gcd` (proc.go:7609).
+fn gcd(mut a: u32, mut b: u32) -> u32 {
+    while b != 0 {
+        let t = a % b;
+        a = b;
+        b = t;
+    }
+    a
+}
+
+// ─── γ diagnostic counters ───────────────────────────────────────────
+
+/// Total successful steals across all Ms.
+pub static STEAL_HITS: AtomicU32 = AtomicU32::new(0);
+/// Number of times an M entered the steal pass (regardless of
+/// whether it succeeded).
+pub static STEAL_PASSES: AtomicU32 = AtomicU32::new(0);

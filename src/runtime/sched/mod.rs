@@ -60,7 +60,7 @@ pub use m::{
 };
 pub use p::{
     acquirep, bootstrap_ps, current_p, for_each_p, num_ps, p_at, releasep, LOCAL_RUNQ_SIZE,
-    MAX_PS, P, P_DEAD, P_IDLE, P_RUNNING, P_SYSCALL,
+    MAX_PS, P, P_DEAD, P_IDLE, P_RUNNING, P_SYSCALL, STEAL_HITS, STEAL_PASSES,
 };
 pub use scheduler::{
     block_forever_commit, bootstrap_workers, chan_park_commit, current_g, for_each_m, gopark,

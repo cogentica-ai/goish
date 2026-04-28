@@ -220,19 +220,55 @@ fn test_close_drains_buffer_then_returns_false() {
     }
     schedule();
 
-    // First three should be the buffered values, ok=true.
-    // Goroutines run in FIFO — consumer 0 should get the first
-    // buffered value (10), consumer 1 gets 20, consumer 2 gets 30.
-    check(SEQ[0].load(Ordering::Relaxed) == 10, b"drain[0] != 10\n");
-    check(SEQ[1].load(Ordering::Relaxed) == 20, b"drain[1] != 20\n");
-    check(SEQ[2].load(Ordering::Relaxed) == 30, b"drain[2] != 30\n");
-    check(OKS[0].load(Ordering::Relaxed) == 1, b"drain[0] not ok\n");
-    check(OKS[1].load(Ordering::Relaxed) == 1, b"drain[1] not ok\n");
-    check(OKS[2].load(Ordering::Relaxed) == 1, b"drain[2] not ok\n");
-    check(OKS[3].load(Ordering::Relaxed) == 0, b"drain[3] expected !ok\n");
-    check(OKS[4].load(Ordering::Relaxed) == 0, b"drain[4] expected !ok\n");
-    check(SEQ[3].load(Ordering::Relaxed) == 0, b"drain[3] != 0\n");
-    check(SEQ[4].load(Ordering::Relaxed) == 0, b"drain[4] != 0\n");
+    // The *channel buffer* drains in FIFO (10, 20, 30 in that
+    // order — the property under test), but the *consumer
+    // goroutines* are not guaranteed to run in spawn order. Go's
+    // own runtime documents this at proc.go:7042-7050:
+    //
+    //   "To shake out latent assumptions about scheduling order,
+    //    we introduce some randomness into scheduling decisions
+    //    when running with the race detector. … breaking many
+    //    poorly-written tests."
+    //
+    // Once M17b-γ work-stealing distributes Gs across worker Ms,
+    // consumer i=k may execute its `Recv()` before consumer i=0,
+    // so SEQ[i] does not necessarily hold the i-th buffered
+    // value. The invariant we assert is the multi-set: three of
+    // the five recv calls return one each of {10, 20, 30} (in
+    // some order), and two return (0, !ok) from the
+    // closed-and-empty path.
+    let mut got_buf: [i64; 3] = [0; 3];
+    let mut got_buf_n: usize = 0;
+    let mut closed_count: usize = 0;
+    for i in 0..5usize {
+        let v = SEQ[i].load(Ordering::Relaxed);
+        let ok = OKS[i].load(Ordering::Relaxed);
+        if ok == 1 {
+            check(got_buf_n < 3, b"drain: too many ok=true recvs\n");
+            got_buf[got_buf_n] = v;
+            got_buf_n += 1;
+        } else if ok == 0 {
+            check(v == 0, b"drain: !ok recv with non-zero value\n");
+            closed_count += 1;
+        } else {
+            die(b"drain: consumer never wrote OKS slot\n");
+        }
+    }
+    check(got_buf_n == 3, b"drain: buffered recv count != 3\n");
+    check(closed_count == 2, b"drain: closed-recv count != 2\n");
+    if got_buf[0] > got_buf[1] {
+        got_buf.swap(0, 1);
+    }
+    if got_buf[1] > got_buf[2] {
+        got_buf.swap(1, 2);
+    }
+    if got_buf[0] > got_buf[1] {
+        got_buf.swap(0, 1);
+    }
+    check(
+        got_buf[0] == 10 && got_buf[1] == 20 && got_buf[2] == 30,
+        b"drain: recv'd values != {10,20,30}\n",
+    );
 }
 
 // ─── Test 5: Len() / Cap() reflect runtime state ────────────────────
