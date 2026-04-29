@@ -280,6 +280,12 @@ extern "C" fn sysmon_main() -> ! {
             goready(g);
         }
 
+        // M27f-α: fire expired netpoll deadlines (Conn::SetReadDeadline
+        // / SetWriteDeadline). Each entry's seq is checked against the
+        // pd's current rseq/wseq inside fire_expired_deadlines so a
+        // deadline that was cleared or replaced doesn't fire stale.
+        crate::runtime::netpoll::fire_expired_deadlines(now);
+
         // Fire all expired timers. Pop one at a time, drop the heap
         // lock, goready, repeat. Avoids batching into a Vec (which
         // would allocate once per sysmon tick that has any expirations).

@@ -23,5 +23,5 @@ pub mod url;
 pub use header::Header;
 pub use request::{ReadRequest, Request};
 pub use response::ResponseWriter;
-pub use server::{Handler, HandlerFunc, ListenAndServe, NotFoundHandler, ServeMux};
+pub use server::{Handler, HandlerFunc, ListenAndServe, NotFoundHandler, Serve, ServeMux};
 pub use url::URL;

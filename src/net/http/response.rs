@@ -1,10 +1,16 @@
 // net/http/response — ResponseWriter.
 //
-// Slim port of Go's `http.ResponseWriter` interface and the default
-// implementation that writes onto the bufio.Writer<Conn> bound to a
-// connection. We materialize ResponseWriter as a concrete struct
-// (not a trait) for v1 — handlers receive `&mut ResponseWriter`.
-// Promotion to a trait is a future refactor.
+// Buffered v1: handler `Write` calls accumulate into an internal
+// body buffer. `flush` (or its convenience wrapper `close_conn`)
+// emits status line + headers + body in one go, with a
+// Content-Length derived from the buffer length so HTTP/1.1
+// keep-alive can frame successive responses without chunked
+// transfer-encoding (deferred).
+//
+// Trade vs. Go's `chunkWriter`: simpler — one Vec per response, no
+// auto-detect-length state machine, no streaming. Cost: total
+// response body must fit in memory. For the REST/JSON-shaped
+// payloads net/http typically hosts, this is the right v1 trade.
 
 #![allow(non_snake_case)]
 
@@ -14,97 +20,122 @@ use alloc::vec::Vec;
 
 use crate::errors::{self, error};
 use crate::goslice::slice;
-use crate::io::{self, Writer};
+use crate::io::{self, Closer, Writer};
 use crate::net::Conn;
 use crate::string;
 use crate::types::{byte, int};
 
 use super::header::Header;
 
-/// `http.ResponseWriter`. Owns a buffered handle to the connection.
-/// Handler code calls `Header()` / `WriteHeader(status)` / `Write(p)`.
-///
-/// **Lifecycle**: built by `serve_conn` per request, dropped after
-/// the handler returns. The drop path flushes the headers if the
-/// handler never wrote a body.
+/// `http.ResponseWriter`. Owns the connection until `take_conn` /
+/// `close_conn` ends its lifecycle. v1 buffers the body internally;
+/// `flush` writes status + headers (including a derived
+/// `Content-Length`) + body in one wire send.
 pub struct ResponseWriter {
-    /// The connection. Internal — body bytes go to it via Write.
-    /// We don't wrap in `bufio::Writer` for v1 because that would
-    /// force ownership of the conn into the writer; the server
-    /// keeps it for keep-alive read-back. Direct writes are fine
-    /// for the volumes a one-handler response generates.
     conn: Conn,
     header: Header,
-    /// `true` after `WriteHeader` (or the first `Write`) sent the
-    /// status line + headers onto the wire. From this point on
-    /// `Header()` mutations are silently ignored (Go panics in
-    /// debug; we silently drop).
-    wrote_header: bool,
-    /// Status code captured at WriteHeader time.
+    /// Captured at `WriteHeader` time. Zero before that; `Write`
+    /// implicitly calls WriteHeader(200) on first body byte.
     status: int,
+    /// `true` once `WriteHeader` was called explicitly or implicitly.
+    wrote_header: bool,
+    /// `true` once `flush` has emitted bytes onto the wire. Idempotent
+    /// guard.
+    flushed: bool,
+    /// Buffered body. v1 requires the full body in memory so
+    /// `flush` can compute Content-Length.
+    body: Vec<u8>,
+    /// Set by the server before invoking the handler, based on the
+    /// request's HTTP version + `Connection` header. Controls whether
+    /// `flush` emits `Connection: close`.
+    keep_alive: bool,
 }
 
 impl ResponseWriter {
-    /// Build a fresh `ResponseWriter` over `conn`. Public so callers
-    /// running their own accept loop (e.g. examples that need to
-    /// print the port before serving) can reuse the same response
-    /// path the server's internal `serve_conn` does.
+    /// Build a fresh `ResponseWriter` over `conn`. Connection is
+    /// closed after the response unless the caller flips
+    /// `set_keep_alive(true)` before invoking the handler.
     pub fn new(conn: Conn) -> Self {
         let mut h = Header::new();
         h.Set(string("Content-Type"), string("text/plain; charset=utf-8"));
         ResponseWriter {
             conn,
             header: h,
-            wrote_header: false,
             status: 200,
+            wrote_header: false,
+            flushed: false,
+            body: Vec::new(),
+            keep_alive: false,
         }
     }
 
-    /// `Header()` returns the response header map. Mutations made
-    /// before the first `Write` / `WriteHeader` flush onto the wire.
+    /// Server hook: enable/disable HTTP keep-alive on this response.
+    /// The default is `false` (HTTP/1.0 close-style); ListenAndServe
+    /// flips this to `true` for HTTP/1.1 requests without an
+    /// explicit `Connection: close`.
+    pub fn __set_keep_alive(&mut self, keep_alive: bool) {
+        self.keep_alive = keep_alive;
+    }
+
+    /// `Header()` returns the response header map.
     pub fn Header(&mut self) -> &mut Header {
         &mut self.header
     }
 
-    /// `WriteHeader(status)` — emit the status line + headers.
-    /// Idempotent: subsequent calls are no-ops (matching Go's
-    /// "second WriteHeader" warning behavior).
+    /// `WriteHeader(status)` — set the status code. Buffered until
+    /// `flush`; subsequent calls are no-ops (matching Go's "second
+    /// WriteHeader" warning behavior).
     pub fn WriteHeader(&mut self, status: int) {
         if self.wrote_header {
             return;
         }
         self.wrote_header = true;
         self.status = status;
-        self.flush_headers();
     }
 
-    /// `Write(p)` — emit body bytes. Implicitly calls
-    /// `WriteHeader(200)` on first call if the handler hasn't yet.
+    /// `Write(p)` — append `p` to the body buffer. Implicitly calls
+    /// `WriteHeader(200)` on first call. Returns `(p.len(), nil)` —
+    /// buffered writes never report short writes.
     pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
         if !self.wrote_header {
             self.WriteHeader(200);
         }
-        self.conn.Write(p)
+        self.body.extend_from_slice(&*p);
+        (p.len() as int, errors::nil)
     }
 
-    /// Internal: render `HTTP/1.1 <status> <reason>\r\n` + each
-    /// header line + the empty separator. Direct write — buffer
-    /// once, single syscall on the wire.
-    fn flush_headers(&mut self) {
-        let mut buf: Vec<u8> = Vec::with_capacity(256);
+    /// Render the response onto the wire. Idempotent — calling twice
+    /// is a no-op. After `flush`, the underlying connection holds
+    /// only the kept-alive read buffer (if any) and may be reused.
+    pub fn flush(&mut self) -> error {
+        if self.flushed {
+            return errors::nil;
+        }
+        self.flushed = true;
+        if !self.wrote_header {
+            self.WriteHeader(200);
+        }
+
+        // Emit Content-Length derived from buffered body. Required
+        // for HTTP/1.1 keep-alive framing without chunked encoding.
+        if self.header.Get(string("Content-Length")).Len() == 0 {
+            self.header
+                .Set(string("Content-Length"), int_to_string(self.body.len() as i64));
+        }
+        // Connection header policy:
+        //   keep_alive  → don't emit Connection (HTTP/1.1 default).
+        //   !keep_alive → emit Connection: close.
+        if !self.keep_alive && self.header.Get(string("Connection")).Len() == 0 {
+            self.header.Set(string("Connection"), string("close"));
+        }
+
+        let mut buf: Vec<u8> = Vec::with_capacity(256 + self.body.len());
         buf.extend_from_slice(b"HTTP/1.1 ");
         push_dec(&mut buf, self.status as u32);
         buf.push(b' ');
         buf.extend_from_slice(status_text(self.status as u32).as_bytes());
         buf.extend_from_slice(b"\r\n");
 
-        // Default to Connection: close in v1 (no keep-alive).
-        if self.header.Get(string("Connection")).Len() == 0 {
-            self.header
-                .Set(string("Connection"), string("close"));
-        }
-
-        // Walk the header map.
         let inner = self.header.__inner();
         for (key, values) in inner.__iter() {
             let n = values.Len();
@@ -115,20 +146,25 @@ impl ResponseWriter {
                 buf.extend_from_slice(b"\r\n");
             }
         }
-
         buf.extend_from_slice(b"\r\n");
-        let _ = self.conn.Write(slice::<byte>::__from_vec(buf));
+        buf.extend_from_slice(&self.body);
+
+        let (_, err) = self.conn.Write(slice::<byte>::__from_vec(buf));
+        err
     }
 
-    /// Flush headers (if not yet) and close the underlying conn.
-    /// Public for the same reason as `new` — examples that drive
-    /// their own accept loop call this after the handler returns.
+    /// Server hook: flush the response and return the underlying
+    /// connection. Used by the keep-alive loop in ListenAndServe to
+    /// hand the connection back for the next request on the same fd.
+    pub fn __take_conn(mut self) -> Conn {
+        let _ = self.flush();
+        self.conn
+    }
+
+    /// Convenience for examples that drive their own accept loop:
+    /// flush headers (if not yet) and close the underlying conn.
     pub fn close_conn(mut self) -> error {
-        if !self.wrote_header {
-            // Empty body but still need to flush a 200.
-            self.WriteHeader(200);
-        }
-        use crate::io::Closer;
+        let _ = self.flush();
         self.conn.Close()
     }
 }
@@ -172,6 +208,35 @@ fn push_dec(buf: &mut Vec<u8>, mut n: u32) {
         return;
     }
     let mut tmp = [0u8; 10];
+    let mut i = 0;
+    while n > 0 {
+        tmp[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+        i += 1;
+    }
+    while i > 0 {
+        i -= 1;
+        buf.push(tmp[i]);
+    }
+}
+
+fn int_to_string(n: i64) -> string {
+    let mut buf: Vec<u8> = Vec::with_capacity(20);
+    if n < 0 {
+        buf.push(b'-');
+        push_dec_64(&mut buf, (-n) as u64);
+    } else {
+        push_dec_64(&mut buf, n as u64);
+    }
+    string::from_bytes(&buf)
+}
+
+fn push_dec_64(buf: &mut Vec<u8>, mut n: u64) {
+    if n == 0 {
+        buf.push(b'0');
+        return;
+    }
+    let mut tmp = [0u8; 20];
     let mut i = 0;
     while n > 0 {
         tmp[i] = b'0' + (n % 10) as u8;

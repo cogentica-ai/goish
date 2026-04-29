@@ -66,59 +66,25 @@ fn main() {
     });
     let mux: Arc<dyn http::Handler> = Arc::new(mux);
 
-    // Bind, expose port, kick off accept loop. ListenAndServe blocks
-    // — wrap it in a goroutine so this main can also drive a self-test
-    // in a sibling goroutine.
+    // Bind on 127.0.0.1:0 so the kernel picks a free port, discover
+    // it via Listener.Addr, print it, then hand the listener to
+    // `http::Serve` which runs the keep-alive accept loop.
+    let (ln, err) = net::Listen(string("tcp"), string("127.0.0.1:0"));
+    if !err.IsNil() {
+        print(b"listen failed\n");
+        syscall::Exit(1);
+    }
+    let port = ln.Addr().Port as u32;
+    print(b"PID ");
+    print_dec(syscall::Getpid() as u32);
+    print(b" PORT ");
+    print_dec(port);
+    print(b"\n");
+
     let mux_for_listen = mux.clone();
     go!(stack(64 * KB), move || {
-        // Bind on 127.0.0.1:0 — kernel picks a free port, we discover
-        // it before starting Serve. ListenAndServe rolls bind+listen+
-        // accept-loop together; for the demo we replicate that with a
-        // separate Listen so we can print the port first.
-        let (ln, err) = net::Listen(string("tcp"), string("127.0.0.1:0"));
-        if !err.IsNil() {
-            print(b"listen failed\n");
-            syscall::Exit(1);
-        }
-        let port = ln.Addr().Port as u32;
-        print(b"PID ");
-        print_dec(syscall::Getpid() as u32);
-        print(b" PORT ");
-        print_dec(port);
-        print(b"\n");
-
-        // Hand-rolled accept loop matching ListenAndServe's body, so
-        // we use the same Listener we just printed the port for.
-        loop {
-            let (conn, err) = ln.Accept();
-            if !err.IsNil() {
-                return;
-            }
-            let h = mux_for_listen.clone();
-            go!(stack(64 * KB), move || {
-                serve_one(conn, h);
-            });
-        }
+        let _ = http::Serve(ln, mux_for_listen);
     });
 
     schedule();
-}
-
-/// Same body as `net::http::server::serve_conn`, but exposed to the
-/// example so the driver can print the port before the server starts
-/// accepting. Production uses `http::ListenAndServe` directly.
-fn serve_one(mut conn: net::Conn, handler: Arc<dyn http::Handler>) {
-    let req = {
-        let mut br = goish::bufio::NewReader(&mut conn);
-        let (req, err) = http::ReadRequest(&mut br);
-        if !err.IsNil() {
-            use goish::io::Closer;
-            let _ = conn.Close();
-            return;
-        }
-        req
-    };
-    let mut w = http::ResponseWriter::new(conn);
-    handler.ServeHTTP(&mut w, &req);
-    let _ = w.close_conn();
 }

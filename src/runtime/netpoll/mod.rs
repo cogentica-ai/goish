@@ -6,17 +6,20 @@
 // against the parker's pdWait→Wait transition.
 //
 // What's ported (per doc/M27e-netpoller-design.md):
-//   PollDesc { fd, rg, wg }      — netpoll.go:75
+//   PollDesc { fd, rg, wg, rd, wd, rseq, wseq }
+//                                — netpoll.go:75 (M27e-α + M27f-α deadlines)
 //   init()                       — netpoll_epoll.go:21 (epollcreate1 + eventfd2)
 //   open(fd) -> *const PollDesc  — netpoll_epoll.go:49 (EPOLL_CTL_ADD, EPOLLIN|OUT|RDHUP|ET)
 //   close(pd)                    — netpoll_epoll.go:57
-//   block(pd, mode) -> bool      — netpoll.go:548
+//   block(pd, mode) -> BlockResult — netpoll.go:548 (Ready / Timedout / Aborted)
 //   unblock(pd, mode, ioready)   — netpoll.go:591
 //   poll(delay_ms) -> gList      — netpoll_epoll.go:99
 //   netpoll_break()              — netpoll_epoll.go:67
+//   set_deadline(pd, ns, mode)   — netpoll.go:371 poll_runtime_pollSetDeadline
+//   fire_expired_deadlines(now)  — netpoll.go:622 netpolldeadlineimpl
+//                                  (sysmon-driven; no per-pd timer object)
 //
-// Deferred (see design doc):
-//   - Deadlines (rd/wd, timer fields, pollSetDeadline / deadlineimpl).
+// Deferred:
 //   - Tagged-pointer fdseq (stale-event protection across fd reuse).
 //   - pollCache slab — v1 leaks one Box<PollDesc> per open fd.
 //   - closing/eventErr atomic info bits — v1 conflates "closing"
@@ -27,12 +30,14 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
+use alloc::collections::BinaryHeap;
 use alloc::vec::Vec;
 
+use core::cmp::{Ordering as CmpOrdering, Reverse};
 use core::ptr::{self, NonNull};
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32, AtomicUsize, Ordering};
 
-use crate::runtime::sched::{current_m, gopark, G};
+use crate::runtime::sched::{current_m, goready, gopark, G};
 use crate::runtime::spin::SpinLock;
 use crate::syscall;
 
@@ -69,6 +74,19 @@ pub struct PollDesc {
     pub rg: AtomicUsize,
     /// Write-side parker state.
     pub wg: AtomicUsize,
+
+    /// Read deadline (CLOCK_MONOTONIC nanoseconds, sysmon-comparable).
+    /// `0` = no deadline. `-1` = expired (block returns timeout
+    /// immediately). Mirrors Go's `pd.rd` (netpoll.go:110).
+    pub rd: AtomicI64,
+    /// Write deadline. `0` = none, `-1` = expired.
+    pub wd: AtomicI64,
+    /// Read-deadline generation counter. Bumped by `set_deadline`
+    /// before pushing onto `DEADLINE_HEAP`; sysmon discards heap
+    /// entries whose seq doesn't match. Mirrors Go's `pd.rseq`.
+    pub rseq: AtomicU32,
+    /// Write-deadline generation counter.
+    pub wseq: AtomicU32,
 }
 
 impl PollDesc {
@@ -77,8 +95,30 @@ impl PollDesc {
             fd,
             rg: AtomicUsize::new(PD_NIL),
             wg: AtomicUsize::new(PD_NIL),
+            rd: AtomicI64::new(0),
+            wd: AtomicI64::new(0),
+            rseq: AtomicU32::new(0),
+            wseq: AtomicU32::new(0),
         }
     }
+}
+
+/// Outcome of a `block(pd, mode)` call. Mirrors the (bool, errcode)
+/// pair Go's `runtime_pollWait` returns to the user — but folded into
+/// a tri-state because v1 only distinguishes ready/timeout/aborted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockResult {
+    /// Slot was PD_READY when consumed (or epoll fired during park).
+    /// Caller proceeds with the I/O syscall.
+    Ready,
+    /// Deadline expired while parked (or before park was attempted).
+    /// Caller returns a timeout error.
+    Timedout,
+    /// Slot returned PD_NIL through some non-deadline path (e.g.
+    /// netpoll_break drove an unblock with ioready=false). Caller
+    /// retries; we don't generate this case in v1 but keep the
+    /// variant so future closing/cancel logic has a slot.
+    Aborted,
 }
 
 // ─── Module-global state ─────────────────────────────────────────────
@@ -216,15 +256,19 @@ fn slot(pd: &PollDesc, mode: u8) -> &AtomicUsize {
 }
 
 /// Park the current goroutine on `pd.{rg,wg}` for I/O readiness.
-/// Returns `true` if the fd is ready (proceed with the syscall),
-/// `false` if the park was aborted (caller treats as "go retry").
-///
-/// Mirrors Go's `netpollblock` (netpoll.go:548) — without the
-/// timeout/closing checks (deferred to a follow-up milestone).
+/// Mirrors Go's `netpollblock` (netpoll.go:548).
 ///
 /// Concurrent `block` in the same mode is undefined behavior (Go
 /// panics "double wait"). For Conn this is naturally enforced.
-pub fn block(pd: &PollDesc, mode: u8) -> bool {
+pub fn block(pd: &PollDesc, mode: u8) -> BlockResult {
+    // Pre-park deadline check. If the deadline already expired, skip
+    // park and return Timedout — saves a context switch and matches
+    // Go's `netpollcheckerr` running before `gopark` (netpoll.go:574).
+    let dl = if mode == b'r' { &pd.rd } else { &pd.wd };
+    if dl.load(Ordering::Acquire) < 0 {
+        return BlockResult::Timedout;
+    }
+
     let gpp = slot(pd, mode);
 
     // Set gpp from PD_NIL to PD_WAIT, consuming any pdReady fast-path.
@@ -233,7 +277,7 @@ pub fn block(pd: &PollDesc, mode: u8) -> bool {
             .compare_exchange(PD_READY, PD_NIL, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
         {
-            return true;
+            return BlockResult::Ready;
         }
         if gpp
             .compare_exchange(PD_NIL, PD_WAIT, Ordering::AcqRel, Ordering::Acquire)
@@ -259,13 +303,22 @@ pub fn block(pd: &PollDesc, mode: u8) -> bool {
     );
 
     // Resumed. Race-cleanup: if we slept (G ptr stored) the unblock
-    // path overwrote it with PD_READY. If commit aborted, slot still
-    // has PD_WAIT. Either way swap to PD_NIL and report.
+    // path overwrote it with PD_READY (ioready) or PD_NIL (deadline).
+    // If commit aborted, slot still has PD_WAIT. Drain to PD_NIL.
     let old = gpp.swap(PD_NIL, Ordering::AcqRel);
     if old > PD_WAIT {
         panic!("netpoll: corrupted polldesc");
     }
-    old == PD_READY
+    if old == PD_READY {
+        return BlockResult::Ready;
+    }
+    // Slot resolved to PD_NIL: either a deadline-fire unblock or a
+    // future cancel path. Distinguish by inspecting the deadline.
+    if dl.load(Ordering::Acquire) < 0 {
+        BlockResult::Timedout
+    } else {
+        BlockResult::Aborted
+    }
 }
 
 /// gopark commit fn for `block`. The waiting slot's address was
@@ -421,6 +474,139 @@ pub fn netpoll_break() {
         const EAGAIN: isize = 11;
         if n != -EAGAIN && n != -EINTR {
             panic!("netpoll: eventfd write failed");
+        }
+    }
+}
+
+// ─── Deadlines ────────────────────────────────────────────────────────
+//
+// V1 deadline strategy: a single global min-heap of `(deadline_ns,
+// pd, mode, seq)` entries, scanned by sysmon's tick. Each entry's
+// `seq` is matched against `pd.{rseq,wseq}` at fire time — stale
+// entries (deadline reset, deadline cleared, fd closed before fire)
+// are silently dropped.
+//
+// Trade vs. Go's per-pd `pd.rt`/`pd.wt` timer objects: simpler (no
+// per-pd timer init/stop), uses sysmon's existing tick instead of a
+// dedicated timer-fire path. Cost: heap entries accumulate at one
+// per `set_deadline` call until they fire — for HTTP keep-alive (one
+// SetReadDeadline per request), this is bounded by request rate
+// times max keep-alive timeout.
+
+/// One pending deadline. `seq` is the value of `pd.{rseq,wseq}` at
+/// push time; sysmon discards entries where seq != current seq.
+#[derive(Clone, Copy)]
+struct DeadlineEntry {
+    deadline_ns: i64,
+    pd: *const PollDesc,
+    mode: u8, // b'r' or b'w'
+    seq: u32,
+}
+
+unsafe impl Send for DeadlineEntry {}
+
+impl PartialEq for DeadlineEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.deadline_ns == other.deadline_ns
+    }
+}
+impl Eq for DeadlineEntry {}
+impl Ord for DeadlineEntry {
+    fn cmp(&self, other: &Self) -> CmpOrdering {
+        self.deadline_ns.cmp(&other.deadline_ns)
+    }
+}
+impl PartialOrd for DeadlineEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
+        Some(self.cmp(other))
+    }
+}
+
+static DEADLINE_HEAP: SpinLock<BinaryHeap<Reverse<DeadlineEntry>>> =
+    SpinLock::new(BinaryHeap::new());
+
+/// Set or clear a read/write deadline on `pd`.
+///
+/// `deadline_ns == 0` clears the deadline (no expiration).
+/// `deadline_ns > 0` is a CLOCK_MONOTONIC nanosecond timestamp at
+/// which the corresponding parker wakes with `BlockResult::Timedout`.
+/// `deadline_ns < 0` immediately expires (block returns Timedout
+/// without parking).
+///
+/// Mirrors Go's `poll_runtime_pollSetDeadline` (netpoll.go:371) — but
+/// without timer modify/stop (we push a new heap entry each call and
+/// rely on `seq` to invalidate stale entries).
+pub fn set_deadline(pd: &PollDesc, deadline_ns: i64, mode: u8) {
+    let (dl, seq) = if mode == b'r' {
+        (&pd.rd, &pd.rseq)
+    } else {
+        (&pd.wd, &pd.wseq)
+    };
+
+    // Bump seq so any in-flight stale heap entry stops matching.
+    seq.fetch_add(1, Ordering::AcqRel);
+
+    if deadline_ns == 0 {
+        dl.store(0, Ordering::Release);
+        return;
+    }
+    if deadline_ns < 0 {
+        // Past deadline → mark expired and unblock any current parker
+        // immediately so it returns Timedout on resume.
+        dl.store(-1, Ordering::Release);
+        if let Some(g) = unblock(pd, mode, false) {
+            goready(g);
+        }
+        return;
+    }
+
+    dl.store(deadline_ns, Ordering::Release);
+    let entry = DeadlineEntry {
+        deadline_ns,
+        pd: pd as *const PollDesc,
+        mode,
+        seq: seq.load(Ordering::Acquire),
+    };
+    DEADLINE_HEAP.lock().push(Reverse(entry));
+}
+
+/// Fire all deadlines that expired at or before `now`. Called from
+/// sysmon's main tick (alongside the timer-heap scan). Stale entries
+/// (whose pd.{rseq,wseq} no longer matches the entry's seq, or whose
+/// pd.rd/wd was reset to a future value) are popped and discarded.
+///
+/// Mirrors Go's `netpolldeadlineimpl` (netpoll.go:622) per-fire body
+/// driven by a heap pop loop instead of per-pd timers.
+pub fn fire_expired_deadlines(now: i64) {
+    loop {
+        let popped: Option<DeadlineEntry> = {
+            let mut heap = DEADLINE_HEAP.lock();
+            match heap.peek().copied() {
+                Some(Reverse(entry)) if entry.deadline_ns <= now => {
+                    heap.pop();
+                    Some(entry)
+                }
+                _ => return,
+            }
+        };
+        let entry = match popped {
+            Some(e) => e,
+            None => return,
+        };
+        // Stale-entry check: sequence must still match.
+        let pd = unsafe { &*entry.pd };
+        let (dl, seq) = if entry.mode == b'r' {
+            (&pd.rd, &pd.rseq)
+        } else {
+            (&pd.wd, &pd.wseq)
+        };
+        if seq.load(Ordering::Acquire) != entry.seq {
+            continue;
+        }
+        // Mark expired and wake the parked G (if any).
+        dl.store(-1, Ordering::Release);
+        if let Some(g) = unblock(pd, entry.mode, false) {
+            goready(g);
         }
     }
 }

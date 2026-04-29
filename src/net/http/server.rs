@@ -167,6 +167,14 @@ pub fn ListenAndServe(addr: string, handler: Arc<dyn Handler>) -> error {
     if !err.IsNil() {
         return err;
     }
+    Serve(ln, handler)
+}
+
+/// `http.Serve(l, handler)` — accept loop on a pre-bound Listener.
+/// Mirrors Go's `func Serve(l net.Listener, handler Handler) error`
+/// (server.go:3676). Useful when you need access to the bound port
+/// before serving (e.g., to print it for tests / port-zero binds).
+pub fn Serve(ln: net::Listener, handler: Arc<dyn Handler>) -> error {
     loop {
         let (conn, err) = ln.Accept();
         if !err.IsNil() {
@@ -182,22 +190,86 @@ pub fn ListenAndServe(addr: string, handler: Arc<dyn Handler>) -> error {
     }
 }
 
-/// One-shot connection handler. Reads a single request, dispatches
-/// to `handler`, sends the response, closes the conn. No keep-alive
-/// in v1.
+/// Per-connection serving loop with HTTP/1.1 keep-alive (M27f-β).
+///
+/// Cycle: SetReadDeadline(ReadHeaderTimeout) → ReadRequest → clear
+/// deadline → dispatch → flush response → if keep-alive, reuse conn
+/// for next request; otherwise close.
+///
+/// Idle keep-alive connections are bounded by the read deadline:
+/// after the configured `ReadHeaderTimeout` (default 5s) of no data
+/// from the client, ReadRequest's underlying Read returns
+/// "i/o timeout" and we close the conn. This prevents stuck peers
+/// from leaking goroutines indefinitely.
 fn serve_conn(mut conn: net::Conn, handler: Arc<dyn Handler>) {
-    let req = {
-        // Borrow the conn for the parser; releases on scope exit so
-        // the same conn can be moved into ResponseWriter below.
-        let mut br = bufio::NewReader(&mut conn);
-        let (req, err) = ReadRequest(&mut br);
+    use crate::time;
+    /// Idle keep-alive timeout. Matches Go's `Server.IdleTimeout`
+    /// default behavior (when zero, falls back to ReadHeaderTimeout).
+    /// 5s is a conservative compromise — long enough that browsers
+    /// reuse conns within a page load, short enough that idle peers
+    /// don't pin goroutines.
+    const READ_HEADER_TIMEOUT: i64 = 5_000_000_000; // 5s in ns
+
+    loop {
+        // Arm the idle deadline before each request. Cleared after the
+        // headers parse so the handler's body read isn't artificially
+        // capped (chunked uploads etc. take their own time).
+        let dl = time::Now().Add(time::Duration(READ_HEADER_TIMEOUT));
+        let _ = conn.SetReadDeadline(dl);
+
+        let (req, err) = {
+            let mut br = bufio::NewReader(&mut conn);
+            ReadRequest(&mut br)
+        };
         if !err.IsNil() {
+            // EOF, parse error, or idle timeout — all close the conn.
             let _ = conn.Close();
             return;
         }
-        req
-    };
-    let mut w = ResponseWriter::new(conn);
-    handler.ServeHTTP(&mut w, &req);
-    let _ = w.close_conn();
+        // Clear the deadline once headers are parsed. The handler can
+        // re-arm via Conn methods if it cares about body-read timeouts.
+        let _ = conn.SetReadDeadline(time::Time::default());
+
+        let keep_alive = request_keep_alive(&req);
+        let mut w = ResponseWriter::new(conn);
+        w.__set_keep_alive(keep_alive);
+        handler.ServeHTTP(&mut w, &req);
+        conn = w.__take_conn();
+
+        if !keep_alive {
+            let _ = conn.Close();
+            return;
+        }
+    }
+}
+
+/// Decide whether to keep the connection alive after this request.
+/// Mirrors Go's `Request.shouldClose()` (request.go:1450) inverted.
+///
+/// HTTP/1.1: keep-alive default; `Connection: close` opts out.
+/// HTTP/1.0: close default; `Connection: keep-alive` opts in.
+fn request_keep_alive(req: &Request) -> bool {
+    let conn_hdr = req.Header.Get(string("Connection"));
+    let conn_bytes = conn_hdr.as_bytes();
+    let says_close = ascii_eq_ignore_case(conn_bytes, b"close");
+    let says_keep_alive = ascii_eq_ignore_case(conn_bytes, b"keep-alive");
+    if req.ProtoMajor == 1 && req.ProtoMinor >= 1 {
+        !says_close
+    } else {
+        says_keep_alive
+    }
+}
+
+fn ascii_eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    for i in 0..a.len() {
+        let x = a[i] | 0x20;
+        let y = b[i] | 0x20;
+        if x != y {
+            return false;
+        }
+    }
+    true
 }

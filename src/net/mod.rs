@@ -42,7 +42,7 @@ use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::string;
 use crate::io;
-use crate::runtime::netpoll::{self, PollDesc};
+use crate::runtime::netpoll::{self, BlockResult, PollDesc};
 use crate::syscall;
 use crate::types::{byte, int};
 
@@ -108,8 +108,12 @@ impl Listener {
                 if pd.is_null() {
                     return (Conn::dead(), errno_error("accept", errno));
                 }
-                netpoll::block(unsafe { &*pd }, b'r');
-                continue;
+                match netpoll::block(unsafe { &*pd }, b'r') {
+                    BlockResult::Ready | BlockResult::Aborted => continue,
+                    BlockResult::Timedout => {
+                        return (Conn::dead(), timeout_error("accept"));
+                    }
+                }
             }
             return (Conn::dead(), errno_error("accept", errno));
         }
@@ -135,6 +139,21 @@ impl Listener {
     /// kernel-assigned port substituted in if the user asked for `:0`).
     pub fn Addr(&self) -> TCPAddr {
         self.addr.clone()
+    }
+
+    /// `(*TCPListener).SetDeadline(t time.Time)` — set the deadline
+    /// for `Accept` calls. Zero `t` clears.
+    pub fn SetDeadline(&self, t: crate::time::Time) -> error {
+        if self.fd < 0 {
+            return errno_error("set deadline", 9);
+        }
+        let pd = self.ensure_pd();
+        if pd.is_null() {
+            return errno_error("set deadline/poll_open", 0);
+        }
+        let dl_ns = deadline_from_time(t);
+        netpoll::set_deadline(unsafe { &*pd }, dl_ns, b'r');
+        errors::nil
     }
 
     /// Lazily register the listening fd with the netpoller on the
@@ -244,6 +263,41 @@ impl Conn {
         self.fd
     }
 
+    /// `(*TCPConn).SetReadDeadline(t time.Time)` — set the deadline
+    /// for future Read calls. Zero `t` clears any existing deadline.
+    /// A read in progress when the deadline expires returns
+    /// `"i/o timeout"`.
+    pub fn SetReadDeadline(&self, t: crate::time::Time) -> error {
+        self.set_deadline_internal(t, b'r')
+    }
+
+    /// `(*TCPConn).SetWriteDeadline(t time.Time)` — set the deadline
+    /// for future Write calls. Same semantics as SetReadDeadline.
+    pub fn SetWriteDeadline(&self, t: crate::time::Time) -> error {
+        self.set_deadline_internal(t, b'w')
+    }
+
+    /// `(*TCPConn).SetDeadline(t time.Time)` — set both read and
+    /// write deadlines. Equivalent to calling SetReadDeadline +
+    /// SetWriteDeadline with the same `t`.
+    pub fn SetDeadline(&self, t: crate::time::Time) -> error {
+        let _ = self.set_deadline_internal(t, b'r');
+        self.set_deadline_internal(t, b'w')
+    }
+
+    fn set_deadline_internal(&self, t: crate::time::Time, mode: u8) -> error {
+        if self.fd < 0 {
+            return errno_error("set deadline", 9);
+        }
+        let pd = self.ensure_pd();
+        if pd.is_null() {
+            return errno_error("set deadline/poll_open", 0);
+        }
+        let dl_ns = deadline_from_time(t);
+        netpoll::set_deadline(unsafe { &*pd }, dl_ns, mode);
+        errors::nil
+    }
+
     /// Lazy netpoll registration on first EAGAIN. Idempotent.
     fn ensure_pd(&self) -> *const PollDesc {
         let cur = self.pd.load(Ordering::Acquire);
@@ -292,8 +346,10 @@ impl io::Reader for Conn {
                 if pd.is_null() {
                     return (0, errno_error("read", errno));
                 }
-                netpoll::block(unsafe { &*pd }, b'r');
-                continue;
+                match netpoll::block(unsafe { &*pd }, b'r') {
+                    BlockResult::Ready | BlockResult::Aborted => continue,
+                    BlockResult::Timedout => return (0, timeout_error("read")),
+                }
             }
             return (0, errno_error("read", errno));
         }
@@ -329,8 +385,12 @@ impl io::Writer for Conn {
                 if pd.is_null() {
                     return (off as int, errno_error("write", errno));
                 }
-                netpoll::block(unsafe { &*pd }, b'w');
-                continue;
+                match netpoll::block(unsafe { &*pd }, b'w') {
+                    BlockResult::Ready | BlockResult::Aborted => continue,
+                    BlockResult::Timedout => {
+                        return (off as int, timeout_error("write"));
+                    }
+                }
             }
             return (off as int, errno_error("write", errno));
         }
@@ -486,7 +546,14 @@ pub fn Dial(network: string, addr: string) -> (Conn, error) {
             let _ = syscall::Close(fd);
             return (Conn::dead(), errno_error("connect/poll_open", 0));
         }
-        netpoll::block(unsafe { &*pd }, b'w');
+        // Connect has no deadline in this Dial path (v1); a future
+        // DialTimeout would `set_deadline(pd, …, b'w')` before this
+        // call and translate Timedout into a connect-timeout error.
+        if let BlockResult::Timedout = netpoll::block(unsafe { &*pd }, b'w') {
+            unsafe { netpoll::close(pd); }
+            let _ = syscall::Close(fd);
+            return (Conn::dead(), timeout_error("connect"));
+        }
         // SO_ERROR carries the asynchronous connect result. Zero
         // means success; anything else is the errno from the failed
         // 3-way handshake.
@@ -574,6 +641,36 @@ fn errno_error(op: &str, errno: i32) -> error {
     buf.extend_from_slice(op.as_bytes());
     buf.extend_from_slice(b": ");
     buf.extend_from_slice(errno_message(errno).as_bytes());
+    errors::New(string::from_bytes(&buf))
+}
+
+/// Convert a `time.Time` deadline to a CLOCK_MONOTONIC-nanos value
+/// suitable for `netpoll::set_deadline`. Zero time → 0 (clear);
+/// already-past time → -1 (immediate expiry); future time → absolute
+/// monotonic ns of the deadline. Mirrors the start of Go's
+/// `poll_runtime_pollSetDeadline` (netpoll.go:380), where `d > 0`
+/// gets `d += nanotime()`.
+fn deadline_from_time(t: crate::time::Time) -> i64 {
+    if t.IsZero() {
+        return 0;
+    }
+    let dur = crate::time::Until(t);
+    let ns = dur.Nanoseconds();
+    if ns <= 0 {
+        return -1;
+    }
+    crate::runtime::sysmon::monotonic_ns().wrapping_add(ns as i64)
+}
+
+/// Build a "i/o timeout" error matching Go's net.OpError +
+/// `Err: errors.New("i/o timeout")` pattern. Returned when a
+/// `SetReadDeadline` / `SetWriteDeadline` fires before the I/O
+/// completes. Callers can still inspect the error; v1 does not yet
+/// expose `IsTimeout()` — the message is the contract.
+fn timeout_error(op: &str) -> error {
+    let mut buf: Vec<u8> = Vec::with_capacity(32);
+    buf.extend_from_slice(op.as_bytes());
+    buf.extend_from_slice(b": i/o timeout");
     errors::New(string::from_bytes(&buf))
 }
 
