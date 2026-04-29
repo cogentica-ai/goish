@@ -91,6 +91,41 @@ impl G {
             preempt: AtomicBool::new(false),
         }
     }
+
+    /// M17b-ε.α: construct an M's `g0` — the goroutine whose stack is
+    /// the M's OS thread stack. `g0` is permanent: it never parks,
+    /// never exits, never holds a user closure. Its sole purpose is
+    /// to give the scheduler a stack-distinct G so `getg()` can
+    /// distinguish "running user code" (`m.curg`) from "running
+    /// scheduler code" (`m.g0`).
+    ///
+    /// The caller passes the OS-thread-stack bounds directly:
+    ///   - Worker M: bounds of the `Mmap(_, WORKER_M_STACK)` region
+    ///     allocated in `spawn_worker_m` (the same region passed as
+    ///     `child_stack` to `clone(2)`).
+    ///   - Main M: bounds parsed from `/proc/self/maps`'s `[stack]`
+    ///     entry containing the current rsp.
+    ///
+    /// `Stack::adopted` is non-owning — `g0`'s Drop will not munmap
+    /// the OS thread stack (the kernel reclaims it at thread exit).
+    ///
+    /// Mirrors Go's `mp.g0 = malg(16384 * sys.StackGuardMultiplier);
+    /// mp.g0.stack.{lo, hi} = …` pattern from `proc.go:2346` /
+    /// `os_linux.go:newosproc`.
+    pub fn new_g0(stack_base: *mut u8, stack_size: usize) -> Self {
+        G {
+            gobuf: Gobuf::new(),
+            stack: Stack::adopted(stack_base, stack_size),
+            // g0 is always Running: it represents the M's scheduler
+            // context. Status changes never apply to g0; only `curg`
+            // moves through Idle/Runnable/Running/Waiting/Dead.
+            status: GStatus::Running,
+            entry: None,
+            select_wait: [core::ptr::null(); SELECT_WAIT_MAX],
+            select_wait_len: 0,
+            preempt: AtomicBool::new(false),
+        }
+    }
 }
 
 

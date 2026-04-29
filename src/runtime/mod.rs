@@ -80,6 +80,12 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // mheap isn't online yet.
     sched::register_m_storage(&sched::MAIN_M);
 
+    // M17b-ε.α: allocate main M's g0 after the allocator is online.
+    // setup_main_g0 parses /proc/self/maps for the main thread's
+    // [stack] mapping and constructs g0 with that as a non-owning
+    // adopted Stack. Workers allocate their g0 in `spawn_worker_m`.
+    sched::setup_main_g0();
+
     // M17b-α: bootstrap GOMAXPROCS Ps and bind P[0] to the main M.
     // Must follow the allocator coming online (Ps are leaked Box<P>)
     // and precede `bootstrap_workers` (each worker `acquirep`s

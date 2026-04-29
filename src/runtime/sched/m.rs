@@ -145,6 +145,20 @@ pub struct MStorage {
     /// scans, sysmon) can read it lock-free; written exclusively by
     /// the owning M's thread via `acquirep` / `releasep`.
     pub current_p: AtomicPtr<P>,
+    /// M17b-ε.α: pointer to this M's `g0` — the goroutine whose stack
+    /// is the M's OS thread stack. Scheduler / yield-fn bodies run on
+    /// `g0`'s stack rather than the user G's stack. Mirrors Go's
+    /// `m.g0` (runtime/runtime2.go:533).
+    ///
+    /// Null until `setup_main_tls` (main M) or the worker's `mstart`
+    /// (worker M) has parsed the OS thread stack bounds and allocated
+    /// the `G` object via `Box::leak`. After that, the pointer is
+    /// stable for the M's lifetime.
+    ///
+    /// Read by `getg()` to determine whether the calling code is on
+    /// `g0`'s stack (returns `g0`) or on the user G's stack (returns
+    /// `m.curg`). Read by `mcall` asm to find the stack to switch to.
+    pub g0: AtomicPtr<crate::runtime::sched::g::G>,
 }
 
 // MStorage holds a raw pointer in UnsafeCell. We assert thread-
@@ -165,6 +179,7 @@ impl MStorage {
             locks: AtomicU32::new(0),
             start_running_ns: AtomicI64::new(0),
             current_p: AtomicPtr::new(core::ptr::null_mut()),
+            g0: AtomicPtr::new(core::ptr::null_mut()),
         }
     }
 
@@ -351,6 +366,49 @@ pub fn setup_main_tls() {
     // Main M never parks idle (it's the supervisor — terminates
     // via Exit when LIVE_G_COUNT==0), so wakers don't need to find
     // it. Worker Ms are registered in `spawn_worker_m`.
+}
+
+/// M17b-ε.α: allocate main M's `g0` after the allocator is online.
+///
+/// Must run AFTER `mheap_init()` (we Box::leak the G), and BEFORE
+/// `bootstrap_workers` so all Ms in the pool have their g0 wired by
+/// the time goroutines start running.
+///
+/// Parses `/proc/self/maps` to find the `[stack]` mapping containing
+/// the current rsp. That mapping is the main thread's OS stack —
+/// what `g0.stack` should adopt (non-owning).
+///
+/// Falls back to a heuristic 8 MiB region anchored at current rsp if
+/// the parse fails (e.g. `/proc` not mounted in some sandbox). The
+/// fallback is sized for default Linux `RLIMIT_STACK = 8 MiB`.
+pub fn setup_main_g0() {
+    use crate::runtime::sched::g::G;
+    use crate::runtime::sched::stack::parse_main_stack_bounds;
+
+    let mut buf = [0u8; 16 * 1024];
+    let (base, size) = match parse_main_stack_bounds(&mut buf) {
+        Some(pair) => pair,
+        None => {
+            // Heuristic fallback: 8 MiB stack with current rsp inside.
+            let rsp: usize;
+            unsafe {
+                core::arch::asm!(
+                    "mov {}, rsp",
+                    out(reg) rsp,
+                    options(nomem, nostack, preserves_flags),
+                );
+            }
+            const FALLBACK_STACK: usize = 8 * 1024 * 1024;
+            // Round rsp up to nearest FALLBACK_STACK boundary as approximate top.
+            let top = (rsp + FALLBACK_STACK - 1) & !(FALLBACK_STACK - 1);
+            let base = top - FALLBACK_STACK;
+            (base as *mut u8, FALLBACK_STACK)
+        }
+    };
+
+    let g0_box = alloc::boxed::Box::new(G::new_g0(base, size));
+    let g0_ptr: *mut G = alloc::boxed::Box::leak(g0_box) as *mut _;
+    MAIN_M.g0.store(g0_ptr, Ordering::Release);
 }
 
 /// Pointer to the currently-running M's `SpinLock<M>`, read from the

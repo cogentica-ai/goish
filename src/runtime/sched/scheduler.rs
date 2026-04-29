@@ -1035,6 +1035,19 @@ fn spawn_worker_m(id: u32) -> i64 {
     }
     let stack_top = unsafe { stack_base.add(WORKER_M_STACK) };
 
+    // M17b-ε.α: allocate this worker's `g0` BEFORE clone(2). The
+    // mmap'd 64 KiB region we just got is the OS thread stack — i.e.,
+    // exactly what `g0.stack` adopts. Storing the pointer in
+    // `m.g0` before clone means the worker's `mstart` sees a fully-
+    // wired g0 from its first instruction, so any future `getg()`
+    // there returns g0 (not None / not stale).
+    //
+    // Box::leak: g0 lives for the M's lifetime; process exit reclaims
+    // the heap and the stack mmap together via exit_group(2).
+    let g0_box = alloc::boxed::Box::new(super::g::G::new_g0(stack_base, WORKER_M_STACK));
+    let g0_ptr: *mut super::g::G = alloc::boxed::Box::leak(g0_box) as *mut _;
+    storage.g0.store(g0_ptr, Ordering::Release);
+
     unsafe {
         syscall::Clone(
             syscall::CLONE_THREAD_FLAGS,

@@ -211,6 +211,23 @@ pub fn Read(fd: i32, p: *mut u8, n: usize) -> isize {
     unsafe { syscall3(SYS_READ, fd as usize, p as usize, n) }
 }
 
+/// Open flags. Subset of `<fcntl.h>`.
+pub const O_RDONLY: i32 = 0;
+pub const O_CLOEXEC: i32 = 0o2_000_000;
+
+/// `open(2)` — open a file. `path` must be a NUL-terminated C string.
+/// Returns the new fd on success, or a negative `-errno` on error.
+#[allow(non_snake_case)]
+pub fn Open(path: *const u8, flags: i32, mode: i32) -> i32 {
+    unsafe { syscall3(SYS_OPEN, path as usize, flags as usize, mode as usize) as i32 }
+}
+
+/// `close(2)` — close a file descriptor.
+#[allow(non_snake_case)]
+pub fn Close(fd: i32) -> i32 {
+    unsafe { syscall1(SYS_CLOSE, fd as usize) as i32 }
+}
+
 /// Terminate the entire process. Mirrors `syscall.Exit` in Go (which
 /// invokes `exit_group` on Linux).
 #[allow(non_snake_case)]
