@@ -1,0 +1,53 @@
+#!/usr/bin/env bpftrace
+/*
+ * netpoll_leak.bt — count goish::runtime::netpoll::open vs close calls
+ * via uprobes; report unmatched pairs at exit.
+ *
+ * Usage:
+ *   sudo ./scripts/bpftrace/netpoll_leak.bt $BINARY &
+ *   $BINARY                 # run the test
+ *   pkill -INT bpftrace     # finish, print report
+ *
+ * Or oneshot:
+ *   sudo ./scripts/bpftrace/netpoll_run.sh $BINARY
+ *
+ * What we expect (post-M27h):
+ *   open == close  → no in-flight registrations leaked
+ *   open >  close  → either an active conn at exit, or a real fd leak
+ *
+ * The goish PollDesc memory is intentionally never freed (Go's
+ * pollCache discipline), so this script does NOT track Box::leak;
+ * it tracks the kernel-visible registration lifecycle (EPOLL_CTL_ADD
+ * via open, EPOLL_CTL_DEL via close).
+ */
+
+uprobe:$1:"goish::runtime::netpoll::open"
+{
+        @opens = count();
+        @open_stacks[ustack(perf, 6)] = count();
+}
+
+uprobe:$1:"goish::runtime::netpoll::close"
+{
+        @closes = count();
+        @close_stacks[ustack(perf, 6)] = count();
+}
+
+END
+{
+        printf("\n=== netpoll registration report ===\n");
+        printf("open  count : %lld\n", @opens);
+        printf("close count : %lld\n", @closes);
+        printf("delta       : %lld (positive = unbalanced opens)\n",
+               @opens - @closes);
+
+        printf("\n=== open call sites (top 5 by count) ===\n");
+        print(@open_stacks, 5);
+        printf("\n=== close call sites (top 5 by count) ===\n");
+        print(@close_stacks, 5);
+
+        clear(@opens);
+        clear(@closes);
+        clear(@open_stacks);
+        clear(@close_stacks);
+}
