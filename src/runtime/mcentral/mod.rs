@@ -35,7 +35,7 @@ use crate::runtime::mheap::page_alloc::ALLOC_FAILED;
 use crate::syscall;
 
 use sizeclasses::{class_for, NPAGES_OF_CLASS, NUM_SIZE_CLASSES, SIZE_OF_CLASS};
-use span::{Span, ALLOC_BITS_WORDS, NIL_SPAN};
+use span::{Span, NIL_SPAN};
 
 /// Maximum number of live spans in the heap. 1024 covers our 64 MiB
 /// initial arena (worst case: every span = 1 page, so 8192 pages /
@@ -90,7 +90,7 @@ impl MCentral {
         MCentral {
             partial: [NIL_SPAN; NUM_SIZE_CLASSES],
             full: [NIL_SPAN; NUM_SIZE_CLASSES],
-            spans: [Span::EMPTY; MAX_SPANS],
+            spans: [const { Span::new() }; MAX_SPANS],
             spans_bump: 0,
             spans_free_head: NIL_SPAN,
             page_to_span: [NIL_SPAN; MAX_TRACKED_PAGES],
@@ -107,7 +107,7 @@ impl MCentral {
         if self.spans_free_head != NIL_SPAN {
             let idx = self.spans_free_head;
             self.spans_free_head = self.spans[idx as usize].next;
-            self.spans[idx as usize] = Span::EMPTY;
+            self.spans[idx as usize].reset();
             return idx;
         }
         let idx = self.spans_bump + 1;
@@ -122,7 +122,7 @@ impl MCentral {
     /// released to mheap. Caller must have already cleared the
     /// page_to_span entries.
     fn release_span_idx(&mut self, idx: u16) {
-        self.spans[idx as usize] = Span::EMPTY;
+        self.spans[idx as usize].reset();
         self.spans[idx as usize].next = self.spans_free_head;
         self.spans_free_head = idx;
     }
@@ -196,9 +196,12 @@ impl MCentral {
         s.elemsize = elemsize;
         s.nelems = nelems as u16;
         s.sizeclass = class;
-        s.alloc_count = 0;
-        s.freeindex = 0;
-        s.alloc_bits = [0; ALLOC_BITS_WORDS];
+        s.alloc_count.store(0, Ordering::Relaxed);
+        s.freeindex.store(0, Ordering::Relaxed);
+        for w in &s.alloc_bits {
+            w.store(0, Ordering::Relaxed);
+        }
+        unsafe { *s.alloc_cache.get() = 0; }
         s.next = NIL_SPAN;
         s.prev = NIL_SPAN;
 
@@ -271,8 +274,8 @@ pub unsafe fn alloc(size: usize, align: usize) -> *mut u8 {
     }
 
     // Pull a slot from the partial-head span.
-    let span = &mut g.spans[idx as usize];
-    let slot = match span.alloc_slot() {
+    let span = &g.spans[idx as usize];
+    let slot = match span.alloc_slot_locked() {
         Some(s) => s,
         None => {
             // Span head was full despite living on the partial list —
@@ -296,6 +299,15 @@ pub unsafe fn alloc(size: usize, align: usize) -> *mut u8 {
 /// Free a pointer obtained from `mcentral::alloc`. Returns true on
 /// success, false if `ptr` is not owned by mcentral (caller should
 /// route to mheap).
+///
+/// **Concurrency** (post task #106). The lookup phase
+/// (`page_to_span`, span bounds, `cached` flag) needs to consult
+/// `MCentral` state; the lock is held briefly to read it. Once we
+/// know the span is *cached*, the actual bit clear + count decrement
+/// happen via atomic ops (`free_slot_atomic`) **after the lock is
+/// dropped** — this is the path that the per-P mcache hot-path free
+/// takes. For uncached spans, the lock is reacquired (or held) for
+/// list manipulation and possible mheap return.
 pub unsafe fn free(ptr: *mut u8) -> bool {
     let p = ptr as usize;
     let mut g = MCENTRAL.lock();
@@ -311,22 +323,32 @@ pub unsafe fn free(ptr: *mut u8) -> bool {
     if idx == NIL_SPAN {
         return false;
     }
-    let span = &mut g.spans[idx as usize];
+    let span = &g.spans[idx as usize];
     if p < span.base || p >= span.base + span.npages as usize * PAGE_SIZE {
         return false;
     }
-    let was_full = span.is_full();
-    let was_cached = span.cached;
+    let was_cached = span.cached.load(Ordering::Acquire);
     let slot = span.slot_of(p);
-    span.free_slot(slot);
 
     if was_cached {
-        // Cached spans live on no central list — the bit/count update
-        // above is sufficient. The owning P sees the freed slot on
-        // its next `alloc_slot_in` (freeindex was rewound) or on
-        // uncacheSpan when the central state is re-evaluated.
+        // Lock-free fast path: cached span lives on no central list,
+        // so list manipulation is unnecessary. Drop the central lock
+        // before the atomic bit clear so other Ms aren't blocked on
+        // it. The owning P sees the freed slot on its next
+        // `refill_alloc_cache` (which OR-claims fresh free bits) or
+        // on `uncacheSpan` (which releases unsold reserved bits).
+        drop(g);
+        // Re-borrow span via the static for lock-free atomic ops.
+        // Safe: spans live in a fixed-size static; index is stable
+        // once allocated. The atomic ops on alloc_bits/alloc_count
+        // are the only mutations.
+        let span_ref = span_by_idx(idx);
+        span_ref.free_slot_atomic(slot);
         return true;
     }
+
+    let was_full = g.spans[idx as usize].is_full();
+    g.spans[idx as usize].free_slot_locked(slot);
 
     if was_full {
         // Move span from full to partial.
@@ -352,6 +374,27 @@ pub unsafe fn free(ptr: *mut u8) -> bool {
     true
 }
 
+/// Borrow a `&'static Span` by index without holding the central
+/// lock. Spans live in a fixed-size BSS-resident static array; their
+/// addresses are stable across the program's lifetime once a slot is
+/// bump-allocated. All mutation that races with this borrow goes
+/// through atomic fields (`alloc_bits`, `alloc_count`, `freeindex`,
+/// `cached`). The non-atomic descriptive fields (`base`, `npages`,
+/// `elemsize`, `nelems`, `sizeclass`) are written exactly once under
+/// the central lock during `init_span`, before any caller can ever
+/// see this index, and are not mutated again until `release_span_idx`
+/// (which only runs after the span is empty and removed from all
+/// lists, by which point no concurrent reader holds the index).
+unsafe fn span_by_idx(idx: u16) -> &'static Span {
+    // `data_unchecked()` is the documented unsafe escape hatch. We
+    // immediately re-borrow as `&Span` (shared) and only invoke
+    // atomic methods on it. Lifetime extends to `'static` because
+    // `MCENTRAL` is a static.
+    let mc: &mut MCentral = MCENTRAL.data_unchecked();
+    let s: &Span = &mc.spans[idx as usize];
+    core::mem::transmute::<&Span, &'static Span>(s)
+}
+
 /// **`cacheSpan(class)`** — pop a span the calling P can alloc from
 /// without contending the central lock on every slot. Mirrors Go's
 /// `runtime.(*mcentral).cacheSpan` (mcentral.go).
@@ -370,7 +413,17 @@ pub unsafe fn cacheSpan(class: u8) -> u16 {
     let idx = g.partial[class as usize];
     if idx != NIL_SPAN {
         g.list_remove(idx);
-        g.spans[idx as usize].cached = true;
+        // Reset freeindex and prime alloc_cache so the owner P starts
+        // fresh on this span. Mirrors Go's `cacheSpan` (mcentral.go:189):
+        // `freeByteBase := s.freeindex &^ (64 - 1); whichByte := freeByteBase / 8;
+        //  s.refillAllocCache(whichByte); s.allocCache >>= s.freeindex % 64`.
+        let s = &g.spans[idx as usize];
+        s.freeindex.store(0, Ordering::Relaxed);
+        let claimed = s.refill_alloc_cache(0);
+        if claimed != 0 {
+            s.alloc_count.fetch_add(claimed as u16, Ordering::AcqRel);
+        }
+        s.cached.store(true, Ordering::Release);
         return idx;
     }
     // No partial — draw a fresh span from mheap.
@@ -383,7 +436,12 @@ pub unsafe fn cacheSpan(class: u8) -> u16 {
     let mut g2 = MCENTRAL.lock();
     let new_idx = g2.alloc_span_idx();
     g2.init_span(new_idx, class, base);
-    g2.spans[new_idx as usize].cached = true;
+    let s = &g2.spans[new_idx as usize];
+    let claimed = s.refill_alloc_cache(0);
+    if claimed != 0 {
+        s.alloc_count.fetch_add(claimed as u16, Ordering::AcqRel);
+    }
+    s.cached.store(true, Ordering::Release);
     // Don't push to partial — we hand it directly to the caller.
     new_idx
 }
@@ -400,7 +458,12 @@ pub unsafe fn uncacheSpan(idx: u16) {
         return;
     }
     let mut g = MCENTRAL.lock();
-    g.spans[idx as usize].cached = false;
+    // Release any unsold reserved bits from `alloc_cache` back to
+    // `alloc_bits` + `alloc_count`. Without this, slots reserved
+    // during `refill_alloc_cache` but never sold to a user would
+    // remain marked as allocated until the span is fully recycled.
+    g.spans[idx as usize].release_unsold();
+    g.spans[idx as usize].cached.store(false, Ordering::Release);
     let s = &g.spans[idx as usize];
     let is_empty = s.is_empty();
     let is_full = s.is_full();
@@ -430,29 +493,38 @@ pub unsafe fn uncacheSpan(idx: u16) {
 
 /// **`alloc_slot_in(idx)`** — allocate a single slot from a specific
 /// cached span without consulting partial/full lists. Used by the
-/// per-P mcache hot path. Returns the slot's address, or null on
-/// "span is full / not initialized".
+/// per-P mcache hot path.
+///
+/// **Lock-free** (post task #106). Calls `next_free_owner` on the
+/// span, which consumes from `alloc_cache` (per-P private) and
+/// refills via `fetch_or` from `alloc_bits` (atomic). Never touches
+/// `MCENTRAL.lock()`.
+///
+/// Returns the slot's address, or null when the span is full (the
+/// caller should refill via `uncacheSpan` + `cacheSpan`).
+///
+/// Safety: caller must own the cached span — i.e. this `idx` is in
+/// the calling P's `mcache[class]` slot and the calling M is bound
+/// to that P.
 pub unsafe fn alloc_slot_in(idx: u16) -> *mut u8 {
     if idx == NIL_SPAN {
         return core::ptr::null_mut();
     }
-    let mut g = MCENTRAL.lock();
-    let s = &mut g.spans[idx as usize];
-    let slot = match s.alloc_slot() {
-        Some(s) => s,
-        None => return core::ptr::null_mut(),
-    };
-    s.slot_addr(slot) as *mut u8
+    let s = span_by_idx(idx);
+    match s.next_free_owner() {
+        Some(slot) => s.slot_addr(slot) as *mut u8,
+        None => core::ptr::null_mut(),
+    }
 }
 
 /// **`is_full(idx)`** — true if the span at `idx` has no free slots.
-/// Used by the per-P mcache to decide when to refill.
+/// Used by the per-P mcache to decide when to refill. Lock-free —
+/// reads `alloc_count` atomically.
 pub fn is_full(idx: u16) -> bool {
     if idx == NIL_SPAN {
         return true;
     }
-    let g = MCENTRAL.lock();
-    g.spans[idx as usize].is_full()
+    unsafe { span_by_idx(idx).is_full() }
 }
 
 /// Stress-test only: number of currently in-use slots across all
@@ -463,7 +535,7 @@ pub fn live_slots() -> usize {
     let g = MCENTRAL.lock();
     let mut n = 0;
     for s in &g.spans[1..=(g.spans_bump as usize)] {
-        n += s.alloc_count as usize;
+        n += s.alloc_count.load(Ordering::Acquire) as usize;
     }
     n
 }
