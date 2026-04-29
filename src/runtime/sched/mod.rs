@@ -51,6 +51,7 @@ mod m;
 mod p;
 mod scheduler;
 mod stack;
+pub mod stackpool;
 
 pub use g::{GStatus, SELECT_WAIT_MAX, G};
 pub use gobuf::{gogo, make_context, make_context_gogo, swap_context, Gobuf};

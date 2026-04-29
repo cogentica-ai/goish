@@ -509,10 +509,13 @@ fn dispatch_g_trap_dump(label: &[u8], g_ptr: NonNull<G>) -> ! {
 fn dispatch_validate_g(g_ptr: NonNull<G>) {
     // Per-G stacks are now variable-sized (M26): every G stores its
     // own allocation size on `stack`. Validate that the stored bounds
-    // are internally consistent and span at least one full page —
-    // anything else indicates the G was freed (and likely zeroed)
-    // before we got here.
-    const PAGE_SIZE: usize = 4096;
+    // are internally consistent and the size is a power of two ≥
+    // FIXED_STACK (2 KiB) — covers both pool-managed slots
+    // (2K/4K/8K/16K/32K) and direct-mmap'd large stacks (always
+    // page-rounded → multiple of 4096, which is also a power of two
+    // multiple). Anything else indicates the G was freed (and likely
+    // zeroed) before we got here.
+    const FIXED_STACK: usize = 2 * 1024;
     let g_ref = unsafe { g_ptr.as_ref() };
     let base = g_ref.stack.base();
     let top = g_ref.stack.top();
@@ -520,8 +523,8 @@ fn dispatch_validate_g(g_ptr: NonNull<G>) {
     if top > base
         && base != 0
         && top - base == recorded
-        && recorded >= PAGE_SIZE
-        && recorded.is_multiple_of(PAGE_SIZE)
+        && recorded >= FIXED_STACK
+        && recorded.is_power_of_two()
     {
         return;
     }

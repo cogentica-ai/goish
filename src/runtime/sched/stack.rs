@@ -58,14 +58,26 @@ pub const STACK_SIZE: usize = 64 * 1024;
 /// caller-requested stack sizes up to a whole page.
 pub const PAGE_SIZE: usize = 4096;
 
-/// A goroutine stack. Owns its mmap region (when `owned`) and unmaps
-/// on drop, OR borrows pre-existing OS-thread-stack bounds (when
-/// `!owned`) — used for `g0`, whose stack is the M's OS thread stack
-/// (not separately mmap'd).
+/// A goroutine stack. The storage source depends on `owned` and
+/// `pool_span_idx`:
+///
+///   - `owned == false`              → adopted OS-thread stack
+///                                     (`g0` only). Drop is a no-op.
+///   - `pool_span_idx != 0`          → carved from
+///                                     `runtime::sched::stackpool` —
+///                                     a sub-page slot inside a
+///                                     mmap'd 32 KiB span. Drop
+///                                     returns the slot to the pool.
+///   - `owned == true && pool_span_idx == 0`
+///                                   → direct mmap (large stack >
+///                                     32 KiB). Drop munmaps.
 pub struct Stack {
     base: *mut u8,
     size: usize,
     owned: bool,
+    /// Stackpool span index, or `0` (`stackpool::NIL_SPAN`) for
+    /// direct-mmap'd stacks.
+    pool_span_idx: u32,
 }
 
 unsafe impl Send for Stack {}
@@ -79,16 +91,32 @@ impl Stack {
         Self::new_sized(DEFAULT_STACK_SIZE)
     }
 
-    /// Allocate a fresh stack of `requested` bytes (rounded **up** to
-    /// the nearest 4 KiB page). Used by `go!(stack(N), closure)` when
-    /// the caller knows their goroutine needs more (or less) than the
-    /// default.
+    /// Allocate a fresh stack of `requested` bytes.
     ///
-    /// Minimum allocation is one page (4 KiB) regardless of how small
-    /// `requested` is — Linux mmap can't go finer-grained without a
-    /// chunked stack pool (Phase 2 work).
+    /// **M26 phase 2 routing**:
+    ///   - `requested ≤ 32 KiB`  → carved from the chunked
+    ///     `stackpool` (sub-page slots inside a 32 KiB span).
+    ///     A 2 KiB request truly costs 2 KiB.
+    ///   - `requested > 32 KiB`  → direct page-aligned mmap (large
+    ///     path).
+    ///
+    /// In both cases the returned `Stack`'s `top()` is 16-byte aligned
+    /// (suitable for `make_context`).
     pub fn new_sized(requested: usize) -> Self {
-        let size = round_up_to_page(requested.max(1));
+        let bytes = requested.max(1);
+        if let Some(order) = super::stackpool::order_for(bytes) {
+            // Sub-page chunked path: round up to the nearest stack
+            // class, draw from the pool.
+            let (base, span_idx, size) = unsafe { super::stackpool::alloc(order) };
+            return Stack {
+                base,
+                size,
+                owned: true,
+                pool_span_idx: span_idx,
+            };
+        }
+        // Large path: page-aligned direct mmap.
+        let size = round_up_to_page(bytes);
         let p = syscall::Mmap(
             core::ptr::null_mut(),
             size,
@@ -106,6 +134,7 @@ impl Stack {
             base: p,
             size,
             owned: true,
+            pool_span_idx: super::stackpool::NIL_SPAN,
         }
     }
 
@@ -128,6 +157,7 @@ impl Stack {
             base,
             size,
             owned: false,
+            pool_span_idx: super::stackpool::NIL_SPAN,
         }
     }
 
@@ -158,7 +188,15 @@ const fn round_up_to_page(n: usize) -> usize {
 
 impl Drop for Stack {
     fn drop(&mut self) {
-        if self.owned {
+        if !self.owned {
+            return;
+        }
+        if self.pool_span_idx != super::stackpool::NIL_SPAN {
+            // Pool-managed: return slot to the stackpool. The pool
+            // will munmap the span when fully empty.
+            unsafe { super::stackpool::free(self.pool_span_idx, self.base); }
+        } else {
+            // Direct-mmap'd large stack.
             syscall::Munmap(self.base, self.size);
         }
     }
