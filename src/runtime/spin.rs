@@ -153,15 +153,25 @@ impl<T> SpinLock<T> {
     }
 
     /// `#[inline(never)]` + `#[link_section]`: tagged so the SIGURG
-    /// handler refuses to inject when RIP falls inside this fn. The
-    /// brief window between the CAS-acquire success and the
-    /// `bump_m_locks()` call is otherwise preempt-eligible despite
-    /// holding the atom — a misfire would yield with the lock held.
-    /// Note this is generic: each monomorphization gets its own copy
-    /// in `goish_rt_text` (the attribute applies per instantiation).
+    /// handler refuses to inject when RIP falls inside this fn.
+    ///
+    /// **Why bump_m_locks BEFORE the CAS, not after** (M17b-ε debug
+    /// fix): the acquire CAS calls into `core::sync::atomic`, which
+    /// is in regular `.text`, not `goish_rt_text`. SIGURG saved-PC
+    /// landing inside that core function bypasses the rt_text PC
+    /// filter. If `m.locks == 0` at that moment, the handler injects;
+    /// the trampoline then calls `current_g()` → `current_m().lock()`
+    /// → another CAS on the *same* atom that we just successfully
+    /// flipped to `true` (between CAS and bump). The trampoline spins
+    /// forever — the M is deadlocked on its own SpinLock.
+    ///
+    /// Bumping `m.locks` first closes the window: the SIGURG handler's
+    /// `current_m_locks() != 0` check now skips even when the saved PC
+    /// is inside the core CAS.
     #[inline(never)]
     #[link_section = "goish_rt_text"]
     pub fn lock(&self) -> Guard<'_, T> {
+        bump_m_locks();
         while self
             .locked
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -169,10 +179,6 @@ impl<T> SpinLock<T> {
         {
             core::hint::spin_loop();
         }
-        // Bump m.locks AFTER acquiring so the increment happens-after
-        // the acquire fence — no reordering can place runtime work
-        // outside the locked region.
-        bump_m_locks();
         Guard { lock: self }
     }
 
@@ -204,6 +210,9 @@ impl<T> SpinLock<T> {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 pub unsafe fn raw_lock(atom: *const AtomicBool) {
+    // Bump m.locks BEFORE the CAS — same reasoning as `SpinLock::lock`:
+    // closes the SIGURG-on-core-CAS deadlock window.
+    bump_m_locks();
     let atom = &*atom;
     while atom
         .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -211,7 +220,6 @@ pub unsafe fn raw_lock(atom: *const AtomicBool) {
     {
         core::hint::spin_loop();
     }
-    bump_m_locks();
 }
 
 /// Release a `SpinLock` previously acquired via `raw_lock`.
@@ -221,10 +229,23 @@ pub unsafe fn raw_lock(atom: *const AtomicBool) {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 pub unsafe fn raw_unlock(atom: *const AtomicBool) {
-    // Drop m.locks BEFORE releasing the lock so the decrement is
-    // observably inside the locked region.
-    drop_m_locks();
+    // **Order reversed in M17b-ε debug fix**: release the atom FIRST,
+    // then decrement `m.locks`. Same window-closure reasoning as
+    // `SpinLock::lock`: the previous order (decrement first) opened
+    // a window where `m.locks == 0` while `atom == true`. SIGURG saved
+    // PC could land inside the core::sync::atomic CAS-or-store path
+    // (out of `goish_rt_text`), bypass the PC filter, and inject;
+    // the trampoline's `current_g()` would then deadlock on a still-
+    // held SpinLock atom.
+    //
+    // With the new order, between the atom store and the drop of
+    // `m.locks`, the lock is *released* — any contesting `current_g()`
+    // succeeds. The `m.locks > 0` invariant is preserved across both
+    // the store and the cooperative-preempt-check entry, so the M is
+    // never preemptable while this fn is running until the explicit
+    // safe-point at the bottom.
     (*atom).store(false, Ordering::Release);
+    drop_m_locks();
     // M18b-γ: cooperative-preempt safe point. After releasing the
     // last lock on this M, check whether sysmon has flagged the
     // current G for preemption (e.g. because async preempt was
@@ -260,8 +281,11 @@ impl<'a, T> Drop for Guard<'a, T> {
     #[inline(never)]
     #[link_section = "goish_rt_text"]
     fn drop(&mut self) {
-        drop_m_locks();
+        // Release atom FIRST, then decrement m.locks (M17b-ε debug
+        // fix — see `raw_unlock` for the full rationale). Closes the
+        // SIGURG-on-core-atomic-store deadlock window.
         self.lock.locked.store(false, Ordering::Release);
+        drop_m_locks();
         cooperative_preempt_check();
     }
 }

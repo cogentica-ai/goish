@@ -289,7 +289,11 @@ pub fn newproc(closure: Box<dyn FnOnce()>) {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 pub fn Gosched() {
-    if current_m().lock().curg.is_none() {
+    // Lock-free curg read (per-M, single-thread mutator). Taking
+    // M's SpinLock here would risk a coop_preempt_check-driven
+    // Gosched detour mid-check, migrating us to another M before
+    // the actual mcall call (see `mcall` body for full rationale).
+    if unsafe { current_m().data_unchecked().curg }.is_none() {
         return;
     }
     unsafe {
@@ -528,10 +532,32 @@ fn dispatch_validate_g(g_ptr: NonNull<G>) {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 unsafe fn mcall(fn_to_call: extern "C" fn(*mut G) -> !) {
-    let g0_ptr = current_m_storage().g0.load(Ordering::Acquire);
+    // **Why lock-free reads of g0/curg** (not `current_m().lock()`):
+    //
+    // Both fields are per-M and only mutated by the M's own thread,
+    // so a same-thread read is data-race-free without the SpinLock.
+    //
+    // Taking the SpinLock here would be unsafe in a subtle way: the
+    // Guard<M> drop runs `cooperative_preempt_check` after releasing
+    // the atom. If sysmon flagged this G for preemption, the check
+    // fires `Gosched` → recursive `mcall(gosched_m)` → the G's
+    // gobuf is saved with PC *inside this Rust mcall body*, the G
+    // gets re-enqueued, and any M can pick it up. When the G is
+    // later resumed via `execute → gogo`, control re-enters this
+    // mcall frame **on a possibly-different M** — but our captured
+    // `g0_ptr` was for the original M's g0. mcall_asm would then
+    // switch RSP to the wrong M's g0 stack, corrupting state and
+    // crashing later with "no current G" or worse.
+    //
+    // Reading curg/g0 lock-free side-steps the coop_preempt_check
+    // window entirely. Per Theorem 1 (m.locks invariants), curg is a
+    // stable per-thread read.
+    let storage = current_m_storage();
+    let g0_ptr = storage.g0.load(Ordering::Acquire);
     debug_assert!(!g0_ptr.is_null(), "mcall: g0 not initialized");
 
-    let curg = current_m().lock().curg.expect("mcall: no current G");
+    let curg = unsafe { current_m().data_unchecked().curg }
+        .expect("mcall: no current G");
 
     let from_buf = unsafe { &mut (*curg.as_ptr()).gobuf as *mut Gobuf };
     let to_buf = unsafe { &(*g0_ptr).gobuf as *const Gobuf };
@@ -1156,7 +1182,9 @@ pub fn current_g() -> Option<NonNull<G>> {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 pub fn gopark(commit: ParkCommit, lock_atom: *const AtomicBool) {
-    if current_m().lock().curg.is_none() {
+    // Lock-free curg read — see `mcall` for why taking the SpinLock
+    // here is unsafe (coop_preempt_check can migrate us mid-call).
+    if unsafe { current_m().data_unchecked().curg }.is_none() {
         return;
     }
 
@@ -1170,6 +1198,10 @@ pub fn gopark(commit: ParkCommit, lock_atom: *const AtomicBool) {
 
     // Stash commit + lock pointer on the M. park_m picks them up on
     // g0 post-mcall and invokes commit there (after dropg).
+    //
+    // We hold `m.locks > 0` across this whole block (acquirem above),
+    // so the SpinLock-Guard's coop_preempt_check skips on m.locks > 0
+    // and cannot migrate us before mcall.
     {
         let mut m = current_m().lock();
         m.waitunlockf = Some(commit);
