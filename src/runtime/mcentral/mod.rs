@@ -37,15 +37,16 @@ use crate::syscall;
 use sizeclasses::{class_for, NPAGES_OF_CLASS, NUM_SIZE_CLASSES, SIZE_OF_CLASS};
 use span::{Span, NIL_SPAN};
 
-/// Maximum number of live spans in the heap. 1024 covers our 64 MiB
-/// initial arena (worst case: every span = 1 page, so 8192 pages /
-/// 8 = 1024 single-page spans... actually 8192 pages so could need
-/// more if every alloc is single-page; cap chosen to fit BSS budget).
-pub const MAX_SPANS: usize = 4096;
+/// Maximum number of live spans in the heap. Saturates the `u16`
+/// span-index width (sentinel 0 reserved). For a workload spawning
+/// 1 M goroutines at ~400 B per G struct + ~50 B per closure box,
+/// expect ~50 K spans of small classes — fits comfortably.
+pub const MAX_SPANS: usize = 65535;
 
-/// Maximum number of pages the page → span map covers. Sized to
-/// accommodate up to 4× the initial arena (256 MiB / 8 KiB).
-pub const MAX_TRACKED_PAGES: usize = 32 * 1024;
+/// Maximum number of pages the page → span map covers. 256 K pages
+/// × 8 KiB = 2 GiB of tracked arena. Sized for 1 M-goroutine
+/// workloads (~450 MB G + closure heap, plus headroom).
+pub const MAX_TRACKED_PAGES: usize = 256 * 1024;
 
 /// `MCentral` — per-size-class central span lists, plus the span
 /// pool and page-to-span map.

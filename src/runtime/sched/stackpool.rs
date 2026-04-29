@@ -69,9 +69,10 @@ pub const NUM_STACK_ORDERS: usize = 5;
 pub const STACK_CACHE_SIZE: usize = 32 * 1024;
 
 /// Maximum number of live stack spans the pool can track. Each span
-/// holds 1..16 stacks, so 16384 spans = up to 256 K stacks at order 0.
-/// BSS budget: ~512 KiB at `size_of::<StackSpan>() = 32`.
-pub const MAX_STACK_SPANS: usize = 16 * 1024;
+/// of order 0 (2 KiB stacks) holds 16 slots, so 131072 spans cover
+/// 2 M order-0 goroutines — comfortable headroom for the 1M-G goal.
+/// BSS budget: ~4 MiB at `size_of::<StackSpan>() = 32`.
+pub const MAX_STACK_SPANS: usize = 128 * 1024;
 
 /// Sentinel meaning "no span" (lists, freelist heads).
 pub const NIL_SPAN: u32 = 0;

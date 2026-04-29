@@ -43,12 +43,17 @@ use core::sync::atomic::{AtomicBool, Ordering};
 pub const LARGE_THRESHOLD: usize = 32 * 1024;
 
 /// Initial mheap arena size — number of chunks to map up front.
-const INITIAL_ARENA_CHUNKS: usize = 16;
+/// 256 chunks × 4 MiB = 1 GiB virtual; physical RSS only grows with
+/// actual usage (anonymous mmap is lazily-paged). Sized to host 1 M
+/// goroutines (~450 MB G + closure heap) without re-grow plumbing.
+const INITIAL_ARENA_CHUNKS: usize = 256;
 
 /// Maximum mheap arena size — chunks the radix tree's metadata is
-/// pre-sized to cover. With 4 MiB chunks, 256 chunks is a 1 GiB
+/// pre-sized to cover. With 4 MiB chunks, 512 chunks is a 2 GiB
 /// total heap. Demand-paging means metadata RSS scales with usage.
-const MAX_ARENA_CHUNKS: usize = 256;
+/// Sized to accommodate 1 M-goroutine workloads where each G + its
+/// closure box land in mcentral-managed spans.
+const MAX_ARENA_CHUNKS: usize = 512;
 
 // ─── mheap ────────────────────────────────────────────────────────────
 
