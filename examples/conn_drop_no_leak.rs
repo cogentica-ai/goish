@@ -89,17 +89,23 @@ fn count_fds() -> usize {
 fn main() {
     let baseline = count_fds();
 
-    // Spin up a long-lived listener to dial against.
+    // Spin up a long-lived listener to dial against. We wrap it in
+    // an Arc so main can call Close() to break the accept loop on
+    // shutdown — a clean exit lets bpftrace observability scripts
+    // (scripts/bpftrace/netpoll_leak.bt) report a balanced delta.
     let (server_ln, err) = net::Listen(string("tcp"), string("127.0.0.1:0"));
     check(err.IsNil(), b"server Listen failed\n");
     let port = server_ln.Addr().Port;
     static SERVER_PORT: AtomicI32 = AtomicI32::new(0);
     SERVER_PORT.store(port as i32, Ordering::Release);
 
+    let server_ln = alloc::sync::Arc::new(server_ln);
+    let server_ln_for_accept = server_ln.clone();
+
     // Server accept loop in a goroutine — accept and immediately drop.
     go!(stack(64 * KB), move || {
         loop {
-            let (conn, err) = server_ln.Accept();
+            let (conn, err) = server_ln_for_accept.Accept();
             if !err.IsNil() {
                 return;
             }
@@ -161,6 +167,16 @@ fn main() {
         buf.extend_from_slice(b"\n");
         syscall::Write(syscall::STDERR, buf.as_ptr(), buf.len());
         syscall::Exit(1);
+    }
+
+    // Cleanly close the listener so the netpoll registration is
+    // unregistered before exit — gives bpftrace a balanced report.
+    let _ = server_ln.Close();
+    // Yield so the accept goroutine notices the closed fd and exits,
+    // dropping its Arc<Listener> clone (Drop is now idempotent so
+    // this is harmless even though Close already ran).
+    for _ in 0..20 {
+        goish::runtime::sched::Gosched();
     }
 
     let ok: &[u8] = b"conn_drop_no_leak: fd count stable across 200 dial+drop cycles\n";

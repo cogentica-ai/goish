@@ -8,7 +8,7 @@ debug-counter mode.
 ## Requirements
 
 - `bpftrace` ≥ 0.16 (Ubuntu 22.04+ has it: `apt install bpftrace`).
-- Root, because uprobe attach is privileged. Wrap calls in `sudo`.
+- Root, because uprobe attach is privileged. Wrap calls in `pkexec`.
 - A goish binary built with debug symbols (default for `cargo build`,
   not for `--release` unless you set `[profile.release] debug = true`).
 
@@ -22,17 +22,20 @@ unique by frequency) are included so you can attribute imbalance
 to a specific call site.
 
 ```
-sudo ./scripts/bpftrace/netpoll_leak.bt path/to/binary &
+pkexec ./scripts/bpftrace/netpoll_leak.bt path/to/binary &
 path/to/binary <its args>
-sudo pkill -INT bpftrace
+pkexec pkill -INT bpftrace
 ```
 
-Or use the wrapper:
+Or use the wrapper (no pkexec prefix — it elevates internally only
+for the bpftrace process):
 
 ```
-sudo ./scripts/bpftrace/netpoll_run.sh \
+./scripts/bpftrace/netpoll_run.sh \
     target/x86_64-unknown-linux-gnu/debug/examples/conn_drop_no_leak
 ```
+
+Set `GOISH_BPFTRACE_LAUNCHER=sudo` to use sudo instead of pkexec.
 
 ## Interpreting output
 
@@ -77,7 +80,7 @@ quoted symbol names in the .bt script if the demangled form differs
 from `goish::runtime::netpoll::open` etc.
 
 **"bpftrace currently only supports running as the root user"** —
-prepend `sudo`. The wrapper script does this for you.
+prepend `pkexec`. The wrapper script does this for you.
 
 **Empty report (counts all 0)** — bpftrace attached to the wrong
 binary path, or attached after the binary already exited. Use the

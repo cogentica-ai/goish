@@ -21,15 +21,27 @@
  * via open, EPOLL_CTL_DEL via close).
  */
 
-uprobe:$1:"goish::runtime::netpoll::open"
+/*
+ * Symbol matching: rustc mangles `goish::runtime::netpoll::open` to
+ * `_ZN5goish7runtime7netpoll4open17h<hash>E`. The <hash> changes per
+ * build, so we use a wildcard that matches the stable prefix
+ * `5goish7runtime7netpoll4open`. The leading underscore + Z + N +
+ * length-prefixed components are the Itanium C++ ABI mangling rustc
+ * uses; trailing `17h<16hex>E` is rustc's per-build hash + version.
+ *
+ * If your rustc version differs (and the prefix shape changes), run
+ *   nm <binary> | grep netpoll
+ * and adjust the wildcards below.
+ */
+uprobe:$1:_ZN5goish7runtime7netpoll4open*
 {
-        @opens = count();
+        @opens += 1;
         @open_stacks[ustack(perf, 6)] = count();
 }
 
-uprobe:$1:"goish::runtime::netpoll::close"
+uprobe:$1:_ZN5goish7runtime7netpoll5close*
 {
-        @closes = count();
+        @closes += 1;
         @close_stacks[ustack(perf, 6)] = count();
 }
 

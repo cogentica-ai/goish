@@ -4,9 +4,11 @@
 #
 # Usage: scripts/bpftrace/netpoll_run.sh <binary> [binary args...]
 #
-# Requires: bpftrace + sudo (for uprobe attach). Without sudo the
-# uprobe attach fails silently and you see zero counts — that's the
-# tell.
+# Privilege: bpftrace requires root for uprobe attach. We use
+# `pkexec` which prompts via PolicyKit (works in both terminal and
+# desktop sessions, and is what goish dev hygiene uses elsewhere
+# — see feedback_pkexec_core_pattern memory). Override via
+# GOISH_BPFTRACE_LAUNCHER=sudo if you prefer sudo.
 
 set -eu
 
@@ -28,22 +30,35 @@ fi
 BIN="$(readlink -f "$BIN")"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LAUNCHER="${GOISH_BPFTRACE_LAUNCHER:-pkexec}"
 
 # Background bpftrace, give it a moment to attach uprobes, then run.
 TMP_OUT="$(mktemp)"
 trap 'rm -f "$TMP_OUT"' EXIT
 
-sudo bpftrace "$SCRIPT_DIR/netpoll_leak.bt" "$BIN" >"$TMP_OUT" 2>&1 &
+"$LAUNCHER" bpftrace "$SCRIPT_DIR/netpoll_leak.bt" "$BIN" >"$TMP_OUT" 2>&1 &
 BT_PID=$!
 
-# Give bpftrace ~300ms to finish attaching uprobes.
-sleep 0.3
+# Block until bpftrace prints "Attaching N probes" — the line it
+# emits AFTER all uprobes are attached. Without this, fast tests
+# can finish before the probes are live and the report comes out
+# empty (this took several iterations to debug).
+for _ in $(seq 1 50); do
+        if grep -q "Attaching " "$TMP_OUT" 2>/dev/null; then
+                break
+        fi
+        sleep 0.1
+done
+# Tiny grace period after "Attaching" prints — bpftrace flushes the
+# message slightly before the kernel-side uprobe is fully active.
+sleep 0.2
 
 # Run the target. Don't kill bpftrace if the binary returns nonzero.
 "$BIN" "$@" || true
 
-# Drain — bpftrace's END runs on SIGINT.
-sudo kill -INT "$BT_PID" 2>/dev/null || true
+# Drain — bpftrace's END runs on SIGINT. Use the launcher to send
+# the signal because the bpftrace process is owned by root.
+"$LAUNCHER" kill -INT "$BT_PID" 2>/dev/null || true
 wait "$BT_PID" 2>/dev/null || true
 
 cat "$TMP_OUT"
