@@ -14,7 +14,7 @@ use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use goish::runtime::sched::schedule;
 use goish::sync::WaitGroup;
-use goish::{go, syscall};
+use goish::{go, syscall, KB};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -48,7 +48,7 @@ fn test_add_done_wait() {
     WG.Add(N);
 
     for i in 0..N {
-        go!(move || {
+        go!(stack(8 * KB), move || {
             SUM.fetch_add(i + 1, Ordering::Relaxed);
             WG.Done();
         });
@@ -56,7 +56,7 @@ fn test_add_done_wait() {
 
     // Spawn one waiter goroutine; the schedule() drain coordinates it.
     static WAIT_DONE: AtomicUsize = AtomicUsize::new(0);
-    go!(|| {
+    go!(stack(8 * KB), || {
         WG.Wait();
         WAIT_DONE.store(1, Ordering::Release);
     });
@@ -78,14 +78,14 @@ fn test_many_waiters() {
 
     const N_WAITERS: usize = 16;
     for _ in 0..N_WAITERS {
-        go!(|| {
+        go!(stack(8 * KB), || {
             WG.Wait();
             WAITERS_DONE.fetch_add(1, Ordering::Relaxed);
         });
     }
 
     // Single Done() should release all 16 waiters.
-    go!(|| {
+    go!(stack(8 * KB), || {
         WG.Done();
     });
     schedule();
@@ -112,7 +112,7 @@ fn test_go_method() {
     }
 
     static W2: AtomicUsize = AtomicUsize::new(0);
-    go!(|| {
+    go!(stack(8 * KB), || {
         WG.Wait();
         W2.store(1, Ordering::Release);
     });
@@ -135,20 +135,20 @@ fn test_reuse() {
     // First batch.
     WG.Add(8);
     for _ in 0..8 {
-        go!(|| {
+        go!(stack(8 * KB), || {
             C1.fetch_add(1, Ordering::Relaxed);
             WG.Done();
         });
     }
     static W1: AtomicUsize = AtomicUsize::new(0);
-    go!(|| {
+    go!(stack(8 * KB), || {
         WG.Wait();
         W1.store(1, Ordering::Release);
 
         // Second batch — only after first Wait returned.
         WG.Add(5);
         for _ in 0..5 {
-            go!(|| {
+            go!(stack(8 * KB), || {
                 C2.fetch_add(1, Ordering::Relaxed);
                 WG.Done();
             });

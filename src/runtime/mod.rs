@@ -165,10 +165,35 @@ fn on_panic(info: &core::panic::PanicInfo) -> ! {
         const NL: &[u8] = b"\n";
         syscall::Write(syscall::STDERR, NL.as_ptr(), NL.len());
     }
-    // The PanicInfo's message itself isn't directly extractable as
-    // bytes in no_std without `core::fmt`. We can at least emit the
-    // message via the Display trait through a fixed buffer. For now,
-    // location-only is enough to identify the panic site.
+    // Render the panic message via `core::fmt::Write` into a fixed
+    // 1 KiB stack buffer. Truncates if longer; that's fine — the
+    // first few hundred bytes are usually enough to identify the
+    // panic. Helps diagnose location-ambiguous panics where inlining
+    // attributes the file:line to an outer frame.
+    {
+        use core::fmt::Write;
+        struct StderrBuf {
+            buf: [u8; 1024],
+            len: usize,
+        }
+        impl core::fmt::Write for StderrBuf {
+            fn write_str(&mut self, s: &str) -> core::fmt::Result {
+                let bytes = s.as_bytes();
+                let room = self.buf.len() - self.len;
+                let n = bytes.len().min(room);
+                self.buf[self.len..self.len + n].copy_from_slice(&bytes[..n]);
+                self.len += n;
+                Ok(())
+            }
+        }
+        let mut buf = StderrBuf { buf: [0u8; 1024], len: 0 };
+        const PRE: &[u8] = b"  msg: ";
+        syscall::Write(syscall::STDERR, PRE.as_ptr(), PRE.len());
+        let _ = write!(&mut buf, "{}", info.message());
+        syscall::Write(syscall::STDERR, buf.buf.as_ptr(), buf.len);
+        const NL: &[u8] = b"\n";
+        syscall::Write(syscall::STDERR, NL.as_ptr(), NL.len());
+    }
     syscall::Exit(2)
 }
 
