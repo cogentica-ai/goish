@@ -35,7 +35,6 @@ use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicPtr, AtomicU32, Ordering};
 
 use super::g::G;
-use super::gobuf::Gobuf;
 use super::p::P;
 use crate::runtime::note::Note;
 use crate::runtime::spin::SpinLock;

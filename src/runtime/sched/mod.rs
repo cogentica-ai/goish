@@ -53,7 +53,10 @@ mod scheduler;
 mod stack;
 
 pub use g::{GStatus, SELECT_WAIT_MAX, G};
-pub use gobuf::{make_context, swap_context, Gobuf};
+pub use gobuf::{gogo, make_context, make_context_gogo, swap_context, Gobuf};
+// `mcall_asm` is `pub(crate)`; expose it through the parent for the
+// SIGURG handler's PC-range filter (`is_in_mcall_asm`).
+pub(crate) use gobuf::mcall_asm;
 pub use m::{
     acquirem, current_g0_gobuf, current_m, current_m_locks, current_m_storage, is_tls_ready,
     releasem, setup_main_g0, setup_main_tls, MStorage, ParkCommit, M, MAIN_M,

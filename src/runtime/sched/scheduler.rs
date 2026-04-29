@@ -45,7 +45,7 @@ use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::g::{GStatus, G};
-use super::gobuf::{make_context, swap_context, Gobuf};
+use super::gobuf::{gogo, make_context_gogo, mcall_asm, Gobuf};
 use super::m::{acquirem, current_m, current_m_storage, releasem, MStorage, ParkCommit};
 use super::p::current_p;
 use crate::runtime::spin::SpinLock;
@@ -271,70 +271,45 @@ pub fn newproc(closure: Box<dyn FnOnce()>) {
 /// Voluntarily yield the CPU. Equivalent to Go's `runtime.Gosched()`
 /// (proc.go:387). If called from outside any goroutine (i.e. on the
 /// scheduler thread itself), this is a no-op.
+///
+/// **M17b-ε.γ.1**: implemented as `mcall(gosched_m)`, mirroring Go's
+/// `runtime.Gosched` → `mcall(gosched_m)` → `goschedImpl(_, false)`
+/// (proc.go:387, 4283, 4319).
+///
+/// On the user G's stack we only check that we're inside a goroutine
+/// (curg is set). The actual yield mechanism — saving the G's PC/SP
+/// into curg.gobuf, switching to g0's stack, re-enqueuing the G,
+/// picking the next G — runs entirely inside `gosched_m` on g0.
+///
+/// Resume: when `execute(g)` later does `gogo(&g.gobuf)`, control
+/// returns to the instruction after `mcall(gosched_m)`'s asm call,
+/// inside this function's frame; we then return normally to the
+/// user-visible call site.
 #[allow(non_snake_case)]
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 pub fn Gosched() {
-    let g_ptr = match current_m().lock().curg {
-        Some(p) => p,
-        None => return,
-    };
-    // M17b-δ: do NOT runqput before swap_context. Mirroring Go's
-    // mcall(gosched_m), the order must be:
-    //   1. swap_context — saves G's gobuf, transfers to scheduler.
-    //   2. Scheduler (post-swap on M's sched stack) re-enqueues G.
-    //
-    // The previous order (status flip → runqput → swap) opens a
-    // race: between runqput and swap, another M can steal G from
-    // the runq, dispatch_one_g it, and `swap_context(_, &g.gobuf)`
-    // — but g.gobuf has not yet been written by the in-flight
-    // swap. M_other reads STALE gobuf (still holds the previous
-    // yield's saved state) and resumes G at that stale PC/RSP
-    // while M_orig is still walking through Gosched on G's user
-    // stack. Two Ms then write to the same G stack — corruption.
-    //
-    // Status flip stays here (cheap, atomic-store), but the actual
-    // visibility-to-runq is deferred to the post-swap path in
-    // `dispatch_one_g`.
-    unsafe {
-        (*g_ptr.as_ptr()).status = GStatus::Runnable;
-    }
-    let buf_from = unsafe { &mut (*g_ptr.as_ptr()).gobuf as *mut Gobuf };
-    // M17b-ε.α.5: scheduler context now lives in m.g0.gobuf, not in
-    // m.sched_buf. No M lock needed: g0 is per-M and only the M's
-    // own thread reads/writes its g0.gobuf via swap_context save.
-    let buf_to = super::m::current_g0_gobuf() as *const Gobuf;
-    unsafe {
-        swap_context(buf_from, buf_to);
+    if current_m().lock().curg.is_none() {
+        return;
     }
     unsafe {
-        (*g_ptr.as_ptr()).status = GStatus::Running;
+        mcall(gosched_m);
     }
 }
 
 /// Internal: invoked when a G's entry closure returns. Marks the G
-/// dead and swaps back to the scheduler. Equivalent to Go's
-/// `runtime.goexit1` (proc.go:4431).
+/// dead, switches to g0, and runs `goexit0` on g0's stack — which
+/// frees the G and calls `schedule()`. Equivalent to Go's
+/// `runtime.goexit1` → `mcall(goexit0)` (proc.go:4431, 4459).
 ///
-/// **m.locks**: not bumped here. Once status is `Dead`, the SIGURG
-/// preempt handler filters on `curg.status == Running` and skips
-/// injection — the only PC-window where the handler could reach us
-/// is the swap_context asm itself, covered by phase-C's PC-range
-/// guard. A balanced bump pair is impossible because the swap_context
-/// here never returns to this stack.
+/// **m.locks**: not bumped here. `goexit0` runs on g0 and never
+/// returns to this stack; the trampoline `unreachable_dead` is
+/// retained as a defensive marker.
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 fn goexit() -> ! {
-    let g_ptr = current_m().lock().curg.expect("goexit: no current G");
     unsafe {
-        (*g_ptr.as_ptr()).status = GStatus::Dead;
-    }
-    let buf_from = unsafe { &mut (*g_ptr.as_ptr()).gobuf as *mut Gobuf };
-    // M17b-ε.α.5: g0.gobuf replaces m.sched_buf as the scheduler
-    // save slot. No M lock needed for g0 access (per-M, single-thread).
-    let buf_to = super::m::current_g0_gobuf() as *const Gobuf;
-    unsafe {
-        swap_context(buf_from, buf_to);
+        mcall(goexit0);
     }
     unreachable_dead()
 }
@@ -523,138 +498,193 @@ fn dispatch_validate_g(g_ptr: NonNull<G>) {
     dispatch_g_trap_dump(b"  reason       : stack invariants violated", g_ptr)
 }
 
+/// **`mcall(fn)`** — switch to g0's stack and call `fn(curg)`.
+///
+/// User-G-side half of Go's `runtime·mcall` (asm_amd64.s:427). Saves
+/// the caller's PC/SP/BP/callee-saved into `curg.gobuf`, then the
+/// asm switches to `m.g0.gobuf.sp` and calls `fn(curg)`. `fn` must
+/// be `-> !` and end with `schedule()` (or `execute(g)`), which uses
+/// `gogo` to leave g0 — never returning to mcall_asm directly.
+///
+/// **Why a Rust wrapper rather than pure asm.** Go encodes `curg`
+/// in R14 and `m.g0` at a fixed offset of `g.m`, so its mcall is
+/// pure asm. Rust's calling convention has no dedicated `g`
+/// register, so we resolve `curg` and `g0` in Rust here and hand the
+/// gobuf pointers + fn + arg to a 4-arg asm helper.
+///
+/// **Save discipline.** `mcall_asm` saves the *return address from
+/// this Rust frame's call* as `curg.gobuf.pc`. So when something
+/// later calls `gogo(&curg.gobuf)`, control resumes at the
+/// instruction after `call mcall_asm` inside this wrapper, which
+/// then returns normally to the caller (Gosched/gopark/goexit). The
+/// user-visible flow is: caller calls Gosched → mcall(gosched_m)
+/// runs gosched_m on g0 → schedule loops, eventually execute(curg)
+/// gogos back into curg's saved frame → mcall returns → Gosched
+/// returns → user code resumes.
+///
+/// **Safety.** Caller must already be running as a goroutine (i.e.
+/// `m.curg` is `Some`). The Rust wrapper does no allocation and no
+/// SpinLock-Guard-spanning work between curg lookup and the asm call.
 #[inline(never)]
 #[link_section = "goish_rt_text"]
-fn dispatch_one_g(mut g_ptr: NonNull<G>) {
+unsafe fn mcall(fn_to_call: extern "C" fn(*mut G) -> !) {
+    let g0_ptr = current_m_storage().g0.load(Ordering::Acquire);
+    debug_assert!(!g0_ptr.is_null(), "mcall: g0 not initialized");
+
+    let curg = current_m().lock().curg.expect("mcall: no current G");
+
+    let from_buf = unsafe { &mut (*curg.as_ptr()).gobuf as *mut Gobuf };
+    let to_buf = unsafe { &(*g0_ptr).gobuf as *const Gobuf };
+
+    unsafe {
+        mcall_asm(from_buf, to_buf, fn_to_call, curg.as_ptr());
+    }
+}
+
+/// **`execute(gp)`** — run `gp` on the current M. Mirrors Go's
+/// `execute` (proc.go:3336). Never returns: ends in `gogo(&gp.gobuf)`,
+/// which JMPs into the goroutine's saved context.
+///
+/// Must be called on g0's stack (i.e., from inside `schedule()`,
+/// `gosched_m`, `park_m`, or `goexit0`). The first call after a
+/// goroutine is allocated lazily lays out the `Idle → Running` first
+/// frame via `make_context_gogo`.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
+fn execute(mut g_ptr: NonNull<G>) -> ! {
     dispatch_validate_g(g_ptr);
     let g = unsafe { g_ptr.as_mut() };
     if g.status == GStatus::Idle {
+        // First-time dispatch: lay out gobuf for gogo (pc=g_entry,
+        // sp=stack_top-8, with goexit_trampoline parked at [sp]).
         unsafe {
-            make_context(&mut g.gobuf, g.stack.top(), g_entry);
+            make_context_gogo(&mut g.gobuf, g.stack.top(), g_entry);
         }
     }
     g.status = GStatus::Running;
 
-    // M17b-δ: clear g.preempt at dispatch entry. Belt-and-braces
-    // with the rsp-range guard in `cooperative_preempt_check`: even
-    // if some unforeseen path calls the check while on M's
-    // scheduler stack with `m.curg` pointing to this G,
-    // `preempt.swap(false)` will return `false` and skip Gosched.
-    // Without this, a sysmon-flagged preempt bit set during the
-    // G's previous run would still be live across re-dispatch.
+    // Clear stale preempt-request flag; sysmon will set it again if
+    // this G runs too long.
     g.preempt.store(false, Ordering::Relaxed);
 
-    // Capture buf_from from this M's storage. M's address is stable
-    // (static MAIN_M for the main thread, leaked Box for workers),
-    // so the raw `*mut Gobuf` outlives the lock release.
-    //
-    // M17b-ε.α.5: scheduler save slot is now `m.g0.gobuf` (a per-M
-    // permanent G allocation), not `m.sched_buf`. The g0 pointer in
-    // MStorage is set during bootstrap and never changes — its
-    // gobuf address is stable for the M's lifetime.
     {
         let mut m = current_m().lock();
         m.curg = Some(g_ptr);
     }
-    let buf_from = super::m::current_g0_gobuf();
-    // M18b-β: stamp the start time so sysmon's force-preempt scan
-    // can compute elapsed runtime. Lock-free atomic so sysmon reads
-    // without blocking. Must be SET before the swap (sysmon needs
-    // a non-zero value the moment the G starts running) and CLEARED
-    // after the swap returns (so a parked-G's stale value doesn't
-    // make sysmon target this M while it's idle).
+    // M18b-β: stamp the start time so sysmon's force-preempt scan can
+    // compute elapsed runtime. Lock-free; cleared in the yield-fn
+    // bodies (gosched_m / park_m / goexit0) after dropg.
     current_m_storage()
         .start_running_ns
         .store(crate::runtime::sysmon::monotonic_ns(), Ordering::Release);
     DISPATCH_STAMP_COUNT.fetch_add(1, Ordering::Relaxed);
-    let buf_to = &g.gobuf as *const Gobuf;
-    unsafe {
-        swap_context(buf_from, buf_to);
-    }
-    // Clear the start-time stamp now that no G is running.
+
+    let buf = &g.gobuf as *const Gobuf;
+    unsafe { gogo(buf) }
+}
+
+/// `dropg` — sever the M↔G ownership and clear the run-time stamp.
+/// Mirrors Go's `dropg()` (proc.go:3322): zeros `m.curg` and `gp.m`.
+/// Goish carries no `gp.m` field yet; only the M side is cleared.
+#[inline(always)]
+fn dropg() {
+    current_m().lock().curg = None;
     current_m_storage()
         .start_running_ns
         .store(0, Ordering::Release);
+}
 
-    // ── post-swap: if G parked, run its commit fn (Go's park_m). ──
-    let commit = current_m().lock().waitunlockf.take();
-    if let Some(f) = commit {
-        // Status flip to Waiting — strictly AFTER gobuf was written
-        // by swap_context (above) and BEFORE the commit fn releases
-        // the lock that gates remote-M discovery of this G's sudog.
-        g.status = GStatus::Waiting;
-        // dropg analog: M no longer owns G (proc.go:4256).
-        current_m().lock().curg = None;
+/// `gosched_m(gp)` — Gosched continuation on g0. Mirrors Go's
+/// `gosched_m` → `goschedImpl(gp, false)` (proc.go:4283, 4318).
+///
+/// Runs after `mcall(gosched_m)` switched to g0. Sets gp Runnable,
+/// drops M's claim, re-enqueues, then `schedule()` picks the next G.
+extern "C" fn gosched_m(g_ptr: *mut G) -> ! {
+    let g = NonNull::new(g_ptr).expect("gosched_m: null gp");
+    unsafe {
+        (*g_ptr).status = GStatus::Runnable;
+    }
+    dropg();
+    // `next=false` matches Go's `goschedImpl(_, false)` — Gosched
+    // yields to the back of the queue (proc.go:4307 globrunqput).
+    enqueue_runnable(g, false);
+    schedule()
+}
 
-        let parked = unsafe { f(g_ptr) };
+/// `park_m(gp)` — gopark continuation on g0. Mirrors Go's `park_m`
+/// (proc.go:4229). Sets gp Waiting, drops M's claim, runs the
+/// commit fn (the unlockf that releases chan/select locks); on
+/// `false` the park is aborted and gp is `execute()`d immediately,
+/// otherwise schedule() picks something else.
+extern "C" fn park_m(g_ptr: *mut G) -> ! {
+    let g = NonNull::new(g_ptr).expect("park_m: null gp");
+
+    // Take waitunlockf but DO NOT clear waitlock yet — goish's
+    // commit fns (e.g. `chan_park_commit`) read `m.waitlock` from M
+    // rather than receive it as an arg, so the slot must remain
+    // populated across the unlockf call. Mirrors Go's proc.go:4258
+    // which passes mp.waitlock to fn(gp, mp.waitlock) and then nil's
+    // both fields *after* the call returns.
+    let unlockf = current_m().lock().waitunlockf.take();
+
+    unsafe {
+        (*g_ptr).status = GStatus::Waiting;
+    }
+    dropg();
+
+    if let Some(f) = unlockf {
+        let parked = unsafe { f(g) };
+        // Clear waitlock now that unlockf has consumed it (matches
+        // Go's `mp.waitlock = nil` at proc.go:4261).
+        current_m().lock().waitlock = core::ptr::null();
         if !parked {
-            // unlockf returned false — abort the park. Mirror
-            // proc.go:4262-4273: status → Runnable, re-enqueue so
-            // the next dispatch picks G up again. Route through the
-            // current P's runq when bound (M17b-β); else global.
-            // `next=true` keeps the aborted G hot on this P.
-            g.status = GStatus::Runnable;
-            enqueue_runnable(g_ptr, true);
-            return;
-        }
-        // Committed park. G stays in Waiting until something calls
-        // goready(g) on it. M stays free for the next iteration.
-        return;
-    }
-
-    current_m().lock().curg = None;
-
-    // M17b-δ: post-swap re-enqueue for `Gosched`. Gosched flips
-    // status to Runnable and swaps to us without touching the
-    // runq — that's deliberate, to avoid the runqput→swap race
-    // where another M could read a not-yet-saved g.gobuf. Now
-    // that swap_context has written g.gobuf and we've cleared
-    // m.curg, the G is safe to expose to other Ms via the
-    // runq. `next=false` matches Go's `goschedImpl(_, false)`
-    // (proc.go:4400) — Gosched yields to the back of the queue.
-    if g.status == GStatus::Runnable {
-        enqueue_runnable(g_ptr, false);
-        return;
-    }
-
-    if g.status == GStatus::Dead {
-        let prev = LIVE_G_COUNT.fetch_sub(1, Ordering::AcqRel);
-        // ── M18b-δ.4: gobuf poison at G free (KASAN-style beacon) ──
-        //
-        // Overwrite the gobuf (Gobuf has no Drop — 7 plain u64 fields)
-        // with `0xDEADBEEFDEADBEEF` BEFORE `Box::from_raw` runs the
-        // remaining drops. If anything later does
-        // `swap_context(_, &dead_g.gobuf)` via a stale pointer, the
-        // load `mov rsp, [rsi+0x00]` reads 0xDEADBEEFDEADBEEF as RSP
-        // and the resulting fault address is unmistakable in core
-        // dumps and rr replays.
-        //
-        // Limited to gobuf because other G fields (stack: Stack,
-        // entry: Option<Box<dyn FnOnce()>>) have Drop impls; corrupting
-        // those would crash Box::from_raw itself. Gobuf alone is
-        // enough to catch dispatch-after-free, since
-        // `dispatch_one_g → swap_context` is the load-bearing
-        // dereference path.
-        unsafe {
-            const POISON: u64 = 0xDEADBEEF_DEADBEEF;
-            let gbuf_off = core::mem::offset_of!(G, gobuf);
-            let g_bytes = g_ptr.as_ptr() as *mut u8;
-            let gobuf_size = core::mem::size_of::<Gobuf>();
-            let mut off = 0usize;
-            while off < gobuf_size {
-                (g_bytes.add(gbuf_off + off) as *mut u64).write_volatile(POISON);
-                off += 8;
+            // Abort park (proc.go:4262-4273): status → Runnable;
+            // execute(gp, true) — re-dispatch this same G immediately.
+            unsafe {
+                (*g_ptr).status = GStatus::Runnable;
             }
+            execute(g);
         }
-        let _ = unsafe { Box::from_raw(g_ptr.as_ptr()) };
-        if prev == 1 {
-            // Last live goroutine just exited. Any Ms parked on
-            // futex_wait need a signal so they observe
-            // LIVE_G_COUNT == 0 and exit (workers via ExitThread,
-            // main M via schedule() return).
-            wake_all_idle_m();
+    } else {
+        current_m().lock().waitlock = core::ptr::null();
+    }
+    schedule()
+}
+
+/// `goexit0(gp)` — goexit continuation on g0. Mirrors Go's
+/// `goexit0` (proc.go:4447) plus `gdestroy` (proc.go:4452): casgstatus
+/// to Dead, dropg, decrement live-count, free the G via
+/// `Box::from_raw`, then `schedule()`.
+extern "C" fn goexit0(g_ptr: *mut G) -> ! {
+    unsafe {
+        (*g_ptr).status = GStatus::Dead;
+    }
+    dropg();
+
+    let prev = LIVE_G_COUNT.fetch_sub(1, Ordering::AcqRel);
+
+    // Poison gobuf before the box drops the rest of the G — KASAN-
+    // style beacon for any post-free dispatch via stale pointer.
+    unsafe {
+        const POISON: u64 = 0xDEADBEEF_DEADBEEF;
+        let gbuf_off = core::mem::offset_of!(G, gobuf);
+        let g_bytes = g_ptr as *mut u8;
+        let gobuf_size = core::mem::size_of::<Gobuf>();
+        let mut off = 0usize;
+        while off < gobuf_size {
+            (g_bytes.add(gbuf_off + off) as *mut u64).write_volatile(POISON);
+            off += 8;
         }
     }
+    let _ = unsafe { Box::from_raw(g_ptr) };
+
+    if prev == 1 {
+        // Last live goroutine just exited. Wake every parked M so
+        // they observe LIVE_G_COUNT == 0 and either exit (main M)
+        // or stay parked (workers, reaped by exit_group).
+        wake_all_idle_m();
+    }
+    schedule()
 }
 
 /// Drain the run queue. Returns when **all live goroutines** have
@@ -674,28 +704,47 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
 /// parked goroutines with no waker (a user-program deadlock). Go's
 /// runtime detects this via `checkdead` (proc.go:5566); goish v1
 /// will hang in that case until M18b lands.
+///
+/// **M17b-ε**: under the mcall-pattern, `schedule()` runs on g0's
+/// stack and never returns. Picks a runnable G via `find_runnable`
+/// and hands off to `execute(g)` (which uses `gogo` to JMP into the
+/// G — also no return). When no work is left and `LIVE_G_COUNT == 0`
+/// the main M exits the process (`Exit(0)`); workers stay parked
+/// forever (process exit will reap them).
 #[inline(never)]
 #[link_section = "goish_rt_text"]
-pub fn schedule() {
+pub fn schedule() -> ! {
     loop {
         match find_runnable() {
-            Some(g) => dispatch_one_g(g),
+            Some(g) => execute(g), // never returns
             None => {
                 if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
-                    return;
+                    maybe_exit_main_m();
                 }
                 // Brief spin (~32 PAUSE) to absorb producer
                 // latency, then futex-park. Mirrors Go's
                 // `runtime.findRunnable` spin-then-stop pattern.
                 spin_or_yield();
                 if LIVE_G_COUNT.load(Ordering::Acquire) == 0 {
-                    return;
+                    maybe_exit_main_m();
                 }
                 if !has_local_or_global_work() {
                     park_m_idle();
                 }
             }
         }
+    }
+}
+
+/// Exit the process if the calling thread is the main M (id == 0).
+/// On worker Ms this is a no-op — workers remain parked forever and
+/// are reaped by `exit_group(2)` from the main M's `Exit`.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
+fn maybe_exit_main_m() {
+    let id = current_m().lock().id;
+    if id == 0 {
+        crate::syscall::Exit(0);
     }
 }
 
@@ -883,33 +932,10 @@ fn wake_all_idle_m() {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 pub fn m_schedule_loop() -> ! {
-    loop {
-        match find_runnable() {
-            Some(g) => dispatch_one_g(g),
-            None => {
-                // Brief spin then futex-park (M17c). spin_or_yield
-                // first so a producer pushing inflight work right
-                // now can avoid the syscall round-trip.
-                //
-                // M17b-γ: workers do *not* self-exit on
-                // `LIVE_G_COUNT == 0`. Mirroring Go's `stopm`
-                // (proc.go:2997) → `mPark` (proc.go:1972), an M
-                // that finds nothing runnable parks via notesleep
-                // until a producer's `wakep` revives it. The
-                // pre-γ `ExitThread(0)` was a M17a optimization
-                // that does not appear in Go and prevents
-                // `find_runnable`'s steal pass from finding any
-                // alive Ms to participate. Process exit is
-                // handled by main M's `runtime.exit(0)` in
-                // `__goish_rt0`, which calls `exit_group(2)` and
-                // reaps every parked worker atomically.
-                spin_or_yield();
-                if !has_local_or_global_work() {
-                    park_m_idle();
-                }
-            }
-        }
-    }
+    // M17b-ε: schedule() is the unified entry point under the mcall
+    // pattern; it never returns. The main-vs-worker shutdown branch
+    // lives inside `maybe_exit_main_m()` (workers stay parked).
+    schedule()
 }
 
 /// Number of live goroutines (created via `newproc`, not yet exited).
@@ -1130,49 +1156,33 @@ pub fn current_g() -> Option<NonNull<G>> {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 pub fn gopark(commit: ParkCommit, lock_atom: *const AtomicBool) {
-    let g_ptr = match current_m().lock().curg {
-        Some(p) => p,
-        None => return,
-    };
+    if current_m().lock().curg.is_none() {
+        return;
+    }
 
-    // Hold m.locks > 0 across the setup → swap window. Unlike
-    // Gosched/goexit, gopark's G has status == Running until
-    // dispatch_one_g flips it to Waiting *post*-swap (the commit-fn
-    // pattern), so the SIGURG handler's status filter does NOT cover
-    // this body. Only the lock counter does.
-    //
-    // Discipline mirrors Go's gopark (proc.go:419):
+    // Hold m.locks > 0 across the setup → mcall window. Mirrors Go's
+    // gopark (proc.go:419):
     //   acquirem → setup → releasem → mcall(park_m)
-    // i.e. the matching releasem runs *before* the context switch so
-    // the +1 / -1 are accounted on the same M (the parker's M may
-    // differ from the resuming M after multi-M migration). The
-    // residual window between releasem and swap_context entry is
-    // covered by phase-C's PC-range guard (`is_in_runtime_text`).
+    // The matching releasem runs *before* the context switch so the
+    // +1 / -1 are accounted on the same M (the parker's M may differ
+    // from the resuming M after multi-M migration).
     acquirem();
 
-    // Stash commit + lock pointer on the M. dispatch_one_g picks
-    // them up post-swap and runs commit on the scheduler stack.
+    // Stash commit + lock pointer on the M. park_m picks them up on
+    // g0 post-mcall and invokes commit there (after dropg).
     {
         let mut m = current_m().lock();
         m.waitunlockf = Some(commit);
         m.waitlock = lock_atom;
     }
 
-    let buf_from = unsafe { &mut (*g_ptr.as_ptr()).gobuf as *mut Gobuf };
-    // M17b-ε.α.5: scheduler save lives in m.g0.gobuf.
-    let buf_to = super::m::current_g0_gobuf() as *const Gobuf;
     releasem();
     unsafe {
-        swap_context(buf_from, buf_to);
+        mcall(park_m);
     }
-
-    // Resumed (or commit returned false). dispatch_one_g already set
-    // status appropriately; the next dispatch into us via
-    // dispatch_one_g restored Running before swap_context returned
-    // here, so this assignment is defensive but harmless.
-    unsafe {
-        (*g_ptr.as_ptr()).status = GStatus::Running;
-    }
+    // Resumed via gogo from execute() — control re-enters the user
+    // G's frame at the instruction after `mcall(park_m)`'s asm call.
+    // status was restored to Running by execute().
 }
 
 /// `block_forever_commit` — gopark commit fn for nil-chan send/recv.

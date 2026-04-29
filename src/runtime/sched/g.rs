@@ -113,8 +113,28 @@ impl G {
     /// mp.g0.stack.{lo, hi} = …` pattern from `proc.go:2346` /
     /// `os_linux.go:newosproc`.
     pub fn new_g0(stack_base: *mut u8, stack_size: usize) -> Self {
+        // M17b-ε.β: stamp g0.gobuf.sp = top-of-stack so the first
+        // `mcall(_)` on this M has a valid g0 stack pointer to switch
+        // to. Mirrors Go's `mstart1` (proc.go:1911):
+        //   gp.sched.sp = getcallersp()
+        // We use the stack top (highest address) rather than capturing
+        // the current rsp because:
+        //   1. We may not yet be running on this stack (worker M's g0
+        //      is allocated by the parent thread before clone(2)).
+        //   2. Every mcall switches rsp to this exact value, so the
+        //      yield fn body always starts at a fresh frame at the
+        //      top — bounded stack use, no growth across mcalls.
+        //
+        // The 16-byte alignment is enforced because SysV expects
+        // `rsp % 16 == 0` immediately before a CALL. After the asm
+        // `mov rsp, [rsi+0x00]` and the subsequent `call rdx` in
+        // mcall_asm, the resulting `rsp % 16 == 8` matches the SysV
+        // convention at fn entry.
+        let top = ((stack_base as usize) + stack_size) & !0xf;
+        let mut gobuf = Gobuf::new();
+        gobuf.rsp = top as u64;
         G {
-            gobuf: Gobuf::new(),
+            gobuf,
             stack: Stack::adopted(stack_base, stack_size),
             // g0 is always Running: it represents the M's scheduler
             // context. Status changes never apply to g0; only `curg`

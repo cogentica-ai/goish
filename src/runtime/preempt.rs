@@ -130,6 +130,12 @@ pub const ASYNC_PREEMPT_STACK: usize = 1024;
 extern "C" {
     fn goish_async_preempt_end();
     fn goish_swap_context_end();
+    // M17b-ε β.2/β.3: end-markers for the new asm primitives. The
+    // SIGURG handler refuses injection when PC falls inside `gogo`'s
+    // load-and-JMP or `mcall_asm`'s save-and-switch — same rationale
+    // as `swap_context`: half-switched RSP would crash the trampoline.
+    fn goish_gogo_end();
+    fn goish_mcall_end();
 }
 
 // ─── Diagnostic counters ───────────────────────────────────────────
@@ -191,6 +197,33 @@ fn is_in_trampoline(pc: u64) -> bool {
 fn is_in_swap_context(pc: u64) -> bool {
     let start = crate::runtime::sched::swap_context as usize as u64;
     let end = goish_swap_context_end as usize as u64;
+    pc >= start && pc < end
+}
+
+/// True when the saved RIP falls inside `gogo`'s asm — the
+/// JMP-into-G primitive. Same half-switched-stack risk as
+/// `is_in_swap_context`: between `mov rsp, [rdi+0x00]` and the
+/// final indirect JMP through gobuf.pc, RSP belongs to the resuming
+/// G but PC has not yet transferred. SIGURG injection here would
+/// crash the trampoline on the target G's stack with an undefined
+/// resume PC.
+#[inline]
+fn is_in_gogo(pc: u64) -> bool {
+    let start = crate::runtime::sched::gogo as usize as u64;
+    let end = goish_gogo_end as usize as u64;
+    pc >= start && pc < end
+}
+
+/// True when the saved RIP falls inside `mcall_asm`'s save-and-switch
+/// asm. Mirrors `is_in_swap_context`: between the partial save of
+/// caller's PC/SP into `*from` and the `call rdx` that re-enters
+/// scheduler code on g0, the M's stack pointer is mid-transition.
+#[inline]
+fn is_in_mcall_asm(pc: u64) -> bool {
+    // mcall_asm is `pub(crate)` so we can't take its address through
+    // a `pub use`; reach into the module directly.
+    let start = crate::runtime::sched::mcall_asm as usize as u64;
+    let end = goish_mcall_end as usize as u64;
     pc >= start && pc < end
 }
 
@@ -473,10 +506,15 @@ extern "C" fn goish_preempt_sigtramp(
 
     let pc = unsafe { (*ctx).uc_mcontext.gregs[REG_RIP] };
 
-    // 2. PC ∉ trampoline range AND PC ∉ swap_context range. Both
-    // are runtime asm windows where m.locks == 0 but injection
-    // would corrupt scheduler state.
-    if is_in_trampoline(pc) || is_in_swap_context(pc) {
+    // 2. PC ∉ trampoline range AND PC ∉ {swap_context, gogo,
+    // mcall_asm} range. All of these are runtime asm windows where
+    // m.locks == 0 but injection would corrupt scheduler state by
+    // hijacking a half-switched RSP.
+    if is_in_trampoline(pc)
+        || is_in_swap_context(pc)
+        || is_in_gogo(pc)
+        || is_in_mcall_asm(pc)
+    {
         SKIP_TRAMPOLINE.fetch_add(1, Ordering::Relaxed);
         return;
     }
