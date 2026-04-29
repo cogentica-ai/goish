@@ -275,7 +275,7 @@ pub fn newproc(closure: Box<dyn FnOnce()>) {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 pub fn Gosched() {
-    let g_ptr = match current_m().lock().current_g {
+    let g_ptr = match current_m().lock().curg {
         Some(p) => p,
         None => return,
     };
@@ -325,7 +325,7 @@ pub fn Gosched() {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 fn goexit() -> ! {
-    let g_ptr = current_m().lock().current_g.expect("goexit: no current G");
+    let g_ptr = current_m().lock().curg.expect("goexit: no current G");
     unsafe {
         (*g_ptr.as_ptr()).status = GStatus::Dead;
     }
@@ -356,7 +356,7 @@ extern "C" fn g_entry() -> ! {
     let entry = {
         let g_ptr = current_m()
             .lock()
-            .current_g
+            .curg
             .expect("g_entry: no current G");
         unsafe { (*g_ptr.as_ptr()).entry.take().expect("g_entry: empty entry") }
     };
@@ -539,7 +539,7 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
     // M17b-δ: clear g.preempt at dispatch entry. Belt-and-braces
     // with the rsp-range guard in `cooperative_preempt_check`: even
     // if some unforeseen path calls the check while on M's
-    // scheduler stack with `m.current_g` pointing to this G,
+    // scheduler stack with `m.curg` pointing to this G,
     // `preempt.swap(false)` will return `false` and skip Gosched.
     // Without this, a sysmon-flagged preempt bit set during the
     // G's previous run would still be live across re-dispatch.
@@ -550,7 +550,7 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
     // so the &mut sched_buf raw pointer outlives the lock release.
     let buf_from = {
         let mut m = current_m().lock();
-        m.current_g = Some(g_ptr);
+        m.curg = Some(g_ptr);
         &mut m.sched_buf as *mut Gobuf
     };
     // M18b-β: stamp the start time so sysmon's force-preempt scan
@@ -580,7 +580,7 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
         // the lock that gates remote-M discovery of this G's sudog.
         g.status = GStatus::Waiting;
         // dropg analog: M no longer owns G (proc.go:4256).
-        current_m().lock().current_g = None;
+        current_m().lock().curg = None;
 
         let parked = unsafe { f(g_ptr) };
         if !parked {
@@ -598,14 +598,14 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
         return;
     }
 
-    current_m().lock().current_g = None;
+    current_m().lock().curg = None;
 
     // M17b-δ: post-swap re-enqueue for `Gosched`. Gosched flips
     // status to Runnable and swaps to us without touching the
     // runq — that's deliberate, to avoid the runqput→swap race
     // where another M could read a not-yet-saved g.gobuf. Now
     // that swap_context has written g.gobuf and we've cleared
-    // m.current_g, the G is safe to expose to other Ms via the
+    // m.curg, the G is safe to expose to other Ms via the
     // runq. `next=false` matches Go's `goschedImpl(_, false)`
     // (proc.go:4400) — Gosched yields to the back of the queue.
     if g.status == GStatus::Runnable {
@@ -1095,7 +1095,7 @@ pub fn runq_len() -> usize {
 /// scheduler stack itself). Higher layers (channels, sync) need this
 /// to identify which G to park or wake.
 pub fn current_g() -> Option<NonNull<G>> {
-    current_m().lock().current_g
+    current_m().lock().curg
 }
 
 /// Suspend the current goroutine in the `Waiting` state. The G will
@@ -1126,7 +1126,7 @@ pub fn current_g() -> Option<NonNull<G>> {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 pub fn gopark(commit: ParkCommit, lock_atom: *const AtomicBool) {
-    let g_ptr = match current_m().lock().current_g {
+    let g_ptr = match current_m().lock().curg {
         Some(p) => p,
         None => return,
     };

@@ -65,7 +65,10 @@ pub struct M {
     pub procid: AtomicI32,
     /// Currently-running goroutine on this M, or `None` while the
     /// M is on its scheduler stack between dispatches.
-    pub current_g: Option<NonNull<G>>,
+    /// Currently-running user goroutine on this M, or `None` while
+    /// the M is on its `g0` scheduler stack between dispatches.
+    /// Mirrors Go's `m.curg` (runtime/runtime2.go:544).
+    pub curg: Option<NonNull<G>>,
     /// Saved register set when this M is suspended (i.e. while a
     /// goroutine is executing on it). `swap_context(&mut sched_buf,
     /// &g.gobuf)` transfers control from the M's scheduler context
@@ -94,7 +97,7 @@ impl M {
         M {
             id,
             procid: AtomicI32::new(0),
-            current_g: None,
+            curg: None,
             sched_buf: Gobuf::new(),
             waitunlockf: None,
             waitlock: core::ptr::null(),

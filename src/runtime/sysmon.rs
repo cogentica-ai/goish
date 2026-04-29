@@ -226,7 +226,7 @@ fn check_force_preempt(now: i64) {
         // pointer or the freshly committed one. Either is safe to
         // act on (we just ask the handler to consider it).
         let m = unsafe { storage.m.data_unchecked() };
-        let g_ptr = match m.current_g {
+        let g_ptr = match m.curg {
             Some(p) => p,
             None => return,
         };

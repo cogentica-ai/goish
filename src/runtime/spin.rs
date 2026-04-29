@@ -93,12 +93,12 @@ fn cooperative_preempt_check() {
         return;
     }
     let m = unsafe { crate::runtime::sched::current_m().data_unchecked() };
-    let g_ptr = match m.current_g {
+    let g_ptr = match m.curg {
         Some(p) => p,
         None => return,
     };
     let g_ref = unsafe { g_ptr.as_ref() };
-    // M17b-δ: dispatch_one_g sets `m.current_g = Some(g)` BEFORE
+    // M17b-δ: dispatch_one_g sets `m.curg = Some(g)` BEFORE
     // `swap_context` jumps to G's stack. The Guard<M> drop at the
     // end of that block runs `raw_unlock`, which calls us. If we
     // fired Gosched here we would overwrite g.gobuf with M's

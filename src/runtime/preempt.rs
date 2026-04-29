@@ -498,7 +498,7 @@ extern "C" fn goish_preempt_sigtramp(
     // 3. M has a current G — lock-free read justified by Theorem 1
     // (m.locks == 0 ⟹ no concurrent write to current_g).
     let m = unsafe { current_m().data_unchecked() };
-    let g_ptr = match m.current_g {
+    let g_ptr = match m.curg {
         Some(p) => p,
         None => {
             SKIP_NO_CURG.fetch_add(1, Ordering::Relaxed);
