@@ -69,12 +69,6 @@ pub struct M {
     /// the M is on its `g0` scheduler stack between dispatches.
     /// Mirrors Go's `m.curg` (runtime/runtime2.go:544).
     pub curg: Option<NonNull<G>>,
-    /// Saved register set when this M is suspended (i.e. while a
-    /// goroutine is executing on it). `swap_context(&mut sched_buf,
-    /// &g.gobuf)` transfers control from the M's scheduler context
-    /// into the goroutine; `swap_context(&mut g.gobuf, &sched_buf)`
-    /// transfers it back.
-    pub sched_buf: Gobuf,
     /// Park-commit fn populated by `gopark` and consumed by
     /// `dispatch_one_g` post-swap (see `scheduler::dispatch_one_g`).
     /// `Some(_)` between the gopark call site and the commit
@@ -98,7 +92,6 @@ impl M {
             id,
             procid: AtomicI32::new(0),
             curg: None,
-            sched_buf: Gobuf::new(),
             waitunlockf: None,
             waitlock: core::ptr::null(),
         }
@@ -216,6 +209,26 @@ pub static MAIN_M: MStorage = MStorage::new(0);
 /// `fs` base is planted by `clone(2)` with `CLONE_SETTLS` atomically
 /// with thread creation, before any user code on the worker runs.
 static TLS_READY: AtomicBool = AtomicBool::new(false);
+
+/// M17b-ε.α.5: pointer to the current M's `g0.gobuf` — the
+/// scheduler-context save slot. Used as the `swap_context` "from"
+/// slot when entering a user G (saves M's pre-dispatch state) and
+/// as the "to" slot when a user G yields (resumes M's scheduler
+/// loop).
+///
+/// Mirrors Go's `m.g0.sched` (used as `gp.sched` of the g0 G in
+/// asm `gogo`/`mcall` save/restore). Replaces the legacy
+/// `m.sched_buf` slot.
+///
+/// Precondition: `g0` has been allocated for the calling M (i.e.
+/// `setup_main_g0` for main M, `spawn_worker_m` for workers). After
+/// bootstrap, every M that runs scheduler code has its g0 wired.
+#[inline]
+pub fn current_g0_gobuf() -> *mut crate::runtime::sched::gobuf::Gobuf {
+    let g0_ptr = current_m_storage().g0.load(Ordering::Acquire);
+    debug_assert!(!g0_ptr.is_null(), "current_g0_gobuf: g0 not yet initialized");
+    unsafe { &mut (*g0_ptr).gobuf as *mut crate::runtime::sched::gobuf::Gobuf }
+}
 
 /// Mark TLS as ready. Called once from `setup_main_tls` after
 /// `arch_prctl(ARCH_SET_FS, …)` succeeds. Idempotent.

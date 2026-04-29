@@ -55,8 +55,8 @@ mod stack;
 pub use g::{GStatus, SELECT_WAIT_MAX, G};
 pub use gobuf::{make_context, swap_context, Gobuf};
 pub use m::{
-    acquirem, current_m, current_m_locks, current_m_storage, is_tls_ready, releasem,
-    setup_main_g0, setup_main_tls, MStorage, ParkCommit, M, MAIN_M,
+    acquirem, current_g0_gobuf, current_m, current_m_locks, current_m_storage, is_tls_ready,
+    releasem, setup_main_g0, setup_main_tls, MStorage, ParkCommit, M, MAIN_M,
 };
 pub use p::{
     acquirep, bootstrap_ps, current_p, for_each_p, num_ps, p_at, releasep, LOCAL_RUNQ_SIZE,

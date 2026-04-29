@@ -300,10 +300,10 @@ pub fn Gosched() {
         (*g_ptr.as_ptr()).status = GStatus::Runnable;
     }
     let buf_from = unsafe { &mut (*g_ptr.as_ptr()).gobuf as *mut Gobuf };
-    let buf_to = {
-        let m = current_m().lock();
-        &m.sched_buf as *const Gobuf
-    };
+    // M17b-ε.α.5: scheduler context now lives in m.g0.gobuf, not in
+    // m.sched_buf. No M lock needed: g0 is per-M and only the M's
+    // own thread reads/writes its g0.gobuf via swap_context save.
+    let buf_to = super::m::current_g0_gobuf() as *const Gobuf;
     unsafe {
         swap_context(buf_from, buf_to);
     }
@@ -330,10 +330,9 @@ fn goexit() -> ! {
         (*g_ptr.as_ptr()).status = GStatus::Dead;
     }
     let buf_from = unsafe { &mut (*g_ptr.as_ptr()).gobuf as *mut Gobuf };
-    let buf_to = {
-        let m = current_m().lock();
-        &m.sched_buf as *const Gobuf
-    };
+    // M17b-ε.α.5: g0.gobuf replaces m.sched_buf as the scheduler
+    // save slot. No M lock needed for g0 access (per-M, single-thread).
+    let buf_to = super::m::current_g0_gobuf() as *const Gobuf;
     unsafe {
         swap_context(buf_from, buf_to);
     }
@@ -547,12 +546,17 @@ fn dispatch_one_g(mut g_ptr: NonNull<G>) {
 
     // Capture buf_from from this M's storage. M's address is stable
     // (static MAIN_M for the main thread, leaked Box for workers),
-    // so the &mut sched_buf raw pointer outlives the lock release.
-    let buf_from = {
+    // so the raw `*mut Gobuf` outlives the lock release.
+    //
+    // M17b-ε.α.5: scheduler save slot is now `m.g0.gobuf` (a per-M
+    // permanent G allocation), not `m.sched_buf`. The g0 pointer in
+    // MStorage is set during bootstrap and never changes — its
+    // gobuf address is stable for the M's lifetime.
+    {
         let mut m = current_m().lock();
         m.curg = Some(g_ptr);
-        &mut m.sched_buf as *mut Gobuf
-    };
+    }
+    let buf_from = super::m::current_g0_gobuf();
     // M18b-β: stamp the start time so sysmon's force-preempt scan
     // can compute elapsed runtime. Lock-free atomic so sysmon reads
     // without blocking. Must be SET before the swap (sysmon needs
@@ -1155,10 +1159,8 @@ pub fn gopark(commit: ParkCommit, lock_atom: *const AtomicBool) {
     }
 
     let buf_from = unsafe { &mut (*g_ptr.as_ptr()).gobuf as *mut Gobuf };
-    let buf_to = {
-        let m = current_m().lock();
-        &m.sched_buf as *const Gobuf
-    };
+    // M17b-ε.α.5: scheduler save lives in m.g0.gobuf.
+    let buf_to = super::m::current_g0_gobuf() as *const Gobuf;
     releasem();
     unsafe {
         swap_context(buf_from, buf_to);
