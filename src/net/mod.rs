@@ -44,6 +44,7 @@ use crate::syscall;
 use crate::types::{byte, int};
 
 mod parse;
+pub mod http;
 
 pub use parse::TCPAddr;
 
