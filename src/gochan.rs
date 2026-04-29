@@ -101,6 +101,14 @@ impl SelectCoord {
 
 /// Wait-list entry for a parked goroutine. Lives on the stack of
 /// the goroutine that's parking.
+///
+/// **Intrusive queue links** (zero-alloc port — task #110 followup):
+/// `next` / `prev` thread the sudog into the chan's `sendq` /
+/// `recvq` doubly-linked lists, replacing the heap-allocated
+/// `VecDeque<NonNull<Sudog<T>>>`. Push, pop, and mid-list cancel
+/// (select pass-3) all run in O(1) under the chan lock with zero
+/// allocator round-trips. Mirrors Go's `sudog.next` / `prev`
+/// (runtime/runtime2.go:335).
 #[doc(hidden)] pub struct Sudog<T> {
     #[doc(hidden)] pub g: NonNull<G>,
     /// Send sudog: starts `Some(value)`, taken by a matching
@@ -115,6 +123,13 @@ impl SelectCoord {
     /// before firing; on a stale sudog the CAS fails and the waker
     /// must skip this entry and try the next.
     #[doc(hidden)] pub coord: Option<NonNull<SelectCoord>>,
+    /// Intrusive queue link (sendq / recvq successor). Null when
+    /// the sudog is at the tail or unqueued. Only mutated under the
+    /// owning chan's `state` SpinLock.
+    #[doc(hidden)] pub next: *mut Sudog<T>,
+    /// Intrusive queue link (sendq / recvq predecessor). Null when
+    /// at the head or unqueued. Same lock discipline as `next`.
+    #[doc(hidden)] pub prev: *mut Sudog<T>,
 }
 
 impl<T> Sudog<T> {
@@ -125,6 +140,8 @@ impl<T> Sudog<T> {
             value: Some(v),
             success: false,
             coord: None,
+            next: core::ptr::null_mut(),
+            prev: core::ptr::null_mut(),
         }
     }
 
@@ -135,6 +152,8 @@ impl<T> Sudog<T> {
             value: None,
             success: false,
             coord: None,
+            next: core::ptr::null_mut(),
+            prev: core::ptr::null_mut(),
         }
     }
 
@@ -151,6 +170,8 @@ impl<T> Sudog<T> {
             value: Some(v),
             success: false,
             coord: Some(coord),
+            next: core::ptr::null_mut(),
+            prev: core::ptr::null_mut(),
         }
     }
 
@@ -162,7 +183,111 @@ impl<T> Sudog<T> {
             value: None,
             success: false,
             coord: Some(coord),
+            next: core::ptr::null_mut(),
+            prev: core::ptr::null_mut(),
         }
+    }
+}
+
+/// Intrusive doubly-linked queue of `Sudog<T>` pointers. All sudogs
+/// live on parking goroutines' stacks; this queue just threads them
+/// via `next`/`prev`. Zero-alloc replacement for the prior
+/// `VecDeque<NonNull<Sudog<T>>>`.
+///
+/// **Concurrency**: only mutated under the owning chan's
+/// `state` SpinLock — same discipline as the prior VecDeque.
+#[doc(hidden)]
+pub struct SudogQueue<T> {
+    head: *mut Sudog<T>,
+    tail: *mut Sudog<T>,
+}
+
+unsafe impl<T> Send for SudogQueue<T> {}
+
+impl<T> SudogQueue<T> {
+    pub const fn new() -> Self {
+        SudogQueue {
+            head: core::ptr::null_mut(),
+            tail: core::ptr::null_mut(),
+        }
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.head.is_null()
+    }
+
+    /// Append `sg` to the tail. Caller must hold the chan lock and
+    /// guarantee `sg` is not already in any queue.
+    pub fn push_back(&mut self, sg: *mut Sudog<T>) {
+        unsafe {
+            (*sg).next = core::ptr::null_mut();
+            (*sg).prev = self.tail;
+            if self.tail.is_null() {
+                self.head = sg;
+            } else {
+                (*self.tail).next = sg;
+            }
+            self.tail = sg;
+        }
+    }
+
+    /// Pop the head, or return null if empty.
+    pub fn pop_front(&mut self) -> *mut Sudog<T> {
+        if self.head.is_null() {
+            return core::ptr::null_mut();
+        }
+        let h = self.head;
+        unsafe {
+            self.head = (*h).next;
+            if self.head.is_null() {
+                self.tail = core::ptr::null_mut();
+            } else {
+                (*self.head).prev = core::ptr::null_mut();
+            }
+            (*h).next = core::ptr::null_mut();
+            (*h).prev = core::ptr::null_mut();
+        }
+        h
+    }
+
+    /// Unlink `sg` from this queue using its own `prev` / `next`
+    /// fields. Caller must guarantee `sg` is in this queue (not
+    /// already popped). O(1).
+    pub fn unlink(&mut self, sg: *mut Sudog<T>) {
+        unsafe {
+            let prev = (*sg).prev;
+            let next = (*sg).next;
+            if prev.is_null() {
+                self.head = next;
+            } else {
+                (*prev).next = next;
+            }
+            if next.is_null() {
+                self.tail = prev;
+            } else {
+                (*next).prev = prev;
+            }
+            (*sg).next = core::ptr::null_mut();
+            (*sg).prev = core::ptr::null_mut();
+        }
+    }
+
+    /// Walk the queue looking for `sg`; if found, unlink and return
+    /// true. Used by `__cancel_*` to distinguish select winner from
+    /// loser. O(N) in the queue length.
+    pub fn cancel(&mut self, sg: *mut Sudog<T>) -> bool {
+        unsafe {
+            let mut cur = self.head;
+            while !cur.is_null() {
+                if cur == sg {
+                    self.unlink(cur);
+                    return true;
+                }
+                cur = (*cur).next;
+            }
+        }
+        false
     }
 }
 
@@ -198,9 +323,9 @@ pub struct HchanState<T> {
     /// Ring buffer of in-flight values. Length is in `[0, cap]`.
     buf: VecDeque<T>,
     /// Goroutines waiting to send.
-    sendq: VecDeque<NonNull<Sudog<T>>>,
+    sendq: SudogQueue<T>,
     /// Goroutines waiting to receive.
-    recvq: VecDeque<NonNull<Sudog<T>>>,
+    recvq: SudogQueue<T>,
 }
 
 /// Public channel descriptor.
@@ -247,8 +372,8 @@ impl<T> chan<T> {
                     closed: false,
                     cap,
                     buf: VecDeque::with_capacity(cap),
-                    sendq: VecDeque::new(),
-                    recvq: VecDeque::new(),
+                    sendq: SudogQueue::new(),
+                    recvq: SudogQueue::new(),
                 }),
             }),
         }
@@ -266,8 +391,8 @@ impl<T> chan<T> {
                     closed: false,
                     cap: 0,
                     buf: VecDeque::new(),
-                    sendq: VecDeque::new(),
-                    recvq: VecDeque::new(),
+                    sendq: SudogQueue::new(),
+                    recvq: SudogQueue::new(),
                 }),
             }),
         }
@@ -352,36 +477,35 @@ impl<T> chan<T> {
         if s.closed && s.buf.is_empty() {
             return Some((T::default(), false));
         }
-        let mut i = 0;
-        while i < s.sendq.len() {
-            let send_ptr = s.sendq[i];
-            if !try_claim_sudog(send_ptr) {
-                i += 1;
-                continue;
-            }
-            s.sendq.remove(i);
-            let sender_v = unsafe {
-                (*send_ptr.as_ptr())
+        unsafe {
+            let mut cur = s.sendq.head;
+            while !cur.is_null() {
+                let next = (*cur).next;
+                let send_ptr = NonNull::new_unchecked(cur);
+                if !try_claim_sudog(send_ptr) {
+                    cur = next;
+                    continue;
+                }
+                s.sendq.unlink(cur);
+                let sender_v = (*cur)
                     .value
                     .take()
-                    .expect("recv-locked: sender sudog empty")
-            };
-            let v = if s.cap == 0 {
-                sender_v
-            } else {
-                let head = s
-                    .buf
-                    .pop_front()
-                    .expect("recv-locked: buf empty with parked sender");
-                s.buf.push_back(sender_v);
-                head
-            };
-            unsafe {
-                (*send_ptr.as_ptr()).success = true;
+                    .expect("recv-locked: sender sudog empty");
+                let v = if s.cap == 0 {
+                    sender_v
+                } else {
+                    let head = s
+                        .buf
+                        .pop_front()
+                        .expect("recv-locked: buf empty with parked sender");
+                    s.buf.push_back(sender_v);
+                    head
+                };
+                (*cur).success = true;
+                let send_g = (*cur).g;
+                goready(send_g);
+                return Some((v, true));
             }
-            let send_g = unsafe { (*send_ptr.as_ptr()).g };
-            goready(send_g);
-            return Some((v, true));
         }
         if let Some(v) = s.buf.pop_front() {
             return Some((v, true));
@@ -398,21 +522,22 @@ impl<T> chan<T> {
         if s.closed {
             fatal(b"goish: chan: send on closed channel\n");
         }
-        let mut i = 0;
-        while i < s.recvq.len() {
-            let recv_ptr = s.recvq[i];
-            if !try_claim_sudog(recv_ptr) {
-                i += 1;
-                continue;
+        unsafe {
+            let mut cur = s.recvq.head;
+            while !cur.is_null() {
+                let next = (*cur).next;
+                let recv_ptr = NonNull::new_unchecked(cur);
+                if !try_claim_sudog(recv_ptr) {
+                    cur = next;
+                    continue;
+                }
+                s.recvq.unlink(cur);
+                (*cur).value = Some(v);
+                (*cur).success = true;
+                let recv_g = (*cur).g;
+                goready(recv_g);
+                return Ok(());
             }
-            s.recvq.remove(i);
-            unsafe {
-                (*recv_ptr.as_ptr()).value = Some(v);
-                (*recv_ptr.as_ptr()).success = true;
-            }
-            let recv_g = unsafe { (*recv_ptr.as_ptr()).g };
-            goready(recv_g);
-            return Ok(());
         }
         if s.buf.len() < s.cap {
             s.buf.push_back(v);
@@ -430,7 +555,7 @@ impl<T> chan<T> {
         if s.closed && s.buf.is_empty() {
             return RegisterStatus::Closed;
         }
-        s.recvq.push_back(NonNull::from(sg));
+        s.recvq.push_back(sg as *mut Sudog<T>);
         RegisterStatus::Registered
     }
 
@@ -442,7 +567,7 @@ impl<T> chan<T> {
         if s.closed {
             return RegisterStatus::Closed;
         }
-        s.sendq.push_back(NonNull::from(sg));
+        s.sendq.push_back(sg as *mut Sudog<T>);
         RegisterStatus::Registered
     }
 }
@@ -502,23 +627,24 @@ impl<T> chan<T> {
         // parking G's pass-3 will cancel it. Removing it here would
         // hide the loser from `__cancel_recv`'s "is it still in the
         // queue?" check that distinguishes winner from loser.
-        let mut i = 0;
-        while i < s.recvq.len() {
-            let recv_ptr = s.recvq[i];
-            if !try_claim_sudog(recv_ptr) {
-                i += 1;
-                continue;
+        unsafe {
+            let mut cur = s.recvq.head;
+            while !cur.is_null() {
+                let next = (*cur).next;
+                let recv_ptr = NonNull::new_unchecked(cur);
+                if !try_claim_sudog(recv_ptr) {
+                    cur = next;
+                    continue;
+                }
+                // Claim succeeded — remove from queue and hand off.
+                s.recvq.unlink(cur);
+                (*cur).value = Some(v);
+                (*cur).success = true;
+                let recv_g = (*cur).g;
+                drop(s);
+                goready(recv_g);
+                return Ok(());
             }
-            // Claim succeeded — remove from queue and hand off.
-            s.recvq.remove(i);
-            unsafe {
-                (*recv_ptr.as_ptr()).value = Some(v);
-                (*recv_ptr.as_ptr()).success = true;
-            }
-            let recv_g = unsafe { (*recv_ptr.as_ptr()).g };
-            drop(s);
-            goready(recv_g);
-            return Ok(());
         }
 
         // Buffer has room — push and return.
@@ -553,37 +679,36 @@ impl<T> chan<T> {
         // Peek + CAS-claim; only remove a sudog from sendq once we
         // successfully claim it. Stale select sudogs stay in place
         // for pass-3 cleanup by the parking G.
-        let mut i = 0;
-        while i < s.sendq.len() {
-            let send_ptr = s.sendq[i];
-            if !try_claim_sudog(send_ptr) {
-                i += 1;
-                continue;
-            }
-            s.sendq.remove(i);
-            let sender_v = unsafe {
-                (*send_ptr.as_ptr())
+        unsafe {
+            let mut cur = s.sendq.head;
+            while !cur.is_null() {
+                let next = (*cur).next;
+                let send_ptr = NonNull::new_unchecked(cur);
+                if !try_claim_sudog(send_ptr) {
+                    cur = next;
+                    continue;
+                }
+                s.sendq.unlink(cur);
+                let sender_v = (*cur)
                     .value
                     .take()
-                    .expect("recv: sender sudog empty")
-            };
-            let v = if s.cap == 0 {
-                sender_v
-            } else {
-                let head = s
-                    .buf
-                    .pop_front()
-                    .expect("recv: buf empty with parked sender");
-                s.buf.push_back(sender_v);
-                head
-            };
-            unsafe {
-                (*send_ptr.as_ptr()).success = true;
+                    .expect("recv: sender sudog empty");
+                let v = if s.cap == 0 {
+                    sender_v
+                } else {
+                    let head = s
+                        .buf
+                        .pop_front()
+                        .expect("recv: buf empty with parked sender");
+                    s.buf.push_back(sender_v);
+                    head
+                };
+                (*cur).success = true;
+                let send_g = (*cur).g;
+                drop(s);
+                goready(send_g);
+                return Some((v, true));
             }
-            let send_g = unsafe { (*send_ptr.as_ptr()).g };
-            drop(s);
-            goready(send_g);
-            return Some((v, true));
         }
 
         // Non-empty buffer.
@@ -603,7 +728,7 @@ impl<T> chan<T> {
         if s.closed {
             return false;
         }
-        s.sendq.push_back(NonNull::from(sg));
+        s.sendq.push_back(sg as *mut Sudog<T>);
         true
     }
 
@@ -615,7 +740,7 @@ impl<T> chan<T> {
         if s.closed && s.buf.is_empty() {
             return Err(());
         }
-        s.recvq.push_back(NonNull::from(sg));
+        s.recvq.push_back(sg as *mut Sudog<T>);
         Ok(())
     }
 
@@ -631,9 +756,7 @@ impl<T> chan<T> {
     #[link_section = "goish_rt_text"]
     pub fn __cancel_send(&self, sg: NonNull<Sudog<T>>) -> bool {
         let mut s = self.inner.state.lock();
-        let before = s.sendq.len();
-        s.sendq.retain(|p| *p != sg);
-        s.sendq.len() != before
+        s.sendq.cancel(sg.as_ptr())
     }
 
     /// Drop a previously-registered recv sudog from `recvq`. Same
@@ -643,9 +766,7 @@ impl<T> chan<T> {
     #[link_section = "goish_rt_text"]
     pub fn __cancel_recv(&self, sg: NonNull<Sudog<T>>) -> bool {
         let mut s = self.inner.state.lock();
-        let before = s.recvq.len();
-        s.recvq.retain(|p| *p != sg);
-        s.recvq.len() != before
+        s.recvq.cancel(sg.as_ptr())
     }
 }
 
@@ -804,34 +925,36 @@ impl<T> chan<T> {
         }
         s.closed = true;
 
-        let mut i = 0;
-        while i < s.recvq.len() {
-            let recv_ptr = s.recvq[i];
-            if !try_claim_sudog(recv_ptr) {
-                i += 1;
-                continue;
+        unsafe {
+            let mut cur = s.recvq.head;
+            while !cur.is_null() {
+                let next = (*cur).next;
+                let recv_ptr = NonNull::new_unchecked(cur);
+                if !try_claim_sudog(recv_ptr) {
+                    cur = next;
+                    continue;
+                }
+                s.recvq.unlink(cur);
+                (*cur).success = false;
+                (*cur).value = None;
+                let recv_g = (*cur).g;
+                goready(recv_g);
+                cur = next;
             }
-            s.recvq.remove(i);
-            unsafe {
-                (*recv_ptr.as_ptr()).success = false;
-                (*recv_ptr.as_ptr()).value = None;
+            let mut cur = s.sendq.head;
+            while !cur.is_null() {
+                let next = (*cur).next;
+                let send_ptr = NonNull::new_unchecked(cur);
+                if !try_claim_sudog(send_ptr) {
+                    cur = next;
+                    continue;
+                }
+                s.sendq.unlink(cur);
+                (*cur).success = false;
+                let send_g = (*cur).g;
+                goready(send_g);
+                cur = next;
             }
-            let recv_g = unsafe { (*recv_ptr.as_ptr()).g };
-            goready(recv_g);
-        }
-        let mut i = 0;
-        while i < s.sendq.len() {
-            let send_ptr = s.sendq[i];
-            if !try_claim_sudog(send_ptr) {
-                i += 1;
-                continue;
-            }
-            s.sendq.remove(i);
-            unsafe {
-                (*send_ptr.as_ptr()).success = false;
-            }
-            let send_g = unsafe { (*send_ptr.as_ptr()).g };
-            goready(send_g);
         }
     }
 }
