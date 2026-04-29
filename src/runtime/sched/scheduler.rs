@@ -532,26 +532,33 @@ fn dispatch_validate_g(g_ptr: NonNull<G>) {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 unsafe fn mcall(fn_to_call: extern "C" fn(*mut G) -> !) {
+    // **Bump m.locks across the wrapper.** Even with lock-free reads
+    // below, SIGURG can land on user G's stack between the reads and
+    // the asm call; the trampoline's `Gosched` would save G's gobuf
+    // mid-wrapper, re-enqueue, and any M might dispatch it — control
+    // would resume inside *this* mcall frame on a possibly-different
+    // M while our captured `g0_ptr` is for the *original* M's g0.
+    // mcall_asm would then switch RSP to the wrong M's g0 stack and
+    // corrupt scheduler state on both Ms.
+    //
+    // `acquirem` makes m.locks > 0 throughout the wrapper; SIGURG is
+    // skipped on the m.locks check. The matching `releasem` runs
+    // **inside the fn body** on g0 (gosched_m / park_m / goexit0
+    // call `releasem` before `schedule()`), since by then we're past
+    // the mcall_asm switch and the wrapper's local state is no longer
+    // load-bearing.
+    acquirem();
+
     // **Why lock-free reads of g0/curg** (not `current_m().lock()`):
     //
     // Both fields are per-M and only mutated by the M's own thread,
     // so a same-thread read is data-race-free without the SpinLock.
     //
-    // Taking the SpinLock here would be unsafe in a subtle way: the
-    // Guard<M> drop runs `cooperative_preempt_check` after releasing
-    // the atom. If sysmon flagged this G for preemption, the check
-    // fires `Gosched` → recursive `mcall(gosched_m)` → the G's
-    // gobuf is saved with PC *inside this Rust mcall body*, the G
-    // gets re-enqueued, and any M can pick it up. When the G is
-    // later resumed via `execute → gogo`, control re-enters this
-    // mcall frame **on a possibly-different M** — but our captured
-    // `g0_ptr` was for the original M's g0. mcall_asm would then
-    // switch RSP to the wrong M's g0 stack, corrupting state and
-    // crashing later with "no current G" or worse.
-    //
-    // Reading curg/g0 lock-free side-steps the coop_preempt_check
-    // window entirely. Per Theorem 1 (m.locks invariants), curg is a
-    // stable per-thread read.
+    // Taking the SpinLock here would compound the migration risk: the
+    // Guard<M> drop runs `cooperative_preempt_check`, which can
+    // trigger another Gosched detour. acquirem above already prevents
+    // SIGURG-induced migration; lock-free reads close the
+    // coop_preempt_check vector too.
     let storage = current_m_storage();
     let g0_ptr = storage.g0.load(Ordering::Acquire);
     debug_assert!(!g0_ptr.is_null(), "mcall: g0 not initialized");
@@ -626,6 +633,9 @@ fn dropg() {
 /// Runs after `mcall(gosched_m)` switched to g0. Sets gp Runnable,
 /// drops M's claim, re-enqueues, then `schedule()` picks the next G.
 extern "C" fn gosched_m(g_ptr: *mut G) -> ! {
+    // Release the mcall-wrapper's m.locks bump (we're now on g0; no
+    // user-G context to preempt back into).
+    releasem();
     let g = NonNull::new(g_ptr).expect("gosched_m: null gp");
     unsafe {
         (*g_ptr).status = GStatus::Runnable;
@@ -643,6 +653,8 @@ extern "C" fn gosched_m(g_ptr: *mut G) -> ! {
 /// `false` the park is aborted and gp is `execute()`d immediately,
 /// otherwise schedule() picks something else.
 extern "C" fn park_m(g_ptr: *mut G) -> ! {
+    // Release the mcall-wrapper's m.locks bump.
+    releasem();
     let g = NonNull::new(g_ptr).expect("park_m: null gp");
 
     // Take waitunlockf but DO NOT clear waitlock yet — goish's
@@ -682,6 +694,8 @@ extern "C" fn park_m(g_ptr: *mut G) -> ! {
 /// to Dead, dropg, decrement live-count, free the G via
 /// `Box::from_raw`, then `schedule()`.
 extern "C" fn goexit0(g_ptr: *mut G) -> ! {
+    // Release the mcall-wrapper's m.locks bump.
+    releasem();
     unsafe {
         (*g_ptr).status = GStatus::Dead;
     }
