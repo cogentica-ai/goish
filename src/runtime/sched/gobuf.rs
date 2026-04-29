@@ -29,28 +29,60 @@
 
 use core::arch::naked_asm;
 
+/// Saved register file for a suspended G. Layout matches Go's
+/// `runtime.gobuf` semantically. Offsets 0x00..0x38 are the legacy
+/// `swap_context` save/restore region (rsp/rbp/rbx/r12-r15) and are
+/// PINNED for asm compat — `swap_context` uses literal offsets in
+/// `naked_asm!`. M17b-ε β.1 adds `pc` at offset 0x38 for `gogo`'s
+/// JMP-based resume; legacy `swap_context` does not touch it (it
+/// resumes via RET-pops-PC-from-stack).
 #[repr(C)]
 #[derive(Default)]
 pub struct Gobuf {
+    /// Saved stack pointer. Loaded into `rsp` on resume.
     pub rsp: u64,
+    /// Saved base pointer.
     pub rbp: u64,
+    /// Saved callee-saved registers.
     pub rbx: u64,
     pub r12: u64,
     pub r13: u64,
     pub r14: u64,
     pub r15: u64,
+    /// Saved program counter. Used by `gogo` (β.2): loaded via `JMP`
+    /// to resume without a RET. `swap_context` does NOT write/read
+    /// this field — its RET resumes by popping PC from `[rsp]`.
+    pub pc: u64,
 }
+
+/// Field offsets — verified at compile time. Asm uses these as
+/// literal constants.
+pub const GOBUF_RSP: usize = 0x00;
+pub const GOBUF_RBP: usize = 0x08;
+pub const GOBUF_RBX: usize = 0x10;
+pub const GOBUF_R12: usize = 0x18;
+pub const GOBUF_R13: usize = 0x20;
+pub const GOBUF_R14: usize = 0x28;
+pub const GOBUF_R15: usize = 0x30;
+pub const GOBUF_PC:  usize = 0x38;
+
+const _: () = {
+    assert!(core::mem::offset_of!(Gobuf, rsp) == GOBUF_RSP);
+    assert!(core::mem::offset_of!(Gobuf, rbp) == GOBUF_RBP);
+    assert!(core::mem::offset_of!(Gobuf, rbx) == GOBUF_RBX);
+    assert!(core::mem::offset_of!(Gobuf, r12) == GOBUF_R12);
+    assert!(core::mem::offset_of!(Gobuf, r13) == GOBUF_R13);
+    assert!(core::mem::offset_of!(Gobuf, r14) == GOBUF_R14);
+    assert!(core::mem::offset_of!(Gobuf, r15) == GOBUF_R15);
+    assert!(core::mem::offset_of!(Gobuf, pc)  == GOBUF_PC);
+};
 
 impl Gobuf {
     pub const fn new() -> Self {
         Gobuf {
-            rsp: 0,
-            rbp: 0,
-            rbx: 0,
-            r12: 0,
-            r13: 0,
-            r14: 0,
-            r15: 0,
+            rsp: 0, rbp: 0,
+            rbx: 0, r12: 0, r13: 0, r14: 0, r15: 0,
+            pc: 0,
         }
     }
 }
