@@ -74,6 +74,20 @@ pub struct G {
     /// (M18b-γ) clears it when calling `Gosched` post-unlock.
     /// Mirrors Go's `g.preempt` (runtime/runtime2.go).
     pub preempt: AtomicBool,
+    /// **Sema waiter intrusive link** (task #110). When this G is
+    /// parked in `Sema::acquire`, this points at the next G in the
+    /// FIFO waiter chain (or null if tail). Lets `Sema` keep its
+    /// queue without a heap-allocated `VecDeque`, fixing a
+    /// 24-frame-deep alloc-path stack overflow on 2 KiB stacks
+    /// (commit f2e334a's followup).
+    ///
+    /// **Concurrency**: only mutated under the owning Sema's
+    /// `SpinLock`. A G is in at most one Sema queue at any time
+    /// (a parked G can only be parked on one thing), so a single
+    /// link suffices. Plain `*mut G` — G already
+    /// `unsafe impl Send`s, and access is serialized by the Sema
+    /// lock.
+    pub sema_next: *mut G,
 }
 
 impl G {
@@ -97,6 +111,7 @@ impl G {
             select_wait: [core::ptr::null(); SELECT_WAIT_MAX],
             select_wait_len: 0,
             preempt: AtomicBool::new(false),
+            sema_next: core::ptr::null_mut(),
         }
     }
 
@@ -152,6 +167,7 @@ impl G {
             select_wait: [core::ptr::null(); SELECT_WAIT_MAX],
             select_wait_len: 0,
             preempt: AtomicBool::new(false),
+            sema_next: core::ptr::null_mut(),
         }
     }
 }
