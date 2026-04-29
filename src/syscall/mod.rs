@@ -37,6 +37,24 @@ pub const SYS_GETPID: usize = 39;
 pub const SYS_KILL: usize = 62;
 pub const SYS_TGKILL: usize = 234;
 pub const SYS_SIGALTSTACK: usize = 131;
+// Socket family (M27a — net/http port).
+pub const SYS_SOCKET: usize = 41;
+pub const SYS_CONNECT: usize = 42;
+pub const SYS_ACCEPT: usize = 43;
+pub const SYS_SENDTO: usize = 44;
+pub const SYS_RECVFROM: usize = 45;
+pub const SYS_SHUTDOWN: usize = 48;
+pub const SYS_BIND: usize = 49;
+pub const SYS_LISTEN: usize = 50;
+pub const SYS_GETSOCKNAME: usize = 51;
+pub const SYS_GETPEERNAME: usize = 52;
+pub const SYS_SETSOCKOPT: usize = 54;
+pub const SYS_GETSOCKOPT: usize = 55;
+pub const SYS_FCNTL: usize = 72;
+pub const SYS_ACCEPT4: usize = 288;
+pub const SYS_EPOLL_CREATE1: usize = 291;
+pub const SYS_EPOLL_CTL: usize = 233;
+pub const SYS_EPOLL_PWAIT: usize = 281;
 
 // Signal numbers (Linux). Mirror /usr/include/asm-generic/signal.h.
 pub const SIGHUP: i32 = 1;
@@ -571,4 +589,364 @@ pub unsafe extern "C" fn Clone(
         "retq",
         options(att_syntax),
     )
+}
+
+// ─── BSD/POSIX sockets — M27a ─────────────────────────────────────────
+//
+// Linux x86_64 socket calls. Each is a direct syscall (no
+// `socketcall(2)` indirection — that's i386). Constants and structs
+// mirror /usr/include/{sys/socket.h, netinet/in.h, asm-generic/socket.h}
+// and asm-generic/fcntl.h. Goish defines its own repr(C) to stay free
+// of libc.
+
+/// `socket(2)` domains.
+pub const AF_UNIX: i32 = 1;
+pub const AF_INET: i32 = 2;
+pub const AF_INET6: i32 = 10;
+
+/// `socket(2)` types.
+pub const SOCK_STREAM: i32 = 1;
+pub const SOCK_DGRAM: i32 = 2;
+/// OR into the type to atomically set close-on-exec on the new fd.
+pub const SOCK_CLOEXEC: i32 = 0o2000000;
+/// OR into the type to atomically set non-blocking on the new fd.
+pub const SOCK_NONBLOCK: i32 = 0o4000;
+
+/// Common protocols.
+pub const IPPROTO_TCP: i32 = 6;
+pub const IPPROTO_UDP: i32 = 17;
+
+/// `setsockopt(2)` levels.
+pub const SOL_SOCKET: i32 = 1;
+pub const IPPROTO_IPV6: i32 = 41;
+
+/// SOL_SOCKET option names.
+pub const SO_REUSEADDR: i32 = 2;
+pub const SO_TYPE: i32 = 3;
+pub const SO_ERROR: i32 = 4;
+pub const SO_KEEPALIVE: i32 = 9;
+pub const SO_LINGER: i32 = 13;
+pub const SO_REUSEPORT: i32 = 15;
+pub const SO_RCVTIMEO: i32 = 20;
+pub const SO_SNDTIMEO: i32 = 21;
+
+/// IPV6_V6ONLY: bind on AF_INET6 should not also accept AF_INET.
+pub const IPV6_V6ONLY: i32 = 26;
+
+/// `shutdown(2)` how.
+pub const SHUT_RD: i32 = 0;
+pub const SHUT_WR: i32 = 1;
+pub const SHUT_RDWR: i32 = 2;
+
+/// `fcntl(2)` commands.
+pub const F_GETFL: i32 = 3;
+pub const F_SETFL: i32 = 4;
+/// File status flag — non-blocking I/O.
+pub const O_NONBLOCK: i32 = 0o4000;
+pub const FD_CLOEXEC: i32 = 1;
+
+/// Special listen-on-any IPv4 address.
+pub const INADDR_ANY: u32 = 0;
+/// 127.0.0.1 in network-byte-order is computed by `htonl(0x7F000001)`
+/// = 0x0100007F. We expose only `INADDR_ANY`; user code uses a
+/// helper to build a SockaddrIn.
+
+/// `epoll_ctl(2)` ops.
+pub const EPOLL_CTL_ADD: i32 = 1;
+pub const EPOLL_CTL_DEL: i32 = 2;
+pub const EPOLL_CTL_MOD: i32 = 3;
+
+/// `epoll` event masks.
+pub const EPOLLIN: u32 = 0x001;
+pub const EPOLLOUT: u32 = 0x004;
+pub const EPOLLERR: u32 = 0x008;
+pub const EPOLLHUP: u32 = 0x010;
+pub const EPOLLRDHUP: u32 = 0x2000;
+pub const EPOLLET: u32 = 1u32 << 31;
+pub const EPOLLONESHOT: u32 = 1u32 << 30;
+
+/// IPv4 socket address. Layout matches `struct sockaddr_in`:
+///   `family: u16`, `port: u16` (BE), `addr: u32` (BE), `_pad: [u8; 8]`.
+/// Total 16 bytes — what `bind`/`connect`/`accept` expect via
+/// `*const sockaddr` + `socklen_t`.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct SockaddrIn {
+    pub sin_family: u16,
+    /// Port number in **network byte order** (big-endian). Use
+    /// `htons(p)` to convert from host order.
+    pub sin_port: u16,
+    /// IPv4 address in **network byte order** (big-endian).
+    pub sin_addr: u32,
+    pub _pad: [u8; 8],
+}
+
+impl SockaddrIn {
+    /// Build an `AF_INET` sockaddr for `port` on the wildcard
+    /// address (binds all interfaces).
+    pub const fn any(port: u16) -> Self {
+        SockaddrIn {
+            sin_family: AF_INET as u16,
+            sin_port: htons(port),
+            sin_addr: INADDR_ANY,
+            _pad: [0; 8],
+        }
+    }
+
+    /// Build an `AF_INET` sockaddr for `port` on the loopback
+    /// address `127.0.0.1`.
+    pub const fn loopback(port: u16) -> Self {
+        SockaddrIn {
+            sin_family: AF_INET as u16,
+            sin_port: htons(port),
+            sin_addr: htonl(0x7F00_0001),
+            _pad: [0; 8],
+        }
+    }
+
+    /// Build from `(a, b, c, d)` IPv4 octets and host-order port.
+    pub const fn ipv4(octets: [u8; 4], port: u16) -> Self {
+        let addr = ((octets[0] as u32) << 24)
+            | ((octets[1] as u32) << 16)
+            | ((octets[2] as u32) << 8)
+            | (octets[3] as u32);
+        SockaddrIn {
+            sin_family: AF_INET as u16,
+            sin_port: htons(port),
+            sin_addr: htonl(addr),
+            _pad: [0; 8],
+        }
+    }
+
+    /// Extract host-order port.
+    pub const fn port_host(&self) -> u16 {
+        ntohs(self.sin_port)
+    }
+}
+
+/// Single `epoll_event` entry. `repr(packed)` to match the
+/// kernel's `__attribute__((packed))` ABI on x86_64 — the data
+/// payload follows events with no alignment padding.
+#[repr(C, packed)]
+#[derive(Copy, Clone)]
+pub struct EpollEvent {
+    pub events: u32,
+    pub data: u64,
+}
+
+/// Convert host-order u16 to network byte order (big-endian).
+#[inline]
+pub const fn htons(x: u16) -> u16 {
+    x.to_be()
+}
+
+/// Convert network-order u16 to host order.
+#[inline]
+pub const fn ntohs(x: u16) -> u16 {
+    u16::from_be(x)
+}
+
+/// Convert host-order u32 to network byte order.
+#[inline]
+pub const fn htonl(x: u32) -> u32 {
+    x.to_be()
+}
+
+/// Convert network-order u32 to host order.
+#[inline]
+pub const fn ntohl(x: u32) -> u32 {
+    u32::from_be(x)
+}
+
+/// `socket(2)` — create an endpoint. Returns the fd on success or
+/// `-errno` on failure (mirrors syscall convention).
+#[allow(non_snake_case)]
+pub fn Socket(domain: i32, type_: i32, protocol: i32) -> i32 {
+    unsafe {
+        syscall3(
+            SYS_SOCKET,
+            domain as usize,
+            type_ as usize,
+            protocol as usize,
+        ) as i32
+    }
+}
+
+/// `bind(2)` — bind a socket to an address. Returns `0` on
+/// success, `-errno` on failure.
+#[allow(non_snake_case)]
+pub fn Bind(fd: i32, addr: *const SockaddrIn, addrlen: u32) -> i32 {
+    unsafe {
+        syscall3(
+            SYS_BIND,
+            fd as usize,
+            addr as usize,
+            addrlen as usize,
+        ) as i32
+    }
+}
+
+/// `listen(2)` — mark a socket as accepting connections. Returns
+/// `0` on success, `-errno` on failure.
+#[allow(non_snake_case)]
+pub fn Listen(fd: i32, backlog: i32) -> i32 {
+    unsafe { syscall2(SYS_LISTEN, fd as usize, backlog as usize) as i32 }
+}
+
+/// `accept4(2)` — accept a connection, atomically setting flags
+/// (`SOCK_NONBLOCK`, `SOCK_CLOEXEC`) on the returned fd. Returns
+/// the new fd on success, `-errno` on failure. `addr` may be null
+/// when the caller doesn't need the peer address.
+#[allow(non_snake_case)]
+pub fn Accept4(
+    fd: i32,
+    addr: *mut SockaddrIn,
+    addrlen: *mut u32,
+    flags: i32,
+) -> i32 {
+    unsafe {
+        syscall6(
+            SYS_ACCEPT4,
+            fd as usize,
+            addr as usize,
+            addrlen as usize,
+            flags as usize,
+            0,
+            0,
+        ) as i32
+    }
+}
+
+/// `connect(2)` — connect a socket to a peer. Returns `0` on
+/// success, `-errno` on failure (including `-EINPROGRESS` on
+/// non-blocking sockets).
+#[allow(non_snake_case)]
+pub fn Connect(fd: i32, addr: *const SockaddrIn, addrlen: u32) -> i32 {
+    unsafe {
+        syscall3(
+            SYS_CONNECT,
+            fd as usize,
+            addr as usize,
+            addrlen as usize,
+        ) as i32
+    }
+}
+
+/// `setsockopt(2)`. Returns `0` on success, `-errno` on failure.
+#[allow(non_snake_case)]
+pub fn Setsockopt(
+    fd: i32,
+    level: i32,
+    name: i32,
+    val: *const u8,
+    len: u32,
+) -> i32 {
+    unsafe {
+        syscall6(
+            SYS_SETSOCKOPT,
+            fd as usize,
+            level as usize,
+            name as usize,
+            val as usize,
+            len as usize,
+            0,
+        ) as i32
+    }
+}
+
+/// `getsockopt(2)`. `len` is in/out. Returns `0` on success.
+#[allow(non_snake_case)]
+pub fn Getsockopt(
+    fd: i32,
+    level: i32,
+    name: i32,
+    val: *mut u8,
+    len: *mut u32,
+) -> i32 {
+    unsafe {
+        syscall6(
+            SYS_GETSOCKOPT,
+            fd as usize,
+            level as usize,
+            name as usize,
+            val as usize,
+            len as usize,
+            0,
+        ) as i32
+    }
+}
+
+/// `shutdown(2)`. `how` is `SHUT_RD` / `SHUT_WR` / `SHUT_RDWR`.
+#[allow(non_snake_case)]
+pub fn Shutdown(fd: i32, how: i32) -> i32 {
+    unsafe { syscall2(SYS_SHUTDOWN, fd as usize, how as usize) as i32 }
+}
+
+/// `fcntl(2)`. The `arg` form (used for `F_SETFL`); for `F_GETFL`
+/// pass `0`. Returns the result on success, `-errno` on failure.
+#[allow(non_snake_case)]
+pub fn Fcntl(fd: i32, cmd: i32, arg: i32) -> i32 {
+    unsafe {
+        syscall3(
+            SYS_FCNTL,
+            fd as usize,
+            cmd as usize,
+            arg as usize,
+        ) as i32
+    }
+}
+
+/// `epoll_create1(2)`. Returns the epoll fd or `-errno`. Pass
+/// `O_CLOEXEC` (= 0o2000000) for close-on-exec.
+#[allow(non_snake_case)]
+pub fn EpollCreate1(flags: i32) -> i32 {
+    unsafe { syscall1(SYS_EPOLL_CREATE1, flags as usize) as i32 }
+}
+
+/// `epoll_ctl(2)`. `op` is `EPOLL_CTL_{ADD,DEL,MOD}`. `event` may
+/// be null for `EPOLL_CTL_DEL`.
+#[allow(non_snake_case)]
+pub fn EpollCtl(
+    epfd: i32,
+    op: i32,
+    fd: i32,
+    event: *mut EpollEvent,
+) -> i32 {
+    unsafe {
+        syscall6(
+            SYS_EPOLL_CTL,
+            epfd as usize,
+            op as usize,
+            fd as usize,
+            event as usize,
+            0,
+            0,
+        ) as i32
+    }
+}
+
+/// `epoll_pwait(2)`. Returns the number of events filled into
+/// `events[..maxevents]`, `0` on timeout, or `-errno`.
+/// `timeout_ms` is in milliseconds, `-1` for indefinite.
+/// `sigmask` may be null.
+#[allow(non_snake_case)]
+pub fn EpollPwait(
+    epfd: i32,
+    events: *mut EpollEvent,
+    maxevents: i32,
+    timeout_ms: i32,
+    sigmask: *const u8,
+    sigsetsize: usize,
+) -> i32 {
+    unsafe {
+        syscall6(
+            SYS_EPOLL_PWAIT,
+            epfd as usize,
+            events as usize,
+            maxevents as usize,
+            timeout_ms as usize,
+            sigmask as usize,
+            sigsetsize,
+        ) as i32
+    }
 }
