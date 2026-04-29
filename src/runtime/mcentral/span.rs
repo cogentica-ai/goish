@@ -57,6 +57,12 @@ pub struct Span {
     /// Per-class partial/full list link.
     pub next: u16,
     pub prev: u16,
+    /// `true` while this span is owned by a P's mcache. While cached,
+    /// the span is on no central list (`partial`/`full`); a free into
+    /// it just clears the bit and decrements `alloc_count` without
+    /// list manipulation. Cleared on `uncacheSpan`. Mirrors Go's
+    /// `mspan.spanclass` "cached" bit + `mspan.list = nil` invariant.
+    pub cached: bool,
 }
 
 impl Span {
@@ -72,6 +78,7 @@ impl Span {
         alloc_bits: [0; ALLOC_BITS_WORDS],
         next: NIL_SPAN,
         prev: NIL_SPAN,
+        cached: false,
     };
 
     /// True if every slot is allocated.
@@ -176,6 +183,7 @@ mod tests {
             alloc_bits: [0; ALLOC_BITS_WORDS],
             next: NIL_SPAN,
             prev: NIL_SPAN,
+            cached: false,
         }
     }
 

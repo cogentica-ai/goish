@@ -160,23 +160,42 @@ fn route_to_mcentral(layout: Layout) -> bool {
 
 /// Allocate `size` bytes at `align` alignment. Returns null on
 /// failure. `align` must be a power of two.
+///
+/// **Routing priority** (M17b-ε.mcache):
+///   1. If `size > LARGE_THRESHOLD`: mheap directly (large path).
+///   2. If a P is bound to this M and the size fits a class: try
+///      `P::mcache_alloc` (per-P cached span — no central scan).
+///   3. Else fall back to `mcentral::alloc` (central partial-list scan).
+///   4. On all-tier OOM: round to a page and try mheap.
 pub unsafe fn alloc(size: usize, align: usize) -> *mut u8 {
     let layout = Layout::from_size_align_unchecked(size, align);
     if route_to_mheap(layout) {
-        mheap_alloc(layout)
-    } else if route_to_mcentral(layout) {
+        return mheap_alloc(layout);
+    }
+    if route_to_mcentral(layout) {
+        // Per-P fast path. `current_p()` is a lock-free TLS read; only
+        // valid once the runtime has bound a P to this M (post
+        // `acquirep`).
+        if let Some(p) = crate::runtime::sched::current_p() {
+            let q = p.mcache_alloc(size, align);
+            if !q.is_null() {
+                return q;
+            }
+            // mcache miss (e.g., class refill failed). Fall through
+            // to the central path which will retry with the same
+            // central lock that mcache_alloc just released.
+        }
         let p = crate::runtime::mcentral::alloc(size, align);
         if !p.is_null() {
             return p;
         }
         // mcentral couldn't serve (table exhausted, etc.) — fall back
         // to mheap rounding the request up to a page.
-        mheap_alloc(layout)
-    } else {
-        // Pre-init only. Round up to a page and use mheap directly.
-        // In practice nothing allocates before mheap_init.
-        mheap_alloc(layout)
+        return mheap_alloc(layout);
     }
+    // Pre-init only. Round up to a page and use mheap directly.
+    // In practice nothing allocates before mheap_init.
+    mheap_alloc(layout)
 }
 
 /// Reallocate via alloc + memcpy + free.
@@ -219,17 +238,22 @@ unsafe impl GlobalAlloc for GoishAllocator {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         if route_to_mheap(layout) {
-            mheap_alloc(layout)
-        } else if route_to_mcentral(layout) {
+            return mheap_alloc(layout);
+        }
+        if route_to_mcentral(layout) {
+            if let Some(p) = crate::runtime::sched::current_p() {
+                let q = p.mcache_alloc(layout.size(), layout.align());
+                if !q.is_null() {
+                    return q;
+                }
+            }
             let p = crate::runtime::mcentral::alloc(layout.size(), layout.align());
             if !p.is_null() {
-                p
-            } else {
-                mheap_alloc(layout)
+                return p;
             }
-        } else {
-            mheap_alloc(layout)
+            return mheap_alloc(layout);
         }
+        mheap_alloc(layout)
     }
 
     #[inline]

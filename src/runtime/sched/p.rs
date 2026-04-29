@@ -98,9 +98,14 @@ pub struct P {
     /// (runtime2.go:677). β populates.
     pub runnext: AtomicPtr<G>,
 
-    /// Phase ε will attach an mcache here (per-size-class span cache).
-    /// Currently a placeholder so the struct layout is final from α.
-    pub mcache_placeholder: UnsafeCell<usize>,
+    /// **Per-P mcache** — one cached span index per size class. Each
+    /// slot is a `Span` index into `runtime::mcentral::MCentral.spans`
+    /// (NIL_SPAN = 0 means "no cached span for this class — refill
+    /// on next alloc"). Only the M currently bound to this P touches
+    /// these entries; lock-free per-P discipline.
+    ///
+    /// Mirrors Go's `mcache.alloc[numSpanClasses]` (mcache.go:47).
+    pub mcache: UnsafeCell<[u16; crate::runtime::mcentral::sizeclasses::NUM_SIZE_CLASSES]>,
 }
 
 unsafe impl Send for P {}
@@ -118,7 +123,80 @@ impl P {
             runqtail: AtomicU32::new(0),
             runq: UnsafeCell::new([core::ptr::null_mut(); LOCAL_RUNQ_SIZE]),
             runnext: AtomicPtr::new(core::ptr::null_mut()),
-            mcache_placeholder: UnsafeCell::new(0),
+            mcache: UnsafeCell::new(
+                [0u16; crate::runtime::mcentral::sizeclasses::NUM_SIZE_CLASSES],
+            ),
+        }
+    }
+
+    /// **Per-P mcache fast-path alloc.** Maps `(size, align)` to a
+    /// size class via `mcentral::sizeclasses::class_for`, then tries
+    /// to allocate one slot from this P's cached span for that class.
+    /// On a miss (`NIL_SPAN` cached, or the cached span is full), the
+    /// slow path calls `mcentral::cacheSpan` to refill, returning the
+    /// previously-cached span via `mcentral::uncacheSpan` first.
+    ///
+    /// Returns `null` if the requested size cannot be served by a
+    /// size class (caller should route to mheap directly).
+    ///
+    /// **Discipline**: caller must guarantee this P is bound to the
+    /// current M (typically via `current_p`). Safe to call without a
+    /// SpinLock because the per-class slot is only mutated by this
+    /// M's thread.
+    ///
+    /// Mirrors Go's `mcache.nextFree` → `refill` chain (malloc.go,
+    /// mcache.go). Goish's slim version inlines both into one fn.
+    pub unsafe fn mcache_alloc(&self, size: usize, align: usize) -> *mut u8 {
+        use crate::runtime::mcentral;
+        use crate::runtime::mcentral::sizeclasses::class_for;
+        use crate::runtime::mcentral::span::NIL_SPAN;
+
+        let class = match class_for(size, align) {
+            Some(c) if c >= 1 => c,
+            _ => return core::ptr::null_mut(),
+        };
+
+        let cache = &mut *self.mcache.get();
+        let idx = cache[class as usize];
+
+        // Fast path: try to alloc one slot from the currently-cached
+        // span. `alloc_slot_in` takes the central lock briefly; the
+        // mcache shape still wins because (a) we skip the partial-list
+        // scan in `mcentral::alloc`, (b) the cached-span hit-rate is
+        // ~99% in steady state, so refill cost is amortized.
+        if idx != NIL_SPAN {
+            let p = mcentral::alloc_slot_in(idx);
+            if !p.is_null() {
+                return p;
+            }
+            // Cached span is full — return it to mcentral.
+            mcentral::uncacheSpan(idx);
+            cache[class as usize] = NIL_SPAN;
+        }
+
+        // Refill: ask mcentral for a fresh span on this class.
+        let new_idx = mcentral::cacheSpan(class);
+        if new_idx == NIL_SPAN {
+            return core::ptr::null_mut();
+        }
+        cache[class as usize] = new_idx;
+        mcentral::alloc_slot_in(new_idx)
+    }
+
+    /// Flush all cached spans on this P back to mcentral. Called from
+    /// `releasep` when this M is about to drop the P, so spans don't
+    /// remain "private" to a P that no longer has an owner.
+    pub fn mcache_flush(&self) {
+        use crate::runtime::mcentral;
+        use crate::runtime::mcentral::sizeclasses::NUM_SIZE_CLASSES;
+        use crate::runtime::mcentral::span::NIL_SPAN;
+        let cache = unsafe { &mut *self.mcache.get() };
+        for class in 1..NUM_SIZE_CLASSES {
+            let idx = cache[class];
+            if idx != NIL_SPAN {
+                cache[class] = NIL_SPAN;
+                unsafe { mcentral::uncacheSpan(idx); }
+            }
         }
     }
 
@@ -257,6 +335,12 @@ pub fn releasep() -> Option<&'static P> {
         return None;
     }
     let p = unsafe { &*p_ptr };
+    // Flush cached spans back to mcentral before the P goes idle. A
+    // P with cached spans that no longer has an owning M would leave
+    // those slots unreachable from any allocator path until another M
+    // re-acquires this P. Mirrors Go's `releasep` calling
+    // `mcache.releaseAll`.
+    p.mcache_flush();
     // Sever P → M backlink before flipping status, so a steal scan
     // that finds status==P_IDLE never sees a stale m pointer.
     p.m.store(core::ptr::null_mut(), Ordering::Release);

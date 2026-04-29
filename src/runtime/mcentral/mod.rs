@@ -316,8 +316,17 @@ pub unsafe fn free(ptr: *mut u8) -> bool {
         return false;
     }
     let was_full = span.is_full();
+    let was_cached = span.cached;
     let slot = span.slot_of(p);
     span.free_slot(slot);
+
+    if was_cached {
+        // Cached spans live on no central list — the bit/count update
+        // above is sufficient. The owning P sees the freed slot on
+        // its next `alloc_slot_in` (freeindex was rewound) or on
+        // uncacheSpan when the central state is re-evaluated.
+        return true;
+    }
 
     if was_full {
         // Move span from full to partial.
@@ -341,6 +350,109 @@ pub unsafe fn free(ptr: *mut u8) -> bool {
         crate::runtime::mheap_free_pages(base, npages);
     }
     true
+}
+
+/// **`cacheSpan(class)`** — pop a span the calling P can alloc from
+/// without contending the central lock on every slot. Mirrors Go's
+/// `runtime.(*mcentral).cacheSpan` (mcentral.go).
+///
+/// Returns `NIL_SPAN` if the per-class central pool is empty AND no
+/// fresh span can be drawn from mheap (OOM).
+///
+/// The returned span is **removed from the partial list** — it is
+/// not on any central list while cached. The owning P must call
+/// `uncacheSpan(idx)` to return it.
+pub unsafe fn cacheSpan(class: u8) -> u16 {
+    let mut g = MCENTRAL.lock();
+    if class == 0 || (class as usize) >= NUM_SIZE_CLASSES {
+        return NIL_SPAN;
+    }
+    let idx = g.partial[class as usize];
+    if idx != NIL_SPAN {
+        g.list_remove(idx);
+        g.spans[idx as usize].cached = true;
+        return idx;
+    }
+    // No partial — draw a fresh span from mheap.
+    let npages = NPAGES_OF_CLASS[class as usize] as usize;
+    drop(g);
+    let base = crate::runtime::mheap_alloc_pages(npages);
+    if base == ALLOC_FAILED {
+        return NIL_SPAN;
+    }
+    let mut g2 = MCENTRAL.lock();
+    let new_idx = g2.alloc_span_idx();
+    g2.init_span(new_idx, class, base);
+    g2.spans[new_idx as usize].cached = true;
+    // Don't push to partial — we hand it directly to the caller.
+    new_idx
+}
+
+/// **`uncacheSpan(idx)`** — return a previously-cached span to the
+/// central lists. Mirrors Go's `runtime.(*mcentral).uncacheSpan`.
+///
+/// Routes to `partial[class]` if the span has free slots, or
+/// `full[class]` if every slot is allocated. If the span is fully
+/// empty, it is released back to mheap (same path as `free`'s
+/// last-slot release).
+pub unsafe fn uncacheSpan(idx: u16) {
+    if idx == NIL_SPAN {
+        return;
+    }
+    let mut g = MCENTRAL.lock();
+    g.spans[idx as usize].cached = false;
+    let s = &g.spans[idx as usize];
+    let is_empty = s.is_empty();
+    let is_full = s.is_full();
+    let base = s.base;
+    let npages = s.npages as usize;
+    let arena_base = g.arena_base;
+    if is_empty {
+        // Empty: page → span entries cleared, slot returned, pages
+        // released to mheap. Mirrors the last-slot path in `free`.
+        let first_page = (base - arena_base) / PAGE_SIZE;
+        for pp in first_page..(first_page + npages) {
+            if pp < MAX_TRACKED_PAGES {
+                g.page_to_span[pp] = NIL_SPAN;
+            }
+        }
+        g.release_span_idx(idx);
+        drop(g);
+        crate::runtime::mheap_free_pages(base, npages);
+        return;
+    }
+    if is_full {
+        g.full_push(idx);
+    } else {
+        g.partial_push(idx);
+    }
+}
+
+/// **`alloc_slot_in(idx)`** — allocate a single slot from a specific
+/// cached span without consulting partial/full lists. Used by the
+/// per-P mcache hot path. Returns the slot's address, or null on
+/// "span is full / not initialized".
+pub unsafe fn alloc_slot_in(idx: u16) -> *mut u8 {
+    if idx == NIL_SPAN {
+        return core::ptr::null_mut();
+    }
+    let mut g = MCENTRAL.lock();
+    let s = &mut g.spans[idx as usize];
+    let slot = match s.alloc_slot() {
+        Some(s) => s,
+        None => return core::ptr::null_mut(),
+    };
+    s.slot_addr(slot) as *mut u8
+}
+
+/// **`is_full(idx)`** — true if the span at `idx` has no free slots.
+/// Used by the per-P mcache to decide when to refill.
+pub fn is_full(idx: u16) -> bool {
+    if idx == NIL_SPAN {
+        return true;
+    }
+    let g = MCENTRAL.lock();
+    g.spans[idx as usize].is_full()
 }
 
 /// Stress-test only: number of currently in-use slots across all
