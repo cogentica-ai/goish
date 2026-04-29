@@ -55,6 +55,7 @@ pub const SYS_ACCEPT4: usize = 288;
 pub const SYS_EPOLL_CREATE1: usize = 291;
 pub const SYS_EPOLL_CTL: usize = 233;
 pub const SYS_EPOLL_PWAIT: usize = 281;
+pub const SYS_EVENTFD2: usize = 290;
 
 // Signal numbers (Linux). Mirror /usr/include/asm-generic/signal.h.
 pub const SIGHUP: i32 = 1;
@@ -665,6 +666,11 @@ pub const EPOLLRDHUP: u32 = 0x2000;
 pub const EPOLLET: u32 = 1u32 << 31;
 pub const EPOLLONESHOT: u32 = 1u32 << 30;
 
+/// `eventfd(2)` flags. Mirror the Linux `EFD_*` bits used by
+/// `runtime/netpoll_epoll.go`.
+pub const EFD_CLOEXEC: i32 = 0x80000;
+pub const EFD_NONBLOCK: i32 = 0x800;
+
 /// IPv4 socket address. Layout matches `struct sockaddr_in`:
 ///   `family: u16`, `port: u16` (BE), `addr: u32` (BE), `_pad: [u8; 8]`.
 /// Total 16 bytes — what `bind`/`connect`/`accept` expect via
@@ -923,6 +929,14 @@ pub fn EpollCtl(
             0,
         ) as i32
     }
+}
+
+/// `eventfd2(2)`. Returns a new eventfd or `-errno`. The netpoller
+/// uses one eventfd registered with EPOLLIN as the wakeup source for
+/// `netpollBreak` (mirrors `runtime/netpoll_epoll.go:netpollinit`).
+#[allow(non_snake_case)]
+pub fn Eventfd(initval: u32, flags: i32) -> i32 {
+    unsafe { syscall2(SYS_EVENTFD2, initval as usize, flags as usize) as i32 }
 }
 
 /// `epoll_pwait(2)`. Returns the number of events filled into

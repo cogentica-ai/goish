@@ -22,6 +22,7 @@ pub mod heap;
 pub mod mcentral;
 pub mod mheap;
 mod mem;
+pub mod netpoll;
 pub mod note;
 pub mod preempt;
 pub mod rand;

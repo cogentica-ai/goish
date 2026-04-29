@@ -269,6 +269,17 @@ extern "C" fn sysmon_main() -> ! {
         // too long and force-preempt them via SIGURG.
         check_force_preempt(now);
 
+        // M27e: drain ready I/O events. Sysmon is the fallback poller
+        // when every worker M is parked (idle or in syscall) — without
+        // this tick, a connection arriving while all Ms are idle would
+        // never wake the listener G. Goready transitions each ready G
+        // Waiting → Runnable, enqueues onto local-or-global runq, and
+        // wakes a parked M via `wake_idle_m`.
+        let ready = crate::runtime::netpoll::poll(0);
+        for g in ready {
+            goready(g);
+        }
+
         // Fire all expired timers. Pop one at a time, drop the heap
         // lock, goready, repeat. Avoids batching into a Vec (which
         // would allocate once per sysmon tick that has any expirations).

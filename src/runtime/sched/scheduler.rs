@@ -96,15 +96,16 @@ fn globrunqget_one() -> Option<NonNull<G>> {
 }
 
 /// Find the next runnable G for the calling M. Drain order
-/// (M17b-γ): local P runq → global runq → steal from another P.
-/// Returns `None` if all three tiers come up empty.
+/// (M17b-γ + M27e): local P runq → global runq → steal from another P
+/// → drain netpoll(0). Returns `None` if all four tiers come up empty.
 ///
 /// Mirrors a slim subset of Go's `findRunnable` (proc.go:3377).
 /// Goish does not carry the spinning-M / nmspinning state machine,
-/// the idlepMask, the trace/GC/finalizer hooks, or netpoll —
-/// step (3) is unconditional rather than gated on `mp.spinning`.
-/// The simplification is safe (more contention, never less
-/// correctness) per proof §9.
+/// the idlepMask, the trace/GC/finalizer hooks, or netpoll's blocking
+/// drain (Go's `netpoll(blocking)` when all Ps idle); step (3) is
+/// unconditional rather than gated on `mp.spinning`, and the netpoll
+/// step (4) is always non-blocking — sysmon's tick is the fallback
+/// for the "all Ps idle" case in v1.
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 fn find_runnable() -> Option<NonNull<G>> {
@@ -116,7 +117,34 @@ fn find_runnable() -> Option<NonNull<G>> {
     if let Some(g) = globrunqget_one() {
         return Some(g);
     }
-    steal_work()
+    if let Some(g) = steal_work() {
+        return Some(g);
+    }
+    poll_netpoll_take_one()
+}
+
+/// Non-blocking netpoll drain. Returns the head G (transitioned
+/// Waiting → Runnable; execute() will move it to Running). The tail,
+/// if any, is goready'd so other Ms can pick the rest up via
+/// `wake_idle_m`. Mirrors Go's findRunnable netpoll branch
+/// (proc.go:3553) which calls `netpoll(0)` and `injectglist(&list)`.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
+fn poll_netpoll_take_one() -> Option<NonNull<G>> {
+    let ready = crate::runtime::netpoll::poll(0);
+    if ready.is_empty() {
+        return None;
+    }
+    let mut iter = ready.into_iter();
+    let head = iter.next()?;
+    unsafe {
+        debug_assert_eq!((*head.as_ptr()).status, GStatus::Waiting);
+        (*head.as_ptr()).status = GStatus::Runnable;
+    }
+    for g in iter {
+        goready(g);
+    }
+    Some(head)
 }
 
 /// Attempt to steal a runnable G from another P. Mirrors a slim

@@ -35,11 +35,14 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
+use core::ptr;
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::string;
 use crate::io;
+use crate::runtime::netpoll::{self, PollDesc};
 use crate::syscall;
 use crate::types::{byte, int};
 
@@ -48,45 +51,78 @@ pub mod http;
 
 pub use parse::TCPAddr;
 
+/// `EAGAIN` / `EWOULDBLOCK` (Linux: same value, 11). The non-blocking
+/// I/O retry signal — caller parks on the netpoller and re-attempts.
+const EAGAIN: i32 = 11;
+/// `EINPROGRESS` (Linux: 115). Returned by non-blocking `connect(2)`
+/// to indicate the connection handshake is underway.
+const EINPROGRESS: i32 = 115;
+/// `EINTR` (Linux: 4). Syscall interrupted by signal — caller retries
+/// the syscall directly without parking.
+const EINTR: i32 = 4;
+
 // ─── Listener ────────────────────────────────────────────────────────
 
-/// `net.Listener` for TCP. Wraps a listening socket fd.
+/// `net.Listener` for TCP. Wraps a listening socket fd plus a lazily-
+/// registered netpoll `PollDesc`. Send across goroutines is sound: the
+/// fd is just an int and `pd` is an `AtomicPtr`.
 pub struct Listener {
     fd: i32,
     addr: TCPAddr,
+    /// PollDesc registered the first time `Accept` hits EAGAIN; null
+    /// before that. Lazy registration matches Go's `internal/poll.FD`
+    /// shape and avoids paying epoll_ctl on a one-shot listener.
+    pd: AtomicPtr<PollDesc>,
 }
 
+unsafe impl Send for Listener {}
+unsafe impl Sync for Listener {}
+
 impl Listener {
-    /// `(*TCPListener).Accept` — block until a peer connects, return a
-    /// new `Conn`. Mirrors Go's `func (l *TCPListener) Accept() (Conn, error)`
-    /// (net/tcpsock.go).
+    /// `(*TCPListener).Accept` — return a new `Conn` for the next
+    /// connecting peer, parking the calling goroutine on the netpoller
+    /// while the accept queue is empty. Mirrors Go's
+    /// `func (l *TCPListener) Accept() (Conn, error)` (net/tcpsock.go).
     pub fn Accept(&self) -> (Conn, error) {
-        let mut peer = syscall::SockaddrIn::loopback(0);
-        let mut peer_len: u32 = core::mem::size_of::<syscall::SockaddrIn>() as u32;
-        let fd = syscall::Accept4(
-            self.fd,
-            &mut peer,
-            &mut peer_len,
-            syscall::SOCK_CLOEXEC,
-        );
-        if fd < 0 {
-            return (
-                Conn::dead(),
-                errno_error("accept", -fd),
+        loop {
+            let mut peer = syscall::SockaddrIn::loopback(0);
+            let mut peer_len: u32 = core::mem::size_of::<syscall::SockaddrIn>() as u32;
+            let fd = syscall::Accept4(
+                self.fd,
+                &mut peer,
+                &mut peer_len,
+                syscall::SOCK_CLOEXEC | syscall::SOCK_NONBLOCK,
             );
+            if fd >= 0 {
+                return (
+                    Conn::from_accepted(fd, self.addr.clone(), TCPAddr::from_sockaddr_in(&peer)),
+                    errors::nil,
+                );
+            }
+            let errno = -fd;
+            if errno == EINTR {
+                continue;
+            }
+            if errno == EAGAIN {
+                let pd = self.ensure_pd();
+                if pd.is_null() {
+                    return (Conn::dead(), errno_error("accept", errno));
+                }
+                netpoll::block(unsafe { &*pd }, b'r');
+                continue;
+            }
+            return (Conn::dead(), errno_error("accept", errno));
         }
-        (
-            Conn {
-                fd,
-                local: self.addr.clone(),
-                remote: TCPAddr::from_sockaddr_in(&peer),
-            },
-            errors::nil,
-        )
     }
 
     /// `(*TCPListener).Close` — stop listening and drop the fd.
     pub fn Close(&self) -> error {
+        let pd = self.pd.swap(ptr::null_mut(), Ordering::AcqRel);
+        if !pd.is_null() {
+            unsafe {
+                netpoll::close(pd);
+            }
+        }
         let r = syscall::Close(self.fd);
         if r < 0 {
             errno_error("close", -r)
@@ -100,16 +136,51 @@ impl Listener {
     pub fn Addr(&self) -> TCPAddr {
         self.addr.clone()
     }
+
+    /// Lazily register the listening fd with the netpoller on the
+    /// first EAGAIN. Idempotent / race-safe via AtomicPtr CAS.
+    fn ensure_pd(&self) -> *const PollDesc {
+        let cur = self.pd.load(Ordering::Acquire);
+        if !cur.is_null() {
+            return cur;
+        }
+        let new = netpoll::open(self.fd) as *mut PollDesc;
+        if new.is_null() {
+            return self.pd.load(Ordering::Acquire);
+        }
+        match self.pd.compare_exchange(
+            ptr::null_mut(),
+            new,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => new as *const PollDesc,
+            Err(_) => {
+                unsafe {
+                    netpoll::close(new);
+                }
+                self.pd.load(Ordering::Acquire)
+            }
+        }
+    }
 }
 
 // ─── Conn ────────────────────────────────────────────────────────────
 
-/// TCP `net.Conn`. Implements `io::{Reader, Writer, Closer}`.
+/// TCP `net.Conn`. Implements `io::{Reader, Writer, Closer}`. The fd
+/// is set non-blocking; Read/Write park on the netpoller when the
+/// kernel returns EAGAIN.
 pub struct Conn {
     fd: i32,
     local: TCPAddr,
     remote: TCPAddr,
+    /// Lazy-init netpoll registration. Null on a `dead()` conn or
+    /// before the first EAGAIN; populated via `ensure_pd`.
+    pd: AtomicPtr<PollDesc>,
 }
+
+unsafe impl Send for Conn {}
+unsafe impl Sync for Conn {}
 
 impl Conn {
     /// Internal: dead-conn placeholder returned alongside an error.
@@ -119,6 +190,18 @@ impl Conn {
             fd: -1,
             local: TCPAddr::zero(),
             remote: TCPAddr::zero(),
+            pd: AtomicPtr::new(ptr::null_mut()),
+        }
+    }
+
+    /// Wrap a freshly-accepted fd. The fd is already SOCK_NONBLOCK
+    /// (the Accept4 caller passed the flag).
+    fn from_accepted(fd: i32, local: TCPAddr, remote: TCPAddr) -> Self {
+        Conn {
+            fd,
+            local,
+            remote,
+            pd: AtomicPtr::new(ptr::null_mut()),
         }
     }
 
@@ -160,30 +243,98 @@ impl Conn {
     pub fn __fd(&self) -> i32 {
         self.fd
     }
+
+    /// Lazy netpoll registration on first EAGAIN. Idempotent.
+    fn ensure_pd(&self) -> *const PollDesc {
+        let cur = self.pd.load(Ordering::Acquire);
+        if !cur.is_null() {
+            return cur;
+        }
+        let new = netpoll::open(self.fd) as *mut PollDesc;
+        if new.is_null() {
+            return self.pd.load(Ordering::Acquire);
+        }
+        match self.pd.compare_exchange(
+            ptr::null_mut(),
+            new,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => new as *const PollDesc,
+            Err(_) => {
+                unsafe {
+                    netpoll::close(new);
+                }
+                self.pd.load(Ordering::Acquire)
+            }
+        }
+    }
 }
 
 impl io::Reader for Conn {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         let len = p.len();
         let ptr = p.as_mut_ptr();
-        let n = syscall::Read(self.fd, ptr, len);
-        if n < 0 {
-            return (0, errno_error("read", -(n as i32)));
+        loop {
+            let n = syscall::Read(self.fd, ptr, len);
+            if n >= 0 {
+                if n == 0 {
+                    return (0, io::EOF());
+                }
+                return (n as int, errors::nil);
+            }
+            let errno = -(n as i32);
+            if errno == EINTR {
+                continue;
+            }
+            if errno == EAGAIN {
+                let pd = self.ensure_pd();
+                if pd.is_null() {
+                    return (0, errno_error("read", errno));
+                }
+                netpoll::block(unsafe { &*pd }, b'r');
+                continue;
+            }
+            return (0, errno_error("read", errno));
         }
-        if n == 0 {
-            return (0, io::EOF());
-        }
-        (n as int, errors::nil)
     }
 }
 
 impl io::Writer for Conn {
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
-        let n = syscall::Write(self.fd, p.as_ptr(), p.len());
-        if n < 0 {
-            return (0, errno_error("write", -(n as i32)));
+        // Drain the buffer; partial writes loop. Matches Go's
+        // internal/poll.FD.Write which keeps writing until n == len(p)
+        // or an error is hit.
+        let total = p.len();
+        let base = p.as_ptr();
+        let mut off: usize = 0;
+        while off < total {
+            let n = syscall::Write(self.fd, unsafe { base.add(off) }, total - off);
+            if n > 0 {
+                off += n as usize;
+                continue;
+            }
+            if n == 0 {
+                // Linux write(2) returning 0 on a non-zero buffer is
+                // unexpected for sockets; treat as a generic I/O
+                // error rather than spinning.
+                return (off as int, errno_error("write", 5));
+            }
+            let errno = -(n as i32);
+            if errno == EINTR {
+                continue;
+            }
+            if errno == EAGAIN {
+                let pd = self.ensure_pd();
+                if pd.is_null() {
+                    return (off as int, errno_error("write", errno));
+                }
+                netpoll::block(unsafe { &*pd }, b'w');
+                continue;
+            }
+            return (off as int, errno_error("write", errno));
         }
-        (n as int, errors::nil)
+        (off as int, errors::nil)
     }
 }
 
@@ -191,6 +342,12 @@ impl io::Closer for Conn {
     fn Close(&mut self) -> error {
         if self.fd < 0 {
             return errors::nil;
+        }
+        let pd = self.pd.swap(ptr::null_mut(), Ordering::AcqRel);
+        if !pd.is_null() {
+            unsafe {
+                netpoll::close(pd);
+            }
         }
         let r = syscall::Close(self.fd);
         self.fd = -1;
@@ -224,7 +381,7 @@ pub fn Listen(network: string, addr: string) -> (Listener, error) {
 
     let fd = syscall::Socket(
         syscall::AF_INET,
-        syscall::SOCK_STREAM | syscall::SOCK_CLOEXEC,
+        syscall::SOCK_STREAM | syscall::SOCK_CLOEXEC | syscall::SOCK_NONBLOCK,
         syscall::IPPROTO_TCP,
     );
     if fd < 0 {
@@ -277,6 +434,7 @@ pub fn Listen(network: string, addr: string) -> (Listener, error) {
         Listener {
             fd,
             addr: TCPAddr::from_sockaddr_in(&got),
+            pd: AtomicPtr::new(ptr::null_mut()),
         },
         errors::nil,
     )
@@ -299,21 +457,75 @@ pub fn Dial(network: string, addr: string) -> (Conn, error) {
 
     let fd = syscall::Socket(
         syscall::AF_INET,
-        syscall::SOCK_STREAM | syscall::SOCK_CLOEXEC,
+        syscall::SOCK_STREAM | syscall::SOCK_CLOEXEC | syscall::SOCK_NONBLOCK,
         syscall::IPPROTO_TCP,
     );
     if fd < 0 {
         return (Conn::dead(), errno_error("socket", -fd));
     }
 
+    // Non-blocking connect: returns 0 if the kernel completed the
+    // handshake immediately (rare for TCP), or -EINPROGRESS while the
+    // SYN/SYN-ACK exchange is in flight. In the in-flight case we
+    // park on the netpoller for write-readiness, then read SO_ERROR
+    // to learn the connect outcome (Go's `internal/poll.FD.Connect`).
     let r = syscall::Connect(
         fd,
         &parsed,
         core::mem::size_of::<syscall::SockaddrIn>() as u32,
     );
     if r < 0 {
-        let _ = syscall::Close(fd);
-        return (Conn::dead(), errno_error("connect", -r));
+        let errno = -r;
+        if errno != EINPROGRESS {
+            let _ = syscall::Close(fd);
+            return (Conn::dead(), errno_error("connect", errno));
+        }
+        // Wait for the connect to finalize.
+        let pd = netpoll::open(fd);
+        if pd.is_null() {
+            let _ = syscall::Close(fd);
+            return (Conn::dead(), errno_error("connect/poll_open", 0));
+        }
+        netpoll::block(unsafe { &*pd }, b'w');
+        // SO_ERROR carries the asynchronous connect result. Zero
+        // means success; anything else is the errno from the failed
+        // 3-way handshake.
+        let mut so_err: i32 = 0;
+        let mut so_err_len: u32 = core::mem::size_of::<i32>() as u32;
+        let _ = syscall::Getsockopt(
+            fd,
+            syscall::SOL_SOCKET,
+            syscall::SO_ERROR,
+            &mut so_err as *mut i32 as *mut u8,
+            &mut so_err_len,
+        );
+        if so_err != 0 {
+            unsafe {
+                netpoll::close(pd);
+            }
+            let _ = syscall::Close(fd);
+            return (Conn::dead(), errno_error("connect", so_err));
+        }
+        // Connect succeeded — recover both ends.
+        let mut local = syscall::SockaddrIn::loopback(0);
+        let mut local_len: u32 = core::mem::size_of::<syscall::SockaddrIn>() as u32;
+        let _ = unsafe {
+            syscall::syscall3(
+                syscall::SYS_GETSOCKNAME,
+                fd as usize,
+                &mut local as *mut _ as usize,
+                &mut local_len as *mut _ as usize,
+            )
+        };
+        return (
+            Conn {
+                fd,
+                local: TCPAddr::from_sockaddr_in(&local),
+                remote: TCPAddr::from_sockaddr_in(&parsed),
+                pd: AtomicPtr::new(pd as *mut PollDesc),
+            },
+            errors::nil,
+        );
     }
 
     // Recover both ends.
@@ -333,6 +545,7 @@ pub fn Dial(network: string, addr: string) -> (Conn, error) {
             fd,
             local: TCPAddr::from_sockaddr_in(&local),
             remote: TCPAddr::from_sockaddr_in(&parsed),
+            pd: AtomicPtr::new(ptr::null_mut()),
         },
         errors::nil,
     )
@@ -349,6 +562,7 @@ fn dead_listener() -> Listener {
     Listener {
         fd: -1,
         addr: TCPAddr::zero(),
+        pd: AtomicPtr::new(ptr::null_mut()),
     }
 }
 
