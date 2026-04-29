@@ -190,6 +190,20 @@ fn eventfd_tag() -> u64 {
 /// the caller (net::Listener / net::Conn) stashes alongside the fd.
 /// On failure, returns null.
 ///
+/// **Memory lifetime — type-stable, never freed.** PollDescs leak
+/// permanently (Box::leak forever). This mirrors Go's pollCache
+/// (netpoll.go:688), which also never returns memory to the heap.
+/// The reason: `poll()` dereferences a raw `*const PollDesc` carried
+/// in `event.data`, and `fire_expired_deadlines` does the same with
+/// heap-stored entries. Concurrent `close()` cannot safely free the
+/// memory under either path without RCU-style synchronization. The
+/// trade-off (~80 bytes leaked per ever-opened socket, bounded by
+/// process socket-open count) is the same Go accepts.
+///
+/// Stale-event protection comes from the `seq` counter
+/// (`pd.{rseq,wseq}`), bumped on every `set_deadline` call. Sysmon
+/// discards heap entries whose seq doesn't match.
+///
 /// `fd` should already be `O_NONBLOCK` — the caller arranges that via
 /// SOCK_NONBLOCK in socket()/accept4() or fcntl(F_SETFL).
 pub fn open(fd: i32) -> *const PollDesc {
@@ -213,20 +227,23 @@ pub fn open(fd: i32) -> *const PollDesc {
     );
     if r < 0 {
         // Caller will see the null and treat the fd as un-pollable.
-        // Drop the pd we just leaked.
-        unsafe {
-            drop(Box::from_raw(pd));
-        }
+        // PollDesc memory is intentionally leaked (see above) — but
+        // since we never registered, no one will reference it again.
         return ptr::null();
     }
     pd as *const PollDesc
 }
 
 /// Unregister `pd` from the poller. Caller still owns the fd —
-/// `close(2)` is the caller's responsibility. Frees the PollDesc.
+/// `close(2)` is the caller's responsibility.
 ///
-/// Safety: `pd` must come from a prior `open()` call and must not be
-/// dereferenced after this returns.
+/// **Does NOT free the PollDesc memory** (see `open` doc-comment for
+/// why). The kernel's epoll registration is removed; the in-memory
+/// PollDesc stays valid forever for any in-flight deadline-heap or
+/// `poll()` deref to safely traverse. Stale events / heap entries
+/// are filtered by `seq` mismatch.
+///
+/// Safety: `pd` must come from a prior `open()` call.
 pub unsafe fn close(pd: *const PollDesc) {
     if pd.is_null() {
         return;
@@ -241,10 +258,11 @@ pub unsafe fn close(pd: *const PollDesc) {
         pd_ref.fd,
         &mut ev,
     );
-    // Reclaim the leaked Box.
-    unsafe {
-        drop(Box::from_raw(pd as *mut PollDesc));
-    }
+    // Bump rseq + wseq so any pending deadline-heap entries for this
+    // pd no longer match — sysmon will pop and discard them. This
+    // is the only cleanup needed; the memory itself stays leaked.
+    pd_ref.rseq.fetch_add(1, Ordering::AcqRel);
+    pd_ref.wseq.fetch_add(1, Ordering::AcqRel);
 }
 
 // ─── block / unblock ─────────────────────────────────────────────────
@@ -493,8 +511,14 @@ pub fn netpoll_break() {
 // SetReadDeadline per request), this is bounded by request rate
 // times max keep-alive timeout.
 
-/// One pending deadline. `seq` is the value of `pd.{rseq,wseq}` at
-/// push time; sysmon discards entries where seq != current seq.
+/// One pending deadline.
+///
+/// **Lifetime safety**: `pd` is a raw pointer; PollDesc memory is
+/// never freed (see `open` doc-comment), so the deref in
+/// `fire_expired_deadlines` is always valid. Stale entries (deadline
+/// reset, cleared, or fd closed since push) are filtered by `seq`
+/// mismatch — `netpoll::close` bumps both `rseq` and `wseq` on the
+/// way out, so all pending entries for a closed fd self-discard.
 #[derive(Clone, Copy)]
 struct DeadlineEntry {
     deadline_ns: i64,
@@ -593,7 +617,11 @@ pub fn fire_expired_deadlines(now: i64) {
             Some(e) => e,
             None => return,
         };
-        // Stale-entry check: sequence must still match.
+        // Stale-entry check: PollDesc memory is never freed (see
+        // `open` doc-comment), so the deref is always safe. The seq
+        // counter discriminates: bumped by `set_deadline` (deadline
+        // replaced/cleared) and by `close` (fd closed → all pending
+        // deadlines for this pd self-discard).
         let pd = unsafe { &*entry.pd };
         let (dl, seq) = if entry.mode == b'r' {
             (&pd.rd, &pd.rseq)

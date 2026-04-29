@@ -36,7 +36,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use core::ptr;
-use core::sync::atomic::{AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use crate::errors::{self, error};
 use crate::goslice::slice;
@@ -65,7 +65,7 @@ const EINTR: i32 = 4;
 
 /// `net.Listener` for TCP. Wraps a listening socket fd plus a lazily-
 /// registered netpoll `PollDesc`. Send across goroutines is sound: the
-/// fd is just an int and `pd` is an `AtomicPtr`.
+/// fd is read-only after construction and `pd` / `closed` are atomic.
 pub struct Listener {
     fd: i32,
     addr: TCPAddr,
@@ -73,6 +73,10 @@ pub struct Listener {
     /// before that. Lazy registration matches Go's `internal/poll.FD`
     /// shape and avoids paying epoll_ctl on a one-shot listener.
     pd: AtomicPtr<PollDesc>,
+    /// True after `Close` has run. Used by `Close` itself for
+    /// idempotency and by `Drop` to skip the close on a Listener
+    /// that the user already closed explicitly.
+    closed: AtomicBool,
 }
 
 unsafe impl Send for Listener {}
@@ -120,7 +124,12 @@ impl Listener {
     }
 
     /// `(*TCPListener).Close` — stop listening and drop the fd.
+    /// Idempotent: a second call is a no-op (mirrors Go's
+    /// `onceCloseListener` server-side wrapper).
     pub fn Close(&self) -> error {
+        if self.closed.swap(true, Ordering::AcqRel) {
+            return errors::nil;
+        }
         let pd = self.pd.swap(ptr::null_mut(), Ordering::AcqRel);
         if !pd.is_null() {
             unsafe {
@@ -442,6 +451,28 @@ impl io::Closer for Conn {
     }
 }
 
+/// Drop closes the fd and unregisters from the netpoller if the user
+/// didn't call `Close()` explicitly. Idempotent with `Close` — that
+/// path already swaps `pd` to null and `fd` to `-1`, so a Drop on a
+/// closed Conn is a no-op. Without this, dropping a Conn without
+/// calling Close would leak the OS file descriptor for the lifetime
+/// of the process.
+impl Drop for Conn {
+    fn drop(&mut self) {
+        let _ = <Self as io::Closer>::Close(self);
+    }
+}
+
+/// Same idempotent-Close on Drop for Listener. The `closed` flag in
+/// `Close` makes second-call a no-op, so explicit-Close-then-Drop
+/// is harmless. This fixes the listening-fd leak when a user binds
+/// a Listener and drops it without closing.
+impl Drop for Listener {
+    fn drop(&mut self) {
+        let _ = self.Close();
+    }
+}
+
 // ─── Listen / Dial ───────────────────────────────────────────────────
 
 /// `net.Listen` — open a listening socket. `network` must be `"tcp"`
@@ -518,6 +549,7 @@ pub fn Listen(network: string, addr: string) -> (Listener, error) {
             fd,
             addr: TCPAddr::from_sockaddr_in(&got),
             pd: AtomicPtr::new(ptr::null_mut()),
+            closed: AtomicBool::new(false),
         },
         errors::nil,
     )
@@ -653,6 +685,9 @@ fn dead_listener() -> Listener {
         fd: -1,
         addr: TCPAddr::zero(),
         pd: AtomicPtr::new(ptr::null_mut()),
+        // Mark as already-closed so Drop skips the syscall::Close(-1)
+        // round-trip — fd is the sentinel, not a real handle.
+        closed: AtomicBool::new(true),
     }
 }
 
