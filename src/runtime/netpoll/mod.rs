@@ -29,8 +29,8 @@
 
 extern crate alloc;
 
-use alloc::boxed::Box;
 use alloc::collections::BinaryHeap;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
 use core::cmp::{Ordering as CmpOrdering, Reverse};
@@ -69,7 +69,16 @@ const PD_WAIT: usize = 2;
 /// the same. For Conn this is naturally enforced (one reader, one
 /// writer per Conn).
 pub struct PollDesc {
-    pub fd: i32,
+    /// Kernel fd. Constant for the lifetime of this Arc<PollDesc>;
+    /// only read by `close()` to issue EPOLL_CTL_DEL on the right fd.
+    /// Stored Atomic to keep the struct interior-mutable (alternatives
+    /// would require a &mut self constructor, which conflicts with
+    /// Arc::new's by-value initialization).
+    pub fd: AtomicI32,
+    /// Index into `REGISTRY.slots` for this PollDesc. `event.data`
+    /// (low 32 bits) carries this index; `poll()` looks up the Arc
+    /// in the slab to safely deref.
+    pub slot: AtomicU32,
     /// Read-side parker state. See PD_* constants above.
     pub rg: AtomicUsize,
     /// Write-side parker state.
@@ -87,19 +96,40 @@ pub struct PollDesc {
     pub rseq: AtomicU32,
     /// Write-deadline generation counter.
     pub wseq: AtomicU32,
+    /// Slot-recycle generation counter. Bumped by `close()` before
+    /// the slot returns to the freelist. Bottom 16 bits are packed
+    /// into bits [32..48] of `EpollEvent.data` at `EPOLL_CTL_ADD`
+    /// time; `poll()` filters stale events whose embedded tag no
+    /// longer matches `pd.fdseq.load()`. Mirrors Go's `pd.fdseq`
+    /// (netpoll.go:79) — Go uses 24 bits, we use 16.
+    pub fdseq: AtomicU32,
 }
 
 impl PollDesc {
-    const fn new(fd: i32) -> Self {
+    fn new(fd: i32) -> Self {
         PollDesc {
-            fd,
+            fd: AtomicI32::new(fd),
+            slot: AtomicU32::new(u32::MAX),
             rg: AtomicUsize::new(PD_NIL),
             wg: AtomicUsize::new(PD_NIL),
             rd: AtomicI64::new(0),
             wd: AtomicI64::new(0),
             rseq: AtomicU32::new(0),
             wseq: AtomicU32::new(0),
+            // Start at 1 — Go reserves 0 (netpoll.go:256-258
+            // "value 0 is special in setEventErr").
+            fdseq: AtomicU32::new(1),
         }
+    }
+}
+
+impl Drop for PollDesc {
+    fn drop(&mut self) {
+        // Fires when the last Arc<PollDesc> clone drops. The Drop
+        // ordering is what makes `live_count()` accurately reflect
+        // currently-allocated PollDescs even if a `poll()` iteration
+        // holds an in-flight clone past `netpoll::close()`.
+        PD_LIVE.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -138,6 +168,179 @@ static WAKE_SIG: AtomicI32 = AtomicI32::new(0);
 
 /// Init guard — set once by `init()`, idempotent.
 static INIT: SpinLock<bool> = SpinLock::new(false);
+
+// ─── lifecycle counters ──────────────────────────────────────────────
+//
+// Post-M27k there is no leak — PollDescs are owned by `Arc<PollDesc>`
+// and freed when the last Arc clone drops. These counters expose the
+// flow:
+//
+//   PD_LIVE      — currently allocated (non-dropped). Equivalent to
+//   the registry's slab-occupancy count plus any in-flight clones the
+//   poll loop is holding. Drops to zero when all conns close.
+//
+//   PD_TOTAL_OPENS — monotonic count of every `open()` call that
+//   succeeded with EPOLL_CTL_ADD. Telemetry only.
+//
+//   PD_RECYCLED  — count of opens that reused a freed slot index
+//   (slab grew once, then indices recycle). Indicates `Vec` capacity
+//   reuse, not memory reuse — every open allocates a fresh
+//   `Arc<PollDesc>`.
+//
+// All Relaxed: observability only, not used for safety invariants.
+static PD_LIVE: AtomicUsize = AtomicUsize::new(0);
+static PD_TOTAL_OPENS: AtomicUsize = AtomicUsize::new(0);
+static PD_RECYCLED: AtomicUsize = AtomicUsize::new(0);
+
+/// Currently allocated PollDescs (Arc<PollDesc> instances). Drops to
+/// zero after all conns close — no leak.
+pub fn live_count() -> usize {
+    PD_LIVE.load(Ordering::Relaxed)
+}
+
+/// Monotonic total of all successful `open()` calls. Useful for
+/// telemetry (load over time) and for the recycle hit ratio.
+pub fn total_opens_count() -> usize {
+    PD_TOTAL_OPENS.load(Ordering::Relaxed)
+}
+
+/// Count of opens that reused a freed slot index (slab capacity
+/// reuse). `recycled_count() / total_opens_count()` is the cache hit
+/// ratio for the slab's `Vec<u32>` free index list.
+pub fn recycled_count() -> usize {
+    PD_RECYCLED.load(Ordering::Relaxed)
+}
+
+/// Estimated bytes currently held by live PollDescs. Bounded by
+/// peak concurrency, drops to zero when all conns close.
+pub fn live_bytes() -> usize {
+    live_count() * core::mem::size_of::<PollDesc>()
+}
+
+// ─── PollDesc registry (M27k slab) ───────────────────────────────────
+//
+// Idiomatic Rust replacement for Go's never-free pollCache. Mirrors
+// async-io's Reactor.sources slab (smol-rs/async-io reactor.rs). Each
+// PollDesc lives in an `Arc<PollDesc>`; the slab owns one strong
+// reference per registered fd. `event.data` carries the slab INDEX
+// (not a raw pointer), so concurrent `close()` is safe: it removes
+// the slab's Arc, dropping the count by one. If `poll()` already
+// cloned the Arc for an in-flight event, that clone keeps the
+// PollDesc alive until it's processed; once all clones drop the
+// PollDesc is freed.
+//
+// Why this beats Go's design: Go uses `persistentalloc` for pollDescs
+// (never returned to the OS) plus tagged-pointer fdseq for stale-event
+// filtering. We get both safety AND clean reclamation by separating
+// the *index* (stable, fits in a u32) from the *pointer* (Rust-managed
+// via Arc). The fdseq tag is still useful — protects against the
+// short window between EPOLL_CTL_DEL and the slab.remove() during
+// which a recycled-index event could otherwise alias.
+struct RegistryInner {
+    slots: Vec<Option<Arc<PollDesc>>>,
+    /// Free slot indices, popped on insert.
+    free: Vec<u32>,
+}
+
+static REGISTRY: SpinLock<RegistryInner> = SpinLock::new(RegistryInner {
+    slots: Vec::new(),
+    free: Vec::new(),
+});
+
+/// Insert `arc` into the slab; return the assigned slot index. The
+/// slab takes one strong reference (clone); caller's `arc` is
+/// untouched.
+fn registry_insert(arc: &Arc<PollDesc>) -> u32 {
+    let mut g = REGISTRY.lock();
+    if let Some(idx) = g.free.pop() {
+        g.slots[idx as usize] = Some(arc.clone());
+        PD_RECYCLED.fetch_add(1, Ordering::Relaxed);
+        idx
+    } else {
+        let idx = g.slots.len() as u32;
+        g.slots.push(Some(arc.clone()));
+        idx
+    }
+}
+
+/// Remove the slab's Arc clone for `idx`. Returns the removed Arc
+/// (caller may drop it immediately, or hold to extend the lifetime).
+fn registry_remove(idx: u32) -> Option<Arc<PollDesc>> {
+    let mut g = REGISTRY.lock();
+    let i = idx as usize;
+    if i >= g.slots.len() {
+        return None;
+    }
+    let removed = g.slots[i].take();
+    if removed.is_some() {
+        g.free.push(idx);
+    }
+    removed
+}
+
+/// Look up the Arc for `idx` and clone it. Returns None if the slot
+/// has been closed (slab took() the entry).
+fn registry_get(idx: u32) -> Option<Arc<PollDesc>> {
+    let g = REGISTRY.lock();
+    let i = idx as usize;
+    if i >= g.slots.len() {
+        return None;
+    }
+    g.slots[i].clone()
+}
+
+/// Look up a `Weak<PollDesc>` for `idx`. Used by the deadline heap so
+/// pending entries don't keep the PollDesc alive past close.
+fn registry_get_weak(idx: u32) -> Option<Weak<PollDesc>> {
+    let g = REGISTRY.lock();
+    let i = idx as usize;
+    if i >= g.slots.len() {
+        return None;
+    }
+    g.slots[i].as_ref().map(Arc::downgrade)
+}
+
+// ─── event.data layout ───────────────────────────────────────────────
+//
+// `event.data` is a 64-bit cookie the kernel echoes back from
+// EPOLL_CTL_ADD on every event. We split it so a single equality
+// check against `eventfd_tag()` works AND we never alias with a
+// userspace-pointer-shaped value (the eventfd discriminator is
+// `&EVENTFD_FD as u64`, which has bits [48..] all zero on Linux):
+//
+//   bit  [48]     — `1` for slab events, `0` for the eventfd. This
+//                   is the cheap discriminator: any `data` with bit
+//                   48 set is a slab event, period.
+//   bits [32..48] — fdseq tag (low 16 bits of pd.fdseq) for stale-
+//                   event filtering across the EPOLL_CTL_DEL ↔
+//                   slab.take() window.
+//   bits [0..32]  — slot index (u32 from REGISTRY).
+//   bits [49..64] — reserved (zero).
+//
+// The fdseq tag is no longer strictly required for safety (the slab
+// take() makes the slot lookup return None, so the deref simply never
+// happens), but it's a cheap fast-path filter for the brief window
+// where EPOLL_CTL_DEL has fired but slab.take() hasn't — and it costs
+// only 16 bits.
+const SLOT_MASK: u64 = 0xFFFF_FFFF;
+const FDSEQ_MASK: u64 = 0xFFFF;
+const FDSEQ_SHIFT: u32 = 32;
+const SLAB_DISCRIMINATOR: u64 = 1u64 << 48;
+
+#[inline]
+fn pack_event_data(slot: u32, fdseq: u32) -> u64 {
+    SLAB_DISCRIMINATOR | (slot as u64) | (((fdseq as u64) & FDSEQ_MASK) << FDSEQ_SHIFT)
+}
+
+#[inline]
+fn unpack_slot(data: u64) -> u32 {
+    (data & SLOT_MASK) as u32
+}
+
+#[inline]
+fn unpack_tag(data: u64) -> u32 {
+    ((data >> FDSEQ_SHIFT) & FDSEQ_MASK) as u32
+}
 
 // ─── init / open / close ─────────────────────────────────────────────
 
@@ -186,38 +389,42 @@ fn eventfd_tag() -> u64 {
     &EVENTFD_FD as *const AtomicI32 as u64
 }
 
-/// Register `fd` with the poller. Returns a stable `*const PollDesc`
-/// the caller (net::Listener / net::Conn) stashes alongside the fd.
-/// On failure, returns null.
+/// Register `fd` with the poller and return an owning `Arc<PollDesc>`
+/// the caller (net::Listener / net::Conn) holds for the lifetime of
+/// the registration. On failure, returns `None`.
 ///
-/// **Memory lifetime — type-stable, never freed.** PollDescs leak
-/// permanently (Box::leak forever). This mirrors Go's pollCache
-/// (netpoll.go:688), which also never returns memory to the heap.
-/// The reason: `poll()` dereferences a raw `*const PollDesc` carried
-/// in `event.data`, and `fire_expired_deadlines` does the same with
-/// heap-stored entries. Concurrent `close()` cannot safely free the
-/// memory under either path without RCU-style synchronization. The
-/// trade-off (~80 bytes leaked per ever-opened socket, bounded by
-/// process socket-open count) is the same Go accepts.
+/// **Memory lifetime — Rust-managed.** `PollDesc` is owned by
+/// `Arc<PollDesc>`. The slab (`REGISTRY`) holds one strong reference
+/// per registered fd; the caller's returned Arc is the second. When
+/// `close()` is called, the slab releases its clone; once the caller
+/// drops their Arc and any in-flight `poll()` clone drops too, the
+/// PollDesc is freed. No leak. (Compare async-io's `Reactor.sources:
+/// Mutex<Slab<Arc<Source>>>` — same pattern.)
 ///
-/// Stale-event protection comes from the `seq` counter
-/// (`pd.{rseq,wseq}`), bumped on every `set_deadline` call. Sysmon
-/// discards heap entries whose seq doesn't match.
+/// Stale-event filtering uses `pd.fdseq` (low 16 bits embedded in
+/// `event.data`); see the layout doc above.
 ///
 /// `fd` should already be `O_NONBLOCK` — the caller arranges that via
 /// SOCK_NONBLOCK in socket()/accept4() or fcntl(F_SETFL).
-pub fn open(fd: i32) -> *const PollDesc {
+pub fn open(fd: i32) -> Option<Arc<PollDesc>> {
     if EPFD.load(Ordering::Acquire) < 0 {
         init();
     }
 
-    let pd = Box::leak(Box::new(PollDesc::new(fd))) as *mut PollDesc;
+    // Allocate a fresh PollDesc, register it in the slab. `Arc::new`
+    // gives strong=1; `registry_insert` clones to strong=2 (caller +
+    // slab).
+    let arc = Arc::new(PollDesc::new(fd));
+    let slot = registry_insert(&arc);
+    arc.slot.store(slot, Ordering::Release);
+
+    let fdseq = arc.fdseq.load(Ordering::Relaxed);
     let mut ev = syscall::EpollEvent {
         events: syscall::EPOLLIN
             | syscall::EPOLLOUT
             | syscall::EPOLLRDHUP
             | syscall::EPOLLET,
-        data: pd as u64,
+        data: pack_event_data(slot, fdseq),
     };
     let r = syscall::EpollCtl(
         EPFD.load(Ordering::Acquire),
@@ -226,43 +433,54 @@ pub fn open(fd: i32) -> *const PollDesc {
         &mut ev,
     );
     if r < 0 {
-        // Caller will see the null and treat the fd as un-pollable.
-        // PollDesc memory is intentionally leaked (see above) — but
-        // since we never registered, no one will reference it again.
-        return ptr::null();
+        // Registration failed — undo the slab insert. The two Arc
+        // references (caller's + slab's) both drop; PollDesc freed.
+        let _ = registry_remove(slot);
+        return None;
     }
-    pd as *const PollDesc
+    PD_LIVE.fetch_add(1, Ordering::Relaxed);
+    PD_TOTAL_OPENS.fetch_add(1, Ordering::Relaxed);
+    Some(arc)
 }
 
-/// Unregister `pd` from the poller. Caller still owns the fd —
-/// `close(2)` is the caller's responsibility.
-///
-/// **Does NOT free the PollDesc memory** (see `open` doc-comment for
-/// why). The kernel's epoll registration is removed; the in-memory
-/// PollDesc stays valid forever for any in-flight deadline-heap or
-/// `poll()` deref to safely traverse. Stale events / heap entries
-/// are filtered by `seq` mismatch.
-///
-/// Safety: `pd` must come from a prior `open()` call.
-pub unsafe fn close(pd: *const PollDesc) {
-    if pd.is_null() {
-        return;
-    }
-    let pd_ref = unsafe { &*pd };
+/// Unregister `pd` from the poller and release the slab's strong
+/// reference. The caller's Arc is consumed; if no `poll()` iteration
+/// is currently holding a clone, the PollDesc is freed at the end of
+/// this call. Otherwise it's freed when the last in-flight clone
+/// drops. Caller still owns the fd — `close(2)` on the fd is the
+/// caller's responsibility.
+pub fn close(pd: Arc<PollDesc>) {
+    let slot = pd.slot.load(Ordering::Acquire);
     // Best-effort EPOLL_CTL_DEL — the kernel may have already removed
     // the registration if the fd was closed.
+    let fd = pd.fd.load(Ordering::Relaxed);
     let mut ev = syscall::EpollEvent { events: 0, data: 0 };
     let _ = syscall::EpollCtl(
         EPFD.load(Ordering::Acquire),
         syscall::EPOLL_CTL_DEL,
-        pd_ref.fd,
+        fd,
         &mut ev,
     );
+    // Bump fdseq BEFORE removing from the slab. Any in-flight epoll
+    // event still referring to this slot via the old fdseq tag will
+    // fail the tag check in poll() and self-discard.
+    pd.fdseq.fetch_add(1, Ordering::AcqRel);
     // Bump rseq + wseq so any pending deadline-heap entries for this
-    // pd no longer match — sysmon will pop and discard them. This
-    // is the only cleanup needed; the memory itself stays leaked.
-    pd_ref.rseq.fetch_add(1, Ordering::AcqRel);
-    pd_ref.wseq.fetch_add(1, Ordering::AcqRel);
+    // pd no longer match — sysmon will pop and discard them.
+    pd.rseq.fetch_add(1, Ordering::AcqRel);
+    pd.wseq.fetch_add(1, Ordering::AcqRel);
+    // PD_LIVE is decremented in `Drop for PollDesc`, not here — that
+    // way an in-flight poll() clone keeps the count accurate.
+    // Drop the slab's clone. Future `registry_get(slot)` returns None;
+    // the slot index is freed for reuse by a later `open()`.
+    let _slab_arc = registry_remove(slot);
+    drop(_slab_arc);
+    // Caller's Arc drops at end of fn — together with the slab drop
+    // above, that brings the strong count down by 2. If `poll()` is
+    // not currently iterating an event for this slot, count = 0 and
+    // the PollDesc is freed here. Otherwise it's freed when poll's
+    // clone drops at the end of its event-processing loop.
+    drop(pd);
 }
 
 // ─── block / unblock ─────────────────────────────────────────────────
@@ -434,6 +652,9 @@ pub fn poll(delay_ms: i32) -> Vec<NonNull<G>> {
         if evbits == 0 {
             continue;
         }
+        // The eventfd is registered with `data = &EVENTFD_FD as u64`
+        // (no fdseq tag, top bits zero), so the equality check works
+        // identically with or without tagging.
         if data == evtag {
             // Drain the eventfd counter (8-byte read).
             if delay_ms != 0 {
@@ -447,7 +668,26 @@ pub fn poll(delay_ms: i32) -> Vec<NonNull<G>> {
             }
             continue;
         }
-        let pd = unsafe { &*(data as *const PollDesc) };
+        // M27k: look up the Arc<PollDesc> by slot index. If the slot
+        // is None, the registration was closed since this event was
+        // queued — drop the event. The Arc clone we get back keeps
+        // the PollDesc alive for the duration of this iteration even
+        // if a concurrent close() removes the slab entry.
+        let slot = unpack_slot(data);
+        let event_tag = unpack_tag(data);
+        let arc = match registry_get(slot) {
+            Some(a) => a,
+            None => continue,
+        };
+        // Fast-path stale-event filter for the EPOLL_CTL_DEL ↔
+        // slab.take() window: if fdseq was bumped since this event
+        // was registered, the underlying fd has been closed (and
+        // possibly the slot reused). Drop the event.
+        let live_tag = arc.fdseq.load(Ordering::Acquire) & (FDSEQ_MASK as u32);
+        if event_tag != live_tag {
+            continue;
+        }
+        let pd: &PollDesc = &arc;
         if evbits
             & (syscall::EPOLLIN
                 | syscall::EPOLLRDHUP
@@ -464,6 +704,8 @@ pub fn poll(delay_ms: i32) -> Vec<NonNull<G>> {
                 to_run.push(g);
             }
         }
+        // `arc` drops here — strong count goes back to its
+        // pre-event-iteration value.
     }
     to_run
 }
@@ -513,21 +755,22 @@ pub fn netpoll_break() {
 
 /// One pending deadline.
 ///
-/// **Lifetime safety**: `pd` is a raw pointer; PollDesc memory is
-/// never freed (see `open` doc-comment), so the deref in
-/// `fire_expired_deadlines` is always valid. Stale entries (deadline
-/// reset, cleared, or fd closed since push) are filtered by `seq`
-/// mismatch — `netpoll::close` bumps both `rseq` and `wseq` on the
-/// way out, so all pending entries for a closed fd self-discard.
-#[derive(Clone, Copy)]
+/// **Lifetime safety**: `pd` is a `Weak<PollDesc>`. If the underlying
+/// PollDesc has been freed (last Arc clone dropped after close), the
+/// `weak.upgrade()` in `fire_expired_deadlines` returns `None` and the
+/// entry self-discards. Otherwise we get a fresh `Arc<PollDesc>`
+/// holding the PollDesc alive for the duration of the wake. Stale
+/// entries (deadline reset/cleared since push) are filtered by `seq`
+/// mismatch as before — `netpoll::close` bumps both `rseq` and `wseq`
+/// on the way out, so any pending entries for a closed fd whose
+/// PollDesc happens to still be alive (because someone holds the Arc)
+/// also self-discard via the seq mismatch.
 struct DeadlineEntry {
     deadline_ns: i64,
-    pd: *const PollDesc,
+    pd: Weak<PollDesc>,
     mode: u8, // b'r' or b'w'
     seq: u32,
 }
-
-unsafe impl Send for DeadlineEntry {}
 
 impl PartialEq for DeadlineEntry {
     fn eq(&self, other: &Self) -> bool {
@@ -585,9 +828,21 @@ pub fn set_deadline(pd: &PollDesc, deadline_ns: i64, mode: u8) {
     }
 
     dl.store(deadline_ns, Ordering::Release);
+    // Resolve a Weak<PollDesc> via the slab. This avoids burdening
+    // callers with passing the Arc through, and the Weak naturally
+    // self-invalidates if the PollDesc is freed before the deadline
+    // fires.
+    let slot = pd.slot.load(Ordering::Acquire);
+    let weak = match registry_get_weak(slot) {
+        Some(w) => w,
+        // Slot was already removed (close raced this set_deadline) —
+        // nothing to do; any parker on this pd will see the dl<0
+        // store and timeout on its own.
+        None => return,
+    };
     let entry = DeadlineEntry {
         deadline_ns,
-        pd: pd as *const PollDesc,
+        pd: weak,
         mode,
         seq: seq.load(Ordering::Acquire),
     };
@@ -605,10 +860,9 @@ pub fn fire_expired_deadlines(now: i64) {
     loop {
         let popped: Option<DeadlineEntry> = {
             let mut heap = DEADLINE_HEAP.lock();
-            match heap.peek().copied() {
+            match heap.peek() {
                 Some(Reverse(entry)) if entry.deadline_ns <= now => {
-                    heap.pop();
-                    Some(entry)
+                    heap.pop().map(|r| r.0)
                 }
                 _ => return,
             }
@@ -617,17 +871,22 @@ pub fn fire_expired_deadlines(now: i64) {
             Some(e) => e,
             None => return,
         };
-        // Stale-entry check: PollDesc memory is never freed (see
-        // `open` doc-comment), so the deref is always safe. The seq
-        // counter discriminates: bumped by `set_deadline` (deadline
-        // replaced/cleared) and by `close` (fd closed → all pending
-        // deadlines for this pd self-discard).
-        let pd = unsafe { &*entry.pd };
+        // M27k: Weak::upgrade returns None if the PollDesc was freed
+        // since the entry was pushed (caller closed the conn / dropped
+        // their Arc). In that case the deadline is moot — drop it.
+        let arc = match entry.pd.upgrade() {
+            Some(a) => a,
+            None => continue,
+        };
+        let pd: &PollDesc = &arc;
         let (dl, seq) = if entry.mode == b'r' {
             (&pd.rd, &pd.rseq)
         } else {
             (&pd.wd, &pd.wseq)
         };
+        // The seq counter discriminates: bumped by `set_deadline`
+        // (deadline replaced/cleared) and by `close` (fd closed → all
+        // pending deadlines for this pd self-discard).
         if seq.load(Ordering::Acquire) != entry.seq {
             continue;
         }

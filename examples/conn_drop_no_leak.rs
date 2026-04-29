@@ -16,6 +16,7 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicI32, Ordering};
 use goish::net;
+use goish::runtime::netpoll;
 use goish::runtime::sched::schedule;
 use goish::{go, string, syscall, KB};
 
@@ -88,6 +89,8 @@ fn count_fds() -> usize {
 #[goish::main]
 fn main() {
     let baseline = count_fds();
+    let pd_total_opens_baseline = netpoll::total_opens_count();
+    let pd_live_baseline = netpoll::live_count();
 
     // Spin up a long-lived listener to dial against. We wrap it in
     // an Arc so main can call Close() to break the accept loop on
@@ -177,6 +180,45 @@ fn main() {
     // this is harmless even though Close already ran).
     for _ in 0..20 {
         goish::runtime::sched::Gosched();
+    }
+
+    // PollDesc lifecycle report (M27k zero-leak model). `live` is
+    // currently-allocated PollDesc instances; it should drop to zero
+    // (the baseline) after all conns close. `opens` is the monotonic
+    // count of registrations that happened during the test — useful
+    // to confirm the test actually exercised the code. `recycled` is
+    // slab-index reuse (memory reclaim, not slot reuse).
+    let pd_total_opens_after = netpoll::total_opens_count();
+    let pd_live_after = netpoll::live_count();
+    let pd_opens_delta = pd_total_opens_after.saturating_sub(pd_total_opens_baseline);
+    let pd_live_delta = (pd_live_after as isize) - (pd_live_baseline as isize);
+    let mut buf: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    buf.extend_from_slice(b"polldesc: live=");
+    push_dec(&mut buf, pd_live_after as u64);
+    buf.extend_from_slice(b" (");
+    push_dec(&mut buf, netpoll::live_bytes() as u64);
+    buf.extend_from_slice(b"B) opens+=");
+    push_dec(&mut buf, pd_opens_delta as u64);
+    buf.extend_from_slice(b" recycled=");
+    push_dec(&mut buf, netpoll::recycled_count() as u64);
+    buf.extend_from_slice(b" live_delta=");
+    if pd_live_delta < 0 {
+        buf.push(b'-');
+        push_dec(&mut buf, (-pd_live_delta) as u64);
+    } else {
+        push_dec(&mut buf, pd_live_delta as u64);
+    }
+    buf.extend_from_slice(b"\n");
+    syscall::Write(syscall::STDOUT, buf.as_ptr(), buf.len());
+
+    // M27k invariant: live PollDescs should be at-or-below baseline
+    // after every Conn/Listener has been dropped and the slab has
+    // released its strong references. A non-trivial positive delta
+    // means a PollDesc is being kept alive somewhere — a real leak.
+    if pd_live_delta > 0 {
+        let msg = b"PD LEAK: live PollDesc count grew during test\n";
+        syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
+        syscall::Exit(1);
     }
 
     let ok: &[u8] = b"conn_drop_no_leak: fd count stable across 200 dial+drop cycles\n";

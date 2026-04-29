@@ -240,10 +240,6 @@ name = "rand_smoke"
 path = "examples/rand_smoke.rs"
 
 [[example]]
-name = "select_handcoded"
-path = "examples/select_handcoded.rs"
-
-[[example]]
 name = "select_smoke"
 path = "examples/select_smoke.rs"
 
@@ -296,24 +292,12 @@ name = "rt_section_smoke"
 path = "examples/rt_section_smoke.rs"
 
 [[example]]
-name = "chan_micro_send_only_segvinfo"
-path = "examples/chan_micro_send_only_segvinfo.rs"
-
-[[example]]
 name = "chan_micro_select_send_small"
 path = "examples/chan_micro_select_send_small.rs"
 
 [[example]]
 name = "chan_micro_select_recv_only"
 path = "examples/chan_micro_select_recv_only.rs"
-
-[[example]]
-name = "chan_micro_select_diag"
-path = "examples/chan_micro_select_diag.rs"
-
-[[example]]
-name = "chan_micro_select_dump"
-path = "examples/chan_micro_select_dump.rs"
 
 [[example]]
 name = "chan_self_select"
@@ -360,10 +344,6 @@ name = "m20_smoke"
 path = "examples/m20_smoke.rs"
 
 [[example]]
-name = "bench_string_slice"
-path = "examples/bench_string_slice.rs"
-
-[[example]]
 name = "testing_smoke"
 path = "examples/testing_smoke.rs"
 
@@ -407,6 +387,3 @@ path = "examples/preempt_slot_offline_proof.rs"
 name = "sigaltstack_offline_proof"
 path = "examples/sigaltstack_offline_proof.rs"
 
-[[example]]
-name = "chan_micro_select_send_only_handcoded"
-path = "examples/chan_micro_select_send_only_handcoded.rs"

@@ -43,6 +43,7 @@ use crate::goslice::slice;
 use crate::string;
 use crate::io;
 use crate::runtime::netpoll::{self, BlockResult, PollDesc};
+use alloc::sync::Arc;
 use crate::syscall;
 use crate::types::{byte, int};
 
@@ -130,11 +131,13 @@ impl Listener {
         if self.closed.swap(true, Ordering::AcqRel) {
             return errors::nil;
         }
-        let pd = self.pd.swap(ptr::null_mut(), Ordering::AcqRel);
-        if !pd.is_null() {
-            unsafe {
-                netpoll::close(pd);
-            }
+        let pd_raw = self.pd.swap(ptr::null_mut(), Ordering::AcqRel);
+        if !pd_raw.is_null() {
+            // Reconstitute the Arc that ensure_pd stashed via
+            // Arc::into_raw, then hand to netpoll::close which
+            // releases the slab's clone and drops the caller's Arc.
+            let arc = unsafe { Arc::from_raw(pd_raw as *const PollDesc) };
+            netpoll::close(arc);
         }
         let r = syscall::Close(self.fd);
         if r < 0 {
@@ -190,15 +193,23 @@ impl Listener {
 
     /// Lazily register the listening fd with the netpoller on the
     /// first EAGAIN. Idempotent / race-safe via AtomicPtr CAS.
+    ///
+    /// **Lifetime**: the AtomicPtr stores an `Arc<PollDesc>` consumed
+    /// via `Arc::into_raw`. `Listener` owns one strong reference for
+    /// its lifetime; `Close` / `Drop` recover the Arc with
+    /// `Arc::from_raw` and pass it to `netpoll::close`. Reading the
+    /// pointer as `&PollDesc` is sound because the Listener is the
+    /// owner — the Arc cannot be freed while `&self` is held.
     fn ensure_pd(&self) -> *const PollDesc {
         let cur = self.pd.load(Ordering::Acquire);
         if !cur.is_null() {
             return cur;
         }
-        let new = netpoll::open(self.fd) as *mut PollDesc;
-        if new.is_null() {
-            return self.pd.load(Ordering::Acquire);
-        }
+        let arc = match netpoll::open(self.fd) {
+            Some(a) => a,
+            None => return self.pd.load(Ordering::Acquire),
+        };
+        let new = Arc::into_raw(arc) as *mut PollDesc;
         match self.pd.compare_exchange(
             ptr::null_mut(),
             new,
@@ -207,9 +218,11 @@ impl Listener {
         ) {
             Ok(_) => new as *const PollDesc,
             Err(_) => {
-                unsafe {
-                    netpoll::close(new);
-                }
+                // Lost the install race — close our orphan Arc (which
+                // also unregisters from the slab/epoll) and use the
+                // winner.
+                let orphan = unsafe { Arc::from_raw(new as *const PollDesc) };
+                netpoll::close(orphan);
                 self.pd.load(Ordering::Acquire)
             }
         }
@@ -331,15 +344,18 @@ impl Conn {
     }
 
     /// Lazy netpoll registration on first EAGAIN. Idempotent.
+    /// See `Listener::ensure_pd` for the lifetime invariants of the
+    /// AtomicPtr ↔ Arc conversion.
     fn ensure_pd(&self) -> *const PollDesc {
         let cur = self.pd.load(Ordering::Acquire);
         if !cur.is_null() {
             return cur;
         }
-        let new = netpoll::open(self.fd) as *mut PollDesc;
-        if new.is_null() {
-            return self.pd.load(Ordering::Acquire);
-        }
+        let arc = match netpoll::open(self.fd) {
+            Some(a) => a,
+            None => return self.pd.load(Ordering::Acquire),
+        };
+        let new = Arc::into_raw(arc) as *mut PollDesc;
         match self.pd.compare_exchange(
             ptr::null_mut(),
             new,
@@ -348,9 +364,8 @@ impl Conn {
         ) {
             Ok(_) => new as *const PollDesc,
             Err(_) => {
-                unsafe {
-                    netpoll::close(new);
-                }
+                let orphan = unsafe { Arc::from_raw(new as *const PollDesc) };
+                netpoll::close(orphan);
                 self.pd.load(Ordering::Acquire)
             }
         }
@@ -435,11 +450,13 @@ impl io::Closer for Conn {
         if self.fd < 0 {
             return errors::nil;
         }
-        let pd = self.pd.swap(ptr::null_mut(), Ordering::AcqRel);
-        if !pd.is_null() {
-            unsafe {
-                netpoll::close(pd);
-            }
+        let pd_raw = self.pd.swap(ptr::null_mut(), Ordering::AcqRel);
+        if !pd_raw.is_null() {
+            // Reconstitute the Arc<PollDesc> that ensure_pd installed
+            // via Arc::into_raw, then hand to netpoll::close (which
+            // unregisters from the slab and drops the caller's Arc).
+            let arc = unsafe { Arc::from_raw(pd_raw as *const PollDesc) };
+            netpoll::close(arc);
         }
         let r = syscall::Close(self.fd);
         self.fd = -1;
@@ -596,16 +613,18 @@ pub fn Dial(network: string, addr: string) -> (Conn, error) {
             return (Conn::dead(), errno_error("connect", errno));
         }
         // Wait for the connect to finalize.
-        let pd = netpoll::open(fd);
-        if pd.is_null() {
-            let _ = syscall::Close(fd);
-            return (Conn::dead(), errno_error("connect/poll_open", 0));
-        }
+        let arc = match netpoll::open(fd) {
+            Some(a) => a,
+            None => {
+                let _ = syscall::Close(fd);
+                return (Conn::dead(), errno_error("connect/poll_open", 0));
+            }
+        };
         // Connect has no deadline in this Dial path (v1); a future
         // DialTimeout would `set_deadline(pd, …, b'w')` before this
         // call and translate Timedout into a connect-timeout error.
-        if let BlockResult::Timedout = netpoll::block(unsafe { &*pd }, b'w') {
-            unsafe { netpoll::close(pd); }
+        if let BlockResult::Timedout = netpoll::block(&arc, b'w') {
+            netpoll::close(arc);
             let _ = syscall::Close(fd);
             return (Conn::dead(), timeout_error("connect"));
         }
@@ -622,13 +641,14 @@ pub fn Dial(network: string, addr: string) -> (Conn, error) {
             &mut so_err_len,
         );
         if so_err != 0 {
-            unsafe {
-                netpoll::close(pd);
-            }
+            netpoll::close(arc);
             let _ = syscall::Close(fd);
             return (Conn::dead(), errno_error("connect", so_err));
         }
-        // Connect succeeded — recover both ends.
+        // Connect succeeded — recover both ends. We move the Arc
+        // into the new Conn's AtomicPtr via Arc::into_raw, so the
+        // strong count is preserved (Conn owns one ref; slab owns
+        // one ref).
         let mut local = syscall::SockaddrIn::loopback(0);
         let mut local_len: u32 = core::mem::size_of::<syscall::SockaddrIn>() as u32;
         let _ = unsafe {
@@ -639,12 +659,13 @@ pub fn Dial(network: string, addr: string) -> (Conn, error) {
                 &mut local_len as *mut _ as usize,
             )
         };
+        let pd_raw = Arc::into_raw(arc) as *mut PollDesc;
         return (
             Conn {
                 fd,
                 local: TCPAddr::from_sockaddr_in(&local),
                 remote: TCPAddr::from_sockaddr_in(&parsed),
-                pd: AtomicPtr::new(pd as *mut PollDesc),
+                pd: AtomicPtr::new(pd_raw),
             },
             errors::nil,
         );
