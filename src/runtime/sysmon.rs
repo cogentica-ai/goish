@@ -33,7 +33,6 @@
 
 use alloc::boxed::Box;
 use alloc::collections::BinaryHeap;
-use alloc::vec::Vec;
 use core::cmp::{Ordering as CmpOrdering, Reverse};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -270,23 +269,24 @@ extern "C" fn sysmon_main() -> ! {
         // too long and force-preempt them via SIGURG.
         check_force_preempt(now);
 
-        // Fire all expired timers.
-        let mut to_wake: Vec<NonNull<G>> = Vec::new();
-        let next_deadline: Option<i64> = {
-            let mut heap = TIMER_HEAP.lock();
-            while let Some(Reverse(entry)) = heap.peek().copied() {
-                if entry.deadline_ns <= now {
-                    heap.pop();
-                    to_wake.push(entry.g);
-                } else {
-                    break;
+        // Fire all expired timers. Pop one at a time, drop the heap
+        // lock, goready, repeat. Avoids batching into a Vec (which
+        // would allocate once per sysmon tick that has any expirations).
+        let next_deadline: Option<i64> = loop {
+            let popped: Option<NonNull<G>> = {
+                let mut heap = TIMER_HEAP.lock();
+                match heap.peek().copied() {
+                    Some(Reverse(entry)) if entry.deadline_ns <= now => {
+                        heap.pop();
+                        Some(entry.g)
+                    }
+                    _ => break heap.peek().map(|Reverse(e)| e.deadline_ns),
                 }
+            };
+            if let Some(g) = popped {
+                goready(g);
             }
-            heap.peek().map(|Reverse(e)| e.deadline_ns)
         };
-        for g in to_wake {
-            goready(g);
-        }
 
         // Sleep until next deadline (or default poll). Capped at
         // FORCE_PREEMPT_NS so the next force-preempt scan fires

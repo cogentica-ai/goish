@@ -1167,6 +1167,18 @@ fn spawn_worker_m(id: u32) -> i64 {
 /// adds Ps; for now everything shares one global runq).
 pub fn bootstrap_workers() {
     let n = num_cpus();
+    // Pre-grow MIDLE / ALL_MS to capacity so subsequent push()es
+    // never reallocate. MIDLE is hit on every M park; without this
+    // the first park-cycle pushes trigger amortized Vec growth (an
+    // allocator round-trip under MIDLE's SpinLock — exactly the
+    // class of slow path the M26-phase + intrusive-Sema work
+    // chased out of the runtime). Sized to `n` (will never grow
+    // past the M count) but capped at MAX_PS for safety.
+    {
+        let cap = n.min(crate::runtime::sched::MAX_PS);
+        MIDLE.lock().reserve_exact(cap.saturating_sub(1));
+        ALL_MS.lock().reserve_exact(cap);
+    }
     // Spawn one worker per CPU beyond the main M (id=0).
     for i in 1..n {
         let _ = spawn_worker_m(i as u32);
