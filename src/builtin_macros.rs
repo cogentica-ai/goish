@@ -186,8 +186,22 @@ macro_rules! delete {
 ///   go!(move || {
 ///       println!("captured x = {}", x);
 ///   });
+/// Two forms (M26):
+///
+///   go!(|| work());                           // default 2 KiB stack
+///   go!(stack(8 * KB), || tiny_helper());     // explicit size
+///   go!(stack(1 * MB), || deep_recursion());  // explicit size
+///
+/// `KB` / `MB` / `GB` are exported at the crate root. Sizes are
+/// rounded up to the nearest 4 KiB page.
 #[macro_export]
 macro_rules! go {
+    (stack($size:expr), $closure:expr) => {{
+        $crate::runtime::sched::newproc_with_stack(
+            $size,
+            $crate::__macro_alloc::Box::new($closure),
+        );
+    }};
     ($closure:expr) => {{
         $crate::runtime::sched::newproc($crate::__macro_alloc::Box::new($closure));
     }};

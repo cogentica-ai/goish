@@ -28,6 +28,23 @@ pub mod __macro_alloc {
     pub use alloc::vec;
 }
 
+// ─── byte-size unit constants ───────────────────────────────────────
+//
+// Convenience constants for sizes (stack sizes, buffer caps, etc.):
+//
+//   go!(stack(8 * KB), || tiny_helper());
+//   go!(stack(1 * MB), || deep_recursion());
+//
+// Mirrors Go's idiom of writing literal multiplications (`8 << 10`
+// or `8 * 1024`); having named constants is purely ergonomic.
+
+/// One kilobyte (1024 bytes).
+pub const KB: usize = 1024;
+/// One megabyte (1024 KiB).
+pub const MB: usize = 1024 * 1024;
+/// One gigabyte (1024 MiB).
+pub const GB: usize = 1024 * 1024 * 1024;
+
 pub mod bufio;
 pub mod builtin;
 pub mod builtin_macros;

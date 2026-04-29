@@ -77,13 +77,21 @@ pub struct G {
 }
 
 impl G {
-    /// Allocate a `G` with a fresh stack and the given entry closure.
-    /// Status starts as `Idle`; the scheduler will transition to
-    /// `Running` on first dispatch.
+    /// Allocate a `G` with a fresh **default-sized** stack and the
+    /// given entry closure. Status starts as `Idle`; the scheduler
+    /// will transition to `Running` on first dispatch.
     pub fn new(entry: Box<dyn FnOnce()>) -> Self {
+        Self::new_with_stack(super::stack::DEFAULT_STACK_SIZE, entry)
+    }
+
+    /// Allocate a `G` with a stack of the requested size (M26).
+    /// `stack_size` is rounded up to the nearest page by `Stack::new_sized`.
+    /// Used by `go!(stack(N), closure)` when the caller knows their
+    /// goroutine needs a non-default stack size.
+    pub fn new_with_stack(stack_size: usize, entry: Box<dyn FnOnce()>) -> Self {
         G {
             gobuf: Gobuf::new(),
-            stack: Stack::new(),
+            stack: Stack::new_sized(stack_size),
             status: GStatus::Idle,
             entry: Some(entry),
             select_wait: [core::ptr::null(); SELECT_WAIT_MAX],

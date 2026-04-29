@@ -260,9 +260,28 @@ fn enqueue_runnable(g_ptr: NonNull<G>, next: bool) {
 /// after enqueueing the G; the closure does not run until the
 /// scheduler dispatches.
 ///
-/// Mirrors Go's `runtime.newproc(fn)` from proc.go:5158.
+/// Mirrors Go's `runtime.newproc(fn)` from proc.go:5158. The G is
+/// allocated with the default 2 KiB stack (page-rounded to 4 KiB).
 pub fn newproc(closure: Box<dyn FnOnce()>) {
     let g = Box::leak(Box::new(G::new(closure)));
+    let g_ptr = NonNull::from(&mut *g);
+    LIVE_G_COUNT.fetch_add(1, Ordering::AcqRel);
+    enqueue_runnable(g_ptr, false);
+}
+
+/// **`newproc_with_stack(size, closure)`** — spawn a goroutine with
+/// an explicit stack size (M26). Used by `go!(stack(N), closure)` when
+/// the caller knows the default 2 KiB stack is too small (deep
+/// recursion, large stack-allocated buffers) or wants to shrink for
+/// massive goroutine counts.
+///
+/// `size` is rounded up to the nearest 4 KiB page; the minimum
+/// allocation is one page regardless of the request. Goish has no
+/// `morestack`, so the stack you request is the stack you get —
+/// overflow silently corrupts adjacent memory unless a guard page
+/// has been installed (Phase γ work).
+pub fn newproc_with_stack(size: usize, closure: Box<dyn FnOnce()>) {
+    let g = Box::leak(Box::new(G::new_with_stack(size, closure)));
     let g_ptr = NonNull::from(&mut *g);
     LIVE_G_COUNT.fetch_add(1, Ordering::AcqRel);
     enqueue_runnable(g_ptr, false);
@@ -488,15 +507,22 @@ fn dispatch_g_trap_dump(label: &[u8], g_ptr: NonNull<G>) -> ! {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 fn dispatch_validate_g(g_ptr: NonNull<G>) {
-    // Each goroutine stack is exactly STACK_SIZE = 64 KiB (see
-    // runtime::sched::stack). Anything that doesn't match this
-    // invariant means the G was freed (and likely zeroed) before
-    // we got here.
-    const STACK_SIZE: usize = 64 * 1024;
+    // Per-G stacks are now variable-sized (M26): every G stores its
+    // own allocation size on `stack`. Validate that the stored bounds
+    // are internally consistent and span at least one full page —
+    // anything else indicates the G was freed (and likely zeroed)
+    // before we got here.
+    const PAGE_SIZE: usize = 4096;
     let g_ref = unsafe { g_ptr.as_ref() };
     let base = g_ref.stack.base();
     let top = g_ref.stack.top();
-    if top > base && top - base == STACK_SIZE && base != 0 {
+    let recorded = g_ref.stack.size();
+    if top > base
+        && base != 0
+        && top - base == recorded
+        && recorded >= PAGE_SIZE
+        && recorded.is_multiple_of(PAGE_SIZE)
+    {
         return;
     }
     dispatch_g_trap_dump(b"  reason       : stack invariants violated", g_ptr)

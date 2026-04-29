@@ -18,16 +18,45 @@
 //     overflows hard to diagnose, but adding it is purely additive
 //     code.
 //
-// Stack size: fixed 64 KiB per stack, no growth. Go uses 2 KiB
-// initial + segmented stack growth (`morestack`); we don't have the
-// compiler hooks for that yet, so we go static. 64 KiB comfortably
-// holds the call depths smoke tests will reach without bloating
-// memory for the common case.
+// **Stack size policy (M26 / phase 1).**
+//
+// Default stack is **2 KiB nominal**, matching Go's `stackMin`
+// (`runtime/stack.go:76`). Linux's mmap is page-granular (4 KiB on
+// x86_64), so a 2 KiB request actually consumes one page (4 KiB) of
+// virtual memory. Physical RSS for an idle/parked goroutine stays at
+// ~one page until the stack is actually touched (lazy paging).
+//
+// Goish does **not** implement Go's `morestack` growth (no compiler
+// hooks). The stack you request is the stack you get; overflow
+// silently corrupts adjacent memory unless a guard page is added
+// (Phase γ — separate work). For deep call chains, the user must
+// bump the size explicitly via `go!(stack(N), closure)`.
+//
+// **Why 2 KiB default**: targeting workloads with ~1M goroutines.
+// 1M × 4 KiB virtual = 4 GiB; physical RSS is bounded by actual
+// stack usage on touched pages. A larger default (e.g. 64 KiB)
+// would push virtual to 64 GiB and touch many more pages on
+// goroutines that spawn deep frames.
+//
+// To approach true 2 KiB density (sub-page), Phase 2 will port Go's
+// `stackpool` (`runtime/stack.go:194`) — chunked allocator carving
+// 2 K / 4 K / 8 K / 16 K / 32 K stacks from larger mmap'd spans.
 
 use crate::syscall;
 
-/// Per-G stack size in bytes. 64 KiB = 16 pages.
+/// Default per-G stack size in bytes (M26): 2 KiB nominal.
+/// Page-rounded to 4 KiB at mmap time on x86_64.
+pub const DEFAULT_STACK_SIZE: usize = 2 * 1024;
+
+/// Legacy alias — pre-M26 every G got exactly 64 KiB. Kept so any
+/// out-of-tree callers continue to compile, but new code should use
+/// `DEFAULT_STACK_SIZE` or pass an explicit size to `Stack::new_sized`.
+#[deprecated(note = "use DEFAULT_STACK_SIZE or Stack::new_sized(N)")]
 pub const STACK_SIZE: usize = 64 * 1024;
+
+/// Page granularity (mmap minimum allocation). Used to round
+/// caller-requested stack sizes up to a whole page.
+pub const PAGE_SIZE: usize = 4096;
 
 /// A goroutine stack. Owns its mmap region (when `owned`) and unmaps
 /// on drop, OR borrows pre-existing OS-thread-stack bounds (when
@@ -42,13 +71,27 @@ pub struct Stack {
 unsafe impl Send for Stack {}
 
 impl Stack {
-    /// Allocate a fresh stack via mmap. Returns a `Stack` whose `top()`
-    /// is page-aligned (and therefore 16-byte aligned, suitable for
+    /// Allocate a fresh stack at the **default size** (2 KiB nominal,
+    /// page-rounded to 4 KiB). Returns a `Stack` whose `top()` is
+    /// page-aligned (and therefore 16-byte aligned, suitable for
     /// `make_context`).
     pub fn new() -> Self {
+        Self::new_sized(DEFAULT_STACK_SIZE)
+    }
+
+    /// Allocate a fresh stack of `requested` bytes (rounded **up** to
+    /// the nearest 4 KiB page). Used by `go!(stack(N), closure)` when
+    /// the caller knows their goroutine needs more (or less) than the
+    /// default.
+    ///
+    /// Minimum allocation is one page (4 KiB) regardless of how small
+    /// `requested` is — Linux mmap can't go finer-grained without a
+    /// chunked stack pool (Phase 2 work).
+    pub fn new_sized(requested: usize) -> Self {
+        let size = round_up_to_page(requested.max(1));
         let p = syscall::Mmap(
             core::ptr::null_mut(),
-            STACK_SIZE,
+            size,
             syscall::PROT_READ | syscall::PROT_WRITE,
             syscall::MAP_PRIVATE | syscall::MAP_ANONYMOUS,
             -1,
@@ -61,7 +104,7 @@ impl Stack {
         }
         Stack {
             base: p,
-            size: STACK_SIZE,
+            size,
             owned: true,
         }
     }
@@ -100,6 +143,17 @@ impl Stack {
     pub fn base(&self) -> usize {
         self.base as usize
     }
+
+    /// Allocated stack size in bytes (post page-rounding).
+    pub fn size(&self) -> usize {
+        self.size
+    }
+}
+
+/// Round `n` up to the nearest multiple of `PAGE_SIZE`.
+#[inline]
+const fn round_up_to_page(n: usize) -> usize {
+    (n + PAGE_SIZE - 1) & !(PAGE_SIZE - 1)
 }
 
 impl Drop for Stack {
