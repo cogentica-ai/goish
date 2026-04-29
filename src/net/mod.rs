@@ -141,6 +141,29 @@ impl Listener {
         self.addr.clone()
     }
 
+    /// Internal raw fd accessor — used by `http::Server.Shutdown` to
+    /// close the listening socket from another goroutine. Not part
+    /// of the public Go API.
+    #[doc(hidden)]
+    pub fn __fd(&self) -> i32 {
+        self.fd
+    }
+
+    /// Internal: wake any goroutine parked in Accept by force-
+    /// expiring the read deadline on the listener's PollDesc.
+    /// Closing the underlying fd alone does not wake an Accept
+    /// parked on netpoll — kernel `close(2)` removes the fd from
+    /// epoll's interest set and pending events on it are dropped,
+    /// leaving any parked goroutine permanently stuck. Used by
+    /// `http::Server.Shutdown` to break out of a blocked Accept.
+    #[doc(hidden)]
+    pub fn __wake_accept(&self) {
+        let pd = self.ensure_pd();
+        if !pd.is_null() {
+            netpoll::set_deadline(unsafe { &*pd }, -1, b'r');
+        }
+    }
+
     /// `(*TCPListener).SetDeadline(t time.Time)` — set the deadline
     /// for `Accept` calls. Zero `t` clears.
     pub fn SetDeadline(&self, t: crate::time::Time) -> error {
