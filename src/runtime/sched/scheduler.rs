@@ -273,15 +273,25 @@ static LIVE_G_COUNT: AtomicUsize = AtomicUsize::new(0);
 /// work-stealing (γ), `next=true` for newproc would let the most
 /// recent spawn dominate `runnext` and starve earlier ones; `next=false`
 /// keeps spawn order deterministic. We can revisit once γ ships.
+///
+/// **acquirem/releasem bracketing** (Go parity): mirrors Go's `ready()`
+/// discipline at proc.go:1121–1136. Comment there is explicit — *"disable
+/// preemption because it can be holding p in a local var"*. Without the
+/// bump, an async-preempt or coop-preempt can fire between `current_p()`
+/// and `p.runqput()`, migrate the M to a different P, and the subsequent
+/// `runqput` then writes to a P this M no longer owns — violating the
+/// SPMC ring's single-writer invariant (`runqtail` and `runq[]` slots).
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 fn enqueue_runnable(g_ptr: NonNull<G>, next: bool) {
+    super::m::acquirem();
     if let Some(p) = current_p() {
         unsafe { p.runqput(g_ptr, next) };
     } else {
         SCHED.lock().runq.push_back(g_ptr);
     }
     wake_idle_m();
+    super::m::releasem();
 }
 
 /// Spawn a new goroutine running `closure`. Returns immediately
@@ -1366,9 +1376,18 @@ pub unsafe fn selparkcommit(g_ptr: NonNull<G>) -> bool {
             crate::runtime::spin::raw_unlock(atom);
         }
     }
-    // Clear so a later non-select gopark on this G doesn't try
-    // to walk stale pointers. Reset at next select pass-2.
-    g.select_wait_len = 0;
+    // Do NOT clear g.select_wait_len here. Once raw_unlock above
+    // releases each chan atom, a waker on another M can claim our
+    // sudog and goready us *before* we return. If that waker's pass-1
+    // re-dispatches this G on a different M and that G runs the next
+    // select! iteration's pass-2 (which writes select_wait_len again),
+    // the clear here would race and overwrite the new value with 0.
+    // The next selparkcommit invocation would then read 0, walk no
+    // atoms, and the new pass-2's chan locks would be leaked. Verified
+    // via rr replay: the fix removes the only writer that races with
+    // pass-2's `__g.select_wait_len = __take_n` (select_macro.rs:626).
+    // Pass-2 always sets the value freshly before each gopark; no
+    // other commit fn reads it; leaving stale len behind is harmless.
     true
 }
 
