@@ -47,6 +47,7 @@
 
 mod g;
 mod gobuf;
+pub mod grow;
 mod m;
 mod p;
 mod scheduler;
@@ -71,5 +72,9 @@ pub use scheduler::{
     goready, live_g_count, m_schedule_loop, newproc, newproc_with_stack, num_cpus,
     register_m_storage, registered_m_count, runq_len, schedule, selparkcommit, Gosched,
     DISPATCH_STAMP_COUNT,
+};
+pub use grow::{
+    grow_bytes_live, grow_calls, grow_hits, grow_live, grow_peak_live, maybe_grow,
+    DEFAULT_GROW_BARE_CAP, DEFAULT_GROW_RED_ZONE,
 };
 pub use stack::Stack;

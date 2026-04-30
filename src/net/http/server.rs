@@ -216,10 +216,17 @@ pub struct Server {
 }
 
 /// `http.ErrServerClosed` (server.go:36). Returned by `Serve` /
-/// `ListenAndServe` after `Shutdown` is called. Pattern-match by
-/// message (Goish errors don't have pointer identity).
+/// `ListenAndServe` after `Shutdown` is called. Cached as a stable
+/// sentinel so `errors::Is(err, http::ErrServerClosed())` works the
+/// same way Go's `errors.Is(err, http.ErrServerClosed)` does.
 pub fn ErrServerClosed() -> error {
-    errors::New(string("http: Server closed"))
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::New(string("http: Server closed")));
+    }
+    g.as_ref().unwrap().clone()
 }
 
 /// v1 fallback when both ReadHeaderTimeout and ReadTimeout are zero

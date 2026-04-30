@@ -16,10 +16,12 @@
 //     and drop the storage afterwards.
 
 use alloc::boxed::Box;
-use core::sync::atomic::AtomicBool;
+use core::sync::atomic::{AtomicBool, AtomicUsize};
 
 use super::gobuf::Gobuf;
 use super::stack::Stack;
+use crate::runtime::spin::SpinLock;
+use crate::syscall;
 
 /// Maximum number of distinct chans a single `select!` can hold locks
 /// on. Mirrors the cap on case count from `select_macro.rs` (32).
@@ -88,6 +90,22 @@ pub struct G {
     /// `unsafe impl Send`s, and access is serialized by the Sema
     /// lock.
     pub sema_next: *mut G,
+    /// M28-α: bottom of the goroutine's currently-active stack region.
+    /// Equals `stack.lo()` until `runtime::sched::maybe_grow` pivots
+    /// onto a fresh region; reset on grow exit. Used by `maybe_grow`
+    /// to compute remaining stack against the right bounds.
+    pub active_stack_lo: AtomicUsize,
+    /// Top (highest address) of the active stack region. Mirrors
+    /// `active_stack_lo`. Currently informational; reserved for
+    /// debugger inspection and future bounds checks.
+    pub active_stack_hi: AtomicUsize,
+    /// M28-β: growth-region chain. Each `maybe_grow` pivot pushes
+    /// `(base, size)` here. Regions are NOT freed when the closure
+    /// returns; they're freed by the G's destructor / goexit path
+    /// so that a goroutine which parks on the grown stack and is
+    /// later resumed (possibly on a different M) finds its memory
+    /// still mapped. Memory is dropped together with the G.
+    pub growth_chain: SpinLock<alloc::vec::Vec<(*mut u8, usize)>>,
 }
 
 impl G {
@@ -103,15 +121,21 @@ impl G {
     /// Used by `go!(stack(N), closure)` when the caller knows their
     /// goroutine needs a non-default stack size.
     pub fn new_with_stack(stack_size: usize, entry: Box<dyn FnOnce()>) -> Self {
+        let stack = Stack::new_sized(stack_size);
+        let lo = stack.base();
+        let hi = stack.top();
         G {
             gobuf: Gobuf::new(),
-            stack: Stack::new_sized(stack_size),
+            stack,
             status: GStatus::Idle,
             entry: Some(entry),
             select_wait: [core::ptr::null(); SELECT_WAIT_MAX],
             select_wait_len: 0,
             preempt: AtomicBool::new(false),
             sema_next: core::ptr::null_mut(),
+            active_stack_lo: AtomicUsize::new(lo),
+            active_stack_hi: AtomicUsize::new(hi),
+            growth_chain: SpinLock::new(alloc::vec::Vec::new()),
         }
     }
 
@@ -168,6 +192,22 @@ impl G {
             select_wait_len: 0,
             preempt: AtomicBool::new(false),
             sema_next: core::ptr::null_mut(),
+            active_stack_lo: AtomicUsize::new(stack_base as usize),
+            active_stack_hi: AtomicUsize::new(stack_base as usize + stack_size),
+            growth_chain: SpinLock::new(alloc::vec::Vec::new()),
+        }
+    }
+}
+
+impl Drop for G {
+    /// Free any M28-β growth regions still attached to this G.
+    /// Runs when the G is dropped after `goexit` (scheduler frees
+    /// dead Gs). The growth regions outlived the closures that
+    /// allocated them — that's the whole point of pinning to the G.
+    fn drop(&mut self) {
+        let mut chain = self.growth_chain.lock();
+        while let Some((base, size)) = chain.pop() {
+            let _ = syscall::Munmap(base, size);
         }
     }
 }

@@ -17,7 +17,7 @@ use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use goish::gochan::chan;
 use goish::runtime::sched::schedule;
-use goish::{go, make, select, syscall};
+use goish::{go, make, select, syscall, KB};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -48,7 +48,7 @@ fn main() {
     // Select sender: 4N iterations, sends to one of c[0..3].
     {
         let c1_init: [chan<i64>; 4] = [c[0].clone(), c[1].clone(), c[2].clone(), c[3].clone()];
-        go!(move || {
+        go!(stack(64 * KB), move || {
             let mut c1 = c1_init;
             let mut n = [0i64; 4];
             for _ in 0..(4 * N) {
@@ -79,7 +79,7 @@ fn main() {
     // Select receiver: 4N iterations, receives from one of c[0..3].
     {
         let c1_init: [chan<i64>; 4] = [c[0].clone(), c[1].clone(), c[2].clone(), c[3].clone()];
-        go!(move || {
+        go!(stack(64 * KB), move || {
             let mut c1 = c1_init;
             let mut n = [0i64; 4];
             for _ in 0..(4 * N) {

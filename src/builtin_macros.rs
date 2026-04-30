@@ -186,24 +186,48 @@ macro_rules! delete {
 ///   go!(move || {
 ///       println!("captured x = {}", x);
 ///   });
-/// Two forms (M26):
+/// Three forms (M28):
 ///
-///   go!(|| work());                           // default 2 KiB stack
-///   go!(stack(8 * KB), || tiny_helper());     // explicit size
-///   go!(stack(1 * MB), || deep_recursion());  // explicit size
+///   go!(|| work());                              // 2 KiB FIXED, no grow
+///   go!(8 * KB, || tiny_helper());               // 8 KiB FIXED, no grow
+///   go!(stack(2 * KB), || tiny_helper());        // 2 KiB FIXED, no grow (alias)
+///
+/// **No automatic growth in the macro.** This preserves the dense
+/// memory model for 1M-goroutines workloads (every goroutine costs
+/// only its carved stack, no mmap-per-G overhead) AND keeps every
+/// goroutine on a single stack region — channel-park / Gosched
+/// flows are unconditional safe regardless of the goroutine's
+/// stack size.
+///
+/// **For deep recursion** that wouldn't fit in a fixed stack, call
+/// `runtime::sched::maybe_grow(red_zone, size, || body)` explicitly
+/// at the recursion site (mirrors how `stacker::maybe_grow` is used
+/// in the Rust ecosystem). Avoid blocking I/O / channel ops from
+/// inside the borrowed region.
 ///
 /// `KB` / `MB` / `GB` are exported at the crate root. Sizes are
 /// rounded up to the nearest 4 KiB page.
 #[macro_export]
 macro_rules! go {
+    // Back-compat: `go!(stack(N), || body)`.
     (stack($size:expr), $closure:expr) => {{
         $crate::runtime::sched::newproc_with_stack(
             $size,
             $crate::__macro_alloc::Box::new($closure),
         );
     }};
+    // Positional sized form: `go!(N, || body)`.
+    ($size:expr, $closure:expr) => {{
+        $crate::runtime::sched::newproc_with_stack(
+            $size,
+            $crate::__macro_alloc::Box::new($closure),
+        );
+    }};
+    // Bare form: default-sized (2 KiB) stack, no grow.
     ($closure:expr) => {{
-        $crate::runtime::sched::newproc($crate::__macro_alloc::Box::new($closure));
+        $crate::runtime::sched::newproc(
+            $crate::__macro_alloc::Box::new($closure),
+        );
     }};
 }
 
