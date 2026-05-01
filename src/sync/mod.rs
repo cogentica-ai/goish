@@ -29,6 +29,6 @@ mod waitgroup;
 
 pub use mutex::{Mutex, MutexGuard};
 pub use once::Once;
-pub use oncefunc::{OnceFunc, OnceValue};
+pub use oncefunc::{OnceFunc, OnceValue, OnceValues};
 pub use rwmutex::RWMutex;
 pub use waitgroup::WaitGroup;

@@ -95,11 +95,44 @@ fn main() {
         }
     }
 
+    // 5. OnceValues — replays both values across calls.
+    {
+        let p = sync::OnceValues(|| -> (int, string) {
+            (7, string("widgets"))
+        });
+        let (a, b) = p();
+        let (c, d) = p();
+        if a == 7 && c == 7 && b == string("widgets") && d == string("widgets") {
+            Println!("[ 5] OnceValues pair           PASS");
+        } else {
+            Println!("[ 5] OnceValues pair           FAIL");
+            failed += 1;
+        }
+    }
+
+    // 6. OnceValues — runs producer once.
+    {
+        static RUNS: AtomicI32 = AtomicI32::new(0);
+        let p = sync::OnceValues(|| -> (int, int) {
+            RUNS.fetch_add(1, Ordering::SeqCst);
+            (1, 2)
+        });
+        let _ = p();
+        let _ = p();
+        let _ = p();
+        if RUNS.load(Ordering::SeqCst) == 1 {
+            Println!("[ 6] OnceValues once           PASS");
+        } else {
+            Println!("[ 6] OnceValues once           FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        Println!("ok 4/4");
+        Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 4");
+        Println!("FAIL", failed, "of 6");
         syscall::Exit(1);
     }
 }
