@@ -57,6 +57,15 @@ pub struct Request {
     /// when a `/users/{id}`-style pattern matches; queried via
     /// `r.PathValue(name)`. Empty otherwise.
     pub(crate) path_values: crate::gomap::map<string, string>,
+    /// Parsed form (URL query + POST body if any). Populated lazily by
+    /// `ParseForm()`; mirrors `Request.Form` (request.go:281). The
+    /// pair `(form_parsed, form)` represents Go's `r.Form == nil` test.
+    pub(crate) form_parsed: bool,
+    pub(crate) form: crate::gomap::map<string, slice<string>>,
+    /// Parsed POST body form. Populated lazily by `ParseForm()` when
+    /// the method is POST/PUT/PATCH. Mirrors `Request.PostForm`.
+    pub(crate) post_form_parsed: bool,
+    pub(crate) post_form: crate::gomap::map<string, slice<string>>,
 }
 
 impl Request {
@@ -113,6 +122,74 @@ impl Request {
     #[doc(hidden)]
     pub fn __set_path_values(&mut self, m: crate::gomap::map<string, string>) {
         self.path_values = m;
+    }
+
+    /// `r.ParseForm()` — populate `r.Form` and `r.PostForm`.
+    ///
+    /// Line-by-line port of `(*Request).ParseForm()` (request.go:1327).
+    /// For all requests, parses the URL's RawQuery into `r.Form`. For
+    /// POST/PUT/PATCH with `Content-Type: application/x-www-form-urlencoded`,
+    /// also parses the body and merges into both `r.PostForm` and
+    /// `r.Form`. Idempotent.
+    pub fn ParseForm(&mut self) -> error {
+        // Go: var err error
+        let mut err: error = errors::nil;
+        // Go: if r.PostForm == nil { … }
+        if !self.post_form_parsed {
+            self.post_form_parsed = true;
+            // Go: if r.Method == "POST" || "PUT" || "PATCH" { r.PostForm, err = parsePostForm(r) }
+            if self.Method == "POST" || self.Method == "PUT" || self.Method == "PATCH" {
+                let (pf, e) = parse_post_form(self);
+                self.post_form = pf;
+                err = e;
+            }
+            // Go: if r.PostForm == nil { r.PostForm = make(url.Values) }
+            // (already initialized to empty map by default; nothing to do)
+        }
+        // Go: if r.Form == nil { … }
+        if !self.form_parsed {
+            self.form_parsed = true;
+            // Go: if len(r.PostForm) > 0 { copyValues(r.Form, r.PostForm) }
+            if self.post_form.Len() > 0 {
+                copy_values(&mut self.form, &self.post_form);
+            }
+            // Go: newValues, e := url.ParseQuery(r.URL.RawQuery)
+            let (new_values, e) = super::url::ParseQuery(self.URL.RawQuery.clone());
+            if err.IsNil() {
+                err = e;
+            }
+            // Go: copyValues(r.Form, newValues)
+            copy_values(&mut self.form, &new_values);
+        }
+        err
+    }
+
+    /// `r.FormValue(key)` — first form value for `key`, or empty.
+    /// Mirrors `(*Request).FormValue(key)` (request.go:1419).
+    pub fn FormValue(&mut self, key: string) -> string {
+        // Go: if r.Form == nil { r.ParseMultipartForm(defaultMaxMemory) }
+        if !self.form_parsed {
+            let _ = self.ParseForm();
+        }
+        // Go: if vs := r.Form[key]; len(vs) > 0 { return vs[0] }
+        let (vs, ok) = self.form.Get(key);
+        if ok && vs.Len() > 0 {
+            return vs[0].clone();
+        }
+        string::new()
+    }
+
+    /// `r.PostFormValue(key)` — first POST form value for `key`, or
+    /// empty. Mirrors request.go:1434.
+    pub fn PostFormValue(&mut self, key: string) -> string {
+        if !self.post_form_parsed {
+            let _ = self.ParseForm();
+        }
+        let (vs, ok) = self.post_form.Get(key);
+        if ok && vs.Len() > 0 {
+            return vs[0].clone();
+        }
+        string::new()
     }
 
     /// `r.AddCookie(c)` — append a cookie to the `Cookie:` request
@@ -184,6 +261,10 @@ pub fn ReadRequestWithLimit<R: io::Reader>(
         Body: slice::<byte>::__from_vec(Vec::new()),
         RemoteAddr: string::new(),
         path_values: crate::gomap::map::<string, string>::new(),
+        form_parsed: false,
+        form: crate::gomap::map::<string, slice<string>>::new(),
+        post_form_parsed: false,
+        post_form: crate::gomap::map::<string, slice<string>>::new(),
     };
 
     // Request-line: METHOD SP request-target SP HTTP-version CRLF
@@ -475,5 +556,47 @@ fn valid_method(m: &[u8]) -> bool {
         }
     }
     true
+}
+
+// ─── Form helpers (line-by-line port of request.go:1245-1306) ────────
+
+/// `parsePostForm(r)` (request.go:1245). Reads body when content type
+/// is application/x-www-form-urlencoded; otherwise returns empty.
+fn parse_post_form(r: &Request) -> (crate::gomap::map<string, slice<string>>, error) {
+    use crate::gomap::map;
+    // Go: if r.Body == nil { return … }
+    if r.Body.Len() == 0 && r.ContentLength <= 0 {
+        return (map::<string, slice<string>>::new(), errors::nil);
+    }
+    // Go: ct := r.Header.Get("Content-Type")
+    let ct = r.Header.Get(string("Content-Type"));
+    // Strip parameters: "application/x-www-form-urlencoded; charset=utf-8" → base
+    let (base, _, _) = crate::strings::Cut(ct, string(";"));
+    let base = crate::strings::TrimSpace(base);
+    // Go: switch ct { case "application/x-www-form-urlencoded": … }
+    if !crate::strings::EqualFold(base, string("application/x-www-form-urlencoded")) {
+        return (map::<string, slice<string>>::new(), errors::nil);
+    }
+    // Go: b, e := io.ReadAll(reader)
+    // We already have r.Body fully buffered; just decode it as a string.
+    let body_bytes = r.Body.clone();
+    let body_str = crate::convert::string(body_bytes);
+    super::url::ParseQuery(body_str)
+}
+
+/// Merge `src` into `dst` (append values). Mirrors `copyValues`
+/// (request.go:1238).
+fn copy_values(
+    dst: &mut crate::gomap::map<string, slice<string>>,
+    src: &crate::gomap::map<string, slice<string>>,
+) {
+    for (k, v) in src.__iter() {
+        let (existing, _) = dst.Get(k.clone());
+        let mut merged = existing;
+        for i in 0..v.Len() {
+            merged = crate::append!(merged, v[i].clone());
+        }
+        dst.Set(k.clone(), merged);
+    }
 }
 

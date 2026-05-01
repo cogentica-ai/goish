@@ -151,3 +151,144 @@ fn find_subseq(hay: &[u8], needle: &[u8]) -> Option<usize> {
     }
     None
 }
+
+// ─── ParseQuery / QueryUnescape ──────────────────────────────────────
+//
+// Line-by-line ports of Go 1.25 src/net/url/url.go's ParseQuery (line 879)
+// and QueryUnescape (line 277). Slim — strict mode only (Go's default
+// since 1.16; no semicolon separator support, errors propagate).
+
+use crate::errors::{self, error};
+use crate::gomap::map;
+use crate::goslice::slice;
+use crate::strings;
+use crate::types::{byte, int};
+
+/// `url.ParseQuery(query)` — parse "k1=v1&k2=v2" into Values
+/// (`map<string, slice<string>>`). Mirrors url.go:879.
+///
+/// Reports an error for malformed escape sequences but still returns
+/// whatever Values it could parse (matching Go).
+pub fn ParseQuery(query: string) -> (map<string, slice<string>>, error) {
+    let mut m: map<string, slice<string>> = map::<string, slice<string>>::new();
+    let err = parse_query(&mut m, query);
+    (m, err)
+}
+
+fn parse_query(m: &mut map<string, slice<string>>, mut query: string) -> error {
+    // Go: var err error
+    let mut err: error = errors::nil;
+    // Go: for query != "" { … }
+    while query.Len() > 0 {
+        // Go: var key string
+        // Go: key, query, _ = strings.Cut(query, "&")
+        let (key, rest, _) = strings::Cut(query, string("&"));
+        query = rest;
+        // Go: if strings.Contains(key, ";") { err = fmt.Errorf(...); continue }
+        if strings::Contains(key.clone(), string(";")) {
+            if err.IsNil() {
+                err = errors::New(string("invalid semicolon separator in query"));
+            }
+            continue;
+        }
+        // Go: if key == "" { continue }
+        if key.Len() == 0 {
+            continue;
+        }
+        // Go: key, value, _ := strings.Cut(key, "=")
+        let (raw_k, raw_v, _) = strings::Cut(key, string("="));
+        // Go: key, err1 := QueryUnescape(key); if err1 != nil { … continue }
+        let (uk, e1) = QueryUnescape(raw_k);
+        if !e1.IsNil() {
+            if err.IsNil() {
+                err = e1;
+            }
+            continue;
+        }
+        let (uv, e2) = QueryUnescape(raw_v);
+        if !e2.IsNil() {
+            if err.IsNil() {
+                err = e2;
+            }
+            continue;
+        }
+        // Go: m[key] = append(m[key], value)
+        let (existing, _) = m.Get(uk.clone());
+        let updated = crate::append!(existing, uv);
+        m.Set(uk, updated);
+    }
+    err
+}
+
+/// `url.QueryUnescape(s)` — invert query-string percent-encoding.
+/// Slim port of url.go:277 (strict mode).
+pub fn QueryUnescape(s: string) -> (string, error) {
+    unescape(s, true)
+}
+
+/// `url.PathUnescape(s)` — like QueryUnescape but does not turn `+`
+/// into space. Mirrors url.go:303.
+pub fn PathUnescape(s: string) -> (string, error) {
+    unescape(s, false)
+}
+
+fn unescape(s: string, query_mode: bool) -> (string, error) {
+    // First pass: count '%' escapes, validate, count '+' (query only).
+    let mut n: int = 0;
+    let mut has_plus = false;
+    let mut i: int = 0;
+    while i < s.Len() {
+        let c: byte = s[i];
+        if c == b'%' {
+            n += 1;
+            if i + 2 >= s.Len() || !is_hex(s[i + 1]) || !is_hex(s[i + 2]) {
+                return (string::new(), errors::New(string("invalid URL escape")));
+            }
+            i += 3;
+        } else if c == b'+' {
+            has_plus = true;
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+    // Fast path.
+    if n == 0 && !(query_mode && has_plus) {
+        return (s, errors::nil);
+    }
+    // Second pass: emit decoded bytes via a goish slice<byte>.
+    let mut out = crate::make!([]byte, 0);
+    let mut i: int = 0;
+    while i < s.Len() {
+        let c: byte = s[i];
+        if c == b'%' {
+            let hi = unhex(s[i + 1]);
+            let lo = unhex(s[i + 2]);
+            out = crate::append!(out, (hi << 4) | lo);
+            i += 3;
+        } else if c == b'+' && query_mode {
+            out = crate::append!(out, b' ');
+            i += 1;
+        } else {
+            out = crate::append!(out, c);
+            i += 1;
+        }
+    }
+    (crate::convert::string(out), errors::nil)
+}
+
+fn is_hex(c: byte) -> bool {
+    (c >= b'0' && c <= b'9') || (c >= b'a' && c <= b'f') || (c >= b'A' && c <= b'F')
+}
+
+fn unhex(c: byte) -> byte {
+    if c >= b'0' && c <= b'9' {
+        c - b'0'
+    } else if c >= b'a' && c <= b'f' {
+        c - b'a' + 10
+    } else if c >= b'A' && c <= b'F' {
+        c - b'A' + 10
+    } else {
+        0
+    }
+}

@@ -465,6 +465,10 @@ impl Client {
                         Body: slice::<byte>::__from_vec(Vec::new()),
                         RemoteAddr: string::new(),
                         path_values: crate::gomap::map::<string, string>::new(),
+                        form_parsed: false,
+                        form: crate::gomap::map::<string, slice<string>>::new(),
+                        post_form_parsed: false,
+                        post_form: crate::gomap::map::<string, slice<string>>::new(),
                     };
                     // Preserve body only on 307/308 (per RFC).
                     if resp.StatusCode == 307 || resp.StatusCode == 308 {
@@ -590,6 +594,10 @@ pub fn NewRequest(method: string, url: string, body: slice<byte>) -> (Request, e
         Body: body,
         RemoteAddr: string::new(),
         path_values: crate::gomap::map::<string, string>::new(),
+        form_parsed: false,
+        form: crate::gomap::map::<string, slice<string>>::new(),
+        post_form_parsed: false,
+        post_form: crate::gomap::map::<string, slice<string>>::new(),
     };
     (req, errors::nil)
 }
@@ -607,6 +615,10 @@ fn default_request() -> Request {
         Body: slice::<byte>::__from_vec(Vec::new()),
         RemoteAddr: string::new(),
         path_values: crate::gomap::map::<string, string>::new(),
+        form_parsed: false,
+        form: crate::gomap::map::<string, slice<string>>::new(),
+        post_form_parsed: false,
+        post_form: crate::gomap::map::<string, slice<string>>::new(),
     }
 }
 
