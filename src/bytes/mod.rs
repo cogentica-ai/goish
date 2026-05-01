@@ -1460,6 +1460,53 @@ pub fn Map<S: Into<slice<byte>>, F: Fn(rune) -> rune>(mapping: F, s: S) -> slice
     slice::__from_vec(out)
 }
 
+/// Line-by-line port of `bytes.ToValidUTF8` (bytes/bytes.go:779).
+///
+/// Returns a copy of `s` with each run of invalid UTF-8 byte sequences
+/// replaced by `replacement` (which may be empty).
+pub fn ToValidUTF8<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(
+    s: S1,
+    replacement: S2,
+) -> slice<byte> {
+    let s = s.into();
+    let replacement = replacement.into();
+    let s_bytes: alloc::vec::Vec<byte> = s.__into_vec();
+    let repl_bytes: alloc::vec::Vec<byte> = replacement.__into_vec();
+    // Go: b := make([]byte, 0, len(s)+len(replacement))
+    let mut b: alloc::vec::Vec<byte> =
+        alloc::vec::Vec::with_capacity(s_bytes.len() + repl_bytes.len());
+    // Go: invalid := false
+    let mut invalid: bool = false;
+    // Go: for i := 0; i < len(s); { c := s[i]; ... }
+    let mut i: usize = 0;
+    while i < s_bytes.len() {
+        let c = s_bytes[i];
+        // Go: if c < utf8.RuneSelf { i++; invalid=false; b = append(b, c); continue }
+        if c < utf8::RuneSelf {
+            i += 1;
+            invalid = false;
+            b.push(c);
+            continue;
+        }
+        // Go: _, wid := utf8.DecodeRune(s[i:])
+        let (_, wid) = utf8::DecodeRune(&s_bytes[i..]);
+        // Go: if wid == 1 { i++; if !invalid { invalid=true; b = append(b, replacement...) }; continue }
+        if wid == 1 {
+            i += 1;
+            if !invalid {
+                invalid = true;
+                b.extend_from_slice(&repl_bytes);
+            }
+            continue;
+        }
+        // Go: invalid = false; b = append(b, s[i:i+wid]...); i += wid
+        invalid = false;
+        b.extend_from_slice(&s_bytes[i..i + wid as usize]);
+        i += wid as usize;
+    }
+    slice::__from_vec(b)
+}
+
 /// `bytes.SplitAfter(s, sep)` — split keeping `sep` at end of each segment.
 pub fn SplitAfter<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(
     s: S1,
