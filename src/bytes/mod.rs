@@ -1507,6 +1507,95 @@ pub fn ToValidUTF8<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(
     slice::__from_vec(b)
 }
 
+/// Line-by-line port of `bytes.Runes` (bytes/bytes.go:1159) — interpret
+/// `s` as UTF-8 and return a slice of decoded runes. Invalid UTF-8
+/// bytes are decoded as `utf8.RuneError` (matching `DecodeRune`'s
+/// contract — Go does the same via `RuneCount` + `DecodeRune`).
+pub fn Runes<S: Into<slice<byte>>>(s: S) -> slice<rune> {
+    let s = s.into();
+    let bytes: alloc::vec::Vec<byte> = s.__into_vec();
+    // Go: t := make([]rune, utf8.RuneCount(s))
+    let cap = utf8::RuneCount(&bytes) as usize;
+    let mut t: alloc::vec::Vec<rune> = alloc::vec::Vec::with_capacity(cap);
+    // Go: i := 0; for len(s) > 0 { r, l := utf8.DecodeRune(s); t[i] = r; i++; s = s[l:] }
+    let mut i: usize = 0;
+    while i < bytes.len() {
+        let (r, l) = utf8::DecodeRune(&bytes[i..]);
+        t.push(r);
+        if l == 0 {
+            break;
+        }
+        i += l as usize;
+    }
+    slice::__from_vec(t)
+}
+
+/// Line-by-line port of `bytes.isSeparator` (bytes/bytes.go:808) — used
+/// by `Title` to detect word boundaries.
+fn is_separator(r: rune) -> bool {
+    // Go: if r <= 0x7F { ... }
+    if r <= 0x7F {
+        // Go: 0..9 / a..z / A..Z / '_' are not separators.
+        if r >= b'0' as rune && r <= b'9' as rune {
+            return false;
+        }
+        if r >= b'a' as rune && r <= b'z' as rune {
+            return false;
+        }
+        if r >= b'A' as rune && r <= b'Z' as rune {
+            return false;
+        }
+        if r == b'_' as rune {
+            return false;
+        }
+        return true;
+    }
+    // Slim: goish lacks unicode.IsLetter / IsDigit / IsSpace tables.
+    // Treat any non-ASCII rune as a non-separator (Go's IsLetter/IsDigit
+    // would cover most non-ASCII alphanumerics anyway).
+    false
+}
+
+/// Line-by-line port of `bytes.Title` (bytes/bytes.go:836) — return a
+/// copy of `s` with the first letter of each word title-cased. Slim
+/// port: only ASCII letters are title-cased (rune ≥ 0x80 left as-is)
+/// since goish lacks the full unicode.ToTitle table.
+///
+/// Deprecated in Go upstream; ported for compatibility.
+#[deprecated = "see Go upstream — Title's word-boundary rule is unsafe for general Unicode"]
+pub fn Title<S: Into<slice<byte>>>(s: S) -> slice<byte> {
+    let s = s.into();
+    let bytes: alloc::vec::Vec<byte> = s.__into_vec();
+    let mut out: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(bytes.len());
+    // Go: prev := ' '
+    let mut prev: rune = b' ' as rune;
+    let mut tmp = [0u8; 4];
+    let mut i: usize = 0;
+    // Go: return Map(func(r rune) rune { … }, s) — inlined for ASCII title-case.
+    while i < bytes.len() {
+        let (r, w) = utf8::DecodeRune(&bytes[i..]);
+        // Go: if isSeparator(prev) { return unicode.ToTitle(r) }
+        let nr = if is_separator(prev) {
+            // Slim ToTitle: ASCII a..z → A..Z; everything else unchanged.
+            if r >= b'a' as rune && r <= b'z' as rune {
+                r - 32
+            } else {
+                r
+            }
+        } else {
+            r
+        };
+        prev = r;
+        let n = utf8::EncodeRune(&mut tmp, nr) as usize;
+        out.extend_from_slice(&tmp[..n]);
+        if w == 0 {
+            break;
+        }
+        i += w as usize;
+    }
+    slice::__from_vec(out)
+}
+
 /// `bytes.SplitAfter(s, sep)` — split keeping `sep` at end of each segment.
 pub fn SplitAfter<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(
     s: S1,
