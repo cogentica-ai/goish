@@ -622,6 +622,71 @@ impl IP {
         false
     }
 
+    /// `IP.Equal(x)` (ip.go:391) — byte-wise equality. Slim: with
+    /// IPv4-only support both IPs are 4 bytes (or both nil), so the
+    /// 4-vs-16 v4-mapped-prefix path from Go is skipped.
+    pub fn Equal(&self, x: &IP) -> bool {
+        // Go: len(ip) == len(x) → bytealg.Equal(ip, x)
+        let a: &[byte] = &self.bytes;
+        let b: &[byte] = &x.bytes;
+        a == b
+    }
+
+    /// `IP.AppendText(b)` (ip.go:349) — append the string form to `b`.
+    /// `(b, nil)` for valid IPv4 / nil IP. Returns an error for any
+    /// non-canonical length (slim accepts only 0 or 4 bytes).
+    pub fn AppendText(&self, b: slice<byte>) -> (slice<byte>, error) {
+        // Go: if len(ip) == 0 { return b, nil }
+        if self.bytes.Len() == 0 {
+            return (b, errors::nil);
+        }
+        // Slim: only IPv4 (4 bytes) is canonical.
+        if self.bytes.Len() != 4 {
+            return (b, errors::New(string("invalid IP address")));
+        }
+        // Go: return ip.appendTo(b), nil
+        // Slim: render dotted-decimal directly.
+        let s = self.String();
+        let mut v: alloc::vec::Vec<byte> = b.__into_vec();
+        v.extend_from_slice(s.as_bytes());
+        (slice::<byte>::__from_vec(v), errors::nil)
+    }
+
+    /// `IP.MarshalText()` (ip.go:363) — encoding.TextMarshaler.
+    /// Returns the dotted-decimal bytes for IPv4, empty for nil IP.
+    pub fn MarshalText(&self) -> (slice<byte>, error) {
+        // Go: b, err := ip.AppendText(make([]byte, 0, 24))
+        let buf = slice::<byte>::__from_vec(alloc::vec::Vec::with_capacity(24));
+        let (out, err) = self.AppendText(buf);
+        if !err.IsNil() {
+            return (
+                slice::<byte>::__from_vec(alloc::vec::Vec::new()),
+                err,
+            );
+        }
+        (out, errors::nil)
+    }
+
+    /// `IP.UnmarshalText(text)` (ip.go:374) — encoding.TextUnmarshaler.
+    /// Empty `text` resets `*ip` to nil; otherwise parses via ParseIP.
+    /// Returns an error if the text is non-empty but unparseable.
+    pub fn UnmarshalText(&mut self, text: slice<byte>) -> error {
+        // Go: if len(text) == 0 { *ip = nil; return nil }
+        if text.Len() == 0 {
+            *self = IP::default();
+            return errors::nil;
+        }
+        // Go: s := string(text); x := ParseIP(s)
+        let s = string::from_bytes(&text);
+        let x = ParseIP(s.clone());
+        if x.IsNil() {
+            // Go: return &ParseError{Type: "IP address", Text: s}
+            return errors::New(string("invalid IP address"));
+        }
+        *self = x;
+        errors::nil
+    }
+
     /// `IP.String()` (ip.go:299) — slim. IPv4 addresses render as
     /// `"a.b.c.d"`. The nil sentinel renders as `"<nil>"` (matches Go).
     /// IPv6 forms are not supported in slim and render as `"<nil>"`.
