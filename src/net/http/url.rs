@@ -32,6 +32,10 @@ pub struct URL {
     pub Path: string,
     pub RawPath: string,
     pub RawQuery: string,
+    /// `#fragment` — decoded; URL.String() will percent-encode if set.
+    pub Fragment: string,
+    /// Encoded fragment hint (used by `EscapedFragment`).
+    pub RawFragment: string,
 }
 
 impl URL {
@@ -42,6 +46,19 @@ impl URL {
             Path: string::new(),
             RawPath: string::new(),
             RawQuery: string::new(),
+            Fragment: string::new(),
+            RawFragment: string::new(),
+        }
+    }
+
+    /// `(u *URL).EscapedFragment()` (url.go:807) — fragment in the
+    /// form needed for URL.String(). Slim port: returns RawFragment if
+    /// non-empty, else Fragment.
+    pub fn EscapedFragment(&self) -> string {
+        if self.RawFragment.Len() != 0 {
+            self.RawFragment.clone()
+        } else {
+            self.Fragment.clone()
         }
     }
 
@@ -165,6 +182,11 @@ impl URL {
             out.push(b'?');
             out.extend_from_slice(self.RawQuery.as_bytes());
         }
+        // Go: if u.Fragment != "" { buf.WriteByte('#'); buf.WriteString(u.EscapedFragment()) }
+        if self.Fragment.Len() != 0 || self.RawFragment.Len() != 0 {
+            out.push(b'#');
+            out.extend_from_slice(self.EscapedFragment().as_bytes());
+        }
         string::from_bytes(&out)
     }
 }
@@ -193,6 +215,8 @@ pub(crate) fn parse_request_uri(raw: &string) -> Result<URL, string> {
             Path: string("*"),
             RawPath: string("*"),
             RawQuery: string::new(),
+            Fragment: string::new(),
+            RawFragment: string::new(),
         });
     }
 
@@ -239,6 +263,8 @@ pub(crate) fn parse_request_uri(raw: &string) -> Result<URL, string> {
         Path: path_str.clone(),
         RawPath: path_str,
         RawQuery: string::from_bytes(query),
+        Fragment: string::new(),
+        RawFragment: string::new(),
     })
 }
 
@@ -412,14 +438,22 @@ pub fn JoinPath(
 
 /// `url.Parse(rawURL)` (url.go:479) — parse a URL in either absolute
 /// or relative form. Slim port: handles `scheme://host/path?query#frag`,
-/// `/path?query`, and `relative/path`, but doesn't model Opaque,
-/// Userinfo, or Fragment as separate fields. Fragment is stripped.
+/// `/path?query`, and `relative/path`, but doesn't model Opaque or
+/// Userinfo as separate fields. Fragment IS captured into u.Fragment.
 ///
 /// Returns `(URL, error)` per goish convention.
 pub fn Parse(raw_url: string) -> (URL, error) {
     // Go: u, frag, _ := strings.Cut(rawURL, "#")
-    let (u, _frag, _) = crate::strings::Cut(raw_url, string("#"));
-    parse(u, false)
+    let (u, frag, has_frag) = crate::strings::Cut(raw_url, string("#"));
+    let (mut url, err) = parse(u, false);
+    if !err.IsNil() {
+        return (url, err);
+    }
+    if has_frag {
+        url.Fragment = frag.clone();
+        url.RawFragment = frag;
+    }
+    (url, errors::nil)
 }
 
 /// `url.ParseRequestURI(rawURL)` (url.go:500) — parse a URL received
@@ -470,6 +504,8 @@ fn parse(raw_url: string, via_request: bool) -> (URL, error) {
                 Path: rest.clone(),
                 RawPath: rest,
                 RawQuery: raw_query,
+                Fragment: string::new(),
+                RawFragment: string::new(),
             };
             return (u, errors::nil);
         }
@@ -511,6 +547,8 @@ fn parse(raw_url: string, via_request: bool) -> (URL, error) {
         Path: path.clone(),
         RawPath: path,
         RawQuery: raw_query,
+        Fragment: string::new(),
+        RawFragment: string::new(),
     };
     (u, errors::nil)
 }
