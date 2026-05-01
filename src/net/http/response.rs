@@ -161,6 +161,13 @@ impl ResponseWriter {
         self.conn
     }
 
+    /// Server hook: raw fd of the underlying connection. Used by
+    /// `serve_conn` to register a panic-time close cleanup so a
+    /// handler-panic doesn't leak the fd / hang the client.
+    pub fn __conn_fd(&self) -> i32 {
+        self.conn.__fd()
+    }
+
     /// Convenience for examples that drive their own accept loop:
     /// flush headers (if not yet) and close the underlying conn.
     pub fn close_conn(mut self) -> error {

@@ -370,6 +370,10 @@ name = "defer_panic_smoke"
 path = "examples/defer_panic_smoke.rs"
 
 [[example]]
+name = "http_panic_demo"
+path = "examples/http_panic_demo.rs"
+
+[[example]]
 name = "preempt_smoke"
 path = "examples/preempt_smoke.rs"
 
