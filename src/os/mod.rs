@@ -211,6 +211,66 @@ fn bytes_of(s: &string) -> &[u8] {
     crate::gostring::__crate_as_bytes(s)
 }
 
+/// `os.ReadFile(name)` (os/file.go:735) — read the entire named file
+/// and return its contents. Closes the file before returning.
+pub fn ReadFile(name: string) -> (slice<byte>, error) {
+    use crate::io::Reader;
+    let (mut f, err) = Open(name);
+    if !err.IsNil() {
+        return (slice::<byte>::__from_vec(Vec::new()), err);
+    }
+    let (fi, ferr) = f.Stat();
+    if !ferr.IsNil() {
+        let _ = f.Close();
+        return (slice::<byte>::__from_vec(Vec::new()), ferr);
+    }
+    let want = fi.Size();
+    let mut body = slice::<byte>::__from_vec(alloc::vec![0u8; want as usize]);
+    let mut got: int = 0;
+    while got < want {
+        let mut chunk =
+            slice::<byte>::__from_vec(alloc::vec![0u8; (want - got) as usize]);
+        let (n, rerr) = f.Read(&mut chunk);
+        if n > 0 {
+            for i in 0..n {
+                body[got + i] = chunk[i];
+            }
+            got += n;
+        }
+        if !rerr.IsNil() {
+            if crate::errors::Is(rerr.clone(), crate::io::EOF()) {
+                break;
+            }
+            let _ = f.Close();
+            return (body, rerr);
+        }
+        if n == 0 {
+            break;
+        }
+    }
+    let _ = f.Close();
+    if got < want {
+        body = body.slice(0, got);
+    }
+    (body, nil)
+}
+
+/// `os.WriteFile(name, data, perm)` (os/file.go:763) — write `data`
+/// to the named file, creating or truncating it.
+pub fn WriteFile(name: string, data: slice<byte>, perm: u32) -> error {
+    use crate::io::Writer;
+    let (mut f, err) = OpenFile(name, O_WRONLY | O_CREATE | O_TRUNC, perm);
+    if !err.IsNil() {
+        return err;
+    }
+    let (_, werr) = f.Write(data);
+    let cerr = f.Close();
+    if !werr.IsNil() {
+        return werr;
+    }
+    cerr
+}
+
 /// Compute the base-name (last path component).
 fn base_name(p: &string) -> string {
     let bs = bytes_of(p);

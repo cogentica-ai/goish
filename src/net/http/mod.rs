@@ -20,6 +20,7 @@ pub mod cookie;
 pub mod fs;
 pub mod header;
 pub mod httputil;
+pub mod method;
 pub mod pattern;
 pub mod request;
 pub mod response;
@@ -34,6 +35,10 @@ pub use client::{
 pub use cookie::{Cookie, ParseCookie, ParseSetCookie, SameSite, SetCookie};
 pub use fs::{Dir, FileServer, NewDir, ServeFile};
 pub use header::{CanonicalHeaderKey, Header, ParseTime, TimeFormat};
+pub use method::{
+    MethodConnect, MethodDelete, MethodGet, MethodHead, MethodOptions, MethodPatch, MethodPost,
+    MethodPut, MethodTrace,
+};
 pub use request::{
     ErrMaxBytes, MaxBytesReader, NewMaxBytesReader, ParseHTTPVersion, ReadRequest, Request,
 };
