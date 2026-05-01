@@ -986,6 +986,25 @@ impl<W: io::Writer> Writer<W> {
         (self.buf.len() - self.n) as int
     }
 
+    /// `Writer.AvailableBuffer()` (bufio.go:668) — returns a `slice<byte>`
+    /// with `len == 0` and `cap` equal to the writer's currently-available
+    /// buffer space. Intended to be appended to and passed to a subsequent
+    /// `Write`/`WriteString` call to avoid an intermediate allocation.
+    ///
+    /// Slim deviation: Go returns `b.buf[b.n:][:0]`, a sub-slice that
+    /// aliases the underlying writer buffer so a follow-up
+    /// `b.Write(buf[:m])` can be detected as in-place and skip the copy.
+    /// goish slices are owned `Vec<byte>`, so we return a fresh empty
+    /// slice with `Vec::with_capacity(self.Available())`. Callers see the
+    /// same observable surface (an empty slice they can append to and
+    /// pass to Write); only the zero-copy hand-off is lost — the
+    /// follow-up Write performs a copy as it would for any other slice.
+    pub fn AvailableBuffer(&self) -> slice<byte> {
+        // Go: return b.buf[b.n:][:0]
+        let avail = self.buf.len() - self.n;
+        slice::__from_vec(Vec::with_capacity(avail))
+    }
+
     /// `Flush()` — push buffered bytes to the underlying writer. Once an
     /// error is recorded, no further writes will be accepted until Reset.
     pub fn Flush(&mut self) -> error {
