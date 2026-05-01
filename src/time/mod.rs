@@ -263,6 +263,234 @@ impl Time {
         // 1970-01-01 was a Thursday (=4 in Sun..Sat = 0..6).
         ((days + 4).rem_euclid(7)) as int
     }
+
+    /// `t.Format(layout)` (format.go:639) — slim port. Recognizes the
+    /// canonical layout constants (RFC3339, RFC1123, RFC1123Z,
+    /// DateTime, DateOnly, TimeOnly, Stamp, Kitchen, ANSIC) and
+    /// renders the time directly. Does NOT support arbitrary
+    /// reference-time layouts (porting Go's nextStdChunk machinery
+    /// is ~1500 LOC).
+    ///
+    /// Pass the constant via `string(time::RFC3339)`.
+    pub fn Format(self, layout: crate::gostring::string) -> crate::gostring::string {
+        let (y, m, d, hh, mm, ss) = civil_from_unix(self.sec);
+        let wd = self.Weekday();
+        let nano = self.nsec;
+        format_layout(&layout, y, m, d, hh, mm, ss, wd, nano as int)
+    }
+}
+
+const MONTH_SHORT: [&str; 13] = [
+    "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+const DAY_SHORT: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_LONG: [&str; 7] = [
+    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+];
+
+fn pad2(n: int) -> [u8; 2] {
+    let n = n as i64;
+    [
+        b'0' + ((n / 10) % 10) as u8,
+        b'0' + (n % 10) as u8,
+    ]
+}
+
+fn pad4(n: int) -> [u8; 4] {
+    let n = n as i64;
+    [
+        b'0' + ((n / 1000) % 10) as u8,
+        b'0' + ((n / 100) % 10) as u8,
+        b'0' + ((n / 10) % 10) as u8,
+        b'0' + (n % 10) as u8,
+    ]
+}
+
+fn format_layout(
+    layout: &crate::gostring::string,
+    y: int,
+    m: int,
+    d: int,
+    hh: int,
+    mm: int,
+    ss: int,
+    wd: int,
+    _nano: int,
+) -> crate::gostring::string {
+    use crate::gostring::string;
+    let l = layout.clone();
+
+    // RFC3339: "2006-01-02T15:04:05Z07:00" → "<date>T<time>Z" (UTC)
+    if l == "2006-01-02T15:04:05Z07:00" {
+        let mut out = alloc::vec::Vec::with_capacity(20);
+        out.extend_from_slice(&pad4(y));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(m));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(d));
+        out.push(b'T');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        out.push(b'Z');
+        return string::from_bytes(&out);
+    }
+    // DateTime: "2006-01-02 15:04:05"
+    if l == "2006-01-02 15:04:05" {
+        let mut out = alloc::vec::Vec::with_capacity(19);
+        out.extend_from_slice(&pad4(y));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(m));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(d));
+        out.push(b' ');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        return string::from_bytes(&out);
+    }
+    // DateOnly: "2006-01-02"
+    if l == "2006-01-02" {
+        let mut out = alloc::vec::Vec::with_capacity(10);
+        out.extend_from_slice(&pad4(y));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(m));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(d));
+        return string::from_bytes(&out);
+    }
+    // TimeOnly: "15:04:05"
+    if l == "15:04:05" {
+        let mut out = alloc::vec::Vec::with_capacity(8);
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        return string::from_bytes(&out);
+    }
+    // RFC1123: "Mon, 02 Jan 2006 15:04:05 MST" — assume UTC → "GMT"
+    if l == "Mon, 02 Jan 2006 15:04:05 MST" {
+        let mut out = alloc::vec::Vec::with_capacity(29);
+        out.extend_from_slice(DAY_SHORT[wd as usize].as_bytes());
+        out.extend_from_slice(b", ");
+        out.extend_from_slice(&pad2(d));
+        out.push(b' ');
+        out.extend_from_slice(MONTH_SHORT[m as usize].as_bytes());
+        out.push(b' ');
+        out.extend_from_slice(&pad4(y));
+        out.push(b' ');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        out.extend_from_slice(b" GMT");
+        return string::from_bytes(&out);
+    }
+    // RFC1123Z: "Mon, 02 Jan 2006 15:04:05 -0700" — UTC → "+0000"
+    if l == "Mon, 02 Jan 2006 15:04:05 -0700" {
+        let mut out = alloc::vec::Vec::with_capacity(31);
+        out.extend_from_slice(DAY_SHORT[wd as usize].as_bytes());
+        out.extend_from_slice(b", ");
+        out.extend_from_slice(&pad2(d));
+        out.push(b' ');
+        out.extend_from_slice(MONTH_SHORT[m as usize].as_bytes());
+        out.push(b' ');
+        out.extend_from_slice(&pad4(y));
+        out.push(b' ');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        out.extend_from_slice(b" +0000");
+        return string::from_bytes(&out);
+    }
+    // ANSIC: "Mon Jan _2 15:04:05 2006"
+    if l == "Mon Jan _2 15:04:05 2006" {
+        let mut out = alloc::vec::Vec::with_capacity(24);
+        out.extend_from_slice(DAY_SHORT[wd as usize].as_bytes());
+        out.push(b' ');
+        out.extend_from_slice(MONTH_SHORT[m as usize].as_bytes());
+        out.push(b' ');
+        // _2 = space-padded day
+        if d < 10 {
+            out.push(b' ');
+            out.push(b'0' + d as u8);
+        } else {
+            out.extend_from_slice(&pad2(d));
+        }
+        out.push(b' ');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        out.push(b' ');
+        out.extend_from_slice(&pad4(y));
+        return string::from_bytes(&out);
+    }
+    // Stamp: "Jan _2 15:04:05"
+    if l == "Jan _2 15:04:05" {
+        let mut out = alloc::vec::Vec::with_capacity(15);
+        out.extend_from_slice(MONTH_SHORT[m as usize].as_bytes());
+        out.push(b' ');
+        if d < 10 {
+            out.push(b' ');
+            out.push(b'0' + d as u8);
+        } else {
+            out.extend_from_slice(&pad2(d));
+        }
+        out.push(b' ');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        return string::from_bytes(&out);
+    }
+    // Kitchen: "3:04PM"
+    if l == "3:04PM" {
+        let h12 = if hh == 0 { 12 } else if hh > 12 { hh - 12 } else { hh };
+        let pm = hh >= 12;
+        let mut out = alloc::vec::Vec::with_capacity(7);
+        if h12 < 10 {
+            out.push(b'0' + h12 as u8);
+        } else {
+            out.extend_from_slice(&pad2(h12));
+        }
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.extend_from_slice(if pm { b"PM" } else { b"AM" });
+        return string::from_bytes(&out);
+    }
+    // Long-day variant (RFC850): "Monday, 02-Jan-06 15:04:05 MST"
+    if l == "Monday, 02-Jan-06 15:04:05 MST" {
+        let mut out = alloc::vec::Vec::with_capacity(36);
+        out.extend_from_slice(DAY_LONG[wd as usize].as_bytes());
+        out.extend_from_slice(b", ");
+        out.extend_from_slice(&pad2(d));
+        out.push(b'-');
+        out.extend_from_slice(MONTH_SHORT[m as usize].as_bytes());
+        out.push(b'-');
+        out.extend_from_slice(&pad2(y % 100));
+        out.push(b' ');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        out.extend_from_slice(b" GMT");
+        return string::from_bytes(&out);
+    }
+    // Unrecognized layout — return the layout literal back, mirroring
+    // Go's behavior of emitting un-tokenized text verbatim.
+    l
 }
 
 // Civil date from Unix seconds. Returns (year, month, day, hour, min, sec)
