@@ -868,6 +868,63 @@ impl<R: io::Reader> Reader<R> {
         let (b, e) = self.ReadBytes(delim);
         (string::from_bytes(&b.__into_vec()), e)
     }
+
+    /// Line-by-line port of `bufio.Reader.WriteTo` (bufio.go:518) —
+    /// drain everything in the buffer and the underlying reader to `w`.
+    /// Slim deviation: skip the `WriterTo` / `ReaderFrom` fast paths
+    /// since goish doesn't expose those traits as `dyn`-castable.
+    pub fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (int, error) {
+        // Go: b.lastByte = -1; b.lastRuneSize = -1
+        self.last_byte = -1;
+        self.last_rune_size = -1;
+
+        let mut n: int = 0;
+
+        // Go: if b.r < b.w { n, err = b.writeBuf(w); if err != nil { return } }
+        if self.r < self.w {
+            let (m, err) = self.write_buf(w);
+            n += m;
+            if err != nil {
+                return (n, err);
+            }
+        }
+
+        // Go: if b.w-b.r < len(b.buf) { b.fill() } — only fill when not full.
+        if (self.w - self.r) < self.buf.len() {
+            self.fill();
+        }
+
+        // Go: for b.r < b.w { m, err := b.writeBuf(w); n += m; if err != nil { return n, err }; b.fill() }
+        while self.r < self.w {
+            let (m, err) = self.write_buf(w);
+            n += m;
+            if err != nil {
+                return (n, err);
+            }
+            self.fill();
+        }
+
+        // Go: if b.err == io.EOF { b.err = nil }
+        if self.err != nil && errors::Is(self.err.clone(), io::EOF()) {
+            self.err = nil;
+        }
+
+        (n, self.read_err())
+    }
+
+    // Internal helper: port of bufio.Reader.writeBuf (bufio.go:565).
+    fn write_buf(&mut self, w: &mut dyn io::Writer) -> (int, error) {
+        // Go: n, err := w.Write(b.buf[b.r:b.w])
+        let chunk: slice<byte> = slice::__from_vec(self.buf[self.r..self.w].to_vec());
+        let (n, err) = w.Write(chunk);
+        // Go: if n < 0 { panic(errNegativeWrite) }
+        if n < 0 {
+            panic!("bufio: writer returned negative count from Write");
+        }
+        // Go: b.r += n
+        self.r += n as usize;
+        (n, err)
+    }
 }
 
 impl<R: io::Reader> io::Reader for Reader<R> {
@@ -1069,6 +1126,77 @@ impl<W: io::Writer> Writer<W> {
         self.n += take;
         nn += take;
         (nn as int, nil)
+    }
+
+    /// Line-by-line port of `bufio.Writer.ReadFrom` (bufio.go:787) —
+    /// pull bytes from `r` and buffer them, flushing as needed. Returns
+    /// `(bytesRead, err)`. EOF is normalized to nil (Go behavior).
+    /// Slim deviation: skip the `ReaderFrom` fast path on the underlying
+    /// writer since goish doesn't expose that trait as `dyn`-castable.
+    pub fn ReadFrom(&mut self, r: &mut dyn io::Reader) -> (int, error) {
+        // Go: if b.err != nil { return 0, b.err }
+        if self.err != nil {
+            return (0, self.err.clone());
+        }
+        let mut n: int = 0;
+        let mut err: error = nil;
+        // Go: for { … }
+        loop {
+            // Go: if b.Available() == 0 { if err1 := b.Flush(); err1 != nil { return n, err1 } }
+            if self.Available() == 0 {
+                let err1 = self.Flush();
+                if err1 != nil {
+                    return (n, err1);
+                }
+            }
+            // Slim: no ReaderFrom fast path.
+
+            // Go: nr := 0; for nr < maxConsecutiveEmptyReads { m, err = r.Read(b.buf[b.n:]); ... }
+            let mut nr = 0;
+            let mut m: int = 0;
+            while nr < maxConsecutiveEmptyReads {
+                let avail = self.buf.len() - self.n;
+                let mut tmp: slice<byte> = slice::__from_vec({
+                    let mut v: Vec<byte> = Vec::with_capacity(avail);
+                    v.resize(avail, 0);
+                    v
+                });
+                let (mm, e) = r.Read(&mut tmp);
+                m = mm;
+                err = e;
+                // Copy what we got back into our buffer.
+                if mm > 0 {
+                    let src = tmp.__into_vec();
+                    self.buf[self.n..self.n + mm as usize]
+                        .copy_from_slice(&src[..mm as usize]);
+                }
+                if mm != 0 || err != nil {
+                    break;
+                }
+                nr += 1;
+            }
+            // Go: if nr == maxConsecutiveEmptyReads { return n, io.ErrNoProgress }
+            if nr == maxConsecutiveEmptyReads {
+                return (n, errors::New("multiple Read calls return no data or error"));
+            }
+            // Go: b.n += m; n += int64(m)
+            self.n += m as usize;
+            n += m;
+            // Go: if err != nil { break }
+            if err != nil {
+                break;
+            }
+        }
+        // Go: if err == io.EOF { … } — normalize EOF.
+        if errors::Is(err.clone(), io::EOF()) {
+            // Go: if b.Available() == 0 { err = b.Flush() } else { err = nil }
+            if self.Available() == 0 {
+                err = self.Flush();
+            } else {
+                err = nil;
+            }
+        }
+        (n, err)
     }
 }
 
