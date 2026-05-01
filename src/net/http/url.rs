@@ -232,6 +232,119 @@ pub fn PathUnescape(s: string) -> (string, error) {
     unescape(s, false)
 }
 
+/// `url.QueryEscape(s)` (url.go:281) — percent-encode `s` so it is
+/// safe inside the query component of a URL. Spaces become `+`.
+pub fn QueryEscape(s: string) -> string {
+    escape(s, EncodingMode::QueryComponent)
+}
+
+/// `url.PathEscape(s)` (url.go:287) — percent-encode `s` so it is
+/// safe inside a single URL path segment (i.e. `/`, `;`, `,`, `?` are
+/// all escaped). Spaces become `%20`.
+pub fn PathEscape(s: string) -> string {
+    escape(s, EncodingMode::PathSegment)
+}
+
+/// Subset of url.go's `encoding` enum (url.go:78). The full Go enum
+/// also distinguishes encodePath / encodeHost / encodeZone /
+/// encodeUserPassword / encodeFragment; we only ship the two modes
+/// that QueryEscape + PathEscape need.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum EncodingMode {
+    PathSegment,
+    QueryComponent,
+}
+
+/// Line-by-line port of `escape` (url.go:291).
+fn escape(s: string, mode: EncodingMode) -> string {
+    // Go: spaceCount, hexCount := 0, 0
+    let mut space_count: int = 0;
+    let mut hex_count: int = 0;
+    // Go: for i := 0; i < len(s); i++ { c := s[i] ... }
+    let mut i: int = 0;
+    while i < s.Len() {
+        let c: byte = s[i];
+        if should_escape(c, mode) {
+            if c == b' ' && mode == EncodingMode::QueryComponent {
+                space_count += 1;
+            } else {
+                hex_count += 1;
+            }
+        }
+        i += 1;
+    }
+
+    // Go: if spaceCount == 0 && hexCount == 0 { return s }
+    if space_count == 0 && hex_count == 0 {
+        return s;
+    }
+
+    // Go: required := len(s) + 2*hexCount; t := make([]byte, required)
+    let required = (s.Len() + 2 * hex_count) as usize;
+    let mut t: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(required);
+
+    // Go: if hexCount == 0 { copy(t, s); for i { if s[i] == ' ' { t[i] = '+' } }
+    if hex_count == 0 {
+        let mut i: int = 0;
+        while i < s.Len() {
+            let c: byte = s[i];
+            if c == b' ' {
+                t.push(b'+');
+            } else {
+                t.push(c);
+            }
+            i += 1;
+        }
+        return string::from_bytes(&t);
+    }
+
+    // Go: j := 0; for i := 0; i < len(s); i++ { switch ... }
+    let upperhex = b"0123456789ABCDEF";
+    let mut i: int = 0;
+    while i < s.Len() {
+        let c: byte = s[i];
+        if c == b' ' && mode == EncodingMode::QueryComponent {
+            t.push(b'+');
+        } else if should_escape(c, mode) {
+            t.push(b'%');
+            t.push(upperhex[(c >> 4) as usize]);
+            t.push(upperhex[(c & 15) as usize]);
+        } else {
+            t.push(c);
+        }
+        i += 1;
+    }
+    string::from_bytes(&t)
+}
+
+/// Line-by-line port of `shouldEscape` (url.go:107). Slim mode set
+/// matches `EncodingMode`.
+fn should_escape(c: byte, mode: EncodingMode) -> bool {
+    // Go: §2.3 Unreserved characters (alphanum)
+    if (b'a' <= c && c <= b'z') || (b'A' <= c && c <= b'Z') || (b'0' <= c && c <= b'9') {
+        return false;
+    }
+    // Go: §2.3 Unreserved characters (mark)
+    match c {
+        b'-' | b'_' | b'.' | b'~' => return false,
+        _ => {}
+    }
+    // Go: §2.2 Reserved characters
+    match c {
+        b'$' | b'&' | b'+' | b',' | b'/' | b':' | b';' | b'=' | b'?' | b'@' => match mode {
+            // Go: encodePathSegment — return c == '/' || c == ';' || c == ',' || c == '?'
+            EncodingMode::PathSegment => {
+                return c == b'/' || c == b';' || c == b',' || c == b'?';
+            }
+            // Go: encodeQueryComponent — RFC reserves everything.
+            EncodingMode::QueryComponent => return true,
+        },
+        _ => {}
+    }
+    // Everything else must be escaped.
+    true
+}
+
 fn unescape(s: string, query_mode: bool) -> (string, error) {
     // First pass: count '%' escapes, validate, count '+' (query only).
     let mut n: int = 0;
