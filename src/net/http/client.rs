@@ -728,7 +728,7 @@ fn has_port(host: &string) -> bool {
 /// Loose port of `(*Request).write` (request.go:603) — we don't have
 /// `bufio.Writer` plumbing yet, so we accumulate into a `strings::Builder`
 /// for the head and concatenate the body slice<byte> at the end.
-fn serialize_request(req: &Request, host: &string) -> slice<byte> {
+pub(crate) fn serialize_request(req: &Request, host: &string) -> slice<byte> {
     // Go: var b strings.Builder
     let mut b = strings::Builder::new();
     b.Grow(256);

@@ -83,6 +83,17 @@ impl Request {
         super::cookie::read_cookies(&self.Header, &string::new())
     }
 
+    /// `r.CookiesNamed(name)` (request.go:434) — return all request
+    /// cookies with the given name. Empty `name` yields an empty slice.
+    pub fn CookiesNamed(&self, name: string) -> slice<super::cookie::Cookie> {
+        // Go: if name == "" { return []*Cookie{} }
+        if name.Len() == 0 {
+            return slice::<super::cookie::Cookie>::__from_vec(Vec::new());
+        }
+        // Go: return readCookies(r.Header, name)
+        super::cookie::read_cookies(&self.Header, &name)
+    }
+
     /// `r.Cookie(name)` — return the named cookie, or
     /// `(Cookie::default(), ErrNoCookie)` if absent. Mirrors
     /// `(*Request).Cookie(name)` (request.go:418).
@@ -190,6 +201,28 @@ impl Request {
             return vs[0].clone();
         }
         string::new()
+    }
+
+    /// `r.Write(w)` (request.go:561) — serialize the request onto `w`
+    /// in HTTP/1.1 wire format. Slim port: delegates to the same
+    /// `serialize_request` helper used by Client::Do, which already
+    /// implements (*Request).write internally.
+    pub fn Write<W: io::Writer>(&self, w: &mut W) -> error {
+        // Go: return r.write(w, false, nil, nil)
+        let host = if self.Host.Len() != 0 {
+            self.Host.clone()
+        } else {
+            self.URL.Host.clone()
+        };
+        let buf = super::client::serialize_request(self, &host);
+        let mut body = buf;
+        if self.Body.Len() > 0 {
+            for i in 0..self.Body.Len() {
+                body = crate::append!(body, self.Body[i]);
+            }
+        }
+        let (_, e) = w.Write(body);
+        e
     }
 
     /// `r.ProtoAtLeast(major, minor)` (request.go:417) — reports whether
