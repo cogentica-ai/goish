@@ -529,3 +529,141 @@ pub fn AppendBool(dst: slice<byte>, b: bool) -> slice<byte> {
     }
     slice::__from_vec(v)
 }
+
+// ─── Quote / Unquote (slim ASCII port of strconv/quote.go) ───────────
+
+/// `strconv.Quote(s)` (quote.go:125) — return a double-quoted Go
+/// string literal of `s`. Slim port: ASCII-only.
+///
+/// - `\\`, `"` always escaped.
+/// - Tab/newline/CR/etc. use the canonical `\t`/`\n`/`\r` short forms.
+/// - Other bytes < 0x20 or = 0x7F render as `\xHH` (lower-hex).
+/// - Bytes >= 0x80 render as `\xHH` (no full UTF-8 IsPrint check).
+pub fn Quote<S: Into<string>>(s: S) -> string {
+    let s = s.into();
+    let bs = s.as_bytes();
+    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(bs.len() + 2);
+    out.push(b'"');
+    let lowerhex = b"0123456789abcdef";
+    for &c in bs.iter() {
+        match c {
+            b'\\' => {
+                out.push(b'\\');
+                out.push(b'\\');
+            }
+            b'"' => {
+                out.push(b'\\');
+                out.push(b'"');
+            }
+            b'\n' => out.extend_from_slice(b"\\n"),
+            b'\r' => out.extend_from_slice(b"\\r"),
+            b'\t' => out.extend_from_slice(b"\\t"),
+            0x07 => out.extend_from_slice(b"\\a"),
+            0x08 => out.extend_from_slice(b"\\b"),
+            0x0c => out.extend_from_slice(b"\\f"),
+            0x0b => out.extend_from_slice(b"\\v"),
+            c if c < 0x20 || c == 0x7f || c >= 0x80 => {
+                out.extend_from_slice(b"\\x");
+                out.push(lowerhex[(c >> 4) as usize]);
+                out.push(lowerhex[(c & 0x0f) as usize]);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push(b'"');
+    string::from_bytes(&out)
+}
+
+/// `strconv.Unquote(s)` (quote.go:383) — slim ASCII port. Decodes a
+/// `"..."` literal containing the Quote-emitted escapes (`\\`, `\"`,
+/// `\n`, `\r`, `\t`, `\a`, `\b`, `\f`, `\v`, `\xHH`). Returns
+/// `(decoded, err)`.
+pub fn Unquote<S: Into<string>>(s: S) -> (string, error) {
+    let s = s.into();
+    let bs = s.as_bytes();
+    if bs.len() < 2 || bs[0] != b'"' || bs[bs.len() - 1] != b'"' {
+        return (string::new(), errors::New("invalid syntax"));
+    }
+    let inner = &bs[1..bs.len() - 1];
+    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(inner.len());
+    let mut i: usize = 0;
+    while i < inner.len() {
+        let c = inner[i];
+        if c == b'"' {
+            // Bare " inside the quoted region is invalid.
+            return (string::new(), errors::New("invalid syntax"));
+        }
+        if c != b'\\' {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        // Escape sequence; need at least one more byte.
+        if i + 1 >= inner.len() {
+            return (string::new(), errors::New("invalid syntax"));
+        }
+        let next = inner[i + 1];
+        match next {
+            b'\\' => {
+                out.push(b'\\');
+                i += 2;
+            }
+            b'"' => {
+                out.push(b'"');
+                i += 2;
+            }
+            b'n' => {
+                out.push(b'\n');
+                i += 2;
+            }
+            b'r' => {
+                out.push(b'\r');
+                i += 2;
+            }
+            b't' => {
+                out.push(b'\t');
+                i += 2;
+            }
+            b'a' => {
+                out.push(0x07);
+                i += 2;
+            }
+            b'b' => {
+                out.push(0x08);
+                i += 2;
+            }
+            b'f' => {
+                out.push(0x0c);
+                i += 2;
+            }
+            b'v' => {
+                out.push(0x0b);
+                i += 2;
+            }
+            b'x' => {
+                if i + 3 >= inner.len() {
+                    return (string::new(), errors::New("invalid syntax"));
+                }
+                let h1 = unhex_byte(inner[i + 2]);
+                let h2 = unhex_byte(inner[i + 3]);
+                if h1 == 0xff || h2 == 0xff {
+                    return (string::new(), errors::New("invalid syntax"));
+                }
+                out.push((h1 << 4) | h2);
+                i += 4;
+            }
+            _ => return (string::new(), errors::New("invalid syntax")),
+        }
+    }
+    let _ = nil; // silence unused
+    (string::from_bytes(&out), errors::nil)
+}
+
+fn unhex_byte(c: u8) -> u8 {
+    match c {
+        b'0'..=b'9' => c - b'0',
+        b'a'..=b'f' => c - b'a' + 10,
+        b'A'..=b'F' => c - b'A' + 10,
+        _ => 0xff,
+    }
+}
