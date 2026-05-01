@@ -227,6 +227,59 @@ pub fn WriteString(w: &mut dyn Writer, s: crate::gostring::string) -> (int, erro
     w.Write(buf)
 }
 
+/// `io.CopyBuffer(dst, src, buf)` (io.go:398) — like Copy but stages
+/// through the caller-supplied buffer. If `buf` is nil (zero-length
+/// slice constructed via `make!([]byte, 0)`), CopyBuffer allocates one
+/// internally — slim deviation from Go which panics on empty (non-nil)
+/// buffer; goish has no nil/empty distinction for slices, so any
+/// zero-length buf triggers the internal allocation.
+///
+/// **Slim deviation from Go**: doesn't try src.WriteTo / dst.ReadFrom
+/// fast paths (goish doesn't yet have an io::WriterTo / io::ReaderFrom
+/// trait surface for runtime dispatch). Always stages through the
+/// buffer.
+pub fn CopyBuffer(
+    dst: &mut dyn Writer,
+    src: &mut dyn Reader,
+    buf: slice<byte>,
+) -> (i64, error) {
+    // Go: if buf == nil { buf = make([]byte, size) } — goish: if the
+    // caller passed an empty slice, allocate the default 32 KiB.
+    let mut buf = if buf.Len() == 0 {
+        crate::make!([]byte, 32 * 1024)
+    } else {
+        buf
+    };
+    // Go: var written int64; for { nr, er := src.Read(buf); ... }
+    let mut written: i64 = 0;
+    let eof = EOF();
+    loop {
+        let (nr, rerr) = src.Read(&mut buf);
+        if nr > 0 {
+            // Go: nw, ew := dst.Write(buf[0:nr])
+            let chunk = buf.slice(0, nr);
+            let chunk_len = chunk.Len();
+            let (nw, werr) = dst.Write(chunk);
+            written += nw as i64;
+            // Go: if ew != nil { err = ew; break }
+            if werr != nil {
+                return (written, werr);
+            }
+            // Go: if nr != nw { err = ErrShortWrite; break }
+            if (nw as int) < chunk_len {
+                return (written, ErrShortWrite());
+            }
+        }
+        // Go: if er != nil { if er != EOF { err = er }; break }
+        if rerr != nil {
+            if rerr == eof {
+                return (written, nil);
+            }
+            return (written, rerr);
+        }
+    }
+}
+
 // ─── LimitReader / LimitedReader ─────────────────────────────────────
 
 /// `io.LimitedReader` (io.go:467). Reads from `R` but stops at `N` bytes.
