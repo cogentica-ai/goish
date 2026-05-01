@@ -34,7 +34,7 @@ use crate::string;
 use crate::sync::Mutex;
 use crate::time;
 
-use super::request::{ReadRequest, Request};
+use super::request::{ReadRequestWithLimit, Request};
 use super::response::ResponseWriter;
 
 /// `http.Handler` — types that can serve HTTP requests. Mirrors
@@ -199,14 +199,25 @@ pub struct Server {
     pub WriteTimeout: time::Duration,
     /// Idle keep-alive timeout. Zero falls back to `ReadHeaderTimeout`.
     pub IdleTimeout: time::Duration,
-    /// Cap on bytes read parsing the request line + header. Currently
-    /// honored at fixed 8 KiB by `ReadRequest`; this field is reserved
-    /// for a v2 plumb-through. Zero = use the parser default.
+    /// Cap on bytes per request line / per header line, in bytes.
+    /// `<= 0` falls back to the parser default (8 KiB). Mirrors
+    /// `Server.MaxHeaderBytes` (server.go:3072).
     pub MaxHeaderBytes: crate::types::int,
+    /// Cap on the number of connections being served concurrently.
+    /// `0` means unlimited (Go's default behavior).
+    /// `> 0` makes the accept loop block once this many connections
+    /// are in flight, providing backpressure under load instead of
+    /// spawning unbounded goroutines.
+    pub MaxConcurrentConns: crate::types::int,
 
     // ─── internal state, populated by Default ─────────────────────
     in_shutdown: AtomicBool,
     active_conns: AtomicUsize,
+    /// Bounded semaphore for `MaxConcurrentConns`. `None` until Serve
+    /// initializes it; capacity = `MaxConcurrentConns`. Each accepted
+    /// conn pushes one token and drains it on completion. Send blocks
+    /// when the chan is full ⇒ accept loop pauses.
+    conn_sem: Mutex<Option<crate::gochan::chan<()>>>,
     /// Tracked listener for shutdown. `Mutex<Option<...>>` so the
     /// Serve goroutine can install it on entry and Shutdown can
     /// take it out (close it + wake parked Accept) from another
@@ -243,9 +254,11 @@ impl Default for Server {
             WriteTimeout: time::Duration(0),
             IdleTimeout: time::Duration(0),
             MaxHeaderBytes: 0,
+            MaxConcurrentConns: 0,
             in_shutdown: AtomicBool::new(false),
             active_conns: AtomicUsize::new(0),
             tracked_listener: Mutex::new(None),
+            conn_sem: Mutex::new(None),
         }
     }
 }
@@ -281,37 +294,64 @@ impl Server {
     /// break the Accept loop and close the socket.
     pub fn Serve(self: Arc<Self>, ln: net::Listener) -> error {
         let ln = Arc::new(ln);
-        // Install tracked_listener and check in_shutdown atomically:
-        // hold the listener mutex across both. Without this, a
-        // Shutdown call that wins the race against Serve's entry
-        // would observe an empty tracked_listener (so __wake_accept
-        // and Close run on nothing), and Serve would later install
-        // its listener and enter Accept on a fd that was never
-        // closed → permanent park.
+        // Install tracked_listener + initialize conn_sem (if backpressure
+        // configured) under one critical section; check in_shutdown
+        // atomically. Without this, a Shutdown that wins the race vs
+        // Serve's entry would observe an empty tracked_listener (so
+        // __wake_accept and Close run on nothing), and Serve would
+        // later install its listener and enter Accept on a fd that was
+        // never closed → permanent park.
         {
             let mut tracked = self.tracked_listener.Lock();
             if self.in_shutdown.load(Ordering::Acquire) {
                 return ErrServerClosed();
             }
             *tracked = Some(ln.clone());
+            if self.MaxConcurrentConns > 0 {
+                let cap = self.MaxConcurrentConns as usize;
+                *self.conn_sem.Lock() =
+                    Some(crate::gochan::chan::<()>::new_buffered(cap));
+            }
         }
 
+        // Snapshot the chan handle once so subsequent Send/Recv on it
+        // never hold the conn_sem mutex (Send blocks when the chan is
+        // full; if we held the mutex we'd deadlock the workers'
+        // drain side).
+        let sem_handle: Option<crate::gochan::chan<()>> = if self.MaxConcurrentConns > 0 {
+            self.conn_sem.Lock().clone()
+        } else {
+            None
+        };
+
         loop {
+            // Backpressure: if MaxConcurrentConns is set, block here
+            // until a slot opens up. Each per-conn goroutine drains
+            // its slot on completion.
+            if let Some(ref sem) = sem_handle {
+                sem.Send(());
+            }
+
             let (conn, err) = ln.Accept();
             if !err.IsNil() {
-                // Whether the error is the kernel's EBADF (we closed
-                // the fd) or netpoll's "i/o timeout" (we forced the
-                // pd's read deadline expired), we treat it as a
-                // graceful shutdown if `in_shutdown` is set.
+                // Release the slot we just acquired since no goroutine
+                // will drain it.
+                if let Some(ref sem) = sem_handle {
+                    let _ = sem.__try_recv();
+                }
                 if self.in_shutdown.load(Ordering::Acquire) {
                     return ErrServerClosed();
                 }
                 return err;
             }
             let srv = self.clone();
+            let release_sem = sem_handle.clone();
             // 64 KiB stack — ample for the per-handler chain.
             go!(stack(64 * 1024), move || {
                 srv.serve_conn(conn);
+                if let Some(ref sem) = release_sem {
+                    let _ = sem.__try_recv();
+                }
             });
         }
     }
@@ -401,7 +441,7 @@ impl Server {
 
             let (req, err) = {
                 let mut br = bufio::NewReader(&mut conn);
-                ReadRequest(&mut br)
+                ReadRequestWithLimit(&mut br, self.MaxHeaderBytes)
             };
             if !err.IsNil() {
                 // EOF, parse error, or idle timeout — all close the conn.

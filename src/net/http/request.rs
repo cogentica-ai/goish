@@ -108,20 +108,39 @@ impl Request {
 
 // ─── ReadRequest ─────────────────────────────────────────────────────
 
-const MAX_LINE: usize = 8 * 1024;
+const DEFAULT_MAX_LINE: usize = 8 * 1024;
 const MAX_HEADERS: usize = 100;
 const MAX_BODY: usize = 16 * 1024 * 1024; // 16 MiB safety cap
 
 /// `http.ReadRequest(b *bufio.Reader)` — parse an HTTP/1.x request
-/// from the given buffered reader. Mirrors Go's
+/// using the default 8 KiB max-header-line. Mirrors
 /// `func ReadRequest(b *bufio.Reader) (*Request, error)`
 /// (request.go:1058).
 ///
-/// On success the reader is positioned at the first byte after the
-/// final CRLF of the request body (or after the headers if no body).
+/// For server use with a configurable limit, prefer
+/// `ReadRequestWithLimit` (called by `http::Server` with
+/// `srv.MaxHeaderBytes`).
 pub fn ReadRequest<R: io::Reader>(
     br: &mut bufio::Reader<R>,
 ) -> (Request, error) {
+    ReadRequestWithLimit(br, DEFAULT_MAX_LINE as int)
+}
+
+/// Variant of `ReadRequest` that honors the caller-provided
+/// `max_header_bytes` — the maximum length of the request line and of
+/// each individual header line. `<= 0` means "use the default".
+///
+/// On success the reader is positioned at the first byte after the
+/// final CRLF of the request body (or after the headers if no body).
+pub fn ReadRequestWithLimit<R: io::Reader>(
+    br: &mut bufio::Reader<R>,
+    max_header_bytes: int,
+) -> (Request, error) {
+    let max_line = if max_header_bytes > 0 {
+        max_header_bytes as usize
+    } else {
+        DEFAULT_MAX_LINE
+    };
     let mut req = Request {
         Method: string::new(),
         URL: URL::empty(),
@@ -136,7 +155,7 @@ pub fn ReadRequest<R: io::Reader>(
     };
 
     // Request-line: METHOD SP request-target SP HTTP-version CRLF
-    let line = match read_line(br, MAX_LINE) {
+    let line = match read_line(br, max_line) {
         Ok(l) => l,
         Err(e) => return (req, e),
     };
@@ -167,7 +186,7 @@ pub fn ReadRequest<R: io::Reader>(
     // Headers: lines of `Name: value` ending with an empty line.
     let mut count = 0;
     loop {
-        let line = match read_line(br, MAX_LINE) {
+        let line = match read_line(br, max_line) {
             Ok(l) => l,
             Err(e) => return (req, e),
         };
