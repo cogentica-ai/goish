@@ -783,6 +783,30 @@ impl io::Writer for Buffer {
     }
 }
 
+impl io::ByteReader for Buffer {
+    fn ReadByte(&mut self) -> (byte, error) {
+        Buffer::ReadByte(self)
+    }
+}
+
+impl io::ByteScanner for Buffer {
+    fn UnreadByte(&mut self) -> error {
+        Buffer::UnreadByte(self)
+    }
+}
+
+impl io::ByteWriter for Buffer {
+    fn WriteByte(&mut self, c: byte) -> error {
+        Buffer::WriteByte(self, c)
+    }
+}
+
+impl io::StringWriter for Buffer {
+    fn WriteString(&mut self, s: string) -> (int, error) {
+        Buffer::WriteString(self, s)
+    }
+}
+
 impl io::Reader for Buffer {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         Buffer::Read(self, p)
@@ -844,6 +868,58 @@ impl Reader {
     pub fn Reset(&mut self, b: slice<byte>) {
         self.s = b.__into_vec();
         self.i = 0;
+    }
+
+    /// `(r *Reader).Seek(offset, whence)` (bytes/reader.go:127) — slim port.
+    pub fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
+        // Go: switch whence { case SeekStart: ... }
+        let abs: i64 = match whence {
+            x if x == io::SeekStart => offset,
+            x if x == io::SeekCurrent => (self.i as i64).wrapping_add(offset),
+            x if x == io::SeekEnd => (self.s.len() as i64).wrapping_add(offset),
+            _ => {
+                return (0, crate::errors::New("bytes.Reader.Seek: invalid whence"));
+            }
+        };
+        // Go: if abs < 0 { return 0, error }
+        if abs < 0 {
+            return (0, crate::errors::New("bytes.Reader.Seek: negative position"));
+        }
+        self.i = abs as usize;
+        (abs, nil)
+    }
+
+    /// `(r *Reader).ReadAt(p, off)` (bytes/reader.go:88) — slim port.
+    pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
+        // Go: if off < 0 { return 0, errors.New("bytes.Reader.ReadAt: negative offset") }
+        if off < 0 {
+            return (0, crate::errors::New("bytes.Reader.ReadAt: negative offset"));
+        }
+        if off >= self.s.len() as i64 {
+            return (0, io::EOF());
+        }
+        let start = off as usize;
+        let want = (p.Len() as usize).min(self.s.len() - start);
+        for k in 0..want {
+            p[k as int] = self.s[start + k];
+        }
+        // Go: if n < len(p) { err = io.EOF }
+        if want < p.Len() as usize {
+            return (want as int, io::EOF());
+        }
+        (want as int, nil)
+    }
+}
+
+impl io::Seeker for Reader {
+    fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
+        Reader::Seek(self, offset, whence)
+    }
+}
+
+impl io::ReaderAt for Reader {
+    fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
+        Reader::ReadAt(self, p, off)
     }
 }
 
