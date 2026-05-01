@@ -288,7 +288,7 @@ fn test_arena_reuse_epochs() {
     const BLOCKS_PER_EPOCH: usize = PER_EPOCH_BYTES / BLOCK_SIZE; // 128
 
     for epoch in 0..EPOCHS {
-        let pattern = ((epoch as u64) * 0x9E37_79B9_7F4A_7C15u64) as u8;
+        let pattern = (epoch as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15u64) as u8;
 
         let mut blocks: Vec<Vec<u8>> = Vec::with_capacity(BLOCKS_PER_EPOCH);
         for _ in 0..BLOCKS_PER_EPOCH {
