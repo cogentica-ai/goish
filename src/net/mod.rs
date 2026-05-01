@@ -942,6 +942,154 @@ impl IP {
     }
 }
 
+/// `net.IPNet` (ip.go:46) — IP network: address + mask. Slim
+/// IPv4-only port; both fields are 4-byte.
+#[derive(Clone, Default)]
+pub struct IPNet {
+    /// Network number (network address part of the CIDR).
+    pub IP: IP,
+    /// Network mask.
+    pub Mask: IPMask,
+}
+
+impl IPNet {
+    /// `IPNet.Network()` (ip.go:498) — constant `"ip+net"`.
+    pub fn Network(&self) -> string {
+        // Go: return "ip+net"
+        string::from_static("ip+net")
+    }
+
+    /// `IPNet.Contains(ip)` (ip.go:480) — true when `ip` lies in this
+    /// network. Slim: only the IPv4×IPv4 path is reachable.
+    pub fn Contains(&self, ip: IP) -> bool {
+        // Go: nn, m := networkNumberAndMask(n)
+        let (nn, m) = network_number_and_mask(self);
+        if nn.bytes.Len() == 0 || m.bytes.Len() == 0 {
+            return false;
+        }
+        // Go: if x := ip.To4(); x != nil { ip = x }
+        let ip4 = ip.To4();
+        let needle: IP = if ip4.bytes.Len() == 4 { ip4 } else { ip };
+        // Go: if l != len(nn) { return false }
+        let l = needle.bytes.Len();
+        if l != nn.bytes.Len() {
+            return false;
+        }
+        // Go: for i := 0; i < l; i++ { ... }
+        let mut i: int = 0;
+        while i < l {
+            // Go: if nn[i]&m[i] != ip[i]&m[i] { return false }
+            if (nn.bytes[i] & m.bytes[i]) != (needle.bytes[i] & m.bytes[i]) {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+
+    /// `IPNet.String()` (ip.go:506) — CIDR notation, e.g. `"192.0.2.0/24"`.
+    /// Falls back to `"ip/<hex-mask>"` when the mask isn't canonical.
+    pub fn String(&self) -> string {
+        // Go: nn, m := networkNumberAndMask(n)
+        let (nn, m) = network_number_and_mask(self);
+        if nn.bytes.Len() == 0 || m.bytes.Len() == 0 {
+            return string::from_static("<nil>");
+        }
+        // Go: l := simpleMaskLength(m)
+        let l = simple_mask_length(&m);
+        // Go: if l == -1 { return nn.String() + "/" + m.String() }
+        if l == -1 {
+            return nn.String() + string::from_static("/") + m.String();
+        }
+        // Go: return nn.String() + "/" + itoa.Uitoa(uint(l))
+        nn.String() + string::from_static("/") + crate::strconv::Itoa(l)
+    }
+}
+
+/// `networkNumberAndMask` (ip.go:456) — normalize the (ip, mask) pair.
+/// Slim: returns the IP/Mask as-is when both are 4-byte; nil/nil
+/// otherwise (no IPv6 reduction).
+fn network_number_and_mask(n: &IPNet) -> (IP, IPMask) {
+    // Go: if ip = n.IP.To4(); ip == nil { ... }
+    let ip = n.IP.To4();
+    if ip.bytes.Len() != 4 {
+        return (IP::default(), IPMask::default());
+    }
+    // Go: switch len(m) { case IPv4len: ... default: return nil, nil }
+    if n.Mask.bytes.Len() != 4 {
+        return (IP::default(), IPMask::default());
+    }
+    (ip, n.Mask.clone())
+}
+
+/// `net.ParseCIDR(s)` (ip.go:550) — parse `"a.b.c.d/n"` into the IP
+/// address and the implied IPNet. Slim: IPv4 only; rejects v6 forms.
+pub fn ParseCIDR(s: crate::string) -> (IP, IPNet, error) {
+    // Go: addr, mask, found := stringslite.Cut(s, "/")
+    let (addr, mask, found) = crate::strings::Cut(s.clone(), string::from_static("/"));
+    // Go: if !found { return nil, nil, &ParseError{Type: "CIDR address", Text: s} }
+    if !found {
+        return (
+            IP::default(),
+            IPNet::default(),
+            errors::New(string("invalid CIDR address: ") + s),
+        );
+    }
+    // Go: ipAddr, err := netip.ParseAddr(addr)
+    let ip_addr = ParseIP(addr);
+    if ip_addr.IsNil() {
+        return (
+            IP::default(),
+            IPNet::default(),
+            errors::New(string("invalid CIDR address: ") + s),
+        );
+    }
+    // Go: n, i, ok := dtoi(mask); validate range.
+    let (n_val, ok) = parse_decimal_int(&mask);
+    let bit_len: int = 32; // slim: IPv4 only.
+    if !ok || n_val < 0 || n_val > bit_len {
+        return (
+            IP::default(),
+            IPNet::default(),
+            errors::New(string("invalid CIDR address: ") + s),
+        );
+    }
+    // Go: m := CIDRMask(n, ipAddr.BitLen())
+    let m = CIDRMask(n_val, bit_len);
+    // Go: return IP(addr16[:]), &IPNet{IP: IP(addr16[:]).Mask(m), Mask: m}, nil
+    let net_ip = ip_addr.Mask(m.clone());
+    (
+        ip_addr,
+        IPNet {
+            IP: net_ip,
+            Mask: m,
+        },
+        errors::nil,
+    )
+}
+
+/// Parse a non-negative decimal integer from a goish `string`.
+/// Returns (value, true) on success; (0, false) on any non-digit
+/// or empty input. Mirrors Go's `dtoi` strict-prefix decode but
+/// rejects trailing junk to match `i != len(mask)`.
+fn parse_decimal_int(s: &crate::string) -> (int, bool) {
+    let bs = crate::convert::bytes(s.clone());
+    if bs.Len() == 0 {
+        return (0, false);
+    }
+    let mut n: int = 0;
+    let mut i: int = 0;
+    while i < bs.Len() {
+        let c = bs[i];
+        if c < b'0' || c > b'9' {
+            return (0, false);
+        }
+        n = n * 10 + (c - b'0') as int;
+        i += 1;
+    }
+    (n, true)
+}
+
 /// `net.IPv4(a, b, c, d)` (ip.go:43) — construct an IPv4 net.IP.
 /// Slim port returns the 4-byte form directly (Go returns the
 /// 16-byte v4-mapped-v6 form, which `To4()` then collapses).
