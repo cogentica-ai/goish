@@ -729,6 +729,14 @@ impl errors::ErrorTrait for MaxBytesError {
         // Go: "Due to Hyrum's law, this text cannot be changed."
         string("http: request body too large")
     }
+
+    /// Walks to the legacy sentinel so callers using the older
+    /// `errors::Is(err, ErrMaxBytes())` form continue to match. Go's
+    /// type uses `errors.As(*MaxBytesError)` instead, but goish lacks
+    /// errors.As; chaining through Unwrap is the closest analogue.
+    fn Unwrap(&self) -> errors::error {
+        ErrMaxBytes()
+    }
 }
 
 /// Build a `MaxBytesError` wrapped as a goish `error`.
