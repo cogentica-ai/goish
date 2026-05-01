@@ -307,6 +307,47 @@ pub fn UserHomeDir() -> (string, error) {
     (string::new(), errors::New(b.String()))
 }
 
+/// Line-by-line port of `os.Getwd()` (file.go ~ getwd) — return the
+/// current working directory via `getcwd(2)`. The buffer doubles up
+/// to a 4 KiB cap, mirroring Go's exponential growth retry loop.
+pub fn Getwd() -> (string, error) {
+    // Go: var buf [128]byte; for { n, err := syscall.Getcwd(buf[:]); ... }
+    let mut size: usize = 128;
+    while size <= 4096 {
+        let mut buf: Vec<u8> = Vec::with_capacity(size);
+        buf.resize(size, 0);
+        // Go: n, err := syscall.Getcwd(buf)
+        let n = syscall::Getcwd(buf.as_mut_ptr(), size);
+        // Go: if err == nil { return string(buf[:n-1]), nil } — strip trailing NUL.
+        if n > 0 {
+            // Linux returns total length including NUL — drop it.
+            let len = (n as usize).saturating_sub(1);
+            return (string::from_bytes(&buf[..len]), nil);
+        }
+        // Go: if err != ERANGE { return "", err } — bigger buffer otherwise.
+        // Slim: -ERANGE is -34 on Linux. Anything else is fatal.
+        if n != -34 {
+            return (string::new(), errors::New(string("getwd failed")));
+        }
+        size *= 2;
+    }
+    (string::new(), errors::New(string("getwd: cwd path too long")))
+}
+
+/// Line-by-line port of `os.Chdir(name)` (file.go) — change the
+/// current working directory to `name`. Returns `nil` on success.
+pub fn Chdir(name: string) -> error {
+    // Go: if e := syscall.Chdir(name); e != nil { return &PathError{...} }
+    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
+    buf.extend_from_slice(bytes_of(&name));
+    buf.push(0);
+    let rc = syscall::Chdir(buf.as_ptr());
+    if rc < 0 {
+        return errors::New(string("chdir failed"));
+    }
+    nil
+}
+
 /// `os.Hostname()` (sys.go:8) — return the kernel's nodename via
 /// uname(2).
 pub fn Hostname() -> (string, error) {

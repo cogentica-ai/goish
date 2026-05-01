@@ -51,6 +51,8 @@ pub const SYS_GETPEERNAME: usize = 52;
 pub const SYS_SETSOCKOPT: usize = 54;
 pub const SYS_GETSOCKOPT: usize = 55;
 pub const SYS_FCNTL: usize = 72;
+pub const SYS_GETCWD: usize = 79;
+pub const SYS_CHDIR: usize = 80;
 pub const SYS_ACCEPT4: usize = 288;
 pub const SYS_EPOLL_CREATE1: usize = 291;
 pub const SYS_EPOLL_CTL: usize = 233;
@@ -359,6 +361,19 @@ pub fn Unlink(path: *const u8) -> i32 {
 #[allow(non_snake_case)]
 pub fn Rmdir(path: *const u8) -> i32 {
     unsafe { syscall1(SYS_RMDIR, path as usize) as i32 }
+}
+
+/// `getcwd(buf, size)`. Linux returns the length of the cwd string
+/// (including the terminating NUL), or a negative errno on failure.
+#[allow(non_snake_case)]
+pub fn Getcwd(buf: *mut u8, size: usize) -> isize {
+    unsafe { syscall2(SYS_GETCWD, buf as usize, size) as isize }
+}
+
+/// `chdir(path)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Chdir(path: *const u8) -> i32 {
+    unsafe { syscall1(SYS_CHDIR, path as usize) as i32 }
 }
 
 // ─── uname ───────────────────────────────────────────────────────────

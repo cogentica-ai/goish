@@ -185,6 +185,31 @@ pub fn SplitList<S: Into<string>>(p: S) -> slice<string> {
     slice::__from_vec(out)
 }
 
+// ─── Abs ──────────────────────────────────────────────────────────────
+
+/// Line-by-line port of `filepath.Abs` (path.go:161 + path_unix.go's
+/// `unixAbs`). If `path` is absolute, returns `Clean(path)`. Otherwise
+/// joins `os.Getwd()` with `path`. The Linux semantics mirror Go's
+/// `unixAbs` directly — no Windows volume / drive handling needed.
+pub fn Abs<S: Into<string>>(path: S) -> (string, error) {
+    let path = path.into();
+    // Go: if IsAbs(path) { return Clean(path), nil }
+    if IsAbs(path.clone()) {
+        return (Clean(path), nil);
+    }
+    // Go: wd, err := os.Getwd(); if err != nil { return "", err }
+    let (wd, e) = crate::os::Getwd();
+    if !e.IsNil() {
+        return (string::new(), e);
+    }
+    // Go: return Join(wd, path), nil
+    let mut elems: alloc::vec::Vec<string> = alloc::vec::Vec::with_capacity(2);
+    elems.push(wd);
+    elems.push(path);
+    let elem_slice = slice::__from_vec(elems);
+    (Join(elem_slice), nil)
+}
+
 // ─── Rel ──────────────────────────────────────────────────────────────
 
 /// `filepath.Rel(basepath, targpath)` — returns a relative path lexically
