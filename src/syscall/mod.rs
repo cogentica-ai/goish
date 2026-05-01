@@ -366,6 +366,9 @@ pub const SYS_RMDIR: usize = 84;
 pub const SYS_CHMOD: usize = 90;
 pub const SYS_SYMLINK: usize = 88;
 pub const SYS_READLINK: usize = 89;
+pub const SYS_RENAME: usize = 82;
+pub const SYS_LINK: usize = 86;
+pub const SYS_TRUNCATE: usize = 76;
 
 /// `mkdir(path, mode)`. Returns 0 on success, -errno on failure.
 #[allow(non_snake_case)]
@@ -415,6 +418,25 @@ pub fn Symlink(oldname: *const u8, newname: *const u8) -> i32 {
 #[allow(non_snake_case)]
 pub fn Readlink(path: *const u8, buf: *mut u8, bufsiz: usize) -> isize {
     unsafe { syscall3(SYS_READLINK, path as usize, buf as usize, bufsiz) as isize }
+}
+
+/// `rename(oldpath, newpath)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Rename(oldpath: *const u8, newpath: *const u8) -> i32 {
+    unsafe { syscall2(SYS_RENAME, oldpath as usize, newpath as usize) as i32 }
+}
+
+/// `link(oldpath, newpath)` — create newpath as a hard link to oldpath.
+/// Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Link(oldpath: *const u8, newpath: *const u8) -> i32 {
+    unsafe { syscall2(SYS_LINK, oldpath as usize, newpath as usize) as i32 }
+}
+
+/// `truncate(path, length)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Truncate(path: *const u8, length: i64) -> i32 {
+    unsafe { syscall2(SYS_TRUNCATE, path as usize, length as usize) as i32 }
 }
 
 // ─── uname ───────────────────────────────────────────────────────────

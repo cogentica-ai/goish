@@ -445,6 +445,62 @@ pub fn Readlink(name: string) -> (string, error) {
     }
 }
 
+/// Line-by-line port of `os.Rename(oldpath, newpath)` (file.go:440 →
+/// file_unix.go:26 rename). Slim: drops the SameFile case-only-rename
+/// gymnastics (Linux is always case-sensitive) but preserves the
+/// "newname is a directory" prelude check so `Rename(file, dir)` errors
+/// before clobbering anything.
+pub fn Rename(oldpath: string, newpath: string) -> error {
+    // Go: fi, err := Lstat(newname); if err == nil && fi.IsDir() { return &LinkError{...EEXIST} }
+    let (fi, e) = Lstat(newpath.clone());
+    if e.IsNil() && fi.IsDir() {
+        return errors::New(string("rename: newname is a directory"));
+    }
+    // Go: err = ignoringEINTR(func() error { return syscall.Rename(oldname, newname) })
+    let mut old_buf: Vec<u8> = Vec::with_capacity(oldpath.Len() as usize + 1);
+    old_buf.extend_from_slice(bytes_of(&oldpath));
+    old_buf.push(0);
+    let mut new_buf: Vec<u8> = Vec::with_capacity(newpath.Len() as usize + 1);
+    new_buf.extend_from_slice(bytes_of(&newpath));
+    new_buf.push(0);
+    let rc = syscall::Rename(old_buf.as_ptr(), new_buf.as_ptr());
+    if rc < 0 {
+        return errors::New(string("rename failed"));
+    }
+    nil
+}
+
+/// Line-by-line port of `os.Link(oldname, newname)` (file_unix.go:403)
+/// — create `newname` as a hard link to `oldname`.
+pub fn Link(oldname: string, newname: string) -> error {
+    // Go: e := ignoringEINTR(func() error { return syscall.Link(oldname, newname) })
+    let mut old_buf: Vec<u8> = Vec::with_capacity(oldname.Len() as usize + 1);
+    old_buf.extend_from_slice(bytes_of(&oldname));
+    old_buf.push(0);
+    let mut new_buf: Vec<u8> = Vec::with_capacity(newname.Len() as usize + 1);
+    new_buf.extend_from_slice(bytes_of(&newname));
+    new_buf.push(0);
+    let rc = syscall::Link(old_buf.as_ptr(), new_buf.as_ptr());
+    if rc < 0 {
+        return errors::New(string("link failed"));
+    }
+    nil
+}
+
+/// Line-by-line port of `os.Truncate(name, size)` (file_unix.go:344)
+/// — change the size of the named file. Follows symlinks (per Go).
+pub fn Truncate(name: string, size: int) -> error {
+    // Go: e := ignoringEINTR(func() error { return syscall.Truncate(name, size) })
+    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
+    buf.extend_from_slice(bytes_of(&name));
+    buf.push(0);
+    let rc = syscall::Truncate(buf.as_ptr(), size);
+    if rc < 0 {
+        return errors::New(string("truncate failed"));
+    }
+    nil
+}
+
 /// `os.Hostname()` (sys.go:8) — return the kernel's nodename via
 /// uname(2).
 pub fn Hostname() -> (string, error) {
