@@ -370,6 +370,8 @@ pub const SYS_RENAME: usize = 82;
 pub const SYS_LINK: usize = 86;
 pub const SYS_TRUNCATE: usize = 76;
 pub const SYS_PIPE2: usize = 293;
+pub const SYS_CHOWN: usize = 92;
+pub const SYS_LCHOWN: usize = 94;
 
 /// `mkdir(path, mode)`. Returns 0 on success, -errno on failure.
 #[allow(non_snake_case)]
@@ -446,6 +448,20 @@ pub fn Truncate(path: *const u8, length: i64) -> i32 {
 #[allow(non_snake_case)]
 pub fn Pipe2(pipefd: &mut [i32; 2], flags: i32) -> i32 {
     unsafe { syscall2(SYS_PIPE2, pipefd.as_mut_ptr() as usize, flags as usize) as i32 }
+}
+
+/// `chown(path, uid, gid)` — set ownership; -1 leaves the field
+/// unchanged. Returns 0 on success or -errno on failure.
+#[allow(non_snake_case)]
+pub fn Chown(path: *const u8, uid: i32, gid: i32) -> i32 {
+    unsafe { syscall3(SYS_CHOWN, path as usize, uid as usize, gid as usize) as i32 }
+}
+
+/// `lchown(path, uid, gid)` — like chown, but does not follow a
+/// final-component symlink. Returns 0 on success or -errno.
+#[allow(non_snake_case)]
+pub fn Lchown(path: *const u8, uid: i32, gid: i32) -> i32 {
+    unsafe { syscall3(SYS_LCHOWN, path as usize, uid as usize, gid as usize) as i32 }
 }
 
 // ─── uname ───────────────────────────────────────────────────────────

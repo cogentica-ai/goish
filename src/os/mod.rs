@@ -639,6 +639,35 @@ pub fn Truncate(name: string, size: int) -> error {
     nil
 }
 
+/// Line-by-line port of `os.Chown(name, uid, gid)` (file_posix.go:105).
+/// uid or gid of -1 leaves that field unchanged. Follows symlinks
+/// (per Go).
+pub fn Chown(name: string, uid: int, gid: int) -> error {
+    // Go: e := ignoringEINTR(func() error { return syscall.Chown(name, uid, gid) })
+    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
+    buf.extend_from_slice(bytes_of(&name));
+    buf.push(0);
+    let rc = syscall::Chown(buf.as_ptr(), uid as i32, gid as i32);
+    if rc < 0 {
+        return errors::New(string("chown failed"));
+    }
+    nil
+}
+
+/// Line-by-line port of `os.Lchown(name, uid, gid)` (file_posix.go:121)
+/// — does not follow a final-component symlink.
+pub fn Lchown(name: string, uid: int, gid: int) -> error {
+    // Go: e := ignoringEINTR(func() error { return syscall.Lchown(name, uid, gid) })
+    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
+    buf.extend_from_slice(bytes_of(&name));
+    buf.push(0);
+    let rc = syscall::Lchown(buf.as_ptr(), uid as i32, gid as i32);
+    if rc < 0 {
+        return errors::New(string("lchown failed"));
+    }
+    nil
+}
+
 /// Line-by-line port of `os.Pipe()` (pipe2_unix.go:13) — create a
 /// connected pair of Files; reads from `r` return bytes written to
 /// `w`. Both ends are O_CLOEXEC by default, mirroring upstream.
