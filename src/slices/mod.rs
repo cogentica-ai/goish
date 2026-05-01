@@ -617,3 +617,37 @@ where
     });
     slice::__from_vec(v)
 }
+
+/// `slices.Chunk(s, n)` (slices/iter.go:97) — return consecutive
+/// sub-slices of up to `n` elements of `s`. All but the last sub-slice
+/// have size `n`. If `s` is empty, the result is empty (no empty
+/// slice in the sequence). Panics if `n < 1`, matching Go.
+///
+/// Slim deviation: Go returns `iter.Seq[Slice]`; goish has no
+/// `iter.Seq`, so this returns `slice<slice<T>>` eagerly. Each chunk
+/// is a fresh `slice<T>` cloned from the source.
+pub fn Chunk<T: Clone>(s: slice<T>, n: int) -> slice<slice<T>> {
+    // Go: if n < 1 { panic("cannot be less than 1") }
+    if n < 1 {
+        panic!("cannot be less than 1");
+    }
+    let raw: &[T] = &s;
+    let total = raw.len();
+    // Go: for i := 0; i < len(s); i += n { ... yield(s[i : i+end : i+end]) }
+    let mut out: alloc::vec::Vec<slice<T>> = alloc::vec::Vec::new();
+    let n_us = n as usize;
+    let mut i: usize = 0;
+    while i < total {
+        // Go: end := min(n, len(s[i:]))
+        let remaining = total - i;
+        let end = if n_us < remaining { n_us } else { remaining };
+        // Go: yield(s[i : i+end : i+end]) — fresh chunk, no shared cap.
+        let mut chunk: alloc::vec::Vec<T> = alloc::vec::Vec::with_capacity(end);
+        for j in 0..end {
+            chunk.push(raw[i + j].clone());
+        }
+        out.push(slice::__from_vec(chunk));
+        i += n_us;
+    }
+    slice::__from_vec(out)
+}
