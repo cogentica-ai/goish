@@ -136,6 +136,21 @@ impl URL {
         self.Scheme.Len() != 0
     }
 
+    /// Line-by-line port of `(u *URL).Parse(ref)` (url.go:1123) — parse
+    /// `ref` as a URL in the context of `self` (the receiver as base).
+    /// The ref may be relative or absolute. Returns parse errors from
+    /// the inner Parse; otherwise returns `self.ResolveReference(refURL)`.
+    pub fn Parse(&self, ref_: string) -> (URL, crate::errors::error) {
+        // Go: refURL, err := Parse(ref)
+        let (ref_url, err) = Parse(ref_);
+        // Go: if err != nil { return nil, err }
+        if !err.IsNil() {
+            return (URL::default(), err);
+        }
+        // Go: return u.ResolveReference(refURL), nil
+        (self.ResolveReference(&ref_url), crate::errors::nil)
+    }
+
     /// `(u *URL).RequestURI()` (url.go:1186) — return the encoded
     /// path?query string used in an HTTP request line. Slim port:
     /// goish's URL has no Opaque or ForceQuery, so the choice is just
@@ -850,6 +865,18 @@ pub fn ValuesEncode(v: crate::gomap::map<string, crate::goslice::slice<string>>)
 /// all escaped). Spaces become `%20`.
 pub fn PathEscape(s: string) -> string {
     escape(s, EncodingMode::PathSegment)
+}
+
+/// Line-by-line port of `(v Values).Has(key)` (url.go:974) — report
+/// whether `v` contains an entry for `key`. Goish models Values as
+/// the bare `map<string, slice<string>>`, so this is a free fn.
+pub fn ValuesHas(
+    v: &crate::gomap::map<string, crate::goslice::slice<string>>,
+    key: string,
+) -> bool {
+    // Go: _, ok := v[key]; return ok
+    let (_, ok) = v.Get(key);
+    ok
 }
 
 /// Subset of url.go's `encoding` enum (url.go:78). The full Go enum
