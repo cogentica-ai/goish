@@ -279,6 +279,83 @@ pub fn NopCloser<R: Reader>(r: R) -> NopCloserImpl<R> {
     NopCloserImpl { r }
 }
 
+// ─── ReadAll / ReadFull / ReadAtLeast ────────────────────────────────
+
+/// `io.ReadAll(r)` (io.go:709) — drain `r` until EOF/error, return the
+/// accumulated bytes. EOF is normal termination (returned err == nil).
+///
+/// Slim deviation: uses `bytes::Buffer` for the growing accumulator
+/// rather than Go's `b[len(b):cap(b)]` capacity-grow trick (goish slice
+/// subslicing copies, so the Go pattern doesn't apply).
+pub fn ReadAll(r: &mut dyn Reader) -> (slice<byte>, error) {
+    let eof = EOF();
+    // Go: b := make([]byte, 0, 512)
+    let mut buf = crate::bytes::NewBuffer(crate::make!([]byte, 0));
+    // Reusable read chunk; size matches Go's initial capacity.
+    let mut chunk: slice<byte> = crate::make!([]byte, 512);
+    loop {
+        // Go: n, err := r.Read(b[len(b):cap(b)])
+        let (n, err) = r.Read(&mut chunk);
+        if n > 0 {
+            // Go: b = b[:len(b)+n]
+            let part = chunk.slice(0, n);
+            let _ = buf.Write(part);
+        }
+        if !err.IsNil() {
+            // Go: if err == EOF { err = nil }; return b, err
+            if err == eof {
+                return (buf.Bytes(), nil);
+            }
+            return (buf.Bytes(), err);
+        }
+    }
+}
+
+/// `io.ReadAtLeast(r, buf, min)` (io.go:329) — read into `buf` until
+/// at least `min` bytes are accumulated. Returns ErrShortBuffer if
+/// `len(buf) < min`, ErrUnexpectedEOF if EOF arrives after some bytes
+/// but before reaching `min`.
+pub fn ReadAtLeast(r: &mut dyn Reader, buf: &mut slice<byte>, min: int) -> (int, error) {
+    // Go: if len(buf) < min { return 0, ErrShortBuffer }
+    if buf.Len() < min {
+        return (0, ErrShortBuffer());
+    }
+    let eof = EOF();
+    let total = buf.Len();
+    let mut n: int = 0;
+    let mut err: error = nil;
+    // Go: for n < min && err == nil
+    while n < min && err.IsNil() {
+        // Go: nn, err = r.Read(buf[n:])
+        // goish slice subslicing copies; we instead read into a
+        // temp scratch chunk sized to remaining capacity, then copy
+        // the bytes into buf at [n..n+nn].
+        let cap_left = total - n;
+        let mut tmp = crate::make!([]byte, cap_left);
+        let (nn, e) = r.Read(&mut tmp);
+        for i in 0..nn {
+            buf[n + i] = tmp[i];
+        }
+        n += nn;
+        err = e;
+    }
+    // Go: if n >= min { err = nil }
+    if n >= min {
+        err = nil;
+    } else if n > 0 && err == eof {
+        // Go: else if n > 0 && err == EOF { err = ErrUnexpectedEOF }
+        err = ErrUnexpectedEOF();
+    }
+    (n, err)
+}
+
+/// `io.ReadFull(r, buf)` (io.go:353) — read exactly `len(buf)` bytes
+/// or fail. Thin wrapper over ReadAtLeast.
+pub fn ReadFull(r: &mut dyn Reader, buf: &mut slice<byte>) -> (int, error) {
+    let n = buf.Len();
+    ReadAtLeast(r, buf, n)
+}
+
 // ─── MultiReader ─────────────────────────────────────────────────────
 //
 // Slim port of multi.go:13 (`multiReader`). Public surface accepts a
