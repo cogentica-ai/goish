@@ -377,6 +377,16 @@ pub fn ToLower<S: Into<slice<byte>>>(s: S) -> slice<byte> {
     slice::__from_vec(v)
 }
 
+/// `bytes.ToTitle(s)` (bytes.go:757) — title-case mapping over `s`.
+/// Go: `func ToTitle(s []byte) []byte { return Map(unicode.ToTitle, s) }`.
+///
+/// Slim: ASCII title-case is identical to upper-case (mirrors
+/// `strings.ToTitle`); non-ASCII bytes pass through unchanged.
+pub fn ToTitle<S: Into<slice<byte>>>(s: S) -> slice<byte> {
+    // Go: return Map(unicode.ToTitle, s)
+    Map(crate::unicode::ToTitle, s)
+}
+
 pub fn EqualFold<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, t: S2) -> bool {
     let s = s.into();
     let t = t.into();

@@ -449,6 +449,18 @@ pub fn ToLower<S: Into<string>>(s: S) -> string {
     string::__from_vec(v)
 }
 
+/// `strings.ToTitle(s)` (strings.go:768) — title-case mapping over `s`.
+/// Go: `func ToTitle(s string) string { return Map(unicode.ToTitle, s) }`.
+///
+/// Slim: ASCII title-case is identical to upper-case (Go's
+/// `unicode.ToTitle` for ASCII delegates to ToUpper). For non-ASCII the
+/// slim path passes runes through unchanged — full Unicode title-case
+/// requires the SpecialCasing tables not yet shipped.
+pub fn ToTitle<S: Into<string>>(s: S) -> string {
+    // Go: return Map(unicode.ToTitle, s)
+    Map(crate::unicode::ToTitle, s)
+}
+
 // ─── Replace / ReplaceAll / Repeat ────────────────────────────────────
 
 pub fn Replace<S1, S2, S3>(s: S1, old: S2, new_: S3, mut n: int) -> string
