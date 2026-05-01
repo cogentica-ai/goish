@@ -249,6 +249,64 @@ pub fn Clone<T: Clone>(s: &slice<T>) -> slice<T> {
     s.clone()
 }
 
+/// Line-by-line port of `slices.Reverse` (slices/slices.go:481) — reverse
+/// the elements of `s` in place.
+pub fn Reverse<T>(s: &mut slice<T>) {
+    // Go: for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 { s[i], s[j] = s[j], s[i] }
+    let raw: &mut [T] = s;
+    let mut i: usize = 0;
+    if raw.is_empty() {
+        return;
+    }
+    let mut j: usize = raw.len() - 1;
+    while i < j {
+        raw.swap(i, j);
+        i += 1;
+        j -= 1;
+    }
+}
+
+/// Line-by-line port of `slices.Repeat` (slices/slices.go:512) — return
+/// a new slice that repeats `x` `count` times. Result length is
+/// `len(x) * count`. Panics on negative `count` (Go semantics).
+pub fn Repeat<T: Clone>(x: &slice<T>, count: int) -> slice<T> {
+    // Go: if count < 0 { panic("cannot be negative") }
+    if count < 0 {
+        panic!("slices.Repeat: count cannot be negative");
+    }
+    let raw: &[T] = x;
+    let n = raw.len();
+    // Go: hi, lo := bits.Mul(uint(len(x)), uint(count))
+    //     if hi > 0 || lo > maxInt { panic("overflow") }
+    // Goish: usize::checked_mul covers both cases.
+    let total = match n.checked_mul(count as usize) {
+        Some(t) => t,
+        None => panic!("slices.Repeat: len(x) * count overflows"),
+    };
+    // Go: newslice := make(S, int(lo)); copy + double-up loop.
+    // Goish: doubling-copy mirrors Go's algorithm verbatim.
+    let mut out: alloc::vec::Vec<T> = alloc::vec::Vec::with_capacity(total);
+    if n == 0 || count == 0 {
+        return slice::__from_vec(out);
+    }
+    // First copy of x.
+    for el in raw.iter() {
+        out.push(el.clone());
+    }
+    // Go: for n < len(newslice) { n += copy(newslice[n:], newslice[:n]) }
+    let mut filled = n;
+    while filled < total {
+        let take = core::cmp::min(filled, total - filled);
+        // Clone the prefix [0..take) to extend.
+        for k in 0..take {
+            let elem = out[k].clone();
+            out.push(elem);
+        }
+        filled += take;
+    }
+    slice::__from_vec(out)
+}
+
 // ─── Func variants — comparator/predicate closures ────────────────────
 //
 // Closure conventions match Go:
