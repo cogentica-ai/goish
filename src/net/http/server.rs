@@ -617,6 +617,79 @@ pub fn ErrServerClosed() -> error {
     g.as_ref().unwrap().clone()
 }
 
+/// `http.ErrBodyNotAllowed` (server.go:43). Returned by
+/// ResponseWriter.Write calls when the HTTP method or response code
+/// does not permit a body. Cached sentinel.
+pub fn ErrBodyNotAllowed() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::New(string(
+            "http: request method or response status code does not allow body",
+        )));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// `http.ErrHijacked` (server.go:50). Returned by ResponseWriter.Write
+/// calls when the underlying connection has been hijacked. Cached
+/// sentinel.
+pub fn ErrHijacked() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::New(string("http: connection has been hijacked")));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// `http.ErrContentLength` (server.go:56). Returned by
+/// ResponseWriter.Write calls when a Handler set a Content-Length
+/// response header with a declared size and then attempted to write
+/// more bytes than declared. Cached sentinel.
+pub fn ErrContentLength() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::New(string(
+            "http: wrote more than the declared Content-Length",
+        )));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// `http.ErrAbortHandler` (server.go:1909). A sentinel panic value to
+/// abort a handler. Panicking with this from inside a handler signals
+/// that the client should see an interrupted response, but the server
+/// should not log an error. Cached sentinel.
+pub fn ErrAbortHandler() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::New(string("net/http: abort Handler")));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// `http.ErrHandlerTimeout` (server.go:3829). Returned on
+/// ResponseWriter Write calls in handlers wrapped with TimeoutHandler.
+/// Cached sentinel; goish does not yet implement TimeoutHandler, but
+/// the constant is exposed so user code that compares against it
+/// continues to compile.
+pub fn ErrHandlerTimeout() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::New(string("http: Handler timeout")));
+    }
+    g.as_ref().unwrap().clone()
+}
+
 /// v1 fallback when both ReadHeaderTimeout and ReadTimeout are zero
 /// — bounds idle keep-alive at 5 seconds.
 const DEFAULT_READ_HEADER_TIMEOUT_NS: i64 = 5_000_000_000;

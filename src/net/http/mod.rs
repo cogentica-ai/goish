@@ -47,13 +47,15 @@ pub use method::{
 };
 pub use protocols::{NoBody, Protocols};
 pub use request::{
-    ErrMaxBytes, ErrMissingBoundary, ErrNotMultipart, MaxBytesError, MaxBytesReader,
-    NewMaxBytesError, NewMaxBytesReader, ParseHTTPVersion, ReadRequest, Request,
+    ErrMaxBytes, ErrMissingBoundary, ErrMissingFile, ErrNoCookie, ErrNotMultipart,
+    MaxBytesError, MaxBytesReader, NewMaxBytesError, NewMaxBytesReader, ParseHTTPVersion,
+    ReadRequest, Request,
 };
 pub use response::ResponseWriter;
 pub use httputil::NewSingleHostReverseProxy;
 pub use server::{
-    AllowQuerySemicolons, DefaultServeMux, Error, ErrServerClosed, Handle, HandleFunc, Handler,
+    AllowQuerySemicolons, DefaultServeMux, ErrAbortHandler, ErrBodyNotAllowed, ErrContentLength,
+    ErrHandlerTimeout, ErrHijacked, ErrServerClosed, Error, Handle, HandleFunc, Handler,
     HandlerFunc, ListenAndServe, NewServeMux, NotFound, NotFoundHandler, Redirect,
     RedirectHandler, Serve, ServeMux, Server, StripPrefix,
 };

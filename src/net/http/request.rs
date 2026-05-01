@@ -133,10 +133,7 @@ impl Request {
         if matches.Len() > 0 {
             return (matches[0].clone(), errors::nil);
         }
-        (
-            super::cookie::Cookie::default(),
-            errors::New(string("http: named cookie not present")),
-        )
+        (super::cookie::Cookie::default(), ErrNoCookie())
     }
 
     /// `r.PathValue(name)` — look up a wildcard binding from a Go 1.22
@@ -786,6 +783,33 @@ pub struct MaxBytesReader<R: io::Reader> {
     initial: int,
     remaining: int,
     err: error,
+}
+
+/// `http.ErrNoCookie` (request.go:442) — returned by `Request.Cookie`
+/// when the named cookie is not present. Cached sentinel.
+pub fn ErrNoCookie() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::New(string("http: named cookie not present")));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// `http.ErrMissingFile` (request.go:41) — returned by
+/// `FormFile` when the provided file field name is either not
+/// present in the request or not a file. Cached sentinel; FormFile
+/// itself is not yet ported, but the constant is exposed for
+/// downstream code.
+pub fn ErrMissingFile() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::New(string("http: no such file")));
+    }
+    g.as_ref().unwrap().clone()
 }
 
 /// `http.ErrNotMultipart` (request.go:78) — returned by
