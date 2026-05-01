@@ -639,6 +639,29 @@ pub fn Truncate(name: string, size: int) -> error {
     nil
 }
 
+/// Line-by-line port of `os.Pipe()` (pipe2_unix.go:13) — create a
+/// connected pair of Files; reads from `r` return bytes written to
+/// `w`. Both ends are O_CLOEXEC by default, mirroring upstream.
+pub fn Pipe() -> (File, File, error) {
+    // Go: var p [2]int; e := syscall.Pipe2(p[:], syscall.O_CLOEXEC)
+    let mut p: [i32; 2] = [-1, -1];
+    let rc = syscall::Pipe2(&mut p, syscall::O_CLOEXEC);
+    // Go: if e != nil { return nil, nil, NewSyscallError("pipe2", e) }
+    if rc < 0 {
+        return (
+            File::NewFile(-1, string::new()),
+            File::NewFile(-1, string::new()),
+            errors::New(string("pipe2 failed")),
+        );
+    }
+    // Go: return newFile(p[0], "|0", kindPipe, false), newFile(p[1], "|1", kindPipe, false), nil
+    (
+        File::NewFile(p[0] as int, string("|0")),
+        File::NewFile(p[1] as int, string("|1")),
+        nil,
+    )
+}
+
 /// `os.Hostname()` (sys.go:8) — return the kernel's nodename via
 /// uname(2).
 pub fn Hostname() -> (string, error) {

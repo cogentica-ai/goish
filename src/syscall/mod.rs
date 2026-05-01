@@ -369,6 +369,7 @@ pub const SYS_READLINK: usize = 89;
 pub const SYS_RENAME: usize = 82;
 pub const SYS_LINK: usize = 86;
 pub const SYS_TRUNCATE: usize = 76;
+pub const SYS_PIPE2: usize = 293;
 
 /// `mkdir(path, mode)`. Returns 0 on success, -errno on failure.
 #[allow(non_snake_case)]
@@ -437,6 +438,14 @@ pub fn Link(oldpath: *const u8, newpath: *const u8) -> i32 {
 #[allow(non_snake_case)]
 pub fn Truncate(path: *const u8, length: i64) -> i32 {
     unsafe { syscall2(SYS_TRUNCATE, path as usize, length as usize) as i32 }
+}
+
+/// `pipe2(pipefd[2], flags)` — create a unidirectional pipe; pipefd[0]
+/// is the read end, pipefd[1] is the write end. Returns 0 on success
+/// or -errno. Pass `O_CLOEXEC` to set close-on-exec on both ends.
+#[allow(non_snake_case)]
+pub fn Pipe2(pipefd: &mut [i32; 2], flags: i32) -> i32 {
+    unsafe { syscall2(SYS_PIPE2, pipefd.as_mut_ptr() as usize, flags as usize) as i32 }
 }
 
 // ─── uname ───────────────────────────────────────────────────────────
