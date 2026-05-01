@@ -37,7 +37,7 @@ use goish::context::{Background, WithCancel};
 use goish::runtime::sched::schedule;
 use goish::runtime::NumGoroutine;
 use goish::time::{Milliseconds, NewTicker, NewTimer, Sleep};
-use goish::{int, syscall};
+use goish::{int, syscall, KB};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -244,7 +244,7 @@ static DONE: AtomicI64 = AtomicI64::new(0);
 
 #[goish::main]
 fn main() {
-    goish::go!(|| {
+    goish::go!(stack(64 * KB), || {
         test_context_chain_cancel();
         test_timer_stop();
         test_ticker_stop();
