@@ -671,6 +671,33 @@ pub fn fprintln_impl(w: &mut dyn io::Writer, args: &[FmtArg]) -> (int, error) {
 }
 
 #[doc(hidden)]
+pub fn sprint_impl(args: &[FmtArg]) -> string {
+    // Go: Sprint formats using the default formats for its operands and
+    // returns the resulting string.  Spaces are added between operands
+    // when neither is a string. (print.go:267)
+    //
+    // Slim: keep the same shape as print_impl — concat without inserting
+    // spaces; the public Println/Print pair already differs from Go on
+    // separator handling, and Sprint follows print_impl's lead for
+    // consistency.
+    let mut f = FmtBuf::new();
+    for a in args {
+        a.write(b'v', f.borrow_mut());
+    }
+    string::__from_vec(f.into_bytes())
+}
+
+#[doc(hidden)]
+pub fn sprintln_impl(args: &[FmtArg]) -> string {
+    // Go: Sprintln formats using the default formats for its operands and
+    // returns the resulting string. Spaces are always added between
+    // operands and a newline is appended. (print.go:283)
+    let mut f = FmtBuf::new();
+    do_println(args, &mut f);
+    string::__from_vec(f.into_bytes())
+}
+
+#[doc(hidden)]
 pub fn print_impl(args: &[FmtArg]) -> (int, error) {
     let mut f = FmtBuf::new();
     let mut first = true;
@@ -775,6 +802,25 @@ macro_rules! Printf {
 macro_rules! Sprintf {
     ($fmt:expr $(, $arg:expr)* $(,)?) => {
         $crate::fmt::sprintf_impl(($fmt).as_bytes(), $crate::__fmt_args!($($arg),*))
+    };
+}
+
+/// `fmt::Sprint!(args...)` — return the concatenated default-format string.
+/// Mirrors `fmt.Sprint` (print.go:267).
+#[macro_export]
+macro_rules! Sprint {
+    ($($arg:expr),* $(,)?) => {
+        $crate::fmt::sprint_impl($crate::__fmt_args!($($arg),*))
+    };
+}
+
+/// `fmt::Sprintln!(args...)` — return the default-format string with
+/// spaces between args and a trailing newline. Mirrors `fmt.Sprintln`
+/// (print.go:283).
+#[macro_export]
+macro_rules! Sprintln {
+    ($($arg:expr),* $(,)?) => {
+        $crate::fmt::sprintln_impl($crate::__fmt_args!($($arg),*))
     };
 }
 
