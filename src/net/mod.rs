@@ -490,6 +490,148 @@ impl Drop for Listener {
     }
 }
 
+// ─── SplitHostPort / JoinHostPort ────────────────────────────────────
+
+/// `net.SplitHostPort(hostport)` (ipsock.go:165) — split a network
+/// address of the form `"host:port"`, `"host%zone:port"`,
+/// `"[host]:port"`, or `"[host%zone]:port"` into its host and port
+/// components. Mirrors Go's strict validation:
+///   - Missing port → error.
+///   - Host containing ':' (without brackets) → "too many colons".
+///   - Stray '[' / ']' outside the IPv6 brackets → error.
+pub fn SplitHostPort(hostport: crate::string) -> (crate::string, crate::string, crate::errors::error) {
+    let missing_port = "missing port in address";
+    let too_many_colons = "too many colons in address";
+
+    // Go: i := bytealg.LastIndexByteString(hostport, ':')
+    let i = crate::bytes::LastIndexByte(crate::convert::bytes(hostport.clone()), b':');
+    if i < 0 {
+        return (
+            crate::string::new(),
+            crate::string::new(),
+            addr_error(hostport, missing_port),
+        );
+    }
+
+    let i = i as i64;
+    let h_bytes = hostport.as_bytes();
+    let mut host: crate::string;
+    let mut j: i64 = 0;
+    let mut k: i64 = 0;
+
+    if h_bytes[0] == b'[' {
+        // Go: end := bytealg.IndexByteString(hostport, ']')
+        let end = crate::bytes::IndexByte(crate::convert::bytes(hostport.clone()), b']');
+        if end < 0 {
+            return (
+                crate::string::new(),
+                crate::string::new(),
+                addr_error(hostport, "missing ']' in address"),
+            );
+        }
+        let end = end as i64;
+        // Go: switch end+1 { case len(hostport): … case i: … default: … }
+        if end + 1 == hostport.Len() {
+            return (
+                crate::string::new(),
+                crate::string::new(),
+                addr_error(hostport, missing_port),
+            );
+        } else if end + 1 == i {
+            // ok
+        } else if h_bytes[(end + 1) as usize] == b':' {
+            return (
+                crate::string::new(),
+                crate::string::new(),
+                addr_error(hostport, too_many_colons),
+            );
+        } else {
+            return (
+                crate::string::new(),
+                crate::string::new(),
+                addr_error(hostport, missing_port),
+            );
+        }
+        // Go: host = hostport[1:end]
+        host = crate::string::from_bytes(&h_bytes[1..end as usize]);
+        // Go: j, k = 1, end+1
+        j = 1;
+        k = end + 1;
+    } else {
+        // Go: host = hostport[:i]
+        host = crate::string::from_bytes(&h_bytes[..i as usize]);
+        // Go: if bytealg.IndexByteString(host, ':') >= 0 { tooManyColons }
+        if crate::bytes::IndexByte(crate::convert::bytes(host.clone()), b':') >= 0 {
+            return (
+                crate::string::new(),
+                crate::string::new(),
+                addr_error(hostport, too_many_colons),
+            );
+        }
+    }
+    // Go: if bytealg.IndexByteString(hostport[j:], '[') >= 0 { ... }
+    if crate::bytes::IndexByte(
+        crate::convert::bytes(crate::string::from_bytes(&h_bytes[j as usize..])),
+        b'[',
+    ) >= 0
+    {
+        return (
+            crate::string::new(),
+            crate::string::new(),
+            addr_error(hostport, "unexpected '[' in address"),
+        );
+    }
+    // Go: if bytealg.IndexByteString(hostport[k:], ']') >= 0 { ... }
+    if crate::bytes::IndexByte(
+        crate::convert::bytes(crate::string::from_bytes(&h_bytes[k as usize..])),
+        b']',
+    ) >= 0
+    {
+        return (
+            crate::string::new(),
+            crate::string::new(),
+            addr_error(hostport, "unexpected ']' in address"),
+        );
+    }
+    // Go: port = hostport[i+1:]
+    let port = crate::string::from_bytes(&h_bytes[(i + 1) as usize..]);
+    let _ = host.clone(); // silence unused-mut
+    (host, port, crate::errors::nil)
+}
+
+/// `net.JoinHostPort(host, port)` (ipsock.go:236) — combine `host`
+/// and `port` into a `"host:port"` (or `"[host]:port"` for IPv6
+/// literals containing `:`).
+pub fn JoinHostPort(host: crate::string, port: crate::string) -> crate::string {
+    // Go: if bytealg.IndexByteString(host, ':') >= 0 { return "[" + host + "]:" + port }
+    if crate::bytes::IndexByte(crate::convert::bytes(host.clone()), b':') >= 0 {
+        let mut b = crate::strings::Builder::new();
+        b.Grow(host.Len() + port.Len() + 3);
+        let _ = b.WriteByte(b'[');
+        let _ = b.WriteString(host);
+        let _ = b.WriteString("]:");
+        let _ = b.WriteString(port);
+        return b.String();
+    }
+    // Go: return host + ":" + port
+    let mut b = crate::strings::Builder::new();
+    b.Grow(host.Len() + port.Len() + 1);
+    let _ = b.WriteString(host);
+    let _ = b.WriteByte(b':');
+    let _ = b.WriteString(port);
+    b.String()
+}
+
+/// Slim `*AddrError` analogue for SplitHostPort error messages.
+fn addr_error(addr: crate::string, why: &str) -> crate::errors::error {
+    let mut b = crate::strings::Builder::new();
+    let _ = b.WriteString("address ");
+    let _ = b.WriteString(addr);
+    let _ = b.WriteString(": ");
+    let _ = b.WriteString(why);
+    crate::errors::New(b.String())
+}
+
 // ─── Listen / Dial ───────────────────────────────────────────────────
 
 /// `net.Listen` — open a listening socket. `network` must be `"tcp"`
