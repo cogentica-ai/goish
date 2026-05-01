@@ -186,6 +186,24 @@ pub unsafe fn syscall3(n: usize, a1: usize, a2: usize, a3: usize) -> isize {
     ret
 }
 
+/// 4-argument syscall (newfstatat).
+#[inline]
+pub unsafe fn syscall4(n: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> isize {
+    let ret: isize;
+    asm!(
+        "syscall",
+        inlateout("rax") n => ret,
+        in("rdi") a1,
+        in("rsi") a2,
+        in("rdx") a3,
+        in("r10") a4,
+        out("rcx") _,
+        out("r11") _,
+        options(nostack, preserves_flags),
+    );
+    ret
+}
+
 /// 6-argument syscall (mmap).
 #[inline]
 pub unsafe fn syscall6(
@@ -245,6 +263,78 @@ pub fn Open(path: *const u8, flags: i32, mode: i32) -> i32 {
 #[allow(non_snake_case)]
 pub fn Close(fd: i32) -> i32 {
     unsafe { syscall1(SYS_CLOSE, fd as usize) as i32 }
+}
+
+// ─── stat / fstat (Linux x86_64 layout) ──────────────────────────────
+
+pub const SYS_FSTAT: usize = 5;
+pub const SYS_NEWFSTATAT: usize = 262;
+pub const SYS_LSEEK: usize = 8;
+
+/// File mode bits (from <sys/stat.h>). Used by `Stat_t.st_mode`.
+pub const S_IFMT: u32 = 0o170000;
+pub const S_IFDIR: u32 = 0o040000;
+pub const S_IFREG: u32 = 0o100000;
+pub const S_IFLNK: u32 = 0o120000;
+
+/// `seek(2)` whence values.
+pub const SEEK_SET: i32 = 0;
+pub const SEEK_CUR: i32 = 1;
+pub const SEEK_END: i32 = 2;
+
+/// Linux x86_64 `struct stat` (asm-generic/stat.h with x86_64 padding).
+/// Layout matches what SYS_FSTAT / SYS_NEWFSTATAT write.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct Stat_t {
+    pub st_dev: u64,
+    pub st_ino: u64,
+    pub st_nlink: u64,
+    pub st_mode: u32,
+    pub st_uid: u32,
+    pub st_gid: u32,
+    pub __pad0: u32,
+    pub st_rdev: u64,
+    pub st_size: i64,
+    pub st_blksize: i64,
+    pub st_blocks: i64,
+    pub st_atime: i64,
+    pub st_atime_nsec: u64,
+    pub st_mtime: i64,
+    pub st_mtime_nsec: u64,
+    pub st_ctime: i64,
+    pub st_ctime_nsec: u64,
+    pub __unused: [i64; 3],
+}
+
+/// `fstat(fd, &stat)` — fill `out` from the kernel. Returns 0 on
+/// success or `-errno` on error.
+#[allow(non_snake_case)]
+pub fn Fstat(fd: i32, out: &mut Stat_t) -> i32 {
+    unsafe { syscall2(SYS_FSTAT, fd as usize, out as *mut Stat_t as usize) as i32 }
+}
+
+/// `fstatat(AT_FDCWD, path, &stat, 0)` — stat a path relative to CWD,
+/// following symlinks. `path` must be NUL-terminated.
+pub const AT_FDCWD: i32 = -100;
+
+#[allow(non_snake_case)]
+pub fn Stat(path: *const u8, out: &mut Stat_t) -> i32 {
+    unsafe {
+        syscall4(
+            SYS_NEWFSTATAT,
+            AT_FDCWD as usize,
+            path as usize,
+            out as *mut Stat_t as usize,
+            0,
+        ) as i32
+    }
+}
+
+/// `lseek(fd, offset, whence)` — reposition file offset.
+#[allow(non_snake_case)]
+pub fn Lseek(fd: i32, offset: i64, whence: i32) -> i64 {
+    unsafe { syscall3(SYS_LSEEK, fd as usize, offset as usize, whence as usize) as i64 }
 }
 
 /// Terminate the entire process. Mirrors `syscall.Exit` in Go (which

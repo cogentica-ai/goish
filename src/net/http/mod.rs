@@ -17,6 +17,7 @@
 pub mod chunked;
 pub mod client;
 pub mod cookie;
+pub mod fs;
 pub mod header;
 pub mod httputil;
 pub mod pattern;
@@ -31,6 +32,7 @@ pub use client::{
     Client, Get, Head, NewRequest, Post, PostForm, ReadResponse, Response, RoundTripper, Transport,
 };
 pub use cookie::{Cookie, ParseCookie, ParseSetCookie, SameSite, SetCookie};
+pub use fs::{Dir, FileServer, NewDir, ServeFile};
 pub use header::{CanonicalHeaderKey, Header, ParseTime, TimeFormat};
 pub use request::{
     ErrMaxBytes, MaxBytesReader, NewMaxBytesReader, ParseHTTPVersion, ReadRequest, Request,

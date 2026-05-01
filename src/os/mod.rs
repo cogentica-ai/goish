@@ -39,6 +39,192 @@ use crate::{errors, nil};
 extern crate alloc;
 use alloc::vec::Vec;
 
+// ─── FileMode ──────────────────────────────────────────────────────────
+
+/// `os.FileMode` (os/types.go:34) — file mode bits. Goish slim: just
+/// the high-level flag bits; permission bits in the low 9.
+pub type FileMode = u32;
+
+pub const ModeDir: FileMode = 1 << 31;
+pub const ModeSymlink: FileMode = 1 << 30;
+pub const ModePerm: FileMode = 0o777;
+
+/// `os.Open` flag aliases (os/file.go).
+pub const O_RDONLY: i32 = syscall::O_RDONLY;
+pub const O_WRONLY: i32 = 0o1;
+pub const O_RDWR: i32 = 0o2;
+pub const O_CREATE: i32 = 0o100;
+pub const O_TRUNC: i32 = 0o1000;
+pub const O_APPEND: i32 = 0o2000;
+pub const O_EXCL: i32 = 0o200;
+
+// ─── FileInfo ──────────────────────────────────────────────────────────
+
+/// `os.FileInfo` (io/fs.FileInfo) — slim port. Carries the fields
+/// most callers (FileServer, ServeFile, http.ServeContent) need.
+#[derive(Clone)]
+pub struct FileInfo {
+    name: string,
+    size: int,
+    mode: FileMode,
+    mod_time: crate::time::Time,
+    is_dir: bool,
+}
+
+impl FileInfo {
+    /// `f.Name()` — base name of the file (no directory component).
+    pub fn Name(&self) -> string {
+        self.name.clone()
+    }
+    /// `f.Size()` — size in bytes for regular files.
+    pub fn Size(&self) -> int {
+        self.size
+    }
+    /// `f.Mode()` — permission + type bits.
+    pub fn Mode(&self) -> FileMode {
+        self.mode
+    }
+    /// `f.ModTime()` — last modification time.
+    pub fn ModTime(&self) -> crate::time::Time {
+        self.mod_time
+    }
+    /// `f.IsDir()` — convenience for `mode & ModeDir != 0`.
+    pub fn IsDir(&self) -> bool {
+        self.is_dir
+    }
+}
+
+fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfo {
+    let kind = st.st_mode & syscall::S_IFMT;
+    let is_dir = kind == syscall::S_IFDIR;
+    let mut mode: FileMode = (st.st_mode & 0o777) as FileMode;
+    if is_dir {
+        mode |= ModeDir;
+    }
+    if kind == syscall::S_IFLNK {
+        mode |= ModeSymlink;
+    }
+    FileInfo {
+        name,
+        size: st.st_size,
+        mode,
+        mod_time: crate::time::Unix(st.st_mtime, st.st_mtime_nsec as int),
+        is_dir,
+    }
+}
+
+// ─── Open / Stat / Create ──────────────────────────────────────────────
+
+/// `os.Open(name)` (os/file.go:386) — open `name` read-only.
+pub fn Open(name: string) -> (File, error) {
+    OpenFile(name, O_RDONLY, 0)
+}
+
+/// `os.Create(name)` (os/file.go:402) — create or truncate `name`.
+pub fn Create(name: string) -> (File, error) {
+    OpenFile(name, O_RDWR | O_CREATE | O_TRUNC, 0o666)
+}
+
+/// `os.OpenFile(name, flag, perm)` (os/file.go:412).
+pub fn OpenFile(name: string, flag: i32, perm: u32) -> (File, error) {
+    // Build a NUL-terminated path for the kernel.
+    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
+    let nb = bytes_of(&name);
+    buf.extend_from_slice(nb);
+    buf.push(0);
+    let fd = syscall::Open(buf.as_ptr(), flag | syscall::O_CLOEXEC, perm as i32);
+    if fd < 0 {
+        return (
+            File {
+                fd: -1,
+                name: name.clone(),
+            },
+            errors::New(string("open failed")),
+        );
+    }
+    (
+        File {
+            fd,
+            name: name.clone(),
+        },
+        nil,
+    )
+}
+
+/// `os.Stat(name)` (os/stat.go:14) — stat a path, following symlinks.
+pub fn Stat(name: string) -> (FileInfo, error) {
+    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
+    let nb = bytes_of(&name);
+    buf.extend_from_slice(nb);
+    buf.push(0);
+    let mut st = syscall::Stat_t::default();
+    let rc = syscall::Stat(buf.as_ptr(), &mut st);
+    if rc < 0 {
+        return (
+            FileInfo {
+                name: name.clone(),
+                size: 0,
+                mode: 0,
+                mod_time: crate::time::Time::default(),
+                is_dir: false,
+            },
+            errors::New(string("stat failed")),
+        );
+    }
+    let base = base_name(&name);
+    (fileinfo_from_stat(base, &st), nil)
+}
+
+/// `(*File).Stat()` (os/file.go:432) — fstat the open fd.
+impl File {
+    pub fn Stat(&self) -> (FileInfo, error) {
+        let mut st = syscall::Stat_t::default();
+        let rc = syscall::Fstat(self.fd, &mut st);
+        if rc < 0 {
+            return (
+                FileInfo {
+                    name: self.name.clone(),
+                    size: 0,
+                    mode: 0,
+                    mod_time: crate::time::Time::default(),
+                    is_dir: false,
+                },
+                errors::New(string("fstat failed")),
+            );
+        }
+        let base = base_name(&self.name);
+        (fileinfo_from_stat(base, &st), nil)
+    }
+
+    /// `(*File).Seek(offset, whence)` (os/file.go:286).
+    pub fn Seek(&self, offset: int, whence: int) -> (int, error) {
+        let rc = syscall::Lseek(self.fd, offset, whence as i32);
+        if rc < 0 {
+            return (0, errors::New(string("seek failed")));
+        }
+        (rc as int, nil)
+    }
+}
+
+/// Pull the file path's bytes via the pub(crate) accessor.
+fn bytes_of(s: &string) -> &[u8] {
+    crate::gostring::__crate_as_bytes(s)
+}
+
+/// Compute the base-name (last path component).
+fn base_name(p: &string) -> string {
+    let bs = bytes_of(p);
+    let mut end = bs.len();
+    while end > 0 && bs[end - 1] == b'/' {
+        end -= 1;
+    }
+    let mut start = end;
+    while start > 0 && bs[start - 1] != b'/' {
+        start -= 1;
+    }
+    string::from_bytes(&bs[start..end])
+}
+
 // ─── File ──────────────────────────────────────────────────────────────
 
 /// Wraps an open file descriptor. `Stdin/Stdout/Stderr` return prebuilt

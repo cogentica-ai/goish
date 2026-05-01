@@ -63,6 +63,7 @@ pub mod gostring;
 pub mod maps;
 pub mod io;
 pub mod log;
+pub mod mime;
 pub mod net;
 pub mod os;
 pub mod path;
