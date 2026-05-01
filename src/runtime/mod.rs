@@ -246,6 +246,11 @@ fn on_panic(info: &core::panic::PanicInfo) -> ! {
         if let Some(g_ptr) = sched::current_g() {
             let g = unsafe { &*g_ptr.as_ptr() };
             if g.panic_recover.rsp != 0 {
+                // Mark this G as panicking BEFORE running cleanups so
+                // `recover!()` inside `defer!` bodies can distinguish
+                // the panic path from normal scope exit. Cleared by
+                // `on_g_panic_aborted` after the gogo lands.
+                g.panicking.store(true, core::sync::atomic::Ordering::Release);
                 // Walk cleanups while the panicked frames are still
                 // intact — the cleanup nodes live there and will be
                 // abandoned by the gogo. Callbacks must not allocate

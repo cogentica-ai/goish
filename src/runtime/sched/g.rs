@@ -128,6 +128,12 @@ pub struct G {
     /// Each `Cleanup` is a stack-allocated node in the resource owner's
     /// frame; on normal Drop the owner unlinks itself.
     pub cleanups: core::sync::atomic::AtomicPtr<super::cleanup::Cleanup>,
+    /// True while this G is inside the panic handler's cleanup walk.
+    /// Set by `#[panic_handler]` before invoking `cleanup::run_all`,
+    /// cleared by `on_g_panic_aborted` before `goexit`. Read by the
+    /// `recover!()` macro so a `defer!{}` body can distinguish "scope
+    /// exited normally" from "scope unwound via panic".
+    pub panicking: AtomicBool,
 }
 
 impl G {
@@ -160,6 +166,7 @@ impl G {
             growth_chain: SpinLock::new(alloc::vec::Vec::new()),
             panic_recover: super::gobuf::Gobuf::new(),
             cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
+            panicking: AtomicBool::new(false),
         }
     }
 
@@ -221,6 +228,7 @@ impl G {
             growth_chain: SpinLock::new(alloc::vec::Vec::new()),
             panic_recover: super::gobuf::Gobuf::new(),
             cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
+            panicking: AtomicBool::new(false),
         }
     }
 }
