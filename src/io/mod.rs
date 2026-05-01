@@ -278,3 +278,98 @@ impl<R: Reader> Closer for NopCloserImpl<R> {
 pub fn NopCloser<R: Reader>(r: R) -> NopCloserImpl<R> {
     NopCloserImpl { r }
 }
+
+// ─── MultiReader ─────────────────────────────────────────────────────
+//
+// Slim port of multi.go:13 (`multiReader`). Public surface accepts a
+// `slice<Box<dyn Reader>>` — Go's variadic `...Reader` becomes a slice
+// of trait-object readers. Internal storage is `Vec<Box<dyn Reader>>`
+// because Box<dyn Reader> is not Clone (slice's `.slice()` requires
+// Clone, and we need pop-from-front via Vec::remove(0)).
+//
+// Deviations from Go: no flatten optimisation for nested multiReaders
+// (multi.go:20-25); no WriteTo special case (multi.go:44-66).
+
+/// `io.MultiReader` (multi.go:73) — concrete reader that concatenates
+/// `mr.readers` sequentially. Returned by [`MultiReader`].
+pub struct MultiReaderImpl {
+    readers: alloc::vec::Vec<alloc::boxed::Box<dyn Reader>>,
+}
+
+impl Reader for MultiReaderImpl {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        // Go: for len(mr.readers) > 0
+        let eof = EOF();
+        while !self.readers.is_empty() {
+            // Go: n, err = mr.readers[0].Read(p)
+            let (n, err) = self.readers[0].Read(p);
+            // Go: if err == EOF { mr.readers = mr.readers[1:] }
+            let is_eof = err == eof;
+            if is_eof {
+                self.readers.remove(0);
+            }
+            // Go: if n > 0 || err != EOF { ... return }
+            if n > 0 || !is_eof {
+                // Go: if err == EOF && len(mr.readers) > 0 { err = nil }
+                let mut err_out = err;
+                if is_eof && !self.readers.is_empty() {
+                    err_out = nil;
+                }
+                return (n, err_out);
+            }
+            // n == 0 && err == EOF: pop'd above, loop to next reader.
+        }
+        // Go: return 0, EOF
+        (0, EOF())
+    }
+}
+
+/// `io.MultiReader(readers...)` (multi.go:73) — slim port. Returns a
+/// Reader that reads from each in sequence; EOF from one advances to
+/// the next; final EOF surfaces only after the last reader is drained.
+///
+/// Pass readers as `slice<Box<dyn io::Reader>>` (the Go-variadic shape).
+pub fn MultiReader(readers: slice<alloc::boxed::Box<dyn Reader>>) -> MultiReaderImpl {
+    MultiReaderImpl { readers: readers.__into_vec() }
+}
+
+// ─── MultiWriter ─────────────────────────────────────────────────────
+//
+// Slim port of multi.go:79 (`multiWriter`). Each Write is fanned out to
+// every wrapped writer; first error short-circuits. No flatten of nested
+// multiWriters (multi.go:127-135) and no StringWriter optimisation
+// (multi.go:97-119) — slim path always goes through Write.
+
+/// `io.multiWriter` (multi.go:79) — concrete writer returned by
+/// [`MultiWriter`]. Fans each Write out to all `t.writers`.
+pub struct MultiWriterImpl {
+    writers: alloc::vec::Vec<alloc::boxed::Box<dyn Writer>>,
+}
+
+impl Writer for MultiWriterImpl {
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        // Go: for _, w := range t.writers
+        let plen = p.Len();
+        for w in self.writers.iter_mut() {
+            // Slim port: clone p per writer because goish Write consumes
+            // its argument (Go shares the same []byte across writers).
+            let (n, err) = w.Write(p.clone());
+            // Go: if err != nil { return }
+            if !err.IsNil() {
+                return (n, err);
+            }
+            // Go: if n != len(p) { err = ErrShortWrite; return }
+            if n != plen {
+                return (n, ErrShortWrite());
+            }
+        }
+        // Go: return len(p), nil
+        (plen, nil)
+    }
+}
+
+/// `io.MultiWriter(writers...)` (multi.go:127) — slim port. Returns a
+/// Writer that duplicates each Write to all listed writers in order.
+pub fn MultiWriter(writers: slice<alloc::boxed::Box<dyn Writer>>) -> MultiWriterImpl {
+    MultiWriterImpl { writers: writers.__into_vec() }
+}
