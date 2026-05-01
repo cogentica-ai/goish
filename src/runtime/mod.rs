@@ -194,6 +194,35 @@ fn on_panic(info: &core::panic::PanicInfo) -> ! {
         syscall::Write(syscall::STDERR, buf.buf.as_ptr(), buf.len);
         const NL: &[u8] = b"\n";
         syscall::Write(syscall::STDERR, NL.as_ptr(), NL.len());
+
+        // Dump SIGURG-handler counters + current m.locks at panic.
+        // Helps separate "async-preempt was the trigger" from
+        // "something else panicked" for race-class bugs.
+        let mut buf2 = StderrBuf { buf: [0u8; 1024], len: 0 };
+        let inv = crate::runtime::preempt::invocations();
+        let inj = crate::runtime::preempt::injections();
+        let (sk_locks, sk_tramp, sk_parking, sk_no_curg, sk_not_running, sk_sp) =
+            crate::runtime::preempt::skip_breakdown();
+        let mlocks = crate::runtime::sched::current_m_locks();
+        let _ = write!(
+            &mut buf2,
+            "  preempt: inv={inv} inj={inj} skip(locks={sk_locks},tramp={sk_tramp},park={sk_parking},nocurg={sk_no_curg},notrun={sk_not_running},sp={sk_sp}) m.locks={mlocks}\n"
+        );
+        syscall::Write(syscall::STDERR, buf2.buf.as_ptr(), buf2.len);
+
+        // Dump the last few injection PCs — correlate with the
+        // user-code site preempted right before this panic.
+        let mut pcs = [0u64; 8];
+        let n = crate::runtime::preempt::snapshot_injection_pcs(&mut pcs);
+        if n > 0 {
+            let mut buf3 = StderrBuf { buf: [0u8; 1024], len: 0 };
+            let _ = write!(&mut buf3, "  inject_pcs(newest-first):");
+            for k in 0..n {
+                let _ = write!(&mut buf3, " 0x{:x}", pcs[k]);
+            }
+            let _ = write!(&mut buf3, "\n");
+            syscall::Write(syscall::STDERR, buf3.buf.as_ptr(), buf3.len);
+        }
     }
     syscall::Exit(2)
 }
