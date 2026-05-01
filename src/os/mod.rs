@@ -284,6 +284,29 @@ pub fn TempDir() -> string {
     string("/tmp")
 }
 
+/// `os.UserHomeDir()` (os/file.go:608) — return the current user's home
+/// directory.
+///
+/// Slim: Linux/Unix only — reads `$HOME`. If unset, returns
+/// `("", "$HOME is not defined")`. The Windows / Plan 9 / Android / iOS
+/// branches in upstream Go are not reached by this port (no GOOS).
+pub fn UserHomeDir() -> (string, error) {
+    // Go: env, enverr := "HOME", "$HOME"
+    let env = string("HOME");
+    let enverr = string("$HOME");
+    // Go: if v := Getenv(env); v != "" { return v, nil }
+    let v = Getenv(env);
+    if v.Len() != 0 {
+        return (v, nil);
+    }
+    // Go: return "", errors.New(enverr + " is not defined")
+    let mut b = crate::strings::Builder::new();
+    b.Grow(enverr.Len() + 16);
+    let _ = b.WriteString(enverr);
+    let _ = b.WriteString(string(" is not defined"));
+    (string::new(), errors::New(b.String()))
+}
+
 /// `os.Hostname()` (sys.go:8) — return the kernel's nodename via
 /// uname(2).
 pub fn Hostname() -> (string, error) {
