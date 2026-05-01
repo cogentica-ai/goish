@@ -22,6 +22,7 @@ pub mod pattern;
 pub mod request;
 pub mod response;
 pub mod server;
+pub mod status;
 pub mod url;
 
 pub use client::{
@@ -33,5 +34,25 @@ pub use request::{ReadRequest, Request};
 pub use response::ResponseWriter;
 pub use server::{
     ErrServerClosed, Handler, HandlerFunc, ListenAndServe, NotFoundHandler, Serve, ServeMux, Server,
+};
+pub use status::{
+    StatusAccepted, StatusBadGateway, StatusBadRequest, StatusConflict, StatusContinue,
+    StatusCreated, StatusEarlyHints, StatusExpectationFailed, StatusFailedDependency,
+    StatusForbidden, StatusFound, StatusGatewayTimeout, StatusGone,
+    StatusHTTPVersionNotSupported, StatusIMUsed, StatusInsufficientStorage,
+    StatusInternalServerError, StatusLengthRequired, StatusLocked, StatusLoopDetected,
+    StatusMethodNotAllowed, StatusMisdirectedRequest, StatusMovedPermanently,
+    StatusMultiStatus, StatusMultipleChoices, StatusNetworkAuthenticationRequired,
+    StatusNoContent, StatusNonAuthoritativeInfo, StatusNotAcceptable, StatusNotExtended,
+    StatusNotFound, StatusNotImplemented, StatusNotModified, StatusOK, StatusPartialContent,
+    StatusPaymentRequired, StatusPermanentRedirect, StatusPreconditionFailed,
+    StatusPreconditionRequired, StatusProcessing, StatusProxyAuthRequired,
+    StatusRequestEntityTooLarge, StatusRequestHeaderFieldsTooLarge, StatusRequestTimeout,
+    StatusRequestURITooLong, StatusRequestedRangeNotSatisfiable, StatusResetContent,
+    StatusSeeOther, StatusServiceUnavailable, StatusSwitchingProtocols, StatusTeapot,
+    StatusTemporaryRedirect, StatusText, StatusTooEarly, StatusTooManyRequests,
+    StatusUnauthorized, StatusUnavailableForLegalReasons, StatusUnprocessableEntity,
+    StatusUnsupportedMediaType, StatusUpgradeRequired, StatusUseProxy,
+    StatusVariantAlsoNegotiates, StatusAlreadyReported,
 };
 pub use url::URL;

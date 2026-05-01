@@ -246,7 +246,8 @@ fn build_head(status: int, header: &Header) -> Vec<u8> {
     buf.extend_from_slice(b"HTTP/1.1 ");
     push_dec(&mut buf, status as u32);
     buf.push(b' ');
-    buf.extend_from_slice(status_text(status as u32).as_bytes());
+    let st = status_text(status as u32);
+    buf.extend_from_slice(&*crate::convert::bytes(st));
     buf.extend_from_slice(b"\r\n");
     let inner = header.__inner();
     for (key, values) in inner.__iter() {
@@ -307,36 +308,15 @@ fn push_hex(buf: &mut Vec<u8>, mut n: u64) {
     }
 }
 
-/// Standard reason phrases for the status codes a handler is most
-/// likely to use. Falls back to "Status NNN" for unknown codes —
-/// HTTP allows arbitrary phrases as long as the numeric code is
-/// recognized by the client.
-fn status_text(code: u32) -> &'static str {
-    match code {
-        100 => "Continue",
-        200 => "OK",
-        201 => "Created",
-        202 => "Accepted",
-        204 => "No Content",
-        301 => "Moved Permanently",
-        302 => "Found",
-        304 => "Not Modified",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        403 => "Forbidden",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        408 => "Request Timeout",
-        409 => "Conflict",
-        413 => "Payload Too Large",
-        414 => "URI Too Long",
-        429 => "Too Many Requests",
-        500 => "Internal Server Error",
-        501 => "Not Implemented",
-        502 => "Bad Gateway",
-        503 => "Service Unavailable",
-        504 => "Gateway Timeout",
-        _ => "Status",
+/// Reason phrase for a status code via the full IANA registry. Empty
+/// string falls back to "Status" so the wire stays well-formed.
+/// Delegates to `status::StatusText`.
+fn status_text(code: u32) -> string {
+    let s = super::status::StatusText(code as int);
+    if s.Len() == 0 {
+        string("Status")
+    } else {
+        s
     }
 }
 
