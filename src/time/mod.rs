@@ -51,6 +51,33 @@ pub const Second: Duration = Duration(1_000_000_000);
 pub const Minute: Duration = Duration(60 * 1_000_000_000);
 pub const Hour: Duration = Duration(60 * 60 * 1_000_000_000);
 
+// ─── Format layouts (time/format.go:80) ──────────────────────────────
+//
+// Go exposes these as plain `const` strings; goish heap-allocates
+// strings, so we expose them as `&'static str` and let callers wrap
+// them with `string(layout)` when calling Format. The literals are
+// identical to Go's, so existing layout-driven code ports verbatim.
+
+pub const Layout: &str = "01/02 03:04:05PM '06 -0700";
+pub const ANSIC: &str = "Mon Jan _2 15:04:05 2006";
+pub const UnixDate: &str = "Mon Jan _2 15:04:05 MST 2006";
+pub const RubyDate: &str = "Mon Jan 02 15:04:05 -0700 2006";
+pub const RFC822: &str = "02 Jan 06 15:04 MST";
+pub const RFC822Z: &str = "02 Jan 06 15:04 -0700";
+pub const RFC850: &str = "Monday, 02-Jan-06 15:04:05 MST";
+pub const RFC1123: &str = "Mon, 02 Jan 2006 15:04:05 MST";
+pub const RFC1123Z: &str = "Mon, 02 Jan 2006 15:04:05 -0700";
+pub const RFC3339: &str = "2006-01-02T15:04:05Z07:00";
+pub const RFC3339Nano: &str = "2006-01-02T15:04:05.999999999Z07:00";
+pub const Kitchen: &str = "3:04PM";
+pub const Stamp: &str = "Jan _2 15:04:05";
+pub const StampMilli: &str = "Jan _2 15:04:05.000";
+pub const StampMicro: &str = "Jan _2 15:04:05.000000";
+pub const StampNano: &str = "Jan _2 15:04:05.000000000";
+pub const DateTime: &str = "2006-01-02 15:04:05";
+pub const DateOnly: &str = "2006-01-02";
+pub const TimeOnly: &str = "15:04:05";
+
 impl Duration {
     pub fn Nanoseconds(self) -> int {
         self.0
