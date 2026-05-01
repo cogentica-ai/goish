@@ -393,3 +393,7 @@ path = "examples/preempt_slot_offline_proof.rs"
 name = "sigaltstack_offline_proof"
 path = "examples/sigaltstack_offline_proof.rs"
 
+[[example]]
+name = "wg_borrow_smoke"
+path = "examples/wg_borrow_smoke.rs"
+

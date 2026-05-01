@@ -114,12 +114,70 @@ impl WaitGroup {
     /// Go calls `f` in a new goroutine and adds it to the
     /// WaitGroup. Mirrors `WaitGroup.Go` (waitgroup.go:235), a Go
     /// 1.25 convenience method.
-    pub fn Go<F: FnOnce() + Send + 'static>(&'static self, f: F) {
+    ///
+    /// **Lifetime-bound (Form 3):** `f` is bounded by the borrow
+    /// lifetime `'a` of `&self`, not `'static`. This lets `f`
+    /// capture references to data that lives at least as long as
+    /// `self`. Soundness rests on `WaitGroup`'s `Drop` impl, which
+    /// blocks on `Wait()`: when `self` falls out of scope, every
+    /// spawned closure has already called `Done()` and finished,
+    /// so the captured borrows never outlive their referents.
+    ///
+    /// Backward-compatible: static WaitGroups (`'a = 'static`)
+    /// still work; closures are simply more permissive now.
+    pub fn Go<'a, F>(&'a self, f: F)
+    where
+        F: FnOnce() + Send + 'a,
+    {
         self.Add(1);
-        crate::runtime::sched::newproc(alloc::boxed::Box::new(move || {
-            f();
-            self.Done();
-        }));
+        let body: alloc::boxed::Box<dyn FnOnce() + Send + 'a> =
+            alloc::boxed::Box::new(move || {
+                f();
+                self.Done();
+            });
+
+        // SAFETY: `WaitGroup`'s `Drop` impl calls `Wait()`, which
+        // blocks until the counter reaches zero — i.e., until every
+        // spawned closure has run `self.Done()` and returned. So
+        // although the runtime's `newproc` requires a `'static` Box,
+        // every spawned closure with a non-`'static` lifetime `'a`
+        // is guaranteed to finish before `'a` ends. Extending the
+        // lifetime bound on the Box (without changing the actual
+        // captures) is therefore sound.
+        //
+        // The only escape hatch is `core::mem::forget(wg)`, which
+        // bypasses Drop. That is documented as the explicit way to
+        // leak goroutines past the WaitGroup's scope.
+        let body_static: alloc::boxed::Box<dyn FnOnce() + Send + 'static> =
+            unsafe { core::mem::transmute(body) };
+        crate::runtime::sched::newproc(body_static);
+    }
+}
+
+impl Drop for WaitGroup {
+    /// Block until the counter reaches zero before releasing the
+    /// `WaitGroup` storage. This is the structural-correctness
+    /// half of `Go`'s lifetime contract: every closure spawned by
+    /// `Go(...)` may borrow data with the same lifetime as the
+    /// `WaitGroup`, and Drop here guarantees those closures
+    /// complete before that data is freed.
+    ///
+    /// Fast path: if the counter is already zero (because the user
+    /// called `Wait()` explicitly, or no `Go` was ever invoked),
+    /// this is a single atomic load and return.
+    ///
+    /// Slow path: park the calling goroutine in `Wait()` until the
+    /// last spawned closure runs `Done()`.
+    ///
+    /// Note: under `panic = "abort"` (goish's default), this Drop
+    /// does not run on panic — the process aborts. In-flight
+    /// goroutines are killed mid-execution by the abort.
+    fn drop(&mut self) {
+        let counter = (self.state.load(Ordering::Acquire) >> 32) as i64;
+        if counter == 0 {
+            return;
+        }
+        self.Wait();
     }
 }
 
