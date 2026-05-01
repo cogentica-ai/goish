@@ -707,6 +707,51 @@ fn format_layout(
         out.push(b'Z');
         return string::from_bytes(&out);
     }
+    // RFC3339Nano: "2006-01-02T15:04:05.999999999Z07:00"
+    //
+    // Per Go format.go:fmtFrac the trailing-9 form trims trailing zeros
+    // from the fractional seconds; when the fractional part is fully
+    // zero the entire ".NNNNNNNNN" suffix is omitted (no leading dot).
+    // Slim: UTC only — emit "Z" instead of an offset.
+    if l == "2006-01-02T15:04:05.999999999Z07:00" {
+        let mut out = alloc::vec::Vec::with_capacity(30);
+        out.extend_from_slice(&pad4(y));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(m));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(d));
+        out.push(b'T');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        // Render fractional seconds: 9 digits left-padded; then strip
+        // trailing zeros. If all digits are zero, omit the dot too.
+        if _nano > 0 {
+            // Go: u := uint64(nsec); for i := 9-1; i >= 0; i-- { ... }
+            // Goish: build the 9-digit string then trim trailing zeros.
+            let mut frac: [u8; 9] = [b'0'; 9];
+            let mut n = _nano as u64;
+            let mut i = 9;
+            while i > 0 {
+                i -= 1;
+                frac[i] = b'0' + (n % 10) as u8;
+                n /= 10;
+            }
+            // Trim trailing zeros.
+            let mut len = 9;
+            while len > 0 && frac[len - 1] == b'0' {
+                len -= 1;
+            }
+            if len > 0 {
+                out.push(b'.');
+                out.extend_from_slice(&frac[..len]);
+            }
+        }
+        out.push(b'Z');
+        return string::from_bytes(&out);
+    }
     // DateTime: "2006-01-02 15:04:05"
     if l == "2006-01-02 15:04:05" {
         let mut out = alloc::vec::Vec::with_capacity(19);
