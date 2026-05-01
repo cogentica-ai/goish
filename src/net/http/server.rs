@@ -183,7 +183,7 @@ impl ServeMux {
             }
         }
         (
-            Arc::new(NotFoundHandler) as Arc<dyn Handler>,
+            Arc::new(notFoundHandler) as Arc<dyn Handler>,
             crate::gomap::map::<string, string>::new(),
         )
     }
@@ -232,7 +232,7 @@ impl ServeMux {
             }
         }
         (
-            Arc::new(NotFoundHandler) as Arc<dyn Handler>,
+            Arc::new(notFoundHandler) as Arc<dyn Handler>,
             string::new(),
         )
     }
@@ -254,9 +254,12 @@ impl Handler for ServeMux {
     }
 }
 
-/// Default 404 handler. Matches Go's `http.NotFoundHandler()`.
-pub struct NotFoundHandler;
-impl Handler for NotFoundHandler {
+/// Default 404 handler. Internal type returned by Go's
+/// `http.NotFoundHandler()`. The lowercase name keeps the public
+/// surface symmetric with Go (which exposes only the function form
+/// `NotFoundHandler() Handler`, not a struct of the same name).
+struct notFoundHandler;
+impl Handler for notFoundHandler {
     fn ServeHTTP(&self, w: &mut ResponseWriter, _r: &Request) {
         w.WriteHeader(404);
         let _ = w.Write(crate::convert::bytes("404 page not found\n"));
@@ -286,6 +289,16 @@ pub fn Error(w: &mut ResponseWriter, error: string, code: int) {
 /// `http.NotFound(w, r)` (server.go:2358) — convenience wrapper.
 pub fn NotFound(w: &mut ResponseWriter, _r: &Request) {
     Error(w, string("404 page not found"), super::status::StatusNotFound);
+}
+
+/// `http.NotFoundHandler()` (server.go:2362) — returns a Handler that
+/// replies to every request with a 404 not-found error. Faithfully
+/// matches Go's `return HandlerFunc(NotFound)`; goish wraps the
+/// internal `notFoundHandler` struct in `Arc<dyn Handler>` to fit
+/// the same plumbing as `StripPrefix` / `RedirectHandler`.
+pub fn NotFoundHandler() -> Arc<dyn Handler> {
+    // Go: return HandlerFunc(NotFound)
+    Arc::new(notFoundHandler)
 }
 
 // ─── NewServeMux ─────────────────────────────────────────────────────
@@ -369,7 +382,7 @@ impl Handler for stripPrefixHandler {
             self.inner.ServeHTTP(w, &r2);
         } else {
             // Go: NotFound(w, r)
-            NotFoundHandler.ServeHTTP(w, r);
+            notFoundHandler.ServeHTTP(w, r);
         }
     }
 }
@@ -698,7 +711,7 @@ impl Default for Server {
     fn default() -> Self {
         Server {
             Addr: string::new(),
-            Handler: Arc::new(NotFoundHandler) as Arc<dyn Handler>,
+            Handler: Arc::new(notFoundHandler) as Arc<dyn Handler>,
             ReadTimeout: time::Duration(0),
             ReadHeaderTimeout: time::Duration(0),
             WriteTimeout: time::Duration(0),
