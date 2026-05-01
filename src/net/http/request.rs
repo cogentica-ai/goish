@@ -273,12 +273,25 @@ impl Request {
     /// implements (*Request).write internally.
     pub fn Write<W: io::Writer>(&self, w: &mut W) -> error {
         // Go: return r.write(w, false, nil, nil)
+        self.write_to(w, false)
+    }
+
+    /// `r.WriteProxy(w)` (request.go:571) — like Write but emits an
+    /// absolute Request-URI line (scheme://host/path?query) per RFC
+    /// 7230 §5.3. Used when the request is being sent through an HTTP
+    /// proxy.
+    pub fn WriteProxy<W: io::Writer>(&self, w: &mut W) -> error {
+        // Go: return r.write(w, true, nil, nil)
+        self.write_to(w, true)
+    }
+
+    fn write_to<W: io::Writer>(&self, w: &mut W, using_proxy: bool) -> error {
         let host = if self.Host.Len() != 0 {
             self.Host.clone()
         } else {
             self.URL.Host.clone()
         };
-        let buf = super::client::serialize_request(self, &host);
+        let buf = super::client::serialize_request_proxy(self, &host, using_proxy);
         let mut body = buf;
         if self.Body.Len() > 0 {
             for i in 0..self.Body.Len() {

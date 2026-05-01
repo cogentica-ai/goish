@@ -752,6 +752,17 @@ fn has_port(host: &string) -> bool {
 /// `bufio.Writer` plumbing yet, so we accumulate into a `strings::Builder`
 /// for the head and concatenate the body slice<byte> at the end.
 pub(crate) fn serialize_request(req: &Request, host: &string) -> slice<byte> {
+    serialize_request_proxy(req, host, false)
+}
+
+/// Same as `serialize_request` but emits an absolute Request-URI in
+/// the request line when `using_proxy` is true. Mirrors Go's
+/// `(*Request).write` (request.go:582) call shape.
+pub(crate) fn serialize_request_proxy(
+    req: &Request,
+    host: &string,
+    using_proxy: bool,
+) -> slice<byte> {
     // Go: var b strings.Builder
     let mut b = strings::Builder::new();
     b.Grow(256);
@@ -759,6 +770,12 @@ pub(crate) fn serialize_request(req: &Request, host: &string) -> slice<byte> {
     // Go: fmt.Fprintf(&b, "%s %s HTTP/1.1\r\n", req.Method, ruri)
     let _ = b.WriteString(req.Method.clone());
     let _ = b.WriteByte(b' ');
+    // Go: when usingProxy, ruri = req.URL.Scheme + "://" + host + path
+    if using_proxy && req.URL.Scheme.Len() != 0 {
+        let _ = b.WriteString(req.URL.Scheme.clone());
+        let _ = b.WriteString("://");
+        let _ = b.WriteString(host.clone());
+    }
     if req.URL.Path.Len() == 0 {
         let _ = b.WriteByte(b'/');
     } else {
