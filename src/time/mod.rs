@@ -88,10 +88,85 @@ impl Duration {
     pub fn Milliseconds(self) -> int {
         self.0 / 1_000_000
     }
+    /// `(d Duration).Seconds() float64` — Go time/time.go:1086.
+    pub fn Seconds(self) -> f64 {
+        let sec = self.0 / Second.0;
+        let nsec = self.0 % Second.0;
+        (sec as f64) + (nsec as f64) / 1e9
+    }
+    /// `(d Duration).Minutes() float64` — Go time/time.go:1093.
+    pub fn Minutes(self) -> f64 {
+        let min = self.0 / Minute.0;
+        let nsec = self.0 % Minute.0;
+        (min as f64) + (nsec as f64) / (60.0 * 1e9)
+    }
+    /// `(d Duration).Hours() float64` — Go time/time.go:1100.
+    pub fn Hours(self) -> f64 {
+        let hour = self.0 / Hour.0;
+        let nsec = self.0 % Hour.0;
+        (hour as f64) + (nsec as f64) / (60.0 * 60.0 * 1e9)
+    }
+    /// `(d Duration).Truncate(m Duration) Duration` — Go time/time.go:1108.
+    /// Rounds toward zero to a multiple of `m`. m ≤ 0 returns d unchanged.
+    pub fn Truncate(self, m: Duration) -> Duration {
+        if m.0 <= 0 {
+            return self;
+        }
+        Duration(self.0 - self.0 % m.0)
+    }
+    /// `(d Duration).Round(m Duration) Duration` — Go time/time.go:1127.
+    /// Rounds to the nearest multiple of `m`; halfway rounds away from
+    /// zero. Saturates at min/max Duration on overflow. m ≤ 0 returns
+    /// d unchanged.
+    pub fn Round(self, m: Duration) -> Duration {
+        if m.0 <= 0 {
+            return self;
+        }
+        let mut r = self.0 % m.0;
+        if self.0 < 0 {
+            r = -r;
+            if less_than_half(r, m.0) {
+                return Duration(self.0 + r);
+            }
+            let d1 = self.0.wrapping_sub(m.0).wrapping_add(r);
+            if d1 < self.0 {
+                return Duration(d1);
+            }
+            return Duration(int::MIN); // overflow → minDuration
+        }
+        if less_than_half(r, m.0) {
+            return Duration(self.0 - r);
+        }
+        let d1 = self.0.wrapping_add(m.0).wrapping_sub(r);
+        if d1 > self.0 {
+            return Duration(d1);
+        }
+        Duration(int::MAX) // overflow → maxDuration
+    }
+    /// `(d Duration).Abs() Duration` — Go time/time.go:1154. As a
+    /// special case, Duration(MinInt64) is converted to Duration(MaxInt64).
+    pub fn Abs(self) -> Duration {
+        if self.0 >= 0 {
+            self
+        } else if self.0 == int::MIN {
+            Duration(int::MAX)
+        } else {
+            Duration(-self.0)
+        }
+    }
     /// Go-faithful "1h2m3.456s" / "100ms" / "1.2us" / "5ns" / "0s" form.
     pub fn String(self) -> string {
         format_duration(self.0)
     }
+}
+
+/// `lessThanHalf` (time.go:1117): reports whether x+x < y, treating
+/// inputs as positive uint64 to avoid signed overflow.
+#[inline]
+fn less_than_half(x: int, y: int) -> bool {
+    let xu = x as u64;
+    let yu = y as u64;
+    xu.wrapping_add(xu) < yu
 }
 
 impl Mul<int> for Duration {
