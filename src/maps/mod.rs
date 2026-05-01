@@ -11,9 +11,8 @@
 //   c := maps.Clone(m)                   let c = maps::Clone(&m);
 //   maps.Copy(dst, src)                  maps::Copy(&mut dst, &src);
 //
-// Deferred (need closures or `iter` package):
-//   * EqualFunc, DeleteFunc, Insert, Collect, All — when an iter
-//     equivalent ships.
+// Deferred (need an `iter` package):
+//   * Insert, Collect, All — return iter.Seq pairs.
 //
 // In Go 1.21+, `Keys` and `Values` return `iter.Seq[K]`/`iter.Seq[V]`.
 // Goish v1 returns `slice<K>`/`slice<V>` directly (BTreeMap-sorted)
@@ -89,6 +88,53 @@ where
 {
     for (k, v) in src.__iter() {
         dst.Set(k.clone(), v.clone());
+    }
+}
+
+/// `maps.EqualFunc(m1, m2, eq)` (maps.go:31) — like `Equal` but uses
+/// `eq` to compare values. Keys are still compared with byte equality
+/// via the underlying `BTreeMap`.
+pub fn EqualFunc<K, V1, V2, F>(m1: &map<K, V1>, m2: &map<K, V2>, mut eq: F) -> bool
+where
+    K: Ord,
+    V1: Default,
+    V2: Default,
+    F: FnMut(&V1, &V2) -> bool,
+{
+    // Go: if len(m1) != len(m2) { return false }
+    if m1.Len() != m2.Len() {
+        return false;
+    }
+    // Go: for k, v1 := range m1 { v2, ok := m2[k]; if !ok || !eq(v1, v2) { return false } }
+    for (k, v1) in m1.__iter() {
+        match find_key(m2, k) {
+            Some(v2) if eq(v1, v2) => continue,
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// `maps.DeleteFunc(m, del)` (maps.go:69) — delete every entry where
+/// `del(k, v)` is true. Iteration order is the BTreeMap-sorted order;
+/// matching pairs are collected first then removed to avoid mutating
+/// while iterating.
+pub fn DeleteFunc<K, V, F>(m: &mut map<K, V>, mut del: F)
+where
+    K: Ord + Clone,
+    V: Default,
+    F: FnMut(&K, &V) -> bool,
+{
+    // Go: for k, v := range m { if del(k, v) { delete(m, k) } }
+    // Slim: collect first to keep BTreeMap iteration stable.
+    let mut to_remove: Vec<K> = Vec::new();
+    for (k, v) in m.__iter() {
+        if del(k, v) {
+            to_remove.push(k.clone());
+        }
+    }
+    for k in to_remove {
+        m.Delete(k);
     }
 }
 
