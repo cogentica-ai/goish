@@ -192,6 +192,14 @@ impl Request {
         string::new()
     }
 
+    /// `r.ProtoAtLeast(major, minor)` (request.go:417) — reports whether
+    /// the request's HTTP protocol is at least major.minor.
+    pub fn ProtoAtLeast(&self, major: int, minor: int) -> bool {
+        // Go: return r.ProtoMajor > major ||
+        //         r.ProtoMajor == major && r.ProtoMinor >= minor
+        self.ProtoMajor > major || self.ProtoMajor == major && self.ProtoMinor >= minor
+    }
+
     /// `r.UserAgent()` (request.go:423) — convenience for the
     /// `User-Agent` request header.
     pub fn UserAgent(&self) -> string {

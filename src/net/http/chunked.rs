@@ -38,6 +38,13 @@ use crate::types::{byte, int};
 
 const MAX_LINE_LENGTH: usize = 4096;
 
+/// `httputil.ErrLineTooLong` (httputil.go:43) — sentinel returned when
+/// a chunked-encoding line exceeds `maxLineLength` (4 KiB). Exposed so
+/// `net/http/httputil::ErrLineTooLong` can re-export the singleton.
+pub fn ErrLineTooLong() -> error {
+    err_line_too_long()
+}
+
 fn err_line_too_long() -> error {
     errors::New(crate::string("http: chunked header line too long"))
 }

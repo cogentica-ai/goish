@@ -1,7 +1,8 @@
 // net/http/httputil — slim port of Go's net/http/httputil package.
 //
-// Currently provides DumpRequest. Future iterations will add
-// DumpResponse and ReverseProxy.
+// Currently provides DumpRequest, DumpResponse, NewChunkedReader,
+// NewChunkedWriter, ErrLineTooLong. Future iterations will add
+// ReverseProxy.
 
 #![allow(non_snake_case)]
 #![allow(dead_code)]
@@ -9,12 +10,40 @@
 use crate::errors::{self, error};
 use crate::gomap::map;
 use crate::goslice::slice;
+use crate::io::{Reader, Writer};
 use crate::string;
 use crate::strings;
 use crate::types::byte;
 
+use super::chunked::{ChunkedReader, ChunkedWriter};
 use super::client::Response;
 use super::request::Request;
+
+// ─── Chunked Reader / Writer wrappers ────────────────────────────────
+
+/// `httputil.NewChunkedReader(r)` (httputil.go:21) — translate from
+/// HTTP "chunked" format. Returns an `io.Reader` that yields the
+/// dechunked body and signals EOF on the terminator. Thin wrapper
+/// over the internal `chunked.NewChunkedReader`.
+pub fn NewChunkedReader<R: Reader>(r: R) -> ChunkedReader<R> {
+    super::chunked::NewChunkedReader(r)
+}
+
+/// `httputil.NewChunkedWriter(w)` (httputil.go:36) — wrap `w` so
+/// writes are emitted as HTTP "chunked" frames. Closing the writer
+/// sends the terminating zero-length chunk but not the trailing CRLF
+/// — callers writing trailers (or a final empty trailer) must emit
+/// the closing CRLF themselves.
+pub fn NewChunkedWriter<W: Writer>(w: W) -> ChunkedWriter<W> {
+    super::chunked::NewChunkedWriter(w)
+}
+
+/// `httputil.ErrLineTooLong` (httputil.go:43) — sentinel returned by
+/// `NewChunkedReader` when a chunk-extension line exceeds the 4 KiB
+/// limit.
+pub fn ErrLineTooLong() -> error {
+    super::chunked::ErrLineTooLong()
+}
 
 /// `httputil.DumpRequest(req, body) -> ([]byte, error)` — render a
 /// Request in HTTP/1.x wire format. Line-by-line port of Go 1.25
