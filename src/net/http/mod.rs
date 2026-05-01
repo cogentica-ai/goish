@@ -70,6 +70,6 @@ pub use status::{
     StatusVariantAlsoNegotiates, StatusAlreadyReported,
 };
 pub use url::{
-    Parse as ParseURL, ParseRequestURI, PathEscape, PathUnescape, QueryEscape, QueryUnescape,
-    ValuesEncode, URL,
+    JoinPath as JoinURLPath, Parse as ParseURL, ParseRequestURI, PathEscape, PathUnescape,
+    QueryEscape, QueryUnescape, ValuesEncode, URL,
 };

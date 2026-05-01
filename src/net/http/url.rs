@@ -100,6 +100,57 @@ impl URL {
         v
     }
 
+    /// `(u *URL).JoinPath(elem ...string) *URL` (url.go:1262) — return
+    /// a copy of `u` with `elem` appended to its path. Slim port:
+    /// uses goish's `path::Join` for the heavy lifting, preserves a
+    /// trailing slash if the last element ended with one.
+    pub fn JoinPath(&self, elem: slice<string>) -> URL {
+        // Go: elem = append([]string{u.EscapedPath()}, elem...)
+        // Slim URL has no Opaque/encoded path: Path is already the
+        // canonical decoded form.
+        let mut all: slice<string> = slice::__from_vec(alloc::vec::Vec::new());
+        all = crate::append!(all, self.Path.clone());
+        let mut i: int = 0;
+        while i < elem.Len() {
+            all = crate::append!(all, elem[i].clone());
+            i += 1;
+        }
+        // Go: if !strings.HasPrefix(elem[0], "/") { elem[0] = "/" + elem[0]; p = path.Join(elem...)[1:] } else { p = path.Join(elem...) }
+        let p = if !crate::strings::HasPrefix(all[0].clone(), string("/")) {
+            // Prefix the first segment with "/" then trim the leading
+            // slash from the result.
+            let mut prefixed = crate::strings::Builder::new();
+            prefixed.Grow(1 + all[0].Len());
+            let _ = prefixed.WriteByte(b'/');
+            let _ = prefixed.WriteString(all[0].clone());
+            all[0] = prefixed.String();
+            let joined = crate::path::Join(all.clone());
+            // Go: p = path.Join(elem...)[1:]
+            string::from_bytes(&joined.as_bytes()[1..])
+        } else {
+            crate::path::Join(all.clone())
+        };
+
+        // Go: if strings.HasSuffix(elem[len(elem)-1], "/") && !strings.HasSuffix(p, "/") { p += "/" }
+        let last = all[all.Len() - 1].clone();
+        let mut p = p;
+        if crate::strings::HasSuffix(last, string("/"))
+            && !crate::strings::HasSuffix(p.clone(), string("/"))
+        {
+            let mut b = crate::strings::Builder::new();
+            b.Grow(p.Len() + 1);
+            let _ = b.WriteString(p.clone());
+            let _ = b.WriteByte(b'/');
+            p = b.String();
+        }
+
+        // Go: url := *u; url.setPath(p); return &url
+        let mut out = self.clone();
+        out.Path = p.clone();
+        out.RawPath = p;
+        out
+    }
+
     /// Render as the request-target string. For URLs parsed from a
     /// request-target this is the inverse of `parse_request_uri`.
     pub fn String(&self) -> string {
@@ -285,6 +336,22 @@ pub fn QueryUnescape(s: string) -> (string, error) {
 /// into space. Mirrors url.go:303.
 pub fn PathUnescape(s: string) -> (string, error) {
     unescape(s, false)
+}
+
+/// `url.JoinPath(base, elem...)` (url.go:1338) — Parse `base`, append
+/// `elem` to the path via `URL.JoinPath`, and return the rendered URL.
+/// Returns `(result, error)` per goish convention.
+pub fn JoinPath(
+    base: string,
+    elem: slice<string>,
+) -> (string, error) {
+    // Go: url, err := Parse(base); if err != nil { return }
+    let (u, err) = Parse(base);
+    if !err.IsNil() {
+        return (string::new(), err);
+    }
+    // Go: result = url.JoinPath(elem...).String()
+    (u.JoinPath(elem).String(), errors::nil)
 }
 
 /// `url.Parse(rawURL)` (url.go:479) — parse a URL in either absolute
