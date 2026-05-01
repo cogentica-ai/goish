@@ -923,6 +923,65 @@ pub fn Map<S: Into<string>, F: Fn(rune) -> rune>(mapping: F, s: S) -> string {
     string::__from_vec(out)
 }
 
+/// Line-by-line port of `strings.isSeparator` (strings/strings.go:840).
+fn is_separator(r: rune) -> bool {
+    // Go: if r <= 0x7F { ... } else { …unicode.IsLetter / IsDigit / IsSpace }
+    if r <= 0x7F {
+        if r >= b'0' as rune && r <= b'9' as rune {
+            return false;
+        }
+        if r >= b'a' as rune && r <= b'z' as rune {
+            return false;
+        }
+        if r >= b'A' as rune && r <= b'Z' as rune {
+            return false;
+        }
+        if r == b'_' as rune {
+            return false;
+        }
+        return true;
+    }
+    // Slim: goish lacks the unicode tables; treat non-ASCII as non-separator.
+    false
+}
+
+/// Line-by-line port of `strings.Title` (strings/strings.go:868) — return a
+/// copy of `s` with the first letter of each word title-cased. Slim port:
+/// only ASCII letters are title-cased (rune ≥ 0x80 left as-is).
+///
+/// Deprecated in Go upstream; ported for compatibility.
+#[deprecated = "see Go upstream — Title's word-boundary rule is unsafe for general Unicode"]
+pub fn Title<S: Into<string>>(s: S) -> string {
+    let s = s.into();
+    let bytes = s.as_bytes();
+    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(bytes.len());
+    // Go: prev := ' '
+    let mut prev: rune = b' ' as rune;
+    let mut tmp = [0u8; 4];
+    let mut i: usize = 0;
+    while i < bytes.len() {
+        let (r, w) = utf8::DecodeRune(&bytes[i..]);
+        let nr = if is_separator(prev) {
+            // Slim ToTitle: ASCII a..z → A..Z; everything else unchanged.
+            if r >= b'a' as rune && r <= b'z' as rune {
+                r - 32
+            } else {
+                r
+            }
+        } else {
+            r
+        };
+        prev = r;
+        let n = utf8::EncodeRune(&mut tmp, nr) as usize;
+        out.extend_from_slice(&tmp[..n]);
+        if w == 0 {
+            break;
+        }
+        i += w as usize;
+    }
+    string::__from_vec(out)
+}
+
 /// Line-by-line port of `strings.ToValidUTF8` (strings/strings.go:790).
 ///
 /// Returns a copy of `s` with each run of invalid UTF-8 byte sequences
