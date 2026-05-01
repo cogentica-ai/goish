@@ -35,6 +35,35 @@ pub mod sysmon;
 pub use debug::{NumCPU, NumGoroutine, GOMAXPROCS};
 pub use heap::{alloc, free, mheap_alloc_pages, mheap_free_pages, realloc};
 
+// ─── GOOS / GOARCH / Compiler — Go runtime build identifiers ─────────
+//
+// Go: extern.go:397 / :401 — `const GOOS string = goos.GOOS`
+//                            `const GOARCH string = goarch.GOARCH`
+//
+// goish v1 is Linux-only, x86_64-only — these are baked at compile
+// time. Compiler is "goish" (matches the Go convention of returning
+// the build's compiler name; gc / gccgo / gollvm are the upstream
+// values).
+
+/// `runtime.GOOS` (extern.go:397) — operating-system target. Always
+/// `"linux"` for goish v1.
+pub const GOOS: &str = "linux";
+
+/// `runtime.GOARCH` (extern.go:401) — CPU architecture target.
+/// Always `"amd64"` for goish v1.
+pub const GOARCH: &str = "amd64";
+
+/// `runtime.Compiler` (extern.go:412) — name of the compiler used
+/// to build this binary. Goish reports `"goish"` to distinguish from
+/// upstream Go's `"gc"`.
+pub const Compiler: &str = "goish";
+
+/// `runtime.Version()` (extern.go:439) — runtime version string.
+/// Goish v1 reports `"goish1.0"` while staying close to Go's format.
+pub fn Version() -> crate::gostring::string {
+    crate::gostring::string::from_static("goish1.0")
+}
+
 /// First Rust code to run after the kernel hands control to `_start`.
 /// `_start` (emitted by `#[goish::main]`) reads argc/argv off the stack,
 /// loads them into rdi/rsi per SysV, then `call`s here.
