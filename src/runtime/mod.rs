@@ -225,6 +225,38 @@ fn on_panic(info: &core::panic::PanicInfo) -> ! {
             syscall::Write(syscall::STDERR, buf3.buf.as_ptr(), buf3.len);
         }
     }
+
+    // Per-G panic recovery (Phase B). If we're on a user goroutine
+    // with `panic_recover` installed by `g_entry`, run any registered
+    // cleanups (release fds, unlock SpinLocks, etc.), then `gogo` to
+    // the recovery point. The recovery fn (`on_g_panic_aborted`)
+    // chains to `goexit` so the scheduler reclaims this G normally
+    // and other goroutines keep running.
+    //
+    // Skipped when:
+    //   - TLS isn't set up yet (panic during early `__goish_rt0`)
+    //   - We're on g0 / scheduler stack (no curg) — runtime-internal
+    //     panic, fatal
+    //   - The G doesn't have a recovery installed (rsp==0) — either
+    //     before `g_entry` planted it, or after the user closure
+    //     returned and we cleared it
+    //
+    // Falls through to `Exit(2)` in those cases.
+    if sched::is_tls_ready() {
+        if let Some(g_ptr) = sched::current_g() {
+            let g = unsafe { &*g_ptr.as_ptr() };
+            if g.panic_recover.rsp != 0 {
+                // Walk cleanups while the panicked frames are still
+                // intact — the cleanup nodes live there and will be
+                // abandoned by the gogo. Callbacks must not allocate
+                // or panic.
+                unsafe { sched::cleanup::run_all(g) };
+                // Jump to the recovery fn on this G's clean stack.
+                // Never returns.
+                unsafe { sched::gogo(&g.panic_recover) };
+            }
+        }
+    }
     syscall::Exit(2)
 }
 

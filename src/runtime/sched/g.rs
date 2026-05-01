@@ -106,6 +106,28 @@ pub struct G {
     /// later resumed (possibly on a different M) finds its memory
     /// still mapped. Memory is dropped together with the G.
     pub growth_chain: SpinLock<alloc::vec::Vec<(*mut u8, usize)>>,
+    /// Panic recovery point. Initialized by `g_entry` before invoking
+    /// the user closure: pc=`on_g_panic_aborted`, sp=top-of-stack.
+    /// Cleared (sp=0) when the user closure returns normally.
+    ///
+    /// On panic, the `#[panic_handler]` checks `panic_recover.rsp != 0`
+    /// and `gogo`s here to abandon the panicked frames and re-enter the
+    /// G at a clean stack via `on_g_panic_aborted`, which runs cleanups
+    /// and chains to `goexit`. Without this, a panic would `Exit(2)`
+    /// and kill the whole process.
+    ///
+    /// Per-goroutine isolation only — Drops in the panicked frames are
+    /// SKIPPED (we're in panic=abort mode; a real unwind requires
+    /// nightly + -Zbuild-std). Resource cleanups must register with
+    /// `cleanups` to release on panic.
+    pub panic_recover: super::gobuf::Gobuf,
+    /// Head of the per-G cleanup list. Resources registered here have
+    /// their callbacks run by `on_g_panic_aborted` (or by the
+    /// `#[panic_handler]` immediately before `gogo`) so they're
+    /// released even though Drops are skipped on panic-abort.
+    /// Each `Cleanup` is a stack-allocated node in the resource owner's
+    /// frame; on normal Drop the owner unlinks itself.
+    pub cleanups: core::sync::atomic::AtomicPtr<super::cleanup::Cleanup>,
 }
 
 impl G {
@@ -136,6 +158,8 @@ impl G {
             active_stack_lo: AtomicUsize::new(lo),
             active_stack_hi: AtomicUsize::new(hi),
             growth_chain: SpinLock::new(alloc::vec::Vec::new()),
+            panic_recover: super::gobuf::Gobuf::new(),
+            cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
         }
     }
 
@@ -195,6 +219,8 @@ impl G {
             active_stack_lo: AtomicUsize::new(stack_base as usize),
             active_stack_hi: AtomicUsize::new(stack_base as usize + stack_size),
             growth_chain: SpinLock::new(alloc::vec::Vec::new()),
+            panic_recover: super::gobuf::Gobuf::new(),
+            cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
         }
     }
 }

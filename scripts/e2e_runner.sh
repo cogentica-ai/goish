@@ -103,7 +103,12 @@ for name in "${TARGETS[@]}"; do
       out=$(timeout "$TIMEOUT" "$bin" 2>&1)
     fi
     rc=$?
-    if [[ $rc -eq 124 ]]; then
+    # rc=0 wins regardless of stdout content. Tests that intentionally
+    # panic + recover (e.g. panic_recovery_smoke) print "panic" to
+    # stderr and exit 0; treating them as panic-fails would be wrong.
+    if [[ $rc -eq 0 ]]; then
+      pass=$((pass+1))
+    elif [[ $rc -eq 124 ]]; then
       tout=$((tout+1))
       if [[ ! -s "$first_log" ]]; then
         { echo "=== iter $i: TIMEOUT after ${TIMEOUT}s ==="; echo "$out"; } > "$first_log"
@@ -113,13 +118,11 @@ for name in "${TARGETS[@]}"; do
       if [[ ! -s "$first_log" ]]; then
         { echo "=== iter $i: PANIC (rc=$rc) ==="; echo "$out"; } > "$first_log"
       fi
-    elif [[ $rc -ne 0 ]]; then
+    else
       fail=$((fail+1))
       if [[ ! -s "$first_log" ]]; then
         { echo "=== iter $i: FAIL (rc=$rc) ==="; echo "$out"; } > "$first_log"
       fi
-    else
-      pass=$((pass+1))
     fi
   done
 
