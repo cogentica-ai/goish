@@ -7,6 +7,13 @@
 // argv is a pointer into the auxiliary process stack mapped by the
 // kernel. The pointers it holds are valid for the lifetime of the
 // process, so retaining them as raw `*const *const u8` is safe.
+//
+// `envp_overlay` provides Setenv/Unsetenv semantics on top of the
+// kernel envp without mutating it directly. The overlay is consulted
+// first by `envp_lookup`; a `None` value acts as a tombstone (Unsetenv).
+
+extern crate alloc;
+use alloc::vec::Vec;
 
 use crate::runtime::spin::SpinLock;
 
@@ -36,12 +43,69 @@ pub fn get() -> Option<Raw> {
     *SLOT.lock()
 }
 
+// Process-wide overlay for Setenv/Unsetenv. Linear-scan Vec keeps the
+// lock simple; environment overrides are uncommon and small.
+// `Some(value)` is a set; `None` is a tombstone (Unsetenv mask).
+static OVERLAY: SpinLock<Vec<(Vec<u8>, Option<Vec<u8>>)>> = SpinLock::new(Vec::new());
+
+/// Insert or update an overlay entry for `key`. Used by `os::Setenv`.
+pub fn envp_set(key: &[u8], value: &[u8]) {
+    let mut g = OVERLAY.lock();
+    for (k, v) in g.iter_mut() {
+        if k.as_slice() == key {
+            *v = Some(value.to_vec());
+            return;
+        }
+    }
+    g.push((key.to_vec(), Some(value.to_vec())));
+}
+
+/// Mask `key` as unset. Used by `os::Unsetenv`. Future lookups will
+/// return None even if the kernel envp holds the key.
+pub fn envp_unset(key: &[u8]) {
+    let mut g = OVERLAY.lock();
+    for (k, v) in g.iter_mut() {
+        if k.as_slice() == key {
+            *v = None;
+            return;
+        }
+    }
+    g.push((key.to_vec(), None));
+}
+
 /// Walk the kernel-supplied envp (located at argv + argc + 1 per the
 /// Linux ELF stack layout) looking for an entry of the form `KEY=...`
 /// where `KEY` matches `key`. Returns `(value, true)` on hit. The
 /// returned bytes alias kernel memory and are valid for the process
 /// lifetime — callers should copy as needed before storing.
+///
+/// The overlay (Setenv/Unsetenv) is consulted first; a None overlay
+/// entry acts as a tombstone, hiding any kernel-supplied value.
 pub unsafe fn envp_lookup(key: &[u8]) -> Option<&'static [u8]> {
+    {
+        // Scope the overlay borrow so we never hold the lock across
+        // raw-pointer walks below.
+        let g = OVERLAY.lock();
+        for (k, v) in g.iter() {
+            if k.as_slice() == key {
+                match v {
+                    Some(val) => {
+                        // Promote overlay value to 'static via a leaked
+                        // copy. Goish leaks happen at startup-only
+                        // scope; Setenv calls are rare in practice.
+                        let leaked: &'static [u8] =
+                            alloc::boxed::Box::leak(val.clone().into_boxed_slice());
+                        return Some(leaked);
+                    }
+                    None => return None,
+                }
+            }
+        }
+    }
+    envp_lookup_kernel(key)
+}
+
+unsafe fn envp_lookup_kernel(key: &[u8]) -> Option<&'static [u8]> {
     let raw = match get() {
         Some(r) => r,
         None => return None,

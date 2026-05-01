@@ -302,6 +302,49 @@ pub fn Getenv(key: string) -> string {
     v
 }
 
+/// Line-by-line port of `os.Setenv(key, value)` (env.go:119) — set the
+/// value of the environment variable named `key`. Goish slim: writes
+/// to a process-wide overlay rather than the kernel envp, so child
+/// processes won't inherit the change (no exec support yet).
+pub fn Setenv(key: string, value: string) -> error {
+    // Go: err := syscall.Setenv(key, value); ... return NewSyscallError("setenv", err)
+    let kb = bytes_of(&key);
+    if kb.is_empty() {
+        return errors::New(string("setenv: key is empty"));
+    }
+    for &c in kb {
+        if c == b'=' || c == 0 {
+            return errors::New(string("setenv: invalid argument"));
+        }
+    }
+    let vb = bytes_of(&value);
+    for &c in vb {
+        if c == 0 {
+            return errors::New(string("setenv: invalid argument"));
+        }
+    }
+    runtime::args::envp_set(kb, vb);
+    nil
+}
+
+/// Line-by-line port of `os.Unsetenv(key)` (env.go:128) — unset the
+/// environment variable named `key`. Goish slim: writes a tombstone
+/// to the overlay rather than mutating kernel envp.
+pub fn Unsetenv(key: string) -> error {
+    // Go: return syscall.Unsetenv(key)
+    let kb = bytes_of(&key);
+    if kb.is_empty() {
+        return errors::New(string("unsetenv: key is empty"));
+    }
+    for &c in kb {
+        if c == b'=' || c == 0 {
+            return errors::New(string("unsetenv: invalid argument"));
+        }
+    }
+    runtime::args::envp_unset(kb);
+    nil
+}
+
 /// `os.TempDir()` (file.go:490) — TMPDIR if set, else "/tmp".
 pub fn TempDir() -> string {
     let (v, ok) = LookupEnv(string("TMPDIR"));
