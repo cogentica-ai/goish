@@ -36,7 +36,7 @@ use crate::errors::{self, error, nil, ErrorTrait};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::runtime::spin::SpinLock;
-use crate::types::{byte, int, uint};
+use crate::types::{byte, int, rune, uint};
 
 mod atof;
 mod decimal;
@@ -572,6 +572,56 @@ pub fn Quote<S: Into<string>>(s: S) -> string {
     }
     out.push(b'"');
     string::from_bytes(&out)
+}
+
+/// `strconv.AppendQuote(dst, s)` (quote.go:131) — append the
+/// quoted-string form of `s` to `dst` and return the extended buffer.
+pub fn AppendQuote<S: Into<string>>(dst: slice<byte>, s: S) -> slice<byte> {
+    // Go: return appendQuotedWith(dst, s, '"', false, false)
+    // Slim: just delegate to Quote() and append the bytes.
+    let q = Quote(s);
+    let mut v = dst.__into_vec();
+    v.extend_from_slice(q.as_bytes());
+    slice::__from_vec(v)
+}
+
+/// `strconv.CanBackquote(s)` (quote.go:212) — report whether `s` can
+/// be rendered unchanged inside backticks (no control chars except
+/// '\t', no backquote, no DEL, no BOM).
+///
+/// Slim: ASCII fast-path identical to Go for that subset; multi-byte
+/// runes other than the BOM (U+FEFF) are assumed printable per Go's
+/// comment on quote.go:220.
+pub fn CanBackquote<S: Into<string>>(s: S) -> bool {
+    let s = s.into();
+    let bs = s.as_bytes();
+    let mut i: usize = 0;
+    while i < bs.len() {
+        // Go: r, wid := utf8.DecodeRuneInString(s); s = s[wid:]
+        let (r, wid) = crate::unicode::utf8::DecodeRune(&bs[i..]);
+        if wid == 0 {
+            // Defensive: can't make progress.
+            break;
+        }
+        // Go: if wid > 1 { if r == '﻿' { return false }; continue }
+        if wid > 1 {
+            if r == 0xFEFF {
+                return false; // BOMs are invisible.
+            }
+            i += wid as usize;
+            continue;
+        }
+        // Go: if r == utf8.RuneError { return false }
+        if r == crate::unicode::utf8::RuneError {
+            return false;
+        }
+        // Go: if (r < ' ' && r != '\t') || r == '`' || r == '' { return false }
+        if (r < b' ' as rune && r != b'\t' as rune) || r == b'`' as rune || r == 0x7F {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 /// `strconv.Unquote(s)` (quote.go:383) — slim ASCII port. Decodes a
