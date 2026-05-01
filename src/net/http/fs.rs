@@ -99,8 +99,8 @@ fn serve_file_path(w: &mut ResponseWriter, r: &Request, path: string) {
 }
 
 fn serve_regular_file(w: &mut ResponseWriter, r: &Request, path: string, fi: os::FileInfo) {
-    let _ = r;
-    // Open + read fully into a slice<byte>.
+    // Open + read fully into a slice<byte>. Range slicing happens
+    // after the read since v1 has no streaming Read with seek loops.
     let (mut f, err) = os::Open(path.clone());
     if !err.IsNil() {
         super::server::Error(
@@ -119,6 +119,7 @@ fn serve_regular_file(w: &mut ResponseWriter, r: &Request, path: string, fi: os:
     } else {
         body
     };
+    let size = body.Len();
 
     // Content-Type via extension lookup, then sniffing fallback.
     let ext = ext_of(&path);
@@ -127,7 +128,102 @@ fn serve_regular_file(w: &mut ResponseWriter, r: &Request, path: string, fi: os:
         ct = super::sniff::DetectContentType(body.clone());
     }
     w.Header().Set(string("Content-Type"), ct);
+    // Last-Modified header from Stat (RFC 7232 §2.2). Mirrors
+    // Go's writeNotModified-supporting branch in fs.go:setLastModified.
+    let mtime = fi.ModTime();
+    if !mtime.IsZero() {
+        let mut buf: [crate::types::byte; 29] = [0; 29];
+        let appended = imf_fixdate_into(&mut buf, &mtime);
+        w.Header()
+            .Set(string("Last-Modified"), string::from_bytes(appended));
+        // If-Modified-Since handling — return 304 if the resource
+        // hasn't changed since the client's cached copy.
+        let ims = r.Header.Get(string("If-Modified-Since"));
+        if ims.Len() > 0 {
+            let (since, terr) = super::header::ParseTime(ims);
+            if terr.IsNil() && !mtime.After(since) {
+                w.WriteHeader(super::status::StatusNotModified);
+                return;
+            }
+        }
+    }
+    // Range header — single-range only for v1 (the common case).
+    let range_hdr = r.Header.Get(string("Range"));
+    if range_hdr.Len() > 0 {
+        let (ranges, perr) = ParseRange(range_hdr, size);
+        if !perr.IsNil() || ranges.Len() == 0 {
+            // Malformed → 416 Requested Range Not Satisfiable.
+            w.Header().Set(
+                string("Content-Range"),
+                crate::Sprintf!("bytes */{}", size),
+            );
+            w.WriteHeader(super::status::StatusRequestedRangeNotSatisfiable);
+            return;
+        }
+        if ranges.Len() == 1 {
+            let r0 = ranges[0];
+            w.Header()
+                .Set(string("Content-Range"), r0.ContentRange(size));
+            w.Header()
+                .Set(string("Content-Length"), crate::strconv::Itoa(r0.Length));
+            w.WriteHeader(super::status::StatusPartialContent);
+            let part = body.slice(r0.Start, r0.Start + r0.Length);
+            let _ = w.Write(part);
+            return;
+        }
+        // Multi-range → fall through to whole-body 200 (v1 deviation
+        // from Go which would emit multipart/byteranges).
+    }
     let _ = w.Write(body);
+}
+
+/// Inline IMF-fixdate writer for Last-Modified. Mirrors the helper
+/// in cookie.rs but kept private here to avoid a circular dependency.
+fn imf_fixdate_into<'a>(
+    buf: &'a mut [crate::types::byte; 29],
+    t: &crate::time::Time,
+) -> &'a [crate::types::byte] {
+    const DAYS: [&[crate::types::byte; 3]; 7] =
+        [b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat"];
+    const MONS: [&[crate::types::byte; 3]; 12] = [
+        b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun",
+        b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
+    ];
+    let weekday = (t.Weekday() as usize) % 7;
+    let (year, month, day) = t.Date();
+    let (hh, mm, ss) = t.Clock();
+    let dn = DAYS[weekday];
+    let mn = MONS[((month - 1) as usize) % 12];
+    buf[0] = dn[0];
+    buf[1] = dn[1];
+    buf[2] = dn[2];
+    buf[3] = b',';
+    buf[4] = b' ';
+    buf[5] = b'0' + ((day / 10) % 10) as crate::types::byte;
+    buf[6] = b'0' + (day % 10) as crate::types::byte;
+    buf[7] = b' ';
+    buf[8] = mn[0];
+    buf[9] = mn[1];
+    buf[10] = mn[2];
+    buf[11] = b' ';
+    buf[12] = b'0' + ((year / 1000) % 10) as crate::types::byte;
+    buf[13] = b'0' + ((year / 100) % 10) as crate::types::byte;
+    buf[14] = b'0' + ((year / 10) % 10) as crate::types::byte;
+    buf[15] = b'0' + (year % 10) as crate::types::byte;
+    buf[16] = b' ';
+    buf[17] = b'0' + ((hh / 10) % 10) as crate::types::byte;
+    buf[18] = b'0' + (hh % 10) as crate::types::byte;
+    buf[19] = b':';
+    buf[20] = b'0' + ((mm / 10) % 10) as crate::types::byte;
+    buf[21] = b'0' + (mm % 10) as crate::types::byte;
+    buf[22] = b':';
+    buf[23] = b'0' + ((ss / 10) % 10) as crate::types::byte;
+    buf[24] = b'0' + (ss % 10) as crate::types::byte;
+    buf[25] = b' ';
+    buf[26] = b'G';
+    buf[27] = b'M';
+    buf[28] = b'T';
+    &buf[..]
 }
 
 /// `http.FileServer(root)` (fs.go:971) — Handler that serves files
