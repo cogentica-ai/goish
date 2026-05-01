@@ -467,6 +467,105 @@ pub fn PathUnescape(s: string) -> (string, error) {
     unescape(s, false)
 }
 
+/// `url.resolvePath(base, ref)` (url.go:1050) — RFC 3986 §5.2.4 path
+/// merging: combine a base URI's path and a reference's path,
+/// resolving `.` and `..` segments. Returns the merged absolute-path.
+///
+/// Goish-internal scratch uses a `Vec<u8>` (rather than the consuming
+/// strings.Builder) because the algorithm needs to read the buffer
+/// contents while still appending — Go's strings.Builder allows that
+/// via a non-consuming String(); goish v1's String() consumes.
+pub fn ResolvePath(base: string, reference: string) -> string {
+    // Go: var full string
+    // Go: if ref == "" { full = base }
+    // Go: else if ref[0] != '/' { i := strings.LastIndex(base, "/"); full = base[:i+1] + ref }
+    // Go: else { full = ref }
+    let full: string = if reference.Len() == 0 {
+        base
+    } else if reference.as_bytes()[0] != b'/' {
+        let i = crate::strings::LastIndex(base.clone(), string("/"));
+        let mut b = crate::strings::Builder::new();
+        b.Grow((i + 1) + reference.Len());
+        let _ = b.WriteString(string::from_bytes(&base.as_bytes()[..(i + 1) as usize]));
+        let _ = b.WriteString(reference);
+        b.String()
+    } else {
+        reference
+    };
+    // Go: if full == "" { return "" }
+    if full.Len() == 0 {
+        return string::new();
+    }
+
+    // Go: var elem string; var dst strings.Builder; first := true
+    let mut elem: string = string::new();
+    let mut dst: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
+    let mut first: bool = true;
+    // Go: remaining := full
+    let mut remaining: string = full;
+    // Go: dst.WriteByte('/')
+    dst.push(b'/');
+    // Go: found := true; for found { elem, remaining, found = strings.Cut(remaining, "/"); ... }
+    let mut found: bool = true;
+    while found {
+        let (e, r, f) = crate::strings::Cut(remaining.clone(), string("/"));
+        elem = e;
+        remaining = r;
+        found = f;
+        // Go: if elem == "." { first = false; continue }
+        if elem == string(".") {
+            first = false;
+            continue;
+        }
+        // Go: if elem == ".." { ... }
+        if elem == string("..") {
+            // Go: str := dst.String()[1:]
+            // Goish: snapshot dst[1:] into a fresh Vec so we can mutate
+            // dst (Reset + write) below without aliasing.
+            let str_bytes: alloc::vec::Vec<u8> = dst[1..].to_vec();
+            // strings.LastIndexByte: -1 if not found.
+            let mut index: int = -1;
+            let mut k: int = (str_bytes.len() as int) - 1;
+            while k >= 0 {
+                if str_bytes[k as usize] == b'/' {
+                    index = k;
+                    break;
+                }
+                k -= 1;
+            }
+            // Go: dst.Reset(); dst.WriteByte('/')
+            dst.clear();
+            dst.push(b'/');
+            // Go: if index == -1 { first = true } else { dst.WriteString(str[:index]) }
+            if index == -1 {
+                first = true;
+            } else {
+                dst.extend_from_slice(&str_bytes[..index as usize]);
+            }
+        } else {
+            // Go: if !first { dst.WriteByte('/') }
+            if !first {
+                dst.push(b'/');
+            }
+            // Go: dst.WriteString(elem); first = false
+            dst.extend_from_slice(elem.as_bytes());
+            first = false;
+        }
+    }
+
+    // Go: if elem == "." || elem == ".." { dst.WriteByte('/') }
+    if elem == string(".") || elem == string("..") {
+        dst.push(b'/');
+    }
+
+    // Go: r := dst.String(); if len(r) > 1 && r[1] == '/' { r = r[1:] }; return r
+    if dst.len() > 1 && dst[1] == b'/' {
+        // Drop the duplicate leading '/'.
+        return string::from_bytes(&dst[1..]);
+    }
+    string::from_bytes(&dst)
+}
+
 /// `url.JoinPath(base, elem...)` (url.go:1338) — Parse `base`, append
 /// `elem` to the path via `URL.JoinPath`, and return the rendered URL.
 /// Returns `(result, error)` per goish convention.
