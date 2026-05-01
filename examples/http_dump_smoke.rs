@@ -47,6 +47,63 @@ fn main() {
         }
     }
 
+    // CanonicalHeaderKey
+    if http::CanonicalHeaderKey(string("content-type")) == "Content-Type"
+        && http::CanonicalHeaderKey(string("ACCEPT-ENCODING")) == "Accept-Encoding"
+    {
+        Println!("[+] CanonicalHeaderKey         PASS");
+    } else {
+        Println!("[+] CanonicalHeaderKey         FAIL");
+        failed += 1;
+    }
+
+    // ParseHTTPVersion
+    {
+        let (a, b, ok1) = http::ParseHTTPVersion(string("HTTP/1.1"));
+        let (_c, _d, ok_bad) = http::ParseHTTPVersion(string("HTTP/2"));
+        if ok1 && a == 1 && b == 1 && !ok_bad {
+            Println!("[+] ParseHTTPVersion           PASS");
+        } else {
+            Println!("[+] ParseHTTPVersion           FAIL");
+            failed += 1;
+        }
+    }
+
+    // DumpResponse — synthesize a response with Status, Header, Body.
+    {
+        let mut resp = http::Response::default();
+        resp.StatusCode = 418;
+        resp.Status = string("418 I'm a teapot");
+        resp.ProtoMajor = 1;
+        resp.ProtoMinor = 1;
+        resp.ContentLength = 5;
+        resp.Body = bytes("brew\n");
+        resp.Header.Set(string("X-Mark"), string("z"));
+        let (rdump, _err) = http::httputil::DumpResponse(&resp, true);
+        let mut h2 = alloc::vec::Vec::new();
+        for i in 0..rdump.Len() {
+            h2.push(rdump[i]);
+        }
+        let needles2: [&[u8]; 4] = [
+            b"HTTP/1.1 418 I'm a teapot\r\n",
+            b"Content-Length: 5\r\n",
+            b"X-Mark: z\r\n",
+            b"brew\n",
+        ];
+        let mut bad = false;
+        for n in needles2.iter() {
+            if !find_subseq(&h2, n) {
+                bad = true;
+            }
+        }
+        if !bad {
+            Println!("[+] DumpResponse               PASS");
+        } else {
+            Println!("[+] DumpResponse               FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
         Println!("ok dump smoke");
         syscall::Exit(0);

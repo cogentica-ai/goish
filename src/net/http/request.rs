@@ -512,6 +512,35 @@ fn parse_header_line(line: &string) -> Option<(string, string)> {
 }
 
 /// `ParseHTTPVersion` (request.go:929) — parse "HTTP/1.1" → (1, 1).
+/// `http.ParseHTTPVersion(vers)` (request.go:817) — parse an HTTP
+/// version string per RFC 7230 §2.6. `"HTTP/1.0"` → `(1, 0, true)`.
+/// Note: strings without a minor version (e.g. `"HTTP/2"`) are
+/// rejected.
+pub fn ParseHTTPVersion(vers: string) -> (int, int, bool) {
+    // Go: switch vers { case "HTTP/1.1": return 1, 1, true; case "HTTP/1.0": return 1, 0, true }
+    if vers == "HTTP/1.1" {
+        return (1, 1, true);
+    }
+    if vers == "HTTP/1.0" {
+        return (1, 0, true);
+    }
+    // Go: if !strings.HasPrefix(vers, "HTTP/") || len(vers) != len("HTTP/X.Y") { return 0,0,false }
+    if !crate::strings::HasPrefix(vers.clone(), string("HTTP/")) || vers.Len() != 8 {
+        return (0, 0, false);
+    }
+    // Go: if vers[6] != '.' { return 0,0,false }
+    if vers[6] != b'.' {
+        return (0, 0, false);
+    }
+    // Go: maj, err := strconv.ParseUint(vers[5:6], 10, 0)
+    let mb: byte = vers[5];
+    let nb: byte = vers[7];
+    if !mb.is_ascii_digit() || !nb.is_ascii_digit() {
+        return (0, 0, false);
+    }
+    ((mb - b'0') as int, (nb - b'0') as int, true)
+}
+
 fn parse_http_version(b: &[u8]) -> Option<(int, int)> {
     if !b.starts_with(b"HTTP/") {
         return None;

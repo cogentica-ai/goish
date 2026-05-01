@@ -186,6 +186,13 @@ fn sanitize_header_value(s: string) -> string {
     crate::strings::TrimSpace(b.String())
 }
 
+/// `http.CanonicalHeaderKey(s)` (header.go:234) — public canonical
+/// form. Mirrors Go's delegation to `textproto.CanonicalMIMEHeaderKey`.
+/// `content-type` → `Content-Type`, `accept-encoding` → `Accept-Encoding`.
+pub fn CanonicalHeaderKey(s: string) -> string {
+    canonical_key(&s)
+}
+
 /// Canonicalize a header name. RFC 7230: lowercase except the first
 /// letter and any letter following a `-`. So `content-type` →
 /// `Content-Type`, `accept-encoding` → `Accept-Encoding`.

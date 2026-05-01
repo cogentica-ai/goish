@@ -30,8 +30,8 @@ pub use client::{
     Client, Get, Head, NewRequest, Post, PostForm, ReadResponse, Response, RoundTripper, Transport,
 };
 pub use cookie::{Cookie, ParseCookie, ParseSetCookie, SameSite, SetCookie};
-pub use header::Header;
-pub use request::{ReadRequest, Request};
+pub use header::{CanonicalHeaderKey, Header};
+pub use request::{ParseHTTPVersion, ReadRequest, Request};
 pub use response::ResponseWriter;
 pub use server::{
     ErrServerClosed, Handler, HandlerFunc, ListenAndServe, NotFoundHandler, Redirect,
