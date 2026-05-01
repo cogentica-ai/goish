@@ -44,6 +44,7 @@ pub use request::{
     NewMaxBytesError, NewMaxBytesReader, ParseHTTPVersion, ReadRequest, Request,
 };
 pub use response::ResponseWriter;
+pub use httputil::NewSingleHostReverseProxy;
 pub use server::{
     AllowQuerySemicolons, DefaultServeMux, Error, ErrServerClosed, Handle, HandleFunc, Handler,
     HandlerFunc, ListenAndServe, NewServeMux, NotFound, NotFoundHandler, Redirect,

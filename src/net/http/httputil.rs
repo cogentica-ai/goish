@@ -1,8 +1,7 @@
 // net/http/httputil — slim port of Go's net/http/httputil package.
 //
 // Currently provides DumpRequest, DumpResponse, NewChunkedReader,
-// NewChunkedWriter, ErrLineTooLong. Future iterations will add
-// ReverseProxy.
+// NewChunkedWriter, ErrLineTooLong, NewSingleHostReverseProxy.
 
 #![allow(non_snake_case)]
 #![allow(dead_code)]
@@ -219,4 +218,154 @@ pub fn DumpResponse(resp: &Response, body: bool) -> (slice<byte>, error) {
         }
     }
     (out, errors::nil)
+}
+
+// ─── ReverseProxy (slim port of reverseproxy.go) ─────────────────────
+
+/// `httputil.NewSingleHostReverseProxy(target)` (reverseproxy.go:275).
+/// Returns a Handler that forwards every incoming request to `target`,
+/// rewriting the URL's Scheme/Host/Path and stripping hop-by-hop
+/// headers in both directions.
+///
+/// Slim deviations from Go:
+///   - No Director, ModifyResponse, ErrorHandler, or Transport hooks
+///     (the proxy uses a default `http::Client`).
+///   - No streaming Body — request body is `slice<byte>` already.
+///   - No X-Forwarded-For / X-Forwarded-Host injection (slim).
+///   - No connection upgrade (websocket) handling.
+///
+/// Sufficient for in-process reverse-proxy demos and basic load
+/// balancers; not a drop-in for Go's hardened `httputil.ReverseProxy`.
+pub fn NewSingleHostReverseProxy(
+    target: super::url::URL,
+) -> alloc::sync::Arc<dyn super::server::Handler> {
+    alloc::sync::Arc::new(reverseProxyHandler {
+        target,
+        client: alloc::sync::Arc::new(super::client::Client::default()),
+    })
+}
+
+#[allow(non_camel_case_types)]
+struct reverseProxyHandler {
+    target: super::url::URL,
+    client: alloc::sync::Arc<super::client::Client>,
+}
+
+/// Hop-by-hop headers (RFC 7230). Stripped before forwarding the
+/// request and before relaying the response back to the original
+/// client. Mirrors Go's `hopHeaders` (reverseproxy.go:307).
+const HOP_HEADERS: &[&str] = &[
+    "Connection",
+    "Proxy-Connection",
+    "Keep-Alive",
+    "Proxy-Authenticate",
+    "Proxy-Authorization",
+    "Te",
+    "Trailer",
+    "Transfer-Encoding",
+    "Upgrade",
+];
+
+fn is_hop_header(name: &string) -> bool {
+    for h in HOP_HEADERS.iter() {
+        if crate::strings::EqualFold(name.clone(), string(*h)) {
+            return true;
+        }
+    }
+    false
+}
+
+/// `joinURLPath` (reverseproxy.go: ~the unexported helper). Appends
+/// req's path to target's, gluing with a single '/'.
+fn join_url_path(target_path: &string, req_path: &string) -> string {
+    let a = target_path.clone();
+    let b = req_path.clone();
+    let a_slash = crate::strings::HasSuffix(a.clone(), string("/"));
+    let b_slash = crate::strings::HasPrefix(b.clone(), string("/"));
+    let mut out = strings::Builder::new();
+    if a_slash && b_slash {
+        let _ = out.WriteString(a.clone());
+        let trimmed = crate::strings::TrimPrefix(b, string("/"));
+        let _ = out.WriteString(trimmed);
+    } else if !a_slash && !b_slash {
+        let _ = out.WriteString(a.clone());
+        if a.Len() > 0 && b.Len() > 0 {
+            let _ = out.WriteByte(b'/');
+        }
+        let _ = out.WriteString(b);
+    } else {
+        let _ = out.WriteString(a);
+        let _ = out.WriteString(b);
+    }
+    out.String()
+}
+
+impl super::server::Handler for reverseProxyHandler {
+    fn ServeHTTP(
+        &self,
+        w: &mut super::response::ResponseWriter,
+        r: &super::request::Request,
+    ) {
+        // Go: outreq := req.Clone(req.Context())
+        let mut outreq = r.clone();
+
+        // Go: rewriteRequestURL(req, target)
+        outreq.URL.Scheme = self.target.Scheme.clone();
+        outreq.URL.Host = self.target.Host.clone();
+        outreq.URL.Path = join_url_path(&self.target.Path, &r.URL.Path);
+        outreq.URL.RawPath = outreq.URL.Path.clone();
+        // Combine target query with request query, preferring incoming.
+        if self.target.RawQuery.Len() > 0 || r.URL.RawQuery.Len() > 0 {
+            if self.target.RawQuery.Len() == 0 || r.URL.RawQuery.Len() == 0 {
+                let mut q = strings::Builder::new();
+                let _ = q.WriteString(self.target.RawQuery.clone());
+                let _ = q.WriteString(r.URL.RawQuery.clone());
+                outreq.URL.RawQuery = q.String();
+            } else {
+                let mut q = strings::Builder::new();
+                let _ = q.WriteString(self.target.RawQuery.clone());
+                let _ = q.WriteByte(b'&');
+                let _ = q.WriteString(r.URL.RawQuery.clone());
+                outreq.URL.RawQuery = q.String();
+            }
+        }
+        // Drop the original Host so URL.Host wins on serialization.
+        outreq.Host = string::new();
+
+        // Go: removeHopByHopHeaders(outreq.Header)
+        let inner = outreq.Header.__inner().clone();
+        for (k, _) in inner.__iter() {
+            if is_hop_header(k) {
+                outreq.Header.Del(k.clone());
+            }
+        }
+
+        // Go: roundTrip via Transport / our Client.
+        let (resp, err) = self.client.Do(&outreq);
+        if !err.IsNil() {
+            super::server::Error(
+                w,
+                string("Bad Gateway"),
+                super::status::StatusBadGateway,
+            );
+            return;
+        }
+
+        // Go: copyHeader(rw.Header(), res.Header) minus hop-by-hop.
+        let r_inner = resp.Header.__inner();
+        for (k, vs) in r_inner.__iter() {
+            if is_hop_header(k) {
+                continue;
+            }
+            for i in 0..vs.Len() {
+                w.Header().Add(k.clone(), vs[i].clone());
+            }
+        }
+
+        // Go: rw.WriteHeader(res.StatusCode)
+        w.WriteHeader(resp.StatusCode);
+
+        // Go: io.Copy(rw, res.Body)
+        let _ = w.Write(resp.Body);
+    }
 }
