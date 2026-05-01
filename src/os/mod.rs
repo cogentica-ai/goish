@@ -334,6 +334,78 @@ pub fn UserHomeDir() -> (string, error) {
     (string::new(), errors::New(b.String()))
 }
 
+/// Line-by-line port of `os.UserCacheDir()` (file.go:507) — return the
+/// default root directory for user-specific cached data.
+///
+/// Slim: Linux/Unix only. Returns `$XDG_CACHE_HOME` if set and absolute,
+/// otherwise `$HOME/.cache`. Errors if neither is defined or
+/// `$XDG_CACHE_HOME` is relative.
+pub fn UserCacheDir() -> (string, error) {
+    // Go: dir = Getenv("XDG_CACHE_HOME")
+    let dir = Getenv(string("XDG_CACHE_HOME"));
+    // Go: if dir == "" { dir = Getenv("HOME"); if dir == "" { return "", errors.New(...) }; dir += "/.cache" }
+    if dir.Len() == 0 {
+        let home = Getenv(string("HOME"));
+        if home.Len() == 0 {
+            return (
+                string::new(),
+                errors::New(string(
+                    "neither $XDG_CACHE_HOME nor $HOME are defined",
+                )),
+            );
+        }
+        let mut b = crate::strings::Builder::new();
+        b.Grow(home.Len() + 7);
+        let _ = b.WriteString(home);
+        let _ = b.WriteString(string("/.cache"));
+        return (b.String(), nil);
+    }
+    // Go: else if !filepathlite.IsAbs(dir) { return "", errors.New("path in $XDG_CACHE_HOME is relative") }
+    if !crate::path::filepath::IsAbs(dir.clone()) {
+        return (
+            string::new(),
+            errors::New(string("path in $XDG_CACHE_HOME is relative")),
+        );
+    }
+    (dir, nil)
+}
+
+/// Line-by-line port of `os.UserConfigDir()` (file.go:560) — return the
+/// default root directory for user-specific configuration data.
+///
+/// Slim: Linux/Unix only. Returns `$XDG_CONFIG_HOME` if set and absolute,
+/// otherwise `$HOME/.config`. Errors if neither is defined or
+/// `$XDG_CONFIG_HOME` is relative.
+pub fn UserConfigDir() -> (string, error) {
+    // Go: dir = Getenv("XDG_CONFIG_HOME")
+    let dir = Getenv(string("XDG_CONFIG_HOME"));
+    // Go: if dir == "" { dir = Getenv("HOME"); if dir == "" { return "", errors.New(...) }; dir += "/.config" }
+    if dir.Len() == 0 {
+        let home = Getenv(string("HOME"));
+        if home.Len() == 0 {
+            return (
+                string::new(),
+                errors::New(string(
+                    "neither $XDG_CONFIG_HOME nor $HOME are defined",
+                )),
+            );
+        }
+        let mut b = crate::strings::Builder::new();
+        b.Grow(home.Len() + 8);
+        let _ = b.WriteString(home);
+        let _ = b.WriteString(string("/.config"));
+        return (b.String(), nil);
+    }
+    // Go: else if !filepathlite.IsAbs(dir) { return "", errors.New("path in $XDG_CONFIG_HOME is relative") }
+    if !crate::path::filepath::IsAbs(dir.clone()) {
+        return (
+            string::new(),
+            errors::New(string("path in $XDG_CONFIG_HOME is relative")),
+        );
+    }
+    (dir, nil)
+}
+
 /// Line-by-line port of `os.Getwd()` (file.go ~ getwd) — return the
 /// current working directory via `getcwd(2)`. The buffer doubles up
 /// to a 4 KiB cap, mirroring Go's exponential growth retry loop.
