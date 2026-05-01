@@ -314,6 +314,19 @@ macro_rules! __select_emit {
         // 0 or 1 default arm.
         [ $( ( default ($d_body:expr) ) )* ]
     ) => {{
+        // ─── async-preempt mask across the entire select! body ───
+        // (FIRST statement so eval-once locals also run masked.)
+        //
+        // Pass-1's sort/dedup of `__sel_atoms` runs *before* any
+        // `raw_lock`, so without this bump `m.locks == 0` and the
+        // SIGURG handler is free to inject the async-preempt
+        // trampoline anywhere in user code. Bumping m.locks masks
+        // SIGURG injection until the matching `releasem()` at the
+        // bottom of this block, after which pass-1 success
+        // (`__select_release_all`), pass-2's `selparkcommit`, or
+        // pass-3's per-`__cancel_*` raw_unlock have all returned.
+        $crate::runtime::sched::acquirem();
+
         // ─── eval-once chan + send-val locals ────────────────────
         $( let $br_cn = ($br_ch).clone(); )*
         $( let $pr_cn = ($pr_ch).clone(); )*
@@ -472,6 +485,13 @@ macro_rules! __select_emit {
                 [ $( ($s_idx $s_cn $s_vn $s_sn ($s_body)) )* ]
             );
         };
+        // Matching `releasem()` for the `acquirem()` at the top of
+        // this block. By this point all chan locks held during the
+        // select! invocation have been released — pass-1 success →
+        // `__select_release_all`; pass-2 → `selparkcommit`; pass-3
+        // cancel → per-`__cancel_*` raw_unlock — so dropping
+        // m.locks here re-arms async preempt for subsequent code.
+        $crate::runtime::sched::releasem();
         __select_out
     }};
 }

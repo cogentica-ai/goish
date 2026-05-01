@@ -153,6 +153,35 @@ static SKIP_NO_CURG: AtomicU64 = AtomicU64::new(0);
 static SKIP_NOT_RUNNING: AtomicU64 = AtomicU64::new(0);
 static SKIP_SP_RANGE: AtomicU64 = AtomicU64::new(0);
 
+/// Ring buffer of the last 32 user PCs at which the handler injected
+/// the async-preempt trampoline. Filled mod 32 by the handler; read
+/// from the panic handler / diagnostics. Diagnostic only — used to
+/// correlate panic-time state with the user-code site that was
+/// preempted.
+const INJECT_RING_LEN: usize = 32;
+static INJECT_RING: [AtomicU64; INJECT_RING_LEN] = {
+    const INIT: AtomicU64 = AtomicU64::new(0);
+    [INIT; INJECT_RING_LEN]
+};
+
+/// Read a snapshot of the last `count` injection PCs (most-recent
+/// first, up to `min(count, 32)`). Out-param style for no-alloc use.
+/// Returns the number written.
+pub fn snapshot_injection_pcs(out: &mut [u64]) -> usize {
+    let count = out.len().min(INJECT_RING_LEN);
+    let total = PREEMPT_INJECTIONS.load(Ordering::Relaxed) as usize;
+    let mut written = 0;
+    let mut i = 0;
+    while i < count && i < total {
+        // Most recent first: index = (total - 1 - i) mod RING_LEN.
+        let slot = (total + INJECT_RING_LEN - 1 - i) % INJECT_RING_LEN;
+        out[i] = INJECT_RING[slot].load(Ordering::Relaxed);
+        written += 1;
+        i += 1;
+    }
+    written
+}
+
 /// Total handler invocations since process start.
 pub fn invocations() -> u64 {
     PREEMPT_INVOCATIONS.load(Ordering::Relaxed)
@@ -322,10 +351,31 @@ extern "C" fn goish_async_preempt2() {
 pub unsafe extern "C" fn goish_async_preempt() {
     naked_asm!(
         // ── Prologue ──
+        //
+        // **EFLAGS preservation discipline (entry side, M28-fix-2).**
+        // The kernel preserves the user's EFLAGS across signal
+        // delivery — `rt_sigreturn` restores `ucontext.gregs[REG_EFL]`
+        // to RFLAGS before transferring control to our modified
+        // `ucontext.RIP`. So at trampoline entry, RFLAGS *is* the
+        // user's pre-SIGURG flags.
+        //
+        // Until we `pushfq` to capture them, NO flag-clobbering
+        // instruction may execute — otherwise pushfq saves garbage
+        // and the matching epilogue `popfq` restores garbage,
+        // breaking the user's resume-PC conditional branch (e.g.
+        // a `jne` after a `cmp` from before SIGURG hit). Use `lea`
+        // for RSP arithmetic in this window; `push`/`mov` are
+        // flag-preserving by ISA spec.
+        //
+        // Mirrors the epilogue's "`popfq` last among flag-touchers"
+        // discipline: the prologue's `pushfq` is FIRST among
+        // flag-touchers.
+
         // Step 1: shift SP below the user's red zone (`[SP_user-128,
         // SP_user)`). Anything we push from here on lives strictly
         // below the red zone, leaving leaf-fn locals untouched.
-        "sub rsp, 128",                              // rsp = SP_user-136
+        // `lea` (not `sub`) preserves user's EFLAGS for pushfq below.
+        "lea rsp, [rsp - 128]",                      // rsp = SP_user-136
 
         // Step 2 (M18b-δ.3): advance RSP past the resume-PC slot —
         // the handler has *already* written the resume PC to
@@ -334,20 +384,25 @@ pub unsafe extern "C" fn goish_async_preempt() {
         // (SA_ONSTACK + sigaltstack), the kernel never touches the
         // user G's stack during signal delivery, so the handler's
         // write is the only writer for this slot until the epilogue
-        // reads it.
-        "sub rsp, 8",                                // rsp = SP_user-144 (slot written by handler)
+        // reads it. `lea` (not `sub`) preserves EFLAGS.
+        "lea rsp, [rsp - 8]",                        // rsp = SP_user-144 (slot written by handler)
 
-        // Step 3: standard frame pointer.
+        // Step 3: standard frame pointer. `push` and `mov` are
+        // both ISA-spec flag-preserving — EFLAGS still = user's.
         "push rbp",                                  // [SP_user-152] = user BP
         "mov rbp, rsp",                              // rbp = SP_user-152 — frame anchor
 
-        // Step 4: save flags (so we can restore EFLAGS exactly).
-        "pushfq",                                    // [SP_user-160] = flags
+        // Step 4: save user's EFLAGS. `pushfq` MUST be the first
+        // flag-touching instruction in the trampoline; everything
+        // above is `lea`/`push`/`mov` (all flag-preserving).
+        "pushfq",                                    // [SP_user-160] = user FLAGS
 
-        // Step 5: 384-byte save area + 16-byte alignment for the
-        // SysV `call` below (RSP%16 must be 0 immediately before
-        // CALL; `andq $-16` rounds down).
-        "sub rsp, 384",
+        // Step 5: 768-byte save area + 16-byte alignment.
+        //   [rsp + 0..104]    14 GPRs
+        //   [rsp + 112..623]  512-byte fxsave area (16-aligned)
+        //                     — saves x87/MMX/MXCSR/XMM0-15 in one go.
+        // 768 = 624 (used) + 144 align/call-margin slack.
+        "sub rsp, 768",
         "and rsp, -16",
 
         // Step 6: save 14 GPRs (rax,rcx,rdx,rbx,rsi,rdi,r8-r15) at
@@ -368,23 +423,12 @@ pub unsafe extern "C" fn goish_async_preempt() {
         "mov [rsp + 96],  r14",
         "mov [rsp + 104], r15",
 
-        // Step 7: save 16 XMMs at offsets 112..352.
-        "movups [rsp + 112], xmm0",
-        "movups [rsp + 128], xmm1",
-        "movups [rsp + 144], xmm2",
-        "movups [rsp + 160], xmm3",
-        "movups [rsp + 176], xmm4",
-        "movups [rsp + 192], xmm5",
-        "movups [rsp + 208], xmm6",
-        "movups [rsp + 224], xmm7",
-        "movups [rsp + 240], xmm8",
-        "movups [rsp + 256], xmm9",
-        "movups [rsp + 272], xmm10",
-        "movups [rsp + 288], xmm11",
-        "movups [rsp + 304], xmm12",
-        "movups [rsp + 320], xmm13",
-        "movups [rsp + 336], xmm14",
-        "movups [rsp + 352], xmm15",
+        // Step 7: fxsave64 at [rsp+112] (16-aligned). Saves x87
+        // FPU + MMX + MXCSR + XMM0-15 in 512 bytes — superset of
+        // the prior movups loop. Avoids the multi-instruction
+        // window where individual XMMs could see asynchronous
+        // updates from a nested signal handler.
+        "fxsave64 [rsp + 112]",
 
         // ── Body ──
         // async_preempt2 manages m.locks (acquirem at entry,
@@ -402,7 +446,11 @@ pub unsafe extern "C" fn goish_async_preempt() {
         "mov rax, [rsp + 0]",
         "mov [rbp + 16], rax",
 
-        // Restore the other GPRs (rax stays as scratch).
+        // fxrstor64 — restore x87/MMX/MXCSR/XMM0-15 in one shot.
+        "fxrstor64 [rsp + 112]",
+
+        // Restore the other GPRs (rax stays as scratch — restored
+        // below from the [rbp+16] snapshot, BEFORE popfq).
         "mov rcx, [rsp + 8]",
         "mov rdx, [rsp + 16]",
         "mov rbx, [rsp + 24]",
@@ -417,48 +465,49 @@ pub unsafe extern "C" fn goish_async_preempt() {
         "mov r14, [rsp + 96]",
         "mov r15, [rsp + 104]",
 
-        // Restore XMMs.
-        "movups xmm0,  [rsp + 112]",
-        "movups xmm1,  [rsp + 128]",
-        "movups xmm2,  [rsp + 144]",
-        "movups xmm3,  [rsp + 160]",
-        "movups xmm4,  [rsp + 176]",
-        "movups xmm5,  [rsp + 192]",
-        "movups xmm6,  [rsp + 208]",
-        "movups xmm7,  [rsp + 224]",
-        "movups xmm8,  [rsp + 240]",
-        "movups xmm9,  [rsp + 256]",
-        "movups xmm10, [rsp + 272]",
-        "movups xmm11, [rsp + 288]",
-        "movups xmm12, [rsp + 304]",
-        "movups xmm13, [rsp + 320]",
-        "movups xmm14, [rsp + 336]",
-        "movups xmm15, [rsp + 352]",
+        // ── EFLAGS preservation discipline (M28-fix, hardened) ──
+        //
+        // After `popfq` restores user EFLAGS, the user's resume PC
+        // may be a conditional branch reading ZF/CF/SF set by a
+        // `cmp`/`test` immediately before the SIGURG injection
+        // (concretely: `current_m`'s alignment check
+        // `cmp $0x0, %rax; jne <panic>` — saved EFLAGS reflects
+        // that cmp; ANY flag-clobbering instruction between popfq
+        // and the resume jmp causes JNE to branch on stale flags
+        // and panic spuriously).
+        //
+        // Mirroring Go's `asyncPreempt` epilogue shape (which ends
+        // `…; POPFQ; POPQ BP; RET` — three architecturally
+        // flag-preserving instructions): we restore rax BEFORE
+        // popfq (where flag-clobbering is harmless because the
+        // saved-flag slot is about to overwrite EFLAGS), then
+        // commit the post-popfq window to ONLY:
+        //
+        //     popfq            ; restores user FLAGS
+        //     pop rbp          ; ISA-spec: flag-preserving
+        //     lea rsp, [...]   ; SIB arithmetic, flag-preserving
+        //     jmp qword [mem]  ; memory-operand JMP, flag-preserving
+        //
+        // No `add`/`sub`/`xor`/`test`/`cmp`/`inc`/`dec`/`and`/`or`
+        // may appear between popfq and the resume jmp. If you need
+        // RSP arithmetic, use `lea`.
 
-        // Tear down: rbp anchors us regardless of how the andq
-        // alignment shifted RSP.
-        "lea rsp, [rbp - 8]",                        // popfq slot at [SP_user-160]
-        "popfq",                                     // rsp = SP_user-152
-        "pop rbp",                                   // restore user BP, rsp = SP_user-144 (= resume_pc snapshot slot)
+        // Restore user's rax from the [rbp+16] snapshot — placed
+        // BEFORE popfq deliberately so that even though `mov` is
+        // flag-preserving, we shrink the post-popfq window to
+        // strictly the smallest set of necessary instructions.
+        "mov rax, [rbp + 16]",                       // rax = user_rax
 
-        // Discard the resume_pc snapshot slot (we'll read it via
-        // memory operand below).
-        "add rsp, 8",                                // rsp = SP_user-136 (= user_rax snapshot slot)
+        // Reset rsp to the popfq slot via rbp anchor (lea = flag-safe,
+        // but flags don't matter yet — popfq is next).
+        "lea rsp, [rbp - 8]",                        // rsp = SP_user-160 (popfq slot)
 
-        // Restore user's rax from the snapshot.
-        "mov rax, [rsp]",                            // rax = user_rax
-
-        // Walk rsp up to user's pre-SIGURG SP. We never wrote into
-        // [SP_user-128, SP_user) (red zone) — only read at the very
-        // end via the [rsp - 144] absolute jmp operand below.
-        "add rsp, 128",                              // rsp = SP_user-8
-        "add rsp, 8",                                // rsp = SP_user
-
-        // Jump via memory: [rsp - 144] = [SP_user - 144] = the
-        // resume_pc snapshot we wrote at trampoline entry. The slot
-        // is below the red zone so reading it is benign for the
-        // user's stack invariants.
-        "jmp qword ptr [rsp - 144]",
+        // ─── BEGIN flag-sensitive window ──────────────────────────
+        "popfq",                                     // rsp = SP_user-152, FLAGS = user's
+        "pop rbp",                                   // rsp = SP_user-144, rbp = user's (flag-safe)
+        "lea rsp, [rsp + 144]",                      // rsp = SP_user (flag-safe — lea)
+        "jmp qword ptr [rsp - 144]",                 // jump to resume_pc (flag-safe — mem-op JMP)
+        // ─── END flag-sensitive window ────────────────────────────
 
         // Emit a global end-of-trampoline label inline so
         // `is_in_trampoline` can compute the exact PC range. `int3`
@@ -616,7 +665,11 @@ extern "C" fn goish_preempt_sigtramp(
     // tick if the G is still hogging the M.
     g_ref.preempt.store(false, Ordering::Release);
 
-    PREEMPT_INJECTIONS.fetch_add(1, Ordering::Relaxed);
+    // Record the user PC just before injection into the ring buffer
+    // (mod RING_LEN) for post-mortem correlation with panic state.
+    let prev = PREEMPT_INJECTIONS.fetch_add(1, Ordering::Relaxed);
+    let slot = (prev as usize) % INJECT_RING_LEN;
+    INJECT_RING[slot].store(pc as u64, Ordering::Relaxed);
 }
 
 // ─── Install ───────────────────────────────────────────────────────
