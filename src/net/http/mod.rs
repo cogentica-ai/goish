@@ -32,11 +32,13 @@ pub use client::{
 };
 pub use cookie::{Cookie, ParseCookie, ParseSetCookie, SameSite, SetCookie};
 pub use header::{CanonicalHeaderKey, Header};
-pub use request::{ParseHTTPVersion, ReadRequest, Request};
+pub use request::{
+    ErrMaxBytes, MaxBytesReader, NewMaxBytesReader, ParseHTTPVersion, ReadRequest, Request,
+};
 pub use response::ResponseWriter;
 pub use server::{
-    ErrServerClosed, Handler, HandlerFunc, ListenAndServe, NotFoundHandler, Redirect,
-    RedirectHandler, Serve, ServeMux, Server, StripPrefix,
+    Error, ErrServerClosed, Handler, HandlerFunc, ListenAndServe, NotFound, NotFoundHandler,
+    Redirect, RedirectHandler, Serve, ServeMux, Server, StripPrefix,
 };
 pub use sniff::DetectContentType;
 pub use status::{

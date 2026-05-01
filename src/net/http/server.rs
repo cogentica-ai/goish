@@ -214,6 +214,31 @@ impl Handler for NotFoundHandler {
     }
 }
 
+/// `http.Error(w, error, code)` (server.go:2337) — write a plain-text
+/// HTTP error response. Resets Content-Type to text/plain, sets
+/// X-Content-Type-Options: nosniff, deletes any prior Content-Length,
+/// then writes status + body + trailing newline.
+pub fn Error(w: &mut ResponseWriter, error: string, code: int) {
+    // Go: h := w.Header(); h.Del("Content-Length")
+    w.Header().Del(string("Content-Length"));
+    // Go: h.Set("Content-Type", "text/plain; charset=utf-8")
+    w.Header()
+        .Set(string("Content-Type"), string("text/plain; charset=utf-8"));
+    // Go: h.Set("X-Content-Type-Options", "nosniff")
+    w.Header()
+        .Set(string("X-Content-Type-Options"), string("nosniff"));
+    // Go: w.WriteHeader(code)
+    w.WriteHeader(code);
+    // Go: fmt.Fprintln(w, error) — writes message + "\n"
+    let _ = w.Write(crate::convert::bytes(error));
+    let _ = w.Write(crate::convert::bytes("\n"));
+}
+
+/// `http.NotFound(w, r)` (server.go:2358) — convenience wrapper.
+pub fn NotFound(w: &mut ResponseWriter, _r: &Request) {
+    Error(w, string("404 page not found"), super::status::StatusNotFound);
+}
+
 // ─── StripPrefix / Redirect / RedirectHandler ────────────────────────
 //
 // Line-by-line ports of net/http/server.go:2370 / :2403 / :2488.

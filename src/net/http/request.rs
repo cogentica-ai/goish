@@ -587,6 +587,80 @@ fn valid_method(m: &[u8]) -> bool {
     true
 }
 
+// ─── MaxBytesReader (line-by-line port of request.go:1186) ───────────
+
+/// `http.MaxBytesReader(w, r, n)` — returns a `Reader` that stops
+/// reading from `r` after `n` bytes, returning `MaxBytesError` once
+/// the limit is exceeded. Slim port: drops Go's `requestTooLarge`
+/// connection-close hook (goish ResponseWriter doesn't expose one
+/// yet) and the `io.ReadCloser` aspect (Reader-only).
+pub struct MaxBytesReader<R: io::Reader> {
+    inner: R,
+    initial: int,
+    remaining: int,
+    err: error,
+}
+
+/// `http.MaxBytesReader` returned-error sentinel (request.go:1193).
+pub fn ErrMaxBytes() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::New(string("http: request body too large")));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+pub fn NewMaxBytesReader<R: io::Reader>(r: R, n: int) -> MaxBytesReader<R> {
+    // Go: if n < 0 { n = 0 }
+    let n = if n < 0 { 0 } else { n };
+    MaxBytesReader {
+        inner: r,
+        initial: n,
+        remaining: n,
+        err: errors::nil,
+    }
+}
+
+impl<R: io::Reader> io::Reader for MaxBytesReader<R> {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        // Go: if l.err != nil { return 0, l.err }
+        if !self.err.IsNil() {
+            return (0, self.err.clone());
+        }
+        // Go: if len(p) == 0 { return 0, nil }
+        if p.Len() == 0 {
+            return (0, errors::nil);
+        }
+        // Go: if int64(len(p))-1 > l.n { p = p[:l.n+1] }
+        // We can't shrink the caller's slice; instead read into a tmp.
+        let cap = if p.Len() - 1 > self.remaining {
+            self.remaining + 1
+        } else {
+            p.Len()
+        };
+        let mut tmp = crate::make!([]byte, cap);
+        let (n, err) = self.inner.Read(&mut tmp);
+        // Copy what we read into p.
+        for i in 0..n {
+            p[i] = tmp[i];
+        }
+        // Go: if int64(n) <= l.n { l.n -= int64(n); l.err = err; return n, err }
+        if n <= self.remaining {
+            self.remaining -= n;
+            self.err = err.clone();
+            return (n, err);
+        }
+        // Go: n = int(l.n); l.n = 0; … return n, MaxBytesError
+        let limited_n = self.remaining;
+        self.remaining = 0;
+        let _ = self.initial; // tagged but unused (slim version)
+        self.err = ErrMaxBytes();
+        (limited_n, self.err.clone())
+    }
+}
+
 // ─── Form helpers (line-by-line port of request.go:1245-1306) ────────
 
 /// `parsePostForm(r)` (request.go:1245). Reads body when content type
