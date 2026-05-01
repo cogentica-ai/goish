@@ -7,6 +7,7 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::bytes;
 use goish::io;
 use goish::strings;
 use goish::{byte, string, syscall, Println};
@@ -93,11 +94,38 @@ fn main() {
         }
     }
 
+    // 7. CopyN copies exactly n bytes when src has enough.
+    {
+        let mut r = strings::NewReader(string("0123456789"));
+        let mut buf = bytes::NewBuffer(goish::make!([]byte, 0));
+        let (n, err) = io::CopyN(&mut buf, &mut r, 4);
+        if err.IsNil() && n == 4 && buf.String() == "0123" {
+            Println!("[ 7] CopyN exact               PASS");
+        } else {
+            Println!("[ 7] CopyN exact               FAIL n={} got={}", n, buf.String());
+            failed += 1;
+        }
+    }
+
+    // 8. CopyN on too-short src returns EOF.
+    {
+        let mut r = strings::NewReader(string("ab"));
+        let mut buf = bytes::NewBuffer(goish::make!([]byte, 0));
+        let (n, err) = io::CopyN(&mut buf, &mut r, 5);
+        let want = io::EOF();
+        if !err.IsNil() && err == want && n == 2 {
+            Println!("[ 8] CopyN short src=EOF       PASS");
+        } else {
+            Println!("[ 8] CopyN short src=EOF       FAIL n={}", n);
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        Println!("ok 6/6");
+        Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 6", failed);
+        Println!("FAIL {} of 8", failed);
         syscall::Exit(1);
     }
 }

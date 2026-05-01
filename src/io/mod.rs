@@ -279,6 +279,26 @@ pub fn NopCloser<R: Reader>(r: R) -> NopCloserImpl<R> {
     NopCloserImpl { r }
 }
 
+// ─── CopyN ───────────────────────────────────────────────────────────
+
+/// `io.CopyN(dst, src, n)` (io.go:363) — copy exactly `n` bytes from
+/// `src` to `dst`. Returns `(written, err)` where `written == n iff err == nil`.
+/// If `src` ends early, surfaces `io.EOF`.
+pub fn CopyN(dst: &mut dyn Writer, src: &mut dyn Reader, n: i64) -> (i64, error) {
+    // Go: written, err = Copy(dst, LimitReader(src, n))
+    let mut limited = LimitReader(src, n as int);
+    let (written, err) = Copy(dst, &mut limited);
+    // Go: if written == n { return n, nil }
+    if written == n {
+        return (n, nil);
+    }
+    // Go: if written < n && err == nil { err = EOF }
+    if written < n && err.IsNil() {
+        return (written, EOF());
+    }
+    (written, err)
+}
+
 // ─── ReadAll / ReadFull / ReadAtLeast ────────────────────────────────
 
 /// `io.ReadAll(r)` (io.go:709) — drain `r` until EOF/error, return the
