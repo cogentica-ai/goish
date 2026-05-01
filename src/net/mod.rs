@@ -532,6 +532,96 @@ impl IP {
         IP::default()
     }
 
+    /// `IP.IsUnspecified()` (ip.go:121) — slim. True for the IPv4
+    /// "unspecified" address `0.0.0.0`. (Go also matches IPv6 `::`,
+    /// but slim has no IPv6 representation.)
+    pub fn IsUnspecified(&self) -> bool {
+        // Go: ip.Equal(IPv4zero) || ip.Equal(IPv6unspecified)
+        let ip4 = self.To4();
+        if ip4.bytes.Len() == 4 {
+            return ip4.bytes[0] == 0
+                && ip4.bytes[1] == 0
+                && ip4.bytes[2] == 0
+                && ip4.bytes[3] == 0;
+        }
+        false
+    }
+
+    /// `IP.IsLoopback()` (ip.go:126) — slim. True when the IPv4
+    /// first octet is 127 (RFC 5735 loopback range 127.0.0.0/8).
+    /// IPv6 `::1` not supported in slim.
+    pub fn IsLoopback(&self) -> bool {
+        // Go: if ip4 := ip.To4(); ip4 != nil { return ip4[0] == 127 }
+        let ip4 = self.To4();
+        if ip4.bytes.Len() == 4 {
+            return ip4.bytes[0] == 127;
+        }
+        // Go: return ip.Equal(IPv6loopback)
+        false
+    }
+
+    /// `IP.IsPrivate()` (ip.go:135) — slim. RFC 1918 IPv4 ranges:
+    ///   10.0.0.0/8    — first octet 10
+    ///   172.16.0.0/12 — first octet 172, second octet 16..31
+    ///   192.168.0.0/16 — first octet 192, second octet 168
+    /// RFC 4193 IPv6 (fc00::/7) not supported in slim.
+    pub fn IsPrivate(&self) -> bool {
+        let ip4 = self.To4();
+        if ip4.bytes.Len() == 4 {
+            // Go: ip4[0] == 10
+            if ip4.bytes[0] == 10 {
+                return true;
+            }
+            // Go: ip4[0] == 172 && ip4[1]&0xf0 == 16
+            // (`b & 0xf0 == 16` matches 16..31 inclusive — RFC 1918 172.16/12)
+            if ip4.bytes[0] == 172 && (ip4.bytes[1] & 0xf0) == 16 {
+                return true;
+            }
+            // Go: ip4[0] == 192 && ip4[1] == 168
+            if ip4.bytes[0] == 192 && ip4.bytes[1] == 168 {
+                return true;
+            }
+            return false;
+        }
+        // Slim: IPv6 unique-local (fc00::/7) not supported.
+        false
+    }
+
+    /// `IP.IsMulticast()` (ip.go:153) — slim. IPv4 multicast is
+    /// 224.0.0.0/4 (first octet's high nibble == 0xE).
+    pub fn IsMulticast(&self) -> bool {
+        let ip4 = self.To4();
+        if ip4.bytes.Len() == 4 {
+            // Go: return ip4[0]&0xf0 == 0xe0
+            return (ip4.bytes[0] & 0xf0) == 0xe0;
+        }
+        false
+    }
+
+    /// `IP.IsLinkLocalMulticast()` (ip.go:168) — slim. IPv4
+    /// link-local multicast is 224.0.0.0/24 (224.0.0.x).
+    pub fn IsLinkLocalMulticast(&self) -> bool {
+        let ip4 = self.To4();
+        if ip4.bytes.Len() == 4 {
+            // Go: ip4[0] == 224 && ip4[1] == 0 && ip4[2] == 0
+            return ip4.bytes[0] == 224
+                && ip4.bytes[1] == 0
+                && ip4.bytes[2] == 0;
+        }
+        false
+    }
+
+    /// `IP.IsLinkLocalUnicast()` (ip.go:177) — slim. IPv4 link-local
+    /// unicast is 169.254.0.0/16 (RFC 3927).
+    pub fn IsLinkLocalUnicast(&self) -> bool {
+        let ip4 = self.To4();
+        if ip4.bytes.Len() == 4 {
+            // Go: ip4[0] == 169 && ip4[1] == 254
+            return ip4.bytes[0] == 169 && ip4.bytes[1] == 254;
+        }
+        false
+    }
+
     /// `IP.String()` (ip.go:299) — slim. IPv4 addresses render as
     /// `"a.b.c.d"`. The nil sentinel renders as `"<nil>"` (matches Go).
     /// IPv6 forms are not supported in slim and render as `"<nil>"`.
