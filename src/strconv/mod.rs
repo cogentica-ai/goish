@@ -735,6 +735,48 @@ pub fn AppendQuoteRuneToASCII(dst: slice<byte>, r: rune) -> slice<byte> {
 /// Slim: ASCII fast-path identical to Go for that subset; multi-byte
 /// runes other than the BOM (U+FEFF) are assumed printable per Go's
 /// comment on quote.go:220.
+pub fn IsPrint(r: crate::types::rune) -> bool {
+    // Go: if r <= 0xFF { ... fast Latin-1 path ... }
+    if r <= 0xFF {
+        // Go: if 0x20 <= r && r <= 0x7E { return true }
+        if r >= 0x20 && r <= 0x7E {
+            return true;
+        }
+        // Go: if 0xA1 <= r && r <= 0xFF { return r != 0xAD }
+        if r >= 0xA1 && r <= 0xFF {
+            return r != 0xAD;
+        }
+        return false;
+    }
+    // Slim deviation: the upstream non-Latin-1 path consults the
+    // isPrint16 / isPrint32 / isNotPrint16 / isNotPrint32 Unicode tables
+    // (~32 KiB static). Goish v1 doesn't ship those, so codepoints with
+    // r > 0xFF that are valid Unicode (excluding surrogates and the
+    // > 0x10FFFF out-of-range region) are accepted as printable. This
+    // errs toward "show the rune" — callers needing strict Unicode-table
+    // conformance should not rely on this for security-sensitive
+    // filtering.
+    if r < 0 || r > 0x10_FFFF {
+        return false;
+    }
+    if r >= 0xD800 && r <= 0xDFFF {
+        return false;
+    }
+    true
+}
+
+/// Line-by-line port of `strconv.IsGraphic(r)` (quote.go:568) — reports
+/// whether `r` is defined as a Graphic by Unicode (categories L, M, N,
+/// P, S, and Zs).
+///
+/// Slim: defers to IsPrint; upstream's `isInGraphicList` extension for
+/// the U+0000..U+FFFF range needs the `isGraphic` table that goish v1
+/// doesn't ship.
+pub fn IsGraphic(r: crate::types::rune) -> bool {
+    // Go: if IsPrint(r) { return true }; return isInGraphicList(r)
+    IsPrint(r)
+}
+
 pub fn CanBackquote<S: Into<string>>(s: S) -> bool {
     let s = s.into();
     let bs = s.as_bytes();
