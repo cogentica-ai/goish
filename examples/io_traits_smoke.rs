@@ -10,6 +10,7 @@ extern crate goish;
 
 use goish::bytes;
 use goish::io::{self, ByteReader, ByteScanner, ByteWriter, ReaderAt, Seeker, StringWriter};
+use goish::strings;
 use goish::{byte, string, syscall, Println};
 
 #[goish::main]
@@ -99,11 +100,43 @@ fn main() {
         }
     }
 
+    // 7. strings.Reader satisfies Seeker.
+    {
+        let mut r = strings::NewReader(string("0123456789"));
+        let (pos, err) = io::Seeker::Seek(&mut r, 7, io::SeekStart);
+        if err.IsNil() && pos == 7 {
+            let mut buf = goish::make!([]byte, 2);
+            let _ = r.Read(&mut buf);
+            if buf[0] == b'7' && buf[1] == b'8' {
+                Println!("[ 7] strings Reader Seek       PASS");
+            } else {
+                Println!("[ 7] strings Reader Seek       FAIL bytes");
+                failed += 1;
+            }
+        } else {
+            Println!("[ 7] strings Reader Seek       FAIL pos={}", pos);
+            failed += 1;
+        }
+    }
+
+    // 8. strings.Reader satisfies ReaderAt.
+    {
+        let mut r = strings::NewReader(string("hello"));
+        let mut p = goish::make!([]byte, 3);
+        let (n, err) = io::ReaderAt::ReadAt(&mut r, &mut p, 1);
+        if err.IsNil() && n == 3 && p[0] == b'e' && p[1] == b'l' && p[2] == b'l' {
+            Println!("[ 8] strings Reader ReadAt     PASS");
+        } else {
+            Println!("[ 8] strings Reader ReadAt     FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        Println!("ok 6/6");
+        Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 6", failed);
+        Println!("FAIL {} of 8", failed);
         syscall::Exit(1);
     }
 }

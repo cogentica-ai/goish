@@ -1022,11 +1022,61 @@ impl Reader {
         self.s = s.into();
         self.i = 0;
     }
+
+    /// `(r *Reader).Seek(offset, whence)` (strings/reader.go:99) — slim port.
+    pub fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
+        let abs: i64 = if whence == io::SeekStart {
+            offset
+        } else if whence == io::SeekCurrent {
+            (self.i as i64).wrapping_add(offset)
+        } else if whence == io::SeekEnd {
+            (self.s.Len() as i64).wrapping_add(offset)
+        } else {
+            return (0, crate::errors::New("strings.Reader.Seek: invalid whence"));
+        };
+        if abs < 0 {
+            return (0, crate::errors::New("strings.Reader.Seek: negative position"));
+        }
+        self.i = abs as int;
+        (abs, nil)
+    }
+
+    /// `(r *Reader).ReadAt(p, off)` (strings/reader.go:62) — slim port.
+    pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
+        if off < 0 {
+            return (0, crate::errors::New("strings.Reader.ReadAt: negative offset"));
+        }
+        if off >= self.s.Len() as i64 {
+            return (0, io::EOF());
+        }
+        let bytes = self.s.as_bytes();
+        let start = off as usize;
+        let want = (p.Len() as usize).min(bytes.len() - start);
+        for k in 0..want {
+            p[k as int] = bytes[start + k];
+        }
+        if want < p.Len() as usize {
+            return (want as int, io::EOF());
+        }
+        (want as int, nil)
+    }
 }
 
 impl io::Reader for Reader {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         Reader::Read(self, p)
+    }
+}
+
+impl io::Seeker for Reader {
+    fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
+        Reader::Seek(self, offset, whence)
+    }
+}
+
+impl io::ReaderAt for Reader {
+    fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
+        Reader::ReadAt(self, p, off)
     }
 }
 
