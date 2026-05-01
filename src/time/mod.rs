@@ -1212,6 +1212,28 @@ impl Ticker {
     }
 }
 
+/// `time.Tick(d)` (tick.go:86) — convenience wrapper that returns a
+/// channel which delivers ticks every `d`. Equivalent to
+/// `NewTicker(d).C`.
+///
+/// Slim deviation: Go returns a typed-nil `<-chan Time` when `d <= 0`,
+/// causing receives to block forever (Go's nil-channel semantics).
+/// Goish channels have no nil representation, so we instead return an
+/// unbuffered `chan<Time>` with no producer — receives on it block
+/// indefinitely, matching the observable behavior of Go's nil-channel
+/// case for the common usage pattern `for now := range time.Tick(d)`.
+#[allow(non_snake_case)]
+pub fn Tick(d: Duration) -> chan<Time> {
+    // Go: if d <= 0 { return nil }
+    if d.0 <= 0 {
+        // No producer goroutine; receives block forever — closest
+        // possible match to Go's nil-channel semantics.
+        return crate::make!(chan Time, 0);
+    }
+    // Go: return NewTicker(d).C
+    NewTicker(d).C
+}
+
 /// `time.NewTicker(d)` — fires roughly every `d`. Mirrors
 /// `NewTicker`.
 #[allow(non_snake_case)]
