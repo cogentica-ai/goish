@@ -764,6 +764,184 @@ impl IP {
     }
 }
 
+/// `net.IPMask` (ip.go:43) — bitmask used to manipulate IP addresses
+/// for routing. Slim port keeps the same backing as `IP` (slice<byte>);
+/// length 4 is the IPv4 form (`/0` … `/32`). IPv6 length-16 masks are
+/// accepted for length checks but not produced by `CIDRMask` in slim.
+#[derive(Clone, Default)]
+pub struct IPMask {
+    /// Backing bytes. Length 4 for an IPv4 mask; length 0 means "nil".
+    pub bytes: slice<byte>,
+}
+
+impl IPMask {
+    /// `IPMask.Size()` (ip.go:440) — return `(ones, bits)` where `ones`
+    /// is the count of leading 1-bits and `bits` is the total mask
+    /// width. Returns `(0, 0)` if the mask isn't canonical (ones
+    /// followed by zeros).
+    pub fn Size(&self) -> (int, int) {
+        // Go: ones, bits = simpleMaskLength(m), len(m)*8
+        let ones = simple_mask_length(self);
+        let bits = (self.bytes.Len() as int) * 8;
+        // Go: if ones == -1 { return 0, 0 }
+        if ones == -1 {
+            return (0, 0);
+        }
+        (ones, bits)
+    }
+
+    /// `IPMask.String()` (ip.go:449) — hex form, no punctuation.
+    /// Returns `"<nil>"` for the empty mask.
+    pub fn String(&self) -> string {
+        // Go: if len(m) == 0 { return "<nil>" }
+        if self.bytes.Len() == 0 {
+            return string::from_static("<nil>");
+        }
+        // Go: return hexString(m)
+        hex_string(&self.bytes)
+    }
+}
+
+/// `simpleMaskLength` (ip.go:410) — return number of leading 1-bits
+/// when `mask` is canonical (1s followed by 0s), else -1.
+fn simple_mask_length(m: &IPMask) -> int {
+    let mut n: int = 0;
+    let len = m.bytes.Len();
+    let mut i: int = 0;
+    while i < len {
+        let mut v = m.bytes[i];
+        // Go: if v == 0xff { n += 8; continue }
+        if v == 0xff {
+            n += 8;
+            i += 1;
+            continue;
+        }
+        // Go: count 1 bits in this non-ff byte.
+        while (v & 0x80) != 0 {
+            n += 1;
+            v <<= 1;
+        }
+        // Go: rest must be 0 bits.
+        if v != 0 {
+            return -1;
+        }
+        i += 1;
+        while i < len {
+            // Go: if mask[i] != 0 { return -1 }
+            if m.bytes[i] != 0 {
+                return -1;
+            }
+            i += 1;
+        }
+        break;
+    }
+    n
+}
+
+/// `hexString` (ip.go:318) — render bytes as lowercase hex with no
+/// punctuation.
+fn hex_string(b: &slice<byte>) -> string {
+    const HEX: &[byte] = b"0123456789abcdef";
+    let mut buf: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity((b.Len() as usize) * 2);
+    for (_, c) in crate::range!(b.clone()) {
+        buf.push(HEX[(c >> 4) as usize]);
+        buf.push(HEX[(c & 0x0f) as usize]);
+    }
+    string::from_bytes(&buf)
+}
+
+/// `net.IPv4Mask(a, b, c, d)` (ip.go:67) — IPv4 4-byte mask.
+pub fn IPv4Mask(a: byte, b: byte, c: byte, d: byte) -> IPMask {
+    // Go: p := make(IPMask, IPv4len); p[0]=a; p[1]=b; p[2]=c; p[3]=d.
+    let mut v: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(4);
+    v.push(a);
+    v.push(b);
+    v.push(c);
+    v.push(d);
+    IPMask {
+        bytes: slice::<byte>::__from_vec(v),
+    }
+}
+
+/// `net.CIDRMask(ones, bits)` (ip.go:79) — `ones` 1-bits followed by
+/// 0s up to total `bits` width. Slim: accepts `bits` of 32 or 128,
+/// matching Go; for 128 we still produce a 16-byte mask buffer.
+/// Returns the nil-IPMask if inputs are invalid.
+pub fn CIDRMask(ones: int, bits: int) -> IPMask {
+    // Go: if bits != 8*IPv4len && bits != 8*IPv6len { return nil }
+    if bits != 32 && bits != 128 {
+        return IPMask::default();
+    }
+    // Go: if ones < 0 || ones > bits { return nil }
+    if ones < 0 || ones > bits {
+        return IPMask::default();
+    }
+    // Go: l := bits / 8; m := make(IPMask, l)
+    let l = (bits / 8) as usize;
+    let mut m: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(l);
+    m.resize(l, 0u8);
+    // Go: n := uint(ones); for i := 0; i < l; i++ { ... }
+    let mut n = ones as u32;
+    for i in 0..l {
+        if n >= 8 {
+            m[i] = 0xff;
+            n -= 8;
+            continue;
+        }
+        // Go: m[i] = ^byte(0xff >> n)
+        m[i] = !(0xff_u8 >> n);
+        n = 0;
+    }
+    IPMask {
+        bytes: slice::<byte>::__from_vec(m),
+    }
+}
+
+impl IP {
+    /// `IP.DefaultMask()` (ip.go:248) — RFC 791 default classful mask.
+    /// Returns the nil-IPMask if the IP isn't IPv4.
+    pub fn DefaultMask(&self) -> IPMask {
+        // Go: if ip = ip.To4(); ip == nil { return nil }
+        let ip4 = self.To4();
+        if ip4.bytes.Len() != 4 {
+            return IPMask::default();
+        }
+        // Go: switch { case ip[0] < 0x80: classA; case ip[0] < 0xC0: classB; default: classC }
+        let first = ip4.bytes[0];
+        if first < 0x80 {
+            return IPv4Mask(0xff, 0, 0, 0);
+        }
+        if first < 0xC0 {
+            return IPv4Mask(0xff, 0xff, 0, 0);
+        }
+        IPv4Mask(0xff, 0xff, 0xff, 0)
+    }
+
+    /// `IP.Mask(mask)` (ip.go:272) — bitwise-AND ip with mask. Returns
+    /// the nil-IP if shapes don't line up. Slim: only the IPv4×IPv4
+    /// path is taken (the v4-mapped-v6 reductions in Go are for IPs
+    /// goish doesn't construct).
+    pub fn Mask(&self, mask: IPMask) -> IP {
+        // Go: shape-normalize mismatched lengths via v4InV6Prefix.
+        // Slim: skip; both must be 4-byte IPv4 (or both nil).
+        let n = self.bytes.Len();
+        // Go: if n != len(mask) { return nil }
+        if n != mask.bytes.Len() {
+            return IP::default();
+        }
+        // Go: out := make(IP, n); for i := 0; i < n; i++ { out[i] = ip[i] & mask[i] }
+        let mut out: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(n as usize);
+        let mut i: int = 0;
+        while i < n {
+            out.push(self.bytes[i] & mask.bytes[i]);
+            i += 1;
+        }
+        IP {
+            bytes: slice::<byte>::__from_vec(out),
+        }
+    }
+}
+
 /// `net.IPv4(a, b, c, d)` (ip.go:43) — construct an IPv4 net.IP.
 /// Slim port returns the 4-byte form directly (Go returns the
 /// 16-byte v4-mapped-v6 form, which `To4()` then collapses).
