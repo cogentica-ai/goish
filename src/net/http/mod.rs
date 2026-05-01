@@ -22,6 +22,7 @@ pub mod header;
 pub mod httputil;
 pub mod method;
 pub mod pattern;
+pub mod protocols;
 pub mod request;
 pub mod response;
 pub mod server;
@@ -43,6 +44,7 @@ pub use method::{
     MethodConnect, MethodDelete, MethodGet, MethodHead, MethodOptions, MethodPatch, MethodPost,
     MethodPut, MethodTrace,
 };
+pub use protocols::{NoBody, Protocols};
 pub use request::{
     ErrMaxBytes, ErrMissingBoundary, ErrNotMultipart, MaxBytesError, MaxBytesReader,
     NewMaxBytesError, NewMaxBytesReader, ParseHTTPVersion, ReadRequest, Request,
