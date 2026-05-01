@@ -383,6 +383,34 @@ impl Time {
         (unix_days_now - unix_days_jan1 + 1) as int
     }
 
+    /// `t.ISOWeek()` (time.go:848) — ISO 8601 (year, week) for t.
+    /// Week 1 contains the first Thursday of the ISO year. A January 1 in
+    /// some years can belong to week 52 or 53 of the previous ISO year;
+    /// likewise December 31 can fall in week 1 of the next ISO year.
+    pub fn ISOWeek(self) -> (int, int) {
+        // Go: time.go:859 — `days := t.absSec().days()`.
+        let days = self.sec.div_euclid(86_400);
+        // Go: time.go:860 — `thu := days + absDays(Thursday - ((days-1).weekday()+1))`.
+        // `weekday()` on absDays returns Sun=0..Sat=6 (Go's standard
+        // `Weekday`). We derive the same numbering from Unix days:
+        // 1970-01-01 was a Thursday (=4 in Sun=0..Sat=6), so
+        //   weekday_sun(unix_day) = (unix_day + 4) mod 7
+        //   weekday_sun(unix_day - 1) = (unix_day + 3) mod 7
+        let sun_weekday_yesterday = (days + 3).rem_euclid(7);
+        // Thursday = 4. offset = Thursday - (sun_weekday_yesterday + 1)
+        //                     = 3 - sun_weekday_yesterday.
+        let offset = 3 - sun_weekday_yesterday;
+        let thu_days = days + offset;
+        // Go: time.go:861 — `year, yday := thu.yearYday()`.
+        // Slim: derive year from civil_from_unix on Thursday's epoch sec,
+        // then year_day from (thu_days - days_from_civil(year,1,1) + 1).
+        let (thu_year, _, _, _, _, _) = civil_from_unix(thu_days * 86_400);
+        let thu_jan1 = days_from_civil(thu_year, 1, 1);
+        let yday = thu_days - thu_jan1 + 1;
+        // Go: time.go:862
+        (thu_year, (yday - 1) / 7 + 1)
+    }
+
     /// `t.AddDate(years, months, days)` (time.go:1258) — add the given
     /// number of years, months, and days, normalizing the result the
     /// same way `Date` does (e.g. `AddDate(0, 1, 0)` on Oct 31 yields
