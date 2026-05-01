@@ -14,6 +14,8 @@
 
 extern crate alloc;
 
+pub mod multipart;
+
 use crate::string;
 use crate::strings;
 

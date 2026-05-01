@@ -51,6 +51,7 @@ pub mod builtin_macros;
 pub mod bytes;
 pub mod context;
 pub mod convert;
+pub mod crypto;
 pub mod defer;
 pub mod encoding;
 pub mod errors;

@@ -361,6 +361,21 @@ pub fn Rmdir(path: *const u8) -> i32 {
     unsafe { syscall1(SYS_RMDIR, path as usize) as i32 }
 }
 
+// ─── getrandom ───────────────────────────────────────────────────────
+
+pub const SYS_GETRANDOM: usize = 318;
+pub const GRND_NONBLOCK: u32 = 0x0001;
+pub const GRND_RANDOM: u32 = 0x0002;
+pub const GRND_INSECURE: u32 = 0x0004;
+
+/// `getrandom(2)` — fill `buf[0..buflen]` with random bytes from the
+/// kernel CSPRNG. Returns the number of bytes written, or `-errno` on
+/// failure.
+#[allow(non_snake_case)]
+pub fn Getrandom(buf: *mut u8, buflen: usize, flags: u32) -> i64 {
+    unsafe { syscall3(SYS_GETRANDOM, buf as usize, buflen, flags as usize) as i64 }
+}
+
 // ─── getdents64 ──────────────────────────────────────────────────────
 
 pub const SYS_GETDENTS64: usize = 217;
