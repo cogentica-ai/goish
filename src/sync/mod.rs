@@ -22,11 +22,13 @@
 pub mod atomic;
 mod mutex;
 mod once;
+mod oncefunc;
 mod rwmutex;
 mod sema;
 mod waitgroup;
 
 pub use mutex::{Mutex, MutexGuard};
 pub use once::Once;
+pub use oncefunc::{OnceFunc, OnceValue};
 pub use rwmutex::RWMutex;
 pub use waitgroup::WaitGroup;
