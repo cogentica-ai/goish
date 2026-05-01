@@ -1080,6 +1080,41 @@ impl io::ReaderAt for Reader {
     }
 }
 
+impl Reader {
+    /// `(r *Reader).WriteTo(w)` (strings/reader.go:137) — drain the
+    /// unread tail to `w` via WriteString. Returns bytes written.
+    pub fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
+        // Go's prevRune reset is only needed for UnreadRune support,
+        // which the slim goish Reader doesn't track. Skip.
+        // Go: if r.i >= int64(len(r.s)) { return 0, nil }
+        if self.i as usize >= self.s.as_bytes().len() {
+            return (0, nil);
+        }
+        // s := r.s[r.i:]
+        let tail = &self.s.as_bytes()[self.i as usize..];
+        let s_tail = string::from_bytes(tail);
+        // m, err := io.WriteString(w, s)
+        let (m, err) = io::WriteString(w, s_tail);
+        if (m as usize) > tail.len() {
+            panic!("strings.Reader.WriteTo: invalid WriteString count");
+        }
+        // r.i += int64(m); n = int64(m)
+        self.i += m as i64;
+        let n = m as i64;
+        // if m != len(s) && err == nil { err = io.ErrShortWrite }
+        if (m as usize) != tail.len() && err.IsNil() {
+            return (n, io::ErrShortWrite());
+        }
+        (n, err)
+    }
+}
+
+impl io::WriterTo for Reader {
+    fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
+        Reader::WriteTo(self, w)
+    }
+}
+
 /// `strings.NewReader(s)` — `Reader` over `s`.
 pub fn NewReader<S: Into<string>>(s: S) -> Reader {
     Reader { s: s.into(), i: 0 }

@@ -773,7 +773,7 @@ impl Buffer {
     /// `(b *Buffer).ReadFrom(r)` (buffer.go:212) — read from `r`
     /// until EOF and append to the buffer. Returns the number of
     /// bytes read.
-    pub fn ReadFrom<R: io::Reader + ?Sized>(&mut self, r: &mut R) -> (i64, error) {
+    pub fn ReadFrom(&mut self, r: &mut dyn io::Reader) -> (i64, error) {
         let mut n: i64 = 0;
         loop {
             // Go: i := b.grow(MinRead); b.buf = b.buf[:i]
@@ -802,7 +802,7 @@ impl Buffer {
     /// `(b *Buffer).WriteTo(w)` (buffer.go:264) — drain buffer to
     /// `w` until exhausted or an error occurs. Returns bytes
     /// written.
-    pub fn WriteTo<W: io::Writer + ?Sized>(&mut self, w: &mut W) -> (i64, error) {
+    pub fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
         let mut n: i64 = 0;
         let nbytes = self.Len();
         if nbytes > 0 {
@@ -962,6 +962,33 @@ impl Reader {
         (abs, nil)
     }
 
+    /// `(r *Reader).WriteTo(w)` (bytes/reader.go:137) — drain unread
+    /// tail to `w` via Write. Returns bytes written.
+    pub fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
+        // Go's prevRune reset is for UnreadRune support; slim Reader
+        // doesn't track it. Skip.
+        // Go: if r.i >= int64(len(r.s)) { return 0, nil }
+        if self.i >= self.s.len() {
+            return (0, nil);
+        }
+        // b := r.s[r.i:]
+        let b = slice::__from_vec(self.s[self.i..].to_vec());
+        let blen = b.Len();
+        // m, err := w.Write(b)
+        let (m, err) = w.Write(b);
+        if m > blen {
+            panic!("bytes.Reader.WriteTo: invalid Write count");
+        }
+        // r.i += int64(m); n = int64(m)
+        self.i += m as usize;
+        let n = m as i64;
+        // if m != len(b) && err == nil { err = io.ErrShortWrite }
+        if m != blen && err.IsNil() {
+            return (n, io::ErrShortWrite());
+        }
+        (n, err)
+    }
+
     /// `(r *Reader).ReadAt(p, off)` (bytes/reader.go:88) — slim port.
     pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
         // Go: if off < 0 { return 0, errors.New("bytes.Reader.ReadAt: negative offset") }
@@ -999,6 +1026,12 @@ impl io::ReaderAt for Reader {
 impl io::Reader for Reader {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         Reader::Read(self, p)
+    }
+}
+
+impl io::WriterTo for Reader {
+    fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
+        Reader::WriteTo(self, w)
     }
 }
 
