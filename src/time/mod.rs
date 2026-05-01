@@ -447,6 +447,47 @@ impl Time {
         }
         err
     }
+
+    /// `t.MarshalJSON()` (time.go:1587) — encode as a JSON-quoted
+    /// RFC3339 string. Slim deviation: emits RFC3339 (no fractional
+    /// seconds) instead of RFC3339Nano, mirroring MarshalText.
+    pub fn MarshalJSON(self) -> (crate::goslice::slice<crate::types::byte>, crate::errors::error) {
+        // b := make([]byte, 0, len(RFC3339Nano)+len(`""`))
+        let mut b: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(RFC3339Nano.len() + 2);
+        // b = append(b, '"')
+        b.push(b'"');
+        // appendStrictRFC3339 — slim version: just Format(RFC3339).
+        let s = self.Format(crate::gostring::string::from(RFC3339));
+        b.extend_from_slice(s.as_bytes());
+        // b = append(b, '"')
+        b.push(b'"');
+        (crate::goslice::slice::__from_vec(b), crate::nil)
+    }
+
+    /// `(*Time).UnmarshalJSON(data)` (time.go:1600) — parse a JSON-
+    /// quoted RFC3339 string. Treats the literal `null` as a no-op.
+    pub fn UnmarshalJSON(
+        &mut self,
+        data: crate::goslice::slice<crate::types::byte>,
+    ) -> crate::errors::error {
+        // if string(data) == "null" { return nil }
+        if &*data == b"null" {
+            return crate::nil;
+        }
+        // if len(data) < 2 || data[0] != '"' || data[len(data)-1] != '"' { error }
+        let bs = &*data;
+        if bs.len() < 2 || bs[0] != b'"' || bs[bs.len() - 1] != b'"' {
+            return crate::errors::New("Time.UnmarshalJSON: input is not a JSON string");
+        }
+        // data = data[1:len(data)-1]
+        let inner = &bs[1..bs.len() - 1];
+        let s = crate::gostring::string::from_bytes(inner);
+        let (t, err) = Parse(crate::gostring::string::from(RFC3339), s);
+        if err.IsNil() {
+            *self = t;
+        }
+        err
+    }
 }
 
 const MONTH_SHORT: [&str; 13] = [
