@@ -73,6 +73,103 @@ pub fn envp_unset(key: &[u8]) {
     g.push((key.to_vec(), None));
 }
 
+/// Walk the merged environment (kernel envp + overlay) and produce a
+/// list of `KEY=VALUE` byte buffers. Overlay tombstones suppress the
+/// kernel-supplied entry; overlay sets win for ordering (entries come
+/// after kernel entries).
+pub unsafe fn envp_environ() -> Vec<Vec<u8>> {
+    let mut out: Vec<Vec<u8>> = Vec::new();
+    // Build a quick set of overlay-shadowed keys to skip from kernel walk.
+    let g = OVERLAY.lock();
+    let overlay_keys: Vec<Vec<u8>> = g.iter().map(|(k, _)| k.clone()).collect();
+    drop(g);
+
+    let raw = match get() {
+        Some(r) => r,
+        None => Raw {
+            argc: 0,
+            argv: core::ptr::null(),
+        },
+    };
+    if !raw.argv.is_null() {
+        let envp_start = raw.argv.add(raw.argc as usize + 1);
+        let mut i: usize = 0;
+        while i < 4096 {
+            let entry = *envp_start.add(i);
+            if entry.is_null() {
+                break;
+            }
+            // Find '=' offset and total NUL-terminated length.
+            let mut eq: usize = 0;
+            while eq < 16 * 1024 && *entry.add(eq) != b'=' && *entry.add(eq) != 0 {
+                eq += 1;
+            }
+            let key = core::slice::from_raw_parts(entry, eq);
+            // Skip if shadowed by overlay (we'll emit the overlay version below).
+            let shadowed = overlay_keys.iter().any(|k| k.as_slice() == key);
+            if !shadowed {
+                let mut total = eq;
+                if *entry.add(eq) == b'=' {
+                    total = eq + 1;
+                    while total < 64 * 1024 && *entry.add(total) != 0 {
+                        total += 1;
+                    }
+                }
+                let buf = core::slice::from_raw_parts(entry, total).to_vec();
+                out.push(buf);
+            }
+            i += 1;
+        }
+    }
+    // Append overlay sets (tombstones suppressed).
+    let g = OVERLAY.lock();
+    for (k, v) in g.iter() {
+        if let Some(val) = v {
+            let mut buf: Vec<u8> = Vec::with_capacity(k.len() + 1 + val.len());
+            buf.extend_from_slice(k);
+            buf.push(b'=');
+            buf.extend_from_slice(val);
+            out.push(buf);
+        }
+    }
+    out
+}
+
+/// Clear the entire visible environment: install a tombstone for every
+/// kernel-envp key, then drop overlay sets. Subsequent Setenv calls
+/// repopulate the overlay normally.
+pub unsafe fn envp_clear() {
+    let mut keys_to_tombstone: Vec<Vec<u8>> = Vec::new();
+    let raw = match get() {
+        Some(r) => r,
+        None => Raw {
+            argc: 0,
+            argv: core::ptr::null(),
+        },
+    };
+    if !raw.argv.is_null() {
+        let envp_start = raw.argv.add(raw.argc as usize + 1);
+        let mut i: usize = 0;
+        while i < 4096 {
+            let entry = *envp_start.add(i);
+            if entry.is_null() {
+                break;
+            }
+            let mut eq: usize = 0;
+            while eq < 16 * 1024 && *entry.add(eq) != b'=' && *entry.add(eq) != 0 {
+                eq += 1;
+            }
+            keys_to_tombstone.push(core::slice::from_raw_parts(entry, eq).to_vec());
+            i += 1;
+        }
+    }
+    let mut g = OVERLAY.lock();
+    g.clear();
+    for k in keys_to_tombstone.into_iter() {
+        g.push((k, None));
+    }
+}
+
 /// Walk the kernel-supplied envp (located at argv + argc + 1 per the
 /// Linux ELF stack layout) looking for an entry of the form `KEY=...`
 /// where `KEY` matches `key`. Returns `(value, true)` on hit. The

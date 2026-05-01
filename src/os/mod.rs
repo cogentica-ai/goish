@@ -345,6 +345,29 @@ pub fn Unsetenv(key: string) -> error {
     nil
 }
 
+/// Line-by-line port of `os.Environ()` (env.go:139) — return a copy of
+/// the entire visible environment as a slice of `KEY=VALUE` strings.
+/// Goish merges kernel envp with the Setenv/Unsetenv overlay; tombstoned
+/// keys are omitted, and Setenv'd keys appear after the kernel entries.
+pub fn Environ() -> slice<string> {
+    // Go: copyenv(); a := make([]string, 0, len(envs)); for _, env := range envs { ... }; return a
+    let bufs = unsafe { runtime::args::envp_environ() };
+    let mut out: Vec<string> = Vec::with_capacity(bufs.len());
+    for b in bufs.iter() {
+        out.push(string::from_bytes(b));
+    }
+    slice::__from_vec(out)
+}
+
+/// Line-by-line port of `os.Clearenv()` (env.go:134) — delete every
+/// environment variable visible to this process. Goish slim: installs
+/// a tombstone for every kernel-envp key and drops overlay sets, since
+/// kernel envp is read-only.
+pub fn Clearenv() {
+    // Go: syscall.Clearenv()
+    unsafe { runtime::args::envp_clear() };
+}
+
 /// `os.TempDir()` (file.go:490) — TMPDIR if set, else "/tmp".
 pub fn TempDir() -> string {
     let (v, ok) = LookupEnv(string("TMPDIR"));
