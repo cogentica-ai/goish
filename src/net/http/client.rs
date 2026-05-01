@@ -94,6 +94,15 @@ impl Response {
         read_set_cookies(&self.Header)
     }
 
+    /// `(*Response).ProtoAtLeast(major, minor)` (response.go:224) —
+    /// reports whether the response's HTTP protocol is at least
+    /// major.minor.
+    pub fn ProtoAtLeast(&self, major: int, minor: int) -> bool {
+        // Go: return r.ProtoMajor > major ||
+        //         r.ProtoMajor == major && r.ProtoMinor >= minor
+        self.ProtoMajor > major || self.ProtoMajor == major && self.ProtoMinor >= minor
+    }
+
     /// `(*Response).Location()` — Resolve the `Location` header.
     /// Returns absolute URLs as-is; relative URLs are best-effort
     /// resolved against the request's URL.
