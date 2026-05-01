@@ -72,5 +72,5 @@ pub use status::{
 };
 pub use url::{
     JoinPath as JoinURLPath, Parse as ParseURL, ParseRequestURI, PathEscape, PathUnescape,
-    QueryEscape, QueryUnescape, ValuesEncode, URL,
+    QueryEscape, QueryUnescape, User, UserPassword, Userinfo, ValuesEncode, URL,
 };

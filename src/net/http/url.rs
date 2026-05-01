@@ -326,6 +326,62 @@ fn parse_query(m: &mut map<string, slice<string>>, mut query: string) -> error {
     err
 }
 
+// ─── Userinfo (slim port of url.go:411) ──────────────────────────────
+
+/// `url.Userinfo` — immutable username + optional password.
+/// `passwordSet` distinguishes "no password" from "empty password".
+#[derive(Clone)]
+pub struct Userinfo {
+    username: string,
+    password: string,
+    password_set: bool,
+}
+
+/// `url.User(username)` (url.go:391) — Userinfo with no password set.
+pub fn User(username: string) -> Userinfo {
+    Userinfo {
+        username,
+        password: string::new(),
+        password_set: false,
+    }
+}
+
+/// `url.UserPassword(user, pass)` (url.go:403) — Userinfo with both
+/// username and password.
+pub fn UserPassword(username: string, password: string) -> Userinfo {
+    Userinfo {
+        username,
+        password,
+        password_set: true,
+    }
+}
+
+impl Userinfo {
+    /// `(*Userinfo).Username()` (url.go:418).
+    pub fn Username(&self) -> string {
+        self.username.clone()
+    }
+
+    /// `(*Userinfo).Password()` (url.go:426) — `(value, isSet)`.
+    pub fn Password(&self) -> (string, bool) {
+        (self.password.clone(), self.password_set)
+    }
+
+    /// `(*Userinfo).String()` (url.go:435) — "user[:pass]". Slim port:
+    /// uses PathEscape mode rather than encodeUserPassword.
+    pub fn String(&self) -> string {
+        if self.password_set {
+            let mut b = crate::strings::Builder::new();
+            let _ = b.WriteString(PathEscape(self.username.clone()));
+            let _ = b.WriteByte(b':');
+            let _ = b.WriteString(PathEscape(self.password.clone()));
+            b.String()
+        } else {
+            PathEscape(self.username.clone())
+        }
+    }
+}
+
 /// `url.QueryUnescape(s)` — invert query-string percent-encoding.
 /// Slim port of url.go:277 (strict mode).
 pub fn QueryUnescape(s: string) -> (string, error) {
