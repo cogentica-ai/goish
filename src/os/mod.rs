@@ -175,6 +175,33 @@ pub fn Stat(name: string) -> (FileInfo, error) {
     (fileinfo_from_stat(base, &st), nil)
 }
 
+/// Line-by-line port of `os.Lstat(name)` (file.go:417 → stat_unix.go).
+/// Like Stat but does not follow a final-component symlink, so
+/// FileInfo.Mode() reports ModeSymlink for a link target.
+pub fn Lstat(name: string) -> (FileInfo, error) {
+    // Go: return statNolog(name) with AT_SYMLINK_NOFOLLOW.
+    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
+    let nb = bytes_of(&name);
+    buf.extend_from_slice(nb);
+    buf.push(0);
+    let mut st = syscall::Stat_t::default();
+    let rc = syscall::Lstat(buf.as_ptr(), &mut st);
+    if rc < 0 {
+        return (
+            FileInfo {
+                name: name.clone(),
+                size: 0,
+                mode: 0,
+                mod_time: crate::time::Time::default(),
+                is_dir: false,
+            },
+            errors::New(string("lstat failed")),
+        );
+    }
+    let base = base_name(&name);
+    (fileinfo_from_stat(base, &st), nil)
+}
+
 /// `(*File).Stat()` (os/file.go:432) — fstat the open fd.
 impl File {
     pub fn Stat(&self) -> (FileInfo, error) {

@@ -320,6 +320,10 @@ pub fn Fstat(fd: i32, out: &mut Stat_t) -> i32 {
 /// following symlinks. `path` must be NUL-terminated.
 pub const AT_FDCWD: i32 = -100;
 
+/// `AT_SYMLINK_NOFOLLOW` — don't traverse a final-component symlink.
+/// Used by Lstat (fstatat with this flag).
+pub const AT_SYMLINK_NOFOLLOW: i32 = 0x100;
+
 #[allow(non_snake_case)]
 pub fn Stat(path: *const u8, out: &mut Stat_t) -> i32 {
     unsafe {
@@ -329,6 +333,21 @@ pub fn Stat(path: *const u8, out: &mut Stat_t) -> i32 {
             path as usize,
             out as *mut Stat_t as usize,
             0,
+        ) as i32
+    }
+}
+
+/// `fstatat(AT_FDCWD, path, &stat, AT_SYMLINK_NOFOLLOW)` — stat a path
+/// without following a final-component symlink. Mirrors `lstat(2)`.
+#[allow(non_snake_case)]
+pub fn Lstat(path: *const u8, out: &mut Stat_t) -> i32 {
+    unsafe {
+        syscall4(
+            SYS_NEWFSTATAT,
+            AT_FDCWD as usize,
+            path as usize,
+            out as *mut Stat_t as usize,
+            AT_SYMLINK_NOFOLLOW as usize,
         ) as i32
     }
 }
