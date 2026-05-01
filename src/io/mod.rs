@@ -166,3 +166,115 @@ pub fn WriteString(w: &mut dyn Writer, s: crate::gostring::string) -> (int, erro
     let buf = crate::convert::bytes(s);
     w.Write(buf)
 }
+
+// ─── LimitReader / LimitedReader ─────────────────────────────────────
+
+/// `io.LimitedReader` (io.go:467). Reads from `R` but stops at `N` bytes.
+pub struct LimitedReader<R: Reader> {
+    pub R: R,
+    pub N: int,
+}
+
+impl<R: Reader> Reader for LimitedReader<R> {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        // Go: if l.N <= 0 { return 0, EOF }
+        if self.N <= 0 {
+            return (0, EOF());
+        }
+        // Go: if int64(len(p)) > l.N { p = p[0:l.N] }
+        // We can't shrink p in place (caller-owned); read into a tmp.
+        let cap = if p.Len() > self.N { self.N } else { p.Len() };
+        let mut tmp = crate::make!([]byte, cap);
+        let (n, err) = self.R.Read(&mut tmp);
+        // Copy what was read into the caller's buffer.
+        for i in 0..n {
+            p[i] = tmp[i];
+        }
+        // Go: l.N -= int64(n)
+        self.N -= n;
+        (n, err)
+    }
+}
+
+/// `io.LimitReader(r, n)` (io.go:461) — return a Reader that reads at
+/// most `n` bytes from `r` before signaling EOF.
+pub fn LimitReader<R: Reader>(r: R, n: int) -> LimitedReader<R> {
+    LimitedReader { R: r, N: n }
+}
+
+// ─── TeeReader ───────────────────────────────────────────────────────
+
+/// `io.teeReader` (io.go:622) — Reader that mirrors all reads to a Writer.
+pub struct TeeReaderImpl<R: Reader, W: Writer> {
+    r: R,
+    w: W,
+}
+
+impl<R: Reader, W: Writer> Reader for TeeReaderImpl<R, W> {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        // Go: n, err = t.r.Read(p)
+        let (n, err) = self.r.Read(p);
+        // Go: if n > 0 { if n, err := t.w.Write(p[:n]); err != nil { return n, err } }
+        if n > 0 {
+            let chunk = p.slice(0, n);
+            let (wn, werr) = self.w.Write(chunk);
+            if !werr.IsNil() {
+                return (wn, werr);
+            }
+        }
+        (n, err)
+    }
+}
+
+/// `io.TeeReader(r, w)` (io.go:618) — every Read also writes to `w`.
+/// Errors from `w` surface as Read errors.
+pub fn TeeReader<R: Reader, W: Writer>(r: R, w: W) -> TeeReaderImpl<R, W> {
+    TeeReaderImpl { r, w }
+}
+
+// ─── Discard ─────────────────────────────────────────────────────────
+
+/// `io.Discard` analogue (io.go:639). A Writer whose every Write
+/// silently succeeds. Use as a sink for body draining or benchmarks.
+///
+/// Go exposes `Discard` as a singleton; goish exposes a constructor
+/// because static-trait-object initialization is unwieldy here.
+pub struct Discard;
+
+/// Construct a fresh Discard writer.
+pub fn DiscardWriter() -> Discard {
+    Discard
+}
+
+impl Writer for Discard {
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        // Go: return len(p), nil
+        (p.Len(), nil)
+    }
+}
+
+// ─── NopCloser ───────────────────────────────────────────────────────
+
+/// `io.NopCloser(r)` analogue (io.go:682). Wraps a Reader so Close is
+/// a no-op. WriterTo special case is dropped (slim port).
+pub struct NopCloserImpl<R: Reader> {
+    r: R,
+}
+
+impl<R: Reader> Reader for NopCloserImpl<R> {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        self.r.Read(p)
+    }
+}
+
+impl<R: Reader> Closer for NopCloserImpl<R> {
+    fn Close(&mut self) -> error {
+        nil
+    }
+}
+
+/// `io.NopCloser(r)` (io.go:682) — produce a `Reader+Closer` whose
+/// Close is a no-op.
+pub fn NopCloser<R: Reader>(r: R) -> NopCloserImpl<R> {
+    NopCloserImpl { r }
+}
