@@ -127,11 +127,51 @@ fn main() {
         }
     }
 
+    // 10. Zone() returns ("UTC", 0) — slim time has no Location.
+    {
+        let (name, off) = t.Zone();
+        if name == "UTC" && off == 0 {
+            Println!("[10] Zone UTC                  PASS");
+        } else {
+            Println!("[10] Zone UTC                  FAIL");
+            failed += 1;
+        }
+    }
+
+    // 11. IsDST() always returns false.
+    {
+        if !t.IsDST() {
+            Println!("[11] IsDST=false               PASS");
+        } else {
+            Println!("[11] IsDST=false               FAIL");
+            failed += 1;
+        }
+    }
+
+    // 12. MarshalText/UnmarshalText round-trip via RFC3339 (no nanos).
+    {
+        let t_anchor = time::Unix(1_700_000_000, 0);
+        let (data, err) = t_anchor.MarshalText();
+        if !err.IsNil() {
+            Println!("[12] MarshalText/Unmarshal     FAIL marshal");
+            failed += 1;
+        } else {
+            let mut got = time::Unix(0, 0);
+            let uerr = got.UnmarshalText(data);
+            if uerr.IsNil() && got.Unix() == 1_700_000_000 {
+                Println!("[12] MarshalText/Unmarshal     PASS");
+            } else {
+                Println!("[12] MarshalText/Unmarshal     FAIL unix={}", got.Unix());
+                failed += 1;
+            }
+        }
+    }
+
     if failed == 0 {
-        Println!("ok 9/9");
+        Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 9", failed);
+        Println!("FAIL {} of 12", failed);
         syscall::Exit(1);
     }
 }

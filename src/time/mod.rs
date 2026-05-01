@@ -335,6 +335,43 @@ impl Time {
         }
         out
     }
+
+    /// `t.Zone()` (time.go:1399) — slim port. Always returns
+    /// ("UTC", 0) since slim time has no Location.
+    pub fn Zone(self) -> (crate::gostring::string, int) {
+        (crate::gostring::string::from("UTC"), 0)
+    }
+
+    /// `t.IsDST()` (time.go:1677) — slim port. Always false (no DST
+    /// in UTC-only slim time).
+    pub fn IsDST(self) -> bool {
+        false
+    }
+
+    /// `t.MarshalText()` (time.go:1634) — encode as RFC3339 bytes.
+    /// Implements `encoding.TextMarshaler`. Slim deviation: emits
+    /// RFC3339 (no fractional seconds) rather than RFC3339Nano —
+    /// the slim Format helper doesn't recognise RFC3339Nano. Parse
+    /// pairs cleanly with this output via UnmarshalText.
+    pub fn MarshalText(self) -> (crate::goslice::slice<crate::types::byte>, crate::errors::error) {
+        let s = self.Format(crate::gostring::string::from(RFC3339));
+        (crate::convert::bytes(s), crate::nil)
+    }
+
+    /// `(*Time).UnmarshalText(data)` (time.go:1640) — parse RFC3339
+    /// from bytes. Updates `self` in place. Implements
+    /// `encoding.TextUnmarshaler`.
+    pub fn UnmarshalText(
+        &mut self,
+        data: crate::goslice::slice<crate::types::byte>,
+    ) -> crate::errors::error {
+        let s = crate::gostring::string::from_bytes(&data);
+        let (t, err) = Parse(crate::gostring::string::from(RFC3339), s);
+        if err.IsNil() {
+            *self = t;
+        }
+        err
+    }
 }
 
 const MONTH_SHORT: [&str; 13] = [
