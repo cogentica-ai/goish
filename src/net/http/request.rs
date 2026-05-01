@@ -192,6 +192,44 @@ impl Request {
         string::new()
     }
 
+    /// `r.UserAgent()` (request.go:423) — convenience for the
+    /// `User-Agent` request header.
+    pub fn UserAgent(&self) -> string {
+        self.Header.Get(string("User-Agent"))
+    }
+
+    /// `r.Referer()` (request.go:481) — convenience for the
+    /// `Referer` request header. Note the historical misspelling.
+    pub fn Referer(&self) -> string {
+        self.Header.Get(string("Referer"))
+    }
+
+    /// `r.BasicAuth()` (request.go:973) — return `(user, pass, ok)`
+    /// from a HTTP Basic `Authorization` header.
+    pub fn BasicAuth(&self) -> (string, string, bool) {
+        let auth = self.Header.Get(string("Authorization"));
+        if auth.Len() == 0 {
+            return (string::new(), string::new(), false);
+        }
+        parse_basic_auth(auth)
+    }
+
+    /// `r.SetBasicAuth(user, pass)` (request.go:1022) — set the
+    /// `Authorization` header to "Basic " + base64(user:pass).
+    pub fn SetBasicAuth(&mut self, username: string, password: string) {
+        let mut creds = crate::strings::Builder::new();
+        let _ = creds.WriteString(username);
+        let _ = creds.WriteByte(b':');
+        let _ = creds.WriteString(password);
+        let combined = creds.String();
+        let encoded = crate::encoding::base64::StdEncoding
+            .EncodeToString(crate::convert::bytes(combined).as_ref());
+        let mut hv = crate::strings::Builder::new();
+        let _ = hv.WriteString("Basic ");
+        let _ = hv.WriteString(encoded);
+        self.Header.Set(string("Authorization"), hv.String());
+    }
+
     /// `r.AddCookie(c)` — append a cookie to the `Cookie:` request
     /// header. Mirrors `(*Request).AddCookie(c)` (request.go:434);
     /// per RFC 6265 the request only has a single `Cookie:` line, so
@@ -585,6 +623,37 @@ fn valid_method(m: &[u8]) -> bool {
         }
     }
     true
+}
+
+/// Line-by-line port of `parseBasicAuth` (request.go:993).
+fn parse_basic_auth(auth: string) -> (string, string, bool) {
+    // Go: const prefix = "Basic "
+    // Go: if len(auth) < len(prefix) || !ascii.EqualFold(auth[:len(prefix)], prefix) { return "","",false }
+    if auth.Len() < 6 {
+        return (string::new(), string::new(), false);
+    }
+    let head_bytes = &auth.as_bytes()[..6];
+    let head = string::from_bytes(head_bytes);
+    if !crate::strings::EqualFold(head, string("Basic ")) {
+        return (string::new(), string::new(), false);
+    }
+    // Go: c, err := base64.StdEncoding.DecodeString(auth[len(prefix):])
+    let payload_bytes = &auth.as_bytes()[6..];
+    let payload_str = match core::str::from_utf8(payload_bytes) {
+        Ok(s) => s,
+        Err(_) => return (string::new(), string::new(), false),
+    };
+    let (decoded, derr) = crate::encoding::base64::StdEncoding.DecodeString(payload_str);
+    if !derr.IsNil() {
+        return (string::new(), string::new(), false);
+    }
+    // Go: cs := string(c); username, password, ok := strings.Cut(cs, ":")
+    let cs = crate::convert::string(decoded);
+    let (user, pass, ok) = crate::strings::Cut(cs, string(":"));
+    if !ok {
+        return (string::new(), string::new(), false);
+    }
+    (user, pass, true)
 }
 
 // ─── MaxBytesReader (line-by-line port of request.go:1186) ───────────
