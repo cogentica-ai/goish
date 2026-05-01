@@ -28,9 +28,17 @@ use crate::types::{byte, int};
 use super::header::Header;
 
 /// `http.ResponseWriter`. Owns the connection until `take_conn` /
-/// `close_conn` ends its lifecycle. v1 buffers the body internally;
-/// `flush` writes status + headers (including a derived
-/// `Content-Length`) + body in one wire send.
+/// `close_conn` ends its lifecycle.
+///
+/// Two modes:
+///   * **Buffered (default):** `Write` calls accumulate into `body`;
+///     `flush` emits status + headers (with derived `Content-Length`)
+///     + body in one send. Right for typical sub-MB responses.
+///   * **Streaming (after `Flush`):** the response head is emitted
+///     with `Transfer-Encoding: chunked` and any subsequent `Write`
+///     emits one chunk per call. The closing `0\r\n\r\n` terminator is
+///     sent by the final `flush()`. Mirrors Go's `http.Flusher`
+///     interface (`(*response).Flush()` in server.go:1657).
 pub struct ResponseWriter {
     conn: Conn,
     header: Header,
@@ -42,9 +50,13 @@ pub struct ResponseWriter {
     /// `true` once `flush` has emitted bytes onto the wire. Idempotent
     /// guard.
     flushed: bool,
-    /// Buffered body. v1 requires the full body in memory so
-    /// `flush` can compute Content-Length.
+    /// Buffered body. Used in buffered mode; in streaming mode, it
+    /// only holds bytes written before the first `Flush()` call (those
+    /// are emitted as the first chunk).
     body: Vec<u8>,
+    /// Streaming mode flag — once true, `Write` emits each call as a
+    /// chunk on the wire and the head has already been sent.
+    chunked: bool,
     /// Set by the server before invoking the handler, based on the
     /// request's HTTP version + `Connection` header. Controls whether
     /// `flush` emits `Connection: close`.
@@ -65,6 +77,7 @@ impl ResponseWriter {
             wrote_header: false,
             flushed: false,
             body: Vec::new(),
+            chunked: false,
             keep_alive: false,
         }
     }
@@ -93,15 +106,75 @@ impl ResponseWriter {
         self.status = status;
     }
 
-    /// `Write(p)` — append `p` to the body buffer. Implicitly calls
-    /// `WriteHeader(200)` on first call. Returns `(p.len(), nil)` —
-    /// buffered writes never report short writes.
+    /// `Write(p)` — buffered or streaming depending on mode.
+    /// In buffered mode (no `Flush()` yet), appends to the body
+    /// buffer. In streaming mode (after `Flush()`), emits one chunk
+    /// directly on the wire. Implicitly calls `WriteHeader(200)` on
+    /// first call. Returns `(p.len(), nil)` for the buffered path;
+    /// the streaming path returns `(written, err)` from the wire.
     pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
         if !self.wrote_header {
             self.WriteHeader(200);
         }
+        if self.chunked {
+            return write_chunk(&mut self.conn, &p);
+        }
         self.body.extend_from_slice(&*p);
         (p.len() as int, errors::nil)
+    }
+
+    /// `Flush()` — switch the response into streaming (chunked) mode.
+    /// Mirrors Go's `http.Flusher` interface
+    /// (`(*response).Flush()`, server.go:1657).
+    ///
+    /// First call: emit the response head with
+    /// `Transfer-Encoding: chunked` (no Content-Length), followed by
+    /// any already-buffered body bytes as the first chunk. From this
+    /// point on, every `Write` emits a chunk directly on the wire and
+    /// the closing `0\r\n\r\n` terminator is appended by the final
+    /// `flush()`.
+    ///
+    /// Subsequent `Flush()` calls in streaming mode are no-ops at the
+    /// wire level (the `Conn` writes are already unbuffered) but kept
+    /// for API compatibility with handlers that loop
+    /// `w.Write(...); w.Flush();`.
+    pub fn Flush(&mut self) -> error {
+        if !self.wrote_header {
+            self.WriteHeader(200);
+        }
+        if self.chunked {
+            // Already streaming — nothing to flush at the writer level.
+            return errors::nil;
+        }
+        // Promote to chunked mode: emit head + any buffered body as
+        // the first chunk.
+        self.chunked = true;
+        // Set Transfer-Encoding; clear any user-set Content-Length
+        // (mutually exclusive per RFC 7230 §3.3.2).
+        self.header.Del(string("Content-Length"));
+        self.header
+            .Set(string("Transfer-Encoding"), string("chunked"));
+        if !self.keep_alive && self.header.Get(string("Connection")).Len() == 0 {
+            self.header.Set(string("Connection"), string("close"));
+        }
+        // Emit head.
+        let head = build_head(self.status, &self.header);
+        let (_, err) = self.conn.Write(slice::<byte>::__from_vec(head));
+        if !err.IsNil() {
+            return err;
+        }
+        // Emit any buffered body as the initial chunk.
+        if !self.body.is_empty() {
+            let body = core::mem::take(&mut self.body);
+            let (_, werr) = write_chunk(
+                &mut self.conn,
+                &slice::<byte>::__from_vec(body),
+            );
+            if !werr.IsNil() {
+                return werr;
+            }
+        }
+        errors::nil
     }
 
     /// Render the response onto the wire. Idempotent — calling twice
@@ -115,40 +188,29 @@ impl ResponseWriter {
         if !self.wrote_header {
             self.WriteHeader(200);
         }
+        if self.chunked {
+            // Streaming mode: emit "0\r\n\r\n" terminator (the chunked
+            // writer's Close() emits "0\r\n"; the trailing CRLF
+            // closes the trailer block).
+            let (_, err) = self
+                .conn
+                .Write(slice::<byte>::__from_vec(alloc::vec![
+                    b'0', b'\r', b'\n', b'\r', b'\n'
+                ]));
+            return err;
+        }
 
-        // Emit Content-Length derived from buffered body. Required
-        // for HTTP/1.1 keep-alive framing without chunked encoding.
+        // Buffered mode: emit Content-Length derived from buffered body.
         if self.header.Get(string("Content-Length")).Len() == 0 {
             self.header
                 .Set(string("Content-Length"), int_to_string(self.body.len() as i64));
         }
-        // Connection header policy:
-        //   keep_alive  → don't emit Connection (HTTP/1.1 default).
-        //   !keep_alive → emit Connection: close.
         if !self.keep_alive && self.header.Get(string("Connection")).Len() == 0 {
             self.header.Set(string("Connection"), string("close"));
         }
-
-        let mut buf: Vec<u8> = Vec::with_capacity(256 + self.body.len());
-        buf.extend_from_slice(b"HTTP/1.1 ");
-        push_dec(&mut buf, self.status as u32);
-        buf.push(b' ');
-        buf.extend_from_slice(status_text(self.status as u32).as_bytes());
-        buf.extend_from_slice(b"\r\n");
-
-        let inner = self.header.__inner();
-        for (key, values) in inner.__iter() {
-            let n = values.Len();
-            for i in 0..n {
-                buf.extend_from_slice(key.as_bytes());
-                buf.extend_from_slice(b": ");
-                buf.extend_from_slice(values[i].as_bytes());
-                buf.extend_from_slice(b"\r\n");
-            }
-        }
-        buf.extend_from_slice(b"\r\n");
+        let mut buf = build_head(self.status, &self.header);
+        buf.reserve(self.body.len());
         buf.extend_from_slice(&self.body);
-
         let (_, err) = self.conn.Write(slice::<byte>::__from_vec(buf));
         err
     }
@@ -173,6 +235,75 @@ impl ResponseWriter {
     pub fn close_conn(mut self) -> error {
         let _ = self.flush();
         self.conn.Close()
+    }
+}
+
+/// Build the response head (status line + headers + final CRLF).
+/// Shared between buffered and streaming modes. Returns the bytes
+/// ready to write to the wire.
+fn build_head(status: int, header: &Header) -> Vec<u8> {
+    let mut buf: Vec<u8> = Vec::with_capacity(256);
+    buf.extend_from_slice(b"HTTP/1.1 ");
+    push_dec(&mut buf, status as u32);
+    buf.push(b' ');
+    buf.extend_from_slice(status_text(status as u32).as_bytes());
+    buf.extend_from_slice(b"\r\n");
+    let inner = header.__inner();
+    for (key, values) in inner.__iter() {
+        let n = values.Len();
+        for i in 0..n {
+            buf.extend_from_slice(key.as_bytes());
+            buf.extend_from_slice(b": ");
+            buf.extend_from_slice(values[i].as_bytes());
+            buf.extend_from_slice(b"\r\n");
+        }
+    }
+    buf.extend_from_slice(b"\r\n");
+    buf
+}
+
+/// Emit one chunk on the wire: `<hex>\r\n<data>\r\n`. Returns
+/// `(data.len(), err)` so a `Write` proxy can forward it.
+fn write_chunk(conn: &mut Conn, data: &slice<byte>) -> (int, error) {
+    let n = data.Len();
+    if n == 0 {
+        return (0, errors::nil);
+    }
+    let mut head: Vec<u8> = Vec::with_capacity(20);
+    push_hex(&mut head, n as u64);
+    head.extend_from_slice(b"\r\n");
+    let (_, err) = conn.Write(slice::<byte>::__from_vec(head));
+    if !err.IsNil() {
+        return (0, err);
+    }
+    let (_, werr) = conn.Write(data.clone());
+    if !werr.IsNil() {
+        return (0, werr);
+    }
+    let (_, terr) = conn.Write(slice::<byte>::__from_vec(alloc::vec![b'\r', b'\n']));
+    (n, terr)
+}
+
+fn push_hex(buf: &mut Vec<u8>, mut n: u64) {
+    if n == 0 {
+        buf.push(b'0');
+        return;
+    }
+    let mut tmp = [0u8; 16];
+    let mut i = 0;
+    while n > 0 {
+        let nibble = (n & 0xf) as u8;
+        tmp[i] = if nibble < 10 {
+            b'0' + nibble
+        } else {
+            b'a' + (nibble - 10)
+        };
+        n >>= 4;
+        i += 1;
+    }
+    while i > 0 {
+        i -= 1;
+        buf.push(tmp[i]);
     }
 }
 

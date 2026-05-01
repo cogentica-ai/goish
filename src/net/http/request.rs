@@ -25,7 +25,7 @@ use crate::bufio;
 use crate::bytes;
 use crate::errors::{self, error};
 use crate::goslice::slice;
-use crate::io;
+use crate::io::{self, Reader};
 use crate::string;
 use crate::types::{byte, int};
 
@@ -191,6 +191,49 @@ pub fn ReadRequest<R: io::Reader>(
         }
     }
 
+    // Body framing — Transfer-Encoding: chunked takes precedence over
+    // Content-Length per RFC 7230 §3.3.3.
+    let te = req.Header.Get(string("Transfer-Encoding"));
+    let chunked = is_chunked(te.as_bytes());
+    if chunked {
+        // Decode chunked body into a Vec, then drop into req.Body.
+        // ContentLength = -1 ("unknown") matches Go's convention.
+        req.ContentLength = -1;
+        let mut buf: Vec<u8> = Vec::new();
+        // ChunkedReader sits over `br` directly via a small adapter:
+        // we hand it ownership of a &mut bufio::Reader-like surface.
+        // Simplest: drain the bufio::Reader's Buffered() bytes plus
+        // any future reads through the chunked decoder. Since
+        // `ChunkedReader<R>` wraps its own bufio::Reader, we feed it
+        // a thin `BufioPassthrough` that delegates to the existing
+        // `br`.
+        let mut cr = super::chunked::NewChunkedReader(BufioPassthrough { inner: br });
+        loop {
+            let mut tmp = slice::<byte>::__from_vec(alloc::vec![0u8; 4096]);
+            let (n_read, err) = cr.Read(&mut tmp);
+            if n_read > 0 {
+                let n_us = n_read as usize;
+                if buf.len() + n_us > MAX_BODY {
+                    return (req, errors::New(string("net/http: chunked body too large")));
+                }
+                for i in 0..n_us {
+                    buf.push(tmp[i as int]);
+                }
+            }
+            if !err.IsNil() {
+                if errors::Is(err.clone(), io::EOF()) {
+                    break;
+                }
+                return (req, err);
+            }
+            if n_read == 0 {
+                break;
+            }
+        }
+        req.Body = slice::<byte>::__from_vec(buf);
+        return (req, errors::nil);
+    }
+
     // Content-Length → bounded body.
     let cl_str = req.Header.Get(string("Content-Length"));
     let n: int = if cl_str.as_bytes().is_empty() {
@@ -206,9 +249,6 @@ pub fn ReadRequest<R: io::Reader>(
     if n > 0 {
         let want = n as usize;
         let mut buf: Vec<u8> = Vec::with_capacity(want);
-        // Read in chunks via a small scratch slice; slice's DerefMut
-        // gives us a &mut [u8] view, but io::Reader::Read takes a
-        // &mut slice<byte>. Construct one per chunk.
         let mut got: usize = 0;
         while got < want {
             let chunk = (want - got).min(4096);
@@ -230,6 +270,49 @@ pub fn ReadRequest<R: io::Reader>(
     }
 
     (req, errors::nil)
+}
+
+/// Adapter so ChunkedReader (which builds its *own* bufio::Reader)
+/// can pull bytes from the request parser's existing bufio::Reader
+/// without double-buffering. ChunkedReader wraps this in a fresh
+/// bufio of its own — that's a small extra buffer, but the alternative
+/// would require ChunkedReader to take a borrowed bufio which clashes
+/// with its current `R: Reader` API shape.
+struct BufioPassthrough<'a, R: io::Reader> {
+    inner: &'a mut bufio::Reader<R>,
+}
+impl<'a, R: io::Reader> io::Reader for BufioPassthrough<'a, R> {
+    fn Read(&mut self, b: &mut slice<byte>) -> (int, error) {
+        self.inner.Read(b)
+    }
+}
+
+/// Match RFC 7230 `Transfer-Encoding: chunked` (case-insensitive,
+/// possibly part of a comma-separated list — we accept any list whose
+/// last item is `chunked`).
+fn is_chunked(value: &[u8]) -> bool {
+    // Trim and lowercase walk; check trailing token == "chunked".
+    let mut end = value.len();
+    while end > 0 && (value[end - 1] == b' ' || value[end - 1] == b'\t') {
+        end -= 1;
+    }
+    let mut start = end;
+    while start > 0 {
+        let prev = value[start - 1];
+        if prev == b',' || prev == b' ' || prev == b'\t' {
+            break;
+        }
+        start -= 1;
+    }
+    let last = &value[start..end];
+    last.len() == 7
+        && (last[0] | 0x20) == b'c'
+        && (last[1] | 0x20) == b'h'
+        && (last[2] | 0x20) == b'u'
+        && (last[3] | 0x20) == b'n'
+        && (last[4] | 0x20) == b'k'
+        && (last[5] | 0x20) == b'e'
+        && (last[6] | 0x20) == b'd'
 }
 
 // ─── parsers ─────────────────────────────────────────────────────────
