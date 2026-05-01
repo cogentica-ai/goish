@@ -189,6 +189,55 @@ impl ServeMux {
     }
 }
 
+impl ServeMux {
+    /// `mux.Handler(r) -> (Handler, pattern)` (server.go:2683) — return
+    /// the handler that would dispatch `r`, along with the pattern that
+    /// matched. For requests with no matching route, returns the
+    /// `NotFoundHandler` and an empty pattern.
+    ///
+    /// Slim port: doesn't trigger redirects (Go's Handler synthesizes
+    /// a `RedirectHandler` for missing-trailing-slash cases); doesn't
+    /// populate path-value wildcards on `r`.
+    pub fn Handler(&self, r: &Request) -> (Arc<dyn Handler>, string) {
+        let s = self.state.Lock();
+        // 1. Exact literal match.
+        for route in s.routes.iter() {
+            if route.0 == r.URL.Path {
+                return (route.1.clone(), route.0.clone());
+            }
+        }
+        // 2. Longest prefix-with-trailing-slash match.
+        let path_b = r.URL.Path.as_bytes();
+        let mut best_len: usize = 0;
+        let mut best: Option<(Arc<dyn Handler>, string)> = None;
+        for (pat, handler) in s.routes.iter() {
+            let pb = pat.as_bytes();
+            if pb.last() == Some(&b'/') && path_b.starts_with(pb) && pb.len() > best_len {
+                best_len = pb.len();
+                best = Some((handler.clone(), pat.clone()));
+            }
+        }
+        if let Some(b) = best {
+            return b;
+        }
+        // 3. Wildcard pattern match.
+        let host = r.Host.clone();
+        for pr in s.pattern_routes.iter() {
+            if pr
+                .pattern
+                .Match(&r.Method, &host, &r.URL.Path)
+                .is_some()
+            {
+                return (pr.handler.clone(), pr.pattern.Str.clone());
+            }
+        }
+        (
+            Arc::new(NotFoundHandler) as Arc<dyn Handler>,
+            string::new(),
+        )
+    }
+}
+
 impl Handler for ServeMux {
     fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
         let (h, bindings) = self.match_handler(r);
