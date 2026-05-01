@@ -69,4 +69,7 @@ pub use status::{
     StatusUnsupportedMediaType, StatusUpgradeRequired, StatusUseProxy,
     StatusVariantAlsoNegotiates, StatusAlreadyReported,
 };
-pub use url::{PathEscape, PathUnescape, QueryEscape, QueryUnescape, ValuesEncode, URL};
+pub use url::{
+    Parse as ParseURL, ParseRequestURI, PathEscape, PathUnescape, QueryEscape, QueryUnescape,
+    ValuesEncode, URL,
+};

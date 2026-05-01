@@ -287,6 +287,146 @@ pub fn PathUnescape(s: string) -> (string, error) {
     unescape(s, false)
 }
 
+/// `url.Parse(rawURL)` (url.go:479) — parse a URL in either absolute
+/// or relative form. Slim port: handles `scheme://host/path?query#frag`,
+/// `/path?query`, and `relative/path`, but doesn't model Opaque,
+/// Userinfo, or Fragment as separate fields. Fragment is stripped.
+///
+/// Returns `(URL, error)` per goish convention.
+pub fn Parse(raw_url: string) -> (URL, error) {
+    // Go: u, frag, _ := strings.Cut(rawURL, "#")
+    let (u, _frag, _) = crate::strings::Cut(raw_url, string("#"));
+    parse(u, false)
+}
+
+/// `url.ParseRequestURI(rawURL)` (url.go:500) — parse a URL received
+/// in an HTTP request line: must be absolute-URI or absolute-path.
+/// No fragment is permitted (browsers strip them client-side).
+pub fn ParseRequestURI(raw_url: string) -> (URL, error) {
+    parse(raw_url, true)
+}
+
+/// Line-by-line slim port of `parse` (url.go:512). Honors the
+/// origin-form / absolute-URI distinction via `via_request` but
+/// does not implement Opaque, host validation, IPv6 zones, or
+/// %-decoding of host bytes.
+fn parse(raw_url: string, via_request: bool) -> (URL, error) {
+    // Go: if rawURL == "" && viaRequest { return nil, errors.New("empty url") }
+    if raw_url.Len() == 0 && via_request {
+        return (URL::empty(), errors::New(string("empty url")));
+    }
+
+    // Go: if rawURL == "*" { url.Path = "*"; return }
+    if raw_url == "*" {
+        let mut u = URL::empty();
+        u.Path = string("*");
+        u.RawPath = string("*");
+        return (u, errors::nil);
+    }
+
+    // Go: url.Scheme, rest, err = getScheme(rawURL); url.Scheme = strings.ToLower(...)
+    let (scheme, rest) = match get_scheme(raw_url.clone()) {
+        Ok(t) => t,
+        Err(e) => return (URL::empty(), e),
+    };
+    let scheme = crate::strings::ToLower(scheme);
+
+    // Go: rest, url.RawQuery, _ = strings.Cut(rest, "?")
+    let (rest, raw_query, _) = crate::strings::Cut(rest, string("?"));
+
+    // Go: if !strings.HasPrefix(rest, "/") {
+    //         if url.Scheme != "" { url.Opaque = rest; return url, nil }
+    //         if viaRequest { return nil, errors.New("invalid URI for request") }
+    //     }
+    if !crate::strings::HasPrefix(rest.clone(), string("/")) {
+        if scheme.Len() != 0 {
+            // Goish has no Opaque field; render rootless paths as Path.
+            let u = URL {
+                Scheme: scheme,
+                Host: string::new(),
+                Path: rest.clone(),
+                RawPath: rest,
+                RawQuery: raw_query,
+            };
+            return (u, errors::nil);
+        }
+        if via_request {
+            return (
+                URL::empty(),
+                errors::New(string("invalid URI for request")),
+            );
+        }
+    }
+
+    // Go: if (url.Scheme != "" || !viaRequest && !strings.HasPrefix(rest, "///")) && strings.HasPrefix(rest, "//") { ... authority }
+    let mut host = string::new();
+    let mut path_rest = rest.clone();
+    if (scheme.Len() != 0
+        || (!via_request && !crate::strings::HasPrefix(rest.clone(), string("///"))))
+        && crate::strings::HasPrefix(rest.clone(), string("//"))
+    {
+        // Skip the leading "//"
+        let after = string::from_bytes(&rest.as_bytes()[2..]);
+        // Host runs to first '/' or end.
+        let host_end = match crate::bytes::IndexByte(crate::convert::bytes(after.clone()), b'/') {
+            -1 => after.Len(),
+            n => n,
+        };
+        host = string::from_bytes(&after.as_bytes()[..host_end as usize]);
+        path_rest = string::from_bytes(&after.as_bytes()[host_end as usize..]);
+    }
+
+    // Empty path on absolute URL → "/".
+    let mut path = path_rest;
+    if host.Len() != 0 && path.Len() == 0 {
+        path = string("/");
+    }
+
+    let u = URL {
+        Scheme: scheme,
+        Host: host,
+        Path: path.clone(),
+        RawPath: path,
+        RawQuery: raw_query,
+    };
+    (u, errors::nil)
+}
+
+/// Line-by-line port of `getScheme` (url.go:209). Returns
+/// `(scheme, rest)` where `scheme` is lowercase and may be empty.
+fn get_scheme(raw_url: string) -> Result<(string, string), error> {
+    // Go: for i := 0; i < len(rawURL); i++ { ... }
+    let mut i: int = 0;
+    while i < raw_url.Len() {
+        let c: byte = raw_url[i];
+        // Go: switch { case 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z': ... }
+        if (b'a' <= c && c <= b'z') || (b'A' <= c && c <= b'Z') {
+            // ok, continue
+        } else if (b'0' <= c && c <= b'9') || c == b'+' || c == b'-' || c == b'.' {
+            // Go: case '0' <= c && c <= '9' || c == '+' || c == '-' || c == '.':
+            // First char cannot be digit/+/-/.
+            if i == 0 {
+                return Ok((string::new(), raw_url));
+            }
+        } else if c == b':' {
+            // Go: case c == ':':
+            if i == 0 {
+                return Err(errors::New(string("missing protocol scheme")));
+            }
+            return Ok((
+                string::from_bytes(&raw_url.as_bytes()[..i as usize]),
+                string::from_bytes(&raw_url.as_bytes()[(i as usize) + 1..]),
+            ));
+        } else {
+            // Go: default — we have encountered an invalid character,
+            // so there is no valid scheme.
+            return Ok((string::new(), raw_url));
+        }
+        i += 1;
+    }
+    Ok((string::new(), raw_url))
+}
+
 /// `url.QueryEscape(s)` (url.go:281) — percent-encode `s` so it is
 /// safe inside the query component of a URL. Spaces become `+`.
 pub fn QueryEscape(s: string) -> string {
