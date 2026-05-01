@@ -37,8 +37,9 @@ pub use request::{
 };
 pub use response::ResponseWriter;
 pub use server::{
-    Error, ErrServerClosed, Handler, HandlerFunc, ListenAndServe, NotFound, NotFoundHandler,
-    Redirect, RedirectHandler, Serve, ServeMux, Server, StripPrefix,
+    DefaultServeMux, Error, ErrServerClosed, Handle, HandleFunc, Handler, HandlerFunc,
+    ListenAndServe, NotFound, NotFoundHandler, Redirect, RedirectHandler, Serve, ServeMux,
+    Server, StripPrefix,
 };
 pub use sniff::DetectContentType;
 pub use status::{

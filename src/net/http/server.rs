@@ -239,6 +239,38 @@ pub fn NotFound(w: &mut ResponseWriter, _r: &Request) {
     Error(w, string("404 page not found"), super::status::StatusNotFound);
 }
 
+// ─── DefaultServeMux + Handle / HandleFunc free fns ──────────────────
+
+/// `http.DefaultServeMux` (server.go:2570) — process-wide singleton
+/// ServeMux. Used by the free `http::Handle` / `http::HandleFunc`
+/// helpers so that small examples can register routes without
+/// constructing a ServeMux manually.
+pub fn DefaultServeMux() -> Arc<ServeMux> {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<Arc<ServeMux>>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(Arc::new(ServeMux::new()));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// `http.Handle(pattern, h)` (server.go:2576) — register on
+/// DefaultServeMux. Mirrors the free function shape.
+pub fn Handle(pattern: string, h: Arc<dyn Handler>) {
+    DefaultServeMux().Handle(pattern, h);
+}
+
+/// `http.HandleFunc(pattern, fn)` (server.go:2583) — register a
+/// closure on DefaultServeMux. Note this is a *free function*; the
+/// same-named method on `ServeMux` registers on a specific mux.
+pub fn HandleFunc<F>(pattern: string, f: F)
+where
+    F: Fn(&mut ResponseWriter, &Request) + Send + Sync + 'static,
+{
+    DefaultServeMux().HandleFunc(pattern, f);
+}
+
 // ─── StripPrefix / Redirect / RedirectHandler ────────────────────────
 //
 // Line-by-line ports of net/http/server.go:2370 / :2403 / :2488.
