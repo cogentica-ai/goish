@@ -401,3 +401,7 @@ path = "examples/wg_borrow_smoke.rs"
 name = "lockfree_ring_smoke"
 path = "examples/lockfree_ring_smoke.rs"
 
+[[example]]
+name = "lockfree_ring_bench"
+path = "examples/lockfree_ring_bench.rs"
+

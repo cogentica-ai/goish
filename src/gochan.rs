@@ -58,8 +58,8 @@
 
 extern crate alloc;
 
-use alloc::collections::VecDeque;
 use alloc::sync::Arc;
+use crate::runtime::lockfree_ring::LockFreeRing;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -320,8 +320,14 @@ pub struct HchanState<T> {
     closed: bool,
     /// Buffer capacity. 0 = unbuffered.
     cap: usize,
-    /// Ring buffer of in-flight values. Length is in `[0, cap]`.
-    buf: VecDeque<T>,
+    /// Ring buffer of in-flight values. For cap=0 (unbuffered) the
+    /// ring exists with capacity 1 but is never used (buf hand-off
+    /// goes directly via sudog). For cap>0, length is in `[0, cap]`.
+    /// Storage migrated from `VecDeque<T>` to the lock-free MPMC
+    /// ring as Stage 1 of the chan lock-free hot-path refactor.
+    /// Stage 1 still holds the SpinLock across all ring ops; Stage 2
+    /// will move the ring outside the lock to capture the speedup.
+    buf: LockFreeRing<T>,
     /// Goroutines waiting to send.
     sendq: SudogQueue<T>,
     /// Goroutines waiting to receive.
@@ -371,7 +377,11 @@ impl<T> chan<T> {
                 state: SpinLock::new(HchanState {
                     closed: false,
                     cap,
-                    buf: VecDeque::with_capacity(cap),
+                    // For cap=0, allocate a 1-slot dummy ring (never
+                    // touched — buf hand-off bypasses the buffer for
+                    // unbuffered chans). The 64 B overhead per
+                    // unbuffered chan is negligible.
+                    buf: LockFreeRing::new(cap.max(1)),
                     sendq: SudogQueue::new(),
                     recvq: SudogQueue::new(),
                 }),
@@ -390,7 +400,7 @@ impl<T> chan<T> {
                 state: SpinLock::new(HchanState {
                     closed: false,
                     cap: 0,
-                    buf: VecDeque::new(),
+                    buf: LockFreeRing::new(1),
                     sendq: SudogQueue::new(),
                     recvq: SudogQueue::new(),
                 }),
@@ -474,7 +484,7 @@ impl<T> chan<T> {
     where
         T: Default,
     {
-        if s.closed && s.buf.is_empty() {
+        if s.closed && s.buf.len() == 0 {
             return Some((T::default(), false));
         }
         unsafe {
@@ -496,9 +506,12 @@ impl<T> chan<T> {
                 } else {
                     let head = s
                         .buf
-                        .pop_front()
+                        .try_recv()
                         .expect("recv-locked: buf empty with parked sender");
-                    s.buf.push_back(sender_v);
+                    s.buf
+                        .try_send(sender_v)
+                        .ok()
+                        .expect("buf rotate: ring full though slot just freed");
                     head
                 };
                 (*cur).success = true;
@@ -507,7 +520,7 @@ impl<T> chan<T> {
                 return Some((v, true));
             }
         }
-        if let Some(v) = s.buf.pop_front() {
+        if let Some(v) = s.buf.try_recv() {
             return Some((v, true));
         }
         None
@@ -540,7 +553,10 @@ impl<T> chan<T> {
             }
         }
         if s.buf.len() < s.cap {
-            s.buf.push_back(v);
+            s.buf
+                .try_send(v)
+                .ok()
+                .expect("buf send: ring full though len < cap");
             return Ok(());
         }
         Err(v)
@@ -552,7 +568,7 @@ impl<T> chan<T> {
     /// chans don't reach the locked path).
     #[doc(hidden)]
     pub fn __register_recv_locked(s: &mut HchanState<T>, sg: &mut Sudog<T>) -> RegisterStatus {
-        if s.closed && s.buf.is_empty() {
+        if s.closed && s.buf.len() == 0 {
             return RegisterStatus::Closed;
         }
         s.recvq.push_back(sg as *mut Sudog<T>);
@@ -649,7 +665,10 @@ impl<T> chan<T> {
 
         // Buffer has room — push and return.
         if s.buf.len() < s.cap {
-            s.buf.push_back(v);
+            s.buf
+                .try_send(v)
+                .ok()
+                .expect("buf send: ring full though len < cap");
             return Ok(());
         }
 
@@ -670,7 +689,7 @@ impl<T> chan<T> {
         let mut s = self.inner.state.lock();
 
         // closed-and-empty → (zero, false)
-        if s.closed && s.buf.is_empty() {
+        if s.closed && s.buf.len() == 0 {
             drop(s);
             return Some((T::default(), false));
         }
@@ -698,9 +717,12 @@ impl<T> chan<T> {
                 } else {
                     let head = s
                         .buf
-                        .pop_front()
+                        .try_recv()
                         .expect("recv: buf empty with parked sender");
-                    s.buf.push_back(sender_v);
+                    s.buf
+                        .try_send(sender_v)
+                        .ok()
+                        .expect("buf rotate: ring full though slot just freed");
                     head
                 };
                 (*cur).success = true;
@@ -712,7 +734,7 @@ impl<T> chan<T> {
         }
 
         // Non-empty buffer.
-        if let Some(v) = s.buf.pop_front() {
+        if let Some(v) = s.buf.try_recv() {
             return Some((v, true));
         }
 
@@ -737,7 +759,7 @@ impl<T> chan<T> {
     /// return `(zero, false)` and not park).
     #[doc(hidden)] pub fn __register_recv(&self, sg: &mut Sudog<T>) -> Result<(), ()> {
         let mut s = self.inner.state.lock();
-        if s.closed && s.buf.is_empty() {
+        if s.closed && s.buf.len() == 0 {
             return Err(());
         }
         s.recvq.push_back(sg as *mut Sudog<T>);
