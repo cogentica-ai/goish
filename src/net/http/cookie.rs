@@ -208,46 +208,57 @@ pub fn ParseSetCookie(line: string) -> (Cookie, error) {
         if part.Len() == 0 {
             continue;
         }
+        // Go: attr, val, _ := strings.Cut(parts[i], "=")
         let (attr, raw_val, _) = strings::Cut(part.clone(), string("="));
-        let lower_attr = ascii_to_lower_string(&attr);
+        // Go: lowerAttr, isASCII := ascii.ToLower(attr); if !isASCII { continue }
+        // goish: use strings::EqualFold for each known attribute name —
+        // skips the lowering allocation and matches case-insensitively.
         let (vv, _, vok) = parse_cookie_value(&raw_val, false);
         if !vok {
             unparsed.push(part);
             continue;
         }
-        match lower_attr.as_bytes() {
-            b"samesite" => {
-                let lower_val = ascii_to_lower_string(&vv);
-                c.SameSite = match lower_val.as_bytes() {
-                    b"lax" => SameSite::LaxMode,
-                    b"strict" => SameSite::StrictMode,
-                    b"none" => SameSite::NoneMode,
-                    _ => SameSite::DefaultMode,
-                };
+        if strings::EqualFold(attr.clone(), string("samesite")) {
+            // Go: switch lowerVal { case "lax": ...; "strict": ...; "none": ...; default: ... }
+            if strings::EqualFold(vv.clone(), string("lax")) {
+                c.SameSite = SameSite::LaxMode;
+            } else if strings::EqualFold(vv.clone(), string("strict")) {
+                c.SameSite = SameSite::StrictMode;
+            } else if strings::EqualFold(vv.clone(), string("none")) {
+                c.SameSite = SameSite::NoneMode;
+            } else {
+                c.SameSite = SameSite::DefaultMode;
             }
-            b"secure" => c.Secure = true,
-            b"httponly" => c.HttpOnly = true,
-            b"domain" => c.Domain = vv,
-            b"max-age" => {
-                let (secs, perr) = crate::strconv::Atoi(vv.clone());
-                let bad_zero = vv.Len() > 0 && vv.as_bytes()[0] == b'0' && secs != 0;
-                if !perr.IsNil() || bad_zero {
-                    unparsed.push(part);
-                    continue;
-                }
-                c.MaxAge = if secs <= 0 { -1 } else { secs };
+        } else if strings::EqualFold(attr.clone(), string("secure")) {
+            c.Secure = true;
+        } else if strings::EqualFold(attr.clone(), string("httponly")) {
+            c.HttpOnly = true;
+        } else if strings::EqualFold(attr.clone(), string("domain")) {
+            c.Domain = vv;
+        } else if strings::EqualFold(attr.clone(), string("max-age")) {
+            // Go: secs, err := strconv.Atoi(val); if err != nil || secs != 0 && val[0] == '0' { break }
+            let (secs, perr) = crate::strconv::Atoi(vv.clone());
+            let bad_zero = vv.Len() > 0 && vv[0] == b'0' && secs != 0;
+            if !perr.IsNil() || bad_zero {
+                unparsed.push(part);
+                continue;
             }
-            b"expires" => {
-                c.RawExpires = vv.clone();
-                if let Some(t) = parse_imf_fixdate(&vv).or_else(|| parse_legacy_cookie_date(&vv)) {
-                    c.Expires = t;
-                } else {
-                    c.Expires = time::Time::default();
-                }
+            // Go: if secs <= 0 { secs = -1 }; c.MaxAge = secs
+            c.MaxAge = if secs <= 0 { -1 } else { secs };
+        } else if strings::EqualFold(attr.clone(), string("expires")) {
+            // Go: c.RawExpires = val; exptime, err := time.Parse(time.RFC1123, val); …
+            c.RawExpires = vv.clone();
+            if let Some(t) = parse_imf_fixdate(&vv).or_else(|| parse_legacy_cookie_date(&vv)) {
+                c.Expires = t;
+            } else {
+                c.Expires = time::Time::default();
             }
-            b"path" => c.Path = vv,
-            b"partitioned" => c.Partitioned = true,
-            _ => unparsed.push(part),
+        } else if strings::EqualFold(attr.clone(), string("path")) {
+            c.Path = vv;
+        } else if strings::EqualFold(attr.clone(), string("partitioned")) {
+            c.Partitioned = true;
+        } else {
+            unparsed.push(part);
         }
     }
     c.Unparsed = slice::<string>::__from_vec(unparsed);
@@ -260,83 +271,135 @@ impl Cookie {
     /// Serialize the cookie for use in a `Cookie:` header (when only
     /// `Name`+`Value` are set) or `Set-Cookie:` response header (when
     /// any other field is set). Returns `""` if `Name` is invalid.
-    /// Mirrors `(*Cookie).String()` (cookie.go:261).
+    ///
+    /// Line-by-line port of `(*Cookie).String()` (cookie.go:261). Uses
+    /// `strings::Builder` and `strconv::AppendInt` so the body matches
+    /// Go's `var b strings.Builder` flow one statement to one
+    /// statement.
     pub fn String(&self) -> string {
+        // Go: if c == nil || !isToken(c.Name) { return "" }
         if !is_token(&self.Name) {
-            return string::new();
+            return string("");
         }
-        let cap = (self.Name.Len() + self.Value.Len() + self.Domain.Len() + self.Path.Len()) as usize + 110;
-        let mut out: Vec<u8> = Vec::with_capacity(cap);
-        out.extend_from_slice(self.Name.as_bytes());
-        out.push(b'=');
-        let sanitized = sanitize_cookie_value(&self.Value, self.Quoted);
-        out.extend_from_slice(sanitized.as_bytes());
+        // Go: const extraCookieLength = 110
+        const EXTRA_COOKIE_LENGTH: int = 110;
+        // Go: var b strings.Builder
+        let mut b = strings::Builder::new();
+        // Go: b.Grow(len(c.Name) + len(c.Value) + len(c.Domain) + len(c.Path) + extraCookieLength)
+        b.Grow(
+            self.Name.Len()
+                + self.Value.Len()
+                + self.Domain.Len()
+                + self.Path.Len()
+                + EXTRA_COOKIE_LENGTH,
+        );
+        // Go: b.WriteString(c.Name)
+        let _ = b.WriteString(self.Name.clone());
+        // Go: b.WriteRune('=')
+        let _ = b.WriteByte(b'=');
+        // Go: b.WriteString(sanitizeCookieValue(c.Value, c.Quoted))
+        let _ = b.WriteString(sanitize_cookie_value(self.Value.clone(), self.Quoted));
 
+        // Go: if len(c.Path) > 0 { b.WriteString("; Path="); b.WriteString(sanitizeCookiePath(c.Path)) }
         if self.Path.Len() > 0 {
-            out.extend_from_slice(b"; Path=");
-            let p = sanitize_cookie_path(&self.Path);
-            out.extend_from_slice(p.as_bytes());
+            let _ = b.WriteString("; Path=");
+            let _ = b.WriteString(sanitize_cookie_path(self.Path.clone()));
         }
-        if self.Domain.Len() > 0 && valid_cookie_domain(&self.Domain) {
-            // Strip leading dot per RFC 6265.
-            let d = self.Domain.as_bytes();
-            let dd = if !d.is_empty() && d[0] == b'.' { &d[1..] } else { d };
-            out.extend_from_slice(b"; Domain=");
-            out.extend_from_slice(dd);
+        // Go: if len(c.Domain) > 0 { if validCookieDomain(c.Domain) { ... } else { log.Printf("…") } }
+        if self.Domain.Len() > 0 {
+            if valid_cookie_domain(&self.Domain) {
+                // Go: d := c.Domain; if d[0] == '.' { d = d[1:] }
+                let d = self.Domain.clone();
+                let d = if d.Len() > 0 && d[0] == b'.' {
+                    string::from_bytes(&d.as_bytes()[1..])
+                } else {
+                    d
+                };
+                let _ = b.WriteString("; Domain=");
+                let _ = b.WriteString(d);
+            }
+            // Go's else branch logs and drops the attribute; we silently drop (no log pkg yet).
         }
+        // Go: var buf [len(TimeFormat)]byte
+        // Go: if validCookieExpires(c.Expires) { b.WriteString("; Expires="); b.Write(c.Expires.UTC().AppendFormat(buf[:0], TimeFormat)) }
+        let mut time_buf: [byte; 29] = [0; 29];
         if valid_cookie_expires(&self.Expires) {
-            out.extend_from_slice(b"; Expires=");
-            append_imf_fixdate(&mut out, &self.Expires);
+            let _ = b.WriteString("; Expires=");
+            let appended = append_imf_fixdate_into(&mut time_buf, &self.Expires);
+            let _ = b.WriteString(string::from_bytes(appended));
         }
+        // Go: if c.MaxAge > 0 { b.WriteString("; Max-Age="); b.Write(strconv.AppendInt(buf[:0], int64(c.MaxAge), 10)) }
+        // Go: else if c.MaxAge < 0 { b.WriteString("; Max-Age=0") }
         if self.MaxAge > 0 {
-            out.extend_from_slice(b"; Max-Age=");
-            append_int(&mut out, self.MaxAge);
+            let _ = b.WriteString("; Max-Age=");
+            let dst = slice::<byte>::__from_vec(Vec::new());
+            let appended = crate::strconv::AppendInt(dst, self.MaxAge, 10);
+            let _ = b.WriteString(string::from_bytes(&appended));
         } else if self.MaxAge < 0 {
-            out.extend_from_slice(b"; Max-Age=0");
+            let _ = b.WriteString("; Max-Age=0");
         }
+        // Go: if c.HttpOnly { b.WriteString("; HttpOnly") }
         if self.HttpOnly {
-            out.extend_from_slice(b"; HttpOnly");
+            let _ = b.WriteString("; HttpOnly");
         }
+        // Go: if c.Secure { b.WriteString("; Secure") }
         if self.Secure {
-            out.extend_from_slice(b"; Secure");
+            let _ = b.WriteString("; Secure");
         }
+        // Go: switch c.SameSite { case SameSiteDefaultMode: ... }
         match self.SameSite {
-            SameSite::DefaultMode => {} // skip
-            SameSite::NoneMode => out.extend_from_slice(b"; SameSite=None"),
-            SameSite::LaxMode => out.extend_from_slice(b"; SameSite=Lax"),
-            SameSite::StrictMode => out.extend_from_slice(b"; SameSite=Strict"),
+            SameSite::DefaultMode => {} // Go: skip — default mode = no attribute
+            SameSite::NoneMode => {
+                let _ = b.WriteString("; SameSite=None");
+            }
+            SameSite::LaxMode => {
+                let _ = b.WriteString("; SameSite=Lax");
+            }
+            SameSite::StrictMode => {
+                let _ = b.WriteString("; SameSite=Strict");
+            }
         }
+        // Go: if c.Partitioned { b.WriteString("; Partitioned") }
         if self.Partitioned {
-            out.extend_from_slice(b"; Partitioned");
+            let _ = b.WriteString("; Partitioned");
         }
-        string::from_bytes(&out)
+        // Go: return b.String()
+        b.String()
     }
 
     /// Reports whether the cookie is valid. Returns `errors::nil` if so,
-    /// else an error describing the first problem. Mirrors
-    /// `(*Cookie).Valid()` (cookie.go:328).
+    /// else an error describing the first problem.
+    ///
+    /// Line-by-line port of `(*Cookie).Valid()` (cookie.go:328).
     pub fn Valid(&self) -> error {
+        // Go: if c == nil { return errors.New("http: nil Cookie") }   — we have &self, so always non-nil
+        // Go: if !isToken(c.Name) { ... }
         if !is_token(&self.Name) {
             return errors::New(string("http: invalid Cookie.Name"));
         }
+        // Go: if !c.Expires.IsZero() && !validCookieExpires(c.Expires) { ... }
         if !self.Expires.IsZero() && !valid_cookie_expires(&self.Expires) {
             return errors::New(string("http: invalid Cookie.Expires"));
         }
-        for &b in self.Value.as_bytes() {
-            if !valid_cookie_value_byte(b) {
+        // Go: for i := 0; i < len(c.Value); i++ { if !validCookieValueByte(c.Value[i]) { … } }
+        for i in 0..self.Value.Len() {
+            if !valid_cookie_value_byte(self.Value[i]) {
                 return errors::New(string("http: invalid byte in Cookie.Value"));
             }
         }
+        // Go: if len(c.Path) > 0 { for i ... validCookiePathByte ... }
         if self.Path.Len() > 0 {
-            for &b in self.Path.as_bytes() {
-                if !valid_cookie_path_byte(b) {
+            for i in 0..self.Path.Len() {
+                if !valid_cookie_path_byte(self.Path[i]) {
                     return errors::New(string("http: invalid byte in Cookie.Path"));
                 }
             }
         }
+        // Go: if len(c.Domain) > 0 { if !validCookieDomain(c.Domain) { … } }
         if self.Domain.Len() > 0 && !valid_cookie_domain(&self.Domain) {
             return errors::New(string("http: invalid Cookie.Domain"));
         }
+        // Go: if c.Partitioned { if !c.Secure { return errors.New(...) } }
         if self.Partitioned && !self.Secure {
             return errors::New(string("http: partitioned cookies must be set with Secure"));
         }
@@ -444,223 +507,254 @@ fn is_token_byte(b: byte) -> bool {
         b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z')
 }
 
+/// Line-by-line port of Go's `isToken` (mime header / RFC 7230 token).
+/// Used for cookie-name validation.
 fn is_token(s: &string) -> bool {
-    let b = s.as_bytes();
-    if b.is_empty() {
+    // Go: if len(s) == 0 { return false }
+    if s.Len() == 0 {
         return false;
     }
-    for &c in b {
-        if !is_token_byte(c) {
+    // Go: for i := 0; i < len(s); i++ { if !isTokenByte(s[i]) { return false } }
+    for i in 0..s.Len() {
+        if !is_token_byte(s[i]) {
             return false;
         }
     }
     true
 }
 
-fn sanitize_cookie_value(v: &string, quoted: bool) -> string {
-    let cleaned = sanitize_or_drop(v.as_bytes(), valid_cookie_value_byte);
-    if cleaned.is_empty() {
-        return string::from_bytes(&cleaned);
+/// Line-by-line port of `sanitizeCookieValue` (cookie.go:509).
+fn sanitize_cookie_value(v: string, quoted: bool) -> string {
+    // Go: v = sanitizeOrWarn("Cookie.Value", validCookieValueByte, v)
+    let v = sanitize_or_warn(string("Cookie.Value"), valid_cookie_value_byte, v);
+    // Go: if len(v) == 0 { return v }
+    if v.Len() == 0 {
+        return v;
     }
-    let needs_quotes =
-        quoted || cleaned.iter().any(|&b| b == b' ' || b == b',');
-    if needs_quotes {
-        let mut out = Vec::with_capacity(cleaned.len() + 2);
-        out.push(b'"');
-        out.extend_from_slice(&cleaned);
-        out.push(b'"');
-        string::from_bytes(&out)
-    } else {
-        string::from_bytes(&cleaned)
+    // Go: if strings.ContainsAny(v, " ,") || quoted { return `"` + v + `"` }
+    if strings::ContainsAny(v.clone(), string(" ,")) || quoted {
+        let mut b = strings::Builder::new();
+        b.Grow(v.Len() + 2);
+        let _ = b.WriteByte(b'"');
+        let _ = b.WriteString(v);
+        let _ = b.WriteByte(b'"');
+        return b.String();
     }
+    // Go: return v
+    v
 }
 
-fn sanitize_cookie_path(v: &string) -> string {
-    let cleaned = sanitize_or_drop(v.as_bytes(), valid_cookie_path_byte);
-    string::from_bytes(&cleaned)
+/// Line-by-line port of `sanitizeCookiePath` (cookie.go:526).
+fn sanitize_cookie_path(v: string) -> string {
+    sanitize_or_warn(string("Cookie.Path"), valid_cookie_path_byte, v)
 }
 
-/// `sanitizeOrWarn` (cookie.go:534). The Go version logs a warning;
-/// we silently drop. Returns a fresh byte vec whether or not anything
-/// was filtered.
-fn sanitize_or_drop(v: &[u8], valid: fn(byte) -> bool) -> Vec<u8> {
-    let mut out: Vec<u8> = Vec::with_capacity(v.len());
-    for &b in v {
+/// Line-by-line port of `sanitizeOrWarn` (cookie.go:534). Go's version
+/// logs the offending byte via `log.Printf`; goish silently drops
+/// since `log` isn't ported. Behavior on the wire is identical.
+fn sanitize_or_warn(_field_name: string, valid: fn(byte) -> bool, v: string) -> string {
+    // Go: ok := true; for i := 0; i < len(v); i++ { if valid(v[i]) { continue }; … ok = false; break }
+    let mut ok = true;
+    for i in 0..v.Len() {
+        if valid(v[i]) {
+            continue;
+        }
+        // Go logs here; we drop silently.
+        ok = false;
+        break;
+    }
+    // Go: if ok { return v }
+    if ok {
+        return v;
+    }
+    // Go: buf := make([]byte, 0, len(v))
+    let mut buf = crate::make!([]byte, 0, v.Len());
+    // Go: for i := 0; i < len(v); i++ { if b := v[i]; valid(b) { buf = append(buf, b) } }
+    for i in 0..v.Len() {
+        let b = v[i];
         if valid(b) {
-            out.push(b);
+            buf = crate::append!(buf, b);
         }
     }
-    out
+    // Go: return string(buf)
+    crate::convert::string(buf)
 }
 
-/// `parseCookieValue` (cookie.go:565). Strips matching outer quotes
-/// when `allow_double_quote` is set; rejects invalid bytes.
+/// Line-by-line port of `parseCookieValue` (cookie.go:565).
+/// Strips matching outer quotes when `allow_double_quote` is set;
+/// rejects invalid bytes.
 fn parse_cookie_value(raw: &string, allow_double_quote: bool) -> (string, bool, bool) {
-    let mut bytes = raw.as_bytes();
+    // Go: var quoted bool
     let mut quoted = false;
-    if allow_double_quote && bytes.len() > 1 && bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"' {
-        bytes = &bytes[1..bytes.len() - 1];
+    // Go: if allowDoubleQuote && len(raw) > 1 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+    //         raw = raw[1 : len(raw)-1]; quoted = true
+    //     }
+    let raw = if allow_double_quote
+        && raw.Len() > 1
+        && raw[0] == b'"'
+        && raw[raw.Len() - 1] == b'"'
+    {
         quoted = true;
-    }
-    for &b in bytes {
-        if !valid_cookie_value_byte(b) {
-            return (string::new(), quoted, false);
+        string::from_bytes(&raw.as_bytes()[1..(raw.Len() - 1) as usize])
+    } else {
+        raw.clone()
+    };
+    // Go: for i := 0; i < len(raw); i++ { if !validCookieValueByte(raw[i]) { return "", quoted, false } }
+    for i in 0..raw.Len() {
+        if !valid_cookie_value_byte(raw[i]) {
+            return (string(""), quoted, false);
         }
     }
-    (string::from_bytes(bytes), quoted, true)
+    // Go: return raw, quoted, true
+    (raw, quoted, true)
 }
 
+/// Line-by-line port of `validCookieDomain` (cookie.go:418). Goish
+/// drops the IPv6 path since `net::ParseIP` isn't ported.
 fn valid_cookie_domain(v: &string) -> bool {
+    // Go: if isCookieDomainName(v) { return true }
     if is_cookie_domain_name(v) {
         return true;
     }
-    is_ipv4_literal(v.as_bytes())
+    // Go: if net.ParseIP(v) != nil && !strings.Contains(v, ":") { return true }
+    is_ipv4_literal(v)
 }
 
 fn valid_cookie_expires(t: &time::Time) -> bool {
-    // RFC 6265 §5.1.1.5 — year >= 1601.
+    // Go: t.Year() >= 1601 (with goish's IsZero guard for safety)
     !t.IsZero() && t.Year() >= 1601
 }
 
-/// Mirrors `isCookieDomainName` (cookie.go:437). Almost a direct copy
-/// of net's `isDomainName`, but disallows underscore.
+/// Line-by-line port of `isCookieDomainName` (cookie.go:437). Direct
+/// copy of net's `isDomainName` with underscore disallowed.
 fn is_cookie_domain_name(s: &string) -> bool {
-    let mut bytes = s.as_bytes();
-    if bytes.is_empty() || bytes.len() > 255 {
+    // Go: if len(s) == 0 { return false }; if len(s) > 255 { return false }
+    if s.Len() == 0 || s.Len() > 255 {
         return false;
     }
-    if bytes[0] == b'.' {
-        bytes = &bytes[1..];
-    }
-    let mut last: u8 = b'.';
+    // Go: if s[0] == '.' { s = s[1:] }
+    let s = if s[0] == b'.' {
+        string::from_bytes(&s.as_bytes()[1..])
+    } else {
+        s.clone()
+    };
+    // Go: last := byte('.'); ok := false; partlen := 0
+    let mut last: byte = b'.';
     let mut ok = false;
-    let mut partlen: usize = 0;
-    for &c in bytes {
-        match c {
-            b'a'..=b'z' | b'A'..=b'Z' => {
-                ok = true;
-                partlen += 1;
-            }
-            b'0'..=b'9' => partlen += 1,
-            b'-' => {
-                if last == b'.' {
-                    return false;
-                }
-                partlen += 1;
-            }
-            b'.' => {
-                if last == b'.' || last == b'-' {
-                    return false;
-                }
-                if partlen > 63 || partlen == 0 {
-                    return false;
-                }
-                partlen = 0;
-            }
-            _ => return false,
-        }
-        last = c;
-    }
-    !(last == b'-' || partlen > 63) && ok
-}
-
-/// Tiny IPv4-literal check — `D.D.D.D` where each D is 0..255 with
-/// no leading-zero shenanigans. Used in place of `net::ParseIP`.
-fn is_ipv4_literal(s: &[u8]) -> bool {
-    let mut octets = 0;
-    let mut digits: u32 = 0;
-    let mut acc: u32 = 0;
-    for &b in s {
-        if b == b'.' {
-            if digits == 0 || acc > 255 {
+    let mut partlen: int = 0;
+    // Go: for i := 0; i < len(s); i++ { c := s[i]; switch { ... } }
+    for i in 0..s.Len() {
+        let c: byte = s[i];
+        if (c >= b'a' && c <= b'z') || (c >= b'A' && c <= b'Z') {
+            ok = true;
+            partlen += 1;
+        } else if c >= b'0' && c <= b'9' {
+            partlen += 1;
+        } else if c == b'-' {
+            if last == b'.' {
                 return false;
             }
-            octets += 1;
-            digits = 0;
-            acc = 0;
-        } else if b.is_ascii_digit() {
-            acc = acc * 10 + (b - b'0') as u32;
-            digits += 1;
-            if digits > 3 || acc > 255 {
+            partlen += 1;
+        } else if c == b'.' {
+            if last == b'.' || last == b'-' {
                 return false;
             }
+            if partlen > 63 || partlen == 0 {
+                return false;
+            }
+            partlen = 0;
         } else {
             return false;
         }
+        last = c;
     }
-    octets == 3 && digits > 0 && acc <= 255
+    // Go: if last == '-' || partlen > 63 { return false }
+    if last == b'-' || partlen > 63 {
+        return false;
+    }
+    ok
 }
 
-#[inline]
-fn ascii_to_lower_string(s: &string) -> string {
-    let mut out = Vec::with_capacity(s.Len() as usize);
-    for &b in s.as_bytes() {
-        out.push(if (b'A'..=b'Z').contains(&b) { b + 32 } else { b });
+/// IPv4 dotted-decimal literal check (4 octets 0..=255). Stand-in for
+/// `net.ParseIP(v) != nil && !strings.Contains(v, ":")` until net.ParseIP
+/// is ported.
+fn is_ipv4_literal(s: &string) -> bool {
+    // Go (paraphrased): split on '.'; need exactly 4 numeric groups.
+    let parts = strings::Split(s.clone(), string("."));
+    if parts.Len() != 4 {
+        return false;
     }
-    string::from_bytes(&out)
-}
-
-fn append_int(out: &mut Vec<u8>, mut n: int) {
-    if n == 0 {
-        out.push(b'0');
-        return;
+    for i in 0..parts.Len() {
+        let p = parts[i].clone();
+        if p.Len() == 0 || p.Len() > 3 {
+            return false;
+        }
+        let (n, err) = crate::strconv::Atoi(p);
+        if !err.IsNil() || n < 0 || n > 255 {
+            return false;
+        }
     }
-    let neg = n < 0;
-    if neg {
-        n = -n;
-    }
-    let mut buf = [0u8; 20];
-    let mut i = buf.len();
-    while n > 0 {
-        i -= 1;
-        buf[i] = b'0' + (n % 10) as u8;
-        n /= 10;
-    }
-    if neg {
-        out.push(b'-');
-    }
-    out.extend_from_slice(&buf[i..]);
+    true
 }
 
 // ─── inline IMF-fixdate (RFC 7231 §7.1.1.1): "Mon, 02 Jan 2006 15:04:05 GMT"
+//
+// Matches Go's `TimeFormat` constant from net/http/server.go:
+//   "Mon, 02 Jan 2006 15:04:05 GMT" — 29 bytes, fixed.
+// Used in place of `time.Time.Format(TimeFormat)` until time::Format is
+// ported.
 
-const DAY_NAMES: [&[u8]; 7] = [
+const DAY_NAMES: [&[byte; 3]; 7] = [
     b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat",
 ];
-const MONTH_NAMES: [&[u8]; 12] = [
+const MONTH_NAMES: [&[byte; 3]; 12] = [
     b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun",
     b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
 ];
 
-fn append_imf_fixdate(out: &mut Vec<u8>, t: &time::Time) {
-    let weekday = t.Weekday() as usize % 7;
+/// Fill `buf` (must be ≥ 29 bytes) with the IMF-fixdate rendering of
+/// `t`, returning a slice covering exactly the 29 bytes written.
+/// Mirrors Go's `t.UTC().AppendFormat(buf[:0], TimeFormat)` flow.
+fn append_imf_fixdate_into<'a>(buf: &'a mut [byte; 29], t: &time::Time) -> &'a [byte] {
+    let weekday = (t.Weekday() as usize) % 7;
     let (year, month, day) = t.Date();
     let (hh, mm, ss) = t.Clock();
-    out.extend_from_slice(DAY_NAMES[weekday]);
-    out.extend_from_slice(b", ");
-    push_2(out, day as u32);
-    out.push(b' ');
-    out.extend_from_slice(MONTH_NAMES[(month - 1) as usize % 12]);
-    out.push(b' ');
-    push_4(out, year as u32);
-    out.push(b' ');
-    push_2(out, hh as u32);
-    out.push(b':');
-    push_2(out, mm as u32);
-    out.push(b':');
-    push_2(out, ss as u32);
-    out.extend_from_slice(b" GMT");
+    let dn = DAY_NAMES[weekday];
+    buf[0] = dn[0];
+    buf[1] = dn[1];
+    buf[2] = dn[2];
+    buf[3] = b',';
+    buf[4] = b' ';
+    write_2(&mut buf[5..7], day as u32);
+    buf[7] = b' ';
+    let mn = MONTH_NAMES[((month - 1) as usize) % 12];
+    buf[8] = mn[0];
+    buf[9] = mn[1];
+    buf[10] = mn[2];
+    buf[11] = b' ';
+    write_4(&mut buf[12..16], year as u32);
+    buf[16] = b' ';
+    write_2(&mut buf[17..19], hh as u32);
+    buf[19] = b':';
+    write_2(&mut buf[20..22], mm as u32);
+    buf[22] = b':';
+    write_2(&mut buf[23..25], ss as u32);
+    buf[25] = b' ';
+    buf[26] = b'G';
+    buf[27] = b'M';
+    buf[28] = b'T';
+    &buf[..]
 }
 
-fn push_2(out: &mut Vec<u8>, n: u32) {
-    out.push(b'0' + ((n / 10) % 10) as u8);
-    out.push(b'0' + (n % 10) as u8);
+fn write_2(dst: &mut [byte], n: u32) {
+    dst[0] = b'0' + ((n / 10) % 10) as byte;
+    dst[1] = b'0' + (n % 10) as byte;
 }
-fn push_4(out: &mut Vec<u8>, n: u32) {
-    out.push(b'0' + ((n / 1000) % 10) as u8);
-    out.push(b'0' + ((n / 100) % 10) as u8);
-    out.push(b'0' + ((n / 10) % 10) as u8);
-    out.push(b'0' + (n % 10) as u8);
+fn write_4(dst: &mut [byte], n: u32) {
+    dst[0] = b'0' + ((n / 1000) % 10) as byte;
+    dst[1] = b'0' + ((n / 100) % 10) as byte;
+    dst[2] = b'0' + ((n / 10) % 10) as byte;
+    dst[3] = b'0' + (n % 10) as byte;
 }
 
 /// Parse `"Mon, 02 Jan 2006 15:04:05 GMT"`. Returns `None` on any
@@ -746,7 +840,7 @@ fn read_4(b: &[u8]) -> Option<u32> {
 
 fn month_index(b: &[u8]) -> Option<u32> {
     for (i, m) in MONTH_NAMES.iter().enumerate() {
-        if eq_case_insensitive(b, m) {
+        if eq_case_insensitive(b, &m[..]) {
             return Some(i as u32);
         }
     }
