@@ -1068,7 +1068,8 @@ pub fn Until(t: Time) -> Duration {
 //   - Reset is not implemented (would need to wake the sleeper).
 //   - Timer's chan is buffered cap=1 (matches Go's pre-1.23
 //     behavior; post-1.23 sync mode is not faithful here).
-//   - AfterFunc is not implemented (use `go!()` with Sleep instead).
+//   - AfterFunc returns a Timer with a fresh (unused) C chan, since
+//     goish has no nil chan to mirror Go's nil-C convention.
 
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -1153,6 +1154,47 @@ pub fn NewTimer(d: Duration) -> Timer {
             },
             let _ = stop_inner.Recv() => {
                 // Stopped before fire — exit, drop both chans.
+            },
+        }
+    });
+    Timer {
+        C: c,
+        stopped: Arc::new(AtomicBool::new(false)),
+        stop_chan,
+    }
+}
+
+/// `time.AfterFunc(d, f)` (sleep.go:188) — wait `d`, then run `f` in
+/// its own goroutine. Returns a Timer whose `Stop` cancels the call
+/// (returning `true` if cancellation beat the fire).
+///
+/// Slim deviation: Go documents `Timer.C` as nil for AfterFunc; goish
+/// has no nil chan, so `C` is a fresh cap=1 chan that nothing ever
+/// sends on. Don't read from it.
+#[allow(non_snake_case)]
+pub fn AfterFunc<F>(d: Duration, f: F) -> Timer
+where
+    F: FnOnce() + Send + 'static,
+{
+    // Go: c := make(chan Time, 1)  // not actually wired up; slim mirrors.
+    let c: chan<Time> = crate::make!(chan Time, 1);
+    let stop_chan: chan<()> = crate::make!(chan (), 1);
+    let stop_inner = stop_chan.clone();
+    crate::go!(stack(64 * crate::KB), move || {
+        // Race: timer firing vs Stop. Whichever side arrives first wins
+        // and the watcher exits. spawn_fire's gor still lives ≤ d, but
+        // its handle is dropped here so there's no leak past `d`.
+        let fire = spawn_fire(d);
+        crate::select! {
+            let _ = fire.Recv() => {
+                // Go: go f()  (sleep.go:189 — f runs on its own goroutine).
+                // Slim: run f directly on this watcher gor — it has no
+                // other work, so giving f a fresh gor would just add a
+                // hop. Single-shot semantics are identical.
+                f();
+            },
+            let _ = stop_inner.Recv() => {
+                // Stop wins — drop f.
             },
         }
     });
