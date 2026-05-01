@@ -168,3 +168,81 @@ pub fn Unwrap(err: error) -> error {
         None => nil,
     }
 }
+
+// ─── Join (slim port of errors/join.go:19) ───────────────────────────
+
+/// `errors.Join(errs...)` (errors/join.go:19) — combine multiple
+/// errors into one. Nil entries are discarded. Returns `nil` if all
+/// entries are nil; the original error if exactly one is non-nil.
+///
+/// Goish flavor: variadic ...error maps to slice<error>. The joined
+/// error's Error() message concatenates each component's message with
+/// a newline between them; Unwrap walks to the first non-nil entry
+/// (mirroring single-chain Unwrap rather than Go 1.20's
+/// `Unwrap() []error` multi-chain — goish's errors::Is doesn't yet
+/// fan out across multiple parents).
+pub fn Join(errs: crate::goslice::slice<error>) -> error {
+    let mut n: crate::types::int = 0;
+    let mut i: crate::types::int = 0;
+    while i < errs.Len() {
+        if !errs[i].IsNil() {
+            n += 1;
+        }
+        i += 1;
+    }
+    if n == 0 {
+        return nil;
+    }
+    if n == 1 {
+        let mut j: crate::types::int = 0;
+        while j < errs.Len() {
+            if !errs[j].IsNil() {
+                return errs[j].clone();
+            }
+            j += 1;
+        }
+    }
+    let mut filtered: alloc::vec::Vec<error> =
+        alloc::vec::Vec::with_capacity(n as usize);
+    let mut k: crate::types::int = 0;
+    while k < errs.Len() {
+        if !errs[k].IsNil() {
+            filtered.push(errs[k].clone());
+        }
+        k += 1;
+    }
+    error(Some(Arc::new(JoinError { errs: filtered })))
+}
+
+struct JoinError {
+    errs: alloc::vec::Vec<error>,
+}
+
+impl ErrorTrait for JoinError {
+    fn Error(&self) -> crate::gostring::string {
+        if self.errs.is_empty() {
+            return crate::gostring::string::new();
+        }
+        if self.errs.len() == 1 {
+            return self.errs[0].Error();
+        }
+        let mut b: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        b.extend_from_slice(self.errs[0].Error().as_bytes());
+        for e in self.errs.iter().skip(1) {
+            b.push(b'\n');
+            b.extend_from_slice(e.Error().as_bytes());
+        }
+        crate::gostring::string::from_bytes(&b)
+    }
+    fn Unwrap(&self) -> error {
+        // Slim chain: walk to the first wrapped error. Go's actual
+        // joinError.Unwrap returns []error, but goish's errors::Is is
+        // single-chain; chaining to the first non-nil keeps "is this
+        // a wrapped X" predicates working for the common case.
+        if self.errs.is_empty() {
+            nil
+        } else {
+            self.errs[0].clone()
+        }
+    }
+}
