@@ -585,6 +585,149 @@ pub fn AppendQuote<S: Into<string>>(dst: slice<byte>, s: S) -> slice<byte> {
     slice::__from_vec(v)
 }
 
+/// `strconv.QuoteToASCII(s)` (quote.go:138) — return a double-quoted
+/// Go string literal representing `s`, escaping every non-ASCII byte
+/// using `\xHH`. Slim port: the existing `Quote` already emits
+/// ASCII-only output for bytes ≥ 0x80, so this delegates directly.
+pub fn QuoteToASCII<S: Into<string>>(s: S) -> string {
+    // Go: return quoteWith(s, '"', true, false)
+    Quote(s)
+}
+
+/// `strconv.AppendQuoteToASCII(dst, s)` (quote.go:144) — append the
+/// ASCII-quoted form of `s` to `dst` and return the extended buffer.
+pub fn AppendQuoteToASCII<S: Into<string>>(dst: slice<byte>, s: S) -> slice<byte> {
+    // Go: return appendQuotedWith(dst, s, '"', true, false)
+    AppendQuote(dst, s)
+}
+
+// Internal helper: append the Go-escape form of a single rune with
+// the given quote-byte (either `'` for QuoteRune, `"` for Quote).
+// Slim: ASCII printable bytes pass through; control chars use `\x`;
+// runes ≥ 0x80 always escape (`\u` < 0x10000, else `\U`).
+fn append_escaped_rune(out: &mut alloc::vec::Vec<u8>, r: rune, quote: u8) {
+    let lowerhex = b"0123456789abcdef";
+    // Go: if r == rune(quote) || r == '\\' { ... }
+    if r == quote as rune {
+        out.push(b'\\');
+        out.push(quote);
+        return;
+    }
+    if r == b'\\' as rune {
+        out.push(b'\\');
+        out.push(b'\\');
+        return;
+    }
+    // Go: short-form escapes for the named control chars.
+    match r {
+        0x07 => {
+            out.extend_from_slice(b"\\a");
+            return;
+        }
+        0x08 => {
+            out.extend_from_slice(b"\\b");
+            return;
+        }
+        0x0C => {
+            out.extend_from_slice(b"\\f");
+            return;
+        }
+        0x0A => {
+            out.extend_from_slice(b"\\n");
+            return;
+        }
+        0x0D => {
+            out.extend_from_slice(b"\\r");
+            return;
+        }
+        0x09 => {
+            out.extend_from_slice(b"\\t");
+            return;
+        }
+        0x0B => {
+            out.extend_from_slice(b"\\v");
+            return;
+        }
+        _ => {}
+    }
+    // Other control chars / DEL → \xHH.
+    if r >= 0 && r < 0x20 {
+        out.extend_from_slice(b"\\x");
+        out.push(lowerhex[((r >> 4) & 0xF) as usize]);
+        out.push(lowerhex[(r & 0xF) as usize]);
+        return;
+    }
+    if r == 0x7F {
+        out.extend_from_slice(b"\\x7f");
+        return;
+    }
+    // ASCII printable: emit raw byte.
+    if r >= 0x20 && r < 0x7F {
+        out.push(r as u8);
+        return;
+    }
+    // Non-ASCII / invalid: \u or \U escape.
+    if r < 0 || r > 0x10FFFF {
+        // Invalid code point → render replacement char as �.
+        out.extend_from_slice(b"\\ufffd");
+        return;
+    }
+    if r < 0x10000 {
+        out.extend_from_slice(b"\\u");
+        let mut shift: i32 = 12;
+        while shift >= 0 {
+            let nib = ((r >> shift) & 0xF) as usize;
+            out.push(lowerhex[nib]);
+            shift -= 4;
+        }
+        return;
+    }
+    out.extend_from_slice(b"\\U");
+    let mut shift: i32 = 28;
+    while shift >= 0 {
+        let nib = ((r >> shift) & 0xF) as usize;
+        out.push(lowerhex[nib]);
+        shift -= 4;
+    }
+}
+
+/// `strconv.QuoteRune(r)` (quote.go:167) — return a single-quoted
+/// Go character literal for `r`. Control chars and non-ASCII use
+/// Go escape sequences (`\t`, `\n`, `\xFF`, `Ā`, `\U00100000`).
+pub fn QuoteRune(r: rune) -> string {
+    // Go: return quoteRuneWith(r, '\'', false, false)
+    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(8);
+    out.push(b'\'');
+    append_escaped_rune(&mut out, r, b'\'');
+    out.push(b'\'');
+    string::from_bytes(&out)
+}
+
+/// `strconv.AppendQuoteRune(dst, r)` (quote.go:173) — append the
+/// QuoteRune form of `r` to `dst` and return the extended buffer.
+pub fn AppendQuoteRune(dst: slice<byte>, r: rune) -> slice<byte> {
+    // Go: return appendQuotedRuneWith(dst, r, '\'', false, false)
+    let q = QuoteRune(r);
+    let mut v = dst.__into_vec();
+    v.extend_from_slice(q.as_bytes());
+    slice::__from_vec(v)
+}
+
+/// `strconv.QuoteRuneToASCII(r)` (quote.go:183) — slim port: same
+/// as `QuoteRune` because our slim implementation already escapes
+/// non-ASCII runes.
+pub fn QuoteRuneToASCII(r: rune) -> string {
+    // Go: return quoteRuneWith(r, '\'', true, false)
+    QuoteRune(r)
+}
+
+/// `strconv.AppendQuoteRuneToASCII(dst, r)` (quote.go:189) — append
+/// the QuoteRuneToASCII form to `dst`.
+pub fn AppendQuoteRuneToASCII(dst: slice<byte>, r: rune) -> slice<byte> {
+    // Go: return appendQuotedRuneWith(dst, r, '\'', true, false)
+    AppendQuoteRune(dst, r)
+}
+
 /// `strconv.CanBackquote(s)` (quote.go:212) — report whether `s` can
 /// be rendered unchanged inside backticks (no control chars except
 /// '\t', no backquote, no DEL, no BOM).
