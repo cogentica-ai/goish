@@ -495,10 +495,159 @@ impl Drop for Listener {
 /// `net.SplitHostPort(hostport)` (ipsock.go:165) — split a network
 /// address of the form `"host:port"`, `"host%zone:port"`,
 /// `"[host]:port"`, or `"[host%zone]:port"` into its host and port
-/// components. Mirrors Go's strict validation:
-///   - Missing port → error.
-///   - Host containing ':' (without brackets) → "too many colons".
-///   - Stray '[' / ']' outside the IPv6 brackets → error.
+/// `net.IP` (ip.go:37) — `type IP []byte`. Slim port: holds either a
+/// 4-byte IPv4 representation or an unset (length-0) "nil" sentinel.
+/// IPv6 is deferred (16-byte form not yet supported by the parser).
+///
+///   Go                                   goish
+///   ──────────────────────────────────   ──────────────────────────────────
+///   net.IPv4(192, 0, 2, 1)               IPv4(192, 0, 2, 1)            -> IP
+///   net.ParseIP("127.0.0.1")             ParseIP(string("127.0.0.1"))  -> IP
+///   ip == nil                            ip.IsNil()
+///   ip.To4()                             ip.To4()
+///   ip.String()                          ip.String()
+#[derive(Clone, Default)]
+pub struct IP {
+    /// Backing bytes. Length 4 for IPv4; length 0 means "nil".
+    pub bytes: slice<byte>,
+}
+
+impl IP {
+    /// `IsNil()` — slim helper, true when the IP is the zero value
+    /// (no backing bytes). Mirrors `ip == nil` in Go.
+    pub fn IsNil(&self) -> bool {
+        self.bytes.Len() == 0
+    }
+
+    /// `IP.To4()` (ip.go:255) — return the 4-byte form, or nil-IP if
+    /// the address isn't an IPv4. Slim port: with IPv4-only support
+    /// the 4-byte form is already canonical, so this returns a clone
+    /// when len==4 and a nil IP otherwise.
+    pub fn To4(&self) -> IP {
+        // Go: if 4-byte → return. If 16-byte v4-mapped → return last 4.
+        // Slim: only the 4-byte case exists.
+        if self.bytes.Len() == 4 {
+            return self.clone();
+        }
+        IP::default()
+    }
+
+    /// `IP.String()` (ip.go:299) — slim. IPv4 addresses render as
+    /// `"a.b.c.d"`. The nil sentinel renders as `"<nil>"` (matches Go).
+    /// IPv6 forms are not supported in slim and render as `"<nil>"`.
+    pub fn String(&self) -> string {
+        // Go: if len(p) == 0 { return "<nil>" }
+        if self.bytes.Len() == 0 {
+            return string::from_static("<nil>");
+        }
+        // Go: if 4-byte → render dotted-decimal.
+        if self.bytes.Len() == 4 {
+            // strconv::AppendInt + literal '.' separators.
+            let mut buf: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(15);
+            buf = crate::strconv::AppendInt(
+                slice::<byte>::__from_vec(buf),
+                self.bytes[0] as int,
+                10,
+            )
+            .__into_vec();
+            buf.push(b'.');
+            buf = crate::strconv::AppendInt(
+                slice::<byte>::__from_vec(buf),
+                self.bytes[1] as int,
+                10,
+            )
+            .__into_vec();
+            buf.push(b'.');
+            buf = crate::strconv::AppendInt(
+                slice::<byte>::__from_vec(buf),
+                self.bytes[2] as int,
+                10,
+            )
+            .__into_vec();
+            buf.push(b'.');
+            buf = crate::strconv::AppendInt(
+                slice::<byte>::__from_vec(buf),
+                self.bytes[3] as int,
+                10,
+            )
+            .__into_vec();
+            return string::from_bytes(&buf);
+        }
+        // Slim: any other length is not a recognized form.
+        string::from_static("<nil>")
+    }
+}
+
+/// `net.IPv4(a, b, c, d)` (ip.go:43) — construct an IPv4 net.IP.
+/// Slim port returns the 4-byte form directly (Go returns the
+/// 16-byte v4-mapped-v6 form, which `To4()` then collapses).
+pub fn IPv4(a: byte, b: byte, c: byte, d: byte) -> IP {
+    let mut v: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(4);
+    v.push(a);
+    v.push(b);
+    v.push(c);
+    v.push(d);
+    IP {
+        bytes: slice::<byte>::__from_vec(v),
+    }
+}
+
+/// `net.ParseIP(s)` (ip.go:527) — parse a textual IP address.
+/// Slim port: IPv4 dotted-decimal only (`"a.b.c.d"`). IPv6 forms
+/// (`"::1"`, `"fe80::1"`, etc.) return the nil-IP sentinel.
+///
+/// Each octet must be 1-3 ASCII digits with value in 0..=255 and no
+/// leading zeros beyond a single '0' (matches Go's strict parser).
+pub fn ParseIP(s: crate::string) -> IP {
+    let bs = crate::convert::bytes(s);
+    let raw: &[byte] = &bs;
+    parse_ipv4(raw).unwrap_or_default()
+}
+
+fn parse_ipv4(s: &[byte]) -> Option<IP> {
+    let mut octets: [byte; 4] = [0; 4];
+    let mut i = 0usize;
+    let mut field = 0usize;
+    while field < 4 {
+        // Each octet: 1-3 digits.
+        if i >= s.len() {
+            return None;
+        }
+        let mut n: u32 = 0;
+        let mut digits = 0;
+        while i < s.len() && s[i] >= b'0' && s[i] <= b'9' {
+            // Reject leading zero followed by another digit (Go strict).
+            if digits == 1 && octets[field] == 0 && n == 0 {
+                return None;
+            }
+            n = n * 10 + (s[i] - b'0') as u32;
+            if n > 255 {
+                return None;
+            }
+            octets[field] = n as byte;
+            digits += 1;
+            i += 1;
+            if digits > 3 {
+                return None;
+            }
+        }
+        if digits == 0 {
+            return None;
+        }
+        // Separator: '.' between octets, EOF after the 4th.
+        if field < 3 {
+            if i >= s.len() || s[i] != b'.' {
+                return None;
+            }
+            i += 1; // consume '.'
+        } else if i != s.len() {
+            return None; // trailing junk
+        }
+        field += 1;
+    }
+    Some(IPv4(octets[0], octets[1], octets[2], octets[3]))
+}
+
 pub fn SplitHostPort(hostport: crate::string) -> (crate::string, crate::string, crate::errors::error) {
     let missing_port = "missing port in address";
     let too_many_colons = "too many colons in address";
