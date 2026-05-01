@@ -371,6 +371,40 @@ impl Time {
         ((days + 4).rem_euclid(7)) as int
     }
 
+    /// `t.YearDay()` (time.go:903) — day of the year, [1, 365] for non-leap,
+    /// [1, 366] for leap years.
+    pub fn YearDay(self) -> int {
+        // Go: time.go:904 — `_, yday := t.absSec().days().yearYday()`.
+        // Slim: derive from current Date() vs Jan 1 of the same year.
+        let (y, _, _) = self.Date();
+        let unix_days_now = self.sec.div_euclid(86_400);
+        let unix_days_jan1 = days_from_civil(y, 1, 1);
+        // Go: yday is 1-based.
+        (unix_days_now - unix_days_jan1 + 1) as int
+    }
+
+    /// `t.AddDate(years, months, days)` (time.go:1258) — add the given
+    /// number of years, months, and days, normalizing the result the
+    /// same way `Date` does (e.g. `AddDate(0, 1, 0)` on Oct 31 yields
+    /// Dec 1, the normalized form of Nov 31).
+    pub fn AddDate(self, years: int, months: int, days: int) -> Time {
+        // Go: time.go:1259-1260
+        let (year, month, day) = self.Date();
+        let (hour, min, sec) = self.Clock();
+        // Go: time.go:1261 — Date(year+years, month+Month(months), day+days,
+        // hour, min, sec, int(t.nsec()), t.Location()).
+        // Slim: no Location parameter (UTC-only).
+        Date(
+            year + years,
+            month + months,
+            day + days,
+            hour,
+            min,
+            sec,
+            self.nsec as int,
+        )
+    }
+
     /// `t.UTC()` (time.go:1364) — slim time is always UTC, returns self.
     pub fn UTC(self) -> Time {
         self
