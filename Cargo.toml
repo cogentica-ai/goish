@@ -19,6 +19,12 @@ goish-macros = { path = "goish-macros", version = "0.1" }
 
 [profile.dev]
 panic = "abort"
+# Full embedded DWARF for gdb post-mortem on e2e segfaults +
+# rr replay. `debug = "full"` is equivalent to `debug = 2`; making
+# it explicit guards against future global rust default changes.
+debug = "full"
+split-debuginfo = "off"
+strip = "none"
 
 [profile.release]
 panic = "abort"
