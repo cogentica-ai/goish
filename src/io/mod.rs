@@ -477,6 +477,84 @@ pub fn NewSectionReader(
     }
 }
 
+// ─── OffsetWriter ────────────────────────────────────────────────────
+//
+// Slim port of io.go:569 + :578. Symmetric to SectionReader: maps
+// writes at offset `base` to offset `base+off` in the underlying
+// `WriterAt`. Internal `w` is `Box<dyn WriterAt>`.
+
+/// `io.OffsetWriter` (io.go:570) — Write/WriteAt/Seek over a fixed
+/// offset window of an underlying `WriterAt`.
+pub struct OffsetWriter {
+    w: alloc::boxed::Box<dyn WriterAt>,
+    base: i64,
+    off: i64,
+}
+
+impl OffsetWriter {
+    /// `(o *OffsetWriter).Write(p)` (io.go:582). Advances the cursor.
+    pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        // Go: n, err = o.w.WriteAt(p, o.off); o.off += int64(n)
+        let (n, err) = self.w.WriteAt(p, self.off);
+        self.off += n as i64;
+        (n, err)
+    }
+
+    /// `(o *OffsetWriter).WriteAt(p, off)` (io.go:588). Random-access
+    /// write. Negative `off` returns `errOffset`.
+    pub fn WriteAt(&mut self, p: slice<byte>, off: i64) -> (int, error) {
+        // Go: if off < 0 { return 0, errOffset }
+        if off < 0 {
+            return (0, crate::errors::New("Seek: invalid offset"));
+        }
+        // Go: off += o.base; return o.w.WriteAt(p, off)
+        self.w.WriteAt(p, off + self.base)
+    }
+
+    /// `(o *OffsetWriter).Seek(offset, whence)` (io.go:597). Note: Go's
+    /// OffsetWriter.Seek does NOT support SeekEnd (no underlying size
+    /// to anchor against).
+    pub fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
+        // Go: switch whence { case SeekStart: ...; case SeekCurrent: ... }
+        let new_off: i64 = if whence == SeekStart {
+            offset.wrapping_add(self.base)
+        } else if whence == SeekCurrent {
+            offset.wrapping_add(self.off)
+        } else {
+            return (0, crate::errors::New("Seek: invalid whence"));
+        };
+        if new_off < self.base {
+            return (0, crate::errors::New("Seek: invalid offset"));
+        }
+        self.off = new_off;
+        (new_off - self.base, nil)
+    }
+}
+
+impl Writer for OffsetWriter {
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        OffsetWriter::Write(self, p)
+    }
+}
+
+impl WriterAt for OffsetWriter {
+    fn WriteAt(&mut self, p: slice<byte>, off: i64) -> (int, error) {
+        OffsetWriter::WriteAt(self, p, off)
+    }
+}
+
+impl Seeker for OffsetWriter {
+    fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
+        OffsetWriter::Seek(self, offset, whence)
+    }
+}
+
+/// `io.NewOffsetWriter(w, off)` (io.go:578) — write to `w` starting at
+/// offset `off`.
+pub fn NewOffsetWriter(w: alloc::boxed::Box<dyn WriterAt>, off: i64) -> OffsetWriter {
+    OffsetWriter { w, base: off, off }
+}
+
 // ─── CopyN ───────────────────────────────────────────────────────────
 
 /// `io.CopyN(dst, src, n)` (io.go:363) — copy exactly `n` bytes from
