@@ -81,12 +81,12 @@ fn bench_chan_spsc() {
     let wg = WaitGroup::new();
 
     let t0 = Now();
-    wg.Go(move || {
+    wg.GoStack(8 * KB, move || {
         for i in 0..N_SPSC {
             cs.Send(i);
         }
     });
-    wg.Go(move || {
+    wg.GoStack(8 * KB, move || {
         for _ in 0..N_SPSC {
             let _ = cr.Recv();
         }
@@ -110,7 +110,7 @@ fn bench_ring_spsc() {
     let wg = WaitGroup::new();
 
     let t0 = Now();
-    wg.Go(move || {
+    wg.GoStack(8 * KB, move || {
         let mut i: i64 = 0;
         while i < N_SPSC {
             if r.try_send(i).is_ok() {
@@ -120,7 +120,7 @@ fn bench_ring_spsc() {
             }
         }
     });
-    wg.Go(move || {
+    wg.GoStack(8 * KB, move || {
         let mut got: i64 = 0;
         while got < N_SPSC {
             if r.try_recv().is_some() {
@@ -155,7 +155,7 @@ fn bench_chan_mpmc() {
     let t0 = Now();
     for pid in 0..N_PRODUCERS_MPMC {
         let cs = c.clone();
-        wg.Go(move || {
+        wg.GoStack(8 * KB, move || {
             let lo = pid * N_MPMC_PER_PRODUCER;
             let hi = lo + N_MPMC_PER_PRODUCER;
             for i in lo..hi {
@@ -165,7 +165,7 @@ fn bench_chan_mpmc() {
     }
     for _ in 0..N_PRODUCERS_MPMC {
         let cr = c.clone();
-        wg.Go(move || loop {
+        wg.GoStack(8 * KB, move || loop {
             if RECEIVED.load(Ordering::Acquire) >= total {
                 return;
             }
@@ -208,7 +208,7 @@ fn bench_ring_mpmc() {
 
     let t0 = Now();
     for pid in 0..N_PRODUCERS_MPMC {
-        wg.Go(move || {
+        wg.GoStack(8 * KB, move || {
             let lo = pid * N_MPMC_PER_PRODUCER;
             let hi = lo + N_MPMC_PER_PRODUCER;
             let mut i = lo;
@@ -222,7 +222,7 @@ fn bench_ring_mpmc() {
         });
     }
     for _ in 0..N_PRODUCERS_MPMC {
-        wg.Go(|| loop {
+        wg.GoStack(8 * KB, || loop {
             if RECEIVED.load(Ordering::Acquire) >= total {
                 DONE.fetch_add(1, Ordering::AcqRel);
                 return;
