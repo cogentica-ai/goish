@@ -598,6 +598,15 @@ impl IP {
         false
     }
 
+    /// `IP.IsInterfaceLocalMulticast()` (ip.go:162) — slim. IPv6-only
+    /// concept (`ff01::/16`); always false for IPv4 / nil. Goish slim
+    /// has no IPv6 representation, so this is a constant `false`.
+    pub fn IsInterfaceLocalMulticast(&self) -> bool {
+        // Go: return len(ip) == IPv6len && ip[0] == 0xff && ip[1]&0x0f == 0x01
+        // Slim: no IPv6 → always false.
+        false
+    }
+
     /// `IP.IsLinkLocalMulticast()` (ip.go:168) — slim. IPv4
     /// link-local multicast is 224.0.0.0/24 (224.0.0.x).
     pub fn IsLinkLocalMulticast(&self) -> bool {
@@ -620,6 +629,28 @@ impl IP {
             return ip4.bytes[0] == 169 && ip4.bytes[1] == 254;
         }
         false
+    }
+
+    /// `IP.IsGlobalUnicast()` (ip.go:192) — slim. True for every
+    /// IPv4 unicast address that isn't broadcast / unspecified /
+    /// loopback / multicast / link-local-unicast. Slim only checks
+    /// IPv4 (length 4); the IPv6 branch is unreachable.
+    pub fn IsGlobalUnicast(&self) -> bool {
+        // Go: (len(ip) == IPv4len || len(ip) == IPv6len) && ...
+        if self.bytes.Len() != 4 {
+            return false;
+        }
+        // Go: !ip.Equal(IPv4bcast) — 255.255.255.255
+        let bcast = IPv4(255, 255, 255, 255);
+        if self.Equal(&bcast) {
+            return false;
+        }
+        // Go: !ip.IsUnspecified() && !ip.IsLoopback() &&
+        //     !ip.IsMulticast()  && !ip.IsLinkLocalUnicast()
+        !self.IsUnspecified()
+            && !self.IsLoopback()
+            && !self.IsMulticast()
+            && !self.IsLinkLocalUnicast()
     }
 
     /// `IP.Equal(x)` (ip.go:391) — byte-wise equality. Slim: with
