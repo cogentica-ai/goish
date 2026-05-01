@@ -1,5 +1,5 @@
-// mime_parse_smoke — exercise mime::ParseMediaType
-// (slim line-by-line port of mediatype.go:134).
+// mime_parse_smoke — exercise mime::ParseMediaType + FormatMediaType
+// (slim line-by-line ports of mediatype.go:134 / :21).
 
 #![no_std]
 #![no_main]
@@ -114,11 +114,66 @@ fn main() {
         }
     }
 
+    // 9. FormatMediaType: roundtrip a simple type/subtype + param.
+    {
+        let mut params: goish::gomap::map<string, string> = goish::gomap::map::new();
+        params.Set(string("charset"), string("utf-8"));
+        let s = mime::FormatMediaType(string("text/plain"), params);
+        if s == "text/plain; charset=utf-8" {
+            Println!("[ 9] Format simple             PASS");
+        } else {
+            Println!("[ 9] Format simple             FAIL got={}", s);
+            failed += 1;
+        }
+    }
+
+    // 10. FormatMediaType: value with space → quoted.
+    {
+        let mut params: goish::gomap::map<string, string> = goish::gomap::map::new();
+        params.Set(string("filename"), string("hello world.txt"));
+        let s = mime::FormatMediaType(string("attachment"), params);
+        if s == "attachment; filename=\"hello world.txt\"" {
+            Println!("[10] Format quoted value       PASS");
+        } else {
+            Println!("[10] Format quoted value       FAIL got={}", s);
+            failed += 1;
+        }
+    }
+
+    // 11. FormatMediaType: invalid token in type → "".
+    {
+        let params: goish::gomap::map<string, string> = goish::gomap::map::new();
+        let s = mime::FormatMediaType(string("bad type"), params);
+        if s.Len() == 0 {
+            Println!("[11] Format invalid type       PASS");
+        } else {
+            Println!("[11] Format invalid type       FAIL");
+            failed += 1;
+        }
+    }
+
+    // 12. FormatMediaType → ParseMediaType round-trip.
+    {
+        let mut params: goish::gomap::map<string, string> = goish::gomap::map::new();
+        params.Set(string("boundary"), string("X-Boundary-1234"));
+        params.Set(string("charset"), string("utf-8"));
+        let s = mime::FormatMediaType(string("multipart/form-data"), params);
+        let (mt, p, err) = mime::ParseMediaType(s);
+        let (b, _) = p.Get(string("boundary"));
+        let (cs, _) = p.Get(string("charset"));
+        if err.IsNil() && mt == "multipart/form-data" && b == "X-Boundary-1234" && cs == "utf-8" {
+            Println!("[12] Format → Parse round-tr   PASS");
+        } else {
+            Println!("[12] Format → Parse round-tr   FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        Println!("ok 8/8");
+        Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 8", failed);
+        Println!("FAIL {} of 12", failed);
         syscall::Exit(1);
     }
 }

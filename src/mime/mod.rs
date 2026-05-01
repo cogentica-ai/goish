@@ -17,6 +17,88 @@ extern crate alloc;
 use crate::string;
 use crate::strings;
 
+/// `mime.FormatMediaType(t, param)` (mediatype.go:21) — serialize the
+/// media type `t` and its parameters as a Content-Type / Content-
+/// Disposition value. Returns `""` if any input violates the RFC 2045
+/// token grammar.
+///
+/// Slim port: skips RFC 2231 percent-encoding for non-ASCII parameter
+/// values (paired with the matching slim ParseMediaType). Values that
+/// would need encoding are emitted as quoted strings instead.
+pub fn FormatMediaType(t: string, param: crate::gomap::map<string, string>) -> string {
+    let mut b = strings::Builder::new();
+
+    // Go: if major, sub, ok := strings.Cut(t, "/"); !ok { ... } else { ... }
+    let (major, sub, ok) = strings::Cut(t.clone(), string("/"));
+    if !ok {
+        // Go: if !isToken(t) { return "" }
+        if !is_token(t.clone()) {
+            return string::new();
+        }
+        let _ = b.WriteString(strings::ToLower(t));
+    } else {
+        if !is_token(major.clone()) || !is_token(sub.clone()) {
+            return string::new();
+        }
+        let _ = b.WriteString(strings::ToLower(major));
+        let _ = b.WriteByte(b'/');
+        let _ = b.WriteString(strings::ToLower(sub));
+    }
+
+    // Go: for _, attribute := range slices.Sorted(maps.Keys(param))
+    let keys = param.Keys();
+    let mut i: crate::types::int = 0;
+    while i < keys.Len() {
+        let attribute = keys[i].clone();
+        let (value, _) = param.Get(attribute.clone());
+        let _ = b.WriteByte(b';');
+        let _ = b.WriteByte(b' ');
+        if !is_token(attribute.clone()) {
+            return string::new();
+        }
+        let _ = b.WriteString(strings::ToLower(attribute));
+        let _ = b.WriteByte(b'=');
+
+        // Go: if isToken(value) { b.WriteString(value); continue }
+        if is_token(value.clone()) {
+            let _ = b.WriteString(value);
+            i += 1;
+            continue;
+        }
+        // Go: quoted-string with backslash-escape for '"' and '\'.
+        let _ = b.WriteByte(b'"');
+        let bs = value.as_bytes();
+        let mut j: usize = 0;
+        while j < bs.len() {
+            let c = bs[j];
+            if c == b'"' || c == b'\\' {
+                let _ = b.WriteByte(b'\\');
+            }
+            let _ = b.WriteByte(c);
+            j += 1;
+        }
+        let _ = b.WriteByte(b'"');
+        i += 1;
+    }
+    b.String()
+}
+
+/// `mime/grammar.go:75` `isToken(s)` — whole-string variant.
+fn is_token(s: string) -> bool {
+    if s.Len() == 0 {
+        return false;
+    }
+    let bs = s.as_bytes();
+    let mut i: usize = 0;
+    while i < bs.len() {
+        if !is_token_char(bs[i]) {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 /// `mime.ErrInvalidMediaParameter` (mediatype.go:122) — sentinel
 /// returned by ParseMediaType when the optional parameters are
 /// malformed.
