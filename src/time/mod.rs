@@ -1260,6 +1260,264 @@ fn parse_int(bs: &[u8]) -> Result<int, crate::errors::error> {
     Ok(n)
 }
 
+// ─── ParseDuration (slim port of time/format.go:1621) ────────────────
+//
+// Reference: Go 1.25 src/time/format.go:1605-1718. Internal helpers
+// `leadingInt` and `leadingFraction` are inlined as fns here.
+
+/// `time.ParseDuration(s)` — parse a duration string.
+///
+/// A duration string is a possibly signed sequence of decimal numbers,
+/// each with optional fraction and a unit suffix, such as "300ms",
+/// "-1.5h" or "2h45m". Valid time units are "ns", "us" (or "µs"),
+/// "ms", "s", "m", "h".
+pub fn ParseDuration(s: crate::gostring::string) -> (Duration, crate::errors::error) {
+    use crate::gostring::string;
+    use crate::strconv;
+
+    // [-+]?([0-9]*(\.[0-9]*)?[a-z]+)+
+    let orig = s.clone();
+    let mut cur = s.as_bytes().to_vec();
+    let mut d: u64 = 0;
+    let mut neg = false;
+
+    // Consume [-+]?
+    if !cur.is_empty() {
+        let c = cur[0];
+        if c == b'-' || c == b'+' {
+            neg = c == b'-';
+            cur = cur[1..].to_vec();
+        }
+    }
+    // Special case: if all that is left is "0", this is zero.
+    if cur.as_slice() == b"0" {
+        return (Duration(0), crate::errors::nil);
+    }
+    if cur.is_empty() {
+        return (
+            Duration(0),
+            crate::errors::New(
+                string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+            ),
+        );
+    }
+    while !cur.is_empty() {
+        let mut v: u64;
+        let mut f: u64 = 0;
+        let mut scale: f64 = 1.0; // value = v + f/scale
+
+        // The next character must be [0-9.]
+        if !(cur[0] == b'.' || (b'0' <= cur[0] && cur[0] <= b'9')) {
+            return (
+                Duration(0),
+                crate::errors::New(
+                    string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+                ),
+            );
+        }
+        // Consume [0-9]*
+        let pl = cur.len();
+        let (vv, rem, err) = leading_int(&cur);
+        if !err.IsNil() {
+            return (
+                Duration(0),
+                crate::errors::New(
+                    string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+                ),
+            );
+        }
+        v = vv;
+        cur = rem;
+        let pre = pl != cur.len(); // whether we consumed anything before a period
+
+        // Consume (\.[0-9]*)?
+        let mut post = false;
+        if !cur.is_empty() && cur[0] == b'.' {
+            cur = cur[1..].to_vec();
+            let pl = cur.len();
+            let (ff, sc, rem) = leading_fraction(&cur);
+            f = ff;
+            scale = sc;
+            cur = rem;
+            post = pl != cur.len();
+        }
+        if !pre && !post {
+            // no digits (e.g. ".s" or "-.s")
+            return (
+                Duration(0),
+                crate::errors::New(
+                    string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+                ),
+            );
+        }
+
+        // Consume unit.
+        let mut i = 0usize;
+        while i < cur.len() {
+            let c = cur[i];
+            if c == b'.' || (b'0' <= c && c <= b'9') {
+                break;
+            }
+            i += 1;
+        }
+        if i == 0 {
+            return (
+                Duration(0),
+                crate::errors::New(
+                    string::from("time: missing unit in duration ")
+                        + strconv::Quote(orig.clone()),
+                ),
+            );
+        }
+        let u = &cur[..i];
+        let unit = match unit_lookup(u) {
+            Some(n) => n,
+            None => {
+                return (
+                    Duration(0),
+                    crate::errors::New(
+                        string::from("time: unknown unit ")
+                            + strconv::Quote(string::from_bytes(u))
+                            + string::from(" in duration ")
+                            + strconv::Quote(orig.clone()),
+                    ),
+                );
+            }
+        };
+        cur = cur[i..].to_vec();
+        if v > (1u64 << 63) / unit {
+            // overflow
+            return (
+                Duration(0),
+                crate::errors::New(
+                    string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+                ),
+            );
+        }
+        v = v.wrapping_mul(unit);
+        if f > 0 {
+            // float64 is needed to be nanosecond accurate for fractions of hours.
+            v = v.wrapping_add(((f as f64) * (unit as f64 / scale)) as u64);
+            if v > 1u64 << 63 {
+                // overflow
+                return (
+                    Duration(0),
+                    crate::errors::New(
+                        string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+                    ),
+                );
+            }
+        }
+        d = d.wrapping_add(v);
+        if d > 1u64 << 63 {
+            return (
+                Duration(0),
+                crate::errors::New(
+                    string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+                ),
+            );
+        }
+    }
+    if neg {
+        return (Duration(-(d as i128) as int), crate::errors::nil);
+    }
+    if d > (1u64 << 63) - 1 {
+        return (
+            Duration(0),
+            crate::errors::New(
+                string::from("time: invalid duration ") + strconv::Quote(orig),
+            ),
+        );
+    }
+    (Duration(d as int), crate::errors::nil)
+}
+
+/// Mirrors Go's `unitMap` (format.go:1605). Each unit's value is the
+/// number of nanoseconds it represents.
+fn unit_lookup(u: &[u8]) -> Option<u64> {
+    match u {
+        b"ns" => Some(1),
+        b"us" => Some(1_000),
+        // "µs" — U+00B5 (0xC2 0xB5)
+        [0xC2, 0xB5, b's'] => Some(1_000),
+        // "μs" — U+03BC (0xCE 0xBC)
+        [0xCE, 0xBC, b's'] => Some(1_000),
+        b"ms" => Some(1_000_000),
+        b"s" => Some(1_000_000_000),
+        b"m" => Some(60 * 1_000_000_000),
+        b"h" => Some(60 * 60 * 1_000_000_000),
+        _ => None,
+    }
+}
+
+/// `leadingInt` — consume the leading [0-9]* from `s`. Returns
+/// `(x, rem, err)`.
+///
+/// Mirrors format.go:1554. Returns error on overflow (caller treats
+/// it as "invalid duration"); rem is the unconsumed tail.
+fn leading_int(s: &[u8]) -> (u64, alloc::vec::Vec<u8>, crate::errors::error) {
+    let mut x: u64 = 0;
+    let mut i = 0usize;
+    while i < s.len() {
+        let c = s[i];
+        if c < b'0' || c > b'9' {
+            break;
+        }
+        if x > (1u64 << 63) / 10 {
+            // overflow
+            return (
+                0,
+                s.to_vec(),
+                crate::errors::New(crate::gostring::string::from("time: bad [0-9]*")),
+            );
+        }
+        x = x * 10 + (c - b'0') as u64;
+        if x > 1u64 << 63 {
+            // overflow
+            return (
+                0,
+                s.to_vec(),
+                crate::errors::New(crate::gostring::string::from("time: bad [0-9]*")),
+            );
+        }
+        i += 1;
+    }
+    (x, s[i..].to_vec(), crate::errors::nil)
+}
+
+/// `leadingFraction` — consume the leading [0-9]* from `s` as a
+/// fraction. Mirrors format.go:1577. No error on overflow; precision
+/// just stops accumulating.
+fn leading_fraction(s: &[u8]) -> (u64, f64, alloc::vec::Vec<u8>) {
+    let mut x: u64 = 0;
+    let mut scale: f64 = 1.0;
+    let mut overflow = false;
+    let mut i = 0usize;
+    while i < s.len() {
+        let c = s[i];
+        if c < b'0' || c > b'9' {
+            break;
+        }
+        if !overflow {
+            if x > ((1u64 << 63) - 1) / 10 {
+                // It's possible for overflow to give a positive number,
+                // so take care.
+                overflow = true;
+            } else {
+                let y = x * 10 + (c - b'0') as u64;
+                if y > 1u64 << 63 {
+                    overflow = true;
+                } else {
+                    x = y;
+                    scale *= 10.0;
+                }
+            }
+        }
+        i += 1;
+    }
+    (x, scale, s[i..].to_vec())
+}
+
 fn month_short(bs: &[u8]) -> Option<int> {
     match bs {
         b"Jan" => Some(1),
