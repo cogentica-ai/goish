@@ -348,6 +348,76 @@ pub fn Chdir(name: string) -> error {
     nil
 }
 
+/// Line-by-line port of `os.Chmod(name, mode)` (file.go:647 →
+/// file_posix.go:76 chmod). Slim: no PathError wrapping, no EINTR
+/// retry loop (chmod(2) is not interruptible on Linux in practice).
+pub fn Chmod(name: string, mode: FileMode) -> error {
+    // Go: longName := fixLongPath(name) — Linux no-op.
+    // Go: e := ignoringEINTR(func() error { return syscall.Chmod(longName, syscallMode(mode)) })
+    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
+    buf.extend_from_slice(bytes_of(&name));
+    buf.push(0);
+    // syscallMode(mode) for slim FileMode collapses to perm bits only.
+    let rc = syscall::Chmod(buf.as_ptr(), mode & 0o7777);
+    if rc < 0 {
+        // Go: return &PathError{Op: "chmod", Path: name, Err: e}
+        return errors::New(string("chmod failed"));
+    }
+    nil
+}
+
+/// Line-by-line port of `os.Symlink(oldname, newname)` (file_unix.go:417).
+/// Slim: no LinkError wrapping, no EINTR retry.
+pub fn Symlink(oldname: string, newname: string) -> error {
+    // Go: e := ignoringEINTR(func() error { return syscall.Symlink(oldname, newname) })
+    let mut old_buf: Vec<u8> = Vec::with_capacity(oldname.Len() as usize + 1);
+    old_buf.extend_from_slice(bytes_of(&oldname));
+    old_buf.push(0);
+    let mut new_buf: Vec<u8> = Vec::with_capacity(newname.Len() as usize + 1);
+    new_buf.extend_from_slice(bytes_of(&newname));
+    new_buf.push(0);
+    let rc = syscall::Symlink(old_buf.as_ptr(), new_buf.as_ptr());
+    if rc < 0 {
+        // Go: return &LinkError{"symlink", oldname, newname, e}
+        return errors::New(string("symlink failed"));
+    }
+    nil
+}
+
+/// Line-by-line port of `os.Readlink(name)` (file.go:449 →
+/// file_unix.go:427 readlink) — read the target of a symbolic link.
+/// Doubles the buffer until the result fits, mirroring Go's growth
+/// retry loop.
+pub fn Readlink(name: string) -> (string, error) {
+    // Go: for len := 128; ; len *= 2 { ... }
+    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
+    buf.extend_from_slice(bytes_of(&name));
+    buf.push(0);
+    let mut len_: usize = 128;
+    loop {
+        // Go: b := make([]byte, len)
+        let mut b: Vec<u8> = Vec::with_capacity(len_);
+        b.resize(len_, 0);
+        // Go: n, err := fixCount(syscall.Readlink(name, b))
+        let n = syscall::Readlink(buf.as_ptr(), b.as_mut_ptr(), len_);
+        if n < 0 {
+            // Go: return "", &PathError{Op: "readlink", Path: name, Err: e}
+            return (string::new(), errors::New(string("readlink failed")));
+        }
+        let nu = n as usize;
+        // Go: if n < len { return string(b[0:n]), nil }
+        if nu < len_ {
+            return (string::from_bytes(&b[..nu]), nil);
+        }
+        // Go: len *= 2
+        len_ *= 2;
+        // Hard cap to prevent runaway: 1 MiB is more than any realistic symlink.
+        if len_ > 1 << 20 {
+            return (string::new(), errors::New(string("readlink: target too long")));
+        }
+    }
+}
+
 /// `os.Hostname()` (sys.go:8) — return the kernel's nodename via
 /// uname(2).
 pub fn Hostname() -> (string, error) {

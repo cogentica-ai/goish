@@ -339,11 +339,14 @@ pub fn Lseek(fd: i32, offset: i64, whence: i32) -> i64 {
     unsafe { syscall3(SYS_LSEEK, fd as usize, offset as usize, whence as usize) as i64 }
 }
 
-// ─── mkdir / unlink / rmdir ──────────────────────────────────────────
+// ─── mkdir / unlink / rmdir / chmod / symlink / readlink ────────────
 
 pub const SYS_MKDIR: usize = 83;
 pub const SYS_UNLINK: usize = 87;
 pub const SYS_RMDIR: usize = 84;
+pub const SYS_CHMOD: usize = 90;
+pub const SYS_SYMLINK: usize = 88;
+pub const SYS_READLINK: usize = 89;
 
 /// `mkdir(path, mode)`. Returns 0 on success, -errno on failure.
 #[allow(non_snake_case)]
@@ -374,6 +377,25 @@ pub fn Getcwd(buf: *mut u8, size: usize) -> isize {
 #[allow(non_snake_case)]
 pub fn Chdir(path: *const u8) -> i32 {
     unsafe { syscall1(SYS_CHDIR, path as usize) as i32 }
+}
+
+/// `chmod(path, mode)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Chmod(path: *const u8, mode: u32) -> i32 {
+    unsafe { syscall2(SYS_CHMOD, path as usize, mode as usize) as i32 }
+}
+
+/// `symlink(oldname, newname)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Symlink(oldname: *const u8, newname: *const u8) -> i32 {
+    unsafe { syscall2(SYS_SYMLINK, oldname as usize, newname as usize) as i32 }
+}
+
+/// `readlink(path, buf, bufsiz)`. Returns the number of bytes placed in
+/// buf (without NUL) on success, or a negative errno on failure.
+#[allow(non_snake_case)]
+pub fn Readlink(path: *const u8, buf: *mut u8, bufsiz: usize) -> isize {
+    unsafe { syscall3(SYS_READLINK, path as usize, buf as usize, bufsiz) as isize }
 }
 
 // ─── uname ───────────────────────────────────────────────────────────
