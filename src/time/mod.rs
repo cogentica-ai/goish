@@ -264,6 +264,45 @@ impl Time {
         ((days + 4).rem_euclid(7)) as int
     }
 
+    /// `t.UTC()` (time.go:1364) — slim time is always UTC, returns self.
+    pub fn UTC(self) -> Time {
+        self
+    }
+
+    /// `t.Local()` (time.go:1370) — slim time has no Location, returns self.
+    pub fn Local(self) -> Time {
+        self
+    }
+
+    /// `t.Truncate(d)` (time.go:1778) — round t down to a multiple of d
+    /// since the zero time. If d <= 0, returns t unchanged.
+    pub fn Truncate(self, d: Duration) -> Time {
+        let mut t = self;
+        t.mono = 0;
+        if d.0 <= 0 {
+            return t;
+        }
+        let r = t.UnixNano().rem_euclid(d.0);
+        t.Add(Duration(-r))
+    }
+
+    /// `t.Round(d)` (time.go:1798) — round t to the nearest multiple of d
+    /// since the zero time; halfway values round up. If d <= 0, returns t
+    /// unchanged.
+    pub fn Round(self, d: Duration) -> Time {
+        let mut t = self;
+        t.mono = 0;
+        if d.0 <= 0 {
+            return t;
+        }
+        let r = t.UnixNano().rem_euclid(d.0);
+        if r.wrapping_mul(2) < d.0 {
+            t.Add(Duration(-r))
+        } else {
+            t.Add(Duration(d.0 - r))
+        }
+    }
+
     /// `t.Format(layout)` (format.go:639) — slim port. Recognizes the
     /// canonical layout constants (RFC3339, RFC1123, RFC1123Z,
     /// DateTime, DateOnly, TimeOnly, Stamp, Kitchen, ANSIC) and
