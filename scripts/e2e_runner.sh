@@ -24,6 +24,22 @@ FILTER="${FILTER:-.*}"
 EXCLUDE="${EXCLUDE:-^(http_hello|spawn_million|spawn_density|preempt_sysmon)$}"
 TARGET_DIR="${TARGET_DIR:-target/x86_64-unknown-linux-gnu/debug}"
 
+# Per-example CLI args + stdin. Some demos parse argv (`sumargs N…`,
+# `greet NAME…`, etc.) or read stdin (`json_pretty`); without these,
+# they exit nonzero with a usage banner — a false positive in e2e.
+# Map: example-name → "ARGS||STDIN". STDIN is sent on input if present.
+example_inputs() {
+  case "$1" in
+    sumargs)      echo '1 2 3 4 5||' ;;
+    stopwatch)    echo '50||' ;;
+    greet)        echo 'world||' ;;
+    bytestack)    echo ',||' ;;
+    uniq_sort)    echo '3 1 4 1 5 9 2 6 5 3||' ;;
+    json_pretty)  echo '||{"a":1,"b":[2,3],"c":{"d":true}}' ;;
+    *)            echo '||' ;;
+  esac
+}
+
 EXAMPLES_DIR="$TARGET_DIR/examples"
 mkdir -p "$ARTIFACTS"
 rm -f "$ARTIFACTS"/*.log "$ARTIFACTS"/summary.txt
@@ -70,8 +86,22 @@ for name in "${TARGETS[@]}"; do
   pass=0; fail=0; tout=0; panic=0
   first_log="$ARTIFACTS/$name.first_failure.log"
 
+  inp=$(example_inputs "$name")
+  ex_args="${inp%%||*}"
+  ex_stdin="${inp#*||}"
+
   for i in $(seq 1 "$LOOPS"); do
-    out=$(timeout "$TIMEOUT" "$bin" 2>&1)
+    if [[ -n "$ex_stdin" ]]; then
+      # Stdin-driven demo (e.g. json_pretty).
+      # shellcheck disable=SC2086
+      out=$(printf '%s' "$ex_stdin" | timeout "$TIMEOUT" "$bin" $ex_args 2>&1)
+    elif [[ -n "$ex_args" ]]; then
+      # Argv-driven demo.
+      # shellcheck disable=SC2086
+      out=$(timeout "$TIMEOUT" "$bin" $ex_args 2>&1)
+    else
+      out=$(timeout "$TIMEOUT" "$bin" 2>&1)
+    fi
     rc=$?
     if [[ $rc -eq 124 ]]; then
       tout=$((tout+1))
