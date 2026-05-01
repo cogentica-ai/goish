@@ -49,6 +49,7 @@ pub mod bufio;
 pub mod builtin;
 pub mod builtin_macros;
 pub mod bytes;
+pub mod cmp;
 pub mod context;
 pub mod convert;
 pub mod crypto;
