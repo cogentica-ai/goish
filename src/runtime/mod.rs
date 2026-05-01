@@ -64,6 +64,62 @@ pub fn Version() -> crate::gostring::string {
     crate::gostring::string::from_static("goish1.0")
 }
 
+// ─── Stub fns common Go programs call ────────────────────────────────
+//
+// These are no-ops or constant-return stubs. They exist so user code
+// that imports `runtime` for these names compiles without rewriting.
+// All have line refs to the Go SDK so the contract is documented.
+
+/// `runtime.LockOSThread()` (proc.go:4172) — wire the calling
+/// goroutine to its current OS thread. Slim is a no-op: each M owns
+/// its own OS thread, and the scheduler doesn't migrate Gs across Ms
+/// in ways that would violate this contract for typical use cases
+/// (cgo callbacks, OpenGL, locale-sensitive C libs). If real
+/// thread-pinning becomes load-bearing, this fn is the hook.
+pub fn LockOSThread() {
+    // Slim: no-op.
+}
+
+/// `runtime.UnlockOSThread()` (proc.go:4196) — undo a prior
+/// `LockOSThread`. Slim is a no-op (mirroring `LockOSThread`).
+pub fn UnlockOSThread() {
+    // Slim: no-op.
+}
+
+/// `runtime.NumCgoCall()` (extern.go:330) — number of cgo calls made
+/// by the current process. Goish has no cgo (every call is native),
+/// so this is constant `0`.
+pub fn NumCgoCall() -> i64 {
+    0
+}
+
+/// `runtime.GC()` (mgc.go:455) — trigger a garbage-collection cycle
+/// and block until it completes. Slim has no managed GC (Vec-backed
+/// slices/strings + Arc/Box for shared boxed data), so this is a
+/// no-op. User code that calls `runtime.GC()` for tests / fuzz seeds
+/// gets exactly the behavior it expects: an explicit "force GC now"
+/// is a hint, never load-bearing.
+pub fn GC() {
+    // Slim: no-op.
+}
+
+/// `runtime.GOROOT()` (extern.go:285) — directory containing the
+/// Go installation. Goish doesn't ship as a tree (single-binary
+/// rlib), so this returns `""` to mirror Go's "not set" sentinel.
+/// Deprecated in Go 1.24+.
+pub fn GOROOT() -> crate::gostring::string {
+    crate::gostring::string::from_static("")
+}
+
+/// `runtime.GoroutineProfile(p)` (mprof.go:889) — collect a stack
+/// trace of every active goroutine. Slim returns `(0, false)` —
+/// no profile collected, never enough room in any caller buffer —
+/// so users branch on the "not enough room" path and skip profiling.
+pub fn GoroutineProfile(_p: crate::goslice::slice<()>) -> (crate::types::int, bool) {
+    // Slim: profile collection deferred — no goroutine stack walker.
+    (0, false)
+}
+
 /// First Rust code to run after the kernel hands control to `_start`.
 /// `_start` (emitted by `#[goish::main]`) reads argc/argv off the stack,
 /// loads them into rdi/rsi per SysV, then `call`s here.
