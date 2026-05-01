@@ -19,6 +19,7 @@ pub mod args;
 pub mod debug;
 pub mod flags;
 pub mod heap;
+pub mod lockfree_ring;
 pub mod mcentral;
 pub mod mheap;
 mod mem;
