@@ -210,6 +210,165 @@ pub fn Abs<S: Into<string>>(path: S) -> (string, error) {
     (Join(elem_slice), nil)
 }
 
+// ─── Glob ─────────────────────────────────────────────────────────────
+
+/// Line-by-line port of `path/filepath.Glob` (match.go:243). Returns
+/// the names of all files matching `pattern`, or an empty slice if
+/// none match. Pattern syntax matches `Match`. Glob ignores filesystem
+/// errors; the only returned error is `ErrBadPattern`.
+pub fn Glob<S: Into<string>>(pattern: S) -> (slice<string>, error) {
+    glob_with_limit(pattern.into(), 0)
+}
+
+fn glob_with_limit(pattern: string, depth: i32) -> (slice<string>, error) {
+    // Go: const pathSeparatorsLimit = 10000 (CVE-2022-30632)
+    const PATH_SEPARATORS_LIMIT: i32 = 10000;
+    if depth == PATH_SEPARATORS_LIMIT {
+        return (slice::new(), ErrBadPattern());
+    }
+    // Go: if _, err := Match(pattern, ""); err != nil { return nil, err }
+    {
+        let (_, err) = Match(pattern.clone(), string::from_static(""));
+        if !err.IsNil() {
+            return (slice::new(), err);
+        }
+    }
+    // Go: if !hasMeta(pattern) { ... return []string{pattern}, nil }
+    if !has_meta(&pattern) {
+        let (_, e) = crate::os::Lstat(pattern.clone());
+        if !e.IsNil() {
+            return (slice::new(), nil);
+        }
+        let mut out: Vec<string> = Vec::with_capacity(1);
+        out.push(pattern);
+        return (slice::__from_vec(out), nil);
+    }
+    // Go: dir, file := Split(pattern)
+    let (dir_raw, file) = Split(pattern.clone());
+    // Linux slim: volumeLen = 0, no Windows branch.
+    let dir = clean_glob_path(dir_raw.clone());
+
+    // Go: if !hasMeta(dir[volumeLen:]) { return glob(dir, file, nil) }
+    if !has_meta(&dir) {
+        return glob_dir(dir, file, slice::new());
+    }
+    // Go: if dir == pattern { return nil, ErrBadPattern } (issue 15879)
+    if dir == pattern {
+        return (slice::new(), ErrBadPattern());
+    }
+    // Go: m, err = globWithLimit(dir, depth+1)
+    let (m, err) = glob_with_limit(dir, depth + 1);
+    if !err.IsNil() {
+        return (slice::new(), err);
+    }
+    // Go: for _, d := range m { matches, err = glob(d, file, matches) }
+    let mut matches: slice<string> = slice::new();
+    let m_vec = m.__into_vec();
+    for d in m_vec.into_iter() {
+        let (next, e2) = glob_dir(d, file.clone(), matches);
+        if !e2.IsNil() {
+            return (slice::new(), e2);
+        }
+        matches = next;
+    }
+    (matches, nil)
+}
+
+/// `cleanGlobPath` (match.go:297) — Linux variant. Empty → ".";
+/// "/" → "/"; otherwise chop trailing separator.
+fn clean_glob_path(path: string) -> string {
+    let pb = path.as_bytes();
+    if pb.is_empty() {
+        return string::from_static(".");
+    }
+    if pb.len() == 1 && pb[0] == Separator {
+        return path;
+    }
+    string::from_bytes(&pb[..pb.len() - 1])
+}
+
+/// `glob(dir, pattern, matches)` (match.go:332) — list `dir`,
+/// append entries that match `pattern`. Filesystem errors are ignored
+/// (returns existing matches unchanged), per Go semantics.
+fn glob_dir(dir: string, pattern: string, matches: slice<string>) -> (slice<string>, error) {
+    let mut m = matches;
+    // Go: fi, err := os.Stat(dir); if err != nil { return }
+    let (fi, err) = crate::os::Stat(dir.clone());
+    if !err.IsNil() {
+        return (m, nil);
+    }
+    // Go: if !fi.IsDir() { return }
+    if !fi.IsDir() {
+        return (m, nil);
+    }
+    // Go: d, err := os.Open(dir); if err != nil { return }; defer d.Close()
+    // Go: names, _ := d.Readdirnames(-1); slices.Sort(names)
+    let (entries, e) = crate::os::ReadDir(dir.clone());
+    if !e.IsNil() {
+        return (m, nil);
+    }
+    let entries_v = entries.__into_vec();
+    let mut names: Vec<string> = Vec::with_capacity(entries_v.len());
+    for d in entries_v.iter() {
+        names.push(d.Name());
+    }
+    // Sort names lexicographically (slices.Sort).
+    sort_strings(&mut names);
+    // Go: for _, n := range names { matched, err := Match(pattern, n) ...
+    //     if matched { m = append(m, Join(dir, n)) } }
+    let mut m_vec: Vec<string> = m.__into_vec();
+    for n in names.into_iter() {
+        let (matched, err) = Match(pattern.clone(), n.clone());
+        if !err.IsNil() {
+            return (slice::__from_vec(m_vec), err);
+        }
+        if matched {
+            // Go: m = append(m, Join(dir, n))
+            let mut elems: Vec<string> = Vec::with_capacity(2);
+            elems.push(dir.clone());
+            elems.push(n);
+            m_vec.push(Join(slice::__from_vec(elems)));
+        }
+    }
+    m = slice::__from_vec(m_vec);
+    (m, nil)
+}
+
+/// In-place lexicographic sort of `string` slice. Used by `glob` to
+/// match `slices.Sort(names)` semantics from match.go:348. Uses
+/// insertion sort — directory listings are short, and we don't have a
+/// goish-internal sort module yet.
+fn sort_strings(v: &mut Vec<string>) {
+    let n = v.len();
+    let mut i: usize = 1;
+    while i < n {
+        let mut j = i;
+        while j > 0 {
+            // Compare bytewise.
+            let a = v[j - 1].as_bytes();
+            let b = v[j].as_bytes();
+            if a <= b {
+                break;
+            }
+            v.swap(j - 1, j);
+            j -= 1;
+        }
+        i += 1;
+    }
+}
+
+/// `hasMeta(path)` (match.go:364) — true if `path` contains glob
+/// metacharacters. Linux includes `\` for backslash escape.
+fn has_meta(path: &string) -> bool {
+    let bytes = path.as_bytes();
+    for &c in bytes {
+        if c == b'*' || c == b'?' || c == b'[' || c == b'\\' {
+            return true;
+        }
+    }
+    false
+}
+
 // ─── EvalSymlinks ─────────────────────────────────────────────────────
 
 /// Line-by-line port of `path/filepath.EvalSymlinks` (path.go:147 →
