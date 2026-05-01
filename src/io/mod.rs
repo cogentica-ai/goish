@@ -746,3 +746,8 @@ impl Writer for MultiWriterImpl {
 pub fn MultiWriter(writers: slice<alloc::boxed::Box<dyn Writer>>) -> MultiWriterImpl {
     MultiWriterImpl { writers: writers.__into_vec() }
 }
+
+// ─── Pipe (line-by-line port of pipe.go) ─────────────────────────────
+
+pub mod pipe;
+pub use pipe::{ErrClosedPipe, Pipe, PipeReader, PipeWriter};
