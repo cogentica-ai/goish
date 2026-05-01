@@ -668,6 +668,36 @@ pub fn Lchown(name: string, uid: int, gid: int) -> error {
     nil
 }
 
+/// `os.Getuid()` (proc.go:31) — caller's real user id.
+pub fn Getuid() -> int {
+    syscall::Getuid() as int
+}
+
+/// `os.Geteuid()` (proc.go:36) — caller's effective user id.
+pub fn Geteuid() -> int {
+    syscall::Geteuid() as int
+}
+
+/// `os.Getgid()` (proc.go:41) — caller's real group id.
+pub fn Getgid() -> int {
+    syscall::Getgid() as int
+}
+
+/// `os.Getegid()` (proc.go:46) — caller's effective group id.
+pub fn Getegid() -> int {
+    syscall::Getegid() as int
+}
+
+/// `os.Getpid()` (proc.go:50) — caller's process id.
+pub fn Getpid() -> int {
+    syscall::Getpid() as int
+}
+
+/// `os.Getppid()` (proc.go:55) — caller's parent process id.
+pub fn Getppid() -> int {
+    syscall::Getppid() as int
+}
+
 /// Line-by-line port of `os.Pipe()` (pipe2_unix.go:13) — create a
 /// connected pair of Files; reads from `r` return bytes written to
 /// `w`. Both ends are O_CLOEXEC by default, mirroring upstream.

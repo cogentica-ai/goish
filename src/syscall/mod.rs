@@ -634,6 +634,42 @@ pub fn Getpid() -> i32 {
     unsafe { syscall1(SYS_GETPID, 0) as i32 }
 }
 
+pub const SYS_GETUID: usize = 102;
+pub const SYS_GETGID: usize = 104;
+pub const SYS_GETEUID: usize = 107;
+pub const SYS_GETEGID: usize = 108;
+pub const SYS_GETPPID: usize = 110;
+
+/// `getuid(2)` — real user id of the calling process.
+#[allow(non_snake_case)]
+pub fn Getuid() -> i32 {
+    unsafe { syscall1(SYS_GETUID, 0) as i32 }
+}
+
+/// `getgid(2)` — real group id of the calling process.
+#[allow(non_snake_case)]
+pub fn Getgid() -> i32 {
+    unsafe { syscall1(SYS_GETGID, 0) as i32 }
+}
+
+/// `geteuid(2)` — effective user id.
+#[allow(non_snake_case)]
+pub fn Geteuid() -> i32 {
+    unsafe { syscall1(SYS_GETEUID, 0) as i32 }
+}
+
+/// `getegid(2)` — effective group id.
+#[allow(non_snake_case)]
+pub fn Getegid() -> i32 {
+    unsafe { syscall1(SYS_GETEGID, 0) as i32 }
+}
+
+/// `getppid(2)` — parent process id.
+#[allow(non_snake_case)]
+pub fn Getppid() -> i32 {
+    unsafe { syscall1(SYS_GETPPID, 0) as i32 }
+}
+
 /// `kill(2)` — send a signal to a process. Use `Getpid()` for the
 /// target to send a signal to ourselves (the test pattern).
 #[allow(non_snake_case)]
