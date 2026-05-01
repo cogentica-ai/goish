@@ -129,6 +129,28 @@ impl WaitGroup {
     where
         F: FnOnce() + Send + 'a,
     {
+        self.go_inner(None, f);
+    }
+
+    /// Same as `Go`, but spawns the goroutine with an explicit stack
+    /// size in bytes (rounded up to the nearest 4 KiB page). Mirrors
+    /// the relationship between `runtime::sched::newproc` and
+    /// `newproc_with_stack`.
+    ///
+    /// Use when the default 2 KiB stack is too small — e.g., debug
+    /// builds (no inlining inflates frame depth), or workloads that
+    /// recurse / hold large stack-allocated buffers.
+    pub fn GoStack<'a, F>(&'a self, stack_size: usize, f: F)
+    where
+        F: FnOnce() + Send + 'a,
+    {
+        self.go_inner(Some(stack_size), f);
+    }
+
+    fn go_inner<'a, F>(&'a self, stack_size: Option<usize>, f: F)
+    where
+        F: FnOnce() + Send + 'a,
+    {
         self.Add(1);
         let body: alloc::boxed::Box<dyn FnOnce() + Send + 'a> =
             alloc::boxed::Box::new(move || {
@@ -150,7 +172,10 @@ impl WaitGroup {
         // leak goroutines past the WaitGroup's scope.
         let body_static: alloc::boxed::Box<dyn FnOnce() + Send + 'static> =
             unsafe { core::mem::transmute(body) };
-        crate::runtime::sched::newproc(body_static);
+        match stack_size {
+            Some(sz) => crate::runtime::sched::newproc_with_stack(sz, body_static),
+            None => crate::runtime::sched::newproc(body_static),
+        }
     }
 }
 
