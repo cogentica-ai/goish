@@ -15,6 +15,7 @@
 #![allow(non_snake_case)]
 
 pub mod chunked;
+pub mod client;
 pub mod cookie;
 pub mod header;
 pub mod request;
@@ -22,6 +23,9 @@ pub mod response;
 pub mod server;
 pub mod url;
 
+pub use client::{
+    Client, Get, Head, NewRequest, Post, PostForm, ReadResponse, Response, RoundTripper, Transport,
+};
 pub use cookie::{Cookie, ParseCookie, ParseSetCookie, SameSite, SetCookie};
 pub use header::Header;
 pub use request::{ReadRequest, Request};
