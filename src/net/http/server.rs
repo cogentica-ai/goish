@@ -420,7 +420,39 @@ impl Server {
                 && !self.in_shutdown.load(Ordering::Acquire);
             let mut w = ResponseWriter::new(conn);
             w.__set_keep_alive(keep_alive);
+
+            // Register a panic-only cleanup that closes the fd if the
+            // handler panics. Without this, gogo recovery abandons the
+            // ResponseWriter (whose Drop is skipped under panic=abort)
+            // and the client hangs on Read forever waiting for data /
+            // EOF that never comes. On the success path we unregister
+            // BEFORE the cleanup fires, so the fd survives for keep-
+            // alive reuse.
+            let fd = w.__conn_fd();
+            let mut close_node = crate::runtime::sched::cleanup::Cleanup::new(
+                close_fd_on_panic,
+                fd as usize as *mut (),
+            );
+            let cur_g = crate::runtime::sched::current_g();
+            if let Some(g_ptr) = cur_g {
+                unsafe {
+                    crate::runtime::sched::cleanup::register(
+                        &*g_ptr.as_ptr(),
+                        &mut close_node,
+                    );
+                }
+            }
             self.Handler.ServeHTTP(&mut w, &req);
+            // Handler returned normally — unregister BEFORE __take_conn
+            // so the cleanup is gone before we move conn out.
+            if let Some(g_ptr) = cur_g {
+                unsafe {
+                    crate::runtime::sched::cleanup::unregister(
+                        &*g_ptr.as_ptr(),
+                        &mut close_node,
+                    );
+                }
+            }
             conn = w.__take_conn();
 
             if write_timeout_ns > 0 {
@@ -500,6 +532,16 @@ fn request_keep_alive(req: &Request) -> bool {
         !says_close
     } else {
         says_keep_alive
+    }
+}
+
+/// Cleanup callback invoked by `runtime::sched::cleanup::run_all`
+/// when a handler panics with `close_node` registered. Closes the fd
+/// so the client sees EOF instead of hanging on Read forever.
+unsafe extern "C" fn close_fd_on_panic(fd_arg: *mut ()) {
+    let fd = fd_arg as usize as i32;
+    if fd >= 0 {
+        let _ = crate::syscall::Close(fd);
     }
 }
 
