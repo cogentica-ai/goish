@@ -361,6 +361,42 @@ pub fn Rmdir(path: *const u8) -> i32 {
     unsafe { syscall1(SYS_RMDIR, path as usize) as i32 }
 }
 
+// ─── uname ───────────────────────────────────────────────────────────
+
+pub const SYS_UNAME: usize = 63;
+
+/// Linux `struct utsname`. Each field is a NUL-padded byte array of
+/// fixed length (65 on Linux). `sysname` / `nodename` / `release` /
+/// `version` / `machine` / `domainname`.
+#[repr(C)]
+pub struct Utsname {
+    pub sysname: [u8; 65],
+    pub nodename: [u8; 65],
+    pub release: [u8; 65],
+    pub version: [u8; 65],
+    pub machine: [u8; 65],
+    pub domainname: [u8; 65],
+}
+
+impl Default for Utsname {
+    fn default() -> Self {
+        Utsname {
+            sysname: [0; 65],
+            nodename: [0; 65],
+            release: [0; 65],
+            version: [0; 65],
+            machine: [0; 65],
+            domainname: [0; 65],
+        }
+    }
+}
+
+/// `uname(2)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Uname(buf: &mut Utsname) -> i32 {
+    unsafe { syscall1(SYS_UNAME, buf as *mut Utsname as usize) as i32 }
+}
+
 // ─── getrandom ───────────────────────────────────────────────────────
 
 pub const SYS_GETRANDOM: usize = 318;

@@ -255,6 +255,50 @@ pub fn ReadFile(name: string) -> (slice<byte>, error) {
     (body, nil)
 }
 
+// ─── Env / Hostname / TempDir ───────────────────────────────────────
+
+/// `os.LookupEnv(key)` (env.go:112) — return `(value, true)` if `key`
+/// is set in the process environment, `("", false)` otherwise.
+pub fn LookupEnv(key: string) -> (string, bool) {
+    let bytes_key = bytes_of(&key);
+    let val_bytes = unsafe { runtime::args::envp_lookup(bytes_key) };
+    match val_bytes {
+        Some(b) => (string::from_bytes(b), true),
+        None => (string::new(), false),
+    }
+}
+
+/// `os.Getenv(key)` (env.go:101) — return the value of `key` in the
+/// process environment, or "" if not present.
+pub fn Getenv(key: string) -> string {
+    let (v, _) = LookupEnv(key);
+    v
+}
+
+/// `os.TempDir()` (file.go:490) — TMPDIR if set, else "/tmp".
+pub fn TempDir() -> string {
+    let (v, ok) = LookupEnv(string("TMPDIR"));
+    if ok && v.Len() > 0 {
+        return v;
+    }
+    string("/tmp")
+}
+
+/// `os.Hostname()` (sys.go:8) — return the kernel's nodename via
+/// uname(2).
+pub fn Hostname() -> (string, error) {
+    let mut u = syscall::Utsname::default();
+    let rc = syscall::Uname(&mut u);
+    if rc < 0 {
+        return (string::new(), errors::New(string("uname failed")));
+    }
+    let mut n: usize = 0;
+    while n < u.nodename.len() && u.nodename[n] != 0 {
+        n += 1;
+    }
+    (string::from_bytes(&u.nodename[..n]), nil)
+}
+
 // ─── Mkdir / Remove ──────────────────────────────────────────────────
 
 /// `os.Mkdir(name, perm)` (os/file.go) — create a single directory.
