@@ -98,6 +98,92 @@ impl Header {
     pub fn __inner(&self) -> &map<string, slice<string>> {
         &self.inner
     }
+
+    /// `h.Clone()` — return a deep copy. Mirrors `Header.Clone`
+    /// (header.go:94). Goish gomap clones internally, but we go
+    /// through Set() so each value slice is independently owned.
+    pub fn Clone(&self) -> Header {
+        let mut out = Header::new();
+        for (k, v) in self.inner.__iter() {
+            // Go: h2[k] = sv[:n:n]  (independent slice copy)
+            let copied = v.clone();
+            out.inner.Set(k.clone(), copied);
+        }
+        out
+    }
+
+    /// `h.Write(w)` — write the header in HTTP wire format
+    /// (`Key: value\r\n` per line). Mirrors `Header.Write`
+    /// (header.go:85).
+    pub fn Write<W: crate::io::Writer>(&self, w: &mut W) -> crate::errors::error {
+        self.WriteSubset(w, &map::<string, bool>::new())
+    }
+
+    /// `h.WriteSubset(w, exclude)` — like `Write` but skips keys
+    /// where `exclude[key] == true`. Mirrors header.go:186.
+    pub fn WriteSubset<W: crate::io::Writer>(
+        &self,
+        w: &mut W,
+        exclude: &map<string, bool>,
+    ) -> crate::errors::error {
+        // Go: kvs, _ := h.sortedKeyValues(exclude)
+        // Sorting requires reading all keys; since gomap has no Keys()
+        // surface here, we collect via __iter and sort in Vec.
+        let mut kvs: Vec<(string, slice<string>)> = Vec::new();
+        for (k, v) in self.inner.__iter() {
+            // Go: if !exclude[k] { kvs = append(kvs, keyValues{k, vv}) }
+            let (skip, _) = exclude.Get(k.clone());
+            if skip {
+                continue;
+            }
+            kvs.push((k.clone(), v.clone()));
+        }
+        // Go: slices.SortFunc(kvs, func(a, b) int { return strings.Compare(a.key, b.key) })
+        kvs.sort_by(|a, b| {
+            crate::strings::Compare(a.0.clone(), b.0.clone()).cmp(&0)
+        });
+        // Go: for _, kv := range kvs { for _, v := range kv.values { ws.WriteString(...) } }
+        for (k, vv) in kvs.iter() {
+            for i in 0..vv.Len() {
+                let v = vv[i].clone();
+                // Go: v = headerNewlineToSpace.Replace(v); v = textproto.TrimString(v)
+                let v = sanitize_header_value(v);
+                let (_, e1) = w.Write(crate::convert::bytes(k.clone()));
+                if !e1.IsNil() {
+                    return e1;
+                }
+                let (_, e2) = w.Write(crate::convert::bytes(": "));
+                if !e2.IsNil() {
+                    return e2;
+                }
+                let (_, e3) = w.Write(crate::convert::bytes(v));
+                if !e3.IsNil() {
+                    return e3;
+                }
+                let (_, e4) = w.Write(crate::convert::bytes("\r\n"));
+                if !e4.IsNil() {
+                    return e4;
+                }
+            }
+        }
+        crate::errors::nil
+    }
+}
+
+/// Replace newlines/CRs with spaces and trim OWS — Go's
+/// `headerNewlineToSpace.Replace` + `textproto.TrimString`.
+fn sanitize_header_value(s: string) -> string {
+    let mut b = crate::strings::Builder::new();
+    b.Grow(s.Len());
+    for i in 0..s.Len() {
+        let c = s[i];
+        if c == b'\n' || c == b'\r' {
+            let _ = b.WriteByte(b' ');
+        } else {
+            let _ = b.WriteByte(c);
+        }
+    }
+    crate::strings::TrimSpace(b.String())
 }
 
 /// Canonicalize a header name. RFC 7230: lowercase except the first
