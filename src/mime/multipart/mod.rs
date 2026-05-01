@@ -9,6 +9,8 @@
 
 #![allow(non_snake_case)]
 
+pub mod reader;
 pub mod writer;
 
+pub use reader::{NewReader, Part, Reader};
 pub use writer::{FileContentDisposition, NewWriter, Writer};
