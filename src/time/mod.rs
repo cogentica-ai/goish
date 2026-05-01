@@ -1202,6 +1202,20 @@ pub fn Unix(sec: int, nsec: int) -> Time {
     }
 }
 
+/// `time.UnixMilli(msec)` (time.go:1666) — return the Time
+/// corresponding to `msec` milliseconds since 1970-01-01 UTC.
+pub fn UnixMilli(msec: int) -> Time {
+    // Go: return Unix(msec/1e3, (msec%1e3)*1e6)
+    Unix(msec / 1_000, (msec % 1_000) * 1_000_000)
+}
+
+/// `time.UnixMicro(usec)` (time.go:1672) — return the Time
+/// corresponding to `usec` microseconds since 1970-01-01 UTC.
+pub fn UnixMicro(usec: int) -> Time {
+    // Go: return Unix(usec/1e6, (usec%1e6)*1e3)
+    Unix(usec / 1_000_000, (usec % 1_000_000) * 1_000)
+}
+
 /// `time.Date(year, month, day, hour, min, sec, nsec)` — construct a
 /// UTC Time. Slim port of Go's `time.Date` (time.go:1438) without the
 /// `*Location` argument (UTC only, v1). Out-of-range fields normalize
