@@ -96,19 +96,24 @@ pub fn NewChunkedReader<R: Reader>(r: R) -> ChunkedReader<R> {
 }
 
 impl<R: Reader> ChunkedReader<R> {
-    /// Read the chunk-size line and parse it. Sets `self.err` on
-    /// failure (or to `io::EOF` when size is 0).
+    /// Line-by-line port of `(*chunkedReader).beginChunk`
+    /// (chunked.go:46).
     fn begin_chunk(&mut self) {
+        // Go: var line []byte
+        // Go: line, cr.err = readChunkLine(cr.r)
         let (line, err) = read_chunk_line(&mut self.r);
         if !err.IsNil() {
             self.err = err;
             return;
         }
-        // line excludes the trailing CRLF.
-        self.excess = self.excess.saturating_add(line.len() as i64 + 2);
-        let trimmed = trim_trailing_ows(&line);
-        let stripped = remove_chunk_extension(&trimmed);
-        match parse_hex_uint(&stripped) {
+        // Go: cr.excess += int64(len(line)) + 2
+        self.excess = self.excess.saturating_add(line.Len() + 2);
+        // Go: line = trimTrailingWhitespace(line)
+        let line = trim_trailing_ows(line);
+        // Go: line, cr.err = removeChunkExtension(line)
+        let line = remove_chunk_extension(line);
+        // Go: cr.n, cr.err = parseHexUint(line)
+        match parse_hex_uint(line) {
             Ok(n) => self.n = n,
             Err(e) => {
                 self.err = e;
@@ -130,17 +135,17 @@ impl<R: Reader> ChunkedReader<R> {
         }
     }
 
+    /// Line-by-line port of `(*chunkedReader).chunkHeaderAvailable`
+    /// (chunked.go:88).
     fn chunk_header_available(&mut self) -> bool {
-        let nbuf = self.r.Buffered();
-        if nbuf <= 0 {
-            return false;
+        // Go: n := cr.r.Buffered()
+        let n = self.r.Buffered();
+        // Go: if n > 0 { peek, _ := cr.r.Peek(n); return bytes.IndexByte(peek, '\n') >= 0 }
+        if n > 0 {
+            let (peek, _) = self.r.Peek(n);
+            return crate::bytes::IndexByte(peek, b'\n') >= 0;
         }
-        let (peek, _) = self.r.Peek(nbuf);
-        for i in 0..peek.len() {
-            if peek[i as int] == b'\n' {
-                return true;
-            }
-        }
+        // Go: return false
         false
     }
 }
@@ -182,20 +187,18 @@ impl<R: Reader> Reader for ChunkedReader<R> {
                 self.begin_chunk();
                 continue;
             }
-            if b.len() == 0 {
+            // Go: if len(b) == 0 { break }
+            if b.Len() == 0 {
                 break;
             }
-            // Read up to min(remaining_in_chunk, b.len() - n).
-            let want = core::cmp::min(b.len() as u64 - n as u64, self.n) as usize;
-            // Slice over &mut b[n..n+want].
-            let mut tmp: Vec<u8> = alloc::vec![0u8; want];
-            let mut tmp_slice = slice::<byte>::__from_vec(tmp.clone());
-            let (rn, rerr) = self.r.Read(&mut tmp_slice);
-            // Copy bytes out.
+            // Go: rbuf := b; if uint64(len(rbuf)) > cr.n { rbuf = rbuf[:cr.n] }
+            let want = core::cmp::min(b.Len() as u64 - n as u64, self.n) as int;
+            let mut rbuf = crate::make!([]byte, want);
+            // Go: var n0 int; n0, cr.err = cr.r.Read(rbuf); n += n0; b = b[n0:]
+            let (rn, rerr) = self.r.Read(&mut rbuf);
             for i in 0..rn {
-                b[(n + i) as int] = tmp_slice[i as int];
+                b[n + i] = rbuf[i];
             }
-            let _ = tmp;
             n += rn;
             self.n -= rn as u64;
             if !rerr.IsNil() {
@@ -214,31 +217,38 @@ impl<R: Reader> Reader for ChunkedReader<R> {
     }
 }
 
-/// Implement `io::ReadFull` inline: read exactly `b.len()` bytes or
-/// return whatever short count was achieved with the underlying error.
-fn io_read_full<R: Reader>(r: &mut R, b: &mut slice<byte>) -> (int, error) {
-    let need: int = b.Len();
-    let mut got: int = 0;
-    while got < need {
-        let mut tail = slice::<byte>::__from_vec(alloc::vec![0u8; (need - got) as usize]);
-        let (rn, rerr) = r.Read(&mut tail);
+/// Line-by-line port of `io.ReadFull` (Go's io/io.go:331).
+/// Reads exactly `len(buf)` bytes from `r` into `buf`, or returns the
+/// short count with the underlying error.
+fn io_read_full<R: Reader>(r: &mut R, buf: &mut slice<byte>) -> (int, error) {
+    // Go: min := len(buf); for n < min && err == nil { … }
+    let min = buf.Len();
+    let mut n: int = 0;
+    while n < min {
+        let mut tail = crate::make!([]byte, min - n);
+        let (rn, err) = r.Read(&mut tail);
         for i in 0..rn {
-            b[got + i] = tail[i as int];
+            buf[n + i] = tail[i];
         }
-        got += rn;
-        if !rerr.IsNil() {
-            return (got, rerr);
+        n += rn;
+        if !err.IsNil() {
+            return (n, err);
         }
         if rn == 0 {
-            return (got, io::EOF());
+            return (n, io::EOF());
         }
     }
-    (got, errors::nil)
+    (n, errors::nil)
 }
 
-fn read_chunk_line<R: Reader>(b: &mut bufio::Reader<R>) -> (Vec<u8>, error) {
-    let (raw, err) = b.ReadSlice(b'\n');
+/// Line-by-line port of `readChunkLine` (chunked.go:155). Returns
+/// the line without trailing CRLF as a `slice<byte>`.
+fn read_chunk_line<R: Reader>(b: &mut bufio::Reader<R>) -> (slice<byte>, error) {
+    // Go: p, err := b.ReadSlice('\n')
+    let (p, err) = b.ReadSlice(b'\n');
     if !err.IsNil() {
+        // Go: if err == io.EOF { err = io.ErrUnexpectedEOF }
+        // Go: else if err == bufio.ErrBufferFull { err = ErrLineTooLong }
         let mapped = if errors::Is(err.clone(), io::EOF()) {
             io::ErrUnexpectedEOF()
         } else if errors::Is(err.clone(), bufio::ErrBufferFull()) {
@@ -246,64 +256,61 @@ fn read_chunk_line<R: Reader>(b: &mut bufio::Reader<R>) -> (Vec<u8>, error) {
         } else {
             err
         };
-        return (Vec::new(), mapped);
+        return (slice::<byte>::__from_vec(Vec::new()), mapped);
     }
-    let bytes: Vec<u8> = (0..raw.Len()).map(|i| raw[i]).collect();
-    // Verify the line ends in CRLF and contains no other CR.
-    let mut cr_idx: Option<usize> = None;
-    for (i, &c) in bytes.iter().enumerate() {
-        if c == b'\r' {
-            cr_idx = Some(i);
-            break;
-        }
+    // Go: if idx := bytes.IndexByte(p, '\r'); idx == -1 { return nil, errors.New("…bare LF") }
+    let idx = crate::bytes::IndexByte(p.clone(), b'\r');
+    if idx == -1 {
+        return (slice::<byte>::__from_vec(Vec::new()), err_bare_lf());
     }
-    match cr_idx {
-        None => (Vec::new(), err_bare_lf()),
-        Some(i) if i != bytes.len() - 2 => (Vec::new(), err_invalid_cr()),
-        Some(i) => {
-            let p: Vec<u8> = bytes[..i].to_vec();
-            if p.len() >= MAX_LINE_LENGTH {
-                return (Vec::new(), err_line_too_long());
-            }
-            (p, errors::nil)
-        }
+    // Go: else if idx != len(p)-2 { return nil, errors.New("invalid CR…") }
+    if idx != p.Len() - 2 {
+        return (slice::<byte>::__from_vec(Vec::new()), err_invalid_cr());
     }
+    // Go: p = p[:len(p)-2]
+    let p = p.slice(0, p.Len() - 2);
+    // Go: if len(p) >= maxLineLength { return nil, ErrLineTooLong }
+    if p.Len() >= MAX_LINE_LENGTH as int {
+        return (slice::<byte>::__from_vec(Vec::new()), err_line_too_long());
+    }
+    (p, errors::nil)
 }
 
-fn trim_trailing_ows(b: &[u8]) -> Vec<u8> {
-    let mut end = b.len();
-    while end > 0 && (b[end - 1] == b' ' || b[end - 1] == b'\t') {
-        end -= 1;
-    }
-    b[..end].to_vec()
+/// Line-by-line port of `trimTrailingWhitespace` (chunked.go:186).
+fn trim_trailing_ows(b: slice<byte>) -> slice<byte> {
+    crate::bytes::TrimRight(b, crate::convert::bytes(" \t"))
 }
 
-/// Strip any chunk-extension (everything from the first `;` onward).
-/// Mirrors `removeChunkExtension` (chunked.go:206) — we ignore the
-/// extension contents entirely.
-fn remove_chunk_extension(p: &[u8]) -> Vec<u8> {
-    for (i, &b) in p.iter().enumerate() {
-        if b == b';' {
-            return p[..i].to_vec();
-        }
-    }
-    p.to_vec()
+/// Line-by-line port of `removeChunkExtension` (chunked.go:206).
+/// Strips everything from the first `;` onward.
+fn remove_chunk_extension(p: slice<byte>) -> slice<byte> {
+    // Go: p, _, _ = bytes.Cut(p, semi)
+    let (before, _after, _found) = crate::bytes::Cut(p, crate::convert::bytes(";"));
+    before
 }
 
-fn parse_hex_uint(v: &[u8]) -> Result<u64, error> {
-    if v.is_empty() {
+/// Line-by-line port of `parseHexUint` (chunked.go:278).
+fn parse_hex_uint(v: slice<byte>) -> Result<u64, error> {
+    // Go: if len(v) == 0 { return 0, errors.New("empty hex…") }
+    if v.Len() == 0 {
         return Err(err_empty_hex());
     }
+    // Go: for i, b := range v { … n <<= 4; n |= uint64(b) }
     let mut n: u64 = 0;
-    for (i, &b) in v.iter().enumerate() {
+    for (i, b) in crate::range!(v) {
+        // Go: if i == 16 { return 0, errors.New("…too large") }
         if i == 16 {
             return Err(err_chunk_too_large());
         }
-        let d = match b {
-            b'0'..=b'9' => b - b'0',
-            b'a'..=b'f' => b - b'a' + 10,
-            b'A'..=b'F' => b - b'A' + 10,
-            _ => return Err(err_bad_hex()),
+        // Go: switch { case '0' <= b && b <= '9': b = b - '0'; … }
+        let d: byte = if *b >= b'0' && *b <= b'9' {
+            *b - b'0'
+        } else if *b >= b'a' && *b <= b'f' {
+            *b - b'a' + 10
+        } else if *b >= b'A' && *b <= b'F' {
+            *b - b'A' + 10
+        } else {
+            return Err(err_bad_hex());
         };
         n = (n << 4) | (d as u64);
     }
@@ -329,63 +336,38 @@ pub fn NewChunkedWriter<W: Writer>(w: W) -> ChunkedWriter<W> {
 }
 
 impl<W: Writer> Writer for ChunkedWriter<W> {
+    /// Line-by-line port of `(*chunkedWriter).Write` (chunked.go:238).
     fn Write(&mut self, data: slice<byte>) -> (int, error) {
-        let n: int = data.Len();
-        if n == 0 {
-            // Don't send zero-length data — that's the EOF terminator
-            // shape on the wire.
+        // Go: if len(data) == 0 { return 0, nil }
+        if data.Len() == 0 {
             return (0, errors::nil);
         }
-        // Hex size + CRLF.
-        let mut header: Vec<u8> = Vec::with_capacity(20);
-        push_hex(&mut header, n as u64);
-        header.extend_from_slice(b"\r\n");
-        let (_, err) = self.Wire.Write(slice::<byte>::__from_vec(header));
+        // Go: if _, err = fmt.Fprintf(cw.Wire, "%x\r\n", len(data)); err != nil { return 0, err }
+        let (_, err) = crate::Fprintf!(self.Wire, "%x\r\n", data.Len());
         if !err.IsNil() {
             return (0, err);
         }
-        let (wrote, werr) = self.Wire.Write(data);
+        let want = data.Len();
+        // Go: if n, err = cw.Wire.Write(data); err != nil { return }
+        let (n, werr) = self.Wire.Write(data);
         if !werr.IsNil() {
-            return (wrote, werr);
+            return (n, werr);
         }
-        if wrote != n {
-            return (wrote, io::ErrShortWrite());
+        // Go: if n != len(data) { err = io.ErrShortWrite; return }
+        if n != want {
+            return (n, io::ErrShortWrite());
         }
-        let (_, terr) = self
-            .Wire
-            .Write(slice::<byte>::__from_vec(alloc::vec![b'\r', b'\n']));
+        // Go: if _, err = io.WriteString(cw.Wire, "\r\n"); err != nil { return }
+        let (_, terr) = self.Wire.Write(crate::convert::bytes("\r\n"));
         (n, terr)
     }
 }
 
 impl<W: Writer> Closer for ChunkedWriter<W> {
+    /// Line-by-line port of `(*chunkedWriter).Close` (chunked.go:264).
     fn Close(&mut self) -> error {
-        let (_, err) = self
-            .Wire
-            .Write(slice::<byte>::__from_vec(alloc::vec![b'0', b'\r', b'\n']));
+        // Go: _, err := io.WriteString(cw.Wire, "0\r\n")
+        let (_, err) = self.Wire.Write(crate::convert::bytes("0\r\n"));
         err
-    }
-}
-
-fn push_hex(buf: &mut Vec<u8>, mut n: u64) {
-    if n == 0 {
-        buf.push(b'0');
-        return;
-    }
-    let mut tmp = [0u8; 16];
-    let mut i = 0;
-    while n > 0 {
-        let nibble = (n & 0xf) as u8;
-        tmp[i] = if nibble < 10 {
-            b'0' + nibble
-        } else {
-            b'a' + (nibble - 10)
-        };
-        n >>= 4;
-        i += 1;
-    }
-    while i > 0 {
-        i -= 1;
-        buf.push(tmp[i]);
     }
 }
