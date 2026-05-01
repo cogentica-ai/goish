@@ -697,6 +697,78 @@ impl Buffer {
         self.off += want;
         (want as int, nil)
     }
+
+    /// `(b *Buffer).Truncate(n)` (buffer.go:97) — discard all but the
+    /// first n unread bytes. Panics if n is out of range.
+    pub fn Truncate(&mut self, n: int) {
+        // Go: if n == 0 { b.Reset(); return }
+        if n == 0 {
+            self.Reset();
+            return;
+        }
+        // Go: if n < 0 || n > b.Len() { panic(...) }
+        if n < 0 || n > self.Len() {
+            panic!("bytes.Buffer: truncation out of range");
+        }
+        // Keep the first n unread bytes, drop the rest.
+        self.buf.truncate(self.off + n as usize);
+    }
+
+    /// `(b *Buffer).ReadByte()` (buffer.go:362) — pop one byte.
+    /// Returns `(0, io.EOF)` when empty.
+    pub fn ReadByte(&mut self) -> (byte, error) {
+        // Go: if b.empty() { b.Reset(); return 0, io.EOF }
+        if self.off >= self.buf.len() {
+            self.Reset();
+            return (0, io::EOF());
+        }
+        // Go: c := b.buf[b.off]; b.off++
+        let c = self.buf[self.off];
+        self.off += 1;
+        (c, nil)
+    }
+
+    /// `(b *Buffer).UnreadByte()` (buffer.go:419) — push back one byte.
+    /// Slim port: doesn't track last-op state — succeeds whenever off>0.
+    pub fn UnreadByte(&mut self) -> error {
+        // Go strictly tracks lastRead; slim port simply rewinds if able.
+        if self.off > 0 {
+            self.off -= 1;
+            nil
+        } else {
+            crate::errors::New("bytes.Buffer: UnreadByte: previous operation was not a successful read")
+        }
+    }
+
+    /// `(b *Buffer).ReadBytes(delim)` (buffer.go:436) — read up to and
+    /// including `delim`. On EOF before delim, returns the partial data
+    /// plus io.EOF.
+    pub fn ReadBytes(&mut self, delim: byte) -> (slice<byte>, error) {
+        // Go's readSlice: i := IndexByte(b.buf[b.off:], delim)
+        let mut i: int = -1;
+        for (k, b) in self.buf[self.off..].iter().enumerate() {
+            if *b == delim {
+                i = k as int;
+                break;
+            }
+        }
+        let (end, err) = if i < 0 {
+            (self.buf.len(), io::EOF())
+        } else {
+            (self.off + i as usize + 1, nil)
+        };
+        // Go: line = b.buf[b.off:end]; b.off = end; copy out.
+        let line = slice::__from_vec(self.buf[self.off..end].to_vec());
+        self.off = end;
+        (line, err)
+    }
+
+    /// `(b *Buffer).ReadString(delim)` (buffer.go:464) — same as
+    /// ReadBytes but returns a `string`.
+    pub fn ReadString(&mut self, delim: byte) -> (string, error) {
+        let (line, err) = self.ReadBytes(delim);
+        (string::from_bytes(&line), err)
+    }
 }
 
 impl Default for Buffer {
