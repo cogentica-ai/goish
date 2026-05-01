@@ -19,6 +19,7 @@ pub mod client;
 pub mod cookie;
 pub mod fs;
 pub mod header;
+pub mod helpers;
 pub mod httputil;
 pub mod method;
 pub mod pattern;
