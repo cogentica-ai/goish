@@ -23,7 +23,7 @@ use alloc::vec::Vec;
 use crate::string;
 
 /// `net/url.URL` — slim. Only fields HTTP routing typically reads.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct URL {
     pub Scheme: string,
     pub Host: string,
@@ -188,6 +188,53 @@ impl URL {
             out.extend_from_slice(self.EscapedFragment().as_bytes());
         }
         string::from_bytes(&out)
+    }
+
+    /// `(u *URL).Redacted()` (url.go:926) — like `String()` but
+    /// replaces any password in the userinfo with `xxxxx`.
+    ///
+    /// Slim deviation: the goish URL struct has no `User` field, so
+    /// no userinfo can appear in the output. Redacted is therefore
+    /// equivalent to String() until a User field is added.
+    pub fn Redacted(&self) -> string {
+        self.String()
+    }
+
+    /// `(u *URL).MarshalBinary()` (url.go:1242) — serialize as bytes.
+    pub fn MarshalBinary(&self) -> (crate::goslice::slice<crate::types::byte>, error) {
+        // return u.AppendBinary(nil)
+        self.AppendBinary(crate::goslice::slice::__from_vec(
+            crate::__macro_alloc::Vec::<crate::types::byte>::new(),
+        ))
+    }
+
+    /// `(u *URL).AppendBinary(b)` (url.go:1246) — append the
+    /// String() form to b.
+    pub fn AppendBinary(
+        &self,
+        b: crate::goslice::slice<crate::types::byte>,
+    ) -> (crate::goslice::slice<crate::types::byte>, error) {
+        // return append(b, u.String()...), nil
+        let mut v = b.__into_vec();
+        v.extend_from_slice(self.String().as_bytes());
+        (crate::goslice::slice::__from_vec(v), crate::nil)
+    }
+
+    /// `(u *URL).UnmarshalBinary(text)` (url.go:1250) — parse bytes
+    /// into self in place. Returns any parse error.
+    pub fn UnmarshalBinary(
+        &mut self,
+        text: crate::goslice::slice<crate::types::byte>,
+    ) -> error {
+        // u1, err := Parse(string(text))
+        let s = string::from_bytes(&text);
+        let (u1, err) = Parse(s);
+        if !err.IsNil() {
+            return err;
+        }
+        // *u = *u1
+        *self = u1;
+        crate::nil
     }
 }
 
