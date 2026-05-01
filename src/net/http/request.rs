@@ -77,6 +77,37 @@ impl Request {
         bytes::NewReader(self.Body.clone())
     }
 
+    /// `r.Context()` (request.go:352) — slim port. Goish v1 doesn't
+    /// store a context on Request yet, so always returns Background().
+    pub fn Context(&self) -> alloc::sync::Arc<dyn crate::context::Context> {
+        crate::context::Background()
+    }
+
+    /// `r.WithContext(ctx)` (request.go:368) — slim port. Returns a
+    /// shallow clone of the request. The ctx parameter is accepted
+    /// for API compatibility but is not yet stored.
+    pub fn WithContext(
+        &self,
+        _ctx: alloc::sync::Arc<dyn crate::context::Context>,
+    ) -> Request {
+        // Go: r2 := new(Request); *r2 = *r; r2.ctx = ctx
+        // goish: derive-Clone gives an owning copy; ctx ignored.
+        self.clone()
+    }
+
+    /// `r.Clone(ctx)` (request.go:386) — slim port. Returns a deep
+    /// copy of the request. Goish container types (string / slice /
+    /// gomap) all deep-clone via #[derive(Clone)], so the explicit
+    /// per-field clones in Go's source are unnecessary here.
+    pub fn Clone(
+        &self,
+        _ctx: alloc::sync::Arc<dyn crate::context::Context>,
+    ) -> Request {
+        // Go: cloneURL(r.URL); r.Header.Clone(); r.Trailer.Clone(); etc.
+        // All of these deep-clone in goish via derived Clone.
+        self.clone()
+    }
+
     /// `r.Cookies()` — parse all `Cookie:` request headers. Mirrors
     /// `(*Request).Cookies()` (request.go:404).
     pub fn Cookies(&self) -> slice<super::cookie::Cookie> {
