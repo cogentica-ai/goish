@@ -842,6 +842,126 @@ pub fn ErrMissingBoundary() -> error {
     g.as_ref().unwrap().clone()
 }
 
+// ─── ProtocolError + sentinels (line-by-line port of request.go:43-94) ─
+
+/// `http.ProtocolError` (request.go:47) — typed HTTP protocol error.
+/// Mirrors:
+///
+/// ```ignore
+/// type ProtocolError struct { ErrorString string }
+/// func (pe *ProtocolError) Error() string { return pe.ErrorString }
+/// ```
+///
+/// User code can construct one directly: `errors::Wrap(ProtocolError{
+/// ErrorString: string("...") })`. Sentinel instances live in cached
+/// SpinLocks below so identity-comparison via Arc::ptr_eq works.
+#[derive(Clone)]
+pub struct ProtocolError {
+    pub ErrorString: string,
+}
+
+impl errors::ErrorTrait for ProtocolError {
+    // Go: func (pe *ProtocolError) Error() string { return pe.ErrorString }
+    fn Error(&self) -> string {
+        self.ErrorString.clone()
+    }
+}
+
+/// Internal: ErrNotSupported's pointee. Wraps ProtocolError but
+/// chains `Unwrap()` to `errors::ErrUnsupported()`, so
+/// `errors::Is(http::ErrNotSupported(), errors::ErrUnsupported())`
+/// returns true. Mirrors Go's:
+///
+/// ```ignore
+/// func (pe *ProtocolError) Is(err error) bool {
+///     return pe == ErrNotSupported && err == errors.ErrUnsupported
+/// }
+/// ```
+///
+/// Goish has no `errors.As`, so the sentinel's identity is encoded in
+/// the type itself — only the cached `ErrNotSupported()` instance is
+/// of this internal type, all other ProtocolError values are not.
+struct __ErrNotSupported;
+
+impl errors::ErrorTrait for __ErrNotSupported {
+    fn Error(&self) -> string {
+        // Go: ErrNotSupported = &ProtocolError{"feature not supported"}
+        string("feature not supported")
+    }
+    fn Unwrap(&self) -> error {
+        // Goish chain: walk to errors.ErrUnsupported so callers using
+        // `errors::Is(err, errors::ErrUnsupported())` succeed.
+        crate::errors::ErrUnsupported()
+    }
+}
+
+/// `http.ErrNotSupported` (request.go:65) — sentinel returned by
+/// ResponseController methods and Pusher.Push when a feature is not
+/// supported. `errors::Is(_, errors::ErrUnsupported())` succeeds via
+/// the Unwrap chain. Cached singleton.
+pub fn ErrNotSupported() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::Wrap(__ErrNotSupported));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// `http.ErrUnexpectedTrailer` (request.go:70) — deprecated sentinel.
+/// Retained for completeness; nothing in net/http currently returns it.
+pub fn ErrUnexpectedTrailer() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::Wrap(ProtocolError {
+            ErrorString: string("trailer header without chunked transfer encoding"),
+        }));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// `http.ErrHeaderTooLong` (request.go:83) — deprecated sentinel.
+pub fn ErrHeaderTooLong() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::Wrap(ProtocolError {
+            ErrorString: string("header too long"),
+        }));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// `http.ErrShortBody` (request.go:88) — deprecated sentinel.
+pub fn ErrShortBody() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::Wrap(ProtocolError {
+            ErrorString: string("entity body too short"),
+        }));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// `http.ErrMissingContentLength` (request.go:93) — deprecated sentinel.
+pub fn ErrMissingContentLength() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::Wrap(ProtocolError {
+            ErrorString: string("missing ContentLength in HEAD response"),
+        }));
+    }
+    g.as_ref().unwrap().clone()
+}
+
 /// Internal helper to construct a degenerate Reader for the
 /// MultipartReader error paths.
 fn empty_multipart_reader() -> crate::mime::multipart::Reader {

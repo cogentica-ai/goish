@@ -47,9 +47,10 @@ pub use method::{
 };
 pub use protocols::{NoBody, Protocols};
 pub use request::{
-    ErrMaxBytes, ErrMissingBoundary, ErrMissingFile, ErrNoCookie, ErrNotMultipart,
+    ErrHeaderTooLong, ErrMaxBytes, ErrMissingBoundary, ErrMissingContentLength, ErrMissingFile,
+    ErrNoCookie, ErrNotMultipart, ErrNotSupported, ErrShortBody, ErrUnexpectedTrailer,
     MaxBytesError, MaxBytesReader, NewMaxBytesError, NewMaxBytesReader, ParseHTTPVersion,
-    ReadRequest, Request,
+    ProtocolError, ReadRequest, Request,
 };
 pub use response::ResponseWriter;
 pub use httputil::NewSingleHostReverseProxy;
