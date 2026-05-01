@@ -337,6 +337,41 @@ pub fn Lseek(fd: i32, offset: i64, whence: i32) -> i64 {
     unsafe { syscall3(SYS_LSEEK, fd as usize, offset as usize, whence as usize) as i64 }
 }
 
+// ─── getdents64 ──────────────────────────────────────────────────────
+
+pub const SYS_GETDENTS64: usize = 217;
+
+/// Linux `struct linux_dirent64` (getdents64(2)). Variable-sized
+/// `d_name` field is *not* part of this struct; callers parse it
+/// out of the buffer via `d_reclen`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct LinuxDirent64Header {
+    pub d_ino: u64,
+    pub d_off: i64,
+    pub d_reclen: u16,
+    pub d_type: u8,
+    // d_name follows here, NUL-terminated, length = d_reclen - 19.
+}
+
+/// `d_type` values for getdents64. `DT_UNKNOWN` means caller must stat.
+pub const DT_UNKNOWN: u8 = 0;
+pub const DT_FIFO: u8 = 1;
+pub const DT_CHR: u8 = 2;
+pub const DT_DIR: u8 = 4;
+pub const DT_BLK: u8 = 6;
+pub const DT_REG: u8 = 8;
+pub const DT_LNK: u8 = 10;
+pub const DT_SOCK: u8 = 12;
+
+/// `getdents64(fd, buf, buflen)` — read raw directory entries into the
+/// caller-provided buffer. Returns the number of bytes filled, or
+/// `-errno` on error, `0` on EOD.
+#[allow(non_snake_case)]
+pub fn Getdents64(fd: i32, buf: *mut u8, buflen: usize) -> i64 {
+    unsafe { syscall3(SYS_GETDENTS64, fd as usize, buf as usize, buflen) as i64 }
+}
+
 /// Terminate the entire process. Mirrors `syscall.Exit` in Go (which
 /// invokes `exit_group` on Linux).
 #[allow(non_snake_case)]

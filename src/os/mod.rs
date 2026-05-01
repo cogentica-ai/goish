@@ -255,6 +255,110 @@ pub fn ReadFile(name: string) -> (slice<byte>, error) {
     (body, nil)
 }
 
+// ─── DirEntry / ReadDir ──────────────────────────────────────────────
+
+/// `os.DirEntry` (Go 1.16, os/dir.go:85). Slim subset: just name +
+/// type bits. `Type()` returns the FileMode portion populated from the
+/// directory's `d_type` (see `getdents64(2)`).
+#[derive(Clone)]
+pub struct DirEntry {
+    pub Name_: string,
+    pub Type_: FileMode,
+}
+
+impl DirEntry {
+    /// `e.Name()` (fs/fs.go) — base name of the directory entry.
+    pub fn Name(&self) -> string {
+        self.Name_.clone()
+    }
+    /// `e.IsDir()` — convenience for `Type().IsDir()`.
+    pub fn IsDir(&self) -> bool {
+        (self.Type_ & ModeDir) != 0
+    }
+    /// `e.Type()` — entry mode bits (directory / symlink / etc.).
+    pub fn Type(&self) -> FileMode {
+        self.Type_
+    }
+}
+
+/// `os.ReadDir(name)` (os/dir.go:114) — read directory entries from
+/// `name`, returning them sorted by filename. Slim port: relies on
+/// the Linux `getdents64(2)` syscall and returns `(slice<DirEntry>,
+/// error)` per goish convention.
+pub fn ReadDir(name: string) -> (slice<DirEntry>, error) {
+    let (mut f, err) = Open(name);
+    if !err.IsNil() {
+        return (slice::<DirEntry>::__from_vec(Vec::new()), err);
+    }
+    let mut entries: Vec<DirEntry> = Vec::new();
+    // 4 KiB buffer matches the kernel's per-call output size sweet spot.
+    let mut buf: alloc::vec::Vec<u8> = alloc::vec![0u8; 4096];
+    loop {
+        let n = syscall::Getdents64(f.fd, buf.as_mut_ptr(), buf.len());
+        if n < 0 {
+            let _ = f.Close();
+            return (
+                slice::<DirEntry>::__from_vec(entries),
+                errors::New(string("readdir failed")),
+            );
+        }
+        if n == 0 {
+            // EOD
+            break;
+        }
+        // Walk the populated buffer, parsing one linux_dirent64 at a time.
+        let mut pos: usize = 0;
+        let n = n as usize;
+        while pos < n {
+            // Header layout (offsets within the record):
+            //   0  d_ino   u64
+            //   8  d_off   i64
+            //  16  d_reclen u16
+            //  18  d_type  u8
+            //  19  d_name  NUL-terminated, runs through end of record.
+            let p = unsafe { buf.as_ptr().add(pos) };
+            let reclen = unsafe { core::ptr::read_unaligned(p.add(16) as *const u16) } as usize;
+            let dtype = unsafe { core::ptr::read(p.add(18)) };
+            let name_start = pos + 19;
+            // Find NUL terminator within the record.
+            let mut name_end = name_start;
+            while name_end < pos + reclen && buf[name_end] != 0 {
+                name_end += 1;
+            }
+            let name_bytes = &buf[name_start..name_end];
+            // Skip "." and ".." per Go's behavior.
+            if name_bytes != b"." && name_bytes != b".." {
+                let mode = mode_from_dtype(dtype);
+                entries.push(DirEntry {
+                    Name_: string::from_bytes(name_bytes),
+                    Type_: mode,
+                });
+            }
+            if reclen == 0 {
+                break;
+            }
+            pos += reclen;
+        }
+    }
+    let _ = f.Close();
+    // Sort by name (Go uses slices.SortFunc on Name).
+    entries.sort_by(|a, b| {
+        let ab = bytes_of(&a.Name_);
+        let bb = bytes_of(&b.Name_);
+        ab.cmp(bb)
+    });
+    (slice::<DirEntry>::__from_vec(entries), nil)
+}
+
+/// Map a `getdents64` `d_type` byte into the goish FileMode bits.
+fn mode_from_dtype(dt: u8) -> FileMode {
+    match dt {
+        x if x == syscall::DT_DIR => ModeDir,
+        x if x == syscall::DT_LNK => ModeSymlink,
+        _ => 0,
+    }
+}
+
 /// `os.WriteFile(name, data, perm)` (os/file.go:763) — write `data`
 /// to the named file, creating or truncating it.
 pub fn WriteFile(name: string, data: slice<byte>, perm: u32) -> error {
