@@ -263,6 +263,38 @@ impl Time {
     pub fn Equal(self, u: Time) -> bool {
         self.sec == u.sec && self.nsec == u.nsec
     }
+
+    /// `(t Time).Compare(u)` (time/time.go:288). Returns -1 if t < u,
+    /// +1 if t > u, 0 if equal. Slim port: no monotonic-clock fast path
+    /// (goish stores monotonic alongside sec/nsec but Compare semantics
+    /// match Sub-then-Sign in a way that's correct for both wall- and
+    /// monotonic-time inputs).
+    pub fn Compare(self, u: Time) -> crate::types::int {
+        // Prefer monotonic when both have it.
+        if self.mono != 0 && u.mono != 0 {
+            if self.mono < u.mono {
+                return -1;
+            }
+            if self.mono > u.mono {
+                return 1;
+            }
+            return 0;
+        }
+        // Fall back to wall-clock (sec, nsec).
+        if self.sec < u.sec {
+            return -1;
+        }
+        if self.sec > u.sec {
+            return 1;
+        }
+        if (self.nsec as crate::types::int) < (u.nsec as crate::types::int) {
+            return -1;
+        }
+        if (self.nsec as crate::types::int) > (u.nsec as crate::types::int) {
+            return 1;
+        }
+        0
+    }
     pub fn Sub(self, u: Time) -> Duration {
         // Prefer monotonic when both have it.
         if self.mono != 0 && u.mono != 0 {
