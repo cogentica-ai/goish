@@ -1,0 +1,148 @@
+// unicode_predicates_smoke — exercise unicode.IsControl / IsPrint /
+// IsGraphic / IsPunct / IsTitle / ToTitle (ASCII slim).
+
+#![no_std]
+#![no_main]
+#![allow(non_snake_case)]
+
+extern crate alloc;
+extern crate goish;
+
+use goish::types::rune;
+use goish::unicode;
+use goish::{syscall, Println};
+
+#[goish::main]
+fn main() {
+    let mut failed = 0;
+
+    // 1. IsControl: 0x00 (NUL), 0x09 (TAB), 0x1F, 0x7F (DEL), 0x80, 0x9F.
+    {
+        if unicode::IsControl(0x00) && unicode::IsControl(0x09)
+            && unicode::IsControl(0x1F) && unicode::IsControl(0x7F)
+            && unicode::IsControl(0x80) && unicode::IsControl(0x9F)
+        {
+            Println!("[ 1] IsControl ctrl chars      PASS");
+        } else {
+            Println!("[ 1] IsControl ctrl chars      FAIL");
+            failed += 1;
+        }
+    }
+
+    // 2. IsControl: NOT for printable ASCII or > 0x9F.
+    {
+        if !unicode::IsControl(b'A' as rune) && !unicode::IsControl(b' ' as rune)
+            && !unicode::IsControl(0xA0) && !unicode::IsControl(-1)
+        {
+            Println!("[ 2] IsControl non-ctrl        PASS");
+        } else {
+            Println!("[ 2] IsControl non-ctrl        FAIL");
+            failed += 1;
+        }
+    }
+
+    // 3. IsPrint: ASCII printable.
+    {
+        if unicode::IsPrint(b' ' as rune) && unicode::IsPrint(b'~' as rune)
+            && unicode::IsPrint(b'A' as rune)
+        {
+            Println!("[ 3] IsPrint ASCII             PASS");
+        } else {
+            Println!("[ 3] IsPrint ASCII             FAIL");
+            failed += 1;
+        }
+    }
+
+    // 4. IsPrint: NOT for control or out-of-range.
+    {
+        if !unicode::IsPrint(0x00) && !unicode::IsPrint(0x7F)
+            && !unicode::IsPrint(-1) && !unicode::IsPrint(0x110000)
+        {
+            Println!("[ 4] IsPrint non-printable     PASS");
+        } else {
+            Println!("[ 4] IsPrint non-printable     FAIL");
+            failed += 1;
+        }
+    }
+
+    // 5. IsGraphic: includes U+00A0 (NBSP), unlike IsPrint.
+    {
+        if unicode::IsGraphic(0xA0) && !unicode::IsPrint(0xA0) {
+            Println!("[ 5] IsGraphic vs IsPrint NBSP PASS");
+        } else {
+            Println!("[ 5] IsGraphic vs IsPrint NBSP FAIL");
+            failed += 1;
+        }
+    }
+
+    // 6. IsGraphic: agrees with IsPrint elsewhere.
+    {
+        if unicode::IsGraphic(b'A' as rune) && unicode::IsGraphic(b'!' as rune)
+            && !unicode::IsGraphic(0x00) && !unicode::IsGraphic(0x7F)
+        {
+            Println!("[ 6] IsGraphic agrees w/ Print PASS");
+        } else {
+            Println!("[ 6] IsGraphic agrees w/ Print FAIL");
+            failed += 1;
+        }
+    }
+
+    // 7. IsPunct: ASCII punctuation chars.
+    {
+        if unicode::IsPunct(b'!' as rune) && unicode::IsPunct(b'.' as rune)
+            && unicode::IsPunct(b':' as rune) && unicode::IsPunct(b'?' as rune)
+            && unicode::IsPunct(b'[' as rune) && unicode::IsPunct(b'{' as rune)
+        {
+            Println!("[ 7] IsPunct ASCII punct       PASS");
+        } else {
+            Println!("[ 7] IsPunct ASCII punct       FAIL");
+            failed += 1;
+        }
+    }
+
+    // 8. IsPunct: NOT for letters/digits/space/control.
+    {
+        if !unicode::IsPunct(b'A' as rune) && !unicode::IsPunct(b'0' as rune)
+            && !unicode::IsPunct(b' ' as rune) && !unicode::IsPunct(0x00)
+        {
+            Println!("[ 8] IsPunct non-punct         PASS");
+        } else {
+            Println!("[ 8] IsPunct non-punct         FAIL");
+            failed += 1;
+        }
+    }
+
+    // 9. IsTitle: ASCII slim returns false for everything.
+    {
+        if !unicode::IsTitle(b'A' as rune) && !unicode::IsTitle(b'a' as rune)
+            && !unicode::IsTitle(0x01C5) /* LJ-titlecase */
+        {
+            Println!("[ 9] IsTitle ASCII slim        PASS");
+        } else {
+            Println!("[ 9] IsTitle ASCII slim        FAIL");
+            failed += 1;
+        }
+    }
+
+    // 10. ToTitle: ASCII letters titlecase = uppercase; non-letters pass-through.
+    {
+        if unicode::ToTitle(b'a' as rune) == b'A' as rune
+            && unicode::ToTitle(b'Z' as rune) == b'Z' as rune
+            && unicode::ToTitle(b'5' as rune) == b'5' as rune
+            && unicode::ToTitle(b' ' as rune) == b' ' as rune
+        {
+            Println!("[10] ToTitle ASCII             PASS");
+        } else {
+            Println!("[10] ToTitle ASCII             FAIL");
+            failed += 1;
+        }
+    }
+
+    if failed == 0 {
+        Println!("ok 10/10");
+        syscall::Exit(0);
+    } else {
+        Println!("FAIL", failed, "of 10");
+        syscall::Exit(1);
+    }
+}
