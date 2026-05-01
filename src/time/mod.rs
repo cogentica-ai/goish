@@ -488,6 +488,134 @@ impl Time {
         }
         err
     }
+
+    /// `t.AppendBinary(b)` (time.go:1466) — append a 15-byte binary
+    /// encoding to b. Slim deviation: always emits V1 with
+    /// offsetMin = -1 (UTC) since slim time is UTC-only. The wire
+    /// format is interoperable with Go's time.UnmarshalBinary.
+    pub fn AppendBinary(
+        self,
+        b: crate::goslice::slice<crate::types::byte>,
+    ) -> (crate::goslice::slice<crate::types::byte>, crate::errors::error) {
+        // Go: var offsetMin int16  (slim: always UTC → -1)
+        let offset_min: i16 = -1;
+        // Go: version := timeBinaryVersionV1
+        let version: u8 = 1;
+        // Go: sec := t.sec(); nsec := t.nsec()
+        let sec: i64 = self.sec as i64;
+        let nsec: i32 = self.nsec;
+        // Go: b = append(b, version, byte(sec>>56), ..., byte(offsetMin))
+        let mut v = b.__into_vec();
+        v.push(version);
+        v.push((sec >> 56) as u8);
+        v.push((sec >> 48) as u8);
+        v.push((sec >> 40) as u8);
+        v.push((sec >> 32) as u8);
+        v.push((sec >> 24) as u8);
+        v.push((sec >> 16) as u8);
+        v.push((sec >> 8) as u8);
+        v.push(sec as u8);
+        v.push((nsec >> 24) as u8);
+        v.push((nsec >> 16) as u8);
+        v.push((nsec >> 8) as u8);
+        v.push(nsec as u8);
+        v.push((offset_min >> 8) as u8);
+        v.push(offset_min as u8);
+        // Go: return b, nil
+        (crate::goslice::slice::__from_vec(v), crate::nil)
+    }
+
+    /// `t.MarshalBinary()` (time.go:1513) — implements
+    /// `encoding.BinaryMarshaler`. Wraps AppendBinary on a fresh
+    /// 16-byte capacity buffer.
+    pub fn MarshalBinary(
+        self,
+    ) -> (crate::goslice::slice<crate::types::byte>, crate::errors::error) {
+        // Go: b, err := t.AppendBinary(make([]byte, 0, 16))
+        let buf: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(16);
+        let (b, err) = self.AppendBinary(crate::goslice::slice::__from_vec(buf));
+        if !err.IsNil() {
+            // Go: return nil, err
+            let empty: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+            return (crate::goslice::slice::__from_vec(empty), err);
+        }
+        // Go: return b, nil
+        (b, crate::nil)
+    }
+
+    /// `(*Time).UnmarshalBinary(data)` (time.go:1522) — implements
+    /// `encoding.BinaryUnmarshaler`. Slim: zone offset is parsed but
+    /// ignored (slim time is UTC-only); accepts both V1 (15-byte) and
+    /// V2 (16-byte) inputs.
+    pub fn UnmarshalBinary(
+        &mut self,
+        data: crate::goslice::slice<crate::types::byte>,
+    ) -> crate::errors::error {
+        // Go: buf := data; if len(buf) == 0 { return errors.New("...: no data") }
+        let buf = data.__into_vec();
+        if buf.is_empty() {
+            return crate::errors::New("Time.UnmarshalBinary: no data");
+        }
+        // Go: version := buf[0]
+        let version = buf[0];
+        // Go: if version != V1 && version != V2 { return error }
+        if version != 1 && version != 2 {
+            return crate::errors::New("Time.UnmarshalBinary: unsupported version");
+        }
+        // Go: wantLen := 1 + 8 + 4 + 2; if V2 { wantLen++ }
+        let mut want_len: usize = 1 + 8 + 4 + 2;
+        if version == 2 {
+            want_len += 1;
+        }
+        // Go: if len(buf) != wantLen { return error }
+        if buf.len() != want_len {
+            return crate::errors::New("Time.UnmarshalBinary: invalid length");
+        }
+        // Go: buf = buf[1:]; sec := int64(buf[7]) | ... | int64(buf[0])<<56
+        let sec: i64 = (buf[8] as i64)
+            | ((buf[7] as i64) << 8)
+            | ((buf[6] as i64) << 16)
+            | ((buf[5] as i64) << 24)
+            | ((buf[4] as i64) << 32)
+            | ((buf[3] as i64) << 40)
+            | ((buf[2] as i64) << 48)
+            | ((buf[1] as i64) << 56);
+        // Go: buf = buf[8:]; nsec := int32(buf[3]) | ... | int32(buf[0])<<24
+        let nsec: i32 = (buf[12] as i32)
+            | ((buf[11] as i32) << 8)
+            | ((buf[10] as i32) << 16)
+            | ((buf[9] as i32) << 24);
+        // Go: buf = buf[4:]; offset := int(int16(buf[1])|int16(buf[0])<<8) * 60
+        // (parsed but ignored — slim time is UTC-only)
+        let _offset: i16 = (buf[14] as i16) | ((buf[13] as i16) << 8);
+        // Go: *t = Time{}; t.wall = uint64(nsec); t.ext = sec
+        *self = Time {
+            sec: sec as int,
+            nsec,
+            mono: 0,
+        };
+        // Go: return nil
+        crate::nil
+    }
+
+    /// `t.GobEncode()` (time.go:1574) — implements
+    /// `encoding/gob.GobEncoder`. Delegates to MarshalBinary.
+    pub fn GobEncode(
+        self,
+    ) -> (crate::goslice::slice<crate::types::byte>, crate::errors::error) {
+        // Go: return t.MarshalBinary()
+        self.MarshalBinary()
+    }
+
+    /// `(*Time).GobDecode(data)` (time.go:1579) — implements
+    /// `encoding/gob.GobDecoder`. Delegates to UnmarshalBinary.
+    pub fn GobDecode(
+        &mut self,
+        data: crate::goslice::slice<crate::types::byte>,
+    ) -> crate::errors::error {
+        // Go: return t.UnmarshalBinary(data)
+        self.UnmarshalBinary(data)
+    }
 }
 
 const MONTH_SHORT: [&str; 13] = [
