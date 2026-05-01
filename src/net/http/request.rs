@@ -63,6 +63,47 @@ impl Request {
     pub fn body_reader(&self) -> bytes::Reader {
         bytes::NewReader(self.Body.clone())
     }
+
+    /// `r.Cookies()` — parse all `Cookie:` request headers. Mirrors
+    /// `(*Request).Cookies()` (request.go:404).
+    pub fn Cookies(&self) -> slice<super::cookie::Cookie> {
+        super::cookie::read_cookies(&self.Header, &string::new())
+    }
+
+    /// `r.Cookie(name)` — return the named cookie, or
+    /// `(Cookie::default(), ErrNoCookie)` if absent. Mirrors
+    /// `(*Request).Cookie(name)` (request.go:418).
+    pub fn Cookie(&self, name: string) -> (super::cookie::Cookie, error) {
+        let matches = super::cookie::read_cookies(&self.Header, &name);
+        if matches.Len() > 0 {
+            return (matches[0].clone(), errors::nil);
+        }
+        (
+            super::cookie::Cookie::default(),
+            errors::New(string("http: named cookie not present")),
+        )
+    }
+
+    /// `r.AddCookie(c)` — append a cookie to the `Cookie:` request
+    /// header. Mirrors `(*Request).AddCookie(c)` (request.go:434);
+    /// per RFC 6265 the request only has a single `Cookie:` line, so
+    /// repeat calls fold into one space+`; `-separated value.
+    pub fn AddCookie(&mut self, c: &super::cookie::Cookie) {
+        let s = c.String();
+        if s.Len() == 0 {
+            return;
+        }
+        let existing = self.Header.Get(string("Cookie"));
+        if existing.Len() == 0 {
+            self.Header.Set(string("Cookie"), s);
+        } else {
+            let mut buf: Vec<u8> = Vec::with_capacity((existing.Len() + s.Len()) as usize + 2);
+            buf.extend_from_slice(existing.as_bytes());
+            buf.extend_from_slice(b"; ");
+            buf.extend_from_slice(s.as_bytes());
+            self.Header.Set(string("Cookie"), string::from_bytes(&buf));
+        }
+    }
 }
 
 // ─── ReadRequest ─────────────────────────────────────────────────────

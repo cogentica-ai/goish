@@ -14,12 +14,14 @@
 
 #![allow(non_snake_case)]
 
+pub mod cookie;
 pub mod header;
 pub mod request;
 pub mod response;
 pub mod server;
 pub mod url;
 
+pub use cookie::{Cookie, ParseCookie, ParseSetCookie, SameSite, SetCookie};
 pub use header::Header;
 pub use request::{ReadRequest, Request};
 pub use response::ResponseWriter;

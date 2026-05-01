@@ -532,6 +532,32 @@ pub fn Unix(sec: int, nsec: int) -> Time {
     }
 }
 
+/// `time.Date(year, month, day, hour, min, sec, nsec)` — construct a
+/// UTC Time. Slim port of Go's `time.Date` (time.go:1438) without the
+/// `*Location` argument (UTC only, v1). Out-of-range fields normalize
+/// the same way Go does (e.g. `Date(2024, 1, 32, …)` ≡ Feb 1).
+pub fn Date(year: int, month: int, day: int, hour: int, min: int, sec: int, nsec: int) -> Time {
+    let days = days_from_civil(year, month, day);
+    let total_sec = days
+        .wrapping_mul(86_400)
+        .wrapping_add(hour.wrapping_mul(3600))
+        .wrapping_add(min.wrapping_mul(60))
+        .wrapping_add(sec);
+    Unix(total_sec, nsec)
+}
+
+/// Inverse of `civil_from_unix` — Howard Hinnant's `days_from_civil`.
+/// Returns Unix days (signed, epoch 1970-01-01).
+fn days_from_civil(year: int, month: int, day: int) -> int {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400; // [0, 399]
+    let mp = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
 // ─── Duration formatting (Go-faithful, ASCII "us") ────────────────────
 
 fn format_duration(d: int) -> string {
