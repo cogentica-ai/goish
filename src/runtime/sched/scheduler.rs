@@ -440,14 +440,42 @@ unsafe fn g_entry_clear_recovery() {
 extern "C" fn on_g_panic_aborted() -> ! {
     // Cleanups already ran in the `#[panic_handler]` (where the
     // panicked stack frames were still valid). Here we're on a fresh
-    // top-of-stack frame; just print and exit.
+    // top-of-stack frame; just print, clear panicking flag, and exit.
     const MSG: &[u8] = b"goish: goroutine recovered from panic, scheduler continuing\n";
     crate::syscall::Write(crate::syscall::STDERR, MSG.as_ptr(), MSG.len());
 
     // Increment the per-process panicked-G counter for diagnostics.
     G_PANIC_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
+    // Clear the panicking flag so any final code on this G observes
+    // the normal-execution state. The G is about to die anyway, but
+    // this also defends against false positives if the flag were ever
+    // observed post-recovery (e.g., a future feature that reuses Gs).
+    if let Some(g_ptr) = current_m().lock().curg {
+        unsafe { (*g_ptr.as_ptr()).panicking.store(false, core::sync::atomic::Ordering::Release) };
+    }
+
     goexit();
+}
+
+/// True while the current goroutine is inside the panic handler's
+/// cleanup walk — i.e., a `defer!{}` body is being run because the
+/// scope is unwinding due to panic, not because it exited normally.
+///
+/// Mirrors Go's `recover()` for the *observation* part — the
+/// `recover!()` macro reads this. Unlike Go, our flag does NOT stop
+/// panic propagation: the goroutine still terminates after defers
+/// run. (Stopping propagation would require frame-level unwind tables,
+/// gated behind nightly + -Zbuild-std on no_std crates.)
+///
+/// Returns `false` outside any goroutine (g0 / sysmon).
+#[inline]
+pub fn panicking() -> bool {
+    if let Some(g_ptr) = current_g() {
+        unsafe { (*g_ptr.as_ptr()).panicking.load(core::sync::atomic::Ordering::Acquire) }
+    } else {
+        false
+    }
 }
 
 /// Total number of goroutines that have died by panic (vs normal

@@ -140,3 +140,47 @@ macro_rules! defer {
         unsafe { _deferred.__register(); }
     };
 }
+
+/// `recover!()` — inside a `defer!{}` body, returns `Some(())` if the
+/// body is being run because the enclosing scope is unwinding due to
+/// panic; returns `None` if the body is being run on normal scope
+/// exit (Drop). Mirrors Go's `recover()` for the *observation* part.
+///
+/// **Difference from Go:** Go's `recover()` ALSO stops panic
+/// propagation, letting the recovering function return normally to
+/// its caller. Goish's `recover!()` does not — the goroutine still
+/// terminates after defers complete. This is a fundamental
+/// consequence of running on stable Rust + no_std with `panic =
+/// "abort"` plus our gogo-based recovery: we cannot resynthesize
+/// a normal function-return without compiler-emitted unwind tables
+/// (gated behind nightly + -Zbuild-std on no_std crates).
+///
+/// In practice, the `if recover!() { … }` pattern is what Go users
+/// reach for when they want to log + clean up on panic. The
+/// "continue execution" semantic of Go's recover is rarely correct
+/// outside HTTP-handler-style top-of-goroutine patterns, which goish
+/// already handles automatically: a panic in any goroutine kills
+/// only that goroutine, and the scheduler keeps running.
+///
+/// Returns `None` outside any goroutine (g0 / sysmon).
+///
+/// ```ignore
+/// defer!{
+///     if recover!().is_some() {
+///         // panic path: log it, release a resource we don't want to
+///         // leak in the panic case, etc.
+///         let _ = conn.Close();
+///     }
+///     // either path: things you always want to run go here
+/// }
+/// ```
+#[macro_export]
+macro_rules! recover {
+    () => {{
+        if $crate::runtime::sched::panicking() {
+            ::core::option::Option::Some(())
+        } else {
+            ::core::option::Option::None
+        }
+    }};
+}
