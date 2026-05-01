@@ -22,6 +22,7 @@ pub mod header;
 pub mod helpers;
 pub mod httptest;
 pub mod httputil;
+pub mod internal;
 pub mod method;
 pub mod pattern;
 pub mod protocols;
