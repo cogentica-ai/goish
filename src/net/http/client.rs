@@ -464,6 +464,7 @@ impl Client {
                         ContentLength: 0,
                         Body: slice::<byte>::__from_vec(Vec::new()),
                         RemoteAddr: string::new(),
+                        path_values: crate::gomap::map::<string, string>::new(),
                     };
                     // Preserve body only on 307/308 (per RFC).
                     if resp.StatusCode == 307 || resp.StatusCode == 308 {
@@ -588,6 +589,7 @@ pub fn NewRequest(method: string, url: string, body: slice<byte>) -> (Request, e
         ContentLength: body_len,
         Body: body,
         RemoteAddr: string::new(),
+        path_values: crate::gomap::map::<string, string>::new(),
     };
     (req, errors::nil)
 }
@@ -604,6 +606,7 @@ fn default_request() -> Request {
         ContentLength: 0,
         Body: slice::<byte>::__from_vec(Vec::new()),
         RemoteAddr: string::new(),
+        path_values: crate::gomap::map::<string, string>::new(),
     }
 }
 

@@ -53,6 +53,10 @@ pub struct Request {
     /// observable behavior with simpler lifetimes.
     pub Body: slice<byte>,
     pub RemoteAddr: string,
+    /// Wildcard pattern bindings (Go 1.22). Populated by `ServeMux`
+    /// when a `/users/{id}`-style pattern matches; queried via
+    /// `r.PathValue(name)`. Empty otherwise.
+    pub(crate) path_values: crate::gomap::map<string, string>,
 }
 
 impl Request {
@@ -82,6 +86,33 @@ impl Request {
             super::cookie::Cookie::default(),
             errors::New(string("http: named cookie not present")),
         )
+    }
+
+    /// `r.PathValue(name)` — look up a wildcard binding from a Go 1.22
+    /// pattern match (e.g. `/users/{id}` → `r.PathValue("id")`).
+    /// Returns the empty string if no such binding exists. Mirrors
+    /// `(*Request).PathValue(name)` (request.go:472 in Go's source).
+    pub fn PathValue(&self, name: string) -> string {
+        let (v, ok) = self.path_values.Get(name);
+        if ok {
+            v
+        } else {
+            string::new()
+        }
+    }
+
+    /// `r.SetPathValue(name, value)` — set a wildcard binding for
+    /// testing or middleware use. Mirrors `(*Request).SetPathValue`.
+    pub fn SetPathValue(&mut self, name: string, value: string) {
+        self.path_values.Set(name, value);
+    }
+
+    /// Internal: bulk-install path bindings from a successful pattern
+    /// match. Used by `ServeMux::ServeHTTP`; not part of the public
+    /// API since users would set bindings via `SetPathValue` instead.
+    #[doc(hidden)]
+    pub fn __set_path_values(&mut self, m: crate::gomap::map<string, string>) {
+        self.path_values = m;
     }
 
     /// `r.AddCookie(c)` — append a cookie to the `Cookie:` request
@@ -152,6 +183,7 @@ pub fn ReadRequestWithLimit<R: io::Reader>(
         ContentLength: 0,
         Body: slice::<byte>::__from_vec(Vec::new()),
         RemoteAddr: string::new(),
+        path_values: crate::gomap::map::<string, string>::new(),
     };
 
     // Request-line: METHOD SP request-target SP HTTP-version CRLF

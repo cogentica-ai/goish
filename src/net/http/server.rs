@@ -31,6 +31,7 @@ use crate::go;
 use crate::io::Closer;
 use crate::net;
 use crate::string;
+use crate::strings;
 use crate::sync::Mutex;
 use crate::time;
 
@@ -63,11 +64,15 @@ where
 
 /// `http.ServeMux` — pattern → Handler routing table.
 ///
-/// Two pattern shapes:
+/// Three pattern shapes:
 ///   - Exact: `"/about"` matches only `/about`.
 ///   - Prefix: `"/static/"` (trailing slash) matches any path
 ///     starting with `/static/`.
-/// Longest-pattern wins on conflict (`/static/` > `/`).
+///   - Wildcard (Go 1.22): `"/users/{id}"` and `"/files/{path...}"`.
+///     Optional `[METHOD ]` prefix (`"GET /users/{id}"`).
+///
+/// Match order: exact > prefix (longest-wins) > wildcard (registration
+/// order). Wildcard bindings are exposed via `r.PathValue(name)`.
 pub struct ServeMux {
     /// Inner state behind a Mutex so handlers can be added before
     /// `ListenAndServe` and `ServeMux` is `Send + Sync` for
@@ -76,25 +81,49 @@ pub struct ServeMux {
 }
 
 struct MuxState {
-    /// Routes as a Vec so the value can be a `dyn Handler` trait
-    /// object — `gomap` requires V: Default which `dyn Trait`
-    /// can't satisfy. Linear scan in `match_handler` is fine
-    /// for typical route counts (<100).
+    /// Plain (literal) routes for exact + longest-prefix matching.
+    /// Linear scan in `match_handler` is fine for typical route
+    /// counts (<100).
     routes: Vec<(string, Arc<dyn Handler>)>,
+    /// Wildcard routes. Stored separately because their precedence is
+    /// after literal exact/prefix.
+    pattern_routes: Vec<PatternRoute>,
+}
+
+struct PatternRoute {
+    pattern: super::pattern::Pattern,
+    handler: Arc<dyn Handler>,
 }
 
 impl ServeMux {
     pub fn new() -> Self {
         ServeMux {
-            state: Arc::new(Mutex::new(MuxState { routes: Vec::new() })),
+            state: Arc::new(Mutex::new(MuxState {
+                routes: Vec::new(),
+                pattern_routes: Vec::new(),
+            })),
         }
     }
 
-    /// `mux.Handle(pattern, h)` — register a Handler. If `pattern`
-    /// already exists, replaces it (Go panics; we silently replace
-    /// for v1 simplicity).
+    /// `mux.Handle(pattern, h)` — register a Handler. Patterns that
+    /// contain `{` are parsed as Go 1.22 wildcards; any parse error
+    /// causes the registration to be silently dropped (Go panics).
+    /// If `pattern` already exists in the literal table, replaces it.
     pub fn Handle(&self, pattern: string, h: Arc<dyn Handler>) {
+        // Wildcard or method-prefixed → parse as Pattern.
+        let needs_pattern_parse = strings::Contains(pattern.clone(), string("{"))
+            || strings::ContainsAny(pattern.clone(), string(" \t"));
         let mut s = self.state.Lock();
+        if needs_pattern_parse {
+            let (p, err) = super::pattern::parse_pattern(pattern);
+            if err.IsNil() {
+                s.pattern_routes.push(PatternRoute {
+                    pattern: p,
+                    handler: h,
+                });
+            }
+            return;
+        }
         for r in s.routes.iter_mut() {
             if r.0 == pattern {
                 r.1 = h;
@@ -114,18 +143,25 @@ impl ServeMux {
         self.Handle(pattern, Arc::new(HandlerFunc(f)));
     }
 
-    /// Internal: pick the handler for `path`. Returns the
-    /// longest-matching pattern's handler, or a 404 stub.
-    fn match_handler(&self, path: &string) -> Arc<dyn Handler> {
+    /// Internal: pick the handler for `r`. Returns the chosen handler
+    /// and (for wildcard hits) any path-value bindings, or a 404
+    /// stub with empty bindings.
+    fn match_handler(
+        &self,
+        r: &Request,
+    ) -> (
+        Arc<dyn Handler>,
+        crate::gomap::map<string, string>,
+    ) {
         let s = self.state.Lock();
-        // Try exact match first.
-        for r in s.routes.iter() {
-            if r.0 == *path {
-                return r.1.clone();
+        // 1. Exact literal match.
+        for route in s.routes.iter() {
+            if route.0 == r.URL.Path {
+                return (route.1.clone(), crate::gomap::map::<string, string>::new());
             }
         }
-        // Then longest prefix-with-trailing-slash match.
-        let path_b = path.as_bytes();
+        // 2. Longest prefix-with-trailing-slash match.
+        let path_b = r.URL.Path.as_bytes();
         let mut best_len: usize = 0;
         let mut best: Option<Arc<dyn Handler>> = None;
         for (pat, handler) in s.routes.iter() {
@@ -135,14 +171,36 @@ impl ServeMux {
                 best = Some(handler.clone());
             }
         }
-        best.unwrap_or_else(|| Arc::new(NotFoundHandler))
+        if let Some(h) = best {
+            return (h, crate::gomap::map::<string, string>::new());
+        }
+        // 3. Wildcard pattern match (registration order).
+        let host = r.Host.clone();
+        for pr in s.pattern_routes.iter() {
+            if let Some(bindings) = pr.pattern.Match(&r.Method, &host, &r.URL.Path) {
+                return (pr.handler.clone(), bindings);
+            }
+        }
+        (
+            Arc::new(NotFoundHandler) as Arc<dyn Handler>,
+            crate::gomap::map::<string, string>::new(),
+        )
     }
 }
 
 impl Handler for ServeMux {
     fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
-        let h = self.match_handler(&r.URL.Path);
-        h.ServeHTTP(w, r);
+        let (h, bindings) = self.match_handler(r);
+        if bindings.Len() == 0 {
+            h.ServeHTTP(w, r);
+        } else {
+            // Clone the request and attach path-value bindings before
+            // dispatching, so r.PathValue(name) inside the handler
+            // sees the bindings from the matched pattern.
+            let mut r2 = r.clone();
+            r2.__set_path_values(bindings);
+            h.ServeHTTP(w, &r2);
+        }
     }
 }
 

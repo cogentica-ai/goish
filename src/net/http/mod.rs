@@ -18,6 +18,7 @@ pub mod chunked;
 pub mod client;
 pub mod cookie;
 pub mod header;
+pub mod pattern;
 pub mod request;
 pub mod response;
 pub mod server;
