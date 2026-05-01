@@ -158,6 +158,125 @@ impl Handler for FileHandler {
     }
 }
 
+// ─── Range header parsing (fs.go:1015) ───────────────────────────────
+
+/// `httpRange` (fs.go:998) — a parsed byte range. Public so callers
+/// (e.g. CDNs / partial transfer tooling) can act on the parsed list.
+#[derive(Clone, Copy)]
+pub struct HttpRange {
+    pub Start: int,
+    pub Length: int,
+}
+
+impl HttpRange {
+    /// `r.ContentRange(size)` (fs.go:1002) — render a "bytes A-B/SIZE"
+    /// string for the Content-Range header.
+    pub fn ContentRange(&self, size: int) -> string {
+        crate::Sprintf!(
+            "bytes %d-%d/%d",
+            self.Start,
+            self.Start + self.Length - 1,
+            size
+        )
+    }
+}
+
+/// `parseRange(s, size)` (fs.go:1015) — parse a Range header per
+/// RFC 7233 §3.1. Returns `(ranges, ok)`; `ok=false` when the header
+/// is malformed.
+pub fn ParseRange(s: string, size: int) -> (slice<HttpRange>, error) {
+    // Go: if s == "" { return nil, nil }
+    if s.Len() == 0 {
+        return (slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()), errors::nil);
+    }
+    // Go: const b = "bytes="; if !strings.HasPrefix(s, b) { return nil, errors.New(...) }
+    if !strings::HasPrefix(s.clone(), string("bytes=")) {
+        return (
+            slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
+            errors::New(string("invalid range")),
+        );
+    }
+    let body = strings::TrimPrefix(s, string("bytes="));
+    let mut ranges: alloc::vec::Vec<HttpRange> = alloc::vec::Vec::new();
+    let mut no_overlap = false;
+    let parts = strings::Split(body, string(","));
+    for i in 0..parts.Len() {
+        let ra = strings::TrimSpace(parts[i].clone());
+        // Go: if ra == "" { continue }
+        if ra.Len() == 0 {
+            continue;
+        }
+        // Go: start, end, ok := strings.Cut(ra, "-")
+        let (start, end, ok) = strings::Cut(ra, string("-"));
+        if !ok {
+            return (
+                slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
+                errors::New(string("invalid range")),
+            );
+        }
+        let start = strings::TrimSpace(start);
+        let end = strings::TrimSpace(end);
+        let mut r = HttpRange { Start: 0, Length: 0 };
+        if start.Len() == 0 {
+            // Suffix form: "bytes=-N" → last N bytes.
+            if end.Len() == 0 || end[0] == b'-' {
+                return (
+                    slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
+                    errors::New(string("invalid range")),
+                );
+            }
+            let (mut n, perr) = crate::strconv::Atoi(end);
+            if !perr.IsNil() || n < 0 {
+                return (
+                    slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
+                    errors::New(string("invalid range")),
+                );
+            }
+            if n > size {
+                n = size;
+            }
+            r.Start = size - n;
+            r.Length = size - r.Start;
+        } else {
+            let (i_start, perr) = crate::strconv::Atoi(start);
+            if !perr.IsNil() || i_start < 0 {
+                return (
+                    slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
+                    errors::New(string("invalid range")),
+                );
+            }
+            if i_start >= size {
+                no_overlap = true;
+                continue;
+            }
+            r.Start = i_start;
+            if end.Len() == 0 {
+                r.Length = size - r.Start;
+            } else {
+                let (mut i_end, perr) = crate::strconv::Atoi(end);
+                if !perr.IsNil() || r.Start > i_end {
+                    return (
+                        slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
+                        errors::New(string("invalid range")),
+                    );
+                }
+                if i_end >= size {
+                    i_end = size - 1;
+                }
+                r.Length = i_end - r.Start + 1;
+            }
+        }
+        ranges.push(r);
+    }
+    if no_overlap && ranges.is_empty() {
+        return (
+            slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
+            errors::New(string("requested range not satisfiable")),
+        );
+    }
+    (slice::<HttpRange>::__from_vec(ranges), errors::nil)
+}
+
 // ─── small helpers ───────────────────────────────────────────────────
 
 /// Allocate a `slice<byte>` of length `n`, zero-initialized.

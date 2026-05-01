@@ -33,7 +33,7 @@ pub use client::{
     Client, Get, Head, NewRequest, Post, PostForm, ReadResponse, Response, RoundTripper, Transport,
 };
 pub use cookie::{Cookie, ParseCookie, ParseSetCookie, SameSite, SetCookie};
-pub use fs::{Dir, FileServer, NewDir, ServeFile};
+pub use fs::{Dir, FileServer, HttpRange, NewDir, ParseRange, ServeFile};
 pub use header::{CanonicalHeaderKey, Header, ParseTime, TimeFormat};
 pub use method::{
     MethodConnect, MethodDelete, MethodGet, MethodHead, MethodOptions, MethodPatch, MethodPost,
