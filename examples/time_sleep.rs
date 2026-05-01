@@ -18,7 +18,7 @@ use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use goish::runtime::sched::schedule;
 use goish::time::{Now, Sleep, Since, Milliseconds};
-use goish::{go, syscall};
+use goish::{go, syscall, KB};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -47,7 +47,7 @@ fn test_single_sleep() {
     static GOT: AtomicI64 = AtomicI64::new(0);
     static DONE: AtomicUsize = AtomicUsize::new(0);
 
-    go!(|| {
+    go!(stack(64 * KB), || {
         let t0 = Now();
         Sleep(Milliseconds(10));
         let elapsed = Since(t0).Nanoseconds();
@@ -81,7 +81,7 @@ fn test_concurrent_sleeps() {
     let t0 = Now();
     for &ms in &durations_ms {
         for _ in 0..copies {
-            go!(move || {
+            go!(stack(64 * KB), move || {
                 Sleep(Milliseconds(ms));
                 GS_DONE.fetch_add(1, Ordering::Relaxed);
             });
@@ -111,12 +111,12 @@ fn test_sleeper_doesnt_block_m() {
     SLEEPER_DONE.store(0, Ordering::Relaxed);
     WORKER_DONE.store(0, Ordering::Relaxed);
 
-    go!(|| {
+    go!(stack(64 * KB), || {
         Sleep(Milliseconds(20));
         SLEEPER_DONE.store(1, Ordering::Release);
     });
 
-    go!(|| {
+    go!(stack(64 * KB), || {
         // No I/O, no sleep — just CPU work.
         let mut acc: u64 = 0;
         for i in 0..100_000u64 {

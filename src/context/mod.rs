@@ -207,7 +207,7 @@ fn build_cancel_ctx(parent: &Arc<dyn Context>, own_deadline: Option<Time>) -> Ar
         let me_for_watch = me.clone();
         let parent_for_watch = parent.clone();
         let own_done = me.done.clone();
-        crate::go!(move || {
+        crate::go!(stack(64 * crate::KB), move || {
             crate::select! {
                 let _ = parent_done.Recv() => {
                     // Parent was cancelled — adopt its err.
@@ -257,7 +257,7 @@ pub fn WithDeadline(parent: Arc<dyn Context>, d: Time) -> (Arc<dyn Context>, Can
         ctx.cancel(DeadlineExceeded());
     } else {
         let ctx_for_timer = ctx.clone();
-        crate::go!(move || {
+        crate::go!(stack(64 * crate::KB), move || {
             crate::time::Sleep(until);
             ctx_for_timer.cancel(DeadlineExceeded());
         });

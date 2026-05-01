@@ -391,7 +391,7 @@ impl Timer {
 fn spawn_fire(d: Duration) -> chan<()> {
     let fire: chan<()> = crate::make!(chan (), 1);
     let inner = fire.clone();
-    crate::go!(move || {
+    crate::go!(stack(64 * crate::KB), move || {
         Sleep(d);
         // Cap=1, fresh chan; first __try_send always slots in.
         let _ = inner.__try_send(());
@@ -407,7 +407,7 @@ pub fn NewTimer(d: Duration) -> Timer {
     let stop_chan: chan<()> = crate::make!(chan (), 1);
     let c_inner = c.clone();
     let stop_inner = stop_chan.clone();
-    crate::go!(move || {
+    crate::go!(stack(64 * crate::KB), move || {
         // spawn_fire spawns the actual sleeper. Its gor lives ≤ d
         // regardless of Stop. Our outer select races that against
         // the stop chan — when Stop fires, this outer watcher
@@ -444,7 +444,7 @@ pub fn NewTimer(d: Duration) -> Timer {
 pub fn After(d: Duration) -> chan<Time> {
     let c: chan<Time> = crate::make!(chan Time, 1);
     let c_inner = c.clone();
-    crate::go!(move || {
+    crate::go!(stack(64 * crate::KB), move || {
         Sleep(d);
         let _ = c_inner.__try_send(Now());
     });
@@ -494,7 +494,7 @@ pub fn NewTicker(d: Duration) -> Ticker {
     let stop_chan: chan<()> = crate::make!(chan (), 1);
     let c_inner = c.clone();
     let stop_inner = stop_chan.clone();
-    crate::go!(move || {
+    crate::go!(stack(64 * crate::KB), move || {
         loop {
             // Per-tick spawn_fire — its inner gor lives ≤ d. The
             // outer loop's select races against stop_chan: when

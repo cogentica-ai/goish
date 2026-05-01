@@ -12,7 +12,7 @@ use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use goish::os::signal as ossig;
 use goish::runtime::sched::schedule;
 use goish::time::{Milliseconds, Sleep};
-use goish::{go, make, syscall};
+use goish::{go, make, syscall, KB};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -44,10 +44,14 @@ fn test_notify_then_recv() {
     let c = make!(chan i32, 1);
     ossig::Notify(&c, &[syscall::SIGUSR1]);
 
-    // Receiver goroutine.
+    // Receiver goroutine. Recv parks via gopark which carries
+    // a deeper Rust-debug-build call stack than the 2 KiB default
+    // (chan_park → mcall_setup → swap_context, plus alloc paths
+    // when the chan's recvq grows). 64 KiB matches the chan_micro
+    // examples and keeps the same headroom margin.
     {
         let c = c.clone();
-        go!(move || {
+        go!(stack(64 * KB), move || {
             let (sig, _) = c.Recv();
             GOT_SIG.store(sig as i64, Ordering::Release);
             DONE.store(1, Ordering::Release);
@@ -55,7 +59,11 @@ fn test_notify_then_recv() {
     }
 
     // Sender: small delay to let the receiver park, then self-kill.
-    go!(|| {
+    // Sleep → sysmon::timer_park → BinaryHeap::push → mheap alloc
+    // is ~24 frames deep in debug builds; default 2 KiB stack
+    // overflows into the next mmap region and SEGV-s in
+    // PallocBits::summarize.
+    go!(stack(64 * KB), || {
         Sleep(Milliseconds(10));
         let pid = syscall::Getpid();
         let r = syscall::Kill(pid, syscall::SIGUSR1);
@@ -87,10 +95,12 @@ fn test_stop_drops_signals() {
 
     // Spawn a goroutine that uses select with default to drain
     // anything in the chan during a 30ms window. Without a Stop
-    // bug, nothing should arrive.
+    // bug, nothing should arrive. 64 KiB stack as for test 1 —
+    // Sleep's call chain through sysmon::timer_park overflows
+    // the default 2 KiB.
     {
         let c = c.clone();
-        go!(move || {
+        go!(stack(64 * KB), move || {
             for _ in 0..3 {
                 Sleep(Milliseconds(10));
                 // Try non-blocking recv via __try_recv-equivalent:
@@ -104,7 +114,7 @@ fn test_stop_drops_signals() {
     }
 
     // Self-kill SIGUSR2 while the goroutine watches.
-    go!(|| {
+    go!(stack(64 * KB), || {
         Sleep(Milliseconds(5));
         let pid = syscall::Getpid();
         let _ = syscall::Kill(pid, syscall::SIGUSR2);

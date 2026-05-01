@@ -25,7 +25,7 @@
 use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use goish::runtime::sched::schedule;
-use goish::{go, make, select, syscall};
+use goish::{go, make, select, syscall, KB};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -57,7 +57,7 @@ fn test_same_chan_dedup_4_cases() {
     let ch = make!(chan i64, 4);
     {
         let c = ch.clone();
-        go!(move || {
+        go!(stack(64 * KB), move || {
             c.Send(1);
             c.Send(2);
             c.Send(3);
@@ -67,7 +67,7 @@ fn test_same_chan_dedup_4_cases() {
     static SUM: AtomicI64 = AtomicI64::new(0);
     {
         let c = ch.clone();
-        go!(move || {
+        go!(stack(64 * KB), move || {
             for _ in 0..4 {
                 select! {
                     let v = c.Recv() => SUM.fetch_add(v, Ordering::Relaxed),
@@ -101,7 +101,7 @@ fn test_eight_distinct_chans_default() {
         chs[0].clone(), chs[1].clone(), chs[2].clone(), chs[3].clone(),
         chs[4].clone(), chs[5].clone(), chs[6].clone(), chs[7].clone(),
     ];
-    go!(move || {
+    go!(stack(64 * KB), move || {
         let arm: u8 = select! {
             let _ = (cs[0]).Recv() => 0u8,
             let _ = (cs[1]).Recv() => 1u8,
@@ -140,7 +140,7 @@ fn test_eight_distinct_chans_park_then_recv() {
         chs[0].clone(), chs[1].clone(), chs[2].clone(), chs[3].clone(),
         chs[4].clone(), chs[5].clone(), chs[6].clone(), chs[7].clone(),
     ];
-    go!(move || {
+    go!(stack(64 * KB), move || {
         let arm = select! {
             let v = (cs[0]).Recv() => { GOT.store(v, Ordering::Relaxed); 0i64 },
             let v = (cs[1]).Recv() => { GOT.store(v, Ordering::Relaxed); 1i64 },
@@ -156,7 +156,7 @@ fn test_eight_distinct_chans_park_then_recv() {
     // Counterpart: send on chan 5.
     {
         let c = chs[5].clone();
-        go!(move || c.Send(0xABCD));
+        go!(stack(64 * KB), move || c.Send(0xABCD));
     }
     schedule();
     check(FIRED.load(Ordering::Relaxed) == 5, b"t3: wrong arm fired\n");
@@ -184,7 +184,7 @@ fn test_eight_distinct_chans_park_then_send() {
         chs[0].clone(), chs[1].clone(), chs[2].clone(), chs[3].clone(),
         chs[4].clone(), chs[5].clone(), chs[6].clone(), chs[7].clone(),
     ];
-    go!(move || {
+    go!(stack(64 * KB), move || {
         let arm = select! {
             (cs[0]).Send(100) => 0i64,
             (cs[1]).Send(101) => 1i64,
@@ -199,7 +199,7 @@ fn test_eight_distinct_chans_park_then_send() {
     });
     {
         let c = chs[3].clone();
-        go!(move || {
+        go!(stack(64 * KB), move || {
             let (v, _) = c.Recv();
             SENT.store(v, Ordering::Relaxed);
         });
@@ -219,7 +219,7 @@ fn test_default_releases_all_locks() {
         let a = a.clone();
         let b = b.clone();
         let c = c.clone();
-        go!(move || {
+        go!(stack(64 * KB), move || {
             select! {
                 let _ = a.Recv() => die(b"t5: a fired\n"),
                 let _ = b.Recv() => die(b"t5: b fired\n"),
@@ -237,8 +237,8 @@ fn test_default_releases_all_locks() {
     for ch in [a, b, c] {
         let s = ch.clone();
         let r = ch.clone();
-        go!(move || s.Send(1));
-        go!(move || {
+        go!(stack(64 * KB), move || s.Send(1));
+        go!(stack(64 * KB), move || {
             let _ = r.Recv();
             DONE.fetch_add(1, Ordering::Relaxed);
         });
@@ -258,7 +258,7 @@ fn test_repeated_selects_no_deadlock() {
     {
         let a = a.clone();
         let b = b.clone();
-        go!(move || {
+        go!(stack(64 * KB), move || {
             for i in 0..50i64 {
                 if i % 2 == 0 {
                     a.Send(i);
@@ -271,7 +271,7 @@ fn test_repeated_selects_no_deadlock() {
     {
         let a = a.clone();
         let b = b.clone();
-        go!(move || {
+        go!(stack(64 * KB), move || {
             for _ in 0..50 {
                 select! {
                     let _ = a.Recv() => OK_COUNT.fetch_add(1, Ordering::Relaxed),
