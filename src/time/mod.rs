@@ -934,3 +934,252 @@ fn fmt_int(buf: &mut [u8], mut v: u64) -> usize {
     }
     w
 }
+
+// ─── Parse (slim port of time.Parse) ─────────────────────────────────
+
+/// `time.Parse(layout, value)` (format.go:1232) — slim. Recognizes the
+/// canonical reference-time layout constants and parses `value`
+/// according to the chosen one. Returns `(t, err)` per goish
+/// convention; UTC only.
+///
+/// Recognized layouts: RFC3339, DateTime, DateOnly, TimeOnly,
+/// RFC1123 (assumes "GMT" or arbitrary 3-letter zone), ANSIC.
+/// Anything else returns an error.
+pub fn Parse(
+    layout: crate::gostring::string,
+    value: crate::gostring::string,
+) -> (Time, crate::errors::error) {
+    use crate::gostring::string;
+
+    let l = layout.clone();
+
+    // RFC3339: "2006-01-02T15:04:05Z07:00"
+    if l == "2006-01-02T15:04:05Z07:00" {
+        return parse_rfc3339(value);
+    }
+    // DateTime: "2006-01-02 15:04:05"
+    if l == "2006-01-02 15:04:05" {
+        return parse_datetime(value, b' ');
+    }
+    // DateOnly: "2006-01-02"
+    if l == "2006-01-02" {
+        return parse_date_only(value);
+    }
+    // TimeOnly: "15:04:05" (parsed as today's date at the given time;
+    // we use 1970-01-01 since there's no Local in goish slim time).
+    if l == "15:04:05" {
+        return parse_time_only(value);
+    }
+    // RFC1123: "Mon, 02 Jan 2006 15:04:05 MST"
+    if l == "Mon, 02 Jan 2006 15:04:05 MST" {
+        return parse_rfc1123(value);
+    }
+    // ANSIC: "Mon Jan _2 15:04:05 2006"
+    if l == "Mon Jan _2 15:04:05 2006" {
+        return parse_ansic(value);
+    }
+
+    (
+        Time::default(),
+        crate::errors::New("time: unsupported layout"),
+    )
+}
+
+fn parse_rfc3339(s: crate::gostring::string) -> (Time, crate::errors::error) {
+    use crate::gostring::string;
+    let bs = s.as_bytes();
+    // "YYYY-MM-DDTHH:MM:SSZ" minimum. Z may be replaced by ±HH:MM, slim port treats only Z.
+    if bs.len() < 20 {
+        return (Time::default(), crate::errors::New("time: short RFC3339"));
+    }
+    if bs[4] != b'-' || bs[7] != b'-' || bs[10] != b'T' || bs[13] != b':' || bs[16] != b':' {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed RFC3339"),
+        );
+    }
+    let y = match parse_int(&bs[0..4]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let m = match parse_int(&bs[5..7]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let d = match parse_int(&bs[8..10]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let hh = match parse_int(&bs[11..13]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let mm = match parse_int(&bs[14..16]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let ss = match parse_int(&bs[17..19]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    // Trailing Z (UTC) or offset — slim accepts only Z.
+    if bs[19] != b'Z' {
+        return (
+            Time::default(),
+            crate::errors::New("time: only UTC (Z) supported in slim Parse"),
+        );
+    }
+    (Date(y, m, d, hh, mm, ss, 0), crate::errors::nil)
+}
+
+fn parse_datetime(s: crate::gostring::string, sep: u8) -> (Time, crate::errors::error) {
+    use crate::gostring::string;
+    let bs = s.as_bytes();
+    if bs.len() != 19
+        || bs[4] != b'-'
+        || bs[7] != b'-'
+        || bs[10] != sep
+        || bs[13] != b':'
+        || bs[16] != b':'
+    {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed DateTime"),
+        );
+    }
+    let y = match parse_int(&bs[0..4]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let m = match parse_int(&bs[5..7]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let d = match parse_int(&bs[8..10]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let hh = match parse_int(&bs[11..13]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mm = match parse_int(&bs[14..16]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let ss = match parse_int(&bs[17..19]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    (Date(y, m, d, hh, mm, ss, 0), crate::errors::nil)
+}
+
+fn parse_date_only(s: crate::gostring::string) -> (Time, crate::errors::error) {
+    use crate::gostring::string;
+    let bs = s.as_bytes();
+    if bs.len() != 10 || bs[4] != b'-' || bs[7] != b'-' {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed DateOnly"),
+        );
+    }
+    let y = match parse_int(&bs[0..4]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let m = match parse_int(&bs[5..7]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let d = match parse_int(&bs[8..10]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    (Date(y, m, d, 0, 0, 0, 0), crate::errors::nil)
+}
+
+fn parse_time_only(s: crate::gostring::string) -> (Time, crate::errors::error) {
+    use crate::gostring::string;
+    let bs = s.as_bytes();
+    if bs.len() != 8 || bs[2] != b':' || bs[5] != b':' {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed TimeOnly"),
+        );
+    }
+    let hh = match parse_int(&bs[0..2]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mm = match parse_int(&bs[3..5]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let ss = match parse_int(&bs[6..8]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    (Date(1970, 1, 1, hh, mm, ss, 0), crate::errors::nil)
+}
+
+fn parse_rfc1123(s: crate::gostring::string) -> (Time, crate::errors::error) {
+    use crate::gostring::string;
+    let bs = s.as_bytes();
+    // "Day, DD Mon YYYY HH:MM:SS GMT" → 29 chars
+    if bs.len() != 29 || bs[3] != b',' || bs[4] != b' ' || bs[7] != b' ' || bs[11] != b' '
+        || bs[16] != b' ' || bs[19] != b':' || bs[22] != b':' || bs[25] != b' '
+    {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed RFC1123"),
+        );
+    }
+    let d = match parse_int(&bs[5..7]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mon = match month_short(&bs[8..11]) {
+        Some(v) => v,
+        None => {
+            return (
+                Time::default(),
+                crate::errors::New("time: bad month in RFC1123"),
+            );
+        }
+    };
+    let y = match parse_int(&bs[12..16]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let hh = match parse_int(&bs[17..19]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mm = match parse_int(&bs[20..22]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let ss = match parse_int(&bs[23..25]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    (Date(y, mon, d, hh, mm, ss, 0), crate::errors::nil)
+}
+
+fn parse_ansic(s: crate::gostring::string) -> (Time, crate::errors::error) {
+    use crate::gostring::string;
+    let bs = s.as_bytes();
+    // "Mon Jan _2 15:04:05 2006" → 24 chars
+    if bs.len() != 24
+        || bs[3] != b' '
+        || bs[7] != b' '
+        || bs[10] != b' '
+        || bs[13] != b':'
+        || bs[16] != b':'
+        || bs[19] != b' '
+    {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed ANSIC"),
+        );
+    }
+    let mon = match month_short(&bs[4..7]) {
+        Some(v) => v,
+        None => {
+            return (
+                Time::default(),
+                crate::errors::New("time: bad month in ANSIC"),
+            );
+        }
+    };
+    // _2 form: space-padded day in cols 8..10
+    let day_bytes = &bs[8..10];
+    let d = if day_bytes[0] == b' ' {
+        match parse_int(&day_bytes[1..2]) { Ok(v) => v, Err(e) => return (Time::default(), e) }
+    } else {
+        match parse_int(day_bytes) { Ok(v) => v, Err(e) => return (Time::default(), e) }
+    };
+    let hh = match parse_int(&bs[11..13]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mm = match parse_int(&bs[14..16]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let ss = match parse_int(&bs[17..19]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let y = match parse_int(&bs[20..24]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    (Date(y, mon, d, hh, mm, ss, 0), crate::errors::nil)
+}
+
+fn parse_int(bs: &[u8]) -> Result<int, crate::errors::error> {
+    let mut n: int = 0;
+    for &c in bs.iter() {
+        if !(b'0'..=b'9').contains(&c) {
+            return Err(crate::errors::New("time: non-digit in numeric field"));
+        }
+        n = n * 10 + (c - b'0') as int;
+    }
+    Ok(n)
+}
+
+fn month_short(bs: &[u8]) -> Option<int> {
+    match bs {
+        b"Jan" => Some(1),
+        b"Feb" => Some(2),
+        b"Mar" => Some(3),
+        b"Apr" => Some(4),
+        b"May" => Some(5),
+        b"Jun" => Some(6),
+        b"Jul" => Some(7),
+        b"Aug" => Some(8),
+        b"Sep" => Some(9),
+        b"Oct" => Some(10),
+        b"Nov" => Some(11),
+        b"Dec" => Some(12),
+        _ => None,
+    }
+}
