@@ -8,7 +8,7 @@ extern crate alloc;
 extern crate goish;
 
 use goish::time;
-use goish::{syscall, Println};
+use goish::{string, syscall, Println};
 
 #[goish::main]
 fn main() {
@@ -113,11 +113,25 @@ fn main() {
         }
     }
 
+    // 9. AppendFormat appends formatted bytes to existing buffer.
+    {
+        let prefix = goish::convert::bytes("ts=");
+        let appended = t.AppendFormat(prefix, string(time::RFC3339));
+        let s = goish::string::from_bytes(&appended);
+        // RFC3339 layout produces the date-time including 'Z'.
+        if goish::strings::HasPrefix(s.clone(), string("ts=")) && s.Len() > 3 {
+            Println!("[ 9] AppendFormat prefix       PASS");
+        } else {
+            Println!("[ 9] AppendFormat prefix       FAIL got={}", s);
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        Println!("ok 8/8");
+        Println!("ok 9/9");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 8", failed);
+        Println!("FAIL {} of 9", failed);
         syscall::Exit(1);
     }
 }

@@ -317,6 +317,24 @@ impl Time {
         let nano = self.nsec;
         format_layout(&layout, y, m, d, hh, mm, ss, wd, nano as int)
     }
+
+    /// `t.AppendFormat(b, layout)` (format.go:655) — append the formatted
+    /// time to `b` and return the extended buffer. Slim port: delegates
+    /// to `Format` then appends the byte representation.
+    pub fn AppendFormat(
+        self,
+        b: crate::goslice::slice<crate::types::byte>,
+        layout: crate::gostring::string,
+    ) -> crate::goslice::slice<crate::types::byte> {
+        let s = self.Format(layout);
+        let extra = crate::convert::bytes(s);
+        // Go: return append(b, formatted...). Use range! to mirror.
+        let mut out = b;
+        for (_, byte_ref) in crate::range!(extra) {
+            out = crate::append!(out, *byte_ref);
+        }
+        out
+    }
 }
 
 const MONTH_SHORT: [&str; 13] = [
