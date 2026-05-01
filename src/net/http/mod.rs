@@ -23,6 +23,7 @@ pub mod pattern;
 pub mod request;
 pub mod response;
 pub mod server;
+pub mod sniff;
 pub mod status;
 pub mod url;
 
@@ -37,6 +38,7 @@ pub use server::{
     ErrServerClosed, Handler, HandlerFunc, ListenAndServe, NotFoundHandler, Redirect,
     RedirectHandler, Serve, ServeMux, Server, StripPrefix,
 };
+pub use sniff::DetectContentType;
 pub use status::{
     StatusAccepted, StatusBadGateway, StatusBadRequest, StatusConflict, StatusContinue,
     StatusCreated, StatusEarlyHints, StatusExpectationFailed, StatusFailedDependency,
