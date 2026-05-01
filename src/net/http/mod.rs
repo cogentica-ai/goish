@@ -31,7 +31,7 @@ pub use client::{
     Client, Get, Head, NewRequest, Post, PostForm, ReadResponse, Response, RoundTripper, Transport,
 };
 pub use cookie::{Cookie, ParseCookie, ParseSetCookie, SameSite, SetCookie};
-pub use header::{CanonicalHeaderKey, Header};
+pub use header::{CanonicalHeaderKey, Header, ParseTime, TimeFormat};
 pub use request::{
     ErrMaxBytes, MaxBytesReader, NewMaxBytesReader, ParseHTTPVersion, ReadRequest, Request,
 };
