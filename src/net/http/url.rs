@@ -62,6 +62,73 @@ impl URL {
         }
     }
 
+    /// `(u *URL).EscapedPath()` (url.go:744) — return the escaped form
+    /// of u.Path. Returns RawPath if it is a valid escaping of Path;
+    /// otherwise computes a fresh escape via the encodePath mode.
+    /// Special-cases `*` (Issue 11202) which is left unescaped.
+    pub fn EscapedPath(&self) -> string {
+        // Go: if u.RawPath != "" && validEncoded(u.RawPath, encodePath) {
+        if self.RawPath.Len() != 0 && valid_encoded(self.RawPath.clone(), EncodingMode::Path) {
+            // Go: p, err := unescape(u.RawPath, encodePath)
+            //     if err == nil && p == u.Path { return u.RawPath }
+            let (p, err) = unescape(self.RawPath.clone(), false);
+            if err.IsNil() && p == self.Path {
+                return self.RawPath.clone();
+            }
+        }
+        // Go: if u.Path == "*" { return "*" }
+        if self.Path == string("*") {
+            return string("*");
+        }
+        // Go: return escape(u.Path, encodePath)
+        escape(self.Path.clone(), EncodingMode::Path)
+    }
+
+    /// `(u *URL).ResolveReference(ref)` (url.go:1137) — resolve a URI
+    /// reference to an absolute URI from absolute base URI `self`, per
+    /// RFC 3986 §5.2. Always returns a new URL.
+    ///
+    /// Slim deviation: goish URL has no `User`, `Opaque`, or
+    /// `ForceQuery` fields, so the corresponding Go branches are
+    /// dropped — only `Scheme`, `Host`, `Path`, `RawQuery`, `Fragment`
+    /// participate in the merge.
+    pub fn ResolveReference(&self, reference: &URL) -> URL {
+        // Go: url := *ref
+        let mut url: URL = reference.clone();
+        // Go: if ref.Scheme == "" { url.Scheme = u.Scheme }
+        if reference.Scheme.Len() == 0 {
+            url.Scheme = self.Scheme.clone();
+        }
+        // Go: if ref.Scheme != "" || ref.Host != "" || ref.User != nil { ... }
+        // Slim: User dropped — only Scheme / Host trigger absolute-URI branch.
+        if reference.Scheme.Len() != 0 || reference.Host.Len() != 0 {
+            // Go: url.setPath(resolvePath(ref.EscapedPath(), ""))
+            let p = ResolvePath(reference.EscapedPath(), string::new());
+            url.Path = p.clone();
+            url.RawPath = p;
+            return url;
+        }
+        // Go: if ref.Opaque != "" { ... } — slim has no Opaque, skip.
+        // Go: if ref.Path == "" && !ref.ForceQuery && ref.RawQuery == "" {
+        // Slim: ForceQuery dropped.
+        if reference.Path.Len() == 0 && reference.RawQuery.Len() == 0 {
+            url.RawQuery = self.RawQuery.clone();
+            // Go: if ref.Fragment == "" { url.Fragment = u.Fragment; url.RawFragment = u.RawFragment }
+            if reference.Fragment.Len() == 0 {
+                url.Fragment = self.Fragment.clone();
+                url.RawFragment = self.RawFragment.clone();
+            }
+        }
+        // Go: if ref.Path == "" && u.Opaque != "" — skip (no Opaque).
+        // Go: url.Host = u.Host; url.User = u.User
+        url.Host = self.Host.clone();
+        // Go: url.setPath(resolvePath(u.EscapedPath(), ref.EscapedPath()))
+        let p = ResolvePath(self.EscapedPath(), reference.EscapedPath());
+        url.Path = p.clone();
+        url.RawPath = p;
+        url
+    }
+
     /// `(u *URL).IsAbs()` (url.go:1116) — reports whether the URL is
     /// absolute. Absolute URLs always have a non-empty Scheme.
     pub fn IsAbs(&self) -> bool {
@@ -791,6 +858,7 @@ pub fn PathEscape(s: string) -> string {
 /// that QueryEscape + PathEscape need.
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum EncodingMode {
+    Path,
     PathSegment,
     QueryComponent,
 }
@@ -872,6 +940,10 @@ fn should_escape(c: byte, mode: EncodingMode) -> bool {
     // Go: §2.2 Reserved characters
     match c {
         b'$' | b'&' | b'+' | b',' | b'/' | b':' | b';' | b'=' | b'?' | b'@' => match mode {
+            // Go: encodePath — only '?' must be escaped (url.go:137).
+            EncodingMode::Path => {
+                return c == b'?';
+            }
             // Go: encodePathSegment — return c == '/' || c == ';' || c == ',' || c == '?'
             EncodingMode::PathSegment => {
                 return c == b'/' || c == b';' || c == b',' || c == b'?';
@@ -882,6 +954,35 @@ fn should_escape(c: byte, mode: EncodingMode) -> bool {
         _ => {}
     }
     // Everything else must be escaped.
+    true
+}
+
+/// Line-by-line port of `validEncoded` (url.go:760).
+///
+/// Reports whether `s` is a valid encoded path, according to `mode`.
+/// Sub-delims, `[`, `]`, `%` are accepted directly; everything else is
+/// validated via `should_escape`.
+fn valid_encoded(s: string, mode: EncodingMode) -> bool {
+    // Go: for i := 0; i < len(s); i++ { ... }
+    let mut i: int = 0;
+    while i < s.Len() {
+        let c: byte = s[i];
+        // Go: switch s[i] { case '!','$','&','\'','(',')','*','+',',',';','=',':','@': /* ok */
+        match c {
+            b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b','
+            | b';' | b'=' | b':' | b'@' => { /* ok */ }
+            // Go: case '[', ']': // ok — left alone by modern browsers
+            b'[' | b']' => { /* ok */ }
+            // Go: case '%': // ok — percent encoded, will decode
+            b'%' => { /* ok */ }
+            _ => {
+                if should_escape(c, mode) {
+                    return false;
+                }
+            }
+        }
+        i += 1;
+    }
     true
 }
 
