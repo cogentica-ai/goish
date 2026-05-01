@@ -429,6 +429,80 @@ pub fn Compact(dst: slice<byte>, src: slice<byte>) -> (slice<byte>, error) {
     (slice::__from_vec(out), nil)
 }
 
+/// `json.Indent(dst, src, prefix, indent)` (indent.go:120) — append an
+/// indented form of `src` to `dst`. Each element in a JSON object or
+/// array begins on a new, indented line beginning with `prefix` followed
+/// by one or more copies of `indent` according to the indentation
+/// nesting. The data appended to `dst` does not begin with the prefix
+/// nor any indentation, to make it easier to embed inside other
+/// formatted JSON data.
+///
+/// Slim: parse to a `Value` then re-encode through the existing
+/// indent-aware encoder. Faithful for valid input; returns
+/// `(dst, ErrSyntax)` on parse error.
+pub fn Indent(dst: slice<byte>, src: slice<byte>, prefix: &str, indent: &str) -> (slice<byte>, error) {
+    // Go: scan := newScanner(); ...
+    //     b, err := appendIndent(b, src, prefix, indent)
+    let bs: &[byte] = &src;
+    let (v, err) = parse_to_value(bs);
+    if !err.IsNil() {
+        return (dst, err);
+    }
+    let mut out: Vec<byte> = dst.__into_vec();
+    let cfg = IndentCfg { prefix, indent };
+    encode_value(&mut out, &v, Some(&cfg), "", 0);
+    (slice::__from_vec(out), nil)
+}
+
+/// `json.HTMLEscape(dst, src)` (indent.go:16) — append `src` to `dst`
+/// with `<`, `>`, `&`, U+2028 and U+2029 inside string literals
+/// changed to `<`, `>`, `&`, ` `, ` ` so that
+/// the JSON will be safe to embed inside HTML `<script>` tags.
+///
+/// Slim note: the byte-level escape matches Go exactly; it does not
+/// distinguish bytes inside vs outside JSON string literals (Go's
+/// implementation does the same byte-level scan).
+pub fn HTMLEscape(dst: slice<byte>, src: slice<byte>) -> slice<byte> {
+    // Go: dst.Grow(len(src))
+    //     dst.Write(appendHTMLEscape(dst.AvailableBuffer(), src))
+    let s: &[byte] = &src;
+    let mut out: Vec<byte> = dst.__into_vec();
+    // Go: start := 0
+    let mut start: usize = 0;
+    // Go: for i, c := range src
+    let mut i: usize = 0;
+    while i < s.len() {
+        let c = s[i];
+        // Go: if c == '<' || c == '>' || c == '&'
+        if c == b'<' || c == b'>' || c == b'&' {
+            // Go: dst = append(dst, src[start:i]...)
+            out.extend_from_slice(&s[start..i]);
+            // Go: dst = append(dst, '\\', 'u', '0', '0', hex[c>>4], hex[c&0xF])
+            out.extend_from_slice(b"\\u00");
+            out.push(hex_digit(c >> 4));
+            out.push(hex_digit(c & 0xF));
+            // Go: start = i + 1
+            start = i + 1;
+        }
+        // Go: if c == 0xE2 && i+2 < len(src) && src[i+1] == 0x80 && src[i+2]&^1 == 0xA8
+        if c == 0xE2 && i + 2 < s.len() && s[i + 1] == 0x80 && (s[i + 2] & !1) == 0xA8 {
+            // Go: dst = append(dst, src[start:i]...)
+            out.extend_from_slice(&s[start..i]);
+            // Go: dst = append(dst, '\\', 'u', '2', '0', '2', hex[src[i+2]&0xF])
+            out.extend_from_slice(b"\\u202");
+            out.push(hex_digit(s[i + 2] & 0xF));
+            // Go: start = i + len(" ")  // 3 bytes
+            start = i + 3;
+        }
+        i += 1;
+    }
+    // Go: return append(dst, src[start:]...)
+    if start < s.len() {
+        out.extend_from_slice(&s[start..]);
+    }
+    slice::__from_vec(out)
+}
+
 /// `json.MarshalIndent(v, prefix, indent)` — pretty-printed variant.
 pub fn MarshalIndent<T: crate::reflect::Reflect + ?Sized>(
     v: &T,
