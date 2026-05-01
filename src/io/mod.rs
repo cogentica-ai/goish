@@ -339,6 +339,144 @@ pub fn NopCloser<R: Reader>(r: R) -> NopCloserImpl<R> {
     NopCloserImpl { r }
 }
 
+// ─── SectionReader ───────────────────────────────────────────────────
+//
+// Slim port of io.go:486 + :501. Internal `r` is `Box<dyn ReaderAt>` —
+// the goish-idiomatic representation of Go's interface value. Outer()
+// is omitted because it would require ceding ownership of `r` to the
+// caller (Go can return the interface by value cheaply because Reader
+// values are reference-y; goish must Box, which forces a choice
+// between cloning or moving).
+
+/// `io.SectionReader` (io.go:501) — Read/Seek/ReadAt over a contiguous
+/// `[off, off+n)` window of an underlying `ReaderAt`.
+pub struct SectionReader {
+    r: alloc::boxed::Box<dyn ReaderAt>,
+    base: i64,
+    off: i64,
+    limit: i64,
+    #[allow(dead_code)]
+    n: i64,
+}
+
+impl SectionReader {
+    /// `(s *SectionReader).Read(p)` (io.go:509). Truncates the read
+    /// window when fewer than `len(p)` bytes remain.
+    pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        // Go: if s.off >= s.limit { return 0, EOF }
+        if self.off >= self.limit {
+            return (0, EOF());
+        }
+        // Go: if max := s.limit - s.off; int64(len(p)) > max { p = p[0:max] }
+        let avail = self.limit - self.off;
+        let want = if (p.Len() as i64) > avail {
+            avail as int
+        } else {
+            p.Len()
+        };
+        let mut tmp = crate::make!([]byte, want);
+        // Go: n, err = s.r.ReadAt(p, s.off)
+        let (n, err) = self.r.ReadAt(&mut tmp, self.off);
+        for i in 0..n {
+            p[i] = tmp[i];
+        }
+        self.off += n as i64;
+        (n, err)
+    }
+
+    /// `(s *SectionReader).Seek(offset, whence)` (io.go:524).
+    pub fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
+        // Go: switch whence { ... }
+        let new_off: i64 = if whence == SeekStart {
+            offset.wrapping_add(self.base)
+        } else if whence == SeekCurrent {
+            offset.wrapping_add(self.off)
+        } else if whence == SeekEnd {
+            offset.wrapping_add(self.limit)
+        } else {
+            return (0, crate::errors::New("Seek: invalid whence"));
+        };
+        // Go: if offset < s.base { return 0, errOffset }
+        if new_off < self.base {
+            return (0, crate::errors::New("Seek: invalid offset"));
+        }
+        self.off = new_off;
+        (new_off - self.base, nil)
+    }
+
+    /// `(s *SectionReader).ReadAt(p, off)` (io.go:542). Surfaces EOF
+    /// when reading past the section boundary.
+    pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
+        // Go: if off < 0 || off >= s.Size() { return 0, EOF }
+        if off < 0 || off >= self.Size() {
+            return (0, EOF());
+        }
+        let abs_off = off + self.base;
+        let avail = self.limit - abs_off;
+        // Go: if max := s.limit - off; int64(len(p)) > max { p = p[0:max] ... err = EOF }
+        if (p.Len() as i64) > avail {
+            let mut tmp = crate::make!([]byte, avail as int);
+            let (n, mut err) = self.r.ReadAt(&mut tmp, abs_off);
+            for i in 0..n {
+                p[i] = tmp[i];
+            }
+            if err.IsNil() {
+                err = EOF();
+            }
+            return (n, err);
+        }
+        // Go: return s.r.ReadAt(p, off)
+        self.r.ReadAt(p, abs_off)
+    }
+
+    /// `(s *SectionReader).Size()` (io.go:559). Constant after creation.
+    pub fn Size(&self) -> i64 {
+        self.limit - self.base
+    }
+}
+
+impl Reader for SectionReader {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        SectionReader::Read(self, p)
+    }
+}
+
+impl Seeker for SectionReader {
+    fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
+        SectionReader::Seek(self, offset, whence)
+    }
+}
+
+impl ReaderAt for SectionReader {
+    fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
+        SectionReader::ReadAt(self, p, off)
+    }
+}
+
+/// `io.NewSectionReader(r, off, n)` (io.go:486) — read from `r`
+/// starting at offset `off`, capped at `n` bytes.
+pub fn NewSectionReader(
+    r: alloc::boxed::Box<dyn ReaderAt>,
+    off: i64,
+    n: i64,
+) -> SectionReader {
+    // Go: const maxint64 = 1<<63 - 1
+    //     if off <= maxint64 - n { remaining = n + off } else { remaining = maxint64 }
+    let maxint64 = i64::MAX;
+    let remaining = if off <= maxint64.wrapping_sub(n) {
+        n + off
+    } else {
+        maxint64
+    };
+    SectionReader {
+        r,
+        base: off,
+        off,
+        limit: remaining,
+        n,
+    }
+}
+
 // ─── CopyN ───────────────────────────────────────────────────────────
 
 /// `io.CopyN(dst, src, n)` (io.go:363) — copy exactly `n` bytes from
