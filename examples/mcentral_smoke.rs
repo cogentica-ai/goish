@@ -25,6 +25,7 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use goish::runtime::mcentral;
+use goish::runtime::sched::current_p;
 use goish::syscall;
 
 fn die(msg: &[u8]) -> ! {
@@ -35,6 +36,19 @@ fn die(msg: &[u8]) -> ! {
 fn check(cond: bool, msg: &[u8]) {
     if !cond {
         die(msg);
+    }
+}
+
+/// Drain the calling P's per-P mcache so cached-but-unallocated
+/// slots return to mcentral. Required before strict
+/// `live_slots() == baseline` checks because `refill_alloc_cache`
+/// claims a whole 64-bit window at a time and bumps `alloc_count`
+/// for every claimed bit — slots that landed in mcache but were
+/// never handed to user code remain "live" in mcentral's count
+/// until uncached.
+fn flush_mcache() {
+    if let Some(p) = current_p() {
+        p.mcache_flush();
     }
 }
 
@@ -55,6 +69,7 @@ fn main() {
 // ─── A single size class — alloc/free roundtrip ──────────────────────
 
 fn test_one_class() {
+    flush_mcache();
     let baseline = mcentral::live_slots();
     let mut v: Vec<u8> = Vec::with_capacity(20);
     for i in 0..20 {
@@ -65,6 +80,7 @@ fn test_one_class() {
         check(v[i] == i as u8, b"one-class: data corrupted\n");
     }
     drop(v);
+    flush_mcache();
     check(
         mcentral::live_slots() == baseline,
         b"one-class: slot not returned\n",
@@ -74,6 +90,7 @@ fn test_one_class() {
 // ─── Many distinct size classes alive simultaneously ─────────────────
 
 fn test_many_classes() {
+    flush_mcache();
     let baseline = mcentral::live_slots();
     let sizes: [usize; 8] = [8, 16, 32, 64, 128, 256, 1024, 4096];
     let mut all: Vec<Vec<u8>> = Vec::with_capacity(sizes.len());
@@ -98,6 +115,7 @@ fn test_many_classes() {
         check(v[v.len() - 1] == marker, b"many-classes: tail\n");
     }
     drop(all);
+    flush_mcache();
     check(
         mcentral::live_slots() == baseline,
         b"many-classes: not all freed\n",
@@ -107,6 +125,7 @@ fn test_many_classes() {
 // ─── Fill an entire span (class 1 = 1024 slots) and drain it ────────
 
 fn test_full_span_then_drain() {
+    flush_mcache();
     let baseline = mcentral::live_slots();
 
     // Class 1 has 1024 slots of 8 bytes each. Allocating 1024 × 8-byte
@@ -135,6 +154,7 @@ fn test_full_span_then_drain() {
 
     // Drain — should trigger full → partial → empty span return-to-mheap.
     drop(held);
+    flush_mcache();
     check(
         mcentral::live_slots() == baseline,
         b"full-span: drain incomplete\n",
