@@ -1015,6 +1015,10 @@ const _: usize = SMALL_BUFFER_SIZE;
 pub struct Reader {
     s: Vec<byte>,
     i: usize,
+    /// Mirrors Go's `prevRune`: index of previous rune, or `-1` if
+    /// the most recent op was not a successful ReadRune. Used only
+    /// by UnreadRune.
+    prev_rune: i64,
 }
 
 impl Reader {
@@ -1030,6 +1034,7 @@ impl Reader {
     }
 
     pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        self.prev_rune = -1;
         if self.i >= self.s.len() {
             return (0, io::EOF());
         }
@@ -1044,10 +1049,84 @@ impl Reader {
     pub fn Reset(&mut self, b: slice<byte>) {
         self.s = b.__into_vec();
         self.i = 0;
+        self.prev_rune = -1;
+    }
+
+    /// `(r *Reader).ReadByte()` (bytes/reader.go:66) — implements
+    /// io.ByteReader. Invalidates prevRune.
+    pub fn ReadByte(&mut self) -> (byte, error) {
+        // Go: r.prevRune = -1
+        self.prev_rune = -1;
+        // Go: if r.i >= int64(len(r.s)) { return 0, io.EOF }
+        if self.i >= self.s.len() {
+            return (0, io::EOF());
+        }
+        // Go: b := r.s[r.i]; r.i++; return b, nil
+        let b = self.s[self.i];
+        self.i += 1;
+        (b, nil)
+    }
+
+    /// `(r *Reader).UnreadByte()` (bytes/reader.go:77) — implements
+    /// io.ByteScanner. Returns error if at the start.
+    pub fn UnreadByte(&mut self) -> error {
+        // Go: if r.i <= 0 { return errors.New("...: at beginning of slice") }
+        if self.i == 0 {
+            return crate::errors::New("bytes.Reader.UnreadByte: at beginning of slice");
+        }
+        // Go: r.prevRune = -1; r.i--; return nil
+        self.prev_rune = -1;
+        self.i -= 1;
+        nil
+    }
+
+    /// `(r *Reader).ReadRune()` (bytes/reader.go:87) — implements
+    /// io.RuneReader. ASCII fast-path; non-ASCII via DecodeRune.
+    pub fn ReadRune(&mut self) -> (rune, int, error) {
+        // Go: if r.i >= int64(len(r.s)) { r.prevRune = -1; return 0, 0, io.EOF }
+        if self.i >= self.s.len() {
+            self.prev_rune = -1;
+            return (0, 0, io::EOF());
+        }
+        // Go: r.prevRune = int(r.i)
+        self.prev_rune = self.i as i64;
+        // Go: if c := r.s[r.i]; c < utf8.RuneSelf { r.i++; return rune(c), 1, nil }
+        let c = self.s[self.i];
+        if c < utf8::RuneSelf {
+            self.i += 1;
+            return (c as rune, 1, nil);
+        }
+        // Go: ch, size = utf8.DecodeRune(r.s[r.i:])
+        let (ch, size) = utf8::DecodeRune(&self.s[self.i..]);
+        // Go: r.i += int64(size)
+        self.i += size as usize;
+        (ch, size, nil)
+    }
+
+    /// `(r *Reader).UnreadRune()` (bytes/reader.go:103) — implements
+    /// io.RuneScanner. Restores cursor to the start of the most-recent
+    /// ReadRune.
+    pub fn UnreadRune(&mut self) -> error {
+        // Go: if r.i <= 0 { return errors.New("...: at beginning of slice") }
+        if self.i == 0 {
+            return crate::errors::New("bytes.Reader.UnreadRune: at beginning of slice");
+        }
+        // Go: if r.prevRune < 0 { return errors.New("...: previous operation was not ReadRune") }
+        if self.prev_rune < 0 {
+            return crate::errors::New(
+                "bytes.Reader.UnreadRune: previous operation was not ReadRune",
+            );
+        }
+        // Go: r.i = int64(r.prevRune); r.prevRune = -1; return nil
+        self.i = self.prev_rune as usize;
+        self.prev_rune = -1;
+        nil
     }
 
     /// `(r *Reader).Seek(offset, whence)` (bytes/reader.go:127) — slim port.
     pub fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
+        // Go: r.prevRune = -1
+        self.prev_rune = -1;
         // Go: switch whence { case SeekStart: ... }
         let abs: i64 = match whence {
             x if x == io::SeekStart => offset,
@@ -1068,8 +1147,8 @@ impl Reader {
     /// `(r *Reader).WriteTo(w)` (bytes/reader.go:137) — drain unread
     /// tail to `w` via Write. Returns bytes written.
     pub fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
-        // Go's prevRune reset is for UnreadRune support; slim Reader
-        // doesn't track it. Skip.
+        // Go: r.prevRune = -1
+        self.prev_rune = -1;
         // Go: if r.i >= int64(len(r.s)) { return 0, nil }
         if self.i >= self.s.len() {
             return (0, nil);
@@ -1143,6 +1222,7 @@ pub fn NewReader(b: slice<byte>) -> Reader {
     Reader {
         s: b.__into_vec(),
         i: 0,
+        prev_rune: -1,
     }
 }
 
