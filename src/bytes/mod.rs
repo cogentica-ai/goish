@@ -769,7 +769,68 @@ impl Buffer {
         let (line, err) = self.ReadBytes(delim);
         (string::from_bytes(&line), err)
     }
+
+    /// `(b *Buffer).ReadFrom(r)` (buffer.go:212) — read from `r`
+    /// until EOF and append to the buffer. Returns the number of
+    /// bytes read.
+    pub fn ReadFrom<R: io::Reader + ?Sized>(&mut self, r: &mut R) -> (i64, error) {
+        let mut n: i64 = 0;
+        loop {
+            // Go: i := b.grow(MinRead); b.buf = b.buf[:i]
+            //     m, e := r.Read(b.buf[i:cap(b.buf)])
+            // We use a fixed scratch buffer of MinRead bytes; this loses
+            // Go's "read directly into buffer's spare capacity" trick
+            // but matches the visible behavior.
+            let mut scratch = crate::make!([]byte, MinRead);
+            let (m, e) = r.Read(&mut scratch);
+            if m < 0 {
+                panic!("bytes.Buffer.ReadFrom: negative Read count");
+            }
+            // append m bytes
+            let raw: &[byte] = &scratch;
+            self.buf.extend_from_slice(&raw[..m as usize]);
+            n += m as i64;
+            if crate::errors::Is(e.clone(), io::EOF()) {
+                return (n, nil);
+            }
+            if !e.IsNil() {
+                return (n, e);
+            }
+        }
+    }
+
+    /// `(b *Buffer).WriteTo(w)` (buffer.go:264) — drain buffer to
+    /// `w` until exhausted or an error occurs. Returns bytes
+    /// written.
+    pub fn WriteTo<W: io::Writer + ?Sized>(&mut self, w: &mut W) -> (i64, error) {
+        let mut n: i64 = 0;
+        let nbytes = self.Len();
+        if nbytes > 0 {
+            let chunk = slice::__from_vec(self.buf[self.off..].to_vec());
+            let (m, e) = w.Write(chunk);
+            if m as int > nbytes {
+                panic!("bytes.Buffer.WriteTo: invalid Write count");
+            }
+            self.off += m as usize;
+            n = m as i64;
+            if !e.IsNil() {
+                return (n, e);
+            }
+            // all bytes should have been written, by definition of
+            // Write method in io.Writer
+            if m as int != nbytes {
+                return (n, io::ErrShortWrite());
+            }
+        }
+        // Buffer is now empty; reset.
+        self.Reset();
+        (n, nil)
+    }
 }
+
+/// `bytes.MinRead` (buffer.go:206) — minimum slice size used by
+/// `Buffer.ReadFrom`.
+pub const MinRead: int = 512;
 
 impl Default for Buffer {
     fn default() -> Self {
@@ -804,6 +865,18 @@ impl io::ByteWriter for Buffer {
 impl io::StringWriter for Buffer {
     fn WriteString(&mut self, s: string) -> (int, error) {
         Buffer::WriteString(self, s)
+    }
+}
+
+impl io::ReaderFrom for Buffer {
+    fn ReadFrom(&mut self, r: &mut dyn io::Reader) -> (i64, error) {
+        Buffer::ReadFrom(self, r)
+    }
+}
+
+impl io::WriterTo for Buffer {
+    fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
+        Buffer::WriteTo(self, w)
     }
 }
 
