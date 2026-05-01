@@ -269,6 +269,83 @@ pub fn Mkdir(name: string, perm: u32) -> error {
     nil
 }
 
+/// `os.MkdirAll(path, perm)` (os/path.go:19) — create `path` and any
+/// missing parent directories. If `path` is already a directory,
+/// returns nil.
+pub fn MkdirAll(path: string, perm: u32) -> error {
+    // Go: dir, err := Stat(path); if err == nil { if dir.IsDir() { return nil }; return ... }
+    let (dir, err) = Stat(path.clone());
+    if err.IsNil() {
+        if dir.IsDir() {
+            return nil;
+        }
+        return errors::New(string("mkdir: path exists and is not a directory"));
+    }
+
+    // Go: scan back for parent.
+    let bs = bytes_of(&path);
+    let mut i: int = bs.len() as int - 1;
+    while i >= 0 && bs[i as usize] == b'/' {
+        i -= 1;
+    }
+    while i >= 0 && bs[i as usize] != b'/' {
+        i -= 1;
+    }
+    if i < 0 {
+        i = 0;
+    }
+    // Go: if parent := path[:i]; len(parent) > 0 { MkdirAll(parent, perm) }
+    if i > 0 {
+        let parent = string::from_bytes(&bs[..i as usize]);
+        let perr = MkdirAll(parent, perm);
+        if !perr.IsNil() {
+            return perr;
+        }
+    }
+    // Go: Mkdir(path, perm); on failure double-check.
+    let merr = Mkdir(path.clone(), perm);
+    if !merr.IsNil() {
+        let (d2, err2) = Stat(path);
+        if err2.IsNil() && d2.IsDir() {
+            return nil;
+        }
+        return merr;
+    }
+    nil
+}
+
+/// `os.RemoveAll(path)` (os/path.go:73) — recursively delete `path`
+/// and everything beneath. Missing paths return nil.
+pub fn RemoveAll(path: string) -> error {
+    // Stat to learn if it's a dir.
+    let (fi, err) = Stat(path.clone());
+    if !err.IsNil() {
+        // Treat any stat failure as "doesn't exist" — matches Go's
+        // os.IsNotExist short-circuit.
+        return nil;
+    }
+    if !fi.IsDir() {
+        return Remove(path);
+    }
+    // Recurse into children.
+    let (entries, derr) = ReadDir(path.clone());
+    if !derr.IsNil() {
+        return derr;
+    }
+    for i in 0..entries.Len() {
+        let e = entries[i].clone();
+        let mut child = crate::strings::Builder::new();
+        let _ = child.WriteString(path.clone());
+        let _ = child.WriteByte(b'/');
+        let _ = child.WriteString(e.Name());
+        let cerr = RemoveAll(child.String());
+        if !cerr.IsNil() {
+            return cerr;
+        }
+    }
+    Remove(path)
+}
+
 /// `os.Remove(name)` (os/file_unix.go). Removes a file or empty
 /// directory. First tries unlink; falls back to rmdir on EISDIR.
 pub fn Remove(name: string) -> error {
