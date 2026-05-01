@@ -45,6 +45,61 @@ impl URL {
         }
     }
 
+    /// `(u *URL).IsAbs()` (url.go:1116) — reports whether the URL is
+    /// absolute. Absolute URLs always have a non-empty Scheme.
+    pub fn IsAbs(&self) -> bool {
+        // Go: return u.Scheme != ""
+        self.Scheme.Len() != 0
+    }
+
+    /// `(u *URL).RequestURI()` (url.go:1186) — return the encoded
+    /// path?query string used in an HTTP request line. Slim port:
+    /// goish's URL has no Opaque or ForceQuery, so the choice is just
+    /// RawPath (preferred when set) ?: Path, plus an optional
+    /// `?<RawQuery>` suffix. An empty path is rendered as "/".
+    pub fn RequestURI(&self) -> string {
+        // Go: result := u.Opaque; if result == "" { result := u.EscapedPath(); if result == "" { result = "/" } }
+        let mut result: string = if self.RawPath.Len() != 0 {
+            self.RawPath.clone()
+        } else if self.Path.Len() != 0 {
+            self.Path.clone()
+        } else {
+            string("/")
+        };
+        // Go: if u.ForceQuery || u.RawQuery != "" { result += "?" + u.RawQuery }
+        if self.RawQuery.Len() != 0 {
+            let mut b = crate::strings::Builder::new();
+            b.Grow(result.Len() + 1 + self.RawQuery.Len());
+            let _ = b.WriteString(result.clone());
+            let _ = b.WriteByte(b'?');
+            let _ = b.WriteString(self.RawQuery.clone());
+            result = b.String();
+        }
+        result
+    }
+
+    /// `(u *URL).Hostname()` (url.go:1208) — return u.Host with the
+    /// optional `:port` suffix removed. IPv6 brackets are stripped.
+    pub fn Hostname(&self) -> string {
+        let (host, _) = split_host_port(self.Host.clone());
+        host
+    }
+
+    /// `(u *URL).Port()` (url.go:1216) — return the numeric port from
+    /// u.Host (without the leading colon), or "" if absent or invalid.
+    pub fn Port(&self) -> string {
+        let (_, port) = split_host_port(self.Host.clone());
+        port
+    }
+
+    /// `(u *URL).Query()` (url.go:1179) — parse RawQuery and return
+    /// the resulting map. Malformed pairs are silently dropped (use
+    /// `ParseQuery` directly to surface errors).
+    pub fn Query(&self) -> crate::gomap::map<string, crate::goslice::slice<string>> {
+        let (v, _) = ParseQuery(self.RawQuery.clone());
+        v
+    }
+
     /// Render as the request-target string. For URLs parsed from a
     /// request-target this is the inverse of `parse_request_uri`.
     pub fn String(&self) -> string {
@@ -392,6 +447,61 @@ fn unescape(s: string, query_mode: bool) -> (string, error) {
 
 fn is_hex(c: byte) -> bool {
     (c >= b'0' && c <= b'9') || (c >= b'a' && c <= b'f') || (c >= b'A' && c <= b'F')
+}
+
+/// Line-by-line port of `splitHostPort` (url.go:1224).
+fn split_host_port(host_port: string) -> (string, string) {
+    // Go: host = hostPort
+    let mut host: string = host_port;
+    let mut port: string = string::new();
+
+    // Go: colon := strings.LastIndexByte(host, ':')
+    let colon = crate::bytes::LastIndexByte(crate::convert::bytes(host.clone()), b':');
+    if colon != -1 {
+        // Go: if validOptionalPort(host[colon:]) { ... }
+        let suffix = string::from_bytes(&host.as_bytes()[colon as usize..]);
+        if valid_optional_port(suffix.clone()) {
+            // Go: host, port = host[:colon], host[colon+1:]
+            let pre = string::from_bytes(&host.as_bytes()[..colon as usize]);
+            let post =
+                string::from_bytes(&host.as_bytes()[(colon as usize) + 1..]);
+            host = pre;
+            port = post;
+        }
+    }
+
+    // Go: if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+    if crate::strings::HasPrefix(host.clone(), string("["))
+        && crate::strings::HasSuffix(host.clone(), string("]"))
+    {
+        // Go: host = host[1 : len(host)-1]
+        host = string::from_bytes(&host.as_bytes()[1..host.Len() as usize - 1]);
+    }
+
+    (host, port)
+}
+
+/// Line-by-line port of `validOptionalPort` (url.go:819). Reports
+/// whether `port` is "" or matches `:\d*`.
+fn valid_optional_port(port: string) -> bool {
+    // Go: if port == "" { return true }
+    if port.Len() == 0 {
+        return true;
+    }
+    // Go: if port[0] != ':' { return false }
+    if port[0] != b':' {
+        return false;
+    }
+    // Go: for _, b := range port[1:] { if b < '0' || b > '9' { return false } }
+    let mut i: int = 1;
+    while i < port.Len() {
+        let b: byte = port[i];
+        if b < b'0' || b > b'9' {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 fn unhex(c: byte) -> byte {
