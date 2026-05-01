@@ -711,7 +711,34 @@ pub struct MaxBytesReader<R: io::Reader> {
     err: error,
 }
 
-/// `http.MaxBytesReader` returned-error sentinel (request.go:1193).
+/// `http.MaxBytesError` (request.go:1193) — typed error returned by
+/// MaxBytesReader when its read limit is exceeded. Carries the
+/// configured byte limit so callers can introspect it. Mirrors:
+///
+/// ```ignore
+/// type MaxBytesError struct { Limit int64 }
+/// func (e *MaxBytesError) Error() string { return "http: request body too large" }
+/// ```
+#[derive(Clone)]
+pub struct MaxBytesError {
+    pub Limit: int,
+}
+
+impl errors::ErrorTrait for MaxBytesError {
+    fn Error(&self) -> string {
+        // Go: "Due to Hyrum's law, this text cannot be changed."
+        string("http: request body too large")
+    }
+}
+
+/// Build a `MaxBytesError` wrapped as a goish `error`.
+pub fn NewMaxBytesError(limit: int) -> error {
+    errors::Wrap(MaxBytesError { Limit: limit })
+}
+
+/// `http.MaxBytesReader` legacy sentinel — kept for callers that
+/// match against a single error value rather than the typed
+/// MaxBytesError. Prefer the typed form when you need the limit.
 pub fn ErrMaxBytes() -> error {
     use crate::runtime::spin::SpinLock;
     static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
@@ -762,11 +789,10 @@ impl<R: io::Reader> io::Reader for MaxBytesReader<R> {
             self.err = err.clone();
             return (n, err);
         }
-        // Go: n = int(l.n); l.n = 0; … return n, MaxBytesError
+        // Go: n = int(l.n); l.n = 0; … return n, &MaxBytesError{l.i}
         let limited_n = self.remaining;
         self.remaining = 0;
-        let _ = self.initial; // tagged but unused (slim version)
-        self.err = ErrMaxBytes();
+        self.err = NewMaxBytesError(self.initial);
         (limited_n, self.err.clone())
     }
 }
