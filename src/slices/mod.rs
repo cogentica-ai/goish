@@ -307,6 +307,90 @@ pub fn Repeat<T: Clone>(x: &slice<T>, count: int) -> slice<T> {
     slice::__from_vec(out)
 }
 
+/// Line-by-line port of `slices.Insert` (slices/slices.go:135) — insert
+/// the values `v...` into `s` at index `i`. Returns the modified slice.
+/// Panics if `i > len(s)` or `i < 0` (matches Go's bounds check).
+///
+/// Goish deviation: Go's `v ...E` variadic becomes `v: &slice<T>`. Goish
+/// slices are not aliased the way Go slices are, so we don't need the
+/// overlap detection / rotateRight branches — we always own the buffer.
+pub fn Insert<T: Clone>(s: slice<T>, i: int, v: &slice<T>) -> slice<T> {
+    // Go: _ = s[i:] // bounds check
+    if i < 0 || (i as usize) > s.Len() as usize {
+        panic!("slices.Insert: index out of range");
+    }
+    // Go: m := len(v); if m == 0 { return s }
+    let m = v.Len() as usize;
+    if m == 0 {
+        return s;
+    }
+    // Goish: own the backing Vec and splice in.
+    let mut out = s.__into_vec();
+    let iu = i as usize;
+    // Build the insert payload by cloning v elementwise.
+    let raw_v: &[T] = v;
+    let mut payload: alloc::vec::Vec<T> = alloc::vec::Vec::with_capacity(m);
+    for el in raw_v.iter() {
+        payload.push(el.clone());
+    }
+    // Vec::splice handles all the shifting in one shot.
+    out.splice(iu..iu, payload);
+    slice::__from_vec(out)
+}
+
+/// Line-by-line port of `slices.Replace` (slices/slices.go:260) — replaces
+/// `s[i:j]` with the given `v` and returns the modified slice. Panics if
+/// `j > len(s)` or `i > j` (Go's bounds-check semantics).
+///
+/// Goish deviation: variadic `v...E` becomes `v: &slice<T>`; aliasing
+/// concerns absent since the backing Vec is owned.
+pub fn Replace<T: Clone>(s: slice<T>, i: int, j: int, v: &slice<T>) -> slice<T> {
+    // Go: _ = s[i:j] // bounds check
+    if i < 0 || j < i || (j as usize) > s.Len() as usize {
+        panic!("slices.Replace: invalid range");
+    }
+    // Go: if i == j { return Insert(s, i, v...) }
+    if i == j {
+        return Insert(s, i, v);
+    }
+    let mut out = s.__into_vec();
+    let iu = i as usize;
+    let ju = j as usize;
+    // Build the replacement payload by cloning v elementwise.
+    let raw_v: &[T] = v;
+    let mut payload: alloc::vec::Vec<T> = alloc::vec::Vec::with_capacity(raw_v.len());
+    for el in raw_v.iter() {
+        payload.push(el.clone());
+    }
+    out.splice(iu..ju, payload);
+    slice::__from_vec(out)
+}
+
+/// Line-by-line port of `slices.Grow` (slices/slices.go:420) — grows
+/// the slice's capacity, if necessary, to guarantee space for another
+/// `n` elements. Panics on negative `n`.
+///
+/// Goish: backing Vec is always owned, so we can call reserve directly.
+pub fn Grow<T>(s: slice<T>, n: int) -> slice<T> {
+    // Go: if n < 0 { panic("cannot be negative") }
+    if n < 0 {
+        panic!("slices.Grow: cannot be negative");
+    }
+    let mut v = s.__into_vec();
+    // Go: if n -= cap(s) - len(s); n > 0 { ... }
+    // Goish: reserve already amortizes; let Vec handle the math.
+    v.reserve(n as usize);
+    slice::__from_vec(v)
+}
+
+/// Line-by-line port of `slices.Clip` (slices/slices.go:433) — drops
+/// unused capacity. In Go: `s[:len(s):len(s)]`. In goish: shrink_to_fit.
+pub fn Clip<T>(s: slice<T>) -> slice<T> {
+    let mut v = s.__into_vec();
+    v.shrink_to_fit();
+    slice::__from_vec(v)
+}
+
 // ─── Func variants — comparator/predicate closures ────────────────────
 //
 // Closure conventions match Go:
