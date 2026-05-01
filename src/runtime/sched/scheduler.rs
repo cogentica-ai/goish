@@ -387,17 +387,73 @@ fn unreachable_dead() -> ! {
 /// Picks up the G's entry closure (the M's `current_g` knows which
 /// goroutine just resumed) and invokes it. When the closure returns,
 /// chain to `goexit`.
+///
+/// Before invoking the closure, installs a panic-recovery `Gobuf`
+/// pointing at `on_g_panic_aborted`. The `#[panic_handler]` reads
+/// this and `gogo`s here on user-code panic, abandoning the panicked
+/// frames but keeping the rest of the runtime alive (per-goroutine
+/// panic isolation). After the closure returns normally, the
+/// recovery point is invalidated (rsp=0) so a later runtime-internal
+/// panic on this M's g0 still aborts the process.
 extern "C" fn g_entry() -> ! {
-    let entry = {
-        let g_ptr = current_m()
-            .lock()
-            .curg
-            .expect("g_entry: no current G");
-        unsafe { (*g_ptr.as_ptr()).entry.take().expect("g_entry: empty entry") }
-    };
+    // Install panic recovery + take entry in a sub-frame that's freed
+    // before `entry()` runs — keeps g_entry's own frame minimal so
+    // small (2 KiB default) goroutine stacks don't bust the budget
+    // during the prologue.
+    let entry = unsafe { g_entry_setup() };
     entry();
+    unsafe { g_entry_clear_recovery() };
     goexit();
 }
+
+#[inline(never)]
+unsafe fn g_entry_setup() -> alloc::boxed::Box<dyn FnOnce()> {
+    let g_ptr = current_m()
+        .lock()
+        .curg
+        .expect("g_entry: no current G");
+    let g = unsafe { &mut *g_ptr.as_ptr() };
+    crate::runtime::sched::make_context_gogo(
+        &mut g.panic_recover,
+        g.stack.top(),
+        on_g_panic_aborted,
+    );
+    g.entry.take().expect("g_entry: empty entry")
+}
+
+#[inline(never)]
+unsafe fn g_entry_clear_recovery() {
+    if let Some(g_ptr) = current_m().lock().curg {
+        unsafe { (*g_ptr.as_ptr()).panic_recover.rsp = 0 };
+    }
+}
+
+/// Recovery entry called via `gogo(g.panic_recover)` from the panic
+/// handler when user code panics. Runs on the G's own stack (rsp=top)
+/// so the abandoned mid-panic frames are below us and will be
+/// overwritten by future activity on this G's stack — which is fine,
+/// the G is about to die.
+///
+/// Walks `g.cleanups` to release fds/locks/etc. that were registered
+/// by the abandoned frames, then chains to `goexit` so the scheduler
+/// reclaims this G normally.
+extern "C" fn on_g_panic_aborted() -> ! {
+    // Cleanups already ran in the `#[panic_handler]` (where the
+    // panicked stack frames were still valid). Here we're on a fresh
+    // top-of-stack frame; just print and exit.
+    const MSG: &[u8] = b"goish: goroutine recovered from panic, scheduler continuing\n";
+    crate::syscall::Write(crate::syscall::STDERR, MSG.as_ptr(), MSG.len());
+
+    // Increment the per-process panicked-G counter for diagnostics.
+    G_PANIC_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+
+    goexit();
+}
+
+/// Total number of goroutines that have died by panic (vs normal
+/// return) since process start. Read by tests + diagnostic dumps.
+pub static G_PANIC_COUNT: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(0);
 
 /// Dispatch a single goroutine on the calling M, wait for it to
 /// yield or exit, then return. Internal helper shared by `schedule`
