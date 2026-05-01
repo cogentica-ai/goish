@@ -112,6 +112,15 @@ pub enum SameSite {
     NoneMode = 4,
 }
 
+/// Go-style constants matching `http.SameSiteDefaultMode` etc. — same
+/// values as the enum variants, exposed at module scope so call sites
+/// can write `http::SameSiteLaxMode` instead of
+/// `http::SameSite::LaxMode`.
+pub const SameSiteDefaultMode: SameSite = SameSite::DefaultMode;
+pub const SameSiteLaxMode: SameSite = SameSite::LaxMode;
+pub const SameSiteStrictMode: SameSite = SameSite::StrictMode;
+pub const SameSiteNoneMode: SameSite = SameSite::NoneMode;
+
 // ─── Errors (lazy-init for stable identity) ──────────────────────────
 
 fn err_blank_cookie() -> error {

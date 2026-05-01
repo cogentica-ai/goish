@@ -577,6 +577,20 @@ pub fn PostForm(url: string, vals: &[(string, string)]) -> (Response, error) {
 
 // ─── NewRequest ──────────────────────────────────────────────────────
 
+/// `http.NewRequestWithContext(ctx, method, url, body)` (request.go:898).
+/// Slim port: ctx is accepted but currently ignored (goish doesn't yet
+/// thread context through Request). Behaves identically to NewRequest
+/// in v1; switching to a context-aware Client/Transport later won't
+/// break call sites that already pass the ctx through.
+pub fn NewRequestWithContext(
+    _ctx: alloc::sync::Arc<dyn crate::context::Context>,
+    method: string,
+    url: string,
+    body: slice<byte>,
+) -> (Request, error) {
+    NewRequest(method, url, body)
+}
+
 /// `http.NewRequest(method, url, body)` — slim. Body is a pre-buffered
 /// slice<byte> rather than an `io.Reader` (matches v1 Request shape).
 pub fn NewRequest(method: string, url: string, body: slice<byte>) -> (Request, error) {
