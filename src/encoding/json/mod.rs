@@ -390,6 +390,45 @@ pub fn Marshal<T: crate::reflect::Reflect + ?Sized>(v: &T) -> (slice<byte>, erro
     (slice::__from_vec(out), nil)
 }
 
+/// `json.Valid(data)` (stream.go:484) — report whether `data` is a
+/// well-formed JSON value (any of object / array / number / string /
+/// bool / null with optional surrounding whitespace).
+///
+/// Slim: routes through the existing recursive-descent parser.
+/// Returns `false` for any syntax error (matching Go); empty input
+/// is invalid because Go's scanner requires at least one value.
+pub fn Valid(data: slice<byte>) -> bool {
+    // Go: scan := newScanner(); defer freeScanner(scan)
+    //     return checkValid(data, scan) == nil
+    let bs: &[byte] = &data;
+    let (_, err) = parse_to_value(bs);
+    err.IsNil()
+}
+
+/// `json.Compact(dst, src)` (indent.go:13) — append a compact form
+/// of `src` to `dst` and return `(extended_dst, err)`. Compact strips
+/// insignificant whitespace between tokens; quoted strings are
+/// preserved verbatim.
+///
+/// Slim: parse to a Value then re-encode (the existing encoder
+/// already produces compact output). Faithful for valid input;
+/// returns `(dst, ErrSyntax)` for invalid input.  Differs from Go
+/// only in that whitespace inside string literals is preserved
+/// (Go's Compact is byte-level — neither version touches string
+/// contents).
+pub fn Compact(dst: slice<byte>, src: slice<byte>) -> (slice<byte>, error) {
+    // Go: scan := newScanner(); ...
+    //     return compact(dst, src, false, scan)
+    let bs: &[byte] = &src;
+    let (v, err) = parse_to_value(bs);
+    if !err.IsNil() {
+        return (dst, err);
+    }
+    let mut out: Vec<byte> = dst.__into_vec();
+    encode_value(&mut out, &v, None, "", 0);
+    (slice::__from_vec(out), nil)
+}
+
 /// `json.MarshalIndent(v, prefix, indent)` — pretty-printed variant.
 pub fn MarshalIndent<T: crate::reflect::Reflect + ?Sized>(
     v: &T,
