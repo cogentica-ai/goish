@@ -239,6 +239,17 @@ pub fn NotFound(w: &mut ResponseWriter, _r: &Request) {
     Error(w, string("404 page not found"), super::status::StatusNotFound);
 }
 
+// ─── NewServeMux ─────────────────────────────────────────────────────
+
+/// `http.NewServeMux()` (server.go:2619) — allocates and returns a new
+/// ServeMux. The Go form is `func NewServeMux() *ServeMux`; goish hands
+/// back `Arc<ServeMux>` so the value can flow into `Server.Handler`
+/// directly without an extra `Arc::new(...)` at the call site.
+pub fn NewServeMux() -> Arc<ServeMux> {
+    // Go: return &ServeMux{}
+    Arc::new(ServeMux::new())
+}
+
 // ─── DefaultServeMux + Handle / HandleFunc free fns ──────────────────
 
 /// `http.DefaultServeMux` (server.go:2570) — process-wide singleton
@@ -405,6 +416,39 @@ struct redirectHandler {
 impl Handler for redirectHandler {
     fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
         Redirect(w, r, self.url.clone(), self.code);
+    }
+}
+
+// ─── AllowQuerySemicolons ────────────────────────────────────────────
+
+/// `http.AllowQuerySemicolons(h)` (server.go:3354). Returns a handler
+/// that converts unescaped `;` characters in `r.URL.RawQuery` to `&`
+/// before delegating to `h`. Restores the pre-Go-1.17 query parsing
+/// behavior. Should be invoked before `Request.ParseForm`.
+pub fn AllowQuerySemicolons(h: Arc<dyn Handler>) -> Arc<dyn Handler> {
+    Arc::new(allowQuerySemicolonsHandler { inner: h })
+}
+
+struct allowQuerySemicolonsHandler {
+    inner: Arc<dyn Handler>,
+}
+
+impl Handler for allowQuerySemicolonsHandler {
+    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+        // Go: if strings.Contains(r.URL.RawQuery, ";") {
+        if strings::Contains(r.URL.RawQuery.clone(), string(";")) {
+            // Go: r2 := new(Request); *r2 = *r
+            // Go: r2.URL = new(url.URL); *r2.URL = *r.URL
+            // Go: r2.URL.RawQuery = strings.ReplaceAll(r.URL.RawQuery, ";", "&")
+            let mut r2 = r.clone();
+            r2.URL.RawQuery =
+                strings::ReplaceAll(r.URL.RawQuery.clone(), string(";"), string("&"));
+            // Go: h.ServeHTTP(w, r2)
+            self.inner.ServeHTTP(w, &r2);
+        } else {
+            // Go: h.ServeHTTP(w, r)
+            self.inner.ServeHTTP(w, r);
+        }
     }
 }
 
