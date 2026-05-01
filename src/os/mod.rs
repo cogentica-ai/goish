@@ -255,6 +255,38 @@ pub fn ReadFile(name: string) -> (slice<byte>, error) {
     (body, nil)
 }
 
+// ─── Mkdir / Remove ──────────────────────────────────────────────────
+
+/// `os.Mkdir(name, perm)` (os/file.go) — create a single directory.
+pub fn Mkdir(name: string, perm: u32) -> error {
+    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
+    buf.extend_from_slice(bytes_of(&name));
+    buf.push(0);
+    let rc = syscall::Mkdir(buf.as_ptr(), perm);
+    if rc < 0 {
+        return errors::New(string("mkdir failed"));
+    }
+    nil
+}
+
+/// `os.Remove(name)` (os/file_unix.go). Removes a file or empty
+/// directory. First tries unlink; falls back to rmdir on EISDIR.
+pub fn Remove(name: string) -> error {
+    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
+    buf.extend_from_slice(bytes_of(&name));
+    buf.push(0);
+    let rc = syscall::Unlink(buf.as_ptr());
+    if rc == 0 {
+        return nil;
+    }
+    // EISDIR (-21) or EPERM (-1) on dirs → try rmdir.
+    let rc2 = syscall::Rmdir(buf.as_ptr());
+    if rc2 == 0 {
+        return nil;
+    }
+    errors::New(string("remove failed"))
+}
+
 // ─── DirEntry / ReadDir ──────────────────────────────────────────────
 
 /// `os.DirEntry` (Go 1.16, os/dir.go:85). Slim subset: just name +

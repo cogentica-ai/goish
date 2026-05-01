@@ -337,6 +337,30 @@ pub fn Lseek(fd: i32, offset: i64, whence: i32) -> i64 {
     unsafe { syscall3(SYS_LSEEK, fd as usize, offset as usize, whence as usize) as i64 }
 }
 
+// ─── mkdir / unlink / rmdir ──────────────────────────────────────────
+
+pub const SYS_MKDIR: usize = 83;
+pub const SYS_UNLINK: usize = 87;
+pub const SYS_RMDIR: usize = 84;
+
+/// `mkdir(path, mode)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Mkdir(path: *const u8, mode: u32) -> i32 {
+    unsafe { syscall2(SYS_MKDIR, path as usize, mode as usize) as i32 }
+}
+
+/// `unlink(path)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Unlink(path: *const u8) -> i32 {
+    unsafe { syscall1(SYS_UNLINK, path as usize) as i32 }
+}
+
+/// `rmdir(path)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Rmdir(path: *const u8) -> i32 {
+    unsafe { syscall1(SYS_RMDIR, path as usize) as i32 }
+}
+
 // ─── getdents64 ──────────────────────────────────────────────────────
 
 pub const SYS_GETDENTS64: usize = 217;

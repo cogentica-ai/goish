@@ -92,10 +92,83 @@ fn serve_file_path(w: &mut ResponseWriter, r: &Request, path: string) {
         if ierr.IsNil() && !ifi.IsDir() {
             return serve_regular_file(w, r, candidate, ifi);
         }
-        NotFound(w, r);
-        return;
+        // No index.html — emit an HTML directory listing.
+        return dir_list(w, r, path);
     }
     serve_regular_file(w, r, path, fi);
+}
+
+/// Line-by-line port of `dirList` (fs.go:139). Renders an HTML
+/// directory listing — entries sorted by name, directories suffixed
+/// with `/`. Missing pieces vs Go: no URL-escape on the href (slim;
+/// goish has http::PathEscape but legacy dirList uses url.URL{Path:n}).
+fn dir_list(w: &mut ResponseWriter, _r: &Request, path: string) {
+    let (entries, err) = os::ReadDir(path);
+    if !err.IsNil() {
+        super::server::Error(
+            w,
+            string("Error reading directory"),
+            super::status::StatusInternalServerError,
+        );
+        return;
+    }
+    // Go: sort.Slice — os::ReadDir already returns sorted, no extra step.
+    w.Header().Set(
+        string("Content-Type"),
+        string("text/html; charset=utf-8"),
+    );
+    let mut buf = strings::Builder::new();
+    let _ = buf.WriteString("<!doctype html>\n");
+    let _ = buf.WriteString("<meta name=\"viewport\" content=\"width=device-width\">\n");
+    let _ = buf.WriteString("<pre>\n");
+    for i in 0..entries.Len() {
+        let e = entries[i].clone();
+        let mut name = e.Name();
+        if e.IsDir() {
+            let mut nb = strings::Builder::new();
+            let _ = nb.WriteString(name.clone());
+            let _ = nb.WriteByte(b'/');
+            name = nb.String();
+        }
+        let escaped = super::url::PathEscape(name.clone());
+        let _ = buf.WriteString("<a href=\"");
+        let _ = buf.WriteString(escaped);
+        let _ = buf.WriteString("\">");
+        let _ = buf.WriteString(html_replace(name));
+        let _ = buf.WriteString("</a>\n");
+    }
+    let _ = buf.WriteString("</pre>\n");
+    let _ = w.Write(crate::convert::bytes(buf.String()));
+}
+
+/// Slim analogue of Go's `htmlReplacer` (fs.go:135).
+fn html_replace(s: string) -> string {
+    let mut b = strings::Builder::new();
+    b.Grow(s.Len());
+    for i in 0..s.Len() {
+        let c: crate::types::byte = s[i];
+        match c {
+            b'&' => {
+                let _ = b.WriteString("&amp;");
+            }
+            b'<' => {
+                let _ = b.WriteString("&lt;");
+            }
+            b'>' => {
+                let _ = b.WriteString("&gt;");
+            }
+            b'"' => {
+                let _ = b.WriteString("&#34;");
+            }
+            b'\'' => {
+                let _ = b.WriteString("&#39;");
+            }
+            _ => {
+                let _ = b.WriteByte(c);
+            }
+        }
+    }
+    b.String()
 }
 
 fn serve_regular_file(w: &mut ResponseWriter, r: &Request, path: string, fi: os::FileInfo) {
