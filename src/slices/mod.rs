@@ -557,3 +557,63 @@ where
     v.dedup_by(|a, b| eq(a, b));
     slice::__from_vec(v)
 }
+
+// ─── Sorted (Go 1.23+) ────────────────────────────────────────────────
+//
+// Go's signature is `Sorted[E cmp.Ordered](seq iter.Seq[E]) []E`, but
+// goish has no iter.Seq yet, so the slim version takes `slice<T>` and
+// returns a fresh sorted slice.  Once an iter package lands, the
+// existing `Sorted(s)` callers can stay valid since `slice<T>` is the
+// natural single-pass source.
+
+/// `slices.Sorted(s)` (sort.go: Sorted) — clone `s`, sort ascending,
+/// return. Equivalent to `let s2 = s.clone(); slices::Sort!(s2); s2`.
+/// Slim: takes a `slice<T>` instead of `iter.Seq[T]`.
+pub fn Sorted<T: Ord + Clone>(s: &slice<T>) -> slice<T> {
+    // Go: s := slices.Collect(seq); Sort(s); return s
+    let mut v = (s.clone()).__into_vec();
+    v.sort_unstable();
+    slice::__from_vec(v)
+}
+
+/// `slices.SortedFunc(s, cmp)` (sort.go: SortedFunc) — clone `s`, sort
+/// using `cmp(a, b) -> int` (negative = a<b, 0 = equal, positive = a>b),
+/// return. Slim: takes a `slice<T>` instead of `iter.Seq[T]`.
+pub fn SortedFunc<T: Clone, F>(s: &slice<T>, mut cmp: F) -> slice<T>
+where
+    F: FnMut(&T, &T) -> int,
+{
+    let mut v = (s.clone()).__into_vec();
+    // Go: SortFunc(s, cmp)
+    v.sort_unstable_by(|a, b| {
+        let n = cmp(a, b);
+        if n < 0 {
+            core::cmp::Ordering::Less
+        } else if n == 0 {
+            core::cmp::Ordering::Equal
+        } else {
+            core::cmp::Ordering::Greater
+        }
+    });
+    slice::__from_vec(v)
+}
+
+/// `slices.SortedStableFunc(s, cmp)` — stable variant of `SortedFunc`.
+/// Equal elements keep their original relative order.
+pub fn SortedStableFunc<T: Clone, F>(s: &slice<T>, mut cmp: F) -> slice<T>
+where
+    F: FnMut(&T, &T) -> int,
+{
+    let mut v = (s.clone()).__into_vec();
+    v.sort_by(|a, b| {
+        let n = cmp(a, b);
+        if n < 0 {
+            core::cmp::Ordering::Less
+        } else if n == 0 {
+            core::cmp::Ordering::Equal
+        } else {
+            core::cmp::Ordering::Greater
+        }
+    });
+    slice::__from_vec(v)
+}
