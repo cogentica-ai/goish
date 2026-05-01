@@ -639,6 +639,7 @@ pub const SYS_GETGID: usize = 104;
 pub const SYS_GETEUID: usize = 107;
 pub const SYS_GETEGID: usize = 108;
 pub const SYS_GETPPID: usize = 110;
+pub const SYS_GETGROUPS: usize = 115;
 
 /// `getuid(2)` — real user id of the calling process.
 #[allow(non_snake_case)]
@@ -668,6 +669,15 @@ pub fn Getegid() -> i32 {
 #[allow(non_snake_case)]
 pub fn Getppid() -> i32 {
     unsafe { syscall1(SYS_GETPPID, 0) as i32 }
+}
+
+/// `getgroups(2)` — list of supplementary group IDs. Linux signature:
+/// `int getgroups(int size, gid_t list[])`. Returns the count on
+/// success, -errno on failure. Caller passes `size=0, list=null` to
+/// probe the count, then allocates and re-calls with the right size.
+#[allow(non_snake_case)]
+pub fn Getgroups(size: i32, list: *mut u32) -> isize {
+    unsafe { syscall2(SYS_GETGROUPS, size as usize, list as usize) }
 }
 
 /// `kill(2)` — send a signal to a process. Use `Getpid()` for the

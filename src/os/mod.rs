@@ -698,6 +698,52 @@ pub fn Getppid() -> int {
     syscall::Getppid() as int
 }
 
+/// `os.Getgroups()` (proc.go:51) — list of the numeric IDs of the
+/// supplementary groups for the calling process.
+///
+/// Line-by-line port of:
+///   - os/proc.go:51-58       (the public wrapper)
+///   - syscall/syscall_linux.go (the two-step Getgroups dance)
+pub fn Getgroups() -> (slice<int>, error) {
+    use alloc::vec::Vec;
+
+    // Go: n, err := getgroups(0, nil)
+    let n = syscall::Getgroups(0, core::ptr::null_mut());
+    // Go: if err != nil { return nil, err }
+    if n < 0 {
+        return (
+            slice::<int>::__from_vec(Vec::new()),
+            errors::New(string("getgroups failed")),
+        );
+    }
+    // Go: if n == 0 { return nil, nil }
+    if n == 0 {
+        return (slice::<int>::__from_vec(Vec::new()), errors::nil);
+    }
+
+    // Go: a := make([]_Gid_t, n)
+    //     n, err = getgroups(n, &a[0])
+    // _Gid_t on Linux x86_64 is u32. Allocate exact-size buffer; the
+    // second syscall fills `n` entries.
+    let count = n as usize;
+    let mut a: Vec<u32> = alloc::vec::from_elem(0u32, count);
+    let n2 = syscall::Getgroups(count as i32, a.as_mut_ptr());
+    if n2 < 0 {
+        return (
+            slice::<int>::__from_vec(Vec::new()),
+            errors::New(string("getgroups failed")),
+        );
+    }
+
+    // Go: gids = make([]int, n); for i, v := range a[:n] { gids[i] = int(v) }
+    let real = n2 as usize;
+    let mut gids: Vec<int> = Vec::with_capacity(real);
+    for i in 0..real {
+        gids.push(a[i] as int);
+    }
+    (slice::<int>::__from_vec(gids), errors::nil)
+}
+
 /// Line-by-line port of `os.Pipe()` (pipe2_unix.go:13) — create a
 /// connected pair of Files; reads from `r` return bytes written to
 /// `w`. Both ends are O_CLOEXEC by default, mirroring upstream.
