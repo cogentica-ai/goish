@@ -923,6 +923,87 @@ pub fn Map<S: Into<string>, F: Fn(rune) -> rune>(mapping: F, s: S) -> string {
     string::__from_vec(out)
 }
 
+/// Line-by-line port of `strings.ToValidUTF8` (strings/strings.go:790).
+///
+/// Returns a copy of `s` with each run of invalid UTF-8 byte sequences
+/// replaced by `replacement` (which may be empty).
+pub fn ToValidUTF8<S1: Into<string>, S2: Into<string>>(s: S1, replacement: S2) -> string {
+    // Go: var b Builder
+    // Goish: use Vec<u8> for the scratch buffer — strings.Builder.Cap()
+    // isn't part of the goish surface, so we track the "did we grow yet"
+    // flag explicitly (b_grown) to mirror Go's `b.Cap() == 0` fast path.
+    let s_in = s.into();
+    let replacement = replacement.into();
+    let bytes = s_in.as_bytes();
+    let mut b: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    let mut b_grown: bool = false;
+
+    // Go: for i, c := range s { if c != utf8.RuneError { continue }
+    //         _, wid := utf8.DecodeRuneInString(s[i:])
+    //         if wid == 1 { b.Grow(...); b.WriteString(s[:i]); s = s[i:]; break } }
+    // Goish: walk runes manually until we hit an invalid one (RuneError
+    // with width 1). Track the byte offset `start` so we can retain the
+    // good prefix.
+    let mut i: usize = 0;
+    let mut start: usize = bytes.len(); // sentinel: no invalid byte found yet
+    while i < bytes.len() {
+        let (c, w) = utf8::DecodeRune(&bytes[i..]);
+        if c == utf8::RuneError && w == 1 {
+            // Go: b.Grow(len(s) + len(replacement))
+            b.reserve(bytes.len() + replacement.as_bytes().len());
+            b_grown = true;
+            // Go: b.WriteString(s[:i])
+            b.extend_from_slice(&bytes[..i]);
+            // Go: s = s[i:]; break
+            start = i;
+            break;
+        }
+        if w == 0 {
+            break;
+        }
+        i += w as usize;
+    }
+
+    // Go: if b.Cap() == 0 { return s }   — fast path: nothing invalid.
+    if !b_grown {
+        return s_in;
+    }
+
+    // Go: invalid := false
+    // Go: for i := 0; i < len(s); { c := s[i]; if c < utf8.RuneSelf { ... }; ... }
+    let tail = &bytes[start..];
+    let mut invalid: bool = false;
+    let mut j: usize = 0;
+    while j < tail.len() {
+        let c = tail[j];
+        // Go: if c < utf8.RuneSelf { i++; invalid=false; b.WriteByte(c); continue }
+        if c < utf8::RuneSelf {
+            j += 1;
+            invalid = false;
+            b.push(c);
+            continue;
+        }
+        // Go: _, wid := utf8.DecodeRuneInString(s[i:])
+        let (_, wid) = utf8::DecodeRune(&tail[j..]);
+        // Go: if wid == 1 { i++; if !invalid { invalid=true; b.WriteString(replacement) }; continue }
+        if wid == 1 {
+            j += 1;
+            if !invalid {
+                invalid = true;
+                b.extend_from_slice(replacement.as_bytes());
+            }
+            continue;
+        }
+        // Go: invalid = false; b.WriteString(s[i:i+wid]); i += wid
+        invalid = false;
+        b.extend_from_slice(&tail[j..j + wid as usize]);
+        j += wid as usize;
+    }
+
+    // Go: return b.String()
+    string::__from_vec(b)
+}
+
 /// `strings.SplitAfter(s, sep)` — split *retaining* the separator at
 /// the end of each segment.
 pub fn SplitAfter<S1: Into<string>, S2: Into<string>>(s: S1, sep: S2) -> slice<string> {
