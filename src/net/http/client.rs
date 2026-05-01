@@ -39,8 +39,10 @@ use crate::goslice::slice;
 use crate::io::{self, Closer, Reader, Writer};
 use crate::net;
 use crate::string;
+use crate::strings;
 use crate::time;
 use crate::types::{byte, int};
+use crate::{append, make};
 
 use super::cookie::{read_set_cookies, Cookie};
 use super::header::Header;
@@ -203,22 +205,22 @@ pub fn ReadResponse<R: Reader>(
         resp.Header.Add(name, value);
     }
 
-    // Determine Close.
+    // Go: if connHdr := resp.Header.Get("Connection"); … { resp.Close = … }
     let conn_hdr = resp.Header.Get(string("Connection"));
-    if ascii_eq_ci(conn_hdr.as_bytes(), b"close") {
+    if strings::EqualFold(conn_hdr.clone(), string("close")) {
         resp.Close = true;
     } else if resp.ProtoMajor == 1 && resp.ProtoMinor == 0 {
-        resp.Close = !ascii_eq_ci(conn_hdr.as_bytes(), b"keep-alive");
+        resp.Close = !strings::EqualFold(conn_hdr, string("keep-alive"));
     }
 
-    // Body framing.
+    // Go: body framing — Transfer-Encoding takes precedence over Content-Length.
     let te = resp.Header.Get(string("Transfer-Encoding"));
-    let chunked = is_chunked_te(te.as_bytes());
+    let chunked = is_chunked_te(&te);
     let cl_str = resp.Header.Get(string("Content-Length"));
 
-    // HEAD / 1xx / 204 / 304 → empty body, regardless of CL/TE.
+    // Go: HEAD / 1xx / 204 / 304 → empty body, regardless of CL/TE.
     let head_only = match resp.Request {
-        Some(ref r) => r.Method.as_bytes() == b"HEAD",
+        Some(ref r) => r.Method == "HEAD",
         None => false,
     };
     let no_body = head_only
@@ -228,81 +230,94 @@ pub fn ReadResponse<R: Reader>(
 
     if no_body {
         resp.ContentLength = 0;
-        resp.Body = slice::<byte>::__from_vec(Vec::new());
+        resp.Body = make!([]byte, 0);
     } else if chunked {
+        // Go: resp.TransferEncoding = []string{"chunked"}; resp.ContentLength = -1
+        // Go: resp.Body = http.internal.NewChunkedReader(r) — drained into Body.
         resp.ContentLength = -1;
-        let mut buf: Vec<u8> = Vec::new();
+        let body = make!([]byte, 0);
         let mut cr = super::chunked::NewChunkedReader(BufioPassthrough { inner: br });
-        let mut tmp = slice::<byte>::__from_vec(alloc::vec![0u8; 4096]);
-        loop {
-            let (n, err) = cr.Read(&mut tmp);
-            for i in 0..n {
-                buf.push(tmp[i]);
-            }
-            if !err.IsNil() {
-                if errors::Is(err.clone(), io::EOF()) {
-                    break;
-                }
-                return (resp, err);
-            }
-            if n == 0 {
-                break;
-            }
+        let (b, err) = drain_to_eof(&mut cr, body);
+        if !err.IsNil() && !errors::Is(err.clone(), io::EOF()) {
+            return (resp, err);
         }
-        resp.Body = slice::<byte>::__from_vec(buf);
+        resp.Body = b;
     } else if cl_str.Len() > 0 {
-        let n = match parse_decimal(cl_str.as_bytes()) {
-            Some(n) => n,
-            None => return (resp, errors::New(string("http: invalid Content-Length"))),
-        };
+        // Go: cl, err := strconv.ParseInt(cls, 10, 64)
+        let (n, perr) = crate::strconv::Atoi(cl_str);
+        if !perr.IsNil() || n < 0 {
+            return (resp, errors::New(string("http: invalid Content-Length")));
+        }
         resp.ContentLength = n;
-        let want = n as usize;
-        let mut buf: Vec<u8> = Vec::with_capacity(want);
-        while buf.len() < want {
-            let mut tmp = slice::<byte>::__from_vec(alloc::vec![0u8; (want - buf.len()).min(4096)]);
-            let (rn, rerr) = br.Read(&mut tmp);
-            for i in 0..rn {
-                buf.push(tmp[i]);
-            }
-            if !rerr.IsNil() {
-                if errors::Is(rerr.clone(), io::EOF()) {
-                    break;
-                }
-                return (resp, rerr);
-            }
-            if rn == 0 {
-                break;
-            }
+        let want = n as int;
+        let mut body = make!([]byte, want);
+        // Go: io.ReadFull(r, body)
+        let (got, ferr) = read_full_into(br, &mut body);
+        if !ferr.IsNil() && !errors::Is(ferr.clone(), io::EOF()) {
+            return (resp, ferr);
         }
-        resp.Body = slice::<byte>::__from_vec(buf);
+        if got < want {
+            body = body.slice(0, got);
+        }
+        resp.Body = body;
     } else if resp.Close {
-        // No CL, no TE, Connection: close → read until EOF.
+        // Go: no CL, no TE, Connection: close → io.ReadAll(r)
         resp.ContentLength = -1;
-        let mut buf: Vec<u8> = Vec::new();
-        let mut tmp = slice::<byte>::__from_vec(alloc::vec![0u8; 4096]);
-        loop {
-            let (rn, rerr) = br.Read(&mut tmp);
-            for i in 0..rn {
-                buf.push(tmp[i]);
-            }
-            if !rerr.IsNil() {
-                if errors::Is(rerr.clone(), io::EOF()) {
-                    break;
-                }
-                return (resp, rerr);
-            }
-            if rn == 0 {
-                break;
-            }
+        let body = make!([]byte, 0);
+        let (b, err) = drain_to_eof(br, body);
+        if !err.IsNil() && !errors::Is(err.clone(), io::EOF()) {
+            return (resp, err);
         }
-        resp.Body = slice::<byte>::__from_vec(buf);
+        resp.Body = b;
     } else {
-        // No CL, no TE, no close — body is empty.
+        // Go: no CL, no TE, no close — body is empty.
         resp.ContentLength = 0;
-        resp.Body = slice::<byte>::__from_vec(Vec::new());
+        resp.Body = make!([]byte, 0);
     }
 
     (resp, errors::nil)
+}
+
+/// Read until EOF into `body`, returning the appended slice and any
+/// non-EOF error. Replaces ad-hoc Vec<u8> drain loops.
+fn drain_to_eof<R: Reader>(r: &mut R, mut body: slice<byte>) -> (slice<byte>, error) {
+    let mut tmp = make!([]byte, 4096);
+    loop {
+        let (n, err) = r.Read(&mut tmp);
+        for i in 0..n {
+            body = append!(body, tmp[i]);
+        }
+        if !err.IsNil() {
+            return (body, err);
+        }
+        if n == 0 {
+            return (body, errors::nil);
+        }
+    }
+}
+
+/// Read exactly `len(buf)` bytes from `r` into `buf`. Returns the
+/// short count + error on EOF mid-read. Mirrors `io.ReadFull` over a
+/// goish buffered reader.
+fn read_full_into<R: Reader>(r: &mut bufio::Reader<R>, buf: &mut slice<byte>) -> (int, error) {
+    let want = buf.Len();
+    let mut got: int = 0;
+    while got < want {
+        let chunk: int = (want - got).min(4096);
+        let mut tmp = make!([]byte, chunk);
+        let (rn, rerr) = r.Read(&mut tmp);
+        for i in 0..rn {
+            buf[got + i] = tmp[i];
+        }
+        got += rn;
+        if !rerr.IsNil() {
+            return (got, rerr);
+        }
+        if rn == 0 {
+            return (got, io::EOF());
+        }
+    }
+    (got, errors::nil)
 }
 
 // ─── RoundTripper / Transport ────────────────────────────────────────
@@ -369,7 +384,7 @@ impl RoundTripper for Transport {
 
         // Write the request.
         let req_bytes = serialize_request(req, &host);
-        let (_, werr) = conn.Write(slice::<byte>::__from_vec(req_bytes));
+        let (_, werr) = conn.Write(req_bytes);
         if !werr.IsNil() {
             let _ = conn.Close();
             return (Response::default(), werr);
@@ -607,248 +622,213 @@ impl<'a, R: Reader> Reader for BufioPassthrough<'a, R> {
 
 /// Read a CRLF-terminated line, returning the line without CRLF.
 fn read_crlf_line<R: Reader>(br: &mut bufio::Reader<R>) -> Result<string, error> {
+    // Go: line, err := br.ReadSlice('\n')
     let (line, err) = br.ReadSlice(b'\n');
     if !err.IsNil() {
         return Err(err);
     }
-    let n = line.Len();
-    if n == 0 {
-        return Ok(string::new());
-    }
-    let mut end = n as usize;
-    if end > 0 && line[(end - 1) as int] == b'\n' {
+    // Go: trim trailing CRLF
+    let mut end = line.Len();
+    if end > 0 && line[end - 1] == b'\n' {
         end -= 1;
     }
-    if end > 0 && line[(end - 1) as int] == b'\r' {
+    if end > 0 && line[end - 1] == b'\r' {
         end -= 1;
     }
-    let mut buf: Vec<u8> = Vec::with_capacity(end);
-    for i in 0..end {
-        buf.push(line[i as int]);
-    }
-    Ok(string::from_bytes(&buf))
+    Ok(crate::convert::string(line.slice(0, end)))
 }
 
+/// Line-by-line port of `ParseHTTPVersion` (request.go:1390 in Go's source).
 fn parse_http_version(s: &string) -> (int, int) {
-    let b = s.as_bytes();
-    if b.len() < 8 || &b[..5] != b"HTTP/" {
+    // Go: if len(s) < 8 || !strings.HasPrefix(s, "HTTP/") { return 0,0,false }
+    if s.Len() < 8 || !strings::HasPrefix(s.clone(), string("HTTP/")) {
         return (0, 0);
     }
-    let dot = match b[5..].iter().position(|&c| c == b'.') {
-        Some(i) => 5 + i,
-        None => return (0, 0),
-    };
-    let mut major: int = 0;
-    for &c in &b[5..dot] {
-        if !c.is_ascii_digit() {
-            return (0, 0);
-        }
-        major = major * 10 + (c - b'0') as int;
+    // Go: rest := s[5:]; major, minor, ok := strings.Cut(rest, ".")
+    let rest = strings::TrimPrefix(s.clone(), string("HTTP/"));
+    let (major_s, minor_s, ok) = strings::Cut(rest, string("."));
+    if !ok {
+        return (0, 0);
     }
-    let mut minor: int = 0;
-    for &c in &b[dot + 1..] {
-        if !c.is_ascii_digit() {
-            return (0, 0);
-        }
-        minor = minor * 10 + (c - b'0') as int;
+    // Go: major, err := strconv.Atoi(majorStr); minor, err := strconv.Atoi(minorStr)
+    let (major, e1) = crate::strconv::Atoi(major_s);
+    let (minor, e2) = crate::strconv::Atoi(minor_s);
+    if !e1.IsNil() || !e2.IsNil() {
+        return (0, 0);
     }
     (major, minor)
 }
 
-fn parse_decimal(b: &[u8]) -> Option<int> {
-    if b.is_empty() {
-        return None;
-    }
-    let mut n: int = 0;
-    for &c in b {
-        if !c.is_ascii_digit() {
-            return None;
-        }
-        n = n.checked_mul(10)?.checked_add((c - b'0') as int)?;
-    }
-    Some(n)
-}
-
-fn ascii_eq_ci(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
+/// Line-by-line port of `isChunked` (transfer.go:617 paraphrased).
+/// Returns true if `value` ends in `chunked` (case-insensitive),
+/// optionally preceded by a comma-separated list.
+fn is_chunked_te(value: &string) -> bool {
+    // Go (paraphrased): trim OWS, then check the last comma-separated
+    // token equals "chunked" (case-insensitive). The simplest goish
+    // line-by-line: split, trim, check last.
+    let trimmed = strings::TrimSpace(value.clone());
+    if trimmed.Len() == 0 {
         return false;
     }
-    for i in 0..a.len() {
-        if (a[i] | 0x20) != (b[i] | 0x20) {
-            return false;
-        }
-    }
-    true
-}
-
-fn is_chunked_te(value: &[u8]) -> bool {
-    let mut end = value.len();
-    while end > 0 && (value[end - 1] == b' ' || value[end - 1] == b'\t') {
-        end -= 1;
-    }
-    let mut start = end;
-    while start > 0 {
-        let prev = value[start - 1];
-        if prev == b',' || prev == b' ' || prev == b'\t' {
-            break;
-        }
-        start -= 1;
-    }
-    let last = &value[start..end];
-    ascii_eq_ci(last, b"chunked")
+    let parts = strings::Split(trimmed, string(","));
+    let last = strings::TrimSpace(parts[parts.Len() - 1].clone());
+    strings::EqualFold(last, string("chunked"))
 }
 
 /// Add `:port` if Host has none.
-fn ensure_default_port(host: &string, port: u16) -> string {
-    let hb = host.as_bytes();
-    let mut has_port = false;
-    // Walk from end; ":" before any "]" → has port.
-    for &b in hb.iter().rev() {
-        if b == b':' {
-            has_port = true;
-            break;
-        }
-        if b == b']' {
-            break;
-        }
+fn ensure_default_port(host: &string, port: int) -> string {
+    // Go: if hasPort(host) { return host }; return host + ":" + strconv.Itoa(port)
+    if has_port(host) {
+        return host.clone();
     }
-    if has_port {
-        host.clone()
-    } else {
-        let mut buf: Vec<u8> = Vec::with_capacity(hb.len() + 6);
-        buf.extend_from_slice(hb);
-        buf.push(b':');
-        let mut p = port;
-        let mut tmp = [0u8; 5];
-        let mut i = 0;
-        if p == 0 {
-            tmp[0] = b'0';
-            i = 1;
-        } else {
-            while p > 0 {
-                tmp[i] = b'0' + (p % 10) as u8;
-                p /= 10;
-                i += 1;
-            }
-        }
-        while i > 0 {
-            i -= 1;
-            buf.push(tmp[i]);
-        }
-        string::from_bytes(&buf)
-    }
+    let mut b = strings::Builder::new();
+    b.Grow(host.Len() + 6);
+    let _ = b.WriteString(host.clone());
+    let _ = b.WriteByte(b':');
+    let _ = b.WriteString(crate::strconv::Itoa(port));
+    b.String()
 }
 
-/// Serialize a Request onto the wire as HTTP/1.1.
-fn serialize_request(req: &Request, host: &string) -> Vec<u8> {
-    let mut out: Vec<u8> = Vec::with_capacity(256 + req.Body.Len() as usize);
-    // Request line: METHOD SP request-target SP HTTP-version CRLF
-    out.extend_from_slice(req.Method.as_bytes());
-    out.push(b' ');
-    // request-target = origin form when scheme is set; else just URL.String().
-    // We always emit origin form for HTTP/1.1 (path[?query]).
-    let path = req.URL.Path.as_bytes();
-    if path.is_empty() {
-        out.push(b'/');
+/// Detect a `:port` suffix in `host`. Walk from end; `:` before `]`
+/// counts. Mirrors Go's `hasPort` shape (net/url/url.go).
+fn has_port(host: &string) -> bool {
+    // Go: for i := len(host) - 1; i >= 0; i-- { switch host[i] { case ':': return true; case ']': return false } }
+    let mut i = host.Len() - 1;
+    while i >= 0 {
+        let c = host[i];
+        if c == b':' {
+            return true;
+        }
+        if c == b']' {
+            return false;
+        }
+        i -= 1;
+    }
+    false
+}
+
+/// Serialize a Request onto the wire as HTTP/1.1. Returns the bytes
+/// ready to write to the underlying conn.
+///
+/// Loose port of `(*Request).write` (request.go:603) — we don't have
+/// `bufio.Writer` plumbing yet, so we accumulate into a `strings::Builder`
+/// for the head and concatenate the body slice<byte> at the end.
+fn serialize_request(req: &Request, host: &string) -> slice<byte> {
+    // Go: var b strings.Builder
+    let mut b = strings::Builder::new();
+    b.Grow(256);
+
+    // Go: fmt.Fprintf(&b, "%s %s HTTP/1.1\r\n", req.Method, ruri)
+    let _ = b.WriteString(req.Method.clone());
+    let _ = b.WriteByte(b' ');
+    if req.URL.Path.Len() == 0 {
+        let _ = b.WriteByte(b'/');
     } else {
-        out.extend_from_slice(path);
+        let _ = b.WriteString(req.URL.Path.clone());
     }
     if req.URL.RawQuery.Len() > 0 {
-        out.push(b'?');
-        out.extend_from_slice(req.URL.RawQuery.as_bytes());
+        let _ = b.WriteByte(b'?');
+        let _ = b.WriteString(req.URL.RawQuery.clone());
     }
-    out.extend_from_slice(b" HTTP/1.1\r\n");
+    let _ = b.WriteString(" HTTP/1.1\r\n");
 
-    // Host header (mandatory in HTTP/1.1).
-    out.extend_from_slice(b"Host: ");
-    out.extend_from_slice(host.as_bytes());
-    out.extend_from_slice(b"\r\n");
+    // Go: fmt.Fprintf(&b, "Host: %s\r\n", host)
+    let _ = b.WriteString("Host: ");
+    let _ = b.WriteString(host.clone());
+    let _ = b.WriteString("\r\n");
 
-    // User-Agent default if not set.
+    // Go: default User-Agent if not set
     if req.Header.Get(string("User-Agent")).Len() == 0 {
-        out.extend_from_slice(b"User-Agent: goish/0.1\r\n");
+        let _ = b.WriteString("User-Agent: goish/0.1\r\n");
     }
 
-    // Content-Length for body-bearing methods. For GET/HEAD with empty
-    // body, skip it.
+    // Go: fmt.Fprintf(&b, "Content-Length: %d\r\n", contentLength) — for body-bearing
     let body_len = req.Body.Len();
-    let has_body_method = !matches!(req.Method.as_bytes(), b"GET" | b"HEAD" | b"DELETE" | b"OPTIONS");
+    let has_body_method = !(req.Method == "GET"
+        || req.Method == "HEAD"
+        || req.Method == "DELETE"
+        || req.Method == "OPTIONS");
     if body_len > 0 || has_body_method {
-        out.extend_from_slice(b"Content-Length: ");
-        let mut cl = body_len;
-        let mut tmp = [0u8; 20];
-        let mut i = 0;
-        if cl == 0 {
-            tmp[0] = b'0';
-            i = 1;
-        } else {
-            while cl > 0 {
-                tmp[i] = b'0' + (cl % 10) as u8;
-                cl /= 10;
-                i += 1;
-            }
-        }
-        while i > 0 {
-            i -= 1;
-            out.push(tmp[i]);
-        }
-        out.extend_from_slice(b"\r\n");
+        let _ = b.WriteString("Content-Length: ");
+        let _ = b.WriteString(crate::strconv::Itoa(body_len));
+        let _ = b.WriteString("\r\n");
     }
 
-    // User-set headers.
+    // Go: write user-set headers via Header.WriteSubset
     let inner = req.Header.__inner();
     for (key, values) in inner.__iter() {
-        // Skip headers we synthesize.
-        let kb = key.as_bytes();
-        if ascii_eq_ci(kb, b"Host") || ascii_eq_ci(kb, b"Content-Length") {
+        // Go: skip Host / Content-Length (we synthesize)
+        if strings::EqualFold(key.clone(), string("Host"))
+            || strings::EqualFold(key.clone(), string("Content-Length"))
+        {
             continue;
         }
         let n = values.Len();
         for i in 0..n {
-            out.extend_from_slice(kb);
-            out.extend_from_slice(b": ");
-            out.extend_from_slice(values[i].as_bytes());
-            out.extend_from_slice(b"\r\n");
+            let _ = b.WriteString(key.clone());
+            let _ = b.WriteString(": ");
+            let _ = b.WriteString(values[i].clone());
+            let _ = b.WriteString("\r\n");
         }
     }
-    out.extend_from_slice(b"\r\n");
+    // Go: b.WriteString("\r\n")
+    let _ = b.WriteString("\r\n");
 
-    // Body.
-    if body_len > 0 {
-        for i in 0..body_len {
-            out.push(req.Body[i]);
-        }
+    // Concat head + body. Convert head to bytes, then append body.
+    let head = crate::convert::bytes(b.String());
+    if body_len == 0 {
+        return head;
+    }
+    let mut out = head;
+    for i in 0..body_len {
+        out = append!(out, req.Body[i]);
     }
     out
 }
 
 /// `application/x-www-form-urlencoded` encode a list of (key, value) pairs.
+/// Line-by-line port of `url.Values.Encode` (net/url/url.go:993).
 fn encode_form(vals: &[(string, string)]) -> slice<byte> {
-    let mut out: Vec<u8> = Vec::new();
-    for (i, (k, v)) in vals.iter().enumerate() {
+    let mut buf = strings::Builder::new();
+    for (i, kv) in vals.iter().enumerate() {
+        // Go: if buf.Len() > 0 { buf.WriteByte('&') }
         if i > 0 {
-            out.push(b'&');
+            let _ = buf.WriteByte(b'&');
         }
-        percent_encode_into(&mut out, k.as_bytes());
-        out.push(b'=');
-        percent_encode_into(&mut out, v.as_bytes());
+        // Go: buf.WriteString(url.QueryEscape(k))
+        let _ = buf.WriteString(query_escape(kv.0.clone()));
+        let _ = buf.WriteByte(b'=');
+        let _ = buf.WriteString(query_escape(kv.1.clone()));
     }
-    slice::<byte>::__from_vec(out)
+    crate::convert::bytes(buf.String())
 }
 
-fn percent_encode_into(out: &mut Vec<u8>, src: &[u8]) {
-    for &b in src {
-        let unreserved = b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~';
+/// Line-by-line port of `url.QueryEscape` (net/url/url.go:887, slim).
+fn query_escape(s: string) -> string {
+    let mut b = strings::Builder::new();
+    b.Grow(s.Len());
+    for i in 0..s.Len() {
+        let c: byte = s[i];
+        // Go: if shouldEscape(c, encodeQueryComponent) { … } else { write c }
+        let unreserved = (c >= b'a' && c <= b'z')
+            || (c >= b'A' && c <= b'Z')
+            || (c >= b'0' && c <= b'9')
+            || c == b'-'
+            || c == b'_'
+            || c == b'.'
+            || c == b'~';
         if unreserved {
-            out.push(b);
-        } else if b == b' ' {
-            out.push(b'+');
+            let _ = b.WriteByte(c);
+        } else if c == b' ' {
+            // Go: special case — space → '+'
+            let _ = b.WriteByte(b'+');
         } else {
-            out.push(b'%');
-            const HEX: &[u8; 16] = b"0123456789ABCDEF";
-            out.push(HEX[(b >> 4) as usize]);
-            out.push(HEX[(b & 0xf) as usize]);
+            let _ = b.WriteByte(b'%');
+            const HEX: &[byte; 16] = b"0123456789ABCDEF";
+            let _ = b.WriteByte(HEX[(c >> 4) as usize]);
+            let _ = b.WriteByte(HEX[(c & 0xf) as usize]);
         }
     }
+    b.String()
 }
 
