@@ -611,6 +611,11 @@ const SMALL_BUFFER_SIZE: usize = 64;
 pub struct Buffer {
     buf: Vec<byte>,
     off: usize,
+    /// Slim equivalent of Go's `lastRead`: encodes the size in bytes
+    /// of the most-recent successful ReadRune (1..=4). 0 means the
+    /// last operation was something other than ReadRune. Used only by
+    /// UnreadRune; UnreadByte continues to use the simpler off>0 rule.
+    last_rune_size: u8,
 }
 
 impl Buffer {
@@ -618,6 +623,7 @@ impl Buffer {
         Self {
             buf: Vec::new(),
             off: 0,
+            last_rune_size: 0,
         }
     }
 
@@ -639,10 +645,26 @@ impl Buffer {
         self.buf.capacity() as int
     }
 
+    /// `(b *Buffer).Available()` (buffer.go:92) — bytes that can be
+    /// written without reallocating: cap(b.buf) - len(b.buf).
+    pub fn Available(&self) -> int {
+        (self.buf.capacity() - self.buf.len()) as int
+    }
+
+    /// `(b *Buffer).AvailableBuffer()` (buffer.go:66) — Go returns an
+    /// empty slice with capacity Available(); intended for `append +
+    /// Write` patterns. In slim goish slices don't expose Vec's
+    /// capacity, so we return an empty slice<byte>; the appender just
+    /// needs to call b.Write on the resulting bytes.
+    pub fn AvailableBuffer(&self) -> slice<byte> {
+        slice::__from_vec(Vec::new())
+    }
+
     /// Reset to empty, retaining underlying storage.
     pub fn Reset(&mut self) {
         self.buf.clear();
         self.off = 0;
+        self.last_rune_size = 0;
     }
 
     /// Ensure space for at least `n` more bytes without reallocation.
@@ -659,6 +681,7 @@ impl Buffer {
 
     /// Append bytes. Always returns `(len(p), nil)`.
     pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        self.last_rune_size = 0;
         let n = p.Len();
         let raw: &[byte] = &p;
         self.buf.extend_from_slice(raw);
@@ -666,6 +689,7 @@ impl Buffer {
     }
 
     pub fn WriteString<S: Into<string>>(&mut self, s: S) -> (int, error) {
+        self.last_rune_size = 0;
         let s = s.into();
         let bs = s.as_bytes();
         self.buf.extend_from_slice(bs);
@@ -673,11 +697,13 @@ impl Buffer {
     }
 
     pub fn WriteByte(&mut self, c: byte) -> error {
+        self.last_rune_size = 0;
         self.buf.push(c);
         nil
     }
 
     pub fn WriteRune(&mut self, r: rune) -> (int, error) {
+        self.last_rune_size = 0;
         let mut tmp = [0u8; 4];
         let n = utf8::EncodeRune(&mut tmp, r);
         self.buf.extend_from_slice(&tmp[..n as usize]);
@@ -687,6 +713,7 @@ impl Buffer {
     /// Read up to `len(p)` bytes from the buffer into `p`. Returns
     /// `(0, io::EOF())` when exhausted, matching Go.
     pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        self.last_rune_size = 0;
         if self.off >= self.buf.len() {
             return (0, io::EOF());
         }
@@ -698,9 +725,78 @@ impl Buffer {
         (want as int, nil)
     }
 
+    /// `(b *Buffer).Next(n)` (buffer.go:346) — return the next n
+    /// unread bytes as an owned slice and advance the read cursor.
+    /// If n exceeds Len(), returns the entire remaining buffer.
+    pub fn Next(&mut self, mut n: int) -> slice<byte> {
+        // Go: b.lastRead = opInvalid
+        self.last_rune_size = 0;
+        // Go: m := b.Len(); if n > m { n = m }
+        let m = self.Len();
+        if n > m {
+            n = m;
+        }
+        if n < 0 {
+            n = 0;
+        }
+        // Go: data := b.buf[b.off : b.off+n]
+        let end = self.off + n as usize;
+        let data = slice::__from_vec(self.buf[self.off..end].to_vec());
+        // Go: b.off += n
+        self.off = end;
+        // Go: if n > 0 { b.lastRead = opRead }  — slim Read, no UnreadRune.
+        data
+    }
+
+    /// `(b *Buffer).ReadRune()` (buffer.go:379) — read one UTF-8
+    /// rune. Returns `(0, 0, io.EOF)` on empty buffer; on invalid
+    /// UTF-8, returns `(U+FFFD, 1, nil)` after consuming one byte.
+    pub fn ReadRune(&mut self) -> (rune, int, error) {
+        // Go: if b.empty() { b.Reset(); return 0, 0, io.EOF }
+        if self.off >= self.buf.len() {
+            self.Reset();
+            return (0, 0, io::EOF());
+        }
+        // Go: c := b.buf[b.off]
+        let c = self.buf[self.off];
+        // Go: if c < utf8.RuneSelf { b.off++; b.lastRead = opReadRune1; return rune(c), 1, nil }
+        if c < utf8::RuneSelf {
+            self.off += 1;
+            self.last_rune_size = 1;
+            return (c as rune, 1, nil);
+        }
+        // Go: r, n := utf8.DecodeRune(b.buf[b.off:])
+        let (r, n) = utf8::DecodeRune(&self.buf[self.off..]);
+        // Go: b.off += n; b.lastRead = readOp(n)
+        self.off += n as usize;
+        self.last_rune_size = n as u8;
+        (r, n, nil)
+    }
+
+    /// `(b *Buffer).UnreadRune()` (buffer.go:402) — push back the
+    /// rune read by the most recent ReadRune. Returns an error if the
+    /// most recent op was not a successful ReadRune.
+    pub fn UnreadRune(&mut self) -> error {
+        // Go: if b.lastRead <= opInvalid { return error }
+        if self.last_rune_size == 0 {
+            return crate::errors::New(
+                "bytes.Buffer: UnreadRune: previous operation was not a successful ReadRune",
+            );
+        }
+        // Go: if b.off >= int(b.lastRead) { b.off -= int(b.lastRead) }
+        let n = self.last_rune_size as usize;
+        if self.off >= n {
+            self.off -= n;
+        }
+        // Go: b.lastRead = opInvalid
+        self.last_rune_size = 0;
+        nil
+    }
+
     /// `(b *Buffer).Truncate(n)` (buffer.go:97) — discard all but the
     /// first n unread bytes. Panics if n is out of range.
     pub fn Truncate(&mut self, n: int) {
+        self.last_rune_size = 0;
         // Go: if n == 0 { b.Reset(); return }
         if n == 0 {
             self.Reset();
@@ -717,6 +813,7 @@ impl Buffer {
     /// `(b *Buffer).ReadByte()` (buffer.go:362) — pop one byte.
     /// Returns `(0, io.EOF)` when empty.
     pub fn ReadByte(&mut self) -> (byte, error) {
+        self.last_rune_size = 0;
         // Go: if b.empty() { b.Reset(); return 0, io.EOF }
         if self.off >= self.buf.len() {
             self.Reset();
@@ -731,6 +828,7 @@ impl Buffer {
     /// `(b *Buffer).UnreadByte()` (buffer.go:419) — push back one byte.
     /// Slim port: doesn't track last-op state — succeeds whenever off>0.
     pub fn UnreadByte(&mut self) -> error {
+        self.last_rune_size = 0;
         // Go strictly tracks lastRead; slim port simply rewinds if able.
         if self.off > 0 {
             self.off -= 1;
@@ -744,6 +842,7 @@ impl Buffer {
     /// including `delim`. On EOF before delim, returns the partial data
     /// plus io.EOF.
     pub fn ReadBytes(&mut self, delim: byte) -> (slice<byte>, error) {
+        self.last_rune_size = 0;
         // Go's readSlice: i := IndexByte(b.buf[b.off:], delim)
         let mut i: int = -1;
         for (k, b) in self.buf[self.off..].iter().enumerate() {
@@ -774,6 +873,7 @@ impl Buffer {
     /// until EOF and append to the buffer. Returns the number of
     /// bytes read.
     pub fn ReadFrom(&mut self, r: &mut dyn io::Reader) -> (i64, error) {
+        self.last_rune_size = 0;
         let mut n: i64 = 0;
         loop {
             // Go: i := b.grow(MinRead); b.buf = b.buf[:i]
@@ -803,6 +903,7 @@ impl Buffer {
     /// `w` until exhausted or an error occurs. Returns bytes
     /// written.
     pub fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
+        self.last_rune_size = 0;
         let mut n: i64 = 0;
         let nbytes = self.Len();
         if nbytes > 0 {
@@ -891,6 +992,7 @@ pub fn NewBuffer(buf: slice<byte>) -> Buffer {
     Buffer {
         buf: buf.__into_vec(),
         off: 0,
+        last_rune_size: 0,
     }
 }
 
@@ -900,6 +1002,7 @@ pub fn NewBufferString<S: Into<string>>(s: S) -> Buffer {
     Buffer {
         buf: s.as_bytes().to_vec(),
         off: 0,
+        last_rune_size: 0,
     }
 }
 
