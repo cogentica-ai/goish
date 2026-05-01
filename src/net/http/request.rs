@@ -203,6 +203,39 @@ impl Request {
         string::new()
     }
 
+    /// `r.MultipartReader()` (request.go:497) — return a
+    /// `mime/multipart::Reader` over the request body, if this is a
+    /// multipart/form-data POST. Slim port: drops the
+    /// "MultipartReader called twice" guard (we don't track
+    /// MultipartForm state) and the multipart/mixed support.
+    pub fn MultipartReader(&self) -> (super::super::super::mime::multipart::Reader, error) {
+        let v = self.Header.Get(string("Content-Type"));
+        if v.Len() == 0 {
+            return (
+                empty_multipart_reader(),
+                ErrNotMultipart(),
+            );
+        }
+        if self.Body.Len() == 0 {
+            return (
+                empty_multipart_reader(),
+                errors::New(string("missing form body")),
+            );
+        }
+        let (d, params, perr) = crate::mime::ParseMediaType(v);
+        if !perr.IsNil() || d != "multipart/form-data" {
+            return (empty_multipart_reader(), ErrNotMultipart());
+        }
+        let (boundary, ok) = params.Get(string("boundary"));
+        if !ok {
+            return (empty_multipart_reader(), ErrMissingBoundary());
+        }
+        (
+            crate::mime::multipart::NewReader(self.Body.clone(), boundary),
+            errors::nil,
+        )
+    }
+
     /// `r.Write(w)` (request.go:561) — serialize the request onto `w`
     /// in HTTP/1.1 wire format. Slim port: delegates to the same
     /// `serialize_request` helper used by Client::Do, which already
@@ -709,6 +742,45 @@ pub struct MaxBytesReader<R: io::Reader> {
     initial: int,
     remaining: int,
     err: error,
+}
+
+/// `http.ErrNotMultipart` (request.go:78) — returned by
+/// Request.MultipartReader when the request's Content-Type isn't
+/// multipart/form-data.
+pub fn ErrNotMultipart() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::New(string(
+            "request Content-Type isn't multipart/form-data",
+        )));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// `http.ErrMissingBoundary` (request.go:74) — returned by
+/// Request.MultipartReader when the multipart Content-Type lacks a
+/// `boundary` parameter.
+pub fn ErrMissingBoundary() -> error {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::New(string(
+            "no multipart boundary param in Content-Type",
+        )));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// Internal helper to construct a degenerate Reader for the
+/// MultipartReader error paths.
+fn empty_multipart_reader() -> crate::mime::multipart::Reader {
+    crate::mime::multipart::NewReader(
+        slice::<byte>::__from_vec(Vec::new()),
+        string::new(),
+    )
 }
 
 /// `http.MaxBytesError` (request.go:1193) — typed error returned by

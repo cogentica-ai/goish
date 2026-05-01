@@ -40,8 +40,8 @@ pub use method::{
     MethodPut, MethodTrace,
 };
 pub use request::{
-    ErrMaxBytes, MaxBytesError, MaxBytesReader, NewMaxBytesError, NewMaxBytesReader,
-    ParseHTTPVersion, ReadRequest, Request,
+    ErrMaxBytes, ErrMissingBoundary, ErrNotMultipart, MaxBytesError, MaxBytesReader,
+    NewMaxBytesError, NewMaxBytesReader, ParseHTTPVersion, ReadRequest, Request,
 };
 pub use response::ResponseWriter;
 pub use server::{
