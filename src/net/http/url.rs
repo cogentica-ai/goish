@@ -293,6 +293,44 @@ pub fn QueryEscape(s: string) -> string {
     escape(s, EncodingMode::QueryComponent)
 }
 
+/// `(v Values).Encode()` (url.go:1028) — URL-encode `v` into the
+/// `key=val&key=val` form, with keys sorted lexicographically. Each
+/// key and value is escaped via `QueryEscape`. Multi-value keys
+/// produce multiple `k=v` pairs in the order stored.
+///
+/// Free function rather than a method because goish models `Values`
+/// as the bare gomap type.
+pub fn ValuesEncode(v: crate::gomap::map<string, crate::goslice::slice<string>>) -> string {
+    // Go: if len(v) == 0 { return "" }
+    if v.Len() == 0 {
+        return string::new();
+    }
+    // Go: var buf strings.Builder
+    let mut buf = crate::strings::Builder::new();
+    // Go: for _, k := range slices.Sorted(maps.Keys(v)) { ... }
+    let keys = v.Keys(); // gomap::Keys returns BTreeMap-sorted slice
+    let mut i: int = 0;
+    while i < keys.Len() {
+        let k = keys[i].clone();
+        let (vs, _) = v.Get(k.clone());
+        let key_escaped = QueryEscape(k);
+        // Go: for _, v := range vs { ... }
+        let mut j: int = 0;
+        while j < vs.Len() {
+            // Go: if buf.Len() > 0 { buf.WriteByte('&') }
+            if buf.Len() > 0 {
+                let _ = buf.WriteByte(b'&');
+            }
+            let _ = buf.WriteString(key_escaped.clone());
+            let _ = buf.WriteByte(b'=');
+            let _ = buf.WriteString(QueryEscape(vs[j].clone()));
+            j += 1;
+        }
+        i += 1;
+    }
+    buf.String()
+}
+
 /// `url.PathEscape(s)` (url.go:287) — percent-encode `s` so it is
 /// safe inside a single URL path segment (i.e. `/`, `;`, `,`, `?` are
 /// all escaped). Spaces become `%20`.
