@@ -33,7 +33,8 @@ pub use header::Header;
 pub use request::{ReadRequest, Request};
 pub use response::ResponseWriter;
 pub use server::{
-    ErrServerClosed, Handler, HandlerFunc, ListenAndServe, NotFoundHandler, Serve, ServeMux, Server,
+    ErrServerClosed, Handler, HandlerFunc, ListenAndServe, NotFoundHandler, Redirect,
+    RedirectHandler, Serve, ServeMux, Server, StripPrefix,
 };
 pub use status::{
     StatusAccepted, StatusBadGateway, StatusBadRequest, StatusConflict, StatusContinue,

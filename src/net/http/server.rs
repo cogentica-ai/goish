@@ -34,6 +34,7 @@ use crate::string;
 use crate::strings;
 use crate::sync::Mutex;
 use crate::time;
+use crate::types::int;
 
 use super::request::{ReadRequestWithLimit, Request};
 use super::response::ResponseWriter;
@@ -211,6 +212,174 @@ impl Handler for NotFoundHandler {
         w.WriteHeader(404);
         let _ = w.Write(crate::convert::bytes("404 page not found\n"));
     }
+}
+
+// ─── StripPrefix / Redirect / RedirectHandler ────────────────────────
+//
+// Line-by-line ports of net/http/server.go:2370 / :2403 / :2488.
+
+/// `http.StripPrefix(prefix, h)` (server.go:2370). Returns a handler
+/// that trims `prefix` from `r.URL.Path` (and `RawPath` if set)
+/// before delegating to `h`. If the request path doesn't begin with
+/// `prefix`, the handler replies with 404.
+pub fn StripPrefix(prefix: string, h: Arc<dyn Handler>) -> Arc<dyn Handler> {
+    // Go: if prefix == "" { return h }
+    if prefix.Len() == 0 {
+        return h;
+    }
+    Arc::new(stripPrefixHandler { prefix, inner: h })
+}
+
+struct stripPrefixHandler {
+    prefix: string,
+    inner: Arc<dyn Handler>,
+}
+
+impl Handler for stripPrefixHandler {
+    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+        // Go: p := strings.TrimPrefix(r.URL.Path, prefix)
+        let p = crate::strings::TrimPrefix(r.URL.Path.clone(), self.prefix.clone());
+        // Go: rp := strings.TrimPrefix(r.URL.RawPath, prefix)
+        let rp = crate::strings::TrimPrefix(r.URL.RawPath.clone(), self.prefix.clone());
+        // Go: if len(p) < len(r.URL.Path) && (r.URL.RawPath == "" || len(rp) < len(r.URL.RawPath)) { … }
+        if p.Len() < r.URL.Path.Len()
+            && (r.URL.RawPath.Len() == 0 || rp.Len() < r.URL.RawPath.Len())
+        {
+            // Go: r2 := *r; r2.URL = *r.URL; r2.URL.Path = p; r2.URL.RawPath = rp
+            let mut r2 = r.clone();
+            r2.URL.Path = p;
+            r2.URL.RawPath = rp;
+            self.inner.ServeHTTP(w, &r2);
+        } else {
+            // Go: NotFound(w, r)
+            NotFoundHandler.ServeHTTP(w, r);
+        }
+    }
+}
+
+/// `http.Redirect(w, r, url, code)` (server.go:2403). Replies with a
+/// redirect to `url`. Slim port: relative paths are resolved against
+/// `r.URL.Path` via `path::Clean` + `path::Split`.
+pub fn Redirect(w: &mut ResponseWriter, r: &Request, url: string, code: int) {
+    let mut url = url;
+
+    // Go: if u, err := url.Parse(url); err == nil { … relative resolve … }
+    // Slim: detect relative by absence of "://" and leading "/".
+    let absolute = crate::strings::Contains(url.clone(), string("://"));
+    if !absolute {
+        let url_b = url.as_bytes();
+        let leading_slash = !url_b.is_empty() && url_b[0] == b'/';
+        if !leading_slash {
+            // Go: olddir, _ := path.Split(oldpath); url = olddir + url
+            let oldpath = if r.URL.Path.Len() == 0 {
+                string("/")
+            } else {
+                r.URL.Path.clone()
+            };
+            let (olddir, _) = crate::path::Split(oldpath);
+            let mut b = crate::strings::Builder::new();
+            let _ = b.WriteString(olddir);
+            let _ = b.WriteString(url);
+            url = b.String();
+        }
+        // Go: split off ?query, clean, restore query
+        let q_idx = crate::strings::Index(url.clone(), string("?"));
+        let (path_part, query_part) = if q_idx >= 0 {
+            let (p, q, _) = crate::strings::Cut(url.clone(), string("?"));
+            (p, {
+                let mut b = crate::strings::Builder::new();
+                let _ = b.WriteByte(b'?');
+                let _ = b.WriteString(q);
+                b.String()
+            })
+        } else {
+            (url, string::new())
+        };
+        // Go: trailing := strings.HasSuffix(url, "/"); url = path.Clean(url); if trailing { url += "/" }
+        let trailing = crate::strings::HasSuffix(path_part.clone(), string("/"));
+        let mut cleaned = crate::path::Clean(path_part);
+        if trailing && !crate::strings::HasSuffix(cleaned.clone(), string("/")) {
+            let mut b = crate::strings::Builder::new();
+            let _ = b.WriteString(cleaned);
+            let _ = b.WriteByte(b'/');
+            cleaned = b.String();
+        }
+        let mut b = crate::strings::Builder::new();
+        let _ = b.WriteString(cleaned);
+        let _ = b.WriteString(query_part);
+        url = b.String();
+    }
+
+    // Go: h := w.Header()
+    let had_ct = w.Header().Get(string("Content-Type")).Len() > 0;
+    // Go: h.Set("Location", hexEscapeNonASCII(url))
+    w.Header().Set(string("Location"), url.clone());
+    // Go: if !hadCT && (r.Method == "GET" || r.Method == "HEAD") { h.Set("Content-Type", "text/html; charset=utf-8") }
+    if !had_ct && (r.Method == "GET" || r.Method == "HEAD") {
+        w.Header()
+            .Set(string("Content-Type"), string("text/html; charset=utf-8"));
+    }
+    // Go: w.WriteHeader(code)
+    w.WriteHeader(code);
+    // Go: if !hadCT && r.Method == "GET" { body := "<a href=\"...\">"+StatusText(code)+"</a>"; fmt.Fprintln(w, body) }
+    if !had_ct && r.Method == "GET" {
+        let mut b = crate::strings::Builder::new();
+        let _ = b.WriteString("<a href=\"");
+        let _ = b.WriteString(html_escape(url));
+        let _ = b.WriteString("\">");
+        let _ = b.WriteString(super::status::StatusText(code));
+        let _ = b.WriteString("</a>.\n");
+        let body = b.String();
+        let _ = w.Write(crate::convert::bytes(body));
+    }
+}
+
+/// `http.RedirectHandler(url, code)` (server.go:2488). Returns a
+/// handler that redirects all requests to `url` with the given status.
+pub fn RedirectHandler(url: string, code: int) -> Arc<dyn Handler> {
+    Arc::new(redirectHandler { url, code })
+}
+
+struct redirectHandler {
+    url: string,
+    code: int,
+}
+
+impl Handler for redirectHandler {
+    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+        Redirect(w, r, self.url.clone(), self.code);
+    }
+}
+
+/// Line-by-line port of `htmlEscape` (server.go:2468) using a single
+/// strings::Builder pass instead of strings.NewReplacer.
+fn html_escape(s: string) -> string {
+    let mut b = crate::strings::Builder::new();
+    b.Grow(s.Len());
+    for i in 0..s.Len() {
+        let c: crate::types::byte = s[i];
+        match c {
+            b'&' => {
+                let _ = b.WriteString("&amp;");
+            }
+            b'<' => {
+                let _ = b.WriteString("&lt;");
+            }
+            b'>' => {
+                let _ = b.WriteString("&gt;");
+            }
+            b'"' => {
+                let _ = b.WriteString("&#34;");
+            }
+            b'\'' => {
+                let _ = b.WriteString("&#39;");
+            }
+            _ => {
+                let _ = b.WriteByte(c);
+            }
+        }
+    }
+    b.String()
 }
 
 // ─── Server ──────────────────────────────────────────────────────────
