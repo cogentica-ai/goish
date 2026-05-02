@@ -8,5 +8,6 @@ pub mod ascii85;
 pub mod base32;
 pub mod base64;
 pub mod binary;
+pub mod csv;
 pub mod hex;
 pub mod json;
