@@ -176,3 +176,163 @@ pub fn AppendDecode(dst: slice<byte>, src: slice<byte>) -> (slice<byte>, error) 
     out.truncate(start + n as usize);
     (slice::__from_vec(out), err)
 }
+
+// ─── Dumper / Dump (hex.go:144 + 242) ────────────────────────────────────────
+
+/// `hex.Dumper(w)` (hex.go:242) — return a Dumper that writes a
+/// `hexdump -C`-style hex dump of all input data to `w`.
+///
+/// Slim deviation: returns the concrete `Dumper<W>` rather than
+/// `io.WriteCloser` (Goish doesn't ship trait-object Writers); callers
+/// can still call `.Write` and `.Close` directly.
+pub fn Dumper<W: crate::io::Writer>(w: W) -> Dumper<W> {
+    Dumper {
+        w,
+        right_chars: [0u8; 18],
+        buf: [0u8; 14],
+        used: 0,
+        n: 0,
+        closed: false,
+    }
+}
+
+/// `hex.Dump(data)` (hex.go:146) — return a hexdump string for `data`.
+/// Empty input → empty string.
+pub fn Dump(data: slice<byte>) -> string {
+    use crate::io::{Closer, Writer};
+    if data.len() == 0 {
+        return string::from_static("");
+    }
+    let mut buf = crate::bytes::NewBuffer(slice::__from_vec(alloc::vec![]));
+    let mut d = Dumper(&mut buf);
+    let _ = d.Write(data);
+    let _ = d.Close();
+    buf.String()
+}
+
+/// `*dumper` (hex.go:246) — `hexdump -C` writer. Implements
+/// `io::Writer` + `io::Closer`.
+pub struct Dumper<W: crate::io::Writer> {
+    w: W,
+    right_chars: [byte; 18],
+    buf: [byte; 14],
+    used: int,
+    n: u32,
+    closed: bool,
+}
+
+#[inline]
+fn to_char(b: byte) -> byte {
+    // Go: hex.go:255-260
+    if b < 32 || b > 126 {
+        b'.'
+    } else {
+        b
+    }
+}
+
+impl<W: crate::io::Writer> crate::io::Writer for Dumper<W> {
+    fn Write(&mut self, data: slice<byte>) -> (int, error) {
+        // Go: hex.go:262-318
+        if self.closed {
+            return (
+                0,
+                crate::errors::New("encoding/hex: dumper closed"),
+            );
+        }
+        let raw: &[byte] = &data;
+        let mut written: int = 0;
+
+        for i in 0..raw.len() {
+            // Go: hex.go:271 — at line start, emit offset.
+            if self.used == 0 {
+                self.buf[0] = (self.n >> 24) as byte;
+                self.buf[1] = (self.n >> 16) as byte;
+                self.buf[2] = (self.n >> 8) as byte;
+                self.buf[3] = self.n as byte;
+                let (left, right) = self.buf.split_at_mut(4);
+                Encode(&mut right[..8], &left[..4]);
+                self.buf[12] = b' ';
+                self.buf[13] = b' ';
+                let chunk = slice::__from_vec(self.buf[4..14].to_vec());
+                let (_, err) = self.w.Write(chunk);
+                if !err.IsNil() {
+                    return (written, err);
+                }
+            }
+            // Go: hex.go:286 — encode this byte and emit hex pair + spacer.
+            let one = [raw[i]];
+            Encode(&mut self.buf[..2], &one);
+            self.buf[2] = b' ';
+            let mut l: usize = 3;
+            if self.used == 7 {
+                self.buf[3] = b' ';
+                l = 4;
+            } else if self.used == 15 {
+                self.buf[3] = b' ';
+                self.buf[4] = b'|';
+                l = 5;
+            }
+            let chunk = slice::__from_vec(self.buf[..l].to_vec());
+            let (_, err) = self.w.Write(chunk);
+            if !err.IsNil() {
+                return (written, err);
+            }
+            written += 1;
+            self.right_chars[self.used as usize] = to_char(raw[i]);
+            self.used += 1;
+            self.n += 1;
+            if self.used == 16 {
+                self.right_chars[16] = b'|';
+                self.right_chars[17] = b'\n';
+                let chunk = slice::__from_vec(self.right_chars[..18].to_vec());
+                let (_, err) = self.w.Write(chunk);
+                if !err.IsNil() {
+                    return (written, err);
+                }
+                self.used = 0;
+            }
+        }
+        (written, crate::errors::nil)
+    }
+}
+
+impl<W: crate::io::Writer> crate::io::Closer for Dumper<W> {
+    fn Close(&mut self) -> error {
+        // Go: hex.go:321-353
+        if self.closed {
+            return crate::errors::nil;
+        }
+        self.closed = true;
+        if self.used == 0 {
+            return crate::errors::nil;
+        }
+        self.buf[0] = b' ';
+        self.buf[1] = b' ';
+        self.buf[2] = b' ';
+        self.buf[3] = b' ';
+        self.buf[4] = b'|';
+        let n_bytes = self.used;
+        while self.used < 16 {
+            let mut l: usize = 3;
+            if self.used == 7 {
+                l = 4;
+            } else if self.used == 15 {
+                l = 5;
+            }
+            let chunk = slice::__from_vec(self.buf[..l].to_vec());
+            let (_, err) = self.w.Write(chunk);
+            if !err.IsNil() {
+                return err;
+            }
+            self.used += 1;
+        }
+        self.right_chars[n_bytes as usize] = b'|';
+        self.right_chars[(n_bytes + 1) as usize] = b'\n';
+        let chunk = slice::__from_vec(
+            self.right_chars[..(n_bytes + 2) as usize].to_vec(),
+        );
+        let (_, err) = self.w.Write(chunk);
+        err
+    }
+}
