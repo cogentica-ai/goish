@@ -16,11 +16,10 @@
 // goroutines). The underlying core atomics give us the same
 // guarantees.
 //
-// What v1 omits: atomic.Pointer<T> (lifetime/ownership of T in
-// Rust requires more design — `Arc<T>` swap pattern is the
-// usual port). atomic.Value is shipped as `Value<T>` — generic
-// rather than untyped (mirror of sync::Pool / sync::Map's
-// generic-vs-any trade).
+// atomic.Pointer<T> ships as `Pointer<T>` — typed, Arc-backed
+// (Go's `*T` ↔ Goish `Option<Arc<T>>`, nil ↔ None). atomic.Value
+// is shipped as `Value<T>` — generic rather than untyped (mirror of
+// sync::Pool / sync::Map's generic-vs-any trade).
 //
 // Also omitted: free-function variants (LoadInt32, StoreInt32,
 // CompareAndSwapInt32, etc.). Go provides them for legacy reasons;
@@ -269,6 +268,7 @@ impl Bool {
 //     The Mutex path is correct and matches the public API exactly.
 
 extern crate alloc;
+use alloc::sync::Arc;
 use crate::sync::Mutex;
 
 // Go: value.go:16
@@ -345,6 +345,94 @@ impl<T: Clone + Default + Send + PartialEq + 'static> Value<T> {
 }
 
 impl<T: Clone + Default + Send + 'static> Default for Value<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ─── Pointer<T> ───────────────────────────────────────────────────
+//
+// Line-by-line port of /share/go/src/sync/atomic/type.go:44-69.
+//
+// Slim deviations from upstream:
+//
+//   * Go: `*T` (raw pointer, optionally nil).
+//     Goish: `Option<Arc<T>>` — `None` ↔ nil, `Some(arc)` ↔ non-nil.
+//     Rust has no nullable raw pointer in safe code; `Arc<T>` is the
+//     direct analogue of `*T` for shared ownership.
+//
+//   * Backing store is `Mutex<Option<Arc<T>>>`, not lock-free
+//     `unsafe.Pointer`. Same precedent as `Value<T>` above. The public
+//     API still presents Go's atomic semantics: any single Load/Store/
+//     Swap/CompareAndSwap is a linearization point.
+//
+//   * CompareAndSwap uses `Arc::ptr_eq` (pointer-identity), which
+//     matches Go's `CompareAndSwapPointer` (compares pointer values,
+//     not pointee values). Two distinct `Arc::new(7)` calls compare
+//     unequal even though the pointees are equal — same as Go.
+
+// Go: type.go:44
+//   type Pointer[T any] struct { ... v unsafe.Pointer }
+/// `atomic.Pointer<T>` — atomic load/store/swap of a `*T`-like handle.
+///
+/// The zero value (via [`Pointer::new`]) reports `None` from
+/// [`Pointer::Load`] until the first [`Pointer::Store`]. Mirrors
+/// `sync/atomic.Pointer[T]` (type.go:47).
+pub struct Pointer<T: Send + Sync + 'static> {
+    inner: Mutex<Option<Arc<T>>>,
+}
+
+impl<T: Send + Sync + 'static> Pointer<T> {
+    /// Build an empty Pointer (Go: zero value is nil `*T`).
+    pub const fn new() -> Self {
+        Pointer { inner: Mutex::new(None) }
+    }
+
+    // Go: type.go:58
+    //   func (x *Pointer[T]) Load() *T { return (*T)(LoadPointer(&x.v)) }
+    /// Atomically load the stored `Arc<T>`. Returns `None` if no Store
+    /// has occurred (or last Store was `None`).
+    pub fn Load(&self) -> Option<Arc<T>> {
+        self.inner.Lock().clone()
+    }
+
+    // Go: type.go:61
+    //   func (x *Pointer[T]) Store(val *T) { StorePointer(...) }
+    /// Atomically store `val`. Pass `None` to clear the pointer (nil).
+    pub fn Store(&self, val: Option<Arc<T>>) {
+        *self.inner.Lock() = val;
+    }
+
+    // Go: type.go:64
+    //   func (x *Pointer[T]) Swap(new *T) (old *T) { ... }
+    /// Atomically store `new` and return the previous value.
+    pub fn Swap(&self, new: Option<Arc<T>>) -> Option<Arc<T>> {
+        let mut g = self.inner.Lock();
+        core::mem::replace(&mut *g, new)
+    }
+
+    // Go: type.go:67
+    //   func (x *Pointer[T]) CompareAndSwap(old, new *T) (swapped bool) { ... }
+    /// Atomically swap to `new` only if the current value is
+    /// pointer-equal to `old` (via `Arc::ptr_eq`, mirroring Go's
+    /// `CompareAndSwapPointer` semantics).
+    pub fn CompareAndSwap(&self, old: Option<Arc<T>>, new: Option<Arc<T>>) -> bool {
+        let mut g = self.inner.Lock();
+        let matches = match (g.as_ref(), old.as_ref()) {
+            (None, None) => true,
+            (Some(cur), Some(want)) => Arc::ptr_eq(cur, want),
+            _ => false,
+        };
+        if matches {
+            *g = new;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl<T: Send + Sync + 'static> Default for Pointer<T> {
     fn default() -> Self {
         Self::new()
     }
