@@ -24,6 +24,7 @@
 #![allow(non_snake_case)]
 
 pub mod signal;
+pub mod user;
 
 use crate::errors::error;
 use crate::goslice::slice;
