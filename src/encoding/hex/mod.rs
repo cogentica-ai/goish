@@ -140,3 +140,39 @@ pub fn DecodeString(s: &str) -> (slice<byte>, error) {
     dst.truncate(n as usize);
     (slice::__from_vec(dst), err)
 }
+
+/// `hex.AppendEncode(dst, src)` (hex.go:57) — append the hex encoding
+/// of `src` to `dst` and return the extended buffer.
+///
+/// Public API uses goish primitives (`slice<byte>`); the existing
+/// `Encode(&mut [u8], &[u8])` is the low-level helper.
+pub fn AppendEncode(dst: slice<byte>, src: slice<byte>) -> slice<byte> {
+    // Go: n := EncodedLen(len(src)); dst = slices.Grow(dst, n)
+    //     Encode(dst[len(dst):][:n], src); return dst[:len(dst)+n]
+    let src_raw: &[byte] = &src;
+    let n = src_raw.len() * 2;
+    let mut out: Vec<byte> = dst.__into_vec();
+    out.reserve(n);
+    let start = out.len();
+    out.resize(start + n, 0);
+    Encode(&mut out[start..start + n], src_raw);
+    slice::__from_vec(out)
+}
+
+/// `hex.AppendDecode(dst, src)` (hex.go:118) — append the decoded
+/// bytes of `src` to `dst` and return the extended buffer plus any
+/// decoding error. On error returns the partially decoded prefix.
+pub fn AppendDecode(dst: slice<byte>, src: slice<byte>) -> (slice<byte>, error) {
+    // Go: n := DecodedLen(len(src)); dst = slices.Grow(dst, n)
+    //     n, err := Decode(dst[len(dst):][:n], src)
+    //     return dst[:len(dst)+n], err
+    let src_raw: &[byte] = &src;
+    let cap_n = src_raw.len() / 2;
+    let mut out: Vec<byte> = dst.__into_vec();
+    out.reserve(cap_n);
+    let start = out.len();
+    out.resize(start + cap_n, 0);
+    let (n, err) = Decode(&mut out[start..start + cap_n], src_raw);
+    out.truncate(start + n as usize);
+    (slice::__from_vec(out), err)
+}
