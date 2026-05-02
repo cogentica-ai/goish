@@ -4,11 +4,11 @@
 // subpackage source for each codec.
 //
 // v1 ships:
-//   ascii85, base32, base64, binary, csv, hex, json, pem
+//   ascii85, asn1 (primitive parsers only), base32, base64, binary,
+//   csv, hex, json, pem
 //
-// Other subpackages (`encoding/gob`, `encoding/asn1`, `encoding/xml`)
-// land later — they require these interface traits as their
-// dispatch surface.
+// Other subpackages (`encoding/gob`, `encoding/xml`) land later —
+// they require these interface traits as their dispatch surface.
 
 #![allow(non_snake_case)]
 
@@ -19,6 +19,7 @@ use crate::goslice::slice;
 use crate::types::byte;
 
 pub mod ascii85;
+pub mod asn1;
 pub mod base32;
 pub mod base64;
 pub mod binary;
