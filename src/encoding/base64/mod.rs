@@ -9,12 +9,19 @@
 //   base64::RawStdEncoding.EncodeToString(&src)     // no '=' padding
 //   base64::RawURLEncoding.EncodeToString(&src)     // no '=' padding
 //   base64::StdEncoding.DecodeString(&s) -> (slice<byte>, error)
+//   base64::StdEncoding.Encode(&mut dst, src)       // in-place encode
+//   base64::StdEncoding.AppendEncode(dst, src)      // appends → slice<byte>
+//   base64::StdEncoding.Decode(&mut dst, src)       // in-place decode
+//   base64::StdEncoding.AppendDecode(dst, src)      // appends → slice<byte>
+//   base64::NewEncoder(enc, w)                      // streaming encoder
 //
-// All four are values of type `Encoding`. The alphabet + padding
-// flag are stored in the Encoding; methods are dispatched on it.
+// All four pre-baked encodings are values of type `Encoding`. The
+// alphabet + padding flag are stored in the Encoding; methods are
+// dispatched on it.
 //
-// What v1 omits: NewEncoding, WithPadding, Strict, NewEncoder/
-// NewDecoder (io wrappers), AppendEncode/AppendDecode. Add later.
+// What v1 omits: NewEncoding (runtime alphabet), WithPadding, Strict,
+// NewDecoder (io reader — needs newline-filtering + partial-block
+// buffering). Add later.
 
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
@@ -241,5 +248,216 @@ impl ErrorTrait for CorruptInputError {
         buf.extend_from_slice(prefix);
         buf.extend_from_slice(n_str.as_bytes());
         string::from_bytes(&buf)
+    }
+}
+
+// ───── Goish-style additive API (slice<byte> public types) ───────────
+//
+// These methods mirror Go's signatures using goish's `slice<byte>`
+// instead of the legacy `&[u8]` / `&str` placeholders kept above for
+// existing callers. They share the `encode_into` / `decode_into`
+// internals.
+
+impl Encoding {
+    // Go: base64.go:145
+    //   func (enc *Encoding) Encode(dst, src []byte)
+    //
+    // Writes `EncodedLen(len(src))` bytes into the start of dst's
+    // backing buffer, growing it if needed.
+    pub fn Encode(&self, dst: &mut slice<byte>, src: slice<byte>) {
+        let mut dv: Vec<byte> = dst.clone().__into_vec();
+        let n = self.EncodedLen(src.Len()) as usize;
+        if dv.len() < n {
+            dv.resize(n, 0);
+        }
+        let src_raw: &[byte] = &src;
+        self.encode_into(&mut dv[..n], src_raw);
+        *dst = slice::__from_vec(dv);
+    }
+
+    // Go: base64.go:198
+    //   func (enc *Encoding) AppendEncode(dst, src []byte) []byte
+    pub fn AppendEncode(&self, dst: slice<byte>, src: slice<byte>) -> slice<byte> {
+        let n = self.EncodedLen(src.Len()) as usize;
+        let mut out: Vec<byte> = dst.__into_vec();
+        let start = out.len();
+        out.resize(start + n, 0);
+        let src_raw: &[byte] = &src;
+        self.encode_into(&mut out[start..start + n], src_raw);
+        slice::__from_vec(out)
+    }
+
+    // Go: base64.go:518
+    //   func (enc *Encoding) Decode(dst, src []byte) (n int, err error)
+    pub fn Decode(&self, dst: &mut slice<byte>, src: slice<byte>) -> (int, error) {
+        let mut dv: Vec<byte> = dst.clone().__into_vec();
+        let max_len = self.DecodedLen(src.Len()) as usize + 3;
+        if dv.len() < max_len {
+            dv.resize(max_len, 0);
+        }
+        let src_raw: &[byte] = &src;
+        let (n, err) = self.decode_into(&mut dv, src_raw);
+        dv.truncate(n as usize);
+        *dst = slice::__from_vec(dv);
+        (n, err)
+    }
+
+    // Go: base64.go:413
+    //   func (enc *Encoding) AppendDecode(dst, src []byte) ([]byte, error)
+    pub fn AppendDecode(
+        &self,
+        dst: slice<byte>,
+        src: slice<byte>,
+    ) -> (slice<byte>, error) {
+        let mut out: Vec<byte> = dst.__into_vec();
+        let start = out.len();
+        let max_len = self.DecodedLen(src.Len()) as usize + 3;
+        out.resize(start + max_len, 0);
+        let src_raw: &[byte] = &src;
+        let (n, err) = self.decode_into(&mut out[start..], src_raw);
+        out.truncate(start + n as usize);
+        (slice::__from_vec(out), err)
+    }
+}
+
+// ───── Streaming Encoder (Go: base64.go:212-286) ─────────────────────
+//
+// Mirrors Go's `encoder` struct:
+//
+//   type encoder struct {
+//       err  error
+//       enc  *Encoding
+//       w    io.Writer
+//       buf  [3]byte
+//       nbuf int
+//       out  [1024]byte
+//   }
+//
+// `Write` buffers up to 3 bytes of input, flushes 4-byte encoded
+// blocks. `Close` flushes any pending partial block. After Close,
+// further Write calls are errors.
+pub struct Encoder<W: crate::io::Writer> {
+    err: error,
+    enc: Encoding,
+    w: W,
+    buf: [byte; 3],
+    nbuf: usize,
+    out: [byte; 1024],
+}
+
+impl<W: crate::io::Writer> Encoder<W> {
+    // Go: base64.go:221
+    //   func (e *encoder) Write(p []byte) (n int, err error)
+    pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        if !self.err.IsNil() {
+            return (0, self.err.clone());
+        }
+
+        let mut p_raw: &[byte] = &p;
+        let mut n: int = 0;
+
+        // Leading fringe: fill the 3-byte buffer if a previous Write
+        // left a partial block.
+        if self.nbuf > 0 {
+            let mut i = 0usize;
+            while i < p_raw.len() && self.nbuf < 3 {
+                self.buf[self.nbuf] = p_raw[i];
+                self.nbuf += 1;
+                i += 1;
+            }
+            n += i as int;
+            p_raw = &p_raw[i..];
+            if self.nbuf < 3 {
+                return (n, crate::errors::nil);
+            }
+            // Flush the now-full buffer as 4 encoded bytes.
+            let buf_copy = [self.buf[0], self.buf[1], self.buf[2]];
+            self.enc.encode_into(&mut self.out[..4], &buf_copy);
+            let chunk = slice::__from_vec(self.out[..4].to_vec());
+            let (_, werr) = self.w.Write(chunk);
+            if !werr.IsNil() {
+                self.err = werr.clone();
+                return (n, werr);
+            }
+            self.nbuf = 0;
+        }
+
+        // Large interior chunks: encode `nn` source bytes (multiple
+        // of 3) and flush as `nn/3*4` output bytes.
+        while p_raw.len() >= 3 {
+            let mut nn = self.out.len() / 4 * 3; // 768 bytes max per pass
+            if nn > p_raw.len() {
+                nn = p_raw.len();
+                nn -= nn % 3;
+            }
+            // Stage src into a local Vec to avoid borrow conflict
+            // between &mut self.out and &p_raw.
+            let src_chunk: alloc::vec::Vec<byte> = p_raw[..nn].to_vec();
+            let out_len = nn / 3 * 4;
+            self.enc.encode_into(&mut self.out[..out_len], &src_chunk);
+            let chunk = slice::__from_vec(self.out[..out_len].to_vec());
+            let (_, werr) = self.w.Write(chunk);
+            if !werr.IsNil() {
+                self.err = werr.clone();
+                return (n, werr);
+            }
+            n += nn as int;
+            p_raw = &p_raw[nn..];
+        }
+
+        // Trailing fringe: stash remaining 0..3 bytes.
+        let p_len = p_raw.len();
+        let mut i = 0usize;
+        while i < p_len {
+            self.buf[i] = p_raw[i];
+            i += 1;
+        }
+        self.nbuf = p_len;
+        n += p_len as int;
+        (n, crate::errors::nil)
+    }
+
+    // Go: base64.go:269
+    //   func (e *encoder) Close() error
+    pub fn Close(&mut self) -> error {
+        if self.err.IsNil() && self.nbuf > 0 {
+            let nbuf = self.nbuf;
+            let elen = self.enc.EncodedLen(nbuf as int) as usize;
+            // Stage src so we don't borrow self.buf and self.out together.
+            let src_buf: [byte; 3] = self.buf;
+            self.enc.encode_into(&mut self.out[..elen], &src_buf[..nbuf]);
+            let chunk = slice::__from_vec(self.out[..elen].to_vec());
+            let (_, werr) = self.w.Write(chunk);
+            if !werr.IsNil() {
+                self.err = werr.clone();
+            }
+            self.nbuf = 0;
+        }
+        self.err.clone()
+    }
+}
+
+// `Encoder<W>` is itself an `io.Writer`. Allows `io::Copy(enc, src)`
+// patterns and lets it slot into pipelines (e.g. quoted-printable +
+// base64). Note: Close() must still be called explicitly to flush.
+impl<W: crate::io::Writer> crate::io::Writer for Encoder<W> {
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        Encoder::Write(self, p)
+    }
+}
+
+// Go: base64.go:284
+//   func NewEncoder(enc *Encoding, w io.Writer) io.WriteCloser
+//
+// Goish takes `Encoding` by value (it's `Copy`) and the writer by
+// move. The returned `Encoder<W>` exposes both `Write` and `Close`.
+pub fn NewEncoder<W: crate::io::Writer>(enc: Encoding, w: W) -> Encoder<W> {
+    Encoder {
+        err: crate::errors::nil,
+        enc,
+        w,
+        buf: [0; 3],
+        nbuf: 0,
+        out: [0; 1024],
     }
 }
