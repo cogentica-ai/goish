@@ -217,6 +217,74 @@ pub fn Len64(x: u64) -> int {
     64 - x.leading_zeros() as int
 }
 
+// ─── Add / Add32 / Add64 (bits.go:360-393) ────────────────────────────
+
+/// `bits.Add(x, y, carry)` — sum-with-carry; `(sum, carryOut)`.
+/// `carry` must be 0 or 1; `carryOut` is 0 or 1.
+pub fn Add(x: uint, y: uint, carry: uint) -> (uint, uint) {
+    // Go: UintSize == 64 path on goish.
+    let (s, c) = Add64(x as u64, y as u64, carry as u64);
+    (s as uint, c as uint)
+}
+
+/// `bits.Add32(x, y, carry)` — sum-with-carry on 32-bit operands.
+pub fn Add32(x: u32, y: u32, carry: u32) -> (u32, u32) {
+    // Go: sum64 := uint64(x) + uint64(y) + uint64(carry)
+    //     sum = uint32(sum64); carryOut = uint32(sum64 >> 32)
+    let sum64 = (x as u64) + (y as u64) + (carry as u64);
+    (sum64 as u32, (sum64 >> 32) as u32)
+}
+
+/// `bits.Add64(x, y, carry)` — sum-with-carry on 64-bit operands.
+pub fn Add64(x: u64, y: u64, carry: u64) -> (u64, u64) {
+    // Go: sum = x + y + carry
+    //     carryOut = ((x & y) | ((x | y) &^ sum)) >> 63
+    let sum = x.wrapping_add(y).wrapping_add(carry);
+    let carry_out = ((x & y) | ((x | y) & !sum)) >> 63;
+    (sum, carry_out)
+}
+
+// ─── Sub / Sub32 / Sub64 (bits.go:402-436) ────────────────────────────
+
+/// `bits.Sub(x, y, borrow)` — diff-with-borrow; `(diff, borrowOut)`.
+pub fn Sub(x: uint, y: uint, borrow: uint) -> (uint, uint) {
+    let (d, b) = Sub64(x as u64, y as u64, borrow as u64);
+    (d as uint, b as uint)
+}
+
+/// `bits.Sub32(x, y, borrow)`.
+pub fn Sub32(x: u32, y: u32, borrow: u32) -> (u32, u32) {
+    // Go: diff = x - y - borrow
+    //     borrowOut = ((^x & y) | (^(x ^ y) & diff)) >> 31
+    let diff = x.wrapping_sub(y).wrapping_sub(borrow);
+    let borrow_out = (((!x) & y) | ((!(x ^ y)) & diff)) >> 31;
+    (diff, borrow_out)
+}
+
+/// `bits.Sub64(x, y, borrow)`.
+pub fn Sub64(x: u64, y: u64, borrow: u64) -> (u64, u64) {
+    // Go: diff = x - y - borrow
+    //     borrowOut = ((^x & y) | (^(x ^ y) & diff)) >> 63
+    let diff = x.wrapping_sub(y).wrapping_sub(borrow);
+    let borrow_out = (((!x) & y) | ((!(x ^ y)) & diff)) >> 63;
+    (diff, borrow_out)
+}
+
+// ─── Mul / Mul32 (bits.go:445-463) ────────────────────────────────────
+
+/// `bits.Mul(x, y)` — full-width product `(hi, lo) = x * y`.
+pub fn Mul(x: uint, y: uint) -> (uint, uint) {
+    let (h, l) = Mul64(x as u64, y as u64);
+    (h as uint, l as uint)
+}
+
+/// `bits.Mul32(x, y)` — 64-bit product, returned as `(hi, lo)`.
+pub fn Mul32(x: u32, y: u32) -> (u32, u32) {
+    // Go: tmp := uint64(x) * uint64(y); hi, lo = uint32(tmp>>32), uint32(tmp)
+    let tmp = (x as u64).wrapping_mul(y as u64);
+    ((tmp >> 32) as u32, tmp as u32)
+}
+
 // ─── Mul64 (bits.go:470) ──────────────────────────────────────────────
 
 /// `bits.Mul64(x, y)` — full 128-bit product `(hi, lo) = x * y`.
@@ -246,4 +314,125 @@ pub fn Mul64(x: u64, y: u64) -> (u64, u64) {
         .wrapping_add(w1 >> 32);
     let lo = x.wrapping_mul(y);
     (hi, lo)
+}
+
+// ─── Div / Div32 / Div64 (bits.go:492-568) ────────────────────────────
+
+/// `bits.Div(hi, lo, y)` — `(hi, lo)/y` -> `(quo, rem)`. Panics for
+/// `y == 0` or `y <= hi` (quotient overflow).
+pub fn Div(hi: uint, lo: uint, y: uint) -> (uint, uint) {
+    let (q, r) = Div64(hi as u64, lo as u64, y as u64);
+    (q as uint, r as uint)
+}
+
+/// `bits.Div32(hi, lo, y)` — 64-bit dividend, 32-bit divisor.
+pub fn Div32(hi: u32, lo: u32, y: u32) -> (u32, u32) {
+    // Go: if y != 0 && y <= hi { panic(overflowError) }
+    //     z := uint64(hi)<<32 | uint64(lo)
+    //     quo, rem = uint32(z/uint64(y)), uint32(z%uint64(y))
+    if y == 0 {
+        panic!("integer divide by zero");
+    }
+    if y <= hi {
+        panic!("bits: integer overflow");
+    }
+    let z = ((hi as u64) << 32) | (lo as u64);
+    let yy = y as u64;
+    ((z / yy) as u32, (z % yy) as u32)
+}
+
+/// `bits.Div64(hi, lo, y)` — 128-bit dividend, 64-bit divisor.
+pub fn Div64(hi: u64, lo: u64, mut y: u64) -> (u64, u64) {
+    // Go: if y == 0 { panic(divideError) }
+    //     if y <= hi { panic(overflowError) }
+    if y == 0 {
+        panic!("integer divide by zero");
+    }
+    if y <= hi {
+        panic!("bits: integer overflow");
+    }
+    // Go: if hi == 0 { return lo / y, lo % y }
+    if hi == 0 {
+        return (lo / y, lo % y);
+    }
+    // Go: s := uint(LeadingZeros64(y))
+    //     y <<= s
+    let s = LeadingZeros64(y) as u32;
+    y <<= s;
+
+    // Go: const two32 = 1 << 32; const mask32 = two32 - 1
+    let two32: u64 = 1 << 32;
+    let mask32: u64 = two32 - 1;
+    let yn1 = y >> 32;
+    let yn0 = y & mask32;
+    // Go: un32 := hi<<s | lo>>(64-s)
+    //     un10 := lo << s
+    let un32: u64 = if s == 0 { hi } else { (hi << s) | (lo >> (64 - s)) };
+    let un10 = lo << s;
+    let un1 = un10 >> 32;
+    let un0 = un10 & mask32;
+    let mut q1 = un32 / yn1;
+    let mut rhat = un32 - q1 * yn1;
+
+    // Go: for q1 >= two32 || q1*yn0 > two32*rhat+un1 { q1--; rhat += yn1; if rhat >= two32 { break } }
+    while q1 >= two32 || q1.wrapping_mul(yn0) > two32.wrapping_mul(rhat).wrapping_add(un1) {
+        q1 -= 1;
+        rhat = rhat.wrapping_add(yn1);
+        if rhat >= two32 {
+            break;
+        }
+    }
+
+    // Go: un21 := un32*two32 + un1 - q1*y
+    let un21 = un32
+        .wrapping_mul(two32)
+        .wrapping_add(un1)
+        .wrapping_sub(q1.wrapping_mul(y));
+    let mut q0 = un21 / yn1;
+    rhat = un21 - q0 * yn1;
+
+    while q0 >= two32 || q0.wrapping_mul(yn0) > two32.wrapping_mul(rhat).wrapping_add(un0) {
+        q0 -= 1;
+        rhat = rhat.wrapping_add(yn1);
+        if rhat >= two32 {
+            break;
+        }
+    }
+
+    // Go: return q1*two32 + q0, (un21*two32 + un0 - q0*y) >> s
+    let quo = q1.wrapping_mul(two32).wrapping_add(q0);
+    let rem = un21
+        .wrapping_mul(two32)
+        .wrapping_add(un0)
+        .wrapping_sub(q0.wrapping_mul(y))
+        >> s;
+    (quo, rem)
+}
+
+// ─── Rem / Rem32 / Rem64 (bits.go:573-599) ────────────────────────────
+
+/// `bits.Rem(hi, lo, y)` — remainder of `(hi, lo)/y`. Panics on `y == 0`,
+/// but unlike `Div` does not panic on quotient overflow.
+pub fn Rem(hi: uint, lo: uint, y: uint) -> uint {
+    Rem64(hi as u64, lo as u64, y as u64) as uint
+}
+
+/// `bits.Rem32(hi, lo, y)`.
+pub fn Rem32(hi: u32, lo: u32, y: u32) -> u32 {
+    // Go: return uint32((uint64(hi)<<32 | uint64(lo)) % uint64(y))
+    if y == 0 {
+        panic!("integer divide by zero");
+    }
+    ((((hi as u64) << 32) | (lo as u64)) % (y as u64)) as u32
+}
+
+/// `bits.Rem64(hi, lo, y)`. Reduces `hi mod y` first to avoid the
+/// quotient-overflow panic in `Div64`.
+pub fn Rem64(hi: u64, lo: u64, y: u64) -> u64 {
+    // Go: _, rem := Div64(hi%y, lo, y); return rem
+    if y == 0 {
+        panic!("integer divide by zero");
+    }
+    let (_, rem) = Div64(hi % y, lo, y);
+    rem
 }
