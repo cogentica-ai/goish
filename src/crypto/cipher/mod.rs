@@ -164,6 +164,7 @@ pub trait AEAD {
 mod cbc;
 mod cfb;
 mod ctr;
+mod gcm;
 mod io;
 mod ofb;
 
@@ -172,5 +173,6 @@ pub use self::cbc::{
 };
 pub use self::cfb::{NewCFBDecrypter, NewCFBEncrypter, CFB};
 pub use self::ctr::{NewCTR, CTR};
+pub use self::gcm::{NewGCM, NewGCMWithNonceSize, NewGCMWithTagSize, GCM};
 pub use self::io::{StreamReader, StreamWriter};
 pub use self::ofb::{NewOFB, OFB};
