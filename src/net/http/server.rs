@@ -139,8 +139,8 @@ impl ServeMux {
     /// `Box<dyn Handler>` — without writing `Arc::new(...) as
     /// Arc<dyn http::Handler>` at the call site. Mirrors Go's
     /// `mux.Handle(pattern, h Handler)` interface-value semantics.
-    pub fn Handle<H: Handler + 'static>(&self, pattern: string, h: H) {
-        self.handle_arc(pattern, Arc::new(h));
+    pub fn Handle<P: Into<string>, H: Handler + 'static>(&self, pattern: P, h: H) {
+        self.handle_arc(pattern.into(), Arc::new(h));
     }
 
     /// Internal: stores an already-arced handler. Used by `Handle`,
@@ -173,11 +173,11 @@ impl ServeMux {
     /// `mux.HandleFunc(pattern, fn)` — register a closure handler.
     /// The closure must be `Send + Sync + 'static` to be safely
     /// shared across the per-connection worker goroutines.
-    pub fn HandleFunc<F>(&self, pattern: string, f: F)
+    pub fn HandleFunc<P: Into<string>, F>(&self, pattern: P, f: F)
     where
         F: Fn(&mut ResponseWriter, &Request) + Send + Sync + 'static,
     {
-        self.handle_arc(pattern, Arc::new(HandlerFunc(f)));
+        self.handle_arc(pattern.into(), Arc::new(HandlerFunc(f)));
     }
 
     /// Internal: pick the handler for `r`. Returns the chosen handler
@@ -333,7 +333,7 @@ impl Handler for notFoundHandler {
 /// HTTP error response. Resets Content-Type to text/plain, sets
 /// X-Content-Type-Options: nosniff, deletes any prior Content-Length,
 /// then writes status + body + trailing newline.
-pub fn Error(w: &mut ResponseWriter, error: string, code: int) {
+pub fn Error<S: Into<string>>(w: &mut ResponseWriter, error: S, code: int) {
     // Go: h := w.Header(); h.Del("Content-Length")
     w.Header().Del(string("Content-Length"));
     // Go: h.Set("Content-Type", "text/plain; charset=utf-8")
@@ -345,7 +345,7 @@ pub fn Error(w: &mut ResponseWriter, error: string, code: int) {
     // Go: w.WriteHeader(code)
     w.WriteHeader(code);
     // Go: fmt.Fprintln(w, error) — writes message + "\n"
-    let _ = w.Write(crate::convert::bytes(error));
+    let _ = w.Write(crate::convert::bytes(error.into()));
     let _ = w.Write(crate::convert::bytes("\n"));
 }
 
@@ -428,7 +428,11 @@ where
 /// Generic over `H: Handler + 'static` — accepts bare structs,
 /// `Arc<dyn Handler>`, etc. without explicit `Arc::new` at the call
 /// site.
-pub fn StripPrefix<H: Handler + 'static>(prefix: string, h: H) -> Arc<dyn Handler> {
+pub fn StripPrefix<P: Into<string>, H: Handler + 'static>(
+    prefix: P,
+    h: H,
+) -> Arc<dyn Handler> {
+    let prefix: string = prefix.into();
     let h: Arc<dyn Handler> = Arc::new(h);
     // Go: if prefix == "" { return h }
     if prefix.Len() == 0 {

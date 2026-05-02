@@ -1305,7 +1305,9 @@ fn addr_error(addr: crate::string, why: &str) -> crate::errors::error {
 /// IPv4 dotted literal; hostname resolution is not implemented in
 /// v1. Port `:0` lets the kernel pick a free port (recovered via
 /// `Listener.Addr()`).
-pub fn Listen(network: string, addr: string) -> (Listener, error) {
+pub fn Listen<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Listener, error) {
+    let network: string = network.into();
+    let addr: string = addr.into();
     if !is_tcp_network(&network) {
         return (
             dead_listener(),

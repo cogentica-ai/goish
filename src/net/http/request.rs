@@ -131,7 +131,8 @@ impl Request {
 
     /// `r.CookiesNamed(name)` (request.go:434) — return all request
     /// cookies with the given name. Empty `name` yields an empty slice.
-    pub fn CookiesNamed(&self, name: string) -> slice<super::cookie::Cookie> {
+    pub fn CookiesNamed<S: Into<string>>(&self, name: S) -> slice<super::cookie::Cookie> {
+        let name = name.into();
         // Go: if name == "" { return []*Cookie{} }
         if name.Len() == 0 {
             return slice::<super::cookie::Cookie>::__from_vec(Vec::new());
@@ -143,8 +144,8 @@ impl Request {
     /// `r.Cookie(name)` — return the named cookie, or
     /// `(Cookie::default(), ErrNoCookie)` if absent. Mirrors
     /// `(*Request).Cookie(name)` (request.go:418).
-    pub fn Cookie(&self, name: string) -> (super::cookie::Cookie, error) {
-        let matches = super::cookie::read_cookies(&self.Header, &name);
+    pub fn Cookie<S: Into<string>>(&self, name: S) -> (super::cookie::Cookie, error) {
+        let matches = super::cookie::read_cookies(&self.Header, &name.into());
         if matches.Len() > 0 {
             return (matches[0].clone(), errors::nil);
         }
@@ -155,8 +156,8 @@ impl Request {
     /// pattern match (e.g. `/users/{id}` → `r.PathValue("id")`).
     /// Returns the empty string if no such binding exists. Mirrors
     /// `(*Request).PathValue(name)` (request.go:472 in Go's source).
-    pub fn PathValue(&self, name: string) -> string {
-        let (v, ok) = self.path_values.Get(name);
+    pub fn PathValue<S: Into<string>>(&self, name: S) -> string {
+        let (v, ok) = self.path_values.Get(name.into());
         if ok {
             v
         } else {
@@ -166,8 +167,8 @@ impl Request {
 
     /// `r.SetPathValue(name, value)` — set a wildcard binding for
     /// testing or middleware use. Mirrors `(*Request).SetPathValue`.
-    pub fn SetPathValue(&mut self, name: string, value: string) {
-        self.path_values.Set(name, value);
+    pub fn SetPathValue<K: Into<string>, V: Into<string>>(&mut self, name: K, value: V) {
+        self.path_values.Set(name.into(), value.into());
     }
 
     /// Internal: bulk-install path bindings from a successful pattern
@@ -227,14 +228,14 @@ impl Request {
 
     /// `r.FormValue(key)` — first form value for `key`, or empty.
     /// Mirrors `(*Request).FormValue(key)` (request.go:1419).
-    pub fn FormValue(&self, key: string) -> string {
+    pub fn FormValue<S: Into<string>>(&self, key: S) -> string {
         // Go: if r.Form == nil { r.ParseMultipartForm(defaultMaxMemory) }
         if !self.form_state.Lock().parsed {
             let _ = self.ParseForm();
         }
         // Go: if vs := r.Form[key]; len(vs) > 0 { return vs[0] }
         let s = self.form_state.Lock();
-        let (vs, ok) = s.form.Get(key);
+        let (vs, ok) = s.form.Get(key.into());
         if ok && vs.Len() > 0 {
             return vs[0].clone();
         }
@@ -243,12 +244,12 @@ impl Request {
 
     /// `r.PostFormValue(key)` — first POST form value for `key`, or
     /// empty. Mirrors request.go:1434.
-    pub fn PostFormValue(&self, key: string) -> string {
+    pub fn PostFormValue<S: Into<string>>(&self, key: S) -> string {
         if !self.form_state.Lock().post_parsed {
             let _ = self.ParseForm();
         }
         let s = self.form_state.Lock();
-        let (vs, ok) = s.post_form.Get(key);
+        let (vs, ok) = s.post_form.Get(key.into());
         if ok && vs.Len() > 0 {
             return vs[0].clone();
         }

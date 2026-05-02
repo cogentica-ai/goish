@@ -39,30 +39,34 @@ impl Header {
 
     /// `h.Set(key, value)` — replaces any existing values associated
     /// with `key`. Mirrors `Header.Set` (header.go:53).
-    pub fn Set(&mut self, key: string, value: string) {
-        let k = canonical_key(&key);
+    ///
+    /// Generic over `impl Into<string>` for both args so callers can
+    /// pass `&str` literals directly: `h.Set("Content-Type", "text/plain")`
+    /// without wrapping in `string("…")`.
+    pub fn Set<K: Into<string>, V: Into<string>>(&mut self, key: K, value: V) {
+        let k = canonical_key(&key.into());
         let mut v: Vec<string> = Vec::with_capacity(1);
-        v.push(value);
+        v.push(value.into());
         self.inner.Set(k, slice::<string>::__from_vec(v));
     }
 
     /// `h.Add(key, value)` — appends to any existing values.
-    pub fn Add(&mut self, key: string, value: string) {
-        let k = canonical_key(&key);
+    pub fn Add<K: Into<string>, V: Into<string>>(&mut self, key: K, value: V) {
+        let k = canonical_key(&key.into());
         let (existing, ok) = self.inner.Get(k.clone());
         let mut v: Vec<string> = if ok {
             existing.__into_vec()
         } else {
             Vec::with_capacity(1)
         };
-        v.push(value);
+        v.push(value.into());
         self.inner.Set(k, slice::<string>::__from_vec(v));
     }
 
     /// `h.Get(key)` — first value, or empty string if absent. Same
     /// behavior as Go's `Header.Get` (header.go:43).
-    pub fn Get(&self, key: string) -> string {
-        let k = canonical_key(&key);
+    pub fn Get<K: Into<string>>(&self, key: K) -> string {
+        let k = canonical_key(&key.into());
         let (values, ok) = self.inner.Get(k);
         if ok && values.Len() > 0 {
             values[0].clone()
@@ -72,8 +76,8 @@ impl Header {
     }
 
     /// `h.Values(key)` — all values for `key`. Empty slice if absent.
-    pub fn Values(&self, key: string) -> slice<string> {
-        let k = canonical_key(&key);
+    pub fn Values<K: Into<string>>(&self, key: K) -> slice<string> {
+        let k = canonical_key(&key.into());
         let (values, ok) = self.inner.Get(k);
         if ok {
             values
@@ -83,8 +87,8 @@ impl Header {
     }
 
     /// `h.Del(key)` — remove all values for `key`.
-    pub fn Del(&mut self, key: string) {
-        let k = canonical_key(&key);
+    pub fn Del<K: Into<string>>(&mut self, key: K) {
+        let k = canonical_key(&key.into());
         self.inner.Delete(k);
     }
 

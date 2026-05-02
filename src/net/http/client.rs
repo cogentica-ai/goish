@@ -494,7 +494,7 @@ impl Client {
     }
 
     /// `(*Client).Get(url)` — issue a GET. Mirrors client.go:481.
-    pub fn Get(&self, url: string) -> (Response, error) {
+    pub fn Get<U: Into<string>>(&self, url: U) -> (Response, error) {
         let (req, err) = NewRequest(string("GET"), url, slice::<byte>::__from_vec(Vec::new()));
         if !err.IsNil() {
             return (Response::default(), err);
@@ -503,7 +503,7 @@ impl Client {
     }
 
     /// `(*Client).Head(url)`.
-    pub fn Head(&self, url: string) -> (Response, error) {
+    pub fn Head<U: Into<string>>(&self, url: U) -> (Response, error) {
         let (req, err) = NewRequest(string("HEAD"), url, slice::<byte>::__from_vec(Vec::new()));
         if !err.IsNil() {
             return (Response::default(), err);
@@ -512,23 +512,23 @@ impl Client {
     }
 
     /// `(*Client).Post(url, contentType, body)`.
-    pub fn Post(
+    pub fn Post<U: Into<string>, C: Into<string>>(
         &self,
-        url: string,
-        content_type: string,
+        url: U,
+        content_type: C,
         body: slice<byte>,
     ) -> (Response, error) {
         let (mut req, err) = NewRequest(string("POST"), url, body);
         if !err.IsNil() {
             return (Response::default(), err);
         }
-        req.Header.Set(string("Content-Type"), content_type);
+        req.Header.Set(string("Content-Type"), content_type.into());
         self.Do(&req)
     }
 
     /// `(*Client).PostForm(url, vals)` — POST `application/x-www-form-urlencoded`
     /// body built from key=value pairs.
-    pub fn PostForm(&self, url: string, vals: &[(string, string)]) -> (Response, error) {
+    pub fn PostForm<U: Into<string>>(&self, url: U, vals: &[(string, string)]) -> (Response, error) {
         let body = encode_form(vals);
         self.Post(
             url,
@@ -553,22 +553,26 @@ fn default_client() -> Arc<Client> {
 }
 
 /// `http.Get(url)`.
-pub fn Get(url: string) -> (Response, error) {
+pub fn Get<U: Into<string>>(url: U) -> (Response, error) {
     default_client().Get(url)
 }
 
 /// `http.Head(url)`.
-pub fn Head(url: string) -> (Response, error) {
+pub fn Head<U: Into<string>>(url: U) -> (Response, error) {
     default_client().Head(url)
 }
 
 /// `http.Post(url, contentType, body)`.
-pub fn Post(url: string, content_type: string, body: slice<byte>) -> (Response, error) {
+pub fn Post<U: Into<string>, C: Into<string>>(
+    url: U,
+    content_type: C,
+    body: slice<byte>,
+) -> (Response, error) {
     default_client().Post(url, content_type, body)
 }
 
 /// `http.PostForm(url, vals)`.
-pub fn PostForm(url: string, vals: &[(string, string)]) -> (Response, error) {
+pub fn PostForm<U: Into<string>>(url: U, vals: &[(string, string)]) -> (Response, error) {
     default_client().PostForm(url, vals)
 }
 
@@ -579,10 +583,10 @@ pub fn PostForm(url: string, vals: &[(string, string)]) -> (Response, error) {
 /// thread context through Request). Behaves identically to NewRequest
 /// in v1; switching to a context-aware Client/Transport later won't
 /// break call sites that already pass the ctx through.
-pub fn NewRequestWithContext(
+pub fn NewRequestWithContext<M: Into<string>, U: Into<string>>(
     _ctx: alloc::sync::Arc<dyn crate::context::Context>,
-    method: string,
-    url: string,
+    method: M,
+    url: U,
     body: slice<byte>,
 ) -> (Request, error) {
     NewRequest(method, url, body)
@@ -590,7 +594,13 @@ pub fn NewRequestWithContext(
 
 /// `http.NewRequest(method, url, body)` — slim. Body is a pre-buffered
 /// slice<byte> rather than an `io.Reader` (matches v1 Request shape).
-pub fn NewRequest(method: string, url: string, body: slice<byte>) -> (Request, error) {
+pub fn NewRequest<M: Into<string>, U: Into<string>>(
+    method: M,
+    url: U,
+    body: slice<byte>,
+) -> (Request, error) {
+    let method: string = method.into();
+    let url: string = url.into();
     let m = if method.Len() == 0 {
         string("GET")
     } else {

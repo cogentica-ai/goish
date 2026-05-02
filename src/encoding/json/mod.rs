@@ -30,7 +30,7 @@ use crate::gostring::string;
 use crate::io;
 use crate::runtime::spin::SpinLock;
 use crate::strconv;
-use crate::types::{byte, float64};
+use crate::types::{byte, float64, int};
 
 // ─── Value ─────────────────────────────────────────────────────────────
 
@@ -88,6 +88,47 @@ impl Value {
         } else {
             None
         }
+    }
+}
+
+// ─── ergonomic From impls — `obj.Set("k", "v")` Just Works ──────────
+//
+// Map.Set is generic over `Into<V>` where V = Value, so any type that
+// `From`-coerces to Value becomes a one-arg literal at the call site.
+// Mirrors Go's untyped map/JSON literals (`map[string]any{"k": "v"}`).
+
+impl From<&str> for Value {
+    #[inline]
+    fn from(s: &str) -> Self {
+        Value::String(string::from(s))
+    }
+}
+
+impl From<string> for Value {
+    #[inline]
+    fn from(s: string) -> Self {
+        Value::String(s)
+    }
+}
+
+impl From<bool> for Value {
+    #[inline]
+    fn from(b: bool) -> Self {
+        Value::Bool(b)
+    }
+}
+
+impl From<f64> for Value {
+    #[inline]
+    fn from(n: f64) -> Self {
+        Value::Number(n)
+    }
+}
+
+impl From<int> for Value {
+    #[inline]
+    fn from(n: int) -> Self {
+        Value::Number(n as f64)
     }
 }
 

@@ -116,16 +116,20 @@ where
     /// `m[k] = v` (long form). Use bracket syntax `m[k] = v` for
     /// idiomatic call sites; this method is here for cases where the
     /// receiver is awkward to access via `&mut m[k]`.
+    ///
+    /// Generic over `Into<K>` / `Into<V>` so callers can pass `&str`
+    /// literals against `map<string, …>` without wrapping each key
+    /// in `string("…")`.
     #[allow(non_snake_case)]
-    pub fn Set(&mut self, k: K, v: V) {
-        self.inner.insert(k, v);
+    pub fn Set<KI: Into<K>, VI: Into<V>>(&mut self, k: KI, v: VI) {
+        self.inner.insert(k.into(), v.into());
     }
 
     /// `delete(m, k)` (long form). Use the `delete!(m, k)` macro at
     /// call sites for the Go-shaped syntax.
     #[allow(non_snake_case)]
-    pub fn Delete(&mut self, k: K) {
-        self.inner.remove(&k);
+    pub fn Delete<KI: Into<K>>(&mut self, k: KI) {
+        self.inner.remove(&k.into());
     }
 
     /// All keys, sorted (BTreeMap order).
