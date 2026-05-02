@@ -154,3 +154,13 @@ pub trait AEAD {
         additionalData: slice<byte>,
     ) -> (slice<byte>, error);
 }
+
+// ─── Stream wrappers (io.go) ──────────────────────────────────────────
+//
+// Submodule that pairs `Stream` with `io::Reader` / `io::Writer`. Public
+// surface is re-exported here so users write `cipher::StreamReader` and
+// `cipher::StreamWriter` exactly as in Go.
+
+mod io;
+
+pub use self::io::{StreamReader, StreamWriter};
