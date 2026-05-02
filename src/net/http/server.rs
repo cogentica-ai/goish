@@ -46,6 +46,29 @@ pub trait Handler: Send + Sync {
     fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request);
 }
 
+// ─── blanket impls so Arc<T>/Box<T> satisfy `Handler` ───────────────
+//
+// Lets `mux.Handle(pat, h)` and `StripPrefix(pat, h)` (now generic over
+// `H: Handler + 'static`) accept either a bare struct, a wrapped
+// closure, or an already-`Arc<dyn Handler>` without the caller writing
+// `Arc::new(...) as Arc<dyn Handler>`. Mirrors Go's interface-value
+// passing where `*ServeMux` and `http.Handler` are interchangeable at
+// call sites.
+
+impl<T: Handler + ?Sized> Handler for Arc<T> {
+    #[inline]
+    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+        (**self).ServeHTTP(w, r)
+    }
+}
+
+impl<T: Handler + ?Sized> Handler for alloc::boxed::Box<T> {
+    #[inline]
+    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+        (**self).ServeHTTP(w, r)
+    }
+}
+
 /// `http.HandlerFunc` adapter — wrap a closure as a `Handler`.
 /// Mirrors Go's `type HandlerFunc func(ResponseWriter, *Request)`.
 pub struct HandlerFunc<F>(pub F)
@@ -110,7 +133,20 @@ impl ServeMux {
     /// contain `{` are parsed as Go 1.22 wildcards; any parse error
     /// causes the registration to be silently dropped (Go panics).
     /// If `pattern` already exists in the literal table, replaces it.
-    pub fn Handle(&self, pattern: string, h: Arc<dyn Handler>) {
+    ///
+    /// Generic over `H: Handler + 'static` so callers can pass any
+    /// `Handler` impl directly — bare structs, `Arc<dyn Handler>`,
+    /// `Box<dyn Handler>` — without writing `Arc::new(...) as
+    /// Arc<dyn http::Handler>` at the call site. Mirrors Go's
+    /// `mux.Handle(pattern, h Handler)` interface-value semantics.
+    pub fn Handle<H: Handler + 'static>(&self, pattern: string, h: H) {
+        self.handle_arc(pattern, Arc::new(h));
+    }
+
+    /// Internal: stores an already-arced handler. Used by `Handle`,
+    /// `HandleFunc`, and other internal callers that already hold an
+    /// `Arc<dyn Handler>`.
+    fn handle_arc(&self, pattern: string, h: Arc<dyn Handler>) {
         // Wildcard or method-prefixed → parse as Pattern.
         let needs_pattern_parse = strings::Contains(pattern.clone(), string("{"))
             || strings::ContainsAny(pattern.clone(), string(" \t"));
@@ -141,7 +177,7 @@ impl ServeMux {
     where
         F: Fn(&mut ResponseWriter, &Request) + Send + Sync + 'static,
     {
-        self.Handle(pattern, Arc::new(HandlerFunc(f)));
+        self.handle_arc(pattern, Arc::new(HandlerFunc(f)));
     }
 
     /// Internal: pick the handler for `r`. Returns the chosen handler
@@ -356,9 +392,18 @@ pub fn DefaultServeMux() -> Arc<ServeMux> {
 }
 
 /// `http.Handle(pattern, h)` (server.go:2576) — register on
-/// DefaultServeMux. Mirrors the free function shape.
-pub fn Handle(pattern: string, h: Arc<dyn Handler>) {
+/// DefaultServeMux. Mirrors the free function shape. Generic over
+/// `H: Handler + 'static` so callers can pass bare structs.
+pub fn Handle<H: Handler + 'static>(pattern: string, h: H) {
     DefaultServeMux().Handle(pattern, h);
+}
+
+/// `http::handler(h)` — wrap any `Handler + 'static` into the
+/// `Arc<dyn Handler>` shape required by `Server.Handler` field
+/// assignment. Saves the user from typing `Arc::new(h) as
+/// Arc<dyn http::Handler>` at the boundary.
+pub fn handler<H: Handler + 'static>(h: H) -> Arc<dyn Handler> {
+    Arc::new(h)
 }
 
 /// `http.HandleFunc(pattern, fn)` (server.go:2583) — register a
@@ -379,7 +424,12 @@ where
 /// that trims `prefix` from `r.URL.Path` (and `RawPath` if set)
 /// before delegating to `h`. If the request path doesn't begin with
 /// `prefix`, the handler replies with 404.
-pub fn StripPrefix(prefix: string, h: Arc<dyn Handler>) -> Arc<dyn Handler> {
+///
+/// Generic over `H: Handler + 'static` — accepts bare structs,
+/// `Arc<dyn Handler>`, etc. without explicit `Arc::new` at the call
+/// site.
+pub fn StripPrefix<H: Handler + 'static>(prefix: string, h: H) -> Arc<dyn Handler> {
+    let h: Arc<dyn Handler> = Arc::new(h);
     // Go: if prefix == "" { return h }
     if prefix.Len() == 0 {
         return h;

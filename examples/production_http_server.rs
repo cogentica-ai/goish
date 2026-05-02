@@ -165,9 +165,9 @@ fn h_root(w: &mut http::ResponseWriter, r: &http::Request) {
 
 // ─── middleware combinators ──────────────────────────────────────────
 
-struct LoggingMW(Arc<dyn http::Handler>);
+struct LoggingMW<H: http::Handler>(H);
 
-impl http::Handler for LoggingMW {
+impl<H: http::Handler> http::Handler for LoggingMW<H> {
     fn ServeHTTP(&self, w: &mut http::ResponseWriter, r: &http::Request) {
         REQ_COUNT.Add(1);
         let started = time::Now();
@@ -177,12 +177,12 @@ impl http::Handler for LoggingMW {
     }
 }
 
-struct BearerAuthMW {
-    inner: Arc<dyn http::Handler>,
+struct BearerAuthMW<H: http::Handler> {
+    inner: H,
     token: string,
 }
 
-impl http::Handler for BearerAuthMW {
+impl<H: http::Handler> http::Handler for BearerAuthMW<H> {
     fn ServeHTTP(&self, w: &mut http::ResponseWriter, r: &http::Request) {
         let auth = r.Header.Get(string("Authorization"));
         if !goish::strings::HasPrefix(&auth, string("Bearer ")) {
@@ -202,9 +202,9 @@ impl http::Handler for BearerAuthMW {
     }
 }
 
-struct CorsMW(Arc<dyn http::Handler>);
+struct CorsMW<H: http::Handler>(H);
 
-impl http::Handler for CorsMW {
+impl<H: http::Handler> http::Handler for CorsMW<H> {
     fn ServeHTTP(&self, w: &mut http::ResponseWriter, r: &http::Request) {
         w.Header().Set(
             string("Access-Control-Allow-Origin"),
@@ -262,21 +262,14 @@ fn main() {
     // /admin protected by Bearer middleware
     let admin_mux = http::ServeMux::new();
     admin_mux.HandleFunc(string("/secret"), h_protected);
-    let admin_inner: Arc<dyn http::Handler> = Arc::new(admin_mux);
-    let admin: Arc<dyn http::Handler> = Arc::new(BearerAuthMW {
-        inner: http::StripPrefix(string("/admin"), admin_inner),
+    mux.Handle(string("/admin/"), BearerAuthMW {
+        inner: http::StripPrefix(string("/admin"), admin_mux),
         token: string("s3cret"),
     });
-    mux.Handle(string("/admin/"), admin);
 
-    // Wrap whole mux in CORS + Logging.
-    let mux: Arc<dyn http::Handler> = Arc::new(mux);
-    let mux: Arc<dyn http::Handler> = Arc::new(CorsMW(mux));
-    let mux: Arc<dyn http::Handler> = Arc::new(LoggingMW(mux));
-
-    // Server with timeouts.
+    // Server with timeouts. Wrap whole mux in CORS + Logging.
     let mut srv = http::Server::default();
-    srv.Handler = mux;
+    srv.Handler = http::handler(LoggingMW(CorsMW(mux)));
     srv.ReadHeaderTimeout = time::Second;
     srv.ReadTimeout = time::Second * 3;
     srv.WriteTimeout = time::Second * 3;

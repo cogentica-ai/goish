@@ -64,9 +64,9 @@ pub use request::{
 pub use response::ResponseWriter;
 pub use httputil::NewSingleHostReverseProxy;
 pub use server::{
-    AllowQuerySemicolons, DefaultServeMux, ErrAbortHandler, ErrBodyNotAllowed, ErrContentLength,
-    ErrHandlerTimeout, ErrHijacked, ErrServerClosed, Error, Handle, HandleFunc, Handler,
-    HandlerFunc, ListenAndServe, NewServeMux, NotFound, NotFoundHandler, Redirect,
+    handler, AllowQuerySemicolons, DefaultServeMux, ErrAbortHandler, ErrBodyNotAllowed,
+    ErrContentLength, ErrHandlerTimeout, ErrHijacked, ErrServerClosed, Error, Handle, HandleFunc,
+    Handler, HandlerFunc, ListenAndServe, NewServeMux, NotFound, NotFoundHandler, Redirect,
     RedirectHandler, Serve, ServeMux, Server, StripPrefix,
 };
 pub use sniff::DetectContentType;
