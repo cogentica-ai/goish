@@ -631,7 +631,11 @@ impl Time {
     /// is ~1500 LOC).
     ///
     /// Pass the constant via `string(time::RFC3339)`.
-    pub fn Format(self, layout: crate::gostring::string) -> crate::gostring::string {
+    pub fn Format<S: Into<crate::gostring::string>>(
+        self,
+        layout: S,
+    ) -> crate::gostring::string {
+        let layout = layout.into();
         let (y, m, d, hh, mm, ss) = civil_from_unix(self.sec);
         let wd = self.Weekday().Int();
         let nano = self.nsec;
@@ -641,11 +645,8 @@ impl Time {
     /// `t.AppendFormat(b, layout)` (format.go:655) — append the formatted
     /// time to `b` and return the extended buffer. Slim port: delegates
     /// to `Format` then appends the byte representation.
-    pub fn AppendFormat(
-        self,
-        b: crate::goslice::slice<crate::types::byte>,
-        layout: crate::gostring::string,
-    ) -> crate::goslice::slice<crate::types::byte> {
+    pub fn AppendFormat<L: Into<crate::gostring::string>>(self, b: crate::goslice::slice<crate::types::byte>, layout: L) -> crate::goslice::slice<crate::types::byte> {
+        let layout: crate::gostring::string = layout.into();
         let s = self.Format(layout);
         let extra = crate::convert::bytes(s);
         // Go: return append(b, formatted...). Use range! to mirror.
@@ -1651,10 +1652,9 @@ fn fmt_int(buf: &mut [u8], mut v: u64) -> usize {
 /// Recognized layouts: RFC3339, DateTime, DateOnly, TimeOnly,
 /// RFC1123 (assumes "GMT" or arbitrary 3-letter zone), ANSIC.
 /// Anything else returns an error.
-pub fn Parse(
-    layout: crate::gostring::string,
-    value: crate::gostring::string,
-) -> (Time, crate::errors::error) {
+pub fn Parse<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>(layout: L, value: V) -> (Time, crate::errors::error) {
+    let layout: crate::gostring::string = layout.into();
+    let value: crate::gostring::string = value.into();
     use crate::gostring::string;
 
     let l = layout.clone();
@@ -1883,9 +1883,12 @@ fn parse_int(bs: &[u8]) -> Result<int, crate::errors::error> {
 /// each with optional fraction and a unit suffix, such as "300ms",
 /// "-1.5h" or "2h45m". Valid time units are "ns", "us" (or "µs"),
 /// "ms", "s", "m", "h".
-pub fn ParseDuration(s: crate::gostring::string) -> (Duration, crate::errors::error) {
+pub fn ParseDuration<S: Into<crate::gostring::string>>(
+    s: S,
+) -> (Duration, crate::errors::error) {
     use crate::gostring::string;
     use crate::strconv;
+    let s: crate::gostring::string = s.into();
 
     // [-+]?([0-9]*(\.[0-9]*)?[a-z]+)+
     let orig = s.clone();

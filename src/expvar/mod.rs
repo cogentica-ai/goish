@@ -178,7 +178,8 @@ impl String {
         self.s.Load().0
     }
     // Go: expvar.go:286 — func (v *String) Set(value string)
-    pub fn Set(&self, value: string) {
+    pub fn Set<V: Into<string>>(&self, value: V){
+        let value: string = value.into();
         self.s.Store(value);
     }
 }
@@ -273,7 +274,8 @@ impl Map {
     //   func (v *Map) Set(key string, av Var) { ... }
     /// Sets `key` to `av`. If the key didn't exist, it's added to the
     /// sorted key list.
-    pub fn Set(&self, key: string, av: Arc<dyn Var>) {
+    pub fn Set<K: Into<string>>(&self, key: K, av: Arc<dyn Var>){
+        let key: string = key.into();
         let mut s = self.state.Lock();
         let new_key = !s.m.contains_key(&key);
         s.m.insert(key.clone(), av);
@@ -391,7 +393,8 @@ fn vars() -> &'static Map {
 //   }
 /// Declare a named exported variable. Panics if the name is already
 /// registered.
-pub fn Publish(name: string, v: Arc<dyn Var>) {
+pub fn Publish<N: Into<string>>(name: N, v: Arc<dyn Var>){
+    let name: string = name.into();
     let m = vars();
     let mut s = m.state.Lock();
     if s.m.contains_key(&name) {
@@ -414,28 +417,32 @@ pub fn Get(name: &string) -> Option<Arc<dyn Var>> {
 //   }
 /// Convenience constructor: creates a new `Int`, publishes it under
 /// `name`, returns an `Arc<Int>` for the caller to keep.
-pub fn NewInt(name: string) -> Arc<Int> {
+pub fn NewInt<N: Into<string>>(name: N) -> Arc<Int> {
+    let name: string = name.into();
     let v: Arc<Int> = Arc::new(Int::new());
     Publish(name, v.clone() as Arc<dyn Var>);
     v
 }
 
 /// Convenience constructor: creates a new `Float`, publishes it.
-pub fn NewFloat(name: string) -> Arc<Float> {
+pub fn NewFloat<N: Into<string>>(name: N) -> Arc<Float> {
+    let name: string = name.into();
     let v: Arc<Float> = Arc::new(Float::new());
     Publish(name, v.clone() as Arc<dyn Var>);
     v
 }
 
 /// Convenience constructor: creates a new `Map`, publishes it.
-pub fn NewMap(name: string) -> Arc<Map> {
+pub fn NewMap<N: Into<string>>(name: N) -> Arc<Map> {
+    let name: string = name.into();
     let v: Arc<Map> = Arc::new(Map::new());
     Publish(name, v.clone() as Arc<dyn Var>);
     v
 }
 
 /// Convenience constructor: creates a new `String`, publishes it.
-pub fn NewString(name: string) -> Arc<String> {
+pub fn NewString<N: Into<string>>(name: N) -> Arc<String> {
+    let name: string = name.into();
     let v: Arc<String> = Arc::new(String::new());
     Publish(name, v.clone() as Arc<dyn Var>);
     v
@@ -527,7 +534,8 @@ fn format_cmdline() -> string {
 // Go: expvar.go:391
 //   func appendJSONQuote(b []byte, s string) []byte { ... }
 /// JSON-quote `s` and append to `b`. Mirrors Go's appendJSONQuote.
-pub fn appendJSONQuote(b: slice<byte>, s: string) -> slice<byte> {
+pub fn appendJSONQuote<S: Into<string>>(b: slice<byte>, s: S) -> slice<byte> {
+    let s: string = s.into();
     const HEX: &[byte; 16] = b"0123456789abcdef";
     let mut v = b.__into_vec();
     v.push(b'"');

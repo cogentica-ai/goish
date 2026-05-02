@@ -1131,7 +1131,8 @@ impl<W: io::Writer> Writer<W> {
     }
 
     /// `WriteString(s)` — append a string.
-    pub fn WriteString(&mut self, s: string) -> (int, error) {
+    pub fn WriteString<S: Into<string>>(&mut self, s: S) -> (int, error) {
+        let s: string = s.into();
         let mut s = s.as_bytes().to_vec();
         let mut nn: usize = 0;
         while s.len() > self.Available() as usize && self.err == nil {

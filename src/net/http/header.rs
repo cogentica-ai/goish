@@ -188,7 +188,8 @@ pub const TimeFormat: &str = "Mon, 02 Jan 2006 15:04:05 GMT";
 /// dash-separated cookie form (`Mon, 02-Jan-2006 15:04:05 MST`).
 /// `time::Parse` is not yet ported; once it lands this function
 /// will gain the third form.
-pub fn ParseTime(text: string) -> (crate::time::Time, crate::errors::error) {
+pub fn ParseTime<T: Into<string>>(text: T) -> (crate::time::Time, crate::errors::error) {
+    let text: string = text.into();
     if let Some(t) = parse_http_date(text.as_bytes(), b' ') {
         return (t, crate::errors::nil);
     }
@@ -309,7 +310,8 @@ fn sanitize_header_value(s: string) -> string {
 /// `http.CanonicalHeaderKey(s)` (header.go:234) — public canonical
 /// form. Mirrors Go's delegation to `textproto.CanonicalMIMEHeaderKey`.
 /// `content-type` → `Content-Type`, `accept-encoding` → `Accept-Encoding`.
-pub fn CanonicalHeaderKey(s: string) -> string {
+pub fn CanonicalHeaderKey<S: Into<string>>(s: S) -> string {
+    let s: string = s.into();
     canonical_key(&s)
 }
 

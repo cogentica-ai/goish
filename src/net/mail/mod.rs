@@ -158,7 +158,8 @@ impl Header {
     //   func (h Header) Get(key string) string {
     //       return textproto.MIMEHeader(h).Get(key)
     //   }
-    pub fn Get(&self, key: string) -> string {
+    pub fn Get<K: Into<string>>(&self, key: K) -> string {
+        let key: string = key.into();
         textproto::Get(&self.0, key)
     }
 
@@ -169,7 +170,8 @@ impl Header {
     }
 
     // Convenience: existence check (Go does `_, ok := h[k]` directly).
-    pub fn Has(&self, key: string) -> bool {
+    pub fn Has<K: Into<string>>(&self, key: K) -> bool {
+        let key: string = key.into();
         let k = textproto::CanonicalMIMEHeaderKey(key);
         self.0.Has(k)
     }

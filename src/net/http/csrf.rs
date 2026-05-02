@@ -57,7 +57,8 @@ pub fn NewCrossOriginProtection() -> Arc<CrossOriginProtection> {
 impl CrossOriginProtection {
     /// `AddTrustedOrigin(origin)` (csrf.go:57). Origin must look like
     /// `scheme://host[:port]` — no path / query / fragment.
-    pub fn AddTrustedOrigin(&self, origin: string) -> error {
+    pub fn AddTrustedOrigin<O: Into<string>>(&self, origin: O) -> error {
+        let origin: string = origin.into();
         // Go: u, err := url.Parse(origin)
         let (u, err) = url::Parse(origin.clone());
         if !err.IsNil() {
@@ -93,7 +94,8 @@ impl CrossOriginProtection {
 
     /// `AddInsecureBypassPattern(pattern)` (csrf.go:95). Permits all
     /// requests matching `pattern` (uses ServeMux match semantics).
-    pub fn AddInsecureBypassPattern(&self, pattern: string) {
+    pub fn AddInsecureBypassPattern<P: Into<string>>(&self, pattern: P){
+        let pattern: string = pattern.into();
         // Go: lazy-init c.bypass via CAS loop.
         let bypass = loop {
             if let Some(b) = self.bypass.Load() {

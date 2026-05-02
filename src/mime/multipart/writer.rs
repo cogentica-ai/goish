@@ -49,7 +49,8 @@ impl<W: IoWriter> Writer<W> {
     /// `(*Writer).SetBoundary(s)` (writer.go:46) — override the random
     /// default with an explicit boundary. Must be called before any
     /// parts are written.
-    pub fn SetBoundary(&mut self, boundary: string) -> error {
+    pub fn SetBoundary<B: Into<string>>(&mut self, boundary: B) -> error {
+        let boundary: string = boundary.into();
         if self.has_lastpart {
             return errors::New(string("mime: SetBoundary called after write"));
         }
@@ -154,7 +155,9 @@ impl<W: IoWriter> Writer<W> {
 
     /// `(*Writer).CreateFormField + Write` (writer.go:145, :160) —
     /// emit a `form-data; name=…` part with the given string value.
-    pub fn WriteField(&mut self, fieldname: string, value: string) -> error {
+    pub fn WriteField<F: Into<string>, V: Into<string>>(&mut self, fieldname: F, value: V) -> error {
+        let fieldname: string = fieldname.into();
+        let value: string = value.into();
         let mut h = Header::new();
         let mut cd = strings::Builder::new();
         let _ = cd.WriteString("form-data; name=\"");
@@ -167,12 +170,9 @@ impl<W: IoWriter> Writer<W> {
     /// `(*Writer).CreateFormFile + Write` (writer.go:136). Emit a
     /// `form-data; name=…; filename=…` part with body and
     /// `Content-Type: application/octet-stream`.
-    pub fn WriteFile(
-        &mut self,
-        fieldname: string,
-        filename: string,
-        body: slice<byte>,
-    ) -> error {
+    pub fn WriteFile<F: Into<string>, F1: Into<string>>(&mut self, fieldname: F, filename: F1, body: slice<byte>) -> error {
+        let fieldname: string = fieldname.into();
+        let filename: string = filename.into();
         let mut h = Header::new();
         h.Set(
             string("Content-Disposition"),
@@ -197,7 +197,9 @@ impl<W: IoWriter> Writer<W> {
 }
 
 /// `multipart.FileContentDisposition(field, filename)` (writer.go:154).
-pub fn FileContentDisposition(fieldname: string, filename: string) -> string {
+pub fn FileContentDisposition<F: Into<string>, F1: Into<string>>(fieldname: F, filename: F1) -> string {
+    let fieldname: string = fieldname.into();
+    let filename: string = filename.into();
     let mut b = strings::Builder::new();
     let _ = b.WriteString("form-data; name=\"");
     let _ = b.WriteString(escape_quotes(fieldname));

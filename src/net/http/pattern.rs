@@ -83,7 +83,8 @@ impl Default for Segment {
 ///
 /// Syntax: `[METHOD] [HOST]/[PATH]` where each PATH segment is either
 /// a literal or a wildcard `{name}` / `{name...}` / `{$}`.
-pub fn parse_pattern(s: string) -> (Pattern, error) {
+pub fn parse_pattern<S: Into<string>>(s: S) -> (Pattern, error) {
+    let s: string = s.into();
     // Go: if len(s) == 0 { return nil, errors.New("empty pattern") }
     if s.Len() == 0 {
         return (default_pattern(), errors::New(string("empty pattern")));

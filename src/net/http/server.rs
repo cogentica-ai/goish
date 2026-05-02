@@ -471,7 +471,8 @@ impl Handler for stripPrefixHandler {
 /// `http.Redirect(w, r, url, code)` (server.go:2403). Replies with a
 /// redirect to `url`. Slim port: relative paths are resolved against
 /// `r.URL.Path` via `path::Clean` + `path::Split`.
-pub fn Redirect(w: &mut ResponseWriter, r: &Request, url: string, code: int) {
+pub fn Redirect<U: Into<string>>(w: &mut ResponseWriter, r: &Request, url: U, code: int){
+    let url: string = url.into();
     let mut url = url;
 
     // Go: if u, err := url.Parse(url); err == nil { … relative resolve … }
@@ -547,7 +548,8 @@ pub fn Redirect(w: &mut ResponseWriter, r: &Request, url: string, code: int) {
 
 /// `http.RedirectHandler(url, code)` (server.go:2488). Returns a
 /// handler that redirects all requests to `url` with the given status.
-pub fn RedirectHandler(url: string, code: int) -> Arc<dyn Handler> {
+pub fn RedirectHandler<U: Into<string>>(url: U, code: int) -> Arc<dyn Handler> {
+    let url: string = url.into();
     Arc::new(redirectHandler { url, code })
 }
 
@@ -1084,7 +1086,8 @@ impl Server {
 /// Mirrors Go's `func ListenAndServe(addr string, handler Handler) error`
 /// (server.go:3702). For per-server config (timeouts, shutdown), use
 /// `http::Server` directly.
-pub fn ListenAndServe(addr: string, handler: Arc<dyn Handler>) -> error {
+pub fn ListenAndServe<A: Into<string>>(addr: A, handler: Arc<dyn Handler>) -> error {
+    let addr: string = addr.into();
     let srv = Arc::new(Server {
         Addr: addr,
         Handler: handler,

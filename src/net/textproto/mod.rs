@@ -97,7 +97,8 @@ impl ErrorTrait for ProtocolError {
 
 /// `textproto.TrimString(s)` (textproto.go:127) — strip leading/trailing
 /// ASCII space (' ', '\t', '\n', '\r').
-pub fn TrimString(s: string) -> string {
+pub fn TrimString<S: Into<string>>(s: S) -> string {
+    let s: string = s.into();
     let b = crate::gostring::__crate_as_bytes(&s);
     let mut lo = 0usize;
     let mut hi = b.len();
@@ -140,12 +141,15 @@ pub type MIMEHeader = map<string, slice<string>>;
 /// `textproto.CanonicalMIMEHeaderKey(s)` (reader.go:651). Re-exported
 /// from the http header implementation since both produce the same
 /// RFC 9112 canonical form (`content-type` → `Content-Type`).
-pub fn CanonicalMIMEHeaderKey(s: string) -> string {
+pub fn CanonicalMIMEHeaderKey<S: Into<string>>(s: S) -> string {
+    let s: string = s.into();
     crate::net::http::CanonicalHeaderKey(s)
 }
 
 /// `(MIMEHeader).Add(key, value)` (header.go:13).
-pub fn Add(h: &mut MIMEHeader, key: string, value: string) {
+pub fn Add<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: V){
+    let key: string = key.into();
+    let value: string = value.into();
     let k = CanonicalMIMEHeaderKey(key);
     let cur = if h.Has(k.clone()) {
         h[k.clone()].clone()
@@ -158,13 +162,16 @@ pub fn Add(h: &mut MIMEHeader, key: string, value: string) {
 }
 
 /// `(MIMEHeader).Set(key, value)` (header.go:21).
-pub fn Set(h: &mut MIMEHeader, key: string, value: string) {
+pub fn Set<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: V){
+    let key: string = key.into();
+    let value: string = value.into();
     let k = CanonicalMIMEHeaderKey(key);
     h[k] = slice::__from_vec(alloc::vec![value]);
 }
 
 /// `(MIMEHeader).Get(key)` (header.go:30).
-pub fn Get(h: &MIMEHeader, key: string) -> string {
+pub fn Get<K: Into<string>>(h: &MIMEHeader, key: K) -> string {
+    let key: string = key.into();
     let k = CanonicalMIMEHeaderKey(key);
     if !h.Has(k.clone()) {
         return string::new();
@@ -177,7 +184,8 @@ pub fn Get(h: &MIMEHeader, key: string) -> string {
 }
 
 /// `(MIMEHeader).Values(key)` (header.go:46).
-pub fn Values(h: &MIMEHeader, key: string) -> slice<string> {
+pub fn Values<K: Into<string>>(h: &MIMEHeader, key: K) -> slice<string> {
+    let key: string = key.into();
     let k = CanonicalMIMEHeaderKey(key);
     if !h.Has(k.clone()) {
         return slice::__from_vec(Vec::new());
@@ -186,7 +194,8 @@ pub fn Values(h: &MIMEHeader, key: string) -> slice<string> {
 }
 
 /// `(MIMEHeader).Del(key)` (header.go:54).
-pub fn Del(h: &mut MIMEHeader, key: string) {
+pub fn Del<K: Into<string>>(h: &mut MIMEHeader, key: K){
+    let key: string = key.into();
     let k = CanonicalMIMEHeaderKey(key);
     h.Delete(k);
 }
@@ -219,7 +228,8 @@ impl<W: io::Writer> Writer<W> {
     /// variadic over `any` which we can't replicate without macro
     /// machinery; the macro layer in goish (`Fprintf!`) is the
     /// idiomatic path for variadic format calls.
-    pub fn PrintfLine(&mut self, line: string) -> error {
+    pub fn PrintfLine<L: Into<string>>(&mut self, line: L) -> error {
+        let line: string = line.into();
         self.closeDot();
         let (_, err) = self.W.WriteString(line);
         if !err.IsNil() {

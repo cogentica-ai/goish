@@ -354,7 +354,8 @@ impl Encoding {
 
     /// `Encoding.DecodeString(s)` (base32.go:421). Returns the decoded
     /// bytes plus any error.
-    pub fn DecodeString(&self, s: string) -> (slice<byte>, error) {
+    pub fn DecodeString<S: Into<string>>(&self, s: S) -> (slice<byte>, error) {
+        let s: string = s.into();
         let bv: Vec<byte> = crate::gostring::__crate_as_bytes(&s).to_vec();
         let n_max = self.DecodedLen(bv.len() as int) as usize;
         // Strip newlines first (matches Go's stripNewlines).

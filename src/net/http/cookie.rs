@@ -93,7 +93,9 @@ impl Cookie {
     /// Convenience constructor: a Cookie with `Name`/`Value` set and
     /// every other field at its zero value. The Go-idiomatic way is
     /// the struct literal, but this is handier for the common case.
-    pub fn new(name: string, value: string) -> Self {
+    pub fn new<N: Into<string>, V: Into<string>>(name: N, value: V) -> Self {
+        let name: string = name.into();
+        let value: string = value.into();
         let mut c = Cookie::default();
         c.Name = name;
         c.Value = value;
@@ -151,7 +153,8 @@ fn cookie_num_within_max(n: usize) -> bool {
 /// `http.ParseCookie(line)` — parse a `Cookie:` header value into the
 /// list of cookies it carries (cookie.go:91). Same name may appear
 /// multiple times.
-pub fn ParseCookie(line: string) -> (slice<Cookie>, error) {
+pub fn ParseCookie<L: Into<string>>(line: L) -> (slice<Cookie>, error) {
+    let line: string = line.into();
     let semi_count = strings::Count(line.clone(), string(";")) as usize;
     if !cookie_num_within_max(semi_count + 1) {
         return (slice::<Cookie>::__from_vec(Vec::new()), err_num_limit());
@@ -186,7 +189,8 @@ pub fn ParseCookie(line: string) -> (slice<Cookie>, error) {
 
 /// `http.ParseSetCookie(line)` — parse a `Set-Cookie:` header value
 /// (cookie.go:120).
-pub fn ParseSetCookie(line: string) -> (Cookie, error) {
+pub fn ParseSetCookie<L: Into<string>>(line: L) -> (Cookie, error) {
+    let line: string = line.into();
     let trimmed = strings::TrimSpace(line.clone());
     let parts = strings::Split(trimmed, string(";"));
     if parts.Len() == 1 && parts[0].Len() == 0 {

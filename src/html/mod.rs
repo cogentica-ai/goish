@@ -274,7 +274,8 @@ fn htmlEscaper() -> strings::Replacer {
 /// `html.EscapeString` — escapes `<`, `>`, `&`, `'` and `"`. The
 /// inverse is [`UnescapeString`] (which also recognises numeric
 /// character references).
-pub fn EscapeString(s: string) -> string {
+pub fn EscapeString<S: Into<string>>(s: S) -> string {
+    let s: string = s.into();
     htmlEscaper().Replace(s)
 }
 
@@ -291,7 +292,8 @@ pub fn EscapeString(s: string) -> string {
 /// `html.UnescapeString` — inverse of [`EscapeString`], plus all
 /// numeric character references (`&#NN;`, `&#xNN;`). The full HTML5
 /// named-entity table is **not** shipped (see module docs).
-pub fn UnescapeString(s: string) -> string {
+pub fn UnescapeString<S: Into<string>>(s: S) -> string {
+    let s: string = s.into();
     // Go: escape.go:188 — i := strings.IndexByte(s, '&')
     let i = strings::IndexByte(s.clone(), b'&');
 

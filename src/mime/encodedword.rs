@@ -44,7 +44,9 @@ fn err_invalid_word() -> error {
 
 impl WordEncoder {
     /// `(WordEncoder).Encode(charset, s)` (encodedword.go:35).
-    pub fn Encode(self, charset: string, s: string) -> string {
+    pub fn Encode<C: Into<string>, S: Into<string>>(self, charset: C, s: S) -> string {
+        let charset: string = charset.into();
+        let s: string = s.into();
         // Go: if !needsEncoding(s) { return s }
         if !needs_encoding(&s) {
             return s;
@@ -247,7 +249,8 @@ impl WordDecoder {
     }
 
     /// `(*WordDecoder).Decode(word)` (encodedword.go:198).
-    pub fn Decode(&self, word: string) -> (string, error) {
+    pub fn Decode<W: Into<string>>(&self, word: W) -> (string, error) {
+        let word: string = word.into();
         // Go: if len(word) < 8 || !strings.HasPrefix(word, "=?") ||
         //         !strings.HasSuffix(word, "?=") || strings.Count(word, "?") != 4 {
         if word.Len() < 8
@@ -289,7 +292,8 @@ impl WordDecoder {
     }
 
     /// `(*WordDecoder).DecodeHeader(header)` (encodedword.go:230).
-    pub fn DecodeHeader(&self, header: string) -> (string, error) {
+    pub fn DecodeHeader<H: Into<string>>(&self, header: H) -> (string, error) {
+        let header: string = header.into();
         // Go: i := strings.Index(header, "=?"); if i == -1 { return header, nil }
         let i0 = strings::Index(header.clone(), string::from_static("=?"));
         if i0 == -1 {

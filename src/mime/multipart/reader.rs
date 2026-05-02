@@ -86,7 +86,8 @@ pub struct Reader {
 /// `r` is provided as the already-buffered body bytes rather than an
 /// io.Reader, since goish HTTP requests carry their body as a
 /// slice<byte>.
-pub fn NewReader(body: slice<byte>, boundary: string) -> Reader {
+pub fn NewReader<B: Into<string>>(body: slice<byte>, boundary: B) -> Reader {
+    let boundary: string = boundary.into();
     Reader {
         body,
         boundary,

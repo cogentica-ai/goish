@@ -305,7 +305,8 @@ impl<V: Clone + Default + Send + 'static> Group<V> {
     /// `ForgetUnshared` tells the singleflight to forget about a key if
     /// no other goroutines are waiting for the same key. Returns
     /// whether the key was forgotten or unknown.
-    pub fn ForgetUnshared(&self, key: string) -> bool {
+    pub fn ForgetUnshared<K: Into<string>>(&self, key: K) -> bool {
+        let key: string = key.into();
         let mut s = self.state.Lock();
         let m = match s.m.as_mut() {
             None => return true,

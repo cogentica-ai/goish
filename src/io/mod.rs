@@ -222,8 +222,11 @@ pub fn Copy(dst: &mut dyn Writer, src: &mut dyn Reader) -> (i64, error) {
 }
 
 /// `io.WriteString(w, s)` — convenience: write a string to a Writer.
-pub fn WriteString(w: &mut dyn Writer, s: crate::gostring::string) -> (int, error) {
-    let buf = crate::convert::bytes(s);
+pub fn WriteString<S: Into<crate::gostring::string>>(
+    w: &mut dyn Writer,
+    s: S,
+) -> (int, error) {
+    let buf = crate::convert::bytes(s.into());
     w.Write(buf)
 }
 

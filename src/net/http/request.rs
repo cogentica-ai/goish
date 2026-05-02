@@ -356,7 +356,9 @@ impl Request {
 
     /// `r.SetBasicAuth(user, pass)` (request.go:1022) — set the
     /// `Authorization` header to "Basic " + base64(user:pass).
-    pub fn SetBasicAuth(&mut self, username: string, password: string) {
+    pub fn SetBasicAuth<U: Into<string>, P: Into<string>>(&mut self, username: U, password: P){
+        let username: string = username.into();
+        let password: string = password.into();
         let mut creds = crate::strings::Builder::new();
         let _ = creds.WriteString(username);
         let _ = creds.WriteByte(b':');
@@ -691,7 +693,8 @@ fn parse_header_line(line: &string) -> Option<(string, string)> {
 /// version string per RFC 7230 §2.6. `"HTTP/1.0"` → `(1, 0, true)`.
 /// Note: strings without a minor version (e.g. `"HTTP/2"`) are
 /// rejected.
-pub fn ParseHTTPVersion(vers: string) -> (int, int, bool) {
+pub fn ParseHTTPVersion<V: Into<string>>(vers: V) -> (int, int, bool) {
+    let vers: string = vers.into();
     // Go: switch vers { case "HTTP/1.1": return 1, 1, true; case "HTTP/1.0": return 1, 0, true }
     if vers == "HTTP/1.1" {
         return (1, 1, true);

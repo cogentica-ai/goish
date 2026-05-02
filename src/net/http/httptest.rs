@@ -31,17 +31,16 @@ use crate::types::byte;
 ///     `tls.ConnectionState`.
 ///   - Error → panic translation from httptest.go:52 dropped: callers
 ///     get a Request with empty fields plus a nil-check-able error.
-pub fn NewRequest(method: string, target: string, body: slice<byte>) -> Request {
+pub fn NewRequest<M: Into<string>, T: Into<string>>(method: M, target: T, body: slice<byte>) -> Request {
+    let method: string = method.into();
+    let target: string = target.into();
     NewRequestWithContext(crate::context::Background(), method, target, body)
 }
 
 /// `httptest.NewRequestWithContext` (httptest.go:46).
-pub fn NewRequestWithContext(
-    _ctx: Arc<dyn crate::context::Context>,
-    method: string,
-    target: string,
-    body: slice<byte>,
-) -> Request {
+pub fn NewRequestWithContext<M: Into<string>, T: Into<string>>(_ctx: Arc<dyn crate::context::Context>, method: M, target: T, body: slice<byte>) -> Request {
+    let method: string = method.into();
+    let target: string = target.into();
     // Go: if method == "" { method = "GET" }
     let m = if method.Len() == 0 {
         string::from_static("GET")

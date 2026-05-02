@@ -28,7 +28,8 @@ pub fn hasPort(s: &string) -> bool {
 ///
 /// Strips the empty port in ":port" to "" as mandated by RFC 3986
 /// Section 6.2.3.
-pub fn removeEmptyPort(host: string) -> string {
+pub fn removeEmptyPort<H: Into<string>>(host: H) -> string {
+    let host: string = host.into();
     // Go: if hasPort(host) { return strings.TrimSuffix(host, ":") }
     if hasPort(&host) {
         return strings::TrimSuffix(host, string::from(":"));
@@ -90,7 +91,8 @@ pub fn stringContainsCTLByte(s: &string) -> bool {
 /// Percent-encodes any byte ≥ 0x80 as `%XX` (lowercase hex).
 /// Used when emitting `Location:` headers so non-ASCII bytes survive
 /// transit.
-pub fn hexEscapeNonASCII(s: string) -> string {
+pub fn hexEscapeNonASCII<S: Into<string>>(s: S) -> string {
+    let s: string = s.into();
     // Go: newLen := 0
     let mut newLen: int = 0;
     // Go: for i := 0; i < len(s); i++ {

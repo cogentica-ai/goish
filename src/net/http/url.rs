@@ -41,7 +41,9 @@ pub struct Error {
 
 impl Error {
     /// Build a `url.Error` and lift it into `errors::error`.
-    pub fn new(op: string, url: string, err: error) -> error {
+    pub fn new<O: Into<string>, U: Into<string>>(op: O, url: U, err: error) -> error {
+        let op: string = op.into();
+        let url: string = url.into();
         errors::Wrap(Error { Op: op, URL: url, Err: err })
     }
 }
@@ -79,7 +81,8 @@ impl ErrorTrait for Error {
 pub struct EscapeError(pub string);
 
 impl EscapeError {
-    pub fn new(s: string) -> error {
+    pub fn new<S: Into<string>>(s: S) -> error {
+        let s: string = s.into();
         errors::Wrap(EscapeError(s))
     }
 }
@@ -104,7 +107,8 @@ impl ErrorTrait for EscapeError {
 pub struct InvalidHostError(pub string);
 
 impl InvalidHostError {
-    pub fn new(s: string) -> error {
+    pub fn new<S: Into<string>>(s: S) -> error {
+        let s: string = s.into();
         errors::Wrap(InvalidHostError(s))
     }
 }
@@ -244,7 +248,8 @@ impl URL {
     /// `ref` as a URL in the context of `self` (the receiver as base).
     /// The ref may be relative or absolute. Returns parse errors from
     /// the inner Parse; otherwise returns `self.ResolveReference(refURL)`.
-    pub fn Parse(&self, ref_: string) -> (URL, crate::errors::error) {
+    pub fn Parse<R: Into<string>>(&self, ref_: R) -> (URL, crate::errors::error) {
+        let ref_: string = ref_.into();
         // Go: refURL, err := Parse(ref)
         let (ref_url, err) = Parse(ref_);
         // Go: if err != nil { return nil, err }
@@ -533,7 +538,8 @@ use crate::types::{byte, int};
 ///
 /// Reports an error for malformed escape sequences but still returns
 /// whatever Values it could parse (matching Go).
-pub fn ParseQuery(query: string) -> (map<string, slice<string>>, error) {
+pub fn ParseQuery<Q: Into<string>>(query: Q) -> (map<string, slice<string>>, error) {
+    let query: string = query.into();
     let mut m: map<string, slice<string>> = map::<string, slice<string>>::new();
     let err = parse_query(&mut m, query);
     (m, err)
@@ -596,7 +602,8 @@ pub struct Userinfo {
 }
 
 /// `url.User(username)` (url.go:391) — Userinfo with no password set.
-pub fn User(username: string) -> Userinfo {
+pub fn User<U: Into<string>>(username: U) -> Userinfo {
+    let username: string = username.into();
     Userinfo {
         username,
         password: string::new(),
@@ -606,7 +613,9 @@ pub fn User(username: string) -> Userinfo {
 
 /// `url.UserPassword(user, pass)` (url.go:403) — Userinfo with both
 /// username and password.
-pub fn UserPassword(username: string, password: string) -> Userinfo {
+pub fn UserPassword<U: Into<string>, P: Into<string>>(username: U, password: P) -> Userinfo {
+    let username: string = username.into();
+    let password: string = password.into();
     Userinfo {
         username,
         password,
@@ -642,13 +651,15 @@ impl Userinfo {
 
 /// `url.QueryUnescape(s)` — invert query-string percent-encoding.
 /// Slim port of url.go:277 (strict mode).
-pub fn QueryUnescape(s: string) -> (string, error) {
+pub fn QueryUnescape<S: Into<string>>(s: S) -> (string, error) {
+    let s: string = s.into();
     unescape(s, true)
 }
 
 /// `url.PathUnescape(s)` — like QueryUnescape but does not turn `+`
 /// into space. Mirrors url.go:303.
-pub fn PathUnescape(s: string) -> (string, error) {
+pub fn PathUnescape<S: Into<string>>(s: S) -> (string, error) {
+    let s: string = s.into();
     unescape(s, false)
 }
 
@@ -660,7 +671,9 @@ pub fn PathUnescape(s: string) -> (string, error) {
 /// strings.Builder) because the algorithm needs to read the buffer
 /// contents while still appending — Go's strings.Builder allows that
 /// via a non-consuming String(); goish v1's String() consumes.
-pub fn ResolvePath(base: string, reference: string) -> string {
+pub fn ResolvePath<B: Into<string>, R: Into<string>>(base: B, reference: R) -> string {
+    let base: string = base.into();
+    let reference: string = reference.into();
     // Go: var full string
     // Go: if ref == "" { full = base }
     // Go: else if ref[0] != '/' { i := strings.LastIndex(base, "/"); full = base[:i+1] + ref }
@@ -754,10 +767,8 @@ pub fn ResolvePath(base: string, reference: string) -> string {
 /// `url.JoinPath(base, elem...)` (url.go:1338) — Parse `base`, append
 /// `elem` to the path via `URL.JoinPath`, and return the rendered URL.
 /// Returns `(result, error)` per goish convention.
-pub fn JoinPath(
-    base: string,
-    elem: slice<string>,
-) -> (string, error) {
+pub fn JoinPath<B: Into<string>>(base: B, elem: slice<string>) -> (string, error) {
+    let base: string = base.into();
     // Go: url, err := Parse(base); if err != nil { return }
     let (u, err) = Parse(base);
     if !err.IsNil() {
@@ -773,7 +784,8 @@ pub fn JoinPath(
 /// Userinfo as separate fields. Fragment IS captured into u.Fragment.
 ///
 /// Returns `(URL, error)` per goish convention.
-pub fn Parse(raw_url: string) -> (URL, error) {
+pub fn Parse<R: Into<string>>(raw_url: R) -> (URL, error) {
+    let raw_url: string = raw_url.into();
     // Go: u, frag, _ := strings.Cut(rawURL, "#")
     let (u, frag, has_frag) = crate::strings::Cut(raw_url, string("#"));
     let (mut url, err) = parse(u, false);
@@ -790,7 +802,8 @@ pub fn Parse(raw_url: string) -> (URL, error) {
 /// `url.ParseRequestURI(rawURL)` (url.go:500) — parse a URL received
 /// in an HTTP request line: must be absolute-URI or absolute-path.
 /// No fragment is permitted (browsers strip them client-side).
-pub fn ParseRequestURI(raw_url: string) -> (URL, error) {
+pub fn ParseRequestURI<R: Into<string>>(raw_url: R) -> (URL, error) {
+    let raw_url: string = raw_url.into();
     parse(raw_url, true)
 }
 
@@ -921,7 +934,8 @@ fn get_scheme(raw_url: string) -> Result<(string, string), error> {
 
 /// `url.QueryEscape(s)` (url.go:281) — percent-encode `s` so it is
 /// safe inside the query component of a URL. Spaces become `+`.
-pub fn QueryEscape(s: string) -> string {
+pub fn QueryEscape<S: Into<string>>(s: S) -> string {
+    let s: string = s.into();
     escape(s, EncodingMode::QueryComponent)
 }
 
@@ -966,17 +980,16 @@ pub fn ValuesEncode(v: crate::gomap::map<string, crate::goslice::slice<string>>)
 /// `url.PathEscape(s)` (url.go:287) — percent-encode `s` so it is
 /// safe inside a single URL path segment (i.e. `/`, `;`, `,`, `?` are
 /// all escaped). Spaces become `%20`.
-pub fn PathEscape(s: string) -> string {
+pub fn PathEscape<S: Into<string>>(s: S) -> string {
+    let s: string = s.into();
     escape(s, EncodingMode::PathSegment)
 }
 
 /// Line-by-line port of `(v Values).Has(key)` (url.go:974) — report
 /// whether `v` contains an entry for `key`. Goish models Values as
 /// the bare `map<string, slice<string>>`, so this is a free fn.
-pub fn ValuesHas(
-    v: &crate::gomap::map<string, crate::goslice::slice<string>>,
-    key: string,
-) -> bool {
+pub fn ValuesHas<K: Into<string>>(v: &crate::gomap::map<string, crate::goslice::slice<string>>, key: K) -> bool {
+    let key: string = key.into();
     // Go: _, ok := v[key]; return ok
     let (_, ok) = v.Get(key);
     ok

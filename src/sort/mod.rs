@@ -210,7 +210,8 @@ pub fn SearchFloat64s(a: &slice<float64>, x: float64) -> int {
 }
 
 /// `sort.SearchStrings(a, x)` (search.go:139).
-pub fn SearchStrings(a: &slice<string>, x: string) -> int {
+pub fn SearchStrings<X: Into<string>>(a: &slice<string>, x: X) -> int {
+    let x: string = x.into();
     let raw: &[string] = a;
     Search(raw.len() as int, |i| raw[i as usize] >= x)
 }

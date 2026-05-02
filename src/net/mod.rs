@@ -1384,7 +1384,9 @@ pub fn Listen<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Listene
 /// `net.Dial` — connect to a TCP peer. `network` must be `"tcp"` or
 /// `"tcp4"`. `addr` is `"host:port"` with `host` an IPv4 literal
 /// (DNS resolution is not implemented in v1).
-pub fn Dial(network: string, addr: string) -> (Conn, error) {
+pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Conn, error) {
+    let network: string = network.into();
+    let addr: string = addr.into();
     if !is_tcp_network(&network) {
         return (
             Conn::dead(),

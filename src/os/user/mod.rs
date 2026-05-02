@@ -99,7 +99,8 @@ impl ErrorTrait for UnknownUserError {
 }
 
 impl UnknownUserError {
-    pub fn new(name: string) -> error {
+    pub fn new<N: Into<string>>(name: N) -> error {
+        let name: string = name.into();
         errors::Wrap(UnknownUserError(name))
     }
 }
@@ -119,7 +120,8 @@ impl ErrorTrait for UnknownGroupIdError {
 }
 
 impl UnknownGroupIdError {
-    pub fn new(id: string) -> error {
+    pub fn new<I: Into<string>>(id: I) -> error {
+        let id: string = id.into();
         errors::Wrap(UnknownGroupIdError(id))
     }
 }
@@ -139,7 +141,8 @@ impl ErrorTrait for UnknownGroupError {
 }
 
 impl UnknownGroupError {
-    pub fn new(name: string) -> error {
+    pub fn new<N: Into<string>>(name: N) -> error {
+        let name: string = name.into();
         errors::Wrap(UnknownGroupError(name))
     }
 }
@@ -153,7 +156,8 @@ const GROUP_FILE: &str = "/etc/group";
 
 // Go: lookup.go:39  func Lookup(username string) (*User, error)
 /// `os/user.Lookup(username)` — find user by login name.
-pub fn Lookup(username: string) -> (User, error) {
+pub fn Lookup<U: Into<string>>(username: U) -> (User, error) {
+    let username: string = username.into();
     // Go: if u, err := Current(); err == nil && u.Username == username { return u, err }
     let (cur, cur_err) = Current();
     if cur_err.IsNil() && cur.Username == username {
@@ -164,7 +168,8 @@ pub fn Lookup(username: string) -> (User, error) {
 
 // Go: lookup.go:48  func LookupId(uid string) (*User, error)
 /// `os/user.LookupId(uid)` — find user by uid string.
-pub fn LookupId(uid: string) -> (User, error) {
+pub fn LookupId<U: Into<string>>(uid: U) -> (User, error) {
+    let uid: string = uid.into();
     let (cur, cur_err) = Current();
     if cur_err.IsNil() && cur.Uid == uid {
         return (cur, errors::nil);
@@ -174,13 +179,15 @@ pub fn LookupId(uid: string) -> (User, error) {
 
 // Go: lookup.go:57  func LookupGroup(name string) (*Group, error)
 /// `os/user.LookupGroup(name)` — find group by name.
-pub fn LookupGroup(name: string) -> (Group, error) {
+pub fn LookupGroup<N: Into<string>>(name: N) -> (Group, error) {
+    let name: string = name.into();
     lookup_group(name)
 }
 
 // Go: lookup.go:63  func LookupGroupId(gid string) (*Group, error)
 /// `os/user.LookupGroupId(gid)` — find group by gid string.
-pub fn LookupGroupId(gid: string) -> (Group, error) {
+pub fn LookupGroupId<G: Into<string>>(gid: G) -> (Group, error) {
+    let gid: string = gid.into();
     lookup_group_id(gid)
 }
 

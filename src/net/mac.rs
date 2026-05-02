@@ -49,7 +49,8 @@ pub fn HardwareAddrString(a: &HardwareAddr) -> string {
 /// `net.ParseMAC(s)` (mac.go:39) — parse `s` as an IEEE 802 MAC-48,
 /// EUI-48, EUI-64, or 20-octet IPoIB link-layer address. Accepts ':',
 /// '-', or '.' delimiters per Go's documented forms.
-pub fn ParseMAC(s: string) -> (HardwareAddr, error) {
+pub fn ParseMAC<S: Into<string>>(s: S) -> (HardwareAddr, error) {
+    let s: string = s.into();
     let raw = crate::gostring::__crate_as_bytes(&s);
 
     // Go: mac.go:40 — if len(s) < 14 { goto error }

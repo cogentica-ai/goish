@@ -31,7 +31,8 @@ use crate::strings;
 /// Slim port: skips RFC 2231 percent-encoding for non-ASCII parameter
 /// values (paired with the matching slim ParseMediaType). Values that
 /// would need encoding are emitted as quoted strings instead.
-pub fn FormatMediaType(t: string, param: crate::gomap::map<string, string>) -> string {
+pub fn FormatMediaType<T: Into<string>>(t: T, param: crate::gomap::map<string, string>) -> string {
+    let t: string = t.into();
     let mut b = strings::Builder::new();
 
     // Go: if major, sub, ok := strings.Cut(t, "/"); !ok { ... } else { ... }
@@ -128,13 +129,12 @@ pub fn ErrInvalidMediaParameter() -> crate::errors::error {
 ///   - param keys are lowercased; values keep case.
 ///   - Quoted values are unescaped (handles `\"` etc.).
 ///   - Duplicate parameter keys with conflicting values → error.
-pub fn ParseMediaType(
-    v: string,
-) -> (
+pub fn ParseMediaType<V: Into<string>>(v: V) -> (
     string,
     crate::gomap::map<string, string>,
     crate::errors::error,
 ) {
+    let v: string = v.into();
     // Go: base, _, _ := strings.Cut(v, ";")
     let (base, _, _) = strings::Cut(v.clone(), string(";"));
     // Go: mediatype = strings.TrimSpace(strings.ToLower(base))
@@ -322,7 +322,8 @@ fn is_tspecial(c: u8) -> bool {
 /// `mime.TypeByExtension(ext)` — look up the MIME type for a file
 /// extension. `ext` should begin with a dot (e.g. `".html"`); ASCII
 /// case is ignored. Returns the empty string if no entry is known.
-pub fn TypeByExtension(ext: string) -> string {
+pub fn TypeByExtension<E: Into<string>>(ext: E) -> string {
+    let ext: string = ext.into();
     if ext.Len() == 0 {
         return string::new();
     }
@@ -358,7 +359,8 @@ pub fn TypeByExtension(ext: string) -> string {
 /// returned slice is sorted ascending. Returns `(nil, nil)` if `typ`
 /// has no associated extensions; returns `("", err)` if `typ` is not
 /// a valid media type.
-pub fn ExtensionsByType(typ: string) -> (crate::goslice::slice<string>, crate::errors::error) {
+pub fn ExtensionsByType<T: Into<string>>(typ: T) -> (crate::goslice::slice<string>, crate::errors::error) {
+    let typ: string = typ.into();
     // Go: justType, _, err := ParseMediaType(typ)
     let (just_type, _, err) = ParseMediaType(typ);
     if !err.IsNil() {
@@ -417,7 +419,9 @@ pub fn ExtensionsByType(typ: string) -> (crate::goslice::slice<string>, crate::e
 /// MIME type `typ` for file extension `ext`. `ext` must begin with
 /// a leading dot. For text/* types without an explicit charset
 /// parameter, `charset=utf-8` is added automatically.
-pub fn AddExtensionType(ext: string, typ: string) -> crate::errors::error {
+pub fn AddExtensionType<E: Into<string>, T: Into<string>>(ext: E, typ: T) -> crate::errors::error {
+    let ext: string = ext.into();
+    let typ: string = typ.into();
     // Go: if !strings.HasPrefix(ext, ".") { return fmt.Errorf(...) }
     if !strings::HasPrefix(ext.clone(), string(".")) {
         let mut msg: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(48 + ext.Len() as usize);

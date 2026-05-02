@@ -194,7 +194,8 @@ fn adapt(mut delta: i32, numPoints: i32, firstTime: bool) -> i32 {
 //
 //   toASCII("bücher.example.com") == "xn--bcher-kva.example.com"
 //   toASCII("golang")             == "golang"
-pub fn toASCII(s: string) -> (string, error) {
+pub fn toASCII<S: Into<string>>(s: S) -> (string, error) {
+    let s: string = s.into();
     // Go: if ascii.Is(s) { return s, nil }
     if ascii::Is(s.clone()) {
         return (s, crate::errors::nil);

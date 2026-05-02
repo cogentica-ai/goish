@@ -37,7 +37,8 @@ pub struct Dir {
     root: string,
 }
 
-pub fn NewDir(root: string) -> Dir {
+pub fn NewDir<R: Into<string>>(root: R) -> Dir {
+    let root: string = root.into();
     Dir { root }
 }
 
@@ -67,7 +68,8 @@ impl Dir {
 }
 
 /// `http.ServeFile(w, r, name)` (fs.go:814) — serve the named file.
-pub fn ServeFile(w: &mut ResponseWriter, r: &Request, name: string) {
+pub fn ServeFile<N: Into<string>>(w: &mut ResponseWriter, r: &Request, name: N){
+    let name: string = name.into();
     serve_file_path(w, r, name);
 }
 
@@ -353,7 +355,8 @@ impl HttpRange {
 /// `parseRange(s, size)` (fs.go:1015) — parse a Range header per
 /// RFC 7233 §3.1. Returns `(ranges, ok)`; `ok=false` when the header
 /// is malformed.
-pub fn ParseRange(s: string, size: int) -> (slice<HttpRange>, error) {
+pub fn ParseRange<S: Into<string>>(s: S, size: int) -> (slice<HttpRange>, error) {
+    let s: string = s.into();
     // Go: if s == "" { return nil, nil }
     if s.Len() == 0 {
         return (slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()), errors::nil);

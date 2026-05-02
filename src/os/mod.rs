@@ -117,17 +117,20 @@ fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfo {
 // ─── Open / Stat / Create ──────────────────────────────────────────────
 
 /// `os.Open(name)` (os/file.go:386) — open `name` read-only.
-pub fn Open(name: string) -> (File, error) {
+pub fn Open<N: Into<string>>(name: N) -> (File, error) {
+    let name: string = name.into();
     OpenFile(name, O_RDONLY, 0)
 }
 
 /// `os.Create(name)` (os/file.go:402) — create or truncate `name`.
-pub fn Create(name: string) -> (File, error) {
+pub fn Create<N: Into<string>>(name: N) -> (File, error) {
+    let name: string = name.into();
     OpenFile(name, O_RDWR | O_CREATE | O_TRUNC, 0o666)
 }
 
 /// `os.OpenFile(name, flag, perm)` (os/file.go:412).
-pub fn OpenFile(name: string, flag: i32, perm: u32) -> (File, error) {
+pub fn OpenFile<N: Into<string>>(name: N, flag: i32, perm: u32) -> (File, error) {
+    let name: string = name.into();
     // Build a NUL-terminated path for the kernel.
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     let nb = bytes_of(&name);
@@ -153,7 +156,8 @@ pub fn OpenFile(name: string, flag: i32, perm: u32) -> (File, error) {
 }
 
 /// `os.Stat(name)` (os/stat.go:14) — stat a path, following symlinks.
-pub fn Stat(name: string) -> (FileInfo, error) {
+pub fn Stat<N: Into<string>>(name: N) -> (FileInfo, error) {
+    let name: string = name.into();
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     let nb = bytes_of(&name);
     buf.extend_from_slice(nb);
@@ -179,7 +183,8 @@ pub fn Stat(name: string) -> (FileInfo, error) {
 /// Line-by-line port of `os.Lstat(name)` (file.go:417 → stat_unix.go).
 /// Like Stat but does not follow a final-component symlink, so
 /// FileInfo.Mode() reports ModeSymlink for a link target.
-pub fn Lstat(name: string) -> (FileInfo, error) {
+pub fn Lstat<N: Into<string>>(name: N) -> (FileInfo, error) {
+    let name: string = name.into();
     // Go: return statNolog(name) with AT_SYMLINK_NOFOLLOW.
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     let nb = bytes_of(&name);
@@ -241,7 +246,8 @@ fn bytes_of(s: &string) -> &[u8] {
 
 /// `os.ReadFile(name)` (os/file.go:735) — read the entire named file
 /// and return its contents. Closes the file before returning.
-pub fn ReadFile(name: string) -> (slice<byte>, error) {
+pub fn ReadFile<N: Into<string>>(name: N) -> (slice<byte>, error) {
+    let name: string = name.into();
     use crate::io::Reader;
     let (mut f, err) = Open(name);
     if !err.IsNil() {
@@ -287,7 +293,8 @@ pub fn ReadFile(name: string) -> (slice<byte>, error) {
 
 /// `os.LookupEnv(key)` (env.go:112) — return `(value, true)` if `key`
 /// is set in the process environment, `("", false)` otherwise.
-pub fn LookupEnv(key: string) -> (string, bool) {
+pub fn LookupEnv<K: Into<string>>(key: K) -> (string, bool) {
+    let key: string = key.into();
     let bytes_key = bytes_of(&key);
     let val_bytes = unsafe { runtime::args::envp_lookup(bytes_key) };
     match val_bytes {
@@ -298,7 +305,8 @@ pub fn LookupEnv(key: string) -> (string, bool) {
 
 /// `os.Getenv(key)` (env.go:101) — return the value of `key` in the
 /// process environment, or "" if not present.
-pub fn Getenv(key: string) -> string {
+pub fn Getenv<K: Into<string>>(key: K) -> string {
+    let key: string = key.into();
     let (v, _) = LookupEnv(key);
     v
 }
@@ -307,7 +315,9 @@ pub fn Getenv(key: string) -> string {
 /// value of the environment variable named `key`. Goish slim: writes
 /// to a process-wide overlay rather than the kernel envp, so child
 /// processes won't inherit the change (no exec support yet).
-pub fn Setenv(key: string, value: string) -> error {
+pub fn Setenv<K: Into<string>, V: Into<string>>(key: K, value: V) -> error {
+    let key: string = key.into();
+    let value: string = value.into();
     // Go: err := syscall.Setenv(key, value); ... return NewSyscallError("setenv", err)
     let kb = bytes_of(&key);
     if kb.is_empty() {
@@ -331,7 +341,8 @@ pub fn Setenv(key: string, value: string) -> error {
 /// Line-by-line port of `os.Unsetenv(key)` (env.go:128) — unset the
 /// environment variable named `key`. Goish slim: writes a tombstone
 /// to the overlay rather than mutating kernel envp.
-pub fn Unsetenv(key: string) -> error {
+pub fn Unsetenv<K: Into<string>>(key: K) -> error {
+    let key: string = key.into();
     // Go: return syscall.Unsetenv(key)
     let kb = bytes_of(&key);
     if kb.is_empty() {
@@ -502,7 +513,8 @@ pub fn Getwd() -> (string, error) {
 
 /// Line-by-line port of `os.Chdir(name)` (file.go) — change the
 /// current working directory to `name`. Returns `nil` on success.
-pub fn Chdir(name: string) -> error {
+pub fn Chdir<N: Into<string>>(name: N) -> error {
+    let name: string = name.into();
     // Go: if e := syscall.Chdir(name); e != nil { return &PathError{...} }
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
@@ -517,7 +529,8 @@ pub fn Chdir(name: string) -> error {
 /// Line-by-line port of `os.Chmod(name, mode)` (file.go:647 →
 /// file_posix.go:76 chmod). Slim: no PathError wrapping, no EINTR
 /// retry loop (chmod(2) is not interruptible on Linux in practice).
-pub fn Chmod(name: string, mode: FileMode) -> error {
+pub fn Chmod<N: Into<string>>(name: N, mode: FileMode) -> error {
+    let name: string = name.into();
     // Go: longName := fixLongPath(name) — Linux no-op.
     // Go: e := ignoringEINTR(func() error { return syscall.Chmod(longName, syscallMode(mode)) })
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
@@ -534,7 +547,9 @@ pub fn Chmod(name: string, mode: FileMode) -> error {
 
 /// Line-by-line port of `os.Symlink(oldname, newname)` (file_unix.go:417).
 /// Slim: no LinkError wrapping, no EINTR retry.
-pub fn Symlink(oldname: string, newname: string) -> error {
+pub fn Symlink<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> error {
+    let oldname: string = oldname.into();
+    let newname: string = newname.into();
     // Go: e := ignoringEINTR(func() error { return syscall.Symlink(oldname, newname) })
     let mut old_buf: Vec<u8> = Vec::with_capacity(oldname.Len() as usize + 1);
     old_buf.extend_from_slice(bytes_of(&oldname));
@@ -554,7 +569,8 @@ pub fn Symlink(oldname: string, newname: string) -> error {
 /// file_unix.go:427 readlink) — read the target of a symbolic link.
 /// Doubles the buffer until the result fits, mirroring Go's growth
 /// retry loop.
-pub fn Readlink(name: string) -> (string, error) {
+pub fn Readlink<N: Into<string>>(name: N) -> (string, error) {
+    let name: string = name.into();
     // Go: for len := 128; ; len *= 2 { ... }
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
@@ -589,7 +605,9 @@ pub fn Readlink(name: string) -> (string, error) {
 /// gymnastics (Linux is always case-sensitive) but preserves the
 /// "newname is a directory" prelude check so `Rename(file, dir)` errors
 /// before clobbering anything.
-pub fn Rename(oldpath: string, newpath: string) -> error {
+pub fn Rename<O: Into<string>, N: Into<string>>(oldpath: O, newpath: N) -> error {
+    let oldpath: string = oldpath.into();
+    let newpath: string = newpath.into();
     // Go: fi, err := Lstat(newname); if err == nil && fi.IsDir() { return &LinkError{...EEXIST} }
     let (fi, e) = Lstat(newpath.clone());
     if e.IsNil() && fi.IsDir() {
@@ -611,7 +629,9 @@ pub fn Rename(oldpath: string, newpath: string) -> error {
 
 /// Line-by-line port of `os.Link(oldname, newname)` (file_unix.go:403)
 /// — create `newname` as a hard link to `oldname`.
-pub fn Link(oldname: string, newname: string) -> error {
+pub fn Link<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> error {
+    let oldname: string = oldname.into();
+    let newname: string = newname.into();
     // Go: e := ignoringEINTR(func() error { return syscall.Link(oldname, newname) })
     let mut old_buf: Vec<u8> = Vec::with_capacity(oldname.Len() as usize + 1);
     old_buf.extend_from_slice(bytes_of(&oldname));
@@ -628,7 +648,8 @@ pub fn Link(oldname: string, newname: string) -> error {
 
 /// Line-by-line port of `os.Truncate(name, size)` (file_unix.go:344)
 /// — change the size of the named file. Follows symlinks (per Go).
-pub fn Truncate(name: string, size: int) -> error {
+pub fn Truncate<N: Into<string>>(name: N, size: int) -> error {
+    let name: string = name.into();
     // Go: e := ignoringEINTR(func() error { return syscall.Truncate(name, size) })
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
@@ -643,7 +664,8 @@ pub fn Truncate(name: string, size: int) -> error {
 /// Line-by-line port of `os.Chown(name, uid, gid)` (file_posix.go:105).
 /// uid or gid of -1 leaves that field unchanged. Follows symlinks
 /// (per Go).
-pub fn Chown(name: string, uid: int, gid: int) -> error {
+pub fn Chown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
+    let name: string = name.into();
     // Go: e := ignoringEINTR(func() error { return syscall.Chown(name, uid, gid) })
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
@@ -657,7 +679,8 @@ pub fn Chown(name: string, uid: int, gid: int) -> error {
 
 /// Line-by-line port of `os.Lchown(name, uid, gid)` (file_posix.go:121)
 /// — does not follow a final-component symlink.
-pub fn Lchown(name: string, uid: int, gid: int) -> error {
+pub fn Lchown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
+    let name: string = name.into();
     // Go: e := ignoringEINTR(func() error { return syscall.Lchown(name, uid, gid) })
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
@@ -786,7 +809,8 @@ pub fn Hostname() -> (string, error) {
 // ─── Mkdir / Remove ──────────────────────────────────────────────────
 
 /// `os.Mkdir(name, perm)` (os/file.go) — create a single directory.
-pub fn Mkdir(name: string, perm: u32) -> error {
+pub fn Mkdir<N: Into<string>>(name: N, perm: u32) -> error {
+    let name: string = name.into();
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
     buf.push(0);
@@ -800,7 +824,8 @@ pub fn Mkdir(name: string, perm: u32) -> error {
 /// `os.MkdirAll(path, perm)` (os/path.go:19) — create `path` and any
 /// missing parent directories. If `path` is already a directory,
 /// returns nil.
-pub fn MkdirAll(path: string, perm: u32) -> error {
+pub fn MkdirAll<P: Into<string>>(path: P, perm: u32) -> error {
+    let path: string = path.into();
     // Go: dir, err := Stat(path); if err == nil { if dir.IsDir() { return nil }; return ... }
     let (dir, err) = Stat(path.clone());
     if err.IsNil() {
@@ -844,7 +869,8 @@ pub fn MkdirAll(path: string, perm: u32) -> error {
 
 /// `os.RemoveAll(path)` (os/path.go:73) — recursively delete `path`
 /// and everything beneath. Missing paths return nil.
-pub fn RemoveAll(path: string) -> error {
+pub fn RemoveAll<P: Into<string>>(path: P) -> error {
+    let path: string = path.into();
     // Stat to learn if it's a dir.
     let (fi, err) = Stat(path.clone());
     if !err.IsNil() {
@@ -876,7 +902,8 @@ pub fn RemoveAll(path: string) -> error {
 
 /// `os.Remove(name)` (os/file_unix.go). Removes a file or empty
 /// directory. First tries unlink; falls back to rmdir on EISDIR.
-pub fn Remove(name: string) -> error {
+pub fn Remove<N: Into<string>>(name: N) -> error {
+    let name: string = name.into();
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
     buf.push(0);
@@ -922,7 +949,8 @@ impl DirEntry {
 /// `name`, returning them sorted by filename. Slim port: relies on
 /// the Linux `getdents64(2)` syscall and returns `(slice<DirEntry>,
 /// error)` per goish convention.
-pub fn ReadDir(name: string) -> (slice<DirEntry>, error) {
+pub fn ReadDir<N: Into<string>>(name: N) -> (slice<DirEntry>, error) {
+    let name: string = name.into();
     let (mut f, err) = Open(name);
     if !err.IsNil() {
         return (slice::<DirEntry>::__from_vec(Vec::new()), err);
@@ -998,7 +1026,8 @@ fn mode_from_dtype(dt: u8) -> FileMode {
 
 /// `os.WriteFile(name, data, perm)` (os/file.go:763) — write `data`
 /// to the named file, creating or truncating it.
-pub fn WriteFile(name: string, data: slice<byte>, perm: u32) -> error {
+pub fn WriteFile<N: Into<string>>(name: N, data: slice<byte>, perm: u32) -> error {
+    let name: string = name.into();
     use crate::io::Writer;
     let (mut f, err) = OpenFile(name, O_WRONLY | O_CREATE | O_TRUNC, perm);
     if !err.IsNil() {
@@ -1040,7 +1069,8 @@ impl File {
     /// `os.NewFile(fd, name)` — wrap an existing fd. Public so user code
     /// can construct from raw fds (rare; mostly used by stdio factories
     /// and future Pipe/Open functions).
-    pub fn NewFile(fd: int, name: string) -> File {
+    pub fn NewFile<N: Into<string>>(fd: int, name: N) -> File {
+        let name: string = name.into();
         File {
             fd: fd as i32,
             name,

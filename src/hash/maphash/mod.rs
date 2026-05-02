@@ -197,7 +197,8 @@ pub fn Bytes(seed: Seed, b: slice<byte>) -> u64 {
 }
 
 /// `maphash.String(seed, s)` — hash of `s` with `seed`.
-pub fn String(seed: Seed, s: string) -> u64 {
+pub fn String<S: Into<string>>(seed: Seed, s: S) -> u64 {
+    let s: string = s.into();
     // Go: state := seed.s; if state == 0 { panic(...) }
     //     for len(s) > bufSize { state = rthashString(s[:bufSize], state); s = s[bufSize:] }
     //     return rthashString(s, state)
@@ -264,7 +265,8 @@ impl Hash {
     }
 
     /// `Hash.WriteString(s)` (maphash.go:174).
-    pub fn WriteString(&mut self, s: string) -> (int, error) {
+    pub fn WriteString<S: Into<string>>(&mut self, s: S) -> (int, error) {
+        let s: string = s.into();
         let bv: Vec<byte> = crate::gostring::__crate_as_bytes(&s).to_vec();
         self.write_internal(&bv)
     }

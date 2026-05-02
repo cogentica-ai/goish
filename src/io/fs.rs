@@ -144,7 +144,8 @@ impl FileMode {
 
 // Go: fs.go:54-79
 //   func ValidPath(name string) bool
-pub fn ValidPath(name: string) -> bool {
+pub fn ValidPath<S: Into<string>>(name: S) -> bool {
+    let name = name.into();
     // Go: if !utf8.ValidString(name) { return false }
     if !utf8::ValidString(&name) {
         return false;
