@@ -8,6 +8,7 @@
 //   atomic::Int64     -> Load, Store, Add, Swap, CompareAndSwap, And, Or
 //   atomic::Uint32    -> Load, Store, Add, Swap, CompareAndSwap, And, Or
 //   atomic::Uint64    -> Load, Store, Add, Swap, CompareAndSwap, And, Or
+//   atomic::Uintptr   -> Load, Store, Add, Swap, CompareAndSwap, And, Or
 //   atomic::Bool      -> Load, Store, Swap, CompareAndSwap
 //
 // All methods use `Ordering::SeqCst` to match Go's atomic memory
@@ -28,7 +29,8 @@
 
 use core::sync::atomic::{
     AtomicBool as CoreBool, AtomicI32 as CoreI32, AtomicI64 as CoreI64,
-    AtomicU32 as CoreU32, AtomicU64 as CoreU64, Ordering,
+    AtomicU32 as CoreU32, AtomicU64 as CoreU64, AtomicUsize as CoreUsize,
+    Ordering,
 };
 
 const ORD: Ordering = Ordering::SeqCst;
@@ -162,6 +164,54 @@ impl Uint64 {
         self.0.fetch_and(mask, ORD)
     }
     pub fn Or(&self, mask: u64) -> u64 {
+        self.0.fetch_or(mask, ORD)
+    }
+}
+
+// ─── Uintptr ──────────────────────────────────────────────────────
+
+// Go: type.go:208
+//   type Uintptr struct { _ noCopy; v uintptr }
+//
+// Goish maps Go's `uintptr` to Rust's `usize` (target-pointer-sized
+// unsigned). All semantics mirror Int64/Uint64.
+/// `atomic.Uintptr` — atomic pointer-sized unsigned integer.
+/// Mirrors `sync/atomic.Uintptr` (type.go:208).
+#[derive(Default)]
+pub struct Uintptr(CoreUsize);
+
+impl Uintptr {
+    pub const fn new(v: usize) -> Self {
+        Uintptr(CoreUsize::new(v))
+    }
+    // Go: type.go:214 — func (x *Uintptr) Load() uintptr
+    pub fn Load(&self) -> usize {
+        self.0.load(ORD)
+    }
+    // Go: type.go:217 — func (x *Uintptr) Store(val uintptr)
+    pub fn Store(&self, v: usize) {
+        self.0.store(v, ORD)
+    }
+    // Go: type.go:220 — func (x *Uintptr) Swap(new) (old uintptr)
+    pub fn Swap(&self, new: usize) -> usize {
+        self.0.swap(new, ORD)
+    }
+    // Go: type.go:223 — func (x *Uintptr) CompareAndSwap(old, new) bool
+    pub fn CompareAndSwap(&self, old: usize, new: usize) -> bool {
+        self.0.compare_exchange(old, new, ORD, ORD).is_ok()
+    }
+    // Go: type.go:228 — func (x *Uintptr) Add(delta) (new uintptr)
+    //   Returns the NEW value (post-add); use wrapping_add to match
+    //   Go's modular semantics on overflow.
+    pub fn Add(&self, delta: usize) -> usize {
+        self.0.fetch_add(delta, ORD).wrapping_add(delta)
+    }
+    // Go: type.go:232 — func (x *Uintptr) And(mask) (old uintptr)
+    pub fn And(&self, mask: usize) -> usize {
+        self.0.fetch_and(mask, ORD)
+    }
+    // Go: type.go:235 — func (x *Uintptr) Or(mask) (old uintptr)
+    pub fn Or(&self, mask: usize) -> usize {
         self.0.fetch_or(mask, ORD)
     }
 }
