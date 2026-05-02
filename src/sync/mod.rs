@@ -26,6 +26,7 @@ mod oncefunc;
 mod pool;
 mod rwmutex;
 mod sema;
+mod syncmap;
 mod waitgroup;
 
 pub use mutex::{Mutex, MutexGuard};
@@ -33,4 +34,5 @@ pub use once::Once;
 pub use oncefunc::{OnceFunc, OnceValue, OnceValues};
 pub use pool::Pool;
 pub use rwmutex::RWMutex;
+pub use syncmap::Map;
 pub use waitgroup::WaitGroup;
