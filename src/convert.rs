@@ -135,3 +135,60 @@ impl __RunesConv for &'static str {
         runes(string::from_static(self))
     }
 }
+
+// ─── Go-style numeric conversions ────────────────────────────────────
+//
+// `int(x)`, `int64(x)`, `uint64(x)`, `float64(x)` — mirror Go's typed
+// numeric conversion calls. Each accepts any numeric type and dispatches
+// to a per-type trait so the call site reads exactly like Go:
+//
+//   let n = int(port);              // u16 → i64
+//   let f = float64(REQ_COUNT.Load());   // u64 → f64
+//   let u = uint64(n);              // i64 → u64
+//
+// Implemented for u8/i8/u16/i16/u32/i32/u64/i64/usize/isize/f32/f64
+// and goish's `byte`/`rune`/`int`/`uint`. Truncation/widening matches
+// Rust's `as` operator (which already mirrors Go's spec for numeric
+// conversions).
+
+use crate::types::{float32, float64, int, uint};
+
+macro_rules! __num_conv {
+    ($trait:ident, $fn_name:ident, $target:ty) => {
+        pub trait $trait {
+            #[doc(hidden)]
+            fn __conv(self) -> $target;
+        }
+        #[allow(non_snake_case)]
+        #[inline]
+        pub fn $fn_name<T: $trait>(x: T) -> $target {
+            x.__conv()
+        }
+        // Numeric source impls — `as` covers truncation/widening per Go.
+        impl $trait for u8 {  #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for i8 {  #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for u16 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for i16 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for u32 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for i32 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for u64 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for i64 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for usize { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for isize { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for f32 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for f64 { #[inline] fn __conv(self) -> $target { self as $target } }
+    };
+}
+
+__num_conv!(__IntConv, int, int);
+__num_conv!(__Int8Conv, int8, i8);
+__num_conv!(__Int16Conv, int16, i16);
+__num_conv!(__Int32Conv, int32, i32);
+__num_conv!(__Int64Conv, int64, i64);
+__num_conv!(__UintConv, uint, uint);
+__num_conv!(__Uint8Conv, uint8, u8);
+__num_conv!(__Uint16Conv, uint16, u16);
+__num_conv!(__Uint32Conv, uint32, u32);
+__num_conv!(__Uint64Conv, uint64, u64);
+__num_conv!(__Float32Conv, float32, float32);
+__num_conv!(__Float64Conv, float64, float64);

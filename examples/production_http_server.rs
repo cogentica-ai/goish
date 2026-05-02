@@ -42,11 +42,10 @@ use goish::net;
 use goish::net::http;
 use goish::os;
 use goish::runtime::sched::schedule;
-use goish::strconv;
 use goish::sync::atomic::Uint64;
 use goish::time;
-use goish::types::{byte, int};
-use goish::{bytes, go, make, string, Eprintln, Println, KB};
+use goish::types::byte;
+use goish::{bytes, float64, go, int, int64, make, string, uint64, Eprintln, Printf, Println, KB};
 
 // ─── shared server state ─────────────────────────────────────────────
 
@@ -69,7 +68,7 @@ fn pass<S: Into<string>>(name: S) {
 fn h_health(w: &mut http::ResponseWriter, _r: &http::Request) {
     let mut obj = goish::map::<string, json::Value>::new();
     obj.Set("status", "ok");
-    obj.Set("reqs", REQ_COUNT.Load() as f64);
+    obj.Set("reqs", float64(REQ_COUNT.Load()));
     let v = json::Value::Object(obj);
     let (body, e) = json::Marshal(&v);
     if !e.IsNil() {
@@ -156,10 +155,8 @@ struct LoggingMW<H: http::Handler>(H);
 impl<H: http::Handler> http::Handler for LoggingMW<H> {
     fn ServeHTTP(&self, w: &mut http::ResponseWriter, r: &http::Request) {
         REQ_COUNT.Add(1);
-        let started = time::Now();
-        self.0.ServeHTTP(w, r);
         // TODO(slog): emit structured access log with time::Since(started).
-        let _ = started;
+        self.0.ServeHTTP(w, r);
     }
 }
 
@@ -210,7 +207,7 @@ fn check<S: Into<string>>(cond: bool, name: S) {
 }
 
 fn url_at<S: Into<string>>(path: S) -> string {
-    let port = CLIENT_PORT.Load() as int;
+    let port = int(CLIENT_PORT.Load());
     goish::Sprintf!("http://127.0.0.1:%d%s", port, path.into())
 }
 
@@ -225,7 +222,7 @@ fn main() {
         os::Exit(1);
     }
     let port = ln.Addr().Port;
-    CLIENT_PORT.Store(port as u64);
+    CLIENT_PORT.Store(uint64(port));
 
     // Build the mux with a representative set of routes.
     let mux = http::ServeMux::new();
@@ -305,7 +302,7 @@ fn main() {
               "GET /admin/secret bad token -> 401");
 
         // Test 7: /admin/secret with correct token → 200.
-        let mut req = http::NewRequest("GET", url_at("/admin/secret"), make!([]byte, 0)).0;
+        let (mut req, _) = http::NewRequest("GET", url_at("/admin/secret"), make!([]byte, 0));
         req.Header.Set("Authorization", "Bearer s3cret");
         let (resp, e) = client.Do(&req);
         check(e.IsNil() && resp.StatusCode == 200
@@ -318,7 +315,7 @@ fn main() {
         check(cors.Len() > 0, "CORS header on response");
 
         // Test 9: OPTIONS preflight → 204.
-        let req = http::NewRequest("OPTIONS", url_at("/"), make!([]byte, 0)).0;
+        let (req, _) = http::NewRequest("OPTIONS", url_at("/"), make!([]byte, 0));
         let (resp, e) = client.Do(&req);
         check(e.IsNil() && resp.StatusCode == 204,
               "OPTIONS preflight -> 204");
@@ -329,7 +326,7 @@ fn main() {
         check(goish::strings::HasPrefix(&sc, "sid=abc123"),
               "Set-Cookie returned");
 
-        let mut req = http::NewRequest("GET", url_at("/session/get"), make!([]byte, 0)).0;
+        let (mut req, _) = http::NewRequest("GET", url_at("/session/get"), make!([]byte, 0));
         req.Header.Set("Cookie", "sid=abc123");
         let (resp, e) = client.Do(&req);
         check(e.IsNil() && resp.StatusCode == 200
@@ -356,12 +353,12 @@ fn main() {
         check(SERVE_DONE.Load() == 1,
               "Serve goroutine returned post-Shutdown");
 
-        let f = FAILED.Load() as goish::int;
+        let f = int64(FAILED.Load());
         if f == 0 {
             Println!("PRODUCTION_HTTP_OK 12/12");
             os::Exit(0);
         } else {
-            Println!("PRODUCTION_HTTP_FAIL {} / 12", f);
+            Printf!("PRODUCTION_HTTP_FAIL %d / 12\n", f);
             os::Exit(1);
         }
     });

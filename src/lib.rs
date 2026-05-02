@@ -98,7 +98,10 @@ pub use builtin::{cap, len};
 // function, in convert) are re-exported here. They occupy different
 // namespaces (type vs value), exactly like Go's `string` type and
 // `string(...)` conversion. Same for `slice<T>`.
-pub use convert::{bytes, runes, string};
+pub use convert::{
+    bytes, float32, float64, int, int16, int32, int64, int8, runes, string, uint, uint16, uint32,
+    uint64, uint8,
+};
 pub use errors::{error, nil};
 pub use gomap::map;
 pub use goslice::slice;
