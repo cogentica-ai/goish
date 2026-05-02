@@ -35,10 +35,14 @@
 // goroutine per derived context) is acceptable at v1 scale.
 //
 // What v1 does NOT include:
-//   - WithValue / Value(key)
 //   - WithCancelCause / WithDeadlineCause / WithTimeoutCause / Cause
 //   - AfterFunc
 //   - WithoutCancel
+//
+// What v1 does include:
+//   - WithValue(parent, key, value) — keyed value propagation. Keys
+//     are `string` (Go uses `any` with type-tagged uniqueness; goish
+//     callers should namespace their keys to avoid collision).
 
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
@@ -102,6 +106,19 @@ pub trait Context: Send + Sync {
     /// Err returns nil while Done is open; returns Canceled or
     /// DeadlineExceeded after cancellation.
     fn Err(&self) -> error;
+
+    /// Value returns the value associated with this context for `key`,
+    /// or `None` if no value is associated. Successive Value calls with
+    /// the same key return the same value.
+    ///
+    /// Slim deviation: Go uses `any` for both key and value. Goish v1
+    /// uses `string` keys (callers should namespace) and
+    /// `Arc<dyn Any + Send + Sync>` values. The default impl returns
+    /// `None`, so non-WithValue contexts inherit the empty answer
+    /// without each having to implement Value.
+    fn Value(&self, _key: &str) -> Option<Arc<dyn core::any::Any + Send + Sync>> {
+        None
+    }
 }
 
 /// `CancelFunc` — boxed cancel closure. Calling it cancels the
@@ -273,4 +290,48 @@ pub fn WithDeadline(parent: Arc<dyn Context>, d: Time) -> (Arc<dyn Context>, Can
 pub fn WithTimeout(parent: Arc<dyn Context>, d: Duration) -> (Arc<dyn Context>, CancelFunc) {
     let deadline = Now().Add(d);
     WithDeadline(parent, deadline)
+}
+
+// ─── valueCtx (WithValue) — context.go:744 ───────────────────────
+
+/// `valueCtx` (context.go:744) — pairs (key, value) with parent context.
+struct ValueCtx {
+    parent: Arc<dyn Context>,
+    key: alloc::string::String,
+    val: Arc<dyn core::any::Any + Send + Sync>,
+}
+
+impl Context for ValueCtx {
+    fn Deadline(&self) -> Option<Time> {
+        self.parent.Deadline()
+    }
+    fn Done(&self) -> chan<()> {
+        self.parent.Done()
+    }
+    fn Err(&self) -> error {
+        self.parent.Err()
+    }
+    fn Value(&self, key: &str) -> Option<Arc<dyn core::any::Any + Send + Sync>> {
+        if self.key == key {
+            return Some(self.val.clone());
+        }
+        self.parent.Value(key)
+    }
+}
+
+/// `WithValue(parent, key, value)` (context.go:760) — derive a context
+/// that maps `key` to `value`. Lookup via `ctx.Value(key)`.
+pub fn WithValue<V>(parent: Arc<dyn Context>, key: &str, value: V) -> Arc<dyn Context>
+where
+    V: core::any::Any + Send + Sync + 'static,
+{
+    if key.is_empty() {
+        // Match Go's panic on nil key (Go uses interface{}, nil key panics).
+        panic!("nil key");
+    }
+    Arc::new(ValueCtx {
+        parent,
+        key: alloc::string::String::from(key),
+        val: Arc::new(value),
+    })
 }
