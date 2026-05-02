@@ -49,6 +49,7 @@ use crate::types::{byte, int};
 
 mod parse;
 pub mod http;
+pub mod textproto;
 
 pub use parse::TCPAddr;
 
