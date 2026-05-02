@@ -6,3 +6,4 @@
 #![allow(non_snake_case)]
 
 pub mod bits;
+pub mod rand;
