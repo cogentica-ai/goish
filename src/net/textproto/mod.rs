@@ -399,3 +399,8 @@ impl<'a, W: io::Writer> DotWriter<'a, W> {
 
 mod reader;
 pub use reader::{NewReader, Reader, validHeaderFieldByte, validHeaderValueByte};
+
+// ─── Pipeline (pipeline.go) ─────────────────────────────────────────
+
+mod pipeline;
+pub use pipeline::Pipeline;
