@@ -933,6 +933,12 @@ impl<R: io::Reader> io::Reader for Reader<R> {
     }
 }
 
+impl<R: io::Reader> io::ByteReader for Reader<R> {
+    fn ReadByte(&mut self) -> (byte, error) {
+        Reader::ReadByte(self)
+    }
+}
+
 // ─── Writer ───────────────────────────────────────────────────────────
 //
 // Buffered wrapper around any `io::Writer`. Call `Flush()` before
