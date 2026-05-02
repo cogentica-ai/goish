@@ -161,13 +161,23 @@ impl ServeMux {
                 return (route.1.clone(), crate::gomap::map::<string, string>::new());
             }
         }
-        // 2. Longest prefix-with-trailing-slash match.
+        // 2. Longest prefix-with-trailing-slash match — but skip the
+        //    bare `/` catchall here so registered wildcards still win.
+        //    Go 1.22's mux compares pattern specificity globally; we
+        //    approximate by deferring `/` to step 4. A multi-segment
+        //    literal prefix like `/api/users/` still pre-empts any
+        //    wildcard registered later, matching Go's intent that
+        //    longer literal prefixes are more specific.
         let path_b = r.URL.Path.as_bytes();
         let mut best_len: usize = 0;
         let mut best: Option<Arc<dyn Handler>> = None;
         for (pat, handler) in s.routes.iter() {
             let pb = pat.as_bytes();
-            if pb.last() == Some(&b'/') && path_b.starts_with(pb) && pb.len() > best_len {
+            if pb.last() == Some(&b'/')
+                && pb.len() > 1
+                && path_b.starts_with(pb)
+                && pb.len() > best_len
+            {
                 best_len = pb.len();
                 best = Some(handler.clone());
             }
@@ -180,6 +190,12 @@ impl ServeMux {
         for pr in s.pattern_routes.iter() {
             if let Some(bindings) = pr.pattern.Match(&r.Method, &host, &r.URL.Path) {
                 return (pr.handler.clone(), bindings);
+            }
+        }
+        // 4. Fallback to the bare `/` catchall, if registered.
+        for (pat, handler) in s.routes.iter() {
+            if pat.as_bytes() == b"/" {
+                return (handler.clone(), crate::gomap::map::<string, string>::new());
             }
         }
         (
@@ -206,13 +222,18 @@ impl ServeMux {
                 return (route.1.clone(), route.0.clone());
             }
         }
-        // 2. Longest prefix-with-trailing-slash match.
+        // 2. Longest multi-segment prefix-with-trailing-slash match.
+        //    `/` deferred to step 4 so wildcards can win.
         let path_b = r.URL.Path.as_bytes();
         let mut best_len: usize = 0;
         let mut best: Option<(Arc<dyn Handler>, string)> = None;
         for (pat, handler) in s.routes.iter() {
             let pb = pat.as_bytes();
-            if pb.last() == Some(&b'/') && path_b.starts_with(pb) && pb.len() > best_len {
+            if pb.last() == Some(&b'/')
+                && pb.len() > 1
+                && path_b.starts_with(pb)
+                && pb.len() > best_len
+            {
                 best_len = pb.len();
                 best = Some((handler.clone(), pat.clone()));
             }
@@ -229,6 +250,12 @@ impl ServeMux {
                 .is_some()
             {
                 return (pr.handler.clone(), pr.pattern.Str.clone());
+            }
+        }
+        // 4. Fallback to bare `/` catchall, if any.
+        for (pat, handler) in s.routes.iter() {
+            if pat.as_bytes() == b"/" {
+                return (handler.clone(), pat.clone());
             }
         }
         (
