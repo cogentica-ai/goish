@@ -14,8 +14,11 @@
 
 extern crate alloc;
 
+pub mod encodedword;
 pub mod multipart;
 pub mod quotedprintable;
+
+pub use encodedword::{BEncoding, QEncoding, WordDecoder, WordEncoder};
 
 use crate::string;
 use crate::strings;
