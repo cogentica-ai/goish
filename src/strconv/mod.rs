@@ -601,6 +601,26 @@ pub fn AppendQuoteToASCII<S: Into<string>>(dst: slice<byte>, s: S) -> slice<byte
     AppendQuote(dst, s)
 }
 
+/// `strconv.QuoteToGraphic(s)` (quote.go:152) — return a double-quoted
+/// Go string literal that leaves Unicode graphic characters unchanged
+/// and uses Go escape sequences for non-graphic characters.
+///
+/// Slim: in goish v1, [`IsGraphic`] defers to [`IsPrint`] (no Unicode
+/// graphic-list table), and [`Quote`] already escapes every byte that
+/// fails the slim printable test, so this is a thin alias over
+/// [`Quote`]. The output for the common ASCII subset matches Go's.
+pub fn QuoteToGraphic<S: Into<string>>(s: S) -> string {
+    // Go: return quoteWith(s, '"', false, true)
+    Quote(s)
+}
+
+/// `strconv.AppendQuoteToGraphic(dst, s)` (quote.go:158) — append the
+/// graphic-quoted form of `s` to `dst` and return the extended buffer.
+pub fn AppendQuoteToGraphic<S: Into<string>>(dst: slice<byte>, s: S) -> slice<byte> {
+    // Go: return appendQuotedWith(dst, s, '"', false, true)
+    AppendQuote(dst, s)
+}
+
 // Internal helper: append the Go-escape form of a single rune with
 // the given quote-byte (either `'` for QuoteRune, `"` for Quote).
 // Slim: ASCII printable bytes pass through; control chars use `\x`;
@@ -728,6 +748,25 @@ pub fn AppendQuoteRuneToASCII(dst: slice<byte>, r: rune) -> slice<byte> {
     AppendQuoteRune(dst, r)
 }
 
+/// `strconv.QuoteRuneToGraphic(r)` (quote.go:199) — return a single-
+/// quoted Go character literal. If `r` is not a Unicode graphic
+/// character (per [`IsGraphic`]), the returned string uses a Go escape
+/// sequence (`\t`, `\n`, `\xFF`, `Ā`).
+///
+/// Slim: aliases [`QuoteRune`] for the same reason that
+/// [`QuoteToGraphic`] aliases [`Quote`].
+pub fn QuoteRuneToGraphic(r: rune) -> string {
+    // Go: return quoteRuneWith(r, '\'', false, true)
+    QuoteRune(r)
+}
+
+/// `strconv.AppendQuoteRuneToGraphic(dst, r)` (quote.go:205) — append
+/// the QuoteRuneToGraphic form to `dst`.
+pub fn AppendQuoteRuneToGraphic(dst: slice<byte>, r: rune) -> slice<byte> {
+    // Go: return appendQuotedRuneWith(dst, r, '\'', false, true)
+    AppendQuoteRune(dst, r)
+}
+
 /// `strconv.CanBackquote(s)` (quote.go:212) — report whether `s` can
 /// be rendered unchanged inside backticks (no control chars except
 /// '\t', no backquote, no DEL, no BOM).
@@ -809,96 +848,302 @@ pub fn CanBackquote<S: Into<string>>(s: S) -> bool {
     true
 }
 
-/// `strconv.Unquote(s)` (quote.go:383) — slim ASCII port. Decodes a
-/// `"..."` literal containing the Quote-emitted escapes (`\\`, `\"`,
-/// `\n`, `\r`, `\t`, `\a`, `\b`, `\f`, `\v`, `\xHH`). Returns
-/// `(decoded, err)`.
-pub fn Unquote<S: Into<string>>(s: S) -> (string, error) {
-    let s = s.into();
-    let bs = s.as_bytes();
-    if bs.len() < 2 || bs[0] != b'"' || bs[bs.len() - 1] != b'"' {
-        return (string::new(), errors::New("invalid syntax"));
+// Go: quote.go:232
+//   func unhex(b byte) (v rune, ok bool) { ... }
+fn unhex(b: byte) -> (rune, bool) {
+    let c = b as rune;
+    if c >= b'0' as rune && c <= b'9' as rune {
+        return (c - b'0' as rune, true);
     }
-    let inner = &bs[1..bs.len() - 1];
-    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(inner.len());
-    let mut i: usize = 0;
-    while i < inner.len() {
-        let c = inner[i];
-        if c == b'"' {
-            // Bare " inside the quoted region is invalid.
-            return (string::new(), errors::New("invalid syntax"));
-        }
-        if c != b'\\' {
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        // Escape sequence; need at least one more byte.
-        if i + 1 >= inner.len() {
-            return (string::new(), errors::New("invalid syntax"));
-        }
-        let next = inner[i + 1];
-        match next {
-            b'\\' => {
-                out.push(b'\\');
-                i += 2;
-            }
-            b'"' => {
-                out.push(b'"');
-                i += 2;
-            }
-            b'n' => {
-                out.push(b'\n');
-                i += 2;
-            }
-            b'r' => {
-                out.push(b'\r');
-                i += 2;
-            }
-            b't' => {
-                out.push(b'\t');
-                i += 2;
-            }
-            b'a' => {
-                out.push(0x07);
-                i += 2;
-            }
-            b'b' => {
-                out.push(0x08);
-                i += 2;
-            }
-            b'f' => {
-                out.push(0x0c);
-                i += 2;
-            }
-            b'v' => {
-                out.push(0x0b);
-                i += 2;
-            }
-            b'x' => {
-                if i + 3 >= inner.len() {
-                    return (string::new(), errors::New("invalid syntax"));
-                }
-                let h1 = unhex_byte(inner[i + 2]);
-                let h2 = unhex_byte(inner[i + 3]);
-                if h1 == 0xff || h2 == 0xff {
-                    return (string::new(), errors::New("invalid syntax"));
-                }
-                out.push((h1 << 4) | h2);
-                i += 4;
-            }
-            _ => return (string::new(), errors::New("invalid syntax")),
-        }
+    if c >= b'a' as rune && c <= b'f' as rune {
+        return (c - b'a' as rune + 10, true);
     }
-    let _ = nil; // silence unused
-    (string::from_bytes(&out), errors::nil)
+    if c >= b'A' as rune && c <= b'F' as rune {
+        return (c - b'A' as rune + 10, true);
+    }
+    (0, false)
 }
 
-fn unhex_byte(c: u8) -> u8 {
-    match c {
-        b'0'..=b'9' => c - b'0',
-        b'a'..=b'f' => c - b'a' + 10,
-        b'A'..=b'F' => c - b'A' + 10,
-        _ => 0xff,
+/// `strconv.UnquoteChar(s, quote)` (quote.go:259) — decode the first
+/// character or byte in the escaped string or character literal.
+///
+/// Returns `(value, multibyte, tail, err)`:
+///   * `value`     — the decoded Unicode code point or byte.
+///   * `multibyte` — true if the decoded character requires a multibyte
+///                   UTF-8 representation.
+///   * `tail`      — the remainder of `s` after the consumed character.
+///   * `err`       — non-nil on syntax error (no characters consumed).
+///
+/// The `quote` argument selects the literal form: `'` for character
+/// literals, `"` for string literals, or `0` to allow both quote
+/// characters to appear unescaped.
+pub fn UnquoteChar<S: Into<string>>(s: S, quote: byte) -> (rune, bool, string, error) {
+    let s_in = s.into();
+    let bs = s_in.as_bytes();
+    // Go: easy cases. if len(s) == 0 { err = ErrSyntax; return }
+    if bs.is_empty() {
+        return (0, false, string::new(), ErrSyntax());
     }
+    // Go: switch c := s[0]; { ... }
+    let c = bs[0];
+    // Go: case c == quote && (quote == '\'' || quote == '"'): err = ErrSyntax
+    if c == quote && (quote == b'\'' || quote == b'"') {
+        return (0, false, string::new(), ErrSyntax());
+    }
+    // Go: case c >= utf8.RuneSelf:
+    //         r, size := utf8.DecodeRuneInString(s)
+    //         return r, true, s[size:], nil
+    if c >= crate::unicode::utf8::RuneSelf {
+        let (r, size) = crate::unicode::utf8::DecodeRune(bs);
+        let tail = string::from_bytes(&bs[size as usize..]);
+        return (r, true, tail, nil);
+    }
+    // Go: case c != '\\': return rune(s[0]), false, s[1:], nil
+    if c != b'\\' {
+        let tail = string::from_bytes(&bs[1..]);
+        return (c as rune, false, tail, nil);
+    }
+    // Go: hard case — c is backslash. if len(s) <= 1 { err = ErrSyntax; return }
+    if bs.len() <= 1 {
+        return (0, false, string::new(), ErrSyntax());
+    }
+    // Go: c := s[1]; s = s[2:]
+    let esc = bs[1];
+    let mut tail_bs: &[byte] = &bs[2..];
+    let mut value: rune = 0;
+    let mut multibyte: bool = false;
+    match esc {
+        b'a' => value = 0x07,
+        b'b' => value = 0x08,
+        b'f' => value = 0x0C,
+        b'n' => value = 0x0A,
+        b'r' => value = 0x0D,
+        b't' => value = 0x09,
+        b'v' => value = 0x0B,
+        // Go: case 'x', 'u', 'U':
+        b'x' | b'u' | b'U' => {
+            let n: usize = match esc {
+                b'x' => 2,
+                b'u' => 4,
+                b'U' => 8,
+                _ => 0,
+            };
+            // Go: if len(s) < n { err = ErrSyntax; return }
+            if tail_bs.len() < n {
+                return (0, false, string::new(), ErrSyntax());
+            }
+            let mut v: rune = 0;
+            // Go: for j := 0; j < n; j++ {
+            //         x, ok := unhex(s[j]); if !ok { err = ErrSyntax; return }
+            //         v = v<<4 | x
+            //     }
+            for j in 0..n {
+                let (x, ok) = unhex(tail_bs[j]);
+                if !ok {
+                    return (0, false, string::new(), ErrSyntax());
+                }
+                v = (v << 4) | x;
+            }
+            tail_bs = &tail_bs[n..];
+            // Go: if c == 'x' { value = v; break }
+            if esc == b'x' {
+                value = v;
+            } else {
+                // Go: if !utf8.ValidRune(v) { err = ErrSyntax; return }
+                if !crate::unicode::utf8::ValidRune(v) {
+                    return (0, false, string::new(), ErrSyntax());
+                }
+                value = v;
+                multibyte = true;
+            }
+        }
+        // Go: case '0', '1', '2', '3', '4', '5', '6', '7':
+        b'0' | b'1' | b'2' | b'3' | b'4' | b'5' | b'6' | b'7' => {
+            let mut v: rune = (esc as rune) - b'0' as rune;
+            if tail_bs.len() < 2 {
+                return (0, false, string::new(), ErrSyntax());
+            }
+            for j in 0..2 {
+                let x: rune = (tail_bs[j] as rune) - b'0' as rune;
+                if x < 0 || x > 7 {
+                    return (0, false, string::new(), ErrSyntax());
+                }
+                v = (v << 3) | x;
+            }
+            tail_bs = &tail_bs[2..];
+            if v > 255 {
+                return (0, false, string::new(), ErrSyntax());
+            }
+            value = v;
+        }
+        b'\\' => value = b'\\' as rune,
+        // Go: case '\'', '"':
+        b'\'' | b'"' => {
+            if esc != quote {
+                return (0, false, string::new(), ErrSyntax());
+            }
+            value = esc as rune;
+        }
+        _ => return (0, false, string::new(), ErrSyntax()),
+    }
+    let tail = string::from_bytes(tail_bs);
+    (value, multibyte, tail, nil)
+}
+
+// Go: quote.go:391
+//   func unquote(in string, unescape bool) (out, rem string, err error)
+//
+// Internal helper shared by Unquote and QuotedPrefix.
+fn unquote_impl(in_s: string, unescape: bool) -> (string, string, error) {
+    let in_bs = in_s.as_bytes();
+    // Go: if len(in) < 2 { return "", in, ErrSyntax }
+    if in_bs.len() < 2 {
+        return (string::new(), in_s.clone(), ErrSyntax());
+    }
+    // Go: quote := in[0]; end := index(in[1:], quote)
+    //     if end < 0 { return "", in, ErrSyntax }
+    //     end += 2
+    let quote = in_bs[0];
+    let end_after_inner = match in_bs[1..].iter().position(|&b| b == quote) {
+        Some(p) => p + 2, // position after terminating quote
+        None => return (string::new(), in_s.clone(), ErrSyntax()),
+    };
+    let end = end_after_inner;
+
+    match quote {
+        b'`' => {
+            // Go: case '`': switch { case !unescape: out = in[:end] ... }
+            let out: string;
+            if !unescape {
+                out = string::from_bytes(&in_bs[..end]);
+            } else if !in_bs[..end].contains(&b'\r') {
+                out = string::from_bytes(&in_bs[1..end - 1]);
+            } else {
+                // Carriage returns inside raw strings are dropped from the value.
+                let mut buf: Vec<byte> = Vec::with_capacity(end - 2);
+                let mut i = 1usize;
+                while i < end - 1 {
+                    if in_bs[i] != b'\r' {
+                        buf.push(in_bs[i]);
+                    }
+                    i += 1;
+                }
+                out = string::from_bytes(&buf);
+            }
+            let rem = string::from_bytes(&in_bs[end..]);
+            (out, rem, nil)
+        }
+        b'"' | b'\'' => {
+            // Go: if !contains(in[:end], '\\') && !contains(in[:end], '\n') { ... fast path ... }
+            let head = &in_bs[..end];
+            let has_bs = head.contains(&b'\\');
+            let has_nl = head.contains(&b'\n');
+            if !has_bs && !has_nl {
+                let valid: bool = match quote {
+                    b'"' => crate::unicode::utf8::ValidString(&string::from_bytes(&head[1..end - 1])),
+                    b'\'' => {
+                        let inner = &head[1..end - 1];
+                        let (r, n) = crate::unicode::utf8::DecodeRune(inner);
+                        let n_us = n as usize;
+                        // Go: valid = len("'")+n+len("'") == end && (r != utf8.RuneError || n != 1)
+                        2 + n_us == end
+                            && (r != crate::unicode::utf8::RuneError || n != 1)
+                    }
+                    _ => false,
+                };
+                if valid {
+                    let out: string;
+                    if unescape {
+                        out = string::from_bytes(&head[1..end - 1]);
+                    } else {
+                        out = string::from_bytes(head);
+                    }
+                    let rem = string::from_bytes(&in_bs[end..]);
+                    return (out, rem, nil);
+                }
+            }
+
+            // Go: handle quoted strings with escape sequences.
+            let mut buf: Vec<byte> = if unescape { Vec::with_capacity(3 * end / 2) } else { Vec::new() };
+            let in0 = in_s.clone();
+            // Go: in = in[1:]; skip starting quote.
+            let mut cur = string::from_bytes(&in_bs[1..]);
+            // Go: for len(in) > 0 && in[0] != quote { ... }
+            loop {
+                let cur_bs = cur.as_bytes();
+                if cur_bs.is_empty() || cur_bs[0] == quote {
+                    break;
+                }
+                // Go: r, multibyte, rem, err := UnquoteChar(in, quote)
+                //     if in[0] == '\n' || err != nil { return "", in0, ErrSyntax }
+                let first = cur_bs[0];
+                let (r, multibyte, rem, err) = UnquoteChar(cur.clone(), quote);
+                if first == b'\n' || !err.IsNil() {
+                    return (string::new(), in0, ErrSyntax());
+                }
+                cur = rem;
+
+                if unescape {
+                    // Go: if r < utf8.RuneSelf || !multibyte { buf = append(buf, byte(r)) }
+                    //     else { buf = utf8.AppendRune(buf, r) }
+                    if r < crate::unicode::utf8::RuneSelf as rune || !multibyte {
+                        buf.push(r as byte);
+                    } else {
+                        let s_in = slice::__from_vec(buf);
+                        let s_out = crate::unicode::utf8::AppendRune(s_in, r);
+                        buf = s_out.__into_vec();
+                    }
+                }
+
+                // Go: single-quoted strings are a single character.
+                if quote == b'\'' {
+                    break;
+                }
+            }
+
+            // Go: verify the string ends with a terminating quote.
+            let cur_bs = cur.as_bytes();
+            if !(!cur_bs.is_empty() && cur_bs[0] == quote) {
+                return (string::new(), in0, ErrSyntax());
+            }
+            // Go: in = in[1:] — skip terminating quote.
+            cur = string::from_bytes(&cur_bs[1..]);
+
+            if unescape {
+                return (string::from_bytes(&buf), cur, nil);
+            }
+            // Go: return in0[:len(in0)-len(in)], in, nil
+            let in0_bs = in0.as_bytes();
+            let cur_bs = cur.as_bytes();
+            let prefix_len = in0_bs.len() - cur_bs.len();
+            let out = string::from_bytes(&in0_bs[..prefix_len]);
+            (out, cur, nil)
+        }
+        _ => (string::new(), in_s.clone(), ErrSyntax()),
+    }
+}
+
+/// `strconv.QuotedPrefix(s)` (quote.go:372) — returns the quoted
+/// string at the prefix of `s` (as understood by [`Unquote`]).
+/// If `s` does not start with a valid quoted string, returns an
+/// `ErrSyntax` error.
+pub fn QuotedPrefix<S: Into<string>>(s: S) -> (string, error) {
+    // Go: out, _, err := unquote(s, false); return out, err
+    let (out, _rem, err) = unquote_impl(s.into(), false);
+    (out, err)
+}
+
+/// `strconv.Unquote(s)` (quote.go:383) — interprets `s` as a single-,
+/// double-, or backquoted Go string literal, returning the string
+/// value that `s` quotes. Single-quoted literals decode as a one-rune
+/// string (or empty if the rune is a single byte).
+pub fn Unquote<S: Into<string>>(s: S) -> (string, error) {
+    // Go: out, rem, err := unquote(s, true)
+    //     if len(rem) > 0 { return "", ErrSyntax }
+    //     return out, err
+    let (out, rem, err) = unquote_impl(s.into(), true);
+    if rem.as_bytes().len() > 0 {
+        return (string::new(), ErrSyntax());
+    }
+    (out, err)
 }
