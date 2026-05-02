@@ -321,3 +321,11 @@ pub fn Sum(data: slice<byte>) -> [byte; 20] {
     let _ = io::Writer::Write(&mut d, data);
     check_sum(&mut d)
 }
+
+// ─── Boxed constructor for trait-object consumers (e.g. hmac::New) ────
+
+/// `sha1.NewHash()` — boxed constructor matching `hash.Hash` interface.
+/// Use with `hmac::New(crypto::sha1::NewHash, key)`.
+pub fn NewHash() -> alloc::boxed::Box<dyn Hash> {
+    alloc::boxed::Box::new(New())
+}

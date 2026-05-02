@@ -5,6 +5,7 @@
 
 #![allow(non_snake_case)]
 
+pub mod hmac;
 pub mod md5;
 pub mod rand;
 pub mod sha1;

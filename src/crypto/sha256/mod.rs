@@ -388,3 +388,16 @@ pub fn Sum224(data: slice<byte>) -> [byte; 28] {
     sum.copy_from_slice(&raw[..28]);
     sum
 }
+
+// ─── Boxed constructors for trait-object consumers (e.g. hmac::New) ───
+
+/// `sha256.NewHash()` — boxed constructor matching `hash.Hash` interface.
+/// Use with `hmac::New(crypto::sha256::NewHash, key)`.
+pub fn NewHash() -> alloc::boxed::Box<dyn Hash> {
+    alloc::boxed::Box::new(New())
+}
+
+/// `sha256.NewHash224()` — boxed SHA-224 constructor.
+pub fn NewHash224() -> alloc::boxed::Box<dyn Hash> {
+    alloc::boxed::Box::new(New224())
+}
