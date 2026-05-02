@@ -417,3 +417,169 @@ path = "examples/lockfree_ring_smoke.rs"
 name = "lockfree_ring_bench"
 path = "examples/lockfree_ring_bench.rs"
 
+
+# ─── HTTP smoke examples — added 2026-05-02 for e2e coverage ─────────
+
+[[example]]
+name = "http_basicauth_smoke"
+path = "examples/http_basicauth_smoke.rs"
+
+[[example]]
+name = "http_chunked_smoke"
+path = "examples/http_chunked_smoke.rs"
+
+[[example]]
+name = "http_client_smoke"
+path = "examples/http_client_smoke.rs"
+
+[[example]]
+name = "http_clone_smoke"
+path = "examples/http_clone_smoke.rs"
+
+[[example]]
+name = "http_constants_smoke"
+path = "examples/http_constants_smoke.rs"
+
+[[example]]
+name = "http_cookiejar_smoke"
+path = "examples/http_cookiejar_smoke.rs"
+
+[[example]]
+name = "http_cookie_smoke"
+path = "examples/http_cookie_smoke.rs"
+
+[[example]]
+name = "http_default_mux_smoke"
+path = "examples/http_default_mux_smoke.rs"
+
+[[example]]
+name = "http_dump_smoke"
+path = "examples/http_dump_smoke.rs"
+
+[[example]]
+name = "http_error_smoke"
+path = "examples/http_error_smoke.rs"
+
+[[example]]
+name = "http_fileserver_dir_smoke"
+path = "examples/http_fileserver_dir_smoke.rs"
+
+[[example]]
+name = "http_fileserver_range_smoke"
+path = "examples/http_fileserver_range_smoke.rs"
+
+[[example]]
+name = "http_fileserver_smoke"
+path = "examples/http_fileserver_smoke.rs"
+
+[[example]]
+name = "http_form_smoke"
+path = "examples/http_form_smoke.rs"
+
+[[example]]
+name = "http_header_smoke"
+path = "examples/http_header_smoke.rs"
+
+[[example]]
+name = "http_hello"
+path = "examples/http_hello.rs"
+
+[[example]]
+name = "http_helpers_smoke"
+path = "examples/http_helpers_smoke.rs"
+
+[[example]]
+name = "http_httputil_chunked_smoke"
+path = "examples/http_httputil_chunked_smoke.rs"
+
+[[example]]
+name = "http_internal_ascii_smoke"
+path = "examples/http_internal_ascii_smoke.rs"
+
+[[example]]
+name = "http_keepalive_smoke"
+path = "examples/http_keepalive_smoke.rs"
+
+[[example]]
+name = "http_limits_smoke"
+path = "examples/http_limits_smoke.rs"
+
+[[example]]
+name = "http_max_bytes_error_smoke"
+path = "examples/http_max_bytes_error_smoke.rs"
+
+[[example]]
+name = "http_multipart_request_smoke"
+path = "examples/http_multipart_request_smoke.rs"
+
+[[example]]
+name = "http_mux_handler_smoke"
+path = "examples/http_mux_handler_smoke.rs"
+
+[[example]]
+name = "http_notfound_handler_smoke"
+path = "examples/http_notfound_handler_smoke.rs"
+
+[[example]]
+name = "http_parse_smoke"
+path = "examples/http_parse_smoke.rs"
+
+[[example]]
+name = "http_protocol_error_smoke"
+path = "examples/http_protocol_error_smoke.rs"
+
+[[example]]
+name = "http_protocols_smoke"
+path = "examples/http_protocols_smoke.rs"
+
+[[example]]
+name = "http_query_semicolons_smoke"
+path = "examples/http_query_semicolons_smoke.rs"
+
+[[example]]
+name = "http_range_smoke"
+path = "examples/http_range_smoke.rs"
+
+[[example]]
+name = "http_redirect_smoke"
+path = "examples/http_redirect_smoke.rs"
+
+[[example]]
+name = "http_request_write_smoke"
+path = "examples/http_request_write_smoke.rs"
+
+[[example]]
+name = "http_reverseproxy_smoke"
+path = "examples/http_reverseproxy_smoke.rs"
+
+[[example]]
+name = "http_sentinels_smoke"
+path = "examples/http_sentinels_smoke.rs"
+
+[[example]]
+name = "http_shutdown_smoke"
+path = "examples/http_shutdown_smoke.rs"
+
+[[example]]
+name = "http_sniff_smoke"
+path = "examples/http_sniff_smoke.rs"
+
+[[example]]
+name = "http_status_smoke"
+path = "examples/http_status_smoke.rs"
+
+[[example]]
+name = "http_time_smoke"
+path = "examples/http_time_smoke.rs"
+
+[[example]]
+name = "http_wildcard_smoke"
+path = "examples/http_wildcard_smoke.rs"
+
+[[example]]
+name = "http_writeproxy_smoke"
+path = "examples/http_writeproxy_smoke.rs"
+
+[[example]]
+name = "production_http_server"
+path = "examples/production_http_server.rs"
