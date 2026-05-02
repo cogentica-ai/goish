@@ -27,6 +27,7 @@ mod oncefunc;
 mod pool;
 mod rwmutex;
 mod sema;
+pub mod singleflight;
 mod syncmap;
 mod waitgroup;
 
