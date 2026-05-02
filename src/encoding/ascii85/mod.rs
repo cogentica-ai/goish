@@ -2,11 +2,15 @@
 //
 // btoa / Adobe PostScript and PDF base85 encoding.
 //
+// Reference: /share/go/src/encoding/ascii85/ascii85.go.
+//
 // Slim deviations:
-//   * No NewEncoder / NewDecoder streaming wrappers (Go uses these for
-//     io.Writer / io.Reader streaming; goish callers use one-shot
-//     Encode/Decode).
-//   * `CorruptInputError` is a goish-style typed error.
+//   * `CorruptInputError` is a goish-style typed error (see bottom of
+//     file). Go uses an `int64` newtype; we use a struct field to
+//     keep the public-API rule of "no Rust scalars in error names."
+//   * The streaming `Encoder` / `Decoder` wrap any `io::Writer` /
+//     `io::Reader` (generic over `W` / `R`), matching the goish base64
+//     streaming pattern shipped earlier; Go uses interface-typed fields.
 
 #![allow(non_snake_case)]
 
@@ -226,5 +230,294 @@ impl ErrorTrait for CorruptInputError {
             out.push(d as char);
         }
         crate::gostring::string::from_bytes(out.as_bytes())
+    }
+}
+
+// ─── Streaming Encoder (ascii85.go:95-161) ────────────────────────────
+//
+// Mirrors Go's `encoder` struct:
+//
+//   type encoder struct {
+//       err  error
+//       w    io.Writer
+//       buf  [4]byte
+//       nbuf int
+//       out  [1024]byte
+//   }
+//
+// 4-byte input blocks → 5-byte output blocks (or 1 byte for `z`-shortened
+// runs of zeros).
+
+/// `ascii85` streaming encoder (ascii85.go:95). Wraps any `io::Writer`
+/// and converts incoming bytes into ascii85 in 4-byte input chunks.
+/// Caller must call `Close()` to flush any trailing partial block.
+pub struct Encoder<W: crate::io::Writer> {
+    err: error,
+    w: W,
+    buf: [byte; 4],
+    nbuf: usize,
+    out: [byte; 1024],
+}
+
+impl<W: crate::io::Writer> Encoder<W> {
+    // Go: ascii85.go:103
+    //   func (e *encoder) Write(p []byte) (n int, err error)
+    pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        // Go: if e.err != nil { return 0, e.err }
+        if !self.err.IsNil() {
+            return (0, self.err.clone());
+        }
+
+        let mut p_raw: &[byte] = &p;
+        let mut n: int = 0;
+
+        // Go: leading fringe — fill the 4-byte buffer.
+        if self.nbuf > 0 {
+            let mut i = 0usize;
+            while i < p_raw.len() && self.nbuf < 4 {
+                self.buf[self.nbuf] = p_raw[i];
+                self.nbuf += 1;
+                i += 1;
+            }
+            n += i as int;
+            p_raw = &p_raw[i..];
+            // Go: if e.nbuf < 4 { return }
+            if self.nbuf < 4 {
+                return (n, nil);
+            }
+            // Go: nout := Encode(e.out[0:], e.buf[0:])
+            //     if _, e.err = e.w.Write(e.out[0:nout]); e.err != nil { return n, e.err }
+            let buf_copy = [self.buf[0], self.buf[1], self.buf[2], self.buf[3]];
+            let nout = encode_into(&mut self.out[..], &buf_copy);
+            let chunk = slice::__from_vec(self.out[..nout].to_vec());
+            let (_, werr) = self.w.Write(chunk);
+            if !werr.IsNil() {
+                self.err = werr.clone();
+                return (n, werr);
+            }
+            self.nbuf = 0;
+        }
+
+        // Go: large interior chunks — encode `nn` bytes (multiple of 4).
+        //     nn := len(e.out) / 5 * 4
+        while p_raw.len() >= 4 {
+            let mut nn = self.out.len() / 5 * 4; // 819 → 816 multiple of 4 below
+            if nn > p_raw.len() {
+                nn = p_raw.len();
+            }
+            // Go: nn -= nn % 4
+            nn -= nn % 4;
+            if nn > 0 {
+                // Stage src into a local Vec to avoid borrow conflict
+                // between &mut self.out and &p_raw.
+                let src_chunk: alloc::vec::Vec<byte> = p_raw[..nn].to_vec();
+                let nout = encode_into(&mut self.out[..], &src_chunk);
+                let chunk = slice::__from_vec(self.out[..nout].to_vec());
+                let (_, werr) = self.w.Write(chunk);
+                if !werr.IsNil() {
+                    self.err = werr.clone();
+                    return (n, werr);
+                }
+            }
+            n += nn as int;
+            p_raw = &p_raw[nn..];
+        }
+
+        // Go: trailing fringe — copy remaining 0..3 bytes to e.buf.
+        let p_len = p_raw.len();
+        let mut i = 0usize;
+        while i < p_len {
+            self.buf[i] = p_raw[i];
+            i += 1;
+        }
+        self.nbuf = p_len;
+        n += p_len as int;
+        (n, nil)
+    }
+
+    // Go: ascii85.go:153
+    //   func (e *encoder) Close() error
+    pub fn Close(&mut self) -> error {
+        // Go: if e.err == nil && e.nbuf > 0 {
+        //         nout := Encode(e.out[0:], e.buf[0:e.nbuf])
+        //         e.nbuf = 0
+        //         _, e.err = e.w.Write(e.out[0:nout])
+        //     }
+        if self.err.IsNil() && self.nbuf > 0 {
+            let nbuf = self.nbuf;
+            let src_buf: [byte; 4] = self.buf;
+            let nout = encode_into(&mut self.out[..], &src_buf[..nbuf]);
+            let chunk = slice::__from_vec(self.out[..nout].to_vec());
+            let (_, werr) = self.w.Write(chunk);
+            if !werr.IsNil() {
+                self.err = werr.clone();
+            }
+            self.nbuf = 0;
+        }
+        self.err.clone()
+    }
+}
+
+// `Encoder<W>` is itself an `io::Writer` — slot into pipelines.
+impl<W: crate::io::Writer> crate::io::Writer for Encoder<W> {
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        Encoder::Write(self, p)
+    }
+}
+
+// Go: ascii85.go:88
+//   func NewEncoder(w io.Writer) io.WriteCloser
+//
+// Goish takes the writer by move; the returned `Encoder<W>` exposes
+// both `Write` and `Close`.
+pub fn NewEncoder<W: crate::io::Writer>(w: W) -> Encoder<W> {
+    Encoder {
+        err: nil,
+        w,
+        buf: [0; 4],
+        nbuf: 0,
+        out: [0; 1024],
+    }
+}
+
+// ─── Streaming Decoder (ascii85.go:243-307) ───────────────────────────
+//
+// Mirrors Go's `decoder` struct:
+//
+//   type decoder struct {
+//       err     error
+//       readErr error
+//       r       io.Reader
+//       buf     [1024]byte
+//       nbuf    int
+//       out     []byte
+//       outbuf  [1024]byte
+//   }
+//
+// `out` (a slice into `outbuf`) is represented as `out_start..out_end`
+// indices to avoid self-referential borrows.
+
+/// `ascii85` streaming decoder (ascii85.go:245). Wraps any `io::Reader`
+/// and decodes ascii85 input on demand.
+pub struct Decoder<R: crate::io::Reader> {
+    err: error,
+    read_err: error,
+    r: R,
+    buf: [byte; 1024],
+    nbuf: usize,
+    // Slice into outbuf — Go uses `out []byte`; goish uses index pair.
+    out_start: usize,
+    out_end: usize,
+    outbuf: [byte; 1024],
+}
+
+impl<R: crate::io::Reader> Decoder<R> {
+    // Go: ascii85.go:255
+    //   func (d *decoder) Read(p []byte) (n int, err error)
+    pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        // Go: if len(p) == 0 { return 0, nil }
+        if p.Len() == 0 {
+            return (0, nil);
+        }
+        // Go: if d.err != nil { return 0, d.err }
+        if !self.err.IsNil() {
+            return (0, self.err.clone());
+        }
+
+        loop {
+            // Go: copy leftover output from last decode.
+            if self.out_end > self.out_start {
+                let avail = self.out_end - self.out_start;
+                let plen = p.Len() as usize;
+                let n = if plen < avail { plen } else { avail };
+                for i in 0..n {
+                    p[i as int] = self.outbuf[self.out_start + i];
+                }
+                self.out_start += n;
+                return (n as int, nil);
+            }
+
+            // Go: decode leftover input from last read.
+            if self.nbuf > 0 {
+                let nbuf = self.nbuf;
+                let flush = !self.read_err.IsNil();
+                let src_buf: alloc::vec::Vec<byte> = self.buf[..nbuf].to_vec();
+                let (ndst, nsrc, derr) = decode_into(&mut self.outbuf[..], &src_buf, flush);
+                self.err = derr;
+
+                // Go: if ndst > 0 { d.out = d.outbuf[0:ndst]; d.nbuf = copy(d.buf[0:], d.buf[nsrc:d.nbuf]); continue }
+                if ndst > 0 {
+                    self.out_start = 0;
+                    self.out_end = ndst as usize;
+                    // Shift unconsumed input down to the front.
+                    let nsrc_u = nsrc as usize;
+                    let remaining = self.nbuf - nsrc_u;
+                    for i in 0..remaining {
+                        self.buf[i] = self.buf[nsrc_u + i];
+                    }
+                    self.nbuf = remaining;
+                    continue;
+                }
+                // Go: special case — input mostly non-data; filter it out.
+                if ndst == 0 && self.err.IsNil() {
+                    let mut off = 0usize;
+                    let mut i = 0usize;
+                    while i < self.nbuf {
+                        if self.buf[i] > b' ' {
+                            self.buf[off] = self.buf[i];
+                            off += 1;
+                        }
+                        i += 1;
+                    }
+                    self.nbuf = off;
+                }
+            }
+
+            // Go: out of input, out of decoded output. Check errors.
+            if !self.err.IsNil() {
+                return (0, self.err.clone());
+            }
+            if !self.read_err.IsNil() {
+                self.err = self.read_err.clone();
+                return (0, self.err.clone());
+            }
+
+            // Go: read more data — d.r.Read(d.buf[d.nbuf:])
+            let want = self.buf.len() - self.nbuf;
+            let mut tmp = slice::__from_vec(alloc::vec![0u8; want]);
+            let (nn, rerr) = self.r.Read(&mut tmp);
+            self.read_err = rerr;
+            let nn_u = nn as usize;
+            let tmp_raw: &[byte] = &tmp;
+            for i in 0..nn_u {
+                self.buf[self.nbuf + i] = tmp_raw[i];
+            }
+            self.nbuf += nn_u;
+        }
+    }
+}
+
+// `Decoder<R>` is itself an `io::Reader` — slot into pipelines.
+impl<R: crate::io::Reader> crate::io::Reader for Decoder<R> {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        Decoder::Read(self, p)
+    }
+}
+
+// Go: ascii85.go:243
+//   func NewDecoder(r io.Reader) io.Reader
+//
+// Goish takes the reader by move (or by `&mut R` via the io::Reader
+// blanket impl on `&mut T`).
+pub fn NewDecoder<R: crate::io::Reader>(r: R) -> Decoder<R> {
+    Decoder {
+        err: nil,
+        read_err: nil,
+        r,
+        buf: [0; 1024],
+        nbuf: 0,
+        out_start: 0,
+        out_end: 0,
+        outbuf: [0; 1024],
     }
 }
