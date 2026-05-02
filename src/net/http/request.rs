@@ -57,15 +57,30 @@ pub struct Request {
     /// when a `/users/{id}`-style pattern matches; queried via
     /// `r.PathValue(name)`. Empty otherwise.
     pub(crate) path_values: crate::gomap::map<string, string>,
-    /// Parsed form (URL query + POST body if any). Populated lazily by
-    /// `ParseForm()`; mirrors `Request.Form` (request.go:281). The
-    /// pair `(form_parsed, form)` represents Go's `r.Form == nil` test.
-    pub(crate) form_parsed: bool,
-    pub(crate) form: crate::gomap::map<string, slice<string>>,
-    /// Parsed POST body form. Populated lazily by `ParseForm()` when
-    /// the method is POST/PUT/PATCH. Mirrors `Request.PostForm`.
-    pub(crate) post_form_parsed: bool,
-    pub(crate) post_form: crate::gomap::map<string, slice<string>>,
+    /// Lazy form-parse state. Wrapped in `Arc<Mutex<…>>` so
+    /// `ParseForm`/`FormValue`/`PostFormValue` can be called from
+    /// `&Request` (handlers receive `&Request`, not `&mut Request`,
+    /// because `Handler::ServeHTTP` takes `&self`). Mirrors Go's
+    /// `(r *Request).ParseForm()` mutation through a shared pointer.
+    ///
+    /// Cloning a Request shares this state via `Arc::clone` — slight
+    /// divergence from Go where `r.Clone(ctx)` deep-copies Form. In
+    /// practice handlers don't clone-then-parse; the shared-state
+    /// model matches "all `&Request` views see the same parsed
+    /// values" which is what Go's pointer-aliasing already provides.
+    pub(crate) form_state: alloc::sync::Arc<crate::sync::Mutex<FormCell>>,
+}
+
+/// Internal form-parse cell — the four fields that ParseForm
+/// populates, bundled under one Mutex. Mirrors the four Go
+/// `Request.Form` / `Request.PostForm` fields plus their nil-test
+/// booleans.
+#[derive(Default, Clone)]
+pub(crate) struct FormCell {
+    pub parsed: bool,
+    pub post_parsed: bool,
+    pub form: crate::gomap::map<string, slice<string>>,
+    pub post_form: crate::gomap::map<string, slice<string>>,
 }
 
 impl Request {
@@ -170,27 +185,34 @@ impl Request {
     /// POST/PUT/PATCH with `Content-Type: application/x-www-form-urlencoded`,
     /// also parses the body and merges into both `r.PostForm` and
     /// `r.Form`. Idempotent.
-    pub fn ParseForm(&mut self) -> error {
+    ///
+    /// Takes `&self` (not `&mut self`) so handlers — which receive
+    /// `&Request` from the `Handler` trait — can call it directly,
+    /// matching Go's `func (r *Request) ParseForm()` ergonomics.
+    /// State lives behind an internal `Mutex<FormCell>`.
+    pub fn ParseForm(&self) -> error {
+        let mut s = self.form_state.Lock();
         // Go: var err error
         let mut err: error = errors::nil;
         // Go: if r.PostForm == nil { … }
-        if !self.post_form_parsed {
-            self.post_form_parsed = true;
+        if !s.post_parsed {
+            s.post_parsed = true;
             // Go: if r.Method == "POST" || "PUT" || "PATCH" { r.PostForm, err = parsePostForm(r) }
             if self.Method == "POST" || self.Method == "PUT" || self.Method == "PATCH" {
                 let (pf, e) = parse_post_form(self);
-                self.post_form = pf;
+                s.post_form = pf;
                 err = e;
             }
             // Go: if r.PostForm == nil { r.PostForm = make(url.Values) }
             // (already initialized to empty map by default; nothing to do)
         }
         // Go: if r.Form == nil { … }
-        if !self.form_parsed {
-            self.form_parsed = true;
+        if !s.parsed {
+            s.parsed = true;
             // Go: if len(r.PostForm) > 0 { copyValues(r.Form, r.PostForm) }
-            if self.post_form.Len() > 0 {
-                copy_values(&mut self.form, &self.post_form);
+            if s.post_form.Len() > 0 {
+                let post_form = s.post_form.clone();
+                copy_values(&mut s.form, &post_form);
             }
             // Go: newValues, e := url.ParseQuery(r.URL.RawQuery)
             let (new_values, e) = super::url::ParseQuery(self.URL.RawQuery.clone());
@@ -198,20 +220,21 @@ impl Request {
                 err = e;
             }
             // Go: copyValues(r.Form, newValues)
-            copy_values(&mut self.form, &new_values);
+            copy_values(&mut s.form, &new_values);
         }
         err
     }
 
     /// `r.FormValue(key)` — first form value for `key`, or empty.
     /// Mirrors `(*Request).FormValue(key)` (request.go:1419).
-    pub fn FormValue(&mut self, key: string) -> string {
+    pub fn FormValue(&self, key: string) -> string {
         // Go: if r.Form == nil { r.ParseMultipartForm(defaultMaxMemory) }
-        if !self.form_parsed {
+        if !self.form_state.Lock().parsed {
             let _ = self.ParseForm();
         }
         // Go: if vs := r.Form[key]; len(vs) > 0 { return vs[0] }
-        let (vs, ok) = self.form.Get(key);
+        let s = self.form_state.Lock();
+        let (vs, ok) = s.form.Get(key);
         if ok && vs.Len() > 0 {
             return vs[0].clone();
         }
@@ -220,11 +243,12 @@ impl Request {
 
     /// `r.PostFormValue(key)` — first POST form value for `key`, or
     /// empty. Mirrors request.go:1434.
-    pub fn PostFormValue(&mut self, key: string) -> string {
-        if !self.post_form_parsed {
+    pub fn PostFormValue(&self, key: string) -> string {
+        if !self.form_state.Lock().post_parsed {
             let _ = self.ParseForm();
         }
-        let (vs, ok) = self.post_form.Get(key);
+        let s = self.form_state.Lock();
+        let (vs, ok) = s.post_form.Get(key);
         if ok && vs.Len() > 0 {
             return vs[0].clone();
         }
@@ -414,10 +438,7 @@ pub fn ReadRequestWithLimit<R: io::Reader>(
         Body: slice::<byte>::__from_vec(Vec::new()),
         RemoteAddr: string::new(),
         path_values: crate::gomap::map::<string, string>::new(),
-        form_parsed: false,
-        form: crate::gomap::map::<string, slice<string>>::new(),
-        post_form_parsed: false,
-        post_form: crate::gomap::map::<string, slice<string>>::new(),
+        form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(FormCell::default())),
     };
 
     // Request-line: METHOD SP request-target SP HTTP-version CRLF

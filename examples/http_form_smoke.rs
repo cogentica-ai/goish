@@ -39,34 +39,30 @@ fn main() {
     {
         let s = q_seen.clone();
         mux.HandleFunc(string("/q"), move |w, r| {
-            let mut r2 = r.clone();
-            *s.Lock() = r2.FormValue(string("q"));
+            *s.Lock() = r.FormValue(string("q"));
             let _ = w.Write(bytes("ok\n"));
         });
     }
     {
         let s = pf_name.clone();
         mux.HandleFunc(string("/p"), move |w, r| {
-            let mut r2 = r.clone();
-            *s.Lock() = r2.PostFormValue(string("name"));
+            *s.Lock() = r.PostFormValue(string("name"));
             let _ = w.Write(bytes("ok\n"));
         });
     }
     {
         let s = merged.clone();
         mux.HandleFunc(string("/merge"), move |w, r| {
-            let mut r2 = r.clone();
             // Body has key=body; URL has key=query.
             // ParseForm puts both into Form; PostForm wins for key in body.
-            *s.Lock() = r2.FormValue(string("key"));
+            *s.Lock() = r.FormValue(string("key"));
             let _ = w.Write(bytes("ok\n"));
         });
     }
     {
         let s = decoded.clone();
         mux.HandleFunc(string("/d"), move |w, r| {
-            let mut r2 = r.clone();
-            *s.Lock() = r2.FormValue(string("text"));
+            *s.Lock() = r.FormValue(string("text"));
             let _ = w.Write(bytes("ok\n"));
         });
     }

@@ -111,18 +111,20 @@ fn h_user_get(w: &mut http::ResponseWriter, r: &http::Request) {
 }
 
 fn h_form(w: &mut http::ResponseWriter, r: &http::Request) {
-    // goish exposes ParseForm on &mut Request. The handler signature
-    // gives us &Request — we can't call &mut methods. This is a real
-    // gap for form-handling at the handler boundary.
-    //
-    // Workaround: Read r.URL.RawQuery and echo it.
+    // ParseForm + FormValue both take `&Request` (interior mutability
+    // via Mutex<FormCell>), so handlers can parse form values
+    // directly — no `&mut self` workaround needed.
+    let name = r.FormValue(string("name"));
+    let age = r.FormValue(string("age"));
     w.Header().Set(
         string("Content-Type"),
         string("text/plain"),
     );
     let mut out = goish::strings::Builder::new();
-    out.WriteString(string("query="));
-    out.WriteString(&r.URL.RawQuery);
+    out.WriteString(string("name="));
+    out.WriteString(name);
+    out.WriteString(string("&age="));
+    out.WriteString(age);
     w.Write(bytes(out.String()));
 }
 
@@ -369,11 +371,12 @@ fn main() {
               && goish::bytes::Contains(&resp.Body, bytes("sid=abc123")),
               string("Cookie roundtrip"));
 
-        // Test 11: form query parsing.
+        // Test 11: form query parsing via FormValue (handler-side parse).
         let (resp, e) = http::Get(url_at(string("/form?name=alice&age=30")));
         check(e.IsNil()
-              && goish::bytes::Contains(&resp.Body, bytes("query=name=alice")),
-              string("Form query echo"));
+              && goish::bytes::Contains(&resp.Body, bytes("name=alice"))
+              && goish::bytes::Contains(&resp.Body, bytes("age=30")),
+              string("Form query parsed via FormValue"));
 
         // Test 12: graceful shutdown.
         let err = srv_for_shutdown.Shutdown(time::Second);
