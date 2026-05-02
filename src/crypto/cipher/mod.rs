@@ -161,11 +161,15 @@ pub trait AEAD {
 // surface is re-exported here so users write `cipher::StreamReader` and
 // `cipher::StreamWriter` exactly as in Go.
 
+mod cbc;
 mod cfb;
 mod ctr;
 mod io;
 mod ofb;
 
+pub use self::cbc::{
+    CBCDecrypter, CBCEncrypter, NewCBCDecrypter, NewCBCEncrypter,
+};
 pub use self::cfb::{NewCFBDecrypter, NewCFBEncrypter, CFB};
 pub use self::ctr::{NewCTR, CTR};
 pub use self::io::{StreamReader, StreamWriter};
