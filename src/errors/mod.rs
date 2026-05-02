@@ -27,6 +27,8 @@
 extern crate alloc;
 use alloc::sync::Arc;
 
+use core::any::{Any, TypeId};
+
 use crate::convert::__StringConv;
 use crate::gostring::string;
 
@@ -36,8 +38,9 @@ use crate::gostring::string;
 /// custom error type by writing `impl errors::ErrorTrait for MyType`.
 ///
 /// `Send + Sync + 'static` so errors can cross goroutines (M15) and
-/// be stored in long-lived sentinels.
-pub trait ErrorTrait: Send + Sync + 'static {
+/// be stored in long-lived sentinels. `Any` supertrait enables
+/// `errors::As` to recover the concrete type from the chain.
+pub trait ErrorTrait: Any + Send + Sync + 'static {
     /// Go's `Error() string` — the one method the interface requires.
     fn Error(&self) -> string;
 
@@ -179,6 +182,58 @@ pub fn Unwrap(err: error) -> error {
     match &err.0 {
         Some(e) => e.Unwrap(),
         None => nil,
+    }
+}
+
+// ─── As (slim port of errors/wrap.go:97) ────────────────────────────────
+
+/// `errors.As(err)` — finds the first error in `err`'s chain whose
+/// concrete type is `T` and returns it.
+///
+/// Slim: Go's signature `As(err error, target any) bool` uses
+/// reflection to mutate a caller-supplied target pointer. Goish
+/// returns `Option<Arc<T>>` instead — idiomatic Rust, same effect.
+/// The caller writes:
+///
+/// ```ignore
+/// if let Some(pe) = errors::As::<ParseError>(err) {
+///     /* use pe.line / pe.col */
+/// }
+/// ```
+///
+/// Slim deviations:
+///   * No `As(any) bool` method on the error type — goish doesn't have
+///     a `Box<dyn Any>`-shaped target, so the "error provides custom
+///     As" extension point is omitted.
+///   * Unwrap()-of-multi-errors not walked; goish's Unwrap returns a
+///     single error (matching `Unwrap() error` only).
+pub fn As<T: ErrorTrait>(err: error) -> Option<Arc<T>> {
+    let mut cur = err;
+    loop {
+        if cur.IsNil() {
+            return None;
+        }
+        // Try the head of the chain.
+        if let Some(arc) = cur.0.as_ref() {
+            // Use Any::type_id via the supertrait. Calls into the
+            // ErrorTrait vtable, which dispatches to Any's type_id
+            // implementation for the underlying concrete type.
+            let dyn_ref: &dyn ErrorTrait = arc.as_ref();
+            if (dyn_ref as &dyn Any).type_id() == TypeId::of::<T>() {
+                // SAFETY: the type id matches, so the data behind the
+                // fat pointer is a `T`. Convert Arc<dyn ErrorTrait> →
+                // Arc<T> by stripping the vtable from the fat pointer.
+                let arc_clone = arc.clone();
+                let raw = Arc::into_raw(arc_clone) as *const T;
+                return Some(unsafe { Arc::from_raw(raw) });
+            }
+        }
+        // Walk the chain via Unwrap().
+        let next = match &cur.0 {
+            Some(e) => e.Unwrap(),
+            None => return None,
+        };
+        cur = next;
     }
 }
 
