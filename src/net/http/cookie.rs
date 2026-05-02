@@ -725,7 +725,7 @@ const MONTH_NAMES: [&[byte; 3]; 12] = [
 /// `t`, returning a slice covering exactly the 29 bytes written.
 /// Mirrors Go's `t.UTC().AppendFormat(buf[:0], TimeFormat)` flow.
 fn append_imf_fixdate_into<'a>(buf: &'a mut [byte; 29], t: &time::Time) -> &'a [byte] {
-    let weekday = (t.Weekday() as usize) % 7;
+    let weekday = (t.Weekday().Int() as usize) % 7;
     let (year, month, day) = t.Date();
     let (hh, mm, ss) = t.Clock();
     let dn = DAY_NAMES[weekday];

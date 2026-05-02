@@ -262,7 +262,7 @@ fn imf_fixdate_into<'a>(
         b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun",
         b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
     ];
-    let weekday = (t.Weekday() as usize) % 7;
+    let weekday = (t.Weekday().Int() as usize) % 7;
     let (year, month, day) = t.Date();
     let (hh, mm, ss) = t.Clock();
     let dn = DAYS[weekday];

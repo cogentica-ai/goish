@@ -78,6 +78,154 @@ pub const DateTime: &str = "2006-01-02 15:04:05";
 pub const DateOnly: &str = "2006-01-02";
 pub const TimeOnly: &str = "15:04:05";
 
+// ─── Month + Weekday (time/time.go:319-368) ──────────────────────────
+//
+// Line-by-line port of Go's `Month` and `Weekday` typed enums.
+//
+// Slim deviations:
+//   * Go `type Month int` — Goish `pub struct Month(int)`. Rust has
+//     no native typed-int alias; the wrapper is the closest analogue.
+//   * `m.String()` for an out-of-range Month renders
+//     "%!Month(N)" exactly like Go (time.go:343).
+//   * Cross-type comparison (`m == 5`) is enabled via PartialEq<int>
+//     to mirror Go's untyped-const promotion. Use `.Int()` for the
+//     underlying number when an explicit `i64` is needed.
+
+// Go: type.go:320  type Month int
+//     time.go:319  // A Month specifies a month of the year (January = 1, ...).
+/// `time.Month` — typed month-of-year (1=January .. 12=December).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Month(int);
+
+// Go: time.go:322-335
+//     const ( January Month = 1 + iota; ... December )
+pub const January: Month = Month(1);
+pub const February: Month = Month(2);
+pub const March: Month = Month(3);
+pub const April: Month = Month(4);
+pub const May: Month = Month(5);
+pub const June: Month = Month(6);
+pub const July: Month = Month(7);
+pub const August: Month = Month(8);
+pub const September: Month = Month(9);
+pub const October: Month = Month(10);
+pub const November: Month = Month(11);
+pub const December: Month = Month(12);
+
+impl Month {
+    /// Construct a Month from a raw 1..=12 value. No bounds check;
+    /// out-of-range values render via `String()` as `%!Month(N)`.
+    pub const fn new(v: int) -> Self {
+        Month(v)
+    }
+
+    /// The underlying month number, 1=January .. 12=December.
+    pub const fn Int(self) -> int {
+        self.0
+    }
+
+    // Go: time.go:338  func (m Month) String() string
+    /// English name ("January" .. "December"). Out-of-range values
+    /// render as "%!Month(N)".
+    pub fn String(self) -> string {
+        if self.0 >= 1 && self.0 <= 12 {
+            return string::from_static(MONTH_LONG[self.0 as usize - 1]);
+        }
+        // Go: "%!Month(" + fmtInt(buf, uint64(m)) + ")"
+        crate::Sprintf!("%%!Month(%d)", self.0)
+    }
+}
+
+// Go: time.go:347  type Weekday int
+/// `time.Weekday` — typed day-of-week (0=Sunday .. 6=Saturday).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Weekday(int);
+
+// Go: time.go:350-358
+//     const ( Sunday Weekday = iota; ... Saturday )
+pub const Sunday: Weekday = Weekday(0);
+pub const Monday: Weekday = Weekday(1);
+pub const Tuesday: Weekday = Weekday(2);
+pub const Wednesday: Weekday = Weekday(3);
+pub const Thursday: Weekday = Weekday(4);
+pub const Friday: Weekday = Weekday(5);
+pub const Saturday: Weekday = Weekday(6);
+
+impl Weekday {
+    /// Construct a Weekday from a raw 0..=6 value.
+    pub const fn new(v: int) -> Self {
+        Weekday(v)
+    }
+
+    /// The underlying day-of-week number, 0=Sunday .. 6=Saturday.
+    pub const fn Int(self) -> int {
+        self.0
+    }
+
+    // Go: time.go:361  func (d Weekday) String() string
+    /// English name ("Sunday" .. "Saturday"). Out-of-range values
+    /// render as "%!Weekday(N)".
+    pub fn String(self) -> string {
+        if self.0 >= 0 && self.0 <= 6 {
+            return string::from_static(DAY_LONG[self.0 as usize]);
+        }
+        crate::Sprintf!("%%!Weekday(%d)", self.0)
+    }
+}
+
+// Cross-type equality with `int` to mirror Go's untyped-const
+// promotion. Without these, callers would need `m == time::January`
+// instead of `m == 1`. Both work; the int form keeps existing code
+// portable.
+impl PartialEq<int> for Month {
+    fn eq(&self, other: &int) -> bool {
+        self.0 == *other
+    }
+}
+impl PartialEq<Month> for int {
+    fn eq(&self, other: &Month) -> bool {
+        *self == other.0
+    }
+}
+impl PartialEq<int> for Weekday {
+    fn eq(&self, other: &int) -> bool {
+        self.0 == *other
+    }
+}
+impl PartialEq<Weekday> for int {
+    fn eq(&self, other: &Weekday) -> bool {
+        *self == other.0
+    }
+}
+
+// Long-name lookup tables used by Month::String / Weekday::String.
+// Mirrors Go's longMonthNames + longDayNames in time/format.go.
+const MONTH_LONG: [&str; 12] = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+];
+
+// fmt::Format impls — `%d`/`%b`/`%o`/`%x` print the underlying int;
+// any other verb (`%s`, `%v`, default) prints the English name.
+// Mirrors Go: Month/Weekday implement Stringer, and the printer
+// dispatches numeric verbs to the underlying int.
+impl crate::fmt::Format for Month {
+    fn fmt(&self, verb: crate::types::byte, f: &mut crate::fmt::FmtBuf) {
+        match verb {
+            b'd' | b'b' | b'o' | b'x' | b'X' | b'c' | b'U' => self.0.fmt(verb, f),
+            _ => f.extend(self.String().as_bytes()),
+        }
+    }
+}
+impl crate::fmt::Format for Weekday {
+    fn fmt(&self, verb: crate::types::byte, f: &mut crate::fmt::FmtBuf) {
+        match verb {
+            b'd' | b'b' | b'o' | b'x' | b'X' | b'c' | b'U' => self.0.fmt(verb, f),
+            _ => f.extend(self.String().as_bytes()),
+        }
+    }
+}
+
 impl Duration {
     pub fn Nanoseconds(self) -> int {
         self.0
@@ -337,9 +485,10 @@ impl Time {
     pub fn Year(self) -> int {
         self.Date().0
     }
-    /// 1=January .. 12=December.
-    pub fn Month(self) -> int {
-        self.Date().1
+    /// `t.Month()` (time.go:1126) — Month-of-year as a typed
+    /// [`Month`]. Use `.Int()` for the underlying 1..=12 number.
+    pub fn Month(self) -> Month {
+        Month(self.Date().1)
     }
     pub fn Day(self) -> int {
         self.Date().2
@@ -364,11 +513,13 @@ impl Time {
         self.nsec as int
     }
 
-    /// `t.Weekday()` — 0=Sunday .. 6=Saturday (Go convention).
-    pub fn Weekday(self) -> int {
+    /// `t.Weekday()` (time.go:1145) — day-of-week as a typed
+    /// [`Weekday`]. Use `.Int()` for the underlying 0..=6 number
+    /// (0=Sunday .. 6=Saturday).
+    pub fn Weekday(self) -> Weekday {
         let days = self.sec.div_euclid(86_400);
         // 1970-01-01 was a Thursday (=4 in Sun..Sat = 0..6).
-        ((days + 4).rem_euclid(7)) as int
+        Weekday((days + 4).rem_euclid(7) as int)
     }
 
     /// `t.YearDay()` (time.go:903) — day of the year, [1, 365] for non-leap,
@@ -482,7 +633,7 @@ impl Time {
     /// Pass the constant via `string(time::RFC3339)`.
     pub fn Format(self, layout: crate::gostring::string) -> crate::gostring::string {
         let (y, m, d, hh, mm, ss) = civil_from_unix(self.sec);
-        let wd = self.Weekday();
+        let wd = self.Weekday().Int();
         let nano = self.nsec;
         format_layout(&layout, y, m, d, hh, mm, ss, wd, nano as int)
     }
