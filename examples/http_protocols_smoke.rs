@@ -130,7 +130,7 @@ fn main() {
         }
     }
 
-    // 10. NoBody.WriteTo returns (0, nil) without touching the writer.
+    // 10. NoBody.WriteTo returns (0, nil.into()) without touching the writer.
     {
         let mut nb = http::NoBody();
         let mut buf = goish::bytes::NewBuffer(make!([]goish::byte, 0));

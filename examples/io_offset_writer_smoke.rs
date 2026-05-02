@@ -43,7 +43,7 @@ impl WriterAt for PageSink {
             self.buf[off + i as usize] = p[i];
             n += 1;
         }
-        (n as goish::int, nil)
+        (n as goish::int, nil.into())
     }
 }
 

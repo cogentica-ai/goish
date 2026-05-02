@@ -102,6 +102,29 @@ impl PartialEq for error {
         }
     }
 }
+
+// ─── nil ↔ error wiring (polymorphic Nil sentinel) ──────────────────
+//
+// Lets Goish users write:
+//   let e: error = nil.into();         // nil → error(None)
+//   if err == nil { … }                // PartialEq<Nil>
+//   if nil != err { … }                // commutative
+// without ever touching `errors::nil` directly.
+
+impl From<crate::nilval::Nil> for error {
+    #[inline]
+    fn from(_: crate::nilval::Nil) -> Self { nil }
+}
+
+impl PartialEq<crate::nilval::Nil> for error {
+    #[inline]
+    fn eq(&self, _: &crate::nilval::Nil) -> bool { self.IsNil() }
+}
+
+impl PartialEq<error> for crate::nilval::Nil {
+    #[inline]
+    fn eq(&self, other: &error) -> bool { other.IsNil() }
+}
 impl Eq for error {}
 
 // ─── New / Wrap ─────────────────────────────────────────────────────────

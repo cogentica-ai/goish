@@ -44,8 +44,9 @@ use goish::os;
 use goish::runtime::sched::schedule;
 use goish::sync::atomic::Uint64;
 use goish::time;
-use goish::types::byte;
-use goish::{bytes, float64, go, int, int64, make, string, uint64, Eprintln, Printf, Println, KB};
+use goish::{
+    bytes, float64, go, int, int64, nil, string, uint64, Eprintln, Printf, Println, KB,
+};
 
 // ─── shared server state ─────────────────────────────────────────────
 
@@ -291,7 +292,7 @@ fn main() {
               "GET /admin/secret unauth -> 401");
 
         // Test 6: /admin/secret with bad token -> 401.
-        let mut req = match http::NewRequest("GET", url_at("/admin/secret"), make!([]byte, 0)) {
+        let mut req = match http::NewRequest("GET", url_at("/admin/secret"), nil) {
             (r, e) if e.IsNil() => r,
             _ => { fail("NewRequest"); return; }
         };
@@ -302,7 +303,7 @@ fn main() {
               "GET /admin/secret bad token -> 401");
 
         // Test 7: /admin/secret with correct token → 200.
-        let (mut req, _) = http::NewRequest("GET", url_at("/admin/secret"), make!([]byte, 0));
+        let (mut req, _) = http::NewRequest("GET", url_at("/admin/secret"), nil);
         req.Header.Set("Authorization", "Bearer s3cret");
         let (resp, e) = client.Do(&req);
         check(e.IsNil() && resp.StatusCode == 200
@@ -315,7 +316,7 @@ fn main() {
         check(cors.Len() > 0, "CORS header on response");
 
         // Test 9: OPTIONS preflight → 204.
-        let (req, _) = http::NewRequest("OPTIONS", url_at("/"), make!([]byte, 0));
+        let (req, _) = http::NewRequest("OPTIONS", url_at("/"), nil);
         let (resp, e) = client.Do(&req);
         check(e.IsNil() && resp.StatusCode == 204,
               "OPTIONS preflight -> 204");
@@ -326,7 +327,7 @@ fn main() {
         check(goish::strings::HasPrefix(&sc, "sid=abc123"),
               "Set-Cookie returned");
 
-        let (mut req, _) = http::NewRequest("GET", url_at("/session/get"), make!([]byte, 0));
+        let (mut req, _) = http::NewRequest("GET", url_at("/session/get"), nil);
         req.Header.Set("Cookie", "sid=abc123");
         let (resp, e) = client.Do(&req);
         check(e.IsNil() && resp.StatusCode == 200

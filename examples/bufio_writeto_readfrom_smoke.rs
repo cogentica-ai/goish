@@ -32,7 +32,7 @@ impl io::Reader for ByteReader {
             p[i as int] = self.data[self.pos + i];
         }
         self.pos += want;
-        (want as int, nil)
+        (want as int, nil.into())
     }
 }
 
@@ -50,7 +50,7 @@ impl io::Writer for ByteWriter {
         let v = p.__into_vec();
         let n = v.len();
         self.data.extend_from_slice(&v);
-        (n as int, nil)
+        (n as int, nil.into())
     }
 }
 

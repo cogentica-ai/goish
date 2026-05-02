@@ -49,7 +49,7 @@ use crate::errors::error;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
-use crate::nil;
+use crate::errors::nil;
 use crate::types::{byte, int, rune};
 use crate::unicode::utf8;
 

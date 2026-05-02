@@ -135,7 +135,7 @@ impl AEAD for ToyAEAD {
         for i in 1..n {
             v.push(ciphertext[i] ^ self.key);
         }
-        (slice::__from_vec(v), nil)
+        (slice::__from_vec(v), nil.into())
     }
 }
 

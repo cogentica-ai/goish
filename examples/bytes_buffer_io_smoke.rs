@@ -39,7 +39,7 @@ fn main() {
         }
     }
 
-    // 3. ReadFrom from empty reader returns (0, nil).
+    // 3. ReadFrom from empty reader returns (0, nil.into()).
     {
         let mut src = bytes::NewReader(make!([]goish::byte, 0));
         let mut buf = bytes::NewBuffer(make!([]goish::byte, 0));
@@ -65,7 +65,7 @@ fn main() {
         }
     }
 
-    // 5. WriteTo on empty buffer returns (0, nil) without writes.
+    // 5. WriteTo on empty buffer returns (0, nil.into()) without writes.
     {
         let mut src = bytes::NewBuffer(make!([]goish::byte, 0));
         let mut dst = bytes::NewBuffer(make!([]goish::byte, 0));

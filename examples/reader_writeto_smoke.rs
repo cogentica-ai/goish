@@ -43,7 +43,7 @@ fn main() {
         }
     }
 
-    // 3. WriteTo on already-drained Reader returns (0, nil).
+    // 3. WriteTo on already-drained Reader returns (0, nil.into()).
     {
         let mut r = bytes::NewReader(goish::convert::bytes("a"));
         let mut dst = bytes::NewBuffer(make!([]goish::byte, 0));

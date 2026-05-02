@@ -33,7 +33,7 @@ struct Pair {
 impl BinaryMarshaler for Pair {
     fn MarshalBinary(&self) -> (slice<byte>, error) {
         let v: alloc::vec::Vec<byte> = alloc::vec![self.hi, self.lo];
-        (slice::__from_vec(v), nil)
+        (slice::__from_vec(v), nil.into())
     }
 }
 
@@ -44,7 +44,7 @@ impl BinaryUnmarshaler for Pair {
         }
         self.hi = data[0];
         self.lo = data[1];
-        nil
+        nil.into()
     }
 }
 
@@ -56,7 +56,7 @@ impl BinaryAppender for Pair {
         let mut v: alloc::vec::Vec<byte> = b.__into_vec();
         v.push(self.hi);
         v.push(self.lo);
-        (slice::__from_vec(v), nil)
+        (slice::__from_vec(v), nil.into())
     }
 }
 
@@ -86,7 +86,7 @@ impl TextMarshaler for Pair {
             hex_nyb(self.lo >> 4),
             hex_nyb(self.lo & 0x0f),
         ];
-        (slice::__from_vec(v), nil)
+        (slice::__from_vec(v), nil.into())
     }
 }
 
@@ -104,7 +104,7 @@ impl TextUnmarshaler for Pair {
         }
         self.hi = (h_hi << 4) | h_lo;
         self.lo = (l_hi << 4) | l_lo;
-        nil
+        nil.into()
     }
 }
 
@@ -119,7 +119,7 @@ impl TextAppender for Pair {
         v.push(b':');
         v.push(hex_nyb(self.lo >> 4));
         v.push(hex_nyb(self.lo & 0x0f));
-        (slice::__from_vec(v), nil)
+        (slice::__from_vec(v), nil.into())
     }
 }
 

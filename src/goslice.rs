@@ -121,6 +121,35 @@ impl<T: Clone> From<&slice<T>> for slice<T> {
     }
 }
 
+// ─── nil ↔ slice<T> wiring (polymorphic Nil sentinel) ────────────────
+//
+// `let s: slice<int> = nil.into();` produces a zero-length slice.
+// `if s == nil` reports `true` for empty slices. Goish's slice is
+// always allocated (no separate "nil header"), so the equality is
+// "len == 0" — matches user intent for `if s == nil` even though
+// it's slightly looser than Go's strict `slice header == zero` test.
+
+impl<T: Clone> From<crate::nilval::Nil> for slice<T> {
+    #[inline]
+    fn from(_: crate::nilval::Nil) -> Self {
+        slice::<T>::__from_vec(alloc::vec::Vec::new())
+    }
+}
+
+impl<T> PartialEq<crate::nilval::Nil> for slice<T> {
+    #[inline]
+    fn eq(&self, _: &crate::nilval::Nil) -> bool {
+        self.Len() == 0
+    }
+}
+
+impl<T> PartialEq<slice<T>> for crate::nilval::Nil {
+    #[inline]
+    fn eq(&self, other: &slice<T>) -> bool {
+        other.Len() == 0
+    }
+}
+
 // ─── builtin len(xs) / cap(xs) — see builtin.rs for `len` ─────────────
 
 impl<T> LenTrait for slice<T> {

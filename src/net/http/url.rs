@@ -408,7 +408,7 @@ impl URL {
         // return append(b, u.String()...), nil
         let mut v = b.__into_vec();
         v.extend_from_slice(self.String().as_bytes());
-        (crate::goslice::slice::__from_vec(v), crate::nil)
+        (crate::goslice::slice::__from_vec(v), crate::errors::nil)
     }
 
     /// `(u *URL).UnmarshalBinary(text)` (url.go:1250) — parse bytes
@@ -425,7 +425,7 @@ impl URL {
         }
         // *u = *u1
         *self = u1;
-        crate::nil
+        crate::errors::nil
     }
 }
 

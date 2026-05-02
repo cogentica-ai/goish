@@ -35,7 +35,7 @@ use crate::io;
 use crate::runtime;
 use crate::syscall;
 use crate::types::{byte, int};
-use crate::{errors, nil};
+use crate::errors::{self, nil};
 
 extern crate alloc;
 use alloc::vec::Vec;

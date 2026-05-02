@@ -38,7 +38,7 @@ fn main() {
             if e.IsNil() {
                 count += 1;
             }
-            nil
+            nil.into()
         });
         if err.IsNil() && count == 9 {
             Println!("[ 1] WalkDir all entries       PASS");
@@ -55,7 +55,7 @@ fn main() {
             if e.IsNil() {
                 paths.push(p);
             }
-            nil
+            nil.into()
         });
         // First entry is root itself.
         if paths.len() >= 2 && paths[0] == root && paths[1] == "/tmp/goish-walk-smoke/a.txt" {
@@ -76,7 +76,7 @@ fn main() {
             if d.Name() == "secret.txt" {
                 visited_secret = true;
             }
-            nil
+            nil.into()
         });
         if !visited_secret {
             Println!("[ 3] WalkDir SkipDir skips     PASS");
@@ -94,7 +94,7 @@ fn main() {
             if count >= 2 {
                 return filepath::SkipAll();
             }
-            nil
+            nil.into()
         });
         if err.IsNil() && count == 2 {
             Println!("[ 4] WalkDir SkipAll bails     PASS");
@@ -113,7 +113,7 @@ fn main() {
             if count == 3 {
                 return stop_err.clone();
             }
-            nil
+            nil.into()
         });
         if !err.IsNil() && count == 3 {
             Println!("[ 5] WalkDir error propagates  PASS");
@@ -128,7 +128,7 @@ fn main() {
         let mut calls: i64 = 0;
         let _ = filepath::WalkDir(string("/tmp/goish-walk-nonexistent"), |_p, _d, _e| {
             calls += 1;
-            nil
+            nil.into()
         });
         if calls == 1 {
             Println!("[ 6] WalkDir bad root reports  PASS");
@@ -145,7 +145,7 @@ fn main() {
             if e.IsNil() {
                 count += 1;
             }
-            nil
+            nil.into()
         });
         if err.IsNil() && count == 9 {
             Println!("[ 7] Walk total nodes          PASS");
@@ -165,7 +165,7 @@ fn main() {
             if info.Name() == "d.txt" {
                 visited_inner = true;
             }
-            nil
+            nil.into()
         });
         if !visited_inner {
             Println!("[ 8] Walk SkipDir on subdir    PASS");

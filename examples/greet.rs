@@ -39,7 +39,7 @@ fn greet(name: string) -> (string, error) {
     if name == "" {
         return (string(""), errors::New("name cannot be empty"));
     }
-    (Sprintf!("Hello, %s!", ascii_upper(name)), nil)
+    (Sprintf!("Hello, %s!", ascii_upper(name)), nil.into())
 }
 
 #[goish::main]

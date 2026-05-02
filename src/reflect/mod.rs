@@ -423,7 +423,7 @@ impl Type {
     /// the "indirection through nil" error case Go raises doesn't
     /// arise). Provided for API parity.
     pub fn FieldByIndexErr(&self, index: &[int]) -> (StructField, crate::errors::error) {
-        (self.FieldByIndex(index), crate::nil)
+        (self.FieldByIndex(index), crate::errors::nil)
     }
 
     /// `FieldByNameFunc(match)` — find first field whose name satisfies
@@ -1005,7 +1005,7 @@ macro_rules! impl_from_reflect {
         impl FromReflectValue for $t {
             fn from_reflect_value(v: Value) -> (Self, crate::errors::error) {
                 match v {
-                    Value::$variant(x) => (x, crate::nil),
+                    Value::$variant(x) => (x, crate::errors::nil),
                     _ => (
                         <$t as Default>::default(),
                         crate::errors::New(concat!("reflect: expected ", $name)),
@@ -1036,12 +1036,12 @@ impl<T: FromReflectValue + Clone + Default> FromReflectValue for slice<T> {
                 let mut out: Vec<T> = Vec::with_capacity(items.len());
                 for item in items {
                     let (elem, err) = T::from_reflect_value(item);
-                    if err != crate::nil {
+                    if err != crate::errors::nil {
                         return (slice::__from_vec(Vec::new()), err);
                     }
                     out.push(elem);
                 }
-                (slice::__from_vec(out), crate::nil)
+                (slice::__from_vec(out), crate::errors::nil)
             }
             _ => (
                 slice::__from_vec(Vec::new()),
@@ -1062,16 +1062,16 @@ where
                 let mut out = crate::gomap::map::<K, V>::new();
                 for (kv, vv) in entries {
                     let (k, err) = K::from_reflect_value(kv);
-                    if err != crate::nil {
+                    if err != crate::errors::nil {
                         return (crate::gomap::map::<K, V>::new(), err);
                     }
                     let (v, err) = V::from_reflect_value(vv);
-                    if err != crate::nil {
+                    if err != crate::errors::nil {
                         return (crate::gomap::map::<K, V>::new(), err);
                     }
                     out.Set(k, v);
                 }
-                (out, crate::nil)
+                (out, crate::errors::nil)
             }
             _ => (
                 crate::gomap::map::<K, V>::new(),

@@ -2,7 +2,7 @@
 //
 // Validates the line-by-line port of io/io.go:398:
 //   • CopyBuffer with caller-supplied buffer: full data round-trip,
-//     return value = (total bytes, nil).
+//     return value = (total bytes, nil.into()).
 //   • CopyBuffer with empty buffer: allocates 32 KiB internally;
 //     same behavior as Copy.
 //   • Multi-iteration loop: small caller buffer forces multiple
@@ -66,7 +66,7 @@ fn main() {
         }
     }
 
-    // 4. CopyBuffer of empty source returns (0, nil).
+    // 4. CopyBuffer of empty source returns (0, nil.into()).
     {
         let mut src = bytes::NewReader(convert::bytes(""));
         let mut dst = bytes::Buffer::new();

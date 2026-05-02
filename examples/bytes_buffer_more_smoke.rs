@@ -78,7 +78,7 @@ fn main() {
         }
     }
 
-    // 6. ReadRune on ASCII byte returns (r, 1, nil).
+    // 6. ReadRune on ASCII byte returns (r, 1, nil.into()).
     {
         let mut b = bytes::NewBufferString(string("Ab"));
         let (r, n, err) = b.ReadRune();

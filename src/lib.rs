@@ -65,6 +65,7 @@ pub mod gochan;
 pub mod gomap;
 pub mod goslice;
 pub mod gostring;
+pub mod nilval;
 pub mod hash;
 pub mod html;
 pub mod maps;
@@ -102,7 +103,8 @@ pub use convert::{
     bytes, float32, float64, int, int16, int32, int64, int8, runes, string, uint, uint16, uint32,
     uint64, uint8,
 };
-pub use errors::{error, nil};
+pub use errors::error;
+pub use nilval::{nil, Nil};
 pub use gomap::map;
 pub use goslice::slice;
 pub use gostring::string;

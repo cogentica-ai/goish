@@ -495,7 +495,7 @@ impl Client {
 
     /// `(*Client).Get(url)` — issue a GET. Mirrors client.go:481.
     pub fn Get<U: Into<string>>(&self, url: U) -> (Response, error) {
-        let (req, err) = NewRequest(string("GET"), url, slice::<byte>::__from_vec(Vec::new()));
+        let (req, err) = NewRequest(string("GET"), url, ());
         if !err.IsNil() {
             return (Response::default(), err);
         }
@@ -504,7 +504,7 @@ impl Client {
 
     /// `(*Client).Head(url)`.
     pub fn Head<U: Into<string>>(&self, url: U) -> (Response, error) {
-        let (req, err) = NewRequest(string("HEAD"), url, slice::<byte>::__from_vec(Vec::new()));
+        let (req, err) = NewRequest(string("HEAD"), url, ());
         if !err.IsNil() {
             return (Response::default(), err);
         }
@@ -583,24 +583,77 @@ pub fn PostForm<U: Into<string>>(url: U, vals: &[(string, string)]) -> (Response
 /// thread context through Request). Behaves identically to NewRequest
 /// in v1; switching to a context-aware Client/Transport later won't
 /// break call sites that already pass the ctx through.
-pub fn NewRequestWithContext<M: Into<string>, U: Into<string>>(
+pub fn NewRequestWithContext<M: Into<string>, U: Into<string>, B: __RequestBody>(
     _ctx: alloc::sync::Arc<dyn crate::context::Context>,
     method: M,
     url: U,
-    body: slice<byte>,
+    body: B,
 ) -> (Request, error) {
     NewRequest(method, url, body)
 }
 
-/// `http.NewRequest(method, url, body)` — slim. Body is a pre-buffered
-/// slice<byte> rather than an `io.Reader` (matches v1 Request shape).
-pub fn NewRequest<M: Into<string>, U: Into<string>>(
+/// Body-arg dispatch — lets `http::NewRequest`/`Client::Post` accept
+/// any of: `nil` (no body, mirrors Go's `nil`), `slice<byte>` (raw
+/// bytes), `string` (bytes-of-string), or `&'static str` (literal
+/// body sugar). Mirrors Go's `body io.Reader` accepting `nil` plus
+/// `*bytes.Reader` / `*strings.Reader` constructors. The future
+/// `io.Reader`-streaming port will plug in here as another impl.
+pub trait __RequestBody {
+    #[doc(hidden)]
+    fn __to_body(self) -> slice<byte>;
+}
+
+/// `http::NewRequest("GET", url, nil)` — Goish's polymorphic nil
+/// sentinel as a body, exactly mirroring Go's `body == nil` slot.
+impl __RequestBody for crate::nilval::Nil {
+    #[inline]
+    fn __to_body(self) -> slice<byte> {
+        slice::<byte>::__from_vec(Vec::new())
+    }
+}
+
+// `()` retained for backwards compatibility while old call sites
+// migrate; new code should pass `nil`.
+impl __RequestBody for () {
+    #[inline]
+    fn __to_body(self) -> slice<byte> {
+        slice::<byte>::__from_vec(Vec::new())
+    }
+}
+
+impl __RequestBody for slice<byte> {
+    #[inline]
+    fn __to_body(self) -> slice<byte> {
+        self
+    }
+}
+
+impl __RequestBody for string {
+    #[inline]
+    fn __to_body(self) -> slice<byte> {
+        crate::convert::bytes(self)
+    }
+}
+
+impl __RequestBody for &'static str {
+    #[inline]
+    fn __to_body(self) -> slice<byte> {
+        crate::convert::bytes(self)
+    }
+}
+
+/// `http.NewRequest(method, url, body)` — slim. Body accepts `()`
+/// (no body, like Go's `nil`), a `slice<byte>`, a `string`, or a
+/// `&'static str` via the `__RequestBody` trait. Real `io.Reader`
+/// streaming is the C1 follow-up.
+pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
     method: M,
     url: U,
-    body: slice<byte>,
+    body: B,
 ) -> (Request, error) {
     let method: string = method.into();
     let url: string = url.into();
+    let body: slice<byte> = body.__to_body();
     let m = if method.Len() == 0 {
         string("GET")
     } else {

@@ -23,7 +23,7 @@ fn greet(name: string) -> (string, error) {
         return (string(""), errors::New("name cannot be empty"));
     }
     // M8 fmt::Sprintf would replace this. Until then, plain concat:
-    (string("hello, ") + name, nil)
+    (string("hello, ") + name, nil.into())
 }
 
 // ─── greet2: with a custom error type wrapping context ───────────────
@@ -48,7 +48,7 @@ fn greet_strict(name: string) -> (string, error) {
         // Wrap with context so caller can see "argument: name cannot..."
         return (string(""), errors::Wrap(ArgErr { inner: err }));
     }
-    (msg, nil)
+    (msg, nil.into())
 }
 
 // ─── main: iterate, dispatch on error / non-error ────────────────────

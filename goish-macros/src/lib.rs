@@ -225,7 +225,7 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_text.push_str("        } };\n");
     impl_text.push_str("        let __obj = match __v {\n");
     impl_text.push_str("            ::goish::encoding::json::Value::Object(o) => o,\n");
-    impl_text.push_str("            ::goish::encoding::json::Value::Null => return (__zero(), ::goish::nil),\n");
+    impl_text.push_str("            ::goish::encoding::json::Value::Null => return (__zero(), ::goish::errors::nil),\n");
     impl_text.push_str("            _ => return (__zero(), ::goish::errors::New(\"json: cannot unmarshal into struct\")),\n");
     impl_text.push_str("        };\n");
     impl_text.push_str("        let mut __out = __zero();\n");
@@ -252,13 +252,13 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
             "                    let (__val, __err) = <{} as ::goish::encoding::json::FromValue>::from_value(&__sub);\n",
             f.ty
         );
-        impl_text.push_str("                    if __err != ::goish::nil { return (__out, __err); }\n");
+        impl_text.push_str("                    if __err != ::goish::errors::nil { return (__out, __err); }\n");
         let _ = write!(impl_text, "                    __out.{} = __val;\n", f.name);
         impl_text.push_str("                }\n");
         impl_text.push_str("            }\n");
         impl_text.push_str("        }\n");
     }
-    impl_text.push_str("        (__out, ::goish::nil)\n");
+    impl_text.push_str("        (__out, ::goish::errors::nil)\n");
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
 
@@ -322,11 +322,11 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
     for (i, f) in parsed.fields.iter().enumerate() {
         let _ = write!(
             impl_text,
-            "        {{\n            let (__val, __err) = <{} as ::goish::reflect::FromReflectValue>::from_reflect_value(__fields[{}].clone());\n            if __err != ::goish::nil {{ return (__zero(), __err); }}\n            __out.{} = __val;\n        }}\n",
+            "        {{\n            let (__val, __err) = <{} as ::goish::reflect::FromReflectValue>::from_reflect_value(__fields[{}].clone());\n            if __err != ::goish::errors::nil {{ return (__zero(), __err); }}\n            __out.{} = __val;\n        }}\n",
             f.ty, i, f.name
         );
     }
-    impl_text.push_str("        (__out, ::goish::nil)\n");
+    impl_text.push_str("        (__out, ::goish::errors::nil)\n");
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
 
@@ -348,9 +348,9 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
             "                let (__val, __err) = <{} as ::goish::reflect::FromReflectValue>::from_reflect_value(__v);\n",
             f.ty
         );
-        impl_text.push_str("                if __err != ::goish::nil { return __err; }\n");
+        impl_text.push_str("                if __err != ::goish::errors::nil { return __err; }\n");
         let _ = write!(impl_text, "                self.{} = __val;\n", f.name);
-        impl_text.push_str("                ::goish::nil\n");
+        impl_text.push_str("                ::goish::errors::nil\n");
         impl_text.push_str("            }\n");
     }
     impl_text.push_str("            _ => ::goish::errors::New(\"reflect.SetField: index out of range\"),\n");

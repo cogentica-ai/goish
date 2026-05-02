@@ -36,7 +36,7 @@ use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
 use crate::io::Writer as _; // bring `.Write()` method into scope
-use crate::nil;
+use crate::errors::nil;
 use crate::os;
 use crate::types::{byte, int, rune};
 use crate::unicode::utf8;

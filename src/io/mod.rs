@@ -32,7 +32,7 @@ extern crate alloc;
 use crate::errors::error;
 use crate::goslice::slice;
 use crate::types::{byte, int};
-use crate::{errors, nil};
+use crate::errors::{self, nil};
 
 // ─── Reader / Writer / Closer traits ───────────────────────────────────
 

@@ -27,7 +27,7 @@ use alloc::sync::Arc;
 use crate::errors::{self, error};
 use crate::gochan::chan;
 use crate::goslice::slice;
-use crate::nil;
+use crate::errors::nil;
 use crate::sync::{Mutex, Once};
 use crate::types::{byte, int};
 

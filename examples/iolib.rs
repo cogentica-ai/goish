@@ -35,7 +35,7 @@ impl io::Writer for BufWriter {
             tmp = append!(tmp, *b);
         }
         self.buf = tmp;
-        (n, nil)
+        (n, nil.into())
     }
 }
 
@@ -63,7 +63,7 @@ impl io::Reader for BufReader {
             written += 1;
         }
         self.pos += written;
-        (written, nil)
+        (written, nil.into())
     }
 }
 

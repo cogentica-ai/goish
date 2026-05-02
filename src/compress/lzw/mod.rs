@@ -32,7 +32,7 @@ use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
 use crate::types::{byte, int, uint};
-use crate::nil;
+use crate::errors::nil;
 
 // Go: const ( LSB Order = iota; MSB )
 //

@@ -676,7 +676,7 @@ impl Time {
     /// pairs cleanly with this output via UnmarshalText.
     pub fn MarshalText(self) -> (crate::goslice::slice<crate::types::byte>, crate::errors::error) {
         let s = self.Format(crate::gostring::string::from(RFC3339));
-        (crate::convert::bytes(s), crate::nil)
+        (crate::convert::bytes(s), crate::errors::nil)
     }
 
     /// `(*Time).UnmarshalText(data)` (time.go:1640) — parse RFC3339
@@ -707,7 +707,7 @@ impl Time {
         b.extend_from_slice(s.as_bytes());
         // b = append(b, '"')
         b.push(b'"');
-        (crate::goslice::slice::__from_vec(b), crate::nil)
+        (crate::goslice::slice::__from_vec(b), crate::errors::nil)
     }
 
     /// `(*Time).UnmarshalJSON(data)` (time.go:1600) — parse a JSON-
@@ -718,7 +718,7 @@ impl Time {
     ) -> crate::errors::error {
         // if string(data) == "null" { return nil }
         if &*data == b"null" {
-            return crate::nil;
+            return crate::errors::nil;
         }
         // if len(data) < 2 || data[0] != '"' || data[len(data)-1] != '"' { error }
         let bs = &*data;
@@ -768,7 +768,7 @@ impl Time {
         v.push((offset_min >> 8) as u8);
         v.push(offset_min as u8);
         // Go: return b, nil
-        (crate::goslice::slice::__from_vec(v), crate::nil)
+        (crate::goslice::slice::__from_vec(v), crate::errors::nil)
     }
 
     /// `t.MarshalBinary()` (time.go:1513) — implements
@@ -786,7 +786,7 @@ impl Time {
             return (crate::goslice::slice::__from_vec(empty), err);
         }
         // Go: return b, nil
-        (b, crate::nil)
+        (b, crate::errors::nil)
     }
 
     /// `(*Time).UnmarshalBinary(data)` (time.go:1522) — implements
@@ -841,7 +841,7 @@ impl Time {
             mono: 0,
         };
         // Go: return nil
-        crate::nil
+        crate::errors::nil
     }
 
     /// `t.GobEncode()` (time.go:1574) — implements

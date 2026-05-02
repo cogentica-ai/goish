@@ -121,13 +121,13 @@ impl crate::io::Reader for noBody {
 impl crate::io::Closer for noBody {
     fn Close(&mut self) -> crate::errors::error {
         // Go: return nil
-        crate::nil
+        crate::errors::nil
     }
 }
 
 impl crate::io::WriterTo for noBody {
     fn WriteTo(&mut self, _w: &mut dyn crate::io::Writer) -> (i64, crate::errors::error) {
         // Go: return 0, nil
-        (0, crate::nil)
+        (0, crate::errors::nil)
     }
 }

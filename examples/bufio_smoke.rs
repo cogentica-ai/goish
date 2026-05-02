@@ -48,7 +48,7 @@ impl io::Reader for ByteReader {
             p[i as int] = self.data[self.pos + i];
         }
         self.pos += want;
-        (want as int, nil)
+        (want as int, nil.into())
     }
 }
 
@@ -126,15 +126,15 @@ fn main() {
                 return (
                     (i + 1) as int,
                     Some(slice::__from_vec(data[..i].to_vec())),
-                    nil,
+                    nil.into(),
                 );
             }
             i += 1;
         }
         if at_eof && !data.is_empty() {
-            return (data.len() as int, Some(slice::__from_vec(data.to_vec())), nil);
+            return (data.len() as int, Some(slice::__from_vec(data.to_vec())), nil.into());
         }
-        (0, None, nil)
+        (0, None, nil.into())
     });
     let mut out = goish::make!([]string, 0, 3);
     while sc.Scan() {

@@ -170,6 +170,45 @@ where
     }
 }
 
+// ─── nil ↔ map<K, V> wiring (polymorphic Nil sentinel) ──────────────
+//
+// `let m: map<string, int> = nil.into();` gives a fresh empty map.
+// `if m == nil` is true for empty (matches Go's "nil map reads but
+// can't write" intent, lenient on the empty=nil collapse).
+
+impl<K, V> From<crate::nilval::Nil> for map<K, V>
+where
+    K: Ord,
+    V: Default,
+{
+    #[inline]
+    fn from(_: crate::nilval::Nil) -> Self {
+        Self::new()
+    }
+}
+
+impl<K, V> PartialEq<crate::nilval::Nil> for map<K, V>
+where
+    K: Ord,
+    V: Default,
+{
+    #[inline]
+    fn eq(&self, _: &crate::nilval::Nil) -> bool {
+        self.Len() == 0
+    }
+}
+
+impl<K, V> PartialEq<map<K, V>> for crate::nilval::Nil
+where
+    K: Ord,
+    V: Default,
+{
+    #[inline]
+    fn eq(&self, other: &map<K, V>) -> bool {
+        other.Len() == 0
+    }
+}
+
 impl<K, V> LenTrait for map<K, V>
 where
     K: Ord,
