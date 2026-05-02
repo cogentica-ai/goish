@@ -18,9 +18,113 @@
 
 extern crate alloc;
 
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use crate::errors::{self, error, ErrorTrait};
 use crate::string;
+
+// ─── url.Error / url.EscapeError / url.InvalidHostError (url.go:27-99)
+//
+// Line-by-line port of Go's three typed error types in net/url.
+
+// Go: url.go:27
+//   type Error struct { Op, URL string; Err error }
+/// `url.Error` reports an error and the operation + URL that caused it.
+/// Mirrors `net/url.Error` (url.go:28-32).
+#[derive(Clone)]
+pub struct Error {
+    pub Op: string,
+    pub URL: string,
+    pub Err: error,
+}
+
+impl Error {
+    /// Build a `url.Error` and lift it into `errors::error`.
+    pub fn new(op: string, url: string, err: error) -> error {
+        errors::Wrap(Error { Op: op, URL: url, Err: err })
+    }
+}
+
+// Go: url.go:34  func (e *Error) Unwrap() error { return e.Err }
+// Go: url.go:35  func (e *Error) Error() string { return fmt.Sprintf("%s %q: %s", e.Op, e.URL, e.Err) }
+impl ErrorTrait for Error {
+    fn Error(&self) -> string {
+        // Go: fmt.Sprintf("%s %q: %s", e.Op, e.URL, e.Err)
+        let inner = if self.Err.IsNil() {
+            string::from_static("<nil>")
+        } else {
+            self.Err.Error()
+        };
+        crate::Sprintf!("%s %q: %s", self.Op.clone(), self.URL.clone(), inner)
+    }
+    fn Unwrap(&self) -> error {
+        // Go: url.go:34  return e.Err
+        self.Err.clone()
+    }
+}
+
+// Timeout / Temporary delegate down the wrap chain — Go uses an
+// interface assertion (`e.Err.(interface{ Timeout() bool })`); goish
+// can't do interface assertions without reflect, so we expose them
+// only when the inner error is itself a `url.Error`. For the common
+// case where Err is a network/timeout sentinel, callers should query
+// the inner error directly via Unwrap().
+
+// Go: url.go:90
+//   type EscapeError string
+/// `url.EscapeError` — wraps the malformed escape sequence text.
+/// Mirrors `net/url.EscapeError` (url.go:90).
+#[derive(Clone)]
+pub struct EscapeError(pub string);
+
+impl EscapeError {
+    pub fn new(s: string) -> error {
+        errors::Wrap(EscapeError(s))
+    }
+}
+
+// Go: url.go:92
+//   func (e EscapeError) Error() string {
+//     return "invalid URL escape " + strconv.Quote(string(e))
+//   }
+impl ErrorTrait for EscapeError {
+    fn Error(&self) -> string {
+        let mut buf = string::from_static("invalid URL escape ");
+        buf = buf + crate::strconv::Quote(self.0.clone());
+        buf
+    }
+}
+
+// Go: url.go:96
+//   type InvalidHostError string
+/// `url.InvalidHostError` — wraps the offending character in a host.
+/// Mirrors `net/url.InvalidHostError` (url.go:96).
+#[derive(Clone)]
+pub struct InvalidHostError(pub string);
+
+impl InvalidHostError {
+    pub fn new(s: string) -> error {
+        errors::Wrap(InvalidHostError(s))
+    }
+}
+
+// Go: url.go:98
+//   func (e InvalidHostError) Error() string {
+//     return "invalid character " + strconv.Quote(string(e)) + " in host name"
+//   }
+impl ErrorTrait for InvalidHostError {
+    fn Error(&self) -> string {
+        let mut buf = string::from_static("invalid character ");
+        buf = buf + crate::strconv::Quote(self.0.clone());
+        buf = buf + string::from_static(" in host name");
+        buf
+    }
+}
+
+// Silence unused-import warnings if Arc isn't otherwise referenced.
+#[allow(dead_code)]
+fn _arc_check<T>(_x: Arc<T>) {}
 
 /// `net/url.URL` — slim. Only fields HTTP routing typically reads.
 #[derive(Clone, Default)]
@@ -419,7 +523,6 @@ fn find_subseq(hay: &[u8], needle: &[u8]) -> Option<usize> {
 // and QueryUnescape (line 277). Slim — strict mode only (Go's default
 // since 1.16; no semicolon separator support, errors propagate).
 
-use crate::errors::{self, error};
 use crate::gomap::map;
 use crate::goslice::slice;
 use crate::strings;
