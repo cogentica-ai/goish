@@ -18,6 +18,7 @@ pub mod chunked;
 pub mod client;
 pub mod cookie;
 pub mod cookiejar;
+pub mod csrf;
 pub mod fs;
 pub mod header;
 pub mod helpers;
@@ -42,6 +43,10 @@ pub use client::{
 pub use cookie::{
     Cookie, ParseCookie, ParseSetCookie, SameSite, SameSiteDefaultMode, SameSiteLaxMode,
     SameSiteNoneMode, SameSiteStrictMode, SetCookie,
+};
+pub use csrf::{
+    errCrossOriginRequest, errCrossOriginRequestFromOldBrowser, CrossOriginProtection,
+    NewCrossOriginProtection,
 };
 pub use fs::{Dir, FileServer, HttpRange, NewDir, ParseRange, ServeFile};
 pub use header::{CanonicalHeaderKey, Header, ParseTime, TimeFormat};

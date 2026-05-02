@@ -866,11 +866,11 @@ fn parse(raw_url: string, via_request: bool) -> (URL, error) {
         path_rest = string::from_bytes(&after.as_bytes()[host_end as usize..]);
     }
 
-    // Empty path on absolute URL → "/".
-    let mut path = path_rest;
-    if host.Len() != 0 && path.Len() == 0 {
-        path = string("/");
-    }
+    // Go: Path stays "" for "https://host" (no trailing slash). The
+    // earlier goish version normalized "" → "/" to round-trip cleanly,
+    // but that diverges from `net/url.Parse`'s actual semantics and
+    // confuses callers that distinguish absent path from root path.
+    let path = path_rest;
 
     let u = URL {
         Scheme: scheme,
