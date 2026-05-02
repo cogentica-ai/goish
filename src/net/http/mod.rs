@@ -17,6 +17,7 @@
 pub mod chunked;
 pub mod client;
 pub mod cookie;
+pub mod cookiejar;
 pub mod fs;
 pub mod header;
 pub mod helpers;
