@@ -677,7 +677,20 @@ pub struct Server {
     /// spawning unbounded goroutines.
     pub MaxConcurrentConns: crate::types::int,
 
-    // ─── internal state, populated by Default ─────────────────────
+    /// Internal runtime state. Bundled behind a single field so users
+    /// can construct a `Server` with Go-style struct literal syntax —
+    /// `Server { Addr, Handler, ..., ..Default::default() }` — without
+    /// being blocked by E0451 ("private field") errors. The field is
+    /// public-by-name but its type (`__ServerState`) is private, so
+    /// outside callers can't directly construct or inspect it.
+    #[doc(hidden)]
+    pub __state: __ServerState,
+}
+
+/// Internal Server state — type is private, the holding field on
+/// `Server` is `pub` only so struct-update literal syntax works.
+#[doc(hidden)]
+pub struct __ServerState {
     in_shutdown: AtomicBool,
     active_conns: AtomicUsize,
     /// Bounded semaphore for `MaxConcurrentConns`. `None` until Serve
@@ -795,6 +808,14 @@ impl Default for Server {
             IdleTimeout: time::Duration(0),
             MaxHeaderBytes: 0,
             MaxConcurrentConns: 0,
+            __state: __ServerState::default(),
+        }
+    }
+}
+
+impl Default for __ServerState {
+    fn default() -> Self {
+        __ServerState {
             in_shutdown: AtomicBool::new(false),
             active_conns: AtomicUsize::new(0),
             tracked_listener: Mutex::new(None),
@@ -842,14 +863,14 @@ impl Server {
         // later install its listener and enter Accept on a fd that was
         // never closed → permanent park.
         {
-            let mut tracked = self.tracked_listener.Lock();
-            if self.in_shutdown.load(Ordering::Acquire) {
+            let mut tracked = self.__state.tracked_listener.Lock();
+            if self.__state.in_shutdown.load(Ordering::Acquire) {
                 return ErrServerClosed();
             }
             *tracked = Some(ln.clone());
             if self.MaxConcurrentConns > 0 {
                 let cap = self.MaxConcurrentConns as usize;
-                *self.conn_sem.Lock() =
+                *self.__state.conn_sem.Lock() =
                     Some(crate::gochan::chan::<()>::new_buffered(cap));
             }
         }
@@ -859,7 +880,7 @@ impl Server {
         // full; if we held the mutex we'd deadlock the workers'
         // drain side).
         let sem_handle: Option<crate::gochan::chan<()>> = if self.MaxConcurrentConns > 0 {
-            self.conn_sem.Lock().clone()
+            self.__state.conn_sem.Lock().clone()
         } else {
             None
         };
@@ -879,7 +900,7 @@ impl Server {
                 if let Some(ref sem) = sem_handle {
                     let _ = sem.__try_recv();
                 }
-                if self.in_shutdown.load(Ordering::Acquire) {
+                if self.__state.in_shutdown.load(Ordering::Acquire) {
                     return ErrServerClosed();
                 }
                 return err;
@@ -918,8 +939,8 @@ impl Server {
         // observed None and proceeded — leaving a fd open with no
         // wakeup.
         let listener = {
-            let mut tracked = self.tracked_listener.Lock();
-            self.in_shutdown.store(true, Ordering::Release);
+            let mut tracked = self.__state.tracked_listener.Lock();
+            self.__state.in_shutdown.store(true, Ordering::Release);
             tracked.take()
         };
 
@@ -940,7 +961,7 @@ impl Server {
         };
         let mut sleep_ns: i64 = 1_000_000; // 1ms
         loop {
-            if self.active_conns.load(Ordering::Acquire) == 0 {
+            if self.__state.active_conns.load(Ordering::Acquire) == 0 {
                 return errors::nil;
             }
             if crate::runtime::sysmon::monotonic_ns() >= deadline_ns {
@@ -961,14 +982,14 @@ impl Server {
                 self.0.fetch_sub(1, Ordering::AcqRel);
             }
         }
-        self.active_conns.fetch_add(1, Ordering::AcqRel);
-        let _guard = ActiveGuard(&self.active_conns);
+        self.__state.active_conns.fetch_add(1, Ordering::AcqRel);
+        let _guard = ActiveGuard(&self.__state.active_conns);
 
         let read_header_ns = self.read_header_timeout_ns();
         let write_timeout_ns = self.write_timeout_ns();
 
         loop {
-            if self.in_shutdown.load(Ordering::Acquire) {
+            if self.__state.in_shutdown.load(Ordering::Acquire) {
                 let _ = conn.Close();
                 return;
             }
@@ -997,7 +1018,7 @@ impl Server {
             }
 
             let keep_alive = request_keep_alive(&req)
-                && !self.in_shutdown.load(Ordering::Acquire);
+                && !self.__state.in_shutdown.load(Ordering::Acquire);
             let mut w = ResponseWriter::new(conn);
             w.__set_keep_alive(keep_alive);
 

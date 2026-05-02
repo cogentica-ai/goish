@@ -129,11 +129,13 @@ fn h_form(w: &mut http::ResponseWriter, r: &http::Request) {
 }
 
 fn h_session_set(w: &mut http::ResponseWriter, _r: &http::Request) {
-    let mut c = http::Cookie::default();
-    c.Name = string("sid");
-    c.Value = string("abc123");
-    c.Path = string("/");
-    c.HttpOnly = true;
+    let c = http::Cookie {
+        Name: string("sid"),
+        Value: string("abc123"),
+        Path: string("/"),
+        HttpOnly: true,
+        ..Default::default()
+    };
     http::SetCookie(w, &c);
     w.Write(bytes("session set\n"));
 }
@@ -270,12 +272,13 @@ fn main() {
     });
 
     // Server with timeouts. Wrap whole mux in CORS + Logging.
-    let mut srv = http::Server::default();
-    srv.Handler = http::handler(LoggingMW(CorsMW(mux)));
-    srv.ReadHeaderTimeout = time::Second;
-    srv.ReadTimeout = time::Second * 3;
-    srv.WriteTimeout = time::Second * 3;
-    let srv = Arc::new(srv);
+    let srv = Arc::new(http::Server {
+        Handler: http::handler(LoggingMW(CorsMW(mux))),
+        ReadHeaderTimeout: time::Second,
+        ReadTimeout: time::Second * 3,
+        WriteTimeout: time::Second * 3,
+        ..Default::default()
+    });
 
     let srv_run = srv.clone();
     go!(stack(64 * KB), move || {
