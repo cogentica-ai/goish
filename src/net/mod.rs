@@ -50,6 +50,7 @@ use crate::types::{byte, int};
 mod parse;
 mod mac;
 pub mod http;
+pub mod mail;
 pub mod textproto;
 
 pub use mac::{HardwareAddr, HardwareAddrString, ParseMAC};
