@@ -162,5 +162,7 @@ pub trait AEAD {
 // `cipher::StreamWriter` exactly as in Go.
 
 mod io;
+mod ofb;
 
 pub use self::io::{StreamReader, StreamWriter};
+pub use self::ofb::{NewOFB, OFB};
