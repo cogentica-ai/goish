@@ -119,6 +119,21 @@ impl From<&str> for string {
     }
 }
 
+// ─── From<&string> for string — borrow-friendly clone ────────────────
+//
+// Lets `bytes::Contains(&body, ...)` and `strings::HasPrefix(&auth, ...)`
+// work without an explicit `.clone()` at the call site. Functions that
+// take `S: Into<string>` accept either an owned `string` (move) or a
+// `&string` (clone via this impl). Mirrors Go's by-value string passing
+// while keeping the Rust borrow checker happy.
+
+impl From<&string> for string {
+    #[inline]
+    fn from(s: &string) -> Self {
+        s.clone()
+    }
+}
+
 // ─── Borrow<[u8]> — lets BTreeMap<string, V> look up by &[u8] / &str ──
 //
 // Required so the `map<string, V>` Index<&str> specialization can
