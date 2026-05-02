@@ -77,6 +77,7 @@ pub mod reflect;
 pub mod runtime;
 pub mod select_macro;
 pub mod slices;
+pub mod sort;
 pub mod strconv;
 pub mod strings;
 pub mod sync;
