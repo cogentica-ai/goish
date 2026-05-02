@@ -57,6 +57,7 @@ pub mod crypto;
 pub mod defer;
 pub mod encoding;
 pub mod errors;
+pub mod expvar;
 pub mod flag;
 pub mod fmt;
 pub mod gochan;
