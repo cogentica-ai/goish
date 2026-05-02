@@ -5,6 +5,7 @@
 
 #![allow(non_snake_case)]
 
+pub mod aes;
 pub mod cipher;
 pub mod hkdf;
 pub mod hmac;
