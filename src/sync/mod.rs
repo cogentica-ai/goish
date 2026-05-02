@@ -20,6 +20,7 @@
 #![allow(non_snake_case)]
 
 pub mod atomic;
+mod cond;
 mod mutex;
 mod once;
 mod oncefunc;
@@ -29,6 +30,7 @@ mod sema;
 mod syncmap;
 mod waitgroup;
 
+pub use cond::{Cond, Locker, NewCond};
 pub use mutex::{Mutex, MutexGuard};
 pub use once::Once;
 pub use oncefunc::{OnceFunc, OnceValue, OnceValues};
