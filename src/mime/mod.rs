@@ -15,6 +15,7 @@
 extern crate alloc;
 
 pub mod multipart;
+pub mod quotedprintable;
 
 use crate::string;
 use crate::strings;
