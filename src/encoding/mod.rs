@@ -11,3 +11,4 @@ pub mod binary;
 pub mod csv;
 pub mod hex;
 pub mod json;
+pub mod pem;
