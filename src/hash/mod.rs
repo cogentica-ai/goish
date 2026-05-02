@@ -22,6 +22,7 @@
 
 pub mod adler32;
 pub mod crc32;
+pub mod crc64;
 pub mod fnv;
 
 use crate::goslice::slice;
