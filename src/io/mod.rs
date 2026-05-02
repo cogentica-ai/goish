@@ -804,3 +804,7 @@ pub fn MultiWriter(writers: slice<alloc::boxed::Box<dyn Writer>>) -> MultiWriter
 
 pub mod pipe;
 pub use pipe::{ErrClosedPipe, Pipe, PipeReader, PipeWriter};
+
+// ─── io/fs subpackage (slim — FileMode, ValidPath, PathError) ──────
+
+pub mod fs;
