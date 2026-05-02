@@ -16,5 +16,6 @@ pub mod rand;
 pub mod rc4;
 pub mod sha1;
 pub mod sha256;
+pub mod sha3;
 pub mod sha512;
 pub mod subtle;
