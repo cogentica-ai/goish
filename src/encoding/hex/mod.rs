@@ -11,9 +11,9 @@
 //   hex::EncodedLen(n) -> int
 //   hex::DecodedLen(n) -> int
 //
-// What v1 omits: NewEncoder/NewDecoder (io.Writer/Reader wrappers),
-// AppendEncode/AppendDecode, Dump (canonical pretty-print). Easy to
-// add later; not load-bearing for the typical use case.
+// All of upstream is now ported: streaming NewEncoder / NewDecoder
+// (io.Writer / io.Reader wrappers), AppendEncode / AppendDecode,
+// canonical Dump / Dumper.
 
 #![allow(non_snake_case)]
 
@@ -175,6 +175,135 @@ pub fn AppendDecode(dst: slice<byte>, src: slice<byte>) -> (slice<byte>, error) 
     let (n, err) = Decode(&mut out[start..start + cap_n], src_raw);
     out.truncate(start + n as usize);
     (slice::__from_vec(out), err)
+}
+
+// ─── NewEncoder / NewDecoder (hex.go:163-237) ────────────────────────────────
+
+const BUFFER_SIZE: usize = 1024;
+
+/// `hex.NewEncoder(w)` (hex.go:172) — `io.Writer` that lower-cases
+/// hex-encodes its input as it streams into `w`.
+pub fn NewEncoder<W: crate::io::Writer>(w: W) -> Encoder<W> {
+    Encoder {
+        w,
+        err: crate::errors::nil,
+        out: [0u8; BUFFER_SIZE],
+    }
+}
+
+/// `*encoder` (hex.go:166) — `io::Writer` that hex-encodes input.
+pub struct Encoder<W: crate::io::Writer> {
+    w: W,
+    err: error,
+    out: [byte; BUFFER_SIZE],
+}
+
+impl<W: crate::io::Writer> crate::io::Writer for Encoder<W> {
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        // Go: hex.go:177-191
+        let raw: &[byte] = &p;
+        let mut p = raw;
+        let mut n: int = 0;
+        while !p.is_empty() && self.err.IsNil() {
+            let chunk_size = (BUFFER_SIZE / 2).min(p.len());
+            let encoded = Encode(&mut self.out[..], &p[..chunk_size]);
+            // Go: written, e.err = e.w.Write(e.out[:encoded])
+            let chunk = slice::__from_vec(self.out[..encoded as usize].to_vec());
+            let (written, err) = self.w.Write(chunk);
+            self.err = err;
+            n += written / 2;
+            p = &p[chunk_size..];
+        }
+        (n, self.err.clone())
+    }
+}
+
+/// `hex.NewDecoder(r)` (hex.go:202) — `io.Reader` that hex-decodes
+/// `r` on the fly. Expects an even number of hex chars in total.
+pub fn NewDecoder<R: crate::io::Reader>(r: R) -> Decoder<R> {
+    Decoder {
+        r,
+        err: crate::errors::nil,
+        in_buf: alloc::vec![],
+        arr: [0u8; BUFFER_SIZE],
+    }
+}
+
+/// `*decoder` (hex.go:193) — `io::Reader` that hex-decodes input.
+pub struct Decoder<R: crate::io::Reader> {
+    r: R,
+    err: error,
+    in_buf: Vec<byte>,
+    arr: [byte; BUFFER_SIZE],
+}
+
+impl<R: crate::io::Reader> crate::io::Reader for Decoder<R> {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        // Go: hex.go:206-237
+        // Refill internal buffer if we have <2 hex chars and no error.
+        if self.in_buf.len() < 2 && self.err.IsNil() {
+            let num_copy = self.in_buf.len();
+            self.arr[..num_copy].copy_from_slice(&self.in_buf);
+            // Read remaining bytes after the existing leftover.
+            let mut tail_buf =
+                slice::__from_vec(alloc::vec![0u8; BUFFER_SIZE - num_copy]);
+            let (num_read, err) = self.r.Read(&mut tail_buf);
+            let tail_raw: &[byte] = &tail_buf;
+            self.arr[num_copy..num_copy + num_read as usize]
+                .copy_from_slice(&tail_raw[..num_read as usize]);
+            self.in_buf = self.arr[..num_copy + num_read as usize].to_vec();
+            self.err = err;
+
+            // Go: hex.go:213-220 — odd length at EOF check.
+            if is_eof(&self.err) && self.in_buf.len() % 2 != 0 {
+                let last = self.in_buf[self.in_buf.len() - 1];
+                if !is_hex(last) {
+                    self.err = invalid_byte_error(last);
+                } else {
+                    self.err = crate::errors::New("unexpected EOF");
+                }
+            }
+        }
+
+        // Decode internal buffer into output buffer.
+        let p_raw: &mut [byte] = p;
+        let max_decode = self.in_buf.len() / 2;
+        let take = p_raw.len().min(max_decode);
+        let (num_dec, err) = Decode(&mut p_raw[..take], &self.in_buf[..take * 2]);
+        // Drop the consumed bytes.
+        self.in_buf.drain(..(2 * num_dec as usize));
+        if !err.IsNil() {
+            // Decode error; discard input remainder and propagate.
+            self.in_buf.clear();
+            self.err = err;
+        }
+
+        if self.in_buf.len() < 2 {
+            return (num_dec, self.err.clone());
+        }
+        (num_dec, crate::errors::nil)
+    }
+}
+
+#[inline]
+fn is_hex(b: byte) -> bool {
+    b.is_ascii_digit() || (b'a'..=b'f').contains(&b) || (b'A'..=b'F').contains(&b)
+}
+
+fn is_eof(e: &error) -> bool {
+    if e.IsNil() {
+        return false;
+    }
+    e.Error() == "EOF"
+}
+
+fn invalid_byte_error(b: byte) -> error {
+    let mut buf = crate::strings::Builder::new();
+    let _ = buf.WriteString(string::from_static("encoding/hex: invalid byte: "));
+    // emit b as decimal int.
+    let s = crate::strconv::Itoa(b as int);
+    let _ = buf.WriteString(s);
+    crate::errors::New(buf.String())
 }
 
 // ─── Dumper / Dump (hex.go:144 + 242) ────────────────────────────────────────
