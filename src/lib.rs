@@ -66,6 +66,7 @@ pub mod hash;
 pub mod maps;
 pub mod io;
 pub mod log;
+pub mod math;
 pub mod mime;
 pub mod net;
 pub mod os;
