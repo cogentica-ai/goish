@@ -62,6 +62,7 @@ pub mod gochan;
 pub mod gomap;
 pub mod goslice;
 pub mod gostring;
+pub mod hash;
 pub mod maps;
 pub mod io;
 pub mod log;
