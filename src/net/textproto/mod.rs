@@ -5,11 +5,15 @@
 //     net/textproto/textproto.go     (Error, ProtocolError, TrimString)
 //     net/textproto/header.go        (MIMEHeader)
 //     net/textproto/writer.go        (Writer, dotWriter, PrintfLine)
+//     net/textproto/reader.go        (Reader, ReadLine, ReadMIMEHeader — slim)
 //
 // Slim deviations:
-//   * `Conn`, `Pipeline`, `Reader` are not ported in v1: HTTP doesn't
-//     consume them (it has its own header reader), and SMTP/NNTP are
-//     out of v1 scope.
+//   * `Conn`, `Pipeline` are not ported in v1: SMTP/NNTP framing is out
+//     of v1 scope.
+//   * `Reader::DotReader` / `ReadCodeLine` / `ReadResponse` /
+//     `ReadDotBytes` / `ReadDotLines` are not ported (SMTP/NNTP-specific).
+//     The line + MIME-header surface (used by HTTP and net/mail) is
+//     present in `reader.rs`.
 //   * `MIMEHeader` is `map<string, slice<string>>`. The map keys must
 //     already be canonicalized; the methods canonicalize for the caller.
 //   * `dotWriter` is a struct that writes to a referenced bufio writer
@@ -390,3 +394,8 @@ impl<'a, W: io::Writer> DotWriter<'a, W> {
         self.w.W.Flush()
     }
 }
+
+// ─── Reader (reader.go) ─────────────────────────────────────────────
+
+mod reader;
+pub use reader::{NewReader, Reader, validHeaderFieldByte, validHeaderValueByte};
