@@ -24,6 +24,7 @@ pub mod adler32;
 pub mod crc32;
 pub mod crc64;
 pub mod fnv;
+pub mod maphash;
 
 use crate::goslice::slice;
 use crate::io;
