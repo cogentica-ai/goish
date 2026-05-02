@@ -48,9 +48,11 @@ use crate::syscall;
 use crate::types::{byte, int};
 
 mod parse;
+mod mac;
 pub mod http;
 pub mod textproto;
 
+pub use mac::{HardwareAddr, HardwareAddrString, ParseMAC};
 pub use parse::TCPAddr;
 
 /// `EAGAIN` / `EWOULDBLOCK` (Linux: same value, 11). The non-blocking
