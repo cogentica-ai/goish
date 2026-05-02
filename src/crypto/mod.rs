@@ -7,6 +7,7 @@
 
 pub mod aes;
 pub mod cipher;
+pub mod des;
 pub mod hkdf;
 pub mod hmac;
 pub mod md5;
