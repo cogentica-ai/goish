@@ -1219,6 +1219,20 @@ impl File {
             nil
         }
     }
+
+    /// `f.Sync()` — flush any buffered data to disk. Returns an error
+    /// if the underlying fsync syscall fails.
+    pub fn Sync(&mut self) -> error {
+        if self.fd < 0 {
+            return errors::New("file already closed")
+        }
+        let rc = unsafe { syscall::syscall1(syscall::SYS_FSYNC, self.fd as usize) };
+        if rc < 0 {
+            errors::New("fsync failed")
+        } else {
+            nil
+        }
+    }
 }
 
 impl io::Writer for File {

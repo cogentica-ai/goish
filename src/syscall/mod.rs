@@ -51,6 +51,7 @@ pub const SYS_GETPEERNAME: usize = 52;
 pub const SYS_SETSOCKOPT: usize = 54;
 pub const SYS_GETSOCKOPT: usize = 55;
 pub const SYS_FCNTL: usize = 72;
+pub const SYS_FSYNC: usize = 74;
 pub const SYS_GETCWD: usize = 79;
 pub const SYS_CHDIR: usize = 80;
 pub const SYS_ACCEPT4: usize = 288;
