@@ -310,6 +310,17 @@ pub struct StructField {
     pub Name: &'static str,
     pub Tag: StructTag,
     pub Type: fn() -> Type,
+    /// Mirrors `reflect.StructField.PkgPath` — non-empty marks the
+    /// field unexported. Goish currently exposes only exported fields
+    /// via `#[goish::reflect]`, so this is always `""`. Present so
+    /// ports that test `f.PkgPath != ""` skip-unexported branches
+    /// compile and behave as no-ops.
+    pub PkgPath: &'static str,
+    /// Mirrors `reflect.StructField.Anonymous` — true for embedded
+    /// (no-name) fields. Goish's reflect descriptor doesn't yet model
+    /// embedding, so this is always `false`. Present so ports that
+    /// branch on `f.Anonymous` for embedded-walk compile.
+    pub Anonymous: bool,
 }
 
 // ─── Type ─────────────────────────────────────────────────────────────
@@ -317,6 +328,11 @@ pub struct StructField {
 /// Mirrors `reflect.Type`. The struct is value-typed; `TypeOf` returns
 /// it by value (cheap — a few words). `elem` and `key` carry late-bound
 /// element/key descriptors for Slice / Map / Pointer kinds.
+///
+/// Eq/Ord/Hash compare by `(kind, name)` — same identity Go uses for
+/// `reflect.Type` (each named type is unique, and Type is comparable).
+/// This lets `map<reflect::Type, V>` and `map[reflect::Type] = ...` work
+/// in Go ports that key caches on type.
 #[derive(Clone, Copy)]
 pub struct Type {
     kind: Kind,
@@ -324,6 +340,29 @@ pub struct Type {
     fields: &'static [StructField],
     elem: Option<fn() -> Type>,
     key: Option<fn() -> Type>,
+}
+
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.name == other.name
+    }
+}
+impl Eq for Type {}
+impl PartialOrd for Type {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Type {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        (self.kind as u8, self.name).cmp(&(other.kind as u8, other.name))
+    }
+}
+impl core::hash::Hash for Type {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        (self.kind as u8).hash(state);
+        self.name.hash(state);
+    }
 }
 
 impl Type {
@@ -398,6 +437,8 @@ impl Type {
                 Name: "",
                 Tag: StructTag::__new(""),
                 Type: || Type::__new(Kind::Invalid, "", &[]),
+                PkgPath: "",
+                Anonymous: false,
             },
             false,
         )
@@ -516,6 +557,8 @@ impl Type {
                 Name: "",
                 Tag: StructTag::__new(""),
                 Type: || Type::__new(Kind::Invalid, "", &[]),
+                PkgPath: "",
+                Anonymous: false,
             },
             false,
         )

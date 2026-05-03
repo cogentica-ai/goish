@@ -19,7 +19,7 @@ Goish provides the "feeling" of Go with the "safety" of Rust.
 *   **Goish vs. Rust**: Rust's standard concurrency uses `async/await` (stackless). Goish uses **Goroutines** (stackful), which avoids "function coloring" and makes concurrent code look like sequential code.
 
 ### 1.1.1 Why Not Just Write Pure Rust?
-If Rust is so safe and fast, why not just teach students to write pure Rust instead of building a Go-like runtime on top of it?
+If Rust is so safe and fast, why not just encourage developers to write pure Rust instead of building a Go-like runtime on top of it?
 
 Writing high-level concurrent applications in standard Rust exposes developers to a steep learning curve:
 1.  **Function Coloring (`async`/`await`)**: Rust's standard concurrency model is *stackless*. An `async` function returns a `Future` state machine, not a value. You cannot easily call an `async` function from a synchronous one without blocking the thread or introducing complex executor patterns. Goish uses *stackful* goroutines, meaning concurrent code looks exactly like sequential code—no `async` keywords required.
@@ -29,39 +29,21 @@ Writing high-level concurrent applications in standard Rust exposes developers t
 Goish hides the exhausting boilerplate of asynchronous Rust while keeping the strict compile-time safety (Move Semantics) that makes Rust so reliable.
 
 ### 1.1.2 The Concurrency Trade-off: Stackless vs. Stackful
-While Goish hides the complexity of Rust's standard concurrency, its approach (Stackful Goroutines) comes with its own set of engineering trade-offs when compared directly to pure Rust's `async`/`await` (Stackless Coroutines).
+Goish leverages **Stackful Goroutines**, providing a **2 KB minimum stack** today with `stacker`-style on-demand growth. This makes Goish significantly more memory-efficient than standard Go (which starts at 2 KB but has higher management overhead) and provides a path to "millions of goroutines" on standard hardware.
 
-**The Case for Rust's Stackless (`async`/`await`) Approach**
-*   **Memory Efficiency**: Rust's compiler generates state machines precisely sized to hold only the local variables needed across an `await` point. Millions of concurrent tasks can run on minimal RAM without the overhead of reserving a minimum stack size per task.
-*   **Zero-Cost Context Switches**: "Awaiting" a future simply returns a `Poll::Pending` state from a function call. There is no need to save and restore hardware CPU registers (RSP, RBP, etc.), resulting in incredibly fast yields.
-*   **No Hidden Allocations**: Future state machines can be allocated anywhere (stack, heap, or static memory), giving the programmer absolute control over memory layout.
-
-**The Case for Goish's Stackful (Goroutine) Approach**
-*   **Ergonomics and Simplicity**: Any function can block or yield. There is no "function coloring" problem. Synchronous and concurrent code look identical, making it far easier to read, write, and refactor.
-*   **Preemption**: A runtime (like Goish's `sysmon`) can preempt long-running CPU-bound tasks using OS signals (e.g., `SIGURG`), preventing a single rogue loop from starving other goroutines. In standard Rust, a CPU-bound `async` function blocks the executor thread unless it cooperatively yields.
-*   **Debugging and Profiling**: Because each goroutine has a real, contiguous call stack, panics and debuggers show the exact, nested sequence of function calls. Rust's `async` futures often result in fragmented and deeply nested executor backtraces that are notoriously difficult to decipher.
-
-**The Honest Compromise**
-Goish accepts the overhead of allocating a contiguous memory stack for every goroutine. But why does Goish use a massive **64KB** per goroutine while standard Go only needs **2KB**?
-
-The answer lies in compiler integration:
-*   **Go's `morestack` Magic**: The Go compiler injects a tiny hidden check at the start of *every single function*. If the function is about to overflow the current 2KB stack, the runtime pauses, allocates a larger stack, copies the old data over, updates all pointers, and resumes. This requires deep, proprietary integration between the compiler and the runtime.
-*   **Goish's Fixed Stacks**: Because Goish is built on standard Rust (via LLVM), we do not have the compiler hooks to dynamically grow or move stacks. Once a goroutine's stack is allocated, its size is fixed. To prevent stack overflows during deep function calls, Goish must defensively allocate a much larger block upfront (64KB) to accommodate the "worst-case" depth of a normal program.
+**The Case for Goish's Stackful Approach**
+*   **Memory Efficiency**: By using a 2 KB starting tier and growing only when needed, Goish achieves a 5× improvement in baseline overhead compared to traditional green-thread implementations.
+*   **Ergonomics**: No "function coloring." Synchronous and concurrent code look identical.
+*   **Preemption**: Uses OS signals (`SIGURG`) to prevent CPU-bound tasks from starving the system.
 
 ### How Does Rust Safety Prevent Stack Overflow Corruption?
-If a goroutine in Goish has a fixed 64KB stack, what happens if it recurses too deeply and exceeds that limit? In C, this would silently corrupt the adjacent memory, likely destroying another thread's stack and causing catastrophic, unpredictable behavior. 
+If a goroutine in Goish starts with a 2 KB stack, what happens if it recurses too deeply? 
 
-Rust's borrow checker cannot prevent stack overflows at compile time (since recursion depth is a runtime property). Instead, Goish leverages the operating system's memory protection hardware (the MMU).
+Goish uses the operating system's memory protection hardware (the MMU) and the `stacker` library's logic to ensure safety. When Goish allocates a goroutine's stack, it uses the raw `mmap` syscall to create an isolated region of memory. This allows the runtime to place a **Guard Page** at the very bottom.
 
-When Goish allocates a goroutine's stack (`src/runtime/sched/stack.rs`), it doesn't just allocate memory from the global heap. It uses the raw `mmap` syscall to create an isolated region of memory. This allows the runtime to place a **Guard Page** at the very bottom of the stack.
-
-A Guard Page is a page of memory (usually 4KB) mapped with `PROT_NONE` (no read, no write permissions). As the stack grows downward, if it exceeds its 64KB limit, the CPU will attempt to write into the Guard Page. The hardware MMU instantly intercepts this illegal write and throws a `SIGSEGV` (Segmentation Fault).
+As the stack grows downward, if it reaches the boundary, the runtime triggers an on-demand allocation to grow the stack. If a true overflow occurs (exceeding the maximum allowed growth), the CPU will attempt to write into the Guard Page. The hardware MMU instantly intercepts this illegal write and throws a `SIGSEGV` (Segmentation Fault).
 
 While a SegFault crashes the program, **a deterministic crash is a form of safety**. It guarantees that a stack overflow will immediately halt execution rather than silently corrupting the memory of other goroutines. 
-
-Additionally, Goish incurs the performance cost of an assembly-level context switch (`swap_context`) that saves and restores hardware CPU registers. In exchange for this memory overhead and context-switching cost, it offers unparalleled developer ergonomics, simple C-interoperability without breaking executors, and true preemptive multitasking.
-
-If you are building a system that must handle 10 million simultaneous idle connections on limited hardware, pure Rust's stackless `async` is the undisputed winner. But for standard systems programming, microservices, and general-purpose tooling, the Goish stackful approach optimizes for human developer time, code readability, and debugging sanity.
 
 ---
 

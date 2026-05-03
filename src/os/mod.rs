@@ -47,56 +47,84 @@ use alloc::vec::Vec;
 /// the high-level flag bits; permission bits in the low 9.
 pub type FileMode = u32;
 
-pub const PathSeparator: u8 = b'/';
-pub const PathListSeparator: u8 = b':';
-
-pub fn IsPathSeparator(c: u8) -> bool {
-    c == PathSeparator
-}
-
 pub const ModeDir: FileMode = 1 << 31;
 pub const ModeSymlink: FileMode = 1 << 30;
 pub const ModePerm: FileMode = 0o777;
 
-/// `os.Open` flag aliases (os/file.go).
 pub const O_RDONLY: i32 = syscall::O_RDONLY;
 pub const O_WRONLY: i32 = 0o1;
 pub const O_RDWR: i32 = 0o2;
 pub const O_CREATE: i32 = 0o100;
 pub const O_TRUNC: i32 = 0o1000;
-pub const O_APPEND: i32 = 0o2000;
-pub const O_EXCL: i32 = 0o200;
 
-// ─── Sentinel errors ───────────────────────────────────────────────────
+pub const PathSeparator: u8 = b'/';
+pub const PathListSeparator: u8 = b':';
 
-pub fn ErrNotExist() -> error {
-    static SLOT: crate::runtime::spin::SpinLock<Option<error>> =
-        crate::runtime::spin::SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New("file does not exist"));
-    }
-    g.as_ref().unwrap().clone()
+/// `os.ErrClosed` (os/error.go:24) — "file already closed".
+pub fn ErrClosed() -> error {
+    errors::New("file already closed")
 }
 
+/// `os.ErrInvalid` (os/error.go:19) — "invalid argument".
+pub fn ErrInvalid() -> error {
+    errors::New("invalid argument")
+}
+
+/// `os.ErrPermission` (os/error.go:21) — "permission denied".
+pub fn ErrPermission() -> error {
+    errors::New("permission denied")
+}
+
+/// `os.ErrExist` (os/error.go:22) — "file already exists".
 pub fn ErrExist() -> error {
-    static SLOT: crate::runtime::spin::SpinLock<Option<error>> =
-        crate::runtime::spin::SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New("file already exists"));
-    }
-    g.as_ref().unwrap().clone()
+    errors::New("file already exists")
 }
 
-/// `os.IsNotExist(err)` — true if err indicates a missing file.
+/// `os.ErrNotExist` (os/error.go:23) — "file does not exist".
+pub fn ErrNotExist() -> error {
+    errors::New("file does not exist")
+}
+
+/// `os.IsNotExist(err)` (os/error.go:91) — reports whether `err` is known
+/// to report that a file or directory does not exist.
 pub fn IsNotExist(err: error) -> bool {
-    errors::Is(err, ErrNotExist())
+    err == ErrNotExist()
 }
 
-/// `os.IsExist(err)` — true if err indicates file already exists.
+/// `os.IsExist(err)` (os/error.go:80) — reports whether `err` is known to
+/// report that a file or directory already exists.
 pub fn IsExist(err: error) -> bool {
-    errors::Is(err, ErrExist())
+    err == ErrExist()
+}
+
+/// `os.IsPermission(err)` (os/error.go:100) — reports whether `err` is
+/// known to report that permission is denied.
+pub fn IsPermission(err: error) -> bool {
+    err == ErrPermission()
+}
+
+/// `os.PathError` (os/error.go:46) — records an error and the operation
+/// and file path that caused it.
+#[derive(Clone)]
+pub struct PathError {
+    pub Op: string,
+    pub Path: string,
+    pub Err: error,
+}
+
+impl crate::errors::ErrorTrait for PathError {
+    fn Error(&self) -> string {
+        self.Op.clone() + " " + self.Path.clone() + ": " + self.Err.Error()
+    }
+    fn Unwrap(&self) -> error {
+        self.Err.clone()
+    }
+}
+
+impl From<PathError> for crate::errors::error {
+    fn from(p: PathError) -> Self {
+        crate::errors::Wrap(p)
+    }
 }
 
 // ─── FileInfo ──────────────────────────────────────────────────────────
@@ -1229,6 +1257,51 @@ impl File {
         let rc = unsafe { syscall::syscall1(syscall::SYS_FSYNC, self.fd as usize) };
         if rc < 0 {
             errors::New("fsync failed")
+        } else {
+            nil
+        }
+    }
+
+    /// `f.ReadAt(buf, off)` — read from file at given offset.
+    /// Does not change the current file offset.
+    pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
+        if self.fd < 0 {
+            return (0, ErrClosed());
+        }
+        let len = p.len();
+        let ptr = p.as_mut_ptr();
+        let n = syscall::Pread64(self.fd, ptr, len, off);
+        if n < 0 {
+            (0, errors::New("read failed"))
+        } else if n == 0 {
+            (0, io::EOF())
+        } else {
+            (n as int, nil)
+        }
+    }
+
+    /// `f.WriteAt(buf, off)` — write to file at given offset.
+    /// Does not change the current file offset.
+    pub fn WriteAt(&mut self, p: slice<byte>, off: i64) -> (int, error) {
+        if self.fd < 0 {
+            return (0, ErrClosed());
+        }
+        let n = syscall::Pwrite64(self.fd, p.as_ptr(), p.len(), off);
+        if n < 0 {
+            (0, errors::New("write failed"))
+        } else {
+            (n as int, nil)
+        }
+    }
+
+    /// `f.Truncate(size)` — truncate file to given size.
+    pub fn Truncate(&mut self, size: int) -> error {
+        if self.fd < 0 {
+            return ErrClosed();
+        }
+        let rc = syscall::Ftruncate(self.fd, size as i64);
+        if rc < 0 {
+            errors::New("truncate failed")
         } else {
             nil
         }

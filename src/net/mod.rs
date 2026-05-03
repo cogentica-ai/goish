@@ -261,6 +261,10 @@ unsafe impl Sync for Conn {}
 pub struct Dialer {
     pub Timeout: crate::time::Duration,
     pub KeepAlive: crate::time::Duration,
+    /// Allow IPv4-or-IPv6 dialing on systems with both stacks. Inert
+    /// in v1 (the dial path picks whichever the kernel's address
+    /// resolver returns first).
+    pub DualStack: bool,
 }
 
 impl Dialer {

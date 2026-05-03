@@ -37,6 +37,7 @@ pub mod md5;
 pub mod pbkdf2;
 pub mod rand;
 pub mod rc4;
+pub mod rsa;
 pub mod sha1;
 pub mod sha256;
 pub mod sha3;

@@ -264,6 +264,10 @@ pub const EEXIST: i32 = 17;
 pub const ENOTDIR: i32 = 20;
 pub const EISDIR: i32 = 21;
 pub const ENOTEMPTY: i32 = 39;
+pub const EINTR: i32 = 4;
+pub const ENOSYS: i32 = 38;
+pub const ENOTSUP: i32 = 95;
+pub const EOPNOTSUPP: i32 = 95;
 
 /// Open flags. Subset of `<fcntl.h>`.
 pub const O_RDONLY: i32 = 0;
@@ -417,6 +421,37 @@ pub fn Lseek(fd: i32, offset: i64, whence: i32) -> i64 {
     unsafe { syscall3(SYS_LSEEK, fd as usize, offset as usize, whence as usize) as i64 }
 }
 
+/// `pread64(fd, buf, count, offset)` — read from file at given offset.
+#[allow(non_snake_case)]
+pub fn Pread64(fd: i32, buf: *mut u8, count: usize, offset: i64) -> isize {
+    unsafe { syscall4(SYS_PREAD64, fd as usize, buf as usize, count, offset as usize) as isize }
+}
+
+/// `pwrite64(fd, buf, count, offset)` — write to file at given offset.
+#[allow(non_snake_case)]
+pub fn Pwrite64(fd: i32, buf: *const u8, count: usize, offset: i64) -> isize {
+    unsafe { syscall4(SYS_PWRITE64, fd as usize, buf as usize, count, offset as usize) as isize }
+}
+
+/// `ftruncate(fd, length)` — truncate file to given length.
+#[allow(non_snake_case)]
+pub fn Ftruncate(fd: i32, length: i64) -> i32 {
+    unsafe { syscall2(SYS_FTRUNCATE, fd as usize, length as usize) as i32 }
+}
+
+/// `flock(fd, operation)` — advisory file lock.
+/// operation: LOCK_SH (shared), LOCK_EX (exclusive), LOCK_UN (unlock).
+#[allow(non_snake_case)]
+pub fn Flock(fd: i32, operation: i32) -> i32 {
+    unsafe { syscall2(SYS_FLOCK, fd as usize, operation as usize) as i32 }
+}
+
+// flock operations (linux/fcntl.h)
+pub const LOCK_SH: i32 = 1;
+pub const LOCK_EX: i32 = 2;
+pub const LOCK_UN: i32 = 8;
+pub const LOCK_NB: i32 = 4;
+
 // ─── mkdir / unlink / rmdir / chmod / symlink / readlink ────────────
 
 pub const SYS_MKDIR: usize = 83;
@@ -428,6 +463,10 @@ pub const SYS_READLINK: usize = 89;
 pub const SYS_RENAME: usize = 82;
 pub const SYS_LINK: usize = 86;
 pub const SYS_TRUNCATE: usize = 76;
+pub const SYS_FTRUNCATE: usize = 77;
+pub const SYS_PREAD64: usize = 17;
+pub const SYS_PWRITE64: usize = 18;
+pub const SYS_FLOCK: usize = 73;
 pub const SYS_PIPE2: usize = 293;
 pub const SYS_CHOWN: usize = 92;
 pub const SYS_LCHOWN: usize = 94;

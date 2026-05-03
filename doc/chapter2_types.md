@@ -54,7 +54,7 @@ By backing the string with an `Arc<[u8]>` (Atomic Reference Counted slice):
 
 ## 2.3 Borrowing vs. Copying in Goish
 
-One of the hardest adjustments for students moving from Garbage Collected languages (like Go, Java, or Python) to Systems languages (like Rust or C) is understanding exactly when data is copied and when it is shared.
+One of the hardest adjustments for readers moving from Garbage Collected languages (like Go, Java, or Python) to Systems languages (like Rust or C) is understanding exactly when data is copied and when it is shared.
 
 In Go, "everything is passed by value." However, because slices, maps, and channels are essentially pointers under the hood, passing them by value effectively *shares* the underlying data.
 

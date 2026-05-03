@@ -393,6 +393,17 @@ pub struct Transport {
     /// yet plumbed); the field exists so user ports can store and
     /// reset it for thread-safety.
     pub TLSClientConfig: crate::crypto::tls::Config,
+    /// Disable HTTP keep-alive. Inert in v1 (each request dials anew).
+    pub DisableKeepAlives: bool,
+    /// Idle-connection-pool cap. Inert until the pool lands.
+    pub MaxIdleConns: int,
+    /// Per-host idle-connection cap. Inert until the pool lands.
+    /// Negative values mean "no pool for this host" in Go.
+    pub MaxIdleConnsPerHost: int,
+    /// Max in-flight connections per host. Inert in v1.
+    pub MaxConnsPerHost: int,
+    /// Prefer HTTP/2 over TLS. Inert in v1 (HTTP/2 not yet plumbed).
+    pub ForceAttemptHTTP2: bool,
 }
 
 impl Default for Transport {
@@ -406,6 +417,11 @@ impl Default for Transport {
             TLSHandshakeTimeout: time::Duration(0),
             ExpectContinueTimeout: time::Duration(0),
             TLSClientConfig: crate::crypto::tls::Config::default(),
+            DisableKeepAlives: false,
+            MaxIdleConns: 0,
+            MaxIdleConnsPerHost: 0,
+            MaxConnsPerHost: 0,
+            ForceAttemptHTTP2: false,
         }
     }
 }
