@@ -11,10 +11,27 @@ When designing or porting any Go API, verify signatures, semantics, and edge cas
 Public API surface should read like Go:
 - Lowercase types: `string`, `slice<T>`, `byte`, `rune`, `int`
 - Free-function builtins: `len`, `cap`, `make`, `append`, `copy`, `string()`, `bytes()`, `runes()`
-- `range!(x)` macro
+- `range!(x)` macro — **hard rule, see below**
 - Multi-return tuples
 
 Internal implementation must rely on Rust ownership / borrow-check, not unsafe-by-default. No shared mutable backing across slice handles, no leaking `&str` / `&[u8]` into public signatures except where unavoidable.
+
+### 2a. No `as <type>` casts — use goish types
+
+Never use Rust's `as` cast syntax (e.g., `x as usize`, `y as int`) in goish code. Goish defines its own type equivalents; use those instead. If a cast is needed, use the goish-provided conversion functions or types. This keeps the code looking like Go, not Rust.
+
+### 2b. `range!()` is mandatory — if it doesn't work, fix the runtime
+
+**Hard rule:** All iteration over goish collections (`slice<T>`, `map<K,V>`, `string`) **must** use `for (i, v) in range!(collection)`.
+
+If `range!()` fails to compile for a given type or context (e.g., `range!(&node.childNodes)` produces `&&slice<T>` which lacks a `RangeIter` impl), **do not** work around it with raw Rust `for` loops, `.iter()`, or index-based `for i in 0..len`. Instead:
+
+1. **Stop immediately.**
+2. **Identify the missing `RangeIter` impl** or macro issue.
+3. **Propose a fix to the goish runtime** (in `src/range.rs` or the relevant type module).
+4. **Only continue once the runtime fix lands.**
+
+This ensures all ports stay uniform and benefits every future consumer of that type. Working around `range!()` fragments the codebase and defeats the purpose of a Go-like runtime.
 
 ## 3. NO Rust container types in public Go-API signatures
 

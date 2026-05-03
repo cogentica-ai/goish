@@ -78,6 +78,19 @@ impl<'a, T> RangeIter for &'a slice<T> {
     }
 }
 
+// `range!(&x)` where `x: &slice<T>` → `&&slice<T>`.
+// Needed when iterating over a borrowed slice handle inside a struct field.
+impl<'a, T> RangeIter for &&'a slice<T> {
+    type Item = (int, &'a T);
+    type Iter = SliceRangeIter<'a, T>;
+    fn range(self) -> Self::Iter {
+        SliceRangeIter {
+            slice: &***self,
+            i: 0,
+        }
+    }
+}
+
 // ─── string → (int byte-offset, rune) — UTF-8 decode per step ───────
 
 pub struct StringRangeIter<'a> {
