@@ -154,3 +154,17 @@ where
         self.__iter()
     }
 }
+
+// `range!(&m)` where `m: &map<K,V>` → `&&map<K,V>`.
+// Needed when iterating over a borrowed map handle inside a struct field.
+impl<'a, K, V> RangeIter for &&'a map<K, V>
+where
+    K: Ord,
+    V: Default,
+{
+    type Item = (&'a K, &'a V);
+    type Iter = alloc::collections::btree_map::Iter<'a, K, V>;
+    fn range(self) -> Self::Iter {
+        (**self).__iter()
+    }
+}

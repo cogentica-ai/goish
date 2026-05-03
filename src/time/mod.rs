@@ -1126,6 +1126,35 @@ fn format_layout(
         out.extend_from_slice(b" GMT");
         return string::from_bytes(&out);
     }
+    // Fixed-width fractional seconds: "2006-01-02T15:04:05.0000000Z07:00"
+    // (7 digits, zero-padded, always emitted including the dot).
+    if l == "2006-01-02T15:04:05.0000000Z07:00" {
+        let mut out = alloc::vec::Vec::with_capacity(30);
+        out.extend_from_slice(&pad4(y));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(m));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(d));
+        out.push(b'T');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        out.push(b'.');
+        // 7 digits from nanoseconds (0..999999999) — pad to 7, truncate if > 7.
+        let mut frac: [u8; 7] = [b'0'; 7];
+        let mut n = _nano as u64;
+        let mut i = 7;
+        while i > 0 {
+            i -= 1;
+            frac[i] = b'0' + (n % 10) as u8;
+            n /= 10;
+        }
+        out.extend_from_slice(&frac);
+        out.push(b'Z');
+        return string::from_bytes(&out);
+    }
     // Unrecognized layout — return the layout literal back, mirroring
     // Go's behavior of emitting un-tokenized text verbatim.
     l

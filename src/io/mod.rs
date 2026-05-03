@@ -53,6 +53,13 @@ pub trait Closer {
     fn Close(&mut self) -> error;
 }
 
+/// Go's `io.ReadCloser` — combines [`Reader`] and [`Closer`].
+pub trait ReadCloser: Reader + Closer {}
+
+/// Blanket impl: any type that implements both `Reader` and `Closer`
+/// automatically implements `ReadCloser`.
+impl<T: Reader + Closer> ReadCloser for T {}
+
 /// Go's `io.Seeker` (io.go:126). Reposition the read/write head.
 /// Whence is one of `SeekStart`, `SeekCurrent`, `SeekEnd`.
 pub trait Seeker {
