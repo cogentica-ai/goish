@@ -98,10 +98,11 @@ impl string {
         self.bytes.len() as int
     }
 
-    /// Internal byte access for utf8/range/comparison machinery. Public
-    /// users get bytes via the `bytes(s)` builtin, which copies into a
-    /// `slice<byte>` (Go-faithful semantics).
-    pub(crate) fn as_bytes(&self) -> &[u8] {
+    /// Raw byte access. The slice is valid for `&self`'s lifetime (Arc
+    /// keeps the allocation alive). Use this for zero-copy byte-level
+    /// operations (path scanning, pattern matching). For a Go-faithful
+    /// owned copy, call `bytes(s)` which returns `slice<byte>`.
+    pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }
 }

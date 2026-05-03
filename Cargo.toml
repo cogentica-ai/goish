@@ -16,6 +16,7 @@ path = "src/lib.rs"
 
 [dependencies]
 goish-macros = { path = "goish-macros", version = "0.1" }
+libm = { version = "0.2", default-features = false }
 
 [profile.dev]
 panic = "abort"

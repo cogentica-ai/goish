@@ -23,6 +23,7 @@
 
 #![allow(non_snake_case)]
 
+pub mod exec;
 pub mod signal;
 pub mod user;
 
@@ -46,6 +47,13 @@ use alloc::vec::Vec;
 /// the high-level flag bits; permission bits in the low 9.
 pub type FileMode = u32;
 
+pub const PathSeparator: u8 = b'/';
+pub const PathListSeparator: u8 = b':';
+
+pub fn IsPathSeparator(c: u8) -> bool {
+    c == PathSeparator
+}
+
 pub const ModeDir: FileMode = 1 << 31;
 pub const ModeSymlink: FileMode = 1 << 30;
 pub const ModePerm: FileMode = 0o777;
@@ -58,6 +66,38 @@ pub const O_CREATE: i32 = 0o100;
 pub const O_TRUNC: i32 = 0o1000;
 pub const O_APPEND: i32 = 0o2000;
 pub const O_EXCL: i32 = 0o200;
+
+// ─── Sentinel errors ───────────────────────────────────────────────────
+
+pub fn ErrNotExist() -> error {
+    static SLOT: crate::runtime::spin::SpinLock<Option<error>> =
+        crate::runtime::spin::SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::New("file does not exist"));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+pub fn ErrExist() -> error {
+    static SLOT: crate::runtime::spin::SpinLock<Option<error>> =
+        crate::runtime::spin::SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(errors::New("file already exists"));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// `os.IsNotExist(err)` — true if err indicates a missing file.
+pub fn IsNotExist(err: error) -> bool {
+    errors::Is(err, ErrNotExist())
+}
+
+/// `os.IsExist(err)` — true if err indicates file already exists.
+pub fn IsExist(err: error) -> bool {
+    errors::Is(err, ErrExist())
+}
 
 // ─── FileInfo ──────────────────────────────────────────────────────────
 
@@ -157,13 +197,14 @@ pub fn OpenFile<N: Into<string>>(name: N, flag: i32, perm: u32) -> (File, error)
     buf.push(0);
     let fd = syscall::Open(buf.as_ptr(), flag | syscall::O_CLOEXEC, perm as i32);
     if fd < 0 {
-        return (
-            File {
-                fd: -1,
-                name: name.clone(),
-            },
-            errors::New(string("open failed")),
-        );
+        let err = if -fd == syscall::ENOENT {
+            ErrNotExist()
+        } else if -fd == syscall::EEXIST {
+            ErrExist()
+        } else {
+            errors::New(string("open failed"))
+        };
+        return (File { fd: -1, name: name.clone() }, err);
     }
     (
         File {
@@ -184,6 +225,11 @@ pub fn Stat<N: Into<string>>(name: N) -> (FileInfo, error) {
     let mut st = syscall::Stat_t::default();
     let rc = syscall::Stat(buf.as_ptr(), &mut st);
     if rc < 0 {
+        let err = if -rc == syscall::ENOENT {
+            ErrNotExist()
+        } else {
+            errors::New(string("stat failed"))
+        };
         return (
             FileInfo {
                 name: name.clone(),
@@ -192,7 +238,7 @@ pub fn Stat<N: Into<string>>(name: N) -> (FileInfo, error) {
                 mod_time: crate::time::Time::default(),
                 is_dir: false,
             },
-            errors::New(string("stat failed")),
+            err,
         );
     }
     let base = base_name(&name);

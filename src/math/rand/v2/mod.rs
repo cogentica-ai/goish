@@ -3,10 +3,10 @@
 // Reference: /share/go/src/math/rand/v2/{rand.go,pcg.go}
 //
 // Slim deviations:
-//   * No globalRand / runtime.rand binding. Top-level convenience
-//     functions (Int64, Float64, Shuffle, …) are NOT exposed; users
-//     must construct an explicit PCG / Rand. This avoids the runtime
-//     fastrand hook and keeps `no_std` builds self-contained.
+//   * globalRand is a pair of AtomicU64s seeded lazily from Now().
+//     The pair-update is not atomic (two separate 64-bit stores) so
+//     concurrent callers may observe a slightly biased sequence —
+//     acceptable for jitter / fuzzing use cases, not for crypto.
 //   * Source is a Rust trait `Source` rather than a Go interface —
 //     callers either pass `&mut PCG` directly, or wrap their own
 //     impl. `Rand<S>` is generic over the source.
@@ -23,6 +23,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::errors::{self, error};
 use crate::goslice::slice;
@@ -278,4 +279,85 @@ impl<S: Source> Rand<S> {
             i -= 1;
         }
     }
+}
+
+// ─── Global rand (rand.go:262) ───────────────────────────────────────
+//
+// Go's globalRand is bound to runtime.rand (a per-M fast source). Goish
+// uses two AtomicU64s for the PCG state. The hi+lo pair is not updated
+// atomically, so concurrent goroutines may observe a race on the 128-bit
+// state — the result is a different (still uniform) sequence, not UB.
+// For backoff jitter and non-crypto uses this is perfectly acceptable.
+
+static GLOBAL_INIT: AtomicBool = AtomicBool::new(false);
+static GLOBAL_HI:   AtomicU64  = AtomicU64::new(0);
+static GLOBAL_LO:   AtomicU64  = AtomicU64::new(0);
+
+fn global_next_u64() -> u64 {
+    if !GLOBAL_INIT.swap(true, Ordering::AcqRel) {
+        let seed = crate::time::Now().UnixNano() as u64;
+        GLOBAL_HI.store(seed, Ordering::Relaxed);
+        GLOBAL_LO.store(seed ^ 0x9e3779b97f4a7c15, Ordering::Relaxed);
+    }
+    let hi = GLOBAL_HI.load(Ordering::Relaxed);
+    let lo = GLOBAL_LO.load(Ordering::Relaxed);
+    let mut pcg = PCG { hi, lo };
+    let val = pcg.Uint64();
+    GLOBAL_HI.store(pcg.hi, Ordering::Relaxed);
+    GLOBAL_LO.store(pcg.lo, Ordering::Relaxed);
+    val
+}
+
+/// `rand.Float64()` — [0.0, 1.0) from the global source.
+pub fn Float64() -> f64 {
+    let v = global_next_u64();
+    ((v << 11) >> 11) as f64 / (1u64 << 53) as f64
+}
+
+/// `rand.Float32()` — [0.0, 1.0) from the global source.
+pub fn Float32() -> f32 {
+    let v = (global_next_u64() >> 32) as u32;
+    ((v << 8) >> 8) as f32 / (1u32 << 24) as f32
+}
+
+/// `rand.Int64()` — non-negative 63-bit integer from the global source.
+pub fn Int64() -> i64 {
+    (global_next_u64() & !(1u64 << 63)) as i64
+}
+
+/// `rand.Uint64()` — random uint64 from the global source.
+pub fn Uint64() -> u64 {
+    global_next_u64()
+}
+
+/// `rand.Int()` — non-negative int from the global source.
+pub fn Int() -> int {
+    ((global_next_u64() << 1) >> 1) as int
+}
+
+/// `rand.Int64N(n)` — random int64 in [0, n) from the global source.
+pub fn Int64N(n: i64) -> i64 {
+    if n <= 0 { panic!("invalid argument to Int64N"); }
+    let mut r = Rand { src: PCG { hi: GLOBAL_HI.load(Ordering::Relaxed), lo: GLOBAL_LO.load(Ordering::Relaxed) } };
+    r.Int64N(n)
+}
+
+/// `rand.IntN(n)` — random int in [0, n) from the global source.
+pub fn IntN(n: int) -> int {
+    if n <= 0 { panic!("invalid argument to IntN"); }
+    let mut r = Rand { src: PCG { hi: GLOBAL_HI.load(Ordering::Relaxed), lo: GLOBAL_LO.load(Ordering::Relaxed) } };
+    r.IntN(n)
+}
+
+/// `rand.Uint64N(n)` — random uint64 in [0, n) from the global source.
+pub fn Uint64N(n: u64) -> u64 {
+    if n == 0 { panic!("invalid argument to Uint64N"); }
+    let mut r = Rand { src: PCG { hi: GLOBAL_HI.load(Ordering::Relaxed), lo: GLOBAL_LO.load(Ordering::Relaxed) } };
+    r.Uint64N(n)
+}
+
+/// `rand.Shuffle(n, swap)` — Fisher-Yates using global source.
+pub fn Shuffle<F: FnMut(int, int)>(n: int, mut swap: F) {
+    let mut r = Rand { src: PCG { hi: GLOBAL_HI.load(Ordering::Relaxed), lo: GLOBAL_LO.load(Ordering::Relaxed) } };
+    r.Shuffle(n, &mut swap);
 }

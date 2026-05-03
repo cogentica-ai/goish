@@ -58,6 +58,12 @@ pub const SYS_EPOLL_CREATE1: usize = 291;
 pub const SYS_EPOLL_CTL: usize = 233;
 pub const SYS_EPOLL_PWAIT: usize = 281;
 pub const SYS_EVENTFD2: usize = 290;
+// Process family (os/exec port — M27 follow-up).
+pub const SYS_FORK: usize = 57;
+pub const SYS_EXECVE: usize = 59;
+pub const SYS_WAIT4: usize = 61;
+pub const SYS_DUP2: usize = 33;
+pub const SYS_DUP3: usize = 292;
 
 // Signal numbers (Linux). Mirror /usr/include/asm-generic/signal.h.
 pub const SIGHUP: i32 = 1;
@@ -250,6 +256,14 @@ pub fn Read(fd: i32, p: *mut u8, n: usize) -> isize {
     unsafe { syscall3(SYS_READ, fd as usize, p as usize, n) }
 }
 
+/// Common errno values (Linux, from `<errno.h>`).
+pub const ENOENT: i32 = 2;
+pub const EACCES: i32 = 13;
+pub const EEXIST: i32 = 17;
+pub const ENOTDIR: i32 = 20;
+pub const EISDIR: i32 = 21;
+pub const ENOTEMPTY: i32 = 39;
+
 /// Open flags. Subset of `<fcntl.h>`.
 pub const O_RDONLY: i32 = 0;
 pub const O_CLOEXEC: i32 = 0o2_000_000;
@@ -266,6 +280,50 @@ pub fn Open(path: *const u8, flags: i32, mode: i32) -> i32 {
 pub fn Close(fd: i32) -> i32 {
     unsafe { syscall1(SYS_CLOSE, fd as usize) as i32 }
 }
+
+// ─── process family (os/exec) ─────────────────────────────────────────
+
+/// `fork(2)` — returns 0 in child, child PID in parent, -errno on
+/// error. Linux x86_64 still ships the legacy `SYS_FORK` (57) which
+/// behaves like a `clone(SIGCHLD, 0)`. Goish uses it directly because
+/// the address-space-sharing variants (vfork, clone with CLONE_VM)
+/// require careful child-side discipline that the simple posix-style
+/// Cmd.Run path doesn't need.
+#[allow(non_snake_case)]
+pub fn Fork() -> i32 {
+    unsafe { syscall0(SYS_FORK) as i32 }
+}
+
+/// `execve(2)` — replace the current process image. `argv` and `envp`
+/// are NULL-terminated arrays of NULL-terminated C strings. On
+/// success, does not return (so the caller observes the child via
+/// wait4 and a non-zero exit). On failure, returns -errno.
+#[allow(non_snake_case)]
+pub fn Execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> i32 {
+    unsafe {
+        syscall3(SYS_EXECVE, path as usize, argv as usize, envp as usize) as i32
+    }
+}
+
+/// `wait4(2)` — wait for the given pid and return its raw status word
+/// (or -errno). `options` follows Linux's WNOHANG/WUNTRACED/etc.; pass
+/// 0 for blocking-wait-for-exit semantics. The decoded exit-code lives
+/// in bits 8..16 of the status word for normal exits.
+#[allow(non_snake_case)]
+pub fn Wait4(pid: i32, status: *mut i32, options: i32, rusage: *mut u8) -> i32 {
+    unsafe {
+        syscall4(SYS_WAIT4, pid as usize, status as usize, options as usize, rusage as usize) as i32
+    }
+}
+
+/// `dup3(2)` — duplicate `oldfd` to `newfd` with optional flags
+/// (typically `O_CLOEXEC`). Used to wire pipes onto stdin/stdout/
+/// stderr in the child between Fork and Execve.
+#[allow(non_snake_case)]
+pub fn Dup3(oldfd: i32, newfd: i32, flags: i32) -> i32 {
+    unsafe { syscall3(SYS_DUP3, oldfd as usize, newfd as usize, flags as usize) as i32 }
+}
+
 
 // ─── stat / fstat (Linux x86_64 layout) ──────────────────────────────
 
@@ -602,6 +660,20 @@ pub fn ClockGettime(clk: i32, tp: *mut Timespec) -> isize {
 #[allow(non_snake_case)]
 pub fn Nanosleep(req: *const Timespec, rem: *mut Timespec) -> isize {
     unsafe { syscall2(SYS_NANOSLEEP, req as usize, rem as usize) }
+}
+
+/// 0-argument syscall — used by `fork(2)` and `getpid(2)`.
+#[inline]
+pub unsafe fn syscall0(n: usize) -> isize {
+    let ret: isize;
+    asm!(
+        "syscall",
+        inlateout("rax") n => ret,
+        out("rcx") _,
+        out("r11") _,
+        options(nostack, preserves_flags),
+    );
+    ret
 }
 
 /// 2-argument syscall — used by `clock_gettime` / `nanosleep`.
