@@ -71,7 +71,7 @@ fn main() {
         let mut visited_secret = false;
         let _ = filepath::WalkDir(root.clone(), |p, d, _e| {
             if p == "/tmp/goish-walk-smoke/skipme" {
-                return filepath::SkipDir();
+                return filepath::SkipDir.into();
             }
             if d.Name() == "secret.txt" {
                 visited_secret = true;
@@ -92,7 +92,7 @@ fn main() {
         let err = filepath::WalkDir(root.clone(), |_p, _d, _e| {
             count += 1;
             if count >= 2 {
-                return filepath::SkipAll();
+                return filepath::SkipAll.into();
             }
             nil.into()
         });
@@ -160,7 +160,7 @@ fn main() {
         let mut visited_inner = false;
         let _ = filepath::Walk(root.clone(), |_p, info, _e| {
             if info.Name() == "sub" && info.IsDir() {
-                return filepath::SkipDir();
+                return filepath::SkipDir.into();
             }
             if info.Name() == "d.txt" {
                 visited_inner = true;

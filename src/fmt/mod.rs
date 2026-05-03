@@ -614,6 +614,22 @@ fn write_reflect_value(v: &crate::reflect::Value, plus: bool, f: &mut FmtBuf) {
                 write_reflect_value(inner, plus, f);
             }
         }
+        K::Interface => {
+            // The downcast already happened inside __reflect_value, so
+            // a Kind::Interface that survives to here means an unknown
+            // dynamic type. Render Go's customary placeholder.
+            f.extend(b"<interface>");
+        }
+        K::Int64 | K::Uint64 | K::Uintptr | K::Func | K::Chan
+        | K::UnsafePointer | K::Array => {
+            // Fallback rendering for variants whose `__reflect_value`
+            // doesn't yet produce a typed Value (placeholder for parity
+            // with Go's reflect.Kind universe).
+            f.extend(b"<");
+            let s = v.Kind().String();
+            f.extend(s.as_bytes());
+            f.extend(b">");
+        }
     }
 }
 
@@ -624,6 +640,59 @@ pub fn sprintf_impl(format: &[byte], args: &[FmtArg]) -> string {
     let mut f = FmtBuf::new();
     do_format(format, args, &mut f);
     string::__from_vec(f.into_bytes())
+}
+
+/// Runtime variadic-spread Sprintf — for the Go pattern
+/// `fmt.Sprintf(format, args...)` where `args ...interface{}` becomes a
+/// goish `slice<Arc<dyn Any + Send + Sync>>`. Each arg is runtime-
+/// downcast to a known formattable type and dispatched as `FmtArg::Val`.
+///
+/// Supported concrete types: `string`, `&str`, `i64`/`i32`/`isize`,
+/// `u64`/`u32`/`usize`, `f64`/`f32`, `bool`, `byte` (u8), `char`, `error`.
+/// Unrecognised types render as `"<unsupported %T>"`.
+pub fn Sprintv<S: Into<string>>(
+    format: S,
+    args: slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+) -> string {
+    let format = format.into();
+    let fmt_bytes = format.as_bytes();
+    let mut fa: Vec<FmtArg<'_>> = Vec::with_capacity(args.Len() as usize);
+    let placeholder: &str = "<unsupported %T>";
+    for a in args.iter() {
+        let any: &(dyn core::any::Any + Send + Sync) = a.as_ref();
+        if let Some(v) = any.downcast_ref::<string>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<&str>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<i64>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<i32>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<isize>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<u64>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<u32>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<usize>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<f64>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<f32>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<bool>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<u8>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<char>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<error>() {
+            fa.push(FmtArg::Err(v));
+        } else {
+            fa.push(FmtArg::Val(&placeholder as &dyn Format));
+        }
+    }
+    sprintf_impl(fmt_bytes, &fa)
 }
 
 #[doc(hidden)]
@@ -857,3 +926,12 @@ macro_rules! Errorf {
         $crate::fmt::errorf_impl(($fmt).as_bytes(), $crate::__fmt_args!($($arg),*))
     };
 }
+
+// ─── Re-export macros under `fmt::` so callers write `fmt::Println!` ──
+//
+// `#[macro_export]` only registers macros at the crate root, but Go's
+// idiom is `fmt.Println(...)` → `fmt::Println!(...)`. Re-exporting here
+// makes the qualified path work: `use goish::fmt; fmt::Println!(…)`.
+pub use crate::{
+    Eprintln, Errorf, Fprintf, Fprintln, Print, Printf, Println, Sprint, Sprintf, Sprintln,
+};

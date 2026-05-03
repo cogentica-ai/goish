@@ -243,3 +243,22 @@ macro_rules! close {
         ($ch).Close()
     }};
 }
+
+// ─── new!(T) — zero-valued T ─────────────────────────────────────────
+
+/// `new!(T)` — Go's `new(T)`. Returns the zero value of `T`. In Go this
+/// is `*T` (heap pointer); in Goish, methods auto-borrow `&self` /
+/// `&mut self`, so the value-shape suffices and the call site reads the
+/// same:
+///
+///   p := new(Counter)        →  let mut p = new!(Counter);
+///   p.Increment()            →  p.Increment();
+///
+/// Requires `T: Default`. Goish primitives (`int`, `string`,
+/// `slice<T>`, `map<K,V>`, `error`, …) all implement `Default`.
+#[macro_export]
+macro_rules! new {
+    ($t:ty) => {
+        <$t as ::core::default::Default>::default()
+    };
+}

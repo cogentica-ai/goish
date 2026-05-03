@@ -114,6 +114,15 @@ pub fn runes<T: __RunesConv>(x: T) -> slice<rune> {
     x.__to_runes()
 }
 
+// Borrow-friendly: `runes(&line)` where `line` is already `&string`
+// (e.g. from a range-loop binding) needs `&string: __RunesConv`.
+// Cloning is cheap (Arc bump) so we forward through `clone()`.
+impl __RunesConv for &string {
+    fn __to_runes(self) -> slice<rune> {
+        self.clone().__to_runes()
+    }
+}
+
 impl __RunesConv for string {
     fn __to_runes(self) -> slice<rune> {
         let bytes = self.as_bytes();

@@ -30,6 +30,12 @@ use crate::gostring::string;
 use crate::types::{byte, int, rune};
 use crate::unicode::utf8;
 
+// Go's `io/fs` re-exports `FileInfo` (defined in fs.go:130) as the
+// canonical interface — `os.FileInfo` is the same type. Mirror that
+// here so call sites can write `fs::FileInfo` interchangeably with
+// `os::FileInfo`. Goish's concrete representation lives in `os`.
+pub use crate::os::FileInfo;
+
 // Go: fs.go:172
 //   type FileMode uint32
 //

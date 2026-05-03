@@ -374,26 +374,87 @@ fn has_meta(path: &string) -> bool {
 
 /// `filepath.SkipDir` (path.go:259) — sentinel returned from a
 /// WalkFunc / WalkDirFunc to signal "skip the directory I'm in".
-/// Compared with `errors::Is`, which uses Arc::ptr_eq, so the
-/// singleton is cached behind a SpinLock.
-pub fn SkipDir() -> error {
+///
+/// Go declares this as `var SkipDir = errors.New("…")`, so call sites
+/// reference it as a *value* (`return filepath.SkipDir`,
+/// `if err == filepath.SkipDir`). To match that shape in goish — and
+/// in particular let `==` work directly — we expose `SkipDir` as a
+/// ZST marker with `From<…> for error` and `PartialEq` both ways.
+/// Internally the marker materialises to a single shared error value
+/// via a SpinLock-cached Arc.
+#[derive(Copy, Clone, Default)]
+pub struct __SkipDirMarker;
+
+#[allow(non_upper_case_globals)]
+pub const SkipDir: __SkipDirMarker = __SkipDirMarker;
+
+const __SKIPDIR_MSG: &str = "skip this directory";
+
+fn __skipdir_error() -> error {
     static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
     let mut g = SLOT.lock();
     if g.is_none() {
-        *g = Some(errors::New("skip this directory"));
+        *g = Some(errors::New(__SKIPDIR_MSG));
     }
     g.as_ref().unwrap().clone()
 }
 
+impl From<__SkipDirMarker> for error {
+    fn from(_: __SkipDirMarker) -> Self {
+        __skipdir_error()
+    }
+}
+impl PartialEq<__SkipDirMarker> for error {
+    fn eq(&self, _: &__SkipDirMarker) -> bool {
+        if self.IsNil() {
+            return false;
+        }
+        self.Error() == __SKIPDIR_MSG
+    }
+}
+impl PartialEq<error> for __SkipDirMarker {
+    fn eq(&self, e: &error) -> bool {
+        e == self
+    }
+}
+
 /// `filepath.SkipAll` (path.go:264) — sentinel returned from a
-/// WalkFunc / WalkDirFunc to signal "stop the walk entirely".
-pub fn SkipAll() -> error {
+/// WalkFunc / WalkDirFunc to signal "stop the walk entirely". Same
+/// ZST-marker shape as `SkipDir`.
+#[derive(Copy, Clone, Default)]
+pub struct __SkipAllMarker;
+
+#[allow(non_upper_case_globals)]
+pub const SkipAll: __SkipAllMarker = __SkipAllMarker;
+
+const __SKIPALL_MSG: &str = "skip everything and stop the walk";
+
+fn __skipall_error() -> error {
     static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
     let mut g = SLOT.lock();
     if g.is_none() {
-        *g = Some(errors::New("skip everything and stop the walk"));
+        *g = Some(errors::New(__SKIPALL_MSG));
     }
     g.as_ref().unwrap().clone()
+}
+
+impl From<__SkipAllMarker> for error {
+    fn from(_: __SkipAllMarker) -> Self {
+        __skipall_error()
+    }
+}
+impl PartialEq<__SkipAllMarker> for error {
+    fn eq(&self, _: &__SkipAllMarker) -> bool {
+        if self.IsNil() {
+            return false;
+        }
+        self.Error() == __SKIPALL_MSG
+    }
+}
+impl PartialEq<error> for __SkipAllMarker {
+    fn eq(&self, e: &error) -> bool {
+        e == self
+    }
 }
 
 /// Line-by-line port of `filepath.WalkDir(root, fn)` (path.go:395).
@@ -420,7 +481,7 @@ where
         walk_dir(root, d, &mut fn_)
     };
     // Go: if err == SkipDir || err == SkipAll { return nil }
-    if errors::Is(walk_err.clone(), SkipDir()) || errors::Is(walk_err.clone(), SkipAll()) {
+    if errors::Is(walk_err.clone(), SkipDir.into()) || errors::Is(walk_err.clone(), SkipAll.into()) {
         return nil;
     }
     walk_err
@@ -444,7 +505,7 @@ where
     {
         let err = fn_(path_.clone(), d.clone(), nil);
         if !err.IsNil() || !d.IsDir() {
-            if errors::Is(err.clone(), SkipDir()) && d.IsDir() {
+            if errors::Is(err.clone(), SkipDir.into()) && d.IsDir() {
                 return nil;
             }
             return err;
@@ -457,7 +518,7 @@ where
         // Go: err = walkDirFn(path, d, err); ... if err == SkipDir && d.IsDir() { err = nil }
         let err = fn_(path_.clone(), d.clone(), err);
         if !err.IsNil() {
-            if errors::Is(err.clone(), SkipDir()) && d.IsDir() {
+            if errors::Is(err.clone(), SkipDir.into()) && d.IsDir() {
                 return nil;
             }
             return err;
@@ -474,7 +535,7 @@ where
         let err = walk_dir(path1, d1, fn_);
         if !err.IsNil() {
             // Go: if err == SkipDir { break }; return err
-            if errors::Is(err.clone(), SkipDir()) {
+            if errors::Is(err.clone(), SkipDir.into()) {
                 break;
             }
             return err;
@@ -501,7 +562,7 @@ where
     } else {
         walk_helper(root, info, &mut fn_)
     };
-    if errors::Is(walk_err.clone(), SkipDir()) || errors::Is(walk_err.clone(), SkipAll()) {
+    if errors::Is(walk_err.clone(), SkipDir.into()) || errors::Is(walk_err.clone(), SkipAll.into()) {
         return nil;
     }
     walk_err
@@ -533,7 +594,7 @@ where
         if !err.IsNil() {
             // Go: if err := walkFn(filename, fileInfo, err); err != nil && err != SkipDir { return err }
             let cb_err = fn_(filename, file_info, err);
-            if !cb_err.IsNil() && !errors::Is(cb_err.clone(), SkipDir()) {
+            if !cb_err.IsNil() && !errors::Is(cb_err.clone(), SkipDir.into()) {
                 return cb_err;
             }
         } else {
@@ -541,7 +602,7 @@ where
             //     if err != nil { if !fileInfo.IsDir() || err != SkipDir { return err } }
             let is_dir_now = file_info.IsDir();
             let err = walk_helper(filename, file_info, fn_);
-            if !err.IsNil() && (!is_dir_now || !errors::Is(err.clone(), SkipDir())) {
+            if !err.IsNil() && (!is_dir_now || !errors::Is(err.clone(), SkipDir.into())) {
                 return err;
             }
         }

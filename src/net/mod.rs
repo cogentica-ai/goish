@@ -250,6 +250,30 @@ pub struct Conn {
 unsafe impl Send for Conn {}
 unsafe impl Sync for Conn {}
 
+/// `net.Dialer` (Go 1.25 src/net/dial.go) — connection-establishing
+/// configuration. Goish v1 carries the Timeout / KeepAlive fields
+/// most commonly read; the actual `DialContext`/`Dial` method-typed
+/// resolver is exposed via `.DialContext()` returning an opaque
+/// `Arc<dyn Fn>` that can be assigned to
+/// `http::Transport.DialContext` etc. The closure is inert in v1
+/// (each `RoundTrip` dials via `crate::net::Dial` directly).
+#[derive(Clone, Default)]
+pub struct Dialer {
+    pub Timeout: crate::time::Duration,
+    pub KeepAlive: crate::time::Duration,
+}
+
+impl Dialer {
+    /// `(*Dialer).DialContext` — Go method that returns the dial
+    /// callback. Goish exposes it as a no-op closure for now (the
+    /// real implementation routes through `net::Dial` with the
+    /// Dialer's timeouts; deferred until the connection-pool layer
+    /// lands).
+    pub fn DialContext(&self) -> crate::net::http::DialContextFn {
+        alloc::sync::Arc::new(|| {})
+    }
+}
+
 impl Conn {
     /// Internal: dead-conn placeholder returned alongside an error.
     /// Caller must ignore the conn when the error is non-nil.
@@ -1287,14 +1311,68 @@ pub fn JoinHostPort(host: crate::string, port: crate::string) -> crate::string {
     b.String()
 }
 
-/// Slim `*AddrError` analogue for SplitHostPort error messages.
-fn addr_error(addr: crate::string, why: &str) -> crate::errors::error {
-    let mut b = crate::strings::Builder::new();
-    let _ = b.WriteString("address ");
-    let _ = b.WriteString(addr);
-    let _ = b.WriteString(": ");
-    let _ = b.WriteString(why);
-    crate::errors::New(b.String())
+/// `net.AddrError` (net.go:1064) — the typed error for address-shape
+/// failures. Carries the bad address and the diagnostic. Satisfies the
+/// `error` interface via its `Error()` method.
+///
+/// User code constructs it as `net::AddrError { Err: …, Addr: … }` and
+/// returns it through `errors::Wrap` (per the standard goish error-
+/// chaining pattern), e.g.:
+///
+///   return (string(""), -1, errors::Wrap(net::AddrError {
+///       Err: string("missing port in address"),
+///       Addr: addr,
+///   }));
+#[derive(Clone)]
+pub struct AddrError {
+    pub Err: crate::string,
+    pub Addr: crate::string,
+}
+
+impl crate::errors::ErrorTrait for AddrError {
+    fn Error(&self) -> crate::string {
+        // Mirror Go's `*AddrError.Error()` (net/net.go:1069). On bare
+        // `Err` (no Addr) we just return Err; otherwise prepend
+        // `address <addr>: `.
+        if self.Addr == crate::string::from_static("") {
+            return self.Err.clone();
+        }
+        let mut b = crate::strings::Builder::new();
+        let _ = b.WriteString(crate::string::from_static("address "));
+        let _ = b.WriteString(self.Addr.clone());
+        let _ = b.WriteString(crate::string::from_static(": "));
+        let _ = b.WriteString(self.Err.clone());
+        b.String()
+    }
+}
+
+impl AddrError {
+    /// Go: `func (e *AddrError) Timeout() bool { return false }`
+    /// (net/net.go:1078).
+    pub fn Timeout(&self) -> bool { false }
+    /// Go: `func (e *AddrError) Temporary() bool { return false }`
+    /// (net/net.go:1079).
+    pub fn Temporary(&self) -> bool { false }
+}
+
+/// Lets call sites write `let e: error = net::AddrError {…}.into();` or
+/// pass it through tuple-return slots via `… .into()`. Mirrors Go's
+/// implicit `*AddrError → error` interface satisfaction.
+impl From<AddrError> for crate::errors::error {
+    fn from(e: AddrError) -> crate::errors::error {
+        crate::errors::Wrap(e)
+    }
+}
+
+/// Internal helper retained for SplitHostPort's existing call sites —
+/// returns a typed `AddrError` wrapped through `errors::Wrap`. `why`
+/// must be a `&'static str` because the AddrError stores it as a
+/// `string` constructed via `from_static` (zero-alloc path).
+fn addr_error(addr: crate::string, why: &'static str) -> crate::errors::error {
+    crate::errors::Wrap(AddrError {
+        Err: crate::string::from_static(why),
+        Addr: addr,
+    })
 }
 
 // ─── Listen / Dial ───────────────────────────────────────────────────

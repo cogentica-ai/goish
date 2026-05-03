@@ -529,11 +529,27 @@ where
     -1
 }
 
-pub fn ContainsFunc<T, F>(s: &slice<T>, pred: F) -> bool
+pub fn ContainsFunc<T: Clone, F>(s: &slice<T>, pred: F) -> bool
 where
-    F: FnMut(&T) -> bool,
+    F: FnMut(T) -> bool,
 {
-    IndexFunc(s, pred) >= 0
+    IndexFuncOwned(s, pred) >= 0
+}
+
+/// Internal: Go-shaped `IndexFunc` that passes elements by value (Go's
+/// closure semantic). T must be Clone so the loop can hand each item
+/// to `pred` by value. Used by `ContainsFunc`; exposed to goishc-
+/// generated code via the alias-form below.
+pub fn IndexFuncOwned<T: Clone, F>(s: &slice<T>, mut pred: F) -> int
+where
+    F: FnMut(T) -> bool,
+{
+    for (i, item) in s.iter().enumerate() {
+        if pred(item.clone()) {
+            return i as int;
+        }
+    }
+    -1
 }
 
 /// `DeleteFunc(s, pred)` — returns a slice with every element `e` where

@@ -324,6 +324,15 @@ impl Mul<int> for Duration {
     }
 }
 
+/// Symmetric: Go's `60 * time.Second` writes the integer on the left.
+/// Without this impl Rust would reject the multiplication direction.
+impl Mul<Duration> for int {
+    type Output = Duration;
+    fn mul(self, rhs: Duration) -> Duration {
+        Duration(self.wrapping_mul(rhs.0))
+    }
+}
+
 impl Add<Duration> for Duration {
     type Output = Duration;
     fn add(self, rhs: Duration) -> Duration {

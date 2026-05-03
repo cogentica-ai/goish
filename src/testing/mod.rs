@@ -107,17 +107,35 @@ impl T {
         self.Logf(msg);
     }
 
-    /// `t.Errorf(msg)` — log + mark test as failed. Test continues.
-    pub fn Errorf<M: Into<string>>(&self, msg: M){
-        let msg: string = msg.into();
+    /// `t.Errorf(format, args)` — log + mark test as failed. Test
+    /// continues. Mirrors Go: `func (c *common) Errorf(format string,
+    /// args ...any)` (testing.go) — `args` is the runtime variadic
+    /// slice that `fmt.Sprintf` would normally spread. We accept it
+    /// directly and route through `fmt::Sprintv` (the runtime spread
+    /// helper) for formatting.
+    ///
+    /// Two call shapes work without ceremony:
+    ///   - `t.Errorf("simple msg")` — empty args slice via `Default`
+    ///   - `t.Errorf("got %v want %v", goish::slice!([]Any{a, b}))`
+    pub fn Errorf<M: Into<string>>(
+        &self,
+        format: M,
+        args: crate::goslice::slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+    ) {
+        let format: string = format.into();
+        let msg: string = if args.Len() == 0 {
+            format
+        } else {
+            crate::fmt::Sprintv(format, args)
+        };
         self.state.failed.store(true, Ordering::Release);
         self.write_line(b"err", &msg);
     }
 
-    /// `t.Error(msg)` — alias for Errorf.
+    /// `t.Error(msg)` — alias for Errorf with no format args.
     pub fn Error<M: Into<string>>(&self, msg: M){
         let msg: string = msg.into();
-        self.Errorf(msg);
+        self.Errorf(msg, crate::goslice::slice::new());
     }
 
     /// `t.Fail()` — mark failed without logging.
@@ -139,7 +157,7 @@ impl T {
     /// `t.Fatalf(msg)` — log error then FailNow.
     pub fn Fatalf<M: Into<string>>(&self, msg: M) -> ! {
         let msg: string = msg.into();
-        self.Errorf(msg);
+        self.Errorf(msg, crate::goslice::slice::new());
         self.FailNow();
     }
 

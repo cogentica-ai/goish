@@ -337,19 +337,111 @@ pub trait RoundTripper: Send + Sync {
     fn RoundTrip(&self, req: &Request) -> (Response, error);
 }
 
+/// `nil → Box<dyn RoundTripper + Send + Sync>` — produces a stub whose
+/// `RoundTrip` panics. Used by `return nil` from functions whose
+/// return type is `Box<dyn RoundTripper>` (Go's `if hook == nil {
+/// return nil }` pattern). Callers must check `is_set()`/equivalent
+/// guards before invoking, never reach the stub.
+struct __NilRoundTripper;
+impl RoundTripper for __NilRoundTripper {
+    fn RoundTrip(&self, _req: &Request) -> (Response, crate::errors::error) {
+        panic!("RoundTrip called on nil RoundTripper")
+    }
+}
+impl From<crate::nilval::Nil> for alloc::boxed::Box<dyn RoundTripper + Send + Sync> {
+    fn from(_: crate::nilval::Nil) -> Self {
+        alloc::boxed::Box::new(__NilRoundTripper)
+    }
+}
+
+/// Type alias for the proxy-resolver closure shape. Go: `func(*Request)
+/// (*url.URL, error)`. Goish carries an opaque boxed closure so the
+/// package-level `ProxyFromEnvironment` (and user-supplied resolvers)
+/// can be assigned in via the `Transport.Proxy` field. The function
+/// shape is left as `Arc<dyn Fn>` rather than a typed closure so we
+/// don't need a public URL type in the surface.
+pub type ProxyResolver = alloc::sync::Arc<dyn Fn() + Send + Sync>;
+/// Type alias for the dial-context closure. Same opaque shape as
+/// `ProxyResolver` — the real signature would carry `(Context, network,
+/// addr) -> (Conn, error)` but those are inert in v1.
+pub type DialContextFn = alloc::sync::Arc<dyn Fn() + Send + Sync>;
+
 /// `http.Transport` (transport.go:163). v1: dial-per-request, no idle
-/// pool. Configurable timeouts only.
+/// pool. Field surface mirrors Go's struct so user ports can configure
+/// or read these slots; only `Timeout` actually drives behaviour
+/// today, the rest are inert metadata until the connection-pool layer
+/// lands.
 pub struct Transport {
     /// Maximum time `RoundTrip` will spend on the entire request
     /// (dial + write + read). Zero ≡ no timeout.
     pub Timeout: time::Duration,
+    /// Disable transparent gzip request/response. Inert in v1.
+    pub DisableCompression: bool,
+    /// Proxy resolver. `Option` so the zero value is None (`nil` in Go).
+    pub Proxy: Option<ProxyResolver>,
+    /// Idle-connection eviction timeout. Inert until the connection
+    /// pool lands.
+    pub IdleConnTimeout: time::Duration,
+    /// Per-dial timeout/keepalive callback. `Option` so the zero value
+    /// is None.
+    pub DialContext: Option<DialContextFn>,
+    /// Maximum time waiting for the TLS handshake. Inert in v1.
+    pub TLSHandshakeTimeout: time::Duration,
+    /// Maximum time waiting for an Expect: 100-continue response.
+    pub ExpectContinueTimeout: time::Duration,
+    /// TLS configuration applied per-connection. Inert in v1 (TLS not
+    /// yet plumbed); the field exists so user ports can store and
+    /// reset it for thread-safety.
+    pub TLSClientConfig: crate::crypto::tls::Config,
 }
 
 impl Default for Transport {
     fn default() -> Self {
         Transport {
             Timeout: time::Duration(0),
+            DisableCompression: false,
+            Proxy: None,
+            IdleConnTimeout: time::Duration(0),
+            DialContext: None,
+            TLSHandshakeTimeout: time::Duration(0),
+            ExpectContinueTimeout: time::Duration(0),
+            TLSClientConfig: crate::crypto::tls::Config::default(),
         }
+    }
+}
+
+/// `http.ProxyFromEnvironment` — Go's default proxy resolver. v1
+/// returns a no-op closure (env-var inspection deferred). Goish ports
+/// reference this as `http::ProxyFromEnvironment` (a function call is
+/// what produces the resolver value in goish; Go callers assigning the
+/// bare identifier go through `From<>` under the hood).
+pub fn ProxyFromEnvironment() -> ProxyResolver {
+    alloc::sync::Arc::new(|| {})
+}
+
+// Polymorphic-nil for Transport. Go's `transport *http.Transport`
+// callers do `if transport == nil { … }` — in goish the param is
+// `&Transport` which is always non-nil by Rust's borrow guarantee, so
+// the comparison returns false. Symmetric impl mirrors the Nil↔T
+// triple from priority #5.
+impl PartialEq<crate::nilval::Nil> for Transport {
+    fn eq(&self, _: &crate::nilval::Nil) -> bool {
+        false
+    }
+}
+impl PartialEq<Transport> for crate::nilval::Nil {
+    fn eq(&self, _: &Transport) -> bool {
+        false
+    }
+}
+impl PartialEq<crate::nilval::Nil> for &Transport {
+    fn eq(&self, _: &crate::nilval::Nil) -> bool {
+        false
+    }
+}
+impl PartialEq<&Transport> for crate::nilval::Nil {
+    fn eq(&self, _: &&Transport) -> bool {
+        false
     }
 }
 

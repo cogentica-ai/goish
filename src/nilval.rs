@@ -38,3 +38,43 @@ pub struct Nil;
 
 /// `nil` — Goish's polymorphic zero value.
 pub const nil: Nil = Nil;
+
+// ─── Polymorphic nil for Arc<dyn Any + Send + Sync> ───────────────────
+//
+// Goish models Go's `interface{}` as `Arc<dyn core::any::Any + Send +
+// Sync>`. Go lets `var x interface{} = nil; if x == nil` work
+// directly; the goish equivalent needs the standard polymorphic-nil
+// triple (From / PartialEq both directions) on the Arc-of-Any type.
+// Lives here rather than per-module because Nil is defined here and
+// the impls coherence-wise belong with the upstream type.
+
+extern crate alloc;
+
+/// `nil` → `Arc<dyn Any>` materialises as a `__NilMarker` Arc — a
+/// distinguishable shape that PartialEq can recognise. Used in
+/// `let x: Arc<dyn Any> = nil.into();` returns and tuple slots.
+impl From<Nil> for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
+    fn from(_: Nil) -> Self {
+        alloc::sync::Arc::new(__NilMarker)
+    }
+}
+
+/// Compare an `Arc<dyn Any>` against bare `nil`. True when the
+/// underlying Any is `__NilMarker` (the nil-built shape) or `()` (a
+/// common stub payload other places use to mean "no real value").
+impl PartialEq<Nil> for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
+    fn eq(&self, _: &Nil) -> bool {
+        let any: &(dyn core::any::Any + Send + Sync) = self.as_ref();
+        any.is::<__NilMarker>() || any.is::<()>()
+    }
+}
+impl PartialEq<alloc::sync::Arc<dyn core::any::Any + Send + Sync>> for Nil {
+    fn eq(&self, other: &alloc::sync::Arc<dyn core::any::Any + Send + Sync>) -> bool {
+        other.eq(self)
+    }
+}
+
+/// Internal marker carried by the `nil → Arc<dyn Any>` conversion so
+/// PartialEq can recognise the nil-shape Arc at runtime. Never exposed
+/// to user code.
+struct __NilMarker;

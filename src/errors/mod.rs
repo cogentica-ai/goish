@@ -127,6 +127,33 @@ impl PartialEq<error> for crate::nilval::Nil {
 }
 impl Eq for error {}
 
+// ─── Display / Debug ─────────────────────────────────────────────────────
+//
+// Lets `panic!("{}", err)`, `format_args!`, and any core-formatter consumer
+// render an `error` directly — the natural Goish lowering of Go's
+// `panic(err)` and `log.Fatal(err)`. Delegates to `Error()` for the
+// message; nil renders as `<nil>` (mirroring Go's `fmt.Println(nilErr)`
+// which prints "<nil>"), so we don't panic from the formatter on a stray
+// nil.
+
+impl core::fmt::Display for error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match &self.0 {
+            Some(e) => core::fmt::Display::fmt(&e.Error(), f),
+            None => f.write_str("<nil>"),
+        }
+    }
+}
+
+impl core::fmt::Debug for error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match &self.0 {
+            Some(e) => write!(f, "error({:?})", e.Error()),
+            None => f.write_str("error(<nil>)"),
+        }
+    }
+}
+
 // ─── New / Wrap ─────────────────────────────────────────────────────────
 
 /// Internal: the trivial `error` produced by `errors::New`. Mirrors Go's

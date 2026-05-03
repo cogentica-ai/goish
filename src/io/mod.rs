@@ -185,6 +185,15 @@ pub fn ErrShortBuffer() -> error {
     cached_error(&SLOT, || errors::New("short buffer"))
 }
 
+/// `io.ErrNoProgress` — Reader returned no bytes and no error across
+/// many consecutive Read calls; clients use this to break livelocks.
+/// Go: `var ErrNoProgress = errors.New("multiple Read calls return no
+/// data or error")` (io/io.go:53).
+pub fn ErrNoProgress() -> error {
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    cached_error(&SLOT, || errors::New("multiple Read calls return no data or error"))
+}
+
 // ─── Copy / WriteString ────────────────────────────────────────────────
 
 /// `io.Copy(dst, src)` — copy from src to dst until EOF. Returns the

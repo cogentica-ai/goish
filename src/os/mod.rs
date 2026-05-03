@@ -63,13 +63,32 @@ pub const O_EXCL: i32 = 0o200;
 
 /// `os.FileInfo` (io/fs.FileInfo) — slim port. Carries the fields
 /// most callers (FileServer, ServeFile, http.ServeContent) need.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct FileInfo {
     name: string,
     size: int,
     mode: FileMode,
     mod_time: crate::time::Time,
     is_dir: bool,
+}
+
+// Polymorphic-nil per priority #5. Go's `os.FileInfo` is an interface
+// — callers pass `nil` for "no info"; in goish we materialise that as
+// a zero-valued FileInfo (Name() == "", Size() == 0, IsDir() == false).
+impl From<crate::nilval::Nil> for FileInfo {
+    fn from(_: crate::nilval::Nil) -> Self {
+        Self::default()
+    }
+}
+impl PartialEq<crate::nilval::Nil> for FileInfo {
+    fn eq(&self, _: &crate::nilval::Nil) -> bool {
+        self.name == "" && self.size == 0
+    }
+}
+impl PartialEq<FileInfo> for crate::nilval::Nil {
+    fn eq(&self, other: &FileInfo) -> bool {
+        other == self
+    }
 }
 
 impl FileInfo {
@@ -227,6 +246,56 @@ impl File {
         }
         let base = base_name(&self.name);
         (fileinfo_from_stat(base, &st), nil)
+    }
+
+    /// `(*File).Readdirnames(n)` (os/dir.go:46).
+    /// Returns up to `n` directory entry names from the directory
+    /// the receiver is open on. `n <= 0` reads all entries. Mirrors
+    /// the Go shape `([]string, error)`. Names are unsorted (Go's
+    /// contract).
+    pub fn Readdirnames(&mut self, n: int) -> (slice<string>, error) {
+        let mut names: Vec<string> = Vec::new();
+        let mut buf: alloc::vec::Vec<u8> = alloc::vec![0u8; 4096];
+        let want_all = n <= 0;
+        let want = if want_all { usize::MAX } else { n as usize };
+        loop {
+            if names.len() >= want {
+                break;
+            }
+            let got = syscall::Getdents64(self.fd, buf.as_mut_ptr(), buf.len());
+            if got < 0 {
+                return (
+                    slice::<string>::__from_vec(names),
+                    errors::New(string("readdir failed")),
+                );
+            }
+            if got == 0 {
+                break;
+            }
+            let total = got as usize;
+            let mut pos: usize = 0;
+            while pos < total && names.len() < want {
+                // linux_dirent64 layout:
+                //   0  d_ino     u64
+                //   8  d_off     i64
+                //  16  d_reclen  u16
+                //  18  d_type    u8
+                //  19  d_name…   NUL-terminated
+                let reclen = u16::from_ne_bytes([buf[pos + 16], buf[pos + 17]]) as usize;
+                let name_start = pos + 19;
+                let mut name_end = name_start;
+                while name_end < pos + reclen && buf[name_end] != 0 {
+                    name_end += 1;
+                }
+                let raw = &buf[name_start..name_end];
+                // Filter `.` and `..` to match Go's Readdirnames.
+                if !(raw == b"." || raw == b"..") {
+                    names.push(string::from_bytes(raw));
+                }
+                pos += reclen;
+            }
+        }
+        (slice::<string>::__from_vec(names), nil.into())
     }
 
     /// `(*File).Seek(offset, whence)` (os/file.go:286).
