@@ -75,7 +75,32 @@ Two prerequisite impls in `gostring.rs` must stay:
 
 **`json::Value` From impls**: `From<&str>`, `From<string>`, `From<bool>`, `From<f64>`, `From<int>` are wired so `obj.Set("k", "v")` and `obj.Set("count", 42_i64)` materialise as JSON nodes directly.
 
-## 5. Polymorphic `nil` — single sentinel, multiple types
+## 5. Go-shape struct ports — field layout must match Go exactly
+
+When porting a Go struct, **preserve the exact field layout** from the Go source. Do not redesign the struct to fit Rust patterns.
+
+### What "Go-shape" means
+
+| Go | goish port | WRONG |
+|---|---|---|
+| `mu *sync.Mutex; logFile *os.File` | `mu: sync::Mutex, logFile: os::File` | `mu: sync::Mutex<os::File>` (bundles two fields into one) |
+| `var Instance Writer` (global) | `pub static Instance: ...` or `pub` field | `GetInstance()` / `SetInstance()` accessor pair |
+| `URL func(u *url.URL) string` | Use raw function type or propose runtime gap | `pub URL: Option<Arc<dyn Fn(...)>>` (Rust trait object in public field) |
+| `type foo struct{}` | `pub struct foo {}` | `pub struct Foo {}` (renames to Rust convention) |
+
+### Rules
+
+1. **No bundling.** Go has two fields → goish has two fields. Never combine them into a generic `Mutex<T>` or `Arc<RefCell<T>>`.
+2. **No accessor ceremony.** Go exposes a field directly (`var Instance Writer`) → the port exposes it directly (`pub static Instance` or `pub Instance`). No `GetInstance()` / `SetInstance()` wrappers.
+3. **No Rust trait objects in public struct fields.** `Arc<dyn Fn(...) -> T + Send + Sync>`, `Box<dyn Trait>`, `Rc<dyn ...>` are all banned from public struct definitions. They leak Rust's memory model and trait system into the Go API.
+4. **If Go has a function-valued field** (`URL func(...)`) and goish has no equivalent, **propose a runtime gap** rather than exposing `dyn Fn`. In the interim, use the simplest possible representation (raw `fn(...)` pointer if no closure capture is needed, or a module-private wrapper) and document the limitation.
+5. **Keep Go names.** `fileLogger` stays `fileLogger`, not `FileLogger`. `logFile` stays `logFile`, not `log_file`.
+
+### Why this matters
+
+The goal of a port is that a Go programmer reading the Rust source can map it 1:1 to the Go original. When we redesign structs for Rust idioms, we lose that traceability and make maintenance harder.
+
+## 6. Polymorphic `nil` — single sentinel, multiple types
 
 Goish's `nil` is a `Nil` ZST (`pub const nil: Nil` at lib root) with per-type `From<Nil>` and `PartialEq<Nil>` impls in each nilable module.
 
