@@ -1228,7 +1228,8 @@ impl io::WriterTo for Reader {
 }
 
 /// `NewReader(b)` — `Reader` over `b`.
-pub fn NewReader(b: slice<byte>) -> Reader {
+pub fn NewReader<B: Into<slice<byte>>>(b: B) -> Reader {
+    let b = b.into();
     Reader {
         s: b.__into_vec(),
         i: 0,

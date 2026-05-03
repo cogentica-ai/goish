@@ -168,6 +168,50 @@ impl PartialEq for Value {
     }
 }
 
+// ─── Token / Delim — streaming decoder API ─────────────────────────────
+
+/// A `Token` is one of the JSON lexical tokens returned by [Decoder::Token].
+/// Mirrors Go's `json.Token` interface values (`Delim`, `bool`, `float64`,
+/// `string`, `nil`).  Goish uses an explicit enum because Rust has no `any`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Token {
+    Delim(Delim),
+    Bool(bool),
+    Number(float64),
+    String(string),
+    Null,
+}
+
+/// `json.Delim` — one of the four JSON structural characters `{ } [ ]`.
+/// In Go this is `type Delim rune`; goish stores it as a `byte` since all
+/// four delimiters are ASCII.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Delim(pub byte);
+
+impl Delim {
+    pub fn as_byte(&self) -> byte {
+        self.0
+    }
+}
+
+impl core::fmt::Display for Delim {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0 as char)
+    }
+}
+
+impl PartialEq<Delim> for Token {
+    fn eq(&self, other: &Delim) -> bool {
+        matches!(self, Token::Delim(d) if d.0 == other.0)
+    }
+}
+
+impl PartialEq<Token> for Delim {
+    fn eq(&self, other: &Token) -> bool {
+        matches!(other, Token::Delim(d) if d.0 == self.0)
+    }
+}
+
 // ─── Sentinel errors ───────────────────────────────────────────────────
 
 fn cached_error(slot: &SpinLock<Option<error>>, init: fn() -> error) -> error {
@@ -1263,10 +1307,30 @@ impl<W: io::Writer> Encoder<W> {
 pub struct Decoder<R: io::Reader> {
     r: R,
     buf: Vec<byte>,
+    scan_pos: usize,
+    token_state: u8,
+    token_stack: Vec<u8>,
 }
 
+// Token-state constants — mirror Go's tokenTopValue .. tokenObjectComma.
+const TOKEN_TOP_VALUE: u8 = 0;
+const TOKEN_ARRAY_START: u8 = 1;
+const TOKEN_ARRAY_VALUE: u8 = 2;
+const TOKEN_ARRAY_COMMA: u8 = 3;
+const TOKEN_OBJECT_START: u8 = 4;
+const TOKEN_OBJECT_KEY: u8 = 5;
+const TOKEN_OBJECT_COLON: u8 = 6;
+const TOKEN_OBJECT_VALUE: u8 = 7;
+const TOKEN_OBJECT_COMMA: u8 = 8;
+
 pub fn NewDecoder<R: io::Reader>(r: R) -> Decoder<R> {
-    Decoder { r, buf: Vec::new() }
+    Decoder {
+        r,
+        buf: Vec::new(),
+        scan_pos: 0,
+        token_state: TOKEN_TOP_VALUE,
+        token_stack: Vec::new(),
+    }
 }
 
 impl<R: io::Reader> Decoder<R> {
@@ -1297,5 +1361,355 @@ impl<R: io::Reader> Decoder<R> {
             }
         }
         parse_to_value(&self.buf)
+    }
+
+    /// Return the next JSON token from the input stream.
+    /// At EOF returns `(Token::Null, io::EOF())`.
+    pub fn Token(&mut self) -> (Token, error) {
+        self.fill_buf();
+        loop {
+            let c = match self.peek() {
+                Some(b) => b,
+                None => return (Token::Null, io::EOF()),
+            };
+            match c {
+                b'[' => {
+                    if !self.token_value_allowed() {
+                        return self.token_error(c);
+                    }
+                    self.scan_pos += 1;
+                    self.token_stack.push(self.token_state);
+                    self.token_state = TOKEN_ARRAY_START;
+                    return (Token::Delim(Delim(b'[')), nil);
+                }
+                b']' => {
+                    if self.token_state != TOKEN_ARRAY_START && self.token_state != TOKEN_ARRAY_COMMA
+                    {
+                        return self.token_error(c);
+                    }
+                    self.scan_pos += 1;
+                    self.token_state = self.token_stack.pop().unwrap_or(TOKEN_TOP_VALUE);
+                    self.token_value_end();
+                    return (Token::Delim(Delim(b']')), nil);
+                }
+                b'{' => {
+                    if !self.token_value_allowed() {
+                        return self.token_error(c);
+                    }
+                    self.scan_pos += 1;
+                    self.token_stack.push(self.token_state);
+                    self.token_state = TOKEN_OBJECT_START;
+                    return (Token::Delim(Delim(b'{')), nil);
+                }
+                b'}' => {
+                    if self.token_state != TOKEN_OBJECT_START
+                        && self.token_state != TOKEN_OBJECT_COMMA
+                    {
+                        return self.token_error(c);
+                    }
+                    self.scan_pos += 1;
+                    self.token_state = self.token_stack.pop().unwrap_or(TOKEN_TOP_VALUE);
+                    self.token_value_end();
+                    return (Token::Delim(Delim(b'}')), nil);
+                }
+                b':' => {
+                    if self.token_state != TOKEN_OBJECT_COLON {
+                        return self.token_error(c);
+                    }
+                    self.scan_pos += 1;
+                    self.token_state = TOKEN_OBJECT_VALUE;
+                    continue;
+                }
+                b',' => {
+                    if self.token_state == TOKEN_ARRAY_COMMA {
+                        self.scan_pos += 1;
+                        self.token_state = TOKEN_ARRAY_VALUE;
+                        continue;
+                    }
+                    if self.token_state == TOKEN_OBJECT_COMMA {
+                        self.scan_pos += 1;
+                        self.token_state = TOKEN_OBJECT_KEY;
+                        continue;
+                    }
+                    return self.token_error(c);
+                }
+                b'"' => {
+                    // Object key detection: when the decoder is in object-start
+                    // or object-key state, the next string is an object key.
+                    let is_key = self.token_state == TOKEN_OBJECT_START
+                        || self.token_state == TOKEN_OBJECT_KEY;
+                    let old_state = self.token_state;
+                    self.token_state = TOKEN_TOP_VALUE; // let scan_string think we're parsing a value
+                    let (s, err) = self.scan_string_bytes();
+                    self.token_state = old_state;
+                    if err != nil {
+                        return (Token::Null, err);
+                    }
+                    if is_key {
+                        self.token_state = TOKEN_OBJECT_COLON;
+                        return (Token::String(string::__from_vec(s)), nil);
+                    }
+                    // Regular string value
+                    self.token_value_end();
+                    return (Token::String(string::__from_vec(s)), nil);
+                }
+                _ => {
+                    if !self.token_value_allowed() {
+                        return self.token_error(c);
+                    }
+                    // Parse a literal value: true / false / null / number
+                    let (tok, err) = self.scan_literal_or_number();
+                    if err != nil {
+                        return (Token::Null, err);
+                    }
+                    self.token_value_end();
+                    return (tok, nil);
+                }
+            }
+        }
+    }
+
+    /// More reports whether there are more elements in the current
+    /// array or object being parsed.
+    pub fn More(&mut self) -> bool {
+        self.fill_buf();
+        match self.peek() {
+            Some(b']') | Some(b'}') => false,
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    // ─── Token helpers ───────────────────────────────────────────────────
+
+    fn fill_buf(&mut self) {
+        if self.scan_pos >= self.buf.len() {
+            let mut chunk = slice::__from_vec({
+                let mut v: Vec<byte> = Vec::with_capacity(4096);
+                v.resize(4096, 0);
+                v
+            });
+            loop {
+                let (n, err) = self.r.Read(&mut chunk);
+                if n > 0 {
+                    let raw: &[byte] = &chunk;
+                    self.buf.extend_from_slice(&raw[..n as usize]);
+                }
+                if err != nil {
+                    break;
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+        }
+    }
+
+    fn peek(&mut self) -> Option<byte> {
+        while self.scan_pos < self.buf.len() {
+            let c = self.buf[self.scan_pos];
+            if c != b' ' && c != b'\t' && c != b'\n' && c != b'\r' {
+                return Some(c);
+            }
+            self.scan_pos += 1;
+        }
+        None
+    }
+
+    fn token_value_allowed(&self) -> bool {
+        matches!(
+            self.token_state,
+            TOKEN_TOP_VALUE | TOKEN_ARRAY_START | TOKEN_ARRAY_VALUE | TOKEN_OBJECT_VALUE
+        )
+    }
+
+    fn token_value_end(&mut self) {
+        match self.token_state {
+            TOKEN_ARRAY_START | TOKEN_ARRAY_VALUE => self.token_state = TOKEN_ARRAY_COMMA,
+            TOKEN_OBJECT_VALUE => self.token_state = TOKEN_OBJECT_COMMA,
+            _ => {}
+        }
+    }
+
+    fn token_error(&self, _c: byte) -> (Token, error) {
+        let msg = match self.token_state {
+            TOKEN_TOP_VALUE => "json: invalid character: looking for beginning of value",
+            TOKEN_ARRAY_START | TOKEN_ARRAY_VALUE | TOKEN_OBJECT_VALUE => {
+                "json: invalid character: looking for beginning of value"
+            }
+            TOKEN_ARRAY_COMMA => "json: invalid character: after array element",
+            TOKEN_OBJECT_KEY => "json: invalid character: looking for beginning of object key string",
+            TOKEN_OBJECT_COLON => "json: invalid character: after object key",
+            TOKEN_OBJECT_COMMA => "json: invalid character: after object key:value pair",
+            _ => "json: invalid character",
+        };
+        (Token::Null, errors::New(string::from(msg)))
+    }
+
+    fn scan_string_bytes(&mut self) -> (Vec<byte>, error) {
+        if self.scan_pos >= self.buf.len() || self.buf[self.scan_pos] != b'"' {
+            return (Vec::new(), ErrSyntax());
+        }
+        self.scan_pos += 1; // consume opening quote
+        let mut out: Vec<byte> = Vec::new();
+        while self.scan_pos < self.buf.len() {
+            let c = self.buf[self.scan_pos];
+            self.scan_pos += 1;
+            match c {
+                b'"' => return (out, nil),
+                b'\\' => {
+                    if self.scan_pos >= self.buf.len() {
+                        return (Vec::new(), ErrUnexpectedEnd());
+                    }
+                    let esc = self.buf[self.scan_pos];
+                    self.scan_pos += 1;
+                    match esc {
+                        b'"' => out.push(b'"'),
+                        b'\\' => out.push(b'\\'),
+                        b'/' => out.push(b'/'),
+                        b'n' => out.push(b'\n'),
+                        b'r' => out.push(b'\r'),
+                        b't' => out.push(b'\t'),
+                        b'b' => out.push(b'\x08'),
+                        b'f' => out.push(b'\x0c'),
+                        b'u' => {
+                            let cp = match self.scan_hex4() {
+                                Some(v) => v,
+                                None => return (Vec::new(), ErrSyntax()),
+                            };
+                            if (0xD800..=0xDBFF).contains(&cp) {
+                                if self.scan_pos >= self.buf.len()
+                                    || self.buf[self.scan_pos] != b'\\'
+                                {
+                                    return (Vec::new(), ErrSyntax());
+                                }
+                                self.scan_pos += 1;
+                                if self.scan_pos >= self.buf.len()
+                                    || self.buf[self.scan_pos] != b'u'
+                                {
+                                    return (Vec::new(), ErrSyntax());
+                                }
+                                self.scan_pos += 1;
+                                let lo = match self.scan_hex4() {
+                                    Some(v) => v,
+                                    None => return (Vec::new(), ErrSyntax()),
+                                };
+                                if !(0xDC00..=0xDFFF).contains(&lo) {
+                                    return (Vec::new(), ErrSyntax());
+                                }
+                                let combined =
+                                    0x10000 + (((cp - 0xD800) as u32) << 10) + (lo - 0xDC00) as u32;
+                                encode_utf8(&mut out, combined as i32);
+                            } else if (0xDC00..=0xDFFF).contains(&cp) {
+                                encode_utf8(&mut out, 0xFFFD);
+                            } else {
+                                encode_utf8(&mut out, cp as i32);
+                            }
+                        }
+                        _ => return (Vec::new(), ErrSyntax()),
+                    }
+                }
+                _ => out.push(c),
+            }
+        }
+        (Vec::new(), ErrUnexpectedEnd())
+    }
+
+    fn scan_hex4(&mut self) -> Option<u32> {
+        if self.buf.len() - self.scan_pos < 4 {
+            return None;
+        }
+        let mut n: u32 = 0;
+        for i in 0..4 {
+            let c = self.buf[self.scan_pos + i];
+            let digit = match c {
+                b'0'..=b'9' => (c - b'0') as u32,
+                b'a'..=b'f' => (c - b'a' + 10) as u32,
+                b'A'..=b'F' => (c - b'A' + 10) as u32,
+                _ => return None,
+            };
+            n = n * 16 + digit;
+        }
+        self.scan_pos += 4;
+        Some(n)
+    }
+
+    fn scan_literal_or_number(&mut self) -> (Token, error) {
+        let start = self.scan_pos;
+        // true
+        if self.buf.len() - self.scan_pos >= 4
+            && &self.buf[self.scan_pos..self.scan_pos + 4] == b"true"
+        {
+            self.scan_pos += 4;
+            return (Token::Bool(true), nil);
+        }
+        // false
+        if self.buf.len() - self.scan_pos >= 5
+            && &self.buf[self.scan_pos..self.scan_pos + 5] == b"false"
+        {
+            self.scan_pos += 5;
+            return (Token::Bool(false), nil);
+        }
+        // null
+        if self.buf.len() - self.scan_pos >= 4
+            && &self.buf[self.scan_pos..self.scan_pos + 4] == b"null"
+        {
+            self.scan_pos += 4;
+            return (Token::Null, nil);
+        }
+        // number
+        self.scan_pos = start;
+        self.scan_number()
+    }
+
+    fn scan_number(&mut self) -> (Token, error) {
+        let start = self.scan_pos;
+        if self.peek_at(start) == Some(b'-') {
+            self.scan_pos = start + 1;
+        }
+        match self.peek_at(self.scan_pos) {
+            Some(b'0') => self.scan_pos += 1,
+            Some(b'1'..=b'9') => {
+                while matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
+                    self.scan_pos += 1;
+                }
+            }
+            _ => return (Token::Null, ErrSyntax()),
+        }
+        if self.peek_at(self.scan_pos) == Some(b'.') {
+            self.scan_pos += 1;
+            if !matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
+                return (Token::Null, ErrSyntax());
+            }
+            while matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
+                self.scan_pos += 1;
+            }
+        }
+        if let Some(b'e') | Some(b'E') = self.peek_at(self.scan_pos) {
+            self.scan_pos += 1;
+            if let Some(b'+') | Some(b'-') = self.peek_at(self.scan_pos) {
+                self.scan_pos += 1;
+            }
+            if !matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
+                return (Token::Null, ErrSyntax());
+            }
+            while matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
+                self.scan_pos += 1;
+            }
+        }
+        let num_str = string::__from_vec(self.buf[start..self.scan_pos].to_vec());
+        let (n, err) = strconv::ParseFloat(&num_str, 64);
+        if err != nil {
+            return (Token::Null, err);
+        }
+        (Token::Number(n), nil)
+    }
+
+    fn peek_at(&self, pos: usize) -> Option<byte> {
+        if pos < self.buf.len() {
+            Some(self.buf[pos])
+        } else {
+            None
+        }
     }
 }
