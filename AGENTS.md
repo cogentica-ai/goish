@@ -129,7 +129,7 @@ impl PartialEq<crate::nilval::Nil> for MyType { fn eq(&self, _) -> bool { self.i
 impl PartialEq<MyType> for crate::nilval::Nil { fn eq(&self, other) -> bool { other.is_nil_check() } }
 ```
 
-## 6. Picking the next leaf to port — use `goishc deps`
+## 7. Picking the next leaf to port — use `goishc deps`
 
 Don't browse `~/go/pkg/mod` by hand. The `goishc deps` subcommand walks a Go module's full transitive dep graph, cross-references against the ports workspace `Cargo.toml`, and ranks candidates.
 
@@ -148,7 +148,7 @@ Output legend: `✓` ported · `▶` ready · `○` pending · `·` no source on
 
 **Inspect imports before committing to a small port.** A 52-LOC leaf can balloon if it pulls in a missing runtime module (e.g. `titanous/rocacheck` needs `math/big` + `crypto/rsa`). Runtime gaps are the priority — never skip them; plan for the extra runtime LOC up front.
 
-## 7. Debug and bug hunting using `rr` and `gdb`
+## 8. Debug and bug hunting using `rr` and `gdb`
 
 Compile with debug symbols (cargo's `dev` profile is fine). Use `rr` to record and replay; use gdb breakpoints + reverse-execution to trace.
 
@@ -181,3 +181,210 @@ done
 - **Single-thread illusion in replay.** A thread can appear "stuck" in the same frame for hundreds of events because rr's deterministic-replay schedule has paused it; this isn't real-time spin.
 
 See `memory/reference_rr_gdb_recipe.md` for the full playbook with worked examples.
+
+## 9. Errors — `goish::var!` and Doctrine 2 (active doctrine)
+
+The error type is `error` (canonical at `goish::error`, defined in
+`src/errors/mod.rs`). Errors-package functions stay in their Go-shape
+home: `errors::Is`, `errors::New`, `errors::Wrap`, `errors::As`,
+`errors::Unwrap`, `errors::Join`, `errors::ErrUnsupported`.
+
+### Defining sentinel errors
+
+Use `goish::var!` (single-line or block form). Identity-stable markers
+emitted by the macro support bare-symbol comparison; conversion needs
+`.into()` (same discipline as polymorphic `nil`).
+
+```rust
+goish::var! {
+    pub EOF: error              = "EOF";
+    pub ErrShortWrite: error    = "short write";
+    /// Unexported (no `pub`) — internal sentinel.
+    errInvalidWrite: error      = "invalid write result";
+}
+
+// Typed-payload form (brace-grouped expression):
+goish::var! {
+    pub Canceled: error = { CanceledError };
+}
+```
+
+For non-error vars, the same macro emits `pub const`:
+
+```rust
+goish::var! { pub MaxBufSize: int = 4096; }
+```
+
+### Use sites
+
+```rust
+// Comparison: bare symbol — no parens, no .into()
+errors::Is(err, io::EOF)
+if err == io::EOF { ... }
+match err { e if e == io::EOF => ... }
+
+// Conversion / storage: .into() needed (same as nil)
+let e: error = io::EOF.into();
+return (0, io::EOF.into());
+Cause { err: io::EOF.into() }
+
+// Public API accepting `impl Into<error>` lets callers pass bare:
+fn handle<E: Into<error>>(e: E) { ... }
+handle(io::EOF);                    // ✓
+handle(errors::New("foo"));         // ✓ reflexive
+```
+
+### When porting
+
+- **Don't write hand-rolled `pub fn ErrFoo() -> error { ... lazy SpinLock ... }`.**
+  Use `goish::var!` instead.
+- **Don't use `errors::error` qualified.** The bare `error` type (or
+  `goish::error`) is canonical; `errors::error` was removed from call
+  sites in commit `8515436`.
+- The macro doesn't allow same-name `pub fn` and `pub const` to coexist
+  in the same module. Each module migrates as a unit (see
+  `DISCUSSION_VAR.md` §13 if relevant).
+- `syscall::Errno` (typed errors with custom semantic `Is()`) is a
+  different shape — deferred until source-controller forces it.
+
+Background: `DISCUSSION_VAR.md` at the repo root captures the full
+design rationale (three doctrines, why Doctrine 2 won, the trait-
+bound widening on `errors::Is`, the migration plan).
+
+## 10. Working directories
+
+Repo layout (all under `/home/chanwit/Dropbox/projects/goro-workspace/`):
+
+```
+goro-workspace/
+├── goish-v1/                         ← this repo (the goish runtime)
+│   ├── src/                          runtime
+│   ├── examples/                     137 e2e examples
+│   ├── goish-macros/                 proc-macros (#[goish::main],
+│   │                                  goish::reflect!, var_emit_error_marker)
+│   ├── doc/                          chapter drafts (untracked, in progress)
+│   ├── DISCUSSION_VAR.md             ← Doctrine 2 design record
+│   ├── AGENTS.md                     ← this file
+│   └── CLAUDE.md                     `@AGENTS.md` redirect
+│
+└── ports/                            sibling workspace, NOT a git repo
+    ├── Cargo.toml                    workspace manifest (~46 ports)
+    ├── flux_source_controller/       excluded from workspace (2k+ errors)
+    ├── go_logr_logr/                 ← shipped 2026-05-04
+    ├── Masterminds_semver_v3/
+    ├── fluxcd_pkg_*/
+    ├── go_openapi_swag_*/
+    └── ...                           (see ports/Cargo.toml for full list)
+```
+
+### Important paths
+
+| Path | Purpose |
+|---|---|
+| `/home/chanwit/Dropbox/projects/goro-workspace/goish-v1/` | goish runtime (this repo) |
+| `/home/chanwit/Dropbox/projects/goro-workspace/ports/` | port crates workspace |
+| `/nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/` | Go 1.25 SDK source — consult before porting |
+| `~/go/pkg/mod/` | Go module cache — source for third-party ports |
+| `/tmp/source-controller/` | flux source-controller checkout (port target) |
+
+### Test commands
+
+| Command | What it does |
+|---|---|
+| `cargo check --lib` | typecheck goish runtime |
+| `cargo build --examples` | build all 137 e2e examples |
+| `make e2e LOOPS=1` | run all examples once each (~30s) |
+| `make e2e LOOPS=10 FILTER='^chan_'` | stress one family |
+| `cd ../ports && cargo check --workspace` | typecheck all ports |
+
+### Conventions
+
+- **goish-v1 is a git repo.** All runtime + example changes commit here.
+- **ports/ is NOT a git repo.** Edits there don't get tracked. If a port
+  needs a permanent home, bring it under version control separately.
+- **Doc files in `goish-v1/doc/` are intentionally untracked.** Per
+  recent commit conventions (e.g. `92d80b5`, `b702cb7`), goish source
+  commits explicitly exclude `doc/*.md`.
+
+## 11. Status — what's done (2026-05-04)
+
+### Doctrine 2 + `goish::var!` shipped
+
+- `errors::IsTarget` trait, `errors::Is::<T: IsTarget>` widened
+- `error::__ptr_eq` accessor for marker `PartialEq` impls
+- `goish-macros::var_emit_error_marker` proc-macro (token-level, no
+  `syn`/`quote`/`paste` deps — matches existing crate posture)
+- `goish::var!` muncher in `builtin_macros.rs`: 3 arms (string-literal,
+  typed-payload-brace, plain-const fallback), recursive munch handles
+  arbitrary block size
+- `extern crate self as goish;` in `lib.rs` so proc-macro emitting
+  `::goish::...` paths resolves inside the goish crate itself
+
+### Stdlib sentinel migration complete
+
+Zero `pub fn Err*() -> error` sentinel functions remain. Migrated:
+
+| Module | Sentinels |
+|---|---|
+| `errors` | `ErrUnsupported` |
+| `io` | `EOF`, `ErrShortWrite`, `ErrUnexpectedEOF`, `ErrShortBuffer`, `ErrNoProgress` |
+| `io/fs` | `ErrInvalid`, `ErrPermission`, `ErrExist`, `ErrNotExist`, `ErrClosed` |
+| `os` | `ErrInvalid`, `ErrPermission`, `ErrExist`, `ErrNotExist`, `ErrClosed` (also fixed pre-existing identity bug) |
+| `context` | `Canceled`, `DeadlineExceeded` (typed-payload form) |
+| `bufio` | 9 sentinels |
+| `archive/tar` | `ErrHeader`, `ErrFieldTooLong` |
+| `testing/iotest` | `ErrTimeout` (typed-payload) |
+| `os/exec` | `ErrNotFound` |
+| `encoding/csv` | `ErrBareQuote`, `ErrQuote`, `ErrFieldCount` |
+| `encoding/json` | `ErrSyntax`, `ErrUnexpectedEnd` |
+| `io/pipe` | `ErrClosedPipe` |
+| `net/mail` | `ErrHeaderNotPresent` |
+| `net/http/chunked` + `httputil` | `ErrLineTooLong` |
+| `net/http/server` | `ErrServerClosed`, `ErrBodyNotAllowed`, `ErrHijacked`, `ErrContentLength`, `ErrAbortHandler`, `ErrHandlerTimeout` |
+| `net/http/request` | 9 sentinels (4 string + 4 typed-payload + ErrMaxBytes) |
+| `strconv` | `ErrSyntax`, `ErrRange` |
+| `path` | `ErrBadPattern` |
+
+### Naming standardization
+
+`errors::error` → `error` everywhere. Zero qualified references remain.
+The type still lives in `src/errors/mod.rs` with all impls; the canonical
+public path is `goish::error` via `pub use errors::error;` at lib root.
+
+### Other fixes shipped this session
+
+- Lib warnings: 98 → 0
+- gomap `MapRefIter::next()` mid-bucket skip bug fixed
+- `fmt::Sprintf("%+v")` sorts map keys (Go-faithful)
+- `os::IsPathSeparator(c uint8) bool` added (unblocked
+  `monochromegane_go_gitignore`)
+- New examples: `gomap_smoke`, `gomap_range_smoke`, `var_marker_smoke`
+
+### Ports workspace
+
+`cargo check --workspace` from `/home/chanwit/Dropbox/projects/goro-workspace/ports/`
+**succeeds for ALL crates** (after this session's fixes — see commit
+history). `flux_source_controller` is intentionally excluded from the
+workspace; it has 2k+ unrelated errors that are tracked separately.
+
+### Open / deferred
+
+- `#[goish::main]` eager-init pass — defer until a port forces it
+- `goish::const!` macro for true compile-time constants — open design
+- `iota`-style sequences — separate problem
+- `syscall::Errno` typed errors with custom semantic `Is()` — different
+  shape than string-message sentinels; defer
+
+### Session commit history
+
+| Commit | What |
+|---|---|
+| `92d80b5` | gomap iterator + json key-sort + smoke tests |
+| `05e3e7b` | All 98 lib warnings → 0 |
+| `2690340` | Ship `goish::var!` macro (Doctrine 2 infra) |
+| `03215a9` | First-batch sentinel migration (~17 sentinels) |
+| `52429ff` | Complete sentinel migration (zero fn-form remain) |
+| `8515436` | Standardize call sites on `error` (canonical at goish::error) |
+| `ef72dc6` | `os::IsPathSeparator` — unblock final port |
+
+E2e at every commit boundary: **137/137 green**.
