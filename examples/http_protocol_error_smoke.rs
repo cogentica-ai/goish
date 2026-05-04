@@ -27,8 +27,8 @@ fn main() {
 
     // 1. ErrNotSupported is non-nil and stable across calls.
     {
-        let a: errors::error = http::ErrNotSupported.into();
-        let b: errors::error = http::ErrNotSupported.into();
+        let a: error = http::ErrNotSupported.into();
+        let b: error = http::ErrNotSupported.into();
         if !a.IsNil() && errors::Is(a, b) {
             Println!("[ 1] ErrNotSupported stable    PASS");
         } else {
@@ -39,7 +39,7 @@ fn main() {
 
     // 2. ErrNotSupported message matches Go.
     {
-        let __e_s: errors::error = http::ErrNotSupported.into(); let s = __e_s.Error();
+        let __e_s: error = http::ErrNotSupported.into(); let s = __e_s.Error();
         if s == "feature not supported" {
             Println!("[ 2] ErrNotSupported message   PASS");
         } else {
@@ -60,7 +60,7 @@ fn main() {
 
     // 4. ErrUnexpectedTrailer sentinel + message + stable.
     {
-        let a: errors::error = http::ErrUnexpectedTrailer.into();
+        let a: error = http::ErrUnexpectedTrailer.into();
         let s = a.Error();
         if errors::Is(a.clone(), http::ErrUnexpectedTrailer)
             && s == "trailer header without chunked transfer encoding"
@@ -74,7 +74,7 @@ fn main() {
 
     // 5. ErrHeaderTooLong sentinel + message.
     {
-        let __e_s: errors::error = http::ErrHeaderTooLong.into(); let s = __e_s.Error();
+        let __e_s: error = http::ErrHeaderTooLong.into(); let s = __e_s.Error();
         if s == "header too long" {
             Println!("[ 5] ErrHeaderTooLong message  PASS");
         } else {
@@ -85,7 +85,7 @@ fn main() {
 
     // 6. ErrShortBody sentinel + message.
     {
-        let __e_s: errors::error = http::ErrShortBody.into(); let s = __e_s.Error();
+        let __e_s: error = http::ErrShortBody.into(); let s = __e_s.Error();
         if s == "entity body too short" {
             Println!("[ 6] ErrShortBody message      PASS");
         } else {
@@ -96,7 +96,7 @@ fn main() {
 
     // 7. ErrMissingContentLength sentinel + message.
     {
-        let __e_s: errors::error = http::ErrMissingContentLength.into(); let s = __e_s.Error();
+        let __e_s: error = http::ErrMissingContentLength.into(); let s = __e_s.Error();
         if s == "missing ContentLength in HEAD response" {
             Println!("[ 7] ErrMissingContentLength   PASS");
         } else {
@@ -123,7 +123,7 @@ fn main() {
     // 9. User-constructed ProtocolError exposes its ErrorString.
     {
         let pe = http::ProtocolError { ErrorString: goish::string("custom oops") };
-        let e: errors::error = errors::Wrap(pe);
+        let e: error = errors::Wrap(pe);
         let s = e.Error();
         if s == "custom oops" {
             Println!("[ 9] ProtocolError user ctor   PASS");
@@ -136,7 +136,7 @@ fn main() {
     // 10. User-constructed ProtocolError does NOT chain to ErrUnsupported.
     {
         let pe = http::ProtocolError { ErrorString: goish::string("feature not supported") };
-        let e: errors::error = errors::Wrap(pe);
+        let e: error = errors::Wrap(pe);
         if !errors::Is(e, errors::ErrUnsupported) {
             Println!("[10] user pe !ErrUnsup chain   PASS");
         } else {

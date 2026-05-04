@@ -20,7 +20,7 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 
-use crate::errors::error;
+use crate::error;
 use crate::gomap::map;
 use crate::gostring::string;
 use crate::sync::atomic::Pointer;

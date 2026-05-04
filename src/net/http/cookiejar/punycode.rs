@@ -13,7 +13,7 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::errors::error;
+use crate::error;
 use crate::gostring::string;
 use crate::strings;
 use crate::types::{byte, int};

@@ -45,7 +45,7 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::errors::error;
+use crate::error;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;

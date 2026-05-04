@@ -33,7 +33,7 @@ impl PageSink {
 }
 
 impl WriterAt for PageSink {
-    fn WriteAt(&mut self, p: slice<byte>, off: i64) -> (goish::int, goish::errors::error) {
+    fn WriteAt(&mut self, p: slice<byte>, off: i64) -> (goish::int, goish::error) {
         let off = off as usize;
         let mut n = 0;
         for i in 0..p.Len() {

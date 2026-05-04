@@ -108,9 +108,9 @@ fn is_token(s: string) -> bool {
 /// `mime.ErrInvalidMediaParameter` (mediatype.go:122) — sentinel
 /// returned by ParseMediaType when the optional parameters are
 /// malformed.
-pub fn ErrInvalidMediaParameter() -> crate::errors::error {
+pub fn ErrInvalidMediaParameter() -> crate::error {
     use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<crate::errors::error>> = SpinLock::new(None);
+    static SLOT: SpinLock<Option<crate::error>> = SpinLock::new(None);
     let mut g = SLOT.lock();
     if g.is_none() {
         *g = Some(crate::errors::New(string("mime: invalid media parameter")));
@@ -131,7 +131,7 @@ pub fn ErrInvalidMediaParameter() -> crate::errors::error {
 pub fn ParseMediaType<V: Into<string>>(v: V) -> (
     string,
     crate::gomap::map<string, string>,
-    crate::errors::error,
+    crate::error,
 ) {
     let v: string = v.into();
     // Go: base, _, _ := strings.Cut(v, ";")
@@ -185,7 +185,7 @@ pub fn ParseMediaType<V: Into<string>>(v: V) -> (
 }
 
 /// Line-by-line port of `checkMediaTypeDisposition` (mediatype.go:98).
-fn check_media_type_disposition(s: string) -> Result<(), crate::errors::error> {
+fn check_media_type_disposition(s: string) -> Result<(), crate::error> {
     let (typ, rest) = consume_token(s);
     if typ.Len() == 0 {
         return Err(crate::errors::New(string("mime: no media type")));
@@ -358,7 +358,7 @@ pub fn TypeByExtension<E: Into<string>>(ext: E) -> string {
 /// returned slice is sorted ascending. Returns `(nil, nil)` if `typ`
 /// has no associated extensions; returns `("", err)` if `typ` is not
 /// a valid media type.
-pub fn ExtensionsByType<T: Into<string>>(typ: T) -> (crate::goslice::slice<string>, crate::errors::error) {
+pub fn ExtensionsByType<T: Into<string>>(typ: T) -> (crate::goslice::slice<string>, crate::error) {
     let typ: string = typ.into();
     // Go: justType, _, err := ParseMediaType(typ)
     let (just_type, _, err) = ParseMediaType(typ);
@@ -418,7 +418,7 @@ pub fn ExtensionsByType<T: Into<string>>(typ: T) -> (crate::goslice::slice<strin
 /// MIME type `typ` for file extension `ext`. `ext` must begin with
 /// a leading dot. For text/* types without an explicit charset
 /// parameter, `charset=utf-8` is added automatically.
-pub fn AddExtensionType<E: Into<string>, T: Into<string>>(ext: E, typ: T) -> crate::errors::error {
+pub fn AddExtensionType<E: Into<string>, T: Into<string>>(ext: E, typ: T) -> crate::error {
     let ext: string = ext.into();
     let typ: string = typ.into();
     // Go: if !strings.HasPrefix(ext, ".") { return fmt.Errorf(...) }
@@ -433,7 +433,7 @@ pub fn AddExtensionType<E: Into<string>, T: Into<string>>(ext: E, typ: T) -> cra
 }
 
 /// `setExtensionType(extension, mimeType)` (type.go:168).
-fn set_extension_type(extension: string, mut mime_type: string) -> crate::errors::error {
+fn set_extension_type(extension: string, mut mime_type: string) -> crate::error {
     // Go: justType, param, err := ParseMediaType(mimeType)
     let (just_type, mut param, err) = ParseMediaType(mime_type.clone());
     if !err.IsNil() {

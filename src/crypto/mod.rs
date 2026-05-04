@@ -17,7 +17,7 @@
 
 extern crate alloc;
 
-use crate::errors::error;
+use crate::error;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::hash::Hash as HashTrait;

@@ -79,7 +79,7 @@ fn main() {
 
     // 3. ErrLineTooLong is non-nil and has the documented message.
     {
-        let e: goish::errors::error = httputil::ErrLineTooLong.into();
+        let e: goish::error = httputil::ErrLineTooLong.into();
         if !e.IsNil() && e.Error() == "http: chunked header line too long" {
             Println!("[ 3] ErrLineTooLong            PASS");
         } else {

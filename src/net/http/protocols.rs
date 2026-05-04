@@ -113,21 +113,21 @@ pub fn NoBody() -> noBody {
 pub struct noBody {}
 
 impl crate::io::Reader for noBody {
-    fn Read(&mut self, _p: &mut crate::slice<crate::types::byte>) -> (int, crate::errors::error) {
+    fn Read(&mut self, _p: &mut crate::slice<crate::types::byte>) -> (int, crate::error) {
         // Go: return 0, io.EOF
         (0, crate::io::EOF.into())
     }
 }
 
 impl crate::io::Closer for noBody {
-    fn Close(&mut self) -> crate::errors::error {
+    fn Close(&mut self) -> crate::error {
         // Go: return nil
         crate::errors::nil
     }
 }
 
 impl crate::io::WriterTo for noBody {
-    fn WriteTo(&mut self, _w: &mut dyn crate::io::Writer) -> (i64, crate::errors::error) {
+    fn WriteTo(&mut self, _w: &mut dyn crate::io::Writer) -> (i64, crate::error) {
         // Go: return 0, nil
         (0, crate::errors::nil)
     }

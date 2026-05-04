@@ -20,6 +20,7 @@
 
 extern crate alloc;
 
+use goish::error;
 use goish::convert;
 use goish::errors;
 use goish::io;
@@ -43,8 +44,8 @@ fn main() {
 
     // ─── Test 1: ErrClosedPipe is stable + message matches Go ─────
     {
-        let a: errors::error = io::ErrClosedPipe.into();
-        let b: errors::error = io::ErrClosedPipe.into();
+        let a: error = io::ErrClosedPipe.into();
+        let b: error = io::ErrClosedPipe.into();
         check(!a.IsNil(), b"io_pipe: T1 ErrClosedPipe nil\n");
         check(
             a.Error() == "io: read/write on closed pipe",

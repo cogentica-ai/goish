@@ -33,7 +33,7 @@ extern crate alloc;
 use alloc::sync::Arc;
 
 use crate::context::{self, Context};
-use crate::errors::error;
+use crate::error;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::net::textproto::MIMEHeader;

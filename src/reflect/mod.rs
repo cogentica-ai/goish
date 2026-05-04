@@ -546,7 +546,7 @@ impl Type {
     /// is equivalent to `FieldByIndex` (we don't traverse pointers, so
     /// the "indirection through nil" error case Go raises doesn't
     /// arise). Provided for API parity.
-    pub fn FieldByIndexErr(&self, index: &[int]) -> (StructField, crate::errors::error) {
+    pub fn FieldByIndexErr(&self, index: &[int]) -> (StructField, crate::error) {
         (self.FieldByIndex(index), crate::errors::nil)
     }
 
@@ -1195,13 +1195,13 @@ pub fn Zero(t: Type) -> Value {
 // extract the typed payload from a Value at runtime.
 
 pub trait FromReflectValue: Sized {
-    fn from_reflect_value(v: Value) -> (Self, crate::errors::error);
+    fn from_reflect_value(v: Value) -> (Self, crate::error);
 }
 
 macro_rules! impl_from_reflect {
     ($t:ty, $variant:ident, $name:expr) => {
         impl FromReflectValue for $t {
-            fn from_reflect_value(v: Value) -> (Self, crate::errors::error) {
+            fn from_reflect_value(v: Value) -> (Self, crate::error) {
                 match v {
                     Value::$variant(x) => (x, crate::errors::nil),
                     _ => (
@@ -1228,7 +1228,7 @@ impl_from_reflect!(float64, Float64, "float64");
 impl_from_reflect!(string, String, "string");
 
 impl<T: FromReflectValue + Clone + Default> FromReflectValue for slice<T> {
-    fn from_reflect_value(v: Value) -> (Self, crate::errors::error) {
+    fn from_reflect_value(v: Value) -> (Self, crate::error) {
         match v {
             Value::Slice { items, .. } => {
                 let mut out: Vec<T> = Vec::with_capacity(items.len());
@@ -1254,7 +1254,7 @@ where
     K: FromReflectValue + crate::gomap::GoHash + PartialEq + Default + Clone,
     V: FromReflectValue + Default + Clone,
 {
-    fn from_reflect_value(v: Value) -> (Self, crate::errors::error) {
+    fn from_reflect_value(v: Value) -> (Self, crate::error) {
         match v {
             Value::Map { entries, .. } => {
                 let mut out = crate::gomap::map::<K, V>::new();
@@ -1295,11 +1295,11 @@ where
 pub trait Settable {
     /// Assigns `v` into the i-th field. Returns `nil` on success or a
     /// type-mismatch / out-of-range error.
-    fn __reflect_set_field(&mut self, idx: int, v: Value) -> crate::errors::error;
+    fn __reflect_set_field(&mut self, idx: int, v: Value) -> crate::error;
 }
 
 /// `reflect.SetField(&mut t, idx, v)` — write `v` into the i-th field.
-pub fn SetField<T: Settable>(target: &mut T, idx: int, v: Value) -> crate::errors::error {
+pub fn SetField<T: Settable>(target: &mut T, idx: int, v: Value) -> crate::error {
     target.__reflect_set_field(idx, v)
 }
 
@@ -1310,7 +1310,7 @@ pub fn SetFieldByName<T: Settable + Reflect>(
     target: &mut T,
     name: &str,
     v: Value,
-) -> crate::errors::error {
+) -> crate::error {
     let ty = T::__reflect_type();
     for i in 0..ty.NumField() {
         if ty.Field(i).Name.as_bytes() == name.as_bytes() {

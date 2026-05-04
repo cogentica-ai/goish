@@ -25,7 +25,7 @@
 
 #![allow(non_snake_case)]
 
-use crate::errors::error;
+use crate::error;
 use crate::goslice::slice;
 use crate::hash::Hash;
 use crate::io;

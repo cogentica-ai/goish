@@ -683,7 +683,7 @@ impl Time {
     /// RFC3339 (no fractional seconds) rather than RFC3339Nano —
     /// the slim Format helper doesn't recognise RFC3339Nano. Parse
     /// pairs cleanly with this output via UnmarshalText.
-    pub fn MarshalText(self) -> (crate::goslice::slice<crate::types::byte>, crate::errors::error) {
+    pub fn MarshalText(self) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
         let s = self.Format(crate::gostring::string::from(RFC3339));
         (crate::convert::bytes(s), crate::errors::nil)
     }
@@ -694,7 +694,7 @@ impl Time {
     pub fn UnmarshalText(
         &mut self,
         data: crate::goslice::slice<crate::types::byte>,
-    ) -> crate::errors::error {
+    ) -> crate::error {
         let s = crate::gostring::string::from_bytes(&data);
         let (t, err) = Parse(crate::gostring::string::from(RFC3339), s);
         if err.IsNil() {
@@ -706,7 +706,7 @@ impl Time {
     /// `t.MarshalJSON()` (time.go:1587) — encode as a JSON-quoted
     /// RFC3339 string. Slim deviation: emits RFC3339 (no fractional
     /// seconds) instead of RFC3339Nano, mirroring MarshalText.
-    pub fn MarshalJSON(self) -> (crate::goslice::slice<crate::types::byte>, crate::errors::error) {
+    pub fn MarshalJSON(self) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
         // b := make([]byte, 0, len(RFC3339Nano)+len(`""`))
         let mut b: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(RFC3339Nano.len() + 2);
         // b = append(b, '"')
@@ -724,7 +724,7 @@ impl Time {
     pub fn UnmarshalJSON(
         &mut self,
         data: crate::goslice::slice<crate::types::byte>,
-    ) -> crate::errors::error {
+    ) -> crate::error {
         // if string(data) == "null" { return nil }
         if &*data == b"null" {
             return crate::errors::nil;
@@ -751,7 +751,7 @@ impl Time {
     pub fn AppendBinary(
         self,
         b: crate::goslice::slice<crate::types::byte>,
-    ) -> (crate::goslice::slice<crate::types::byte>, crate::errors::error) {
+    ) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
         // Go: var offsetMin int16  (slim: always UTC → -1)
         let offset_min: i16 = -1;
         // Go: version := timeBinaryVersionV1
@@ -785,7 +785,7 @@ impl Time {
     /// 16-byte capacity buffer.
     pub fn MarshalBinary(
         self,
-    ) -> (crate::goslice::slice<crate::types::byte>, crate::errors::error) {
+    ) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
         // Go: b, err := t.AppendBinary(make([]byte, 0, 16))
         let buf: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(16);
         let (b, err) = self.AppendBinary(crate::goslice::slice::__from_vec(buf));
@@ -805,7 +805,7 @@ impl Time {
     pub fn UnmarshalBinary(
         &mut self,
         data: crate::goslice::slice<crate::types::byte>,
-    ) -> crate::errors::error {
+    ) -> crate::error {
         // Go: buf := data; if len(buf) == 0 { return errors.New("...: no data") }
         let buf = data.__into_vec();
         if buf.is_empty() {
@@ -857,7 +857,7 @@ impl Time {
     /// `encoding/gob.GobEncoder`. Delegates to MarshalBinary.
     pub fn GobEncode(
         self,
-    ) -> (crate::goslice::slice<crate::types::byte>, crate::errors::error) {
+    ) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
         // Go: return t.MarshalBinary()
         self.MarshalBinary()
     }
@@ -867,7 +867,7 @@ impl Time {
     pub fn GobDecode(
         &mut self,
         data: crate::goslice::slice<crate::types::byte>,
-    ) -> crate::errors::error {
+    ) -> crate::error {
         // Go: return t.UnmarshalBinary(data)
         self.UnmarshalBinary(data)
     }
@@ -1690,7 +1690,7 @@ fn fmt_int(buf: &mut [u8], mut v: u64) -> usize {
 /// Recognized layouts: RFC3339, DateTime, DateOnly, TimeOnly,
 /// RFC1123 (assumes "GMT" or arbitrary 3-letter zone), ANSIC.
 /// Anything else returns an error.
-pub fn Parse<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>(layout: L, value: V) -> (Time, crate::errors::error) {
+pub fn Parse<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>(layout: L, value: V) -> (Time, crate::error) {
     let layout: crate::gostring::string = layout.into();
     let value: crate::gostring::string = value.into();
     
@@ -1729,7 +1729,7 @@ pub fn Parse<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>
     )
 }
 
-fn parse_rfc3339(s: crate::gostring::string) -> (Time, crate::errors::error) {
+fn parse_rfc3339(s: crate::gostring::string) -> (Time, crate::error) {
     
     let bs = s.as_bytes();
     // "YYYY-MM-DDTHH:MM:SSZ" minimum. Z may be replaced by ±HH:MM, slim port treats only Z.
@@ -1776,7 +1776,7 @@ fn parse_rfc3339(s: crate::gostring::string) -> (Time, crate::errors::error) {
     (Date(y, m, d, hh, mm, ss, 0), crate::errors::nil)
 }
 
-fn parse_datetime(s: crate::gostring::string, sep: u8) -> (Time, crate::errors::error) {
+fn parse_datetime(s: crate::gostring::string, sep: u8) -> (Time, crate::error) {
     
     let bs = s.as_bytes();
     if bs.len() != 19
@@ -1800,7 +1800,7 @@ fn parse_datetime(s: crate::gostring::string, sep: u8) -> (Time, crate::errors::
     (Date(y, m, d, hh, mm, ss, 0), crate::errors::nil)
 }
 
-fn parse_date_only(s: crate::gostring::string) -> (Time, crate::errors::error) {
+fn parse_date_only(s: crate::gostring::string) -> (Time, crate::error) {
     
     let bs = s.as_bytes();
     if bs.len() != 10 || bs[4] != b'-' || bs[7] != b'-' {
@@ -1815,7 +1815,7 @@ fn parse_date_only(s: crate::gostring::string) -> (Time, crate::errors::error) {
     (Date(y, m, d, 0, 0, 0, 0), crate::errors::nil)
 }
 
-fn parse_time_only(s: crate::gostring::string) -> (Time, crate::errors::error) {
+fn parse_time_only(s: crate::gostring::string) -> (Time, crate::error) {
     
     let bs = s.as_bytes();
     if bs.len() != 8 || bs[2] != b':' || bs[5] != b':' {
@@ -1830,7 +1830,7 @@ fn parse_time_only(s: crate::gostring::string) -> (Time, crate::errors::error) {
     (Date(1970, 1, 1, hh, mm, ss, 0), crate::errors::nil)
 }
 
-fn parse_rfc1123(s: crate::gostring::string) -> (Time, crate::errors::error) {
+fn parse_rfc1123(s: crate::gostring::string) -> (Time, crate::error) {
     
     let bs = s.as_bytes();
     // "Day, DD Mon YYYY HH:MM:SS GMT" → 29 chars
@@ -1859,7 +1859,7 @@ fn parse_rfc1123(s: crate::gostring::string) -> (Time, crate::errors::error) {
     (Date(y, mon, d, hh, mm, ss, 0), crate::errors::nil)
 }
 
-fn parse_ansic(s: crate::gostring::string) -> (Time, crate::errors::error) {
+fn parse_ansic(s: crate::gostring::string) -> (Time, crate::error) {
     
     let bs = s.as_bytes();
     // "Mon Jan _2 15:04:05 2006" → 24 chars
@@ -1899,7 +1899,7 @@ fn parse_ansic(s: crate::gostring::string) -> (Time, crate::errors::error) {
     (Date(y, mon, d, hh, mm, ss, 0), crate::errors::nil)
 }
 
-fn parse_int(bs: &[u8]) -> Result<int, crate::errors::error> {
+fn parse_int(bs: &[u8]) -> Result<int, crate::error> {
     let mut n: int = 0;
     for &c in bs.iter() {
         if !(b'0'..=b'9').contains(&c) {
@@ -1923,7 +1923,7 @@ fn parse_int(bs: &[u8]) -> Result<int, crate::errors::error> {
 /// "ms", "s", "m", "h".
 pub fn ParseDuration<S: Into<crate::gostring::string>>(
     s: S,
-) -> (Duration, crate::errors::error) {
+) -> (Duration, crate::error) {
     use crate::gostring::string;
     use crate::strconv;
     let s: crate::gostring::string = s.into();
@@ -2108,7 +2108,7 @@ fn unit_lookup(u: &[u8]) -> Option<u64> {
 ///
 /// Mirrors format.go:1554. Returns error on overflow (caller treats
 /// it as "invalid duration"); rem is the unconsumed tail.
-fn leading_int(s: &[u8]) -> (u64, alloc::vec::Vec<u8>, crate::errors::error) {
+fn leading_int(s: &[u8]) -> (u64, alloc::vec::Vec<u8>, crate::error) {
     let mut x: u64 = 0;
     let mut i = 0usize;
     while i < s.len() {

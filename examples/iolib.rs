@@ -97,11 +97,11 @@ fn main() {
 
     // (4) Other sentinels are also stable. With Doctrine 2 markers,
     // bare `==` works directly (no `.into()` needed at compare positions).
-    let sw1: errors::error = io::ErrShortWrite.into();
-    let sw2: errors::error = io::ErrShortWrite.into();
+    let sw1: error = io::ErrShortWrite.into();
+    let sw2: error = io::ErrShortWrite.into();
     check(sw1 == sw2, b"io: ErrShortWrite stable\n");
-    let uf1: errors::error = io::ErrUnexpectedEOF.into();
-    let uf2: errors::error = io::ErrUnexpectedEOF.into();
+    let uf1: error = io::ErrUnexpectedEOF.into();
+    let uf2: error = io::ErrUnexpectedEOF.into();
     check(uf1 == uf2, b"io: ErrUnexpectedEOF stable\n");
     check(e1 != io::ErrShortWrite, b"io: distinct sentinels distinct\n");
 

@@ -42,7 +42,7 @@ use alloc::vec::Vec;
 use core::sync::atomic::AtomicI32;
 
 use crate::errors;
-use crate::errors::error;
+use crate::error;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;

@@ -1193,7 +1193,7 @@ fn parse_ipv4(s: &[byte]) -> Option<IP> {
     Some(IPv4(octets[0], octets[1], octets[2], octets[3]))
 }
 
-pub fn SplitHostPort(hostport: crate::string) -> (crate::string, crate::string, crate::errors::error) {
+pub fn SplitHostPort(hostport: crate::string) -> (crate::string, crate::string, crate::error) {
     let missing_port = "missing port in address";
     let too_many_colons = "too many colons in address";
 
@@ -1363,8 +1363,8 @@ impl AddrError {
 /// Lets call sites write `let e: error = net::AddrError {…}.into();` or
 /// pass it through tuple-return slots via `… .into()`. Mirrors Go's
 /// implicit `*AddrError → error` interface satisfaction.
-impl From<AddrError> for crate::errors::error {
-    fn from(e: AddrError) -> crate::errors::error {
+impl From<AddrError> for crate::error {
+    fn from(e: AddrError) -> crate::error {
         crate::errors::Wrap(e)
     }
 }
@@ -1373,7 +1373,7 @@ impl From<AddrError> for crate::errors::error {
 /// returns a typed `AddrError` wrapped through `errors::Wrap`. `why`
 /// must be a `&'static str` because the AddrError stores it as a
 /// `string` constructed via `from_static` (zero-alloc path).
-fn addr_error(addr: crate::string, why: &'static str) -> crate::errors::error {
+fn addr_error(addr: crate::string, why: &'static str) -> crate::error {
     crate::errors::Wrap(AddrError {
         Err: crate::string::from_static(why),
         Addr: addr,

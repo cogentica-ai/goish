@@ -120,7 +120,7 @@ impl Header {
     /// `h.Write(w)` — write the header in HTTP wire format
     /// (`Key: value\r\n` per line). Mirrors `Header.Write`
     /// (header.go:85).
-    pub fn Write<W: crate::io::Writer>(&self, w: &mut W) -> crate::errors::error {
+    pub fn Write<W: crate::io::Writer>(&self, w: &mut W) -> crate::error {
         self.WriteSubset(w, &map::<string, bool>::new())
     }
 
@@ -130,7 +130,7 @@ impl Header {
         &self,
         w: &mut W,
         exclude: &map<string, bool>,
-    ) -> crate::errors::error {
+    ) -> crate::error {
         // Go: kvs, _ := h.sortedKeyValues(exclude)
         // Sorting requires reading all keys; since gomap has no Keys()
         // surface here, we collect via __iter and sort in Vec.
@@ -188,7 +188,7 @@ pub const TimeFormat: &str = "Mon, 02 Jan 2006 15:04:05 GMT";
 /// dash-separated cookie form (`Mon, 02-Jan-2006 15:04:05 MST`).
 /// `time::Parse` is not yet ported; once it lands this function
 /// will gain the third form.
-pub fn ParseTime<T: Into<string>>(text: T) -> (crate::time::Time, crate::errors::error) {
+pub fn ParseTime<T: Into<string>>(text: T) -> (crate::time::Time, crate::error) {
     let text: string = text.into();
     if let Some(t) = parse_http_date(text.as_bytes(), b' ') {
         return (t, crate::errors::nil);

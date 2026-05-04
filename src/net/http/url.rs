@@ -40,7 +40,7 @@ pub struct Error {
 }
 
 impl Error {
-    /// Build a `url.Error` and lift it into `errors::error`.
+    /// Build a `url.Error` and lift it into `error`.
     pub fn new<O: Into<string>, U: Into<string>>(op: O, url: U, err: error) -> error {
         let op: string = op.into();
         let url: string = url.into();
@@ -248,7 +248,7 @@ impl URL {
     /// `ref` as a URL in the context of `self` (the receiver as base).
     /// The ref may be relative or absolute. Returns parse errors from
     /// the inner Parse; otherwise returns `self.ResolveReference(refURL)`.
-    pub fn Parse<R: Into<string>>(&self, ref_: R) -> (URL, crate::errors::error) {
+    pub fn Parse<R: Into<string>>(&self, ref_: R) -> (URL, crate::error) {
         let ref_: string = ref_.into();
         // Go: refURL, err := Parse(ref)
         let (ref_url, err) = Parse(ref_);

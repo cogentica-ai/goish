@@ -25,6 +25,7 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::error;
 use goish::bytes;
 use goish::compress::lzw::{self, LSB, MSB};
 use goish::errors;
@@ -83,7 +84,7 @@ fn from_bytes(b: &[u8]) -> slice<byte> {
     slice::__from_vec(v)
 }
 
-fn read_all(r: &mut lzw::Reader<bytes::Reader>) -> (alloc::vec::Vec<byte>, errors::error) {
+fn read_all(r: &mut lzw::Reader<bytes::Reader>) -> (alloc::vec::Vec<byte>, error) {
     let mut out: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
     let mut buf = from_bytes(&[0u8; 256]);
     loop {

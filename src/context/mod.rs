@@ -7,7 +7,7 @@
 //   trait Context {
 //       fn Deadline(&self) -> Option<time::Time>;
 //       fn Done(&self) -> chan<()>;
-//       fn Err(&self) -> errors::error;
+//       fn Err(&self) -> error;
 //   }
 //
 //   fn Background() -> Arc<dyn Context>;

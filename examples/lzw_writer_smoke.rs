@@ -27,6 +27,7 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::error;
 use goish::bytes;
 use goish::compress::lzw::{self, LSB, MSB};
 use goish::errors;
@@ -111,7 +112,7 @@ fn compress_with(input: &[u8], order: lzw::Order, lit_width: int) -> alloc::vec:
 // Helper Writer that captures bytes into a Vec via Rc/RefCell-style.
 // Goish has no Rc; we use a static buffer keyed by test number.
 
-fn read_all(r: &mut lzw::Reader<bytes::Reader>) -> (alloc::vec::Vec<byte>, errors::error) {
+fn read_all(r: &mut lzw::Reader<bytes::Reader>) -> (alloc::vec::Vec<byte>, error) {
     let mut out: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
     let mut buf = from_bytes(&[0u8; 256]);
     loop {
@@ -200,7 +201,7 @@ fn slot_get(i: usize) -> &'static mut alloc::vec::Vec<byte> {
 }
 
 impl io::Writer for TapWriter {
-    fn Write(&mut self, p: slice<byte>) -> (int, errors::error) {
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
         let v = slot_get(self.slot);
         for i in 0..(p.Len() as usize) {
             v.push(p[i as int]);

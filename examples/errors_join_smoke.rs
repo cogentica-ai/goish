@@ -11,8 +11,8 @@ use goish::errors;
 use goish::goslice::slice;
 use goish::{string, syscall, Println};
 
-fn errs(items: &[goish::errors::error]) -> slice<goish::errors::error> {
-    let mut s: slice<goish::errors::error> = slice::__from_vec(alloc::vec::Vec::new());
+fn errs(items: &[goish::error]) -> slice<goish::error> {
+    let mut s: slice<goish::error> = slice::__from_vec(alloc::vec::Vec::new());
     for it in items.iter() {
         s = goish::append!(s, it.clone());
     }

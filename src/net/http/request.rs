@@ -937,7 +937,7 @@ impl errors::ErrorTrait for MaxBytesError {
     /// `errors::Is(err, ErrMaxBytes.into())` form continue to match. Go's
     /// type uses `errors.As(*MaxBytesError)` instead, but goish lacks
     /// errors.As; chaining through Unwrap is the closest analogue.
-    fn Unwrap(&self) -> errors::error {
+    fn Unwrap(&self) -> error {
         ErrMaxBytes.into()
     }
 }

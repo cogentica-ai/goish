@@ -24,8 +24,8 @@ fn main() {
 
     // 1. ErrNoCookie is non-nil and stable.
     {
-        let a: goish::errors::error = http::ErrNoCookie.into();
-        let b: goish::errors::error = http::ErrNoCookie.into();
+        let a: goish::error = http::ErrNoCookie.into();
+        let b: goish::error = http::ErrNoCookie.into();
         if !a.IsNil() && errors::Is(a, b) {
             Println!("[ 1] ErrNoCookie stable        PASS");
         } else {
@@ -36,7 +36,7 @@ fn main() {
 
     // 2. ErrNoCookie message matches Go.
     {
-        let __e_for_s: goish::errors::error = http::ErrNoCookie.into(); let s = __e_for_s.Error();
+        let __e_for_s: goish::error = http::ErrNoCookie.into(); let s = __e_for_s.Error();
         if s == "http: named cookie not present" {
             Println!("[ 2] ErrNoCookie message       PASS");
         } else {
@@ -47,7 +47,7 @@ fn main() {
 
     // 3. ErrMissingFile sentinel + message.
     {
-        let __e_for_s: goish::errors::error = http::ErrMissingFile.into(); let s = __e_for_s.Error();
+        let __e_for_s: goish::error = http::ErrMissingFile.into(); let s = __e_for_s.Error();
         if s == "http: no such file" {
             Println!("[ 3] ErrMissingFile message    PASS");
         } else {
@@ -58,7 +58,7 @@ fn main() {
 
     // 4. ErrBodyNotAllowed sentinel.
     {
-        let __ev_s: goish::errors::error = http::ErrBodyNotAllowed.into(); let s = __ev_s.Error();
+        let __ev_s: goish::error = http::ErrBodyNotAllowed.into(); let s = __ev_s.Error();
         if s == "http: request method or response status code does not allow body" {
             Println!("[ 4] ErrBodyNotAllowed message PASS");
         } else {
@@ -69,8 +69,8 @@ fn main() {
 
     // 5. ErrHijacked sentinel.
     {
-        let a: goish::errors::error = http::ErrHijacked.into();
-        let b: goish::errors::error = http::ErrHijacked.into();
+        let a: goish::error = http::ErrHijacked.into();
+        let b: goish::error = http::ErrHijacked.into();
         if errors::Is(a.clone(), b) && a.Error() == "http: connection has been hijacked" {
             Println!("[ 5] ErrHijacked stable+msg    PASS");
         } else {
@@ -81,7 +81,7 @@ fn main() {
 
     // 6. ErrContentLength sentinel.
     {
-        let __ev_s: goish::errors::error = http::ErrContentLength.into(); let s = __ev_s.Error();
+        let __ev_s: goish::error = http::ErrContentLength.into(); let s = __ev_s.Error();
         if s == "http: wrote more than the declared Content-Length" {
             Println!("[ 6] ErrContentLength message  PASS");
         } else {
@@ -92,8 +92,8 @@ fn main() {
 
     // 7. ErrAbortHandler sentinel + stability.
     {
-        let a: goish::errors::error = http::ErrAbortHandler.into();
-        let b: goish::errors::error = http::ErrAbortHandler.into();
+        let a: goish::error = http::ErrAbortHandler.into();
+        let b: goish::error = http::ErrAbortHandler.into();
         if errors::Is(a.clone(), b) && a.Error() == "net/http: abort Handler" {
             Println!("[ 7] ErrAbortHandler           PASS");
         } else {
@@ -104,7 +104,7 @@ fn main() {
 
     // 8. ErrHandlerTimeout sentinel.
     {
-        let __ev_s: goish::errors::error = http::ErrHandlerTimeout.into(); let s = __ev_s.Error();
+        let __ev_s: goish::error = http::ErrHandlerTimeout.into(); let s = __ev_s.Error();
         if s == "http: Handler timeout" {
             Println!("[ 8] ErrHandlerTimeout message PASS");
         } else {
@@ -115,7 +115,7 @@ fn main() {
 
     // 9. ErrServerClosed (pre-existing) sentinel still works alongside.
     {
-        let __ev_s: goish::errors::error = http::ErrServerClosed.into(); let s = __ev_s.Error();
+        let __ev_s: goish::error = http::ErrServerClosed.into(); let s = __ev_s.Error();
         if s == "http: Server closed" {
             Println!("[ 9] ErrServerClosed message   PASS");
         } else {

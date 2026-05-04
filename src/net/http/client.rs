@@ -344,7 +344,7 @@ pub trait RoundTripper: Send + Sync {
 /// guards before invoking, never reach the stub.
 struct __NilRoundTripper;
 impl RoundTripper for __NilRoundTripper {
-    fn RoundTrip(&self, _req: &Request) -> (Response, crate::errors::error) {
+    fn RoundTrip(&self, _req: &Request) -> (Response, crate::error) {
         panic!("RoundTrip called on nil RoundTripper")
     }
 }

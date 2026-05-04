@@ -8,6 +8,7 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::error;
 use goish::bytes;
 use goish::crypto::cipher;
 use goish::crypto::rc4;
@@ -235,7 +236,7 @@ fn main() {
             buf: alloc::vec::Vec<byte>,
         }
         impl io::Writer for Tracker {
-            fn Write(&mut self, p: slice<byte>) -> (goish::types::int, errors::error) {
+            fn Write(&mut self, p: slice<byte>) -> (goish::types::int, error) {
                 let v = p.__into_vec();
                 let n = v.len() as goish::types::int;
                 self.buf.extend_from_slice(&v);
@@ -243,7 +244,7 @@ fn main() {
             }
         }
         impl io::Closer for Tracker {
-            fn Close(&mut self) -> errors::error {
+            fn Close(&mut self) -> error {
                 self.closed = true;
                 errors::nil.clone()
             }

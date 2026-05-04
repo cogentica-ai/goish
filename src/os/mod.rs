@@ -27,7 +27,7 @@ pub mod exec;
 pub mod signal;
 pub mod user;
 
-use crate::errors::error;
+use crate::error;
 use crate::goslice::slice;
 // `crate::string` resolves both the type (gostring) and the function
 // (convert) — different namespaces, both re-exported at root.
@@ -118,7 +118,7 @@ impl crate::errors::ErrorTrait for PathError {
     }
 }
 
-impl From<PathError> for crate::errors::error {
+impl From<PathError> for crate::error {
     fn from(p: PathError) -> Self {
         crate::errors::Wrap(p)
     }

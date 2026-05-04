@@ -8,6 +8,7 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::error;
 use goish::errors;
 use goish::io::fs;
 use goish::{string, syscall, Println};
@@ -140,9 +141,9 @@ fn main() {
 
     // 9. Sentinel singletons compare equal across calls.
     {
-        let a: errors::error = fs::ErrNotExist.into();
-        let b: errors::error = fs::ErrNotExist.into();
-        let c: errors::error = fs::ErrInvalid.into();
+        let a: error = fs::ErrNotExist.into();
+        let b: error = fs::ErrNotExist.into();
+        let c: error = fs::ErrInvalid.into();
         if a == b && a != c {
             Println!("[ 9] Sentinel identity       PASS");
         } else {
