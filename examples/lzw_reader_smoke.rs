@@ -94,7 +94,7 @@ fn read_all(r: &mut lzw::Reader<bytes::Reader>) -> (alloc::vec::Vec<byte>, error
             }
         }
         if !err.IsNil() {
-            if errors::Is(err.clone(), io::EOF()) {
+            if errors::Is(err.clone(), io::EOF) {
                 return (out, errors::nil);
             }
             return (out, err);
@@ -203,7 +203,7 @@ fn test_7_tobe_truncated() {
     let mut rc = lzw::NewReader(r, LSB, 8);
     let (_got, err) = read_all(&mut rc);
     let _ = rc.Close();
-    if !err.IsNil() && errors::Is(err, io::ErrUnexpectedEOF()) {
+    if !err.IsNil() && errors::Is(err, io::ErrUnexpectedEOF) {
         write_result(7, b"tobe-truncated ErrUnexpectedEOF", true);
     } else {
         write_result(7, b"tobe-truncated ErrUnexpectedEOF", false);

@@ -57,7 +57,7 @@ pub fn ReadMessage<R: io::Reader + 'static>(r: R) -> (Option<Message>, error) {
     let (hdr, err) = readHeader(&mut tp);
 
     // Go: if err != nil && (err != io.EOF || len(hdr) == 0) { return nil, err }
-    if err != nil && (!errors::Is(err.clone(), io::EOF()) || hdr.Len() == 0) {
+    if err != nil && (!errors::Is(err.clone(), io::EOF) || hdr.Len() == 0) {
         return (None, err);
     }
 

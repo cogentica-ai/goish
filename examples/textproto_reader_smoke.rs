@@ -45,7 +45,7 @@ fn main() {
         let mut r = textproto::NewReader(br);
         let (_, _) = r.ReadLine();
         let (_, e2) = r.ReadLine();
-        if errors::Is(e2, io::EOF()) {
+        if errors::Is(e2, io::EOF) {
             Println!("[ 2] ReadLine EOF            PASS");
         } else {
             Println!("[ 2] ReadLine EOF            FAIL");
@@ -173,7 +173,7 @@ fn main() {
         let br = bufio::NewReader(buf);
         let mut r = textproto::NewReader(br);
         let (h, err) = r.ReadMIMEHeader();
-        if errors::Is(err, io::EOF()) && h.Len() == 0 {
+        if errors::Is(err, io::EOF) && h.Len() == 0 {
             Println!("[ 9] MIMEHeader empty input  PASS");
         } else {
             Println!("[ 9] MIMEHeader empty input  FAIL");

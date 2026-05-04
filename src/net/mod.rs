@@ -413,7 +413,7 @@ impl io::Reader for Conn {
             let n = syscall::Read(self.fd, ptr, len);
             if n >= 0 {
                 if n == 0 {
-                    return (0, io::EOF());
+                    return (0, io::EOF.into());
                 }
                 return (n as int, errors::nil);
             }

@@ -99,7 +99,7 @@ fn main() {
         let mut dec = base64::NewDecoder(base64::StdEncoding, src);
         let mut out = goish::make!([]byte, 8);
         let (n, err) = dec.Read(&mut out);
-        let eof = io::EOF();
+        let eof = io::EOF;
         if n == 0 && goish::errors::Is(err, eof) {
             Println!("[ 4] Decoder empty input → EOF  PASS");
         } else {
@@ -195,7 +195,7 @@ fn main() {
         let mut out = goish::make!([]byte, 8);
         let (_n, err) = dec.Read(&mut out);
         // Must surface a non-nil, non-EOF error (corrupt input).
-        let eof = io::EOF();
+        let eof = io::EOF;
         if !err.IsNil() && !goish::errors::Is(err.clone(), eof) {
             Println!("[ 9] Decoder corrupt input      PASS");
         } else {

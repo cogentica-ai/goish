@@ -60,47 +60,44 @@ pub const O_TRUNC: i32 = 0o1000;
 pub const PathSeparator: u8 = b'/';
 pub const PathListSeparator: u8 = b':';
 
-/// `os.ErrClosed` (os/error.go:24) — "file already closed".
-pub fn ErrClosed() -> error {
-    errors::New("file already closed")
-}
+// os sentinels — Doctrine 2 marker form. Identity-stable, so
+// `errors::Is(err, os::ErrNotExist)` works across the program.
+// (Previous fn-form returned a fresh errors::New() each call — the
+// Is() check could spuriously fail for sentinels stored at module
+// boundary.)
+crate::var! {
+    /// `os.ErrInvalid` (os/error.go:19) — "invalid argument".
+    pub ErrInvalid: error    = "invalid argument";
 
-/// `os.ErrInvalid` (os/error.go:19) — "invalid argument".
-pub fn ErrInvalid() -> error {
-    errors::New("invalid argument")
-}
+    /// `os.ErrPermission` (os/error.go:21) — "permission denied".
+    pub ErrPermission: error = "permission denied";
 
-/// `os.ErrPermission` (os/error.go:21) — "permission denied".
-pub fn ErrPermission() -> error {
-    errors::New("permission denied")
-}
+    /// `os.ErrExist` (os/error.go:22) — "file already exists".
+    pub ErrExist: error      = "file already exists";
 
-/// `os.ErrExist` (os/error.go:22) — "file already exists".
-pub fn ErrExist() -> error {
-    errors::New("file already exists")
-}
+    /// `os.ErrNotExist` (os/error.go:23) — "file does not exist".
+    pub ErrNotExist: error   = "file does not exist";
 
-/// `os.ErrNotExist` (os/error.go:23) — "file does not exist".
-pub fn ErrNotExist() -> error {
-    errors::New("file does not exist")
+    /// `os.ErrClosed` (os/error.go:24) — "file already closed".
+    pub ErrClosed: error     = "file already closed";
 }
 
 /// `os.IsNotExist(err)` (os/error.go:91) — reports whether `err` is known
 /// to report that a file or directory does not exist.
 pub fn IsNotExist(err: error) -> bool {
-    err == ErrNotExist()
+    err == ErrNotExist
 }
 
 /// `os.IsExist(err)` (os/error.go:80) — reports whether `err` is known to
 /// report that a file or directory already exists.
 pub fn IsExist(err: error) -> bool {
-    err == ErrExist()
+    err == ErrExist
 }
 
 /// `os.IsPermission(err)` (os/error.go:100) — reports whether `err` is
 /// known to report that permission is denied.
 pub fn IsPermission(err: error) -> bool {
-    err == ErrPermission()
+    err == ErrPermission
 }
 
 /// `os.PathError` (os/error.go:46) — records an error and the operation
@@ -225,10 +222,10 @@ pub fn OpenFile<N: Into<string>>(name: N, flag: i32, perm: u32) -> (File, error)
     buf.push(0);
     let fd = syscall::Open(buf.as_ptr(), flag | syscall::O_CLOEXEC, perm as i32);
     if fd < 0 {
-        let err = if -fd == syscall::ENOENT {
-            ErrNotExist()
+        let err: error = if -fd == syscall::ENOENT {
+            ErrNotExist.into()
         } else if -fd == syscall::EEXIST {
-            ErrExist()
+            ErrExist.into()
         } else {
             errors::New(string("open failed"))
         };
@@ -253,8 +250,8 @@ pub fn Stat<N: Into<string>>(name: N) -> (FileInfo, error) {
     let mut st = syscall::Stat_t::default();
     let rc = syscall::Stat(buf.as_ptr(), &mut st);
     if rc < 0 {
-        let err = if -rc == syscall::ENOENT {
-            ErrNotExist()
+        let err: error = if -rc == syscall::ENOENT {
+            ErrNotExist.into()
         } else {
             errors::New(string("stat failed"))
         };
@@ -415,7 +412,7 @@ pub fn ReadFile<N: Into<string>>(name: N) -> (slice<byte>, error) {
             got += n;
         }
         if !rerr.IsNil() {
-            if crate::errors::Is(rerr.clone(), crate::io::EOF()) {
+            if crate::errors::Is(rerr.clone(), crate::io::EOF) {
                 break;
             }
             let _ = f.Close();
@@ -1266,7 +1263,7 @@ impl File {
     /// Does not change the current file offset.
     pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
         if self.fd < 0 {
-            return (0, ErrClosed());
+            return (0, ErrClosed.into());
         }
         let len = p.len();
         let ptr = p.as_mut_ptr();
@@ -1274,7 +1271,7 @@ impl File {
         if n < 0 {
             (0, errors::New("read failed"))
         } else if n == 0 {
-            (0, io::EOF())
+            (0, io::EOF.into())
         } else {
             (n as int, nil)
         }
@@ -1284,7 +1281,7 @@ impl File {
     /// Does not change the current file offset.
     pub fn WriteAt(&mut self, p: slice<byte>, off: i64) -> (int, error) {
         if self.fd < 0 {
-            return (0, ErrClosed());
+            return (0, ErrClosed.into());
         }
         let n = syscall::Pwrite64(self.fd, p.as_ptr(), p.len(), off);
         if n < 0 {
@@ -1297,7 +1294,7 @@ impl File {
     /// `f.Truncate(size)` — truncate file to given size.
     pub fn Truncate(&mut self, size: int) -> error {
         if self.fd < 0 {
-            return ErrClosed();
+            return ErrClosed.into();
         }
         let rc = syscall::Ftruncate(self.fd, size as i64);
         if rc < 0 {
@@ -1329,7 +1326,7 @@ impl io::Reader for File {
             (0, errors::New("read failed"))
         } else if n == 0 {
             // Convention: Read returns (0, EOF) on end-of-input.
-            (0, io::EOF())
+            (0, io::EOF.into())
         } else {
             (n as int, nil)
         }

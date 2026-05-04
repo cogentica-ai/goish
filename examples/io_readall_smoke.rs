@@ -58,7 +58,7 @@ fn main() {
         let mut r = strings::NewReader(string("abc"));
         let mut p = goish::make!([]byte, 8);
         let (n, err) = io::ReadFull(&mut r, &mut p);
-        let want = io::ErrUnexpectedEOF();
+        let want = io::ErrUnexpectedEOF;
         if !err.IsNil() && err == want && n == 3 {
             Println!("[ 4] ReadFull unexpected EOF   PASS");
         } else {
@@ -72,7 +72,7 @@ fn main() {
         let mut r = strings::NewReader(string("data"));
         let mut p = goish::make!([]byte, 2);
         let (n, err) = io::ReadAtLeast(&mut r, &mut p, 5);
-        let want = io::ErrShortBuffer();
+        let want = io::ErrShortBuffer;
         if !err.IsNil() && err == want && n == 0 {
             Println!("[ 5] ReadAtLeast short buf     PASS");
         } else {
@@ -112,7 +112,7 @@ fn main() {
         let mut r = strings::NewReader(string("ab"));
         let mut buf = bytes::NewBuffer(goish::make!([]byte, 0));
         let (n, err) = io::CopyN(&mut buf, &mut r, 5);
-        let want = io::EOF();
+        let want = io::EOF;
         if !err.IsNil() && err == want && n == 2 {
             Println!("[ 8] CopyN short src=EOF       PASS");
         } else {

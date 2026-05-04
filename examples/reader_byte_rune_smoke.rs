@@ -25,7 +25,7 @@ fn main() {
         let (b1, e1) = r.ReadByte();
         let (b2, e2) = r.ReadByte();
         let (_, e3) = r.ReadByte();
-        if e1.IsNil() && e2.IsNil() && b1 == b'A' && b2 == b'B' && goish::errors::Is(e3, io::EOF()) {
+        if e1.IsNil() && e2.IsNil() && b1 == b'A' && b2 == b'B' && goish::errors::Is(e3, io::EOF) {
             Println!("[ 1] bytes.Reader ReadByte     PASS");
         } else {
             Println!("[ 1] bytes.Reader ReadByte     FAIL");

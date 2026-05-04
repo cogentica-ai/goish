@@ -247,7 +247,7 @@ pub fn ReadResponse<R: Reader>(
         let body = make!([]byte, 0);
         let mut cr = super::chunked::NewChunkedReader(BufioPassthrough { inner: br });
         let (b, err) = drain_to_eof(&mut cr, body);
-        if !err.IsNil() && !errors::Is(err.clone(), io::EOF()) {
+        if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
             return (resp, err);
         }
         resp.Body = b;
@@ -262,7 +262,7 @@ pub fn ReadResponse<R: Reader>(
         let mut body = make!([]byte, want);
         // Go: io.ReadFull(r, body)
         let (got, ferr) = read_full_into(br, &mut body);
-        if !ferr.IsNil() && !errors::Is(ferr.clone(), io::EOF()) {
+        if !ferr.IsNil() && !errors::Is(ferr.clone(), io::EOF) {
             return (resp, ferr);
         }
         if got < want {
@@ -274,7 +274,7 @@ pub fn ReadResponse<R: Reader>(
         resp.ContentLength = -1;
         let body = make!([]byte, 0);
         let (b, err) = drain_to_eof(br, body);
-        if !err.IsNil() && !errors::Is(err.clone(), io::EOF()) {
+        if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
             return (resp, err);
         }
         resp.Body = b;
@@ -323,7 +323,7 @@ fn read_full_into<R: Reader>(r: &mut bufio::Reader<R>, buf: &mut slice<byte>) ->
             return (got, rerr);
         }
         if rn == 0 {
-            return (got, io::EOF());
+            return (got, io::EOF.into());
         }
     }
     (got, errors::nil)

@@ -164,8 +164,8 @@ impl<R: io::Reader> Reader<R> {
             let (code, err) = self.read_code();
             if !err.IsNil() {
                 // Go: if err == io.EOF { err = io.ErrUnexpectedEOF }
-                self.err = if errors::Is(err.clone(), io::EOF()) {
-                    io::ErrUnexpectedEOF()
+                self.err = if errors::Is(err.clone(), io::EOF) {
+                    io::ErrUnexpectedEOF.into()
                 } else {
                     err
                 };
@@ -190,7 +190,7 @@ impl<R: io::Reader> Reader<R> {
                 continue;
             } else if code == self.eof_ {
                 // case code == r.eof (reader.go:167-169)
-                self.err = io::EOF();
+                self.err = io::EOF.into();
                 break;
             } else if code <= self.hi {
                 // case code <= r.hi (reader.go:170-196)

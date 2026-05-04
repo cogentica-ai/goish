@@ -18,6 +18,11 @@
 // `extern crate alloc;` to their root.
 extern crate alloc;
 
+// Self-alias so proc-macros (e.g. `goish::var!` from `goish-macros`) that
+// emit `::goish::...` paths resolve correctly when expanded INSIDE this
+// crate. External users get the same name via the crate's package name.
+extern crate self as goish;
+
 // Hidden re-export so `make!`/`slice!`/`append!` macros can reach Vec
 // from inside user binaries that haven't added `extern crate alloc;`.
 // Users never write this path directly.

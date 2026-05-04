@@ -190,7 +190,7 @@ fn main() {
     {
         let e1 = mail::ErrHeaderNotPresent();
         let e2 = mail::ErrHeaderNotPresent();
-        if errors::Is(e1.clone(), e2.clone()) && !errors::Is(e1, io::EOF()) {
+        if errors::Is(e1.clone(), e2.clone()) && !errors::Is(e1, io::EOF) {
             Println!("[10] ErrHeaderNotPresent     PASS");
         } else {
             Println!("[10] ErrHeaderNotPresent     FAIL");

@@ -140,8 +140,8 @@ fn main() {
 
     // 7. Existing errors::Is still works after Any supertrait change.
     {
-        let sentinel = errors::ErrUnsupported();
-        let same = errors::ErrUnsupported();
+        let sentinel: error = errors::ErrUnsupported.into();
+        let same: error = errors::ErrUnsupported.into();
         if errors::Is(sentinel, same) {
             Println!("[ 7] Is still works          PASS");
         } else {

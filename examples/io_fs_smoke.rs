@@ -110,7 +110,7 @@ fn main() {
         let pe = fs::PathError {
             Op: string("open"),
             Path: string("/foo"),
-            Err: fs::ErrNotExist(),
+            Err: fs::ErrNotExist.into(),
         };
         let e = errors::Wrap(pe);
         let msg = e.Error();
@@ -127,10 +127,10 @@ fn main() {
         let pe = fs::PathError {
             Op: string("open"),
             Path: string("/x"),
-            Err: fs::ErrPermission(),
+            Err: fs::ErrPermission.into(),
         };
         let e = errors::Wrap(pe);
-        if errors::Is(e, fs::ErrPermission()) {
+        if errors::Is(e, fs::ErrPermission) {
             Println!("[ 8] PathError chains Is     PASS");
         } else {
             Println!("[ 8] PathError chains Is     FAIL");
@@ -140,9 +140,9 @@ fn main() {
 
     // 9. Sentinel singletons compare equal across calls.
     {
-        let a = fs::ErrNotExist();
-        let b = fs::ErrNotExist();
-        let c = fs::ErrInvalid();
+        let a: errors::error = fs::ErrNotExist.into();
+        let b: errors::error = fs::ErrNotExist.into();
+        let c: errors::error = fs::ErrInvalid.into();
         if a == b && a != c {
             Println!("[ 9] Sentinel identity       PASS");
         } else {

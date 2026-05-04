@@ -89,6 +89,9 @@ impl FmtBuf {
     fn into_bytes(self) -> Vec<byte> {
         self.buf
     }
+    pub(crate) fn as_slice(&self) -> &[byte] {
+        &self.buf
+    }
 }
 
 // ─── FmtArg — the autoref-spec dispatch envelope ──────────────────────
@@ -581,14 +584,28 @@ fn write_reflect_value(v: &crate::reflect::Value, plus: bool, f: &mut FmtBuf) {
         }
         K::Map => {
             f.extend(b"map[");
+            // Go's fmt.Sprintf("%v"/"%+v") sorts map keys deterministically
+            // (since Go 1.12). Sort the goish reflect-MapKeys output by
+            // formatted-key bytes so output matches Go semantics regardless
+            // of gomap's randomized iteration order.
             let keys = v.MapKeys();
-            for (i, k) in keys.iter().enumerate() {
-                if i > 0 {
+            let mut key_strs: alloc::vec::Vec<(usize, FmtBuf)> = keys
+                .iter()
+                .enumerate()
+                .map(|(i, k)| {
+                    let mut buf = FmtBuf::new();
+                    write_reflect_value(k, plus, &mut buf);
+                    (i, buf)
+                })
+                .collect();
+            key_strs.sort_by(|a, b| a.1.as_slice().cmp(b.1.as_slice()));
+            for (n, (orig_idx, key_buf)) in key_strs.iter().enumerate() {
+                if n > 0 {
                     f.push(b' ');
                 }
-                write_reflect_value(k, plus, f);
+                f.extend(key_buf.as_slice());
                 f.push(b':');
-                let val = v.MapIndex(k);
+                let val = v.MapIndex(&keys[*orig_idx as int]);
                 write_reflect_value(&val, plus, f);
             }
             f.push(b']');

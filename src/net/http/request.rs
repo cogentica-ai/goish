@@ -530,7 +530,7 @@ pub fn ReadRequestWithLimit<R: io::Reader>(
                 }
             }
             if !err.IsNil() {
-                if errors::Is(err.clone(), io::EOF()) {
+                if errors::Is(err.clone(), io::EOF) {
                     break;
                 }
                 return (req, err);
@@ -915,8 +915,8 @@ impl errors::ErrorTrait for __ErrNotSupported {
     }
     fn Unwrap(&self) -> error {
         // Goish chain: walk to errors.ErrUnsupported so callers using
-        // `errors::Is(err, errors::ErrUnsupported())` succeed.
-        crate::errors::ErrUnsupported()
+        // `errors::Is(err, errors::ErrUnsupported)` succeed.
+        crate::errors::ErrUnsupported.into()
     }
 }
 

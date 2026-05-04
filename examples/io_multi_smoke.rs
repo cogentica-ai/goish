@@ -48,7 +48,7 @@ fn main() {
         let mut mr = io::MultiReader(readers);
         let mut p = goish::make!([]byte, 4);
         let (n, err) = mr.Read(&mut p);
-        let eof = io::EOF();
+        let eof = io::EOF;
         if n == 0 && err == eof {
             Println!("[ 2] MultiReader empty=EOF     PASS");
         } else {
@@ -104,7 +104,7 @@ fn main() {
         let mut p3 = goish::make!([]byte, 2);
         let (n3, e3) = mr.Read(&mut p3);
 
-        let eof = io::EOF();
+        let eof = io::EOF;
         // First two reads should yield 2 bytes each, third should be EOF.
         if n1 == 2 && e1.IsNil()
             && n2 == 2 && (e2.IsNil() || e2 == eof.clone())

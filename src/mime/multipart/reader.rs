@@ -98,10 +98,10 @@ pub fn NewReader<B: Into<string>>(body: slice<byte>, boundary: B) -> Reader {
 
 impl Reader {
     /// `(*Reader).NextPart()` (multipart.go:343) — return the next
-    /// part. Returns `io::EOF()` after the last part.
+    /// part. Returns `io::EOF` after the last part.
     pub fn NextPart(&mut self) -> (Part, error) {
         if self.finished {
-            return (empty_part(), io::EOF());
+            return (empty_part(), io::EOF.into());
         }
         let body_bytes = body_as_slice(&self.body);
         let dash_boundary_bytes: Vec<u8> = make_dash_boundary(&self.boundary);
@@ -123,7 +123,7 @@ impl Reader {
                     Some(off) => p += off + crlf_dash_boundary_bytes.len(),
                     None => {
                         self.finished = true;
-                        return (empty_part(), io::EOF());
+                        return (empty_part(), io::EOF.into());
                     }
                 }
             }
@@ -139,7 +139,7 @@ impl Reader {
             && &body_bytes[p..p + close_marker.len()] == close_marker
         {
             self.finished = true;
-            return (empty_part(), io::EOF());
+            return (empty_part(), io::EOF.into());
         }
 
         // 3. Skip transport-padding + CRLF after the boundary line.

@@ -562,7 +562,7 @@ impl crate::io::Reader for Reader {
             p.Len()
         };
         if want == 0 {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         let mut tmp = crate::make!([]byte, want);
         let (n, mut err) = self.r.Read(&mut tmp);
@@ -571,12 +571,12 @@ impl crate::io::Reader for Reader {
         }
         self.nb -= n as i64;
         if err.IsNil() && self.nb == 0 {
-            err = io::EOF();
+            err = io::EOF.into();
         }
-        if err == io::EOF() && self.nb > 0 {
-            err = io::ErrUnexpectedEOF();
+        if err == io::EOF && self.nb > 0 {
+            err = io::ErrUnexpectedEOF.into();
         }
-        if !err.IsNil() && err != io::EOF() {
+        if !err.IsNil() && err != io::EOF {
             self.err = err.clone();
         }
         (n, err)
@@ -628,8 +628,8 @@ impl Reader {
             let mut tmp2 = crate::make!([]byte, 512);
             let (_, err2) = crate::io::ReadFull(&mut *self.r, &mut tmp2);
             if !err2.IsNil() {
-                if err2 == io::EOF() {
-                    return (Header::new(), io::EOF());
+                if err2 == io::EOF {
+                    return (Header::new(), io::EOF.into());
                 }
                 return (Header::new(), err2);
             }
@@ -640,7 +640,7 @@ impl Reader {
                 i += 1;
             }
             if blk2.isZero() {
-                return (Header::new(), io::EOF());
+                return (Header::new(), io::EOF.into());
             }
             return (Header::new(), ErrHeader());
         }
@@ -1014,8 +1014,8 @@ fn discard(r: &mut dyn crate::io::Reader, n: i64) -> error {
     }
     let mut discarder = crate::io::DiscardWriter();
     let (_, mut err) = crate::io::CopyN(&mut discarder, r, n);
-    if err == io::EOF() {
-        err = io::ErrUnexpectedEOF();
+    if err == io::EOF {
+        err = io::ErrUnexpectedEOF.into();
     }
     err
 }
@@ -1034,7 +1034,7 @@ fn tryReadFull(r: &mut dyn crate::io::Reader, buf: &mut slice<byte>) -> (int, er
         n += nn;
         err = e;
     }
-    if total == n && err == io::EOF() {
+    if total == n && err == io::EOF {
         err = nil;
     }
     (n, err)
@@ -1042,8 +1042,8 @@ fn tryReadFull(r: &mut dyn crate::io::Reader, buf: &mut slice<byte>) -> (int, er
 
 fn mustReadFull(r: &mut dyn crate::io::Reader, buf: &mut slice<byte>) -> (int, error) {
     let (n, mut err) = tryReadFull(r, buf);
-    if err == io::EOF() {
-        err = io::ErrUnexpectedEOF();
+    if err == io::EOF {
+        err = io::ErrUnexpectedEOF.into();
     }
     (n, err)
 }

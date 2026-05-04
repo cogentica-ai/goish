@@ -28,7 +28,7 @@ impl MemReader {
 impl io::Reader for MemReader {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, goish::error) {
         if self.pos >= self.data.len() {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         let want = (p.Len() as usize).min(self.data.len() - self.pos);
         let mut i: int = 0;
@@ -142,7 +142,7 @@ fn main() {
 
     // End of archive: expect EOF
     let (_, err) = tr.Next();
-    check(err == io::EOF(), b"tar: expected EOF at end of archive\n");
+    check(err == io::EOF, b"tar: expected EOF at end of archive\n");
 
     const OK: &[u8] = b"archive/tar: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

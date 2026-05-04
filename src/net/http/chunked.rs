@@ -20,7 +20,7 @@
 //     are synchronous (no userspace buffering layer between the chunked
 //     writer and the TCP send), so per-chunk flush is automatic.
 //   * Errors are returned as goish `error` values rather than typed
-//     `io.ErrUnexpectedEOF` etc.; `errors::Is(err, io::EOF())` keeps
+//     `io.ErrUnexpectedEOF` etc.; `errors::Is(err, io::EOF)` keeps
 //     working through `cached_error` Arc-pointer identity.
 
 #![allow(non_snake_case)]
@@ -138,7 +138,7 @@ impl<R: Reader> ChunkedReader<R> {
             return;
         }
         if self.n == 0 {
-            self.err = io::EOF();
+            self.err = io::EOF.into();
         }
     }
 
@@ -173,8 +173,8 @@ impl<R: Reader> Reader for ChunkedReader<R> {
                 let mut buf = slice::<byte>::__from_vec(alloc::vec![0u8; 2]);
                 let (rn, rerr) = io_read_full(&mut self.r, &mut buf);
                 if !rerr.IsNil() || rn != 2 {
-                    self.err = if errors::Is(rerr.clone(), io::EOF()) {
-                        io::ErrUnexpectedEOF()
+                    self.err = if errors::Is(rerr.clone(), io::EOF) {
+                        io::ErrUnexpectedEOF.into()
                     } else {
                         rerr
                     };
@@ -209,8 +209,8 @@ impl<R: Reader> Reader for ChunkedReader<R> {
             n += rn;
             self.n -= rn as u64;
             if !rerr.IsNil() {
-                if errors::Is(rerr.clone(), io::EOF()) {
-                    self.err = io::ErrUnexpectedEOF();
+                if errors::Is(rerr.clone(), io::EOF) {
+                    self.err = io::ErrUnexpectedEOF.into();
                 } else {
                     self.err = rerr;
                 }
@@ -242,7 +242,7 @@ fn io_read_full<R: Reader>(r: &mut R, buf: &mut slice<byte>) -> (int, error) {
             return (n, err);
         }
         if rn == 0 {
-            return (n, io::EOF());
+            return (n, io::EOF.into());
         }
     }
     (n, errors::nil)
@@ -256,9 +256,9 @@ fn read_chunk_line<R: Reader>(b: &mut bufio::Reader<R>) -> (slice<byte>, error) 
     if !err.IsNil() {
         // Go: if err == io.EOF { err = io.ErrUnexpectedEOF }
         // Go: else if err == bufio.ErrBufferFull { err = ErrLineTooLong }
-        let mapped = if errors::Is(err.clone(), io::EOF()) {
-            io::ErrUnexpectedEOF()
-        } else if errors::Is(err.clone(), bufio::ErrBufferFull()) {
+        let mapped = if errors::Is(err.clone(), io::EOF) {
+            io::ErrUnexpectedEOF.into()
+        } else if errors::Is(err.clone(), bufio::ErrBufferFull) {
             err_line_too_long()
         } else {
             err
@@ -362,7 +362,7 @@ impl<W: Writer> Writer for ChunkedWriter<W> {
         }
         // Go: if n != len(data) { err = io.ErrShortWrite; return }
         if n != want {
-            return (n, io::ErrShortWrite());
+            return (n, io::ErrShortWrite.into());
         }
         // Go: if _, err = io.WriteString(cw.Wire, "\r\n"); err != nil { return }
         let (_, terr) = self.Wire.Write(crate::convert::bytes("\r\n"));

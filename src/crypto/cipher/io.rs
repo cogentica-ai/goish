@@ -118,7 +118,7 @@ impl<S: Stream, W: io::Writer> io::Writer for StreamWriter<S, W> {
         let (n, err) = self.W.Write(c);
         // Go: if n != len(src) && err == nil { err = io.ErrShortWrite }
         if n != n_src && err.IsNil() {
-            return (n, io::ErrShortWrite());
+            return (n, io::ErrShortWrite.into());
         }
         // Go: return
         (n, err)

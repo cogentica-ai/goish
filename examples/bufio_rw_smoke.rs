@@ -43,7 +43,7 @@ fn main() {
         // EOF on next call: empty payload + io.EOF
         let (line, err) = r.ReadString(b'\n');
         check(line == "", b"r1: trailing line non-empty\n");
-        check(errors::Is(err, io::EOF()), b"r1: trailing err not EOF\n");
+        check(errors::Is(err, io::EOF), b"r1: trailing err not EOF\n");
     }
 
     // ─── Reader: trailing line without newline ───────────────────────
@@ -58,7 +58,7 @@ fn main() {
         // Last line: payload "two", err = io.EOF (no delim found).
         let (line, err) = r.ReadString(b'\n');
         check(line == "two", b"r2: trailing payload wrong\n");
-        check(errors::Is(err, io::EOF()), b"r2: trailing err not EOF\n");
+        check(errors::Is(err, io::EOF), b"r2: trailing err not EOF\n");
     }
 
     // ─── Reader: ReadByte / UnreadByte ───────────────────────────────

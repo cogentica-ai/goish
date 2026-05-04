@@ -721,11 +721,11 @@ impl Buffer {
     }
 
     /// Read up to `len(p)` bytes from the buffer into `p`. Returns
-    /// `(0, io::EOF())` when exhausted, matching Go.
+    /// `(0, io::EOF)` when exhausted, matching Go.
     pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         self.last_rune_size = 0;
         if self.off >= self.buf.len() {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         let want = (p.Len() as usize).min(self.buf.len() - self.off);
         for i in 0..want {
@@ -765,7 +765,7 @@ impl Buffer {
         // Go: if b.empty() { b.Reset(); return 0, 0, io.EOF }
         if self.off >= self.buf.len() {
             self.Reset();
-            return (0, 0, io::EOF());
+            return (0, 0, io::EOF.into());
         }
         // Go: c := b.buf[b.off]
         let c = self.buf[self.off];
@@ -827,7 +827,7 @@ impl Buffer {
         // Go: if b.empty() { b.Reset(); return 0, io.EOF }
         if self.off >= self.buf.len() {
             self.Reset();
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         // Go: c := b.buf[b.off]; b.off++
         let c = self.buf[self.off];
@@ -862,7 +862,7 @@ impl Buffer {
             }
         }
         let (end, err) = if i < 0 {
-            (self.buf.len(), io::EOF())
+            (self.buf.len(), io::EOF.into())
         } else {
             (self.off + i as usize + 1, nil)
         };
@@ -900,7 +900,7 @@ impl Buffer {
             let raw: &[byte] = &scratch;
             self.buf.extend_from_slice(&raw[..m as usize]);
             n += m as i64;
-            if crate::errors::Is(e.clone(), io::EOF()) {
+            if crate::errors::Is(e.clone(), io::EOF) {
                 return (n, nil);
             }
             if !e.IsNil() {
@@ -930,7 +930,7 @@ impl Buffer {
             // all bytes should have been written, by definition of
             // Write method in io.Writer
             if m as int != nbytes {
-                return (n, io::ErrShortWrite());
+                return (n, io::ErrShortWrite.into());
             }
         }
         // Buffer is now empty; reset.
@@ -1046,7 +1046,7 @@ impl Reader {
     pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         self.prev_rune = -1;
         if self.i >= self.s.len() {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         let want = (p.Len() as usize).min(self.s.len() - self.i);
         for k in 0..want {
@@ -1069,7 +1069,7 @@ impl Reader {
         self.prev_rune = -1;
         // Go: if r.i >= int64(len(r.s)) { return 0, io.EOF }
         if self.i >= self.s.len() {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         // Go: b := r.s[r.i]; r.i++; return b, nil
         let b = self.s[self.i];
@@ -1096,7 +1096,7 @@ impl Reader {
         // Go: if r.i >= int64(len(r.s)) { r.prevRune = -1; return 0, 0, io.EOF }
         if self.i >= self.s.len() {
             self.prev_rune = -1;
-            return (0, 0, io::EOF());
+            return (0, 0, io::EOF.into());
         }
         // Go: r.prevRune = int(r.i)
         self.prev_rune = self.i as i64;
@@ -1176,7 +1176,7 @@ impl Reader {
         let n = m as i64;
         // if m != len(b) && err == nil { err = io.ErrShortWrite }
         if m != blen && err.IsNil() {
-            return (n, io::ErrShortWrite());
+            return (n, io::ErrShortWrite.into());
         }
         (n, err)
     }
@@ -1188,7 +1188,7 @@ impl Reader {
             return (0, crate::errors::New("bytes.Reader.ReadAt: negative offset"));
         }
         if off >= self.s.len() as i64 {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         let start = off as usize;
         let want = (p.Len() as usize).min(self.s.len() - start);
@@ -1197,7 +1197,7 @@ impl Reader {
         }
         // Go: if n < len(p) { err = io.EOF }
         if want < p.Len() as usize {
-            return (want as int, io::EOF());
+            return (want as int, io::EOF.into());
         }
         (want as int, nil)
     }

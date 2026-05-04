@@ -16,6 +16,7 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::error;
 use goish::errors;
 use goish::net::http;
 use goish::{syscall, Println};
@@ -49,7 +50,7 @@ fn main() {
 
     // 3. ErrNotSupported chains to errors.ErrUnsupported.
     {
-        if errors::Is(http::ErrNotSupported(), errors::ErrUnsupported()) {
+        if errors::Is(http::ErrNotSupported(), errors::ErrUnsupported) {
             Println!("[ 3] ErrNotSupported→ErrUnsup  PASS");
         } else {
             Println!("[ 3] ErrNotSupported→ErrUnsup  FAIL");
@@ -107,10 +108,10 @@ fn main() {
     // 8. Non-ErrNotSupported sentinels do NOT chain to ErrUnsupported.
     {
         let any_chain =
-               errors::Is(http::ErrUnexpectedTrailer(), errors::ErrUnsupported())
-            || errors::Is(http::ErrHeaderTooLong(),     errors::ErrUnsupported())
-            || errors::Is(http::ErrShortBody(),         errors::ErrUnsupported())
-            || errors::Is(http::ErrMissingContentLength(), errors::ErrUnsupported());
+               errors::Is(http::ErrUnexpectedTrailer(), errors::ErrUnsupported)
+            || errors::Is(http::ErrHeaderTooLong(),     errors::ErrUnsupported)
+            || errors::Is(http::ErrShortBody(),         errors::ErrUnsupported)
+            || errors::Is(http::ErrMissingContentLength(), errors::ErrUnsupported);
         if !any_chain {
             Println!("[ 8] other sentinels !ErrUnsup PASS");
         } else {
@@ -136,7 +137,7 @@ fn main() {
     {
         let pe = http::ProtocolError { ErrorString: goish::string("feature not supported") };
         let e: errors::error = errors::Wrap(pe);
-        if !errors::Is(e, errors::ErrUnsupported()) {
+        if !errors::Is(e, errors::ErrUnsupported) {
             Println!("[10] user pe !ErrUnsup chain   PASS");
         } else {
             Println!("[10] user pe !ErrUnsup chain   FAIL");
@@ -158,8 +159,8 @@ fn main() {
 
     // 12. errors.ErrUnsupported is itself stable.
     {
-        let a = errors::ErrUnsupported();
-        let b = errors::ErrUnsupported();
+        let a: error = errors::ErrUnsupported.into();
+        let b: error = errors::ErrUnsupported.into();
         if !a.IsNil() && a.Error() == "unsupported operation" && errors::Is(a, b) {
             Println!("[12] errors.ErrUnsupported     PASS");
         } else {

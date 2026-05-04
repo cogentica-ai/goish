@@ -74,57 +74,16 @@ fn cached_error(slot: &SpinLock<Option<error>>, init: fn() -> error) -> error {
     g.as_ref().unwrap().clone()
 }
 
-pub fn ErrTooLong() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("bufio.Scanner: token too long"))
-}
-
-pub fn ErrNegativeAdvance() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || {
-        errors::New("bufio.Scanner: SplitFunc returns negative advance count")
-    })
-}
-
-pub fn ErrAdvanceTooFar() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || {
-        errors::New("bufio.Scanner: SplitFunc returns advance count beyond input")
-    })
-}
-
-pub fn ErrBadReadCount() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || {
-        errors::New("bufio.Scanner: Read returned impossible count")
-    })
-}
-
-pub fn ErrNoProgress() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || {
-        errors::New("multiple Read calls return no data or error")
-    })
-}
-
-pub fn ErrInvalidUnreadByte() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("bufio: invalid use of UnreadByte"))
-}
-
-pub fn ErrInvalidUnreadRune() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("bufio: invalid use of UnreadRune"))
-}
-
-pub fn ErrBufferFull() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("bufio: buffer full"))
-}
-
-pub fn ErrNegativeCount() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("bufio: negative count"))
+crate::var! {
+    pub ErrTooLong: error            = "bufio.Scanner: token too long";
+    pub ErrNegativeAdvance: error    = "bufio.Scanner: SplitFunc returns negative advance count";
+    pub ErrAdvanceTooFar: error      = "bufio.Scanner: SplitFunc returns advance count beyond input";
+    pub ErrBadReadCount: error       = "bufio.Scanner: Read returned impossible count";
+    pub ErrNoProgress: error         = "multiple Read calls return no data or error";
+    pub ErrInvalidUnreadByte: error  = "bufio: invalid use of UnreadByte";
+    pub ErrInvalidUnreadRune: error  = "bufio: invalid use of UnreadRune";
+    pub ErrBufferFull: error         = "bufio: buffer full";
+    pub ErrNegativeCount: error      = "bufio: negative count";
 }
 
 fn err_negative_write() -> error {
@@ -198,7 +157,7 @@ impl<R: io::Reader> Scanner<R> {
 
     /// First non-EOF error encountered. `nil` if scanning ended cleanly.
     pub fn Err(&self) -> error {
-        if errors::Is(self.err.clone(), io::EOF()) {
+        if errors::Is(self.err.clone(), io::EOF) {
             return nil;
         }
         self.err.clone()
@@ -230,18 +189,18 @@ impl<R: io::Reader> Scanner<R> {
     }
 
     fn set_err(&mut self, e: error) {
-        if self.err == nil || errors::Is(self.err.clone(), io::EOF()) {
+        if self.err == nil || errors::Is(self.err.clone(), io::EOF) {
             self.err = e;
         }
     }
 
     fn advance(&mut self, n: int) -> bool {
         if n < 0 {
-            self.set_err(ErrNegativeAdvance());
+            self.set_err(ErrNegativeAdvance.into());
             return false;
         }
         if (n as usize) > self.end - self.start {
-            self.set_err(ErrAdvanceTooFar());
+            self.set_err(ErrAdvanceTooFar.into());
             return false;
         }
         self.start += n as usize;
@@ -298,7 +257,7 @@ impl<R: io::Reader> Scanner<R> {
             // Grow if full.
             if self.end == self.buf.len() {
                 if self.buf.len() >= self.max_token_size as usize {
-                    self.set_err(ErrTooLong());
+                    self.set_err(ErrTooLong.into());
                     return false;
                 }
                 let mut new_size = self.buf.len() * 2;
@@ -321,7 +280,7 @@ impl<R: io::Reader> Scanner<R> {
                 });
                 let (n_io, read_err) = self.r.Read(&mut tmp);
                 if n_io < 0 || (n_io as usize) > want {
-                    self.set_err(ErrBadReadCount());
+                    self.set_err(ErrBadReadCount.into());
                     break;
                 }
                 if n_io > 0 {
@@ -340,7 +299,7 @@ impl<R: io::Reader> Scanner<R> {
                 }
                 loop_count += 1;
                 if loop_count > maxConsecutiveEmptyReads {
-                    self.set_err(ErrNoProgress());
+                    self.set_err(ErrNoProgress.into());
                     break;
                 }
             }
@@ -563,7 +522,7 @@ impl<R: io::Reader> Reader<R> {
             }
             tries -= 1;
         }
-        self.err = io::ErrUnexpectedEOF();
+        self.err = io::ErrUnexpectedEOF.into();
         // Go uses io.ErrNoProgress; mirror it.
         self.err = errors::New("multiple Read calls return no data or error");
     }
@@ -572,7 +531,7 @@ impl<R: io::Reader> Reader<R> {
     /// Err is `ErrBufferFull` if n exceeds buffer size.
     pub fn Peek(&mut self, n: int) -> (slice<byte>, error) {
         if n < 0 {
-            return (slice::new(), ErrNegativeCount());
+            return (slice::new(), ErrNegativeCount.into());
         }
         self.last_byte = -1;
         self.last_rune_size = -1;
@@ -585,7 +544,7 @@ impl<R: io::Reader> Reader<R> {
         if (n as usize) > self.buf.len() {
             return (
                 slice::__from_vec(self.buf[self.r..self.w].to_vec()),
-                ErrBufferFull(),
+                ErrBufferFull.into(),
             );
         }
         let avail = self.w - self.r;
@@ -595,7 +554,7 @@ impl<R: io::Reader> Reader<R> {
             out_n = avail;
             err = self.read_err();
             if err == nil {
-                err = ErrBufferFull();
+                err = ErrBufferFull.into();
             }
         }
         (
@@ -607,7 +566,7 @@ impl<R: io::Reader> Reader<R> {
     /// `Discard(n)` — skip n bytes. Returns (skipped, err).
     pub fn Discard(&mut self, n: int) -> (int, error) {
         if n < 0 {
-            return (0, ErrNegativeCount());
+            return (0, ErrNegativeCount.into());
         }
         if n == 0 {
             return (0, nil);
@@ -711,7 +670,7 @@ impl<R: io::Reader> Reader<R> {
     /// `UnreadByte()` — push back the most recently read byte.
     pub fn UnreadByte(&mut self) -> error {
         if self.last_byte < 0 || (self.r == 0 && self.w > 0) {
-            return ErrInvalidUnreadByte();
+            return ErrInvalidUnreadByte.into();
         }
         if self.r > 0 {
             self.r -= 1;
@@ -755,7 +714,7 @@ impl<R: io::Reader> Reader<R> {
     /// than UnreadByte: only valid immediately after ReadRune.
     pub fn UnreadRune(&mut self) -> error {
         if self.last_rune_size < 0 || self.r < self.last_rune_size as usize {
-            return ErrInvalidUnreadRune();
+            return ErrInvalidUnreadRune.into();
         }
         self.r -= self.last_rune_size as usize;
         self.last_byte = -1;
@@ -792,7 +751,7 @@ impl<R: io::Reader> Reader<R> {
                 self.r = self.w;
                 let line = self.buf.clone();
                 // last_byte is already set by previous ReadByte/Read; keep it.
-                return (slice::__from_vec(line), ErrBufferFull());
+                return (slice::__from_vec(line), ErrBufferFull.into());
             }
             s = self.w - self.r;
             self.fill();
@@ -804,7 +763,7 @@ impl<R: io::Reader> Reader<R> {
     /// returns isPrefix=true and the line so far.
     pub fn ReadLine(&mut self) -> (slice<byte>, bool, error) {
         let (mut line, err) = self.ReadSlice(b'\n');
-        if err != nil && errors::Is(err.clone(), ErrBufferFull()) {
+        if err != nil && errors::Is(err.clone(), ErrBufferFull) {
             // Handle the case where "\r\n" straddles the buffer.
             if line.Len() > 0 && line[line.Len() - 1] == b'\r' {
                 if self.r == 0 {
@@ -845,7 +804,7 @@ impl<R: io::Reader> Reader<R> {
                 frag = s.__into_vec();
                 break;
             }
-            if !errors::Is(e.clone(), ErrBufferFull()) {
+            if !errors::Is(e.clone(), ErrBufferFull) {
                 frag = s.__into_vec();
                 err_final = e;
                 break;
@@ -905,7 +864,7 @@ impl<R: io::Reader> Reader<R> {
         }
 
         // Go: if b.err == io.EOF { b.err = nil }
-        if self.err != nil && errors::Is(self.err.clone(), io::EOF()) {
+        if self.err != nil && errors::Is(self.err.clone(), io::EOF) {
             self.err = nil;
         }
 
@@ -1030,7 +989,7 @@ impl<W: io::Writer> Writer<W> {
         let n = n as usize;
         let mut err = err;
         if n < want && err == nil {
-            err = io::ErrShortWrite();
+            err = io::ErrShortWrite.into();
         }
         if err != nil {
             if n > 0 && n < want {
@@ -1214,7 +1173,7 @@ impl<W: io::Writer> Writer<W> {
             }
         }
         // Go: if err == io.EOF { … } — normalize EOF.
-        if errors::Is(err.clone(), io::EOF()) {
+        if errors::Is(err.clone(), io::EOF) {
             // Go: if b.Available() == 0 { err = b.Flush() } else { err = nil }
             if self.Available() == 0 {
                 err = self.Flush();

@@ -199,7 +199,7 @@ impl PipeData {
     fn closeWrite(&self, mut err: error) -> error {
         // Go: if err == nil { err = EOF }
         if err.IsNil() {
-            err = EOF();
+            err = EOF.into();
         }
         // Go: p.werr.Store(err)
         self.werr.Store(err);

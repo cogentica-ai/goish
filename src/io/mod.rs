@@ -10,7 +10,7 @@
 //       Write(p []byte) (n int, err error)   fn Write(&mut self, p: slice<byte>) -> (int, error);
 //   }                                     }
 //
-//   var EOF = errors.New("EOF")          pub fn EOF() -> error  // cached, ptr-stable
+//   var EOF = errors.New("EOF")          pub fn EOF.into() -> error  // cached, ptr-stable
 //   io.Copy(dst, src)                     io::Copy(dst, src) -> (int64, error)
 //   io.WriteString(w, s)                  io::WriteString(w, s) -> (int, error)
 //
@@ -37,7 +37,7 @@ use crate::errors::{self, nil};
 // ─── Reader / Writer / Closer traits ───────────────────────────────────
 
 /// Go's `io.Reader`. Read up to `len(p)` bytes into `p`; returns
-/// `(n, err)`. EOF is signaled by returning `io::EOF()` as the error.
+/// `(n, err)`. EOF is signaled by returning `io::EOF` as the error.
 pub trait Reader {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error);
 }
@@ -150,8 +150,8 @@ impl<C: Closer + ?Sized> Closer for &mut C {
 // Go pattern: `var EOF = errors.New("EOF")` — a single Arc value used
 // for `if err == io.EOF` comparisons. We achieve the same by lazily
 // initializing each sentinel into a static SpinLock-protected slot;
-// every call to `EOF()` returns a clone of the *same* Arc, so
-// `errors::Is(err, io::EOF())` succeeds via Arc::ptr_eq.
+// every call to `EOF.into()` returns a clone of the *same* Arc, so
+// `errors::Is(err, io::EOF)` succeeds via Arc::ptr_eq.
 //
 // When OnceLock-equivalent infrastructure lands in goish::sync, these
 // helpers swap to a lock-free read fast-path. The shape stays.
@@ -166,39 +166,28 @@ fn cached_error(slot: &SpinLock<Option<error>>, init: fn() -> error) -> error {
     g.as_ref().unwrap().clone()
 }
 
-/// `io.EOF` — the sentinel returned by Reader.Read at end-of-input.
-pub fn EOF() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("EOF"))
-}
+// io sentinels — Doctrine 2 marker form. Use sites compare bare:
+//   if errors::Is(err, io::EOF) { ... }
+//   if err == io::EOF { ... }
+//   return io::EOF.into();   // .into() needed for return slot
+crate::var! {
+    /// `io.EOF` — sentinel returned by Reader.Read at end-of-input.
+    pub EOF: error = "EOF";
 
-/// `io.ErrShortWrite` — Writer wrote fewer bytes than requested,
-/// non-nil error, no other reason.
-pub fn ErrShortWrite() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("short write"))
-}
+    /// `io.ErrShortWrite` — Writer wrote fewer bytes than requested,
+    /// non-nil error, no other reason.
+    pub ErrShortWrite: error = "short write";
 
-/// `io.ErrUnexpectedEOF` — Reader hit EOF mid-record (e.g. ReadFull
-/// got fewer bytes than buffer length).
-pub fn ErrUnexpectedEOF() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("unexpected EOF"))
-}
+    /// `io.ErrUnexpectedEOF` — Reader hit EOF mid-record (e.g. ReadFull
+    /// got fewer bytes than buffer length).
+    pub ErrUnexpectedEOF: error = "unexpected EOF";
 
-/// `io.ErrShortBuffer` — provided buffer was too small.
-pub fn ErrShortBuffer() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("short buffer"))
-}
+    /// `io.ErrShortBuffer` — provided buffer was too small.
+    pub ErrShortBuffer: error = "short buffer";
 
-/// `io.ErrNoProgress` — Reader returned no bytes and no error across
-/// many consecutive Read calls; clients use this to break livelocks.
-/// Go: `var ErrNoProgress = errors.New("multiple Read calls return no
-/// data or error")` (io/io.go:53).
-pub fn ErrNoProgress() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("multiple Read calls return no data or error"))
+    /// `io.ErrNoProgress` — Reader returned no bytes and no error across
+    /// many consecutive Read calls; clients use this to break livelocks.
+    pub ErrNoProgress: error = "multiple Read calls return no data or error";
 }
 
 // ─── Copy / WriteString ────────────────────────────────────────────────
@@ -211,7 +200,7 @@ pub fn ErrNoProgress() -> error {
 pub fn Copy(dst: &mut dyn Writer, src: &mut dyn Reader) -> (i64, error) {
     let mut total: i64 = 0;
     let mut buf = crate::make!([]byte, 32 * 1024);
-    let eof = EOF();
+    let eof: error = EOF.into();
     loop {
         let (n, rerr) = src.Read(&mut buf);
         if n > 0 {
@@ -224,7 +213,7 @@ pub fn Copy(dst: &mut dyn Writer, src: &mut dyn Reader) -> (i64, error) {
                 return (total, werr);
             }
             if (wn as int) < chunk_len {
-                return (total, ErrShortWrite());
+                return (total, ErrShortWrite.into());
             }
         }
         if rerr != nil {
@@ -271,7 +260,7 @@ pub fn CopyBuffer(
     };
     // Go: var written int64; for { nr, er := src.Read(buf); ... }
     let mut written: i64 = 0;
-    let eof = EOF();
+    let eof: error = EOF.into();
     loop {
         let (nr, rerr) = src.Read(&mut buf);
         if nr > 0 {
@@ -286,7 +275,7 @@ pub fn CopyBuffer(
             }
             // Go: if nr != nw { err = ErrShortWrite; break }
             if (nw as int) < chunk_len {
-                return (written, ErrShortWrite());
+                return (written, ErrShortWrite.into());
             }
         }
         // Go: if er != nil { if er != EOF { err = er }; break }
@@ -311,7 +300,7 @@ impl<R: Reader> Reader for LimitedReader<R> {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         // Go: if l.N <= 0 { return 0, EOF }
         if self.N <= 0 {
-            return (0, EOF());
+            return (0, EOF.into());
         }
         // Go: if int64(len(p)) > l.N { p = p[0:l.N] }
         // We can't shrink p in place (caller-owned); read into a tmp.
@@ -437,7 +426,7 @@ impl SectionReader {
     pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         // Go: if s.off >= s.limit { return 0, EOF }
         if self.off >= self.limit {
-            return (0, EOF());
+            return (0, EOF.into());
         }
         // Go: if max := s.limit - s.off; int64(len(p)) > max { p = p[0:max] }
         let avail = self.limit - self.off;
@@ -481,7 +470,7 @@ impl SectionReader {
     pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
         // Go: if off < 0 || off >= s.Size() { return 0, EOF }
         if off < 0 || off >= self.Size() {
-            return (0, EOF());
+            return (0, EOF.into());
         }
         let abs_off = off + self.base;
         let avail = self.limit - abs_off;
@@ -493,7 +482,7 @@ impl SectionReader {
                 p[i] = tmp[i];
             }
             if err.IsNil() {
-                err = EOF();
+                err = EOF.into();
             }
             return (n, err);
         }
@@ -642,7 +631,7 @@ pub fn CopyN(dst: &mut dyn Writer, src: &mut dyn Reader, n: i64) -> (i64, error)
     }
     // Go: if written < n && err == nil { err = EOF }
     if written < n && err.IsNil() {
-        return (written, EOF());
+        return (written, EOF.into());
     }
     (written, err)
 }
@@ -656,7 +645,7 @@ pub fn CopyN(dst: &mut dyn Writer, src: &mut dyn Reader, n: i64) -> (i64, error)
 /// rather than Go's `b[len(b):cap(b)]` capacity-grow trick (goish slice
 /// subslicing copies, so the Go pattern doesn't apply).
 pub fn ReadAll(r: &mut dyn Reader) -> (slice<byte>, error) {
-    let eof = EOF();
+    let eof: error = EOF.into();
     // Go: b := make([]byte, 0, 512)
     let mut buf = crate::bytes::NewBuffer(crate::make!([]byte, 0));
     // Reusable read chunk; size matches Go's initial capacity.
@@ -686,9 +675,9 @@ pub fn ReadAll(r: &mut dyn Reader) -> (slice<byte>, error) {
 pub fn ReadAtLeast(r: &mut dyn Reader, buf: &mut slice<byte>, min: int) -> (int, error) {
     // Go: if len(buf) < min { return 0, ErrShortBuffer }
     if buf.Len() < min {
-        return (0, ErrShortBuffer());
+        return (0, ErrShortBuffer.into());
     }
-    let eof = EOF();
+    let eof: error = EOF.into();
     let total = buf.Len();
     let mut n: int = 0;
     let mut err: error = nil;
@@ -712,7 +701,7 @@ pub fn ReadAtLeast(r: &mut dyn Reader, buf: &mut slice<byte>, min: int) -> (int,
         err = nil;
     } else if n > 0 && err == eof {
         // Go: else if n > 0 && err == EOF { err = ErrUnexpectedEOF }
-        err = ErrUnexpectedEOF();
+        err = ErrUnexpectedEOF.into();
     }
     (n, err)
 }
@@ -744,7 +733,7 @@ pub struct MultiReaderImpl {
 impl Reader for MultiReaderImpl {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         // Go: for len(mr.readers) > 0
-        let eof = EOF();
+        let eof: error = EOF.into();
         while !self.readers.is_empty() {
             // Go: n, err = mr.readers[0].Read(p)
             let (n, err) = self.readers[0].Read(p);
@@ -765,7 +754,7 @@ impl Reader for MultiReaderImpl {
             // n == 0 && err == EOF: pop'd above, loop to next reader.
         }
         // Go: return 0, EOF
-        (0, EOF())
+        (0, EOF.into())
     }
 }
 
@@ -805,7 +794,7 @@ impl Writer for MultiWriterImpl {
             }
             // Go: if n != len(p) { err = ErrShortWrite; return }
             if n != plen {
-                return (n, ErrShortWrite());
+                return (n, ErrShortWrite.into());
             }
         }
         // Go: return len(p), nil

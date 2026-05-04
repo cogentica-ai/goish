@@ -196,7 +196,7 @@ fn main() {
         let mut r = NewReader(src);
         let mut buf: slice<byte> = slice::__from_vec(alloc::vec![0u8; 16]);
         let (n, e) = r.Read(&mut buf);
-        if n == 0 && goish::errors::Is(e, io::EOF()) {
+        if n == 0 && goish::errors::Is(e, io::EOF) {
             Println!("[11] decode empty            PASS");
         } else {
             Println!("[11] decode empty            FAIL n={}", n);

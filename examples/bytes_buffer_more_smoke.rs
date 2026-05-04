@@ -107,7 +107,7 @@ fn main() {
     {
         let mut b = bytes::NewBuffer(make!([]goish::byte, 0));
         let (r, n, err) = b.ReadRune();
-        if !err.IsNil() && r == 0 && n == 0 && goish::errors::Is(err, io::EOF()) {
+        if !err.IsNil() && r == 0 && n == 0 && goish::errors::Is(err, io::EOF) {
             Println!("[ 8] ReadRune empty EOF        PASS");
         } else {
             Println!("[ 8] ReadRune empty EOF        FAIL");

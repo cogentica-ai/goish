@@ -65,7 +65,7 @@ fn main() {
                 && p2.FormName() == "file"
                 && p2.FileName() == "hello.bin"
                 && body_str(&p2.Body) == "PNGBYTES"
-                && errors::Is(e3, io::EOF());
+                && errors::Is(e3, io::EOF);
             if ok {
                 Println!("[ 1] MultipartReader 2 parts   PASS");
             } else {

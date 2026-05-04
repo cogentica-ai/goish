@@ -64,7 +64,7 @@ fn main() {
         let mut r = bytes::NewReader(goish::convert::bytes("xy"));
         let mut p = goish::make!([]byte, 4);
         let (n, err) = io::ReaderAt::ReadAt(&mut r, &mut p, 5);
-        let eof = io::EOF();
+        let eof = io::EOF;
         if n == 0 && err == eof {
             Println!("[ 4] ReadAt past end → EOF     PASS");
         } else {

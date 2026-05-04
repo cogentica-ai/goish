@@ -85,7 +85,7 @@ fn main() {
         let (n2, err2) = r1.Read(&mut buf);
         check(n2 == 0, b"io_pipe: T2 2nd Read n != 0\n");
         check(
-            errors::Is(err2, io::EOF()),
+            errors::Is(err2, io::EOF),
             b"io_pipe: T2 2nd Read err != EOF\n",
         );
     });

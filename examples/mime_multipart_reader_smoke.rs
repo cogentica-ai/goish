@@ -49,7 +49,7 @@ fn main() {
         loop {
             let (p, err) = r.NextPart();
             if !err.IsNil() {
-                if errors::Is(err.clone(), io::EOF()) {
+                if errors::Is(err.clone(), io::EOF) {
                     break;
                 }
                 Println!("[ 1] reader err {}", err.Error());
@@ -94,7 +94,7 @@ fn main() {
         let ok = e1.IsNil() && e2.IsNil()
             && p1.FormName() == "x" && body_str(&p1.Body) == "hello"
             && p2.FormName() == "y" && body_str(&p2.Body) == "world"
-            && errors::Is(e3, io::EOF());
+            && errors::Is(e3, io::EOF);
         if ok {
             Println!("[ 2] hand-built body           PASS");
         } else {

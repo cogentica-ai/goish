@@ -45,7 +45,7 @@ fn main() {
         let (c1, e1) = b.ReadByte();
         let (c2, e2) = b.ReadByte();
         let (c3, e3) = b.ReadByte();
-        let eof = goish::io::EOF();
+        let eof = goish::io::EOF;
         if c1 == b'a' && e1.IsNil()
             && c2 == b'b' && e2.IsNil()
             && c3 == 0 && e3 == eof
@@ -101,7 +101,7 @@ fn main() {
     {
         let mut b = bytes::NewBufferString("notfound");
         let (s, err) = b.ReadString(b'\n');
-        let eof = goish::io::EOF();
+        let eof = goish::io::EOF;
         if err == eof && s == "notfound" {
             Println!("[ 7] ReadString no delim → EOF PASS");
         } else {

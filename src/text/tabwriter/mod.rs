@@ -217,7 +217,7 @@ impl<W: io::Writer> Writer<W> {
         let s: slice<byte> = slice::__from_vec(buf.to_vec());
         let (n, err) = self.output.Write(s);
         if n != n_in && err.IsNil() {
-            self.pending_err = io::ErrShortWrite();
+            self.pending_err = io::ErrShortWrite.into();
             return;
         }
         if !err.IsNil() {

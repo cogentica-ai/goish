@@ -214,7 +214,7 @@ impl<R: io::Reader> Reader<R> {
         let mut records: Vec<slice<string>> = Vec::new();
         loop {
             let (record, err) = self.readRecord();
-            if crate::errors::Is(err.clone(), io::EOF()) {
+            if crate::errors::Is(err.clone(), io::EOF) {
                 return (slice::__from_vec(records), nil);
             }
             if !err.IsNil() {
@@ -230,10 +230,10 @@ impl<R: io::Reader> Reader<R> {
         let (line, mut err) = self.r.ReadSlice(b'\n');
         let mut line: Vec<byte> = line.__into_vec();
         // Go: if err == bufio.ErrBufferFull { ... }
-        if !err.IsNil() && crate::errors::Is(err.clone(), bufio::ErrBufferFull()) {
+        if !err.IsNil() && crate::errors::Is(err.clone(), bufio::ErrBufferFull) {
             self.rawBuffer.clear();
             self.rawBuffer.extend_from_slice(&line);
-            while crate::errors::Is(err.clone(), bufio::ErrBufferFull()) {
+            while crate::errors::Is(err.clone(), bufio::ErrBufferFull) {
                 let (chunk, err2) = self.r.ReadSlice(b'\n');
                 let chunk_v: Vec<byte> = chunk.__into_vec();
                 err = err2;
@@ -243,7 +243,7 @@ impl<R: io::Reader> Reader<R> {
         }
         let readSize = line.len();
         // Go: if readSize > 0 && err == io.EOF { err = nil; if line[end] == '\r' { line = line[:end-1] } }
-        if readSize > 0 && crate::errors::Is(err.clone(), io::EOF()) {
+        if readSize > 0 && crate::errors::Is(err.clone(), io::EOF) {
             err = nil;
             if line[readSize - 1] == b'\r' {
                 line.pop();
@@ -293,7 +293,7 @@ impl<R: io::Reader> Reader<R> {
             }
             break;
         }
-        if crate::errors::Is(errRead.clone(), io::EOF()) {
+        if crate::errors::Is(errRead.clone(), io::EOF) {
             return (slice::__from_vec(Vec::new()), errRead);
         }
 
@@ -424,7 +424,7 @@ impl<R: io::Reader> Reader<R> {
                         pos.line += 1;
                         pos.col = 1;
                     }
-                    if crate::errors::Is(errRead.clone(), io::EOF()) {
+                    if crate::errors::Is(errRead.clone(), io::EOF) {
                         errRead = nil;
                     }
                 } else {

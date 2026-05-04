@@ -609,8 +609,8 @@ impl<R: crate::io::Reader> Decoder<R> {
             }
             self.err = self.read_err.clone();
             // Mid-record EOF → ErrUnexpectedEOF.
-            if crate::errors::Is(self.err.clone(), crate::io::EOF()) && self.nbuf > 0 {
-                self.err = crate::io::ErrUnexpectedEOF();
+            if crate::errors::Is(self.err.clone(), crate::io::EOF) && self.nbuf > 0 {
+                self.err = crate::io::ErrUnexpectedEOF.into();
             }
             return (0, self.err.clone());
         }

@@ -74,18 +74,16 @@ impl ErrorTrait for DeadlineExceededError {
     }
 }
 
-/// `context.Canceled` — the error returned by `Err()` when a
-/// context is cancelled by `cancel()`. Mirrors `context.Canceled`
-/// (context.go:167).
-pub fn Canceled() -> error {
-    crate::errors::Wrap(CanceledError)
-}
+// context sentinels — Doctrine 2 marker form. Identity-stable so
+// `errors::Is(err, context::Canceled)` works across goroutine boundaries.
+crate::var! {
+    /// `context.Canceled` — the error returned by `Err()` when a
+    /// context is cancelled by `cancel()`. Mirrors context.go:167.
+    pub Canceled: error = { CanceledError };
 
-/// `context.DeadlineExceeded` — the error returned by `Err()` when
-/// a context is cancelled by deadline expiry. Mirrors
-/// `context.DeadlineExceeded` (context.go:171).
-pub fn DeadlineExceeded() -> error {
-    crate::errors::Wrap(DeadlineExceededError)
+    /// `context.DeadlineExceeded` — the error returned by `Err()` when
+    /// a context is cancelled by deadline expiry. Mirrors context.go:171.
+    pub DeadlineExceeded: error = { DeadlineExceededError };
 }
 
 // ─── Context trait ───────────────────────────────────────────────
@@ -253,7 +251,7 @@ fn build_cancel_ctx(parent: &Arc<dyn Context>, own_deadline: Option<Time>) -> Ar
                 let _ = parent_done.Recv() => {
                     // Parent was cancelled — adopt its err.
                     let perr = parent_for_watch.Err();
-                    let cancel_err = if perr.IsNil() { Canceled() } else { perr };
+                    let cancel_err: error = if perr.IsNil() { Canceled.into() } else { perr };
                     me_for_watch.cancel(cancel_err);
                 },
                 let _ = own_done.Recv() => {
@@ -272,7 +270,7 @@ fn build_cancel_ctx(parent: &Arc<dyn Context>, own_deadline: Option<Time>) -> Ar
 pub fn WithCancel(parent: Arc<dyn Context>) -> (Arc<dyn Context>, CancelFunc) {
     let ctx = build_cancel_ctx(&parent, None);
     let ctx_clone = ctx.clone();
-    let cancel = Box::new(move || ctx_clone.cancel(Canceled()));
+    let cancel = Box::new(move || ctx_clone.cancel(Canceled.into()));
     (ctx, cancel)
 }
 
@@ -295,17 +293,17 @@ pub fn WithDeadline(parent: Arc<dyn Context>, d: Time) -> (Arc<dyn Context>, Can
     let now = Now();
     let until: Duration = d.Sub(now);
     if until.0 <= 0 {
-        ctx.cancel(DeadlineExceeded());
+        ctx.cancel(DeadlineExceeded.into());
     } else {
         let ctx_for_timer = ctx.clone();
         crate::go!(stack(64 * crate::KB), move || {
             crate::time::Sleep(until);
-            ctx_for_timer.cancel(DeadlineExceeded());
+            ctx_for_timer.cancel(DeadlineExceeded.into());
         });
     }
 
     let ctx_clone = ctx.clone();
-    let cancel = Box::new(move || ctx_clone.cancel(Canceled()));
+    let cancel = Box::new(move || ctx_clone.cancel(Canceled.into()));
     (ctx, cancel)
 }
 
@@ -323,7 +321,7 @@ pub fn WithCancelCause(parent: Arc<dyn Context>) -> (Arc<dyn Context>, CancelCau
     let ctx = build_cancel_ctx(&parent, None);
     let ctx_clone = ctx.clone();
     let cancel = Box::new(move |cause: error| {
-        let err = Canceled();
+        let err: error = Canceled.into();
         let cause = if cause.IsNil() { err.clone() } else { cause };
         ctx_clone.cancel_with_cause(err, cause);
     });

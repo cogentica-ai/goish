@@ -26,7 +26,7 @@ fn main() {
         let (n, _) = lr.Read(&mut out);
         // Second read returns 0 + EOF.
         let (n2, err2) = lr.Read(&mut out);
-        if n == 5 && n2 == 0 && errors::Is(err2, io::EOF()) {
+        if n == 5 && n2 == 0 && errors::Is(err2, io::EOF) {
             Println!("[ 1] LimitReader stops         PASS");
         } else {
             Println!("[ 1] LimitReader stops         FAIL n={} n2={}", n, n2);
@@ -44,7 +44,7 @@ fn main() {
         let (n2, _) = lr.Read(&mut out);
         let (n3, e3) = lr.Read(&mut out);
         // 2 + 1 = 3, then EOF.
-        if n1 == 2 && n2 == 1 && n3 == 0 && errors::Is(e3, io::EOF()) {
+        if n1 == 2 && n2 == 1 && n3 == 0 && errors::Is(e3, io::EOF) {
             Println!("[ 2] LimitReader split         PASS");
         } else {
             Println!("[ 2] LimitReader split         FAIL");

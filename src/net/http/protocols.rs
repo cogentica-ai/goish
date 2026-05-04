@@ -115,7 +115,7 @@ pub struct noBody {}
 impl crate::io::Reader for noBody {
     fn Read(&mut self, _p: &mut crate::slice<crate::types::byte>) -> (int, crate::errors::error) {
         // Go: return 0, io.EOF
-        (0, crate::io::EOF())
+        (0, crate::io::EOF.into())
     }
 }
 

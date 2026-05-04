@@ -235,55 +235,13 @@ impl ErrorTrait for PathError {
 //   )
 //
 // Each is a cached singleton: Arc::ptr_eq across calls so
-// `errors::Is(e, fs::ErrNotExist())` works.
-pub fn ErrInvalid() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string::from_static("invalid argument")));
-    }
-    g.as_ref().unwrap().clone()
-}
-
-pub fn ErrPermission() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string::from_static("permission denied")));
-    }
-    g.as_ref().unwrap().clone()
-}
-
-pub fn ErrExist() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string::from_static("file already exists")));
-    }
-    g.as_ref().unwrap().clone()
-}
-
-pub fn ErrNotExist() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string::from_static("file does not exist")));
-    }
-    g.as_ref().unwrap().clone()
-}
-
-pub fn ErrClosed() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string::from_static("file already closed")));
-    }
-    g.as_ref().unwrap().clone()
+// `errors::Is(e, fs::ErrNotExist)` works.
+crate::var! {
+    pub ErrInvalid: error    = "invalid argument";
+    pub ErrPermission: error = "permission denied";
+    pub ErrExist: error      = "file already exists";
+    pub ErrNotExist: error   = "file does not exist";
+    pub ErrClosed: error     = "file already closed";
 }
 
 // Suppress unused-import warnings for items pulled in for completeness.

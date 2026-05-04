@@ -219,7 +219,7 @@ fn main() {
         let mut buf: slice<byte> =
             goish::slice::__from_vec(alloc::vec![0u8; 4]);
         let (n, err) = sr.Read(&mut buf);
-        if n == 0 && goish::errors::Is(err.clone(), io::EOF()) {
+        if n == 0 && goish::errors::Is(err.clone(), io::EOF) {
             Println!("[ 7] StreamReader empty src     PASS");
         } else {
             Println!("[ 7] StreamReader empty src     FAIL");

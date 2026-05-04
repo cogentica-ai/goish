@@ -70,7 +70,7 @@ fn invalid_hex_msg(b: byte) -> string {
 /// `readHexByte(v)` (reader.go:43).
 fn read_hex_byte(v: &[byte]) -> (byte, error) {
     if v.len() < 2 {
-        return (0, io::ErrUnexpectedEOF());
+        return (0, io::ErrUnexpectedEOF.into());
     }
     let (hb, err1) = from_hex(v[0]);
     if !err1.IsNil() {
@@ -202,7 +202,7 @@ impl<R: io::Reader> io::Reader for Reader<R> {
 }
 
 fn is_eof(e: &error) -> bool {
-    !e.IsNil() && errors::Is(e.clone(), io::EOF())
+    !e.IsNil() && errors::Is(e.clone(), io::EOF)
 }
 
 // ─── Writer (writer.go:12) ───────────────────────────────────────────

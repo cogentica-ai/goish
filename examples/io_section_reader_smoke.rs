@@ -43,7 +43,7 @@ fn main() {
         let (n, _) = sr.Read(&mut p);
         // First read should give 3 bytes.
         let (n2, e2) = sr.Read(&mut p);
-        let eof = io::EOF();
+        let eof = io::EOF;
         if n == 3 && n2 == 0 && e2 == eof {
             Println!("[ 2] Section EOF after window  PASS");
         } else {
@@ -94,7 +94,7 @@ fn main() {
         let mut sr = io::NewSectionReader(r, 0, 2);
         let mut p = goish::make!([]byte, 1);
         let (n, err) = sr.ReadAt(&mut p, 5);
-        let eof = io::EOF();
+        let eof = io::EOF;
         if n == 0 && err == eof {
             Println!("[ 5] ReadAt past Size → EOF    PASS");
         } else {

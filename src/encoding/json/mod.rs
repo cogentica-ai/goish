@@ -1360,7 +1360,7 @@ impl<R: io::Reader> Decoder<R> {
                 self.buf.extend_from_slice(&raw[..n as usize]);
             }
             if err != nil {
-                if errors::Is(err.clone(), io::EOF()) {
+                if errors::Is(err.clone(), io::EOF) {
                     break;
                 }
                 return (Value::Null, err);
@@ -1373,13 +1373,13 @@ impl<R: io::Reader> Decoder<R> {
     }
 
     /// Return the next JSON token from the input stream.
-    /// At EOF returns `(Token::Null, io::EOF())`.
+    /// At EOF returns `(Token::Null, io::EOF)`.
     pub fn Token(&mut self) -> (Token, error) {
         self.fill_buf();
         loop {
             let c = match self.peek() {
                 Some(b) => b,
-                None => return (Token::Null, io::EOF()),
+                None => return (Token::Null, io::EOF.into()),
             };
             match c {
                 b'[' => {

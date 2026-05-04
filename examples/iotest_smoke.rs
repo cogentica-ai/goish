@@ -46,7 +46,7 @@ fn main() {
         loop {
             let (n, e) = obr.Read(&mut b);
             if !e.IsNil() {
-                if errors::Is(e, io::EOF()) {
+                if errors::Is(e, io::EOF) {
                     break;
                 }
                 Println!("[ 2] OneByteReader drain     FAIL unexpected err");
@@ -146,10 +146,10 @@ fn main() {
 
     // 8. ErrReader with EOF.
     {
-        let mut er = ErrReader(io::EOF());
+        let mut er = ErrReader(io::EOF.into());
         let mut b: slice<byte> = slice::__from_vec(alloc::vec![0u8; 4]);
         let (n, e) = er.Read(&mut b);
-        if n == 0 && errors::Is(e, io::EOF()) {
+        if n == 0 && errors::Is(e, io::EOF) {
             Println!("[ 8] ErrReader EOF           PASS");
         } else {
             Println!("[ 8] ErrReader EOF           FAIL");
@@ -179,7 +179,7 @@ fn main() {
         // last call should have n>0 AND err==EOF.
         let want = convert::bytes("Hello, World!");
         let want_raw: &[byte] = &want;
-        if last_n > 0 && errors::Is(last_err, io::EOF()) && got.as_slice() == want_raw {
+        if last_n > 0 && errors::Is(last_err, io::EOF) && got.as_slice() == want_raw {
             Println!("[ 9] DataErrReader drain     PASS");
         } else {
             Println!("[ 9] DataErrReader drain     FAIL last_n={}", last_n);
@@ -193,7 +193,7 @@ fn main() {
         let mut der = DataErrReader(buf);
         let mut b: slice<byte> = slice::__from_vec(alloc::vec![0u8; 5]);
         let (n, e) = der.Read(&mut b);
-        if n == 0 && errors::Is(e, io::EOF()) {
+        if n == 0 && errors::Is(e, io::EOF) {
             Println!("[10] DataErrReader empty     PASS");
         } else {
             Println!("[10] DataErrReader empty     FAIL n={}", n);

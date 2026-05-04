@@ -190,17 +190,9 @@ pub fn New<S: __StringConv>(text: S) -> error {
 }
 
 /// `errors.ErrUnsupported` (errors/errors.go:90) — sentinel returned
-/// when a feature is unsupported. Cached singleton: every call returns
-/// the same Arc, so `errors::Is(x, ErrUnsupported())` works.
-pub fn ErrUnsupported() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(New("unsupported operation"));
-    }
-    g.as_ref().unwrap().clone()
-}
+/// when a feature is unsupported. Use sites compare bare:
+/// `errors::Is(x, errors::ErrUnsupported)` and `if x == errors::ErrUnsupported`.
+crate::var! { pub ErrUnsupported: error = "unsupported operation"; }
 
 /// `errors.Wrap` (goish helper, no Go equivalent in the stdlib but the
 /// idiomatic way to lift a custom `ErrorTrait` impl into `error`).

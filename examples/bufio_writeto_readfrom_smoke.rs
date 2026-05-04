@@ -25,7 +25,7 @@ impl ByteReader {
 impl io::Reader for ByteReader {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, goish::error) {
         if self.pos >= self.data.len() {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         let want = (p.Len() as usize).min(self.data.len() - self.pos);
         for i in 0..want {

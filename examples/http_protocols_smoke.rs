@@ -110,7 +110,7 @@ fn main() {
         let mut nb = http::NoBody();
         let mut buf = make!([]goish::byte, 16);
         let (n, err) = io::Reader::Read(&mut nb, &mut buf);
-        if n == 0 && errors::Is(err, io::EOF()) {
+        if n == 0 && errors::Is(err, io::EOF) {
             Println!("[ 8] NoBody.Read=(0,EOF)       PASS");
         } else {
             Println!("[ 8] NoBody.Read=(0,EOF)       FAIL n={}", n);

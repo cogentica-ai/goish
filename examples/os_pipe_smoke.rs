@@ -91,7 +91,7 @@ fn main() {
             Println!("[ 3] Pipe EOF after writer     FAIL n=", n as i64);
             failed += 1;
         }
-        let _ = io::EOF();
+        let _ = io::EOF;
     }
 
     // 4. Names are "|0" and "|1".

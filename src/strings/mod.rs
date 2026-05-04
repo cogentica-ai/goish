@@ -1163,7 +1163,7 @@ impl Reader {
 
     pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         if self.i >= self.s.Len() {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         // Go: r.prevRune = -1
         self.prev_rune = -1;
@@ -1190,7 +1190,7 @@ impl Reader {
         self.prev_rune = -1;
         // Go: if r.i >= int64(len(r.s)) { return 0, io.EOF }
         if self.i >= self.s.Len() {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         // Go: b := r.s[r.i]; r.i++; return b, nil
         let b = self.s.as_bytes()[self.i as usize];
@@ -1217,7 +1217,7 @@ impl Reader {
         // Go: if r.i >= int64(len(r.s)) { r.prevRune = -1; return 0, 0, io.EOF }
         if self.i >= self.s.Len() {
             self.prev_rune = -1;
-            return (0, 0, io::EOF());
+            return (0, 0, io::EOF.into());
         }
         // Go: r.prevRune = int(r.i)
         self.prev_rune = self.i;
@@ -1281,7 +1281,7 @@ impl Reader {
             return (0, crate::errors::New("strings.Reader.ReadAt: negative offset"));
         }
         if off >= self.s.Len() as i64 {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         let bytes = self.s.as_bytes();
         let start = off as usize;
@@ -1290,7 +1290,7 @@ impl Reader {
             p[k as int] = bytes[start + k];
         }
         if want < p.Len() as usize {
-            return (want as int, io::EOF());
+            return (want as int, io::EOF.into());
         }
         (want as int, nil)
     }
@@ -1337,7 +1337,7 @@ impl Reader {
         let n = m as i64;
         // if m != len(s) && err == nil { err = io.ErrShortWrite }
         if (m as usize) != tail.len() && err.IsNil() {
-            return (n, io::ErrShortWrite());
+            return (n, io::ErrShortWrite.into());
         }
         (n, err)
     }

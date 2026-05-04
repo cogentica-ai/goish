@@ -122,7 +122,7 @@ fn read_all(r: &mut lzw::Reader<bytes::Reader>) -> (alloc::vec::Vec<byte>, error
             }
         }
         if !err.IsNil() {
-            if errors::Is(err.clone(), io::EOF()) {
+            if errors::Is(err.clone(), io::EOF) {
                 return (out, errors::nil);
             }
             return (out, err);
