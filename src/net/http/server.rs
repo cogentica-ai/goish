@@ -17,7 +17,7 @@
 // shape as Go's `ServeMux` (Go 1.22 simple form, pre-`{wildcard}`
 // patterns).
 
-#![allow(non_snake_case)]
+#![allow(non_snake_case, non_camel_case_types)]
 
 extern crate alloc;
 

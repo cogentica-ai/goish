@@ -9,7 +9,7 @@
 //   * encoding.BinaryMarshaler / AppendBinary / UnmarshalBinary not
 //     yet ported (cosmetic — internal-state save/restore).
 
-#![allow(non_snake_case, non_upper_case_globals)]
+#![allow(non_snake_case, non_upper_case_globals, non_camel_case_types)]
 
 use crate::errors::{error, nil};
 use crate::goslice::slice;

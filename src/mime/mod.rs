@@ -9,7 +9,6 @@
 //
 // Reference: /nix/store/.../mime/type.go and /etc/mime.types.
 
-#![no_std]
 #![allow(non_snake_case)]
 
 extern crate alloc;
@@ -372,7 +371,7 @@ pub fn ExtensionsByType<T: Into<string>>(typ: T) -> (crate::goslice::slice<strin
 
     // Go: collect from static table (lowercase keys) plus runtime overrides.
     let mut out: alloc::vec::Vec<string> = alloc::vec::Vec::new();
-    let mut seen = |out: &alloc::vec::Vec<string>, e: &string| -> bool {
+    let seen = |out: &alloc::vec::Vec<string>, e: &string| -> bool {
         for v in out.iter() {
             if v == e {
                 return true;

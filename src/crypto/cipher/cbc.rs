@@ -35,7 +35,7 @@
 //     (mirrors Go's `cbcEncrypter.SetIV` / `cbcDecrypter.SetIV`); not
 //     part of the `BlockMode` trait surface (matches Go's interface).
 
-#![allow(non_snake_case)]
+#![allow(non_snake_case, non_camel_case_types)]
 
 extern crate alloc;
 use alloc::vec::Vec;

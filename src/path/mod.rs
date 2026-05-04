@@ -29,7 +29,7 @@ use crate::errors::{self, error, nil};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::runtime::spin::SpinLock;
-use crate::types::{byte, int, rune};
+use crate::types::{byte, rune};
 use crate::unicode::utf8;
 
 const SEP: byte = b'/';

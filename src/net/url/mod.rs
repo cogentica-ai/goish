@@ -10,15 +10,10 @@
 
 extern crate alloc;
 
-use alloc::boxed::Box;
-use alloc::format;
-use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::errors::{self, error, ErrorTrait};
-use crate::fmt;
 use crate::gomap;
-use crate::goslice;
 use crate::strings;
 use crate::types::int;
 use crate::{byte, nil, string, slice};
@@ -923,7 +918,7 @@ pub fn ParseQuery<S: Into<string>>(query: S) -> (Values, error) {
     while i <= q_len {
         if i == q_len || bytes[i as usize] == b'&' || bytes[i as usize] == b';' {
             let part = query.slice(start, i);
-            let mut key = string::new();
+            let key;
             let mut value = string::new();
 
             let eq = strings::IndexByte(part.clone(), b'=');

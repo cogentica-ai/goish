@@ -13,11 +13,9 @@ extern crate alloc;
 use alloc::sync::Arc;
 
 use crate::errors;
-use crate::goslice::slice;
 use crate::gostring::string;
 use crate::net::http::client::NewRequest as http_NewRequest;
 use crate::net::http::request::Request;
-use crate::types::byte;
 
 /// Line-by-line port of `httptest.NewRequest(method, target, body)`
 /// (httptest.go:19). Builds an incoming-server Request suitable for

@@ -23,7 +23,7 @@ use alloc::vec::Vec;
 
 use crate::bufio;
 use crate::bytes;
-use crate::errors::{self, error, nil, ErrorTrait};
+use crate::errors::{self, error, nil};
 use crate::goslice::slice;
 use crate::gomap::map;
 use crate::gostring::string;

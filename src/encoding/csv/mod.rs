@@ -13,7 +13,7 @@
 //   * `FieldPos` panics with goish-style panic.
 //   * Empty-line + comment-line handling matches Go reader.go:305-319.
 
-#![allow(non_snake_case)]
+#![allow(non_snake_case, non_camel_case_types)]
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -271,8 +271,8 @@ impl<R: io::Reader> Reader<R> {
         }
 
         // Go: read line, skipping empty lines and comment lines.
-        let mut line: Vec<byte> = Vec::new();
-        let mut errRead = nil;
+        let mut line: Vec<byte>;
+        let mut errRead;
         loop {
             let (l, e) = self.readLine();
             line = l;

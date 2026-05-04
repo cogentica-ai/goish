@@ -16,11 +16,10 @@
 extern crate alloc;
 
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 
 use crate::errors::{self, error};
 use crate::goslice::slice;
-use crate::io::{Closer, Reader};
+use crate::io::Reader;
 use crate::os;
 use crate::string;
 use crate::strings;

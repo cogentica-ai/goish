@@ -42,7 +42,7 @@
 //   * `subtle.XORBytes` calls are open-coded inline, mirroring
 //     existing CBC/CFB/CTR/OFB ports.
 
-#![allow(non_snake_case)]
+#![allow(non_snake_case, non_camel_case_types)]
 
 extern crate alloc;
 use alloc::vec::Vec;

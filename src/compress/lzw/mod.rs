@@ -158,7 +158,7 @@ impl<R: io::Reader> Reader<R> {
     fn decode(&mut self) {
         // Go: loop:  for { ... break loop ... }
         // Goish: model the labeled break with a sentinel `done` flag.
-        let mut done = false;
+        let done = false;
         while !done {
             // Go: code, err := r.read(r)
             let (code, err) = self.read_code();
@@ -191,7 +191,6 @@ impl<R: io::Reader> Reader<R> {
             } else if code == self.eof_ {
                 // case code == r.eof (reader.go:167-169)
                 self.err = io::EOF();
-                done = true;
                 break;
             } else if code <= self.hi {
                 // case code <= r.hi (reader.go:170-196)
@@ -228,7 +227,6 @@ impl<R: io::Reader> Reader<R> {
             } else {
                 // default: invalid code (reader.go:197-200)
                 self.err = errors::New("lzw: invalid code");
-                done = true;
                 break;
             }
 

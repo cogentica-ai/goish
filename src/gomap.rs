@@ -34,7 +34,6 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use core::borrow::Borrow;
 use core::ops::{Index, IndexMut};
 
 use crate::builtin::Len as LenTrait;
@@ -385,7 +384,7 @@ where
     /// Hidden hook used by `maps::Equal`, `maps::Copy`, `maps::Clone`
     /// to walk pairs without exposing implementation details.
     #[doc(hidden)]
-    pub fn __iter(&self) -> MapRefIter<K, V> {
+    pub fn __iter(&self) -> MapRefIter<'_, K, V> {
         MapRefIter::new(self)
     }
 }

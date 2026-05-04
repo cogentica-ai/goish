@@ -910,7 +910,7 @@ pub fn UnquoteChar<S: Into<string>>(s: S, quote: byte) -> (rune, bool, string, e
     // Go: c := s[1]; s = s[2:]
     let esc = bs[1];
     let mut tail_bs: &[byte] = &bs[2..];
-    let mut value: rune = 0;
+    let value: rune;
     let mut multibyte: bool = false;
     match esc {
         b'a' => value = 0x07,

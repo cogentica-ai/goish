@@ -436,7 +436,8 @@ macro_rules! __select_emit {
                             $crate::__select_release_all!(__sel_unique, __sel_atoms);
                             let _ = __ok;
                             let $br_v = __v;
-                            break 'select_blk $br_body;
+                            #[allow(unreachable_code)]
+                            break 'select_blk ({ $br_body });
                         }
                     }
                 )*
@@ -449,7 +450,8 @@ macro_rules! __select_emit {
                         {
                             $crate::__select_release_all!(__sel_unique, __sel_atoms);
                             let ($($pr_p)+) = (__v, __ok);
-                            break 'select_blk $pr_body;
+                            #[allow(unreachable_code)]
+                            break 'select_blk ({ $pr_body });
                         }
                     }
                 )*
@@ -463,7 +465,8 @@ macro_rules! __select_emit {
                         match $crate::gochan::chan::__try_send_locked(__s, __take) {
                             ::core::result::Result::Ok(()) => {
                                 $crate::__select_release_all!(__sel_unique, __sel_atoms);
-                                break 'select_blk $s_body;
+                                #[allow(unreachable_code)]
+                                break 'select_blk ({ $s_body });
                             }
                             ::core::result::Result::Err(__returned) => {
                                 $s_vn = ::core::option::Option::Some(__returned);
@@ -531,7 +534,8 @@ macro_rules! __select_default_or_park {
       [ $( ($s_idx:tt $s_cn:ident $s_vn:ident $s_sn:ident ($s_body:expr)) )* ]
     ) => {
         $crate::__select_release_all!($sel_unique, $sel_atoms);
-        break $blk $d_body;
+        #[allow(unreachable_code)]
+        break $blk ({ $d_body });
     };
 
     // ─── no default → register sudogs (under held locks), then
@@ -697,21 +701,24 @@ macro_rules! __select_default_or_park {
                 let __v = $br_sn.value.take().unwrap_or_default();
                 let _ = __ok;
                 let $br_v = __v;
-                break $blk $br_body;
+                #[allow(unreachable_code)]
+                break $blk ({ $br_body });
             }
         )*
         $( if __select_winners[$pr_idx as usize] {
                 let __ok = $pr_sn.success;
                 let __v = $pr_sn.value.take().unwrap_or_default();
                 let ($($pr_p)+) = (__v, __ok);
-                break $blk $pr_body;
+                #[allow(unreachable_code)]
+                break $blk ({ $pr_body });
             }
         )*
         $( if __select_winners[$s_idx as usize] {
                 if !$s_sn.success {
                     ::core::panic!("goish: select send winner: chan closed");
                 }
-                break $blk $s_body;
+                #[allow(unreachable_code)]
+                break $blk ({ $s_body });
             }
         )*
 

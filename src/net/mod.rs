@@ -1209,7 +1209,7 @@ pub fn SplitHostPort(hostport: crate::string) -> (crate::string, crate::string, 
 
     let i = i as i64;
     let h_bytes = hostport.as_bytes();
-    let mut host: crate::string;
+    let host: crate::string;
     let mut j: i64 = 0;
     let mut k: i64 = 0;
 

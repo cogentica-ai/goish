@@ -107,7 +107,7 @@ fn wyhash(key: &[byte], mut seed: u64, len_in: u64) -> u64 {
     // Direct port of maphash_purego.go:50.
     let mut p: &[byte] = key;
     let mut i = len_in;
-    let mut a: u64;
+    let a: u64;
     let mut b: u64 = 0;
     let hk = hashkey();
     seed ^= hk[0];

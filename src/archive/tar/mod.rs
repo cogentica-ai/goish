@@ -6,13 +6,13 @@
 //
 // Public API mirrors Go 1.25 archive/tar reader surface.
 
-#![allow(non_snake_case, non_upper_case_globals, non_camel_case_types)]
+#![allow(non_snake_case, non_upper_case_globals, non_camel_case_types, dead_code)]
 
 extern crate alloc;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::errors::{self, error, nil, ErrorTrait};
+use crate::errors::{self, error, nil};
 use crate::gomap::map;
 use crate::goslice::slice;
 use crate::gostring::string;
@@ -20,7 +20,7 @@ use crate::io;
 use crate::strconv;
 use crate::strings;
 use crate::time::Time;
-use crate::types::{byte, int, uint};
+use crate::types::{byte, int};
 
 // ─── Constants ───────────────────────────────────────────────────────
 

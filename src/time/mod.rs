@@ -1693,7 +1693,7 @@ fn fmt_int(buf: &mut [u8], mut v: u64) -> usize {
 pub fn Parse<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>(layout: L, value: V) -> (Time, crate::errors::error) {
     let layout: crate::gostring::string = layout.into();
     let value: crate::gostring::string = value.into();
-    use crate::gostring::string;
+    
 
     let l = layout.clone();
 
@@ -1730,7 +1730,7 @@ pub fn Parse<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>
 }
 
 fn parse_rfc3339(s: crate::gostring::string) -> (Time, crate::errors::error) {
-    use crate::gostring::string;
+    
     let bs = s.as_bytes();
     // "YYYY-MM-DDTHH:MM:SSZ" minimum. Z may be replaced by ±HH:MM, slim port treats only Z.
     if bs.len() < 20 {
@@ -1777,7 +1777,7 @@ fn parse_rfc3339(s: crate::gostring::string) -> (Time, crate::errors::error) {
 }
 
 fn parse_datetime(s: crate::gostring::string, sep: u8) -> (Time, crate::errors::error) {
-    use crate::gostring::string;
+    
     let bs = s.as_bytes();
     if bs.len() != 19
         || bs[4] != b'-'
@@ -1801,7 +1801,7 @@ fn parse_datetime(s: crate::gostring::string, sep: u8) -> (Time, crate::errors::
 }
 
 fn parse_date_only(s: crate::gostring::string) -> (Time, crate::errors::error) {
-    use crate::gostring::string;
+    
     let bs = s.as_bytes();
     if bs.len() != 10 || bs[4] != b'-' || bs[7] != b'-' {
         return (
@@ -1816,7 +1816,7 @@ fn parse_date_only(s: crate::gostring::string) -> (Time, crate::errors::error) {
 }
 
 fn parse_time_only(s: crate::gostring::string) -> (Time, crate::errors::error) {
-    use crate::gostring::string;
+    
     let bs = s.as_bytes();
     if bs.len() != 8 || bs[2] != b':' || bs[5] != b':' {
         return (
@@ -1831,7 +1831,7 @@ fn parse_time_only(s: crate::gostring::string) -> (Time, crate::errors::error) {
 }
 
 fn parse_rfc1123(s: crate::gostring::string) -> (Time, crate::errors::error) {
-    use crate::gostring::string;
+    
     let bs = s.as_bytes();
     // "Day, DD Mon YYYY HH:MM:SS GMT" → 29 chars
     if bs.len() != 29 || bs[3] != b',' || bs[4] != b' ' || bs[7] != b' ' || bs[11] != b' '
@@ -1860,7 +1860,7 @@ fn parse_rfc1123(s: crate::gostring::string) -> (Time, crate::errors::error) {
 }
 
 fn parse_ansic(s: crate::gostring::string) -> (Time, crate::errors::error) {
-    use crate::gostring::string;
+    
     let bs = s.as_bytes();
     // "Mon Jan _2 15:04:05 2006" → 24 chars
     if bs.len() != 24

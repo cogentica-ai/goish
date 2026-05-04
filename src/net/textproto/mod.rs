@@ -337,7 +337,7 @@ impl<'a, W: io::Writer> DotWriter<'a, W> {
 
     /// `(*dotWriter).Close()` (writer.go:103) — flushes the trailer
     /// (".\r\n") according to current state.
-    pub fn Close(mut self) -> error {
+    pub fn Close(self) -> error {
         // Go: switch d.state { default: WriteByte('\r'); fallthrough
         //                       case CR: WriteByte('\n'); fallthrough
         //                       case BeginLine: Write(".\r\n") }

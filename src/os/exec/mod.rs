@@ -39,7 +39,7 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicI32, Ordering};
+use core::sync::atomic::AtomicI32;
 
 use crate::errors;
 use crate::errors::error;
@@ -329,7 +329,7 @@ fn child_die(code: i32) -> ! {
     unsafe { syscall::syscall1(syscall::SYS_EXIT, code as usize); }
     // Should be unreachable, but on the off-chance the syscall fails
     // we spin rather than UB.
-    loop { core::sync::atomic::spin_loop_hint(); }
+    loop { core::hint::spin_loop(); }
 }
 
 /// Read everything from `fd` into the goish writer. Buffers are 4 KiB
