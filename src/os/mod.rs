@@ -60,6 +60,13 @@ pub const O_TRUNC: i32 = 0o1000;
 pub const PathSeparator: u8 = b'/';
 pub const PathListSeparator: u8 = b':';
 
+/// `os.IsPathSeparator(c)` (path_unix.go:14) — reports whether `c` is
+/// the OS's path separator. Linux-pinned in goish v1, so just `c == '/'`.
+#[inline]
+pub fn IsPathSeparator(c: u8) -> bool {
+    c == PathSeparator
+}
+
 // os sentinels — Doctrine 2 marker form. Identity-stable, so
 // `errors::Is(err, os::ErrNotExist)` works across the program.
 // (Previous fn-form returned a fresh errors::New() each call — the
