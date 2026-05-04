@@ -169,6 +169,21 @@ impl GoHash for isize {
     }
 }
 
+// Float keys hash on their bit pattern. NaN comparison still follows
+// IEEE 754 (`x != x` for any NaN), so writing `m[NaN] = v` produces an
+// entry that can never be retrieved — same observable behavior as Go.
+impl GoHash for f64 {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(&self.to_bits().to_le_bytes(), seed)
+    }
+}
+
+impl GoHash for f32 {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(&self.to_bits().to_le_bytes(), seed)
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // Bucket
 // ═══════════════════════════════════════════════════════════════════════
