@@ -177,8 +177,8 @@ fn main() {
     // IndexFunc / ContainsFunc — first element > 5.
     let xs: slice<int> = slice!([]int{ 1, 3, 5, 7, 9 });
     check(slices::IndexFunc(&xs, |e: &int| *e > 5) == 3, b"slices: IndexFunc wrong\n");
-    check(slices::ContainsFunc(&xs, |e: &int| *e > 100) == false, b"slices: ContainsFunc miss wrong\n");
-    check(slices::ContainsFunc(&xs, |e: &int| *e == 5), b"slices: ContainsFunc hit wrong\n");
+    check(slices::ContainsFunc(&xs, |e: int| e > 100) == false, b"slices: ContainsFunc miss wrong\n");
+    check(slices::ContainsFunc(&xs, |e: int| e == 5), b"slices: ContainsFunc hit wrong\n");
 
     // DeleteFunc — drop odd numbers.
     let xs: slice<int> = slice!([]int{ 1, 2, 3, 4, 5, 6 });

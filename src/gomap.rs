@@ -464,43 +464,62 @@ where
     }
 
     /// Insert a key/value pair assuming there is capacity (no growth).
+    ///
+    /// Single-pass: tracks the first empty slot while scanning for the
+    /// existing key. If the key is found first, its value is updated. If
+    /// the key is not found, the first empty slot is used (or a new
+    /// overflow bucket is appended). This prevents duplicate-key insertion
+    /// when a deleted slot appears before the existing key in the chain.
     fn insert_no_grow(&mut self, key: K, value: V) {
         let hash = self.hash(&key);
         let mask = self.bucket_mask();
         let bucket_idx = (hash as usize) & mask;
         let top = tophash(hash);
 
-        // Use raw index to avoid borrow-checker issues with &mut chains
+        // first_empty_ptr/slot: first empty slot across the entire chain.
+        let mut first_empty_ptr: *mut Bucket<K, V> = core::ptr::null_mut();
+        let mut first_empty_slot: usize = 0;
         let mut bucket_ptr: *mut Bucket<K, V> = &mut *self.buckets[bucket_idx];
 
-        loop {
-            let bucket = unsafe { &mut *bucket_ptr };
+        'search: loop {
+            let b = unsafe { &mut *bucket_ptr };
             for i in 0..BUCKET_COUNT {
-                // Existing key — update value
-                if bucket.tophash[i] == top {
-                    if let Some(ref k) = bucket.keys[i] {
+                if b.tophash[i] == top {
+                    if let Some(ref k) = b.keys[i] {
                         if k == &key {
-                            bucket.elems[i] = Some(value);
-                            return;
+                            b.elems[i] = Some(value);
+                            return; // existing key updated — count unchanged
                         }
                     }
                 }
-                // Empty slot — insert
-                if bucket.tophash[i] < MIN_TOP_HASH {
-                    bucket.tophash[i] = top;
-                    bucket.keys[i] = Some(key);
-                    bucket.elems[i] = Some(value);
-                    self.count += 1;
-                    return;
+                if b.tophash[i] < MIN_TOP_HASH && first_empty_ptr.is_null() {
+                    first_empty_ptr = bucket_ptr;
+                    first_empty_slot = i;
                 }
             }
-            // Allocate overflow bucket if needed
-            if bucket.overflow.is_none() {
-                bucket.overflow = Some(Box::new(Bucket::new()));
-                self.noverflow += 1;
+            match b.overflow.as_mut() {
+                Some(ovf) => bucket_ptr = ovf.as_mut(),
+                None => break 'search,
             }
-            bucket_ptr = bucket.overflow.as_mut().unwrap().as_mut();
         }
+
+        // Key not found. Insert at first empty slot, or append overflow.
+        if !first_empty_ptr.is_null() {
+            let ib = unsafe { &mut *first_empty_ptr };
+            ib.tophash[first_empty_slot] = top;
+            ib.keys[first_empty_slot] = Some(key);
+            ib.elems[first_empty_slot] = Some(value);
+        } else {
+            // Every slot in the chain is occupied; append to last bucket.
+            let last = unsafe { &mut *bucket_ptr };
+            last.overflow = Some(Box::new(Bucket::new()));
+            self.noverflow += 1;
+            let ovf = last.overflow.as_mut().unwrap();
+            ovf.tophash[0] = top;
+            ovf.keys[0] = Some(key);
+            ovf.elems[0] = Some(value);
+        }
+        self.count += 1;
     }
 
     /// Delete a key from a bucket chain.
@@ -588,31 +607,72 @@ where
         let bucket_idx = (hash as usize) & mask;
         let top = tophash(hash);
 
+        // Same two-position single-pass as insert_no_grow.
+        let mut first_empty_ptr: *mut Bucket<K, V> = core::ptr::null_mut();
+        let mut first_empty_slot: usize = 0;
         let mut bucket_ptr: *mut Bucket<K, V> = &mut *self.buckets[bucket_idx];
-        loop {
-            let bucket = unsafe { &mut *bucket_ptr };
+
+        'search: loop {
+            let b = unsafe { &mut *bucket_ptr };
             for i in 0..BUCKET_COUNT {
-                if bucket.tophash[i] == top {
-                    if let Some(ref k) = bucket.keys[i] {
+                if b.tophash[i] == top {
+                    if let Some(ref k) = b.keys[i] {
                         if k == &key {
-                            return bucket.elems[i].as_mut().unwrap();
+                            return b.elems[i].as_mut().unwrap();
                         }
                     }
                 }
-                if bucket.tophash[i] < MIN_TOP_HASH {
-                    bucket.tophash[i] = top;
-                    bucket.keys[i] = Some(key);
-                    bucket.elems[i] = Some(V::default());
-                    self.count += 1;
-                    return bucket.elems[i].as_mut().unwrap();
+                if b.tophash[i] < MIN_TOP_HASH && first_empty_ptr.is_null() {
+                    first_empty_ptr = bucket_ptr;
+                    first_empty_slot = i;
                 }
             }
-            if bucket.overflow.is_none() {
-                bucket.overflow = Some(Box::new(Bucket::new()));
-                self.noverflow += 1;
+            match b.overflow.as_mut() {
+                Some(ovf) => bucket_ptr = ovf.as_mut(),
+                None => break 'search,
             }
-            bucket_ptr = bucket.overflow.as_mut().unwrap().as_mut();
         }
+
+        // Key not found — insert at first empty slot or append overflow.
+        if !first_empty_ptr.is_null() {
+            let ib = unsafe { &mut *first_empty_ptr };
+            ib.tophash[first_empty_slot] = top;
+            ib.keys[first_empty_slot] = Some(key);
+            ib.elems[first_empty_slot] = Some(V::default());
+            self.count += 1;
+            return unsafe { (*first_empty_ptr).elems[first_empty_slot].as_mut().unwrap() };
+        }
+        let last = unsafe { &mut *bucket_ptr };
+        last.overflow = Some(Box::new(Bucket::new()));
+        self.noverflow += 1;
+        let ovf = last.overflow.as_mut().unwrap();
+        ovf.tophash[0] = top;
+        ovf.keys[0] = Some(key);
+        ovf.elems[0] = Some(V::default());
+        self.count += 1;
+        ovf.elems[0].as_mut().unwrap()
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// &str convenience — lets `m["key"]` work when K = string
+// ═══════════════════════════════════════════════════════════════════════
+
+/// `m["literal"]` read for `map<string, V>` — converts `&str` to `string`
+/// then delegates to `Index<string>`. Mirrors Go's implicit string coercion.
+impl<V: Default> Index<&str> for map<string, V> {
+    type Output = V;
+    #[inline]
+    fn index(&self, key: &str) -> &V {
+        self.index(string::from(key))
+    }
+}
+
+/// `m["literal"] = v` for `map<string, V>`.
+impl<V: Default> IndexMut<&str> for map<string, V> {
+    #[inline]
+    fn index_mut(&mut self, key: &str) -> &mut V {
+        self.index_mut(string::from(key))
     }
 }
 
@@ -682,14 +742,18 @@ impl<'a, K, V> Iterator for MapRefIter<'a, K, V> {
         }
         loop {
             let b = if let Some(ovf) = self.overflow {
+                // Continuing an overflow bucket from a prior yield.
                 ovf
+            } else if self.slot > 0 {
+                // Resuming a main bucket mid-scan after a prior yield.
+                &self.buckets[self.bucket]
             } else {
+                // Advance to the next main bucket (slot==0 means exhausted or fresh start).
                 if self.visited_buckets >= self.total_buckets {
                     return None;
                 }
                 self.bucket = (self.start_bucket + self.visited_buckets) % self.total_buckets;
                 self.visited_buckets += 1;
-                self.slot = 0;
                 &self.buckets[self.bucket]
             };
 

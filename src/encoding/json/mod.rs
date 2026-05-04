@@ -673,11 +673,17 @@ fn encode_reflect_indent(
 }
 
 fn encode_map(out: &mut Vec<byte>, v: &reflect::Value, cfg: Option<&IndentCfg>, depth: usize) {
-    let keys = v.MapKeys();
+    let mut keys = v.MapKeys();
     if keys.is_empty() {
         out.extend_from_slice(b"{}");
         return;
     }
+    // Go's encoding/json marshals map keys in sorted order.
+    keys.sort_by(|a, b| {
+        let as_ = match a { reflect::Value::String(s) => s.as_bytes(), _ => b"" };
+        let bs = match b { reflect::Value::String(s) => s.as_bytes(), _ => b"" };
+        as_.cmp(bs)
+    });
     out.push(b'{');
     let inner = depth + 1;
     for (i, k) in keys.iter().enumerate() {
@@ -877,10 +883,13 @@ fn encode_object(out: &mut Vec<byte>, o: &map<string, Value>, cfg: Option<&Inden
         out.extend_from_slice(b"{}");
         return;
     }
+    // Go's encoding/json marshals map keys in sorted order.
+    let mut pairs: alloc::vec::Vec<(&string, &Value)> = o.__iter().collect();
+    pairs.sort_by(|(a, _), (b, _)| a.as_bytes().cmp(b.as_bytes()));
     out.push(b'{');
     let inner_depth = depth + 1;
     let mut first = true;
-    for (k, v) in o.__iter() {
+    for (k, v) in pairs {
         if !first {
             out.push(b',');
         }
