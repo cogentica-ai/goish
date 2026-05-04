@@ -91,6 +91,36 @@ impl<'a, T> RangeIter for &&'a slice<T> {
     }
 }
 
+// ─── array<T, N> → (int, &T) ─────────────────────────────────────────
+//
+// Trait selection doesn't auto-deref, so we need an explicit impl on
+// `&array<T, N>` even though `array<T, N>: Deref<Target=[T]>`. Same
+// shape as the `&slice<T>` impl above.
+
+use crate::goarray::array;
+
+impl<'a, T, const N: usize> RangeIter for &'a array<T, N> {
+    type Item = (int, &'a T);
+    type Iter = SliceRangeIter<'a, T>;
+    fn range(self) -> Self::Iter {
+        SliceRangeIter {
+            slice: &**self, // Deref<Target=[T]>
+            i: 0,
+        }
+    }
+}
+
+impl<'a, T, const N: usize> RangeIter for &&'a array<T, N> {
+    type Item = (int, &'a T);
+    type Iter = SliceRangeIter<'a, T>;
+    fn range(self) -> Self::Iter {
+        SliceRangeIter {
+            slice: &***self,
+            i: 0,
+        }
+    }
+}
+
 // ─── string → (int byte-offset, rune) — UTF-8 decode per step ───────
 
 pub struct StringRangeIter<'a> {

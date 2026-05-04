@@ -118,6 +118,74 @@ macro_rules! make {
     };
 }
 
+// ─── array!([N]T) / array!([N]T{...}) / array!([...]T{...}) ─────────
+//
+// Go's fixed-array composite literal forms, ported to a single macro.
+// Note that `array!` covers what `make!` does NOT — Go's `make` rejects
+// array types (only slice/map/chan), and `array!` mirrors that split.
+//
+//   var a [12]byte                 → let a = array!([12]byte);
+//   a := [3]int{1, 2, 3}           → let a = array!([3]int{1, 2, 3});
+//   a := [6]int{1, 2, 3, 5}        → let a = array!([6]int{1, 2, 3, 5});  // rest zero
+//   a := [...]int{1, 2, 3}         → let a = array!([...]int{1, 2, 3});   // length inferred
+//
+// In **type position** users write `array<T, N>` directly — Rust macros
+// can't appear in type slots, same as the `slice<T>` / `slice!` split.
+// Sparse-keyed form `[N]T{2: 99}` is deferred (rare; can be added as a
+// new arm without breaking the existing ones).
+
+/// `array!([N]T)` — zero-valued fixed array of length `N`. Mirrors Go's
+/// `var a [N]T` / `[N]T{}`. Requires `T: Default`.
+///
+/// `array!([N]T{e1, e2, ...})` — full or partial composite literal.
+/// Trailing elements (if fewer than `N`) are zero-filled, matching Go.
+///
+/// `array!([...]T{e1, e2, ...})` — length inferred from the element
+/// count. Mirrors Go's `[...]T{...}`.
+#[macro_export]
+macro_rules! array {
+    // [...]T{e1, e2, ...} — length inferred from element count
+    ([...] $t:ty { $($e:expr),* $(,)? }) => {{
+        let __raw: [$t; $crate::__count_exprs!($($e),*)] = [
+            $( <$t as ::core::convert::From<_>>::from($e) ),*
+        ];
+        $crate::goarray::array::__from_arr(__raw)
+    }};
+    // [N]T{} — empty literal == zero array
+    ([$n:expr] $t:ty { $(,)? }) => {{
+        let __a: $crate::goarray::array<$t, { $n }> =
+            <$crate::goarray::array<$t, { $n }> as ::core::default::Default>::default();
+        __a
+    }};
+    // [N]T{e1, e2, ...} — full or partial literal (rest zero-filled)
+    ([$n:expr] $t:ty { $($e:expr),+ $(,)? }) => {{
+        let mut __a: $crate::goarray::array<$t, { $n }> =
+            <$crate::goarray::array<$t, { $n }> as ::core::default::Default>::default();
+        let mut __i: $crate::int = 0;
+        $(
+            __a[__i] = <$t as ::core::convert::From<_>>::from($e);
+            __i += 1;
+        )+
+        let _ = __i;
+        __a
+    }};
+    // [N]T — bare type, zero-valued (Go: `var a [N]T`)
+    ([$n:expr] $t:ty) => {{
+        let __a: $crate::goarray::array<$t, { $n }> =
+            <$crate::goarray::array<$t, { $n }> as ::core::default::Default>::default();
+        __a
+    }};
+}
+
+/// Internal helper for `array!([...]T{...})` — counts repetition tokens
+/// at compile time so the result can be used as a const-generic `N`.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __count_exprs {
+    () => { 0usize };
+    ($head:expr $(, $tail:expr)*) => { 1usize + $crate::__count_exprs!($($tail),*) };
+}
+
 // ─── append!(s, x, y, z) — variadic append ────────────────────────────
 
 /// `append!(s, x[, y, z, ...])` — Go's `append(s, ...)` for slices.

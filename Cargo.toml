@@ -604,3 +604,7 @@ path = "examples/os_exec_smoke.rs"
 [[example]]
 name = "var_marker_smoke"
 path = "examples/var_marker_smoke.rs"
+
+[[example]]
+name = "goarray_smoke"
+path = "examples/goarray_smoke.rs"

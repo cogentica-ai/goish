@@ -68,6 +68,7 @@ pub mod errors;
 pub mod expvar;
 pub mod flag;
 pub mod fmt;
+pub mod goarray;
 pub mod gochan;
 pub mod gomap;
 pub mod goslice;
@@ -115,6 +116,7 @@ pub use convert::{
 };
 pub use errors::error;
 pub use nilval::{nil, Nil};
+pub use goarray::array;
 pub use gomap::map;
 pub use goslice::slice;
 pub use gostring::string;
