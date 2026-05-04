@@ -81,7 +81,7 @@ fn main() {
             http::NewRequest(string("POST"), string("http://x/u"), bytes("hello"));
         req.Header.Set(string("Content-Type"), string("text/plain"));
         let (_mr, err) = req.MultipartReader();
-        if errors::Is(err, http::ErrNotMultipart()) {
+        if errors::Is(err, http::ErrNotMultipart) {
             Println!("[ 2] non-multipart err         PASS");
         } else {
             Println!("[ 2] non-multipart err         FAIL");
@@ -96,7 +96,7 @@ fn main() {
         req.Header
             .Set(string("Content-Type"), string("multipart/form-data"));
         let (_mr, err) = req.MultipartReader();
-        if errors::Is(err, http::ErrMissingBoundary()) {
+        if errors::Is(err, http::ErrMissingBoundary) {
             Println!("[ 3] missing boundary err      PASS");
         } else {
             Println!("[ 3] missing boundary err      FAIL");

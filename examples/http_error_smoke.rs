@@ -84,7 +84,7 @@ fn main() {
         let (n2, e2) = limited.Read(&mut buf);
         // First Read returns up to 11 bytes (limit + 1 probe). After
         // remaining hits 0, the next Read returns 0 + ErrMaxBytes.
-        if (n1 == 10 || n1 == 11) && n2 == 0 && errors::Is(e2, http::ErrMaxBytes()) {
+        if (n1 == 10 || n1 == 11) && n2 == 0 && errors::Is(e2, http::ErrMaxBytes) {
             Println!("[ 3] MaxBytesReader limit      PASS");
         } else {
             Println!("[ 3] MaxBytesReader limit      FAIL n1={} n2={}", n1, n2);

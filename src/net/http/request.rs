@@ -149,7 +149,7 @@ impl Request {
         if matches.Len() > 0 {
             return (matches[0].clone(), errors::nil);
         }
-        (super::cookie::Cookie::default(), ErrNoCookie())
+        (super::cookie::Cookie::default(), ErrNoCookie.into())
     }
 
     /// `r.PathValue(name)` — look up a wildcard binding from a Go 1.22
@@ -266,7 +266,7 @@ impl Request {
         if v.Len() == 0 {
             return (
                 empty_multipart_reader(),
-                ErrNotMultipart(),
+                ErrNotMultipart.into(),
             );
         }
         if self.Body.Len() == 0 {
@@ -277,11 +277,11 @@ impl Request {
         }
         let (d, params, perr) = crate::mime::ParseMediaType(v);
         if !perr.IsNil() || d != "multipart/form-data" {
-            return (empty_multipart_reader(), ErrNotMultipart());
+            return (empty_multipart_reader(), ErrNotMultipart.into());
         }
         let (boundary, ok) = params.Get(string("boundary"));
         if !ok {
-            return (empty_multipart_reader(), ErrMissingBoundary());
+            return (empty_multipart_reader(), ErrMissingBoundary.into());
         }
         (
             crate::mime::multipart::NewReader(self.Body.clone(), boundary),
@@ -810,61 +810,18 @@ pub struct MaxBytesReader<R: io::Reader> {
     err: error,
 }
 
-/// `http.ErrNoCookie` (request.go:442) — returned by `Request.Cookie`
-/// when the named cookie is not present. Cached sentinel.
-pub fn ErrNoCookie() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string("http: named cookie not present")));
-    }
-    g.as_ref().unwrap().clone()
-}
+crate::var! {
+    /// `http.ErrNoCookie` (request.go:442).
+    pub ErrNoCookie: error        = "http: named cookie not present";
 
-/// `http.ErrMissingFile` (request.go:41) — returned by
-/// `FormFile` when the provided file field name is either not
-/// present in the request or not a file. Cached sentinel; FormFile
-/// itself is not yet ported, but the constant is exposed for
-/// downstream code.
-pub fn ErrMissingFile() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string("http: no such file")));
-    }
-    g.as_ref().unwrap().clone()
-}
+    /// `http.ErrMissingFile` (request.go:41).
+    pub ErrMissingFile: error     = "http: no such file";
 
-/// `http.ErrNotMultipart` (request.go:78) — returned by
-/// Request.MultipartReader when the request's Content-Type isn't
-/// multipart/form-data.
-pub fn ErrNotMultipart() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string(
-            "request Content-Type isn't multipart/form-data",
-        )));
-    }
-    g.as_ref().unwrap().clone()
-}
+    /// `http.ErrNotMultipart` (request.go:78).
+    pub ErrNotMultipart: error    = "request Content-Type isn't multipart/form-data";
 
-/// `http.ErrMissingBoundary` (request.go:74) — returned by
-/// Request.MultipartReader when the multipart Content-Type lacks a
-/// `boundary` parameter.
-pub fn ErrMissingBoundary() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string(
-            "no multipart boundary param in Content-Type",
-        )));
-    }
-    g.as_ref().unwrap().clone()
+    /// `http.ErrMissingBoundary` (request.go:74).
+    pub ErrMissingBoundary: error = "no multipart boundary param in Content-Type";
 }
 
 // ─── ProtocolError + sentinels (line-by-line port of request.go:43-94) ─
@@ -894,7 +851,7 @@ impl errors::ErrorTrait for ProtocolError {
 
 /// Internal: ErrNotSupported's pointee. Wraps ProtocolError but
 /// chains `Unwrap()` to `errors::ErrUnsupported()`, so
-/// `errors::Is(http::ErrNotSupported(), errors::ErrUnsupported())`
+/// `errors::Is(http::ErrNotSupported, errors::ErrUnsupported())`
 /// returns true. Mirrors Go's:
 ///
 /// ```ignore
@@ -920,71 +877,32 @@ impl errors::ErrorTrait for __ErrNotSupported {
     }
 }
 
-/// `http.ErrNotSupported` (request.go:65) — sentinel returned by
-/// ResponseController methods and Pusher.Push when a feature is not
-/// supported. `errors::Is(_, errors::ErrUnsupported())` succeeds via
-/// the Unwrap chain. Cached singleton.
-pub fn ErrNotSupported() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::Wrap(__ErrNotSupported));
-    }
-    g.as_ref().unwrap().clone()
-}
+crate::var! {
+    /// `http.ErrNotSupported` (request.go:65) — sentinel returned by
+    /// ResponseController methods and Pusher.Push when a feature is not
+    /// supported. `errors::Is(_, errors::ErrUnsupported)` succeeds via
+    /// the Unwrap chain.
+    pub ErrNotSupported: error = { __ErrNotSupported };
 
-/// `http.ErrUnexpectedTrailer` (request.go:70) — deprecated sentinel.
-/// Retained for completeness; nothing in net/http currently returns it.
-pub fn ErrUnexpectedTrailer() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::Wrap(ProtocolError {
-            ErrorString: string("trailer header without chunked transfer encoding"),
-        }));
-    }
-    g.as_ref().unwrap().clone()
-}
+    /// `http.ErrUnexpectedTrailer` (request.go:70) — deprecated sentinel.
+    pub ErrUnexpectedTrailer: error = {
+        ProtocolError { ErrorString: string("trailer header without chunked transfer encoding") }
+    };
 
-/// `http.ErrHeaderTooLong` (request.go:83) — deprecated sentinel.
-pub fn ErrHeaderTooLong() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::Wrap(ProtocolError {
-            ErrorString: string("header too long"),
-        }));
-    }
-    g.as_ref().unwrap().clone()
-}
+    /// `http.ErrHeaderTooLong` (request.go:83) — deprecated sentinel.
+    pub ErrHeaderTooLong: error = {
+        ProtocolError { ErrorString: string("header too long") }
+    };
 
-/// `http.ErrShortBody` (request.go:88) — deprecated sentinel.
-pub fn ErrShortBody() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::Wrap(ProtocolError {
-            ErrorString: string("entity body too short"),
-        }));
-    }
-    g.as_ref().unwrap().clone()
-}
+    /// `http.ErrShortBody` (request.go:88) — deprecated sentinel.
+    pub ErrShortBody: error = {
+        ProtocolError { ErrorString: string("entity body too short") }
+    };
 
-/// `http.ErrMissingContentLength` (request.go:93) — deprecated sentinel.
-pub fn ErrMissingContentLength() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::Wrap(ProtocolError {
-            ErrorString: string("missing ContentLength in HEAD response"),
-        }));
-    }
-    g.as_ref().unwrap().clone()
+    /// `http.ErrMissingContentLength` (request.go:93) — deprecated sentinel.
+    pub ErrMissingContentLength: error = {
+        ProtocolError { ErrorString: string("missing ContentLength in HEAD response") }
+    };
 }
 
 /// Internal helper to construct a degenerate Reader for the
@@ -1016,11 +934,11 @@ impl errors::ErrorTrait for MaxBytesError {
     }
 
     /// Walks to the legacy sentinel so callers using the older
-    /// `errors::Is(err, ErrMaxBytes())` form continue to match. Go's
+    /// `errors::Is(err, ErrMaxBytes.into())` form continue to match. Go's
     /// type uses `errors.As(*MaxBytesError)` instead, but goish lacks
     /// errors.As; chaining through Unwrap is the closest analogue.
     fn Unwrap(&self) -> errors::error {
-        ErrMaxBytes()
+        ErrMaxBytes.into()
     }
 }
 
@@ -1029,17 +947,11 @@ pub fn NewMaxBytesError(limit: int) -> error {
     errors::Wrap(MaxBytesError { Limit: limit })
 }
 
-/// `http.MaxBytesReader` legacy sentinel — kept for callers that
-/// match against a single error value rather than the typed
-/// MaxBytesError. Prefer the typed form when you need the limit.
-pub fn ErrMaxBytes() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string("http: request body too large")));
-    }
-    g.as_ref().unwrap().clone()
+crate::var! {
+    /// `http.MaxBytesReader` legacy sentinel — kept for callers that
+    /// match against a single error value rather than the typed
+    /// MaxBytesError. Prefer the typed form when you need the limit.
+    pub ErrMaxBytes: error = "http: request body too large";
 }
 
 pub fn NewMaxBytesReader<R: io::Reader>(r: R, n: int) -> MaxBytesReader<R> {

@@ -43,8 +43,8 @@ fn main() {
 
     // ─── Test 1: ErrClosedPipe is stable + message matches Go ─────
     {
-        let a = io::ErrClosedPipe();
-        let b = io::ErrClosedPipe();
+        let a: errors::error = io::ErrClosedPipe.into();
+        let b: errors::error = io::ErrClosedPipe.into();
         check(!a.IsNil(), b"io_pipe: T1 ErrClosedPipe nil\n");
         check(
             a.Error() == "io: read/write on closed pipe",
@@ -105,7 +105,7 @@ fn main() {
         let (_, err) = w2.Write(payload);
         check(!err.IsNil(), b"io_pipe: T3 Write returned nil err\n");
         check(
-            errors::Is(err, io::ErrClosedPipe()),
+            errors::Is(err, io::ErrClosedPipe),
             b"io_pipe: T3 Write err != ErrClosedPipe\n",
         );
     });

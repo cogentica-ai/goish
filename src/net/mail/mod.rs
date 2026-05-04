@@ -180,14 +180,6 @@ impl Header {
 // Go: message.go:208
 //   var ErrHeaderNotPresent = errors.New("mail: header not in message")
 //
-// Cached singleton — every call returns the same Arc so
-// `errors::Is(err, ErrHeaderNotPresent())` works.
-pub fn ErrHeaderNotPresent() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string::from_static("mail: header not in message")));
-    }
-    g.as_ref().unwrap().clone()
+crate::var! {
+    pub ErrHeaderNotPresent: error = "mail: header not in message";
 }

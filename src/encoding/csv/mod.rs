@@ -31,16 +31,10 @@ use crate::unicode::utf8;
 
 // ─── Sentinel errors (reader.go:88) + validDelim (reader.go:98) ──────
 
-pub fn ErrBareQuote() -> error {
-    crate::errors::New(string::from_static("bare \" in non-quoted-field"))
-}
-pub fn ErrQuote() -> error {
-    crate::errors::New(string::from_static(
-        "extraneous or missing \" in quoted-field",
-    ))
-}
-pub fn ErrFieldCount() -> error {
-    crate::errors::New(string::from_static("wrong number of fields"))
+crate::var! {
+    pub ErrBareQuote: error  = "bare \" in non-quoted-field";
+    pub ErrQuote: error      = "extraneous or missing \" in quoted-field";
+    pub ErrFieldCount: error = "wrong number of fields";
 }
 fn errInvalidDelim() -> error {
     crate::errors::New(string::from_static("csv: invalid field or comment delimiter"))
@@ -103,7 +97,7 @@ impl ErrorTrait for ParseError {
 }
 
 fn errors_is_field_count(e: &error) -> bool {
-    crate::errors::Is(e.clone(), ErrFieldCount())
+    crate::errors::Is(e.clone(), ErrFieldCount)
 }
 
 fn push_str(out: &mut alloc::string::String, s: &string) {
@@ -354,7 +348,7 @@ impl<R: io::Reader> Reader<R> {
                             StartLine: recLine,
                             Line: self.numLine,
                             Column: col,
-                            Err: ErrBareQuote(),
+                            Err: ErrBareQuote.into(),
                         });
                         break 'parseField;
                     }
@@ -405,7 +399,7 @@ impl<R: io::Reader> Reader<R> {
                             StartLine: recLine,
                             Line: self.numLine,
                             Column: pos.col - quote_len as int,
-                            Err: ErrQuote(),
+                            Err: ErrQuote.into(),
                         });
                         break 'parseField;
                     }
@@ -433,7 +427,7 @@ impl<R: io::Reader> Reader<R> {
                             StartLine: recLine,
                             Line: pos.line,
                             Column: pos.col,
-                            Err: ErrQuote(),
+                            Err: ErrQuote.into(),
                         });
                         break 'parseField;
                     }
@@ -465,7 +459,7 @@ impl<R: io::Reader> Reader<R> {
                     StartLine: recLine,
                     Line: recLine,
                     Column: 1,
-                    Err: ErrFieldCount(),
+                    Err: ErrFieldCount.into(),
                 });
             }
         } else if self.FieldsPerRecord == 0 {

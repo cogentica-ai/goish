@@ -79,11 +79,11 @@ fn main() {
         b"strconv: Atoi(abc) error text wrong\n",
     );
     check(
-        errors::Is(err.clone(), strconv::ErrSyntax()),
+        errors::Is(err.clone(), strconv::ErrSyntax),
         b"strconv: Atoi(abc) Is(ErrSyntax) must hold\n",
     );
     check(
-        !errors::Is(err.clone(), strconv::ErrRange()),
+        !errors::Is(err.clone(), strconv::ErrRange),
         b"strconv: Atoi(abc) Is(ErrRange) must NOT hold\n",
     );
 
@@ -92,7 +92,7 @@ fn main() {
     let (n, err) = strconv::Atoi("99999999999999999999"); // 20 digits
     check(err != nil, b"strconv: Atoi big-num err must be non-nil\n");
     check(
-        errors::Is(err.clone(), strconv::ErrRange()),
+        errors::Is(err.clone(), strconv::ErrRange),
         b"strconv: Atoi big-num Is(ErrRange) must hold\n",
     );
     check(n == i64::MAX, b"strconv: Atoi big-num clamp must be i64::MAX\n");

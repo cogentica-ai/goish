@@ -37,12 +37,9 @@ pub fn NewChunkedWriter<W: Writer>(w: W) -> ChunkedWriter<W> {
     super::chunked::NewChunkedWriter(w)
 }
 
-/// `httputil.ErrLineTooLong` (httputil.go:43) — sentinel returned by
-/// `NewChunkedReader` when a chunk-extension line exceeds the 4 KiB
-/// limit.
-pub fn ErrLineTooLong() -> error {
-    super::chunked::ErrLineTooLong()
-}
+/// `httputil.ErrLineTooLong` (httputil.go:43) — re-export of
+/// `chunked::ErrLineTooLong`. Same Arc identity.
+pub use super::chunked::ErrLineTooLong;
 
 /// `httputil.DumpRequest(req, body) -> ([]byte, error)` — render a
 /// Request in HTTP/1.x wire format. Line-by-line port of Go 1.25

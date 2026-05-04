@@ -50,9 +50,9 @@ use crate::syscall;
 use crate::types::{byte, int};
 
 /// Sentinel returned by `LookPath` when no matching executable is on
-/// `$PATH`. Mirrors `exec.ErrNotFound`.
-pub fn ErrNotFound() -> error {
-    errors::New("executable file not found in $PATH")
+crate::var! {
+    /// `$PATH`. Mirrors `exec.ErrNotFound`.
+    pub ErrNotFound: error = "executable file not found in $PATH";
 }
 
 /// `exec.Cmd` — a one-shot subprocess. Build via `Command(name, args)`.
@@ -137,7 +137,7 @@ pub fn LookPath<S: Into<string>>(file: S) -> (string, error) {
     }
     let path = crate::os::Getenv("PATH");
     if path.Len() == 0 {
-        return (string::new(), ErrNotFound());
+        return (string::new(), ErrNotFound.into());
     }
     let dirs = crate::strings::Split(path, ":");
     let n = crate::len(&dirs);
@@ -151,7 +151,7 @@ pub fn LookPath<S: Into<string>>(file: S) -> (string, error) {
             return (candidate, crate::nilval::nil.into());
         }
     }
-    (string::new(), ErrNotFound())
+    (string::new(), ErrNotFound.into())
 }
 
 fn name_has_slash(s: &string) -> bool {
@@ -191,7 +191,7 @@ impl Cmd {
     /// the child's status as an error (or nil on exit code 0).
     pub fn Run(&mut self) -> error {
         if self.Path.Len() == 0 {
-            return ErrNotFound();
+            return ErrNotFound.into();
         }
         // Build the C-string argv. We hold the buffers alive across
         // execve via `argv_bufs`; argv_ptrs points into them.

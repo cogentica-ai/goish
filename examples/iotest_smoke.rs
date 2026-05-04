@@ -105,7 +105,7 @@ fn main() {
         let (n1, e1) = tor.Read(&mut b);
         let (n2, e2) = tor.Read(&mut b);
         // First call succeeds, second returns ErrTimeout (count == 2).
-        let timeout_msg = ErrTimeout().Error();
+        let __ev_timeout_msg: goish::errors::error = ErrTimeout.into(); let timeout_msg = __ev_timeout_msg.Error();
         if n1 > 0 && e1.IsNil() && n2 == 0 && !e2.IsNil() && e2.Error() == timeout_msg {
             Println!("[ 5] TimeoutReader 2nd call  PASS");
         } else {
@@ -203,8 +203,8 @@ fn main() {
 
     // 11. ErrTimeout sentinel constant message.
     {
-        let e1 = ErrTimeout();
-        let e2 = ErrTimeout();
+        let e1: goish::errors::error = ErrTimeout.into();
+        let e2: goish::errors::error = ErrTimeout.into();
         if e1.Error() == string("timeout") && e2.Error() == string("timeout") {
             Println!("[11] ErrTimeout message      PASS");
         } else {

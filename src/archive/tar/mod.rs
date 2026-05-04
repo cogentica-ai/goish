@@ -98,14 +98,12 @@ const paxGNUSparseMap: &str = "GNU.sparse.map";
 
 // ─── Errors ──────────────────────────────────────────────────────────
 
-/// Invalid tar header.
-pub fn ErrHeader() -> error {
-    errors::New("archive/tar: invalid tar header")
-}
+crate::var! {
+    /// Invalid tar header.
+    pub ErrHeader: error       = "archive/tar: invalid tar header";
 
-/// Header field too long.
-pub fn ErrFieldTooLong() -> error {
-    errors::New("archive/tar: header field too long")
+    /// Header field too long.
+    pub ErrFieldTooLong: error = "archive/tar: header field too long";
 }
 
 // ─── Format ──────────────────────────────────────────────────────────
@@ -599,7 +597,7 @@ impl Reader {
             nb = 0;
         }
         if nb < 0 {
-            return ErrHeader();
+            return ErrHeader.into();
         }
         self.pad = blockPadding(nb);
         self.nb = nb;
@@ -642,12 +640,12 @@ impl Reader {
             if blk2.isZero() {
                 return (Header::new(), io::EOF.into());
             }
-            return (Header::new(), ErrHeader());
+            return (Header::new(), ErrHeader.into());
         }
 
         let format = self.blk.getFormat();
         if format == FormatUnknown {
-            return (Header::new(), ErrHeader());
+            return (Header::new(), ErrHeader.into());
         }
 
         let mut p = parser::new();
@@ -782,7 +780,7 @@ fn mergePAX(hdr: &mut Header, paxHdrs: &map<string, string>) -> error {
             }
         }
         if !err.IsNil() {
-            return ErrHeader();
+            return ErrHeader.into();
         }
     }
     hdr.PAXRecords = paxHdrs.clone();
@@ -802,7 +800,7 @@ fn parsePAX(r: &mut dyn crate::io::Reader) -> (map<string, string>, error) {
     while sbuf.Len() > 0 {
         let (key, value, residual, err) = parsePAXRecord(sbuf);
         if !err.IsNil() {
-            return (map::new(), ErrHeader());
+            return (map::new(), ErrHeader.into());
         }
         sbuf = residual;
         let key_bytes = key.as_bytes();
@@ -815,7 +813,7 @@ fn parsePAX(r: &mut dyn crate::io::Reader) -> (map<string, string>, error) {
                 || (!is_even && is_offset)
                 || strings::Contains(value.clone(), ",")
             {
-                return (map::new(), ErrHeader());
+                return (map::new(), ErrHeader.into());
             }
             sparseMap.push(value);
         } else {
@@ -839,23 +837,23 @@ fn parsePAXRecord(s: string) -> (string, string, string, error) {
         }
     }
     if space_idx < 0 {
-        return (string::new(), string::new(), s, ErrHeader());
+        return (string::new(), string::new(), s, ErrHeader.into());
     }
     let n_str = s.slice(0, space_idx);
     let rest = s.slice(space_idx + 1, s.Len());
     let (n, err) = strconv::ParseInt(n_str, 10, 0);
     if !err.IsNil() || n < 5 || n > s.Len() {
-        return (string::new(), string::new(), s, ErrHeader());
+        return (string::new(), string::new(), s, ErrHeader.into());
     }
     let rec_len = n - (space_idx + 1);
     if rec_len <= 0 {
-        return (string::new(), string::new(), s, ErrHeader());
+        return (string::new(), string::new(), s, ErrHeader.into());
     }
     let rec = rest.slice(0, rec_len - 1);
     let nl = rest.slice(rec_len - 1, rec_len);
     let rem = rest.slice(rec_len, rest.Len());
     if nl != "\n" {
-        return (string::new(), string::new(), s, ErrHeader());
+        return (string::new(), string::new(), s, ErrHeader.into());
     }
 
     let rec_bytes = rec.as_bytes();
@@ -867,12 +865,12 @@ fn parsePAXRecord(s: string) -> (string, string, string, error) {
         }
     }
     if eq_idx < 0 {
-        return (string::new(), string::new(), s, ErrHeader());
+        return (string::new(), string::new(), s, ErrHeader.into());
     }
     let key = rec.slice(0, eq_idx);
     let val = rec.slice(eq_idx + 1, rec.Len());
     if !validPAXRecord(key.clone(), val.clone()) {
-        return (string::new(), string::new(), s, ErrHeader());
+        return (string::new(), string::new(), s, ErrHeader.into());
     }
     (key, val, rem, nil)
 }
@@ -903,7 +901,7 @@ fn parsePAXTime(s: string) -> (Time, error) {
     let ss_bytes = ss.as_bytes();
     let (secs, err) = strconv::ParseInt(&ss, 10, 64);
     if !err.IsNil() {
-        return (crate::time::Unix(0, 0), ErrHeader());
+        return (crate::time::Unix(0, 0), ErrHeader.into());
     }
     if !has_dot {
         return (crate::time::Unix(secs, 0), nil);
@@ -912,7 +910,7 @@ fn parsePAXTime(s: string) -> (Time, error) {
     let sn_bytes = sn.as_bytes();
     for &c in sn_bytes {
         if c < b'0' || c > b'9' {
-            return (crate::time::Unix(0, 0), ErrHeader());
+            return (crate::time::Unix(0, 0), ErrHeader.into());
         }
     }
 
@@ -962,13 +960,13 @@ impl parser {
                     c &= 0x7f;
                 }
                 if (x >> 56) > 0 {
-                    self.err = ErrHeader();
+                    self.err = ErrHeader.into();
                     return 0;
                 }
                 x = (x << 8) | (c as u64);
             }
             if (x >> 63) > 0 {
-                self.err = ErrHeader();
+                self.err = ErrHeader.into();
                 return 0;
             }
             if inv == 0xff {
@@ -996,7 +994,7 @@ impl parser {
         let s = self.parseString(trimmed);
         let (x, err) = strconv::ParseUint(s, 8, 64);
         if !err.IsNil() {
-            self.err = ErrHeader();
+            self.err = ErrHeader.into();
         }
         x as i64
     }
@@ -1052,7 +1050,7 @@ fn readSpecialFile(r: &mut dyn crate::io::Reader) -> (slice<byte>, error) {
     let mut limited = crate::io::LimitReader(r, (maxSpecialFileSize + 1) as int);
     let (buf, err) = crate::io::ReadAll(&mut limited);
     if buf.Len() > maxSpecialFileSize {
-        return (slice::new(), ErrFieldTooLong());
+        return (slice::new(), ErrFieldTooLong.into());
     }
     (buf, err)
 }

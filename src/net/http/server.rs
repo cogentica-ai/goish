@@ -712,91 +712,24 @@ pub struct __ServerState {
     tracked_listener: Mutex<Option<Arc<net::Listener>>>,
 }
 
-/// `http.ErrServerClosed` (server.go:36). Returned by `Serve` /
-/// `ListenAndServe` after `Shutdown` is called. Cached as a stable
-/// sentinel so `errors::Is(err, http::ErrServerClosed())` works the
-/// same way Go's `errors.Is(err, http.ErrServerClosed)` does.
-pub fn ErrServerClosed() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string("http: Server closed")));
-    }
-    g.as_ref().unwrap().clone()
-}
+crate::var! {
+    /// `http.ErrServerClosed` (server.go:36).
+    pub ErrServerClosed: error    = "http: Server closed";
 
-/// `http.ErrBodyNotAllowed` (server.go:43). Returned by
-/// ResponseWriter.Write calls when the HTTP method or response code
-/// does not permit a body. Cached sentinel.
-pub fn ErrBodyNotAllowed() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string(
-            "http: request method or response status code does not allow body",
-        )));
-    }
-    g.as_ref().unwrap().clone()
-}
+    /// `http.ErrBodyNotAllowed` (server.go:43).
+    pub ErrBodyNotAllowed: error  = "http: request method or response status code does not allow body";
 
-/// `http.ErrHijacked` (server.go:50). Returned by ResponseWriter.Write
-/// calls when the underlying connection has been hijacked. Cached
-/// sentinel.
-pub fn ErrHijacked() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string("http: connection has been hijacked")));
-    }
-    g.as_ref().unwrap().clone()
-}
+    /// `http.ErrHijacked` (server.go:50).
+    pub ErrHijacked: error        = "http: connection has been hijacked";
 
-/// `http.ErrContentLength` (server.go:56). Returned by
-/// ResponseWriter.Write calls when a Handler set a Content-Length
-/// response header with a declared size and then attempted to write
-/// more bytes than declared. Cached sentinel.
-pub fn ErrContentLength() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string(
-            "http: wrote more than the declared Content-Length",
-        )));
-    }
-    g.as_ref().unwrap().clone()
-}
+    /// `http.ErrContentLength` (server.go:56).
+    pub ErrContentLength: error   = "http: wrote more than the declared Content-Length";
 
-/// `http.ErrAbortHandler` (server.go:1909). A sentinel panic value to
-/// abort a handler. Panicking with this from inside a handler signals
-/// that the client should see an interrupted response, but the server
-/// should not log an error. Cached sentinel.
-pub fn ErrAbortHandler() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string("net/http: abort Handler")));
-    }
-    g.as_ref().unwrap().clone()
-}
+    /// `http.ErrAbortHandler` (server.go:1909).
+    pub ErrAbortHandler: error    = "net/http: abort Handler";
 
-/// `http.ErrHandlerTimeout` (server.go:3829). Returned on
-/// ResponseWriter Write calls in handlers wrapped with TimeoutHandler.
-/// Cached sentinel; goish does not yet implement TimeoutHandler, but
-/// the constant is exposed so user code that compares against it
-/// continues to compile.
-pub fn ErrHandlerTimeout() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string("http: Handler timeout")));
-    }
-    g.as_ref().unwrap().clone()
+    /// `http.ErrHandlerTimeout` (server.go:3829).
+    pub ErrHandlerTimeout: error  = "http: Handler timeout";
 }
 
 /// v1 fallback when both ReadHeaderTimeout and ReadTimeout are zero
@@ -871,7 +804,7 @@ impl Server {
         {
             let mut tracked = self.__state.tracked_listener.Lock();
             if self.__state.in_shutdown.load(Ordering::Acquire) {
-                return ErrServerClosed();
+                return ErrServerClosed.into();
             }
             *tracked = Some(ln.clone());
             if self.MaxConcurrentConns > 0 {
@@ -907,7 +840,7 @@ impl Server {
                     let _ = sem.__try_recv();
                 }
                 if self.__state.in_shutdown.load(Ordering::Acquire) {
-                    return ErrServerClosed();
+                    return ErrServerClosed.into();
                 }
                 return err;
             }

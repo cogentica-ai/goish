@@ -27,8 +27,8 @@ fn main() {
 
     // 1. ErrNotSupported is non-nil and stable across calls.
     {
-        let a = http::ErrNotSupported();
-        let b = http::ErrNotSupported();
+        let a: errors::error = http::ErrNotSupported.into();
+        let b: errors::error = http::ErrNotSupported.into();
         if !a.IsNil() && errors::Is(a, b) {
             Println!("[ 1] ErrNotSupported stable    PASS");
         } else {
@@ -39,7 +39,7 @@ fn main() {
 
     // 2. ErrNotSupported message matches Go.
     {
-        let s = http::ErrNotSupported().Error();
+        let __e_s: errors::error = http::ErrNotSupported.into(); let s = __e_s.Error();
         if s == "feature not supported" {
             Println!("[ 2] ErrNotSupported message   PASS");
         } else {
@@ -50,7 +50,7 @@ fn main() {
 
     // 3. ErrNotSupported chains to errors.ErrUnsupported.
     {
-        if errors::Is(http::ErrNotSupported(), errors::ErrUnsupported) {
+        if errors::Is(http::ErrNotSupported.into(), errors::ErrUnsupported) {
             Println!("[ 3] ErrNotSupported→ErrUnsup  PASS");
         } else {
             Println!("[ 3] ErrNotSupported→ErrUnsup  FAIL");
@@ -60,9 +60,9 @@ fn main() {
 
     // 4. ErrUnexpectedTrailer sentinel + message + stable.
     {
-        let a = http::ErrUnexpectedTrailer();
+        let a: errors::error = http::ErrUnexpectedTrailer.into();
         let s = a.Error();
-        if errors::Is(a.clone(), http::ErrUnexpectedTrailer())
+        if errors::Is(a.clone(), http::ErrUnexpectedTrailer)
             && s == "trailer header without chunked transfer encoding"
         {
             Println!("[ 4] ErrUnexpectedTrailer      PASS");
@@ -74,7 +74,7 @@ fn main() {
 
     // 5. ErrHeaderTooLong sentinel + message.
     {
-        let s = http::ErrHeaderTooLong().Error();
+        let __e_s: errors::error = http::ErrHeaderTooLong.into(); let s = __e_s.Error();
         if s == "header too long" {
             Println!("[ 5] ErrHeaderTooLong message  PASS");
         } else {
@@ -85,7 +85,7 @@ fn main() {
 
     // 6. ErrShortBody sentinel + message.
     {
-        let s = http::ErrShortBody().Error();
+        let __e_s: errors::error = http::ErrShortBody.into(); let s = __e_s.Error();
         if s == "entity body too short" {
             Println!("[ 6] ErrShortBody message      PASS");
         } else {
@@ -96,7 +96,7 @@ fn main() {
 
     // 7. ErrMissingContentLength sentinel + message.
     {
-        let s = http::ErrMissingContentLength().Error();
+        let __e_s: errors::error = http::ErrMissingContentLength.into(); let s = __e_s.Error();
         if s == "missing ContentLength in HEAD response" {
             Println!("[ 7] ErrMissingContentLength   PASS");
         } else {
@@ -108,10 +108,10 @@ fn main() {
     // 8. Non-ErrNotSupported sentinels do NOT chain to ErrUnsupported.
     {
         let any_chain =
-               errors::Is(http::ErrUnexpectedTrailer(), errors::ErrUnsupported)
-            || errors::Is(http::ErrHeaderTooLong(),     errors::ErrUnsupported)
-            || errors::Is(http::ErrShortBody(),         errors::ErrUnsupported)
-            || errors::Is(http::ErrMissingContentLength(), errors::ErrUnsupported);
+               errors::Is(http::ErrUnexpectedTrailer.into(), errors::ErrUnsupported)
+            || errors::Is(http::ErrHeaderTooLong.into(),     errors::ErrUnsupported)
+            || errors::Is(http::ErrShortBody.into(),         errors::ErrUnsupported)
+            || errors::Is(http::ErrMissingContentLength.into(), errors::ErrUnsupported);
         if !any_chain {
             Println!("[ 8] other sentinels !ErrUnsup PASS");
         } else {
@@ -147,8 +147,10 @@ fn main() {
 
     // 11. Different ProtocolError sentinels are distinct from each other.
     {
-        if !errors::Is(http::ErrHeaderTooLong(), http::ErrShortBody())
-            && !errors::Is(http::ErrShortBody(), http::ErrHeaderTooLong())
+        let __htl: error = http::ErrHeaderTooLong.into();
+        let __sb: error = http::ErrShortBody.into();
+        if !errors::Is(__htl.clone(), http::ErrShortBody)
+            && !errors::Is(__sb.clone(), http::ErrHeaderTooLong)
         {
             Println!("[11] sentinels are distinct   PASS");
         } else {

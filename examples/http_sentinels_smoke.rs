@@ -24,8 +24,8 @@ fn main() {
 
     // 1. ErrNoCookie is non-nil and stable.
     {
-        let a = http::ErrNoCookie();
-        let b = http::ErrNoCookie();
+        let a: goish::errors::error = http::ErrNoCookie.into();
+        let b: goish::errors::error = http::ErrNoCookie.into();
         if !a.IsNil() && errors::Is(a, b) {
             Println!("[ 1] ErrNoCookie stable        PASS");
         } else {
@@ -36,7 +36,7 @@ fn main() {
 
     // 2. ErrNoCookie message matches Go.
     {
-        let s = http::ErrNoCookie().Error();
+        let __e_for_s: goish::errors::error = http::ErrNoCookie.into(); let s = __e_for_s.Error();
         if s == "http: named cookie not present" {
             Println!("[ 2] ErrNoCookie message       PASS");
         } else {
@@ -47,7 +47,7 @@ fn main() {
 
     // 3. ErrMissingFile sentinel + message.
     {
-        let s = http::ErrMissingFile().Error();
+        let __e_for_s: goish::errors::error = http::ErrMissingFile.into(); let s = __e_for_s.Error();
         if s == "http: no such file" {
             Println!("[ 3] ErrMissingFile message    PASS");
         } else {
@@ -58,7 +58,7 @@ fn main() {
 
     // 4. ErrBodyNotAllowed sentinel.
     {
-        let s = http::ErrBodyNotAllowed().Error();
+        let __ev_s: goish::errors::error = http::ErrBodyNotAllowed.into(); let s = __ev_s.Error();
         if s == "http: request method or response status code does not allow body" {
             Println!("[ 4] ErrBodyNotAllowed message PASS");
         } else {
@@ -69,8 +69,8 @@ fn main() {
 
     // 5. ErrHijacked sentinel.
     {
-        let a = http::ErrHijacked();
-        let b = http::ErrHijacked();
+        let a: goish::errors::error = http::ErrHijacked.into();
+        let b: goish::errors::error = http::ErrHijacked.into();
         if errors::Is(a.clone(), b) && a.Error() == "http: connection has been hijacked" {
             Println!("[ 5] ErrHijacked stable+msg    PASS");
         } else {
@@ -81,7 +81,7 @@ fn main() {
 
     // 6. ErrContentLength sentinel.
     {
-        let s = http::ErrContentLength().Error();
+        let __ev_s: goish::errors::error = http::ErrContentLength.into(); let s = __ev_s.Error();
         if s == "http: wrote more than the declared Content-Length" {
             Println!("[ 6] ErrContentLength message  PASS");
         } else {
@@ -92,8 +92,8 @@ fn main() {
 
     // 7. ErrAbortHandler sentinel + stability.
     {
-        let a = http::ErrAbortHandler();
-        let b = http::ErrAbortHandler();
+        let a: goish::errors::error = http::ErrAbortHandler.into();
+        let b: goish::errors::error = http::ErrAbortHandler.into();
         if errors::Is(a.clone(), b) && a.Error() == "net/http: abort Handler" {
             Println!("[ 7] ErrAbortHandler           PASS");
         } else {
@@ -104,7 +104,7 @@ fn main() {
 
     // 8. ErrHandlerTimeout sentinel.
     {
-        let s = http::ErrHandlerTimeout().Error();
+        let __ev_s: goish::errors::error = http::ErrHandlerTimeout.into(); let s = __ev_s.Error();
         if s == "http: Handler timeout" {
             Println!("[ 8] ErrHandlerTimeout message PASS");
         } else {
@@ -115,7 +115,7 @@ fn main() {
 
     // 9. ErrServerClosed (pre-existing) sentinel still works alongside.
     {
-        let s = http::ErrServerClosed().Error();
+        let __ev_s: goish::errors::error = http::ErrServerClosed.into(); let s = __ev_s.Error();
         if s == "http: Server closed" {
             Println!("[ 9] ErrServerClosed message   PASS");
         } else {
@@ -126,7 +126,7 @@ fn main() {
 
     // 10. Two different sentinels are NOT Is-equal.
     {
-        if !errors::Is(http::ErrNoCookie(), http::ErrMissingFile()) {
+        if !errors::Is(http::ErrNoCookie.into(), http::ErrMissingFile) {
             Println!("[10] distinct sentinels        PASS");
         } else {
             Println!("[10] distinct sentinels        FAIL");
@@ -142,7 +142,7 @@ fn main() {
             goish::make!([]goish::byte, 0),
         );
         let (_, err) = r.Cookie(goish::string("missing"));
-        if errors::Is(err, http::ErrNoCookie()) {
+        if errors::Is(err, http::ErrNoCookie) {
             Println!("[11] Request.Cookie wires it   PASS");
         } else {
             Println!("[11] Request.Cookie wires it   FAIL");

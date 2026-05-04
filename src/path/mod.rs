@@ -235,14 +235,9 @@ pub fn Dir<S: Into<string>>(p: S) -> string {
 
 // ─── Match — shell-pattern matching (match.go) ────────────────────────
 
-/// `path.ErrBadPattern` — returned from Match on syntax error.
-pub fn ErrBadPattern() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New("syntax error in pattern"));
-    }
-    g.as_ref().unwrap().clone()
+crate::var! {
+    /// `path.ErrBadPattern` — returned from Match on syntax error.
+    pub ErrBadPattern: error = "syntax error in pattern";
 }
 
 /// `path.Match(pattern, name)` — shell glob match against full name.
@@ -393,7 +388,7 @@ fn match_chunk<'a>(mut chunk: &'a [u8], mut s: &'a [u8]) -> (Option<&'a [u8]>, O
             b'\\' => {
                 chunk = &chunk[1..];
                 if chunk.is_empty() {
-                    return (None, Some(ErrBadPattern()));
+                    return (None, Some(ErrBadPattern.into()));
                 }
                 if !failed {
                     if chunk[0] != s[0] {
@@ -423,21 +418,21 @@ fn match_chunk<'a>(mut chunk: &'a [u8], mut s: &'a [u8]) -> (Option<&'a [u8]>, O
 
 fn get_esc(mut chunk: &[u8]) -> (rune, &[u8], Option<error>) {
     if chunk.is_empty() || chunk[0] == b'-' || chunk[0] == b']' {
-        return (0, chunk, Some(ErrBadPattern()));
+        return (0, chunk, Some(ErrBadPattern.into()));
     }
     if chunk[0] == b'\\' {
         chunk = &chunk[1..];
         if chunk.is_empty() {
-            return (0, chunk, Some(ErrBadPattern()));
+            return (0, chunk, Some(ErrBadPattern.into()));
         }
     }
     let (r, n) = utf8::DecodeRune(chunk);
     if r == utf8::RuneError && n == 1 {
-        return (0, chunk, Some(ErrBadPattern()));
+        return (0, chunk, Some(ErrBadPattern.into()));
     }
     let nchunk = &chunk[n as usize..];
     if nchunk.is_empty() {
-        return (r, nchunk, Some(ErrBadPattern()));
+        return (r, nchunk, Some(ErrBadPattern.into()));
     }
     (r, nchunk, None)
 }

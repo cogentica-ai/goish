@@ -20,14 +20,19 @@ Components landed:
 - `goish::var!` muncher in `builtin_macros.rs`: single-line + block forms, mixed `error` + plain-const
 - Existing `__SkipDirMarker` / `__SkipAllMarker` in `path/filepath` migrated to `IsTarget`
 
-Pending — see §13 below for the migration plan:
+Pending:
 
-1. **Stdlib migration**: 133 `io::EOF()` / `io::ErrShortWrite()` / etc. call
-   sites across 48 files. Mechanical (drop parens), but the const-vs-fn
-   name clash prevents both forms coexisting in the same module — so each
-   module migrates as a unit. Defer until next session.
+1. ~~**Stdlib migration**: 133 `io::EOF()` / etc. call sites~~ →
+   **DONE 2026-05-04**. All `pub fn Err*() -> error` sentinel functions
+   migrated to `goish::var!` markers. Zero remain in `src/`. Modules
+   touched: `errors`, `io`, `io/fs`, `os`, `context`, `bufio`, `archive/tar`,
+   `testing/iotest`, `os/exec`, `encoding/csv`, `encoding/json`, `io/pipe`,
+   `net/mail`, `net/http/chunked`, `net/http/httputil`, `net/http/server`,
+   `net/http/request`, `strconv`, `path`. ~50 sentinels, ~250 call sites.
 2. **`#[goish::main]` eager-init**: still deferred per open decision #5.
 3. **`const!` macro**: still deferred per open decision #2.
+4. **`syscall::E*` (Errno-style typed errors)**: deferred — different
+   shape (custom `Is()` for semantic matching, not pointer-eq).
 
 The doctrine choice and trade-off analysis below remain the architectural
 record, even though the recommendation in §10 is now superseded.

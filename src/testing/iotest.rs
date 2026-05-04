@@ -33,9 +33,9 @@ impl ErrorTrait for ErrTimeoutImpl {
     }
 }
 
-/// `iotest.ErrTimeout` (reader.go:74) — fake timeout error.
-pub fn ErrTimeout() -> error {
-    errors::Wrap(ErrTimeoutImpl)
+crate::var! {
+    /// `iotest.ErrTimeout` (reader.go:74) — fake timeout error.
+    pub ErrTimeout: error = { ErrTimeoutImpl };
 }
 
 // ─── OneByteReader (reader.go:17) ────────────────────────────────────────────
@@ -153,7 +153,7 @@ impl<R: io::Reader> io::Reader for TimeoutReaderImpl<R> {
         // Go: reader.go:85-91
         self.count += 1;
         if self.count == 2 {
-            return (0, ErrTimeout());
+            return (0, ErrTimeout.into());
         }
         self.r.Read(p)
     }

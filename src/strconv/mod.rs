@@ -67,16 +67,11 @@ fn cached_error(slot: &SpinLock<Option<error>>, init: fn() -> error) -> error {
     g.as_ref().unwrap().clone()
 }
 
-/// `strconv.ErrSyntax` — input did not look like a number.
-pub fn ErrSyntax() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("invalid syntax"))
-}
-
-/// `strconv.ErrRange` — value parsed but is out of range for the target.
-pub fn ErrRange() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("value out of range"))
+crate::var! {
+    /// `strconv.ErrSyntax` — input did not look like a number.
+    pub ErrSyntax: error = "invalid syntax";
+    /// `strconv.ErrRange` — value parsed but is out of range for the target.
+    pub ErrRange: error  = "value out of range";
 }
 
 // ─── NumError ─────────────────────────────────────────────────────────
@@ -120,7 +115,7 @@ fn syntaxError(fn_name: &'static str, s: string) -> error {
     errors::Wrap(NumError {
         Func: string::from_static(fn_name),
         Num: s,
-        Err: ErrSyntax(),
+        Err: ErrSyntax.into(),
     })
 }
 
@@ -128,7 +123,7 @@ fn rangeError(fn_name: &'static str, s: string) -> error {
     errors::Wrap(NumError {
         Func: string::from_static(fn_name),
         Num: s,
-        Err: ErrRange(),
+        Err: ErrRange.into(),
     })
 }
 
@@ -372,7 +367,7 @@ pub fn ParseInt<S: Into<string>>(s: S, base: int, bit_size: int) -> (int, error)
 
     if err != nil {
         // Reshape: same error class, but Func="ParseInt" and Num=s0.
-        let inner_is_range = errors::Is(err.clone(), ErrRange());
+        let inner_is_range = errors::Is(err.clone(), ErrRange);
         if !inner_is_range {
             // Could be syntax, base, or bit-size — preserve syntax;
             // for base/bit-size errors we fall through to syntaxError
@@ -447,7 +442,7 @@ pub fn Atoi<S: Into<string>>(s: S) -> (int, error) {
     let s0 = s.clone();
     let (i64_val, err) = ParseInt(s, 10, 0);
     if err != nil {
-        let new_err = if errors::Is(err.clone(), ErrRange()) {
+        let new_err = if errors::Is(err.clone(), ErrRange) {
             rangeError(FN, s0)
         } else {
             syntaxError(FN, s0)
@@ -882,13 +877,13 @@ pub fn UnquoteChar<S: Into<string>>(s: S, quote: byte) -> (rune, bool, string, e
     let bs = s_in.as_bytes();
     // Go: easy cases. if len(s) == 0 { err = ErrSyntax; return }
     if bs.is_empty() {
-        return (0, false, string::new(), ErrSyntax());
+        return (0, false, string::new(), ErrSyntax.into());
     }
     // Go: switch c := s[0]; { ... }
     let c = bs[0];
     // Go: case c == quote && (quote == '\'' || quote == '"'): err = ErrSyntax
     if c == quote && (quote == b'\'' || quote == b'"') {
-        return (0, false, string::new(), ErrSyntax());
+        return (0, false, string::new(), ErrSyntax.into());
     }
     // Go: case c >= utf8.RuneSelf:
     //         r, size := utf8.DecodeRuneInString(s)
@@ -905,7 +900,7 @@ pub fn UnquoteChar<S: Into<string>>(s: S, quote: byte) -> (rune, bool, string, e
     }
     // Go: hard case — c is backslash. if len(s) <= 1 { err = ErrSyntax; return }
     if bs.len() <= 1 {
-        return (0, false, string::new(), ErrSyntax());
+        return (0, false, string::new(), ErrSyntax.into());
     }
     // Go: c := s[1]; s = s[2:]
     let esc = bs[1];
@@ -930,7 +925,7 @@ pub fn UnquoteChar<S: Into<string>>(s: S, quote: byte) -> (rune, bool, string, e
             };
             // Go: if len(s) < n { err = ErrSyntax; return }
             if tail_bs.len() < n {
-                return (0, false, string::new(), ErrSyntax());
+                return (0, false, string::new(), ErrSyntax.into());
             }
             let mut v: rune = 0;
             // Go: for j := 0; j < n; j++ {
@@ -940,7 +935,7 @@ pub fn UnquoteChar<S: Into<string>>(s: S, quote: byte) -> (rune, bool, string, e
             for j in 0..n {
                 let (x, ok) = unhex(tail_bs[j]);
                 if !ok {
-                    return (0, false, string::new(), ErrSyntax());
+                    return (0, false, string::new(), ErrSyntax.into());
                 }
                 v = (v << 4) | x;
             }
@@ -951,7 +946,7 @@ pub fn UnquoteChar<S: Into<string>>(s: S, quote: byte) -> (rune, bool, string, e
             } else {
                 // Go: if !utf8.ValidRune(v) { err = ErrSyntax; return }
                 if !crate::unicode::utf8::ValidRune(v) {
-                    return (0, false, string::new(), ErrSyntax());
+                    return (0, false, string::new(), ErrSyntax.into());
                 }
                 value = v;
                 multibyte = true;
@@ -961,18 +956,18 @@ pub fn UnquoteChar<S: Into<string>>(s: S, quote: byte) -> (rune, bool, string, e
         b'0' | b'1' | b'2' | b'3' | b'4' | b'5' | b'6' | b'7' => {
             let mut v: rune = (esc as rune) - b'0' as rune;
             if tail_bs.len() < 2 {
-                return (0, false, string::new(), ErrSyntax());
+                return (0, false, string::new(), ErrSyntax.into());
             }
             for j in 0..2 {
                 let x: rune = (tail_bs[j] as rune) - b'0' as rune;
                 if x < 0 || x > 7 {
-                    return (0, false, string::new(), ErrSyntax());
+                    return (0, false, string::new(), ErrSyntax.into());
                 }
                 v = (v << 3) | x;
             }
             tail_bs = &tail_bs[2..];
             if v > 255 {
-                return (0, false, string::new(), ErrSyntax());
+                return (0, false, string::new(), ErrSyntax.into());
             }
             value = v;
         }
@@ -980,11 +975,11 @@ pub fn UnquoteChar<S: Into<string>>(s: S, quote: byte) -> (rune, bool, string, e
         // Go: case '\'', '"':
         b'\'' | b'"' => {
             if esc != quote {
-                return (0, false, string::new(), ErrSyntax());
+                return (0, false, string::new(), ErrSyntax.into());
             }
             value = esc as rune;
         }
-        _ => return (0, false, string::new(), ErrSyntax()),
+        _ => return (0, false, string::new(), ErrSyntax.into()),
     }
     let tail = string::from_bytes(tail_bs);
     (value, multibyte, tail, nil)
@@ -998,7 +993,7 @@ fn unquote_impl(in_s: string, unescape: bool) -> (string, string, error) {
     let in_bs = in_s.as_bytes();
     // Go: if len(in) < 2 { return "", in, ErrSyntax }
     if in_bs.len() < 2 {
-        return (string::new(), in_s.clone(), ErrSyntax());
+        return (string::new(), in_s.clone(), ErrSyntax.into());
     }
     // Go: quote := in[0]; end := index(in[1:], quote)
     //     if end < 0 { return "", in, ErrSyntax }
@@ -1006,7 +1001,7 @@ fn unquote_impl(in_s: string, unescape: bool) -> (string, string, error) {
     let quote = in_bs[0];
     let end_after_inner = match in_bs[1..].iter().position(|&b| b == quote) {
         Some(p) => p + 2, // position after terminating quote
-        None => return (string::new(), in_s.clone(), ErrSyntax()),
+        None => return (string::new(), in_s.clone(), ErrSyntax.into()),
     };
     let end = end_after_inner;
 
@@ -1079,7 +1074,7 @@ fn unquote_impl(in_s: string, unescape: bool) -> (string, string, error) {
                 let first = cur_bs[0];
                 let (r, multibyte, rem, err) = UnquoteChar(cur.clone(), quote);
                 if first == b'\n' || !err.IsNil() {
-                    return (string::new(), in0, ErrSyntax());
+                    return (string::new(), in0, ErrSyntax.into());
                 }
                 cur = rem;
 
@@ -1104,7 +1099,7 @@ fn unquote_impl(in_s: string, unescape: bool) -> (string, string, error) {
             // Go: verify the string ends with a terminating quote.
             let cur_bs = cur.as_bytes();
             if !(!cur_bs.is_empty() && cur_bs[0] == quote) {
-                return (string::new(), in0, ErrSyntax());
+                return (string::new(), in0, ErrSyntax.into());
             }
             // Go: in = in[1:] — skip terminating quote.
             cur = string::from_bytes(&cur_bs[1..]);
@@ -1119,7 +1114,7 @@ fn unquote_impl(in_s: string, unescape: bool) -> (string, string, error) {
             let out = string::from_bytes(&in0_bs[..prefix_len]);
             (out, cur, nil)
         }
-        _ => (string::new(), in_s.clone(), ErrSyntax()),
+        _ => (string::new(), in_s.clone(), ErrSyntax.into()),
     }
 }
 
@@ -1143,7 +1138,7 @@ pub fn Unquote<S: Into<string>>(s: S) -> (string, error) {
     //     return out, err
     let (out, rem, err) = unquote_impl(s.into(), true);
     if rem.as_bytes().len() > 0 {
-        return (string::new(), ErrSyntax());
+        return (string::new(), ErrSyntax.into());
     }
     (out, err)
 }

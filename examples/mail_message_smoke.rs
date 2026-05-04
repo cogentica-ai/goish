@@ -188,8 +188,8 @@ fn main() {
 
     // 10. ErrHeaderNotPresent is a distinct singleton (errors::Is works).
     {
-        let e1 = mail::ErrHeaderNotPresent();
-        let e2 = mail::ErrHeaderNotPresent();
+        let e1: errors::error = mail::ErrHeaderNotPresent.into();
+        let e2: errors::error = mail::ErrHeaderNotPresent.into();
         if errors::Is(e1.clone(), e2.clone()) && !errors::Is(e1, io::EOF) {
             Println!("[10] ErrHeaderNotPresent     PASS");
         } else {

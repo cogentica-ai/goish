@@ -35,13 +35,11 @@ use super::{cached_error, Closer, Reader, Writer, EOF};
 
 // ─── ErrClosedPipe (pipe.go:36) ───────────────────────────────────────
 
-/// `io.ErrClosedPipe` (pipe.go:36) — error returned from Read/Write on
-/// a closed pipe. Cached singleton so `errors::Is(err, ErrClosedPipe())`
-/// succeeds via Arc::ptr_eq.
-pub fn ErrClosedPipe() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("io: read/write on closed pipe"))
+crate::var! {
+    /// `io.ErrClosedPipe` (pipe.go:36) — error returned from Read/Write
+    /// on a closed pipe. Identity-stable so `errors::Is(err, ErrClosedPipe)`
+    /// succeeds via Arc::ptr_eq.
+    pub ErrClosedPipe: error = "io: read/write on closed pipe";
 }
 
 // ─── onceError (pipe.go:16-33) ───────────────────────────────────────
@@ -137,7 +135,7 @@ impl PipeData {
     fn closeRead(&self, mut err: error) -> error {
         // Go: if err == nil { err = ErrClosedPipe }
         if err.IsNil() {
-            err = ErrClosedPipe();
+            err = ErrClosedPipe.into();
         }
         // Go: p.rerr.Store(err)
         self.rerr.Store(err);
@@ -221,7 +219,7 @@ impl PipeData {
             return werr;
         }
         // Go: return ErrClosedPipe
-        ErrClosedPipe()
+        ErrClosedPipe.into()
     }
 
     // Go: func (p *pipe) writeCloseError() error — pipe.go:117
@@ -234,7 +232,7 @@ impl PipeData {
             return rerr;
         }
         // Go: return ErrClosedPipe
-        ErrClosedPipe()
+        ErrClosedPipe.into()
     }
 }
 

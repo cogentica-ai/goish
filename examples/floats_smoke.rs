@@ -52,7 +52,7 @@ fn main() {
     let (_, err) = strconv::ParseFloat("abc", 64);
     check(err != nil, b"floats: ParseFloat(abc) must err\n");
     check(
-        errors::Is(err, strconv::ErrSyntax()),
+        errors::Is(err, strconv::ErrSyntax),
         b"floats: ParseFloat(abc) Is(ErrSyntax) wrong\n",
     );
 

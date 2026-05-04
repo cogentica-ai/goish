@@ -225,7 +225,7 @@ fn glob_with_limit(pattern: string, depth: i32) -> (slice<string>, error) {
     // Go: const pathSeparatorsLimit = 10000 (CVE-2022-30632)
     const PATH_SEPARATORS_LIMIT: i32 = 10000;
     if depth == PATH_SEPARATORS_LIMIT {
-        return (slice::new(), ErrBadPattern());
+        return (slice::new(), ErrBadPattern.into());
     }
     // Go: if _, err := Match(pattern, ""); err != nil { return nil, err }
     {
@@ -255,7 +255,7 @@ fn glob_with_limit(pattern: string, depth: i32) -> (slice<string>, error) {
     }
     // Go: if dir == pattern { return nil, ErrBadPattern } (issue 15879)
     if dir == pattern {
-        return (slice::new(), ErrBadPattern());
+        return (slice::new(), ErrBadPattern.into());
     }
     // Go: m, err = globWithLimit(dir, depth+1)
     let (m, err) = glob_with_limit(dir, depth + 1);

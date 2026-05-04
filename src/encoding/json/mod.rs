@@ -222,14 +222,9 @@ fn cached_error(slot: &SpinLock<Option<error>>, init: fn() -> error) -> error {
     g.as_ref().unwrap().clone()
 }
 
-pub fn ErrSyntax() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("json: invalid syntax"))
-}
-
-pub fn ErrUnexpectedEnd() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("json: unexpected end of input"))
+crate::var! {
+    pub ErrSyntax: error       = "json: invalid syntax";
+    pub ErrUnexpectedEnd: error = "json: unexpected end of input";
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────
@@ -952,7 +947,7 @@ fn parse_to_value(data: &[byte]) -> (Value, error) {
     }
     p.skip_ws();
     if p.pos != data.len() {
-        return (Value::Null, ErrSyntax());
+        return (Value::Null, ErrSyntax.into());
     }
     (v, nil)
 }
@@ -992,8 +987,8 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 nil
             }
-            Some(_) => ErrSyntax(),
-            None => ErrUnexpectedEnd(),
+            Some(_) => ErrSyntax.into(),
+            None => ErrUnexpectedEnd.into(),
         }
     }
 
@@ -1006,8 +1001,8 @@ impl<'a> Parser<'a> {
             Some(b't') | Some(b'f') => self.parse_bool(),
             Some(b'n') => self.parse_null(),
             Some(b'-') | Some(b'0'..=b'9') => self.parse_number(),
-            Some(_) => (Value::Null, ErrSyntax()),
-            None => (Value::Null, ErrUnexpectedEnd()),
+            Some(_) => (Value::Null, ErrSyntax.into()),
+            None => (Value::Null, ErrUnexpectedEnd.into()),
         }
     }
 
@@ -1015,7 +1010,7 @@ impl<'a> Parser<'a> {
         if self.literal_match(b"null") {
             (Value::Null, nil)
         } else {
-            (Value::Null, ErrSyntax())
+            (Value::Null, ErrSyntax.into())
         }
     }
 
@@ -1025,7 +1020,7 @@ impl<'a> Parser<'a> {
         } else if self.literal_match(b"false") {
             (Value::Bool(false), nil)
         } else {
-            (Value::Null, ErrSyntax())
+            (Value::Null, ErrSyntax.into())
         }
     }
 
@@ -1053,13 +1048,13 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                 }
             }
-            _ => return (Value::Null, ErrSyntax()),
+            _ => return (Value::Null, ErrSyntax.into()),
         }
         // Fraction
         if self.peek() == Some(b'.') {
             self.pos += 1;
             if !matches!(self.peek(), Some(b'0'..=b'9')) {
-                return (Value::Null, ErrSyntax());
+                return (Value::Null, ErrSyntax.into());
             }
             while matches!(self.peek(), Some(b'0'..=b'9')) {
                 self.pos += 1;
@@ -1072,7 +1067,7 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
             }
             if !matches!(self.peek(), Some(b'0'..=b'9')) {
-                return (Value::Null, ErrSyntax());
+                return (Value::Null, ErrSyntax.into());
             }
             while matches!(self.peek(), Some(b'0'..=b'9')) {
                 self.pos += 1;
@@ -1082,12 +1077,12 @@ impl<'a> Parser<'a> {
         // SAFETY: literal is ASCII digits + '.' / 'e' / sign.
         let s = match core::str::from_utf8(lit) {
             Ok(s) => s,
-            Err(_) => return (Value::Null, ErrSyntax()),
+            Err(_) => return (Value::Null, ErrSyntax.into()),
         };
         let owned = string::from_bytes(s.as_bytes());
         let (n, err) = strconv::ParseFloat(owned, 64);
         if err != nil {
-            return (Value::Null, ErrSyntax());
+            return (Value::Null, ErrSyntax.into());
         }
         (Value::Number(n), nil)
     }
@@ -1102,20 +1097,20 @@ impl<'a> Parser<'a> {
 
     fn parse_string_bytes(&mut self) -> (Vec<byte>, error) {
         if self.advance() != Some(b'"') {
-            return (Vec::new(), ErrSyntax());
+            return (Vec::new(), ErrSyntax.into());
         }
         let mut out: Vec<byte> = Vec::new();
         loop {
             let c = match self.advance() {
                 Some(c) => c,
-                None => return (Vec::new(), ErrUnexpectedEnd()),
+                None => return (Vec::new(), ErrUnexpectedEnd.into()),
             };
             match c {
                 b'"' => return (out, nil),
                 b'\\' => {
                     let esc = match self.advance() {
                         Some(c) => c,
-                        None => return (Vec::new(), ErrUnexpectedEnd()),
+                        None => return (Vec::new(), ErrUnexpectedEnd.into()),
                     };
                     match esc {
                         b'"' => out.push(b'"'),
@@ -1129,23 +1124,23 @@ impl<'a> Parser<'a> {
                         b'u' => {
                             let cp = match self.parse_hex4() {
                                 Some(v) => v,
-                                None => return (Vec::new(), ErrSyntax()),
+                                None => return (Vec::new(), ErrSyntax.into()),
                             };
                             // Handle surrogate pairs for UTF-16.
                             if (0xD800..=0xDBFF).contains(&cp) {
                                 // High surrogate — must be followed by \uXXXX low surrogate.
                                 if self.advance() != Some(b'\\') {
-                                    return (Vec::new(), ErrSyntax());
+                                    return (Vec::new(), ErrSyntax.into());
                                 }
                                 if self.advance() != Some(b'u') {
-                                    return (Vec::new(), ErrSyntax());
+                                    return (Vec::new(), ErrSyntax.into());
                                 }
                                 let lo = match self.parse_hex4() {
                                     Some(v) => v,
-                                    None => return (Vec::new(), ErrSyntax()),
+                                    None => return (Vec::new(), ErrSyntax.into()),
                                 };
                                 if !(0xDC00..=0xDFFF).contains(&lo) {
-                                    return (Vec::new(), ErrSyntax());
+                                    return (Vec::new(), ErrSyntax.into());
                                 }
                                 let combined =
                                     0x10000 + (((cp - 0xD800) as u32) << 10) + (lo - 0xDC00) as u32;
@@ -1157,7 +1152,7 @@ impl<'a> Parser<'a> {
                                 encode_utf8(&mut out, cp as i32);
                             }
                         }
-                        _ => return (Vec::new(), ErrSyntax()),
+                        _ => return (Vec::new(), ErrSyntax.into()),
                     }
                 }
                 _ => out.push(c),
@@ -1211,8 +1206,8 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     return (Value::Array(slice::__from_vec(items)), nil);
                 }
-                Some(_) => return (Value::Null, ErrSyntax()),
-                None => return (Value::Null, ErrUnexpectedEnd()),
+                Some(_) => return (Value::Null, ErrSyntax.into()),
+                None => return (Value::Null, ErrUnexpectedEnd.into()),
             }
         }
     }
@@ -1256,8 +1251,8 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     return (Value::Object(m), nil);
                 }
-                Some(_) => return (Value::Null, ErrSyntax()),
-                None => return (Value::Null, ErrUnexpectedEnd()),
+                Some(_) => return (Value::Null, ErrSyntax.into()),
+                None => return (Value::Null, ErrUnexpectedEnd.into()),
             }
         }
     }
@@ -1557,7 +1552,7 @@ impl<R: io::Reader> Decoder<R> {
 
     fn scan_string_bytes(&mut self) -> (Vec<byte>, error) {
         if self.scan_pos >= self.buf.len() || self.buf[self.scan_pos] != b'"' {
-            return (Vec::new(), ErrSyntax());
+            return (Vec::new(), ErrSyntax.into());
         }
         self.scan_pos += 1; // consume opening quote
         let mut out: Vec<byte> = Vec::new();
@@ -1568,7 +1563,7 @@ impl<R: io::Reader> Decoder<R> {
                 b'"' => return (out, nil),
                 b'\\' => {
                     if self.scan_pos >= self.buf.len() {
-                        return (Vec::new(), ErrUnexpectedEnd());
+                        return (Vec::new(), ErrUnexpectedEnd.into());
                     }
                     let esc = self.buf[self.scan_pos];
                     self.scan_pos += 1;
@@ -1584,27 +1579,27 @@ impl<R: io::Reader> Decoder<R> {
                         b'u' => {
                             let cp = match self.scan_hex4() {
                                 Some(v) => v,
-                                None => return (Vec::new(), ErrSyntax()),
+                                None => return (Vec::new(), ErrSyntax.into()),
                             };
                             if (0xD800..=0xDBFF).contains(&cp) {
                                 if self.scan_pos >= self.buf.len()
                                     || self.buf[self.scan_pos] != b'\\'
                                 {
-                                    return (Vec::new(), ErrSyntax());
+                                    return (Vec::new(), ErrSyntax.into());
                                 }
                                 self.scan_pos += 1;
                                 if self.scan_pos >= self.buf.len()
                                     || self.buf[self.scan_pos] != b'u'
                                 {
-                                    return (Vec::new(), ErrSyntax());
+                                    return (Vec::new(), ErrSyntax.into());
                                 }
                                 self.scan_pos += 1;
                                 let lo = match self.scan_hex4() {
                                     Some(v) => v,
-                                    None => return (Vec::new(), ErrSyntax()),
+                                    None => return (Vec::new(), ErrSyntax.into()),
                                 };
                                 if !(0xDC00..=0xDFFF).contains(&lo) {
-                                    return (Vec::new(), ErrSyntax());
+                                    return (Vec::new(), ErrSyntax.into());
                                 }
                                 let combined =
                                     0x10000 + (((cp - 0xD800) as u32) << 10) + (lo - 0xDC00) as u32;
@@ -1615,13 +1610,13 @@ impl<R: io::Reader> Decoder<R> {
                                 encode_utf8(&mut out, cp as i32);
                             }
                         }
-                        _ => return (Vec::new(), ErrSyntax()),
+                        _ => return (Vec::new(), ErrSyntax.into()),
                     }
                 }
                 _ => out.push(c),
             }
         }
-        (Vec::new(), ErrUnexpectedEnd())
+        (Vec::new(), ErrUnexpectedEnd.into())
     }
 
     fn scan_hex4(&mut self) -> Option<u32> {
@@ -1683,12 +1678,12 @@ impl<R: io::Reader> Decoder<R> {
                     self.scan_pos += 1;
                 }
             }
-            _ => return (Token::Null, ErrSyntax()),
+            _ => return (Token::Null, ErrSyntax.into()),
         }
         if self.peek_at(self.scan_pos) == Some(b'.') {
             self.scan_pos += 1;
             if !matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
-                return (Token::Null, ErrSyntax());
+                return (Token::Null, ErrSyntax.into());
             }
             while matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
                 self.scan_pos += 1;
@@ -1700,7 +1695,7 @@ impl<R: io::Reader> Decoder<R> {
                 self.scan_pos += 1;
             }
             if !matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
-                return (Token::Null, ErrSyntax());
+                return (Token::Null, ErrSyntax.into());
             }
             while matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
                 self.scan_pos += 1;
