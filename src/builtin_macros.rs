@@ -262,3 +262,67 @@ macro_rules! new {
         <$t as ::core::default::Default>::default()
     };
 }
+
+// ─── goish::var! — package-level declaration block ──────────────────
+//
+// Mirrors Go's `var` (single-line and block forms). Per-decl dispatch:
+//
+//   pub EOF: error = "EOF";              → identity-stable lazy sentinel
+//                                           (ZST + cached Arc, see
+//                                           goish-macros::var_emit_error_marker)
+//   pub MaxBuf: int = 4096;              → pub const MaxBuf: int = 4096;
+//
+// Use sites:
+//   errors::Is(err, EOF)        // bare-symbol target
+//   if err == EOF { ... }       // bare PartialEq
+//   let e: error = EOF.into();  // From<Marker> for error
+//
+// See DISCUSSION_VAR.md for the doctrine choice and trade-offs.
+
+#[macro_export]
+macro_rules! var {
+    ( $($decl:tt)* ) => { $crate::__var_munch!( $($decl)* ); };
+}
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __var_munch {
+    // Base case — no more declarations.
+    () => {};
+
+    // ── error sentinel: string-literal payload ─────────────────────
+    (
+        $(#[$attr:meta])*
+        $vis:vis $name:ident : error = $msg:literal ;
+        $($rest:tt)*
+    ) => {
+        $(#[$attr])*
+        $crate::__var_emit_error_marker!( $vis $name $msg );
+        $crate::__var_munch!( $($rest)* );
+    };
+
+    // ── error sentinel: typed-payload (brace-grouped expr) ─────────
+    //
+    // Token-tree-bounded so the proc-macro receives a clean group; the
+    // user writes `{ MyError { … } }` to disambiguate from string lit.
+    (
+        $(#[$attr:meta])*
+        $vis:vis $name:ident : error = { $($expr:tt)* } ;
+        $($rest:tt)*
+    ) => {
+        $(#[$attr])*
+        $crate::__var_emit_error_marker!( $vis $name { $($expr)* } );
+        $crate::__var_munch!( $($rest)* );
+    };
+
+    // ── plain const fallback ───────────────────────────────────────
+    (
+        $(#[$attr:meta])*
+        $vis:vis $name:ident : $ty:ty = $val:expr ;
+        $($rest:tt)*
+    ) => {
+        $(#[$attr])*
+        $vis const $name: $ty = $val;
+        $crate::__var_munch!( $($rest)* );
+    };
+}

@@ -121,3 +121,9 @@ pub use goish_macros::main;
 // (The `goish::reflect` module path coexists — attributes and modules
 // occupy different namespaces, just like `goish::main` doesn't conflict.)
 pub use goish_macros::reflect;
+
+// `__var_emit_error_marker!` — proc-macro helper used by the
+// `goish::var!` muncher to emit per-sentinel ZST + impls. Hidden from
+// docs; users only see `goish::var!`.
+#[doc(hidden)]
+pub use goish_macros::var_emit_error_marker as __var_emit_error_marker;

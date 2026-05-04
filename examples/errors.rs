@@ -99,9 +99,13 @@ fn main() {
     check(!errors::Is(other, sentinel.clone()), b"errors: Is must use ptr identity\n");
 
     // (9) errors::Is — nil cases.
-    check(errors::Is(nil.into(), nil.into()), b"errors: Is(nil, nil.into()) must be true\n");
-    check(!errors::Is(sentinel.clone(), nil.into()), b"errors: Is(non-nil, nil.into()) must be false\n");
-    check(!errors::Is(nil.into(), sentinel.clone()), b"errors: Is(nil, non-nil) must be false\n");
+    let nil_e1: error = nil.into();
+    let nil_e2: error = nil.into();
+    let nil_e3: error = nil.into();
+    let nil_e4: error = nil.into();
+    check(errors::Is(nil_e1, nil_e2), b"errors: Is(nil, nil.into()) must be true\n");
+    check(!errors::Is(sentinel.clone(), nil_e3), b"errors: Is(non-nil, nil.into()) must be false\n");
+    check(!errors::Is(nil_e4, sentinel.clone()), b"errors: Is(nil, non-nil) must be false\n");
 
     // (10) Wrapping chain — inner is reachable via Unwrap and Is.
     let inner = errors::New("inner cause");

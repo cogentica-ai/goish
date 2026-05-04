@@ -78,6 +78,18 @@ impl error {
     pub fn IsNil(&self) -> bool {
         self.0.is_none()
     }
+
+    /// Internal: Arc pointer-equality between two `error` values. Used by
+    /// the `goish::var!` macro to implement `PartialEq<Marker> for error`
+    /// without exposing the inner Option<Arc<dyn>>.
+    #[doc(hidden)]
+    pub fn __ptr_eq(&self, other: &error) -> bool {
+        match (&self.0, &other.0) {
+            (None, None) => true,
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
 }
 
 impl Default for error {
@@ -202,10 +214,33 @@ pub fn Wrap<E: ErrorTrait>(e: E) -> error {
 
 // ─── Is / Unwrap ────────────────────────────────────────────────────────
 
+/// Marker-or-error dispatch trait used by `errors::Is`. Implemented
+/// reflexively for `error` (cheap clone) and emitted per-sentinel by the
+/// `goish::var!` macro for marker ZSTs (returns the lazily-cached Arc).
+///
+/// Distinct from `Borrow<error>` so call sites stay unambiguous: only
+/// `error` and macro-emitted markers satisfy this bound, never user
+/// types that happen to expose a `Borrow<error>` accidentally.
+pub trait IsTarget {
+    /// Resolve to an owned `error`. For markers, this triggers the
+    /// lazy cache lookup and clones the cached Arc; for `error` itself,
+    /// it clones (one atomic refcount bump).
+    fn __resolve(&self) -> error;
+}
+
+impl IsTarget for error {
+    #[inline]
+    fn __resolve(&self) -> error { self.clone() }
+}
+
 /// `errors.Is(err, target)` — walks `err`'s `Unwrap()` chain looking for
 /// an error that compares equal to `target` (pointer-identity). Returns
 /// true if `target == nil` and `err == nil`.
-pub fn Is(err: error, target: error) -> bool {
+///
+/// Generic over `IsTarget` so call sites can pass either an `error`
+/// value or a sentinel marker (Copy ZST emitted by `goish::var!`).
+pub fn Is<T: IsTarget>(err: error, target: T) -> bool {
+    let target: error = target.__resolve();
     if target == nil {
         return err == nil;
     }
@@ -214,7 +249,7 @@ pub fn Is(err: error, target: error) -> bool {
         if cur == nil {
             return false;
         }
-        if cur == target {
+        if cur.__ptr_eq(&target) {
             return true;
         }
         // Walk the chain via Unwrap().
@@ -364,3 +399,4 @@ impl ErrorTrait for JoinError {
         }
     }
 }
+
