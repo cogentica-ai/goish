@@ -45,6 +45,7 @@ pub const MB: usize = 1024 * 1024;
 /// One gigabyte (1024 MiB).
 pub const GB: usize = 1024 * 1024 * 1024;
 
+pub mod archive;
 pub mod bufio;
 pub mod builtin;
 pub mod builtin_macros;

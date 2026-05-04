@@ -54,7 +54,7 @@ Before declaring `pub fn` complete, grep the signature for `Vec<`, `String`, `&s
 
 ## 4. String parameters must be generic over `Into<string>`
 
-Any user-facing `pub fn` that *accepts* a `string` must take `impl Into<string>` (or named generic `S: Into<string>`) instead of bare `string`. This lets call sites pass `&'static str` literals directly.
+Any user-facing `pub fn` that *accepts* a `string` must take `impl Into<string>` (or named generic `S: Into<string>`) instead of bare `string`. The `string` here is **goish's `string`** (`crate::string`), not Rust's `String`. This lets call sites pass `&'static str` literals directly.
 
 ```rust
 pub fn Get<K: Into<string>>(&self, key: K) -> string {
@@ -66,6 +66,10 @@ pub fn Set<K: Into<string>, V: Into<string>>(&mut self, key: K, value: V) { }
 ```
 
 **Return types stay `string`** — only parameters get the generic.
+
+### Internal Rust helpers — relaxed rule
+
+For **internal Rust helper functions** that are not part of the public Go API surface (e.g. private `fn`, `pub(crate)` helpers, builder internals), we relax the restriction. You may use `impl Into<String>` (Rust's `String`) when the parameter will be converted to `String` internally and the function is not meant to be called with goish `string` types. This avoids an extra `string → String` hop when the helper immediately needs a Rust `String`.
 
 Two prerequisite impls in `gostring.rs` must stay:
 - `impl From<&str> for string` — literal-coercion path

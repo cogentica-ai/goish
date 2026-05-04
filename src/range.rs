@@ -139,17 +139,17 @@ impl<'a> RangeIter for &'a &str {
     }
 }
 
-// ─── map<K, V> → (&K, &V) — sorted by K (BTreeMap order) ──────────────
+// ─── map<K, V> → (&K, &V) — bucket-walk order (Go randomized) ──────
 
-use crate::gomap::map;
+use crate::gomap::{map, MapRefIter};
 
 impl<'a, K, V> RangeIter for &'a map<K, V>
 where
-    K: Ord,
+    K: crate::gomap::GoHash + PartialEq,
     V: Default,
 {
     type Item = (&'a K, &'a V);
-    type Iter = alloc::collections::btree_map::Iter<'a, K, V>;
+    type Iter = MapRefIter<'a, K, V>;
     fn range(self) -> Self::Iter {
         self.__iter()
     }
@@ -159,11 +159,11 @@ where
 // Needed when iterating over a borrowed map handle inside a struct field.
 impl<'a, K, V> RangeIter for &&'a map<K, V>
 where
-    K: Ord,
+    K: crate::gomap::GoHash + PartialEq,
     V: Default,
 {
     type Item = (&'a K, &'a V);
-    type Iter = alloc::collections::btree_map::Iter<'a, K, V>;
+    type Iter = MapRefIter<'a, K, V>;
     fn range(self) -> Self::Iter {
         (**self).__iter()
     }

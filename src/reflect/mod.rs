@@ -365,6 +365,12 @@ impl core::hash::Hash for Type {
     }
 }
 
+impl crate::gomap::GoHash for Type {
+    fn go_hash(&self, seed: u64) -> u64 {
+        crate::gomap::hash_bytes(self.name.as_bytes(), seed)
+    }
+}
+
 impl Type {
     /// Internal constructor for `#[goish::reflect]` and built-in impls.
     #[doc(hidden)]
@@ -1245,7 +1251,7 @@ impl<T: FromReflectValue + Clone + Default> FromReflectValue for slice<T> {
 
 impl<K, V> FromReflectValue for crate::gomap::map<K, V>
 where
-    K: FromReflectValue + Ord + Default + Clone,
+    K: FromReflectValue + crate::gomap::GoHash + PartialEq + Default + Clone,
     V: FromReflectValue + Default + Clone,
 {
     fn from_reflect_value(v: Value) -> (Self, crate::errors::error) {
@@ -1584,7 +1590,7 @@ use crate::gomap::map as gomap_map;
 
 impl<K, V> Reflect for gomap_map<K, V>
 where
-    K: Reflect + Ord + Default + Clone,
+    K: Reflect + crate::gomap::GoHash + PartialEq + Default + Clone,
     V: Reflect + Default + Clone,
 {
     fn __reflect_type() -> Type {

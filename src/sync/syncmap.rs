@@ -38,7 +38,7 @@ use super::mutex::Mutex;
 /// Construct with [`Map::new`].
 pub struct Map<K, V>
 where
-    K: Ord + Send + 'static,
+    K: crate::gomap::GoHash + PartialEq + Send + 'static,
     V: Default + Send + Clone + 'static,
 {
     inner: Mutex<gomap<K, V>>,
@@ -46,7 +46,7 @@ where
 
 impl<K, V> Map<K, V>
 where
-    K: Ord + Clone + Send + 'static,
+    K: crate::gomap::GoHash + PartialEq + Clone + Send + 'static,
     V: Default + Clone + Send + 'static,
 {
     /// Construct an empty Map. Mirrors Go's "the zero Map is empty
@@ -152,7 +152,7 @@ where
 
 impl<K, V> Default for Map<K, V>
 where
-    K: Ord + Clone + Send + 'static,
+    K: crate::gomap::GoHash + PartialEq + Clone + Send + 'static,
     V: Default + Clone + Send + 'static,
 {
     fn default() -> Self {

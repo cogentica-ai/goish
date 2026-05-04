@@ -52,6 +52,7 @@ mod mac;
 pub mod http;
 pub mod mail;
 pub mod textproto;
+pub mod url;
 
 pub use mac::{HardwareAddr, HardwareAddrString, ParseMAC};
 pub use parse::TCPAddr;

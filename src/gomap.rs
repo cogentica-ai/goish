@@ -1,4 +1,4 @@
-// gomap — Go's `map[K]V`, ported.
+// gomap — Go's `map[K]V`, ported with Go-faithful hash-table backing.
 //
 //   Go                                   goish
 //   ──────────────────────────────────   ──────────────────────────────────
@@ -12,78 +12,233 @@
 //   len(m)                               len(&m)
 //   for k, v := range m                  for (k, v) in range!(m)
 //
-// v1 backing: `alloc::collections::BTreeMap<K, V>`. Pure Rust, no_std,
-// uses our dlmalloc allocator. **K: Ord** is the v1 trait bound. A v2
-// upgrade can swap in a ported Go-style hashmap for hash-keyed,
-// randomized-iteration semantics; the public API stays identical.
+// **Hash-table implementation** (replacing v1's BTreeMap):
 //
-// v1 deviations from Go:
+//   * Open-addressed buckets with overflow chaining (Go runtime's classic
+//     design, not the experimental Swiss tables).
+//   * 8 key/elem pairs per bucket (`BUCKET_COUNT = 8`).
+//   * Per-map random hash seed (`hash0`) for hash-flooding resistance.
+//   * Iteration order is bucket-walk order starting at a random bucket and
+//     random intra-bucket offset — matches Go's non-deterministic semantics.
+//   * Load-factor growth trigger (~6.5 avg per bucket) and same-size rehash
+//     when overflow buckets exceed regular buckets.
+//   * Immediate evacuation on growth (v1 simplification; Go does incremental
+//     evacuation which requires oldbuckets tracking).
 //
-//   * **K: Ord** (BTreeMap requirement). Iteration is sorted by key —
-//     a happy v1 detail vs Go's deliberate randomization. Don't write
-//     code that assumes randomized order; we'll port a hashmap later.
-//   * **V: Default** is required at the struct level. Needed so
-//     `m[k]` (Index) can return a reference to a stored zero on miss
-//     (Rust can't fabricate `&V::default()` from thin air without a
-//     place to keep it; we keep one zero per map).
-//   * **No `m, ok := m[k]` comma-ok via brackets.** Use `m.Get(k)`.
-//     Rust's `Index` returns `&V`, not `(V, bool)`, and overloading is
-//     not available.
-//   * **Non-Copy `V` reads need `.clone()` at the call site:**
-//     `let s = m["k"].clone()` (Rust universal Index limitation).
+// Public-API discipline: lowercase goish types, `impl Into<string>` for
+// string params, multi-return tuples.
 
 #![allow(non_camel_case_types)]
 
 extern crate alloc;
+
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 use core::borrow::Borrow;
 use core::ops::{Index, IndexMut};
 
 use crate::builtin::Len as LenTrait;
 use crate::goslice::slice;
 use crate::gostring::string;
+use crate::runtime::rand;
 use crate::types::int;
 
-pub struct map<K, V>
-where
-    K: Ord,
-    V: Default,
-{
-    inner: BTreeMap<K, V>,
-    /// Sentinel returned from `Index::index` when key is missing. Built
-    /// once per map at construction; never mutated. Boxed so that
-    /// `V` may itself transitively contain `map<K, V>` (e.g.,
-    /// `json::Value` recursive enum) — a non-Box `V` field would make
-    /// the type infinite-sized.
-    zero: Box<V>,
+// ═══════════════════════════════════════════════════════════════════════
+// Constants
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Maximum key/elem pairs per bucket.
+const BUCKET_COUNT: usize = 8;
+
+/// Load-factor numerator   = 13
+/// Load-factor denominator   = 2  →  trigger at ~6.5 entries / bucket.
+const LOAD_FACTOR_NUM: usize = 13;
+const LOAD_FACTOR_DEN: usize = 2;
+
+/// Tophash sentinel: cell is empty and no more non-empty cells follow.
+const _EMPTY_REST: u8 = 0;
+/// Tophash sentinel: cell is empty (but following cells may be used).
+const EMPTY_ONE: u8 = 1;
+/// Minimum tophash for a normal filled cell.
+const MIN_TOP_HASH: u8 = 5;
+
+// ═══════════════════════════════════════════════════════════════════════
+// GoHash — per-type hash function
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Trait for types that can be used as map keys. Mirrors Go's built-in
+/// map-key requirement (types comparable with `==`).
+pub trait GoHash {
+    /// Compute a 64-bit hash of `self` mixed with `seed`.
+    /// The seed is the per-map `hash0` — each map instance gets a
+    /// different seed so hash-flooding attacks are ineffective.
+    fn go_hash(&self, seed: u64) -> u64;
 }
 
-// Clone implemented manually so the struct's trait bounds stay minimal
-// (just `K: Ord`, `V: Default`); cloning additionally requires
-// `K: Clone, V: Clone`.
-impl<K, V> Clone for map<K, V>
-where
-    K: Ord + Clone,
-    V: Default + Clone,
-{
-    fn clone(&self) -> Self {
+/// Simple non-cryptographic byte-array hash (FNV-1a style).
+#[inline]
+pub fn hash_bytes(data: &[u8], seed: u64) -> u64 {
+    let mut h = seed;
+    for &b in data {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x010000000001b3);
+    }
+    h
+}
+
+/// Extract the top byte of a 64-bit hash for tophash storage.
+#[inline]
+fn tophash(hash: u64) -> u8 {
+    let mut top = (hash >> 56) as u8;
+    if top < MIN_TOP_HASH {
+        top += MIN_TOP_HASH;
+    }
+    top
+}
+
+// ─── Implementations for built-in goish types ─────────────────────────
+
+impl GoHash for string {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(self.as_bytes(), seed)
+    }
+}
+
+impl GoHash for alloc::string::String {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(self.as_bytes(), seed)
+    }
+}
+
+impl GoHash for int {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(&self.to_le_bytes(), seed)
+    }
+}
+
+impl GoHash for crate::types::byte {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(&[*self], seed)
+    }
+}
+
+impl GoHash for crate::types::rune {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(&self.to_le_bytes(), seed)
+    }
+}
+
+impl GoHash for u64 {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(&self.to_le_bytes(), seed)
+    }
+}
+
+impl GoHash for u32 {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(&self.to_le_bytes(), seed)
+    }
+}
+
+impl GoHash for u16 {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(&self.to_le_bytes(), seed)
+    }
+}
+
+impl GoHash for i8 {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(&[*self as u8], seed)
+    }
+}
+
+impl GoHash for bool {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(&[*self as u8], seed)
+    }
+}
+
+impl GoHash for usize {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(&self.to_le_bytes(), seed)
+    }
+}
+
+impl GoHash for isize {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(&self.to_le_bytes(), seed)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Bucket
+// ═══════════════════════════════════════════════════════════════════════
+
+struct Bucket<K, V> {
+    /// Tophash array — one byte per slot.  Values < MIN_TOP_HASH are
+    /// reserved sentinel states; >= MIN_TOP_HASH store the top byte of
+    /// the key's hash for quick rejection during lookup.
+    tophash: [u8; BUCKET_COUNT],
+    /// Keys stored in this bucket.  `None` = empty slot.
+    keys: [Option<K>; BUCKET_COUNT],
+    /// Values stored in this bucket.  `None` = empty slot.
+    elems: [Option<V>; BUCKET_COUNT],
+    /// Overflow bucket chain — allocated when this bucket is full.
+    overflow: Option<Box<Bucket<K, V>>>,
+}
+
+impl<K, V> Bucket<K, V> {
+    fn new() -> Self {
         Self {
-            inner: self.inner.clone(),
-            zero: self.zero.clone(),
+            tophash: [EMPTY_ONE; BUCKET_COUNT],
+            keys: core::array::from_fn(|_| None),
+            elems: core::array::from_fn(|_| None),
+            overflow: None,
         }
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// Map struct  (Go: hmap)
+// ═══════════════════════════════════════════════════════════════════════
+
+pub struct map<K, V>
+where
+    K: GoHash + PartialEq,
+    V: Default,
+{
+    /// Number of live entries (Go: hmap.count). Must be first — known by
+    /// the compiler for the `len()` builtin.
+    count: int,
+    /// log₂ of bucket array length.
+    b: u8,
+    /// Approximate number of overflow buckets.
+    noverflow: u16,
+    /// Per-map random hash seed (Go: hmap.hash0).
+    hash0: u32,
+    /// Bucket array — length is `1 << b`.
+    buckets: Vec<Box<Bucket<K, V>>>,
+    /// Sentinel returned from `Index::index` when key is missing.
+    zero: Box<V>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Core operations
+// ═══════════════════════════════════════════════════════════════════════
+
 impl<K, V> map<K, V>
 where
-    K: Ord,
+    K: GoHash + PartialEq,
     V: Default,
 {
     /// Empty map. Equivalent to `make!(map[K]V)`.
     pub fn new() -> Self {
         Self {
-            inner: BTreeMap::new(),
+            count: 0,
+            b: 0,
+            noverflow: 0,
+            hash0: rand::cheaprand(),
+            buckets: Vec::new(),
             zero: Box::new(V::default()),
         }
     }
@@ -91,13 +246,37 @@ where
     /// `len(m)` — pair count.
     #[allow(non_snake_case)]
     pub fn Len(&self) -> int {
-        self.inner.len() as int
+        self.count
     }
 
     /// `_, ok := m[k]` form — does the key exist?
     #[allow(non_snake_case)]
     pub fn Has(&self, k: K) -> bool {
-        self.inner.contains_key(&k)
+        if self.count == 0 || self.buckets.is_empty() {
+            return false;
+        }
+        let hash = self.hash(&k);
+        let mask = self.bucket_mask();
+        let bucket_idx = (hash as usize) & mask;
+        let top = tophash(hash);
+
+        let mut bucket = &self.buckets[bucket_idx];
+        loop {
+            for i in 0..BUCKET_COUNT {
+                if bucket.tophash[i] != top {
+                    continue;
+                }
+                if let Some(ref key) = bucket.keys[i] {
+                    if key == &k {
+                        return true;
+                    }
+                }
+            }
+            match &bucket.overflow {
+                Some(next) => bucket = next,
+                None => return false,
+            }
+        }
     }
 
     /// `v, ok := m[k]` — comma-ok form. Returns `(V::default(), false)`
@@ -107,9 +286,32 @@ where
     where
         V: Clone,
     {
-        match self.inner.get(&k) {
-            Some(v) => (v.clone(), true),
-            None => (V::default(), false),
+        if self.count == 0 || self.buckets.is_empty() {
+            return (self.zero.as_ref().clone(), false);
+        }
+        let hash = self.hash(&k);
+        let mask = self.bucket_mask();
+        let bucket_idx = (hash as usize) & mask;
+        let top = tophash(hash);
+
+        let mut bucket = &self.buckets[bucket_idx];
+        loop {
+            for i in 0..BUCKET_COUNT {
+                if bucket.tophash[i] != top {
+                    continue;
+                }
+                if let Some(ref key) = bucket.keys[i] {
+                    if key == &k {
+                        if let Some(ref val) = bucket.elems[i] {
+                            return (val.clone(), true);
+                        }
+                    }
+                }
+            }
+            match &bucket.overflow {
+                Some(next) => bucket = next,
+                None => return (self.zero.as_ref().clone(), false),
+            }
         }
     }
 
@@ -118,67 +320,406 @@ where
     /// receiver is awkward to access via `&mut m[k]`.
     ///
     /// Generic over `Into<K>` / `Into<V>` so callers can pass `&str`
-    /// literals against `map<string, …>` without wrapping each key
-    /// in `string("…")`.
+    /// literals against `map<string, …>` without wrapping each key.
     #[allow(non_snake_case)]
     pub fn Set<KI: Into<K>, VI: Into<V>>(&mut self, k: KI, v: VI) {
-        self.inner.insert(k.into(), v.into());
+        let k = k.into();
+        let v = v.into();
+        if self.buckets.is_empty() {
+            self.buckets.push(Box::new(Bucket::new()));
+        }
+        // Growth check (mirrors Go's mapassign pre-check)
+        let count_after = self.count as usize + 1;
+        if count_after > BUCKET_COUNT
+            && count_after > (LOAD_FACTOR_NUM * (1usize << self.b)) / LOAD_FACTOR_DEN
+        {
+            self.grow(false);
+        } else if self.too_many_overflow_buckets() {
+            self.grow(true);
+        }
+        self.insert_no_grow(k, v);
     }
 
     /// `delete(m, k)` (long form). Use the `delete!(m, k)` macro at
     /// call sites for the Go-shaped syntax.
     #[allow(non_snake_case)]
-    pub fn Delete<KI: Into<K>>(&mut self, k: KI) {
-        self.inner.remove(&k.into());
+    pub fn Delete(&mut self, k: K) {
+        if self.count == 0 || self.buckets.is_empty() {
+            return;
+        }
+        let hash = self.hash(&k);
+        let mask = self.bucket_mask();
+        let bucket_idx = (hash as usize) & mask;
+        let top = tophash(hash);
+
+        let bucket = &mut self.buckets[bucket_idx];
+        Self::delete_from_bucket(bucket, top, &k, &mut self.count);
     }
 
-    /// All keys, sorted (BTreeMap order).
+    /// All keys, in bucket-walk order (Go's randomized iteration order).
     #[allow(non_snake_case)]
     pub fn Keys(&self) -> slice<K>
     where
         K: Clone,
     {
-        let v: alloc::vec::Vec<K> = self.inner.keys().cloned().collect();
+        let mut v: Vec<K> = Vec::with_capacity(self.count as usize);
+        for (k, _) in self.__iter() {
+            v.push(k.clone());
+        }
         slice::__from_vec(v)
     }
 
-    /// All values, in key-sorted order.
+    /// All values, in bucket-walk order.
     #[allow(non_snake_case)]
     pub fn Values(&self) -> slice<V>
     where
         V: Clone,
     {
-        let v: alloc::vec::Vec<V> = self.inner.values().cloned().collect();
+        let mut v: Vec<V> = Vec::with_capacity(self.count as usize);
+        for (_, val) in self.__iter() {
+            v.push(val.clone());
+        }
         slice::__from_vec(v)
     }
 
-    /// Hidden hook used by `maps::Equal` and `maps::Copy` to walk pairs
-    /// without exposing the BTreeMap dependency in the public API.
+    /// Hidden hook used by `maps::Equal`, `maps::Copy`, `maps::Clone`
+    /// to walk pairs without exposing implementation details.
     #[doc(hidden)]
-    pub fn __iter(&self) -> alloc::collections::btree_map::Iter<'_, K, V> {
-        self.inner.iter()
+    pub fn __iter(&self) -> MapRefIter<K, V> {
+        MapRefIter::new(self)
     }
 }
 
-impl<K, V> Default for map<K, V>
+// ═══════════════════════════════════════════════════════════════════════
+// Internal helpers
+// ═══════════════════════════════════════════════════════════════════════
+
+impl<K, V> map<K, V>
 where
-    K: Ord,
+    K: GoHash + PartialEq,
     V: Default,
 {
-    fn default() -> Self {
-        Self::new()
+    #[inline]
+    fn hash(&self, k: &K) -> u64 {
+        k.go_hash(self.hash0 as u64)
+    }
+
+    #[inline]
+    fn bucket_mask(&self) -> usize {
+        if self.b == 0 {
+            0
+        } else {
+            (1usize << self.b) - 1
+        }
+    }
+
+    #[inline]
+    fn too_many_overflow_buckets(&self) -> bool {
+        let limit = if self.b > 15 { 15 } else { self.b };
+        self.noverflow >= (1u16 << limit)
+    }
+
+    /// Immediate growth: allocate a new bucket array and re-insert all
+    /// entries.  Go does this incrementally (evacuate); goish v1 does it
+    /// all at once for simplicity.
+    fn grow(&mut self, same_size: bool) {
+        let old_buckets = core::mem::take(&mut self.buckets);
+
+        if same_size {
+            // Same number of buckets, just rehash to collapse overflow chains
+            let n = 1usize << self.b;
+            self.buckets.reserve(n);
+            for _ in 0..n {
+                self.buckets.push(Box::new(Bucket::new()));
+            }
+        } else {
+            // Double bucket count
+            self.b += 1;
+            let n = 1usize << self.b;
+            self.buckets.reserve(n);
+            for _ in 0..n {
+                self.buckets.push(Box::new(Bucket::new()));
+            }
+        }
+        self.noverflow = 0;
+        self.count = 0;
+
+        // Re-insert every live entry
+        for mut bucket in old_buckets {
+            for i in 0..BUCKET_COUNT {
+                if let (Some(k), Some(v)) = (bucket.keys[i].take(), bucket.elems[i].take()) {
+                    self.insert_no_grow(k, v);
+                }
+            }
+            let mut overflow = bucket.overflow.take();
+            while let Some(mut ovf) = overflow {
+                for i in 0..BUCKET_COUNT {
+                    if let (Some(k), Some(v)) = (ovf.keys[i].take(), ovf.elems[i].take()) {
+                        self.insert_no_grow(k, v);
+                    }
+                }
+                overflow = ovf.overflow.take();
+            }
+        }
+    }
+
+    /// Insert a key/value pair assuming there is capacity (no growth).
+    fn insert_no_grow(&mut self, key: K, value: V) {
+        let hash = self.hash(&key);
+        let mask = self.bucket_mask();
+        let bucket_idx = (hash as usize) & mask;
+        let top = tophash(hash);
+
+        // Use raw index to avoid borrow-checker issues with &mut chains
+        let mut bucket_ptr: *mut Bucket<K, V> = &mut *self.buckets[bucket_idx];
+
+        loop {
+            let bucket = unsafe { &mut *bucket_ptr };
+            for i in 0..BUCKET_COUNT {
+                // Existing key — update value
+                if bucket.tophash[i] == top {
+                    if let Some(ref k) = bucket.keys[i] {
+                        if k == &key {
+                            bucket.elems[i] = Some(value);
+                            return;
+                        }
+                    }
+                }
+                // Empty slot — insert
+                if bucket.tophash[i] < MIN_TOP_HASH {
+                    bucket.tophash[i] = top;
+                    bucket.keys[i] = Some(key);
+                    bucket.elems[i] = Some(value);
+                    self.count += 1;
+                    return;
+                }
+            }
+            // Allocate overflow bucket if needed
+            if bucket.overflow.is_none() {
+                bucket.overflow = Some(Box::new(Bucket::new()));
+                self.noverflow += 1;
+            }
+            bucket_ptr = bucket.overflow.as_mut().unwrap().as_mut();
+        }
+    }
+
+    /// Delete a key from a bucket chain.
+    fn delete_from_bucket(bucket: &mut Bucket<K, V>, top: u8, key: &K, count: &mut int) {
+        for i in 0..BUCKET_COUNT {
+            if bucket.tophash[i] != top {
+                continue;
+            }
+            if let Some(ref k) = bucket.keys[i] {
+                if k == key {
+                    bucket.tophash[i] = EMPTY_ONE;
+                    bucket.keys[i] = None;
+                    bucket.elems[i] = None;
+                    *count -= 1;
+                    return;
+                }
+            }
+        }
+        if let Some(next) = bucket.overflow.as_mut() {
+            Self::delete_from_bucket(next, top, key, count);
+        }
     }
 }
 
-// ─── nil ↔ map<K, V> wiring (polymorphic Nil sentinel) ──────────────
-//
-// `let m: map<string, int> = nil.into();` gives a fresh empty map.
-// `if m == nil` is true for empty (matches Go's "nil map reads but
-// can't write" intent, lenient on the empty=nil collapse).
+// ═══════════════════════════════════════════════════════════════════════
+// Index / IndexMut
+// ═══════════════════════════════════════════════════════════════════════
+
+impl<K, V> Index<K> for map<K, V>
+where
+    K: GoHash + PartialEq,
+    V: Default,
+{
+    type Output = V;
+    fn index(&self, key: K) -> &V {
+        if self.count == 0 || self.buckets.is_empty() {
+            return self.zero.as_ref();
+        }
+        let hash = self.hash(&key);
+        let mask = self.bucket_mask();
+        let bucket_idx = (hash as usize) & mask;
+        let top = tophash(hash);
+
+        let mut bucket = &self.buckets[bucket_idx];
+        loop {
+            for i in 0..BUCKET_COUNT {
+                if bucket.tophash[i] != top {
+                    continue;
+                }
+                if let Some(ref k) = bucket.keys[i] {
+                    if k == &key {
+                        return bucket.elems[i].as_ref().unwrap();
+                    }
+                }
+            }
+            match &bucket.overflow {
+                Some(next) => bucket = next,
+                None => return self.zero.as_ref(),
+            }
+        }
+    }
+}
+
+impl<K, V> IndexMut<K> for map<K, V>
+where
+    K: GoHash + PartialEq + Clone,
+    V: Default,
+{
+    fn index_mut(&mut self, key: K) -> &mut V {
+        if self.buckets.is_empty() {
+            self.buckets.push(Box::new(Bucket::new()));
+        }
+        // Pre-grow if necessary so the returned reference stays valid
+        let count_after = self.count as usize + 1;
+        if count_after > BUCKET_COUNT
+            && count_after > (LOAD_FACTOR_NUM * (1usize << self.b)) / LOAD_FACTOR_DEN
+        {
+            self.grow(false);
+        } else if self.too_many_overflow_buckets() {
+            self.grow(true);
+        }
+
+        let hash = self.hash(&key);
+        let mask = self.bucket_mask();
+        let bucket_idx = (hash as usize) & mask;
+        let top = tophash(hash);
+
+        let mut bucket_ptr: *mut Bucket<K, V> = &mut *self.buckets[bucket_idx];
+        loop {
+            let bucket = unsafe { &mut *bucket_ptr };
+            for i in 0..BUCKET_COUNT {
+                if bucket.tophash[i] == top {
+                    if let Some(ref k) = bucket.keys[i] {
+                        if k == &key {
+                            return bucket.elems[i].as_mut().unwrap();
+                        }
+                    }
+                }
+                if bucket.tophash[i] < MIN_TOP_HASH {
+                    bucket.tophash[i] = top;
+                    bucket.keys[i] = Some(key);
+                    bucket.elems[i] = Some(V::default());
+                    self.count += 1;
+                    return bucket.elems[i].as_mut().unwrap();
+                }
+            }
+            if bucket.overflow.is_none() {
+                bucket.overflow = Some(Box::new(Bucket::new()));
+                self.noverflow += 1;
+            }
+            bucket_ptr = bucket.overflow.as_mut().unwrap().as_mut();
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Reference iterator (bucket-walk order, Go-randomized start)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Iterator yielding `(&K, &V)` in Go's bucket-walk order.
+/// Snapshot semantics: reads the bucket array as it exists at creation
+/// time.  Does not reflect subsequent mutations.
+pub struct MapRefIter<'a, K, V> {
+    buckets: &'a [Box<Bucket<K, V>>],
+    /// Index of the bucket currently being walked.
+    bucket: usize,
+    /// Current overflow bucket in the chain, if any.
+    overflow: Option<&'a Bucket<K, V>>,
+    /// Current slot index (0..BUCKET_COUNT) within the bucket.
+    slot: usize,
+    /// Starting bucket (random).
+    start_bucket: usize,
+    /// Starting slot offset (random).
+    offset: usize,
+    /// How many buckets have been started.
+    visited_buckets: usize,
+    /// Total number of buckets in the array.
+    total_buckets: usize,
+    /// How many entries have been yielded so far.
+    yielded: usize,
+    /// Total live entries expected.
+    total: usize,
+}
+
+impl<'a, K, V> MapRefIter<'a, K, V>
+where
+    K: GoHash + PartialEq,
+    V: Default,
+{
+    fn new(m: &'a map<K, V>) -> Self {
+        let total_buckets = m.buckets.len();
+        let start_bucket = if total_buckets > 0 {
+            (rand::cheaprand() as usize) % total_buckets
+        } else {
+            0
+        };
+        let offset = (rand::cheaprand() as usize) % BUCKET_COUNT;
+        Self {
+            buckets: &m.buckets,
+            bucket: start_bucket,
+            overflow: None,
+            slot: 0,
+            start_bucket,
+            offset,
+            visited_buckets: 0,
+            total_buckets,
+            yielded: 0,
+            total: m.count as usize,
+        }
+    }
+}
+
+impl<'a, K, V> Iterator for MapRefIter<'a, K, V> {
+    type Item = (&'a K, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.yielded >= self.total {
+            return None;
+        }
+        loop {
+            let b = if let Some(ovf) = self.overflow {
+                ovf
+            } else {
+                if self.visited_buckets >= self.total_buckets {
+                    return None;
+                }
+                self.bucket = (self.start_bucket + self.visited_buckets) % self.total_buckets;
+                self.visited_buckets += 1;
+                self.slot = 0;
+                &self.buckets[self.bucket]
+            };
+
+            while self.slot < BUCKET_COUNT {
+                let idx = (self.slot + self.offset) % BUCKET_COUNT;
+                self.slot += 1;
+                if let (Some(ref k), Some(ref v)) = (&b.keys[idx], &b.elems[idx]) {
+                    self.yielded += 1;
+                    return Some((k, v));
+                }
+            }
+
+            // Move to overflow or next bucket
+            self.slot = 0;
+            if let Some(ref next) = b.overflow {
+                self.overflow = Some(next);
+            } else {
+                self.overflow = None;
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Nil support
+// ═══════════════════════════════════════════════════════════════════════
 
 impl<K, V> From<crate::nilval::Nil> for map<K, V>
 where
-    K: Ord,
+    K: GoHash + PartialEq,
     V: Default,
 {
     #[inline]
@@ -189,106 +730,69 @@ where
 
 impl<K, V> PartialEq<crate::nilval::Nil> for map<K, V>
 where
-    K: Ord,
+    K: GoHash + PartialEq,
     V: Default,
 {
     #[inline]
     fn eq(&self, _: &crate::nilval::Nil) -> bool {
-        self.Len() == 0
+        self.count == 0
     }
 }
 
 impl<K, V> PartialEq<map<K, V>> for crate::nilval::Nil
 where
-    K: Ord,
+    K: GoHash + PartialEq,
     V: Default,
 {
     #[inline]
     fn eq(&self, other: &map<K, V>) -> bool {
-        other.Len() == 0
+        other.count == 0
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// LenTrait
+// ═══════════════════════════════════════════════════════════════════════
+
 impl<K, V> LenTrait for map<K, V>
 where
-    K: Ord,
+    K: GoHash + PartialEq,
     V: Default,
 {
     #[inline]
     fn __len(&self) -> int {
-        self.inner.len() as int
+        self.count
     }
 }
 
-// ─── Index / IndexMut — generic by-value form ─────────────────────────
+// ═══════════════════════════════════════════════════════════════════════
+// Clone
+// ═══════════════════════════════════════════════════════════════════════
 
-impl<K, V> Index<K> for map<K, V>
+impl<K, V> Clone for map<K, V>
 where
-    K: Ord,
-    V: Default,
+    K: GoHash + PartialEq + Clone,
+    V: Default + Clone,
 {
-    type Output = V;
-    fn index(&self, key: K) -> &V {
-        self.inner.get(&key).unwrap_or(&*self.zero)
-    }
-}
-
-impl<K, V> IndexMut<K> for map<K, V>
-where
-    K: Ord,
-    V: Default,
-{
-    fn index_mut(&mut self, key: K) -> &mut V {
-        self.inner.entry(key).or_insert_with(V::default)
-    }
-}
-
-// ─── Index<&str> / IndexMut<&str> — string-keyed maps only ────────────
-//
-// Lets `m["foo"]` work directly without `m[string("foo")]`. The Borrow
-// impl on `string` (in gostring.rs) makes the read path zero-allocation;
-// the write path allocates a `string` only when inserting a new key.
-
-impl<V> Index<&str> for map<string, V>
-where
-    V: Default,
-{
-    type Output = V;
-    fn index(&self, key: &str) -> &V {
-        let lookup: &[u8] = key.as_bytes();
-        // BTreeMap::get takes `&Q where K: Borrow<Q>`. K=string, Q=[u8].
-        match (&self.inner as &BTreeMap<string, V>).get(lookup) {
-            Some(v) => v,
-            None => &*self.zero,
+    fn clone(&self) -> Self {
+        let mut out = Self::new();
+        for (k, v) in self.__iter() {
+            out.Set(k.clone(), v.clone());
         }
+        out
     }
 }
 
-impl<V> IndexMut<&str> for map<string, V>
+// ═══════════════════════════════════════════════════════════════════════
+// Default
+// ═══════════════════════════════════════════════════════════════════════
+
+impl<K, V> Default for map<K, V>
 where
+    K: GoHash + PartialEq,
     V: Default,
 {
-    fn index_mut(&mut self, key: &str) -> &mut V {
-        let lookup: &[u8] = key.as_bytes();
-        if !self.inner.contains_key(lookup) {
-            self.inner.insert(string::from(key), V::default());
-        }
-        self.inner.get_mut(lookup).expect("just inserted")
+    fn default() -> Self {
+        Self::new()
     }
 }
-
-// Borrow lookup for string keys uses byte slices internally (see
-// `impl Borrow<[u8]> for string` in gostring.rs). Helper to keep that
-// detail out of user code. Currently only used by the &str specializations.
-#[doc(hidden)]
-pub fn __get_string_keyed<'a, V: Default>(m: &'a map<string, V>, key: &str) -> Option<&'a V> {
-    m.inner.get::<[u8]>(key.as_bytes())
-}
-
-// Wire `K: Ord` ↔ `Borrow<[u8]>` for the string case. The compiler
-// already has `impl Borrow<[u8]> for string`; the use here is just to
-// keep the path obvious to readers.
-const _: fn() = || {
-    fn assert_borrow<T: Borrow<[u8]>>() {}
-    assert_borrow::<string>();
-};

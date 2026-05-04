@@ -584,3 +584,19 @@ path = "examples/http_writeproxy_smoke.rs"
 [[example]]
 name = "production_http_server"
 path = "examples/production_http_server.rs"
+
+[[example]]
+name = "tar_smoke"
+path = "examples/tar_smoke.rs"
+
+[[example]]
+name = "math_big_smoke"
+path = "examples/math_big_smoke.rs"
+
+[[example]]
+name = "net_url_smoke"
+path = "examples/net_url_smoke.rs"
+
+[[example]]
+name = "os_exec_smoke"
+path = "examples/os_exec_smoke.rs"

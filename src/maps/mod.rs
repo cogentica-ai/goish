@@ -30,7 +30,7 @@ use crate::goslice::slice;
 /// `maps.Keys(m)` — slice of keys, sorted (v1 BTreeMap backing).
 pub fn Keys<K, V>(m: &map<K, V>) -> slice<K>
 where
-    K: Ord + Clone,
+    K: crate::gomap::GoHash + PartialEq + Clone,
     V: Default,
 {
     let v: Vec<K> = m.__iter().map(|(k, _)| k.clone()).collect();
@@ -40,7 +40,7 @@ where
 /// `maps.Values(m)` — slice of values, in key-sorted order.
 pub fn Values<K, V>(m: &map<K, V>) -> slice<V>
 where
-    K: Ord,
+    K: crate::gomap::GoHash + PartialEq,
     V: Default + Clone,
 {
     let v: Vec<V> = m.__iter().map(|(_, v)| v.clone()).collect();
@@ -50,7 +50,7 @@ where
 /// `maps.Equal(m1, m2)` — same keys with equal values.
 pub fn Equal<K, V>(m1: &map<K, V>, m2: &map<K, V>) -> bool
 where
-    K: Ord,
+    K: crate::gomap::GoHash + PartialEq,
     V: Default + PartialEq,
 {
     let a = m1.__iter();
@@ -69,7 +69,7 @@ where
 /// `maps.Clone(m)` — deep copy.
 pub fn Clone<K, V>(m: &map<K, V>) -> map<K, V>
 where
-    K: Ord + Clone,
+    K: crate::gomap::GoHash + PartialEq + Clone,
     V: Default + Clone,
 {
     let mut out: map<K, V> = map::new();
@@ -83,7 +83,7 @@ where
 /// into `dst`. Existing keys in `dst` not in `src` are preserved.
 pub fn Copy<K, V>(dst: &mut map<K, V>, src: &map<K, V>)
 where
-    K: Ord + Clone,
+    K: crate::gomap::GoHash + PartialEq + Clone,
     V: Default + Clone,
 {
     for (k, v) in src.__iter() {
@@ -96,7 +96,7 @@ where
 /// via the underlying `BTreeMap`.
 pub fn EqualFunc<K, V1, V2, F>(m1: &map<K, V1>, m2: &map<K, V2>, mut eq: F) -> bool
 where
-    K: Ord,
+    K: crate::gomap::GoHash + PartialEq,
     V1: Default,
     V2: Default,
     F: FnMut(&V1, &V2) -> bool,
@@ -121,7 +121,7 @@ where
 /// while iterating.
 pub fn DeleteFunc<K, V, F>(m: &mut map<K, V>, mut del: F)
 where
-    K: Ord + Clone,
+    K: crate::gomap::GoHash + PartialEq + Clone,
     V: Default,
     F: FnMut(&K, &V) -> bool,
 {
@@ -144,7 +144,7 @@ where
 // would be re-exposing more of BTreeMap's API.
 fn find_key<'a, K, V>(m: &'a map<K, V>, key: &K) -> Option<&'a V>
 where
-    K: Ord,
+    K: crate::gomap::GoHash + PartialEq,
     V: Default,
 {
     for (k, v) in m.__iter() {
