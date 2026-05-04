@@ -2,6 +2,62 @@
 
 This file captures the project conventions from `.claude/goish-reminder.md` so that any coding agent can discover them.
 
+## Working directories (read first)
+
+Repo layout (all under `/home/chanwit/Dropbox/projects/goro-workspace/`):
+
+```
+goro-workspace/
+├── goish-v1/                         ← this repo (the goish runtime)
+│   ├── src/                          runtime
+│   ├── examples/                     137 e2e examples
+│   ├── goish-macros/                 proc-macros (#[goish::main],
+│   │                                  goish::reflect!, var_emit_error_marker)
+│   ├── doc/                          chapter drafts (untracked, in progress)
+│   ├── DISCUSSION_VAR.md             ← Doctrine 2 design record
+│   ├── AGENTS.md                     ← this file
+│   └── CLAUDE.md                     `@AGENTS.md` redirect
+│
+└── ports/                            sibling workspace, NOT a git repo
+    ├── Cargo.toml                    workspace manifest (~46 ports)
+    ├── flux_source_controller/       excluded from workspace (2k+ errors)
+    ├── go_logr_logr/                 ← shipped 2026-05-04
+    ├── Masterminds_semver_v3/
+    ├── fluxcd_pkg_*/
+    ├── go_openapi_swag_*/
+    └── ...                           (see ports/Cargo.toml for full list)
+```
+
+### Important paths
+
+| Path | Purpose |
+|---|---|
+| `/home/chanwit/Dropbox/projects/goro-workspace/goish-v1/` | goish runtime (this repo) |
+| `/home/chanwit/Dropbox/projects/goro-workspace/ports/` | port crates workspace |
+| `/nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/` | Go 1.25 SDK source — consult before porting |
+| `~/go/pkg/mod/` | Go module cache — source for third-party ports |
+| `/tmp/source-controller/` | flux source-controller checkout (port target) |
+
+### Test commands
+
+| Command | What it does |
+|---|---|
+| `cargo check --lib` | typecheck goish runtime |
+| `cargo build --examples` | build all 137 e2e examples |
+| `make e2e LOOPS=1` | run all examples once each (~30s) |
+| `make e2e LOOPS=10 FILTER='^chan_'` | stress one family |
+| `cd ../ports && cargo check --workspace` | typecheck all ports |
+
+### Conventions
+
+- **goish-v1 is a git repo.** All runtime + example changes commit here.
+- **ports/ is NOT a git repo.** Edits there don't get tracked. If a port
+  needs a permanent home, bring it under version control separately.
+- **Doc files in `goish-v1/doc/` are intentionally untracked.** Per
+  recent commit conventions (e.g. `92d80b5`, `b702cb7`), goish source
+  commits explicitly exclude `doc/*.md`.
+
+
 ## 1. Consult Go 1.25 source when porting APIs
 
 When designing or porting any Go API, verify signatures, semantics, and edge cases against the actual Go source at `/nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/` rather than reasoning from memory. Read the file you're porting from before you write the goish version.
@@ -251,62 +307,7 @@ Background: `DISCUSSION_VAR.md` at the repo root captures the full
 design rationale (three doctrines, why Doctrine 2 won, the trait-
 bound widening on `errors::Is`, the migration plan).
 
-## 10. Working directories
-
-Repo layout (all under `/home/chanwit/Dropbox/projects/goro-workspace/`):
-
-```
-goro-workspace/
-├── goish-v1/                         ← this repo (the goish runtime)
-│   ├── src/                          runtime
-│   ├── examples/                     137 e2e examples
-│   ├── goish-macros/                 proc-macros (#[goish::main],
-│   │                                  goish::reflect!, var_emit_error_marker)
-│   ├── doc/                          chapter drafts (untracked, in progress)
-│   ├── DISCUSSION_VAR.md             ← Doctrine 2 design record
-│   ├── AGENTS.md                     ← this file
-│   └── CLAUDE.md                     `@AGENTS.md` redirect
-│
-└── ports/                            sibling workspace, NOT a git repo
-    ├── Cargo.toml                    workspace manifest (~46 ports)
-    ├── flux_source_controller/       excluded from workspace (2k+ errors)
-    ├── go_logr_logr/                 ← shipped 2026-05-04
-    ├── Masterminds_semver_v3/
-    ├── fluxcd_pkg_*/
-    ├── go_openapi_swag_*/
-    └── ...                           (see ports/Cargo.toml for full list)
-```
-
-### Important paths
-
-| Path | Purpose |
-|---|---|
-| `/home/chanwit/Dropbox/projects/goro-workspace/goish-v1/` | goish runtime (this repo) |
-| `/home/chanwit/Dropbox/projects/goro-workspace/ports/` | port crates workspace |
-| `/nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/` | Go 1.25 SDK source — consult before porting |
-| `~/go/pkg/mod/` | Go module cache — source for third-party ports |
-| `/tmp/source-controller/` | flux source-controller checkout (port target) |
-
-### Test commands
-
-| Command | What it does |
-|---|---|
-| `cargo check --lib` | typecheck goish runtime |
-| `cargo build --examples` | build all 137 e2e examples |
-| `make e2e LOOPS=1` | run all examples once each (~30s) |
-| `make e2e LOOPS=10 FILTER='^chan_'` | stress one family |
-| `cd ../ports && cargo check --workspace` | typecheck all ports |
-
-### Conventions
-
-- **goish-v1 is a git repo.** All runtime + example changes commit here.
-- **ports/ is NOT a git repo.** Edits there don't get tracked. If a port
-  needs a permanent home, bring it under version control separately.
-- **Doc files in `goish-v1/doc/` are intentionally untracked.** Per
-  recent commit conventions (e.g. `92d80b5`, `b702cb7`), goish source
-  commits explicitly exclude `doc/*.md`.
-
-## 11. Status — what's done (2026-05-04)
+## 10. Status — what's done (2026-05-04)
 
 ### Doctrine 2 + `goish::var!` shipped
 
