@@ -118,7 +118,7 @@ pub use nilval::{nil, Nil};
 pub use gomap::map;
 pub use goslice::slice;
 pub use gostring::string;
-pub use types::{byte, float32, float64, int, rune, uint};
+pub use types::{byte, float32, float64, int, rune, uint, uintptr};
 
 // Re-export the entry-point attribute so users write `#[goish::main]`.
 pub use goish_macros::main;

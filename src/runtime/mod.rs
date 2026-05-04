@@ -120,6 +120,49 @@ pub fn GoroutineProfile(_p: crate::goslice::slice<()>) -> (crate::types::int, bo
     (0, false)
 }
 
+// ─── Caller / FuncForPC — stack-frame introspection (slim) ───────────
+//
+// Go: `runtime.Caller(skip)` (extern.go:235) returns
+// `(pc uintptr, file string, line int, ok bool)` for the call site
+// `skip` frames up the stack. `runtime.FuncForPC(pc)` (symtab.go) maps
+// a PC to a `*Func` whose `.Name()` is the qualified function name.
+//
+// goish v1 has no DWARF backtrace runtime — calling these returns the
+// "unknown" sentinel so callers (logr/funcr, glog, klog) compile and
+// produce log lines tagged "<unknown>" for caller info instead of
+// erroring out. Fill this in when a port forces actual frame walking.
+
+/// `runtime.Caller(skip)` (Go 1.25 extern.go:235) — slim stub returning
+/// `(0, "", 0, false)`. Callers that branch on `ok` get the "unable to
+/// recover information" path, which logr/funcr renders as
+/// `Caller{File: "<unknown>", Line: 0}`.
+pub fn Caller(_skip: crate::types::int) -> (crate::types::uintptr, crate::gostring::string, crate::types::int, bool) {
+    (0, crate::gostring::string::from_static(""), 0, false)
+}
+
+/// `runtime.Func` (Go 1.25 symtab.go) — opaque handle returned by
+/// `FuncForPC`. Goish stub is a unit struct; `.Name()` always returns
+/// `""` (matches Go's behaviour for an unknown PC).
+#[derive(Clone, Copy)]
+pub struct Func {
+    _priv: (),
+}
+
+impl Func {
+    /// `(*Func).Name()` (symtab.go) — qualified function name. Goish
+    /// stub returns the empty string until real symbolization lands.
+    pub fn Name(&self) -> crate::gostring::string {
+        crate::gostring::string::from_static("")
+    }
+}
+
+/// `runtime.FuncForPC(pc)` (Go 1.25 symtab.go) — slim stub returning
+/// `None` for any PC since goish has no symbol table. Callers that
+/// guard `if fp != nil { name = fp.Name() }` get the empty-name path.
+pub fn FuncForPC(_pc: crate::types::uintptr) -> Option<Func> {
+    None
+}
+
 /// First Rust code to run after the kernel hands control to `_start`.
 /// `_start` (emitted by `#[goish::main]`) reads argc/argv off the stack,
 /// loads them into rdi/rsi per SysV, then `call`s here.
