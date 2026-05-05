@@ -134,6 +134,17 @@ pub struct G {
     /// `recover!()` macro so a `defer!{}` body can distinguish "scope
     /// exited normally" from "scope unwound via panic".
     pub panicking: AtomicBool,
+    /// The panic value, captured by `#[panic_handler]` from
+    /// `PanicInfo::message()`. Read & cleared by `recover!()` (Go's
+    /// recover semantics — once retrieved, subsequent recover()s
+    /// in the same panic chain see nil).
+    ///
+    /// Stored as `error` rather than the original payload type
+    /// because Rust's `panic!()` macro doesn't expose typed payloads
+    /// in no_std (we only get a renderable `&Arguments`). Ports that
+    /// want typed-panic recovery should still use `errors::As` after
+    /// recover; the underlying payload is the rendered message.
+    pub panic_value: SpinLock<Option<crate::error>>,
 }
 
 impl G {
@@ -167,6 +178,7 @@ impl G {
             panic_recover: super::gobuf::Gobuf::new(),
             cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             panicking: AtomicBool::new(false),
+            panic_value: SpinLock::new(None),
         }
     }
 
@@ -229,6 +241,7 @@ impl G {
             panic_recover: super::gobuf::Gobuf::new(),
             cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             panicking: AtomicBool::new(false),
+            panic_value: SpinLock::new(None),
         }
     }
 }

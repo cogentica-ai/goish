@@ -203,3 +203,13 @@ impl<T> DerefMut for slice<T> {
         &mut self.inner
     }
 }
+
+// `AsRef<[T]>` lets generic helpers in goish (`utf8::RuneCount<P:
+// AsRef<[u8]>>`, etc.) accept `slice<T>` directly — no manual `.as_slice()`
+// at the call site, and ports stay free of `&[T]` leaks per §3.
+impl<T> AsRef<[T]> for slice<T> {
+    #[inline]
+    fn as_ref(&self) -> &[T] {
+        &self.inner
+    }
+}

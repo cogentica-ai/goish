@@ -970,7 +970,7 @@ impl Server {
             // survives for keep-alive reuse on success.
             let fd = w.__conn_fd();
             crate::defer!{
-                if crate::recover!().is_some() {
+                if crate::recover!() != crate::nil {
                     let _ = crate::syscall::Close(fd);
                 }
             }

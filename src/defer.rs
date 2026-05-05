@@ -141,10 +141,17 @@ macro_rules! defer {
     };
 }
 
-/// `recover!()` — inside a `defer!{}` body, returns `Some(())` if the
-/// body is being run because the enclosing scope is unwinding due to
-/// panic; returns `None` if the body is being run on normal scope
-/// exit (Drop). Mirrors Go's `recover()` for the *observation* part.
+/// `recover!()` — inside a `defer!{}` body, returns the panic value
+/// (an `error`) if the body is being run because the enclosing scope
+/// is unwinding due to panic; returns `nil` if the body is being run
+/// on normal scope exit (Drop). Mirrors Go's `recover()` for the
+/// *observation* and *value-retrieval* parts.
+///
+/// The returned `error` carries the rendered panic message captured
+/// by `#[panic_handler]` from `core::panic::PanicInfo`. Ports that
+/// need typed-panic recovery (`if e := recover(); e.(*MyErr) ...`)
+/// can match on the error string or use `errors::As` once a custom
+/// payload mechanism is wired through `panic_value`.
 ///
 /// **Difference from Go:** Go's `recover()` ALSO stops panic
 /// propagation, letting the recovering function return normally to
@@ -155,20 +162,19 @@ macro_rules! defer {
 /// a normal function-return without compiler-emitted unwind tables
 /// (gated behind nightly + -Zbuild-std on no_std crates).
 ///
-/// In practice, the `if recover!() { … }` pattern is what Go users
-/// reach for when they want to log + clean up on panic. The
-/// "continue execution" semantic of Go's recover is rarely correct
-/// outside HTTP-handler-style top-of-goroutine patterns, which goish
-/// already handles automatically: a panic in any goroutine kills
-/// only that goroutine, and the scheduler keeps running.
+/// **First-call semantics:** the panic value is *taken* from the G
+/// on the first `recover!()` call in a panic chain — subsequent
+/// calls within the same chain see `nil`. Mirrors Go's recover()
+/// idempotency.
 ///
-/// Returns `None` outside any goroutine (g0 / sysmon).
+/// Returns `nil` outside any goroutine (g0 / sysmon).
 ///
 /// ```ignore
 /// defer!{
-///     if recover!().is_some() {
-///         // panic path: log it, release a resource we don't want to
-///         // leak in the panic case, etc.
+///     let e = recover!();
+///     if e != nil {
+///         // panic path: log + clean up
+///         log::Printf("recovered: %v", e);
 ///         let _ = conn.Close();
 ///     }
 ///     // either path: things you always want to run go here
@@ -177,10 +183,24 @@ macro_rules! defer {
 #[macro_export]
 macro_rules! recover {
     () => {{
-        if $crate::runtime::sched::panicking() {
-            ::core::option::Option::Some(())
-        } else {
-            ::core::option::Option::None
-        }
+        $crate::defer::__recover_impl()
     }};
+}
+
+/// Implementation of `recover!()`. Returns the captured panic value
+/// (taking it out of the G's `panic_value` slot) when the current G
+/// is panicking, else `nil`. Public for the macro; not meant for
+/// direct use.
+#[inline]
+pub fn __recover_impl() -> crate::error {
+    use core::sync::atomic::Ordering;
+    if let Some(g_ptr) = crate::runtime::sched::current_g() {
+        let g = unsafe { &*g_ptr.as_ptr() };
+        if g.panicking.load(Ordering::Acquire) {
+            if let Some(e) = g.panic_value.lock().take() {
+                return e;
+            }
+        }
+    }
+    crate::nil.into()
 }

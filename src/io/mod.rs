@@ -374,6 +374,40 @@ impl Writer for Discard {
     }
 }
 
+// ─── Empty / Null counterparts ──────────────────────────────────────
+
+/// Reader counterpart to `Discard` — every `Read` returns `(0, EOF)`.
+/// Mirrors the behaviour of an empty `bytes.Reader`. Used as the
+/// default sentinel for `Box<dyn io::Reader>` struct fields when a
+/// goishc-generated `Default` impl needs a concrete value.
+pub struct Empty;
+
+/// Construct a fresh Empty reader.
+pub fn EmptyReader() -> Empty {
+    Empty
+}
+
+impl Reader for Empty {
+    fn Read(&mut self, _p: &mut slice<byte>) -> (int, error) {
+        (0, EOF.into())
+    }
+}
+
+/// Closer counterpart whose `Close` is a no-op returning nil. Used as
+/// the default sentinel for `Box<dyn io::Closer>` struct fields.
+pub struct NullCloser;
+
+/// Construct a fresh NullCloser.
+pub fn NopCloser_() -> NullCloser {
+    NullCloser
+}
+
+impl Closer for NullCloser {
+    fn Close(&mut self) -> error {
+        nil.into()
+    }
+}
+
 // ─── NopCloser ───────────────────────────────────────────────────────
 
 /// `io.NopCloser(r)` analogue (io.go:682). Wraps a Reader so Close is

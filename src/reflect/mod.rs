@@ -1157,6 +1157,58 @@ pub fn ValueOf<T: Reflect + ?Sized>(v: &T) -> Value {
     v.__reflect_value()
 }
 
+// ─── AnyReflect — type-erased reflection ─────────────────────────────
+//
+// Ports that accept arbitrary user values (logr's structured logging
+// slots, json.Marshal's `any`, query.Values's interface{}, …) used to
+// take `Arc<dyn core::any::Any>`. That handles concrete-type downcast
+// but loses access to reflection — funcr renders unknown types as
+// `"<unhandled>"`.
+//
+// `AnyReflect` is the supertrait that bundles both: implementers are
+// `Any` (downcast-capable) AND `Reflect` (walkable via Value). The
+// blanket impl below makes every `Reflect + Any + Send + Sync` type
+// pick this up for free, including all `#[goish::reflect]`-tagged
+// user structs and the built-in primitives.
+//
+// Migration path for ports: change `Arc<dyn Any + Send + Sync>` to
+// `Arc<dyn AnyReflect + Send + Sync>`. Existing `downcast_ref::<T>()`
+// call sites work unchanged through the `as_any()` upcast helper;
+// new sites can call `.__reflect_value()` directly to get a Value.
+
+/// Type-erased reflection handle. Combines `core::any::Any` (typeid-
+/// based downcast) with goish's `Reflect` (Value walking). Use
+/// `Arc<dyn AnyReflect + Send + Sync>` in port APIs that accept Go's
+/// `interface{}` / `any` values.
+pub trait AnyReflect: core::any::Any + Send + Sync {
+    /// Upcast to `&dyn Any` so existing `Any::downcast_ref::<T>()`
+    /// call sites keep working without restructuring.
+    fn as_any(&self) -> &dyn core::any::Any;
+    /// Walk the value into a `reflect::Value`. Same semantics as
+    /// `Reflect::__reflect_value` — provided here so callers with
+    /// only an `&dyn AnyReflect` reference can introspect without a
+    /// concrete type.
+    fn reflect_value(&self) -> Value;
+    /// Return the `reflect::Type` descriptor for this value's
+    /// static (concrete) type. Mirrors `Reflect::__reflect_type`.
+    fn reflect_type(&self) -> Type;
+}
+
+impl<T> AnyReflect for T
+where
+    T: core::any::Any + Reflect + Send + Sync,
+{
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+    fn reflect_value(&self) -> Value {
+        <T as Reflect>::__reflect_value(self)
+    }
+    fn reflect_type(&self) -> Type {
+        <T as Reflect>::__reflect_type()
+    }
+}
+
 /// `reflect.Zero(t)` (Go 1.25 `src/reflect/value.go`) — the zero
 /// `Value` for type `t`. The returned value is neither addressable nor
 /// settable. Goish v1 derives the zero from `t.Kind()`; types whose

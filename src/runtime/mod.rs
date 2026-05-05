@@ -379,6 +379,38 @@ fn on_panic(info: &core::panic::PanicInfo) -> ! {
                 // the panic path from normal scope exit. Cleared by
                 // `on_g_panic_aborted` after the gogo lands.
                 g.panicking.store(true, core::sync::atomic::Ordering::Release);
+                // Capture the panic value (rendered from `PanicInfo`)
+                // for `recover!()` to retrieve. We render through a
+                // bounded buffer to avoid allocator pressure during
+                // panic; the buffer feeds an `errors::New(<message>)`
+                // call that copies into a heap string. Bounded at
+                // 1 KiB; longer panic messages truncate.
+                {
+                    use core::fmt::Write;
+                    struct CaptureBuf {
+                        buf: [u8; 1024],
+                        len: usize,
+                    }
+                    impl core::fmt::Write for CaptureBuf {
+                        fn write_str(&mut self, s: &str) -> core::fmt::Result {
+                            let bytes = s.as_bytes();
+                            let room = self.buf.len() - self.len;
+                            let n = bytes.len().min(room);
+                            self.buf[self.len..self.len + n].copy_from_slice(&bytes[..n]);
+                            self.len += n;
+                            Ok(())
+                        }
+                    }
+                    let mut cap_buf = CaptureBuf { buf: [0u8; 1024], len: 0 };
+                    let _ = write!(&mut cap_buf, "{}", info.message());
+                    let s = core::str::from_utf8(&cap_buf.buf[..cap_buf.len]).unwrap_or("");
+                    // Build an owned goish::string from the borrowed
+                    // panic message before handing to errors::New
+                    // (which requires non-borrowed input).
+                    let owned: crate::string = crate::string::from(s);
+                    let e = crate::errors::New(owned);
+                    *g.panic_value.lock() = Some(e);
+                }
                 // Walk cleanups while the panicked frames are still
                 // intact — the cleanup nodes live there and will be
                 // abandoned by the gogo. Callbacks must not allocate
