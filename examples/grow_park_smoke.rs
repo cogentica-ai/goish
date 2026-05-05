@@ -6,10 +6,11 @@
 // park inside grow is unsafe" diagnosis was actually a 2-KiB home
 // overflow during `grow_and_call` setup, not a park-resume corruption.
 //
-// **Home-stack note:** uses `stack(4 * KB)` because 2 KiB is too small
-// for `grow_and_call`'s pre-pivot setup frame (Box::new + closure
-// marshalling). The 3-tier auto-grow ladder must either bump the home
-// default to ≥4 KiB or shrink `grow_and_call`'s pre-pivot frame.
+// **Home-stack note:** uses bare `go!()` (default 2 KiB). Earlier
+// regression with 2 KiB was the Box::new allocator path inside
+// `grow_and_call`'s pre-pivot frame; eliminated by switching to a
+// stack-resident `MaybeUninit<F>` slot. The 2 KiB sub-page density
+// goal (preserved against bumping the default) stays intact.
 //
 // Topology:
 //   producer ──c──> consumer
@@ -65,7 +66,7 @@ fn main() {
     // Consumer — runs Recv-loop INSIDE maybe_grow on a grown region.
     {
         let c = c.clone();
-        go!(stack(4 * KB), move || {
+        go!(move || {
             let (n, s) = sched::maybe_grow(8 * KB, 64 * KB, || {
                 let mut n: i64 = 0;
                 let mut s: i64 = 0;

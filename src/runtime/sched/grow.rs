@@ -17,10 +17,6 @@
 // - psm/src/lib.rs:181-207 (on_stack closure marshalling)
 // - stacker/src/lib.rs:148-168 (_grow)
 
-extern crate alloc;
-
-use alloc::boxed::Box;
-
 use core::arch::naked_asm;
 use core::mem::MaybeUninit;
 use core::ptr::NonNull;
@@ -251,25 +247,29 @@ where
     let saved_lo = swap_active_stack_lo(base as usize);
     let saved_hi = swap_active_stack_hi(base as usize + size);
 
-    // Box the closure so we have a stable pointer to pass through asm.
-    // The Box is consumed by `run_closure` (which `read`s the F out of
-    // its MaybeUninit slot and runs it), so we must `into_raw` it and
-    // free the storage manually after the pivot returns.
-    let closure: Box<MaybeUninit<F>> = Box::new(MaybeUninit::new(f));
-    let closure_raw = Box::into_raw(closure);
+    // Stack-resident closure slot — gives us a stable pointer to pass
+    // through the asm pivot without paying the Box::new allocator path
+    // on the home stack. The home-stack frame for `grow_and_call`
+    // remains live through the entire pivot/execution/pivot-back
+    // cycle, so `&mut closure_slot` stays valid for the asm-side
+    // `run_closure` to read F out of. After F is consumed, the
+    // MaybeUninit is logically empty; its scope-end is a no-op drop.
+    //
+    // Why this matters: in debug builds the Box::new path adds ~3 fn
+    // frames (Box::new → alloc::alloc::alloc → goish heap allocator),
+    // each ~100 B, which pushed the 2 KiB home stack into overflow
+    // when a goroutine entered maybe_grow at entry — see
+    // `examples/grow_park_smoke.rs` for the regression evidence.
+    let mut closure_slot: MaybeUninit<F> = MaybeUninit::new(f);
     let mut return_slot: MaybeUninit<R> = MaybeUninit::uninit();
 
     unsafe {
         goish_on_stack(
-            closure_raw as *mut u8,
+            &mut closure_slot as *mut _ as *mut u8,
             &mut return_slot as *mut _ as *mut u8,
             run_closure::<F, R>,
             new_sp,
         );
-        // Reclaim the Box's heap allocation. The F inside has already
-        // been moved-out by `run_closure`, so we deallocate without
-        // dropping (the MaybeUninit doesn't track init state for us).
-        let _ = Box::from_raw(closure_raw);
     }
 
     // Restore bookkeeping and free the growth region. M28-α: the
