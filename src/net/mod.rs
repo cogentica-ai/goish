@@ -1360,14 +1360,8 @@ impl AddrError {
     pub fn Temporary(&self) -> bool { false }
 }
 
-/// Lets call sites write `let e: error = net::AddrError {…}.into();` or
-/// pass it through tuple-return slots via `… .into()`. Mirrors Go's
-/// implicit `*AddrError → error` interface satisfaction.
-impl From<AddrError> for crate::error {
-    fn from(e: AddrError) -> crate::error {
-        crate::errors::Wrap(e)
-    }
-}
+// `AddrError → error` via `.into()` is now provided by the blanket
+// `impl<E: ErrorTrait> From<E> for error` in errors/mod.rs.
 
 /// Internal helper retained for SplitHostPort's existing call sites —
 /// returns a typed `AddrError` wrapped through `errors::Wrap`. `why`

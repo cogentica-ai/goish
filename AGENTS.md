@@ -204,6 +204,23 @@ Output legend: `✓` ported · `▶` ready · `○` pending · `·` no source on
 
 **Inspect imports before committing to a small port.** A 52-LOC leaf can balloon if it pulls in a missing runtime module (e.g. `titanous/rocacheck` needs `math/big` + `crypto/rsa`). Runtime gaps are the priority — never skip them; plan for the extra runtime LOC up front.
 
+### 7a. Hard rule — if a port can't be done, fix the runtime instead of stepping aside
+
+**If you can't port a chosen target because something is missing (a stdlib subpackage, a runtime API, a transpiler capability, a `range!()` impl, a `goish::var!` shape, etc.), the correct response is to ADD that missing piece to the goish runtime — not to silently move on to a different leaf.**
+
+Concrete examples:
+- `go-logr/stdr` needs `funcr` (914 LOC subpackage of `go-logr/logr`) → port `funcr`, then `stdr` (don't drop `stdr` for a smaller unrelated leaf).
+- A `range!(&x)` failure on a borrowed value → fix `range.rs`, don't fall back to a raw Rust `for` loop in the port.
+- A missing `math/rand/v2::Float64()` → add it to the runtime, don't inline a private RNG in the port.
+- A `Cookie { Name: string("sid"), … }` struct-literal hop → propose a constructor / builder fix in the runtime, don't leave a hand-conversion comment in the port.
+
+**What "stepping aside" looks like and why it's wrong:**
+- Picking a different leaf because the chosen one needs a missing dep.
+- Hand-stubbing a Go API in a port crate that should live in the runtime.
+- Working around a runtime gap with Rust idioms that violate the public-API rules in §2 / §3 / §5.
+
+Each step-aside fragments the codebase, leaves the gap unfilled for every future port, and erodes the runtime → ports invariant. Filling the gap once benefits every consumer forever. **Runtime first. Always.**
+
 ## 8. Debug and bug hunting using `rr` and `gdb`
 
 Compile with debug symbols (cargo's `dev` profile is fine). Use `rr` to record and replay; use gdb breakpoints + reverse-execution to trace.
@@ -307,85 +324,270 @@ Background: `DISCUSSION_VAR.md` at the repo root captures the full
 design rationale (three doctrines, why Doctrine 2 won, the trait-
 bound widening on `errors::Is`, the migration plan).
 
-## 10. Status — what's done (2026-05-04)
+## 10. goishc translate→fix→retranslate loop (the porting methodology)
+
+**The default workflow for porting a new Go module** is the translate→fix
+loop, NOT hand-rolling Rust from scratch. Every error the transpiler
+produces is either:
+
+- **A transpiler bug** — fix once in goishc and every future port benefits.
+- **A runtime gap** — fix once in goish-v1 and every future port benefits.
+- **A hand-edit pattern** — for structural issues that are too port-
+  specific to generalise (typed sentinel statics, newtype wrappers for
+  Go func-types-with-methods, etc.). Document with `// HAND-EDIT:`
+  comments so re-translation can re-merge.
+
+### The loop
+
+```
+1. goishc pkg -o crate/src/lib.rs <go-source-dir>
+2. Add crate to ports workspace (Cargo.toml members)
+3. cargo check -p <crate> 2>&1 | grep -E "^error\[" | sort | uniq -c
+   → Categorise by error code, count cascades
+4. Pick highest-impact fix:
+   - Cluster of N identical errors → one root, fix it
+   - One error blocking all subsequent code → fix it
+5. Apply fix in goishc (transpiler) OR goish-v1 (runtime) OR both
+6. Re-build goishc (`go build -o ~/bin/goishc`) when transpiler changed
+7. Re-translate (overwrites lib.rs) — DO NOT lose hand-edits if any!
+8. Recount; verify drop (or note cascading new errors surfacing)
+9. Repeat until count plateaus OR remaining errors are single
+   instances with no clear cascading root
+10. Switch to hand-edits for the residual; document each
+11. Verify e2e (138/138) AND full ports `cargo check --workspace`
+    after every runtime change — runtime additions can break other
+    crates that already passed
+```
+
+### Recipes proven by the `uber_multierr` session (2026-05-04)
+
+**Transpiler-side fixes worth replicating:**
+
+| Symptom | Root | Fix location |
+|---|---|---|
+| `bytes` defined multiple times (E0252) | prelude `bytes` collides with `import "bytes"` | `main.go` UseLinesPass — skip prelude name if also in goishMods |
+| `.clone()` on `&mut dyn io::Writer` | auto-clone for all locals | `bodies.go` `collectNoCloneParams` — detect `&mut` stdlib trait params |
+| `if recv == nil` on `&mut self` | Go nil-receiver guard | `bodies.go` `emitIf` — elide via `isReceiverNilCheck` |
+| `#[derive(Default, Clone)]` fails on atomic field | unconditional Clone derive | `decls.go` `structHasNonCloneField` — drop Clone for atomic/sync.Mutex/etc |
+| `pool.Get().MustAs::<&T>()` | type-assert on already-typed Pool result | track `PoolGlobals` in IR; elide assertion in body emitter |
+| `cannot find value 'res'` (named returns) | Go `(res T)` slot never declared | `bodies.go` `collectNamedReturns` + EmitBlock prelude + emitReturn substitution |
+| `Error()/String()` method on `&mut self` blocks Trait impl | pointer-receiver always emits `&mut self` | `decls.go` `isStringReturningNullary` — override to `&self` for trait shapes |
+| `*p = …` on `&p: &T` | pointer params always become `&T` | `decls.go` `pointerParamsWrittenThrough` — promote to `&mut T` if body writes |
+| `append(s, other...)` lost spread | Ellipsis not preserved | `bodies.go` — append builtin keeps `...` token; macro has TT-muncher arm |
+| Type-assert emits `As::<&T>` (with `&`) | `*T` mapped to `&T` then leaked | `bodies.go` — strip leading `&` before `.As::<T>()` emit |
+
+**Runtime additions worth keeping:**
+
+| Addition | Module | Future ports unlocked |
+|---|---|---|
+| `From<E: ErrorTrait> for error` blanket | `errors/mod.rs` | Any port with custom error types — `MyErr {…}.into()` works at error slots |
+| Auto `impl ErrorTrait for T` (when T has `Error() string`) | goishc `decls.go::emitErrorTraitImpl` | Same — pairs with the blanket |
+| `error::As<T: ErrorTrait + Default>(&self) -> (Arc<T>, bool)` | `errors/mod.rs` | Comma-ok type assertion `merr, ok := err.(*T)` |
+| `&error == Nil`, `&mut error == Nil` | `errors/mod.rs` | `range!(errs)` yields `&error`, `*error` write-through params |
+| `bytes::Buffer: Clone` | `bytes/mod.rs` | sync.Pool + Buffer pool patterns |
+| `fmt::State: io::Writer` + `fmt::Formatter` | `fmt/mod.rs` | Any port with custom `Format(fmt.State, rune)` |
+| `append!(xs, other...)` spread (TT-muncher) | `builtin_macros.rs` | Every Go `append(s, other...)` byte-identical |
+
+**Hand-edit recipes when transpiler gaps remain:**
+
+| Symptom in transpiled output | Hand-edit |
+|---|---|
+| `static X: int = bytes("...")` (wrong type from `[]byte` conv inference) | `static X: Lazy<slice<byte>> = Lazy::new(\|\| bytes("..."));` |
+| `bytes::Buffer { }` empty-literal in Pool init | `bytes::Buffer::default()` |
+| `pool.Get()` then `.clone()` per call | bind owned `let mut buff = …; …writeXxx(&mut buff); pool.Put(buff);` |
+| `f.Flag(b'+')` in Formatter (State::Flag takes int) | `f.Flag('+' as int)` |
+| `self.writeXxx(f)` where `f: &mut dyn fmt::State` and writeXxx wants `&mut dyn io::Writer` | upcast `f as &mut dyn io::Writer` (works since `State: io::Writer`) |
+| `match n { len(&xs) => … }` (non-const arm) | restructure as `if n == len(&xs)` chain |
+| `pub type X = Arc<dyn Fn() -> Y>` + `impl X` (Go func-type with method) | newtype: `pub struct X(pub Arc<dyn Fn() -> Y + Send + Sync>); impl Trait for X { … (self.0)() … }` |
+| `closer.Close` (Go method-value capture) | `Arc::new(SpinLock::new(closer))` + `move \|\| handle.lock().Close()` |
+| `err.As::<dyn SomeTrait>()` (As on a trait — fails T:Default bound) | short-circuit through the one concrete impl: `err.As::<ConcreteType>()` |
+| `*into = Append(*into, …)` (move out of `&mut` borrow) | `*into = Append(into.clone(), …)` |
+| `(/* TODO(goishc): expr *ast.ArrayType */)(nil.into())` (cast-nil-to-slice) | `make!([]T, 0)` |
+
+### Performance note (TT-muncher specifically)
+
+Macro recursion overhead from the spread-detecting `append!` muncher is
+unmeasurable: cold-cache `cargo check` timing for both the goish lib
+(217 existing `append!` call sites) and the full ports workspace stays
+within timing noise. Don't worry about adding more TT-munchers when
+they enable Go-faithful syntax.
+
+### When to STOP iterating and switch to hand-edits
+
+The loop has diminishing returns when:
+
+- **Remaining errors don't cluster** — singletons with no shared root.
+- **Fix would touch one Go-specific shape** — Go's method values, named
+  return shadowing, multiple-init in one statement, etc. Generalised
+  transpiler support costs more than annotated hand-edits in 2-3 ports.
+- **Cascade unblocks more than it fixes** — e.g. the Pool.Get fix (iter 6)
+  briefly raised total count by exposing a downstream auto-clone issue.
+  Take the win on that fix anyway; the cascade was visible-but-latent.
+
+For the `uber_multierr` session, the loop stopped at 26 errors (after
+13 transpiler/runtime improvements); the residual 26 needed
+~80 lines of `// HAND-EDIT:`-marked hand-tuning to reach 0.
+
+## 11. Status — what's done (2026-05-04)
 
 ### Doctrine 2 + `goish::var!` shipped
 
-- `errors::IsTarget` trait, `errors::Is::<T: IsTarget>` widened
-- `error::__ptr_eq` accessor for marker `PartialEq` impls
-- `goish-macros::var_emit_error_marker` proc-macro (token-level, no
-  `syn`/`quote`/`paste` deps — matches existing crate posture)
-- `goish::var!` muncher in `builtin_macros.rs`: 3 arms (string-literal,
-  typed-payload-brace, plain-const fallback), recursive munch handles
+- `errors::IsTarget` trait — widens `errors::Is::<T: IsTarget>` to
+  accept identity-stable markers in addition to `error` values
+- `error::__ptr_eq` accessor — backs the marker-side `PartialEq` impls
+- `goish-macros::var_emit_error_marker` proc-macro — token-level only,
+  no `syn`/`quote`/`paste` deps (matches the existing crate posture)
+- `goish::var!` muncher in `builtin_macros.rs` — 3 arms (string-literal,
+  typed-payload-brace, plain-const fallback); recursive munch handles
   arbitrary block size
-- `extern crate self as goish;` in `lib.rs` so proc-macro emitting
-  `::goish::...` paths resolves inside the goish crate itself
+- `extern crate self as goish;` in `lib.rs` — lets the proc-macro emit
+  `::goish::...` paths that resolve inside the goish crate itself
 
 ### Stdlib sentinel migration complete
 
-Zero `pub fn Err*() -> error` sentinel functions remain. Migrated:
-
-| Module | Sentinels |
-|---|---|
-| `errors` | `ErrUnsupported` |
-| `io` | `EOF`, `ErrShortWrite`, `ErrUnexpectedEOF`, `ErrShortBuffer`, `ErrNoProgress` |
-| `io/fs` | `ErrInvalid`, `ErrPermission`, `ErrExist`, `ErrNotExist`, `ErrClosed` |
-| `os` | `ErrInvalid`, `ErrPermission`, `ErrExist`, `ErrNotExist`, `ErrClosed` (also fixed pre-existing identity bug) |
-| `context` | `Canceled`, `DeadlineExceeded` (typed-payload form) |
-| `bufio` | 9 sentinels |
-| `archive/tar` | `ErrHeader`, `ErrFieldTooLong` |
-| `testing/iotest` | `ErrTimeout` (typed-payload) |
-| `os/exec` | `ErrNotFound` |
-| `encoding/csv` | `ErrBareQuote`, `ErrQuote`, `ErrFieldCount` |
-| `encoding/json` | `ErrSyntax`, `ErrUnexpectedEnd` |
-| `io/pipe` | `ErrClosedPipe` |
-| `net/mail` | `ErrHeaderNotPresent` |
-| `net/http/chunked` + `httputil` | `ErrLineTooLong` |
-| `net/http/server` | `ErrServerClosed`, `ErrBodyNotAllowed`, `ErrHijacked`, `ErrContentLength`, `ErrAbortHandler`, `ErrHandlerTimeout` |
-| `net/http/request` | 9 sentinels (4 string + 4 typed-payload + ErrMaxBytes) |
-| `strconv` | `ErrSyntax`, `ErrRange` |
-| `path` | `ErrBadPattern` |
+Zero `pub fn Err*() -> error` sentinel functions remain across the
+runtime. Coverage spans `errors`, `io`, `io/fs`, `os`, `context`,
+`bufio`, `archive/tar`, `testing/iotest`, `os/exec`, `encoding/csv`,
+`encoding/json`, `io/pipe`, `net/mail`, `net/http/*`, `strconv`, and
+`path`. To enumerate, `grep -rn 'goish::var!' src/` is authoritative.
 
 ### Naming standardization
 
-`errors::error` → `error` everywhere. Zero qualified references remain.
-The type still lives in `src/errors/mod.rs` with all impls; the canonical
-public path is `goish::error` via `pub use errors::error;` at lib root.
+`errors::error` → `error` everywhere; zero qualified references remain.
+The type still lives in `src/errors/mod.rs` with all impls; the
+canonical public path is `goish::error` via `pub use errors::error;` at
+lib root.
 
 ### Other fixes shipped this session
 
 - Lib warnings: 98 → 0
-- gomap `MapRefIter::next()` mid-bucket skip bug fixed
-- `fmt::Sprintf("%+v")` sorts map keys (Go-faithful)
-- `os::IsPathSeparator(c uint8) bool` added (unblocked
-  `monochromegane_go_gitignore`)
+- gomap `MapRefIter::next()` — mid-bucket skip bug fixed
+- `fmt::Sprintf("%+v")` — sorts map keys (Go-faithful)
+- `os::IsPathSeparator(c uint8) bool` — unblocks
+  `monochromegane_go_gitignore`
+- `gomap::GoHash` for `f64` / `f32` — bit-pattern hash; NaN behavior
+  matches Go (writeable but unretrievable); required by
+  `quantile.NewTargeted(map[float64]float64)` in `beorn7_perks`
+- `runtime::Caller` / `FuncForPC` / `Func` — slim stubs returning
+  `<unknown>` / empty-name; real DWARF backtrace deferred. Minimum
+  surface to unblock `funcr` (and any port that inspects the call site
+  without depending on the answer).
+- `types::uintptr` (= `u64`) — re-exported at lib root for ports that
+  mirror Go's `uintptr` in signatures
 - New examples: `gomap_smoke`, `gomap_range_smoke`, `var_marker_smoke`
+
+### `goarray::array<T, const N: usize>` — first-class fixed array (`[N]T`)
+
+Models Go 1.25 spec §Array_types: length-in-type, value-copy assignment
+(when `T: Copy`), element-wise comparability + hashability, constant
+`Len()`. Methods: `Len`, `Index<int>`, `IndexMut<int>`,
+`slice(low, high) -> slice<T>`, `to_slice() -> slice<T>`,
+`Deref<Target=[T]>` for raw-byte hot paths, `RangeIter` (so `range!(a)`
+works), `From<[T;N]>` / `Into<[T;N]>` boundary helpers, polymorphic
+`nil` wiring (zero-array == nil).
+
+**Companion `array!` macro** covers Go's 4 composite-literal shapes:
+
+- `array!([N]T)` — zero
+- `array!([N]T{e1, e2, …})` — full / partial (rest zero-filled,
+  requires `T: Default`)
+- `array!([...]T{e1, e2, …})` — length inferred via internal
+  `__count_exprs!` recursion
+- Sparse-keyed `[N]T{2: 99}` deferred
+
+Multi-dim composes naturally: `array<array<int, 5>, 3>` ports `[3][5]int`.
+
+Re-exported as `goish::array` at lib root; macro is `goish::array!`.
+`make!` deliberately rejects array types — Go's `make` is slice/map/chan
+only (spec §Making_slices_maps_and_channels); `array!` owns the
+fixed-array slot exclusively.
+
+**v1 deviation** (carried over from `slice<T>`): `a.slice(low, high)` /
+`a.to_slice()` *copy* the elements; Go's `a[:]` shares the underlying
+array. Same ROADMAP.md entry as the slice-subslicing deviation.
+
+**Rust coherence note**: only `Index<int>` is impl'd; the
+`Index<I: SliceIndex<[T]>>` blanket conflicts with future
+`i64: SliceIndex<[T]>` impls. Range expressions (`a[0..4]`) on array
+fields use `(*a)[0..4]` — explicit deref to `[T]`. Same constraint that
+`slice<T>` already lives with.
+
+**Regression check**: `rs_xid::ID` retrofitted from
+`pub struct ID(pub [u8; 12])` to `pub struct ID(pub array<byte, 12>)` —
+full workspace + 138/138 e2e green post-change.
+
+### Ports shipped this session (Batch C)
+
+| Port | LOC | Notes |
+|---|---|---|
+| `go_logr_logr` | ~340 | `logr.Logger` / `LogSink` trait + capability sub-traits |
+| `go_openapi_swag_conv` | — | numeric conversions |
+| `cenkalti_backoff_v5` | 487 | `BackOff` trait, `ExponentialBackOff`, `Retry` generic, `Ticker` |
+| `beorn7_perks` | ~580 | quantile + histogram + topk in one crate |
+| `go_logr_logr/funcr` | ~700 | structured key=value / JSON formatter (sub-module of `go_logr_logr`) |
+| `go_logr_stdr` | ~225 | logr-on-top-of-Go-stdlib-log (depends on `funcr`) |
+| `rs_xid` | ~390 | `xid.ID` — 12-byte Mongo-ObjectId-compatible globally-unique id |
+| `pmezard_go_difflib` | ~684 | `SequenceMatcher` / `WriteUnifiedDiff` / `WriteContextDiff` (Python difflib partial port) |
+| `uber_multierr` | ~330 | `Combine` / `Append` / `AppendInto` / `Errors` / `extractErrors` / `Invoker`. **First port driven by the goishc translate→fix→retranslate loop** — 13 transpiler/runtime improvements + targeted hand-edits, 46 → 0 cargo-check errors |
+
+**Per-port gotchas** (only items not already generalised in §10):
+
+- `beorn7_perks/quantile` — replaced Go's `func(*stream, float64)`
+  private field with an `invariantKind` enum to dodge `Box<dyn Fn>` in
+  a struct field. Hand-rolled overlap-safe shifts (Rust's
+  `clone_from_slice` panics on overlapping right shift).
+- `beorn7_perks/topk` — internal `Arc<RefCell<Element>>` for
+  pointer-aliased `mon`/`min` (preserves Go's evict-min in-place
+  semantics including orphan-after-evict). Public types stay by-value.
+- `funcr` — reflection fallback covers primitives only via
+  `downcast_ref`; unknown types render `"<unhandled>"`. Full
+  struct/slice/map walking needs a `dyn AnyReflect` registry —
+  deferred. Hook fields omitted (Doctrine 5). `Formatter::depth` is
+  `AtomicI64` so `Init(&self, info)` flows.
+- `rs_xid` — Go init-order via per-state `goish::lazy::Lazy<T>` (one
+  per `dec` table, `objectIDCounter`, `machineID`, `pid`). Eager init
+  to match Go's package-load timing is deferred to `#[goish::main]`.
+  `atomic.AddUint32` modernised to typed `atomic::Uint32::Add`.
+- `pmezard_go_difflib` — see Memory entry
+  `feedback_defer_moves_captured_value.md` for the bufio-vs-`defer!`
+  drop. `IsJunk` demoted to private `Option<Box<dyn Fn>>` (Doctrine 5).
+  Recursive nested closure (`var matchBlocks func(...)`) hoisted to
+  private method — Rust local closures can't self-recurse.
+  `type ContextDiff UnifiedDiff` → `pub type ContextDiff = UnifiedDiff`
+  (no methods on either side, so a zero-cost alias is fine).
+- `uber_multierr` — first goishc-loop port; see §10. Residual ~80 LOC
+  `// HAND-EDIT:` tags. Notable port-specific shapes:
+  Go func-type-with-method → newtype struct (not `pub type` alias —
+  E0116); `closer.Close` method-value → `Arc<SpinLock<Box<dyn Closer
+  + Send + Sync>>>` + `move || handle.lock().Close()` (RefCell is
+  `!Sync`); `err.As::<dyn Trait>` short-circuited through the one
+  concrete carrier; `&mut dyn fmt::State → &mut dyn io::Writer` upcast
+  needs explicit `as` despite supertrait declaration.
 
 ### Ports workspace
 
 `cargo check --workspace` from `/home/chanwit/Dropbox/projects/goro-workspace/ports/`
 **succeeds for ALL crates** (after this session's fixes — see commit
 history). `flux_source_controller` is intentionally excluded from the
-workspace; it has 2k+ unrelated errors that are tracked separately.
+workspace; it has 2k+ unrelated errors tracked separately.
 
 ### Open / deferred
 
 - `#[goish::main]` eager-init pass — defer until a port forces it
 - `goish::const!` macro for true compile-time constants — open design
 - `iota`-style sequences — separate problem
-- `syscall::Errno` typed errors with custom semantic `Is()` — different
-  shape than string-message sentinels; defer
+- `syscall::Errno` typed errors with custom semantic `Is()` —
+  different shape from string-message sentinels; defer
 
 ### Session commit history
 
-| Commit | What |
-|---|---|
-| `92d80b5` | gomap iterator + json key-sort + smoke tests |
-| `05e3e7b` | All 98 lib warnings → 0 |
-| `2690340` | Ship `goish::var!` macro (Doctrine 2 infra) |
-| `03215a9` | First-batch sentinel migration (~17 sentinels) |
-| `52429ff` | Complete sentinel migration (zero fn-form remain) |
-| `8515436` | Standardize call sites on `error` (canonical at goish::error) |
-| `ef72dc6` | `os::IsPathSeparator` — unblock final port |
+`git log --oneline` is authoritative. Notable landmarks of this
+session: `2690340` ships `goish::var!`; `52429ff` completes the
+sentinel migration; `8515436` standardises `error`. Uncommitted at
+time of writing: `goarray`, the `errors` blanket + `As<T>`,
+`bytes::Buffer: Clone`, `fmt::State` supertrait, `append!` spread,
+the 11 transpiler improvements from the `uber_multierr` loop, the
+codegen-test split, and the ports `funcr`/`stdr`/`rs_xid`/`uber_multierr`.
 
-E2e at every commit boundary: **137/137 green**.
+E2e at every commit boundary: **138/138 green** (137 pre-`goarray`,
+138 once `goarray_smoke` joined the suite).

@@ -49,6 +49,34 @@ pub trait Stringer {
     fn String(&self) -> string;
 }
 
+/// Go's `fmt.State` (fmt/print.go) — passed to `Formatter.Format`
+/// implementations. Carries the underlying writer plus the parsed
+/// width / precision / flags so a custom Format can render itself
+/// according to the verb's modifiers.
+///
+/// Method shapes mirror Go: `Write([]byte) (int, error)`, `Width()
+/// (int, bool)`, `Precision() (int, bool)`, `Flag(int) bool`.
+///
+/// The `int` arg to `Flag` is a flag character (`'+'`, `'-'`, `'#'`,
+/// `' '`, `'0'`); Goish keeps the Go `int` widening so call sites
+/// like `f.Flag(b'+' as int)` (or `f.Flag('+' as int)`) compile.
+pub trait State: crate::io::Writer {
+    fn Width(&self) -> (crate::types::int, bool);
+    fn Precision(&self) -> (crate::types::int, bool);
+    fn Flag(&self, c: crate::types::int) -> bool;
+}
+
+/// Go's `fmt.Formatter` interface — implemented by types that want
+/// custom verb-aware formatting (e.g. `multiError.Format(f, 'v')`
+/// switches on the `+` flag for the `%+v` multi-line variant).
+///
+/// Goish's verb-formatting fast path checks for this trait via the
+/// reflect-aware `%v` printer; types that don't impl Formatter fall
+/// back to Stringer / Format / the default `%v` walker.
+pub trait Formatter {
+    fn Format(&self, f: &mut dyn State, c: crate::types::rune);
+}
+
 /// Internal dispatch trait. Implemented for all builtin types in this
 /// file. User types satisfy it via the blanket on `Stringer` below.
 pub trait Format {

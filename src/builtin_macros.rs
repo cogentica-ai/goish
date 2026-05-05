@@ -197,13 +197,62 @@ macro_rules! __count_exprs {
 ///   let xs = append!(xs, 1, 2, 3);
 #[macro_export]
 macro_rules! append {
-    ($s:expr $(, $x:expr)+ $(,)?) => {
+    // Public entry. Tail-recurse through `__append_dispatch` to detect
+    // a trailing `...` spread terminator anywhere in the input — Go's
+    // `append(s, other...)` lowers verbatim to `append!(s, other...)`,
+    // exactly mirroring the Go source.
+    //
+    // Why the muncher: Rust's macro grammar restricts what can follow
+    // a `:expr` fragment to `=>`, `,`, or `;` — the literal `...`
+    // token is rejected. So we slurp the rest as a stream of
+    // `:tt` token-trees and decide based on the final token.
+    ($s:expr, $($rest:tt)+) => {
+        $crate::__append_dispatch!(($s) () $($rest)+)
+    };
+    // Single-arg call: just hand back the slice unchanged.
+    ($s:expr $(,)?) => { $s };
+}
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __append_dispatch {
+    // Spread terminator: input ends with literal `...`. Accumulator
+    // holds the spread source as a single token-tree stream that
+    // re-parses as one expression (`other`, `nested.errors`, …).
+    (($s:expr) ($($acc:tt)+) ...) => {
         {
             let mut __v = $crate::slice::__into_vec($s);
-            $( __v.push(($x).into()); )+
+            for __e in ($($acc)+).iter() {
+                __v.push(__e.clone().into());
+            }
             $crate::slice::__from_vec(__v)
         }
     };
+    // Slurp one more token into the accumulator and recurse.
+    (($s:expr) ($($acc:tt)*) $head:tt $($tail:tt)*) => {
+        $crate::__append_dispatch!(($s) ($($acc)* $head) $($tail)*)
+    };
+    // Exhausted input with no spread `...` — accumulator is a
+    // comma-separated list of expressions. Hand off to the per-element
+    // pusher.
+    (($s:expr) ($($acc:tt)+)) => {
+        {
+            let mut __v = $crate::slice::__into_vec($s);
+            $crate::__append_push_each!(__v, $($acc)+ ,);
+            $crate::slice::__from_vec(__v)
+        }
+    };
+}
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __append_push_each {
+    ($v:ident, $head:expr, $($rest:tt)*) => {
+        $v.push(($head).into());
+        $crate::__append_push_each!($v, $($rest)*);
+    };
+    ($v:ident,) => {};
+    ($v:ident) => {};
 }
 
 // ─── copy!(dst, src) — element copy, returns int ──────────────────────

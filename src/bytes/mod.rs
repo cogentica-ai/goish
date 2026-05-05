@@ -618,6 +618,13 @@ const SMALL_BUFFER_SIZE: usize = 64;
 
 /// `bytes.Buffer` — variable-size byte buffer with `Read`+`Write` methods.
 /// Implements `io::Reader` and `io::Writer`.
+///
+/// `Clone` matches Go's by-value copy semantics for `bytes.Buffer{}`
+/// composite-literals — the underlying `Vec<byte>` is duplicated. This
+/// makes `pool.Get().clone()` shapes (transpiled from Go's by-pointer
+/// pool patterns) compile cleanly; in steady-state code that wants to
+/// avoid the copy, prefer `&mut buf` to share the buffer in place.
+#[derive(Clone)]
 pub struct Buffer {
     buf: Vec<byte>,
     off: usize,

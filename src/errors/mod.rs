@@ -137,6 +137,29 @@ impl PartialEq<error> for crate::nilval::Nil {
     #[inline]
     fn eq(&self, other: &error) -> bool { other.IsNil() }
 }
+
+// Same comparison through a borrow — needed when the call site holds
+// `&error` (e.g. transpiled-through-pointer-receiver code, or
+// `for (_, err) in range!(errs)` which yields `&error`).
+impl PartialEq<crate::nilval::Nil> for &error {
+    #[inline]
+    fn eq(&self, _: &crate::nilval::Nil) -> bool { (*self).IsNil() }
+}
+impl PartialEq<&error> for crate::nilval::Nil {
+    #[inline]
+    fn eq(&self, other: &&error) -> bool { (*other).IsNil() }
+}
+// `&mut error` flavour — Goish lowers Go's `*error` write-through
+// parameters to `&mut error`, and those still need `if (*p == nil)`
+// guards to compile.
+impl PartialEq<crate::nilval::Nil> for &mut error {
+    #[inline]
+    fn eq(&self, _: &crate::nilval::Nil) -> bool { (**self).IsNil() }
+}
+impl PartialEq<&mut error> for crate::nilval::Nil {
+    #[inline]
+    fn eq(&self, other: &&mut error) -> bool { (**other).IsNil() }
+}
 impl Eq for error {}
 
 // ─── Display / Debug ─────────────────────────────────────────────────────
@@ -194,6 +217,25 @@ pub fn New<S: __StringConv>(text: S) -> error {
 /// `errors::Is(x, errors::ErrUnsupported)` and `if x == errors::ErrUnsupported`.
 crate::var! { pub ErrUnsupported: error = "unsupported operation"; }
 
+impl error {
+    /// Type-assertion comma-ok form. Mirrors Go's `merr, ok := err.(*T)`.
+    /// On success returns `(Arc<T>, true)`; on failure returns
+    /// `(Arc<T::default()>, false)` so the caller's `ok` check is the
+    /// gate (matching Go's "zero value plus false" semantics).
+    ///
+    /// Requires `T: Default` because the failure case has no concrete
+    /// `T` to hand back; user-defined error types declared via goishc
+    /// auto-derive Default, so this bound is satisfied transparently.
+    /// For hand-written types, derive or implement Default alongside
+    /// the ErrorTrait impl.
+    pub fn As<T: ErrorTrait + Default>(&self) -> (Arc<T>, bool) {
+        match As::<T>(self.clone()) {
+            Some(arc) => (arc, true),
+            None => (Arc::new(T::default()), false),
+        }
+    }
+}
+
 /// `errors.Wrap` (goish helper, no Go equivalent in the stdlib but the
 /// idiomatic way to lift a custom `ErrorTrait` impl into `error`).
 ///
@@ -202,6 +244,22 @@ crate::var! { pub ErrUnsupported: error = "unsupported operation"; }
 ///   return errors::Wrap(ParseErr { line: 7 });
 pub fn Wrap<E: ErrorTrait>(e: E) -> error {
     error(Some(Arc::new(e)))
+}
+
+// Lets transpiled code write `return MyErr { ... }.into();` for any
+// user struct with an `errors::ErrorTrait` impl — same lift as
+// `errors::Wrap` but reachable through Rust's `From`/`Into` traits so
+// goishc can emit `.into()` uniformly at error-slot return sites.
+//
+// Coherence note: this conflicts with neither the reflexive `From<T>
+// for T` (which makes `error: From<error>`) nor the existing
+// `From<Nil> for error` impl, since `error` and `Nil` neither
+// implement `ErrorTrait`. User types that opt into `ErrorTrait` flow
+// through this blanket; the `error` and `Nil` paths stay on their
+// dedicated impls.
+impl<E: ErrorTrait> From<E> for error {
+    #[inline]
+    fn from(e: E) -> Self { Wrap(e) }
 }
 
 // ─── Is / Unwrap ────────────────────────────────────────────────────────

@@ -125,11 +125,8 @@ impl crate::errors::ErrorTrait for PathError {
     }
 }
 
-impl From<PathError> for crate::error {
-    fn from(p: PathError) -> Self {
-        crate::errors::Wrap(p)
-    }
-}
+// `PathError → error` via `.into()` now provided by the blanket
+// `impl<E: ErrorTrait> From<E> for error` in errors/mod.rs.
 
 // ─── FileInfo ──────────────────────────────────────────────────────────
 
