@@ -76,6 +76,7 @@ pub use scheduler::{
 };
 pub use grow::{
     grow_bytes_live, grow_calls, grow_hits, grow_live, grow_peak_live, maybe_grow,
-    DEFAULT_GROW_BARE_CAP, DEFAULT_GROW_RED_ZONE,
+    maybe_grow_step, DEFAULT_GROW_BARE_CAP, DEFAULT_GROW_RED_ZONE, GROW_TIER_2_SIZE,
+    GROW_TIER_3_SIZE,
 };
 pub use stack::Stack;

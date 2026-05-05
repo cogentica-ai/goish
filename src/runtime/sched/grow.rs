@@ -85,6 +85,32 @@ pub const DEFAULT_GROW_RED_ZONE: usize = 1024;
 /// Tuned to fit comfortably for handlers, parsers, codegen passes.
 pub const DEFAULT_GROW_BARE_CAP: usize = 64 * 1024;
 
+// ─── 3-tier ladder constants ─────────────────────────────────────────
+//
+// `maybe_grow_step` (below) walks this ladder one rung at a time:
+// each call inspects the current active region size and pivots to the
+// next-larger tier if SP is within the per-tier red zone.
+//
+// 2 KiB (home) → 64 KiB (tier-2) → 1 MiB (tier-3) → no further growth.
+//
+// Past tier-3, `maybe_grow_step` is a no-op fast path. True unbounded
+// recursion still aborts via mmap failure or SIGSEGV on the bottom
+// guard page (when added).
+
+/// Tier-2 region size — pivot target when on the 2 KiB home stack.
+pub const GROW_TIER_2_SIZE: usize = 64 * 1024;
+
+/// Tier-3 region size — pivot target when on a tier-2 region.
+pub const GROW_TIER_3_SIZE: usize = 1024 * 1024;
+
+/// Red zone applied when on the home stack; if SP is within this many
+/// bytes of the home base, `maybe_grow_step` pivots to tier-2.
+const GROW_TIER_1_RED_ZONE: usize = 512;
+
+/// Red zone applied when on a tier-2 region; if SP is within this many
+/// bytes of the tier-2 base, `maybe_grow_step` pivots to tier-3.
+const GROW_TIER_2_RED_ZONE: usize = 8 * 1024;
+
 // ─── leaf asm: read RSP ──────────────────────────────────────────────
 
 /// Returns the current value of RSP at the call site, accounting for
@@ -196,6 +222,71 @@ where
     }
 
     grow_and_call(stack_size, f)
+}
+
+/// Tier-aware single-step grow.
+///
+/// Inspect the current active region's size and pivot to the next
+/// rung of the ladder if SP is within the corresponding red zone.
+/// One call per recursion site; the runtime picks the target size
+/// from a fixed ladder:
+///
+///   2 KiB (home) → 64 KiB (tier-2) → 1 MiB (tier-3) → no-op
+///
+/// Mirrors how stacker users call `maybe_grow` at recursion sites,
+/// but eliminates the manual `red_zone` / `target` tuning and gives
+/// the deepest goroutines two automatic upgrades. Past tier-3, the
+/// helper is a fast-path no-op; users who genuinely need >1 MiB
+/// should call `maybe_grow(red_zone, size, f)` directly with their
+/// own size.
+///
+/// Recommended use: wrap recursive calls (parsers, AST visitors,
+/// codegen passes, hash/btree balancing) so depth doesn't have to
+/// be known at goroutine spawn time. Cheap for shallow recursion
+/// (single fast-path comparison); pays one mmap when a pivot fires.
+///
+/// ```no_run
+/// use goish::runtime::sched::maybe_grow_step;
+///
+/// fn deep_recurse(n: i64) -> i64 {
+///     maybe_grow_step(|| {
+///         if n == 0 { return 0; }
+///         n + deep_recurse(n - 1)
+///     })
+/// }
+/// ```
+#[inline(never)]
+pub fn maybe_grow_step<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    let lo = current_active_stack_lo();
+    let hi = current_active_stack_hi();
+    if lo == 0 || hi <= lo {
+        // Pre-scheduler-init or no current G — just run.
+        return f();
+    }
+    let cur_size = hi - lo;
+    if cur_size < GROW_TIER_2_SIZE {
+        // Home tier (2 KiB nominal). The home stack is too small to
+        // safely host any non-trivial recursion: the fast-path check
+        // itself (current_active_stack_lo/hi + maybe_grow's helpers)
+        // burns several hundred bytes of debug-build frames per
+        // call. Pivot unconditionally to tier-2 — the user opted
+        // into `maybe_grow_step` at this site precisely because
+        // they expected growth.
+        //
+        // `usize::MAX` red_zone forces `maybe_grow`'s slow path
+        // regardless of current SP.
+        return maybe_grow(usize::MAX, GROW_TIER_2_SIZE, f);
+    }
+    if cur_size < GROW_TIER_3_SIZE {
+        // Tier-2 (64 KiB) — there's real headroom here, so the
+        // standard red-zone fast path applies.
+        return maybe_grow(GROW_TIER_2_RED_ZONE, GROW_TIER_3_SIZE, f);
+    }
+    // Already at tier-3 or beyond — no further auto-growth.
+    f()
 }
 
 /// Slow path: allocate a fresh stack region and pivot onto it.
@@ -319,6 +410,15 @@ fn current_active_stack_lo() -> usize {
     match crate::runtime::sched::scheduler::current_g() {
         Some(g) => unsafe {
             (*g.as_ptr()).active_stack_lo.load(Ordering::Acquire)
+        },
+        None => 0,
+    }
+}
+
+fn current_active_stack_hi() -> usize {
+    match crate::runtime::sched::scheduler::current_g() {
+        Some(g) => unsafe {
+            (*g.as_ptr()).active_stack_hi.load(Ordering::Acquire)
         },
         None => 0,
     }
