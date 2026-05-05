@@ -279,12 +279,17 @@ where
     // path where another M might wake it before we return — that
     // is documented in `maybe_grow`'s public doc.
     //
-    // (M28-β attempted to pin to G lifetime via `G.growth_chain`,
-    // but the resulting interaction with the existing cooperative-
-    // preempt residual scheduler bug — see
-    // project_residual_4pct_root_cause_found.md — destabilized
-    // chan-park-inside-grow flows. Reverted here; the field
-    // `G.growth_chain` is retained as plumbing for a future fix.)
+    // **Re-enablement of M28-β is now in scope** (the cooperative-
+    // preempt residual that previously blocked it has been resolved
+    // by the deferred-runqput fix in 956153a, the selparkcommit
+    // clear removal in 84edfb5, and the async-preempt EFLAGS
+    // preservation in 9028a07). To make grown regions outlive their
+    // closures, push `(base, size)` onto `G.growth_chain` here and
+    // skip the `Munmap` below — the `Drop for G` impl in `g.rs:254`
+    // already drains the chain at goexit. Validation gate before
+    // flipping: `make e2e LOOPS=100 FILTER='^chan_'` clean plus
+    // a heavy-recursion-with-park smoke. See the 3-tier design
+    // memory for context.
     swap_active_stack_lo(saved_lo);
     swap_active_stack_hi(saved_hi);
     GROW_LIVE.fetch_sub(1, Ordering::Relaxed);
