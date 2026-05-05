@@ -72,6 +72,22 @@ pub fn grow_bytes_live() -> usize {
     GROW_BYTES_LIVE.load(Ordering::Relaxed)
 }
 
+// ─── M28-β: lazy growth-chain container ──────────────────────────────
+//
+// Heap-allocated container for the list of grown regions a single
+// goroutine has accumulated. `G.growth_chain` is `*mut GrowChain`
+// (null until first push), so non-growing goroutines pay 8 bytes
+// instead of an inline `SpinLock<Vec<…>>` (32 bytes). Frees
+// automatically in `Drop for G`, which Munmap's each entry.
+//
+// Currently dormant — `grow_and_call` still uses the M28-α
+// scope-bound free path and never pushes here. Re-enabling M28-β
+// will replace the immediate `Munmap` in `grow_and_call` with a
+// push to `current_g().growth_chain`.
+pub struct GrowChain {
+    pub regions: alloc::vec::Vec<(*mut u8, usize)>,
+}
+
 // ─── go!() macro defaults (M28-γ) ────────────────────────────────────
 
 /// Headroom triggering a grow: when current SP is within

@@ -633,20 +633,17 @@ macro_rules! __select_default_or_park {
             }
         )*
 
-        // Populate G.select_wait with the deduped, sorted atoms so
-        // selparkcommit can release them in order during the park
-        // transition. The slice-copy is unsafe because we're
-        // touching G's internals through a raw pointer; that's fine
-        // because we own the G as the parking goroutine.
+        // Stash a *pointer* to the parker's own `$sel_atoms` array
+        // (already deduped/sorted, lives on this stack frame for the
+        // entire park). selparkcommit walks via this pointer to
+        // release locks in order — saves the 256 B inline copy on G.
+        // The parker's stack frame stays live throughout `gopark`,
+        // so the pointer is valid for the whole park transition.
         unsafe {
             let __g = &mut *__select_g.as_ptr();
             let __cap = $crate::runtime::sched::SELECT_WAIT_MAX;
             let __take_n = if $sel_unique > __cap { __cap } else { $sel_unique };
-            let mut __i: usize = 0;
-            while __i < __take_n {
-                __g.select_wait[__i] = $sel_atoms[__i];
-                __i += 1;
-            }
+            __g.select_wait = $sel_atoms.as_ptr();
             __g.select_wait_len = __take_n as u8;
         }
 

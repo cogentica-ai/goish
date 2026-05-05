@@ -58,16 +58,24 @@ pub struct G {
     /// lifetime.
     pub entry: Option<Box<dyn FnOnce()>>,
     /// `select!` (M16f-β) per-G wait-list of distinct chan-lock
-    /// `AtomicBool` pointers, in lock-acquire order, populated when
-    /// the goroutine parks on a select with no default. The select-
-    /// macro fills these in pass-2 right before `gopark`; the
-    /// commit fn (`runtime::sched::selparkcommit`) walks this slice
-    /// and releases each lock under the park transition. Mirrors
-    /// Go's `gp.waiting` (runtime/select.go:84) but stored as a
-    /// flat slice of lock atoms instead of an intrusive sudog
-    /// linked list (sudogs in goish are typed per case and can't
-    /// share a heterogeneous link list cleanly).
-    pub select_wait: [*const AtomicBool; SELECT_WAIT_MAX],
+    /// `AtomicBool` pointers. **Pointer to a stack-resident array
+    /// owned by the parking goroutine's `select!` invocation**, in
+    /// lock-acquire order, populated when the goroutine parks on a
+    /// select with no default. The select macro stashes the
+    /// `&__sel_atoms[0]` of its local array in pass-2 right before
+    /// `gopark`; the commit fn (`runtime::sched::selparkcommit`)
+    /// walks `[select_wait..select_wait+select_wait_len]` and
+    /// releases each lock under the park transition. Safe because
+    /// the parker's stack frame stays live throughout the park.
+    ///
+    /// **Memory note**: storing a pointer (8 B) instead of an inline
+    /// `[*const AtomicBool; 32]` (256 B) saves 248 B per G — half
+    /// the struct. Most goroutines never `select!` and never
+    /// populate this; the savings let mcentral fit ~50% more Gs.
+    /// Mirrors Go's `gp.waiting` (runtime/select.go:84) but stored
+    /// as a flat-slice pointer rather than an intrusive sudog
+    /// linked list (sudogs in goish are typed per case).
+    pub select_wait: *const *const AtomicBool,
     pub select_wait_len: u8,
     /// Asynchronous-preempt request flag. Sysmon's
     /// `check_force_preempt` (M18b-β) sets this on Gs that have
@@ -99,13 +107,16 @@ pub struct G {
     /// `active_stack_lo`. Currently informational; reserved for
     /// debugger inspection and future bounds checks.
     pub active_stack_hi: AtomicUsize,
-    /// M28-β: growth-region chain. Each `maybe_grow` pivot pushes
-    /// `(base, size)` here. Regions are NOT freed when the closure
-    /// returns; they're freed by the G's destructor / goexit path
-    /// so that a goroutine which parks on the grown stack and is
-    /// later resumed (possibly on a different M) finds its memory
-    /// still mapped. Memory is dropped together with the G.
-    pub growth_chain: SpinLock<alloc::vec::Vec<(*mut u8, usize)>>,
+    /// M28-β: growth-region chain. Each `maybe_grow` pivot would push
+    /// `(base, size)` here so the region outlives the closure that
+    /// allocated it (currently unused — M28-β is reverted; see the
+    /// comment in `runtime::sched::grow.rs::grow_and_call`). Stored
+    /// as a `*mut GrowChain` instead of inline `SpinLock<Vec<…>>` to
+    /// keep `sizeof(G)` small for 1M-goroutine workloads — when
+    /// M28-β re-enables, the first push allocates the chain.
+    /// `null` means "no chain yet"; `Drop for G` frees the chain
+    /// data and Munmap's each entry.
+    pub growth_chain: core::sync::atomic::AtomicPtr<super::grow::GrowChain>,
     /// Panic recovery point. Initialized by `g_entry` before invoking
     /// the user closure: pc=`on_g_panic_aborted`, sp=top-of-stack.
     /// Cleared (sp=0) when the user closure returns normally.
@@ -181,13 +192,13 @@ impl G {
             stack,
             status: GStatus::Idle,
             entry: Some(entry),
-            select_wait: [core::ptr::null(); SELECT_WAIT_MAX],
+            select_wait: core::ptr::null(),
             select_wait_len: 0,
             preempt: AtomicBool::new(false),
             sema_next: core::ptr::null_mut(),
             active_stack_lo: AtomicUsize::new(lo),
             active_stack_hi: AtomicUsize::new(hi),
-            growth_chain: SpinLock::new(alloc::vec::Vec::new()),
+            growth_chain: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             panic_recover: super::gobuf::Gobuf::new(),
             cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             panicking: AtomicBool::new(false),
@@ -245,13 +256,13 @@ impl G {
             // moves through Idle/Runnable/Running/Waiting/Dead.
             status: GStatus::Running,
             entry: None,
-            select_wait: [core::ptr::null(); SELECT_WAIT_MAX],
+            select_wait: core::ptr::null(),
             select_wait_len: 0,
             preempt: AtomicBool::new(false),
             sema_next: core::ptr::null_mut(),
             active_stack_lo: AtomicUsize::new(stack_base as usize),
             active_stack_hi: AtomicUsize::new(stack_base as usize + stack_size),
-            growth_chain: SpinLock::new(alloc::vec::Vec::new()),
+            growth_chain: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             panic_recover: super::gobuf::Gobuf::new(),
             cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             panicking: AtomicBool::new(false),
@@ -266,10 +277,24 @@ impl Drop for G {
     /// Runs when the G is dropped after `goexit` (scheduler frees
     /// dead Gs). The growth regions outlived the closures that
     /// allocated them — that's the whole point of pinning to the G.
+    ///
+    /// Lazy-alloc shape: `growth_chain` is `null` for goroutines
+    /// that never grew (M28-β-style pinning re-enable will allocate
+    /// on first push). Drop is a no-op in the null case — saves
+    /// the 32 B inline `SpinLock<Vec>` per non-grown G.
     fn drop(&mut self) {
-        let mut chain = self.growth_chain.lock();
-        while let Some((base, size)) = chain.pop() {
-            let _ = syscall::Munmap(base, size);
+        let chain_ptr = self.growth_chain.swap(
+            core::ptr::null_mut(),
+            core::sync::atomic::Ordering::AcqRel,
+        );
+        if !chain_ptr.is_null() {
+            unsafe {
+                let chain = alloc::boxed::Box::from_raw(chain_ptr);
+                for (base, size) in chain.regions.iter() {
+                    let _ = syscall::Munmap(*base, *size);
+                }
+                drop(chain);
+            }
         }
     }
 }

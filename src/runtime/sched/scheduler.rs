@@ -1472,8 +1472,9 @@ pub unsafe fn chan_park_commit(_g: NonNull<G>) -> bool {
 pub unsafe fn selparkcommit(g_ptr: NonNull<G>) -> bool {
     let g = &mut *g_ptr.as_ptr();
     let n = g.select_wait_len as usize;
+    let base = g.select_wait;
     for i in 0..n {
-        let atom = g.select_wait[i];
+        let atom = *base.add(i);
         // Skip nulls: nil chans contribute null atoms to the
         // dedup'd select_wait list. Null entries get sorted to the
         // front by the macro's address-sort and survive dedup as a
