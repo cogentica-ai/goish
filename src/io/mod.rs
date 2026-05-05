@@ -131,6 +131,17 @@ impl<R: Reader + ?Sized> Reader for &mut R {
     }
 }
 
+// `Box<dyn Reader + Send + Sync>` is the canonical lowering for an
+// owned interface storage slot (Go's `io.Reader` field). Forward the
+// trait through Box::deref_mut so callers can pass the boxed reader
+// straight to `io::ReadFull(boxed, …)` without unboxing.
+impl<R: Reader + ?Sized> Reader for alloc::boxed::Box<R> {
+    #[inline]
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        (**self).Read(p)
+    }
+}
+
 impl<W: Writer + ?Sized> Writer for &mut W {
     #[inline]
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
@@ -138,7 +149,21 @@ impl<W: Writer + ?Sized> Writer for &mut W {
     }
 }
 
+impl<W: Writer + ?Sized> Writer for alloc::boxed::Box<W> {
+    #[inline]
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        (**self).Write(p)
+    }
+}
+
 impl<C: Closer + ?Sized> Closer for &mut C {
+    #[inline]
+    fn Close(&mut self) -> error {
+        (**self).Close()
+    }
+}
+
+impl<C: Closer + ?Sized> Closer for alloc::boxed::Box<C> {
     #[inline]
     fn Close(&mut self) -> error {
         (**self).Close()

@@ -30,6 +30,7 @@ extern crate alloc;
 use core::ops::{Deref, DerefMut, Index, IndexMut};
 
 use crate::builtin::Len as LenTrait;
+use crate::convert::__SliceIndex;
 use crate::goslice::slice;
 use crate::types::int;
 
@@ -102,16 +103,16 @@ impl<T: Clone, const N: usize> array<T, N> {
 // Rust's coherence rules reject the two impls because `int: i64`
 // could in principle gain a `SliceIndex<[T]>` impl in the future.
 
-impl<T, const N: usize> Index<int> for array<T, N> {
+impl<T, const N: usize, I: __SliceIndex> Index<I> for array<T, N> {
     type Output = T;
-    fn index(&self, i: int) -> &T {
-        &self.inner[i as usize]
+    fn index(&self, i: I) -> &T {
+        &self.inner[i.__sidx()]
     }
 }
 
-impl<T, const N: usize> IndexMut<int> for array<T, N> {
-    fn index_mut(&mut self, i: int) -> &mut T {
-        &mut self.inner[i as usize]
+impl<T, const N: usize, I: __SliceIndex> IndexMut<I> for array<T, N> {
+    fn index_mut(&mut self, i: I) -> &mut T {
+        &mut self.inner[i.__sidx()]
     }
 }
 

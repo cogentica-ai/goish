@@ -28,6 +28,7 @@ use core::hash::{Hash, Hasher};
 use core::ops::{Add, Index};
 
 use crate::builtin::Len as LenTrait;
+use crate::convert::__SliceIndex;
 use crate::types::{byte, int};
 
 #[derive(Clone)]
@@ -174,12 +175,12 @@ impl LenTrait for string {
 
 // ─── s[i] — byte indexing, Go-faithful ────────────────────────────────
 
-impl Index<int> for string {
+impl<I: __SliceIndex> Index<I> for string {
     type Output = byte;
-    fn index(&self, i: int) -> &byte {
+    fn index(&self, i: I) -> &byte {
         // Bounds check matches Go: panics on out-of-range, byte access
         // (NOT rune access — `s[i]` in Go returns a byte too).
-        &self.bytes[i as usize]
+        &self.bytes[i.__sidx()]
     }
 }
 

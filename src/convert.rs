@@ -201,3 +201,29 @@ __num_conv!(__Uint32Conv, uint32, u32);
 __num_conv!(__Uint64Conv, uint64, u64);
 __num_conv!(__Float32Conv, float32, float32);
 __num_conv!(__Float64Conv, float64, float64);
+__num_conv!(__RuneConv, rune, crate::types::rune);
+__num_conv!(__ByteConv, byte, crate::types::byte);
+
+// ─── __SliceIndex — accept any integer type as a Go-style index ─────
+//
+// Go allows any integer type to index a slice/array/string. The
+// trait is implemented exclusively for integer types (no f32/f64) so
+// `s[0.0]` still fails to compile, matching Go's spec.
+//
+// Used by `slice<T>`, `array<T,N>`, and `string` `Index` impls so call
+// sites stay Go-shape: `dec[buf[i]]` where `buf[i]: byte` typechecks
+// without an explicit `int(buf[i])` cast.
+pub trait __SliceIndex {
+    #[doc(hidden)]
+    fn __sidx(self) -> usize;
+}
+impl __SliceIndex for u8    { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for i8    { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for u16   { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for i16   { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for u32   { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for i32   { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for u64   { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for i64   { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for usize { #[inline] fn __sidx(self) -> usize { self } }
+impl __SliceIndex for isize { #[inline] fn __sidx(self) -> usize { self as usize } }

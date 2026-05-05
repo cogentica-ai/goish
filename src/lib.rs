@@ -105,14 +105,14 @@ pub mod unicode;
 
 // Re-export Go's predeclared identifiers at the crate root so a single
 // `use goish::{len, string, ...}` mirrors Go's always-available builtins.
-pub use builtin::{cap, len};
+pub use builtin::{cap, len, Len};
 // Both `string` (the type, in gostring) and `string` (the conversion
 // function, in convert) are re-exported here. They occupy different
 // namespaces (type vs value), exactly like Go's `string` type and
 // `string(...)` conversion. Same for `slice<T>`.
 pub use convert::{
-    bytes, float32, float64, int, int16, int32, int64, int8, runes, string, uint, uint16, uint32,
-    uint64, uint8,
+    byte, bytes, float32, float64, int, int16, int32, int64, int8, rune, runes, string, uint,
+    uint16, uint32, uint64, uint8,
 };
 pub use errors::error;
 pub use nilval::{nil, Nil};

@@ -26,6 +26,7 @@ use alloc::vec::Vec;
 use core::ops::{Deref, DerefMut, Index, IndexMut};
 
 use crate::builtin::{Cap as CapTrait, Len as LenTrait};
+use crate::convert::__SliceIndex;
 use crate::types::int;
 
 #[derive(Clone)]
@@ -168,16 +169,18 @@ impl<T> CapTrait for slice<T> {
 
 // ─── xs[i] — Go-faithful indexing (panics on out-of-range) ────────────
 
-impl<T> Index<int> for slice<T> {
+// Generic over any integer type to match Go's `s[i]` (where i can be
+// any integer kind, including byte). See convert.rs::__SliceIndex.
+impl<T, I: __SliceIndex> Index<I> for slice<T> {
     type Output = T;
-    fn index(&self, i: int) -> &T {
-        &self.inner[i as usize]
+    fn index(&self, i: I) -> &T {
+        &self.inner[i.__sidx()]
     }
 }
 
-impl<T> IndexMut<int> for slice<T> {
-    fn index_mut(&mut self, i: int) -> &mut T {
-        &mut self.inner[i as usize]
+impl<T, I: __SliceIndex> IndexMut<I> for slice<T> {
+    fn index_mut(&mut self, i: I) -> &mut T {
+        &mut self.inner[i.__sidx()]
     }
 }
 

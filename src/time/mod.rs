@@ -324,6 +324,22 @@ impl Mul<int> for Duration {
     }
 }
 
+// Go's `int(time.Millisecond)` is a typed conversion to the
+// underlying nanosecond count. Wire `__IntConv` so call sites match.
+// `__Int64Conv` is impl'd in lockstep so `int64(d)` works the same way.
+impl crate::convert::__IntConv for Duration {
+    #[inline]
+    fn __conv(self) -> int {
+        self.0
+    }
+}
+impl crate::convert::__Int64Conv for Duration {
+    #[inline]
+    fn __conv(self) -> i64 {
+        self.0 as i64
+    }
+}
+
 /// Symmetric: Go's `60 * time.Second` writes the integer on the left.
 /// Without this impl Rust would reject the multiplication direction.
 impl Mul<Duration> for int {

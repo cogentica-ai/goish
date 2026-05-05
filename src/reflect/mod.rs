@@ -1610,6 +1610,25 @@ impl Reflect for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
     }
 }
 
+// `interface{}` reflection — AnyReflect carrier. Mirrors the
+// `Arc<dyn Any + Send + Sync>` flavour above, but the supertrait
+// already provides per-value Reflect dispatch, so `__reflect_value`
+// just delegates. This means `reflect::ValueOf(&subject)` on a
+// `&Arc<dyn AnyReflect + Send + Sync>` returns the value's actual
+// Kind (Struct, Slice, Map, …) instead of collapsing to the static
+// downcast table — matching Go's `reflect.ValueOf(x)` semantic
+// where `x` is `interface{}` carrying a real concrete type.
+impl Reflect for alloc::sync::Arc<dyn AnyReflect + Send + Sync> {
+    #[inline]
+    fn __reflect_type() -> Type {
+        Type::__new(Kind::Interface, "interface{}", &[])
+    }
+    #[inline]
+    fn __reflect_value(&self) -> Value {
+        (**self).reflect_value()
+    }
+}
+
 // ─── slice<T: Reflect> — generic Reflect impl ─────────────────────────
 //
 // The Type descriptor itself doesn't carry the element kind in v1

@@ -257,16 +257,60 @@ macro_rules! __append_push_each {
 
 // ─── copy!(dst, src) — element copy, returns int ──────────────────────
 
+/// `__CopySource<T>` — adapter trait the `copy!` macro uses to coerce
+/// the source argument to a `&[T]` regardless of whether it's a
+/// `slice<T>`, an array, a `&[T]` borrow, or — in the byte-element
+/// special case — a `string`. Mirrors Go's `copy()` rule that the
+/// source may be a string when the dest is `[]byte` (spec
+/// §Appending_to_and_copying_slices).
+pub trait __CopySource<T> {
+    fn __copy_src(&self) -> &[T];
+}
+
+impl<T> __CopySource<T> for crate::slice<T> {
+    #[inline]
+    fn __copy_src(&self) -> &[T] {
+        // slice<T>: Deref<Target=[T]> (goslice.rs:193).
+        &**self
+    }
+}
+
+impl<T> __CopySource<T> for [T] {
+    #[inline]
+    fn __copy_src(&self) -> &[T] { self }
+}
+
+// String → byte-slice source, used when the dest is `slice<byte>` and
+// the user wrote `copy(buf, "literal")` or `copy(buf, s)`. Go's spec
+// allows this exact narrowing.
+impl __CopySource<crate::types::byte> for crate::gostring::string {
+    #[inline]
+    fn __copy_src(&self) -> &[crate::types::byte] {
+        self.as_bytes()
+    }
+}
+
 /// `copy!(dst, src)` — copies `min(len(dst), len(src))` elements from
 /// `src` into `dst`, returning the count as `int`. `dst` and `src` may
 /// be `&mut slice<T>` and `&slice<T>` (or any slices that deref to
 /// `[T]`). The macro takes them by name to avoid leaking `&mut` syntax
 /// at the call site.
+///
+/// When `dst` is `slice<byte>`, `src` may also be a `string` — Go's
+/// `copy([]byte, string)` rule. The dispatch goes through
+/// [`__CopySource`].
 #[macro_export]
 macro_rules! copy {
     ($dst:expr, $src:expr) => {{
         let __dst: &mut [_] = &mut $dst;
-        let __src: &[_] = &$src;
+        // Bind the source as a `&_` ref directly — `&$src` extends a
+        // temporary's lifetime to the enclosing statement, so a
+        // chained source like `x.clone().slice(…)` stays live for
+        // the duration of the block. Going through a local owned
+        // binding (`let __src_owned = $src`) would consume `*b` or
+        // similar deref-LHS sources, which the older macro avoided.
+        let __src_ref = &$src;
+        let __src: &[_] = $crate::builtin_macros::__CopySource::__copy_src(__src_ref);
         let __n = ::core::cmp::min(__dst.len(), __src.len());
         __dst[..__n].clone_from_slice(&__src[..__n]);
         __n as $crate::int
