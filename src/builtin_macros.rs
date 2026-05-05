@@ -347,24 +347,32 @@ macro_rules! delete {
 ///   go!(move || {
 ///       println!("captured x = {}", x);
 ///   });
-/// Three forms (M28):
+/// Four forms:
 ///
 ///   go!(|| work());                              // 2 KiB FIXED, no grow
+///   go!(grow, || work());                        // 2 KiB → tier-2 (64 KiB) at entry,
+///                                                //   climbable to tier-3 (1 MiB) via
+///                                                //   maybe_grow_step at recursion sites
 ///   go!(8 * KB, || tiny_helper());               // 8 KiB FIXED, no grow
 ///   go!(stack(2 * KB), || tiny_helper());        // 2 KiB FIXED, no grow (alias)
 ///
-/// **No automatic growth in the macro.** This preserves the dense
-/// memory model for 1M-goroutines workloads (every goroutine costs
-/// only its carved stack, no mmap-per-G overhead) AND keeps every
-/// goroutine on a single stack region — channel-park / Gosched
-/// flows are unconditional safe regardless of the goroutine's
-/// stack size.
+/// **Default is dense (no grow).** Bare `go!(|| body)` keeps the
+/// 1M-goroutines memory story (~2 GiB virtual, ~one 4 KiB page each
+/// post-mmap rounding) and keeps every goroutine on a single stack
+/// region — channel-park / Gosched flows are unconditionally safe.
 ///
-/// **For deep recursion** that wouldn't fit in a fixed stack, call
-/// `runtime::sched::maybe_grow(red_zone, size, || body)` explicitly
-/// at the recursion site (mirrors how `stacker::maybe_grow` is used
-/// in the Rust ecosystem). Avoid blocking I/O / channel ops from
-/// inside the borrowed region.
+/// **`go!(grow, || body)`** wraps the user body in
+/// `runtime::sched::maybe_grow_step`. The body pivots once at entry
+/// from 2 KiB home to 64 KiB tier-2; if it recurses deeply enough
+/// that tier-2 runs low, calling `maybe_grow_step` again from inside
+/// the body climbs to the 1 MiB tier-3. Cost: one mmap per opted-in
+/// goroutine. Use for parsers / AST visitors / codegen passes where
+/// recursion depth isn't bounded at spawn time.
+///
+/// **For finer control** call `runtime::sched::maybe_grow_step` (tier
+/// ladder) or `runtime::sched::maybe_grow(red_zone, size, || body)`
+/// (custom red zone / target) directly at the recursion site —
+/// mirrors how `stacker::maybe_grow` is used in the Rust ecosystem.
 ///
 /// `KB` / `MB` / `GB` are exported at the crate root. Sizes are
 /// rounded up to the nearest 4 KiB page.
@@ -375,6 +383,25 @@ macro_rules! go {
         $crate::runtime::sched::newproc_with_stack(
             $size,
             $crate::__macro_alloc::Box::new($closure),
+        );
+    }};
+    // Auto-grow form: `go!(grow, || body)`.
+    //
+    // Spawns on the default 2 KiB carve (preserves spawn density and
+    // VMA count) and wraps the user body in `maybe_grow_step` so the
+    // first frame pivots eagerly to tier-2 (64 KiB). Inside the body,
+    // additional `maybe_grow_step` calls climb the ladder to tier-3
+    // (1 MiB) only when remaining tier-2 space drops below the red
+    // zone — paying a second mmap only on goroutines that actually
+    // need it.
+    (grow, $closure:expr) => {{
+        let __goish_user_body = $closure;
+        $crate::runtime::sched::newproc(
+            $crate::__macro_alloc::Box::new(move || {
+                $crate::runtime::sched::maybe_grow_step(move || {
+                    __goish_user_body();
+                });
+            }),
         );
     }};
     // Positional sized form: `go!(N, || body)`.
