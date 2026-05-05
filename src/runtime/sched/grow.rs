@@ -105,7 +105,15 @@ pub const GROW_TIER_3_SIZE: usize = 1024 * 1024;
 
 /// Red zone applied when on the home stack; if SP is within this many
 /// bytes of the home base, `maybe_grow_step` pivots to tier-2.
-const GROW_TIER_1_RED_ZONE: usize = 512;
+///
+/// **Sized for the pivot path itself**: between the red-zone check
+/// firing and the asm RSP pivot inside `goish_on_stack`, the slow
+/// path adds `grow_and_call` + `Mmap` + `swap_active_stack_lo/hi` +
+/// `goish_on_stack` setup frames on the home stack. In debug builds
+/// that's ~600–800 B. The red zone must cover that — and ideally
+/// leave one or two recursion frames of margin so the pivot fires
+/// before the user is right at the edge.
+const GROW_TIER_1_RED_ZONE: usize = 1024;
 
 /// Red zone applied when on a tier-2 region; if SP is within this many
 /// bytes of the tier-2 base, `maybe_grow_step` pivots to tier-3.
@@ -255,38 +263,61 @@ where
 ///     })
 /// }
 /// ```
-#[inline(never)]
+#[inline(always)]
 pub fn maybe_grow_step<F, R>(f: F) -> R
 where
     F: FnOnce() -> R,
 {
-    let lo = current_active_stack_lo();
-    let hi = current_active_stack_hi();
+    // Inline the check so the whole fast path lives in the caller's
+    // frame — no nested fn frames consuming home-stack budget. We
+    // read `active_stack_lo`/`hi` directly off the G to skip the
+    // `current_active_stack_lo`/`hi` helper frames, and we duplicate
+    // `maybe_grow`'s SP comparison here so the slow path is the only
+    // call out.
+    //
+    // **Why this matters for 2 KiB home stacks**: in debug builds
+    // each function call costs ~150 B of frame (prologue/spills).
+    // The previous out-of-line version called four functions just
+    // to decide whether to pivot, eating 600+ B before the user's
+    // recursion got a chance — forcing us to pivot unconditionally
+    // on home. Inlining brings the fast-path check down to a single
+    // frame so home (2 KiB) can host real recursion until SP
+    // actually descends into the red zone.
+    // Lock-free curg read — same pattern as `gopark` /`mcall`. The
+    // SpinLock-locked `current_g()` is too expensive in debug
+    // builds; data_unchecked() is safe here because curg is only
+    // mutated by this M's own thread.
+    let g = match unsafe { crate::runtime::sched::m::current_m().data_unchecked().curg } {
+        Some(g) => g,
+        None => return f(),
+    };
+    let (lo, hi) = unsafe {
+        (
+            (*g.as_ptr()).active_stack_lo.load(Ordering::Acquire),
+            (*g.as_ptr()).active_stack_hi.load(Ordering::Acquire),
+        )
+    };
     if lo == 0 || hi <= lo {
-        // Pre-scheduler-init or no current G — just run.
         return f();
     }
     let cur_size = hi - lo;
-    if cur_size < GROW_TIER_2_SIZE {
-        // Home tier (2 KiB nominal). The home stack is too small to
-        // safely host any non-trivial recursion: the fast-path check
-        // itself (current_active_stack_lo/hi + maybe_grow's helpers)
-        // burns several hundred bytes of debug-build frames per
-        // call. Pivot unconditionally to tier-2 — the user opted
-        // into `maybe_grow_step` at this site precisely because
-        // they expected growth.
-        //
-        // `usize::MAX` red_zone forces `maybe_grow`'s slow path
-        // regardless of current SP.
-        return maybe_grow(usize::MAX, GROW_TIER_2_SIZE, f);
+    let (target, red_zone) = if cur_size < GROW_TIER_2_SIZE {
+        (GROW_TIER_2_SIZE, GROW_TIER_1_RED_ZONE)
+    } else if cur_size < GROW_TIER_3_SIZE {
+        (GROW_TIER_3_SIZE, GROW_TIER_2_RED_ZONE)
+    } else {
+        // Tier-3 or beyond — no further auto-growth.
+        return f();
+    };
+    // Inline fast-path SP check; only call out to grow_and_call on
+    // the slow path so the out-of-line frame is amortised across
+    // genuine pivots.
+    GROW_CALLS.fetch_add(1, Ordering::Relaxed);
+    let sp = current_sp();
+    if sp.saturating_sub(lo) >= red_zone {
+        return f();
     }
-    if cur_size < GROW_TIER_3_SIZE {
-        // Tier-2 (64 KiB) — there's real headroom here, so the
-        // standard red-zone fast path applies.
-        return maybe_grow(GROW_TIER_2_RED_ZONE, GROW_TIER_3_SIZE, f);
-    }
-    // Already at tier-3 or beyond — no further auto-growth.
-    f()
+    grow_and_call(target, f)
 }
 
 /// Slow path: allocate a fresh stack region and pivot onto it.
