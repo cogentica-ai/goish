@@ -145,6 +145,14 @@ pub struct G {
     /// want typed-panic recovery should still use `errors::As` after
     /// recover; the underlying payload is the rendered message.
     pub panic_value: SpinLock<Option<crate::error>>,
+    /// `true` when this G was spawned via the bare `go!()` form
+    /// (auto-grow default). The scheduler picks `g_entry_growable` for
+    /// such Gs, which wraps the user `entry()` in `maybe_grow_step`
+    /// so the user closure runs inside a tier-aware grow scope.
+    /// `false` for `go!(stack(N), …)` and `go!(N, …)` — those Gs run
+    /// strictly on their N-byte stack, no auto-grow.
+    /// `g0` Gs are also `false`.
+    pub growable: bool,
 }
 
 impl G {
@@ -152,7 +160,12 @@ impl G {
     /// given entry closure. Status starts as `Idle`; the scheduler
     /// will transition to `Running` on first dispatch.
     pub fn new(entry: Box<dyn FnOnce()>) -> Self {
-        Self::new_with_stack(super::stack::DEFAULT_STACK_SIZE, entry)
+        // Bare `go!()` form: default 2 KiB home stack with auto-grow
+        // (`growable = true` flips the entry fn to `g_entry_growable`,
+        // which wraps user `entry()` in `maybe_grow_step`).
+        let mut g = Self::new_with_stack(super::stack::DEFAULT_STACK_SIZE, entry);
+        g.growable = true;
+        g
     }
 
     /// Allocate a `G` with a stack of the requested size (M26).
@@ -179,6 +192,7 @@ impl G {
             cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             panicking: AtomicBool::new(false),
             panic_value: SpinLock::new(None),
+            growable: false,
         }
     }
 
@@ -242,6 +256,7 @@ impl G {
             cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             panicking: AtomicBool::new(false),
             panic_value: SpinLock::new(None),
+            growable: false,
         }
     }
 }

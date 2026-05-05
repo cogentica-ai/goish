@@ -1,19 +1,17 @@
-// grow_macro_smoke — exercise the `go!(grow, || body)` macro arm.
+// grow_macro_smoke — exercise the bare `go!()` (default auto-grow)
+// vs. `go!(stack(N), …)` (fixed-size opt-out) macro arms.
 //
-// Three spawn forms compared on the same recursive workload:
+// Two spawn forms compared on the same recursive workload:
 //
-//   bare     go!(|| body)               — default 2 KiB, no grow.
-//                                         deep recursion would SEGV;
-//                                         we use a shallow body.
-//   grow     go!(grow, || body)         — spawns on 2 KiB, body
-//                                         auto-pivots to tier-2 at
-//                                         entry. deep recursion
-//                                         climbs to tier-3 if the
-//                                         body calls maybe_grow_step
-//                                         internally.
-//   stack(N) go!(stack(64*KB), || body) — explicit 64 KiB, no grow.
-//                                         deep recursion fits in
-//                                         tier-2 but cannot climb.
+//   bare:      go!(|| body)              — default: 2 KiB home,
+//                                          AUTO-GROWABLE via the
+//                                          maybe_grow_step wrap added
+//                                          by the macro. Body pivots
+//                                          lazily to tier-2 (64 KiB)
+//                                          when home runs low, then
+//                                          to tier-3 (1 MiB) on deeper
+//                                          maybe_grow_step calls.
+//   stack(N):  go!(stack(64*KB), …)      — explicit 64 KiB, FIXED.
 
 #![no_std]
 #![no_main]
@@ -48,10 +46,8 @@ fn recurse_plain(n: i64, sum: i64) -> i64 {
     recurse_plain(n - 1, sum + n)
 }
 
-static BARE_DONE: AtomicUsize = AtomicUsize::new(0);
 static GROW_DONE: AtomicUsize = AtomicUsize::new(0);
 static STACK_DONE: AtomicUsize = AtomicUsize::new(0);
-static BARE_R: AtomicI64 = AtomicI64::new(0);
 static GROW_R: AtomicI64 = AtomicI64::new(0);
 static STACK_R: AtomicI64 = AtomicI64::new(0);
 
@@ -59,31 +55,23 @@ static STACK_R: AtomicI64 = AtomicI64::new(0);
 fn main() {
     let hits_before = sched::grow_hits();
 
-    // Bare form — small workload that fits in 2 KiB.
+    // Bare form (auto-grow default) — body pivots lazily as recursion
+    // descends; can climb to tier-3 via internal maybe_grow_step calls.
     go!(move || {
-        let r = recurse_plain(2, 0);
-        BARE_R.store(r, Ordering::Release);
-        BARE_DONE.store(1, Ordering::Release);
-    });
-
-    // Auto-grow form — body pivots at entry, then climbs to tier-3
-    // via internal maybe_grow_step calls when tier-2 runs low.
-    go!(grow, move || {
         let r = recurse_step(500, 0);
         GROW_R.store(r, Ordering::Release);
         GROW_DONE.store(1, Ordering::Release);
     });
 
-    // Explicit stack(N) form — fixed 64 KiB, sufficient for
-    // mid-range recursion.
+    // Explicit stack(N) form — fixed 64 KiB, no grow. Sufficient for
+    // mid-range recursion known at spawn time.
     go!(stack(64 * KB), move || {
         let r = recurse_plain(50, 0);
         STACK_R.store(r, Ordering::Release);
         STACK_DONE.store(1, Ordering::Release);
     });
 
-    while BARE_DONE.load(Ordering::Acquire) == 0
-        || GROW_DONE.load(Ordering::Acquire) == 0
+    while GROW_DONE.load(Ordering::Acquire) == 0
         || STACK_DONE.load(Ordering::Acquire) == 0
     {
         sched::Gosched();
@@ -97,18 +85,17 @@ fn main() {
     print_dec(sched::grow_peak_live() as u64);
     print(b"\n");
 
-    // bare form: 0 pivots (no maybe_grow_step calls)
-    // grow form: 2 pivots (entry → tier-2; tier-2 → tier-3 from internal recursion)
-    // stack(N) form: 0 pivots
+    // Bare goroutine: body has macro-inserted maybe_grow_step + the
+    // user's recurse_step's per-level maybe_grow_step. Recursion to
+    // depth 500 forces tier-2 → tier-3, so >=2 pivots fire.
+    // Stack(N) goroutine: 0 pivots (recurse_plain has no maybe_grow_step).
     if hits < 2 {
-        die(b"FAIL: expected >=2 pivots from the grow goroutine\n");
+        die(b"FAIL: expected >=2 pivots from the bare-grow goroutine\n");
     }
 
-    let bare = BARE_R.load(Ordering::Acquire);
     let grow_r = GROW_R.load(Ordering::Acquire);
     let stack_r = STACK_R.load(Ordering::Acquire);
-    if bare != 2 * 3 / 2 { die(b"FAIL: bare result wrong\n"); }
-    if grow_r != 500 * 501 / 2 { die(b"FAIL: grow result wrong\n"); }
+    if grow_r != 500 * 501 / 2 { die(b"FAIL: bare-grow result wrong\n"); }
     if stack_r != 50 * 51 / 2 { die(b"FAIL: stack(N) result wrong\n"); }
 
     print(b"grow_macro_smoke: ok\n");

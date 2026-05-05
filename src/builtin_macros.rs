@@ -347,27 +347,26 @@ macro_rules! delete {
 ///   go!(move || {
 ///       println!("captured x = {}", x);
 ///   });
-/// Four forms:
+/// Three forms:
 ///
-///   go!(|| work());                              // 2 KiB FIXED, no grow
-///   go!(grow, || work());                        // 2 KiB → tier-2 (64 KiB) at entry,
-///                                                //   climbable to tier-3 (1 MiB) via
-///                                                //   maybe_grow_step at recursion sites
+///   go!(|| work());                              // GROWABLE: 2 KiB → 64 KiB → 1 MiB
 ///   go!(8 * KB, || tiny_helper());               // 8 KiB FIXED, no grow
 ///   go!(stack(2 * KB), || tiny_helper());        // 2 KiB FIXED, no grow (alias)
 ///
-/// **Default is dense (no grow).** Bare `go!(|| body)` keeps the
-/// 1M-goroutines memory story (~2 GiB virtual, ~one 4 KiB page each
-/// post-mmap rounding) and keeps every goroutine on a single stack
-/// region — channel-park / Gosched flows are unconditionally safe.
+/// **Bare `go!(|| body)` is growable by default.** The user body is
+/// wrapped in `runtime::sched::maybe_grow_step`, so it spawns on the
+/// 2 KiB home stack (preserving spawn density and VMA count) and
+/// pivots lazily to tier-2 (64 KiB) when home runs low — typically a
+/// few levels into actual recursion. Goroutines that don't recurse
+/// never pay any mmap cost; goroutines that do get up to 1 MiB
+/// transparently if they call `maybe_grow_step` at deeper recursion
+/// sites.
 ///
-/// **`go!(grow, || body)`** wraps the user body in
-/// `runtime::sched::maybe_grow_step`. The body pivots once at entry
-/// from 2 KiB home to 64 KiB tier-2; if it recurses deeply enough
-/// that tier-2 runs low, calling `maybe_grow_step` again from inside
-/// the body climbs to the 1 MiB tier-3. Cost: one mmap per opted-in
-/// goroutine. Use for parsers / AST visitors / codegen passes where
-/// recursion depth isn't bounded at spawn time.
+/// **`go!(stack(N), || body)`** is the opt-out for fixed-size,
+/// no-grow goroutines. Use when N is known at spawn time and the
+/// goroutine has bounded depth — microbenchmarks, library-internal
+/// watcher goroutines, performance-critical paths where the lazy
+/// pivot's check overhead is unwelcome.
 ///
 /// **For finer control** call `runtime::sched::maybe_grow_step` (tier
 /// ladder) or `runtime::sched::maybe_grow(red_zone, size, || body)`
@@ -378,40 +377,24 @@ macro_rules! delete {
 /// rounded up to the nearest 4 KiB page.
 #[macro_export]
 macro_rules! go {
-    // Back-compat: `go!(stack(N), || body)`.
+    // Back-compat: `go!(stack(N), || body)` — fixed N bytes, no grow.
     (stack($size:expr), $closure:expr) => {{
         $crate::runtime::sched::newproc_with_stack(
             $size,
             $crate::__macro_alloc::Box::new($closure),
         );
     }};
-    // Auto-grow form: `go!(grow, || body)`.
-    //
-    // Spawns on the default 2 KiB carve (preserves spawn density and
-    // VMA count) and wraps the user body in `maybe_grow_step` so the
-    // first frame pivots eagerly to tier-2 (64 KiB). Inside the body,
-    // additional `maybe_grow_step` calls climb the ladder to tier-3
-    // (1 MiB) only when remaining tier-2 space drops below the red
-    // zone — paying a second mmap only on goroutines that actually
-    // need it.
-    (grow, $closure:expr) => {{
-        let __goish_user_body = $closure;
-        $crate::runtime::sched::newproc(
-            $crate::__macro_alloc::Box::new(move || {
-                $crate::runtime::sched::maybe_grow_step(move || {
-                    __goish_user_body();
-                });
-            }),
-        );
-    }};
-    // Positional sized form: `go!(N, || body)`.
+    // Positional sized form: `go!(N, || body)` — fixed N bytes, no grow.
     ($size:expr, $closure:expr) => {{
         $crate::runtime::sched::newproc_with_stack(
             $size,
             $crate::__macro_alloc::Box::new($closure),
         );
     }};
-    // Bare form: default-sized (2 KiB) stack, no grow.
+    // Bare form: default-sized (2 KiB) home stack, AUTO-GROW via
+    // `maybe_grow_step` — pivots lazily to tier-2 (64 KiB) when home
+    // runs low, then to tier-3 (1 MiB) if user calls maybe_grow_step
+    // again from deeper recursion.
     ($closure:expr) => {{
         $crate::runtime::sched::newproc(
             $crate::__macro_alloc::Box::new($closure),

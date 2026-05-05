@@ -406,6 +406,22 @@ extern "C" fn g_entry() -> ! {
     goexit();
 }
 
+/// Variant of `g_entry` for goroutines spawned with auto-grow
+/// (bare `go!()` form, `g.growable == true`). Wraps `entry()` in
+/// `runtime::sched::maybe_grow_step`, so the user closure runs
+/// inside the tier-aware grow scope: home (2 KiB) → tier-2 (64 KiB)
+/// → tier-3 (1 MiB), pivoting lazily as SP descends into each tier's
+/// red zone.
+///
+/// Goroutines spawned via `go!(stack(N), …)` / `go!(N, …)` skip this
+/// wrap (`g.growable == false`) and run on a strictly-N-byte stack.
+extern "C" fn g_entry_growable() -> ! {
+    let entry = unsafe { g_entry_setup() };
+    crate::runtime::sched::maybe_grow_step(entry);
+    unsafe { g_entry_clear_recovery() };
+    goexit();
+}
+
 #[inline(never)]
 unsafe fn g_entry_setup() -> alloc::boxed::Box<dyn FnOnce()> {
     let g_ptr = current_m()
@@ -739,10 +755,16 @@ fn execute(mut g_ptr: NonNull<G>) -> ! {
     dispatch_validate_g(g_ptr);
     let g = unsafe { g_ptr.as_mut() };
     if g.status == GStatus::Idle {
-        // First-time dispatch: lay out gobuf for gogo (pc=g_entry,
-        // sp=stack_top-8, with goexit_trampoline parked at [sp]).
+        // First-time dispatch: lay out gobuf for gogo. PC is either
+        // `g_entry` (fixed-stack goroutines: `go!(stack(N), …)` and
+        // `go!(N, …)`) or `g_entry_growable` (bare `go!()` — wraps
+        // user `entry()` in `maybe_grow_step` for tier-aware lazy
+        // growth). Sp = stack_top-8, with goexit_trampoline parked
+        // at [sp].
+        let entry_fn: extern "C" fn() -> ! =
+            if g.growable { g_entry_growable } else { g_entry };
         unsafe {
-            make_context_gogo(&mut g.gobuf, g.stack.top(), g_entry);
+            make_context_gogo(&mut g.gobuf, g.stack.top(), entry_fn);
         }
     }
     g.status = GStatus::Running;
