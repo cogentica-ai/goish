@@ -130,6 +130,10 @@ pub use goish_macros::main;
 // in Rust's macro namespace; coexists with the `goish::init()`
 // bootstrap function (value namespace).
 pub use goish_macros::init;
+// Re-export the file-scope `import!` proc-macro — emits `use` lines
+// AND registers a `.init_array` slot calling each port's init().
+// `__run_pkg_inits` (below) walks the section before main runs.
+pub use goish_macros::import;
 // Re-export the reflect attribute so users write `#[goish::reflect]`.
 // (The `goish::reflect` module path coexists — attributes and modules
 // occupy different namespaces, just like `goish::main` doesn't conflict.)
@@ -173,4 +177,49 @@ pub fn init() {
     pkg_init_once!("goish", {
         crypto::RegisterStandardHashes();
     });
+}
+
+// ─── .init_array walk for goish::import! file-scope side-effect imports
+//
+// Each `goish::import! { … }` macro invocation emits an
+// `extern "C" fn` and a `#[link_section = ".init_array"]` static
+// pointer to it. The linker concatenates `.init_array` from every
+// translation unit into one section in the final binary, between
+// `__init_array_start` and `__init_array_end` (provided by the
+// linker for ELF targets).
+//
+// `#[goish::main]` calls `__run_pkg_inits()` after `goish::init()`
+// and before the user main body — so port `init()`s run after
+// goish-stdlib is up but before user code touches anything.
+//
+// Mirrors libc's csu/elf-init.c walk used by C/C++ static
+// constructors. Fully Go-equivalent for ordering: linker section
+// order is "imported-packages-first" because the linker walks the
+// dependency graph when building. Within a single crate, declaration
+// order is preserved.
+extern "C" {
+    static __init_array_start: extern "C" fn();
+    static __init_array_end: extern "C" fn();
+}
+
+#[doc(hidden)]
+pub fn __run_pkg_inits() {
+    // SAFETY: `__init_array_*` symbols come from the linker; the
+    // section between them holds an array of `extern "C" fn()`
+    // pointers, populated by `#[link_section = ".init_array"]`
+    // statics emitted by `goish::import!`. Reading each pointer and
+    // calling it is the standard ELF-CRT init protocol.
+    //
+    // The `as *const _ as *const extern "C" fn()` casts go via
+    // `*const ()` rather than reinterpreting the function-pointer
+    // value itself — `&__init_array_start` is the ADDRESS of the
+    // start slot, not the start pointer's value.
+    unsafe {
+        let mut p = &__init_array_start as *const _ as *const extern "C" fn();
+        let end = &__init_array_end as *const _ as *const extern "C" fn();
+        while p < end {
+            (*p)();
+            p = p.add(1);
+        }
+    }
 }

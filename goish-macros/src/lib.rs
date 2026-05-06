@@ -21,6 +21,14 @@ extern crate proc_macro;
 
 use proc_macro::{Delimiter, TokenStream, TokenTree};
 use std::fmt::Write as _;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Per-process counter for unique symbol names emitted by `import!`.
+/// Each invocation gets a fresh integer, used to disambiguate the
+/// `__goish_import_<N>` function and `__GOISH_IMPORT_<N>` static slot
+/// within a single crate's symbol table. Collisions across crates
+/// are impossible — they each have their own object file.
+static IMPORT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[proc_macro_attribute]
 pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -76,11 +84,21 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
     .parse()
     .expect("goish::main: invalid fn prefix");
 
-    // Splice `::goish::init();` as the first statement of the user
-    // body. We rebuild the brace group rather than doing string
-    // surgery so any non-ASCII tokens inside body stay untouched.
+    // Splice the init prelude as the first statements of the user
+    // body. Order:
+    //
+    //   1. `::goish::init()` — bootstrap goish-stdlib state
+    //      (crypto registry etc.). Idempotent via PkgInit.
+    //
+    //   2. `::goish::__run_pkg_inits()` — walk the `.init_array`
+    //      section so each `goish::import! { … }` block's port
+    //      `init()` runs. Mirrors Go's per-package init walk before
+    //      `main` (proc.go:202, :255-7).
+    //
+    // We rebuild the brace group rather than doing string surgery so
+    // any non-ASCII tokens inside body stay untouched.
     let init_call: TokenStream = r#"
-        { ::goish::init(); }
+        { ::goish::init(); ::goish::__run_pkg_inits(); }
     "#
     .parse()
     .expect("goish::main: invalid init prelude");
@@ -799,4 +817,176 @@ fn parse_fields(body: TokenStream) -> Vec<ParsedField> {
     }
 
     fields
+}
+
+// ─── goish::import! { … } — file-scope side-effect import ────────────
+//
+// Mirrors Go's `import _ "pkg/path"` — pull in a port, run its
+// `init()` before main, and (unlike Go's blank import) also bring
+// the path into scope so user code can reference it.
+//
+// User writes at file scope:
+//
+//   goish::import! {
+//       opencontainers_go_digest as digest,
+//       cenkalti_backoff_v5,
+//   }
+//
+// The macro emits:
+//
+//   1. `use` lines so `digest::FromBytes(...)` resolves at call sites.
+//
+//   2. An `extern "C" fn __goish_import_<N>()` whose body calls
+//      `<path>::init()` for each listed port (in declaration order).
+//
+//   3. A `#[used] #[link_section = ".init_array"]` static function
+//      pointer to that fn. The linker concatenates `.init_array`
+//      sections from every translation unit; goish's `__goish_main`
+//      prelude walks the section before user code runs.
+//
+// Each invocation gets a unique `<N>` from a per-process counter, so
+// multiple `import!` blocks across files don't collide. Different
+// crates each have their own counter (per-process state in the proc-
+// macro driver), but their object files have separate symbol tables
+// regardless, so no inter-crate collision either.
+//
+// Path forms:
+//
+//   - `crate_name`               — `use crate_name; crate_name::init();`
+//   - `crate_name as alias`      — `use crate_name as alias; crate_name::init();`
+//   - `foo::bar`                 — `use foo::bar; foo::bar::init();`
+//   - `foo::bar as baz`          — `use foo::bar as baz; foo::bar::init();`
+//
+// The init call always uses the original path, never the alias —
+// which matches Go's `import _ "pkg/path"` (no alias, just side
+// effect) combined with the named-import case `import alias "pkg"`.
+#[proc_macro]
+pub fn import(input: TokenStream) -> TokenStream {
+    let entries = parse_imports(input);
+
+    let n = IMPORT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let fn_name = format!("__goish_import_{}", n);
+    let slot_name = format!("__GOISH_IMPORT_{}", n);
+
+    let mut out = String::new();
+
+    // Step 1: emit `use` lines.
+    for e in &entries {
+        if let Some(alias) = &e.alias {
+            let _ = writeln!(out, "#[allow(unused_imports)] use {} as {};", e.path, alias);
+        } else {
+            let _ = writeln!(out, "#[allow(unused_imports)] use {};", e.path);
+        }
+    }
+
+    // Step 2: the init dispatcher fn. extern "C" so the .init_array
+    // entry's function-pointer type matches the C ABI used by libc
+    // and by goish's rt0 walk.
+    let _ = writeln!(out, "extern \"C\" fn {}() {{", fn_name);
+    for e in &entries {
+        let _ = writeln!(out, "    {}::init();", e.path);
+    }
+    let _ = writeln!(out, "}}");
+
+    // Step 3: register the dispatcher in `.init_array`. The `#[used]`
+    // attribute keeps the linker from stripping the static; the
+    // `#[link_section = ".init_array"]` puts the fn pointer where
+    // goish's __run_pkg_inits walk will find it.
+    //
+    // `#[allow(non_upper_case_globals)]` — the auto-generated name
+    // is conventionally formatted, not user-visible.
+    let _ = writeln!(out, "#[used]");
+    let _ = writeln!(out, "#[allow(non_upper_case_globals)]");
+    let _ = writeln!(out, "#[link_section = \".init_array\"]");
+    let _ = writeln!(
+        out,
+        "static {}: extern \"C\" fn() = {};",
+        slot_name, fn_name
+    );
+
+    out.parse().expect("goish::import: emitted source failed to parse")
+}
+
+// `(path, alias?)` — one entry per comma-separated item in the
+// `import!` argument list.
+struct ImportEntry {
+    path: String,
+    alias: Option<String>,
+}
+
+fn parse_imports(input: TokenStream) -> Vec<ImportEntry> {
+    let tokens: Vec<TokenTree> = input.into_iter().collect();
+    let mut iter = tokens.into_iter().peekable();
+    let mut out = Vec::new();
+
+    while iter.peek().is_some() {
+        // Path: ident (:: ident)*. We greedy-consume idents and `::`
+        // pairs until we hit `as`, `,`, or end.
+        let mut path = String::new();
+        let mut after_segment = false;
+        loop {
+            match iter.peek() {
+                Some(TokenTree::Ident(id)) => {
+                    let s = id.to_string();
+                    if after_segment && s == "as" {
+                        break;
+                    }
+                    path.push_str(&s);
+                    iter.next();
+                    after_segment = true;
+                }
+                Some(TokenTree::Punct(p)) if p.as_char() == ':' => {
+                    // Expect `::` — two consecutive ':' Punct tokens.
+                    iter.next();
+                    match iter.peek() {
+                        Some(TokenTree::Punct(p2)) if p2.as_char() == ':' => {
+                            iter.next();
+                            path.push_str("::");
+                            after_segment = false;
+                        }
+                        other => panic!(
+                            "goish::import: expected `::` after `:`, got {:?}",
+                            other
+                        ),
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        if path.is_empty() {
+            panic!("goish::import: expected an import path");
+        }
+
+        // Optional `as <alias>`.
+        let alias = if let Some(TokenTree::Ident(id)) = iter.peek() {
+            if id.to_string() == "as" {
+                iter.next();
+                match iter.next() {
+                    Some(TokenTree::Ident(a)) => Some(a.to_string()),
+                    other => panic!(
+                        "goish::import: expected alias ident after `as`, got {:?}",
+                        other
+                    ),
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        out.push(ImportEntry { path, alias });
+
+        // Optional comma between entries; trailing comma allowed.
+        match iter.peek() {
+            Some(TokenTree::Punct(p)) if p.as_char() == ',' => {
+                iter.next();
+            }
+            None => {}
+            other => panic!("goish::import: expected `,` or end, got {:?}", other),
+        }
+    }
+
+    out
 }

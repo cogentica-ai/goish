@@ -616,3 +616,7 @@ path = "examples/gomap_no_zero_smoke.rs"
 [[example]]
 name = "pkginit_smoke"
 path = "examples/pkginit_smoke.rs"
+
+[[example]]
+name = "import_smoke"
+path = "examples/import_smoke.rs"
