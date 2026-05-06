@@ -68,6 +68,29 @@ impl __StringConv for rune {
     }
 }
 
+impl __StringConv for u8 {
+    /// Go's `string(b byte)` — same gotcha as `string(rune)`. The byte
+    /// is treated as a Unicode codepoint, so `string(byte('A'))` is
+    /// `"A"` (one byte ASCII) and `string(byte(0xC2))` is the U+00C2
+    /// codepoint encoded as two UTF-8 bytes.
+    #[inline]
+    fn __to_string(self) -> string {
+        let mut buf = [0u8; 4];
+        let n = utf8::EncodeRune(&mut buf, self as rune);
+        string::from_bytes(&buf[..n as usize])
+    }
+}
+
+/// Borrowed `&u8` passthrough — `range!(slice<byte>)` yields `&u8`,
+/// and `string(c)` inside the loop body would otherwise hit a missing
+/// `__StringConv` impl. Reads through with a deref.
+impl __StringConv for &u8 {
+    #[inline]
+    fn __to_string(self) -> string {
+        (*self).__to_string()
+    }
+}
+
 impl __StringConv for slice<byte> {
     /// Go's `string(b []byte)` — copy bytes into a fresh string.
     fn __to_string(self) -> string {

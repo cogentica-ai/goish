@@ -112,3 +112,21 @@ where
         &s.get()[i]
     }
 }
+
+// `range!(LAZY)` — package-level `var xs = []byte{…}` lowers to
+// `static xs: Lazy<slice<byte>>`. The `range!` macro expands to
+// `RangeIter::range(&xs)`, hitting `&Lazy<T>` which lacks an inherent
+// `RangeIter` impl. Forward through the once-init Deref so any `&T:
+// RangeIter` carries to `&Lazy<T>`. The `'static` constraint matches
+// the `Lazy::get` shape exactly.
+impl<T: 'static> crate::range::RangeIter for &Lazy<T>
+where
+    &'static T: crate::range::RangeIter,
+{
+    type Item = <&'static T as crate::range::RangeIter>::Item;
+    type Iter = <&'static T as crate::range::RangeIter>::Iter;
+    fn range(self) -> Self::Iter {
+        let s: &'static Lazy<T> = unsafe { core::mem::transmute(self) };
+        crate::range::RangeIter::range(s.get())
+    }
+}
