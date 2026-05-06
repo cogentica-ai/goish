@@ -487,21 +487,21 @@ pub fn SumSHAKE256(data: slice<byte>, length: int) -> slice<byte> {
 // ─── Boxed constructor for hmac::New consumers ────────────────────────
 
 /// `sha3.NewHash224()` — boxed constructor for hash.Hash trait objects.
-pub fn NewHash224() -> alloc::boxed::Box<dyn Hash> {
+pub fn NewHash224() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
     alloc::boxed::Box::new(New224())
 }
 
 /// `sha3.NewHash256()` — boxed SHA3-256 constructor.
-pub fn NewHash256() -> alloc::boxed::Box<dyn Hash> {
+pub fn NewHash256() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
     alloc::boxed::Box::new(New256())
 }
 
 /// `sha3.NewHash384()` — boxed SHA3-384 constructor.
-pub fn NewHash384() -> alloc::boxed::Box<dyn Hash> {
+pub fn NewHash384() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
     alloc::boxed::Box::new(New384())
 }
 
 /// `sha3.NewHash512()` — boxed SHA3-512 constructor.
-pub fn NewHash512() -> alloc::boxed::Box<dyn Hash> {
+pub fn NewHash512() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
     alloc::boxed::Box::new(New512())
 }

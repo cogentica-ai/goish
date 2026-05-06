@@ -154,7 +154,7 @@ pub fn HashFunc(h: Hash) -> Hash {
 
 // ─── Hash registry (Go: crypto.go:123) ────────────────────────────────
 
-type HashCtor = Box<dyn Fn() -> Box<dyn HashTrait> + Send + Sync>;
+type HashCtor = Box<dyn Fn() -> Box<dyn HashTrait + Send + Sync> + Send + Sync>;
 
 /// Registry of `Hash → constructor`. Entries are populated by per-algorithm
 /// modules at call time; goish has no `init()` so consumers register
@@ -171,7 +171,7 @@ static HASH_REGISTRY: SpinLock<[Option<HashCtor>; maxHash as usize]> =
 /// `crypto.RegisterHash(h, f)` (crypto.go:145).
 pub fn RegisterHash<F>(h: Hash, f: F)
 where
-    F: Fn() -> Box<dyn HashTrait> + Send + Sync + 'static,
+    F: Fn() -> Box<dyn HashTrait + Send + Sync> + Send + Sync + 'static,
 {
     if h >= maxHash {
         panic!("crypto: RegisterHash of unknown hash function");
@@ -181,7 +181,7 @@ where
 }
 
 /// `Hash.New()` (crypto.go:127). Panics if the hash is not registered.
-pub fn HashNew(h: Hash) -> Box<dyn HashTrait> {
+pub fn HashNew(h: Hash) -> Box<dyn HashTrait + Send + Sync> {
     if h > 0 && h < maxHash {
         let g = HASH_REGISTRY.lock();
         if let Some(ref f) = g[h as usize] {

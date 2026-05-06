@@ -6,7 +6,7 @@
 //     crypto/internal/fips140/hkdf/hkdf.go  (inlined — Extract/Expand bodies)
 //
 // Slim deviations:
-//   * Hash factory is `fn() -> Box<dyn Hash>` instead of Go's
+//   * Hash factory is `fn() -> Box<dyn Hash + Send + Sync>` instead of Go's
 //     `func() H` generic, matching the convention already established
 //     by `crypto::hmac::New`.
 //   * No `crypto/internal/fips140hash.UnwrapNew` and no
@@ -34,7 +34,7 @@ use crate::types::{byte, int};
 //
 // Slim: H is `Box<dyn Hash>`; FIPS check elided.
 pub fn Extract(
-    h: fn() -> Box<dyn Hash>,
+    h: fn() -> Box<dyn Hash + Send + Sync>,
     secret: slice<byte>,
     salt: slice<byte>,
 ) -> (slice<byte>, error) {
@@ -65,7 +65,7 @@ pub fn Extract(
 //
 // Slim: H is `Box<dyn Hash>`; FIPS check elided.
 pub fn Expand(
-    h: fn() -> Box<dyn Hash>,
+    h: fn() -> Box<dyn Hash + Send + Sync>,
     pseudorandomKey: slice<byte>,
     info: string,
     keyLength: int,
@@ -142,7 +142,7 @@ pub fn Expand(
 // Slim: H is `Box<dyn Hash>`; FIPS check elided. Inlines `Extract`
 // followed by `Expand`.
 pub fn Key(
-    h: fn() -> Box<dyn Hash>,
+    h: fn() -> Box<dyn Hash + Send + Sync>,
     secret: slice<byte>,
     salt: slice<byte>,
     info: string,

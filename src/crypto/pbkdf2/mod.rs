@@ -6,7 +6,7 @@
 //     crypto/internal/fips140/pbkdf2/pbkdf2.go  (inlined)
 //
 // Slim deviations:
-//   * Hash factory is `fn() -> Box<dyn Hash>` instead of Go's
+//   * Hash factory is `fn() -> Box<dyn Hash + Send + Sync>` instead of Go's
 //     `func() H` generic.
 //   * No FIPS service indicator (no `setServiceIndicator`).
 //   * No FIPS-only key/salt minimum-length checks.
@@ -40,7 +40,7 @@ fn divRoundUp(x: int, y: int) -> int {
 //   func Key[Hash hash.Hash](h func() Hash, password string, salt []byte,
 //                            iter, keyLength int) ([]byte, error)
 pub fn Key(
-    h: fn() -> Box<dyn Hash>,
+    h: fn() -> Box<dyn Hash + Send + Sync>,
     password: string,
     salt: slice<byte>,
     iter: int,

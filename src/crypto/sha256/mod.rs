@@ -393,11 +393,11 @@ pub fn Sum224(data: slice<byte>) -> [byte; 28] {
 
 /// `sha256.NewHash()` — boxed constructor matching `hash.Hash` interface.
 /// Use with `hmac::New(crypto::sha256::NewHash, key)`.
-pub fn NewHash() -> alloc::boxed::Box<dyn Hash> {
+pub fn NewHash() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
     alloc::boxed::Box::new(New())
 }
 
 /// `sha256.NewHash224()` — boxed SHA-224 constructor.
-pub fn NewHash224() -> alloc::boxed::Box<dyn Hash> {
+pub fn NewHash224() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
     alloc::boxed::Box::new(New224())
 }
