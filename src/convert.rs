@@ -102,6 +102,16 @@ impl __BytesConv for &'static str {
     }
 }
 
+// `bytes(b"\xff\x06...")` for ports whose Go source uses byte-string
+// literals with non-UTF-8 bytes (e.g. snappy's `magicChunk` magic
+// prefix, file-format signatures, frame headers). Required at the
+// boundary where a Rust byte literal becomes a goish slice<byte>.
+impl __BytesConv for &'static [u8] {
+    fn __to_bytes(self) -> slice<byte> {
+        slice::__from_vec(self.to_vec())
+    }
+}
+
 // ─── runes(s) — []rune(s) ─────────────────────────────────────────────
 
 pub trait __RunesConv {
