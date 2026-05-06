@@ -197,6 +197,19 @@ impl Format for string {
     }
 }
 
+// `&string` arises from `range!(&slice<string>)` (Phase 4 borrowed-
+// range): the iterator yields `(int, &string)` per element, and a
+// downstream `fmt::Fprintf!("%s", line)` would then fail with E0599
+// because the blanket `impl<T: Stringer> Format for T` doesn't cover
+// references (Stringer isn't impl'd for `&string` either). Thread an
+// explicit forwarder so the borrowed iteration value formats directly
+// without a `.clone()` at the call site.
+impl Format for &string {
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        write_string_with_verb(self.as_bytes(), verb, f);
+    }
+}
+
 impl Format for &str {
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         write_string_with_verb(self.as_bytes(), verb, f);
@@ -206,6 +219,15 @@ impl Format for &str {
 impl Format for slice<byte> {
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         // self: &slice<byte>; Deref<Target=[byte]> auto-coerces to &[byte].
+        write_string_with_verb(self, verb, f);
+    }
+}
+
+// Same shape as `&string` — `range!(&slice<slice<byte>>)` yields
+// `&slice<byte>` per iteration. Without this `Fprintf!("%s", b)` on
+// the borrowed slot would fail E0599.
+impl Format for &slice<byte> {
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         write_string_with_verb(self, verb, f);
     }
 }
