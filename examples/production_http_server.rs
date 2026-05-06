@@ -95,6 +95,87 @@ fn h_user_get(w: &mut http::ResponseWriter, r: &http::Request) {
     w.Write(body);
 }
 
+// POST /api/echo — accepts a JSON body { "name": "...", "items": [...] },
+// validates the schema (name must be a non-empty string, items must be
+// an array), then echoes it back with a server-side `received_at`
+// timestamp and an `item_count` field. Demonstrates the request-side
+// JSON path: r.Body → json::Unmarshal → schema check → reshape →
+// json::Marshal → w.Write.
+fn h_api_echo(w: &mut http::ResponseWriter, r: &http::Request) {
+    if r.Method != "POST" {
+        http::Error(w, "POST required", http::StatusMethodNotAllowed);
+        return;
+    }
+    let mut req_val = json::Value::Null;
+    let perr = json::Unmarshal(&r.Body, &mut req_val);
+    if !perr.IsNil() {
+        http::Error(w, "invalid json", http::StatusBadRequest);
+        return;
+    }
+    let req_obj = match req_val {
+        json::Value::Object(m) => m,
+        _ => {
+            http::Error(w, "expected object", http::StatusBadRequest);
+            return;
+        }
+    };
+    let (name_v, ok) = req_obj.Get(string("name"));
+    let name = match (ok, &name_v) {
+        (true, json::Value::String(s)) if s.Len() > 0 => s.clone(),
+        _ => {
+            http::Error(w, "name must be a non-empty string", http::StatusBadRequest);
+            return;
+        }
+    };
+    let (items_v, ok) = req_obj.Get(string("items"));
+    let items = match (ok, items_v) {
+        (true, json::Value::Array(a)) => a,
+        _ => {
+            http::Error(w, "items must be an array", http::StatusBadRequest);
+            return;
+        }
+    };
+    let mut out = goish::map::<string, json::Value>::new();
+    out.Set("name", name);
+    out.Set("item_count", float64(items.Len() as f64));
+    out.Set("items", json::Value::Array(items));
+    out.Set("received_at_unix", float64(time::Now().Unix() as f64));
+    let v = json::Value::Object(out);
+    let (body, e) = json::Marshal(&v);
+    if !e.IsNil() {
+        http::Error(w, e.Error(), http::StatusInternalServerError);
+        return;
+    }
+    w.Header().Set("Content-Type", "application/json; charset=utf-8");
+    w.Write(body);
+}
+
+// GET /api/stats — emits a nested-JSON status snapshot. Exercises the
+// response-side path with non-trivial nesting (object → array of
+// objects → number/string mix) so the body's json::Marshal recursion
+// is non-trivial. With auto-grow this fits in tier-1 with room to
+// spare; under heavier nesting the maybe_grow_step inside json's
+// recursive marshaller would pivot.
+fn h_api_stats(w: &mut http::ResponseWriter, _r: &http::Request) {
+    // Build a "shards" array of {id, reqs, healthy} objects.
+    let mut shards = goish::slice::<json::Value>::new();
+    for i in 0..4i64 {
+        let mut s = goish::map::<string, json::Value>::new();
+        s.Set("id", float64(i as f64));
+        s.Set("reqs", float64((REQ_COUNT.Load() / 4) as f64));
+        s.Set("healthy", json::Value::Bool(true));
+        shards = goish::append!(shards, json::Value::Object(s));
+    }
+    let mut root = goish::map::<string, json::Value>::new();
+    root.Set("service", "production_http_server");
+    root.Set("uptime_unix", float64(time::Now().Unix() as f64));
+    root.Set("total_reqs", float64(REQ_COUNT.Load() as f64));
+    root.Set("shards", json::Value::Array(shards));
+    let (body, _) = json::Marshal(&json::Value::Object(root));
+    w.Header().Set("Content-Type", "application/json; charset=utf-8");
+    w.Write(body);
+}
+
 fn h_form(w: &mut http::ResponseWriter, r: &http::Request) {
     // ParseForm + FormValue both take `&Request` (interior mutability
     // via Mutex<FormCell>), so handlers can parse form values
@@ -229,6 +310,8 @@ fn main() {
     let mux = http::ServeMux::new();
     mux.HandleFunc("/healthz", h_health);
     mux.HandleFunc("/api/users/{id}", h_user_get);
+    mux.HandleFunc("/api/echo", h_api_echo);
+    mux.HandleFunc("/api/stats", h_api_stats);
     mux.HandleFunc("/form", h_form);
     mux.HandleFunc("/session/set", h_session_set);
     mux.HandleFunc("/session/get", h_session_get);
@@ -251,6 +334,9 @@ fn main() {
         ..Default::default()
     });
 
+    // Serve goroutine — runs the accept loop. Kept on `stack(64*KB)`
+    // because Serve's internal per-connection spawn path uses heavier
+    // closure plumbing than the auto-grow wrap's lazy-pivot threshold.
     let srv_run = srv.clone();
     go!(stack(64 * KB), move || {
         srv_run.Serve(ln);
@@ -258,6 +344,9 @@ fn main() {
     });
 
     // Driver goroutine — runs all assertions then shuts the server.
+    // Kept on `stack(256*KB)` because the http client.Do chain has
+    // heavy debug-build frame overhead that exceeds the auto-grow
+    // wrap's tier-1 → tier-2 transition headroom.
     let srv_for_shutdown = srv.clone();
     go!(stack(256 * KB), move || {
         time::Sleep(time::Millisecond * 50);
@@ -341,7 +430,51 @@ fn main() {
               && goish::bytes::Contains(&resp.Body, bytes("age=30")),
               "Form query parsed via FormValue");
 
-        // Test 12: graceful shutdown.
+        // Test 12: POST /api/echo — JSON request body roundtrip.
+        // Server parses JSON, validates schema, reshapes, returns JSON.
+        let echo_payload = bytes(r#"{"name":"widget","items":[1,"two",true,null]}"#);
+        let (mut req, _) = http::NewRequest("POST", url_at("/api/echo"), nil);
+        req.Body = echo_payload.clone();
+        req.ContentLength = echo_payload.Len();
+        req.Header.Set("Content-Type", "application/json");
+        let (resp, e) = client.Do(&req);
+        check(e.IsNil() && resp.StatusCode == 200
+              && goish::bytes::Contains(&resp.Body, bytes("\"name\":\"widget\""))
+              && goish::bytes::Contains(&resp.Body, bytes("\"item_count\":4")),
+              "POST /api/echo roundtrips JSON body");
+
+        // Test 13: POST /api/echo with bad JSON → 400.
+        let (mut req, _) = http::NewRequest("POST", url_at("/api/echo"), nil);
+        req.Body = bytes("not-json{");
+        req.ContentLength = req.Body.Len();
+        req.Header.Set("Content-Type", "application/json");
+        let (resp, e) = client.Do(&req);
+        check(e.IsNil() && resp.StatusCode == 400,
+              "POST /api/echo rejects malformed JSON");
+
+        // Test 14: POST /api/echo with wrong schema (missing items) → 400.
+        let (mut req, _) = http::NewRequest("POST", url_at("/api/echo"), nil);
+        req.Body = bytes(r#"{"name":"x"}"#);
+        req.ContentLength = req.Body.Len();
+        req.Header.Set("Content-Type", "application/json");
+        let (resp, e) = client.Do(&req);
+        check(e.IsNil() && resp.StatusCode == 400,
+              "POST /api/echo rejects bad schema");
+
+        // Test 15: GET /api/echo → 405 (POST required).
+        let (resp, e) = http::Get(url_at("/api/echo"));
+        check(e.IsNil() && resp.StatusCode == 405,
+              "GET /api/echo returns 405");
+
+        // Test 16: GET /api/stats — nested JSON response.
+        let (resp, e) = http::Get(url_at("/api/stats"));
+        check(e.IsNil() && resp.StatusCode == 200
+              && goish::bytes::Contains(&resp.Body, bytes("\"service\""))
+              && goish::bytes::Contains(&resp.Body, bytes("\"shards\""))
+              && goish::bytes::Contains(&resp.Body, bytes("\"healthy\":true")),
+              "GET /api/stats returns nested JSON");
+
+        // Test 17: graceful shutdown.
         let err = srv_for_shutdown.Shutdown(time::Second);
         check(err.IsNil(), "Server.Shutdown returns nil");
 
@@ -356,10 +489,10 @@ fn main() {
 
         let f = int64(FAILED.Load());
         if f == 0 {
-            Println!("PRODUCTION_HTTP_OK 12/12");
+            Println!("PRODUCTION_HTTP_OK 17/17");
             os::Exit(0);
         } else {
-            Printf!("PRODUCTION_HTTP_FAIL %d / 12\n", f);
+            Printf!("PRODUCTION_HTTP_FAIL %d / 17\n", f);
             os::Exit(1);
         }
     });
