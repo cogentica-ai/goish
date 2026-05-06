@@ -219,7 +219,6 @@ impl<K, V> Bucket<K, V> {
 pub struct map<K, V>
 where
     K: GoHash + PartialEq,
-    V: Default,
 {
     /// Number of live entries (Go: hmap.count). Must be first — known by
     /// the compiler for the `len()` builtin.
@@ -233,12 +232,37 @@ where
     /// Bucket array — length is `1 << b`.
     buckets: Vec<Box<Bucket<K, V>>>,
     /// Sentinel returned from `Index::index` when key is missing.
-    zero: Box<V>,
+    /// `None` for value types that don't impl `Default` (e.g.
+    /// `Box<dyn Trait>` for Go interface-typed maps) — Index/Get/etc.
+    /// panic on missing-key access in that case.
+    zero: Option<Box<V>>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════
 // Core operations
 // ═══════════════════════════════════════════════════════════════════════
+
+/// Ctors that need no zero-value sentinel. For value types that do not
+/// impl `Default` — `Box<dyn Trait + Send + Sync>` (Go interface-typed
+/// maps), `&Regexp`, etc. Index/Get/IndexMut on a missing key panic.
+impl<K, V> map<K, V>
+where
+    K: GoHash + PartialEq,
+{
+    /// Empty map for non-`Default` V. Missing-key access panics.
+    /// Use the `Default`-bounded `new()` when the value type has a
+    /// natural zero (`int`, `string`, …).
+    pub fn new_no_zero() -> Self {
+        Self {
+            count: 0,
+            b: 0,
+            noverflow: 0,
+            hash0: rand::cheaprand(),
+            buckets: Vec::new(),
+            zero: None,
+        }
+    }
+}
 
 impl<K, V> map<K, V>
 where
@@ -253,14 +277,66 @@ where
             noverflow: 0,
             hash0: rand::cheaprand(),
             buckets: Vec::new(),
-            zero: Box::new(V::default()),
+            zero: Some(Box::new(V::default())),
         }
+    }
+}
+
+impl<K, V> map<K, V>
+where
+    K: GoHash + PartialEq,
+{
+    /// Borrow the missing-key sentinel. Panics with a clear message
+    /// when the map was built via `new_no_zero()` (V doesn't impl
+    /// `Default`) — the caller should use `.Has(k)` or a different
+    /// retrieval method on those maps.
+    fn zero_value(&self) -> &V {
+        self.zero
+            .as_deref()
+            .expect("map: missing-key access on no-default-zero map; check Has(k) before reading")
     }
 
     /// `len(m)` — pair count.
     #[allow(non_snake_case)]
     pub fn Len(&self) -> int {
         self.count
+    }
+
+    /// Borrow-form `v, ok := m[k]` — returns `(Some(&v), true)` on hit
+    /// and `(None, false)` on miss. Unlike `Get`, places no `V: Clone`
+    /// or `V: Default` bounds on the value type, so it works for
+    /// `map<K, Box<dyn Trait>>` and similar interface-typed shapes
+    /// where the value can't be cloned cheaply or has no zero.
+    #[allow(non_snake_case)]
+    pub fn GetRef<KI: Into<K>>(&self, k: KI) -> (Option<&V>, bool) {
+        let k: K = k.into();
+        if self.count == 0 || self.buckets.is_empty() {
+            return (None, false);
+        }
+        let hash = self.hash(&k);
+        let mask = self.bucket_mask();
+        let bucket_idx = (hash as usize) & mask;
+        let top = tophash(hash);
+
+        let mut bucket = &self.buckets[bucket_idx];
+        loop {
+            for i in 0..BUCKET_COUNT {
+                if bucket.tophash[i] != top {
+                    continue;
+                }
+                if let Some(ref key) = bucket.keys[i] {
+                    if key == &k {
+                        if let Some(ref val) = bucket.elems[i] {
+                            return (Some(val), true);
+                        }
+                    }
+                }
+            }
+            match &bucket.overflow {
+                Some(next) => bucket = next,
+                None => return (None, false),
+            }
+        }
     }
 
     /// `_, ok := m[k]` form — does the key exist?
@@ -303,7 +379,7 @@ where
     {
         let k: K = k.into();
         if self.count == 0 || self.buckets.is_empty() {
-            return (self.zero.as_ref().clone(), false);
+            return (self.zero_value().clone(), false);
         }
         let hash = self.hash(&k);
         let mask = self.bucket_mask();
@@ -326,7 +402,7 @@ where
             }
             match &bucket.overflow {
                 Some(next) => bucket = next,
-                None => return (self.zero.as_ref().clone(), false),
+                None => return (self.zero_value().clone(), false),
             }
         }
     }
@@ -414,7 +490,6 @@ where
 impl<K, V> map<K, V>
 where
     K: GoHash + PartialEq,
-    V: Default,
 {
     #[inline]
     fn hash(&self, k: &K) -> u64 {
@@ -568,12 +643,11 @@ where
 impl<K, V> Index<K> for map<K, V>
 where
     K: GoHash + PartialEq,
-    V: Default,
 {
     type Output = V;
     fn index(&self, key: K) -> &V {
         if self.count == 0 || self.buckets.is_empty() {
-            return self.zero.as_ref();
+            return self.zero_value();
         }
         let hash = self.hash(&key);
         let mask = self.bucket_mask();
@@ -594,7 +668,7 @@ where
             }
             match &bucket.overflow {
                 Some(next) => bucket = next,
-                None => return self.zero.as_ref(),
+                None => return self.zero_value(),
             }
         }
     }
@@ -677,7 +751,7 @@ where
 
 /// `m["literal"]` read for `map<string, V>` — converts `&str` to `string`
 /// then delegates to `Index<string>`. Mirrors Go's implicit string coercion.
-impl<V: Default> Index<&str> for map<string, V> {
+impl<V> Index<&str> for map<string, V> {
     type Output = V;
     #[inline]
     fn index(&self, key: &str) -> &V {
@@ -725,7 +799,6 @@ pub struct MapRefIter<'a, K, V> {
 impl<'a, K, V> MapRefIter<'a, K, V>
 where
     K: GoHash + PartialEq,
-    V: Default,
 {
     fn new(m: &'a map<K, V>) -> Self {
         let total_buckets = m.buckets.len();
@@ -838,7 +911,6 @@ where
 impl<K, V> LenTrait for map<K, V>
 where
     K: GoHash + PartialEq,
-    V: Default,
 {
     #[inline]
     fn __len(&self) -> int {
