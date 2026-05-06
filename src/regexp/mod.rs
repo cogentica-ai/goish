@@ -362,10 +362,20 @@ fn escape_byte(b: byte) -> byte {
 pub struct Regexp {
     root: Arc<Node>,
     n_caps: usize,
+    /// Original source pattern. Returned by `String()` (Go's
+    /// `regexp.Regexp.String() string`, regexp.go:142).
+    pattern: string,
 }
 
 impl Regexp {
     fn n_groups(&self) -> usize { self.n_caps + 1 }
+
+    /// `Regexp.String() string` — returns the source text of the
+    /// pattern. Mirrors Go's `regexp.Regexp.String()`.
+    #[allow(non_snake_case)]
+    pub fn String(&self) -> string {
+        self.pattern.clone()
+    }
 }
 
 // ─── Compile / MustCompile ─────────────────────────────────────────────
@@ -379,14 +389,14 @@ pub fn Compile<S: Into<string>>(expr: S) -> (Regexp, error) {
         Ok(node) => {
             if p.pos != p.src.len() {
                 return (
-                    Regexp { root: Arc::new(Node::Concat(Vec::new())), n_caps: 0 },
+                    Regexp { root: Arc::new(Node::Concat(Vec::new())), n_caps: 0, pattern: expr_s.clone() },
                     compile_err(&expr_s, "trailing junk in pattern"),
                 );
             }
-            (Regexp { root: Arc::new(node), n_caps: p.next_cap - 1 }, crate::nilval::nil.into())
+            (Regexp { root: Arc::new(node), n_caps: p.next_cap - 1, pattern: expr_s }, crate::nilval::nil.into())
         }
         Err(why) => (
-            Regexp { root: Arc::new(Node::Concat(Vec::new())), n_caps: 0 },
+            Regexp { root: Arc::new(Node::Concat(Vec::new())), n_caps: 0, pattern: expr_s.clone() },
             compile_err(&expr_s, why),
         ),
     }
