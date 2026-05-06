@@ -116,3 +116,37 @@ impl PartialEq<alloc::sync::Arc<dyn crate::reflect::AnyReflect + Send + Sync>> f
         other.eq(self)
     }
 }
+
+// ─── Polymorphic nil for `Arc<dyn Fn(...) -> R + Send + Sync>` ────────
+//
+// Go function values are nilable; `var f func() error` defaults to nil
+// and `if f != nil` is idiomatic. Goish models function values as
+// `Arc<dyn Fn(...)>` which is never nil — so the equality is degenerate
+// (always returns false / `!=` always returns true). This matches
+// observable Go semantics IF no caller passes a nil function value
+// across the boundary; with goish Arc, nil-construction isn't even
+// expressible, so the user-side check just becomes a constant-true.
+//
+// For higher-arity / generic-return Fn shapes the user crate can add
+// the same impls per-instance — these cover the most common arities
+// (0-4 args, generic return).
+macro_rules! impl_arc_fn_nil_eq {
+    ($($A:ident),*) => {
+        impl<$($A: 'static,)* R: 'static> PartialEq<Nil>
+            for alloc::sync::Arc<dyn Fn($($A),*) -> R + Send + Sync>
+        {
+            fn eq(&self, _: &Nil) -> bool { false }
+        }
+        impl<$($A: 'static,)* R: 'static>
+            PartialEq<alloc::sync::Arc<dyn Fn($($A),*) -> R + Send + Sync>> for Nil
+        {
+            fn eq(&self, _: &alloc::sync::Arc<dyn Fn($($A),*) -> R + Send + Sync>) -> bool { false }
+        }
+    };
+}
+
+impl_arc_fn_nil_eq!();
+impl_arc_fn_nil_eq!(A1);
+impl_arc_fn_nil_eq!(A1, A2);
+impl_arc_fn_nil_eq!(A1, A2, A3);
+impl_arc_fn_nil_eq!(A1, A2, A3, A4);
