@@ -37,15 +37,20 @@ extern crate goish;
 
 use alloc::sync::Arc;
 
+// Go-shape package imports — `strings.HasPrefix(...)` reads as
+// `strings::HasPrefix(...)` once `strings` is in scope.
+use goish::bytes as gobytes;
 use goish::encoding::json;
 use goish::net;
 use goish::net::http;
 use goish::os;
 use goish::runtime::sched::schedule;
+use goish::strings;
 use goish::sync::atomic::Uint64;
 use goish::time;
 use goish::{
-    bytes, float64, go, int, int64, nil, string, uint64, Eprintln, Printf, Println, KB,
+    append, bytes, float64, go, int, int64, make, nil, string, uint64, Eprintln, Printf, Println,
+    Sprintf, KB,
 };
 
 // ─── shared server state ─────────────────────────────────────────────
@@ -67,12 +72,11 @@ fn pass<S: Into<string>>(name: S) {
 // ─── handlers ────────────────────────────────────────────────────────
 
 fn h_health(w: &mut http::ResponseWriter, _r: &http::Request) {
-    let mut obj = goish::map::<string, json::Value>::new();
+    let mut obj = make!(map[string]json::Value);
     obj.Set("status", "ok");
     obj.Set("reqs", float64(REQ_COUNT.Load()));
-    let v = json::Value::Object(obj);
-    let (body, e) = json::Marshal(&v);
-    if !e.IsNil() {
+    let (body, e) = json::Marshal(&json::Value::Object(obj));
+    if e != nil {
         http::Error(w, e.Error(), http::StatusInternalServerError);
         return;
     }
@@ -86,11 +90,14 @@ fn h_user_get(w: &mut http::ResponseWriter, r: &http::Request) {
         http::Error(w, "missing id", http::StatusBadRequest);
         return;
     }
-    let mut obj = goish::map::<string, json::Value>::new();
+    let mut obj = make!(map[string]json::Value);
     obj.Set("id", id);
     obj.Set("name", "Alice");
-    let v = json::Value::Object(obj);
-    let (body, _) = json::Marshal(&v);
+    let (body, err) = json::Marshal(&json::Value::Object(obj));
+    if err != nil {
+        http::Error(w, err.Error(), http::StatusInternalServerError);
+        return;
+    }
     w.Header().Set("Content-Type", "application/json");
     w.Write(body);
 }
@@ -106,43 +113,43 @@ fn h_api_echo(w: &mut http::ResponseWriter, r: &http::Request) {
         http::Error(w, "POST required", http::StatusMethodNotAllowed);
         return;
     }
+    // Go shape: var req map[string]any; if err := json.Unmarshal(r.Body, &req); err != nil { … }
     let mut req_val = json::Value::Null;
     let perr = json::Unmarshal(&r.Body, &mut req_val);
-    if !perr.IsNil() {
+    if perr != nil {
         http::Error(w, "invalid json", http::StatusBadRequest);
         return;
     }
-    let req_obj = match req_val {
-        json::Value::Object(m) => m,
-        _ => {
-            http::Error(w, "expected object", http::StatusBadRequest);
-            return;
-        }
-    };
-    let (name_v, ok) = req_obj.Get(string("name"));
-    let name = match (ok, &name_v) {
-        (true, json::Value::String(s)) if s.Len() > 0 => s.clone(),
-        _ => {
-            http::Error(w, "name must be a non-empty string", http::StatusBadRequest);
-            return;
-        }
-    };
-    let (items_v, ok) = req_obj.Get(string("items"));
-    let items = match (ok, items_v) {
-        (true, json::Value::Array(a)) => a,
-        _ => {
-            http::Error(w, "items must be an array", http::StatusBadRequest);
-            return;
-        }
-    };
-    let mut out = goish::map::<string, json::Value>::new();
+    // req, ok := reqVal.(map[string]any)
+    let req = req_val.AsObject();
+    if req.is_none() {
+        http::Error(w, "expected object", http::StatusBadRequest);
+        return;
+    }
+    let req = req.unwrap();
+    // nameV, ok := req["name"]; name, ok := nameV.(string); …
+    let (name_v, ok) = req.Get(string("name"));
+    let name_s = name_v.AsString();
+    if !ok || name_s.is_none() || name_s.unwrap().Len() == 0 {
+        http::Error(w, "name must be a non-empty string", http::StatusBadRequest);
+        return;
+    }
+    let name = name_s.unwrap().clone();
+    // itemsV, ok := req["items"]; items, ok := itemsV.([]any); …
+    let (items_v, ok) = req.Get(string("items"));
+    if !ok || items_v.AsArray().is_none() {
+        http::Error(w, "items must be an array", http::StatusBadRequest);
+        return;
+    }
+    let items = items_v.AsArray().unwrap().clone();
+    // out := map[string]any{ "name": name, "item_count": …, "items": items, "received_at_unix": … }
+    let mut out = make!(map[string]json::Value);
     out.Set("name", name);
-    out.Set("item_count", float64(items.Len() as f64));
+    out.Set("item_count", float64(items.Len()));
     out.Set("items", json::Value::Array(items));
-    out.Set("received_at_unix", float64(time::Now().Unix() as f64));
-    let v = json::Value::Object(out);
-    let (body, e) = json::Marshal(&v);
-    if !e.IsNil() {
+    out.Set("received_at_unix", float64(time::Now().Unix()));
+    let (body, e) = json::Marshal(&json::Value::Object(out));
+    if e != nil {
         http::Error(w, e.Error(), http::StatusInternalServerError);
         return;
     }
@@ -157,21 +164,27 @@ fn h_api_echo(w: &mut http::ResponseWriter, r: &http::Request) {
 // spare; under heavier nesting the maybe_grow_step inside json's
 // recursive marshaller would pivot.
 fn h_api_stats(w: &mut http::ResponseWriter, _r: &http::Request) {
-    // Build a "shards" array of {id, reqs, healthy} objects.
-    let mut shards = goish::slice::<json::Value>::new();
-    for i in 0..4i64 {
-        let mut s = goish::map::<string, json::Value>::new();
-        s.Set("id", float64(i as f64));
-        s.Set("reqs", float64((REQ_COUNT.Load() / 4) as f64));
+    // shards := make([]any, 0)
+    // for i := 0; i < 4; i++ { shards = append(shards, map[string]any{…}) }
+    let mut shards = make!([]json::Value, 0);
+    for i in 0..int64(4) {
+        let mut s = make!(map[string]json::Value);
+        s.Set("id", float64(i));
+        s.Set("reqs", float64(REQ_COUNT.Load() / 4));
         s.Set("healthy", json::Value::Bool(true));
-        shards = goish::append!(shards, json::Value::Object(s));
+        shards = append!(shards, json::Value::Object(s));
     }
-    let mut root = goish::map::<string, json::Value>::new();
+    // root := map[string]any{ "service": …, "shards": shards, … }
+    let mut root = make!(map[string]json::Value);
     root.Set("service", "production_http_server");
-    root.Set("uptime_unix", float64(time::Now().Unix() as f64));
-    root.Set("total_reqs", float64(REQ_COUNT.Load() as f64));
+    root.Set("uptime_unix", float64(time::Now().Unix()));
+    root.Set("total_reqs", float64(REQ_COUNT.Load()));
     root.Set("shards", json::Value::Array(shards));
-    let (body, _) = json::Marshal(&json::Value::Object(root));
+    let (body, err) = json::Marshal(&json::Value::Object(root));
+    if err != nil {
+        http::Error(w, err.Error(), http::StatusInternalServerError);
+        return;
+    }
     w.Header().Set("Content-Type", "application/json; charset=utf-8");
     w.Write(body);
 }
@@ -183,7 +196,7 @@ fn h_form(w: &mut http::ResponseWriter, r: &http::Request) {
     let name = r.FormValue("name");
     let age = r.FormValue("age");
     w.Header().Set("Content-Type", "text/plain");
-    let mut out = goish::strings::Builder::new();
+    let mut out = strings::Builder::new();
     out.WriteString("name=");
     out.WriteString(name);
     out.WriteString("&age=");
@@ -205,11 +218,11 @@ fn h_session_set(w: &mut http::ResponseWriter, _r: &http::Request) {
 
 fn h_session_get(w: &mut http::ResponseWriter, r: &http::Request) {
     let (c, err) = r.Cookie("sid");
-    if !err.IsNil() {
+    if err != nil {
         w.Write(bytes("no session\n"));
         return;
     }
-    let mut out = goish::strings::Builder::new();
+    let mut out = strings::Builder::new();
     out.WriteString("sid=");
     out.WriteString(c.Value);
     out.WriteString("\n");
@@ -231,66 +244,54 @@ fn h_root(w: &mut http::ResponseWriter, r: &http::Request) {
 }
 
 // ─── middleware combinators ──────────────────────────────────────────
+//
+// Go shape: middleware are functions `func(next http.Handler) http.Handler`,
+// composing via wrapping. Goish renders these as functions returning an
+// `Arc<dyn http::Handler>` constructed from a closure via
+// `http::HandlerFunc`. No generic struct + trait-impl boilerplate.
 
-struct LoggingMW<H: http::Handler>(H);
-
-impl<H: http::Handler> http::Handler for LoggingMW<H> {
-    fn ServeHTTP(&self, w: &mut http::ResponseWriter, r: &http::Request) {
+fn logging(next: Arc<dyn http::Handler>) -> Arc<dyn http::Handler> {
+    Arc::new(http::HandlerFunc(move |w: &mut http::ResponseWriter, r: &http::Request| {
         REQ_COUNT.Add(1);
         // TODO(slog): emit structured access log with time::Since(started).
-        self.0.ServeHTTP(w, r);
-    }
+        next.ServeHTTP(w, r);
+    }))
 }
 
-struct BearerAuthMW<H: http::Handler> {
-    inner: H,
-    token: string,
-}
-
-impl<H: http::Handler> http::Handler for BearerAuthMW<H> {
-    fn ServeHTTP(&self, w: &mut http::ResponseWriter, r: &http::Request) {
+fn bearer_auth(token: string, next: Arc<dyn http::Handler>) -> Arc<dyn http::Handler> {
+    Arc::new(http::HandlerFunc(move |w: &mut http::ResponseWriter, r: &http::Request| {
         let auth = r.Header.Get("Authorization");
-        if !goish::strings::HasPrefix(&auth, "Bearer ") {
+        if !strings::HasPrefix(&auth, "Bearer ") {
             w.Header().Set("WWW-Authenticate", "Bearer");
             http::Error(w, "unauthorized", http::StatusUnauthorized);
             return;
         }
-        let supplied = goish::strings::TrimPrefix(auth, "Bearer ");
-        if supplied != self.token {
+        let supplied = strings::TrimPrefix(auth, "Bearer ");
+        if supplied != token {
             http::Error(w, "unauthorized", http::StatusUnauthorized);
             return;
         }
-        self.inner.ServeHTTP(w, r);
-    }
+        next.ServeHTTP(w, r);
+    }))
 }
 
-struct CorsMW<H: http::Handler>(H);
-
-impl<H: http::Handler> http::Handler for CorsMW<H> {
-    fn ServeHTTP(&self, w: &mut http::ResponseWriter, r: &http::Request) {
+fn cors(next: Arc<dyn http::Handler>) -> Arc<dyn http::Handler> {
+    Arc::new(http::HandlerFunc(move |w: &mut http::ResponseWriter, r: &http::Request| {
         w.Header().Set("Access-Control-Allow-Origin", "*");
         w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         if r.Method == "OPTIONS" {
             w.WriteHeader(http::StatusNoContent);
             return;
         }
-        self.0.ServeHTTP(w, r);
-    }
+        next.ServeHTTP(w, r);
+    }))
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────
 
-fn check<S: Into<string>>(cond: bool, name: S) {
-    if cond {
-        pass(name);
-    } else {
-        fail(name);
-    }
-}
-
 fn url_at<S: Into<string>>(path: S) -> string {
     let port = int(CLIENT_PORT.Load());
-    goish::Sprintf!("http://127.0.0.1:%d%s", port, path.into())
+    Sprintf!("http://127.0.0.1:%d%s", port, path.into())
 }
 
 // ─── main ────────────────────────────────────────────────────────────
@@ -299,7 +300,7 @@ fn url_at<S: Into<string>>(path: S) -> string {
 fn main() {
     // Bind first so we can report the port.
     let (ln, e) = net::Listen("tcp", "127.0.0.1:0");
-    if !e.IsNil() {
+    if e != nil {
         Println!("listen failed");
         os::Exit(1);
     }
@@ -317,17 +318,19 @@ fn main() {
     mux.HandleFunc("/session/get", h_session_get);
     mux.HandleFunc("/", h_root);
 
-    // /admin protected by Bearer middleware
+    // /admin protected by Bearer middleware (Go: bearerAuth("s3cret",
+    // http.StripPrefix("/admin", adminMux))).
     let admin_mux = http::ServeMux::new();
     admin_mux.HandleFunc("/secret", h_protected);
-    mux.Handle("/admin/", BearerAuthMW {
-        inner: http::StripPrefix("/admin", admin_mux),
-        token: string("s3cret"),
-    });
+    mux.Handle("/admin/", bearer_auth(
+        string("s3cret"),
+        http::StripPrefix("/admin", admin_mux),
+    ));
 
-    // Server with timeouts. Wrap whole mux in CORS + Logging.
+    // Server with timeouts. Wrap whole mux in CORS + Logging
+    // (Go: srv.Handler = logging(cors(mux))).
     let srv = Arc::new(http::Server {
-        Handler: http::handler(LoggingMW(CorsMW(mux))),
+        Handler: logging(cors(http::handler(mux))),
         ReadHeaderTimeout: time::Second,
         ReadTimeout: time::Second * 3,
         WriteTimeout: time::Second * 3,
@@ -350,142 +353,290 @@ fn main() {
     let srv_for_shutdown = srv.clone();
     go!(stack(256 * KB), move || {
         time::Sleep(time::Millisecond * 50);
+        let client = http::Client::default();
 
         // Test 1: /healthz → 200 with JSON body.
-        let (resp, e) = http::Get(url_at("/healthz"));
-        check(e.IsNil() && resp.StatusCode == 200
-              && goish::bytes::Contains(&resp.Body, bytes("\"status\"")),
-              "GET /healthz returns JSON 200");
+        let name = string("GET /healthz returns JSON 200");
+        let (resp, err) = http::Get(url_at("/healthz"));
+        if err != nil {
+            fail(Sprintf!("%s: %s", &name, err.Error()));
+        } else if resp.StatusCode != 200 {
+            fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+        } else if !gobytes::Contains(&resp.Body, bytes("\"status\"")) {
+            fail(Sprintf!("%s: missing \"status\" field", &name));
+        } else {
+            pass(name);
+        }
 
         // Test 2: / root → 200 hello.
-        let (resp, e) = http::Get(url_at("/"));
-        check(e.IsNil() && resp.StatusCode == 200
-              && goish::bytes::HasPrefix(&resp.Body, bytes("hello world")),
-              "GET / returns hello world");
+        let name = string("GET / returns hello world");
+        let (resp, err) = http::Get(url_at("/"));
+        if err != nil {
+            fail(Sprintf!("%s: %s", &name, err.Error()));
+        } else if resp.StatusCode != 200 {
+            fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+        } else if !gobytes::HasPrefix(&resp.Body, bytes("hello world")) {
+            fail(Sprintf!("%s: bad body", &name));
+        } else {
+            pass(name);
+        }
 
         // Test 3: /unknown → 404 custom.
-        let (resp, e) = http::Get(url_at("/unknown"));
-        check(e.IsNil() && resp.StatusCode == 404
-              && goish::bytes::Contains(&resp.Body, bytes("custom 404")),
-              "GET /unknown returns custom 404");
+        let name = string("GET /unknown returns custom 404");
+        let (resp, err) = http::Get(url_at("/unknown"));
+        if err != nil {
+            fail(Sprintf!("%s: %s", &name, err.Error()));
+        } else if resp.StatusCode != 404 {
+            fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+        } else if !gobytes::Contains(&resp.Body, bytes("custom 404")) {
+            fail(Sprintf!("%s: bad body", &name));
+        } else {
+            pass(name);
+        }
 
         // Test 4: /api/users/{id} wildcard binding.
-        let (resp, e) = http::Get(url_at("/api/users/42"));
-        check(e.IsNil() && resp.StatusCode == 200
-              && goish::bytes::Contains(&resp.Body, bytes("\"id\":\"42\"")),
-              "GET /api/users/42 binds wildcard");
+        let name = string("GET /api/users/42 binds wildcard");
+        let (resp, err) = http::Get(url_at("/api/users/42"));
+        if err != nil {
+            fail(Sprintf!("%s: %s", &name, err.Error()));
+        } else if resp.StatusCode != 200 {
+            fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+        } else if !gobytes::Contains(&resp.Body, bytes("\"id\":\"42\"")) {
+            fail(Sprintf!("%s: id not bound", &name));
+        } else {
+            pass(name);
+        }
 
         // Test 5: /admin/secret without token → 401.
-        let (resp, e) = http::Get(url_at("/admin/secret"));
-        check(e.IsNil() && resp.StatusCode == 401,
-              "GET /admin/secret unauth -> 401");
+        let name = string("GET /admin/secret unauth -> 401");
+        let (resp, err) = http::Get(url_at("/admin/secret"));
+        if err != nil {
+            fail(Sprintf!("%s: %s", &name, err.Error()));
+        } else if resp.StatusCode != 401 {
+            fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+        } else {
+            pass(name);
+        }
 
         // Test 6: /admin/secret with bad token -> 401.
-        let mut req = match http::NewRequest("GET", url_at("/admin/secret"), nil) {
-            (r, e) if e.IsNil() => r,
-            _ => { fail("NewRequest"); return; }
-        };
-        req.Header.Set("Authorization", "Bearer wrong");
-        let client = http::Client::default();
-        let (resp, e) = client.Do(&req);
-        check(e.IsNil() && resp.StatusCode == 401,
-              "GET /admin/secret bad token -> 401");
+        let name = string("GET /admin/secret bad token -> 401");
+        let (mut req, err) = http::NewRequest("GET", url_at("/admin/secret"), nil);
+        if err != nil {
+            fail(Sprintf!("%s: NewRequest: %s", &name, err.Error()));
+        } else {
+            req.Header.Set("Authorization", "Bearer wrong");
+            let (resp, err) = client.Do(&req);
+            if err != nil {
+                fail(Sprintf!("%s: %s", &name, err.Error()));
+            } else if resp.StatusCode != 401 {
+                fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+            } else {
+                pass(name);
+            }
+        }
 
         // Test 7: /admin/secret with correct token → 200.
-        let (mut req, _) = http::NewRequest("GET", url_at("/admin/secret"), nil);
-        req.Header.Set("Authorization", "Bearer s3cret");
-        let (resp, e) = client.Do(&req);
-        check(e.IsNil() && resp.StatusCode == 200
-              && goish::bytes::Contains(&resp.Body, bytes("admin only")),
-              "GET /admin/secret with token -> 200");
+        let name = string("GET /admin/secret with token -> 200");
+        let (mut req, err) = http::NewRequest("GET", url_at("/admin/secret"), nil);
+        if err != nil {
+            fail(Sprintf!("%s: NewRequest: %s", &name, err.Error()));
+        } else {
+            req.Header.Set("Authorization", "Bearer s3cret");
+            let (resp, err) = client.Do(&req);
+            if err != nil {
+                fail(Sprintf!("%s: %s", &name, err.Error()));
+            } else if resp.StatusCode != 200 {
+                fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+            } else if !gobytes::Contains(&resp.Body, bytes("admin only")) {
+                fail(Sprintf!("%s: bad body", &name));
+            } else {
+                pass(name);
+            }
+        }
 
         // Test 8: CORS headers on plain GET.
-        let (resp, _) = http::Get(url_at("/"));
-        let cors = resp.Header.Get("Access-Control-Allow-Origin");
-        check(cors.Len() > 0, "CORS header on response");
+        let name = string("CORS header on response");
+        let (resp, err) = http::Get(url_at("/"));
+        if err != nil {
+            fail(Sprintf!("%s: %s", &name, err.Error()));
+        } else if resp.Header.Get("Access-Control-Allow-Origin").Len() == 0 {
+            fail(Sprintf!("%s: header missing", &name));
+        } else {
+            pass(name);
+        }
 
         // Test 9: OPTIONS preflight → 204.
-        let (req, _) = http::NewRequest("OPTIONS", url_at("/"), nil);
-        let (resp, e) = client.Do(&req);
-        check(e.IsNil() && resp.StatusCode == 204,
-              "OPTIONS preflight -> 204");
+        let name = string("OPTIONS preflight -> 204");
+        let (req, err) = http::NewRequest("OPTIONS", url_at("/"), nil);
+        if err != nil {
+            fail(Sprintf!("%s: NewRequest: %s", &name, err.Error()));
+        } else {
+            let (resp, err) = client.Do(&req);
+            if err != nil {
+                fail(Sprintf!("%s: %s", &name, err.Error()));
+            } else if resp.StatusCode != 204 {
+                fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+            } else {
+                pass(name);
+            }
+        }
 
-        // Test 10: cookie set/get round-trip via header forwarding.
-        let (resp, _) = http::Get(url_at("/session/set"));
-        let sc = resp.Header.Get("Set-Cookie");
-        check(goish::strings::HasPrefix(&sc, "sid=abc123"),
-              "Set-Cookie returned");
+        // Test 10a: cookie set returns Set-Cookie header.
+        let name = string("Set-Cookie returned");
+        let (resp, err) = http::Get(url_at("/session/set"));
+        if err != nil {
+            fail(Sprintf!("%s: %s", &name, err.Error()));
+        } else {
+            let sc = resp.Header.Get("Set-Cookie");
+            if !strings::HasPrefix(&sc, "sid=abc123") {
+                fail(Sprintf!("%s: got %s", &name, &sc));
+            } else {
+                pass(name);
+            }
+        }
 
-        let (mut req, _) = http::NewRequest("GET", url_at("/session/get"), nil);
-        req.Header.Set("Cookie", "sid=abc123");
-        let (resp, e) = client.Do(&req);
-        check(e.IsNil() && resp.StatusCode == 200
-              && goish::bytes::Contains(&resp.Body, bytes("sid=abc123")),
-              "Cookie roundtrip");
+        // Test 10b: cookie roundtrip — client sends, server reads.
+        let name = string("Cookie roundtrip");
+        let (mut req, err) = http::NewRequest("GET", url_at("/session/get"), nil);
+        if err != nil {
+            fail(Sprintf!("%s: NewRequest: %s", &name, err.Error()));
+        } else {
+            req.Header.Set("Cookie", "sid=abc123");
+            let (resp, err) = client.Do(&req);
+            if err != nil {
+                fail(Sprintf!("%s: %s", &name, err.Error()));
+            } else if resp.StatusCode != 200 {
+                fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+            } else if !gobytes::Contains(&resp.Body, bytes("sid=abc123")) {
+                fail(Sprintf!("%s: server didn't see cookie", &name));
+            } else {
+                pass(name);
+            }
+        }
 
         // Test 11: form query parsing via FormValue (handler-side parse).
-        let (resp, e) = http::Get(url_at("/form?name=alice&age=30"));
-        check(e.IsNil()
-              && goish::bytes::Contains(&resp.Body, bytes("name=alice"))
-              && goish::bytes::Contains(&resp.Body, bytes("age=30")),
-              "Form query parsed via FormValue");
+        let name = string("Form query parsed via FormValue");
+        let (resp, err) = http::Get(url_at("/form?name=alice&age=30"));
+        if err != nil {
+            fail(Sprintf!("%s: %s", &name, err.Error()));
+        } else if !gobytes::Contains(&resp.Body, bytes("name=alice"))
+            || !gobytes::Contains(&resp.Body, bytes("age=30"))
+        {
+            fail(Sprintf!("%s: bad body", &name));
+        } else {
+            pass(name);
+        }
 
         // Test 12: POST /api/echo — JSON request body roundtrip.
-        // Server parses JSON, validates schema, reshapes, returns JSON.
-        let echo_payload = bytes(r#"{"name":"widget","items":[1,"two",true,null]}"#);
-        let (mut req, _) = http::NewRequest("POST", url_at("/api/echo"), nil);
-        req.Body = echo_payload.clone();
-        req.ContentLength = echo_payload.Len();
-        req.Header.Set("Content-Type", "application/json");
-        let (resp, e) = client.Do(&req);
-        check(e.IsNil() && resp.StatusCode == 200
-              && goish::bytes::Contains(&resp.Body, bytes("\"name\":\"widget\""))
-              && goish::bytes::Contains(&resp.Body, bytes("\"item_count\":4")),
-              "POST /api/echo roundtrips JSON body");
+        let name = string("POST /api/echo roundtrips JSON body");
+        let payload = bytes(r#"{"name":"widget","items":[1,"two",true,null]}"#);
+        let (mut req, err) = http::NewRequest("POST", url_at("/api/echo"), nil);
+        if err != nil {
+            fail(Sprintf!("%s: NewRequest: %s", &name, err.Error()));
+        } else {
+            req.Body = payload.clone();
+            req.ContentLength = payload.Len();
+            req.Header.Set("Content-Type", "application/json");
+            let (resp, err) = client.Do(&req);
+            if err != nil {
+                fail(Sprintf!("%s: %s", &name, err.Error()));
+            } else if resp.StatusCode != 200 {
+                fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+            } else if !gobytes::Contains(&resp.Body, bytes("\"name\":\"widget\""))
+                || !gobytes::Contains(&resp.Body, bytes("\"item_count\":4"))
+            {
+                fail(Sprintf!("%s: bad body", &name));
+            } else {
+                pass(name);
+            }
+        }
 
         // Test 13: POST /api/echo with bad JSON → 400.
-        let (mut req, _) = http::NewRequest("POST", url_at("/api/echo"), nil);
-        req.Body = bytes("not-json{");
-        req.ContentLength = req.Body.Len();
-        req.Header.Set("Content-Type", "application/json");
-        let (resp, e) = client.Do(&req);
-        check(e.IsNil() && resp.StatusCode == 400,
-              "POST /api/echo rejects malformed JSON");
+        let name = string("POST /api/echo rejects malformed JSON");
+        let (mut req, err) = http::NewRequest("POST", url_at("/api/echo"), nil);
+        if err != nil {
+            fail(Sprintf!("%s: NewRequest: %s", &name, err.Error()));
+        } else {
+            req.Body = bytes("not-json{");
+            req.ContentLength = req.Body.Len();
+            req.Header.Set("Content-Type", "application/json");
+            let (resp, err) = client.Do(&req);
+            if err != nil {
+                fail(Sprintf!("%s: %s", &name, err.Error()));
+            } else if resp.StatusCode != 400 {
+                fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+            } else {
+                pass(name);
+            }
+        }
 
         // Test 14: POST /api/echo with wrong schema (missing items) → 400.
-        let (mut req, _) = http::NewRequest("POST", url_at("/api/echo"), nil);
-        req.Body = bytes(r#"{"name":"x"}"#);
-        req.ContentLength = req.Body.Len();
-        req.Header.Set("Content-Type", "application/json");
-        let (resp, e) = client.Do(&req);
-        check(e.IsNil() && resp.StatusCode == 400,
-              "POST /api/echo rejects bad schema");
+        let name = string("POST /api/echo rejects bad schema");
+        let (mut req, err) = http::NewRequest("POST", url_at("/api/echo"), nil);
+        if err != nil {
+            fail(Sprintf!("%s: NewRequest: %s", &name, err.Error()));
+        } else {
+            req.Body = bytes(r#"{"name":"x"}"#);
+            req.ContentLength = req.Body.Len();
+            req.Header.Set("Content-Type", "application/json");
+            let (resp, err) = client.Do(&req);
+            if err != nil {
+                fail(Sprintf!("%s: %s", &name, err.Error()));
+            } else if resp.StatusCode != 400 {
+                fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+            } else {
+                pass(name);
+            }
+        }
 
         // Test 15: GET /api/echo → 405 (POST required).
-        let (resp, e) = http::Get(url_at("/api/echo"));
-        check(e.IsNil() && resp.StatusCode == 405,
-              "GET /api/echo returns 405");
+        let name = string("GET /api/echo returns 405");
+        let (resp, err) = http::Get(url_at("/api/echo"));
+        if err != nil {
+            fail(Sprintf!("%s: %s", &name, err.Error()));
+        } else if resp.StatusCode != 405 {
+            fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+        } else {
+            pass(name);
+        }
 
         // Test 16: GET /api/stats — nested JSON response.
-        let (resp, e) = http::Get(url_at("/api/stats"));
-        check(e.IsNil() && resp.StatusCode == 200
-              && goish::bytes::Contains(&resp.Body, bytes("\"service\""))
-              && goish::bytes::Contains(&resp.Body, bytes("\"shards\""))
-              && goish::bytes::Contains(&resp.Body, bytes("\"healthy\":true")),
-              "GET /api/stats returns nested JSON");
+        let name = string("GET /api/stats returns nested JSON");
+        let (resp, err) = http::Get(url_at("/api/stats"));
+        if err != nil {
+            fail(Sprintf!("%s: %s", &name, err.Error()));
+        } else if resp.StatusCode != 200 {
+            fail(Sprintf!("%s: status %d", &name, resp.StatusCode));
+        } else if !gobytes::Contains(&resp.Body, bytes("\"service\""))
+            || !gobytes::Contains(&resp.Body, bytes("\"shards\""))
+            || !gobytes::Contains(&resp.Body, bytes("\"healthy\":true"))
+        {
+            fail(Sprintf!("%s: bad body", &name));
+        } else {
+            pass(name);
+        }
 
         // Test 17: graceful shutdown.
+        let name = string("Server.Shutdown returns nil");
         let err = srv_for_shutdown.Shutdown(time::Second);
-        check(err.IsNil(), "Server.Shutdown returns nil");
+        if err != nil {
+            fail(Sprintf!("%s: %s", &name, err.Error()));
+        } else {
+            pass(name);
+        }
 
         // Wait for serve goroutine to acknowledge.
+        let name = string("Serve goroutine returned post-Shutdown");
         let mut tries = 0;
         while SERVE_DONE.Load() == 0 && tries < 30 {
             time::Sleep(time::Millisecond * 50);
             tries += 1;
         }
-        check(SERVE_DONE.Load() == 1,
-              "Serve goroutine returned post-Shutdown");
+        if SERVE_DONE.Load() != 1 {
+            fail(Sprintf!("%s: serve still running", &name));
+        } else {
+            pass(name);
+        }
 
         let f = int64(FAILED.Load());
         if f == 0 {
