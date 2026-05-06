@@ -265,7 +265,8 @@ where
 
     /// `_, ok := m[k]` form — does the key exist?
     #[allow(non_snake_case)]
-    pub fn Has(&self, k: K) -> bool {
+    pub fn Has<KI: Into<K>>(&self, k: KI) -> bool {
+        let k: K = k.into();
         if self.count == 0 || self.buckets.is_empty() {
             return false;
         }
@@ -296,10 +297,11 @@ where
     /// `v, ok := m[k]` — comma-ok form. Returns `(V::default(), false)`
     /// when the key is missing.
     #[allow(non_snake_case)]
-    pub fn Get(&self, k: K) -> (V, bool)
+    pub fn Get<KI: Into<K>>(&self, k: KI) -> (V, bool)
     where
         V: Clone,
     {
+        let k: K = k.into();
         if self.count == 0 || self.buckets.is_empty() {
             return (self.zero.as_ref().clone(), false);
         }
@@ -357,7 +359,8 @@ where
     /// `delete(m, k)` (long form). Use the `delete!(m, k)` macro at
     /// call sites for the Go-shaped syntax.
     #[allow(non_snake_case)]
-    pub fn Delete(&mut self, k: K) {
+    pub fn Delete<KI: Into<K>>(&mut self, k: KI) {
+        let k: K = k.into();
         if self.count == 0 || self.buckets.is_empty() {
             return;
         }
