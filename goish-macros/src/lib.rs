@@ -990,3 +990,280 @@ fn parse_imports(input: TokenStream) -> Vec<ImportEntry> {
 
     out
 }
+
+// ─── #[goish::interface] — Go-faithful interface declaration ─────────
+//
+// Decorate a trait declaration to give it Go-interface semantics:
+//
+//   1. `: Send + Sync` supertraits — every Goish iface value flows
+//      across goroutines.
+//   2. Hidden default-method `__is_nil_iface(&self) -> bool` returning
+//      `false`. Concrete impls inherit the default unchanged.
+//   3. A `__NilT` ZST whose every method panics with a clear
+//      "method call on nil T interface" message and whose
+//      `__is_nil_iface` returns `true`.
+//   4. `Default for Arc<dyn T + Send + Sync>` returning the sentinel —
+//      gives Go's `var x T` zero-value semantics. Cascades into
+//      `..Default::default()` working on structs that have an
+//      interface-typed field.
+//   5. `PartialEq<goish::Nil>` (both directions) on
+//      `Arc<dyn T + Send + Sync>` — implements Go's `if r == nil`
+//      check by dispatching through `__is_nil_iface`.
+//
+// User pattern:
+//
+//   #[goish::interface]
+//   pub trait Reader {
+//       fn Read(&self, p: slice<byte>) -> (int, error);
+//   }
+//
+//   impl Reader for MyFile {
+//       fn Read(&self, p: slice<byte>) -> (int, error) { … }
+//   }
+//
+//   pub struct Conn {
+//       pub reader: alloc::sync::Arc<dyn Reader + Send + Sync>,
+//       // #[derive(Default)] now compiles — was broken without the
+//       // attribute because dyn Reader had no Default.
+//   }
+//
+// Token-level parser (no syn/quote, matching the rest of this crate's
+// posture). Method signatures are reproduced verbatim from the trait
+// declaration into the sentinel impl, with each `;` swapped for
+// `{ panic!(…) }`.
+//
+// Limitations:
+//   * Trait must NOT have generics on the trait itself (Go interfaces
+//     don't either; emit error if encountered).
+//   * Methods must be `;`-terminated signatures, no default bodies
+//     (also matches Go interface declarations exactly).
+//   * Each method's signature is captured as raw token text and
+//     re-emitted; complex generic / where-clause shapes round-trip
+//     through `TokenStream::to_string()`.
+#[proc_macro_attribute]
+pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let parsed = parse_iface(item);
+    let name = &parsed.name;
+    let nil_name = format!("__Nil{}", name);
+    let ref_name = format!("{}Ref", name);
+    let vis = parsed.vis.as_deref().unwrap_or("");
+
+    let mut out = String::new();
+
+    // ── (1) Trait redeclaration with supertraits + hidden helper ───
+    //
+    // `__is_nil_iface` is a default method on the trait itself (NOT a
+    // separate supertrait) so concrete impls inherit `false` for free
+    // and the nil sentinel overrides to `true`.
+    let _ = writeln!(
+        out,
+        "{vis} trait {name}: ::core::marker::Send + ::core::marker::Sync {{"
+    );
+    for m in &parsed.methods {
+        let _ = writeln!(out, "    {}", m.sig_text);
+    }
+    out.push_str("    #[doc(hidden)]\n");
+    out.push_str("    fn __is_nil_iface(&self) -> bool { false }\n");
+    out.push_str("}\n\n");
+
+    // ── (2) Nil sentinel struct ─────────────────────────────────────
+    out.push_str("#[doc(hidden)]\n");
+    out.push_str("#[allow(non_camel_case_types)]\n");
+    let _ = writeln!(out, "pub struct {nil_name};");
+    out.push('\n');
+
+    // ── (3) impl Trait for __NilT — every method panics ────────────
+    let _ = writeln!(out, "impl {name} for {nil_name} {{");
+    for m in &parsed.methods {
+        // Strip the trailing `;` and append `{ panic!(...) }`.
+        let body_part = m.sig_text.trim_end();
+        let stripped = body_part.strip_suffix(';').unwrap_or(body_part);
+        let _ = writeln!(
+            out,
+            "    {} {{ panic!(\"goish: method call on nil {} interface\") }}",
+            stripped, name
+        );
+    }
+    out.push_str("    fn __is_nil_iface(&self) -> bool { true }\n");
+    out.push_str("}\n\n");
+
+    // ── (4) The canonical iface-value newtype `<Trait>Ref` ──────────
+    //
+    // `Arc<dyn Trait>` would be the natural representation, but Rust's
+    // orphan rule rejects `impl Default for Arc<dyn LocalTrait>` —
+    // `Arc` isn't `#[fundamental]`, so the local trait inside doesn't
+    // make the outer Arc local. The wrapper newtype (declared in the
+    // same crate as the trait) is local, so all impls land cleanly.
+    //
+    // Provides Default, Clone, Deref<Target = dyn Trait>, PartialEq<Nil>
+    // both directions, and `From<T>` for any concrete impl. Use sites
+    // see a value-type wrapper that behaves exactly like a Go interface
+    // value.
+    let _ = writeln!(out,
+        "{vis} struct {ref_name}(pub ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync>);"
+    );
+    out.push('\n');
+
+    let _ = writeln!(out,
+        "impl ::core::default::Default for {ref_name} {{"
+    );
+    let _ = writeln!(out,
+        "    #[inline] fn default() -> Self {{ {ref_name}(::alloc::sync::Arc::new({nil_name})) }}"
+    );
+    out.push_str("}\n\n");
+
+    let _ = writeln!(out, "impl ::core::clone::Clone for {ref_name} {{");
+    let _ = writeln!(out,
+        "    #[inline] fn clone(&self) -> Self {{ {ref_name}(::alloc::sync::Arc::clone(&self.0)) }}"
+    );
+    out.push_str("}\n\n");
+
+    let _ = writeln!(out, "impl ::core::ops::Deref for {ref_name} {{");
+    let _ = writeln!(out,
+        "    type Target = dyn {name} + ::core::marker::Send + ::core::marker::Sync;"
+    );
+    out.push_str("    #[inline] fn deref(&self) -> &Self::Target { &*self.0 }\n");
+    out.push_str("}\n\n");
+
+    // From<T> for any concrete impl — matches Go's "any type with the
+    // method set satisfies the interface" via Rust's `impl T for U`.
+    let _ = writeln!(out,
+        "impl<__T: {name} + 'static> ::core::convert::From<__T> for {ref_name} {{"
+    );
+    let _ = writeln!(out,
+        "    #[inline] fn from(t: __T) -> Self {{ {ref_name}(::alloc::sync::Arc::new(t)) }}"
+    );
+    out.push_str("}\n\n");
+
+    // ── (5) PartialEq<Nil> in both directions ──────────────────────
+    let _ = writeln!(out,
+        "impl ::core::cmp::PartialEq<::goish::Nil> for {ref_name} {{"
+    );
+    out.push_str("    #[inline] fn eq(&self, _: &::goish::Nil) -> bool { (*self.0).__is_nil_iface() }\n");
+    out.push_str("}\n\n");
+    let _ = writeln!(out,
+        "impl ::core::cmp::PartialEq<{ref_name}> for ::goish::Nil {{"
+    );
+    let _ = writeln!(out,
+        "    #[inline] fn eq(&self, other: &{ref_name}) -> bool {{ (*other.0).__is_nil_iface() }}"
+    );
+    out.push_str("}\n\n");
+
+    // ── (6) From<Nil> — lets `nil.into()` flow into iface slots ────
+    let _ = writeln!(out,
+        "impl ::core::convert::From<::goish::Nil> for {ref_name} {{"
+    );
+    out.push_str("    #[inline] fn from(_: ::goish::Nil) -> Self { <Self as ::core::default::Default>::default() }\n");
+    out.push_str("}\n\n");
+
+    out.parse()
+        .expect("goish::interface: emitted source failed to parse")
+}
+
+struct ParsedIface {
+    vis: Option<String>,
+    name: String,
+    methods: Vec<IfaceMethod>,
+}
+
+struct IfaceMethod {
+    /// Verbatim signature text including the trailing `;`.
+    sig_text: String,
+}
+
+fn parse_iface(item: TokenStream) -> ParsedIface {
+    let tokens: Vec<TokenTree> = item.into_iter().collect();
+    let mut iter = tokens.into_iter().peekable();
+
+    // Skip outer attributes (e.g. doc comments): `# [ ... ]`.
+    loop {
+        match iter.peek() {
+            Some(TokenTree::Punct(p)) if p.as_char() == '#' => {
+                iter.next();
+                iter.next(); // bracket group
+            }
+            _ => break,
+        }
+    }
+
+    // Optional visibility.
+    let vis = consume_visibility(&mut iter);
+
+    // `trait` keyword.
+    match iter.next() {
+        Some(TokenTree::Ident(i)) if i.to_string() == "trait" => {}
+        other => panic!(
+            "#[goish::interface] expects `trait Name {{ ... }}`, got {:?}",
+            other
+        ),
+    }
+
+    // Trait name.
+    let name = match iter.next() {
+        Some(TokenTree::Ident(i)) => i.to_string(),
+        other => panic!("#[goish::interface]: expected trait name, got {:?}", other),
+    };
+
+    // Reject generics on the trait itself — Go interfaces don't
+    // have type parameters.
+    match iter.peek() {
+        Some(TokenTree::Punct(p)) if p.as_char() == '<' => panic!(
+            "#[goish::interface]: trait `{}` has generics, which Go interfaces don't support",
+            name
+        ),
+        _ => {}
+    }
+
+    // Brace-delimited body.
+    let body = match iter.next() {
+        Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => g,
+        other => panic!(
+            "#[goish::interface]: expected trait body `{{ ... }}`, got {:?}",
+            other
+        ),
+    };
+
+    let methods = parse_iface_methods(body.stream());
+    ParsedIface { vis, name, methods }
+}
+
+fn parse_iface_methods(body: TokenStream) -> Vec<IfaceMethod> {
+    let mut methods = Vec::new();
+    let mut current: Vec<TokenTree> = Vec::new();
+
+    for tt in body {
+        let is_terminator = matches!(&tt, TokenTree::Punct(p) if p.as_char() == ';');
+        let is_brace_body =
+            matches!(&tt, TokenTree::Group(g) if g.delimiter() == Delimiter::Brace);
+
+        if is_terminator {
+            current.push(tt);
+            let sig: TokenStream = current.drain(..).collect();
+            methods.push(IfaceMethod { sig_text: sig.to_string() });
+        } else if is_brace_body {
+            // Default-bodied method — refuse. Go interfaces don't
+            // have these; if a user wants one, they should declare
+            // a plain `pub trait` instead of using this attribute.
+            panic!(
+                "#[goish::interface]: default-method bodies are not supported \
+                 (Go interfaces don't have them); use a plain `pub trait` instead"
+            );
+        } else {
+            current.push(tt);
+        }
+    }
+
+    if !current.is_empty() {
+        let sig: TokenStream = current.drain(..).collect();
+        let leftover = sig.to_string();
+        let trimmed = leftover.trim();
+        if !trimmed.is_empty() {
+            panic!(
+                "#[goish::interface]: trailing tokens after last method `{}`",
+                trimmed
+            );
+        }
+    }
+
+    methods
+}

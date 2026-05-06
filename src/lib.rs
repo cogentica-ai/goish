@@ -134,6 +134,12 @@ pub use goish_macros::init;
 // AND registers a `.init_array` slot calling each port's init().
 // `__run_pkg_inits` (below) walks the section before main runs.
 pub use goish_macros::import;
+// Re-export the `#[goish::interface]` attribute — Go-faithful interface
+// declaration. Auto-emits Send + Sync supertraits, a per-trait nil
+// sentinel, `Default for Arc<dyn T + Send + Sync>` returning the
+// sentinel, and `PartialEq<Nil>` in both directions. See the
+// proc-macro's docs in goish-macros/src/lib.rs.
+pub use goish_macros::interface;
 // Re-export the reflect attribute so users write `#[goish::reflect]`.
 // (The `goish::reflect` module path coexists — attributes and modules
 // occupy different namespaces, just like `goish::main` doesn't conflict.)

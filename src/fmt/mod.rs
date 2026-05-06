@@ -45,6 +45,7 @@ use crate::unicode::utf8;
 
 /// Go's `fmt.Stringer`. User types implement this to define their `%s`
 /// / `%v` representation.
+#[goish::interface]
 pub trait Stringer {
     fn String(&self) -> string;
 }

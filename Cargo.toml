@@ -620,3 +620,11 @@ path = "examples/pkginit_smoke.rs"
 [[example]]
 name = "import_smoke"
 path = "examples/import_smoke.rs"
+
+[[example]]
+name = "interface_smoke"
+path = "examples/interface_smoke.rs"
+
+[[example]]
+name = "stringer_ref_smoke"
+path = "examples/stringer_ref_smoke.rs"
