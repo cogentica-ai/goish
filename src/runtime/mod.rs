@@ -29,11 +29,141 @@ pub mod preempt;
 pub mod rand;
 pub mod rt_section;
 pub mod sched;
+pub mod segv;
 pub mod signal;
+pub mod symbolize;
 pub mod spin;
 pub mod sysmon;
 pub use debug::{NumCPU, NumGoroutine, GOMAXPROCS};
 pub use heap::{alloc, free, mheap_alloc_pages, mheap_free_pages, realloc};
+
+// ─── GOOS / GOARCH / Compiler — Go runtime build identifiers ─────────
+//
+// Go: extern.go:397 / :401 — `const GOOS string = goos.GOOS`
+//                            `const GOARCH string = goarch.GOARCH`
+//
+// goish v1 is Linux-only, x86_64-only — these are baked at compile
+// time. Compiler is "goish" (matches the Go convention of returning
+// the build's compiler name; gc / gccgo / gollvm are the upstream
+// values).
+
+/// `runtime.GOOS` (extern.go:397) — operating-system target. Always
+/// `"linux"` for goish v1.
+pub const GOOS: &str = "linux";
+
+/// `runtime.GOARCH` (extern.go:401) — CPU architecture target.
+/// Always `"amd64"` for goish v1.
+pub const GOARCH: &str = "amd64";
+
+/// `runtime.Compiler` (extern.go:412) — name of the compiler used
+/// to build this binary. Goish reports `"goish"` to distinguish from
+/// upstream Go's `"gc"`.
+pub const Compiler: &str = "goish";
+
+/// `runtime.Version()` (extern.go:439) — runtime version string.
+/// Goish v1 reports `"goish1.0"` while staying close to Go's format.
+pub fn Version() -> crate::gostring::string {
+    crate::gostring::string::from_static("goish1.0")
+}
+
+// ─── Stub fns common Go programs call ────────────────────────────────
+//
+// These are no-ops or constant-return stubs. They exist so user code
+// that imports `runtime` for these names compiles without rewriting.
+// All have line refs to the Go SDK so the contract is documented.
+
+/// `runtime.LockOSThread()` (proc.go:4172) — wire the calling
+/// goroutine to its current OS thread. Slim is a no-op: each M owns
+/// its own OS thread, and the scheduler doesn't migrate Gs across Ms
+/// in ways that would violate this contract for typical use cases
+/// (cgo callbacks, OpenGL, locale-sensitive C libs). If real
+/// thread-pinning becomes load-bearing, this fn is the hook.
+pub fn LockOSThread() {
+    // Slim: no-op.
+}
+
+/// `runtime.UnlockOSThread()` (proc.go:4196) — undo a prior
+/// `LockOSThread`. Slim is a no-op (mirroring `LockOSThread`).
+pub fn UnlockOSThread() {
+    // Slim: no-op.
+}
+
+/// `runtime.NumCgoCall()` (extern.go:330) — number of cgo calls made
+/// by the current process. Goish has no cgo (every call is native),
+/// so this is constant `0`.
+pub fn NumCgoCall() -> i64 {
+    0
+}
+
+/// `runtime.GC()` (mgc.go:455) — trigger a garbage-collection cycle
+/// and block until it completes. Slim has no managed GC (Vec-backed
+/// slices/strings + Arc/Box for shared boxed data), so this is a
+/// no-op. User code that calls `runtime.GC()` for tests / fuzz seeds
+/// gets exactly the behavior it expects: an explicit "force GC now"
+/// is a hint, never load-bearing.
+pub fn GC() {
+    // Slim: no-op.
+}
+
+/// `runtime.GOROOT()` (extern.go:285) — directory containing the
+/// Go installation. Goish doesn't ship as a tree (single-binary
+/// rlib), so this returns `""` to mirror Go's "not set" sentinel.
+/// Deprecated in Go 1.24+.
+pub fn GOROOT() -> crate::gostring::string {
+    crate::gostring::string::from_static("")
+}
+
+/// `runtime.GoroutineProfile(p)` (mprof.go:889) — collect a stack
+/// trace of every active goroutine. Slim returns `(0, false)` —
+/// no profile collected, never enough room in any caller buffer —
+/// so users branch on the "not enough room" path and skip profiling.
+pub fn GoroutineProfile(_p: crate::goslice::slice<()>) -> (crate::types::int, bool) {
+    // Slim: profile collection deferred — no goroutine stack walker.
+    (0, false)
+}
+
+// ─── Caller / FuncForPC — stack-frame introspection (slim) ───────────
+//
+// Go: `runtime.Caller(skip)` (extern.go:235) returns
+// `(pc uintptr, file string, line int, ok bool)` for the call site
+// `skip` frames up the stack. `runtime.FuncForPC(pc)` (symtab.go) maps
+// a PC to a `*Func` whose `.Name()` is the qualified function name.
+//
+// goish v1 has no DWARF backtrace runtime — calling these returns the
+// "unknown" sentinel so callers (logr/funcr, glog, klog) compile and
+// produce log lines tagged "<unknown>" for caller info instead of
+// erroring out. Fill this in when a port forces actual frame walking.
+
+/// `runtime.Caller(skip)` (Go 1.25 extern.go:235) — slim stub returning
+/// `(0, "", 0, false)`. Callers that branch on `ok` get the "unable to
+/// recover information" path, which logr/funcr renders as
+/// `Caller{File: "<unknown>", Line: 0}`.
+pub fn Caller(_skip: crate::types::int) -> (crate::types::uintptr, crate::gostring::string, crate::types::int, bool) {
+    (0, crate::gostring::string::from_static(""), 0, false)
+}
+
+/// `runtime.Func` (Go 1.25 symtab.go) — opaque handle returned by
+/// `FuncForPC`. Goish stub is a unit struct; `.Name()` always returns
+/// `""` (matches Go's behaviour for an unknown PC).
+#[derive(Clone, Copy)]
+pub struct Func {
+    _priv: (),
+}
+
+impl Func {
+    /// `(*Func).Name()` (symtab.go) — qualified function name. Goish
+    /// stub returns the empty string until real symbolization lands.
+    pub fn Name(&self) -> crate::gostring::string {
+        crate::gostring::string::from_static("")
+    }
+}
+
+/// `runtime.FuncForPC(pc)` (Go 1.25 symtab.go) — slim stub returning
+/// `None` for any PC since goish has no symbol table. Callers that
+/// guard `if fp != nil { name = fp.Name() }` get the empty-name path.
+pub fn FuncForPC(_pc: crate::types::uintptr) -> Option<Func> {
+    None
+}
 
 /// First Rust code to run after the kernel hands control to `_start`.
 /// `_start` (emitted by `#[goish::main]`) reads argc/argv off the stack,
@@ -114,6 +244,22 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // Decision-only: counts would-be preempts but does not modify
     // ucontext yet. Phase C wires the asyncPreempt trampoline.
     preempt::install();
+
+    // Initialise the in-process DWARF symboliser. Mmaps
+    // `/proc/self/exe` and pre-builds (PC → fn_name) and
+    // (PC → file:line) lookup tables. Used by the SIGSEGV handler to
+    // emit Go-style symbolised backtraces. Heavy-ish at startup
+    // (parses .debug_line for every CU); skipped for `cargo build
+    // --release` once we strip DWARF.
+    symbolize::init();
+
+    // Install the SIGSEGV stack-overflow handler. Reads spawn-site
+    // info from the side table populated by `newproc_at` /
+    // `newproc_with_stack_at` and prints an actionable diagnostic
+    // when a goroutine overflows its stack. Genuine memory bugs that
+    // don't fall within a known stack region chain to the default
+    // handler so the user still gets a core dump.
+    segv::install();
 
     // Hand off to the user's main. The proc-macro #[goish::main]
     // generates a #[no_mangle] extern "C" fn __goish_main wrapping the
@@ -251,6 +397,38 @@ fn on_panic(info: &core::panic::PanicInfo) -> ! {
                 // the panic path from normal scope exit. Cleared by
                 // `on_g_panic_aborted` after the gogo lands.
                 g.panicking.store(true, core::sync::atomic::Ordering::Release);
+                // Capture the panic value (rendered from `PanicInfo`)
+                // for `recover!()` to retrieve. We render through a
+                // bounded buffer to avoid allocator pressure during
+                // panic; the buffer feeds an `errors::New(<message>)`
+                // call that copies into a heap string. Bounded at
+                // 1 KiB; longer panic messages truncate.
+                {
+                    use core::fmt::Write;
+                    struct CaptureBuf {
+                        buf: [u8; 1024],
+                        len: usize,
+                    }
+                    impl core::fmt::Write for CaptureBuf {
+                        fn write_str(&mut self, s: &str) -> core::fmt::Result {
+                            let bytes = s.as_bytes();
+                            let room = self.buf.len() - self.len;
+                            let n = bytes.len().min(room);
+                            self.buf[self.len..self.len + n].copy_from_slice(&bytes[..n]);
+                            self.len += n;
+                            Ok(())
+                        }
+                    }
+                    let mut cap_buf = CaptureBuf { buf: [0u8; 1024], len: 0 };
+                    let _ = write!(&mut cap_buf, "{}", info.message());
+                    let s = core::str::from_utf8(&cap_buf.buf[..cap_buf.len]).unwrap_or("");
+                    // Build an owned goish::string from the borrowed
+                    // panic message before handing to errors::New
+                    // (which requires non-borrowed input).
+                    let owned: crate::string = crate::string::from(s);
+                    let e = crate::errors::New(owned);
+                    *g.panic_value.lock() = Some(e);
+                }
                 // Walk cleanups while the panicked frames are still
                 // intact — the cleanup nodes live there and will be
                 // abandoned by the gogo. Callbacks must not allocate

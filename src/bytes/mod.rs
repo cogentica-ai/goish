@@ -377,6 +377,16 @@ pub fn ToLower<S: Into<slice<byte>>>(s: S) -> slice<byte> {
     slice::__from_vec(v)
 }
 
+/// `bytes.ToTitle(s)` (bytes.go:757) — title-case mapping over `s`.
+/// Go: `func ToTitle(s []byte) []byte { return Map(unicode.ToTitle, s) }`.
+///
+/// Slim: ASCII title-case is identical to upper-case (mirrors
+/// `strings.ToTitle`); non-ASCII bytes pass through unchanged.
+pub fn ToTitle<S: Into<slice<byte>>>(s: S) -> slice<byte> {
+    // Go: return Map(unicode.ToTitle, s)
+    Map(crate::unicode::ToTitle, s)
+}
+
 pub fn EqualFold<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, t: S2) -> bool {
     let s = s.into();
     let t = t.into();
@@ -608,9 +618,21 @@ const SMALL_BUFFER_SIZE: usize = 64;
 
 /// `bytes.Buffer` — variable-size byte buffer with `Read`+`Write` methods.
 /// Implements `io::Reader` and `io::Writer`.
+///
+/// `Clone` matches Go's by-value copy semantics for `bytes.Buffer{}`
+/// composite-literals — the underlying `Vec<byte>` is duplicated. This
+/// makes `pool.Get().clone()` shapes (transpiled from Go's by-pointer
+/// pool patterns) compile cleanly; in steady-state code that wants to
+/// avoid the copy, prefer `&mut buf` to share the buffer in place.
+#[derive(Clone)]
 pub struct Buffer {
     buf: Vec<byte>,
     off: usize,
+    /// Slim equivalent of Go's `lastRead`: encodes the size in bytes
+    /// of the most-recent successful ReadRune (1..=4). 0 means the
+    /// last operation was something other than ReadRune. Used only by
+    /// UnreadRune; UnreadByte continues to use the simpler off>0 rule.
+    last_rune_size: u8,
 }
 
 impl Buffer {
@@ -618,6 +640,7 @@ impl Buffer {
         Self {
             buf: Vec::new(),
             off: 0,
+            last_rune_size: 0,
         }
     }
 
@@ -639,10 +662,26 @@ impl Buffer {
         self.buf.capacity() as int
     }
 
+    /// `(b *Buffer).Available()` (buffer.go:92) — bytes that can be
+    /// written without reallocating: cap(b.buf) - len(b.buf).
+    pub fn Available(&self) -> int {
+        (self.buf.capacity() - self.buf.len()) as int
+    }
+
+    /// `(b *Buffer).AvailableBuffer()` (buffer.go:66) — Go returns an
+    /// empty slice with capacity Available(); intended for `append +
+    /// Write` patterns. In slim goish slices don't expose Vec's
+    /// capacity, so we return an empty slice<byte>; the appender just
+    /// needs to call b.Write on the resulting bytes.
+    pub fn AvailableBuffer(&self) -> slice<byte> {
+        slice::__from_vec(Vec::new())
+    }
+
     /// Reset to empty, retaining underlying storage.
     pub fn Reset(&mut self) {
         self.buf.clear();
         self.off = 0;
+        self.last_rune_size = 0;
     }
 
     /// Ensure space for at least `n` more bytes without reallocation.
@@ -659,6 +698,7 @@ impl Buffer {
 
     /// Append bytes. Always returns `(len(p), nil)`.
     pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        self.last_rune_size = 0;
         let n = p.Len();
         let raw: &[byte] = &p;
         self.buf.extend_from_slice(raw);
@@ -666,6 +706,7 @@ impl Buffer {
     }
 
     pub fn WriteString<S: Into<string>>(&mut self, s: S) -> (int, error) {
+        self.last_rune_size = 0;
         let s = s.into();
         let bs = s.as_bytes();
         self.buf.extend_from_slice(bs);
@@ -673,11 +714,13 @@ impl Buffer {
     }
 
     pub fn WriteByte(&mut self, c: byte) -> error {
+        self.last_rune_size = 0;
         self.buf.push(c);
         nil
     }
 
     pub fn WriteRune(&mut self, r: rune) -> (int, error) {
+        self.last_rune_size = 0;
         let mut tmp = [0u8; 4];
         let n = utf8::EncodeRune(&mut tmp, r);
         self.buf.extend_from_slice(&tmp[..n as usize]);
@@ -685,10 +728,11 @@ impl Buffer {
     }
 
     /// Read up to `len(p)` bytes from the buffer into `p`. Returns
-    /// `(0, io::EOF())` when exhausted, matching Go.
+    /// `(0, io::EOF)` when exhausted, matching Go.
     pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        self.last_rune_size = 0;
         if self.off >= self.buf.len() {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         let want = (p.Len() as usize).min(self.buf.len() - self.off);
         for i in 0..want {
@@ -697,7 +741,214 @@ impl Buffer {
         self.off += want;
         (want as int, nil)
     }
+
+    /// `(b *Buffer).Next(n)` (buffer.go:346) — return the next n
+    /// unread bytes as an owned slice and advance the read cursor.
+    /// If n exceeds Len(), returns the entire remaining buffer.
+    pub fn Next(&mut self, mut n: int) -> slice<byte> {
+        // Go: b.lastRead = opInvalid
+        self.last_rune_size = 0;
+        // Go: m := b.Len(); if n > m { n = m }
+        let m = self.Len();
+        if n > m {
+            n = m;
+        }
+        if n < 0 {
+            n = 0;
+        }
+        // Go: data := b.buf[b.off : b.off+n]
+        let end = self.off + n as usize;
+        let data = slice::__from_vec(self.buf[self.off..end].to_vec());
+        // Go: b.off += n
+        self.off = end;
+        // Go: if n > 0 { b.lastRead = opRead }  — slim Read, no UnreadRune.
+        data
+    }
+
+    /// `(b *Buffer).ReadRune()` (buffer.go:379) — read one UTF-8
+    /// rune. Returns `(0, 0, io.EOF)` on empty buffer; on invalid
+    /// UTF-8, returns `(U+FFFD, 1, nil)` after consuming one byte.
+    pub fn ReadRune(&mut self) -> (rune, int, error) {
+        // Go: if b.empty() { b.Reset(); return 0, 0, io.EOF }
+        if self.off >= self.buf.len() {
+            self.Reset();
+            return (0, 0, io::EOF.into());
+        }
+        // Go: c := b.buf[b.off]
+        let c = self.buf[self.off];
+        // Go: if c < utf8.RuneSelf { b.off++; b.lastRead = opReadRune1; return rune(c), 1, nil }
+        if c < utf8::RuneSelf {
+            self.off += 1;
+            self.last_rune_size = 1;
+            return (c as rune, 1, nil);
+        }
+        // Go: r, n := utf8.DecodeRune(b.buf[b.off:])
+        let (r, n) = utf8::DecodeRune(&self.buf[self.off..]);
+        // Go: b.off += n; b.lastRead = readOp(n)
+        self.off += n as usize;
+        self.last_rune_size = n as u8;
+        (r, n, nil)
+    }
+
+    /// `(b *Buffer).UnreadRune()` (buffer.go:402) — push back the
+    /// rune read by the most recent ReadRune. Returns an error if the
+    /// most recent op was not a successful ReadRune.
+    pub fn UnreadRune(&mut self) -> error {
+        // Go: if b.lastRead <= opInvalid { return error }
+        if self.last_rune_size == 0 {
+            return crate::errors::New(
+                "bytes.Buffer: UnreadRune: previous operation was not a successful ReadRune",
+            );
+        }
+        // Go: if b.off >= int(b.lastRead) { b.off -= int(b.lastRead) }
+        let n = self.last_rune_size as usize;
+        if self.off >= n {
+            self.off -= n;
+        }
+        // Go: b.lastRead = opInvalid
+        self.last_rune_size = 0;
+        nil
+    }
+
+    /// `(b *Buffer).Truncate(n)` (buffer.go:97) — discard all but the
+    /// first n unread bytes. Panics if n is out of range.
+    pub fn Truncate(&mut self, n: int) {
+        self.last_rune_size = 0;
+        // Go: if n == 0 { b.Reset(); return }
+        if n == 0 {
+            self.Reset();
+            return;
+        }
+        // Go: if n < 0 || n > b.Len() { panic(...) }
+        if n < 0 || n > self.Len() {
+            panic!("bytes.Buffer: truncation out of range");
+        }
+        // Keep the first n unread bytes, drop the rest.
+        self.buf.truncate(self.off + n as usize);
+    }
+
+    /// `(b *Buffer).ReadByte()` (buffer.go:362) — pop one byte.
+    /// Returns `(0, io.EOF)` when empty.
+    pub fn ReadByte(&mut self) -> (byte, error) {
+        self.last_rune_size = 0;
+        // Go: if b.empty() { b.Reset(); return 0, io.EOF }
+        if self.off >= self.buf.len() {
+            self.Reset();
+            return (0, io::EOF.into());
+        }
+        // Go: c := b.buf[b.off]; b.off++
+        let c = self.buf[self.off];
+        self.off += 1;
+        (c, nil)
+    }
+
+    /// `(b *Buffer).UnreadByte()` (buffer.go:419) — push back one byte.
+    /// Slim port: doesn't track last-op state — succeeds whenever off>0.
+    pub fn UnreadByte(&mut self) -> error {
+        self.last_rune_size = 0;
+        // Go strictly tracks lastRead; slim port simply rewinds if able.
+        if self.off > 0 {
+            self.off -= 1;
+            nil
+        } else {
+            crate::errors::New("bytes.Buffer: UnreadByte: previous operation was not a successful read")
+        }
+    }
+
+    /// `(b *Buffer).ReadBytes(delim)` (buffer.go:436) — read up to and
+    /// including `delim`. On EOF before delim, returns the partial data
+    /// plus io.EOF.
+    pub fn ReadBytes(&mut self, delim: byte) -> (slice<byte>, error) {
+        self.last_rune_size = 0;
+        // Go's readSlice: i := IndexByte(b.buf[b.off:], delim)
+        let mut i: int = -1;
+        for (k, b) in self.buf[self.off..].iter().enumerate() {
+            if *b == delim {
+                i = k as int;
+                break;
+            }
+        }
+        let (end, err) = if i < 0 {
+            (self.buf.len(), io::EOF.into())
+        } else {
+            (self.off + i as usize + 1, nil)
+        };
+        // Go: line = b.buf[b.off:end]; b.off = end; copy out.
+        let line = slice::__from_vec(self.buf[self.off..end].to_vec());
+        self.off = end;
+        (line, err)
+    }
+
+    /// `(b *Buffer).ReadString(delim)` (buffer.go:464) — same as
+    /// ReadBytes but returns a `string`.
+    pub fn ReadString(&mut self, delim: byte) -> (string, error) {
+        let (line, err) = self.ReadBytes(delim);
+        (string::from_bytes(&line), err)
+    }
+
+    /// `(b *Buffer).ReadFrom(r)` (buffer.go:212) — read from `r`
+    /// until EOF and append to the buffer. Returns the number of
+    /// bytes read.
+    pub fn ReadFrom(&mut self, r: &mut dyn io::Reader) -> (i64, error) {
+        self.last_rune_size = 0;
+        let mut n: i64 = 0;
+        loop {
+            // Go: i := b.grow(MinRead); b.buf = b.buf[:i]
+            //     m, e := r.Read(b.buf[i:cap(b.buf)])
+            // We use a fixed scratch buffer of MinRead bytes; this loses
+            // Go's "read directly into buffer's spare capacity" trick
+            // but matches the visible behavior.
+            let mut scratch = crate::make!([]byte, MinRead);
+            let (m, e) = r.Read(&mut scratch);
+            if m < 0 {
+                panic!("bytes.Buffer.ReadFrom: negative Read count");
+            }
+            // append m bytes
+            let raw: &[byte] = &scratch;
+            self.buf.extend_from_slice(&raw[..m as usize]);
+            n += m as i64;
+            if crate::errors::Is(e.clone(), io::EOF) {
+                return (n, nil);
+            }
+            if !e.IsNil() {
+                return (n, e);
+            }
+        }
+    }
+
+    /// `(b *Buffer).WriteTo(w)` (buffer.go:264) — drain buffer to
+    /// `w` until exhausted or an error occurs. Returns bytes
+    /// written.
+    pub fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
+        self.last_rune_size = 0;
+        let mut n: i64 = 0;
+        let nbytes = self.Len();
+        if nbytes > 0 {
+            let chunk = slice::__from_vec(self.buf[self.off..].to_vec());
+            let (m, e) = w.Write(chunk);
+            if m as int > nbytes {
+                panic!("bytes.Buffer.WriteTo: invalid Write count");
+            }
+            self.off += m as usize;
+            n = m as i64;
+            if !e.IsNil() {
+                return (n, e);
+            }
+            // all bytes should have been written, by definition of
+            // Write method in io.Writer
+            if m as int != nbytes {
+                return (n, io::ErrShortWrite.into());
+            }
+        }
+        // Buffer is now empty; reset.
+        self.Reset();
+        (n, nil)
+    }
 }
+
+/// `bytes.MinRead` (buffer.go:206) — minimum slice size used by
+/// `Buffer.ReadFrom`.
+pub const MinRead: int = 512;
 
 impl Default for Buffer {
     fn default() -> Self {
@@ -708,6 +959,42 @@ impl Default for Buffer {
 impl io::Writer for Buffer {
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
         Buffer::Write(self, p)
+    }
+}
+
+impl io::ByteReader for Buffer {
+    fn ReadByte(&mut self) -> (byte, error) {
+        Buffer::ReadByte(self)
+    }
+}
+
+impl io::ByteScanner for Buffer {
+    fn UnreadByte(&mut self) -> error {
+        Buffer::UnreadByte(self)
+    }
+}
+
+impl io::ByteWriter for Buffer {
+    fn WriteByte(&mut self, c: byte) -> error {
+        Buffer::WriteByte(self, c)
+    }
+}
+
+impl io::StringWriter for Buffer {
+    fn WriteString(&mut self, s: string) -> (int, error) {
+        Buffer::WriteString(self, s)
+    }
+}
+
+impl io::ReaderFrom for Buffer {
+    fn ReadFrom(&mut self, r: &mut dyn io::Reader) -> (i64, error) {
+        Buffer::ReadFrom(self, r)
+    }
+}
+
+impl io::WriterTo for Buffer {
+    fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
+        Buffer::WriteTo(self, w)
     }
 }
 
@@ -722,6 +1009,7 @@ pub fn NewBuffer(buf: slice<byte>) -> Buffer {
     Buffer {
         buf: buf.__into_vec(),
         off: 0,
+        last_rune_size: 0,
     }
 }
 
@@ -731,6 +1019,7 @@ pub fn NewBufferString<S: Into<string>>(s: S) -> Buffer {
     Buffer {
         buf: s.as_bytes().to_vec(),
         off: 0,
+        last_rune_size: 0,
     }
 }
 
@@ -743,6 +1032,10 @@ const _: usize = SMALL_BUFFER_SIZE;
 pub struct Reader {
     s: Vec<byte>,
     i: usize,
+    /// Mirrors Go's `prevRune`: index of previous rune, or `-1` if
+    /// the most recent op was not a successful ReadRune. Used only
+    /// by UnreadRune.
+    prev_rune: i64,
 }
 
 impl Reader {
@@ -758,8 +1051,9 @@ impl Reader {
     }
 
     pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        self.prev_rune = -1;
         if self.i >= self.s.len() {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         let want = (p.Len() as usize).min(self.s.len() - self.i);
         for k in 0..want {
@@ -772,6 +1066,159 @@ impl Reader {
     pub fn Reset(&mut self, b: slice<byte>) {
         self.s = b.__into_vec();
         self.i = 0;
+        self.prev_rune = -1;
+    }
+
+    /// `(r *Reader).ReadByte()` (bytes/reader.go:66) — implements
+    /// io.ByteReader. Invalidates prevRune.
+    pub fn ReadByte(&mut self) -> (byte, error) {
+        // Go: r.prevRune = -1
+        self.prev_rune = -1;
+        // Go: if r.i >= int64(len(r.s)) { return 0, io.EOF }
+        if self.i >= self.s.len() {
+            return (0, io::EOF.into());
+        }
+        // Go: b := r.s[r.i]; r.i++; return b, nil
+        let b = self.s[self.i];
+        self.i += 1;
+        (b, nil)
+    }
+
+    /// `(r *Reader).UnreadByte()` (bytes/reader.go:77) — implements
+    /// io.ByteScanner. Returns error if at the start.
+    pub fn UnreadByte(&mut self) -> error {
+        // Go: if r.i <= 0 { return errors.New("...: at beginning of slice") }
+        if self.i == 0 {
+            return crate::errors::New("bytes.Reader.UnreadByte: at beginning of slice");
+        }
+        // Go: r.prevRune = -1; r.i--; return nil
+        self.prev_rune = -1;
+        self.i -= 1;
+        nil
+    }
+
+    /// `(r *Reader).ReadRune()` (bytes/reader.go:87) — implements
+    /// io.RuneReader. ASCII fast-path; non-ASCII via DecodeRune.
+    pub fn ReadRune(&mut self) -> (rune, int, error) {
+        // Go: if r.i >= int64(len(r.s)) { r.prevRune = -1; return 0, 0, io.EOF }
+        if self.i >= self.s.len() {
+            self.prev_rune = -1;
+            return (0, 0, io::EOF.into());
+        }
+        // Go: r.prevRune = int(r.i)
+        self.prev_rune = self.i as i64;
+        // Go: if c := r.s[r.i]; c < utf8.RuneSelf { r.i++; return rune(c), 1, nil }
+        let c = self.s[self.i];
+        if c < utf8::RuneSelf {
+            self.i += 1;
+            return (c as rune, 1, nil);
+        }
+        // Go: ch, size = utf8.DecodeRune(r.s[r.i:])
+        let (ch, size) = utf8::DecodeRune(&self.s[self.i..]);
+        // Go: r.i += int64(size)
+        self.i += size as usize;
+        (ch, size, nil)
+    }
+
+    /// `(r *Reader).UnreadRune()` (bytes/reader.go:103) — implements
+    /// io.RuneScanner. Restores cursor to the start of the most-recent
+    /// ReadRune.
+    pub fn UnreadRune(&mut self) -> error {
+        // Go: if r.i <= 0 { return errors.New("...: at beginning of slice") }
+        if self.i == 0 {
+            return crate::errors::New("bytes.Reader.UnreadRune: at beginning of slice");
+        }
+        // Go: if r.prevRune < 0 { return errors.New("...: previous operation was not ReadRune") }
+        if self.prev_rune < 0 {
+            return crate::errors::New(
+                "bytes.Reader.UnreadRune: previous operation was not ReadRune",
+            );
+        }
+        // Go: r.i = int64(r.prevRune); r.prevRune = -1; return nil
+        self.i = self.prev_rune as usize;
+        self.prev_rune = -1;
+        nil
+    }
+
+    /// `(r *Reader).Seek(offset, whence)` (bytes/reader.go:127) — slim port.
+    pub fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
+        // Go: r.prevRune = -1
+        self.prev_rune = -1;
+        // Go: switch whence { case SeekStart: ... }
+        let abs: i64 = match whence {
+            x if x == io::SeekStart => offset,
+            x if x == io::SeekCurrent => (self.i as i64).wrapping_add(offset),
+            x if x == io::SeekEnd => (self.s.len() as i64).wrapping_add(offset),
+            _ => {
+                return (0, crate::errors::New("bytes.Reader.Seek: invalid whence"));
+            }
+        };
+        // Go: if abs < 0 { return 0, error }
+        if abs < 0 {
+            return (0, crate::errors::New("bytes.Reader.Seek: negative position"));
+        }
+        self.i = abs as usize;
+        (abs, nil)
+    }
+
+    /// `(r *Reader).WriteTo(w)` (bytes/reader.go:137) — drain unread
+    /// tail to `w` via Write. Returns bytes written.
+    pub fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
+        // Go: r.prevRune = -1
+        self.prev_rune = -1;
+        // Go: if r.i >= int64(len(r.s)) { return 0, nil }
+        if self.i >= self.s.len() {
+            return (0, nil);
+        }
+        // b := r.s[r.i:]
+        let b = slice::__from_vec(self.s[self.i..].to_vec());
+        let blen = b.Len();
+        // m, err := w.Write(b)
+        let (m, err) = w.Write(b);
+        if m > blen {
+            panic!("bytes.Reader.WriteTo: invalid Write count");
+        }
+        // r.i += int64(m); n = int64(m)
+        self.i += m as usize;
+        let n = m as i64;
+        // if m != len(b) && err == nil { err = io.ErrShortWrite }
+        if m != blen && err.IsNil() {
+            return (n, io::ErrShortWrite.into());
+        }
+        (n, err)
+    }
+
+    /// `(r *Reader).ReadAt(p, off)` (bytes/reader.go:88) — slim port.
+    pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
+        // Go: if off < 0 { return 0, errors.New("bytes.Reader.ReadAt: negative offset") }
+        if off < 0 {
+            return (0, crate::errors::New("bytes.Reader.ReadAt: negative offset"));
+        }
+        if off >= self.s.len() as i64 {
+            return (0, io::EOF.into());
+        }
+        let start = off as usize;
+        let want = (p.Len() as usize).min(self.s.len() - start);
+        for k in 0..want {
+            p[k as int] = self.s[start + k];
+        }
+        // Go: if n < len(p) { err = io.EOF }
+        if want < p.Len() as usize {
+            return (want as int, io::EOF.into());
+        }
+        (want as int, nil)
+    }
+}
+
+impl io::Seeker for Reader {
+    fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
+        Reader::Seek(self, offset, whence)
+    }
+}
+
+impl io::ReaderAt for Reader {
+    fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
+        Reader::ReadAt(self, p, off)
     }
 }
 
@@ -781,11 +1228,19 @@ impl io::Reader for Reader {
     }
 }
 
+impl io::WriterTo for Reader {
+    fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
+        Reader::WriteTo(self, w)
+    }
+}
+
 /// `NewReader(b)` — `Reader` over `b`.
-pub fn NewReader(b: slice<byte>) -> Reader {
+pub fn NewReader<B: Into<slice<byte>>>(b: B) -> Reader {
+    let b = b.into();
     Reader {
         s: b.__into_vec(),
         i: 0,
+        prev_rune: -1,
     }
 }
 
@@ -1015,6 +1470,142 @@ pub fn Map<S: Into<slice<byte>>, F: Fn(rune) -> rune>(mapping: F, s: S) -> slice
             let n = utf8::EncodeRune(&mut tmp, nr) as usize;
             out.extend_from_slice(&tmp[..n]);
         }
+        if w == 0 {
+            break;
+        }
+        i += w as usize;
+    }
+    slice::__from_vec(out)
+}
+
+/// Line-by-line port of `bytes.ToValidUTF8` (bytes/bytes.go:779).
+///
+/// Returns a copy of `s` with each run of invalid UTF-8 byte sequences
+/// replaced by `replacement` (which may be empty).
+pub fn ToValidUTF8<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(
+    s: S1,
+    replacement: S2,
+) -> slice<byte> {
+    let s = s.into();
+    let replacement = replacement.into();
+    let s_bytes: alloc::vec::Vec<byte> = s.__into_vec();
+    let repl_bytes: alloc::vec::Vec<byte> = replacement.__into_vec();
+    // Go: b := make([]byte, 0, len(s)+len(replacement))
+    let mut b: alloc::vec::Vec<byte> =
+        alloc::vec::Vec::with_capacity(s_bytes.len() + repl_bytes.len());
+    // Go: invalid := false
+    let mut invalid: bool = false;
+    // Go: for i := 0; i < len(s); { c := s[i]; ... }
+    let mut i: usize = 0;
+    while i < s_bytes.len() {
+        let c = s_bytes[i];
+        // Go: if c < utf8.RuneSelf { i++; invalid=false; b = append(b, c); continue }
+        if c < utf8::RuneSelf {
+            i += 1;
+            invalid = false;
+            b.push(c);
+            continue;
+        }
+        // Go: _, wid := utf8.DecodeRune(s[i:])
+        let (_, wid) = utf8::DecodeRune(&s_bytes[i..]);
+        // Go: if wid == 1 { i++; if !invalid { invalid=true; b = append(b, replacement...) }; continue }
+        if wid == 1 {
+            i += 1;
+            if !invalid {
+                invalid = true;
+                b.extend_from_slice(&repl_bytes);
+            }
+            continue;
+        }
+        // Go: invalid = false; b = append(b, s[i:i+wid]...); i += wid
+        invalid = false;
+        b.extend_from_slice(&s_bytes[i..i + wid as usize]);
+        i += wid as usize;
+    }
+    slice::__from_vec(b)
+}
+
+/// Line-by-line port of `bytes.Runes` (bytes/bytes.go:1159) — interpret
+/// `s` as UTF-8 and return a slice of decoded runes. Invalid UTF-8
+/// bytes are decoded as `utf8.RuneError` (matching `DecodeRune`'s
+/// contract — Go does the same via `RuneCount` + `DecodeRune`).
+pub fn Runes<S: Into<slice<byte>>>(s: S) -> slice<rune> {
+    let s = s.into();
+    let bytes: alloc::vec::Vec<byte> = s.__into_vec();
+    // Go: t := make([]rune, utf8.RuneCount(s))
+    let cap = utf8::RuneCount(&bytes) as usize;
+    let mut t: alloc::vec::Vec<rune> = alloc::vec::Vec::with_capacity(cap);
+    // Go: i := 0; for len(s) > 0 { r, l := utf8.DecodeRune(s); t[i] = r; i++; s = s[l:] }
+    let mut i: usize = 0;
+    while i < bytes.len() {
+        let (r, l) = utf8::DecodeRune(&bytes[i..]);
+        t.push(r);
+        if l == 0 {
+            break;
+        }
+        i += l as usize;
+    }
+    slice::__from_vec(t)
+}
+
+/// Line-by-line port of `bytes.isSeparator` (bytes/bytes.go:808) — used
+/// by `Title` to detect word boundaries.
+fn is_separator(r: rune) -> bool {
+    // Go: if r <= 0x7F { ... }
+    if r <= 0x7F {
+        // Go: 0..9 / a..z / A..Z / '_' are not separators.
+        if r >= b'0' as rune && r <= b'9' as rune {
+            return false;
+        }
+        if r >= b'a' as rune && r <= b'z' as rune {
+            return false;
+        }
+        if r >= b'A' as rune && r <= b'Z' as rune {
+            return false;
+        }
+        if r == b'_' as rune {
+            return false;
+        }
+        return true;
+    }
+    // Slim: goish lacks unicode.IsLetter / IsDigit / IsSpace tables.
+    // Treat any non-ASCII rune as a non-separator (Go's IsLetter/IsDigit
+    // would cover most non-ASCII alphanumerics anyway).
+    false
+}
+
+/// Line-by-line port of `bytes.Title` (bytes/bytes.go:836) — return a
+/// copy of `s` with the first letter of each word title-cased. Slim
+/// port: only ASCII letters are title-cased (rune ≥ 0x80 left as-is)
+/// since goish lacks the full unicode.ToTitle table.
+///
+/// Deprecated in Go upstream; ported for compatibility.
+#[deprecated = "see Go upstream — Title's word-boundary rule is unsafe for general Unicode"]
+pub fn Title<S: Into<slice<byte>>>(s: S) -> slice<byte> {
+    let s = s.into();
+    let bytes: alloc::vec::Vec<byte> = s.__into_vec();
+    let mut out: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(bytes.len());
+    // Go: prev := ' '
+    let mut prev: rune = b' ' as rune;
+    let mut tmp = [0u8; 4];
+    let mut i: usize = 0;
+    // Go: return Map(func(r rune) rune { … }, s) — inlined for ASCII title-case.
+    while i < bytes.len() {
+        let (r, w) = utf8::DecodeRune(&bytes[i..]);
+        // Go: if isSeparator(prev) { return unicode.ToTitle(r) }
+        let nr = if is_separator(prev) {
+            // Slim ToTitle: ASCII a..z → A..Z; everything else unchanged.
+            if r >= b'a' as rune && r <= b'z' as rune {
+                r - 32
+            } else {
+                r
+            }
+        } else {
+            r
+        };
+        prev = r;
+        let n = utf8::EncodeRune(&mut tmp, nr) as usize;
+        out.extend_from_slice(&tmp[..n]);
         if w == 0 {
             break;
         }

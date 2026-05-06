@@ -307,6 +307,17 @@ pub fn newproc(closure: Box<dyn FnOnce()>) {
     enqueue_runnable(g_ptr, false);
 }
 
+/// Spawn-site-tagged variant of [`newproc`]. Records `(file, line)`
+/// in the SIGSEGV side table so a stack-overflow diagnostic can name
+/// the spawning `go!()` call.
+pub fn newproc_at(file: &'static str, line: u32, closure: Box<dyn FnOnce()>) {
+    let g = Box::leak(Box::new(G::new(closure)));
+    let g_ptr = NonNull::from(&mut *g);
+    crate::runtime::segv::register(g_ptr.as_ptr(), file, line);
+    LIVE_G_COUNT.fetch_add(1, Ordering::AcqRel);
+    enqueue_runnable(g_ptr, false);
+}
+
 /// **`newproc_with_stack(size, closure)`** — spawn a goroutine with
 /// an explicit stack size (M26). Used by `go!(stack(N), closure)` when
 /// the caller knows the default 2 KiB stack is too small (deep
@@ -321,6 +332,20 @@ pub fn newproc(closure: Box<dyn FnOnce()>) {
 pub fn newproc_with_stack(size: usize, closure: Box<dyn FnOnce()>) {
     let g = Box::leak(Box::new(G::new_with_stack(size, closure)));
     let g_ptr = NonNull::from(&mut *g);
+    LIVE_G_COUNT.fetch_add(1, Ordering::AcqRel);
+    enqueue_runnable(g_ptr, false);
+}
+
+/// Spawn-site-tagged variant of [`newproc_with_stack`].
+pub fn newproc_with_stack_at(
+    size: usize,
+    file: &'static str,
+    line: u32,
+    closure: Box<dyn FnOnce()>,
+) {
+    let g = Box::leak(Box::new(G::new_with_stack(size, closure)));
+    let g_ptr = NonNull::from(&mut *g);
+    crate::runtime::segv::register(g_ptr.as_ptr(), file, line);
     LIVE_G_COUNT.fetch_add(1, Ordering::AcqRel);
     enqueue_runnable(g_ptr, false);
 }
@@ -402,6 +427,22 @@ extern "C" fn g_entry() -> ! {
     // during the prologue.
     let entry = unsafe { g_entry_setup() };
     entry();
+    unsafe { g_entry_clear_recovery() };
+    goexit();
+}
+
+/// Variant of `g_entry` for goroutines spawned with auto-grow
+/// (bare `go!()` form, `g.growable == true`). Wraps `entry()` in
+/// `runtime::sched::maybe_grow_step`, so the user closure runs
+/// inside the tier-aware grow scope: home (2 KiB) → tier-2 (64 KiB)
+/// → tier-3 (1 MiB), pivoting lazily as SP descends into each tier's
+/// red zone.
+///
+/// Goroutines spawned via `go!(stack(N), …)` / `go!(N, …)` skip this
+/// wrap (`g.growable == false`) and run on a strictly-N-byte stack.
+extern "C" fn g_entry_growable() -> ! {
+    let entry = unsafe { g_entry_setup() };
+    crate::runtime::sched::maybe_grow_step(entry);
     unsafe { g_entry_clear_recovery() };
     goexit();
 }
@@ -739,10 +780,16 @@ fn execute(mut g_ptr: NonNull<G>) -> ! {
     dispatch_validate_g(g_ptr);
     let g = unsafe { g_ptr.as_mut() };
     if g.status == GStatus::Idle {
-        // First-time dispatch: lay out gobuf for gogo (pc=g_entry,
-        // sp=stack_top-8, with goexit_trampoline parked at [sp]).
+        // First-time dispatch: lay out gobuf for gogo. PC is either
+        // `g_entry` (fixed-stack goroutines: `go!(stack(N), …)` and
+        // `go!(N, …)`) or `g_entry_growable` (bare `go!()` — wraps
+        // user `entry()` in `maybe_grow_step` for tier-aware lazy
+        // growth). Sp = stack_top-8, with goexit_trampoline parked
+        // at [sp].
+        let entry_fn: extern "C" fn() -> ! =
+            if g.growable { g_entry_growable } else { g_entry };
         unsafe {
-            make_context_gogo(&mut g.gobuf, g.stack.top(), g_entry);
+            make_context_gogo(&mut g.gobuf, g.stack.top(), entry_fn);
         }
     }
     g.status = GStatus::Running;
@@ -853,6 +900,10 @@ extern "C" fn goexit0(g_ptr: *mut G) -> ! {
     dropg();
 
     let prev = LIVE_G_COUNT.fetch_sub(1, Ordering::AcqRel);
+
+    // Release the SIGSEGV side-table slot so the next goroutine
+    // that hashes here can claim it. Cheap (probe + 1 atomic store).
+    crate::runtime::segv::unregister(g_ptr);
 
     // Poison gobuf before the box drops the rest of the G — KASAN-
     // style beacon for any post-free dispatch via stale pointer.
@@ -1450,8 +1501,9 @@ pub unsafe fn chan_park_commit(_g: NonNull<G>) -> bool {
 pub unsafe fn selparkcommit(g_ptr: NonNull<G>) -> bool {
     let g = &mut *g_ptr.as_ptr();
     let n = g.select_wait_len as usize;
+    let base = g.select_wait;
     for i in 0..n {
-        let atom = g.select_wait[i];
+        let atom = *base.add(i);
         // Skip nulls: nil chans contribute null atoms to the
         // dedup'd select_wait list. Null entries get sorted to the
         // front by the macro's address-sort and survive dedup as a

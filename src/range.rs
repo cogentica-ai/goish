@@ -78,6 +78,49 @@ impl<'a, T> RangeIter for &'a slice<T> {
     }
 }
 
+// `range!(&x)` where `x: &slice<T>` → `&&slice<T>`.
+// Needed when iterating over a borrowed slice handle inside a struct field.
+impl<'a, T> RangeIter for &&'a slice<T> {
+    type Item = (int, &'a T);
+    type Iter = SliceRangeIter<'a, T>;
+    fn range(self) -> Self::Iter {
+        SliceRangeIter {
+            slice: &***self,
+            i: 0,
+        }
+    }
+}
+
+// ─── array<T, N> → (int, &T) ─────────────────────────────────────────
+//
+// Trait selection doesn't auto-deref, so we need an explicit impl on
+// `&array<T, N>` even though `array<T, N>: Deref<Target=[T]>`. Same
+// shape as the `&slice<T>` impl above.
+
+use crate::goarray::array;
+
+impl<'a, T, const N: usize> RangeIter for &'a array<T, N> {
+    type Item = (int, &'a T);
+    type Iter = SliceRangeIter<'a, T>;
+    fn range(self) -> Self::Iter {
+        SliceRangeIter {
+            slice: &**self, // Deref<Target=[T]>
+            i: 0,
+        }
+    }
+}
+
+impl<'a, T, const N: usize> RangeIter for &&'a array<T, N> {
+    type Item = (int, &'a T);
+    type Iter = SliceRangeIter<'a, T>;
+    fn range(self) -> Self::Iter {
+        SliceRangeIter {
+            slice: &***self,
+            i: 0,
+        }
+    }
+}
+
 // ─── string → (int byte-offset, rune) — UTF-8 decode per step ───────
 
 pub struct StringRangeIter<'a> {
@@ -126,18 +169,62 @@ impl<'a> RangeIter for &'a &str {
     }
 }
 
-// ─── map<K, V> → (&K, &V) — sorted by K (BTreeMap order) ──────────────
+// ─── map<K, V> → (&K, &V) — bucket-walk order (Go randomized) ──────
 
-use crate::gomap::map;
+use crate::gomap::{map, MapRefIter};
 
 impl<'a, K, V> RangeIter for &'a map<K, V>
 where
-    K: Ord,
+    K: crate::gomap::GoHash + PartialEq,
     V: Default,
 {
     type Item = (&'a K, &'a V);
-    type Iter = alloc::collections::btree_map::Iter<'a, K, V>;
+    type Iter = MapRefIter<'a, K, V>;
     fn range(self) -> Self::Iter {
         self.__iter()
+    }
+}
+
+// `range!(&m)` where `m: &map<K,V>` → `&&map<K,V>`.
+// Needed when iterating over a borrowed map handle inside a struct field.
+impl<'a, K, V> RangeIter for &&'a map<K, V>
+where
+    K: crate::gomap::GoHash + PartialEq,
+    V: Default,
+{
+    type Item = (&'a K, &'a V);
+    type Iter = MapRefIter<'a, K, V>;
+    fn range(self) -> Self::Iter {
+        (**self).__iter()
+    }
+}
+
+// ─── chans → value (single-bind) ─────────────────────────────────────
+//
+// Go's `for v := range ch` reads from `ch` until close, yielding each
+// value. Mirrors Go's chan-range semantic — terminates when the chan
+// is closed and drained.
+
+pub struct ChanRangeIter<'a, T: Default + Clone> {
+    c: &'a crate::gochan::chan<T>,
+}
+
+impl<'a, T: Default + Clone> Iterator for ChanRangeIter<'a, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        let (v, ok) = self.c.Recv();
+        if ok {
+            Some(v)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a, T: Default + Clone> RangeIter for &'a crate::gochan::chan<T> {
+    type Item = T;
+    type Iter = ChanRangeIter<'a, T>;
+    fn range(self) -> Self::Iter {
+        ChanRangeIter { c: self }
     }
 }

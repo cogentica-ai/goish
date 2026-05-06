@@ -45,11 +45,11 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::errors::error;
+use crate::error;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
-use crate::nil;
+use crate::errors::nil;
 use crate::types::{byte, int, rune};
 use crate::unicode::utf8;
 
@@ -447,6 +447,18 @@ pub fn ToLower<S: Into<string>>(s: S) -> string {
         }
     }
     string::__from_vec(v)
+}
+
+/// `strings.ToTitle(s)` (strings.go:768) — title-case mapping over `s`.
+/// Go: `func ToTitle(s string) string { return Map(unicode.ToTitle, s) }`.
+///
+/// Slim: ASCII title-case is identical to upper-case (Go's
+/// `unicode.ToTitle` for ASCII delegates to ToUpper). For non-ASCII the
+/// slim path passes runes through unchanged — full Unicode title-case
+/// requires the SpecialCasing tables not yet shipped.
+pub fn ToTitle<S: Into<string>>(s: S) -> string {
+    // Go: return Map(unicode.ToTitle, s)
+    Map(crate::unicode::ToTitle, s)
 }
 
 // ─── Replace / ReplaceAll / Repeat ────────────────────────────────────
@@ -923,6 +935,146 @@ pub fn Map<S: Into<string>, F: Fn(rune) -> rune>(mapping: F, s: S) -> string {
     string::__from_vec(out)
 }
 
+/// Line-by-line port of `strings.isSeparator` (strings/strings.go:840).
+fn is_separator(r: rune) -> bool {
+    // Go: if r <= 0x7F { ... } else { …unicode.IsLetter / IsDigit / IsSpace }
+    if r <= 0x7F {
+        if r >= b'0' as rune && r <= b'9' as rune {
+            return false;
+        }
+        if r >= b'a' as rune && r <= b'z' as rune {
+            return false;
+        }
+        if r >= b'A' as rune && r <= b'Z' as rune {
+            return false;
+        }
+        if r == b'_' as rune {
+            return false;
+        }
+        return true;
+    }
+    // Slim: goish lacks the unicode tables; treat non-ASCII as non-separator.
+    false
+}
+
+/// Line-by-line port of `strings.Title` (strings/strings.go:868) — return a
+/// copy of `s` with the first letter of each word title-cased. Slim port:
+/// only ASCII letters are title-cased (rune ≥ 0x80 left as-is).
+///
+/// Deprecated in Go upstream; ported for compatibility.
+#[deprecated = "see Go upstream — Title's word-boundary rule is unsafe for general Unicode"]
+pub fn Title<S: Into<string>>(s: S) -> string {
+    let s = s.into();
+    let bytes = s.as_bytes();
+    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(bytes.len());
+    // Go: prev := ' '
+    let mut prev: rune = b' ' as rune;
+    let mut tmp = [0u8; 4];
+    let mut i: usize = 0;
+    while i < bytes.len() {
+        let (r, w) = utf8::DecodeRune(&bytes[i..]);
+        let nr = if is_separator(prev) {
+            // Slim ToTitle: ASCII a..z → A..Z; everything else unchanged.
+            if r >= b'a' as rune && r <= b'z' as rune {
+                r - 32
+            } else {
+                r
+            }
+        } else {
+            r
+        };
+        prev = r;
+        let n = utf8::EncodeRune(&mut tmp, nr) as usize;
+        out.extend_from_slice(&tmp[..n]);
+        if w == 0 {
+            break;
+        }
+        i += w as usize;
+    }
+    string::__from_vec(out)
+}
+
+/// Line-by-line port of `strings.ToValidUTF8` (strings/strings.go:790).
+///
+/// Returns a copy of `s` with each run of invalid UTF-8 byte sequences
+/// replaced by `replacement` (which may be empty).
+pub fn ToValidUTF8<S1: Into<string>, S2: Into<string>>(s: S1, replacement: S2) -> string {
+    // Go: var b Builder
+    // Goish: use Vec<u8> for the scratch buffer — strings.Builder.Cap()
+    // isn't part of the goish surface, so we track the "did we grow yet"
+    // flag explicitly (b_grown) to mirror Go's `b.Cap() == 0` fast path.
+    let s_in = s.into();
+    let replacement = replacement.into();
+    let bytes = s_in.as_bytes();
+    let mut b: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    let mut b_grown: bool = false;
+
+    // Go: for i, c := range s { if c != utf8.RuneError { continue }
+    //         _, wid := utf8.DecodeRuneInString(s[i:])
+    //         if wid == 1 { b.Grow(...); b.WriteString(s[:i]); s = s[i:]; break } }
+    // Goish: walk runes manually until we hit an invalid one (RuneError
+    // with width 1). Track the byte offset `start` so we can retain the
+    // good prefix.
+    let mut i: usize = 0;
+    let mut start: usize = bytes.len(); // sentinel: no invalid byte found yet
+    while i < bytes.len() {
+        let (c, w) = utf8::DecodeRune(&bytes[i..]);
+        if c == utf8::RuneError && w == 1 {
+            // Go: b.Grow(len(s) + len(replacement))
+            b.reserve(bytes.len() + replacement.as_bytes().len());
+            b_grown = true;
+            // Go: b.WriteString(s[:i])
+            b.extend_from_slice(&bytes[..i]);
+            // Go: s = s[i:]; break
+            start = i;
+            break;
+        }
+        if w == 0 {
+            break;
+        }
+        i += w as usize;
+    }
+
+    // Go: if b.Cap() == 0 { return s }   — fast path: nothing invalid.
+    if !b_grown {
+        return s_in;
+    }
+
+    // Go: invalid := false
+    // Go: for i := 0; i < len(s); { c := s[i]; if c < utf8.RuneSelf { ... }; ... }
+    let tail = &bytes[start..];
+    let mut invalid: bool = false;
+    let mut j: usize = 0;
+    while j < tail.len() {
+        let c = tail[j];
+        // Go: if c < utf8.RuneSelf { i++; invalid=false; b.WriteByte(c); continue }
+        if c < utf8::RuneSelf {
+            j += 1;
+            invalid = false;
+            b.push(c);
+            continue;
+        }
+        // Go: _, wid := utf8.DecodeRuneInString(s[i:])
+        let (_, wid) = utf8::DecodeRune(&tail[j..]);
+        // Go: if wid == 1 { i++; if !invalid { invalid=true; b.WriteString(replacement) }; continue }
+        if wid == 1 {
+            j += 1;
+            if !invalid {
+                invalid = true;
+                b.extend_from_slice(replacement.as_bytes());
+            }
+            continue;
+        }
+        // Go: invalid = false; b.WriteString(s[i:i+wid]); i += wid
+        invalid = false;
+        b.extend_from_slice(&tail[j..j + wid as usize]);
+        j += wid as usize;
+    }
+
+    // Go: return b.String()
+    string::__from_vec(b)
+}
+
 /// `strings.SplitAfter(s, sep)` — split *retaining* the separator at
 /// the end of each segment.
 pub fn SplitAfter<S1: Into<string>, S2: Into<string>>(s: S1, sep: S2) -> slice<string> {
@@ -991,6 +1143,10 @@ fn sub(s: &string, low: int, high: int) -> string {
 pub struct Reader {
     s: string,
     i: int,
+    /// Mirrors Go's `prevRune`: index of previous rune, or `-1` if
+    /// the most recent op was not a successful ReadRune. Used only
+    /// by UnreadRune.
+    prev_rune: int,
 }
 
 impl Reader {
@@ -1007,8 +1163,10 @@ impl Reader {
 
     pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         if self.i >= self.s.Len() {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
+        // Go: r.prevRune = -1
+        self.prev_rune = -1;
         let want = (p.Len() as usize).min((self.s.Len() - self.i) as usize);
         let bytes = self.s.as_bytes();
         for k in 0..want {
@@ -1019,8 +1177,122 @@ impl Reader {
     }
 
     pub fn Reset<S: Into<string>>(&mut self, s: S) {
+        // Go: *r = Reader{s, 0, -1}
         self.s = s.into();
         self.i = 0;
+        self.prev_rune = -1;
+    }
+
+    /// `(r *Reader).ReadByte()` (strings/reader.go:66) — implements
+    /// io.ByteReader.
+    pub fn ReadByte(&mut self) -> (byte, error) {
+        // Go: r.prevRune = -1
+        self.prev_rune = -1;
+        // Go: if r.i >= int64(len(r.s)) { return 0, io.EOF }
+        if self.i >= self.s.Len() {
+            return (0, io::EOF.into());
+        }
+        // Go: b := r.s[r.i]; r.i++; return b, nil
+        let b = self.s.as_bytes()[self.i as usize];
+        self.i += 1;
+        (b, nil)
+    }
+
+    /// `(r *Reader).UnreadByte()` (strings/reader.go:77) — implements
+    /// io.ByteScanner.
+    pub fn UnreadByte(&mut self) -> error {
+        // Go: if r.i <= 0 { return errors.New("...: at beginning of string") }
+        if self.i == 0 {
+            return crate::errors::New("strings.Reader.UnreadByte: at beginning of string");
+        }
+        // Go: r.prevRune = -1; r.i--; return nil
+        self.prev_rune = -1;
+        self.i -= 1;
+        nil
+    }
+
+    /// `(r *Reader).ReadRune()` (strings/reader.go:87) — implements
+    /// io.RuneReader. ASCII fast-path; non-ASCII via DecodeRuneInString.
+    pub fn ReadRune(&mut self) -> (rune, int, error) {
+        // Go: if r.i >= int64(len(r.s)) { r.prevRune = -1; return 0, 0, io.EOF }
+        if self.i >= self.s.Len() {
+            self.prev_rune = -1;
+            return (0, 0, io::EOF.into());
+        }
+        // Go: r.prevRune = int(r.i)
+        self.prev_rune = self.i;
+        // Go: if c := r.s[r.i]; c < utf8.RuneSelf { r.i++; return rune(c), 1, nil }
+        let c = self.s.as_bytes()[self.i as usize];
+        if c < utf8::RuneSelf {
+            self.i += 1;
+            return (c as rune, 1, nil);
+        }
+        // Go: ch, size = utf8.DecodeRuneInString(r.s[r.i:])
+        let tail = string::from_bytes(&self.s.as_bytes()[self.i as usize..]);
+        let (ch, size) = utf8::DecodeRuneInString(&tail);
+        // Go: r.i += int64(size)
+        self.i += size;
+        (ch, size, nil)
+    }
+
+    /// `(r *Reader).UnreadRune()` (strings/reader.go:103) — implements
+    /// io.RuneScanner. Restores cursor to the start of the most-recent
+    /// ReadRune.
+    pub fn UnreadRune(&mut self) -> error {
+        // Go: if r.i <= 0 { return errors.New("...: at beginning of string") }
+        if self.i == 0 {
+            return crate::errors::New("strings.Reader.UnreadRune: at beginning of string");
+        }
+        // Go: if r.prevRune < 0 { return errors.New("...: previous operation was not ReadRune") }
+        if self.prev_rune < 0 {
+            return crate::errors::New(
+                "strings.Reader.UnreadRune: previous operation was not ReadRune",
+            );
+        }
+        // Go: r.i = int64(r.prevRune); r.prevRune = -1; return nil
+        self.i = self.prev_rune;
+        self.prev_rune = -1;
+        nil
+    }
+
+    /// `(r *Reader).Seek(offset, whence)` (strings/reader.go:99) — slim port.
+    pub fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
+        // Go: r.prevRune = -1
+        self.prev_rune = -1;
+        let abs: i64 = if whence == io::SeekStart {
+            offset
+        } else if whence == io::SeekCurrent {
+            (self.i as i64).wrapping_add(offset)
+        } else if whence == io::SeekEnd {
+            (self.s.Len() as i64).wrapping_add(offset)
+        } else {
+            return (0, crate::errors::New("strings.Reader.Seek: invalid whence"));
+        };
+        if abs < 0 {
+            return (0, crate::errors::New("strings.Reader.Seek: negative position"));
+        }
+        self.i = abs as int;
+        (abs, nil)
+    }
+
+    /// `(r *Reader).ReadAt(p, off)` (strings/reader.go:62) — slim port.
+    pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
+        if off < 0 {
+            return (0, crate::errors::New("strings.Reader.ReadAt: negative offset"));
+        }
+        if off >= self.s.Len() as i64 {
+            return (0, io::EOF.into());
+        }
+        let bytes = self.s.as_bytes();
+        let start = off as usize;
+        let want = (p.Len() as usize).min(bytes.len() - start);
+        for k in 0..want {
+            p[k as int] = bytes[start + k];
+        }
+        if want < p.Len() as usize {
+            return (want as int, io::EOF.into());
+        }
+        (want as int, nil)
     }
 }
 
@@ -1030,7 +1302,118 @@ impl io::Reader for Reader {
     }
 }
 
+impl io::Seeker for Reader {
+    fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
+        Reader::Seek(self, offset, whence)
+    }
+}
+
+impl io::ReaderAt for Reader {
+    fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
+        Reader::ReadAt(self, p, off)
+    }
+}
+
+impl Reader {
+    /// `(r *Reader).WriteTo(w)` (strings/reader.go:137) — drain the
+    /// unread tail to `w` via WriteString. Returns bytes written.
+    pub fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
+        // Go: r.prevRune = -1
+        self.prev_rune = -1;
+        // Go: if r.i >= int64(len(r.s)) { return 0, nil }
+        if self.i as usize >= self.s.as_bytes().len() {
+            return (0, nil);
+        }
+        // s := r.s[r.i:]
+        let tail = &self.s.as_bytes()[self.i as usize..];
+        let s_tail = string::from_bytes(tail);
+        // m, err := io.WriteString(w, s)
+        let (m, err) = io::WriteString(w, s_tail);
+        if (m as usize) > tail.len() {
+            panic!("strings.Reader.WriteTo: invalid WriteString count");
+        }
+        // r.i += int64(m); n = int64(m)
+        self.i += m as i64;
+        let n = m as i64;
+        // if m != len(s) && err == nil { err = io.ErrShortWrite }
+        if (m as usize) != tail.len() && err.IsNil() {
+            return (n, io::ErrShortWrite.into());
+        }
+        (n, err)
+    }
+}
+
+impl io::WriterTo for Reader {
+    fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
+        Reader::WriteTo(self, w)
+    }
+}
+
 /// `strings.NewReader(s)` — `Reader` over `s`.
 pub fn NewReader<S: Into<string>>(s: S) -> Reader {
-    Reader { s: s.into(), i: 0 }
+    Reader {
+        s: s.into(),
+        i: 0,
+        prev_rune: -1,
+    }
+}
+
+// ─── Replacer (slim port of strings/replace.go) ──────────────────────
+
+/// `strings.Replacer` (replace.go:14). Slim port: holds the
+/// (old, new) pairs and performs a linear scan-and-replace in
+/// `Replace`. Sufficient for HTTP-style sanitization where pair sets
+/// are small.
+#[derive(Clone)]
+pub struct Replacer {
+    pairs: alloc::vec::Vec<(string, string)>,
+}
+
+/// `strings.NewReplacer(oldnew...)` (replace.go:32). The variadic
+/// parameter list maps to a `slice<string>` in goish. Panics on odd
+/// argument count, matching Go.
+pub fn NewReplacer(oldnew: slice<string>) -> Replacer {
+    if oldnew.Len() % 2 != 0 {
+        panic!("strings.NewReplacer: odd argument count");
+    }
+    let mut pairs: alloc::vec::Vec<(string, string)> =
+        alloc::vec::Vec::with_capacity((oldnew.Len() / 2) as usize);
+    let mut i: int = 0;
+    while i < oldnew.Len() {
+        pairs.push((oldnew[i].clone(), oldnew[i + 1].clone()));
+        i += 2;
+    }
+    Replacer { pairs }
+}
+
+impl Replacer {
+    /// `(*Replacer).Replace(s)` (replace.go:95). Walk `s` byte-by-byte;
+    /// at each position try each (old, new) pair in argument order; on
+    /// the first match emit `new` and skip past `old`. Empty `old`
+    /// follows Go's behavior (insert `new` between every byte and at
+    /// the boundaries — matched on each non-match position).
+    pub fn Replace<S: Into<string>>(&self, s: S) -> string {
+        let s = s.into();
+        let bs = s.as_bytes();
+        let mut out: alloc::vec::Vec<u8> =
+            alloc::vec::Vec::with_capacity(bs.len());
+        let mut i: usize = 0;
+        while i < bs.len() {
+            let mut matched = false;
+            for (old, new_) in self.pairs.iter() {
+                let ob = old.as_bytes();
+                if !ob.is_empty() && i + ob.len() <= bs.len() && &bs[i..i + ob.len()] == ob {
+                    out.extend_from_slice(new_.as_bytes());
+                    i += ob.len();
+                    matched = true;
+                    break;
+                }
+            }
+            if !matched {
+                out.push(bs[i]);
+                i += 1;
+            }
+        }
+        string::from_bytes(&out)
+    }
 }

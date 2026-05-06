@@ -22,5 +22,6 @@ pub type byte = u8;
 pub type rune = i32;
 pub type int = i64;
 pub type uint = u64;
+pub type uintptr = u64;
 pub type float32 = f32;
 pub type float64 = f64;

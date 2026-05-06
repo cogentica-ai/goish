@@ -97,6 +97,40 @@ impl BigEndian {
     }
 
     /// Mirrors `String() string` from the ByteOrder interface.
+    /// Append `v` as 2 big-endian bytes to `buf` and return the
+    /// extended buffer. (binary.go: BigEndian.AppendUint16)
+    pub fn AppendUint16(self, buf: crate::goslice::slice<crate::types::byte>, v: u16) -> crate::goslice::slice<crate::types::byte> {
+        let mut v_buf: alloc::vec::Vec<u8> = buf.__into_vec();
+        v_buf.push((v >> 8) as u8);
+        v_buf.push(v as u8);
+        crate::goslice::slice::__from_vec(v_buf)
+    }
+
+    /// Append `v` as 4 big-endian bytes to `buf`.
+    pub fn AppendUint32(self, buf: crate::goslice::slice<crate::types::byte>, v: u32) -> crate::goslice::slice<crate::types::byte> {
+        let mut v_buf: alloc::vec::Vec<u8> = buf.__into_vec();
+        v_buf.push((v >> 24) as u8);
+        v_buf.push((v >> 16) as u8);
+        v_buf.push((v >> 8) as u8);
+        v_buf.push(v as u8);
+        crate::goslice::slice::__from_vec(v_buf)
+    }
+
+    /// Append `v` as 8 big-endian bytes to `buf`.
+    pub fn AppendUint64(self, buf: crate::goslice::slice<crate::types::byte>, v: u64) -> crate::goslice::slice<crate::types::byte> {
+        let mut v_buf: alloc::vec::Vec<u8> = buf.__into_vec();
+        v_buf.push((v >> 56) as u8);
+        v_buf.push((v >> 48) as u8);
+        v_buf.push((v >> 40) as u8);
+        v_buf.push((v >> 32) as u8);
+        v_buf.push((v >> 24) as u8);
+        v_buf.push((v >> 16) as u8);
+        v_buf.push((v >> 8) as u8);
+        v_buf.push(v as u8);
+        crate::goslice::slice::__from_vec(v_buf)
+    }
+
+    /// Mirrors `String() string` from the ByteOrder interface.
     pub fn String(self) -> string {
         string::from_static("BigEndian")
     }
@@ -156,7 +190,128 @@ impl LittleEndian {
         b[7] = (v >> 56) as u8;
     }
 
+    /// Append `v` as 2 little-endian bytes to `buf`.
+    pub fn AppendUint16(self, buf: crate::goslice::slice<crate::types::byte>, v: u16) -> crate::goslice::slice<crate::types::byte> {
+        let mut v_buf: alloc::vec::Vec<u8> = buf.__into_vec();
+        v_buf.push(v as u8);
+        v_buf.push((v >> 8) as u8);
+        crate::goslice::slice::__from_vec(v_buf)
+    }
+
+    /// Append `v` as 4 little-endian bytes to `buf`.
+    pub fn AppendUint32(self, buf: crate::goslice::slice<crate::types::byte>, v: u32) -> crate::goslice::slice<crate::types::byte> {
+        let mut v_buf: alloc::vec::Vec<u8> = buf.__into_vec();
+        v_buf.push(v as u8);
+        v_buf.push((v >> 8) as u8);
+        v_buf.push((v >> 16) as u8);
+        v_buf.push((v >> 24) as u8);
+        crate::goslice::slice::__from_vec(v_buf)
+    }
+
+    /// Append `v` as 8 little-endian bytes to `buf`.
+    pub fn AppendUint64(self, buf: crate::goslice::slice<crate::types::byte>, v: u64) -> crate::goslice::slice<crate::types::byte> {
+        let mut v_buf: alloc::vec::Vec<u8> = buf.__into_vec();
+        v_buf.push(v as u8);
+        v_buf.push((v >> 8) as u8);
+        v_buf.push((v >> 16) as u8);
+        v_buf.push((v >> 24) as u8);
+        v_buf.push((v >> 32) as u8);
+        v_buf.push((v >> 40) as u8);
+        v_buf.push((v >> 48) as u8);
+        v_buf.push((v >> 56) as u8);
+        crate::goslice::slice::__from_vec(v_buf)
+    }
+
     pub fn String(self) -> string {
         string::from_static("LittleEndian")
     }
+}
+
+// ─── Varint encoding (varint.go) ────────────────────────────────────
+
+/// `MaxVarintLen16` (varint.go:34) — max bytes for a varint-16.
+pub const MaxVarintLen16: crate::types::int = 3;
+/// `MaxVarintLen32` (varint.go:35) — max bytes for a varint-32.
+pub const MaxVarintLen32: crate::types::int = 5;
+/// `MaxVarintLen64` (varint.go:36) — max bytes for a varint-64.
+pub const MaxVarintLen64: crate::types::int = 10;
+
+/// `binary.AppendUvarint(buf, x)` (varint.go:41) — append the LEB128
+/// varint encoding of `x` to `buf`. Each byte holds 7 bits; MSB=1 in
+/// all but the last byte to mark continuation.
+pub fn AppendUvarint(
+    buf: crate::goslice::slice<crate::types::byte>,
+    mut x: crate::types::uint,
+) -> crate::goslice::slice<crate::types::byte> {
+    let mut v_buf: alloc::vec::Vec<u8> = buf.__into_vec();
+    // Go: for x >= 0x80 { buf = append(buf, byte(x)|0x80); x >>= 7 }
+    while x >= 0x80 {
+        v_buf.push((x as u8) | 0x80);
+        x >>= 7;
+    }
+    // Go: return append(buf, byte(x))
+    v_buf.push(x as u8);
+    crate::goslice::slice::__from_vec(v_buf)
+}
+
+/// `binary.Uvarint(buf)` (varint.go:68) — decode a varint from `buf`.
+/// Returns `(value, n)`:
+///   * `n > 0` — number of bytes consumed.
+///   * `n == 0` — buf too short.
+///   * `n < 0`  — overflow; `-n` is the byte count read.
+pub fn Uvarint(buf: crate::goslice::slice<crate::types::byte>) -> (crate::types::uint, crate::types::int) {
+    let mut x: crate::types::uint = 0;
+    let mut s: u32 = 0;
+    let len = buf.Len();
+    let mut i: crate::types::int = 0;
+    // Go: for i, b := range buf { ... }
+    while i < len {
+        // Go: if i == MaxVarintLen64 { return 0, -(i+1) }
+        if i == MaxVarintLen64 {
+            return (0, -(i + 1));
+        }
+        let b = buf[i];
+        // Go: if b < 0x80 { ... return x | uint64(b)<<s, i+1 }
+        if b < 0x80 {
+            // Overflow guard: at MaxVarintLen64-1, the top bits of
+            // `b` would shift past bit 63.
+            if i == MaxVarintLen64 - 1 && b > 1 {
+                return (0, -(i + 1));
+            }
+            return (x | (b as crate::types::uint) << s, i + 1);
+        }
+        // Go: x |= uint64(b&0x7f) << s; s += 7
+        x |= ((b & 0x7f) as crate::types::uint) << s;
+        s += 7;
+        i += 1;
+    }
+    // Go: return 0, 0  — buf too small.
+    (0, 0)
+}
+
+/// `binary.AppendVarint(buf, x)` (varint.go:91) — append zig-zag
+/// encoded varint of signed `x`.
+pub fn AppendVarint(
+    buf: crate::goslice::slice<crate::types::byte>,
+    x: crate::types::int,
+) -> crate::goslice::slice<crate::types::byte> {
+    // Go: ux := uint64(x) << 1; if x < 0 { ux = ^ux }
+    let mut ux = (x as u64).wrapping_shl(1);
+    if x < 0 {
+        ux = !ux;
+    }
+    AppendUvarint(buf, ux as crate::types::uint)
+}
+
+/// `binary.Varint(buf)` (varint.go:115) — decode zig-zag signed varint.
+/// Returns `(value, n)` with the same conventions as `Uvarint`.
+pub fn Varint(buf: crate::goslice::slice<crate::types::byte>) -> (crate::types::int, crate::types::int) {
+    // Go: ux, n := Uvarint(buf)
+    let (ux, n) = Uvarint(buf);
+    // Go: x := int64(ux >> 1); if ux&1 != 0 { x = ^x }
+    let mut x = (ux >> 1) as crate::types::int;
+    if (ux & 1) != 0 {
+        x = !x;
+    }
+    (x, n)
 }

@@ -41,6 +41,16 @@ impl Len for str {
     }
 }
 
+// Blanket impl for borrows: `len(&line)` where `line` is already
+// `&T` (from a range-loop binding) ends up as `len(&&T)`. Forward
+// to the underlying `T`'s Len impl so call sites stay Go-shaped.
+impl<T: Len + ?Sized> Len for &T {
+    #[inline]
+    fn __len(&self) -> int {
+        (**self).__len()
+    }
+}
+
 /// Go's `len`: returns the number of elements. Returns `int` (signed,
 /// platform-sized) to match Go. Auto-borrow makes call sites match Go:
 ///

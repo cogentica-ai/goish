@@ -26,6 +26,7 @@ use alloc::vec::Vec;
 use core::ops::{Deref, DerefMut, Index, IndexMut};
 
 use crate::builtin::{Cap as CapTrait, Len as LenTrait};
+use crate::convert::__SliceIndex;
 use crate::types::int;
 
 #[derive(Clone)]
@@ -121,6 +122,35 @@ impl<T: Clone> From<&slice<T>> for slice<T> {
     }
 }
 
+// ─── nil ↔ slice<T> wiring (polymorphic Nil sentinel) ────────────────
+//
+// `let s: slice<int> = nil.into();` produces a zero-length slice.
+// `if s == nil` reports `true` for empty slices. Goish's slice is
+// always allocated (no separate "nil header"), so the equality is
+// "len == 0" — matches user intent for `if s == nil` even though
+// it's slightly looser than Go's strict `slice header == zero` test.
+
+impl<T: Clone> From<crate::nilval::Nil> for slice<T> {
+    #[inline]
+    fn from(_: crate::nilval::Nil) -> Self {
+        slice::<T>::__from_vec(alloc::vec::Vec::new())
+    }
+}
+
+impl<T> PartialEq<crate::nilval::Nil> for slice<T> {
+    #[inline]
+    fn eq(&self, _: &crate::nilval::Nil) -> bool {
+        self.Len() == 0
+    }
+}
+
+impl<T> PartialEq<slice<T>> for crate::nilval::Nil {
+    #[inline]
+    fn eq(&self, other: &slice<T>) -> bool {
+        other.Len() == 0
+    }
+}
+
 // ─── builtin len(xs) / cap(xs) — see builtin.rs for `len` ─────────────
 
 impl<T> LenTrait for slice<T> {
@@ -139,16 +169,18 @@ impl<T> CapTrait for slice<T> {
 
 // ─── xs[i] — Go-faithful indexing (panics on out-of-range) ────────────
 
-impl<T> Index<int> for slice<T> {
+// Generic over any integer type to match Go's `s[i]` (where i can be
+// any integer kind, including byte). See convert.rs::__SliceIndex.
+impl<T, I: __SliceIndex> Index<I> for slice<T> {
     type Output = T;
-    fn index(&self, i: int) -> &T {
-        &self.inner[i as usize]
+    fn index(&self, i: I) -> &T {
+        &self.inner[i.__sidx()]
     }
 }
 
-impl<T> IndexMut<int> for slice<T> {
-    fn index_mut(&mut self, i: int) -> &mut T {
-        &mut self.inner[i as usize]
+impl<T, I: __SliceIndex> IndexMut<I> for slice<T> {
+    fn index_mut(&mut self, i: I) -> &mut T {
+        &mut self.inner[i.__sidx()]
     }
 }
 
@@ -172,5 +204,15 @@ impl<T> DerefMut for slice<T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut [T] {
         &mut self.inner
+    }
+}
+
+// `AsRef<[T]>` lets generic helpers in goish (`utf8::RuneCount<P:
+// AsRef<[u8]>>`, etc.) accept `slice<T>` directly — no manual `.as_slice()`
+// at the call site, and ports stay free of `&[T]` leaks per §3.
+impl<T> AsRef<[T]> for slice<T> {
+    #[inline]
+    fn as_ref(&self) -> &[T] {
+        &self.inner
     }
 }

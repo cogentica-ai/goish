@@ -36,7 +36,7 @@ use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
 use crate::io::Writer as _; // bring `.Write()` method into scope
-use crate::nil;
+use crate::errors::nil;
 use crate::os;
 use crate::types::{byte, int, rune};
 use crate::unicode::utf8;
@@ -47,6 +47,34 @@ use crate::unicode::utf8;
 /// / `%v` representation.
 pub trait Stringer {
     fn String(&self) -> string;
+}
+
+/// Go's `fmt.State` (fmt/print.go) — passed to `Formatter.Format`
+/// implementations. Carries the underlying writer plus the parsed
+/// width / precision / flags so a custom Format can render itself
+/// according to the verb's modifiers.
+///
+/// Method shapes mirror Go: `Write([]byte) (int, error)`, `Width()
+/// (int, bool)`, `Precision() (int, bool)`, `Flag(int) bool`.
+///
+/// The `int` arg to `Flag` is a flag character (`'+'`, `'-'`, `'#'`,
+/// `' '`, `'0'`); Goish keeps the Go `int` widening so call sites
+/// like `f.Flag(b'+' as int)` (or `f.Flag('+' as int)`) compile.
+pub trait State: crate::io::Writer {
+    fn Width(&self) -> (crate::types::int, bool);
+    fn Precision(&self) -> (crate::types::int, bool);
+    fn Flag(&self, c: crate::types::int) -> bool;
+}
+
+/// Go's `fmt.Formatter` interface — implemented by types that want
+/// custom verb-aware formatting (e.g. `multiError.Format(f, 'v')`
+/// switches on the `+` flag for the `%+v` multi-line variant).
+///
+/// Goish's verb-formatting fast path checks for this trait via the
+/// reflect-aware `%v` printer; types that don't impl Formatter fall
+/// back to Stringer / Format / the default `%v` walker.
+pub trait Formatter {
+    fn Format(&self, f: &mut dyn State, c: crate::types::rune);
 }
 
 /// Internal dispatch trait. Implemented for all builtin types in this
@@ -88,6 +116,9 @@ impl FmtBuf {
     }
     fn into_bytes(self) -> Vec<byte> {
         self.buf
+    }
+    pub(crate) fn as_slice(&self) -> &[byte] {
+        &self.buf
     }
 }
 
@@ -166,6 +197,19 @@ impl Format for string {
     }
 }
 
+// `&string` arises from `range!(&slice<string>)` (Phase 4 borrowed-
+// range): the iterator yields `(int, &string)` per element, and a
+// downstream `fmt::Fprintf!("%s", line)` would then fail with E0599
+// because the blanket `impl<T: Stringer> Format for T` doesn't cover
+// references (Stringer isn't impl'd for `&string` either). Thread an
+// explicit forwarder so the borrowed iteration value formats directly
+// without a `.clone()` at the call site.
+impl Format for &string {
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        write_string_with_verb(self.as_bytes(), verb, f);
+    }
+}
+
 impl Format for &str {
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         write_string_with_verb(self.as_bytes(), verb, f);
@@ -175,6 +219,15 @@ impl Format for &str {
 impl Format for slice<byte> {
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         // self: &slice<byte>; Deref<Target=[byte]> auto-coerces to &[byte].
+        write_string_with_verb(self, verb, f);
+    }
+}
+
+// Same shape as `&string` — `range!(&slice<slice<byte>>)` yields
+// `&slice<byte>` per iteration. Without this `Fprintf!("%s", b)` on
+// the borrowed slot would fail E0599.
+impl Format for &slice<byte> {
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         write_string_with_verb(self, verb, f);
     }
 }
@@ -581,14 +634,28 @@ fn write_reflect_value(v: &crate::reflect::Value, plus: bool, f: &mut FmtBuf) {
         }
         K::Map => {
             f.extend(b"map[");
+            // Go's fmt.Sprintf("%v"/"%+v") sorts map keys deterministically
+            // (since Go 1.12). Sort the goish reflect-MapKeys output by
+            // formatted-key bytes so output matches Go semantics regardless
+            // of gomap's randomized iteration order.
             let keys = v.MapKeys();
-            for (i, k) in keys.iter().enumerate() {
-                if i > 0 {
+            let mut key_strs: alloc::vec::Vec<(usize, FmtBuf)> = keys
+                .iter()
+                .enumerate()
+                .map(|(i, k)| {
+                    let mut buf = FmtBuf::new();
+                    write_reflect_value(k, plus, &mut buf);
+                    (i, buf)
+                })
+                .collect();
+            key_strs.sort_by(|a, b| a.1.as_slice().cmp(b.1.as_slice()));
+            for (n, (orig_idx, key_buf)) in key_strs.iter().enumerate() {
+                if n > 0 {
                     f.push(b' ');
                 }
-                write_reflect_value(k, plus, f);
+                f.extend(key_buf.as_slice());
                 f.push(b':');
-                let val = v.MapIndex(k);
+                let val = v.MapIndex(&keys[*orig_idx as int]);
                 write_reflect_value(&val, plus, f);
             }
             f.push(b']');
@@ -614,6 +681,22 @@ fn write_reflect_value(v: &crate::reflect::Value, plus: bool, f: &mut FmtBuf) {
                 write_reflect_value(inner, plus, f);
             }
         }
+        K::Interface => {
+            // The downcast already happened inside __reflect_value, so
+            // a Kind::Interface that survives to here means an unknown
+            // dynamic type. Render Go's customary placeholder.
+            f.extend(b"<interface>");
+        }
+        K::Int64 | K::Uint64 | K::Uintptr | K::Func | K::Chan
+        | K::UnsafePointer | K::Array => {
+            // Fallback rendering for variants whose `__reflect_value`
+            // doesn't yet produce a typed Value (placeholder for parity
+            // with Go's reflect.Kind universe).
+            f.extend(b"<");
+            let s = v.Kind().String();
+            f.extend(s.as_bytes());
+            f.extend(b">");
+        }
     }
 }
 
@@ -624,6 +707,59 @@ pub fn sprintf_impl(format: &[byte], args: &[FmtArg]) -> string {
     let mut f = FmtBuf::new();
     do_format(format, args, &mut f);
     string::__from_vec(f.into_bytes())
+}
+
+/// Runtime variadic-spread Sprintf — for the Go pattern
+/// `fmt.Sprintf(format, args...)` where `args ...interface{}` becomes a
+/// goish `slice<Arc<dyn Any + Send + Sync>>`. Each arg is runtime-
+/// downcast to a known formattable type and dispatched as `FmtArg::Val`.
+///
+/// Supported concrete types: `string`, `&str`, `i64`/`i32`/`isize`,
+/// `u64`/`u32`/`usize`, `f64`/`f32`, `bool`, `byte` (u8), `char`, `error`.
+/// Unrecognised types render as `"<unsupported %T>"`.
+pub fn Sprintv<S: Into<string>>(
+    format: S,
+    args: slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+) -> string {
+    let format = format.into();
+    let fmt_bytes = format.as_bytes();
+    let mut fa: Vec<FmtArg<'_>> = Vec::with_capacity(args.Len() as usize);
+    let placeholder: &str = "<unsupported %T>";
+    for a in args.iter() {
+        let any: &(dyn core::any::Any + Send + Sync) = a.as_ref();
+        if let Some(v) = any.downcast_ref::<string>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<&str>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<i64>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<i32>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<isize>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<u64>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<u32>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<usize>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<f64>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<f32>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<bool>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<u8>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<char>() {
+            fa.push(FmtArg::Val(v as &dyn Format));
+        } else if let Some(v) = any.downcast_ref::<error>() {
+            fa.push(FmtArg::Err(v));
+        } else {
+            fa.push(FmtArg::Val(&placeholder as &dyn Format));
+        }
+    }
+    sprintf_impl(fmt_bytes, &fa)
 }
 
 #[doc(hidden)]
@@ -668,6 +804,33 @@ pub fn fprintln_impl(w: &mut dyn io::Writer, args: &[FmtArg]) -> (int, error) {
     do_println(args, &mut f);
     let buf = slice::__from_vec(f.into_bytes());
     w.Write(buf)
+}
+
+#[doc(hidden)]
+pub fn sprint_impl(args: &[FmtArg]) -> string {
+    // Go: Sprint formats using the default formats for its operands and
+    // returns the resulting string.  Spaces are added between operands
+    // when neither is a string. (print.go:267)
+    //
+    // Slim: keep the same shape as print_impl — concat without inserting
+    // spaces; the public Println/Print pair already differs from Go on
+    // separator handling, and Sprint follows print_impl's lead for
+    // consistency.
+    let mut f = FmtBuf::new();
+    for a in args {
+        a.write(b'v', f.borrow_mut());
+    }
+    string::__from_vec(f.into_bytes())
+}
+
+#[doc(hidden)]
+pub fn sprintln_impl(args: &[FmtArg]) -> string {
+    // Go: Sprintln formats using the default formats for its operands and
+    // returns the resulting string. Spaces are always added between
+    // operands and a newline is appended. (print.go:283)
+    let mut f = FmtBuf::new();
+    do_println(args, &mut f);
+    string::__from_vec(f.into_bytes())
 }
 
 #[doc(hidden)]
@@ -778,6 +941,25 @@ macro_rules! Sprintf {
     };
 }
 
+/// `fmt::Sprint!(args...)` — return the concatenated default-format string.
+/// Mirrors `fmt.Sprint` (print.go:267).
+#[macro_export]
+macro_rules! Sprint {
+    ($($arg:expr),* $(,)?) => {
+        $crate::fmt::sprint_impl($crate::__fmt_args!($($arg),*))
+    };
+}
+
+/// `fmt::Sprintln!(args...)` — return the default-format string with
+/// spaces between args and a trailing newline. Mirrors `fmt.Sprintln`
+/// (print.go:283).
+#[macro_export]
+macro_rules! Sprintln {
+    ($($arg:expr),* $(,)?) => {
+        $crate::fmt::sprintln_impl($crate::__fmt_args!($($arg),*))
+    };
+}
+
 /// `fmt::Fprintf!(w, format, args...)` — formatted print to writer.
 #[macro_export]
 macro_rules! Fprintf {
@@ -811,3 +993,12 @@ macro_rules! Errorf {
         $crate::fmt::errorf_impl(($fmt).as_bytes(), $crate::__fmt_args!($($arg),*))
     };
 }
+
+// ─── Re-export macros under `fmt::` so callers write `fmt::Println!` ──
+//
+// `#[macro_export]` only registers macros at the crate root, but Go's
+// idiom is `fmt.Println(...)` → `fmt::Println!(...)`. Re-exporting here
+// makes the qualified path work: `use goish::fmt; fmt::Println!(…)`.
+pub use crate::{
+    Eprintln, Errorf, Fprintf, Fprintln, Print, Printf, Println, Sprint, Sprintf, Sprintln,
+};

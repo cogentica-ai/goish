@@ -18,7 +18,7 @@ use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use goish::gochan::chan;
 use goish::runtime::sched::schedule;
-use goish::{go, make, select, syscall};
+use goish::{go, make, select, syscall, KB};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -52,7 +52,7 @@ fn test_select_with_nil_recv_chooses_other() {
     {
         let real = real.clone();
         let nil_ch = nil_ch.clone();
-        go!(move || {
+        go!(stack(64 * KB), move || {
             select! {
                 let _v = nil_ch.Recv() => die(b"nil-recv: nil case fired\n"),
                 real.Send(42) => { GOT.store(42, Ordering::Relaxed); },
@@ -62,7 +62,7 @@ fn test_select_with_nil_recv_chooses_other() {
 
     {
         let real = real.clone();
-        go!(move || {
+        go!(stack(64 * KB), move || {
             let (v, _) = real.Recv();
             // ensure consumer sees what we sent
             if v != 42 {
@@ -88,7 +88,7 @@ fn test_select_with_nil_send_chooses_other() {
     {
         let real = real.clone();
         let nil_ch = nil_ch.clone();
-        go!(move || {
+        go!(stack(64 * KB), move || {
             select! {
                 nil_ch.Send(99) => die(b"nil-send: nil case fired\n"),
                 let v = real.Recv() => { GOT_V.store(v, Ordering::Relaxed); },
@@ -110,7 +110,7 @@ fn test_select_with_default_and_all_nil() {
     {
         let n1 = n1.clone();
         let n2 = n2.clone();
-        go!(move || {
+        go!(stack(64 * KB), move || {
             select! {
                 let _ = n1.Recv() => die(b"all-nil-default: n1 fired\n"),
                 n2.Send(5) => die(b"all-nil-default: n2 fired\n"),
@@ -145,7 +145,7 @@ fn test_select_progresses_after_replace() {
     {
         let mut a_h = a.clone();
         let b_h = b.clone();
-        go!(move || {
+        go!(stack(64 * KB), move || {
             for _ in 0..16 {
                 select! {
                     let v = a_h.Recv() => {

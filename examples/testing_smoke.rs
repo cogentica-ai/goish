@@ -28,7 +28,7 @@ fn main() {
 fn test_arithmetic(t: &mut testing::T) {
     let got: int = 2 + 3;
     if got != 5 {
-        t.Errorf(Sprintf!("2+3 = %d, want 5", got));
+        t.Error(Sprintf!("2+3 = %d, want 5", got));
     }
     t.Logf(string::from_static("arithmetic looks fine"));
 }
@@ -39,14 +39,14 @@ fn test_subtests(t: &mut testing::T) {
     t.Run(string::from_static("addition"), |t| {
         let got: int = 1 + 1;
         if got != 2 {
-            t.Errorf(Sprintf!("1+1 = %d, want 2", got));
+            t.Error(Sprintf!("1+1 = %d, want 2", got));
         }
     });
 
     t.Run(string::from_static("multiplication"), |t| {
         let got: int = 6 * 7;
         if got != 42 {
-            t.Errorf(Sprintf!("6*7 = %d, want 42", got));
+            t.Error(Sprintf!("6*7 = %d, want 42", got));
         }
     });
 }

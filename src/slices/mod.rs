@@ -249,6 +249,148 @@ pub fn Clone<T: Clone>(s: &slice<T>) -> slice<T> {
     s.clone()
 }
 
+/// Line-by-line port of `slices.Reverse` (slices/slices.go:481) — reverse
+/// the elements of `s` in place.
+pub fn Reverse<T>(s: &mut slice<T>) {
+    // Go: for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 { s[i], s[j] = s[j], s[i] }
+    let raw: &mut [T] = s;
+    let mut i: usize = 0;
+    if raw.is_empty() {
+        return;
+    }
+    let mut j: usize = raw.len() - 1;
+    while i < j {
+        raw.swap(i, j);
+        i += 1;
+        j -= 1;
+    }
+}
+
+/// Line-by-line port of `slices.Repeat` (slices/slices.go:512) — return
+/// a new slice that repeats `x` `count` times. Result length is
+/// `len(x) * count`. Panics on negative `count` (Go semantics).
+pub fn Repeat<T: Clone>(x: &slice<T>, count: int) -> slice<T> {
+    // Go: if count < 0 { panic("cannot be negative") }
+    if count < 0 {
+        panic!("slices.Repeat: count cannot be negative");
+    }
+    let raw: &[T] = x;
+    let n = raw.len();
+    // Go: hi, lo := bits.Mul(uint(len(x)), uint(count))
+    //     if hi > 0 || lo > maxInt { panic("overflow") }
+    // Goish: usize::checked_mul covers both cases.
+    let total = match n.checked_mul(count as usize) {
+        Some(t) => t,
+        None => panic!("slices.Repeat: len(x) * count overflows"),
+    };
+    // Go: newslice := make(S, int(lo)); copy + double-up loop.
+    // Goish: doubling-copy mirrors Go's algorithm verbatim.
+    let mut out: alloc::vec::Vec<T> = alloc::vec::Vec::with_capacity(total);
+    if n == 0 || count == 0 {
+        return slice::__from_vec(out);
+    }
+    // First copy of x.
+    for el in raw.iter() {
+        out.push(el.clone());
+    }
+    // Go: for n < len(newslice) { n += copy(newslice[n:], newslice[:n]) }
+    let mut filled = n;
+    while filled < total {
+        let take = core::cmp::min(filled, total - filled);
+        // Clone the prefix [0..take) to extend.
+        for k in 0..take {
+            let elem = out[k].clone();
+            out.push(elem);
+        }
+        filled += take;
+    }
+    slice::__from_vec(out)
+}
+
+/// Line-by-line port of `slices.Insert` (slices/slices.go:135) — insert
+/// the values `v...` into `s` at index `i`. Returns the modified slice.
+/// Panics if `i > len(s)` or `i < 0` (matches Go's bounds check).
+///
+/// Goish deviation: Go's `v ...E` variadic becomes `v: &slice<T>`. Goish
+/// slices are not aliased the way Go slices are, so we don't need the
+/// overlap detection / rotateRight branches — we always own the buffer.
+pub fn Insert<T: Clone>(s: slice<T>, i: int, v: &slice<T>) -> slice<T> {
+    // Go: _ = s[i:] // bounds check
+    if i < 0 || (i as usize) > s.Len() as usize {
+        panic!("slices.Insert: index out of range");
+    }
+    // Go: m := len(v); if m == 0 { return s }
+    let m = v.Len() as usize;
+    if m == 0 {
+        return s;
+    }
+    // Goish: own the backing Vec and splice in.
+    let mut out = s.__into_vec();
+    let iu = i as usize;
+    // Build the insert payload by cloning v elementwise.
+    let raw_v: &[T] = v;
+    let mut payload: alloc::vec::Vec<T> = alloc::vec::Vec::with_capacity(m);
+    for el in raw_v.iter() {
+        payload.push(el.clone());
+    }
+    // Vec::splice handles all the shifting in one shot.
+    out.splice(iu..iu, payload);
+    slice::__from_vec(out)
+}
+
+/// Line-by-line port of `slices.Replace` (slices/slices.go:260) — replaces
+/// `s[i:j]` with the given `v` and returns the modified slice. Panics if
+/// `j > len(s)` or `i > j` (Go's bounds-check semantics).
+///
+/// Goish deviation: variadic `v...E` becomes `v: &slice<T>`; aliasing
+/// concerns absent since the backing Vec is owned.
+pub fn Replace<T: Clone>(s: slice<T>, i: int, j: int, v: &slice<T>) -> slice<T> {
+    // Go: _ = s[i:j] // bounds check
+    if i < 0 || j < i || (j as usize) > s.Len() as usize {
+        panic!("slices.Replace: invalid range");
+    }
+    // Go: if i == j { return Insert(s, i, v...) }
+    if i == j {
+        return Insert(s, i, v);
+    }
+    let mut out = s.__into_vec();
+    let iu = i as usize;
+    let ju = j as usize;
+    // Build the replacement payload by cloning v elementwise.
+    let raw_v: &[T] = v;
+    let mut payload: alloc::vec::Vec<T> = alloc::vec::Vec::with_capacity(raw_v.len());
+    for el in raw_v.iter() {
+        payload.push(el.clone());
+    }
+    out.splice(iu..ju, payload);
+    slice::__from_vec(out)
+}
+
+/// Line-by-line port of `slices.Grow` (slices/slices.go:420) — grows
+/// the slice's capacity, if necessary, to guarantee space for another
+/// `n` elements. Panics on negative `n`.
+///
+/// Goish: backing Vec is always owned, so we can call reserve directly.
+pub fn Grow<T>(s: slice<T>, n: int) -> slice<T> {
+    // Go: if n < 0 { panic("cannot be negative") }
+    if n < 0 {
+        panic!("slices.Grow: cannot be negative");
+    }
+    let mut v = s.__into_vec();
+    // Go: if n -= cap(s) - len(s); n > 0 { ... }
+    // Goish: reserve already amortizes; let Vec handle the math.
+    v.reserve(n as usize);
+    slice::__from_vec(v)
+}
+
+/// Line-by-line port of `slices.Clip` (slices/slices.go:433) — drops
+/// unused capacity. In Go: `s[:len(s):len(s)]`. In goish: shrink_to_fit.
+pub fn Clip<T>(s: slice<T>) -> slice<T> {
+    let mut v = s.__into_vec();
+    v.shrink_to_fit();
+    slice::__from_vec(v)
+}
+
 // ─── Func variants — comparator/predicate closures ────────────────────
 //
 // Closure conventions match Go:
@@ -387,11 +529,27 @@ where
     -1
 }
 
-pub fn ContainsFunc<T, F>(s: &slice<T>, pred: F) -> bool
+pub fn ContainsFunc<T: Clone, F>(s: &slice<T>, pred: F) -> bool
 where
-    F: FnMut(&T) -> bool,
+    F: FnMut(T) -> bool,
 {
-    IndexFunc(s, pred) >= 0
+    IndexFuncOwned(s, pred) >= 0
+}
+
+/// Internal: Go-shaped `IndexFunc` that passes elements by value (Go's
+/// closure semantic). T must be Clone so the loop can hand each item
+/// to `pred` by value. Used by `ContainsFunc`; exposed to goishc-
+/// generated code via the alias-form below.
+pub fn IndexFuncOwned<T: Clone, F>(s: &slice<T>, mut pred: F) -> int
+where
+    F: FnMut(T) -> bool,
+{
+    for (i, item) in s.iter().enumerate() {
+        if pred(item.clone()) {
+            return i as int;
+        }
+    }
+    -1
 }
 
 /// `DeleteFunc(s, pred)` — returns a slice with every element `e` where
@@ -414,4 +572,98 @@ where
     let mut v = s.__into_vec();
     v.dedup_by(|a, b| eq(a, b));
     slice::__from_vec(v)
+}
+
+// ─── Sorted (Go 1.23+) ────────────────────────────────────────────────
+//
+// Go's signature is `Sorted[E cmp.Ordered](seq iter.Seq[E]) []E`, but
+// goish has no iter.Seq yet, so the slim version takes `slice<T>` and
+// returns a fresh sorted slice.  Once an iter package lands, the
+// existing `Sorted(s)` callers can stay valid since `slice<T>` is the
+// natural single-pass source.
+
+/// `slices.Sorted(s)` (sort.go: Sorted) — clone `s`, sort ascending,
+/// return. Equivalent to `let s2 = s.clone(); slices::Sort!(s2); s2`.
+/// Slim: takes a `slice<T>` instead of `iter.Seq[T]`.
+pub fn Sorted<T: Ord + Clone>(s: &slice<T>) -> slice<T> {
+    // Go: s := slices.Collect(seq); Sort(s); return s
+    let mut v = (s.clone()).__into_vec();
+    v.sort_unstable();
+    slice::__from_vec(v)
+}
+
+/// `slices.SortedFunc(s, cmp)` (sort.go: SortedFunc) — clone `s`, sort
+/// using `cmp(a, b) -> int` (negative = a<b, 0 = equal, positive = a>b),
+/// return. Slim: takes a `slice<T>` instead of `iter.Seq[T]`.
+pub fn SortedFunc<T: Clone, F>(s: &slice<T>, mut cmp: F) -> slice<T>
+where
+    F: FnMut(&T, &T) -> int,
+{
+    let mut v = (s.clone()).__into_vec();
+    // Go: SortFunc(s, cmp)
+    v.sort_unstable_by(|a, b| {
+        let n = cmp(a, b);
+        if n < 0 {
+            core::cmp::Ordering::Less
+        } else if n == 0 {
+            core::cmp::Ordering::Equal
+        } else {
+            core::cmp::Ordering::Greater
+        }
+    });
+    slice::__from_vec(v)
+}
+
+/// `slices.SortedStableFunc(s, cmp)` — stable variant of `SortedFunc`.
+/// Equal elements keep their original relative order.
+pub fn SortedStableFunc<T: Clone, F>(s: &slice<T>, mut cmp: F) -> slice<T>
+where
+    F: FnMut(&T, &T) -> int,
+{
+    let mut v = (s.clone()).__into_vec();
+    v.sort_by(|a, b| {
+        let n = cmp(a, b);
+        if n < 0 {
+            core::cmp::Ordering::Less
+        } else if n == 0 {
+            core::cmp::Ordering::Equal
+        } else {
+            core::cmp::Ordering::Greater
+        }
+    });
+    slice::__from_vec(v)
+}
+
+/// `slices.Chunk(s, n)` (slices/iter.go:97) — return consecutive
+/// sub-slices of up to `n` elements of `s`. All but the last sub-slice
+/// have size `n`. If `s` is empty, the result is empty (no empty
+/// slice in the sequence). Panics if `n < 1`, matching Go.
+///
+/// Slim deviation: Go returns `iter.Seq[Slice]`; goish has no
+/// `iter.Seq`, so this returns `slice<slice<T>>` eagerly. Each chunk
+/// is a fresh `slice<T>` cloned from the source.
+pub fn Chunk<T: Clone>(s: slice<T>, n: int) -> slice<slice<T>> {
+    // Go: if n < 1 { panic("cannot be less than 1") }
+    if n < 1 {
+        panic!("cannot be less than 1");
+    }
+    let raw: &[T] = &s;
+    let total = raw.len();
+    // Go: for i := 0; i < len(s); i += n { ... yield(s[i : i+end : i+end]) }
+    let mut out: alloc::vec::Vec<slice<T>> = alloc::vec::Vec::new();
+    let n_us = n as usize;
+    let mut i: usize = 0;
+    while i < total {
+        // Go: end := min(n, len(s[i:]))
+        let remaining = total - i;
+        let end = if n_us < remaining { n_us } else { remaining };
+        // Go: yield(s[i : i+end : i+end]) — fresh chunk, no shared cap.
+        let mut chunk: alloc::vec::Vec<T> = alloc::vec::Vec::with_capacity(end);
+        for j in 0..end {
+            chunk.push(raw[i + j].clone());
+        }
+        out.push(slice::__from_vec(chunk));
+        i += n_us;
+    }
+    slice::__from_vec(out)
 }

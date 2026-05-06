@@ -30,7 +30,7 @@ use crate::gostring::string;
 use crate::io;
 use crate::runtime::spin::SpinLock;
 use crate::strconv;
-use crate::types::{byte, float64};
+use crate::types::{byte, float64, int};
 
 // ─── Value ─────────────────────────────────────────────────────────────
 
@@ -91,6 +91,47 @@ impl Value {
     }
 }
 
+// ─── ergonomic From impls — `obj.Set("k", "v")` Just Works ──────────
+//
+// Map.Set is generic over `Into<V>` where V = Value, so any type that
+// `From`-coerces to Value becomes a one-arg literal at the call site.
+// Mirrors Go's untyped map/JSON literals (`map[string]any{"k": "v"}`).
+
+impl From<&str> for Value {
+    #[inline]
+    fn from(s: &str) -> Self {
+        Value::String(string::from(s))
+    }
+}
+
+impl From<string> for Value {
+    #[inline]
+    fn from(s: string) -> Self {
+        Value::String(s)
+    }
+}
+
+impl From<bool> for Value {
+    #[inline]
+    fn from(b: bool) -> Self {
+        Value::Bool(b)
+    }
+}
+
+impl From<f64> for Value {
+    #[inline]
+    fn from(n: f64) -> Self {
+        Value::Number(n)
+    }
+}
+
+impl From<int> for Value {
+    #[inline]
+    fn from(n: int) -> Self {
+        Value::Number(n as f64)
+    }
+}
+
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -127,6 +168,50 @@ impl PartialEq for Value {
     }
 }
 
+// ─── Token / Delim — streaming decoder API ─────────────────────────────
+
+/// A `Token` is one of the JSON lexical tokens returned by [Decoder::Token].
+/// Mirrors Go's `json.Token` interface values (`Delim`, `bool`, `float64`,
+/// `string`, `nil`).  Goish uses an explicit enum because Rust has no `any`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Token {
+    Delim(Delim),
+    Bool(bool),
+    Number(float64),
+    String(string),
+    Null,
+}
+
+/// `json.Delim` — one of the four JSON structural characters `{ } [ ]`.
+/// In Go this is `type Delim rune`; goish stores it as a `byte` since all
+/// four delimiters are ASCII.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Delim(pub byte);
+
+impl Delim {
+    pub fn as_byte(&self) -> byte {
+        self.0
+    }
+}
+
+impl core::fmt::Display for Delim {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0 as char)
+    }
+}
+
+impl PartialEq<Delim> for Token {
+    fn eq(&self, other: &Delim) -> bool {
+        matches!(self, Token::Delim(d) if d.0 == other.0)
+    }
+}
+
+impl PartialEq<Token> for Delim {
+    fn eq(&self, other: &Token) -> bool {
+        matches!(other, Token::Delim(d) if d.0 == self.0)
+    }
+}
+
 // ─── Sentinel errors ───────────────────────────────────────────────────
 
 fn cached_error(slot: &SpinLock<Option<error>>, init: fn() -> error) -> error {
@@ -137,14 +222,9 @@ fn cached_error(slot: &SpinLock<Option<error>>, init: fn() -> error) -> error {
     g.as_ref().unwrap().clone()
 }
 
-pub fn ErrSyntax() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("json: invalid syntax"))
-}
-
-pub fn ErrUnexpectedEnd() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("json: unexpected end of input"))
+crate::var! {
+    pub ErrSyntax: error       = "json: invalid syntax";
+    pub ErrUnexpectedEnd: error = "json: unexpected end of input";
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────
@@ -390,6 +470,119 @@ pub fn Marshal<T: crate::reflect::Reflect + ?Sized>(v: &T) -> (slice<byte>, erro
     (slice::__from_vec(out), nil)
 }
 
+/// `json.Valid(data)` (stream.go:484) — report whether `data` is a
+/// well-formed JSON value (any of object / array / number / string /
+/// bool / null with optional surrounding whitespace).
+///
+/// Slim: routes through the existing recursive-descent parser.
+/// Returns `false` for any syntax error (matching Go); empty input
+/// is invalid because Go's scanner requires at least one value.
+pub fn Valid(data: slice<byte>) -> bool {
+    // Go: scan := newScanner(); defer freeScanner(scan)
+    //     return checkValid(data, scan) == nil
+    let bs: &[byte] = &data;
+    let (_, err) = parse_to_value(bs);
+    err.IsNil()
+}
+
+/// `json.Compact(dst, src)` (indent.go:13) — append a compact form
+/// of `src` to `dst` and return `(extended_dst, err)`. Compact strips
+/// insignificant whitespace between tokens; quoted strings are
+/// preserved verbatim.
+///
+/// Slim: parse to a Value then re-encode (the existing encoder
+/// already produces compact output). Faithful for valid input;
+/// returns `(dst, ErrSyntax)` for invalid input.  Differs from Go
+/// only in that whitespace inside string literals is preserved
+/// (Go's Compact is byte-level — neither version touches string
+/// contents).
+pub fn Compact(dst: slice<byte>, src: slice<byte>) -> (slice<byte>, error) {
+    // Go: scan := newScanner(); ...
+    //     return compact(dst, src, false, scan)
+    let bs: &[byte] = &src;
+    let (v, err) = parse_to_value(bs);
+    if !err.IsNil() {
+        return (dst, err);
+    }
+    let mut out: Vec<byte> = dst.__into_vec();
+    encode_value(&mut out, &v, None, "", 0);
+    (slice::__from_vec(out), nil)
+}
+
+/// `json.Indent(dst, src, prefix, indent)` (indent.go:120) — append an
+/// indented form of `src` to `dst`. Each element in a JSON object or
+/// array begins on a new, indented line beginning with `prefix` followed
+/// by one or more copies of `indent` according to the indentation
+/// nesting. The data appended to `dst` does not begin with the prefix
+/// nor any indentation, to make it easier to embed inside other
+/// formatted JSON data.
+///
+/// Slim: parse to a `Value` then re-encode through the existing
+/// indent-aware encoder. Faithful for valid input; returns
+/// `(dst, ErrSyntax)` on parse error.
+pub fn Indent(dst: slice<byte>, src: slice<byte>, prefix: &str, indent: &str) -> (slice<byte>, error) {
+    // Go: scan := newScanner(); ...
+    //     b, err := appendIndent(b, src, prefix, indent)
+    let bs: &[byte] = &src;
+    let (v, err) = parse_to_value(bs);
+    if !err.IsNil() {
+        return (dst, err);
+    }
+    let mut out: Vec<byte> = dst.__into_vec();
+    let cfg = IndentCfg { prefix, indent };
+    encode_value(&mut out, &v, Some(&cfg), "", 0);
+    (slice::__from_vec(out), nil)
+}
+
+/// `json.HTMLEscape(dst, src)` (indent.go:16) — append `src` to `dst`
+/// with `<`, `>`, `&`, U+2028 and U+2029 inside string literals
+/// changed to `<`, `>`, `&`, ` `, ` ` so that
+/// the JSON will be safe to embed inside HTML `<script>` tags.
+///
+/// Slim note: the byte-level escape matches Go exactly; it does not
+/// distinguish bytes inside vs outside JSON string literals (Go's
+/// implementation does the same byte-level scan).
+pub fn HTMLEscape(dst: slice<byte>, src: slice<byte>) -> slice<byte> {
+    // Go: dst.Grow(len(src))
+    //     dst.Write(appendHTMLEscape(dst.AvailableBuffer(), src))
+    let s: &[byte] = &src;
+    let mut out: Vec<byte> = dst.__into_vec();
+    // Go: start := 0
+    let mut start: usize = 0;
+    // Go: for i, c := range src
+    let mut i: usize = 0;
+    while i < s.len() {
+        let c = s[i];
+        // Go: if c == '<' || c == '>' || c == '&'
+        if c == b'<' || c == b'>' || c == b'&' {
+            // Go: dst = append(dst, src[start:i]...)
+            out.extend_from_slice(&s[start..i]);
+            // Go: dst = append(dst, '\\', 'u', '0', '0', hex[c>>4], hex[c&0xF])
+            out.extend_from_slice(b"\\u00");
+            out.push(hex_digit(c >> 4));
+            out.push(hex_digit(c & 0xF));
+            // Go: start = i + 1
+            start = i + 1;
+        }
+        // Go: if c == 0xE2 && i+2 < len(src) && src[i+1] == 0x80 && src[i+2]&^1 == 0xA8
+        if c == 0xE2 && i + 2 < s.len() && s[i + 1] == 0x80 && (s[i + 2] & !1) == 0xA8 {
+            // Go: dst = append(dst, src[start:i]...)
+            out.extend_from_slice(&s[start..i]);
+            // Go: dst = append(dst, '\\', 'u', '2', '0', '2', hex[src[i+2]&0xF])
+            out.extend_from_slice(b"\\u202");
+            out.push(hex_digit(s[i + 2] & 0xF));
+            // Go: start = i + len(" ")  // 3 bytes
+            start = i + 3;
+        }
+        i += 1;
+    }
+    // Go: return append(dst, src[start:]...)
+    if start < s.len() {
+        out.extend_from_slice(&s[start..]);
+    }
+    slice::__from_vec(out)
+}
+
 /// `json.MarshalIndent(v, prefix, indent)` — pretty-printed variant.
 pub fn MarshalIndent<T: crate::reflect::Reflect + ?Sized>(
     v: &T,
@@ -475,11 +668,17 @@ fn encode_reflect_indent(
 }
 
 fn encode_map(out: &mut Vec<byte>, v: &reflect::Value, cfg: Option<&IndentCfg>, depth: usize) {
-    let keys = v.MapKeys();
+    let mut keys = v.MapKeys();
     if keys.is_empty() {
         out.extend_from_slice(b"{}");
         return;
     }
+    // Go's encoding/json marshals map keys in sorted order.
+    keys.sort_by(|a, b| {
+        let as_ = match a { reflect::Value::String(s) => s.as_bytes(), _ => b"" };
+        let bs = match b { reflect::Value::String(s) => s.as_bytes(), _ => b"" };
+        as_.cmp(bs)
+    });
     out.push(b'{');
     let inner = depth + 1;
     for (i, k) in keys.iter().enumerate() {
@@ -679,10 +878,13 @@ fn encode_object(out: &mut Vec<byte>, o: &map<string, Value>, cfg: Option<&Inden
         out.extend_from_slice(b"{}");
         return;
     }
+    // Go's encoding/json marshals map keys in sorted order.
+    let mut pairs: alloc::vec::Vec<(&string, &Value)> = o.__iter().collect();
+    pairs.sort_by(|(a, _), (b, _)| a.as_bytes().cmp(b.as_bytes()));
     out.push(b'{');
     let inner_depth = depth + 1;
     let mut first = true;
-    for (k, v) in o.__iter() {
+    for (k, v) in pairs {
         if !first {
             out.push(b',');
         }
@@ -745,7 +947,7 @@ fn parse_to_value(data: &[byte]) -> (Value, error) {
     }
     p.skip_ws();
     if p.pos != data.len() {
-        return (Value::Null, ErrSyntax());
+        return (Value::Null, ErrSyntax.into());
     }
     (v, nil)
 }
@@ -785,8 +987,8 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 nil
             }
-            Some(_) => ErrSyntax(),
-            None => ErrUnexpectedEnd(),
+            Some(_) => ErrSyntax.into(),
+            None => ErrUnexpectedEnd.into(),
         }
     }
 
@@ -799,8 +1001,8 @@ impl<'a> Parser<'a> {
             Some(b't') | Some(b'f') => self.parse_bool(),
             Some(b'n') => self.parse_null(),
             Some(b'-') | Some(b'0'..=b'9') => self.parse_number(),
-            Some(_) => (Value::Null, ErrSyntax()),
-            None => (Value::Null, ErrUnexpectedEnd()),
+            Some(_) => (Value::Null, ErrSyntax.into()),
+            None => (Value::Null, ErrUnexpectedEnd.into()),
         }
     }
 
@@ -808,7 +1010,7 @@ impl<'a> Parser<'a> {
         if self.literal_match(b"null") {
             (Value::Null, nil)
         } else {
-            (Value::Null, ErrSyntax())
+            (Value::Null, ErrSyntax.into())
         }
     }
 
@@ -818,7 +1020,7 @@ impl<'a> Parser<'a> {
         } else if self.literal_match(b"false") {
             (Value::Bool(false), nil)
         } else {
-            (Value::Null, ErrSyntax())
+            (Value::Null, ErrSyntax.into())
         }
     }
 
@@ -846,13 +1048,13 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                 }
             }
-            _ => return (Value::Null, ErrSyntax()),
+            _ => return (Value::Null, ErrSyntax.into()),
         }
         // Fraction
         if self.peek() == Some(b'.') {
             self.pos += 1;
             if !matches!(self.peek(), Some(b'0'..=b'9')) {
-                return (Value::Null, ErrSyntax());
+                return (Value::Null, ErrSyntax.into());
             }
             while matches!(self.peek(), Some(b'0'..=b'9')) {
                 self.pos += 1;
@@ -865,7 +1067,7 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
             }
             if !matches!(self.peek(), Some(b'0'..=b'9')) {
-                return (Value::Null, ErrSyntax());
+                return (Value::Null, ErrSyntax.into());
             }
             while matches!(self.peek(), Some(b'0'..=b'9')) {
                 self.pos += 1;
@@ -875,12 +1077,12 @@ impl<'a> Parser<'a> {
         // SAFETY: literal is ASCII digits + '.' / 'e' / sign.
         let s = match core::str::from_utf8(lit) {
             Ok(s) => s,
-            Err(_) => return (Value::Null, ErrSyntax()),
+            Err(_) => return (Value::Null, ErrSyntax.into()),
         };
         let owned = string::from_bytes(s.as_bytes());
         let (n, err) = strconv::ParseFloat(owned, 64);
         if err != nil {
-            return (Value::Null, ErrSyntax());
+            return (Value::Null, ErrSyntax.into());
         }
         (Value::Number(n), nil)
     }
@@ -895,20 +1097,20 @@ impl<'a> Parser<'a> {
 
     fn parse_string_bytes(&mut self) -> (Vec<byte>, error) {
         if self.advance() != Some(b'"') {
-            return (Vec::new(), ErrSyntax());
+            return (Vec::new(), ErrSyntax.into());
         }
         let mut out: Vec<byte> = Vec::new();
         loop {
             let c = match self.advance() {
                 Some(c) => c,
-                None => return (Vec::new(), ErrUnexpectedEnd()),
+                None => return (Vec::new(), ErrUnexpectedEnd.into()),
             };
             match c {
                 b'"' => return (out, nil),
                 b'\\' => {
                     let esc = match self.advance() {
                         Some(c) => c,
-                        None => return (Vec::new(), ErrUnexpectedEnd()),
+                        None => return (Vec::new(), ErrUnexpectedEnd.into()),
                     };
                     match esc {
                         b'"' => out.push(b'"'),
@@ -922,23 +1124,23 @@ impl<'a> Parser<'a> {
                         b'u' => {
                             let cp = match self.parse_hex4() {
                                 Some(v) => v,
-                                None => return (Vec::new(), ErrSyntax()),
+                                None => return (Vec::new(), ErrSyntax.into()),
                             };
                             // Handle surrogate pairs for UTF-16.
                             if (0xD800..=0xDBFF).contains(&cp) {
                                 // High surrogate — must be followed by \uXXXX low surrogate.
                                 if self.advance() != Some(b'\\') {
-                                    return (Vec::new(), ErrSyntax());
+                                    return (Vec::new(), ErrSyntax.into());
                                 }
                                 if self.advance() != Some(b'u') {
-                                    return (Vec::new(), ErrSyntax());
+                                    return (Vec::new(), ErrSyntax.into());
                                 }
                                 let lo = match self.parse_hex4() {
                                     Some(v) => v,
-                                    None => return (Vec::new(), ErrSyntax()),
+                                    None => return (Vec::new(), ErrSyntax.into()),
                                 };
                                 if !(0xDC00..=0xDFFF).contains(&lo) {
-                                    return (Vec::new(), ErrSyntax());
+                                    return (Vec::new(), ErrSyntax.into());
                                 }
                                 let combined =
                                     0x10000 + (((cp - 0xD800) as u32) << 10) + (lo - 0xDC00) as u32;
@@ -950,7 +1152,7 @@ impl<'a> Parser<'a> {
                                 encode_utf8(&mut out, cp as i32);
                             }
                         }
-                        _ => return (Vec::new(), ErrSyntax()),
+                        _ => return (Vec::new(), ErrSyntax.into()),
                     }
                 }
                 _ => out.push(c),
@@ -1004,8 +1206,8 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     return (Value::Array(slice::__from_vec(items)), nil);
                 }
-                Some(_) => return (Value::Null, ErrSyntax()),
-                None => return (Value::Null, ErrUnexpectedEnd()),
+                Some(_) => return (Value::Null, ErrSyntax.into()),
+                None => return (Value::Null, ErrUnexpectedEnd.into()),
             }
         }
     }
@@ -1049,8 +1251,8 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     return (Value::Object(m), nil);
                 }
-                Some(_) => return (Value::Null, ErrSyntax()),
-                None => return (Value::Null, ErrUnexpectedEnd()),
+                Some(_) => return (Value::Null, ErrSyntax.into()),
+                None => return (Value::Null, ErrUnexpectedEnd.into()),
             }
         }
     }
@@ -1109,10 +1311,30 @@ impl<W: io::Writer> Encoder<W> {
 pub struct Decoder<R: io::Reader> {
     r: R,
     buf: Vec<byte>,
+    scan_pos: usize,
+    token_state: u8,
+    token_stack: Vec<u8>,
 }
 
+// Token-state constants — mirror Go's tokenTopValue .. tokenObjectComma.
+const TOKEN_TOP_VALUE: u8 = 0;
+const TOKEN_ARRAY_START: u8 = 1;
+const TOKEN_ARRAY_VALUE: u8 = 2;
+const TOKEN_ARRAY_COMMA: u8 = 3;
+const TOKEN_OBJECT_START: u8 = 4;
+const TOKEN_OBJECT_KEY: u8 = 5;
+const TOKEN_OBJECT_COLON: u8 = 6;
+const TOKEN_OBJECT_VALUE: u8 = 7;
+const TOKEN_OBJECT_COMMA: u8 = 8;
+
 pub fn NewDecoder<R: io::Reader>(r: R) -> Decoder<R> {
-    Decoder { r, buf: Vec::new() }
+    Decoder {
+        r,
+        buf: Vec::new(),
+        scan_pos: 0,
+        token_state: TOKEN_TOP_VALUE,
+        token_stack: Vec::new(),
+    }
 }
 
 impl<R: io::Reader> Decoder<R> {
@@ -1133,7 +1355,7 @@ impl<R: io::Reader> Decoder<R> {
                 self.buf.extend_from_slice(&raw[..n as usize]);
             }
             if err != nil {
-                if errors::Is(err.clone(), io::EOF()) {
+                if errors::Is(err.clone(), io::EOF) {
                     break;
                 }
                 return (Value::Null, err);
@@ -1143,5 +1365,355 @@ impl<R: io::Reader> Decoder<R> {
             }
         }
         parse_to_value(&self.buf)
+    }
+
+    /// Return the next JSON token from the input stream.
+    /// At EOF returns `(Token::Null, io::EOF)`.
+    pub fn Token(&mut self) -> (Token, error) {
+        self.fill_buf();
+        loop {
+            let c = match self.peek() {
+                Some(b) => b,
+                None => return (Token::Null, io::EOF.into()),
+            };
+            match c {
+                b'[' => {
+                    if !self.token_value_allowed() {
+                        return self.token_error(c);
+                    }
+                    self.scan_pos += 1;
+                    self.token_stack.push(self.token_state);
+                    self.token_state = TOKEN_ARRAY_START;
+                    return (Token::Delim(Delim(b'[')), nil);
+                }
+                b']' => {
+                    if self.token_state != TOKEN_ARRAY_START && self.token_state != TOKEN_ARRAY_COMMA
+                    {
+                        return self.token_error(c);
+                    }
+                    self.scan_pos += 1;
+                    self.token_state = self.token_stack.pop().unwrap_or(TOKEN_TOP_VALUE);
+                    self.token_value_end();
+                    return (Token::Delim(Delim(b']')), nil);
+                }
+                b'{' => {
+                    if !self.token_value_allowed() {
+                        return self.token_error(c);
+                    }
+                    self.scan_pos += 1;
+                    self.token_stack.push(self.token_state);
+                    self.token_state = TOKEN_OBJECT_START;
+                    return (Token::Delim(Delim(b'{')), nil);
+                }
+                b'}' => {
+                    if self.token_state != TOKEN_OBJECT_START
+                        && self.token_state != TOKEN_OBJECT_COMMA
+                    {
+                        return self.token_error(c);
+                    }
+                    self.scan_pos += 1;
+                    self.token_state = self.token_stack.pop().unwrap_or(TOKEN_TOP_VALUE);
+                    self.token_value_end();
+                    return (Token::Delim(Delim(b'}')), nil);
+                }
+                b':' => {
+                    if self.token_state != TOKEN_OBJECT_COLON {
+                        return self.token_error(c);
+                    }
+                    self.scan_pos += 1;
+                    self.token_state = TOKEN_OBJECT_VALUE;
+                    continue;
+                }
+                b',' => {
+                    if self.token_state == TOKEN_ARRAY_COMMA {
+                        self.scan_pos += 1;
+                        self.token_state = TOKEN_ARRAY_VALUE;
+                        continue;
+                    }
+                    if self.token_state == TOKEN_OBJECT_COMMA {
+                        self.scan_pos += 1;
+                        self.token_state = TOKEN_OBJECT_KEY;
+                        continue;
+                    }
+                    return self.token_error(c);
+                }
+                b'"' => {
+                    // Object key detection: when the decoder is in object-start
+                    // or object-key state, the next string is an object key.
+                    let is_key = self.token_state == TOKEN_OBJECT_START
+                        || self.token_state == TOKEN_OBJECT_KEY;
+                    let old_state = self.token_state;
+                    self.token_state = TOKEN_TOP_VALUE; // let scan_string think we're parsing a value
+                    let (s, err) = self.scan_string_bytes();
+                    self.token_state = old_state;
+                    if err != nil {
+                        return (Token::Null, err);
+                    }
+                    if is_key {
+                        self.token_state = TOKEN_OBJECT_COLON;
+                        return (Token::String(string::__from_vec(s)), nil);
+                    }
+                    // Regular string value
+                    self.token_value_end();
+                    return (Token::String(string::__from_vec(s)), nil);
+                }
+                _ => {
+                    if !self.token_value_allowed() {
+                        return self.token_error(c);
+                    }
+                    // Parse a literal value: true / false / null / number
+                    let (tok, err) = self.scan_literal_or_number();
+                    if err != nil {
+                        return (Token::Null, err);
+                    }
+                    self.token_value_end();
+                    return (tok, nil);
+                }
+            }
+        }
+    }
+
+    /// More reports whether there are more elements in the current
+    /// array or object being parsed.
+    pub fn More(&mut self) -> bool {
+        self.fill_buf();
+        match self.peek() {
+            Some(b']') | Some(b'}') => false,
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    // ─── Token helpers ───────────────────────────────────────────────────
+
+    fn fill_buf(&mut self) {
+        if self.scan_pos >= self.buf.len() {
+            let mut chunk = slice::__from_vec({
+                let mut v: Vec<byte> = Vec::with_capacity(4096);
+                v.resize(4096, 0);
+                v
+            });
+            loop {
+                let (n, err) = self.r.Read(&mut chunk);
+                if n > 0 {
+                    let raw: &[byte] = &chunk;
+                    self.buf.extend_from_slice(&raw[..n as usize]);
+                }
+                if err != nil {
+                    break;
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+        }
+    }
+
+    fn peek(&mut self) -> Option<byte> {
+        while self.scan_pos < self.buf.len() {
+            let c = self.buf[self.scan_pos];
+            if c != b' ' && c != b'\t' && c != b'\n' && c != b'\r' {
+                return Some(c);
+            }
+            self.scan_pos += 1;
+        }
+        None
+    }
+
+    fn token_value_allowed(&self) -> bool {
+        matches!(
+            self.token_state,
+            TOKEN_TOP_VALUE | TOKEN_ARRAY_START | TOKEN_ARRAY_VALUE | TOKEN_OBJECT_VALUE
+        )
+    }
+
+    fn token_value_end(&mut self) {
+        match self.token_state {
+            TOKEN_ARRAY_START | TOKEN_ARRAY_VALUE => self.token_state = TOKEN_ARRAY_COMMA,
+            TOKEN_OBJECT_VALUE => self.token_state = TOKEN_OBJECT_COMMA,
+            _ => {}
+        }
+    }
+
+    fn token_error(&self, _c: byte) -> (Token, error) {
+        let msg = match self.token_state {
+            TOKEN_TOP_VALUE => "json: invalid character: looking for beginning of value",
+            TOKEN_ARRAY_START | TOKEN_ARRAY_VALUE | TOKEN_OBJECT_VALUE => {
+                "json: invalid character: looking for beginning of value"
+            }
+            TOKEN_ARRAY_COMMA => "json: invalid character: after array element",
+            TOKEN_OBJECT_KEY => "json: invalid character: looking for beginning of object key string",
+            TOKEN_OBJECT_COLON => "json: invalid character: after object key",
+            TOKEN_OBJECT_COMMA => "json: invalid character: after object key:value pair",
+            _ => "json: invalid character",
+        };
+        (Token::Null, errors::New(string::from(msg)))
+    }
+
+    fn scan_string_bytes(&mut self) -> (Vec<byte>, error) {
+        if self.scan_pos >= self.buf.len() || self.buf[self.scan_pos] != b'"' {
+            return (Vec::new(), ErrSyntax.into());
+        }
+        self.scan_pos += 1; // consume opening quote
+        let mut out: Vec<byte> = Vec::new();
+        while self.scan_pos < self.buf.len() {
+            let c = self.buf[self.scan_pos];
+            self.scan_pos += 1;
+            match c {
+                b'"' => return (out, nil),
+                b'\\' => {
+                    if self.scan_pos >= self.buf.len() {
+                        return (Vec::new(), ErrUnexpectedEnd.into());
+                    }
+                    let esc = self.buf[self.scan_pos];
+                    self.scan_pos += 1;
+                    match esc {
+                        b'"' => out.push(b'"'),
+                        b'\\' => out.push(b'\\'),
+                        b'/' => out.push(b'/'),
+                        b'n' => out.push(b'\n'),
+                        b'r' => out.push(b'\r'),
+                        b't' => out.push(b'\t'),
+                        b'b' => out.push(b'\x08'),
+                        b'f' => out.push(b'\x0c'),
+                        b'u' => {
+                            let cp = match self.scan_hex4() {
+                                Some(v) => v,
+                                None => return (Vec::new(), ErrSyntax.into()),
+                            };
+                            if (0xD800..=0xDBFF).contains(&cp) {
+                                if self.scan_pos >= self.buf.len()
+                                    || self.buf[self.scan_pos] != b'\\'
+                                {
+                                    return (Vec::new(), ErrSyntax.into());
+                                }
+                                self.scan_pos += 1;
+                                if self.scan_pos >= self.buf.len()
+                                    || self.buf[self.scan_pos] != b'u'
+                                {
+                                    return (Vec::new(), ErrSyntax.into());
+                                }
+                                self.scan_pos += 1;
+                                let lo = match self.scan_hex4() {
+                                    Some(v) => v,
+                                    None => return (Vec::new(), ErrSyntax.into()),
+                                };
+                                if !(0xDC00..=0xDFFF).contains(&lo) {
+                                    return (Vec::new(), ErrSyntax.into());
+                                }
+                                let combined =
+                                    0x10000 + (((cp - 0xD800) as u32) << 10) + (lo - 0xDC00) as u32;
+                                encode_utf8(&mut out, combined as i32);
+                            } else if (0xDC00..=0xDFFF).contains(&cp) {
+                                encode_utf8(&mut out, 0xFFFD);
+                            } else {
+                                encode_utf8(&mut out, cp as i32);
+                            }
+                        }
+                        _ => return (Vec::new(), ErrSyntax.into()),
+                    }
+                }
+                _ => out.push(c),
+            }
+        }
+        (Vec::new(), ErrUnexpectedEnd.into())
+    }
+
+    fn scan_hex4(&mut self) -> Option<u32> {
+        if self.buf.len() - self.scan_pos < 4 {
+            return None;
+        }
+        let mut n: u32 = 0;
+        for i in 0..4 {
+            let c = self.buf[self.scan_pos + i];
+            let digit = match c {
+                b'0'..=b'9' => (c - b'0') as u32,
+                b'a'..=b'f' => (c - b'a' + 10) as u32,
+                b'A'..=b'F' => (c - b'A' + 10) as u32,
+                _ => return None,
+            };
+            n = n * 16 + digit;
+        }
+        self.scan_pos += 4;
+        Some(n)
+    }
+
+    fn scan_literal_or_number(&mut self) -> (Token, error) {
+        let start = self.scan_pos;
+        // true
+        if self.buf.len() - self.scan_pos >= 4
+            && &self.buf[self.scan_pos..self.scan_pos + 4] == b"true"
+        {
+            self.scan_pos += 4;
+            return (Token::Bool(true), nil);
+        }
+        // false
+        if self.buf.len() - self.scan_pos >= 5
+            && &self.buf[self.scan_pos..self.scan_pos + 5] == b"false"
+        {
+            self.scan_pos += 5;
+            return (Token::Bool(false), nil);
+        }
+        // null
+        if self.buf.len() - self.scan_pos >= 4
+            && &self.buf[self.scan_pos..self.scan_pos + 4] == b"null"
+        {
+            self.scan_pos += 4;
+            return (Token::Null, nil);
+        }
+        // number
+        self.scan_pos = start;
+        self.scan_number()
+    }
+
+    fn scan_number(&mut self) -> (Token, error) {
+        let start = self.scan_pos;
+        if self.peek_at(start) == Some(b'-') {
+            self.scan_pos = start + 1;
+        }
+        match self.peek_at(self.scan_pos) {
+            Some(b'0') => self.scan_pos += 1,
+            Some(b'1'..=b'9') => {
+                while matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
+                    self.scan_pos += 1;
+                }
+            }
+            _ => return (Token::Null, ErrSyntax.into()),
+        }
+        if self.peek_at(self.scan_pos) == Some(b'.') {
+            self.scan_pos += 1;
+            if !matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
+                return (Token::Null, ErrSyntax.into());
+            }
+            while matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
+                self.scan_pos += 1;
+            }
+        }
+        if let Some(b'e') | Some(b'E') = self.peek_at(self.scan_pos) {
+            self.scan_pos += 1;
+            if let Some(b'+') | Some(b'-') = self.peek_at(self.scan_pos) {
+                self.scan_pos += 1;
+            }
+            if !matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
+                return (Token::Null, ErrSyntax.into());
+            }
+            while matches!(self.peek_at(self.scan_pos), Some(b'0'..=b'9')) {
+                self.scan_pos += 1;
+            }
+        }
+        let num_str = string::__from_vec(self.buf[start..self.scan_pos].to_vec());
+        let (n, err) = strconv::ParseFloat(&num_str, 64);
+        if err != nil {
+            return (Token::Null, err);
+        }
+        (Token::Number(n), nil)
+    }
+
+    fn peek_at(&self, pos: usize) -> Option<byte> {
+        if pos < self.buf.len() {
+            Some(self.buf[pos])
+        } else {
+            None
+        }
     }
 }

@@ -7,7 +7,7 @@
 //   trait Context {
 //       fn Deadline(&self) -> Option<time::Time>;
 //       fn Done(&self) -> chan<()>;
-//       fn Err(&self) -> errors::error;
+//       fn Err(&self) -> error;
 //   }
 //
 //   fn Background() -> Arc<dyn Context>;
@@ -35,10 +35,14 @@
 // goroutine per derived context) is acceptable at v1 scale.
 //
 // What v1 does NOT include:
-//   - WithValue / Value(key)
-//   - WithCancelCause / WithDeadlineCause / WithTimeoutCause / Cause
+//   - WithDeadlineCause / WithTimeoutCause
 //   - AfterFunc
 //   - WithoutCancel
+//
+// What v1 does include:
+//   - WithValue(parent, key, value) — keyed value propagation. Keys
+//     are `string` (Go uses `any` with type-tagged uniqueness; goish
+//     callers should namespace their keys to avoid collision).
 
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
@@ -70,18 +74,16 @@ impl ErrorTrait for DeadlineExceededError {
     }
 }
 
-/// `context.Canceled` — the error returned by `Err()` when a
-/// context is cancelled by `cancel()`. Mirrors `context.Canceled`
-/// (context.go:167).
-pub fn Canceled() -> error {
-    crate::errors::Wrap(CanceledError)
-}
+// context sentinels — Doctrine 2 marker form. Identity-stable so
+// `errors::Is(err, context::Canceled)` works across goroutine boundaries.
+crate::var! {
+    /// `context.Canceled` — the error returned by `Err()` when a
+    /// context is cancelled by `cancel()`. Mirrors context.go:167.
+    pub Canceled: error = { CanceledError };
 
-/// `context.DeadlineExceeded` — the error returned by `Err()` when
-/// a context is cancelled by deadline expiry. Mirrors
-/// `context.DeadlineExceeded` (context.go:171).
-pub fn DeadlineExceeded() -> error {
-    crate::errors::Wrap(DeadlineExceededError)
+    /// `context.DeadlineExceeded` — the error returned by `Err()` when
+    /// a context is cancelled by deadline expiry. Mirrors context.go:171.
+    pub DeadlineExceeded: error = { DeadlineExceededError };
 }
 
 // ─── Context trait ───────────────────────────────────────────────
@@ -102,12 +104,37 @@ pub trait Context: Send + Sync {
     /// Err returns nil while Done is open; returns Canceled or
     /// DeadlineExceeded after cancellation.
     fn Err(&self) -> error;
+
+    /// Value returns the value associated with this context for `key`,
+    /// or `None` if no value is associated. Successive Value calls with
+    /// the same key return the same value.
+    ///
+    /// Slim deviation: Go uses `any` for both key and value. Goish v1
+    /// uses `string` keys (callers should namespace) and
+    /// `Arc<dyn Any + Send + Sync>` values. The default impl returns
+    /// `None`, so non-WithValue contexts inherit the empty answer
+    /// without each having to implement Value.
+    fn Value(&self, _key: &str) -> Option<Arc<dyn core::any::Any + Send + Sync>> {
+        None
+    }
+
+    /// Internal: returns the cancellation cause (set by CancelCauseFunc).
+    /// Default: same as Err() — contexts created with WithCancel have no
+    /// separate cause. Overridden by CancelCauseCtx.
+    fn __cause(&self) -> error {
+        self.Err()
+    }
 }
 
 /// `CancelFunc` — boxed cancel closure. Calling it cancels the
 /// associated context (and its children); subsequent calls are
 /// no-ops. Mirrors `context.CancelFunc` (context.go:231).
 pub type CancelFunc = Box<dyn Fn() + Send + Sync>;
+
+/// `CancelCauseFunc` — like CancelFunc but records a cause error.
+/// `context.Cause(ctx)` returns it. Mirrors `context.CancelCauseFunc`
+/// (context.go:239).
+pub type CancelCauseFunc = Box<dyn Fn(error) + Send + Sync>;
 
 // ─── empty context (Background / TODO) ───────────────────────────
 
@@ -144,6 +171,7 @@ pub fn TODO() -> Arc<dyn Context> {
 
 struct CancelState {
     err: error,
+    cause: error,
 }
 
 struct CancelCtx {
@@ -151,18 +179,23 @@ struct CancelCtx {
     own_deadline: Option<Time>,
     done: chan<()>,
     /// Verbatim Go-shape: a `sync.Mutex` wrapping the protected
-    /// `CancelState`. Mirrors `cancelCtx { mu Mutex; err error }`.
+    /// `CancelState`. Mirrors `cancelCtx { mu Mutex; err error; cause error }`.
     state: Mutex<CancelState>,
 }
 
 impl CancelCtx {
     fn cancel(&self, err: error) {
+        self.cancel_with_cause(err.clone(), err);
+    }
+
+    fn cancel_with_cause(&self, err: error, cause: error) {
         {
             let mut s = self.state.Lock();
             if !s.err.IsNil() {
                 return; // already cancelled
             }
             s.err = err;
+            s.cause = cause;
             // Drop the guard before Close so any G that wakes from
             // Done.Recv and immediately calls Err() doesn't contend.
         }
@@ -173,9 +206,6 @@ impl CancelCtx {
 
 impl Context for CancelCtx {
     fn Deadline(&self) -> Option<Time> {
-        // Own deadline (if set) overrides parent's, but only if
-        // strictly earlier. WithDeadline does this check at
-        // construction; here we just return the effective one.
         self.own_deadline.or(self.parent_deadline)
     }
     fn Done(&self) -> chan<()> {
@@ -183,6 +213,14 @@ impl Context for CancelCtx {
     }
     fn Err(&self) -> error {
         self.state.Lock().err.clone()
+    }
+    fn __cause(&self) -> error {
+        let s = self.state.Lock();
+        if s.err.IsNil() {
+            crate::errors::nil
+        } else {
+            s.cause.clone()
+        }
     }
 }
 
@@ -193,6 +231,7 @@ fn build_cancel_ctx(parent: &Arc<dyn Context>, own_deadline: Option<Time>) -> Ar
         done: crate::make!(chan ()),
         state: Mutex::new(CancelState {
             err: crate::errors::nil,
+            cause: crate::errors::nil,
         }),
     });
 
@@ -212,7 +251,7 @@ fn build_cancel_ctx(parent: &Arc<dyn Context>, own_deadline: Option<Time>) -> Ar
                 let _ = parent_done.Recv() => {
                     // Parent was cancelled — adopt its err.
                     let perr = parent_for_watch.Err();
-                    let cancel_err = if perr.IsNil() { Canceled() } else { perr };
+                    let cancel_err: error = if perr.IsNil() { Canceled.into() } else { perr };
                     me_for_watch.cancel(cancel_err);
                 },
                 let _ = own_done.Recv() => {
@@ -231,7 +270,7 @@ fn build_cancel_ctx(parent: &Arc<dyn Context>, own_deadline: Option<Time>) -> Ar
 pub fn WithCancel(parent: Arc<dyn Context>) -> (Arc<dyn Context>, CancelFunc) {
     let ctx = build_cancel_ctx(&parent, None);
     let ctx_clone = ctx.clone();
-    let cancel = Box::new(move || ctx_clone.cancel(Canceled()));
+    let cancel = Box::new(move || ctx_clone.cancel(Canceled.into()));
     (ctx, cancel)
 }
 
@@ -254,17 +293,17 @@ pub fn WithDeadline(parent: Arc<dyn Context>, d: Time) -> (Arc<dyn Context>, Can
     let now = Now();
     let until: Duration = d.Sub(now);
     if until.0 <= 0 {
-        ctx.cancel(DeadlineExceeded());
+        ctx.cancel(DeadlineExceeded.into());
     } else {
         let ctx_for_timer = ctx.clone();
         crate::go!(stack(64 * crate::KB), move || {
             crate::time::Sleep(until);
-            ctx_for_timer.cancel(DeadlineExceeded());
+            ctx_for_timer.cancel(DeadlineExceeded.into());
         });
     }
 
     let ctx_clone = ctx.clone();
-    let cancel = Box::new(move || ctx_clone.cancel(Canceled()));
+    let cancel = Box::new(move || ctx_clone.cancel(Canceled.into()));
     (ctx, cancel)
 }
 
@@ -273,4 +312,70 @@ pub fn WithDeadline(parent: Arc<dyn Context>, d: Time) -> (Arc<dyn Context>, Can
 pub fn WithTimeout(parent: Arc<dyn Context>, d: Duration) -> (Arc<dyn Context>, CancelFunc) {
     let deadline = Now().Add(d);
     WithDeadline(parent, deadline)
+}
+
+/// `WithCancelCause(parent)` — like WithCancel but the returned func
+/// accepts a cause error. `Cause(ctx)` returns it.
+/// Mirrors `WithCancelCause` (context.go:260).
+pub fn WithCancelCause(parent: Arc<dyn Context>) -> (Arc<dyn Context>, CancelCauseFunc) {
+    let ctx = build_cancel_ctx(&parent, None);
+    let ctx_clone = ctx.clone();
+    let cancel = Box::new(move |cause: error| {
+        let err: error = Canceled.into();
+        let cause = if cause.IsNil() { err.clone() } else { cause };
+        ctx_clone.cancel_with_cause(err, cause);
+    });
+    (ctx, cancel)
+}
+
+/// `Cause(c)` — returns a non-nil error explaining why a context was
+/// cancelled. If cancelled via CancelCauseFunc(err), returns err.
+/// Otherwise returns c.Err(). Returns nil if c is not cancelled.
+/// Mirrors `Cause` (context.go:291).
+pub fn Cause(c: &Arc<dyn Context>) -> error {
+    c.__cause()
+}
+
+// ─── valueCtx (WithValue) — context.go:744 ───────────────────────
+
+/// `valueCtx` (context.go:744) — pairs (key, value) with parent context.
+struct ValueCtx {
+    parent: Arc<dyn Context>,
+    key: alloc::string::String,
+    val: Arc<dyn core::any::Any + Send + Sync>,
+}
+
+impl Context for ValueCtx {
+    fn Deadline(&self) -> Option<Time> {
+        self.parent.Deadline()
+    }
+    fn Done(&self) -> chan<()> {
+        self.parent.Done()
+    }
+    fn Err(&self) -> error {
+        self.parent.Err()
+    }
+    fn Value(&self, key: &str) -> Option<Arc<dyn core::any::Any + Send + Sync>> {
+        if self.key == key {
+            return Some(self.val.clone());
+        }
+        self.parent.Value(key)
+    }
+}
+
+/// `WithValue(parent, key, value)` (context.go:760) — derive a context
+/// that maps `key` to `value`. Lookup via `ctx.Value(key)`.
+pub fn WithValue<V>(parent: Arc<dyn Context>, key: &str, value: V) -> Arc<dyn Context>
+where
+    V: core::any::Any + Send + Sync + 'static,
+{
+    if key.is_empty() {
+        // Match Go's panic on nil key (Go uses interface{}, nil key panics).
+        panic!("nil key");
+    }
+    Arc::new(ValueCtx {
+        parent,
+        key: alloc::string::String::from(key),
+        val: Arc::new(value),
+    })
 }

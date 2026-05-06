@@ -17,7 +17,7 @@
 // shape as Go's `ServeMux` (Go 1.22 simple form, pre-`{wildcard}`
 // patterns).
 
-#![allow(non_snake_case)]
+#![allow(non_snake_case, non_camel_case_types)]
 
 extern crate alloc;
 
@@ -31,10 +31,12 @@ use crate::go;
 use crate::io::Closer;
 use crate::net;
 use crate::string;
+use crate::strings;
 use crate::sync::Mutex;
 use crate::time;
+use crate::types::int;
 
-use super::request::{ReadRequest, Request};
+use super::request::{ReadRequestWithLimit, Request};
 use super::response::ResponseWriter;
 
 /// `http.Handler` — types that can serve HTTP requests. Mirrors
@@ -42,6 +44,29 @@ use super::response::ResponseWriter;
 /// (server.go:88).
 pub trait Handler: Send + Sync {
     fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request);
+}
+
+// ─── blanket impls so Arc<T>/Box<T> satisfy `Handler` ───────────────
+//
+// Lets `mux.Handle(pat, h)` and `StripPrefix(pat, h)` (now generic over
+// `H: Handler + 'static`) accept either a bare struct, a wrapped
+// closure, or an already-`Arc<dyn Handler>` without the caller writing
+// `Arc::new(...) as Arc<dyn Handler>`. Mirrors Go's interface-value
+// passing where `*ServeMux` and `http.Handler` are interchangeable at
+// call sites.
+
+impl<T: Handler + ?Sized> Handler for Arc<T> {
+    #[inline]
+    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+        (**self).ServeHTTP(w, r)
+    }
+}
+
+impl<T: Handler + ?Sized> Handler for alloc::boxed::Box<T> {
+    #[inline]
+    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+        (**self).ServeHTTP(w, r)
+    }
 }
 
 /// `http.HandlerFunc` adapter — wrap a closure as a `Handler`.
@@ -63,11 +88,15 @@ where
 
 /// `http.ServeMux` — pattern → Handler routing table.
 ///
-/// Two pattern shapes:
+/// Three pattern shapes:
 ///   - Exact: `"/about"` matches only `/about`.
 ///   - Prefix: `"/static/"` (trailing slash) matches any path
 ///     starting with `/static/`.
-/// Longest-pattern wins on conflict (`/static/` > `/`).
+///   - Wildcard (Go 1.22): `"/users/{id}"` and `"/files/{path...}"`.
+///     Optional `[METHOD ]` prefix (`"GET /users/{id}"`).
+///
+/// Match order: exact > prefix (longest-wins) > wildcard (registration
+/// order). Wildcard bindings are exposed via `r.PathValue(name)`.
 pub struct ServeMux {
     /// Inner state behind a Mutex so handlers can be added before
     /// `ListenAndServe` and `ServeMux` is `Send + Sync` for
@@ -76,25 +105,62 @@ pub struct ServeMux {
 }
 
 struct MuxState {
-    /// Routes as a Vec so the value can be a `dyn Handler` trait
-    /// object — `gomap` requires V: Default which `dyn Trait`
-    /// can't satisfy. Linear scan in `match_handler` is fine
-    /// for typical route counts (<100).
+    /// Plain (literal) routes for exact + longest-prefix matching.
+    /// Linear scan in `match_handler` is fine for typical route
+    /// counts (<100).
     routes: Vec<(string, Arc<dyn Handler>)>,
+    /// Wildcard routes. Stored separately because their precedence is
+    /// after literal exact/prefix.
+    pattern_routes: Vec<PatternRoute>,
+}
+
+struct PatternRoute {
+    pattern: super::pattern::Pattern,
+    handler: Arc<dyn Handler>,
 }
 
 impl ServeMux {
     pub fn new() -> Self {
         ServeMux {
-            state: Arc::new(Mutex::new(MuxState { routes: Vec::new() })),
+            state: Arc::new(Mutex::new(MuxState {
+                routes: Vec::new(),
+                pattern_routes: Vec::new(),
+            })),
         }
     }
 
-    /// `mux.Handle(pattern, h)` — register a Handler. If `pattern`
-    /// already exists, replaces it (Go panics; we silently replace
-    /// for v1 simplicity).
-    pub fn Handle(&self, pattern: string, h: Arc<dyn Handler>) {
+    /// `mux.Handle(pattern, h)` — register a Handler. Patterns that
+    /// contain `{` are parsed as Go 1.22 wildcards; any parse error
+    /// causes the registration to be silently dropped (Go panics).
+    /// If `pattern` already exists in the literal table, replaces it.
+    ///
+    /// Generic over `H: Handler + 'static` so callers can pass any
+    /// `Handler` impl directly — bare structs, `Arc<dyn Handler>`,
+    /// `Box<dyn Handler>` — without writing `Arc::new(...) as
+    /// Arc<dyn http::Handler>` at the call site. Mirrors Go's
+    /// `mux.Handle(pattern, h Handler)` interface-value semantics.
+    pub fn Handle<P: Into<string>, H: Handler + 'static>(&self, pattern: P, h: H) {
+        self.handle_arc(pattern.into(), Arc::new(h));
+    }
+
+    /// Internal: stores an already-arced handler. Used by `Handle`,
+    /// `HandleFunc`, and other internal callers that already hold an
+    /// `Arc<dyn Handler>`.
+    fn handle_arc(&self, pattern: string, h: Arc<dyn Handler>) {
+        // Wildcard or method-prefixed → parse as Pattern.
+        let needs_pattern_parse = strings::Contains(pattern.clone(), string("{"))
+            || strings::ContainsAny(pattern.clone(), string(" \t"));
         let mut s = self.state.Lock();
+        if needs_pattern_parse {
+            let (p, err) = super::pattern::parse_pattern(pattern);
+            if err.IsNil() {
+                s.pattern_routes.push(PatternRoute {
+                    pattern: p,
+                    handler: h,
+                });
+            }
+            return;
+        }
         for r in s.routes.iter_mut() {
             if r.0 == pattern {
                 r.1 = h;
@@ -107,52 +173,459 @@ impl ServeMux {
     /// `mux.HandleFunc(pattern, fn)` — register a closure handler.
     /// The closure must be `Send + Sync + 'static` to be safely
     /// shared across the per-connection worker goroutines.
-    pub fn HandleFunc<F>(&self, pattern: string, f: F)
+    pub fn HandleFunc<P: Into<string>, F>(&self, pattern: P, f: F)
     where
         F: Fn(&mut ResponseWriter, &Request) + Send + Sync + 'static,
     {
-        self.Handle(pattern, Arc::new(HandlerFunc(f)));
+        self.handle_arc(pattern.into(), Arc::new(HandlerFunc(f)));
     }
 
-    /// Internal: pick the handler for `path`. Returns the
-    /// longest-matching pattern's handler, or a 404 stub.
-    fn match_handler(&self, path: &string) -> Arc<dyn Handler> {
+    /// Internal: pick the handler for `r`. Returns the chosen handler
+    /// and (for wildcard hits) any path-value bindings, or a 404
+    /// stub with empty bindings.
+    fn match_handler(
+        &self,
+        r: &Request,
+    ) -> (
+        Arc<dyn Handler>,
+        crate::gomap::map<string, string>,
+    ) {
         let s = self.state.Lock();
-        // Try exact match first.
-        for r in s.routes.iter() {
-            if r.0 == *path {
-                return r.1.clone();
+        // 1. Exact literal match.
+        for route in s.routes.iter() {
+            if route.0 == r.URL.Path {
+                return (route.1.clone(), crate::gomap::map::<string, string>::new());
             }
         }
-        // Then longest prefix-with-trailing-slash match.
-        let path_b = path.as_bytes();
+        // 2. Longest prefix-with-trailing-slash match — but skip the
+        //    bare `/` catchall here so registered wildcards still win.
+        //    Go 1.22's mux compares pattern specificity globally; we
+        //    approximate by deferring `/` to step 4. A multi-segment
+        //    literal prefix like `/api/users/` still pre-empts any
+        //    wildcard registered later, matching Go's intent that
+        //    longer literal prefixes are more specific.
+        let path_b = r.URL.Path.as_bytes();
         let mut best_len: usize = 0;
         let mut best: Option<Arc<dyn Handler>> = None;
         for (pat, handler) in s.routes.iter() {
             let pb = pat.as_bytes();
-            if pb.last() == Some(&b'/') && path_b.starts_with(pb) && pb.len() > best_len {
+            if pb.last() == Some(&b'/')
+                && pb.len() > 1
+                && path_b.starts_with(pb)
+                && pb.len() > best_len
+            {
                 best_len = pb.len();
                 best = Some(handler.clone());
             }
         }
-        best.unwrap_or_else(|| Arc::new(NotFoundHandler))
+        if let Some(h) = best {
+            return (h, crate::gomap::map::<string, string>::new());
+        }
+        // 3. Wildcard pattern match (registration order).
+        let host = r.Host.clone();
+        for pr in s.pattern_routes.iter() {
+            if let Some(bindings) = pr.pattern.Match(&r.Method, &host, &r.URL.Path) {
+                return (pr.handler.clone(), bindings);
+            }
+        }
+        // 4. Fallback to the bare `/` catchall, if registered.
+        for (pat, handler) in s.routes.iter() {
+            if pat.as_bytes() == b"/" {
+                return (handler.clone(), crate::gomap::map::<string, string>::new());
+            }
+        }
+        (
+            Arc::new(notFoundHandler) as Arc<dyn Handler>,
+            crate::gomap::map::<string, string>::new(),
+        )
+    }
+}
+
+impl ServeMux {
+    /// `mux.Handler(r) -> (Handler, pattern)` (server.go:2683) — return
+    /// the handler that would dispatch `r`, along with the pattern that
+    /// matched. For requests with no matching route, returns the
+    /// `NotFoundHandler` and an empty pattern.
+    ///
+    /// Slim port: doesn't trigger redirects (Go's Handler synthesizes
+    /// a `RedirectHandler` for missing-trailing-slash cases); doesn't
+    /// populate path-value wildcards on `r`.
+    pub fn Handler(&self, r: &Request) -> (Arc<dyn Handler>, string) {
+        let s = self.state.Lock();
+        // 1. Exact literal match.
+        for route in s.routes.iter() {
+            if route.0 == r.URL.Path {
+                return (route.1.clone(), route.0.clone());
+            }
+        }
+        // 2. Longest multi-segment prefix-with-trailing-slash match.
+        //    `/` deferred to step 4 so wildcards can win.
+        let path_b = r.URL.Path.as_bytes();
+        let mut best_len: usize = 0;
+        let mut best: Option<(Arc<dyn Handler>, string)> = None;
+        for (pat, handler) in s.routes.iter() {
+            let pb = pat.as_bytes();
+            if pb.last() == Some(&b'/')
+                && pb.len() > 1
+                && path_b.starts_with(pb)
+                && pb.len() > best_len
+            {
+                best_len = pb.len();
+                best = Some((handler.clone(), pat.clone()));
+            }
+        }
+        if let Some(b) = best {
+            return b;
+        }
+        // 3. Wildcard pattern match.
+        let host = r.Host.clone();
+        for pr in s.pattern_routes.iter() {
+            if pr
+                .pattern
+                .Match(&r.Method, &host, &r.URL.Path)
+                .is_some()
+            {
+                return (pr.handler.clone(), pr.pattern.Str.clone());
+            }
+        }
+        // 4. Fallback to bare `/` catchall, if any.
+        for (pat, handler) in s.routes.iter() {
+            if pat.as_bytes() == b"/" {
+                return (handler.clone(), pat.clone());
+            }
+        }
+        (
+            Arc::new(notFoundHandler) as Arc<dyn Handler>,
+            string::new(),
+        )
     }
 }
 
 impl Handler for ServeMux {
     fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
-        let h = self.match_handler(&r.URL.Path);
-        h.ServeHTTP(w, r);
+        let (h, bindings) = self.match_handler(r);
+        if bindings.Len() == 0 {
+            h.ServeHTTP(w, r);
+        } else {
+            // Clone the request and attach path-value bindings before
+            // dispatching, so r.PathValue(name) inside the handler
+            // sees the bindings from the matched pattern.
+            let mut r2 = r.clone();
+            r2.__set_path_values(bindings);
+            h.ServeHTTP(w, &r2);
+        }
     }
 }
 
-/// Default 404 handler. Matches Go's `http.NotFoundHandler()`.
-pub struct NotFoundHandler;
-impl Handler for NotFoundHandler {
+/// Default 404 handler. Internal type returned by Go's
+/// `http.NotFoundHandler()`. The lowercase name keeps the public
+/// surface symmetric with Go (which exposes only the function form
+/// `NotFoundHandler() Handler`, not a struct of the same name).
+struct notFoundHandler;
+impl Handler for notFoundHandler {
     fn ServeHTTP(&self, w: &mut ResponseWriter, _r: &Request) {
         w.WriteHeader(404);
         let _ = w.Write(crate::convert::bytes("404 page not found\n"));
     }
+}
+
+/// `http.Error(w, error, code)` (server.go:2337) — write a plain-text
+/// HTTP error response. Resets Content-Type to text/plain, sets
+/// X-Content-Type-Options: nosniff, deletes any prior Content-Length,
+/// then writes status + body + trailing newline.
+pub fn Error<S: Into<string>>(w: &mut ResponseWriter, error: S, code: int) {
+    // Go: h := w.Header(); h.Del("Content-Length")
+    w.Header().Del(string("Content-Length"));
+    // Go: h.Set("Content-Type", "text/plain; charset=utf-8")
+    w.Header()
+        .Set(string("Content-Type"), string("text/plain; charset=utf-8"));
+    // Go: h.Set("X-Content-Type-Options", "nosniff")
+    w.Header()
+        .Set(string("X-Content-Type-Options"), string("nosniff"));
+    // Go: w.WriteHeader(code)
+    w.WriteHeader(code);
+    // Go: fmt.Fprintln(w, error) — writes message + "\n"
+    let _ = w.Write(crate::convert::bytes(error.into()));
+    let _ = w.Write(crate::convert::bytes("\n"));
+}
+
+/// `http.NotFound(w, r)` (server.go:2358) — convenience wrapper.
+pub fn NotFound(w: &mut ResponseWriter, _r: &Request) {
+    Error(w, string("404 page not found"), super::status::StatusNotFound);
+}
+
+/// `http.NotFoundHandler()` (server.go:2362) — returns a Handler that
+/// replies to every request with a 404 not-found error. Faithfully
+/// matches Go's `return HandlerFunc(NotFound)`; goish wraps the
+/// internal `notFoundHandler` struct in `Arc<dyn Handler>` to fit
+/// the same plumbing as `StripPrefix` / `RedirectHandler`.
+pub fn NotFoundHandler() -> Arc<dyn Handler> {
+    // Go: return HandlerFunc(NotFound)
+    Arc::new(notFoundHandler)
+}
+
+// ─── NewServeMux ─────────────────────────────────────────────────────
+
+/// `http.NewServeMux()` (server.go:2619) — allocates and returns a new
+/// ServeMux. The Go form is `func NewServeMux() *ServeMux`; goish hands
+/// back `Arc<ServeMux>` so the value can flow into `Server.Handler`
+/// directly without an extra `Arc::new(...)` at the call site.
+pub fn NewServeMux() -> Arc<ServeMux> {
+    // Go: return &ServeMux{}
+    Arc::new(ServeMux::new())
+}
+
+// ─── DefaultServeMux + Handle / HandleFunc free fns ──────────────────
+
+/// `http.DefaultServeMux` (server.go:2570) — process-wide singleton
+/// ServeMux. Used by the free `http::Handle` / `http::HandleFunc`
+/// helpers so that small examples can register routes without
+/// constructing a ServeMux manually.
+pub fn DefaultServeMux() -> Arc<ServeMux> {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<Arc<ServeMux>>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(Arc::new(ServeMux::new()));
+    }
+    g.as_ref().unwrap().clone()
+}
+
+/// `http.Handle(pattern, h)` (server.go:2576) — register on
+/// DefaultServeMux. Mirrors the free function shape. Generic over
+/// `H: Handler + 'static` so callers can pass bare structs.
+pub fn Handle<H: Handler + 'static>(pattern: string, h: H) {
+    DefaultServeMux().Handle(pattern, h);
+}
+
+/// `http::handler(h)` — wrap any `Handler + 'static` into the
+/// `Arc<dyn Handler>` shape required by `Server.Handler` field
+/// assignment. Saves the user from typing `Arc::new(h) as
+/// Arc<dyn http::Handler>` at the boundary.
+pub fn handler<H: Handler + 'static>(h: H) -> Arc<dyn Handler> {
+    Arc::new(h)
+}
+
+/// `http.HandleFunc(pattern, fn)` (server.go:2583) — register a
+/// closure on DefaultServeMux. Note this is a *free function*; the
+/// same-named method on `ServeMux` registers on a specific mux.
+pub fn HandleFunc<F>(pattern: string, f: F)
+where
+    F: Fn(&mut ResponseWriter, &Request) + Send + Sync + 'static,
+{
+    DefaultServeMux().HandleFunc(pattern, f);
+}
+
+// ─── StripPrefix / Redirect / RedirectHandler ────────────────────────
+//
+// Line-by-line ports of net/http/server.go:2370 / :2403 / :2488.
+
+/// `http.StripPrefix(prefix, h)` (server.go:2370). Returns a handler
+/// that trims `prefix` from `r.URL.Path` (and `RawPath` if set)
+/// before delegating to `h`. If the request path doesn't begin with
+/// `prefix`, the handler replies with 404.
+///
+/// Generic over `H: Handler + 'static` — accepts bare structs,
+/// `Arc<dyn Handler>`, etc. without explicit `Arc::new` at the call
+/// site.
+pub fn StripPrefix<P: Into<string>, H: Handler + 'static>(
+    prefix: P,
+    h: H,
+) -> Arc<dyn Handler> {
+    let prefix: string = prefix.into();
+    let h: Arc<dyn Handler> = Arc::new(h);
+    // Go: if prefix == "" { return h }
+    if prefix.Len() == 0 {
+        return h;
+    }
+    Arc::new(stripPrefixHandler { prefix, inner: h })
+}
+
+struct stripPrefixHandler {
+    prefix: string,
+    inner: Arc<dyn Handler>,
+}
+
+impl Handler for stripPrefixHandler {
+    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+        // Go: p := strings.TrimPrefix(r.URL.Path, prefix)
+        let p = crate::strings::TrimPrefix(r.URL.Path.clone(), self.prefix.clone());
+        // Go: rp := strings.TrimPrefix(r.URL.RawPath, prefix)
+        let rp = crate::strings::TrimPrefix(r.URL.RawPath.clone(), self.prefix.clone());
+        // Go: if len(p) < len(r.URL.Path) && (r.URL.RawPath == "" || len(rp) < len(r.URL.RawPath)) { … }
+        if p.Len() < r.URL.Path.Len()
+            && (r.URL.RawPath.Len() == 0 || rp.Len() < r.URL.RawPath.Len())
+        {
+            // Go: r2 := *r; r2.URL = *r.URL; r2.URL.Path = p; r2.URL.RawPath = rp
+            let mut r2 = r.clone();
+            r2.URL.Path = p;
+            r2.URL.RawPath = rp;
+            self.inner.ServeHTTP(w, &r2);
+        } else {
+            // Go: NotFound(w, r)
+            notFoundHandler.ServeHTTP(w, r);
+        }
+    }
+}
+
+/// `http.Redirect(w, r, url, code)` (server.go:2403). Replies with a
+/// redirect to `url`. Slim port: relative paths are resolved against
+/// `r.URL.Path` via `path::Clean` + `path::Split`.
+pub fn Redirect<U: Into<string>>(w: &mut ResponseWriter, r: &Request, url: U, code: int){
+    let url: string = url.into();
+    let mut url = url;
+
+    // Go: if u, err := url.Parse(url); err == nil { … relative resolve … }
+    // Slim: detect relative by absence of "://" and leading "/".
+    let absolute = crate::strings::Contains(url.clone(), string("://"));
+    if !absolute {
+        let url_b = url.as_bytes();
+        let leading_slash = !url_b.is_empty() && url_b[0] == b'/';
+        if !leading_slash {
+            // Go: olddir, _ := path.Split(oldpath); url = olddir + url
+            let oldpath = if r.URL.Path.Len() == 0 {
+                string("/")
+            } else {
+                r.URL.Path.clone()
+            };
+            let (olddir, _) = crate::path::Split(oldpath);
+            let mut b = crate::strings::Builder::new();
+            let _ = b.WriteString(olddir);
+            let _ = b.WriteString(url);
+            url = b.String();
+        }
+        // Go: split off ?query, clean, restore query
+        let q_idx = crate::strings::Index(url.clone(), string("?"));
+        let (path_part, query_part) = if q_idx >= 0 {
+            let (p, q, _) = crate::strings::Cut(url.clone(), string("?"));
+            (p, {
+                let mut b = crate::strings::Builder::new();
+                let _ = b.WriteByte(b'?');
+                let _ = b.WriteString(q);
+                b.String()
+            })
+        } else {
+            (url, string::new())
+        };
+        // Go: trailing := strings.HasSuffix(url, "/"); url = path.Clean(url); if trailing { url += "/" }
+        let trailing = crate::strings::HasSuffix(path_part.clone(), string("/"));
+        let mut cleaned = crate::path::Clean(path_part);
+        if trailing && !crate::strings::HasSuffix(cleaned.clone(), string("/")) {
+            let mut b = crate::strings::Builder::new();
+            let _ = b.WriteString(cleaned);
+            let _ = b.WriteByte(b'/');
+            cleaned = b.String();
+        }
+        let mut b = crate::strings::Builder::new();
+        let _ = b.WriteString(cleaned);
+        let _ = b.WriteString(query_part);
+        url = b.String();
+    }
+
+    // Go: h := w.Header()
+    let had_ct = w.Header().Get(string("Content-Type")).Len() > 0;
+    // Go: h.Set("Location", hexEscapeNonASCII(url))
+    w.Header().Set(string("Location"), url.clone());
+    // Go: if !hadCT && (r.Method == "GET" || r.Method == "HEAD") { h.Set("Content-Type", "text/html; charset=utf-8") }
+    if !had_ct && (r.Method == "GET" || r.Method == "HEAD") {
+        w.Header()
+            .Set(string("Content-Type"), string("text/html; charset=utf-8"));
+    }
+    // Go: w.WriteHeader(code)
+    w.WriteHeader(code);
+    // Go: if !hadCT && r.Method == "GET" { body := "<a href=\"...\">"+StatusText(code)+"</a>"; fmt.Fprintln(w, body) }
+    if !had_ct && r.Method == "GET" {
+        let mut b = crate::strings::Builder::new();
+        let _ = b.WriteString("<a href=\"");
+        let _ = b.WriteString(html_escape(url));
+        let _ = b.WriteString("\">");
+        let _ = b.WriteString(super::status::StatusText(code));
+        let _ = b.WriteString("</a>.\n");
+        let body = b.String();
+        let _ = w.Write(crate::convert::bytes(body));
+    }
+}
+
+/// `http.RedirectHandler(url, code)` (server.go:2488). Returns a
+/// handler that redirects all requests to `url` with the given status.
+pub fn RedirectHandler<U: Into<string>>(url: U, code: int) -> Arc<dyn Handler> {
+    let url: string = url.into();
+    Arc::new(redirectHandler { url, code })
+}
+
+struct redirectHandler {
+    url: string,
+    code: int,
+}
+
+impl Handler for redirectHandler {
+    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+        Redirect(w, r, self.url.clone(), self.code);
+    }
+}
+
+// ─── AllowQuerySemicolons ────────────────────────────────────────────
+
+/// `http.AllowQuerySemicolons(h)` (server.go:3354). Returns a handler
+/// that converts unescaped `;` characters in `r.URL.RawQuery` to `&`
+/// before delegating to `h`. Restores the pre-Go-1.17 query parsing
+/// behavior. Should be invoked before `Request.ParseForm`.
+pub fn AllowQuerySemicolons(h: Arc<dyn Handler>) -> Arc<dyn Handler> {
+    Arc::new(allowQuerySemicolonsHandler { inner: h })
+}
+
+struct allowQuerySemicolonsHandler {
+    inner: Arc<dyn Handler>,
+}
+
+impl Handler for allowQuerySemicolonsHandler {
+    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+        // Go: if strings.Contains(r.URL.RawQuery, ";") {
+        if strings::Contains(r.URL.RawQuery.clone(), string(";")) {
+            // Go: r2 := new(Request); *r2 = *r
+            // Go: r2.URL = new(url.URL); *r2.URL = *r.URL
+            // Go: r2.URL.RawQuery = strings.ReplaceAll(r.URL.RawQuery, ";", "&")
+            let mut r2 = r.clone();
+            r2.URL.RawQuery =
+                strings::ReplaceAll(r.URL.RawQuery.clone(), string(";"), string("&"));
+            // Go: h.ServeHTTP(w, r2)
+            self.inner.ServeHTTP(w, &r2);
+        } else {
+            // Go: h.ServeHTTP(w, r)
+            self.inner.ServeHTTP(w, r);
+        }
+    }
+}
+
+/// Line-by-line port of `htmlEscape` (server.go:2468) using a single
+/// strings::Builder pass instead of strings.NewReplacer.
+fn html_escape(s: string) -> string {
+    let mut b = crate::strings::Builder::new();
+    b.Grow(s.Len());
+    for i in 0..s.Len() {
+        let c: crate::types::byte = s[i];
+        match c {
+            b'&' => {
+                let _ = b.WriteString("&amp;");
+            }
+            b'<' => {
+                let _ = b.WriteString("&lt;");
+            }
+            b'>' => {
+                let _ = b.WriteString("&gt;");
+            }
+            b'"' => {
+                let _ = b.WriteString("&#34;");
+            }
+            b'\'' => {
+                let _ = b.WriteString("&#39;");
+            }
+            _ => {
+                let _ = b.WriteByte(c);
+            }
+        }
+    }
+    b.String()
 }
 
 // ─── Server ──────────────────────────────────────────────────────────
@@ -199,14 +672,38 @@ pub struct Server {
     pub WriteTimeout: time::Duration,
     /// Idle keep-alive timeout. Zero falls back to `ReadHeaderTimeout`.
     pub IdleTimeout: time::Duration,
-    /// Cap on bytes read parsing the request line + header. Currently
-    /// honored at fixed 8 KiB by `ReadRequest`; this field is reserved
-    /// for a v2 plumb-through. Zero = use the parser default.
+    /// Cap on bytes per request line / per header line, in bytes.
+    /// `<= 0` falls back to the parser default (8 KiB). Mirrors
+    /// `Server.MaxHeaderBytes` (server.go:3072).
     pub MaxHeaderBytes: crate::types::int,
+    /// Cap on the number of connections being served concurrently.
+    /// `0` means unlimited (Go's default behavior).
+    /// `> 0` makes the accept loop block once this many connections
+    /// are in flight, providing backpressure under load instead of
+    /// spawning unbounded goroutines.
+    pub MaxConcurrentConns: crate::types::int,
 
-    // ─── internal state, populated by Default ─────────────────────
+    /// Internal runtime state. Bundled behind a single field so users
+    /// can construct a `Server` with Go-style struct literal syntax —
+    /// `Server { Addr, Handler, ..., ..Default::default() }` — without
+    /// being blocked by E0451 ("private field") errors. The field is
+    /// public-by-name but its type (`__ServerState`) is private, so
+    /// outside callers can't directly construct or inspect it.
+    #[doc(hidden)]
+    pub __state: __ServerState,
+}
+
+/// Internal Server state — type is private, the holding field on
+/// `Server` is `pub` only so struct-update literal syntax works.
+#[doc(hidden)]
+pub struct __ServerState {
     in_shutdown: AtomicBool,
     active_conns: AtomicUsize,
+    /// Bounded semaphore for `MaxConcurrentConns`. `None` until Serve
+    /// initializes it; capacity = `MaxConcurrentConns`. Each accepted
+    /// conn pushes one token and drains it on completion. Send blocks
+    /// when the chan is full ⇒ accept loop pauses.
+    conn_sem: Mutex<Option<crate::gochan::chan<()>>>,
     /// Tracked listener for shutdown. `Mutex<Option<...>>` so the
     /// Serve goroutine can install it on entry and Shutdown can
     /// take it out (close it + wake parked Accept) from another
@@ -215,18 +712,24 @@ pub struct Server {
     tracked_listener: Mutex<Option<Arc<net::Listener>>>,
 }
 
-/// `http.ErrServerClosed` (server.go:36). Returned by `Serve` /
-/// `ListenAndServe` after `Shutdown` is called. Cached as a stable
-/// sentinel so `errors::Is(err, http::ErrServerClosed())` works the
-/// same way Go's `errors.Is(err, http.ErrServerClosed)` does.
-pub fn ErrServerClosed() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(errors::New(string("http: Server closed")));
-    }
-    g.as_ref().unwrap().clone()
+crate::var! {
+    /// `http.ErrServerClosed` (server.go:36).
+    pub ErrServerClosed: error    = "http: Server closed";
+
+    /// `http.ErrBodyNotAllowed` (server.go:43).
+    pub ErrBodyNotAllowed: error  = "http: request method or response status code does not allow body";
+
+    /// `http.ErrHijacked` (server.go:50).
+    pub ErrHijacked: error        = "http: connection has been hijacked";
+
+    /// `http.ErrContentLength` (server.go:56).
+    pub ErrContentLength: error   = "http: wrote more than the declared Content-Length";
+
+    /// `http.ErrAbortHandler` (server.go:1909).
+    pub ErrAbortHandler: error    = "net/http: abort Handler";
+
+    /// `http.ErrHandlerTimeout` (server.go:3829).
+    pub ErrHandlerTimeout: error  = "http: Handler timeout";
 }
 
 /// v1 fallback when both ReadHeaderTimeout and ReadTimeout are zero
@@ -237,15 +740,25 @@ impl Default for Server {
     fn default() -> Self {
         Server {
             Addr: string::new(),
-            Handler: Arc::new(NotFoundHandler) as Arc<dyn Handler>,
+            Handler: Arc::new(notFoundHandler) as Arc<dyn Handler>,
             ReadTimeout: time::Duration(0),
             ReadHeaderTimeout: time::Duration(0),
             WriteTimeout: time::Duration(0),
             IdleTimeout: time::Duration(0),
             MaxHeaderBytes: 0,
+            MaxConcurrentConns: 0,
+            __state: __ServerState::default(),
+        }
+    }
+}
+
+impl Default for __ServerState {
+    fn default() -> Self {
+        __ServerState {
             in_shutdown: AtomicBool::new(false),
             active_conns: AtomicUsize::new(0),
             tracked_listener: Mutex::new(None),
+            conn_sem: Mutex::new(None),
         }
     }
 }
@@ -281,37 +794,64 @@ impl Server {
     /// break the Accept loop and close the socket.
     pub fn Serve(self: Arc<Self>, ln: net::Listener) -> error {
         let ln = Arc::new(ln);
-        // Install tracked_listener and check in_shutdown atomically:
-        // hold the listener mutex across both. Without this, a
-        // Shutdown call that wins the race against Serve's entry
-        // would observe an empty tracked_listener (so __wake_accept
-        // and Close run on nothing), and Serve would later install
-        // its listener and enter Accept on a fd that was never
-        // closed → permanent park.
+        // Install tracked_listener + initialize conn_sem (if backpressure
+        // configured) under one critical section; check in_shutdown
+        // atomically. Without this, a Shutdown that wins the race vs
+        // Serve's entry would observe an empty tracked_listener (so
+        // __wake_accept and Close run on nothing), and Serve would
+        // later install its listener and enter Accept on a fd that was
+        // never closed → permanent park.
         {
-            let mut tracked = self.tracked_listener.Lock();
-            if self.in_shutdown.load(Ordering::Acquire) {
-                return ErrServerClosed();
+            let mut tracked = self.__state.tracked_listener.Lock();
+            if self.__state.in_shutdown.load(Ordering::Acquire) {
+                return ErrServerClosed.into();
             }
             *tracked = Some(ln.clone());
+            if self.MaxConcurrentConns > 0 {
+                let cap = self.MaxConcurrentConns as usize;
+                *self.__state.conn_sem.Lock() =
+                    Some(crate::gochan::chan::<()>::new_buffered(cap));
+            }
         }
 
+        // Snapshot the chan handle once so subsequent Send/Recv on it
+        // never hold the conn_sem mutex (Send blocks when the chan is
+        // full; if we held the mutex we'd deadlock the workers'
+        // drain side).
+        let sem_handle: Option<crate::gochan::chan<()>> = if self.MaxConcurrentConns > 0 {
+            self.__state.conn_sem.Lock().clone()
+        } else {
+            None
+        };
+
         loop {
+            // Backpressure: if MaxConcurrentConns is set, block here
+            // until a slot opens up. Each per-conn goroutine drains
+            // its slot on completion.
+            if let Some(ref sem) = sem_handle {
+                sem.Send(());
+            }
+
             let (conn, err) = ln.Accept();
             if !err.IsNil() {
-                // Whether the error is the kernel's EBADF (we closed
-                // the fd) or netpoll's "i/o timeout" (we forced the
-                // pd's read deadline expired), we treat it as a
-                // graceful shutdown if `in_shutdown` is set.
-                if self.in_shutdown.load(Ordering::Acquire) {
-                    return ErrServerClosed();
+                // Release the slot we just acquired since no goroutine
+                // will drain it.
+                if let Some(ref sem) = sem_handle {
+                    let _ = sem.__try_recv();
+                }
+                if self.__state.in_shutdown.load(Ordering::Acquire) {
+                    return ErrServerClosed.into();
                 }
                 return err;
             }
             let srv = self.clone();
+            let release_sem = sem_handle.clone();
             // 64 KiB stack — ample for the per-handler chain.
             go!(stack(64 * 1024), move || {
                 srv.serve_conn(conn);
+                if let Some(ref sem) = release_sem {
+                    let _ = sem.__try_recv();
+                }
             });
         }
     }
@@ -338,8 +878,8 @@ impl Server {
         // observed None and proceeded — leaving a fd open with no
         // wakeup.
         let listener = {
-            let mut tracked = self.tracked_listener.Lock();
-            self.in_shutdown.store(true, Ordering::Release);
+            let mut tracked = self.__state.tracked_listener.Lock();
+            self.__state.in_shutdown.store(true, Ordering::Release);
             tracked.take()
         };
 
@@ -360,7 +900,7 @@ impl Server {
         };
         let mut sleep_ns: i64 = 1_000_000; // 1ms
         loop {
-            if self.active_conns.load(Ordering::Acquire) == 0 {
+            if self.__state.active_conns.load(Ordering::Acquire) == 0 {
                 return errors::nil;
             }
             if crate::runtime::sysmon::monotonic_ns() >= deadline_ns {
@@ -381,14 +921,14 @@ impl Server {
                 self.0.fetch_sub(1, Ordering::AcqRel);
             }
         }
-        self.active_conns.fetch_add(1, Ordering::AcqRel);
-        let _guard = ActiveGuard(&self.active_conns);
+        self.__state.active_conns.fetch_add(1, Ordering::AcqRel);
+        let _guard = ActiveGuard(&self.__state.active_conns);
 
         let read_header_ns = self.read_header_timeout_ns();
         let write_timeout_ns = self.write_timeout_ns();
 
         loop {
-            if self.in_shutdown.load(Ordering::Acquire) {
+            if self.__state.in_shutdown.load(Ordering::Acquire) {
                 let _ = conn.Close();
                 return;
             }
@@ -401,7 +941,7 @@ impl Server {
 
             let (req, err) = {
                 let mut br = bufio::NewReader(&mut conn);
-                ReadRequest(&mut br)
+                ReadRequestWithLimit(&mut br, self.MaxHeaderBytes)
             };
             if !err.IsNil() {
                 // EOF, parse error, or idle timeout — all close the conn.
@@ -417,7 +957,7 @@ impl Server {
             }
 
             let keep_alive = request_keep_alive(&req)
-                && !self.in_shutdown.load(Ordering::Acquire);
+                && !self.__state.in_shutdown.load(Ordering::Acquire);
             let mut w = ResponseWriter::new(conn);
             w.__set_keep_alive(keep_alive);
 
@@ -430,7 +970,7 @@ impl Server {
             // survives for keep-alive reuse on success.
             let fd = w.__conn_fd();
             crate::defer!{
-                if crate::recover!().is_some() {
+                if crate::recover!() != crate::nil {
                     let _ = crate::syscall::Close(fd);
                 }
             }
@@ -479,7 +1019,8 @@ impl Server {
 /// Mirrors Go's `func ListenAndServe(addr string, handler Handler) error`
 /// (server.go:3702). For per-server config (timeouts, shutdown), use
 /// `http::Server` directly.
-pub fn ListenAndServe(addr: string, handler: Arc<dyn Handler>) -> error {
+pub fn ListenAndServe<A: Into<string>>(addr: A, handler: Arc<dyn Handler>) -> error {
+    let addr: string = addr.into();
     let srv = Arc::new(Server {
         Addr: addr,
         Handler: handler,

@@ -46,7 +46,7 @@
 
 #![allow(dead_code)]
 
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::AtomicBool;
 
 use crate::runtime::spin::SpinLock;
 use crate::syscall;

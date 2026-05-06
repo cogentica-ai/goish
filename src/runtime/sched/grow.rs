@@ -17,10 +17,6 @@
 // - psm/src/lib.rs:181-207 (on_stack closure marshalling)
 // - stacker/src/lib.rs:148-168 (_grow)
 
-extern crate alloc;
-
-use alloc::boxed::Box;
-
 use core::arch::naked_asm;
 use core::mem::MaybeUninit;
 use core::ptr::NonNull;
@@ -76,6 +72,22 @@ pub fn grow_bytes_live() -> usize {
     GROW_BYTES_LIVE.load(Ordering::Relaxed)
 }
 
+// ─── M28-β: lazy growth-chain container ──────────────────────────────
+//
+// Heap-allocated container for the list of grown regions a single
+// goroutine has accumulated. `G.growth_chain` is `*mut GrowChain`
+// (null until first push), so non-growing goroutines pay 8 bytes
+// instead of an inline `SpinLock<Vec<…>>` (32 bytes). Frees
+// automatically in `Drop for G`, which Munmap's each entry.
+//
+// Currently dormant — `grow_and_call` still uses the M28-α
+// scope-bound free path and never pushes here. Re-enabling M28-β
+// will replace the immediate `Munmap` in `grow_and_call` with a
+// push to `current_g().growth_chain`.
+pub struct GrowChain {
+    pub regions: alloc::vec::Vec<(*mut u8, usize)>,
+}
+
 // ─── go!() macro defaults (M28-γ) ────────────────────────────────────
 
 /// Headroom triggering a grow: when current SP is within
@@ -88,6 +100,40 @@ pub const DEFAULT_GROW_RED_ZONE: usize = 1024;
 /// 2 KiB carve; if it ever grows, it pivots onto this much.
 /// Tuned to fit comfortably for handlers, parsers, codegen passes.
 pub const DEFAULT_GROW_BARE_CAP: usize = 64 * 1024;
+
+// ─── 3-tier ladder constants ─────────────────────────────────────────
+//
+// `maybe_grow_step` (below) walks this ladder one rung at a time:
+// each call inspects the current active region size and pivots to the
+// next-larger tier if SP is within the per-tier red zone.
+//
+// 2 KiB (home) → 64 KiB (tier-2) → 1 MiB (tier-3) → no further growth.
+//
+// Past tier-3, `maybe_grow_step` is a no-op fast path. True unbounded
+// recursion still aborts via mmap failure or SIGSEGV on the bottom
+// guard page (when added).
+
+/// Tier-2 region size — pivot target when on the 2 KiB home stack.
+pub const GROW_TIER_2_SIZE: usize = 64 * 1024;
+
+/// Tier-3 region size — pivot target when on a tier-2 region.
+pub const GROW_TIER_3_SIZE: usize = 1024 * 1024;
+
+/// Red zone applied when on the home stack; if SP is within this many
+/// bytes of the home base, `maybe_grow_step` pivots to tier-2.
+///
+/// **Sized for the pivot path itself**: between the red-zone check
+/// firing and the asm RSP pivot inside `goish_on_stack`, the slow
+/// path adds `grow_and_call` + `Mmap` + `swap_active_stack_lo/hi` +
+/// `goish_on_stack` setup frames on the home stack. In debug builds
+/// that's ~600–800 B. The red zone must cover that — and ideally
+/// leave one or two recursion frames of margin so the pivot fires
+/// before the user is right at the edge.
+const GROW_TIER_1_RED_ZONE: usize = 1024;
+
+/// Red zone applied when on a tier-2 region; if SP is within this many
+/// bytes of the tier-2 base, `maybe_grow_step` pivots to tier-3.
+const GROW_TIER_2_RED_ZONE: usize = 8 * 1024;
 
 // ─── leaf asm: read RSP ──────────────────────────────────────────────
 
@@ -202,6 +248,94 @@ where
     grow_and_call(stack_size, f)
 }
 
+/// Tier-aware single-step grow.
+///
+/// Inspect the current active region's size and pivot to the next
+/// rung of the ladder if SP is within the corresponding red zone.
+/// One call per recursion site; the runtime picks the target size
+/// from a fixed ladder:
+///
+///   2 KiB (home) → 64 KiB (tier-2) → 1 MiB (tier-3) → no-op
+///
+/// Mirrors how stacker users call `maybe_grow` at recursion sites,
+/// but eliminates the manual `red_zone` / `target` tuning and gives
+/// the deepest goroutines two automatic upgrades. Past tier-3, the
+/// helper is a fast-path no-op; users who genuinely need >1 MiB
+/// should call `maybe_grow(red_zone, size, f)` directly with their
+/// own size.
+///
+/// Recommended use: wrap recursive calls (parsers, AST visitors,
+/// codegen passes, hash/btree balancing) so depth doesn't have to
+/// be known at goroutine spawn time. Cheap for shallow recursion
+/// (single fast-path comparison); pays one mmap when a pivot fires.
+///
+/// ```no_run
+/// use goish::runtime::sched::maybe_grow_step;
+///
+/// fn deep_recurse(n: i64) -> i64 {
+///     maybe_grow_step(|| {
+///         if n == 0 { return 0; }
+///         n + deep_recurse(n - 1)
+///     })
+/// }
+/// ```
+#[inline(always)]
+pub fn maybe_grow_step<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    // Inline the check so the whole fast path lives in the caller's
+    // frame — no nested fn frames consuming home-stack budget. We
+    // read `active_stack_lo`/`hi` directly off the G to skip the
+    // `current_active_stack_lo`/`hi` helper frames, and we duplicate
+    // `maybe_grow`'s SP comparison here so the slow path is the only
+    // call out.
+    //
+    // **Why this matters for 2 KiB home stacks**: in debug builds
+    // each function call costs ~150 B of frame (prologue/spills).
+    // The previous out-of-line version called four functions just
+    // to decide whether to pivot, eating 600+ B before the user's
+    // recursion got a chance — forcing us to pivot unconditionally
+    // on home. Inlining brings the fast-path check down to a single
+    // frame so home (2 KiB) can host real recursion until SP
+    // actually descends into the red zone.
+    // Lock-free curg read — same pattern as `gopark` /`mcall`. The
+    // SpinLock-locked `current_g()` is too expensive in debug
+    // builds; data_unchecked() is safe here because curg is only
+    // mutated by this M's own thread.
+    let g = match unsafe { crate::runtime::sched::m::current_m().data_unchecked().curg } {
+        Some(g) => g,
+        None => return f(),
+    };
+    let (lo, hi) = unsafe {
+        (
+            (*g.as_ptr()).active_stack_lo.load(Ordering::Acquire),
+            (*g.as_ptr()).active_stack_hi.load(Ordering::Acquire),
+        )
+    };
+    if lo == 0 || hi <= lo {
+        return f();
+    }
+    let cur_size = hi - lo;
+    let (target, red_zone) = if cur_size < GROW_TIER_2_SIZE {
+        (GROW_TIER_2_SIZE, GROW_TIER_1_RED_ZONE)
+    } else if cur_size < GROW_TIER_3_SIZE {
+        (GROW_TIER_3_SIZE, GROW_TIER_2_RED_ZONE)
+    } else {
+        // Tier-3 or beyond — no further auto-growth.
+        return f();
+    };
+    // Inline fast-path SP check; only call out to grow_and_call on
+    // the slow path so the out-of-line frame is amortised across
+    // genuine pivots.
+    GROW_CALLS.fetch_add(1, Ordering::Relaxed);
+    let sp = current_sp();
+    if sp.saturating_sub(lo) >= red_zone {
+        return f();
+    }
+    grow_and_call(target, f)
+}
+
 /// Slow path: allocate a fresh stack region and pivot onto it.
 fn grow_and_call<F, R>(stack_size: usize, f: F) -> R
 where
@@ -251,25 +385,29 @@ where
     let saved_lo = swap_active_stack_lo(base as usize);
     let saved_hi = swap_active_stack_hi(base as usize + size);
 
-    // Box the closure so we have a stable pointer to pass through asm.
-    // The Box is consumed by `run_closure` (which `read`s the F out of
-    // its MaybeUninit slot and runs it), so we must `into_raw` it and
-    // free the storage manually after the pivot returns.
-    let closure: Box<MaybeUninit<F>> = Box::new(MaybeUninit::new(f));
-    let closure_raw = Box::into_raw(closure);
+    // Stack-resident closure slot — gives us a stable pointer to pass
+    // through the asm pivot without paying the Box::new allocator path
+    // on the home stack. The home-stack frame for `grow_and_call`
+    // remains live through the entire pivot/execution/pivot-back
+    // cycle, so `&mut closure_slot` stays valid for the asm-side
+    // `run_closure` to read F out of. After F is consumed, the
+    // MaybeUninit is logically empty; its scope-end is a no-op drop.
+    //
+    // Why this matters: in debug builds the Box::new path adds ~3 fn
+    // frames (Box::new → alloc::alloc::alloc → goish heap allocator),
+    // each ~100 B, which pushed the 2 KiB home stack into overflow
+    // when a goroutine entered maybe_grow at entry — see
+    // `examples/grow_park_smoke.rs` for the regression evidence.
+    let mut closure_slot: MaybeUninit<F> = MaybeUninit::new(f);
     let mut return_slot: MaybeUninit<R> = MaybeUninit::uninit();
 
     unsafe {
         goish_on_stack(
-            closure_raw as *mut u8,
+            &mut closure_slot as *mut _ as *mut u8,
             &mut return_slot as *mut _ as *mut u8,
             run_closure::<F, R>,
             new_sp,
         );
-        // Reclaim the Box's heap allocation. The F inside has already
-        // been moved-out by `run_closure`, so we deallocate without
-        // dropping (the MaybeUninit doesn't track init state for us).
-        let _ = Box::from_raw(closure_raw);
     }
 
     // Restore bookkeeping and free the growth region. M28-α: the
@@ -279,12 +417,17 @@ where
     // path where another M might wake it before we return — that
     // is documented in `maybe_grow`'s public doc.
     //
-    // (M28-β attempted to pin to G lifetime via `G.growth_chain`,
-    // but the resulting interaction with the existing cooperative-
-    // preempt residual scheduler bug — see
-    // project_residual_4pct_root_cause_found.md — destabilized
-    // chan-park-inside-grow flows. Reverted here; the field
-    // `G.growth_chain` is retained as plumbing for a future fix.)
+    // **Re-enablement of M28-β is now in scope** (the cooperative-
+    // preempt residual that previously blocked it has been resolved
+    // by the deferred-runqput fix in 956153a, the selparkcommit
+    // clear removal in 84edfb5, and the async-preempt EFLAGS
+    // preservation in 9028a07). To make grown regions outlive their
+    // closures, push `(base, size)` onto `G.growth_chain` here and
+    // skip the `Munmap` below — the `Drop for G` impl in `g.rs:254`
+    // already drains the chain at goexit. Validation gate before
+    // flipping: `make e2e LOOPS=100 FILTER='^chan_'` clean plus
+    // a heavy-recursion-with-park smoke. See the 3-tier design
+    // memory for context.
     swap_active_stack_lo(saved_lo);
     swap_active_stack_hi(saved_hi);
     GROW_LIVE.fetch_sub(1, Ordering::Relaxed);
@@ -314,6 +457,15 @@ fn current_active_stack_lo() -> usize {
     match crate::runtime::sched::scheduler::current_g() {
         Some(g) => unsafe {
             (*g.as_ptr()).active_stack_lo.load(Ordering::Acquire)
+        },
+        None => 0,
+    }
+}
+
+fn current_active_stack_hi() -> usize {
+    match crate::runtime::sched::scheduler::current_g() {
+        Some(g) => unsafe {
+            (*g.as_ptr()).active_stack_hi.load(Ordering::Acquire)
         },
         None => 0,
     }

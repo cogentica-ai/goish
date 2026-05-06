@@ -114,6 +114,15 @@ pub fn runes<T: __RunesConv>(x: T) -> slice<rune> {
     x.__to_runes()
 }
 
+// Borrow-friendly: `runes(&line)` where `line` is already `&string`
+// (e.g. from a range-loop binding) needs `&string: __RunesConv`.
+// Cloning is cheap (Arc bump) so we forward through `clone()`.
+impl __RunesConv for &string {
+    fn __to_runes(self) -> slice<rune> {
+        self.clone().__to_runes()
+    }
+}
+
 impl __RunesConv for string {
     fn __to_runes(self) -> slice<rune> {
         let bytes = self.as_bytes();
@@ -135,3 +144,86 @@ impl __RunesConv for &'static str {
         runes(string::from_static(self))
     }
 }
+
+// ─── Go-style numeric conversions ────────────────────────────────────
+//
+// `int(x)`, `int64(x)`, `uint64(x)`, `float64(x)` — mirror Go's typed
+// numeric conversion calls. Each accepts any numeric type and dispatches
+// to a per-type trait so the call site reads exactly like Go:
+//
+//   let n = int(port);              // u16 → i64
+//   let f = float64(REQ_COUNT.Load());   // u64 → f64
+//   let u = uint64(n);              // i64 → u64
+//
+// Implemented for u8/i8/u16/i16/u32/i32/u64/i64/usize/isize/f32/f64
+// and goish's `byte`/`rune`/`int`/`uint`. Truncation/widening matches
+// Rust's `as` operator (which already mirrors Go's spec for numeric
+// conversions).
+
+use crate::types::{float32, float64, int, uint};
+
+macro_rules! __num_conv {
+    ($trait:ident, $fn_name:ident, $target:ty) => {
+        pub trait $trait {
+            #[doc(hidden)]
+            fn __conv(self) -> $target;
+        }
+        #[allow(non_snake_case)]
+        #[inline]
+        pub fn $fn_name<T: $trait>(x: T) -> $target {
+            x.__conv()
+        }
+        // Numeric source impls — `as` covers truncation/widening per Go.
+        impl $trait for u8 {  #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for i8 {  #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for u16 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for i16 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for u32 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for i32 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for u64 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for i64 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for usize { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for isize { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for f32 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for f64 { #[inline] fn __conv(self) -> $target { self as $target } }
+    };
+}
+
+__num_conv!(__IntConv, int, int);
+__num_conv!(__Int8Conv, int8, i8);
+__num_conv!(__Int16Conv, int16, i16);
+__num_conv!(__Int32Conv, int32, i32);
+__num_conv!(__Int64Conv, int64, i64);
+__num_conv!(__UintConv, uint, uint);
+__num_conv!(__Uint8Conv, uint8, u8);
+__num_conv!(__Uint16Conv, uint16, u16);
+__num_conv!(__Uint32Conv, uint32, u32);
+__num_conv!(__Uint64Conv, uint64, u64);
+__num_conv!(__Float32Conv, float32, float32);
+__num_conv!(__Float64Conv, float64, float64);
+__num_conv!(__RuneConv, rune, crate::types::rune);
+__num_conv!(__ByteConv, byte, crate::types::byte);
+
+// ─── __SliceIndex — accept any integer type as a Go-style index ─────
+//
+// Go allows any integer type to index a slice/array/string. The
+// trait is implemented exclusively for integer types (no f32/f64) so
+// `s[0.0]` still fails to compile, matching Go's spec.
+//
+// Used by `slice<T>`, `array<T,N>`, and `string` `Index` impls so call
+// sites stay Go-shape: `dec[buf[i]]` where `buf[i]: byte` typechecks
+// without an explicit `int(buf[i])` cast.
+pub trait __SliceIndex {
+    #[doc(hidden)]
+    fn __sidx(self) -> usize;
+}
+impl __SliceIndex for u8    { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for i8    { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for u16   { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for i16   { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for u32   { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for i32   { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for u64   { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for i64   { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for usize { #[inline] fn __sidx(self) -> usize { self } }
+impl __SliceIndex for isize { #[inline] fn __sidx(self) -> usize { self as usize } }

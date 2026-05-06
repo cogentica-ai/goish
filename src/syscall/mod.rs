@@ -51,11 +51,20 @@ pub const SYS_GETPEERNAME: usize = 52;
 pub const SYS_SETSOCKOPT: usize = 54;
 pub const SYS_GETSOCKOPT: usize = 55;
 pub const SYS_FCNTL: usize = 72;
+pub const SYS_FSYNC: usize = 74;
+pub const SYS_GETCWD: usize = 79;
+pub const SYS_CHDIR: usize = 80;
 pub const SYS_ACCEPT4: usize = 288;
 pub const SYS_EPOLL_CREATE1: usize = 291;
 pub const SYS_EPOLL_CTL: usize = 233;
 pub const SYS_EPOLL_PWAIT: usize = 281;
 pub const SYS_EVENTFD2: usize = 290;
+// Process family (os/exec port — M27 follow-up).
+pub const SYS_FORK: usize = 57;
+pub const SYS_EXECVE: usize = 59;
+pub const SYS_WAIT4: usize = 61;
+pub const SYS_DUP2: usize = 33;
+pub const SYS_DUP3: usize = 292;
 
 // Signal numbers (Linux). Mirror /usr/include/asm-generic/signal.h.
 pub const SIGHUP: i32 = 1;
@@ -186,6 +195,24 @@ pub unsafe fn syscall3(n: usize, a1: usize, a2: usize, a3: usize) -> isize {
     ret
 }
 
+/// 4-argument syscall (newfstatat).
+#[inline]
+pub unsafe fn syscall4(n: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> isize {
+    let ret: isize;
+    asm!(
+        "syscall",
+        inlateout("rax") n => ret,
+        in("rdi") a1,
+        in("rsi") a2,
+        in("rdx") a3,
+        in("r10") a4,
+        out("rcx") _,
+        out("r11") _,
+        options(nostack, preserves_flags),
+    );
+    ret
+}
+
 /// 6-argument syscall (mmap).
 #[inline]
 pub unsafe fn syscall6(
@@ -230,6 +257,18 @@ pub fn Read(fd: i32, p: *mut u8, n: usize) -> isize {
     unsafe { syscall3(SYS_READ, fd as usize, p as usize, n) }
 }
 
+/// Common errno values (Linux, from `<errno.h>`).
+pub const ENOENT: i32 = 2;
+pub const EACCES: i32 = 13;
+pub const EEXIST: i32 = 17;
+pub const ENOTDIR: i32 = 20;
+pub const EISDIR: i32 = 21;
+pub const ENOTEMPTY: i32 = 39;
+pub const EINTR: i32 = 4;
+pub const ENOSYS: i32 = 38;
+pub const ENOTSUP: i32 = 95;
+pub const EOPNOTSUPP: i32 = 95;
+
 /// Open flags. Subset of `<fcntl.h>`.
 pub const O_RDONLY: i32 = 0;
 pub const O_CLOEXEC: i32 = 0o2_000_000;
@@ -245,6 +284,368 @@ pub fn Open(path: *const u8, flags: i32, mode: i32) -> i32 {
 #[allow(non_snake_case)]
 pub fn Close(fd: i32) -> i32 {
     unsafe { syscall1(SYS_CLOSE, fd as usize) as i32 }
+}
+
+// ─── process family (os/exec) ─────────────────────────────────────────
+
+/// `fork(2)` — returns 0 in child, child PID in parent, -errno on
+/// error. Linux x86_64 still ships the legacy `SYS_FORK` (57) which
+/// behaves like a `clone(SIGCHLD, 0)`. Goish uses it directly because
+/// the address-space-sharing variants (vfork, clone with CLONE_VM)
+/// require careful child-side discipline that the simple posix-style
+/// Cmd.Run path doesn't need.
+#[allow(non_snake_case)]
+pub fn Fork() -> i32 {
+    unsafe { syscall0(SYS_FORK) as i32 }
+}
+
+/// `execve(2)` — replace the current process image. `argv` and `envp`
+/// are NULL-terminated arrays of NULL-terminated C strings. On
+/// success, does not return (so the caller observes the child via
+/// wait4 and a non-zero exit). On failure, returns -errno.
+#[allow(non_snake_case)]
+pub fn Execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> i32 {
+    unsafe {
+        syscall3(SYS_EXECVE, path as usize, argv as usize, envp as usize) as i32
+    }
+}
+
+/// `wait4(2)` — wait for the given pid and return its raw status word
+/// (or -errno). `options` follows Linux's WNOHANG/WUNTRACED/etc.; pass
+/// 0 for blocking-wait-for-exit semantics. The decoded exit-code lives
+/// in bits 8..16 of the status word for normal exits.
+#[allow(non_snake_case)]
+pub fn Wait4(pid: i32, status: *mut i32, options: i32, rusage: *mut u8) -> i32 {
+    unsafe {
+        syscall4(SYS_WAIT4, pid as usize, status as usize, options as usize, rusage as usize) as i32
+    }
+}
+
+/// `dup3(2)` — duplicate `oldfd` to `newfd` with optional flags
+/// (typically `O_CLOEXEC`). Used to wire pipes onto stdin/stdout/
+/// stderr in the child between Fork and Execve.
+#[allow(non_snake_case)]
+pub fn Dup3(oldfd: i32, newfd: i32, flags: i32) -> i32 {
+    unsafe { syscall3(SYS_DUP3, oldfd as usize, newfd as usize, flags as usize) as i32 }
+}
+
+
+// ─── stat / fstat (Linux x86_64 layout) ──────────────────────────────
+
+pub const SYS_FSTAT: usize = 5;
+pub const SYS_NEWFSTATAT: usize = 262;
+pub const SYS_LSEEK: usize = 8;
+
+/// File mode bits (from <sys/stat.h>). Used by `Stat_t.st_mode`.
+pub const S_IFMT: u32 = 0o170000;
+pub const S_IFDIR: u32 = 0o040000;
+pub const S_IFREG: u32 = 0o100000;
+pub const S_IFLNK: u32 = 0o120000;
+
+/// `seek(2)` whence values.
+pub const SEEK_SET: i32 = 0;
+pub const SEEK_CUR: i32 = 1;
+pub const SEEK_END: i32 = 2;
+
+/// Linux x86_64 `struct stat` (asm-generic/stat.h with x86_64 padding).
+/// Layout matches what SYS_FSTAT / SYS_NEWFSTATAT write.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct Stat_t {
+    pub st_dev: u64,
+    pub st_ino: u64,
+    pub st_nlink: u64,
+    pub st_mode: u32,
+    pub st_uid: u32,
+    pub st_gid: u32,
+    pub __pad0: u32,
+    pub st_rdev: u64,
+    pub st_size: i64,
+    pub st_blksize: i64,
+    pub st_blocks: i64,
+    pub st_atime: i64,
+    pub st_atime_nsec: u64,
+    pub st_mtime: i64,
+    pub st_mtime_nsec: u64,
+    pub st_ctime: i64,
+    pub st_ctime_nsec: u64,
+    pub __unused: [i64; 3],
+}
+
+/// `fstat(fd, &stat)` — fill `out` from the kernel. Returns 0 on
+/// success or `-errno` on error.
+#[allow(non_snake_case)]
+pub fn Fstat(fd: i32, out: &mut Stat_t) -> i32 {
+    unsafe { syscall2(SYS_FSTAT, fd as usize, out as *mut Stat_t as usize) as i32 }
+}
+
+/// `fstatat(AT_FDCWD, path, &stat, 0)` — stat a path relative to CWD,
+/// following symlinks. `path` must be NUL-terminated.
+pub const AT_FDCWD: i32 = -100;
+
+/// `AT_SYMLINK_NOFOLLOW` — don't traverse a final-component symlink.
+/// Used by Lstat (fstatat with this flag).
+pub const AT_SYMLINK_NOFOLLOW: i32 = 0x100;
+
+#[allow(non_snake_case)]
+pub fn Stat(path: *const u8, out: &mut Stat_t) -> i32 {
+    unsafe {
+        syscall4(
+            SYS_NEWFSTATAT,
+            AT_FDCWD as usize,
+            path as usize,
+            out as *mut Stat_t as usize,
+            0,
+        ) as i32
+    }
+}
+
+/// `fstatat(AT_FDCWD, path, &stat, AT_SYMLINK_NOFOLLOW)` — stat a path
+/// without following a final-component symlink. Mirrors `lstat(2)`.
+#[allow(non_snake_case)]
+pub fn Lstat(path: *const u8, out: &mut Stat_t) -> i32 {
+    unsafe {
+        syscall4(
+            SYS_NEWFSTATAT,
+            AT_FDCWD as usize,
+            path as usize,
+            out as *mut Stat_t as usize,
+            AT_SYMLINK_NOFOLLOW as usize,
+        ) as i32
+    }
+}
+
+/// `lseek(fd, offset, whence)` — reposition file offset.
+#[allow(non_snake_case)]
+pub fn Lseek(fd: i32, offset: i64, whence: i32) -> i64 {
+    unsafe { syscall3(SYS_LSEEK, fd as usize, offset as usize, whence as usize) as i64 }
+}
+
+/// `pread64(fd, buf, count, offset)` — read from file at given offset.
+#[allow(non_snake_case)]
+pub fn Pread64(fd: i32, buf: *mut u8, count: usize, offset: i64) -> isize {
+    unsafe { syscall4(SYS_PREAD64, fd as usize, buf as usize, count, offset as usize) as isize }
+}
+
+/// `pwrite64(fd, buf, count, offset)` — write to file at given offset.
+#[allow(non_snake_case)]
+pub fn Pwrite64(fd: i32, buf: *const u8, count: usize, offset: i64) -> isize {
+    unsafe { syscall4(SYS_PWRITE64, fd as usize, buf as usize, count, offset as usize) as isize }
+}
+
+/// `ftruncate(fd, length)` — truncate file to given length.
+#[allow(non_snake_case)]
+pub fn Ftruncate(fd: i32, length: i64) -> i32 {
+    unsafe { syscall2(SYS_FTRUNCATE, fd as usize, length as usize) as i32 }
+}
+
+/// `flock(fd, operation)` — advisory file lock.
+/// operation: LOCK_SH (shared), LOCK_EX (exclusive), LOCK_UN (unlock).
+#[allow(non_snake_case)]
+pub fn Flock(fd: i32, operation: i32) -> i32 {
+    unsafe { syscall2(SYS_FLOCK, fd as usize, operation as usize) as i32 }
+}
+
+// flock operations (linux/fcntl.h)
+pub const LOCK_SH: i32 = 1;
+pub const LOCK_EX: i32 = 2;
+pub const LOCK_UN: i32 = 8;
+pub const LOCK_NB: i32 = 4;
+
+// ─── mkdir / unlink / rmdir / chmod / symlink / readlink ────────────
+
+pub const SYS_MKDIR: usize = 83;
+pub const SYS_UNLINK: usize = 87;
+pub const SYS_RMDIR: usize = 84;
+pub const SYS_CHMOD: usize = 90;
+pub const SYS_SYMLINK: usize = 88;
+pub const SYS_READLINK: usize = 89;
+pub const SYS_RENAME: usize = 82;
+pub const SYS_LINK: usize = 86;
+pub const SYS_TRUNCATE: usize = 76;
+pub const SYS_FTRUNCATE: usize = 77;
+pub const SYS_PREAD64: usize = 17;
+pub const SYS_PWRITE64: usize = 18;
+pub const SYS_FLOCK: usize = 73;
+pub const SYS_PIPE2: usize = 293;
+pub const SYS_CHOWN: usize = 92;
+pub const SYS_LCHOWN: usize = 94;
+
+/// `mkdir(path, mode)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Mkdir(path: *const u8, mode: u32) -> i32 {
+    unsafe { syscall2(SYS_MKDIR, path as usize, mode as usize) as i32 }
+}
+
+/// `unlink(path)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Unlink(path: *const u8) -> i32 {
+    unsafe { syscall1(SYS_UNLINK, path as usize) as i32 }
+}
+
+/// `rmdir(path)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Rmdir(path: *const u8) -> i32 {
+    unsafe { syscall1(SYS_RMDIR, path as usize) as i32 }
+}
+
+/// `getcwd(buf, size)`. Linux returns the length of the cwd string
+/// (including the terminating NUL), or a negative errno on failure.
+#[allow(non_snake_case)]
+pub fn Getcwd(buf: *mut u8, size: usize) -> isize {
+    unsafe { syscall2(SYS_GETCWD, buf as usize, size) as isize }
+}
+
+/// `chdir(path)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Chdir(path: *const u8) -> i32 {
+    unsafe { syscall1(SYS_CHDIR, path as usize) as i32 }
+}
+
+/// `chmod(path, mode)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Chmod(path: *const u8, mode: u32) -> i32 {
+    unsafe { syscall2(SYS_CHMOD, path as usize, mode as usize) as i32 }
+}
+
+/// `symlink(oldname, newname)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Symlink(oldname: *const u8, newname: *const u8) -> i32 {
+    unsafe { syscall2(SYS_SYMLINK, oldname as usize, newname as usize) as i32 }
+}
+
+/// `readlink(path, buf, bufsiz)`. Returns the number of bytes placed in
+/// buf (without NUL) on success, or a negative errno on failure.
+#[allow(non_snake_case)]
+pub fn Readlink(path: *const u8, buf: *mut u8, bufsiz: usize) -> isize {
+    unsafe { syscall3(SYS_READLINK, path as usize, buf as usize, bufsiz) as isize }
+}
+
+/// `rename(oldpath, newpath)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Rename(oldpath: *const u8, newpath: *const u8) -> i32 {
+    unsafe { syscall2(SYS_RENAME, oldpath as usize, newpath as usize) as i32 }
+}
+
+/// `link(oldpath, newpath)` — create newpath as a hard link to oldpath.
+/// Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Link(oldpath: *const u8, newpath: *const u8) -> i32 {
+    unsafe { syscall2(SYS_LINK, oldpath as usize, newpath as usize) as i32 }
+}
+
+/// `truncate(path, length)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Truncate(path: *const u8, length: i64) -> i32 {
+    unsafe { syscall2(SYS_TRUNCATE, path as usize, length as usize) as i32 }
+}
+
+/// `pipe2(pipefd[2], flags)` — create a unidirectional pipe; pipefd[0]
+/// is the read end, pipefd[1] is the write end. Returns 0 on success
+/// or -errno. Pass `O_CLOEXEC` to set close-on-exec on both ends.
+#[allow(non_snake_case)]
+pub fn Pipe2(pipefd: &mut [i32; 2], flags: i32) -> i32 {
+    unsafe { syscall2(SYS_PIPE2, pipefd.as_mut_ptr() as usize, flags as usize) as i32 }
+}
+
+/// `chown(path, uid, gid)` — set ownership; -1 leaves the field
+/// unchanged. Returns 0 on success or -errno on failure.
+#[allow(non_snake_case)]
+pub fn Chown(path: *const u8, uid: i32, gid: i32) -> i32 {
+    unsafe { syscall3(SYS_CHOWN, path as usize, uid as usize, gid as usize) as i32 }
+}
+
+/// `lchown(path, uid, gid)` — like chown, but does not follow a
+/// final-component symlink. Returns 0 on success or -errno.
+#[allow(non_snake_case)]
+pub fn Lchown(path: *const u8, uid: i32, gid: i32) -> i32 {
+    unsafe { syscall3(SYS_LCHOWN, path as usize, uid as usize, gid as usize) as i32 }
+}
+
+// ─── uname ───────────────────────────────────────────────────────────
+
+pub const SYS_UNAME: usize = 63;
+
+/// Linux `struct utsname`. Each field is a NUL-padded byte array of
+/// fixed length (65 on Linux). `sysname` / `nodename` / `release` /
+/// `version` / `machine` / `domainname`.
+#[repr(C)]
+pub struct Utsname {
+    pub sysname: [u8; 65],
+    pub nodename: [u8; 65],
+    pub release: [u8; 65],
+    pub version: [u8; 65],
+    pub machine: [u8; 65],
+    pub domainname: [u8; 65],
+}
+
+impl Default for Utsname {
+    fn default() -> Self {
+        Utsname {
+            sysname: [0; 65],
+            nodename: [0; 65],
+            release: [0; 65],
+            version: [0; 65],
+            machine: [0; 65],
+            domainname: [0; 65],
+        }
+    }
+}
+
+/// `uname(2)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Uname(buf: &mut Utsname) -> i32 {
+    unsafe { syscall1(SYS_UNAME, buf as *mut Utsname as usize) as i32 }
+}
+
+// ─── getrandom ───────────────────────────────────────────────────────
+
+pub const SYS_GETRANDOM: usize = 318;
+pub const GRND_NONBLOCK: u32 = 0x0001;
+pub const GRND_RANDOM: u32 = 0x0002;
+pub const GRND_INSECURE: u32 = 0x0004;
+
+/// `getrandom(2)` — fill `buf[0..buflen]` with random bytes from the
+/// kernel CSPRNG. Returns the number of bytes written, or `-errno` on
+/// failure.
+#[allow(non_snake_case)]
+pub fn Getrandom(buf: *mut u8, buflen: usize, flags: u32) -> i64 {
+    unsafe { syscall3(SYS_GETRANDOM, buf as usize, buflen, flags as usize) as i64 }
+}
+
+// ─── getdents64 ──────────────────────────────────────────────────────
+
+pub const SYS_GETDENTS64: usize = 217;
+
+/// Linux `struct linux_dirent64` (getdents64(2)). Variable-sized
+/// `d_name` field is *not* part of this struct; callers parse it
+/// out of the buffer via `d_reclen`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct LinuxDirent64Header {
+    pub d_ino: u64,
+    pub d_off: i64,
+    pub d_reclen: u16,
+    pub d_type: u8,
+    // d_name follows here, NUL-terminated, length = d_reclen - 19.
+}
+
+/// `d_type` values for getdents64. `DT_UNKNOWN` means caller must stat.
+pub const DT_UNKNOWN: u8 = 0;
+pub const DT_FIFO: u8 = 1;
+pub const DT_CHR: u8 = 2;
+pub const DT_DIR: u8 = 4;
+pub const DT_BLK: u8 = 6;
+pub const DT_REG: u8 = 8;
+pub const DT_LNK: u8 = 10;
+pub const DT_SOCK: u8 = 12;
+
+/// `getdents64(fd, buf, buflen)` — read raw directory entries into the
+/// caller-provided buffer. Returns the number of bytes filled, or
+/// `-errno` on error, `0` on EOD.
+#[allow(non_snake_case)]
+pub fn Getdents64(fd: i32, buf: *mut u8, buflen: usize) -> i64 {
+    unsafe { syscall3(SYS_GETDENTS64, fd as usize, buf as usize, buflen) as i64 }
 }
 
 /// Terminate the entire process. Mirrors `syscall.Exit` in Go (which
@@ -301,6 +702,20 @@ pub fn Nanosleep(req: *const Timespec, rem: *mut Timespec) -> isize {
     unsafe { syscall2(SYS_NANOSLEEP, req as usize, rem as usize) }
 }
 
+/// 0-argument syscall — used by `fork(2)` and `getpid(2)`.
+#[inline]
+pub unsafe fn syscall0(n: usize) -> isize {
+    let ret: isize;
+    asm!(
+        "syscall",
+        inlateout("rax") n => ret,
+        out("rcx") _,
+        out("r11") _,
+        options(nostack, preserves_flags),
+    );
+    ret
+}
+
 /// 2-argument syscall — used by `clock_gettime` / `nanosleep`.
 #[inline]
 pub unsafe fn syscall2(n: usize, a1: usize, a2: usize) -> isize {
@@ -329,6 +744,52 @@ pub fn Gettid() -> i32 {
 #[allow(non_snake_case)]
 pub fn Getpid() -> i32 {
     unsafe { syscall1(SYS_GETPID, 0) as i32 }
+}
+
+pub const SYS_GETUID: usize = 102;
+pub const SYS_GETGID: usize = 104;
+pub const SYS_GETEUID: usize = 107;
+pub const SYS_GETEGID: usize = 108;
+pub const SYS_GETPPID: usize = 110;
+pub const SYS_GETGROUPS: usize = 115;
+
+/// `getuid(2)` — real user id of the calling process.
+#[allow(non_snake_case)]
+pub fn Getuid() -> i32 {
+    unsafe { syscall1(SYS_GETUID, 0) as i32 }
+}
+
+/// `getgid(2)` — real group id of the calling process.
+#[allow(non_snake_case)]
+pub fn Getgid() -> i32 {
+    unsafe { syscall1(SYS_GETGID, 0) as i32 }
+}
+
+/// `geteuid(2)` — effective user id.
+#[allow(non_snake_case)]
+pub fn Geteuid() -> i32 {
+    unsafe { syscall1(SYS_GETEUID, 0) as i32 }
+}
+
+/// `getegid(2)` — effective group id.
+#[allow(non_snake_case)]
+pub fn Getegid() -> i32 {
+    unsafe { syscall1(SYS_GETEGID, 0) as i32 }
+}
+
+/// `getppid(2)` — parent process id.
+#[allow(non_snake_case)]
+pub fn Getppid() -> i32 {
+    unsafe { syscall1(SYS_GETPPID, 0) as i32 }
+}
+
+/// `getgroups(2)` — list of supplementary group IDs. Linux signature:
+/// `int getgroups(int size, gid_t list[])`. Returns the count on
+/// success, -errno on failure. Caller passes `size=0, list=null` to
+/// probe the count, then allocates and re-calls with the right size.
+#[allow(non_snake_case)]
+pub fn Getgroups(size: i32, list: *mut u32) -> isize {
+    unsafe { syscall2(SYS_GETGROUPS, size as usize, list as usize) }
 }
 
 /// `kill(2)` — send a signal to a process. Use `Getpid()` for the

@@ -213,16 +213,23 @@ pub fn AppendRune(p: crate::goslice::slice<byte>, r: rune) -> crate::goslice::sl
 // ─── Counting / validation ─────────────────────────────────────────────
 
 /// Number of runes in `p`. Each invalid byte counts as one rune.
+///
+/// Generic over `AsRef<[u8]>` so callers can pass `&[u8]`,
+/// `slice<byte>` (via Deref), `bytes::Buffer::Bytes()`, or any other
+/// byte source without a manual coercion. Goish §3 forbids leaking
+/// `&[u8]` in port-facing signatures, so the bound preserves the
+/// goish call-style while keeping internal callers ergonomic.
 #[allow(non_snake_case)]
-pub fn RuneCount(p: &[byte]) -> int {
+pub fn RuneCount<P: AsRef<[byte]>>(p: P) -> int {
+    let bytes = p.as_ref();
     let mut i = 0usize;
     let mut n: int = 0;
-    while i < p.len() {
+    while i < bytes.len() {
         n += 1;
-        if p[i] < RuneSelf {
+        if bytes[i] < RuneSelf {
             i += 1;
         } else {
-            let (_, sz) = DecodeRune(&p[i..]);
+            let (_, sz) = DecodeRune(&bytes[i..]);
             i += sz as usize;
         }
     }

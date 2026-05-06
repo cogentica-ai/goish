@@ -15,6 +15,11 @@
 // Verifies that close-during-recv-storm is correct under multi-M:
 // every queued value is delivered exactly once, count and sum
 // match feeder's expectations, no deadlock.
+//
+// Stack size: workers are opted up to 64 KiB to avoid 2 KiB overflow
+// under the close-storm path (Recv frame + sudog + gopark + signal-
+// stack interaction crowds the cap on real hardware at ~0.2% rate;
+// see project_stack_grow_3tier_design.md for the long-term fix).
 
 #![no_std]
 #![no_main]
@@ -56,7 +61,7 @@ fn main() {
     for _ in 0..NWORK {
         let q = q.clone();
         let r = r.clone();
-        go!(move || {
+        go!(stack(64 * goish::KB), move || {
             loop {
                 let (v, ok) = q.Recv();
                 if !ok {
@@ -74,7 +79,7 @@ fn main() {
     // Feeder: produce NITER values, then close q.
     {
         let q = q.clone();
-        go!(move || {
+        go!(stack(64 * goish::KB), move || {
             let mut expect: i64 = 0;
             for i in 0..NITER {
                 let v = PRIMES[(i as usize) % PRIMES.len()];
@@ -90,7 +95,7 @@ fn main() {
     // Consumer: drain r and sum.
     {
         let r = r.clone();
-        go!(move || {
+        go!(stack(64 * goish::KB), move || {
             let mut n: i64 = 0;
             let mut s: i64 = 0;
             loop {

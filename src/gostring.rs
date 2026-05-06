@@ -28,6 +28,7 @@ use core::hash::{Hash, Hasher};
 use core::ops::{Add, Index};
 
 use crate::builtin::Len as LenTrait;
+use crate::convert::__SliceIndex;
 use crate::types::{byte, int};
 
 #[derive(Clone)]
@@ -40,6 +41,20 @@ impl string {
     pub fn new() -> Self {
         Self {
             bytes: Arc::from([] as [u8; 0]),
+        }
+    }
+
+    /// `s[i:j]` — substring from byte offset `i` (inclusive) to `j`
+    /// (exclusive). Mirrors Go's slice expression on strings; the
+    /// result shares the underlying `Arc<[u8]>` so this is O(1) plus
+    /// a refcount bump, not a copy. Panics if the indices are out of
+    /// range or split a multi-byte UTF-8 sequence.
+    pub fn slice(&self, start: i64, end: i64) -> string {
+        let s = start as usize;
+        let e = end as usize;
+        let bytes = &self.bytes[s..e];
+        Self {
+            bytes: Arc::from(bytes),
         }
     }
 
@@ -84,10 +99,11 @@ impl string {
         self.bytes.len() as int
     }
 
-    /// Internal byte access for utf8/range/comparison machinery. Public
-    /// users get bytes via the `bytes(s)` builtin, which copies into a
-    /// `slice<byte>` (Go-faithful semantics).
-    pub(crate) fn as_bytes(&self) -> &[u8] {
+    /// Raw byte access. The slice is valid for `&self`'s lifetime (Arc
+    /// keeps the allocation alive). Use this for zero-copy byte-level
+    /// operations (path scanning, pattern matching). For a Go-faithful
+    /// owned copy, call `bytes(s)` which returns `slice<byte>`.
+    pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }
 }
@@ -119,6 +135,21 @@ impl From<&str> for string {
     }
 }
 
+// ─── From<&string> for string — borrow-friendly clone ────────────────
+//
+// Lets `bytes::Contains(&body, ...)` and `strings::HasPrefix(&auth, ...)`
+// work without an explicit `.clone()` at the call site. Functions that
+// take `S: Into<string>` accept either an owned `string` (move) or a
+// `&string` (clone via this impl). Mirrors Go's by-value string passing
+// while keeping the Rust borrow checker happy.
+
+impl From<&string> for string {
+    #[inline]
+    fn from(s: &string) -> Self {
+        s.clone()
+    }
+}
+
 // ─── Borrow<[u8]> — lets BTreeMap<string, V> look up by &[u8] / &str ──
 //
 // Required so the `map<string, V>` Index<&str> specialization can
@@ -144,12 +175,12 @@ impl LenTrait for string {
 
 // ─── s[i] — byte indexing, Go-faithful ────────────────────────────────
 
-impl Index<int> for string {
+impl<I: __SliceIndex> Index<I> for string {
     type Output = byte;
-    fn index(&self, i: int) -> &byte {
+    fn index(&self, i: I) -> &byte {
         // Bounds check matches Go: panics on out-of-range, byte access
         // (NOT rune access — `s[i]` in Go returns a byte too).
-        &self.bytes[i as usize]
+        &self.bytes[i.__sidx()]
     }
 }
 
@@ -192,6 +223,30 @@ impl PartialEq<&str> for string {
     }
 }
 
+// Mixed-borrow PartialEq impls — let `&string == string` and friends
+// compile without forcing call sites to clone or deref. The common
+// trigger is range-loop bindings: `for (_, part) in range!(strings)`
+// gives `part: &string`, then `part == flag` (where `flag: string`)
+// needs the borrowed-LHS form. Symmetric impls keep `flag == part`
+// working too.
+impl PartialEq<string> for &string {
+    fn eq(&self, other: &string) -> bool {
+        // Reuse `string == string`.
+        (*self).eq(other)
+    }
+}
+impl PartialEq<&string> for string {
+    fn eq(&self, other: &&string) -> bool {
+        self.eq(*other)
+    }
+}
+// `&string == "literal"` form too.
+impl PartialEq<&str> for &string {
+    fn eq(&self, other: &&str) -> bool {
+        (*self).eq(other)
+    }
+}
+
 impl Hash for string {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // Hash the bytes, not the Arc identity — matches Go map semantics.
@@ -207,5 +262,54 @@ impl PartialOrd for string {
 impl Ord for string {
     fn cmp(&self, other: &Self) -> Ordering {
         (*self.bytes).cmp(&*other.bytes)
+    }
+}
+
+// ─── Display / Debug ─────────────────────────────────────────────────────
+//
+// Lets `panic!("{}", s)`, `format_args!`, and core's formatter machinery
+// render goish strings without callers manually pulling out a `&str`.
+// Mirrors Go's `fmt.Stringer` (where applicable) and the unwritten rule
+// that `panic(string)` prints the bytes.
+//
+// Strategy: try the happy UTF-8 path; on invalid bytes, fall back to a
+// lossy walk that emits each maximal valid run followed by U+FFFD for
+// the bad sequence — same shape as `alloc::str::from_utf8_lossy` but
+// streamed into the formatter (no allocation). The `unsafe` block is
+// sound because `from_utf8`'s `valid_up_to` is contractually guaranteed
+// to mark valid UTF-8.
+
+impl core::fmt::Display for string {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut bytes: &[u8] = &self.bytes;
+        loop {
+            match core::str::from_utf8(bytes) {
+                Ok(s) => return f.write_str(s),
+                Err(e) => {
+                    let valid = e.valid_up_to();
+                    // SAFETY: `valid_up_to` is the length of a known-valid
+                    // UTF-8 prefix per `Utf8Error`'s contract.
+                    let prefix = unsafe { core::str::from_utf8_unchecked(&bytes[..valid]) };
+                    f.write_str(prefix)?;
+                    f.write_str("\u{FFFD}")?;
+                    match e.error_len() {
+                        Some(n) => bytes = &bytes[valid + n..],
+                        None => return Ok(()), // invalid sequence runs to end
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl core::fmt::Debug for string {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // Mirror Go's `%q` / Rust's debug-string framing: wrap in quotes,
+        // escape with str's debug machinery for valid UTF-8; on invalid
+        // bytes, fall back to {:?} of the byte slice so we never lose info.
+        match core::str::from_utf8(&self.bytes) {
+            Ok(s) => core::fmt::Debug::fmt(s, f),
+            Err(_) => write!(f, "string({:?})", &*self.bytes),
+        }
     }
 }

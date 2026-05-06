@@ -14,16 +14,84 @@
 
 #![allow(non_snake_case)]
 
+pub mod chunked;
+pub mod client;
+pub mod cookie;
+pub mod cookiejar;
+pub mod csrf;
+pub mod fs;
 pub mod header;
+pub mod helpers;
+pub mod httptest;
+pub mod httptrace;
+pub mod httputil;
+pub mod internal;
+pub mod method;
+pub mod pattern;
+pub mod protocols;
 pub mod request;
 pub mod response;
 pub mod server;
+pub mod sniff;
+pub mod status;
 pub mod url;
 
-pub use header::Header;
-pub use request::{ReadRequest, Request};
-pub use response::ResponseWriter;
-pub use server::{
-    ErrServerClosed, Handler, HandlerFunc, ListenAndServe, NotFoundHandler, Serve, ServeMux, Server,
+pub use client::{
+    Client, DialContextFn, Get, Head, NewRequest, NewRequestWithContext, Post, PostForm,
+    ProxyFromEnvironment, ProxyResolver, ReadResponse, Response, RoundTripper, Transport,
 };
-pub use url::URL;
+pub use cookie::{
+    Cookie, ParseCookie, ParseSetCookie, SameSite, SameSiteDefaultMode, SameSiteLaxMode,
+    SameSiteNoneMode, SameSiteStrictMode, SetCookie,
+};
+pub use csrf::{
+    errCrossOriginRequest, errCrossOriginRequestFromOldBrowser, CrossOriginProtection,
+    NewCrossOriginProtection,
+};
+pub use fs::{Dir, FileServer, HttpRange, NewDir, ParseRange, ServeFile};
+pub use header::{CanonicalHeaderKey, Header, ParseTime, TimeFormat};
+pub use method::{
+    MethodConnect, MethodDelete, MethodGet, MethodHead, MethodOptions, MethodPatch, MethodPost,
+    MethodPut, MethodTrace,
+};
+pub use protocols::{NoBody, Protocols};
+pub use request::{
+    ErrHeaderTooLong, ErrMaxBytes, ErrMissingBoundary, ErrMissingContentLength, ErrMissingFile,
+    ErrNoCookie, ErrNotMultipart, ErrNotSupported, ErrShortBody, ErrUnexpectedTrailer,
+    MaxBytesError, MaxBytesReader, NewMaxBytesError, NewMaxBytesReader, ParseHTTPVersion,
+    ProtocolError, ReadRequest, Request,
+};
+pub use response::ResponseWriter;
+pub use httputil::NewSingleHostReverseProxy;
+pub use server::{
+    handler, AllowQuerySemicolons, DefaultServeMux, ErrAbortHandler, ErrBodyNotAllowed,
+    ErrContentLength, ErrHandlerTimeout, ErrHijacked, ErrServerClosed, Error, Handle, HandleFunc,
+    Handler, HandlerFunc, ListenAndServe, NewServeMux, NotFound, NotFoundHandler, Redirect,
+    RedirectHandler, Serve, ServeMux, Server, StripPrefix,
+};
+pub use sniff::DetectContentType;
+pub use status::{
+    StatusAccepted, StatusBadGateway, StatusBadRequest, StatusConflict, StatusContinue,
+    StatusCreated, StatusEarlyHints, StatusExpectationFailed, StatusFailedDependency,
+    StatusForbidden, StatusFound, StatusGatewayTimeout, StatusGone,
+    StatusHTTPVersionNotSupported, StatusIMUsed, StatusInsufficientStorage,
+    StatusInternalServerError, StatusLengthRequired, StatusLocked, StatusLoopDetected,
+    StatusMethodNotAllowed, StatusMisdirectedRequest, StatusMovedPermanently,
+    StatusMultiStatus, StatusMultipleChoices, StatusNetworkAuthenticationRequired,
+    StatusNoContent, StatusNonAuthoritativeInfo, StatusNotAcceptable, StatusNotExtended,
+    StatusNotFound, StatusNotImplemented, StatusNotModified, StatusOK, StatusPartialContent,
+    StatusPaymentRequired, StatusPermanentRedirect, StatusPreconditionFailed,
+    StatusPreconditionRequired, StatusProcessing, StatusProxyAuthRequired,
+    StatusRequestEntityTooLarge, StatusRequestHeaderFieldsTooLarge, StatusRequestTimeout,
+    StatusRequestURITooLong, StatusRequestedRangeNotSatisfiable, StatusResetContent,
+    StatusSeeOther, StatusServiceUnavailable, StatusSwitchingProtocols, StatusTeapot,
+    StatusTemporaryRedirect, StatusText, StatusTooEarly, StatusTooManyRequests,
+    StatusUnauthorized, StatusUnavailableForLegalReasons, StatusUnprocessableEntity,
+    StatusUnsupportedMediaType, StatusUpgradeRequired, StatusUseProxy,
+    StatusVariantAlsoNegotiates, StatusAlreadyReported,
+};
+pub use url::{
+    JoinPath as JoinURLPath, Parse as ParseURL, ParseRequestURI, PathEscape, PathUnescape,
+    QueryEscape, QueryUnescape, ResolvePath, User, UserPassword, Userinfo, ValuesEncode, ValuesHas,
+    URL,
+};

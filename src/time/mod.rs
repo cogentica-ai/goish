@@ -51,6 +51,181 @@ pub const Second: Duration = Duration(1_000_000_000);
 pub const Minute: Duration = Duration(60 * 1_000_000_000);
 pub const Hour: Duration = Duration(60 * 60 * 1_000_000_000);
 
+// ─── Format layouts (time/format.go:80) ──────────────────────────────
+//
+// Go exposes these as plain `const` strings; goish heap-allocates
+// strings, so we expose them as `&'static str` and let callers wrap
+// them with `string(layout)` when calling Format. The literals are
+// identical to Go's, so existing layout-driven code ports verbatim.
+
+pub const Layout: &str = "01/02 03:04:05PM '06 -0700";
+pub const ANSIC: &str = "Mon Jan _2 15:04:05 2006";
+pub const UnixDate: &str = "Mon Jan _2 15:04:05 MST 2006";
+pub const RubyDate: &str = "Mon Jan 02 15:04:05 -0700 2006";
+pub const RFC822: &str = "02 Jan 06 15:04 MST";
+pub const RFC822Z: &str = "02 Jan 06 15:04 -0700";
+pub const RFC850: &str = "Monday, 02-Jan-06 15:04:05 MST";
+pub const RFC1123: &str = "Mon, 02 Jan 2006 15:04:05 MST";
+pub const RFC1123Z: &str = "Mon, 02 Jan 2006 15:04:05 -0700";
+pub const RFC3339: &str = "2006-01-02T15:04:05Z07:00";
+pub const RFC3339Nano: &str = "2006-01-02T15:04:05.999999999Z07:00";
+pub const Kitchen: &str = "3:04PM";
+pub const Stamp: &str = "Jan _2 15:04:05";
+pub const StampMilli: &str = "Jan _2 15:04:05.000";
+pub const StampMicro: &str = "Jan _2 15:04:05.000000";
+pub const StampNano: &str = "Jan _2 15:04:05.000000000";
+pub const DateTime: &str = "2006-01-02 15:04:05";
+pub const DateOnly: &str = "2006-01-02";
+pub const TimeOnly: &str = "15:04:05";
+
+// ─── Month + Weekday (time/time.go:319-368) ──────────────────────────
+//
+// Line-by-line port of Go's `Month` and `Weekday` typed enums.
+//
+// Slim deviations:
+//   * Go `type Month int` — Goish `pub struct Month(int)`. Rust has
+//     no native typed-int alias; the wrapper is the closest analogue.
+//   * `m.String()` for an out-of-range Month renders
+//     "%!Month(N)" exactly like Go (time.go:343).
+//   * Cross-type comparison (`m == 5`) is enabled via PartialEq<int>
+//     to mirror Go's untyped-const promotion. Use `.Int()` for the
+//     underlying number when an explicit `i64` is needed.
+
+// Go: type.go:320  type Month int
+//     time.go:319  // A Month specifies a month of the year (January = 1, ...).
+/// `time.Month` — typed month-of-year (1=January .. 12=December).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Month(int);
+
+// Go: time.go:322-335
+//     const ( January Month = 1 + iota; ... December )
+pub const January: Month = Month(1);
+pub const February: Month = Month(2);
+pub const March: Month = Month(3);
+pub const April: Month = Month(4);
+pub const May: Month = Month(5);
+pub const June: Month = Month(6);
+pub const July: Month = Month(7);
+pub const August: Month = Month(8);
+pub const September: Month = Month(9);
+pub const October: Month = Month(10);
+pub const November: Month = Month(11);
+pub const December: Month = Month(12);
+
+impl Month {
+    /// Construct a Month from a raw 1..=12 value. No bounds check;
+    /// out-of-range values render via `String()` as `%!Month(N)`.
+    pub const fn new(v: int) -> Self {
+        Month(v)
+    }
+
+    /// The underlying month number, 1=January .. 12=December.
+    pub const fn Int(self) -> int {
+        self.0
+    }
+
+    // Go: time.go:338  func (m Month) String() string
+    /// English name ("January" .. "December"). Out-of-range values
+    /// render as "%!Month(N)".
+    pub fn String(self) -> string {
+        if self.0 >= 1 && self.0 <= 12 {
+            return string::from_static(MONTH_LONG[self.0 as usize - 1]);
+        }
+        // Go: "%!Month(" + fmtInt(buf, uint64(m)) + ")"
+        crate::Sprintf!("%%!Month(%d)", self.0)
+    }
+}
+
+// Go: time.go:347  type Weekday int
+/// `time.Weekday` — typed day-of-week (0=Sunday .. 6=Saturday).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Weekday(int);
+
+// Go: time.go:350-358
+//     const ( Sunday Weekday = iota; ... Saturday )
+pub const Sunday: Weekday = Weekday(0);
+pub const Monday: Weekday = Weekday(1);
+pub const Tuesday: Weekday = Weekday(2);
+pub const Wednesday: Weekday = Weekday(3);
+pub const Thursday: Weekday = Weekday(4);
+pub const Friday: Weekday = Weekday(5);
+pub const Saturday: Weekday = Weekday(6);
+
+impl Weekday {
+    /// Construct a Weekday from a raw 0..=6 value.
+    pub const fn new(v: int) -> Self {
+        Weekday(v)
+    }
+
+    /// The underlying day-of-week number, 0=Sunday .. 6=Saturday.
+    pub const fn Int(self) -> int {
+        self.0
+    }
+
+    // Go: time.go:361  func (d Weekday) String() string
+    /// English name ("Sunday" .. "Saturday"). Out-of-range values
+    /// render as "%!Weekday(N)".
+    pub fn String(self) -> string {
+        if self.0 >= 0 && self.0 <= 6 {
+            return string::from_static(DAY_LONG[self.0 as usize]);
+        }
+        crate::Sprintf!("%%!Weekday(%d)", self.0)
+    }
+}
+
+// Cross-type equality with `int` to mirror Go's untyped-const
+// promotion. Without these, callers would need `m == time::January`
+// instead of `m == 1`. Both work; the int form keeps existing code
+// portable.
+impl PartialEq<int> for Month {
+    fn eq(&self, other: &int) -> bool {
+        self.0 == *other
+    }
+}
+impl PartialEq<Month> for int {
+    fn eq(&self, other: &Month) -> bool {
+        *self == other.0
+    }
+}
+impl PartialEq<int> for Weekday {
+    fn eq(&self, other: &int) -> bool {
+        self.0 == *other
+    }
+}
+impl PartialEq<Weekday> for int {
+    fn eq(&self, other: &Weekday) -> bool {
+        *self == other.0
+    }
+}
+
+// Long-name lookup tables used by Month::String / Weekday::String.
+// Mirrors Go's longMonthNames + longDayNames in time/format.go.
+const MONTH_LONG: [&str; 12] = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+];
+
+// fmt::Format impls — `%d`/`%b`/`%o`/`%x` print the underlying int;
+// any other verb (`%s`, `%v`, default) prints the English name.
+// Mirrors Go: Month/Weekday implement Stringer, and the printer
+// dispatches numeric verbs to the underlying int.
+impl crate::fmt::Format for Month {
+    fn fmt(&self, verb: crate::types::byte, f: &mut crate::fmt::FmtBuf) {
+        match verb {
+            b'd' | b'b' | b'o' | b'x' | b'X' | b'c' | b'U' => self.0.fmt(verb, f),
+            _ => f.extend(self.String().as_bytes()),
+        }
+    }
+}
+impl crate::fmt::Format for Weekday {
+    fn fmt(&self, verb: crate::types::byte, f: &mut crate::fmt::FmtBuf) {
+        match verb {
+            b'd' | b'b' | b'o' | b'x' | b'X' | b'c' | b'U' => self.0.fmt(verb, f),
+            _ => f.extend(self.String().as_bytes()),
+        }
+    }
+}
+
 impl Duration {
     pub fn Nanoseconds(self) -> int {
         self.0
@@ -61,16 +236,116 @@ impl Duration {
     pub fn Milliseconds(self) -> int {
         self.0 / 1_000_000
     }
+    /// `(d Duration).Seconds() float64` — Go time/time.go:1086.
+    pub fn Seconds(self) -> f64 {
+        let sec = self.0 / Second.0;
+        let nsec = self.0 % Second.0;
+        (sec as f64) + (nsec as f64) / 1e9
+    }
+    /// `(d Duration).Minutes() float64` — Go time/time.go:1093.
+    pub fn Minutes(self) -> f64 {
+        let min = self.0 / Minute.0;
+        let nsec = self.0 % Minute.0;
+        (min as f64) + (nsec as f64) / (60.0 * 1e9)
+    }
+    /// `(d Duration).Hours() float64` — Go time/time.go:1100.
+    pub fn Hours(self) -> f64 {
+        let hour = self.0 / Hour.0;
+        let nsec = self.0 % Hour.0;
+        (hour as f64) + (nsec as f64) / (60.0 * 60.0 * 1e9)
+    }
+    /// `(d Duration).Truncate(m Duration) Duration` — Go time/time.go:1108.
+    /// Rounds toward zero to a multiple of `m`. m ≤ 0 returns d unchanged.
+    pub fn Truncate(self, m: Duration) -> Duration {
+        if m.0 <= 0 {
+            return self;
+        }
+        Duration(self.0 - self.0 % m.0)
+    }
+    /// `(d Duration).Round(m Duration) Duration` — Go time/time.go:1127.
+    /// Rounds to the nearest multiple of `m`; halfway rounds away from
+    /// zero. Saturates at min/max Duration on overflow. m ≤ 0 returns
+    /// d unchanged.
+    pub fn Round(self, m: Duration) -> Duration {
+        if m.0 <= 0 {
+            return self;
+        }
+        let mut r = self.0 % m.0;
+        if self.0 < 0 {
+            r = -r;
+            if less_than_half(r, m.0) {
+                return Duration(self.0 + r);
+            }
+            let d1 = self.0.wrapping_sub(m.0).wrapping_add(r);
+            if d1 < self.0 {
+                return Duration(d1);
+            }
+            return Duration(int::MIN); // overflow → minDuration
+        }
+        if less_than_half(r, m.0) {
+            return Duration(self.0 - r);
+        }
+        let d1 = self.0.wrapping_add(m.0).wrapping_sub(r);
+        if d1 > self.0 {
+            return Duration(d1);
+        }
+        Duration(int::MAX) // overflow → maxDuration
+    }
+    /// `(d Duration).Abs() Duration` — Go time/time.go:1154. As a
+    /// special case, Duration(MinInt64) is converted to Duration(MaxInt64).
+    pub fn Abs(self) -> Duration {
+        if self.0 >= 0 {
+            self
+        } else if self.0 == int::MIN {
+            Duration(int::MAX)
+        } else {
+            Duration(-self.0)
+        }
+    }
     /// Go-faithful "1h2m3.456s" / "100ms" / "1.2us" / "5ns" / "0s" form.
     pub fn String(self) -> string {
         format_duration(self.0)
     }
 }
 
+/// `lessThanHalf` (time.go:1117): reports whether x+x < y, treating
+/// inputs as positive uint64 to avoid signed overflow.
+#[inline]
+fn less_than_half(x: int, y: int) -> bool {
+    let xu = x as u64;
+    let yu = y as u64;
+    xu.wrapping_add(xu) < yu
+}
+
 impl Mul<int> for Duration {
     type Output = Duration;
     fn mul(self, rhs: int) -> Duration {
         Duration(self.0.wrapping_mul(rhs))
+    }
+}
+
+// Go's `int(time.Millisecond)` is a typed conversion to the
+// underlying nanosecond count. Wire `__IntConv` so call sites match.
+// `__Int64Conv` is impl'd in lockstep so `int64(d)` works the same way.
+impl crate::convert::__IntConv for Duration {
+    #[inline]
+    fn __conv(self) -> int {
+        self.0
+    }
+}
+impl crate::convert::__Int64Conv for Duration {
+    #[inline]
+    fn __conv(self) -> i64 {
+        self.0 as i64
+    }
+}
+
+/// Symmetric: Go's `60 * time.Second` writes the integer on the left.
+/// Without this impl Rust would reject the multiplication direction.
+impl Mul<Duration> for int {
+    type Output = Duration;
+    fn mul(self, rhs: Duration) -> Duration {
+        Duration(self.wrapping_mul(rhs.0))
     }
 }
 
@@ -161,6 +436,38 @@ impl Time {
     pub fn Equal(self, u: Time) -> bool {
         self.sec == u.sec && self.nsec == u.nsec
     }
+
+    /// `(t Time).Compare(u)` (time/time.go:288). Returns -1 if t < u,
+    /// +1 if t > u, 0 if equal. Slim port: no monotonic-clock fast path
+    /// (goish stores monotonic alongside sec/nsec but Compare semantics
+    /// match Sub-then-Sign in a way that's correct for both wall- and
+    /// monotonic-time inputs).
+    pub fn Compare(self, u: Time) -> crate::types::int {
+        // Prefer monotonic when both have it.
+        if self.mono != 0 && u.mono != 0 {
+            if self.mono < u.mono {
+                return -1;
+            }
+            if self.mono > u.mono {
+                return 1;
+            }
+            return 0;
+        }
+        // Fall back to wall-clock (sec, nsec).
+        if self.sec < u.sec {
+            return -1;
+        }
+        if self.sec > u.sec {
+            return 1;
+        }
+        if (self.nsec as crate::types::int) < (u.nsec as crate::types::int) {
+            return -1;
+        }
+        if (self.nsec as crate::types::int) > (u.nsec as crate::types::int) {
+            return 1;
+        }
+        0
+    }
     pub fn Sub(self, u: Time) -> Duration {
         // Prefer monotonic when both have it.
         if self.mono != 0 && u.mono != 0 {
@@ -203,9 +510,10 @@ impl Time {
     pub fn Year(self) -> int {
         self.Date().0
     }
-    /// 1=January .. 12=December.
-    pub fn Month(self) -> int {
-        self.Date().1
+    /// `t.Month()` (time.go:1126) — Month-of-year as a typed
+    /// [`Month`]. Use `.Int()` for the underlying 1..=12 number.
+    pub fn Month(self) -> Month {
+        Month(self.Date().1)
     }
     pub fn Day(self) -> int {
         self.Date().2
@@ -230,12 +538,642 @@ impl Time {
         self.nsec as int
     }
 
-    /// `t.Weekday()` — 0=Sunday .. 6=Saturday (Go convention).
-    pub fn Weekday(self) -> int {
+    /// `t.Weekday()` (time.go:1145) — day-of-week as a typed
+    /// [`Weekday`]. Use `.Int()` for the underlying 0..=6 number
+    /// (0=Sunday .. 6=Saturday).
+    pub fn Weekday(self) -> Weekday {
         let days = self.sec.div_euclid(86_400);
         // 1970-01-01 was a Thursday (=4 in Sun..Sat = 0..6).
-        ((days + 4).rem_euclid(7)) as int
+        Weekday((days + 4).rem_euclid(7) as int)
     }
+
+    /// `t.YearDay()` (time.go:903) — day of the year, [1, 365] for non-leap,
+    /// [1, 366] for leap years.
+    pub fn YearDay(self) -> int {
+        // Go: time.go:904 — `_, yday := t.absSec().days().yearYday()`.
+        // Slim: derive from current Date() vs Jan 1 of the same year.
+        let (y, _, _) = self.Date();
+        let unix_days_now = self.sec.div_euclid(86_400);
+        let unix_days_jan1 = days_from_civil(y, 1, 1);
+        // Go: yday is 1-based.
+        (unix_days_now - unix_days_jan1 + 1) as int
+    }
+
+    /// `t.ISOWeek()` (time.go:848) — ISO 8601 (year, week) for t.
+    /// Week 1 contains the first Thursday of the ISO year. A January 1 in
+    /// some years can belong to week 52 or 53 of the previous ISO year;
+    /// likewise December 31 can fall in week 1 of the next ISO year.
+    pub fn ISOWeek(self) -> (int, int) {
+        // Go: time.go:859 — `days := t.absSec().days()`.
+        let days = self.sec.div_euclid(86_400);
+        // Go: time.go:860 — `thu := days + absDays(Thursday - ((days-1).weekday()+1))`.
+        // `weekday()` on absDays returns Sun=0..Sat=6 (Go's standard
+        // `Weekday`). We derive the same numbering from Unix days:
+        // 1970-01-01 was a Thursday (=4 in Sun=0..Sat=6), so
+        //   weekday_sun(unix_day) = (unix_day + 4) mod 7
+        //   weekday_sun(unix_day - 1) = (unix_day + 3) mod 7
+        let sun_weekday_yesterday = (days + 3).rem_euclid(7);
+        // Thursday = 4. offset = Thursday - (sun_weekday_yesterday + 1)
+        //                     = 3 - sun_weekday_yesterday.
+        let offset = 3 - sun_weekday_yesterday;
+        let thu_days = days + offset;
+        // Go: time.go:861 — `year, yday := thu.yearYday()`.
+        // Slim: derive year from civil_from_unix on Thursday's epoch sec,
+        // then year_day from (thu_days - days_from_civil(year,1,1) + 1).
+        let (thu_year, _, _, _, _, _) = civil_from_unix(thu_days * 86_400);
+        let thu_jan1 = days_from_civil(thu_year, 1, 1);
+        let yday = thu_days - thu_jan1 + 1;
+        // Go: time.go:862
+        (thu_year, (yday - 1) / 7 + 1)
+    }
+
+    /// `t.AddDate(years, months, days)` (time.go:1258) — add the given
+    /// number of years, months, and days, normalizing the result the
+    /// same way `Date` does (e.g. `AddDate(0, 1, 0)` on Oct 31 yields
+    /// Dec 1, the normalized form of Nov 31).
+    pub fn AddDate(self, years: int, months: int, days: int) -> Time {
+        // Go: time.go:1259-1260
+        let (year, month, day) = self.Date();
+        let (hour, min, sec) = self.Clock();
+        // Go: time.go:1261 — Date(year+years, month+Month(months), day+days,
+        // hour, min, sec, int(t.nsec()), t.Location()).
+        // Slim: no Location parameter (UTC-only).
+        Date(
+            year + years,
+            month + months,
+            day + days,
+            hour,
+            min,
+            sec,
+            self.nsec as int,
+        )
+    }
+
+    /// `t.UTC()` (time.go:1364) — slim time is always UTC, returns self.
+    pub fn UTC(self) -> Time {
+        self
+    }
+
+    /// `t.Local()` (time.go:1370) — slim time has no Location, returns self.
+    pub fn Local(self) -> Time {
+        self
+    }
+
+    /// `t.Truncate(d)` (time.go:1778) — round t down to a multiple of d
+    /// since the zero time. If d <= 0, returns t unchanged.
+    pub fn Truncate(self, d: Duration) -> Time {
+        let mut t = self;
+        t.mono = 0;
+        if d.0 <= 0 {
+            return t;
+        }
+        let r = t.UnixNano().rem_euclid(d.0);
+        t.Add(Duration(-r))
+    }
+
+    /// `t.Round(d)` (time.go:1798) — round t to the nearest multiple of d
+    /// since the zero time; halfway values round up. If d <= 0, returns t
+    /// unchanged.
+    pub fn Round(self, d: Duration) -> Time {
+        let mut t = self;
+        t.mono = 0;
+        if d.0 <= 0 {
+            return t;
+        }
+        let r = t.UnixNano().rem_euclid(d.0);
+        if r.wrapping_mul(2) < d.0 {
+            t.Add(Duration(-r))
+        } else {
+            t.Add(Duration(d.0 - r))
+        }
+    }
+
+    /// `t.Format(layout)` (format.go:639) — slim port. Recognizes the
+    /// canonical layout constants (RFC3339, RFC1123, RFC1123Z,
+    /// DateTime, DateOnly, TimeOnly, Stamp, Kitchen, ANSIC) and
+    /// renders the time directly. Does NOT support arbitrary
+    /// reference-time layouts (porting Go's nextStdChunk machinery
+    /// is ~1500 LOC).
+    ///
+    /// Pass the constant via `string(time::RFC3339)`.
+    pub fn Format<S: Into<crate::gostring::string>>(
+        self,
+        layout: S,
+    ) -> crate::gostring::string {
+        let layout = layout.into();
+        let (y, m, d, hh, mm, ss) = civil_from_unix(self.sec);
+        let wd = self.Weekday().Int();
+        let nano = self.nsec;
+        format_layout(&layout, y, m, d, hh, mm, ss, wd, nano as int)
+    }
+
+    /// `t.AppendFormat(b, layout)` (format.go:655) — append the formatted
+    /// time to `b` and return the extended buffer. Slim port: delegates
+    /// to `Format` then appends the byte representation.
+    pub fn AppendFormat<L: Into<crate::gostring::string>>(self, b: crate::goslice::slice<crate::types::byte>, layout: L) -> crate::goslice::slice<crate::types::byte> {
+        let layout: crate::gostring::string = layout.into();
+        let s = self.Format(layout);
+        let extra = crate::convert::bytes(s);
+        // Go: return append(b, formatted...). Use range! to mirror.
+        let mut out = b;
+        for (_, byte_ref) in crate::range!(extra) {
+            out = crate::append!(out, *byte_ref);
+        }
+        out
+    }
+
+    /// `t.Zone()` (time.go:1399) — slim port. Always returns
+    /// ("UTC", 0) since slim time has no Location.
+    pub fn Zone(self) -> (crate::gostring::string, int) {
+        (crate::gostring::string::from("UTC"), 0)
+    }
+
+    /// `t.IsDST()` (time.go:1677) — slim port. Always false (no DST
+    /// in UTC-only slim time).
+    pub fn IsDST(self) -> bool {
+        false
+    }
+
+    /// `t.MarshalText()` (time.go:1634) — encode as RFC3339 bytes.
+    /// Implements `encoding.TextMarshaler`. Slim deviation: emits
+    /// RFC3339 (no fractional seconds) rather than RFC3339Nano —
+    /// the slim Format helper doesn't recognise RFC3339Nano. Parse
+    /// pairs cleanly with this output via UnmarshalText.
+    pub fn MarshalText(self) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
+        let s = self.Format(crate::gostring::string::from(RFC3339));
+        (crate::convert::bytes(s), crate::errors::nil)
+    }
+
+    /// `(*Time).UnmarshalText(data)` (time.go:1640) — parse RFC3339
+    /// from bytes. Updates `self` in place. Implements
+    /// `encoding.TextUnmarshaler`.
+    pub fn UnmarshalText(
+        &mut self,
+        data: crate::goslice::slice<crate::types::byte>,
+    ) -> crate::error {
+        let s = crate::gostring::string::from_bytes(&data);
+        let (t, err) = Parse(crate::gostring::string::from(RFC3339), s);
+        if err.IsNil() {
+            *self = t;
+        }
+        err
+    }
+
+    /// `t.MarshalJSON()` (time.go:1587) — encode as a JSON-quoted
+    /// RFC3339 string. Slim deviation: emits RFC3339 (no fractional
+    /// seconds) instead of RFC3339Nano, mirroring MarshalText.
+    pub fn MarshalJSON(self) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
+        // b := make([]byte, 0, len(RFC3339Nano)+len(`""`))
+        let mut b: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(RFC3339Nano.len() + 2);
+        // b = append(b, '"')
+        b.push(b'"');
+        // appendStrictRFC3339 — slim version: just Format(RFC3339).
+        let s = self.Format(crate::gostring::string::from(RFC3339));
+        b.extend_from_slice(s.as_bytes());
+        // b = append(b, '"')
+        b.push(b'"');
+        (crate::goslice::slice::__from_vec(b), crate::errors::nil)
+    }
+
+    /// `(*Time).UnmarshalJSON(data)` (time.go:1600) — parse a JSON-
+    /// quoted RFC3339 string. Treats the literal `null` as a no-op.
+    pub fn UnmarshalJSON(
+        &mut self,
+        data: crate::goslice::slice<crate::types::byte>,
+    ) -> crate::error {
+        // if string(data) == "null" { return nil }
+        if &*data == b"null" {
+            return crate::errors::nil;
+        }
+        // if len(data) < 2 || data[0] != '"' || data[len(data)-1] != '"' { error }
+        let bs = &*data;
+        if bs.len() < 2 || bs[0] != b'"' || bs[bs.len() - 1] != b'"' {
+            return crate::errors::New("Time.UnmarshalJSON: input is not a JSON string");
+        }
+        // data = data[1:len(data)-1]
+        let inner = &bs[1..bs.len() - 1];
+        let s = crate::gostring::string::from_bytes(inner);
+        let (t, err) = Parse(crate::gostring::string::from(RFC3339), s);
+        if err.IsNil() {
+            *self = t;
+        }
+        err
+    }
+
+    /// `t.AppendBinary(b)` (time.go:1466) — append a 15-byte binary
+    /// encoding to b. Slim deviation: always emits V1 with
+    /// offsetMin = -1 (UTC) since slim time is UTC-only. The wire
+    /// format is interoperable with Go's time.UnmarshalBinary.
+    pub fn AppendBinary(
+        self,
+        b: crate::goslice::slice<crate::types::byte>,
+    ) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
+        // Go: var offsetMin int16  (slim: always UTC → -1)
+        let offset_min: i16 = -1;
+        // Go: version := timeBinaryVersionV1
+        let version: u8 = 1;
+        // Go: sec := t.sec(); nsec := t.nsec()
+        let sec: i64 = self.sec as i64;
+        let nsec: i32 = self.nsec;
+        // Go: b = append(b, version, byte(sec>>56), ..., byte(offsetMin))
+        let mut v = b.__into_vec();
+        v.push(version);
+        v.push((sec >> 56) as u8);
+        v.push((sec >> 48) as u8);
+        v.push((sec >> 40) as u8);
+        v.push((sec >> 32) as u8);
+        v.push((sec >> 24) as u8);
+        v.push((sec >> 16) as u8);
+        v.push((sec >> 8) as u8);
+        v.push(sec as u8);
+        v.push((nsec >> 24) as u8);
+        v.push((nsec >> 16) as u8);
+        v.push((nsec >> 8) as u8);
+        v.push(nsec as u8);
+        v.push((offset_min >> 8) as u8);
+        v.push(offset_min as u8);
+        // Go: return b, nil
+        (crate::goslice::slice::__from_vec(v), crate::errors::nil)
+    }
+
+    /// `t.MarshalBinary()` (time.go:1513) — implements
+    /// `encoding.BinaryMarshaler`. Wraps AppendBinary on a fresh
+    /// 16-byte capacity buffer.
+    pub fn MarshalBinary(
+        self,
+    ) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
+        // Go: b, err := t.AppendBinary(make([]byte, 0, 16))
+        let buf: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(16);
+        let (b, err) = self.AppendBinary(crate::goslice::slice::__from_vec(buf));
+        if !err.IsNil() {
+            // Go: return nil, err
+            let empty: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+            return (crate::goslice::slice::__from_vec(empty), err);
+        }
+        // Go: return b, nil
+        (b, crate::errors::nil)
+    }
+
+    /// `(*Time).UnmarshalBinary(data)` (time.go:1522) — implements
+    /// `encoding.BinaryUnmarshaler`. Slim: zone offset is parsed but
+    /// ignored (slim time is UTC-only); accepts both V1 (15-byte) and
+    /// V2 (16-byte) inputs.
+    pub fn UnmarshalBinary(
+        &mut self,
+        data: crate::goslice::slice<crate::types::byte>,
+    ) -> crate::error {
+        // Go: buf := data; if len(buf) == 0 { return errors.New("...: no data") }
+        let buf = data.__into_vec();
+        if buf.is_empty() {
+            return crate::errors::New("Time.UnmarshalBinary: no data");
+        }
+        // Go: version := buf[0]
+        let version = buf[0];
+        // Go: if version != V1 && version != V2 { return error }
+        if version != 1 && version != 2 {
+            return crate::errors::New("Time.UnmarshalBinary: unsupported version");
+        }
+        // Go: wantLen := 1 + 8 + 4 + 2; if V2 { wantLen++ }
+        let mut want_len: usize = 1 + 8 + 4 + 2;
+        if version == 2 {
+            want_len += 1;
+        }
+        // Go: if len(buf) != wantLen { return error }
+        if buf.len() != want_len {
+            return crate::errors::New("Time.UnmarshalBinary: invalid length");
+        }
+        // Go: buf = buf[1:]; sec := int64(buf[7]) | ... | int64(buf[0])<<56
+        let sec: i64 = (buf[8] as i64)
+            | ((buf[7] as i64) << 8)
+            | ((buf[6] as i64) << 16)
+            | ((buf[5] as i64) << 24)
+            | ((buf[4] as i64) << 32)
+            | ((buf[3] as i64) << 40)
+            | ((buf[2] as i64) << 48)
+            | ((buf[1] as i64) << 56);
+        // Go: buf = buf[8:]; nsec := int32(buf[3]) | ... | int32(buf[0])<<24
+        let nsec: i32 = (buf[12] as i32)
+            | ((buf[11] as i32) << 8)
+            | ((buf[10] as i32) << 16)
+            | ((buf[9] as i32) << 24);
+        // Go: buf = buf[4:]; offset := int(int16(buf[1])|int16(buf[0])<<8) * 60
+        // (parsed but ignored — slim time is UTC-only)
+        let _offset: i16 = (buf[14] as i16) | ((buf[13] as i16) << 8);
+        // Go: *t = Time{}; t.wall = uint64(nsec); t.ext = sec
+        *self = Time {
+            sec: sec as int,
+            nsec,
+            mono: 0,
+        };
+        // Go: return nil
+        crate::errors::nil
+    }
+
+    /// `t.GobEncode()` (time.go:1574) — implements
+    /// `encoding/gob.GobEncoder`. Delegates to MarshalBinary.
+    pub fn GobEncode(
+        self,
+    ) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
+        // Go: return t.MarshalBinary()
+        self.MarshalBinary()
+    }
+
+    /// `(*Time).GobDecode(data)` (time.go:1579) — implements
+    /// `encoding/gob.GobDecoder`. Delegates to UnmarshalBinary.
+    pub fn GobDecode(
+        &mut self,
+        data: crate::goslice::slice<crate::types::byte>,
+    ) -> crate::error {
+        // Go: return t.UnmarshalBinary(data)
+        self.UnmarshalBinary(data)
+    }
+}
+
+const MONTH_SHORT: [&str; 13] = [
+    "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+const DAY_SHORT: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_LONG: [&str; 7] = [
+    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+];
+
+fn pad2(n: int) -> [u8; 2] {
+    let n = n as i64;
+    [
+        b'0' + ((n / 10) % 10) as u8,
+        b'0' + (n % 10) as u8,
+    ]
+}
+
+fn pad4(n: int) -> [u8; 4] {
+    let n = n as i64;
+    [
+        b'0' + ((n / 1000) % 10) as u8,
+        b'0' + ((n / 100) % 10) as u8,
+        b'0' + ((n / 10) % 10) as u8,
+        b'0' + (n % 10) as u8,
+    ]
+}
+
+fn format_layout(
+    layout: &crate::gostring::string,
+    y: int,
+    m: int,
+    d: int,
+    hh: int,
+    mm: int,
+    ss: int,
+    wd: int,
+    _nano: int,
+) -> crate::gostring::string {
+    use crate::gostring::string;
+    let l = layout.clone();
+
+    // RFC3339: "2006-01-02T15:04:05Z07:00" → "<date>T<time>Z" (UTC)
+    if l == "2006-01-02T15:04:05Z07:00" {
+        let mut out = alloc::vec::Vec::with_capacity(20);
+        out.extend_from_slice(&pad4(y));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(m));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(d));
+        out.push(b'T');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        out.push(b'Z');
+        return string::from_bytes(&out);
+    }
+    // RFC3339Nano: "2006-01-02T15:04:05.999999999Z07:00"
+    //
+    // Per Go format.go:fmtFrac the trailing-9 form trims trailing zeros
+    // from the fractional seconds; when the fractional part is fully
+    // zero the entire ".NNNNNNNNN" suffix is omitted (no leading dot).
+    // Slim: UTC only — emit "Z" instead of an offset.
+    if l == "2006-01-02T15:04:05.999999999Z07:00" {
+        let mut out = alloc::vec::Vec::with_capacity(30);
+        out.extend_from_slice(&pad4(y));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(m));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(d));
+        out.push(b'T');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        // Render fractional seconds: 9 digits left-padded; then strip
+        // trailing zeros. If all digits are zero, omit the dot too.
+        if _nano > 0 {
+            // Go: u := uint64(nsec); for i := 9-1; i >= 0; i-- { ... }
+            // Goish: build the 9-digit string then trim trailing zeros.
+            let mut frac: [u8; 9] = [b'0'; 9];
+            let mut n = _nano as u64;
+            let mut i = 9;
+            while i > 0 {
+                i -= 1;
+                frac[i] = b'0' + (n % 10) as u8;
+                n /= 10;
+            }
+            // Trim trailing zeros.
+            let mut len = 9;
+            while len > 0 && frac[len - 1] == b'0' {
+                len -= 1;
+            }
+            if len > 0 {
+                out.push(b'.');
+                out.extend_from_slice(&frac[..len]);
+            }
+        }
+        out.push(b'Z');
+        return string::from_bytes(&out);
+    }
+    // DateTime: "2006-01-02 15:04:05"
+    if l == "2006-01-02 15:04:05" {
+        let mut out = alloc::vec::Vec::with_capacity(19);
+        out.extend_from_slice(&pad4(y));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(m));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(d));
+        out.push(b' ');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        return string::from_bytes(&out);
+    }
+    // DateOnly: "2006-01-02"
+    if l == "2006-01-02" {
+        let mut out = alloc::vec::Vec::with_capacity(10);
+        out.extend_from_slice(&pad4(y));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(m));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(d));
+        return string::from_bytes(&out);
+    }
+    // TimeOnly: "15:04:05"
+    if l == "15:04:05" {
+        let mut out = alloc::vec::Vec::with_capacity(8);
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        return string::from_bytes(&out);
+    }
+    // RFC1123: "Mon, 02 Jan 2006 15:04:05 MST" — assume UTC → "GMT"
+    if l == "Mon, 02 Jan 2006 15:04:05 MST" {
+        let mut out = alloc::vec::Vec::with_capacity(29);
+        out.extend_from_slice(DAY_SHORT[wd as usize].as_bytes());
+        out.extend_from_slice(b", ");
+        out.extend_from_slice(&pad2(d));
+        out.push(b' ');
+        out.extend_from_slice(MONTH_SHORT[m as usize].as_bytes());
+        out.push(b' ');
+        out.extend_from_slice(&pad4(y));
+        out.push(b' ');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        out.extend_from_slice(b" GMT");
+        return string::from_bytes(&out);
+    }
+    // RFC1123Z: "Mon, 02 Jan 2006 15:04:05 -0700" — UTC → "+0000"
+    if l == "Mon, 02 Jan 2006 15:04:05 -0700" {
+        let mut out = alloc::vec::Vec::with_capacity(31);
+        out.extend_from_slice(DAY_SHORT[wd as usize].as_bytes());
+        out.extend_from_slice(b", ");
+        out.extend_from_slice(&pad2(d));
+        out.push(b' ');
+        out.extend_from_slice(MONTH_SHORT[m as usize].as_bytes());
+        out.push(b' ');
+        out.extend_from_slice(&pad4(y));
+        out.push(b' ');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        out.extend_from_slice(b" +0000");
+        return string::from_bytes(&out);
+    }
+    // ANSIC: "Mon Jan _2 15:04:05 2006"
+    if l == "Mon Jan _2 15:04:05 2006" {
+        let mut out = alloc::vec::Vec::with_capacity(24);
+        out.extend_from_slice(DAY_SHORT[wd as usize].as_bytes());
+        out.push(b' ');
+        out.extend_from_slice(MONTH_SHORT[m as usize].as_bytes());
+        out.push(b' ');
+        // _2 = space-padded day
+        if d < 10 {
+            out.push(b' ');
+            out.push(b'0' + d as u8);
+        } else {
+            out.extend_from_slice(&pad2(d));
+        }
+        out.push(b' ');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        out.push(b' ');
+        out.extend_from_slice(&pad4(y));
+        return string::from_bytes(&out);
+    }
+    // Stamp: "Jan _2 15:04:05"
+    if l == "Jan _2 15:04:05" {
+        let mut out = alloc::vec::Vec::with_capacity(15);
+        out.extend_from_slice(MONTH_SHORT[m as usize].as_bytes());
+        out.push(b' ');
+        if d < 10 {
+            out.push(b' ');
+            out.push(b'0' + d as u8);
+        } else {
+            out.extend_from_slice(&pad2(d));
+        }
+        out.push(b' ');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        return string::from_bytes(&out);
+    }
+    // Kitchen: "3:04PM"
+    if l == "3:04PM" {
+        let h12 = if hh == 0 { 12 } else if hh > 12 { hh - 12 } else { hh };
+        let pm = hh >= 12;
+        let mut out = alloc::vec::Vec::with_capacity(7);
+        if h12 < 10 {
+            out.push(b'0' + h12 as u8);
+        } else {
+            out.extend_from_slice(&pad2(h12));
+        }
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.extend_from_slice(if pm { b"PM" } else { b"AM" });
+        return string::from_bytes(&out);
+    }
+    // Long-day variant (RFC850): "Monday, 02-Jan-06 15:04:05 MST"
+    if l == "Monday, 02-Jan-06 15:04:05 MST" {
+        let mut out = alloc::vec::Vec::with_capacity(36);
+        out.extend_from_slice(DAY_LONG[wd as usize].as_bytes());
+        out.extend_from_slice(b", ");
+        out.extend_from_slice(&pad2(d));
+        out.push(b'-');
+        out.extend_from_slice(MONTH_SHORT[m as usize].as_bytes());
+        out.push(b'-');
+        out.extend_from_slice(&pad2(y % 100));
+        out.push(b' ');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        out.extend_from_slice(b" GMT");
+        return string::from_bytes(&out);
+    }
+    // Fixed-width fractional seconds: "2006-01-02T15:04:05.0000000Z07:00"
+    // (7 digits, zero-padded, always emitted including the dot).
+    if l == "2006-01-02T15:04:05.0000000Z07:00" {
+        let mut out = alloc::vec::Vec::with_capacity(30);
+        out.extend_from_slice(&pad4(y));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(m));
+        out.push(b'-');
+        out.extend_from_slice(&pad2(d));
+        out.push(b'T');
+        out.extend_from_slice(&pad2(hh));
+        out.push(b':');
+        out.extend_from_slice(&pad2(mm));
+        out.push(b':');
+        out.extend_from_slice(&pad2(ss));
+        out.push(b'.');
+        // 7 digits from nanoseconds (0..999999999) — pad to 7, truncate if > 7.
+        let mut frac: [u8; 7] = [b'0'; 7];
+        let mut n = _nano as u64;
+        let mut i = 7;
+        while i > 0 {
+            i -= 1;
+            frac[i] = b'0' + (n % 10) as u8;
+            n /= 10;
+        }
+        out.extend_from_slice(&frac);
+        out.push(b'Z');
+        return string::from_bytes(&out);
+    }
+    // Unrecognized layout — return the layout literal back, mirroring
+    // Go's behavior of emitting un-tokenized text verbatim.
+    l
 }
 
 // Civil date from Unix seconds. Returns (year, month, day, hour, min, sec)
@@ -336,7 +1274,8 @@ pub fn Until(t: Time) -> Duration {
 //   - Reset is not implemented (would need to wake the sleeper).
 //   - Timer's chan is buffered cap=1 (matches Go's pre-1.23
 //     behavior; post-1.23 sync mode is not faithful here).
-//   - AfterFunc is not implemented (use `go!()` with Sleep instead).
+//   - AfterFunc returns a Timer with a fresh (unused) C chan, since
+//     goish has no nil chan to mirror Go's nil-C convention.
 
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -431,6 +1370,47 @@ pub fn NewTimer(d: Duration) -> Timer {
     }
 }
 
+/// `time.AfterFunc(d, f)` (sleep.go:188) — wait `d`, then run `f` in
+/// its own goroutine. Returns a Timer whose `Stop` cancels the call
+/// (returning `true` if cancellation beat the fire).
+///
+/// Slim deviation: Go documents `Timer.C` as nil for AfterFunc; goish
+/// has no nil chan, so `C` is a fresh cap=1 chan that nothing ever
+/// sends on. Don't read from it.
+#[allow(non_snake_case)]
+pub fn AfterFunc<F>(d: Duration, f: F) -> Timer
+where
+    F: FnOnce() + Send + 'static,
+{
+    // Go: c := make(chan Time, 1)  // not actually wired up; slim mirrors.
+    let c: chan<Time> = crate::make!(chan Time, 1);
+    let stop_chan: chan<()> = crate::make!(chan (), 1);
+    let stop_inner = stop_chan.clone();
+    crate::go!(stack(64 * crate::KB), move || {
+        // Race: timer firing vs Stop. Whichever side arrives first wins
+        // and the watcher exits. spawn_fire's gor still lives ≤ d, but
+        // its handle is dropped here so there's no leak past `d`.
+        let fire = spawn_fire(d);
+        crate::select! {
+            let _ = fire.Recv() => {
+                // Go: go f()  (sleep.go:189 — f runs on its own goroutine).
+                // Slim: run f directly on this watcher gor — it has no
+                // other work, so giving f a fresh gor would just add a
+                // hop. Single-shot semantics are identical.
+                f();
+            },
+            let _ = stop_inner.Recv() => {
+                // Stop wins — drop f.
+            },
+        }
+    });
+    Timer {
+        C: c,
+        stopped: Arc::new(AtomicBool::new(false)),
+        stop_chan,
+    }
+}
+
 /// `time.After(d)` — equivalent to `NewTimer(d).C` semantically,
 /// but implemented standalone so it's the leaf of the timer-call
 /// graph and can be used inside `NewTimer`/`NewTicker` watchers
@@ -478,6 +1458,28 @@ impl Ticker {
             }
         }
     }
+}
+
+/// `time.Tick(d)` (tick.go:86) — convenience wrapper that returns a
+/// channel which delivers ticks every `d`. Equivalent to
+/// `NewTicker(d).C`.
+///
+/// Slim deviation: Go returns a typed-nil `<-chan Time` when `d <= 0`,
+/// causing receives to block forever (Go's nil-channel semantics).
+/// Goish channels have no nil representation, so we instead return an
+/// unbuffered `chan<Time>` with no producer — receives on it block
+/// indefinitely, matching the observable behavior of Go's nil-channel
+/// case for the common usage pattern `for now := range time.Tick(d)`.
+#[allow(non_snake_case)]
+pub fn Tick(d: Duration) -> chan<Time> {
+    // Go: if d <= 0 { return nil }
+    if d.0 <= 0 {
+        // No producer goroutine; receives block forever — closest
+        // possible match to Go's nil-channel semantics.
+        return crate::make!(chan Time, 0);
+    }
+    // Go: return NewTicker(d).C
+    NewTicker(d).C
 }
 
 /// `time.NewTicker(d)` — fires roughly every `d`. Mirrors
@@ -530,6 +1532,46 @@ pub fn Unix(sec: int, nsec: int) -> Time {
         nsec: final_nsec,
         mono: 0,
     }
+}
+
+/// `time.UnixMilli(msec)` (time.go:1666) — return the Time
+/// corresponding to `msec` milliseconds since 1970-01-01 UTC.
+pub fn UnixMilli(msec: int) -> Time {
+    // Go: return Unix(msec/1e3, (msec%1e3)*1e6)
+    Unix(msec / 1_000, (msec % 1_000) * 1_000_000)
+}
+
+/// `time.UnixMicro(usec)` (time.go:1672) — return the Time
+/// corresponding to `usec` microseconds since 1970-01-01 UTC.
+pub fn UnixMicro(usec: int) -> Time {
+    // Go: return Unix(usec/1e6, (usec%1e6)*1e3)
+    Unix(usec / 1_000_000, (usec % 1_000_000) * 1_000)
+}
+
+/// `time.Date(year, month, day, hour, min, sec, nsec)` — construct a
+/// UTC Time. Slim port of Go's `time.Date` (time.go:1438) without the
+/// `*Location` argument (UTC only, v1). Out-of-range fields normalize
+/// the same way Go does (e.g. `Date(2024, 1, 32, …)` ≡ Feb 1).
+pub fn Date(year: int, month: int, day: int, hour: int, min: int, sec: int, nsec: int) -> Time {
+    let days = days_from_civil(year, month, day);
+    let total_sec = days
+        .wrapping_mul(86_400)
+        .wrapping_add(hour.wrapping_mul(3600))
+        .wrapping_add(min.wrapping_mul(60))
+        .wrapping_add(sec);
+    Unix(total_sec, nsec)
+}
+
+/// Inverse of `civil_from_unix` — Howard Hinnant's `days_from_civil`.
+/// Returns Unix days (signed, epoch 1970-01-01).
+fn days_from_civil(year: int, month: int, day: int) -> int {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400; // [0, 399]
+    let mp = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
 }
 
 // ─── Duration formatting (Go-faithful, ASCII "us") ────────────────────
@@ -652,4 +1694,513 @@ fn fmt_int(buf: &mut [u8], mut v: u64) -> usize {
         }
     }
     w
+}
+
+// ─── Parse (slim port of time.Parse) ─────────────────────────────────
+
+/// `time.Parse(layout, value)` (format.go:1232) — slim. Recognizes the
+/// canonical reference-time layout constants and parses `value`
+/// according to the chosen one. Returns `(t, err)` per goish
+/// convention; UTC only.
+///
+/// Recognized layouts: RFC3339, DateTime, DateOnly, TimeOnly,
+/// RFC1123 (assumes "GMT" or arbitrary 3-letter zone), ANSIC.
+/// Anything else returns an error.
+pub fn Parse<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>(layout: L, value: V) -> (Time, crate::error) {
+    let layout: crate::gostring::string = layout.into();
+    let value: crate::gostring::string = value.into();
+    
+
+    let l = layout.clone();
+
+    // RFC3339: "2006-01-02T15:04:05Z07:00"
+    if l == "2006-01-02T15:04:05Z07:00" {
+        return parse_rfc3339(value);
+    }
+    // DateTime: "2006-01-02 15:04:05"
+    if l == "2006-01-02 15:04:05" {
+        return parse_datetime(value, b' ');
+    }
+    // DateOnly: "2006-01-02"
+    if l == "2006-01-02" {
+        return parse_date_only(value);
+    }
+    // TimeOnly: "15:04:05" (parsed as today's date at the given time;
+    // we use 1970-01-01 since there's no Local in goish slim time).
+    if l == "15:04:05" {
+        return parse_time_only(value);
+    }
+    // RFC1123: "Mon, 02 Jan 2006 15:04:05 MST"
+    if l == "Mon, 02 Jan 2006 15:04:05 MST" {
+        return parse_rfc1123(value);
+    }
+    // ANSIC: "Mon Jan _2 15:04:05 2006"
+    if l == "Mon Jan _2 15:04:05 2006" {
+        return parse_ansic(value);
+    }
+
+    (
+        Time::default(),
+        crate::errors::New("time: unsupported layout"),
+    )
+}
+
+fn parse_rfc3339(s: crate::gostring::string) -> (Time, crate::error) {
+    
+    let bs = s.as_bytes();
+    // "YYYY-MM-DDTHH:MM:SSZ" minimum. Z may be replaced by ±HH:MM, slim port treats only Z.
+    if bs.len() < 20 {
+        return (Time::default(), crate::errors::New("time: short RFC3339"));
+    }
+    if bs[4] != b'-' || bs[7] != b'-' || bs[10] != b'T' || bs[13] != b':' || bs[16] != b':' {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed RFC3339"),
+        );
+    }
+    let y = match parse_int(&bs[0..4]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let m = match parse_int(&bs[5..7]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let d = match parse_int(&bs[8..10]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let hh = match parse_int(&bs[11..13]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let mm = match parse_int(&bs[14..16]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let ss = match parse_int(&bs[17..19]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    // Trailing Z (UTC) or offset — slim accepts only Z.
+    if bs[19] != b'Z' {
+        return (
+            Time::default(),
+            crate::errors::New("time: only UTC (Z) supported in slim Parse"),
+        );
+    }
+    (Date(y, m, d, hh, mm, ss, 0), crate::errors::nil)
+}
+
+fn parse_datetime(s: crate::gostring::string, sep: u8) -> (Time, crate::error) {
+    
+    let bs = s.as_bytes();
+    if bs.len() != 19
+        || bs[4] != b'-'
+        || bs[7] != b'-'
+        || bs[10] != sep
+        || bs[13] != b':'
+        || bs[16] != b':'
+    {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed DateTime"),
+        );
+    }
+    let y = match parse_int(&bs[0..4]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let m = match parse_int(&bs[5..7]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let d = match parse_int(&bs[8..10]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let hh = match parse_int(&bs[11..13]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mm = match parse_int(&bs[14..16]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let ss = match parse_int(&bs[17..19]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    (Date(y, m, d, hh, mm, ss, 0), crate::errors::nil)
+}
+
+fn parse_date_only(s: crate::gostring::string) -> (Time, crate::error) {
+    
+    let bs = s.as_bytes();
+    if bs.len() != 10 || bs[4] != b'-' || bs[7] != b'-' {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed DateOnly"),
+        );
+    }
+    let y = match parse_int(&bs[0..4]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let m = match parse_int(&bs[5..7]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let d = match parse_int(&bs[8..10]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    (Date(y, m, d, 0, 0, 0, 0), crate::errors::nil)
+}
+
+fn parse_time_only(s: crate::gostring::string) -> (Time, crate::error) {
+    
+    let bs = s.as_bytes();
+    if bs.len() != 8 || bs[2] != b':' || bs[5] != b':' {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed TimeOnly"),
+        );
+    }
+    let hh = match parse_int(&bs[0..2]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mm = match parse_int(&bs[3..5]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let ss = match parse_int(&bs[6..8]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    (Date(1970, 1, 1, hh, mm, ss, 0), crate::errors::nil)
+}
+
+fn parse_rfc1123(s: crate::gostring::string) -> (Time, crate::error) {
+    
+    let bs = s.as_bytes();
+    // "Day, DD Mon YYYY HH:MM:SS GMT" → 29 chars
+    if bs.len() != 29 || bs[3] != b',' || bs[4] != b' ' || bs[7] != b' ' || bs[11] != b' '
+        || bs[16] != b' ' || bs[19] != b':' || bs[22] != b':' || bs[25] != b' '
+    {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed RFC1123"),
+        );
+    }
+    let d = match parse_int(&bs[5..7]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mon = match month_short(&bs[8..11]) {
+        Some(v) => v,
+        None => {
+            return (
+                Time::default(),
+                crate::errors::New("time: bad month in RFC1123"),
+            );
+        }
+    };
+    let y = match parse_int(&bs[12..16]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let hh = match parse_int(&bs[17..19]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mm = match parse_int(&bs[20..22]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let ss = match parse_int(&bs[23..25]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    (Date(y, mon, d, hh, mm, ss, 0), crate::errors::nil)
+}
+
+fn parse_ansic(s: crate::gostring::string) -> (Time, crate::error) {
+    
+    let bs = s.as_bytes();
+    // "Mon Jan _2 15:04:05 2006" → 24 chars
+    if bs.len() != 24
+        || bs[3] != b' '
+        || bs[7] != b' '
+        || bs[10] != b' '
+        || bs[13] != b':'
+        || bs[16] != b':'
+        || bs[19] != b' '
+    {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed ANSIC"),
+        );
+    }
+    let mon = match month_short(&bs[4..7]) {
+        Some(v) => v,
+        None => {
+            return (
+                Time::default(),
+                crate::errors::New("time: bad month in ANSIC"),
+            );
+        }
+    };
+    // _2 form: space-padded day in cols 8..10
+    let day_bytes = &bs[8..10];
+    let d = if day_bytes[0] == b' ' {
+        match parse_int(&day_bytes[1..2]) { Ok(v) => v, Err(e) => return (Time::default(), e) }
+    } else {
+        match parse_int(day_bytes) { Ok(v) => v, Err(e) => return (Time::default(), e) }
+    };
+    let hh = match parse_int(&bs[11..13]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mm = match parse_int(&bs[14..16]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let ss = match parse_int(&bs[17..19]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let y = match parse_int(&bs[20..24]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    (Date(y, mon, d, hh, mm, ss, 0), crate::errors::nil)
+}
+
+fn parse_int(bs: &[u8]) -> Result<int, crate::error> {
+    let mut n: int = 0;
+    for &c in bs.iter() {
+        if !(b'0'..=b'9').contains(&c) {
+            return Err(crate::errors::New("time: non-digit in numeric field"));
+        }
+        n = n * 10 + (c - b'0') as int;
+    }
+    Ok(n)
+}
+
+// ─── ParseDuration (slim port of time/format.go:1621) ────────────────
+//
+// Reference: Go 1.25 src/time/format.go:1605-1718. Internal helpers
+// `leadingInt` and `leadingFraction` are inlined as fns here.
+
+/// `time.ParseDuration(s)` — parse a duration string.
+///
+/// A duration string is a possibly signed sequence of decimal numbers,
+/// each with optional fraction and a unit suffix, such as "300ms",
+/// "-1.5h" or "2h45m". Valid time units are "ns", "us" (or "µs"),
+/// "ms", "s", "m", "h".
+pub fn ParseDuration<S: Into<crate::gostring::string>>(
+    s: S,
+) -> (Duration, crate::error) {
+    use crate::gostring::string;
+    use crate::strconv;
+    let s: crate::gostring::string = s.into();
+
+    // [-+]?([0-9]*(\.[0-9]*)?[a-z]+)+
+    let orig = s.clone();
+    let mut cur = s.as_bytes().to_vec();
+    let mut d: u64 = 0;
+    let mut neg = false;
+
+    // Consume [-+]?
+    if !cur.is_empty() {
+        let c = cur[0];
+        if c == b'-' || c == b'+' {
+            neg = c == b'-';
+            cur = cur[1..].to_vec();
+        }
+    }
+    // Special case: if all that is left is "0", this is zero.
+    if cur.as_slice() == b"0" {
+        return (Duration(0), crate::errors::nil);
+    }
+    if cur.is_empty() {
+        return (
+            Duration(0),
+            crate::errors::New(
+                string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+            ),
+        );
+    }
+    while !cur.is_empty() {
+        let mut v: u64;
+        let mut f: u64 = 0;
+        let mut scale: f64 = 1.0; // value = v + f/scale
+
+        // The next character must be [0-9.]
+        if !(cur[0] == b'.' || (b'0' <= cur[0] && cur[0] <= b'9')) {
+            return (
+                Duration(0),
+                crate::errors::New(
+                    string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+                ),
+            );
+        }
+        // Consume [0-9]*
+        let pl = cur.len();
+        let (vv, rem, err) = leading_int(&cur);
+        if !err.IsNil() {
+            return (
+                Duration(0),
+                crate::errors::New(
+                    string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+                ),
+            );
+        }
+        v = vv;
+        cur = rem;
+        let pre = pl != cur.len(); // whether we consumed anything before a period
+
+        // Consume (\.[0-9]*)?
+        let mut post = false;
+        if !cur.is_empty() && cur[0] == b'.' {
+            cur = cur[1..].to_vec();
+            let pl = cur.len();
+            let (ff, sc, rem) = leading_fraction(&cur);
+            f = ff;
+            scale = sc;
+            cur = rem;
+            post = pl != cur.len();
+        }
+        if !pre && !post {
+            // no digits (e.g. ".s" or "-.s")
+            return (
+                Duration(0),
+                crate::errors::New(
+                    string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+                ),
+            );
+        }
+
+        // Consume unit.
+        let mut i = 0usize;
+        while i < cur.len() {
+            let c = cur[i];
+            if c == b'.' || (b'0' <= c && c <= b'9') {
+                break;
+            }
+            i += 1;
+        }
+        if i == 0 {
+            return (
+                Duration(0),
+                crate::errors::New(
+                    string::from("time: missing unit in duration ")
+                        + strconv::Quote(orig.clone()),
+                ),
+            );
+        }
+        let u = &cur[..i];
+        let unit = match unit_lookup(u) {
+            Some(n) => n,
+            None => {
+                return (
+                    Duration(0),
+                    crate::errors::New(
+                        string::from("time: unknown unit ")
+                            + strconv::Quote(string::from_bytes(u))
+                            + string::from(" in duration ")
+                            + strconv::Quote(orig.clone()),
+                    ),
+                );
+            }
+        };
+        cur = cur[i..].to_vec();
+        if v > (1u64 << 63) / unit {
+            // overflow
+            return (
+                Duration(0),
+                crate::errors::New(
+                    string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+                ),
+            );
+        }
+        v = v.wrapping_mul(unit);
+        if f > 0 {
+            // float64 is needed to be nanosecond accurate for fractions of hours.
+            v = v.wrapping_add(((f as f64) * (unit as f64 / scale)) as u64);
+            if v > 1u64 << 63 {
+                // overflow
+                return (
+                    Duration(0),
+                    crate::errors::New(
+                        string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+                    ),
+                );
+            }
+        }
+        d = d.wrapping_add(v);
+        if d > 1u64 << 63 {
+            return (
+                Duration(0),
+                crate::errors::New(
+                    string::from("time: invalid duration ") + strconv::Quote(orig.clone()),
+                ),
+            );
+        }
+    }
+    if neg {
+        return (Duration(-(d as i128) as int), crate::errors::nil);
+    }
+    if d > (1u64 << 63) - 1 {
+        return (
+            Duration(0),
+            crate::errors::New(
+                string::from("time: invalid duration ") + strconv::Quote(orig),
+            ),
+        );
+    }
+    (Duration(d as int), crate::errors::nil)
+}
+
+/// Mirrors Go's `unitMap` (format.go:1605). Each unit's value is the
+/// number of nanoseconds it represents.
+fn unit_lookup(u: &[u8]) -> Option<u64> {
+    match u {
+        b"ns" => Some(1),
+        b"us" => Some(1_000),
+        // "µs" — U+00B5 (0xC2 0xB5)
+        [0xC2, 0xB5, b's'] => Some(1_000),
+        // "μs" — U+03BC (0xCE 0xBC)
+        [0xCE, 0xBC, b's'] => Some(1_000),
+        b"ms" => Some(1_000_000),
+        b"s" => Some(1_000_000_000),
+        b"m" => Some(60 * 1_000_000_000),
+        b"h" => Some(60 * 60 * 1_000_000_000),
+        _ => None,
+    }
+}
+
+/// `leadingInt` — consume the leading [0-9]* from `s`. Returns
+/// `(x, rem, err)`.
+///
+/// Mirrors format.go:1554. Returns error on overflow (caller treats
+/// it as "invalid duration"); rem is the unconsumed tail.
+fn leading_int(s: &[u8]) -> (u64, alloc::vec::Vec<u8>, crate::error) {
+    let mut x: u64 = 0;
+    let mut i = 0usize;
+    while i < s.len() {
+        let c = s[i];
+        if c < b'0' || c > b'9' {
+            break;
+        }
+        if x > (1u64 << 63) / 10 {
+            // overflow
+            return (
+                0,
+                s.to_vec(),
+                crate::errors::New(crate::gostring::string::from("time: bad [0-9]*")),
+            );
+        }
+        x = x * 10 + (c - b'0') as u64;
+        if x > 1u64 << 63 {
+            // overflow
+            return (
+                0,
+                s.to_vec(),
+                crate::errors::New(crate::gostring::string::from("time: bad [0-9]*")),
+            );
+        }
+        i += 1;
+    }
+    (x, s[i..].to_vec(), crate::errors::nil)
+}
+
+/// `leadingFraction` — consume the leading [0-9]* from `s` as a
+/// fraction. Mirrors format.go:1577. No error on overflow; precision
+/// just stops accumulating.
+fn leading_fraction(s: &[u8]) -> (u64, f64, alloc::vec::Vec<u8>) {
+    let mut x: u64 = 0;
+    let mut scale: f64 = 1.0;
+    let mut overflow = false;
+    let mut i = 0usize;
+    while i < s.len() {
+        let c = s[i];
+        if c < b'0' || c > b'9' {
+            break;
+        }
+        if !overflow {
+            if x > ((1u64 << 63) - 1) / 10 {
+                // It's possible for overflow to give a positive number,
+                // so take care.
+                overflow = true;
+            } else {
+                let y = x * 10 + (c - b'0') as u64;
+                if y > 1u64 << 63 {
+                    overflow = true;
+                } else {
+                    x = y;
+                    scale *= 10.0;
+                }
+            }
+        }
+        i += 1;
+    }
+    (x, scale, s[i..].to_vec())
+}
+
+fn month_short(bs: &[u8]) -> Option<int> {
+    match bs {
+        b"Jan" => Some(1),
+        b"Feb" => Some(2),
+        b"Mar" => Some(3),
+        b"Apr" => Some(4),
+        b"May" => Some(5),
+        b"Jun" => Some(6),
+        b"Jul" => Some(7),
+        b"Aug" => Some(8),
+        b"Sep" => Some(9),
+        b"Oct" => Some(10),
+        b"Nov" => Some(11),
+        b"Dec" => Some(12),
+        _ => None,
+    }
 }

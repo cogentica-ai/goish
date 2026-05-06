@@ -74,57 +74,16 @@ fn cached_error(slot: &SpinLock<Option<error>>, init: fn() -> error) -> error {
     g.as_ref().unwrap().clone()
 }
 
-pub fn ErrTooLong() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("bufio.Scanner: token too long"))
-}
-
-pub fn ErrNegativeAdvance() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || {
-        errors::New("bufio.Scanner: SplitFunc returns negative advance count")
-    })
-}
-
-pub fn ErrAdvanceTooFar() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || {
-        errors::New("bufio.Scanner: SplitFunc returns advance count beyond input")
-    })
-}
-
-pub fn ErrBadReadCount() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || {
-        errors::New("bufio.Scanner: Read returned impossible count")
-    })
-}
-
-pub fn ErrNoProgress() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || {
-        errors::New("multiple Read calls return no data or error")
-    })
-}
-
-pub fn ErrInvalidUnreadByte() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("bufio: invalid use of UnreadByte"))
-}
-
-pub fn ErrInvalidUnreadRune() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("bufio: invalid use of UnreadRune"))
-}
-
-pub fn ErrBufferFull() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("bufio: buffer full"))
-}
-
-pub fn ErrNegativeCount() -> error {
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    cached_error(&SLOT, || errors::New("bufio: negative count"))
+crate::var! {
+    pub ErrTooLong: error            = "bufio.Scanner: token too long";
+    pub ErrNegativeAdvance: error    = "bufio.Scanner: SplitFunc returns negative advance count";
+    pub ErrAdvanceTooFar: error      = "bufio.Scanner: SplitFunc returns advance count beyond input";
+    pub ErrBadReadCount: error       = "bufio.Scanner: Read returned impossible count";
+    pub ErrNoProgress: error         = "multiple Read calls return no data or error";
+    pub ErrInvalidUnreadByte: error  = "bufio: invalid use of UnreadByte";
+    pub ErrInvalidUnreadRune: error  = "bufio: invalid use of UnreadRune";
+    pub ErrBufferFull: error         = "bufio: buffer full";
+    pub ErrNegativeCount: error      = "bufio: negative count";
 }
 
 fn err_negative_write() -> error {
@@ -198,7 +157,7 @@ impl<R: io::Reader> Scanner<R> {
 
     /// First non-EOF error encountered. `nil` if scanning ended cleanly.
     pub fn Err(&self) -> error {
-        if errors::Is(self.err.clone(), io::EOF()) {
+        if errors::Is(self.err.clone(), io::EOF) {
             return nil;
         }
         self.err.clone()
@@ -230,18 +189,18 @@ impl<R: io::Reader> Scanner<R> {
     }
 
     fn set_err(&mut self, e: error) {
-        if self.err == nil || errors::Is(self.err.clone(), io::EOF()) {
+        if self.err == nil || errors::Is(self.err.clone(), io::EOF) {
             self.err = e;
         }
     }
 
     fn advance(&mut self, n: int) -> bool {
         if n < 0 {
-            self.set_err(ErrNegativeAdvance());
+            self.set_err(ErrNegativeAdvance.into());
             return false;
         }
         if (n as usize) > self.end - self.start {
-            self.set_err(ErrAdvanceTooFar());
+            self.set_err(ErrAdvanceTooFar.into());
             return false;
         }
         self.start += n as usize;
@@ -298,7 +257,7 @@ impl<R: io::Reader> Scanner<R> {
             // Grow if full.
             if self.end == self.buf.len() {
                 if self.buf.len() >= self.max_token_size as usize {
-                    self.set_err(ErrTooLong());
+                    self.set_err(ErrTooLong.into());
                     return false;
                 }
                 let mut new_size = self.buf.len() * 2;
@@ -321,7 +280,7 @@ impl<R: io::Reader> Scanner<R> {
                 });
                 let (n_io, read_err) = self.r.Read(&mut tmp);
                 if n_io < 0 || (n_io as usize) > want {
-                    self.set_err(ErrBadReadCount());
+                    self.set_err(ErrBadReadCount.into());
                     break;
                 }
                 if n_io > 0 {
@@ -340,7 +299,7 @@ impl<R: io::Reader> Scanner<R> {
                 }
                 loop_count += 1;
                 if loop_count > maxConsecutiveEmptyReads {
-                    self.set_err(ErrNoProgress());
+                    self.set_err(ErrNoProgress.into());
                     break;
                 }
             }
@@ -563,7 +522,7 @@ impl<R: io::Reader> Reader<R> {
             }
             tries -= 1;
         }
-        self.err = io::ErrUnexpectedEOF();
+        self.err = io::ErrUnexpectedEOF.into();
         // Go uses io.ErrNoProgress; mirror it.
         self.err = errors::New("multiple Read calls return no data or error");
     }
@@ -572,7 +531,7 @@ impl<R: io::Reader> Reader<R> {
     /// Err is `ErrBufferFull` if n exceeds buffer size.
     pub fn Peek(&mut self, n: int) -> (slice<byte>, error) {
         if n < 0 {
-            return (slice::new(), ErrNegativeCount());
+            return (slice::new(), ErrNegativeCount.into());
         }
         self.last_byte = -1;
         self.last_rune_size = -1;
@@ -585,7 +544,7 @@ impl<R: io::Reader> Reader<R> {
         if (n as usize) > self.buf.len() {
             return (
                 slice::__from_vec(self.buf[self.r..self.w].to_vec()),
-                ErrBufferFull(),
+                ErrBufferFull.into(),
             );
         }
         let avail = self.w - self.r;
@@ -595,7 +554,7 @@ impl<R: io::Reader> Reader<R> {
             out_n = avail;
             err = self.read_err();
             if err == nil {
-                err = ErrBufferFull();
+                err = ErrBufferFull.into();
             }
         }
         (
@@ -607,7 +566,7 @@ impl<R: io::Reader> Reader<R> {
     /// `Discard(n)` — skip n bytes. Returns (skipped, err).
     pub fn Discard(&mut self, n: int) -> (int, error) {
         if n < 0 {
-            return (0, ErrNegativeCount());
+            return (0, ErrNegativeCount.into());
         }
         if n == 0 {
             return (0, nil);
@@ -711,7 +670,7 @@ impl<R: io::Reader> Reader<R> {
     /// `UnreadByte()` — push back the most recently read byte.
     pub fn UnreadByte(&mut self) -> error {
         if self.last_byte < 0 || (self.r == 0 && self.w > 0) {
-            return ErrInvalidUnreadByte();
+            return ErrInvalidUnreadByte.into();
         }
         if self.r > 0 {
             self.r -= 1;
@@ -755,7 +714,7 @@ impl<R: io::Reader> Reader<R> {
     /// than UnreadByte: only valid immediately after ReadRune.
     pub fn UnreadRune(&mut self) -> error {
         if self.last_rune_size < 0 || self.r < self.last_rune_size as usize {
-            return ErrInvalidUnreadRune();
+            return ErrInvalidUnreadRune.into();
         }
         self.r -= self.last_rune_size as usize;
         self.last_byte = -1;
@@ -792,7 +751,7 @@ impl<R: io::Reader> Reader<R> {
                 self.r = self.w;
                 let line = self.buf.clone();
                 // last_byte is already set by previous ReadByte/Read; keep it.
-                return (slice::__from_vec(line), ErrBufferFull());
+                return (slice::__from_vec(line), ErrBufferFull.into());
             }
             s = self.w - self.r;
             self.fill();
@@ -804,7 +763,7 @@ impl<R: io::Reader> Reader<R> {
     /// returns isPrefix=true and the line so far.
     pub fn ReadLine(&mut self) -> (slice<byte>, bool, error) {
         let (mut line, err) = self.ReadSlice(b'\n');
-        if err != nil && errors::Is(err.clone(), ErrBufferFull()) {
+        if err != nil && errors::Is(err.clone(), ErrBufferFull) {
             // Handle the case where "\r\n" straddles the buffer.
             if line.Len() > 0 && line[line.Len() - 1] == b'\r' {
                 if self.r == 0 {
@@ -845,7 +804,7 @@ impl<R: io::Reader> Reader<R> {
                 frag = s.__into_vec();
                 break;
             }
-            if !errors::Is(e.clone(), ErrBufferFull()) {
+            if !errors::Is(e.clone(), ErrBufferFull) {
                 frag = s.__into_vec();
                 err_final = e;
                 break;
@@ -868,11 +827,74 @@ impl<R: io::Reader> Reader<R> {
         let (b, e) = self.ReadBytes(delim);
         (string::from_bytes(&b.__into_vec()), e)
     }
+
+    /// Line-by-line port of `bufio.Reader.WriteTo` (bufio.go:518) —
+    /// drain everything in the buffer and the underlying reader to `w`.
+    /// Slim deviation: skip the `WriterTo` / `ReaderFrom` fast paths
+    /// since goish doesn't expose those traits as `dyn`-castable.
+    pub fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (int, error) {
+        // Go: b.lastByte = -1; b.lastRuneSize = -1
+        self.last_byte = -1;
+        self.last_rune_size = -1;
+
+        let mut n: int = 0;
+
+        // Go: if b.r < b.w { n, err = b.writeBuf(w); if err != nil { return } }
+        if self.r < self.w {
+            let (m, err) = self.write_buf(w);
+            n += m;
+            if err != nil {
+                return (n, err);
+            }
+        }
+
+        // Go: if b.w-b.r < len(b.buf) { b.fill() } — only fill when not full.
+        if (self.w - self.r) < self.buf.len() {
+            self.fill();
+        }
+
+        // Go: for b.r < b.w { m, err := b.writeBuf(w); n += m; if err != nil { return n, err }; b.fill() }
+        while self.r < self.w {
+            let (m, err) = self.write_buf(w);
+            n += m;
+            if err != nil {
+                return (n, err);
+            }
+            self.fill();
+        }
+
+        // Go: if b.err == io.EOF { b.err = nil }
+        if self.err != nil && errors::Is(self.err.clone(), io::EOF) {
+            self.err = nil;
+        }
+
+        (n, self.read_err())
+    }
+
+    // Internal helper: port of bufio.Reader.writeBuf (bufio.go:565).
+    fn write_buf(&mut self, w: &mut dyn io::Writer) -> (int, error) {
+        // Go: n, err := w.Write(b.buf[b.r:b.w])
+        let chunk: slice<byte> = slice::__from_vec(self.buf[self.r..self.w].to_vec());
+        let (n, err) = w.Write(chunk);
+        // Go: if n < 0 { panic(errNegativeWrite) }
+        if n < 0 {
+            panic!("bufio: writer returned negative count from Write");
+        }
+        // Go: b.r += n
+        self.r += n as usize;
+        (n, err)
+    }
 }
 
 impl<R: io::Reader> io::Reader for Reader<R> {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         Reader::Read(self, p)
+    }
+}
+
+impl<R: io::Reader> io::ByteReader for Reader<R> {
+    fn ReadByte(&mut self) -> (byte, error) {
+        Reader::ReadByte(self)
     }
 }
 
@@ -929,6 +951,25 @@ impl<W: io::Writer> Writer<W> {
         (self.buf.len() - self.n) as int
     }
 
+    /// `Writer.AvailableBuffer()` (bufio.go:668) — returns a `slice<byte>`
+    /// with `len == 0` and `cap` equal to the writer's currently-available
+    /// buffer space. Intended to be appended to and passed to a subsequent
+    /// `Write`/`WriteString` call to avoid an intermediate allocation.
+    ///
+    /// Slim deviation: Go returns `b.buf[b.n:][:0]`, a sub-slice that
+    /// aliases the underlying writer buffer so a follow-up
+    /// `b.Write(buf[:m])` can be detected as in-place and skip the copy.
+    /// goish slices are owned `Vec<byte>`, so we return a fresh empty
+    /// slice with `Vec::with_capacity(self.Available())`. Callers see the
+    /// same observable surface (an empty slice they can append to and
+    /// pass to Write); only the zero-copy hand-off is lost — the
+    /// follow-up Write performs a copy as it would for any other slice.
+    pub fn AvailableBuffer(&self) -> slice<byte> {
+        // Go: return b.buf[b.n:][:0]
+        let avail = self.buf.len() - self.n;
+        slice::__from_vec(Vec::with_capacity(avail))
+    }
+
     /// `Flush()` — push buffered bytes to the underlying writer. Once an
     /// error is recorded, no further writes will be accepted until Reset.
     pub fn Flush(&mut self) -> error {
@@ -948,7 +989,7 @@ impl<W: io::Writer> Writer<W> {
         let n = n as usize;
         let mut err = err;
         if n < want && err == nil {
-            err = io::ErrShortWrite();
+            err = io::ErrShortWrite.into();
         }
         if err != nil {
             if n > 0 && n < want {
@@ -1049,7 +1090,8 @@ impl<W: io::Writer> Writer<W> {
     }
 
     /// `WriteString(s)` — append a string.
-    pub fn WriteString(&mut self, s: string) -> (int, error) {
+    pub fn WriteString<S: Into<string>>(&mut self, s: S) -> (int, error) {
+        let s: string = s.into();
         let mut s = s.as_bytes().to_vec();
         let mut nn: usize = 0;
         while s.len() > self.Available() as usize && self.err == nil {
@@ -1069,6 +1111,77 @@ impl<W: io::Writer> Writer<W> {
         self.n += take;
         nn += take;
         (nn as int, nil)
+    }
+
+    /// Line-by-line port of `bufio.Writer.ReadFrom` (bufio.go:787) —
+    /// pull bytes from `r` and buffer them, flushing as needed. Returns
+    /// `(bytesRead, err)`. EOF is normalized to nil (Go behavior).
+    /// Slim deviation: skip the `ReaderFrom` fast path on the underlying
+    /// writer since goish doesn't expose that trait as `dyn`-castable.
+    pub fn ReadFrom(&mut self, r: &mut dyn io::Reader) -> (int, error) {
+        // Go: if b.err != nil { return 0, b.err }
+        if self.err != nil {
+            return (0, self.err.clone());
+        }
+        let mut n: int = 0;
+        let mut err: error = nil;
+        // Go: for { … }
+        loop {
+            // Go: if b.Available() == 0 { if err1 := b.Flush(); err1 != nil { return n, err1 } }
+            if self.Available() == 0 {
+                let err1 = self.Flush();
+                if err1 != nil {
+                    return (n, err1);
+                }
+            }
+            // Slim: no ReaderFrom fast path.
+
+            // Go: nr := 0; for nr < maxConsecutiveEmptyReads { m, err = r.Read(b.buf[b.n:]); ... }
+            let mut nr = 0;
+            let mut m: int = 0;
+            while nr < maxConsecutiveEmptyReads {
+                let avail = self.buf.len() - self.n;
+                let mut tmp: slice<byte> = slice::__from_vec({
+                    let mut v: Vec<byte> = Vec::with_capacity(avail);
+                    v.resize(avail, 0);
+                    v
+                });
+                let (mm, e) = r.Read(&mut tmp);
+                m = mm;
+                err = e;
+                // Copy what we got back into our buffer.
+                if mm > 0 {
+                    let src = tmp.__into_vec();
+                    self.buf[self.n..self.n + mm as usize]
+                        .copy_from_slice(&src[..mm as usize]);
+                }
+                if mm != 0 || err != nil {
+                    break;
+                }
+                nr += 1;
+            }
+            // Go: if nr == maxConsecutiveEmptyReads { return n, io.ErrNoProgress }
+            if nr == maxConsecutiveEmptyReads {
+                return (n, errors::New("multiple Read calls return no data or error"));
+            }
+            // Go: b.n += m; n += int64(m)
+            self.n += m as usize;
+            n += m;
+            // Go: if err != nil { break }
+            if err != nil {
+                break;
+            }
+        }
+        // Go: if err == io.EOF { … } — normalize EOF.
+        if errors::Is(err.clone(), io::EOF) {
+            // Go: if b.Available() == 0 { err = b.Flush() } else { err = nil }
+            if self.Available() == 0 {
+                err = self.Flush();
+            } else {
+                err = nil;
+            }
+        }
+        (n, err)
     }
 }
 

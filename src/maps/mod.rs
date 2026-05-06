@@ -11,9 +11,8 @@
 //   c := maps.Clone(m)                   let c = maps::Clone(&m);
 //   maps.Copy(dst, src)                  maps::Copy(&mut dst, &src);
 //
-// Deferred (need closures or `iter` package):
-//   * EqualFunc, DeleteFunc, Insert, Collect, All — when an iter
-//     equivalent ships.
+// Deferred (need an `iter` package):
+//   * Insert, Collect, All — return iter.Seq pairs.
 //
 // In Go 1.21+, `Keys` and `Values` return `iter.Seq[K]`/`iter.Seq[V]`.
 // Goish v1 returns `slice<K>`/`slice<V>` directly (BTreeMap-sorted)
@@ -31,7 +30,7 @@ use crate::goslice::slice;
 /// `maps.Keys(m)` — slice of keys, sorted (v1 BTreeMap backing).
 pub fn Keys<K, V>(m: &map<K, V>) -> slice<K>
 where
-    K: Ord + Clone,
+    K: crate::gomap::GoHash + PartialEq + Clone,
     V: Default,
 {
     let v: Vec<K> = m.__iter().map(|(k, _)| k.clone()).collect();
@@ -41,7 +40,7 @@ where
 /// `maps.Values(m)` — slice of values, in key-sorted order.
 pub fn Values<K, V>(m: &map<K, V>) -> slice<V>
 where
-    K: Ord,
+    K: crate::gomap::GoHash + PartialEq,
     V: Default + Clone,
 {
     let v: Vec<V> = m.__iter().map(|(_, v)| v.clone()).collect();
@@ -51,7 +50,7 @@ where
 /// `maps.Equal(m1, m2)` — same keys with equal values.
 pub fn Equal<K, V>(m1: &map<K, V>, m2: &map<K, V>) -> bool
 where
-    K: Ord,
+    K: crate::gomap::GoHash + PartialEq,
     V: Default + PartialEq,
 {
     let a = m1.__iter();
@@ -70,7 +69,7 @@ where
 /// `maps.Clone(m)` — deep copy.
 pub fn Clone<K, V>(m: &map<K, V>) -> map<K, V>
 where
-    K: Ord + Clone,
+    K: crate::gomap::GoHash + PartialEq + Clone,
     V: Default + Clone,
 {
     let mut out: map<K, V> = map::new();
@@ -84,11 +83,58 @@ where
 /// into `dst`. Existing keys in `dst` not in `src` are preserved.
 pub fn Copy<K, V>(dst: &mut map<K, V>, src: &map<K, V>)
 where
-    K: Ord + Clone,
+    K: crate::gomap::GoHash + PartialEq + Clone,
     V: Default + Clone,
 {
     for (k, v) in src.__iter() {
         dst.Set(k.clone(), v.clone());
+    }
+}
+
+/// `maps.EqualFunc(m1, m2, eq)` (maps.go:31) — like `Equal` but uses
+/// `eq` to compare values. Keys are still compared with byte equality
+/// via the underlying `BTreeMap`.
+pub fn EqualFunc<K, V1, V2, F>(m1: &map<K, V1>, m2: &map<K, V2>, mut eq: F) -> bool
+where
+    K: crate::gomap::GoHash + PartialEq,
+    V1: Default,
+    V2: Default,
+    F: FnMut(&V1, &V2) -> bool,
+{
+    // Go: if len(m1) != len(m2) { return false }
+    if m1.Len() != m2.Len() {
+        return false;
+    }
+    // Go: for k, v1 := range m1 { v2, ok := m2[k]; if !ok || !eq(v1, v2) { return false } }
+    for (k, v1) in m1.__iter() {
+        match find_key(m2, k) {
+            Some(v2) if eq(v1, v2) => continue,
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// `maps.DeleteFunc(m, del)` (maps.go:69) — delete every entry where
+/// `del(k, v)` is true. Iteration order is the BTreeMap-sorted order;
+/// matching pairs are collected first then removed to avoid mutating
+/// while iterating.
+pub fn DeleteFunc<K, V, F>(m: &mut map<K, V>, mut del: F)
+where
+    K: crate::gomap::GoHash + PartialEq + Clone,
+    V: Default,
+    F: FnMut(&K, &V) -> bool,
+{
+    // Go: for k, v := range m { if del(k, v) { delete(m, k) } }
+    // Slim: collect first to keep BTreeMap iteration stable.
+    let mut to_remove: Vec<K> = Vec::new();
+    for (k, v) in m.__iter() {
+        if del(k, v) {
+            to_remove.push(k.clone());
+        }
+    }
+    for k in to_remove {
+        m.Delete(k);
     }
 }
 
@@ -98,7 +144,7 @@ where
 // would be re-exposing more of BTreeMap's API.
 fn find_key<'a, K, V>(m: &'a map<K, V>, key: &K) -> Option<&'a V>
 where
-    K: Ord,
+    K: crate::gomap::GoHash + PartialEq,
     V: Default,
 {
     for (k, v) in m.__iter() {

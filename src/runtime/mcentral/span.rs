@@ -253,8 +253,12 @@ impl Span {
             return None;
         }
 
-        // Shift past the bit we just consumed.
-        *self.alloc_cache.get() = acache >> (bit_index + 1);
+        // Shift past the bit we just consumed. When `bit_index == 63`
+        // the shift amount is 64, which is UB on x86_64 (and panics in
+        // debug builds via Rust's overflow checks). `checked_shr`
+        // returns `None` for ≥ 64 — fall back to 0, the algebraically
+        // correct result (the cache is now empty).
+        *self.alloc_cache.get() = acache.checked_shr(bit_index + 1).unwrap_or(0);
         let new_freeindex = slot.wrapping_add(1);
 
         // If the shift exhausted alloc_cache and we're still at a

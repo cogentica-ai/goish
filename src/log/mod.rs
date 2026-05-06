@@ -90,6 +90,27 @@ pub fn printf_impl(format: &[byte], args: &[fmt::FmtArg]) {
 }
 
 #[doc(hidden)]
+pub fn print_impl(args: &[fmt::FmtArg]) {
+    // Go: log.Print (log.go:399) — std.output(0, 2, fmt.Append(b, v...))
+    //     output() ensures a trailing newline if the appended bytes
+    //     don't already end in one.
+    write_prefix_to_stderr();
+    let mut e = os::Stderr();
+    // Go: fmt.Append behavior — concatenate args with default %v, no
+    // separators or trailing newline. Reuse fmt::sprint_impl for the
+    // body, then append a newline if missing.
+    let body = fmt::sprint_impl(args);
+    let body_bytes = body.as_bytes();
+    let mut buf: Vec<byte> = Vec::with_capacity(body_bytes.len() + 1);
+    buf.extend_from_slice(body_bytes);
+    // Go: if len(*buf) == 0 || (*buf)[len(*buf)-1] != '\n' { *buf = append(*buf, '\n') }
+    if buf.is_empty() || *buf.last().unwrap() != b'\n' {
+        buf.push(b'\n');
+    }
+    let _ = e.Write(crate::goslice::slice::__from_vec(buf));
+}
+
+#[doc(hidden)]
 pub fn fatal_impl(args: &[fmt::FmtArg]) -> ! {
     println_impl(args);
     os::Exit(1);
@@ -98,6 +119,13 @@ pub fn fatal_impl(args: &[fmt::FmtArg]) -> ! {
 #[doc(hidden)]
 pub fn fatalf_impl(format: &[byte], args: &[fmt::FmtArg]) -> ! {
     printf_impl(format, args);
+    os::Exit(1);
+}
+
+#[doc(hidden)]
+pub fn fatalln_impl(args: &[fmt::FmtArg]) -> ! {
+    // Go: log.Fatalln (log.go:438) — Println followed by os.Exit(1).
+    println_impl(args);
     os::Exit(1);
 }
 
@@ -135,7 +163,25 @@ macro_rules! __goish_log_fatalf {
     };
 }
 
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __goish_log_print {
+    ($($arg:expr),* $(,)?) => {
+        $crate::log::print_impl($crate::__fmt_args!($($arg),*))
+    };
+}
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __goish_log_fatalln {
+    ($($arg:expr),* $(,)?) => {
+        $crate::log::fatalln_impl($crate::__fmt_args!($($arg),*))
+    };
+}
+
 pub use crate::__goish_log_fatal as Fatal;
 pub use crate::__goish_log_fatalf as Fatalf;
+pub use crate::__goish_log_fatalln as Fatalln;
+pub use crate::__goish_log_print as Print;
 pub use crate::__goish_log_printf as Printf;
 pub use crate::__goish_log_println as Println;

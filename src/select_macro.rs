@@ -436,7 +436,8 @@ macro_rules! __select_emit {
                             $crate::__select_release_all!(__sel_unique, __sel_atoms);
                             let _ = __ok;
                             let $br_v = __v;
-                            break 'select_blk $br_body;
+                            #[allow(unreachable_code)]
+                            break 'select_blk ({ $br_body });
                         }
                     }
                 )*
@@ -449,7 +450,8 @@ macro_rules! __select_emit {
                         {
                             $crate::__select_release_all!(__sel_unique, __sel_atoms);
                             let ($($pr_p)+) = (__v, __ok);
-                            break 'select_blk $pr_body;
+                            #[allow(unreachable_code)]
+                            break 'select_blk ({ $pr_body });
                         }
                     }
                 )*
@@ -463,7 +465,8 @@ macro_rules! __select_emit {
                         match $crate::gochan::chan::__try_send_locked(__s, __take) {
                             ::core::result::Result::Ok(()) => {
                                 $crate::__select_release_all!(__sel_unique, __sel_atoms);
-                                break 'select_blk $s_body;
+                                #[allow(unreachable_code)]
+                                break 'select_blk ({ $s_body });
                             }
                             ::core::result::Result::Err(__returned) => {
                                 $s_vn = ::core::option::Option::Some(__returned);
@@ -531,7 +534,8 @@ macro_rules! __select_default_or_park {
       [ $( ($s_idx:tt $s_cn:ident $s_vn:ident $s_sn:ident ($s_body:expr)) )* ]
     ) => {
         $crate::__select_release_all!($sel_unique, $sel_atoms);
-        break $blk $d_body;
+        #[allow(unreachable_code)]
+        break $blk ({ $d_body });
     };
 
     // ─── no default → register sudogs (under held locks), then
@@ -629,20 +633,17 @@ macro_rules! __select_default_or_park {
             }
         )*
 
-        // Populate G.select_wait with the deduped, sorted atoms so
-        // selparkcommit can release them in order during the park
-        // transition. The slice-copy is unsafe because we're
-        // touching G's internals through a raw pointer; that's fine
-        // because we own the G as the parking goroutine.
+        // Stash a *pointer* to the parker's own `$sel_atoms` array
+        // (already deduped/sorted, lives on this stack frame for the
+        // entire park). selparkcommit walks via this pointer to
+        // release locks in order — saves the 256 B inline copy on G.
+        // The parker's stack frame stays live throughout `gopark`,
+        // so the pointer is valid for the whole park transition.
         unsafe {
             let __g = &mut *__select_g.as_ptr();
             let __cap = $crate::runtime::sched::SELECT_WAIT_MAX;
             let __take_n = if $sel_unique > __cap { __cap } else { $sel_unique };
-            let mut __i: usize = 0;
-            while __i < __take_n {
-                __g.select_wait[__i] = $sel_atoms[__i];
-                __i += 1;
-            }
+            __g.select_wait = $sel_atoms.as_ptr();
             __g.select_wait_len = __take_n as u8;
         }
 
@@ -697,21 +698,24 @@ macro_rules! __select_default_or_park {
                 let __v = $br_sn.value.take().unwrap_or_default();
                 let _ = __ok;
                 let $br_v = __v;
-                break $blk $br_body;
+                #[allow(unreachable_code)]
+                break $blk ({ $br_body });
             }
         )*
         $( if __select_winners[$pr_idx as usize] {
                 let __ok = $pr_sn.success;
                 let __v = $pr_sn.value.take().unwrap_or_default();
                 let ($($pr_p)+) = (__v, __ok);
-                break $blk $pr_body;
+                #[allow(unreachable_code)]
+                break $blk ({ $pr_body });
             }
         )*
         $( if __select_winners[$s_idx as usize] {
                 if !$s_sn.success {
                     ::core::panic!("goish: select send winner: chan closed");
                 }
-                break $blk $s_body;
+                #[allow(unreachable_code)]
+                break $blk ({ $s_body });
             }
         )*
 

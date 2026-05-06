@@ -72,6 +72,141 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
     out
 }
 
+// ─── goish::var! sentinel-marker emission ────────────────────────────
+//
+// Internal helper invoked from the `goish::var!` macro_rules! muncher.
+// Receives a parsed-down decl in one of two shapes:
+//
+//   var_emit_error_marker!( vis NAME "literal" )    — string-message arm
+//   var_emit_error_marker!( vis NAME { expr } )     — typed-payload arm
+//
+// Emits the full per-sentinel expansion: ZST marker + const + lazy slot
+// + IsTarget/From/PartialEq impls. Identity-stable across all access
+// paths (.into(), errors::Is, ==).
+//
+// Token-level proc-macro (no syn/quote) — matches the rest of this
+// crate's posture. macro_rules! drives the per-decl dispatch; this
+// only does the ident-concatenation Rust macro_rules! can't do.
+
+#[proc_macro]
+pub fn var_emit_error_marker(input: TokenStream) -> TokenStream {
+    // macro_rules! `$vis:vis` and `$expr` matchers wrap their captures in an
+    // "invisible" `Group` (Delimiter::None). Flatten any such groups at the
+    // top level before walking the token stream.
+    let flat: Vec<TokenTree> = input
+        .into_iter()
+        .flat_map(|tt| match tt {
+            TokenTree::Group(g) if g.delimiter() == Delimiter::None => {
+                g.stream().into_iter().collect::<Vec<_>>()
+            }
+            other => vec![other],
+        })
+        .collect();
+
+    let mut iter = flat.into_iter().peekable();
+
+    // Parse optional visibility tokens (pub, pub(crate), pub(super), etc.)
+    // until we hit the name ident.
+    let mut vis = String::new();
+    let name: String;
+    loop {
+        match iter.peek() {
+            Some(TokenTree::Ident(id)) if id.to_string() == "pub" => {
+                vis.push_str(&id.to_string());
+                vis.push(' ');
+                iter.next();
+                // Optional `(crate)`, `(super)`, `(in path)` group
+                if let Some(TokenTree::Group(g)) = iter.peek() {
+                    if g.delimiter() == Delimiter::Parenthesis {
+                        vis.push('(');
+                        vis.push_str(&g.stream().to_string());
+                        vis.push_str(") ");
+                        iter.next();
+                    }
+                }
+            }
+            Some(TokenTree::Ident(id)) => {
+                name = id.to_string();
+                iter.next();
+                break;
+            }
+            other => panic!("var_emit_error_marker: expected vis or name, got {:?}", other),
+        }
+    }
+
+    // Parse the payload — either a string literal or a brace group.
+    let payload = iter
+        .next()
+        .expect("var_emit_error_marker: missing payload after name");
+
+    let init_expr = match &payload {
+        TokenTree::Literal(lit) => {
+            // String literal — wrap with errors::New
+            format!("::goish::errors::New({})", lit)
+        }
+        TokenTree::Group(g) if g.delimiter() == Delimiter::Brace => {
+            // Typed-payload — wrap with errors::Wrap
+            format!("::goish::errors::Wrap({{ {} }})", g.stream())
+        }
+        other => panic!("var_emit_error_marker: payload must be \"literal\" or {{ expr }}, got {:?}", other),
+    };
+
+    let marker = format!("__{}Marker", name);
+    let slot = format!("__{}_SLOT", name);
+    let resolve = format!("__{}_resolve", name);
+
+    let src = format!(
+        r#"
+        #[doc(hidden)]
+        #[derive(::core::marker::Copy, ::core::clone::Clone)]
+        {vis}struct {marker};
+
+        #[allow(non_upper_case_globals)]
+        {vis}const {name}: {marker} = {marker};
+
+        #[doc(hidden)]
+        #[allow(non_upper_case_globals)]
+        static {slot}: ::goish::runtime::spin::SpinLock<
+            ::core::option::Option<::goish::error>,
+        > = ::goish::runtime::spin::SpinLock::new(::core::option::Option::None);
+
+        #[doc(hidden)]
+        #[allow(non_snake_case)]
+        fn {resolve}() -> ::goish::error {{
+            let mut g = {slot}.lock();
+            if g.is_none() {{
+                *g = ::core::option::Option::Some({init_expr});
+            }}
+            g.as_ref().unwrap().clone()
+        }}
+
+        impl ::goish::errors::IsTarget for {marker} {{
+            #[inline]
+            fn __resolve(&self) -> ::goish::error {{ {resolve}() }}
+        }}
+
+        impl ::core::convert::From<{marker}> for ::goish::error {{
+            #[inline]
+            fn from(_: {marker}) -> Self {{ {resolve}() }}
+        }}
+
+        impl ::core::cmp::PartialEq<{marker}> for ::goish::error {{
+            #[inline]
+            fn eq(&self, _: &{marker}) -> bool {{
+                self.__ptr_eq(&{resolve}())
+            }}
+        }}
+
+        impl ::core::cmp::PartialEq<::goish::error> for {marker} {{
+            #[inline]
+            fn eq(&self, e: &::goish::error) -> bool {{ e == self }}
+        }}
+        "#,
+    );
+
+    src.parse().expect("var_emit_error_marker: emitted source failed to parse")
+}
+
 // ─── #[goish::reflect] ───────────────────────────────────────────────
 
 /// `#[goish::reflect]` — emit `impl reflect::Reflect` for a struct.
@@ -124,6 +259,8 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20Name: \"{}\",\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20Tag: ::goish::reflect::StructTag::__new({}),\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20Type: <{} as ::goish::reflect::Reflect>::__reflect_type,\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20PkgPath: \"\",\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20Anonymous: false,\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}},\n",
             f.name, tag, f.ty
         );
@@ -225,7 +362,7 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_text.push_str("        } };\n");
     impl_text.push_str("        let __obj = match __v {\n");
     impl_text.push_str("            ::goish::encoding::json::Value::Object(o) => o,\n");
-    impl_text.push_str("            ::goish::encoding::json::Value::Null => return (__zero(), ::goish::nil),\n");
+    impl_text.push_str("            ::goish::encoding::json::Value::Null => return (__zero(), ::goish::errors::nil),\n");
     impl_text.push_str("            _ => return (__zero(), ::goish::errors::New(\"json: cannot unmarshal into struct\")),\n");
     impl_text.push_str("        };\n");
     impl_text.push_str("        let mut __out = __zero();\n");
@@ -252,13 +389,13 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
             "                    let (__val, __err) = <{} as ::goish::encoding::json::FromValue>::from_value(&__sub);\n",
             f.ty
         );
-        impl_text.push_str("                    if __err != ::goish::nil { return (__out, __err); }\n");
+        impl_text.push_str("                    if __err != ::goish::errors::nil { return (__out, __err); }\n");
         let _ = write!(impl_text, "                    __out.{} = __val;\n", f.name);
         impl_text.push_str("                }\n");
         impl_text.push_str("            }\n");
         impl_text.push_str("        }\n");
     }
-    impl_text.push_str("        (__out, ::goish::nil)\n");
+    impl_text.push_str("        (__out, ::goish::errors::nil)\n");
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
 
@@ -322,11 +459,11 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
     for (i, f) in parsed.fields.iter().enumerate() {
         let _ = write!(
             impl_text,
-            "        {{\n            let (__val, __err) = <{} as ::goish::reflect::FromReflectValue>::from_reflect_value(__fields[{}].clone());\n            if __err != ::goish::nil {{ return (__zero(), __err); }}\n            __out.{} = __val;\n        }}\n",
+            "        {{\n            let (__val, __err) = <{} as ::goish::reflect::FromReflectValue>::from_reflect_value(__fields[{}].clone());\n            if __err != ::goish::errors::nil {{ return (__zero(), __err); }}\n            __out.{} = __val;\n        }}\n",
             f.ty, i, f.name
         );
     }
-    impl_text.push_str("        (__out, ::goish::nil)\n");
+    impl_text.push_str("        (__out, ::goish::errors::nil)\n");
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
 
@@ -348,9 +485,9 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
             "                let (__val, __err) = <{} as ::goish::reflect::FromReflectValue>::from_reflect_value(__v);\n",
             f.ty
         );
-        impl_text.push_str("                if __err != ::goish::nil { return __err; }\n");
+        impl_text.push_str("                if __err != ::goish::errors::nil { return __err; }\n");
         let _ = write!(impl_text, "                self.{} = __val;\n", f.name);
-        impl_text.push_str("                ::goish::nil\n");
+        impl_text.push_str("                ::goish::errors::nil\n");
         impl_text.push_str("            }\n");
     }
     impl_text.push_str("            _ => ::goish::errors::New(\"reflect.SetField: index out of range\"),\n");

@@ -35,7 +35,7 @@ impl io::Writer for BufWriter {
             tmp = append!(tmp, *b);
         }
         self.buf = tmp;
-        (n, nil)
+        (n, nil.into())
     }
 }
 
@@ -49,7 +49,7 @@ struct BufReader {
 impl io::Reader for BufReader {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         if self.pos >= self.buf.Len() {
-            return (0, io::EOF());
+            return (0, io::EOF.into());
         }
         let mut written: int = 0;
         let cap_p = p.Len();
@@ -63,7 +63,7 @@ impl io::Reader for BufReader {
             written += 1;
         }
         self.pos += written;
-        (written, nil)
+        (written, nil.into())
     }
 }
 
@@ -90,15 +90,20 @@ fn main() {
     check(w2.buf.Len() == 5, b"io: WriteString len\n");
 
     // (3) EOF is pointer-stable across calls.
-    let e1 = io::EOF();
-    let e2 = io::EOF();
-    check(e1 == e2, b"io: EOF must be ptr-stable across calls\n");
-    check(errors::Is(e1.clone(), e2.clone()), b"io: EOF errors::Is failed\n");
+    let e1: error = io::EOF.into();
+    let e2: error = io::EOF.into();
+    check(e1 == e2, b"io: EOF.into() must be ptr-stable across calls\n");
+    check(errors::Is(e1.clone(), e2.clone()), b"io: EOF.into() errors::Is failed\n");
 
-    // (4) Other sentinels are also stable.
-    check(io::ErrShortWrite() == io::ErrShortWrite(), b"io: ErrShortWrite stable\n");
-    check(io::ErrUnexpectedEOF() == io::ErrUnexpectedEOF(), b"io: ErrUnexpectedEOF stable\n");
-    check(io::EOF() != io::ErrShortWrite(), b"io: distinct sentinels distinct\n");
+    // (4) Other sentinels are also stable. With Doctrine 2 markers,
+    // bare `==` works directly (no `.into()` needed at compare positions).
+    let sw1: error = io::ErrShortWrite.into();
+    let sw2: error = io::ErrShortWrite.into();
+    check(sw1 == sw2, b"io: ErrShortWrite stable\n");
+    let uf1: error = io::ErrUnexpectedEOF.into();
+    let uf2: error = io::ErrUnexpectedEOF.into();
+    check(uf1 == uf2, b"io: ErrUnexpectedEOF stable\n");
+    check(e1 != io::ErrShortWrite, b"io: distinct sentinels distinct\n");
 
     // (5) Reader trait — read until EOF.
     let mut r = BufReader {
@@ -118,7 +123,7 @@ fn main() {
     check(n == 2 && err == nil, b"io: third Read short\n");
 
     let (n, err) = io::Reader::Read(&mut r, &mut out);
-    check(n == 0 && err == io::EOF(), b"io: fourth Read should EOF\n");
+    check(n == 0 && err == io::EOF, b"io: fourth Read should EOF\n");
 
     // (6) io::Copy — Reader → Writer round-trip.
     let mut src = BufReader {

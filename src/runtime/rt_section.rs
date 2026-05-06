@@ -32,7 +32,7 @@
 // preserves the function as its own callable site so the section
 // attribute actually places it.
 
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::AtomicU64;
 
 extern "C" {
     /// First byte of the `goish_rt_text` section.

@@ -18,6 +18,11 @@
 // `extern crate alloc;` to their root.
 extern crate alloc;
 
+// Self-alias so proc-macros (e.g. `goish::var!` from `goish-macros`) that
+// emit `::goish::...` paths resolve correctly when expanded INSIDE this
+// crate. External users get the same name via the crate's package name.
+extern crate self as goish;
+
 // Hidden re-export so `make!`/`slice!`/`append!` macros can reach Vec
 // from inside user binaries that haven't added `extern crate alloc;`.
 // Users never write this path directly.
@@ -45,54 +50,77 @@ pub const MB: usize = 1024 * 1024;
 /// One gigabyte (1024 MiB).
 pub const GB: usize = 1024 * 1024 * 1024;
 
+pub mod archive;
 pub mod bufio;
 pub mod builtin;
 pub mod builtin_macros;
 pub mod bytes;
+pub mod cmp;
+pub mod compress;
+pub mod container;
 pub mod context;
 pub mod convert;
+pub mod crypto;
+pub mod database;
 pub mod defer;
 pub mod encoding;
 pub mod errors;
+pub mod expvar;
 pub mod flag;
 pub mod fmt;
+pub mod goarray;
 pub mod gochan;
 pub mod gomap;
 pub mod goslice;
 pub mod gostring;
+pub mod hook;
+pub mod lazy;
+pub mod nilval;
+pub mod hash;
+pub mod html;
 pub mod maps;
 pub mod io;
 pub mod log;
+pub mod math;
+pub mod mime;
 pub mod net;
 pub mod os;
 pub mod path;
 pub mod range;
 pub mod reflect;
+pub mod regexp;
 pub mod runtime;
 pub mod select_macro;
 pub mod slices;
+pub mod sort;
 pub mod strconv;
 pub mod strings;
 pub mod sync;
 pub mod syscall;
 pub mod testing;
+pub mod text;
 pub mod time;
 pub mod types;
 pub mod unicode;
 
 // Re-export Go's predeclared identifiers at the crate root so a single
 // `use goish::{len, string, ...}` mirrors Go's always-available builtins.
-pub use builtin::{cap, len};
+pub use builtin::{cap, len, Len};
 // Both `string` (the type, in gostring) and `string` (the conversion
 // function, in convert) are re-exported here. They occupy different
 // namespaces (type vs value), exactly like Go's `string` type and
 // `string(...)` conversion. Same for `slice<T>`.
-pub use convert::{bytes, runes, string};
-pub use errors::{error, nil};
+pub use convert::{
+    byte, bytes, float32, float64, int, int16, int32, int64, int8, rune, runes, string, uint,
+    uint16, uint32, uint64, uint8,
+};
+pub use errors::error;
+pub use nilval::{nil, Nil};
+pub use goarray::array;
 pub use gomap::map;
 pub use goslice::slice;
 pub use gostring::string;
-pub use types::{byte, float32, float64, int, rune, uint};
+pub use types::{byte, float32, float64, int, rune, uint, uintptr};
 
 // Re-export the entry-point attribute so users write `#[goish::main]`.
 pub use goish_macros::main;
@@ -100,3 +128,9 @@ pub use goish_macros::main;
 // (The `goish::reflect` module path coexists — attributes and modules
 // occupy different namespaces, just like `goish::main` doesn't conflict.)
 pub use goish_macros::reflect;
+
+// `__var_emit_error_marker!` — proc-macro helper used by the
+// `goish::var!` muncher to emit per-sentinel ZST + impls. Hidden from
+// docs; users only see `goish::var!`.
+#[doc(hidden)]
+pub use goish_macros::var_emit_error_marker as __var_emit_error_marker;
