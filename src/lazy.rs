@@ -80,3 +80,35 @@ impl<T: 'static> Deref for Lazy<T> {
         s.get()
     }
 }
+
+// `len(&LAZY)` — Go's `len(magicBody)` lowers to `goish::len(&magicBody)`
+// where `magicBody: Lazy<slice<byte>>`. Generic `len` arg-type matching
+// can't auto-deref; forward `Len` so call sites stay clean.
+impl<T: 'static + crate::builtin::Len> crate::builtin::Len for Lazy<T> {
+    fn __len(&self) -> crate::types::int {
+        let s: &'static Self = unsafe { core::mem::transmute(self) };
+        s.get().__len()
+    }
+}
+
+impl<T: 'static + crate::builtin::Cap> crate::builtin::Cap for Lazy<T> {
+    fn __cap(&self) -> crate::types::int {
+        let s: &'static Self = unsafe { core::mem::transmute(self) };
+        s.get().__cap()
+    }
+}
+
+// `LAZY[i]` — for ports that statically declare a `slice<byte>` with
+// non-UTF-8 bytes (snappy's `magicBody`) and index it Go-style. The
+// indexing operator desugars to `Index::index`; method-call auto-deref
+// covers most cases but the explicit forwarder removes ambiguity.
+impl<T: 'static + core::ops::Index<I>, I> core::ops::Index<I> for Lazy<T>
+where
+    T::Output: Sized,
+{
+    type Output = T::Output;
+    fn index(&self, i: I) -> &T::Output {
+        let s: &'static Self = unsafe { core::mem::transmute(self) };
+        &s.get()[i]
+    }
+}
