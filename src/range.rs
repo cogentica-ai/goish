@@ -198,3 +198,33 @@ where
         (**self).__iter()
     }
 }
+
+// ─── chans → value (single-bind) ─────────────────────────────────────
+//
+// Go's `for v := range ch` reads from `ch` until close, yielding each
+// value. Mirrors Go's chan-range semantic — terminates when the chan
+// is closed and drained.
+
+pub struct ChanRangeIter<'a, T: Default + Clone> {
+    c: &'a crate::gochan::chan<T>,
+}
+
+impl<'a, T: Default + Clone> Iterator for ChanRangeIter<'a, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        let (v, ok) = self.c.Recv();
+        if ok {
+            Some(v)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a, T: Default + Clone> RangeIter for &'a crate::gochan::chan<T> {
+    type Item = T;
+    type Iter = ChanRangeIter<'a, T>;
+    fn range(self) -> Self::Iter {
+        ChanRangeIter { c: self }
+    }
+}
