@@ -47,6 +47,17 @@ impl __StringConv for &'static str {
     }
 }
 
+// Borrowed-string passthrough — `string(self)` inside a `&self` method
+// on a `string`-typed alias (trait-ext lowering, e.g.
+// `type Algorithm = string`) lands here. Cloning the inner Arc is
+// O(1).
+impl __StringConv for &string {
+    #[inline]
+    fn __to_string(self) -> string {
+        self.clone()
+    }
+}
+
 impl __StringConv for rune {
     /// Go's `string(i rune)` — encode a single rune to UTF-8 (1..4 bytes).
     /// Note: this is the Go gotcha where `string(65)` == `"A"`, not `"65"`.
