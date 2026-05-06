@@ -42,6 +42,7 @@ use super::response::ResponseWriter;
 /// `http.Handler` — types that can serve HTTP requests. Mirrors
 /// Go's `type Handler interface { ServeHTTP(ResponseWriter, *Request) }`
 /// (server.go:88).
+#[goish::interface]
 pub trait Handler: Send + Sync {
     fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request);
 }

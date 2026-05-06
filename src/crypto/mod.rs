@@ -235,6 +235,7 @@ pub type PublicKey = Box<dyn Any + Send + Sync>;
 pub type PrivateKey = Box<dyn Any + Send + Sync>;
 
 /// `crypto.SignerOpts` (crypto.go:218) — options for `Signer.Sign`.
+#[goish::interface]
 pub trait SignerOpts: Send + Sync {
     /// Returns the hash function used; zero indicates no hashing.
     fn HashFunc(&self) -> Hash;
@@ -254,6 +255,7 @@ impl SignerOpts for HashOpts {
 }
 
 /// `crypto.Signer` (crypto.go:180) — opaque signing key.
+#[goish::interface]
 pub trait Signer: Send + Sync {
     fn Public(&self) -> PublicKey;
     fn Sign(
@@ -279,6 +281,7 @@ pub type DecrypterOpts = Box<dyn Any + Send + Sync>;
 
 /// `crypto.Decrypter` (crypto.go:229) — opaque private key for asymmetric
 /// decryption.
+#[goish::interface]
 pub trait Decrypter: Send + Sync {
     fn Public(&self) -> PublicKey;
     fn Decrypt(

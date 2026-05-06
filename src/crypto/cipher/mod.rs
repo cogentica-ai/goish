@@ -39,6 +39,7 @@ use crate::types::{byte, int};
 /// key. Provides the capability to encrypt or decrypt individual
 /// blocks. Mode implementations (CBC, CTR, CFB, OFB, GCM) extend that
 /// capability to streams of blocks.
+#[goish::interface]
 pub trait Block {
     /// Returns the cipher's block size.
     fn BlockSize(&self) -> int;
@@ -69,6 +70,7 @@ pub trait Block {
 /// Multiple calls to `XORKeyStream` behave as if the concatenation of
 /// the `src` buffers was passed in a single run. The stream maintains
 /// state and does not reset at each call.
+#[goish::interface]
 pub trait Stream {
     fn XORKeyStream(&mut self, dst: &mut slice<byte>, src: slice<byte>);
 }
@@ -92,6 +94,7 @@ pub trait Stream {
 /// Multiple calls to `CryptBlocks` behave as if the concatenation of
 /// the `src` buffers was passed in a single run. The mode maintains
 /// state and does not reset at each call.
+#[goish::interface]
 pub trait BlockMode {
     fn BlockSize(&self) -> int;
     fn CryptBlocks(&mut self, dst: &mut slice<byte>, src: slice<byte>);
@@ -107,6 +110,7 @@ pub trait BlockMode {
 /// `cipher.AEAD` — a cipher mode providing authenticated encryption
 /// with associated data. See
 /// <https://en.wikipedia.org/wiki/Authenticated_encryption>.
+#[goish::interface]
 pub trait AEAD {
     /// Returns the size of the nonce that must be passed to `Seal`
     /// and `Open`.

@@ -58,6 +58,7 @@ use crate::unicode::utf8;
 //   }
 /// `expvar.Var` — abstract type for all exported variables.
 /// Implementations must return a *valid JSON value* from `String()`.
+#[goish::interface]
 pub trait Var: Send + Sync {
     fn String(&self) -> string;
 }

@@ -39,6 +39,7 @@ pub mod punycode;
 /// Implementations must be safe for concurrent use by multiple goroutines.
 /// An implementation that always returns "" is valid for testing but
 /// not secure (it lets foo.com set cookies for bar.com).
+#[goish::interface]
 pub trait PublicSuffixList: Send + Sync {
     /// Public suffix of `domain` (e.g. "co.uk" of "foo.co.uk").
     fn PublicSuffix(&self, domain: string) -> string;

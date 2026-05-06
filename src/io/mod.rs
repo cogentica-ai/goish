@@ -38,17 +38,20 @@ use crate::errors::{self, nil};
 
 /// Go's `io.Reader`. Read up to `len(p)` bytes into `p`; returns
 /// `(n, err)`. EOF is signaled by returning `io::EOF` as the error.
+#[goish::interface]
 pub trait Reader {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error);
 }
 
 /// Go's `io.Writer`. Write `len(p)` bytes from `p`. Returns `(n, err)`
 /// where `n < len(p)` requires a non-nil `err`.
+#[goish::interface]
 pub trait Writer {
     fn Write(&mut self, p: slice<byte>) -> (int, error);
 }
 
 /// Go's `io.Closer`.
+#[goish::interface]
 pub trait Closer {
     fn Close(&mut self) -> error;
 }
@@ -62,6 +65,7 @@ impl<T: Reader + Closer> ReadCloser for T {}
 
 /// Go's `io.Seeker` (io.go:126). Reposition the read/write head.
 /// Whence is one of `SeekStart`, `SeekCurrent`, `SeekEnd`.
+#[goish::interface]
 pub trait Seeker {
     fn Seek(&mut self, offset: i64, whence: int) -> (i64, error);
 }
@@ -73,17 +77,20 @@ pub const SeekEnd: int = 2;
 
 /// Go's `io.ReaderAt` (io.go:230). Random-access read at byte offset
 /// `off`. Implementations must not retain `p` across the call.
+#[goish::interface]
 pub trait ReaderAt {
     fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error);
 }
 
 /// Go's `io.WriterAt` (io.go:249). Random-access write at byte offset
 /// `off`. Implementations must not retain `p` across the call.
+#[goish::interface]
 pub trait WriterAt {
     fn WriteAt(&mut self, p: slice<byte>, off: i64) -> (int, error);
 }
 
 /// Go's `io.ByteReader` (io.go:262).
+#[goish::interface]
 pub trait ByteReader {
     fn ReadByte(&mut self) -> (byte, error);
 }
@@ -94,28 +101,33 @@ pub trait ByteScanner: ByteReader {
 }
 
 /// Go's `io.ByteWriter` (io.go:280).
+#[goish::interface]
 pub trait ByteWriter {
     fn WriteByte(&mut self, c: byte) -> error;
 }
 
 /// Go's `io.RuneReader` (io.go:289).
+#[goish::interface]
 pub trait RuneReader {
     fn ReadRune(&mut self) -> (crate::types::rune, int, error);
 }
 
 /// Go's `io.StringWriter` (io.go:307).
+#[goish::interface]
 pub trait StringWriter {
     fn WriteString(&mut self, s: crate::gostring::string) -> (int, error);
 }
 
 /// Go's `io.ReaderFrom` (io.go:189). Used by `Copy` for fast-path
 /// fan-in when the destination supports it.
+#[goish::interface]
 pub trait ReaderFrom {
     fn ReadFrom(&mut self, r: &mut dyn Reader) -> (i64, error);
 }
 
 /// Go's `io.WriterTo` (io.go:200). Used by `Copy` for fast-path
 /// fan-out when the source supports it.
+#[goish::interface]
 pub trait WriterTo {
     fn WriteTo(&mut self, w: &mut dyn Writer) -> (i64, error);
 }

@@ -395,10 +395,12 @@ impl<V: FromValue + Default + Clone> FromValue for map<string, V> {
 
 // ─── Marshaler / Unmarshaler traits ────────────────────────────────────
 
+#[goish::interface]
 pub trait Marshaler {
     fn MarshalJSON(&self) -> (slice<byte>, error);
 }
 
+#[goish::interface]
 pub trait Unmarshaler {
     fn UnmarshalJSON(&mut self, data: &[byte]) -> error;
 }

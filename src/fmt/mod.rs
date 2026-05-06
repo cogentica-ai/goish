@@ -74,6 +74,7 @@ pub trait State: crate::io::Writer {
 /// Goish's verb-formatting fast path checks for this trait via the
 /// reflect-aware `%v` printer; types that don't impl Formatter fall
 /// back to Stringer / Format / the default `%v` walker.
+#[goish::interface]
 pub trait Formatter {
     fn Format(&self, f: &mut dyn State, c: crate::types::rune);
 }

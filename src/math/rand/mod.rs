@@ -35,6 +35,7 @@ type int64 = i64;
 
 /// A Source represents a source of uniformly-distributed pseudo-random
 /// int64 values in the range `[0, 1<<63)`. Not safe for concurrent use.
+#[goish::interface]
 pub trait Source: Send + Sync {
     fn Int63(&mut self) -> int64;
     fn Seed(&mut self, seed: int64);

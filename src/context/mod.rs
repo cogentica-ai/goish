@@ -90,6 +90,7 @@ crate::var! {
 
 /// `context.Context` — carries deadline + cancellation signal.
 /// Mirrors `context.Context` (context.go:71).
+#[goish::interface]
 pub trait Context: Send + Sync {
     /// Deadline returns the time at which work should be cancelled,
     /// if a deadline is set. None = no deadline.

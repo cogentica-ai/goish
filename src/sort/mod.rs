@@ -38,6 +38,7 @@ use crate::types::{float64, int};
 /// `sort.Interface` (sort.go:17) — collection that can be sorted in
 /// place by `Sort` and friends. Implementors expose a length, a
 /// pairwise less-than predicate, and an index-pair swap.
+#[goish::interface]
 pub trait Interface {
     /// `Len()` — number of elements.
     fn Len(&self) -> int;

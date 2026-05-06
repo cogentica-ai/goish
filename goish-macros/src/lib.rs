@@ -1048,6 +1048,22 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let ref_name = format!("{}Ref", name);
     let vis = parsed.vis.as_deref().unwrap_or("");
 
+    // Compose the supertrait clause. We always require `Send + Sync`
+    // (every Goish iface flows across goroutines); pre-existing
+    // user supertraits (like `: io::Writer` for hash::Hash) are
+    // preserved by token-capturing them in parse_iface. Rust accepts
+    // duplicate trait bounds without warnings, so over-specifying is
+    // harmless if the user already wrote `: Send + Sync`.
+    let supertraits = if parsed.supertraits.is_empty() {
+        String::from(": ::core::marker::Send + ::core::marker::Sync")
+    } else {
+        // parsed.supertraits starts with the leading `:` token.
+        format!(
+            "{} + ::core::marker::Send + ::core::marker::Sync",
+            parsed.supertraits
+        )
+    };
+
     let mut out = String::new();
 
     // ── (1) Trait redeclaration with supertraits + hidden helper ───
@@ -1057,10 +1073,10 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // and the nil sentinel overrides to `true`.
     let _ = writeln!(
         out,
-        "{vis} trait {name}: ::core::marker::Send + ::core::marker::Sync {{"
+        "{vis} trait {name}{supertraits} {{"
     );
     for m in &parsed.methods {
-        let _ = writeln!(out, "    {}", m.sig_text);
+        let _ = writeln!(out, "    {}", m.full_text);
     }
     out.push_str("    #[doc(hidden)]\n");
     out.push_str("    fn __is_nil_iface(&self) -> bool { false }\n");
@@ -1075,13 +1091,10 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // ── (3) impl Trait for __NilT — every method panics ────────────
     let _ = writeln!(out, "impl {name} for {nil_name} {{");
     for m in &parsed.methods {
-        // Strip the trailing `;` and append `{ panic!(...) }`.
-        let body_part = m.sig_text.trim_end();
-        let stripped = body_part.strip_suffix(';').unwrap_or(body_part);
         let _ = writeln!(
             out,
             "    {} {{ panic!(\"goish: method call on nil {} interface\") }}",
-            stripped, name
+            m.sig_only.trim(), name
         );
     }
     out.push_str("    fn __is_nil_iface(&self) -> bool { true }\n");
@@ -1156,6 +1169,28 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     out.push_str("    #[inline] fn from(_: ::goish::Nil) -> Self { <Self as ::core::default::Default>::default() }\n");
     out.push_str("}\n\n");
 
+    // ── (7) Backwards-compat From<Nil> for Box<dyn T> ─────────────
+    //
+    // Pre-existing ports use `Box<dyn T + Send + Sync>` directly as
+    // the owned interface-value lowering (today's transpiler default).
+    // `nil.into()` returning a Box<dyn T> needs `From<Nil>`. Box<T>
+    // is `#[fundamental]`, so the orphan rule accepts the impl
+    // because `dyn LocalTrait` is the local type at uncovered
+    // position — the impl lands cleanly in the trait-defining crate.
+    //
+    // We do NOT emit the equivalent for `Arc<dyn T>` — Arc is not
+    // fundamental, the orphan rule rejects when the trait is foreign
+    // to the calling crate. Use the `<T>Ref` wrapper for Arc-shaped
+    // interface values (Default, Clone, From<Nil> are all there).
+    let _ = writeln!(out,
+        "impl ::core::convert::From<::goish::Nil> \
+         for ::alloc::boxed::Box<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
+    );
+    let _ = writeln!(out,
+        "    #[inline] fn from(_: ::goish::Nil) -> Self {{ ::alloc::boxed::Box::new({nil_name}) }}"
+    );
+    out.push_str("}\n\n");
+
     out.parse()
         .expect("goish::interface: emitted source failed to parse")
 }
@@ -1163,12 +1198,25 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
 struct ParsedIface {
     vis: Option<String>,
     name: String,
+    /// Verbatim text of any supertrait clause the user wrote (between
+    /// `trait Name` and the body brace), e.g. `: io::Writer` or `:
+    /// Send + Sync`. Empty when the user wrote no supertrait clause.
+    /// The macro always tacks on `+ Send + Sync` to whatever the user
+    /// wrote — Rust accepts duplicate trait bounds without diagnostic
+    /// warnings, so over-specifying is harmless.
+    supertraits: String,
     methods: Vec<IfaceMethod>,
 }
 
 struct IfaceMethod {
-    /// Verbatim signature text including the trailing `;`.
-    sig_text: String,
+    /// Verbatim text for trait redeclaration — may end in `;`
+    /// (signature-only) OR a brace group (default-bodied method,
+    /// for Goish-specific traits with optional methods like
+    /// `context::Context::Value`).
+    full_text: String,
+    /// Signature-only text WITHOUT the trailing `;` or default body.
+    /// Used to build the sentinel impl: `<sig_only> { panic!(…) }`.
+    sig_only: String,
 }
 
 fn parse_iface(item: TokenStream) -> ParsedIface {
@@ -1214,17 +1262,26 @@ fn parse_iface(item: TokenStream) -> ParsedIface {
         _ => {}
     }
 
-    // Brace-delimited body.
-    let body = match iter.next() {
-        Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => g,
-        other => panic!(
-            "#[goish::interface]: expected trait body `{{ ... }}`, got {:?}",
-            other
-        ),
+    // Capture the supertrait clause: every token between the trait
+    // name and the body brace group. Typically `: io::Writer + Send +
+    // Sync` or empty.
+    let mut supertraits = String::new();
+    let body = loop {
+        match iter.next() {
+            Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => break g,
+            Some(tt) => {
+                supertraits.push(' ');
+                supertraits.push_str(&tt.to_string());
+            }
+            None => panic!(
+                "#[goish::interface]: expected trait body `{{ ... }}` after supertraits"
+            ),
+        }
     };
+    let supertraits = supertraits.trim().to_string();
 
     let methods = parse_iface_methods(body.stream());
-    ParsedIface { vis, name, methods }
+    ParsedIface { vis, name, supertraits, methods }
 }
 
 fn parse_iface_methods(body: TokenStream) -> Vec<IfaceMethod> {
@@ -1237,17 +1294,25 @@ fn parse_iface_methods(body: TokenStream) -> Vec<IfaceMethod> {
             matches!(&tt, TokenTree::Group(g) if g.delimiter() == Delimiter::Brace);
 
         if is_terminator {
-            current.push(tt);
-            let sig: TokenStream = current.drain(..).collect();
-            methods.push(IfaceMethod { sig_text: sig.to_string() });
+            // Signature-only method: `fn name(...) -> ret;`
+            let sig_only: TokenStream = current.drain(..).collect();
+            let sig_only_text = sig_only.to_string();
+            // full_text = sig + `;`
+            let full_text = format!("{};", sig_only_text);
+            methods.push(IfaceMethod {
+                full_text,
+                sig_only: sig_only_text,
+            });
         } else if is_brace_body {
-            // Default-bodied method — refuse. Go interfaces don't
-            // have these; if a user wants one, they should declare
-            // a plain `pub trait` instead of using this attribute.
-            panic!(
-                "#[goish::interface]: default-method bodies are not supported \
-                 (Go interfaces don't have them); use a plain `pub trait` instead"
-            );
+            // Default-bodied method: `fn name(...) -> ret { body }`.
+            // sig_only excludes the brace body; full_text includes it.
+            let sig_only: TokenStream = current.drain(..).collect();
+            let sig_only_text = sig_only.to_string();
+            let full_text = format!("{} {}", sig_only_text, tt.to_string());
+            methods.push(IfaceMethod {
+                full_text,
+                sig_only: sig_only_text,
+            });
         } else {
             current.push(tt);
         }
