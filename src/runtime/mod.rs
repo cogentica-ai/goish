@@ -29,7 +29,9 @@ pub mod preempt;
 pub mod rand;
 pub mod rt_section;
 pub mod sched;
+pub mod segv;
 pub mod signal;
+pub mod symbolize;
 pub mod spin;
 pub mod sysmon;
 pub use debug::{NumCPU, NumGoroutine, GOMAXPROCS};
@@ -242,6 +244,22 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // Decision-only: counts would-be preempts but does not modify
     // ucontext yet. Phase C wires the asyncPreempt trampoline.
     preempt::install();
+
+    // Initialise the in-process DWARF symboliser. Mmaps
+    // `/proc/self/exe` and pre-builds (PC → fn_name) and
+    // (PC → file:line) lookup tables. Used by the SIGSEGV handler to
+    // emit Go-style symbolised backtraces. Heavy-ish at startup
+    // (parses .debug_line for every CU); skipped for `cargo build
+    // --release` once we strip DWARF.
+    symbolize::init();
+
+    // Install the SIGSEGV stack-overflow handler. Reads spawn-site
+    // info from the side table populated by `newproc_at` /
+    // `newproc_with_stack_at` and prints an actionable diagnostic
+    // when a goroutine overflows its stack. Genuine memory bugs that
+    // don't fall within a known stack region chain to the default
+    // handler so the user still gets a core dump.
+    segv::install();
 
     // Hand off to the user's main. The proc-macro #[goish::main]
     // generates a #[no_mangle] extern "C" fn __goish_main wrapping the

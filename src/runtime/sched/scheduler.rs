@@ -307,6 +307,17 @@ pub fn newproc(closure: Box<dyn FnOnce()>) {
     enqueue_runnable(g_ptr, false);
 }
 
+/// Spawn-site-tagged variant of [`newproc`]. Records `(file, line)`
+/// in the SIGSEGV side table so a stack-overflow diagnostic can name
+/// the spawning `go!()` call.
+pub fn newproc_at(file: &'static str, line: u32, closure: Box<dyn FnOnce()>) {
+    let g = Box::leak(Box::new(G::new(closure)));
+    let g_ptr = NonNull::from(&mut *g);
+    crate::runtime::segv::register(g_ptr.as_ptr(), file, line);
+    LIVE_G_COUNT.fetch_add(1, Ordering::AcqRel);
+    enqueue_runnable(g_ptr, false);
+}
+
 /// **`newproc_with_stack(size, closure)`** — spawn a goroutine with
 /// an explicit stack size (M26). Used by `go!(stack(N), closure)` when
 /// the caller knows the default 2 KiB stack is too small (deep
@@ -321,6 +332,20 @@ pub fn newproc(closure: Box<dyn FnOnce()>) {
 pub fn newproc_with_stack(size: usize, closure: Box<dyn FnOnce()>) {
     let g = Box::leak(Box::new(G::new_with_stack(size, closure)));
     let g_ptr = NonNull::from(&mut *g);
+    LIVE_G_COUNT.fetch_add(1, Ordering::AcqRel);
+    enqueue_runnable(g_ptr, false);
+}
+
+/// Spawn-site-tagged variant of [`newproc_with_stack`].
+pub fn newproc_with_stack_at(
+    size: usize,
+    file: &'static str,
+    line: u32,
+    closure: Box<dyn FnOnce()>,
+) {
+    let g = Box::leak(Box::new(G::new_with_stack(size, closure)));
+    let g_ptr = NonNull::from(&mut *g);
+    crate::runtime::segv::register(g_ptr.as_ptr(), file, line);
     LIVE_G_COUNT.fetch_add(1, Ordering::AcqRel);
     enqueue_runnable(g_ptr, false);
 }
@@ -875,6 +900,10 @@ extern "C" fn goexit0(g_ptr: *mut G) -> ! {
     dropg();
 
     let prev = LIVE_G_COUNT.fetch_sub(1, Ordering::AcqRel);
+
+    // Release the SIGSEGV side-table slot so the next goroutine
+    // that hashes here can claim it. Cheap (probe + 1 atomic store).
+    crate::runtime::segv::unregister(g_ptr);
 
     // Poison gobuf before the box drops the rest of the G — KASAN-
     // style beacon for any post-free dispatch via stale pointer.

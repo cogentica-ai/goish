@@ -15,4 +15,9 @@ rustflags = [
     "-C", "link-arg=-static",
     "-C", "link-arg=-Wl,--no-dynamic-linker",
     "-C", "relocation-model=static",
+    # Force-emit frame pointers so the SIGSEGV handler can walk the
+    # RBP chain to produce a backtrace. Cost is ~1 GPR (RBP reserved)
+    # and ~1-2% throughput in release; dev builds were already
+    # reserving RBP. Required by `runtime::segv::walk_frames`.
+    "-C", "force-frame-pointers=yes",
 ]

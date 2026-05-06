@@ -379,15 +379,19 @@ macro_rules! delete {
 macro_rules! go {
     // Back-compat: `go!(stack(N), || body)` — fixed N bytes, no grow.
     (stack($size:expr), $closure:expr) => {{
-        $crate::runtime::sched::newproc_with_stack(
+        $crate::runtime::sched::newproc_with_stack_at(
             $size,
+            file!(),
+            line!(),
             $crate::__macro_alloc::Box::new($closure),
         );
     }};
     // Positional sized form: `go!(N, || body)` — fixed N bytes, no grow.
     ($size:expr, $closure:expr) => {{
-        $crate::runtime::sched::newproc_with_stack(
+        $crate::runtime::sched::newproc_with_stack_at(
             $size,
+            file!(),
+            line!(),
             $crate::__macro_alloc::Box::new($closure),
         );
     }};
@@ -396,7 +400,9 @@ macro_rules! go {
     // runs low, then to tier-3 (1 MiB) if user calls maybe_grow_step
     // again from deeper recursion.
     ($closure:expr) => {{
-        $crate::runtime::sched::newproc(
+        $crate::runtime::sched::newproc_at(
+            file!(),
+            line!(),
             $crate::__macro_alloc::Box::new($closure),
         );
     }};
