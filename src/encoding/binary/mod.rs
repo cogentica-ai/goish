@@ -236,6 +236,43 @@ pub const MaxVarintLen32: crate::types::int = 5;
 /// `MaxVarintLen64` (varint.go:36) — max bytes for a varint-64.
 pub const MaxVarintLen64: crate::types::int = 10;
 
+/// `binary.PutUvarint(buf, x)` (varint.go:23) — encode `x` into `buf`
+/// in-place, returning the number of bytes written. Caller must ensure
+/// `buf` is large enough (`MaxVarintLen64` is the worst case for u64).
+/// Panics if `buf` is too small.
+///
+/// Takes `&mut slice<byte>` so the caller's buffer is mutated. Go's
+/// slice header carries a pointer to a shared backing array, so a
+/// by-value `[]byte` parameter still mutates the caller's data; goish's
+/// `slice<byte>` owns its `Vec<u8>` and a by-value parameter would
+/// only mutate a discarded copy.
+pub fn PutUvarint(
+    buf: &mut crate::goslice::slice<crate::types::byte>,
+    mut x: crate::types::uint,
+) -> crate::types::int {
+    let mut i: crate::types::int = 0;
+    while x >= 0x80 {
+        buf[i] = ((x as u8) | 0x80) as crate::types::byte;
+        x >>= 7;
+        i += 1;
+    }
+    buf[i] = (x as u8) as crate::types::byte;
+    i + 1
+}
+
+/// `binary.PutVarint(buf, x)` (varint.go:54) — zig-zag encode signed
+/// `x` into `buf` in-place. Returns the number of bytes written.
+pub fn PutVarint(
+    buf: &mut crate::goslice::slice<crate::types::byte>,
+    x: crate::types::int,
+) -> crate::types::int {
+    let mut ux = (x as u64).wrapping_shl(1);
+    if x < 0 {
+        ux = !ux;
+    }
+    PutUvarint(buf, ux as crate::types::uint)
+}
+
 /// `binary.AppendUvarint(buf, x)` (varint.go:41) — append the LEB128
 /// varint encoding of `x` to `buf`. Each byte holds 7 bits; MSB=1 in
 /// all but the last byte to mark continuation.
