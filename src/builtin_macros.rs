@@ -22,6 +22,39 @@
 // ─── slice!([]T{a, b, c}) — typed slice literal ───────────────────────
 
 /// `slice!([]T{a, b, c})` — typed slice literal. Mirrors Go's
+/// `import! { pkg_a, pkg_b, … }` — Go's `import _ "pkg/a"` side-effect
+/// import. Calls `pkg::init()` for each listed crate. The state
+/// machine inside each port's `#[goish::init]` deduplicates, so
+/// listing a crate twice (or having two crates that both depend on a
+/// third) is free.
+///
+/// Place at the top of `#[goish::main] fn main()`. `goish::init()`
+/// itself is auto-called by `#[goish::main]`'s prelude — no need to
+/// list it.
+///
+/// ```ignore
+/// #[goish::main]
+/// fn main() {
+///     goish::import! {
+///         opencontainers_go_digest,
+///         cenkalti_backoff_v5,
+///         fluxcd_pkg_version,
+///     }
+///     // ... user code ...
+/// }
+/// ```
+///
+/// Nested paths work too: `goish::import! { foo::bar }` calls
+/// `foo::bar::init()`. A trailing comma is accepted.
+#[macro_export]
+macro_rules! import {
+    ( $( $($pkg:ident)::+ ),* $(,)? ) => {
+        {
+            $( $($pkg)::* :: init(); )*
+        }
+    };
+}
+
 /// `[]T{a, b, c}` composite literal. Each element is `.into()`-converted,
 /// so `&str` widens to `string`, integer literals widen to typed ints, etc.
 ///

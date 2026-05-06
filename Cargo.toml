@@ -612,3 +612,7 @@ path = "examples/goarray_smoke.rs"
 [[example]]
 name = "gomap_no_zero_smoke"
 path = "examples/gomap_no_zero_smoke.rs"
+
+[[example]]
+name = "pkginit_smoke"
+path = "examples/pkginit_smoke.rs"

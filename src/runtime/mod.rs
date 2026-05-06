@@ -25,6 +25,7 @@ pub mod mheap;
 mod mem;
 pub mod netpoll;
 pub mod note;
+pub mod pkginit;
 pub mod preempt;
 pub mod rand;
 pub mod rt_section;

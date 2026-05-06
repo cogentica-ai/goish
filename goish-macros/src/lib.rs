@@ -57,6 +57,18 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
     //    The signature is built as raw text; the body is appended as the
     //    original TokenTree::Group so all literals (including non-ASCII)
     //    are preserved verbatim.
+    //
+    //    Go's `runtime.main` calls `doInit(runtime_inittasks)` and
+    //    walks per-module init lists BEFORE the user `main` body
+    //    (proc.go:202, :255-7). We do the equivalent by prepending
+    //    `::goish::init()` — the state machine inside makes the call
+    //    idempotent so any port whose own `init()` already invokes it
+    //    pays nothing on the second pass.
+    //
+    //    Port-specific init still needs an explicit call at the top
+    //    of the user's main body — Cargo dependency graphs aren't
+    //    available at proc-macro expansion time, and the goish runtime
+    //    has no linker-driven `firstmoduledata` walk equivalent.
     let prefix: TokenStream = r#"
         #[no_mangle]
         pub extern "C" fn __goish_main()
@@ -64,11 +76,123 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
     .parse()
     .expect("goish::main: invalid fn prefix");
 
-    let body_stream: TokenStream = TokenTree::Group(body).into();
+    // Splice `::goish::init();` as the first statement of the user
+    // body. We rebuild the brace group rather than doing string
+    // surgery so any non-ASCII tokens inside body stay untouched.
+    let init_call: TokenStream = r#"
+        { ::goish::init(); }
+    "#
+    .parse()
+    .expect("goish::main: invalid init prelude");
+
+    let body_with_init = {
+        let mut inner = init_call.into_iter().collect::<Vec<_>>();
+        // The single brace group emitted by `{ ::goish::init(); }`.
+        let prelude_stream = match inner.pop().expect("init prelude empty") {
+            TokenTree::Group(g) if g.delimiter() == Delimiter::Brace => g.stream(),
+            _ => panic!("goish::main: init prelude not a brace group"),
+        };
+        let mut combined = prelude_stream;
+        combined.extend(body.stream());
+        proc_macro::Group::new(Delimiter::Brace, combined)
+    };
+
+    let body_stream: TokenStream = TokenTree::Group(body_with_init).into();
 
     let mut out = asm;
     out.extend(prefix);
     out.extend(body_stream);
+    out
+}
+
+// ─── #[goish::init] — package-level init wrapper ─────────────────────
+//
+// Decorates a port's `fn init() { … }` to wrap the body in the
+// `PkgInit::run_once` state machine. Mirrors Go's per-package init
+// task — see `goish::runtime::pkginit`.
+//
+// User writes:
+//
+//   #[goish::init]
+//   fn init() {
+//       goish::init();           // bootstrap deps
+//       RegisterAlgorithm(…);    // package-level state setup
+//   }
+//
+// Expands to:
+//
+//   pub fn init() {
+//       static __PKG_INIT: ::goish::runtime::pkginit::PkgInit =
+//           ::goish::runtime::pkginit::PkgInit::new(env!("CARGO_PKG_NAME"));
+//       __PKG_INIT.run_once(|| { /* original body, verbatim */ });
+//   }
+//
+// `env!("CARGO_PKG_NAME")` is a `&'static str` literal at compile
+// time, which `PkgInit::new` (a `const fn`) accepts as a static
+// initializer. The static slot is private to the function — Rust's
+// fn-local-static feature gives it the lifetime of the binary while
+// keeping the name out of the public API surface.
+//
+// Token-level body splicing (rather than stringification) preserves
+// non-ASCII char literals and any other source detail, exactly like
+// `#[goish::main]` already does.
+#[proc_macro_attribute]
+pub fn init(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let mut tokens: Vec<TokenTree> = item.into_iter().collect();
+    let body = match tokens.pop() {
+        Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => g,
+        _ => panic!("#[goish::init] must be placed on `fn init() {{ ... }}`"),
+    };
+
+    // Discard the original signature tokens — we rebuild the prefix.
+    // We don't validate the discarded tokens: the proc-macro is
+    // documented as "place on `fn init() { … }`", and a malformed
+    // signature surfaces as a clear error from rustc on the rebuilt
+    // form.
+
+    // `.parse()` rejects unbalanced fragments — every level of
+    // delimiter must be opened and closed within the same string.
+    // Build the output bottom-up: closure body → closure expr →
+    // call's parenthesised arg → fn body braces → outer signature.
+
+    // Closure literal: `|| { user_body }`. The two pipes are
+    // separate Punct tokens; `body` is the user's brace Group.
+    use proc_macro::{Group, Punct, Spacing};
+    let mut closure_inner: TokenStream = TokenStream::new();
+    closure_inner.extend(core::iter::once(TokenTree::Punct(Punct::new('|', Spacing::Joint))));
+    closure_inner.extend(core::iter::once(TokenTree::Punct(Punct::new('|', Spacing::Alone))));
+    closure_inner.extend(core::iter::once(TokenTree::Group(body)));
+
+    // Wrap closure in `( … )` for the run_once call argument.
+    let arg_paren: TokenTree =
+        TokenTree::Group(Group::new(Delimiter::Parenthesis, closure_inner));
+
+    // Inner fn body prelude. Balanced — declares the static, then
+    // names the run_once method (we append the parenthesised arg
+    // and a trailing semicolon next).
+    let inner_prefix: TokenStream = r#"
+        static __PKG_INIT: ::goish::runtime::pkginit::PkgInit =
+            ::goish::runtime::pkginit::PkgInit::new(env!("CARGO_PKG_NAME"));
+        __PKG_INIT.run_once
+    "#
+    .parse()
+    .expect("goish::init: invalid inner prelude");
+
+    let semi: TokenStream = ";".parse().expect("goish::init: missing semi");
+
+    let mut inner: TokenStream = inner_prefix;
+    inner.extend(core::iter::once(arg_paren));
+    inner.extend(semi);
+
+    // Outer signature, then fn body Group(Brace, inner).
+    let outer_sig: TokenStream = "pub fn init()"
+        .parse()
+        .expect("goish::init: invalid outer signature");
+
+    let fn_body = TokenTree::Group(Group::new(Delimiter::Brace, inner));
+
+    let mut out = outer_sig;
+    out.extend(core::iter::once(fn_body));
     out
 }
 

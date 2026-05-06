@@ -124,6 +124,12 @@ pub use types::{byte, float32, float64, int, rune, uint, uintptr};
 
 // Re-export the entry-point attribute so users write `#[goish::main]`.
 pub use goish_macros::main;
+// Re-export the package-init attribute — port authors use
+// `#[goish::init] fn init() { … }` instead of the manual
+// `pkg_init_once!("crate", { … })` boilerplate. The attribute lives
+// in Rust's macro namespace; coexists with the `goish::init()`
+// bootstrap function (value namespace).
+pub use goish_macros::init;
 // Re-export the reflect attribute so users write `#[goish::reflect]`.
 // (The `goish::reflect` module path coexists — attributes and modules
 // occupy different namespaces, just like `goish::main` doesn't conflict.)
@@ -134,3 +140,37 @@ pub use goish_macros::reflect;
 // docs; users only see `goish::var!`.
 #[doc(hidden)]
 pub use goish_macros::var_emit_error_marker as __var_emit_error_marker;
+
+// ─── Goish package init — Go's `runtime.initTask` analogue ──────────
+//
+// Goish-stdlib bootstrap. Runs once on first call (idempotent), wires
+// up registries that Go's per-package `init()` functions would
+// populate at link time:
+//
+//   * `crypto::RegisterStandardHashes()` — SHA1/SHA224/SHA256/SHA384/
+//     SHA512/SHA512_224/SHA512_256/SHA3_*/MD5 are available to
+//     `crypto::HashNew(h)`.
+//
+// Ports that depend on goish-stdlib state should call `goish::init()`
+// at the top of their own `init()` body — the state machine
+// deduplicates, so calling it from many ports in one binary is free.
+//
+// Pattern in a port:
+// ```ignore
+// pub fn init() {
+//     goish::pkg_init_once!("my_port", {
+//         goish::init();  // bootstrap goish first
+//         // package-level registrations
+//     });
+// }
+// ```
+//
+// User binaries call each top-level port's `init()` once before any
+// other library work, mirroring Go's `import _ "..."` side-effect
+// imports — except listed at the start of `main` rather than at the
+// import line.
+pub fn init() {
+    pkg_init_once!("goish", {
+        crypto::RegisterStandardHashes();
+    });
+}

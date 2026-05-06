@@ -200,6 +200,31 @@ pub fn HashAvailable(h: Hash) -> bool {
     g[h as usize].is_some()
 }
 
+/// Register every hash algorithm shipped with goish's `crypto` tree so
+/// `crypto::HashNew(h)` resolves for the standard SHAs and MD5. Call
+/// once from a port's bootstrap path (or `#[goish::main]`) before the
+/// first lookup. Idempotent — re-registering replaces the existing
+/// constructor, which is harmless because every entry resolves to the
+/// same NewHash function.
+///
+/// Go side: each hash subpackage's `init()` calls
+/// `crypto.RegisterHash(crypto.SHA256, sha256.New)` etc. Goish has no
+/// per-package init driver, so the registration has to be explicit.
+pub fn RegisterStandardHashes() {
+    RegisterHash(MD5, crate::crypto::md5::NewHash);
+    RegisterHash(SHA1, crate::crypto::sha1::NewHash);
+    RegisterHash(SHA224, crate::crypto::sha256::NewHash224);
+    RegisterHash(SHA256, crate::crypto::sha256::NewHash);
+    RegisterHash(SHA384, crate::crypto::sha512::NewHash384);
+    RegisterHash(SHA512, crate::crypto::sha512::NewHash);
+    RegisterHash(SHA512_224, crate::crypto::sha512::NewHash512_224);
+    RegisterHash(SHA512_256, crate::crypto::sha512::NewHash512_256);
+    RegisterHash(SHA3_224, crate::crypto::sha3::NewHash224);
+    RegisterHash(SHA3_256, crate::crypto::sha3::NewHash256);
+    RegisterHash(SHA3_384, crate::crypto::sha3::NewHash384);
+    RegisterHash(SHA3_512, crate::crypto::sha3::NewHash512);
+}
+
 // ─── Signer / Decrypter trait surface (Go: crypto.go:152-240) ─────────
 
 /// `crypto.PublicKey` (crypto.go:152) — opaque public key. Concrete types
