@@ -452,11 +452,24 @@ macro_rules! new {
 //                                           (ZST + cached Arc, see
 //                                           goish-macros::var_emit_error_marker)
 //   pub MaxBuf: int = 4096;              → pub const MaxBuf: int = 4096;
+//   pub mut counter: uint32 = 0;         → static counter: atomic::Uint32
+//   pub mut pid: int = 0;                → static pid: atomic::Int64
+//   pub mut started: bool = false;       → static started: atomic::Bool
+//   pub LAZY: T = expr;                  → static LAZY: Lazy<T> (any T)
+//
+// Mut vs Lazy decision: the `mut` keyword in front of the name marks
+// this as a write-after-init binding. Goishc emits `mut` when the
+// effects pass records EffReassign / EffElemWrite / EffPassedAsMutPtr
+// on the package-level binding. For primitive int / bool types,
+// `mut` routes through the atomic module — read sites use `.Load()`,
+// write sites `.Store()`, RMW sites `.Add()` / `.Xor()` / etc.
 //
 // Use sites:
 //   errors::Is(err, EOF)        // bare-symbol target
 //   if err == EOF { ... }       // bare PartialEq
 //   let e: error = EOF.into();  // From<Marker> for error
+//   counter.Add(1)              // atomic RMW
+//   counter.Load()              // atomic read
 //
 // See DISCUSSION_VAR.md for the doctrine choice and trade-offs.
 
@@ -493,6 +506,128 @@ macro_rules! __var_munch {
     ) => {
         $(#[$attr])*
         $crate::__var_emit_error_marker!( $vis $name { $($expr)* } );
+        $crate::__var_munch!( $($rest)* );
+    };
+
+    // ── mut primitive — atomic-backed package-level binding ────────
+    //
+    // The transpiler emits `pub mut` when the effects pass records a
+    // write to a package-level binding (EffReassign / EffElemWrite /
+    // …). Routing through atomic::* gives Go-faithful semantics
+    // (sequentially consistent across goroutines) and matches Go's
+    // own runtime treatment of int-typed package vars under
+    // -race-bounded analysis.
+    //
+    // Initial value must be a const-expression; runtime-init values
+    // (e.g. `os.Getpid()`) are written by `#[goish::init] fn init()`
+    // via `<name>.Store(rt_value)` after the static is constructed.
+    (
+        $(#[$attr:meta])*
+        $vis:vis mut $name:ident : int32 = $init:expr ;
+        $($rest:tt)*
+    ) => {
+        $(#[$attr])*
+        #[allow(non_upper_case_globals)]
+        $vis static $name: $crate::sync::atomic::Int32 =
+            $crate::sync::atomic::Int32::new($init);
+        $crate::__var_munch!( $($rest)* );
+    };
+    (
+        $(#[$attr:meta])*
+        $vis:vis mut $name:ident : int64 = $init:expr ;
+        $($rest:tt)*
+    ) => {
+        $(#[$attr])*
+        #[allow(non_upper_case_globals)]
+        $vis static $name: $crate::sync::atomic::Int64 =
+            $crate::sync::atomic::Int64::new($init);
+        $crate::__var_munch!( $($rest)* );
+    };
+    (
+        $(#[$attr:meta])*
+        $vis:vis mut $name:ident : int = $init:expr ;
+        $($rest:tt)*
+    ) => {
+        // `int` is i64 in goish (see types.rs).
+        $(#[$attr])*
+        #[allow(non_upper_case_globals)]
+        $vis static $name: $crate::sync::atomic::Int64 =
+            $crate::sync::atomic::Int64::new($init);
+        $crate::__var_munch!( $($rest)* );
+    };
+    (
+        $(#[$attr:meta])*
+        $vis:vis mut $name:ident : uint32 = $init:expr ;
+        $($rest:tt)*
+    ) => {
+        $(#[$attr])*
+        #[allow(non_upper_case_globals)]
+        $vis static $name: $crate::sync::atomic::Uint32 =
+            $crate::sync::atomic::Uint32::new($init);
+        $crate::__var_munch!( $($rest)* );
+    };
+    (
+        $(#[$attr:meta])*
+        $vis:vis mut $name:ident : uint64 = $init:expr ;
+        $($rest:tt)*
+    ) => {
+        $(#[$attr])*
+        #[allow(non_upper_case_globals)]
+        $vis static $name: $crate::sync::atomic::Uint64 =
+            $crate::sync::atomic::Uint64::new($init);
+        $crate::__var_munch!( $($rest)* );
+    };
+    (
+        $(#[$attr:meta])*
+        $vis:vis mut $name:ident : uint = $init:expr ;
+        $($rest:tt)*
+    ) => {
+        // `uint` is u64 in goish (see types.rs).
+        $(#[$attr])*
+        #[allow(non_upper_case_globals)]
+        $vis static $name: $crate::sync::atomic::Uint64 =
+            $crate::sync::atomic::Uint64::new($init);
+        $crate::__var_munch!( $($rest)* );
+    };
+    (
+        $(#[$attr:meta])*
+        $vis:vis mut $name:ident : uintptr = $init:expr ;
+        $($rest:tt)*
+    ) => {
+        $(#[$attr])*
+        #[allow(non_upper_case_globals)]
+        $vis static $name: $crate::sync::atomic::Uintptr =
+            $crate::sync::atomic::Uintptr::new($init);
+        $crate::__var_munch!( $($rest)* );
+    };
+    (
+        $(#[$attr:meta])*
+        $vis:vis mut $name:ident : bool = $init:expr ;
+        $($rest:tt)*
+    ) => {
+        $(#[$attr])*
+        #[allow(non_upper_case_globals)]
+        $vis static $name: $crate::sync::atomic::Bool =
+            $crate::sync::atomic::Bool::new($init);
+        $crate::__var_munch!( $($rest)* );
+    };
+
+    // ── lazy general — non-const RHS, immutable post-init ──────────
+    //
+    // The `lazy` keyword forces the goish::lazy::Lazy<T> shape even
+    // when T would otherwise route to `pub const`. Used by the
+    // transpiler for any package-level var whose RHS isn't a const
+    // expression — `make()`, function calls, struct literals with
+    // runtime fields, …
+    (
+        $(#[$attr:meta])*
+        $vis:vis lazy $name:ident : $ty:ty = $init:expr ;
+        $($rest:tt)*
+    ) => {
+        $(#[$attr])*
+        #[allow(non_upper_case_globals)]
+        $vis static $name: $crate::lazy::Lazy<$ty> =
+            $crate::lazy::Lazy::new(|| $init);
         $crate::__var_munch!( $($rest)* );
     };
 

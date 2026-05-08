@@ -67,6 +67,11 @@ impl Int32 {
     pub fn Or(&self, mask: i32) -> i32 {
         self.0.fetch_or(mask, ORD)
     }
+    /// `Xor(mask)` — atomic XOR. Mirrors Go's `(*Int32).Xor`
+    /// (type.go:99 in Go 1.23+). Returns the previous value.
+    pub fn Xor(&self, mask: i32) -> i32 {
+        self.0.fetch_xor(mask, ORD)
+    }
 }
 
 // ─── Int64 ────────────────────────────────────────────────────────
@@ -99,6 +104,11 @@ impl Int64 {
     }
     pub fn Or(&self, mask: i64) -> i64 {
         self.0.fetch_or(mask, ORD)
+    }
+    /// `Xor(mask)` — atomic XOR. Mirrors Go's `(*Int64).Xor`
+    /// (type.go:131 in Go 1.23+). Returns the previous value.
+    pub fn Xor(&self, mask: i64) -> i64 {
+        self.0.fetch_xor(mask, ORD)
     }
 }
 
@@ -133,6 +143,11 @@ impl Uint32 {
     pub fn Or(&self, mask: u32) -> u32 {
         self.0.fetch_or(mask, ORD)
     }
+    /// `Xor(mask)` — atomic XOR. Mirrors Go's `(*Uint32).Xor`
+    /// (type.go:165 in Go 1.23+). Returns the previous value.
+    pub fn Xor(&self, mask: u32) -> u32 {
+        self.0.fetch_xor(mask, ORD)
+    }
 }
 
 // ─── Uint64 ───────────────────────────────────────────────────────
@@ -165,6 +180,11 @@ impl Uint64 {
     }
     pub fn Or(&self, mask: u64) -> u64 {
         self.0.fetch_or(mask, ORD)
+    }
+    /// `Xor(mask)` — atomic XOR. Mirrors Go's `(*Uint64).Xor`
+    /// (type.go:198 in Go 1.23+). Returns the previous value.
+    pub fn Xor(&self, mask: u64) -> u64 {
+        self.0.fetch_xor(mask, ORD)
     }
 }
 
@@ -213,6 +233,11 @@ impl Uintptr {
     // Go: type.go:235 — func (x *Uintptr) Or(mask) (old uintptr)
     pub fn Or(&self, mask: usize) -> usize {
         self.0.fetch_or(mask, ORD)
+    }
+    /// `Xor(mask)` — atomic XOR. Mirrors Go's `(*Uintptr).Xor`
+    /// (Go 1.23+). Returns the previous value.
+    pub fn Xor(&self, mask: usize) -> usize {
+        self.0.fetch_xor(mask, ORD)
     }
 }
 
@@ -531,4 +556,52 @@ pub fn CompareAndSwapUint32(addr: &Uint32, old: u32, new: u32) -> bool {
 #[inline]
 pub fn CompareAndSwapUint64(addr: &Uint64, old: u64, new: u64) -> bool {
     addr.CompareAndSwap(old, new)
+}
+#[inline]
+pub fn AndInt32(addr: &Int32, mask: i32) -> i32 {
+    addr.And(mask)
+}
+#[inline]
+pub fn AndInt64(addr: &Int64, mask: i64) -> i64 {
+    addr.And(mask)
+}
+#[inline]
+pub fn AndUint32(addr: &Uint32, mask: u32) -> u32 {
+    addr.And(mask)
+}
+#[inline]
+pub fn AndUint64(addr: &Uint64, mask: u64) -> u64 {
+    addr.And(mask)
+}
+#[inline]
+pub fn OrInt32(addr: &Int32, mask: i32) -> i32 {
+    addr.Or(mask)
+}
+#[inline]
+pub fn OrInt64(addr: &Int64, mask: i64) -> i64 {
+    addr.Or(mask)
+}
+#[inline]
+pub fn OrUint32(addr: &Uint32, mask: u32) -> u32 {
+    addr.Or(mask)
+}
+#[inline]
+pub fn OrUint64(addr: &Uint64, mask: u64) -> u64 {
+    addr.Or(mask)
+}
+#[inline]
+pub fn XorInt32(addr: &Int32, mask: i32) -> i32 {
+    addr.Xor(mask)
+}
+#[inline]
+pub fn XorInt64(addr: &Int64, mask: i64) -> i64 {
+    addr.Xor(mask)
+}
+#[inline]
+pub fn XorUint32(addr: &Uint32, mask: u32) -> u32 {
+    addr.Xor(mask)
+}
+#[inline]
+pub fn XorUint64(addr: &Uint64, mask: u64) -> u64 {
+    addr.Xor(mask)
 }
