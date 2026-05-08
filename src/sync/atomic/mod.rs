@@ -437,3 +437,98 @@ impl<T: Send + Sync + 'static> Default for Pointer<T> {
         Self::new()
     }
 }
+
+// ─── Free-function variants (legacy Go pre-1.19 API) ──────────────────
+//
+// Go's `sync/atomic` package historically exposed `AddInt32`,
+// `LoadUint32`, etc. as free functions taking `*T`. The Go 1.19+
+// `atomic.Int32` struct API is the recommended form, but a lot of
+// existing code (and ports — rs/xid is one) still uses the free-fn
+// shape. Goish accepts both: the free fns delegate to the typed
+// struct's method via a `&Uint32`/`&Int32`/… handle. Callers pass
+// the same `&counter` they'd pass in Go.
+
+#[inline]
+pub fn AddInt32(addr: &Int32, delta: i32) -> i32 {
+    addr.Add(delta)
+}
+#[inline]
+pub fn AddInt64(addr: &Int64, delta: i64) -> i64 {
+    addr.Add(delta)
+}
+#[inline]
+pub fn AddUint32(addr: &Uint32, delta: u32) -> u32 {
+    addr.Add(delta)
+}
+#[inline]
+pub fn AddUint64(addr: &Uint64, delta: u64) -> u64 {
+    addr.Add(delta)
+}
+#[inline]
+pub fn AddUintptr(addr: &Uintptr, delta: usize) -> usize {
+    addr.Add(delta)
+}
+#[inline]
+pub fn LoadInt32(addr: &Int32) -> i32 {
+    addr.Load()
+}
+#[inline]
+pub fn LoadInt64(addr: &Int64) -> i64 {
+    addr.Load()
+}
+#[inline]
+pub fn LoadUint32(addr: &Uint32) -> u32 {
+    addr.Load()
+}
+#[inline]
+pub fn LoadUint64(addr: &Uint64) -> u64 {
+    addr.Load()
+}
+#[inline]
+pub fn StoreInt32(addr: &Int32, v: i32) {
+    addr.Store(v)
+}
+#[inline]
+pub fn StoreInt64(addr: &Int64, v: i64) {
+    addr.Store(v)
+}
+#[inline]
+pub fn StoreUint32(addr: &Uint32, v: u32) {
+    addr.Store(v)
+}
+#[inline]
+pub fn StoreUint64(addr: &Uint64, v: u64) {
+    addr.Store(v)
+}
+#[inline]
+pub fn SwapInt32(addr: &Int32, new: i32) -> i32 {
+    addr.Swap(new)
+}
+#[inline]
+pub fn SwapInt64(addr: &Int64, new: i64) -> i64 {
+    addr.Swap(new)
+}
+#[inline]
+pub fn SwapUint32(addr: &Uint32, new: u32) -> u32 {
+    addr.Swap(new)
+}
+#[inline]
+pub fn SwapUint64(addr: &Uint64, new: u64) -> u64 {
+    addr.Swap(new)
+}
+#[inline]
+pub fn CompareAndSwapInt32(addr: &Int32, old: i32, new: i32) -> bool {
+    addr.CompareAndSwap(old, new)
+}
+#[inline]
+pub fn CompareAndSwapInt64(addr: &Int64, old: i64, new: i64) -> bool {
+    addr.CompareAndSwap(old, new)
+}
+#[inline]
+pub fn CompareAndSwapUint32(addr: &Uint32, old: u32, new: u32) -> bool {
+    addr.CompareAndSwap(old, new)
+}
+#[inline]
+pub fn CompareAndSwapUint64(addr: &Uint64, old: u64, new: u64) -> bool {
+    addr.CompareAndSwap(old, new)
+}

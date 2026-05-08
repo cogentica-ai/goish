@@ -218,6 +218,33 @@ fn block(dig: &mut Digest, mut p: &[byte]) {
     dig.h[7] = h7;
 }
 
+// ─── Inherent Digest methods — Go-faithful surface ────────────────────
+//
+// Mirrors `(*Digest).Write` / `Sum` / `Reset` / `Size` / `BlockSize`
+// from Go's `hash` package. The same signatures are exposed via the
+// `io::Writer` and `Hash` trait impls below; the inherent forms let
+// callers reach for `d.Write(p)` / `d.Sum(b)` without bringing the
+// traits into scope. Goish's call-as-Go convention expects this:
+// transpiled code reads `hw.Write(bytes(hid))` and `hw.Sum(nil)`
+// without an extra `use io::Writer; use hash::Hash;` import the
+// caller never wrote in Go.
+
+impl Digest {
+    /// `(*Digest).Write(p)` — feed bytes into the running digest.
+    /// Inherent forwarder to the `io::Writer` trait method.
+    pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        <Self as io::Writer>::Write(self, p)
+    }
+
+    /// `(*Digest).Sum(b)` — append the digest to `b` and return.
+    /// Inherent forwarder to the `Hash::Sum` trait method. Accepts
+    /// `impl Into<slice<byte>>` so callers can pass `nil` directly
+    /// (Goish's `From<Nil> for slice<T>` resolves to an empty slice).
+    pub fn Sum<B: Into<slice<byte>>>(&self, b: B) -> slice<byte> {
+        <Self as Hash>::Sum(self, b.into())
+    }
+}
+
 // ─── Hash trait impls for Digest ──────────────────────────────────────
 
 impl io::Writer for Digest {

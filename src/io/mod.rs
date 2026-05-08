@@ -887,3 +887,30 @@ pub use pipe::{ErrClosedPipe, Pipe, PipeReader, PipeWriter};
 // ─── io/fs subpackage (slim — FileMode, ValidPath, PathError) ──────
 
 pub mod fs;
+
+// ─── io/ioutil — Go 1.16-deprecated forwarders ────────────────────────
+//
+// `io/ioutil` was split into `io` and `os` in Go 1.16, but a long
+// tail of code (rs/xid, hashicorp libs, K8s client deps) still spells
+// `ioutil.ReadFile`, `ioutil.WriteFile`, etc. The module here is a
+// compatibility shim — every entry is a thin forwarder to the
+// post-split home.
+pub mod ioutil {
+    use super::*;
+
+    /// `ioutil.ReadFile(name)` — see `os::ReadFile`.
+    #[inline]
+    pub fn ReadFile<N: Into<crate::string>>(name: N) -> (slice<byte>, error) {
+        crate::os::ReadFile(name)
+    }
+
+    /// `ioutil.WriteFile(name, data, perm)` — see `os::WriteFile`.
+    #[inline]
+    pub fn WriteFile<N: Into<crate::string>>(
+        name: N,
+        data: slice<byte>,
+        perm: u32,
+    ) -> error {
+        crate::os::WriteFile(name, data, perm)
+    }
+}

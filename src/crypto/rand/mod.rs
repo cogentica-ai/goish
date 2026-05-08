@@ -6,10 +6,6 @@
 //     // Go: var Reader io.Reader = ...
 //     // Go: func Read(b []byte) (n int, err error)
 //
-// goish exposes only the free Read function — no Reader interface
-// instance — because the per-call signature is what most callers
-// (boundary generation, token generation) reach for.
-//
 // Reference: src/crypto/rand/rand.go (Go 1.25).
 
 #![allow(non_snake_case)]
@@ -20,6 +16,39 @@ use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::string;
 use crate::types::{byte, int};
+
+// ─── rand.Reader — package-global io.Reader instance ──────────────────
+//
+// Go: `var Reader io.Reader = &reader{}` — package-global handle that
+// callers pass to `io.ReadFull(rand.Reader, buf)` and friends.
+//
+// Goish: a unit struct whose `.Read(buf)` matches the io::Reader trait
+// signature. The free `rand::Read(b)` function is the underlying
+// implementation; the trait method delegates. Exposed both as the
+// `Reader` static (Go-faithful call site `rand::Reader.Read(b)`) and
+// as the `RandReader` type for explicit-typed slots.
+
+/// `crypto/rand.Reader` instance. Reading from it draws bytes from
+/// the kernel CSPRNG (same source as `rand::Read`).
+pub struct RandReader;
+
+impl RandReader {
+    /// `Reader.Read(b)` — fills `b` with random bytes. Mirrors
+    /// `io.Reader::Read` for direct call-syntax use.
+    pub fn Read(&self, mut b: slice<byte>) -> (int, error) {
+        Read(&mut b)
+    }
+}
+
+impl crate::io::Reader for RandReader {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        Read(p)
+    }
+}
+
+/// Package-level `Reader` handle — Go's `rand.Reader`.
+#[allow(non_upper_case_globals)]
+pub const Reader: RandReader = RandReader;
 
 /// `crypto/rand.Read(b)` — fill `b` with random bytes from the kernel
 /// CSPRNG. Returns `(len(b), nil)` on success; on failure (the kernel

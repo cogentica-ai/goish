@@ -82,6 +82,34 @@ impl<T: Clone> slice<T> {
             inner: self.inner[lo..hi].to_vec(),
         }
     }
+
+    /// `xs[low:high:max]` — Go's three-index ("full") slice expression.
+    /// Length is `high - low`; capacity is `max - low`. Bounds checked
+    /// against `0 <= low <= high <= max <= cap(xs)` (panic on violation,
+    /// matching Go's runtime panic).
+    ///
+    /// **v1 deviation**: same as `slice()` — returns an independent copy
+    /// rather than a view. The `max` parameter is honored as the
+    /// allocated capacity of the new backing Vec, so subsequent
+    /// `append` against the result reallocates at the same boundary
+    /// Go would.
+    pub fn slice3(&self, low: int, high: int, max: int) -> Self {
+        let lo = low as usize;
+        let hi = high as usize;
+        let mx = max as usize;
+        if !(lo <= hi && hi <= mx && mx <= self.inner.capacity()) {
+            panic!(
+                "slice bounds out of range [{}:{}:{}] with capacity {}",
+                lo,
+                hi,
+                mx,
+                self.inner.capacity()
+            );
+        }
+        let mut v: Vec<T> = Vec::with_capacity(mx - lo);
+        v.extend_from_slice(&self.inner[lo..hi]);
+        Self { inner: v }
+    }
 }
 
 impl<T> Default for slice<T> {
@@ -214,5 +242,17 @@ impl<T> AsRef<[T]> for slice<T> {
     #[inline]
     fn as_ref(&self) -> &[T] {
         &self.inner
+    }
+}
+
+// `AsMut<[T]>` is the by-value mirror used by stdlib write methods
+// (binary::BigEndian::PutUint32 et al) that take `impl AsMut<[u8]>`
+// so callers can pass `slice<byte>` directly. Mutation flows into
+// the slice's owned `Vec<T>` — caller must hold a `&mut` to the
+// slice for the AsMut bound to fire.
+impl<T> AsMut<[T]> for slice<T> {
+    #[inline]
+    fn as_mut(&mut self) -> &mut [T] {
+        &mut self.inner
     }
 }

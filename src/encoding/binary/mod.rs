@@ -40,13 +40,17 @@ pub struct LittleEndian;
 
 impl BigEndian {
     /// Read a uint16 from `b[0..2]`. Panics on slice too short.
-    pub fn Uint16(self, b: &[u8]) -> u16 {
+    /// Accepts anything `impl AsRef<[u8]>` — `&[u8]`, `[u8; N]`,
+    /// `slice<byte>`, `array<byte, N>` all flow in directly.
+    pub fn Uint16<B: AsRef<[u8]>>(self, b: B) -> u16 {
+        let b = b.as_ref();
         assert!(b.len() >= 2, "binary: slice too short for uint16");
         ((b[0] as u16) << 8) | (b[1] as u16)
     }
 
     /// Read a uint32 from `b[0..4]`.
-    pub fn Uint32(self, b: &[u8]) -> u32 {
+    pub fn Uint32<B: AsRef<[u8]>>(self, b: B) -> u32 {
+        let b = b.as_ref();
         assert!(b.len() >= 4, "binary: slice too short for uint32");
         ((b[0] as u32) << 24)
             | ((b[1] as u32) << 16)
@@ -55,7 +59,8 @@ impl BigEndian {
     }
 
     /// Read a uint64 from `b[0..8]`.
-    pub fn Uint64(self, b: &[u8]) -> u64 {
+    pub fn Uint64<B: AsRef<[u8]>>(self, b: B) -> u64 {
+        let b = b.as_ref();
         assert!(b.len() >= 8, "binary: slice too short for uint64");
         ((b[0] as u64) << 56)
             | ((b[1] as u64) << 48)
@@ -67,15 +72,19 @@ impl BigEndian {
             | (b[7] as u64)
     }
 
-    /// Write `v` as 2 bytes into `b[0..2]`.
-    pub fn PutUint16(self, b: &mut [u8], v: u16) {
+    /// Write `v` as 2 bytes into `b[0..2]`. Takes `impl AsMut<[u8]>`
+    /// so callers can pass `slice<byte>`, `array<byte, N>` (via
+    /// DerefMut), or a raw `&mut [u8]`.
+    pub fn PutUint16<B: AsMut<[u8]>>(self, mut b: B, v: u16) {
+        let b = b.as_mut();
         assert!(b.len() >= 2, "binary: slice too short for uint16");
         b[0] = (v >> 8) as u8;
         b[1] = v as u8;
     }
 
     /// Write `v` as 4 bytes into `b[0..4]`.
-    pub fn PutUint32(self, b: &mut [u8], v: u32) {
+    pub fn PutUint32<B: AsMut<[u8]>>(self, mut b: B, v: u32) {
+        let b = b.as_mut();
         assert!(b.len() >= 4, "binary: slice too short for uint32");
         b[0] = (v >> 24) as u8;
         b[1] = (v >> 16) as u8;
@@ -84,7 +93,8 @@ impl BigEndian {
     }
 
     /// Write `v` as 8 bytes into `b[0..8]`.
-    pub fn PutUint64(self, b: &mut [u8], v: u64) {
+    pub fn PutUint64<B: AsMut<[u8]>>(self, mut b: B, v: u64) {
+        let b = b.as_mut();
         assert!(b.len() >= 8, "binary: slice too short for uint64");
         b[0] = (v >> 56) as u8;
         b[1] = (v >> 48) as u8;
@@ -139,12 +149,14 @@ impl BigEndian {
 // ─── LittleEndian ────────────────────────────────────────────────
 
 impl LittleEndian {
-    pub fn Uint16(self, b: &[u8]) -> u16 {
+    pub fn Uint16<B: AsRef<[u8]>>(self, b: B) -> u16 {
+        let b = b.as_ref();
         assert!(b.len() >= 2, "binary: slice too short for uint16");
         (b[0] as u16) | ((b[1] as u16) << 8)
     }
 
-    pub fn Uint32(self, b: &[u8]) -> u32 {
+    pub fn Uint32<B: AsRef<[u8]>>(self, b: B) -> u32 {
+        let b = b.as_ref();
         assert!(b.len() >= 4, "binary: slice too short for uint32");
         (b[0] as u32)
             | ((b[1] as u32) << 8)
@@ -152,7 +164,8 @@ impl LittleEndian {
             | ((b[3] as u32) << 24)
     }
 
-    pub fn Uint64(self, b: &[u8]) -> u64 {
+    pub fn Uint64<B: AsRef<[u8]>>(self, b: B) -> u64 {
+        let b = b.as_ref();
         assert!(b.len() >= 8, "binary: slice too short for uint64");
         (b[0] as u64)
             | ((b[1] as u64) << 8)
@@ -164,13 +177,15 @@ impl LittleEndian {
             | ((b[7] as u64) << 56)
     }
 
-    pub fn PutUint16(self, b: &mut [u8], v: u16) {
+    pub fn PutUint16<B: AsMut<[u8]>>(self, mut b: B, v: u16) {
+        let b = b.as_mut();
         assert!(b.len() >= 2, "binary: slice too short for uint16");
         b[0] = v as u8;
         b[1] = (v >> 8) as u8;
     }
 
-    pub fn PutUint32(self, b: &mut [u8], v: u32) {
+    pub fn PutUint32<B: AsMut<[u8]>>(self, mut b: B, v: u32) {
+        let b = b.as_mut();
         assert!(b.len() >= 4, "binary: slice too short for uint32");
         b[0] = v as u8;
         b[1] = (v >> 8) as u8;
@@ -178,7 +193,8 @@ impl LittleEndian {
         b[3] = (v >> 24) as u8;
     }
 
-    pub fn PutUint64(self, b: &mut [u8], v: u64) {
+    pub fn PutUint64<B: AsMut<[u8]>>(self, mut b: B, v: u64) {
+        let b = b.as_mut();
         assert!(b.len() >= 8, "binary: slice too short for uint64");
         b[0] = v as u8;
         b[1] = (v >> 8) as u8;

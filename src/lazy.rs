@@ -130,3 +130,29 @@ where
         crate::range::RangeIter::range(s.get())
     }
 }
+
+// `LAZY == val` and `val == LAZY` — Go's pattern of declaring a
+// zero-value sentinel `var nilID ID` and comparing other values to
+// it. Without these forwarders the comparison hits `Lazy<T>` and
+// fails at the trait layer; ports would have to write `*LAZY == val`
+// at every site. Symmetric impls cover both operand orderings.
+
+impl<T: 'static + PartialEq> PartialEq<T> for Lazy<T> {
+    fn eq(&self, other: &T) -> bool {
+        let s: &'static Self = unsafe { core::mem::transmute(self) };
+        s.get() == other
+    }
+}
+
+impl<T: 'static + PartialEq> PartialEq<&T> for Lazy<T> {
+    fn eq(&self, other: &&T) -> bool {
+        let s: &'static Self = unsafe { core::mem::transmute(self) };
+        s.get() == *other
+    }
+}
+
+// Symmetric `T == Lazy<T>` and `&T == Lazy<T>` aren't representable
+// here — they'd impl `PartialEq` for foreign type `T` / `&T`, which
+// the orphan rule rejects. Callers writing `id == NIL_LAZY` must
+// flip to `NIL_LAZY == id`; the transpiler does this automatically
+// when one side is a registered Lazy static.
