@@ -1560,6 +1560,21 @@ impl Reflect for string {
     }
 }
 
+// `error` lowers as an interface type for reflection purposes — its
+// dynamic shape is whatever concrete error implementer holds the Arc.
+// Mirrors Go's `reflect.TypeOf(err)` returning the interface descriptor
+// (or the dynamic type if non-nil).
+impl Reflect for crate::errors::error {
+    #[inline]
+    fn __reflect_type() -> Type {
+        Type::__new(Kind::Interface, "error", &[])
+    }
+    #[inline]
+    fn __reflect_value(&self) -> Value {
+        Value::String(crate::gostring::string::from_static("error"))
+    }
+}
+
 // `interface{}` reflection — Go's `var x any = …` carries the dynamic
 // type that reflect.ValueOf reads at runtime. Goish models `any` as
 // `Arc<dyn core::any::Any + Send + Sync>`. `__reflect_type()` is
