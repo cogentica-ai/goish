@@ -32,21 +32,28 @@ impl Counter {
 
 #[goish::main]
 fn main() {
-    // 1. new!(Counter) — non-nil nilable<Counter>; methods auto-deref.
+    // 1. new!(Counter) — non-nil nilable<Counter>. Method access goes
+    //    through Must / MustMut narrowing (no auto-deref).
     let mut p = new!(Counter);
-    check(p.Get() == 0, b"new: Counter not zero\n");
-    p.Increment();
-    p.Increment();
-    p.Increment();
-    check(p.Get() == 3, b"new: Counter increments wrong\n");
+    {
+        let p = p.Must();
+        check(p.Get() == 0, b"new: Counter not zero\n");
+    }
+    {
+        let p = p.MustMut();
+        p.Increment();
+        p.Increment();
+        p.Increment();
+        check(p.Get() == 3, b"new: Counter increments wrong\n");
+    }
 
-    // 2. new!(int) — nilable<int> with zero inside; deref reads zero.
+    // 2. new!(int) — nilable<int> with zero inside.
     let n = new!(int);
-    check(*n == 0, b"new: int not zero\n");
+    check(*n.Must() == 0, b"new: int not zero\n");
 
     // 3. new!(string) — nilable<string> wrapping empty.
     let s = new!(string);
-    check(s.Len() == 0, b"new: string not empty\n");
+    check(s.Must().Len() == 0, b"new: string not empty\n");
 
     fmt::Println!("new: ok");
 }

@@ -50,6 +50,8 @@ fn main() {
             Println!("[ 3] open /etc/passwd          FAIL");
             failed += 1;
         } else {
+            // err is nil ⇒ Open returned a non-nil File. Narrow.
+            let f = f.MustMut();
             let mut buf = goish::goslice::slice::<u8>::__from_vec(alloc::vec![0u8; 16]);
             let (n, _re) = f.Read(&mut buf);
             if n > 0 {

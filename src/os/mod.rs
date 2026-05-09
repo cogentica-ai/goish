@@ -403,6 +403,8 @@ pub fn ReadFile<N: Into<string>>(name: N) -> (slice<byte>, error) {
     if !err.IsNil() {
         return (slice::<byte>::__from_vec(Vec::new()), err);
     }
+    // err is nil ⇒ Open returned a non-nil File. Narrow.
+    let f = f.MustMut();
     let (fi, ferr) = f.Stat();
     if !ferr.IsNil() {
         let _ = f.Close();
@@ -1105,6 +1107,8 @@ pub fn ReadDir<N: Into<string>>(name: N) -> (slice<DirEntry>, error) {
     if !err.IsNil() {
         return (slice::<DirEntry>::__from_vec(Vec::new()), err);
     }
+    // err is nil ⇒ Open returned a non-nil File. Narrow.
+    let f = f.MustMut();
     let mut entries: Vec<DirEntry> = Vec::new();
     // 4 KiB buffer matches the kernel's per-call output size sweet spot.
     let mut buf: alloc::vec::Vec<u8> = alloc::vec![0u8; 4096];
@@ -1183,6 +1187,8 @@ pub fn WriteFile<N: Into<string>>(name: N, data: slice<byte>, perm: u32) -> erro
     if !err.IsNil() {
         return err;
     }
+    // err is nil ⇒ OpenFile returned a non-nil File. Narrow.
+    let f = f.MustMut();
     let (_, werr) = f.Write(data);
     let cerr = f.Close();
     if !werr.IsNil() {

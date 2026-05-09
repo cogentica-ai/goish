@@ -67,11 +67,15 @@ fn main() {
         ok_line(b"PASS: non-nil != Nil\n");
     }
 
-    // 3. Deref / field access on non-nil.
-    if b.n != 7 || b.label != 0xAA {
-        fail(b"Deref field access wrong on non-nil");
-    } else {
-        ok_line(b"PASS: Deref field access\n");
+    // 3. Field access via Must() narrowing (Deref/DerefMut were
+    //    removed — direct `b.n` is now a compile error).
+    {
+        let inner = b.Must();
+        if inner.n != 7 || inner.label != 0xAA {
+            fail(b"Field access wrong on non-nil");
+        } else {
+            ok_line(b"PASS: Must() field access\n");
+        }
     }
 
     // 4. From<Nil> coercion.
@@ -84,7 +88,7 @@ fn main() {
 
     // 5. Clone semantics.
     let b2 = b.clone();
-    if b2.IsNil() || b2.n != 7 {
+    if b2.IsNil() || b2.Must().n != 7 {
         fail(b"Clone preserves field");
     } else {
         ok_line(b"PASS: Clone of non-nil preserves field\n");

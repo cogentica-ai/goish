@@ -184,6 +184,8 @@ fn serve_regular_file(w: &mut ResponseWriter, r: &Request, path: string, fi: os:
         );
         return;
     }
+    // err is nil ⇒ Open returned a non-nil File. Narrow.
+    let f = f.MustMut();
     let want = fi.Size();
     let mut body = make_zero_buf(want);
     let (got, _e) = f.Read(&mut body);

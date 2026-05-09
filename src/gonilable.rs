@@ -43,8 +43,6 @@
 
 #![allow(non_snake_case, non_camel_case_types)]
 
-use core::ops::{Deref, DerefMut};
-
 use crate::nilval::Nil;
 
 /// `nilable<T>` — Goish's `*T` shape with a Go-idiomatic API.
@@ -210,34 +208,21 @@ impl<T> Default for nilable<T> {
     }
 }
 
-// `*x` — Go's pointer deref. Panics on nil to match Go's runtime
-// behaviour. Auto-deref through this lets `x.field`, `x.Method(...)`,
-// and method dispatch flow naturally. The Go-style `Must` prefix on
-// helpers signals the panic-on-precondition shape — no collision with
-// user-Go method names like `Get` / `Unwrap`.
+// NO `Deref` / `DerefMut` impls (policy commit, 2026-05-09).
 //
-// NOTE (2026-05-09): the user-directive policy is to remove these
-// `Deref`/`DerefMut` impls in a later slice so unguarded `*p` /
-// `p.field` becomes a Rust compile error. Until then, transpiler-
-// emitted code goes through `Must`/`MustMut` explicitly, and the
-// auto-deref path remains for hand-written runtime call sites that
-// haven't been migrated yet.
-impl<T> Deref for nilable<T> {
-    type Target = T;
-    #[inline]
-    #[track_caller]
-    fn deref(&self) -> &T {
-        self.Must()
-    }
-}
-
-impl<T> DerefMut for nilable<T> {
-    #[inline]
-    #[track_caller]
-    fn deref_mut(&mut self) -> &mut T {
-        self.MustMut()
-    }
-}
+// Goish enforces nil-safety at compile time: an unguarded `*p` /
+// `p.field` / `p.Method()` against a `nilable<T>` is a Rust type
+// error. Authors must:
+//   - Use `if p != nil { … }` (transpiler injects a `let p = p.Must()`
+//     shadow inside the guarded block — see pass5_nil_narrow), or
+//   - Reach for `Try`/`IfNotNil`/`OrDefault`/`Take` (safe, never
+//     panic), or
+//   - Call `Must`/`MustMut`/`MustTake` explicitly when the
+//     non-nil precondition has been asserted by other means.
+//
+// This is the one Go-semantic exception: `p.field` on nil-pointer
+// in Go panics at runtime; in Goish the same access is rejected at
+// compile time. See project_nilable_deref_panics.md.
 
 // Equality with the universal Nil sentinel — `if x == nil { … }` and
 // `if nil == x { … }`. Symmetric impls.
