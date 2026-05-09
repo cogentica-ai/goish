@@ -67,6 +67,28 @@ pub trait State: crate::io::Writer {
     fn Flag(&self, c: crate::types::int) -> bool;
 }
 
+/// Go's `fmt.ScanState` interface — passed to types that implement
+/// `Scanner` so they can drive their own parse over the input. Goish
+/// stub matches the Go shape; a full impl is deferred until a port
+/// actually reads input through this path. Surfaced by gopkg.in/
+/// inf.v0's `Dec.Scan(s fmt.ScanState, ch rune) error`.
+#[goish::interface]
+pub trait ScanState {
+    fn ReadRune(&mut self) -> (crate::types::rune, crate::types::int, crate::error);
+    fn UnreadRune(&mut self) -> crate::error;
+    fn SkipSpace(&mut self);
+    fn Token(&mut self, skipSpace: bool, f: alloc::sync::Arc<dyn Fn(crate::types::rune) -> bool + Send + Sync>) -> (crate::slice<crate::types::byte>, crate::error);
+    fn Width(&self) -> (crate::types::int, bool);
+}
+
+/// Go's `fmt.Scanner` interface — implemented by types that drive
+/// their own scanning. The `state` arg is a `&mut dyn ScanState` and
+/// `verb` is the format verb being scanned.
+#[goish::interface]
+pub trait Scanner {
+    fn Scan(&mut self, state: &mut dyn ScanState, verb: crate::types::rune) -> crate::error;
+}
+
 /// Go's `fmt.Formatter` interface — implemented by types that want
 /// custom verb-aware formatting (e.g. `multiError.Format(f, 'v')`
 /// switches on the `+` flag for the `%+v` multi-line variant).

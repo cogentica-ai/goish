@@ -51,8 +51,9 @@ use crate::types::{byte, float32, float64, int, rune, uint};
 // (Complex64/128, Array stays as a stub), the variant is present so
 // match arms compile, but `__reflect_value` never produces it.
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Kind {
+    #[default]
     Invalid = 0,
     Bool = 1,
     Int = 2,

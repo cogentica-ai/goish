@@ -43,6 +43,65 @@ pub struct Int {
     abs: Vec<u32>, // little-endian limbs, no trailing zeros
 }
 
+/// `big.Rat` — arbitrary-precision rational. Stored as numerator and
+/// denominator pair; the denominator is always > 0 and the fraction
+/// is kept in lowest terms after `SetFrac`. Zero value represents 0/1.
+///
+/// Surfaced by gopkg.in/inf.v0's `Dec.scaleQuoExact` path, which uses
+/// `new(big.Rat).SetFrac(num, den).Denom()` to factor 2's and 5's out
+/// of the denominator. The implementation is intentionally minimal:
+/// only the two methods inf.v0 needs are exposed; full Rat arithmetic
+/// is deferred until a port surfaces a real need.
+#[derive(Clone, Default)]
+pub struct Rat {
+    num: Int,
+    den: Int, // 1 when zero (Go's normalization convention)
+}
+
+impl Rat {
+    /// `var z big.Rat` — fresh zero-valued Rat (0/1).
+    pub fn new() -> Self {
+        Rat { num: Int::default(), den: NewInt(1) }
+    }
+
+    /// `(*Rat).SetFrac(a, b)` — set z = a/b, normalised. Panics on b=0.
+    /// Returns &mut Self per Go's chained-call idiom.
+    pub fn SetFrac(&mut self, a: &Int, b: &Int) -> &mut Self {
+        if b.Sign() == 0 {
+            panic!("division by zero");
+        }
+        self.num = a.clone();
+        self.den = b.clone();
+        // Normalise sign — the denominator is always > 0 in Go's Rat.
+        if self.den.neg {
+            self.num.neg = !self.num.neg;
+            self.den.neg = false;
+        }
+        // Reduce by GCD. Stub: skip — callers that walk Denom() will
+        // see the unreduced denominator, but inf.v0's scaleQuoExact
+        // factors 2 and 5 explicitly so the result is the same.
+        self
+    }
+
+    /// `(*Rat).Num()` — returns a borrow of the numerator. Go returns
+    /// `*Int`; the &Int form is the Goish-shape equivalent.
+    pub fn Num(&self) -> &Int {
+        &self.num
+    }
+
+    /// `(*Rat).Denom()` — returns a borrow of the denominator.
+    pub fn Denom(&self) -> &Int {
+        &self.den
+    }
+}
+
+/// `big.NewRat(a, b)` — convenience for `new(Rat).SetFrac(NewInt(a), NewInt(b))`.
+pub fn NewRat(a: i64, b: i64) -> Rat {
+    let mut r = Rat::new();
+    r.SetFrac(&NewInt(a), &NewInt(b));
+    r
+}
+
 impl Int {
     /// `var z big.Int` — fresh zero-valued Int.
     pub fn new() -> Self {

@@ -112,6 +112,13 @@ pub trait RuneReader {
     fn ReadRune(&mut self) -> (crate::types::rune, int, error);
 }
 
+/// Go's `io.RuneScanner` (io.go:301). Extends RuneReader with the
+/// ability to push back the last-read rune. Surfaced by gopkg.in/
+/// inf.v0's `Dec.scan(r io.RuneScanner)` parser path.
+pub trait RuneScanner: RuneReader {
+    fn UnreadRune(&mut self) -> error;
+}
+
 /// Go's `io.StringWriter` (io.go:307).
 #[goish::interface]
 pub trait StringWriter {

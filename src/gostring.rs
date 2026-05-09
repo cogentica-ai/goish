@@ -206,6 +206,21 @@ impl Add<&str> for string {
     }
 }
 
+// `&'static str + string` — the const-string LHS case. Surfaced by
+// xeipuuv/gojsonpointer's `pointer_separator + strings.Join(...)`. The
+// orphan rule allows this because `string` is local and `&'static str`
+// is a fundamental reference; rustc treats it as if the local type
+// were the receiver. Same byte-concat as `string + &str` in reverse.
+impl Add<string> for &'static str {
+    type Output = string;
+    fn add(self, rhs: string) -> string {
+        let mut v = Vec::with_capacity(self.len() + rhs.bytes.len());
+        v.extend_from_slice(self.as_bytes());
+        v.extend_from_slice(&rhs.bytes);
+        string::__from_vec(v)
+    }
+}
+
 // `s += t` — AddAssign mirrors Go's `s += t` shorthand. The string is
 // Arc-internal and may be shared, so the impl rebuilds the byte
 // vector instead of mutating in place — same Arc-bumped cost as
