@@ -25,7 +25,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
-use core::ops::{Add, Index};
+use core::ops::{Add, AddAssign, Index};
 
 use crate::builtin::Len as LenTrait;
 use crate::convert::__SliceIndex;
@@ -203,6 +203,29 @@ impl Add<&str> for string {
         v.extend_from_slice(&self.bytes);
         v.extend_from_slice(rhs.as_bytes());
         string::__from_vec(v)
+    }
+}
+
+// `s += t` — AddAssign mirrors Go's `s += t` shorthand. The string is
+// Arc-internal and may be shared, so the impl rebuilds the byte
+// vector instead of mutating in place — same Arc-bumped cost as
+// `s = s + t` but at the AddAssign call shape the transpiler emits
+// for Go's `+=`. Surfaced by porting nozzle/throttler.
+impl AddAssign<string> for string {
+    fn add_assign(&mut self, rhs: string) {
+        let mut v = Vec::with_capacity(self.bytes.len() + rhs.bytes.len());
+        v.extend_from_slice(&self.bytes);
+        v.extend_from_slice(&rhs.bytes);
+        *self = string::__from_vec(v);
+    }
+}
+
+impl AddAssign<&str> for string {
+    fn add_assign(&mut self, rhs: &str) {
+        let mut v = Vec::with_capacity(self.bytes.len() + rhs.len());
+        v.extend_from_slice(&self.bytes);
+        v.extend_from_slice(rhs.as_bytes());
+        *self = string::__from_vec(v);
     }
 }
 
