@@ -32,7 +32,7 @@ impl Counter {
 
 #[goish::main]
 fn main() {
-    // 1. new!(Counter) — zero value, methods work via auto-borrow.
+    // 1. new!(Counter) — non-nil nilable<Counter>; methods auto-deref.
     let mut p = new!(Counter);
     check(p.Get() == 0, b"new: Counter not zero\n");
     p.Increment();
@@ -40,13 +40,13 @@ fn main() {
     p.Increment();
     check(p.Get() == 3, b"new: Counter increments wrong\n");
 
-    // 2. new!(int) — primitive zero value.
+    // 2. new!(int) — nilable<int> with zero inside; deref reads zero.
     let n = new!(int);
-    check(n == 0, b"new: int not zero\n");
+    check(*n == 0, b"new: int not zero\n");
 
-    // 3. new!(string) — empty string.
+    // 3. new!(string) — nilable<string> wrapping empty.
     let s = new!(string);
-    check(s == "", b"new: string not empty\n");
+    check(s.Len() == 0, b"new: string not empty\n");
 
     fmt::Println!("new: ok");
 }

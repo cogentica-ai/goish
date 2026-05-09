@@ -425,22 +425,28 @@ macro_rules! close {
     }};
 }
 
-// ─── new!(T) — zero-valued T ─────────────────────────────────────────
+// ─── new!(T) — Go's `new(T)`, returns `nilable<T>` of zero value ─────
 
-/// `new!(T)` — Go's `new(T)`. Returns the zero value of `T`. In Go this
-/// is `*T` (heap pointer); in Goish, methods auto-borrow `&self` /
-/// `&mut self`, so the value-shape suffices and the call site reads the
-/// same:
+/// `new!(T)` — Go's `new(T)`. Go declares `new(T)` as returning `*T`
+/// (heap pointer to a zero-valued T). Goish materialises `*T` as
+/// `nilable<T>` at owning positions, so `new!(T)` returns
+/// `nilable<T>::new(<T>::default())` — a non-nil pointer to the zero
+/// value. Method calls auto-deref through `nilable<T>::Deref`, so the
+/// call-site shape matches Go:
 ///
 ///   p := new(Counter)        →  let mut p = new!(Counter);
 ///   p.Increment()            →  p.Increment();
 ///
-/// Requires `T: Default`. Goish primitives (`int`, `string`,
-/// `slice<T>`, `map<K,V>`, `error`, …) all implement `Default`.
+/// `new!` is the *only* construct that carries pointer (= nilable)
+/// semantics for the zero value. Plain `T::default()` / `T { … }`
+/// produce owned `T`. Transpiler emits `new!(T)` for `new(T)` and
+/// owned-shape for value-typed `var x T` / `T{…}`.
+///
+/// Requires `T: Default`.
 #[macro_export]
 macro_rules! new {
     ($t:ty) => {
-        <$t as ::core::default::Default>::default()
+        $crate::nilable::<$t>::new(<$t as ::core::default::Default>::default())
     };
 }
 

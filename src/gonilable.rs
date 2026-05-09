@@ -12,23 +12,27 @@
 // when the construction failed.
 //
 // `nilable<T>` is a thin newtype around `Option<T>` with a Go-idiomatic
-// API surface — `IsNil`, `Get`, equality with `Nil`, Deref<Target=T>
-// that panics on nil (matching Go's runtime nil-deref behaviour).
-// Keeps the `*T` shape without exposing Rust's `Option`/`is_some`/
-// `if let Some(x)` idioms at user-visible call sites.
+// API surface — `IsNil`, equality with `Nil`, Deref<Target=T> that
+// panics on nil (matching Go's runtime nil-deref behaviour). Keeps the
+// `*T` shape without exposing Rust's `Option`/`is_some`/`if let
+// Some(x)` idioms at user-visible call sites.
 //
 // API surface (mirrors Go's `*T` behaviour where possible):
 //
 //   nilable::new(t)       — wrap an owned T (non-nil)
 //   nilable::nil()        — the nil pointer (alias of Default::default)
 //   x.IsNil()             — does this hold nil?
-//   x.Get()               — &T, panics on nil (read-side dispatch)
-//   x.GetMut()            — &mut T, panics on nil (write-side dispatch)
-//   x.Unwrap()            — T (consuming), panics on nil
 //   *x                    — Deref<Target=T>, panics on nil (matches
 //                           Go's `*p` runtime panic for nil p)
 //   x == nil / nil == x   — false unless x.IsNil()
 //   x.field, x.Method(…)  — auto-deref through Deref chain
+//
+// Internal helpers (dunder-named so user `Get`/`Unwrap` methods on T
+// auto-deref cleanly):
+//
+//   x.__get()             — &T, panics on nil (read-side dispatch)
+//   x.__get_mut()         — &mut T, panics on nil (write-side dispatch)
+//   x.__unwrap()          — T (consuming), panics on nil
 //
 // Goro: Go-idioms-first — call sites read like Go (`if id == nil`,
 // `id.Method()`, `*id = …`), Rust idioms (Some/None, ?, etc.) stay
@@ -66,21 +70,24 @@ impl<T> nilable<T> {
         self.0.is_none()
     }
 
-    /// Borrow the inner T, panicking on nil. Mirrors Go's runtime
-    /// nil-pointer deref panic.
+    /// Borrow the inner T, panicking on nil. Dunder name keeps this
+    /// off Rust's method-resolution radar so user-Go types with their
+    /// own `Get` method (Go convention for getters) auto-deref through
+    /// `Deref` cleanly. Used internally by `Deref::deref`.
     #[inline]
     #[track_caller]
-    pub fn Get(&self) -> &T {
+    pub fn __get(&self) -> &T {
         match &self.0 {
             Some(t) => t,
             None => nil_deref_panic(),
         }
     }
 
-    /// Mutably borrow the inner T, panicking on nil.
+    /// Mutably borrow the inner T, panicking on nil. Same naming
+    /// rationale as `__get`.
     #[inline]
     #[track_caller]
-    pub fn GetMut(&mut self) -> &mut T {
+    pub fn __get_mut(&mut self) -> &mut T {
         match &mut self.0 {
             Some(t) => t,
             None => nil_deref_panic(),
@@ -89,9 +96,10 @@ impl<T> nilable<T> {
 
     /// Consume the nilable and return the inner T, panicking on nil.
     /// Useful when the user asserts non-nil and wants ownership.
+    /// Dunder for the same reason as `__get`.
     #[inline]
     #[track_caller]
-    pub fn Unwrap(self) -> T {
+    pub fn __unwrap(self) -> T {
         match self.0 {
             Some(t) => t,
             None => nil_deref_panic(),
@@ -115,13 +123,15 @@ impl<T> Default for nilable<T> {
 
 // `*x` — Go's pointer deref. Panics on nil to match Go's runtime
 // behaviour. Auto-deref through this lets `x.field`, `x.Method(...)`,
-// and method dispatch flow naturally without explicit `.Get()` calls.
+// and method dispatch flow naturally — and because the helpers are
+// dunder-named, user-Go types can have `Get` / `Unwrap` of their own
+// without colliding with the wrapper's accessors.
 impl<T> Deref for nilable<T> {
     type Target = T;
     #[inline]
     #[track_caller]
     fn deref(&self) -> &T {
-        self.Get()
+        self.__get()
     }
 }
 
@@ -129,7 +139,7 @@ impl<T> DerefMut for nilable<T> {
     #[inline]
     #[track_caller]
     fn deref_mut(&mut self) -> &mut T {
-        self.GetMut()
+        self.__get_mut()
     }
 }
 
