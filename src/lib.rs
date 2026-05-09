@@ -119,6 +119,7 @@ pub use errors::error;
 pub use gonilable::nilable;
 pub use nilval::{nil, Nil};
 pub use goarray::array;
+pub use gochan::chan;
 pub use gomap::map;
 pub use goslice::slice;
 pub use gostring::string;
