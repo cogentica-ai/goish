@@ -21,6 +21,7 @@ extern crate alloc;
 
 use core::cell::UnsafeCell;
 use core::ops::Deref;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::runtime::spin::SpinLock;
 
@@ -156,3 +157,132 @@ impl<T: 'static + PartialEq> PartialEq<&T> for Lazy<T> {
 // the orphan rule rejects. Callers writing `id == NIL_LAZY` must
 // flip to `NIL_LAZY == id`; the transpiler does this automatically
 // when one side is a registered Lazy static.
+
+// ─── LazyMut<T> — init-phase mutable cell ────────────────────────────
+//
+// Pairs with `Lazy<LazyMut<T>>` for package-level globals that get
+// filled during `init()` and then read post-init: e.g. xid's
+// `var dec [256]byte` filled by `for i { dec[i] = 0xFF }` in init().
+//
+// Today's `Lazy<T>` is read-only post-init. Wrapping `T` in
+// `LazyMut<T>` enables `dec.modify(|t| t[i] = 0xFF)` calls during
+// init, then bare `dec[i]` reads thereafter.
+//
+// Contract (panic-checked):
+//   * `.modify(...)` is only legal before the first read.
+//   * `.get()` / `Deref` freezes the cell; any subsequent `.modify(...)`
+//     panics with a clear message.
+//
+// Sync model:
+//   * Hot path (post-freeze read): `Acquire` load on `frozen` flag,
+//     bare deref. Lock-free. ~1ns.
+//   * Cold path (first read): SpinLock acquire to fence any in-flight
+//     writer, set `frozen = true` via `Release`, deref.
+//   * Write path (modify): SpinLock acquire, check `frozen` is false,
+//     mutate via UnsafeCell. Init-only — performance non-critical.
+//
+// The Acquire/Release on `frozen` plus the SpinLock pair establish
+// happens-before from every `.modify()` to every post-freeze `.get()`,
+// matching Go's memory-model guarantee for package init.
+
+/// Init-phase mutable cell that freezes on first read.
+///
+/// Compose as `Lazy<LazyMut<T>>` for static slots whose value is
+/// built up in `init()` and read afterward.
+pub struct LazyMut<T: 'static> {
+    /// `false` until first `get()`; `true` after — no more writes.
+    frozen: AtomicBool,
+    /// Serialises writers and the first reader's freeze. Post-freeze
+    /// reads bypass this lock entirely.
+    write_lock: SpinLock<()>,
+    /// Storage cell. Mutated through `&self` during init phase under
+    /// the lock; immutably borrowed after freeze.
+    storage: UnsafeCell<T>,
+}
+
+// SAFETY: LazyMut is Sync when T is. Writes happen only under
+// `write_lock` and only before `frozen` is set; reads after freeze
+// are immutable. The Release/Acquire on `frozen` orders writes
+// before reads.
+unsafe impl<T: Send + Sync> Sync for LazyMut<T> {}
+
+impl<T: 'static> LazyMut<T> {
+    /// Construct a `LazyMut` with the given initial value. The cell
+    /// starts unfrozen; mutate via `.modify(...)` until first read.
+    pub const fn new(initial: T) -> Self {
+        Self {
+            frozen: AtomicBool::new(false),
+            write_lock: SpinLock::new(()),
+            storage: UnsafeCell::new(initial),
+        }
+    }
+
+    /// Apply a mutation while still in init phase. Panics if the cell
+    /// has already been frozen by a read.
+    pub fn modify<F>(&self, f: F)
+    where
+        F: FnOnce(&mut T),
+    {
+        let _g = self.write_lock.lock();
+        if self.frozen.load(Ordering::Acquire) {
+            panic!("LazyMut: write after freeze (a read happened-before this write)");
+        }
+        // SAFETY: `write_lock` is held; `frozen` is false, so no
+        // reader has acquired a `&T` to storage. Mutation is sound.
+        unsafe { f(&mut *self.storage.get()) };
+    }
+
+    /// Freeze the cell (idempotent) and return a borrow of the inner
+    /// value. After the first call, subsequent `.modify(...)` panics.
+    pub fn get(&self) -> &T {
+        // Hot path: already frozen — bare deref.
+        if self.frozen.load(Ordering::Acquire) {
+            // SAFETY: `frozen` was set with Release after the last
+            // write under `write_lock`; this Acquire load
+            // synchronizes-with that Release, so all init writes are
+            // visible.
+            return unsafe { &*self.storage.get() };
+        }
+        // Cold path: take the write lock to fence any in-flight
+        // writer, mark frozen, then deref. Any concurrent `.modify`
+        // running on another thread completes before we publish.
+        let _g = self.write_lock.lock();
+        self.frozen.store(true, Ordering::Release);
+        // SAFETY: lock held, so no writer is mid-mutation. Storage
+        // is now treated as immutable for the lifetime of `&self`.
+        unsafe { &*self.storage.get() }
+    }
+}
+
+impl<T: 'static> Deref for LazyMut<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        self.get()
+    }
+}
+
+// `dec[i]` — index-forwarder so `Lazy<LazyMut<array<u8, N>>>` lookups
+// route through Deref to T's Index impl.
+impl<T: 'static + core::ops::Index<I>, I> core::ops::Index<I> for LazyMut<T>
+where
+    T::Output: Sized,
+{
+    type Output = T::Output;
+    fn index(&self, i: I) -> &T::Output {
+        &self.get()[i]
+    }
+}
+
+// `len(&dec)` — forward `Len` so `goish::len(&LAZY_MUT_T)` works on
+// any T with a Len impl.
+impl<T: 'static + crate::builtin::Len> crate::builtin::Len for LazyMut<T> {
+    fn __len(&self) -> crate::types::int {
+        self.get().__len()
+    }
+}
+
+impl<T: 'static + crate::builtin::Cap> crate::builtin::Cap for LazyMut<T> {
+    fn __cap(&self) -> crate::types::int {
+        self.get().__cap()
+    }
+}
