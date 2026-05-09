@@ -75,6 +75,7 @@ pub mod goslice;
 pub mod gostring;
 pub mod hook;
 pub mod lazy;
+pub mod nilable;
 pub mod nilval;
 pub mod hash;
 pub mod html;
