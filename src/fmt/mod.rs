@@ -242,6 +242,49 @@ impl Format for char {
     }
 }
 
+// `Arc<dyn Any + Send + Sync>` — Goish's `interface{}` representation.
+// xid's `fmt.Errorf("xid: scanning unsupported type: %T", value)` lands
+// here when `value` is the type-switch scrutinee. v1 prints a
+// placeholder; %T's full Go semantics (concrete type name) need
+// runtime type-id lookup which is deferred per the module doc.
+//
+// This impl lets the call-site type-check; the user-visible string
+// is "<any>" (or runs a downcast probe for known builtins). Future
+// work registers a TypeId → name table populated by `goish::reflect`.
+impl Format for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        // Probe a small set of common built-in concrete types so the
+        // common Goish format calls produce something user-readable.
+        // Falls back to "<any>" when the wrapped type isn't in the
+        // probe list.
+        if let Some(s) = self.downcast_ref::<crate::gostring::string>() {
+            return s.fmt(verb, f);
+        }
+        if let Some(b) = self.downcast_ref::<crate::goslice::slice<byte>>() {
+            return b.fmt(verb, f);
+        }
+        if let Some(n) = self.downcast_ref::<i64>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(n) = self.downcast_ref::<u64>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(n) = self.downcast_ref::<i32>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(n) = self.downcast_ref::<u32>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(b) = self.downcast_ref::<bool>() {
+            return b.fmt(verb, f);
+        }
+        // Unknown concrete type — placeholder. %T should print the
+        // type's Go name; we don't have a name table yet.
+        let _ = verb;
+        f.extend(b"<any>");
+    }
+}
+
 // All integer widths route through one helper.
 macro_rules! impl_format_for_signed {
     ($($t:ty),*) => { $( impl Format for $t {
