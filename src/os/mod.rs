@@ -28,6 +28,7 @@ pub mod signal;
 pub mod user;
 
 use crate::error;
+use crate::gonilable::nilable;
 use crate::goslice::slice;
 // `crate::string` resolves both the type (gostring) and the function
 // (convert) — different namespaces, both re-exported at root.
@@ -205,19 +206,23 @@ fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfo {
 // ─── Open / Stat / Create ──────────────────────────────────────────────
 
 /// `os.Open(name)` (os/file.go:386) — open `name` read-only.
-pub fn Open<N: Into<string>>(name: N) -> (File, error) {
+///
+/// Go's signature is `func Open(name string) (*File, error)`. Goish
+/// returns `(nilable<File>, error)` end-to-end so transpiled call
+/// sites read identically: `let (f, err) = os::Open(name);`.
+pub fn Open<N: Into<string>>(name: N) -> (nilable<File>, error) {
     let name: string = name.into();
     OpenFile(name, O_RDONLY, 0)
 }
 
 /// `os.Create(name)` (os/file.go:402) — create or truncate `name`.
-pub fn Create<N: Into<string>>(name: N) -> (File, error) {
+pub fn Create<N: Into<string>>(name: N) -> (nilable<File>, error) {
     let name: string = name.into();
     OpenFile(name, O_RDWR | O_CREATE | O_TRUNC, 0o666)
 }
 
 /// `os.OpenFile(name, flag, perm)` (os/file.go:412).
-pub fn OpenFile<N: Into<string>>(name: N, flag: i32, perm: u32) -> (File, error) {
+pub fn OpenFile<N: Into<string>>(name: N, flag: i32, perm: u32) -> (nilable<File>, error) {
     let name: string = name.into();
     // Build a NUL-terminated path for the kernel.
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
@@ -233,13 +238,14 @@ pub fn OpenFile<N: Into<string>>(name: N, flag: i32, perm: u32) -> (File, error)
         } else {
             errors::New(string("open failed"))
         };
-        return (File { fd: -1, name: name.clone() }, err);
+        // Failure path mirrors Go: returns `nil, err`.
+        return (nilable::nil(), err);
     }
     (
-        File {
+        nilable::new(File {
             fd,
             name: name.clone(),
-        },
+        }),
         nil,
     )
 }
