@@ -363,6 +363,16 @@ impl<T> Clone for chan<T> {
     }
 }
 
+/// `Default` returns Go's `var c chan T` zero value — a nil chan whose
+/// sends/recvs block forever. Required for struct literals that use
+/// `..Default::default()` (the common k8s/json idiom in transpiled
+/// ports). Mirrors `chan::nil()`.
+impl<T> Default for chan<T> {
+    fn default() -> Self {
+        Self::nil()
+    }
+}
+
 impl<T> chan<T> {
     /// `make!(chan T)` — unbuffered channel (cap=0).
     pub fn new_unbuffered() -> Self {

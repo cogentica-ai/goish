@@ -754,22 +754,21 @@ pub fn sprintf_impl(format: &[byte], args: &[FmtArg]) -> string {
     string::__from_vec(f.into_bytes())
 }
 
-/// Runtime variadic-spread Sprintf — for the Go pattern
-/// `fmt.Sprintf(format, args...)` where `args ...interface{}` becomes a
-/// goish `slice<Arc<dyn Any + Send + Sync>>`. Each arg is runtime-
-/// downcast to a known formattable type and dispatched as `FmtArg::Val`.
+/// Translate a `slice<Arc<dyn Any + ...>>` (the runtime shape of Go's
+/// `args ...interface{}`) to the `&[FmtArg]` that `*_impl` consumes.
+/// Each arg is downcast to a known formattable type; unsupported types
+/// render as `"<unsupported %T>"`.
 ///
-/// Supported concrete types: `string`, `&str`, `i64`/`i32`/`isize`,
-/// `u64`/`u32`/`usize`, `f64`/`f32`, `bool`, `byte` (u8), `char`, `error`.
-/// Unrecognised types render as `"<unsupported %T>"`.
-pub fn Sprintv<S: Into<string>>(
-    format: S,
-    args: slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
-) -> string {
-    let format = format.into();
-    let fmt_bytes = format.as_bytes();
-    let mut fa: Vec<FmtArg<'_>> = Vec::with_capacity(args.Len() as usize);
-    let placeholder: &str = "<unsupported %T>";
+/// Shared by all `*v` (variadic-spread) entry points so adding a new
+/// supported concrete type touches one place. The lifetime of the
+/// returned `Vec<FmtArg>` is tied to `args` — callers must keep `args`
+/// alive across the call. The placeholder string has `'static`
+/// lifetime, which trivially outlives any caller's `'a`.
+fn __any_args_to_fmtargs<'a>(
+    args: &'a slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+) -> Vec<FmtArg<'a>> {
+    static PLACEHOLDER: &str = "<unsupported %T>";
+    let mut fa: Vec<FmtArg<'a>> = Vec::with_capacity(args.Len() as usize);
     for a in args.iter() {
         let any: &(dyn core::any::Any + Send + Sync) = a.as_ref();
         if let Some(v) = any.downcast_ref::<string>() {
@@ -801,10 +800,58 @@ pub fn Sprintv<S: Into<string>>(
         } else if let Some(v) = any.downcast_ref::<error>() {
             fa.push(FmtArg::Err(v));
         } else {
-            fa.push(FmtArg::Val(&placeholder as &dyn Format));
+            fa.push(FmtArg::Val(&PLACEHOLDER as &dyn Format));
         }
     }
-    sprintf_impl(fmt_bytes, &fa)
+    fa
+}
+
+/// Runtime variadic-spread Sprintf — for the Go pattern
+/// `fmt.Sprintf(format, args...)` where `args ...interface{}` becomes a
+/// goish `slice<Arc<dyn Any + Send + Sync>>`. Each arg is runtime-
+/// downcast to a known formattable type and dispatched as `FmtArg::Val`.
+///
+/// Supported concrete types: `string`, `&str`, `i64`/`i32`/`isize`,
+/// `u64`/`u32`/`usize`, `f64`/`f32`, `bool`, `byte` (u8), `char`, `error`.
+/// Unrecognised types render as `"<unsupported %T>"`.
+pub fn Sprintv<S: Into<string>>(
+    format: S,
+    args: slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+) -> string {
+    let format = format.into();
+    let fa = __any_args_to_fmtargs(&args);
+    sprintf_impl(format.as_bytes(), &fa)
+}
+
+/// Runtime variadic-spread Errorf — `fmt.Errorf(format, args...)`.
+pub fn Errorv<S: Into<string>>(
+    format: S,
+    args: slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+) -> error {
+    let format = format.into();
+    let fa = __any_args_to_fmtargs(&args);
+    errorf_impl(format.as_bytes(), &fa)
+}
+
+/// Runtime variadic-spread Printf — `fmt.Printf(format, args...)`.
+pub fn Printv<S: Into<string>>(
+    format: S,
+    args: slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+) -> (int, error) {
+    let format = format.into();
+    let fa = __any_args_to_fmtargs(&args);
+    printf_impl(format.as_bytes(), &fa)
+}
+
+/// Runtime variadic-spread Fprintf — `fmt.Fprintf(w, format, args...)`.
+pub fn Fprintv<W: io::Writer, S: Into<string>>(
+    w: &mut W,
+    format: S,
+    args: slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+) -> (int, error) {
+    let format = format.into();
+    let fa = __any_args_to_fmtargs(&args);
+    fprintf_impl(w, format.as_bytes(), &fa)
 }
 
 #[doc(hidden)]
