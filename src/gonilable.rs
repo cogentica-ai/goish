@@ -27,12 +27,15 @@
 //   x == nil / nil == x   — false unless x.IsNil()
 //   x.field, x.Method(…)  — auto-deref through Deref chain
 //
-// Internal helpers (dunder-named so user `Get`/`Unwrap` methods on T
-// auto-deref cleanly):
+// Panic-bearing extractors (Go-style `Must` prefix — only the
+// transpiler emits these inside scopes it has flow-proven non-nil;
+// hand-written Goish code generally uses `Try`/`IfNotNil`/`OrDefault`
+// instead). Naming follows Go's `regexp.MustCompile` convention: the
+// `Must` prefix signals "panics if the precondition fails":
 //
-//   x.__get()             — &T, panics on nil (read-side dispatch)
-//   x.__get_mut()         — &mut T, panics on nil (write-side dispatch)
-//   x.__unwrap()          — T (consuming), panics on nil
+//   x.Must()         — &T, panics on nil (paired with Try)
+//   x.MustMut()      — &mut T, panics on nil (paired with TryMut)
+//   x.MustTake()     — T (consuming), panics on nil (paired with Take)
 //
 // Goro: Go-idioms-first — call sites read like Go (`if id == nil`,
 // `id.Method()`, `*id = …`), Rust idioms (Some/None, ?, etc.) stay
@@ -70,24 +73,25 @@ impl<T> nilable<T> {
         self.0.is_none()
     }
 
-    /// Borrow the inner T, panicking on nil. Dunder name keeps this
-    /// off Rust's method-resolution radar so user-Go types with their
-    /// own `Get` method (Go convention for getters) auto-deref through
-    /// `Deref` cleanly. Used internally by `Deref::deref`.
+    /// Borrow the inner T, panicking on nil. Go-style `Must` prefix
+    /// signals that the precondition (non-nil) is asserted by the
+    /// caller; failure crashes loudly. Pairs with `Try()` (which
+    /// returns `Option<&T>`). Transpiler emits this inside scopes
+    /// it has flow-proven non-nil — never as auto-deref.
     #[inline]
     #[track_caller]
-    pub fn __get(&self) -> &T {
+    pub fn Must(&self) -> &T {
         match &self.0 {
             Some(t) => t,
             None => nil_deref_panic(),
         }
     }
 
-    /// Mutably borrow the inner T, panicking on nil. Same naming
-    /// rationale as `__get`.
+    /// Mutably borrow the inner T, panicking on nil. Pairs with
+    /// `TryMut()`. Same `Must` rationale as `Must()`.
     #[inline]
     #[track_caller]
-    pub fn __get_mut(&mut self) -> &mut T {
+    pub fn MustMut(&mut self) -> &mut T {
         match &mut self.0 {
             Some(t) => t,
             None => nil_deref_panic(),
@@ -95,11 +99,11 @@ impl<T> nilable<T> {
     }
 
     /// Consume the nilable and return the inner T, panicking on nil.
-    /// Useful when the user asserts non-nil and wants ownership.
-    /// Dunder for the same reason as `__get`.
+    /// Pairs with `Take()` (which returns `Option<T>`). Useful when
+    /// the caller wants ownership of the inner value.
     #[inline]
     #[track_caller]
-    pub fn __unwrap(self) -> T {
+    pub fn MustTake(self) -> T {
         match self.0 {
             Some(t) => t,
             None => nil_deref_panic(),
@@ -208,15 +212,22 @@ impl<T> Default for nilable<T> {
 
 // `*x` — Go's pointer deref. Panics on nil to match Go's runtime
 // behaviour. Auto-deref through this lets `x.field`, `x.Method(...)`,
-// and method dispatch flow naturally — and because the helpers are
-// dunder-named, user-Go types can have `Get` / `Unwrap` of their own
-// without colliding with the wrapper's accessors.
+// and method dispatch flow naturally. The Go-style `Must` prefix on
+// helpers signals the panic-on-precondition shape — no collision with
+// user-Go method names like `Get` / `Unwrap`.
+//
+// NOTE (2026-05-09): the user-directive policy is to remove these
+// `Deref`/`DerefMut` impls in a later slice so unguarded `*p` /
+// `p.field` becomes a Rust compile error. Until then, transpiler-
+// emitted code goes through `Must`/`MustMut` explicitly, and the
+// auto-deref path remains for hand-written runtime call sites that
+// haven't been migrated yet.
 impl<T> Deref for nilable<T> {
     type Target = T;
     #[inline]
     #[track_caller]
     fn deref(&self) -> &T {
-        self.__get()
+        self.Must()
     }
 }
 
@@ -224,7 +235,7 @@ impl<T> DerefMut for nilable<T> {
     #[inline]
     #[track_caller]
     fn deref_mut(&mut self) -> &mut T {
-        self.__get_mut()
+        self.MustMut()
     }
 }
 
