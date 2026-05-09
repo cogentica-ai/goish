@@ -96,6 +96,49 @@ fn main() {
         ok_line(b"PASS: Clone of nil stays nil\n");
     }
 
+    // 6. Safe accessors — non-panicking read paths.
+    if b.Try().map(|t| t.n).unwrap_or(0) != 7 {
+        fail(b"Try on non-nil should return Some(&T)");
+    } else {
+        ok_line(b"PASS: Try() returns Some on non-nil\n");
+    }
+    if z.Try().is_some() {
+        fail(b"Try on nil should return None");
+    } else {
+        ok_line(b"PASS: Try() returns None on nil\n");
+    }
+    if z.OrDefault().n != 0 {
+        fail(b"OrDefault on nil should give zero");
+    } else {
+        ok_line(b"PASS: OrDefault() falls back to default\n");
+    }
+    if z.OrElse(|| Box { n: 99, label: 0 }).n != 99 {
+        fail(b"OrElse on nil should call closure");
+    } else {
+        ok_line(b"PASS: OrElse() falls back to closure\n");
+    }
+    let len = b.If(|t| t.n).unwrap_or(-1);
+    if len != 7 {
+        fail(b"If on non-nil should run closure");
+    } else {
+        ok_line(b"PASS: If() runs closure on non-nil\n");
+    }
+    if z.If(|t| t.n).is_some() {
+        fail(b"If on nil should be None");
+    } else {
+        ok_line(b"PASS: If() returns None on nil\n");
+    }
+    let mut taken = nilable::new(Box { n: 5, label: 0 });
+    if let Some(t) = taken.Take() {
+        if t.n != 5 || !taken.IsNil() {
+            fail(b"Take should hand over the value and leave nil");
+        } else {
+            ok_line(b"PASS: Take() removes value, leaves nil\n");
+        }
+    } else {
+        fail(b"Take on non-nil should return Some");
+    }
+
     if FAILED.load(Ordering::Acquire) > 0 {
         ok_line(b"FAIL: nilable_smoke had failures\n");
         syscall::Exit(1);

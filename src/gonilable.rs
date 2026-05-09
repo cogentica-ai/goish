@@ -105,6 +105,91 @@ impl<T> nilable<T> {
             None => nil_deref_panic(),
         }
     }
+
+    // ─── Safe (non-panicking) accessors ───────────────────────────
+    //
+    // The canonical Go-idiomatic pattern for nil-safety is:
+    //
+    //     if !p.IsNil() {
+    //         use(*p);  // Deref panics, but we just guarded
+    //     }
+    //
+    // The helpers below cover the cases where that pattern is
+    // cumbersome. None of them panic — pick whichever fits the call
+    // site's shape.
+
+    /// Safe shared borrow — `Some(&T)` if non-nil, `None` if nil.
+    /// Use with `if let Some(t) = p.Try() { … }` for pattern-match
+    /// style, or `p.Try().map(|t| …)` for chained transforms.
+    #[inline]
+    pub fn Try(&self) -> Option<&T> {
+        self.0.as_ref()
+    }
+
+    /// Safe mutable borrow — `Some(&mut T)` if non-nil, `None` if nil.
+    #[inline]
+    pub fn TryMut(&mut self) -> Option<&mut T> {
+        self.0.as_mut()
+    }
+
+    /// Cloned-or-default — return a clone of the inner T, or
+    /// `T::default()` if nil. Mirrors Go's "nil-tolerant" idiom
+    /// where reads from a nil pointer return the zero value (NOT
+    /// what Go does at the language level, but what user-defined
+    /// methods on pointer types often do).
+    #[inline]
+    pub fn OrDefault(&self) -> T
+    where
+        T: Default + Clone,
+    {
+        self.0.clone().unwrap_or_default()
+    }
+
+    /// Cloned-or-fallback — return a clone of the inner T, or call
+    /// `f()` if nil. Lets the caller compute a fallback lazily.
+    #[inline]
+    pub fn OrElse<F>(&self, f: F) -> T
+    where
+        T: Clone,
+        F: FnOnce() -> T,
+    {
+        self.0.clone().unwrap_or_else(f)
+    }
+
+    /// Apply `f` if non-nil, returning `Some(f(&t))`; `None` if nil.
+    /// Useful for read-only transforms: `p.If(|t| t.Len()).
+    /// unwrap_or(0)`.
+    #[inline]
+    pub fn If<R, F>(&self, f: F) -> Option<R>
+    where
+        F: FnOnce(&T) -> R,
+    {
+        self.0.as_ref().map(f)
+    }
+
+    /// Apply `f` if non-nil, mutating in place; no-op if nil.
+    /// Returns `true` when the closure ran (non-nil), `false` on nil
+    /// — handy for `if !p.IfMut(|t| …) { handle_nil(); }`.
+    #[inline]
+    pub fn IfMut<F>(&mut self, f: F) -> bool
+    where
+        F: FnOnce(&mut T),
+    {
+        match &mut self.0 {
+            Some(t) => {
+                f(t);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Take the inner T, leaving nil behind. Returns `None` if
+    /// already nil, `Some(t)` otherwise. Mirrors `Option::take`.
+    #[inline]
+    pub fn Take(&mut self) -> Option<T> {
+        self.0.take()
+    }
 }
 
 #[cold]
