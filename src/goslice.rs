@@ -172,6 +172,78 @@ impl<T> PartialEq<crate::nilval::Nil> for slice<T> {
     }
 }
 
+// Go's `[]rune(s)` and `[]byte(s)` string→slice conversions. Goish
+// emits these as `<slice<rune>>::from(s)` / `<slice<byte>>::from(s)`
+// at the buildTypeConversion call site.
+//
+// `[]rune(s)` decodes UTF-8 codepoints — each rune is the int32
+// code point. Mirrors Go's runtime behaviour where invalid bytes
+// emit U+FFFD (replacement char). `chars()` on `&str` does the
+// same routing through std::char::from_u32.
+//
+// `[]byte(s)` is a copy of the underlying byte buffer.
+
+impl From<&crate::gostring::string> for slice<crate::types::rune> {
+    fn from(s: &crate::gostring::string) -> Self {
+        let bytes = s.as_bytes();
+        let str_view = match core::str::from_utf8(bytes) {
+            Ok(v) => v,
+            Err(_) => {
+                // Invalid UTF-8 — Go's runtime would replace with
+                // U+FFFD; fall back to a lossy decode. The valid
+                // prefix is yielded; replacement filles the rest.
+                let mut out: alloc::vec::Vec<crate::types::rune> = alloc::vec::Vec::new();
+                let mut i = 0;
+                while i < bytes.len() {
+                    match core::str::from_utf8(&bytes[i..]) {
+                        Ok(rest) => {
+                            for c in rest.chars() {
+                                out.push(c as crate::types::rune);
+                            }
+                            i = bytes.len();
+                        }
+                        Err(e) => {
+                            let valid = e.valid_up_to();
+                            if valid > 0 {
+                                if let Ok(prefix) =
+                                    core::str::from_utf8(&bytes[i..i + valid])
+                                {
+                                    for c in prefix.chars() {
+                                        out.push(c as crate::types::rune);
+                                    }
+                                }
+                            }
+                            out.push(0xFFFD);
+                            i += valid + 1;
+                        }
+                    }
+                }
+                return slice::<crate::types::rune>::__from_vec(out);
+            }
+        };
+        let mut out: alloc::vec::Vec<crate::types::rune> =
+            alloc::vec::Vec::with_capacity(str_view.len());
+        for c in str_view.chars() {
+            out.push(c as crate::types::rune);
+        }
+        slice::<crate::types::rune>::__from_vec(out)
+    }
+}
+
+// `[]byte(s)` — Go's idiomatic string-to-bytes conversion. Goish's
+// `bytes(s)` builtin is the same op spelled differently; this impl
+// covers the explicit `slice<byte>::from(s)` path that some emit
+// sites take.
+impl From<&crate::gostring::string> for slice<crate::types::byte> {
+    fn from(s: &crate::gostring::string) -> Self {
+        let bytes = s.as_bytes();
+        let mut out: alloc::vec::Vec<crate::types::byte> =
+            alloc::vec::Vec::with_capacity(bytes.len());
+        out.extend_from_slice(bytes);
+        slice::<crate::types::byte>::__from_vec(out)
+    }
+}
+
 impl<T> PartialEq<slice<T>> for crate::nilval::Nil {
     #[inline]
     fn eq(&self, other: &slice<T>) -> bool {
