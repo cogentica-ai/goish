@@ -16,7 +16,7 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::nilable::nilable;
+use goish::nilable;
 use goish::nilval::Nil;
 use goish::syscall;
 

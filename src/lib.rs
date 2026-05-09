@@ -75,7 +75,7 @@ pub mod goslice;
 pub mod gostring;
 pub mod hook;
 pub mod lazy;
-pub mod nilable;
+pub mod gonilable;
 pub mod nilval;
 pub mod hash;
 pub mod html;
@@ -116,6 +116,7 @@ pub use convert::{
     uint16, uint32, uint64, uint8,
 };
 pub use errors::error;
+pub use gonilable::nilable;
 pub use nilval::{nil, Nil};
 pub use goarray::array;
 pub use gomap::map;
