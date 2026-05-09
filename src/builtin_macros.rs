@@ -19,6 +19,45 @@
 // The trailing `!` is the only visible Rust giveaway — call sites are
 // otherwise letter-for-letter Go.
 
+// ─── any_args!(a, b, c) — variadic ...interface{} bundling ──────────
+//
+// Go's `f(format, a, b, c)` calling `f(format string, args ...interface{})`
+// becomes `f(format, any_args!(a, b, c))` in Goish. Each arg is wrapped
+// as `Arc::new(arg) as Arc<dyn Any + Send + Sync>` and collected into a
+// `slice<Arc<dyn Any + Send + Sync>>`. The transpiler emits this at
+// call sites whose callee's last param is `args ...interface{}`.
+
+/// `any_args!(a, b, c)` — bundle positional args into the runtime
+/// shape of `args ...interface{}`. Empty form returns an empty slice.
+#[macro_export]
+macro_rules! any_args {
+    () => {
+        {
+            let v: $crate::__macro_alloc::Vec<
+                $crate::__macro_alloc::Box<
+                    ::core::any::Any
+                >
+            > = $crate::__macro_alloc::Vec::new();
+            // Routed through __from_vec for empty parity with the
+            // populated arm below — caller never sees an Arc-cast detour.
+            let _ = v; // suppress unused if expansion ends here
+            $crate::slice::__from_vec::<
+                ::alloc::sync::Arc<dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync>
+            >($crate::__macro_alloc::Vec::new())
+        }
+    };
+    ($($arg:expr),+ $(,)?) => {
+        {
+            let v: $crate::__macro_alloc::Vec<
+                ::alloc::sync::Arc<dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync>
+            > = $crate::__macro_alloc::vec![
+                $( ::alloc::sync::Arc::new($arg) as ::alloc::sync::Arc<dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync> ),+
+            ];
+            $crate::slice::__from_vec(v)
+        }
+    };
+}
+
 // ─── slice!([]T{a, b, c}) — typed slice literal ───────────────────────
 
 // `goish::import!` is now a proc-macro re-exported from goish-macros.
