@@ -119,6 +119,18 @@ pub use convert::{
 pub use errors::error;
 pub use goany::Any;
 pub use gonilable::nilable;
+
+/// Trait-impl registry for `goish::Any::As::<dyn Trait>()`.
+/// `#[goish::interface]` emits per-trait `static REGISTRY` plus a
+/// `from_any` impl referencing this module's `lookup_with`. Each
+/// `impl Trait for Concrete` site emits `register_with` to populate
+/// the registry. By the time `Any::As::<dyn Trait>()` is called at
+/// runtime, all reachable impls have registered.
+pub mod any {
+    pub use crate::goany::{
+        register_with, lookup_with, DowncastableFromAny, TraitProbe, TraitRegistry,
+    };
+}
 pub use nilval::{nil, Nil};
 pub use goarray::array;
 pub use gochan::chan;

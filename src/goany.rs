@@ -76,9 +76,24 @@ impl Any {
 
     /// Goish equivalent of Go's comma-ok type assertion `v, ok := x.(T)`.
     /// Returns `Some(&T)` when the wrapped value's runtime type is `T`.
+    ///
+    /// Two specialisations through `DowncastableFromAny`:
+    ///
+    /// * `T: Sized + 'static` — goes via `Any::downcast_ref::<T>()`.
+    /// * `T = dyn Trait` (unsized) — consults the per-trait registry
+    ///   that `#[goish::interface]` emits. Returns `Some(&dyn Trait)`
+    ///   iff the wrapped value's concrete type was registered as
+    ///   implementing `Trait`.
+    ///
+    /// Foundation: open-world type-class lookup. Each
+    /// `impl Trait for Concrete` registers via
+    /// `goish::any::register_trait_impl::<Trait, Concrete>()` so the
+    /// `&dyn Any → &dyn Trait` cast is available at runtime. Mirrors
+    /// Go's structural-interface satisfaction (assertion `x.(I)`) within
+    /// Rust's nominal trait system.
     #[inline]
-    pub fn As<T: 'static>(&self) -> Option<&T> {
-        self.0.downcast_ref::<T>()
+    pub fn As<T: ?Sized + DowncastableFromAny>(&self) -> Option<&T> {
+        T::from_any(self.0.as_ref())
     }
 
     /// Mut-borrow downcast — panics on miss OR if the Arc is shared
@@ -172,3 +187,146 @@ impl PartialEq<Any> for Nil {
 // Nil-shape sentinel: `Nil` itself (from nilval.rs). All `From<Nil>`
 // paths land `Arc::new(nil)`, all IsNil predicates probe `is::<Nil>()`
 // — single nil semantics, no auxiliary marker types.
+
+// ─────────────────────────────────────────────────────────────────────
+// DowncastableFromAny — helper trait for `Any::As<T>`
+// ─────────────────────────────────────────────────────────────────────
+
+/// Witnesses that `Self` can be extracted from a `&dyn CoreAny + Send +
+/// Sync`. Two impl families:
+///
+/// 1. **Blanket `impl<T: 'static + Sized>`** — concrete struct/enum
+///    targets via `CoreAny::downcast_ref::<T>()`.
+///
+/// 2. **Per-trait `impl DowncastableFromAny for dyn UserTrait`** emitted
+///    by `#[goish::interface]`. Consults a registry populated by
+///    `register_trait_impl::<UserTrait, Concrete>()` calls (one per
+///    `impl UserTrait for Concrete` in the program). Returns
+///    `Some(&dyn UserTrait)` when the wrapped value's concrete type
+///    was registered.
+///
+/// Coherence: the blanket requires `Sized`; `dyn Trait: !Sized` so the
+/// per-trait impls don't overlap. Matches Rust 1.70+'s coherence rules
+/// (no negative impls needed).
+pub trait DowncastableFromAny: 'static {
+    /// Try to view a `&dyn Any+Send+Sync` as `&Self`. Returns `None`
+    /// when the wrapped concrete type doesn't match (or, for trait
+    /// targets, isn't registered as implementing `Self`).
+    fn from_any(any_ref: &(dyn CoreAny + Send + Sync)) -> Option<&Self>;
+}
+
+impl<T: 'static + Sized> DowncastableFromAny for T {
+    #[inline]
+    fn from_any(any_ref: &(dyn CoreAny + Send + Sync)) -> Option<&Self> {
+        any_ref.downcast_ref::<T>()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Trait-impl registry for `Any::As::<dyn Trait>()`
+// ─────────────────────────────────────────────────────────────────────
+//
+// Per-trait static — each `#[goish::interface]` expansion creates a
+// `static __<TRAIT>_PROBES: TraitRegistry<dyn Trait+Send+Sync>` and a
+// `register_<trait>_impl::<Concrete>()` helper. The `from_any` impl
+// scans that static.
+//
+// Per-trait separation is needed because the cast fn signature is
+// trait-specific (returns `&dyn Trait+Send+Sync`, a fat pointer with
+// a Trait-specific vtable). A trait-agnostic registry storing
+// `*const ()` would lose the vtable on cast.
+
+use core::any::TypeId;
+use crate::runtime::spin::SpinLock;
+use alloc::vec::Vec;
+
+/// Per-concrete-impl probe entry within a single trait's registry.
+/// `cast` reads `&(dyn Any + Send + Sync)` and returns `&Trait`
+/// (a fat pointer with Trait's vtable). Trait-specific because the
+/// vtable layout is trait-specific.
+///
+/// The macro emits one `TraitRegistry<dyn Trait+Send+Sync>` per
+/// `#[goish::interface]`-decorated trait.
+#[doc(hidden)]
+pub struct TraitProbe<Trait: ?Sized + 'static> {
+    pub concrete: TypeId,
+    pub cast: fn(&(dyn CoreAny + Send + Sync)) -> &Trait,
+}
+
+/// Per-trait registry. The macro creates a `static`
+/// `SpinLock<TraitRegistry<dyn Trait + Send + Sync>>` and exposes a
+/// `register_<trait>_impl(probe)` free function. The `from_any` impl
+/// for `dyn Trait + Send + Sync` scans this registry.
+#[doc(hidden)]
+pub struct TraitRegistry<Trait: ?Sized + 'static> {
+    pub probes: Vec<TraitProbe<Trait>>,
+}
+
+impl<Trait: ?Sized + 'static> TraitRegistry<Trait> {
+    /// `const fn` so the macro can put one in a `static` slot.
+    pub const fn new() -> Self {
+        Self { probes: Vec::new() }
+    }
+
+    /// Records `(concrete, cast)` once per concrete type. Repeat
+    /// registrations for the same concrete are no-ops — the
+    /// transpiler emits at every impl site, and re-running across
+    /// crates re-runs the registration.
+    pub fn register(&mut self, probe: TraitProbe<Trait>) {
+        if self.probes.iter().any(|e| e.concrete == probe.concrete) {
+            return;
+        }
+        self.probes.push(probe);
+    }
+
+    /// Linear scan over registered probes. Returns the first match's
+    /// `&Trait`. O(n) in the number of impls per trait — typically
+    /// small (single-digit) per Goish program.
+    pub fn lookup<'a>(
+        &self,
+        any_ref: &'a (dyn CoreAny + Send + Sync),
+    ) -> Option<&'a Trait> {
+        let concrete = (*any_ref).type_id();
+        for probe in &self.probes {
+            if probe.concrete == concrete {
+                return Some((probe.cast)(any_ref));
+            }
+        }
+        None
+    }
+}
+
+/// Convenience for the proc-macro: locks the registry, inserts one
+/// probe. The macro emits one of these per trait, named like
+/// `register_<trait>_impl`.
+pub fn register_with<Trait: ?Sized + 'static>(
+    registry: &SpinLock<TraitRegistry<Trait>>,
+    probe: TraitProbe<Trait>,
+) {
+    let mut guard = registry.lock();
+    guard.register(probe);
+}
+
+/// Convenience for the proc-macro: locks the registry, scans for a
+/// match. Used by the `from_any` impl emitted per trait.
+pub fn lookup_with<'a, Trait: ?Sized + 'static>(
+    registry: &SpinLock<TraitRegistry<Trait>>,
+    any_ref: &'a (dyn CoreAny + Send + Sync),
+) -> Option<&'a Trait> {
+    let guard = registry.lock();
+    // SAFETY of the lifetime: `guard` borrows the registry's Vec; the
+    // returned `&Trait` is a fresh pointer constructed from `any_ref`
+    // (lifetime 'a, distinct from the registry). The vtable is
+    // 'static (per Rust's type system) and the data pointer is
+    // any_ref's. Detaching the lifetime from `guard` is sound — the
+    // result doesn't borrow registry storage. We use a manual
+    // lifetime extension via the `cast` fn pointer signature.
+    guard.lookup(any_ref).map(|t| {
+        // The `&Trait` we got has lifetime tied to `guard`'s borrow
+        // of the SpinLock. Re-cast through the trait's data pointer
+        // + 'static vtable to detach. cast fn doesn't capture
+        // `guard`-bound state, so the result is sound.
+        let raw = t as *const Trait;
+        unsafe { &*raw }
+    })
+}

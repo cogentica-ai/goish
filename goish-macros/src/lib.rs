@@ -1249,6 +1249,88 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     );
     out.push_str("}\n\n");
 
+    // ── (8) DowncastableFromAny for `dyn Trait` + per-trait registry ─
+    //
+    // Lets `goish::Any::As::<dyn Trait>()` return `Some(&dyn Trait)`
+    // when the wrapped concrete type was registered via the
+    // matching `register_<trait>_impl` helper. Drives Go's
+    // trait-typed comma-ok type assertion `vv, ok := x.(Trait)`;
+    // the transpiler lowers it to `data.As::<dyn Trait>()`.
+    //
+    // Per-trait static + helper because the cast fn signature is
+    // trait-specific (returns `&dyn Trait`, a fat pointer with
+    // Trait's vtable). A trait-agnostic registry would lose the
+    // vtable on cast.
+    //
+    // The transpiler emits `register_<trait>_impl::<Concrete>()` at
+    // every `impl Trait for Concrete` site (typically inside the
+    // crate's `init()` so registration happens before any
+    // `As::<dyn Trait>()` call).
+    let registry_name = format!("__GOISH_{}_REGISTRY", name.to_uppercase());
+    let register_fn = format!("__goish_register_{}_impl", name);
+
+    let _ = writeln!(
+        out,
+        "#[doc(hidden)]\n\
+         pub static {registry_name}: \
+         ::goish::runtime::spin::SpinLock<::goish::any::TraitRegistry<\
+         dyn {name} + ::core::marker::Send + ::core::marker::Sync>> = \
+         ::goish::runtime::spin::SpinLock::new(::goish::any::TraitRegistry::new());"
+    );
+    out.push('\n');
+
+    let _ = writeln!(
+        out,
+        "#[doc(hidden)]\n\
+         pub fn {register_fn}<__C: 'static + {name} + \
+         ::core::marker::Send + ::core::marker::Sync>() {{"
+    );
+    out.push_str("    fn cast<__C: 'static + ");
+    out.push_str(&name);
+    out.push_str(" + ::core::marker::Send + ::core::marker::Sync>(\n");
+    out.push_str(
+        "        any_ref: &(dyn ::core::any::Any + ::core::marker::Send + \
+         ::core::marker::Sync),\n",
+    );
+    // Explicit 'static on the dyn return so the inferred fn-item
+    // lifetime matches `TraitProbe.cast`'s `for<'a> fn(&'a _) -> &'a
+    // Trait` shape (where Trait carries its own 'static object
+    // lifetime). Without the bound, Rust infers the return's dyn-
+    // object-lifetime as 'a, narrowing the type beyond the field.
+    let _ = writeln!(
+        out,
+        "    ) -> &(dyn {name} + ::core::marker::Send + ::core::marker::Sync + 'static) {{"
+    );
+    out.push_str("        any_ref.downcast_ref::<__C>()\n");
+    out.push_str(
+        "            .expect(\"goish::any: cast invoked with mismatched concrete type\")\n",
+    );
+    out.push_str("    }\n");
+    out.push_str(
+        "    let probe = ::goish::any::TraitProbe { concrete: \
+         ::core::any::TypeId::of::<__C>(), cast: cast::<__C> };\n",
+    );
+    let _ = writeln!(
+        out,
+        "    ::goish::any::register_with(&{registry_name}, probe);"
+    );
+    out.push_str("}\n\n");
+
+    let _ = writeln!(
+        out,
+        "impl ::goish::any::DowncastableFromAny \
+         for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
+    );
+    out.push_str(
+        "    #[inline]\n    fn from_any(any_ref: &(dyn ::core::any::Any + \
+         ::core::marker::Send + ::core::marker::Sync)) -> ::core::option::Option<&Self> {\n",
+    );
+    let _ = writeln!(
+        out,
+        "        ::goish::any::lookup_with(&{registry_name}, any_ref)"
+    );
+    out.push_str("    }\n}\n\n");
+
     out.parse()
         .expect("goish::interface: emitted source failed to parse")
 }
