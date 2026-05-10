@@ -128,9 +128,18 @@ pub use gonilable::nilable;
 /// runtime, all reachable impls have registered.
 pub mod any {
     pub use crate::goany::{
-        register_with, lookup_with, DowncastableFromAny, TraitProbe, TraitRegistry,
+        register_with, lookup_with, AsExt, DowncastableFromAny, HasDynAny,
+        TraitProbe, TraitRegistry,
     };
 }
+
+// AsExt + HasDynAny are also re-exported at root so
+// `use goish::AsExt;` brings the `.As::<T>()` extension into scope
+// for trait-borrow receivers. HasDynAny is what
+// `#[goish::interface]` emits per-trait (`impl HasDynAny for dyn
+// Trait + Send + Sync`) — keeping it at root simplifies the macro's
+// generated path.
+pub use goany::{AsExt, HasDynAny};
 pub use nilval::{nil, Nil};
 pub use goarray::array;
 pub use gochan::chan;

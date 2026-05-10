@@ -223,6 +223,79 @@ impl<T: 'static + Sized> DowncastableFromAny for T {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// HasDynAny + AsExt — `<thing>.As::<T>()` on borrowed-trait carriers
+// ─────────────────────────────────────────────────────────────────────
+
+/// Witnesses that `Self` exposes a `&dyn Any + Send + Sync` view.
+/// Two impl families:
+///
+/// 1. **Blanket `impl<T: 'static + Sized + Send + Sync>`** — concrete
+///    sized types upcast directly via subtype coercion.
+///
+/// 2. **Per-trait `impl HasDynAny for dyn Trait + Send + Sync`**
+///    emitted by `#[goish::interface]`. Routes through the trait's
+///    `__as_dyn_any` method (also added by the macro, default body
+///    returns `None`). Concrete impls override the default to return
+///    `Some(self)` — the transpiler emits this override at every
+///    `impl Trait for ConcreteStruct` site.
+///
+/// Why not Any-as-supertrait: adding `core::any::Any` as a supertrait
+/// of every user trait would require `Self: 'static`, which breaks
+/// common forwarding impls like
+/// `impl<R: Reader + ?Sized> Reader for &mut R` (the borrow lifetime
+/// isn't 'static). Routing through a trait method with a default body
+/// avoids the constraint while still letting concrete impls expose
+/// their Any view.
+pub trait HasDynAny {
+    /// Returns the wrapped value's `&dyn Any` view when the concrete
+    /// type registered one. Default is `None` (the type is opaque
+    /// from the Any-perspective). Concrete impls of
+    /// `#[goish::interface]`-decorated traits override to `Some(self)`.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn CoreAny + Send + Sync)>;
+}
+
+impl<T: 'static + Sized + Send + Sync> HasDynAny for T {
+    #[inline]
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn CoreAny + Send + Sync)> {
+        Some(self)
+    }
+}
+
+/// Blanket extension that makes `.As::<T>()` available on any borrowed
+/// carrier that exposes a `&dyn Any` view via `HasDynAny`. Drives Go's
+/// interface-borrow downcast `b, ok := rd.(*Reader)` where rd is
+/// `&mut dyn io::Reader` — the transpiler emits `rd.As::<Reader>()`,
+/// and method resolution picks AsExt's impl (the inherent `Any::As`
+/// lives on `goish::Any`, the newtype, and takes precedence on that
+/// exact type).
+///
+/// Naming: `As` (capital, Goish-style) keeps the surface uniform with
+/// `goish::Any::As<T>`. Method-resolution priority:
+///
+///   1. Inherent `Any::As<T>` on the newtype `goish::Any` — wins for
+///      that exact receiver.
+///   2. AsExt::As<T> blanket — wins for `&dyn Trait` borrows and bare
+///      concrete types alike.
+pub trait AsExt {
+    /// `Some(&T)` when the wrapped value's runtime type is `T`. For
+    /// `T = dyn Trait`, consults the per-trait registry populated by
+    /// `__goish_register_<trait>_impl::<Concrete>()` calls. For a
+    /// Sized + 'static `T`, falls through to `downcast_ref::<T>()`.
+    fn As<T: ?Sized + DowncastableFromAny>(&self) -> Option<&T>;
+}
+
+impl<U> AsExt for U
+where
+    U: ?Sized + HasDynAny,
+{
+    #[inline]
+    fn As<T: ?Sized + DowncastableFromAny>(&self) -> Option<&T> {
+        let any_ref = self.__goish_as_dyn_any()?;
+        T::from_any(any_ref)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Trait-impl registry for `Any::As::<dyn Trait>()`
 // ─────────────────────────────────────────────────────────────────────
 //

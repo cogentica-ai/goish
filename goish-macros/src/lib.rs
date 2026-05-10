@@ -1053,6 +1053,13 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // preserved by token-capturing them in parse_iface. Rust accepts
     // duplicate trait bounds without warnings, so over-specifying is
     // harmless if the user already wrote `: Send + Sync`.
+    //
+    // Note: we don't add `core::any::Any` as a supertrait — Any
+    // requires `Self: 'static`, which would break common forwarding
+    // impls like `impl<R: Reader + ?Sized> Reader for &mut R` where
+    // the borrow lifetime is shorter than 'static. Trait-borrow
+    // downcast (TRAIT-BORROW-DOWNCAST) instead routes through the
+    // per-trait `__as_dyn_any` method that we add below.
     let supertraits = if parsed.supertraits.is_empty() {
         String::from(": ::core::marker::Send + ::core::marker::Sync")
     } else {
@@ -1079,6 +1086,18 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     }
     out.push_str("    #[doc(hidden)]\n");
     out.push_str("    fn __is_nil_iface(&self) -> bool { false }\n");
+    // `__goish_as_dyn_any` exposes a `&dyn Any` view for trait-borrow
+    // downcast (TRAIT-BORROW-DOWNCAST). Default body returns None —
+    // forwarding impls and the nil sentinel inherit this. Concrete
+    // user impls override to `Some(self)` (the transpiler emits the
+    // override at every `impl Trait for Concrete` site). Object-safe
+    // since the method has no generic params.
+    out.push_str("    #[doc(hidden)]\n");
+    out.push_str(
+        "    fn __goish_as_dyn_any(&self) \
+         -> ::core::option::Option<&(dyn ::core::any::Any \
+         + ::core::marker::Send + ::core::marker::Sync)> { ::core::option::Option::None }\n",
+    );
     out.push_str("}\n\n");
 
     // ── (2) Nil sentinel struct ─────────────────────────────────────
@@ -1328,6 +1347,34 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let _ = writeln!(
         out,
         "        ::goish::any::lookup_with(&{registry_name}, any_ref)"
+    );
+    out.push_str("    }\n}\n\n");
+
+    // ── (9) HasDynAny for `dyn Trait + Send + Sync` ─────────────────
+    //
+    // Routes `&dyn Trait`'s "give me an Any view" request through the
+    // trait's `__goish_as_dyn_any` method (added in section 1's
+    // trait-redecl). Concrete impls override to `Some(self)`; default
+    // is `None`. The `AsExt::As<T>` blanket consults HasDynAny, so
+    // `rd.As::<Reader>()` on `rd: &dyn Trait` works out-of-the-box
+    // for any concrete type that overrode `__goish_as_dyn_any`.
+    //
+    // Without this impl, `dyn Trait + Send + Sync: !HasDynAny`,
+    // because the blanket on Sized + 'static doesn't reach unsized
+    // dyn types. Path: TRAIT-BORROW-DOWNCAST.
+    let _ = writeln!(
+        out,
+        "impl ::goish::any::HasDynAny \
+         for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
+    );
+    out.push_str(
+        "    #[inline]\n    fn __goish_as_dyn_any(&self) \
+         -> ::core::option::Option<&(dyn ::core::any::Any + \
+         ::core::marker::Send + ::core::marker::Sync)> {\n",
+    );
+    let _ = writeln!(
+        out,
+        "        {name}::__goish_as_dyn_any(self)"
     );
     out.push_str("    }\n}\n\n");
 
