@@ -33,26 +33,21 @@
 macro_rules! any_args {
     () => {
         {
-            let v: $crate::__macro_alloc::Vec<
-                $crate::__macro_alloc::Box<
-                    ::core::any::Any
-                >
-            > = $crate::__macro_alloc::Vec::new();
-            // Routed through __from_vec for empty parity with the
-            // populated arm below — caller never sees an Arc-cast detour.
-            let _ = v; // suppress unused if expansion ends here
-            $crate::slice::__from_vec::<
-                ::alloc::sync::Arc<dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync>
-            >($crate::__macro_alloc::Vec::new())
+            // Empty `args ...interface{}` — element type is the
+            // `goish::Any` newtype (replaces the raw Arc<dyn Any+...>
+            // shape). Routed through __from_vec so the slice's empty
+            // shape matches the populated arm exactly.
+            $crate::slice::__from_vec::<$crate::Any>(
+                $crate::__macro_alloc::Vec::new()
+            )
         }
     };
     ($($arg:expr),+ $(,)?) => {
         {
-            let v: $crate::__macro_alloc::Vec<
-                ::alloc::sync::Arc<dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync>
-            > = $crate::__macro_alloc::vec![
-                $( ::alloc::sync::Arc::new($arg) as ::alloc::sync::Arc<dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync> ),+
-            ];
+            let v: $crate::__macro_alloc::Vec<$crate::Any>
+                = $crate::__macro_alloc::vec![
+                    $( $crate::Any::new($arg) ),+
+                ];
             $crate::slice::__from_vec(v)
         }
     };

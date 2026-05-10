@@ -68,6 +68,7 @@ pub mod errors;
 pub mod expvar;
 pub mod flag;
 pub mod fmt;
+pub mod goany;
 pub mod goarray;
 pub mod gochan;
 pub mod gomap;
@@ -116,6 +117,7 @@ pub use convert::{
     uint16, uint32, uint64, uint8,
 };
 pub use errors::error;
+pub use goany::Any;
 pub use gonilable::nilable;
 pub use nilval::{nil, Nil};
 pub use goarray::array;

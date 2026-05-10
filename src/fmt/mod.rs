@@ -307,6 +307,16 @@ impl Format for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
     }
 }
 
+// `goish::Any` (interface{} newtype) — forwards through `.0` to the
+// raw-Arc impl above so transpiler output that emits `goish::Any`
+// at fmt.Sprint / Errorf / Println sites picks up the same probe-
+// list behaviour.
+impl Format for crate::goany::Any {
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        self.0.fmt(verb, f)
+    }
+}
+
 // All integer widths route through one helper.
 macro_rules! impl_format_for_signed {
     ($($t:ty),*) => { $( impl Format for $t {
@@ -787,12 +797,12 @@ pub fn sprintf_impl(format: &[byte], args: &[FmtArg]) -> string {
 /// alive across the call. The placeholder string has `'static`
 /// lifetime, which trivially outlives any caller's `'a`.
 fn __any_args_to_fmtargs<'a>(
-    args: &'a slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+    args: &'a slice<crate::goany::Any>,
 ) -> Vec<FmtArg<'a>> {
     static PLACEHOLDER: &str = "<unsupported %T>";
     let mut fa: Vec<FmtArg<'a>> = Vec::with_capacity(args.Len() as usize);
     for a in args.iter() {
-        let any: &(dyn core::any::Any + Send + Sync) = a.as_ref();
+        let any: &(dyn core::any::Any + Send + Sync) = a.as_any();
         if let Some(v) = any.downcast_ref::<string>() {
             fa.push(FmtArg::Val(v as &dyn Format));
         } else if let Some(v) = any.downcast_ref::<&str>() {
@@ -838,7 +848,7 @@ fn __any_args_to_fmtargs<'a>(
 /// Unrecognised types render as `"<unsupported %T>"`.
 pub fn Sprintv<S: Into<string>>(
     format: S,
-    args: slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+    args: slice<crate::goany::Any>,
 ) -> string {
     let format = format.into();
     let fa = __any_args_to_fmtargs(&args);
@@ -848,7 +858,7 @@ pub fn Sprintv<S: Into<string>>(
 /// Runtime variadic-spread Errorf — `fmt.Errorf(format, args...)`.
 pub fn Errorv<S: Into<string>>(
     format: S,
-    args: slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+    args: slice<crate::goany::Any>,
 ) -> error {
     let format = format.into();
     let fa = __any_args_to_fmtargs(&args);
@@ -858,7 +868,7 @@ pub fn Errorv<S: Into<string>>(
 /// Runtime variadic-spread Printf — `fmt.Printf(format, args...)`.
 pub fn Printv<S: Into<string>>(
     format: S,
-    args: slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+    args: slice<crate::goany::Any>,
 ) -> (int, error) {
     let format = format.into();
     let fa = __any_args_to_fmtargs(&args);
@@ -869,7 +879,7 @@ pub fn Printv<S: Into<string>>(
 pub fn Fprintv<W: io::Writer, S: Into<string>>(
     w: &mut W,
     format: S,
-    args: slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+    args: slice<crate::goany::Any>,
 ) -> (int, error) {
     let format = format.into();
     let fa = __any_args_to_fmtargs(&args);

@@ -1626,6 +1626,21 @@ impl Reflect for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
     }
 }
 
+// `goish::Any` (interface{} newtype) — forwards to the inner Arc's
+// Reflect impl. Mirrors the Format forwarder in fmt/mod.rs so the
+// transpiler can emit `goish::Any` at interface{} sites without
+// losing reflect-table behaviour.
+impl Reflect for crate::goany::Any {
+    #[inline]
+    fn __reflect_type() -> Type {
+        <alloc::sync::Arc<dyn core::any::Any + Send + Sync> as Reflect>::__reflect_type()
+    }
+    #[inline]
+    fn __reflect_value(&self) -> Value {
+        <alloc::sync::Arc<dyn core::any::Any + Send + Sync> as Reflect>::__reflect_value(&self.0)
+    }
+}
+
 // `interface{}` reflection — AnyReflect carrier. Mirrors the
 // `Arc<dyn Any + Send + Sync>` flavour above, but the supertrait
 // already provides per-value Reflect dispatch, so `__reflect_value`

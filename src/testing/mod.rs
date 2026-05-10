@@ -120,7 +120,7 @@ impl T {
     pub fn Errorf<M: Into<string>>(
         &self,
         format: M,
-        args: crate::goslice::slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+        args: crate::goslice::slice<crate::goany::Any>,
     ) {
         let format: string = format.into();
         let msg: string = if args.Len() == 0 {
