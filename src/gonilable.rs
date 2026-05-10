@@ -35,10 +35,16 @@
 // API surface (mirrors Go's `*T` behaviour where possible):
 //
 //   nilable::new(t)              — wrap an owned T (non-nil); allocates Arc
-//   nilable::<T>::default()      — the nil pointer (single source of nil-shape)
+//   nilable::<T>::nil()          — the nil pointer (const fn; same shape as below)
+//   nilable::<T>::default()      — the nil pointer (Default::default form)
 //   nil.into() at nilable<T> slot— same shape, via `From<Nil> for nilable<T>`
 //   x.IsNil()                    — does this hold nil?
 //   x == nil / nil == x          — false unless x.IsNil()
+//
+// All four nil-shape entries land the same value. `::nil()` and
+// `::default()` exist side-by-side because `::nil()` is a `const fn`
+// (usable in const contexts where Default::default isn't), while
+// `::default()` is the trait-driven path.
 //
 // Panic-bearing extractors (Go-style `Must` prefix — only the
 // transpiler emits these inside scopes it has flow-proven non-nil;
@@ -90,6 +96,15 @@ impl<T> nilable<T> {
     #[inline]
     pub fn new(value: T) -> Self {
         nilable(Some(Arc::new(value)))
+    }
+
+    /// The nil nilable. `const fn` so it works in const contexts —
+    /// `Default::default()` isn't const, so this is the entry point
+    /// when a nil is needed at compile time. Same shape as
+    /// `<nilable<T>>::default()` and `nil.into()`.
+    #[inline]
+    pub const fn nil() -> Self {
+        nilable(None)
     }
 
     /// Is this the nil pointer?
