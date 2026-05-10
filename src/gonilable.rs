@@ -19,18 +19,13 @@
 // same nilable refer to the same underlying T (shared mutation
 // through `MustMut`'s `Arc::make_mut`).
 //
-// Why Arc storage:
-//   - `m[k]` for a `map<K, *T>` value: Go semantics is pointer copy
-//     (cheap, no T-clone required even for non-Clone T like
-//     sync::Mutex). With Option<T> storage, `nilable<sync::Mutex>`
-//     wasn't Clone, so `map.Get` (which clones V) failed type-check.
-//     With Option<Arc<T>>, Clone is always cheap and Mutex-bearing
-//     pointers compose with maps cleanly.
-//   - struct field `*T` shared across receivers: writes through one
-//     receiver are observed by readers through another receiver,
-//     matching Go's `*T` field aliasing.
-//   - return slot `*T` from a constructor: caller and callee share
-//     the same allocation, no pointless clone.
+// `?Sized` on the T parameter lets `nilable<dyn Trait + Send + Sync>`
+// exist — needed by the per-trait forwarding `impl Trait for nilable<T>`
+// that `#[goish::interface]` emits so a `nilable<MyTracer>` flows into
+// `impl Tracer + 'static` slots without a wrapper type. Methods that
+// take/return T by value (new, MustTake, Take, OrDefault, OrElse) live
+// in a separate Sized-only impl block; methods that work through &T
+// (Must, Try, IfNotNil, ptr_eq, …) work for any T.
 //
 // API surface (mirrors Go's `*T` behaviour where possible):
 //
@@ -41,22 +36,15 @@
 //   x.IsNil()                    — does this hold nil?
 //   x == nil / nil == x          — false unless x.IsNil()
 //
-// All four nil-shape entries land the same value. `::nil()` and
-// `::default()` exist side-by-side because `::nil()` is a `const fn`
-// (usable in const contexts where Default::default isn't), while
-// `::default()` is the trait-driven path.
-//
 // Panic-bearing extractors (Go-style `Must` prefix — only the
 // transpiler emits these inside scopes it has flow-proven non-nil;
 // hand-written Goish code generally uses `Try`/`IfNotNil`/`OrDefault`
 // instead). Naming follows Go's `regexp.MustCompile` convention: the
 // `Must` prefix signals "panics if the precondition fails":
 //
-//   x.Must()         — &T (Arc::deref), panics on nil
-//   x.MustMut()      — &mut T (Arc::make_mut, clone-on-write if
-//                      shared), panics on nil. Requires T: Clone.
-//   x.MustTake()     — T (consuming, Arc::try_unwrap or clone-fallback),
-//                      panics on nil. Requires T: Clone.
+//   x.Must()         — &T, panics on nil
+//   x.MustMut()      — &mut T (Arc::get_mut, panics on shared), panics on nil
+//   x.MustTake()     — T (consuming, Arc::try_unwrap), panics on nil or shared
 //
 // Goro: Go-idioms-first — call sites read like Go (`if id == nil`,
 // `id.Method()`, `*id = …`), Rust idioms (Some/None, ?, etc.) stay
@@ -69,35 +57,23 @@ use alloc::sync::Arc;
 
 /// `nilable<T>` — Goish's `*T` shape with a Go-idiomatic API.
 ///
-/// Storage is `Option<Arc<T>>`, which gives:
-///   - Clone is always cheap (Arc refcount bump); doesn't require
-///     `T: Clone`.
-///   - Two clones of the same nilable share the underlying T —
-///     mutation through one is visible through the others (matching
-///     Go's `*T` aliasing).
-///   - `MustMut` clones the inner T if the Arc is shared (`make_mut`'s
-///     copy-on-write semantic). For shared mutable access without
-///     copy, wrap T in `sync::Mutex` (the goroutine-safe pattern).
-pub struct nilable<T>(Option<Arc<T>>);
+/// Storage is `Option<Arc<T>>`. Clone is always cheap (Arc refcount
+/// bump); two clones share the underlying T. `T: ?Sized` lets the
+/// type carry `dyn Trait` payloads — used by per-trait forwarding
+/// impls emitted by `#[goish::interface]`.
+pub struct nilable<T: ?Sized>(Option<Arc<T>>);
 
 // Manual Clone impl so nilable<T> is Clone for ALL T (not just T: Clone)
 // — Arc's Clone is the refcount bump, not T's clone.
-impl<T> Clone for nilable<T> {
+impl<T: ?Sized> Clone for nilable<T> {
     #[inline]
     fn clone(&self) -> Self {
         nilable(self.0.clone())
     }
 }
 
-impl<T> nilable<T> {
-    /// Wrap an owned T as a non-nil nilable. Mirrors Go's `&T{…}`
-    /// construction. Allocates a new `Arc<T>`; the resulting nilable
-    /// has refcount 1 until a clone bumps it.
-    #[inline]
-    pub fn new(value: T) -> Self {
-        nilable(Some(Arc::new(value)))
-    }
-
+// ── `?Sized` methods — work for `nilable<dyn Trait>` etc. ───────────
+impl<T: ?Sized> nilable<T> {
     /// The nil nilable. `const fn` so it works in const contexts —
     /// `Default::default()` isn't const, so this is the entry point
     /// when a nil is needed at compile time. Same shape as
@@ -118,9 +94,6 @@ impl<T> nilable<T> {
     /// caller; failure crashes loudly. Pairs with `Try()` (which
     /// returns `Option<&T>`). Transpiler emits this inside scopes
     /// it has flow-proven non-nil — never as auto-deref.
-    ///
-    /// Cost: zero — Arc's `Deref` implementation is a single pointer
-    /// dereference.
     #[inline]
     #[track_caller]
     pub fn Must(&self) -> &T {
@@ -135,16 +108,8 @@ impl<T> nilable<T> {
     /// rationale as `Must()`.
     ///
     /// Goish-shared-mutation rule: a shared pointer can't yield
-    /// `&mut T` directly without breaking aliasing. Go allows this
-    /// via undefined behaviour (data races); Goish requires the user
-    /// to wrap T in `sync::Mutex` (or another interior-mutability
-    /// type) for shared mutation. Hence `MustMut` works only when
-    /// the Arc is uniquely owned — refcount 1 — and panics
-    /// otherwise. The panic mirrors Go's "you said this is fine
-    /// but it isn't" runtime trap.
-    ///
-    /// Does NOT require `T: Clone`. The shared-Arc case isn't a
-    /// clone-on-write — it's a hard error.
+    /// `&mut T` directly without breaking aliasing. Wrap T in
+    /// `sync::Mutex` for shared mutation.
     #[inline]
     #[track_caller]
     pub fn MustMut(&mut self) -> &mut T {
@@ -156,35 +121,6 @@ impl<T> nilable<T> {
             None => nil_deref_panic(),
         }
     }
-
-    /// Consume the nilable and return the inner T, panicking on nil
-    /// or on a shared alias. Pairs with `Take()` (which returns
-    /// `Option<T>`). Useful when the caller wants ownership of the
-    /// inner value.
-    ///
-    /// Same shared-alias rule as `MustMut`: succeeds only when the
-    /// Arc is uniquely owned (refcount 1). Doesn't require
-    /// `T: Clone`.
-    #[inline]
-    #[track_caller]
-    pub fn MustTake(self) -> T {
-        match self.0 {
-            Some(arc) => Arc::try_unwrap(arc).unwrap_or_else(|_| shared_mut_panic()),
-            None => nil_deref_panic(),
-        }
-    }
-
-    // ─── Safe (non-panicking) accessors ───────────────────────────
-    //
-    // The canonical Go-idiomatic pattern for nil-safety is:
-    //
-    //     if !p.IsNil() {
-    //         use(*p);  // Deref panics, but we just guarded
-    //     }
-    //
-    // The helpers below cover the cases where that pattern is
-    // cumbersome. None of them panic — pick whichever fits the call
-    // site's shape.
 
     /// Safe shared borrow — `Some(&T)` if non-nil, `None` if nil.
     /// Use with `if let Some(t) = p.Try() { … }` for pattern-match
@@ -206,11 +142,73 @@ impl<T> nilable<T> {
         }
     }
 
+    /// Apply `f` if non-nil, returning `Some(f(&t))`; `None` if nil.
+    /// Useful for read-only transforms: `p.If(|t| t.Len()).
+    /// unwrap_or(0)`.
+    #[inline]
+    pub fn If<R, F>(&self, f: F) -> Option<R>
+    where
+        F: FnOnce(&T) -> R,
+    {
+        self.0.as_deref().map(f)
+    }
+
+    /// Apply `f` if non-nil AND uniquely owned, mutating in place;
+    /// no-op if nil OR shared. Returns `true` when the closure ran,
+    /// `false` otherwise.
+    #[inline]
+    pub fn IfMut<F>(&mut self, f: F) -> bool
+    where
+        F: FnOnce(&mut T),
+    {
+        match self.TryMut() {
+            Some(t) => {
+                f(t);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Pointer-equality test — true iff both nilables alias the same
+    /// underlying allocation (or both are nil). Mirrors Go's `==` on
+    /// pointer values, which compares pointer identity rather than
+    /// dereferenced equality. Doesn't require `T: PartialEq`.
+    #[inline]
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (None, None) => true,
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+}
+
+// ── Sized-only methods — those that take or return `T` by value ─────
+impl<T> nilable<T> {
+    /// Wrap an owned T as a non-nil nilable. Mirrors Go's `&T{…}`
+    /// construction. Allocates a new `Arc<T>`; the resulting nilable
+    /// has refcount 1 until a clone bumps it.
+    #[inline]
+    pub fn new(value: T) -> Self {
+        nilable(Some(Arc::new(value)))
+    }
+
+    /// Consume the nilable and return the inner T, panicking on nil
+    /// or on a shared alias. Pairs with `Take()` (which returns
+    /// `Option<T>`).
+    #[inline]
+    #[track_caller]
+    pub fn MustTake(self) -> T {
+        match self.0 {
+            Some(arc) => Arc::try_unwrap(arc).unwrap_or_else(|_| shared_mut_panic()),
+            None => nil_deref_panic(),
+        }
+    }
+
     /// Cloned-or-default — return a clone of the inner T, or
     /// `T::default()` if nil. Mirrors Go's "nil-tolerant" idiom
-    /// where reads from a nil pointer return the zero value (NOT
-    /// what Go does at the language level, but what user-defined
-    /// methods on pointer types often do).
+    /// where reads from a nil pointer return the zero value.
     #[inline]
     pub fn OrDefault(&self) -> T
     where
@@ -236,58 +234,13 @@ impl<T> nilable<T> {
         }
     }
 
-    /// Apply `f` if non-nil, returning `Some(f(&t))`; `None` if nil.
-    /// Useful for read-only transforms: `p.If(|t| t.Len()).
-    /// unwrap_or(0)`.
-    #[inline]
-    pub fn If<R, F>(&self, f: F) -> Option<R>
-    where
-        F: FnOnce(&T) -> R,
-    {
-        self.0.as_deref().map(f)
-    }
-
-    /// Apply `f` if non-nil AND uniquely owned, mutating in place;
-    /// no-op if nil OR shared. Returns `true` when the closure ran,
-    /// `false` otherwise. Doesn't require `T: Clone` — silently
-    /// no-ops on shared aliases (caller can detect via the bool
-    /// return).
-    #[inline]
-    pub fn IfMut<F>(&mut self, f: F) -> bool
-    where
-        F: FnOnce(&mut T),
-    {
-        match self.TryMut() {
-            Some(t) => {
-                f(t);
-                true
-            }
-            None => false,
-        }
-    }
-
     /// Take the inner T, leaving nil behind. Returns `None` if
-    /// already nil OR shared, `Some(t)` otherwise. Doesn't require
-    /// `T: Clone`. Callers wanting clone-on-shared semantics should
-    /// guard with `IsNil` and reach for `Must().clone()`.
+    /// already nil OR shared, `Some(t)` otherwise.
     #[inline]
     pub fn Take(&mut self) -> Option<T> {
         self.0
             .take()
             .and_then(|arc| Arc::try_unwrap(arc).ok())
-    }
-
-    /// Pointer-equality test — true iff both nilables alias the same
-    /// underlying allocation (or both are nil). Mirrors Go's `==` on
-    /// pointer values, which compares pointer identity rather than
-    /// dereferenced equality. Doesn't require `T: PartialEq`.
-    #[inline]
-    pub fn ptr_eq(&self, other: &Self) -> bool {
-        match (&self.0, &other.0) {
-            (None, None) => true,
-            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-            _ => false,
-        }
     }
 }
 
@@ -307,7 +260,7 @@ fn shared_mut_panic() -> ! {
     )
 }
 
-impl<T> Default for nilable<T> {
+impl<T: ?Sized> Default for nilable<T> {
     #[inline]
     fn default() -> Self {
         nilable(None)
@@ -332,14 +285,14 @@ impl<T> Default for nilable<T> {
 
 // Equality with the universal Nil sentinel — `if x == nil { … }` and
 // `if nil == x { … }`. Symmetric impls.
-impl<T> PartialEq<Nil> for nilable<T> {
+impl<T: ?Sized> PartialEq<Nil> for nilable<T> {
     #[inline]
     fn eq(&self, _: &Nil) -> bool {
         self.IsNil()
     }
 }
 
-impl<T> PartialEq<nilable<T>> for Nil {
+impl<T: ?Sized> PartialEq<nilable<T>> for Nil {
     #[inline]
     fn eq(&self, other: &nilable<T>) -> bool {
         other.IsNil()
@@ -353,14 +306,14 @@ impl<T> PartialEq<nilable<T>> for Nil {
 //
 // Callers wanting deep equality should use `*a == *b` (i.e. compare
 // `a.Must()` and `b.Must()`) once they've nil-guarded.
-impl<T> PartialEq for nilable<T> {
+impl<T: ?Sized> PartialEq for nilable<T> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.ptr_eq(other)
     }
 }
 
-impl<T> Eq for nilable<T> {}
+impl<T: ?Sized> Eq for nilable<T> {}
 
 // `From<T>` is intentionally NOT implemented here — it would conflict
 // with the blanket `From<T> for T` (instantiating T = nilable<T>) and
@@ -370,7 +323,7 @@ impl<T> Eq for nilable<T> {}
 // `From<Nil>` — `let x: nilable<T> = nil.into();` and the auto-coerce
 // at `nil` literals in nilable<T>-typed slots. Routes to the same
 // shape as `<nilable<T>>::default()` — single nil semantics.
-impl<T> From<Nil> for nilable<T> {
+impl<T: ?Sized> From<Nil> for nilable<T> {
     #[inline]
     fn from(_: Nil) -> Self {
         nilable(None)
@@ -380,7 +333,7 @@ impl<T> From<Nil> for nilable<T> {
 // Display / Debug forwarders — delegate to the inner T so user
 // formatting code (println, fmt::Errorf with %v) prints something
 // useful. nil prints as "<nil>" matching Go's fmt %v on nil pointers.
-impl<T: core::fmt::Debug> core::fmt::Debug for nilable<T> {
+impl<T: ?Sized + core::fmt::Debug> core::fmt::Debug for nilable<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match &self.0 {
             Some(t) => t.as_ref().fmt(f),
@@ -389,7 +342,7 @@ impl<T: core::fmt::Debug> core::fmt::Debug for nilable<T> {
     }
 }
 
-impl<T: core::fmt::Display> core::fmt::Display for nilable<T> {
+impl<T: ?Sized + core::fmt::Display> core::fmt::Display for nilable<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match &self.0 {
             Some(t) => t.as_ref().fmt(f),

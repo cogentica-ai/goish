@@ -300,7 +300,7 @@ pub fn var_emit_error_marker(input: TokenStream) -> TokenStream {
     let src = format!(
         r#"
         #[doc(hidden)]
-        #[derive(::core::marker::Copy, ::core::clone::Clone)]
+        #[derive(::core::marker::Copy, ::core::clone::Clone, ::core::fmt::Debug)]
         {vis}struct {marker};
 
         #[allow(non_upper_case_globals)]
@@ -1045,7 +1045,6 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let parsed = parse_iface(item);
     let name = &parsed.name;
     let nil_name = format!("__Nil{}", name);
-    let ref_name = format!("{}Ref", name);
     let vis = parsed.vis.as_deref().unwrap_or("");
 
     // Compose the supertrait clause. We always require `Send + Sync`
@@ -1100,74 +1099,133 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     out.push_str("    fn __is_nil_iface(&self) -> bool { true }\n");
     out.push_str("}\n\n");
 
-    // ── (4) The canonical iface-value newtype `<Trait>Ref` ──────────
+    // ── HARD RULE: NO PER-TRAIT WRAPPER NEWTYPE EMITTED ─────────────
     //
-    // `Arc<dyn Trait>` would be the natural representation, but Rust's
-    // orphan rule rejects `impl Default for Arc<dyn LocalTrait>` —
-    // `Arc` isn't `#[fundamental]`, so the local trait inside doesn't
-    // make the outer Arc local. The wrapper newtype (declared in the
-    // same crate as the trait) is local, so all impls land cleanly.
+    // Earlier designs emitted `<Trait>Ref(pub Arc<dyn Trait + Send +
+    // Sync>)` to host orphan-rule-bound impls (Default, From<U>,
+    // From<Nil>, PartialEq<Nil>) that the rule rejects on bare
+    // `Arc<dyn LocalTrait>`. That generated one new top-level type per
+    // user trait — visual clutter that the Goish project has decided
+    // is not acceptable.
     //
-    // Provides Default, Clone, Deref<Target = dyn Trait>, PartialEq<Nil>
-    // both directions, and `From<T>` for any concrete impl. Use sites
-    // see a value-type wrapper that behaves exactly like a Go interface
-    // value.
-    let _ = writeln!(out,
-        "{vis} struct {ref_name}(pub ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync>);"
-    );
-    out.push('\n');
+    // Replacement convention (enforced by the goishc transpiler, NOT
+    // by macro emission):
+    //   * Function params of interface type lower to
+    //     `impl Trait + 'static` (anonymous generic + bound). No
+    //     wrapper at the param position.
+    //   * Storage positions (struct fields, locals, returns, Hook<T>)
+    //     use `Arc<dyn Trait + Send + Sync>` directly.
+    //   * Default / From<Nil> / PartialEq<Nil> are NOT available on
+    //     `Arc<dyn Trait>` — the transpiler instead emits explicit
+    //     sentinel construction (`Arc::new(__NilTrait)`) and explicit
+    //     nil-checks (`(*v).__is_nil_iface()`). This is the price of
+    //     the no-wrapper rule.
+    //
+    // Section (7) below — `From<Nil> for Box<dyn Trait + Send + Sync>`
+    // — is retained because `Box<T>` is `#[fundamental]`, so its
+    // From<Nil> impl is orphan-rule-allowed without a wrapper. Used
+    // by legacy paths that lower interface returns to Box.
 
-    let _ = writeln!(out,
-        "impl ::core::default::Default for {ref_name} {{"
-    );
-    let _ = writeln!(out,
-        "    #[inline] fn default() -> Self {{ {ref_name}(::alloc::sync::Arc::new({nil_name})) }}"
-    );
-    out.push_str("}\n\n");
+    // ── (6.5) Forwarding impl Trait for Hook<dyn T + Send + Sync> ─
+    //
+    // Lets `goish::var! { pub iface tracer: Tracer; }` users call
+    // `tracer.M(args)` directly — no `tracer.call(|h| h.M(args)).unwrap()`
+    // closure noise. The forwarding impl:
+    //   * locks the SpinLock,
+    //   * if `Some(t)` → calls `t.<method>(args)` via shared `&T`,
+    //   * if `None`    → panics with the same nil-call message the
+    //                    sentinel impl uses (Go's nil-method panic).
+    //
+    // Skip conditions:
+    //   * Any method has `&mut self` receiver — Hook<T>'s Arc storage
+    //     only allows shared `&T` access. Stateful traits use the
+    //     pass5 closure-form fallback (`.call(|h| h.M(args)).unwrap()`).
+    //   * Method-shape parsing failed — same fallback.
+    //
+    // Orphan rule: this impl is local because the trait `T` is local;
+    // `Hook<dyn T + …>` is then a local type instance.
+    let mut forwarding_impl_ok = !parsed.methods.is_empty();
+    for m in &parsed.methods {
+        if m.method_name.is_empty() {
+            forwarding_impl_ok = false;
+            break;
+        }
+        if m.receiver == "&mut self" {
+            forwarding_impl_ok = false;
+            break;
+        }
+    }
+    if forwarding_impl_ok {
+        let _ = writeln!(
+            out,
+            "impl {name} for ::goish::hook::Hook<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
+        );
+        for m in &parsed.methods {
+            let arg_list = m.arg_names.join(", ");
+            // `call_or_panic` (defined on Hook<T>) handles the lock +
+            // unwrap-or-panic dance, so the forwarding body is a
+            // single line. The trait method's `&self` / `&mut self`
+            // distinction doesn't matter at this layer — Hook always
+            // dispatches through `&mut T` (which auto-deref-coerces
+            // to `&T` for `&self` methods).
+            let body = format!(
+                "{{ self.call_or_panic(\"goish: method call on nil {name} interface\", |__t| __t.{method}({args})) }}",
+                name = name,
+                method = m.method_name,
+                args = arg_list,
+            );
+            let _ = writeln!(out, "    {} {}", m.sig_only.trim(), body);
+        }
+        out.push_str("}\n\n");
+    }
 
-    let _ = writeln!(out, "impl ::core::clone::Clone for {ref_name} {{");
-    let _ = writeln!(out,
-        "    #[inline] fn clone(&self) -> Self {{ {ref_name}(::alloc::sync::Arc::clone(&self.0)) }}"
-    );
-    out.push_str("}\n\n");
-
-    let _ = writeln!(out, "impl ::core::ops::Deref for {ref_name} {{");
-    let _ = writeln!(out,
-        "    type Target = dyn {name} + ::core::marker::Send + ::core::marker::Sync;"
-    );
-    out.push_str("    #[inline] fn deref(&self) -> &Self::Target { &*self.0 }\n");
-    out.push_str("}\n\n");
-
-    // From<T> for any concrete impl — matches Go's "any type with the
-    // method set satisfies the interface" via Rust's `impl T for U`.
-    let _ = writeln!(out,
-        "impl<__T: {name} + 'static> ::core::convert::From<__T> for {ref_name} {{"
-    );
-    let _ = writeln!(out,
-        "    #[inline] fn from(t: __T) -> Self {{ {ref_name}(::alloc::sync::Arc::new(t)) }}"
-    );
-    out.push_str("}\n\n");
-
-    // ── (5) PartialEq<Nil> in both directions ──────────────────────
-    let _ = writeln!(out,
-        "impl ::core::cmp::PartialEq<::goish::Nil> for {ref_name} {{"
-    );
-    out.push_str("    #[inline] fn eq(&self, _: &::goish::Nil) -> bool { (*self.0).__is_nil_iface() }\n");
-    out.push_str("}\n\n");
-    let _ = writeln!(out,
-        "impl ::core::cmp::PartialEq<{ref_name}> for ::goish::Nil {{"
-    );
-    let _ = writeln!(out,
-        "    #[inline] fn eq(&self, other: &{ref_name}) -> bool {{ (*other.0).__is_nil_iface() }}"
-    );
-    out.push_str("}\n\n");
-
-    // ── (6) From<Nil> — lets `nil.into()` flow into iface slots ────
-    let _ = writeln!(out,
-        "impl ::core::convert::From<::goish::Nil> for {ref_name} {{"
-    );
-    out.push_str("    #[inline] fn from(_: ::goish::Nil) -> Self { <Self as ::core::default::Default>::default() }\n");
-    out.push_str("}\n\n");
+    // ── (6.6) Forwarding impl Trait for nilable<__T: Trait + ?Sized> ──
+    //
+    // Lets `nilable<MyTracer>` flow into `impl Trait + 'static` slots —
+    // e.g. `Register(t)` where `Register: fn(t: impl Tracer + 'static)`
+    // and `t: nilable<MyTracer>`. Without this impl, the user has to
+    // write `Register(t.Must().clone())` or similar, which leaks the
+    // pointer-shape into call sites.
+    //
+    // Body uses `self.Must()` (panics on nil). Soundness rests on the
+    // transpiler's flow analysis (Tobin-Hochstadt occurrence typing +
+    // Fähndrich-Leino non-null types) ensuring nilable bindings are
+    // proven NonNull at the call site. For hand-written Goish code,
+    // the panic is a backstop matching Go's nil-method-call runtime
+    // panic.
+    //
+    // Skip when:
+    //   * Any method has &mut self — nilable<T>'s Must() yields &T,
+    //     not &mut T. Stateful traits fall back to TryMut/MustMut at
+    //     the call site.
+    //   * Method-shape parsing failed.
+    //
+    // Orphan rule: implementing local trait <Trait> for foreign type
+    // nilable<__T> is always allowed (orphan rule restricts foreign
+    // trait + foreign type, not local trait + foreign type).
+    let mut nilable_impl_ok = !parsed.methods.is_empty();
+    for m in &parsed.methods {
+        if m.method_name.is_empty() || m.receiver == "&mut self" {
+            nilable_impl_ok = false;
+            break;
+        }
+    }
+    if nilable_impl_ok {
+        let _ = writeln!(
+            out,
+            "impl<__T: {name} + ?::core::marker::Sized> {name} for ::goish::nilable<__T> {{"
+        );
+        for m in &parsed.methods {
+            let arg_list = m.arg_names.join(", ");
+            let body = format!(
+                "{{ self.Must().{method}({args}) }}",
+                method = m.method_name,
+                args = arg_list,
+            );
+            let _ = writeln!(out, "    {} {}", m.sig_only.trim(), body);
+        }
+        out.push_str("}\n\n");
+    }
 
     // ── (7) Backwards-compat From<Nil> for Box<dyn T> ─────────────
     //
@@ -1217,6 +1275,20 @@ struct IfaceMethod {
     /// Signature-only text WITHOUT the trailing `;` or default body.
     /// Used to build the sentinel impl: `<sig_only> { panic!(…) }`.
     sig_only: String,
+    /// Method name (extracted from `fn <name>(…)`). Used by the
+    /// Hook-forwarding impl to emit `t.<name>(<args>)`.
+    method_name: String,
+    /// Argument names in source order, excluding `self` / `&self` /
+    /// `&mut self`. Used by the Hook-forwarding impl to thread args
+    /// into the inner call. Empty when the method takes only the
+    /// receiver (or when parsing failed — caller falls back to the
+    /// closure-form rewrite).
+    arg_names: Vec<String>,
+    /// Receiver shape — either "&self" or "&mut self". The
+    /// forwarding impl uses this to lock the SpinLock with `.lock()`
+    /// and call through the appropriate guard projection
+    /// (`as_ref()` for &self, `as_mut()` for &mut self).
+    receiver: String,
 }
 
 fn parse_iface(item: TokenStream) -> ParsedIface {
@@ -1295,23 +1367,32 @@ fn parse_iface_methods(body: TokenStream) -> Vec<IfaceMethod> {
 
         if is_terminator {
             // Signature-only method: `fn name(...) -> ret;`
-            let sig_only: TokenStream = current.drain(..).collect();
+            let sig_tokens: Vec<TokenTree> = current.drain(..).collect();
+            let (method_name, arg_names, receiver) = extract_method_shape(&sig_tokens);
+            let sig_only: TokenStream = sig_tokens.into_iter().collect();
             let sig_only_text = sig_only.to_string();
-            // full_text = sig + `;`
             let full_text = format!("{};", sig_only_text);
             methods.push(IfaceMethod {
                 full_text,
                 sig_only: sig_only_text,
+                method_name,
+                arg_names,
+                receiver,
             });
         } else if is_brace_body {
             // Default-bodied method: `fn name(...) -> ret { body }`.
             // sig_only excludes the brace body; full_text includes it.
-            let sig_only: TokenStream = current.drain(..).collect();
+            let sig_tokens: Vec<TokenTree> = current.drain(..).collect();
+            let (method_name, arg_names, receiver) = extract_method_shape(&sig_tokens);
+            let sig_only: TokenStream = sig_tokens.into_iter().collect();
             let sig_only_text = sig_only.to_string();
             let full_text = format!("{} {}", sig_only_text, tt.to_string());
             methods.push(IfaceMethod {
                 full_text,
                 sig_only: sig_only_text,
+                method_name,
+                arg_names,
+                receiver,
             });
         } else {
             current.push(tt);
@@ -1331,4 +1412,133 @@ fn parse_iface_methods(body: TokenStream) -> Vec<IfaceMethod> {
     }
 
     methods
+}
+
+// extract_method_shape parses a method signature's token stream and
+// extracts (method_name, arg_names, receiver_form). The signature
+// shape is `fn NAME(RECV, NAME: TYPE, …) -> RETURN` where RECV is one
+// of `self`, `&self`, `&mut self`. We need:
+//
+//   * method_name — for `t.<NAME>(args)` in the forwarding impl.
+//   * arg_names   — for the comma-separated forward list.
+//   * receiver    — to pick `as_ref()` vs `as_mut()` on the lock guard.
+//
+// Returns ("", vec![], "&self") on parse failure — the Hook-forwarding
+// impl-emitter checks for empty method_name and skips when the parse
+// can't be trusted.
+fn extract_method_shape(sig: &[TokenTree]) -> (String, Vec<String>, String) {
+    let mut iter = sig.iter().peekable();
+
+    // Skip optional `pub` (interfaces don't have it but be defensive).
+    while let Some(TokenTree::Ident(i)) = iter.peek() {
+        let s = i.to_string();
+        if s == "pub" {
+            iter.next();
+            continue;
+        }
+        break;
+    }
+
+    // Expect `fn`.
+    match iter.next() {
+        Some(TokenTree::Ident(i)) if i.to_string() == "fn" => {}
+        _ => return (String::new(), Vec::new(), String::from("&self")),
+    }
+
+    // Method name.
+    let method_name = match iter.next() {
+        Some(TokenTree::Ident(i)) => i.to_string(),
+        _ => return (String::new(), Vec::new(), String::from("&self")),
+    };
+
+    // Optional generics on the method itself — skip the `<…>` group's
+    // tokens until matching `>`. Rare in Goish ifaces but defensive.
+    if let Some(TokenTree::Punct(p)) = iter.peek() {
+        if p.as_char() == '<' {
+            iter.next();
+            let mut depth = 1;
+            while depth > 0 {
+                match iter.next() {
+                    Some(TokenTree::Punct(p)) if p.as_char() == '<' => depth += 1,
+                    Some(TokenTree::Punct(p)) if p.as_char() == '>' => depth -= 1,
+                    Some(_) => {}
+                    None => return (method_name, Vec::new(), String::from("&self")),
+                }
+            }
+        }
+    }
+
+    // Parameter list — a single Group with parens.
+    let params_group = match iter.next() {
+        Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Parenthesis => g.clone(),
+        _ => return (method_name, Vec::new(), String::from("&self")),
+    };
+
+    // Walk the param tokens, splitting on top-level commas.
+    let mut top_level_params: Vec<Vec<TokenTree>> = vec![Vec::new()];
+    for tt in params_group.stream() {
+        if let TokenTree::Punct(p) = &tt {
+            if p.as_char() == ',' {
+                top_level_params.push(Vec::new());
+                continue;
+            }
+        }
+        top_level_params.last_mut().unwrap().push(tt);
+    }
+
+    // Drop trailing-empty (after final comma).
+    if top_level_params
+        .last()
+        .map(|p| p.is_empty())
+        .unwrap_or(false)
+    {
+        top_level_params.pop();
+    }
+    if top_level_params.is_empty() {
+        return (method_name, Vec::new(), String::from("&self"));
+    }
+
+    // First param is the receiver. Detect `&mut self`, `&self`, `self`.
+    let recv_str = top_level_params[0]
+        .iter()
+        .map(|t| t.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let receiver = if recv_str.contains("mut") && recv_str.contains("self") {
+        "&mut self".to_string()
+    } else if recv_str.contains("self") {
+        "&self".to_string()
+    } else {
+        // Atypical — e.g. associated fn with no `self`. Skip forwarding.
+        return (String::new(), Vec::new(), String::from("&self"));
+    };
+
+    // Each remaining param is `name: type`. Extract the leading ident
+    // name. `name` may be preceded by `mut` or `_` patterns; we take
+    // the LAST ident before the `:` to handle `mut foo: T`.
+    let mut arg_names: Vec<String> = Vec::new();
+    for param in top_level_params.iter().skip(1) {
+        let mut last_ident: Option<String> = None;
+        for tt in param {
+            match tt {
+                TokenTree::Ident(i) => {
+                    let s = i.to_string();
+                    // Skip pattern-binding `mut` or `ref` qualifiers.
+                    if s == "mut" || s == "ref" {
+                        continue;
+                    }
+                    last_ident = Some(s);
+                }
+                TokenTree::Punct(p) if p.as_char() == ':' => break,
+                _ => break,
+            }
+        }
+        match last_ident {
+            Some(name) if name != "_" => arg_names.push(name),
+            // Wildcard or unparseable — bail; caller falls back.
+            _ => return (String::new(), Vec::new(), receiver),
+        }
+    }
+
+    (method_name, arg_names, receiver)
 }

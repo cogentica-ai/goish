@@ -227,6 +227,43 @@ macro_rules! __count_exprs {
 // ─── append!(s, x, y, z) — variadic append ────────────────────────────
 
 /// `append!(s, x[, y, z, ...])` — Go's `append(s, ...)` for slices.
+// ─── min / max — Go 1.21+ builtins ──────────────────────────────────
+//
+// Go 1.21 added `min(a, b, ...)` and `max(a, b, ...)` as universal
+// builtins for any ordered type. Variadic with at least one arg.
+// Goish exposes them as macros so the variadic shape works without
+// a runtime fn pointer (Rust generic variadics aren't a thing).
+
+/// `min(a, b, ...)` — returns the smallest argument by `<` comparison.
+/// At least one argument is required. All arguments must share a
+/// common ordered type; Rust's `Ord` is the constraint.
+#[macro_export]
+macro_rules! min {
+    ($a:expr) => { $a };
+    ($a:expr, $b:expr) => {{
+        let a = $a;
+        let b = $b;
+        if a < b { a } else { b }
+    }};
+    ($a:expr, $b:expr, $($rest:expr),+) => {
+        $crate::min!($crate::min!($a, $b), $($rest),+)
+    };
+}
+
+/// `max(a, b, ...)` — returns the largest argument by `>` comparison.
+#[macro_export]
+macro_rules! max {
+    ($a:expr) => { $a };
+    ($a:expr, $b:expr) => {{
+        let a = $a;
+        let b = $b;
+        if a > b { a } else { b }
+    }};
+    ($a:expr, $b:expr, $($rest:expr),+) => {
+        $crate::max!($crate::max!($a, $b), $($rest),+)
+    };
+}
+
 /// Consumes `s`, pushes each element (with `.into()` so `&str` widens
 /// to `string`, etc.), returns the modified slice. Mirror Go's
 /// `s = append(s, x, y, z)` shape:
@@ -465,16 +502,21 @@ macro_rules! close {
 /// (heap pointer to a zero-valued T). Goish materialises `*T` as
 /// `nilable<T>` at owning positions, so `new!(T)` returns
 /// `nilable<T>::new(<T>::default())` — a non-nil pointer to the zero
-/// value. Method calls auto-deref through `nilable<T>::Deref`, so the
-/// call-site shape matches Go:
+/// `new!(T)` produces a `nilable<T>` carrying a freshly-allocated,
+/// non-nil, zero-initialised T. Mirrors Go's `new(T)` which returns
+/// `*T` always pointing to a valid zero value.
 ///
-///   p := new(Counter)        →  let mut p = new!(Counter);
-///   p.Increment()            →  p.Increment();
+/// Why `nilable<T>` and not owned `T`: Go's `*T` is the pointer type;
+/// the user's hard rule is that `*T` in Go must lower to `nilable<T>`
+/// in Goish-Rust at every position — never plain T. An earlier shape
+/// returned owned T (for method-call ergonomics) but that flattened
+/// the `*T → nilable<T>` mapping and was reverted.
 ///
-/// `new!` is the *only* construct that carries pointer (= nilable)
-/// semantics for the zero value. Plain `T::default()` / `T { … }`
-/// produce owned `T`. Transpiler emits `new!(T)` for `new(T)` and
-/// owned-shape for value-typed `var x T` / `T{…}`.
+/// Method-call ergonomics: trait methods on the inner T flow through
+/// the per-trait forwarding `impl<T: Trait + ?Sized> Trait for
+/// nilable<T>` emitted by `#[goish::interface]`. Non-trait methods
+/// require explicit `.Must()` (or transpiler-injected narrowing
+/// inside flow-proven non-nil scopes — see pass5_nil_narrow).
 ///
 /// Requires `T: Default`.
 #[macro_export]
@@ -496,6 +538,7 @@ macro_rules! new {
 //   pub mut pid: int = 0;                → static pid: atomic::Int64
 //   pub mut started: bool = false;       → static started: atomic::Bool
 //   pub LAZY: T = expr;                  → static LAZY: Lazy<T> (any T)
+//   pub iface tracer: Tracer;            → static tracer: hook::Hook<dyn Tracer + Send + Sync>
 //
 // Mut vs Lazy decision: the `mut` keyword in front of the name marks
 // this as a write-after-init binding. Goishc emits `mut` when the
@@ -504,12 +547,25 @@ macro_rules! new {
 // `mut` routes through the atomic module — read sites use `.Load()`,
 // write sites `.Store()`, RMW sites `.Add()` / `.Xor()` / etc.
 //
+// Iface decision: the `iface` keyword marks an interface-typed
+// package var (Go's hot-swappable hook idiom: `var X SomeIface; func
+// Register(t SomeIface) { X = t }`). The macro expands to a
+// `Hook<dyn T + Send + Sync>` static — pass5 rewrites use sites:
+//   X = t       → X.set(Box::new(t))
+//   X == nil    → !X.is_set()
+//   X != nil    → X.is_set()
+//   X.M(args)   → X.call(|h| h.M(args)).unwrap()
+// The `iface` form takes no init expression (matching Go's `var X T`
+// no-init shape — the hook starts unset).
+//
 // Use sites:
 //   errors::Is(err, EOF)        // bare-symbol target
 //   if err == EOF { ... }       // bare PartialEq
 //   let e: error = EOF.into();  // From<Marker> for error
 //   counter.Add(1)              // atomic RMW
 //   counter.Load()              // atomic read
+//   tracer.set(Box::new(t))     // iface install
+//   tracer.is_set()              // iface nil-check
 //
 // See DISCUSSION_VAR.md for the doctrine choice and trade-offs.
 
@@ -649,6 +705,27 @@ macro_rules! __var_munch {
         #[allow(non_upper_case_globals)]
         $vis static $name: $crate::sync::atomic::Bool =
             $crate::sync::atomic::Bool::new($init);
+        $crate::__var_munch!( $($rest)* );
+    };
+
+    // ── iface — package-level interface var (hot-swappable hook) ───
+    //
+    // Lowers `var X SomeIface` (Go's hot-swappable hook idiom) to a
+    // `goish::hook::Hook<dyn T + Send + Sync>` static. The trait
+    // type may be a single ident (`Tracer`) or a path (`logger::Sink`).
+    //
+    // No init expression — the hook starts unset; `Register(t)`
+    // installs via `X.set(Box::new(t))`. Mirrors Go's `var X T`
+    // shape (no `=` clause).
+    (
+        $(#[$attr:meta])*
+        $vis:vis iface $name:ident : $trait:path ;
+        $($rest:tt)*
+    ) => {
+        $(#[$attr])*
+        #[allow(non_upper_case_globals)]
+        $vis static $name: $crate::hook::Hook<dyn $trait + Send + Sync> =
+            $crate::hook::Hook::new();
         $crate::__var_munch!( $($rest)* );
     };
 
