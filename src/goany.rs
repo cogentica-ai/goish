@@ -81,16 +81,6 @@ impl Any {
         self.0.downcast_ref::<T>()
     }
 
-    /// Same as `As<T>()` — kept under the Rust-conventional name so the
-    /// transpiler's type-switch lowering (`switch v := node.(type) {
-    /// case T1: …; case T2: … }`) which calls `downcast_ref` on the
-    /// scrutinee compiles unchanged. Rust's `Arc<dyn Any>` exposes
-    /// `downcast_ref` natively; the newtype mirrors that surface.
-    #[inline]
-    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
-        self.0.downcast_ref::<T>()
-    }
-
     /// Mut-borrow downcast — panics on miss OR if the Arc is shared
     /// (refcount > 1). Mirrors `nilable<T>::MustMut` semantics: the
     /// caller asserts both that the dynamic type is T and that no
