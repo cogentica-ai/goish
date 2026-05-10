@@ -34,10 +34,11 @@
 //
 // API surface (mirrors Go's `*T` behaviour where possible):
 //
-//   nilable::new(t)       — wrap an owned T (non-nil); allocates Arc
-//   nilable::nil()        — the nil pointer (alias of Default::default)
-//   x.IsNil()             — does this hold nil?
-//   x == nil / nil == x   — false unless x.IsNil()
+//   nilable::new(t)              — wrap an owned T (non-nil); allocates Arc
+//   nilable::<T>::default()      — the nil pointer (single source of nil-shape)
+//   nil.into() at nilable<T> slot— same shape, via `From<Nil> for nilable<T>`
+//   x.IsNil()                    — does this hold nil?
+//   x == nil / nil == x          — false unless x.IsNil()
 //
 // Panic-bearing extractors (Go-style `Must` prefix — only the
 // transpiler emits these inside scopes it has flow-proven non-nil;
@@ -89,13 +90,6 @@ impl<T> nilable<T> {
     #[inline]
     pub fn new(value: T) -> Self {
         nilable(Some(Arc::new(value)))
-    }
-
-    /// The nil nilable. Alias of `Default::default()` — kept as a
-    /// const-callable construction path for sentinel-style usage.
-    #[inline]
-    pub const fn nil() -> Self {
-        nilable(None)
     }
 
     /// Is this the nil pointer?
@@ -359,11 +353,12 @@ impl<T> Eq for nilable<T> {}
 // `nilable::new(<expr>)` explicitly at constructor sites.
 
 // `From<Nil>` — `let x: nilable<T> = nil.into();` and the auto-coerce
-// at `nil` literals in nilable<T>-typed slots.
+// at `nil` literals in nilable<T>-typed slots. Routes to the same
+// shape as `<nilable<T>>::default()` — single nil semantics.
 impl<T> From<Nil> for nilable<T> {
     #[inline]
     fn from(_: Nil) -> Self {
-        nilable::nil()
+        nilable(None)
     }
 }
 

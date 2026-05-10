@@ -239,7 +239,7 @@ pub fn OpenFile<N: Into<string>>(name: N, flag: i32, perm: u32) -> (nilable<File
             errors::New(string("open failed"))
         };
         // Failure path mirrors Go: returns `nil, err`.
-        return (nilable::nil(), err);
+        return (crate::nilval::nil.into(), err);
     }
     (
         nilable::new(File {

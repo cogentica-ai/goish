@@ -33,39 +33,46 @@
 
 /// The polymorphic-nil sentinel type. Zero-sized; users never
 /// construct it directly — they use the `nil` constant.
+///
+/// `Nil` doubles as the payload sentinel for `Arc<dyn Any>` /
+/// `goish::Any` / `Arc<dyn AnyReflect>` shapes. Putting `Nil` inside
+/// the Arc means `is::<Nil>()` recognises the nil-shape — there's
+/// exactly one nil concept in the runtime, no separate marker types.
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq, Hash)]
 pub struct Nil;
 
-/// `nil` — Goish's polymorphic zero value.
+/// `nil` — Goish's polymorphic zero value. Single source of truth for
+/// every nil-shape construction in the crate; per-type `From<Nil>`
+/// and `PartialEq<Nil>` impls route everything through this constant.
 pub const nil: Nil = Nil;
 
 // ─── Polymorphic nil for Arc<dyn Any + Send + Sync> ───────────────────
 //
 // Goish models Go's `interface{}` as `Arc<dyn core::any::Any + Send +
-// Sync>`. Go lets `var x interface{} = nil; if x == nil` work
-// directly; the goish equivalent needs the standard polymorphic-nil
-// triple (From / PartialEq both directions) on the Arc-of-Any type.
-// Lives here rather than per-module because Nil is defined here and
-// the impls coherence-wise belong with the upstream type.
+// Sync>` (or the `goish::Any` newtype around it). Go lets
+// `var x interface{} = nil; if x == nil` work directly; the goish
+// equivalent needs `From<Nil>` + `PartialEq<Nil>` (both directions)
+// on the Arc-of-Any type. The Arc payload IS `Nil` itself — single
+// nil semantics, no separate `__NilMarker` ZST.
 
 extern crate alloc;
 
-/// `nil` → `Arc<dyn Any>` materialises as a `__NilMarker` Arc — a
-/// distinguishable shape that PartialEq can recognise. Used in
-/// `let x: Arc<dyn Any> = nil.into();` returns and tuple slots.
+/// `nil.into()` at an `Arc<dyn Any>` slot materialises as
+/// `Arc::new(Nil)` — the wrapped value is the universal `Nil`
+/// sentinel itself. `is::<Nil>()` then recognises the nil-shape.
 impl From<Nil> for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
     fn from(_: Nil) -> Self {
-        alloc::sync::Arc::new(__NilMarker)
+        alloc::sync::Arc::new(nil)
     }
 }
 
 /// Compare an `Arc<dyn Any>` against bare `nil`. True when the
-/// underlying Any is `__NilMarker` (the nil-built shape) or `()` (a
-/// common stub payload other places use to mean "no real value").
+/// underlying Any is `Nil` (built from `nil.into()`) or `()` (a
+/// stub payload other places use to mean "no real value").
 impl PartialEq<Nil> for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
     fn eq(&self, _: &Nil) -> bool {
         let any: &(dyn core::any::Any + Send + Sync) = self.as_ref();
-        any.is::<__NilMarker>() || any.is::<()>()
+        any.is::<Nil>() || any.is::<()>()
     }
 }
 impl PartialEq<alloc::sync::Arc<dyn core::any::Any + Send + Sync>> for Nil {
@@ -74,24 +81,10 @@ impl PartialEq<alloc::sync::Arc<dyn core::any::Any + Send + Sync>> for Nil {
     }
 }
 
-/// Internal marker carried by every `nil → <Arc-of-Any-shape>`
-/// conversion so the matching `PartialEq<Nil>` / `IsNil()` predicate
-/// can recognise the nil-shape Arc at runtime. Shared across the
-/// crate (nilval here, goany::Any) so all "this came from `nil`"
-/// shapes test equal — there must be exactly one type checked by
-/// `is::<__NilMarker>()` or the predicates split.
-///
-/// `pub(crate)` rather than fully public: user code shouldn't ever
-/// construct `__NilMarker` directly; the public API is `nil` (the
-/// const) plus the per-type `From<Nil>` impls.
-#[derive(Default)]
-pub(crate) struct __NilMarker;
-
-// Reflect for __NilMarker — lets it sit inside `Arc<dyn AnyReflect>`
-// alongside the existing `Arc<dyn Any>` carry. Renders as Kind::Invalid
-// matching Go's "nil interface{}" reflect semantic (`reflect.ValueOf(nil)
-// .Kind() == Invalid`).
-impl crate::reflect::Reflect for __NilMarker {
+// Reflect for `Nil` — lets it sit inside `Arc<dyn AnyReflect>` and
+// `goish::Any` while reporting `Kind::Invalid` (matches Go's
+// `reflect.ValueOf(nil).Kind() == Invalid`).
+impl crate::reflect::Reflect for Nil {
     fn __reflect_type() -> crate::reflect::Type {
         crate::reflect::Type::__new(crate::reflect::Kind::Invalid, "", &[])
     }
@@ -102,21 +95,21 @@ impl crate::reflect::Reflect for __NilMarker {
 
 // ─── Polymorphic nil for `Arc<dyn AnyReflect + Send + Sync>` ─────────
 //
-// Mirrors the `Arc<dyn Any + Send + Sync>` flavour above. Ports that
+// Mirrors the `Arc<dyn Any + Send + Sync>` flavour above; same
+// `Nil` payload, same recognition predicate. Used by ports that
 // take `interface{}` arguments via the reflection-capable carrier
-// (typeutils.IsZero, jsonname.GetJSONName, …) need bare `nil` to pass
-// at the boundary and `if x == nil` to compile.
+// (typeutils.IsZero, jsonname.GetJSONName, …).
 
 impl From<Nil> for alloc::sync::Arc<dyn crate::reflect::AnyReflect + Send + Sync> {
     fn from(_: Nil) -> Self {
-        alloc::sync::Arc::new(__NilMarker)
+        alloc::sync::Arc::new(nil)
     }
 }
 
 impl PartialEq<Nil> for alloc::sync::Arc<dyn crate::reflect::AnyReflect + Send + Sync> {
     fn eq(&self, _: &Nil) -> bool {
         let any: &dyn core::any::Any = (**self).as_any();
-        any.is::<__NilMarker>() || any.is::<()>()
+        any.is::<Nil>() || any.is::<()>()
     }
 }
 impl PartialEq<alloc::sync::Arc<dyn crate::reflect::AnyReflect + Send + Sync>> for Nil {

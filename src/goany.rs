@@ -51,7 +51,7 @@ extern crate alloc;
 use alloc::sync::Arc;
 use core::any::Any as CoreAny;
 
-use crate::nilval::{Nil, __NilMarker};
+use crate::nilval::{nil, Nil};
 
 /// `interface{}` / `any`. See module docs.
 #[repr(transparent)]
@@ -106,24 +106,24 @@ impl Any {
     }
 
     /// True iff this `Any` was produced from `nil` (or is the
-    /// equivalent zero-value `()`-payload). Mirrors the predicate
-    /// used by the `PartialEq<Nil>` impl on the raw Arc form so
-    /// `if x == nil { … }` and `x.IsNil()` agree.
+    /// equivalent zero-value `()`-payload). The payload check is
+    /// `is::<Nil>()` — there's exactly one nil sentinel type
+    /// (`Nil` from nilval), shared by every nil-shape construction
+    /// path in the crate.
     #[inline]
     pub fn IsNil(&self) -> bool {
         let any: &(dyn CoreAny + Send + Sync) = self.0.as_ref();
-        any.is::<__NilMarker>() || any.is::<()>()
+        any.is::<Nil>() || any.is::<()>()
     }
 }
 
-/// Default → wraps `__NilMarker`, the nil-shape sentinel. Matches the
-/// existing `From<Nil> for Arc<dyn Any+Send+Sync>` payload exactly
-/// so partially-keyed struct literals fill `Any` fields with the
-/// same value `nil.into()` would have produced.
+/// Default → wraps `Nil`, the universal nil sentinel. Matches the
+/// `From<Nil>` payload exactly so partially-keyed struct literals
+/// fill `Any` fields with the same value `nil.into()` produces.
 impl Default for Any {
     #[inline]
     fn default() -> Self {
-        Any(Arc::new(__NilMarker))
+        Any(Arc::new(nil))
     }
 }
 
@@ -132,7 +132,7 @@ impl Default for Any {
 impl From<Nil> for Any {
     #[inline]
     fn from(_: Nil) -> Self {
-        Any(Arc::new(__NilMarker))
+        Any(Arc::new(nil))
     }
 }
 
@@ -150,9 +150,6 @@ impl PartialEq<Any> for Nil {
     }
 }
 
-// `__NilMarker` lives in nilval.rs and is shared across the crate so
-// the nil-shape predicates in nilable<T>::PartialEq<Nil>, Any::IsNil,
-// and the legacy Arc<dyn Any> impls all agree on a single sentinel
-// type. Without sharing, a value built via one `From<Nil>` impl can
-// flow through Any and read as non-nil — the asymmetry is
-// user-visible. See nilval.rs for the definition + Reflect impl.
+// Nil-shape sentinel: `Nil` itself (from nilval.rs). All `From<Nil>`
+// paths land `Arc::new(nil)`, all IsNil predicates probe `is::<Nil>()`
+// — single nil semantics, no auxiliary marker types.
