@@ -74,10 +74,18 @@ impl PartialEq<alloc::sync::Arc<dyn core::any::Any + Send + Sync>> for Nil {
     }
 }
 
-/// Internal marker carried by the `nil → Arc<dyn Any>` conversion so
-/// PartialEq can recognise the nil-shape Arc at runtime. Never exposed
-/// to user code.
-struct __NilMarker;
+/// Internal marker carried by every `nil → <Arc-of-Any-shape>`
+/// conversion so the matching `PartialEq<Nil>` / `IsNil()` predicate
+/// can recognise the nil-shape Arc at runtime. Shared across the
+/// crate (nilval here, goany::Any) so all "this came from `nil`"
+/// shapes test equal — there must be exactly one type checked by
+/// `is::<__NilMarker>()` or the predicates split.
+///
+/// `pub(crate)` rather than fully public: user code shouldn't ever
+/// construct `__NilMarker` directly; the public API is `nil` (the
+/// const) plus the per-type `From<Nil>` impls.
+#[derive(Default)]
+pub(crate) struct __NilMarker;
 
 // Reflect for __NilMarker — lets it sit inside `Arc<dyn AnyReflect>`
 // alongside the existing `Arc<dyn Any>` carry. Renders as Kind::Invalid

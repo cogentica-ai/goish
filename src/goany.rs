@@ -51,7 +51,7 @@ extern crate alloc;
 use alloc::sync::Arc;
 use core::any::Any as CoreAny;
 
-use crate::nilval::Nil;
+use crate::nilval::{Nil, __NilMarker};
 
 /// `interface{}` / `any`. See module docs.
 #[repr(transparent)]
@@ -150,19 +150,9 @@ impl PartialEq<Any> for Nil {
     }
 }
 
-/// Internal nil-marker for Any. Distinct from nilval.rs's private
-/// `__NilMarker` so this module is self-contained; both render to the
-/// same nil-shape for IsNil purposes via the `is::<__NilMarker>()`
-/// downcast probe.
-struct __NilMarker;
-
-/// Reflect for the local marker so `Any::default().Kind()` returns
-/// `Invalid` (matching Go's `reflect.ValueOf(nil).Kind()`).
-impl crate::reflect::Reflect for __NilMarker {
-    fn __reflect_type() -> crate::reflect::Type {
-        crate::reflect::Type::__new(crate::reflect::Kind::Invalid, "", &[])
-    }
-    fn __reflect_value(&self) -> crate::reflect::Value {
-        crate::reflect::Value::Invalid
-    }
-}
+// `__NilMarker` lives in nilval.rs and is shared across the crate so
+// the nil-shape predicates in nilable<T>::PartialEq<Nil>, Any::IsNil,
+// and the legacy Arc<dyn Any> impls all agree on a single sentinel
+// type. Without sharing, a value built via one `From<Nil>` impl can
+// flow through Any and read as non-nil — the asymmetry is
+// user-visible. See nilval.rs for the definition + Reflect impl.
