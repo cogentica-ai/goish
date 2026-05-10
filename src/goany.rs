@@ -91,6 +91,35 @@ impl Any {
         self.0.downcast_ref::<T>()
     }
 
+    /// Mut-borrow downcast — panics on miss OR if the Arc is shared
+    /// (refcount > 1). Mirrors `nilable<T>::MustMut` semantics: the
+    /// caller asserts both that the dynamic type is T and that no
+    /// other handle aliases the same allocation. Used by the
+    /// transpiler's lowering of Go's `x.(map[K]V)[k] = v` shape — the
+    /// type-assertion-then-index-assign pattern needs `&mut map<K,V>`
+    /// to drive `Set`, which `MustAs` (returning `&T`) can't provide.
+    ///
+    /// Goish-shared-mutation rule: shared `interface{}` values can't
+    /// yield `&mut T` directly without breaking Arc aliasing. Wrap T
+    /// in `sync::Mutex` for shared mutation, or guarantee uniqueness
+    /// at the call site (which the gojsonpointer pattern does — the
+    /// map is held only by the slice element being indexed).
+    #[inline]
+    #[track_caller]
+    pub fn MustAsMut<T: 'static + Send + Sync>(&mut self) -> &mut T {
+        let inner: &mut (dyn CoreAny + Send + Sync) = Arc::get_mut(&mut self.0)
+            .expect(
+                "interface conversion: Any is shared (refcount > 1) — \
+                 mutation through MustAsMut requires unique ownership",
+            );
+        inner.downcast_mut::<T>().unwrap_or_else(|| {
+            panic!(
+                "interface conversion: any is not {}",
+                core::any::type_name::<T>()
+            )
+        })
+    }
+
     /// Goish equivalent of Go's must-form type assertion `x.(T)` —
     /// panics on miss with a Go-shape diagnostic. The `interface
     /// conversion: …` text matches Go's runtime panic so log output
