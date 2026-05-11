@@ -374,6 +374,39 @@ impl Format for f32 {
     }
 }
 
+// `complex64` and `complex128` are aliases for `(f32, f32)` / `(f64, f64)`
+// in goish v1 (no native complex arithmetic; the runtime models them as
+// tuples so `reflect::Value::Complex()` and `Sprintf!("%v", complex)` in
+// ports compile). Go formats `complex128(1+2i)` as `(1+2i)` for `%v`;
+// we follow the same shape.
+impl Format for (f64, f64) {
+    fn fmt(&self, _verb: byte, f: &mut FmtBuf) {
+        let re = crate::strconv::FormatFloat(self.0, b'g', -1, 64);
+        let im = crate::strconv::FormatFloat(self.1, b'g', -1, 64);
+        f.push(b'(');
+        f.extend(re.as_bytes());
+        if self.1 >= 0.0 {
+            f.push(b'+');
+        }
+        f.extend(im.as_bytes());
+        f.extend(b"i)");
+    }
+}
+
+impl Format for (f32, f32) {
+    fn fmt(&self, _verb: byte, f: &mut FmtBuf) {
+        let re = crate::strconv::FormatFloat(self.0 as f64, b'g', -1, 32);
+        let im = crate::strconv::FormatFloat(self.1 as f64, b'g', -1, 32);
+        f.push(b'(');
+        f.extend(re.as_bytes());
+        if self.1 >= 0.0 {
+            f.push(b'+');
+        }
+        f.extend(im.as_bytes());
+        f.extend(b"i)");
+    }
+}
+
 // byte = u8 — special-case so %c renders ASCII char, %d the number.
 impl Format for u8 {
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
@@ -765,7 +798,7 @@ fn write_reflect_value(v: &crate::reflect::Value, plus: bool, f: &mut FmtBuf) {
             f.extend(b"<interface>");
         }
         K::Int64 | K::Uint64 | K::Uintptr | K::Func | K::Chan
-        | K::UnsafePointer | K::Array => {
+        | K::UnsafePointer | K::Array | K::Complex64 | K::Complex128 => {
             // Fallback rendering for variants whose `__reflect_value`
             // doesn't yet produce a typed Value (placeholder for parity
             // with Go's reflect.Kind universe).

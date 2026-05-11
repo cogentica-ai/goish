@@ -25,3 +25,11 @@ pub type uint = u64;
 pub type uintptr = u64;
 pub type float32 = f32;
 pub type float64 = f64;
+
+// Goish has no native complex arithmetic; we model `complex64`/`complex128`
+// as `(real, imag)` tuples so `reflect::Value::Complex()` and ports that
+// merely format complex values (e.g. kylelemons' pretty-printer) compile.
+// Arithmetic on these types is *not* supported — call sites that perform
+// real complex math must hand-port using a dedicated crate.
+pub type complex64 = (f32, f32);
+pub type complex128 = (f64, f64);

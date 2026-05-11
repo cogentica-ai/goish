@@ -39,7 +39,7 @@ use alloc::vec::Vec;
 
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::types::{byte, float32, float64, int, rune, uint};
+use crate::types::{byte, complex128, float32, float64, int, rune, uint, uintptr};
 
 // ─── Kind ─────────────────────────────────────────────────────────────
 
@@ -97,6 +97,12 @@ pub enum Kind {
     /// most uses; Kind::Array exists for parity but `__reflect_value`
     /// produces Slice instead.
     Array = 24,
+    /// Go: `reflect.Complex64`. Goish has no native complex arithmetic;
+    /// `__reflect_value` never produces this variant — it exists so
+    /// match arms on Kind compile in ports that mention complex.
+    Complex64 = 25,
+    /// Go: `reflect.Complex128`. Same caveat as Complex64.
+    Complex128 = 26,
 }
 
 // Bare `pub const` shortcuts so call sites can write `reflect::Pointer`
@@ -129,6 +135,11 @@ pub const Func: Kind = Kind::Func;
 pub const Chan: Kind = Kind::Chan;
 pub const UnsafePointer: Kind = Kind::UnsafePointer;
 pub const Array: Kind = Kind::Array;
+pub const Complex64: Kind = Kind::Complex64;
+pub const Complex128: Kind = Kind::Complex128;
+/// `reflect.Ptr` — older Go name for `reflect.Pointer`. Some ports still
+/// use the legacy spelling (Go 1.18 renamed it). Same value as `Pointer`.
+pub const Ptr: Kind = Kind::Pointer;
 
 impl Kind {
     /// Mirrors Go's `Kind.String()` — lowercase Go type name.
@@ -159,6 +170,8 @@ impl Kind {
             Kind::UnsafePointer => "unsafe.Pointer",
             Kind::Array => "array",
             Kind::Pointer => "ptr",
+            Kind::Complex64 => "complex64",
+            Kind::Complex128 => "complex128",
         };
         string::from_static(s)
     }
@@ -187,22 +200,23 @@ impl StructTag {
     /// `Get(key)` — value for `key`, empty string if missing.
     /// Mirrors Go's `StructTag.Get`.
     ///
-    /// Takes `key: &str` (not `&string`) because tag lookups are
-    /// almost universally called with a string literal — forcing
-    /// users to write `string::from_static("json")` per call would
-    /// add noise without value. This is the "&str unavoidable"
-    /// carve-out from priority #2 in CLAUDE.md.
-    pub fn Get(&self, key: &str) -> string {
+    /// Takes `impl AsRef<str>` so call sites can pass either a string
+    /// literal (`"json"`) or a Goish `string` value — both deref to
+    /// `&str` for the lookup. Goish ports often call `Tag.Get(string("json"))`
+    /// because Go's source side has no `&str` distinction; widening
+    /// the param is the priority #2 "Go idioms first" pattern from
+    /// CLAUDE.md.
+    pub fn Get<S: AsRef<str>>(&self, key: S) -> string {
         let (v, _) = self.Lookup(key);
         v
     }
 
     /// `Lookup(key)` — `(value, ok)`. `ok` distinguishes "absent" from
     /// "present with empty value". Verbatim port of Go 1.25
-    /// `reflect.StructTag.Lookup` (reflect/type.go:1056). See `Get`
-    /// for the `&str` rationale.
-    pub fn Lookup(&self, key: &str) -> (string, bool) {
-        let key_bytes = key.as_bytes();
+    /// `reflect.StructTag.Lookup` (reflect/type.go:1056). Same widened
+    /// param as `Get`.
+    pub fn Lookup<S: AsRef<str>>(&self, key: S) -> (string, bool) {
+        let key_bytes = key.as_ref().as_bytes();
         let mut tag = self.raw.as_bytes();
 
         while !tag.is_empty() {
@@ -494,6 +508,10 @@ impl Type {
             Kind::Int64 | Kind::Uint64 | Kind::Uintptr => true,
             Kind::Func | Kind::Chan | Kind::UnsafePointer => false,
             Kind::Array => self.fields.iter().all(|f| (f.Type)().Comparable()),
+            // Complex types are comparable in Go (==/!= use IEEE-754 rules).
+            // Goish v1 has no native complex arithmetic; this arm exists for
+            // parity so reflect-driven match-on-Kind compiles.
+            Kind::Complex64 | Kind::Complex128 => true,
             Kind::Invalid => false,
         }
     }
@@ -672,8 +690,13 @@ impl Type {
 // is deferred to a later iteration.
 
 /// Mirrors `reflect.Value` (read-only).
-#[derive(Clone)]
+///
+/// `Default` returns `Value::Invalid` — matches Go's zero-`reflect.Value`,
+/// where `IsValid()` is false. Ports that hold a `reflect::Value` field
+/// (e.g. kylelemons' `formatter.cur`) rely on this to derive `Default`.
+#[derive(Clone, Default)]
 pub enum Value {
+    #[default]
     Invalid,
     Bool(bool),
     Int(int),
@@ -1077,6 +1100,56 @@ impl Value {
             _ => panic!("reflect.Value.FieldByName of non-struct"),
         }
     }
+
+    /// `CanInterface()` — whether `Interface()` is callable without panic.
+    ///
+    /// Go's semantics also returns false for unexported struct fields
+    /// accessed via reflection; goish v1 does not track export status
+    /// per Value, so we conservatively return true for every valid
+    /// Value. Ports using this as a `Interface()` precondition (e.g.
+    /// kylelemons pretty-printer) get the same outcome as Go.
+    pub fn CanInterface(&self) -> bool {
+        self.IsValid()
+    }
+
+    /// `Pointer()` — address as uintptr.
+    ///
+    /// Goish v1's `Value` is owned-tree-shaped, not pointer-shaped, so
+    /// no real machine address exists for primitive variants. For
+    /// `Value::Pointer(b)` we return the stable address of the boxed
+    /// inner (valid for `self`'s lifetime). For other kinds we return
+    /// 0. Sufficient for cycle-detection patterns (kylelemons walks
+    /// pointer values to detect cycles); semantically degraded vs. Go
+    /// for callers that round-trip through pointer arithmetic.
+    pub fn Pointer(&self) -> uintptr {
+        match self {
+            Value::Pointer(b) => (&**b as *const Value) as uintptr,
+            _ => 0,
+        }
+    }
+
+    /// `Complex()` — `complex128` accessor.
+    ///
+    /// Goish v1 has no complex variant on `Value` (Kind::Complex64/128
+    /// exist only for match-arm parity). Returns `(0.0, 0.0)` so
+    /// format-only call sites compile. Real complex arithmetic is not
+    /// supported in v1 — a port that does math on the result must be
+    /// hand-tuned.
+    pub fn Complex(&self) -> complex128 {
+        (0.0, 0.0)
+    }
+
+    /// `Call(args)` — invoke a `Kind::Func` value with the given args.
+    ///
+    /// Goish v1's `Value` does not model `Kind::Func` (functions
+    /// aren't introspectable via reflection in v1). Always returns an
+    /// empty result slice. Ports that rely on dynamic reflective
+    /// dispatch (e.g. kylelemons calling a user-supplied `Formatter`)
+    /// fall through to the non-reflect path — visible behaviour is a
+    /// no-op, not a panic.
+    pub fn Call(&self, _args: crate::goslice::slice<Value>) -> crate::goslice::slice<Value> {
+        crate::goslice::slice::default()
+    }
 }
 
 /// Structural equality for use by `MapIndex`. Compares by Kind and
@@ -1130,6 +1203,8 @@ impl Kind {
             Kind::Chan => "",
             Kind::UnsafePointer => "",
             Kind::Array => "",
+            Kind::Complex64 => "complex64",
+            Kind::Complex128 => "complex128",
         }
     }
 }
