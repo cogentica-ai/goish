@@ -182,6 +182,40 @@ impl<T: ?Sized> nilable<T> {
             _ => false,
         }
     }
+
+    /// View the inner T as a borrow. Returns a `nilable_ref<T>`
+    /// (Option<&T>-shaped, pointer-sized) that aliases the inner
+    /// Arc'd T. Pairs with `BorrowMut`. The lifetime is bound to
+    /// `&self`'s borrow.
+    ///
+    /// Bridge for Design B (#121): converts the owned cell
+    /// `nilable<T>` to the borrowed cell `nilable_ref<T>` so a
+    /// caller holding `nilable<T>` can supply a `nilable<&T>`-typed
+    /// param without cloning.
+    #[inline]
+    pub fn Borrow(&self) -> crate::gonilable_ref::nilable_ref<'_, T> {
+        self.0.as_deref().into()
+    }
+
+    /// Mutably view the inner T as an exclusive borrow. Returns a
+    /// `nilable_refmut<T>` aliasing the inner Arc'd T. Pairs with
+    /// `Borrow`.
+    ///
+    /// Panics with the same shared-Arc message as `MustMut` when
+    /// the inner Arc is shared (refcount > 1) AND non-nil. The
+    /// shared-and-nil case is impossible (None has no refcount).
+    /// Nil → returns a nil `nilable_refmut`.
+    #[inline]
+    #[track_caller]
+    pub fn BorrowMut(&mut self) -> crate::gonilable_ref::nilable_refmut<'_, T> {
+        match &mut self.0 {
+            Some(arc) => match Arc::get_mut(arc) {
+                Some(t) => crate::gonilable_ref::nilable_refmut::new(t),
+                None => shared_mut_panic(),
+            },
+            None => crate::gonilable_ref::nilable_refmut::nil(),
+        }
+    }
 }
 
 // ── Sized-only methods — those that take or return `T` by value ─────

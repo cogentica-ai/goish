@@ -77,6 +77,7 @@ pub mod gostring;
 pub mod hook;
 pub mod lazy;
 pub mod gonilable;
+pub mod gonilable_ref;
 pub mod nilval;
 pub mod hash;
 pub mod html;
@@ -127,6 +128,7 @@ pub use errors::error;
 pub use goany::Any;
 pub use goany::try_consume_box;
 pub use gonilable::nilable;
+pub use gonilable_ref::{nilable_ref, nilable_refmut};
 
 /// Trait-impl registry for `goish::Any::As::<dyn Trait>()`.
 /// `#[goish::interface]` emits per-trait `static REGISTRY` plus a
