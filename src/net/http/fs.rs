@@ -172,7 +172,7 @@ fn html_replace(s: string) -> string {
     b.String()
 }
 
-fn serve_regular_file(w: &mut ResponseWriter, r: &Request, path: string, fi: os::FileInfo) {
+fn serve_regular_file(w: &mut ResponseWriter, r: &Request, path: string, fi: os::FileInfoData) {
     // Open + read fully into a slice<byte>. Range slicing happens
     // after the read since v1 has no streaming Read with seek loops.
     let (mut f, err) = os::Open(path.clone());

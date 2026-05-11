@@ -561,7 +561,7 @@ where
 /// FnMut to allow accumulating state.
 pub fn Walk<F>(root: string, mut fn_: F) -> error
 where
-    F: FnMut(string, crate::os::FileInfo, error) -> error,
+    F: FnMut(string, crate::os::FileInfoData, error) -> error,
 {
     // Go: info, err := os.Lstat(root)
     let (info, err) = crate::os::Lstat(root.clone());
@@ -576,9 +576,9 @@ where
     walk_err
 }
 
-fn walk_helper<F>(path_: string, info: crate::os::FileInfo, fn_: &mut F) -> error
+fn walk_helper<F>(path_: string, info: crate::os::FileInfoData, fn_: &mut F) -> error
 where
-    F: FnMut(string, crate::os::FileInfo, error) -> error,
+    F: FnMut(string, crate::os::FileInfoData, error) -> error,
 {
     // Go: if !info.IsDir() { return walkFn(path, info, nil) }
     if !info.IsDir() {

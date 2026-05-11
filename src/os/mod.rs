@@ -129,12 +129,41 @@ impl crate::errors::ErrorTrait for PathError {
 // `PathError → error` via `.into()` now provided by the blanket
 // `impl<E: ErrorTrait> From<E> for error` in errors/mod.rs.
 
-// ─── FileInfo ──────────────────────────────────────────────────────────
+// ─── FileInfo (trait + concrete) ──────────────────────────────────────
+//
+// Go: `os.FileInfo` is an interface (io/fs.go:130). Slim runtime ships
+// it as a trait + one common concrete impl. Trait shape lets ports
+// receive `dyn fs::FileInfo + Send + Sync` from user APIs (e.g. the
+// fluxcd/lockedfile `File.Stat()` method signature). The concrete
+// `FileInfoData` carries the fields cached by stat(2) / fstat(2);
+// custom Reflect-style FileInfo implementations can ship their own
+// concrete impls of the trait.
 
-/// `os.FileInfo` (io/fs.FileInfo) — slim port. Carries the fields
-/// most callers (FileServer, ServeFile, http.ServeContent) need.
+/// `os.FileInfo` (io/fs.FileInfo, fs.go:130) — file metadata trait.
+///
+/// Required impls (`Send + Sync`) match Go's interface contract: a
+/// FileInfo value flows freely across goroutine boundaries.
+pub trait FileInfo: Send + Sync {
+    fn Name(&self) -> string;
+    fn Size(&self) -> int;
+    fn Mode(&self) -> FileMode;
+    fn ModTime(&self) -> crate::time::Time;
+    fn IsDir(&self) -> bool;
+    /// `Sys()` — Go's `interface{}` underlying-data slot. Slim
+    /// returns a freshly-allocated empty Arc (Go's "no system data"
+    /// equivalent). Concrete impls may override with the platform
+    /// stat buffer.
+    fn Sys(&self) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
+        alloc::sync::Arc::new(())
+    }
+}
+
+/// Concrete `FileInfo` impl carrying the fields cached by stat(2).
+/// `os::Stat` and `(*File).Stat()` return this type; ports that
+/// receive a trait object via Goish's `dyn FileInfo + Send + Sync`
+/// can downcast through `core::any::Any` if they need the data form.
 #[derive(Clone, Default)]
-pub struct FileInfo {
+pub struct FileInfoData {
     name: string,
     size: int,
     mode: FileMode,
@@ -144,47 +173,67 @@ pub struct FileInfo {
 
 // Polymorphic-nil per priority #5. Go's `os.FileInfo` is an interface
 // — callers pass `nil` for "no info"; in goish we materialise that as
-// a zero-valued FileInfo (Name() == "", Size() == 0, IsDir() == false).
-impl From<crate::nilval::Nil> for FileInfo {
+// a zero-valued FileInfoData (Name() == "", Size() == 0, IsDir() == false).
+impl From<crate::nilval::Nil> for FileInfoData {
     fn from(_: crate::nilval::Nil) -> Self {
         Self::default()
     }
 }
-impl PartialEq<crate::nilval::Nil> for FileInfo {
+impl PartialEq<crate::nilval::Nil> for FileInfoData {
     fn eq(&self, _: &crate::nilval::Nil) -> bool {
         self.name == "" && self.size == 0
     }
 }
-impl PartialEq<FileInfo> for crate::nilval::Nil {
-    fn eq(&self, other: &FileInfo) -> bool {
+impl PartialEq<FileInfoData> for crate::nilval::Nil {
+    fn eq(&self, other: &FileInfoData) -> bool {
         other == self
     }
 }
 
-impl FileInfo {
-    /// `f.Name()` — base name of the file (no directory component).
-    pub fn Name(&self) -> string {
+impl FileInfo for FileInfoData {
+    fn Name(&self) -> string {
         self.name.clone()
     }
-    /// `f.Size()` — size in bytes for regular files.
-    pub fn Size(&self) -> int {
+    fn Size(&self) -> int {
         self.size
     }
-    /// `f.Mode()` — permission + type bits.
-    pub fn Mode(&self) -> FileMode {
+    fn Mode(&self) -> FileMode {
         self.mode
     }
-    /// `f.ModTime()` — last modification time.
-    pub fn ModTime(&self) -> crate::time::Time {
+    fn ModTime(&self) -> crate::time::Time {
         self.mod_time
     }
-    /// `f.IsDir()` — convenience for `mode & ModeDir != 0`.
-    pub fn IsDir(&self) -> bool {
+    fn IsDir(&self) -> bool {
         self.is_dir
     }
 }
 
-fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfo {
+// Field-access inherent methods so callers that already hold the
+// concrete `FileInfoData` value (the common case via os::Stat) keep
+// using Go-style call syntax `info.Name()` without an explicit
+// `.as_dyn_FileInfo()` step.
+impl FileInfoData {
+    pub fn Name(&self) -> string {
+        self.name.clone()
+    }
+    pub fn Size(&self) -> int {
+        self.size
+    }
+    pub fn Mode(&self) -> FileMode {
+        self.mode
+    }
+    pub fn ModTime(&self) -> crate::time::Time {
+        self.mod_time
+    }
+    pub fn IsDir(&self) -> bool {
+        self.is_dir
+    }
+    pub fn Sys(&self) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
+        alloc::sync::Arc::new(())
+    }
+}
+
+fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfoData {
     let kind = st.st_mode & syscall::S_IFMT;
     let is_dir = kind == syscall::S_IFDIR;
     let mut mode: FileMode = (st.st_mode & 0o777) as FileMode;
@@ -194,7 +243,7 @@ fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfo {
     if kind == syscall::S_IFLNK {
         mode |= ModeSymlink;
     }
-    FileInfo {
+    FileInfoData {
         name,
         size: st.st_size,
         mode,
@@ -251,7 +300,7 @@ pub fn OpenFile<N: Into<string>>(name: N, flag: i32, perm: u32) -> (nilable<File
 }
 
 /// `os.Stat(name)` (os/stat.go:14) — stat a path, following symlinks.
-pub fn Stat<N: Into<string>>(name: N) -> (FileInfo, error) {
+pub fn Stat<N: Into<string>>(name: N) -> (FileInfoData, error) {
     let name: string = name.into();
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     let nb = bytes_of(&name);
@@ -266,7 +315,7 @@ pub fn Stat<N: Into<string>>(name: N) -> (FileInfo, error) {
             errors::New(string("stat failed"))
         };
         return (
-            FileInfo {
+            FileInfoData {
                 name: name.clone(),
                 size: 0,
                 mode: 0,
@@ -283,7 +332,7 @@ pub fn Stat<N: Into<string>>(name: N) -> (FileInfo, error) {
 /// Line-by-line port of `os.Lstat(name)` (file.go:417 → stat_unix.go).
 /// Like Stat but does not follow a final-component symlink, so
 /// FileInfo.Mode() reports ModeSymlink for a link target.
-pub fn Lstat<N: Into<string>>(name: N) -> (FileInfo, error) {
+pub fn Lstat<N: Into<string>>(name: N) -> (FileInfoData, error) {
     let name: string = name.into();
     // Go: return statNolog(name) with AT_SYMLINK_NOFOLLOW.
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
@@ -294,7 +343,7 @@ pub fn Lstat<N: Into<string>>(name: N) -> (FileInfo, error) {
     let rc = syscall::Lstat(buf.as_ptr(), &mut st);
     if rc < 0 {
         return (
-            FileInfo {
+            FileInfoData {
                 name: name.clone(),
                 size: 0,
                 mode: 0,
@@ -310,12 +359,12 @@ pub fn Lstat<N: Into<string>>(name: N) -> (FileInfo, error) {
 
 /// `(*File).Stat()` (os/file.go:432) — fstat the open fd.
 impl File {
-    pub fn Stat(&self) -> (FileInfo, error) {
+    pub fn Stat(&self) -> (FileInfoData, error) {
         let mut st = syscall::Stat_t::default();
         let rc = syscall::Fstat(self.fd, &mut st);
         if rc < 0 {
             return (
-                FileInfo {
+                FileInfoData {
                     name: self.name.clone(),
                     size: 0,
                     mode: 0,
