@@ -1216,9 +1216,24 @@ fn base_name(p: &string) -> string {
 /// Wraps an open file descriptor. `Stdin/Stdout/Stderr` return prebuilt
 /// `File`s for fd 0/1/2; future `Open`/`Create` will return Files for
 /// real filesystem opens.
+///
+/// Default + Clone are provided so `var f *os.File` in Go (lowered to
+/// `nilable<File>` / `File` slots in Goish) get sensible defaults
+/// without explicit handling. A default File is fd=-1 (a sentinel
+/// invalid fd matching `os.NewFile(-1, "")`); Clone shares the fd
+/// (POSIX dup2 semantics aren't enforced — Go's behavior is that
+/// two File values pointing at the same fd interact through OS-level
+/// locks).
+#[derive(Clone)]
 pub struct File {
     fd: i32,
     name: string,
+}
+
+impl Default for File {
+    fn default() -> Self {
+        File { fd: -1, name: string::from_static("") }
+    }
 }
 
 impl File {

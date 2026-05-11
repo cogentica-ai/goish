@@ -886,6 +886,53 @@ pub fn Fprintv<W: io::Writer, S: Into<string>>(
     fprintf_impl(w, format.as_bytes(), &fa)
 }
 
+/// `fmt.Sprint(args...)` as a function value — for sites that pass
+/// fmt.Sprint as a function pointer (e.g.,
+/// `formatter[reflect.TypeOf(time.Time{})] = fmt.Sprint`).
+/// The macro `fmt::Sprint!` is still preferred for direct calls
+/// because it captures static FmtArg types; this fn shape lifts the
+/// variadic into a single slice<Any> arg for value-passing contexts.
+pub fn Sprint(args: slice<crate::goany::Any>) -> string {
+    let fa = __any_args_to_fmtargs(&args);
+    sprint_impl(&fa)
+}
+
+/// `fmt.Sprintln(args...)` as a function value. See `Sprint` for
+/// the macro-vs-fn dichotomy.
+pub fn Sprintln(args: slice<crate::goany::Any>) -> string {
+    let fa = __any_args_to_fmtargs(&args);
+    sprintln_impl(&fa)
+}
+
+/// `fmt.Fprint(w, args...)` as a function value.
+pub fn Fprint<W: io::Writer>(w: &mut W, args: slice<crate::goany::Any>) -> (int, error) {
+    let fa = __any_args_to_fmtargs(&args);
+    let mut f = FmtBuf::new();
+    for a in &fa {
+        a.write(b'v', f.borrow_mut());
+    }
+    let buf = slice::__from_vec(f.into_bytes());
+    w.Write(buf)
+}
+
+/// `fmt.Fprintln(w, args...)` as a function value.
+pub fn Fprintln<W: io::Writer>(w: &mut W, args: slice<crate::goany::Any>) -> (int, error) {
+    let fa = __any_args_to_fmtargs(&args);
+    fprintln_impl(w, &fa)
+}
+
+/// `fmt.Print(args...)` as a function value.
+pub fn Print(args: slice<crate::goany::Any>) -> (int, error) {
+    let fa = __any_args_to_fmtargs(&args);
+    print_impl(&fa)
+}
+
+/// `fmt.Println(args...)` as a function value.
+pub fn Println(args: slice<crate::goany::Any>) -> (int, error) {
+    let fa = __any_args_to_fmtargs(&args);
+    println_impl(&fa)
+}
+
 #[doc(hidden)]
 pub fn fprintf_impl(w: &mut dyn io::Writer, format: &[byte], args: &[FmtArg]) -> (int, error) {
     let mut f = FmtBuf::new();
