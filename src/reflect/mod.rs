@@ -1228,6 +1228,14 @@ pub fn TypeOf<T: Reflect + ?Sized>(_: &T) -> Type {
     T::__reflect_type()
 }
 
+/// Type-only entry point: returns the reflect descriptor for `T` without
+/// requiring a value of T. Mirrors Go's `reflect.TypeOf((*T)(nil)).Elem()`
+/// idiom — used to fetch the descriptor of an interface (where a real
+/// value would need a concrete carrier).
+pub fn TypeOfDyn<T: Reflect + ?Sized>() -> Type {
+    T::__reflect_type()
+}
+
 /// `reflect.ValueOf(v)` — read-only `Value` mirror of `v`.
 pub fn ValueOf<T: Reflect + ?Sized>(v: &T) -> Value {
     v.__reflect_value()
