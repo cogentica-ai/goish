@@ -295,6 +295,52 @@ where
     }
 }
 
+/// Consume `Box<dyn Trait>` (or `Box<U>` for any `U: HasDynAny`) and
+/// extract the underlying concrete `T` when the runtime type matches.
+/// Returns the box unchanged on miss. This is the consuming counterpart
+/// to `AsExt::As`, needed for Go's `b, ok := rd.(*T); if ok { return b }`
+/// pattern where the receiver must escape the type-assert as an owned
+/// `T` (then re-wrapped in `nilable<T>`).
+///
+/// Why this isn't just `AsExt::As` + manual unwrap: `As` returns a
+/// borrow tied to the box's lifetime — sound for read-only access but
+/// can't yield an owned `T`. This helper does the safe pointer dance:
+///
+///   1. Probe `__goish_as_dyn_any` to verify `TypeId::of::<T>()` matches.
+///   2. Extract the data pointer from the fat pointer via `*mut U as
+///      *mut ()`. Per the Rust reference, casting `*mut dyn Trait` to
+///      `*mut ()` extracts the data half of the fat pointer.
+///   3. Reinterpret as `*mut T`. Sound because step 1 verified
+///      identity.
+///
+/// Object-safety: only constraints are `T: 'static + Send + Sync` so
+/// the recovered value carries the same Send/Sync bounds the box did.
+#[inline]
+pub fn try_consume_box<U, T>(b: alloc::boxed::Box<U>) -> Result<T, alloc::boxed::Box<U>>
+where
+    U: ?Sized + HasDynAny,
+    T: 'static + Send + Sync,
+{
+    use core::any::TypeId;
+    let matches = b
+        .__goish_as_dyn_any()
+        .map(|a| a.type_id() == TypeId::of::<T>())
+        .unwrap_or(false);
+    if !matches {
+        return Err(b);
+    }
+    let raw: *mut U = alloc::boxed::Box::into_raw(b);
+    let data_ptr: *mut T = raw as *mut () as *mut T;
+    // SAFETY: step 1 verified TypeId equality, so the layout at
+    // `data_ptr` is exactly that of `T`. We reconstruct the Box and
+    // move the value out. The original Box's allocator and metadata
+    // are abandoned via into_raw — Box::from_raw takes ownership of
+    // the same allocation. Since *mut U and *mut T point to the same
+    // bytes (per fat-pointer data half == thin pointer for the
+    // concrete type), the Box::from_raw->deref->move pattern is sound.
+    Ok(*unsafe { alloc::boxed::Box::from_raw(data_ptr) })
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Trait-impl registry for `Any::As::<dyn Trait>()`
 // ─────────────────────────────────────────────────────────────────────

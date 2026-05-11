@@ -118,6 +118,7 @@ pub use convert::{
 };
 pub use errors::error;
 pub use goany::Any;
+pub use goany::try_consume_box;
 pub use gonilable::nilable;
 
 /// Trait-impl registry for `goish::Any::As::<dyn Trait>()`.
