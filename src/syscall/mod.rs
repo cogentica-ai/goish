@@ -257,17 +257,109 @@ pub fn Read(fd: i32, p: *mut u8, n: usize) -> isize {
     unsafe { syscall3(SYS_READ, fd as usize, p as usize, n) }
 }
 
-/// Common errno values (Linux, from `<errno.h>`).
-pub const ENOENT: i32 = 2;
-pub const EACCES: i32 = 13;
-pub const EEXIST: i32 = 17;
-pub const ENOTDIR: i32 = 20;
-pub const EISDIR: i32 = 21;
-pub const ENOTEMPTY: i32 = 39;
-pub const EINTR: i32 = 4;
-pub const ENOSYS: i32 = 38;
-pub const ENOTSUP: i32 = 95;
-pub const EOPNOTSUPP: i32 = 95;
+// ─── Errno ────────────────────────────────────────────────────────────
+//
+// Go: `syscall.Errno` is `type Errno uintptr` (integer) that implements
+// the `error` interface (zerrors_linux_*.go:Errno.Error).
+//
+// Goish v1 ships it as a Copy newtype around i32 so we can:
+//   1. Use it as the return type of syscall fns (Go-shape: `error`).
+//   2. Compare values directly (`if err == syscall.EINTR { ... }`) since
+//      Errno is PartialEq.
+//   3. Cross-compare with raw i32 in internal goish-v1 paths that compare
+//      against the negated kernel rc (e.g. `if -rc == syscall::ENOENT`).
+//
+// The wrap-into-error path (`error::from(Errno)`) routes through
+// `errors::From<Errno>` so Go-shape returns `(T, error)` continue to
+// work — the error binding holds an `Errno`-typed Arc<dyn ErrorTrait>.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Default)]
+#[allow(non_camel_case_types)]
+pub struct Errno(pub i32);
+
+impl Errno {
+    /// `(e Errno) Error() string` — Linux errno → human name (Go's
+    /// `errnoErr` table is large; we ship a short table for the v1
+    /// surface and fall through to the numeric form for anything else).
+    #[allow(non_snake_case)]
+    pub fn Error(&self) -> crate::gostring::string {
+        crate::gostring::string::from_static(match self.0 {
+            2 => "no such file or directory",
+            4 => "interrupted system call",
+            13 => "permission denied",
+            17 => "file exists",
+            20 => "not a directory",
+            21 => "is a directory",
+            38 => "function not implemented",
+            39 => "directory not empty",
+            95 => "operation not supported",
+            _ => "errno",
+        })
+    }
+
+    /// `Is(target)` mirrors Go 1.13+ errno comparison helpers — e.g.
+    /// `errors.Is(err, syscall.EINTR)` walks the unwrap chain. We
+    /// expose value-equality as a fast path.
+    #[allow(non_snake_case)]
+    pub fn Is(&self, target: Errno) -> bool {
+        *self == target
+    }
+}
+
+impl crate::errors::ErrorTrait for Errno {
+    fn Error(&self) -> crate::gostring::string {
+        Self::Error(self)
+    }
+}
+
+// `From<Errno> for error` flows through the existing
+// `impl<E: ErrorTrait> From<E> for error` blanket in errors/mod.rs.
+// Errno(0) is the success sentinel (`syscall.Errno(0).Error() ==
+// "errno"`, but `errors.Is(syscall.Errno(0), nil)` is true in Go);
+// goish callers manage that bridge at the syscall fn body, returning
+// `errors::nil` for the zero case instead of `Errno(0).into()`.
+
+// Cross-equality with raw i32 so internal goish-v1 code that compares
+// `(-rc as i32) == syscall::ENOENT` keeps compiling without rewrite.
+impl PartialEq<i32> for Errno {
+    fn eq(&self, other: &i32) -> bool {
+        self.0 == *other
+    }
+}
+impl PartialEq<Errno> for i32 {
+    fn eq(&self, other: &Errno) -> bool {
+        *self == other.0
+    }
+}
+
+// Cross-equality with goish::error so port code `if err == syscall.EINTR`
+// (where err is the trait-object form) compares by underlying Errno
+// value. The implementation downcasts through `goish::Any::As` which
+// returns the Go-shape `(value, ok)` comma-ok pair.
+impl PartialEq<Errno> for crate::errors::error {
+    fn eq(&self, other: &Errno) -> bool {
+        use crate::goany::AsExt;
+        let (e, ok) = self.As::<Errno>();
+        ok && *e == *other
+    }
+}
+impl PartialEq<crate::errors::error> for Errno {
+    fn eq(&self, other: &crate::errors::error) -> bool {
+        other == self
+    }
+}
+
+/// Common errno values (Linux, from `<errno.h>`). Match the Go-side
+/// `syscall.E*` consts in name; type is `Errno` to match Go shape.
+pub const ENOENT: Errno = Errno(2);
+pub const EACCES: Errno = Errno(13);
+pub const EEXIST: Errno = Errno(17);
+pub const ENOTDIR: Errno = Errno(20);
+pub const EISDIR: Errno = Errno(21);
+pub const ENOTEMPTY: Errno = Errno(39);
+pub const EINTR: Errno = Errno(4);
+pub const ENOSYS: Errno = Errno(38);
+pub const ENOTSUP: Errno = Errno(95);
+pub const EOPNOTSUPP: Errno = Errno(95);
 
 /// Open flags. Subset of `<fcntl.h>`.
 pub const O_RDONLY: i32 = 0;
@@ -441,9 +533,18 @@ pub fn Ftruncate(fd: i32, length: i64) -> i32 {
 
 /// `flock(fd, operation)` — advisory file lock.
 /// operation: LOCK_SH (shared), LOCK_EX (exclusive), LOCK_UN (unlock).
+///
+/// Go: `func Flock(fd int, how int) (err error)` (zsyscall_linux_*.go).
+/// Goish mirrors the `int`/`int` arg shape so port-side calls don't
+/// need cast preludes. Returns `nil` on success, `Errno(-rc).into()`
+/// on failure.
 #[allow(non_snake_case)]
-pub fn Flock(fd: i32, operation: i32) -> i32 {
-    unsafe { syscall2(SYS_FLOCK, fd as usize, operation as usize) as i32 }
+pub fn Flock(fd: crate::types::int, operation: crate::types::int) -> crate::errors::error {
+    let rc = unsafe { syscall2(SYS_FLOCK, fd as usize, operation as usize) as i32 };
+    if rc >= 0 {
+        return crate::errors::nil;
+    }
+    Errno(-rc).into()
 }
 
 // flock operations (linux/fcntl.h)

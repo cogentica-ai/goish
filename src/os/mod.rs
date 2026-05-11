@@ -52,11 +52,17 @@ pub const ModeDir: FileMode = 1 << 31;
 pub const ModeSymlink: FileMode = 1 << 30;
 pub const ModePerm: FileMode = 0o777;
 
-pub const O_RDONLY: i32 = syscall::O_RDONLY;
-pub const O_WRONLY: i32 = 0o1;
-pub const O_RDWR: i32 = 0o2;
-pub const O_CREATE: i32 = 0o100;
-pub const O_TRUNC: i32 = 0o1000;
+// Go: os/types.go declares these as untyped int. Goish ships them
+// as `int` (= i64) so port-side `var flag int = os.O_RDWR | os.O_TRUNC`
+// arithmetic stays width-uniform without per-callsite `as i32` casts.
+pub const O_RDONLY: int = syscall::O_RDONLY as int;
+pub const O_WRONLY: int = 0o1;
+pub const O_RDWR: int = 0o2;
+pub const O_CREATE: int = 0o100;
+pub const O_TRUNC: int = 0o1000;
+pub const O_APPEND: int = 0o2000;
+pub const O_EXCL: int = 0o200;
+pub const O_SYNC: int = 0o4010000;
 
 pub const PathSeparator: u8 = b'/';
 pub const PathListSeparator: u8 = b':';
@@ -271,14 +277,14 @@ pub fn Create<N: Into<string>>(name: N) -> (nilable<File>, error) {
 }
 
 /// `os.OpenFile(name, flag, perm)` (os/file.go:412).
-pub fn OpenFile<N: Into<string>>(name: N, flag: i32, perm: u32) -> (nilable<File>, error) {
+pub fn OpenFile<N: Into<string>>(name: N, flag: int, perm: u32) -> (nilable<File>, error) {
     let name: string = name.into();
     // Build a NUL-terminated path for the kernel.
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     let nb = bytes_of(&name);
     buf.extend_from_slice(nb);
     buf.push(0);
-    let fd = syscall::Open(buf.as_ptr(), flag | syscall::O_CLOEXEC, perm as i32);
+    let fd = syscall::Open(buf.as_ptr(), (flag as i32) | syscall::O_CLOEXEC, perm as i32);
     if fd < 0 {
         let err: error = if -fd == syscall::ENOENT {
             ErrNotExist.into()
