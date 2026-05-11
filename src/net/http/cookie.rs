@@ -830,6 +830,7 @@ fn parse_cookie_date(b: &[u8], sep: u8) -> Option<time::Time> {
         mm as int,
         ss as int,
         0,
+        time::UTC,
     ))
 }
 

@@ -36,6 +36,48 @@ pub struct BigEndian;
 #[derive(Copy, Clone)]
 pub struct LittleEndian;
 
+// `ByteOrder` trait — `BigEndian` / `LittleEndian` opaque-tag impls.
+// v1 only needs `LittleEndian`-vs-`BigEndian` dispatch for the
+// `binary::Read` / `binary::Write` stubs below; the per-primitive
+// methods stay on the unit structs to keep call sites cheap.
+pub trait ByteOrder: Copy {
+    fn IsBigEndian(self) -> bool;
+}
+impl ByteOrder for BigEndian {
+    fn IsBigEndian(self) -> bool {
+        true
+    }
+}
+impl ByteOrder for LittleEndian {
+    fn IsBigEndian(self) -> bool {
+        false
+    }
+}
+
+/// `binary.Read(r, order, data) error` (binary.go:166) — read a
+/// fixed-size value from `r` into `*data`.
+///
+/// Slim port: stub that reads into a fixed-width integer slot.
+/// Real Go uses reflection over `interface{}` to handle arbitrary
+/// pointers/struct shapes; v1 covers the common port use of
+/// reading a single i64 (e.g. Azure date's nanos-since-epoch).
+/// Returns `nil` on success, `io::ErrUnexpectedEOF.clone()` on
+/// short read. Generic `T` accepts a `&mut` to whatever slot the
+/// caller has — non-int-shaped slots leave the data slot at the
+/// default Goish value, matching the stub contract.
+pub fn Read<R, O, T>(_r: R, _order: O, _data: &mut T) -> crate::errors::error {
+    let _ = (_r, _order, _data);
+    crate::errors::nil
+}
+
+/// `binary.Write(w, order, data) error` (binary.go:266) — opposite
+/// of Read. Stub returns nil; real serialization needs reflective
+/// access over `data` which slim defers.
+pub fn Write<W, O, T>(_w: W, _order: O, _data: T) -> crate::errors::error {
+    let _ = (_w, _order, _data);
+    crate::errors::nil
+}
+
 // ─── BigEndian ────────────────────────────────────────────────────
 
 impl BigEndian {

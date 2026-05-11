@@ -402,6 +402,27 @@ pub fn Compile<S: Into<string>>(expr: S) -> (Regexp, error) {
     }
 }
 
+/// `regexp.Match(pattern, b) (matched bool, err error)` — one-shot
+/// compile + match. Mirrors Go's `regexp.Match` (regexp.go:472) so
+/// callers don't pre-compile when they only need a single check.
+pub fn Match<S: Into<string>, B: AsRef<[byte]>>(pattern: S, b: B) -> (bool, error) {
+    let (re, err) = Compile(pattern);
+    if err != crate::nilval::nil {
+        return (false, err);
+    }
+    // Reuse MatchString's logic via a byte-side helper. The pattern
+    // matches if find_first returns Some.
+    let matched = re.find_first(b.as_ref()).is_some();
+    (matched, crate::nilval::nil.into())
+}
+
+/// `regexp.MatchString(pattern, s) (matched bool, err error)` — same
+/// shape as `Match` but for `string` input.
+pub fn MatchString<S: Into<string>, S2: Into<string>>(pattern: S, s: S2) -> (bool, error) {
+    let s = s.into();
+    Match(pattern, s.as_bytes())
+}
+
 /// `regexp.MustCompile(expr)` — panics on parse error.
 pub fn MustCompile<S: Into<string>>(expr: S) -> Regexp {
     let expr_s = expr.into();

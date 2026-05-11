@@ -603,7 +603,7 @@ fn errMalformedDomain() -> error {
 
 // Go: var endOfTime = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 fn endOfTime() -> time::Time {
-    time::Date(9999, 12, 31, 23, 59, 59, 0)
+    time::Date(9999, 12, 31, 23, 59, 59, 0, time::UTC)
 }
 
 // ─── String helper (avoids extra alloc for fmt.Sprintf) ──────────────
