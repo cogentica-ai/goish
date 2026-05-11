@@ -106,6 +106,20 @@ pub fn GC() {
     // Slim: no-op.
 }
 
+/// `runtime.SetFinalizer(obj, finalizer)` (Go mfinal.go:84) — register
+/// a finalizer that runs when `obj` becomes unreachable. Slim is a
+/// no-op: Goish v1 uses Arc/Box + RAII (`Drop`) for resource cleanup,
+/// so finalizer registration is redundant — the `Drop` impl on the
+/// concrete type already runs at the correct time.
+///
+/// Ports calling this for OS resource teardown (file descriptors,
+/// locks) should rely on the type's `Drop` impl instead. Surfaced by
+/// porting fluxcd/pkg/lockedfile, which uses SetFinalizer to ensure a
+/// lock file gets closed; the goish File's Drop handles that already.
+pub fn SetFinalizer<T, F>(_obj: T, _finalizer: F) {
+    // Slim: no-op. Drop handles cleanup.
+}
+
 /// `runtime.GOROOT()` (extern.go:285) — directory containing the
 /// Go installation. Goish doesn't ship as a tree (single-binary
 /// rlib), so this returns `""` to mirror Go's "not set" sentinel.

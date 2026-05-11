@@ -105,6 +105,13 @@ pub mod time;
 pub mod types;
 pub mod unicode;
 
+// Top-level `fs` is Go's `io/fs` (Go 1.16+). Re-export rather than
+// declare a second copy so paths `goish::fs::FileMode` and
+// `goish::io::fs::FileMode` refer to the same type. The transpiler's
+// prelude rule (pass4_decls.goishPreludeItems) routes `fs::*` bare paths
+// through `use goish::{fs, ...}`.
+pub use crate::io::fs;
+
 // Re-export Go's predeclared identifiers at the crate root so a single
 // `use goish::{len, string, ...}` mirrors Go's always-available builtins.
 pub use builtin::{cap, len, Len};
