@@ -1709,18 +1709,46 @@ impl Reflect for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
     }
 }
 
-// `goish::Any` (interface{} newtype) — forwards to the inner Arc's
-// Reflect impl. Mirrors the Format forwarder in fmt/mod.rs so the
-// transpiler can emit `goish::Any` at interface{} sites without
-// losing reflect-table behaviour.
+// `goish::Any` (interface{} newtype) — runs the same downcast probe
+// table as the raw-Arc impl above. We can't directly forward to that
+// impl because `Any` now wraps `Arc<dyn AnyVal>` (the dyn_eq-extended
+// trait); the probe set is small, so inlining is cheaper than a shim
+// trait.
 impl Reflect for crate::goany::Any {
     #[inline]
     fn __reflect_type() -> Type {
-        <alloc::sync::Arc<dyn core::any::Any + Send + Sync> as Reflect>::__reflect_type()
+        Type::__new(Kind::Interface, "interface{}", &[])
     }
-    #[inline]
     fn __reflect_value(&self) -> Value {
-        <alloc::sync::Arc<dyn core::any::Any + Send + Sync> as Reflect>::__reflect_value(&self.0)
+        let any = self.as_any();
+        if let Some(v) = any.downcast_ref::<string>() {
+            return Value::String(v.clone());
+        }
+        if let Some(v) = any.downcast_ref::<i64>() {
+            return Value::Int(*v);
+        }
+        if let Some(v) = any.downcast_ref::<i32>() {
+            return Value::Int32(*v);
+        }
+        if let Some(v) = any.downcast_ref::<u64>() {
+            return Value::Uint(*v);
+        }
+        if let Some(v) = any.downcast_ref::<u32>() {
+            return Value::Uint32(*v);
+        }
+        if let Some(v) = any.downcast_ref::<u8>() {
+            return Value::Uint8(*v);
+        }
+        if let Some(v) = any.downcast_ref::<f64>() {
+            return Value::Float64(*v);
+        }
+        if let Some(v) = any.downcast_ref::<f32>() {
+            return Value::Float32(*v);
+        }
+        if let Some(v) = any.downcast_ref::<bool>() {
+            return Value::Bool(*v);
+        }
+        Value::Invalid
     }
 }
 

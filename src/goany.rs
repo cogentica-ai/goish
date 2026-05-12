@@ -53,17 +53,90 @@ use core::any::Any as CoreAny;
 
 use crate::nilval::{nil, Nil};
 
+// ─────────────────────────────────────────────────────────────────────
+// AnyVal — `dyn Any` extended with type-erased equality
+// ─────────────────────────────────────────────────────────────────────
+//
+// Go's `interface{} == interface{}` compares dynamic type + dynamic
+// value. Plain `core::any::Any` only carries the type (via TypeId), not
+// the value comparator — Rust's coherence rejects a blanket
+// `PartialEq<Any> for dyn Any` because there's no way to discharge the
+// stored value's PartialEq without specialization.
+//
+// `AnyVal` solves this by baking a `dyn_eq` method into the vtable. The
+// blanket impl over `T: 'static + Send + Sync + PartialEq` discharges
+// the bound at the call site (every value stored in `Any` must be
+// PartialEq) and supplies a TypeId-gated equality check.
+//
+// Non-comparable Go types (slices, maps, funcs) need bespoke PartialEq
+// impls before they can flow through `Any`. Matches Go's compile-time
+// check at `==` sites, except Goish moves the rejection to
+// `Any::new<T>` instead of the equality site — earlier and more
+// precise.
+
+/// Storage trait for `goish::Any`'s inner Arc. Combines `core::any::Any`
+/// (for TypeId + downcast) with a `dyn_eq` slot that drives
+/// `PartialEq<Any> for Any`. Blanket-impl'd over any
+/// `T: 'static + Send + Sync + PartialEq` — every concrete type
+/// emitted through the transpiler's `interface{}` lowering satisfies
+/// this once its struct derives PartialEq (which Goish ports already
+/// do for Go-struct equality).
+pub trait AnyVal: 'static + Send + Sync {
+    /// View as `&(dyn Any + Send + Sync)` — what the downcast and
+    /// trait-registry machinery already consume.
+    fn __any_send_sync(&self) -> &(dyn CoreAny + Send + Sync);
+
+    /// View as `&mut dyn Any` — `MustAsMut` drives in-place
+    /// `downcast_mut::<T>()` through this.
+    fn __any_mut(&mut self) -> &mut dyn CoreAny;
+
+    /// Type-erased equality. Returns true iff `other`'s dynamic type
+    /// matches `Self` AND the values are PartialEq-equal. Symmetric
+    /// because identical TypeIds drive both directions through the
+    /// same concrete `eq`.
+    fn dyn_eq(&self, other: &dyn CoreAny) -> bool;
+}
+
+impl<T: 'static + Send + Sync + PartialEq> AnyVal for T {
+    #[inline]
+    fn __any_send_sync(&self) -> &(dyn CoreAny + Send + Sync) {
+        self
+    }
+
+    #[inline]
+    fn __any_mut(&mut self) -> &mut dyn CoreAny {
+        self
+    }
+
+    #[inline]
+    fn dyn_eq(&self, other: &dyn CoreAny) -> bool {
+        match other.downcast_ref::<T>() {
+            Some(o) => self == o,
+            None => false,
+        }
+    }
+}
+
 /// `interface{}` / `any`. See module docs.
 #[repr(transparent)]
-#[derive(Clone)]
-pub struct Any(pub(crate) Arc<dyn CoreAny + Send + Sync>);
+pub struct Any(pub(crate) Arc<dyn AnyVal>);
+
+impl Clone for Any {
+    #[inline]
+    fn clone(&self) -> Self {
+        Any(Arc::clone(&self.0))
+    }
+}
 
 impl Any {
-    /// Wrap an owned value of any `T: 'static + Send + Sync`. This is
-    /// the upcast path — Pattern F in the transpiler emits this at
-    /// `interface{}` slot positions for owned-T expressions.
+    /// Wrap an owned value of any
+    /// `T: 'static + Send + Sync + PartialEq`. The PartialEq bound
+    /// powers `PartialEq<Any> for Any`; types that lack it cannot
+    /// flow through `Any` — matches Go's "comparing uncomparable" check
+    /// (slices, maps, funcs) but moves the rejection from the `==`
+    /// site to the wrap site.
     #[inline]
-    pub fn new<T: 'static + Send + Sync>(value: T) -> Self {
+    pub fn new<T: 'static + Send + Sync + PartialEq>(value: T) -> Self {
         Any(Arc::new(value))
     }
 
@@ -71,7 +144,7 @@ impl Any {
     /// forwarders and by the type-assertion lowering.
     #[inline]
     pub fn as_any(&self) -> &(dyn CoreAny + Send + Sync) {
-        self.0.as_ref()
+        self.0.__any_send_sync()
     }
 
     /// Goish equivalent of Go's comma-ok type assertion `v, ok := x.(T)`.
@@ -93,7 +166,7 @@ impl Any {
     /// Rust's nominal trait system.
     #[inline]
     pub fn As<T: ?Sized + DowncastableFromAny>(&self) -> Option<&T> {
-        T::from_any(self.0.as_ref())
+        T::from_any(self.as_any())
     }
 
     /// Mut-borrow downcast — panics on miss OR if the Arc is shared
@@ -111,13 +184,13 @@ impl Any {
     /// map is held only by the slice element being indexed).
     #[inline]
     #[track_caller]
-    pub fn MustAsMut<T: 'static + Send + Sync>(&mut self) -> &mut T {
-        let inner: &mut (dyn CoreAny + Send + Sync) = Arc::get_mut(&mut self.0)
+    pub fn MustAsMut<T: 'static + Send + Sync + PartialEq>(&mut self) -> &mut T {
+        let inner: &mut dyn AnyVal = Arc::get_mut(&mut self.0)
             .expect(
                 "interface conversion: Any is shared (refcount > 1) — \
                  mutation through MustAsMut requires unique ownership",
             );
-        inner.downcast_mut::<T>().unwrap_or_else(|| {
+        inner.__any_mut().downcast_mut::<T>().unwrap_or_else(|| {
             panic!(
                 "interface conversion: any is not {}",
                 core::any::type_name::<T>()
@@ -146,8 +219,21 @@ impl Any {
     /// path in the crate.
     #[inline]
     pub fn IsNil(&self) -> bool {
-        let any: &(dyn CoreAny + Send + Sync) = self.0.as_ref();
+        let any = self.as_any();
         any.is::<Nil>() || any.is::<()>()
+    }
+}
+
+impl PartialEq<Any> for Any {
+    /// Go's `interface{} == interface{}` — same dynamic type AND equal
+    /// dynamic values. Dispatched through the inner Arc's `dyn_eq`
+    /// vtable, which the blanket impl pins to the wrapped type's
+    /// PartialEq. Asymmetric-TypeId comparisons return false (Go's
+    /// behavior — interfaces of different dynamic types compare unequal
+    /// even when their values "look" similar).
+    #[inline]
+    fn eq(&self, other: &Any) -> bool {
+        self.0.dyn_eq(other.as_any())
     }
 }
 

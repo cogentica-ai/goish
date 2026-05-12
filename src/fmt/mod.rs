@@ -307,13 +307,37 @@ impl Format for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
     }
 }
 
-// `goish::Any` (interface{} newtype) — forwards through `.0` to the
-// raw-Arc impl above so transpiler output that emits `goish::Any`
-// at fmt.Sprint / Errorf / Println sites picks up the same probe-
-// list behaviour.
+// `goish::Any` (interface{} newtype) — runs the same downcast probe
+// list as the raw-Arc impl above. We can't directly forward to the
+// raw-Arc impl because `Any` now wraps `Arc<dyn AnyVal>` (with the
+// dyn_eq slot) rather than `Arc<dyn core::any::Any + Send + Sync>`;
+// the probe set is small, so inlining is cheaper than a shim trait.
 impl Format for crate::goany::Any {
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
-        self.0.fmt(verb, f)
+        let inner = self.as_any();
+        if let Some(s) = inner.downcast_ref::<crate::gostring::string>() {
+            return s.fmt(verb, f);
+        }
+        if let Some(b) = inner.downcast_ref::<crate::goslice::slice<byte>>() {
+            return b.fmt(verb, f);
+        }
+        if let Some(n) = inner.downcast_ref::<i64>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(n) = inner.downcast_ref::<u64>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(n) = inner.downcast_ref::<i32>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(n) = inner.downcast_ref::<u32>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(b) = inner.downcast_ref::<bool>() {
+            return b.fmt(verb, f);
+        }
+        let _ = verb;
+        f.extend(b"<any>");
     }
 }
 
