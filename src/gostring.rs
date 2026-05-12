@@ -29,7 +29,7 @@ use core::ops::{Add, AddAssign, Index};
 
 use crate::builtin::Len as LenTrait;
 use crate::convert::__SliceIndex;
-use crate::types::{byte, int};
+use crate::types::{byte, int, rune};
 
 #[derive(Clone)]
 pub struct string {
@@ -90,6 +90,25 @@ impl string {
     #[doc(hidden)]
     pub fn __from_vec(v: Vec<u8>) -> Self {
         Self { bytes: Arc::from(v) }
+    }
+
+    /// `string(r)` where r is byte/rune/int — Go's int-to-string
+    /// conversion. Returns the UTF-8 encoding of the rune. Invalid
+    /// rune values (< 0, surrogates, > max code point) encode as the
+    /// Unicode replacement character U+FFFD, matching Go's behavior.
+    pub fn from_rune(r: rune) -> Self {
+        let mut buf = [0u8; 4];
+        let s: &str = match core::char::from_u32(r as u32) {
+            Some(c) => c.encode_utf8(&mut buf),
+            None => {
+                // U+FFFD = 0xEF 0xBF 0xBD
+                buf[0] = 0xEF;
+                buf[1] = 0xBF;
+                buf[2] = 0xBD;
+                core::str::from_utf8(&buf[..3]).unwrap()
+            }
+        };
+        Self::from_bytes(s.as_bytes())
     }
 
     /// `len(s)` byte count. Method form — `len(s)` free function also
@@ -160,6 +179,32 @@ impl From<&string> for string {
 impl core::borrow::Borrow<[u8]> for string {
     #[inline]
     fn borrow(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+// AsRef<str> — lets functions taking `impl AsRef<str>` accept Goish
+// `string` values without caller-side ceremony. Goish's string is
+// guaranteed-UTF-8 by construction (every From<&str> path validates),
+// so the unchecked conversion is safe. Used by stdlib helpers like
+// `utf8::RuneCountInString`, `reflect::StructTag::Get`, etc., that
+// were narrowed to `&str` and now widen via AsRef.
+impl AsRef<str> for string {
+    #[inline]
+    fn as_ref(&self) -> &str {
+        // SAFETY: every constructor path through `From<&str>` /
+        // `from_bytes` ensures the byte buffer is valid UTF-8. Goish
+        // doesn't expose a raw-bytes constructor that bypasses this.
+        unsafe { core::str::from_utf8_unchecked(&self.bytes) }
+    }
+}
+
+// AsRef<[u8]> — symmetric byte view. Some Goish helpers take
+// `impl AsRef<[byte]>` for byte-slice inputs; without this impl,
+// passing a `string` requires `.as_bytes()` ceremony at call sites.
+impl AsRef<[u8]> for string {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
         &self.bytes
     }
 }
