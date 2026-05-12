@@ -130,29 +130,34 @@ pub use goany::try_consume_box;
 pub use gonilable::nilable;
 pub use gonilable_ref::{nilable_ref, nilable_refmut};
 
-/// `Nilable!` — single surface spelling for the three nilable cells.
+/// `nilable!` — single surface spelling for the three nilable cells.
 ///
 /// Expands at parse time to the concrete runtime type:
 ///
-///   Nilable!(T)        → goish::nilable<T>
-///   Nilable!(&T)       → goish::nilable_ref<'_, T>
-///   Nilable!(&mut T)   → goish::nilable_refmut<'_, T>
+///   nilable![T]        → goish::nilable<T>
+///   nilable![&T]       → goish::nilable_ref<'_, T>
+///   nilable![&mut T]   → goish::nilable_refmut<'_, T>
 ///
 /// The three underlying types must remain distinct because their
 /// runtime layouts differ (Option<Arc<T>> for owned; #[repr(transparent)]
 /// Option<&T> / Option<&mut T> for the borrow flavors). The macro hides
 /// that split at the source level: function signatures, locals, and
-/// return types spell every cell as `Nilable!(...)`.
+/// return types spell every cell as `nilable![...]`.
+///
+/// The lowercase name shadows the `nilable` type in macro position only
+/// — Rust separates type / value / macro namespaces, so `nilable<T>`
+/// (type) and `nilable![T]` (macro) coexist. Brackets convey
+/// "type-position" more clearly than parens.
 ///
 /// Usable in type position (fn params, returns, let bindings). Anon
 /// lifetime `'_` is emitted for the borrow forms, so struct-field
 /// position — which forbids `'_` — should still spell the owned form
-/// `Nilable!(T)` directly.
+/// `nilable![T]` directly.
 #[macro_export]
-macro_rules! Nilable {
-    (&mut $T:ty) => { $crate::nilable_refmut<'_, $T> };
-    (&$T:ty) => { $crate::nilable_ref<'_, $T> };
-    ($T:ty) => { $crate::nilable<$T> };
+macro_rules! nilable {
+    [&mut $T:ty] => { $crate::nilable_refmut<'_, $T> };
+    [&$T:ty] => { $crate::nilable_ref<'_, $T> };
+    [$T:ty] => { $crate::nilable<$T> };
 }
 
 /// Trait-impl registry for `goish::Any::As::<dyn Trait>()`.
