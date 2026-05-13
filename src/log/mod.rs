@@ -16,6 +16,8 @@
 
 #![allow(non_snake_case)]
 
+pub mod slog;
+
 extern crate alloc;
 use alloc::vec::Vec;
 

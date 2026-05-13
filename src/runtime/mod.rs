@@ -157,6 +157,22 @@ pub fn Caller(_skip: crate::types::int) -> (crate::types::uintptr, crate::gostri
     (0, crate::gostring::string::from_static(""), 0, false)
 }
 
+/// `runtime.Callers(skip, pcs)` (Go 1.25 extern.go:268) — fills `pcs`
+/// with the program counters of function invocations on the calling
+/// goroutine's stack, skipping the first `skip` frames. Returns the
+/// number of entries written.
+///
+/// goish v1 has no stack-walking runtime; this stub returns 0 (no
+/// frames captured). Consumers (logr/slog handlers, klog) check
+/// `if n > 0` before calling FuncForPC, so the "no caller info" path
+/// flows through cleanly.
+pub fn Callers(
+    _skip: crate::types::int,
+    _pcs: crate::goslice::slice<crate::types::uintptr>,
+) -> crate::types::int {
+    0
+}
+
 /// `runtime.Func` (Go 1.25 symtab.go) — opaque handle returned by
 /// `FuncForPC`. Goish stub is a unit struct; `.Name()` always returns
 /// `""` (matches Go's behaviour for an unknown PC).
