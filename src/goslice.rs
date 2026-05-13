@@ -244,6 +244,24 @@ impl From<&crate::gostring::string> for slice<crate::types::byte> {
     }
 }
 
+// Owned-string variants — emitted call sites often have `string` by
+// value rather than `&string`. Forwarding to the borrowed impls keeps
+// the conversion logic in one place; the `&` produces a temporary
+// borrow that's valid for the duration of the call.
+impl From<crate::gostring::string> for slice<crate::types::rune> {
+    #[inline]
+    fn from(s: crate::gostring::string) -> Self {
+        Self::from(&s)
+    }
+}
+
+impl From<crate::gostring::string> for slice<crate::types::byte> {
+    #[inline]
+    fn from(s: crate::gostring::string) -> Self {
+        Self::from(&s)
+    }
+}
+
 impl<T> PartialEq<slice<T>> for crate::nilval::Nil {
     #[inline]
     fn eq(&self, other: &slice<T>) -> bool {

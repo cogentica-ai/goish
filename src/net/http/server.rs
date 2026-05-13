@@ -913,7 +913,7 @@ impl Server {
     }
 
     /// Per-connection serving loop. See keep-alive doc (M27f-β).
-    fn serve_conn(self: Arc<Self>, mut conn: net::Conn) {
+    fn serve_conn(self: Arc<Self>, mut conn: net::TCPConn) {
         // Drop guard ensures active_conns is decremented even if a
         // handler panics or an early return path is taken.
         struct ActiveGuard<'a>(&'a AtomicUsize);

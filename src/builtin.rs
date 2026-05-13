@@ -51,6 +51,18 @@ impl<T: Len + ?Sized> Len for &T {
     }
 }
 
+// Same blanket for `&mut T` so `len(&p)` where `p: &mut slice<byte>`
+// (the lifted shape pass4 emits for trait-conformant inherent
+// methods, e.g. utfbom's `Reader::Read(&mut self, p: &mut slice<byte>)`)
+// resolves through the inner `T`. Without this, `len(&p)` produces
+// `len(&&mut slice<byte>)` which lacks a Len impl.
+impl<T: Len + ?Sized> Len for &mut T {
+    #[inline]
+    fn __len(&self) -> int {
+        (**self).__len()
+    }
+}
+
 /// Go's `len`: returns the number of elements. Returns `int` (signed,
 /// platform-sized) to match Go. Auto-borrow makes call sites match Go:
 ///

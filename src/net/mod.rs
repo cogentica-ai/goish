@@ -89,11 +89,11 @@ unsafe impl Send for Listener {}
 unsafe impl Sync for Listener {}
 
 impl Listener {
-    /// `(*TCPListener).Accept` — return a new `Conn` for the next
+    /// `(*TCPListener).Accept` — return a new `TCPConn` for the next
     /// connecting peer, parking the calling goroutine on the netpoller
     /// while the accept queue is empty. Mirrors Go's
-    /// `func (l *TCPListener) Accept() (Conn, error)` (net/tcpsock.go).
-    pub fn Accept(&self) -> (Conn, error) {
+    /// `func (l *TCPListener) Accept() (TCPConn, error)` (net/tcpsock.go).
+    pub fn Accept(&self) -> (TCPConn, error) {
         loop {
             let mut peer = syscall::SockaddrIn::loopback(0);
             let mut peer_len: u32 = core::mem::size_of::<syscall::SockaddrIn>() as u32;
@@ -105,7 +105,7 @@ impl Listener {
             );
             if fd >= 0 {
                 return (
-                    Conn::from_accepted(fd, self.addr.clone(), TCPAddr::from_sockaddr_in(&peer)),
+                    TCPConn::from_accepted(fd, self.addr.clone(), TCPAddr::from_sockaddr_in(&peer)),
                     errors::nil,
                 );
             }
@@ -116,16 +116,16 @@ impl Listener {
             if errno == EAGAIN {
                 let pd = self.ensure_pd();
                 if pd.is_null() {
-                    return (Conn::dead(), errno_error("accept", errno));
+                    return (TCPConn::dead(), errno_error("accept", errno));
                 }
                 match netpoll::block(unsafe { &*pd }, b'r') {
                     BlockResult::Ready | BlockResult::Aborted => continue,
                     BlockResult::Timedout => {
-                        return (Conn::dead(), timeout_error("accept"));
+                        return (TCPConn::dead(), timeout_error("accept"));
                     }
                 }
             }
-            return (Conn::dead(), errno_error("accept", errno));
+            return (TCPConn::dead(), errno_error("accept", errno));
         }
     }
 
@@ -234,12 +234,35 @@ impl Listener {
     }
 }
 
-// ─── Conn ────────────────────────────────────────────────────────────
+// ─── Conn (trait) and TCPConn (one impl) ───────────────────────────────
+//
+// Go's `net.Conn` is an interface; Goish carries it as the `Conn`
+// trait. `TCPConn` (this file) is the TCP socket implementation that
+// `Dial("tcp", …)` / `(*TCPListener).Accept` produce. Other concrete
+// impls (UnixConn, future TLSConn) would live in sibling files and
+// also implement `Conn`. The reasoner cache shows 51 stdlib slots
+// carry `Arc<dyn net::Conn>` — that's why the trait exists separate
+// from the struct.
 
-/// TCP `net.Conn`. Implements `io::{Reader, Writer, Closer}`. The fd
-/// is set non-blocking; Read/Write park on the netpoller when the
-/// kernel returns EAGAIN.
-pub struct Conn {
+/// Go's `net.Conn` — the connection interface. Method set matches
+/// Go's interface verbatim. Anything that wants to be carried as
+/// `Arc<dyn net::Conn>` must implement this trait.
+#[goish::interface]
+pub trait Conn: Send + Sync {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error);
+    fn Write(&mut self, p: slice<byte>) -> (int, error);
+    fn Close(&mut self) -> error;
+    fn LocalAddr(&self) -> TCPAddr;
+    fn RemoteAddr(&self) -> TCPAddr;
+    fn SetDeadline(&self, t: crate::time::Time) -> error;
+    fn SetReadDeadline(&self, t: crate::time::Time) -> error;
+    fn SetWriteDeadline(&self, t: crate::time::Time) -> error;
+}
+
+/// TCP `net.TCPConn`. Implements `Conn` plus `io::{Reader, Writer, Closer}`.
+/// The fd is set non-blocking; Read/Write park on the netpoller when
+/// the kernel returns EAGAIN.
+pub struct TCPConn {
     fd: i32,
     local: TCPAddr,
     remote: TCPAddr,
@@ -248,8 +271,8 @@ pub struct Conn {
     pd: AtomicPtr<PollDesc>,
 }
 
-unsafe impl Send for Conn {}
-unsafe impl Sync for Conn {}
+unsafe impl Send for TCPConn {}
+unsafe impl Sync for TCPConn {}
 
 /// `net.Dialer` (Go 1.25 src/net/dial.go) — connection-establishing
 /// configuration. Goish v1 carries the Timeout / KeepAlive fields
@@ -279,11 +302,11 @@ impl Dialer {
     }
 }
 
-impl Conn {
+impl TCPConn {
     /// Internal: dead-conn placeholder returned alongside an error.
     /// Caller must ignore the conn when the error is non-nil.
     fn dead() -> Self {
-        Conn {
+        TCPConn {
             fd: -1,
             local: TCPAddr::zero(),
             remote: TCPAddr::zero(),
@@ -294,7 +317,7 @@ impl Conn {
     /// Wrap a freshly-accepted fd. The fd is already SOCK_NONBLOCK
     /// (the Accept4 caller passed the flag).
     fn from_accepted(fd: i32, local: TCPAddr, remote: TCPAddr) -> Self {
-        Conn {
+        TCPConn {
             fd,
             local,
             remote,
@@ -405,7 +428,7 @@ impl Conn {
     }
 }
 
-impl io::Reader for Conn {
+impl io::Reader for TCPConn {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         let len = p.len();
         let ptr = p.as_mut_ptr();
@@ -436,7 +459,7 @@ impl io::Reader for Conn {
     }
 }
 
-impl io::Writer for Conn {
+impl io::Writer for TCPConn {
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
         // Drain the buffer; partial writes loop. Matches Go's
         // internal/poll.FD.Write which keeps writing until n == len(p)
@@ -478,7 +501,7 @@ impl io::Writer for Conn {
     }
 }
 
-impl io::Closer for Conn {
+impl io::Closer for TCPConn {
     fn Close(&mut self) -> error {
         if self.fd < 0 {
             return errors::nil;
@@ -501,13 +524,44 @@ impl io::Closer for Conn {
     }
 }
 
+/// `net.Conn` impl for TCPConn — forwards each method to the inherent
+/// implementations. Same body, just expressed through the trait so
+/// callers can hold `Arc<dyn Conn>` polymorphically (e.g. a future
+/// `UnixConn` would also implement this trait).
+impl Conn for TCPConn {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        <Self as io::Reader>::Read(self, p)
+    }
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        <Self as io::Writer>::Write(self, p)
+    }
+    fn Close(&mut self) -> error {
+        <Self as io::Closer>::Close(self)
+    }
+    fn LocalAddr(&self) -> TCPAddr {
+        TCPConn::LocalAddr(self)
+    }
+    fn RemoteAddr(&self) -> TCPAddr {
+        TCPConn::RemoteAddr(self)
+    }
+    fn SetDeadline(&self, t: crate::time::Time) -> error {
+        TCPConn::SetDeadline(self, t)
+    }
+    fn SetReadDeadline(&self, t: crate::time::Time) -> error {
+        TCPConn::SetReadDeadline(self, t)
+    }
+    fn SetWriteDeadline(&self, t: crate::time::Time) -> error {
+        TCPConn::SetWriteDeadline(self, t)
+    }
+}
+
 /// Drop closes the fd and unregisters from the netpoller if the user
 /// didn't call `Close()` explicitly. Idempotent with `Close` — that
 /// path already swaps `pd` to null and `fd` to `-1`, so a Drop on a
-/// closed Conn is a no-op. Without this, dropping a Conn without
+/// closed TCPConn is a no-op. Without this, dropping a TCPConn without
 /// calling Close would leak the OS file descriptor for the lifetime
 /// of the process.
-impl Drop for Conn {
+impl Drop for TCPConn {
     fn drop(&mut self) {
         let _ = <Self as io::Closer>::Close(self);
     }
@@ -1461,18 +1515,18 @@ pub fn Listen<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Listene
 /// `net.Dial` — connect to a TCP peer. `network` must be `"tcp"` or
 /// `"tcp4"`. `addr` is `"host:port"` with `host` an IPv4 literal
 /// (DNS resolution is not implemented in v1).
-pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Conn, error) {
+pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (TCPConn, error) {
     let network: string = network.into();
     let addr: string = addr.into();
     if !is_tcp_network(&network) {
         return (
-            Conn::dead(),
+            TCPConn::dead(),
             errors::New(string("net: only \"tcp\" / \"tcp4\" supported")),
         );
     }
     let parsed = match parse::parse_dial_addr(&addr) {
         Ok(s) => s,
-        Err(msg) => return (Conn::dead(), errors::New(msg)),
+        Err(msg) => return (TCPConn::dead(), errors::New(msg)),
     };
 
     let fd = syscall::Socket(
@@ -1481,7 +1535,7 @@ pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Conn, err
         syscall::IPPROTO_TCP,
     );
     if fd < 0 {
-        return (Conn::dead(), errno_error("socket", -fd));
+        return (TCPConn::dead(), errno_error("socket", -fd));
     }
 
     // Non-blocking connect: returns 0 if the kernel completed the
@@ -1498,14 +1552,14 @@ pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Conn, err
         let errno = -r;
         if errno != EINPROGRESS {
             let _ = syscall::Close(fd);
-            return (Conn::dead(), errno_error("connect", errno));
+            return (TCPConn::dead(), errno_error("connect", errno));
         }
         // Wait for the connect to finalize.
         let arc = match netpoll::open(fd) {
             Some(a) => a,
             None => {
                 let _ = syscall::Close(fd);
-                return (Conn::dead(), errno_error("connect/poll_open", 0));
+                return (TCPConn::dead(), errno_error("connect/poll_open", 0));
             }
         };
         // Connect has no deadline in this Dial path (v1); a future
@@ -1514,7 +1568,7 @@ pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Conn, err
         if let BlockResult::Timedout = netpoll::block(&arc, b'w') {
             netpoll::close(arc);
             let _ = syscall::Close(fd);
-            return (Conn::dead(), timeout_error("connect"));
+            return (TCPConn::dead(), timeout_error("connect"));
         }
         // SO_ERROR carries the asynchronous connect result. Zero
         // means success; anything else is the errno from the failed
@@ -1531,11 +1585,11 @@ pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Conn, err
         if so_err != 0 {
             netpoll::close(arc);
             let _ = syscall::Close(fd);
-            return (Conn::dead(), errno_error("connect", so_err));
+            return (TCPConn::dead(), errno_error("connect", so_err));
         }
         // Connect succeeded — recover both ends. We move the Arc
-        // into the new Conn's AtomicPtr via Arc::into_raw, so the
-        // strong count is preserved (Conn owns one ref; slab owns
+        // into the new TCPConn's AtomicPtr via Arc::into_raw, so the
+        // strong count is preserved (TCPConn owns one ref; slab owns
         // one ref).
         let mut local = syscall::SockaddrIn::loopback(0);
         let mut local_len: u32 = core::mem::size_of::<syscall::SockaddrIn>() as u32;
@@ -1549,7 +1603,7 @@ pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Conn, err
         };
         let pd_raw = Arc::into_raw(arc) as *mut PollDesc;
         return (
-            Conn {
+            TCPConn {
                 fd,
                 local: TCPAddr::from_sockaddr_in(&local),
                 remote: TCPAddr::from_sockaddr_in(&parsed),
@@ -1572,7 +1626,7 @@ pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Conn, err
     };
 
     (
-        Conn {
+        TCPConn {
             fd,
             local: TCPAddr::from_sockaddr_in(&local),
             remote: TCPAddr::from_sockaddr_in(&parsed),

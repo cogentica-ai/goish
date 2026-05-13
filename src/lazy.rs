@@ -71,6 +71,23 @@ impl<T: 'static> Lazy<T> {
     }
 }
 
+// `Load(&self) -> T` — Go's `atomic.Value.Load` shape. Some Go ports
+// declare a package-level `var x atomic.Value` and read it via
+// `x.Load()`. Goish lowers `atomic.Value` storing a known type to
+// `Lazy<T>`, but the port's `.Load()` call site needs a concrete
+// method on Lazy<T>. Returning by clone keeps the cheap-clone Arc
+// semantics aligned with what `atomic.Value.Load() -> interface{}`
+// would do in Go (a fresh handle to the stored value).
+//
+// Requires `T: Clone`. Goish's Lazy<T> values always satisfy Clone
+// when T is cheap-clone (string, slice, map, Arc-backed types) so
+// the bound is non-restrictive in practice.
+impl<T: 'static + Clone> Lazy<T> {
+    pub fn Load(&'static self) -> T {
+        self.get().clone()
+    }
+}
+
 impl<T: 'static> Deref for Lazy<T> {
     type Target = T;
     fn deref(&self) -> &T {

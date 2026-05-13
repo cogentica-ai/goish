@@ -74,6 +74,7 @@ pub mod gochan;
 pub mod gomap;
 pub mod goslice;
 pub mod gostring;
+pub mod r#go;
 pub mod hook;
 pub mod lazy;
 pub mod gonilable;
@@ -129,6 +130,25 @@ pub use goany::Any;
 pub use goany::try_consume_box;
 pub use gonilable::nilable;
 pub use gonilable_ref::{nilable_ref, nilable_refmut};
+
+// Carry-form aliases — shorthand for the `Arc<dyn TRAIT>` shapes the
+// reasoner cache shows are spelled at >900 stdlib call sites. Trailing
+// underscore reads as "the trait-object carry of TRAIT" without
+// shadowing the underlying trait name. (See goishc-reasoner cache
+// info for the slot counts; these were chosen as the top non-Fn
+// `Arc<dyn>` shapes by frequency.)
+pub type Reader_ = alloc::sync::Arc<dyn io::Reader>;
+pub type Writer_ = alloc::sync::Arc<dyn io::Writer>;
+pub type Context_ = alloc::sync::Arc<dyn context::Context>;
+
+/// `&mut slice<byte>` — the mutable-byte-slice borrow, used at 271
+/// stdlib param positions (BufferTo, AppendTo, ReadFull-style APIs).
+pub type bytes_mut<'a> = &'a mut goslice::slice<types::byte>;
+
+/// `bytes_` — the borrow form of a byte slice (read-only). 660 stdlib
+/// param positions. Use over `&slice<byte>` when call-site brevity
+/// matters; both spellings compile identically.
+pub type bytes_<'a> = &'a goslice::slice<types::byte>;
 
 /// `nilable!` — single surface spelling for the three nilable cells.
 ///

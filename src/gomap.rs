@@ -184,6 +184,34 @@ impl GoHash for f32 {
     }
 }
 
+// ─── Newtype derive helper ────────────────────────────────────────────
+//
+// `derive_go_hash_newtype!(Algorithm)` produces:
+//
+//	impl goish::gomap::GoHash for Algorithm {
+//	    fn go_hash(&self, seed: u64) -> u64 { self.0.go_hash(seed) }
+//	}
+//
+// Goishc emits this macro invocation alongside any tuple-struct newtype
+// (`type X T` in Go where T is GoHash-able) so the newtype works as a
+// map key without hand-written impls. Mirrors the same pattern Goish
+// uses for `derive_default!` / `derive_clone!` style emissions.
+
+/// Produce a `GoHash` impl for a single-field tuple-struct newtype that
+/// delegates to the inner field's `go_hash`. The inner type must itself
+/// implement `GoHash`.
+#[macro_export]
+macro_rules! derive_go_hash_newtype {
+    ($name:ty) => {
+        impl $crate::gomap::GoHash for $name {
+            #[inline]
+            fn go_hash(&self, seed: u64) -> u64 {
+                self.0.go_hash(seed)
+            }
+        }
+    };
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // Bucket
 // ═══════════════════════════════════════════════════════════════════════

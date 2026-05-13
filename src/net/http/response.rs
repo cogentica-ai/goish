@@ -21,7 +21,7 @@ use alloc::vec::Vec;
 use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::io::{self, Closer, Writer};
-use crate::net::Conn;
+use crate::net::TCPConn;
 use crate::string;
 use crate::types::{byte, int};
 
@@ -40,7 +40,7 @@ use super::header::Header;
 ///     sent by the final `flush()`. Mirrors Go's `http.Flusher`
 ///     interface (`(*response).Flush()` in server.go:1657).
 pub struct ResponseWriter {
-    conn: Conn,
+    conn: TCPConn,
     header: Header,
     /// Captured at `WriteHeader` time. Zero before that; `Write`
     /// implicitly calls WriteHeader(200) on first body byte.
@@ -67,7 +67,7 @@ impl ResponseWriter {
     /// Build a fresh `ResponseWriter` over `conn`. Connection is
     /// closed after the response unless the caller flips
     /// `set_keep_alive(true)` before invoking the handler.
-    pub fn new(conn: Conn) -> Self {
+    pub fn new(conn: TCPConn) -> Self {
         let mut h = Header::new();
         h.Set(string("Content-Type"), string("text/plain; charset=utf-8"));
         ResponseWriter {
@@ -135,7 +135,7 @@ impl ResponseWriter {
     /// `flush()`.
     ///
     /// Subsequent `Flush()` calls in streaming mode are no-ops at the
-    /// wire level (the `Conn` writes are already unbuffered) but kept
+    /// wire level (the `TCPConn` writes are already unbuffered) but kept
     /// for API compatibility with handlers that loop
     /// `w.Write(...); w.Flush();`.
     pub fn Flush(&mut self) -> error {
@@ -218,7 +218,7 @@ impl ResponseWriter {
     /// Server hook: flush the response and return the underlying
     /// connection. Used by the keep-alive loop in ListenAndServe to
     /// hand the connection back for the next request on the same fd.
-    pub fn __take_conn(mut self) -> Conn {
+    pub fn __take_conn(mut self) -> TCPConn {
         let _ = self.flush();
         self.conn
     }
@@ -265,7 +265,7 @@ fn build_head(status: int, header: &Header) -> Vec<u8> {
 
 /// Emit one chunk on the wire: `<hex>\r\n<data>\r\n`. Returns
 /// `(data.len(), err)` so a `Write` proxy can forward it.
-fn write_chunk(conn: &mut Conn, data: &slice<byte>) -> (int, error) {
+fn write_chunk(conn: &mut TCPConn, data: &slice<byte>) -> (int, error) {
     let n = data.Len();
     if n == 0 {
         return (0, errors::nil);

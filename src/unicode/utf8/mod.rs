@@ -106,8 +106,8 @@ pub fn DecodeRune(p: &[byte]) -> (rune, int) {
 
 /// Decode the first rune in `s`. Same semantics as `DecodeRune`.
 #[allow(non_snake_case)]
-pub fn DecodeRuneInString(s: &string) -> (rune, int) {
-    DecodeRune(s.as_bytes())
+pub fn DecodeRuneInString<S: AsRef<str>>(s: S) -> (rune, int) {
+    DecodeRune(s.as_ref().as_bytes())
 }
 
 /// Decode the *last* rune in `p` (scans backward to find a leading byte).
@@ -139,8 +139,8 @@ pub fn DecodeLastRune(p: &[byte]) -> (rune, int) {
 }
 
 #[allow(non_snake_case)]
-pub fn DecodeLastRuneInString(s: &string) -> (rune, int) {
-    DecodeLastRune(s.as_bytes())
+pub fn DecodeLastRuneInString<S: AsRef<str>>(s: S) -> (rune, int) {
+    DecodeLastRune(s.as_ref().as_bytes())
 }
 
 // ─── Encode ────────────────────────────────────────────────────────────
@@ -237,8 +237,8 @@ pub fn RuneCount<P: AsRef<[byte]>>(p: P) -> int {
 }
 
 #[allow(non_snake_case)]
-pub fn RuneCountInString(s: &string) -> int {
-    RuneCount(s.as_bytes())
+pub fn RuneCountInString<S: AsRef<str>>(s: S) -> int {
+    RuneCount(s.as_ref().as_bytes())
 }
 
 /// True if `b` is the first byte of a UTF-8 sequence (not a continuation).
@@ -266,8 +266,8 @@ pub fn Valid(p: &[byte]) -> bool {
 }
 
 #[allow(non_snake_case)]
-pub fn ValidString(s: &string) -> bool {
-    Valid(s.as_bytes())
+pub fn ValidString<S: AsRef<str>>(s: S) -> bool {
+    Valid(s.as_ref().as_bytes())
 }
 
 /// True if `r` is a valid Unicode code point (not a surrogate, ≤ MaxRune).
@@ -301,6 +301,6 @@ pub fn FullRune(p: &[byte]) -> bool {
 }
 
 #[allow(non_snake_case)]
-pub fn FullRuneInString(s: &string) -> bool {
-    FullRune(s.as_bytes())
+pub fn FullRuneInString<S: AsRef<str>>(s: S) -> bool {
+    FullRune(s.as_ref().as_bytes())
 }

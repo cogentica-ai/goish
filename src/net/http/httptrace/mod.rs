@@ -37,7 +37,7 @@ use crate::error;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::net::textproto::MIMEHeader;
-use crate::net::{Conn, IP};
+use crate::net::{Conn, IP, TCPConn};
 use crate::time::Duration;
 use crate::types::int;
 
@@ -180,8 +180,9 @@ pub struct DNSDoneInfo {
 #[derive(Clone)]
 pub struct GotConnInfo {
     /// `Conn` — the connection that was obtained. Owned by the Transport;
-    /// callers must not read/write/close it.
-    pub Conn: Arc<Conn>,
+    /// callers must not read/write/close it. Carried as `Arc<dyn Conn>`
+    /// so future non-TCP impls (TLSConn, UnixConn) flow through unchanged.
+    pub Conn: Arc<dyn Conn>,
 
     /// `Reused` — whether this connection has been previously used for
     /// another HTTP request.
