@@ -1251,58 +1251,58 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
         out.push_str("}\n\n");
     }
 
-    // ── (6.8) PartialEq<Nil> for Arc<dyn T + Send + Sync> ──────────
+    // ── (6.8) PartialEq<Nil> + From<Nil> for Arc<dyn T + Send + Sync> ──
     //
     // Lets users write `if sink == nil { ... }` and `if sink != nil`
     // against `Arc<dyn Trait>`-typed bindings — Go's idiomatic
     // interface-nil-check, preserved at the source level.
     //
+    // Orphan-rule gate: these impls are only valid when `Nil` is local
+    // to the calling crate (per RFC 2451's "covered" requirement for
+    // `impl ForeignTrait<T_local> for Arc<dyn LocalTrait>`). Inside
+    // goish-v1, `::goish::Nil` IS local (`extern crate self as goish`
+    // makes it so). In a goishc-emitted port crate, `::goish::Nil` is
+    // foreign, and the orphan rule rejects the impl entirely.
+    //
+    // Detect the goish-v1 case via CARGO_PKG_NAME — the proc-macro
+    // reads the env var at expansion time, which is set to the calling
+    // crate's package name by cargo. When we're inside goish-v1, emit;
+    // otherwise the goishc transpiler's nil-check rewrite (which
+    // lowers `arc == nil` to `(*arc).__is_nil_iface()` at the call
+    // site) is the path that makes user-facing `==` work in port code.
+    //
     // Dispatches through the `__is_nil_iface` default method: the
     // private nil sentinel `__NilT` overrides it to return true; any
-    // concrete impl inherits the `false` default. So
-    // `Arc<dyn T> == nil` is true iff the Arc carries the sentinel.
-    //
-    // Orphan-rule note: this impl IS allowed despite both `PartialEq`
-    // and `Arc` being foreign — the trait-argument `Nil` is local,
-    // and `dyn T` makes the Self type's uncovered position local
-    // too. RFC 2451's covered-trait rule accepts it.
-    //
-    // Symmetric impl below so `nil == sink` works as well.
-    let _ = writeln!(out,
-        "impl ::core::cmp::PartialEq<::goish::Nil> \
-         for ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
-    );
-    let _ = writeln!(out,
-        "    #[inline] fn eq(&self, _: &::goish::Nil) -> bool {{ (**self).__is_nil_iface() }}"
-    );
-    out.push_str("}\n\n");
-    let _ = writeln!(out,
-        "impl ::core::cmp::PartialEq<::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync>> \
-         for ::goish::Nil {{"
-    );
-    let _ = writeln!(out,
-        "    #[inline] fn eq(&self, other: &::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync>) -> bool {{ (**other).__is_nil_iface() }}"
-    );
-    out.push_str("}\n\n");
-
-    // ── (6.9) From<Nil> for Arc<dyn T + Send + Sync> ───────────────
-    //
-    // Constructor side of the nil-check above. `let x: Arc<dyn T> =
-    // nil.into();` produces an Arc carrying the sentinel; subsequent
-    // `x == nil` returns true.
-    //
-    // Without this impl, the only way to materialize a nil
-    // `Arc<dyn T>` was an explicit `Arc::new(__NilT)` — pleasant for
-    // generated code but awkward for hand-written Goish. With this,
-    // user code can write `nil.into()` at any Arc<dyn T> slot.
-    let _ = writeln!(out,
-        "impl ::core::convert::From<::goish::Nil> \
-         for ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
-    );
-    let _ = writeln!(out,
-        "    #[inline] fn from(_: ::goish::Nil) -> Self {{ ::alloc::sync::Arc::new({nil_name}) }}"
-    );
-    out.push_str("}\n\n");
+    // concrete impl inherits the `false` default.
+    let inside_goish_runtime = ::std::env::var("CARGO_PKG_NAME")
+        .map(|n| n == "goish")
+        .unwrap_or(false);
+    if inside_goish_runtime {
+        let _ = writeln!(out,
+            "impl ::core::cmp::PartialEq<::goish::Nil> \
+             for ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
+        );
+        let _ = writeln!(out,
+            "    #[inline] fn eq(&self, _: &::goish::Nil) -> bool {{ (**self).__is_nil_iface() }}"
+        );
+        out.push_str("}\n\n");
+        let _ = writeln!(out,
+            "impl ::core::cmp::PartialEq<::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync>> \
+             for ::goish::Nil {{"
+        );
+        let _ = writeln!(out,
+            "    #[inline] fn eq(&self, other: &::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync>) -> bool {{ (**other).__is_nil_iface() }}"
+        );
+        out.push_str("}\n\n");
+        let _ = writeln!(out,
+            "impl ::core::convert::From<::goish::Nil> \
+             for ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
+        );
+        let _ = writeln!(out,
+            "    #[inline] fn from(_: ::goish::Nil) -> Self {{ ::alloc::sync::Arc::new({nil_name}) }}"
+        );
+        out.push_str("}\n\n");
+    }
 
     // ── (7) Backwards-compat From<Nil> for Box<dyn T> ─────────────
     //
