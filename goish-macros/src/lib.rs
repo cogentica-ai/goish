@@ -1118,32 +1118,37 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     out.push_str("    fn __is_nil_iface(&self) -> bool { true }\n");
     out.push_str("}\n\n");
 
-    // ── HARD RULE: NO PER-TRAIT WRAPPER NEWTYPE EMITTED ─────────────
+    // ── NO PER-TRAIT WRAPPER NEWTYPE ────────────────────────────────
     //
     // Earlier designs emitted `<Trait>Ref(pub Arc<dyn Trait + Send +
-    // Sync>)` to host orphan-rule-bound impls (Default, From<U>,
-    // From<Nil>, PartialEq<Nil>) that the rule rejects on bare
-    // `Arc<dyn LocalTrait>`. That generated one new top-level type per
-    // user trait — visual clutter that the Goish project has decided
-    // is not acceptable.
+    // Sync>)` to host orphan-rule-bound impls. That generated one
+    // new top-level type per user trait — visual clutter the Goish
+    // project rejects.
     //
-    // Replacement convention (enforced by the goishc transpiler, NOT
-    // by macro emission):
+    // Convention:
     //   * Function params of interface type lower to
     //     `impl Trait + 'static` (anonymous generic + bound). No
     //     wrapper at the param position.
     //   * Storage positions (struct fields, locals, returns, Hook<T>)
     //     use `Arc<dyn Trait + Send + Sync>` directly.
-    //   * Default / From<Nil> / PartialEq<Nil> are NOT available on
-    //     `Arc<dyn Trait>` — the transpiler instead emits explicit
-    //     sentinel construction (`Arc::new(__NilTrait)`) and explicit
-    //     nil-checks (`(*v).__is_nil_iface()`). This is the price of
-    //     the no-wrapper rule.
     //
-    // Section (7) below — `From<Nil> for Box<dyn Trait + Send + Sync>`
-    // — is retained because `Box<T>` is `#[fundamental]`, so its
-    // From<Nil> impl is orphan-rule-allowed without a wrapper. Used
-    // by legacy paths that lower interface returns to Box.
+    // Orphan-rule subtlety: foreign-trait impls on `Arc<dyn LocalTrait>`
+    // are allowed IFF the foreign trait has at least one local type
+    // argument. Concretely:
+    //
+    //   * `PartialEq<Nil>` for `Arc<dyn T>` — OK. Nil is local; the
+    //     foreign-trait type arg covers Self.
+    //   * `From<Nil>` for `Arc<dyn T>` — OK. Same reason.
+    //   * `Default` for `Arc<dyn T>` — NOT OK. Default has no type
+    //     arguments, so Self alone determines coverage; Arc is
+    //     foreign at the outermost position and `dyn T` doesn't lift
+    //     covered-ness through Arc per RFC 2451.
+    //
+    // Sections (6.8) and (7) below emit the two ALLOWED impls so
+    // users can write `arc == nil` / `nil.into()` directly. Default
+    // is intentionally NOT emitted — structs with `Arc<dyn T>`-typed
+    // fields need either an explicit `Default` impl or to drop
+    // `#[derive(Default)]`.
 
     // ── (6.5) Forwarding impl Trait for Hook<dyn T + Send + Sync> ─
     //
@@ -1246,19 +1251,65 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
         out.push_str("}\n\n");
     }
 
+    // ── (6.8) PartialEq<Nil> for Arc<dyn T + Send + Sync> ──────────
+    //
+    // Lets users write `if sink == nil { ... }` and `if sink != nil`
+    // against `Arc<dyn Trait>`-typed bindings — Go's idiomatic
+    // interface-nil-check, preserved at the source level.
+    //
+    // Dispatches through the `__is_nil_iface` default method: the
+    // private nil sentinel `__NilT` overrides it to return true; any
+    // concrete impl inherits the `false` default. So
+    // `Arc<dyn T> == nil` is true iff the Arc carries the sentinel.
+    //
+    // Orphan-rule note: this impl IS allowed despite both `PartialEq`
+    // and `Arc` being foreign — the trait-argument `Nil` is local,
+    // and `dyn T` makes the Self type's uncovered position local
+    // too. RFC 2451's covered-trait rule accepts it.
+    //
+    // Symmetric impl below so `nil == sink` works as well.
+    let _ = writeln!(out,
+        "impl ::core::cmp::PartialEq<::goish::Nil> \
+         for ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
+    );
+    let _ = writeln!(out,
+        "    #[inline] fn eq(&self, _: &::goish::Nil) -> bool {{ (**self).__is_nil_iface() }}"
+    );
+    out.push_str("}\n\n");
+    let _ = writeln!(out,
+        "impl ::core::cmp::PartialEq<::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync>> \
+         for ::goish::Nil {{"
+    );
+    let _ = writeln!(out,
+        "    #[inline] fn eq(&self, other: &::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync>) -> bool {{ (**other).__is_nil_iface() }}"
+    );
+    out.push_str("}\n\n");
+
+    // ── (6.9) From<Nil> for Arc<dyn T + Send + Sync> ───────────────
+    //
+    // Constructor side of the nil-check above. `let x: Arc<dyn T> =
+    // nil.into();` produces an Arc carrying the sentinel; subsequent
+    // `x == nil` returns true.
+    //
+    // Without this impl, the only way to materialize a nil
+    // `Arc<dyn T>` was an explicit `Arc::new(__NilT)` — pleasant for
+    // generated code but awkward for hand-written Goish. With this,
+    // user code can write `nil.into()` at any Arc<dyn T> slot.
+    let _ = writeln!(out,
+        "impl ::core::convert::From<::goish::Nil> \
+         for ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
+    );
+    let _ = writeln!(out,
+        "    #[inline] fn from(_: ::goish::Nil) -> Self {{ ::alloc::sync::Arc::new({nil_name}) }}"
+    );
+    out.push_str("}\n\n");
+
     // ── (7) Backwards-compat From<Nil> for Box<dyn T> ─────────────
     //
     // Pre-existing ports use `Box<dyn T + Send + Sync>` directly as
-    // the owned interface-value lowering (today's transpiler default).
-    // `nil.into()` returning a Box<dyn T> needs `From<Nil>`. Box<T>
-    // is `#[fundamental]`, so the orphan rule accepts the impl
-    // because `dyn LocalTrait` is the local type at uncovered
-    // position — the impl lands cleanly in the trait-defining crate.
-    //
-    // We do NOT emit the equivalent for `Arc<dyn T>` — Arc is not
-    // fundamental, the orphan rule rejects when the trait is foreign
-    // to the calling crate. Use the `<T>Ref` wrapper for Arc-shaped
-    // interface values (Default, Clone, From<Nil> are all there).
+    // the owned interface-value lowering. `nil.into()` returning a
+    // Box<dyn T> needs `From<Nil>`. Box<T> is `#[fundamental]`, so
+    // the orphan rule accepts this without further justification.
     let _ = writeln!(out,
         "impl ::core::convert::From<::goish::Nil> \
          for ::alloc::boxed::Box<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
