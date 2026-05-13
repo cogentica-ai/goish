@@ -67,6 +67,20 @@ impl<T> slice<T> {
     pub fn Cap(&self) -> int {
         self.inner.capacity() as int
     }
+
+    /// `xs.swap(i, j)` — swap two elements in place.
+    ///
+    /// Goishc lowers Go's tuple-swap idiom `xs[i], xs[j] = xs[j],
+    /// xs[i]` (canonical in `sort.Interface.Swap`) to this call. The
+    /// underlying `[T]::swap` is reachable via `DerefMut`, but its
+    /// `usize` argument types would force callers to cast `int` →
+    /// `usize` at every site; this inherent shim accepts `int`
+    /// (Go's natural integer kind) and does the cast once. Works for
+    /// any element type — no `Copy` / `Clone` bound — because the
+    /// underlying swap is a pointer-level exchange.
+    pub fn swap(&mut self, i: int, j: int) {
+        self.inner.swap(i as usize, j as usize);
+    }
 }
 
 impl<T: Clone> slice<T> {
