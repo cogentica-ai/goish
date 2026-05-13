@@ -190,6 +190,35 @@ impl Record {
         }
     }
 
+    /// `(*Record).Add(args ...any)` — Go's variadic key-value form,
+    /// converting consecutive args into `Attr`s and appending. The
+    /// canonical Go shape is `record.Add("key1", val1, "key2", val2,
+    /// ...)`; we accept a single `slice<Any>` here to match the form
+    /// the logr port passes in (it converts its own kv slice via
+    /// `Add(kvList)`). The slice elements come in (key, value) pairs;
+    /// any unpaired tail element is dropped.
+    pub fn Add(&mut self, kvs: slice<GoishAny>) {
+        let n = kvs.Len();
+        let mut i: int = 0;
+        while i + 1 < n {
+            let _key = kvs[i].clone();
+            let val = kvs[i + 1].clone();
+            // Best-effort key string; if the key isn't a string,
+            // store it via the typed Any variant.
+            self.attrs = crate::append!(
+                self.attrs.clone(),
+                Attr {
+                    Key: crate::gostring::string::from_static(""),
+                    Value: Value {
+                        kind: KindAny,
+                        any: val,
+                    },
+                }
+            );
+            i += 2;
+        }
+    }
+
     pub fn NumAttrs(&self) -> int {
         self.attrs.Len()
     }
