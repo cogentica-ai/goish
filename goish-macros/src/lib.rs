@@ -1251,6 +1251,78 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
         out.push_str("}\n\n");
     }
 
+    // ── (6.7a) Forwarding impl Trait for &T and &mut T blankets ────
+    //
+    // Rust doesn't auto-derive `impl Trait for &T` or `impl Trait for
+    // &mut T` from `impl Trait for T`. Goish-emitted code routinely
+    // borrows trait-implementing values into trait-object positions
+    // — `let h: &slogHandler = ...; h.Handle(...)` requires
+    // `&slogHandler: Handler`. Without these blankets, the borrow
+    // forms fail with E0277 even when the owned form satisfies the
+    // trait.
+    //
+    // Emission:
+    //   * `&mut T` blanket: ALWAYS emit when the trait's methods can
+    //     all be dispatched via auto-deref through `&mut`. Concretely:
+    //     `&mut T` derefs to `T`, and method resolution can find any
+    //     `&self` or `&mut self` method on T. So forwarding is
+    //     unconditional (every method body is `(**self).M(args)`,
+    //     which auto-borrows correctly).
+    //
+    //   * `&T` blanket: emit ONLY when every trait method takes
+    //     `&self` (no `&mut self` methods). Otherwise the impl can't
+    //     dispatch `&mut self` methods through a `&T` — no way to
+    //     promote a shared borrow to an exclusive one.
+    //
+    // Method bodies use fully-qualified dispatch
+    // `<__T as Trait>::M(self, args)` so they don't recurse into the
+    // forwarding impl. Skipped (forwarding_impl_ok) when method-shape
+    // parsing failed for any method.
+    let blanket_methods_ok = !parsed.methods.is_empty()
+        && parsed.methods.iter().all(|m| !m.method_name.is_empty());
+    let any_mut_self = parsed.methods.iter().any(|m| m.receiver == "&mut self");
+
+    if blanket_methods_ok {
+        // &mut T blanket — always valid (every method auto-borrows
+        // through &mut). Methods that take `&self` get an &mut → &
+        // demotion via auto-deref; methods that take `&mut self`
+        // re-borrow through the impl's `self: &mut &mut __T` → `&mut __T`.
+        let _ = writeln!(
+            out,
+            "impl<__T: {name} + ?::core::marker::Sized> {name} for &mut __T {{"
+        );
+        for m in &parsed.methods {
+            let arg_list = m.arg_names.join(", ");
+            let body = format!(
+                "{{ <__T as {name}>::{method}(self, {args}) }}",
+                name = name,
+                method = m.method_name,
+                args = arg_list,
+            );
+            let _ = writeln!(out, "    {} {}", m.sig_only.trim(), body);
+        }
+        out.push_str("}\n\n");
+
+        if !any_mut_self {
+            // &T blanket — only valid when no method needs &mut.
+            let _ = writeln!(
+                out,
+                "impl<__T: {name} + ?::core::marker::Sized> {name} for &__T {{"
+            );
+            for m in &parsed.methods {
+                let arg_list = m.arg_names.join(", ");
+                let body = format!(
+                    "{{ <__T as {name}>::{method}(*self, {args}) }}",
+                    name = name,
+                    method = m.method_name,
+                    args = arg_list,
+                );
+                let _ = writeln!(out, "    {} {}", m.sig_only.trim(), body);
+            }
+            out.push_str("}\n\n");
+        }
+    }
+
     // ── (6.8) PartialEq<Nil> + From<Nil> for Arc<dyn T + Send + Sync> ──
     //
     // Lets users write `if sink == nil { ... }` and `if sink != nil`

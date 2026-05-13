@@ -139,21 +139,11 @@ pub trait WriterTo {
     fn WriteTo(&mut self, w: &mut dyn Writer) -> (i64, error);
 }
 
-// Blanket impls so `&mut R` and `&mut W` satisfy the trait without
-// transferring ownership. Mirrors Go's "any pointer-receiver method
-// promotes through a `*T`" — lets callers do
-// `bufio.NewWriter(&mut buf)` and keep `buf` alive after.
-impl<R: Reader + ?Sized> Reader for &mut R {
-    #[inline]
-    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
-        (**self).Read(p)
-    }
-}
-
-// `Box<dyn Reader + Send + Sync>` is the canonical lowering for an
-// owned interface storage slot (Go's `io.Reader` field). Forward the
-// trait through Box::deref_mut so callers can pass the boxed reader
-// straight to `io::ReadFull(boxed, …)` without unboxing.
+// Blanket impls so `Box<dyn T>` satisfies the trait. The `&mut R`
+// blanket is now auto-emitted by `#[goish::interface]` (section 6.7a
+// of goish-macros); the Box<R> blanket below is retained because
+// Box<dyn T> needs the same dispatch shape for owned trait-object
+// callers and the macro doesn't emit it yet.
 impl<R: Reader + ?Sized> Reader for alloc::boxed::Box<R> {
     #[inline]
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
@@ -161,24 +151,10 @@ impl<R: Reader + ?Sized> Reader for alloc::boxed::Box<R> {
     }
 }
 
-impl<W: Writer + ?Sized> Writer for &mut W {
-    #[inline]
-    fn Write(&mut self, p: slice<byte>) -> (int, error) {
-        (**self).Write(p)
-    }
-}
-
 impl<W: Writer + ?Sized> Writer for alloc::boxed::Box<W> {
     #[inline]
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
         (**self).Write(p)
-    }
-}
-
-impl<C: Closer + ?Sized> Closer for &mut C {
-    #[inline]
-    fn Close(&mut self) -> error {
-        (**self).Close()
     }
 }
 
