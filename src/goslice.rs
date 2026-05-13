@@ -172,6 +172,23 @@ impl<T> PartialEq<crate::nilval::Nil> for slice<T> {
     }
 }
 
+// Element-wise equality. Mirrors Go's `bytes.Equal` / element-by-
+// element `==` chain that Go's spec defines for slices via reflect
+// (with the caveat that `==` on slice values is a compile error in
+// Go for non-byte slices; Goish takes the more permissive route of
+// providing the operator for any cheap-clone `T: PartialEq`, since
+// the alternative — requiring callers to spell `bytes::Equal`
+// explicitly — adds noise without semantic value).
+//
+// Eq is intentionally NOT derived: Go's `[]float64` with NaN
+// elements would violate the Eq reflexivity contract.
+impl<T: PartialEq> PartialEq for slice<T> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
 // Go's `[]rune(s)` and `[]byte(s)` string→slice conversions. Goish
 // emits these as `<slice<rune>>::from(s)` / `<slice<byte>>::from(s)`
 // at the buildTypeConversion call site.
