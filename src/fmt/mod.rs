@@ -341,6 +341,24 @@ impl Format for crate::goany::Any {
     }
 }
 
+// `Option<T>` — Goish's nullable carrier for some stdlib returns
+// (notably `context::Context::Value`, which mirrors Go's `any` return
+// with explicit absence). `None` prints as the Go-flavored "<nil>";
+// `Some(v)` forwards to the inner Format. Coherence: Option<T> has no
+// Stringer impl, so the `impl<T: Stringer> Format for T` blanket
+// doesn't apply.
+impl<T: Format> Format for Option<T> {
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        match self {
+            Some(v) => v.fmt(verb, f),
+            None => {
+                let _ = verb;
+                f.extend(b"<nil>");
+            }
+        }
+    }
+}
+
 // All integer widths route through one helper.
 macro_rules! impl_format_for_signed {
     ($($t:ty),*) => { $( impl Format for $t {
