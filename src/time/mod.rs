@@ -2271,3 +2271,37 @@ fn month_short(bs: &[u8]) -> Option<int> {
         _ => None,
     }
 }
+
+// ─── Reflect ─────────────────────────────────────────────────────────
+//
+// `reflect.TypeOf(time.Time{})` is the common key for fmt-style
+// formatter tables — Go's `pretty` / `litter` / `repr` ports register
+// `fmt.Sprint` under this key. The runtime only needs Type identity;
+// __reflect_value falls back to a name-only struct shape (no field
+// reflection — Time's internals are private).
+impl crate::reflect::Reflect for Time {
+    #[inline]
+    fn __reflect_type() -> crate::reflect::Type {
+        crate::reflect::Type::__new(crate::reflect::Kind::Struct, "time.Time", &[])
+    }
+    #[inline]
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        crate::reflect::Value::Struct {
+            ty: <Self as crate::reflect::Reflect>::__reflect_type(),
+            fields: alloc::vec::Vec::new(),
+        }
+    }
+}
+
+// `time.Duration` reflects as an int64 newtype — matches Go's
+// `reflect.TypeOf(time.Duration(0)).Kind() == reflect.Int64`.
+impl crate::reflect::Reflect for Duration {
+    #[inline]
+    fn __reflect_type() -> crate::reflect::Type {
+        crate::reflect::Type::__new(crate::reflect::Kind::Int64, "time.Duration", &[])
+    }
+    #[inline]
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        crate::reflect::Value::Int(self.0)
+    }
+}

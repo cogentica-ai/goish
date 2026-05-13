@@ -1715,3 +1715,24 @@ fn errno_message(errno: i32) -> &'static str {
         _ => "i/o error",
     }
 }
+
+// ─── Reflect ─────────────────────────────────────────────────────────
+//
+// `reflect.TypeOf(net.IP{})` keys fmt-style formatter tables — ports
+// like kylelemons/godebug/pretty register `fmt.Sprint` under this key.
+// Go's reflect describes `net.IP` as a named slice over bytes; mirror
+// that via Kind::Slice so callers using `.Kind() == reflect.Slice`
+// stay correct.
+impl crate::reflect::Reflect for IP {
+    #[inline]
+    fn __reflect_type() -> crate::reflect::Type {
+        crate::reflect::Type::__new(crate::reflect::Kind::Slice, "net.IP", &[])
+    }
+    #[inline]
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        crate::reflect::Value::Slice {
+            elem_type: <byte as crate::reflect::Reflect>::__reflect_type,
+            items: alloc::vec::Vec::new(),
+        }
+    }
+}

@@ -327,6 +327,30 @@ impl<'a, T: ?Sized + 'a> From<Option<&'a mut T>> for nilable_refmut<'a, T> {
     }
 }
 
+// `&mut nilable<T>` → `nilable_refmut<T>`. Mirrors the read-only
+// `From<&nilable<T>> for nilable_ref<T>` path below; the transpiler
+// emits `(&mut buf).into()` at call sites where a local
+// `let mut buf = new!(bytes::Buffer)` flows into a `nilable![&mut T]`
+// parameter slot. Routes through `TryMut()` so the shared-mutation
+// guard fires uniformly (returns `None` on shared / nil instead of
+// panicking; pairs with `nilable_refmut::Must()` at the read site).
+impl<'a, T: 'a> From<&'a mut crate::nilable<T>> for nilable_refmut<'a, T> {
+    #[inline]
+    fn from(n: &'a mut crate::nilable<T>) -> Self {
+        nilable_refmut(n.TryMut())
+    }
+}
+
+// `&nilable<T>` → `nilable_ref<T>`. Read-only counterpart to the
+// above. Routes through `Try()` so the surface stays purely
+// shared-borrow.
+impl<'a, T: 'a> From<&'a crate::nilable<T>> for nilable_ref<'a, T> {
+    #[inline]
+    fn from(n: &'a crate::nilable<T>) -> Self {
+        nilable_ref(n.Try())
+    }
+}
+
 // ── Debug / Display forwarders — same conventions as nilable<T>. ────
 impl<'a, T: ?Sized + 'a + core::fmt::Debug> core::fmt::Debug for nilable_ref<'a, T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

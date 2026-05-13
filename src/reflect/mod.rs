@@ -1223,6 +1223,23 @@ pub trait Reflect {
     fn __reflect_value(&self) -> Value;
 }
 
+// Blanket impl: `&T: Reflect` when `T: Reflect`. Goish ports often
+// pass `&val` to `reflect::ValueOf` (mirroring Go's value-style
+// `reflect.ValueOf(val)` — except Go's interface{} arg auto-borrows
+// where Rust's `&T` does not). The transpiler emits `ValueOf(&val)`
+// uniformly; this blanket keeps the call valid whether `val` is a
+// concrete `T` or already a borrow.
+impl<T: Reflect + ?Sized> Reflect for &T {
+    #[inline]
+    fn __reflect_type() -> Type {
+        T::__reflect_type()
+    }
+    #[inline]
+    fn __reflect_value(&self) -> Value {
+        (**self).__reflect_value()
+    }
+}
+
 /// `reflect.TypeOf(v)` — descriptor for `v`'s static type.
 pub fn TypeOf<T: Reflect + ?Sized>(_: &T) -> Type {
     T::__reflect_type()
