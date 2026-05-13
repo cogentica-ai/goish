@@ -140,6 +140,22 @@ impl Any {
         Any(Arc::new(value))
     }
 
+    /// Wrap a function-shaped value (typically `Arc<dyn Fn(...) -> R +
+    /// Send + Sync>`) into `Any` without requiring `PartialEq`. Go's
+    /// `func` values are non-comparable except against `nil`; the
+    /// emitted Goish-side `dyn_eq` follows that contract — two
+    /// `Any`-wrapped fn values always compare unequal to each other.
+    ///
+    /// The transpiler routes here at every "fn-item / closure
+    /// flowing into an `Any` slot" site. Manual callers reach for it
+    /// when storing closures in `map<K, goish::Any>` or `slice<goish::
+    /// Any>` — anywhere `Any::new` would otherwise demand `PartialEq`
+    /// on a type that has no comparable shape.
+    #[inline]
+    pub fn new_fn<T: 'static + Send + Sync>(value: T) -> Self {
+        Any(Arc::new(__FnSlot(value)))
+    }
+
     /// `&dyn Any` borrow at the inner Arc. Used by Format / Reflect
     /// forwarders and by the type-assertion lowering.
     #[inline]
@@ -273,6 +289,55 @@ impl PartialEq<Any> for Nil {
 // Nil-shape sentinel: `Nil` itself (from nilval.rs). All `From<Nil>`
 // paths land `Arc::new(nil)`, all IsNil predicates probe `is::<Nil>()`
 // — single nil semantics, no auxiliary marker types.
+
+// ─────────────────────────────────────────────────────────────────────
+// __FnSlot — `Any::new_fn` payload wrapper
+// ─────────────────────────────────────────────────────────────────────
+//
+// Backing storage for `Any::new_fn`. Wraps any
+// `T: 'static + Send + Sync` (no PartialEq) and supplies a custom
+// `AnyVal` impl that:
+//
+//   1. Forwards `__any_send_sync` / `__any_mut` to the inner value,
+//      so `Any::As::<T>()`, reflect::ValueOf, and every other
+//      `downcast_ref`-based consumer sees the bare `T` (the
+//      `__FnSlot` wrapper is transparent at the dyn-Any surface).
+//   2. Stamps `dyn_eq` to always return false — matching Go's
+//      contract that func values are not comparable except against
+//      nil. The blanket `impl AnyVal for T: PartialEq` is bypassed
+//      because `T` here has no PartialEq.
+//
+// Public surface: `goish::Any::new_fn(value)`. The transpiler routes
+// fn-item lifts through `new_fn`; manual callers reach for it when
+// storing closures in `Any`. Callers never see __FnSlot — it's an
+// internal storage detail.
+#[doc(hidden)]
+pub struct __FnSlot<T: 'static + Send + Sync>(pub T);
+
+impl<T: 'static + Send + Sync> AnyVal for __FnSlot<T> {
+    /// Expose the inner T — `downcast_ref::<T>()` sees it directly
+    /// so reflect / type-assertion paths work without seeing the
+    /// __FnSlot wrapper.
+    #[inline]
+    fn __any_send_sync(&self) -> &(dyn CoreAny + Send + Sync) {
+        &self.0
+    }
+
+    /// Inner-T mut view. Mirrors the blanket AnyVal impl's
+    /// downcast_mut handoff — drives `Any::MustAsMut::<T>()` for
+    /// fn-typed slots (rare; included for parity).
+    #[inline]
+    fn __any_mut(&mut self) -> &mut dyn CoreAny {
+        &mut self.0
+    }
+
+    /// Go semantics: func values are non-comparable except against
+    /// nil. Two `Any`-wrapped fn values always compare unequal.
+    #[inline]
+    fn dyn_eq(&self, _other: &dyn CoreAny) -> bool {
+        false
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // DowncastableFromAny — helper trait for `Any::As<T>`
