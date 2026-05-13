@@ -45,13 +45,60 @@ pub use crate::os::{FileInfo, FileInfoData};
 // The numeric layout matches Go exactly so a FileMode round-trips
 // across the os boundary unchanged: `FileMode(os_mode)` and
 // `fm.Bits()` both work.
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Default)]
 pub struct FileMode(pub u32);
 
 impl FileMode {
     pub const fn Bits(&self) -> u32 {
         self.0
     }
+}
+
+// Bit operators — Go writes `mode | os.ModeDir`, `mode & os.ModePerm`,
+// `flag &^ os.O_TRUNC` (Go's bit-clear). Mirror that ergonomically on
+// the newtype so ports keep their idioms without `.0` unwrapping.
+impl core::ops::BitOr for FileMode {
+    type Output = FileMode;
+    fn bitor(self, rhs: FileMode) -> FileMode { FileMode(self.0 | rhs.0) }
+}
+impl core::ops::BitAnd for FileMode {
+    type Output = FileMode;
+    fn bitand(self, rhs: FileMode) -> FileMode { FileMode(self.0 & rhs.0) }
+}
+impl core::ops::BitXor for FileMode {
+    type Output = FileMode;
+    fn bitxor(self, rhs: FileMode) -> FileMode { FileMode(self.0 ^ rhs.0) }
+}
+impl core::ops::BitOrAssign for FileMode {
+    fn bitor_assign(&mut self, rhs: FileMode) { self.0 |= rhs.0; }
+}
+impl core::ops::BitAndAssign for FileMode {
+    fn bitand_assign(&mut self, rhs: FileMode) { self.0 &= rhs.0; }
+}
+impl core::ops::Not for FileMode {
+    type Output = FileMode;
+    fn not(self) -> FileMode { FileMode(!self.0) }
+}
+
+// Integer-literal coercions. Go writes `os.OpenFile(name, flag, 0666)`
+// and the compiler accepts 0666 as `os.FileMode` because Go has
+// untyped constants. Rust doesn't, so accept the common literal widths
+// via `From` and `impl Into<FileMode>` on call sites that take perm.
+impl From<u32> for FileMode { fn from(v: u32) -> FileMode { FileMode(v) } }
+impl From<i32> for FileMode { fn from(v: i32) -> FileMode { FileMode(v as u32) } }
+impl From<i64> for FileMode { fn from(v: i64) -> FileMode { FileMode(v as u32) } }
+impl From<u64> for FileMode { fn from(v: u64) -> FileMode { FileMode(v as u32) } }
+impl From<u16> for FileMode { fn from(v: u16) -> FileMode { FileMode(v as u32) } }
+impl From<crate::nilval::Nil> for FileMode {
+    fn from(_: crate::nilval::Nil) -> FileMode { FileMode(0) }
+}
+
+// Comparison against bare integer 0 — Go's `if perm == 0 { … }`.
+impl PartialEq<i32> for FileMode {
+    fn eq(&self, other: &i32) -> bool { self.0 == *other as u32 }
+}
+impl PartialEq<u32> for FileMode {
+    fn eq(&self, other: &u32) -> bool { self.0 == *other }
 }
 
 // Go: fs.go:179-200 — FileMode constants. The single letters match the

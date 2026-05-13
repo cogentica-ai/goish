@@ -889,10 +889,10 @@ pub mod ioutil {
 
     /// `ioutil.WriteFile(name, data, perm)` — see `os::WriteFile`.
     #[inline]
-    pub fn WriteFile<N: Into<crate::string>>(
+    pub fn WriteFile<N: Into<crate::string>, M: Into<crate::os::FileMode>>(
         name: N,
         data: slice<byte>,
-        perm: u32,
+        perm: M,
     ) -> error {
         crate::os::WriteFile(name, data, perm)
     }

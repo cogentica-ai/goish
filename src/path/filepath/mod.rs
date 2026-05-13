@@ -482,7 +482,7 @@ where
     let (info, err) = crate::os::Lstat(root.clone());
     let walk_err = if !err.IsNil() {
         // Go: err = fn(root, nil, err)
-        fn_(root.clone(), synth_direntry(root.clone(), 0), err)
+        fn_(root.clone(), synth_direntry(root.clone(), crate::os::FileMode(0)), err)
     } else {
         // Go: err = walkDir(root, fs.FileInfoToDirEntry(info), fn)
         let d = synth_direntry(root.clone(), info.Mode());

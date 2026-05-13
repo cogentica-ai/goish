@@ -151,6 +151,12 @@ impl GoHash for i8 {
     }
 }
 
+impl GoHash for i16 {
+    fn go_hash(&self, seed: u64) -> u64 {
+        hash_bytes(&self.to_le_bytes(), seed)
+    }
+}
+
 impl GoHash for bool {
     fn go_hash(&self, seed: u64) -> u64 {
         hash_bytes(&[*self as u8], seed)

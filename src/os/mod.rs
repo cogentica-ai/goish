@@ -46,11 +46,16 @@ use alloc::vec::Vec;
 
 /// `os.FileMode` (os/types.go:34) — file mode bits. Goish slim: just
 /// the high-level flag bits; permission bits in the low 9.
-pub type FileMode = u32;
-
-pub const ModeDir: FileMode = 1 << 31;
-pub const ModeSymlink: FileMode = 1 << 30;
-pub const ModePerm: FileMode = 0o777;
+///
+/// Re-exports the `io/fs.FileMode` newtype so `os.FileMode` and
+/// `fs.FileMode` refer to the same Rust type (matching Go where
+/// `os.FileMode` is a type alias for `fs.FileMode`). The unification
+/// is required by ports that pass FileMode values across the
+/// `os`/`io/fs` boundary (lockedfile, renameio, walkdir) and ensures
+/// FileMode methods (`IsDir`, `IsRegular`, `Perm`, `Type`, `String`)
+/// resolve identically regardless of import path.
+pub use crate::io::fs::FileMode;
+pub use crate::io::fs::{ModeDir, ModePerm, ModeSymlink};
 
 // Go: os/types.go declares these as untyped int. Goish ships them
 // as `int` (= i64) so port-side `var flag int = os.O_RDWR | os.O_TRUNC`
@@ -242,7 +247,7 @@ impl FileInfoData {
 fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfoData {
     let kind = st.st_mode & syscall::S_IFMT;
     let is_dir = kind == syscall::S_IFDIR;
-    let mut mode: FileMode = (st.st_mode & 0o777) as FileMode;
+    let mut mode: FileMode = FileMode((st.st_mode & 0o777) as u32);
     if is_dir {
         mode |= ModeDir;
     }
@@ -267,24 +272,31 @@ fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfoData {
 /// sites read identically: `let (f, err) = os::Open(name);`.
 pub fn Open<N: Into<string>>(name: N) -> (nilable<File>, error) {
     let name: string = name.into();
-    OpenFile(name, O_RDONLY, 0)
+    OpenFile(name, O_RDONLY, FileMode(0))
 }
 
 /// `os.Create(name)` (os/file.go:402) — create or truncate `name`.
 pub fn Create<N: Into<string>>(name: N) -> (nilable<File>, error) {
     let name: string = name.into();
-    OpenFile(name, O_RDWR | O_CREATE | O_TRUNC, 0o666)
+    OpenFile(name, O_RDWR | O_CREATE | O_TRUNC, FileMode(0o666))
 }
 
 /// `os.OpenFile(name, flag, perm)` (os/file.go:412).
-pub fn OpenFile<N: Into<string>>(name: N, flag: int, perm: u32) -> (nilable<File>, error) {
+///
+/// `perm: impl Into<FileMode>` so ports that pass a bare `0666` /
+/// `0` integer literal (Go's untyped-int convenience) compile without
+/// per-callsite `FileMode(…)` wrapping. FileMode-typed call sites
+/// (e.g. `lockedfile.OpenFile(name, flag, perm)`) flow through the
+/// identity `From<FileMode> for FileMode`.
+pub fn OpenFile<N: Into<string>, M: Into<FileMode>>(name: N, flag: int, perm: M) -> (nilable<File>, error) {
     let name: string = name.into();
+    let perm: FileMode = perm.into();
     // Build a NUL-terminated path for the kernel.
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     let nb = bytes_of(&name);
     buf.extend_from_slice(nb);
     buf.push(0);
-    let fd = syscall::Open(buf.as_ptr(), (flag as i32) | syscall::O_CLOEXEC, perm as i32);
+    let fd = syscall::Open(buf.as_ptr(), (flag as i32) | syscall::O_CLOEXEC, perm.0 as i32);
     if fd < 0 {
         let err: error = if -fd == syscall::ENOENT {
             ErrNotExist.into()
@@ -324,7 +336,7 @@ pub fn Stat<N: Into<string>>(name: N) -> (FileInfoData, error) {
             FileInfoData {
                 name: name.clone(),
                 size: 0,
-                mode: 0,
+                mode: FileMode(0),
                 mod_time: crate::time::Time::default(),
                 is_dir: false,
             },
@@ -352,7 +364,7 @@ pub fn Lstat<N: Into<string>>(name: N) -> (FileInfoData, error) {
             FileInfoData {
                 name: name.clone(),
                 size: 0,
-                mode: 0,
+                mode: FileMode(0),
                 mod_time: crate::time::Time::default(),
                 is_dir: false,
             },
@@ -373,7 +385,7 @@ impl File {
                 FileInfoData {
                     name: self.name.clone(),
                     size: 0,
-                    mode: 0,
+                    mode: FileMode(0),
                     mod_time: crate::time::Time::default(),
                     is_dir: false,
                 },
@@ -736,15 +748,19 @@ pub fn Chdir<N: Into<string>>(name: N) -> error {
 /// Line-by-line port of `os.Chmod(name, mode)` (file.go:647 →
 /// file_posix.go:76 chmod). Slim: no PathError wrapping, no EINTR
 /// retry loop (chmod(2) is not interruptible on Linux in practice).
-pub fn Chmod<N: Into<string>>(name: N, mode: FileMode) -> error {
+///
+/// `mode: impl Into<FileMode>` so ports passing a bare integer
+/// literal (Go's untyped-int) flow through `From<i32>`/`From<u32>`.
+pub fn Chmod<N: Into<string>, M: Into<FileMode>>(name: N, mode: M) -> error {
     let name: string = name.into();
+    let mode: FileMode = mode.into();
     // Go: longName := fixLongPath(name) — Linux no-op.
     // Go: e := ignoringEINTR(func() error { return syscall.Chmod(longName, syscallMode(mode)) })
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
     buf.push(0);
     // syscallMode(mode) for slim FileMode collapses to perm bits only.
-    let rc = syscall::Chmod(buf.as_ptr(), mode & 0o7777);
+    let rc = syscall::Chmod(buf.as_ptr(), mode.0 & 0o7777);
     if rc < 0 {
         // Go: return &PathError{Op: "chmod", Path: name, Err: e}
         return errors::New(string("chmod failed"));
@@ -1016,12 +1032,13 @@ pub fn Hostname() -> (string, error) {
 // ─── Mkdir / Remove ──────────────────────────────────────────────────
 
 /// `os.Mkdir(name, perm)` (os/file.go) — create a single directory.
-pub fn Mkdir<N: Into<string>>(name: N, perm: u32) -> error {
+pub fn Mkdir<N: Into<string>, M: Into<FileMode>>(name: N, perm: M) -> error {
     let name: string = name.into();
+    let perm: FileMode = perm.into();
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
     buf.push(0);
-    let rc = syscall::Mkdir(buf.as_ptr(), perm);
+    let rc = syscall::Mkdir(buf.as_ptr(), perm.0);
     if rc < 0 {
         return errors::New(string("mkdir failed"));
     }
@@ -1031,8 +1048,9 @@ pub fn Mkdir<N: Into<string>>(name: N, perm: u32) -> error {
 /// `os.MkdirAll(path, perm)` (os/path.go:19) — create `path` and any
 /// missing parent directories. If `path` is already a directory,
 /// returns nil.
-pub fn MkdirAll<P: Into<string>>(path: P, perm: u32) -> error {
+pub fn MkdirAll<P: Into<string>, M: Into<FileMode>>(path: P, perm: M) -> error {
     let path: string = path.into();
+    let perm: FileMode = perm.into();
     // Go: dir, err := Stat(path); if err == nil { if dir.IsDir() { return nil }; return ... }
     let (dir, err) = Stat(path.clone());
     if err.IsNil() {
@@ -1229,14 +1247,15 @@ fn mode_from_dtype(dt: u8) -> FileMode {
     match dt {
         x if x == syscall::DT_DIR => ModeDir,
         x if x == syscall::DT_LNK => ModeSymlink,
-        _ => 0,
+        _ => FileMode(0),
     }
 }
 
 /// `os.WriteFile(name, data, perm)` (os/file.go:763) — write `data`
 /// to the named file, creating or truncating it.
-pub fn WriteFile<N: Into<string>>(name: N, data: slice<byte>, perm: u32) -> error {
+pub fn WriteFile<N: Into<string>, M: Into<FileMode>>(name: N, data: slice<byte>, perm: M) -> error {
     let name: string = name.into();
+    let perm: FileMode = perm.into();
     use crate::io::Writer;
     let (mut f, err) = OpenFile(name, O_WRONLY | O_CREATE | O_TRUNC, perm);
     if !err.IsNil() {
@@ -1303,9 +1322,11 @@ impl File {
         }
     }
 
-    /// `f.Fd()` — raw fd as int.
-    pub fn Fd(&self) -> int {
-        self.fd as int
+    /// `f.Fd()` (os/file_unix.go:50) — raw fd as `uintptr`, matching
+    /// Go's signature. Cast to `int` at call sites that need the
+    /// signed-integer form (`syscall::Flock(int(f.Fd()), …)`).
+    pub fn Fd(&self) -> crate::types::uintptr {
+        self.fd as crate::types::uintptr
     }
 
     /// `f.Name()` — the name passed to NewFile (or "/dev/stdout" for stdio).
@@ -1387,6 +1408,63 @@ impl File {
             errors::New("truncate failed")
         } else {
             nil
+        }
+    }
+
+    /// `(*File).Chmod(mode)` (os/file_posix.go:106) — change the mode of
+    /// the underlying file. Inherent so callers don't need to import
+    /// any extra trait; the call shape matches Go exactly:
+    /// `f.Chmod(0o644)` or `f.Chmod(mode)` where mode is a FileMode.
+    ///
+    /// Takes `&self` rather than `&mut self` so transpiled call sites
+    /// that hold a `nilable<File>` via `t.Must()` (the immutable-cell
+    /// reach-in) work without requiring a `MustMut()` rewrite. The fd
+    /// is unchanged by `fchmod(2)`; no mutation is required to model
+    /// the syscall faithfully.
+    pub fn Chmod<M: Into<FileMode>>(&self, mode: M) -> error {
+        if self.fd < 0 {
+            return ErrClosed.into();
+        }
+        let mode: FileMode = mode.into();
+        let rc = syscall::Fchmod(self.fd, mode.0 & 0o7777);
+        if rc < 0 {
+            errors::New("fchmod failed")
+        } else {
+            nil
+        }
+    }
+
+    /// `(*File).Write(p)` (os/file.go:188) — inherent forwarder so
+    /// `f.Write(data)` works without `use goish::io::Writer;` at the
+    /// call site. Mirrors Go where `(*os.File).Write` is a concrete
+    /// method on the type (the io.Writer interface is satisfied
+    /// structurally, not by trait-method dispatch).
+    ///
+    /// Takes `&self` for the same reason as `Chmod`: lets transpiled
+    /// callers reach in through `t.Must().File.Write(data)` (immutable
+    /// cell access). The underlying syscall doesn't mutate the `File`
+    /// struct itself — only the kernel's file-offset table.
+    pub fn Write(&self, p: slice<byte>) -> (int, error) {
+        let n = syscall::Write(self.fd, p.as_ptr(), p.len());
+        if n < 0 {
+            (0, errors::New("write failed"))
+        } else {
+            (n as int, nil)
+        }
+    }
+
+    /// `(*File).Read(p)` (os/file.go:118) — inherent forwarder, see
+    /// the rationale on `Write` above.
+    pub fn Read(&self, p: &mut slice<byte>) -> (int, error) {
+        let len = p.len();
+        let ptr = p.as_mut_ptr();
+        let n = syscall::Read(self.fd, ptr, len);
+        if n < 0 {
+            (0, errors::New("read failed"))
+        } else if n == 0 {
+            (0, io::EOF.into())
+        } else {
+            (n as int, nil)
         }
     }
 }

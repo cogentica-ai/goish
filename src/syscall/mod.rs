@@ -559,6 +559,7 @@ pub const SYS_MKDIR: usize = 83;
 pub const SYS_UNLINK: usize = 87;
 pub const SYS_RMDIR: usize = 84;
 pub const SYS_CHMOD: usize = 90;
+pub const SYS_FCHMOD: usize = 91;
 pub const SYS_SYMLINK: usize = 88;
 pub const SYS_READLINK: usize = 89;
 pub const SYS_RENAME: usize = 82;
@@ -607,6 +608,12 @@ pub fn Chdir(path: *const u8) -> i32 {
 #[allow(non_snake_case)]
 pub fn Chmod(path: *const u8, mode: u32) -> i32 {
     unsafe { syscall2(SYS_CHMOD, path as usize, mode as usize) as i32 }
+}
+
+/// `fchmod(fd, mode)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Fchmod(fd: i32, mode: u32) -> i32 {
+    unsafe { syscall2(SYS_FCHMOD, fd as usize, mode as usize) as i32 }
 }
 
 /// `symlink(oldname, newname)`. Returns 0 on success, -errno on failure.
