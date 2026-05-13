@@ -35,6 +35,7 @@ use alloc::vec::Vec;
 
 use crate::bufio;
 use crate::errors::{self, error};
+use crate::gonilable::nilable;
 use crate::goslice::slice;
 use crate::io::{self, Closer, Reader, Writer};
 use crate::net;
@@ -67,7 +68,9 @@ pub struct Response {
     /// Whether the connection should be closed after reading Body.
     pub Close: bool,
     /// The Request that produced this Response. Populated by Client::Do.
-    pub Request: Option<Request>,
+    /// Modelled as `nilable<Request>` (Go's `*http.Request` shape) so
+    /// Goish-side `resp.Request.URL` access can narrow via `.Must()`.
+    pub Request: nilable<Request>,
 }
 
 impl Default for Response {
@@ -82,7 +85,7 @@ impl Default for Response {
             Body: slice::<byte>::__from_vec(Vec::new()),
             ContentLength: 0,
             Close: false,
-            Request: None,
+            Request: nilable::nil(),
         }
     }
 }
@@ -122,7 +125,7 @@ impl Response {
             Err(_) => {}
         }
         // Relative resolution: replace path/query of req.URL with lv.
-        if let Some(ref req) = self.Request {
+        if let Some(req) = self.Request.Try() {
             let mut merged = req.URL.clone();
             // If Location starts with "/", replace path; else append to dirname.
             let lvb = lv.as_bytes();
@@ -156,7 +159,10 @@ pub fn ReadResponse<R: Reader>(
     req: Option<Request>,
 ) -> (Response, error) {
     let mut resp = Response::default();
-    resp.Request = req;
+    resp.Request = match req {
+        Some(r) => nilable::new(r),
+        None => nilable::nil(),
+    };
 
     // Status line: "HTTP/1.1 200 OK\r\n"
     let line = match read_crlf_line(br) {
@@ -228,8 +234,8 @@ pub fn ReadResponse<R: Reader>(
     let cl_str = resp.Header.Get(string("Content-Length"));
 
     // Go: HEAD / 1xx / 204 / 304 → empty body, regardless of CL/TE.
-    let head_only = match resp.Request {
-        Some(ref r) => r.Method == "HEAD",
+    let head_only = match resp.Request.Try() {
+        Some(r) => r.Method == "HEAD",
         None => false,
     };
     let no_body = head_only
