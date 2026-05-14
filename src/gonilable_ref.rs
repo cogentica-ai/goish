@@ -197,6 +197,28 @@ impl<'a, T: ?Sized + 'a> nilable_refmut<'a, T> {
         self.0
     }
 
+    /// Borrow-shaped mutable peek — `Some(&mut T)` if non-nil, `None`
+    /// if nil, without consuming `self`. The reborrowed lifetime is
+    /// tied to `&mut self`, not to `'a`. Used where a method on a
+    /// nilable_refmut field needs to mutate through the wrapper
+    /// without giving up the wrapper itself.
+    #[inline]
+    pub fn TryMutRef(&mut self) -> Option<&mut T> {
+        self.0.as_deref_mut()
+    }
+
+    /// `&mut self`-shaped peek that panics on nil. Mirrors
+    /// `nilable<T>::MustMut` semantics but works through a `&mut`
+    /// reborrow rather than consuming the wrapper.
+    #[inline]
+    #[track_caller]
+    pub fn MustMutRef(&mut self) -> &mut T {
+        match self.0.as_deref_mut() {
+            Some(r) => r,
+            None => nil_deref_panic(),
+        }
+    }
+
     /// Apply `f` if non-nil, with `&T` access (read-only). Mirrors
     /// `nilable<T>::If`. Doesn't consume the mut borrow.
     #[inline]

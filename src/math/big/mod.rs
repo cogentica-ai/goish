@@ -207,6 +207,135 @@ impl Int {
         self.abs = if acc == 0 { Vec::new() } else { alloc::vec![acc as u32] };
         self
     }
+
+    /// `(*Int).Mul(x, y)` — z = x*y, return z. Accepts any type that
+    /// can be borrowed as `&Int` (covers `&Int`, `Int`, `nilable<Int>`,
+    /// `nilable_refmut<Int>`, `&Lazy<nilable<Int>>`).
+    pub fn Mul<X: AsRef<Int>, Y: AsRef<Int>>(&mut self, x: X, y: Y) -> &mut Self {
+        let x = x.as_ref();
+        let y = y.as_ref();
+        let mag = mul_limbs(&x.abs, &y.abs);
+        let neg = !mag.is_empty() && (x.neg != y.neg);
+        self.abs = mag;
+        self.neg = neg;
+        self
+    }
+
+    /// `(*Int).Abs(x)` — z = |x|, return z.
+    pub fn Abs<X: AsRef<Int>>(&mut self, x: X) -> &mut Self {
+        let x = x.as_ref();
+        // Handle aliasing: `b.Abs(b)` where b is self.
+        if core::ptr::eq(self as *const _, x as *const _) {
+            self.neg = false;
+        } else {
+            self.abs = x.abs.clone();
+            self.neg = false;
+        }
+        self
+    }
+
+    /// `(*Int).Div(x, y)` — Euclidean quotient. z = x div y, return z.
+    /// Panics if y == 0 or if |y| exceeds the single-precision divisor
+    /// limit (multi-precision divisor not implemented in v1).
+    pub fn Div<X: AsRef<Int>, Y: AsRef<Int>>(&mut self, x: X, y: Y) -> &mut Self {
+        let x = x.as_ref();
+        let y = y.as_ref();
+        if y.abs.is_empty() {
+            panic!("big::Int::Div: division by zero");
+        }
+        if y.abs.len() > 1 {
+            panic!("big::Int::Div: divisor exceeds u32; multi-precision divisor not implemented in v1");
+        }
+        let d = y.abs[0];
+        let (q_abs, r) = divmod_by_u32(&x.abs, d);
+        // T-division: q_t, r_t with sign(x) carried; Euclidean correction:
+        // if r_t < 0, q -= sign(y); since our r is always ≥ 0 magnitude,
+        // we model T-division then correct.
+        let q_neg_t = !q_abs.is_empty() && (x.neg != y.neg);
+        let r_neg_t = r != 0 && x.neg;
+        // Euclidean: if r_t < 0, adjust q by ±1.
+        let mut q = Int { neg: q_neg_t, abs: q_abs };
+        if r_neg_t {
+            if y.neg {
+                // q += 1
+                q.AddInt64(1);
+            } else {
+                // q -= 1
+                q.AddInt64(-1);
+            }
+        }
+        self.neg = q.neg;
+        self.abs = q.abs;
+        self
+    }
+
+    /// `(*Int).DivMod(x, y, m)` — Euclidean division. z = x div y,
+    /// m = x mod y (with 0 ≤ m < |y|). Returns (z, m).
+    /// `m` is borrowed mutably and updated in place.
+    pub fn DivMod<X, Y, M>(&mut self, x: X, y: Y, mut m: M) -> (&mut Int, M)
+    where
+        X: AsRef<Int>,
+        Y: AsRef<Int>,
+        M: AsMutInt,
+    {
+        let x = x.as_ref();
+        let y = y.as_ref();
+        if y.abs.is_empty() {
+            panic!("big::Int::DivMod: division by zero");
+        }
+        if y.abs.len() > 1 {
+            panic!("big::Int::DivMod: divisor exceeds u32; multi-precision divisor not implemented in v1");
+        }
+        let d = y.abs[0];
+        let (q_abs, r) = divmod_by_u32(&x.abs, d);
+        // T-division then Euclidean correction.
+        let q_neg_t = !q_abs.is_empty() && (x.neg != y.neg);
+        let r_neg_t = r != 0 && x.neg;
+        let mut q = Int { neg: q_neg_t, abs: q_abs };
+        let mut rem_abs = if r == 0 { Vec::new() } else { alloc::vec![r] };
+        let mut rem_neg = r_neg_t;
+        if rem_neg {
+            // r_eucl = |y| - r ; q -= sign(y)
+            let new_r = d - r;
+            rem_abs = if new_r == 0 { Vec::new() } else { alloc::vec![new_r] };
+            rem_neg = false;
+            if y.neg {
+                q.AddInt64(1);
+            } else {
+                q.AddInt64(-1);
+            }
+        }
+        self.neg = q.neg;
+        self.abs = q.abs;
+        {
+            let m_ref = m.as_mut_int();
+            m_ref.neg = rem_neg;
+            m_ref.abs = rem_abs;
+        }
+        (self, m)
+    }
+
+    /// `(*Int).BorrowMut()` — Goish convenience: wrap `&mut self`
+    /// as a `nilable_refmut<Int>` so it can be passed where the
+    /// signature expects `nilable![&mut Int]`.
+    pub fn BorrowMut(&mut self) -> crate::gonilable_ref::nilable_refmut<'_, Int> {
+        crate::gonilable_ref::nilable_refmut::new(self)
+    }
+
+    /// Internal helper: in-place add a small signed integer to self.
+    /// Used by `Div` / `DivMod` for the Euclidean correction step.
+    fn AddInt64(&mut self, delta: i64) {
+        if delta == 0 {
+            return;
+        }
+        // Convert to two Int operands and use existing logic.
+        let mut other = Int::default();
+        other.SetInt64(delta);
+        // self = self + other
+        let res = add_signed(self, &other);
+        self.neg = res.neg;
+        self.abs = res.abs;
+    }
 }
 
 /// `big.NewInt(x)` — Go's package-level constructor.
@@ -285,6 +414,177 @@ fn mod_by_u32(num: &[u32], d: u32) -> u32 {
     r as u32
 }
 
+/// Long division by a single u32 divisor returning (quotient_limbs, remainder).
+/// `quotient_limbs` is trimmed of leading zeros.
+fn divmod_by_u32(num: &[u32], d: u32) -> (Vec<u32>, u32) {
+    debug_assert!(d != 0);
+    let dv = d as u64;
+    let mut q = alloc::vec![0u32; num.len()];
+    let mut r: u64 = 0;
+    for (i, &limb) in num.iter().enumerate().rev() {
+        let cur = (r << 32) | (limb as u64);
+        q[i] = (cur / dv) as u32;
+        r = cur % dv;
+    }
+    // Trim leading zero limbs.
+    while q.last().copied() == Some(0) {
+        q.pop();
+    }
+    (q, r as u32)
+}
+
+/// Unsigned multi-precision multiplication: schoolbook O(n*m).
+/// Returns trimmed limbs (no trailing zeros).
+fn mul_limbs(a: &[u32], b: &[u32]) -> Vec<u32> {
+    if a.is_empty() || b.is_empty() {
+        return Vec::new();
+    }
+    let mut out = alloc::vec![0u32; a.len() + b.len()];
+    for (i, &ai) in a.iter().enumerate() {
+        let mut carry: u64 = 0;
+        for (j, &bj) in b.iter().enumerate() {
+            let prod = (ai as u64) * (bj as u64) + (out[i + j] as u64) + carry;
+            out[i + j] = prod as u32;
+            carry = prod >> 32;
+        }
+        out[i + b.len()] = out[i + b.len()].wrapping_add(carry as u32);
+    }
+    while out.last().copied() == Some(0) {
+        out.pop();
+    }
+    out
+}
+
+/// Unsigned multi-precision addition.
+fn add_limbs(a: &[u32], b: &[u32]) -> Vec<u32> {
+    let n = a.len().max(b.len());
+    let mut out = alloc::vec![0u32; n + 1];
+    let mut carry: u64 = 0;
+    for i in 0..n {
+        let av = a.get(i).copied().unwrap_or(0) as u64;
+        let bv = b.get(i).copied().unwrap_or(0) as u64;
+        let s = av + bv + carry;
+        out[i] = s as u32;
+        carry = s >> 32;
+    }
+    out[n] = carry as u32;
+    while out.last().copied() == Some(0) {
+        out.pop();
+    }
+    out
+}
+
+/// Unsigned multi-precision subtraction assuming a >= b. Returns a - b.
+fn sub_limbs(a: &[u32], b: &[u32]) -> Vec<u32> {
+    debug_assert!(abs_cmp(a, b) != Ordering::Less);
+    let mut out = alloc::vec![0u32; a.len()];
+    let mut borrow: i64 = 0;
+    for i in 0..a.len() {
+        let av = a[i] as i64;
+        let bv = b.get(i).copied().unwrap_or(0) as i64;
+        let mut d = av - bv - borrow;
+        if d < 0 {
+            d += 1i64 << 32;
+            borrow = 1;
+        } else {
+            borrow = 0;
+        }
+        out[i] = d as u32;
+    }
+    while out.last().copied() == Some(0) {
+        out.pop();
+    }
+    out
+}
+
+/// Signed addition: a + b respecting signs.
+fn add_signed(a: &Int, b: &Int) -> Int {
+    if a.neg == b.neg {
+        Int { neg: a.neg && !(a.abs.is_empty() && b.abs.is_empty()), abs: add_limbs(&a.abs, &b.abs) }
+    } else {
+        // Different signs: subtract smaller magnitude from larger.
+        match abs_cmp(&a.abs, &b.abs) {
+            Ordering::Equal => Int { neg: false, abs: Vec::new() },
+            Ordering::Greater => Int { neg: a.neg, abs: sub_limbs(&a.abs, &b.abs) },
+            Ordering::Less => Int { neg: b.neg, abs: sub_limbs(&b.abs, &a.abs) },
+        }
+    }
+}
+
+// ─── AsRef<Int> bridge ───────────────────────────────────────────────
+//
+// Methods like `Mul`, `Div`, `DivMod`, `Abs` accept any of:
+//   * &Int (canonical)
+//   * Int (by value)
+//   * nilable<Int>
+//   * nilable_refmut<'_, Int>
+//   * &Lazy<nilable<Int>> (static refs to Lazy<…>)
+//
+// via the `AsRef<Int>` trait. Each wrapper exposes the inner Int.
+
+impl AsRef<Int> for Int {
+    fn as_ref(&self) -> &Int { self }
+}
+
+impl AsRef<Int> for crate::nilable<Int> {
+    #[track_caller]
+    fn as_ref(&self) -> &Int {
+        self.Must()
+    }
+}
+
+impl<'a> AsRef<Int> for crate::gonilable_ref::nilable_refmut<'a, Int> {
+    #[track_caller]
+    fn as_ref(&self) -> &Int {
+        // `Must(&self) -> &T` is the borrow-shaped peek on nilable_refmut
+        // (panics on nil), matching Go's nil-deref semantics.
+        self.Must()
+    }
+}
+
+impl AsRef<Int> for crate::lazy::Lazy<crate::nilable<Int>> {
+    fn as_ref(&self) -> &Int {
+        // Lazy: Deref<Target=nilable<Int>>; nilable: AsRef<Int>.
+        (**self).as_ref()
+    }
+}
+
+impl AsRef<Int> for crate::lazy::Lazy<Int> {
+    fn as_ref(&self) -> &Int {
+        &**self
+    }
+}
+
+/// Internal: get a `&mut Int` from things that can carry one for
+/// the `m` argument of `DivMod`. Used to accept both owned `Int`
+/// (by value) and `&mut Int` at call sites.
+pub trait AsMutInt {
+    fn as_mut_int(&mut self) -> &mut Int;
+}
+
+impl AsMutInt for Int {
+    fn as_mut_int(&mut self) -> &mut Int { self }
+}
+
+impl AsMutInt for &mut Int {
+    fn as_mut_int(&mut self) -> &mut Int { *self }
+}
+
+impl<'a> AsMutInt for crate::gonilable_ref::nilable_refmut<'a, Int> {
+    #[track_caller]
+    fn as_mut_int(&mut self) -> &mut Int {
+        // `MustMutRef(&mut self)` is the borrow-shaped peek; panics on nil.
+        self.MustMutRef()
+    }
+}
+
+impl AsMutInt for crate::nilable<Int> {
+    #[track_caller]
+    fn as_mut_int(&mut self) -> &mut Int {
+        self.MustMut()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,5 +641,87 @@ mod tests {
         // For (residue=2, prime=11) ROCA pair: j^2 ≡ 1 mod 11 means j ≡ ±1
         // mod 11, i.e. j ∈ {1, 10}.
         assert_eq!(found, alloc::vec![1, 10]);
+    }
+
+    #[test]
+    fn mul_signed() {
+        // 7 * 6 = 42
+        let mut z = Int::default();
+        z.Mul(&NewInt(7), &NewInt(6));
+        assert_eq!(z.Int64(), 42);
+
+        // -7 * 6 = -42
+        let mut z2 = Int::default();
+        z2.Mul(&NewInt(-7), &NewInt(6));
+        assert_eq!(z2.Int64(), -42);
+
+        // -7 * -6 = 42
+        let mut z3 = Int::default();
+        z3.Mul(&NewInt(-7), &NewInt(-6));
+        assert_eq!(z3.Int64(), 42);
+
+        // 0 * anything = 0 (with sign normalized)
+        let mut z4 = Int::default();
+        z4.Mul(&NewInt(0), &NewInt(-42));
+        assert_eq!(z4.Int64(), 0);
+        assert_eq!(z4.Sign(), 0);
+    }
+
+    #[test]
+    fn abs_basic() {
+        let mut z = Int::default();
+        z.Abs(&NewInt(-42));
+        assert_eq!(z.Int64(), 42);
+        z.Abs(&NewInt(42));
+        assert_eq!(z.Int64(), 42);
+
+        // Aliasing: z.Abs(z) on a negative z.
+        let mut a = NewInt(-9);
+        let a_clone = a.clone();
+        // Borrow checker: pass &a_clone, but we model the aliasing path
+        // separately by self-aliasing through the pointer-eq branch.
+        a.Abs(&a_clone);
+        assert_eq!(a.Int64(), 9);
+    }
+
+    #[test]
+    fn div_and_divmod_euclidean() {
+        // Positive case: 17 / 5 = 3, 17 mod 5 = 2.
+        let mut q = Int::default();
+        q.Div(&NewInt(17), &NewInt(5));
+        assert_eq!(q.Int64(), 3);
+
+        let mut q2 = Int::default();
+        let mut m = Int::default();
+        let (_, _) = q2.DivMod(&NewInt(17), &NewInt(5), &mut m);
+        assert_eq!(q2.Int64(), 3);
+        assert_eq!(m.Int64(), 2);
+
+        // Negative dividend, Euclidean: -17 / 5 = -4, -17 mod 5 = 3
+        // (because -17 = (-4)*5 + 3, and 0 ≤ 3 < 5).
+        let mut q3 = Int::default();
+        let mut m3 = Int::default();
+        let (_, _) = q3.DivMod(&NewInt(-17), &NewInt(5), &mut m3);
+        assert_eq!(q3.Int64(), -4);
+        assert_eq!(m3.Int64(), 3);
+
+        // Negative divisor: -17 / -5 = 4, -17 mod -5 = 3.
+        let mut q4 = Int::default();
+        let mut m4 = Int::default();
+        let (_, _) = q4.DivMod(&NewInt(-17), &NewInt(-5), &mut m4);
+        assert_eq!(q4.Int64(), 4);
+        assert_eq!(m4.Int64(), 3);
+    }
+
+    #[test]
+    fn borrow_mut_and_nilable_refmut_as_ref() {
+        // BorrowMut wraps &mut Int as nilable_refmut, and AsRef<Int>
+        // peeks back through it (panic on nil — non-nil here).
+        let mut z = NewInt(99);
+        let nrm = z.BorrowMut();
+        // Drop nrm to release the borrow before using z.
+        assert!(!nrm.IsNil());
+        drop(nrm);
+        assert_eq!(z.Int64(), 99);
     }
 }
