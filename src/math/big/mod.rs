@@ -345,6 +345,50 @@ pub fn NewInt(x: i64) -> Int {
     z
 }
 
+// ─── Stringer / Format — `%v` / `%d` / `%s` on `big::Int` ──────────────
+//
+// Go's `*big.Int` implements `fmt.Stringer` and produces the decimal
+// representation. Goish mirrors that: implement `fmt::Stringer` so
+// the blanket `impl<T: Stringer> Format for T` picks it up
+// automatically for all printf verbs. (`%d` and `%v` both wind up
+// calling `String()` once the value reaches the formatter via Stringer.)
+impl crate::fmt::Stringer for Int {
+    fn String(&self) -> crate::gostring::string {
+        if self.abs.is_empty() {
+            return crate::gostring::string::from("0");
+        }
+        // Decimal conversion: repeatedly divide the magnitude by 10.
+        // Multi-limb magnitudes are supported via long division.
+        let mut limbs = self.abs.clone();
+        // little-endian limbs of base 2^32; divide by 10 in place,
+        // collecting digits LSB-first.
+        let mut digits: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        loop {
+            // Trim trailing zero limbs to simplify the loop exit.
+            while let Some(&0) = limbs.last() {
+                limbs.pop();
+            }
+            if limbs.is_empty() {
+                break;
+            }
+            // Divide limbs[..] (base 2^32) by 10, big-endian per limb
+            // (process from top so carry flows into lower limbs).
+            let mut rem: u64 = 0;
+            for i in (0..limbs.len()).rev() {
+                let cur = (rem << 32) | (limbs[i] as u64);
+                limbs[i] = (cur / 10) as u32;
+                rem = cur % 10;
+            }
+            digits.push(b'0' + rem as u8);
+        }
+        if self.neg {
+            digits.push(b'-');
+        }
+        digits.reverse();
+        crate::gostring::string::from_bytes(&digits)
+    }
+}
+
 // ─── nil-poly: Go callers do `if z == nil` on `*big.Int` ──────────────
 //
 // In goish the canonical zero-value of `Int` IS the zero, so the
@@ -723,5 +767,17 @@ mod tests {
         assert!(!nrm.IsNil());
         drop(nrm);
         assert_eq!(z.Int64(), 99);
+    }
+
+    #[test]
+    fn stringer_decimal() {
+        use crate::fmt::Stringer;
+        assert_eq!(NewInt(0).String().as_bytes(), b"0");
+        assert_eq!(NewInt(7).String().as_bytes(), b"7");
+        assert_eq!(NewInt(-42).String().as_bytes(), b"-42");
+        // Cross the single-limb boundary: 2^33 = 8589934592.
+        let mut z = Int::default();
+        let _ = z.Mul(NewInt(1 << 16), NewInt(1 << 17));
+        assert_eq!(z.String().as_bytes(), b"8589934592");
     }
 }

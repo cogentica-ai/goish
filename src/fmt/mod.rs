@@ -359,6 +359,35 @@ impl<T: Format> Format for Option<T> {
     }
 }
 
+// `nilable_ref<'_, T>` / `nilable_refmut<'_, T>` — Goish's borrow-shaped
+// `*T` wrappers. `nilable<T>` already inherits a `Stringer` impl from
+// `#[goish::interface]`'s auto-forward (see goish-macros §6.6), but the
+// borrow shapes don't, so wire them up here. `nil` prints as Go's
+// `<nil>`; non-nil forwards `String()` to the inner `T: Stringer`.
+// Routing through `Stringer` (not a direct `Format` impl) avoids
+// overlap with the `impl<T: Stringer> Format for T` blanket above —
+// `nilable_ref` / `nilable_refmut` are local types and coherence would
+// reject a `Format`-bounded blanket on them.
+impl<'a, T: ?Sized + Stringer> Stringer for crate::gonilable_ref::nilable_ref<'a, T> {
+    fn String(&self) -> string {
+        // `Try` consumes by-value (Copy via Option<&T>).
+        match (*self).Try() {
+            Some(t) => t.String(),
+            None => string::from("<nil>"),
+        }
+    }
+}
+
+impl<'a, T: ?Sized + Stringer> Stringer for crate::gonilable_ref::nilable_refmut<'a, T> {
+    fn String(&self) -> string {
+        if self.IsNil() {
+            string::from("<nil>")
+        } else {
+            self.Must().String()
+        }
+    }
+}
+
 // All integer widths route through one helper.
 macro_rules! impl_format_for_signed {
     ($($t:ty),*) => { $( impl Format for $t {
