@@ -155,17 +155,27 @@ impl T {
         syscall::Exit(1);
     }
 
-    /// `t.Fatalf(msg)` — log error then FailNow.
-    pub fn Fatalf<M: Into<string>>(&self, msg: M) -> ! {
-        let msg: string = msg.into();
-        self.Errorf(msg, crate::goslice::slice::new());
+    /// `t.Fatalf(format, args)` — log + mark test as failed, then
+    /// abort the current test. Mirrors Go: `func (c *common) Fatalf(
+    /// format string, args ...any)` (testing.go) — `args` is the
+    /// runtime variadic slice that `fmt.Sprintf` would normally
+    /// spread. Same call-shape contract as `Errorf`:
+    ///   - `t.Fatalf("simple msg", goish::slice::new())` — no args
+    ///   - `t.Fatalf("got %v want %v", goish::slice!([]Any{a, b}))`
+    pub fn Fatalf<M: Into<string>>(
+        &self,
+        format: M,
+        args: crate::goslice::slice<crate::goany::Any>,
+    ) -> ! {
+        let format: string = format.into();
+        self.Errorf(format, args);
         self.FailNow();
     }
 
-    /// `t.Fatal(msg)` — alias for Fatalf.
+    /// `t.Fatal(msg)` — alias for Fatalf with no format args.
     pub fn Fatal<M: Into<string>>(&self, msg: M) -> ! {
         let msg: string = msg.into();
-        self.Fatalf(msg);
+        self.Fatalf(msg, crate::goslice::slice::new());
     }
 
     /// `t.Skip(msg)` — mark skipped + log + abort current test.
@@ -260,9 +270,12 @@ impl T {
         let dir = string::from_bytes(&path);
         let err = crate::os::Mkdir(dir.clone(), 0o700);
         if !err.IsNil() {
-            self.Fatalf(string::from_static(
-                "testing.T.TempDir: failed to create temp directory",
-            ));
+            self.Fatalf(
+                string::from_static(
+                    "testing.T.TempDir: failed to create temp directory",
+                ),
+                crate::goslice::slice::new(),
+            );
         }
 
         let cleanup_path = dir.clone();
