@@ -31,7 +31,7 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use core::ops::{Add, Mul, Sub};
+use core::ops::{Add, Div, Mul, Sub};
 
 use crate::fmt::{self, FmtBuf};
 use crate::gostring::string;
@@ -360,6 +360,33 @@ impl Sub<Duration> for Duration {
     type Output = Duration;
     fn sub(self, rhs: Duration) -> Duration {
         Duration(self.0.wrapping_sub(rhs.0))
+    }
+}
+
+/// `time.Duration / time.Duration` — Go's `time.Duration` is `int64`,
+/// so the division is plain integer division: returns the unitless
+/// quotient as a `Duration` (the wrapper is preserved so that callers
+/// who format it with `%d` still see an integer count of nanoseconds-
+/// equivalent ratio, matching Go's semantics where the result type
+/// stays `time.Duration`).
+impl Div<Duration> for Duration {
+    type Output = Duration;
+    fn div(self, rhs: Duration) -> Duration {
+        if rhs.0 == 0 {
+            panic!("time::Duration: integer divide by zero");
+        }
+        Duration(self.0 / rhs.0)
+    }
+}
+
+/// `time.Duration / int` — divide a duration by a scalar.
+impl Div<int> for Duration {
+    type Output = Duration;
+    fn div(self, rhs: int) -> Duration {
+        if rhs == 0 {
+            panic!("time::Duration: integer divide by zero");
+        }
+        Duration(self.0 / rhs)
     }
 }
 
@@ -2303,5 +2330,33 @@ impl crate::reflect::Reflect for Duration {
     #[inline]
     fn __reflect_value(&self) -> crate::reflect::Value {
         crate::reflect::Value::Int(self.0)
+    }
+}
+
+#[cfg(test)]
+mod duration_div_tests {
+    use super::*;
+
+    #[test]
+    fn duration_div_duration() {
+        // 10s / 1s = 10 (as Duration).
+        let a = Duration(10_000_000_000);
+        let b = Duration(1_000_000_000);
+        let q = a / b;
+        assert_eq!(q.0, 10);
+    }
+
+    #[test]
+    fn duration_div_int() {
+        // 1s / 4 = 250ms.
+        let a = Second;
+        let q = a / 4;
+        assert_eq!(q.0, 250_000_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "divide by zero")]
+    fn duration_div_zero_panics() {
+        let _ = Second / Duration(0);
     }
 }

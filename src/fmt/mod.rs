@@ -1037,6 +1037,127 @@ pub fn Println(args: slice<crate::goany::Any>) -> (int, error) {
     println_impl(&fa)
 }
 
+// ─── Sscanf ──────────────────────────────────────────────────────────
+//
+// Go's `fmt.Sscanf(input, format, args...)` scans values from `input`
+// guided by `format` directives. v1 surfaces the limited subset that
+// real ports exercise: a single scan target with a single directive
+// (`%f`, `%d`, `%s`). The polymorphism is via the `ScanTarget` trait;
+// each impl knows how to consume the trimmed input for its directive.
+//
+// The transpiler emits `&mut <target>` at call sites tagged with
+// `Mutates: []int{2}` in stdlib_registry, so callers like
+// `fmt.Sscanf(num, "%f", val)` lower to
+// `fmt::Sscanf(num, string("%f"), &mut val)` — the receiver is borrowed
+// mutably so the side effect on `val` is visible afterwards.
+
+/// Anything that can be filled by `fmt::Sscanf` for a given directive
+/// in `format`. The directive is the byte after `%` (e.g. `b'f'`).
+pub trait ScanTarget {
+    fn __scan_one(&mut self, input: &str, verb: u8) -> bool;
+}
+
+impl ScanTarget for crate::math::big::Rat {
+    fn __scan_one(&mut self, input: &str, verb: u8) -> bool {
+        match verb {
+            b'f' | b'g' | b'e' | b'v' => {
+                crate::math::big::parse_decimal_into_rat(input, self)
+            }
+            _ => false,
+        }
+    }
+}
+
+impl ScanTarget for int {
+    fn __scan_one(&mut self, input: &str, verb: u8) -> bool {
+        match verb {
+            b'd' | b'v' => match input.trim().parse::<int>() {
+                Ok(n) => { *self = n; true }
+                Err(_) => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl ScanTarget for f64 {
+    fn __scan_one(&mut self, input: &str, verb: u8) -> bool {
+        match verb {
+            b'f' | b'g' | b'e' | b'v' => match input.trim().parse::<f64>() {
+                Ok(n) => { *self = n; true }
+                Err(_) => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl ScanTarget for string {
+    fn __scan_one(&mut self, input: &str, verb: u8) -> bool {
+        match verb {
+            b's' | b'v' => {
+                *self = string::from(input.trim_start().split_whitespace().next().unwrap_or(""));
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+/// `fmt.Sscanf(input, format, target)` — scan a single value from
+/// `input` per the directive in `format`. Returns `(n, err)` where
+/// `n` is 1 on success (matching Go's scanned-count contract) and
+/// `err` is non-nil on parse failure or directive mismatch.
+///
+/// v1 limitation: only single-directive formats are supported. Real
+/// Go's Sscanf walks multiple verbs over whitespace-separated tokens;
+/// add multi-verb support when a port surfaces a real need.
+pub fn Sscanf<S1, S2, T>(input: S1, format: S2, target: &mut T) -> (int, error)
+where
+    S1: Into<string>,
+    S2: Into<string>,
+    T: ScanTarget + ?Sized,
+{
+    let input = input.into();
+    let format = format.into();
+    let fb = format.as_bytes();
+    // Find the `%X` directive. Skip any prefix-literal handling — Go
+    // allows literal text in the format that must match the input;
+    // v1 ports only exercise pure directive formats.
+    let mut i = 0;
+    while i < fb.len() && fb[i] != b'%' {
+        i += 1;
+    }
+    if i + 1 >= fb.len() {
+        return (0, errors::New(string::from(
+            "fmt::Sscanf: format has no directive",
+        )));
+    }
+    let verb = fb[i + 1];
+    let s: &str = input.as_ref();
+    if target.__scan_one(s, verb) {
+        (1, crate::errors::nil.into())
+    } else {
+        (0, errors::New(string::from("fmt::Sscanf: parse error")))
+    }
+}
+
+/// `fmt.Sscan(input, args...)` — placeholder, defaults to a single
+/// `%v` directive. Provided for forward symmetry; not yet exercised.
+pub fn Sscan<S, T>(input: S, target: &mut T) -> (int, error)
+where
+    S: Into<string>,
+    T: ScanTarget + ?Sized,
+{
+    let input = input.into();
+    let s: &str = input.as_ref();
+    if target.__scan_one(s, b'v') {
+        (1, crate::errors::nil.into())
+    } else {
+        (0, errors::New(string::from("fmt::Sscan: parse error")))
+    }
+}
+
 #[doc(hidden)]
 pub fn fprintf_impl(w: &mut dyn io::Writer, format: &[byte], args: &[FmtArg]) -> (int, error) {
     let mut f = FmtBuf::new();
@@ -1277,3 +1398,47 @@ macro_rules! Errorf {
 pub use crate::{
     Eprintln, Errorf, Fprintf, Fprintln, Print, Printf, Println, Sprint, Sprintf, Sprintln,
 };
+
+#[cfg(test)]
+mod sscanf_tests {
+    use super::*;
+    use crate::errors::nil;
+    use crate::math::big;
+
+    #[test]
+    fn sscanf_into_rat() {
+        let mut val = big::Rat::default();
+        let (n, err) = Sscanf("3.14", "%f", &mut val);
+        assert_eq!(n, 1);
+        assert!(err == nil);
+        // 3.14 → 314/100
+        assert_eq!(val.Num().Int64(), 314);
+        assert_eq!(val.Denom().Int64(), 100);
+    }
+
+    #[test]
+    fn sscanf_into_int() {
+        let mut n: int = 0;
+        let (count, err) = Sscanf("42", "%d", &mut n);
+        assert_eq!(count, 1);
+        assert!(err == nil);
+        assert_eq!(n, 42);
+    }
+
+    #[test]
+    fn sscanf_into_f64() {
+        let mut x: f64 = 0.0;
+        let (count, err) = Sscanf("2.5", "%f", &mut x);
+        assert_eq!(count, 1);
+        assert!(err == nil);
+        assert!((x - 2.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sscanf_parse_error() {
+        let mut val = big::Rat::default();
+        let (n, err) = Sscanf("not-a-num", "%f", &mut val);
+        assert_eq!(n, 0);
+        assert!(err != nil);
+    }
+}

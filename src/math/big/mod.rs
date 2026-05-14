@@ -93,6 +93,188 @@ impl Rat {
     pub fn Denom(&self) -> &Int {
         &self.den
     }
+
+    /// `(*Rat).SetInt(x)` — set z = x/1 and return self.
+    /// Mirrors Go's `rat.go:SetInt`: copies the integer into the
+    /// numerator and forces the denominator to 1. Accepts any
+    /// `AsRef<Int>` (covers `&Int`, owned `Int`, `nilable<Int>`,
+    /// `nilable_refmut<Int>` — matches Go's `*big.Int` passes).
+    pub fn SetInt<X: AsRef<Int>>(&mut self, x: X) -> &mut Self {
+        let x = x.as_ref();
+        self.num = x.clone();
+        self.den = NewInt(1);
+        // Normalise sign — Rat keeps the sign on the numerator only.
+        self.den.neg = false;
+        self
+    }
+
+    /// `(*Rat).Mul(x, y)` — z = x*y, return z. Mirrors Go's
+    /// `rat.go:Mul`. Aliasing-safe: callers commonly write
+    /// `val.Mul(val, mv)` so we read x and y before mutating self.
+    /// Takes `&Rat` for both args (the canonical Go shape after
+    /// pointer-strip lowering). AsRef-widening exposed deeper
+    /// transpiler borrow-conflict bugs at the `val.Mul(val, mv)`
+    /// pattern — keeping the strict signature so the transpiler's
+    /// own auto-borrow/clone fix is the right place to address them.
+    pub fn Mul(&mut self, x: &Rat, y: &Rat) -> &mut Self {
+        // Snapshot inputs first to handle self-aliasing.
+        let xnum = x.num.clone();
+        let xden = x.den.clone();
+        let ynum = y.num.clone();
+        let yden = y.den.clone();
+        // num = xnum * ynum
+        let mut new_num = Int::default();
+        new_num.Mul(&xnum, &ynum);
+        // den = xden * yden
+        let mut new_den = Int::default();
+        new_den.Mul(&xden, &yden);
+        // Normalise: denominator is always > 0; carry sign on numerator.
+        if new_den.neg {
+            new_num.neg = !new_num.neg;
+            new_den.neg = false;
+        }
+        // Empty denominator would mean 0/0; fall back to 1 (matches the
+        // SetFrac convention of treating zero limbs as the unit).
+        if new_den.abs.is_empty() {
+            new_den = NewInt(1);
+        }
+        self.num = new_num;
+        self.den = new_den;
+        self
+    }
+}
+
+impl AsRef<Rat> for Rat {
+    fn as_ref(&self) -> &Rat { self }
+}
+
+impl AsRef<Rat> for crate::nilable<Rat> {
+    #[track_caller]
+    fn as_ref(&self) -> &Rat {
+        self.Must()
+    }
+}
+
+impl<'a> AsRef<Rat> for crate::gonilable_ref::nilable_refmut<'a, Rat> {
+    #[track_caller]
+    fn as_ref(&self) -> &Rat {
+        self.Must()
+    }
+}
+
+/// Parse a decimal numeric string (Go's `%f` shape: optional sign, digits,
+/// optional `.frac`, optional `e[+-]digits`) into a Rat. Returns true on
+/// success. Used by `fmt::Sscanf` for the `%f` verb against a `&mut Rat`
+/// (the only Sscanf-into-Rat path the ports currently exercise).
+pub fn parse_decimal_into_rat(s: &str, out: &mut Rat) -> bool {
+    let bytes = s.trim().as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+    let mut i = 0;
+    let neg = match bytes[0] {
+        b'+' => { i += 1; false }
+        b'-' => { i += 1; true }
+        _ => false,
+    };
+    let mut digits: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    let mut frac_len: i64 = 0;
+    let mut saw_digit = false;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c.is_ascii_digit() {
+            digits.push(c - b'0');
+            saw_digit = true;
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+        while i < bytes.len() {
+            let c = bytes[i];
+            if c.is_ascii_digit() {
+                digits.push(c - b'0');
+                frac_len += 1;
+                saw_digit = true;
+                i += 1;
+            } else {
+                break;
+            }
+        }
+    }
+    let mut exp: i64 = 0;
+    if i < bytes.len() && (bytes[i] == b'e' || bytes[i] == b'E') {
+        i += 1;
+        let eneg = if i < bytes.len() && bytes[i] == b'-' {
+            i += 1;
+            true
+        } else if i < bytes.len() && bytes[i] == b'+' {
+            i += 1;
+            false
+        } else {
+            false
+        };
+        let mut eval: i64 = 0;
+        let mut saw_e_digit = false;
+        while i < bytes.len() {
+            let c = bytes[i];
+            if c.is_ascii_digit() {
+                eval = eval.saturating_mul(10).saturating_add((c - b'0') as i64);
+                saw_e_digit = true;
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        if !saw_e_digit {
+            return false;
+        }
+        exp = if eneg { -eval } else { eval };
+    }
+    if i != bytes.len() || !saw_digit {
+        return false;
+    }
+    // Build numerator from digits (base 10).
+    let mut num = Int::default();
+    let ten = NewInt(10);
+    for d in &digits {
+        let mut tmp = Int::default();
+        tmp.Mul(&num, &ten);
+        let mut digit_int = Int::default();
+        digit_int.SetInt64(*d as i64);
+        num = Int::default();
+        num.Add(&tmp, &digit_int);
+    }
+    if neg {
+        num.neg = !num.abs.is_empty();
+    }
+    // The fraction places shift the denominator. Combined exponent:
+    // value = digits * 10^(exp - frac_len)
+    let net_exp = exp - frac_len;
+    let mut numer = num;
+    let mut denom = NewInt(1);
+    if net_exp >= 0 {
+        let mut mult = NewInt(1);
+        for _ in 0..net_exp {
+            let mut tmp = Int::default();
+            tmp.Mul(&mult, &ten);
+            mult = tmp;
+        }
+        let mut new_num = Int::default();
+        new_num.Mul(&numer, &mult);
+        numer = new_num;
+    } else {
+        let n = (-net_exp) as i64;
+        for _ in 0..n {
+            let mut tmp = Int::default();
+            tmp.Mul(&denom, &ten);
+            denom = tmp;
+        }
+    }
+    out.SetFrac(&numer, &denom);
+    true
 }
 
 /// `big.NewRat(a, b)` — convenience for `new(Rat).SetFrac(NewInt(a), NewInt(b))`.
@@ -320,6 +502,17 @@ impl Int {
     /// signature expects `nilable![&mut Int]`.
     pub fn BorrowMut(&mut self) -> crate::gonilable_ref::nilable_refmut<'_, Int> {
         crate::gonilable_ref::nilable_refmut::new(self)
+    }
+
+    /// `(*Int).Add(x, y)` — z = x + y, return z. Accepts any
+    /// `AsRef<Int>` so callers can pass owned/borrowed/nilable forms.
+    pub fn Add<X: AsRef<Int>, Y: AsRef<Int>>(&mut self, x: X, y: Y) -> &mut Self {
+        let x = x.as_ref();
+        let y = y.as_ref();
+        let res = add_signed(x, y);
+        self.neg = res.neg;
+        self.abs = res.abs;
+        self
     }
 
     /// Internal helper: in-place add a small signed integer to self.
@@ -779,5 +972,74 @@ mod tests {
         let mut z = Int::default();
         let _ = z.Mul(NewInt(1 << 16), NewInt(1 << 17));
         assert_eq!(z.String().as_bytes(), b"8589934592");
+    }
+
+    #[test]
+    fn rat_setint() {
+        let mut r = Rat::default();
+        r.SetInt(&NewInt(42));
+        assert_eq!(r.Num().Int64(), 42);
+        assert_eq!(r.Denom().Int64(), 1);
+    }
+
+    #[test]
+    fn rat_mul_basic() {
+        // (2/3) * (3/4) = 6/12 (unreduced — we only reduce when forced).
+        let mut a = Rat::default();
+        a.SetFrac(&NewInt(2), &NewInt(3));
+        let mut b = Rat::default();
+        b.SetFrac(&NewInt(3), &NewInt(4));
+        let mut c = Rat::default();
+        c.Mul(&a, &b);
+        assert_eq!(c.Num().Int64(), 6);
+        assert_eq!(c.Denom().Int64(), 12);
+    }
+
+    #[test]
+    fn rat_mul_self_aliasing() {
+        // val.Mul(val, mv) — dustin pattern.
+        let mut val = Rat::default();
+        val.SetFrac(&NewInt(7), &NewInt(2));
+        let mut mv = Rat::default();
+        mv.SetInt(&NewInt(3)); // 3/1
+        let val_snapshot = val.clone();
+        val.Mul(&val_snapshot, &mv);
+        // 7/2 * 3/1 = 21/2
+        assert_eq!(val.Num().Int64(), 21);
+        assert_eq!(val.Denom().Int64(), 2);
+    }
+
+    #[test]
+    fn parse_decimal_into_rat_basic() {
+        // "3.14" → 314/100
+        let mut r = Rat::default();
+        assert!(parse_decimal_into_rat("3.14", &mut r));
+        assert_eq!(r.Num().Int64(), 314);
+        assert_eq!(r.Denom().Int64(), 100);
+
+        // "100" → 100/1
+        let mut r2 = Rat::default();
+        assert!(parse_decimal_into_rat("100", &mut r2));
+        assert_eq!(r2.Num().Int64(), 100);
+        assert_eq!(r2.Denom().Int64(), 1);
+
+        // "-0.5" → -5/10
+        let mut r3 = Rat::default();
+        assert!(parse_decimal_into_rat("-0.5", &mut r3));
+        assert_eq!(r3.Num().Int64(), -5);
+        assert_eq!(r3.Denom().Int64(), 10);
+
+        // Bad input.
+        let mut r4 = Rat::default();
+        assert!(!parse_decimal_into_rat("not-a-number", &mut r4));
+    }
+
+    #[test]
+    fn int_add_basic() {
+        let mut z = Int::default();
+        z.Add(&NewInt(2), &NewInt(3));
+        assert_eq!(z.Int64(), 5);
+        z.Add(&NewInt(-2), &NewInt(7));
+        assert_eq!(z.Int64(), 5);
     }
 }
