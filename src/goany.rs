@@ -228,6 +228,22 @@ impl Any {
         })
     }
 
+    /// Comma-ok type assertion — Goish equivalent of Go's `v, ok := x.(T)`.
+    /// Returns owned T plus true on success; returns `T::default()` plus
+    /// false on miss. Requires `T: Default + Clone` so the false branch
+    /// can yield T's zero value (mirroring Go's interface-assertion
+    /// contract) and the true branch can materialise owned T from the
+    /// borrow returned by `As`. Only emitted by the transpiler for
+    /// concrete T — trait-object targets stay on `As` (their false
+    /// branch has no zero value).
+    #[inline]
+    pub fn AsTuple<T: 'static + Default + Clone + DowncastableFromAny>(&self) -> (T, bool) {
+        match self.As::<T>() {
+            Some(v) => (v.clone(), true),
+            None => (T::default(), false),
+        }
+    }
+
     /// True iff this `Any` was produced from `nil` (or is the
     /// equivalent zero-value `()`-payload). The payload check is
     /// `is::<Nil>()` — there's exactly one nil sentinel type
