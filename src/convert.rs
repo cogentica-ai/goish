@@ -248,6 +248,55 @@ __num_conv!(__Float64Conv, float64, float64);
 __num_conv!(__RuneConv, rune, crate::types::rune);
 __num_conv!(__ByteConv, byte, crate::types::byte);
 
+// ─── NumCast — type-parameter numeric conversion ────────────────────
+//
+// Go's `T(x)` where `T` is a constrained type parameter is a numeric
+// *conversion*, not a call. Rust cannot `as`-cast a generic operand,
+// nor can it "call" a type parameter, so the transpiler lowers it
+// through `NumCast`, which has both directions:
+//
+//   `T(x)`        — convert TO a type param:   `<T as NumCast>::from_<k>(x)`
+//   `int64(t)`    — convert FROM a type param: `NumCast::to_i64(t)`
+//
+// `<k>` is the source operand's basic kind (float → f64, signed → i64,
+// unsigned → u64). A generic function that performs either form gets a
+// `T: goish::NumCast` bound emitted on the corresponding type param.
+//
+// Implemented for the 12 Rust numeric primitives. Goish's `int`,
+// `uint`, `float64`, `float32`, `byte`, `rune` are plain aliases of
+// those primitives (see `types.rs`), so the alias set is covered too.
+pub trait NumCast: Sized + Copy {
+    #[doc(hidden)]
+    fn from_f64(v: f64) -> Self;
+    #[doc(hidden)]
+    fn from_i64(v: i64) -> Self;
+    #[doc(hidden)]
+    fn from_u64(v: u64) -> Self;
+    #[doc(hidden)]
+    fn to_f64(self) -> f64;
+    #[doc(hidden)]
+    fn to_i64(self) -> i64;
+    #[doc(hidden)]
+    fn to_u64(self) -> u64;
+}
+
+macro_rules! __num_cast_impl {
+    ($($t:ty),* $(,)?) => {
+        $(
+            impl NumCast for $t {
+                #[inline] fn from_f64(v: f64) -> Self { v as $t }
+                #[inline] fn from_i64(v: i64) -> Self { v as $t }
+                #[inline] fn from_u64(v: u64) -> Self { v as $t }
+                #[inline] fn to_f64(self) -> f64 { self as f64 }
+                #[inline] fn to_i64(self) -> i64 { self as i64 }
+                #[inline] fn to_u64(self) -> u64 { self as u64 }
+            }
+        )*
+    };
+}
+
+__num_cast_impl!(u8, i8, u16, i16, u32, i32, u64, i64, usize, isize, f32, f64);
+
 // ─── __SliceIndex — accept any integer type as a Go-style index ─────
 //
 // Go allows any integer type to index a slice/array/string. The

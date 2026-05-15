@@ -123,7 +123,7 @@ pub use builtin::{cap, len, Len};
 // `string(...)` conversion. Same for `slice<T>`.
 pub use convert::{
     byte, bytes, float32, float64, int, int16, int32, int64, int8, rune, runes, string, uint,
-    uint16, uint32, uint64, uint8,
+    uint16, uint32, uint64, uint8, NumCast,
 };
 pub use errors::error;
 pub use goany::Any;
