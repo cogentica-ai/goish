@@ -16,7 +16,7 @@ fn main() {
 
     // 1. RFC3339 round-trip.
     {
-        let want = time::Date(2024, 1, 2, 3, 4, 5, 0);
+        let want = time::Date(2024, 1, 2, 3, 4, 5, 0, goish::time::UTC);
         let s = want.Format(string(time::RFC3339));
         let (got, err) = time::Parse(string(time::RFC3339), s);
         if err.IsNil()
@@ -34,7 +34,7 @@ fn main() {
 
     // 2. DateTime round-trip.
     {
-        let want = time::Date(2025, 12, 31, 23, 59, 58, 0);
+        let want = time::Date(2025, 12, 31, 23, 59, 58, 0, goish::time::UTC);
         let s = want.Format(string(time::DateTime));
         let (got, err) = time::Parse(string(time::DateTime), s);
         if err.IsNil() && got.Year() == 2025 && got.Day() == 31 {

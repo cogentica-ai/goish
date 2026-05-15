@@ -16,7 +16,7 @@ fn main() {
     let mut failed = 0;
 
     // 2024-01-02 03:04:05 UTC.
-    let t = time::Date(2024, 1, 2, 3, 4, 5, 0);
+    let t = time::Date(2024, 1, 2, 3, 4, 5, 0, goish::time::UTC);
 
     // 0. Sanity check: Year/Month/Day round-trip.
     {
@@ -99,7 +99,7 @@ fn main() {
 
     // 7. Kitchen with PM time
     {
-        let pm = time::Date(2024, 1, 2, 13, 0, 0, 0);
+        let pm = time::Date(2024, 1, 2, 13, 0, 0, 0, goish::time::UTC);
         let s = pm.Format(string(time::Kitchen));
         if s == "1:00PM" {
             Println!("[ 7] Kitchen PM                PASS");

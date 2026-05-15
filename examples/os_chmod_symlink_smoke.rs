@@ -32,7 +32,7 @@ fn main() {
         if err.IsNil() && e.IsNil() && (fi.Mode() & 0o777) == 0o600 {
             Println!("[ 1] Chmod 0600                PASS");
         } else {
-            Println!("[ 1] Chmod 0600                FAIL mode=", fi.Mode() as i64);
+            Println!("[ 1] Chmod 0600                FAIL mode=", fi.Mode().Bits());
             failed += 1;
         }
     }

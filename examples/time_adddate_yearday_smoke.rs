@@ -17,7 +17,7 @@ fn main() {
 
     // 1. YearDay Jan 1 → 1.
     {
-        let t = time::Date(2024, 1, 1, 0, 0, 0, 0);
+        let t = time::Date(2024, 1, 1, 0, 0, 0, 0, goish::time::UTC);
         let d = t.YearDay();
         if d == 1 {
             Println!("[ 1] YearDay Jan 1             PASS");
@@ -29,7 +29,7 @@ fn main() {
 
     // 2. YearDay Dec 31 leap year (2024) → 366.
     {
-        let t = time::Date(2024, 12, 31, 12, 0, 0, 0);
+        let t = time::Date(2024, 12, 31, 12, 0, 0, 0, goish::time::UTC);
         let d = t.YearDay();
         if d == 366 {
             Println!("[ 2] YearDay Dec 31 leap       PASS");
@@ -41,7 +41,7 @@ fn main() {
 
     // 3. YearDay Dec 31 non-leap (2023) → 365.
     {
-        let t = time::Date(2023, 12, 31, 23, 59, 59, 0);
+        let t = time::Date(2023, 12, 31, 23, 59, 59, 0, goish::time::UTC);
         let d = t.YearDay();
         if d == 365 {
             Println!("[ 3] YearDay Dec 31 non-leap   PASS");
@@ -53,7 +53,7 @@ fn main() {
 
     // 4. YearDay Mar 1 leap year — 31 (Jan) + 29 (Feb) + 1 = 61.
     {
-        let t = time::Date(2024, 3, 1, 0, 0, 0, 0);
+        let t = time::Date(2024, 3, 1, 0, 0, 0, 0, goish::time::UTC);
         let d = t.YearDay();
         if d == 61 {
             Println!("[ 4] YearDay Mar 1 leap        PASS");
@@ -65,7 +65,7 @@ fn main() {
 
     // 5. YearDay Mar 1 non-leap — 31 + 28 + 1 = 60.
     {
-        let t = time::Date(2023, 3, 1, 0, 0, 0, 0);
+        let t = time::Date(2023, 3, 1, 0, 0, 0, 0, goish::time::UTC);
         let d = t.YearDay();
         if d == 60 {
             Println!("[ 5] YearDay Mar 1 non-leap    PASS");
@@ -77,7 +77,7 @@ fn main() {
 
     // 6. AddDate adds years (zero-month, zero-day).
     {
-        let t = time::Date(2024, 6, 15, 12, 30, 0, 0);
+        let t = time::Date(2024, 6, 15, 12, 30, 0, 0, goish::time::UTC);
         let u = t.AddDate(2, 0, 0);
         let (y, m, d) = u.Date();
         if y == 2026 && m == 6 && d == 15 {
@@ -90,7 +90,7 @@ fn main() {
 
     // 7. AddDate adds months and overflows year.
     {
-        let t = time::Date(2024, 11, 1, 0, 0, 0, 0);
+        let t = time::Date(2024, 11, 1, 0, 0, 0, 0, goish::time::UTC);
         let u = t.AddDate(0, 3, 0);
         let (y, m, d) = u.Date();
         if y == 2025 && m == 2 && d == 1 {
@@ -103,7 +103,7 @@ fn main() {
 
     // 8. AddDate normalizes Oct 31 + 1 month = Dec 1 (per Go doc).
     {
-        let t = time::Date(2024, 10, 31, 0, 0, 0, 0);
+        let t = time::Date(2024, 10, 31, 0, 0, 0, 0, goish::time::UTC);
         let u = t.AddDate(0, 1, 0);
         let (y, m, d) = u.Date();
         if y == 2024 && m == 12 && d == 1 {
@@ -116,7 +116,7 @@ fn main() {
 
     // 9. AddDate adds days, crossing month boundary.
     {
-        let t = time::Date(2024, 1, 30, 0, 0, 0, 0);
+        let t = time::Date(2024, 1, 30, 0, 0, 0, 0, goish::time::UTC);
         let u = t.AddDate(0, 0, 5);
         let (y, m, d) = u.Date();
         if y == 2024 && m == 2 && d == 4 {
@@ -129,7 +129,7 @@ fn main() {
 
     // 10. AddDate negative deltas (subtract).
     {
-        let t = time::Date(2024, 3, 1, 0, 0, 0, 0);
+        let t = time::Date(2024, 3, 1, 0, 0, 0, 0, goish::time::UTC);
         let u = t.AddDate(-1, -2, -1);  // 2023 + (3-2)=Jan + (1-1)=0 → 2022-12-31
         let (y, m, d) = u.Date();
         if y == 2022 && m == 12 && d == 31 {
@@ -142,7 +142,7 @@ fn main() {
 
     // 11. AddDate preserves clock (hour/min/sec/nsec).
     {
-        let t = time::Date(2024, 1, 1, 13, 45, 7, 123_456_789);
+        let t = time::Date(2024, 1, 1, 13, 45, 7, 123_456_789, goish::time::UTC);
         let u = t.AddDate(0, 0, 1);
         let (h, mi, s) = u.Clock();
         if h == 13 && mi == 45 && s == 7 && u.Nanosecond() == 123_456_789 {

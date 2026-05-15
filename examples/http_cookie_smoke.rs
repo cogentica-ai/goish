@@ -148,7 +148,7 @@ fn main() {
     // 9. Expires round-trip via parse → String → parse.
     {
         let mut c = Cookie::new(string("e"), string("v"));
-        c.Expires = time::Date(2027, 1, 15, 10, 30, 45, 0);
+        c.Expires = time::Date(2027, 1, 15, 10, 30, 45, 0, goish::time::UTC);
         let s = c.String();
         let (parsed, _err) = http::ParseSetCookie(s.clone());
         let y = parsed.Expires.Year();

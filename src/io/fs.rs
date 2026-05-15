@@ -65,6 +65,14 @@ impl core::ops::BitAnd for FileMode {
     type Output = FileMode;
     fn bitand(self, rhs: FileMode) -> FileMode { FileMode(self.0 & rhs.0) }
 }
+// Mask against a bare integer literal — Go writes `fi.Mode() & 0o777`
+// and the untyped constant coerces to `os.FileMode`. Rust needs the
+// literal pinned: a single `BitAnd<u32>` impl lets `& 0o777` infer the
+// literal as `u32` unambiguously.
+impl core::ops::BitAnd<u32> for FileMode {
+    type Output = FileMode;
+    fn bitand(self, rhs: u32) -> FileMode { FileMode(self.0 & rhs) }
+}
 impl core::ops::BitXor for FileMode {
     type Output = FileMode;
     fn bitxor(self, rhs: FileMode) -> FileMode { FileMode(self.0 ^ rhs.0) }

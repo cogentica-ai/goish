@@ -18,8 +18,8 @@ fn main() {
 
     // 1. Earlier sec < later sec → -1.
     {
-        let t1 = Date(2026, 5, 1, 0, 0, 0, 0);
-        let t2 = Date(2026, 5, 2, 0, 0, 0, 0);
+        let t1 = Date(2026, 5, 1, 0, 0, 0, 0, goish::time::UTC);
+        let t2 = Date(2026, 5, 2, 0, 0, 0, 0, goish::time::UTC);
         if t1.Compare(t2) == -1 {
             Println!("[ 1] earlier sec → -1          PASS");
         } else {
@@ -30,8 +30,8 @@ fn main() {
 
     // 2. Later sec > earlier sec → +1.
     {
-        let t1 = Date(2026, 5, 2, 0, 0, 0, 0);
-        let t2 = Date(2026, 5, 1, 0, 0, 0, 0);
+        let t1 = Date(2026, 5, 2, 0, 0, 0, 0, goish::time::UTC);
+        let t2 = Date(2026, 5, 1, 0, 0, 0, 0, goish::time::UTC);
         if t1.Compare(t2) == 1 {
             Println!("[ 2] later sec → +1            PASS");
         } else {
@@ -42,8 +42,8 @@ fn main() {
 
     // 3. Equal time (same Date input) → 0.
     {
-        let t1 = Date(2026, 5, 1, 12, 30, 0, 0);
-        let t2 = Date(2026, 5, 1, 12, 30, 0, 0);
+        let t1 = Date(2026, 5, 1, 12, 30, 0, 0, goish::time::UTC);
+        let t2 = Date(2026, 5, 1, 12, 30, 0, 0, goish::time::UTC);
         if t1.Compare(t2) == 0 {
             Println!("[ 3] equal → 0                 PASS");
         } else {
@@ -54,8 +54,8 @@ fn main() {
 
     // 4. Same sec, earlier nsec → -1.
     {
-        let t1 = Date(2026, 5, 1, 0, 0, 0, 100);
-        let t2 = Date(2026, 5, 1, 0, 0, 0, 200);
+        let t1 = Date(2026, 5, 1, 0, 0, 0, 100, goish::time::UTC);
+        let t2 = Date(2026, 5, 1, 0, 0, 0, 200, goish::time::UTC);
         if t1.Compare(t2) == -1 {
             Println!("[ 4] same sec, lower nsec → -1 PASS");
         } else {
@@ -66,8 +66,8 @@ fn main() {
 
     // 5. Same sec, later nsec → +1.
     {
-        let t1 = Date(2026, 5, 1, 0, 0, 0, 999);
-        let t2 = Date(2026, 5, 1, 0, 0, 0, 100);
+        let t1 = Date(2026, 5, 1, 0, 0, 0, 999, goish::time::UTC);
+        let t2 = Date(2026, 5, 1, 0, 0, 0, 100, goish::time::UTC);
         if t1.Compare(t2) == 1 {
             Println!("[ 5] same sec, higher nsec→ +1 PASS");
         } else {
@@ -91,8 +91,8 @@ fn main() {
 
     // 7. Compare is consistent with Equal.
     {
-        let t1 = Date(2026, 5, 1, 12, 0, 0, 0);
-        let t2 = Date(2026, 5, 1, 12, 0, 0, 0);
+        let t1 = Date(2026, 5, 1, 12, 0, 0, 0, goish::time::UTC);
+        let t2 = Date(2026, 5, 1, 12, 0, 0, 0, goish::time::UTC);
         if t1.Compare(t2) == 0 && t1.Equal(t2) {
             Println!("[ 7] Compare ↔ Equal           PASS");
         } else {
@@ -103,8 +103,8 @@ fn main() {
 
     // 8. Compare is anti-symmetric.
     {
-        let t1 = Date(2026, 5, 1, 0, 0, 0, 0);
-        let t2 = Date(2026, 6, 1, 0, 0, 0, 0);
+        let t1 = Date(2026, 5, 1, 0, 0, 0, 0, goish::time::UTC);
+        let t2 = Date(2026, 6, 1, 0, 0, 0, 0, goish::time::UTC);
         if t1.Compare(t2) + t2.Compare(t1) == 0 {
             Println!("[ 8] anti-symmetric            PASS");
         } else {

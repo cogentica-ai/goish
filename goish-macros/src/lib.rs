@@ -1336,17 +1336,24 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // makes it so). In a goishc-emitted port crate, `::goish::Nil` is
     // foreign, and the orphan rule rejects the impl entirely.
     //
-    // Detect the goish-v1 case via CARGO_PKG_NAME — the proc-macro
-    // reads the env var at expansion time, which is set to the calling
-    // crate's package name by cargo. When we're inside goish-v1, emit;
-    // otherwise the goishc transpiler's nil-check rewrite (which
-    // lowers `arc == nil` to `(*arc).__is_nil_iface()` at the call
-    // site) is the path that makes user-facing `==` work in port code.
+    // Detect the goish-v1 *lib* crate via CARGO_CRATE_NAME — the
+    // proc-macro reads the env var at expansion time, set to the
+    // crate currently being compiled. `Nil` is local only to the
+    // goish lib crate itself; it is foreign to a port crate AND to
+    // goish's own example crates (which share the `goish` *package*
+    // name but are distinct *crates*). CARGO_PKG_NAME would be
+    // "goish" for both the lib and its examples, wrongly emitting the
+    // orphan-violating impl in examples — CARGO_CRATE_NAME is "goish"
+    // for the lib alone.
+    //
+    // When not the lib crate, the goishc transpiler's nil-check
+    // rewrite (which lowers `arc == nil` to `(*arc).__is_nil_iface()`
+    // at the call site) is the path that makes user-facing `==` work.
     //
     // Dispatches through the `__is_nil_iface` default method: the
     // private nil sentinel `__NilT` overrides it to return true; any
     // concrete impl inherits the `false` default.
-    let inside_goish_runtime = ::std::env::var("CARGO_PKG_NAME")
+    let inside_goish_runtime = ::std::env::var("CARGO_CRATE_NAME")
         .map(|n| n == "goish")
         .unwrap_or(false);
     if inside_goish_runtime {
