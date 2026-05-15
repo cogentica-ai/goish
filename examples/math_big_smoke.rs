@@ -4,7 +4,7 @@
 #![no_std]
 #![no_main]
 
-use goish::{int, syscall};
+use goish::{int, slice, string, syscall};
 use goish::math::big;
 use goish::fmt::Stringer;
 
@@ -421,6 +421,191 @@ fn main() {
     rt.Lsh(&big::NewInt(123456789), 50);
     rt.Rsh(&rt.clone(), 50);
     check(rt.Int64() == 123456789, b"lsh/rsh roundtrip 50 bits");
+
+    // ── SetString / Text round-trips ───────────────────────────────
+    // A large multi-limb value: 123456789012345678901234567890.
+    let big_dec = b"123456789012345678901234567890";
+    {
+        let mut t = big::Int::new();
+        let (_, ok) = t.SetString(string::from_bytes(big_dec), 10);
+        check(ok && dec_eq(&t, big_dec), b"setstring base10 large");
+        // Text(10) must agree with String().
+        check(t.Text(10).as_bytes() == t.String().as_bytes(), b"text10 == string");
+        // Round-trip through bases 2, 8, 10, 16.
+        check(t.Text(2).as_bytes()
+            == b"1100011101110100100001111111101101100001101110011111000001110111001001110001111110000101011010010",
+            b"text base2 large");
+        check(t.Text(8).as_bytes() == b"143564417755415637016711617605322", b"text base8 large");
+        check(t.Text(16).as_bytes() == b"18ee90ff6c373e0ee4e3f0ad2", b"text base16 large");
+        // Re-parse each representation and confirm equality.
+        for &(repr, base) in &[
+            (b"1100011101110100100001111111101101100001101110011111000001110111001001110001111110000101011010010" as &[u8], 2i64),
+            (b"143564417755415637016711617605322" as &[u8], 8),
+            (b"18ee90ff6c373e0ee4e3f0ad2" as &[u8], 16),
+        ] {
+            let mut u = big::Int::new();
+            let (_, uok) = u.SetString(string::from_bytes(repr), base);
+            check(uok && u.Cmp(&t) == 0, b"setstring/text roundtrip");
+        }
+    }
+
+    // Negative multi-limb value through every base.
+    {
+        let neg_dec = b"-987654321098765432109876543210987654321";
+        let mut t = big::Int::new();
+        let (_, ok) = t.SetString(string::from_bytes(neg_dec), 10);
+        check(ok && t.Sign() == -1, b"setstring negative parsed");
+        check(t.Text(10).as_bytes() == neg_dec, b"text negative base10");
+        check(t.Text(16).as_bytes() == b"-2e7074d9c994179b09b1bc62f21c70cb1",
+            b"text negative base16");
+        // Round-trip via base 16.
+        let mut u = big::Int::new();
+        u.SetString(string::from_bytes(b"-2e7074d9c994179b09b1bc62f21c70cb1"), 16);
+        check(u.Cmp(&t) == 0, b"setstring negative base16 roundtrip");
+        // Round-trip via base 2.
+        let bin = t.Text(2);
+        let mut w = big::Int::new();
+        w.SetString(bin.clone(), 2);
+        check(w.Cmp(&t) == 0, b"setstring negative base2 roundtrip");
+    }
+
+    // Bases above 16 — 36 and 62 (cross-checked against Python).
+    {
+        let mut t = big::Int::new();
+        t.SetString(string::from_bytes(big_dec), 10);
+        check(t.Text(36).as_bytes() == b"byw97um9s91dlz68tsi", b"text base36");
+        check(t.Text(62).as_bytes() == b"2AyLS9BKAMjjsWHR0", b"text base62");
+        let mut u = big::Int::new();
+        u.SetString(string::from_bytes(b"2AyLS9BKAMjjsWHR0"), 62);
+        check(u.Cmp(&t) == 0, b"setstring base62 roundtrip");
+    }
+
+    // ── SetString base-0 auto-detect ───────────────────────────────
+    {
+        let mut hx = big::Int::new();
+        let (_, ok) = hx.SetString(string::from_bytes(b"0xFF"), 0);
+        check(ok && hx.Int64() == 255, b"setstring base0 0xFF");
+
+        let mut bn = big::Int::new();
+        let (_, ok) = bn.SetString(string::from_bytes(b"0b101"), 0);
+        check(ok && bn.Int64() == 5, b"setstring base0 0b101");
+
+        let mut oc = big::Int::new();
+        let (_, ok) = oc.SetString(string::from_bytes(b"0o17"), 0);
+        check(ok && oc.Int64() == 15, b"setstring base0 0o17");
+
+        // Bare-zero octal prefix: "017" == 15.
+        let mut oc2 = big::Int::new();
+        let (_, ok) = oc2.SetString(string::from_bytes(b"017"), 0);
+        check(ok && oc2.Int64() == 15, b"setstring base0 017 octal");
+
+        // No prefix → decimal.
+        let mut dc = big::Int::new();
+        let (_, ok) = dc.SetString(string::from_bytes(b"42"), 0);
+        check(ok && dc.Int64() == 42, b"setstring base0 decimal");
+
+        // Negative with prefix.
+        let mut nh = big::Int::new();
+        let (_, ok) = nh.SetString(string::from_bytes(b"-0x10"), 0);
+        check(ok && nh.Int64() == -16, b"setstring base0 -0x10");
+
+        // Underscore separators (base 0 only).
+        let mut us = big::Int::new();
+        let (_, ok) = us.SetString(string::from_bytes(b"0x_de_ad_be_ef"), 0);
+        check(ok && us.Int64() == 0xdeadbeef, b"setstring base0 underscores");
+    }
+
+    // ── SetString parse failures return false ──────────────────────
+    {
+        // Bad digit for the base.
+        let mut f = big::Int::new();
+        let saved = big::NewInt(777);
+        f.Set(&saved);
+        let (_, ok) = f.SetString(string::from_bytes(b"12x9"), 10);
+        check(!ok, b"setstring bad digit -> false");
+        // Self left unchanged on failure.
+        check(f.Int64() == 777, b"setstring failure leaves self");
+
+        // '9' is not a valid binary digit.
+        let mut f2 = big::Int::new();
+        let (_, ok) = f2.SetString(string::from_bytes(b"1019"), 2);
+        check(!ok, b"setstring bad binary digit -> false");
+
+        // Empty string.
+        let mut f3 = big::Int::new();
+        let (_, ok) = f3.SetString(string::from_bytes(b""), 10);
+        check(!ok, b"setstring empty -> false");
+
+        // Trailing junk.
+        let mut f4 = big::Int::new();
+        let (_, ok) = f4.SetString(string::from_bytes(b"123 "), 10);
+        check(!ok, b"setstring trailing junk -> false");
+
+        // Misplaced underscore.
+        let mut f5 = big::Int::new();
+        let (_, ok) = f5.SetString(string::from_bytes(b"1__2"), 0);
+        check(!ok, b"setstring double underscore -> false");
+    }
+
+    // ── Bytes / SetBytes round-trip ────────────────────────────────
+    {
+        // Large value: 123456789012345678901234567890.
+        let mut t = big::Int::new();
+        t.SetString(string::from_bytes(big_dec), 10);
+        let raw = t.Bytes();
+        // Python: v.to_bytes(13,'big').hex() == 018ee90ff6c373e0ee4e3f0ad2
+        // (Bytes() strips the leading zero byte -> 13 bytes here).
+        check(raw.len() == 13, b"bytes large length 13");
+        let expect: [u8; 13] = [
+            0x01, 0x8e, 0xe9, 0x0f, 0xf6, 0xc3, 0x73, 0xe0, 0xee, 0x4e, 0x3f, 0x0a, 0xd2,
+        ];
+        let mut bytes_ok = true;
+        for i in 0..13 {
+            if raw[int::from(i as i64)] != expect[i] {
+                bytes_ok = false;
+            }
+        }
+        check(bytes_ok, b"bytes large content");
+
+        // SetBytes back must reproduce the original magnitude.
+        let mut u = big::Int::new();
+        u.SetBytes(raw.clone());
+        check(u.Cmp(&t) == 0, b"setbytes roundtrip large");
+
+        // Sign is dropped — SetBytes is unsigned.
+        let mut neg = big::Int::new();
+        neg.SetString(string::from_bytes(big_dec), 10);
+        neg.Neg(&neg.clone());
+        let nb = neg.Bytes();
+        check(nb.len() == 13, b"bytes of negative drops sign");
+        let mut back = big::Int::new();
+        back.SetBytes(nb);
+        check(back.Cmp(&t) == 0 && back.Sign() == 1, b"setbytes magnitude only");
+
+        // Zero round-trips to an empty slice.
+        let z0 = big::NewInt(0);
+        check(z0.Bytes().len() == 0, b"bytes zero -> empty");
+        let mut fromempty = big::NewInt(12345);
+        fromempty.SetBytes(z0.Bytes());
+        check(fromempty.Sign() == 0, b"setbytes empty -> zero");
+
+        // A small known value: 0x010203 == 66051.
+        let mut sb = big::Int::new();
+        let three: [u8; 3] = [0x01, 0x02, 0x03];
+        sb.SetBytes(slice::__from_vec(three.to_vec()));
+        check(sb.Int64() == 0x010203, b"setbytes 010203");
+        // And its Bytes() comes back identical.
+        let rt = sb.Bytes();
+        check(rt.len() == 3 && rt[int::from(0)] == 1
+            && rt[int::from(1)] == 2 && rt[int::from(2)] == 3,
+            b"bytes 010203 roundtrip");
+
+        // Leading zero bytes in the input are ignored.
+        let mut lz = big::Int::new();
+        let padded: [u8; 5] = [0x00, 0x00, 0x01, 0x02, 0x03];
+        lz.SetBytes(slice::__from_vec(padded.to_vec()));
+        check(lz.Int64() == 0x010203, b"setbytes leading zeros ignored");
+    }
 
     let _ = &int::from(0);
     report();

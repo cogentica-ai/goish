@@ -795,6 +795,61 @@ impl Int {
         }
         self
     }
+
+    /// `(*Int).SetString(s, base)` — parse `s` as an integer in `base`
+    /// into `self`, returning `(self, ok)`. `ok` is false on a parse
+    /// failure, in which case `self` is left unchanged.
+    ///
+    /// `base` must be 0 or a value between 2 and 62 (Go's `MaxBase`).
+    /// For base 0 the actual base is taken from the literal prefix:
+    /// `0b`/`0B` → 2, `0o`/`0O` → 8, `0x`/`0X` → 16, a leading `0`
+    /// (immediately followed by digits) → 8, otherwise 10. An optional
+    /// leading `+`/`-` sign is accepted. When base is 0, `_` digit
+    /// separators are permitted between successive digits (and between
+    /// a base prefix and a digit), matching Go's `int.go`/`natconv.go`.
+    ///
+    /// For bases ≤ 36 letter digits are case-insensitive; for bases
+    /// > 36 the upper-case letters carry digit values 36..=61.
+    pub fn SetString<S: Into<crate::string>>(&mut self, s: S, base: int) -> (&mut Int, bool) {
+        let s = s.into();
+        match scan_int(s.as_bytes(), base) {
+            Some((neg, abs)) => {
+                self.neg = neg && !abs.is_empty();
+                self.abs = abs;
+                (self, true)
+            }
+            None => (self, false),
+        }
+    }
+
+    /// `(*Int).Text(base)` — string representation of `self` in `base`.
+    /// `base` must be between 2 and 62 inclusive; lower-case letters
+    /// `a`..`z` cover digit values 10..35 and upper-case `A`..`Z` cover
+    /// 36..61. No `0x`-style prefix is added. Negative values are
+    /// prefixed with `-`.
+    pub fn Text(&self, base: int) -> crate::string {
+        if base < 2 || base > MAX_BASE {
+            panic!("big::Int::Text: invalid base");
+        }
+        let buf = itoa(self.neg, &self.abs, base);
+        crate::string::from_bytes(&buf)
+    }
+
+    /// `(*Int).Bytes()` — big-endian byte representation of the absolute
+    /// value of `self`. No sign and no leading zero bytes; zero yields
+    /// an empty slice. Matches Go's `(*Int).Bytes()`.
+    pub fn Bytes(&self) -> crate::slice<crate::types::byte> {
+        crate::slice::<crate::types::byte>::__from_vec(limbs_to_be_bytes(&self.abs))
+    }
+
+    /// `(*Int).SetBytes(buf)` — interpret `buf` as a big-endian unsigned
+    /// integer and assign it to `self` (sign set non-negative). Returns
+    /// `self`. Matches Go's `(*Int).SetBytes`.
+    pub fn SetBytes(&mut self, buf: crate::slice<crate::types::byte>) -> &mut Self {
+        self.abs = be_bytes_to_limbs(&buf);
+        self.neg = false;
+        self
+    }
 }
 
 /// `big.NewInt(x)` — Go's package-level constructor.
@@ -813,38 +868,8 @@ pub fn NewInt(x: i64) -> Int {
 // calling `String()` once the value reaches the formatter via Stringer.)
 impl crate::fmt::Stringer for Int {
     fn String(&self) -> crate::gostring::string {
-        if self.abs.is_empty() {
-            return crate::gostring::string::from("0");
-        }
-        // Decimal conversion: repeatedly divide the magnitude by 10.
-        // Multi-limb magnitudes are supported via long division.
-        let mut limbs = self.abs.clone();
-        // little-endian limbs of base 2^32; divide by 10 in place,
-        // collecting digits LSB-first.
-        let mut digits: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
-        loop {
-            // Trim trailing zero limbs to simplify the loop exit.
-            while let Some(&0) = limbs.last() {
-                limbs.pop();
-            }
-            if limbs.is_empty() {
-                break;
-            }
-            // Divide limbs[..] (base 2^32) by 10, big-endian per limb
-            // (process from top so carry flows into lower limbs).
-            let mut rem: u64 = 0;
-            for i in (0..limbs.len()).rev() {
-                let cur = (rem << 32) | (limbs[i] as u64);
-                limbs[i] = (cur / 10) as u32;
-                rem = cur % 10;
-            }
-            digits.push(b'0' + rem as u8);
-        }
-        if self.neg {
-            digits.push(b'-');
-        }
-        digits.reverse();
-        crate::gostring::string::from_bytes(&digits)
+        // Go's `(*Int).String()` is exactly `x.Text(10)`.
+        self.Text(10)
     }
 }
 
@@ -1130,6 +1155,243 @@ fn sub_limbs(a: &[u32], b: &[u32]) -> Vec<u32> {
         out.pop();
     }
     out
+}
+
+// ─── string / byte conversion helpers ─────────────────────────────────
+//
+// Mirrors Go's `natconv.go` (`itoa` / `scan`) and `intconv.go`
+// (`(*Int).SetString` / `Text`). The limb is a 32-bit `u32`; Go's
+// `nat` uses a 64-bit `Word`, but the algorithms are limb-width
+// agnostic — the only externally visible constant is `MAX_BASE`.
+
+/// `big.MaxBase` — largest base accepted for string conversions:
+/// `10 + ('z'-'a'+1) + ('Z'-'A'+1)` == 62.
+pub const MAX_BASE: int = 62;
+/// Bases up to this value treat `A`-`Z` as a case-insensitive alias
+/// of `a`-`z` (digit values 10..35). Above it, `A`-`Z` carry 36..61.
+const MAX_BASE_SMALL: int = 36;
+
+/// Go's `digits` table: digit value → ASCII character.
+const DIGIT_CHARS: &[u8; 62] =
+    b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/// Map an ASCII character to its digit value, or `None` if it is not a
+/// digit. For `base <= 36`, `A`-`Z` alias `a`-`z`; above that they
+/// continue the sequence at 36. Mirrors `natconv.go:scan`'s switch.
+fn digit_value(ch: u8, base: int) -> Option<u32> {
+    let d = if ch.is_ascii_digit() {
+        (ch - b'0') as u32
+    } else if (b'a'..=b'z').contains(&ch) {
+        (ch - b'a') as u32 + 10
+    } else if (b'A'..=b'Z').contains(&ch) {
+        if base <= MAX_BASE_SMALL {
+            (ch - b'A') as u32 + 10
+        } else {
+            (ch - b'A') as u32 + MAX_BASE_SMALL as u32
+        }
+    } else {
+        return None;
+    };
+    if (d as int) < base { Some(d) } else { None }
+}
+
+/// In-place multiply-and-add: `limbs = limbs*mul + add` (base 2^32).
+/// `mul` and `add` are single u32 words. The limb vector is trimmed.
+fn mul_add_word(limbs: &mut Vec<u32>, mul: u32, add: u32) {
+    let mut carry: u64 = add as u64;
+    for limb in limbs.iter_mut() {
+        let v = (*limb as u64) * (mul as u64) + carry;
+        *limb = v as u32;
+        carry = v >> 32;
+    }
+    if carry != 0 {
+        limbs.push(carry as u32);
+    }
+    while limbs.last().copied() == Some(0) {
+        limbs.pop();
+    }
+}
+
+/// Scan a signed integer from `bytes` in the given `base`. Returns
+/// `(neg, abs_limbs)` on success, `None` on any syntax error.
+///
+/// `base` is 0 (prefix-detected) or 2..=62. For base 0, `_` digit
+/// separators are honoured per Go's `natconv.go:scan` grammar.
+fn scan_int(bytes: &[u8], base: int) -> Option<(bool, Vec<u32>)> {
+    if !(base == 0 || (2..=MAX_BASE).contains(&base)) {
+        return None;
+    }
+    let mut i = 0usize;
+    // Optional sign.
+    let neg = match bytes.first().copied() {
+        Some(b'-') => { i += 1; true }
+        Some(b'+') => { i += 1; false }
+        _ => false,
+    };
+
+    // Determine the actual base and consume any literal prefix.
+    let mut b = base;
+    // `prefix` records which prefix was consumed: 0 (none), b'b', b'o',
+    // b'x', or b'0' (the bare-zero octal prefix). `prev` tracks the
+    // previous significant char for `_`-separator validation: it is
+    // '_' , '0' (a digit), or '.' (start / anything else).
+    let mut prefix: u8 = 0;
+    let mut prev: u8 = b'.';
+    if base == 0 {
+        b = 10;
+        if bytes.get(i).copied() == Some(b'0') {
+            // A leading '0' counts as the previous "digit" — Go keeps
+            // `prev == '0'` across the prefix so a `_` may follow it.
+            prev = b'0';
+            i += 1;
+            match bytes.get(i).copied() {
+                Some(b'b') | Some(b'B') => { b = 2; prefix = b'b'; i += 1; }
+                Some(b'o') | Some(b'O') => { b = 8; prefix = b'o'; i += 1; }
+                Some(b'x') | Some(b'X') => { b = 16; prefix = b'x'; i += 1; }
+                _ => { b = 8; prefix = b'0'; }
+            }
+        }
+    }
+
+    let mut limbs: Vec<u32> = Vec::new();
+    let mut count: usize = 0; // number of digits parsed
+    let mut inval_sep = false;
+
+    while i < bytes.len() {
+        let ch = bytes[i];
+        if ch == b'_' && base == 0 {
+            // A separator may only follow a digit.
+            if prev != b'0' {
+                inval_sep = true;
+            }
+            prev = b'_';
+            i += 1;
+            continue;
+        }
+        match digit_value(ch, b) {
+            Some(d) => {
+                mul_add_word(&mut limbs, b as u32, d);
+                count += 1;
+                prev = b'0';
+                i += 1;
+            }
+            None => {
+                // Not a digit — the number ends here.
+                break;
+            }
+        }
+    }
+
+    // The whole string must be consumed; trailing junk is a failure.
+    if i != bytes.len() {
+        return None;
+    }
+    // A '_' may not be the last char, and an invalid placement fails.
+    if inval_sep || prev == b'_' {
+        return None;
+    }
+    if count == 0 {
+        // A bare "0" (octal prefix with no following digits) is the
+        // valid value zero; every other empty case is a failure.
+        if prefix == b'0' {
+            return Some((false, Vec::new()));
+        }
+        return None;
+    }
+    Some((neg, limbs))
+}
+
+/// Format the magnitude `abs` in `base` (2..=62), prepending `-` when
+/// `neg` and the value is non-zero. Mirrors `natconv.go:itoa`.
+fn itoa(neg: bool, abs: &[u32], base: int) -> Vec<u8> {
+    debug_assert!((2..=MAX_BASE).contains(&base));
+    if abs.is_empty() {
+        return alloc::vec![b'0'];
+    }
+    // Repeatedly divide the magnitude by `base`, collecting digits
+    // least-significant first, then reverse.
+    let mut limbs = abs.to_vec();
+    while limbs.last().copied() == Some(0) {
+        limbs.pop();
+    }
+    let mut digits: Vec<u8> = Vec::new();
+    let bw = base as u32;
+    while !limbs.is_empty() {
+        let (q, r) = divmod_by_u32(&limbs, bw);
+        digits.push(DIGIT_CHARS[r as usize]);
+        limbs = q;
+    }
+    if neg {
+        digits.push(b'-');
+    }
+    digits.reverse();
+    digits
+}
+
+/// Big-endian byte representation of a magnitude (no leading zero
+/// bytes; an empty magnitude yields an empty buffer). Mirrors Go's
+/// `nat.bytes`.
+fn limbs_to_be_bytes(abs: &[u32]) -> Vec<u8> {
+    // Trim trailing zero limbs defensively.
+    let mut top = abs.len();
+    while top > 0 && abs[top - 1] == 0 {
+        top -= 1;
+    }
+    if top == 0 {
+        return Vec::new();
+    }
+    // Emit limbs most-significant first, big-endian within each limb.
+    let mut out: Vec<u8> = Vec::with_capacity(top * 4);
+    for i in (0..top).rev() {
+        let limb = abs[i];
+        out.push((limb >> 24) as u8);
+        out.push((limb >> 16) as u8);
+        out.push((limb >> 8) as u8);
+        out.push(limb as u8);
+    }
+    // Strip leading zero bytes (the most-significant limb may have them).
+    let mut start = 0usize;
+    while start < out.len() - 1 && out[start] == 0 {
+        start += 1;
+    }
+    if out[start] == 0 {
+        // Whole thing was zero (cannot happen given top>0, but be safe).
+        return Vec::new();
+    }
+    out.drain(0..start);
+    out
+}
+
+/// Interpret `buf` as a big-endian unsigned integer, returning its
+/// little-endian u32 limbs (trimmed). Mirrors Go's `nat.setBytes`.
+fn be_bytes_to_limbs(buf: &[u8]) -> Vec<u32> {
+    // Skip leading zero bytes for a clean magnitude.
+    let mut start = 0usize;
+    while start < buf.len() && buf[start] == 0 {
+        start += 1;
+    }
+    let sig = &buf[start..];
+    if sig.is_empty() {
+        return Vec::new();
+    }
+    let nlimbs = (sig.len() + 3) / 4;
+    let mut limbs = alloc::vec![0u32; nlimbs];
+    // Walk from the least-significant byte (end of buf) backwards,
+    // packing 4 bytes per limb.
+    let mut bit = 0u32;
+    let mut li = 0usize;
+    for &byte in sig.iter().rev() {
+        limbs[li] |= (byte as u32) << bit;
+        bit += 8;
+        if bit == 32 {
+            bit = 0;
+            li += 1;
+        }
+    }
+    while limbs.last().copied() == Some(0) {
+        limbs.pop();
+    }
+    limbs
 }
 
 // ─── bitwise / shift limb helpers ──────────────────────────────────────
