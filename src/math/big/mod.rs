@@ -552,6 +552,249 @@ impl Int {
         self.neg = res.neg;
         self.abs = res.abs;
     }
+
+    /// `(*Int).Sub(x, y)` — z = x - y, return z. Subtraction is addition
+    /// with `y`'s sign flipped, reusing the sign-aware `add_signed` core.
+    pub fn Sub<X: AsRef<Int>, Y: AsRef<Int>>(&mut self, x: X, y: Y) -> &mut Self {
+        let x = x.as_ref();
+        let y = y.as_ref();
+        // -y: flip the sign of y's magnitude (zero stays non-negative).
+        let neg_y = Int { neg: !y.neg && !y.abs.is_empty(), abs: y.abs.clone() };
+        let res = add_signed(x, &neg_y);
+        self.neg = res.neg;
+        self.abs = res.abs;
+        self
+    }
+
+    /// `(*Int).Neg(x)` — z = -x, return z. Zero stays non-negative.
+    pub fn Neg<X: AsRef<Int>>(&mut self, x: X) -> &mut Self {
+        let x = x.as_ref();
+        let abs = x.abs.clone();
+        self.neg = !abs.is_empty() && !x.neg;
+        self.abs = abs;
+        self
+    }
+
+    /// `(*Int).BitLen()` — bit length of |x|. The bit length of 0 is 0.
+    pub fn BitLen(&self) -> int {
+        bit_len(&self.abs)
+    }
+
+    /// `(*Int).TrailingZeroBits()` — count of consecutive least-significant
+    /// zero bits of |x|. Zero has 0 trailing-zero bits.
+    pub fn TrailingZeroBits(&self) -> crate::types::uint {
+        trailing_zero_bits(&self.abs)
+    }
+
+    /// `(*Int).Bit(i)` — value of the i-th bit of x, i.e. `(x>>i)&1`.
+    /// Panics on a negative index. For negative x, Go reports the bit
+    /// of the two's-complement representation: bit i of -x is
+    /// `bit i of (|x|-1)` inverted.
+    pub fn Bit(&self, i: int) -> crate::types::uint {
+        if i == 0 {
+            // Bit 0 is identical for x and -x in two's complement.
+            return if self.abs.is_empty() {
+                0
+            } else {
+                (self.abs[0] & 1) as crate::types::uint
+            };
+        }
+        if i < 0 {
+            panic!("negative bit index");
+        }
+        let bi = i as u64;
+        if self.neg {
+            let t = sub_limbs(&self.abs, &[1]);
+            limb_bit(&t, bi) ^ 1
+        } else {
+            limb_bit(&self.abs, bi)
+        }
+    }
+
+    /// `(*Int).SetBit(x, i, b)` — z = x with x's i-th bit set to b (0 or 1).
+    /// If b == 1: `z = x | (1 << i)`; if b == 0: `z = x &^ (1 << i)`.
+    /// Panics on a negative index or b not in {0, 1}. Negative x is
+    /// handled in two's-complement, matching Go.
+    pub fn SetBit<X: AsRef<Int>>(&mut self, x: X, i: int, b: crate::types::uint) -> &mut Self {
+        let x = x.as_ref();
+        if i < 0 {
+            panic!("negative bit index");
+        }
+        if b != 0 && b != 1 {
+            panic!("set bit is not 0 or 1");
+        }
+        let bi = i as u64;
+        if x.neg {
+            // -x == ^(x-1); flipping bit b on -x flips bit (b^1) on (x-1).
+            let t = sub_limbs(&x.abs, &[1]);
+            let t = limb_set_bit(&t, bi, b ^ 1);
+            let abs = add_limbs(&t, &[1]);
+            self.neg = !abs.is_empty();
+            self.abs = abs;
+        } else {
+            self.abs = limb_set_bit(&x.abs, bi, b);
+            self.neg = false;
+        }
+        self
+    }
+
+    /// `(*Int).Lsh(x, n)` — z = x << n. The sign is preserved.
+    pub fn Lsh<X: AsRef<Int>>(&mut self, x: X, n: crate::types::uint) -> &mut Self {
+        let x = x.as_ref();
+        self.abs = lsh_limbs(&x.abs, n);
+        self.neg = x.neg && !self.abs.is_empty();
+        self
+    }
+
+    /// `(*Int).Rsh(x, n)` — z = x >> n (arithmetic right shift). For
+    /// negative x, Go uses two's-complement semantics:
+    /// `(-x) >> n == -(((|x|-1) >> n) + 1)`.
+    pub fn Rsh<X: AsRef<Int>>(&mut self, x: X, n: crate::types::uint) -> &mut Self {
+        let x = x.as_ref();
+        if x.neg {
+            // (-x) >> n == ^((x-1) >> n) == -(((x-1) >> n) + 1)
+            let t = sub_limbs(&x.abs, &[1]);
+            let t = rsh_limbs(&t, n);
+            self.abs = add_limbs(&t, &[1]);
+            self.neg = true; // result cannot be zero when x is negative
+        } else {
+            self.abs = rsh_limbs(&x.abs, n);
+            self.neg = false;
+        }
+        self
+    }
+
+    /// `(*Int).And(x, y)` — z = x & y, in two's-complement semantics for
+    /// negative operands (matches Go's `(*Int).And`).
+    pub fn And<X: AsRef<Int>, Y: AsRef<Int>>(&mut self, x: X, y: Y) -> &mut Self {
+        let x = x.as_ref();
+        let y = y.as_ref();
+        if x.neg == y.neg {
+            if x.neg {
+                // (-x) & (-y) == -(((x-1) | (y-1)) + 1)
+                let x1 = sub_limbs(&x.abs, &[1]);
+                let y1 = sub_limbs(&y.abs, &[1]);
+                let abs = add_limbs(&or_limbs(&x1, &y1), &[1]);
+                self.neg = true;
+                self.abs = abs;
+            } else {
+                self.abs = and_limbs(&x.abs, &y.abs);
+                self.neg = false;
+            }
+        } else {
+            // x.neg != y.neg; & is symmetric — make x the positive one.
+            let (xp, yn) = if x.neg { (y, x) } else { (x, y) };
+            // xp & (-yn) == xp &^ (yn-1)
+            let y1 = sub_limbs(&yn.abs, &[1]);
+            self.abs = and_not_limbs(&xp.abs, &y1);
+            self.neg = false;
+        }
+        self
+    }
+
+    /// `(*Int).AndNot(x, y)` — z = x &^ y (bit clear), two's-complement
+    /// faithful for negative operands (matches Go's `(*Int).AndNot`).
+    pub fn AndNot<X: AsRef<Int>, Y: AsRef<Int>>(&mut self, x: X, y: Y) -> &mut Self {
+        let x = x.as_ref();
+        let y = y.as_ref();
+        if x.neg == y.neg {
+            if x.neg {
+                // (-x) &^ (-y) == (y-1) &^ (x-1)
+                let x1 = sub_limbs(&x.abs, &[1]);
+                let y1 = sub_limbs(&y.abs, &[1]);
+                self.abs = and_not_limbs(&y1, &x1);
+                self.neg = false;
+            } else {
+                self.abs = and_not_limbs(&x.abs, &y.abs);
+                self.neg = false;
+            }
+        } else if x.neg {
+            // (-x) &^ y == -(((x-1) | y) + 1)
+            let x1 = sub_limbs(&x.abs, &[1]);
+            let abs = add_limbs(&or_limbs(&x1, &y.abs), &[1]);
+            self.neg = true;
+            self.abs = abs;
+        } else {
+            // x &^ (-y) == x & (y-1)
+            let y1 = sub_limbs(&y.abs, &[1]);
+            self.abs = and_limbs(&x.abs, &y1);
+            self.neg = false;
+        }
+        self
+    }
+
+    /// `(*Int).Or(x, y)` — z = x | y, two's-complement faithful for
+    /// negative operands (matches Go's `(*Int).Or`).
+    pub fn Or<X: AsRef<Int>, Y: AsRef<Int>>(&mut self, x: X, y: Y) -> &mut Self {
+        let x = x.as_ref();
+        let y = y.as_ref();
+        if x.neg == y.neg {
+            if x.neg {
+                // (-x) | (-y) == -(((x-1) & (y-1)) + 1)
+                let x1 = sub_limbs(&x.abs, &[1]);
+                let y1 = sub_limbs(&y.abs, &[1]);
+                let abs = add_limbs(&and_limbs(&x1, &y1), &[1]);
+                self.neg = true;
+                self.abs = abs;
+            } else {
+                self.abs = or_limbs(&x.abs, &y.abs);
+                self.neg = false;
+            }
+        } else {
+            // | is symmetric — make x the positive one.
+            let (xp, yn) = if x.neg { (y, x) } else { (x, y) };
+            // xp | (-yn) == -(((yn-1) &^ xp) + 1)
+            let y1 = sub_limbs(&yn.abs, &[1]);
+            let abs = add_limbs(&and_not_limbs(&y1, &xp.abs), &[1]);
+            self.neg = true;
+            self.abs = abs;
+        }
+        self
+    }
+
+    /// `(*Int).Xor(x, y)` — z = x ^ y, two's-complement faithful for
+    /// negative operands (matches Go's `(*Int).Xor`).
+    pub fn Xor<X: AsRef<Int>, Y: AsRef<Int>>(&mut self, x: X, y: Y) -> &mut Self {
+        let x = x.as_ref();
+        let y = y.as_ref();
+        if x.neg == y.neg {
+            if x.neg {
+                // (-x) ^ (-y) == (x-1) ^ (y-1)
+                let x1 = sub_limbs(&x.abs, &[1]);
+                let y1 = sub_limbs(&y.abs, &[1]);
+                self.abs = xor_limbs(&x1, &y1);
+                self.neg = false;
+            } else {
+                self.abs = xor_limbs(&x.abs, &y.abs);
+                self.neg = false;
+            }
+        } else {
+            // ^ is symmetric — make x the positive one.
+            let (xp, yn) = if x.neg { (y, x) } else { (x, y) };
+            // xp ^ (-yn) == -((xp ^ (yn-1)) + 1)
+            let y1 = sub_limbs(&yn.abs, &[1]);
+            let abs = add_limbs(&xor_limbs(&xp.abs, &y1), &[1]);
+            self.neg = !abs.is_empty();
+            self.abs = abs;
+        }
+        self
+    }
+
+    /// `(*Int).Not(x)` — z = ^x (two's-complement bitwise NOT).
+    /// `^x == -x - 1`; `^(-x) == x - 1`.
+    pub fn Not<X: AsRef<Int>>(&mut self, x: X) -> &mut Self {
+        let x = x.as_ref();
+        if x.neg {
+            // ^(-x) == x - 1
+            self.abs = sub_limbs(&x.abs, &[1]);
+            self.neg = false;
+        } else {
+            // ^x == -(x + 1)
+            self.abs = add_limbs(&x.abs, &[1]);
+            self.neg = true; // x+1 > 0, result is negative
+        }
+        self
+    }
 }
 
 /// `big.NewInt(x)` — Go's package-level constructor.
@@ -887,6 +1130,158 @@ fn sub_limbs(a: &[u32], b: &[u32]) -> Vec<u32> {
         out.pop();
     }
     out
+}
+
+// ─── bitwise / shift limb helpers ──────────────────────────────────────
+//
+// The limb is a 32-bit `u32` (Go's `_W` is 64; here it is 32). Bitwise
+// ops below operate on trimmed magnitude vectors only — the sign-aware
+// two's-complement bookkeeping is done by the `Int` methods, which
+// translate negative operands into `|x|-1` magnitudes before calling.
+
+/// Trim trailing zero limbs in place (the canonical normal form).
+fn trim(mut v: Vec<u32>) -> Vec<u32> {
+    while v.last().copied() == Some(0) {
+        v.pop();
+    }
+    v
+}
+
+/// Bit length of a magnitude (number of bits in |x|). `bitLen` of 0 is 0.
+fn bit_len(a: &[u32]) -> int {
+    let mut i = a.len();
+    while i > 0 && a[i - 1] == 0 {
+        i -= 1;
+    }
+    if i == 0 {
+        return 0;
+    }
+    ((i - 1) * 32) as int + (32 - a[i - 1].leading_zeros()) as int
+}
+
+/// Count of consecutive least-significant zero bits of a magnitude.
+fn trailing_zero_bits(a: &[u32]) -> crate::types::uint {
+    if a.is_empty() {
+        return 0;
+    }
+    let mut i = 0usize;
+    while i < a.len() && a[i] == 0 {
+        i += 1;
+    }
+    if i == a.len() {
+        return 0; // all-zero magnitude (not normalized) — treat as 0
+    }
+    (i as u64) * 32 + a[i].trailing_zeros() as u64
+}
+
+/// Value of bit `i` (lsb == bit 0) of a magnitude.
+fn limb_bit(a: &[u32], i: u64) -> crate::types::uint {
+    let j = (i / 32) as usize;
+    if j >= a.len() {
+        return 0;
+    }
+    ((a[j] >> (i % 32)) & 1) as crate::types::uint
+}
+
+/// Magnitude `a` with bit `i` set to `b` (0 or 1). Result is trimmed.
+fn limb_set_bit(a: &[u32], i: u64, b: crate::types::uint) -> Vec<u32> {
+    let j = (i / 32) as usize;
+    let m: u32 = 1u32 << (i % 32);
+    let mut z = a.to_vec();
+    if b == 0 {
+        if j < z.len() {
+            z[j] &= !m;
+        }
+    } else {
+        if j >= z.len() {
+            z.resize(j + 1, 0);
+        }
+        z[j] |= m;
+    }
+    trim(z)
+}
+
+/// Magnitude left shift: `x << s` bits. Result is trimmed.
+fn lsh_limbs(x: &[u32], s: u64) -> Vec<u32> {
+    if x.is_empty() {
+        return Vec::new();
+    }
+    let limb_shift = (s / 32) as usize;
+    let bit_shift = (s % 32) as u32;
+    let shifted = if bit_shift == 0 {
+        x.to_vec()
+    } else {
+        shl_small(x, bit_shift)
+    };
+    if limb_shift == 0 {
+        return trim(shifted);
+    }
+    let mut out = alloc::vec![0u32; limb_shift];
+    out.extend_from_slice(&shifted);
+    trim(out)
+}
+
+/// Magnitude right shift: `x >> s` bits. Result is trimmed.
+fn rsh_limbs(x: &[u32], s: u64) -> Vec<u32> {
+    if x.is_empty() {
+        return Vec::new();
+    }
+    let limb_shift = (s / 32) as usize;
+    let bit_shift = (s % 32) as u32;
+    if limb_shift >= x.len() {
+        return Vec::new();
+    }
+    let dropped = &x[limb_shift..];
+    let out = if bit_shift == 0 {
+        dropped.to_vec()
+    } else {
+        shr_small(dropped, bit_shift)
+    };
+    trim(out)
+}
+
+/// Bitwise AND of two magnitudes. Result is trimmed.
+fn and_limbs(x: &[u32], y: &[u32]) -> Vec<u32> {
+    let m = x.len().min(y.len());
+    let mut z = alloc::vec![0u32; m];
+    for i in 0..m {
+        z[i] = x[i] & y[i];
+    }
+    trim(z)
+}
+
+/// Bitwise AND-NOT of two magnitudes: `x &^ y`. Result is trimmed.
+fn and_not_limbs(x: &[u32], y: &[u32]) -> Vec<u32> {
+    let m = x.len();
+    let n = y.len().min(m);
+    let mut z = alloc::vec![0u32; m];
+    for i in 0..n {
+        z[i] = x[i] & !y[i];
+    }
+    z[n..m].copy_from_slice(&x[n..m]);
+    trim(z)
+}
+
+/// Bitwise OR of two magnitudes. Result is trimmed.
+fn or_limbs(x: &[u32], y: &[u32]) -> Vec<u32> {
+    let (short, long) = if x.len() < y.len() { (x, y) } else { (y, x) };
+    let n = short.len();
+    let mut z = long.to_vec();
+    for i in 0..n {
+        z[i] = x[i] | y[i];
+    }
+    trim(z)
+}
+
+/// Bitwise XOR of two magnitudes. Result is trimmed.
+fn xor_limbs(x: &[u32], y: &[u32]) -> Vec<u32> {
+    let (short, long) = if x.len() < y.len() { (x, y) } else { (y, x) };
+    let n = short.len();
+    let mut z = long.to_vec();
+    for i in 0..n {
+        z[i] = x[i] ^ y[i];
+    }
+    trim(z)
 }
 
 /// Signed addition: a + b respecting signs.

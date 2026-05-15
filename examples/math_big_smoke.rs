@@ -80,6 +80,13 @@ fn pow10(n: u32) -> big::Int {
     acc
 }
 
+// 2^n as a big::Int via Lsh (n >= 0).
+fn pow2(n: u64) -> big::Int {
+    let mut acc = big::Int::new();
+    acc.Lsh(&big::NewInt(1), n);
+    acc
+}
+
 #[goish::main]
 fn main() {
     // ── Sign ───────────────────────────────────────────────────────
@@ -268,6 +275,152 @@ fn main() {
     let mut e0 = big::Int::new();
     e0.Exp(&ebase, &big::NewInt(0), &emod);
     check(e0.Int64() == 1, b"exp x^0 == 1");
+
+    // ── Sub ────────────────────────────────────────────────────────
+    let mut s = big::Int::new();
+    s.Sub(&big::NewInt(10), &big::NewInt(3));
+    check(s.Int64() == 7, b"sub 10-3");
+    s.Sub(&big::NewInt(3), &big::NewInt(10));
+    check(s.Int64() == -7, b"sub 3-10");
+    s.Sub(&big::NewInt(-5), &big::NewInt(8));      // -5 - 8 = -13
+    check(s.Int64() == -13, b"sub -5-8");
+    s.Sub(&big::NewInt(-5), &big::NewInt(-8));     // -5 - (-8) = 3
+    check(s.Int64() == 3, b"sub -5-(-8)");
+    s.Sub(&big::NewInt(7), &big::NewInt(7));       // 7 - 7 = 0
+    check(s.Int64() == 0 && s.Sign() == 0, b"sub 7-7 zero");
+    // Multi-precision: (10^55 + 7) - 10^55 == 7.
+    let mut bigsub = big::Int::new();
+    bigsub.Sub(&dividend, &prod);
+    check(bigsub.Int64() == 7, b"sub big 10^55+7 - 10^55");
+
+    // ── Neg ────────────────────────────────────────────────────────
+    let mut ng = big::Int::new();
+    ng.Neg(&big::NewInt(42));
+    check(ng.Int64() == -42, b"neg 42");
+    ng.Neg(&big::NewInt(-42));
+    check(ng.Int64() == 42, b"neg -42");
+    ng.Neg(&big::NewInt(0));
+    check(ng.Sign() == 0, b"neg 0 stays non-neg");
+
+    // ── BitLen / TrailingZeroBits ──────────────────────────────────
+    check(big::NewInt(0).BitLen() == 0,  b"bitlen 0");
+    check(big::NewInt(1).BitLen() == 1,  b"bitlen 1");
+    check(big::NewInt(255).BitLen() == 8, b"bitlen 255");
+    check(big::NewInt(256).BitLen() == 9, b"bitlen 256");
+    // 2^40 has bit length 41.
+    check(pow2(40).BitLen() == 41, b"bitlen 2^40");
+    check(big::NewInt(0).TrailingZeroBits() == 0, b"tzb 0");
+    check(big::NewInt(1).TrailingZeroBits() == 0, b"tzb 1");
+    check(big::NewInt(8).TrailingZeroBits() == 3, b"tzb 8");
+    // 2^40 has 40 trailing zero bits.
+    check(pow2(40).TrailingZeroBits() == 40, b"tzb 2^40");
+
+    // ── Bit ────────────────────────────────────────────────────────
+    let bx = big::NewInt(0b1010);                  // = 10
+    check(bx.Bit(0) == 0, b"bit 10[0]");
+    check(bx.Bit(1) == 1, b"bit 10[1]");
+    check(bx.Bit(2) == 0, b"bit 10[2]");
+    check(bx.Bit(3) == 1, b"bit 10[3]");
+    check(bx.Bit(99) == 0, b"bit 10[99] above range");
+    // Negative: -1 is all-ones in two's complement -> every bit is 1.
+    let bneg = big::NewInt(-1);
+    check(bneg.Bit(0) == 1 && bneg.Bit(5) == 1 && bneg.Bit(70) == 1, b"bit -1 all ones");
+    // -2 == ...11111110 -> bit0=0, bit1..=1.
+    let bneg2 = big::NewInt(-2);
+    check(bneg2.Bit(0) == 0 && bneg2.Bit(1) == 1 && bneg2.Bit(8) == 1, b"bit -2");
+
+    // ── SetBit ─────────────────────────────────────────────────────
+    let mut sb = big::Int::new();
+    sb.SetBit(&big::NewInt(0), 4, 1);              // 0 | (1<<4) = 16
+    check(sb.Int64() == 16, b"setbit 0 bit4=1");
+    sb.SetBit(&big::NewInt(0b1111), 1, 0);         // 15 &^ (1<<1) = 13
+    check(sb.Int64() == 13, b"setbit 15 bit1=0");
+    sb.SetBit(&big::NewInt(5), 1, 1);              // 5 | 2 = 7
+    check(sb.Int64() == 7, b"setbit 5 bit1=1");
+    // Negative: -1 with bit0 cleared == -2 (two's complement).
+    sb.SetBit(&big::NewInt(-1), 0, 0);
+    check(sb.Int64() == -2, b"setbit -1 bit0=0 -> -2");
+
+    // ── Bitwise on positive operands ───────────────────────────────
+    // 0b1100 (12) & 0b1010 (10) = 0b1000 (8)
+    let mut bw = big::Int::new();
+    bw.And(&big::NewInt(12), &big::NewInt(10));
+    check(bw.Int64() == 8, b"and 12&10");
+    bw.Or(&big::NewInt(12), &big::NewInt(10));     // = 14
+    check(bw.Int64() == 14, b"or 12|10");
+    bw.Xor(&big::NewInt(12), &big::NewInt(10));    // = 6
+    check(bw.Int64() == 6, b"xor 12^10");
+    bw.AndNot(&big::NewInt(12), &big::NewInt(10)); // 12 &^ 10 = 4
+    check(bw.Int64() == 4, b"andnot 12&^10");
+    bw.Not(&big::NewInt(0));                       // ^0 = -1
+    check(bw.Int64() == -1, b"not 0 == -1");
+    bw.Not(&big::NewInt(5));                       // ^5 = -6
+    check(bw.Int64() == -6, b"not 5 == -6");
+
+    // ── Bitwise on negative operands (two's complement) ────────────
+    // Cross-checked against Python's arbitrary-precision integers.
+    // -5 & 3 == 3
+    bw.And(&big::NewInt(-5), &big::NewInt(3));
+    check(bw.Int64() == 3, b"and -5&3 == 3");
+    // -5 & -3 == -7
+    bw.And(&big::NewInt(-5), &big::NewInt(-3));
+    check(bw.Int64() == -7, b"and -5&-3 == -7");
+    // -5 | 3 == -5
+    bw.Or(&big::NewInt(-5), &big::NewInt(3));
+    check(bw.Int64() == -5, b"or -5|3 == -5");
+    // -5 | -3 == -1
+    bw.Or(&big::NewInt(-5), &big::NewInt(-3));
+    check(bw.Int64() == -1, b"or -5|-3 == -1");
+    // -5 ^ 3 == -8
+    bw.Xor(&big::NewInt(-5), &big::NewInt(3));
+    check(bw.Int64() == -8, b"xor -5^3 == -8");
+    // -5 ^ -3 == 6
+    bw.Xor(&big::NewInt(-5), &big::NewInt(-3));
+    check(bw.Int64() == 6, b"xor -5^-3 == 6");
+    // -5 &^ 3 == -8   (-5 & ^3)
+    bw.AndNot(&big::NewInt(-5), &big::NewInt(3));
+    check(bw.Int64() == -8, b"andnot -5&^3 == -8");
+    // 12 &^ -3 == 0   (12 & ^(-3) == 12 & 2)
+    bw.AndNot(&big::NewInt(12), &big::NewInt(-3));
+    check(bw.Int64() == 0, b"andnot 12&^-3 == 0");
+    // -12 &^ -3 == 0   (cross-checked: -12 & ~(-3) == -12 & 2 == 0)
+    bw.AndNot(&big::NewInt(-12), &big::NewInt(-3));
+    check(bw.Int64() == 0 && bw.Sign() == 0, b"andnot -12&^-3 == 0");
+    // -5 &^ -3 == 2
+    bw.AndNot(&big::NewInt(-5), &big::NewInt(-3));
+    check(bw.Int64() == 2, b"andnot -5&^-3 == 2");
+    // ^-1 == 0
+    bw.Not(&big::NewInt(-1));
+    check(bw.Int64() == 0 && bw.Sign() == 0, b"not -1 == 0");
+    // ^-6 == 5
+    bw.Not(&big::NewInt(-6));
+    check(bw.Int64() == 5, b"not -6 == 5");
+
+    // ── Lsh / Rsh ──────────────────────────────────────────────────
+    let mut sh = big::Int::new();
+    sh.Lsh(&big::NewInt(1), 10);                   // 1 << 10 = 1024
+    check(sh.Int64() == 1024, b"lsh 1<<10");
+    sh.Lsh(&big::NewInt(3), 40);                   // 3 << 40
+    check(dec_eq(&sh, b"3298534883328"), b"lsh 3<<40");
+    sh.Lsh(&big::NewInt(-1), 4);                   // -1 << 4 = -16
+    check(sh.Int64() == -16, b"lsh -1<<4 == -16");
+    sh.Rsh(&big::NewInt(1024), 10);                // 1024 >> 10 = 1
+    check(sh.Int64() == 1, b"rsh 1024>>10");
+    sh.Rsh(&big::NewInt(255), 4);                  // 255 >> 4 = 15
+    check(sh.Int64() == 15, b"rsh 255>>4");
+    // Negative arithmetic shift: -8 >> 1 == -4 ; -5 >> 1 == -3.
+    sh.Rsh(&big::NewInt(-8), 1);
+    check(sh.Int64() == -4, b"rsh -8>>1 == -4");
+    sh.Rsh(&big::NewInt(-5), 1);
+    check(sh.Int64() == -3, b"rsh -5>>1 == -3");
+    // -1 >> 100 == -1 (sign-extends forever).
+    sh.Rsh(&big::NewInt(-1), 100);
+    check(sh.Int64() == -1, b"rsh -1>>100 == -1");
+    // Lsh then Rsh round-trips a multi-limb value.
+    let mut rt = big::Int::new();
+    rt.Lsh(&big::NewInt(123456789), 50);
+    rt.Rsh(&rt.clone(), 50);
+    check(rt.Int64() == 123456789, b"lsh/rsh roundtrip 50 bits");
 
     let _ = &int::from(0);
     report();
