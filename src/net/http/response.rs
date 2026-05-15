@@ -1,175 +1,312 @@
-// net/http/response — ResponseWriter.
+// net/http/response — the ResponseWriter interface + its v1 concrete
+// implementation, `response`.
 //
-// Buffered v1: handler `Write` calls accumulate into an internal
-// body buffer. `flush` (or its convenience wrapper `close_conn`)
-// emits status line + headers + body in one go, with a
-// Content-Length derived from the buffer length so HTTP/1.1
-// keep-alive can frame successive responses without chunked
-// transfer-encoding (deferred).
+// Go-faithful interface layering (server.go):
 //
-// Trade vs. Go's `chunkWriter`: simpler — one Vec per response, no
-// auto-detect-length state machine, no streaming. Cost: total
-// response body must fit in memory. For the REST/JSON-shaped
-// payloads net/http typically hosts, this is the right v1 trade.
+//   type ResponseWriter interface { Header; Write; WriteHeader }
+//   type Flusher        interface { Flush() }
+//   type Hijacker       interface { Hijack() (...) }
+//   type Pusher         interface { Push(...) error }
+//
+// A handler receives a `ResponseWriter` value and discovers the
+// *optional* capabilities of the concrete writer behind it with a
+// type assertion:
+//
+//   if f, ok := w.(http.Flusher); ok { f.Flush() }
+//
+// Goish models this exactly. `ResponseWriter` / `Flusher` / `Hijacker`
+// / `Pusher` are `#[goish::interface]` traits; the concrete v1 writer
+// is the (unexported, Go-named) `response` struct. Handlers take
+// `&dyn ResponseWriter`, and the comma-ok assertion is spelled with
+// the `goish::cast!` macro:
+//
+//   let (f, ok) = goish::cast!(w, http::Flusher);
+//   if ok { f.Flush(); }
+//
+// — backed by the per-trait downcast registry the interface macro
+// emits (see `goish::any`).
+//
+// v1 capability matrix for `response`:
+//   * ResponseWriter — yes.
+//   * Flusher        — yes (chunked streaming, see `promote_chunked`).
+//   * Hijacker       — no. The buffered v1 writer owns its socket for
+//                      its whole lifecycle; raw-socket handoff is
+//                      deferred. `w.(Hijacker)` therefore yields
+//                      `ok == false`.
+//   * Pusher         — no. Server push is HTTP/2-only; Go's HTTP/1
+//                      `*response` doesn't implement Pusher either,
+//                      so `w.(Pusher)` yielding `ok == false` is
+//                      Go-faithful.
+//
+// Buffered v1 (unchanged from the pre-interface design): handler
+// `Write` calls accumulate into an internal body buffer; `flush`
+// emits status line + headers + body in one go with a derived
+// Content-Length. `Flush()` promotes the response into
+// `Transfer-Encoding: chunked` streaming mode.
 
-#![allow(non_snake_case)]
+#![allow(non_snake_case, non_camel_case_types)]
 
 extern crate alloc;
 
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::errors::{self, error};
 use crate::goslice::slice;
-use crate::io::{self, Closer, Writer};
+use crate::io::{Closer, Writer};
 use crate::net::TCPConn;
+use crate::runtime::spin::SpinLock;
 use crate::string;
 use crate::types::{byte, int};
 
 use super::header::Header;
 
-/// `http.ResponseWriter`. Owns the connection until `take_conn` /
+// ─── The interfaces ─────────────────────────────────────────────────
+
+/// `http.ResponseWriter` (server.go:90) — the interface a handler
+/// uses to construct an HTTP response.
+///
+/// Every method takes `&self`: the concrete writer carries interior
+/// mutability, mirroring Go's `ResponseWriter` interface value (which
+/// is a pointer — all writes flow through it without an exclusive
+/// borrow). This is what lets a handler hold `&dyn ResponseWriter`
+/// and still downcast it to `&dyn Flusher` for streaming.
+#[goish::interface]
+pub trait ResponseWriter {
+    /// `Header()` — a handle to the response's header map. Mutating
+    /// the returned [`HeaderHandle`] (`w.Header().Set(...)`) mutates
+    /// this response's headers — Go reference-map semantics. (Go
+    /// returns the `Header` map directly; goish's `Header` is a value
+    /// type, so the handle restores the shared-mutation behaviour.)
+    fn Header(&self) -> HeaderHandle;
+    /// `Write(p)` — write response body bytes. Implicitly calls
+    /// `WriteHeader(StatusOK)` on first invocation.
+    fn Write(&self, p: slice<byte>) -> (int, error);
+    /// `WriteHeader(statusCode)` — send the response status line.
+    /// Idempotent: the second and later calls are no-ops.
+    fn WriteHeader(&self, statusCode: int);
+}
+
+/// `http.Flusher` (server.go:135) — implemented by ResponseWriters
+/// that allow an HTTP handler to flush buffered data to the client.
+#[goish::interface]
+pub trait Flusher {
+    /// `Flush()` — send any buffered data to the client. The first
+    /// call promotes the response into chunked streaming mode.
+    fn Flush(&self);
+}
+
+/// `http.Hijacker` (server.go:150) — implemented by ResponseWriters
+/// that allow an HTTP handler to take over the connection.
+///
+/// v1 slim: Go's `Hijack() (net.Conn, *bufio.ReadWriter, error)`
+/// drops the buffered-ReadWriter slot (the v1 `response` has no
+/// pending buffered read state to hand off). The v1 `response` does
+/// not implement this trait — see the capability matrix at the top
+/// of this file.
+#[goish::interface]
+pub trait Hijacker {
+    /// `Hijack()` — take over the connection. Returns the raw conn,
+    /// or a non-nil error if hijacking is unsupported.
+    fn Hijack(&self) -> (TCPConn, error);
+}
+
+/// `http.PushOptions` (server.go:170) — options for `Pusher.Push`.
+#[derive(Clone)]
+pub struct PushOptions {
+    /// HTTP method for the promised request. Empty means "GET".
+    pub Method: string,
+    /// Additional request headers for the promised request.
+    pub Header: Header,
+}
+
+/// `http.Pusher` (server.go:189) — implemented by ResponseWriters
+/// that support HTTP/2 server push. The v1 HTTP/1.x `response` does
+/// not implement this — Go's HTTP/1 `*response` doesn't either.
+#[goish::interface]
+pub trait Pusher {
+    /// `Push(target, opts)` — initiate an HTTP/2 server push.
+    fn Push(&self, target: string, opts: PushOptions) -> error;
+}
+
+// ─── HeaderHandle ───────────────────────────────────────────────────
+
+/// A cheap reference handle to a `response`'s header map — the return
+/// type of `ResponseWriter::Header()`.
+///
+/// Why not return `Header` directly: goish's `Header` is a *value*
+/// type (cloning it deep-copies the underlying map), whereas Go's
+/// `http.Header` is a reference type — `w.Header().Set(k, v)` mutates
+/// the response in place. `HeaderHandle` is an `Arc`-shared view that
+/// restores that semantics: every mutation flows back to the
+/// `response` it came from. Cloning a `HeaderHandle` is an `Arc`
+/// bump, not a map copy.
+#[derive(Clone)]
+pub struct HeaderHandle(Arc<SpinLock<Header>>);
+
+impl HeaderHandle {
+    /// `h.Set(key, value)` — replace any existing values for `key`.
+    pub fn Set<K: Into<string>, V: Into<string>>(&self, key: K, value: V) {
+        self.0.lock().Set(key, value);
+    }
+
+    /// `h.Add(key, value)` — append `value` to the values for `key`.
+    pub fn Add<K: Into<string>, V: Into<string>>(&self, key: K, value: V) {
+        self.0.lock().Add(key, value);
+    }
+
+    /// `h.Del(key)` — drop all values for `key`.
+    pub fn Del<K: Into<string>>(&self, key: K) {
+        self.0.lock().Del(key);
+    }
+
+    /// `h.Get(key)` — the first value for `key`, or `""`.
+    pub fn Get<K: Into<string>>(&self, key: K) -> string {
+        self.0.lock().Get(key)
+    }
+
+    /// `h.Values(key)` — all values for `key`.
+    pub fn Values<K: Into<string>>(&self, key: K) -> slice<string> {
+        self.0.lock().Values(key)
+    }
+}
+
+// ─── Registry wiring ────────────────────────────────────────────────
+
+/// Register `response`'s trait impls into the per-trait downcast
+/// registries the `#[goish::interface]` macro emits. Must run before
+/// any `goish::cast!(w, Trait)` call. Idempotent and cheap on the hot
+/// path — a `Lazy` runs the registration exactly once for the process.
+fn register_response_impls() {
+    static REGISTER: crate::lazy::Lazy<()> = crate::lazy::Lazy::new(|| {
+        __goish_register_ResponseWriter_impl::<response>();
+        __goish_register_Flusher_impl::<response>();
+    });
+    let _ = REGISTER.get();
+}
+
+// ─── The concrete v1 writer ─────────────────────────────────────────
+
+/// The v1 concrete `http.ResponseWriter` (Go's unexported
+/// `*http.response`). Owns the connection until `__take_conn` /
 /// `close_conn` ends its lifecycle.
+///
+/// Interior mutability via `SpinLock` so the writer is `Send + Sync`
+/// (required by the interface registry) and every interface method
+/// can take `&self`. There is no real lock contention: a `response`
+/// is confined to its single connection-serving goroutine.
+///
+/// The header lives in its own `Arc<SpinLock<Header>>` so that the
+/// `HeaderHandle` returned by `Header()` shares it (lock order is
+/// always `inner` before `header`, so the two locks never deadlock).
 ///
 /// Two modes:
 ///   * **Buffered (default):** `Write` calls accumulate into `body`;
 ///     `flush` emits status + headers (with derived `Content-Length`)
-///     + body in one send. Right for typical sub-MB responses.
+///     + body in one send.
 ///   * **Streaming (after `Flush`):** the response head is emitted
-///     with `Transfer-Encoding: chunked` and any subsequent `Write`
-///     emits one chunk per call. The closing `0\r\n\r\n` terminator is
-///     sent by the final `flush()`. Mirrors Go's `http.Flusher`
-///     interface (`(*response).Flush()` in server.go:1657).
-pub struct ResponseWriter {
+///     with `Transfer-Encoding: chunked` and every subsequent `Write`
+///     emits one chunk. The closing `0\r\n\r\n` terminator is sent by
+///     the final `flush()`.
+pub struct response {
+    inner: SpinLock<respInner>,
+    /// Response headers — shared with every `HeaderHandle` handed out
+    /// by `Header()`.
+    header: Arc<SpinLock<Header>>,
+}
+
+/// Mutable state of a `response`, serialised behind the writer's
+/// `SpinLock`. The header is *not* here — see `response::header`.
+struct respInner {
     conn: TCPConn,
-    header: Header,
-    /// Captured at `WriteHeader` time. Zero before that; `Write`
+    /// Captured at `WriteHeader` time. 200 before that; `Write`
     /// implicitly calls WriteHeader(200) on first body byte.
     status: int,
     /// `true` once `WriteHeader` was called explicitly or implicitly.
     wrote_header: bool,
-    /// `true` once `flush` has emitted bytes onto the wire. Idempotent
-    /// guard.
+    /// `true` once `flush` has emitted bytes onto the wire.
     flushed: bool,
-    /// Buffered body. Used in buffered mode; in streaming mode, it
-    /// only holds bytes written before the first `Flush()` call (those
-    /// are emitted as the first chunk).
+    /// Buffered body. In streaming mode it only holds bytes written
+    /// before the first `Flush()` (emitted as the first chunk).
     body: Vec<u8>,
-    /// Streaming mode flag — once true, `Write` emits each call as a
-    /// chunk on the wire and the head has already been sent.
+    /// Streaming-mode flag — once true, `Write` emits each call as a
+    /// chunk and the head has already been sent.
     chunked: bool,
-    /// Set by the server before invoking the handler, based on the
-    /// request's HTTP version + `Connection` header. Controls whether
-    /// `flush` emits `Connection: close`.
+    /// Set by the server before invoking the handler. Controls
+    /// whether `flush` emits `Connection: close`.
     keep_alive: bool,
 }
 
-impl ResponseWriter {
-    /// Build a fresh `ResponseWriter` over `conn`. Connection is
-    /// closed after the response unless the caller flips
-    /// `set_keep_alive(true)` before invoking the handler.
+impl response {
+    /// Build a fresh `response` over `conn`. Connection is closed
+    /// after the response unless the server flips `__set_keep_alive`
+    /// before invoking the handler.
     pub fn new(conn: TCPConn) -> Self {
+        register_response_impls();
         let mut h = Header::new();
         h.Set(string("Content-Type"), string("text/plain; charset=utf-8"));
-        ResponseWriter {
-            conn,
-            header: h,
-            status: 200,
-            wrote_header: false,
-            flushed: false,
-            body: Vec::new(),
-            chunked: false,
-            keep_alive: false,
+        response {
+            inner: SpinLock::new(respInner {
+                conn,
+                status: 200,
+                wrote_header: false,
+                flushed: false,
+                body: Vec::new(),
+                chunked: false,
+                keep_alive: false,
+            }),
+            header: Arc::new(SpinLock::new(h)),
         }
     }
 
     /// Server hook: enable/disable HTTP keep-alive on this response.
-    /// The default is `false` (HTTP/1.0 close-style); ListenAndServe
-    /// flips this to `true` for HTTP/1.1 requests without an
-    /// explicit `Connection: close`.
-    pub fn __set_keep_alive(&mut self, keep_alive: bool) {
-        self.keep_alive = keep_alive;
+    pub fn __set_keep_alive(&self, keep_alive: bool) {
+        self.inner.lock().keep_alive = keep_alive;
     }
 
-    /// `Header()` returns the response header map.
-    pub fn Header(&mut self) -> &mut Header {
-        &mut self.header
+    /// Server hook: raw fd of the underlying connection. Used by
+    /// `serve_conn` to register a panic-time close cleanup.
+    pub fn __conn_fd(&self) -> i32 {
+        self.inner.lock().conn.__fd()
     }
 
-    /// `WriteHeader(status)` — set the status code. Buffered until
-    /// `flush`; subsequent calls are no-ops (matching Go's "second
-    /// WriteHeader" warning behavior).
-    pub fn WriteHeader(&mut self, status: int) {
-        if self.wrote_header {
-            return;
-        }
-        self.wrote_header = true;
-        self.status = status;
-    }
-
-    /// `Write(p)` — buffered or streaming depending on mode.
-    /// In buffered mode (no `Flush()` yet), appends to the body
-    /// buffer. In streaming mode (after `Flush()`), emits one chunk
-    /// directly on the wire. Implicitly calls `WriteHeader(200)` on
-    /// first call. Returns `(p.len(), nil)` for the buffered path;
-    /// the streaming path returns `(written, err)` from the wire.
-    pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
-        if !self.wrote_header {
-            self.WriteHeader(200);
-        }
-        if self.chunked {
-            return write_chunk(&mut self.conn, &p);
-        }
-        self.body.extend_from_slice(&*p);
-        (p.len() as int, errors::nil)
-    }
-
-    /// `Flush()` — switch the response into streaming (chunked) mode.
-    /// Mirrors Go's `http.Flusher` interface
-    /// (`(*response).Flush()`, server.go:1657).
+    /// Promote the response into streaming (chunked) mode. Backs the
+    /// `Flusher::Flush` interface method.
     ///
     /// First call: emit the response head with
     /// `Transfer-Encoding: chunked` (no Content-Length), followed by
     /// any already-buffered body bytes as the first chunk. From this
-    /// point on, every `Write` emits a chunk directly on the wire and
-    /// the closing `0\r\n\r\n` terminator is appended by the final
-    /// `flush()`.
-    ///
-    /// Subsequent `Flush()` calls in streaming mode are no-ops at the
-    /// wire level (the `TCPConn` writes are already unbuffered) but kept
-    /// for API compatibility with handlers that loop
-    /// `w.Write(...); w.Flush();`.
-    pub fn Flush(&mut self) -> error {
-        if !self.wrote_header {
-            self.WriteHeader(200);
+    /// point on, every `Write` emits a chunk directly on the wire.
+    /// Subsequent calls are no-ops at the wire level.
+    fn promote_chunked(&self) -> error {
+        let mut g = self.inner.lock();
+        if !g.wrote_header {
+            g.wrote_header = true;
         }
-        if self.chunked {
+        if g.chunked {
             // Already streaming — nothing to flush at the writer level.
             return errors::nil;
         }
-        // Promote to chunked mode: emit head + any buffered body as
-        // the first chunk.
-        self.chunked = true;
-        // Set Transfer-Encoding; clear any user-set Content-Length
-        // (mutually exclusive per RFC 7230 §3.3.2).
-        self.header.Del(string("Content-Length"));
-        self.header
-            .Set(string("Transfer-Encoding"), string("chunked"));
-        if !self.keep_alive && self.header.Get(string("Connection")).Len() == 0 {
-            self.header.Set(string("Connection"), string("close"));
-        }
-        // Emit head.
-        let head = build_head(self.status, &self.header);
-        let (_, err) = self.conn.Write(slice::<byte>::__from_vec(head));
+        g.chunked = true;
+        // Build the head: set Transfer-Encoding, clear any user-set
+        // Content-Length (mutually exclusive per RFC 7230 §3.3.2).
+        let head = {
+            let mut h = self.header.lock();
+            h.Del(string("Content-Length"));
+            h.Set(string("Transfer-Encoding"), string("chunked"));
+            if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
+                h.Set(string("Connection"), string("close"));
+            }
+            build_head(g.status, &h)
+        };
+        let (_, err) = g.conn.Write(slice::<byte>::__from_vec(head));
         if !err.IsNil() {
             return err;
         }
         // Emit any buffered body as the initial chunk.
-        if !self.body.is_empty() {
-            let body = core::mem::take(&mut self.body);
-            let (_, werr) = write_chunk(
-                &mut self.conn,
-                &slice::<byte>::__from_vec(body),
-            );
+        if !g.body.is_empty() {
+            let body = core::mem::take(&mut g.body);
+            let (_, werr) = write_chunk(&mut g.conn, &slice::<byte>::__from_vec(body));
             if !werr.IsNil() {
                 return werr;
             }
@@ -180,67 +317,112 @@ impl ResponseWriter {
     /// Render the response onto the wire. Idempotent — calling twice
     /// is a no-op. After `flush`, the underlying connection holds
     /// only the kept-alive read buffer (if any) and may be reused.
-    pub fn flush(&mut self) -> error {
-        if self.flushed {
+    pub fn flush(&self) -> error {
+        let mut g = self.inner.lock();
+        if g.flushed {
             return errors::nil;
         }
-        self.flushed = true;
-        if !self.wrote_header {
-            self.WriteHeader(200);
+        g.flushed = true;
+        if !g.wrote_header {
+            g.wrote_header = true;
         }
-        if self.chunked {
-            // Streaming mode: emit "0\r\n\r\n" terminator (the chunked
-            // writer's Close() emits "0\r\n"; the trailing CRLF
-            // closes the trailer block).
-            let (_, err) = self
-                .conn
-                .Write(slice::<byte>::__from_vec(alloc::vec![
-                    b'0', b'\r', b'\n', b'\r', b'\n'
-                ]));
+        if g.chunked {
+            // Streaming mode: emit the "0\r\n\r\n" terminator.
+            let (_, err) = g.conn.Write(slice::<byte>::__from_vec(alloc::vec![
+                b'0', b'\r', b'\n', b'\r', b'\n'
+            ]));
             return err;
         }
 
         // Buffered mode: emit Content-Length derived from buffered body.
-        if self.header.Get(string("Content-Length")).Len() == 0 {
-            self.header
-                .Set(string("Content-Length"), int_to_string(self.body.len() as i64));
-        }
-        if !self.keep_alive && self.header.Get(string("Connection")).Len() == 0 {
-            self.header.Set(string("Connection"), string("close"));
-        }
-        let mut buf = build_head(self.status, &self.header);
-        buf.reserve(self.body.len());
-        buf.extend_from_slice(&self.body);
-        let (_, err) = self.conn.Write(slice::<byte>::__from_vec(buf));
+        let buf = {
+            let mut h = self.header.lock();
+            if h.Get(string("Content-Length")).Len() == 0 {
+                h.Set(string("Content-Length"), int_to_string(g.body.len() as i64));
+            }
+            if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
+                h.Set(string("Connection"), string("close"));
+            }
+            let mut buf = build_head(g.status, &h);
+            buf.reserve(g.body.len());
+            buf.extend_from_slice(&g.body);
+            buf
+        };
+        let (_, err) = g.conn.Write(slice::<byte>::__from_vec(buf));
         err
     }
 
     /// Server hook: flush the response and return the underlying
     /// connection. Used by the keep-alive loop in ListenAndServe to
     /// hand the connection back for the next request on the same fd.
-    pub fn __take_conn(mut self) -> TCPConn {
+    pub fn __take_conn(self) -> TCPConn {
         let _ = self.flush();
-        self.conn
-    }
-
-    /// Server hook: raw fd of the underlying connection. Used by
-    /// `serve_conn` to register a panic-time close cleanup so a
-    /// handler-panic doesn't leak the fd / hang the client.
-    pub fn __conn_fd(&self) -> i32 {
-        self.conn.__fd()
+        self.inner.into_inner().conn
     }
 
     /// Convenience for examples that drive their own accept loop:
     /// flush headers (if not yet) and close the underlying conn.
-    pub fn close_conn(mut self) -> error {
+    pub fn close_conn(self) -> error {
         let _ = self.flush();
-        self.conn.Close()
+        let mut conn = self.inner.into_inner().conn;
+        conn.Close()
+    }
+}
+
+// ─── Interface impls for `response` ─────────────────────────────────
+
+impl ResponseWriter for response {
+    fn Header(&self) -> HeaderHandle {
+        // The handle shares the response's header `Arc` — mutations
+        // on it (`w.Header().Set(...)`) flow back to this response.
+        HeaderHandle(self.header.clone())
+    }
+
+    fn Write(&self, p: slice<byte>) -> (int, error) {
+        let mut g = self.inner.lock();
+        if !g.wrote_header {
+            g.wrote_header = true;
+        }
+        if g.chunked {
+            return write_chunk(&mut g.conn, &p);
+        }
+        g.body.extend_from_slice(&*p);
+        (p.len() as int, errors::nil)
+    }
+
+    fn WriteHeader(&self, statusCode: int) {
+        let mut g = self.inner.lock();
+        if g.wrote_header {
+            return;
+        }
+        g.wrote_header = true;
+        g.status = statusCode;
+    }
+
+    fn __goish_as_dyn_any(
+        &self,
+    ) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
+    }
+}
+
+impl Flusher for response {
+    /// `(*response).Flush()` (server.go:1657) — promote to chunked
+    /// streaming. Any wire error is dropped to match Go's
+    /// `Flusher.Flush()` (which has no error return).
+    fn Flush(&self) {
+        let _ = self.promote_chunked();
+    }
+
+    fn __goish_as_dyn_any(
+        &self,
+    ) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
     }
 }
 
 /// Build the response head (status line + headers + final CRLF).
-/// Shared between buffered and streaming modes. Returns the bytes
-/// ready to write to the wire.
+/// Shared between buffered and streaming modes.
 fn build_head(status: int, header: &Header) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::with_capacity(256);
     buf.extend_from_slice(b"HTTP/1.1 ");
@@ -310,7 +492,6 @@ fn push_hex(buf: &mut Vec<u8>, mut n: u64) {
 
 /// Reason phrase for a status code via the full IANA registry. Empty
 /// string falls back to "Status" so the wire stays well-formed.
-/// Delegates to `status::StatusText`.
 fn status_text(code: u32) -> string {
     let s = super::status::StatusText(code as int);
     if s.Len() == 0 {
@@ -364,12 +545,5 @@ fn push_dec_64(buf: &mut Vec<u8>, mut n: u64) {
     while i > 0 {
         i -= 1;
         buf.push(tmp[i]);
-    }
-}
-
-// io::Writer impl for handlers that pass `w` to fmt/io::Copy/etc.
-impl io::Writer for ResponseWriter {
-    fn Write(&mut self, p: slice<byte>) -> (int, error) {
-        ResponseWriter::Write(self, p)
     }
 }

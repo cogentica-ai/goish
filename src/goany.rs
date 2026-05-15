@@ -462,6 +462,47 @@ where
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// NilDyn + type_assert! backing — Go's comma-ok interface assertion
+// ─────────────────────────────────────────────────────────────────────
+
+/// Backs the false branch of a comma-ok interface type assertion
+/// (`let (v, ok) = goish::cast!(x, Iface)` — Go's
+/// `v, ok := x.(Iface)`). When the downcast misses, `v` is bound to
+/// this process-wide nil interface value: every method panics with
+/// `"method call on nil <Iface> interface"`, exactly as invoking a
+/// method on Go's nil interface does.
+///
+/// `#[goish::interface]` emits the `impl NilDyn for dyn Trait` for
+/// every interface; the body hands back a `&'static` borrow of the
+/// trait's zero-sized nil sentinel (`__Nil<Trait>`).
+pub trait NilDyn {
+    /// The process-wide nil interface value of type `Self`.
+    fn __goish_nil_ref() -> &'static Self;
+}
+
+/// Runtime backing for the `cast!` macro — Go's comma-ok interface
+/// type assertion `v, ok := x.(Iface)`.
+///
+/// `carrier` is the interface value being asserted: a `&dyn Trait`
+/// borrow, or `&goish::Any`. On a hit returns `(&Target, true)`; on a
+/// miss `(<nil Target>, false)` — the nil value coming from
+/// [`NilDyn`], so a guarded `if ok { v.M() }` is safe and an
+/// unguarded call panics like Go's nil-interface-method call.
+#[inline]
+pub fn __cast_iface<'a, Target, Carrier>(
+    carrier: &'a Carrier,
+) -> (&'a Target, bool)
+where
+    Target: ?Sized + DowncastableFromAny + NilDyn,
+    Carrier: ?Sized + HasDynAny,
+{
+    match AsExt::As::<Target>(carrier) {
+        Some(v) => (v, true),
+        None => (Target::__goish_nil_ref(), false),
+    }
+}
+
 /// Consume `Box<dyn Trait>` (or `Box<U>` for any `U: HasDynAny`) and
 /// extract the underlying concrete `T` when the runtime type matches.
 /// Returns the box unchanged on miss. This is the consuming counterpart

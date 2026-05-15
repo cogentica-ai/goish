@@ -71,7 +71,7 @@ fn pass<S: Into<string>>(name: S) {
 
 // ─── handlers ────────────────────────────────────────────────────────
 
-fn healthz(w: &mut http::ResponseWriter, _r: &http::Request) {
+fn healthz(w: &(dyn http::ResponseWriter + Send + Sync + 'static), _r: &http::Request) {
     let mut obj = make!(map[string]json::Value);
     obj.Set("status", "ok");
     obj.Set("reqs", float64(REQ_COUNT.Load()));
@@ -84,7 +84,7 @@ fn healthz(w: &mut http::ResponseWriter, _r: &http::Request) {
     w.Write(body);
 }
 
-fn userGet(w: &mut http::ResponseWriter, r: &http::Request) {
+fn userGet(w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request) {
     let id = r.PathValue("id");
     if id.Len() == 0 {
         http::Error(w, "missing id", http::StatusBadRequest);
@@ -108,7 +108,7 @@ fn userGet(w: &mut http::ResponseWriter, r: &http::Request) {
 // timestamp and an `item_count` field. Demonstrates the request-side
 // JSON path: r.Body → json::Unmarshal → schema check → reshape →
 // json::Marshal → w.Write.
-fn apiEcho(w: &mut http::ResponseWriter, r: &http::Request) {
+fn apiEcho(w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request) {
     if r.Method != "POST" {
         http::Error(w, "POST required", http::StatusMethodNotAllowed);
         return;
@@ -163,7 +163,7 @@ fn apiEcho(w: &mut http::ResponseWriter, r: &http::Request) {
 // is non-trivial. With auto-grow this fits in tier-1 with room to
 // spare; under heavier nesting the maybe_grow_step inside json's
 // recursive marshaller would pivot.
-fn apiStats(w: &mut http::ResponseWriter, _r: &http::Request) {
+fn apiStats(w: &(dyn http::ResponseWriter + Send + Sync + 'static), _r: &http::Request) {
     // shards := make([]any, 0)
     // for i := 0; i < 4; i++ { shards = append(shards, map[string]any{…}) }
     let mut shards = make!([]json::Value, 0);
@@ -189,7 +189,7 @@ fn apiStats(w: &mut http::ResponseWriter, _r: &http::Request) {
     w.Write(body);
 }
 
-fn formHandler(w: &mut http::ResponseWriter, r: &http::Request) {
+fn formHandler(w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request) {
     // ParseForm + FormValue both take `&Request` (interior mutability
     // via Mutex<FormCell>), so handlers can parse form values
     // directly — no `&mut self` workaround needed.
@@ -204,7 +204,7 @@ fn formHandler(w: &mut http::ResponseWriter, r: &http::Request) {
     w.Write(bytes(out.String()));
 }
 
-fn sessionSet(w: &mut http::ResponseWriter, _r: &http::Request) {
+fn sessionSet(w: &(dyn http::ResponseWriter + Send + Sync + 'static), _r: &http::Request) {
     let c = http::Cookie {
         Name: string("sid"),
         Value: string("abc123"),
@@ -216,7 +216,7 @@ fn sessionSet(w: &mut http::ResponseWriter, _r: &http::Request) {
     w.Write(bytes("session set\n"));
 }
 
-fn sessionGet(w: &mut http::ResponseWriter, r: &http::Request) {
+fn sessionGet(w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request) {
     let (c, err) = r.Cookie("sid");
     if err != nil {
         w.Write(bytes("no session\n"));
@@ -229,12 +229,12 @@ fn sessionGet(w: &mut http::ResponseWriter, r: &http::Request) {
     w.Write(bytes(out.String()));
 }
 
-fn adminSecret(w: &mut http::ResponseWriter, _r: &http::Request) {
+fn adminSecret(w: &(dyn http::ResponseWriter + Send + Sync + 'static), _r: &http::Request) {
     // Reached only after Bearer middleware validated.
     w.Write(bytes("admin only\n"));
 }
 
-fn rootHandler(w: &mut http::ResponseWriter, r: &http::Request) {
+fn rootHandler(w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request) {
     if r.URL.Path == "/" {
         w.Write(bytes("hello world\n"));
     } else {
@@ -251,7 +251,7 @@ fn rootHandler(w: &mut http::ResponseWriter, r: &http::Request) {
 // `http::HandlerFunc`. No generic struct + trait-impl boilerplate.
 
 fn logging(next: Arc<dyn http::Handler>) -> Arc<dyn http::Handler> {
-    Arc::new(http::HandlerFunc(move |w: &mut http::ResponseWriter, r: &http::Request| {
+    Arc::new(http::HandlerFunc(move |w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
         REQ_COUNT.Add(1);
         // TODO(slog): emit structured access log with time::Since(started).
         next.ServeHTTP(w, r);
@@ -260,7 +260,7 @@ fn logging(next: Arc<dyn http::Handler>) -> Arc<dyn http::Handler> {
 
 fn bearerAuth<S: Into<string>>(token: S, next: Arc<dyn http::Handler>) -> Arc<dyn http::Handler> {
     let token: string = token.into();
-    Arc::new(http::HandlerFunc(move |w: &mut http::ResponseWriter, r: &http::Request| {
+    Arc::new(http::HandlerFunc(move |w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
         let auth = r.Header.Get("Authorization");
         if !strings::HasPrefix(&auth, "Bearer ") {
             w.Header().Set("WWW-Authenticate", "Bearer");
@@ -277,7 +277,7 @@ fn bearerAuth<S: Into<string>>(token: S, next: Arc<dyn http::Handler>) -> Arc<dy
 }
 
 fn cors(next: Arc<dyn http::Handler>) -> Arc<dyn http::Handler> {
-    Arc::new(http::HandlerFunc(move |w: &mut http::ResponseWriter, r: &http::Request| {
+    Arc::new(http::HandlerFunc(move |w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
         w.Header().Set("Access-Control-Allow-Origin", "*");
         w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         if r.Method == "OPTIONS" {

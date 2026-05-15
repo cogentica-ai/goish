@@ -300,7 +300,7 @@ fn join_url_path(target_path: &string, req_path: &string) -> string {
 impl super::server::Handler for reverseProxyHandler {
     fn ServeHTTP(
         &self,
-        w: &mut super::response::ResponseWriter,
+        w: &(dyn super::response::ResponseWriter + Send + Sync + 'static),
         r: &super::request::Request,
     ) {
         // Go: outreq := req.Clone(req.Context())

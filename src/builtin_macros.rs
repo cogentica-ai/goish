@@ -264,6 +264,38 @@ macro_rules! max {
     };
 }
 
+/// Go's comma-ok interface type assertion — `v, ok := x.(Iface)`.
+///
+/// ```ignore
+/// // Go:  if f, ok := w.(http.Flusher); ok { f.Flush() }
+/// let (f, ok) = goish::cast!(w, http::Flusher);
+/// if ok {
+///     f.Flush();
+/// }
+/// ```
+///
+/// `$carrier` is the interface value being asserted — a `&dyn Trait`
+/// borrow (e.g. a handler's `&dyn http::ResponseWriter`) or a
+/// `&goish::Any`. `$iface` is the target `#[goish::interface]` trait.
+///
+/// Evaluates to `(&dyn $iface, bool)`:
+///   * **hit**  — `(&concrete, true)`, the concrete writer viewed as
+///     the asserted interface.
+///   * **miss** — `(<nil $iface>, false)`. The first element is a
+///     process-wide nil interface sentinel; calling a method on it
+///     panics with `"method call on nil <Iface> interface"`, exactly
+///     as a method call on Go's nil interface does. A guarded
+///     `if ok { f.M() }` is the safe, Go-faithful use.
+#[macro_export]
+macro_rules! cast {
+    ($carrier:expr, $iface:path) => {
+        $crate::goany::__cast_iface::<
+            dyn $iface + ::core::marker::Send + ::core::marker::Sync,
+            _,
+        >($carrier)
+    };
+}
+
 /// Consumes `s`, pushes each element (with `.into()` so `&str` widens
 /// to `string`, etc.), returns the modified slice. Mirror Go's
 /// `s = append(s, x, y, z)` shape:

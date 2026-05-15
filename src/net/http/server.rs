@@ -37,14 +37,14 @@ use crate::time;
 use crate::types::int;
 
 use super::request::{ReadRequestWithLimit, Request};
-use super::response::ResponseWriter;
+use super::response::{response, ResponseWriter};
 
 /// `http.Handler` — types that can serve HTTP requests. Mirrors
 /// Go's `type Handler interface { ServeHTTP(ResponseWriter, *Request) }`
 /// (server.go:88).
 #[goish::interface]
 pub trait Handler: Send + Sync {
-    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request);
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request);
 }
 
 // ─── blanket impls so Arc<T>/Box<T> satisfy `Handler` ───────────────
@@ -58,14 +58,14 @@ pub trait Handler: Send + Sync {
 
 impl<T: Handler + ?Sized> Handler for Arc<T> {
     #[inline]
-    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
         (**self).ServeHTTP(w, r)
     }
 }
 
 impl<T: Handler + ?Sized> Handler for alloc::boxed::Box<T> {
     #[inline]
-    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
         (**self).ServeHTTP(w, r)
     }
 }
@@ -74,13 +74,13 @@ impl<T: Handler + ?Sized> Handler for alloc::boxed::Box<T> {
 /// Mirrors Go's `type HandlerFunc func(ResponseWriter, *Request)`.
 pub struct HandlerFunc<F>(pub F)
 where
-    F: Fn(&mut ResponseWriter, &Request) + Send + Sync;
+    F: Fn(&(dyn ResponseWriter + Send + Sync + 'static), &Request) + Send + Sync;
 
 impl<F> Handler for HandlerFunc<F>
 where
-    F: Fn(&mut ResponseWriter, &Request) + Send + Sync,
+    F: Fn(&(dyn ResponseWriter + Send + Sync + 'static), &Request) + Send + Sync,
 {
-    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
         (self.0)(w, r);
     }
 }
@@ -176,7 +176,7 @@ impl ServeMux {
     /// shared across the per-connection worker goroutines.
     pub fn HandleFunc<P: Into<string>, F>(&self, pattern: P, f: F)
     where
-        F: Fn(&mut ResponseWriter, &Request) + Send + Sync + 'static,
+        F: Fn(&(dyn ResponseWriter + Send + Sync + 'static), &Request) + Send + Sync + 'static,
     {
         self.handle_arc(pattern.into(), Arc::new(HandlerFunc(f)));
     }
@@ -303,7 +303,7 @@ impl ServeMux {
 }
 
 impl Handler for ServeMux {
-    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
         let (h, bindings) = self.match_handler(r);
         if bindings.Len() == 0 {
             h.ServeHTTP(w, r);
@@ -324,7 +324,7 @@ impl Handler for ServeMux {
 /// `NotFoundHandler() Handler`, not a struct of the same name).
 struct notFoundHandler;
 impl Handler for notFoundHandler {
-    fn ServeHTTP(&self, w: &mut ResponseWriter, _r: &Request) {
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) {
         w.WriteHeader(404);
         let _ = w.Write(crate::convert::bytes("404 page not found\n"));
     }
@@ -334,7 +334,7 @@ impl Handler for notFoundHandler {
 /// HTTP error response. Resets Content-Type to text/plain, sets
 /// X-Content-Type-Options: nosniff, deletes any prior Content-Length,
 /// then writes status + body + trailing newline.
-pub fn Error<S: Into<string>>(w: &mut ResponseWriter, error: S, code: int) {
+pub fn Error<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), error: S, code: int) {
     // Go: h := w.Header(); h.Del("Content-Length")
     w.Header().Del(string("Content-Length"));
     // Go: h.Set("Content-Type", "text/plain; charset=utf-8")
@@ -351,7 +351,7 @@ pub fn Error<S: Into<string>>(w: &mut ResponseWriter, error: S, code: int) {
 }
 
 /// `http.NotFound(w, r)` (server.go:2358) — convenience wrapper.
-pub fn NotFound(w: &mut ResponseWriter, _r: &Request) {
+pub fn NotFound(w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) {
     Error(w, string("404 page not found"), super::status::StatusNotFound);
 }
 
@@ -412,7 +412,7 @@ pub fn handler<H: Handler + 'static>(h: H) -> Arc<dyn Handler> {
 /// same-named method on `ServeMux` registers on a specific mux.
 pub fn HandleFunc<F>(pattern: string, f: F)
 where
-    F: Fn(&mut ResponseWriter, &Request) + Send + Sync + 'static,
+    F: Fn(&(dyn ResponseWriter + Send + Sync + 'static), &Request) + Send + Sync + 'static,
 {
     DefaultServeMux().HandleFunc(pattern, f);
 }
@@ -448,7 +448,7 @@ struct stripPrefixHandler {
 }
 
 impl Handler for stripPrefixHandler {
-    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
         // Go: p := strings.TrimPrefix(r.URL.Path, prefix)
         let p = crate::strings::TrimPrefix(r.URL.Path.clone(), self.prefix.clone());
         // Go: rp := strings.TrimPrefix(r.URL.RawPath, prefix)
@@ -472,7 +472,7 @@ impl Handler for stripPrefixHandler {
 /// `http.Redirect(w, r, url, code)` (server.go:2403). Replies with a
 /// redirect to `url`. Slim port: relative paths are resolved against
 /// `r.URL.Path` via `path::Clean` + `path::Split`.
-pub fn Redirect<U: Into<string>>(w: &mut ResponseWriter, r: &Request, url: U, code: int){
+pub fn Redirect<U: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request, url: U, code: int){
     let url: string = url.into();
     let mut url = url;
 
@@ -560,7 +560,7 @@ struct redirectHandler {
 }
 
 impl Handler for redirectHandler {
-    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
         Redirect(w, r, self.url.clone(), self.code);
     }
 }
@@ -580,7 +580,7 @@ struct allowQuerySemicolonsHandler {
 }
 
 impl Handler for allowQuerySemicolonsHandler {
-    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
         // Go: if strings.Contains(r.URL.RawQuery, ";") {
         if strings::Contains(r.URL.RawQuery.clone(), string(";")) {
             // Go: r2 := new(Request); *r2 = *r
@@ -959,11 +959,11 @@ impl Server {
 
             let keep_alive = request_keep_alive(&req)
                 && !self.__state.in_shutdown.load(Ordering::Acquire);
-            let mut w = ResponseWriter::new(conn);
+            let w = response::new(conn);
             w.__set_keep_alive(keep_alive);
 
             // Close the conn fd if the handler panics. Without this,
-            // gogo recovery abandons the ResponseWriter (whose Drop
+            // gogo recovery abandons the `response` (whose Drop
             // is skipped under panic = "abort") and the client hangs
             // on Read forever waiting for data / EOF that never come.
             // The defer! body always runs at scope exit; `recover!()`
@@ -975,7 +975,7 @@ impl Server {
                     let _ = crate::syscall::Close(fd);
                 }
             }
-            self.Handler.ServeHTTP(&mut w, &req);
+            self.Handler.ServeHTTP(&w, &req);
             conn = w.__take_conn();
 
             if write_timeout_ns > 0 {

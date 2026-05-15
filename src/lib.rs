@@ -189,7 +189,7 @@ macro_rules! nilable {
 pub mod any {
     pub use crate::goany::{
         register_with, lookup_with, AsExt, DowncastableFromAny, HasDynAny,
-        TraitProbe, TraitRegistry,
+        NilDyn, TraitProbe, TraitRegistry,
     };
 }
 

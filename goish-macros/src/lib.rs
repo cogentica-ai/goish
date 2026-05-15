@@ -1501,6 +1501,28 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     );
     out.push_str("    }\n}\n\n");
 
+    // ── (10) NilDyn for `dyn Trait + Send + Sync` ───────────────────
+    //
+    // Hands back a `&'static` borrow of the nil sentinel `__NilT`.
+    // This is the value the `goish::type_assert!` macro binds in the
+    // false branch of Go's comma-ok interface assertion
+    // (`v, ok := x.(Iface)`): when `ok` is false, `v` is a nil
+    // interface whose every method panics if called — matching Go's
+    // nil-interface-method-call panic.
+    let _ = writeln!(
+        out,
+        "impl ::goish::any::NilDyn \
+         for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
+    );
+    let _ = writeln!(
+        out,
+        "    #[inline]\n    fn __goish_nil_ref() \
+         -> &'static (dyn {name} + ::core::marker::Send + ::core::marker::Sync) {{"
+    );
+    let _ = writeln!(out, "        static __GOISH_NIL: {nil_name} = {nil_name};");
+    out.push_str("        &__GOISH_NIL\n");
+    out.push_str("    }\n}\n\n");
+
     out.parse()
         .expect("goish::interface: emitted source failed to parse")
 }

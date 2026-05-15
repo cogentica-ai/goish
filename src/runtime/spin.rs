@@ -200,6 +200,14 @@ impl<T> SpinLock<T> {
     pub unsafe fn data_unchecked(&self) -> &mut T {
         &mut *self.data.get()
     }
+
+    /// Consume the lock, returning the wrapped value. No locking
+    /// occurs — taking `self` by value statically guarantees no other
+    /// reference exists. Mirrors `core::cell::UnsafeCell::into_inner`.
+    #[inline]
+    pub fn into_inner(self) -> T {
+        self.data.into_inner()
+    }
 }
 
 /// Acquire a `SpinLock` by raw atom pointer. Pairs with `raw_unlock`.

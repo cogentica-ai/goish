@@ -189,7 +189,7 @@ impl CrossOriginProtection {
     /// `Check(r)` first. On rejection, dispatches to the deny handler
     /// (default: 403 Forbidden).
     pub fn Handler(self_arc: Arc<Self>, h: Arc<dyn Handler>) -> Arc<dyn Handler> {
-        Arc::new(HandlerFunc(move |w: &mut ResponseWriter, r: &Request| {
+        Arc::new(HandlerFunc(move |w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request| {
             // Go: if err := c.Check(r); err != nil { … }
             let err = self_arc.Check(r);
             if !err.IsNil() {
@@ -215,7 +215,7 @@ impl CrossOriginProtection {
 struct NoopHandler;
 
 impl Handler for NoopHandler {
-    fn ServeHTTP(&self, _w: &mut ResponseWriter, _r: &Request) {}
+    fn ServeHTTP(&self, _w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) {}
 }
 
 // Go: var sentinelHandler Handler = &noopHandler{}

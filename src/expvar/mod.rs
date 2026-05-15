@@ -464,7 +464,7 @@ pub fn Do<F: FnMut(KeyValue)>(f: F) {
 //       w.Write(vars.appendJSONMayExpand(nil, true))
 //   }
 fn expvarHandler(
-    w: &mut crate::net::http::ResponseWriter,
+    w: &(dyn crate::net::http::ResponseWriter + Send + Sync + 'static),
     _r: &crate::net::http::Request,
 ) {
     w.Header().Set(

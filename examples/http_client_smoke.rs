@@ -83,11 +83,19 @@ fn main() {
         let _ = w.Write(bytes(""));
     });
     mux.HandleFunc(string("/stream"), |w, _r| {
-        let _ = w.Flush();
+        // Go: f, ok := w.(http.Flusher)
+        let (f, ok) = goish::cast!(w, http::Flusher);
+        if ok {
+            f.Flush();
+        }
         let _ = w.Write(bytes("alpha-"));
-        let _ = w.Flush();
+        if ok {
+            f.Flush();
+        }
         let _ = w.Write(bytes("beta-"));
-        let _ = w.Flush();
+        if ok {
+            f.Flush();
+        }
         let _ = w.Write(bytes("gamma"));
     });
     mux.HandleFunc(string("/setcookie"), |w, _r| {

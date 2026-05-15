@@ -61,7 +61,9 @@ pub use request::{
     MaxBytesError, MaxBytesReader, NewMaxBytesError, NewMaxBytesReader, ParseHTTPVersion,
     ProtocolError, ReadRequest, Request,
 };
-pub use response::ResponseWriter;
+pub use response::{
+    Flusher, HeaderHandle, Hijacker, PushOptions, Pusher, ResponseWriter,
+};
 pub use httputil::NewSingleHostReverseProxy;
 pub use server::{
     handler, AllowQuerySemicolons, DefaultServeMux, ErrAbortHandler, ErrBodyNotAllowed,

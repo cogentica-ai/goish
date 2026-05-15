@@ -92,11 +92,19 @@ fn main() {
     {
         let mux = http::ServeMux::new();
         mux.HandleFunc(string("/stream"), |w, _r| {
-            let _ = w.Flush();
+            // Go: f, ok := w.(http.Flusher)
+            let (f, ok) = goish::cast!(w, http::Flusher);
+            if ok {
+                f.Flush();
+            }
             let _ = w.Write(bytes("AAA"));
-            let _ = w.Flush();
+            if ok {
+                f.Flush();
+            }
             let _ = w.Write(bytes("BBB"));
-            let _ = w.Flush();
+            if ok {
+                f.Flush();
+            }
             let _ = w.Write(bytes("CCC"));
         });
         let mux_arc: Arc<dyn http::Handler> = Arc::new(mux);

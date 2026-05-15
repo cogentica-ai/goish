@@ -46,7 +46,7 @@ static WG: WaitGroup = WaitGroup::new();
 
 // ─── server ──────────────────────────────────────────────────────────
 
-fn healthz(w: &mut http::ResponseWriter, _r: &http::Request) {
+fn healthz(w: &(dyn http::ResponseWriter + Send + Sync + 'static), _r: &http::Request) {
     let mut obj = make!(map[string]json::Value);
     obj.Set("ok", json::Value::Bool(true));
     let (body, err) = json::Marshal(&json::Value::Object(obj));
