@@ -10,23 +10,23 @@
 //   z.Exp(x, y, m)                       z.Exp(&x, &y, &m)   (panics if y is negative)
 //   z.Mod(x, y)                          z.Mod(&x, &y)       (Euclidean)
 //
-// Scope: this v1 is the minimum surface a Goish port needs to handle
-// small-prime ROCA-style modular arithmetic on RSA-sized inputs (the
-// `titanous/rocacheck` use-case). The internal layout is `Vec<u32>`
-// little-endian limbs + a sign bit — same shape as Go's `nat []Word`,
-// just narrower so the small-divisor reduction loop stays in u64
-// arithmetic without `__udivmodti4`.
+// Scope: this v1 is genuine multi-precision arithmetic. The internal
+// layout is `Vec<u32>` little-endian limbs + a sign bit — same shape as
+// Go's `nat []Word`, just with a narrower 32-bit limb so intermediate
+// products stay in u64 without needing `__udivmodti4`/`__umodti3`.
 //
-// Limitations that callers should know about:
-//   * `Mod`/`QuoRem` require the divisor to fit in u32 (single-precision
-//     long division). Mods by larger divisors panic — matches the
-//     observed rocacheck pattern (mod by primes ≤ 157).
-//   * `Exp` works for any modulus up to u32::MAX (uses u64-arithmetic
-//     square-and-multiply). Larger moduli panic.
-//   * Negative moduli are not yet supported (panics).
+//   * `Mul` is schoolbook (operand-scanning) multiplication, O(n*m).
+//   * `Div` / `Mod` / `DivMod` use multi-precision long division
+//     (Knuth TAOCP vol. 2, Algorithm D — normalised classic long
+//     division). The divisor may be any size. Semantics are Euclidean
+//     (non-negative remainder), matching Go's `(*Int).Div`/`Mod`/
+//     `DivMod`.
+//   * `Exp` is square-and-multiply on top of the multi-precision `Mul`
+//     and `Mod`, so RSA-sized operands and moduli work.
 //
-// These limits are deliberate, not architectural: filling them out is
-// straightforward "more port" work, deferred until a port hits the gap.
+// The one remaining limitation: `Exp` with a negative exponent panics
+// (it requires a modular inverse / extended-GCD, which is deferred).
+// Everything else is unrestricted.
 
 #![allow(non_snake_case)]
 
@@ -334,59 +334,95 @@ impl Int {
     }
 
     /// `(*Int).Mod(x, y)` — Euclidean remainder (always 0 ≤ r < |y|).
-    /// Returns self after assigning the result. Panics if y == 0 or
-    /// |y| > u32::MAX (single-precision divisor only in v1).
+    /// Returns self after assigning the result. Panics if y == 0.
+    /// The divisor may be any size (multi-precision long division).
     pub fn Mod(&mut self, x: &Int, y: &Int) -> &mut Self {
         if y.abs.is_empty() {
             panic!("big::Int::Mod: division by zero");
         }
-        if y.abs.len() > 1 {
-            panic!("big::Int::Mod: divisor exceeds u32; multi-precision divisor not implemented in v1");
-        }
-        if y.neg {
-            panic!("big::Int::Mod: negative divisor not supported in v1");
-        }
-        let d = y.abs[0];
-        let r = mod_by_u32(&x.abs, d);
-        // Euclidean: if x is negative and r != 0, return d - r.
-        let mag = if x.neg && r != 0 { d - r } else { r };
-        self.neg = false;
-        self.abs = if mag == 0 { Vec::new() } else { alloc::vec![mag] };
+        // T-division: r magnitude is |x| mod |y|, r sign follows x.
+        let r_abs = divmod_limbs(&x.abs, &y.abs).1;
+        let r_neg_t = !r_abs.is_empty() && x.neg;
+        // Euclidean correction: if r_t < 0, add |y| (Go: z.Sub/Add by y0).
+        let (mag, neg) = if r_neg_t {
+            (sub_limbs(&y.abs, &r_abs), false)
+        } else {
+            (r_abs, false)
+        };
+        self.neg = neg && !mag.is_empty();
+        self.abs = mag;
         self
     }
 
-    /// `(*Int).Exp(x, y, m)` — modular exponentiation. y must be ≥ 0;
-    /// m may be nil-equivalent (zero) for plain Exp, but rocacheck
-    /// always passes a modulus, so v1 requires m != 0 with |m| ≤
-    /// u32::MAX. Operands x and y must also fit in u32.
+    /// `(*Int).Exp(x, y, m)` — modular exponentiation: z = x**y mod |m|
+    /// (the sign of m is ignored, matching Go). Fully multi-precision:
+    /// operands and modulus may be any size (RSA-sized inputs work).
+    ///
+    /// Semantics match Go's `(*Int).Exp` for y >= 0:
+    ///   * If m == 0 (nil-equivalent), z = x**y unless y <= 0 then z = 1.
+    ///   * Otherwise z = x**y mod |m|, normalised to 0 <= z < |m|.
+    ///
+    /// Limitation: a negative exponent panics. Go handles y < 0 via a
+    /// modular inverse (extended GCD); that path is deferred. For
+    /// y < 0 with m == 0, Go returns 1 — we still honour that case
+    /// without panicking.
     pub fn Exp(&mut self, x: &Int, y: &Int, m: &Int) -> &mut Self {
+        let m_zero = m.abs.is_empty();
         if y.neg {
-            panic!("big::Int::Exp: negative exponent");
-        }
-        if m.abs.is_empty() {
-            panic!("big::Int::Exp: zero modulus not supported in v1");
-        }
-        if m.abs.len() > 1 || x.abs.len() > 1 || y.abs.len() > 1 {
-            panic!("big::Int::Exp: multi-precision operands not supported in v1");
-        }
-        let m_v = m.abs[0] as u64;
-        let mut base = (x.abs.first().copied().unwrap_or(0) as u64) % m_v;
-        if x.neg && base != 0 {
-            base = m_v - base;
-        }
-        let mut exp = y.abs.first().copied().unwrap_or(0) as u64;
-        let mut acc: u64 = 1 % m_v;
-        while exp > 0 {
-            if exp & 1 == 1 {
-                acc = (acc * base) % m_v;
+            if m_zero {
+                // Go: y < 0 && m == 0  ->  z = 1.
+                return self.SetInt64(1);
             }
-            exp >>= 1;
-            if exp > 0 {
-                base = (base * base) % m_v;
+            panic!("big::Int::Exp: negative exponent requires a modular inverse, not implemented in v1");
+        }
+        // m_abs is |m| (sign ignored, per Go).
+        let m_abs = &m.abs;
+
+        // Compute the magnitude x**y (mod |m| when m != 0) by
+        // square-and-multiply over the limb vectors.
+        // Reduce the base mod |m| up front when a modulus is present.
+        let mut base = if m_zero {
+            x.abs.clone()
+        } else {
+            divmod_limbs(&x.abs, m_abs).1
+        };
+        // acc starts at 1, reduced mod |m| (so |m| == 1 yields 0).
+        let mut acc: Vec<u32> = if m_zero {
+            alloc::vec![1u32]
+        } else {
+            divmod_limbs(&alloc::vec![1u32], m_abs).1
+        };
+        // Walk the exponent bits LSB→MSB.
+        let yw = &y.abs;
+        let mut bit: usize = 0;
+        let total_bits = yw.len() * 32;
+        while bit < total_bits {
+            let limb = yw[bit / 32];
+            if (limb >> (bit % 32)) & 1 == 1 {
+                acc = mul_limbs(&acc, &base);
+                if !m_zero {
+                    acc = divmod_limbs(&acc, m_abs).1;
+                }
+            }
+            bit += 1;
+            if bit < total_bits {
+                base = mul_limbs(&base, &base);
+                if !m_zero {
+                    base = divmod_limbs(&base, m_abs).1;
+                }
             }
         }
-        self.neg = false;
-        self.abs = if acc == 0 { Vec::new() } else { alloc::vec![acc as u32] };
+        // Sign: x**y is negative only when x < 0 and y is odd. With a
+        // modulus, Go normalises the result to 0 <= z < |m|.
+        let y_odd = !yw.is_empty() && (yw[0] & 1 == 1);
+        let mut neg = !acc.is_empty() && x.neg && y_odd;
+        if neg && !m_zero {
+            // make modulus result positive: z = |m| - z
+            acc = sub_limbs(m_abs, &acc);
+            neg = false;
+        }
+        self.neg = neg && !acc.is_empty();
+        self.abs = acc;
         self
     }
 
@@ -417,32 +453,24 @@ impl Int {
     }
 
     /// `(*Int).Div(x, y)` — Euclidean quotient. z = x div y, return z.
-    /// Panics if y == 0 or if |y| exceeds the single-precision divisor
-    /// limit (multi-precision divisor not implemented in v1).
+    /// Panics if y == 0. The divisor may be any size (multi-precision
+    /// long division).
     pub fn Div<X: AsRef<Int>, Y: AsRef<Int>>(&mut self, x: X, y: Y) -> &mut Self {
         let x = x.as_ref();
         let y = y.as_ref();
         if y.abs.is_empty() {
             panic!("big::Int::Div: division by zero");
         }
-        if y.abs.len() > 1 {
-            panic!("big::Int::Div: divisor exceeds u32; multi-precision divisor not implemented in v1");
-        }
-        let d = y.abs[0];
-        let (q_abs, r) = divmod_by_u32(&x.abs, d);
-        // T-division: q_t, r_t with sign(x) carried; Euclidean correction:
-        // if r_t < 0, q -= sign(y); since our r is always ≥ 0 magnitude,
-        // we model T-division then correct.
+        let (q_abs, r_abs) = divmod_limbs(&x.abs, &y.abs);
+        // T-division: q sign = x.neg != y.neg; r sign follows x.
         let q_neg_t = !q_abs.is_empty() && (x.neg != y.neg);
-        let r_neg_t = r != 0 && x.neg;
-        // Euclidean: if r_t < 0, adjust q by ±1.
+        let r_neg_t = !r_abs.is_empty() && x.neg;
         let mut q = Int { neg: q_neg_t, abs: q_abs };
+        // Euclidean correction: if r_t < 0, adjust q by ±1.
         if r_neg_t {
             if y.neg {
-                // q += 1
                 q.AddInt64(1);
             } else {
-                // q -= 1
                 q.AddInt64(-1);
             }
         }
@@ -465,21 +493,16 @@ impl Int {
         if y.abs.is_empty() {
             panic!("big::Int::DivMod: division by zero");
         }
-        if y.abs.len() > 1 {
-            panic!("big::Int::DivMod: divisor exceeds u32; multi-precision divisor not implemented in v1");
-        }
-        let d = y.abs[0];
-        let (q_abs, r) = divmod_by_u32(&x.abs, d);
+        let (q_abs, r_abs) = divmod_limbs(&x.abs, &y.abs);
         // T-division then Euclidean correction.
         let q_neg_t = !q_abs.is_empty() && (x.neg != y.neg);
-        let r_neg_t = r != 0 && x.neg;
+        let r_neg_t = !r_abs.is_empty() && x.neg;
         let mut q = Int { neg: q_neg_t, abs: q_abs };
-        let mut rem_abs = if r == 0 { Vec::new() } else { alloc::vec![r] };
+        let mut rem_abs = r_abs;
         let mut rem_neg = r_neg_t;
         if rem_neg {
             // r_eucl = |y| - r ; q -= sign(y)
-            let new_r = d - r;
-            rem_abs = if new_r == 0 { Vec::new() } else { alloc::vec![new_r] };
+            rem_abs = sub_limbs(&y.abs, &rem_abs);
             rem_neg = false;
             if y.neg {
                 q.AddInt64(1);
@@ -638,19 +661,6 @@ fn abs_cmp(a: &[u32], b: &[u32]) -> Ordering {
     }
 }
 
-/// Long division by a single u32 divisor. Returns the remainder.
-/// Standard textbook algorithm: walk limbs MSB→LSB carrying the
-/// 64-bit (rem << 32 | limb) into a divide.
-fn mod_by_u32(num: &[u32], d: u32) -> u32 {
-    debug_assert!(d != 0);
-    let dv = d as u64;
-    let mut r: u64 = 0;
-    for &limb in num.iter().rev() {
-        r = ((r << 32) | (limb as u64)) % dv;
-    }
-    r as u32
-}
-
 /// Long division by a single u32 divisor returning (quotient_limbs, remainder).
 /// `quotient_limbs` is trimmed of leading zeros.
 fn divmod_by_u32(num: &[u32], d: u32) -> (Vec<u32>, u32) {
@@ -668,6 +678,151 @@ fn divmod_by_u32(num: &[u32], d: u32) -> (Vec<u32>, u32) {
         q.pop();
     }
     (q, r as u32)
+}
+
+/// Shift a trimmed limb vector left by `s` bits (0 <= s < 32).
+/// Used by the divisor-normalisation step of Knuth Algorithm D.
+fn shl_small(a: &[u32], s: u32) -> Vec<u32> {
+    if a.is_empty() {
+        return Vec::new();
+    }
+    if s == 0 {
+        return a.to_vec();
+    }
+    let mut out = alloc::vec![0u32; a.len() + 1];
+    let mut carry: u32 = 0;
+    for (i, &limb) in a.iter().enumerate() {
+        let v = ((limb as u64) << s) | (carry as u64);
+        out[i] = v as u32;
+        carry = (v >> 32) as u32;
+    }
+    out[a.len()] = carry;
+    while out.last().copied() == Some(0) {
+        out.pop();
+    }
+    out
+}
+
+/// Shift a limb vector right by `s` bits (0 <= s < 32). The vector is
+/// not required to be trimmed on entry; the result is trimmed.
+fn shr_small(a: &[u32], s: u32) -> Vec<u32> {
+    if a.is_empty() {
+        return Vec::new();
+    }
+    if s == 0 {
+        let mut out = a.to_vec();
+        while out.last().copied() == Some(0) {
+            out.pop();
+        }
+        return out;
+    }
+    let mut out = alloc::vec![0u32; a.len()];
+    let mut carry: u32 = 0;
+    for i in (0..a.len()).rev() {
+        let v = a[i];
+        out[i] = (v >> s) | carry;
+        carry = v << (32 - s);
+    }
+    while out.last().copied() == Some(0) {
+        out.pop();
+    }
+    out
+}
+
+/// Unsigned multi-precision long division: returns (quotient, remainder)
+/// for `num / den`, both trimmed (no trailing zero limbs).
+///
+/// Implements Knuth TAOCP vol. 2, §4.3.1 Algorithm D — normalised
+/// classic long division with a base-2^32 limb. The single-limb
+/// divisor case is delegated to `divmod_by_u32`. `den` must be
+/// non-empty (the public methods check division-by-zero first).
+fn divmod_limbs(num: &[u32], den: &[u32]) -> (Vec<u32>, Vec<u32>) {
+    debug_assert!(!den.is_empty());
+    // num < den  ->  quotient 0, remainder num.
+    if abs_cmp(num, den) == Ordering::Less {
+        let mut r = num.to_vec();
+        while r.last().copied() == Some(0) {
+            r.pop();
+        }
+        return (Vec::new(), r);
+    }
+    // Single-limb divisor: fast path.
+    if den.len() == 1 {
+        let (q, r) = divmod_by_u32(num, den[0]);
+        return (q, if r == 0 { Vec::new() } else { alloc::vec![r] });
+    }
+
+    // ── Knuth Algorithm D ──────────────────────────────────────────
+    let n = den.len(); // n >= 2
+    let m = num.len() - n; // num.len() > n here (cmp ruled out <)
+
+    // D1. Normalise so the divisor's top limb has its high bit set.
+    let shift = den[n - 1].leading_zeros();
+    let dn = shl_small(den, shift); // normalised divisor, n limbs (top stays high)
+    debug_assert_eq!(dn.len(), n);
+    // Normalised dividend; force exactly num.len()+1 limbs so the
+    // extra top limb un[m+n] always exists.
+    let mut un = shl_small(num, shift);
+    un.resize(num.len() + 1, 0);
+
+    let dn_hi = dn[n - 1] as u64;
+    let dn_lo = dn[n - 2] as u64;
+    let base: u64 = 1u64 << 32;
+
+    let mut q = alloc::vec![0u32; m + 1];
+
+    // D2-D7. Main loop, from the most-significant quotient limb down.
+    for j in (0..=m).rev() {
+        // D3. Estimate q̂.
+        let num_hi = ((un[j + n] as u64) << 32) | (un[j + n - 1] as u64);
+        let mut qhat = num_hi / dn_hi;
+        let mut rhat = num_hi % dn_hi;
+        // Refine: q̂ is at most 2 too large.
+        while qhat >= base
+            || qhat * dn_lo > (rhat << 32) | (un[j + n - 2] as u64)
+        {
+            qhat -= 1;
+            rhat += dn_hi;
+            if rhat >= base {
+                break;
+            }
+        }
+
+        // D4. Multiply and subtract: un[j..j+n+1] -= q̂ * dn.
+        let mut borrow: i64 = 0;
+        let mut carry: u64 = 0;
+        for i in 0..n {
+            let p = qhat * (dn[i] as u64) + carry;
+            carry = p >> 32;
+            let sub = (un[j + i] as i64) - borrow - ((p as u32) as i64);
+            un[j + i] = sub as u32;
+            borrow = if sub < 0 { 1 } else { 0 };
+        }
+        let sub = (un[j + n] as i64) - borrow - (carry as i64);
+        un[j + n] = sub as u32;
+        borrow = if sub < 0 { 1 } else { 0 };
+
+        // D5/D6. If we subtracted too much, q̂ was 1 too big: add back.
+        if borrow != 0 {
+            qhat -= 1;
+            let mut add_carry: u64 = 0;
+            for i in 0..n {
+                let s = (un[j + i] as u64) + (dn[i] as u64) + add_carry;
+                un[j + i] = s as u32;
+                add_carry = s >> 32;
+            }
+            un[j + n] = un[j + n].wrapping_add(add_carry as u32);
+        }
+        q[j] = qhat as u32;
+    }
+
+    // Trim quotient.
+    while q.last().copied() == Some(0) {
+        q.pop();
+    }
+    // Remainder = un[0..n] de-normalised (shift right by `shift`).
+    let rem = shr_small(&un[0..n], shift);
+    (q, rem)
 }
 
 /// Unsigned multi-precision multiplication: schoolbook O(n*m).
