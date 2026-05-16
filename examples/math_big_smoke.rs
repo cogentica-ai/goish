@@ -8,6 +8,7 @@ extern crate alloc;
 
 use goish::{int, slice, string, syscall};
 use goish::math::big;
+use goish::math::rand;
 use goish::fmt::Stringer;
 
 static mut PASS: i32 = 0;
@@ -87,6 +88,74 @@ fn pow2(n: u64) -> big::Int {
     let mut acc = big::Int::new();
     acc.Lsh(&big::NewInt(1), n);
     acc
+}
+
+// ── In-test fmt::State scaffold ───────────────────────────────────────
+//
+// To exercise the `Int` / `Float` `fmt::Formatter` impls we need a
+// concrete `fmt::State`. `TestState` is a byte-buffer Writer whose
+// width / precision / flags are configurable; `Format` writes its
+// output through `Write`, and the captured bytes can be compared
+// against the expected string.
+//
+// A `fmt::ScanState` scaffold for the upcoming Int/Rat/Float `Scan`
+// task would be analogous but cursor-shaped: hold the input bytes + a
+// read position, impl `ReadRune` / `UnreadRune` / `SkipSpace` /
+// `Token` / `Width`. It is just as feasible to build in-test.
+struct TestState {
+    buf: alloc::vec::Vec<u8>,
+    width: int,
+    has_width: bool,
+    prec: int,
+    has_prec: bool,
+    flags: alloc::vec::Vec<u8>, // flag chars that report `true`
+}
+
+impl TestState {
+    fn new() -> Self {
+        TestState {
+            buf: alloc::vec::Vec::new(),
+            width: 0,
+            has_width: false,
+            prec: 0,
+            has_prec: false,
+            flags: alloc::vec::Vec::new(),
+        }
+    }
+    fn with_width(mut self, w: int) -> Self {
+        self.width = w;
+        self.has_width = true;
+        self
+    }
+    fn with_prec(mut self, p: int) -> Self {
+        self.prec = p;
+        self.has_prec = true;
+        self
+    }
+    fn with_flag(mut self, c: u8) -> Self {
+        self.flags.push(c);
+        self
+    }
+}
+
+impl goish::io::Writer for TestState {
+    fn Write(&mut self, p: slice<goish::byte>) -> (int, goish::error) {
+        let n = p.len() as int;
+        self.buf.extend_from_slice(&*p);
+        (n, goish::nil.into())
+    }
+}
+
+impl goish::fmt::State for TestState {
+    fn Width(&self) -> (int, bool) {
+        (self.width, self.has_width)
+    }
+    fn Precision(&self) -> (int, bool) {
+        (self.prec, self.has_prec)
+    }
+    fn Flag(&self, c: int) -> bool {
+        self.flags.iter().any(|&f| f as int == c)
+    }
 }
 
 #[goish::main]
@@ -2319,6 +2388,206 @@ fn main() {
             check(hderr == goish::nil && hgd.Cmp(&hpg) == 0,
                 b"float Gob round-trip hi-prec");
         }
+    }
+
+    // ── Int.Rand — uniform pseudo-random in [0, n) ─────────────────
+    {
+        use goish::fmt::Formatter;
+
+        // Deterministic source so the smoke test is reproducible.
+        let mut rnd = rand::New(rand::NewSource(1));
+
+        // n <= 0 → result is 0.
+        let zero_n = big::NewInt(0);
+        let mut zr = big::Int::new();
+        zr.Rand(&mut rnd, &zero_n);
+        check(zr.Sign() == 0, b"rand n==0 -> 0");
+
+        let neg_n = big::NewInt(-5);
+        let mut nr = big::Int::new();
+        nr.Rand(&mut rnd, &neg_n);
+        check(nr.Sign() == 0, b"rand n<0 -> 0");
+
+        // Small bound: many draws, every sample in [0, n).
+        let small = big::NewInt(7);
+        let mut small_ok = true;
+        let mut seen_nonzero = false;
+        for _ in 0..200 {
+            let mut r = big::Int::new();
+            r.Rand(&mut rnd, &small);
+            if !(r.Sign() >= 0 && r.Cmp(&small) < 0) {
+                small_ok = false;
+            }
+            if r.Sign() > 0 {
+                seen_nonzero = true;
+            }
+        }
+        check(small_ok, b"rand small in [0,7)");
+        check(seen_nonzero, b"rand small produces nonzero");
+
+        // n == 1 → only value possible is 0.
+        let one = big::NewInt(1);
+        let mut all_zero = true;
+        for _ in 0..50 {
+            let mut r = big::Int::new();
+            r.Rand(&mut rnd, &one);
+            if r.Sign() != 0 {
+                all_zero = false;
+            }
+        }
+        check(all_zero, b"rand n==1 -> always 0");
+
+        // Multi-limb bound: 10^40 spans several u32 limbs.
+        let huge = pow10(40);
+        let mut huge_ok = true;
+        for _ in 0..200 {
+            let mut r = big::Int::new();
+            r.Rand(&mut rnd, &huge);
+            if !(r.Sign() >= 0 && r.Cmp(&huge) < 0) {
+                huge_ok = false;
+            }
+        }
+        check(huge_ok, b"rand multi-limb in [0,10^40)");
+
+        // Power-of-two bound exercises the top-word masking (msw fully
+        // significant when bitlen is a multiple of 32).
+        let p32 = pow2(64);
+        let mut p32_ok = true;
+        for _ in 0..200 {
+            let mut r = big::Int::new();
+            r.Rand(&mut rnd, &p32);
+            if !(r.Sign() >= 0 && r.Cmp(&p32) < 0) {
+                p32_ok = false;
+            }
+        }
+        check(p32_ok, b"rand in [0,2^64)");
+
+        // ── Int.Format via fmt::Formatter ──────────────────────────
+        let v = big::NewInt(255);
+
+        // %x — base 16, matches Text(16).
+        let mut st = TestState::new();
+        v.Format(&mut st, 'x' as goish::rune);
+        check(st.buf == v.Text(16).as_bytes(), b"Int.Format %x == Text(16)");
+
+        // %d — base 10.
+        let mut st = TestState::new();
+        v.Format(&mut st, 'd' as goish::rune);
+        check(st.buf == b"255", b"Int.Format %d");
+
+        // %b — base 2.
+        let mut st = TestState::new();
+        v.Format(&mut st, 'b' as goish::rune);
+        check(st.buf == v.Text(2).as_bytes(), b"Int.Format %b == Text(2)");
+
+        // %X — uppercase hex.
+        let mut st = TestState::new();
+        v.Format(&mut st, 'X' as goish::rune);
+        check(st.buf == b"FF", b"Int.Format %X uppercase");
+
+        // %#x — '#' flag adds 0x prefix.
+        let mut st = TestState::new().with_flag(b'#');
+        v.Format(&mut st, 'x' as goish::rune);
+        check(st.buf == b"0xff", b"Int.Format %#x prefix");
+
+        // %O — octal with 0o prefix.
+        let mut st = TestState::new();
+        big::NewInt(8).Format(&mut st, 'O' as goish::rune);
+        check(st.buf == b"0o10", b"Int.Format %O prefix");
+
+        // Negative sign.
+        let mut st = TestState::new();
+        big::NewInt(-12).Format(&mut st, 'd' as goish::rune);
+        check(st.buf == b"-12", b"Int.Format %d negative");
+
+        // '+' flag forces a sign on positives.
+        let mut st = TestState::new().with_flag(b'+');
+        big::NewInt(12).Format(&mut st, 'd' as goish::rune);
+        check(st.buf == b"+12", b"Int.Format %+d sign");
+
+        // Precision zero-pads the digits ("%.5d" of 42 → 00042).
+        let mut st = TestState::new().with_prec(5);
+        big::NewInt(42).Format(&mut st, 'd' as goish::rune);
+        check(st.buf == b"00042", b"Int.Format %.5d precision");
+
+        // Width pads on the left with spaces ("%6d" of 42 → "    42").
+        let mut st = TestState::new().with_width(6);
+        big::NewInt(42).Format(&mut st, 'd' as goish::rune);
+        check(st.buf == b"    42", b"Int.Format %6d width");
+
+        // '0' flag zero-pads to the width.
+        let mut st = TestState::new().with_width(6).with_flag(b'0');
+        big::NewInt(42).Format(&mut st, 'd' as goish::rune);
+        check(st.buf == b"000042", b"Int.Format %06d zero-pad");
+
+        // '-' flag left-justifies.
+        let mut st = TestState::new().with_width(6).with_flag(b'-');
+        big::NewInt(42).Format(&mut st, 'd' as goish::rune);
+        check(st.buf == b"42    ", b"Int.Format %-6d left");
+
+        // Unsupported verb → %!<verb>(big.Int=<dec>).
+        let mut st = TestState::new();
+        big::NewInt(9).Format(&mut st, 'q' as goish::rune);
+        check(st.buf == b"%!q(big.Int=9)", b"Int.Format bad verb");
+
+        // ── Float.Format via fmt::Formatter ────────────────────────
+        let fv = big::NewFloat(2.25);
+
+        // %f — fixed point, default precision 6.
+        let mut st = TestState::new();
+        fv.Format(&mut st, 'f' as goish::rune);
+        check(st.buf == fv.Text(b'f', 6).as_bytes(), b"Float.Format %f default prec");
+
+        // %.2f — precision from State.
+        let mut st = TestState::new().with_prec(2);
+        fv.Format(&mut st, 'f' as goish::rune);
+        check(st.buf == b"2.25", b"Float.Format %.2f");
+
+        // %e — scientific.
+        let mut st = TestState::new().with_prec(2);
+        big::NewFloat(125.0).Format(&mut st, 'e' as goish::rune);
+        check(st.buf == b"1.25e+02", b"Float.Format %e");
+
+        // %g — like Text('g', -1) by default (no precision).
+        let mut st = TestState::new();
+        big::NewFloat(1.0e7).Format(&mut st, 'g' as goish::rune);
+        check(st.buf == b"1e+07", b"Float.Format %g default");
+
+        // Negative float carries its sign.
+        let mut st = TestState::new().with_prec(2);
+        big::NewFloat(-2.25).Format(&mut st, 'f' as goish::rune);
+        check(st.buf == b"-2.25", b"Float.Format %f negative");
+
+        // '+' flag forces a sign on positive floats.
+        let mut st = TestState::new().with_prec(2).with_flag(b'+');
+        fv.Format(&mut st, 'f' as goish::rune);
+        check(st.buf == b"+2.25", b"Float.Format %+f sign");
+
+        // Width pads on the left.
+        let mut st = TestState::new().with_prec(2).with_width(8);
+        fv.Format(&mut st, 'f' as goish::rune);
+        check(st.buf == b"    2.25", b"Float.Format %8.2f width");
+
+        // '0' flag zero-pads a float to width.
+        let mut st = TestState::new().with_prec(2).with_width(8).with_flag(b'0');
+        fv.Format(&mut st, 'f' as goish::rune);
+        check(st.buf == b"00002.25", b"Float.Format %08.2f zero-pad");
+
+        // '-' flag left-justifies.
+        let mut st = TestState::new().with_prec(2).with_width(8).with_flag(b'-');
+        fv.Format(&mut st, 'f' as goish::rune);
+        check(st.buf == b"2.25    ", b"Float.Format %-8.2f left");
+
+        // %v handled like %g.
+        let mut st = TestState::new();
+        big::NewFloat(3.5).Format(&mut st, 'v' as goish::rune);
+        check(st.buf == big::NewFloat(3.5).String().as_bytes()
+            || st.buf == b"3.5", b"Float.Format %v like g");
+
+        // Unsupported verb → %!<verb>(big.Float=...).
+        let mut st = TestState::new();
+        fv.Format(&mut st, 'd' as goish::rune);
+        check(&st.buf[..11] == b"%!d(big.Flo", b"Float.Format bad verb");
     }
 
     let _ = &int::from(0);

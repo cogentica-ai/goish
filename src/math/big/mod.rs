@@ -2077,6 +2077,31 @@ impl Int {
         self.MarshalText()
     }
 
+    /// `(*Int).Rand(rnd, n)` — set `self` to a uniform pseudo-random
+    /// value in `[0, n)` and return `self`. If `n <= 0`, `self` is set
+    /// to 0. The result is always non-negative.
+    ///
+    /// Mirrors Go's `(*Int).Rand` (int.go) on top of `nat.random`
+    /// (nat.go): generate random limbs, mask the top limb to `n`'s
+    /// exact bit count, and reject any candidate `>= n` so the
+    /// distribution stays uniform. As this uses `math/rand`, it must
+    /// not be used for security-sensitive work.
+    pub fn Rand(
+        &mut self,
+        rnd: &mut crate::math::rand::Rand,
+        n: &Int,
+    ) -> &mut Self {
+        // n <= 0 → result is 0. (n.neg or empty magnitude.)
+        if n.neg || n.abs.is_empty() {
+            self.neg = false;
+            self.abs = Vec::new();
+            return self;
+        }
+        self.neg = false;
+        self.abs = nat_random(rnd, &n.abs, bit_len(&n.abs));
+        self
+    }
+
     /// `(*Int).UnmarshalJSON(text)` — parse JSON `text` into `self`. A
     /// JSON `null` leaves the receiver unchanged (matching Go);
     /// otherwise behaves like `UnmarshalText`.
@@ -2167,6 +2192,281 @@ impl crate::fmt::Stringer for Int {
 impl crate::fmt::Stringer for Rat {
     fn String(&self) -> crate::gostring::string {
         self.String()
+    }
+}
+
+// ─── fmt.Formatter — verb-aware `%x` / `%d` / `%.8d` etc. ─────────────
+//
+// Go's `*big.Int` and `*big.Float` implement `fmt.Formatter` so a
+// `%#x` / `%+d` / `%8.4f` printf verb renders with the full flag /
+// width / precision suite. Goish mirrors the two `Format` methods on
+// top of `crate::fmt::State` (the `io::Writer` carrying the parsed
+// modifiers). The sign / width / zero-pad logic is identical between
+// the two, so it lives in the shared `fmt_pad` helper below.
+mod fmt_pad {
+    use crate::fmt::State;
+    use crate::types::int;
+
+    /// Write `text` `count` times through `s` (Go's `writeMultiple`).
+    fn write_multiple(s: &mut dyn State, text: &[u8], count: int) {
+        if text.is_empty() {
+            return;
+        }
+        let mut c = count;
+        while c > 0 {
+            let buf = crate::slice::<crate::types::byte>::__from_vec(text.to_vec());
+            let _ = s.Write(buf);
+            c -= 1;
+        }
+    }
+
+    /// Whether the state has the given flag character set.
+    pub fn flag(s: &dyn State, c: u8) -> bool {
+        s.Flag(c as int)
+    }
+
+    /// Render `[left pad][sign][prefix][zero pad][digits][right pad]`
+    /// through `s`, honoring `Precision` (digit zero-padding) and
+    /// `Width` (field padding). Mirrors the tail of Go's
+    /// `(*Int).Format` (intconv.go) — the shared layout used by both
+    /// the `Int` and `Float` formatters.
+    ///
+    /// `precision_for_zeros` controls whether `Precision()` adds
+    /// leading zeros to the digits: `Int` honors it, `Float` derives
+    /// its precision into `Append` directly and passes `false` here.
+    pub fn emit(
+        s: &mut dyn State,
+        sign: &[u8],
+        prefix: &[u8],
+        digits: &[u8],
+        precision_for_zeros: bool,
+    ) {
+        // number padding from precision: least digits to output.
+        let mut zeros: int = 0;
+        let (precision, precision_set) = s.Precision();
+        if precision_for_zeros && precision_set {
+            let dl = digits.len() as int;
+            if dl < precision {
+                zeros = precision - dl;
+            } else if digits == b"0" && precision == 0 {
+                // zero value with zero precision — print nothing.
+                return;
+            }
+        }
+
+        // field pad from width.
+        let mut left: int = 0;
+        let mut right: int = 0;
+        let length = sign.len() as int + prefix.len() as int + zeros
+            + digits.len() as int;
+        let (width, width_set) = s.Width();
+        if width_set && length < width {
+            let d = width - length;
+            if flag(s, b'-') {
+                // pad on the right; supersedes '0'.
+                right = d;
+            } else if flag(s, b'0') && !(precision_for_zeros && precision_set) {
+                // pad with zeros unless precision also specified.
+                zeros = d;
+            } else {
+                left = d;
+            }
+        }
+
+        write_multiple(s, b" ", left);
+        write_multiple(s, sign, 1);
+        write_multiple(s, prefix, 1);
+        write_multiple(s, b"0", zeros);
+        let dbuf = crate::slice::<crate::types::byte>::__from_vec(digits.to_vec());
+        let _ = s.Write(dbuf);
+        write_multiple(s, b" ", right);
+    }
+
+    /// Float field padding — Go's `(*Float).Format` tail. The `Append`
+    /// output already carries the rendered digits + exponent; this only
+    /// applies sign + field padding (no precision zero-pad). `is_inf`
+    /// suppresses '0'-padding (Go pads Inf with spaces).
+    pub fn emit_float(s: &mut dyn State, sign: &[u8], body: &[u8], is_inf: bool) {
+        let mut padding: int = 0;
+        let (width, width_set) = s.Width();
+        let length = sign.len() as int + body.len() as int;
+        if width_set && width > length {
+            padding = width - length;
+        }
+        if flag(s, b'0') && !is_inf {
+            write_multiple(s, sign, 1);
+            write_multiple(s, b"0", padding);
+            let b = crate::slice::<crate::types::byte>::__from_vec(body.to_vec());
+            let _ = s.Write(b);
+        } else if flag(s, b'-') {
+            write_multiple(s, sign, 1);
+            let b = crate::slice::<crate::types::byte>::__from_vec(body.to_vec());
+            let _ = s.Write(b);
+            write_multiple(s, b" ", padding);
+        } else {
+            write_multiple(s, b" ", padding);
+            write_multiple(s, sign, 1);
+            let b = crate::slice::<crate::types::byte>::__from_vec(body.to_vec());
+            let _ = s.Write(b);
+        }
+    }
+
+    /// Write the Go `%!<verb>(big.<kind>=<value>)` form for an
+    /// unsupported verb.
+    pub fn write_bad_verb(s: &mut dyn State, verb: crate::types::rune, kind: &[u8], value: &[u8]) {
+        let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        out.extend_from_slice(b"%!");
+        let mut rbuf = [0u8; 4];
+        let rn = crate::unicode::utf8::EncodeRune(&mut rbuf, verb);
+        out.extend_from_slice(&rbuf[..rn as usize]);
+        out.push(b'(');
+        out.extend_from_slice(kind);
+        out.push(b'=');
+        out.extend_from_slice(value);
+        out.push(b')');
+        let buf = crate::slice::<crate::types::byte>::__from_vec(out);
+        let _ = s.Write(buf);
+    }
+}
+
+// `(*Int).Format` — Go's intconv.go:Format. Accepts the verbs
+// `b o O d s v x X`; honors the `#` `+` ` ` `-` `0` flags plus width
+// and precision. An unrecognized verb writes `%!<verb>(big.Int=<dec>)`.
+impl crate::fmt::Formatter for Int {
+    fn Format(&self, f: &mut dyn crate::fmt::State, c: crate::types::rune) {
+        // determine base from the verb.
+        let base: int = match c {
+            x if x == 'b' as crate::types::rune => 2,
+            x if x == 'o' as crate::types::rune
+                || x == 'O' as crate::types::rune => 8,
+            x if x == 'd' as crate::types::rune
+                || x == 's' as crate::types::rune
+                || x == 'v' as crate::types::rune => 10,
+            x if x == 'x' as crate::types::rune
+                || x == 'X' as crate::types::rune => 16,
+            _ => {
+                // unknown verb.
+                let dec = self.Text(10);
+                fmt_pad::write_bad_verb(f, c, b"big.Int", dec.as_bytes());
+                return;
+            }
+        };
+
+        // sign character.
+        let sign: &[u8] = if self.neg {
+            b"-"
+        } else if fmt_pad::flag(f, b'+') {
+            b"+"
+        } else if fmt_pad::flag(f, b' ') {
+            b" "
+        } else {
+            b""
+        };
+
+        // base-indicating prefix for the `#` flag (and `O`).
+        let mut prefix: &[u8] = b"";
+        if fmt_pad::flag(f, b'#') {
+            prefix = match c {
+                x if x == 'b' as crate::types::rune => b"0b",
+                x if x == 'o' as crate::types::rune => b"0",
+                x if x == 'x' as crate::types::rune => b"0x",
+                x if x == 'X' as crate::types::rune => b"0X",
+                _ => b"",
+            };
+        }
+        if c == 'O' as crate::types::rune {
+            prefix = b"0o";
+        }
+
+        // render the magnitude digits (Text without the sign).
+        let digit_str = {
+            let mut t = Int::new();
+            t.abs = self.abs.clone();
+            t.neg = false;
+            t.Text(base)
+        };
+        let mut digits: Vec<u8> = digit_str.as_bytes().to_vec();
+        if c == 'X' as crate::types::rune {
+            for d in digits.iter_mut() {
+                if (b'a'..=b'z').contains(d) {
+                    *d = b'A' + (*d - b'a');
+                }
+            }
+        }
+
+        fmt_pad::emit(f, sign, prefix, &digits, true);
+    }
+}
+
+// `(*Float).Format` — Go's ftoa.go:Format. Accepts the verbs
+// `b e E f F g G x p v`; maps each to `Text`'s format byte, derives
+// the precision argument from `f.Precision()`, then applies sign +
+// width padding. An unrecognized verb writes `%!<verb>(big.Float=...)`.
+impl crate::fmt::Formatter for Float {
+    fn Format(&self, f: &mut dyn crate::fmt::State, c: crate::types::rune) {
+        let (prec_set_i, has_prec) = f.Precision();
+        let mut prec: int = if has_prec { prec_set_i } else { 6 };
+
+        // map the verb to a Text format byte.
+        let format: u8 = match c {
+            x if x == 'e' as crate::types::rune => b'e',
+            x if x == 'E' as crate::types::rune => b'E',
+            x if x == 'f' as crate::types::rune => b'f',
+            x if x == 'b' as crate::types::rune => b'b',
+            x if x == 'p' as crate::types::rune => b'p',
+            x if x == 'x' as crate::types::rune => b'x',
+            // 'F' is handled like 'f'.
+            x if x == 'F' as crate::types::rune => b'f',
+            // 'v' is handled like 'g'.
+            x if x == 'v' as crate::types::rune
+                || x == 'g' as crate::types::rune => {
+                if !has_prec {
+                    prec = -1;
+                }
+                b'g'
+            }
+            x if x == 'G' as crate::types::rune => {
+                if !has_prec {
+                    prec = -1;
+                }
+                b'G'
+            }
+            _ => {
+                let g = self.String();
+                fmt_pad::write_bad_verb(f, c, b"big.Float", g.as_bytes());
+                return;
+            }
+        };
+
+        // render the body (Append already produces sign + digits).
+        let mut buf: Vec<u8> = self.append_internal(Vec::new(), format, prec);
+        if buf.is_empty() {
+            buf = b"?".to_vec();
+        }
+
+        // peel the leading sign character off the body.
+        let (sign, body): (&[u8], &[u8]) = match buf[0] {
+            b'-' => (b"-", &buf[1..]),
+            b'+' => {
+                // +Inf — ' ' flag downgrades '+' to a space.
+                if fmt_pad::flag(f, b' ') {
+                    (b" ", &buf[1..])
+                } else {
+                    (b"+", &buf[1..])
+                }
+            }
+            _ => {
+                if fmt_pad::flag(f, b'+') {
+                    (b"+", &buf[..])
+                } else if fmt_pad::flag(f, b' ') {
+                    (b" ", &buf[..])
+                } else {
+                    (b"", &buf[..])
+                }
+            }
+        };
+
+        fmt_pad::emit_float(f, sign, body, self.IsInf());
     }
 }
 
@@ -2952,6 +3252,41 @@ fn bit_len(a: &[u32]) -> int {
         return 0;
     }
     ((i - 1) * 32) as int + (32 - a[i - 1].leading_zeros()) as int
+}
+
+/// `nat.random` — uniform pseudo-random magnitude in `[0, limit)`.
+/// `n` is the bit length of `limit`. Generates random 32-bit limbs,
+/// masks the top limb to `n`'s exact bit count, and rejects any
+/// candidate `>= limit` (rejection sampling). Mirrors `nat.go:random`
+/// (the `_W == 32` branch — goish uses 32-bit limbs). `limit` must be
+/// non-empty (caller guarantees `n > 0`).
+fn nat_random(rnd: &mut crate::math::rand::Rand, limit: &[u32], n: int) -> Vec<u32> {
+    let len = limit.len();
+    let bit_len_of_msw = {
+        let r = (n as u32) % 32;
+        if r == 0 { 32 } else { r }
+    };
+    // mask for the most-significant word.
+    let mask: u32 = if bit_len_of_msw == 32 {
+        u32::MAX
+    } else {
+        (1u32 << bit_len_of_msw) - 1
+    };
+    let mut z: Vec<u32> = alloc::vec![0u32; len];
+    loop {
+        for limb in z.iter_mut() {
+            *limb = rnd.Uint32();
+        }
+        z[len - 1] &= mask;
+        if abs_cmp(&z, limit) == Ordering::Less {
+            break;
+        }
+    }
+    // norm: drop trailing zero limbs.
+    while z.last() == Some(&0) {
+        z.pop();
+    }
+    z
 }
 
 /// Repack little-endian u32 limbs into little-endian 64-bit `Word`s.
