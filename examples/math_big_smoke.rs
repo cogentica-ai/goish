@@ -877,6 +877,215 @@ fn main() {
         }
     }
 
+    // ── Sqrt ───────────────────────────────────────────────────────
+    {
+        // Perfect squares.
+        let mut sq = big::Int::new();
+        sq.Sqrt(&big::NewInt(0));
+        check(sq.Sign() == 0, b"sqrt 0 == 0");
+        sq.Sqrt(&big::NewInt(1));
+        check(sq.Int64() == 1, b"sqrt 1 == 1");
+        sq.Sqrt(&big::NewInt(144));
+        check(sq.Int64() == 12, b"sqrt 144 == 12");
+        sq.Sqrt(&big::NewInt(1000000));
+        check(sq.Int64() == 1000, b"sqrt 10^6 == 1000");
+
+        // Non-perfect squares — floor behaviour.
+        sq.Sqrt(&big::NewInt(15));
+        check(sq.Int64() == 3, b"sqrt 15 == 3 floor");
+        sq.Sqrt(&big::NewInt(99));
+        check(sq.Int64() == 9, b"sqrt 99 == 9 floor");
+        sq.Sqrt(&big::NewInt(2));
+        check(sq.Int64() == 1, b"sqrt 2 == 1 floor");
+        sq.Sqrt(&big::NewInt(8));
+        check(sq.Int64() == 2, b"sqrt 8 == 2 floor");
+
+        // Multi-limb perfect square: sqrt of (10^20)^2 == 10^20.
+        let p20 = pow10(20);
+        let mut sqr = big::Int::new();
+        sqr.Mul(&p20, &p20);                    // 10^40
+        let mut root = big::Int::new();
+        root.Sqrt(&sqr);
+        check(root.Cmp(&p20) == 0, b"sqrt (10^20)^2 == 10^20");
+
+        // Multi-limb non-perfect square: sqrt(10^40 - 1) == 10^20 - 1.
+        let mut one = big::NewInt(1);
+        let mut sqr_m1 = big::Int::new();
+        sqr_m1.Sub(&sqr, &big::NewInt(1));      // 10^40 - 1
+        let mut root2 = big::Int::new();
+        root2.Sqrt(&sqr_m1);
+        let mut p20_m1 = big::Int::new();
+        p20_m1.Sub(&p20, &big::NewInt(1));      // 10^20 - 1
+        check(root2.Cmp(&p20_m1) == 0, b"sqrt (10^40 - 1) floor == 10^20 - 1");
+        // Verify the floor property: root² <= x < (root+1)².
+        {
+            let mut rr = big::Int::new();
+            rr.Mul(&root2, &root2);
+            let mut rp1 = big::Int::new();
+            rp1.Add(&root2, &one);
+            let mut rp1sq = big::Int::new();
+            rp1sq.Mul(&rp1, &rp1);
+            check(rr.Cmp(&sqr_m1) <= 0 && sqr_m1.Cmp(&rp1sq) == -1,
+                b"sqrt multi-limb floor property");
+        }
+        let _ = &mut one;
+    }
+
+    // ── ProbablyPrime ──────────────────────────────────────────────
+    {
+        // Known small primes.
+        check(big::NewInt(2).ProbablyPrime(0),  b"prime 2");
+        check(big::NewInt(3).ProbablyPrime(0),  b"prime 3");
+        check(big::NewInt(97).ProbablyPrime(0), b"prime 97");
+        check(big::NewInt(7919).ProbablyPrime(0), b"prime 7919");
+        // 2^31 - 1 == 2147483647 is a Mersenne prime.
+        check(big::NewInt(2147483647).ProbablyPrime(0), b"prime 2^31-1");
+
+        // Known composites.
+        check(!big::NewInt(1).ProbablyPrime(0),   b"composite 1");
+        check(!big::NewInt(0).ProbablyPrime(0),   b"composite 0");
+        check(!big::NewInt(4).ProbablyPrime(0),   b"composite 4");
+        check(!big::NewInt(100).ProbablyPrime(0), b"composite 100");
+        check(!big::NewInt(7917).ProbablyPrime(0), b"composite 7917");
+        // 561 is the smallest Carmichael number — fools the Fermat test.
+        check(!big::NewInt(561).ProbablyPrime(0), b"composite 561 carmichael");
+        // Negative receiver is never prime.
+        check(!big::NewInt(-7).ProbablyPrime(0),  b"composite negative");
+
+        // Multi-limb prime: 10^20 + 39 is prime (cross-checked).
+        let mut bigprime = big::Int::new();
+        bigprime.Add(&pow10(20), &big::NewInt(39));
+        check(bigprime.ProbablyPrime(0), b"prime multi-limb 10^20+39");
+
+        // Multi-limb composite: 10^20 (obviously even / divisible).
+        check(!pow10(20).ProbablyPrime(0), b"composite multi-limb 10^20");
+        // Multi-limb composite with no small factors: (10^10+19)^2,
+        // a product of two equal large primes.
+        {
+            let mut f = big::Int::new();
+            f.Add(&pow10(10), &big::NewInt(19));   // 10^10 + 19, prime
+            let mut comp = big::Int::new();
+            comp.Mul(&f, &f);
+            check(!comp.ProbablyPrime(0), b"composite multi-limb prime^2");
+        }
+    }
+
+    // ── ModSqrt ────────────────────────────────────────────────────
+    {
+        // Helper-free verification: z*z mod p == x mod p.
+        // p ≡ 3 (mod 4): p = 23.
+        {
+            let p = big::NewInt(23);
+            // x = 2 is a residue mod 23 (5^2 = 25 == 2).
+            let mut z = big::Int::new();
+            z.ModSqrt(&big::NewInt(2), &p);
+            let mut zz = big::Int::new();
+            zz.Mul(&z, &z);
+            let mut r = big::Int::new();
+            r.Mod(&zz, &p);
+            check(r.Int64() == 2, b"modsqrt p=23 (3mod4) z^2==2");
+
+            // x = 0 -> z = 0.
+            let mut z0 = big::Int::new();
+            z0.ModSqrt(&big::NewInt(0), &p);
+            check(z0.Sign() == 0, b"modsqrt x=0 -> 0");
+
+            // x reduced first: x = 25 == 2 mod 23, same root squared.
+            let mut z25 = big::Int::new();
+            z25.ModSqrt(&big::NewInt(25), &p);
+            let mut z25sq = big::Int::new();
+            z25sq.Mul(&z25, &z25);
+            let mut r25 = big::Int::new();
+            r25.Mod(&z25sq, &p);
+            check(r25.Int64() == 2, b"modsqrt x reduced mod p");
+
+            // Sweep every residue: for a in [1,22], (a*a) has a root.
+            let mut all_ok = true;
+            for a in 1i64..23 {
+                let mut xv = big::Int::new();
+                xv.Mod(&big::NewInt(a * a), &p);   // quadratic residue
+                let mut zr = big::Int::new();
+                zr.ModSqrt(&xv, &p);
+                let mut zrsq = big::Int::new();
+                zrsq.Mul(&zr, &zr);
+                let mut rr = big::Int::new();
+                rr.Mod(&zrsq, &p);
+                if rr.Cmp(&xv) != 0 {
+                    all_ok = false;
+                }
+            }
+            check(all_ok, b"modsqrt p=23 sweep all residues");
+        }
+
+        // p ≡ 1 (mod 4): p = 17 — exercises Tonelli-Shanks.
+        {
+            let p = big::NewInt(17);
+            // x = 2 is a residue mod 17 (6^2 = 36 == 2).
+            let mut z = big::Int::new();
+            z.ModSqrt(&big::NewInt(2), &p);
+            let mut zz = big::Int::new();
+            zz.Mul(&z, &z);
+            let mut r = big::Int::new();
+            r.Mod(&zz, &p);
+            check(r.Int64() == 2, b"modsqrt p=17 (1mod4) z^2==2");
+
+            // Sweep every residue mod 17.
+            let mut all_ok = true;
+            for a in 1i64..17 {
+                let mut xv = big::Int::new();
+                xv.Mod(&big::NewInt(a * a), &p);
+                let mut zr = big::Int::new();
+                zr.ModSqrt(&xv, &p);
+                let mut zrsq = big::Int::new();
+                zrsq.Mul(&zr, &zr);
+                let mut rr = big::Int::new();
+                rr.Mod(&zrsq, &p);
+                if rr.Cmp(&xv) != 0 {
+                    all_ok = false;
+                }
+            }
+            check(all_ok, b"modsqrt p=17 sweep all residues");
+        }
+
+        // p ≡ 1 (mod 4): p = 13 — another Tonelli-Shanks check.
+        {
+            let p = big::NewInt(13);
+            // x = 3 is a residue mod 13 (4^2 = 16 == 3).
+            let mut z = big::Int::new();
+            z.ModSqrt(&big::NewInt(3), &p);
+            let mut zz = big::Int::new();
+            zz.Mul(&z, &z);
+            let mut r = big::Int::new();
+            r.Mod(&zz, &p);
+            check(r.Int64() == 3, b"modsqrt p=13 (1mod4) z^2==3");
+        }
+
+        // Non-residue: 5 is not a quadratic residue mod 23.
+        // self must be left unchanged (precondition violated).
+        {
+            let p = big::NewInt(23);
+            let mut nr = big::NewInt(99999);
+            nr.ModSqrt(&big::NewInt(5), &p);
+            check(nr.Int64() == 99999, b"modsqrt non-residue leaves self");
+        }
+
+        // Multi-limb modulus: a large prime p ≡ 3 (mod 4).
+        // p = 10^20 + 39 (prime). 39 mod 4 == 3, so p ≡ 3 mod 4.
+        {
+            let mut p = big::Int::new();
+            p.Add(&pow10(20), &big::NewInt(39));
+            // x = 4 has a known root (2), exercising the multi-limb
+            // p ≡ 3 mod 4 path: z² mod p must equal x.
+            let mut z = big::Int::new();
+            z.ModSqrt(&big::NewInt(4), &p);
+            let mut zz = big::Int::new();
+            zz.Mul(&z, &z);
+            let mut r = big::Int::new();
+            r.Mod(&zz, &p);
+            check(r.Int64() == 4, b"modsqrt multi-limb p z^2==x");
+        }
+    }
+
     let _ = &int::from(0);
     report();
 }

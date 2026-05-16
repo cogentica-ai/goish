@@ -1043,6 +1043,302 @@ impl Int {
         self.neg = false;
         self
     }
+
+    /// `(*Int).Sqrt(x)` — z = ⌊√x⌋, the largest integer with z² ≤ x.
+    /// Panics if x is negative, matching Go. Uses Newton's method on
+    /// `Int`: the iterate `t = (t + x/t) / 2` converges down to ⌊√x⌋.
+    pub fn Sqrt(&mut self, x: &Int) -> &mut Self {
+        if x.neg {
+            panic!("big::Int::Sqrt: square root of negative number");
+        }
+        // Snapshot x — self may alias x at the call site.
+        let x = x.clone();
+        // ⌊√0⌋ = 0, ⌊√1⌋ = 1: handle directly (also dodges div-by-zero).
+        if x.abs.is_empty() {
+            return self.SetInt64(0);
+        }
+        let mut one = Int::new();
+        one.SetInt64(1);
+        if x.Cmp(&one) == 0 {
+            return self.SetInt64(1);
+        }
+
+        // Initial guess: 1 << ((BitLen+1)/2) — an upper bound on ⌊√x⌋.
+        let shift = ((x.BitLen() + 1) / 2) as crate::types::uint;
+        let mut t = Int::new();
+        t.Lsh(&one, shift);
+
+        // Newton iteration: t_{k+1} = (t_k + x/t_k) / 2. The sequence
+        // decreases monotonically (after the first step) toward ⌊√x⌋;
+        // stop once it no longer decreases.
+        let mut two = Int::new();
+        two.SetInt64(2);
+        loop {
+            let mut q = Int::new();
+            q.Div(&x, &t);
+            let mut sum = Int::new();
+            sum.Add(&t, &q);
+            let mut next = Int::new();
+            next.Div(&sum, &two);
+            if next.Cmp(&t) >= 0 {
+                // Converged: t is ⌊√x⌋.
+                break;
+            }
+            t = next;
+        }
+        self.neg = false;
+        self.abs = t.abs;
+        self
+    }
+
+    /// `(*Int).ProbablyPrime(n)` — reports whether `self` is probably
+    /// prime. Panics if `n < 0` (Go: `"negative n for ProbablyPrime"`).
+    /// Negative receivers and values `< 2` are not prime.
+    ///
+    /// Algorithm: small-case + small-prime trial division, then the
+    /// Miller-Rabin test with the 12 deterministic bases
+    /// 2,3,5,7,11,13,17,19,23,29,31,37 — provably exact for every
+    /// integer below 3.3×10²⁴ — plus `n` extra rounds with those same
+    /// bases for larger inputs.
+    ///
+    /// Deviation from Go: Go additionally runs a Baillie-PSW strong
+    /// Lucas test after Miller-Rabin. This implementation is
+    /// Miller-Rabin only; for non-adversarial inputs the probability of
+    /// a false positive is at most ¼ per extra round.
+    pub fn ProbablyPrime(&self, n: int) -> bool {
+        if n < 0 {
+            panic!("negative n for ProbablyPrime");
+        }
+        // Negative or zero — never prime.
+        if self.neg || self.abs.is_empty() {
+            return false;
+        }
+        // Small primes that fit in i64 — settles 2, 3, even-ness early.
+        const SMALL_PRIMES: [u32; 12] =
+            [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
+
+        let mut one = Int::new();
+        one.SetInt64(1);
+        if self.Cmp(&one) <= 0 {
+            return false; // x < 2
+        }
+        // Trial division by the small primes.
+        for &p in SMALL_PRIMES.iter() {
+            let mut pi = Int::new();
+            pi.SetInt64(p as i64);
+            match self.Cmp(&pi) {
+                0 => return true,         // x is itself a small prime
+                -1 => return false,       // 2 < x < p, already trial-divided
+                _ => {}
+            }
+            let mut r = Int::new();
+            r.Mod(self, &pi);
+            if r.abs.is_empty() {
+                return false; // divisible by p
+            }
+        }
+
+        // Miller-Rabin. Decompose n-1 = d·2^s with d odd.
+        let mut nm1 = Int::new();
+        nm1.Sub(self, &one);
+        let s = nm1.TrailingZeroBits();
+        let mut d = Int::new();
+        d.Rsh(&nm1, s);
+
+        // Witness rounds: the 12 deterministic bases give exactness
+        // below 3.3×10²⁴; `n` extra rounds reuse the same bases.
+        let rounds = SMALL_PRIMES.len() + (n as usize);
+        for i in 0..rounds {
+            let base = SMALL_PRIMES[i % SMALL_PRIMES.len()];
+            let mut a = Int::new();
+            a.SetInt64(base as i64);
+            // A base >= n contributes nothing — but n > 37 here, so
+            // every small-prime base is a valid 2 <= a <= n-2.
+            let mut y = Int::new();
+            y.Exp(&a, &d, self); // y = a^d mod self
+            if y.Cmp(&one) == 0 || y.Cmp(&nm1) == 0 {
+                continue; // probable prime for this base
+            }
+            let mut composite = true;
+            // Square up to s-1 times, looking for y == n-1.
+            let mut j: crate::types::uint = 1;
+            while j < s {
+                let mut sq = Int::new();
+                sq.Mul(&y, &y);
+                let mut next = Int::new();
+                next.Mod(&sq, self);
+                y = next;
+                if y.Cmp(&nm1) == 0 {
+                    composite = false;
+                    break;
+                }
+                if y.Cmp(&one) == 0 {
+                    return false; // non-trivial root of 1 -> composite
+                }
+                j += 1;
+            }
+            if composite {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// `(*Int).ModSqrt(x, p)` — z² ≡ x (mod p), with `p` an odd prime.
+    /// Returns `self`.
+    ///
+    /// The result is normalised into `[0, p)`. The fast path is used
+    /// when `p ≡ 3 (mod 4)`; otherwise the general Tonelli-Shanks
+    /// algorithm runs (covering `p ≡ 1 (mod 4)`).
+    ///
+    /// Precondition: `x` must be a quadratic residue mod `p`. When it
+    /// is not (no square root exists), `self` is left **unchanged** —
+    /// matching the design of `ModInverse`'s no-inverse case. Go
+    /// returns nil there; goish methods return `&mut Self` and cannot
+    /// cleanly surface a nil sentinel, so callers must verify the
+    /// residue precondition themselves. A garbage value is never
+    /// stored.
+    pub fn ModSqrt(&mut self, x: &Int, p: &Int) -> &mut Self {
+        // Snapshot — self may alias x or p at the call site.
+        let p = p.clone();
+        let mut x = x.clone();
+
+        let mut zero = Int::new();
+        zero.SetInt64(0);
+        let mut one = Int::new();
+        one.SetInt64(1);
+        let mut two = Int::new();
+        two.SetInt64(2);
+
+        // Reduce x into [0, p).
+        {
+            let mut xr = Int::new();
+            xr.Mod(&x, &p);
+            x = xr;
+        }
+        // sqrt(0) mod p == 0.
+        if x.abs.is_empty() {
+            return self.SetInt64(0);
+        }
+
+        // Euler's criterion: x is a quadratic residue iff
+        // x^((p-1)/2) ≡ 1 (mod p).
+        let mut pm1 = Int::new();
+        pm1.Sub(&p, &one);
+        let mut e = Int::new();
+        e.Div(&pm1, &two); // (p-1)/2
+        let mut legendre = Int::new();
+        legendre.Exp(&x, &e, &p);
+        if legendre.Cmp(&one) != 0 {
+            // Not a quadratic residue — no square root. Leave self
+            // unchanged (Go returns nil here).
+            return self;
+        }
+
+        // Fast path: p ≡ 3 (mod 4) -> z = x^((p+1)/4) mod p.
+        if !p.abs.is_empty() && (p.abs[0] & 3) == 3 {
+            let mut pp1 = Int::new();
+            pp1.Add(&p, &one);
+            let mut exp = Int::new();
+            exp.Div(&pp1, &big_four()); // (p+1)/4
+            let mut r = Int::new();
+            r.Exp(&x, &exp, &p);
+            self.neg = false;
+            self.abs = r.abs;
+            return self;
+        }
+
+        // General case: Tonelli-Shanks. Break p-1 = s·2^ee with s odd.
+        let ee = pm1.TrailingZeroBits();
+        let mut s = Int::new();
+        s.Rsh(&pm1, ee);
+
+        // Find a quadratic non-residue n: smallest n with
+        // n^((p-1)/2) ≡ -1 (mod p).
+        let mut n = Int::new();
+        n.SetInt64(2);
+        loop {
+            let mut t = Int::new();
+            t.Exp(&n, &e, &p);
+            // t == p-1 means Legendre(n,p) == -1.
+            if t.Cmp(&pm1) == 0 {
+                break;
+            }
+            let mut next = Int::new();
+            next.Add(&n, &one);
+            n = next;
+        }
+
+        // y = x^((s+1)/2), b = x^s, g = n^s, r = ee.
+        let mut sp1 = Int::new();
+        sp1.Add(&s, &one);
+        let mut half = Int::new();
+        half.Rsh(&sp1, 1);
+        let mut y = Int::new();
+        y.Exp(&x, &half, &p);
+        let mut b = Int::new();
+        b.Exp(&x, &s, &p);
+        let mut g = Int::new();
+        g.Exp(&n, &s, &p);
+        let mut r = ee;
+
+        loop {
+            // Find the least m with ord_p(b) = 2^m.
+            let mut m: crate::types::uint = 0;
+            let mut t = Int::new();
+            t.Set(&b);
+            while t.Cmp(&one) != 0 {
+                let mut sq = Int::new();
+                sq.Mul(&t, &t);
+                let mut red = Int::new();
+                red.Mod(&sq, &p);
+                t = red;
+                m += 1;
+            }
+            if m == 0 {
+                // b == 1: y is the square root.
+                self.neg = false;
+                self.abs = y.abs;
+                return self;
+            }
+            // t = g^(2^(r-m-1)) mod p.
+            let mut texp = Int::new();
+            texp.SetInt64(0);
+            texp.SetBit(&zero, (r - m - 1) as int, 1);
+            let mut tt = Int::new();
+            tt.Exp(&g, &texp, &p);
+            // g = t² mod p ; y = y·t mod p ; b = b·g mod p ; r = m.
+            {
+                let mut gg = Int::new();
+                gg.Mul(&tt, &tt);
+                let mut gr = Int::new();
+                gr.Mod(&gg, &p);
+                g = gr;
+            }
+            {
+                let mut yy = Int::new();
+                yy.Mul(&y, &tt);
+                let mut yr = Int::new();
+                yr.Mod(&yy, &p);
+                y = yr;
+            }
+            {
+                let mut bb = Int::new();
+                bb.Mul(&b, &g);
+                let mut br = Int::new();
+                br.Mod(&bb, &p);
+                b = br;
+            }
+            r = m;
+        }
+    }
+}
+
+/// The constant 4 as an `Int` — used by `ModSqrt`'s p ≡ 3 mod 4 path.
+fn big_four() -> Int {
+    let mut f = Int::new();
+    f.SetInt64(4);
+    f
 }
 
 /// `big.NewInt(x)` — Go's package-level constructor.
