@@ -160,6 +160,15 @@ impl Rat {
         self
     }
 
+    /// `(*Rat).Set(x)` — copy x into z and return z.
+    pub fn Set(&mut self, x: &Rat) -> &mut Self {
+        if !core::ptr::eq(self as *const _, x as *const _) {
+            self.num = x.num.clone();
+            self.den = x.den.clone();
+        }
+        self
+    }
+
     /// `(*Rat).Mul(x, y)` — z = x*y, return z. Mirrors Go's
     /// `rat.go:Mul`. Aliasing-safe: callers commonly write
     /// `val.Mul(val, mv)` so we read x and y before mutating self.
