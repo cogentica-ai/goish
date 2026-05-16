@@ -1411,9 +1411,9 @@ mod sscanf_tests {
         let (n, err) = Sscanf("3.14", "%f", &mut val);
         assert_eq!(n, 1);
         assert!(err == nil);
-        // 3.14 → 314/100
-        assert_eq!(val.Num().Int64(), 314);
-        assert_eq!(val.Denom().Int64(), 100);
+        // 3.14 → 314/100, reduced by big::Rat's GCD normalization to 157/50
+        assert_eq!(val.Num().Int64(), 157);
+        assert_eq!(val.Denom().Int64(), 50);
     }
 
     #[test]
