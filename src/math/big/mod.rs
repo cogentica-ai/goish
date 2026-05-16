@@ -520,6 +520,62 @@ impl Int {
         (self, m)
     }
 
+    /// `(*Int).Quo(x, y)` — truncated quotient. z = x/y rounded toward
+    /// zero, return z. Panics if y == 0.
+    pub fn Quo<X: AsRef<Int>, Y: AsRef<Int>>(&mut self, x: X, y: Y) -> &mut Self {
+        let x = x.as_ref();
+        let y = y.as_ref();
+        if y.abs.is_empty() {
+            panic!("big::Int::Quo: division by zero");
+        }
+        let q_abs = divmod_limbs(&x.abs, &y.abs).0;
+        // T-division: q sign = x.neg != y.neg; 0 has no sign.
+        self.neg = !q_abs.is_empty() && (x.neg != y.neg);
+        self.abs = q_abs;
+        self
+    }
+
+    /// `(*Int).Rem(x, y)` — truncated remainder. z = x%y, the sign of
+    /// the result follows x, return z. Panics if y == 0.
+    pub fn Rem<X: AsRef<Int>, Y: AsRef<Int>>(&mut self, x: X, y: Y) -> &mut Self {
+        let x = x.as_ref();
+        let y = y.as_ref();
+        if y.abs.is_empty() {
+            panic!("big::Int::Rem: division by zero");
+        }
+        let r_abs = divmod_limbs(&x.abs, &y.abs).1;
+        // T-division: r sign follows x; 0 has no sign.
+        self.neg = !r_abs.is_empty() && x.neg;
+        self.abs = r_abs;
+        self
+    }
+
+    /// `(*Int).QuoRem(x, y, r)` — T-division. z = x/y truncated,
+    /// r = x - y*z. Returns (z, r). Panics if y == 0.
+    pub fn QuoRem<X, Y, R>(&mut self, x: X, y: Y, mut r: R) -> (&mut Int, R)
+    where
+        X: AsRef<Int>,
+        Y: AsRef<Int>,
+        R: AsMutInt,
+    {
+        let x = x.as_ref();
+        let y = y.as_ref();
+        if y.abs.is_empty() {
+            panic!("big::Int::QuoRem: division by zero");
+        }
+        let (q_abs, r_abs) = divmod_limbs(&x.abs, &y.abs);
+        // T-division: q sign = x.neg != y.neg; r sign follows x.
+        // No Euclidean correction. 0 has no sign.
+        self.neg = !q_abs.is_empty() && (x.neg != y.neg);
+        self.abs = q_abs;
+        {
+            let r_ref = r.as_mut_int();
+            r_ref.neg = !r_abs.is_empty() && x.neg;
+            r_ref.abs = r_abs;
+        }
+        (self, r)
+    }
+
     /// `(*Int).BorrowMut()` — Goish convenience: wrap `&mut self`
     /// as a `nilable_refmut<Int>` so it can be passed where the
     /// signature expects `nilable![&mut Int]`.

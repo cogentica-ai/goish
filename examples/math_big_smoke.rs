@@ -607,6 +607,99 @@ fn main() {
         check(lz.Int64() == 0x010203, b"setbytes leading zeros ignored");
     }
 
+    // ── Quo / Rem / QuoRem (truncated / T-division) ────────────────
+    // Truncated division: quotient rounds toward zero, remainder sign
+    // follows the dividend. Negative cases differ from Euclidean Div/Mod.
+    {
+        // -7 Quo 2 == -3   (Euclidean Div gives -4)
+        let mut tq = big::Int::new();
+        tq.Quo(&big::NewInt(-7), &big::NewInt(2));
+        check(tq.Int64() == -3, b"quo -7/2 == -3");
+        // -7 Rem 2 == -1   (Euclidean Mod gives 1)
+        let mut tr = big::Int::new();
+        tr.Rem(&big::NewInt(-7), &big::NewInt(2));
+        check(tr.Int64() == -1, b"rem -7/2 == -1");
+        // -7 Quo -2 == 3
+        tq.Quo(&big::NewInt(-7), &big::NewInt(-2));
+        check(tq.Int64() == 3, b"quo -7/-2 == 3");
+        // 7 Quo -2 == -3
+        tq.Quo(&big::NewInt(7), &big::NewInt(-2));
+        check(tq.Int64() == -3, b"quo 7/-2 == -3");
+        // 7 Rem -2 == 1  (remainder sign follows dividend)
+        tr.Rem(&big::NewInt(7), &big::NewInt(-2));
+        check(tr.Int64() == 1, b"rem 7/-2 == 1");
+        // -7 Rem -2 == -1
+        tr.Rem(&big::NewInt(-7), &big::NewInt(-2));
+        check(tr.Int64() == -1, b"rem -7/-2 == -1");
+        // Positive: 17 Quo 5 == 3, 17 Rem 5 == 2.
+        tq.Quo(&big::NewInt(17), &big::NewInt(5));
+        check(tq.Int64() == 3, b"quo 17/5 == 3");
+        tr.Rem(&big::NewInt(17), &big::NewInt(5));
+        check(tr.Int64() == 2, b"rem 17/5 == 2");
+        // Exact division: remainder zero must not be flagged negative.
+        let mut eq = big::Int::new();
+        let mut er = big::Int::new();
+        eq.QuoRem(&big::NewInt(-12), &big::NewInt(3), &mut er);
+        check(eq.Int64() == -4 && er.Sign() == 0, b"quorem -12/3 exact");
+
+        // QuoRem identity for the signed small cases: y*q + r == x.
+        for &(xv, yv) in &[(-7i64, 2i64), (-7, -2), (7, -2), (13, 4), (-13, 4)] {
+            let mut q = big::Int::new();
+            let mut r = big::Int::new();
+            q.QuoRem(&big::NewInt(xv), &big::NewInt(yv), &mut r);
+            let mut yq = big::Int::new();
+            yq.Mul(&big::NewInt(yv), &q);
+            let mut recon = big::Int::new();
+            recon.Add(&yq, &r);
+            check(recon.Int64() == xv, b"quorem identity y*q+r==x");
+        }
+
+        // Multi-limb Quo: (10^55 + 7) Quo (10^25 + 3) — operands far
+        // exceed 64 bits. Verify via the truncated identity y*q + r == x
+        // with |r| < |y| and r sign following x.
+        let mut mq = big::Int::new();
+        mq.Quo(&dividend, &divisor);
+        let mut mr = big::Int::new();
+        mr.Rem(&dividend, &divisor);
+        {
+            let mut yq = big::Int::new();
+            yq.Mul(&divisor, &mq);
+            let mut recon = big::Int::new();
+            recon.Add(&yq, &mr);
+            let mut absr = big::Int::new();
+            absr.Abs(&mr);
+            check(recon.Cmp(&dividend) == 0 && absr.Cmp(&divisor) == -1,
+                b"quo multi-limb identity");
+        }
+
+        // Multi-limb QuoRem with a negative dividend: -(10^55+7) / (10^25+3).
+        // Truncated: quotient is the negation of the positive case,
+        // remainder sign follows the (negative) dividend.
+        let mut nmq = big::Int::new();
+        let mut nmr = big::Int::new();
+        nmq.QuoRem(&neg_dividend, &divisor, &mut nmr);
+        {
+            let mut yq = big::Int::new();
+            yq.Mul(&divisor, &nmq);
+            let mut recon = big::Int::new();
+            recon.Add(&yq, &nmr);
+            check(recon.Cmp(&neg_dividend) == 0, b"quorem multi-limb neg identity");
+            // Truncated quotient must equal -(positive quotient).
+            let mut negq = big::Int::new();
+            negq.Neg(&mq);
+            check(nmq.Cmp(&negq) == 0, b"quorem multi-limb neg quotient");
+            // Remainder is non-positive (sign follows negative dividend).
+            check(nmr.Sign() <= 0, b"quorem multi-limb neg rem sign");
+        }
+
+        // Exact multi-limb: (10^55) Quo (10^25) == 10^30, remainder 0.
+        let mut xeq = big::Int::new();
+        let mut xer = big::Int::new();
+        xeq.QuoRem(&prod, &q, &mut xer);
+        check(dec_eq(&xeq, b"1000000000000000000000000000000")
+            && xer.Sign() == 0, b"quorem exact 10^55/10^25");
+    }
+
     let _ = &int::from(0);
     report();
 }
