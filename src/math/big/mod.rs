@@ -456,7 +456,7 @@ impl Rat {
 
     /// `(*Rat).Float32()` — nearest f32 to x, plus an exact flag.
     /// The sign of the result always matches the sign of x.
-    pub fn Float32(&self) -> (f32, bool) {
+    pub fn Float32(&self) -> (crate::types::float32, bool) {
         let (f, exact) = quot_to_float32(&self.num.abs, &self.den.abs);
         if self.num.neg {
             (-f, exact)
@@ -467,7 +467,7 @@ impl Rat {
 
     /// `(*Rat).Float64()` — nearest f64 to x, plus an exact flag.
     /// The sign of the result always matches the sign of x.
-    pub fn Float64(&self) -> (f64, bool) {
+    pub fn Float64(&self) -> (crate::types::float64, bool) {
         let (f, exact) = quot_to_float64(&self.num.abs, &self.den.abs);
         if self.num.neg {
             (-f, exact)
@@ -509,7 +509,7 @@ impl Rat {
     /// `(*Rat).SetFloat64(f)` — exact conversion from an f64. The bool
     /// is `false` for Inf/NaN (self is then left unchanged), matching
     /// Go's `nil` return for non-finite inputs.
-    pub fn SetFloat64(&mut self, f: f64) -> (&mut Rat, bool) {
+    pub fn SetFloat64(&mut self, f: crate::types::float64) -> (&mut Rat, bool) {
         const EXP_MASK: u64 = (1 << 11) - 1;
         let bits = f.to_bits();
         let mut mantissa = bits & ((1u64 << 52) - 1);
@@ -1664,7 +1664,7 @@ impl Int {
 
     /// `(*Int).Float64()` — the f64 nearest the value, plus whether the
     /// result is `Below`, `Exact`, or `Above` the true value.
-    pub fn Float64(&self) -> (f64, Accuracy) {
+    pub fn Float64(&self) -> (crate::types::float64, Accuracy) {
         let n = bit_len(&self.abs);
         if n == 0 {
             return (0.0, Accuracy::Exact);
@@ -3668,7 +3668,7 @@ impl Float {
     /// `(*Float).SetFloat64(x)` — set `self` to the exact value of the
     /// f64 `x`. If precision is 0, it is changed to 53. Panics if `x`
     /// is a NaN, matching Go's `ErrNaN`.
-    pub fn SetFloat64(&mut self, x: f64) -> &mut Self {
+    pub fn SetFloat64(&mut self, x: crate::types::float64) -> &mut Self {
         if self.prec == 0 {
             self.prec = 53;
         }
@@ -4091,7 +4091,7 @@ impl Float {
     /// too small to represent (`|x| < SmallestNonzeroFloat32`) the
     /// result is `(0, Below)` or `(-0, Above)`; if `|x|` is too large
     /// (`|x| > MaxFloat32`) it is `(+Inf, Above)` or `(-Inf, Below)`.
-    pub fn Float32(&self) -> (f32, Accuracy) {
+    pub fn Float32(&self) -> (crate::types::float32, Accuracy) {
         match self.form {
             form::Finite => {
                 // 0 < |x| < +Inf
@@ -4186,7 +4186,7 @@ impl Float {
     /// too small to represent (`|x| < SmallestNonzeroFloat64`) the
     /// result is `(0, Below)` or `(-0, Above)`; if `|x|` is too large
     /// (`|x| > MaxFloat64`) it is `(+Inf, Above)` or `(-Inf, Below)`.
-    pub fn Float64(&self) -> (f64, Accuracy) {
+    pub fn Float64(&self) -> (crate::types::float64, Accuracy) {
         match self.form {
             form::Finite => {
                 // 0 < |x| < +Inf
@@ -6075,7 +6075,7 @@ fn sqrt_f64(x: f64) -> f64 {
 /// `big.NewFloat(x)` — allocate a new [`Float`] set to `x`, with
 /// precision 53 and rounding mode `ToNearestEven`. Panics if `x` is a
 /// NaN, matching Go's `ErrNaN`.
-pub fn NewFloat(x: f64) -> Float {
+pub fn NewFloat(x: crate::types::float64) -> Float {
     if x.is_nan() {
         panic!("big::NewFloat(NaN)");
     }
