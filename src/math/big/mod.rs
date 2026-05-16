@@ -92,22 +92,46 @@ impl Rat {
         Rat { num: Int::default(), den: NewInt(1) }
     }
 
-    /// `(*Rat).SetFrac(a, b)` — set z = a/b, normalised. Panics on b=0.
-    /// Returns &mut Self per Go's chained-call idiom.
+    /// `(*Rat).SetFrac(a, b)` — set z = a/b, reduced to lowest terms.
+    /// Panics on b=0. Returns &mut Self per Go's chained-call idiom.
     pub fn SetFrac(&mut self, a: &Int, b: &Int) -> &mut Self {
         if b.Sign() == 0 {
             panic!("division by zero");
         }
         self.num = a.clone();
         self.den = b.clone();
-        // Normalise sign — the denominator is always > 0 in Go's Rat.
+        self.norm()
+    }
+
+    /// `(*Rat).norm()` — mirror of Go's `rat.go:norm`. Moves a negative
+    /// denominator's sign onto the numerator, reduces num/den by their
+    /// GCD, and normalizes a zero numerator to `0/1`. Panics on den=0.
+    fn norm(&mut self) -> &mut Self {
+        if self.den.Sign() == 0 {
+            panic!("division by zero");
+        }
+        // Denominator is always > 0 in Go's Rat — carry sign onto num.
         if self.den.neg {
             self.num.neg = !self.num.neg;
             self.den.neg = false;
         }
-        // Reduce by GCD. Stub: skip — callers that walk Denom() will
-        // see the unreduced denominator, but inf.v0's scaleQuoExact
-        // factors 2 and 5 explicitly so the result is the same.
+        if self.num.Sign() == 0 {
+            // z == 0; normalize to 0/1.
+            self.num.neg = false;
+            self.den = NewInt(1);
+            return self;
+        }
+        // z is a fraction; divide num and den by gcd(|num|, |den|).
+        let mut g = Int::default();
+        g.GCD(crate::nilval::nil, crate::nilval::nil, &self.num, &self.den);
+        if g.Cmp(&NewInt(1)) != 0 {
+            let mut new_num = Int::default();
+            new_num.Div(&self.num, &g);
+            let mut new_den = Int::default();
+            new_den.Div(&self.den, &g);
+            self.num = new_num;
+            self.den = new_den;
+        }
         self
     }
 
@@ -156,19 +180,148 @@ impl Rat {
         // den = xden * yden
         let mut new_den = Int::default();
         new_den.Mul(&xden, &yden);
-        // Normalise: denominator is always > 0; carry sign on numerator.
-        if new_den.neg {
-            new_num.neg = !new_num.neg;
-            new_den.neg = false;
-        }
-        // Empty denominator would mean 0/0; fall back to 1 (matches the
-        // SetFrac convention of treating zero limbs as the unit).
-        if new_den.abs.is_empty() {
-            new_den = NewInt(1);
-        }
         self.num = new_num;
         self.den = new_den;
+        self.norm()
+    }
+
+    /// `(*Rat).Add(x, y)` — z = x + y, reduced. Aliasing-safe.
+    pub fn Add(&mut self, x: &Rat, y: &Rat) -> &mut Self {
+        let xnum = x.num.clone();
+        let xden = x.den.clone();
+        let ynum = y.num.clone();
+        let yden = y.den.clone();
+        // num = xnum*yden + ynum*xden
+        let mut a1 = Int::default();
+        a1.Mul(&xnum, &yden);
+        let mut a2 = Int::default();
+        a2.Mul(&ynum, &xden);
+        let mut new_num = Int::default();
+        new_num.Add(&a1, &a2);
+        // den = xden*yden
+        let mut new_den = Int::default();
+        new_den.Mul(&xden, &yden);
+        self.num = new_num;
+        self.den = new_den;
+        self.norm()
+    }
+
+    /// `(*Rat).Sub(x, y)` — z = x - y, reduced. Aliasing-safe.
+    pub fn Sub(&mut self, x: &Rat, y: &Rat) -> &mut Self {
+        let xnum = x.num.clone();
+        let xden = x.den.clone();
+        let ynum = y.num.clone();
+        let yden = y.den.clone();
+        // num = xnum*yden - ynum*xden
+        let mut a1 = Int::default();
+        a1.Mul(&xnum, &yden);
+        let mut a2 = Int::default();
+        a2.Mul(&ynum, &xden);
+        let mut new_num = Int::default();
+        new_num.Sub(&a1, &a2);
+        // den = xden*yden
+        let mut new_den = Int::default();
+        new_den.Mul(&xden, &yden);
+        self.num = new_num;
+        self.den = new_den;
+        self.norm()
+    }
+
+    /// `(*Rat).Quo(x, y)` — z = x / y, reduced. Panics if y == 0.
+    /// Aliasing-safe.
+    pub fn Quo(&mut self, x: &Rat, y: &Rat) -> &mut Self {
+        if y.num.Sign() == 0 {
+            panic!("big::Rat::Quo: division by zero");
+        }
+        let xnum = x.num.clone();
+        let xden = x.den.clone();
+        let ynum = y.num.clone();
+        let yden = y.den.clone();
+        // num = xnum*yden, den = xden*ynum
+        let mut new_num = Int::default();
+        new_num.Mul(&xnum, &yden);
+        let mut new_den = Int::default();
+        new_den.Mul(&xden, &ynum);
+        self.num = new_num;
+        self.den = new_den;
+        self.norm()
+    }
+
+    /// `(*Rat).Neg(x)` — z = -x. Aliasing-safe.
+    pub fn Neg(&mut self, x: &Rat) -> &mut Self {
+        let mut new_num = Int::default();
+        new_num.Neg(&x.num);
+        self.num = new_num;
+        self.den = x.den.clone();
+        self.norm()
+    }
+
+    /// `(*Rat).Abs(x)` — z = |x|. Aliasing-safe.
+    pub fn Abs(&mut self, x: &Rat) -> &mut Self {
+        let mut new_num = Int::default();
+        new_num.Abs(&x.num);
+        self.num = new_num;
+        self.den = x.den.clone();
+        self.norm()
+    }
+
+    /// `(*Rat).Inv(x)` — z = 1/x. Panics if x == 0. Aliasing-safe.
+    pub fn Inv(&mut self, x: &Rat) -> &mut Self {
+        if x.num.Sign() == 0 {
+            panic!("big::Rat::Inv: division by zero");
+        }
+        // Swap numerator and denominator.
+        let new_num = x.den.clone();
+        let new_den = x.num.clone();
+        self.num = new_num;
+        self.den = new_den;
+        self.norm()
+    }
+
+    /// `(*Rat).Cmp(y)` — -1 / 0 / 1. Cross-multiplies; both denominators
+    /// are positive so the comparison direction is preserved.
+    pub fn Cmp(&self, y: &Rat) -> int {
+        let mut a = Int::default();
+        a.Mul(&self.num, &y.den);
+        let mut b = Int::default();
+        b.Mul(&y.num, &self.den);
+        a.Cmp(&b)
+    }
+
+    /// `(*Rat).Sign()` — sign of the numerator: -1 / 0 / 1.
+    pub fn Sign(&self) -> int {
+        self.num.Sign()
+    }
+
+    /// `(*Rat).IsInt()` — true iff the denominator is 1.
+    pub fn IsInt(&self) -> bool {
+        self.den.Cmp(&NewInt(1)) == 0
+    }
+
+    /// `(*Rat).SetInt64(x)` — z = x/1, return z.
+    pub fn SetInt64(&mut self, x: i64) -> &mut Self {
+        self.num = NewInt(x);
+        self.den = NewInt(1);
         self
+    }
+
+    /// `(*Rat).SetUint64(x)` — z = x/1, return z.
+    pub fn SetUint64(&mut self, x: u64) -> &mut Self {
+        let mut num = Int::default();
+        num.SetUint64(x);
+        self.num = num;
+        self.den = NewInt(1);
+        self
+    }
+
+    /// `(*Rat).SetFrac64(a, b)` — z = a/b, reduced. Panics on b=0.
+    pub fn SetFrac64(&mut self, a: i64, b: i64) -> &mut Self {
+        if b == 0 {
+            panic!("division by zero");
+        }
+        self.num = NewInt(a);
+        self.den = NewInt(b);
+        self.norm()
     }
 }
 

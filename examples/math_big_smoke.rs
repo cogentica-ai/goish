@@ -1444,6 +1444,114 @@ fn main() {
         check(&*out3 == &b">1101"[..], b"append base2 into non-empty buf");
     }
 
+    // ── Rat arithmetic + GCD normalization ─────────────────────────
+    {
+        // Add: 1/2 + 1/3 == 5/6.
+        let mut r = big::Rat::new();
+        r.Add(&big::NewRat(1, 2), &big::NewRat(1, 3));
+        check(r.Num().Cmp(&big::NewInt(5)) == 0, b"rat add num 5");
+        check(r.Denom().Cmp(&big::NewInt(6)) == 0, b"rat add den 6");
+
+        // Sub: 5/6 - 1/3 == 1/2.
+        let mut s = big::Rat::new();
+        s.Sub(&big::NewRat(5, 6), &big::NewRat(1, 3));
+        check(s.Num().Cmp(&big::NewInt(1)) == 0, b"rat sub num 1");
+        check(s.Denom().Cmp(&big::NewInt(2)) == 0, b"rat sub den 2");
+
+        // Mul: 2/3 * 3/4 == 1/2 (reduced).
+        let mut m = big::Rat::new();
+        m.Mul(&big::NewRat(2, 3), &big::NewRat(3, 4));
+        check(m.Num().Cmp(&big::NewInt(1)) == 0, b"rat mul num 1");
+        check(m.Denom().Cmp(&big::NewInt(2)) == 0, b"rat mul den 2");
+
+        // Quo: (1/2) / (3/4) == 2/3.
+        let mut q = big::Rat::new();
+        q.Quo(&big::NewRat(1, 2), &big::NewRat(3, 4));
+        check(q.Num().Cmp(&big::NewInt(2)) == 0, b"rat quo num 2");
+        check(q.Denom().Cmp(&big::NewInt(3)) == 0, b"rat quo den 3");
+
+        // norm reduction: 2/4 -> 1/2.
+        let red = big::NewRat(2, 4);
+        check(red.Num().Cmp(&big::NewInt(1)) == 0, b"rat 2/4 reduces num");
+        check(red.Denom().Cmp(&big::NewInt(2)) == 0, b"rat 2/4 reduces den");
+
+        // norm reduction: 6/8 -> 3/4.
+        let mut sf = big::Rat::new();
+        sf.SetFrac(&big::NewInt(6), &big::NewInt(8));
+        check(sf.Num().Cmp(&big::NewInt(3)) == 0, b"rat 6/8 -> 3/4 num");
+        check(sf.Denom().Cmp(&big::NewInt(4)) == 0, b"rat 6/8 -> 3/4 den");
+
+        // Negative denominator: sign moves onto the numerator.
+        let mut nd = big::Rat::new();
+        nd.SetFrac(&big::NewInt(1), &big::NewInt(-2));
+        check(nd.Num().Cmp(&big::NewInt(-1)) == 0, b"rat neg-den num -1");
+        check(nd.Denom().Cmp(&big::NewInt(2)) == 0, b"rat neg-den den +2");
+
+        // Zero numerator normalizes to 0/1.
+        let mut zr = big::Rat::new();
+        zr.SetFrac(&big::NewInt(0), &big::NewInt(7));
+        check(zr.Num().Sign() == 0, b"rat 0/7 num zero");
+        check(zr.Denom().Cmp(&big::NewInt(1)) == 0, b"rat 0/7 den 1");
+
+        // Neg: -(1/3) == -1/3.
+        let mut ng = big::Rat::new();
+        ng.Neg(&big::NewRat(1, 3));
+        check(ng.Num().Cmp(&big::NewInt(-1)) == 0, b"rat neg num -1");
+        check(ng.Denom().Cmp(&big::NewInt(3)) == 0, b"rat neg den 3");
+
+        // Abs: |-2/5| == 2/5.
+        let mut ab = big::Rat::new();
+        ab.Abs(&big::NewRat(-2, 5));
+        check(ab.Num().Cmp(&big::NewInt(2)) == 0, b"rat abs num 2");
+        check(ab.Sign() == 1, b"rat abs sign +1");
+
+        // Inv: 1/(3/4) == 4/3.
+        let mut iv = big::Rat::new();
+        iv.Inv(&big::NewRat(3, 4));
+        check(iv.Num().Cmp(&big::NewInt(4)) == 0, b"rat inv num 4");
+        check(iv.Denom().Cmp(&big::NewInt(3)) == 0, b"rat inv den 3");
+        // Inv of a negative keeps the denominator positive.
+        let mut ivn = big::Rat::new();
+        ivn.Inv(&big::NewRat(-2, 5));
+        check(ivn.Num().Cmp(&big::NewInt(-5)) == 0, b"rat inv neg num -5");
+        check(ivn.Denom().Cmp(&big::NewInt(2)) == 0, b"rat inv neg den 2");
+
+        // Cmp: 1/3 < 1/2 < 2/3, with equality.
+        check(big::NewRat(1, 3).Cmp(&big::NewRat(1, 2)) == -1, b"rat cmp lt");
+        check(big::NewRat(1, 2).Cmp(&big::NewRat(2, 4)) == 0, b"rat cmp eq");
+        check(big::NewRat(2, 3).Cmp(&big::NewRat(1, 2)) == 1, b"rat cmp gt");
+
+        // Sign.
+        check(big::NewRat(-1, 4).Sign() == -1, b"rat sign neg");
+        check(big::NewRat(0, 4).Sign() == 0, b"rat sign zero");
+        check(big::NewRat(3, 4).Sign() == 1, b"rat sign pos");
+
+        // IsInt: 4/2 reduces to 2/1 (int); 1/2 is not.
+        check(big::NewRat(4, 2).IsInt(), b"rat 4/2 is int");
+        check(!big::NewRat(1, 2).IsInt(), b"rat 1/2 not int");
+
+        // SetInt64 / SetUint64 / SetFrac64.
+        let mut si = big::Rat::new();
+        si.SetInt64(-7);
+        check(si.Num().Cmp(&big::NewInt(-7)) == 0, b"rat setint64 num");
+        check(si.IsInt(), b"rat setint64 is int");
+        let mut su = big::Rat::new();
+        su.SetUint64(42);
+        check(su.Num().Cmp(&big::NewInt(42)) == 0, b"rat setuint64 num");
+        check(su.IsInt(), b"rat setuint64 is int");
+        let mut s64 = big::Rat::new();
+        s64.SetFrac64(10, -4);
+        check(s64.Num().Cmp(&big::NewInt(-5)) == 0, b"rat setfrac64 num -5");
+        check(s64.Denom().Cmp(&big::NewInt(2)) == 0, b"rat setfrac64 den 2");
+
+        // Aliasing: r.Add(r, r) == 2*r.
+        let mut al = big::NewRat(1, 4);
+        let snap = al.clone();
+        al.Add(&snap, &snap);
+        check(al.Num().Cmp(&big::NewInt(1)) == 0, b"rat alias add num 1");
+        check(al.Denom().Cmp(&big::NewInt(2)) == 0, b"rat alias add den 2");
+    }
+
     let _ = &int::from(0);
     report();
 }
