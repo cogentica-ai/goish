@@ -2470,6 +2470,164 @@ impl crate::fmt::Formatter for Float {
     }
 }
 
+// ─── fmt::Scanner — Int / Rat / Float ─────────────────────────────────
+//
+// Go reference: math/big/intconv.go, ratconv.go, floatconv.go. Each of
+// `*big.Int`, `*big.Rat`, `*big.Float` implements `fmt.Scanner` so a
+// printf-style `Sscanf("%d", &z)` parses the value through the
+// scanner's `Scan` method.
+//
+// Go drives the scan via a `byteReader` that wraps `fmt.ScanState` as
+// an `io.ByteScanner`, reading one rune at a time. Goish's `ScanState`
+// already exposes `Token`, which is the simplest faithful path: a
+// predicate selects the run of characters that may belong to a numeric
+// literal, and the collected bytes are handed to the existing string
+// parsers (`scan_int` / `SetString` / `Parse`).
+mod scan_tok {
+    use crate::types::rune;
+    use alloc::sync::Arc;
+
+    /// Predicate for `Int.Scan`: sign, the base-prefix letters, the
+    /// digit characters of every base goish accepts, and the `_`
+    /// separator. Mirrors the character set Go's `nat.scan` consumes.
+    pub fn int_tok(ch: rune) -> bool {
+        matches!(ch as u32 as u8 as char,
+            '+' | '-' | '_' | '.'
+            | '0'..='9' | 'a'..='z' | 'A'..='Z')
+            && ch >= 0 && ch < 128
+    }
+
+    /// Predicate for `Rat.Scan` — Go's `ratTok`: `"+-/0123456789.eE"`.
+    pub fn rat_tok(ch: rune) -> bool {
+        matches!(ch as u32 as u8 as char,
+            '+' | '-' | '/' | '.' | 'e' | 'E' | '0'..='9')
+            && ch >= 0 && ch < 128
+    }
+
+    /// Predicate for `Float.Scan`: a float literal's character set —
+    /// sign, base-prefix letters, digits, radix point, and the `e`/`p`
+    /// exponent indicators (plus `_` for base-0 separators).
+    pub fn float_tok(ch: rune) -> bool {
+        matches!(ch as u32 as u8 as char,
+            '+' | '-' | '_' | '.'
+            | '0'..='9' | 'a'..='z' | 'A'..='Z')
+            && ch >= 0 && ch < 128
+    }
+
+    /// Pull a numeric token out of `state` using `pred`, skipping any
+    /// leading whitespace. Returns the collected bytes, or an error
+    /// when the state reports a read failure.
+    pub fn token(
+        state: &mut dyn crate::fmt::ScanState,
+        pred: fn(rune) -> bool,
+    ) -> (crate::slice<crate::types::byte>, crate::error) {
+        let f: Arc<dyn Fn(rune) -> bool + Send + Sync> = Arc::new(pred);
+        state.Token(true, f)
+    }
+}
+
+// `(*Int).Scan` — Go's intconv.go:Scan. Accepts the verbs `b o d x X`
+// (base 2/8/10/16) plus `s`/`v` (base auto-detected from the literal
+// prefix). Reads a numeric token from `state` and parses it with
+// `scan_int`. An unsupported verb returns `errors.New("Int.Scan:
+// invalid verb")`.
+impl crate::fmt::Scanner for Int {
+    fn Scan(
+        &mut self,
+        state: &mut dyn crate::fmt::ScanState,
+        verb: crate::types::rune,
+    ) -> crate::error {
+        let base: int = match verb {
+            x if x == 'b' as crate::types::rune => 2,
+            x if x == 'o' as crate::types::rune => 8,
+            x if x == 'd' as crate::types::rune => 10,
+            x if x == 'x' as crate::types::rune
+                || x == 'X' as crate::types::rune => 16,
+            x if x == 's' as crate::types::rune
+                || x == 'v' as crate::types::rune => 0,
+            _ => return crate::errors::New("Int.Scan: invalid verb"),
+        };
+        let (tok, err) = scan_tok::token(state, scan_tok::int_tok);
+        if err != crate::errors::nil {
+            return err;
+        }
+        match scan_int(&tok, base) {
+            Some((neg, abs)) => {
+                self.neg = neg && !abs.is_empty();
+                self.abs = abs;
+                crate::errors::nil
+            }
+            None => crate::errors::New("Int.Scan: invalid syntax"),
+        }
+    }
+}
+
+// `(*Rat).Scan` — Go's ratconv.go:Scan. Accepts the verbs `e E f F g
+// G v` (all equivalent). Reads a numeric token and parses it with
+// `Rat::SetString`. An unsupported verb returns `errors.New("Rat.Scan:
+// invalid verb")`.
+impl crate::fmt::Scanner for Rat {
+    fn Scan(
+        &mut self,
+        state: &mut dyn crate::fmt::ScanState,
+        verb: crate::types::rune,
+    ) -> crate::error {
+        let (tok, err) = scan_tok::token(state, scan_tok::rat_tok);
+        if err != crate::errors::nil {
+            return err;
+        }
+        let ok_verb = matches!(verb,
+            x if x == 'e' as crate::types::rune
+                || x == 'E' as crate::types::rune
+                || x == 'f' as crate::types::rune
+                || x == 'F' as crate::types::rune
+                || x == 'g' as crate::types::rune
+                || x == 'G' as crate::types::rune
+                || x == 'v' as crate::types::rune);
+        if !ok_verb {
+            return crate::errors::New("Rat.Scan: invalid verb");
+        }
+        let s = crate::string::from_bytes(&tok);
+        let (_, ok) = self.SetString(s);
+        if ok {
+            crate::errors::nil
+        } else {
+            crate::errors::New("Rat.Scan: invalid syntax")
+        }
+    }
+}
+
+// `(*Float).Scan` — Go's floatconv.go:Scan. Accepts the floating-point
+// verbs `b e E f F g G`. Reads a numeric token and parses it with
+// `Float::Parse` (base 0). Scan does not handle ±Inf. An unsupported
+// verb returns `errors.New("Float.Scan: invalid verb")`.
+impl crate::fmt::Scanner for Float {
+    fn Scan(
+        &mut self,
+        state: &mut dyn crate::fmt::ScanState,
+        verb: crate::types::rune,
+    ) -> crate::error {
+        let ok_verb = matches!(verb,
+            x if x == 'b' as crate::types::rune
+                || x == 'e' as crate::types::rune
+                || x == 'E' as crate::types::rune
+                || x == 'f' as crate::types::rune
+                || x == 'F' as crate::types::rune
+                || x == 'g' as crate::types::rune
+                || x == 'G' as crate::types::rune);
+        if !ok_verb {
+            return crate::errors::New("Float.Scan: invalid verb");
+        }
+        let (tok, err) = scan_tok::token(state, scan_tok::float_tok);
+        if err != crate::errors::nil {
+            return err;
+        }
+        let s = crate::string::from_bytes(&tok);
+        let (_, _, perr) = self.Parse(s, 0);
+        perr
+    }
+}
+
 /// Rat gob codec version — mirrors `ratmarsh.go:ratGobVersion`.
 const RAT_GOB_VERSION: u8 = 1;
 

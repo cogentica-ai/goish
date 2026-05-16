@@ -158,6 +158,78 @@ impl goish::fmt::State for TestState {
     }
 }
 
+// ── In-test fmt::ScanState scaffold ───────────────────────────────────
+//
+// `ScanCursor` wraps an ASCII byte buffer plus a read position so the
+// `Int` / `Rat` / `Float` `fmt::Scanner` impls have a concrete
+// `ScanState` to read through. `ReadRune` / `UnreadRune` step the
+// cursor a byte at a time (ASCII-only is enough for numeric literals);
+// `Token` skips leading space then collects the run of bytes accepted
+// by the predicate `f`.
+struct ScanCursor {
+    buf: alloc::vec::Vec<u8>,
+    pos: usize,
+    last: usize, // pos before the most recent ReadRune (for UnreadRune)
+}
+
+impl ScanCursor {
+    fn new(s: &[u8]) -> Self {
+        ScanCursor {
+            buf: s.to_vec(),
+            pos: 0,
+            last: 0,
+        }
+    }
+}
+
+impl goish::fmt::ScanState for ScanCursor {
+    fn ReadRune(&mut self) -> (goish::rune, int, goish::error) {
+        if self.pos >= self.buf.len() {
+            return (0, 0, goish::io::EOF.into());
+        }
+        self.last = self.pos;
+        let b = self.buf[self.pos];
+        self.pos += 1;
+        (b as goish::rune, 1, goish::nil.into())
+    }
+    fn UnreadRune(&mut self) -> goish::error {
+        self.pos = self.last;
+        goish::nil.into()
+    }
+    fn SkipSpace(&mut self) {
+        while self.pos < self.buf.len()
+            && (self.buf[self.pos] == b' '
+                || self.buf[self.pos] == b'\t'
+                || self.buf[self.pos] == b'\n'
+                || self.buf[self.pos] == b'\r')
+        {
+            self.pos += 1;
+        }
+    }
+    fn Token(
+        &mut self,
+        skip_space: bool,
+        f: alloc::sync::Arc<dyn Fn(goish::rune) -> bool + Send + Sync>,
+    ) -> (slice<goish::byte>, goish::error) {
+        if skip_space {
+            self.SkipSpace();
+        }
+        let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        while self.pos < self.buf.len() {
+            let b = self.buf[self.pos];
+            if !f(b as goish::rune) {
+                break;
+            }
+            out.push(b);
+            self.pos += 1;
+        }
+        (slice::<goish::byte>::__from_vec(out), goish::nil.into())
+    }
+    fn Width(&self) -> (int, bool) {
+        (0, false)
+    }
+}
+
 #[goish::main]
 fn main() {
     // ── Sign ───────────────────────────────────────────────────────
@@ -2588,6 +2660,94 @@ fn main() {
         let mut st = TestState::new();
         fv.Format(&mut st, 'd' as goish::rune);
         check(&st.buf[..11] == b"%!d(big.Flo", b"Float.Format bad verb");
+    }
+
+    // ── fmt::Scanner — Int / Rat / Float ───────────────────────────
+    {
+        use goish::fmt::Scanner;
+
+        // Int.Scan — decimal under the 'd' verb.
+        let mut z = big::Int::new();
+        let mut cur = ScanCursor::new(b"1234");
+        let err = z.Scan(&mut cur, 'd' as goish::rune);
+        check(err == goish::nil && z.Int64() == 1234, b"Int.Scan 1234");
+
+        // Int.Scan — negative.
+        let mut z = big::Int::new();
+        let mut cur = ScanCursor::new(b"-42");
+        let err = z.Scan(&mut cur, 'd' as goish::rune);
+        check(err == goish::nil && z.Int64() == -42, b"Int.Scan -42");
+
+        // Int.Scan — multi-limb decimal (10^25, well beyond i64).
+        let want = pow10(25);
+        let mut z = big::Int::new();
+        let mut cur = ScanCursor::new(want.String().as_bytes());
+        let err = z.Scan(&mut cur, 'd' as goish::rune);
+        check(err == goish::nil && z.Cmp(&want) == 0, b"Int.Scan multi-limb");
+
+        // Int.Scan — hex literal under the 'x' verb (0xff == 255).
+        let mut z = big::Int::new();
+        let mut cur = ScanCursor::new(b"ff");
+        let err = z.Scan(&mut cur, 'x' as goish::rune);
+        check(err == goish::nil && z.Int64() == 255, b"Int.Scan hex ff");
+
+        // Int.Scan — leading whitespace is skipped.
+        let mut z = big::Int::new();
+        let mut cur = ScanCursor::new(b"   77");
+        let err = z.Scan(&mut cur, 'd' as goish::rune);
+        check(err == goish::nil && z.Int64() == 77, b"Int.Scan skip space");
+
+        // Int.Scan — unsupported verb → non-nil error.
+        let mut z = big::Int::new();
+        let mut cur = ScanCursor::new(b"5");
+        let err = z.Scan(&mut cur, 'q' as goish::rune);
+        check(err != goish::nil, b"Int.Scan bad verb");
+
+        // Rat.Scan — fraction "22/7" under the 'v' verb.
+        let mut r = big::Rat::default();
+        let mut cur = ScanCursor::new(b"22/7");
+        let err = r.Scan(&mut cur, 'v' as goish::rune);
+        check(err == goish::nil
+            && r.Num().Int64() == 22
+            && r.Denom().Int64() == 7,
+            b"Rat.Scan 22/7");
+
+        // Rat.Scan — a plain integer "3" → 3/1.
+        let mut r = big::Rat::default();
+        let mut cur = ScanCursor::new(b"3");
+        let err = r.Scan(&mut cur, 'g' as goish::rune);
+        check(err == goish::nil
+            && r.Num().Int64() == 3
+            && r.Denom().Int64() == 1,
+            b"Rat.Scan 3");
+
+        // Rat.Scan — unsupported verb → non-nil error.
+        let mut r = big::Rat::default();
+        let mut cur = ScanCursor::new(b"1/2");
+        let err = r.Scan(&mut cur, 'd' as goish::rune);
+        check(err != goish::nil, b"Rat.Scan bad verb");
+
+        // Float.Scan — decimal "3.14159" under the 'g' verb.
+        let mut fl = big::Float::new();
+        let mut cur = ScanCursor::new(b"3.14159");
+        let err = fl.Scan(&mut cur, 'g' as goish::rune);
+        let (fv, _) = fl.Float64();
+        check(err == goish::nil && (fv - 3.14159).abs() < 1e-9,
+            b"Float.Scan 3.14159");
+
+        // Float.Scan — scientific "-2.5e3" under the 'e' verb.
+        let mut fl = big::Float::new();
+        let mut cur = ScanCursor::new(b"-2.5e3");
+        let err = fl.Scan(&mut cur, 'e' as goish::rune);
+        let (fv, _) = fl.Float64();
+        check(err == goish::nil && (fv - (-2500.0)).abs() < 1e-6,
+            b"Float.Scan -2.5e3");
+
+        // Float.Scan — unsupported verb → non-nil error.
+        let mut fl = big::Float::new();
+        let mut cur = ScanCursor::new(b"1.0");
+        let err = fl.Scan(&mut cur, 'd' as goish::rune);
+        check(err != goish::nil, b"Float.Scan bad verb");
     }
 
     let _ = &int::from(0);
