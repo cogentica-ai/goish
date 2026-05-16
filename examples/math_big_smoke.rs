@@ -1694,6 +1694,166 @@ fn main() {
         check(zr.Sign() == 0 && zr.Denom().Cmp(&big::NewInt(1)) == 0, b"rat gobdecode empty resets");
     }
 
+    // ── Float core: type, RoundingMode, setters, predicates ────────
+    {
+        // NewFloat / SetFloat64 — read back the basic state.
+        let pf = big::NewFloat(3.5);
+        check(pf.Sign() == 1, b"float newfloat sign pos");
+        check(!pf.Signbit(), b"float newfloat signbit");
+        check(!pf.IsInf(), b"float newfloat not inf");
+        check(pf.Prec() == 53, b"float newfloat prec 53");
+        check(pf.Mode() == big::RoundingMode::ToNearestEven, b"float newfloat mode");
+        check(pf.Acc() == big::Accuracy::Exact, b"float newfloat acc exact");
+        check(pf.IsInt() == false, b"float 3.5 not int");
+
+        let nf = big::NewFloat(-2.0);
+        check(nf.Sign() == -1, b"float newfloat sign neg");
+        check(nf.Signbit(), b"float newfloat neg signbit");
+        check(nf.IsInt(), b"float -2.0 is int");
+
+        let mut zf = big::Float::new();
+        zf.SetFloat64(0.0);
+        check(zf.Sign() == 0, b"float zero sign");
+        check(zf.IsInt(), b"float zero is int");
+
+        // Zero value default.
+        let dv = big::Float::default();
+        check(dv.Sign() == 0 && dv.Prec() == 0, b"float default zero");
+        check(dv.Mode() == big::RoundingMode::ToNearestEven, b"float default mode");
+    }
+
+    // ── Float: SetInt64 / SetUint64 / SetInt ───────────────────────
+    {
+        let mut a = big::Float::new();
+        a.SetInt64(-12345);
+        check(a.Sign() == -1, b"float setint64 sign");
+        check(a.Prec() == 64, b"float setint64 prec 64");
+        check(a.IsInt(), b"float setint64 is int");
+
+        let mut u = big::Float::new();
+        u.SetUint64(9000000000000000000);
+        check(u.Sign() == 1 && u.Prec() == 64, b"float setuint64");
+
+        let big_int = pow2(100); // needs 101 bits
+        let mut fi = big::Float::new();
+        fi.SetInt(&big_int);
+        check(fi.Sign() == 1, b"float setint sign");
+        check(fi.Prec() == 101, b"float setint prec = bitlen");
+        check(fi.IsInt(), b"float setint is int");
+
+        let mut fs = big::Float::new();
+        fs.SetInt(&big::NewInt(7));
+        check(fs.Prec() == 64, b"float setint small prec 64");
+    }
+
+    // ── Float: SetInf / IsInf / Signbit ────────────────────────────
+    {
+        let mut pi = big::Float::new();
+        pi.SetInf(false);
+        check(pi.IsInf(), b"float +inf is inf");
+        check(!pi.Signbit(), b"float +inf signbit");
+        check(pi.Sign() == 1, b"float +inf sign");
+        check(!pi.IsInt(), b"float +inf not int");
+
+        let mut ni = big::Float::new();
+        ni.SetInf(true);
+        check(ni.IsInf(), b"float -inf is inf");
+        check(ni.Signbit(), b"float -inf signbit");
+        check(ni.Sign() == -1, b"float -inf sign");
+    }
+
+    // ── Float: Cmp ─────────────────────────────────────────────────
+    {
+        let one = big::NewFloat(1.0);
+        let two = big::NewFloat(2.0);
+        let one2 = big::NewFloat(1.0);
+        check(one.Cmp(&two) == -1, b"float cmp less");
+        check(two.Cmp(&one) == 1, b"float cmp greater");
+        check(one.Cmp(&one2) == 0, b"float cmp equal");
+
+        // ±0 compare equal.
+        let mut pz = big::Float::new();
+        pz.SetFloat64(0.0);
+        let mut nz = big::Float::new();
+        nz.SetFloat64(-0.0);
+        check(pz.Cmp(&nz) == 0, b"float cmp +0 == -0");
+
+        // ±Inf.
+        let mut pinf = big::Float::new();
+        pinf.SetInf(false);
+        let mut ninf = big::Float::new();
+        ninf.SetInf(true);
+        check(ninf.Cmp(&pinf) == -1, b"float cmp -inf < +inf");
+        check(pinf.Cmp(&one) == 1, b"float cmp +inf > 1");
+        check(ninf.Cmp(&one) == -1, b"float cmp -inf < 1");
+        let mut pinf2 = big::Float::new();
+        pinf2.SetInf(false);
+        check(pinf.Cmp(&pinf2) == 0, b"float cmp +inf == +inf");
+    }
+
+    // ── Float: MantExp / SetMantExp round-trip ─────────────────────
+    {
+        // 12.0 = 0.75 × 2^4.
+        let x = big::NewFloat(12.0);
+        let exp_only = x.MantExp(goish::nil);
+        check(exp_only == 4, b"float mantexp exponent (nil out)");
+
+        let mut mant = big::Float::new();
+        let exp = x.MantExp(&mut mant);
+        check(exp == 4, b"float mantexp exponent");
+        // mant ∈ [0.5, 1): 0.5 <= mant < 1.0  ⇔  MantExp(mant) == 0.
+        check(mant.MantExp(goish::nil) == 0, b"float mantexp mant normalized");
+        let half = big::NewFloat(0.5);
+        let one = big::NewFloat(1.0);
+        check(mant.Cmp(&half) >= 0 && mant.Cmp(&one) < 0, b"float mantexp mant in [0.5,1)");
+
+        // SetMantExp reconstructs x from (mant, exp).
+        let mut rebuilt = big::Float::new();
+        rebuilt.SetMantExp(&mant, exp);
+        check(rebuilt.Cmp(&x) == 0, b"float setmantexp round-trip");
+
+        // ±0 / ±Inf special cases: exponent 0.
+        let z = big::NewFloat(0.0);
+        check(z.MantExp(goish::nil) == 0, b"float mantexp zero = 0");
+        let mut inf = big::Float::new();
+        inf.SetInf(false);
+        check(inf.MantExp(goish::nil) == 0, b"float mantexp inf = 0");
+    }
+
+    // ── Float: SetPrec rounds (exercises round helper) / MinPrec ────
+    {
+        // 0.75 = 0.11b → needs 2 mantissa bits. 13.0 = 1101b → needs 4.
+        let thirteen = big::NewFloat(13.0);
+        check(thirteen.MinPrec() == 4, b"float minprec 13.0 = 4");
+
+        // A value needing 10 bits: 1023.0 = 1111111111b.
+        let mut wide = big::Float::new();
+        wide.SetInt64(1023);
+        check(wide.MinPrec() == 10, b"float minprec 1023 = 10");
+
+        // Round 1023 down to 4 bits of precision — must change + report.
+        let mut narrowed = big::Float::new();
+        narrowed.Copy(&wide);
+        narrowed.SetPrec(4);
+        check(narrowed.Prec() == 4, b"float setprec 4");
+        check(narrowed.Acc() != big::Accuracy::Exact, b"float setprec inexact acc");
+        check(narrowed.Cmp(&wide) != 0, b"float setprec changed value");
+        check(narrowed.MinPrec() <= 4, b"float setprec minprec fits");
+
+        // SetPrec to a precision >= MinPrec is exact.
+        let mut keep = big::Float::new();
+        keep.Copy(&wide);
+        keep.SetPrec(16);
+        check(keep.Acc() == big::Accuracy::Exact, b"float setprec wide exact");
+        check(keep.Cmp(&wide) == 0, b"float setprec wide unchanged");
+
+        // SetPrec(0) collapses a finite value to ±0.
+        let mut collapsed = big::Float::new();
+        collapsed.Copy(&wide);
+        collapsed.SetPrec(0);
+        check(collapsed.Sign() == 0 && collapsed.Prec() == 0, b"float setprec 0 = zero");
+    }
+
     let _ = &int::from(0);
     let _ = string::from("");
     report();
