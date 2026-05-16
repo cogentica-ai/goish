@@ -358,14 +358,12 @@ impl Int {
     /// (the sign of m is ignored, matching Go). Fully multi-precision:
     /// operands and modulus may be any size (RSA-sized inputs work).
     ///
-    /// Semantics match Go's `(*Int).Exp` for y >= 0:
+    /// Semantics match Go's `(*Int).Exp`:
     ///   * If m == 0 (nil-equivalent), z = x**y unless y <= 0 then z = 1.
     ///   * Otherwise z = x**y mod |m|, normalised to 0 <= z < |m|.
-    ///
-    /// Limitation: a negative exponent panics. Go handles y < 0 via a
-    /// modular inverse (extended GCD); that path is deferred. For
-    /// y < 0 with m == 0, Go returns 1 — we still honour that case
-    /// without panicking.
+    ///   * For y < 0 with m != 0, z = (x⁻¹ mod |m|)**(-y) mod |m|.
+    ///     Panics with Go's message if x is not coprime to m.
+    ///   * For y < 0 with m == 0, z = 1 (matches Go).
     pub fn Exp(&mut self, x: &Int, y: &Int, m: &Int) -> &mut Self {
         let m_zero = m.abs.is_empty();
         if y.neg {
@@ -373,7 +371,26 @@ impl Int {
                 // Go: y < 0 && m == 0  ->  z = 1.
                 return self.SetInt64(1);
             }
-            panic!("big::Int::Exp: negative exponent requires a modular inverse, not implemented in v1");
+            // Negative exponent: x**y == (x⁻¹)**(-y) mod |m|.
+            // Snapshot up front — self may alias x, y or m.
+            let mut m_abs = Int::new();
+            m_abs.Abs(m);
+            // gcd(x mod |m|, |m|) must be 1 for the inverse to exist.
+            let mut x_red = Int::new();
+            x_red.Mod(x, &m_abs);
+            let mut g = Int::new();
+            g.GCD(crate::nilval::nil, crate::nilval::nil, &x_red, &m_abs);
+            let mut one = Int::new();
+            one.SetInt64(1);
+            if g.Cmp(&one) != 0 {
+                panic!("negative exponent and modulus not relatively prime");
+            }
+            let mut inv = Int::new();
+            inv.ModInverse(&x_red, &m_abs);
+            // pos_y = -y (the magnitude of the exponent).
+            let mut pos_y = Int::new();
+            pos_y.Neg(y);
+            return self.Exp(&inv, &pos_y, &m_abs);
         }
         // m_abs is |m| (sign ignored, per Go).
         let m_abs = &m.abs;
@@ -423,6 +440,126 @@ impl Int {
         }
         self.neg = neg && !acc.is_empty();
         self.abs = acc;
+        self
+    }
+
+    /// `(*Int).GCD(x, y, a, b)` — z = gcd(|a|, |b|), always >= 0.
+    /// If `x` / `y` are non-nil they receive Bézout coefficients such
+    /// that `a*x + b*y == z`. Pass bare `nil` for an out-parameter to
+    /// skip it (Go's `GCD(nil, nil, a, b)`).
+    ///
+    /// `a` and `b` may be positive, zero or negative. Edge cases match
+    /// Go: `gcd(0,0)==0`, and when one operand is zero gcd is the
+    /// magnitude of the other. The coefficients satisfy the Bézout
+    /// identity for the *signed* a, b; a plain extended Euclidean is
+    /// used, so coefficient values may differ from Go's Lehmer path
+    /// while still satisfying `a*x + b*y == z`.
+    pub fn GCD<X: MaybeMutInt, Y: MaybeMutInt, A: AsRef<Int>, B: AsRef<Int>>(
+        &mut self,
+        mut x: X,
+        mut y: Y,
+        a: A,
+        b: B,
+    ) -> &mut Self {
+        // Snapshot a, b up front — z / x / y may alias either operand.
+        let a0 = a.as_ref().clone();
+        let b0 = b.as_ref().clone();
+
+        // Run extended Euclidean on the magnitudes |a|, |b|.
+        // Maintain: r0 = ca*|a| + cb*|b|, r1 = da*|a| + db*|b|.
+        let mut r0 = Int { neg: false, abs: a0.abs.clone() };
+        let mut r1 = Int { neg: false, abs: b0.abs.clone() };
+        let mut ca = Int::new(); ca.SetInt64(1); // 1
+        let mut cb = Int::new();                 // 0
+        let mut da = Int::new();                 // 0
+        let mut db = Int::new(); db.SetInt64(1); // 1
+
+        while r1.Sign() != 0 {
+            // q = r0 div r1, rem = r0 mod r1 (both magnitudes positive).
+            let mut q = Int::new();
+            let mut rem = Int::new();
+            q.DivMod(&r0, &r1, &mut rem);
+            // (r0, r1) = (r1, rem)
+            r0 = r1;
+            r1 = rem;
+            // (ca, da) = (da, ca - q*da)
+            let mut qda = Int::new();
+            qda.Mul(&q, &da);
+            let mut nca = Int::new();
+            nca.Sub(&ca, &qda);
+            ca = da;
+            da = nca;
+            // (cb, db) = (db, cb - q*db)
+            let mut qdb = Int::new();
+            qdb.Mul(&q, &db);
+            let mut ncb = Int::new();
+            ncb.Sub(&cb, &qdb);
+            cb = db;
+            db = ncb;
+        }
+        // r0 == gcd(|a|,|b|) and r0 = ca*|a| + cb*|b|.
+
+        // Bézout coefficients for the *signed* operands: |a| = sign(a)*a,
+        // so ca*|a| = (ca*sign(a))*a. Fold the sign into the coefficient.
+        if let Some(xr) = x.maybe_mut_int() {
+            if a0.neg {
+                xr.Neg(&ca);
+            } else {
+                xr.Set(&ca);
+            }
+        }
+        if let Some(yr) = y.maybe_mut_int() {
+            if b0.neg {
+                yr.Neg(&cb);
+            } else {
+                yr.Set(&cb);
+            }
+        }
+
+        self.neg = false;
+        self.abs = r0.abs;
+        self
+    }
+
+    /// `(*Int).ModInverse(g, n)` — z = the multiplicative inverse of g
+    /// in ℤ/nℤ, i.e. `z*g ≡ 1 (mod n)`, normalised to `0 <= z < |n|`.
+    ///
+    /// If `g` and `n` are not relatively prime, g has no inverse: Go
+    /// returns nil there. goish methods return `&mut Self`, so in the
+    /// no-inverse case `self` is left **unchanged** and a `false`
+    /// status would be needed to detect it — callers must ensure
+    /// `gcd(g,n)==1` (use `GCD` to check). It never stores a garbage
+    /// value. Panics if `n == 0` (division by zero), matching Go.
+    pub fn ModInverse<G: AsRef<Int>, N: AsRef<Int>>(&mut self, g: G, n: N) -> &mut Self {
+        // GCD operates on magnitudes; work with |n| and g reduced mod |n|.
+        let n0 = n.as_ref().clone();
+        if n0.abs.is_empty() {
+            panic!("big::Int::ModInverse: division by zero");
+        }
+        let mut n_abs = Int::new();
+        n_abs.Abs(&n0);
+        // g may be negative — reduce into [0, |n|).
+        let mut g_red = Int::new();
+        g_red.Mod(g.as_ref(), &n_abs);
+
+        // d = gcd(g_red, |n|) with Bézout x: g_red*x + |n|*y = d.
+        let mut d = Int::new();
+        let mut xc = Int::new();
+        d.GCD(&mut xc, crate::nilval::nil, &g_red, &n_abs);
+
+        // Inverse exists iff gcd == 1.
+        let mut one = Int::new();
+        one.SetInt64(1);
+        if d.Cmp(&one) != 0 {
+            // Not coprime: leave self unchanged (Go returns nil here).
+            return self;
+        }
+        // x is the inverse but may be negative; normalise to [0, |n|).
+        if xc.neg {
+            self.Add(&xc, &n_abs);
+        } else {
+            self.Set(&xc);
+        }
         self
     }
 
@@ -1687,6 +1824,40 @@ impl AsMutInt for crate::nilable<Int> {
     #[track_caller]
     fn as_mut_int(&mut self) -> &mut Int {
         self.MustMut()
+    }
+}
+
+/// Internal: an *optional* mutable Int out-parameter. Unlike
+/// `AsMutInt` (which panics on nil), this lets a caller pass bare
+/// `nil` for an out-parameter it wants to skip — modelling Go's
+/// `GCD(x, y, a, b)` where `x` or `y` may be `nil`.
+pub trait MaybeMutInt {
+    fn maybe_mut_int(&mut self) -> Option<&mut Int>;
+}
+
+impl MaybeMutInt for Int {
+    fn maybe_mut_int(&mut self) -> Option<&mut Int> { Some(self) }
+}
+
+impl MaybeMutInt for &mut Int {
+    fn maybe_mut_int(&mut self) -> Option<&mut Int> { Some(*self) }
+}
+
+impl MaybeMutInt for crate::nilval::Nil {
+    fn maybe_mut_int(&mut self) -> Option<&mut Int> { None }
+}
+
+impl<'a> MaybeMutInt for crate::gonilable_ref::nilable_refmut<'a, Int> {
+    #[track_caller]
+    fn maybe_mut_int(&mut self) -> Option<&mut Int> {
+        if self.IsNil() { None } else { Some(self.MustMutRef()) }
+    }
+}
+
+impl MaybeMutInt for crate::nilable<Int> {
+    #[track_caller]
+    fn maybe_mut_int(&mut self) -> Option<&mut Int> {
+        if self.IsNil() { None } else { Some(self.MustMut()) }
     }
 }
 

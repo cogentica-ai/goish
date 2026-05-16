@@ -700,6 +700,183 @@ fn main() {
             && xer.Sign() == 0, b"quorem exact 10^55/10^25");
     }
 
+    // ── GCD ────────────────────────────────────────────────────────
+    {
+        // Coprime small pair: gcd(35, 64) == 1.
+        let mut g = big::Int::new();
+        g.GCD(goish::nil, goish::nil, &big::NewInt(35), &big::NewInt(64));
+        check(g.Int64() == 1, b"gcd 35,64 == 1");
+
+        // Non-coprime small pair: gcd(12, 18) == 6.
+        g.GCD(goish::nil, goish::nil, &big::NewInt(12), &big::NewInt(18));
+        check(g.Int64() == 6, b"gcd 12,18 == 6");
+
+        // gcd(0,0) == 0.
+        g.GCD(goish::nil, goish::nil, &big::NewInt(0), &big::NewInt(0));
+        check(g.Sign() == 0, b"gcd 0,0 == 0");
+
+        // gcd(a,0) == |a|, gcd(0,b) == |b|.
+        g.GCD(goish::nil, goish::nil, &big::NewInt(-42), &big::NewInt(0));
+        check(g.Int64() == 42, b"gcd -42,0 == 42");
+        g.GCD(goish::nil, goish::nil, &big::NewInt(0), &big::NewInt(-99));
+        check(g.Int64() == 99, b"gcd 0,-99 == 99");
+
+        // Negative operands — gcd is always >= 0.
+        g.GCD(goish::nil, goish::nil, &big::NewInt(-12), &big::NewInt(-18));
+        check(g.Int64() == 6 && g.Sign() >= 0, b"gcd -12,-18 == 6");
+
+        // Multi-limb: gcd(10^30, 10^25) == 10^25.
+        let p30 = pow10(30);
+        let p25 = pow10(25);
+        g.GCD(goish::nil, goish::nil, &p30, &p25);
+        check(g.Cmp(&p25) == 0 && dec_eq(&g, b"10000000000000000000000000"),
+            b"gcd 10^30,10^25 == 10^25");
+
+        // Multi-limb coprime: (10^25 + 1) and (10^25 + 3) — both odd,
+        // differ by 2, so gcd is 1.
+        let mut bp = big::Int::new();
+        bp.Add(&p25, &big::NewInt(1));
+        let mut bq = big::Int::new();
+        bq.Add(&p25, &big::NewInt(3));
+        g.GCD(goish::nil, goish::nil, &bp, &bq);
+        check(g.Int64() == 1, b"gcd big coprime == 1");
+
+        // Bézout identity: a*x + b*y == gcd, for several pairs.
+        for &(av, bv) in &[(35i64, 64i64), (12, 18), (-12, 18), (240, 46), (-17, -5)] {
+            let a = big::NewInt(av);
+            let b = big::NewInt(bv);
+            let mut gz = big::Int::new();
+            let mut xc = big::Int::new();
+            let mut yc = big::Int::new();
+            gz.GCD(&mut xc, &mut yc, &a, &b);
+            // recon = a*x + b*y
+            let mut ax = big::Int::new();
+            ax.Mul(&a, &xc);
+            let mut by = big::Int::new();
+            by.Mul(&b, &yc);
+            let mut recon = big::Int::new();
+            recon.Add(&ax, &by);
+            check(recon.Cmp(&gz) == 0, b"gcd bezout a*x+b*y==g");
+        }
+
+        // Bézout on multi-limb operands.
+        {
+            let a = pow10(30);
+            let mut b = big::Int::new();
+            b.Add(&pow10(20), &big::NewInt(7));
+            let mut gz = big::Int::new();
+            let mut xc = big::Int::new();
+            let mut yc = big::Int::new();
+            gz.GCD(&mut xc, &mut yc, &a, &b);
+            let mut ax = big::Int::new();
+            ax.Mul(&a, &xc);
+            let mut by = big::Int::new();
+            by.Mul(&b, &yc);
+            let mut recon = big::Int::new();
+            recon.Add(&ax, &by);
+            check(recon.Cmp(&gz) == 0, b"gcd bezout multi-limb");
+        }
+    }
+
+    // ── ModInverse ─────────────────────────────────────────────────
+    {
+        // 3 * 4 == 12 == 1 (mod 11) -> inverse of 3 mod 11 is 4.
+        let mut inv = big::Int::new();
+        inv.ModInverse(&big::NewInt(3), &big::NewInt(11));
+        check(inv.Int64() == 4, b"modinverse 3 mod 11 == 4");
+
+        // Verify z*g mod n == 1 for several coprime pairs.
+        for &(gv, nv) in &[(3i64, 11i64), (7, 26), (17, 3120), (2, 9), (10, 17)] {
+            let g = big::NewInt(gv);
+            let n = big::NewInt(nv);
+            let mut z = big::Int::new();
+            z.ModInverse(&g, &n);
+            let mut prod = big::Int::new();
+            prod.Mul(&z, &g);
+            let mut r = big::Int::new();
+            r.Mod(&prod, &n);
+            check(r.Int64() == 1, b"modinverse z*g mod n == 1");
+        }
+
+        // Negative g is reduced first: inverse of -3 mod 11 == 7 (since -3≡8, 8*7=56≡1).
+        let mut invn = big::Int::new();
+        invn.ModInverse(&big::NewInt(-3), &big::NewInt(11));
+        {
+            let mut prod = big::Int::new();
+            prod.Mul(&invn, &big::NewInt(-3));
+            let mut r = big::Int::new();
+            r.Mod(&prod, &big::NewInt(11));
+            check(r.Int64() == 1, b"modinverse negative g");
+        }
+
+        // Multi-limb modulus: inverse of 65537 mod (10^25 + 1).
+        {
+            let mut n = big::Int::new();
+            n.Add(&pow10(25), &big::NewInt(1));
+            let gv = big::NewInt(65537);
+            let mut z = big::Int::new();
+            z.ModInverse(&gv, &n);
+            let mut prod = big::Int::new();
+            prod.Mul(&z, &gv);
+            let mut r = big::Int::new();
+            r.Mod(&prod, &n);
+            check(r.Int64() == 1, b"modinverse multi-limb mod");
+            // Result is normalised into [0, n).
+            check(z.Sign() >= 0 && z.Cmp(&n) == -1, b"modinverse result in range");
+        }
+
+        // Non-coprime: gcd(6,9)==3 != 1 — no inverse. self stays unchanged.
+        let mut nc = big::NewInt(12345);
+        nc.ModInverse(&big::NewInt(6), &big::NewInt(9));
+        check(nc.Int64() == 12345, b"modinverse non-coprime leaves self");
+    }
+
+    // ── Exp with negative exponent ─────────────────────────────────
+    {
+        // 3^(-1) mod 11 == modinverse(3,11) == 4.
+        let mut e = big::Int::new();
+        e.Exp(&big::NewInt(3), &big::NewInt(-1), &big::NewInt(11));
+        check(e.Int64() == 4, b"exp 3^-1 mod 11 == 4");
+
+        // 3^(-2) mod 11 == (3^-1)^2 == 4^2 == 16 == 5.
+        e.Exp(&big::NewInt(3), &big::NewInt(-2), &big::NewInt(11));
+        check(e.Int64() == 5, b"exp 3^-2 mod 11 == 5");
+
+        // x.Exp(base,-e,m) == ModInverse(base,m)^e mod m, cross-checked.
+        for &(bv, ev, mv) in &[(3i64, 3i64, 11i64), (7, 4, 26), (2, 5, 9), (10, 3, 17)] {
+            let base = big::NewInt(bv);
+            let modulus = big::NewInt(mv);
+            let mut lhs = big::Int::new();
+            lhs.Exp(&base, &big::NewInt(-ev), &modulus);
+            // rhs = ModInverse(base,m) ^ e mod m
+            let mut inv = big::Int::new();
+            inv.ModInverse(&base, &modulus);
+            let mut rhs = big::Int::new();
+            rhs.Exp(&inv, &big::NewInt(ev), &modulus);
+            check(lhs.Cmp(&rhs) == 0, b"exp neg == modinverse^e");
+        }
+
+        // y < 0 && m == 0 -> 1 (Go's documented case, unchanged).
+        let mut z0 = big::Int::new();
+        z0.Exp(&big::NewInt(5), &big::NewInt(-3), &big::NewInt(0));
+        check(z0.Int64() == 1, b"exp neg exp, m==0 -> 1");
+
+        // Multi-limb negative exponent: base coprime to a big modulus.
+        {
+            let mut m = big::Int::new();
+            m.Add(&pow10(25), &big::NewInt(1));
+            let base = big::NewInt(65537);
+            let mut lhs = big::Int::new();
+            lhs.Exp(&base, &big::NewInt(-2), &m);
+            // rhs = inv^2 mod m
+            let mut inv = big::Int::new();
+            inv.ModInverse(&base, &m);
+            let mut rhs = big::Int::new();
+            rhs.Exp(&inv, &big::NewInt(2), &m);
+            check(lhs.Cmp(&rhs) == 0 && lhs.Sign() >= 0, b"exp neg multi-limb");
+        }
+    }
+
     let _ = &int::from(0);
     report();
 }
