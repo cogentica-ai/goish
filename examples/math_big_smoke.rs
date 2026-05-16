@@ -1325,6 +1325,125 @@ fn main() {
         check(wb[0usize] == 0xDEAD_BEEF_CAFE_F00D, b"bits both halves");
     }
 
+    // ── MarshalText / UnmarshalText round-trip ─────────────────────
+    {
+        // Build a multi-limb value so the magnitude spans >1 limb.
+        let big_pos = pow10(40); // 10^40
+        let mut big_neg = big::Int::new();
+        big_neg.Neg(&big_pos);
+        let cases: [&big::Int; 4] =
+            [&big::NewInt(0), &big::NewInt(123456789), &big::NewInt(-987654321),
+             &big_pos];
+        let names: [&[u8]; 4] = [b"zero", b"pos", b"neg", b"multi-limb"];
+        for k in 0usize..4 {
+            let (txt, err) = cases[k].MarshalText();
+            check(err == goish::nil, b"marshaltext nil error");
+            let mut back = big::Int::new();
+            let derr = back.UnmarshalText(txt);
+            check(derr == goish::nil, b"unmarshaltext nil error");
+            check(back.Cmp(cases[k]) == 0, names[k]);
+        }
+        // Negative multi-limb explicitly.
+        let (ntxt, _) = big_neg.MarshalText();
+        let mut nback = big::Int::new();
+        nback.UnmarshalText(ntxt);
+        check(nback.Cmp(&big_neg) == 0, b"unmarshaltext neg multi-limb");
+        // Text content sanity: decimal, no quotes.
+        let (dt, _) = big::NewInt(-42).MarshalText();
+        check(&*dt == &b"-42"[..], b"marshaltext content -42");
+        // UnmarshalText on invalid input -> non-nil error.
+        let bad: slice<goish::byte> = slice::__from_vec(b"12x34".to_vec());
+        let mut be = big::Int::new();
+        let baderr = be.UnmarshalText(bad);
+        check(baderr != goish::nil, b"unmarshaltext invalid -> error");
+        let empty: slice<goish::byte> = slice::__from_vec(alloc::vec![]);
+        let mut ee = big::Int::new();
+        check(ee.UnmarshalText(empty) != goish::nil,
+              b"unmarshaltext empty -> error");
+    }
+
+    // ── MarshalJSON / UnmarshalJSON round-trip + null ──────────────
+    {
+        let big_pos = pow10(35);
+        let cases: [&big::Int; 3] =
+            [&big::NewInt(0), &big::NewInt(-7777), &big_pos];
+        let names: [&[u8]; 3] = [b"json zero", b"json neg", b"json multi-limb"];
+        for k in 0usize..3 {
+            let (j, err) = cases[k].MarshalJSON();
+            check(err == goish::nil, b"marshaljson nil error");
+            let mut back = big::Int::new();
+            let derr = back.UnmarshalJSON(j);
+            check(derr == goish::nil, b"unmarshaljson nil error");
+            check(back.Cmp(cases[k]) == 0, names[k]);
+        }
+        // MarshalJSON content: decimal, no quotes.
+        let (jc, _) = big::NewInt(12345).MarshalJSON();
+        check(&*jc == &b"12345"[..], b"marshaljson content 12345");
+        // JSON null leaves the receiver unchanged.
+        let mut keep = big::NewInt(555);
+        let nullbuf: slice<goish::byte> = slice::__from_vec(b"null".to_vec());
+        let nerr = keep.UnmarshalJSON(nullbuf);
+        check(nerr == goish::nil, b"unmarshaljson null nil error");
+        check(keep.Int64() == 555, b"unmarshaljson null leaves receiver");
+    }
+
+    // ── GobEncode / GobDecode round-trip ───────────────────────────
+    {
+        let mut big_neg = big::Int::new();
+        big_neg.Neg(&pow10(50));
+        let cases: [&big::Int; 4] =
+            [&big::NewInt(0), &big::NewInt(424242), &big::NewInt(-1),
+             &big_neg];
+        let names: [&[u8]; 4] =
+            [b"gob zero", b"gob pos", b"gob neg small", b"gob neg multi-limb"];
+        for k in 0usize..4 {
+            let (enc, eerr) = cases[k].GobEncode();
+            check(eerr == goish::nil, b"gobencode nil error");
+            let mut back = big::Int::new();
+            // Pre-poison the receiver to ensure decode fully overwrites.
+            back.SetInt64(-99999);
+            let derr = back.GobDecode(enc);
+            check(derr == goish::nil, b"gobdecode nil error");
+            check(back.Cmp(cases[k]) == 0, names[k]);
+        }
+        // Multi-limb positive too.
+        let mp = pow10(45);
+        let (menc, _) = mp.GobEncode();
+        let mut mback = big::Int::new();
+        mback.GobDecode(menc);
+        check(mback.Cmp(&mp) == 0, b"gob pos multi-limb");
+        // Empty buffer resets receiver to zero.
+        let mut zr = big::NewInt(123);
+        let eb: slice<goish::byte> = slice::__from_vec(alloc::vec![]);
+        let zerr = zr.GobDecode(eb);
+        check(zerr == goish::nil, b"gobdecode empty nil error");
+        check(zr.Sign() == 0, b"gobdecode empty resets to zero");
+        // Version-mismatch buffer -> non-nil error.
+        let badver: slice<goish::byte> =
+            slice::__from_vec(alloc::vec![0xFFu8, 0x01u8]);
+        let mut bv = big::Int::new();
+        check(bv.GobDecode(badver) != goish::nil,
+              b"gobdecode bad version -> error");
+        // Sign-bit check: encoding of a negative value has bit 0 set.
+        let (nenc, _) = big::NewInt(-5).GobEncode();
+        check(nenc[0usize] & 1 == 1, b"gobencode negative sign bit");
+        let (penc, _) = big::NewInt(5).GobEncode();
+        check(penc[0usize] & 1 == 0, b"gobencode positive sign bit clear");
+    }
+
+    // ── Append into a non-empty buffer ─────────────────────────────
+    {
+        let prefix: slice<goish::byte> = slice::__from_vec(b"x=".to_vec());
+        let out = big::NewInt(255).Append(prefix, 16);
+        check(&*out == &b"x=ff"[..], b"append base16 into non-empty buf");
+        let prefix2: slice<goish::byte> = slice::__from_vec(b"n:".to_vec());
+        let out2 = big::NewInt(-42).Append(prefix2, 10);
+        check(&*out2 == &b"n:-42"[..], b"append base10 negative");
+        let prefix3: slice<goish::byte> = slice::__from_vec(b">".to_vec());
+        let out3 = big::NewInt(13).Append(prefix3, 2);
+        check(&*out3 == &b">1101"[..], b"append base2 into non-empty buf");
+    }
+
     let _ = &int::from(0);
     report();
 }

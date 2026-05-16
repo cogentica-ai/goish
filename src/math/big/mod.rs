@@ -1535,7 +1535,119 @@ impl Int {
             r = m;
         }
     }
+
+    /// `(*Int).Append(buf, base)` — append the base-`base` text of
+    /// `self` (as produced by `Text`) to `buf` and return the extended
+    /// slice. `base` must be 2..=62.
+    pub fn Append(
+        &self,
+        buf: crate::slice<crate::types::byte>,
+        base: int,
+    ) -> crate::slice<crate::types::byte> {
+        if base < 2 || base > MAX_BASE {
+            panic!("big::Int::Append: invalid base");
+        }
+        let mut out = buf.__into_vec();
+        out.extend_from_slice(&itoa(self.neg, &self.abs, base));
+        crate::slice::<crate::types::byte>::__from_vec(out)
+    }
+
+    /// `(*Int).AppendText(b)` — append the decimal text of `self` to
+    /// `b`. The error is always nil for `Int`, matching Go.
+    pub fn AppendText(
+        &self,
+        b: crate::slice<crate::types::byte>,
+    ) -> (crate::slice<crate::types::byte>, crate::error) {
+        (self.Append(b, 10), crate::errors::nil)
+    }
+
+    /// `(*Int).MarshalText()` — the decimal text bytes of `self`. The
+    /// error is always nil for `Int`, matching Go.
+    pub fn MarshalText(&self) -> (crate::slice<crate::types::byte>, crate::error) {
+        self.AppendText(crate::slice::<crate::types::byte>::new())
+    }
+
+    /// `(*Int).UnmarshalText(text)` — parse decimal `text` into `self`.
+    /// Returns a non-nil error if `text` is not a valid integer.
+    pub fn UnmarshalText(
+        &mut self,
+        text: crate::slice<crate::types::byte>,
+    ) -> crate::error {
+        match scan_int(&text, 0) {
+            Some((neg, abs)) => {
+                self.neg = neg && !abs.is_empty();
+                self.abs = abs;
+                crate::errors::nil
+            }
+            None => crate::errors::New(crate::fmt::Sprintf!(
+                "math/big: cannot unmarshal %q into a *big.Int",
+                crate::string::from_bytes(&text)
+            )),
+        }
+    }
+
+    /// `(*Int).MarshalJSON()` — the decimal text bytes of `self` (no
+    /// quotes). Same as `MarshalText` for `Int`. Error is always nil.
+    pub fn MarshalJSON(&self) -> (crate::slice<crate::types::byte>, crate::error) {
+        self.MarshalText()
+    }
+
+    /// `(*Int).UnmarshalJSON(text)` — parse JSON `text` into `self`. A
+    /// JSON `null` leaves the receiver unchanged (matching Go);
+    /// otherwise behaves like `UnmarshalText`.
+    pub fn UnmarshalJSON(
+        &mut self,
+        text: crate::slice<crate::types::byte>,
+    ) -> crate::error {
+        if &*text == b"null" {
+            return crate::errors::nil;
+        }
+        self.UnmarshalText(text)
+    }
+
+    /// `(*Int).GobEncode()` — gob wire format: a single version/sign
+    /// byte (`intGobVersion << 1`, with bit 0 set when negative)
+    /// followed by the big-endian magnitude bytes. Error is always nil.
+    pub fn GobEncode(&self) -> (crate::slice<crate::types::byte>, crate::error) {
+        let mut out: Vec<u8> = Vec::new();
+        let mut b: u8 = INT_GOB_VERSION << 1; // make space for sign bit
+        if self.neg {
+            b |= 1;
+        }
+        out.push(b);
+        out.extend_from_slice(&limbs_to_be_bytes(&self.abs));
+        (
+            crate::slice::<crate::types::byte>::__from_vec(out),
+            crate::errors::nil,
+        )
+    }
+
+    /// `(*Int).GobDecode(buf)` — inverse of `GobEncode`. An empty `buf`
+    /// resets `self` to zero (the other side sent a nil/default value);
+    /// a version-byte mismatch returns a non-nil error.
+    pub fn GobDecode(&mut self, buf: crate::slice<crate::types::byte>) -> crate::error {
+        if buf.len() == 0 {
+            // Other side sent a nil or default value.
+            self.neg = false;
+            self.abs = Vec::new();
+            return crate::errors::nil;
+        }
+        let b = buf[0usize];
+        if b >> 1 != INT_GOB_VERSION {
+            return crate::errors::New(crate::fmt::Sprintf!(
+                "Int.GobDecode: encoding version %d not supported",
+                int::from((b >> 1) as i64)
+            ));
+        }
+        self.neg = b & 1 != 0;
+        self.abs = be_bytes_to_limbs(&(*buf)[1..]);
+        crate::errors::nil
+    }
 }
+
+/// Gob codec version — leading version byte (top bits also carry the
+/// sign). Mirrors `intmarsh.go:intGobVersion`.
+const INT_GOB_VERSION: u8 = 1;
 
 /// The constant 4 as an `Int` — used by `ModSqrt`'s p ≡ 3 mod 4 path.
 fn big_four() -> Int {
