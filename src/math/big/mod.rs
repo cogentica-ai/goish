@@ -3479,6 +3479,30 @@ fn float_bit(m: &[u32], i: u32) -> u32 {
     (m[w] >> (i % FW)) & 1
 }
 
+/// `msb32` analogue — the 32 most-significant bits of the msb-normalized
+/// mantissa `m` (i.e. its top limb). 0 for an empty mantissa.
+fn msb32(m: &[u32]) -> u32 {
+    match m.last() {
+        Some(&w) => w,
+        None => 0,
+    }
+}
+
+/// `msb64` analogue — the 64 most-significant bits of the msb-normalized
+/// mantissa `m`: the top limb shifted into the high half, OR'd with the
+/// next limb (if any) in the low half. 0 for an empty mantissa.
+fn msb64(m: &[u32]) -> u64 {
+    let n = m.len();
+    if n == 0 {
+        return 0;
+    }
+    let mut v = u64::from(m[n - 1]) << 32;
+    if n > 1 {
+        v |= u64::from(m[n - 2]);
+    }
+    v
+}
+
 impl Float {
     /// `var z big.Float` — fresh zero-valued `Float` (`+0.0`).
     pub fn new() -> Self {
@@ -3953,6 +3977,408 @@ impl Float {
             }
         }
         exp
+    }
+
+    // ─── numeric conversions ─────────────────────────────────────────
+    //
+    // Go reference: math/big/float.go — `Float32`, `Float64`, `Int64`,
+    // `Uint64`, `Int`, `Rat`, `SetRat`. Each conversion reports an
+    // `Accuracy` describing the error relative to the exact value of
+    // `self`. `Float32`/`Float64` round to nearest (with overflow to
+    // `±Inf` and underflow to `±0`); `Int64`/`Uint64`/`Int` truncate
+    // toward zero; `Rat` is always exact for a finite value.
+
+    /// `(*Float).Uint64()` — the unsigned integer obtained by truncating
+    /// `self` toward zero. For `0 <= x <= MaxUint64` the result is
+    /// `Exact` if `x` is an integer and `Below` otherwise. The result is
+    /// `(0, Above)` for `x < 0` and `(MaxUint64, Below)` for
+    /// `x > MaxUint64`.
+    pub fn Uint64(&self) -> (u64, Accuracy) {
+        match self.form {
+            form::Finite => {
+                if self.neg {
+                    return (0, Accuracy::Above);
+                }
+                // 0 < x < +Inf
+                if self.exp <= 0 {
+                    // 0 < x < 1
+                    return (0, Accuracy::Below);
+                }
+                // 1 <= x < +Inf
+                if self.exp <= 64 {
+                    // u = trunc(x) fits into a u64.
+                    let u = msb64(&self.mant) >> (64 - self.exp as u32);
+                    if self.MinPrec() <= 64 {
+                        return (u, Accuracy::Exact);
+                    }
+                    return (u, Accuracy::Below); // x truncated
+                }
+                // x too large
+                (u64::MAX, Accuracy::Below)
+            }
+            form::Zero => (0, Accuracy::Exact),
+            form::Inf => {
+                if self.neg {
+                    (0, Accuracy::Above)
+                } else {
+                    (u64::MAX, Accuracy::Below)
+                }
+            }
+        }
+    }
+
+    /// `(*Float).Int64()` — the integer obtained by truncating `self`
+    /// toward zero. For `MinInt64 <= x <= MaxInt64` the result is
+    /// `Exact` if `x` is an integer, and `Above` (`x < 0`) or `Below`
+    /// (`x > 0`) otherwise. The result saturates to `(MinInt64, Above)`
+    /// for `x < MinInt64` and `(MaxInt64, Below)` for `x > MaxInt64`.
+    pub fn Int64(&self) -> (i64, Accuracy) {
+        match self.form {
+            form::Finite => {
+                // 0 < |x| < +Inf
+                let acc = make_acc(self.neg);
+                if self.exp <= 0 {
+                    // 0 < |x| < 1
+                    return (0, acc);
+                }
+                // exp > 0: 1 <= |x| < +Inf
+                if self.exp <= 63 {
+                    // i = trunc(x) fits into an i64 (excluding MinInt64).
+                    let mag = msb64(&self.mant) >> (64 - self.exp as u32);
+                    let i = if self.neg {
+                        -(mag as i64)
+                    } else {
+                        mag as i64
+                    };
+                    if self.MinPrec() <= self.exp as crate::types::uint {
+                        return (i, Accuracy::Exact);
+                    }
+                    return (i, acc); // x truncated
+                }
+                if self.neg {
+                    // Special case x == MinInt64 (i.e. x == -(0.5 << 64)).
+                    let acc = if self.exp == 64 && self.MinPrec() == 1 {
+                        Accuracy::Exact
+                    } else {
+                        acc
+                    };
+                    return (i64::MIN, acc);
+                }
+                // x too large
+                (i64::MAX, Accuracy::Below)
+            }
+            form::Zero => (0, Accuracy::Exact),
+            form::Inf => {
+                if self.neg {
+                    (i64::MIN, Accuracy::Above)
+                } else {
+                    (i64::MAX, Accuracy::Below)
+                }
+            }
+        }
+    }
+
+    /// `(*Float).Float32()` — the `f32` nearest to `self`. If `|x|` is
+    /// too small to represent (`|x| < SmallestNonzeroFloat32`) the
+    /// result is `(0, Below)` or `(-0, Above)`; if `|x|` is too large
+    /// (`|x| > MaxFloat32`) it is `(+Inf, Above)` or `(-Inf, Below)`.
+    pub fn Float32(&self) -> (f32, Accuracy) {
+        match self.form {
+            form::Finite => {
+                // 0 < |x| < +Inf
+                const FBITS: i32 = 32; // float size
+                const MBITS: i32 = 23; // mantissa size (excluding implicit msb)
+                const EBITS: i32 = FBITS - MBITS - 1; // 8  exponent size
+                const BIAS: i32 = (1 << (EBITS - 1)) - 1; // 127  exponent bias
+                const EMIN: i32 = 1 - BIAS; // -126  smallest normal exponent
+                const EMAX: i32 = BIAS; // 127  largest normal exponent
+                const SMALLEST_NONZERO_F32: f32 = 1.401298464324817e-45;
+
+                // Float mantissa m is 0.5 <= m < 1.0; e is the exponent
+                // for the normal float32 mantissa with 1.0 <= m < 2.0.
+                let mut e = self.exp - 1;
+
+                // Precision p for the float32 mantissa.
+                let mut p = MBITS + 1; // precision of a normal float
+                if e < EMIN {
+                    // Denormal before rounding — recompute precision.
+                    p = MBITS + 1 - EMIN + e;
+                    if p < 0
+                        || p == 0
+                            && float_sticky(&self.mant, (self.mant.len() as u32) * FW - 1) == 0
+                    {
+                        // underflow to ±0 (m <= 0.25, or m == 0.5 → even)
+                        if self.neg {
+                            return (-0.0f32, Accuracy::Above);
+                        }
+                        return (0.0f32, Accuracy::Below);
+                    }
+                    if p == 0 {
+                        // m > 0.5 → round up to the smallest denormal.
+                        if self.neg {
+                            return (-SMALLEST_NONZERO_F32, Accuracy::Below);
+                        }
+                        return (SMALLEST_NONZERO_F32, Accuracy::Above);
+                    }
+                }
+                // p > 0
+
+                // Round a copy of self to p bits.
+                let mut r = Float::default();
+                r.prec = p as u32;
+                r.Set(self);
+                e = r.exp - 1;
+
+                // Rounding may have overflowed r to ±Inf; or e too large.
+                if r.form == form::Inf || e > EMAX {
+                    if self.neg {
+                        return (f32::NEG_INFINITY, Accuracy::Below);
+                    }
+                    return (f32::INFINITY, Accuracy::Above);
+                }
+                // e <= EMAX
+
+                let mut sign: u32 = 0;
+                if self.neg {
+                    sign = 1 << (FBITS - 1);
+                }
+                let bexp: u32;
+                let mant: u32;
+                if e < EMIN {
+                    // Denormal — recompute precision (p > 0 here).
+                    p = MBITS + 1 - EMIN + e;
+                    bexp = 0;
+                    mant = msb32(&r.mant) >> (FBITS - p) as u32;
+                } else {
+                    // Normal: EMIN <= e <= EMAX.
+                    bexp = ((e + BIAS) as u32) << MBITS;
+                    mant = (msb32(&r.mant) >> EBITS as u32) & ((1u32 << MBITS) - 1);
+                }
+                (f32::from_bits(sign | bexp | mant), r.acc)
+            }
+            form::Zero => {
+                if self.neg {
+                    (-0.0f32, Accuracy::Exact)
+                } else {
+                    (0.0f32, Accuracy::Exact)
+                }
+            }
+            form::Inf => {
+                if self.neg {
+                    (f32::NEG_INFINITY, Accuracy::Exact)
+                } else {
+                    (f32::INFINITY, Accuracy::Exact)
+                }
+            }
+        }
+    }
+
+    /// `(*Float).Float64()` — the `f64` nearest to `self`. If `|x|` is
+    /// too small to represent (`|x| < SmallestNonzeroFloat64`) the
+    /// result is `(0, Below)` or `(-0, Above)`; if `|x|` is too large
+    /// (`|x| > MaxFloat64`) it is `(+Inf, Above)` or `(-Inf, Below)`.
+    pub fn Float64(&self) -> (f64, Accuracy) {
+        match self.form {
+            form::Finite => {
+                // 0 < |x| < +Inf
+                const FBITS: i32 = 64; // float size
+                const MBITS: i32 = 52; // mantissa size (excluding implicit msb)
+                const EBITS: i32 = FBITS - MBITS - 1; // 11  exponent size
+                const BIAS: i32 = (1 << (EBITS - 1)) - 1; // 1023  exponent bias
+                const EMIN: i32 = 1 - BIAS; // -1022  smallest normal exponent
+                const EMAX: i32 = BIAS; // 1023  largest normal exponent
+                const SMALLEST_NONZERO_F64: f64 = 5e-324;
+
+                // Float mantissa m is 0.5 <= m < 1.0; e is the exponent
+                // for the normal float64 mantissa with 1.0 <= m < 2.0.
+                let mut e = self.exp - 1;
+
+                // Precision p for the float64 mantissa.
+                let mut p = MBITS + 1; // precision of a normal float
+                if e < EMIN {
+                    // Denormal before rounding — recompute precision.
+                    p = MBITS + 1 - EMIN + e;
+                    if p < 0
+                        || p == 0
+                            && float_sticky(&self.mant, (self.mant.len() as u32) * FW - 1) == 0
+                    {
+                        // underflow to ±0 (m <= 0.25, or m == 0.5 → even)
+                        if self.neg {
+                            return (-0.0f64, Accuracy::Above);
+                        }
+                        return (0.0f64, Accuracy::Below);
+                    }
+                    if p == 0 {
+                        // m > 0.5 → round up to the smallest denormal.
+                        if self.neg {
+                            return (-SMALLEST_NONZERO_F64, Accuracy::Below);
+                        }
+                        return (SMALLEST_NONZERO_F64, Accuracy::Above);
+                    }
+                }
+                // p > 0
+
+                // Round a copy of self to p bits.
+                let mut r = Float::default();
+                r.prec = p as u32;
+                r.Set(self);
+                e = r.exp - 1;
+
+                // Rounding may have overflowed r to ±Inf; or e too large.
+                if r.form == form::Inf || e > EMAX {
+                    if self.neg {
+                        return (f64::NEG_INFINITY, Accuracy::Below);
+                    }
+                    return (f64::INFINITY, Accuracy::Above);
+                }
+                // e <= EMAX
+
+                let mut sign: u64 = 0;
+                if self.neg {
+                    sign = 1 << (FBITS - 1);
+                }
+                let bexp: u64;
+                let mant: u64;
+                if e < EMIN {
+                    // Denormal — recompute precision (p > 0 here).
+                    p = MBITS + 1 - EMIN + e;
+                    bexp = 0;
+                    mant = msb64(&r.mant) >> (FBITS - p) as u32;
+                } else {
+                    // Normal: EMIN <= e <= EMAX.
+                    bexp = ((e + BIAS) as u64) << MBITS;
+                    mant = (msb64(&r.mant) >> EBITS as u32) & ((1u64 << MBITS) - 1);
+                }
+                (f64::from_bits(sign | bexp | mant), r.acc)
+            }
+            form::Zero => {
+                if self.neg {
+                    (-0.0f64, Accuracy::Exact)
+                } else {
+                    (0.0f64, Accuracy::Exact)
+                }
+            }
+            form::Inf => {
+                if self.neg {
+                    (f64::NEG_INFINITY, Accuracy::Exact)
+                } else {
+                    (f64::INFINITY, Accuracy::Exact)
+                }
+            }
+        }
+    }
+
+    /// `(*Float).Int(z)` — the result of truncating `self` toward zero,
+    /// as an [`Int`]. The accuracy is `Exact` if `self.IsInt()`, else
+    /// `Below` for `x > 0` and `Above` for `x < 0`. If a non-nil `z` is
+    /// provided the result is also stored into it; the owned `Int` in
+    /// the returned tuple always carries the value. Panics if `self` is
+    /// an infinity (Go returns `nil`; goish has no `*Int` so a panic is
+    /// the faithful "no integer value" signal).
+    pub fn Int<Z: MaybeMutInt>(&self, mut z: Z) -> (Int, Accuracy) {
+        let (out, acc): (Int, Accuracy) = match self.form {
+            form::Finite => {
+                // 0 < |x| < +Inf
+                let mut acc = make_acc(self.neg);
+                if self.exp <= 0 {
+                    // 0 < |x| < 1 → truncates to 0
+                    (Int::default(), acc)
+                } else {
+                    // exp > 0: 1 <= |x| < +Inf
+                    let all_bits = (self.mant.len() as crate::types::uint) * (FW as crate::types::uint);
+                    let exp = self.exp as crate::types::uint;
+                    if self.MinPrec() <= exp {
+                        acc = Accuracy::Exact;
+                    }
+                    // Shift the mantissa so its binary point lands after
+                    // the integer part: value = mant · 2^(exp - all_bits).
+                    let abs = if exp > all_bits {
+                        lsh_limbs(&self.mant, exp - all_bits)
+                    } else if exp < all_bits {
+                        rsh_limbs(&self.mant, all_bits - exp)
+                    } else {
+                        trim(self.mant.clone())
+                    };
+                    let abs = trim(abs);
+                    let neg = self.neg && !abs.is_empty();
+                    (Int { neg, abs }, acc)
+                }
+            }
+            form::Zero => (Int::default(), Accuracy::Exact),
+            form::Inf => panic!("big::Float::Int of an infinity"),
+        };
+        if let Some(dst) = z.maybe_mut_int() {
+            dst.neg = out.neg;
+            dst.abs = out.abs.clone();
+        }
+        (out, acc)
+    }
+
+    /// `(*Float).Rat(z)` — the rational number equal to `self`. A finite
+    /// `Float` is `mant · 2^exp`, hence always exactly rational, so the
+    /// accuracy is always `Exact`. If a non-nil `z` is provided the
+    /// result is also stored into it; the owned [`Rat`] in the returned
+    /// tuple always carries the value. Panics if `self` is an infinity
+    /// (Go returns `nil`).
+    pub fn Rat<Z: MaybeMutRat>(&self, mut z: Z) -> (Rat, Accuracy) {
+        let (out, acc): (Rat, Accuracy) = match self.form {
+            form::Finite => {
+                // 0 < |x| < +Inf
+                let all_bits = (self.mant.len() as i64) * i64::from(FW);
+                let exp = i64::from(self.exp);
+                let mut r = Rat::new();
+                if exp > all_bits {
+                    // value = (mant << (exp-all_bits)) / 1
+                    r.num = Int {
+                        neg: self.neg,
+                        abs: lsh_limbs(&self.mant, (exp - all_bits) as u64),
+                    };
+                    r.den = NewInt(1);
+                } else if exp < all_bits {
+                    // value = mant / 2^(all_bits-exp), then reduce.
+                    r.num = Int { neg: self.neg, abs: trim(self.mant.clone()) };
+                    r.den = Int {
+                        neg: false,
+                        abs: lsh_limbs(&[1u32], (all_bits - exp) as u64),
+                    };
+                    r.norm();
+                } else {
+                    // exp == all_bits → integer mant / 1
+                    r.num = Int { neg: self.neg, abs: trim(self.mant.clone()) };
+                    r.den = NewInt(1);
+                }
+                (r, Accuracy::Exact)
+            }
+            form::Zero => (Rat::new(), Accuracy::Exact),
+            form::Inf => panic!("big::Float::Rat of an infinity"),
+        };
+        if let Some(dst) = z.maybe_mut_rat() {
+            dst.num = out.num.clone();
+            dst.den = out.den.clone();
+        }
+        (out, acc)
+    }
+
+    /// `(*Float).SetRat(x)` — set `self` to the (possibly rounded) value
+    /// of the [`Rat`] `x`. If `self`'s precision is 0 it is changed to
+    /// the largest of `Num().BitLen()`, `Denom().BitLen()`, or 64
+    /// (matching Go's operand-derived default). Rounding follows `self`'s
+    /// precision and mode.
+    pub fn SetRat<X: AsRef<Rat>>(&mut self, x: X) -> &mut Self {
+        // Snapshot — SetRat reads x while mutating self.
+        let x = x.as_ref().clone();
+        if x.IsInt() {
+            return self.SetInt(x.Num());
+        }
+        // a / b with both as Floats.
+        let mut a = Float::default();
+        a.SetInt(x.Num());
+        let mut b = Float::default();
+        b.SetInt(x.Denom());
+        if self.prec == 0 {
+            self.prec = if a.prec > b.prec { a.prec } else { b.prec };
+        }
+        self.Quo(&a, &b)
     }
 
     // ─── internal: unsigned-mantissa arithmetic helpers ──────────────
@@ -4522,6 +4948,55 @@ impl<'a> MaybeMutFloat for crate::gonilable_ref::nilable_refmut<'a, Float> {
 impl MaybeMutFloat for crate::nilable<Float> {
     #[track_caller]
     fn maybe_mut_float(&mut self) -> Option<&mut Float> {
+        if self.IsNil() {
+            None
+        } else {
+            Some(self.MustMut())
+        }
+    }
+}
+
+/// Optional `&mut Rat` out-parameter — the [`Rat`] analogue of
+/// [`MaybeMutFloat`]. Lets a caller pass bare `nil` for an unwanted
+/// destination (e.g. `Float::Rat`); a `None` result means "no
+/// destination", in which case only the owned tuple value carries the
+/// result.
+pub trait MaybeMutRat {
+    fn maybe_mut_rat(&mut self) -> Option<&mut Rat>;
+}
+
+impl MaybeMutRat for Rat {
+    fn maybe_mut_rat(&mut self) -> Option<&mut Rat> {
+        Some(self)
+    }
+}
+
+impl MaybeMutRat for &mut Rat {
+    fn maybe_mut_rat(&mut self) -> Option<&mut Rat> {
+        Some(*self)
+    }
+}
+
+impl MaybeMutRat for crate::nilval::Nil {
+    fn maybe_mut_rat(&mut self) -> Option<&mut Rat> {
+        None
+    }
+}
+
+impl<'a> MaybeMutRat for crate::gonilable_ref::nilable_refmut<'a, Rat> {
+    #[track_caller]
+    fn maybe_mut_rat(&mut self) -> Option<&mut Rat> {
+        if self.IsNil() {
+            None
+        } else {
+            Some(self.MustMutRef())
+        }
+    }
+}
+
+impl MaybeMutRat for crate::nilable<Rat> {
+    #[track_caller]
+    fn maybe_mut_rat(&mut self) -> Option<&mut Rat> {
         if self.IsNil() {
             None
         } else {

@@ -2045,6 +2045,127 @@ fn main() {
         let mut psum = big::Float::new();
         psum.Add(&p1, &p2);
         check(psum.Prec() == 80, b"float add prec=max(x,y)");
+
+        // ── numeric conversions: Float64 / Float32 ─────────────────
+        // SetFloat64(x).Float64() round-trips exactly for representable x.
+        for &v in &[0.5f64, 3.0, -2.25, 0.1] {
+            let mut f = big::Float::new();
+            f.SetFloat64(v);
+            let (got, acc) = f.Float64();
+            check(got == v, b"float Float64 round-trip");
+            check(acc == big::Accuracy::Exact, b"float Float64 round-trip Exact");
+        }
+
+        // Float32 round-trip for an exactly representable value.
+        let mut f32rt = big::Float::new();
+        f32rt.SetFloat64(-2.25);
+        let (g32, a32) = f32rt.Float32();
+        check(g32 == -2.25f32, b"float Float32 round-trip");
+        check(a32 == big::Accuracy::Exact, b"float Float32 round-trip Exact");
+
+        // A value needing more precision than 53 bits rounds inexactly.
+        // 1/3 at high precision → nearest f64 is rounded.
+        let mut hp = big::Float::new();
+        hp.SetPrec(200);
+        hp.Quo(&big::NewFloat(1.0), &big::NewFloat(3.0));
+        let (g13, a13) = hp.Float64();
+        // nearest f64 to 1/3 is ToNearestEven-rounded → Below the true 1/3
+        // (matches Go: Float64 of a 200-bit 1/3 reports Below).
+        check(a13 == big::Accuracy::Below, b"float Float64 1/3 Below");
+        let (g13_32, a13_32) = hp.Float32();
+        check(a13_32 != big::Accuracy::Exact, b"float Float32 1/3 inexact");
+        let _ = (g13, g13_32);
+
+        // A value that needs more than 24 bits but is exact in f64.
+        // 1/3 truncated to a 30-bit Float is exact as f64 but inexact f32.
+        let mut bits30 = big::Float::new();
+        bits30.SetPrec(30);
+        bits30.Quo(&big::NewFloat(1.0), &big::NewFloat(3.0));
+        let (_, a30_64) = bits30.Float64();
+        check(a30_64 == big::Accuracy::Exact, b"float Float64 30-bit Exact");
+        let (_, a30_32) = bits30.Float32();
+        check(a30_32 != big::Accuracy::Exact, b"float Float32 30-bit inexact");
+
+        // ── numeric conversions: Int64 / Uint64 ────────────────────
+        let mut three = big::Float::new();
+        three.SetFloat64(3.0);
+        let (i3, ai3) = three.Int64();
+        check(i3 == 3 && ai3 == big::Accuracy::Exact, b"float Int64 3.0=3 Exact");
+        let (u3, au3) = three.Uint64();
+        check(u3 == 3 && au3 == big::Accuracy::Exact, b"float Uint64 3.0=3 Exact");
+
+        let mut frac = big::Float::new();
+        frac.SetFloat64(3.9);
+        let (i39, ai39) = frac.Int64();
+        check(i39 == 3 && ai39 == big::Accuracy::Below, b"float Int64 3.9=3 Below");
+        // Go quirk: Uint64's exactness check is MinPrec()<=64, so a
+        // 53-bit 3.9 truncates to 3 yet reports Exact (matches Go).
+        let (u39, au39) = frac.Uint64();
+        check(u39 == 3 && au39 == big::Accuracy::Exact, b"float Uint64 3.9=3 (Go quirk)");
+
+        // Negative truncation: -3.9 → -3, Above (truncation toward zero).
+        let mut nfrac = big::Float::new();
+        nfrac.SetFloat64(-3.9);
+        let (in39, ain39) = nfrac.Int64();
+        check(in39 == -3 && ain39 == big::Accuracy::Above, b"float Int64 -3.9=-3 Above");
+        // Uint64 of a negative value saturates to (0, Above).
+        let (un, aun) = nfrac.Uint64();
+        check(un == 0 && aun == big::Accuracy::Above, b"float Uint64 neg=0 Above");
+
+        // Out-of-range saturation: 2^100 → MaxInt64/MaxUint64, Below.
+        let mut huge = big::Float::new();
+        huge.SetInt(&pow2(100));
+        let (ihuge, aihuge) = huge.Int64();
+        check(ihuge == i64::MAX && aihuge == big::Accuracy::Below,
+            b"float Int64 2^100=MaxInt64 Below");
+        let (uhuge, auhuge) = huge.Uint64();
+        check(uhuge == u64::MAX && auhuge == big::Accuracy::Below,
+            b"float Uint64 2^100=MaxUint64 Below");
+
+        // ── numeric conversions: Int ───────────────────────────────
+        let mut seven_half = big::Float::new();
+        seven_half.SetFloat64(7.5);
+        let (iz, aiz) = seven_half.Int(big::Int::new());
+        check(iz.Int64() == 7 && aiz == big::Accuracy::Below, b"float Int 7.5=7 Below");
+        // Exact integer: Int of 12.0 → 12 Exact.
+        let mut twelve = big::Float::new();
+        twelve.SetFloat64(12.0);
+        let (iz12, aiz12) = twelve.Int(goish::nil);
+        check(iz12.Int64() == 12 && aiz12 == big::Accuracy::Exact, b"float Int 12.0=12 Exact");
+
+        // ── numeric conversions: Rat ───────────────────────────────
+        let mut half = big::Float::new();
+        half.SetFloat64(0.5);
+        let (rz, arz) = half.Rat(big::Rat::new());
+        check(rz.Num().Int64() == 1 && rz.Denom().Int64() == 2
+            && arz == big::Accuracy::Exact, b"float Rat 0.5=1/2 Exact");
+        // Rat of 3.0 → 3/1.
+        let mut rthree = big::Float::new();
+        rthree.SetFloat64(3.0);
+        let (rz3, _) = rthree.Rat(goish::nil);
+        check(rz3.Num().Int64() == 3 && rz3.Denom().Int64() == 1, b"float Rat 3.0=3/1");
+
+        // ── numeric conversions: SetRat ────────────────────────────
+        // SetRat of 1/4 → exact, Float64()==0.25.
+        let mut quarter_rat = big::Rat::new();
+        quarter_rat.SetFrac(&big::NewInt(1), &big::NewInt(4));
+        let mut sr = big::Float::new();
+        sr.SetRat(&quarter_rat);
+        let (srv, _) = sr.Float64();
+        check(srv == 0.25, b"float SetRat 1/4=0.25");
+        // SetRat of 1/3 at low precision rounds inexactly.
+        let mut third_rat = big::Rat::new();
+        third_rat.SetFrac(&big::NewInt(1), &big::NewInt(3));
+        let mut sr3 = big::Float::new();
+        sr3.SetPrec(8);
+        sr3.SetRat(&third_rat);
+        check(sr3.Acc() != big::Accuracy::Exact, b"float SetRat 1/3 inexact");
+        // SetRat of an integer Rat → exact integer Float.
+        let mut int_rat = big::Rat::new();
+        int_rat.SetFrac(&big::NewInt(10), &big::NewInt(2));
+        let mut sri = big::Float::new();
+        sri.SetRat(&int_rat);
+        check(sri.Cmp(&big::NewFloat(5.0)) == 0, b"float SetRat 10/2=5");
     }
 
     let _ = &int::from(0);
