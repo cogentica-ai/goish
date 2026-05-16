@@ -3347,6 +3347,33 @@ pub const MinExp: int = i32::MIN as int;
 /// `big.MaxPrec` — largest (theoretically) supported precision.
 pub const MaxPrec: crate::types::uint = u32::MAX as crate::types::uint;
 
+/// `big.ErrNaN` — the panic value raised by a [`Float`] operation that
+/// would produce a NaN under IEEE 754 rules (e.g. `(+Inf) + (-Inf)`,
+/// `0 · Inf`, `0 / 0`, `√(negative)`). It implements the goish `error`
+/// interface via [`crate::errors::ErrorTrait`].
+///
+/// goish's `panic!` does not carry a typed payload in `no_std`, so the
+/// arithmetic ops `panic!` with the exact Go message text; this type
+/// exists so callers can still construct/inspect an `ErrNaN` value and
+/// lift it into an `error`.
+#[derive(Clone)]
+pub struct ErrNaN {
+    msg: crate::string,
+}
+
+impl ErrNaN {
+    /// Build an `ErrNaN` carrying `msg`.
+    pub fn new<S: Into<crate::string>>(msg: S) -> Self {
+        ErrNaN { msg: msg.into() }
+    }
+}
+
+impl crate::errors::ErrorTrait for ErrNaN {
+    fn Error(&self) -> crate::string {
+        self.msg.clone()
+    }
+}
+
 impl Default for Float {
     /// The zero value: `+0.0`, precision 0, mode `ToNearestEven`.
     fn default() -> Self {
@@ -3927,6 +3954,465 @@ impl Float {
         }
         exp
     }
+
+    // ─── internal: unsigned-mantissa arithmetic helpers ──────────────
+    //
+    // These mirror Go's `uadd` / `usub` / `umul` / `uquo`: they ignore
+    // the operand signs (the caller sets `self.neg` first, since the
+    // directed rounding modes consult it) and end by calling
+    // `set_exp_and_round`. Operands `x` and `y` must be `Finite` with a
+    // non-empty mantissa. Aliasing is safe — operands are passed by
+    // value (clones), so `self` may freely be one of them.
+
+    /// `z = x + y`, ignoring signs. Both operands finite & nonzero.
+    fn uadd(&mut self, x: &Float, y: &Float) {
+        // Exponents of the mantissae with the binary point on the right
+        // (i.e. interpreting the limbs as integers). i64 avoids overflow.
+        let ex = i64::from(x.exp) - (x.mant.len() as i64) * i64::from(FW);
+        let ey = i64::from(y.exp) - (y.mant.len() as i64) * i64::from(FW);
+
+        let (sum, e) = if ex < ey {
+            let t = lsh_limbs(&y.mant, (ey - ex) as u64);
+            (add_limbs(&x.mant, &t), ex)
+        } else if ex > ey {
+            let t = lsh_limbs(&x.mant, (ex - ey) as u64);
+            (add_limbs(&t, &y.mant), ey)
+        } else {
+            (add_limbs(&x.mant, &y.mant), ex)
+        };
+
+        self.mant = sum;
+        // len(z.mant) > 0 — adding two nonzero magnitudes can't cancel.
+        let s = fnorm(&mut self.mant);
+        self.set_exp_and_round(e + (self.mant.len() as i64) * i64::from(FW) - s, 0);
+    }
+
+    /// `z = x - y` for `|x| > |y|`, ignoring signs. Both finite & nonzero.
+    fn usub(&mut self, x: &Float, y: &Float) {
+        let ex = i64::from(x.exp) - (x.mant.len() as i64) * i64::from(FW);
+        let ey = i64::from(y.exp) - (y.mant.len() as i64) * i64::from(FW);
+
+        let (diff, e) = if ex < ey {
+            let t = lsh_limbs(&y.mant, (ey - ex) as u64);
+            (sub_limbs(&x.mant, &t), ex)
+        } else if ex > ey {
+            let t = lsh_limbs(&x.mant, (ex - ey) as u64);
+            (sub_limbs(&t, &y.mant), ey)
+        } else {
+            (sub_limbs(&x.mant, &y.mant), ex)
+        };
+
+        // The operands may have canceled each other out exactly.
+        if diff.is_empty() {
+            self.acc = Accuracy::Exact;
+            self.form = form::Zero;
+            self.neg = false;
+            return;
+        }
+
+        self.mant = diff;
+        let s = fnorm(&mut self.mant);
+        self.set_exp_and_round(e + (self.mant.len() as i64) * i64::from(FW) - s, 0);
+    }
+
+    /// `z = x · y`, ignoring signs. Both finite & nonzero.
+    fn umul(&mut self, x: &Float, y: &Float) {
+        let e = i64::from(x.exp) + i64::from(y.exp);
+        self.mant = mul_limbs(&x.mant, &y.mant);
+        // x and y nonzero => product nonzero => mantissa non-empty.
+        let s = fnorm(&mut self.mant);
+        self.set_exp_and_round(e - s, 0);
+    }
+
+    /// `z = x / y`, ignoring signs. Both finite & nonzero.
+    fn uquo(&mut self, x: &Float, y: &Float) {
+        // Mantissa length in limbs for the desired result precision + 1
+        // (at least one extra bit so the rounding bit survives division).
+        let n = (self.prec / FW) as usize + 1;
+
+        // Pad x's mantissa on the low end with `d` zero limbs so the
+        // quotient is long enough to include the rounding bit.
+        let mut xadj = x.mant.clone();
+        let d_pad = n as i64 - x.mant.len() as i64 + y.mant.len() as i64;
+        if d_pad > 0 {
+            let mut padded = alloc::vec![0u32; d_pad as usize];
+            padded.extend_from_slice(&x.mant);
+            xadj = padded;
+        }
+
+        let d = xadj.len() as i64 - y.mant.len() as i64;
+        let (q, r) = divmod_limbs(&xadj, &y.mant);
+        self.mant = q;
+        let e = i64::from(x.exp)
+            - i64::from(y.exp)
+            - (d - self.mant.len() as i64) * i64::from(FW);
+
+        // A non-zero remainder means the (uncomputed) fractional part
+        // would have a non-zero sticky bit.
+        let sbit: u32 = if r.is_empty() { 0 } else { 1 };
+
+        // q is nonzero: x,y nonzero and xadj padded so quotient ≥ 1 bit.
+        let s = fnorm(&mut self.mant);
+        self.set_exp_and_round(e - s, sbit);
+    }
+
+    // ─── public arithmetic ───────────────────────────────────────────
+
+    /// `(*Float).Add(x, y)` — set `self` to the rounded sum `x + y`. If
+    /// `self`'s precision is 0 it becomes `max(x.prec, y.prec)`. Rounding
+    /// uses `self`'s precision and mode; `self.acc` reports the error.
+    /// Panics (Go's `ErrNaN`) if `x` and `y` are infinities with opposite
+    /// signs.
+    pub fn Add<X: AsRef<Float>, Y: AsRef<Float>>(&mut self, x: X, y: Y) -> &mut Self {
+        // Snapshot operands — callers may alias (`z.Add(z, x)`).
+        let x = x.as_ref().clone();
+        let y = y.as_ref().clone();
+
+        if self.prec == 0 {
+            self.prec = x.prec.max(y.prec);
+        }
+
+        if x.form == form::Finite && y.form == form::Finite {
+            let yneg = y.neg;
+            self.neg = x.neg;
+            if x.neg == yneg {
+                //   x  +   y  ==  (x + y)
+                // (-x) + (-y) == -(x + y)
+                self.uadd(&x, &y);
+            } else if x.ucmp(&y) > 0 {
+                //  x + (-y) == x - y
+                self.usub(&x, &y);
+            } else {
+                // (-x) + y == y - x == -(x - y)
+                self.neg = !self.neg;
+                self.usub(&y, &x);
+            }
+            if self.form == form::Zero
+                && self.mode == RoundingMode::ToNegativeInf
+                && self.acc == Accuracy::Exact
+            {
+                self.neg = true;
+            }
+            return self;
+        }
+
+        if x.form == form::Inf && y.form == form::Inf && x.neg != y.neg {
+            // (+Inf) + (-Inf) — undefined; leave self valid, then panic.
+            self.acc = Accuracy::Exact;
+            self.form = form::Zero;
+            self.neg = false;
+            panic!("addition of infinities with opposite signs");
+        }
+
+        if x.form == form::Zero && y.form == form::Zero {
+            // ±0 + ±0  (only -0 + -0 == -0)
+            self.acc = Accuracy::Exact;
+            self.form = form::Zero;
+            self.neg = x.neg && y.neg;
+            return self;
+        }
+
+        if x.form == form::Inf || y.form == form::Zero {
+            // ±Inf + y  /  x + ±0
+            return self.Set(&x);
+        }
+        // ±0 + y  /  x + ±Inf
+        self.Set(&y)
+    }
+
+    /// `(*Float).Sub(x, y)` — set `self` to the rounded difference
+    /// `x - y`. Precision, rounding, and accuracy as for [`Float::Add`].
+    /// Panics (Go's `ErrNaN`) if `x` and `y` are infinities with equal
+    /// signs.
+    pub fn Sub<X: AsRef<Float>, Y: AsRef<Float>>(&mut self, x: X, y: Y) -> &mut Self {
+        let x = x.as_ref().clone();
+        let y = y.as_ref().clone();
+
+        if self.prec == 0 {
+            self.prec = x.prec.max(y.prec);
+        }
+
+        if x.form == form::Finite && y.form == form::Finite {
+            let yneg = y.neg;
+            self.neg = x.neg;
+            if x.neg != yneg {
+                //   x  - (-y) ==  (x + y)
+                // (-x) -   y  == -(x + y)
+                self.uadd(&x, &y);
+            } else if x.ucmp(&y) > 0 {
+                //   x  -   y  ==  (x - y)
+                self.usub(&x, &y);
+            } else {
+                // (-x) - (-y) == y - x == -(x - y)
+                self.neg = !self.neg;
+                self.usub(&y, &x);
+            }
+            if self.form == form::Zero
+                && self.mode == RoundingMode::ToNegativeInf
+                && self.acc == Accuracy::Exact
+            {
+                self.neg = true;
+            }
+            return self;
+        }
+
+        if x.form == form::Inf && y.form == form::Inf && x.neg == y.neg {
+            // (+Inf) - (+Inf)  /  (-Inf) - (-Inf) — undefined.
+            self.acc = Accuracy::Exact;
+            self.form = form::Zero;
+            self.neg = false;
+            panic!("subtraction of infinities with equal signs");
+        }
+
+        if x.form == form::Zero && y.form == form::Zero {
+            // ±0 - ±0  (only -0 - +0 == -0)
+            self.acc = Accuracy::Exact;
+            self.form = form::Zero;
+            self.neg = x.neg && !y.neg;
+            return self;
+        }
+
+        if x.form == form::Inf || y.form == form::Zero {
+            // ±Inf - y  /  x - ±0
+            return self.Set(&x);
+        }
+        // ±0 - y  /  x - ±Inf
+        self.Neg(&y)
+    }
+
+    /// `(*Float).Mul(x, y)` — set `self` to the rounded product `x · y`.
+    /// Precision, rounding, and accuracy as for [`Float::Add`]. Panics
+    /// (Go's `ErrNaN`) if one operand is zero and the other an infinity.
+    pub fn Mul<X: AsRef<Float>, Y: AsRef<Float>>(&mut self, x: X, y: Y) -> &mut Self {
+        let x = x.as_ref().clone();
+        let y = y.as_ref().clone();
+
+        if self.prec == 0 {
+            self.prec = x.prec.max(y.prec);
+        }
+
+        self.neg = x.neg != y.neg;
+
+        if x.form == form::Finite && y.form == form::Finite {
+            self.umul(&x, &y);
+            return self;
+        }
+
+        self.acc = Accuracy::Exact;
+        if (x.form == form::Zero && y.form == form::Inf)
+            || (x.form == form::Inf && y.form == form::Zero)
+        {
+            // ±0 · ±Inf — undefined; leave self valid, then panic.
+            self.form = form::Zero;
+            self.neg = false;
+            panic!("multiplication of zero with infinity");
+        }
+
+        if x.form == form::Inf || y.form == form::Inf {
+            // ±Inf · y  /  x · ±Inf
+            self.form = form::Inf;
+            return self;
+        }
+        // ±0 · y  /  x · ±0
+        self.form = form::Zero;
+        self
+    }
+
+    /// `(*Float).Quo(x, y)` — set `self` to the rounded quotient `x / y`.
+    /// Precision, rounding, and accuracy as for [`Float::Add`]. Panics
+    /// (Go's `ErrNaN`) if both operands are zero or both infinities.
+    pub fn Quo<X: AsRef<Float>, Y: AsRef<Float>>(&mut self, x: X, y: Y) -> &mut Self {
+        let x = x.as_ref().clone();
+        let y = y.as_ref().clone();
+
+        if self.prec == 0 {
+            self.prec = x.prec.max(y.prec);
+        }
+
+        self.neg = x.neg != y.neg;
+
+        if x.form == form::Finite && y.form == form::Finite {
+            self.uquo(&x, &y);
+            return self;
+        }
+
+        self.acc = Accuracy::Exact;
+        if (x.form == form::Zero && y.form == form::Zero)
+            || (x.form == form::Inf && y.form == form::Inf)
+        {
+            // ±0 / ±0  /  ±Inf / ±Inf — undefined; leave self valid.
+            self.form = form::Zero;
+            self.neg = false;
+            panic!("division of zero by zero or infinity by infinity");
+        }
+
+        if x.form == form::Zero || y.form == form::Inf {
+            // ±0 / y  /  x / ±Inf
+            self.form = form::Zero;
+            return self;
+        }
+        // x / ±0  /  ±Inf / y
+        self.form = form::Inf;
+        self
+    }
+
+    /// `(*Float).Abs(x)` — set `self` to the (possibly rounded) value
+    /// `|x|`.
+    pub fn Abs<X: AsRef<Float>>(&mut self, x: X) -> &mut Self {
+        self.Set(x);
+        self.neg = false;
+        self
+    }
+
+    /// `(*Float).Neg(x)` — set `self` to the (possibly rounded) value of
+    /// `x` with its sign negated.
+    pub fn Neg<X: AsRef<Float>>(&mut self, x: X) -> &mut Self {
+        self.Set(x);
+        self.neg = !self.neg;
+        self
+    }
+
+    /// `(*Float).Sqrt(x)` — set `self` to the rounded square root of `x`.
+    /// If `self`'s precision is 0 it becomes `x`'s precision. Rounding
+    /// uses `self`'s precision and mode; `self.acc` is left undefined
+    /// (matching Go). Panics (Go's `ErrNaN`) if `x < 0`. `√±0 = ±0`,
+    /// `√(+Inf) = +Inf`.
+    pub fn Sqrt<X: AsRef<Float>>(&mut self, x: X) -> &mut Self {
+        let x = x.as_ref().clone();
+
+        if self.prec == 0 {
+            self.prec = x.prec;
+        }
+
+        if x.Sign() == -1 {
+            // IEEE 754-2008 §7.2.
+            panic!("square root of negative operand");
+        }
+
+        // Handle ±0 and +Inf.
+        if x.form != form::Finite {
+            self.acc = Accuracy::Exact;
+            self.form = x.form;
+            self.neg = x.neg; // √±0 == ±0
+            self.mant = Vec::new();
+            self.exp = 0;
+            return self;
+        }
+
+        // MantExp would lower self.prec if self.prec > x.prec; capture
+        // and restore it across the call.
+        let prec = self.prec;
+        let b = x.MantExp(&mut *self);
+        self.prec = prec;
+
+        // Compute √(z·2^b):
+        //   √( z)·2^(½b)    if b even
+        //   √(2z)·2^(⌊½b⌋)  if b > 0 odd
+        //   √(½z)·2^(⌈½b⌉)  if b < 0 odd
+        match b % 2 {
+            0 => {}
+            1 => self.exp += 1,
+            -1 => self.exp -= 1,
+            _ => {}
+        }
+        // 0.25 <= self < 2.0
+
+        let root = self.sqrt_inverse();
+        self.Set(&root);
+
+        // Re-attach the halved exponent.
+        let half = b / 2;
+        let snapshot = self.clone();
+        self.SetMantExp(&snapshot, half)
+    }
+
+    /// Compute `√x` (to `self.prec` precision) by solving `1/t² - x = 0`
+    /// for `t` with Newton's method, then inverting. `self` holds the
+    /// normalized `x` (`0.25 <= x < 2.0`) on entry; the returned `Float`
+    /// is `√x`. Mirrors Go's `sqrtInverse`.
+    fn sqrt_inverse(&self) -> Float {
+        let x = self;
+        // ng: Newton step  t2 = ½t(3 - x·t²).
+        let three = NewFloat(3.0);
+        let next_guess = |t: &Float| -> Float {
+            let mut u = Float::new();
+            u.prec = t.prec;
+            let mut v = Float::new();
+            v.prec = t.prec;
+            u.Mul(t, t); // u = t²
+            let u2 = u.clone();
+            u.Mul(x, &u2); //   = x·t²
+            v.Sub(&three, &u); // v = 3 - x·t²
+            u.Mul(t, &v); // u = t(3 - x·t²)
+            u.exp -= 1; //   = ½t(3 - x·t²)
+            let mut t2 = Float::new();
+            t2.prec = t.prec;
+            t2.Set(&u);
+            t2
+        };
+
+        // Initial guess 1/√x from an f64 approximation.
+        let xf = x.to_f64_approx();
+        let mut sqi = Float::new();
+        sqi.prec = x.prec;
+        sqi.SetFloat64(1.0 / sqrt_f64(xf));
+
+        // Newton's method doubles the correct digits each step; grow the
+        // working precision the same way until it covers prec + 32 bits.
+        let prec = self.prec + 32;
+        while sqi.prec < prec {
+            sqi.prec *= 2;
+            sqi = next_guess(&sqi);
+        }
+        // sqi = 1/√x
+
+        // √x = x / √x = x · (1/√x)
+        let mut z = Float::new();
+        z.prec = self.prec;
+        z.Mul(x, &sqi);
+        z
+    }
+
+    /// Internal: a coarse `f64` approximation of a finite `Float`, used
+    /// only to seed `Sqrt`'s Newton iteration. `Float64()` proper is a
+    /// later task; this reads the top 64 mantissa bits and `ldexp`s.
+    fn to_f64_approx(&self) -> f64 {
+        if self.form != form::Finite || self.mant.is_empty() {
+            return 0.0;
+        }
+        // Top 64 bits of the msb-normalized mantissa.
+        let n = self.mant.len();
+        let hi = u64::from(self.mant[n - 1]);
+        let lo = if n >= 2 { u64::from(self.mant[n - 2]) } else { 0 };
+        let m = (hi << 32) | lo; // msb set (normalized)
+        // m represents the fraction m / 2^64, so value = m · 2^(exp-64).
+        let v = ldexp_f64(m, i64::from(self.exp) - 64);
+        if self.neg { -v } else { v }
+    }
+}
+
+/// Internal: `√x` for a non-negative `f64`, no libm. Newton's method
+/// seeded from an exponent-halving bit-trick; ~5 iterations converge to
+/// full f64 precision. Only used to seed [`Float::Sqrt`].
+fn sqrt_f64(x: f64) -> f64 {
+    if x == 0.0 || x.is_nan() {
+        return x;
+    }
+    if x < 0.0 {
+        return f64::NAN;
+    }
+    if x.is_infinite() {
+        return x;
+    }
+    // Seed: halve the biased exponent (the classic "fast" estimate).
+    let bits = x.to_bits();
+    let seed = f64::from_bits(((bits >> 1) + (0x1ff8_0000_0000_0000u64)) & !(1u64 << 63));
+    let mut g = if seed > 0.0 && seed.is_finite() { seed } else { x };
+    // Newton: g ← ½(g + x/g).
+    for _ in 0..8 {
+        g = 0.5 * (g + x / g);
+    }
+    g
 }
 
 /// `big.NewFloat(x)` — allocate a new [`Float`] set to `x`, with

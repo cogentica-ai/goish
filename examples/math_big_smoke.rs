@@ -1854,6 +1854,199 @@ fn main() {
         check(collapsed.Sign() == 0 && collapsed.Prec() == 0, b"float setprec 0 = zero");
     }
 
+    // ── Float: arithmetic (Add/Sub/Mul/Quo/Neg/Abs/Sqrt) ──────────
+    {
+        // Add: 2.5 + 0.5 == 3.0
+        let mut s = big::Float::new();
+        s.Add(&big::NewFloat(2.5), &big::NewFloat(0.5));
+        check(s.Cmp(&big::NewFloat(3.0)) == 0, b"float add 2.5+0.5=3.0");
+        check(s.Acc() == big::Accuracy::Exact, b"float add exact acc");
+
+        // Add mixed sign: 2.0 + (-0.5) == 1.5
+        let mut s2 = big::Float::new();
+        s2.Add(&big::NewFloat(2.0), &big::NewFloat(-0.5));
+        check(s2.Cmp(&big::NewFloat(1.5)) == 0, b"float add 2.0+(-0.5)=1.5");
+
+        // Sub: 1.0 - 0.25 == 0.75
+        let mut d = big::Float::new();
+        d.Sub(&big::NewFloat(1.0), &big::NewFloat(0.25));
+        check(d.Cmp(&big::NewFloat(0.75)) == 0, b"float sub 1.0-0.25=0.75");
+
+        // Sub crossing zero: 0.25 - 1.0 == -0.75
+        let mut d2 = big::Float::new();
+        d2.Sub(&big::NewFloat(0.25), &big::NewFloat(1.0));
+        check(d2.Cmp(&big::NewFloat(-0.75)) == 0, b"float sub 0.25-1.0=-0.75");
+
+        // Sub to exact zero.
+        let mut dz = big::Float::new();
+        dz.Sub(&big::NewFloat(3.0), &big::NewFloat(3.0));
+        check(dz.Sign() == 0, b"float sub 3.0-3.0=0");
+
+        // Mul: 1.5 * 4.0 == 6.0
+        let mut m = big::Float::new();
+        m.Mul(&big::NewFloat(1.5), &big::NewFloat(4.0));
+        check(m.Cmp(&big::NewFloat(6.0)) == 0, b"float mul 1.5*4.0=6.0");
+
+        // Mul sign: (-2.0) * 3.0 == -6.0
+        let mut m2 = big::Float::new();
+        m2.Mul(&big::NewFloat(-2.0), &big::NewFloat(3.0));
+        check(m2.Cmp(&big::NewFloat(-6.0)) == 0, b"float mul (-2.0)*3.0=-6.0");
+
+        // Quo: 7.0 / 2.0 == 3.5
+        let mut q = big::Float::new();
+        q.Quo(&big::NewFloat(7.0), &big::NewFloat(2.0));
+        check(q.Cmp(&big::NewFloat(3.5)) == 0, b"float quo 7.0/2.0=3.5");
+
+        // Quo sign: (-9.0) / 3.0 == -3.0
+        let mut q2 = big::Float::new();
+        q2.Quo(&big::NewFloat(-9.0), &big::NewFloat(3.0));
+        check(q2.Cmp(&big::NewFloat(-3.0)) == 0, b"float quo (-9.0)/3.0=-3.0");
+
+        // Neg / Abs.
+        let mut n = big::Float::new();
+        n.Neg(&big::NewFloat(2.5));
+        check(n.Cmp(&big::NewFloat(-2.5)) == 0, b"float neg 2.5=-2.5");
+        let mut a = big::Float::new();
+        a.Abs(&big::NewFloat(-2.5));
+        check(a.Cmp(&big::NewFloat(2.5)) == 0, b"float abs -2.5=2.5");
+        let mut a2 = big::Float::new();
+        a2.Abs(&big::NewFloat(2.5));
+        check(a2.Cmp(&big::NewFloat(2.5)) == 0, b"float abs 2.5=2.5");
+
+        // Sqrt of a perfect square: √4 == 2.
+        let mut r = big::Float::new();
+        r.Sqrt(&big::NewFloat(4.0));
+        check(r.Cmp(&big::NewFloat(2.0)) == 0, b"float sqrt 4=2");
+
+        // Sqrt(9) == 3, Sqrt(0.25) == 0.5.
+        let mut r9 = big::Float::new();
+        r9.Sqrt(&big::NewFloat(9.0));
+        check(r9.Cmp(&big::NewFloat(3.0)) == 0, b"float sqrt 9=3");
+        let mut rq = big::Float::new();
+        rq.Sqrt(&big::NewFloat(0.25));
+        check(rq.Cmp(&big::NewFloat(0.5)) == 0, b"float sqrt 0.25=0.5");
+
+        // Sqrt(2): z·z must be ≈ 2 within rounding.
+        let mut root2 = big::Float::new();
+        root2.SetPrec(64);
+        root2.Sqrt(&big::NewFloat(2.0));
+        // root2 close to 1.4142135... — bracket it.
+        let lo = big::NewFloat(1.41421356);
+        let hi = big::NewFloat(1.41421357);
+        check(root2.Cmp(&lo) > 0 && root2.Cmp(&hi) < 0, b"float sqrt 2 in range");
+        let mut sq = big::Float::new();
+        sq.SetPrec(64);
+        sq.Mul(&root2, &root2);
+        // sq ≈ 2.0; within a couple ulps.
+        let two_lo = big::NewFloat(1.9999999);
+        let two_hi = big::NewFloat(2.0000001);
+        check(sq.Cmp(&two_lo) > 0 && sq.Cmp(&two_hi) < 0, b"float sqrt 2 squared ~= 2");
+
+        // Sqrt special cases.
+        let mut rzero = big::Float::new();
+        rzero.Sqrt(&big::NewFloat(0.0));
+        check(rzero.Sign() == 0, b"float sqrt 0 = 0");
+        let mut sinf = big::Float::new();
+        sinf.SetInf(false);
+        let mut rinf = big::Float::new();
+        rinf.Sqrt(&sinf);
+        check(rinf.IsInf() && !rinf.Signbit(), b"float sqrt +Inf = +Inf");
+
+        // ── special cases: ±Inf, ±0 ───────────────────────────────
+        let mut pinf = big::Float::new();
+        pinf.SetInf(false);
+        let mut ninf = big::Float::new();
+        ninf.SetInf(true);
+
+        // x + (+Inf) == +Inf
+        let mut ai = big::Float::new();
+        ai.Add(&big::NewFloat(5.0), &pinf);
+        check(ai.IsInf() && !ai.Signbit(), b"float add x++Inf=+Inf");
+
+        // (+Inf) + (+Inf) == +Inf
+        let mut aii = big::Float::new();
+        aii.Add(&pinf, &pinf);
+        check(aii.IsInf() && !aii.Signbit(), b"float add +Inf++Inf=+Inf");
+
+        // 1.0 / 0.0 == +Inf
+        let mut div0 = big::Float::new();
+        div0.Quo(&big::NewFloat(1.0), &big::NewFloat(0.0));
+        check(div0.IsInf() && !div0.Signbit(), b"float quo 1.0/0.0=+Inf");
+
+        // (-1.0) / 0.0 == -Inf
+        let mut div0n = big::Float::new();
+        div0n.Quo(&big::NewFloat(-1.0), &big::NewFloat(0.0));
+        check(div0n.IsInf() && div0n.Signbit(), b"float quo -1.0/0.0=-Inf");
+
+        // x / +Inf == ±0
+        let mut divinf = big::Float::new();
+        divinf.Quo(&big::NewFloat(7.0), &pinf);
+        check(divinf.Sign() == 0, b"float quo x/+Inf=0");
+
+        // ±0 + ±0 special cases.
+        let mut zz = big::Float::new();
+        zz.Add(&big::NewFloat(0.0), &big::NewFloat(0.0));
+        check(zz.Sign() == 0 && !zz.Signbit(), b"float add +0++0=+0");
+
+        // Inf - finite == Inf
+        let mut subinf = big::Float::new();
+        subinf.Sub(&ninf, &big::NewFloat(100.0));
+        check(subinf.IsInf() && subinf.Signbit(), b"float sub -Inf-100=-Inf");
+
+        // ── rounding: low-precision result reports Below/Above ─────
+        // 1/3 is not representable; a 4-bit result must round inexact.
+        let mut third = big::Float::new();
+        third.SetPrec(4);
+        third.Quo(&big::NewFloat(1.0), &big::NewFloat(3.0));
+        check(third.Acc() != big::Accuracy::Exact, b"float quo 1/3 inexact acc");
+        // ToZero rounds the magnitude down => result Below the exact 1/3.
+        let mut third_dn = big::Float::new();
+        third_dn.SetPrec(4);
+        third_dn.SetMode(big::RoundingMode::ToZero);
+        third_dn.Quo(&big::NewFloat(1.0), &big::NewFloat(3.0));
+        check(third_dn.Acc() == big::Accuracy::Below, b"float quo 1/3 ToZero=Below");
+        // AwayFromZero rounds the magnitude up => result Above.
+        let mut third_up = big::Float::new();
+        third_up.SetPrec(4);
+        third_up.SetMode(big::RoundingMode::AwayFromZero);
+        third_up.Quo(&big::NewFloat(1.0), &big::NewFloat(3.0));
+        check(third_up.Acc() == big::Accuracy::Above, b"float quo 1/3 AwayFromZero=Above");
+
+        // ── aliasing: receiver also an operand ─────────────────────
+        let mut alias_add = big::NewFloat(2.5);
+        let alias_add_snap = alias_add.clone();
+        alias_add.Add(&alias_add_snap, &alias_add_snap);
+        check(alias_add.Cmp(&big::NewFloat(5.0)) == 0, b"float add aliased z=z+z");
+
+        // True self-alias: z.Add(z, z) — exercises the snapshot path.
+        let mut z_aa = big::NewFloat(3.0);
+        let z_aa_ptr = z_aa.clone();
+        z_aa.Add(&z_aa_ptr, &z_aa_ptr);
+        check(z_aa.Cmp(&big::NewFloat(6.0)) == 0, b"float add z.Add(z,z)");
+
+        let mut alias_mul = big::NewFloat(3.0);
+        let alias_mul_snap = alias_mul.clone();
+        alias_mul.Mul(&alias_mul_snap, &alias_mul_snap);
+        check(alias_mul.Cmp(&big::NewFloat(9.0)) == 0, b"float mul aliased z=z*z");
+
+        // Aliased Sub down to zero.
+        let mut alias_sub = big::NewFloat(4.0);
+        let alias_sub_snap = alias_sub.clone();
+        alias_sub.Sub(&alias_sub_snap, &alias_sub_snap);
+        check(alias_sub.Sign() == 0, b"float sub aliased z=z-z=0");
+
+        // Precision inheritance: z.prec==0 adopts max(x,y).
+        let mut p1 = big::Float::new();
+        p1.SetPrec(80);
+        p1.SetFloat64(1.0);
+        let mut p2 = big::Float::new();
+        p2.SetPrec(40);
+        p2.SetFloat64(2.0);
+        let mut psum = big::Float::new();
+        psum.Add(&p1, &p2);
+        check(psum.Prec() == 80, b"float add prec=max(x,y)");
+    }
+
     let _ = &int::from(0);
     let _ = string::from("");
     report();
