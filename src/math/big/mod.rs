@@ -4815,6 +4815,1228 @@ impl Float {
         let v = ldexp_f64(m, i64::from(self.exp) - 64);
         if self.neg { -v } else { v }
     }
+
+    // ─── string I/O — formatting ─────────────────────────────────────
+    //
+    // Go reference: math/big/{ftoa,decimal}.go. The core algorithm
+    // converts the binary mantissa exactly into a decimal-digit string
+    // (`Decimal`), rounds it to the requested precision, then renders
+    // it in the chosen format. The binary/hex forms ('b', 'p', 'x') are
+    // rendered directly from the limbs.
+
+    /// `(*Float).Text(format, prec)` — format `self` as text. The
+    /// `format` byte is one of `'e' 'E' 'f' 'g' 'G' 'x' 'b' 'p'`; see
+    /// the Go docs for the meaning of each. `prec` is the digit count
+    /// (`-1` selects the shortest representation that round-trips). An
+    /// unrecognized `format` yields `"%<format>"`.
+    pub fn Text(&self, format: crate::types::byte, prec: int) -> crate::string {
+        let buf = self.append_internal(Vec::new(), format, prec);
+        crate::string::from_bytes(&buf)
+    }
+
+    /// `(*Float).String()` — formats `self` like `Text('g', 10)`.
+    pub fn String(&self) -> crate::string {
+        self.Text(b'g', 10)
+    }
+
+    /// `(*Float).Append(buf, format, prec)` — append the `Text`
+    /// formatting of `self` to `buf` and return the extended slice.
+    pub fn Append(
+        &self,
+        buf: crate::slice<crate::types::byte>,
+        format: crate::types::byte,
+        prec: int,
+    ) -> crate::slice<crate::types::byte> {
+        let out = self.append_internal(buf.__into_vec(), format, prec);
+        crate::slice::<crate::types::byte>::__from_vec(out)
+    }
+
+    /// Internal: the `Append` body operating on a Rust `Vec<u8>`.
+    /// Mirrors `ftoa.go:(*Float).Append`.
+    fn append_internal(&self, mut buf: Vec<u8>, fmt: u8, mut prec: int) -> Vec<u8> {
+        // sign
+        if self.neg {
+            buf.push(b'-');
+        }
+
+        // Inf
+        if self.form == form::Inf {
+            if !self.neg {
+                buf.push(b'+');
+            }
+            buf.extend_from_slice(b"Inf");
+            return buf;
+        }
+
+        // pick off easy formats
+        match fmt {
+            b'b' => return self.fmt_b(buf),
+            b'p' => return self.fmt_p(buf),
+            b'x' => return self.fmt_x(buf, prec),
+            _ => {}
+        }
+
+        // 1) convert Float to multiprecision decimal
+        let mut d = Decimal::new();
+        if self.form == form::Finite {
+            // x != 0; exp - bitLen(mant) is the shift of the integer mantissa
+            let shift = i64::from(self.exp) - i64::from(bit_len(&self.mant));
+            d.init(&self.mant, shift);
+        }
+
+        // 2) round to desired precision
+        let shortest = prec < 0;
+        if shortest {
+            round_shortest(&mut d, self);
+            match fmt {
+                b'e' | b'E' => prec = d.mant.len() as int - 1,
+                b'f' => prec = core::cmp::max(d.mant.len() as int - d.exp as int, 0),
+                b'g' | b'G' => prec = d.mant.len() as int,
+                _ => {}
+            }
+        } else {
+            match fmt {
+                b'e' | b'E' => d.round(1 + prec),
+                b'f' => d.round(d.exp as int + prec),
+                b'g' | b'G' => {
+                    if prec == 0 {
+                        prec = 1;
+                    }
+                    d.round(prec);
+                }
+                _ => {}
+            }
+        }
+
+        // 3) read digits out and format
+        match fmt {
+            b'e' | b'E' => fmt_e(buf, fmt, prec, &d),
+            b'f' => fmt_f(buf, prec, &d),
+            b'g' | b'G' => {
+                let mut eprec = prec;
+                if eprec > d.mant.len() as int && d.mant.len() as int >= d.exp as int {
+                    eprec = d.mant.len() as int;
+                }
+                if shortest {
+                    eprec = 6;
+                }
+                let exp = d.exp as int - 1;
+                if exp < -4 || exp >= eprec {
+                    if prec > d.mant.len() as int {
+                        prec = d.mant.len() as int;
+                    }
+                    // fmt+'e'-'g' maps 'g'->'e', 'G'->'E'
+                    let efmt = fmt - b'g' + b'e';
+                    return fmt_e(buf, efmt, prec - 1, &d);
+                }
+                if prec > d.exp as int {
+                    prec = d.mant.len() as int;
+                }
+                fmt_f(buf, core::cmp::max(prec - d.exp as int, 0), &d)
+            }
+            _ => {
+                // unknown format
+                if self.neg {
+                    buf.pop(); // sign was added prematurely
+                }
+                buf.push(b'%');
+                buf.push(fmt);
+                buf
+            }
+        }
+    }
+
+    /// `fmtB` — `mantissa "p" exponent`, decimal mantissa using exactly
+    /// `prec` bits, binary exponent. `"0"` for zero. Sign ignored.
+    fn fmt_b(&self, mut buf: Vec<u8>) -> Vec<u8> {
+        if self.form == form::Zero {
+            buf.push(b'0');
+            return buf;
+        }
+        // adjust mantissa to use exactly self.prec bits
+        let w = self.mant.len() as u32 * FW;
+        let m = if w < self.prec {
+            lsh_limbs(&self.mant, u64::from(self.prec - w))
+        } else if w > self.prec {
+            rsh_limbs(&self.mant, u64::from(w - self.prec))
+        } else {
+            self.mant.clone()
+        };
+        buf.extend_from_slice(&itoa(false, &m, 10));
+        buf.push(b'p');
+        let e = i64::from(self.exp) - i64::from(self.prec);
+        if e >= 0 {
+            buf.push(b'+');
+        }
+        append_int(buf, e)
+    }
+
+    /// `fmtP` — `"0x." mantissa "p" exponent`, hex mantissa in
+    /// `[0.5, 1)`, binary exponent. `"0"` for zero. Sign ignored.
+    fn fmt_p(&self, mut buf: Vec<u8>) -> Vec<u8> {
+        if self.form == form::Zero {
+            buf.push(b'0');
+            return buf;
+        }
+        // remove trailing 0 limbs early (no need to trim hex 0's later)
+        let mut m: &[u32] = &self.mant;
+        let mut i = 0usize;
+        while i < m.len() && m[i] == 0 {
+            i += 1;
+        }
+        m = &m[i..];
+        buf.extend_from_slice(b"0x.");
+        let mut hex = itoa(false, m, 16);
+        // trim trailing '0's
+        while hex.last() == Some(&b'0') {
+            hex.pop();
+        }
+        buf.extend_from_slice(&hex);
+        buf.push(b'p');
+        if self.exp >= 0 {
+            buf.push(b'+');
+        }
+        append_int(buf, i64::from(self.exp))
+    }
+
+    /// `fmtX` — `"0x1." mantissa "p" exponent`, hex mantissa in
+    /// `[1, 2)`, binary exponent. `"0x0p+00"` for zero. Sign ignored.
+    fn fmt_x(&self, mut buf: Vec<u8>, prec: int) -> Vec<u8> {
+        if self.form == form::Zero {
+            buf.extend_from_slice(b"0x0");
+            if prec > 0 {
+                buf.push(b'.');
+                for _ in 0..prec {
+                    buf.push(b'0');
+                }
+            }
+            buf.extend_from_slice(b"p+00");
+            return buf;
+        }
+
+        // round mantissa to n bits
+        let n: u32 = if prec < 0 {
+            1 + (self.MinPrec() as u32 - 1 + 3) / 4 * 4
+        } else {
+            1 + 4 * prec as u32
+        };
+        // n%4 == 1; build a rounded copy at precision n
+        let mut x = Float::new();
+        x.SetPrec(n as crate::types::uint);
+        x.SetMode(self.mode);
+        x.Set(self);
+
+        let w = x.mant.len() as u32 * FW;
+        let m = if w < n {
+            lsh_limbs(&x.mant, u64::from(n - w))
+        } else if w > n {
+            rsh_limbs(&x.mant, u64::from(w - n))
+        } else {
+            x.mant.clone()
+        };
+        let mut exp64 = i64::from(x.exp) - 1;
+
+        let hm = itoa(false, &m, 16);
+        buf.extend_from_slice(b"0x1");
+        if hm.len() > 1 {
+            buf.push(b'.');
+            buf.extend_from_slice(&hm[1..]);
+        }
+        buf.push(b'p');
+        if exp64 >= 0 {
+            buf.push(b'+');
+        } else {
+            exp64 = -exp64;
+            buf.push(b'-');
+        }
+        if exp64 < 10 {
+            buf.push(b'0');
+        }
+        append_int(buf, exp64)
+    }
+
+    // ─── string I/O — parsing ────────────────────────────────────────
+    //
+    // Go reference: math/big/floatconv.go. `Parse` reads a float
+    // literal (decimal, or — for base 0 — `0x`/`0b`/`0o`-prefixed),
+    // applies the radix-point and exponent corrections via powers of
+    // 2 and 5, and rounds to the receiver's precision.
+
+    /// `(*Float).Parse(s, base)` — parse a floating-point literal from
+    /// `s` in the given mantissa `base` (`0`, `2`, `8`, `10`, `16`).
+    /// Returns `(self, actual_base, err)`. The whole string must be
+    /// consumed. If `self`'s precision is 0 it becomes 64.
+    pub fn Parse<S: Into<crate::string>>(
+        &mut self,
+        s: S,
+        base: int,
+    ) -> (&mut Float, int, crate::error) {
+        let s = s.into();
+        let bytes = s.as_bytes().to_vec();
+        match float_scan(&bytes, base) {
+            Ok((neg, mant_limbs, b, fcount, exp, ebase, is_inf)) => {
+                if is_inf {
+                    self.SetInf(neg);
+                    return (self, b, crate::errors::nil);
+                }
+                let err = self.apply_scan(neg, mant_limbs, b, fcount, exp, ebase);
+                (self, b, err)
+            }
+            Err(msg) => {
+                self.form = form::Zero;
+                (self, base, crate::errors::New(msg))
+            }
+        }
+    }
+
+    /// Internal: given the decomposed parse result, build `self`.
+    /// Mirrors the tail of `floatconv.go:(*Float).scan`.
+    fn apply_scan(
+        &mut self,
+        neg: bool,
+        mut mant: Vec<u32>,
+        b: int,
+        fcount: i64,
+        exp: i64,
+        ebase: int,
+    ) -> crate::error {
+        let prec = if self.prec == 0 { 64 } else { self.prec };
+        self.neg = neg;
+
+        // special-case 0
+        if mant.is_empty() {
+            self.prec = prec;
+            self.acc = Accuracy::Exact;
+            self.form = form::Zero;
+            return crate::errors::nil;
+        }
+
+        // normalize mantissa and determine initial exponent contributions
+        let s = fnorm(&mut mant);
+        let mut exp2 = (mant.len() as i64) * i64::from(FW) - s;
+        let mut exp5: i64 = 0;
+        self.mant = mant;
+
+        // radix-point contribution
+        if fcount < 0 {
+            let d = fcount;
+            match b {
+                10 => {
+                    exp5 = d;
+                    exp2 += d;
+                }
+                2 => exp2 += d,
+                8 => exp2 += d * 3,
+                16 => exp2 += d * 4,
+                _ => unreachable!(),
+            }
+        }
+
+        // actual exponent
+        match ebase {
+            10 => {
+                exp5 += exp;
+                exp2 += exp;
+            }
+            2 => exp2 += exp,
+            _ => unreachable!(),
+        }
+
+        // apply 2**exp2
+        if MinExp as i64 <= exp2 && exp2 <= MaxExp as i64 {
+            self.prec = prec;
+            self.form = form::Finite;
+            self.exp = exp2 as i32;
+        } else {
+            return crate::errors::New("exponent overflow");
+        }
+
+        if exp5 == 0 {
+            self.round(0);
+            return crate::errors::nil;
+        }
+
+        // apply 5**exp5
+        let mut p = Float::new();
+        p.SetPrec((self.Prec() + 64) as crate::types::uint);
+        if exp5 < 0 {
+            let p5 = pow5_float((-exp5) as u64, self.prec + 64);
+            let snap = self.clone();
+            self.Quo(&snap, &p5);
+        } else {
+            let p5 = pow5_float(exp5 as u64, self.prec + 64);
+            let snap = self.clone();
+            self.Mul(&snap, &p5);
+        }
+        let _ = p;
+        crate::errors::nil
+    }
+
+    /// `(*Float).SetString(s)` — set `self` to the value of `s`
+    /// (base 0). Returns `(self, ok)`; on failure `ok` is false and
+    /// `self`'s value is undefined.
+    pub fn SetString<S: Into<crate::string>>(
+        &mut self,
+        s: S,
+    ) -> (&mut Float, bool) {
+        let (_, _, err) = self.Parse(s, 0);
+        let ok = err == crate::errors::nil;
+        (self, ok)
+    }
+
+    // ─── string I/O — marshalling ────────────────────────────────────
+    //
+    // Go reference: math/big/floatmarsh.go. Gob carries the full Float
+    // state (precision, mode, accuracy, form, sign, exponent, mantissa);
+    // text marshalling carries only the value, in full precision.
+
+    /// `(*Float).AppendText(b)` — append the full-precision `'g'`-format
+    /// text of `self` to `b`. The error is always nil, matching Go.
+    pub fn AppendText(
+        &self,
+        b: crate::slice<crate::types::byte>,
+    ) -> (crate::slice<crate::types::byte>, crate::error) {
+        (self.Append(b, b'g', -1), crate::errors::nil)
+    }
+
+    /// `(*Float).MarshalText()` — the full-precision text encoding of
+    /// `self`. The error is always nil, matching Go.
+    pub fn MarshalText(&self) -> (crate::slice<crate::types::byte>, crate::error) {
+        self.AppendText(crate::slice::<crate::types::byte>::new())
+    }
+
+    /// `(*Float).UnmarshalText(text)` — parse `text` (base 0) into
+    /// `self`, rounded per `self`'s precision and mode (precision 0
+    /// becomes 64). Returns a non-nil error if `text` is invalid.
+    pub fn UnmarshalText(
+        &mut self,
+        text: crate::slice<crate::types::byte>,
+    ) -> crate::error {
+        let s = crate::string::from_bytes(&text);
+        let (_, _, err) = self.Parse(s.clone(), 0);
+        if err != crate::errors::nil {
+            return crate::errors::New(crate::fmt::Sprintf!(
+                "math/big: cannot unmarshal %q into a *big.Float (%v)",
+                s,
+                err
+            ));
+        }
+        crate::errors::nil
+    }
+
+    /// `(*Float).GobEncode()` — gob wire format: a version byte, a
+    /// packed `mode|acc|form|neg` byte, a big-endian 4-byte precision,
+    /// and (for finite values) a big-endian 4-byte exponent followed by
+    /// the big-endian mantissa bytes. Error is always nil.
+    pub fn GobEncode(&self) -> (crate::slice<crate::types::byte>, crate::error) {
+        // number of mantissa words for the given precision
+        let mut n = 0usize;
+        if self.form == form::Finite {
+            let want = ((self.prec + (FW - 1)) / FW) as usize;
+            n = core::cmp::min(want, self.mant.len());
+        }
+
+        let mut out: Vec<u8> = Vec::new();
+        out.push(FLOAT_GOB_VERSION);
+        // mode (3 bits) << 5 | (acc+1) (2 bits) << 3 | form (2 bits) << 1 | neg
+        let mode_bits = rounding_mode_to_bits(self.mode) & 7;
+        let acc_bits = ((accuracy_to_signed(self.acc) + 1) & 3) as u8;
+        let form_bits = form_to_bits(self.form) & 3;
+        let mut b = (mode_bits << 5) | (acc_bits << 3) | (form_bits << 1);
+        if self.neg {
+            b |= 1;
+        }
+        out.push(b);
+        // prec, big-endian u32
+        out.extend_from_slice(&self.prec.to_be_bytes());
+
+        if self.form == form::Finite {
+            out.extend_from_slice(&(self.exp as u32).to_be_bytes());
+            // cut off unused trailing words; mant_bytes is big-endian
+            let kept = &self.mant[self.mant.len() - n..];
+            out.extend_from_slice(&limbs_to_be_bytes_fixed(kept));
+        }
+
+        (
+            crate::slice::<crate::types::byte>::__from_vec(out),
+            crate::errors::nil,
+        )
+    }
+
+    /// `(*Float).GobDecode(buf)` — inverse of `GobEncode`. An empty
+    /// `buf` resets `self` to the zero value; a version mismatch or a
+    /// truncated buffer returns a non-nil error. The result is rounded
+    /// per `self`'s precision and mode unless that precision is 0.
+    pub fn GobDecode(&mut self, buf: crate::slice<crate::types::byte>) -> crate::error {
+        if buf.len() == 0 {
+            *self = Float::default();
+            return crate::errors::nil;
+        }
+        if buf.len() < 6 {
+            return crate::errors::New("Float.GobDecode: buffer too small");
+        }
+        if buf[0usize] != FLOAT_GOB_VERSION {
+            return crate::errors::New(crate::fmt::Sprintf!(
+                "Float.GobDecode: encoding version %d not supported",
+                int::from(buf[0usize] as i64)
+            ));
+        }
+
+        let old_prec = self.prec;
+        let old_mode = self.mode;
+
+        let b = buf[1usize];
+        self.mode = rounding_mode_from_bits((b >> 5) & 7);
+        self.acc = accuracy_from_signed((((b >> 3) & 3) as i32) - 1);
+        self.form = form_from_bits((b >> 1) & 3);
+        self.neg = b & 1 != 0;
+        let raw = &*buf;
+        self.prec = u32::from_be_bytes([raw[2], raw[3], raw[4], raw[5]]);
+
+        if self.form == form::Finite {
+            if buf.len() < 10 {
+                return crate::errors::New(
+                    "Float.GobDecode: buffer too small for finite form float",
+                );
+            }
+            self.exp = u32::from_be_bytes([raw[6], raw[7], raw[8], raw[9]]) as i32;
+            self.mant = be_bytes_to_limbs_padded(&raw[10..]);
+        } else {
+            self.mant = Vec::new();
+            self.exp = 0;
+        }
+
+        if old_prec != 0 {
+            self.mode = old_mode;
+            self.SetPrec(old_prec as crate::types::uint);
+        }
+        crate::errors::nil
+    }
+}
+
+// ─── Float string-I/O support: the `decimal` type ─────────────────────
+//
+// Go reference: math/big/decimal.go. `Decimal` holds an unsigned
+// floating-point number in decimal: value == mant · 10^exp with
+// 0.1 <= mant < 1, big-endian ASCII digits, no trailing zeros. The only
+// operations are exact binary→decimal conversion and rounding.
+
+/// Maximum shift done in one `decimal_rsh` pass without overflowing a
+/// `u64` accumulator: `(1<<maxShift - 1)*10 + 9` must fit a `u64`.
+/// Go uses `_W - 4` (`_W` == 64). Here the accumulator is a `u64`.
+const DEC_MAX_SHIFT: u32 = 60;
+
+/// `decimal` — an unsigned decimal floating-point number used solely
+/// for `Float`→string conversion. Mirrors `decimal.go:decimal`.
+struct Decimal {
+    /// Mantissa ASCII digits, big-endian, most-significant at index 0.
+    mant: Vec<u8>,
+    /// Decimal exponent: value == 0.mant · 10^exp.
+    exp: i32,
+}
+
+impl Decimal {
+    /// The ready-to-use zero decimal.
+    fn new() -> Self {
+        Decimal {
+            mant: Vec::new(),
+            exp: 0,
+        }
+    }
+
+    /// `(*decimal).at(i)` — the `i`'th mantissa digit, `'0'` if out of
+    /// range.
+    fn at(&self, i: int) -> u8 {
+        if i >= 0 && (i as usize) < self.mant.len() {
+            self.mant[i as usize]
+        } else {
+            b'0'
+        }
+    }
+
+    /// `(*decimal).init(m, shift)` — set the decimal to `m << shift`
+    /// (for `shift >= 0`) or `m >> -shift` (for `shift < 0`), where `m`
+    /// is a magnitude in little-endian u32 limbs.
+    fn init(&mut self, m: &[u32], shift: i64) {
+        // special case 0
+        if bit_len(m) == 0 {
+            self.mant.clear();
+            self.exp = 0;
+            return;
+        }
+
+        let mut mag = m.to_vec();
+        while mag.last() == Some(&0) {
+            mag.pop();
+        }
+        let mut shift = shift;
+
+        // Optimization: trim trailing zero bits before a right shift.
+        if shift < 0 {
+            let ntz = trailing_zero_bits(&mag) as i64;
+            let s = (-shift).min(ntz);
+            if s > 0 {
+                mag = rsh_limbs(&mag, s as u64);
+            }
+            shift += s;
+        }
+
+        // Do any shift-left in binary representation.
+        if shift > 0 {
+            mag = lsh_limbs(&mag, shift as u64);
+            shift = 0;
+        }
+
+        // Convert mantissa into decimal representation.
+        let s = itoa(false, &mag, 10);
+        let mut n = s.len();
+        self.exp = n as i32;
+        // Trim trailing zeros; the exponent tracks the decimal point.
+        while n > 0 && s[n - 1] == b'0' {
+            n -= 1;
+        }
+        self.mant.clear();
+        self.mant.extend_from_slice(&s[..n]);
+
+        // Do any remaining shift-right in decimal representation.
+        if shift < 0 {
+            let mut sh = -shift;
+            while sh > i64::from(DEC_MAX_SHIFT) {
+                decimal_rsh(self, DEC_MAX_SHIFT);
+                sh -= i64::from(DEC_MAX_SHIFT);
+            }
+            decimal_rsh(self, sh as u32);
+        }
+    }
+
+    /// `(*decimal).round(n)` — round to at most `n` mantissa digits,
+    /// ToNearestEven. `n < 0` leaves the decimal unchanged.
+    fn round(&mut self, n: int) {
+        if n < 0 || n >= self.mant.len() as int {
+            return;
+        }
+        if decimal_should_round_up(self, n as usize) {
+            self.round_up(n);
+        } else {
+            self.round_down(n);
+        }
+    }
+
+    /// `(*decimal).roundUp(n)` — round the mantissa up to `n` digits.
+    fn round_up(&mut self, n: int) {
+        if n < 0 || n >= self.mant.len() as int {
+            return;
+        }
+        let mut n = n as usize;
+        // find first digit < '9'
+        while n > 0 && self.mant[n - 1] >= b'9' {
+            n -= 1;
+        }
+        if n == 0 {
+            // all '9's => round up to '1', bump exponent
+            self.mant[0] = b'1';
+            self.mant.truncate(1);
+            self.exp += 1;
+            return;
+        }
+        self.mant[n - 1] += 1;
+        self.mant.truncate(n);
+    }
+
+    /// `(*decimal).roundDown(n)` — truncate the mantissa to `n` digits.
+    fn round_down(&mut self, n: int) {
+        if n < 0 || n >= self.mant.len() as int {
+            return;
+        }
+        self.mant.truncate(n as usize);
+        decimal_trim(self);
+    }
+}
+
+/// `decimal.go:rsh` — `x >> s` in decimal, for `s <= DEC_MAX_SHIFT`.
+fn decimal_rsh(x: &mut Decimal, s: u32) {
+    // Division by 1<<s using shift-and-subtract.
+    let mut r = 0usize; // read index
+    let mut n: u64 = 0;
+    // pick up enough leading digits to cover the first shift
+    while n >> s == 0 && r < x.mant.len() {
+        let ch = u64::from(x.mant[r]);
+        r += 1;
+        n = n * 10 + ch - u64::from(b'0');
+    }
+    if n == 0 {
+        // x == 0 — shouldn't get here, handle anyway
+        x.mant.clear();
+        return;
+    }
+    while n >> s == 0 {
+        r += 1;
+        n *= 10;
+    }
+    x.exp += 1 - r as i32;
+
+    let mask: u64 = (1u64 << s) - 1;
+    let mut w = 0usize; // write index
+    while r < x.mant.len() {
+        let ch = u64::from(x.mant[r]);
+        r += 1;
+        let d = n >> s;
+        n &= mask;
+        x.mant[w] = (d + u64::from(b'0')) as u8;
+        w += 1;
+        n = n * 10 + ch - u64::from(b'0');
+    }
+    // write extra digits that still fit
+    while n > 0 && w < x.mant.len() {
+        let d = n >> s;
+        n &= mask;
+        x.mant[w] = (d + u64::from(b'0')) as u8;
+        w += 1;
+        n *= 10;
+    }
+    x.mant.truncate(w);
+    // append additional digits that didn't fit
+    while n > 0 {
+        let d = n >> s;
+        n &= mask;
+        x.mant.push((d + u64::from(b'0')) as u8);
+        n *= 10;
+    }
+    decimal_trim(x);
+}
+
+/// `decimal.go:shouldRoundUp` — whether `x` rounds up when shortened to
+/// `n` digits. `n` must be a valid mantissa index.
+fn decimal_should_round_up(x: &Decimal, n: usize) -> bool {
+    if x.mant[n] == b'5' && n + 1 == x.mant.len() {
+        // exactly halfway — round to even
+        return n > 0 && (x.mant[n - 1] - b'0') & 1 != 0;
+    }
+    x.mant[n] >= b'5'
+}
+
+/// `decimal.go:trim` — cut off trailing zeros from the mantissa.
+fn decimal_trim(x: &mut Decimal) {
+    let mut i = x.mant.len();
+    while i > 0 && x.mant[i - 1] == b'0' {
+        i -= 1;
+    }
+    x.mant.truncate(i);
+    if i == 0 {
+        x.exp = 0;
+    }
+}
+
+/// `ftoa.go:roundShortest` — shorten `d` to the fewest digits that
+/// still round back to `x` under `x`'s precision (ToNearestEven).
+fn round_shortest(d: &mut Decimal, x: &Float) {
+    if d.mant.is_empty() {
+        return;
+    }
+
+    // 1) normalized mantissa with lsb == 1/2 ulp (x.prec+1 bits)
+    let mut mant = x.mant.clone();
+    while mant.last() == Some(&0) {
+        mant.pop();
+    }
+    let mut exp = i64::from(x.exp) - i64::from(bit_len(&mant));
+    let s = i64::from(bit_len(&mant)) - i64::from(x.prec + 1);
+    if s < 0 {
+        mant = lsh_limbs(&mant, (-s) as u64);
+    } else if s > 0 {
+        mant = rsh_limbs(&mant, s as u64);
+    }
+    exp += s;
+    // x == mant · 2^exp with lsb(mant) == 1/2 ulp of x.prec
+
+    // 2) lower bound = mant - 1
+    let mut lower = Decimal::new();
+    lower.init(&sub_limbs(&mant, &[1u32]), exp);
+
+    // 3) upper bound = mant + 1
+    let mut upper = Decimal::new();
+    upper.init(&add_limbs(&mant, &[1u32]), exp);
+
+    // bounds are inclusive only when the original mantissa is even
+    // (test bit 1 — the original mantissa was shifted by 1)
+    let inclusive = (mant.first().copied().unwrap_or(0) & 2) == 0;
+
+    // Walk along until d distinguishes itself from lower and upper.
+    for i in 0..d.mant.len() {
+        let m = d.mant[i];
+        let l = lower.at(i as int);
+        let u = upper.at(i as int);
+
+        let okdown = l != m || (inclusive && i + 1 == lower.mant.len());
+        let okup = m != u
+            && (inclusive || m + 1 < u || i + 1 < upper.mant.len());
+
+        if okdown && okup {
+            d.round(i as int + 1);
+            return;
+        } else if okdown {
+            d.round_down(i as int + 1);
+            return;
+        } else if okup {
+            d.round_up(i as int + 1);
+            return;
+        }
+    }
+}
+
+/// `ftoa.go:fmtE` — `d.ddddde±dd`. `efmt` is `'e'` or `'E'`.
+fn fmt_e(mut buf: Vec<u8>, efmt: u8, prec: int, d: &Decimal) -> Vec<u8> {
+    // first digit
+    let ch = if !d.mant.is_empty() { d.mant[0] } else { b'0' };
+    buf.push(ch);
+
+    // .moredigits
+    if prec > 0 {
+        buf.push(b'.');
+        let mut i = 1usize;
+        let m = core::cmp::min(d.mant.len(), prec as usize + 1);
+        if i < m {
+            buf.extend_from_slice(&d.mant[i..m]);
+            i = m;
+        }
+        while i <= prec as usize {
+            buf.push(b'0');
+            i += 1;
+        }
+    }
+
+    // e±
+    buf.push(efmt);
+    let mut exp: i64 = if !d.mant.is_empty() {
+        i64::from(d.exp) - 1
+    } else {
+        0
+    };
+    if exp < 0 {
+        buf.push(b'-');
+        exp = -exp;
+    } else {
+        buf.push(b'+');
+    }
+    // at least two exponent digits
+    if exp < 10 {
+        buf.push(b'0');
+    }
+    append_int(buf, exp)
+}
+
+/// `ftoa.go:fmtF` — `ddddddd.ddddd`.
+fn fmt_f(mut buf: Vec<u8>, prec: int, d: &Decimal) -> Vec<u8> {
+    // integer part, zero-padded as needed
+    if d.exp > 0 {
+        let mut m = core::cmp::min(d.mant.len(), d.exp as usize);
+        buf.extend_from_slice(&d.mant[..m]);
+        while m < d.exp as usize {
+            buf.push(b'0');
+            m += 1;
+        }
+    } else {
+        buf.push(b'0');
+    }
+
+    // fraction
+    if prec > 0 {
+        buf.push(b'.');
+        for i in 0..prec {
+            buf.push(d.at(d.exp as int + i));
+        }
+    }
+    buf
+}
+
+/// Append the decimal text of an `i64` to `buf`. Internal equivalent of
+/// `strconv.AppendInt(buf, v, 10)`; a negative `v` is prefixed with `-`.
+fn append_int(mut buf: Vec<u8>, v: i64) -> Vec<u8> {
+    if v == 0 {
+        buf.push(b'0');
+        return buf;
+    }
+    let mut n: u64 = if v < 0 {
+        buf.push(b'-');
+        (v as i128).unsigned_abs() as u64
+    } else {
+        v as u64
+    };
+    let mut tmp = [0u8; 20];
+    let mut i = tmp.len();
+    while n > 0 {
+        i -= 1;
+        tmp[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+    }
+    buf.extend_from_slice(&tmp[i..]);
+    buf
+}
+
+// ─── Float parse support ──────────────────────────────────────────────
+
+/// Decomposed result of scanning a float literal:
+/// `(neg, mant_limbs, base, fcount, exp, ebase, is_inf)`.
+type FloatScan = (bool, Vec<u32>, int, i64, i64, int, bool);
+
+/// `floatconv.go:scan` + `Parse` prefix handling — scan a float literal
+/// from `bytes` in the given mantissa `base`. Returns the decomposed
+/// fields, or an error message string. The whole input must be a valid
+/// number (no trailing junk).
+fn float_scan(bytes: &[u8], base: int) -> Result<FloatScan, crate::string> {
+    // ±Inf / ±inf
+    if bytes == b"Inf" || bytes == b"inf" {
+        return Ok((false, Vec::new(), 10, 0, 0, 10, true));
+    }
+    if bytes.len() == 4
+        && (bytes[0] == b'+' || bytes[0] == b'-')
+        && (&bytes[1..] == b"Inf" || &bytes[1..] == b"inf")
+    {
+        return Ok((bytes[0] == b'-', Vec::new(), 10, 0, 0, 10, true));
+    }
+
+    if !(base == 0 || base == 2 || base == 8 || base == 10 || base == 16) {
+        return Err(crate::string::from("invalid number base"));
+    }
+
+    let mut i = 0usize;
+
+    // sign
+    let neg = match bytes.first().copied() {
+        Some(b'-') => {
+            i += 1;
+            true
+        }
+        Some(b'+') => {
+            i += 1;
+            false
+        }
+        _ => false,
+    };
+
+    let allow_underscore = base == 0;
+
+    // base prefix
+    let mut b = base;
+    if base == 0 {
+        b = 10;
+        if bytes.get(i).copied() == Some(b'0') {
+            match bytes.get(i + 1).copied() {
+                Some(b'b') | Some(b'B') => {
+                    b = 2;
+                    i += 2;
+                }
+                Some(b'o') | Some(b'O') => {
+                    b = 8;
+                    i += 2;
+                }
+                Some(b'x') | Some(b'X') => {
+                    b = 16;
+                    i += 2;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // mantissa: digits, optional '.', optional digits
+    let mut mant: Vec<u32> = Vec::new();
+    let mut digit_count: usize = 0;
+    let mut fcount: i64 = 0; // number of fractional digits (negated later)
+    let mut seen_dot = false;
+    let mut prev_digit = false; // for underscore validation
+    let mut prev_underscore = false;
+    let mut invalid_sep = false;
+    let bw = b as u32;
+
+    while i < bytes.len() {
+        let ch = bytes[i];
+        if ch == b'_' && allow_underscore {
+            if !prev_digit {
+                invalid_sep = true;
+            }
+            prev_digit = false;
+            prev_underscore = true;
+            i += 1;
+            continue;
+        }
+        if ch == b'.' && !seen_dot {
+            seen_dot = true;
+            prev_digit = false;
+            prev_underscore = false;
+            i += 1;
+            continue;
+        }
+        match digit_value(ch, b) {
+            Some(d) => {
+                mul_add_word(&mut mant, bw, d);
+                digit_count += 1;
+                if seen_dot {
+                    fcount += 1;
+                }
+                prev_digit = true;
+                prev_underscore = false;
+                i += 1;
+            }
+            None => break,
+        }
+    }
+
+    if digit_count == 0 {
+        return Err(crate::string::from("number has no digits"));
+    }
+    if prev_underscore || invalid_sep {
+        return Err(crate::string::from("'_' must separate successive digits"));
+    }
+
+    // exponent
+    let mut exp: i64 = 0;
+    let mut ebase: int = 10;
+    if i < bytes.len() {
+        let ech = bytes[i];
+        let is_e = ech == b'e' || ech == b'E';
+        let is_p = ech == b'p' || ech == b'P';
+        // for hex mantissae, 'e'/'E' are digits — only 'p'/'P' begin an
+        // exponent (Go: scanExponent).
+        let exp_ok = if b == 16 { is_p } else { is_e || is_p };
+        if exp_ok {
+            if is_p {
+                ebase = 2;
+            }
+            i += 1;
+            let eneg = match bytes.get(i).copied() {
+                Some(b'-') => {
+                    i += 1;
+                    true
+                }
+                Some(b'+') => {
+                    i += 1;
+                    false
+                }
+                _ => false,
+            };
+            let mut ecount = 0usize;
+            let mut eprev_digit = false;
+            let mut eprev_us = false;
+            while i < bytes.len() {
+                let c = bytes[i];
+                if c == b'_' && allow_underscore {
+                    if !eprev_digit {
+                        invalid_sep = true;
+                    }
+                    eprev_digit = false;
+                    eprev_us = true;
+                    i += 1;
+                    continue;
+                }
+                if c.is_ascii_digit() {
+                    exp = exp
+                        .saturating_mul(10)
+                        .saturating_add(i64::from(c - b'0'));
+                    ecount += 1;
+                    eprev_digit = true;
+                    eprev_us = false;
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            if ecount == 0 {
+                return Err(crate::string::from("exponent has no digits"));
+            }
+            if eprev_us || invalid_sep {
+                return Err(crate::string::from(
+                    "'_' must separate successive digits",
+                ));
+            }
+            if eneg {
+                exp = -exp;
+            }
+        }
+    }
+
+    // entire string must be consumed
+    if i != bytes.len() {
+        return Err(crate::string::from("expected end of string"));
+    }
+
+    // fcount is the number of fractional digits; pass it negated so a
+    // radix-point amounts to a division by b**(-fcount).
+    Ok((neg, mant, b, -fcount, exp, ebase, false))
+}
+
+/// `5**n` as a `Float` at the given precision (bits). Mirrors
+/// `floatconv.go:pow5` (binary exponentiation, n >= 0).
+fn pow5_float(n: u64, prec: u32) -> Float {
+    let mut z = Float::new();
+    z.SetPrec(prec as crate::types::uint);
+
+    if (n as usize) < POW5_TAB.len() {
+        z.SetUint64(POW5_TAB[n as usize]);
+        return z;
+    }
+    let m = POW5_TAB.len() as u64 - 1;
+    z.SetUint64(POW5_TAB[m as usize]);
+    let mut n = n - m;
+
+    let mut f = Float::new();
+    f.SetPrec((prec + 64) as crate::types::uint);
+    f.SetUint64(5);
+
+    while n > 0 {
+        if n & 1 != 0 {
+            let snap = z.clone();
+            z.Mul(&snap, &f);
+        }
+        let fsnap = f.clone();
+        f.Mul(&fsnap, &fsnap);
+        n >>= 1;
+    }
+    z
+}
+
+/// Powers of 5 that fit into a `u64`. Mirrors `floatconv.go:pow5tab`.
+const POW5_TAB: [u64; 28] = [
+    1,
+    5,
+    25,
+    125,
+    625,
+    3125,
+    15625,
+    78125,
+    390625,
+    1953125,
+    9765625,
+    48828125,
+    244140625,
+    1220703125,
+    6103515625,
+    30517578125,
+    152587890625,
+    762939453125,
+    3814697265625,
+    19073486328125,
+    95367431640625,
+    476837158203125,
+    2384185791015625,
+    11920928955078125,
+    59604644775390625,
+    298023223876953125,
+    1490116119384765625,
+    7450580596923828125,
+];
+
+// ─── Float gob support ────────────────────────────────────────────────
+
+/// Float gob codec version — mirrors `floatmarsh.go:floatGobVersion`.
+const FLOAT_GOB_VERSION: u8 = 1;
+
+/// Map a [`RoundingMode`] to its 3-bit gob encoding (Go's `mode&7`).
+fn rounding_mode_to_bits(m: RoundingMode) -> u8 {
+    match m {
+        RoundingMode::ToNearestEven => 0,
+        RoundingMode::ToNearestAway => 1,
+        RoundingMode::ToZero => 2,
+        RoundingMode::AwayFromZero => 3,
+        RoundingMode::ToNegativeInf => 4,
+        RoundingMode::ToPositiveInf => 5,
+    }
+}
+
+/// Inverse of [`rounding_mode_to_bits`].
+fn rounding_mode_from_bits(b: u8) -> RoundingMode {
+    match b & 7 {
+        1 => RoundingMode::ToNearestAway,
+        2 => RoundingMode::ToZero,
+        3 => RoundingMode::AwayFromZero,
+        4 => RoundingMode::ToNegativeInf,
+        5 => RoundingMode::ToPositiveInf,
+        _ => RoundingMode::ToNearestEven,
+    }
+}
+
+/// Map an [`Accuracy`] to Go's signed encoding (`Below=-1 .. Above=+1`).
+fn accuracy_to_signed(a: Accuracy) -> i32 {
+    match a {
+        Accuracy::Below => -1,
+        Accuracy::Exact => 0,
+        Accuracy::Above => 1,
+    }
+}
+
+/// Inverse of [`accuracy_to_signed`].
+fn accuracy_from_signed(v: i32) -> Accuracy {
+    match v {
+        -1 => Accuracy::Below,
+        1 => Accuracy::Above,
+        _ => Accuracy::Exact,
+    }
+}
+
+/// Map a [`form`] to its 2-bit gob encoding (Go's `form&3`).
+fn form_to_bits(f: form) -> u8 {
+    match f {
+        form::Zero => 0,
+        form::Finite => 1,
+        form::Inf => 2,
+    }
+}
+
+/// Inverse of [`form_to_bits`].
+fn form_from_bits(b: u8) -> form {
+    match b & 3 {
+        1 => form::Finite,
+        2 => form::Inf,
+        _ => form::Zero,
+    }
+}
+
+/// Big-endian bytes of a `Float` mantissa: each limb emitted
+/// most-significant first, whole words (no trimming) so the limb
+/// boundary is recoverable. Mirrors `nat.bytes` for a normalized
+/// mantissa whose top word's msb is set (no leading zero bytes).
+fn limbs_to_be_bytes_fixed(limbs: &[u32]) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::with_capacity(limbs.len() * 4);
+    for &limb in limbs.iter().rev() {
+        out.extend_from_slice(&limb.to_be_bytes());
+    }
+    out
+}
+
+/// Inverse of [`limbs_to_be_bytes_fixed`]: a big-endian byte buffer
+/// (length a multiple of 4) back into little-endian u32 limbs.
+fn be_bytes_to_limbs_padded(buf: &[u8]) -> Vec<u32> {
+    let nlimbs = (buf.len() + 3) / 4;
+    let mut limbs = alloc::vec![0u32; nlimbs];
+    // buf is most-significant limb first.
+    for (k, chunk) in buf.chunks(4).enumerate() {
+        let mut w: u32 = 0;
+        for &byte in chunk {
+            w = (w << 8) | u32::from(byte);
+        }
+        limbs[nlimbs - 1 - k] = w;
+    }
+    while limbs.last() == Some(&0) {
+        limbs.pop();
+    }
+    limbs
+}
+
+/// `big.ParseFloat(s, base, prec, mode)` — construct a [`Float`] with
+/// the given precision and rounding mode, then parse `s` into it.
+/// Returns `(value, actual_base, err)`. Mirrors `floatconv.go:ParseFloat`.
+pub fn ParseFloat<S: Into<crate::string>>(
+    s: S,
+    base: int,
+    prec: crate::types::uint,
+    mode: RoundingMode,
+) -> (Float, int, crate::error) {
+    let mut z = Float::new();
+    z.SetPrec(prec);
+    z.SetMode(mode);
+    let (_, b, err) = z.Parse(s, base);
+    (z, b, err)
 }
 
 /// Internal: `√x` for a non-negative `f64`, no libm. Newton's method
@@ -4854,32 +6076,9 @@ pub fn NewFloat(x: f64) -> Float {
 }
 
 impl crate::fmt::Stringer for Float {
-    /// Minimal `String` — full `Text`/format support is a later task.
-    /// Reports the form so the value is at least inspectable.
+    /// `(*Float).String()` — formats `x` like `x.Text('g', 10)`.
     fn String(&self) -> crate::gostring::string {
-        crate::gostring::string::from(match self.form {
-            form::Zero => {
-                if self.neg {
-                    "-0"
-                } else {
-                    "0"
-                }
-            }
-            form::Inf => {
-                if self.neg {
-                    "-Inf"
-                } else {
-                    "+Inf"
-                }
-            }
-            form::Finite => {
-                if self.neg {
-                    "-Float"
-                } else {
-                    "Float"
-                }
-            }
-        })
+        Float::String(self)
     }
 }
 

@@ -2168,6 +2168,159 @@ fn main() {
         check(sri.Cmp(&big::NewFloat(5.0)) == 0, b"float SetRat 10/2=5");
     }
 
+    // ── Float string I/O ──────────────────────────────────────────────
+    {
+        // Text / String for simple decimal values.
+        let three = big::NewFloat(3.0);
+        check(three.String().as_bytes() == b"3", b"float String 3.0=\"3\"");
+        check(three.Text(b'g', 10).as_bytes() == b"3", b"float Text g 3.0");
+
+        let half = big::NewFloat(0.5);
+        check(half.String().as_bytes() == b"0.5", b"float String 0.5=\"0.5\"");
+
+        let mneg = big::NewFloat(-2.25);
+        check(mneg.String().as_bytes() == b"-2.25", b"float String -2.25");
+
+        let zero = big::NewFloat(0.0);
+        check(zero.String().as_bytes() == b"0", b"float String 0=\"0\"");
+
+        let mut pinf = big::Float::new();
+        pinf.SetInf(false);
+        check(pinf.String().as_bytes() == b"+Inf", b"float String +Inf");
+        let mut ninf = big::Float::new();
+        ninf.SetInf(true);
+        check(ninf.String().as_bytes() == b"-Inf", b"float String -Inf");
+
+        // Text('f', 2) of 1/3 → "0.33".
+        let mut third = big::Float::new();
+        third.SetPrec(64);
+        third.Quo(&big::NewFloat(1.0), &big::NewFloat(3.0));
+        check(third.Text(b'f', 2).as_bytes() == b"0.33", b"float Text f2 1/3=\"0.33\"");
+
+        // Text('f', 4) of -2.25.
+        check(mneg.Text(b'f', 4).as_bytes() == b"-2.2500", b"float Text f4 -2.25");
+
+        // Text('e', ...) — scientific notation.
+        let mut big100 = big::Float::new();
+        big100.SetFloat64(125.0);
+        check(big100.Text(b'e', 2).as_bytes() == b"1.25e+02", b"float Text e2 125");
+        check(big100.Text(b'E', 2).as_bytes() == b"1.25E+02", b"float Text E2 125");
+
+        // Text('g') for a large number switches to exponent form.
+        let mut million = big::Float::new();
+        million.SetFloat64(1.0e7);
+        check(million.Text(b'g', -1).as_bytes() == b"1e+07", b"float Text g 1e7");
+
+        // 'b' / 'p' / 'x' binary/hex forms — at least non-empty & sane.
+        let two = big::NewFloat(2.0);
+        check(two.Text(b'x', -1).as_bytes() == b"0x1p+01", b"float Text x 2.0");
+        let onex = big::NewFloat(1.0);
+        check(onex.Text(b'p', -1).as_bytes().len() > 0, b"float Text p 1.0 non-empty");
+        check(onex.Text(b'b', -1).as_bytes().len() > 0, b"float Text b 1.0 non-empty");
+
+        // Append onto an existing buffer.
+        let pre: slice<goish::byte> = slice::__from_vec(b"=".to_vec());
+        let app = three.Append(pre, b'g', 10);
+        check(&*app == b"=3", b"float Append onto buffer");
+
+        // Round-trip: Parse(Text(x)) recovers x for several values.
+        for &v in &[3.0f64, 0.5, -2.25, 123.5, 0.0] {
+            let x = big::NewFloat(v);
+            let txt = x.Text(b'g', -1);
+            let mut y = big::Float::new();
+            y.SetPrec(53);
+            let (_, _, err) = y.Parse(txt.clone(), 10);
+            check(err == goish::nil && y.Cmp(&x) == 0, b"float Parse(Text(x))==x");
+        }
+
+        // High-precision round-trip.
+        let mut hp = big::Float::new();
+        hp.SetPrec(200);
+        hp.Quo(&big::NewFloat(22.0), &big::NewFloat(7.0));
+        let hptxt = hp.Text(b'g', -1);
+        let mut hp2 = big::Float::new();
+        hp2.SetPrec(200);
+        let (_, _, hperr) = hp2.Parse(hptxt, 10);
+        check(hperr == goish::nil && hp2.Cmp(&hp) == 0,
+            b"float Parse(Text) hi-prec round-trip");
+
+        // SetString then Float64() ≈ 3.14159.
+        let mut pi = big::Float::new();
+        pi.SetPrec(64);
+        let (_, ok) = pi.SetString("3.14159");
+        let (piv, _) = pi.Float64();
+        check(ok && piv > 3.14158 && piv < 3.14160, b"float SetString 3.14159");
+
+        // ParseFloat with explicit precision/mode.
+        let (pf, pfb, pferr) =
+            big::ParseFloat("2.5", 10, 64, big::RoundingMode::ToNearestEven);
+        check(pferr == goish::nil && pfb == 10
+            && pf.Cmp(&big::NewFloat(2.5)) == 0, b"float ParseFloat 2.5");
+
+        // Base-0 hex-float literal.
+        let mut hf = big::Float::new();
+        hf.SetPrec(64);
+        let (_, hfb, hferr) = hf.Parse("0x1.8p1", 0);
+        check(hferr == goish::nil && hfb == 16
+            && hf.Cmp(&big::NewFloat(3.0)) == 0, b"float Parse 0x1.8p1=3");
+
+        // Invalid parse → non-nil error / ok==false.
+        let mut bad = big::Float::new();
+        let (_, _, berr) = bad.Parse("not-a-number", 10);
+        check(berr != goish::nil, b"float Parse invalid -> error");
+        let mut bad2 = big::Float::new();
+        let (_, bok) = bad2.SetString("12.3.4");
+        check(!bok, b"float SetString invalid -> ok==false");
+
+        // MarshalText / UnmarshalText round-trip.
+        for &v in &[7.5f64, -0.125, 0.0] {
+            let x = big::NewFloat(v);
+            let (txt, merr) = x.MarshalText();
+            let mut y = big::Float::new();
+            y.SetPrec(53);
+            let uerr = y.UnmarshalText(txt);
+            check(merr == goish::nil && uerr == goish::nil && y.Cmp(&x) == 0,
+                b"float MarshalText/UnmarshalText round-trip");
+        }
+
+        // GobEncode → GobDecode round-trip (incl. negative, zero, Inf).
+        {
+            let mut neg_g = big::Float::new();
+            neg_g.SetPrec(64);
+            neg_g.SetFloat64(-12.75);
+            let (gb, gerr) = neg_g.GobEncode();
+            let mut gd = big::Float::new();
+            let derr = gd.GobDecode(gb);
+            check(gerr == goish::nil && derr == goish::nil
+                && gd.Cmp(&neg_g) == 0, b"float Gob round-trip negative");
+
+            let zero_g = big::NewFloat(0.0);
+            let (zgb, _) = zero_g.GobEncode();
+            let mut zgd = big::Float::new();
+            let zderr = zgd.GobDecode(zgb);
+            check(zderr == goish::nil && zgd.Cmp(&zero_g) == 0,
+                b"float Gob round-trip zero");
+
+            let mut inf_g = big::Float::new();
+            inf_g.SetInf(true);
+            let (igb, _) = inf_g.GobEncode();
+            let mut igd = big::Float::new();
+            let iderr = igd.GobDecode(igb);
+            check(iderr == goish::nil && igd.IsInf()
+                && igd.Signbit(), b"float Gob round-trip -Inf");
+
+            // Hi-precision Gob round-trip.
+            let mut hpg = big::Float::new();
+            hpg.SetPrec(160);
+            hpg.Quo(&big::NewFloat(1.0), &big::NewFloat(7.0));
+            let (hgb, _) = hpg.GobEncode();
+            let mut hgd = big::Float::new();
+            let hderr = hgd.GobDecode(hgb);
+            check(hderr == goish::nil && hgd.Cmp(&hpg) == 0,
+                b"float Gob round-trip hi-prec");
+        }
+    }
+
     let _ = &int::from(0);
     let _ = string::from("");
     report();
