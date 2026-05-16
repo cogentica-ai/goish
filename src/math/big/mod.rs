@@ -323,6 +323,329 @@ impl Rat {
         self.den = NewInt(b);
         self.norm()
     }
+
+    /// `(*Rat).String()` — `"a/b"` form, always (even when b == 1).
+    pub fn String(&self) -> crate::string {
+        crate::string::from_bytes(&rat_marshal(&self.num, &self.den))
+    }
+
+    /// `(*Rat).RatString()` — `"a/b"` if b != 1, else just `"a"`.
+    pub fn RatString(&self) -> crate::string {
+        if self.IsInt() {
+            return self.num.Text(10);
+        }
+        self.String()
+    }
+
+    /// `(*Rat).FloatString(prec)` — decimal string with exactly `prec`
+    /// digits after the radix point. The last digit is rounded to
+    /// nearest; halves are rounded away from zero (matching Go).
+    pub fn FloatString(&self, prec: int) -> crate::string {
+        let mut buf: Vec<u8> = Vec::new();
+        if self.IsInt() {
+            buf.extend_from_slice(&itoa(self.num.neg, &self.num.abs, 10));
+            if prec > 0 {
+                buf.push(b'.');
+                for _ in 0..prec {
+                    buf.push(b'0');
+                }
+            }
+            return crate::string::from_bytes(&buf);
+        }
+        // self.den != 1
+        let (mut q, mut r) = divmod_limbs(&self.num.abs, &self.den.abs);
+
+        // p = 10**prec (1 when prec <= 0).
+        let p = if prec > 0 {
+            pow10_limbs(prec as u64)
+        } else {
+            alloc::vec![1u32]
+        };
+
+        // r = (r * p) / den, with r2 = (r * p) % den.
+        r = mul_limbs(&r, &p);
+        let (r_q, r2) = divmod_limbs(&r, &self.den.abs);
+        let mut r = r_q;
+
+        // Round up if 2*r2 >= den.
+        let r2_double = add_limbs(&r2, &r2);
+        if abs_cmp(&self.den.abs, &r2_double) != Ordering::Greater {
+            r = add_limbs(&r, &[1]);
+            if abs_cmp(&r, &p) != Ordering::Less {
+                q = add_limbs(&q, &[1]);
+                r = sub_limbs(&r, &p);
+            }
+        }
+
+        if self.num.neg {
+            buf.push(b'-');
+        }
+        // itoa ignores the sign when q == 0.
+        buf.extend_from_slice(&itoa(false, &q, 10));
+
+        if prec > 0 {
+            buf.push(b'.');
+            let rs = itoa(false, &r, 10);
+            for _ in 0..(prec - rs.len() as int) {
+                buf.push(b'0');
+            }
+            buf.extend_from_slice(&rs);
+        }
+        crate::string::from_bytes(&buf)
+    }
+
+    /// `(*Rat).SetString(s)` — parse `"a/b"`, a plain integer, or a
+    /// decimal/scientific float. Returns `(self, ok)`. On failure the
+    /// value of self is undefined (matching Go) and `ok == false`.
+    pub fn SetString<S: Into<crate::string>>(&mut self, s: S) -> (&mut Rat, bool) {
+        let s: crate::string = s.into();
+        let bytes = s.as_bytes();
+        if bytes.is_empty() {
+            return (self, false);
+        }
+        // Fraction "a/b" form.
+        if let Some(sep) = bytes.iter().position(|&c| c == b'/') {
+            let num_part = &bytes[..sep];
+            let den_part = &bytes[sep + 1..];
+            // Numerator may be signed; parse base-0 (auto-detects 0x/0o/0b).
+            let num = match scan_int(num_part, 0) {
+                Some((neg, abs)) => {
+                    let mut n = Int::default();
+                    n.neg = neg && !abs.is_empty();
+                    n.abs = abs;
+                    n
+                }
+                None => return (self, false),
+            };
+            // Denominator may not be signed.
+            if den_part.is_empty()
+                || den_part[0] == b'+'
+                || den_part[0] == b'-'
+            {
+                return (self, false);
+            }
+            let den = match scan_int(den_part, 0) {
+                Some((_, abs)) if !abs.is_empty() => {
+                    let mut d = Int::default();
+                    d.abs = abs;
+                    d
+                }
+                _ => return (self, false),
+            };
+            self.num = num;
+            self.den = den;
+            self.norm();
+            return (self, true);
+        }
+        // Decimal / scientific float (or a plain integer).
+        if parse_decimal_into_rat(core::str::from_utf8(bytes).unwrap_or(""), self) {
+            (self, true)
+        } else {
+            (self, false)
+        }
+    }
+
+    /// `(*Rat).Float32()` — nearest f32 to x, plus an exact flag.
+    /// The sign of the result always matches the sign of x.
+    pub fn Float32(&self) -> (f32, bool) {
+        let (f, exact) = quot_to_float32(&self.num.abs, &self.den.abs);
+        if self.num.neg {
+            (-f, exact)
+        } else {
+            (f, exact)
+        }
+    }
+
+    /// `(*Rat).Float64()` — nearest f64 to x, plus an exact flag.
+    /// The sign of the result always matches the sign of x.
+    pub fn Float64(&self) -> (f64, bool) {
+        let (f, exact) = quot_to_float64(&self.num.abs, &self.den.abs);
+        if self.num.neg {
+            (-f, exact)
+        } else {
+            (f, exact)
+        }
+    }
+
+    /// `(*Rat).FloatPrec()` — `(n, exact)`. `n` is the number of
+    /// non-repeating fractional decimal digits; `exact` is true iff a
+    /// finite decimal representation exists (i.e. the reduced
+    /// denominator's only prime factors are 2 and 5).
+    pub fn FloatPrec(&self) -> (int, bool) {
+        // d >= 1 (denominator is always positive; zero-value acts as 1).
+        let d: Vec<u32> = if self.den.abs.is_empty() {
+            alloc::vec![1u32]
+        } else {
+            self.den.abs.clone()
+        };
+        // p2 = number of trailing zero bits of d. Reduce d by 2^p2.
+        let p2 = trailing_zero_bits(&d);
+        let mut q = rsh_limbs(&d, p2);
+        // p5 = number of factors of 5 in q.
+        let mut p5: u64 = 0;
+        let five = alloc::vec![5u32];
+        loop {
+            let (quot, rem) = divmod_limbs(&q, &five);
+            if !rem.is_empty() {
+                break;
+            }
+            p5 += 1;
+            q = quot;
+        }
+        let n = if p2 > p5 { p2 } else { p5 };
+        let exact = abs_cmp(&q, &[1]) == Ordering::Equal;
+        (n as int, exact)
+    }
+
+    /// `(*Rat).SetFloat64(f)` — exact conversion from an f64. The bool
+    /// is `false` for Inf/NaN (self is then left unchanged), matching
+    /// Go's `nil` return for non-finite inputs.
+    pub fn SetFloat64(&mut self, f: f64) -> (&mut Rat, bool) {
+        const EXP_MASK: u64 = (1 << 11) - 1;
+        let bits = f.to_bits();
+        let mut mantissa = bits & ((1u64 << 52) - 1);
+        let mut exp: i64 = ((bits >> 52) & EXP_MASK) as i64;
+        if exp == EXP_MASK as i64 {
+            // non-finite (Inf / NaN)
+            return (self, false);
+        } else if exp == 0 {
+            // denormal
+            exp -= 1022;
+        } else {
+            // normal
+            mantissa |= 1 << 52;
+            exp -= 1023;
+        }
+        let mut shift: i64 = 52 - exp;
+        // Partially pre-normalise.
+        while mantissa & 1 == 0 && shift > 0 {
+            mantissa >>= 1;
+            shift -= 1;
+        }
+        let mut num = Int::default();
+        num.abs = u64_to_limbs(mantissa);
+        num.neg = f < 0.0;
+        let mut den = NewInt(1);
+        if shift > 0 {
+            den.abs = lsh_limbs(&den.abs, shift as u64);
+        } else if shift < 0 {
+            num.abs = lsh_limbs(&num.abs, (-shift) as u64);
+        }
+        self.num = num;
+        self.den = den;
+        self.norm();
+        (self, true)
+    }
+
+    /// `(*Rat).AppendText(b)` — append the text encoding of x to `b`.
+    /// `"a"` form when x is an integer, `"a/b"` otherwise. Error is
+    /// always nil.
+    pub fn AppendText(
+        &self,
+        b: crate::slice<crate::types::byte>,
+    ) -> (crate::slice<crate::types::byte>, crate::error) {
+        if self.IsInt() {
+            return self.num.AppendText(b);
+        }
+        let mut out = b.__into_vec();
+        out.extend_from_slice(&rat_marshal(&self.num, &self.den));
+        (
+            crate::slice::<crate::types::byte>::__from_vec(out),
+            crate::errors::nil,
+        )
+    }
+
+    /// `(*Rat).MarshalText()` — the text encoding of x. Error is always
+    /// nil, matching Go.
+    pub fn MarshalText(&self) -> (crate::slice<crate::types::byte>, crate::error) {
+        self.AppendText(crate::slice::<crate::types::byte>::new())
+    }
+
+    /// `(*Rat).UnmarshalText(text)` — parse `text` into x. Returns a
+    /// non-nil error if `text` is not a valid rational.
+    pub fn UnmarshalText(
+        &mut self,
+        text: crate::slice<crate::types::byte>,
+    ) -> crate::error {
+        let s = crate::string::from_bytes(&text);
+        let (_, ok) = self.SetString(s.clone());
+        if ok {
+            crate::errors::nil
+        } else {
+            crate::errors::New(crate::fmt::Sprintf!(
+                "math/big: cannot unmarshal %q into a *big.Rat",
+                s
+            ))
+        }
+    }
+
+    /// `(*Rat).GobEncode()` — gob wire format. A version/sign byte
+    /// (`ratGobVersion << 1`, bit 0 set when negative), a big-endian
+    /// 4-byte numerator length, the big-endian numerator magnitude,
+    /// then the big-endian denominator magnitude. Error is always nil.
+    pub fn GobEncode(&self) -> (crate::slice<crate::types::byte>, crate::error) {
+        let nbytes = limbs_to_be_bytes(&self.num.abs);
+        let dbytes = limbs_to_be_bytes(&self.den.abs);
+        if u32::try_from(nbytes.len()).is_err() {
+            return (
+                crate::slice::<crate::types::byte>::new(),
+                crate::errors::New("Rat.GobEncode: numerator too large"),
+            );
+        }
+        let mut out: Vec<u8> = Vec::with_capacity(1 + 4 + nbytes.len() + dbytes.len());
+        let mut b: u8 = RAT_GOB_VERSION << 1; // make space for sign bit
+        if self.num.neg {
+            b |= 1;
+        }
+        out.push(b);
+        let n = nbytes.len() as u32;
+        out.extend_from_slice(&n.to_be_bytes());
+        out.extend_from_slice(&nbytes);
+        out.extend_from_slice(&dbytes);
+        (
+            crate::slice::<crate::types::byte>::__from_vec(out),
+            crate::errors::nil,
+        )
+    }
+
+    /// `(*Rat).GobDecode(buf)` — inverse of `GobEncode`. An empty `buf`
+    /// resets self to the zero value (0/1). A version mismatch, a
+    /// too-short buffer, or an invalid length returns a non-nil error.
+    pub fn GobDecode(&mut self, buf: crate::slice<crate::types::byte>) -> crate::error {
+        if buf.len() == 0 {
+            // Other side sent a nil or default value.
+            self.num = Int::default();
+            self.den = NewInt(1);
+            return crate::errors::nil;
+        }
+        if buf.len() < 5 {
+            return crate::errors::New("Rat.GobDecode: buffer too small");
+        }
+        let b = buf[0usize];
+        if b >> 1 != RAT_GOB_VERSION {
+            return crate::errors::New(crate::fmt::Sprintf!(
+                "Rat.GobDecode: encoding version %d not supported",
+                int::from((b >> 1) as i64)
+            ));
+        }
+        const J: usize = 1 + 4;
+        let lenb = &(*buf)[J - 4..J];
+        let ln = u32::from_be_bytes([lenb[0], lenb[1], lenb[2], lenb[3]]) as usize;
+        let i = J + ln;
+        if buf.len() < i {
+            return crate::errors::New("Rat.GobDecode: buffer too small");
+        }
+        self.num.neg = b & 1 != 0;
+        self.num.abs = be_bytes_to_limbs(&(*buf)[J..i]);
+        self.num.neg = self.num.neg && !self.num.abs.is_empty();
+        self.den.neg = false;
+        self.den.abs = be_bytes_to_limbs(&(*buf)[i..]);
+        if self.den.abs.is_empty() {
+            // Zero-value denominator acts as 1.
+            self.den.abs = alloc::vec![1u32];
+        }
+        crate::errors::nil
+    }
 }
 
 impl AsRef<Rat> for Rat {
@@ -1828,6 +2151,250 @@ impl crate::fmt::Stringer for Int {
         // Go's `(*Int).String()` is exactly `x.Text(10)`.
         self.Text(10)
     }
+}
+
+// Go's `*big.Rat` also implements `fmt.Stringer`, yielding the `"a/b"`
+// form. Mirror it so all printf verbs pick the Rat up automatically.
+impl crate::fmt::Stringer for Rat {
+    fn String(&self) -> crate::gostring::string {
+        self.String()
+    }
+}
+
+/// Rat gob codec version — mirrors `ratmarsh.go:ratGobVersion`.
+const RAT_GOB_VERSION: u8 = 1;
+
+/// `(*Rat).marshal` — append the `"a/b"` text of a num/den pair to a
+/// fresh buffer (always `"a/b"`, even when den == 1). A zero-value
+/// denominator (empty limbs) prints as `1`.
+fn rat_marshal(num: &Int, den: &Int) -> Vec<u8> {
+    let mut buf = itoa(num.neg, &num.abs, 10);
+    buf.push(b'/');
+    if !den.abs.is_empty() {
+        buf.extend_from_slice(&itoa(false, &den.abs, 10));
+    } else {
+        buf.push(b'1');
+    }
+    buf
+}
+
+/// `10**n` as little-endian u32 limbs (n >= 0).
+fn pow10_limbs(n: u64) -> Vec<u32> {
+    let mut acc = alloc::vec![1u32];
+    let ten = alloc::vec![10u32];
+    for _ in 0..n {
+        acc = mul_limbs(&acc, &ten);
+    }
+    acc
+}
+
+/// `quotToFloat64` — nearest f64 to the non-negative quotient a/b,
+/// round-half-to-even. Preconditions: b non-zero (a zero-value `b`,
+/// i.e. empty limbs, is treated as 1); a and b have no common factors.
+/// Mirrors `rat.go:quotToFloat64`.
+fn quot_to_float64(a: &[u32], b: &[u32]) -> (f64, bool) {
+    // float64 layout constants.
+    const MSIZE: i64 = 52;
+    const MSIZE1: i64 = MSIZE + 1; // incl. implicit 1
+    const MSIZE2: i64 = MSIZE1 + 1;
+    const ESIZE: i64 = 64 - MSIZE1;
+    const EBIAS: i64 = (1 << (ESIZE - 1)) - 1;
+    const EMIN: i64 = 1 - EBIAS;
+
+    let one = alloc::vec![1u32];
+    let b: &[u32] = if b.is_empty() { &one } else { b };
+
+    let alen = bit_len(a);
+    if alen == 0 {
+        return (0.0, true);
+    }
+    let blen = bit_len(b);
+    if blen == 0 {
+        panic!("division by zero");
+    }
+
+    // 1. Left-shift a or b so the quotient lands in the desired range.
+    let mut exp: i64 = (alen - blen) as i64;
+    let mut a2 = a.to_vec();
+    let mut b2 = b.to_vec();
+    let shift = MSIZE2 - exp;
+    if shift > 0 {
+        a2 = lsh_limbs(&a2, shift as u64);
+    } else if shift < 0 {
+        b2 = lsh_limbs(&b2, (-shift) as u64);
+    }
+
+    // 2. Quotient and remainder.
+    let (q, r) = divmod_limbs(&a2, &b2);
+    let mut mantissa: u64 = limbs_to_u64(&q);
+    let mut have_rem = !r.is_empty();
+
+    // 3. If the quotient didn't fit in Msize2 bits, redo by b2<<1.
+    if mantissa >> MSIZE2 == 1 {
+        if mantissa & 1 == 1 {
+            have_rem = true;
+        }
+        mantissa >>= 1;
+        exp += 1;
+    }
+    if mantissa >> MSIZE1 != 1 {
+        panic!("expected exactly Msize2 bits of result");
+    }
+
+    // 4. Rounding.
+    if EMIN - MSIZE <= exp && exp <= EMIN {
+        // Denormal case; lose 'sh' bits of precision.
+        let sh = (EMIN - (exp - 1)) as u64;
+        let lostbits = mantissa & ((1u64 << sh) - 1);
+        have_rem = have_rem || lostbits != 0;
+        mantissa >>= sh;
+        exp = 2 - EBIAS;
+    }
+    // Round q using round-half-to-even.
+    let mut exact = !have_rem;
+    if mantissa & 1 != 0 {
+        exact = false;
+        if have_rem || mantissa & 2 != 0 {
+            mantissa += 1;
+            if mantissa >= 1 << MSIZE2 {
+                mantissa >>= 1;
+                exp += 1;
+            }
+        }
+    }
+    mantissa >>= 1; // discard rounding bit; mantissa scaled by 1<<Msize1.
+
+    let f = ldexp_f64(mantissa, exp - MSIZE1);
+    if f.is_infinite() {
+        exact = false;
+    }
+    (f, exact)
+}
+
+/// `quotToFloat32` — nearest f32 to the non-negative quotient a/b,
+/// round-half-to-even. Mirrors `rat.go:quotToFloat32`.
+fn quot_to_float32(a: &[u32], b: &[u32]) -> (f32, bool) {
+    const MSIZE: i64 = 23;
+    const MSIZE1: i64 = MSIZE + 1; // incl. implicit 1
+    const MSIZE2: i64 = MSIZE1 + 1;
+    const ESIZE: i64 = 32 - MSIZE1;
+    const EBIAS: i64 = (1 << (ESIZE - 1)) - 1;
+    const EMIN: i64 = 1 - EBIAS;
+
+    let one = alloc::vec![1u32];
+    let b: &[u32] = if b.is_empty() { &one } else { b };
+
+    let alen = bit_len(a);
+    if alen == 0 {
+        return (0.0, true);
+    }
+    let blen = bit_len(b);
+    if blen == 0 {
+        panic!("division by zero");
+    }
+
+    let mut exp: i64 = (alen - blen) as i64;
+    let mut a2 = a.to_vec();
+    let mut b2 = b.to_vec();
+    let shift = MSIZE2 - exp;
+    if shift > 0 {
+        a2 = lsh_limbs(&a2, shift as u64);
+    } else if shift < 0 {
+        b2 = lsh_limbs(&b2, (-shift) as u64);
+    }
+
+    let (q, r) = divmod_limbs(&a2, &b2);
+    let mut mantissa: u32 = limbs_to_u64(&q) as u32;
+    let mut have_rem = !r.is_empty();
+
+    if mantissa >> MSIZE2 == 1 {
+        if mantissa & 1 == 1 {
+            have_rem = true;
+        }
+        mantissa >>= 1;
+        exp += 1;
+    }
+    if mantissa >> MSIZE1 != 1 {
+        panic!("expected exactly Msize2 bits of result");
+    }
+
+    if EMIN - MSIZE <= exp && exp <= EMIN {
+        let sh = (EMIN - (exp - 1)) as u32;
+        let lostbits = mantissa & ((1u32 << sh) - 1);
+        have_rem = have_rem || lostbits != 0;
+        mantissa >>= sh;
+        exp = 2 - EBIAS;
+    }
+    let mut exact = !have_rem;
+    if mantissa & 1 != 0 {
+        exact = false;
+        if have_rem || mantissa & 2 != 0 {
+            mantissa += 1;
+            if mantissa >= 1 << MSIZE2 {
+                mantissa >>= 1;
+                exp += 1;
+            }
+        }
+    }
+    mantissa >>= 1;
+
+    let f64v = ldexp_f64(u64::from(mantissa), exp - MSIZE1);
+    let f = f64v as f32;
+    if f.is_infinite() {
+        exact = false;
+    }
+    (f, exact)
+}
+
+/// `math.Ldexp(frac, exp)` for a non-negative integer `mantissa` — the
+/// value `mantissa * 2^exp`. Avoids `core`'s missing libm by scaling
+/// through f64 multiplications/divisions by powers of two.
+fn ldexp_f64(mantissa: u64, exp: i64) -> f64 {
+    let mut f = f64_from_u64_full(mantissa);
+    if f == 0.0 {
+        return 0.0;
+    }
+    // Apply the binary exponent in chunks small enough to stay finite.
+    let mut e = exp;
+    while e > 0 {
+        let step = e.min(60);
+        f *= f64::from_bits(((1023 + step) as u64) << 52);
+        e -= step;
+    }
+    while e < 0 {
+        let step = (-e).min(60);
+        f /= f64::from_bits(((1023 + step) as u64) << 52);
+        e += step;
+    }
+    f
+}
+
+/// Convert any `u64` to the nearest `f64` (round-half-to-even). Unlike
+/// `f64_from_u64`, this does not assume the value fits in 53 bits.
+fn f64_from_u64_full(x: u64) -> f64 {
+    if x == 0 {
+        return 0.0;
+    }
+    let msb = 63 - x.leading_zeros();
+    if msb < 53 {
+        return f64_from_u64(x);
+    }
+    // Round the low (msb-52) bits into the kept 53-bit mantissa.
+    let drop = msb - 52;
+    let keep = x >> drop;
+    let rem = x & ((1u64 << drop) - 1);
+    let half = 1u64 << (drop - 1);
+    let mut mant = keep;
+    let mut exp = msb;
+    if rem > half || (rem == half && (keep & 1) == 1) {
+        mant += 1;
+        if mant >> 53 == 1 {
+            mant >>= 1;
+            exp += 1;
+        }
+    }
+    // mant has 53 significant bits; assemble via the 53-bit-safe path.
+    ldexp_f64(mant, i64::from(exp) - 52)
 }
 
 // ─── nil-poly: Go callers do `if z == nil` on `*big.Int` ──────────────

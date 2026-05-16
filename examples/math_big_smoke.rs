@@ -1552,6 +1552,149 @@ fn main() {
         check(al.Denom().Cmp(&big::NewInt(2)) == 0, b"rat alias add den 2");
     }
 
+    // ── Rat I/O: String / RatString / FloatString ─────────────────
+    {
+        check(big::NewRat(1, 2).String().as_bytes() == b"1/2", b"rat string 1/2");
+        // 4/2 reduces to 2/1 — String always shows the "a/b" form.
+        check(big::NewRat(4, 2).String().as_bytes() == b"2/1", b"rat string 4/2");
+        // RatString drops the denominator when it is 1.
+        check(big::NewRat(1, 2).RatString().as_bytes() == b"1/2", b"rat ratstring 1/2");
+        check(big::NewRat(4, 2).RatString().as_bytes() == b"2", b"rat ratstring 4/2");
+
+        // FloatString: prec digits after the point, rounded.
+        check(
+            big::NewRat(1, 3).FloatString(4).as_bytes() == b"0.3333",
+            b"rat floatstring 1/3 p4",
+        );
+        check(
+            big::NewRat(1, 2).FloatString(2).as_bytes() == b"0.50",
+            b"rat floatstring 1/2 p2",
+        );
+        check(
+            big::NewRat(-1, 3).FloatString(4).as_bytes() == b"-0.3333",
+            b"rat floatstring neg",
+        );
+        // 2/3 = 0.666... — last digit rounds up.
+        check(
+            big::NewRat(2, 3).FloatString(2).as_bytes() == b"0.67",
+            b"rat floatstring 2/3 round",
+        );
+    }
+
+    // ── Rat SetString ──────────────────────────────────────────────
+    {
+        let mut r = big::Rat::new();
+        let (_, ok) = r.SetString("22/7");
+        check(ok, b"rat setstring 22/7 ok");
+        check(r.Num().Cmp(&big::NewInt(22)) == 0, b"rat setstring 22/7 num");
+        check(r.Denom().Cmp(&big::NewInt(7)) == 0, b"rat setstring 22/7 den");
+
+        let mut ri = big::Rat::new();
+        let (_, ok) = ri.SetString("5");
+        check(ok, b"rat setstring 5 ok");
+        check(ri.Num().Cmp(&big::NewInt(5)) == 0, b"rat setstring 5 num");
+        check(ri.Denom().Cmp(&big::NewInt(1)) == 0, b"rat setstring 5 den");
+
+        let mut rf = big::Rat::new();
+        let (_, ok) = rf.SetString("1.5");
+        check(ok, b"rat setstring 1.5 ok");
+        check(rf.Num().Cmp(&big::NewInt(3)) == 0, b"rat setstring 1.5 num");
+        check(rf.Denom().Cmp(&big::NewInt(2)) == 0, b"rat setstring 1.5 den");
+
+        let mut re = big::Rat::new();
+        let (_, ok) = re.SetString("-0.25e1");
+        check(ok, b"rat setstring -0.25e1 ok");
+        // -0.25e1 == -2.5 == -5/2.
+        check(re.Num().Cmp(&big::NewInt(-5)) == 0, b"rat setstring -0.25e1 num");
+        check(re.Denom().Cmp(&big::NewInt(2)) == 0, b"rat setstring -0.25e1 den");
+
+        let mut rbad = big::Rat::new();
+        let (_, ok) = rbad.SetString("not-a-rat");
+        check(!ok, b"rat setstring invalid -> false");
+    }
+
+    // ── Rat Float64 / Float32 (exact flag) ─────────────────────────
+    {
+        let (f, exact) = big::NewRat(1, 2).Float64();
+        check(f == 0.5 && exact, b"rat float64 1/2 exact");
+        let (f3, exact3) = big::NewRat(1, 3).Float64();
+        check(f3 > 0.333 && f3 < 0.334 && !exact3, b"rat float64 1/3 inexact");
+
+        let (g, gexact) = big::NewRat(1, 2).Float32();
+        check(g == 0.5f32 && gexact, b"rat float32 1/2 exact");
+        let (g3, g3exact) = big::NewRat(1, 3).Float32();
+        check(g3 > 0.333f32 && g3 < 0.334f32 && !g3exact, b"rat float32 1/3 inexact");
+
+        // Negative sign is carried onto the float.
+        let (nf, _) = big::NewRat(-1, 2).Float64();
+        check(nf == -0.5, b"rat float64 neg sign");
+    }
+
+    // ── Rat FloatPrec ──────────────────────────────────────────────
+    {
+        let (n, exact) = big::NewRat(1, 2).FloatPrec();
+        check(n == 1 && exact, b"rat floatprec 1/2");
+        let (n4, exact4) = big::NewRat(1, 4).FloatPrec();
+        check(n4 == 2 && exact4, b"rat floatprec 1/4");
+        let (_, exact3) = big::NewRat(1, 3).FloatPrec();
+        check(!exact3, b"rat floatprec 1/3 not exact");
+        // 1/6 = 0.1666... — one non-repeating digit, not exact.
+        let (n6, exact6) = big::NewRat(1, 6).FloatPrec();
+        check(n6 == 1 && !exact6, b"rat floatprec 1/6");
+    }
+
+    // ── Rat SetFloat64 ─────────────────────────────────────────────
+    {
+        let mut rh = big::Rat::new();
+        let (_, ok) = rh.SetFloat64(0.5);
+        check(ok, b"rat setfloat64 0.5 ok");
+        check(rh.Num().Cmp(&big::NewInt(1)) == 0, b"rat setfloat64 0.5 num");
+        check(rh.Denom().Cmp(&big::NewInt(2)) == 0, b"rat setfloat64 0.5 den");
+
+        // An integer-valued float -> a/1.
+        let mut r3 = big::Rat::new();
+        let (_, ok) = r3.SetFloat64(3.0);
+        check(ok, b"rat setfloat64 3.0 ok");
+        check(r3.IsInt() && r3.Num().Cmp(&big::NewInt(3)) == 0, b"rat setfloat64 3.0 int");
+    }
+
+    // ── Rat MarshalText / UnmarshalText round-trip ─────────────────
+    {
+        let src = big::NewRat(22, 7);
+        let (text, err) = src.MarshalText();
+        check(err == goish::nil, b"rat marshaltext no err");
+        check(&*text == &b"22/7"[..], b"rat marshaltext bytes");
+
+        let mut back = big::Rat::new();
+        let uerr = back.UnmarshalText(text);
+        check(uerr == goish::nil, b"rat unmarshaltext no err");
+        check(back.Cmp(&src) == 0, b"rat marshaltext round-trip");
+
+        // An integer Rat marshals without the "/1".
+        let (itext, _) = big::NewRat(6, 2).MarshalText();
+        check(&*itext == &b"3"[..], b"rat marshaltext integer form");
+    }
+
+    // ── Rat GobEncode / GobDecode round-trip ───────────────────────
+    {
+        let src = big::NewRat(-355, 113);
+        let (gob, err) = src.GobEncode();
+        check(err == goish::nil, b"rat gobencode no err");
+
+        let mut back = big::Rat::new();
+        let derr = back.GobDecode(gob);
+        check(derr == goish::nil, b"rat gobdecode no err");
+        check(back.Cmp(&src) == 0, b"rat gob round-trip");
+
+        // An empty buffer resets to the zero value 0/1.
+        let mut zr = big::NewRat(7, 9);
+        let eb: slice<goish::byte> = slice::__from_vec(alloc::vec![]);
+        let zerr = zr.GobDecode(eb);
+        check(zerr == goish::nil, b"rat gobdecode empty no err");
+        check(zr.Sign() == 0 && zr.Denom().Cmp(&big::NewInt(1)) == 0, b"rat gobdecode empty resets");
+    }
+
     let _ = &int::from(0);
+    let _ = string::from("");
     report();
 }
