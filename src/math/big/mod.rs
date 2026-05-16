@@ -36,6 +36,34 @@ use core::cmp::Ordering;
 
 use crate::types::int;
 
+/// `big.Word` — a raw arithmetic word. Go's `Word` is `uintptr`; on this
+/// 64-bit target it is `u64`. Surfaced by `(*Int).Bits` / `SetBits`.
+pub type Word = u64;
+
+/// `big.Accuracy` — describes the rounding error produced by a result
+/// that could not be represented exactly. Go models it as an `int8`
+/// with `Below = -1, Exact = 0, Above = +1`; the goish-shape is an
+/// enum carrying the same three states. Reused by `Float` (later task).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Accuracy {
+    /// The result is smaller than the true (exact) value.
+    Below,
+    /// The result is exact.
+    Exact,
+    /// The result is larger than the true (exact) value.
+    Above,
+}
+
+impl crate::fmt::Stringer for Accuracy {
+    fn String(&self) -> crate::gostring::string {
+        match self {
+            Accuracy::Below => crate::gostring::string::from("Below"),
+            Accuracy::Exact => crate::gostring::string::from("Exact"),
+            Accuracy::Above => crate::gostring::string::from("Above"),
+        }
+    }
+}
+
 /// `big.Int` — signed multi-precision integer. Zero value represents 0.
 #[derive(Clone, Default)]
 pub struct Int {
@@ -1044,6 +1072,181 @@ impl Int {
         self
     }
 
+    /// `(*Int).SetUint64(x)` — assign an unsigned 64-bit value (always
+    /// non-negative) and return self. Matches Go's `(*Int).SetUint64`.
+    pub fn SetUint64(&mut self, x: u64) -> &mut Self {
+        self.abs = u64_to_limbs(x);
+        self.neg = false;
+        self
+    }
+
+    /// `(*Int).Uint64()` — low 64 bits as an unsigned value. Go
+    /// bit-truncates and ignores the sign; if the value doesn't fit a
+    /// `u64` the result is the low 64 bits of the magnitude.
+    pub fn Uint64(&self) -> u64 {
+        limbs_to_u64(&self.abs)
+    }
+
+    /// `(*Int).IsInt64()` — reports whether the value fits a signed i64.
+    pub fn IsInt64(&self) -> bool {
+        // Magnitude must occupy at most 64 bits (two u32 limbs).
+        if self.abs.len() > 2 {
+            return false;
+        }
+        let w = limbs_to_u64(&self.abs);
+        if self.neg {
+            // Negative values fit iff |x| <= 2^63.
+            w <= (i64::MAX as u64) + 1
+        } else {
+            w <= i64::MAX as u64
+        }
+    }
+
+    /// `(*Int).IsUint64()` — reports whether the value is non-negative
+    /// and fits an unsigned u64.
+    pub fn IsUint64(&self) -> bool {
+        !self.neg && self.abs.len() <= 2
+    }
+
+    /// `(*Int).CmpAbs(y)` — compare magnitudes only, ignoring sign:
+    /// -1 if |x| < |y|, 0 if equal, +1 if |x| > |y|.
+    pub fn CmpAbs<Y: AsRef<Int>>(&self, y: Y) -> int {
+        match abs_cmp(&self.abs, &y.as_ref().abs) {
+            Ordering::Less => -1,
+            Ordering::Equal => 0,
+            Ordering::Greater => 1,
+        }
+    }
+
+    /// `(*Int).MulRange(a, b)` — z = product of all integers in [a, b]
+    /// inclusively. If a > b the result is 1; if the range includes 0
+    /// the result is 0. Returns self.
+    pub fn MulRange(&mut self, a: i64, b: i64) -> &mut Self {
+        if a > b {
+            return self.SetInt64(1); // empty range
+        }
+        if a <= 0 && b >= 0 {
+            return self.SetInt64(0); // range includes 0
+        }
+        // a <= b && (b < 0 || a > 0)
+        let mut neg = false;
+        let (lo, hi) = if a < 0 {
+            // Negate the range; an even count of factors flips no sign.
+            neg = (b - a) & 1 == 0;
+            ((-b) as i128 as u64, (-a) as i128 as u64)
+        } else {
+            (a as u64, b as u64)
+        };
+        // Accumulate the product of lo..=hi.
+        self.abs = u64_to_limbs(1);
+        for n in lo..=hi {
+            self.abs = mul_limbs(&self.abs, &u64_to_limbs(n));
+        }
+        self.neg = neg && !self.abs.is_empty();
+        self
+    }
+
+    /// `(*Int).Binomial(n, k)` — z = the binomial coefficient C(n, k).
+    /// Returns self. Mirrors Go's multiplicative-formula loop.
+    pub fn Binomial(&mut self, n: i64, k: i64) -> &mut Self {
+        if k < 0 || k > n {
+            return self.SetInt64(0);
+        }
+        // C(n, k) == C(n, n-k): reduce k to cut the multiplication count.
+        let k = if k > n - k { n - k } else { k };
+        // z = 1; i = 0; while i < k { z *= n-i; i++; z /= i }
+        let mut nn = Int::new();
+        nn.SetInt64(n);
+        let mut z = Int::new();
+        z.SetInt64(1);
+        let mut i = Int::new();
+        let mut one = Int::new();
+        one.SetInt64(1);
+        let mut ival: i64 = 0;
+        while ival < k {
+            let mut t = Int::new();
+            t.SetInt64(n - ival);
+            let zc = z.clone();
+            z.Mul(&zc, &t);
+            ival += 1;
+            i.SetInt64(ival);
+            let zc = z.clone();
+            z.Quo(&zc, &i);
+        }
+        *self = z;
+        self
+    }
+
+    /// `(*Int).Float64()` — the f64 nearest the value, plus whether the
+    /// result is `Below`, `Exact`, or `Above` the true value.
+    pub fn Float64(&self) -> (f64, Accuracy) {
+        let n = bit_len(&self.abs);
+        if n == 0 {
+            return (0.0, Accuracy::Exact);
+        }
+        // Fast path: the value fits a 53-bit f64 mantissa exactly when it
+        // has <= 53 significant bits, or fits in 64 bits with enough
+        // trailing zeros that the significant span is <= 53.
+        let tz = trailing_zero_bits(&self.abs) as int;
+        if n <= 53 || (n < 64 && n - tz <= 53) {
+            let mag = limbs_to_u64(&self.abs);
+            // u64 -> f64 is exact here (significant span <= 53 bits).
+            let mut f = f64_from_u64(mag);
+            if self.neg {
+                f = -f;
+            }
+            return (f, Accuracy::Exact);
+        }
+        // Slow path: round the magnitude to the nearest f64 and report
+        // the direction of the rounding error.
+        let (mag_f, acc) = round_limbs_to_f64(&self.abs);
+        if self.neg {
+            // Negating flips Below<->Above.
+            let acc = match acc {
+                Accuracy::Below => Accuracy::Above,
+                Accuracy::Above => Accuracy::Below,
+                Accuracy::Exact => Accuracy::Exact,
+            };
+            (-mag_f, acc)
+        } else {
+            (mag_f, acc)
+        }
+    }
+
+    /// `(*Int).FillBytes(buf)` — write the absolute value into `buf` as a
+    /// zero-extended big-endian byte slice and return `buf`. Panics if
+    /// the value does not fit, matching Go.
+    pub fn FillBytes(
+        &self,
+        buf: crate::slice<crate::types::byte>,
+    ) -> crate::slice<crate::types::byte> {
+        let be = limbs_to_be_bytes(&self.abs);
+        let n = buf.len() as usize;
+        if be.len() > n {
+            panic!("math/big: buffer too small to fit value");
+        }
+        // Left-pad with zeros, then copy the big-endian magnitude.
+        let mut out: Vec<u8> = alloc::vec![0u8; n];
+        let start = n - be.len();
+        out[start..].copy_from_slice(&be);
+        crate::slice::<crate::types::byte>::__from_vec(out)
+    }
+
+    /// `(*Int).Bits()` — the absolute value as a little-endian `[]Word`
+    /// slice. The internal u32 limbs are repacked into 64-bit words.
+    pub fn Bits(&self) -> crate::slice<Word> {
+        crate::slice::<Word>::__from_vec(limbs_to_words(&self.abs))
+    }
+
+    /// `(*Int).SetBits(abs)` — set the value from a little-endian `[]Word`
+    /// slice (the receiver becomes non-negative) and return self. The
+    /// 64-bit words are unpacked into u32 limbs and normalized.
+    pub fn SetBits(&mut self, abs: crate::slice<Word>) -> &mut Self {
+        self.abs = words_to_limbs(&abs);
+        self.neg = false;
+        self
+    }
+
     /// `(*Int).Sqrt(x)` — z = ⌊√x⌋, the largest integer with z² ≤ x.
     /// Panics if x is negative, matching Go. Uses Newton's method on
     /// `Int`: the iterate `t = (t + x/t) / 2` converges down to ⌊√x⌋.
@@ -1908,6 +2111,161 @@ fn bit_len(a: &[u32]) -> int {
         return 0;
     }
     ((i - 1) * 32) as int + (32 - a[i - 1].leading_zeros()) as int
+}
+
+/// Repack little-endian u32 limbs into little-endian 64-bit `Word`s.
+/// Pairs of limbs `(lo, hi)` become one word `hi<<32 | lo`; a trailing
+/// odd limb becomes a final word with a zero high half. Trailing zero
+/// words are dropped so the result stays normalized.
+fn limbs_to_words(abs: &[u32]) -> Vec<Word> {
+    let mut out: Vec<Word> = Vec::with_capacity(abs.len().div_ceil(2));
+    let mut i = 0usize;
+    while i < abs.len() {
+        let lo = u64::from(abs[i]);
+        let hi = if i + 1 < abs.len() {
+            u64::from(abs[i + 1])
+        } else {
+            0
+        };
+        out.push((hi << 32) | lo);
+        i += 2;
+    }
+    while out.last() == Some(&0) {
+        out.pop();
+    }
+    out
+}
+
+/// Unpack little-endian 64-bit `Word`s into little-endian u32 limbs.
+/// Each word splits into `(lo, hi)`; trailing zero limbs are dropped.
+fn words_to_limbs(words: &[Word]) -> Vec<u32> {
+    let mut out: Vec<u32> = Vec::with_capacity(words.len() * 2);
+    for &w in words {
+        let lo = u32::try_from(w & 0xFFFF_FFFF).unwrap_or(0);
+        let hi = u32::try_from((w >> 32) & 0xFFFF_FFFF).unwrap_or(0);
+        out.push(lo);
+        out.push(hi);
+    }
+    while out.last() == Some(&0) {
+        out.pop();
+    }
+    out
+}
+
+/// Convert a `u64` known to have at most 53 significant bits into the
+/// exact `f64` with that value. No `as` cast: assemble the IEEE-754
+/// bit pattern directly (or return 0 for an all-zero input).
+fn f64_from_u64(x: u64) -> f64 {
+    if x == 0 {
+        return 0.0;
+    }
+    // bitpos of the most significant set bit (0-based).
+    let msb = 63 - x.leading_zeros();
+    // Mantissa: 52 fraction bits below the implicit leading 1.
+    let frac = if msb >= 52 {
+        (x >> (msb - 52)) & ((1u64 << 52) - 1)
+    } else {
+        (x << (52 - msb)) & ((1u64 << 52) - 1)
+    };
+    // Biased exponent = msb + 1023.
+    let exp = u64::from(msb) + 1023;
+    f64::from_bits((exp << 52) | frac)
+}
+
+/// Round a non-zero magnitude (little-endian u32 limbs) to the nearest
+/// `f64`, ties-to-even, and report whether the rounded value is `Below`
+/// or `Above` the true magnitude (or `Exact`). The magnitude is assumed
+/// to exceed the 53-bit fast path, so the result is always > 0 and the
+/// exponent is well within the normal f64 range for any practical Int.
+fn round_limbs_to_f64(abs: &[u32]) -> (f64, Accuracy) {
+    let n = bit_len(abs); // > 53 here
+    // Take the top 54 bits: 53 to keep plus 1 guard bit.
+    let drop = n - 54; // number of low bits discarded (>= 0)
+    let top54 = extract_high_bits(abs, drop, 54);
+    let guard = top54 & 1;
+    let mut keep = top54 >> 1; // 53 bits
+    // Sticky: any set bit strictly below the guard bit.
+    let sticky = !low_bits_all_zero(abs, drop);
+    let mut acc = Accuracy::Exact;
+    if guard == 1 {
+        if sticky || (keep & 1) == 1 {
+            // Round up (ties-to-even rounds the odd mantissa up).
+            keep += 1;
+            acc = Accuracy::Above;
+        } else {
+            // Exact tie to an even mantissa: truncates downward.
+            acc = Accuracy::Below;
+        }
+    } else if guard == 0 && sticky {
+        acc = Accuracy::Below;
+    }
+    // keep now holds 53 or 54 bits (54 if the round-up carried out).
+    let mut exp_of_keep = drop + 1; // weight of keep's bit 0
+    let mut keep_bits = 64 - keep.leading_zeros();
+    if keep_bits > 53 {
+        // Carry-out grew the mantissa; shift back to 53 significant bits.
+        keep >>= 1;
+        exp_of_keep += 1;
+        keep_bits = 64 - keep.leading_zeros();
+    }
+    // Assemble IEEE-754: value = keep * 2^exp_of_keep.
+    let msb = keep_bits - 1; // 0-based index of keep's top bit
+    let frac = if msb >= 52 {
+        (keep >> (u64::from(msb) - 52)) & ((1u64 << 52) - 1)
+    } else {
+        (keep << (52 - u64::from(msb))) & ((1u64 << 52) - 1)
+    };
+    // Unbiased exponent of the value = exp_of_keep + msb.
+    let unbiased = exp_of_keep + int::from(msb);
+    let biased = unbiased + 1023;
+    let bits = (u64::try_from(biased).unwrap_or(0) << 52) | frac;
+    (f64::from_bits(bits), acc)
+}
+
+/// Extract `width` bits from a little-endian u32 magnitude, starting at
+/// bit index `start` (LSB = 0), as a `u64` (width must be <= 64).
+fn extract_high_bits(abs: &[u32], start: int, width: int) -> u64 {
+    let mut out: u64 = 0;
+    let mut produced: int = 0;
+    while produced < width {
+        let bit = start + produced;
+        if bit < 0 {
+            produced += 1;
+            continue;
+        }
+        let limb = (bit / 32) as usize;
+        let off = (bit % 32) as u32;
+        let b = if limb < abs.len() {
+            u64::from((abs[limb] >> off) & 1)
+        } else {
+            0
+        };
+        out |= b << produced;
+        produced += 1;
+    }
+    out
+}
+
+/// Reports whether every bit strictly below bit index `below` of a
+/// little-endian u32 magnitude is zero.
+fn low_bits_all_zero(abs: &[u32], below: int) -> bool {
+    if below <= 0 {
+        return true;
+    }
+    let full = (below / 32) as usize;
+    for &limb in abs.iter().take(full.min(abs.len())) {
+        if limb != 0 {
+            return false;
+        }
+    }
+    let rem = (below % 32) as u32;
+    if rem > 0 && full < abs.len() {
+        let mask = (1u32 << rem) - 1;
+        if abs[full] & mask != 0 {
+            return false;
+        }
+    }
+    true
 }
 
 /// Count of consecutive least-significant zero bits of a magnitude.

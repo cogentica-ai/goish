@@ -4,6 +4,8 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+
 use goish::{int, slice, string, syscall};
 use goish::math::big;
 use goish::fmt::Stringer;
@@ -1084,6 +1086,243 @@ fn main() {
             r.Mod(&zz, &p);
             check(r.Int64() == 4, b"modsqrt multi-limb p z^2==x");
         }
+    }
+
+    // ── SetUint64 / Uint64 round-trip ──────────────────────────────
+    {
+        let mut z = big::Int::new();
+        z.SetUint64(42);
+        check(z.Uint64() == 42, b"setuint64 small");
+        check(z.Sign() == 1, b"setuint64 positive");
+        // A value above i64::MAX must survive the round-trip.
+        let big_u: u64 = 0xFFFF_FFFF_FFFF_FFFF;
+        z.SetUint64(big_u);
+        check(z.Uint64() == big_u, b"setuint64 above i64max");
+        check(z.Sign() == 1, b"setuint64 above i64max positive");
+        // 2^63 exactly.
+        let mid: u64 = 0x8000_0000_0000_0000;
+        z.SetUint64(mid);
+        check(z.Uint64() == mid, b"setuint64 2^63");
+        // Uint64 bit-truncates the magnitude, ignoring sign (Go).
+        let mut nz = big::Int::new();
+        nz.SetInt64(-5);
+        check(nz.Uint64() == 5, b"uint64 ignores sign");
+        // Uint64 of zero is 0.
+        check(big::NewInt(0).Uint64() == 0, b"uint64 zero");
+    }
+
+    // ── IsInt64 / IsUint64 boundary cases ──────────────────────────
+    {
+        let mut z = big::Int::new();
+        check(big::NewInt(0).IsInt64(), b"isint64 zero");
+        check(big::NewInt(i64::MAX).IsInt64(), b"isint64 i64max");
+        check(big::NewInt(i64::MIN).IsInt64(), b"isint64 i64min");
+        // i64::MAX + 1 does not fit a signed i64.
+        z.SetUint64((i64::MAX as u64) + 1);
+        check(!z.IsInt64(), b"isint64 i64max+1 false");
+        check(z.IsUint64(), b"isuint64 i64max+1 true");
+        // u64::MAX fits unsigned but not signed.
+        z.SetUint64(u64::MAX);
+        check(!z.IsInt64(), b"isint64 u64max false");
+        check(z.IsUint64(), b"isuint64 u64max true");
+        // A negative value never fits a u64.
+        check(!big::NewInt(-1).IsUint64(), b"isuint64 neg false");
+        check(big::NewInt(-1).IsInt64(), b"isint64 neg one");
+        // i64::MIN magnitude (2^63) is the largest negative that fits.
+        let mut neg63 = big::Int::new();
+        neg63.SetUint64((i64::MAX as u64) + 1);
+        neg63.Neg(&neg63.clone());
+        check(neg63.IsInt64(), b"isint64 -2^63");
+        // -(2^63 + 1) does not fit.
+        let mut neg63p1 = big::Int::new();
+        neg63p1.SetUint64((i64::MAX as u64) + 2);
+        neg63p1.Neg(&neg63p1.clone());
+        check(!neg63p1.IsInt64(), b"isint64 -(2^63+1) false");
+        // A multi-word value fits neither.
+        let huge = pow2(100);
+        check(!huge.IsInt64(), b"isint64 2^100 false");
+        check(!huge.IsUint64(), b"isuint64 2^100 false");
+    }
+
+    // ── CmpAbs ─────────────────────────────────────────────────────
+    {
+        let a = big::NewInt(-100);
+        let b = big::NewInt(50);
+        check(a.CmpAbs(&b) == 1, b"cmpabs |-100|>|50|");
+        check(b.CmpAbs(&a) == -1, b"cmpabs |50|<|-100|");
+        // Opposite signs, equal magnitude → 0.
+        let p = big::NewInt(77);
+        let n = big::NewInt(-77);
+        check(p.CmpAbs(&n) == 0, b"cmpabs opposite signs equal");
+        check(n.CmpAbs(&p) == 0, b"cmpabs opposite signs equal 2");
+        check(big::NewInt(0).CmpAbs(&big::NewInt(0)) == 0, b"cmpabs zero");
+        // Multi-word magnitudes.
+        check(pow2(200).CmpAbs(&pow2(100)) == 1, b"cmpabs 2^200>2^100");
+    }
+
+    // ── Binomial ───────────────────────────────────────────────────
+    {
+        let mut z = big::Int::new();
+        z.Binomial(10, 3);
+        check(z.Int64() == 120, b"binomial C(10,3)==120");
+        z.Binomial(52, 5);
+        check(z.Int64() == 2598960, b"binomial C(52,5)==2598960");
+        z.Binomial(5, 0);
+        check(z.Int64() == 1, b"binomial C(5,0)==1");
+        z.Binomial(5, 5);
+        check(z.Int64() == 1, b"binomial C(5,5)==1");
+        z.Binomial(5, 6);
+        check(z.Int64() == 0, b"binomial C(5,6)==0 (k>n)");
+        z.Binomial(7, 4);
+        check(z.Int64() == 35, b"binomial C(7,4)==35");
+        // Large: C(67,33) = 14226520737620288370.
+        z.Binomial(67, 33);
+        check(dec_eq(&z, b"14226520737620288370"), b"binomial C(67,33)");
+    }
+
+    // ── MulRange ───────────────────────────────────────────────────
+    {
+        let mut z = big::Int::new();
+        z.MulRange(1, 10);
+        check(z.Int64() == 3628800, b"mulrange 1..10 == 10!");
+        // Empty range → 1.
+        z.MulRange(5, 2);
+        check(z.Int64() == 1, b"mulrange empty == 1");
+        // Range including 0 → 0.
+        z.MulRange(-3, 4);
+        check(z.Int64() == 0, b"mulrange incl 0 == 0");
+        // Single element.
+        z.MulRange(7, 7);
+        check(z.Int64() == 7, b"mulrange 7..7 == 7");
+        // Negative range, even count of factors → positive.
+        // (-4)*(-3) = 12, count 2 (even).
+        z.MulRange(-4, -3);
+        check(z.Int64() == 12, b"mulrange -4..-3 == 12");
+        // Negative range, odd count of factors → negative.
+        // (-3)*(-2)*(-1) = -6, count 3 (odd).
+        z.MulRange(-3, -1);
+        check(z.Int64() == -6, b"mulrange -3..-1 == -6");
+        // Larger product: 1..20 = 20! = 2432902008176640000.
+        z.MulRange(1, 20);
+        check(dec_eq(&z, b"2432902008176640000"), b"mulrange 1..20 == 20!");
+    }
+
+    // ── Float64 ────────────────────────────────────────────────────
+    {
+        // Exact small values.
+        let (f, acc) = big::NewInt(0).Float64();
+        check(f == 0.0 && acc == big::Accuracy::Exact, b"float64 zero exact");
+        let (f, acc) = big::NewInt(42).Float64();
+        check(f == 42.0 && acc == big::Accuracy::Exact, b"float64 42 exact");
+        let (f, acc) = big::NewInt(-7).Float64();
+        check(f == -7.0 && acc == big::Accuracy::Exact, b"float64 -7 exact");
+        // 2^53 is exactly representable.
+        let (f, acc) = pow2(53).Float64();
+        check(f == 9007199254740992.0 && acc == big::Accuracy::Exact,
+              b"float64 2^53 exact");
+        // 2^60 has only one significant bit → exact despite > 53 bits.
+        let (f, acc) = pow2(60).Float64();
+        check(f == 1152921504606846976.0 && acc == big::Accuracy::Exact,
+              b"float64 2^60 exact");
+        // 2^54 + 1 cannot be represented exactly: 54 significant bits.
+        // It rounds down to 2^54 (even mantissa) → Below.
+        let mut inexact = pow2(54);
+        inexact.Add(&inexact.clone(), &big::NewInt(1));
+        let (f, acc) = inexact.Float64();
+        check(f == 18014398509481984.0 && acc == big::Accuracy::Below,
+              b"float64 2^54+1 below");
+        // 2^54 + 3 rounds up to 2^54 + 4 → Above.
+        let mut up = pow2(54);
+        up.Add(&up.clone(), &big::NewInt(3));
+        let (f, acc) = up.Float64();
+        check(f == 18014398509481988.0 && acc == big::Accuracy::Above,
+              b"float64 2^54+3 above");
+        // Negative inexact flips Below<->Above: -(2^54+1) → Above.
+        let mut negin = pow2(54);
+        negin.Add(&negin.clone(), &big::NewInt(1));
+        negin.Neg(&negin.clone());
+        let (f, acc) = negin.Float64();
+        check(f == -18014398509481984.0 && acc == big::Accuracy::Above,
+              b"float64 -(2^54+1) above");
+        // Accuracy::String() values.
+        check(big::Accuracy::Below.String().as_bytes() == b"Below",
+              b"accuracy string below");
+        check(big::Accuracy::Exact.String().as_bytes() == b"Exact",
+              b"accuracy string exact");
+        check(big::Accuracy::Above.String().as_bytes() == b"Above",
+              b"accuracy string above");
+    }
+
+    // ── FillBytes ──────────────────────────────────────────────────
+    {
+        // 0x1234 zero-padded into an 8-byte buffer.
+        let z = big::NewInt(0x1234);
+        let buf: slice<goish::byte> = slice::__from_vec(alloc::vec![0u8; 8]);
+        let out = z.FillBytes(buf);
+        check(out.len() == 8, b"fillbytes len 8");
+        let mut want = [0u8; 8];
+        want[6] = 0x12;
+        want[7] = 0x34;
+        let mut ok = true;
+        for i in 0usize..8 {
+            if out[i] != want[i] {
+                ok = false;
+            }
+        }
+        check(ok, b"fillbytes left-pad big-endian");
+        // Zero fills with all-zero bytes.
+        let zb: slice<goish::byte> = slice::__from_vec(alloc::vec![0xFFu8; 4]);
+        let zout = big::NewInt(0).FillBytes(zb);
+        let mut allzero = true;
+        for i in 0usize..4 {
+            if zout[i] != 0 {
+                allzero = false;
+            }
+        }
+        check(allzero, b"fillbytes zero is all-zero");
+        // Exact-fit buffer: 0xABCD into 2 bytes.
+        let eb: slice<goish::byte> = slice::__from_vec(alloc::vec![0u8; 2]);
+        let eout = big::NewInt(0xABCD).FillBytes(eb);
+        check(eout[0usize] == 0xAB && eout[1usize] == 0xCD,
+              b"fillbytes exact fit");
+    }
+
+    // ── Bits / SetBits round-trip ──────────────────────────────────
+    {
+        // Single-word value.
+        let z = big::NewInt(0x1234_5678);
+        let bits = z.Bits();
+        check(bits.len() == 1, b"bits single word len");
+        check(bits[0usize] == 0x1234_5678, b"bits single word value");
+        let mut back = big::Int::new();
+        back.SetBits(bits);
+        check(back.Cmp(&z) == 0, b"setbits single word round-trip");
+        // Multi-word value: 2^100 + 2^10.
+        let mut mw = pow2(100);
+        mw.Add(&mw.clone(), &pow2(10));
+        let mwbits = mw.Bits();
+        check(mwbits.len() == 2, b"bits multi-word len");
+        let mut mwback = big::Int::new();
+        mwback.SetBits(mwbits);
+        check(mwback.Cmp(&mw) == 0, b"setbits multi-word round-trip");
+        // SetBits makes the receiver non-negative.
+        let words: slice<big::Word> = slice::__from_vec(alloc::vec![7u64, 0u64]);
+        let mut sb = big::Int::new();
+        sb.SetInt64(-999); // pre-existing negative state
+        sb.SetBits(words);
+        check(sb.Sign() == 1, b"setbits forces non-negative");
+        check(sb.Int64() == 7, b"setbits drops trailing zero word");
+        // Zero round-trip.
+        let zbits = big::NewInt(0).Bits();
+        check(zbits.len() == 0, b"bits zero is empty");
+        // Word value that exercises both u32 halves.
+        let mut wmix = big::Int::new();
+        let mixed: slice<big::Word> =
+            slice::__from_vec(alloc::vec![0xDEAD_BEEF_CAFE_F00Du64]);
+        wmix.SetBits(mixed);
+        check(wmix.Uint64() == 0xDEAD_BEEF_CAFE_F00D, b"setbits both halves");
+        let wb = wmix.Bits();
+        check(wb[0usize] == 0xDEAD_BEEF_CAFE_F00D, b"bits both halves");
     }
 
     let _ = &int::from(0);
