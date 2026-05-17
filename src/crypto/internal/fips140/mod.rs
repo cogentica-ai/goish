@@ -32,6 +32,7 @@ use crate::gostring::string;
 
 pub mod bigmod;
 pub mod check;
+pub mod edwards25519;
 pub mod rsa;
 
 /// `fips140.Enabled` — whether FIPS 140-3 mode is active. Always false
