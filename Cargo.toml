@@ -644,3 +644,19 @@ path = "examples/stringer_ref_smoke.rs"
 [[example]]
 name = "crypto_ed25519_smoke"
 path = "examples/crypto_ed25519_smoke.rs"
+
+[[example]]
+name = "edwards25519_field_smoke"
+path = "examples/edwards25519_field_smoke.rs"
+
+[[example]]
+name = "edwards25519_scalar_smoke"
+path = "examples/edwards25519_scalar_smoke.rs"
+
+[[example]]
+name = "edwards25519_point_smoke"
+path = "examples/edwards25519_point_smoke.rs"
+
+[[example]]
+name = "fips_ed25519_smoke"
+path = "examples/fips_ed25519_smoke.rs"
