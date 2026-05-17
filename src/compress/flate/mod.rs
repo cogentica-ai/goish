@@ -581,6 +581,15 @@ impl<R: io::Reader> Decompressor<R> {
         &mut self.r
     }
 
+    /// Consume the decompressor and return its buffered source. Like
+    /// [`reader_mut`](Self::reader_mut) but takes the reader by value —
+    /// used by `compress/gzip`, whose multistream support must re-parse
+    /// a fresh header from the source after one gzip member's trailer
+    /// and then `Reset` a flate decoder back onto it.
+    pub(crate) fn into_reader(self) -> bufio::Reader<R> {
+        self.r
+    }
+
     // Go: func (f *decompressor) readHuffman() error  (inflate.go:367)
     fn readHuffman(&mut self) -> error {
         // HLIT[5], HDIST[5], HCLEN[4].
@@ -1146,6 +1155,40 @@ fn slice_bytes(s: &slice<byte>) -> Vec<byte> {
 fn new_decompressor<R: io::Reader>(r: R, dict: &[byte]) -> Decompressor<R> {
     let mut f = Decompressor {
         r: bufio::NewReader(r),
+        roffset: 0,
+        b: 0,
+        nb: 0,
+        h1: huffmanDecoder::new(),
+        h2: huffmanDecoder::new(),
+        hfixed: fixedHuffmanDecoder(),
+        bitsArr: Box::new([0i64; (maxNumLit + maxNumDist) as usize]),
+        codebits: [0i64; numCodes as usize],
+        dict: dictDecoder::new(),
+        buf: [0u8; 4],
+        step: Step::NextBlock,
+        stepState: stateInit,
+        final_: false,
+        err: nil,
+        toRead: slice::new(),
+        hlFixed: false,
+        hdValid: false,
+        copyLen: 0,
+        copyDist: 0,
+    };
+    f.dict.init(maxMatchOffset, dict);
+    f
+}
+
+/// Build a `Decompressor` whose buffered source *is* the given
+/// `bufio::Reader<R>` — no extra wrapping. `compress/gzip` uses this to
+/// restart inflation on the next gzip member while reusing the buffered
+/// reader it has already positioned past the previous member's trailer.
+pub(crate) fn new_decompressor_buffered<R: io::Reader>(
+    r: bufio::Reader<R>,
+    dict: &[byte],
+) -> Decompressor<R> {
+    let mut f = Decompressor {
+        r,
         roffset: 0,
         b: 0,
         nb: 0,

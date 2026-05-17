@@ -676,3 +676,7 @@ path = "examples/flate_smoke.rs"
 [[example]]
 name = "zlib_smoke"
 path = "examples/zlib_smoke.rs"
+
+[[example]]
+name = "gzip_smoke"
+path = "examples/gzip_smoke.rs"
