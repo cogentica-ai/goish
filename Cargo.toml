@@ -660,3 +660,7 @@ path = "examples/edwards25519_point_smoke.rs"
 [[example]]
 name = "fips_ed25519_smoke"
 path = "examples/fips_ed25519_smoke.rs"
+
+[[example]]
+name = "flate_inflate_smoke"
+path = "examples/flate_inflate_smoke.rs"
