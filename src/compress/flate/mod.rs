@@ -570,6 +570,17 @@ impl<R: io::Reader> Decompressor<R> {
         self.err.clone()
     }
 
+    /// Borrow the underlying buffered source. The DEFLATE decoder stops
+    /// on a byte boundary at the end of the compressed stream, so once
+    /// `Read` has returned `io.EOF` this reader is positioned exactly at
+    /// the first trailing byte. Used by `compress/zlib` (and would be
+    /// used by `compress/gzip`) to read the format trailer that follows
+    /// the DEFLATE payload — Go's `zlib.reader` keeps its own
+    /// `flate.Reader` handle for the same purpose.
+    pub(crate) fn reader_mut(&mut self) -> &mut bufio::Reader<R> {
+        &mut self.r
+    }
+
     // Go: func (f *decompressor) readHuffman() error  (inflate.go:367)
     fn readHuffman(&mut self) -> error {
         // HLIT[5], HDIST[5], HCLEN[4].
