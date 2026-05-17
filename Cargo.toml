@@ -590,6 +590,10 @@ name = "tar_smoke"
 path = "examples/tar_smoke.rs"
 
 [[example]]
+name = "tar_writer_smoke"
+path = "examples/tar_writer_smoke.rs"
+
+[[example]]
 name = "math_big_smoke"
 path = "examples/math_big_smoke.rs"
 

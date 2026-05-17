@@ -156,7 +156,7 @@ impl fs::File for mapRegularFile {
             errors::nil,
         )
     }
-    fn Read(&self, mut p: slice<byte>) -> (int, error) {
+    fn Read(&self, p: &mut slice<byte>) -> (int, error) {
         let mut g = self.pos.lock();
         if *g >= self.content.len() {
             return (0, goish::io::EOF.into());
@@ -194,7 +194,7 @@ impl fs::File for mapDir {
             errors::nil,
         )
     }
-    fn Read(&self, _p: slice<byte>) -> (int, error) {
+    fn Read(&self, _p: &mut slice<byte>) -> (int, error) {
         (0, errors::New("is a directory"))
     }
     fn Close(&self) -> error {
@@ -209,7 +209,7 @@ impl fs::ReadDirFile for mapDir {
     fn Stat(&self) -> (Arc<dyn fs::FileInfo + Send + Sync>, error) {
         <Self as fs::File>::Stat(self)
     }
-    fn Read(&self, p: slice<byte>) -> (int, error) {
+    fn Read(&self, p: &mut slice<byte>) -> (int, error) {
         <Self as fs::File>::Read(self, p)
     }
     fn Close(&self) -> error {

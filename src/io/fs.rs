@@ -339,8 +339,10 @@ pub trait File {
     /// `Stat()` — file metadata.
     fn Stat(&self) -> (Arc<dyn FileInfo + Send + Sync>, error);
     /// `Read(p)` — read bytes into `p`. (`&self`: the concrete file
-    /// owns its cursor behind interior mutability.)
-    fn Read(&self, p: slice<byte>) -> (int, error);
+    /// owns its cursor behind interior mutability.) `p` is taken by
+    /// `&mut` so the caller observes the bytes written, matching
+    /// `io::Reader::Read`.
+    fn Read(&self, p: &mut slice<byte>) -> (int, error);
     /// `Close()` — release associated resources.
     fn Close(&self) -> error;
 }
@@ -370,7 +372,7 @@ pub trait ReadDirFile {
     /// `Stat()` — file metadata (from embedded [`File`]).
     fn Stat(&self) -> (Arc<dyn FileInfo + Send + Sync>, error);
     /// `Read(p)` — read bytes into `p` (from embedded [`File`]).
-    fn Read(&self, p: slice<byte>) -> (int, error);
+    fn Read(&self, p: &mut slice<byte>) -> (int, error);
     /// `Close()` — release resources (from embedded [`File`]).
     fn Close(&self) -> error;
     /// `ReadDir(n)` — up to `n` entries in directory order; `n <= 0`
