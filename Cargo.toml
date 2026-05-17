@@ -594,6 +594,10 @@ name = "math_big_smoke"
 path = "examples/math_big_smoke.rs"
 
 [[example]]
+name = "bigmod_smoke"
+path = "examples/bigmod_smoke.rs"
+
+[[example]]
 name = "net_url_smoke"
 path = "examples/net_url_smoke.rs"
 

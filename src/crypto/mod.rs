@@ -33,6 +33,7 @@ pub mod cipher;
 pub mod des;
 pub mod hkdf;
 pub mod hmac;
+pub mod internal;
 pub mod md5;
 pub mod pbkdf2;
 pub mod rand;
