@@ -879,13 +879,64 @@ fn parse_authority(authority: string) -> (URL, error) {
                 }
                 j += 3;
             }
-            b'[' => in_brackets = true,
-            b']' => in_brackets = false,
+            b'[' => { in_brackets = true; j += 1; }
+            b']' => { in_brackets = false; j += 1; }
             c => {
                 if !in_brackets && c < 0x80 && should_escape(c, EncodeHost) {
                     return (URL::default(), Error::new("parse", authority.clone(), InvalidHostError::new(host.slice(j, j + 1))));
                 }
                 j += 1;
+            }
+        }
+    }
+
+    // Validate port if present (host:port form, excluding IPv6 bracket addresses)
+    // In Go's net/url, a non-numeric port causes a parse error.
+    {
+        let port_str = {
+            let h = host.as_bytes();
+            let hn = host.Len();
+            if hn > 0 && h[0] == b'[' {
+                // IPv6 bracketed address: [::1]:5000 — find closing bracket
+                let mut bi = 1;
+                while bi < hn && h[bi as usize] != b']' { bi += 1; }
+                bi += 1; // skip ']'
+                if bi < hn && h[bi as usize] == b':' {
+                    Some(host.slice(bi + 1, hn))
+                } else {
+                    None
+                }
+            } else {
+                // Find last ':' for port
+                let mut ci = hn - 1;
+                let mut found_colon = false;
+                while ci >= 0 {
+                    if h[ci as usize] == b':' { found_colon = true; break; }
+                    if ci == 0 { break; }
+                    ci -= 1;
+                }
+                if found_colon && ci > 0 {
+                    Some(host.slice(ci + 1, hn))
+                } else {
+                    None
+                }
+            }
+        };
+        if let Some(port) = port_str {
+            if port.Len() > 0 {
+                let pb = port.as_bytes();
+                let mut valid = true;
+                let mut k = 0;
+                while k < port.Len() {
+                    if pb[k as usize] < b'0' || pb[k as usize] > b'9' {
+                        valid = false;
+                        break;
+                    }
+                    k += 1;
+                }
+                if !valid {
+                    return (URL::default(), Error::new("parse", authority.clone(), errors::New("invalid port")));
+                }
             }
         }
     }

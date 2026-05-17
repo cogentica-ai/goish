@@ -302,35 +302,81 @@ impl<'a> Parser<'a> {
                 _ => {}
             }
             first = false;
-            let lo = self.parse_class_atom()?;
-            // Range `a-b`?
-            if self.peek() == Some(b'-') {
-                // Peek ahead — `-` followed by `]` is a literal `-`.
-                if self.src.get(self.pos + 1) == Some(&b']') {
-                    ranges.push((lo, lo));
-                    continue;
+            let atom = self.parse_class_atom()?;
+            match atom {
+                ClassAtom::Expanded(sub_ranges) => {
+                    // \w, \d, \s etc. inside a class — merge their ranges in
+                    ranges.extend(sub_ranges);
                 }
-                self.bump();
-                let hi = self.parse_class_atom()?;
-                if hi < lo { return Err("invalid character range"); }
-                ranges.push((lo, hi));
-            } else {
-                ranges.push((lo, lo));
+                ClassAtom::Byte(lo) => {
+                    // Range `a-b`?
+                    if self.peek() == Some(b'-') {
+                        // Peek ahead — `-` followed by `]` is a literal `-`.
+                        if self.src.get(self.pos + 1) == Some(&b']') {
+                            ranges.push((lo, lo));
+                            continue;
+                        }
+                        self.bump();
+                        let hi_atom = self.parse_class_atom()?;
+                        let hi = match hi_atom {
+                            ClassAtom::Byte(b) => b,
+                            ClassAtom::Expanded(_) => return Err("invalid character range"),
+                        };
+                        if hi < lo { return Err("invalid character range"); }
+                        ranges.push((lo, hi));
+                    } else {
+                        ranges.push((lo, lo));
+                    }
+                }
             }
         }
         Ok(Node::Class { negate, ranges })
     }
 
-    /// Parse one atom inside `[...]`. Returns the byte (or expanded
-    /// shorthand class atoms folded into `ranges`).
-    fn parse_class_atom(&mut self) -> Result<byte, &'static str> {
+    /// Parse one atom inside `[...]`. Returns a `ClassAtom`:
+    /// - `Byte(b)` for a single byte (literal or simple escape)
+    /// - `Expanded(ranges)` for shorthand classes like `\w`, `\d`, `\s`
+    fn parse_class_atom(&mut self) -> Result<ClassAtom, &'static str> {
         let b = self.bump().ok_or("unterminated character class")?;
         if b == b'\\' {
             let nb = self.bump().ok_or("trailing backslash in class")?;
-            return Ok(escape_byte(nb));
+            match nb {
+                b'd' => return Ok(ClassAtom::Expanded(vec![(b'0', b'9')])),
+                b'D' => return Ok(ClassAtom::Expanded(vec![(0u8, b'0'-1), (b'9'+1, 255u8)])),
+                b'w' => return Ok(ClassAtom::Expanded(word_ranges())),
+                b'W' => {
+                    // complement of word_ranges: [^0-9A-Z_a-z]
+                    return Ok(ClassAtom::Expanded(vec![
+                        (0u8, b'0'-1),
+                        (b'9'+1, b'A'-1),
+                        (b'Z'+1, b'_'-1),
+                        (b'_'+1, b'a'-1),
+                        (b'z'+1, 255u8),
+                    ]));
+                }
+                b's' => return Ok(ClassAtom::Expanded(space_ranges())),
+                b'S' => {
+                    return Ok(ClassAtom::Expanded(vec![
+                        (0u8, b'\t'-1),
+                        (b'\t'+1, b'\n'-1),
+                        (b'\n'+1, b'\x0C'-1),
+                        (b'\x0C'+1, b'\r'-1),
+                        (b'\r'+1, b' '-1),
+                        (b' '+1, 255u8),
+                    ]));
+                }
+                _ => return Ok(ClassAtom::Byte(escape_byte(nb))),
+            }
         }
-        Ok(b)
+        Ok(ClassAtom::Byte(b))
     }
+}
+
+/// Atom returned from `parse_class_atom` — either a single byte or
+/// multiple expanded ranges (from `\w`, `\d`, `\s`).
+enum ClassAtom {
+    Byte(byte),
+    Expanded(Vec<(byte, byte)>),
 }
 
 /// Translate a `\X` escape OUTSIDE a class to a Node. Predefined classes

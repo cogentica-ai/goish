@@ -55,7 +55,7 @@ use alloc::vec::Vec;
 /// FileMode methods (`IsDir`, `IsRegular`, `Perm`, `Type`, `String`)
 /// resolve identically regardless of import path.
 pub use crate::io::fs::FileMode;
-pub use crate::io::fs::{ModeDir, ModePerm, ModeSymlink};
+pub use crate::io::fs::{ModeDir, ModePerm, ModeSymlink, ModeSocket};
 
 // Go: os/types.go declares these as untyped int. Goish ships them
 // as `int` (= i64) so port-side `var flag int = os.O_RDWR | os.O_TRUNC`
@@ -224,6 +224,11 @@ impl FileInfo for FileInfoData {
 // using Go-style call syntax `info.Name()` without an explicit
 // `.as_dyn_FileInfo()` step.
 impl FileInfoData {
+    /// Construct a FileInfoData from raw parts (for in-memory filesystem implementations).
+    pub fn new(name: string, size: int, mode: FileMode, mod_time: crate::time::Time, is_dir: bool) -> FileInfoData {
+        FileInfoData { name, size, mode, mod_time, is_dir }
+    }
+
     pub fn Name(&self) -> string {
         self.name.clone()
     }
@@ -588,6 +593,67 @@ pub fn Environ() -> slice<string> {
         out.push(string::from_bytes(b));
     }
     slice::__from_vec(out)
+}
+
+/// `os.ExpandEnv(s)` (env.go:20) — replace `${var}` or `$var` in `s`
+/// using `os.Getenv`. Equivalent to `os.Expand(s, os.Getenv)`.
+pub fn ExpandEnv<S: Into<string>>(s: S) -> string {
+    Expand(s, Getenv)
+}
+
+/// `os.Expand(s, mapping)` (env.go:27) — replace `${var}` and `$var`
+/// in `s` by calling `mapping(var)` for each substitution. The
+/// `$$` escape is replaced by a single `$`. Slim port of Go's
+/// `os/env.go:Expand` — byte-only scan (matches Go's behaviour for
+/// ASCII variable names, which is the overwhelming real-world case).
+pub fn Expand<S: Into<string>, F: Fn(string) -> string>(s: S, mapping: F) -> string {
+    let s = s.into();
+    let b = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(b.len());
+    let mut i = 0usize;
+    while i < b.len() {
+        if b[i] != b'$' || i + 1 >= b.len() {
+            out.push(b[i]);
+            i += 1;
+            continue;
+        }
+        // b[i] == '$'
+        // Check for '$$' → single '$'.
+        if b[i + 1] == b'$' {
+            out.push(b'$');
+            i += 2;
+            continue;
+        }
+        // '${...}' form
+        if b[i + 1] == b'{' {
+            // Find matching '}'.
+            let mut j = i + 2;
+            while j < b.len() && b[j] != b'}' {
+                j += 1;
+            }
+            let var = string::from_bytes(&b[i + 2..j]);
+            let val = mapping(var);
+            out.extend_from_slice(val.as_bytes());
+            i = if j < b.len() { j + 1 } else { j };
+            continue;
+        }
+        // '$name' form — name is [a-zA-Z0-9_] run after '$'.
+        let mut j = i + 1;
+        while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+            j += 1;
+        }
+        if j == i + 1 {
+            // No name chars — emit literal '$'.
+            out.push(b'$');
+            i += 1;
+        } else {
+            let var = string::from_bytes(&b[i + 1..j]);
+            let val = mapping(var);
+            out.extend_from_slice(val.as_bytes());
+            i = j;
+        }
+    }
+    string::__from_vec(out)
 }
 
 /// Line-by-line port of `os.Clearenv()` (env.go:134) — delete every
@@ -1269,6 +1335,97 @@ pub fn WriteFile<N: Into<string>, M: Into<FileMode>>(name: N, data: slice<byte>,
         return werr;
     }
     cerr
+}
+
+// ─── MkdirTemp / CreateTemp (Go 1.16+) ──────────────────────────────────
+
+/// Append a decimal `u64` to a byte buffer.
+fn append_u64(buf: &mut Vec<u8>, mut n: u64) {
+    let mut digits = [0u8; 20];
+    let mut i = digits.len();
+    if n == 0 {
+        i -= 1;
+        digits[i] = b'0';
+    } else {
+        while n > 0 {
+            i -= 1;
+            digits[i] = b'0' + (n % 10) as u8;
+            n /= 10;
+        }
+    }
+    buf.extend_from_slice(&digits[i..]);
+}
+
+/// Build a unique path from `dir`, `pattern` (which may contain a `*`
+/// as the insertion point per Go's os.MkdirTemp convention), and a
+/// process-local counter.
+fn temp_path(dir: &string, pattern: &string) -> string {
+    static NEXT: core::sync::atomic::AtomicU64 =
+        core::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+
+    let base = if dir.Len() == 0 { TempDir() } else { dir.clone() };
+    let pb = bytes_of(pattern);
+
+    // Find the last '*' in the pattern; if absent insert the number at the end.
+    let star = pb.iter().rposition(|&b| b == b'*');
+
+    let mut path: Vec<u8> = Vec::new();
+    path.extend_from_slice(bytes_of(&base));
+    if !path.ends_with(b"/") {
+        path.push(b'/');
+    }
+    match star {
+        Some(pos) => {
+            path.extend_from_slice(&pb[..pos]);
+            append_u64(&mut path, n);
+            path.extend_from_slice(&pb[pos + 1..]);
+        }
+        None => {
+            path.extend_from_slice(pb);
+            append_u64(&mut path, n);
+        }
+    }
+    string::from_bytes(&path)
+}
+
+/// `os.MkdirTemp(dir, pattern)` (os/tempfile.go:96, Go 1.16+) — create
+/// a new temporary directory. The directory name is generated by appending
+/// a process-unique numeric suffix to `pattern` (replacing `*` if
+/// present, appending otherwise). Returns `(path, nil)` on success.
+///
+/// Slim: uniqueness via an atomic counter; no retry loop. Callers should
+/// `RemoveAll` the directory when done.
+pub fn MkdirTemp<S1: Into<string>, S2: Into<string>>(
+    dir: S1,
+    pattern: S2,
+) -> (string, error) {
+    let dir: string = dir.into();
+    let pattern: string = pattern.into();
+    let name = temp_path(&dir, &pattern);
+    let err = Mkdir(name.clone(), FileMode(0o700));
+    if !err.IsNil() {
+        return (string::new(), err);
+    }
+    (name, nil)
+}
+
+/// `os.CreateTemp(dir, pattern)` (os/tempfile.go:20, Go 1.16+) — create
+/// a new temporary file. The filename is generated by appending a
+/// process-unique numeric suffix to `pattern` (replacing `*` if
+/// present, appending otherwise). The file is opened with `O_RDWR |
+/// O_CREATE | O_EXCL` and mode 0600. Returns `(file, nil)` on success.
+///
+/// Slim: uniqueness via an atomic counter; no retry loop. The caller is
+/// responsible for closing and, if needed, removing the file.
+pub fn CreateTemp<S1: Into<string>, S2: Into<string>>(
+    dir: S1,
+    pattern: S2,
+) -> (nilable<File>, error) {
+    let dir: string = dir.into();
+    let pattern: string = pattern.into();
+    let name = temp_path(&dir, &pattern);
+    OpenFile(name, O_RDWR | O_CREATE | O_EXCL, FileMode(0o600))
 }
 
 /// Compute the base-name (last path component).
