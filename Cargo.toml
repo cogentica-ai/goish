@@ -640,3 +640,7 @@ path = "examples/interface_smoke.rs"
 [[example]]
 name = "stringer_ref_smoke"
 path = "examples/stringer_ref_smoke.rs"
+
+[[example]]
+name = "crypto_ed25519_smoke"
+path = "examples/crypto_ed25519_smoke.rs"

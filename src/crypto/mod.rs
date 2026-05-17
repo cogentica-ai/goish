@@ -31,6 +31,7 @@ use core::any::Any;
 pub mod aes;
 pub mod cipher;
 pub mod des;
+pub mod ed25519;
 pub mod hkdf;
 pub mod hmac;
 pub mod internal;
