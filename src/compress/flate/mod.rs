@@ -1188,3 +1188,1454 @@ impl<R: io::Reader> io::Closer for Decompressor<R> {
         Decompressor::Close(self)
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Huffman encoder + bit writer — port of Go 1.25 `token.go`,
+// `huffman_code.go`, `huffman_bit_writer.go`.
+//
+// These types are all `package flate` unexported in Go (`token`,
+// `huffmanEncoder`, `huffmanBitWriter`); they stay module-internal
+// (`pub(crate)` / private) — the compressor (`deflate.go`, next task)
+// consumes them from within this same module.
+//
+// Slim deviations from Go:
+//   * Go's `huffmanBitWriter.writer` is an `io.Writer`. Go's
+//     `newHuffmanBitWriter` takes a raw `io.Writer` and the bit writer
+//     does ALL its own buffering via the inline `bytes [bufferSize]byte`
+//     array — no `bufio` layer. Goish mirrors this: `huffmanBitWriter`
+//     is generic over `W: io::Writer` and holds it directly.
+//   * Go's package-level `fixedLiteralEncoding` / `fixedOffsetEncoding`
+//     / `huffOffset` are built by package `init()`. Goish builds them
+//     lazily behind a `SpinLock` (no `no_std` package-init) and clones
+//     the small immutable tables on demand — same pattern the inflate
+//     side uses for `fixedHuffmanDecoder`.
+//   * Go's `InternalError("...")` constructs the error directly from a
+//     string; goish wraps via `internal(...)`.
+// ═══════════════════════════════════════════════════════════════════════
+
+// ─── token (token.go:7) ────────────────────────────────────────────────
+
+// 2 bits:   type   0 = literal  1=EOF  2=Match   3=Unused
+// 8 bits:   xlength = length - MIN_MATCH_LENGTH
+// 22 bits   xoffset = offset - MIN_OFFSET_SIZE, or literal
+const lengthShift: u32 = 22;
+const offsetMask: u32 = (1 << lengthShift) - 1;
+#[allow(dead_code)]
+const typeMask: u32 = 3 << 30;
+const literalType: u32 = 0 << 30;
+const matchType: u32 = 1 << 30;
+
+// The length code for length X (MIN_MATCH_LENGTH <= X <= MAX_MATCH_LENGTH)
+// is lengthCodes[length - MIN_MATCH_LENGTH].
+static lengthCodes: [u32; 256] = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 8,
+    9, 9, 10, 10, 11, 11, 12, 12, 12, 12,
+    13, 13, 13, 13, 14, 14, 14, 14, 15, 15,
+    15, 15, 16, 16, 16, 16, 16, 16, 16, 16,
+    17, 17, 17, 17, 17, 17, 17, 17, 18, 18,
+    18, 18, 18, 18, 18, 18, 19, 19, 19, 19,
+    19, 19, 19, 19, 20, 20, 20, 20, 20, 20,
+    20, 20, 20, 20, 20, 20, 20, 20, 20, 20,
+    21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
+    21, 21, 21, 21, 21, 21, 22, 22, 22, 22,
+    22, 22, 22, 22, 22, 22, 22, 22, 22, 22,
+    22, 22, 23, 23, 23, 23, 23, 23, 23, 23,
+    23, 23, 23, 23, 23, 23, 23, 23, 24, 24,
+    24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
+    24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
+    24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
+    25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
+    25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
+    25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
+    25, 25, 26, 26, 26, 26, 26, 26, 26, 26,
+    26, 26, 26, 26, 26, 26, 26, 26, 26, 26,
+    26, 26, 26, 26, 26, 26, 26, 26, 26, 26,
+    26, 26, 26, 26, 27, 27, 27, 27, 27, 27,
+    27, 27, 27, 27, 27, 27, 27, 27, 27, 27,
+    27, 27, 27, 27, 27, 27, 27, 27, 27, 27,
+    27, 27, 27, 27, 27, 28,
+];
+
+static offsetCodes: [u32; 256] = [
+    0, 1, 2, 3, 4, 4, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7,
+    8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9,
+    10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+    11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,
+    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
+    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
+    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
+    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+];
+
+/// `flate.token` — a packed `uint32` encoding a literal or a
+/// length+offset match.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub(crate) struct token(pub u32);
+
+/// Convert a literal into a literal token.
+pub(crate) fn literalToken(literal: u32) -> token {
+    token(literalType + literal)
+}
+
+/// Convert a < xlength, xoffset > pair into a match token.
+pub(crate) fn matchToken(xlength: u32, xoffset: u32) -> token {
+    token(matchType + (xlength << lengthShift) + xoffset)
+}
+
+impl token {
+    /// Returns the literal of a literal token.
+    pub(crate) fn literal(self) -> u32 {
+        self.0.wrapping_sub(literalType)
+    }
+
+    /// Returns the extra offset of a match token.
+    pub(crate) fn offset(self) -> u32 {
+        self.0 & offsetMask
+    }
+
+    /// Returns the length of a match token.
+    pub(crate) fn length(self) -> u32 {
+        self.0.wrapping_sub(matchType) >> lengthShift
+    }
+}
+
+/// `lengthCode(len)` — length code for `len`.
+fn lengthCode(len: u32) -> u32 {
+    lengthCodes[len as usize]
+}
+
+/// `offsetCode(off)` — offset code corresponding to a specific offset.
+fn offsetCode(off: u32) -> u32 {
+    if off < (offsetCodes.len() as u32) {
+        return offsetCodes[off as usize];
+    }
+    if (off >> 7) < (offsetCodes.len() as u32) {
+        return offsetCodes[(off >> 7) as usize] + 14;
+    }
+    offsetCodes[(off >> 14) as usize] + 28
+}
+
+// ─── huffmanEncoder (huffman_code.go) ──────────────────────────────────
+
+const math_MaxUint16: u16 = 0xFFFF;
+const math_MaxInt32: i32 = 0x7FFF_FFFF;
+
+/// `flate.hcode` — a Huffman code with a bit code and bit length.
+#[derive(Clone, Copy, Default, Debug)]
+pub(crate) struct hcode {
+    pub(crate) code: u16,
+    pub(crate) len: u16,
+}
+
+impl hcode {
+    /// `(h *hcode).set(code, length)` — set code and length.
+    fn set(&mut self, code: u16, length: u16) {
+        self.len = length;
+        self.code = code;
+    }
+}
+
+/// `flate.literalNode` — a literal value and its frequency.
+#[derive(Clone, Copy, Debug)]
+struct literalNode {
+    literal: u16,
+    freq: i32,
+}
+
+/// `flate.levelInfo` — state of the constructed tree for a given depth.
+#[derive(Clone, Copy, Default)]
+struct levelInfo {
+    // Our level. for better printing.
+    level: i32,
+    // The frequency of the last node at this level.
+    lastFreq: i32,
+    // The frequency of the next character to add to this level.
+    nextCharFreq: i32,
+    // The frequency of the next pair (from level below) to add to this
+    // level. Only valid if the "needed" value of the next lower level is 0.
+    nextPairFreq: i32,
+    // The number of chains remaining to generate for this level before
+    // moving up to the next level.
+    needed: i32,
+}
+
+/// `flate.huffmanEncoder` — a bit-length-limited Huffman code generator.
+pub(crate) struct huffmanEncoder {
+    // Internal scratch buffers — module-private, stay `Vec`.
+    pub(crate) codes: Vec<hcode>,
+    freqcache: Vec<literalNode>,
+    bitCount: [i32; 17],
+}
+
+fn maxNode() -> literalNode {
+    literalNode {
+        literal: math_MaxUint16,
+        freq: math_MaxInt32,
+    }
+}
+
+/// `newHuffmanEncoder(size)`.
+pub(crate) fn newHuffmanEncoder(size: int) -> huffmanEncoder {
+    let mut codes: Vec<hcode> = Vec::with_capacity(size as usize);
+    codes.resize(size as usize, hcode::default());
+    huffmanEncoder {
+        codes,
+        freqcache: Vec::new(),
+        bitCount: [0i32; 17],
+    }
+}
+
+// `reverseBits(number, bitLength)` (huffman_code.go:343).
+fn reverseBits(number: u16, bitLength: byte) -> u16 {
+    bits::Reverse16(number << (16 - (bitLength as u32)))
+}
+
+/// Generates a HuffmanCode corresponding to the fixed literal table.
+fn generateFixedLiteralEncoding() -> huffmanEncoder {
+    let mut h = newHuffmanEncoder(maxNumLit);
+    let mut ch: u16 = 0;
+    while ch < (maxNumLit as u16) {
+        let bits_: u16;
+        let size: u16;
+        if ch < 144 {
+            // size 8, 000110000 .. 10111111
+            bits_ = ch + 48;
+            size = 8;
+        } else if ch < 256 {
+            // size 9, 110010000 .. 111111111
+            bits_ = ch + 400 - 144;
+            size = 9;
+        } else if ch < 280 {
+            // size 7, 0000000 .. 0010111
+            bits_ = ch - 256;
+            size = 7;
+        } else {
+            // size 8, 11000000 .. 11000111
+            bits_ = ch + 192 - 280;
+            size = 8;
+        }
+        h.codes[ch as usize] = hcode {
+            code: reverseBits(bits_, size as byte),
+            len: size,
+        };
+        ch += 1;
+    }
+    h
+}
+
+fn generateFixedOffsetEncoding() -> huffmanEncoder {
+    let mut h = newHuffmanEncoder(30);
+    let n = h.codes.len();
+    for ch in 0..n {
+        h.codes[ch] = hcode {
+            code: reverseBits(ch as u16, 5),
+            len: 5,
+        };
+    }
+    h
+}
+
+impl huffmanEncoder {
+    /// `(h *huffmanEncoder).bitLength(freq)`.
+    fn bitLength(&self, freq: &[i32]) -> int {
+        let mut total: int = 0;
+        for (i, &f) in freq.iter().enumerate() {
+            if f != 0 {
+                total += (f as int) * (self.codes[i].len as int);
+            }
+        }
+        total
+    }
+
+    // `(h *huffmanEncoder).bitCounts(list, maxBits)` (huffman_code.go:132).
+    //
+    // Computes the number of literals assigned to each bit size. Only
+    // called when `list.len() >= 3`. `list` must have a spare slot at
+    // index `len` (the caller passes a sub-slice one short of capacity);
+    // here `list` is the live working slice and we append `maxNode()`.
+    fn bitCounts(&mut self, list: &mut Vec<literalNode>, mut maxBits: i32) -> &[i32] {
+        if maxBits >= maxBitsLimit {
+            panic!("flate: maxBits too large");
+        }
+        let n: i32 = list.len() as i32;
+        // list = list[0:n+1]; list[n] = maxNode()
+        list.push(maxNode());
+
+        // The tree can't have greater depth than n - 1.
+        if maxBits > n - 1 {
+            maxBits = n - 1;
+        }
+
+        // Create information about each of the levels.
+        let mut levels = [levelInfo::default(); maxBitsLimit as usize];
+        // leafCounts[i][j] is the number of literals at the left of the
+        // level j ancestor.
+        let mut leafCounts = [[0i32; maxBitsLimit as usize]; maxBitsLimit as usize];
+
+        {
+            let mut level: i32 = 1;
+            while level <= maxBits {
+                levels[level as usize] = levelInfo {
+                    level,
+                    lastFreq: list[1].freq,
+                    nextCharFreq: list[2].freq,
+                    nextPairFreq: list[0].freq + list[1].freq,
+                    needed: 0,
+                };
+                leafCounts[level as usize][level as usize] = 2;
+                if level == 1 {
+                    levels[level as usize].nextPairFreq = math_MaxInt32;
+                }
+                level += 1;
+            }
+        }
+
+        // We need a total of 2*n - 2 items at top level and have
+        // already generated 2.
+        levels[maxBits as usize].needed = 2 * n - 4;
+
+        let mut level: i32 = maxBits;
+        loop {
+            let nextPairFreq = levels[level as usize].nextPairFreq;
+            let nextCharFreq = levels[level as usize].nextCharFreq;
+            if nextPairFreq == math_MaxInt32 && nextCharFreq == math_MaxInt32 {
+                // We've run out of both leaves and pairs.
+                levels[level as usize].needed = 0;
+                levels[(level + 1) as usize].nextPairFreq = math_MaxInt32;
+                level += 1;
+                continue;
+            }
+
+            let prevFreq = levels[level as usize].lastFreq;
+            if nextCharFreq < nextPairFreq {
+                // The next item on this row is a leaf node.
+                let nn = leafCounts[level as usize][level as usize] + 1;
+                levels[level as usize].lastFreq = nextCharFreq;
+                // Lower leafCounts are the same as the previous node.
+                leafCounts[level as usize][level as usize] = nn;
+                levels[level as usize].nextCharFreq = list[nn as usize].freq;
+            } else {
+                // The next item on this row is a pair from the prev row.
+                levels[level as usize].lastFreq = nextPairFreq;
+                // copy(leafCounts[level][:level], leafCounts[level-1][:level])
+                for k in 0..(level as usize) {
+                    leafCounts[level as usize][k] = leafCounts[(level - 1) as usize][k];
+                }
+                let lvl = levels[level as usize].level;
+                levels[(lvl - 1) as usize].needed = 2;
+            }
+
+            levels[level as usize].needed -= 1;
+            if levels[level as usize].needed == 0 {
+                // We've done everything we need to do for this level.
+                if levels[level as usize].level == maxBits {
+                    // All done!
+                    break;
+                }
+                let lvl = levels[level as usize].level;
+                let lastFreq = levels[level as usize].lastFreq;
+                levels[(lvl + 1) as usize].nextPairFreq = prevFreq + lastFreq;
+                level += 1;
+            } else {
+                // If we stole from below, move down temporarily to
+                // replenish it.
+                while levels[(level - 1) as usize].needed > 0 {
+                    level -= 1;
+                }
+            }
+        }
+
+        // Sanity check.
+        if leafCounts[maxBits as usize][maxBits as usize] != n {
+            panic!("leafCounts[maxBits][maxBits] != n");
+        }
+
+        let mut bits_: usize = 1;
+        {
+            let mut level: i32 = maxBits;
+            while level > 0 {
+                // counts[level] - counts[level-1]
+                self.bitCount[bits_] = leafCounts[maxBits as usize][level as usize]
+                    - leafCounts[maxBits as usize][(level - 1) as usize];
+                bits_ += 1;
+                level -= 1;
+            }
+        }
+        &self.bitCount[..(maxBits as usize) + 1]
+    }
+
+    // `(h *huffmanEncoder).assignEncodingAndSize(bitCount, list)`
+    // (huffman_code.go:246). Assigns each leaf a bit count and an
+    // encoding per RFC 1951 3.2.2.
+    fn assignEncodingAndSize(&mut self, bitCount: &[i32], list: &mut [literalNode]) {
+        let mut code: u16 = 0;
+        let mut list_len: usize = list.len();
+        for (n, &bits_) in bitCount.iter().enumerate() {
+            code <<= 1;
+            if n == 0 || bits_ == 0 {
+                continue;
+            }
+            // The literals list[len-bits .. len] are encoded using "bits"
+            // bits, and get the values code, code+1, ... in literal order.
+            let lo = list_len - (bits_ as usize);
+            let chunk = &mut list[lo..list_len];
+
+            byLiteral_sort(chunk);
+            for node in chunk.iter() {
+                self.codes[node.literal as usize] = hcode {
+                    code: reverseBits(code, n as byte),
+                    len: n as u16,
+                };
+                code += 1;
+            }
+            list_len = lo;
+        }
+    }
+
+    /// `(h *huffmanEncoder).generate(freq, maxBits)` (huffman_code.go:272).
+    ///
+    /// Updates this Huffman code to be the minimum code for the
+    /// specified frequency count.
+    pub(crate) fn generate(&mut self, freq: &[i32], maxBits: i32) {
+        if self.freqcache.is_empty() {
+            // Reusable buffer with the longest possible frequency table.
+            self.freqcache = Vec::with_capacity((maxNumLit + 1) as usize);
+            self.freqcache
+                .resize((maxNumLit + 1) as usize, literalNode { literal: 0, freq: 0 });
+        }
+        // list = h.freqcache[:len(freq)+1]
+        let mut count: usize = 0;
+        // Set list to the set of all non-zero literals and their freqs.
+        for (i, &f) in freq.iter().enumerate() {
+            if f != 0 {
+                self.freqcache[count] = literalNode {
+                    literal: i as u16,
+                    freq: f,
+                };
+                count += 1;
+            } else {
+                self.codes[i].len = 0;
+            }
+        }
+
+        // list = list[:count]
+        let mut list: Vec<literalNode> = self.freqcache[..count].to_vec();
+        if count <= 2 {
+            // Two or fewer literals — everything has bit length 1.
+            for (i, node) in list.iter().enumerate() {
+                self.codes[node.literal as usize].set(i as u16, 1);
+            }
+            return;
+        }
+        byFreq_sort(&mut list);
+
+        // Number of literals for each bit count, then the assignment.
+        // bitCounts appends maxNode() to `list`; assignEncodingAndSize
+        // operates on the original count, so slice it back.
+        let bc = self.bitCounts(&mut list, maxBits).to_vec();
+        list.truncate(count);
+        self.assignEncodingAndSize(&bc, &mut list);
+    }
+}
+
+// `byLiteral.sort` — sort.Sort over byLiteral.Less (literal ascending).
+fn byLiteral_sort(a: &mut [literalNode]) {
+    a.sort_by(|x, y| x.literal.cmp(&y.literal));
+}
+
+// `byFreq.sort` — sort.Sort over byFreq.Less (freq asc, literal tiebreak).
+fn byFreq_sort(a: &mut [literalNode]) {
+    a.sort_by(|x, y| {
+        if x.freq == y.freq {
+            x.literal.cmp(&y.literal)
+        } else {
+            x.freq.cmp(&y.freq)
+        }
+    });
+}
+
+// ─── fixed encoders (huffman_code.go:103 / huffman_bit_writer.go:600) ──
+//
+// Go builds `fixedLiteralEncoding`, `fixedOffsetEncoding` and
+// `huffOffset` in package `init()`. Goish has no package init under
+// `no_std`, so they are built once behind a `SpinLock` and cloned in.
+
+fn clone_encoder(h: &huffmanEncoder) -> huffmanEncoder {
+    huffmanEncoder {
+        codes: h.codes.clone(),
+        freqcache: Vec::new(),
+        bitCount: [0i32; 17],
+    }
+}
+
+fn fixedLiteralEncoding() -> huffmanEncoder {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<Vec<hcode>>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(generateFixedLiteralEncoding().codes);
+    }
+    huffmanEncoder {
+        codes: g.as_ref().unwrap().clone(),
+        freqcache: Vec::new(),
+        bitCount: [0i32; 17],
+    }
+}
+
+fn fixedOffsetEncoding() -> huffmanEncoder {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<Vec<hcode>>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(generateFixedOffsetEncoding().codes);
+    }
+    huffmanEncoder {
+        codes: g.as_ref().unwrap().clone(),
+        freqcache: Vec::new(),
+        bitCount: [0i32; 17],
+    }
+}
+
+// `huffOffset` (huffman_bit_writer.go:600) — a static offset encoder
+// used for huffman-only encoding. Built once, cloned in.
+fn huffOffset() -> huffmanEncoder {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<Vec<hcode>>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        let mut offsetFreq = [0i32; offsetCodeCount as usize];
+        offsetFreq[0] = 1;
+        let mut h = newHuffmanEncoder(offsetCodeCount);
+        h.generate(&offsetFreq, 15);
+        *g = Some(h.codes);
+    }
+    huffmanEncoder {
+        codes: g.as_ref().unwrap().clone(),
+        freqcache: Vec::new(),
+        bitCount: [0i32; 17],
+    }
+}
+
+// ─── huffmanBitWriter constants (huffman_bit_writer.go:11) ─────────────
+
+// The largest offset code.
+const offsetCodeCount: int = 30;
+
+// The first length code.
+const lengthCodesStart: int = 257;
+
+// The number of codegen codes.
+const codegenCodeCount: int = 19;
+const badCode: u8 = 255;
+
+const maxBitsLimit: i32 = 16;
+
+// bufferFlushSize — buffer size after which bytes are flushed to the
+// writer. A multiple of 6 (we accumulate 6 bytes between writes).
+const bufferFlushSize: int = 240;
+
+// bufferSize — actual output byte buffer size. Has headroom for a
+// flush (up to 8 bytes).
+const bufferSize: int = bufferFlushSize + 8;
+
+// maxStoreBlockSize — defined in deflate.go (the compressor task);
+// referenced here by `storedSize`. RFC 1951 stored-block max payload.
+const maxStoreBlockSize: int = 65535;
+
+// The number of extra bits needed by length code X - LENGTH_CODES_START.
+static lengthExtraBits: [i8; 29] = [
+    /* 257 */ 0, 0, 0,
+    /* 260 */ 0, 0, 0, 0, 0, 1, 1, 1, 1, 2,
+    /* 270 */ 2, 2, 2, 3, 3, 3, 3, 4, 4, 4,
+    /* 280 */ 4, 5, 5, 5, 5, 0,
+];
+
+// The length indicated by length code X - LENGTH_CODES_START.
+static lengthBase: [u32; 29] = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 10,
+    12, 14, 16, 20, 24, 28, 32, 40, 48, 56,
+    64, 80, 96, 112, 128, 160, 192, 224, 255,
+];
+
+// Offset code word extra bits.
+static offsetExtraBits: [i8; 30] = [
+    0, 0, 0, 0, 1, 1, 2, 2, 3, 3,
+    4, 4, 5, 5, 6, 6, 7, 7, 8, 8,
+    9, 9, 10, 10, 11, 11, 12, 12, 13, 13,
+];
+
+static offsetBase: [u32; 30] = [
+    0x000000, 0x000001, 0x000002, 0x000003, 0x000004,
+    0x000006, 0x000008, 0x00000c, 0x000010, 0x000018,
+    0x000020, 0x000030, 0x000040, 0x000060, 0x000080,
+    0x0000c0, 0x000100, 0x000180, 0x000200, 0x000300,
+    0x000400, 0x000600, 0x000800, 0x000c00, 0x001000,
+    0x001800, 0x002000, 0x003000, 0x004000, 0x006000,
+];
+
+// The odd order in which the codegen code sizes are written.
+static codegenOrder: [u32; 19] = [
+    16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
+];
+
+// ─── huffmanBitWriter (huffman_bit_writer.go:71) ───────────────────────
+
+/// `flate.huffmanBitWriter` — accumulates Huffman-coded bits and flushes
+/// whole bytes to the underlying `io::Writer`.
+///
+/// Go's `huffmanBitWriter.writer` is a plain `io.Writer`; the bit writer
+/// owns ALL its buffering via the `bytes` array (no `bufio`). Goish
+/// holds the writer directly, generic over `W`.
+pub(crate) struct huffmanBitWriter<W: io::Writer> {
+    // The underlying writer. Do not use directly; use `write`, which
+    // makes Write errors sticky.
+    writer: W,
+
+    // Data waiting to be written is bytes[0:nbytes] and then the low
+    // nbits of bits. Data is always written sequentially into `bytes`.
+    bits: u64,
+    nbits: uint,
+    bytes: [byte; bufferSize as usize],
+    codegenFreq: [i32; codegenCodeCount as usize],
+    nbytes: int,
+    // Internal scratch buffers — module-private, stay `Vec`.
+    literalFreq: Vec<i32>,
+    offsetFreq: Vec<i32>,
+    codegen: Vec<u8>,
+    literalEncoding: huffmanEncoder,
+    offsetEncoding: huffmanEncoder,
+    codegenEncoding: huffmanEncoder,
+    pub(crate) err: error,
+}
+
+/// `newHuffmanBitWriter(w)` (huffman_bit_writer.go:94).
+pub(crate) fn newHuffmanBitWriter<W: io::Writer>(w: W) -> huffmanBitWriter<W> {
+    let mut literalFreq: Vec<i32> = Vec::with_capacity(maxNumLit as usize);
+    literalFreq.resize(maxNumLit as usize, 0);
+    let mut offsetFreq: Vec<i32> = Vec::with_capacity(offsetCodeCount as usize);
+    offsetFreq.resize(offsetCodeCount as usize, 0);
+    let mut codegen: Vec<u8> = Vec::with_capacity((maxNumLit + offsetCodeCount + 1) as usize);
+    codegen.resize((maxNumLit + offsetCodeCount + 1) as usize, 0);
+    huffmanBitWriter {
+        writer: w,
+        bits: 0,
+        nbits: 0,
+        bytes: [0u8; bufferSize as usize],
+        codegenFreq: [0i32; codegenCodeCount as usize],
+        nbytes: 0,
+        literalFreq,
+        offsetFreq,
+        codegen,
+        literalEncoding: newHuffmanEncoder(maxNumLit),
+        offsetEncoding: newHuffmanEncoder(offsetCodeCount),
+        codegenEncoding: newHuffmanEncoder(codegenCodeCount),
+        err: nil,
+    }
+}
+
+impl<W: io::Writer> huffmanBitWriter<W> {
+    /// `(w *huffmanBitWriter).reset(writer)` (huffman_bit_writer.go:106).
+    ///
+    /// Goish takes the new writer by value (Go reassigns the interface
+    /// pointer; goish owns `W`).
+    pub(crate) fn reset(&mut self, writer: W) {
+        self.writer = writer;
+        self.bits = 0;
+        self.nbits = 0;
+        self.nbytes = 0;
+        self.err = nil;
+    }
+
+    /// `(w *huffmanBitWriter).flush()` (huffman_bit_writer.go:111).
+    pub(crate) fn flush(&mut self) {
+        if !self.err.IsNil() {
+            self.nbits = 0;
+            return;
+        }
+        let mut n = self.nbytes;
+        while self.nbits != 0 {
+            self.bytes[n as usize] = self.bits as byte;
+            self.bits >>= 8;
+            if self.nbits > 8 {
+                // Avoid underflow.
+                self.nbits -= 8;
+            } else {
+                self.nbits = 0;
+            }
+            n += 1;
+        }
+        self.bits = 0;
+        self.write_buf(n);
+        self.nbytes = 0;
+    }
+
+    // `(w *huffmanBitWriter).write(b)` — emits `bytes[0:n]` to the
+    // underlying writer with sticky errors. Go passes `w.bytes[:n]`;
+    // goish converts the internal scratch into a `slice<byte>` here.
+    fn write_buf(&mut self, n: int) {
+        if !self.err.IsNil() {
+            return;
+        }
+        let mut v: Vec<byte> = Vec::with_capacity(n as usize);
+        v.extend_from_slice(&self.bytes[..n as usize]);
+        let (_, e) = self.writer.Write(slice::__from_vec(v));
+        self.err = e;
+    }
+
+    // `write` for an arbitrary external buffer (used by `writeBytes`).
+    fn write_slice(&mut self, b: &[byte]) {
+        if !self.err.IsNil() {
+            return;
+        }
+        let mut v: Vec<byte> = Vec::with_capacity(b.len());
+        v.extend_from_slice(b);
+        let (_, e) = self.writer.Write(slice::__from_vec(v));
+        self.err = e;
+    }
+
+    /// `(w *huffmanBitWriter).writeBits(b, nb)` (huffman_bit_writer.go:139).
+    pub(crate) fn writeBits(&mut self, b: i32, nb: uint) {
+        if !self.err.IsNil() {
+            return;
+        }
+        // uint64(b) — Go converts an int32; sign-extend then truncate to
+        // the bit pattern of a u64 the same way Go's conversion does.
+        self.bits |= ((b as i64) as u64) << self.nbits;
+        self.nbits += nb;
+        if self.nbits >= 48 {
+            let bits_ = self.bits;
+            self.bits >>= 48;
+            self.nbits -= 48;
+            let mut n = self.nbytes;
+            self.bytes[n as usize] = bits_ as byte;
+            self.bytes[(n + 1) as usize] = (bits_ >> 8) as byte;
+            self.bytes[(n + 2) as usize] = (bits_ >> 16) as byte;
+            self.bytes[(n + 3) as usize] = (bits_ >> 24) as byte;
+            self.bytes[(n + 4) as usize] = (bits_ >> 32) as byte;
+            self.bytes[(n + 5) as usize] = (bits_ >> 40) as byte;
+            n += 6;
+            if n >= bufferFlushSize {
+                self.write_buf(n);
+                n = 0;
+            }
+            self.nbytes = n;
+        }
+    }
+
+    /// `(w *huffmanBitWriter).writeBytes(bytes)` (huffman_bit_writer.go:166).
+    pub(crate) fn writeBytes(&mut self, bytes_in: &[byte]) {
+        if !self.err.IsNil() {
+            return;
+        }
+        let mut n = self.nbytes;
+        if self.nbits & 7 != 0 {
+            self.err = internal("writeBytes with unfinished bits");
+            return;
+        }
+        while self.nbits != 0 {
+            self.bytes[n as usize] = self.bits as byte;
+            self.bits >>= 8;
+            self.nbits -= 8;
+            n += 1;
+        }
+        if n != 0 {
+            self.write_buf(n);
+        }
+        self.nbytes = 0;
+        self.write_slice(bytes_in);
+    }
+
+    // `(w *huffmanBitWriter).generateCodegen(...)`
+    // (huffman_bit_writer.go:200).
+    //
+    // RFC 1951 3.2.7 run-length encoding of the concatenated literal +
+    // offset length arrays. Result is written into `codegen`; per-code
+    // frequencies into `codegenFreq`.
+    fn generateCodegen(
+        &mut self,
+        numLiterals: int,
+        numOffsets: int,
+        litEnc: &huffmanEncoder,
+        offEnc: &huffmanEncoder,
+    ) {
+        for f in self.codegenFreq.iter_mut() {
+            *f = 0;
+        }
+        // codegen is used both as a temporary copy of the lengths and as
+        // the output — fine because output is always shorter.
+        {
+            // Copy the concatenated code sizes to codegen.
+            for i in 0..(numLiterals as usize) {
+                self.codegen[i] = litEnc.codes[i].len as u8;
+            }
+            for i in 0..(numOffsets as usize) {
+                self.codegen[(numLiterals as usize) + i] = offEnc.codes[i].len as u8;
+            }
+            self.codegen[(numLiterals + numOffsets) as usize] = badCode;
+        }
+
+        let mut size: u8 = self.codegen[0];
+        let mut count: int = 1;
+        let mut outIndex: int = 0;
+        let mut inIndex: int = 1;
+        while size != badCode {
+            // INVARIANT: we have seen "count" copies of size not yet
+            // output.
+            let nextSize: u8 = self.codegen[inIndex as usize];
+            if nextSize == size {
+                count += 1;
+                inIndex += 1;
+                continue;
+            }
+            // Generate codegen indicating "count" of size.
+            if size != 0 {
+                self.codegen[outIndex as usize] = size;
+                outIndex += 1;
+                self.codegenFreq[size as usize] += 1;
+                count -= 1;
+                while count >= 3 {
+                    let mut n: int = 6;
+                    if n > count {
+                        n = count;
+                    }
+                    self.codegen[outIndex as usize] = 16;
+                    outIndex += 1;
+                    self.codegen[outIndex as usize] = (n - 3) as u8;
+                    outIndex += 1;
+                    self.codegenFreq[16] += 1;
+                    count -= n;
+                }
+            } else {
+                while count >= 11 {
+                    let mut n: int = 138;
+                    if n > count {
+                        n = count;
+                    }
+                    self.codegen[outIndex as usize] = 18;
+                    outIndex += 1;
+                    self.codegen[outIndex as usize] = (n - 11) as u8;
+                    outIndex += 1;
+                    self.codegenFreq[18] += 1;
+                    count -= n;
+                }
+                if count >= 3 {
+                    // count >= 3 && count <= 10
+                    self.codegen[outIndex as usize] = 17;
+                    outIndex += 1;
+                    self.codegen[outIndex as usize] = (count - 3) as u8;
+                    outIndex += 1;
+                    self.codegenFreq[17] += 1;
+                    count = 0;
+                }
+            }
+            count -= 1;
+            while count >= 0 {
+                self.codegen[outIndex as usize] = size;
+                outIndex += 1;
+                self.codegenFreq[size as usize] += 1;
+                count -= 1;
+            }
+            // Set up invariant for next iteration.
+            size = nextSize;
+            count = 1;
+            inIndex += 1;
+        }
+        // Marker for the end of the codegen.
+        self.codegen[outIndex as usize] = badCode;
+    }
+
+    // `(w *huffmanBitWriter).dynamicSize(...)` (huffman_bit_writer.go:286).
+    fn dynamicSize(
+        &self,
+        litEnc: &huffmanEncoder,
+        offEnc: &huffmanEncoder,
+        extraBits: int,
+    ) -> (int, int) {
+        let mut numCodegens: int = self.codegenFreq.len() as int;
+        while numCodegens > 4
+            && self.codegenFreq[codegenOrder[(numCodegens - 1) as usize] as usize] == 0
+        {
+            numCodegens -= 1;
+        }
+        let header: int = 3
+            + 5
+            + 5
+            + 4
+            + (3 * numCodegens)
+            + self.codegenEncoding.bitLength(&self.codegenFreq[..])
+            + (self.codegenFreq[16] as int) * 2
+            + (self.codegenFreq[17] as int) * 3
+            + (self.codegenFreq[18] as int) * 7;
+        let size: int = header
+            + litEnc.bitLength(&self.literalFreq)
+            + offEnc.bitLength(&self.offsetFreq)
+            + extraBits;
+        (size, numCodegens)
+    }
+
+    // `(w *huffmanBitWriter).fixedSize(extraBits)`
+    // (huffman_bit_writer.go:305).
+    fn fixedSize(&self, extraBits: int) -> int {
+        3 + fixedLiteralEncoding().bitLength(&self.literalFreq)
+            + fixedOffsetEncoding().bitLength(&self.offsetFreq)
+            + extraBits
+    }
+
+    // `(w *huffmanBitWriter).storedSize(in)` (huffman_bit_writer.go:315).
+    //
+    // Returns the size in bits and whether the block fits in a single
+    // stored block. `None` mirrors Go's `in == nil`.
+    fn storedSize(&self, in_: Option<&[byte]>) -> (int, bool) {
+        match in_ {
+            None => (0, false),
+            Some(b) => {
+                if (b.len() as int) <= maxStoreBlockSize {
+                    return (((b.len() as int) + 5) * 8, true);
+                }
+                (0, false)
+            }
+        }
+    }
+
+    /// `(w *huffmanBitWriter).writeCode(c)` (huffman_bit_writer.go:325).
+    fn writeCode(&mut self, c: hcode) {
+        if !self.err.IsNil() {
+            return;
+        }
+        self.bits |= (c.code as u64) << self.nbits;
+        self.nbits += c.len as uint;
+        if self.nbits >= 48 {
+            let bits_ = self.bits;
+            self.bits >>= 48;
+            self.nbits -= 48;
+            let mut n = self.nbytes;
+            self.bytes[n as usize] = bits_ as byte;
+            self.bytes[(n + 1) as usize] = (bits_ >> 8) as byte;
+            self.bytes[(n + 2) as usize] = (bits_ >> 16) as byte;
+            self.bytes[(n + 3) as usize] = (bits_ >> 24) as byte;
+            self.bytes[(n + 4) as usize] = (bits_ >> 32) as byte;
+            self.bytes[(n + 5) as usize] = (bits_ >> 40) as byte;
+            n += 6;
+            if n >= bufferFlushSize {
+                self.write_buf(n);
+                n = 0;
+            }
+            self.nbytes = n;
+        }
+    }
+
+    // `(w *huffmanBitWriter).writeDynamicHeader(...)`
+    // (huffman_bit_writer.go:357).
+    fn writeDynamicHeader(
+        &mut self,
+        numLiterals: int,
+        numOffsets: int,
+        numCodegens: int,
+        isEof: bool,
+    ) {
+        if !self.err.IsNil() {
+            return;
+        }
+        let mut firstBits: i32 = 4;
+        if isEof {
+            firstBits = 5;
+        }
+        self.writeBits(firstBits, 3);
+        self.writeBits((numLiterals - 257) as i32, 5);
+        self.writeBits((numOffsets - 1) as i32, 5);
+        self.writeBits((numCodegens - 4) as i32, 4);
+
+        {
+            let mut i: int = 0;
+            while i < numCodegens {
+                let value =
+                    self.codegenEncoding.codes[codegenOrder[i as usize] as usize].len as uint;
+                self.writeBits(value as i32, 3);
+                i += 1;
+            }
+        }
+
+        let mut i: int = 0;
+        loop {
+            let codeWord: int = self.codegen[i as usize] as int;
+            i += 1;
+            if codeWord == (badCode as int) {
+                break;
+            }
+            self.writeCode(self.codegenEncoding.codes[codeWord as usize]);
+
+            match codeWord {
+                16 => {
+                    self.writeBits(self.codegen[i as usize] as i32, 2);
+                    i += 1;
+                }
+                17 => {
+                    self.writeBits(self.codegen[i as usize] as i32, 3);
+                    i += 1;
+                }
+                18 => {
+                    self.writeBits(self.codegen[i as usize] as i32, 7);
+                    i += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// `(w *huffmanBitWriter).writeStoredHeader(length, isEof)`
+    /// (huffman_bit_writer.go:398).
+    pub(crate) fn writeStoredHeader(&mut self, length: int, isEof: bool) {
+        if !self.err.IsNil() {
+            return;
+        }
+        let mut flag: i32 = 0;
+        if isEof {
+            flag = 1;
+        }
+        self.writeBits(flag, 3);
+        self.flush();
+        self.writeBits(length as i32, 16);
+        // int32(^uint16(length)) — ones-complement of the low 16 bits.
+        self.writeBits((!((length as u16))) as i32, 16);
+    }
+
+    /// `(w *huffmanBitWriter).writeFixedHeader(isEof)`
+    /// (huffman_bit_writer.go:412).
+    pub(crate) fn writeFixedHeader(&mut self, isEof: bool) {
+        if !self.err.IsNil() {
+            return;
+        }
+        // Indicate that we are a fixed Huffman block.
+        let mut value: i32 = 2;
+        if isEof {
+            value = 3;
+        }
+        self.writeBits(value, 3);
+    }
+
+    /// `(w *huffmanBitWriter).writeBlock(tokens, eof, input)`
+    /// (huffman_bit_writer.go:429).
+    ///
+    /// Writes a block of tokens with the smallest encoding. If `input`
+    /// is supplied and the Huffman-encoded data is larger than the raw
+    /// bytes, a stored block is written instead. `None` input forces
+    /// Huffman encoding (Go's `input == nil`).
+    pub(crate) fn writeBlock(&mut self, tokens: &[token], eof: bool, input: Option<&[byte]>) {
+        if !self.err.IsNil() {
+            return;
+        }
+
+        // tokens = append(tokens, endBlockMarker)
+        let mut toks: Vec<token> = tokens.to_vec();
+        toks.push(token(endBlockMarker as u32));
+        let (numLiterals, numOffsets) = self.indexTokens(&toks);
+
+        let mut extraBits: int = 0;
+        let (storedSize_, storable) = self.storedSize(input);
+        if storable {
+            // Cost of the extra bits required by length/offset fields
+            // (same for fixed and dynamic) — only computed when needed.
+            {
+                let mut lengthCode: int = lengthCodesStart + 8;
+                while lengthCode < numLiterals {
+                    // First eight length codes have extra size = 0.
+                    extraBits += (self.literalFreq[lengthCode as usize] as int)
+                        * (lengthExtraBits[(lengthCode - lengthCodesStart) as usize] as int);
+                    lengthCode += 1;
+                }
+            }
+            {
+                let mut offsetCode: int = 4;
+                while offsetCode < numOffsets {
+                    // First four offset codes have extra size = 0.
+                    extraBits += (self.offsetFreq[offsetCode as usize] as int)
+                        * (offsetExtraBits[offsetCode as usize] as int);
+                    offsetCode += 1;
+                }
+            }
+        }
+
+        // Figure out the smallest code. Fixed Huffman baseline.
+        let mut useFixed = true;
+        let mut size = self.fixedSize(extraBits);
+
+        // Generate codegen + codegenFreq describing how to encode the
+        // dynamic literal/offset encodings.
+        self.generateCodegen(
+            numLiterals,
+            numOffsets,
+            &clone_encoder(&self.literalEncoding),
+            &clone_encoder(&self.offsetEncoding),
+        );
+        let cf = self.codegenFreq;
+        self.codegenEncoding.generate(&cf, 7);
+        let (dynamicSize_, numCodegens) = self.dynamicSize(
+            &clone_encoder(&self.literalEncoding),
+            &clone_encoder(&self.offsetEncoding),
+            extraBits,
+        );
+
+        if dynamicSize_ < size {
+            size = dynamicSize_;
+            useFixed = false;
+        }
+
+        // Stored bytes?
+        if storable && storedSize_ < size {
+            self.writeStoredHeader(input.unwrap().len() as int, eof);
+            self.writeBytes(input.unwrap());
+            return;
+        }
+
+        // Huffman.
+        if useFixed {
+            self.writeFixedHeader(eof);
+            let le = fixedLiteralEncoding();
+            let oe = fixedOffsetEncoding();
+            self.writeTokens(&toks, &le.codes, &oe.codes);
+        } else {
+            self.writeDynamicHeader(numLiterals, numOffsets, numCodegens, eof);
+            let le = clone_encoder(&self.literalEncoding);
+            let oe = clone_encoder(&self.offsetEncoding);
+            self.writeTokens(&toks, &le.codes, &oe.codes);
+        }
+    }
+
+    /// `(w *huffmanBitWriter).writeBlockDynamic(tokens, eof, input)`
+    /// (huffman_bit_writer.go:498).
+    ///
+    /// Encodes a block using a dynamic Huffman table. If `input` is
+    /// supplied and the savings are below 1/16th of the input size, the
+    /// block is stored.
+    pub(crate) fn writeBlockDynamic(
+        &mut self,
+        tokens: &[token],
+        eof: bool,
+        input: Option<&[byte]>,
+    ) {
+        if !self.err.IsNil() {
+            return;
+        }
+
+        let mut toks: Vec<token> = tokens.to_vec();
+        toks.push(token(endBlockMarker as u32));
+        let (numLiterals, numOffsets) = self.indexTokens(&toks);
+
+        // Generate codegen + codegenFreq.
+        self.generateCodegen(
+            numLiterals,
+            numOffsets,
+            &clone_encoder(&self.literalEncoding),
+            &clone_encoder(&self.offsetEncoding),
+        );
+        let cf = self.codegenFreq;
+        self.codegenEncoding.generate(&cf, 7);
+        let (size, numCodegens) = self.dynamicSize(
+            &clone_encoder(&self.literalEncoding),
+            &clone_encoder(&self.offsetEncoding),
+            0,
+        );
+
+        // Store bytes if we don't get a reasonable improvement.
+        let (ssize, storable) = self.storedSize(input);
+        if storable && ssize < (size + (size >> 4)) {
+            self.writeStoredHeader(input.unwrap().len() as int, eof);
+            self.writeBytes(input.unwrap());
+            return;
+        }
+
+        // Write Huffman table.
+        self.writeDynamicHeader(numLiterals, numOffsets, numCodegens, eof);
+
+        // Write the tokens.
+        let le = clone_encoder(&self.literalEncoding);
+        let oe = clone_encoder(&self.offsetEncoding);
+        self.writeTokens(&toks, &le.codes, &oe.codes);
+    }
+
+    // `(w *huffmanBitWriter).indexTokens(tokens)`
+    // (huffman_bit_writer.go:530).
+    //
+    // Indexes a slice of tokens, updates literalFreq/offsetFreq, and
+    // generates literalEncoding/offsetEncoding. Returns the number of
+    // literal and offset codes used.
+    fn indexTokens(&mut self, tokens: &[token]) -> (int, int) {
+        for f in self.literalFreq.iter_mut() {
+            *f = 0;
+        }
+        for f in self.offsetFreq.iter_mut() {
+            *f = 0;
+        }
+
+        for &t in tokens.iter() {
+            if t.0 < matchType {
+                self.literalFreq[t.literal() as usize] += 1;
+                continue;
+            }
+            let length = t.length();
+            let offset = t.offset();
+            self.literalFreq[(lengthCodesStart as usize) + (lengthCode(length) as usize)] += 1;
+            self.offsetFreq[offsetCode(offset) as usize] += 1;
+        }
+
+        // Number of literals.
+        let mut numLiterals: int = self.literalFreq.len() as int;
+        while self.literalFreq[(numLiterals - 1) as usize] == 0 {
+            numLiterals -= 1;
+        }
+        // Number of offsets.
+        let mut numOffsets: int = self.offsetFreq.len() as int;
+        while numOffsets > 0 && self.offsetFreq[(numOffsets - 1) as usize] == 0 {
+            numOffsets -= 1;
+        }
+        if numOffsets == 0 {
+            // No match found. To use dynamic encoding we must count at
+            // least one offset so the offset tree can be encoded.
+            self.offsetFreq[0] = 1;
+            numOffsets = 1;
+        }
+        let lf = self.literalFreq.clone();
+        self.literalEncoding.generate(&lf, 15);
+        let of = self.offsetFreq.clone();
+        self.offsetEncoding.generate(&of, 15);
+        (numLiterals, numOffsets)
+    }
+
+    // `(w *huffmanBitWriter).writeTokens(tokens, leCodes, oeCodes)`
+    // (huffman_bit_writer.go:568).
+    fn writeTokens(&mut self, tokens: &[token], leCodes: &[hcode], oeCodes: &[hcode]) {
+        if !self.err.IsNil() {
+            return;
+        }
+        for &t in tokens.iter() {
+            if t.0 < matchType {
+                self.writeCode(leCodes[t.literal() as usize]);
+                continue;
+            }
+            // Write the length.
+            let length = t.length();
+            let lengthCode_ = lengthCode(length);
+            self.writeCode(leCodes[(lengthCode_ as usize) + (lengthCodesStart as usize)]);
+            let extraLengthBits = lengthExtraBits[lengthCode_ as usize] as uint;
+            if extraLengthBits > 0 {
+                let extraLength = (length - lengthBase[lengthCode_ as usize]) as i32;
+                self.writeBits(extraLength, extraLengthBits);
+            }
+            // Write the offset.
+            let offset = t.offset();
+            let offsetCode_ = offsetCode(offset);
+            self.writeCode(oeCodes[offsetCode_ as usize]);
+            let extraOffsetBits = offsetExtraBits[offsetCode_ as usize] as uint;
+            if extraOffsetBits > 0 {
+                let extraOffset = (offset - offsetBase[offsetCode_ as usize]) as i32;
+                self.writeBits(extraOffset, extraOffsetBits);
+            }
+        }
+    }
+
+    /// `(w *huffmanBitWriter).writeBlockHuff(eof, input)`
+    /// (huffman_bit_writer.go:612).
+    ///
+    /// Encodes a block of bytes as Huffman-coded literals, or as an
+    /// uncompressed stored block if compression barely helps.
+    pub(crate) fn writeBlockHuff(&mut self, eof: bool, input: &[byte]) {
+        if !self.err.IsNil() {
+            return;
+        }
+
+        // Clear histogram.
+        for f in self.literalFreq.iter_mut() {
+            *f = 0;
+        }
+
+        // Add everything as literals.
+        histogram(input, &mut self.literalFreq);
+
+        self.literalFreq[endBlockMarker] = 1;
+
+        const numLiterals: int = (endBlockMarker as int) + 1;
+        self.offsetFreq[0] = 1;
+        const numOffsets: int = 1;
+
+        let lf = self.literalFreq.clone();
+        self.literalEncoding.generate(&lf, 15);
+
+        // Always use dynamic Huffman or Store.
+        // Generate codegen + codegenFreq.
+        self.generateCodegen(
+            numLiterals,
+            numOffsets,
+            &clone_encoder(&self.literalEncoding),
+            &huffOffset(),
+        );
+        let cf = self.codegenFreq;
+        self.codegenEncoding.generate(&cf, 7);
+        let (size, numCodegens) =
+            self.dynamicSize(&clone_encoder(&self.literalEncoding), &huffOffset(), 0);
+
+        // Store bytes if we don't get a reasonable improvement.
+        let (ssize, storable) = self.storedSize(Some(input));
+        if storable && ssize < (size + (size >> 4)) {
+            self.writeStoredHeader(input.len() as int, eof);
+            self.writeBytes(input);
+            return;
+        }
+
+        // Huffman.
+        self.writeDynamicHeader(numLiterals, numOffsets, numCodegens, eof);
+        let encoding: Vec<hcode> = self.literalEncoding.codes[..257].to_vec();
+        let mut n = self.nbytes;
+        for &t in input.iter() {
+            // Bit-writing inlined (~30% speedup in Go).
+            let c = encoding[t as usize];
+            self.bits |= (c.code as u64) << self.nbits;
+            self.nbits += c.len as uint;
+            if self.nbits < 48 {
+                continue;
+            }
+            // Store 6 bytes.
+            let bits_ = self.bits;
+            self.bits >>= 48;
+            self.nbits -= 48;
+            self.bytes[n as usize] = bits_ as byte;
+            self.bytes[(n + 1) as usize] = (bits_ >> 8) as byte;
+            self.bytes[(n + 2) as usize] = (bits_ >> 16) as byte;
+            self.bytes[(n + 3) as usize] = (bits_ >> 24) as byte;
+            self.bytes[(n + 4) as usize] = (bits_ >> 32) as byte;
+            self.bytes[(n + 5) as usize] = (bits_ >> 40) as byte;
+            n += 6;
+            if n < bufferFlushSize {
+                continue;
+            }
+            self.write_buf(n);
+            if !self.err.IsNil() {
+                return; // Return early on write failure.
+            }
+            n = 0;
+        }
+        self.nbytes = n;
+        self.writeCode(encoding[endBlockMarker]);
+    }
+}
+
+// `histogram(b, h)` (huffman_bit_writer.go:688) — accumulate a histogram
+// of `b` into `h`. `h.len()` must be >= 256 and all-zero.
+fn histogram(b: &[byte], h: &mut [i32]) {
+    for &t in b.iter() {
+        h[t as usize] += 1;
+    }
+}
+
+// ─── round-trip test shim ──────────────────────────────────────────────
+//
+// `huffmanBitWriter`, `token` etc. are module-internal (`pub(crate)`),
+// so an example crate cannot drive them directly. This `#[doc(hidden)]`
+// shim builds DEFLATE streams with the encoder above and decodes them
+// back through the already-ported `NewReader` decompressor, returning a
+// per-case status word so an example can assert the encoder is faithful.
+
+/// Drive the Huffman bit writer over three block kinds and inflate the
+/// result back. Returns `(cases_passed, cases_total)`.
+///
+/// `#[doc(hidden)]` — for the `flate_huffman_smoke` example only; not a
+/// stable API.
+#[doc(hidden)]
+pub fn __huffman_writer_roundtrip() -> (int, int) {
+    use crate::bytes;
+
+    let mut passed: int = 0;
+    let total: int = 3;
+
+    // Helper: inflate a DEFLATE byte stream.
+    fn inflate(compressed: slice<byte>) -> Vec<byte> {
+        let src = bytes::NewBuffer(compressed);
+        let mut r = NewReader(src);
+        let mut out: Vec<byte> = Vec::new();
+        let mut buf: slice<byte> = {
+            let mut v: Vec<byte> = Vec::with_capacity(512);
+            v.resize(512, 0u8);
+            slice::__from_vec(v)
+        };
+        loop {
+            let (n, e) = r.Read(&mut buf);
+            let mut k: int = 0;
+            while k < n {
+                out.push(buf[k]);
+                k += 1;
+            }
+            if !e.IsNil() {
+                break;
+            }
+        }
+        out
+    }
+
+    // Case 1 — stored block (writeStoredHeader + writeBytes).
+    {
+        let payload: &[byte] = b"the quick brown fox stored verbatim";
+        let mut w = newHuffmanBitWriter(bytes::NewBuffer(slice::new()));
+        w.writeStoredHeader(payload.len() as int, true);
+        w.writeBytes(payload);
+        w.flush();
+        if w.err.IsNil() {
+            let compressed = w.writer.Bytes();
+            let got = inflate(compressed);
+            if got.as_slice() == payload {
+                passed += 1;
+            }
+        }
+    }
+
+    // Case 2 — literal-only Huffman block via writeBlock (input=None
+    // forces Huffman; fixed or dynamic chosen by size).
+    {
+        let payload: &[byte] = b"aaaaaabbbbbbccccccddddddeeeeeeffffffhuffman literals";
+        let mut toks: Vec<token> = Vec::with_capacity(payload.len());
+        for &c in payload.iter() {
+            toks.push(literalToken(c as u32));
+        }
+        let mut w = newHuffmanBitWriter(bytes::NewBuffer(slice::new()));
+        w.writeBlock(&toks, true, None);
+        w.flush();
+        if w.err.IsNil() {
+            let compressed = w.writer.Bytes();
+            let got = inflate(compressed);
+            if got.as_slice() == payload {
+                passed += 1;
+            }
+        }
+    }
+
+    // Case 3 — a block with a back-reference match token via writeBlock.
+    // Emit "abcabcabc": 6 literals then a match (length 3, offset 3).
+    // matchToken xlength = length-3, xoffset = offset-1.
+    {
+        let expected: &[byte] = b"abcabc";
+        let mut toks: Vec<token> = Vec::new();
+        toks.push(literalToken(b'a' as u32));
+        toks.push(literalToken(b'b' as u32));
+        toks.push(literalToken(b'c' as u32));
+        // copy 3 bytes from 3 back -> "abc" again.
+        toks.push(matchToken(0, 2));
+        let mut w = newHuffmanBitWriter(bytes::NewBuffer(slice::new()));
+        w.writeBlock(&toks, true, None);
+        w.flush();
+        if w.err.IsNil() {
+            let compressed = w.writer.Bytes();
+            let got = inflate(compressed);
+            if got.as_slice() == expected {
+                passed += 1;
+            }
+        }
+    }
+
+    (passed, total)
+}
