@@ -284,9 +284,9 @@ fn classify(g: &G, fault_addr: usize) -> Region {
 // A bogus RBP (uninitialised, smashed, or a leaf fn that didn't set
 // up a frame) terminates the walk cleanly instead of double-faulting.
 
-const MAX_FRAMES: usize = 32;
+pub(crate) const MAX_FRAMES: usize = 32;
 
-fn walk_frames(
+pub(crate) fn walk_frames(
     initial_rbp: u64,
     stack_lo: usize,
     stack_hi: usize,
