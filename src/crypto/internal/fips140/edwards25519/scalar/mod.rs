@@ -944,9 +944,8 @@ impl Scalar {
     ///
     /// w must be between 2 and 8, or nonAdjacentForm will panic.
     ///
-    /// Used later by edwards25519.Point scalar multiplication.
-    #[allow(dead_code)]
-    fn nonAdjacentForm(&self, w: u32) -> [i8; 256] {
+    /// Used by edwards25519.Point scalar multiplication.
+    pub(crate) fn nonAdjacentForm(&self, w: u32) -> [i8; 256] {
         // Adapted from curve25519-dalek; see scalar.go for the doc link.
         let b = self.Bytes();
         if b[31] > 127 {
@@ -1013,9 +1012,8 @@ impl Scalar {
 
     /// `signedRadix16` — recentered radix-16 digits of the scalar.
     ///
-    /// Used later by edwards25519.Point scalar multiplication.
-    #[allow(dead_code)]
-    fn signedRadix16(&self) -> [i8; 64] {
+    /// Used by edwards25519.Point scalar multiplication.
+    pub(crate) fn signedRadix16(&self) -> [i8; 64] {
         let b = self.Bytes();
         if b[31] > 127 {
             panic!("scalar has high bit set illegally");

@@ -114,6 +114,17 @@ impl Element {
         self
     }
 
+    /// `rawEqual` — bitwise (un-reduced) limb equality of v and u.
+    /// Mirrors Go's `field.Element{}` struct comparison; used by
+    /// edwards25519's `checkInitialized`, not a normalised field test.
+    pub(crate) fn rawEqual(&self, u: &Element) -> bool {
+        self.l0 == u.l0
+            && self.l1 == u.l1
+            && self.l2 == u.l2
+            && self.l3 == u.l3
+            && self.l4 == u.l4
+    }
+
     /// `reduce` reduces v modulo 2^255 - 19 and returns it.
     fn reduce(&mut self) -> &mut Element {
         self.carryPropagate();
