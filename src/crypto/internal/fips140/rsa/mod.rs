@@ -2011,16 +2011,14 @@ fn checkApprovedHash(_hash: &mut dyn HashTrait) {
 
 /// `EncryptOAEP` (pkcs1v22.go:372) — encrypt `msg` with RSAES-OAEP.
 pub fn EncryptOAEP(
-    hash: &mut dyn HashTrait,
+    lHash: slice<byte>,
     mgfHash: &mut dyn HashTrait,
     random: &mut dyn io::Reader,
     pub_: &PublicKey,
     msg: slice<byte>,
-    label: slice<byte>,
 ) -> (slice<byte>, error) {
     fipsSelfTest();
     fips140::RecordApproved();
-    checkApprovedHash(hash);
     let (fipsApproved, err) = checkPublicKey(pub_);
     if !err.IsNil() {
         return (slice::<byte>::new(), err);
@@ -2028,7 +2026,12 @@ pub fn EncryptOAEP(
         fips140::RecordNonApproved();
     }
     let k = usize::try_from(pub_.Size()).unwrap_or(0);
-    let hSize = usize::try_from(hash.Size()).unwrap_or(0);
+    // `lHash` is Hash(label), precomputed by the caller. The OAEP hash
+    // is used only to digest the label, so taking it precomputed lets
+    // the caller reuse a single hash object as both the OAEP and the
+    // MGF1 hash without aliasing two `&mut dyn` views.
+    let lHash = to_vec(&lHash);
+    let hSize = lHash.len();
     let msg_v = to_vec(&msg);
     // Signed comparison: k - 2*hSize - 2 can be negative for small keys.
     let maxMsg = int::try_from(k).unwrap_or(0)
@@ -2037,10 +2040,6 @@ pub fn EncryptOAEP(
     if int::try_from(msg_v.len()).unwrap_or(int::MAX) > maxMsg {
         return (slice::<byte>::new(), ErrMessageTooLong.into());
     }
-
-    hash.Reset();
-    let _ = hash.Write(label);
-    let lHash = to_vec(&hash.Sum(slice::<byte>::new()));
 
     // em = 0x00 || seed (hSize) || db (k-1-hSize).
     let mut em: Vec<byte> = alloc::vec![0u8; k];
@@ -2111,18 +2110,18 @@ pub fn EncryptOAEP(
 /// RSAES-OAEP. The plaintext is validated in constant time on the
 /// secret data (Manger's attack countermeasure).
 pub fn DecryptOAEP(
-    hash: &mut dyn HashTrait,
+    lHash: slice<byte>,
     mgfHash: &mut dyn HashTrait,
     priv_: &PrivateKey,
     ciphertext: slice<byte>,
-    label: slice<byte>,
 ) -> (slice<byte>, error) {
     fipsSelfTest();
     fips140::RecordApproved();
-    checkApprovedHash(hash);
 
+    // `lHash` is Hash(label), precomputed by the caller (see EncryptOAEP).
+    let lHash = to_vec(&lHash);
     let k = usize::try_from(priv_.pub_.Size()).unwrap_or(0);
-    let hSize = usize::try_from(hash.Size()).unwrap_or(0);
+    let hSize = lHash.len();
     if usize::try_from(ciphertext.Len()).unwrap_or(usize::MAX) > k
         || k < hSize * 2 + 2
     {
@@ -2153,10 +2152,6 @@ pub fn DecryptOAEP(
             }
         }
     }
-
-    hash.Reset();
-    let _ = hash.Write(label);
-    let lHash = to_vec(&hash.Sum(slice::<byte>::new()));
 
     use crate::crypto::subtle::{ConstantTimeByteEq, ConstantTimeSelect};
     let firstByteIsZero = ConstantTimeByteEq(em[0], 0);

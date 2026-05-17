@@ -375,10 +375,13 @@ impl PrivateKey {
             if err != crate::nilval::nil {
                 return (slice::<byte>::new(), err);
             }
-            let (out, err) =
-                fips::DecryptOAEP(h.as_mut(), m.as_mut(), &fk, ciphertext, o.Label.clone());
+            // `h` and `m` are independent objects (OAEP hash may differ
+            // from the MGF hash). Digest the label with `h`, pass `m` on
+            // as the MGF1 hash — no aliasing.
             h.Reset();
-            m.Reset();
+            let _ = h.Write(o.Label.clone());
+            let lhash = h.Sum(slice::<byte>::new());
+            let (out, err) = fips::DecryptOAEP(lhash, m.as_mut(), &fk, ciphertext);
             return (out, mapFipsError(err));
         }
         if let Some(o) = opts.downcast_ref::<PKCS1v15DecryptOptions>() {
@@ -823,47 +826,15 @@ pub fn EncryptOAEP(
         hash.Reset();
         return (slice::<byte>::new(), err);
     }
-    // Go passes `hash` for both the OAEP hash and the MGF hash. goish
-    // cannot alias one `&mut dyn` into two parameters, so the OAEP hash
-    // also serves as the MGF hash through a single reborrow handled by
-    // the fips layer's internal cloning of digest state. The fips
-    // `EncryptOAEP` takes two distinct `&mut dyn HashTrait`; build a
-    // second instance with the same algorithm via Reset semantics is
-    // not possible from a trait object, so we drive both off `hash` by
-    // calling the fips function which only ever uses `mgfHash` for MGF1
-    // (Reset + Write + Sum) — sequenced after the main hash work.
-    let (out, err) = encryptOAEPWith(hash, pub_, &fk, msg, label);
+    // The OAEP hash digests only the label. Compute lHash here with
+    // `hash`; that borrow ends, leaving `hash` free to be passed on as
+    // the MGF1 hash — so the two roles never need aliasing `&mut` views.
     hash.Reset();
-    (out, mapFipsError(err))
-}
-
-/// Internal: drive `fips::EncryptOAEP` with a single hash object used as
-/// both the OAEP and MGF1 hash. The fips function needs two `&mut dyn`;
-/// we satisfy that by cloning the hash state through a fresh instance
-/// obtained from the registry keyed on the digest size is not reliable,
-/// so instead the OAEP encode is run with one hash and the MGF passes
-/// re-Reset the same object. The fips `EncryptOAEP` already Resets the
-/// hash before computing `lHash`, and uses `mgfHash` only via
-/// Reset/Write/Sum afterwards — a single object handles both roles when
-/// passed twice. Rust forbids two `&mut` to the same place, so this
-/// helper performs the OAEP encode inline by calling the fips function
-/// with `hash` aliased through a raw split.
-fn encryptOAEPWith(
-    hash: &mut dyn crate::hash::Hash,
-    _pub: &PublicKey,
-    fk: &fips::PublicKey,
-    msg: slice<byte>,
-    label: slice<byte>,
-) -> (slice<byte>, error) {
-    // SAFETY: `fips::EncryptOAEP` uses `hash` to compute `lHash` (Reset,
-    // Write, Sum) fully before it touches `mgfHash`, and uses `mgfHash`
-    // only afterwards (the MGF1 passes). The two roles are temporally
-    // disjoint, so a single underlying hash object is sound to drive
-    // both `&mut dyn` parameters. The reborrow below creates the second
-    // mutable view; it is never used concurrently with the first.
-    let h2: &mut dyn crate::hash::Hash = unsafe { &mut *(hash as *mut dyn crate::hash::Hash) };
-    let mut rr = crate::crypto::rand::RandReader;
-    fips::EncryptOAEP(hash, h2, &mut rr, fk, msg, label)
+    let _ = hash.Write(label);
+    let lhash = hash.Sum(slice::<byte>::new());
+    let (out, ferr) = fips::EncryptOAEP(lhash, hash, random, &fk, msg);
+    hash.Reset();
+    (out, mapFipsError(ferr))
 }
 
 /// `rsa.DecryptOAEP(hash, random, priv, ciphertext, label)`
@@ -882,13 +853,14 @@ pub fn DecryptOAEP(
         hash.Reset();
         return (slice::<byte>::new(), err);
     }
-    // SAFETY: see `encryptOAEPWith`. `fips::DecryptOAEP` uses `hash` for
-    // `lHash` first, then `mgfHash` for the MGF1 passes — temporally
-    // disjoint, so a single hash object soundly drives both parameters.
-    let h2: &mut dyn crate::hash::Hash = unsafe { &mut *(hash as *mut dyn crate::hash::Hash) };
-    let (out, err) = fips::DecryptOAEP(hash, h2, &fk, ciphertext, label);
+    // See EncryptOAEP: `hash` digests the label into lHash, then is
+    // reused as the MGF1 hash — strictly sequential, no aliasing.
     hash.Reset();
-    (out, mapFipsError(err))
+    let _ = hash.Write(label);
+    let lhash = hash.Sum(slice::<byte>::new());
+    let (out, ferr) = fips::DecryptOAEP(lhash, hash, &fk, ciphertext);
+    hash.Reset();
+    (out, mapFipsError(ferr))
 }
 
 // ─── PSS (Go: fips.go:64) ─────────────────────────────────────────────

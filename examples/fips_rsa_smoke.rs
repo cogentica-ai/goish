@@ -216,6 +216,13 @@ fn sha256_msg() -> goish::slice<byte> {
     d.Sum(slice::new())
 }
 
+// SHA-256 of the empty OAEP label — the precomputed lHash the fips
+// OAEP functions take in place of a hash object.
+fn oaep_lhash() -> goish::slice<byte> {
+    let d = sha256::New();
+    d.Sum(slice::new())
+}
+
 // Real-Go reference: PKCS#1 v1.5 SHA-256 signature of MSG under the
 // hardcoded 512-bit key, computed via math/big modexp of the EMSA-
 // PKCS1-v1_5 encoded message (Go refuses 512-bit keys in rsa.Sign*).
@@ -307,16 +314,14 @@ fn test_15_oaep_roundtrip() {
     // empty message which is the largest that fits (k-2*hLen-2 == -2 < 0
     // -> ErrMessageTooLong). Confirm the guard fires for SHA-256 and that
     // a real round-trip works against the 2048-bit CAST key.
-    let mut h = sha256::New();
     let mut mgf = sha256::New();
     let small: &[u8] = &[0x01, 0x02, 0x03, 0x04];
     let (ct, e1) = rsa::EncryptOAEP(
-        &mut h,
+        oaep_lhash(),
         &mut mgf,
         &mut rng,
         &pubk,
         from_bytes(small),
-        slice::new(),
     );
     // 512-bit key + SHA-256 OAEP cannot fit any message: expect the
     // ErrMessageTooLong guard. That exercises the size-check path.
@@ -327,19 +332,16 @@ fn test_15_oaep_roundtrip() {
     let (bigk, ge) = rsa::GenerateKey(&mut rng, 1024);
     let rt_ok = if ge.IsNil() {
         let bpub = bigk.PublicKey();
-        let mut h2 = sha256::New();
         let mut mgf2 = sha256::New();
         let (ct2, ce) = rsa::EncryptOAEP(
-            &mut h2,
+            oaep_lhash(),
             &mut mgf2,
             &mut rng,
             &bpub,
             from_bytes(small),
-            slice::new(),
         );
-        let mut h3 = sha256::New();
         let mut mgf3 = sha256::New();
-        let (pt2, de) = rsa::DecryptOAEP(&mut h3, &mut mgf3, &bigk, ct2, slice::new());
+        let (pt2, de) = rsa::DecryptOAEP(oaep_lhash(), &mut mgf3, &bigk, ct2);
         ce.IsNil() && de.IsNil() && slice_eq_exact(&pt2, &from_bytes(small))
     } else {
         false
@@ -361,15 +363,13 @@ fn test_16_oaep_tampered() {
     }
     let bpub = bigk.PublicKey();
     let small: &[u8] = &[0xaa, 0xbb, 0xcc];
-    let mut h = sha256::New();
     let mut mgf = sha256::New();
     let (ct, ce) = rsa::EncryptOAEP(
-        &mut h,
+        oaep_lhash(),
         &mut mgf,
         &mut rng,
         &bpub,
         from_bytes(small),
-        slice::new(),
     );
     if !ce.IsNil() {
         write_result(16, b"DecryptOAEP rejects tamper   ", false);
@@ -379,9 +379,8 @@ fn test_16_oaep_tampered() {
     // Flip a bit in the ciphertext.
     let mut cv = trim_to_vec_full(&ct);
     cv[10] ^= 0x01;
-    let mut h2 = sha256::New();
     let mut mgf2 = sha256::New();
-    let (pt, de) = rsa::DecryptOAEP(&mut h2, &mut mgf2, &bigk, from_bytes(&cv), slice::new());
+    let (pt, de) = rsa::DecryptOAEP(oaep_lhash(), &mut mgf2, &bigk, from_bytes(&cv));
     let ok = !de.IsNil() && pt.Len() == 0;
     write_result(16, b"DecryptOAEP rejects tamper   ", ok);
     if !ok {
