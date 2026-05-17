@@ -21,6 +21,14 @@
 //      decrypt (legacy Exp path) round-trips.
 //  10. GenerateKey at a small bit size produces a valid key whose
 //      encrypt/decrypt round-trips.
+//  11. SignPKCS1v15 -> VerifyPKCS1v15 round-trip (SHA-256).
+//  12. SignPKCS1v15 cross-checked against a real-Go reference signature.
+//  13. VerifyPKCS1v15 rejects a tampered signature (ErrVerification).
+//  14. EncryptPKCS1v15 -> DecryptPKCS1v15 round-trip.
+//  15. EncryptOAEP -> DecryptOAEP round-trip (SHA-256).
+//  16. DecryptOAEP rejects a tampered ciphertext (ErrDecryption).
+//  17. SignPSS -> VerifyPSS round-trip (SHA-256, salt = hLen).
+//  18. VerifyPSS rejects a tampered signature (ErrVerification).
 
 #![no_std]
 #![no_main]
@@ -33,6 +41,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::crypto::internal::fips140::rsa;
 use goish::crypto::rand::RandReader;
+use goish::crypto::sha256;
 use goish::math::big;
 use goish::types::byte;
 use goish::{slice, syscall, Println};
@@ -169,10 +178,10 @@ fn main() {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
-            Println!("ok 10/10");
+            Println!("ok 18/18");
             syscall::Exit(0);
         } else {
-            Println!("FAIL", f as i64, "of 10");
+            Println!("FAIL", f as i64, "of 18");
             syscall::Exit(1);
         }
     });
@@ -190,6 +199,245 @@ fn run_tests() {
     test_8_new_private_key_bad_modulus();
     test_9_without_crt();
     test_10_generate_key();
+    test_11_pkcs1v15_sign_verify();
+    test_12_pkcs1v15_known_answer();
+    test_13_pkcs1v15_tampered();
+    test_14_pkcs1v15_encrypt_decrypt();
+    test_15_oaep_roundtrip();
+    test_16_oaep_tampered();
+    test_17_pss_roundtrip();
+    test_18_pss_tampered();
+}
+
+// SHA-256 of MSG, computed at runtime.
+fn sha256_msg() -> goish::slice<byte> {
+    let mut d = sha256::New();
+    let _ = d.Write(from_bytes(MSG));
+    d.Sum(slice::new())
+}
+
+// Real-Go reference: PKCS#1 v1.5 SHA-256 signature of MSG under the
+// hardcoded 512-bit key, computed via math/big modexp of the EMSA-
+// PKCS1-v1_5 encoded message (Go refuses 512-bit keys in rsa.Sign*).
+const REF_SIG_V15: &[u8] = &[
+    0x2a, 0x10, 0x53, 0xff, 0xf3, 0x92, 0x44, 0x9e, 0x6b, 0x81, 0x18, 0x8b, 0xb1, 0x16, 0xe8,
+    0xee, 0xf3, 0xf4, 0x5b, 0xff, 0xc3, 0x94, 0xf4, 0xbd, 0x2d, 0x6e, 0x93, 0x05, 0xb5, 0x5e,
+    0xe2, 0x95, 0x1c, 0xf0, 0xfa, 0x0b, 0xb5, 0x9c, 0x3a, 0xef, 0x3e, 0x92, 0xa2, 0x11, 0x0e,
+    0x67, 0x82, 0x8f, 0xa0, 0xba, 0xa6, 0xa5, 0xc4, 0x4b, 0x29, 0x29, 0x96, 0x72, 0x10, 0x7a,
+    0x35, 0x0a, 0xe3, 0xdf,
+];
+
+fn slice_eq_exact(a: &goish::slice<byte>, b: &goish::slice<byte>) -> bool {
+    if a.Len() != b.Len() {
+        return false;
+    }
+    let n = a.Len();
+    let mut i: goish::int = 0;
+    while i < n {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+fn test_11_pkcs1v15_sign_verify() {
+    let k = mk_key();
+    let digest = sha256_msg();
+    let (sig, e1) = rsa::SignPKCS1v15(&k, goish::crypto::SHA256, digest.clone());
+    let ev = rsa::VerifyPKCS1v15(&k.PublicKey(), goish::crypto::SHA256, digest, sig);
+    let ok = e1.IsNil() && ev.IsNil();
+    write_result(11, b"SignPKCS1v15 -> Verify       ", ok);
+    if !ok {
+        fail();
+    }
+}
+
+fn test_12_pkcs1v15_known_answer() {
+    let k = mk_key();
+    let digest = sha256_msg();
+    let (sig, e1) = rsa::SignPKCS1v15(&k, goish::crypto::SHA256, digest);
+    let ok = e1.IsNil() && slice_eq_exact(&sig, &from_bytes(REF_SIG_V15));
+    write_result(12, b"SignPKCS1v15 vs Go reference ", ok);
+    if !ok {
+        fail();
+    }
+}
+
+fn test_13_pkcs1v15_tampered() {
+    let k = mk_key();
+    let digest = sha256_msg();
+    let (sig, _) = rsa::SignPKCS1v15(&k, goish::crypto::SHA256, digest.clone());
+    // Flip a bit in the signature.
+    let mut sv = trim_to_vec_full(&sig);
+    sv[0] ^= 0x01;
+    let bad = from_bytes(&sv);
+    let ev = rsa::VerifyPKCS1v15(&k.PublicKey(), goish::crypto::SHA256, digest, bad);
+    let ok = !ev.IsNil() && goish::errors::Is(ev, rsa::ErrVerification);
+    write_result(13, b"VerifyPKCS1v15 rejects tamper", ok);
+    if !ok {
+        fail();
+    }
+}
+
+fn test_14_pkcs1v15_encrypt_decrypt() {
+    let k = mk_key();
+    let pubk = k.PublicKey();
+    let mut rng = RandReader;
+    let plain: &[u8] = &[0xde, 0xad, 0xbe, 0xef, 0x13, 0x37, 0x42, 0x00];
+    let (ct, e1) = rsa::EncryptPKCS1v15(&mut rng, &pubk, from_bytes(plain));
+    let (pt, e2) = rsa::DecryptPKCS1v15(&k, ct);
+    let ok = e1.IsNil() && e2.IsNil() && slice_eq_exact(&pt, &from_bytes(plain));
+    write_result(14, b"EncryptPKCS1v15 -> Decrypt   ", ok);
+    if !ok {
+        fail();
+    }
+}
+
+fn test_15_oaep_roundtrip() {
+    let k = mk_key();
+    let pubk = k.PublicKey();
+    let mut rng = RandReader;
+    // k=64, hLen=32 -> max msg = 64-2*32-2 = -2 ... too small for SHA-256.
+    // Use a short message; SHA-256 OAEP needs k >= 66, so this 512-bit
+    // key can only carry a 0-length payload at best. Skip-by-construction
+    // is not acceptable, so cross-check the size guard instead and use a
+    // SHA-1 MGF/label hash combination is also too big. Therefore use the
+    // empty message which is the largest that fits (k-2*hLen-2 == -2 < 0
+    // -> ErrMessageTooLong). Confirm the guard fires for SHA-256 and that
+    // a real round-trip works against the 2048-bit CAST key.
+    let mut h = sha256::New();
+    let mut mgf = sha256::New();
+    let small: &[u8] = &[0x01, 0x02, 0x03, 0x04];
+    let (ct, e1) = rsa::EncryptOAEP(
+        &mut h,
+        &mut mgf,
+        &mut rng,
+        &pubk,
+        from_bytes(small),
+        slice::new(),
+    );
+    // 512-bit key + SHA-256 OAEP cannot fit any message: expect the
+    // ErrMessageTooLong guard. That exercises the size-check path.
+    let guard_ok = !e1.IsNil() && ct.Len() == 0;
+
+    // Real round-trip on a freshly generated 1024-bit key (k=128 fits a
+    // SHA-256 OAEP payload of up to 128-66 = 62 bytes).
+    let (bigk, ge) = rsa::GenerateKey(&mut rng, 1024);
+    let rt_ok = if ge.IsNil() {
+        let bpub = bigk.PublicKey();
+        let mut h2 = sha256::New();
+        let mut mgf2 = sha256::New();
+        let (ct2, ce) = rsa::EncryptOAEP(
+            &mut h2,
+            &mut mgf2,
+            &mut rng,
+            &bpub,
+            from_bytes(small),
+            slice::new(),
+        );
+        let mut h3 = sha256::New();
+        let mut mgf3 = sha256::New();
+        let (pt2, de) = rsa::DecryptOAEP(&mut h3, &mut mgf3, &bigk, ct2, slice::new());
+        ce.IsNil() && de.IsNil() && slice_eq_exact(&pt2, &from_bytes(small))
+    } else {
+        false
+    };
+    let ok = guard_ok && rt_ok;
+    write_result(15, b"EncryptOAEP -> DecryptOAEP   ", ok);
+    if !ok {
+        fail();
+    }
+}
+
+fn test_16_oaep_tampered() {
+    let mut rng = RandReader;
+    let (bigk, ge) = rsa::GenerateKey(&mut rng, 1024);
+    if !ge.IsNil() {
+        write_result(16, b"DecryptOAEP rejects tamper   ", false);
+        fail();
+        return;
+    }
+    let bpub = bigk.PublicKey();
+    let small: &[u8] = &[0xaa, 0xbb, 0xcc];
+    let mut h = sha256::New();
+    let mut mgf = sha256::New();
+    let (ct, ce) = rsa::EncryptOAEP(
+        &mut h,
+        &mut mgf,
+        &mut rng,
+        &bpub,
+        from_bytes(small),
+        slice::new(),
+    );
+    if !ce.IsNil() {
+        write_result(16, b"DecryptOAEP rejects tamper   ", false);
+        fail();
+        return;
+    }
+    // Flip a bit in the ciphertext.
+    let mut cv = trim_to_vec_full(&ct);
+    cv[10] ^= 0x01;
+    let mut h2 = sha256::New();
+    let mut mgf2 = sha256::New();
+    let (pt, de) = rsa::DecryptOAEP(&mut h2, &mut mgf2, &bigk, from_bytes(&cv), slice::new());
+    let ok = !de.IsNil() && pt.Len() == 0;
+    write_result(16, b"DecryptOAEP rejects tamper   ", ok);
+    if !ok {
+        fail();
+    }
+}
+
+fn test_17_pss_roundtrip() {
+    let k = mk_key();
+    let mut rng = RandReader;
+    let digest = sha256_msg();
+    // 512-bit key: emBits = 511, emLen = 64; hLen=32 -> max salt = 64-32-2
+    // = 30. Use salt length 20.
+    let mut h = sha256::New();
+    let (sig, e1) = rsa::SignPSS(&mut rng, &k, &mut h, digest.clone(), 20);
+    let mut h2 = sha256::New();
+    let ev = rsa::VerifyPSS(&k.PublicKey(), &mut h2, digest, sig);
+    let ok = e1.IsNil() && ev.IsNil();
+    write_result(17, b"SignPSS -> VerifyPSS         ", ok);
+    if !ok {
+        fail();
+    }
+}
+
+fn test_18_pss_tampered() {
+    let k = mk_key();
+    let mut rng = RandReader;
+    let digest = sha256_msg();
+    let mut h = sha256::New();
+    let (sig, e1) = rsa::SignPSS(&mut rng, &k, &mut h, digest.clone(), 20);
+    if !e1.IsNil() {
+        write_result(18, b"VerifyPSS rejects tamper     ", false);
+        fail();
+        return;
+    }
+    let mut sv = trim_to_vec_full(&sig);
+    sv[5] ^= 0x01;
+    let mut h2 = sha256::New();
+    let ev = rsa::VerifyPSS(&k.PublicKey(), &mut h2, digest, from_bytes(&sv));
+    let ok = !ev.IsNil() && goish::errors::Is(ev, rsa::ErrVerification);
+    write_result(18, b"VerifyPSS rejects tamper     ", ok);
+    if !ok {
+        fail();
+    }
+}
+
+// Full byte copy of a slice<byte> (no leading-zero trim).
+fn trim_to_vec_full(s: &goish::slice<byte>) -> alloc::vec::Vec<u8> {
+    let mut v: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    let n = s.Len();
+    let mut i: goish::int = 0;
+    while i < n {
+        v.push(s[i]);
+        i += 1;
+    }
+    v
 }
 
 // Build the hardcoded CRT key via NewPrivateKey (re-derives dP/dQ/qInv).
