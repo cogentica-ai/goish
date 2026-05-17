@@ -2460,6 +2460,65 @@ fn main() {
             check(hderr == goish::nil && hgd.Cmp(&hpg) == 0,
                 b"float Gob round-trip hi-prec");
         }
+
+        // ── Cross-check vs real Go 1.25 (*big.Float).GobEncode ─────────
+        // Reference blobs captured from Go 1.25's math/big. For values
+        // built by SetFloat64 the mantissa is minimal, so goish's
+        // whole-64-bit-word framing must reproduce a 64-bit Go build's
+        // bytes exactly.
+        {
+            let (e1, _) = {
+                let mut f = big::Float::new();
+                f.SetPrec(80);
+                f.SetFloat64(1.5);
+                f.GobEncode()
+            };
+            check(&*e1 == &[0x01u8, 0x0a, 0, 0, 0, 0x50, 0, 0, 0, 0x01,
+                0xc0, 0, 0, 0, 0, 0, 0, 0][..],
+                b"float Gob bytes == Go (p80 1.5)");
+
+            let (e2, _) = {
+                let mut f = big::Float::new();
+                f.SetPrec(100);
+                f.SetFloat64(-3.25);
+                f.GobEncode()
+            };
+            check(&*e2 == &[0x01u8, 0x0b, 0, 0, 0, 0x64, 0, 0, 0, 0x02,
+                0xd0, 0, 0, 0, 0, 0, 0, 0][..],
+                b"float Gob bytes == Go (p100 -3.25)");
+
+            let (e3, _) = {
+                let mut f = big::Float::new();
+                f.SetPrec(64);
+                f.SetFloat64(0.5);
+                f.GobEncode()
+            };
+            check(&*e3 == &[0x01u8, 0x0a, 0, 0, 0, 0x40, 0, 0, 0, 0,
+                0x80, 0, 0, 0, 0, 0, 0, 0][..],
+                b"float Gob bytes == Go (p64 0.5)");
+
+            // Decode a Go-produced blob → correct value + precision.
+            let goblob = slice::<goish::byte>::__from_vec(alloc::vec![
+                0x01u8, 0x0a, 0, 0, 0, 0x50, 0, 0, 0, 0x01,
+                0xc0, 0, 0, 0, 0, 0, 0, 0]);
+            let mut dec = big::Float::new();
+            let derr2 = dec.GobDecode(goblob);
+            let mut want15 = big::Float::new();
+            want15.SetPrec(80);
+            want15.SetFloat64(1.5);
+            check(derr2 == goish::nil && dec.Cmp(&want15) == 0
+                && dec.Prec() == 80, b"float Gob decode Go blob (p80 1.5)");
+
+            // Decode a Go arithmetic-built blob whose mantissa carries
+            // an extra trailing zero word (2.0 @ prec 256, 16-byte mant).
+            let goblob2 = slice::<goish::byte>::__from_vec(alloc::vec![
+                0x01u8, 0x0a, 0, 0, 0x01, 0, 0, 0, 0, 0x02,
+                0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            let mut dec2 = big::Float::new();
+            let derr3 = dec2.GobDecode(goblob2);
+            check(derr3 == goish::nil && dec2.Cmp(&big::NewFloat(2.0)) == 0,
+                b"float Gob decode Go blob (longer mantissa)");
+        }
     }
 
     // ── Int.Rand — uniform pseudo-random in [0, n) ─────────────────

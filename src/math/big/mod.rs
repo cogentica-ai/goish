@@ -5731,13 +5731,6 @@ impl Float {
     /// and (for finite values) a big-endian 4-byte exponent followed by
     /// the big-endian mantissa bytes. Error is always nil.
     pub fn GobEncode(&self) -> (crate::slice<crate::types::byte>, crate::error) {
-        // number of mantissa words for the given precision
-        let mut n = 0usize;
-        if self.form == form::Finite {
-            let want = ((self.prec + (FW - 1)) / FW) as usize;
-            n = core::cmp::min(want, self.mant.len());
-        }
-
         let mut out: Vec<u8> = Vec::new();
         out.push(FLOAT_GOB_VERSION);
         // mode (3 bits) << 5 | (acc+1) (2 bits) << 3 | form (2 bits) << 1 | neg
@@ -5754,9 +5747,26 @@ impl Float {
 
         if self.form == form::Finite {
             out.extend_from_slice(&(self.exp as u32).to_be_bytes());
-            // cut off unused trailing words; mant_bytes is big-endian
-            let kept = &self.mant[self.mant.len() - n..];
-            out.extend_from_slice(&limbs_to_be_bytes_fixed(kept));
+            // Go's gob mantissa is a whole number of machine words; on
+            // a 64-bit Go build that is ceil(MinPrec/64) 64-bit words.
+            // The whole-word framing matters for interop, not just
+            // looks: Go's GobDecode repacks the bytes via nat.setBytes
+            // into 64-bit words and then validate() rejects a mantissa
+            // whose top word's msb is unset — which is exactly what a
+            // non-multiple-of-8 byte length produces. So frame goish's
+            // 32-bit limbs into an even count 2*ceil(MinPrec/64)
+            // (significant limbs at the high end, low end zero-filled).
+            // For SetString/SetFloat64/SetInt-built values the bytes
+            // are then identical to a 64-bit Go build; arithmetic
+            // results may carry extra trailing zero words in Go and so
+            // differ in length, but stay cross-decodable both ways.
+            let words = (usize::try_from(self.MinPrec()).unwrap_or(0) + 63) / 64;
+            let n_limbs = words * 2;
+            let take = core::cmp::min(self.mant.len(), n_limbs);
+            let mut framed = alloc::vec![0u32; n_limbs];
+            framed[n_limbs - take..]
+                .copy_from_slice(&self.mant[self.mant.len() - take..]);
+            out.extend_from_slice(&limbs_to_be_bytes_fixed(&framed));
         }
 
         (
