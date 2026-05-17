@@ -602,6 +602,10 @@ name = "fips_rsa_smoke"
 path = "examples/fips_rsa_smoke.rs"
 
 [[example]]
+name = "crypto_rsa_smoke"
+path = "examples/crypto_rsa_smoke.rs"
+
+[[example]]
 name = "net_url_smoke"
 path = "examples/net_url_smoke.rs"
 

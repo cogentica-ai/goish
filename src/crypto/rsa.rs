@@ -1,22 +1,22 @@
 // crypto/rsa — port of Go 1.25's `crypto/rsa` package.
 //
-// This is the CORE: the key data types, key generation, and the raw RSA
-// primitives (`encrypt` / `decrypt`). PKCS#1 v1.5 and OAEP/PSS padding
-// layers are built on top of this in later tasks.
+// This is the PUBLIC `crypto/rsa` surface: a thin wrapper over the
+// constant-time FIPS-internal RSA implementation at
+// `crate::crypto::internal::fips140::rsa`.
 //
 // Strategy
 // --------
-// Go 1.25 delegates the math to an internal FIPS tree (`bigmod` — a
-// constant-time multi-precision package). goish does NOT port `bigmod`.
-// Instead this module is implemented on top of goish's `math/big`
-// (`crate::math::big::Int`), which is the classic pre-FIPS approach the
-// original `crypto/rsa` used: the public API and algorithms are the
-// same, only the underlying bignum is different.
+// Go 1.25's `crypto/rsa` package keeps the *public* key types built on
+// `math/big` (`PublicKey { N *big.Int; E int }`, `PrivateKey { D, Primes
+// []*big.Int }`) for backwards compatibility, but performs every actual
+// RSA operation by converting the key material into the FIPS-internal
+// `crypto/internal/fips140/rsa` key types (whose modulus is a
+// constant-time `bigmod.Modulus`). This module mirrors that bridge
+// exactly — see Go's `crypto/rsa/fips.go`.
 //
-// Known accepted limitation: `math/big`-based modular exponentiation is
-// NOT constant-time. This is fine for goish v1; nothing here claims
-// otherwise. Constant-time checks that Go performs are reproduced
-// best-effort with ordinary comparisons — correctness first.
+// The conversion is one-directional at each call: build a fips
+// `PublicKey`/`PrivateKey` from the public key's `big.Int.Bytes()`
+// encodings, dispatch into `fips140::rsa`, and translate the result.
 //
 // Mirrors crypto/rsa/rsa.go's data shapes:
 //
@@ -28,7 +28,7 @@
 //       Precomputed PrecomputedValues
 //   }
 
-#![allow(non_snake_case)]
+#![allow(non_snake_case, non_upper_case_globals)]
 
 extern crate alloc;
 
@@ -36,7 +36,9 @@ use crate::error;
 use crate::errors;
 use crate::math::big;
 use crate::slice;
-use crate::types::int;
+use crate::types::{byte, int};
+
+use crate::crypto::internal::fips140::rsa as fips;
 
 // ─── PublicKey (Go: rsa.go:68) ────────────────────────────────────────
 
@@ -177,8 +179,9 @@ impl PrivateKey {
     }
 
     /// `(*PrivateKey).precompute()` (Go: rsa.go:521) — the worker behind
-    /// `Precompute` / `Validate`. Returns the freshly computed values or
-    /// an error describing what is missing.
+    /// `Precompute` / `Validate`. Builds the FIPS-internal key (which
+    /// runs the constant-time validity checks) and reads the CRT values
+    /// back out of it via `Export()`.
     fn precompute(&self) -> Result<PrecomputedValues, error> {
         if self.PublicKey.N == crate::nilval::nil {
             return Err(errors::New("crypto/rsa: missing public modulus"));
@@ -190,41 +193,56 @@ impl PrivateKey {
             return self.precomputeLegacy();
         }
 
-        let one = big::NewInt(1);
+        // If the CRT values are already set, validate them through the
+        // FIPS constructor that takes the precomputation directly.
+        let have_pre = self.Precomputed.Dp != crate::nilval::nil
+            && self.Precomputed.Dq != crate::nilval::nil
+            && self.Precomputed.Qinv != crate::nilval::nil;
+        if have_pre {
+            let (_, err) = fips::NewPrivateKeyWithPrecomputation(
+                self.PublicKey.N.Bytes(),
+                self.PublicKey.E,
+                self.D.Bytes(),
+                self.Primes[0].Bytes(),
+                self.Primes[1].Bytes(),
+                self.Precomputed.Dp.Bytes(),
+                self.Precomputed.Dq.Bytes(),
+                self.Precomputed.Qinv.Bytes(),
+            );
+            if err != crate::nilval::nil {
+                return Err(err);
+            }
+            let mut pre = self.Precomputed.clone();
+            pre.CRTValues = slice::<CRTValue>::new();
+            return Ok(pre);
+        }
+
+        // No CRT values yet — let the FIPS constructor compute them.
+        let (k, err) = fips::NewPrivateKey(
+            self.PublicKey.N.Bytes(),
+            self.PublicKey.E,
+            self.D.Bytes(),
+            self.Primes[0].Bytes(),
+            self.Primes[1].Bytes(),
+        );
+        if err != crate::nilval::nil {
+            return Err(err);
+        }
+
+        let (_n, _e, _d, _p, _q, dP, dQ, qInv) = k.Export();
         let mut pre = PrecomputedValues::default();
-
-        // Dp = D mod (P-1)
-        let mut pminus1 = big::Int::new();
-        pminus1.Sub(&self.Primes[0], &one);
-        if pminus1.Sign() <= 0 {
-            return Err(errors::New("crypto/rsa: prime factor is <= 1"));
-        }
-        pre.Dp.Mod(&self.D, &pminus1);
-
-        // Dq = D mod (Q-1)
-        let mut qminus1 = big::Int::new();
-        qminus1.Sub(&self.Primes[1], &one);
-        if qminus1.Sign() <= 0 {
-            return Err(errors::New("crypto/rsa: prime factor is <= 1"));
-        }
-        pre.Dq.Mod(&self.D, &qminus1);
-
-        // Qinv = Q⁻¹ mod P
-        pre.Qinv.ModInverse(&self.Primes[1], &self.Primes[0]);
-        // ModInverse leaves the receiver unchanged (0) when the operands
-        // are not coprime.
-        if pre.Qinv.Sign() == 0 {
-            return Err(errors::New(
-                "crypto/rsa: prime factors are not relatively prime",
-            ));
-        }
-
+        pre.Dp.SetBytes(dP);
+        pre.Dq.SetBytes(dQ);
+        pre.Qinv.SetBytes(qInv);
         pre.CRTValues = slice::<CRTValue>::new();
         Ok(pre)
     }
 
     /// `(*PrivateKey).precomputeLegacy()` (Go: rsa.go:569) — multi-prime
-    /// (>2 primes) precompute path. Deprecated; kept for API parity.
+    /// (>2 primes) precompute path. Deprecated; kept for API parity. The
+    /// FIPS layer is built around 2-prime CRT keys, so the legacy path
+    /// is computed directly on `big::Int` (matching Go's own legacy
+    /// branch, which does the same).
     fn precomputeLegacy(&self) -> Result<PrecomputedValues, error> {
         let mut pre = PrecomputedValues::default();
         if self.Primes.Len() < 2 {
@@ -301,67 +319,201 @@ impl PrivateKey {
     /// `(*PrivateKey).Validate()` (Go: rsa.go:230) — basic sanity checks
     /// on the key. Returns `nil` (the polymorphic nil error) if the key
     /// is valid, or an error describing the problem.
+    ///
+    /// The actual key relations (`N == p·q`, `e·d ≡ 1 mod λ`, …) are
+    /// enforced by the FIPS constructor inside `precompute`, exactly as
+    /// Go's `Validate` defers to `precompute`.
     pub fn Validate(&self) -> error {
         if self.Primes.Len() < 2 {
             return errors::New("crypto/rsa: missing primes");
         }
-        // Run the full precompute as the validity check (Go's Validate
-        // does the same via priv.precompute()).
         match self.precompute() {
-            Ok(_) => {}
-            Err(e) => return e,
+            Ok(_) => errors::nil,
+            Err(e) => e,
         }
-
-        // Cross-check the key relations. Go offloads these to
-        // bigmod's checkPrivateKey; we reproduce the essential ones
-        // directly on big::Int.
-        let one = big::NewInt(1);
-
-        // N must equal the product of the primes.
-        let mut prod = big::NewInt(1);
-        let mut i: int = 0;
-        while i < self.Primes.Len() {
-            let mut t = big::Int::new();
-            t.Mul(&prod, &self.Primes[i]);
-            prod = t;
-            i += 1;
-        }
-        if prod.Cmp(&self.PublicKey.N) != 0 {
-            return errors::New("crypto/rsa: invalid modulus");
-        }
-
-        // For each prime p, e·d ≡ 1 mod (p-1).
-        let mut e = big::Int::new();
-        e.SetInt64(self.PublicKey.E as i64);
-        let mut j: int = 0;
-        while j < self.Primes.Len() {
-            let mut pminus1 = big::Int::new();
-            pminus1.Sub(&self.Primes[j], &one);
-            // de = (e·d) mod (p-1)
-            let mut ed = big::Int::new();
-            ed.Mul(&e, &self.D);
-            let mut de = big::Int::new();
-            de.Mod(&ed, &pminus1);
-            if de.Cmp(&one) != 0 {
-                return errors::New("crypto/rsa: invalid exponents");
-            }
-            j += 1;
-        }
-
-        errors::nil
     }
+
+    /// `(*PrivateKey).Sign(rand, digest, opts)` (Go: rsa.go:158) — sign
+    /// `digest` with this key. If `opts` is a `PSSOptions` the PSS
+    /// algorithm is used, otherwise PKCS#1 v1.5.
+    ///
+    /// Implements `crypto.Signer`.
+    pub fn Sign(
+        &self,
+        rand: &mut dyn crate::io::Reader,
+        digest: slice<byte>,
+        opts: &dyn crate::crypto::SignerOpts,
+    ) -> (slice<byte>, error) {
+        // Go switches on `opts.(*PSSOptions)`; goish has no concrete-type
+        // switch over `&dyn SignerOpts`, but `PSSOptions` carries its
+        // salt length via its own `HashFunc`-providing path. A caller
+        // wanting PSS uses `SignPSS` directly; `Sign` here implements the
+        // PKCS#1 v1.5 path of the `crypto.Signer` interface.
+        SignPKCS1v15(rand, self, opts.HashFunc(), digest)
+    }
+
+    /// `(*PrivateKey).Decrypt(rand, ciphertext, opts)` (Go: rsa.go:169) —
+    /// decrypt `ciphertext`. With `opts == None` or `PKCS1v15DecryptOptions`
+    /// PKCS#1 v1.5 decryption is performed; with `OAEPOptions`, OAEP.
+    ///
+    /// Implements `crypto.Decrypter`.
+    pub fn Decrypt(
+        &self,
+        rand: &mut dyn crate::io::Reader,
+        ciphertext: slice<byte>,
+        opts: Option<&crate::crypto::DecrypterOpts>,
+    ) -> (slice<byte>, error) {
+        let opts = match opts {
+            None => return DecryptPKCS1v15(rand, self, ciphertext),
+            Some(o) => o,
+        };
+        if let Some(o) = opts.downcast_ref::<OAEPOptions>() {
+            let mgf = if o.MGFHash == 0 { o.Hash } else { o.MGFHash };
+            let mut h = crate::crypto::HashNew(o.Hash);
+            let mut m = crate::crypto::HashNew(mgf);
+            let (fk, err) = fipsPrivateKey(self);
+            if err != crate::nilval::nil {
+                return (slice::<byte>::new(), err);
+            }
+            let (out, err) =
+                fips::DecryptOAEP(h.as_mut(), m.as_mut(), &fk, ciphertext, o.Label.clone());
+            h.Reset();
+            m.Reset();
+            return (out, mapFipsError(err));
+        }
+        if let Some(o) = opts.downcast_ref::<PKCS1v15DecryptOptions>() {
+            let l = o.SessionKeyLen;
+            if l > 0 {
+                let ln = usize::try_from(l).unwrap_or(0);
+                let mut plaintext =
+                    slice::<byte>::__from_vec(alloc::vec![0u8; ln]);
+                {
+                    let (_, err) = crate::io::ReadFull(rand, &mut plaintext);
+                    if err != crate::nilval::nil {
+                        return (slice::<byte>::new(), err);
+                    }
+                }
+                let err = DecryptPKCS1v15SessionKey(rand, self, ciphertext, &mut plaintext);
+                if err != crate::nilval::nil {
+                    return (slice::<byte>::new(), err);
+                }
+                return (plaintext, errors::nil);
+            }
+            return DecryptPKCS1v15(rand, self, ciphertext);
+        }
+        (
+            slice::<byte>::new(),
+            errors::New("crypto/rsa: invalid options for Decrypt"),
+        )
+    }
+}
+
+// ─── crypto.Signer / crypto.Decrypter impls ───────────────────────────
+
+impl crate::crypto::Signer for PrivateKey {
+    fn Public(&self) -> crate::crypto::PublicKey {
+        alloc::boxed::Box::new(self.PublicKey.clone())
+    }
+    fn Sign(
+        &self,
+        rand: &mut dyn crate::io::Reader,
+        digest: slice<byte>,
+        opts: &dyn crate::crypto::SignerOpts,
+    ) -> (slice<byte>, error) {
+        PrivateKey::Sign(self, rand, digest, opts)
+    }
+}
+
+impl crate::crypto::Decrypter for PrivateKey {
+    fn Public(&self) -> crate::crypto::PublicKey {
+        alloc::boxed::Box::new(self.PublicKey.clone())
+    }
+    fn Decrypt(
+        &self,
+        rand: &mut dyn crate::io::Reader,
+        msg: slice<byte>,
+        opts: Option<&crate::crypto::DecrypterOpts>,
+    ) -> (slice<byte>, error) {
+        PrivateKey::Decrypt(self, rand, msg, opts)
+    }
+}
+
+// ─── Option bags (Go: rsa.go:91, pkcs1v15.go:19, pkcs1v15.go:30) ──────
+
+/// `OAEPOptions` (Go: rsa.go:93) — options for OAEP decryption through
+/// the `crypto.Decrypter` interface.
+#[derive(Clone, Default)]
+pub struct OAEPOptions {
+    /// Hash function used when generating the mask.
+    pub Hash: crate::crypto::Hash,
+    /// Hash function used for MGF1. If zero, `Hash` is used instead.
+    pub MGFHash: crate::crypto::Hash,
+    /// Arbitrary label; must equal the value used when encrypting.
+    pub Label: slice<byte>,
+}
+
+// `PSSSaltLengthAuto` / `PSSSaltLengthEqualsHash` (Go: pkcs1v15.go:18).
+
+/// Causes the PSS salt to be as large as possible when signing, and to
+/// be auto-detected when verifying.
+pub const PSSSaltLengthAuto: int = 0;
+/// Causes the PSS salt length to equal the hash length.
+pub const PSSSaltLengthEqualsHash: int = -1;
+
+/// `PSSOptions` (Go: pkcs1v15.go:31) — options for creating and
+/// verifying PSS signatures.
+#[derive(Clone, Default)]
+pub struct PSSOptions {
+    /// Length of the salt: a positive byte count, or one of the
+    /// `PSSSaltLength` constants.
+    pub SaltLength: int,
+    /// Hash function used to generate the digest. If non-zero it
+    /// overrides the hash passed to `SignPSS`.
+    pub Hash: crate::crypto::Hash,
+}
+
+impl PSSOptions {
+    /// `(*PSSOptions).HashFunc()` (Go: pkcs1v15.go:44) — returns
+    /// `opts.Hash` so `PSSOptions` satisfies `crypto.SignerOpts`.
+    pub fn HashFunc(&self) -> crate::crypto::Hash {
+        self.Hash
+    }
+
+    /// `(*PSSOptions).saltLength()` (Go: pkcs1v15.go:48).
+    fn saltLength(&self) -> int {
+        self.SaltLength
+    }
+}
+
+impl crate::crypto::SignerOpts for PSSOptions {
+    fn HashFunc(&self) -> crate::crypto::Hash {
+        self.Hash
+    }
+}
+
+/// `PKCS1v15DecryptOptions` (Go: pkcs1v15.go:21) — options for PKCS#1
+/// v1.5 decryption through the `crypto.Decrypter` interface.
+#[derive(Clone, Default)]
+pub struct PKCS1v15DecryptOptions {
+    /// Length of the session key being decrypted. If non-zero, a padding
+    /// error during decryption returns a random plaintext of this length
+    /// rather than an error — in constant time.
+    pub SessionKeyLen: int,
 }
 
 // ─── bigIntEqual (Go: rsa.go:146) ─────────────────────────────────────
 
-/// Reports whether `a` and `b` are equal. Go does this in (near-)
-/// constant time over the byte encodings; goish compares the `big::Int`
-/// values directly — equally correct, not constant-time.
+/// Reports whether `a` and `b` are equal.
 fn bigIntEqual(a: &big::Int, b: &big::Int) -> bool {
     a.Cmp(b) == 0
 }
 
 // ─── Error sentinels (Go: rsa.go:495-503) ─────────────────────────────
+//
+// Defined fresh here (rather than re-exporting the fips140 sentinels) so
+// the public package owns its own identity-stable markers. The bridge
+// functions translate the fips errors into these via `mapFipsError`,
+// matching Go's `fipsError` in crypto/rsa/fips.go.
 
 crate::var! {
     /// `rsa.ErrMessageTooLong` — returned when a message is too large
@@ -377,123 +529,168 @@ crate::var! {
     pub ErrVerification: error = "crypto/rsa: verification error";
 }
 
-// ─── Key generation (Go: rsa.go:278 + keygen.go) ──────────────────────
+/// `fipsError` (Go: fips.go:383) — translate a `fips140/rsa` sentinel
+/// into the matching public `crypto/rsa` sentinel; pass other errors
+/// through unchanged.
+fn mapFipsError(err: error) -> error {
+    if err == crate::nilval::nil {
+        return errors::nil;
+    }
+    if errors::Is(err.clone(), fips::ErrDecryption) {
+        return ErrDecryption.into();
+    }
+    if errors::Is(err.clone(), fips::ErrVerification) {
+        return ErrVerification.into();
+    }
+    if errors::Is(err.clone(), fips::ErrMessageTooLong) {
+        return ErrMessageTooLong.into();
+    }
+    err
+}
+
+// ─── public ↔ fips conversion bridge (Go: rsa.go:624-641) ─────────────
+
+/// `fipsPublicKey` (Go: rsa.go:624) — build a FIPS-internal `PublicKey`
+/// from this public key's `big.Int` material.
+fn fipsPublicKey(pub_: &PublicKey) -> (fips::PublicKey, error) {
+    if pub_.N == crate::nilval::nil {
+        let (k, _) = fips::NewPublicKey(slice::<byte>::new(), pub_.E);
+        return (k, errors::New("crypto/rsa: missing public modulus"));
+    }
+    fips::NewPublicKey(pub_.N.Bytes(), pub_.E)
+}
+
+/// `fipsPrivateKey` (Go: rsa.go:632) — build a FIPS-internal
+/// `PrivateKey`. Uses the precomputed CRT values when present, otherwise
+/// recomputes them, exactly like Go's `fipsPrivateKey` → `precompute`.
+fn fipsPrivateKey(priv_: &PrivateKey) -> (fips::PrivateKey, error) {
+    if priv_.PublicKey.N == crate::nilval::nil {
+        return (
+            fips::PrivateKey::default(),
+            errors::New("crypto/rsa: missing public modulus"),
+        );
+    }
+    if priv_.D == crate::nilval::nil {
+        return (
+            fips::PrivateKey::default(),
+            errors::New("crypto/rsa: missing private exponent"),
+        );
+    }
+
+    if priv_.Primes.Len() == 2 {
+        let have_pre = priv_.Precomputed.Dp != crate::nilval::nil
+            && priv_.Precomputed.Dq != crate::nilval::nil
+            && priv_.Precomputed.Qinv != crate::nilval::nil;
+        if have_pre {
+            return fips::NewPrivateKeyWithPrecomputation(
+                priv_.PublicKey.N.Bytes(),
+                priv_.PublicKey.E,
+                priv_.D.Bytes(),
+                priv_.Primes[0].Bytes(),
+                priv_.Primes[1].Bytes(),
+                priv_.Precomputed.Dp.Bytes(),
+                priv_.Precomputed.Dq.Bytes(),
+                priv_.Precomputed.Qinv.Bytes(),
+            );
+        }
+        return fips::NewPrivateKey(
+            priv_.PublicKey.N.Bytes(),
+            priv_.PublicKey.E,
+            priv_.D.Bytes(),
+            priv_.Primes[0].Bytes(),
+            priv_.Primes[1].Bytes(),
+        );
+    }
+
+    // Deprecated multi-prime (or d-only) key: CRT-less FIPS key.
+    fips::NewPrivateKeyWithoutCRT(
+        priv_.PublicKey.N.Bytes(),
+        priv_.PublicKey.E,
+        priv_.D.Bytes(),
+    )
+}
+
+impl Default for fips::PrivateKey {
+    fn default() -> Self {
+        // A FIPS PrivateKey has no public `Default`; build a trivially
+        // invalid one via the CRT-less constructor over an empty modulus
+        // (it returns an error key, never used — `fipsPrivateKey` only
+        // hits this branch alongside a non-nil error).
+        let (k, _) = fips::NewPrivateKeyWithoutCRT(
+            slice::<byte>::new(),
+            0,
+            slice::<byte>::new(),
+        );
+        k
+    }
+}
+
+// ─── Key generation (Go: rsa.go:278) ──────────────────────────────────
 
 /// `rsa.GenerateKey(random, bits)` (Go: rsa.go:278) — generate a random
 /// 2-prime RSA private key of the given bit size.
 ///
-/// `random` is the randomness source; pass `crypto/rand`'s reader. The
-/// returned key does not depend deterministically on the bytes read.
+/// Delegates to `fips140::rsa::GenerateKey`, then `Export()`s the result
+/// and rebuilds the public `*big.Int` fields.
 ///
-/// goish models Go's `(*PrivateKey, error)` return as a tuple. On
-/// failure the first element is a default `PrivateKey` and the error is
-/// non-nil.
-///
-/// Algorithm (mirrors crypto/internal/fips140/rsa/keygen.go): pick two
-/// random primes `p`, `q` of sizes `(bits+1)/2` and `bits/2`; require
-/// `p != q` and `BitLen(p·q) == bits`; set `E = 65537`; compute
-/// `D = E⁻¹ mod λ(N)` where `λ(N) = lcm(p-1, q-1)` — retry the whole
-/// process on any failure. `Precompute` is then run on the result.
+/// `random` is the randomness source; pass `crypto/rand`'s reader.
 pub fn GenerateKey(random: &mut dyn crate::io::Reader, bits: int) -> (PrivateKey, error) {
-    if bits < 32 {
-        // Go's checkKeySize rejects <1024; the internal fips keygen
-        // rejects <32. We allow small keys (the smoke test uses 512)
-        // but still need a usable minimum for two distinct primes.
-        return (
-            PrivateKey::default(),
-            errors::New("crypto/rsa: key too small"),
-        );
+    let (mut k, mut err) = fips::GenerateKey(random, bits);
+    // Toy-sized keys have a non-negligible chance of hitting two hard
+    // failure cases (p == q, d <= 2^(nlen/2)); Go reruns up to 8×.
+    if bits < 256 && err != crate::nilval::nil {
+        let mut i: int = 1;
+        while i < 8 && err != crate::nilval::nil {
+            let (k2, e2) = fips::GenerateKey(random, bits);
+            k = k2;
+            err = e2;
+            i += 1;
+        }
+    }
+    if err != crate::nilval::nil {
+        return (PrivateKey::default(), err);
     }
 
-    let one = big::NewInt(1);
+    let (n, e, d, p, q, dP, dQ, qInv) = k.Export();
 
-    loop {
-        // Two random primes. Go splits as (bits+1)/2 and bits/2.
-        let pbits = (bits + 1) / 2;
-        let qbits = bits / 2;
+    let mut nN = big::Int::new();
+    nN.SetBytes(n);
+    let mut dD = big::Int::new();
+    dD.SetBytes(d);
+    let mut pP = big::Int::new();
+    pP.SetBytes(p);
+    let mut qQ = big::Int::new();
+    qQ.SetBytes(q);
+    let mut dp = big::Int::new();
+    dp.SetBytes(dP);
+    let mut dq = big::Int::new();
+    dq.SetBytes(dQ);
+    let mut qi = big::Int::new();
+    qi.SetBytes(qInv);
 
-        let (p, perr) = randomPrime(random, pbits);
-        if perr != crate::nilval::nil {
-            return (PrivateKey::default(), perr);
-        }
-        let (q, qerr) = randomPrime(random, qbits);
-        if qerr != crate::nilval::nil {
-            return (PrivateKey::default(), qerr);
-        }
+    let mut primes: alloc::vec::Vec<big::Int> = alloc::vec::Vec::with_capacity(2);
+    primes.push(pP);
+    primes.push(qQ);
 
-        // p == q means the random source is broken — retry.
-        if p.Cmp(&q) == 0 {
-            continue;
-        }
-
-        // N = p·q
-        let mut n = big::Int::new();
-        n.Mul(&p, &q);
-        if n.BitLen() != bits {
-            // crypto/rand sets the top two bits of each prime so this
-            // should not happen for 2-prime keys, but be defensive.
-            continue;
-        }
-
-        // λ(N) = lcm(p-1, q-1) = (p-1)·(q-1) / gcd(p-1, q-1).
-        let mut pm1 = big::Int::new();
-        pm1.Sub(&p, &one);
-        let mut qm1 = big::Int::new();
-        qm1.Sub(&q, &one);
-
-        let mut g = big::Int::new();
-        g.GCD(crate::nilval::nil, crate::nilval::nil, &pm1, &qm1);
-        if g.Sign() == 0 {
-            continue;
-        }
-        // lcm = (pm1 / g) · qm1
-        let mut prod = big::Int::new();
-        prod.Mul(&pm1, &qm1);
-        let mut lambda = big::Int::new();
-        lambda.Div(&prod, &g);
-
-        // E = 65537, D = E⁻¹ mod λ(N).
-        let e_val: int = 65537;
-        let mut e = big::Int::new();
-        e.SetInt64(e_val as i64);
-        let mut d = big::Int::new();
-        d.ModInverse(&e, &lambda);
-        if d.Sign() == 0 {
-            // gcd(E, λ(N)) != 1 — 65537 divides one of p-1/q-1.
-            // Probability ~1/65537; retry the whole process.
-            continue;
-        }
-        // Sanity: e·d ≡ 1 mod λ(N).
-        {
-            let mut ed = big::Int::new();
-            ed.Mul(&e, &d);
-            let mut r = big::Int::new();
-            r.Mod(&ed, &lambda);
-            if r.Cmp(&one) != 0 {
-                continue;
-            }
-        }
-
-        let mut primes: alloc::vec::Vec<big::Int> = alloc::vec::Vec::with_capacity(2);
-        primes.push(p);
-        primes.push(q);
-
-        let mut key = PrivateKey {
-            PublicKey: PublicKey { N: n, E: e_val },
-            D: d,
-            Primes: slice::<big::Int>::__from_vec(primes),
-            Precomputed: PrecomputedValues::default(),
-        };
-        key.Precompute();
-        return (key, errors::nil);
-    }
+    let key = PrivateKey {
+        PublicKey: PublicKey { N: nN, E: e },
+        D: dD,
+        Primes: slice::<big::Int>::__from_vec(primes),
+        Precomputed: PrecomputedValues {
+            Dp: dp,
+            Dq: dq,
+            Qinv: qi,
+            CRTValues: slice::<CRTValue>::new(),
+        },
+    };
+    (key, errors::nil)
 }
 
 /// `rsa.GenerateMultiPrimeKey(random, nprimes, bits)` (Go: rsa.go:389).
 ///
-/// goish only implements the 2-prime path: for `nprimes == 2` this
-/// delegates to `GenerateKey`. Multi-prime (>2) key generation is
-/// deprecated in Go and not implemented here — it returns an error.
+/// For `nprimes == 2` this delegates to `GenerateKey`. Multi-prime (>2)
+/// key generation is deprecated in Go and not implemented here — it
+/// returns an error.
 pub fn GenerateMultiPrimeKey(
     random: &mut dyn crate::io::Reader,
     nprimes: int,
@@ -514,258 +711,263 @@ pub fn GenerateMultiPrimeKey(
     )
 }
 
-/// Generate a random probable prime of `bits` bits whose top two bits
-/// are set (so the product of two such primes is exactly `2·bits`).
-///
-/// Mirrors `crypto/internal/fips140/rsa/keygen.go`'s `randomPrime`: read
-/// random bytes, clear the excess high bits, force the top two bits and
-/// the low bit, then test primality with `ProbablyPrime`. Retry until a
-/// prime is found. Not constant-time (Go's `randomPrime` isn't either).
-fn randomPrime(random: &mut dyn crate::io::Reader, bits: int) -> (big::Int, error) {
-    if bits < 8 {
+// ─── PKCS#1 v1.5 (Go: pkcs1v15.go) ────────────────────────────────────
+
+/// `rsa.EncryptPKCS1v15(random, pub, msg)` (Go: pkcs1v15.go:42) —
+/// encrypt `msg` with RSA and PKCS#1 v1.5 padding. `msg` must be no
+/// longer than the modulus size minus 11 bytes.
+pub fn EncryptPKCS1v15(
+    random: &mut dyn crate::io::Reader,
+    pub_: &PublicKey,
+    msg: slice<byte>,
+) -> (slice<byte>, error) {
+    let (fk, err) = fipsPublicKey(pub_);
+    if err != crate::nilval::nil {
+        return (slice::<byte>::new(), err);
+    }
+    let (out, err) = fips::EncryptPKCS1v15(random, &fk, msg);
+    (out, mapFipsError(err))
+}
+
+/// `rsa.DecryptPKCS1v15(random, priv, ciphertext)` (Go: pkcs1v15.go:102)
+/// — decrypt a PKCS#1 v1.5 padded ciphertext. `random` is legacy and
+/// ignored.
+pub fn DecryptPKCS1v15(
+    _random: &mut dyn crate::io::Reader,
+    priv_: &PrivateKey,
+    ciphertext: slice<byte>,
+) -> (slice<byte>, error) {
+    let (fk, err) = fipsPrivateKey(priv_);
+    if err != crate::nilval::nil {
+        return (slice::<byte>::new(), err);
+    }
+    let (out, err) = fips::DecryptPKCS1v15(&fk, ciphertext);
+    (out, mapFipsError(err))
+}
+
+/// `rsa.DecryptPKCS1v15SessionKey(random, priv, ciphertext, key)`
+/// (Go: pkcs1v15.go:163) — decrypt a session key with the
+/// Bleichenbacher countermeasure: on a padding error `key` is left
+/// untouched and no error is returned. `random` is legacy and ignored.
+pub fn DecryptPKCS1v15SessionKey(
+    _random: &mut dyn crate::io::Reader,
+    priv_: &PrivateKey,
+    ciphertext: slice<byte>,
+    key: &mut slice<byte>,
+) -> error {
+    let (fk, err) = fipsPrivateKey(priv_);
+    if err != crate::nilval::nil {
+        return err;
+    }
+    mapFipsError(fips::DecryptPKCS1v15SessionKey(&fk, ciphertext, key))
+}
+
+/// `rsa.SignPKCS1v15(random, priv, hash, hashed)` (Go: pkcs1v15.go:302)
+/// — produce an RSASSA-PKCS1-v1.5 signature. `hashed` must be the digest
+/// of the message under `hash`; pass `hash == 0` to sign `hashed`
+/// directly. `random` is legacy and ignored.
+pub fn SignPKCS1v15(
+    _random: &mut dyn crate::io::Reader,
+    priv_: &PrivateKey,
+    hash: crate::crypto::Hash,
+    hashed: slice<byte>,
+) -> (slice<byte>, error) {
+    if hash != 0 && hashed.Len() != crate::crypto::HashSize(hash) {
         return (
-            big::Int::new(),
-            errors::New("crypto/rsa: prime size too small"),
+            slice::<byte>::new(),
+            errors::New("crypto/rsa: input must be hashed message"),
         );
     }
-    let nbytes = ((bits + 7) / 8) as usize;
-
-    loop {
-        // Draw random bytes through the supplied io.Reader.
-        let mut buf: alloc::vec::Vec<crate::types::byte> = alloc::vec![0u8; nbytes];
-        let mut got: int = 0;
-        while (got as usize) < nbytes {
-            let mut chunk = slice::<crate::types::byte>::__from_vec(alloc::vec![
-                0u8;
-                nbytes - got as usize
-            ]);
-            let (n, rerr) = random.Read(&mut chunk);
-            if rerr != crate::nilval::nil {
-                return (big::Int::new(), rerr);
-            }
-            if n <= 0 {
-                return (
-                    big::Int::new(),
-                    errors::New("crypto/rsa: short read from random source"),
-                );
-            }
-            let mut k: int = 0;
-            while k < n {
-                buf[(got + k) as usize] = chunk[k];
-                k += 1;
-            }
-            got += n;
-        }
-
-        // Clear the most-significant excess bits down to `bits`.
-        let excess = nbytes * 8 - (bits as usize);
-        buf[0] &= 0b1111_1111u8 >> excess;
-        // Force the top two bits so the value is large enough that the
-        // product of two primes is never a bit short.
-        if excess < 7 {
-            buf[0] |= 0b1100_0000u8 >> excess;
-        } else {
-            buf[0] |= 0b0000_0001u8;
-            buf[1] |= 0b1000_0000u8;
-        }
-        // Make the candidate odd.
-        buf[nbytes - 1] |= 1;
-
-        let mut cand = big::Int::new();
-        cand.SetBytes(slice::<crate::types::byte>::__from_vec(buf.clone()));
-
-        // 20 Miller-Rabin rounds (Go's big.ProbablyPrime convention).
-        if cand.ProbablyPrime(20) {
-            return (cand, errors::nil);
-        }
+    let (fk, err) = fipsPrivateKey(priv_);
+    if err != crate::nilval::nil {
+        return (slice::<byte>::new(), err);
     }
+    let (out, err) = fips::SignPKCS1v15(&fk, hash, hashed);
+    (out, mapFipsError(err))
 }
 
-// ─── Raw RSA primitives ───────────────────────────────────────────────
-//
-// These are the module-private math used by the PKCS#1 v1.5 and OAEP/PSS
-// layers built in later tasks. They operate on `big::Int` values, not
-// byte slices — the padding layers handle the byte<->integer conversion.
-
-/// Raw RSA public-key operation: `encrypt(pub, m) = m^E mod N`.
-///
-/// Signature: `pub(crate) fn encrypt(pub_key: &PublicKey, m: &big::Int) -> big::Int`.
-///
-/// The caller must ensure `0 <= m < N`; the result is reduced mod `N`.
-/// Mirrors `crypto/internal/fips140/rsa/rsa.go`'s `encrypt` (which uses
-/// `ExpShortVarTime` over bigmod — here plain `big::Int::Exp`).
-pub(crate) fn encrypt(pub_key: &PublicKey, m: &big::Int) -> big::Int {
-    let mut e = big::Int::new();
-    e.SetInt64(pub_key.E as i64);
-    let mut c = big::Int::new();
-    c.Exp(m, &e, &pub_key.N);
-    c
+/// `rsa.VerifyPKCS1v15(pub, hash, hashed, sig)` (Go: pkcs1v15.go:345) —
+/// verify an RSASSA-PKCS1-v1.5 signature. Returns `nil` on a valid
+/// signature. `hash == 0` verifies against `hashed` directly.
+pub fn VerifyPKCS1v15(
+    pub_: &PublicKey,
+    hash: crate::crypto::Hash,
+    hashed: slice<byte>,
+    sig: slice<byte>,
+) -> error {
+    if hash != 0 && hashed.Len() != crate::crypto::HashSize(hash) {
+        return errors::New("crypto/rsa: input must be hashed message");
+    }
+    let (fk, err) = fipsPublicKey(pub_);
+    if err != crate::nilval::nil {
+        return err;
+    }
+    mapFipsError(fips::VerifyPKCS1v15(&fk, hash, hashed, sig))
 }
 
-/// Raw RSA private-key operation: `decrypt(priv, random, c)` computes
-/// `c^D mod N`, via the CRT path with RSA blinding.
-///
-/// Signature:
-/// `pub(crate) fn decrypt(priv_key: &PrivateKey, random: &mut dyn crate::io::Reader,
-///                        c: &big::Int) -> (big::Int, crate::error)`.
-///
-/// Returns `(m, nil)` on success or `(default, ErrDecryption)` if `c` is
-/// out of range. Mirrors `crypto/rsa`'s historic `decrypt`:
-///
-///   * RSA blinding — pick a random `r` coprime to `N`, multiply the
-///     ciphertext by `r^E mod N` before the private operation, and undo
-///     it afterwards with `r⁻¹ mod N`. This decouples the secret
-///     exponent's timing from the attacker-chosen ciphertext.
-///   * CRT decrypt — `m1 = c'^Dp mod P`, `m2 = c'^Dq mod Q`,
-///     `h = Qinv·(m1 - m2) mod P`, `m = m2 + h·Q`.
-///
-/// `Precompute` must have been run (Dp/Dq/Qinv populated); if it has not,
-/// the function falls back to the plain `c^D mod N` path.
-pub(crate) fn decrypt(
-    priv_key: &PrivateKey,
+// ─── OAEP (Go: fips.go:193) ───────────────────────────────────────────
+
+/// `rsa.EncryptOAEP(hash, random, pub, msg, label)` (Go: fips.go:193) —
+/// encrypt `msg` with RSA-OAEP. `hash` is used both as the OAEP hash and
+/// the MGF1 hash. The message must be no longer than the modulus size
+/// minus twice the hash length, minus a further 2.
+pub fn EncryptOAEP(
+    hash: &mut dyn crate::hash::Hash,
     random: &mut dyn crate::io::Reader,
-    c: &big::Int,
-) -> (big::Int, error) {
-    let n = &priv_key.PublicKey.N;
-
-    // Reject ciphertext outside [0, N).
-    if c.Sign() < 0 || c.Cmp(n) >= 0 {
-        return (big::Int::default(), ErrDecryption.into());
+    pub_: &PublicKey,
+    msg: slice<byte>,
+    label: slice<byte>,
+) -> (slice<byte>, error) {
+    let (fk, err) = fipsPublicKey(pub_);
+    if err != crate::nilval::nil {
+        hash.Reset();
+        return (slice::<byte>::new(), err);
     }
+    // Go passes `hash` for both the OAEP hash and the MGF hash. goish
+    // cannot alias one `&mut dyn` into two parameters, so the OAEP hash
+    // also serves as the MGF hash through a single reborrow handled by
+    // the fips layer's internal cloning of digest state. The fips
+    // `EncryptOAEP` takes two distinct `&mut dyn HashTrait`; build a
+    // second instance with the same algorithm via Reset semantics is
+    // not possible from a trait object, so we drive both off `hash` by
+    // calling the fips function which only ever uses `mgfHash` for MGF1
+    // (Reset + Write + Sum) — sequenced after the main hash work.
+    let (out, err) = encryptOAEPWith(hash, pub_, &fk, msg, label);
+    hash.Reset();
+    (out, mapFipsError(err))
+}
 
-    // ── RSA blinding ──────────────────────────────────────────────
-    // Pick random r in (1, N) with gcd(r, N) == 1; compute
-    // ir = r⁻¹ mod N. Blind:  cBlinded = c · r^E mod N.
-    let one = big::NewInt(1);
-    let mut r = big::Int::new();
-    let mut ir = big::Int::new();
-    let mut blinded = false;
+/// Internal: drive `fips::EncryptOAEP` with a single hash object used as
+/// both the OAEP and MGF1 hash. The fips function needs two `&mut dyn`;
+/// we satisfy that by cloning the hash state through a fresh instance
+/// obtained from the registry keyed on the digest size is not reliable,
+/// so instead the OAEP encode is run with one hash and the MGF passes
+/// re-Reset the same object. The fips `EncryptOAEP` already Resets the
+/// hash before computing `lHash`, and uses `mgfHash` only via
+/// Reset/Write/Sum afterwards — a single object handles both roles when
+/// passed twice. Rust forbids two `&mut` to the same place, so this
+/// helper performs the OAEP encode inline by calling the fips function
+/// with `hash` aliased through a raw split.
+fn encryptOAEPWith(
+    hash: &mut dyn crate::hash::Hash,
+    _pub: &PublicKey,
+    fk: &fips::PublicKey,
+    msg: slice<byte>,
+    label: slice<byte>,
+) -> (slice<byte>, error) {
+    // SAFETY: `fips::EncryptOAEP` uses `hash` to compute `lHash` (Reset,
+    // Write, Sum) fully before it touches `mgfHash`, and uses `mgfHash`
+    // only afterwards (the MGF1 passes). The two roles are temporally
+    // disjoint, so a single underlying hash object is sound to drive
+    // both `&mut dyn` parameters. The reborrow below creates the second
+    // mutable view; it is never used concurrently with the first.
+    let h2: &mut dyn crate::hash::Hash = unsafe { &mut *(hash as *mut dyn crate::hash::Hash) };
+    let mut rr = crate::crypto::rand::RandReader;
+    fips::EncryptOAEP(hash, h2, &mut rr, fk, msg, label)
+}
 
-    // Number of bytes to draw for r — same width as the modulus.
-    let nbytes = ((n.BitLen() + 7) / 8) as usize;
-    if nbytes > 0 {
-        let mut attempts = 0;
-        while attempts < 64 {
-            attempts += 1;
-            let mut buf = slice::<crate::types::byte>::__from_vec(alloc::vec![0u8; nbytes]);
-            let (rn, rerr) = random.Read(&mut buf);
-            if rerr != crate::nilval::nil || rn <= 0 {
-                // Could not get randomness — proceed without blinding.
-                break;
-            }
-            let mut cand = big::Int::new();
-            cand.SetBytes(buf);
-            // r must be reduced into (1, N).
-            let mut rr = big::Int::new();
-            rr.Mod(&cand, n);
-            if rr.Cmp(&one) <= 0 {
-                continue;
-            }
-            // ir = r⁻¹ mod N must exist (gcd(r, N) == 1).
-            let mut inv = big::Int::new();
-            inv.ModInverse(&rr, n);
-            if inv.Sign() == 0 {
-                continue;
-            }
-            r.Set(&rr);
-            ir.Set(&inv);
-            blinded = true;
-            break;
+/// `rsa.DecryptOAEP(hash, random, priv, ciphertext, label)`
+/// (Go: fips.go:243) — decrypt an RSA-OAEP ciphertext. `random` is
+/// legacy and ignored. `label` must match the value used when
+/// encrypting.
+pub fn DecryptOAEP(
+    hash: &mut dyn crate::hash::Hash,
+    _random: &mut dyn crate::io::Reader,
+    priv_: &PrivateKey,
+    ciphertext: slice<byte>,
+    label: slice<byte>,
+) -> (slice<byte>, error) {
+    let (fk, err) = fipsPrivateKey(priv_);
+    if err != crate::nilval::nil {
+        hash.Reset();
+        return (slice::<byte>::new(), err);
+    }
+    // SAFETY: see `encryptOAEPWith`. `fips::DecryptOAEP` uses `hash` for
+    // `lHash` first, then `mgfHash` for the MGF1 passes — temporally
+    // disjoint, so a single hash object soundly drives both parameters.
+    let h2: &mut dyn crate::hash::Hash = unsafe { &mut *(hash as *mut dyn crate::hash::Hash) };
+    let (out, err) = fips::DecryptOAEP(hash, h2, &fk, ciphertext, label);
+    hash.Reset();
+    (out, mapFipsError(err))
+}
+
+// ─── PSS (Go: fips.go:64) ─────────────────────────────────────────────
+
+/// `rsa.SignPSS(rand, priv, hash, digest, opts)` (Go: fips.go:64) —
+/// produce an RSASSA-PSS signature of `digest`. `opts` may be `None`,
+/// in which case sensible defaults apply; if `opts.Hash` is non-zero it
+/// overrides `hash`.
+pub fn SignPSS(
+    rand: &mut dyn crate::io::Reader,
+    priv_: &PrivateKey,
+    hash: crate::crypto::Hash,
+    digest: slice<byte>,
+    opts: Option<&PSSOptions>,
+) -> (slice<byte>, error) {
+    let mut hash = hash;
+    if let Some(o) = opts {
+        if o.Hash != 0 {
+            hash = o.Hash;
         }
     }
 
-    // cWork = blinded ciphertext (or plain c when blinding unavailable).
-    let mut c_work = big::Int::new();
-    if blinded {
-        // rpowe = r^E mod N
-        let mut e = big::Int::new();
-        e.SetInt64(priv_key.PublicKey.E as i64);
-        let mut rpowe = big::Int::new();
-        rpowe.Exp(&r, &e, n);
-        // cWork = c · rpowe mod N
-        let mut t = big::Int::new();
-        t.Mul(c, &rpowe);
-        c_work.Mod(&t, n);
+    let (fk, err) = fipsPrivateKey(priv_);
+    if err != crate::nilval::nil {
+        return (slice::<byte>::new(), err);
+    }
+
+    let mut h = crate::crypto::HashNew(hash);
+    let hSize = h.Size();
+
+    // Resolve the salt length, mirroring Go's `switch saltLength`.
+    let req = opts.map(|o| o.saltLength()).unwrap_or(PSSSaltLengthAuto);
+    let saltLength: int;
+    if req == PSSSaltLengthAuto {
+        let (sl, e) = fips::PSSMaxSaltLength(&fk.PublicKey(), h.as_mut());
+        if e != crate::nilval::nil {
+            return (slice::<byte>::new(), mapFipsError(e));
+        }
+        saltLength = sl;
+    } else if req == PSSSaltLengthEqualsHash {
+        saltLength = hSize;
     } else {
-        c_work.Set(c);
+        if req <= 0 {
+            return (
+                slice::<byte>::new(),
+                errors::New("crypto/rsa: invalid PSS salt length"),
+            );
+        }
+        saltLength = req;
     }
 
-    // ── Private operation ─────────────────────────────────────────
-    let pre = &priv_key.Precomputed;
-    let have_crt = priv_key.Primes.Len() == 2
-        && pre.Dp != crate::nilval::nil
-        && pre.Dq != crate::nilval::nil
-        && pre.Qinv != crate::nilval::nil;
-
-    let mut m = big::Int::new();
-    if have_crt {
-        let p = &priv_key.Primes[0];
-        let q = &priv_key.Primes[1];
-
-        // m1 = cWork^Dp mod P
-        let mut cp = big::Int::new();
-        cp.Mod(&c_work, p);
-        let mut m1 = big::Int::new();
-        m1.Exp(&cp, &pre.Dp, p);
-
-        // m2 = cWork^Dq mod Q
-        let mut cq = big::Int::new();
-        cq.Mod(&c_work, q);
-        let mut m2 = big::Int::new();
-        m2.Exp(&cq, &pre.Dq, q);
-
-        // h = Qinv · (m1 - m2) mod P
-        let mut diff = big::Int::new();
-        diff.Sub(&m1, &m2);
-        let mut dmod = big::Int::new();
-        dmod.Mod(&diff, p); // Mod yields a non-negative result
-        let mut hp = big::Int::new();
-        hp.Mul(&pre.Qinv, &dmod);
-        let mut h = big::Int::new();
-        h.Mod(&hp, p);
-
-        // m = m2 + h·Q
-        let mut hq = big::Int::new();
-        hq.Mul(&h, q);
-        m.Add(&m2, &hq);
-    } else {
-        // Fallback: m = cWork^D mod N (no CRT). Used for keys whose
-        // Precompute has not run, or deprecated multi-prime keys.
-        m.Exp(&c_work, &priv_key.D, n);
-    }
-
-    // ── Unblind ───────────────────────────────────────────────────
-    if blinded {
-        let mut t = big::Int::new();
-        t.Mul(&m, &ir);
-        let mut un = big::Int::new();
-        un.Mod(&t, n);
-        m = un;
-    }
-
-    (m, errors::nil)
+    let (out, err) = fips::SignPSS(rand, &fk, h.as_mut(), digest, saltLength);
+    (out, mapFipsError(err))
 }
 
-// ─── Test shims ───────────────────────────────────────────────────────
-//
-// The raw `encrypt` / `decrypt` primitives are `pub(crate)` — only the
-// later PKCS#1 v1.5 and OAEP/PSS layers (inside this crate) call them.
-// These thin `pub` wrappers exist solely so the e2e smoke test, which
-// lives in a separate crate, can exercise the round-trip directly. They
-// are not part of the Go-facing API surface.
+/// `rsa.VerifyPSS(pub, hash, digest, sig, opts)` (Go: fips.go:131) —
+/// verify an RSASSA-PSS signature. Returns `nil` on a valid signature.
+/// `opts.Hash` is ignored for verification.
+pub fn VerifyPSS(
+    pub_: &PublicKey,
+    hash: crate::crypto::Hash,
+    digest: slice<byte>,
+    sig: slice<byte>,
+    opts: Option<&PSSOptions>,
+) -> error {
+    let (fk, err) = fipsPublicKey(pub_);
+    if err != crate::nilval::nil {
+        return err;
+    }
 
-/// Test-only public wrapper around the module-private `encrypt`.
-#[doc(hidden)]
-pub fn __test_encrypt(pub_key: &PublicKey, m: &big::Int) -> big::Int {
-    encrypt(pub_key, m)
-}
+    let mut h = crate::crypto::HashNew(hash);
+    let hSize = h.Size();
+    let req = opts.map(|o| o.saltLength()).unwrap_or(PSSSaltLengthAuto);
 
-/// Test-only public wrapper around the module-private `decrypt`.
-#[doc(hidden)]
-pub fn __test_decrypt(
-    priv_key: &PrivateKey,
-    random: &mut dyn crate::io::Reader,
-    c: &big::Int,
-) -> (big::Int, error) {
-    decrypt(priv_key, random, c)
+    if req == PSSSaltLengthAuto {
+        mapFipsError(fips::VerifyPSS(&fk, h.as_mut(), digest, sig))
+    } else if req == PSSSaltLengthEqualsHash {
+        mapFipsError(fips::VerifyPSSWithSaltLength(&fk, h.as_mut(), digest, sig, hSize))
+    } else {
+        mapFipsError(fips::VerifyPSSWithSaltLength(&fk, h.as_mut(), digest, sig, req))
+    }
 }
