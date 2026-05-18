@@ -140,34 +140,17 @@ impl crate::errors::ErrorTrait for PathError {
 // `PathError → error` via `.into()` now provided by the blanket
 // `impl<E: ErrorTrait> From<E> for error` in errors/mod.rs.
 
-// ─── FileInfo (trait + concrete) ──────────────────────────────────────
+// ─── FileInfo (alias + concrete) ──────────────────────────────────────
 //
-// Go: `os.FileInfo` is an interface (io/fs.go:130). Slim runtime ships
-// it as a trait + one common concrete impl. Trait shape lets ports
-// receive `dyn fs::FileInfo + Send + Sync` from user APIs (e.g. the
-// fluxcd/lockedfile `File.Stat()` method signature). The concrete
-// `FileInfoData` carries the fields cached by stat(2) / fstat(2);
-// custom Reflect-style FileInfo implementations can ship their own
-// concrete impls of the trait.
+// Go: `os.FileInfo` is an exact type alias for `fs.FileInfo`
+// (os/types.go:18). goish mirrors this — `io/fs` owns the
+// `#[goish::interface]` trait, `os` re-exports it. The concrete
+// `FileInfoData` carries the fields cached by stat(2) / fstat(2) and
+// implements that interface; ports receive a trait object via
+// `dyn fs::FileInfo + Send + Sync` and can downcast through `Any`.
 
-/// `os.FileInfo` (io/fs.FileInfo, fs.go:130) — file metadata trait.
-///
-/// Required impls (`Send + Sync`) match Go's interface contract: a
-/// FileInfo value flows freely across goroutine boundaries.
-pub trait FileInfo: Send + Sync {
-    fn Name(&self) -> string;
-    fn Size(&self) -> int;
-    fn Mode(&self) -> FileMode;
-    fn ModTime(&self) -> crate::time::Time;
-    fn IsDir(&self) -> bool;
-    /// `Sys()` — Go's `interface{}` underlying-data slot. Slim
-    /// returns a freshly-allocated empty Arc (Go's "no system data"
-    /// equivalent). Concrete impls may override with the platform
-    /// stat buffer.
-    fn Sys(&self) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
-        alloc::sync::Arc::new(())
-    }
-}
+/// `os.FileInfo` (os/types.go:18) — type alias for [`io::fs::FileInfo`].
+pub use crate::io::fs::FileInfo;
 
 /// Concrete `FileInfo` impl carrying the fields cached by stat(2).
 /// `os::Stat` and `(*File).Stat()` return this type; ports that
@@ -201,6 +184,11 @@ impl PartialEq<FileInfoData> for crate::nilval::Nil {
     }
 }
 
+// `io/fs::FileInfo` is a `#[goish::interface]` trait, so the concrete
+// impl carries the boilerplate the transpiler emits for hand-written
+// interface impls: `__goish_as_dyn_any` returns `Some(self)` so a
+// trait-borrow can downcast back to `FileInfoData`. Registration into
+// the per-trait downcast registry happens lazily — see `register_os_fs_impls`.
 impl FileInfo for FileInfoData {
     fn Name(&self) -> string {
         self.name.clone()
@@ -216,6 +204,12 @@ impl FileInfo for FileInfoData {
     }
     fn IsDir(&self) -> bool {
         self.is_dir
+    }
+    fn Sys(&self) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
+        alloc::sync::Arc::new(())
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
     }
 }
 
@@ -1212,43 +1206,83 @@ pub fn Remove<N: Into<string>>(name: N) -> error {
 
 // ─── DirEntry / ReadDir ──────────────────────────────────────────────
 
-/// `os.DirEntry` (Go 1.16, os/dir.go:85). Slim subset: just name +
-/// type bits. `Type()` returns the FileMode portion populated from the
-/// directory's `d_type` (see `getdents64(2)`).
-#[derive(Clone)]
-pub struct DirEntry {
-    pub Name_: string,
-    pub Type_: FileMode,
+/// `os.DirEntry` (os/dir.go:91) — type alias for [`io::fs::DirEntry`].
+///
+/// Go's `os.DirEntry` is an exact alias for the `fs.DirEntry`
+/// interface; the concrete OS-filesystem implementation is the
+/// unexported [`unixDirent`].
+pub use crate::io::fs::DirEntry;
+
+/// `os.unixDirent` (file_unix.go:446) — concrete `fs.DirEntry` over a
+/// `getdents64` record. Carries the parent directory path so `Info()`
+/// can `lstat` the entry on demand (Go's `unixDirent.Info`).
+struct unixDirent {
+    /// Parent directory path (so `Info()` can build `parent + "/" + name`).
+    parent: string,
+    /// Base name of the entry.
+    name: string,
+    /// Type bits from the directory's `d_type`.
+    typ: FileMode,
 }
 
-impl DirEntry {
-    /// `e.Name()` (fs/fs.go) — base name of the directory entry.
-    pub fn Name(&self) -> string {
-        self.Name_.clone()
+// `io/fs::DirEntry` is a `#[goish::interface]` trait — the concrete
+// impl carries the transpiler-emitted boilerplate (`__goish_as_dyn_any`
+// returns `Some(self)`); registration is lazy via `register_os_fs_impls`.
+impl DirEntry for unixDirent {
+    // Go: func (d *unixDirent) Name() string { return d.name }
+    fn Name(&self) -> string {
+        self.name.clone()
     }
-    /// `e.IsDir()` — convenience for `Type().IsDir()`.
-    pub fn IsDir(&self) -> bool {
-        (self.Type_ & ModeDir) != 0
+    // Go: func (d *unixDirent) IsDir() bool { return d.typ.IsDir() }
+    fn IsDir(&self) -> bool {
+        self.typ.IsDir()
     }
-    /// `e.Type()` — entry mode bits (directory / symlink / etc.).
-    pub fn Type(&self) -> FileMode {
-        self.Type_
+    // Go: func (d *unixDirent) Type() FileMode { return d.typ }
+    fn Type(&self) -> FileMode {
+        self.typ
     }
+    // Go: func (d *unixDirent) Info() (FileInfo, error) {
+    //         return lstat(d.parent + "/" + d.name)
+    //     }
+    fn Info(&self) -> (alloc::sync::Arc<dyn FileInfo + Send + Sync>, error) {
+        let mut full = self.parent.clone();
+        full = full + string::from_static("/");
+        full = full + self.name.clone();
+        let (info, err) = Lstat(full);
+        if !err.IsNil() {
+            return (crate::nil.into(), err);
+        }
+        (alloc::sync::Arc::new(info), nil)
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
+    }
+}
+
+/// Register the `os` concrete `#[goish::interface]` impls into their
+/// per-trait downcast registries (so `goish::cast!` can find them).
+/// Idempotent and cheap; called at the head of `ReadDir`.
+fn register_os_fs_impls() {
+    crate::io::fs::__goish_register_FileInfo_impl::<FileInfoData>();
+    crate::io::fs::__goish_register_DirEntry_impl::<unixDirent>();
 }
 
 /// `os.ReadDir(name)` (os/dir.go:114) — read directory entries from
 /// `name`, returning them sorted by filename. Slim port: relies on
-/// the Linux `getdents64(2)` syscall and returns `(slice<DirEntry>,
-/// error)` per goish convention.
-pub fn ReadDir<N: Into<string>>(name: N) -> (slice<DirEntry>, error) {
+/// the Linux `getdents64(2)` syscall. Like Go, the return type is a
+/// slice of the `fs.DirEntry` interface.
+pub fn ReadDir<N: Into<string>>(
+    name: N,
+) -> (slice<alloc::sync::Arc<dyn DirEntry + Send + Sync>>, error) {
+    register_os_fs_impls();
     let name: string = name.into();
-    let (mut f, err) = Open(name);
+    let (mut f, err) = Open(name.clone());
     if !err.IsNil() {
-        return (slice::<DirEntry>::__from_vec(Vec::new()), err);
+        return (slice::new(), err);
     }
     // err is nil ⇒ Open returned a non-nil File. Narrow.
     let f = f.MustMut();
-    let mut entries: Vec<DirEntry> = Vec::new();
+    let mut entries: Vec<alloc::sync::Arc<dyn DirEntry + Send + Sync>> = Vec::new();
     // 4 KiB buffer matches the kernel's per-call output size sweet spot.
     let mut buf: alloc::vec::Vec<u8> = alloc::vec![0u8; 4096];
     loop {
@@ -1256,7 +1290,7 @@ pub fn ReadDir<N: Into<string>>(name: N) -> (slice<DirEntry>, error) {
         if n < 0 {
             let _ = f.Close();
             return (
-                slice::<DirEntry>::__from_vec(entries),
+                slice::__from_vec(entries),
                 errors::New(string("readdir failed")),
             );
         }
@@ -1287,10 +1321,13 @@ pub fn ReadDir<N: Into<string>>(name: N) -> (slice<DirEntry>, error) {
             // Skip "." and ".." per Go's behavior.
             if name_bytes != b"." && name_bytes != b".." {
                 let mode = mode_from_dtype(dtype);
-                entries.push(DirEntry {
-                    Name_: string::from_bytes(name_bytes),
-                    Type_: mode,
-                });
+                let ent: alloc::sync::Arc<dyn DirEntry + Send + Sync> =
+                    alloc::sync::Arc::new(unixDirent {
+                        parent: name.clone(),
+                        name: string::from_bytes(name_bytes),
+                        typ: mode,
+                    });
+                entries.push(ent);
             }
             if reclen == 0 {
                 break;
@@ -1300,12 +1337,8 @@ pub fn ReadDir<N: Into<string>>(name: N) -> (slice<DirEntry>, error) {
     }
     let _ = f.Close();
     // Sort by name (Go uses slices.SortFunc on Name).
-    entries.sort_by(|a, b| {
-        let ab = bytes_of(&a.Name_);
-        let bb = bytes_of(&b.Name_);
-        ab.cmp(bb)
-    });
-    (slice::<DirEntry>::__from_vec(entries), nil)
+    entries.sort_by(|a, b| a.Name().as_bytes().cmp(b.Name().as_bytes()));
+    (slice::__from_vec(entries), nil)
 }
 
 /// Map a `getdents64` `d_type` byte into the goish FileMode bits.

@@ -12,12 +12,12 @@
 //   * `ReadDir`, `Stat`, `FileInfoToDirEntry`
 //   * `SkipDir` / `SkipAll`, `WalkDirFunc`, `WalkDir`
 //
-// Note on `io/fs` vs `os` duplication: goish's `os` module separately
-// defines its own concrete `os::FileInfo` *trait* and `os::DirEntry`
-// *struct*. Those are NOT the interfaces defined here. Go's canonical
-// home for these interfaces is `io/fs`, so this module owns the
-// `#[goish::interface]` versions; unifying `os`'s shapes with these is
-// out of scope (a future cleanup, once a second FS impl lands).
+// Note on `io/fs` vs `os`: Go's canonical home for the `FileInfo`,
+// `DirEntry`, and `FileMode` types is `io/fs`. The `os` package does
+// not define its own — `os.FileInfo`, `os.DirEntry`, `os.FileMode`
+// are exact type aliases for the `fs` versions. goish mirrors this:
+// this module owns the `#[goish::interface]` traits + the `FileMode`
+// newtype, and `os` re-exports them via `pub use`.
 
 #![allow(non_snake_case, non_camel_case_types)]
 
@@ -309,7 +309,7 @@ pub trait FileInfo {
     /// Base name of the file.
     fn Name(&self) -> string;
     /// Length in bytes for regular files; system-dependent for others.
-    fn Size(&self) -> i64;
+    fn Size(&self) -> int;
     /// File mode bits.
     fn Mode(&self) -> FileMode;
     /// Modification time.

@@ -465,28 +465,61 @@ impl errors::IsTarget for __SkipAllMarker {
     fn __resolve(&self) -> error { __skipall_error() }
 }
 
+// `filepathDirEnt` — a concrete `fs.DirEntry` synthesised for the
+// walk root (which does not come from a parent `os.ReadDir`). Go uses
+// `fs.FileInfoToDirEntry(info)`; the slim equivalent carries just the
+// base name and the mode bits an `os.Lstat` reported. Its `Info()`
+// re-stats the path (matching `fs.dirInfo` / `unixDirent` behaviour).
+struct filepathDirEnt {
+    full: string,
+    name: string,
+    mode: crate::os::FileMode,
+}
+
+impl crate::os::DirEntry for filepathDirEnt {
+    fn Name(&self) -> string {
+        self.name.clone()
+    }
+    fn IsDir(&self) -> bool {
+        self.mode.IsDir()
+    }
+    fn Type(&self) -> crate::os::FileMode {
+        self.mode.Type()
+    }
+    fn Info(&self) -> (alloc::sync::Arc<dyn crate::os::FileInfo + Send + Sync>, error) {
+        let (info, err) = crate::os::Lstat(self.full.clone());
+        if !err.IsNil() {
+            return (crate::nil.into(), err);
+        }
+        (alloc::sync::Arc::new(info), nil)
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
+    }
+}
+
 /// Line-by-line port of `filepath.WalkDir(root, fn)` (path.go:395).
 /// Walks the file tree rooted at `root`, calling `fn` for each file or
 /// directory, including `root` itself. Entries are walked in lexical
 /// order. Symbolic links are not followed.
 ///
-/// Slim deviations: `fn` is `FnMut`; goish has no fs.WalkDirFunc trait,
-/// so the closure signature is `(string, DirEntry, error) -> error`.
-/// The DirEntry passed for `root` itself synthesises a Type from
-/// the FileInfo (since `root` doesn't come from a parent ReadDir).
+/// Slim deviation: `fn` is `FnMut`. The closure signature mirrors Go's
+/// `WalkDirFunc` — `(string, &dyn os::DirEntry, error) -> error` — with
+/// the `DirEntry` argument spelled as an interface-borrow.
 pub fn WalkDir<F>(root: string, mut fn_: F) -> error
 where
-    F: FnMut(string, crate::os::DirEntry, error) -> error,
+    F: FnMut(string, &(dyn crate::os::DirEntry + Send + Sync + 'static), error) -> error,
 {
     // Go: info, err := os.Lstat(root)
     let (info, err) = crate::os::Lstat(root.clone());
     let walk_err = if !err.IsNil() {
         // Go: err = fn(root, nil, err)
-        fn_(root.clone(), synth_direntry(root.clone(), crate::os::FileMode(0)), err)
+        let d = synth_direntry(root.clone(), crate::os::FileMode(0));
+        fn_(root.clone(), &*d, err)
     } else {
         // Go: err = walkDir(root, fs.FileInfoToDirEntry(info), fn)
         let d = synth_direntry(root.clone(), info.Mode());
-        walk_dir(root, d, &mut fn_)
+        walk_dir(root, &d, &mut fn_)
     };
     // Go: if err == SkipDir || err == SkipAll { return nil }
     if errors::Is(walk_err.clone(), SkipDir) || errors::Is(walk_err.clone(), SkipAll) {
@@ -495,23 +528,31 @@ where
     walk_err
 }
 
-fn synth_direntry(name: string, mode: crate::os::FileMode) -> crate::os::DirEntry {
-    crate::os::DirEntry {
-        Name_: Base(name),
-        Type_: mode,
-    }
+fn synth_direntry(
+    name: string,
+    mode: crate::os::FileMode,
+) -> alloc::sync::Arc<dyn crate::os::DirEntry + Send + Sync> {
+    alloc::sync::Arc::new(filepathDirEnt {
+        full: name.clone(),
+        name: Base(name),
+        mode,
+    })
 }
 
-fn walk_dir<F>(path_: string, d: crate::os::DirEntry, fn_: &mut F) -> error
+fn walk_dir<F>(
+    path_: string,
+    d: &alloc::sync::Arc<dyn crate::os::DirEntry + Send + Sync>,
+    fn_: &mut F,
+) -> error
 where
-    F: FnMut(string, crate::os::DirEntry, error) -> error,
+    F: FnMut(string, &(dyn crate::os::DirEntry + Send + Sync + 'static), error) -> error,
 {
     // Go: if err := walkDirFn(path, d, nil); err != nil || !d.IsDir() {
     //         if err == SkipDir && d.IsDir() { err = nil }
     //         return err
     //     }
     {
-        let err = fn_(path_.clone(), d.clone(), nil);
+        let err = fn_(path_.clone(), &**d, nil);
         if !err.IsNil() || !d.IsDir() {
             if errors::Is(err.clone(), SkipDir) && d.IsDir() {
                 return nil;
@@ -524,7 +565,7 @@ where
     let (dirs, err) = crate::os::ReadDir(path_.clone());
     if !err.IsNil() {
         // Go: err = walkDirFn(path, d, err); ... if err == SkipDir && d.IsDir() { err = nil }
-        let err = fn_(path_.clone(), d.clone(), err);
+        let err = fn_(path_.clone(), &**d, err);
         if !err.IsNil() {
             if errors::Is(err.clone(), SkipDir) && d.IsDir() {
                 return nil;
@@ -540,7 +581,7 @@ where
         elems.push(path_.clone());
         elems.push(d1.Name());
         let path1 = Join(slice::__from_vec(elems));
-        let err = walk_dir(path1, d1, fn_);
+        let err = walk_dir(path1, &d1, fn_);
         if !err.IsNil() {
             // Go: if err == SkipDir { break }; return err
             if errors::Is(err.clone(), SkipDir) {

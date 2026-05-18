@@ -622,6 +622,10 @@ name = "os_exec_smoke"
 path = "examples/os_exec_smoke.rs"
 
 [[example]]
+name = "os_readdir_smoke"
+path = "examples/os_readdir_smoke.rs"
+
+[[example]]
 name = "var_marker_smoke"
 path = "examples/var_marker_smoke.rs"
 

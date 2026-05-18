@@ -78,7 +78,7 @@ impl fs::FileInfo for mapInfo {
     fn Name(&self) -> string {
         self.name.clone()
     }
-    fn Size(&self) -> i64 {
+    fn Size(&self) -> int {
         self.size
     }
     fn Mode(&self) -> fs::FileMode {

@@ -46,7 +46,7 @@ fn main() {
                 }
             }
             if found_a && found_b {
-                Println!("[ 1] ReadDir /tmp              PASS ({} entries)", entries.Len());
+                Println!("[ 1] ReadDir /tmp              PASS", entries.Len(), "entries");
             } else {
                 Println!(
                     "[ 1] ReadDir /tmp              FAIL a={} b={}",
@@ -132,13 +132,37 @@ fn main() {
         }
     }
 
+    // 6. DirEntry.Info() lstats the entry — Go-faithful: os.DirEntry is
+    //    the fs.DirEntry interface, and unixDirent.Info() re-stats the
+    //    path. The reported size must match the file we wrote ("a" = 1).
+    {
+        let (entries, _) = os::ReadDir(string("/tmp"));
+        let mut info_ok = false;
+        for i in 0..entries.Len() {
+            let e = entries[i].clone();
+            if e.Name() == "goish-readdir-smoke-file-a.txt" {
+                let (info, ierr) = e.Info();
+                if ierr.IsNil() && info.Size() == 1 && !info.IsDir() {
+                    info_ok = true;
+                }
+                break;
+            }
+        }
+        if info_ok {
+            Println!("[ 6] DirEntry.Info() lstat      PASS");
+        } else {
+            Println!("[ 6] DirEntry.Info() lstat      FAIL");
+            failed += 1;
+        }
+    }
+
     let _ = dir;
 
     if failed == 0 {
-        Println!("ok 5/5");
+        Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 5", failed);
+        Println!("FAIL {} of 6", failed);
         syscall::Exit(1);
     }
 }
