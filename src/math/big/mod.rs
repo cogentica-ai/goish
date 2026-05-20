@@ -3753,6 +3753,7 @@ fn add_signed(a: &Int, b: &Int) -> Int {
 /// `form` enum). The order — `Zero < Finite < Inf` — is meaningful in
 /// Go; we keep an explicit discriminant for clarity.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(non_camel_case_types)]
 enum form {
     /// `±0` — mantissa and exponent are ignored.
     Zero,

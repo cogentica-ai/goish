@@ -322,8 +322,7 @@ impl FlagSet {
     /// Print one line per registered flag: `  -name  usage` to Stderr.
     /// Minimal — no type/default columns yet.
     pub fn PrintDefaults(&self) {
-        use crate::io::Writer as _;
-        let mut e = crate::os::Stderr();
+        let e = crate::os::Stderr();
         for d in &self.defs {
             let mut buf: Vec<byte> = Vec::new();
             buf.extend_from_slice(b"  -");

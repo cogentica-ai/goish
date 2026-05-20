@@ -55,7 +55,7 @@ struct AbbrevAttr {
 struct Abbrev {
     code: u64,
     _tag: u64,
-    has_children: bool,
+    _has_children: bool,
     attrs: Vec<AbbrevAttr>,
 }
 
@@ -74,7 +74,7 @@ fn parse_abbrev_table(buf: &[u8], start: usize) -> Vec<Abbrev> {
             Some(v) => v,
             None => break,
         };
-        let has_children = match read_u8(buf, &mut off) {
+        let _has_children = match read_u8(buf, &mut off) {
             Some(v) => v != 0,
             None => break,
         };
@@ -96,7 +96,7 @@ fn parse_abbrev_table(buf: &[u8], start: usize) -> Vec<Abbrev> {
         out.push(Abbrev {
             code,
             _tag: tag,
-            has_children,
+            _has_children,
             attrs,
         });
     }

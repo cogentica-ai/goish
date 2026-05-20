@@ -337,7 +337,6 @@ impl PartialEq<Errno> for i32 {
 // returns the Go-shape `(value, ok)` comma-ok pair.
 impl PartialEq<Errno> for crate::errors::error {
     fn eq(&self, other: &Errno) -> bool {
-        use crate::goany::AsExt;
         let (e, ok) = self.As::<Errno>();
         ok && *e == *other
     }

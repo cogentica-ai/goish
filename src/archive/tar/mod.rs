@@ -12,7 +12,7 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::errors::{self, error, nil};
+use crate::errors::{error, nil};
 use crate::gomap::map;
 use crate::goslice::slice;
 use crate::gostring::string;
@@ -1368,7 +1368,7 @@ impl Header {
         let mut preferPAX = false;
 
         // verifyString — mirror of common.go's closure.
-        let mut verify_string = |s: &string, size: int, _name: &'static str, paxKey: &'static str,
+        let verify_string = |s: &string, size: int, _name: &'static str, paxKey: &'static str,
                                  format: &mut Format,
                                  whyNoGNU: &mut string,
                                  whyNoUSTAR: &mut string,
@@ -1400,7 +1400,7 @@ impl Header {
             }
         };
 
-        let mut verify_numeric = |n: i64, size: int, _name: &'static str, paxKey: &'static str,
+        let verify_numeric = |n: i64, size: int, _name: &'static str, paxKey: &'static str,
                                   format: &mut Format,
                                   whyNoGNU: &mut string,
                                   whyNoUSTAR: &mut string,
@@ -1426,7 +1426,7 @@ impl Header {
             }
         };
 
-        let mut verify_time = |ts: Time, size: int, _name: &'static str, paxKey: &'static str,
+        let verify_time = |ts: Time, size: int, _name: &'static str, paxKey: &'static str,
                                format: &mut Format,
                                whyNoGNU: &mut string,
                                whyNoUSTAR: &mut string,
@@ -1799,7 +1799,7 @@ impl<W: crate::io::Writer> Writer<W> {
                 buf.extend_from_slice(rec.as_bytes());
             }
 
-            let mut name = string::new();
+            let mut name: string;
             let flag: byte;
             if isGlobal {
                 name = realName.clone();

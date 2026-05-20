@@ -35,7 +35,6 @@ use alloc::vec::Vec;
 use crate::errors::{self, error, nil, ErrorTrait};
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::runtime::spin::SpinLock;
 use crate::types::{byte, int, rune, uint};
 
 mod atof;
@@ -58,14 +57,6 @@ fn lower(c: byte) -> byte {
 }
 
 // ─── Sentinels (cached, Arc-stable) ───────────────────────────────────
-
-fn cached_error(slot: &SpinLock<Option<error>>, init: fn() -> error) -> error {
-    let mut g = slot.lock();
-    if g.is_none() {
-        *g = Some(init());
-    }
-    g.as_ref().unwrap().clone()
-}
 
 crate::var! {
     /// `strconv.ErrSyntax` — input did not look like a number.

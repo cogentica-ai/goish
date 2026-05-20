@@ -789,8 +789,8 @@ pub fn GenerateKey(rand: &mut dyn io::Reader, bits: int) -> (PrivateKey, error) 
     }
 }
 
-/// `errDivisorTooLarge` (keygen.go:118) — returned by `totient` when
-/// gcd(p-1, q-1) is too large to divide with a single-word divisor.
+// `errDivisorTooLarge` (keygen.go:118) — returned by `totient` when
+// gcd(p-1, q-1) is too large to divide with a single-word divisor.
 crate::var! {
     errDivisorTooLarge: error = "divisor too large";
 }

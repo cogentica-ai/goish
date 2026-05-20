@@ -35,7 +35,9 @@ use crate::io;
 use crate::nilval::Nil;
 use crate::runtime::spin::SpinLock;
 use crate::types::{byte, int};
+#[allow(non_camel_case_types)]
 type int32 = i32;
+#[allow(non_camel_case_types)]
 type int64 = i64;
 
 // ─── ALFG constants (rng.go:14-20) ───────────────────────────────────
@@ -67,6 +69,7 @@ pub trait Source64: Source {
 // 607-element ring `vec` plus the two read indices `tap` and `feed`.
 
 #[derive(Clone)]
+#[allow(non_camel_case_types)]
 pub struct rngSource {
     tap: i32,            // index into vec; Go stores as int
     feed: i32,           // index into vec; Go stores as int

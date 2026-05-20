@@ -212,9 +212,9 @@ pub fn New<S: __StringConv>(text: S) -> error {
     })))
 }
 
-/// `errors.ErrUnsupported` (errors/errors.go:90) — sentinel returned
-/// when a feature is unsupported. Use sites compare bare:
-/// `errors::Is(x, errors::ErrUnsupported)` and `if x == errors::ErrUnsupported`.
+// `errors.ErrUnsupported` (errors/errors.go:90) — sentinel returned
+// when a feature is unsupported. Use sites compare bare:
+// `errors::Is(x, errors::ErrUnsupported)` and `if x == errors::ErrUnsupported`.
 crate::var! { pub ErrUnsupported: error = "unsupported operation"; }
 
 impl error {

@@ -1216,6 +1216,7 @@ pub use crate::io::fs::DirEntry;
 /// `os.unixDirent` (file_unix.go:446) — concrete `fs.DirEntry` over a
 /// `getdents64` record. Carries the parent directory path so `Info()`
 /// can `lstat` the entry on demand (Go's `unixDirent.Info`).
+#[allow(non_camel_case_types)]
 struct unixDirent {
     /// Parent directory path (so `Info()` can build `parent + "/" + name`).
     parent: string,

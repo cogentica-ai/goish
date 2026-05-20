@@ -41,7 +41,7 @@ use alloc::vec::Vec;
 
 use crate::bufio;
 use crate::compress::flate;
-use crate::errors::{self, error, nil, ErrorTrait};
+use crate::errors::{self, error, nil};
 use crate::goslice::slice;
 use crate::hash::adler32;
 use crate::hash::Hash32;

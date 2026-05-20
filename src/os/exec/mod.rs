@@ -49,9 +49,9 @@ use crate::io;
 use crate::syscall;
 use crate::types::{byte, int};
 
-/// Sentinel returned by `LookPath` when no matching executable is on
+// Sentinel returned by `LookPath` when no matching executable is on
+// `$PATH`. Mirrors `exec.ErrNotFound`.
 crate::var! {
-    /// `$PATH`. Mirrors `exec.ErrNotFound`.
     pub ErrNotFound: error = "executable file not found in $PATH";
 }
 

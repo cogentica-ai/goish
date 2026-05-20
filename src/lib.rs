@@ -143,11 +143,13 @@ pub type Context_ = alloc::sync::Arc<dyn context::Context>;
 
 /// `&mut slice<byte>` — the mutable-byte-slice borrow, used at 271
 /// stdlib param positions (BufferTo, AppendTo, ReadFull-style APIs).
+#[allow(non_camel_case_types)]
 pub type bytes_mut<'a> = &'a mut goslice::slice<types::byte>;
 
 /// `bytes_` — the borrow form of a byte slice (read-only). 660 stdlib
 /// param positions. Use over `&slice<byte>` when call-site brevity
 /// matters; both spellings compile identically.
+#[allow(non_camel_case_types)]
 pub type bytes_<'a> = &'a goslice::slice<types::byte>;
 
 /// `nilable!` — single surface spelling for the three nilable cells.

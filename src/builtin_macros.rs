@@ -1,5 +1,13 @@
 // builtin_macros — Go's slice-shaped builtins as Rust macros.
 //
+// `#![allow(unused_attributes)]` — the `__var_munch!` macro forwards
+// user-supplied `#[…]` attributes (incl. `#[doc = "…"]`) onto a marker
+// macro call. rustc warns that doc attrs on macro invocations don't
+// generate documentation; the forwarding is the established pattern,
+// so we suppress at module level.
+#![allow(unused_attributes)]
+
+//
 //   Go                                   goish
 //   ──────────────────────────────────   ──────────────────────────────────
 //   make([]int, 5)                       make!([]int, 5)
@@ -613,12 +621,19 @@ macro_rules! __var_munch {
     () => {};
 
     // ── error sentinel: string-literal payload ─────────────────────
+    //
+    // The `$(#[$attr:meta])*` capture lets callers write `/// doc-line`
+    // above each entry without macro_rules parse errors, but the attrs
+    // are NOT replayed onto the inner marker macro invocation (which
+    // would trigger `unused_attributes` since macro calls don't accept
+    // doc attrs). Per-entry rustdoc inside a `var!{}` block is dropped
+    // by design; document the block as a whole with a regular `//`
+    // comment above the `var!` invocation.
     (
         $(#[$attr:meta])*
         $vis:vis $name:ident : error = $msg:literal ;
         $($rest:tt)*
     ) => {
-        $(#[$attr])*
         $crate::__var_emit_error_marker!( $vis $name $msg );
         $crate::__var_munch!( $($rest)* );
     };
@@ -632,7 +647,6 @@ macro_rules! __var_munch {
         $vis:vis $name:ident : error = { $($expr:tt)* } ;
         $($rest:tt)*
     ) => {
-        $(#[$attr])*
         $crate::__var_emit_error_marker!( $vis $name { $($expr)* } );
         $crate::__var_munch!( $($rest)* );
     };

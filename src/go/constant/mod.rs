@@ -33,11 +33,11 @@ pub trait Value: Send + Sync {
 
 /// Match Go's `BoolVal`, `StringVal`, `Int64Val` etc as free functions
 /// dispatching on the trait object.
-pub fn BoolVal(v: &(dyn Value)) -> bool {
+pub fn BoolVal(v: &dyn Value) -> bool {
     matches!(v.Kind(), Kind::Bool)
 }
 
-pub fn StringVal(v: &(dyn Value)) -> string {
+pub fn StringVal(v: &dyn Value) -> string {
     if matches!(v.Kind(), Kind::String) {
         v.String()
     } else {
@@ -45,7 +45,7 @@ pub fn StringVal(v: &(dyn Value)) -> string {
     }
 }
 
-pub fn Int64Val(v: &(dyn Value)) -> (int, bool) {
+pub fn Int64Val(v: &dyn Value) -> (int, bool) {
     let s = v.String();
     let ok = matches!(v.Kind(), Kind::Int);
     let txt: &str = AsRef::<str>::as_ref(&s);

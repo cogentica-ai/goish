@@ -32,7 +32,7 @@ extern crate alloc;
 use crate::error;
 use crate::goslice::slice;
 use crate::types::{byte, int};
-use crate::errors::{self, nil};
+use crate::errors::nil;
 
 // ─── Reader / Writer / Closer traits ───────────────────────────────────
 
@@ -175,16 +175,6 @@ impl<C: Closer + ?Sized> Closer for alloc::boxed::Box<C> {
 //
 // When OnceLock-equivalent infrastructure lands in goish::sync, these
 // helpers swap to a lock-free read fast-path. The shape stays.
-
-use crate::runtime::spin::SpinLock;
-
-fn cached_error(slot: &SpinLock<Option<error>>, init: fn() -> error) -> error {
-    let mut g = slot.lock();
-    if g.is_none() {
-        *g = Some(init());
-    }
-    g.as_ref().unwrap().clone()
-}
 
 // io sentinels — Doctrine 2 marker form. Use sites compare bare:
 //   if errors::Is(err, io::EOF) { ... }

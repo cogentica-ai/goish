@@ -37,7 +37,7 @@ use crate::error;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::net::textproto::MIMEHeader;
-use crate::net::{Conn, IP, TCPConn};
+use crate::net::{Conn, IP};
 use crate::time::Duration;
 use crate::types::int;
 

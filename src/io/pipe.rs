@@ -24,14 +24,14 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 
-use crate::errors::{self, error};
+use crate::errors::error;
 use crate::gochan::chan;
 use crate::goslice::slice;
 use crate::errors::nil;
 use crate::sync::{Mutex, Once};
 use crate::types::{byte, int};
 
-use super::{cached_error, Closer, Reader, Writer, EOF};
+use super::{Closer, Reader, Writer, EOF};
 
 // ─── ErrClosedPipe (pipe.go:36) ───────────────────────────────────────
 

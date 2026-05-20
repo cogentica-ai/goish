@@ -16,7 +16,6 @@
 // rest. String arguments take `&string` (cheap — just a borrow of an
 // `Arc<[u8]>` handle).
 
-use crate::gostring::string;
 use crate::types::{byte, int, rune};
 
 extern crate alloc;

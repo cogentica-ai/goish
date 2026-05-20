@@ -27,7 +27,6 @@ use crate::gomap::map;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
-use crate::runtime::spin::SpinLock;
 use crate::strconv;
 use crate::types::{byte, float64, int};
 
@@ -260,14 +259,6 @@ impl PartialEq<Token> for Delim {
 }
 
 // ─── Sentinel errors ───────────────────────────────────────────────────
-
-fn cached_error(slot: &SpinLock<Option<error>>, init: fn() -> error) -> error {
-    let mut g = slot.lock();
-    if g.is_none() {
-        *g = Some(init());
-    }
-    g.as_ref().unwrap().clone()
-}
 
 crate::var! {
     pub ErrSyntax: error       = "json: invalid syntax";

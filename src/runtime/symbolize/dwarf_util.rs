@@ -76,7 +76,7 @@ pub fn read_uleb(buf: &[u8], off: &mut usize) -> Option<u64> {
 pub fn read_sleb(buf: &[u8], off: &mut usize) -> Option<i64> {
     let mut result: i64 = 0;
     let mut shift: u32 = 0;
-    let mut last: u8 = 0;
+    let mut last: u8;
     loop {
         if *off >= buf.len() {
             return None;

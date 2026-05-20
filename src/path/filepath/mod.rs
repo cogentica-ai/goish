@@ -470,6 +470,7 @@ impl errors::IsTarget for __SkipAllMarker {
 // `fs.FileInfoToDirEntry(info)`; the slim equivalent carries just the
 // base name and the mode bits an `os.Lstat` reported. Its `Info()`
 // re-stats the path (matching `fs.dirInfo` / `unixDirent` behaviour).
+#[allow(non_camel_case_types)]
 struct filepathDirEnt {
     full: string,
     name: string,

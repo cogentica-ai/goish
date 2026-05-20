@@ -35,7 +35,6 @@ use crate::errors::{self, error, ErrorTrait};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
-use crate::io::Writer as _; // bring `.Write()` method into scope
 use crate::errors::nil;
 use crate::os;
 use crate::types::{byte, int, rune};
@@ -1189,7 +1188,7 @@ fn do_println(args: &[FmtArg], f: &mut FmtBuf) {
 pub fn println_impl(args: &[FmtArg]) -> (int, error) {
     let mut f = FmtBuf::new();
     do_println(args, &mut f);
-    let mut out = os::Stdout();
+    let out = os::Stdout();
     let buf = slice::__from_vec(f.into_bytes());
     out.Write(buf)
 }
@@ -1240,7 +1239,7 @@ pub fn print_impl(args: &[FmtArg]) -> (int, error) {
         first = false;
         a.write(b'v', f.borrow_mut());
     }
-    let mut out = os::Stdout();
+    let out = os::Stdout();
     let buf = slice::__from_vec(f.into_bytes());
     out.Write(buf)
 }

@@ -22,7 +22,6 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::fmt;
-use crate::io::Writer as _;
 use crate::os;
 use crate::time;
 use crate::types::{byte, int};
@@ -73,7 +72,7 @@ fn push_int_pad(buf: &mut Vec<byte>, n: int, width: usize) {
 fn write_prefix_to_stderr() {
     let mut buf: Vec<byte> = Vec::with_capacity(20);
     write_prefix(&mut buf);
-    let mut e = os::Stderr();
+    let e = os::Stderr();
     let _ = e.Write(crate::goslice::slice::__from_vec(buf));
 }
 
@@ -97,7 +96,7 @@ pub fn print_impl(args: &[fmt::FmtArg]) {
     //     output() ensures a trailing newline if the appended bytes
     //     don't already end in one.
     write_prefix_to_stderr();
-    let mut e = os::Stderr();
+    let e = os::Stderr();
     // Go: fmt.Append behavior — concatenate args with default %v, no
     // separators or trailing newline. Reuse fmt::sprint_impl for the
     // body, then append a newline if missing.
