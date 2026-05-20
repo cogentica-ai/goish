@@ -145,6 +145,18 @@ pub trait Pusher {
 pub struct HeaderHandle(Arc<SpinLock<Header>>);
 
 impl HeaderHandle {
+    /// Create a new `HeaderHandle` backed by the given `Header` value.
+    /// Useful for constructing mock `ResponseWriter` implementations in tests.
+    pub fn new(header: Header) -> Self {
+        HeaderHandle(Arc::new(SpinLock::new(header)))
+    }
+
+    /// Snapshot: clone the current header state. Use in tests to read back
+    /// what was written into the handle.
+    pub fn snapshot(&self) -> Header {
+        self.0.lock().clone()
+    }
+
     /// `h.Set(key, value)` — replace any existing values for `key`.
     pub fn Set<K: Into<string>, V: Into<string>>(&self, key: K, value: V) {
         self.0.lock().Set(key, value);
