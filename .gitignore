@@ -3,3 +3,4 @@ Cargo.lock
 /.memsearch
 /.claude
 /scripts/.e2e-artifacts/
+/doc/
