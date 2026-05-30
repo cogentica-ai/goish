@@ -124,7 +124,7 @@ fn write_result(idx: u8, label: &[u8], pass: bool) {
 // Decompress `compressed`, assert the output equals `raw`.
 fn check(idx: u8, raw: &[u8], compressed: &[u8], label: &[u8]) {
     let r = bytes::NewReader(from_bytes(compressed));
-    let mut d = flate::NewReader(r);
+    let mut d = flate::NewReaderByte(r);
     let (got, err) = read_all(&mut d);
     let close_err = d.Close();
     let mut ok = err.IsNil() && close_err.IsNil() && got.len() == raw.len();
@@ -197,7 +197,7 @@ fn test_6_dict() {
     let r = bytes::NewReader(from_bytes(
         b"\xc2\x22\xa4\x90\x55\x9a\x5b\x50\x0c\x08\x00\x00\xff\xff",
     ));
-    let mut d = flate::NewReaderDict(r, dict);
+    let mut d = flate::NewReaderByteDict(r, dict);
     let (got, err) = read_all(&mut d);
     let raw: &[u8] = b"the quick brown fox jumps";
     let mut ok = err.IsNil() && got.len() == raw.len();
@@ -221,7 +221,7 @@ fn test_7_truncated() {
     let r = bytes::NewReader(from_bytes(
         b"\x2a\xc9\x48\x55\x28\x2c\xcd\x4c\xce\x56\x48\x2a",
     ));
-    let mut d = flate::NewReader(r);
+    let mut d = flate::NewReaderByte(r);
     let (_got, err) = read_all(&mut d);
     let ok = !err.IsNil() && errors::Is(err, io::ErrUnexpectedEOF);
     write_result(7, b"truncated ErrUnexpectedEOF ", ok);
@@ -233,7 +233,7 @@ fn test_7_truncated() {
 fn test_8_corrupt() {
     // First byte 0x07 -> BFINAL=1, BTYPE=11 (reserved) -> error.
     let r = bytes::NewReader(from_bytes(b"\x07\x00\x00\x00\x00"));
-    let mut d = flate::NewReader(r);
+    let mut d = flate::NewReaderByte(r);
     let (_got, err) = read_all(&mut d);
     let ok = !err.IsNil();
     write_result(8, b"corrupt block type 3      ", ok);
@@ -246,7 +246,7 @@ fn test_9_close() {
     // Close() returns nil once the stream has been fully consumed
     // (terminal err == io.EOF).
     let r = bytes::NewReader(from_bytes(b"\x01\x00\x00\xff\xff"));
-    let mut d = flate::NewReader(r);
+    let mut d = flate::NewReaderByte(r);
     let (_got, _err) = read_all(&mut d);
     let ce = d.Close();
     let ok = ce.IsNil();
@@ -262,7 +262,7 @@ fn test_10_small_buffer() {
     let r = bytes::NewReader(from_bytes(
         b"\xca\x48\xcd\xc9\xc9\xd7\x51\x28\xcf\x2f\xca\x49\x01\x04\x00\x00\xff\xff",
     ));
-    let mut d = flate::NewReader(r);
+    let mut d = flate::NewReaderByte(r);
     let mut out: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
     let mut buf = from_bytes(&[0u8; 3]);
     let raw: &[u8] = b"hello, world";

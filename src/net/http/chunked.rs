@@ -194,11 +194,13 @@ impl<R: Reader> Reader for ChunkedReader<R> {
                 continue;
             }
             // Go: if len(b) == 0 { break }
-            if b.Len() == 0 {
+            // In Go, b is a sub-slice that shrinks (b = b[n0:]) after each
+            // read; Goish uses a fixed slice + offset n. Check remaining space.
+            if b.Len() - n <= 0 {
                 break;
             }
             // Go: rbuf := b; if uint64(len(rbuf)) > cr.n { rbuf = rbuf[:cr.n] }
-            let want = core::cmp::min(b.Len() as u64 - n as u64, self.n) as int;
+            let want = core::cmp::min((b.Len() - n) as u64, self.n) as int;
             let mut rbuf = crate::make!([]byte, want);
             // Go: var n0 int; n0, cr.err = cr.r.Read(rbuf); n += n0; b = b[n0:]
             let (rn, rerr) = self.r.Read(&mut rbuf);

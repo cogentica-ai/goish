@@ -466,6 +466,21 @@ where
 // NilDyn + type_assert! backing — Go's comma-ok interface assertion
 // ─────────────────────────────────────────────────────────────────────
 
+/// Compile-time witness that a `#[goish::interface]`-decorated trait
+/// has a full nil sentinel (i.e. its supertrait clause contains only
+/// `Send`/`Sync` markers, no foreign traits).
+///
+/// Emitted by the macro alongside every decorated trait. The
+/// `cast!` macro const-asserts on this before calling
+/// `__cast_iface`; traits with composite supertraits (e.g.
+/// `Object: metav1::Object + runtime::Object`) set this to `false`,
+/// causing `cast!` to emit a clear compile-time error directing the
+/// user to `AsExt::As::<ConcreteType>()` instead.
+#[doc(hidden)]
+pub trait __HasNilSentinel {
+    const __GOISH_HAS_NIL_SENTINEL: bool;
+}
+
 /// Backs the false branch of a comma-ok interface type assertion
 /// (`let (v, ok) = goish::cast!(x, Iface)` — Go's
 /// `v, ok := x.(Iface)`). When the downcast misses, `v` is bound to

@@ -176,7 +176,7 @@ fn decompress_dict(comp: &[u8], dict: &[u8]) -> (Vec<byte>, error) {
     read_all(&mut d)
 }
 
-fn read_all<R: io::Reader>(d: &mut zlib::Reader<R>) -> (Vec<byte>, error) {
+fn read_all<R: io::Reader + io::ByteReader>(d: &mut zlib::Reader<R>) -> (Vec<byte>, error) {
     let mut out: Vec<byte> = Vec::new();
     let mut buf = from_bytes(&[0u8; 512]);
     loop {

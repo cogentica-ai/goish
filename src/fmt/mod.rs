@@ -158,8 +158,13 @@ impl<'a> FmtArg<'a> {
             FmtArg::Val(v) => v.fmt(verb, f),
             FmtArg::Err(e) => {
                 // %s / %v / default for an error → Error() text.
-                let s = e.Error();
-                write_string_with_verb(s.as_bytes(), verb, f);
+                // Go: nil error formats as "<nil>".
+                if e.IsNil() {
+                    write_string_with_verb(b"<nil>", verb, f);
+                } else {
+                    let s = e.Error();
+                    write_string_with_verb(s.as_bytes(), verb, f);
+                }
             }
         }
     }
@@ -701,11 +706,16 @@ fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> 
         if verb == b'w' {
             if arg_idx < args.len() {
                 if let Some(e) = args[arg_idx].as_error() {
-                    if wrap_target.is_none() && *e != nil {
+                    if wrap_target.is_none() && !e.IsNil() {
                         wrap_target = Some(e.clone());
                     }
-                    let s = e.Error();
-                    f.extend(s.as_bytes());
+                    // Go: nil error formats as "<nil>".
+                    if e.IsNil() {
+                        f.extend(b"<nil>");
+                    } else {
+                        let s = e.Error();
+                        f.extend(s.as_bytes());
+                    }
                 } else {
                     // %w with a non-error arg — Go panics; we write an
                     // explanatory placeholder to make the bug visible.

@@ -468,9 +468,16 @@ impl block {
 
         // Update the checksum.
         // This field is special in that it is terminated by a NUL then space.
+        // Go formats into field[:7] (7 bytes), leaving field[7] for the trailing SPACE.
+        // See: https://cs.opensource.google/go/go/+/refs/tags/go1.25.8:src/archive/tar/format.go;l=223
+        //   f.formatOctal(field[:7], chksum) // Never fails since 128776 < 262143
+        //   field[7] = ' '
         let (chksum, _) = self.computeChecksum();
         let mut f2 = formatter::new();
-        f2.formatOctal(self.v7m_chksum(), chksum);
+        {
+            let chksum_field = self.v7m_chksum();
+            f2.formatOctal(&mut chksum_field[..7], chksum);
+        }
         self.0[155] = b' ';
     }
 }

@@ -191,7 +191,7 @@ macro_rules! nilable {
 pub mod any {
     pub use crate::goany::{
         register_with, lookup_with, AsExt, DowncastableFromAny, HasDynAny,
-        NilDyn, TraitProbe, TraitRegistry,
+        NilDyn, TraitProbe, TraitRegistry, __HasNilSentinel,
     };
 }
 
@@ -208,7 +208,7 @@ pub use gochan::chan;
 pub use gomap::map;
 pub use goslice::slice;
 pub use gostring::string;
-pub use types::{byte, complex64, complex128, float32, float64, int, rune, uint, uintptr};
+pub use types::{byte, complex64, complex128, float32, float64, int, int8, int16, int32, int64, rune, uint, uint8, uint16, uint32, uint64, uintptr};
 
 // Re-export the entry-point attribute so users write `#[goish::main]`.
 pub use goish_macros::main;

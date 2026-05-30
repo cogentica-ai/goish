@@ -411,7 +411,11 @@ impl URL {
                     buf.WriteString(self.Host.clone());
                 }
             }
-            buf.WriteString(self.EscapedPath());
+            let path = self.EscapedPath();
+            if path.Len() != 0 && path.as_bytes()[0] != b'/' && self.Host.Len() != 0 {
+                buf.WriteString("/");
+            }
+            buf.WriteString(path);
         }
 
         if self.ForceQuery || self.RawQuery.Len() != 0 {
@@ -427,10 +431,15 @@ impl URL {
         buf.String()
     }
 
-    /// `u.EscapedPath()` (url.go:701) — returns the escaped form of u.Path.
+    /// `u.EscapedPath()` (url.go:681) — returns the escaped form of u.Path.
+    /// Returns u.RawPath only when it is a valid escaping of u.Path
+    /// (i.e., unescape(RawPath) == Path). Otherwise ignores RawPath.
     pub fn EscapedPath(&self) -> string {
         if self.RawPath.Len() != 0 && self.validEncodedPath(&self.RawPath) {
-            return self.RawPath.clone();
+            let (p, err) = unescape(self.RawPath.clone(), EncodePath);
+            if err == nil && p == self.Path {
+                return self.RawPath.clone();
+            }
         }
         if self.Path == string("*") {
             return self.Path.clone();

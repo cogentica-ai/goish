@@ -696,3 +696,54 @@ path = "examples/gzip_smoke.rs"
 [[example]]
 name = "runtime_callers_smoke"
 path = "examples/runtime_callers_smoke.rs"
+
+[[example]]
+name = "x509_certpool_smoke"
+path = "examples/x509_certpool_smoke.rs"
+
+[[example]]
+name = "asn1_smoke"
+path = "examples/asn1_smoke.rs"
+
+[[example]]
+name = "ssh_smoke"
+path = "examples/ssh_smoke.rs"
+[[example]]
+name = "tls12_smoke"
+path = "examples/tls12_smoke.rs"
+
+[[example]]
+name = "ecdsa_smoke"
+path = "examples/ecdsa_smoke.rs"
+
+[[example]]
+name = "x509_ecdsa_smoke"
+path = "examples/x509_ecdsa_smoke.rs"
+
+[[example]]
+name = "https_real_smoke"
+path = "examples/https_real_smoke.rs"
+
+[[example]]
+name = "temp_uniqueness_smoke"
+path = "examples/temp_uniqueness_smoke.rs"
+
+[[example]]
+name = "bufio_pathological_smoke"
+path = "examples/bufio_pathological_smoke.rs"
+
+[[example]]
+name = "interface_auto_composite"
+path = "examples/interface_auto_composite.rs"
+
+[[example]]
+name = "chacha20poly1305_smoke"
+path = "examples/chacha20poly1305_smoke.rs"
+
+[[example]]
+name = "zlib_offset_smoke"
+path = "examples/zlib_offset_smoke.rs"
+
+[[example]]
+name = "cast_clean_scratch"
+path = "examples/cast_clean_scratch.rs"

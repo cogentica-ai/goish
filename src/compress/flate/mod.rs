@@ -9,12 +9,14 @@
 //   * Go's `decompressor.step` is a `func(*decompressor)` field.
 //     Goish dispatches via the `Step` enum inside `Read` — functionally
 //     identical (no function-pointer field, AGENTS.md §5).
-//   * Go does `r.(Reader)` to detect a source that already implements
-//     `io.ByteReader`, else wraps in `bufio.NewReader`. Goish
-//     unconditionally wraps the source in `bufio::Reader<R>` (which
-//     implements both `io::Reader` and `io::ByteReader` — Go's
-//     `flate.Reader`). Slight extra buffering on already-buffered
-//     sources; behavior identical. The lzw port does the same.
+//   * Go's `makeReader` does `r.(Reader)` to detect a source that already
+//     implements `io.ByteReader`, else wraps it in `bufio.NewReader`. Goish
+//     mirrors this with TWO entry points: `NewReader` wraps a plain
+//     `io::Reader` in `bufio::Reader` (the else-branch), while `NewReaderByte`
+//     takes a source that already implements `io::ByteReader` and uses it
+//     DIRECTLY (the `r.(Reader)` branch) — no extra buffering, so the source
+//     is left positioned exactly at the byte past the DEFLATE stream.
+//     Proven by examples/zlib_offset_smoke.rs (consumed == exact stream len).
 //   * Go's `NewReader` returns `io.ReadCloser`; goish has no
 //     trait-object ReadCloser, so we return the concrete
 //     `Decompressor<R>` which implements `io::Reader` + `io::Closer`
@@ -453,10 +455,17 @@ const stateDict: int = 1;
 /// `flate.decompressor` — DEFLATE decompression state. Returned by
 /// [`NewReader`] / [`NewReaderDict`]; implements `io::Reader` +
 /// `io::Closer`, and carries `Reset` (Go's `Resetter`).
-pub struct Decompressor<R: io::Reader> {
-    // Input source. Go's `flate.Reader` = io.Reader + io.ByteReader;
-    // `bufio::Reader<R>` provides exactly that.
-    r: bufio::Reader<R>,
+pub struct Decompressor<R: io::Reader + io::ByteReader> {
+    // Input source. Go's `flate.Reader` = io.Reader + io.ByteReader.
+    // The decompressor's bit reader pulls bytes via `ReadByte()`, so it
+    // consumes EXACTLY the compressed bytes of the stream and no more —
+    // matching Go's `makeReader`, which uses an already-ByteReader source
+    // directly (no extra buffering). `NewReader` wraps a plain `io::Reader`
+    // in `bufio::Reader` (Go's else-branch); `NewReaderByte` uses a source
+    // that already implements `io::ByteReader` directly (Go's
+    // `r.(flate.Reader)` branch), leaving the source positioned precisely
+    // at the stream end so callers can read a following trailer/next object.
+    r: R,
     roffset: int,
 
     // Input bits, in top of b.
@@ -494,7 +503,7 @@ pub struct Decompressor<R: io::Reader> {
     copyDist: int,
 }
 
-impl<R: io::Reader> Decompressor<R> {
+impl<R: io::Reader + io::ByteReader> Decompressor<R> {
     // Go: func (f *decompressor) nextBlock()  (inflate.go:302)
     fn nextBlock(&mut self) {
         while self.nb < 1 + 2 {
@@ -577,7 +586,7 @@ impl<R: io::Reader> Decompressor<R> {
     /// used by `compress/gzip`) to read the format trailer that follows
     /// the DEFLATE payload — Go's `zlib.reader` keeps its own
     /// `flate.Reader` handle for the same purpose.
-    pub(crate) fn reader_mut(&mut self) -> &mut bufio::Reader<R> {
+    pub(crate) fn reader_mut(&mut self) -> &mut R {
         &mut self.r
     }
 
@@ -586,7 +595,7 @@ impl<R: io::Reader> Decompressor<R> {
     /// used by `compress/gzip`, whose multistream support must re-parse
     /// a fresh header from the source after one gzip member's trailer
     /// and then `Reset` a flate decoder back onto it.
-    pub(crate) fn into_reader(self) -> bufio::Reader<R> {
+    pub(crate) fn into_reader(self) -> R {
         self.r
     }
 
@@ -1029,7 +1038,10 @@ impl<R: io::Reader> Decompressor<R> {
     /// source. `dict` is a preset dictionary (pass `slice::new()` /
     /// `nil` for none).
     pub fn Reset(&mut self, r: R, dict: slice<byte>) -> error {
-        self.r = bufio::NewReader(r);
+        // `R` is already the `flate.Reader` (io::Reader + io::ByteReader);
+        // assign directly — no re-wrapping (mirrors makeReader being a
+        // no-op when the source already implements the interface).
+        self.r = r;
         self.roffset = 0;
         self.b = 0;
         self.nb = 0;
@@ -1067,8 +1079,8 @@ struct HuffTables<'a> {
 
 // Go: func (f *decompressor) huffSym(...)  — table-lookup core lifted out
 // of the impl so it does not alias `&mut self` against the decoder.
-fn huff_sym_step<R: io::Reader>(
-    r: &mut bufio::Reader<R>,
+fn huff_sym_step<R: io::Reader + io::ByteReader>(
+    r: &mut R,
     fb: &mut u32,
     fnb: &mut uint,
     roffset: &mut int,
@@ -1152,41 +1164,7 @@ fn slice_bytes(s: &slice<byte>) -> Vec<byte> {
 
 // ─── constructors (inflate.go:807) ─────────────────────────────────────
 
-fn new_decompressor<R: io::Reader>(r: R, dict: &[byte]) -> Decompressor<R> {
-    let mut f = Decompressor {
-        r: bufio::NewReader(r),
-        roffset: 0,
-        b: 0,
-        nb: 0,
-        h1: huffmanDecoder::new(),
-        h2: huffmanDecoder::new(),
-        hfixed: fixedHuffmanDecoder(),
-        bitsArr: Box::new([0i64; (maxNumLit + maxNumDist) as usize]),
-        codebits: [0i64; numCodes as usize],
-        dict: dictDecoder::new(),
-        buf: [0u8; 4],
-        step: Step::NextBlock,
-        stepState: stateInit,
-        final_: false,
-        err: nil,
-        toRead: slice::new(),
-        hlFixed: false,
-        hdValid: false,
-        copyLen: 0,
-        copyDist: 0,
-    };
-    f.dict.init(maxMatchOffset, dict);
-    f
-}
-
-/// Build a `Decompressor` whose buffered source *is* the given
-/// `bufio::Reader<R>` — no extra wrapping. `compress/gzip` uses this to
-/// restart inflation on the next gzip member while reusing the buffered
-/// reader it has already positioned past the previous member's trailer.
-pub(crate) fn new_decompressor_buffered<R: io::Reader>(
-    r: bufio::Reader<R>,
-    dict: &[byte],
-) -> Decompressor<R> {
+fn new_decompressor<R: io::Reader + io::ByteReader>(r: R, dict: &[byte]) -> Decompressor<R> {
     let mut f = Decompressor {
         r,
         roffset: 0,
@@ -1213,31 +1191,68 @@ pub(crate) fn new_decompressor_buffered<R: io::Reader>(
     f
 }
 
+/// Build a `Decompressor` whose source *is* the given `bufio::Reader<R>`
+/// — no extra wrapping. `compress/gzip` uses this to restart inflation on
+/// the next gzip member while reusing the buffered reader it has already
+/// positioned past the previous member's trailer.
+///
+/// `bufio::Reader<R>` already implements `io::ByteReader`, so this is just
+/// `new_decompressor` specialised to that source type.
+pub(crate) fn new_decompressor_buffered<R: io::Reader>(
+    r: bufio::Reader<R>,
+    dict: &[byte],
+) -> Decompressor<bufio::Reader<R>> {
+    new_decompressor(r, dict)
+}
+
 /// `flate.NewReader(r)` (inflate.go:807) — a new ReadCloser reading the
 /// uncompressed version of `r`. Returns `io.EOF` after the final block.
 ///
-/// Returns the concrete `Decompressor<R>` (Go returns `io.ReadCloser`);
-/// it implements `io::Reader` + `io::Closer` and carries `Reset`.
-pub fn NewReader<R: io::Reader>(r: R) -> Decompressor<R> {
-    new_decompressor(r, &[])
+/// Mirrors Go's `makeReader` ELSE-branch: a plain `io::Reader` is wrapped
+/// in `bufio::Reader` (which supplies `io::ByteReader`). For a source that
+/// already implements `io::ByteReader`, use [`NewReaderByte`] to avoid the
+/// extra buffering and keep the source positioned exactly at the stream
+/// end. Returns the concrete `Decompressor` (Go returns `io.ReadCloser`).
+pub fn NewReader<R: io::Reader>(r: R) -> Decompressor<bufio::Reader<R>> {
+    new_decompressor(bufio::NewReader(r), &[])
 }
 
 /// `flate.NewReaderDict(r, dict)` (inflate.go:826) — like [`NewReader`]
 /// but initializes the reader with a preset dictionary `dict`.
-pub fn NewReaderDict<R: io::Reader>(r: R, dict: slice<byte>) -> Decompressor<R> {
+pub fn NewReaderDict<R: io::Reader>(r: R, dict: slice<byte>) -> Decompressor<bufio::Reader<R>> {
+    let d = slice_bytes(&dict);
+    new_decompressor(bufio::NewReader(r), &d)
+}
+
+/// Like [`NewReader`] but for a source that ALREADY implements
+/// `io::ByteReader` (Go's `flate.Reader`). Mirrors `makeReader`'s
+/// `r.(flate.Reader)` branch: the source is used directly with no extra
+/// buffering, so after `Read` returns `io.EOF` the source is positioned
+/// exactly at the first byte past the DEFLATE stream. This is what
+/// offset-tracking consumers (e.g. git packfile scanners reading
+/// sequential zlib streams) require.
+pub fn NewReaderByte<R: io::Reader + io::ByteReader>(r: R) -> Decompressor<R> {
+    new_decompressor(r, &[])
+}
+
+/// Like [`NewReaderDict`] but for an already-`io::ByteReader` source.
+pub fn NewReaderByteDict<R: io::Reader + io::ByteReader>(
+    r: R,
+    dict: slice<byte>,
+) -> Decompressor<R> {
     let d = slice_bytes(&dict);
     new_decompressor(r, &d)
 }
 
 // ─── trait impls ───────────────────────────────────────────────────────
 
-impl<R: io::Reader> io::Reader for Decompressor<R> {
+impl<R: io::Reader + io::ByteReader> io::Reader for Decompressor<R> {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         Decompressor::Read(self, p)
     }
 }
 
-impl<R: io::Reader> io::Closer for Decompressor<R> {
+impl<R: io::Reader + io::ByteReader> io::Closer for Decompressor<R> {
     fn Close(&mut self) -> error {
         Decompressor::Close(self)
     }

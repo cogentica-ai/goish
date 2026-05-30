@@ -1040,12 +1040,49 @@ fn parse_imports(input: TokenStream) -> Vec<ImportEntry> {
 //   * Each method's signature is captured as raw token text and
 //     re-emitted; complex generic / where-clause shapes round-trip
 //     through `TokenStream::to_string()`.
+/// Returns true when the supertrait clause contains ONLY `Send`/`Sync`
+/// marker traits (or is empty). Returns false when any non-marker
+/// supertrait is present — that means the trait is "composite" and we
+/// cannot safely auto-emit a nil sentinel struct that impls all the
+/// foreign supertraits.
+///
+/// Recognized trivial tokens (case-sensitive):
+///   `Send`, `Sync`,
+///   `::core::marker::Send`, `::core::marker::Sync`,
+///   `core::marker::Send`, `core::marker::Sync`
+///
+/// Any other segment — even `io::Writer` or `metav1::Object` — is
+/// composite.
+fn supertraits_are_trivial(supertraits: &str) -> bool {
+    // Strip leading `: ` that parse_iface may have retained.
+    let s = supertraits.trim_start_matches(':').trim();
+    if s.is_empty() {
+        return true;
+    }
+    s.split('+').map(|x| x.trim()).all(|x| {
+        matches!(
+            x,
+            "Send"
+                | "Sync"
+                | "::core::marker::Send"
+                | "::core::marker::Sync"
+                | "core::marker::Send"
+                | "core::marker::Sync"
+        )
+    })
+}
+
 #[proc_macro_attribute]
 pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let parsed = parse_iface(item);
     let name = &parsed.name;
     let nil_name = format!("__Nil{}", name);
     let vis = parsed.vis.as_deref().unwrap_or("");
+
+    // Determine whether the supertrait clause is trivial (only
+    // Send/Sync markers) or composite (includes foreign traits like
+    // `metav1::Object`). Composite → skip nil sentinel sections.
+    let composite = !supertraits_are_trivial(&parsed.supertraits);
 
     // Compose the supertrait clause. We always require `Send + Sync`
     // (every Goish iface flows across goroutines); pre-existing
@@ -1077,6 +1114,13 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // `__is_nil_iface` is a default method on the trait itself (NOT a
     // separate supertrait) so concrete impls inherit `false` for free
     // and the nil sentinel overrides to `true`.
+    //
+    // `__GOISH_HAS_NIL_SENTINEL` is a doc-hidden associated const
+    // that records whether this trait has a nil sentinel at compile
+    // time. Trivial supertraits → true; composite → false. The
+    // `cast!` macro reads this via `__HasNilSentinel` and produces a
+    // clear compile error for composite-trait callers.
+    let has_sentinel_val = if composite { "false" } else { "true" };
     let _ = writeln!(
         out,
         "{vis} trait {name}{supertraits} {{"
@@ -1100,23 +1144,47 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     );
     out.push_str("}\n\n");
 
-    // ── (2) Nil sentinel struct ─────────────────────────────────────
-    out.push_str("#[doc(hidden)]\n");
-    out.push_str("#[allow(non_camel_case_types)]\n");
-    let _ = writeln!(out, "pub struct {nil_name};");
-    out.push('\n');
-
-    // ── (3) impl Trait for __NilT — every method panics ────────────
-    let _ = writeln!(out, "impl {name} for {nil_name} {{");
-    for m in &parsed.methods {
-        let _ = writeln!(
-            out,
-            "    {} {{ panic!(\"goish: method call on nil {} interface\") }}",
-            m.sig_only.trim(), name
-        );
-    }
-    out.push_str("    fn __is_nil_iface(&self) -> bool { true }\n");
+    // Emit __HasNilSentinel impl so cast!() can const-assert on the
+    // presence/absence of a nil sentinel. Both trivial and composite
+    // traits get this; only the constant VALUE differs.
+    let _ = writeln!(
+        out,
+        "impl ::goish::any::__HasNilSentinel \
+         for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
+    );
+    let _ = writeln!(
+        out,
+        "    const __GOISH_HAS_NIL_SENTINEL: bool = {has_sentinel_val};"
+    );
     out.push_str("}\n\n");
+
+    // ── (2) Nil sentinel struct — TRIVIAL only ──────────────────────
+    //
+    // Skipped for composite traits (supertrait clause contains non-
+    // marker types like `metav1::Object`). Emitting the struct + impl
+    // would require also emitting `impl ForeignTrait for __NilT` which
+    // violates the orphan rule or fails when the foreign trait has
+    // non-default methods.
+    if !composite {
+        out.push_str("#[doc(hidden)]\n");
+        out.push_str("#[allow(non_camel_case_types)]\n");
+        let _ = writeln!(out, "pub struct {nil_name};");
+        out.push('\n');
+    }
+
+    // ── (3) impl Trait for __NilT — every method panics (TRIVIAL only)
+    if !composite {
+        let _ = writeln!(out, "impl {name} for {nil_name} {{");
+        for m in &parsed.methods {
+            let _ = writeln!(
+                out,
+                "    {} {{ panic!(\"goish: method call on nil {} interface\") }}",
+                m.sig_only.trim(), name
+            );
+        }
+        out.push_str("    fn __is_nil_iface(&self) -> bool { true }\n");
+        out.push_str("}\n\n");
+    }
 
     // ── NO PER-TRAIT WRAPPER NEWTYPE ────────────────────────────────
     //
@@ -1154,21 +1222,11 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     //
     // Lets `goish::var! { pub iface tracer: Tracer; }` users call
     // `tracer.M(args)` directly — no `tracer.call(|h| h.M(args)).unwrap()`
-    // closure noise. The forwarding impl:
-    //   * locks the SpinLock,
-    //   * if `Some(t)` → calls `t.<method>(args)` via shared `&T`,
-    //   * if `None`    → panics with the same nil-call message the
-    //                    sentinel impl uses (Go's nil-method panic).
+    // closure noise.
     //
-    // Skip conditions:
-    //   * Any method has `&mut self` receiver — Hook<T>'s Arc storage
-    //     only allows shared `&T` access. Stateful traits use the
-    //     pass5 closure-form fallback (`.call(|h| h.M(args)).unwrap()`).
-    //   * Method-shape parsing failed — same fallback.
-    //
-    // Orphan rule: this impl is local because the trait `T` is local;
-    // `Hook<dyn T + …>` is then a local type instance.
-    let mut forwarding_impl_ok = !parsed.methods.is_empty();
+    // SKIPPED for composite traits: Hook<dyn T> requires a nil sentinel
+    // for the "None" branch panic; composite traits have no sentinel.
+    let mut forwarding_impl_ok = !composite && !parsed.methods.is_empty();
     for m in &parsed.methods {
         if m.method_name.is_empty() {
             forwarding_impl_ok = false;
@@ -1205,29 +1263,11 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // ── (6.6) Forwarding impl Trait for nilable<__T: Trait + ?Sized> ──
     //
-    // Lets `nilable<MyTracer>` flow into `impl Trait + 'static` slots —
-    // e.g. `Register(t)` where `Register: fn(t: impl Tracer + 'static)`
-    // and `t: nilable<MyTracer>`. Without this impl, the user has to
-    // write `Register(t.Must().clone())` or similar, which leaks the
-    // pointer-shape into call sites.
-    //
-    // Body uses `self.Must()` (panics on nil). Soundness rests on the
-    // transpiler's flow analysis (Tobin-Hochstadt occurrence typing +
-    // Fähndrich-Leino non-null types) ensuring nilable bindings are
-    // proven NonNull at the call site. For hand-written Goish code,
-    // the panic is a backstop matching Go's nil-method-call runtime
-    // panic.
-    //
-    // Skip when:
-    //   * Any method has &mut self — nilable<T>'s Must() yields &T,
-    //     not &mut T. Stateful traits fall back to TryMut/MustMut at
-    //     the call site.
-    //   * Method-shape parsing failed.
-    //
-    // Orphan rule: implementing local trait <Trait> for foreign type
-    // nilable<__T> is always allowed (orphan rule restricts foreign
-    // trait + foreign type, not local trait + foreign type).
-    let mut nilable_impl_ok = !parsed.methods.is_empty();
+    // SKIPPED for composite traits: nilable<T> forwarding panics on nil
+    // via Must(), which is fine, but the impl itself requires that
+    // __NilT satisfies the supertrait — which it doesn't when the
+    // supertrait is foreign with non-default methods.
+    let mut nilable_impl_ok = !composite && !parsed.methods.is_empty();
     for m in &parsed.methods {
         if m.method_name.is_empty() || m.receiver == "&mut self" {
             nilable_impl_ok = false;
@@ -1278,7 +1318,15 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // `<__T as Trait>::M(self, args)` so they don't recurse into the
     // forwarding impl. Skipped (forwarding_impl_ok) when method-shape
     // parsing failed for any method.
-    let blanket_methods_ok = !parsed.methods.is_empty()
+    // ── (6.7a) Forwarding impl Trait for &T and &mut T blankets ────
+    //
+    // SKIPPED for composite traits: the blanket `impl<__T: Composite>
+    // Composite for &mut __T` would require `&mut __T: Foreign`, which
+    // generally doesn't hold (foreign traits don't impl for &mut T
+    // unless they explicitly provide it). Composite-trait callers use
+    // the concrete type directly.
+    let blanket_methods_ok = !composite
+        && !parsed.methods.is_empty()
         && parsed.methods.iter().all(|m| !m.method_name.is_empty());
     let any_mut_self = parsed.methods.iter().any(|m| m.receiver == "&mut self");
 
@@ -1357,6 +1405,8 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|n| n == "goish")
         .unwrap_or(false);
     if inside_goish_runtime {
+        // PartialEq<Nil> dispatches through __is_nil_iface() — safe for
+        // both trivial and composite traits (no nil sentinel needed).
         let _ = writeln!(out,
             "impl ::core::cmp::PartialEq<::goish::Nil> \
              for ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
@@ -1373,30 +1423,34 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
             "    #[inline] fn eq(&self, other: &::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync>) -> bool {{ (**other).__is_nil_iface() }}"
         );
         out.push_str("}\n\n");
+        // From<Nil> for Arc needs the nil sentinel struct — TRIVIAL only.
+        if !composite {
+            let _ = writeln!(out,
+                "impl ::core::convert::From<::goish::Nil> \
+                 for ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
+            );
+            let _ = writeln!(out,
+                "    #[inline] fn from(_: ::goish::Nil) -> Self {{ ::alloc::sync::Arc::new({nil_name}) }}"
+            );
+            out.push_str("}\n\n");
+        }
+    }
+
+    // ── (7) Backwards-compat From<Nil> for Box<dyn T> — TRIVIAL only ──
+    //
+    // Composite traits have no nil sentinel struct, so we cannot
+    // construct `Box::new(__NilT)` — skip this section entirely for
+    // composite. Trivial traits emit as before.
+    if !composite {
         let _ = writeln!(out,
             "impl ::core::convert::From<::goish::Nil> \
-             for ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
+             for ::alloc::boxed::Box<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
         );
         let _ = writeln!(out,
-            "    #[inline] fn from(_: ::goish::Nil) -> Self {{ ::alloc::sync::Arc::new({nil_name}) }}"
+            "    #[inline] fn from(_: ::goish::Nil) -> Self {{ ::alloc::boxed::Box::new({nil_name}) }}"
         );
         out.push_str("}\n\n");
     }
-
-    // ── (7) Backwards-compat From<Nil> for Box<dyn T> ─────────────
-    //
-    // Pre-existing ports use `Box<dyn T + Send + Sync>` directly as
-    // the owned interface-value lowering. `nil.into()` returning a
-    // Box<dyn T> needs `From<Nil>`. Box<T> is `#[fundamental]`, so
-    // the orphan rule accepts this without further justification.
-    let _ = writeln!(out,
-        "impl ::core::convert::From<::goish::Nil> \
-         for ::alloc::boxed::Box<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
-    );
-    let _ = writeln!(out,
-        "    #[inline] fn from(_: ::goish::Nil) -> Self {{ ::alloc::boxed::Box::new({nil_name}) }}"
-    );
-    out.push_str("}\n\n");
 
     // ── (8) DowncastableFromAny for `dyn Trait` + per-trait registry ─
     //
@@ -1508,27 +1562,25 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     );
     out.push_str("    }\n}\n\n");
 
-    // ── (10) NilDyn for `dyn Trait + Send + Sync` ───────────────────
+    // ── (10) NilDyn for `dyn Trait + Send + Sync` — TRIVIAL only ───────
     //
     // Hands back a `&'static` borrow of the nil sentinel `__NilT`.
-    // This is the value the `goish::type_assert!` macro binds in the
-    // false branch of Go's comma-ok interface assertion
-    // (`v, ok := x.(Iface)`): when `ok` is false, `v` is a nil
-    // interface whose every method panics if called — matching Go's
-    // nil-interface-method-call panic.
-    let _ = writeln!(
-        out,
-        "impl ::goish::any::NilDyn \
-         for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
-    );
-    let _ = writeln!(
-        out,
-        "    #[inline]\n    fn __goish_nil_ref() \
-         -> &'static (dyn {name} + ::core::marker::Send + ::core::marker::Sync) {{"
-    );
-    let _ = writeln!(out, "        static __GOISH_NIL: {nil_name} = {nil_name};");
-    out.push_str("        &__GOISH_NIL\n");
-    out.push_str("    }\n}\n\n");
+    // Skipped for composite traits because __NilT doesn't exist there.
+    if !composite {
+        let _ = writeln!(
+            out,
+            "impl ::goish::any::NilDyn \
+             for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
+        );
+        let _ = writeln!(
+            out,
+            "    #[inline]\n    fn __goish_nil_ref() \
+             -> &'static (dyn {name} + ::core::marker::Send + ::core::marker::Sync) {{"
+        );
+        let _ = writeln!(out, "        static __GOISH_NIL: {nil_name} = {nil_name};");
+        out.push_str("        &__GOISH_NIL\n");
+        out.push_str("    }\n}\n\n");
+    }
 
     out.parse()
         .expect("goish::interface: emitted source failed to parse")
@@ -1618,20 +1670,25 @@ fn parse_iface(item: TokenStream) -> ParsedIface {
     // Capture the supertrait clause: every token between the trait
     // name and the body brace group. Typically `: io::Writer + Send +
     // Sync` or empty.
-    let mut supertraits = String::new();
+    //
+    // We collect into a Vec<TokenTree> and reconstruct via
+    // TokenStream so that multi-char tokens like `::` (two Joint
+    // Punct tokens) round-trip correctly — iterating and calling
+    // tt.to_string() per token would insert spaces between the two
+    // `:` chars, producing `metav1 : : Object` instead of
+    // `metav1 :: Object`.
+    let mut supertrait_tokens: Vec<TokenTree> = Vec::new();
     let body = loop {
         match iter.next() {
             Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => break g,
-            Some(tt) => {
-                supertraits.push(' ');
-                supertraits.push_str(&tt.to_string());
-            }
+            Some(tt) => supertrait_tokens.push(tt),
             None => panic!(
                 "#[goish::interface]: expected trait body `{{ ... }}` after supertraits"
             ),
         }
     };
-    let supertraits = supertraits.trim().to_string();
+    let supertraits: TokenStream = supertrait_tokens.into_iter().collect();
+    let supertraits = supertraits.to_string();
 
     let methods = parse_iface_methods(body.stream());
     ParsedIface { vis, name, supertraits, methods }

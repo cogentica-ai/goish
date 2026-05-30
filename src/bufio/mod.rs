@@ -522,9 +522,9 @@ impl<R: io::Reader> Reader<R> {
             }
             tries -= 1;
         }
-        self.err = io::ErrUnexpectedEOF.into();
-        // Go uses io.ErrNoProgress; mirror it.
-        self.err = errors::New("multiple Read calls return no data or error");
+        // Go: b.err = io.ErrNoProgress (same string as bufio.ErrNoProgress).
+        // Use the registered sentinel so errors::Is(err, bufio::ErrNoProgress) works.
+        self.err = ErrNoProgress.into();
     }
 
     /// `Peek(n)` — next n bytes without advancing. Returns `(bytes, err)`.

@@ -50,6 +50,17 @@ pub trait Writer {
     fn Write(&mut self, p: slice<byte>) -> (int, error);
 }
 
+/// goish addition: a shareable writer. `Arc<sync::Mutex<W>>` implements
+/// [`Writer`] by serializing each `Write` through the mutex, so several
+/// holders observe writes to the same underlying value. This mirrors Go's
+/// habit of passing a `*T` pointer as an `io.Writer` — e.g.
+/// `log.New(&buf, …)` where the caller later reads `buf.String()`.
+impl<W: Writer> Writer for alloc::sync::Arc<crate::sync::Mutex<W>> {
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        self.Lock().Write(p)
+    }
+}
+
 /// Go's `io.Closer`.
 #[goish::interface]
 pub trait Closer {

@@ -49,6 +49,10 @@ use crate::types::{byte, int};
 
 mod parse;
 mod mac;
+pub mod dnsmessage;
+mod dnsconfig;
+pub mod dnsclient;
+pub mod lookup;
 pub mod http;
 pub mod mail;
 pub mod textproto;
@@ -56,6 +60,11 @@ pub mod url;
 
 pub use mac::{HardwareAddr, HardwareAddrString, ParseMAC};
 pub use parse::TCPAddr;
+pub use lookup::{
+    Resolver, IPAddr as LookupIPAddr, SRV, MX, NS,
+    LookupHost, LookupIP, LookupCNAME, LookupAddr,
+    LookupTXT, LookupNS, LookupMX, LookupSRV,
+};
 
 /// `EAGAIN` / `EWOULDBLOCK` (Linux: same value, 11). The non-blocking
 /// I/O retry signal — caller parks on the netpoller and re-attempts.

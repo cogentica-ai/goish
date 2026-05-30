@@ -248,6 +248,18 @@ __num_conv!(__Float64Conv, float64, float64);
 __num_conv!(__RuneConv, rune, crate::types::rune);
 __num_conv!(__ByteConv, byte, crate::types::byte);
 
+// char → rune: Go character literals are rune-typed; in Rust they are `char`.
+// `rune('x')` should work the same as Go's `'x'` in a rune context.
+impl __RuneConv for char {
+    #[inline]
+    fn __conv(self) -> crate::types::rune { self as crate::types::rune }
+}
+// char → byte: `byte('x')` converts an ASCII char to a u8.
+impl __ByteConv for char {
+    #[inline]
+    fn __conv(self) -> crate::types::byte { self as crate::types::byte }
+}
+
 // ─── NumCast — type-parameter numeric conversion ────────────────────
 //
 // Go's `T(x)` where `T` is a constrained type parameter is a numeric

@@ -100,11 +100,13 @@ fn bePutUint32(b: &mut [byte], v: u32) {
 /// A `Reader` decompresses zlib-format data read from an underlying
 /// reader. Created by [`NewReader`] / [`NewReaderDict`]; implements
 /// `io::Reader` + `io::Closer`.
-pub struct Reader<R: io::Reader> {
+pub struct Reader<FR: io::Reader + io::ByteReader> {
     // Go's `reader` keeps a separate `flate.Reader` (`z.r`); goish's
-    // `flate::Decompressor` owns its buffered source, so the trailer is
-    // read back through `decompressor.reader_mut()`.
-    decompressor: flate::Decompressor<bufio::Reader<R>>,
+    // `flate::Decompressor` owns its source, so the trailer is read back
+    // through `decompressor.reader_mut()`. `FR` is Go's `flate.Reader`
+    // (io.Reader + io.ByteReader): for `NewReader` it is `bufio::Reader<R>`
+    // (wrapped); for `NewReaderByte` it is the caller's source directly.
+    decompressor: flate::Decompressor<FR>,
     digest: adler32::Digest,
     err: error,
     scratch: [byte; 4],
@@ -113,10 +115,16 @@ pub struct Reader<R: io::Reader> {
 /// `zlib.NewReader(r)` (reader.go:74) — a new [`Reader`]. Reads from the
 /// returned `Reader` read and decompress data from `r`.
 ///
+/// Mirrors Go's `makeReader` ELSE-branch: a plain `io::Reader` is wrapped
+/// in a SINGLE `bufio::Reader` (which supplies `io::ByteReader` to flate).
+/// For a source that already implements `io::ByteReader`, use
+/// [`NewReaderByte`] — that path uses the source directly and leaves it
+/// positioned exactly at the byte past the zlib trailer.
+///
 /// It is the caller's responsibility to call [`Close`](Reader::Close)
 /// when done. For the Adler-32 checksum to be verified the reader must
 /// be fully consumed until `io.EOF`.
-pub fn NewReader<R: io::Reader>(r: R) -> (Reader<R>, error) {
+pub fn NewReader<R: io::Reader>(r: R) -> (Reader<bufio::Reader<R>>, error) {
     NewReaderDict(r, slice::new())
 }
 
@@ -124,15 +132,44 @@ pub fn NewReader<R: io::Reader>(r: R) -> (Reader<R>, error) {
 /// uses a preset dictionary. The dictionary is ignored if the compressed
 /// data does not refer to it; if the data refers to a *different*
 /// dictionary, [`ErrDictionary`] is returned.
-pub fn NewReaderDict<R: io::Reader>(r: R, dict: slice<byte>) -> (Reader<R>, error) {
-    // Parse the zlib header from the buffered source, then hand the
-    // buffered reader to flate. `haveDict` selects the flate decoder.
-    let mut br = bufio::NewReader(r);
-    let (haveDict, herr) = readHeader(&mut br, &dict);
+pub fn NewReaderDict<R: io::Reader>(r: R, dict: slice<byte>) -> (Reader<bufio::Reader<R>>, error) {
+    // Wrap the source in ONE bufio reader (supplies io::ByteReader), parse
+    // the zlib header from it, then hand the SAME reader to flate via the
+    // ByteReader-direct path — so flate adds NO further buffering.
+    let br = bufio::NewReader(r);
+    new_reader_from(br, dict)
+}
+
+/// `zlib.NewReader` for a source that already implements `io::ByteReader`
+/// (Go's `r.(flate.Reader)` branch). The source is used directly with no
+/// `bufio` wrapping, so after the `Reader` is fully consumed the source is
+/// positioned exactly at the first byte past the 4-byte Adler-32 trailer.
+/// Offset-tracking consumers (e.g. git packfile scanners reading back-to-
+/// back zlib streams from an in-memory `bytes::Reader`) require this.
+pub fn NewReaderByte<R: io::Reader + io::ByteReader>(r: R) -> (Reader<R>, error) {
+    new_reader_from(r, slice::new())
+}
+
+/// [`NewReaderByte`] with a preset dictionary.
+pub fn NewReaderByteDict<R: io::Reader + io::ByteReader>(
+    r: R,
+    dict: slice<byte>,
+) -> (Reader<R>, error) {
+    new_reader_from(r, dict)
+}
+
+/// Core constructor: `fr` already implements `io::Reader + io::ByteReader`
+/// (Go's `flate.Reader`). Parses the zlib header from it, then builds the
+/// flate decompressor directly on it (no extra buffering).
+fn new_reader_from<FR: io::Reader + io::ByteReader>(
+    mut fr: FR,
+    dict: slice<byte>,
+) -> (Reader<FR>, error) {
+    let (haveDict, herr) = readHeader(&mut fr, &dict);
     if !herr.IsNil() {
         // Build a placeholder decompressor so the struct is well-formed;
         // `err` short-circuits every Read.
-        let decompressor = flate::NewReader(br);
+        let decompressor = flate::NewReaderByte(fr);
         return (
             Reader {
                 decompressor,
@@ -144,9 +181,9 @@ pub fn NewReaderDict<R: io::Reader>(r: R, dict: slice<byte>) -> (Reader<R>, erro
         );
     }
     let decompressor = if haveDict {
-        flate::NewReaderDict(br, dict)
+        flate::NewReaderByteDict(fr, dict)
     } else {
-        flate::NewReader(br)
+        flate::NewReaderByte(fr)
     };
     (
         Reader {
@@ -163,7 +200,7 @@ pub fn NewReaderDict<R: io::Reader>(r: R, dict: slice<byte>) -> (Reader<R>, erro
 /// optional 4-byte preset-dictionary Adler-32 id. Returns whether a
 /// preset dictionary is in use. Faithful port of `reader.Reset`'s
 /// header section (reader.go:141).
-fn readHeader<R: io::Reader>(r: &mut bufio::Reader<R>, dict: &slice<byte>) -> (bool, error) {
+fn readHeader<R: io::Reader>(r: &mut R, dict: &slice<byte>) -> (bool, error) {
     let mut scratch: [byte; 4] = [0; 4];
     // Read the 2-byte header.
     let mut hdr = crate::make!([]byte, 2);
@@ -204,7 +241,7 @@ fn readHeader<R: io::Reader>(r: &mut bufio::Reader<R>, dict: &slice<byte>) -> (b
     (haveDict, nil)
 }
 
-impl<R: io::Reader> Reader<R> {
+impl<FR: io::Reader + io::ByteReader> Reader<FR> {
     /// `(z *reader).Read(p)` (reader.go:92) — decompress into `p`. On the
     /// final read it consumes and verifies the 4-byte big-endian
     /// Adler-32 trailer; a mismatch yields [`ErrChecksum`].
@@ -267,30 +304,31 @@ impl<R: io::Reader> Reader<R> {
     /// `(z *reader).Reset(r, dict)` (reader.go:133) — Go's `Resetter`.
     /// Discards buffered state and reinitializes the `Reader` for a new
     /// source `r`, re-parsing the zlib header.
-    pub fn Reset(&mut self, r: R, dict: slice<byte>) -> error {
-        let mut br = bufio::NewReader(r);
-        let (_, herr) = readHeader(&mut br, &dict);
+    pub fn Reset(&mut self, mut r: FR, dict: slice<byte>) -> error {
+        // `FR` is already Go's `flate.Reader`; parse the header from it and
+        // hand it straight to the flate decompressor (no re-wrapping).
+        let (_, herr) = readHeader(&mut r, &dict);
         if !herr.IsNil() {
             self.err = herr.clone();
             // Keep the decompressor consistent with the new source.
-            self.decompressor.Reset(br, slice::new());
+            self.decompressor.Reset(r, slice::new());
             self.digest = adler32::New();
             return herr;
         }
-        self.err = self.decompressor.Reset(br, dict);
+        self.err = self.decompressor.Reset(r, dict);
         self.digest = adler32::New();
         self.scratch = [0; 4];
         self.err.clone()
     }
 }
 
-impl<R: io::Reader> io::Reader for Reader<R> {
+impl<FR: io::Reader + io::ByteReader> io::Reader for Reader<FR> {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         Reader::Read(self, p)
     }
 }
 
-impl<R: io::Reader> io::Closer for Reader<R> {
+impl<FR: io::Reader + io::ByteReader> io::Closer for Reader<FR> {
     fn Close(&mut self) -> error {
         Reader::Close(self)
     }

@@ -294,7 +294,9 @@ pub fn ReadResponse<R: Reader>(
 }
 
 /// Read until EOF into `body`, returning the appended slice and any
-/// non-EOF error. Replaces ad-hoc Vec<u8> drain loops.
+/// non-EOF error. Mirrors Go's `io.ReadAll` loop — only exits on error
+/// (including io.EOF). A (0, nil) return is treated as "keep reading",
+/// matching Go's `io.Reader` contract: "0 bytes and nil error is not EOF".
 fn drain_to_eof<R: Reader>(r: &mut R, mut body: slice<byte>) -> (slice<byte>, error) {
     let mut tmp = make!([]byte, 4096);
     loop {
@@ -305,9 +307,10 @@ fn drain_to_eof<R: Reader>(r: &mut R, mut body: slice<byte>) -> (slice<byte>, er
         if !err.IsNil() {
             return (body, err);
         }
-        if n == 0 {
-            return (body, errors::nil);
-        }
+        // Go's io.ReadAll does NOT exit on (0, nil) — it keeps looping.
+        // Exiting here was wrong: a reader that temporarily returns 0 bytes
+        // without error (e.g., a MockReader injecting zeros, or a TLS record
+        // boundary where no data is ready yet) would cause silent body truncation.
     }
 }
 
@@ -462,14 +465,15 @@ impl RoundTripper for Transport {
     fn RoundTrip(&self, req: &Request) -> (Response, error) {
         // Resolve scheme.
         let scheme = req.URL.Scheme.clone();
-        if scheme.Len() != 0
-            && scheme.as_bytes() != b"http"
-        {
+        let is_https = scheme.as_bytes() == b"https";
+        let is_http = scheme.Len() == 0 || scheme.as_bytes() == b"http";
+        if !is_http && !is_https {
             return (
                 Response::default(),
-                errors::New(string("http: only scheme=http is supported (TLS not yet ported)")),
+                errors::New(string("http: only scheme=http and scheme=https are supported")),
             );
         }
+
         // Resolve host:port. URL.Host may already include :port.
         let host = if req.URL.Host.Len() > 0 {
             req.URL.Host.clone()
@@ -482,35 +486,76 @@ impl RoundTripper for Transport {
                 errors::New(string("http: no Host in request")),
             );
         }
-        let dial_addr = ensure_default_port(&host, 80);
 
-        // Dial.
-        let (mut conn, derr) = net::Dial(string("tcp"), dial_addr);
-        if !derr.IsNil() {
-            return (Response::default(), derr);
-        }
+        if is_https {
+            // ── HTTPS path ───────────────────────────────────────────────
+            let dial_addr = ensure_default_port(&host, 443);
 
-        // Apply deadline if Timeout > 0.
-        if self.Timeout.0 > 0 {
-            let dl = time::Now().Add(self.Timeout);
-            let _ = conn.SetDeadline(dl);
-        }
+            let tls_cfg = self.TLSClientConfig.clone();
+            let (mut tls_conn, herr) = crate::crypto::tls::Dial(
+                string("tcp"),
+                dial_addr,
+                &tls_cfg,
+            );
+            if !herr.IsNil() {
+                return (Response::default(), herr);
+            }
 
-        // Write the request.
-        let req_bytes = serialize_request(req, &host);
-        let (_, werr) = conn.Write(req_bytes);
-        if !werr.IsNil() {
+            // Apply deadline if Timeout > 0 (same as HTTP path).
+            if self.Timeout.0 > 0 {
+                let dl = time::Now().Add(self.Timeout);
+                let _ = tls_conn.SetDeadline(dl);
+            }
+
+            // Write the request.
+            let req_bytes = serialize_request(req, &host);
+            let (_, werr) = <crate::crypto::tls::Conn as crate::io::Writer>::Write(
+                &mut tls_conn,
+                req_bytes,
+            );
+            if !werr.IsNil() {
+                let _ = tls_conn.Close();
+                return (Response::default(), werr);
+            }
+
+            // Read the response.
+            let (resp, rerr) = {
+                let mut br = bufio::NewReader(&mut tls_conn);
+                ReadResponse(&mut br, Some(req.clone()))
+            };
+            let _ = tls_conn.Close();
+            (resp, rerr)
+        } else {
+            // ── HTTP path ────────────────────────────────────────────────
+            let dial_addr = ensure_default_port(&host, 80);
+
+            let (mut conn, derr) = net::Dial(string("tcp"), dial_addr);
+            if !derr.IsNil() {
+                return (Response::default(), derr);
+            }
+
+            // Apply deadline if Timeout > 0.
+            if self.Timeout.0 > 0 {
+                let dl = time::Now().Add(self.Timeout);
+                let _ = conn.SetDeadline(dl);
+            }
+
+            // Write the request.
+            let req_bytes = serialize_request(req, &host);
+            let (_, werr) = conn.Write(req_bytes);
+            if !werr.IsNil() {
+                let _ = conn.Close();
+                return (Response::default(), werr);
+            }
+
+            // Read the response.
+            let (resp, rerr) = {
+                let mut br = bufio::NewReader(&mut conn);
+                ReadResponse(&mut br, Some(req.clone()))
+            };
             let _ = conn.Close();
-            return (Response::default(), werr);
+            (resp, rerr)
         }
-
-        // Read the response.
-        let (resp, rerr) = {
-            let mut br = bufio::NewReader(&mut conn);
-            ReadResponse(&mut br, Some(req.clone()))
-        };
-        let _ = conn.Close();
-        (resp, rerr)
     }
 }
 

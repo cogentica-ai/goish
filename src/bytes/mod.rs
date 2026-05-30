@@ -1235,6 +1235,12 @@ impl io::Reader for Reader {
     }
 }
 
+impl io::ByteReader for Reader {
+    fn ReadByte(&mut self) -> (byte, error) {
+        Reader::ReadByte(self)
+    }
+}
+
 impl io::WriterTo for Reader {
     fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
         Reader::WriteTo(self, w)

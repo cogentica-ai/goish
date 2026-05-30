@@ -296,12 +296,21 @@ macro_rules! max {
 ///     `if ok { f.M() }` is the safe, Go-faithful use.
 #[macro_export]
 macro_rules! cast {
-    ($carrier:expr, $iface:path) => {
+    ($carrier:expr, $iface:path) => {{
+        const _: () = {
+            if !<dyn $iface + ::core::marker::Send + ::core::marker::Sync
+                    as $crate::goany::__HasNilSentinel>::__GOISH_HAS_NIL_SENTINEL {
+                ::core::panic!(
+                    "goish::cast!: trait has composite supertraits and no nil sentinel; \
+                     use `<carrier>.As::<ConcreteType>()` instead — see goany.rs::AsExt"
+                );
+            }
+        };
         $crate::goany::__cast_iface::<
             dyn $iface + ::core::marker::Send + ::core::marker::Sync,
             _,
         >($carrier)
-    };
+    }};
 }
 
 /// Consumes `s`, pushes each element (with `.into()` so `&str` widens

@@ -168,7 +168,7 @@ pub struct Reader<R: io::Reader> {
     // `flate::Decompressor` owns its buffered source, so the
     // decompressor lives in an `Option` and is taken out (via
     // `into_reader`) when a multistream re-init needs the bare source.
-    decompressor: Option<flate::Decompressor<R>>,
+    decompressor: Option<flate::Decompressor<bufio::Reader<R>>>,
     digest: u32, // CRC-32, IEEE polynomial (section 8)
     size: u32,   // uncompressed size (section 2.3.1)
     buf: [byte; 512],
