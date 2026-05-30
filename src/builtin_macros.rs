@@ -286,6 +286,14 @@ macro_rules! max {
 /// borrow (e.g. a handler's `&dyn http::ResponseWriter`) or a
 /// `&goish::Any`. `$iface` is the target `#[goish::interface]` trait.
 ///
+/// When the value is owned behind a smart pointer (`Box<d!(Iface)>`,
+/// `Arc<…>`), reborrow inline — no carrier local is needed:
+///
+/// ```ignore
+/// // Go:  rs, ok := reader.(io.ReadSeeker)   // reader is io.ReadCloser
+/// let (rs, ok) = goish::cast!(&*reader, io::Seeker);
+/// ```
+///
 /// Evaluates to `(&dyn $iface, bool)`:
 ///   * **hit**  — `(&concrete, true)`, the concrete writer viewed as
 ///     the asserted interface.
@@ -311,6 +319,31 @@ macro_rules! cast {
             _,
         >($carrier)
     }};
+}
+
+/// Spells the Goish interface-object **type** `dyn Iface + Send + Sync`.
+///
+/// Every Goish interface object is `Send + Sync` by convention (goroutines
+/// move trait objects across threads, and `cast!` only emits its downcast
+/// machinery for the `+ Send + Sync` form). Writing those bounds out at
+/// every field/return/argument is noise; `d!(Iface)` is the canonical
+/// short spelling.
+///
+/// ```ignore
+/// // Go:  func (o *MemoryObject) Reader() (io.ReadCloser, error)
+/// fn Reader(&self) -> (Box<d!(io::ReadCloser)>, error) { … }
+///
+/// // Go:  var w io.Writer
+/// let w: Box<d!(io::Writer)>;
+/// ```
+///
+/// Pairs with [`cast!`]: a value typed `Box<d!(Iface)>` (or `&d!(Iface)`)
+/// is a ready carrier, so `cast!(&*value, Other)` needs no carrier local.
+#[macro_export]
+macro_rules! d {
+    ($iface:path) => {
+        dyn $iface + ::core::marker::Send + ::core::marker::Sync
+    };
 }
 
 /// Consumes `s`, pushes each element (with `.into()` so `&str` widens

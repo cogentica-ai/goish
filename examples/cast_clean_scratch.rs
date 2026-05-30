@@ -22,21 +22,14 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use goish::cast;
+use goish::d; // shipped: `d!(Iface)` == `dyn Iface + Send + Sync`
 use goish::fmt;
 use goish::syscall;
 use goish::testing;
 use goish::int;
 
-// ── Proposed spellings (local prototypes) ─────────────────────────────────
-// d!(Trait)  => the Send+Sync interface-object TYPE (for fields/returns/args).
-macro_rules! d {
-    ($p:path) => { dyn $p + ::core::marker::Send + ::core::marker::Sync };
-}
-// dcast!(value, Iface) => Go's `value.(Iface)` with NO carrier local: folds the
-// reborrow into the cast. Works for Box/Arc/&dyn interface values.
-macro_rules! dcast {
-    ($v:expr, $iface:path) => { goish::cast!(&*$v, $iface) };
-}
+// DECISION (shipped): `d!` lives in goish. NO `dcast!` — the inline reborrow
+// `cast!(&*value, Iface)` is the blessed spelling, so no wrapper is needed.
 
 #[goish::interface]
 pub trait Read: Send + Sync {
@@ -177,15 +170,16 @@ fn q3_blanket_supertrait_recovers_clean_impl(t: &mut testing::T) {
     }
 }
 
-// Q4: the proposed clean call-site spelling. `Box<d!(Read)>` (no `+ Send + Sync`
-// spelled) and `dcast!(b, Seek)` (no `let r: &(dyn ...)` carrier local).
+// Q4: the SHIPPED clean call-site spelling — `Box<d!(Read)>` (goish's `d!`, no
+// `+ Send + Sync` spelled out) and the inline `cast!(&*b, Seek)` reborrow (no
+// `let r: &(dyn ...)` carrier local, no `dcast!` wrapper).
 // Uses HookedBuf because the impl-boilerplate macro change isn't applied yet;
 // this isolates the SPELLING ergonomics from the impl-cleanliness change.
 fn q4_clean_spelling_no_carrier_local(t: &mut testing::T) {
     let b: Box<d!(Read)> = Box::new(HookedBuf { n: 11 });
-    let (s, ok) = dcast!(b, Seek);
+    let (s, ok) = cast!(&*b, Seek);
     if !ok {
-        t.Fatal(fmt::Sprintf!("Q4: dcast! ok=false"));
+        t.Fatal(fmt::Sprintf!("Q4: cast! ok=false"));
     }
     if s.Seek() != 111 {
         t.Fatal(fmt::Sprintf!("Q4: Seek()=%d want 111", s.Seek()));
