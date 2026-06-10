@@ -190,6 +190,19 @@ impl<'a, T: ?Sized + 'a> nilable_refmut<'a, T> {
         }
     }
 
+    /// Downgrade to the read-only wrapper, reborrowing the inner
+    /// `&mut T` as `&T` for as long as `self` is borrowed. Used by
+    /// goishc at call sites where the caller's joined trait signature
+    /// carries `nilable![&mut T]` but the callee's inherent method
+    /// only needs `nilable![&T]`.
+    #[inline]
+    pub fn AsRef(&self) -> nilable_ref<'_, T> {
+        match self.0 {
+            Some(ref r) => nilable_ref::new(r),
+            None => nilable_ref::nil(),
+        }
+    }
+
     /// Safe exclusive borrow — `Some(&mut T)` if non-nil, `None` if
     /// nil. Consumes `self` because `&mut` is exclusive.
     #[inline]
