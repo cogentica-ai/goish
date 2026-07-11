@@ -19,8 +19,11 @@
 //   * No TLS (`https://`). Calls return an error if Scheme == "https".
 //   * No CookieJar. Cookies must be set via `req.AddCookie` and read
 //     via `resp.Cookies()` explicitly.
-//   * No `context.Context` / per-request cancellation. `Client.Timeout`
-//     bounds the whole request via deadline-set on the dialed Conn.
+//   * Request contexts are honored: `RoundTrip` fast-fails a done
+//     ctx, folds `ctx.Deadline()` into conn deadlines, and a cancel
+//     watcher interrupts blocked I/O (HTTP path; TLS gets deadline
+//     folding only). `Client.Timeout` re-parents the request under
+//     `context.WithTimeout` — one deadline across all redirect hops.
 //   * `Request.Body` and `Response.Body` are pre-buffered `slice<byte>`
 //     (matches the existing Request type in goish v1).
 //   * No automatic decompression (no `Accept-Encoding: gzip`).

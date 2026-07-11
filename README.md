@@ -58,9 +58,16 @@ Goish is **single-target**: `x86_64-unknown-linux-gnu`. Other targets are delibe
 
 ### Concurrency primitives
 - **Channels** (`gochan.rs`): unbuffered, buffered, nil, close. Intrusive doubly-linked sudog wait queues — zero allocator round-trips on park/unpark.
-- **`select!` macro** (M16f-β): multi-way send/recv with default, full multi-M lock order, CAS-claim for select winner/loser detection.
+- **`select!` macro** (M16f-β): multi-way send/recv with default, full multi-M lock order, CAS-claim for select winner/loser detection. Accepts expression channels in paren form — `let _ = (ctx.Done()).Recv() => …` is Go's `case <-ctx.Done():`.
 - **`sync.{Mutex, RWMutex, WaitGroup, Once}`** plus internal `Sema` — all built on an alloc-free intrusive G chain.
 - **`time.{Sleep, NewTimer, NewTicker, After}`** + sysmon-driven timer heap.
+- **`context`**: `Background`, `WithCancel` / `WithTimeout` / `WithDeadline` / `WithValue`, `Cause`. `Done()` returns a real `chan<()>` that composes with `select!`; nil for non-cancellable contexts, exactly like Go.
+
+### Networking & web
+- **`net`** (M17): TCP/UDP over raw sockets, integrated with an **epoll netpoller** — a blocking `Read`/`Write` parks the goroutine instead of the thread; `SetDeadline` flows through a netpoll deadline heap swept by sysmon.
+- **`net/http` server** (M18): HTTP/1.1 with keep-alive, Go 1.22 `ServeMux` patterns (`"GET /users/{id}"` wildcards, 405 + `Allow` on method mismatch), composable `Handler` middleware, `Flusher` chunked streaming, `TimeoutHandler`, `FileServer` + range requests, `httputil` reverse proxy, graceful `Shutdown`.
+- **Live request contexts**: every inbound request carries a cancellable `r.Context()` — canceled when the response finishes, or the moment the client disconnects mid-handler. Disconnect detection is Go's `startBackgroundRead` shape: a watcher goroutine probes the socket with `recv(MSG_PEEK | MSG_DONTWAIT)` (peeking never eats a pipelined request) and parks on the netpoller; the serve loop aborts it after the handler via a past netpoll deadline (goish's `aLongTimeAgo`).
+- **`net/http` client**: `Get` / `Post` / `Do` with redirects and cookies. `Client.Timeout` re-parents the request under `context.WithTimeout` — one deadline covers every redirect hop — and a mid-flight `ctx` cancel interrupts blocked I/O through the netpoller, surfacing `context.Canceled` / `DeadlineExceeded` like Go's `url.Error` unwrapping.
 
 ### Standard library ports (Go 1.25-faithful)
 `bufio`, `bytes`, `context`, `encoding/{binary, hex, base64, json}`, `errors`, `flag`, `fmt`, `io`, `log`, `maps`, `os`, `path`/`path/filepath`, `reflect` (3 tiers), `slices`, `strconv` (ints + bool + floats), `strings`, `sync`, `sync/atomic`, `testing`, `time`, `unicode/utf8`. Plus `make!` / `slice!` / `append!` / `range!` / `defer!` / `select!` / `go!` macros.

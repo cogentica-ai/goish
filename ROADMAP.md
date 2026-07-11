@@ -94,6 +94,24 @@ Overflow past a reservation hits the guard page and the SIGSEGV
 handler prints a spawn-site diagnostic (`created by file:line`). The
 main goroutine gets an 8 MiB reservation via the same machinery.
 
+### Request contexts — `net/http` × `context` (landed)
+Go cancels an inbound request's context when the handler finishes or
+the client's connection dies, and threads outbound cancellation
+through the transport. goish mirrors all of it:
+
+| Path | Mechanism |
+|------|-----------|
+| `r.Context()` (server) | per-request `context.WithCancel`; canceled when the response is finished (Go `finishRequest`) |
+| client disconnect mid-handler | watcher goroutine probes with `recv(MSG_PEEK \| MSG_DONTWAIT)` — peeking never consumes a pipelined next request — and parks on the netpoller; EOF/reset cancels the ctx. Aborted after the handler via a past netpoll read deadline (Go's `aLongTimeAgo`) and joined before the conn is reused, so the fd's read side has one owner at all times |
+| `Client.Timeout` | `Do` re-parents the request under `context.WithTimeout` (Go `setRequestCancel`) — one deadline spans every redirect hop, which also inherit the original ctx |
+| outbound ctx cancel | `RoundTrip` fast-fails an already-done ctx, folds `ctx.Deadline()` into the conn deadlines, and a cancel watcher kicks blocked I/O out with past netpoll deadlines; wire errors surface as `context.Canceled` / `DeadlineExceeded` |
+
+`http.TimeoutHandler` composes on top: the wrapped handler runs on
+its own goroutine against a buffered writer and observes its budget
+through `r.Context().Done()`. Not in v1: `Server.BaseContext` /
+`ConnContext` hooks (the base is always `Background`), and mid-I/O
+cancel interruption on the TLS client path (deadline folding only).
+
 ### Allocator maturation
 Phase 2a (today) is sufficient through M14. Higher tiers schedule
 against their forcing milestones:
