@@ -590,6 +590,10 @@ name = "production_http_server"
 path = "examples/production_http_server.rs"
 
 [[example]]
+name = "http_complex_api"
+path = "examples/http_complex_api.rs"
+
+[[example]]
 name = "tar_smoke"
 path = "examples/tar_smoke.rs"
 
