@@ -227,6 +227,10 @@ name = "sched_swap"
 path = "examples/sched_swap.rs"
 
 [[example]]
+name = "stack_reserve_smoke"
+path = "examples/stack_reserve_smoke.rs"
+
+[[example]]
 name = "sched_go"
 path = "examples/sched_go.rs"
 

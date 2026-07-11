@@ -16,7 +16,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use goish::context;
 use goish::runtime::sched::schedule;
 use goish::time::Milliseconds;
-use goish::{go, make, select, syscall, KB};
+use goish::{go, make, select, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -61,7 +61,7 @@ fn test_with_cancel() {
     ERR_NIL_BEFORE.store(if ctx.Err().IsNil() { 1 } else { 0 }, Ordering::Release);
 
     let ctx_for_g = ctx.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let _ = ctx_for_g.Done().Recv();
         FIRED.store(1, Ordering::Release);
     });
@@ -85,7 +85,7 @@ fn test_with_timeout_fires() {
 
     let (ctx, _cancel) = context::WithTimeout(context::Background(), Milliseconds(15));
     let ctx_for_g = ctx.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let _ = ctx_for_g.Done().Recv();
         FIRED.store(1, Ordering::Release);
     });
@@ -103,7 +103,7 @@ fn test_select_done_as_timeout() {
     let (ctx, _cancel) = context::WithTimeout(context::Background(), Milliseconds(10));
     let never = make!(chan i64);
     let ctx_for_g = ctx.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         select! {
             let _v = never.Recv() => die(b"select-done: never fired\n"),
             let _t = (ctx_for_g.Done()).Recv() => {
@@ -125,7 +125,7 @@ fn test_parent_cancel_propagates() {
     let (child, _c_cancel) = context::WithCancel(parent.clone());
 
     let child_for_g = child.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let _ = child_for_g.Done().Recv();
         CHILD_FIRED.store(1, Ordering::Release);
     });

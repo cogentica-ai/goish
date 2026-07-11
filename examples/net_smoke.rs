@@ -15,7 +15,7 @@ use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use goish::io::{Reader, Writer, Closer};
 use goish::net;
 use goish::runtime::sched::schedule;
-use goish::{bytes, go, make, string, syscall, KB};
+use goish::{bytes, go, make, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -41,7 +41,7 @@ fn main() {
     static CLIENT_DONE: AtomicUsize = AtomicUsize::new(0);
     CLIENT_PORT.store(port as i32, Ordering::Release);
 
-    go!(stack(16 * KB), || {
+    go!(|| {
         // Build "127.0.0.1:<port>" and dial.
         let p = CLIENT_PORT.load(Ordering::Acquire) as u32;
         let mut addr_buf: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(24);

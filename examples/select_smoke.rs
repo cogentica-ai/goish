@@ -20,7 +20,7 @@
 use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use goish::runtime::sched::schedule;
-use goish::{go, make, select, syscall, KB};
+use goish::{go, make, select, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -60,12 +60,12 @@ fn test_pass1_recv_bare() {
 
     {
         let ch = ch_recv.clone();
-        go!(stack(64 * KB), move || ch.Send(0xCAFE));
+        go!(move || ch.Send(0xCAFE));
     }
     {
         let cr = ch_recv.clone();
         let cs = ch_send.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             let outcome: u8 = select! {
                 let v = cr.Recv() => {
                     GOT.store(v, Ordering::Relaxed);
@@ -89,7 +89,7 @@ fn test_pass1_send() {
     {
         let cr = ch_recv.clone();
         let cs = ch_send.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             let arm: u8 = select! {
                 let _ = cr.Recv() => 1u8,
                 cs.Send(7) => 2u8,
@@ -122,7 +122,7 @@ fn test_pass1_recv_tuple() {
 
     {
         let c = ch.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             select! {
                 let (v, ok) = c.Recv() => {
                     GOT_V.store(v, Ordering::Relaxed);
@@ -145,11 +145,11 @@ fn test_pass1_recv_underscore() {
 
     {
         let c = ch.clone();
-        go!(stack(64 * KB), move || c.Send(42));
+        go!(move || c.Send(42));
     }
     {
         let c = ch.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             select! {
                 let _ = c.Recv() => FIRED.store(1, Ordering::Relaxed),
             }
@@ -171,7 +171,7 @@ fn test_default_fires() {
     {
         let cr = cr.clone();
         let cs = cs.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             let arm: u8 = select! {
                 let _ = cr.Recv() => 1u8,
                 cs.Send(0) => 2u8,
@@ -195,7 +195,7 @@ fn test_park_then_send() {
     {
         let cr = cr.clone();
         let cs = cs.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             let arm: u8 = select! {
                 let _ = cr.Recv() => 1u8,
                 cs.Send(11) => 2u8,
@@ -206,7 +206,7 @@ fn test_park_then_send() {
     // Counterpart: receiver on cs (matches the send case).
     {
         let cs = cs.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             let (v, _) = cs.Recv();
             SEND_GOT.store(v, Ordering::Relaxed);
         });
@@ -227,7 +227,7 @@ fn test_park_then_recv() {
     {
         let cr = cr.clone();
         let cs = cs.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             select! {
                 let v = cr.Recv() => {
                     GOT.store(v, Ordering::Relaxed);
@@ -239,7 +239,7 @@ fn test_park_then_recv() {
     }
     {
         let cr = cr.clone();
-        go!(stack(64 * KB), move || cr.Send(0xBEEF));
+        go!(move || cr.Send(0xBEEF));
     }
     schedule();
     check(FIRED.load(Ordering::Relaxed) == 1, b"t7: recv arm didn't fire\n");
@@ -262,7 +262,7 @@ fn test_many_iterations() {
         // Clone for selector closure.
         let cr_sel = cr.clone();
         let cs_sel = cs.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             select! {
                 let v = cr_sel.Recv() => {
                     RECV_FIRES.fetch_add(1, Ordering::Relaxed);
@@ -277,14 +277,14 @@ fn test_many_iterations() {
         // outer `cr` / `cs` (still owned by the loop body).
         if i % 2 == 0 {
             let cs_cp = cs.clone();
-            go!(stack(64 * KB), move || {
+            go!(move || {
                 let (v, _) = cs_cp.Recv();
                 SEND_SUM.fetch_add(v, Ordering::Relaxed);
             });
         } else {
             let cr_cp = cr.clone();
             let val = i as i64 + 1000;
-            go!(stack(64 * KB), move || cr_cp.Send(val));
+            go!(move || cr_cp.Send(val));
         }
     }
     schedule();
@@ -335,11 +335,11 @@ fn test_paren_chan_recv() {
 
     {
         let c = ch.clone();
-        go!(stack(64 * KB), move || c.Send(0xF00D));
+        go!(move || c.Send(0xF00D));
     }
     {
         let c = chans[0].clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             select! {
                 let v = (c).Recv() => GOT.store(v, Ordering::Relaxed),
             }
@@ -355,7 +355,7 @@ fn test_multi_recv_same_chan() {
     let ch = make!(chan i64, 4);
     {
         let c = ch.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             c.Send(1);
             c.Send(2);
             c.Send(3);
@@ -365,7 +365,7 @@ fn test_multi_recv_same_chan() {
     static SUM: AtomicI64 = AtomicI64::new(0);
     {
         let c = ch.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             // Multi-recv arm — auto-clone semantic should let both
             // arms reference the same `c` without consuming it.
             for _ in 0..4 {

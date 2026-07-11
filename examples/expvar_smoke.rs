@@ -42,7 +42,7 @@ fn fail() {
 
 #[goish::main]
 fn main() {
-    go!(stack(128 * KB), || {
+    go!(|| {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
@@ -97,7 +97,7 @@ fn test_2_int_concurrent() {
     for _ in 0..workers {
         let i = i.clone();
         let wg2 = wg.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             for _ in 0..per {
                 i.Add(1);
             }

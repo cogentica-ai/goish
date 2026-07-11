@@ -25,7 +25,7 @@ const KB: usize = 1024;
 
 #[goish::main]
 fn main() {
-    go!(stack(256 * KB), || {
+    go!(|| {
         let (passed, total) = flate::__huffman_writer_roundtrip();
         if passed == total {
             Println!("ok", passed, "/", total);

@@ -17,7 +17,7 @@ use goish::io::{Closer, Reader, Writer};
 use goish::net;
 use goish::net::http::{self, Cookie, SameSite};
 use goish::time;
-use goish::{bytes, go, string, syscall, Println, KB};
+use goish::{bytes, go, string, syscall, Println};
 
 #[goish::main]
 fn main() {
@@ -187,7 +187,7 @@ fn main() {
             let addr = ln.Addr().String();
             let srv_arc = Arc::new(srv);
             let srv_for_serve = srv_arc.clone();
-            go!(stack(64 * KB), move || {
+            go!(move || {
                 let _ = srv_for_serve.Serve(ln);
             });
             time::Sleep(time::Millisecond * 20);

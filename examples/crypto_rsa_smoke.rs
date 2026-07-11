@@ -118,7 +118,7 @@ const TOTAL: u8 = 14;
 
 #[goish::main]
 fn main() {
-    goish::go!(stack(256 * KB), || {
+    goish::go!(|| {
         // The hash registry must be populated before SignPSS/OAEP, which
         // resolve hash constructors via crypto::HashNew.
         goish::crypto::RegisterStandardHashes();

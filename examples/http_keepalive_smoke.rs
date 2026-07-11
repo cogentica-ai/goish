@@ -18,7 +18,7 @@ use goish::io::{Closer, Reader, Writer};
 use goish::net;
 use goish::net::http;
 use goish::runtime::sched::schedule;
-use goish::{bytes, go, make, string, syscall, KB};
+use goish::{bytes, go, make, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -49,13 +49,13 @@ fn main() {
 
     // Start the server.
     let mux_clone = mux.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let _ = http::Serve(ln, mux_clone);
     });
 
     // Client side: open ONE conn, send three requests, expect three
     // 200-OK responses.
-    go!(stack(64 * KB), || {
+    go!(|| {
         let p = CLIENT_PORT.load(Ordering::Acquire) as u32;
         let mut addr_buf: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(24);
         addr_buf.extend_from_slice(b"127.0.0.1:");

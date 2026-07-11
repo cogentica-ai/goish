@@ -18,7 +18,7 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::runtime::sched::schedule;
-use goish::{go, make, select, syscall, KB};
+use goish::{go, make, select, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -56,7 +56,7 @@ fn test_self_select(chan_cap: i64) {
 
     for p in 0..2i64 {
         let c = c.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             for i in 0..ITERS {
                 if p == 0 || i % 2 == 0 {
                     select! {

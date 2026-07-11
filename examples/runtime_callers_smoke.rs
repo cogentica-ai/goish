@@ -183,7 +183,7 @@ fn run_tests() {
 
 #[goish::main]
 fn main() {
-    goish::go!(stack(256 * KB), || {
+    goish::go!(|| {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {

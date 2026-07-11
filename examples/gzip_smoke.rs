@@ -78,7 +78,7 @@ fn fail() {
 
 #[goish::main]
 fn main() {
-    go!(stack(512 * KB), || {
+    go!(|| {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {

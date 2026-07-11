@@ -241,7 +241,7 @@ impl<V: Clone + Default + Send + 'static> Group<V> {
         let g = self.clone();
         let c2 = c.clone();
         let key2 = key.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             g.doCall(c2, key2, fn_);
         });
         ch

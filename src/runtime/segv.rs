@@ -442,8 +442,8 @@ extern "C" fn goish_segv_sigtramp(
     write_hex(saved_rsp);
     write_str(b")\n");
     write_str(b"\nremedy:\n");
-    write_str(b"\tbump the spawn-site stack:    go!(stack(64 * KB), || ...)\n");
-    write_str(b"\tor wrap recursion to grow:    runtime::sched::maybe_grow_step(|| ...)\n");
+    write_str(b"\tbump the spawn-site stack:    go!(stack(4 * MB), || ...)\n");
+    write_str(b"\tor wrap the recursion site:   runtime::sched::maybe_grow(64 * KB, 4 * MB, || ...)\n");
 
     syscall::Exit(2);
 }

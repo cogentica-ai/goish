@@ -138,7 +138,7 @@ fn http_request(addr: &goish::gostring::string, path: &[u8]) -> bool {
 
 #[goish::main]
 fn main() {
-    go!(stack(128 * KB), || {
+    go!(|| {
         run_demo();
     });
     sched::schedule();
@@ -150,7 +150,7 @@ fn run_demo() {
 
     // ── Server goroutine ──────────────────────────────────────────
     let port_chan_srv = port_chan.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let mux = http::ServeMux::new();
 
         mux.HandleFunc(string("/healthz"), |w, _r| {

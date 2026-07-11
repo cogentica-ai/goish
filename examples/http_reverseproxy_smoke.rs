@@ -16,7 +16,7 @@ use goish::convert::bytes;
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{go, string, syscall, Println, KB};
+use goish::{go, string, syscall, Println};
 
 #[goish::main]
 fn main() {
@@ -40,7 +40,7 @@ fn main() {
     let back_addr = back_ln.Addr().String();
     let back_arc = Arc::new(backend);
     let back_serve = back_arc.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let _ = back_serve.Serve(back_ln);
     });
     time::Sleep(time::Millisecond * 30);
@@ -61,7 +61,7 @@ fn main() {
     let front_addr = front_ln.Addr().String();
     let front_arc = Arc::new(front);
     let front_serve = front_arc.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let _ = front_serve.Serve(front_ln);
     });
     time::Sleep(time::Millisecond * 30);

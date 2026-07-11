@@ -15,7 +15,7 @@ use goish::io::{Closer, Reader};
 use goish::net;
 use goish::runtime::sched::schedule;
 use goish::time;
-use goish::{go, make, string, syscall, KB};
+use goish::{go, make, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -40,7 +40,7 @@ fn main() {
     CLIENT_PORT.store(port as i32, Ordering::Release);
 
     // Client side runs in a goroutine so main can hold `ln`.
-    go!(stack(64 * KB), || {
+    go!(|| {
         let p = CLIENT_PORT.load(Ordering::Acquire) as u32;
         let mut addr_buf: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(24);
         addr_buf.extend_from_slice(b"127.0.0.1:");

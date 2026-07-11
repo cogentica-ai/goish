@@ -597,7 +597,7 @@ fn entry_names(entries: &slice<Arc<dyn fs::DirEntry + Send + Sync>>) -> RustStri
 
 #[goish::main]
 fn main() {
-    goish::go!(stack(256 * KB), || {
+    goish::go!(|| {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         let pass = TOTAL - f;

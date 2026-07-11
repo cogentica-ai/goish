@@ -174,7 +174,7 @@ fn big_from(b: &[u8]) -> big::Int {
 
 #[goish::main]
 fn main() {
-    goish::go!(stack(512 * KB), || {
+    goish::go!(|| {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {

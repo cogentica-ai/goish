@@ -423,29 +423,21 @@ fn unreachable_dead() -> ! {
 extern "C" fn g_entry() -> ! {
     // Install panic recovery + take entry in a sub-frame that's freed
     // before `entry()` runs — keeps g_entry's own frame minimal so
-    // small (2 KiB default) goroutine stacks don't bust the budget
-    // during the prologue.
+    // small explicit stacks (`go!(stack(2*KB))` pool carves) don't
+    // bust the budget during the prologue.
     let entry = unsafe { g_entry_setup() };
     entry();
     unsafe { g_entry_clear_recovery() };
     goexit();
 }
 
-/// Variant of `g_entry` for goroutines spawned with auto-grow
-/// (bare `go!()` form, `g.growable == true`). Wraps `entry()` in
-/// `runtime::sched::maybe_grow_step`, so the user closure runs
-/// inside the tier-aware grow scope: home (2 KiB) → tier-2 (64 KiB)
-/// → tier-3 (1 MiB), pivoting lazily as SP descends into each tier's
-/// red zone.
-///
-/// Goroutines spawned via `go!(stack(N), …)` / `go!(N, …)` skip this
-/// wrap (`g.growable == false`) and run on a strictly-N-byte stack.
-extern "C" fn g_entry_growable() -> ! {
-    let entry = unsafe { g_entry_setup() };
-    crate::runtime::sched::maybe_grow_step(entry);
-    unsafe { g_entry_clear_recovery() };
-    goexit();
-}
+// M29 note: the former `g_entry_growable` variant (bare `go!()`
+// wrapped in `maybe_grow_step`'s pivot ladder) was removed — bare
+// goroutines now run on a 1 MiB lazily-committed reservation
+// (`Stack::new_reserved`), so depth is handled by the kernel's
+// demand paging with no entry wrapper. The pivot ladder
+// (`maybe_grow` / `maybe_grow_step`) remains available as an opt-in
+// for fixed-stack goroutines and for >1 MiB excursions.
 
 #[inline(never)]
 unsafe fn g_entry_setup() -> alloc::boxed::Box<dyn FnOnce()> {
@@ -780,16 +772,13 @@ fn execute(mut g_ptr: NonNull<G>) -> ! {
     dispatch_validate_g(g_ptr);
     let g = unsafe { g_ptr.as_mut() };
     if g.status == GStatus::Idle {
-        // First-time dispatch: lay out gobuf for gogo. PC is either
-        // `g_entry` (fixed-stack goroutines: `go!(stack(N), …)` and
-        // `go!(N, …)`) or `g_entry_growable` (bare `go!()` — wraps
-        // user `entry()` in `maybe_grow_step` for tier-aware lazy
-        // growth). Sp = stack_top-8, with goexit_trampoline parked
-        // at [sp].
-        let entry_fn: extern "C" fn() -> ! =
-            if g.growable { g_entry_growable } else { g_entry };
+        // First-time dispatch: lay out gobuf for gogo. PC is
+        // `g_entry`; Sp = stack_top-8, with goexit_trampoline parked
+        // at [sp]. (M29: bare and fixed-stack goroutines share the
+        // same entry — bare Gs get depth from their lazily-committed
+        // 1 MiB reservation, not from an entry-side pivot wrapper.)
         unsafe {
-            make_context_gogo(&mut g.gobuf, g.stack.top(), entry_fn);
+            make_context_gogo(&mut g.gobuf, g.stack.top(), g_entry);
         }
     }
     g.status = GStatus::Running;

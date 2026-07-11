@@ -17,7 +17,7 @@ use core::sync::atomic::{AtomicI64, Ordering};
 
 use goish::runtime::sched::schedule;
 use goish::sync::WaitGroup;
-use goish::{go, syscall, KB};
+use goish::{go, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -35,7 +35,7 @@ fn main() {
     // Wrap the body in a goroutine so Wait() / blocking Drop can
     // park-resume rather than block the bootstrap thread (which has
     // no `current_g`).
-    go!(stack(64 * KB), || {
+    go!(|| {
         test_borrow_atomic();
         test_explicit_wait_then_drop();
         test_reuse_after_wait();

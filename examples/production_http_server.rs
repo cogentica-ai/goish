@@ -342,7 +342,7 @@ fn main() {
     // because Serve's internal per-connection spawn path uses heavier
     // closure plumbing than the auto-grow wrap's lazy-pivot threshold.
     let srv_run = srv.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         srv_run.Serve(ln);
         SERVE_DONE.Store(1);
     });
@@ -352,7 +352,7 @@ fn main() {
     // heavy debug-build frame overhead that exceeds the auto-grow
     // wrap's tier-1 → tier-2 transition headroom.
     let srv_for_shutdown = srv.clone();
-    go!(stack(256 * KB), move || {
+    go!(move || {
         time::Sleep(time::Millisecond * 50);
         let client = http::Client::default();
 
@@ -649,7 +649,7 @@ fn main() {
         }
     });
 
-    go!(stack(32 * KB), move || {
+    go!(move || {
         time::Sleep(time::Second * 30);
         Println!("TIMEOUT");
         os::Exit(2);

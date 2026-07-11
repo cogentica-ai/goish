@@ -18,7 +18,7 @@ use core::sync::atomic::{AtomicI32, Ordering};
 use goish::net;
 use goish::runtime::netpoll;
 use goish::runtime::sched::schedule;
-use goish::{go, string, syscall, KB};
+use goish::{go, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -106,7 +106,7 @@ fn main() {
     let server_ln_for_accept = server_ln.clone();
 
     // Server accept loop in a goroutine — accept and immediately drop.
-    go!(stack(64 * KB), move || {
+    go!(move || {
         loop {
             let (conn, err) = server_ln_for_accept.Accept();
             if !err.IsNil() {

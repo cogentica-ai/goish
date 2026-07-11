@@ -11,42 +11,76 @@
 //     stack is born with the goroutine and lives until it exits;
 //     mheap allocations come and go on a different timeline.
 //
-//   - **Optional guard pages.** A separately-mmap'd stack lets us
-//     leave a `PROT_NONE` guard page below it later (M18b) so stack
-//     overflow faults rather than silently corrupts adjacent memory.
-//     For M16a we don't add the guard page — a missing guard makes
-//     overflows hard to diagnose, but adding it is purely additive
-//     code.
+//   - **Guard pages.** A separately-mmap'd stack lets us leave a
+//     `PROT_NONE` guard page below it so stack overflow faults (and
+//     gets a symbolized diagnostic from `runtime::segv`) rather than
+//     silently corrupting adjacent memory. Reserved stacks and large
+//     direct-mmap stacks carry a guard; sub-page pool carves cannot
+//     (several stacks share one physical page).
 //
-// **Stack size policy (M26 / phase 1).**
+// **Stack size policy (M29 — reserve-big, commit-lazy).**
 //
-// Default stack is **2 KiB nominal**, matching Go's `stackMin`
-// (`runtime/stack.go:76`). Linux's mmap is page-granular (4 KiB on
-// x86_64), so a 2 KiB request actually consumes one page (4 KiB) of
-// virtual memory. Physical RSS for an idle/parked goroutine stays at
-// ~one page until the stack is actually touched (lazy paging).
+// Goish cannot implement Go's `morestack`: stack copying requires
+// relocating every pointer into the stack (Go has GC stack maps;
+// Rust code holds raw pointers/references the runtime cannot see),
+// and stable Rust offers no compiler hook to insert prologue checks.
+// The stacker-style pivot ladder (`runtime::sched::grow`) works but
+// only at annotated call sites — it can't make bare `go!()` safe for
+// arbitrary code.
 //
-// Goish does **not** implement Go's `morestack` growth (no compiler
-// hooks). The stack you request is the stack you get; overflow
-// silently corrupts adjacent memory unless a guard page is added
-// (Phase γ — separate work). For deep call chains, the user must
-// bump the size explicitly via `go!(stack(N), closure)`.
+// What x86-64 Linux *does* give us is cheap virtual address space
+// with kernel-side lazy commit: an anonymous private mapping costs
+// physical pages only as they're first touched, at 4 KiB
+// granularity. So the default goroutine stack is a **large virtual
+// reservation** (`BARE_STACK_RESERVE`, 1 MiB) mapped with
+// `MAP_NORESERVE` and a `PROT_NONE` guard page at the bottom:
 //
-// **Why 2 KiB default**: targeting workloads with ~1M goroutines.
-// 1M × 4 KiB virtual = 4 GiB; physical RSS is bounded by actual
-// stack usage on touched pages. A larger default (e.g. 64 KiB)
-// would push virtual to 64 GiB and touch many more pages on
-// goroutines that spawn deep frames.
+//   - Depth is transparent: recursion, big locals, fmt machinery all
+//     just touch more pages — no annotations, no `stack(N)` tuning.
+//   - Physical cost ≈ pages actually touched (≥ 1 page once the G
+//     runs). An idle shallow goroutine costs 4 KiB physical.
+//   - Overflow beyond the reservation hits the guard page →
+//     `runtime::segv` prints "stack overflow, spawned at file:line".
 //
-// To approach true 2 KiB density (sub-page), Phase 2 will port Go's
-// `stackpool` (`runtime/stack.go:194`) — chunked allocator carving
-// 2 K / 4 K / 8 K / 16 K / 32 K stacks from larger mmap'd spans.
+// Dead reservations are recycled through `RESERVE_POOL` (below):
+// `MADV_DONTNEED` drops their physical pages, the virtual region is
+// reused by the next spawn without mmap/munmap churn.
+//
+// **Density workloads keep the pool-carve path**: `go!(stack(2*KB))`
+// draws a sub-page slot from `runtime::sched::stackpool` (2 KiB
+// truly costs 2 KiB, no per-G VMA). That's the opt-in for 1M-G
+// workloads, where per-G mmap would exhaust `vm.max_map_count`
+// (default 65530, 2 VMAs per reserved stack).
 
+use crate::runtime::spin::SpinLock;
 use crate::syscall;
 
 /// Default per-G stack size in bytes (M26): 2 KiB nominal.
-/// Page-rounded to 4 KiB at mmap time on x86_64.
+/// Page-rounded to 4 KiB at mmap time on x86_64. This is the
+/// *pool-carve* default used by explicit small `go!(stack(N))`
+/// spawns; bare `go!()` uses `BARE_STACK_RESERVE` instead (M29).
 pub const DEFAULT_STACK_SIZE: usize = 2 * 1024;
+
+/// Virtual reservation for a bare `go!()` goroutine stack (M29).
+/// 1 MiB of `MAP_NORESERVE` address space, committed by the kernel
+/// one 4 KiB page at a time as the goroutine actually touches it.
+/// Matches the old auto-grow ladder's tier-3 cap, so "how deep can a
+/// bare goroutine go" is unchanged — it just no longer needs pivot
+/// annotations to get there. Goroutines needing more than 1 MiB use
+/// `go!(stack(N), …)`.
+pub const BARE_STACK_RESERVE: usize = 1024 * 1024;
+
+/// Guard region below reserved / large stacks: one `PROT_NONE` page.
+/// Overflow lands here and `runtime::segv::classify` (which treats
+/// faults within one page below `stack.base()` as home-stack
+/// overflow) produces the spawn-site diagnostic.
+pub const GUARD_SIZE: usize = PAGE_SIZE;
+
+/// Max recycled reservations parked in `RESERVE_POOL`. Beyond this,
+/// Drop munmaps instead. 256 × 1 MiB = 256 MiB of cached *virtual*
+/// space (physical is dropped via `MADV_DONTNEED` at recycle time);
+/// 512 VMAs — well under the default `vm.max_map_count` of 65530.
+const RESERVE_POOL_CAP: usize = 256;
 
 /// Legacy alias — pre-M26 every G got exactly 64 KiB. Kept so any
 /// out-of-tree callers continue to compile, but new code should use
@@ -58,8 +92,8 @@ pub const STACK_SIZE: usize = 64 * 1024;
 /// caller-requested stack sizes up to a whole page.
 pub const PAGE_SIZE: usize = 4096;
 
-/// A goroutine stack. The storage source depends on `owned` and
-/// `pool_span_idx`:
+/// A goroutine stack. The storage source depends on `owned`,
+/// `pool_span_idx`, and `guarded`:
 ///
 ///   - `owned == false`              → adopted OS-thread stack
 ///                                     (`g0` only). Drop is a no-op.
@@ -68,9 +102,21 @@ pub const PAGE_SIZE: usize = 4096;
 ///                                     a sub-page slot inside a
 ///                                     mmap'd 32 KiB span. Drop
 ///                                     returns the slot to the pool.
-///   - `owned == true && pool_span_idx == 0`
-///                                   → direct mmap (large stack >
-///                                     32 KiB). Drop munmaps.
+///   - `guarded == true`             → mmap of `size + GUARD_SIZE`
+///                                     with a `PROT_NONE` page at the
+///                                     bottom; `base` points *above*
+///                                     the guard. Drop recycles
+///                                     `BARE_STACK_RESERVE`-class
+///                                     regions into `RESERVE_POOL`,
+///                                     munmaps other sizes (guard
+///                                     included).
+///   - `owned == true`, unguarded,
+///     `pool_span_idx == 0`          → legacy direct mmap. Drop
+///                                     munmaps exactly `(base, size)`.
+///
+/// `base` / `size` always describe the *usable* range — guard pages
+/// are excluded, so `base()`, `top()`, and `size()` need no
+/// per-variant adjustment.
 pub struct Stack {
     base: *mut u8,
     size: usize,
@@ -78,6 +124,9 @@ pub struct Stack {
     /// Stackpool span index, or `0` (`stackpool::NIL_SPAN`) for
     /// direct-mmap'd stacks.
     pool_span_idx: u32,
+    /// A `PROT_NONE` guard page sits at `base - GUARD_SIZE`; the
+    /// underlying mapping starts there and Drop must account for it.
+    guarded: bool,
 }
 
 unsafe impl Send for Stack {}
@@ -106,35 +155,50 @@ impl Stack {
         let bytes = requested.max(1);
         if let Some(order) = super::stackpool::order_for(bytes) {
             // Sub-page chunked path: round up to the nearest stack
-            // class, draw from the pool.
+            // class, draw from the pool. No guard page possible —
+            // neighbouring slots share the page an overflow would
+            // land on.
             let (base, span_idx, size) = unsafe { super::stackpool::alloc(order) };
             return Stack {
                 base,
                 size,
                 owned: true,
                 pool_span_idx: span_idx,
+                guarded: false,
             };
         }
-        // Large path: page-aligned direct mmap.
+        // Large path: page-aligned direct mmap with a PROT_NONE guard
+        // page below the usable range, so `go!(stack(N))` overflow
+        // faults into the segv diagnostic instead of corrupting the
+        // neighbouring mapping.
         let size = round_up_to_page(bytes);
-        let p = syscall::Mmap(
-            core::ptr::null_mut(),
-            size,
-            syscall::PROT_READ | syscall::PROT_WRITE,
-            syscall::MAP_PRIVATE | syscall::MAP_ANONYMOUS,
-            -1,
-            0,
-        );
-        if p == syscall::MAP_FAILED {
-            const MSG: &[u8] = b"goish: sched: stack mmap failed\n";
-            syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
-            syscall::Exit(2);
-        }
+        let usable = guarded_mmap(size);
         Stack {
-            base: p,
+            base: usable,
             size,
             owned: true,
             pool_span_idx: super::stackpool::NIL_SPAN,
+            guarded: true,
+        }
+    }
+
+    /// M29: allocate a bare-`go!()` stack — a `BARE_STACK_RESERVE`
+    /// (1 MiB) virtual reservation with lazy physical commit and a
+    /// bottom guard page. Recycled reservations are reused from
+    /// `RESERVE_POOL` without any syscalls (their guard page is
+    /// already in place and their physical pages were dropped at
+    /// recycle time).
+    pub fn new_reserved() -> Self {
+        let usable = match RESERVE_POOL.lock().pop() {
+            Some(addr) => addr as *mut u8,
+            None => guarded_mmap(BARE_STACK_RESERVE),
+        };
+        Stack {
+            base: usable,
+            size: BARE_STACK_RESERVE,
+            owned: true,
+            pool_span_idx: super::stackpool::NIL_SPAN,
+            guarded: true,
         }
     }
 
@@ -158,6 +222,7 @@ impl Stack {
             size,
             owned: false,
             pool_span_idx: super::stackpool::NIL_SPAN,
+            guarded: false,
         }
     }
 
@@ -186,6 +251,47 @@ const fn round_up_to_page(n: usize) -> usize {
     (n + PAGE_SIZE - 1) & !(PAGE_SIZE - 1)
 }
 
+// ─── M29: guarded mmap + reserve pool ────────────────────────────────
+
+/// mmap `usable + GUARD_SIZE` bytes of lazily-committed anonymous
+/// memory and turn the bottom page into a `PROT_NONE` guard. Returns
+/// the usable base (first byte above the guard). Exits the process on
+/// failure — a goroutine spawn has no error path to surface this.
+fn guarded_mmap(usable: usize) -> *mut u8 {
+    let total = usable + GUARD_SIZE;
+    let p = syscall::Mmap(
+        core::ptr::null_mut(),
+        total,
+        syscall::PROT_READ | syscall::PROT_WRITE,
+        syscall::MAP_PRIVATE | syscall::MAP_ANONYMOUS | syscall::MAP_NORESERVE,
+        -1,
+        0,
+    );
+    if p == syscall::MAP_FAILED || (p as isize) < 0 {
+        const MSG: &[u8] = b"goish: sched: stack mmap failed\n";
+        syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+        syscall::Exit(2);
+    }
+    if syscall::Mprotect(p, GUARD_SIZE, syscall::PROT_NONE) < 0 {
+        const MSG: &[u8] = b"goish: sched: stack guard mprotect failed\n";
+        syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+        syscall::Exit(2);
+    }
+    unsafe { p.add(GUARD_SIZE) }
+}
+
+/// Recycled `BARE_STACK_RESERVE` reservations, stored as usable-base
+/// addresses (guard page still protected below each). Physical pages
+/// were dropped with `MADV_DONTNEED` when the entry was pushed, so a
+/// parked entry costs virtual space + 2 VMAs only.
+static RESERVE_POOL: SpinLock<alloc::vec::Vec<usize>> = SpinLock::new(alloc::vec::Vec::new());
+
+/// Number of reservations currently parked in the reserve pool.
+/// Diagnostic — smoke tests assert recycling actually happens.
+pub fn reserve_pool_len() -> usize {
+    RESERVE_POOL.lock().len()
+}
+
 impl Drop for Stack {
     fn drop(&mut self) {
         if !self.owned {
@@ -195,10 +301,27 @@ impl Drop for Stack {
             // Pool-managed: return slot to the stackpool. The pool
             // will munmap the span when fully empty.
             unsafe { super::stackpool::free(self.pool_span_idx, self.base); }
-        } else {
-            // Direct-mmap'd large stack.
-            syscall::Munmap(self.base, self.size);
+            return;
         }
+        if self.guarded {
+            let map_base = unsafe { self.base.sub(GUARD_SIZE) };
+            if self.size == BARE_STACK_RESERVE {
+                // Recycle: drop physical pages now (so RSS reflects
+                // reality while the entry idles in the pool), keep
+                // the virtual region + guard for the next spawn.
+                syscall::Madvise(self.base, self.size, syscall::MADV_DONTNEED);
+                let mut pool = RESERVE_POOL.lock();
+                if pool.len() < RESERVE_POOL_CAP {
+                    pool.push(self.base as usize);
+                    return;
+                }
+                drop(pool);
+            }
+            syscall::Munmap(map_base, self.size + GUARD_SIZE);
+            return;
+        }
+        // Legacy direct-mmap'd stack (no guard).
+        syscall::Munmap(self.base, self.size);
     }
 }
 

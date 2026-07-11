@@ -518,29 +518,33 @@ macro_rules! delete {
 ///   });
 /// Three forms:
 ///
-///   go!(|| work());                              // GROWABLE: 2 KiB → 64 KiB → 1 MiB
-///   go!(8 * KB, || tiny_helper());               // 8 KiB FIXED, no grow
-///   go!(stack(2 * KB), || tiny_helper());        // 2 KiB FIXED, no grow (alias)
+///   go!(|| work());                        // 1 MiB reserved, lazily committed
+///   go!(8 * KB, || tiny_helper());         // 8 KiB FIXED (pool carve)
+///   go!(stack(2 * KB), || tiny_helper());  // 2 KiB FIXED (pool carve, alias)
 ///
-/// **Bare `go!(|| body)` is growable by default.** The user body is
-/// wrapped in `runtime::sched::maybe_grow_step`, so it spawns on the
-/// 2 KiB home stack (preserving spawn density and VMA count) and
-/// pivots lazily to tier-2 (64 KiB) when home runs low — typically a
-/// few levels into actual recursion. Goroutines that don't recurse
-/// never pay any mmap cost; goroutines that do get up to 1 MiB
-/// transparently if they call `maybe_grow_step` at deeper recursion
-/// sites.
+/// **Bare `go!(|| body)` needs no stack sizing** (M29). The
+/// goroutine gets a 1 MiB virtual reservation (`MAP_NORESERVE`) with
+/// a `PROT_NONE` guard page at the bottom; the kernel commits
+/// physical 4 KiB pages only as the goroutine actually touches them.
+/// Recursion, large locals, fmt/chan machinery all just work — no
+/// annotations, no tuning. A shallow goroutine costs ~one physical
+/// page; dead reservations are recycled through an internal pool
+/// (physical pages dropped via `MADV_DONTNEED`), so spawn loops
+/// don't churn mmap. Overflowing the full 1 MiB hits the guard page
+/// and produces the `runtime::segv` spawn-site diagnostic.
 ///
-/// **`go!(stack(N), || body)`** is the opt-out for fixed-size,
-/// no-grow goroutines. Use when N is known at spawn time and the
-/// goroutine has bounded depth — microbenchmarks, library-internal
-/// watcher goroutines, performance-critical paths where the lazy
-/// pivot's check overhead is unwelcome.
+/// **`go!(stack(N), || body)`** is the opt-in for exact-size stacks.
+/// Use it for extreme spawn density: N ≤ 32 KiB is carved sub-page
+/// from `runtime::sched::stackpool` (a 2 KiB stack truly costs
+/// 2 KiB, no per-G VMA — 1M-goroutine workloads live here, since
+/// per-G mappings would exhaust `vm.max_map_count`), or when a
+/// goroutine genuinely needs more than 1 MiB. N > 32 KiB gets a
+/// direct mmap with the same guard-page protection as the bare form.
 ///
-/// **For finer control** call `runtime::sched::maybe_grow_step` (tier
-/// ladder) or `runtime::sched::maybe_grow(red_zone, size, || body)`
-/// (custom red zone / target) directly at the recursion site —
-/// mirrors how `stacker::maybe_grow` is used in the Rust ecosystem.
+/// **For >1 MiB excursions on any stack** call
+/// `runtime::sched::maybe_grow(red_zone, size, || body)` (or the
+/// `maybe_grow_step` tier ladder) at the recursion site — mirrors
+/// `stacker::maybe_grow` in the Rust ecosystem.
 ///
 /// `KB` / `MB` / `GB` are exported at the crate root. Sizes are
 /// rounded up to the nearest 4 KiB page.

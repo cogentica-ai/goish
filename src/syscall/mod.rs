@@ -20,7 +20,9 @@ pub const SYS_WRITE: usize = 1;
 pub const SYS_OPEN: usize = 2;
 pub const SYS_CLOSE: usize = 3;
 pub const SYS_MMAP: usize = 9;
+pub const SYS_MPROTECT: usize = 10;
 pub const SYS_MUNMAP: usize = 11;
+pub const SYS_MADVISE: usize = 28;
 pub const SYS_CLONE: usize = 56;
 pub const SYS_EXIT: usize = 60; // per-thread exit (vs SYS_EXIT_GROUP)
 pub const SYS_SCHED_YIELD: usize = 24;
@@ -157,6 +159,17 @@ pub const PROT_EXEC: i32 = 4;
 
 pub const MAP_PRIVATE: i32 = 0x02;
 pub const MAP_ANONYMOUS: i32 = 0x20;
+/// Don't reserve swap / commit charge for this mapping — pages are
+/// accounted only as they're touched. Used for goroutine stack
+/// reservations, where the virtual size (1 MiB+) vastly exceeds
+/// typical use.
+pub const MAP_NORESERVE: i32 = 0x4000;
+
+/// `madvise(2)` advice: free the pages and reset them to zero-fill on
+/// next touch. Drops physical memory immediately (unlike MADV_FREE's
+/// lazy reclaim), so RSS reflects reality — same reasoning as Go's
+/// default `madvdontneed=1` since 1.16.
+pub const MADV_DONTNEED: i32 = 4;
 
 /// Sentinel returned by `mmap(2)` on failure (`(void*) -1`).
 pub const MAP_FAILED: *mut u8 = !0usize as *mut u8;
@@ -792,6 +805,21 @@ pub fn Mmap(addr: *mut u8, length: usize, prot: i32, flags: i32, fd: i32, offset
 #[allow(non_snake_case)]
 pub fn Munmap(addr: *mut u8, length: usize) -> isize {
     unsafe { syscall3(SYS_MUNMAP, addr as usize, length, 0) }
+}
+
+/// `mprotect(2)` — change protection on a region. Used to carve
+/// `PROT_NONE` guard pages out of goroutine stack reservations.
+#[allow(non_snake_case)]
+pub fn Mprotect(addr: *mut u8, length: usize, prot: i32) -> isize {
+    unsafe { syscall3(SYS_MPROTECT, addr as usize, length, prot as usize) }
+}
+
+/// `madvise(2)` — advise the kernel about a region's usage pattern.
+/// `MADV_DONTNEED` drops physical pages when a stack reservation is
+/// recycled into the reserve pool.
+#[allow(non_snake_case)]
+pub fn Madvise(addr: *mut u8, length: usize, advice: i32) -> isize {
+    unsafe { syscall3(SYS_MADVISE, addr as usize, length, advice as usize) }
 }
 
 /// `clock_gettime(2)` — read the value of `clk` into `tp`. Returns 0 on

@@ -22,7 +22,7 @@ extern crate goish;
 use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use goish::runtime::sched::schedule;
 use goish::syscall;
-use goish::{go, KB};
+use goish::{go};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -88,7 +88,7 @@ fn main() {
     // Step 5: client goroutine.
     static CLIENT_FD: AtomicI32 = AtomicI32::new(-1);
     static CLIENT_DONE: AtomicUsize = AtomicUsize::new(0);
-    go!(stack(8 * KB), move || {
+    go!(move || {
         let cli = syscall::Socket(
             syscall::AF_INET,
             syscall::SOCK_STREAM | syscall::SOCK_CLOEXEC,

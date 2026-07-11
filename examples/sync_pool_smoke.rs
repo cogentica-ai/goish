@@ -15,7 +15,7 @@ use goish::{go, syscall, Println, KB};
 
 #[goish::main]
 fn main() {
-    go!(stack(64 * KB), || run_tests());
+    go!(|| run_tests());
     schedule();
 }
 

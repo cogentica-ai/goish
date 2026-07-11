@@ -146,7 +146,7 @@ fn main() {
 
     // Spawn the accept loop.
     let srv_run = srv.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         srv_run.Serve(ln);
         SERVE_DONE.Store(1);
     });
@@ -155,7 +155,7 @@ fn main() {
     // `time::Sleep`, etc. need a real G context (the `#[goish::main]`
     // body is the bootstrap thread, not a goroutine).
     let srv_for_shutdown = srv.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         // Wait briefly for the server to be ready.
         time::Sleep(time::Millisecond * 100);
 
@@ -165,7 +165,7 @@ fn main() {
         let started = time::Now();
         WG.Add(N);
         for _ in 0..N {
-            go!(stack(CLIENT_STACK), move || {
+            go!(move || {
                 let (resp, err) = http::Get(url_at("/healthz"));
                 if err != nil {
                     FAIL_COUNT.Add(1);

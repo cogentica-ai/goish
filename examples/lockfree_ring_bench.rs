@@ -63,7 +63,7 @@ const CAP: usize = 1024;
 
 #[goish::main]
 fn main() {
-    go!(stack(64 * KB), || {
+    go!(|| {
         bench_chan_spsc();
         bench_ring_spsc();
         bench_chan_mpmc();

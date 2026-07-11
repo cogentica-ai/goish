@@ -36,7 +36,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use goish::runtime::preempt;
 use goish::sync::WaitGroup;
 use goish::time;
-use goish::{go, syscall, KB};
+use goish::{go, syscall};
 
 const N_SPINNERS: usize = 4;
 const ITERS: u64 = 50_000_000;
@@ -67,7 +67,7 @@ fn main() {
     WG.Add(N_SPINNERS as i64);
 
     for i in 0..N_SPINNERS {
-        go!(stack(64 * KB), move || {
+        go!(move || {
             // Tight CPU loop — no chan/sync/syscall ops, so m.locks
             // stays 0 throughout. Goroutine body runs entirely in
             // user code, the only place phase B should bump
@@ -88,7 +88,7 @@ fn main() {
     // the calling thread, the handler runs on a worker M whose
     // `curg` is Some(...).
     static SIGNAL_DONE: AtomicU64 = AtomicU64::new(0);
-    go!(stack(64 * KB), || {
+    go!(|| {
         let pid = syscall::Getpid();
         for _ in 0..SIGURG_BURST {
             syscall::Kill(pid, syscall::SIGURG);
@@ -102,7 +102,7 @@ fn main() {
     // deadlock if called from non-G context (gopark requires
     // current_g != None).
     static DONE: AtomicU64 = AtomicU64::new(0);
-    go!(stack(64 * KB), || {
+    go!(|| {
         WG.Wait();
         DONE.store(1, Ordering::Release);
     });

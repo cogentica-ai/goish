@@ -18,7 +18,7 @@ extern crate goish;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use goish::runtime::sched::schedule;
 use goish::time::{Milliseconds, Tick};
-use goish::{go, select, syscall, KB};
+use goish::{go, select, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -49,7 +49,7 @@ fn main() {
 fn test_tick_zero_never_ready() {
     static FELL_THROUGH: AtomicUsize = AtomicUsize::new(0);
     static DONE: AtomicUsize = AtomicUsize::new(0);
-    go!(stack(64 * KB), || {
+    go!(|| {
         let c = Tick(Milliseconds(0));
         select! {
             let _v = c.Recv() => {
@@ -75,7 +75,7 @@ fn test_tick_zero_never_ready() {
 fn test_tick_negative_never_ready() {
     static FELL_THROUGH: AtomicUsize = AtomicUsize::new(0);
     static DONE: AtomicUsize = AtomicUsize::new(0);
-    go!(stack(64 * KB), || {
+    go!(|| {
         let c = Tick(Milliseconds(-1));
         select! {
             let _v = c.Recv() => {
@@ -101,7 +101,7 @@ fn test_tick_negative_never_ready() {
 fn test_tick_fires_periodically() {
     static TICKS: AtomicUsize = AtomicUsize::new(0);
     static DONE: AtomicUsize = AtomicUsize::new(0);
-    go!(stack(64 * KB), || {
+    go!(|| {
         let c = Tick(Milliseconds(5));
         for _ in 0..3 {
             let _ = (c.clone()).Recv();

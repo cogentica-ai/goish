@@ -458,8 +458,10 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // call did — left `current_g() == None`, so any blocking channel op
     // from `main`/test code fatal'd with "outside of any goroutine".
     //
-    // The main goroutine gets a generous fixed stack (goish has no
-    // morestack): main code plus anything it calls inline must fit.
+    // The main goroutine gets a generous 8 MiB reservation (large
+    // `new_sized` path: lazily committed, guard page below) — main
+    // often hosts the deepest inline call chains, and the virtual
+    // size costs nothing until touched.
     extern "C" {
         fn __goish_main();
     }

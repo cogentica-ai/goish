@@ -46,7 +46,7 @@ fn fail() {
 #[goish::main]
 fn main() {
     // Bootstrap thread isn't a goroutine — wrap blocking work.
-    go!(stack(128 * KB), || {
+    go!(|| {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
@@ -86,7 +86,7 @@ fn test_1_dedup() {
         let calls = calls.clone();
         let wg2 = wg.clone();
         let got_42 = got_42.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             let (v, _e, _shared) = g.Do(string::from_static("k"), || {
                 calls.fetch_add(1, Ordering::AcqRel);
                 // Hold long enough for siblings to queue up.
@@ -122,7 +122,7 @@ fn test_2_independent_keys() {
         let calls = calls.clone();
         let wg2 = wg.clone();
         let key = string::from_static(k);
-        go!(stack(64 * KB), move || {
+        go!(move || {
             let (_v, _e, _shared) = g.Do(key, || {
                 calls.fetch_add(1, Ordering::AcqRel);
                 time::Sleep(time::Millisecond * 20);

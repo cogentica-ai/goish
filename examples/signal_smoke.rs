@@ -12,7 +12,7 @@ use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use goish::os::signal as ossig;
 use goish::runtime::sched::schedule;
 use goish::time::{Milliseconds, Sleep};
-use goish::{go, make, syscall, KB};
+use goish::{go, make, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -51,7 +51,7 @@ fn test_notify_then_recv() {
     // examples and keeps the same headroom margin.
     {
         let c = c.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             let (sig, _) = c.Recv();
             GOT_SIG.store(sig as i64, Ordering::Release);
             DONE.store(1, Ordering::Release);
@@ -63,7 +63,7 @@ fn test_notify_then_recv() {
     // is ~24 frames deep in debug builds; default 2 KiB stack
     // overflows into the next mmap region and SEGV-s in
     // PallocBits::summarize.
-    go!(stack(64 * KB), || {
+    go!(|| {
         Sleep(Milliseconds(10));
         let pid = syscall::Getpid();
         let r = syscall::Kill(pid, syscall::SIGUSR1);
@@ -100,7 +100,7 @@ fn test_stop_drops_signals() {
     // the default 2 KiB.
     {
         let c = c.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             for _ in 0..3 {
                 Sleep(Milliseconds(10));
                 // Try non-blocking recv via __try_recv-equivalent:
@@ -114,7 +114,7 @@ fn test_stop_drops_signals() {
     }
 
     // Self-kill SIGUSR2 while the goroutine watches.
-    go!(stack(64 * KB), || {
+    go!(|| {
         Sleep(Milliseconds(5));
         let pid = syscall::Getpid();
         let _ = syscall::Kill(pid, syscall::SIGUSR2);

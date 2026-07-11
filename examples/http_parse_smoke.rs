@@ -17,7 +17,7 @@ use goish::io::{Closer, Writer};
 use goish::net;
 use goish::net::http;
 use goish::runtime::sched::schedule;
-use goish::{bytes, go, string, syscall, KB};
+use goish::{bytes, go, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -40,7 +40,7 @@ fn main() {
     static CLIENT_DONE: AtomicUsize = AtomicUsize::new(0);
     CLIENT_PORT.store(port as i32, Ordering::Release);
 
-    go!(stack(16 * KB), || {
+    go!(|| {
         // Build the dial address.
         let p = CLIENT_PORT.load(Ordering::Acquire) as u32;
         let mut addr_buf: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(24);

@@ -775,7 +775,7 @@ fn test_goish_to_go() {
 
 #[goish::main]
 fn main() {
-    goish::go!(stack(512 * KB), || {
+    goish::go!(|| {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         let pass = TOTAL - f;

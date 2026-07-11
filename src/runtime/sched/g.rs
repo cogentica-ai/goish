@@ -156,35 +156,30 @@ pub struct G {
     /// want typed-panic recovery should still use `errors::As` after
     /// recover; the underlying payload is the rendered message.
     pub panic_value: SpinLock<Option<crate::error>>,
-    /// `true` when this G was spawned via the bare `go!()` form
-    /// (auto-grow default). The scheduler picks `g_entry_growable` for
-    /// such Gs, which wraps the user `entry()` in `maybe_grow_step`
-    /// so the user closure runs inside a tier-aware grow scope.
-    /// `false` for `go!(stack(N), …)` and `go!(N, …)` — those Gs run
-    /// strictly on their N-byte stack, no auto-grow.
-    /// `g0` Gs are also `false`.
-    pub growable: bool,
 }
 
 impl G {
-    /// Allocate a `G` with a fresh **default-sized** stack and the
-    /// given entry closure. Status starts as `Idle`; the scheduler
-    /// will transition to `Running` on first dispatch.
+    /// Allocate a `G` for the bare `go!()` form: a
+    /// `BARE_STACK_RESERVE` (1 MiB) lazily-committed virtual
+    /// reservation with a bottom guard page (M29). The kernel commits
+    /// physical pages as the goroutine actually touches them, so
+    /// call depth needs no up-front sizing and a shallow goroutine
+    /// costs ~one page of physical memory. Status starts as `Idle`;
+    /// the scheduler transitions to `Running` on first dispatch.
     pub fn new(entry: Box<dyn FnOnce()>) -> Self {
-        // Bare `go!()` form: default 2 KiB home stack with auto-grow
-        // (`growable = true` flips the entry fn to `g_entry_growable`,
-        // which wraps user `entry()` in `maybe_grow_step`).
-        let mut g = Self::new_with_stack(super::stack::DEFAULT_STACK_SIZE, entry);
-        g.growable = true;
-        g
+        Self::with_stack(Stack::new_reserved(), entry)
     }
 
     /// Allocate a `G` with a stack of the requested size (M26).
     /// `stack_size` is rounded up to the nearest page by `Stack::new_sized`.
-    /// Used by `go!(stack(N), closure)` when the caller knows their
-    /// goroutine needs a non-default stack size.
+    /// Used by `go!(stack(N), closure)` when the caller wants an
+    /// exact size: sub-page pool carve for ≤ 32 KiB (1M-goroutine
+    /// density), direct guarded mmap above that.
     pub fn new_with_stack(stack_size: usize, entry: Box<dyn FnOnce()>) -> Self {
-        let stack = Stack::new_sized(stack_size);
+        Self::with_stack(Stack::new_sized(stack_size), entry)
+    }
+
+    fn with_stack(stack: Stack, entry: Box<dyn FnOnce()>) -> Self {
         let lo = stack.base();
         let hi = stack.top();
         G {
@@ -203,7 +198,6 @@ impl G {
             cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             panicking: AtomicBool::new(false),
             panic_value: SpinLock::new(None),
-            growable: false,
         }
     }
 
@@ -267,7 +261,6 @@ impl G {
             cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             panicking: AtomicBool::new(false),
             panic_value: SpinLock::new(None),
-            growable: false,
         }
     }
 }
