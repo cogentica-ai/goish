@@ -41,8 +41,10 @@ fn test_runtime() {
     let n = NumCPU();
     check(n >= 1, b"runtime: NumCPU < 1\n");
 
-    // NumGoroutine: at this point in main (no go!() yet), 0 live.
-    check(NumGoroutine() == 0, b"runtime: NumGoroutine != 0 at start\n");
+    // NumGoroutine: `main` itself runs on the main goroutine
+    // (Go-faithful), so exactly 1 live before any go!(). Go's
+    // runtime.NumGoroutine() likewise reports >= 1 inside main.
+    check(NumGoroutine() == 1, b"runtime: NumGoroutine != 1 at start\n");
 
     // GOMAXPROCS(0) returns current; (>0) sets and returns previous.
     let prev = GOMAXPROCS(0);

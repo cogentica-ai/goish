@@ -470,13 +470,15 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
         alloc::boxed::Box::new(|| unsafe { __goish_main() }),
     );
 
-    // M17b-ε: schedule() under the mcall-pattern never returns. It
+    // M17b-ε: enter the dispatch loop on g0 — never returns. It
     // dispatches the main goroutine (and any others), and the main M
     // exits via `Exit(0)` from `maybe_exit_main_m` once
     // `LIVE_G_COUNT == 0` (or the user calls syscall::Exit directly).
     // Workers keep parking indefinitely, reaped by the main M's
-    // exit_group(2).
-    sched::schedule()
+    // exit_group(2). (`m_schedule_loop`, not the public `schedule()`:
+    // the public entry is `-> ()` because from inside a goroutine it
+    // acts as a returning drain barrier.)
+    sched::m_schedule_loop()
 }
 
 // ─── panic handler ─────────────────────────────────────────────────────
