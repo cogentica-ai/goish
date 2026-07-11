@@ -69,6 +69,12 @@ pub struct Request {
     /// model matches "all `&Request` views see the same parsed
     /// values" which is what Go's pointer-aliasing already provides.
     pub(crate) form_state: alloc::sync::Arc<crate::sync::Mutex<FormCell>>,
+    /// Request-scoped context (Go's unexported `ctx` field,
+    /// request.go:319). `None` means "no context attached" —
+    /// `Context()` then reports `context.Background()`. Set via
+    /// `WithContext` / `Clone`; middleware uses this to hand values
+    /// (request IDs, auth principals) down the handler chain.
+    pub(crate) ctx: Option<alloc::sync::Arc<dyn crate::context::Context>>,
 }
 
 /// Internal form-parse cell — the four fields that ParseForm
@@ -92,35 +98,40 @@ impl Request {
         bytes::NewReader(self.Body.clone())
     }
 
-    /// `r.Context()` (request.go:352) — slim port. Goish v1 doesn't
-    /// store a context on Request yet, so always returns Background().
+    /// `r.Context()` (request.go:352). Returns the request's context,
+    /// or `context.Background()` if none was attached — exactly Go's
+    /// `if r.ctx != nil { return r.ctx }; return context.Background()`.
     pub fn Context(&self) -> alloc::sync::Arc<dyn crate::context::Context> {
-        crate::context::Background()
+        match &self.ctx {
+            Some(c) => c.clone(),
+            None => crate::context::Background(),
+        }
     }
 
-    /// `r.WithContext(ctx)` (request.go:368) — slim port. Returns a
-    /// shallow clone of the request. The ctx parameter is accepted
-    /// for API compatibility but is not yet stored.
+    /// `r.WithContext(ctx)` (request.go:368) — shallow copy of the
+    /// request with its context replaced.
     pub fn WithContext(
         &self,
-        _ctx: alloc::sync::Arc<dyn crate::context::Context>,
+        ctx: alloc::sync::Arc<dyn crate::context::Context>,
     ) -> Request {
         // Go: r2 := new(Request); *r2 = *r; r2.ctx = ctx
-        // goish: derive-Clone gives an owning copy; ctx ignored.
-        self.clone()
+        let mut r2 = self.clone();
+        r2.ctx = Some(ctx);
+        r2
     }
 
-    /// `r.Clone(ctx)` (request.go:386) — slim port. Returns a deep
-    /// copy of the request. Goish container types (string / slice /
-    /// gomap) all deep-clone via #[derive(Clone)], so the explicit
-    /// per-field clones in Go's source are unnecessary here.
+    /// `r.Clone(ctx)` (request.go:386) — deep copy with its context
+    /// replaced. Goish container types (string / slice / gomap) all
+    /// deep-clone via #[derive(Clone)], so the explicit per-field
+    /// clones in Go's source are unnecessary here.
     pub fn Clone(
         &self,
-        _ctx: alloc::sync::Arc<dyn crate::context::Context>,
+        ctx: alloc::sync::Arc<dyn crate::context::Context>,
     ) -> Request {
         // Go: cloneURL(r.URL); r.Header.Clone(); r.Trailer.Clone(); etc.
-        // All of these deep-clone in goish via derived Clone.
-        self.clone()
+        let mut r2 = self.clone();
+        r2.ctx = Some(ctx);
+        r2
     }
 
     /// `r.Cookies()` — parse all `Cookie:` request headers. Mirrors
@@ -442,6 +453,7 @@ pub fn ReadRequestWithLimit<R: io::Reader>(
         RemoteAddr: string::new(),
         path_values: crate::gomap::map::<string, string>::new(),
         form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(FormCell::default())),
+        ctx: None,
     };
 
     // Request-line: METHOD SP request-target SP HTTP-version CRLF

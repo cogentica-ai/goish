@@ -235,10 +235,65 @@ impl ServeMux {
                 return (handler.clone(), crate::gomap::map::<string, string>::new());
             }
         }
+        // 5. Method mismatch → 405 with an Allow header. Go's mux
+        //    (routing errMethodMismatch, server.go:2746): when no
+        //    pattern matched the request but at least one
+        //    method-prefixed pattern matches the path under a
+        //    different method, reply 405 listing the allowed methods
+        //    instead of 404.
+        if let Some(allow) = allowed_methods(&s, &host, &r.URL.Path) {
+            return (
+                Arc::new(methodNotAllowedHandler { allow }) as Arc<dyn Handler>,
+                crate::gomap::map::<string, string>::new(),
+            );
+        }
         (
             Arc::new(notFoundHandler) as Arc<dyn Handler>,
             crate::gomap::map::<string, string>::new(),
         )
+    }
+}
+
+/// Scan the wildcard-pattern table for method-prefixed patterns whose
+/// host+path would match `r` under *their own* method. Returns the
+/// deduplicated `Allow:` header value ("GET, POST"), or `None` if no
+/// pattern matches the path at all (a plain 404). Mirrors
+/// `mux.tree.matchingMethods` (Go routing_tree.go:229).
+fn allowed_methods(s: &MuxState, host: &string, path: &string) -> Option<string> {
+    let mut methods: Vec<string> = Vec::new();
+    for pr in s.pattern_routes.iter() {
+        if pr.pattern.Method.Len() == 0 {
+            continue;
+        }
+        if pr.pattern.Match(&pr.pattern.Method, host, path).is_some()
+            && !methods.iter().any(|m| *m == pr.pattern.Method)
+        {
+            methods.push(pr.pattern.Method.clone());
+        }
+    }
+    if methods.is_empty() {
+        return None;
+    }
+    // Go: strings.Join(methods, ", ")
+    Some(strings::Join(
+        crate::goslice::slice::<string>::__from_vec(methods),
+        string(", "),
+    ))
+}
+
+/// The 405 responder synthesized for method-mismatch routes
+/// (Go server.go:2749).
+struct methodNotAllowedHandler {
+    allow: string,
+}
+impl Handler for methodNotAllowedHandler {
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) {
+        w.Header().Set(string("Allow"), self.allow.clone());
+        Error(
+            w,
+            super::status::StatusText(super::status::StatusMethodNotAllowed),
+            super::status::StatusMethodNotAllowed,
+        );
     }
 }
 
@@ -294,6 +349,14 @@ impl ServeMux {
             if pat.as_bytes() == b"/" {
                 return (handler.clone(), pat.clone());
             }
+        }
+        // 5. Method mismatch → synthesized 405 handler (Go returns
+        //    it with an empty pattern string, server.go:2749).
+        if let Some(allow) = allowed_methods(&s, &r.Host, &r.URL.Path) {
+            return (
+                Arc::new(methodNotAllowedHandler { allow }) as Arc<dyn Handler>,
+                string::new(),
+            );
         }
         (
             Arc::new(notFoundHandler) as Arc<dyn Handler>,
@@ -466,6 +529,186 @@ impl Handler for stripPrefixHandler {
             // Go: NotFound(w, r)
             notFoundHandler.ServeHTTP(w, r);
         }
+    }
+}
+
+/// `http.TimeoutHandler(h, dt, msg)` (server.go:3775) — returns a
+/// Handler that runs `h` with the given time limit.
+///
+/// The wrapped handler runs on its own goroutine against a buffered
+/// writer. If it finishes within `dt`, the buffered status, headers,
+/// and body are copied to the real ResponseWriter. If the deadline
+/// fires first, the caller gets `503 Service Unavailable` with `msg`
+/// as the body (or Go's default HTML timeout page when `msg` is
+/// empty), and the handler's subsequent writes return
+/// `ErrHandlerTimeout`. The handler observes the deadline through
+/// `r.Context().Done()` — the request is re-parented under
+/// `context.WithTimeout`, exactly like Go.
+pub fn TimeoutHandler<H: Handler + 'static, S: Into<string>>(
+    h: H,
+    dt: time::Duration,
+    msg: S,
+) -> Arc<dyn Handler> {
+    Arc::new(timeoutHandler {
+        handler: Arc::new(h),
+        body: msg.into(),
+        dt,
+    })
+}
+
+/// Go's unexported `timeoutHandler` (server.go:3808).
+struct timeoutHandler {
+    handler: Arc<dyn Handler>,
+    body: string,
+    dt: time::Duration,
+}
+
+impl timeoutHandler {
+    /// `(h *timeoutHandler).errorBody()` (server.go:3821).
+    fn errorBody(&self) -> string {
+        if self.body.Len() > 0 {
+            return self.body.clone();
+        }
+        string::from_static(
+            "<html><head><title>Timeout</title></head><body><h1>Timeout</h1></body></html>",
+        )
+    }
+}
+
+impl Handler for timeoutHandler {
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
+        // Go: ctx, cancelCtx = context.WithTimeout(r.Context(), h.dt); defer cancelCtx()
+        let (ctx, cancel) = crate::context::WithTimeout(r.Context(), self.dt);
+        // Go: r = r.WithContext(ctx)
+        let r2 = r.WithContext(ctx.clone());
+
+        // Go: done := make(chan struct{}); close(done) on completion.
+        let done: crate::chan<()> = crate::chan::<()>::new_unbuffered();
+        let tw = Arc::new(timeoutWriter::new());
+
+        // Go: go func() { h.handler.ServeHTTP(tw, r); close(done) }()
+        // (the panicChan arm is dropped: goish builds with
+        // panic="abort", so a panicking handler ends the process
+        // before recovery could run).
+        {
+            let handler = self.handler.clone();
+            let tw = tw.clone();
+            let done = done.clone();
+            go!(move || {
+                handler.ServeHTTP(&*tw, &r2);
+                done.Close();
+            });
+        }
+
+        // Go: case <-done: / case <-ctx.Done():  (select! takes the
+        // channel as an ident, so bind ctx.Done() first).
+        let deadline = ctx.Done();
+        let done_arm: bool = crate::select! {
+            let _ = done.Recv() => true,
+            let _ = deadline.Recv() => false,
+        };
+        if done_arm {
+            // Handler finished in time — replay its buffered response.
+            tw.copy_to(w);
+        } else {
+            // Deadline fired first (ctx.Err() == DeadlineExceeded —
+            // cancellation can't race us here because `cancel` is
+            // only called below). Go: w.WriteHeader(503) + errorBody,
+            // tw.err = ErrHandlerTimeout.
+            tw.mark_timed_out();
+            w.WriteHeader(super::status::StatusServiceUnavailable);
+            let _ = w.Write(crate::convert::bytes(self.errorBody()));
+        }
+        cancel();
+    }
+}
+
+/// Go's unexported `timeoutWriter` (server.go:3866) — the buffered
+/// ResponseWriter handed to the wrapped handler.
+struct timeoutWriter {
+    /// tw.h — headers the handler sets while it still owns the budget.
+    header: super::response::HeaderHandle,
+    state: crate::runtime::spin::SpinLock<twState>,
+}
+
+struct twState {
+    /// tw.wbuf — buffered body bytes.
+    buf: Vec<u8>,
+    /// tw.code / tw.wroteHeader.
+    code: int,
+    wrote_header: bool,
+    /// tw.err — set to ErrHandlerTimeout once the deadline fired;
+    /// later writes are discarded with that error.
+    timed_out: bool,
+}
+
+impl timeoutWriter {
+    fn new() -> Self {
+        timeoutWriter {
+            header: super::response::HeaderHandle::new(super::header::Header::new()),
+            state: crate::runtime::spin::SpinLock::new(twState {
+                buf: Vec::new(),
+                code: 0,
+                wrote_header: false,
+                timed_out: false,
+            }),
+        }
+    }
+
+    fn mark_timed_out(&self) {
+        self.state.lock().timed_out = true;
+    }
+
+    /// The `case <-done:` copy-out (server.go:3852): headers, then
+    /// status (default 200), then the buffered body.
+    fn copy_to(&self, w: &(dyn ResponseWriter + Send + Sync + 'static)) {
+        let g = self.state.lock();
+        let hdr = self.header.snapshot();
+        let dst = w.Header();
+        for (k, vv) in hdr.__inner().__iter() {
+            for i in 0..vv.Len() {
+                dst.Add(k.clone(), vv[i].clone());
+            }
+        }
+        let code = if g.wrote_header {
+            g.code
+        } else {
+            super::status::StatusOK
+        };
+        w.WriteHeader(code);
+        let _ = w.Write(crate::goslice::slice::<crate::types::byte>::__from_vec(
+            g.buf.clone(),
+        ));
+    }
+}
+
+impl ResponseWriter for timeoutWriter {
+    fn Header(&self) -> super::response::HeaderHandle {
+        self.header.clone()
+    }
+
+    fn Write(&self, p: crate::goslice::slice<crate::types::byte>) -> (int, error) {
+        let mut g = self.state.lock();
+        // Go: if tw.err != nil { return 0, tw.err }
+        if g.timed_out {
+            return (0, ErrHandlerTimeout.into());
+        }
+        g.buf.extend_from_slice(&*p);
+        (p.len() as int, errors::nil)
+    }
+
+    fn WriteHeader(&self, statusCode: int) {
+        let mut g = self.state.lock();
+        // Go: if tw.err != nil || tw.wroteHeader { return }
+        if g.timed_out || g.wrote_header {
+            return;
+        }
+        g.wrote_header = true;
+        g.code = statusCode;
+    }
+
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
     }
 }
 

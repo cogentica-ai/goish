@@ -625,6 +625,7 @@ impl Client {
                         RemoteAddr: string::new(),
                         path_values: crate::gomap::map::<string, string>::new(),
                         form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(super::request::FormCell::default())),
+        ctx: None,
                     };
                     // Preserve body only on 307/308 (per RFC).
                     if resp.StatusCode == 307 || resp.StatusCode == 308 {
@@ -661,12 +662,15 @@ impl Client {
         self.Do(&req)
     }
 
-    /// `(*Client).Post(url, contentType, body)`.
-    pub fn Post<U: Into<string>, C: Into<string>>(
+    /// `(*Client).Post(url, contentType, body)`. Like Go's `body
+    /// io.Reader` slot, the body is polymorphic: `nil`, `slice<byte>`,
+    /// `string`, and `&str` literals all work (same `__RequestBody`
+    /// dispatch as `NewRequest`).
+    pub fn Post<U: Into<string>, C: Into<string>, B: __RequestBody>(
         &self,
         url: U,
         content_type: C,
-        body: slice<byte>,
+        body: B,
     ) -> (Response, error) {
         let (mut req, err) = NewRequest(string("POST"), url, body);
         if !err.IsNil() {
@@ -712,11 +716,12 @@ pub fn Head<U: Into<string>>(url: U) -> (Response, error) {
     default_client().Head(url)
 }
 
-/// `http.Post(url, contentType, body)`.
-pub fn Post<U: Into<string>, C: Into<string>>(
+/// `http.Post(url, contentType, body)`. Body is polymorphic like
+/// Go's `io.Reader` slot — `nil` / `slice<byte>` / `string` / `&str`.
+pub fn Post<U: Into<string>, C: Into<string>, B: __RequestBody>(
     url: U,
     content_type: C,
-    body: slice<byte>,
+    body: B,
 ) -> (Response, error) {
     default_client().Post(url, content_type, body)
 }
@@ -729,17 +734,20 @@ pub fn PostForm<U: Into<string>>(url: U, vals: &[(string, string)]) -> (Response
 // ─── NewRequest ──────────────────────────────────────────────────────
 
 /// `http.NewRequestWithContext(ctx, method, url, body)` (request.go:898).
-/// Slim port: ctx is accepted but currently ignored (goish doesn't yet
-/// thread context through Request). Behaves identically to NewRequest
-/// in v1; switching to a context-aware Client/Transport later won't
-/// break call sites that already pass the ctx through.
+/// The ctx is stored on the Request and visible via `r.Context()`.
+/// (v1 slim: the client transport doesn't yet observe ctx
+/// cancellation mid-roundtrip — `Client.Timeout` bounds the wire.)
 pub fn NewRequestWithContext<M: Into<string>, U: Into<string>, B: __RequestBody>(
-    _ctx: alloc::sync::Arc<dyn crate::context::Context>,
+    ctx: alloc::sync::Arc<dyn crate::context::Context>,
     method: M,
     url: U,
     body: B,
 ) -> (Request, error) {
-    NewRequest(method, url, body)
+    let (req, err) = NewRequest(method, url, body);
+    if !err.IsNil() {
+        return (req, err);
+    }
+    (req.WithContext(ctx), err)
 }
 
 /// Body-arg dispatch — lets `http::NewRequest`/`Client::Post` accept
@@ -828,6 +836,7 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
         RemoteAddr: string::new(),
         path_values: crate::gomap::map::<string, string>::new(),
         form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(super::request::FormCell::default())),
+        ctx: None,
     };
     (req, errors::nil)
 }
@@ -846,6 +855,7 @@ fn default_request() -> Request {
         RemoteAddr: string::new(),
         path_values: crate::gomap::map::<string, string>::new(),
         form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(super::request::FormCell::default())),
+        ctx: None,
     }
 }
 
