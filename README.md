@@ -14,7 +14,9 @@ fn main() {
     wg.Add(1_000_000);
 
     for i in 0..1_000_000 {
-        // 2 KiB stack, sub-page allocated from the chunked stackpool.
+        // Explicit 2 KiB stack, sub-page allocated from the chunked
+        // stackpool — the opt-in for extreme spawn density. Everyday
+        // code just writes go!(move || ...) and never sizes a stack.
         go!(stack(2 * KB), move || {
             do_work(i);
             wg.Done();
@@ -31,7 +33,7 @@ That's a million real goroutines on 13 OS threads, ~2 GiB virtual / ~2.4 GiB pea
 
 ## Status
 
-Active development. `main` is green: 360/360 across 12 stress examples, 1500/1500 on `sched_park`, 1000/1000 on `sync_waitgroup` at the new 2 KiB default.
+Active development. `dev` is green: 171/171 on the full e2e example suite, 320/320 across the scheduler/chan/sync/select/time stress families at 10 loops each, and 1M goroutines in `spawn_million`.
 
 Goish is **single-target**: `x86_64-unknown-linux-gnu`. Other targets are deliberately out of scope.
 
@@ -51,7 +53,8 @@ Goish is **single-target**: `x86_64-unknown-linux-gnu`. Other targets are delibe
 - **Page allocator** (`mheap`): radix-tree port of Go's `runtime/mpallocbits.go` — leaf summaries, four-level summary tree, demand-paged metadata via raw `mmap`.
 - **Size-class heap** (`mcentral`): 67 size classes from Go's `internal/runtime/gc/sizeclasses.go`. Lock-free hot path via atomic `alloc_bits` + Go-style `allocCache` discipline (`runtime/mcache.go:14`).
 - **Per-P mcache**: cached span per size-class; mcache hot path takes no central lock.
-- **Chunked stack pool**: Go's `stackpoolalloc` (`runtime/stack.go:194`) port — sub-page 2 KiB / 4 KiB / 8 KiB / 16 KiB / 32 KiB stacks carved from 32 KiB spans. True 2 GiB virtual at 1M goroutines.
+- **Reserved goroutine stacks** (M29): bare `go!()` gets a 1 MiB `MAP_NORESERVE` virtual reservation with a `PROT_NONE` guard page — the kernel commits physical 4 KiB pages as the goroutine touches them, so nobody sizes a stack and a shallow goroutine costs ~one page. Dead reservations recycle through a pool (`MADV_DONTNEED` drops their pages). Overflow past 1 MiB hits the guard and the SIGSEGV handler prints a spawn-site diagnostic.
+- **Chunked stack pool**: Go's `stackpoolalloc` (`runtime/stack.go:194`) port — sub-page 2 KiB / 4 KiB / 8 KiB / 16 KiB / 32 KiB stacks carved from 32 KiB spans, opted into via `go!(stack(N), …)`. True 2 GiB virtual at 1M goroutines.
 
 ### Concurrency primitives
 - **Channels** (`gochan.rs`): unbuffered, buffered, nil, close. Intrusive doubly-linked sudog wait queues — zero allocator round-trips on park/unpark.
@@ -126,6 +129,7 @@ ts  vmsize_kb  vmrss_kb  vmpeak_kb  vmhwm_kb  threads
 │  runtime::preempt SIGURG handler · trampoline    │
 │  runtime::sysmon  timer heap · force-preempt     │
 ├──────────────────────────────────────────────────┤
+│  runtime::sched::stack       1M lazy reservations│
 │  runtime::sched::stackpool   2K..32K span pool   │
 │  runtime::mcentral           67 size classes     │
 │  runtime::mheap              page allocator       │
@@ -144,16 +148,16 @@ The book in `doc/` walks through the implementation chapter by chapter — boots
 
 ## Comparison
 
-|                        | goish                  | Go                       | Pure Rust async       |
-|------------------------|------------------------|--------------------------|-----------------------|
-| Concurrency            | M:N, stackful Gs       | M:N, growable stacks     | stackless futures     |
-| Stack/G                | 2 KiB sub-page         | 2 KiB growable           | one Future per task   |
-| Preemption             | SIGURG (async)         | SIGURG (async)           | cooperative `.await`  |
-| 1M goroutines          | ✅ (2 GiB virtual)     | ✅ (2 KiB-grow each)     | requires runtime tuning |
-| Standalone binary      | ✅ no glibc, no ld.so  | ✅ static linkable       | needs `std`           |
-| GC                     | none (manual mheap)    | concurrent mark+sweep    | none                  |
+|                        | goish                     | Go                       | Pure Rust async       |
+|------------------------|---------------------------|--------------------------|-----------------------|
+| Concurrency            | M:N, stackful Gs          | M:N, growable stacks     | stackless futures     |
+| Stack/G                | 1 MiB reserved, lazy-commit (2 KiB sub-page opt-in) | 2 KiB growable | one Future per task |
+| Preemption             | SIGURG (async)            | SIGURG (async)           | cooperative `.await`  |
+| 1M goroutines          | ✅ (2 GiB virtual, `stack(2*KB)`) | ✅ (2 KiB-grow each) | requires runtime tuning |
+| Standalone binary      | ✅ no glibc, no ld.so     | ✅ static linkable       | needs `std`           |
+| GC                     | none (manual mheap)       | concurrent mark+sweep    | none                  |
 
-Goish is **not** a clone of Go — it ports the runtime *idioms* into a Rust ownership model. The trade-off is no growable stacks (no compiler hooks for `morestack`) and no GC. Per-G stack size is user-controlled via `go!(stack(N), …)` with a 2 KiB default.
+Goish is **not** a clone of Go — it ports the runtime *idioms* into a Rust ownership model. Go's `morestack` (grow by copying the stack) is impossible here — relocating a Rust stack would require fixing up raw pointers the runtime cannot see — so goish grows the other way: bare `go!()` reserves 1 MiB of virtual address space per goroutine and lets the kernel commit physical pages on touch. Depth is transparent up to the reservation; physical cost tracks actual use; overflow faults into a guard page with a spawn-site diagnostic. `go!(stack(N), …)` remains the opt-in for sub-page density (the 1M-goroutine demo) or for goroutines needing more than 1 MiB. No GC either way.
 
 ## License
 

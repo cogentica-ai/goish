@@ -74,6 +74,26 @@ Rust's `Drop` already gives RAII. We add a `defer!{}` macro for
 early-return cleanup that doesn't fit a type's lifetime — same call
 site as Go, executed at scope exit via `Drop`-based shim.
 
+### Goroutine stacks — reserve-big, commit-lazy (M29, landed)
+Go grows stacks by copying (`morestack`); goish can't — relocating a
+Rust stack would require fixing up raw pointers the runtime cannot
+see, and stable Rust has no compiler hook for prologue checks. The
+stacker-style pivot ladder (`runtime::sched::maybe_grow`) works but
+only at annotated call sites. So goish grows the other way, using
+what x86-64 Linux gives us for free — abundant virtual address space
+with kernel-side lazy commit:
+
+| Spawn form | Stack | For |
+|------------|-------|-----|
+| `go!(closure)` | 1 MiB `MAP_NORESERVE` reservation + `PROT_NONE` guard page; physical 4 KiB pages committed on touch; recycled via pool + `MADV_DONTNEED` | everyday code — never size a stack |
+| `go!(stack(N), closure)`, N ≤ 32 KiB | sub-page carve from the chunked stackpool (no guard, no per-G VMA) | extreme density — 1M-goroutine workloads, where per-G mmaps would exhaust `vm.max_map_count` |
+| `go!(stack(N), closure)`, N > 32 KiB | direct mmap + guard page | goroutines needing more than 1 MiB |
+| `maybe_grow(red_zone, size, closure)` | scoped pivot region | >1 MiB excursions at a known recursion site |
+
+Overflow past a reservation hits the guard page and the SIGSEGV
+handler prints a spawn-site diagnostic (`created by file:line`). The
+main goroutine gets an 8 MiB reservation via the same machinery.
+
 ### Allocator maturation
 Phase 2a (today) is sufficient through M14. Higher tiers schedule
 against their forcing milestones:
