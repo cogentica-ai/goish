@@ -822,6 +822,30 @@ pub fn Madvise(addr: *mut u8, length: usize, advice: i32) -> isize {
     unsafe { syscall3(SYS_MADVISE, addr as usize, length, advice as usize) }
 }
 
+/// `recv(2)` flag: peek at incoming data without consuming it.
+pub const MSG_PEEK: i32 = 0x2;
+/// `recv(2)` flag: non-blocking for this call only.
+pub const MSG_DONTWAIT: i32 = 0x40;
+
+/// `recvfrom(2)` with null src-addr — i.e. `recv(2)`. Returns the
+/// byte count, `0` on orderly peer shutdown, or `-errno`. Used with
+/// `MSG_PEEK | MSG_DONTWAIT` by net/http's client-disconnect watcher
+/// to probe a socket without consuming pipelined request bytes.
+#[allow(non_snake_case)]
+pub fn Recvfrom(fd: i32, buf: *mut u8, len: usize, flags: i32) -> isize {
+    unsafe {
+        syscall6(
+            SYS_RECVFROM,
+            fd as usize,
+            buf as usize,
+            len,
+            flags as usize,
+            0,
+            0,
+        )
+    }
+}
+
 /// `clock_gettime(2)` — read the value of `clk` into `tp`. Returns 0 on
 /// success or `-errno`.
 #[allow(non_snake_case)]

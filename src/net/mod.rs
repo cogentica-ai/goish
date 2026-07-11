@@ -408,6 +408,20 @@ impl TCPConn {
         errors::nil
     }
 
+    /// Internal (net/http server): fd + netpoll registration for the
+    /// client-disconnect watcher. Registers the fd with the
+    /// netpoller if it isn't yet (idempotent). The returned pointer
+    /// stays valid until the conn is Closed/dropped — the caller
+    /// (serve_conn) joins its watcher goroutine before either.
+    /// Null pd ⇒ registration failed; caller skips watching.
+    #[doc(hidden)]
+    pub fn __disconnect_watch_parts(&self) -> (i32, *const PollDesc) {
+        if self.fd < 0 {
+            return (self.fd, ptr::null());
+        }
+        (self.fd, self.ensure_pd())
+    }
+
     /// Lazy netpoll registration on first EAGAIN. Idempotent.
     /// See `Listener::ensure_pd` for the lifetime invariants of the
     /// AtomicPtr ↔ Arc conversion.

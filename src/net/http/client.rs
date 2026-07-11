@@ -487,6 +487,17 @@ impl RoundTripper for Transport {
             );
         }
 
+        // ── request context (Go transport.go:594 roundTrip) ──
+        // Fast-fail before dialing if the request's ctx is already
+        // done; fold any ctx deadline into the conn deadline below.
+        let ctx = req.ctx.clone();
+        if let Some(c) = &ctx {
+            let cerr = c.Err();
+            if !cerr.IsNil() {
+                return (Response::default(), cerr);
+            }
+        }
+
         if is_https {
             // ── HTTPS path ───────────────────────────────────────────────
             let dial_addr = ensure_default_port(&host, 443);
@@ -501,9 +512,12 @@ impl RoundTripper for Transport {
                 return (Response::default(), herr);
             }
 
-            // Apply deadline if Timeout > 0 (same as HTTP path).
-            if self.Timeout.0 > 0 {
-                let dl = time::Now().Add(self.Timeout);
+            // Deadline: Transport.Timeout tightened by the ctx
+            // deadline (no mid-I/O cancel watcher on the TLS path in
+            // v1 — WithCancel-style ctxs without a deadline can't
+            // interrupt a blocked TLS read).
+            let dl = self.effective_deadline(&ctx);
+            if !dl.IsZero() {
                 let _ = tls_conn.SetDeadline(dl);
             }
 
@@ -515,7 +529,7 @@ impl RoundTripper for Transport {
             );
             if !werr.IsNil() {
                 let _ = tls_conn.Close();
-                return (Response::default(), werr);
+                return (Response::default(), ctx_err_or(&ctx, werr));
             }
 
             // Read the response.
@@ -524,6 +538,9 @@ impl RoundTripper for Transport {
                 ReadResponse(&mut br, Some(req.clone()))
             };
             let _ = tls_conn.Close();
+            if !rerr.IsNil() {
+                return (resp, ctx_err_or(&ctx, rerr));
+            }
             (resp, rerr)
         } else {
             // ── HTTP path ────────────────────────────────────────────────
@@ -534,18 +551,58 @@ impl RoundTripper for Transport {
                 return (Response::default(), derr);
             }
 
-            // Apply deadline if Timeout > 0.
-            if self.Timeout.0 > 0 {
-                let dl = time::Now().Add(self.Timeout);
+            // Deadline: Transport.Timeout tightened by the ctx deadline.
+            let dl = self.effective_deadline(&ctx);
+            if !dl.IsZero() {
                 let _ = conn.SetDeadline(dl);
+            }
+
+            // ── ctx-cancel watcher (Go transport.go persistConn's
+            // cancel plumbing, slim) ──  For ctxs whose Done chan is
+            // real (WithCancel / WithTimeout), a helper goroutine
+            // selects on Done vs a stop chan. On cancellation it
+            // slams past deadlines onto the conn's PollDesc, kicking
+            // any blocked read/write out with a timeout that the
+            // error-mapping below converts to ctx.Err(). Joined
+            // before the conn is closed, so the PollDesc pointer it
+            // holds stays valid for its whole life.
+            let mut watch: Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)> = None;
+            if let Some(c) = &ctx {
+                let done = c.Done();
+                if !done.is_nil() {
+                    let (_wfd, wpd) = conn.__disconnect_watch_parts();
+                    if !wpd.is_null() {
+                        let stop = crate::gochan::chan::<()>::new_unbuffered();
+                        let exited = crate::gochan::chan::<()>::new_unbuffered();
+                        let stop2 = stop.clone();
+                        let exited2 = exited.clone();
+                        let pd_addr = wpd as usize;
+                        crate::go!(move || {
+                            let fired: bool = crate::select! {
+                                let _ = done.Recv() => true,
+                                let _ = stop2.Recv() => false,
+                            };
+                            if fired {
+                                let pd = unsafe {
+                                    &*(pd_addr as *const crate::runtime::netpoll::PollDesc)
+                                };
+                                crate::runtime::netpoll::set_deadline(pd, -1, b'r');
+                                crate::runtime::netpoll::set_deadline(pd, -1, b'w');
+                            }
+                            exited2.Close();
+                        });
+                        watch = Some((stop, exited));
+                    }
+                }
             }
 
             // Write the request.
             let req_bytes = serialize_request(req, &host);
             let (_, werr) = conn.Write(req_bytes);
             if !werr.IsNil() {
+                stop_cancel_watch(watch);
                 let _ = conn.Close();
-                return (Response::default(), werr);
+                return (Response::default(), ctx_err_or(&ctx, werr));
             }
 
             // Read the response.
@@ -553,9 +610,59 @@ impl RoundTripper for Transport {
                 let mut br = bufio::NewReader(&mut conn);
                 ReadResponse(&mut br, Some(req.clone()))
             };
+            stop_cancel_watch(watch);
             let _ = conn.Close();
+            if !rerr.IsNil() {
+                return (resp, ctx_err_or(&ctx, rerr));
+            }
             (resp, rerr)
         }
+    }
+}
+
+impl Transport {
+    /// Effective conn deadline for one roundtrip: `Transport.Timeout`
+    /// (if set) tightened by the request ctx's deadline (if any).
+    /// Zero Time ⇒ no deadline.
+    fn effective_deadline(
+        &self,
+        ctx: &Option<Arc<dyn crate::context::Context>>,
+    ) -> time::Time {
+        let mut dl = time::Time::default();
+        if self.Timeout.0 > 0 {
+            dl = time::Now().Add(self.Timeout);
+        }
+        if let Some(c) = ctx {
+            if let Some(cd) = c.Deadline() {
+                if dl.IsZero() || cd.Before(dl) {
+                    dl = cd;
+                }
+            }
+        }
+        dl
+    }
+}
+
+/// Prefer the ctx's error over the wire error once the ctx is done —
+/// a read kicked out by the cancel watcher's past-deadline surfaces
+/// as "context canceled" / "context deadline exceeded", matching
+/// Go's url.Error unwrapping to ctx.Err().
+fn ctx_err_or(ctx: &Option<Arc<dyn crate::context::Context>>, fallback: error) -> error {
+    if let Some(c) = ctx {
+        let e = c.Err();
+        if !e.IsNil() {
+            return e;
+        }
+    }
+    fallback
+}
+
+/// Stop + join the ctx-cancel watcher. Must run before the conn is
+/// closed (the watcher dereferences the conn's PollDesc).
+fn stop_cancel_watch(watch: Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)>) {
+    if let Some((stop, exited)) = watch {
+        stop.Close();
+        let (_, _) = exited.Recv();
     }
 }
 
@@ -580,11 +687,37 @@ impl Default for Client {
 
 const MAX_REDIRECTS: usize = 10;
 
+/// Calls the held `context.CancelFunc` when dropped — the goish
+/// rendering of Go's `defer cancel()`. Releases the WithTimeout
+/// timer on every return path out of `Client::Do`.
+struct __CancelOnDrop(Option<crate::context::CancelFunc>);
+impl Drop for __CancelOnDrop {
+    fn drop(&mut self) {
+        if let Some(c) = self.0.take() {
+            c();
+        }
+    }
+}
+
 impl Client {
     /// `(*Client).Do(req)` — execute the request, following up to 10
     /// redirects on 301/302/303/307/308. Mirrors client.go:565.
+    ///
+    /// `Client.Timeout` bounds the entire exchange (all redirect hops
+    /// included) — implemented the way Go's `setRequestCancel`
+    /// (client.go:394) does it: the request is re-parented under
+    /// `context.WithTimeout`, and the transport folds the context
+    /// deadline into its connection deadlines.
     pub fn Do(&self, req: &Request) -> (Response, error) {
         let mut current = req.clone();
+        // Whole-exchange deadline via ctx (canceled on every return
+        // path by the drop guard, releasing the timer).
+        let mut _cancel_guard = __CancelOnDrop(None);
+        if self.Timeout.0 > 0 {
+            let (ctx, cancel) = crate::context::WithTimeout(current.Context(), self.Timeout);
+            current = current.WithContext(ctx);
+            _cancel_guard.0 = Some(cancel);
+        }
         for _step in 0..=MAX_REDIRECTS {
             let (resp, err) = self.Transport.RoundTrip(&current);
             if !err.IsNil() {
@@ -625,7 +758,9 @@ impl Client {
                         RemoteAddr: string::new(),
                         path_values: crate::gomap::map::<string, string>::new(),
                         form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(super::request::FormCell::default())),
-        ctx: None,
+                        // Redirect hops inherit the original request's
+                        // context (Go client.go:665: ireq.Context()).
+                        ctx: current.ctx.clone(),
                     };
                     // Preserve body only on 307/308 (per RFC).
                     if resp.StatusCode == 307 || resp.StatusCode == 308 {
