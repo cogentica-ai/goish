@@ -65,6 +65,9 @@ static SERVE_DONE: Uint64 = Uint64::new(0);
 static PROXY_DONE: Uint64 = Uint64::new(0);
 static API_PORT: Uint64 = Uint64::new(0);
 static PROXY_PORT: Uint64 = Uint64::new(0);
+/// 0 = watchdog handler still pending, 1 = ctx canceled (disconnect
+/// observed), 2 = guard timer fired first (no cancellation).
+static WATCHDOG_RESULT: Uint64 = Uint64::new(0);
 
 fn fail<S: Into<string>>(name: S) {
     FAILED.Add(1);
@@ -442,6 +445,60 @@ fn main() {
     mux.HandleFunc("POST /api/import", importLimited);
     mux.HandleFunc("POST /api/upload", uploadHandler);
 
+    // GET /api/watchdog — parks on the request context until either
+    // the client disconnects (ctx canceled by the server's
+    // background watcher) or a 5 s guard timer fires. Records which
+    // arm won so the driver can assert disconnect-cancellation.
+    mux.HandleFunc(
+        "GET /api/watchdog",
+        |w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
+            let ctx = r.Context();
+            let guard = time::After(time::Second * 5);
+            let outcome: u64 = goish::select! {
+                let _ = (ctx.Done()).Recv() => 1,
+                let _ = guard.Recv() => 2,
+            };
+            WATCHDOG_RESULT.Store(outcome);
+            if outcome == 2 {
+                w.Write(bytes("no disconnect\n"));
+            }
+        },
+    );
+
+    // GET /api/sleepy — sleeps 2 s unless the request context is
+    // canceled first (client hangs up / client-side ctx cancel →
+    // server watcher cancels → we bail early instead of pinning the
+    // connection). Target for the client-side ctx tests.
+    mux.HandleFunc(
+        "GET /api/sleepy",
+        |w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
+            let ctx = r.Context();
+            let nap = time::After(time::Second * 2);
+            let finished: u64 = goish::select! {
+                let _ = (ctx.Done()).Recv() => 0,
+                let _ = nap.Recv() => 1,
+            };
+            if finished == 1 {
+                w.Write(bytes("slept\n"));
+            }
+        },
+    );
+
+    // GET /api/ctxprobe — stashes its request context so the driver
+    // can verify it is canceled once the response is finished
+    // (Go: ctx canceled when ServeHTTP returns).
+    let ctx_slot: Arc<Mutex<Option<Arc<dyn context::Context>>>> = Arc::new(Mutex::new(None));
+    {
+        let slot = ctx_slot.clone();
+        mux.HandleFunc(
+            "GET /api/ctxprobe",
+            move |w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
+                *slot.Lock() = Some(r.Context());
+                w.Write(bytes("probed\n"));
+            },
+        );
+    }
+
     // Slow endpoint wrapped in TimeoutHandler: 400 ms of work behind a
     // 100 ms budget → 503 "too slow". Fast sibling under the same wrap
     // sails through.
@@ -516,6 +573,7 @@ fn main() {
     // ─── driver ─────────────────────────────────────────────────────
     let srv_shutdown = srv.clone();
     let proxy_shutdown = proxy_srv.clone();
+    let ctx_probe = ctx_slot.clone();
     go!(move || {
         time::Sleep(time::Millisecond * 50);
         let client = http::Client::default();
@@ -751,6 +809,71 @@ fn main() {
             pass(name);
         }
 
+        // 11a. Client.Timeout bounds a slow exchange.
+        let name = "Client.Timeout aborts slow request";
+        let slow_client = http::Client {
+            Timeout: time::Millisecond * 200,
+            ..Default::default()
+        };
+        let t0 = time::Now();
+        let (_, err) = slow_client.Get(Sprintf!("%s/api/sleepy", base));
+        let took = time::Since(t0);
+        if err == nil {
+            fail(Sprintf!("%s: no error", name));
+        } else if took >= time::Second {
+            fail(Sprintf!("%s: took %s", name, took.String()));
+        } else {
+            pass(name);
+        }
+
+        // 11b. Cancelling a request ctx mid-flight interrupts the
+        // blocked read and surfaces context.Canceled.
+        let name = "ctx cancel interrupts in-flight request";
+        let (cctx, ccancel) = context::WithCancel(context::Background());
+        let (req, e) =
+            http::NewRequestWithContext(cctx, "GET", Sprintf!("%s/api/sleepy", base), nil);
+        if e != nil {
+            fail(Sprintf!("%s: NewRequestWithContext: %s", name, e.Error()));
+        } else {
+            go!(move || {
+                time::Sleep(time::Millisecond * 150);
+                ccancel();
+            });
+            let t0 = time::Now();
+            let (_, err) = client.Do(&req);
+            let took = time::Since(t0);
+            if err == nil {
+                fail(Sprintf!("%s: no error", name));
+            } else if !goish::errors::Is(err.clone(), context::Canceled) {
+                fail(Sprintf!("%s: err = %s", name, err.Error()));
+            } else if took >= time::Second {
+                fail(Sprintf!("%s: took %s", name, took.String()));
+            } else {
+                pass(name);
+            }
+        }
+
+        // 11c. A pre-canceled ctx fails fast, before dialing.
+        let name = "pre-canceled ctx fails fast";
+        let (cctx, ccancel) = context::WithCancel(context::Background());
+        ccancel();
+        let (req, e) =
+            http::NewRequestWithContext(cctx, "GET", Sprintf!("%s/api/sleepy", base), nil);
+        if e != nil {
+            fail(Sprintf!("%s: NewRequestWithContext: %s", name, e.Error()));
+        } else {
+            let t0 = time::Now();
+            let (_, err) = client.Do(&req);
+            let took = time::Since(t0);
+            if err == nil {
+                fail(Sprintf!("%s: no error", name));
+            } else if took >= time::Millisecond * 100 {
+                fail(Sprintf!("%s: not fast (%s)", name, took.String()));
+            } else {
+                pass(name);
+            }
+        }
+
         // 12. MaxBytesReader: oversize import → 413, small import → 200.
         let name = "POST /api/import oversize -> 413";
         let big = goish::strings::Repeat("x", 200);
@@ -931,7 +1054,68 @@ fn main() {
             pass(name);
         }
 
-        // 17. Graceful shutdown, both hops.
+        // 17. Client disconnect cancels r.Context() mid-handler: the
+        // watchdog handler parks on ctx.Done(); we hang up without
+        // reading the response and expect the server's background
+        // watcher to cancel the request context.
+        let name = "client disconnect cancels request ctx";
+        let (mut conn, derr) = net::Dial("tcp", Sprintf!("127.0.0.1:%d", int(API_PORT.Load())));
+        if derr != nil {
+            fail(Sprintf!("%s: dial: %s", name, derr.Error()));
+        } else {
+            conn.Write(bytes(
+                "GET /api/watchdog HTTP/1.1\r\nHost: taskd\r\n\r\n",
+            ));
+            // Give the handler time to reach its select before we
+            // slam the connection shut.
+            time::Sleep(time::Millisecond * 120);
+            conn.Close();
+            let mut tries = 0;
+            while WATCHDOG_RESULT.Load() == 0 && tries < 60 {
+                time::Sleep(time::Millisecond * 50);
+                tries += 1;
+            }
+            let got = WATCHDOG_RESULT.Load();
+            if got == 1 {
+                pass(name);
+            } else {
+                fail(Sprintf!("%s: watchdog outcome %d, want 1", name, int(got)));
+            }
+        }
+
+        // 18. Request ctx is canceled once the response is finished
+        // (Go: ServeHTTP returns → cancelCtx).
+        let name = "request ctx canceled after response";
+        let (resp, err) = http::Get(Sprintf!("%s/api/ctxprobe", base));
+        if err != nil {
+            fail(Sprintf!("%s: %s", name, err.Error()));
+        } else if resp.StatusCode != 200 {
+            fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+        } else {
+            let mut canceled = false;
+            let mut tries = 0;
+            while !canceled && tries < 20 {
+                {
+                    let g = ctx_probe.Lock();
+                    if let Some(c) = &*g {
+                        if c.Err() != nil {
+                            canceled = true;
+                        }
+                    }
+                }
+                if !canceled {
+                    time::Sleep(time::Millisecond * 50);
+                }
+                tries += 1;
+            }
+            if canceled {
+                pass(name);
+            } else {
+                fail(Sprintf!("%s: ctx.Err() still nil", name));
+            }
+        }
+
+        // 19. Graceful shutdown, both hops.
         let name = "Shutdown proxy + api";
         let e1 = proxy_shutdown.Shutdown(time::Second);
         let e2 = srv_shutdown.Shutdown(time::Second);
@@ -952,10 +1136,10 @@ fn main() {
 
         let f = int64(FAILED.Load());
         if f == 0 {
-            Println!("COMPLEX_API_OK 19/19");
+            Println!("COMPLEX_API_OK 24/24");
             os::Exit(0);
         } else {
-            Printf!("COMPLEX_API_FAIL %d / 19\n", f);
+            Printf!("COMPLEX_API_FAIL %d / 24\n", f);
             os::Exit(1);
         }
     });
