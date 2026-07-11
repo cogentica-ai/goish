@@ -279,6 +279,31 @@ impl Format for char {
 // work registers a TypeId → name table populated by `goish::reflect`.
 impl Format for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        // %T on a raw `Arc<dyn Any>` (no AnyVal type-name slot): name the known
+        // builtins, else "<any>". (`goish::Any` — the `interface{}` newtype most
+        // code uses — carries the real concrete name; prefer that path.) Must
+        // short-circuit before the value-formatting probes below.
+        if verb == b'T' {
+            let name = if self.is::<crate::gostring::string>() {
+                "string"
+            } else if self.is::<crate::goslice::slice<byte>>() {
+                "[]uint8"
+            } else if self.is::<i64>() {
+                "int64"
+            } else if self.is::<u64>() {
+                "uint64"
+            } else if self.is::<i32>() {
+                "int32"
+            } else if self.is::<u32>() {
+                "uint32"
+            } else if self.is::<bool>() {
+                "bool"
+            } else {
+                "<any>"
+            };
+            f.extend(name.as_bytes());
+            return;
+        }
         // Probe a small set of common built-in concrete types so the
         // common Goish format calls produce something user-readable.
         // Falls back to "<any>" when the wrapped type isn't in the
@@ -318,6 +343,14 @@ impl Format for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
 // the probe set is small, so inlining is cheaper than a shim trait.
 impl Format for crate::goany::Any {
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        // %T — Go's `fmt.Sprintf("%T", v)`: the wrapped value's concrete type
+        // name, captured at wrap time (best-effort Rust path; see
+        // `goany::AnyVal::__goish_type_name`). Must short-circuit BEFORE the
+        // value-formatting probes below, which would otherwise print the value.
+        if verb == b'T' {
+            f.extend(self.TypeName().as_bytes());
+            return;
+        }
         let inner = self.as_any();
         if let Some(s) = inner.downcast_ref::<crate::gostring::string>() {
             return s.fmt(verb, f);

@@ -448,15 +448,34 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // Hand off to the user's main. The proc-macro #[goish::main]
     // generates a #[no_mangle] extern "C" fn __goish_main wrapping the
     // user's body, so the linker resolves this `extern` block to it.
+    //
+    // Mirror Go's `runtime.main`: the user's `main` runs on a regular
+    // goroutine (the "main goroutine"), NOT directly on m0's g0
+    // scheduler stack. Running it on a G means `current_g()` is set
+    // while user code executes, so blocking primitives (channel
+    // send/recv, sync.WaitGroup.Wait, sync.Mutex contention) can park
+    // and resume like in Go. Running it on g0 — as the previous direct
+    // call did — left `current_g() == None`, so any blocking channel op
+    // from `main`/test code fatal'd with "outside of any goroutine".
+    //
+    // The main goroutine gets a generous fixed stack (goish has no
+    // morestack): main code plus anything it calls inline must fit.
     extern "C" {
         fn __goish_main();
     }
-    unsafe { __goish_main() }
+    sched::newproc_with_stack_at(
+        8 * 1024 * 1024,
+        file!(),
+        line!(),
+        alloc::boxed::Box::new(|| unsafe { __goish_main() }),
+    );
 
     // M17b-ε: schedule() under the mcall-pattern never returns. It
-    // drains the run queue; the main M exits via `Exit(0)` from
-    // `maybe_exit_main_m` once `LIVE_G_COUNT == 0`. Workers keep
-    // parking indefinitely, reaped by the main M's exit_group(2).
+    // dispatches the main goroutine (and any others), and the main M
+    // exits via `Exit(0)` from `maybe_exit_main_m` once
+    // `LIVE_G_COUNT == 0` (or the user calls syscall::Exit directly).
+    // Workers keep parking indefinitely, reaped by the main M's
+    // exit_group(2).
     sched::schedule()
 }
 

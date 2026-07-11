@@ -107,21 +107,27 @@ impl io::Closer for FdWriter {
 }
 
 // SAFETY: FdWriter contains only an i32 fd, which is a kernel handle.
-// We never expose a raw pointer to shared state.
+// We never expose a raw pointer to shared state. Sync is sound for the same
+// reason (an fd integer); concurrent use is the caller's responsibility, as in Go.
 unsafe impl Send for FdWriter {}
+unsafe impl Sync for FdWriter {}
 
-/// Readable end of a raw OS pipe. Not currently used externally;
-/// kept as the symmetric counterpart of `FdWriter` for future
-/// `StdoutPipe()`-style APIs.
-#[allow(dead_code)]
-struct FdReader {
+/// Readable end of a raw OS pipe. Returned by `Cmd::StdoutPipe()` /
+/// `Cmd::StderrPipe()`; the caller reads the child's output from it while the
+/// child runs and closes it after `Wait()`.
+pub struct FdReader {
     fd: i32,
 }
 
-#[allow(dead_code)]
 impl FdReader {
-    fn from_raw(fd: i32) -> Self {
+    /// Wrap a raw file descriptor. Takes ownership: `Close()` will
+    /// call `syscall::Close(fd)`.
+    pub fn from_raw(fd: i32) -> Self {
         FdReader { fd }
+    }
+    /// Expose the underlying raw fd.
+    pub fn as_raw_fd(&self) -> i32 {
+        self.fd
     }
 }
 
@@ -154,6 +160,7 @@ impl io::Closer for FdReader {
 }
 
 unsafe impl Send for FdReader {}
+unsafe impl Sync for FdReader {}
 
 // Sentinel returned by `LookPath` when no matching executable is on
 // `$PATH`. Mirrors `exec.ErrNotFound`.
@@ -191,6 +198,11 @@ pub struct Cmd {
     /// Start() and Wait() so Wait() can drain them.  -1 when not used.
     cached_out_fd: i32,
     cached_err_fd: i32,
+    /// If StdoutPipe()/StderrPipe() was called, the write end of the pipe to
+    /// dup onto the child's fd 1 / fd 2. The caller holds the read end (an
+    /// FdReader) and reads it directly — not drained by Wait(). -1 otherwise.
+    stdout_pipe_write_fd: i32,
+    stderr_pipe_write_fd: i32,
 }
 
 impl Cmd {
@@ -253,6 +265,57 @@ impl Cmd {
         //  O_CLOEXEC on it is fine — dup3 without O_CLOEXEC clears it.)
         (FdWriter::from_raw(pipe_fds[1]), crate::nilval::nil.into())
     }
+
+    /// `(*Cmd).StdoutPipe()` — return an `FdReader` connected to the child's
+    /// stdout (fd 1). The caller reads the child's output from it while the
+    /// child runs, and should read to EOF before calling `Wait()`.
+    ///
+    /// Must be called before `Start()` or `Run()`.
+    /// Mirrors Go's `(*Cmd).StdoutPipe() (io.ReadCloser, error)`.
+    pub fn StdoutPipe(&mut self) -> (FdReader, error) {
+        if self.stdout_pipe_write_fd >= 0 || self.Stdout.is_some() {
+            return (FdReader::from_raw(-1),
+                    errors::New("os/exec: Stdout already set"));
+        }
+        if self.pid >= 0 {
+            return (FdReader::from_raw(-1),
+                    errors::New("os/exec: StdoutPipe called after Start"));
+        }
+        let mut pipe_fds = [-1i32; 2];
+        let r = syscall::Pipe2(&mut pipe_fds, syscall::O_CLOEXEC);
+        if r < 0 {
+            return (FdReader::from_raw(-1),
+                    errors::New("os/exec: StdoutPipe pipe2 failed"));
+        }
+        // pipe_fds[0] = read end (returned to caller)
+        // pipe_fds[1] = write end (child's fd 1 via dup3 in Start)
+        self.stdout_pipe_write_fd = pipe_fds[1];
+        (FdReader::from_raw(pipe_fds[0]), crate::nilval::nil.into())
+    }
+
+    /// `(*Cmd).StderrPipe()` — return an `FdReader` connected to the child's
+    /// stderr (fd 2). Symmetric to `StdoutPipe()`.
+    ///
+    /// Must be called before `Start()` or `Run()`.
+    /// Mirrors Go's `(*Cmd).StderrPipe() (io.ReadCloser, error)`.
+    pub fn StderrPipe(&mut self) -> (FdReader, error) {
+        if self.stderr_pipe_write_fd >= 0 || self.Stderr.is_some() {
+            return (FdReader::from_raw(-1),
+                    errors::New("os/exec: Stderr already set"));
+        }
+        if self.pid >= 0 {
+            return (FdReader::from_raw(-1),
+                    errors::New("os/exec: StderrPipe called after Start"));
+        }
+        let mut pipe_fds = [-1i32; 2];
+        let r = syscall::Pipe2(&mut pipe_fds, syscall::O_CLOEXEC);
+        if r < 0 {
+            return (FdReader::from_raw(-1),
+                    errors::New("os/exec: StderrPipe pipe2 failed"));
+        }
+        self.stderr_pipe_write_fd = pipe_fds[1];
+        (FdReader::from_raw(pipe_fds[0]), crate::nilval::nil.into())
+    }
 }
 
 /// `exec.Command(name, args...)`. The first arg is the program name —
@@ -288,6 +351,8 @@ pub fn Command<S: Into<string>>(name: S, args: slice<string>) -> Cmd {
         stdin_pipe_read_fd: -1,
         cached_out_fd: -1,
         cached_err_fd: -1,
+        stdout_pipe_write_fd: -1,
+        stderr_pipe_write_fd: -1,
     }
 }
 
@@ -426,16 +491,27 @@ impl Cmd {
         }
 
         // ── Stdout/Stderr pipes ──────────────────────────────────────
+        // Two cases each, mirroring stdin:
+        //   • SetStdout/SetStderr → Stdout/Stderr writer set → create a capture
+        //     pipe; the parent caches the read end and Wait() drains it.
+        //   • StdoutPipe()/StderrPipe() → the pipe was already created; the write
+        //     end is stored here and the caller already holds the read end (it
+        //     reads concurrently with the running child). Not drained by Wait().
         let mut out_pipe = [-1i32; 2];
         let mut err_pipe = [-1i32; 2];
         let want_out = self.Stdout.is_some();
         let want_err = self.Stderr.is_some();
+        let want_out_pipe = self.stdout_pipe_write_fd >= 0;
+        let want_err_pipe = self.stderr_pipe_write_fd >= 0;
         if want_out {
             let r = syscall::Pipe2(&mut out_pipe, syscall::O_CLOEXEC);
             if r < 0 {
                 if want_in_reader { syscall::Close(in_pipe[0]); syscall::Close(in_pipe[1]); }
                 return errors::New("os/exec: pipe2 failed for stdout");
             }
+        } else if want_out_pipe {
+            // out_pipe[0] (read end) is with the caller; we only hold the write end.
+            out_pipe[1] = self.stdout_pipe_write_fd;
         }
         if want_err {
             let r = syscall::Pipe2(&mut err_pipe, syscall::O_CLOEXEC);
@@ -444,6 +520,8 @@ impl Cmd {
                 if want_out { syscall::Close(out_pipe[0]); syscall::Close(out_pipe[1]); }
                 return errors::New("os/exec: pipe2 failed for stderr");
             }
+        } else if want_err_pipe {
+            err_pipe[1] = self.stderr_pipe_write_fd;
         }
 
         // ── Fork ─────────────────────────────────────────────────────
@@ -452,6 +530,10 @@ impl Cmd {
             if want_in_reader { syscall::Close(in_pipe[0]); syscall::Close(in_pipe[1]); }
             if want_out { syscall::Close(out_pipe[0]); syscall::Close(out_pipe[1]); }
             if want_err { syscall::Close(err_pipe[0]); syscall::Close(err_pipe[1]); }
+            // For the StdoutPipe/StderrPipe cases we own only the write end; the
+            // caller holds the read end and will see EOF once it is closed.
+            if want_out_pipe { syscall::Close(out_pipe[1]); self.stdout_pipe_write_fd = -1; }
+            if want_err_pipe { syscall::Close(err_pipe[1]); self.stderr_pipe_write_fd = -1; }
             return errors::New("os/exec: fork failed");
         }
 
@@ -473,15 +555,15 @@ impl Cmd {
                 syscall::Close(in_pipe[0]);
             }
 
-            // Wire stdout (fd 1).
-            if want_out {
-                syscall::Close(out_pipe[0]);
+            // Wire stdout (fd 1). Covers both SetStdout (capture) and StdoutPipe.
+            if want_out || want_out_pipe {
+                if out_pipe[0] >= 0 { syscall::Close(out_pipe[0]); }
                 if syscall::Dup3(out_pipe[1], 1, 0) < 0 { child_die(127); }
                 syscall::Close(out_pipe[1]);
             }
-            // Wire stderr (fd 2).
-            if want_err {
-                syscall::Close(err_pipe[0]);
+            // Wire stderr (fd 2). Covers both SetStderr (capture) and StderrPipe.
+            if want_err || want_err_pipe {
+                if err_pipe[0] >= 0 { syscall::Close(err_pipe[0]); }
                 if syscall::Dup3(err_pipe[1], 2, 0) < 0 { child_die(127); }
                 syscall::Close(err_pipe[1]);
             }
@@ -509,6 +591,11 @@ impl Cmd {
         // Close write ends of stdout/stderr (they belong to the child).
         if want_out { syscall::Close(out_pipe[1]); }
         if want_err { syscall::Close(err_pipe[1]); }
+        // StdoutPipe/StderrPipe: the write end now lives in the child; close the
+        // parent's copy so the caller's reader sees EOF when the child exits.
+        // The caller keeps and closes the read end itself.
+        if want_out_pipe { syscall::Close(out_pipe[1]); self.stdout_pipe_write_fd = -1; }
+        if want_err_pipe { syscall::Close(err_pipe[1]); self.stderr_pipe_write_fd = -1; }
 
         // ── Feed stdin from reader via goroutine ─────────────────────
         // If Stdin was set, spawn a goroutine that copies from the reader

@@ -304,6 +304,18 @@ macro_rules! max {
 ///     `if ok { f.M() }` is the safe, Go-faithful use.
 #[macro_export]
 macro_rules! cast {
+    // Mutable comma-ok interface assertion — Go's `v, ok := x.(J)` where the
+    // asserted view is mutated. Spelling mirrors the immutable carrier: write
+    // `&mut` instead of `&` (`cast!(&mut *box, J)`). Returns `Option<&mut
+    // d!(J)>` — `None` on miss (there is no sound `&'static mut` nil sentinel,
+    // and `&mut` is exclusive). Needs no nil sentinel, so it also works for
+    // composite-supertrait traits that the immutable arm rejects.
+    (&mut $carrier:expr, $iface:path) => {{
+        $crate::goany::__cast_iface_mut::<
+            dyn $iface + ::core::marker::Send + ::core::marker::Sync,
+            _,
+        >(&mut $carrier)
+    }};
     ($carrier:expr, $iface:path) => {{
         const _: () = {
             if !<dyn $iface + ::core::marker::Send + ::core::marker::Sync

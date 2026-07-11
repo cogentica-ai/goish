@@ -95,6 +95,13 @@ pub trait AnyVal: 'static + Send + Sync {
     /// because identical TypeIds drive both directions through the
     /// same concrete `eq`.
     fn dyn_eq(&self, other: &dyn CoreAny) -> bool;
+
+    /// The concrete value's type name (`core::any::type_name::<T>()`),
+    /// captured at wrap time. Backs `fmt`'s `%T` (Go's
+    /// `fmt.Sprintf("%T", v)`). Best-effort: it is the Rust type path
+    /// (e.g. `"alloc::string::String"`), not Go's name (`"string"`) —
+    /// diagnostic-grade, like Go's own `%T` string.
+    fn __goish_type_name(&self) -> &'static str;
 }
 
 impl<T: 'static + Send + Sync + PartialEq> AnyVal for T {
@@ -114,6 +121,11 @@ impl<T: 'static + Send + Sync + PartialEq> AnyVal for T {
             Some(o) => self == o,
             None => false,
         }
+    }
+
+    #[inline]
+    fn __goish_type_name(&self) -> &'static str {
+        core::any::type_name::<T>()
     }
 }
 
@@ -226,6 +238,15 @@ impl Any {
                 core::any::type_name::<T>()
             )
         })
+    }
+
+    /// Concrete type name of the wrapped value — backs `fmt`'s `%T`
+    /// (Go's `fmt.Sprintf("%T", v)` / `reflect.TypeOf(v).String()`).
+    /// Captured at wrap time via `core::any::type_name`; best-effort
+    /// Rust path, not Go's spelling (see `AnyVal::__goish_type_name`).
+    #[inline]
+    pub fn TypeName(&self) -> &'static str {
+        self.0.__goish_type_name()
     }
 
     /// Comma-ok type assertion — Goish equivalent of Go's `v, ok := x.(T)`.
@@ -353,6 +374,13 @@ impl<T: 'static + Send + Sync> AnyVal for __FnSlot<T> {
     fn dyn_eq(&self, _other: &dyn CoreAny) -> bool {
         false
     }
+
+    /// Name the inner `T` (what `__any_send_sync` exposes), not the
+    /// `__FnSlot` wrapper — keeps `%T` consistent with downcast/reflect.
+    #[inline]
+    fn __goish_type_name(&self) -> &'static str {
+        core::any::type_name::<T>()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -386,6 +414,28 @@ impl<T: 'static + Sized> DowncastableFromAny for T {
     #[inline]
     fn from_any(any_ref: &(dyn CoreAny + Send + Sync)) -> Option<&Self> {
         any_ref.downcast_ref::<T>()
+    }
+}
+
+/// Mutable mirror of [`DowncastableFromAny`]. Drives the `&mut` arm of
+/// the interface assertion — `cast!(&mut *box, J)` — recovering a
+/// `&mut Self` from a `&mut dyn Any`. Two impl families, symmetric to
+/// the immutable trait: a `Sized` blanket via `downcast_mut`, and the
+/// per-trait impl emitted by `#[goish::interface]` routing through the
+/// trait's mutable registry lookup.
+///
+/// Returns `Option` (not the nil-sentinel tuple `cast!` uses for the
+/// immutable form): there is no sound shared `&'static mut` nil, and
+/// `&mut` is exclusive, so the honest miss value is `None`.
+pub trait DowncastableFromAnyMut: 'static {
+    /// Try to view a `&mut (dyn Any + Send + Sync)` as `&mut Self`.
+    fn from_any_mut(any_ref: &mut (dyn CoreAny + Send + Sync)) -> Option<&mut Self>;
+}
+
+impl<T: 'static + Sized> DowncastableFromAnyMut for T {
+    #[inline]
+    fn from_any_mut(any_ref: &mut (dyn CoreAny + Send + Sync)) -> Option<&mut Self> {
+        any_ref.downcast_mut::<T>()
     }
 }
 
@@ -428,6 +478,24 @@ impl<T: 'static + Sized + Send + Sync> HasDynAny for T {
     }
 }
 
+/// Mutable mirror of [`HasDynAny`] — exposes a `&mut dyn Any` view.
+/// Same two impl families: a `Sized` blanket returning `Some(self)`,
+/// and the per-trait `impl HasDynAnyMut for dyn Trait + Send + Sync`
+/// emitted by `#[goish::interface]`, which routes through the trait's
+/// `__goish_as_dyn_any_mut` method (default `None`; concrete impls
+/// override to `Some(self)`, emitted at every `impl Trait for C` site
+/// alongside the `__goish_as_dyn_any` override).
+pub trait HasDynAnyMut {
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn CoreAny + Send + Sync)>;
+}
+
+impl<T: 'static + Sized + Send + Sync> HasDynAnyMut for T {
+    #[inline]
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn CoreAny + Send + Sync)> {
+        Some(self)
+    }
+}
+
 /// Blanket extension that makes `.As::<T>()` available on any borrowed
 /// carrier that exposes a `&dyn Any` view via `HasDynAny`. Drives Go's
 /// interface-borrow downcast `b, ok := rd.(*Reader)` where rd is
@@ -459,6 +527,29 @@ where
     fn As<T: ?Sized + DowncastableFromAny>(&self) -> Option<&T> {
         let any_ref = self.__goish_as_dyn_any()?;
         T::from_any(any_ref)
+    }
+}
+
+/// Mutable mirror of [`AsExt`] — `.AsMut::<T>()` on any carrier that
+/// exposes a `&mut dyn Any` view via [`HasDynAnyMut`]. Backs the
+/// `cast!(&mut *box, J)` arm. `AsMut` (PascalCase) is distinct from
+/// `core::convert::AsMut::as_mut`, so there is no method-resolution
+/// clash.
+pub trait AsExtMut {
+    /// `Some(&mut T)` when the wrapped value's runtime type is `T`. For
+    /// `T = dyn Trait`, consults the per-trait registry via
+    /// `DowncastableFromAnyMut::from_any_mut`.
+    fn AsMut<T: ?Sized + DowncastableFromAnyMut>(&mut self) -> Option<&mut T>;
+}
+
+impl<U> AsExtMut for U
+where
+    U: ?Sized + HasDynAnyMut,
+{
+    #[inline]
+    fn AsMut<T: ?Sized + DowncastableFromAnyMut>(&mut self) -> Option<&mut T> {
+        let any_ref = self.__goish_as_dyn_any_mut()?;
+        T::from_any_mut(any_ref)
     }
 }
 
@@ -516,6 +607,25 @@ where
         Some(v) => (v, true),
         None => (Target::__goish_nil_ref(), false),
     }
+}
+
+/// Runtime backing for the `cast!(&mut x, Iface)` macro arm — the
+/// mutable interface assertion. Returns `Some(&mut Target)` on a hit,
+/// `None` on a miss. No nil sentinel: `&mut` is exclusive, so the only
+/// honest miss value is `None` (guard with `if let Some(..)`).
+///
+/// Only type-checks where the carrier is uniquely borrowed (`&mut dyn
+/// Trait`, owned `Box`, or `Any` with refcount 1) — Rust enforces the
+/// aliasing discipline Go leaves to the programmer.
+#[inline]
+pub fn __cast_iface_mut<'a, Target, Carrier>(
+    carrier: &'a mut Carrier,
+) -> Option<&'a mut Target>
+where
+    Target: ?Sized + DowncastableFromAnyMut,
+    Carrier: ?Sized + HasDynAnyMut,
+{
+    AsExtMut::AsMut::<Target>(carrier)
 }
 
 /// Consume `Box<dyn Trait>` (or `Box<U>` for any `U: HasDynAny`) and
@@ -593,6 +703,10 @@ use alloc::vec::Vec;
 pub struct TraitProbe<Trait: ?Sized + 'static> {
     pub concrete: TypeId,
     pub cast: fn(&(dyn CoreAny + Send + Sync)) -> &Trait,
+    /// Mutable cast — the `&mut` mirror of `cast`. Backs
+    /// `cast!(&mut x, Trait)` via `lookup_mut`. Emitted by the macro
+    /// alongside `cast`.
+    pub cast_mut: fn(&mut (dyn CoreAny + Send + Sync)) -> &mut Trait,
 }
 
 /// Per-trait registry. The macro creates a `static`
@@ -636,6 +750,21 @@ impl<Trait: ?Sized + 'static> TraitRegistry<Trait> {
         }
         None
     }
+
+    /// Mutable mirror of [`lookup`](Self::lookup): returns the first
+    /// match's `&mut Trait` via the probe's `cast_mut`.
+    pub fn lookup_mut<'a>(
+        &self,
+        any_ref: &'a mut (dyn CoreAny + Send + Sync),
+    ) -> Option<&'a mut Trait> {
+        let concrete = (*any_ref).type_id();
+        for probe in &self.probes {
+            if probe.concrete == concrete {
+                return Some((probe.cast_mut)(any_ref));
+            }
+        }
+        None
+    }
 }
 
 /// Convenience for the proc-macro: locks the registry, inserts one
@@ -670,5 +799,22 @@ pub fn lookup_with<'a, Trait: ?Sized + 'static>(
         // `guard`-bound state, so the result is sound.
         let raw = t as *const Trait;
         unsafe { &*raw }
+    })
+}
+
+/// Mutable mirror of [`lookup_with`]: locks the registry, scans for a
+/// match, returns `&mut Trait`. Used by the `from_any_mut` impl the
+/// macro emits per trait.
+pub fn lookup_with_mut<'a, Trait: ?Sized + 'static>(
+    registry: &SpinLock<TraitRegistry<Trait>>,
+    any_ref: &'a mut (dyn CoreAny + Send + Sync),
+) -> Option<&'a mut Trait> {
+    let guard = registry.lock();
+    // Same lifetime-detach rationale as `lookup_with`: the returned
+    // `&mut Trait` is built from `any_ref` (lifetime 'a) with a
+    // 'static vtable; it does not borrow the guard's storage.
+    guard.lookup_mut(any_ref).map(|t| {
+        let raw = t as *mut Trait;
+        unsafe { &mut *raw }
     })
 }

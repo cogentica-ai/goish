@@ -1142,6 +1142,15 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
          -> ::core::option::Option<&(dyn ::core::any::Any \
          + ::core::marker::Send + ::core::marker::Sync)> { ::core::option::Option::None }\n",
     );
+    // `__goish_as_dyn_any_mut` — the `&mut` mirror, for `cast!(&mut x, J)`.
+    // Default None; concrete impls override to `Some(self)` alongside the
+    // `__goish_as_dyn_any` override (emitted at every `impl Trait for C` site).
+    out.push_str("    #[doc(hidden)]\n");
+    out.push_str(
+        "    fn __goish_as_dyn_any_mut(&mut self) \
+         -> ::core::option::Option<&mut (dyn ::core::any::Any \
+         + ::core::marker::Send + ::core::marker::Sync)> { ::core::option::Option::None }\n",
+    );
     out.push_str("}\n\n");
 
     // Emit __HasNilSentinel impl so cast!() can const-assert on the
@@ -1509,9 +1518,26 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
         "            .expect(\"goish::any: cast invoked with mismatched concrete type\")\n",
     );
     out.push_str("    }\n");
+    // Mutable cast mirror — recovers `&mut dyn Trait` from `&mut dyn Any`.
+    out.push_str("    fn cast_mut<__C: 'static + ");
+    out.push_str(&name);
+    out.push_str(" + ::core::marker::Send + ::core::marker::Sync>(\n");
+    out.push_str(
+        "        any_ref: &mut (dyn ::core::any::Any + ::core::marker::Send + \
+         ::core::marker::Sync),\n",
+    );
+    let _ = writeln!(
+        out,
+        "    ) -> &mut (dyn {name} + ::core::marker::Send + ::core::marker::Sync + 'static) {{"
+    );
+    out.push_str("        any_ref.downcast_mut::<__C>()\n");
+    out.push_str(
+        "            .expect(\"goish::any: cast_mut invoked with mismatched concrete type\")\n",
+    );
+    out.push_str("    }\n");
     out.push_str(
         "    let probe = ::goish::any::TraitProbe { concrete: \
-         ::core::any::TypeId::of::<__C>(), cast: cast::<__C> };\n",
+         ::core::any::TypeId::of::<__C>(), cast: cast::<__C>, cast_mut: cast_mut::<__C> };\n",
     );
     let _ = writeln!(
         out,
@@ -1531,6 +1557,22 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let _ = writeln!(
         out,
         "        ::goish::any::lookup_with(&{registry_name}, any_ref)"
+    );
+    out.push_str("    }\n}\n\n");
+
+    // Mutable mirror of the DowncastableFromAny impl.
+    let _ = writeln!(
+        out,
+        "impl ::goish::any::DowncastableFromAnyMut \
+         for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
+    );
+    out.push_str(
+        "    #[inline]\n    fn from_any_mut(any_ref: &mut (dyn ::core::any::Any + \
+         ::core::marker::Send + ::core::marker::Sync)) -> ::core::option::Option<&mut Self> {\n",
+    );
+    let _ = writeln!(
+        out,
+        "        ::goish::any::lookup_with_mut(&{registry_name}, any_ref)"
     );
     out.push_str("    }\n}\n\n");
 
@@ -1559,6 +1601,23 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let _ = writeln!(
         out,
         "        {name}::__goish_as_dyn_any(self)"
+    );
+    out.push_str("    }\n}\n\n");
+
+    // Mutable mirror — HasDynAnyMut for `dyn Trait + Send + Sync`.
+    let _ = writeln!(
+        out,
+        "impl ::goish::any::HasDynAnyMut \
+         for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
+    );
+    out.push_str(
+        "    #[inline]\n    fn __goish_as_dyn_any_mut(&mut self) \
+         -> ::core::option::Option<&mut (dyn ::core::any::Any + \
+         ::core::marker::Send + ::core::marker::Sync)> {\n",
+    );
+    let _ = writeln!(
+        out,
+        "        {name}::__goish_as_dyn_any_mut(self)"
     );
     out.push_str("    }\n}\n\n");
 

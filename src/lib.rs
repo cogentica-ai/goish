@@ -190,7 +190,8 @@ macro_rules! nilable {
 /// runtime, all reachable impls have registered.
 pub mod any {
     pub use crate::goany::{
-        register_with, lookup_with, AsExt, DowncastableFromAny, HasDynAny,
+        register_with, lookup_with, lookup_with_mut, AsExt, AsExtMut,
+        DowncastableFromAny, DowncastableFromAnyMut, HasDynAny, HasDynAnyMut,
         NilDyn, TraitProbe, TraitRegistry, __HasNilSentinel,
     };
 }
@@ -201,7 +202,7 @@ pub mod any {
 // `#[goish::interface]` emits per-trait (`impl HasDynAny for dyn
 // Trait + Send + Sync`) — keeping it at root simplifies the macro's
 // generated path.
-pub use goany::{AsExt, HasDynAny};
+pub use goany::{AsExt, AsExtMut, HasDynAny, HasDynAnyMut};
 pub use nilval::{nil, Nil};
 pub use goarray::array;
 pub use gochan::chan;
