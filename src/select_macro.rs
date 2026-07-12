@@ -325,6 +325,13 @@ macro_rules! __select_emit {
         // bottom of this block, after which pass-1 success
         // (`__select_release_all`), pass-2's `selparkcommit`, or
         // pass-3's per-`__cancel_*` raw_unlock have all returned.
+        //
+        // **Not one epoch**: `m.locks` is per-M state, and pass-2's
+        // park can resume on a different M. The mask is therefore
+        // split into two same-M epochs — [here → just before
+        // `gopark`] on the parking M and [just after `gopark` →
+        // the bottom `releasem()`] on the resuming M. See the
+        // epoch-split comment at the pass-2 park site.
         $crate::runtime::sched::acquirem();
 
         // ─── eval-once chan + send-val locals ────────────────────
@@ -437,7 +444,7 @@ macro_rules! __select_emit {
                             let _ = __ok;
                             let $br_v = __v;
                             #[allow(unreachable_code)]
-                            break 'select_blk ({ $br_body });
+                            break 'select_blk ($crate::__select_run_body!($br_body));
                         }
                     }
                 )*
@@ -451,7 +458,7 @@ macro_rules! __select_emit {
                             $crate::__select_release_all!(__sel_unique, __sel_atoms);
                             let ($($pr_p)+) = (__v, __ok);
                             #[allow(unreachable_code)]
-                            break 'select_blk ({ $pr_body });
+                            break 'select_blk ($crate::__select_run_body!($pr_body));
                         }
                     }
                 )*
@@ -466,7 +473,7 @@ macro_rules! __select_emit {
                             ::core::result::Result::Ok(()) => {
                                 $crate::__select_release_all!(__sel_unique, __sel_atoms);
                                 #[allow(unreachable_code)]
-                                break 'select_blk ({ $s_body });
+                                break 'select_blk ($crate::__select_run_body!($s_body));
                             }
                             ::core::result::Result::Err(__returned) => {
                                 $s_vn = ::core::option::Option::Some(__returned);
@@ -489,13 +496,45 @@ macro_rules! __select_emit {
             );
         };
         // Matching `releasem()` for the `acquirem()` at the top of
-        // this block. By this point all chan locks held during the
-        // select! invocation have been released — pass-1 success →
-        // `__select_release_all`; pass-2 → `selparkcommit`; pass-3
-        // cancel → per-`__cancel_*` raw_unlock — so dropping
-        // m.locks here re-arms async preempt for subsequent code.
+        // this block — or, when pass-2 parked, for the re-`acquirem()`
+        // just after `gopark` (the mask is split into two same-M
+        // epochs across the park; see the pass-2 park site). By this
+        // point all chan locks held during the select! invocation have
+        // been released — pass-1 success → `__select_release_all`;
+        // pass-2 → `selparkcommit`; pass-3 cancel → per-`__cancel_*`
+        // raw_unlock — so dropping m.locks here re-arms async preempt
+        // for subsequent code.
         $crate::runtime::sched::releasem();
         __select_out
+    }};
+}
+
+// ─── helper: run a user case body outside the m.locks mask ────────
+//
+// Every dispatch site reaches the body with all chan locks already
+// released (pass-1 success → `__select_release_all`; default →
+// same; pass-3 → per-`__cancel_*` raw_unlock), so the mask protects
+// nothing the body needs — and a body that *parks* (chan op,
+// `time::Sleep`, nested select) can resume on a different M, which
+// would split the select's bump/drop pair across two Ms exactly
+// like the pass-2 straddle (see the epoch-split comment there).
+// Close the epoch, run the body, reopen for the trailing
+// `releasem()` at the bottom of `__select_emit`.
+//
+// User control flow escaping the body (`break`/`continue`/`return`)
+// skips both the re-`acquirem()` here *and* the trailing
+// `releasem()` — the [top-acquirem, pre-body-releasem] pair is
+// already balanced, so escapes stay balanced too.
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __select_run_body {
+    ($body:expr) => {{
+        $crate::runtime::sched::releasem();
+        #[allow(unreachable_code)]
+        let __select_body_val = { $body };
+        $crate::runtime::sched::acquirem();
+        __select_body_val
     }};
 }
 
@@ -535,7 +574,7 @@ macro_rules! __select_default_or_park {
     ) => {
         $crate::__select_release_all!($sel_unique, $sel_atoms);
         #[allow(unreachable_code)]
-        break $blk ({ $d_body });
+        break $blk ($crate::__select_run_body!($d_body));
     };
 
     // ─── no default → register sudogs (under held locks), then
@@ -653,10 +692,29 @@ macro_rules! __select_default_or_park {
         // locks are released, so wakers can claim sudogs.
         // lock_atom is null: selparkcommit doesn't use M.waitlock
         // (it walks G.select_wait instead).
+        //
+        // **m.locks epoch split (Bug B fix).** The select-wide
+        // `acquirem()` at the top of `__select_emit` must NOT stay
+        // open across the park: the G can resume on a *different M*,
+        // and a bump/drop pair split across two Ms leaves the parking
+        // M at +1 forever (never preemptible again) and drives the
+        // resuming M's count to −1 (u32 wrap) — after which every
+        // single-lock critical section reads as "no locks held", the
+        // coop-preempt check fires inside gopark's stash window, the
+        // stash is lost to a mid-gopark Gosched migration, and the
+        // parked G's netpoll/chan wakeup is silently dropped (rr-traced
+        // root cause of the ~2% http_complex_api hang). Close the
+        // epoch here — the chan raw_locks from pass-1 still hold
+        // m.locks ≥ 1 through the park transition, so no preemption
+        // window opens — and reopen it after resume so the
+        // `releasem()` at the bottom of `__select_emit` balances on
+        // the M we actually resumed on.
+        $crate::runtime::sched::releasem();
         $crate::runtime::sched::gopark(
             $crate::runtime::sched::selparkcommit,
             ::core::ptr::null(),
         );
+        $crate::runtime::sched::acquirem();
 
         // Pass-3 step 1 — cancel every sudog. `__cancel_*` returns
         // `false` iff the sudog was already removed from its queue
@@ -699,7 +757,7 @@ macro_rules! __select_default_or_park {
                 let _ = __ok;
                 let $br_v = __v;
                 #[allow(unreachable_code)]
-                break $blk ({ $br_body });
+                break $blk ($crate::__select_run_body!($br_body));
             }
         )*
         $( if __select_winners[$pr_idx as usize] {
@@ -707,7 +765,7 @@ macro_rules! __select_default_or_park {
                 let __v = $pr_sn.value.take().unwrap_or_default();
                 let ($($pr_p)+) = (__v, __ok);
                 #[allow(unreachable_code)]
-                break $blk ({ $pr_body });
+                break $blk ($crate::__select_run_body!($pr_body));
             }
         )*
         $( if __select_winners[$s_idx as usize] {
@@ -715,7 +773,7 @@ macro_rules! __select_default_or_park {
                     ::core::panic!("goish: select send winner: chan closed");
                 }
                 #[allow(unreachable_code)]
-                break $blk ({ $s_body });
+                break $blk ($crate::__select_run_body!($s_body));
             }
         )*
 

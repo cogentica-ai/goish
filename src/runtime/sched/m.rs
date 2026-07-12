@@ -254,27 +254,68 @@ pub fn is_tls_ready() -> bool {
 /// proc.go:419. An RAII guard whose Drop runs after the function
 /// returns would post-date the yield. Free functions match the
 /// surgical placement Go uses.
-#[inline(always)]
+///
+/// **Why a single fs-relative asm RMW, not `AtomicU32::fetch_add`**
+/// (2026-07 lost-wakeup fix): debug builds do not inline
+/// `core::sync::atomic` — the fetch would be a *call* into regular
+/// `.text`, where the SIGURG handler's `goish_rt_text` PC filter
+/// can't see us. An injection between "materialize this M's `locks`
+/// address" and "apply the RMW" migrates the G to another M, and
+/// the RMW then lands on the *old* M's counter: the old M is stuck
+/// > 0 forever (never preemptible again) and the new M's matching
+/// `releasem` underflows to `u32::MAX`, after which the preempt
+/// checks misread "one lock held" as "none held" and preempt inside
+/// critical sections. With fs-relative addressing the per-M address
+/// is never held in a register across a preemptible instruction —
+/// the RMW always hits the M we are executing on *at that instant*.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 pub fn acquirem() {
     if !is_tls_ready() {
         return;
     }
-    current_m_storage()
-        .locks
-        .fetch_add(1, Ordering::Relaxed);
+    unsafe {
+        core::arch::asm!(
+            "lock add dword ptr fs:[{off}], 1",
+            off = const core::mem::offset_of!(MStorage, locks),
+            options(nostack),
+        );
+    }
 }
 
 /// Decrement the calling M's non-yielding-section depth counter.
 /// Pairs with `acquirem`. Mirrors Go's `releasem`
 /// (runtime/runtime1.go:638).
-#[inline]
+///
+/// Single fs-relative `xadd` for the same migration-atomicity
+/// reason as `acquirem` (see there); `xadd` rather than `sub` so
+/// the previous value feeds the underflow tripwire.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
 pub fn releasem() {
     if !is_tls_ready() {
         return;
     }
-    current_m_storage()
-        .locks
-        .fetch_sub(1, Ordering::Relaxed);
+    let prev: u32;
+    unsafe {
+        core::arch::asm!(
+            "mov {p:e}, -1",
+            "lock xadd dword ptr fs:[{off}], {p:e}",
+            p = out(reg) prev,
+            off = const core::mem::offset_of!(MStorage, locks),
+            options(nostack),
+        );
+    }
+    // Underflow tripwire. `locks` is per-M state: a bump/drop pair
+    // that straddles a park (gopark can resume on a different M)
+    // leaves the parking M at +1 forever and wraps the resuming M's
+    // count to u32::MAX — after which the SIGURG handler and the
+    // coop-preempt check misread "one lock held" as "none held" and
+    // preempt inside critical sections (the select! straddle behind
+    // the 2026-07 lost-wakeup hang). Any pair spanning a park must
+    // split into two same-M epochs around it.
+    debug_assert!(prev != 0, "releasem: m.locks underflow");
+    let _ = prev;
 }
 
 /// Read the calling M's `locks` count without touching it. Used by
