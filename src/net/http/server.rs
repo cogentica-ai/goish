@@ -1066,6 +1066,11 @@ impl Server {
             None
         };
 
+        // Go's accept-failure backoff (server.go:3421-3446): on a
+        // temporary error (EMFILE/ENFILE/resource exhaustion), sleep
+        // 5ms doubling to 1s and retry instead of killing the server.
+        let mut temp_delay_ns: i64 = 0;
+
         loop {
             // Backpressure: if MaxConcurrentConns is set, block here
             // until a slot opens up. Each per-conn goroutine drains
@@ -1074,7 +1079,7 @@ impl Server {
                 sem.Send(());
             }
 
-            let (conn, err) = ln.Accept();
+            let (conn, err, temporary) = ln.__accept_classified();
             if !err.IsNil() {
                 // Release the slot we just acquired since no goroutine
                 // will drain it.
@@ -1084,8 +1089,21 @@ impl Server {
                 if self.__state.in_shutdown.load(Ordering::Acquire) {
                     return ErrServerClosed.into();
                 }
+                if temporary {
+                    if temp_delay_ns == 0 {
+                        temp_delay_ns = 5_000_000; // 5ms
+                    } else {
+                        temp_delay_ns *= 2;
+                    }
+                    if temp_delay_ns > 1_000_000_000 {
+                        temp_delay_ns = 1_000_000_000; // 1s cap
+                    }
+                    time::Sleep(time::Duration(temp_delay_ns));
+                    continue;
+                }
                 return err;
             }
+            temp_delay_ns = 0;
             let srv = self.clone();
             let release_sem = sem_handle.clone();
             // 64 KiB stack — ample for the per-handler chain.
