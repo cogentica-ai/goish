@@ -1235,6 +1235,9 @@ impl Server {
                 && !self.__state.in_shutdown.load(Ordering::Acquire);
             let w = response::new(conn);
             w.__set_keep_alive(keep_alive);
+            // HEAD: handler writes are eaten by the response writer
+            // (Go's `isHEAD` at server.go:1302, eat-writes at :1339).
+            w.__set_head(req.Method == string("HEAD"));
 
             // Close the conn fd if the handler panics. Without this,
             // gogo recovery abandons the `response` (whose Drop
