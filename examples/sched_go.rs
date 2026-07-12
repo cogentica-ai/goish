@@ -76,22 +76,37 @@ fn main() {
     // markers so the test can spot if interleave was actually achieved.
     go!(|| {
         for _ in 0..3 {
-            let v = INTERLEAVE_LOG.load(Ordering::Relaxed);
-            INTERLEAVE_LOG.store((v << 2) | 1, Ordering::Relaxed);
+            // Atomic RMW: on multi-M two goroutines can run these
+            // lines simultaneously; a plain load/store pair loses one
+            // marker (lost update) and the count-==-9 check fails.
+            let _ = INTERLEAVE_LOG
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                    Some((v << 2) | 1)
+                });
             Gosched();
         }
     });
     go!(|| {
         for _ in 0..3 {
-            let v = INTERLEAVE_LOG.load(Ordering::Relaxed);
-            INTERLEAVE_LOG.store((v << 2) | 2, Ordering::Relaxed);
+            // Atomic RMW: on multi-M two goroutines can run these
+            // lines simultaneously; a plain load/store pair loses one
+            // marker (lost update) and the count-==-9 check fails.
+            let _ = INTERLEAVE_LOG
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                    Some((v << 2) | 2)
+                });
             Gosched();
         }
     });
     go!(|| {
         for _ in 0..3 {
-            let v = INTERLEAVE_LOG.load(Ordering::Relaxed);
-            INTERLEAVE_LOG.store((v << 2) | 3, Ordering::Relaxed);
+            // Atomic RMW: on multi-M two goroutines can run these
+            // lines simultaneously; a plain load/store pair loses one
+            // marker (lost update) and the count-==-9 check fails.
+            let _ = INTERLEAVE_LOG
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                    Some((v << 2) | 3)
+                });
             Gosched();
         }
     });

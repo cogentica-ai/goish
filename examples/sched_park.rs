@@ -22,7 +22,7 @@ use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 
 use goish::go;
-use goish::runtime::sched::{current_g, gopark, goready, schedule, Gosched, G};
+use goish::runtime::sched::{current_g, gopark, goready, schedule, GStatus, Gosched, G};
 use goish::syscall;
 
 unsafe fn always_park(_g: NonNull<G>) -> bool {
@@ -75,15 +75,30 @@ fn test_park_and_wake() {
         A_AFTER_WAKE.store(true, Ordering::Relaxed);
     });
 
-    // Goroutine B: spins (with Gosched) until A registers, then wakes A.
+    // Goroutine B: spins (with Gosched) until A registers AND its
+    // park has committed, then wakes A.
+    //
+    // Waiting for the pointer alone is not enough on multi-M: it is
+    // published *before* `gopark`, so B could `goready` a G whose
+    // status is still `Running` (mid-park-transition) — a contract
+    // violation (Go's `ready()` throws "bad g->status in ready" for
+    // the same misuse). Real primitives (chan/sema/timer) linearize
+    // wake-after-park through a lock released by the park commit;
+    // this raw smoke test must poll the status instead.
     go!(|| {
         loop {
             let p = SLEEPER_PTR.load(Ordering::Acquire);
             if !p.is_null() {
-                B_RAN.store(true, Ordering::Relaxed);
-                let g = NonNull::new(p).expect("non-null sleeper");
-                goready(g);
-                break;
+                let parked = unsafe {
+                    core::ptr::addr_of!((*p).status).read_volatile()
+                        == GStatus::Waiting
+                };
+                if parked {
+                    B_RAN.store(true, Ordering::Relaxed);
+                    let g = NonNull::new(p).expect("non-null sleeper");
+                    goready(g);
+                    break;
+                }
             }
             Gosched();
         }
