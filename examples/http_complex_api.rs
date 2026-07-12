@@ -853,7 +853,54 @@ fn main() {
             }
         }
 
-        // 11c. A pre-canceled ctx fails fast, before dialing.
+        // 11c. ctx cancel interrupts a TLS handshake in flight: an
+        // https:// request against a listener that never speaks TLS
+        // blocks reading the ServerHello; the cancel watcher (armed
+        // on the raw socket before the handshake) must kick it out.
+        let name = "ctx cancel interrupts TLS handshake";
+        let (tls_ln, le) = net::Listen("tcp", "127.0.0.1:0");
+        if le != nil {
+            fail(Sprintf!("%s: listen: %s", name, le.Error()));
+        } else {
+            let tls_port = tls_ln.Addr().Port;
+            go!(move || {
+                // Accept and hold the conn silently — no ServerHello.
+                let (mut c, e) = tls_ln.Accept();
+                if e == nil {
+                    time::Sleep(time::Second * 3);
+                    let _ = c.Close();
+                }
+            });
+            let (cctx, ccancel) = context::WithCancel(context::Background());
+            let (req, e) = http::NewRequestWithContext(
+                cctx,
+                "GET",
+                Sprintf!("https://127.0.0.1:%d/", int(tls_port)),
+                nil,
+            );
+            if e != nil {
+                fail(Sprintf!("%s: NewRequestWithContext: %s", name, e.Error()));
+            } else {
+                go!(move || {
+                    time::Sleep(time::Millisecond * 150);
+                    ccancel();
+                });
+                let t0 = time::Now();
+                let (_, err) = client.Do(&req);
+                let took = time::Since(t0);
+                if err == nil {
+                    fail(Sprintf!("%s: no error", name));
+                } else if !goish::errors::Is(err.clone(), context::Canceled) {
+                    fail(Sprintf!("%s: err = %s", name, err.Error()));
+                } else if took >= time::Second {
+                    fail(Sprintf!("%s: took %s", name, took.String()));
+                } else {
+                    pass(name);
+                }
+            }
+        }
+
+        // 11d. A pre-canceled ctx fails fast, before dialing.
         let name = "pre-canceled ctx fails fast";
         let (cctx, ccancel) = context::WithCancel(context::Background());
         ccancel();
@@ -1136,10 +1183,10 @@ fn main() {
 
         let f = int64(FAILED.Load());
         if f == 0 {
-            Println!("COMPLEX_API_OK 24/24");
+            Println!("COMPLEX_API_OK 25/25");
             os::Exit(0);
         } else {
-            Printf!("COMPLEX_API_FAIL %d / 24\n", f);
+            Printf!("COMPLEX_API_FAIL %d / 25\n", f);
             os::Exit(1);
         }
     });

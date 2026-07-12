@@ -503,25 +503,43 @@ impl RoundTripper for Transport {
 
         if is_https {
             // ── HTTPS path ───────────────────────────────────────────────
+            // Dial the raw TCP conn ourselves (instead of tls::Dial's
+            // dial-and-handshake) so the deadline and the ctx-cancel
+            // watcher are armed on the socket *before* the handshake —
+            // Timeout and cancellation cover the ClientHello/ServerHello
+            // exchange, not just the request/response I/O after it.
             let dial_addr = ensure_default_port(&host, 443);
 
-            let tls_cfg = self.TLSClientConfig.clone();
-            let (mut tls_conn, herr) = crate::crypto::tls::Dial(
-                string("tcp"),
-                dial_addr,
-                &tls_cfg,
-            );
-            if !herr.IsNil() {
-                return (Response::default(), herr);
+            let (raw_conn, derr) = net::Dial(string("tcp"), dial_addr);
+            if !derr.IsNil() {
+                return (Response::default(), derr);
             }
 
-            // Deadline: Transport.Timeout tightened by the ctx
-            // deadline (no mid-I/O cancel watcher on the TLS path in
-            // v1 — WithCancel-style ctxs without a deadline can't
-            // interrupt a blocked TLS read).
+            // Deadline: Transport.Timeout tightened by the ctx deadline.
             let dl = self.effective_deadline(&ctx);
             if !dl.IsZero() {
-                let _ = tls_conn.SetDeadline(dl);
+                let _ = raw_conn.SetDeadline(dl);
+            }
+
+            // ctx-cancel watcher on the underlying socket — TLS reads
+            // and writes all funnel into it, so a past netpoll
+            // deadline interrupts them exactly like plain HTTP.
+            let watch = arm_cancel_watch(&ctx, raw_conn.__disconnect_watch_parts());
+
+            // tls.Client(conn, cfg) + Handshake, SNI from the config
+            // or the request host (what tls::Dial would derive).
+            let mut tls_cfg = self.TLSClientConfig.clone();
+            if tls_cfg.ServerName.Len() == 0 {
+                tls_cfg.ServerName = host_without_port(&host);
+            }
+            let box_conn: alloc::boxed::Box<dyn crate::net::Conn> =
+                alloc::boxed::Box::new(raw_conn);
+            let mut tls_conn = crate::crypto::tls::Client(box_conn, &tls_cfg);
+            let herr = tls_conn.Handshake();
+            if !herr.IsNil() {
+                stop_cancel_watch(watch);
+                let _ = tls_conn.Close();
+                return (Response::default(), ctx_err_or(&ctx, herr));
             }
 
             // Write the request.
@@ -531,6 +549,7 @@ impl RoundTripper for Transport {
                 req_bytes,
             );
             if !werr.IsNil() {
+                stop_cancel_watch(watch);
                 let _ = tls_conn.Close();
                 return (Response::default(), ctx_err_or(&ctx, werr));
             }
@@ -540,6 +559,7 @@ impl RoundTripper for Transport {
                 let mut br = bufio::NewReader(&mut tls_conn);
                 ReadResponse(&mut br, Some(req.clone()))
             };
+            stop_cancel_watch(watch);
             let _ = tls_conn.Close();
             if !rerr.IsNil() {
                 return (resp, ctx_err_or(&ctx, rerr));
@@ -560,44 +580,8 @@ impl RoundTripper for Transport {
                 let _ = conn.SetDeadline(dl);
             }
 
-            // ── ctx-cancel watcher (Go transport.go persistConn's
-            // cancel plumbing, slim) ──  For ctxs whose Done chan is
-            // real (WithCancel / WithTimeout), a helper goroutine
-            // selects on Done vs a stop chan. On cancellation it
-            // slams past deadlines onto the conn's PollDesc, kicking
-            // any blocked read/write out with a timeout that the
-            // error-mapping below converts to ctx.Err(). Joined
-            // before the conn is closed, so the PollDesc pointer it
-            // holds stays valid for its whole life.
-            let mut watch: Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)> = None;
-            if let Some(c) = &ctx {
-                let done = c.Done();
-                if !done.is_nil() {
-                    let (_wfd, wpd) = conn.__disconnect_watch_parts();
-                    if !wpd.is_null() {
-                        let stop = crate::gochan::chan::<()>::new_unbuffered();
-                        let exited = crate::gochan::chan::<()>::new_unbuffered();
-                        let stop2 = stop.clone();
-                        let exited2 = exited.clone();
-                        let pd_addr = wpd as usize;
-                        crate::go!(move || {
-                            let fired: bool = crate::select! {
-                                let _ = done.Recv() => true,
-                                let _ = stop2.Recv() => false,
-                            };
-                            if fired {
-                                let pd = unsafe {
-                                    &*(pd_addr as *const crate::runtime::netpoll::PollDesc)
-                                };
-                                crate::runtime::netpoll::set_deadline(pd, -1, b'r');
-                                crate::runtime::netpoll::set_deadline(pd, -1, b'w');
-                            }
-                            exited2.Close();
-                        });
-                        watch = Some((stop, exited));
-                    }
-                }
-            }
+            // ctx-cancel watcher (see arm_cancel_watch).
+            let watch = arm_cancel_watch(&ctx, conn.__disconnect_watch_parts());
 
             // Write the request.
             let req_bytes = serialize_request(req, &host);
@@ -660,6 +644,51 @@ fn ctx_err_or(ctx: &Option<Arc<dyn crate::context::Context>>, fallback: error) -
     fallback
 }
 
+/// Arm the ctx-cancel watcher (Go transport.go persistConn's cancel
+/// plumbing, slim). For ctxs whose Done chan is real (WithCancel /
+/// WithTimeout), a helper goroutine selects on Done vs a stop chan.
+/// On cancellation it slams past deadlines onto the conn's PollDesc,
+/// kicking any blocked read/write out with a timeout that the
+/// caller's error mapping (`ctx_err_or`) converts to ctx.Err(). TLS
+/// conns are covered by arming the *underlying* TCP socket — every
+/// TLS record read/write funnels into it.
+///
+/// Returns `None` (nothing to watch) or the (stop, exited) chan pair
+/// to hand to `stop_cancel_watch`, which must run before the conn is
+/// closed — the watcher dereferences the conn's PollDesc.
+fn arm_cancel_watch(
+    ctx: &Option<Arc<dyn crate::context::Context>>,
+    parts: (i32, *const crate::runtime::netpoll::PollDesc),
+) -> Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)> {
+    let c = ctx.as_ref()?;
+    let done = c.Done();
+    if done.is_nil() {
+        return None;
+    }
+    let (_fd, pd) = parts;
+    if pd.is_null() {
+        return None;
+    }
+    let stop = crate::gochan::chan::<()>::new_unbuffered();
+    let exited = crate::gochan::chan::<()>::new_unbuffered();
+    let stop2 = stop.clone();
+    let exited2 = exited.clone();
+    let pd_addr = pd as usize;
+    crate::go!(move || {
+        let fired: bool = crate::select! {
+            let _ = done.Recv() => true,
+            let _ = stop2.Recv() => false,
+        };
+        if fired {
+            let pd = unsafe { &*(pd_addr as *const crate::runtime::netpoll::PollDesc) };
+            crate::runtime::netpoll::set_deadline(pd, -1, b'r');
+            crate::runtime::netpoll::set_deadline(pd, -1, b'w');
+        }
+        exited2.Close();
+    });
+    Some((stop, exited))
+}
+
 /// Stop + join the ctx-cancel watcher. Must run before the conn is
 /// closed (the watcher dereferences the conn's PollDesc).
 fn stop_cancel_watch(watch: Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)>) {
@@ -667,6 +696,19 @@ fn stop_cancel_watch(watch: Option<(crate::gochan::chan<()>, crate::gochan::chan
         stop.Close();
         let (_, _) = exited.Recv();
     }
+}
+
+/// Strip a `:port` suffix from `host` — the SNI name for a dialed
+/// address (what `tls::Dial` derives internally).
+fn host_without_port(host: &string) -> string {
+    if !has_port(host) {
+        return host.clone();
+    }
+    let hb = host.as_bytes();
+    if let Some(i) = hb.iter().rposition(|&b| b == b':') {
+        return string::from_bytes(&hb[..i]);
+    }
+    host.clone()
 }
 
 // ─── Client ──────────────────────────────────────────────────────────
