@@ -893,6 +893,20 @@ fn html_escape(s: string) -> string {
 /// // ...
 /// let _ = srv.Shutdown(time::Second * 5);
 /// ```
+/// `Server.BaseContext`'s function shape (server.go:3081). Named
+/// alias so the `Arc<dyn Fn>` plumbing stays out of user-facing
+/// struct literals — same pattern as `client::ProxyResolver`.
+pub type BaseContextFn = Arc<
+    dyn Fn(&net::Listener) -> Arc<dyn crate::context::Context> + Send + Sync,
+>;
+
+/// `Server.ConnContext`'s function shape (server.go:3087).
+pub type ConnContextFn = Arc<
+    dyn Fn(Arc<dyn crate::context::Context>, &net::TCPConn) -> Arc<dyn crate::context::Context>
+        + Send
+        + Sync,
+>;
+
 pub struct Server {
     /// `host:port` to listen on. Empty = ":80".
     pub Addr: string,
@@ -924,6 +938,14 @@ pub struct Server {
     /// are in flight, providing backpressure under load instead of
     /// spawning unbounded goroutines.
     pub MaxConcurrentConns: crate::types::int,
+    /// `Server.BaseContext` (server.go:3081) — optionally returns
+    /// the base context for incoming requests on this server; called
+    /// once per `Serve` with the listener. `None` → `Background()`.
+    pub BaseContext: Option<BaseContextFn>,
+    /// `Server.ConnContext` (server.go:3087) — optionally modifies
+    /// the per-connection context derived from the base context;
+    /// called once per accepted connection.
+    pub ConnContext: Option<ConnContextFn>,
 
     /// Internal runtime state. Bundled behind a single field so users
     /// can construct a `Server` with Go-style struct literal syntax —
@@ -1068,6 +1090,8 @@ impl Default for Server {
             IdleTimeout: time::Duration(0),
             MaxHeaderBytes: 0,
             MaxConcurrentConns: 0,
+            BaseContext: None,
+            ConnContext: None,
             __state: __ServerState::default(),
         }
     }
@@ -1147,6 +1171,13 @@ impl Server {
             None
         };
 
+        // Base context for every request served here — Go computes it
+        // once per Serve from `BaseContext(listener)` (server.go:3450).
+        let base_ctx: Arc<dyn crate::context::Context> = match &self.BaseContext {
+            Some(f) => f(&ln),
+            None => crate::context::Background(),
+        };
+
         // Go's accept-failure backoff (server.go:3421-3446): on a
         // temporary error (EMFILE/ENFILE/resource exhaustion), sleep
         // 5ms doubling to 1s and retry instead of killing the server.
@@ -1185,11 +1216,17 @@ impl Server {
                 return err;
             }
             temp_delay_ns = 0;
+            // Per-connection context — Go's `ConnContext` hook runs
+            // once per accepted conn (server.go:3467).
+            let conn_ctx: Arc<dyn crate::context::Context> = match &self.ConnContext {
+                Some(cc) => cc(base_ctx.clone(), &conn),
+                None => base_ctx.clone(),
+            };
             let srv = self.clone();
             let release_sem = sem_handle.clone();
             // 64 KiB stack — ample for the per-handler chain.
             go!(stack(64 * 1024), move || {
-                srv.serve_conn(conn);
+                srv.serve_conn(conn, conn_ctx);
                 if let Some(ref sem) = release_sem {
                     let _ = sem.__try_recv();
                 }
@@ -1343,7 +1380,11 @@ impl Server {
     }
 
     /// Per-connection serving loop. See keep-alive doc (M27f-β).
-    fn serve_conn(self: Arc<Self>, mut conn: net::TCPConn) {
+    fn serve_conn(
+        self: Arc<Self>,
+        mut conn: net::TCPConn,
+        conn_ctx: Arc<dyn crate::context::Context>,
+    ) {
         // Drop guard ensures active_conns is decremented (and the
         // conn's tracking record removed) even if a handler panics or
         // an early return path is taken.
@@ -1399,11 +1440,23 @@ impl Server {
             let dl = time::Now().Add(time::Duration(wait_ns));
             let _ = conn.SetReadDeadline(dl);
 
+            let conn_fd = conn.__fd();
             let (mut req, err) = {
                 let mut br = bufio::NewReader(&mut conn);
-                ReadRequestWithLimit(&mut br, self.MaxHeaderBytes)
+                // Server variant: carries the fd so the parser can
+                // emit `100 Continue` before the eager body read.
+                super::request::__read_request_server(&mut br, self.MaxHeaderBytes, conn_fd)
             };
             if !err.IsNil() {
+                // Unknown Expect value → 417 + close (Go
+                // sendExpectationFailed, server.go:2103).
+                if errors::Is(err.clone(), super::request::ErrUnsupportedExpect) {
+                    let w = response::new(conn);
+                    w.__set_keep_alive(false);
+                    w.WriteHeader(417);
+                    let _ = w.close_conn();
+                    return;
+                }
                 // EOF, parse error, or idle timeout — all close the conn.
                 let _ = conn.Close();
                 return;
@@ -1424,7 +1477,7 @@ impl Server {
             // canceled when the response is finished, or earlier by
             // the disconnect watcher below if the client goes away
             // while the handler is still running.
-            let (req_ctx, req_cancel) = crate::context::WithCancel(crate::context::Background());
+            let (req_ctx, req_cancel) = crate::context::WithCancel(conn_ctx.clone());
             req.ctx = Some(req_ctx);
             let req_cancel: Arc<crate::context::CancelFunc> = Arc::new(req_cancel);
 

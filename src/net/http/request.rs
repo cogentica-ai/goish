@@ -435,6 +435,21 @@ pub fn ReadRequestWithLimit<R: io::Reader>(
     br: &mut bufio::Reader<R>,
     max_header_bytes: int,
 ) -> (Request, error) {
+    __read_request_server(br, max_header_bytes, -1)
+}
+
+/// Server-side variant carrying the raw conn fd so the parser can
+/// emit the `HTTP/1.1 100 Continue` interim response between header
+/// parse and the (eager) body read â Go defers this to the first
+/// body `Read` via `expectContinueReader` (server.go:1022); goish
+/// reads bodies eagerly, so "just before the body read" is the same
+/// linearization point. `interim_fd < 0` disables Expect handling
+/// (client-side response parsing paths).
+pub(crate) fn __read_request_server<R: io::Reader>(
+    br: &mut bufio::Reader<R>,
+    max_header_bytes: int,
+    interim_fd: i32,
+) -> (Request, error) {
     let max_line = if max_header_bytes > 0 {
         max_header_bytes as usize
     } else {
@@ -509,6 +524,29 @@ pub fn ReadRequestWithLimit<R: io::Reader>(
             req.Host = value;
         } else {
             req.Header.Add(name, value);
+        }
+    }
+
+    // `Expect` (RFC 9110 §10.1.1) — server path only. Mirrors Go's
+    // readRequest/expectContinueReader split (server.go:1096, :1022):
+    // a 100-continue expectation on a request with a body gets the
+    // interim response now, right before the body read below; any
+    // other Expect value is a 417 (the caller maps the sentinel).
+    if interim_fd >= 0 {
+        let expect = req.Header.Get(string("Expect"));
+        if !expect.as_bytes().is_empty() {
+            if crate::strings::EqualFold(expect.clone(), string("100-continue")) {
+                let has_body = is_chunked(
+                    req.Header.Get(string("Transfer-Encoding")).as_bytes(),
+                ) || !req.Header.Get(string("Content-Length")).as_bytes().is_empty();
+                if req.ProtoMajor > 1 || (req.ProtoMajor == 1 && req.ProtoMinor >= 1) {
+                    if has_body {
+                        write_interim_100(interim_fd);
+                    }
+                }
+            } else {
+                return (req, ErrUnsupportedExpect.into());
+            }
         }
     }
 
@@ -640,6 +678,37 @@ fn is_chunked(value: &[u8]) -> bool {
 
 /// Read a CRLF-terminated line via `bufio.Reader`. Returns the line
 /// **without** the trailing CRLF, or an error on EOF / oversize.
+crate::var! {
+    /// Sentinel returned by the server-side request parser when the
+    /// request carries an `Expect` header other than `100-continue`.
+    /// The serve loop maps it to `417 Expectation Failed` + close
+    /// (Go `sendExpectationFailed`, server.go:2103).
+    pub(crate) ErrUnsupportedExpect: error = "net/http: unsupported Expect header";
+}
+
+/// Blast the `100 Continue` interim response onto the raw conn fd.
+/// 25 bytes into an (empty at this point — no response has started)
+/// socket buffer; EAGAIN is retried with a yield, everything else is
+/// abandoned (the real response write will surface the error).
+fn write_interim_100(fd: i32) {
+    const INTERIM: &[u8] = b"HTTP/1.1 100 Continue\r\n\r\n";
+    let mut off = 0usize;
+    while off < INTERIM.len() {
+        let r = crate::syscall::Write(fd, INTERIM[off..].as_ptr(), INTERIM.len() - off);
+        if r > 0 {
+            off += r as usize;
+            continue;
+        }
+        let errno = -(r as i32);
+        if errno == 11 || errno == 4 {
+            // EAGAIN / EINTR — tiny write, yield and retry.
+            crate::runtime::sched::Gosched();
+            continue;
+        }
+        return;
+    }
+}
+
 fn read_line<R: io::Reader>(
     br: &mut bufio::Reader<R>,
     max: usize,
