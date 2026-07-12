@@ -35,7 +35,6 @@ use crate::errors::{self, error, ErrorTrait};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
-use crate::io::Writer as _; // bring `.Write()` method into scope
 use crate::errors::nil;
 use crate::os;
 use crate::types::{byte, int, rune};
@@ -45,6 +44,7 @@ use crate::unicode::utf8;
 
 /// Go's `fmt.Stringer`. User types implement this to define their `%s`
 /// / `%v` representation.
+#[goish::interface]
 pub trait Stringer {
     fn String(&self) -> string;
 }
@@ -66,6 +66,28 @@ pub trait State: crate::io::Writer {
     fn Flag(&self, c: crate::types::int) -> bool;
 }
 
+/// Go's `fmt.ScanState` interface — passed to types that implement
+/// `Scanner` so they can drive their own parse over the input. Goish
+/// stub matches the Go shape; a full impl is deferred until a port
+/// actually reads input through this path. Surfaced by gopkg.in/
+/// inf.v0's `Dec.Scan(s fmt.ScanState, ch rune) error`.
+#[goish::interface]
+pub trait ScanState {
+    fn ReadRune(&mut self) -> (crate::types::rune, crate::types::int, crate::error);
+    fn UnreadRune(&mut self) -> crate::error;
+    fn SkipSpace(&mut self);
+    fn Token(&mut self, skipSpace: bool, f: alloc::sync::Arc<dyn Fn(crate::types::rune) -> bool + Send + Sync>) -> (crate::slice<crate::types::byte>, crate::error);
+    fn Width(&self) -> (crate::types::int, bool);
+}
+
+/// Go's `fmt.Scanner` interface — implemented by types that drive
+/// their own scanning. The `state` arg is a `&mut dyn ScanState` and
+/// `verb` is the format verb being scanned.
+#[goish::interface]
+pub trait Scanner {
+    fn Scan(&mut self, state: &mut dyn ScanState, verb: crate::types::rune) -> crate::error;
+}
+
 /// Go's `fmt.Formatter` interface — implemented by types that want
 /// custom verb-aware formatting (e.g. `multiError.Format(f, 'v')`
 /// switches on the `+` flag for the `%+v` multi-line variant).
@@ -73,6 +95,7 @@ pub trait State: crate::io::Writer {
 /// Goish's verb-formatting fast path checks for this trait via the
 /// reflect-aware `%v` printer; types that don't impl Formatter fall
 /// back to Stringer / Format / the default `%v` walker.
+#[goish::interface]
 pub trait Formatter {
     fn Format(&self, f: &mut dyn State, c: crate::types::rune);
 }
@@ -135,8 +158,13 @@ impl<'a> FmtArg<'a> {
             FmtArg::Val(v) => v.fmt(verb, f),
             FmtArg::Err(e) => {
                 // %s / %v / default for an error → Error() text.
-                let s = e.Error();
-                write_string_with_verb(s.as_bytes(), verb, f);
+                // Go: nil error formats as "<nil>".
+                if e.IsNil() {
+                    write_string_with_verb(b"<nil>", verb, f);
+                } else {
+                    let s = e.Error();
+                    write_string_with_verb(s.as_bytes(), verb, f);
+                }
             }
         }
     }
@@ -240,6 +268,163 @@ impl Format for char {
     }
 }
 
+// `Arc<dyn Any + Send + Sync>` — Goish's `interface{}` representation.
+// xid's `fmt.Errorf("xid: scanning unsupported type: %T", value)` lands
+// here when `value` is the type-switch scrutinee. v1 prints a
+// placeholder; %T's full Go semantics (concrete type name) need
+// runtime type-id lookup which is deferred per the module doc.
+//
+// This impl lets the call-site type-check; the user-visible string
+// is "<any>" (or runs a downcast probe for known builtins). Future
+// work registers a TypeId → name table populated by `goish::reflect`.
+impl Format for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        // %T on a raw `Arc<dyn Any>` (no AnyVal type-name slot): name the known
+        // builtins, else "<any>". (`goish::Any` — the `interface{}` newtype most
+        // code uses — carries the real concrete name; prefer that path.) Must
+        // short-circuit before the value-formatting probes below.
+        if verb == b'T' {
+            let name = if self.is::<crate::gostring::string>() {
+                "string"
+            } else if self.is::<crate::goslice::slice<byte>>() {
+                "[]uint8"
+            } else if self.is::<i64>() {
+                "int64"
+            } else if self.is::<u64>() {
+                "uint64"
+            } else if self.is::<i32>() {
+                "int32"
+            } else if self.is::<u32>() {
+                "uint32"
+            } else if self.is::<bool>() {
+                "bool"
+            } else {
+                "<any>"
+            };
+            f.extend(name.as_bytes());
+            return;
+        }
+        // Probe a small set of common built-in concrete types so the
+        // common Goish format calls produce something user-readable.
+        // Falls back to "<any>" when the wrapped type isn't in the
+        // probe list.
+        if let Some(s) = self.downcast_ref::<crate::gostring::string>() {
+            return s.fmt(verb, f);
+        }
+        if let Some(b) = self.downcast_ref::<crate::goslice::slice<byte>>() {
+            return b.fmt(verb, f);
+        }
+        if let Some(n) = self.downcast_ref::<i64>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(n) = self.downcast_ref::<u64>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(n) = self.downcast_ref::<i32>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(n) = self.downcast_ref::<u32>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(b) = self.downcast_ref::<bool>() {
+            return b.fmt(verb, f);
+        }
+        // Unknown concrete type — placeholder. %T should print the
+        // type's Go name; we don't have a name table yet.
+        let _ = verb;
+        f.extend(b"<any>");
+    }
+}
+
+// `goish::Any` (interface{} newtype) — runs the same downcast probe
+// list as the raw-Arc impl above. We can't directly forward to the
+// raw-Arc impl because `Any` now wraps `Arc<dyn AnyVal>` (with the
+// dyn_eq slot) rather than `Arc<dyn core::any::Any + Send + Sync>`;
+// the probe set is small, so inlining is cheaper than a shim trait.
+impl Format for crate::goany::Any {
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        // %T — Go's `fmt.Sprintf("%T", v)`: the wrapped value's concrete type
+        // name, captured at wrap time (best-effort Rust path; see
+        // `goany::AnyVal::__goish_type_name`). Must short-circuit BEFORE the
+        // value-formatting probes below, which would otherwise print the value.
+        if verb == b'T' {
+            f.extend(self.TypeName().as_bytes());
+            return;
+        }
+        let inner = self.as_any();
+        if let Some(s) = inner.downcast_ref::<crate::gostring::string>() {
+            return s.fmt(verb, f);
+        }
+        if let Some(b) = inner.downcast_ref::<crate::goslice::slice<byte>>() {
+            return b.fmt(verb, f);
+        }
+        if let Some(n) = inner.downcast_ref::<i64>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(n) = inner.downcast_ref::<u64>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(n) = inner.downcast_ref::<i32>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(n) = inner.downcast_ref::<u32>() {
+            return n.fmt(verb, f);
+        }
+        if let Some(b) = inner.downcast_ref::<bool>() {
+            return b.fmt(verb, f);
+        }
+        let _ = verb;
+        f.extend(b"<any>");
+    }
+}
+
+// `Option<T>` — Goish's nullable carrier for some stdlib returns
+// (notably `context::Context::Value`, which mirrors Go's `any` return
+// with explicit absence). `None` prints as the Go-flavored "<nil>";
+// `Some(v)` forwards to the inner Format. Coherence: Option<T> has no
+// Stringer impl, so the `impl<T: Stringer> Format for T` blanket
+// doesn't apply.
+impl<T: Format> Format for Option<T> {
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        match self {
+            Some(v) => v.fmt(verb, f),
+            None => {
+                let _ = verb;
+                f.extend(b"<nil>");
+            }
+        }
+    }
+}
+
+// `nilable_ref<'_, T>` / `nilable_refmut<'_, T>` — Goish's borrow-shaped
+// `*T` wrappers. `nilable<T>` already inherits a `Stringer` impl from
+// `#[goish::interface]`'s auto-forward (see goish-macros §6.6), but the
+// borrow shapes don't, so wire them up here. `nil` prints as Go's
+// `<nil>`; non-nil forwards `String()` to the inner `T: Stringer`.
+// Routing through `Stringer` (not a direct `Format` impl) avoids
+// overlap with the `impl<T: Stringer> Format for T` blanket above —
+// `nilable_ref` / `nilable_refmut` are local types and coherence would
+// reject a `Format`-bounded blanket on them.
+impl<'a, T: ?Sized + Stringer> Stringer for crate::gonilable_ref::nilable_ref<'a, T> {
+    fn String(&self) -> string {
+        // `Try` consumes by-value (Copy via Option<&T>).
+        match (*self).Try() {
+            Some(t) => t.String(),
+            None => string::from("<nil>"),
+        }
+    }
+}
+
+impl<'a, T: ?Sized + Stringer> Stringer for crate::gonilable_ref::nilable_refmut<'a, T> {
+    fn String(&self) -> string {
+        if self.IsNil() {
+            string::from("<nil>")
+        } else {
+            self.Must().String()
+        }
+    }
+}
+
 // All integer widths route through one helper.
 macro_rules! impl_format_for_signed {
     ($($t:ty),*) => { $( impl Format for $t {
@@ -294,6 +479,39 @@ impl Format for f32 {
         };
         let s = crate::strconv::FormatFloat(*self as f64, fmt, prec, 32);
         f.extend(s.as_bytes());
+    }
+}
+
+// `complex64` and `complex128` are aliases for `(f32, f32)` / `(f64, f64)`
+// in goish v1 (no native complex arithmetic; the runtime models them as
+// tuples so `reflect::Value::Complex()` and `Sprintf!("%v", complex)` in
+// ports compile). Go formats `complex128(1+2i)` as `(1+2i)` for `%v`;
+// we follow the same shape.
+impl Format for (f64, f64) {
+    fn fmt(&self, _verb: byte, f: &mut FmtBuf) {
+        let re = crate::strconv::FormatFloat(self.0, b'g', -1, 64);
+        let im = crate::strconv::FormatFloat(self.1, b'g', -1, 64);
+        f.push(b'(');
+        f.extend(re.as_bytes());
+        if self.1 >= 0.0 {
+            f.push(b'+');
+        }
+        f.extend(im.as_bytes());
+        f.extend(b"i)");
+    }
+}
+
+impl Format for (f32, f32) {
+    fn fmt(&self, _verb: byte, f: &mut FmtBuf) {
+        let re = crate::strconv::FormatFloat(self.0 as f64, b'g', -1, 32);
+        let im = crate::strconv::FormatFloat(self.1 as f64, b'g', -1, 32);
+        f.push(b'(');
+        f.extend(re.as_bytes());
+        if self.1 >= 0.0 {
+            f.push(b'+');
+        }
+        f.extend(im.as_bytes());
+        f.extend(b"i)");
     }
 }
 
@@ -521,11 +739,16 @@ fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> 
         if verb == b'w' {
             if arg_idx < args.len() {
                 if let Some(e) = args[arg_idx].as_error() {
-                    if wrap_target.is_none() && *e != nil {
+                    if wrap_target.is_none() && !e.IsNil() {
                         wrap_target = Some(e.clone());
                     }
-                    let s = e.Error();
-                    f.extend(s.as_bytes());
+                    // Go: nil error formats as "<nil>".
+                    if e.IsNil() {
+                        f.extend(b"<nil>");
+                    } else {
+                        let s = e.Error();
+                        f.extend(s.as_bytes());
+                    }
                 } else {
                     // %w with a non-error arg — Go panics; we write an
                     // explanatory placeholder to make the bug visible.
@@ -688,7 +911,7 @@ fn write_reflect_value(v: &crate::reflect::Value, plus: bool, f: &mut FmtBuf) {
             f.extend(b"<interface>");
         }
         K::Int64 | K::Uint64 | K::Uintptr | K::Func | K::Chan
-        | K::UnsafePointer | K::Array => {
+        | K::UnsafePointer | K::Array | K::Complex64 | K::Complex128 => {
             // Fallback rendering for variants whose `__reflect_value`
             // doesn't yet produce a typed Value (placeholder for parity
             // with Go's reflect.Kind universe).
@@ -709,24 +932,23 @@ pub fn sprintf_impl(format: &[byte], args: &[FmtArg]) -> string {
     string::__from_vec(f.into_bytes())
 }
 
-/// Runtime variadic-spread Sprintf — for the Go pattern
-/// `fmt.Sprintf(format, args...)` where `args ...interface{}` becomes a
-/// goish `slice<Arc<dyn Any + Send + Sync>>`. Each arg is runtime-
-/// downcast to a known formattable type and dispatched as `FmtArg::Val`.
+/// Translate a `slice<Arc<dyn Any + ...>>` (the runtime shape of Go's
+/// `args ...interface{}`) to the `&[FmtArg]` that `*_impl` consumes.
+/// Each arg is downcast to a known formattable type; unsupported types
+/// render as `"<unsupported %T>"`.
 ///
-/// Supported concrete types: `string`, `&str`, `i64`/`i32`/`isize`,
-/// `u64`/`u32`/`usize`, `f64`/`f32`, `bool`, `byte` (u8), `char`, `error`.
-/// Unrecognised types render as `"<unsupported %T>"`.
-pub fn Sprintv<S: Into<string>>(
-    format: S,
-    args: slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
-) -> string {
-    let format = format.into();
-    let fmt_bytes = format.as_bytes();
-    let mut fa: Vec<FmtArg<'_>> = Vec::with_capacity(args.Len() as usize);
-    let placeholder: &str = "<unsupported %T>";
+/// Shared by all `*v` (variadic-spread) entry points so adding a new
+/// supported concrete type touches one place. The lifetime of the
+/// returned `Vec<FmtArg>` is tied to `args` — callers must keep `args`
+/// alive across the call. The placeholder string has `'static`
+/// lifetime, which trivially outlives any caller's `'a`.
+fn __any_args_to_fmtargs<'a>(
+    args: &'a slice<crate::goany::Any>,
+) -> Vec<FmtArg<'a>> {
+    static PLACEHOLDER: &str = "<unsupported %T>";
+    let mut fa: Vec<FmtArg<'a>> = Vec::with_capacity(args.Len() as usize);
     for a in args.iter() {
-        let any: &(dyn core::any::Any + Send + Sync) = a.as_ref();
+        let any: &(dyn core::any::Any + Send + Sync) = a.as_any();
         if let Some(v) = any.downcast_ref::<string>() {
             fa.push(FmtArg::Val(v as &dyn Format));
         } else if let Some(v) = any.downcast_ref::<&str>() {
@@ -756,10 +978,226 @@ pub fn Sprintv<S: Into<string>>(
         } else if let Some(v) = any.downcast_ref::<error>() {
             fa.push(FmtArg::Err(v));
         } else {
-            fa.push(FmtArg::Val(&placeholder as &dyn Format));
+            fa.push(FmtArg::Val(&PLACEHOLDER as &dyn Format));
         }
     }
-    sprintf_impl(fmt_bytes, &fa)
+    fa
+}
+
+/// Runtime variadic-spread Sprintf — for the Go pattern
+/// `fmt.Sprintf(format, args...)` where `args ...interface{}` becomes a
+/// goish `slice<Arc<dyn Any + Send + Sync>>`. Each arg is runtime-
+/// downcast to a known formattable type and dispatched as `FmtArg::Val`.
+///
+/// Supported concrete types: `string`, `&str`, `i64`/`i32`/`isize`,
+/// `u64`/`u32`/`usize`, `f64`/`f32`, `bool`, `byte` (u8), `char`, `error`.
+/// Unrecognised types render as `"<unsupported %T>"`.
+pub fn Sprintv<S: Into<string>>(
+    format: S,
+    args: slice<crate::goany::Any>,
+) -> string {
+    let format = format.into();
+    let fa = __any_args_to_fmtargs(&args);
+    sprintf_impl(format.as_bytes(), &fa)
+}
+
+/// Runtime variadic-spread Errorf — `fmt.Errorf(format, args...)`.
+pub fn Errorv<S: Into<string>>(
+    format: S,
+    args: slice<crate::goany::Any>,
+) -> error {
+    let format = format.into();
+    let fa = __any_args_to_fmtargs(&args);
+    errorf_impl(format.as_bytes(), &fa)
+}
+
+/// Runtime variadic-spread Printf — `fmt.Printf(format, args...)`.
+pub fn Printv<S: Into<string>>(
+    format: S,
+    args: slice<crate::goany::Any>,
+) -> (int, error) {
+    let format = format.into();
+    let fa = __any_args_to_fmtargs(&args);
+    printf_impl(format.as_bytes(), &fa)
+}
+
+/// Runtime variadic-spread Fprintf — `fmt.Fprintf(w, format, args...)`.
+pub fn Fprintv<W: io::Writer, S: Into<string>>(
+    w: &mut W,
+    format: S,
+    args: slice<crate::goany::Any>,
+) -> (int, error) {
+    let format = format.into();
+    let fa = __any_args_to_fmtargs(&args);
+    fprintf_impl(w, format.as_bytes(), &fa)
+}
+
+/// `fmt.Sprint(args...)` as a function value — for sites that pass
+/// fmt.Sprint as a function pointer (e.g.,
+/// `formatter[reflect.TypeOf(time.Time{})] = fmt.Sprint`).
+/// The macro `fmt::Sprint!` is still preferred for direct calls
+/// because it captures static FmtArg types; this fn shape lifts the
+/// variadic into a single slice<Any> arg for value-passing contexts.
+pub fn Sprint(args: slice<crate::goany::Any>) -> string {
+    let fa = __any_args_to_fmtargs(&args);
+    sprint_impl(&fa)
+}
+
+/// `fmt.Sprintln(args...)` as a function value. See `Sprint` for
+/// the macro-vs-fn dichotomy.
+pub fn Sprintln(args: slice<crate::goany::Any>) -> string {
+    let fa = __any_args_to_fmtargs(&args);
+    sprintln_impl(&fa)
+}
+
+/// `fmt.Fprint(w, args...)` as a function value.
+pub fn Fprint<W: io::Writer>(w: &mut W, args: slice<crate::goany::Any>) -> (int, error) {
+    let fa = __any_args_to_fmtargs(&args);
+    let mut f = FmtBuf::new();
+    for a in &fa {
+        a.write(b'v', f.borrow_mut());
+    }
+    let buf = slice::__from_vec(f.into_bytes());
+    w.Write(buf)
+}
+
+/// `fmt.Fprintln(w, args...)` as a function value.
+pub fn Fprintln<W: io::Writer>(w: &mut W, args: slice<crate::goany::Any>) -> (int, error) {
+    let fa = __any_args_to_fmtargs(&args);
+    fprintln_impl(w, &fa)
+}
+
+/// `fmt.Print(args...)` as a function value.
+pub fn Print(args: slice<crate::goany::Any>) -> (int, error) {
+    let fa = __any_args_to_fmtargs(&args);
+    print_impl(&fa)
+}
+
+/// `fmt.Println(args...)` as a function value.
+pub fn Println(args: slice<crate::goany::Any>) -> (int, error) {
+    let fa = __any_args_to_fmtargs(&args);
+    println_impl(&fa)
+}
+
+// ─── Sscanf ──────────────────────────────────────────────────────────
+//
+// Go's `fmt.Sscanf(input, format, args...)` scans values from `input`
+// guided by `format` directives. v1 surfaces the limited subset that
+// real ports exercise: a single scan target with a single directive
+// (`%f`, `%d`, `%s`). The polymorphism is via the `ScanTarget` trait;
+// each impl knows how to consume the trimmed input for its directive.
+//
+// The transpiler emits `&mut <target>` at call sites tagged with
+// `Mutates: []int{2}` in stdlib_registry, so callers like
+// `fmt.Sscanf(num, "%f", val)` lower to
+// `fmt::Sscanf(num, string("%f"), &mut val)` — the receiver is borrowed
+// mutably so the side effect on `val` is visible afterwards.
+
+/// Anything that can be filled by `fmt::Sscanf` for a given directive
+/// in `format`. The directive is the byte after `%` (e.g. `b'f'`).
+pub trait ScanTarget {
+    fn __scan_one(&mut self, input: &str, verb: u8) -> bool;
+}
+
+impl ScanTarget for crate::math::big::Rat {
+    fn __scan_one(&mut self, input: &str, verb: u8) -> bool {
+        match verb {
+            b'f' | b'g' | b'e' | b'v' => {
+                crate::math::big::parse_decimal_into_rat(input, self)
+            }
+            _ => false,
+        }
+    }
+}
+
+impl ScanTarget for int {
+    fn __scan_one(&mut self, input: &str, verb: u8) -> bool {
+        match verb {
+            b'd' | b'v' => match input.trim().parse::<int>() {
+                Ok(n) => { *self = n; true }
+                Err(_) => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl ScanTarget for f64 {
+    fn __scan_one(&mut self, input: &str, verb: u8) -> bool {
+        match verb {
+            b'f' | b'g' | b'e' | b'v' => match input.trim().parse::<f64>() {
+                Ok(n) => { *self = n; true }
+                Err(_) => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl ScanTarget for string {
+    fn __scan_one(&mut self, input: &str, verb: u8) -> bool {
+        match verb {
+            b's' | b'v' => {
+                *self = string::from(input.trim_start().split_whitespace().next().unwrap_or(""));
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+/// `fmt.Sscanf(input, format, target)` — scan a single value from
+/// `input` per the directive in `format`. Returns `(n, err)` where
+/// `n` is 1 on success (matching Go's scanned-count contract) and
+/// `err` is non-nil on parse failure or directive mismatch.
+///
+/// v1 limitation: only single-directive formats are supported. Real
+/// Go's Sscanf walks multiple verbs over whitespace-separated tokens;
+/// add multi-verb support when a port surfaces a real need.
+pub fn Sscanf<S1, S2, T>(input: S1, format: S2, target: &mut T) -> (int, error)
+where
+    S1: Into<string>,
+    S2: Into<string>,
+    T: ScanTarget + ?Sized,
+{
+    let input = input.into();
+    let format = format.into();
+    let fb = format.as_bytes();
+    // Find the `%X` directive. Skip any prefix-literal handling — Go
+    // allows literal text in the format that must match the input;
+    // v1 ports only exercise pure directive formats.
+    let mut i = 0;
+    while i < fb.len() && fb[i] != b'%' {
+        i += 1;
+    }
+    if i + 1 >= fb.len() {
+        return (0, errors::New(string::from(
+            "fmt::Sscanf: format has no directive",
+        )));
+    }
+    let verb = fb[i + 1];
+    let s: &str = input.as_ref();
+    if target.__scan_one(s, verb) {
+        (1, crate::errors::nil.into())
+    } else {
+        (0, errors::New(string::from("fmt::Sscanf: parse error")))
+    }
+}
+
+/// `fmt.Sscan(input, args...)` — placeholder, defaults to a single
+/// `%v` directive. Provided for forward symmetry; not yet exercised.
+pub fn Sscan<S, T>(input: S, target: &mut T) -> (int, error)
+where
+    S: Into<string>,
+    T: ScanTarget + ?Sized,
+{
+    let input = input.into();
+    let s: &str = input.as_ref();
+    if target.__scan_one(s, b'v') {
+        (1, crate::errors::nil.into())
+    } else {
+        (0, errors::New(string::from("fmt::Sscan: parse error")))
+    }
 }
 
 #[doc(hidden)]
@@ -793,7 +1231,7 @@ fn do_println(args: &[FmtArg], f: &mut FmtBuf) {
 pub fn println_impl(args: &[FmtArg]) -> (int, error) {
     let mut f = FmtBuf::new();
     do_println(args, &mut f);
-    let mut out = os::Stdout();
+    let out = os::Stdout();
     let buf = slice::__from_vec(f.into_bytes());
     out.Write(buf)
 }
@@ -844,7 +1282,7 @@ pub fn print_impl(args: &[FmtArg]) -> (int, error) {
         first = false;
         a.write(b'v', f.borrow_mut());
     }
-    let mut out = os::Stdout();
+    let out = os::Stdout();
     let buf = slice::__from_vec(f.into_bytes());
     out.Write(buf)
 }
@@ -1002,3 +1440,47 @@ macro_rules! Errorf {
 pub use crate::{
     Eprintln, Errorf, Fprintf, Fprintln, Print, Printf, Println, Sprint, Sprintf, Sprintln,
 };
+
+#[cfg(test)]
+mod sscanf_tests {
+    use super::*;
+    use crate::errors::nil;
+    use crate::math::big;
+
+    #[test]
+    fn sscanf_into_rat() {
+        let mut val = big::Rat::default();
+        let (n, err) = Sscanf("3.14", "%f", &mut val);
+        assert_eq!(n, 1);
+        assert!(err == nil);
+        // 3.14 → 314/100, reduced by big::Rat's GCD normalization to 157/50
+        assert_eq!(val.Num().Int64(), 157);
+        assert_eq!(val.Denom().Int64(), 50);
+    }
+
+    #[test]
+    fn sscanf_into_int() {
+        let mut n: int = 0;
+        let (count, err) = Sscanf("42", "%d", &mut n);
+        assert_eq!(count, 1);
+        assert!(err == nil);
+        assert_eq!(n, 42);
+    }
+
+    #[test]
+    fn sscanf_into_f64() {
+        let mut x: f64 = 0.0;
+        let (count, err) = Sscanf("2.5", "%f", &mut x);
+        assert_eq!(count, 1);
+        assert!(err == nil);
+        assert!((x - 2.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sscanf_parse_error() {
+        let mut val = big::Rat::default();
+        let (n, err) = Sscanf("not-a-num", "%f", &mut val);
+        assert_eq!(n, 0);
+        assert!(err != nil);
+    }
+}

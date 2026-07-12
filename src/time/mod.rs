@@ -31,7 +31,7 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use core::ops::{Add, Mul, Sub};
+use core::ops::{Add, Div, Mul, Sub};
 
 use crate::fmt::{self, FmtBuf};
 use crate::gostring::string;
@@ -363,6 +363,33 @@ impl Sub<Duration> for Duration {
     }
 }
 
+/// `time.Duration / time.Duration` — Go's `time.Duration` is `int64`,
+/// so the division is plain integer division: returns the unitless
+/// quotient as a `Duration` (the wrapper is preserved so that callers
+/// who format it with `%d` still see an integer count of nanoseconds-
+/// equivalent ratio, matching Go's semantics where the result type
+/// stays `time.Duration`).
+impl Div<Duration> for Duration {
+    type Output = Duration;
+    fn div(self, rhs: Duration) -> Duration {
+        if rhs.0 == 0 {
+            panic!("time::Duration: integer divide by zero");
+        }
+        Duration(self.0 / rhs.0)
+    }
+}
+
+/// `time.Duration / int` — divide a duration by a scalar.
+impl Div<int> for Duration {
+    type Output = Duration;
+    fn div(self, rhs: int) -> Duration {
+        if rhs == 0 {
+            panic!("time::Duration: integer divide by zero");
+        }
+        Duration(self.0 / rhs)
+    }
+}
+
 // Make Duration printable via fmt's %v / %s / Println!.
 impl fmt::Format for Duration {
     fn fmt(&self, verb: u8, buf: &mut FmtBuf) {
@@ -606,6 +633,7 @@ impl Time {
             min,
             sec,
             self.nsec as int,
+            UTC,
         )
     }
 
@@ -1548,18 +1576,84 @@ pub fn UnixMicro(usec: int) -> Time {
     Unix(usec / 1_000_000, (usec % 1_000_000) * 1_000)
 }
 
-/// `time.Date(year, month, day, hour, min, sec, nsec)` — construct a
-/// UTC Time. Slim port of Go's `time.Date` (time.go:1438) without the
-/// `*Location` argument (UTC only, v1). Out-of-range fields normalize
-/// the same way Go does (e.g. `Date(2024, 1, 32, …)` ≡ Feb 1).
-pub fn Date(year: int, month: int, day: int, hour: int, min: int, sec: int, nsec: int) -> Time {
-    let days = days_from_civil(year, month, day);
+/// `time.Date(year, month, day, hour, min, sec, nsec, loc)` — construct
+/// a Time. Slim port of Go's `time.Date` (time.go:1438). v1 has no
+/// real Location support — the `loc` arg is accepted for ABI parity
+/// (matches Go's 8-arg signature) but doesn't affect the output:
+/// every Time is stored in UTC.
+///
+/// Accepts either `int` or `Month` for the month parameter via
+/// `impl Into<int>` — Go callers spell `time.January` (a `Month`
+/// typed const) directly, and `Month` impls `Into<int>` (see
+/// `convert::__IntConv for Month`).
+pub fn Date<M: __MonthArg>(
+    year: int,
+    month: M,
+    day: int,
+    hour: int,
+    min: int,
+    sec: int,
+    nsec: int,
+    _loc: Location,
+) -> Time {
+    let m = month.__as_int();
+    let days = days_from_civil(year, m, day);
     let total_sec = days
         .wrapping_mul(86_400)
         .wrapping_add(hour.wrapping_mul(3600))
         .wrapping_add(min.wrapping_mul(60))
         .wrapping_add(sec);
     Unix(total_sec, nsec)
+}
+
+/// `time.Location` (time.go:38) — opaque time-zone descriptor. Slim
+/// runtime is UTC-only; this carries no real state. Present so the
+/// `Date(..., loc)` 8-arg signature lines up with Go and so port
+/// code spelling `time.UTC` resolves to a value.
+#[derive(Clone, Copy, Default)]
+pub struct Location {
+    _utc: (),
+}
+
+impl Location {
+    #[doc(hidden)]
+    pub const fn __new() -> Self {
+        Self { _utc: () }
+    }
+    /// `(*Location).String()` (time.go:101) — name of the zone.
+    /// Slim runtime returns `"UTC"` for the singleton.
+    #[allow(non_snake_case)]
+    pub fn String(self) -> crate::gostring::string {
+        crate::gostring::string::from_static("UTC")
+    }
+}
+
+/// `time.UTC` (time.go:1067) — the UTC location singleton. v1 has
+/// no other zones; passing this to `Date` is a no-op (every Time is
+/// internally UTC).
+pub const UTC: Location = Location::__new();
+
+/// `time.Local` (time.go:1071) — Go's "system local zone" sentinel.
+/// v1 has no zone-database — folds to UTC.
+pub const Local: Location = Location::__new();
+
+/// Hidden trait so `Date`'s month parameter accepts both `int` and
+/// the named `Month` constants (`time.January`, …). Goish's `Month`
+/// is `struct Month(int)`; this adapter pulls the underlying number
+/// for `days_from_civil`.
+#[doc(hidden)]
+pub trait __MonthArg {
+    fn __as_int(self) -> int;
+}
+impl __MonthArg for int {
+    fn __as_int(self) -> int {
+        self
+    }
+}
+impl __MonthArg for Month {
+    fn __as_int(self) -> int {
+        self.0
+    }
 }
 
 /// Inverse of `civil_from_unix` — Howard Hinnant's `days_from_civil`.
@@ -1789,7 +1883,7 @@ fn parse_rfc3339(s: crate::gostring::string) -> (Time, crate::error) {
             crate::errors::New("time: only UTC (Z) supported in slim Parse"),
         );
     }
-    (Date(y, m, d, hh, mm, ss, 0), crate::errors::nil)
+    (Date(y, m, d, hh, mm, ss, 0, UTC), crate::errors::nil)
 }
 
 fn parse_datetime(s: crate::gostring::string, sep: u8) -> (Time, crate::error) {
@@ -1813,7 +1907,7 @@ fn parse_datetime(s: crate::gostring::string, sep: u8) -> (Time, crate::error) {
     let hh = match parse_int(&bs[11..13]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     let mm = match parse_int(&bs[14..16]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     let ss = match parse_int(&bs[17..19]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    (Date(y, m, d, hh, mm, ss, 0), crate::errors::nil)
+    (Date(y, m, d, hh, mm, ss, 0, UTC), crate::errors::nil)
 }
 
 fn parse_date_only(s: crate::gostring::string) -> (Time, crate::error) {
@@ -1828,7 +1922,7 @@ fn parse_date_only(s: crate::gostring::string) -> (Time, crate::error) {
     let y = match parse_int(&bs[0..4]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     let m = match parse_int(&bs[5..7]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     let d = match parse_int(&bs[8..10]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    (Date(y, m, d, 0, 0, 0, 0), crate::errors::nil)
+    (Date(y, m, d, 0, 0, 0, 0, UTC), crate::errors::nil)
 }
 
 fn parse_time_only(s: crate::gostring::string) -> (Time, crate::error) {
@@ -1843,7 +1937,7 @@ fn parse_time_only(s: crate::gostring::string) -> (Time, crate::error) {
     let hh = match parse_int(&bs[0..2]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     let mm = match parse_int(&bs[3..5]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     let ss = match parse_int(&bs[6..8]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    (Date(1970, 1, 1, hh, mm, ss, 0), crate::errors::nil)
+    (Date(1970, 1, 1, hh, mm, ss, 0, UTC), crate::errors::nil)
 }
 
 fn parse_rfc1123(s: crate::gostring::string) -> (Time, crate::error) {
@@ -1872,7 +1966,7 @@ fn parse_rfc1123(s: crate::gostring::string) -> (Time, crate::error) {
     let hh = match parse_int(&bs[17..19]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     let mm = match parse_int(&bs[20..22]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     let ss = match parse_int(&bs[23..25]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    (Date(y, mon, d, hh, mm, ss, 0), crate::errors::nil)
+    (Date(y, mon, d, hh, mm, ss, 0, UTC), crate::errors::nil)
 }
 
 fn parse_ansic(s: crate::gostring::string) -> (Time, crate::error) {
@@ -1912,7 +2006,7 @@ fn parse_ansic(s: crate::gostring::string) -> (Time, crate::error) {
     let mm = match parse_int(&bs[14..16]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     let ss = match parse_int(&bs[17..19]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     let y = match parse_int(&bs[20..24]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    (Date(y, mon, d, hh, mm, ss, 0), crate::errors::nil)
+    (Date(y, mon, d, hh, mm, ss, 0, UTC), crate::errors::nil)
 }
 
 fn parse_int(bs: &[u8]) -> Result<int, crate::error> {
@@ -2202,5 +2296,67 @@ fn month_short(bs: &[u8]) -> Option<int> {
         b"Nov" => Some(11),
         b"Dec" => Some(12),
         _ => None,
+    }
+}
+
+// ─── Reflect ─────────────────────────────────────────────────────────
+//
+// `reflect.TypeOf(time.Time{})` is the common key for fmt-style
+// formatter tables — Go's `pretty` / `litter` / `repr` ports register
+// `fmt.Sprint` under this key. The runtime only needs Type identity;
+// __reflect_value falls back to a name-only struct shape (no field
+// reflection — Time's internals are private).
+impl crate::reflect::Reflect for Time {
+    #[inline]
+    fn __reflect_type() -> crate::reflect::Type {
+        crate::reflect::Type::__new(crate::reflect::Kind::Struct, "time.Time", &[])
+    }
+    #[inline]
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        crate::reflect::Value::Struct {
+            ty: <Self as crate::reflect::Reflect>::__reflect_type(),
+            fields: alloc::vec::Vec::new(),
+        }
+    }
+}
+
+// `time.Duration` reflects as an int64 newtype — matches Go's
+// `reflect.TypeOf(time.Duration(0)).Kind() == reflect.Int64`.
+impl crate::reflect::Reflect for Duration {
+    #[inline]
+    fn __reflect_type() -> crate::reflect::Type {
+        crate::reflect::Type::__new(crate::reflect::Kind::Int64, "time.Duration", &[])
+    }
+    #[inline]
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        crate::reflect::Value::Int(self.0)
+    }
+}
+
+#[cfg(test)]
+mod duration_div_tests {
+    use super::*;
+
+    #[test]
+    fn duration_div_duration() {
+        // 10s / 1s = 10 (as Duration).
+        let a = Duration(10_000_000_000);
+        let b = Duration(1_000_000_000);
+        let q = a / b;
+        assert_eq!(q.0, 10);
+    }
+
+    #[test]
+    fn duration_div_int() {
+        // 1s / 4 = 250ms.
+        let a = Second;
+        let q = a / 4;
+        assert_eq!(q.0, 250_000_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "divide by zero")]
+    fn duration_div_zero_panics() {
+        let _ = Second / Duration(0);
     }
 }

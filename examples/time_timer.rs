@@ -16,7 +16,7 @@ use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use goish::runtime::sched::schedule;
 use goish::time::{After, Milliseconds, NewTicker, NewTimer, Now, Since};
-use goish::{go, select, syscall, KB};
+use goish::{go, select, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -46,7 +46,7 @@ fn test_after_delivers_one() {
     static FIRED: AtomicUsize = AtomicUsize::new(0);
     static ELAPSED: AtomicI64 = AtomicI64::new(0);
 
-    go!(stack(64 * KB), || {
+    go!(|| {
         let t0 = Now();
         let ch = After(Milliseconds(10));
         let _ = ch.Recv();
@@ -67,7 +67,7 @@ fn test_select_timeout() {
     static TIMEOUT_FIRED: AtomicUsize = AtomicUsize::new(0);
 
     let never = goish::make!(chan i64);
-    go!(stack(64 * KB), move || {
+    go!(move || {
         select! {
             let _v = never.Recv() => die(b"select-timeout: never fired\n"),
             let _t = (After(Milliseconds(10))).Recv() => {
@@ -89,7 +89,7 @@ fn test_timer_stop_prevents_fire() {
     static GOT: AtomicUsize = AtomicUsize::new(0);
     static STOP_OK: AtomicUsize = AtomicUsize::new(0);
 
-    go!(stack(64 * KB), || {
+    go!(|| {
         let t = NewTimer(Milliseconds(50));
         // Stop before the timer fires.
         let was_active = t.Stop();
@@ -119,7 +119,7 @@ fn test_timer_stop_prevents_fire() {
 fn test_ticker_periodic_then_stop() {
     static TICKS: AtomicUsize = AtomicUsize::new(0);
 
-    go!(stack(64 * KB), || {
+    go!(|| {
         let t = NewTicker(Milliseconds(5));
         // Receive 3 ticks.
         for _ in 0..3 {

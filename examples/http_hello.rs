@@ -24,7 +24,7 @@ use alloc::sync::Arc;
 use goish::net;
 use goish::net::http;
 use goish::runtime::sched::schedule;
-use goish::{bytes, go, string, syscall, KB};
+use goish::{bytes, go, string, syscall};
 
 fn print(msg: &[u8]) {
     syscall::Write(syscall::STDOUT, msg.as_ptr(), msg.len());
@@ -82,7 +82,7 @@ fn main() {
     print(b"\n");
 
     let mux_for_listen = mux.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let _ = http::Serve(ln, mux_for_listen);
     });
 

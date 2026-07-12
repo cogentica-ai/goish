@@ -19,8 +19,11 @@
 //   * No TLS (`https://`). Calls return an error if Scheme == "https".
 //   * No CookieJar. Cookies must be set via `req.AddCookie` and read
 //     via `resp.Cookies()` explicitly.
-//   * No `context.Context` / per-request cancellation. `Client.Timeout`
-//     bounds the whole request via deadline-set on the dialed Conn.
+//   * Request contexts are honored: `RoundTrip` fast-fails a done
+//     ctx, folds `ctx.Deadline()` into conn deadlines, and a cancel
+//     watcher interrupts blocked I/O (HTTP path; TLS gets deadline
+//     folding only). `Client.Timeout` re-parents the request under
+//     `context.WithTimeout` — one deadline across all redirect hops.
 //   * `Request.Body` and `Response.Body` are pre-buffered `slice<byte>`
 //     (matches the existing Request type in goish v1).
 //   * No automatic decompression (no `Accept-Encoding: gzip`).
@@ -35,6 +38,7 @@ use alloc::vec::Vec;
 
 use crate::bufio;
 use crate::errors::{self, error};
+use crate::gonilable::nilable;
 use crate::goslice::slice;
 use crate::io::{self, Closer, Reader, Writer};
 use crate::net;
@@ -67,7 +71,9 @@ pub struct Response {
     /// Whether the connection should be closed after reading Body.
     pub Close: bool,
     /// The Request that produced this Response. Populated by Client::Do.
-    pub Request: Option<Request>,
+    /// Modelled as `nilable<Request>` (Go's `*http.Request` shape) so
+    /// Goish-side `resp.Request.URL` access can narrow via `.Must()`.
+    pub Request: nilable<Request>,
 }
 
 impl Default for Response {
@@ -82,7 +88,7 @@ impl Default for Response {
             Body: slice::<byte>::__from_vec(Vec::new()),
             ContentLength: 0,
             Close: false,
-            Request: None,
+            Request: nilable::nil(),
         }
     }
 }
@@ -122,7 +128,7 @@ impl Response {
             Err(_) => {}
         }
         // Relative resolution: replace path/query of req.URL with lv.
-        if let Some(ref req) = self.Request {
+        if let Some(req) = self.Request.Try() {
             let mut merged = req.URL.clone();
             // If Location starts with "/", replace path; else append to dirname.
             let lvb = lv.as_bytes();
@@ -156,7 +162,10 @@ pub fn ReadResponse<R: Reader>(
     req: Option<Request>,
 ) -> (Response, error) {
     let mut resp = Response::default();
-    resp.Request = req;
+    resp.Request = match req {
+        Some(r) => nilable::new(r),
+        None => nilable::nil(),
+    };
 
     // Status line: "HTTP/1.1 200 OK\r\n"
     let line = match read_crlf_line(br) {
@@ -228,8 +237,8 @@ pub fn ReadResponse<R: Reader>(
     let cl_str = resp.Header.Get(string("Content-Length"));
 
     // Go: HEAD / 1xx / 204 / 304 → empty body, regardless of CL/TE.
-    let head_only = match resp.Request {
-        Some(ref r) => r.Method == "HEAD",
+    let head_only = match resp.Request.Try() {
+        Some(r) => r.Method == "HEAD",
         None => false,
     };
     let no_body = head_only
@@ -288,7 +297,9 @@ pub fn ReadResponse<R: Reader>(
 }
 
 /// Read until EOF into `body`, returning the appended slice and any
-/// non-EOF error. Replaces ad-hoc Vec<u8> drain loops.
+/// non-EOF error. Mirrors Go's `io.ReadAll` loop — only exits on error
+/// (including io.EOF). A (0, nil) return is treated as "keep reading",
+/// matching Go's `io.Reader` contract: "0 bytes and nil error is not EOF".
 fn drain_to_eof<R: Reader>(r: &mut R, mut body: slice<byte>) -> (slice<byte>, error) {
     let mut tmp = make!([]byte, 4096);
     loop {
@@ -299,9 +310,10 @@ fn drain_to_eof<R: Reader>(r: &mut R, mut body: slice<byte>) -> (slice<byte>, er
         if !err.IsNil() {
             return (body, err);
         }
-        if n == 0 {
-            return (body, errors::nil);
-        }
+        // Go's io.ReadAll does NOT exit on (0, nil) — it keeps looping.
+        // Exiting here was wrong: a reader that temporarily returns 0 bytes
+        // without error (e.g., a MockReader injecting zeros, or a TLS record
+        // boundary where no data is ready yet) would cause silent body truncation.
     }
 }
 
@@ -333,26 +345,17 @@ fn read_full_into<R: Reader>(r: &mut bufio::Reader<R>, buf: &mut slice<byte>) ->
 
 /// `http.RoundTripper` — single-method interface that executes a
 /// request and returns the response. Mirrors transport.go:103.
+#[goish::interface]
 pub trait RoundTripper: Send + Sync {
     fn RoundTrip(&self, req: &Request) -> (Response, error);
 }
 
-/// `nil → Box<dyn RoundTripper + Send + Sync>` — produces a stub whose
-/// `RoundTrip` panics. Used by `return nil` from functions whose
-/// return type is `Box<dyn RoundTripper>` (Go's `if hook == nil {
-/// return nil }` pattern). Callers must check `is_set()`/equivalent
-/// guards before invoking, never reach the stub.
-struct __NilRoundTripper;
-impl RoundTripper for __NilRoundTripper {
-    fn RoundTrip(&self, _req: &Request) -> (Response, crate::error) {
-        panic!("RoundTrip called on nil RoundTripper")
-    }
-}
-impl From<crate::nilval::Nil> for alloc::boxed::Box<dyn RoundTripper + Send + Sync> {
-    fn from(_: crate::nilval::Nil) -> Self {
-        alloc::boxed::Box::new(__NilRoundTripper)
-    }
-}
+// `__NilRoundTripper`, `From<Nil> for Box<dyn RoundTripper>`, and
+// `From<Nil> for Arc<dyn RoundTripper + Send + Sync>` are all auto-
+// generated by `#[goish::interface]` above (sections 6.9 and 7 of the
+// macro). The hand-emitted `From<Nil> for Arc<dyn RoundTripper>` that
+// used to live here was removed when the macro started emitting it
+// directly — keeping it would cause an E0119 coherence conflict.
 
 /// Type alias for the proxy-resolver closure shape. Go: `func(*Request)
 /// (*url.URL, error)`. Goish carries an opaque boxed closure so the
@@ -465,14 +468,15 @@ impl RoundTripper for Transport {
     fn RoundTrip(&self, req: &Request) -> (Response, error) {
         // Resolve scheme.
         let scheme = req.URL.Scheme.clone();
-        if scheme.Len() != 0
-            && scheme.as_bytes() != b"http"
-        {
+        let is_https = scheme.as_bytes() == b"https";
+        let is_http = scheme.Len() == 0 || scheme.as_bytes() == b"http";
+        if !is_http && !is_https {
             return (
                 Response::default(),
-                errors::New(string("http: only scheme=http is supported (TLS not yet ported)")),
+                errors::New(string("http: only scheme=http and scheme=https are supported")),
             );
         }
+
         // Resolve host:port. URL.Host may already include :port.
         let host = if req.URL.Host.Len() > 0 {
             req.URL.Host.clone()
@@ -485,36 +489,226 @@ impl RoundTripper for Transport {
                 errors::New(string("http: no Host in request")),
             );
         }
-        let dial_addr = ensure_default_port(&host, 80);
 
-        // Dial.
-        let (mut conn, derr) = net::Dial(string("tcp"), dial_addr);
-        if !derr.IsNil() {
-            return (Response::default(), derr);
+        // ── request context (Go transport.go:594 roundTrip) ──
+        // Fast-fail before dialing if the request's ctx is already
+        // done; fold any ctx deadline into the conn deadline below.
+        let ctx = req.ctx.clone();
+        if let Some(c) = &ctx {
+            let cerr = c.Err();
+            if !cerr.IsNil() {
+                return (Response::default(), cerr);
+            }
         }
 
-        // Apply deadline if Timeout > 0.
-        if self.Timeout.0 > 0 {
-            let dl = time::Now().Add(self.Timeout);
-            let _ = conn.SetDeadline(dl);
-        }
+        if is_https {
+            // ── HTTPS path ───────────────────────────────────────────────
+            // Dial the raw TCP conn ourselves (instead of tls::Dial's
+            // dial-and-handshake) so the deadline and the ctx-cancel
+            // watcher are armed on the socket *before* the handshake —
+            // Timeout and cancellation cover the ClientHello/ServerHello
+            // exchange, not just the request/response I/O after it.
+            let dial_addr = ensure_default_port(&host, 443);
 
-        // Write the request.
-        let req_bytes = serialize_request(req, &host);
-        let (_, werr) = conn.Write(req_bytes);
-        if !werr.IsNil() {
+            let (raw_conn, derr) = net::Dial(string("tcp"), dial_addr);
+            if !derr.IsNil() {
+                return (Response::default(), derr);
+            }
+
+            // Deadline: Transport.Timeout tightened by the ctx deadline.
+            let dl = self.effective_deadline(&ctx);
+            if !dl.IsZero() {
+                let _ = raw_conn.SetDeadline(dl);
+            }
+
+            // ctx-cancel watcher on the underlying socket — TLS reads
+            // and writes all funnel into it, so a past netpoll
+            // deadline interrupts them exactly like plain HTTP.
+            let watch = arm_cancel_watch(&ctx, raw_conn.__disconnect_watch_parts());
+
+            // tls.Client(conn, cfg) + Handshake, SNI from the config
+            // or the request host (what tls::Dial would derive).
+            let mut tls_cfg = self.TLSClientConfig.clone();
+            if tls_cfg.ServerName.Len() == 0 {
+                tls_cfg.ServerName = host_without_port(&host);
+            }
+            let box_conn: alloc::boxed::Box<dyn crate::net::Conn> =
+                alloc::boxed::Box::new(raw_conn);
+            let mut tls_conn = crate::crypto::tls::Client(box_conn, &tls_cfg);
+            let herr = tls_conn.Handshake();
+            if !herr.IsNil() {
+                stop_cancel_watch(watch);
+                let _ = tls_conn.Close();
+                return (Response::default(), ctx_err_or(&ctx, herr));
+            }
+
+            // Write the request.
+            let req_bytes = serialize_request(req, &host);
+            let (_, werr) = <crate::crypto::tls::Conn as crate::io::Writer>::Write(
+                &mut tls_conn,
+                req_bytes,
+            );
+            if !werr.IsNil() {
+                stop_cancel_watch(watch);
+                let _ = tls_conn.Close();
+                return (Response::default(), ctx_err_or(&ctx, werr));
+            }
+
+            // Read the response.
+            let (resp, rerr) = {
+                let mut br = bufio::NewReader(&mut tls_conn);
+                ReadResponse(&mut br, Some(req.clone()))
+            };
+            stop_cancel_watch(watch);
+            let _ = tls_conn.Close();
+            if !rerr.IsNil() {
+                return (resp, ctx_err_or(&ctx, rerr));
+            }
+            (resp, rerr)
+        } else {
+            // ── HTTP path ────────────────────────────────────────────────
+            let dial_addr = ensure_default_port(&host, 80);
+
+            let (mut conn, derr) = net::Dial(string("tcp"), dial_addr);
+            if !derr.IsNil() {
+                return (Response::default(), derr);
+            }
+
+            // Deadline: Transport.Timeout tightened by the ctx deadline.
+            let dl = self.effective_deadline(&ctx);
+            if !dl.IsZero() {
+                let _ = conn.SetDeadline(dl);
+            }
+
+            // ctx-cancel watcher (see arm_cancel_watch).
+            let watch = arm_cancel_watch(&ctx, conn.__disconnect_watch_parts());
+
+            // Write the request.
+            let req_bytes = serialize_request(req, &host);
+            let (_, werr) = conn.Write(req_bytes);
+            if !werr.IsNil() {
+                stop_cancel_watch(watch);
+                let _ = conn.Close();
+                return (Response::default(), ctx_err_or(&ctx, werr));
+            }
+
+            // Read the response.
+            let (resp, rerr) = {
+                let mut br = bufio::NewReader(&mut conn);
+                ReadResponse(&mut br, Some(req.clone()))
+            };
+            stop_cancel_watch(watch);
             let _ = conn.Close();
-            return (Response::default(), werr);
+            if !rerr.IsNil() {
+                return (resp, ctx_err_or(&ctx, rerr));
+            }
+            (resp, rerr)
         }
-
-        // Read the response.
-        let (resp, rerr) = {
-            let mut br = bufio::NewReader(&mut conn);
-            ReadResponse(&mut br, Some(req.clone()))
-        };
-        let _ = conn.Close();
-        (resp, rerr)
     }
+}
+
+impl Transport {
+    /// Effective conn deadline for one roundtrip: `Transport.Timeout`
+    /// (if set) tightened by the request ctx's deadline (if any).
+    /// Zero Time ⇒ no deadline.
+    fn effective_deadline(
+        &self,
+        ctx: &Option<Arc<dyn crate::context::Context>>,
+    ) -> time::Time {
+        let mut dl = time::Time::default();
+        if self.Timeout.0 > 0 {
+            dl = time::Now().Add(self.Timeout);
+        }
+        if let Some(c) = ctx {
+            if let Some(cd) = c.Deadline() {
+                if dl.IsZero() || cd.Before(dl) {
+                    dl = cd;
+                }
+            }
+        }
+        dl
+    }
+}
+
+/// Prefer the ctx's error over the wire error once the ctx is done —
+/// a read kicked out by the cancel watcher's past-deadline surfaces
+/// as "context canceled" / "context deadline exceeded", matching
+/// Go's url.Error unwrapping to ctx.Err().
+fn ctx_err_or(ctx: &Option<Arc<dyn crate::context::Context>>, fallback: error) -> error {
+    if let Some(c) = ctx {
+        let e = c.Err();
+        if !e.IsNil() {
+            return e;
+        }
+    }
+    fallback
+}
+
+/// Arm the ctx-cancel watcher (Go transport.go persistConn's cancel
+/// plumbing, slim). For ctxs whose Done chan is real (WithCancel /
+/// WithTimeout), a helper goroutine selects on Done vs a stop chan.
+/// On cancellation it slams past deadlines onto the conn's PollDesc,
+/// kicking any blocked read/write out with a timeout that the
+/// caller's error mapping (`ctx_err_or`) converts to ctx.Err(). TLS
+/// conns are covered by arming the *underlying* TCP socket — every
+/// TLS record read/write funnels into it.
+///
+/// Returns `None` (nothing to watch) or the (stop, exited) chan pair
+/// to hand to `stop_cancel_watch`, which must run before the conn is
+/// closed — the watcher dereferences the conn's PollDesc.
+fn arm_cancel_watch(
+    ctx: &Option<Arc<dyn crate::context::Context>>,
+    parts: (i32, *const crate::runtime::netpoll::PollDesc),
+) -> Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)> {
+    let c = ctx.as_ref()?;
+    let done = c.Done();
+    if done.is_nil() {
+        return None;
+    }
+    let (_fd, pd) = parts;
+    if pd.is_null() {
+        return None;
+    }
+    let stop = crate::gochan::chan::<()>::new_unbuffered();
+    let exited = crate::gochan::chan::<()>::new_unbuffered();
+    let stop2 = stop.clone();
+    let exited2 = exited.clone();
+    let pd_addr = pd as usize;
+    crate::go!(move || {
+        let fired: bool = crate::select! {
+            let _ = done.Recv() => true,
+            let _ = stop2.Recv() => false,
+        };
+        if fired {
+            let pd = unsafe { &*(pd_addr as *const crate::runtime::netpoll::PollDesc) };
+            crate::runtime::netpoll::set_deadline(pd, -1, b'r');
+            crate::runtime::netpoll::set_deadline(pd, -1, b'w');
+        }
+        exited2.Close();
+    });
+    Some((stop, exited))
+}
+
+/// Stop + join the ctx-cancel watcher. Must run before the conn is
+/// closed (the watcher dereferences the conn's PollDesc).
+fn stop_cancel_watch(watch: Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)>) {
+    if let Some((stop, exited)) = watch {
+        stop.Close();
+        let (_, _) = exited.Recv();
+    }
+}
+
+/// Strip a `:port` suffix from `host` — the SNI name for a dialed
+/// address (what `tls::Dial` derives internally).
+fn host_without_port(host: &string) -> string {
+    if !has_port(host) {
+        return host.clone();
+    }
+    let hb = host.as_bytes();
+    if let Some(i) = hb.iter().rposition(|&b| b == b':') {
+        return string::from_bytes(&hb[..i]);
+    }
+    host.clone()
 }
 
 // ─── Client ──────────────────────────────────────────────────────────
@@ -538,11 +732,37 @@ impl Default for Client {
 
 const MAX_REDIRECTS: usize = 10;
 
+/// Calls the held `context.CancelFunc` when dropped — the goish
+/// rendering of Go's `defer cancel()`. Releases the WithTimeout
+/// timer on every return path out of `Client::Do`.
+struct __CancelOnDrop(Option<crate::context::CancelFunc>);
+impl Drop for __CancelOnDrop {
+    fn drop(&mut self) {
+        if let Some(c) = self.0.take() {
+            c();
+        }
+    }
+}
+
 impl Client {
     /// `(*Client).Do(req)` — execute the request, following up to 10
     /// redirects on 301/302/303/307/308. Mirrors client.go:565.
+    ///
+    /// `Client.Timeout` bounds the entire exchange (all redirect hops
+    /// included) — implemented the way Go's `setRequestCancel`
+    /// (client.go:394) does it: the request is re-parented under
+    /// `context.WithTimeout`, and the transport folds the context
+    /// deadline into its connection deadlines.
     pub fn Do(&self, req: &Request) -> (Response, error) {
         let mut current = req.clone();
+        // Whole-exchange deadline via ctx (canceled on every return
+        // path by the drop guard, releasing the timer).
+        let mut _cancel_guard = __CancelOnDrop(None);
+        if self.Timeout.0 > 0 {
+            let (ctx, cancel) = crate::context::WithTimeout(current.Context(), self.Timeout);
+            current = current.WithContext(ctx);
+            _cancel_guard.0 = Some(cancel);
+        }
         for _step in 0..=MAX_REDIRECTS {
             let (resp, err) = self.Transport.RoundTrip(&current);
             if !err.IsNil() {
@@ -583,6 +803,9 @@ impl Client {
                         RemoteAddr: string::new(),
                         path_values: crate::gomap::map::<string, string>::new(),
                         form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(super::request::FormCell::default())),
+                        // Redirect hops inherit the original request's
+                        // context (Go client.go:665: ireq.Context()).
+                        ctx: current.ctx.clone(),
                     };
                     // Preserve body only on 307/308 (per RFC).
                     if resp.StatusCode == 307 || resp.StatusCode == 308 {
@@ -619,12 +842,15 @@ impl Client {
         self.Do(&req)
     }
 
-    /// `(*Client).Post(url, contentType, body)`.
-    pub fn Post<U: Into<string>, C: Into<string>>(
+    /// `(*Client).Post(url, contentType, body)`. Like Go's `body
+    /// io.Reader` slot, the body is polymorphic: `nil`, `slice<byte>`,
+    /// `string`, and `&str` literals all work (same `__RequestBody`
+    /// dispatch as `NewRequest`).
+    pub fn Post<U: Into<string>, C: Into<string>, B: __RequestBody>(
         &self,
         url: U,
         content_type: C,
-        body: slice<byte>,
+        body: B,
     ) -> (Response, error) {
         let (mut req, err) = NewRequest(string("POST"), url, body);
         if !err.IsNil() {
@@ -670,11 +896,12 @@ pub fn Head<U: Into<string>>(url: U) -> (Response, error) {
     default_client().Head(url)
 }
 
-/// `http.Post(url, contentType, body)`.
-pub fn Post<U: Into<string>, C: Into<string>>(
+/// `http.Post(url, contentType, body)`. Body is polymorphic like
+/// Go's `io.Reader` slot — `nil` / `slice<byte>` / `string` / `&str`.
+pub fn Post<U: Into<string>, C: Into<string>, B: __RequestBody>(
     url: U,
     content_type: C,
-    body: slice<byte>,
+    body: B,
 ) -> (Response, error) {
     default_client().Post(url, content_type, body)
 }
@@ -687,17 +914,20 @@ pub fn PostForm<U: Into<string>>(url: U, vals: &[(string, string)]) -> (Response
 // ─── NewRequest ──────────────────────────────────────────────────────
 
 /// `http.NewRequestWithContext(ctx, method, url, body)` (request.go:898).
-/// Slim port: ctx is accepted but currently ignored (goish doesn't yet
-/// thread context through Request). Behaves identically to NewRequest
-/// in v1; switching to a context-aware Client/Transport later won't
-/// break call sites that already pass the ctx through.
+/// The ctx is stored on the Request and visible via `r.Context()`.
+/// (v1 slim: the client transport doesn't yet observe ctx
+/// cancellation mid-roundtrip — `Client.Timeout` bounds the wire.)
 pub fn NewRequestWithContext<M: Into<string>, U: Into<string>, B: __RequestBody>(
-    _ctx: alloc::sync::Arc<dyn crate::context::Context>,
+    ctx: alloc::sync::Arc<dyn crate::context::Context>,
     method: M,
     url: U,
     body: B,
 ) -> (Request, error) {
-    NewRequest(method, url, body)
+    let (req, err) = NewRequest(method, url, body);
+    if !err.IsNil() {
+        return (req, err);
+    }
+    (req.WithContext(ctx), err)
 }
 
 /// Body-arg dispatch — lets `http::NewRequest`/`Client::Post` accept
@@ -786,6 +1016,7 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
         RemoteAddr: string::new(),
         path_values: crate::gomap::map::<string, string>::new(),
         form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(super::request::FormCell::default())),
+        ctx: None,
     };
     (req, errors::nil)
 }
@@ -804,6 +1035,7 @@ fn default_request() -> Request {
         RemoteAddr: string::new(),
         path_values: crate::gomap::map::<string, string>::new(),
         form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(super::request::FormCell::default())),
+        ctx: None,
     }
 }
 

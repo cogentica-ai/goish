@@ -32,23 +32,37 @@ extern crate alloc;
 use crate::error;
 use crate::goslice::slice;
 use crate::types::{byte, int};
-use crate::errors::{self, nil};
+use crate::errors::nil;
 
 // ─── Reader / Writer / Closer traits ───────────────────────────────────
 
 /// Go's `io.Reader`. Read up to `len(p)` bytes into `p`; returns
 /// `(n, err)`. EOF is signaled by returning `io::EOF` as the error.
+#[goish::interface]
 pub trait Reader {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error);
 }
 
 /// Go's `io.Writer`. Write `len(p)` bytes from `p`. Returns `(n, err)`
 /// where `n < len(p)` requires a non-nil `err`.
+#[goish::interface]
 pub trait Writer {
     fn Write(&mut self, p: slice<byte>) -> (int, error);
 }
 
+/// goish addition: a shareable writer. `Arc<sync::Mutex<W>>` implements
+/// [`Writer`] by serializing each `Write` through the mutex, so several
+/// holders observe writes to the same underlying value. This mirrors Go's
+/// habit of passing a `*T` pointer as an `io.Writer` — e.g.
+/// `log.New(&buf, …)` where the caller later reads `buf.String()`.
+impl<W: Writer> Writer for alloc::sync::Arc<crate::sync::Mutex<W>> {
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        self.Lock().Write(p)
+    }
+}
+
 /// Go's `io.Closer`.
+#[goish::interface]
 pub trait Closer {
     fn Close(&mut self) -> error;
 }
@@ -62,6 +76,7 @@ impl<T: Reader + Closer> ReadCloser for T {}
 
 /// Go's `io.Seeker` (io.go:126). Reposition the read/write head.
 /// Whence is one of `SeekStart`, `SeekCurrent`, `SeekEnd`.
+#[goish::interface]
 pub trait Seeker {
     fn Seek(&mut self, offset: i64, whence: int) -> (i64, error);
 }
@@ -73,17 +88,20 @@ pub const SeekEnd: int = 2;
 
 /// Go's `io.ReaderAt` (io.go:230). Random-access read at byte offset
 /// `off`. Implementations must not retain `p` across the call.
+#[goish::interface]
 pub trait ReaderAt {
     fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error);
 }
 
 /// Go's `io.WriterAt` (io.go:249). Random-access write at byte offset
 /// `off`. Implementations must not retain `p` across the call.
+#[goish::interface]
 pub trait WriterAt {
     fn WriteAt(&mut self, p: slice<byte>, off: i64) -> (int, error);
 }
 
 /// Go's `io.ByteReader` (io.go:262).
+#[goish::interface]
 pub trait ByteReader {
     fn ReadByte(&mut self) -> (byte, error);
 }
@@ -94,47 +112,49 @@ pub trait ByteScanner: ByteReader {
 }
 
 /// Go's `io.ByteWriter` (io.go:280).
+#[goish::interface]
 pub trait ByteWriter {
     fn WriteByte(&mut self, c: byte) -> error;
 }
 
 /// Go's `io.RuneReader` (io.go:289).
+#[goish::interface]
 pub trait RuneReader {
     fn ReadRune(&mut self) -> (crate::types::rune, int, error);
 }
 
+/// Go's `io.RuneScanner` (io.go:301). Extends RuneReader with the
+/// ability to push back the last-read rune. Surfaced by gopkg.in/
+/// inf.v0's `Dec.scan(r io.RuneScanner)` parser path.
+pub trait RuneScanner: RuneReader {
+    fn UnreadRune(&mut self) -> error;
+}
+
 /// Go's `io.StringWriter` (io.go:307).
+#[goish::interface]
 pub trait StringWriter {
     fn WriteString(&mut self, s: crate::gostring::string) -> (int, error);
 }
 
 /// Go's `io.ReaderFrom` (io.go:189). Used by `Copy` for fast-path
 /// fan-in when the destination supports it.
+#[goish::interface]
 pub trait ReaderFrom {
     fn ReadFrom(&mut self, r: &mut dyn Reader) -> (i64, error);
 }
 
 /// Go's `io.WriterTo` (io.go:200). Used by `Copy` for fast-path
 /// fan-out when the source supports it.
+#[goish::interface]
 pub trait WriterTo {
     fn WriteTo(&mut self, w: &mut dyn Writer) -> (i64, error);
 }
 
-// Blanket impls so `&mut R` and `&mut W` satisfy the trait without
-// transferring ownership. Mirrors Go's "any pointer-receiver method
-// promotes through a `*T`" — lets callers do
-// `bufio.NewWriter(&mut buf)` and keep `buf` alive after.
-impl<R: Reader + ?Sized> Reader for &mut R {
-    #[inline]
-    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
-        (**self).Read(p)
-    }
-}
-
-// `Box<dyn Reader + Send + Sync>` is the canonical lowering for an
-// owned interface storage slot (Go's `io.Reader` field). Forward the
-// trait through Box::deref_mut so callers can pass the boxed reader
-// straight to `io::ReadFull(boxed, …)` without unboxing.
+// Blanket impls so `Box<dyn T>` satisfies the trait. The `&mut R`
+// blanket is now auto-emitted by `#[goish::interface]` (section 6.7a
+// of goish-macros); the Box<R> blanket below is retained because
+// Box<dyn T> needs the same dispatch shape for owned trait-object
+// callers and the macro doesn't emit it yet.
 impl<R: Reader + ?Sized> Reader for alloc::boxed::Box<R> {
     #[inline]
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
@@ -142,24 +162,10 @@ impl<R: Reader + ?Sized> Reader for alloc::boxed::Box<R> {
     }
 }
 
-impl<W: Writer + ?Sized> Writer for &mut W {
-    #[inline]
-    fn Write(&mut self, p: slice<byte>) -> (int, error) {
-        (**self).Write(p)
-    }
-}
-
 impl<W: Writer + ?Sized> Writer for alloc::boxed::Box<W> {
     #[inline]
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
         (**self).Write(p)
-    }
-}
-
-impl<C: Closer + ?Sized> Closer for &mut C {
-    #[inline]
-    fn Close(&mut self) -> error {
-        (**self).Close()
     }
 }
 
@@ -180,16 +186,6 @@ impl<C: Closer + ?Sized> Closer for alloc::boxed::Box<C> {
 //
 // When OnceLock-equivalent infrastructure lands in goish::sync, these
 // helpers swap to a lock-free read fast-path. The shape stays.
-
-use crate::runtime::spin::SpinLock;
-
-fn cached_error(slot: &SpinLock<Option<error>>, init: fn() -> error) -> error {
-    let mut g = slot.lock();
-    if g.is_none() {
-        *g = Some(init());
-    }
-    g.as_ref().unwrap().clone()
-}
 
 // io sentinels — Doctrine 2 marker form. Use sites compare bare:
 //   if errors::Is(err, io::EOF) { ... }
@@ -875,3 +871,101 @@ pub use pipe::{ErrClosedPipe, Pipe, PipeReader, PipeWriter};
 // ─── io/fs subpackage (slim — FileMode, ValidPath, PathError) ──────
 
 pub mod fs;
+
+// ─── io/ioutil — Go 1.16-deprecated forwarders ────────────────────────
+//
+// `io/ioutil` was split into `io` and `os` in Go 1.16, but a long
+// tail of code (rs/xid, hashicorp libs, K8s client deps) still spells
+// `ioutil.ReadFile`, `ioutil.WriteFile`, etc. The module here is a
+// compatibility shim — every entry is a thin forwarder to the
+// post-split home.
+pub mod ioutil {
+    use super::*;
+
+    /// `ioutil.ReadFile(name)` — see `os::ReadFile`.
+    #[inline]
+    pub fn ReadFile<N: Into<crate::string>>(name: N) -> (slice<byte>, error) {
+        crate::os::ReadFile(name)
+    }
+
+    /// `ioutil.WriteFile(name, data, perm)` — see `os::WriteFile`.
+    #[inline]
+    pub fn WriteFile<N: Into<crate::string>, M: Into<crate::os::FileMode>>(
+        name: N,
+        data: slice<byte>,
+        perm: M,
+    ) -> error {
+        crate::os::WriteFile(name, data, perm)
+    }
+
+    /// `ioutil.TempDir(dir, pattern) (name string, err error)` —
+    /// Go 1.16+ moved to `os.MkdirTemp`. Slim port: create
+    /// `<dir>/<pattern><N>` with a process-local counter for
+    /// uniqueness. Real `mkstemp(3)`-grade collision-avoidance is
+    /// deferred (sufficient for short-lived test/scratch dirs).
+    pub fn TempDir<S: Into<crate::string>, S2: Into<crate::string>>(
+        dir: S,
+        pattern: S2,
+    ) -> (crate::string, error) {
+        let dir: crate::string = dir.into();
+        let pattern: crate::string = pattern.into();
+        let base = if dir.Len() == 0 { crate::os::TempDir() } else { dir };
+
+        static NEXT: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+
+        let mut path: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        path.extend_from_slice(base.as_bytes());
+        if !path.ends_with(b"/") {
+            path.push(b'/');
+        }
+        path.extend_from_slice(pattern.as_bytes());
+        append_u64(&mut path, n);
+
+        let name = crate::string::from_bytes(&path);
+        let err = crate::os::Mkdir(name.clone(), 0o700);
+        (name, err)
+    }
+
+    /// `ioutil.TempFile(dir, pattern) (*os.File, error)` — same
+    /// naming caveat as `TempDir`. Deprecated in Go 1.16 (replaced by
+    /// `os.CreateTemp`).
+    pub fn TempFile<S: Into<crate::string>, S2: Into<crate::string>>(
+        dir: S,
+        pattern: S2,
+    ) -> (crate::gonilable::nilable<crate::os::File>, error) {
+        let dir: crate::string = dir.into();
+        let pattern: crate::string = pattern.into();
+        let base = if dir.Len() == 0 { crate::os::TempDir() } else { dir };
+
+        static NEXT: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+
+        let mut path: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        path.extend_from_slice(base.as_bytes());
+        if !path.ends_with(b"/") {
+            path.push(b'/');
+        }
+        path.extend_from_slice(pattern.as_bytes());
+        append_u64(&mut path, n);
+
+        let name = crate::string::from_bytes(&path);
+        crate::os::Create(name)
+    }
+
+    fn append_u64(buf: &mut alloc::vec::Vec<u8>, mut n: u64) {
+        let mut digits = [0u8; 20];
+        let mut i = digits.len();
+        if n == 0 {
+            i -= 1;
+            digits[i] = b'0';
+        } else {
+            while n > 0 {
+                i -= 1;
+                digits[i] = b'0' + (n % 10) as u8;
+                n /= 10;
+            }
+        }
+        buf.extend_from_slice(&digits[i..]);
+    }
+}

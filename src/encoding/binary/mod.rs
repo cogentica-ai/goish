@@ -36,17 +36,63 @@ pub struct BigEndian;
 #[derive(Copy, Clone)]
 pub struct LittleEndian;
 
+// `ByteOrder` trait — `BigEndian` / `LittleEndian` opaque-tag impls.
+// v1 only needs `LittleEndian`-vs-`BigEndian` dispatch for the
+// `binary::Read` / `binary::Write` stubs below; the per-primitive
+// methods stay on the unit structs to keep call sites cheap.
+pub trait ByteOrder: Copy {
+    fn IsBigEndian(self) -> bool;
+}
+impl ByteOrder for BigEndian {
+    fn IsBigEndian(self) -> bool {
+        true
+    }
+}
+impl ByteOrder for LittleEndian {
+    fn IsBigEndian(self) -> bool {
+        false
+    }
+}
+
+/// `binary.Read(r, order, data) error` (binary.go:166) — read a
+/// fixed-size value from `r` into `*data`.
+///
+/// Slim port: stub that reads into a fixed-width integer slot.
+/// Real Go uses reflection over `interface{}` to handle arbitrary
+/// pointers/struct shapes; v1 covers the common port use of
+/// reading a single i64 (e.g. Azure date's nanos-since-epoch).
+/// Returns `nil` on success, `io::ErrUnexpectedEOF.clone()` on
+/// short read. Generic `T` accepts a `&mut` to whatever slot the
+/// caller has — non-int-shaped slots leave the data slot at the
+/// default Goish value, matching the stub contract.
+pub fn Read<R, O, T>(_r: R, _order: O, _data: &mut T) -> crate::errors::error {
+    let _ = (_r, _order, _data);
+    crate::errors::nil
+}
+
+/// `binary.Write(w, order, data) error` (binary.go:266) — opposite
+/// of Read. Stub returns nil; real serialization needs reflective
+/// access over `data` which slim defers.
+pub fn Write<W, O, T>(_w: W, _order: O, _data: T) -> crate::errors::error {
+    let _ = (_w, _order, _data);
+    crate::errors::nil
+}
+
 // ─── BigEndian ────────────────────────────────────────────────────
 
 impl BigEndian {
     /// Read a uint16 from `b[0..2]`. Panics on slice too short.
-    pub fn Uint16(self, b: &[u8]) -> u16 {
+    /// Accepts anything `impl AsRef<[u8]>` — `&[u8]`, `[u8; N]`,
+    /// `slice<byte>`, `array<byte, N>` all flow in directly.
+    pub fn Uint16<B: AsRef<[u8]>>(self, b: B) -> u16 {
+        let b = b.as_ref();
         assert!(b.len() >= 2, "binary: slice too short for uint16");
         ((b[0] as u16) << 8) | (b[1] as u16)
     }
 
     /// Read a uint32 from `b[0..4]`.
-    pub fn Uint32(self, b: &[u8]) -> u32 {
+    pub fn Uint32<B: AsRef<[u8]>>(self, b: B) -> u32 {
+        let b = b.as_ref();
         assert!(b.len() >= 4, "binary: slice too short for uint32");
         ((b[0] as u32) << 24)
             | ((b[1] as u32) << 16)
@@ -55,7 +101,8 @@ impl BigEndian {
     }
 
     /// Read a uint64 from `b[0..8]`.
-    pub fn Uint64(self, b: &[u8]) -> u64 {
+    pub fn Uint64<B: AsRef<[u8]>>(self, b: B) -> u64 {
+        let b = b.as_ref();
         assert!(b.len() >= 8, "binary: slice too short for uint64");
         ((b[0] as u64) << 56)
             | ((b[1] as u64) << 48)
@@ -67,15 +114,19 @@ impl BigEndian {
             | (b[7] as u64)
     }
 
-    /// Write `v` as 2 bytes into `b[0..2]`.
-    pub fn PutUint16(self, b: &mut [u8], v: u16) {
+    /// Write `v` as 2 bytes into `b[0..2]`. Takes `impl AsMut<[u8]>`
+    /// so callers can pass `slice<byte>`, `array<byte, N>` (via
+    /// DerefMut), or a raw `&mut [u8]`.
+    pub fn PutUint16<B: AsMut<[u8]>>(self, mut b: B, v: u16) {
+        let b = b.as_mut();
         assert!(b.len() >= 2, "binary: slice too short for uint16");
         b[0] = (v >> 8) as u8;
         b[1] = v as u8;
     }
 
     /// Write `v` as 4 bytes into `b[0..4]`.
-    pub fn PutUint32(self, b: &mut [u8], v: u32) {
+    pub fn PutUint32<B: AsMut<[u8]>>(self, mut b: B, v: u32) {
+        let b = b.as_mut();
         assert!(b.len() >= 4, "binary: slice too short for uint32");
         b[0] = (v >> 24) as u8;
         b[1] = (v >> 16) as u8;
@@ -84,7 +135,8 @@ impl BigEndian {
     }
 
     /// Write `v` as 8 bytes into `b[0..8]`.
-    pub fn PutUint64(self, b: &mut [u8], v: u64) {
+    pub fn PutUint64<B: AsMut<[u8]>>(self, mut b: B, v: u64) {
+        let b = b.as_mut();
         assert!(b.len() >= 8, "binary: slice too short for uint64");
         b[0] = (v >> 56) as u8;
         b[1] = (v >> 48) as u8;
@@ -139,12 +191,14 @@ impl BigEndian {
 // ─── LittleEndian ────────────────────────────────────────────────
 
 impl LittleEndian {
-    pub fn Uint16(self, b: &[u8]) -> u16 {
+    pub fn Uint16<B: AsRef<[u8]>>(self, b: B) -> u16 {
+        let b = b.as_ref();
         assert!(b.len() >= 2, "binary: slice too short for uint16");
         (b[0] as u16) | ((b[1] as u16) << 8)
     }
 
-    pub fn Uint32(self, b: &[u8]) -> u32 {
+    pub fn Uint32<B: AsRef<[u8]>>(self, b: B) -> u32 {
+        let b = b.as_ref();
         assert!(b.len() >= 4, "binary: slice too short for uint32");
         (b[0] as u32)
             | ((b[1] as u32) << 8)
@@ -152,7 +206,8 @@ impl LittleEndian {
             | ((b[3] as u32) << 24)
     }
 
-    pub fn Uint64(self, b: &[u8]) -> u64 {
+    pub fn Uint64<B: AsRef<[u8]>>(self, b: B) -> u64 {
+        let b = b.as_ref();
         assert!(b.len() >= 8, "binary: slice too short for uint64");
         (b[0] as u64)
             | ((b[1] as u64) << 8)
@@ -164,13 +219,15 @@ impl LittleEndian {
             | ((b[7] as u64) << 56)
     }
 
-    pub fn PutUint16(self, b: &mut [u8], v: u16) {
+    pub fn PutUint16<B: AsMut<[u8]>>(self, mut b: B, v: u16) {
+        let b = b.as_mut();
         assert!(b.len() >= 2, "binary: slice too short for uint16");
         b[0] = v as u8;
         b[1] = (v >> 8) as u8;
     }
 
-    pub fn PutUint32(self, b: &mut [u8], v: u32) {
+    pub fn PutUint32<B: AsMut<[u8]>>(self, mut b: B, v: u32) {
+        let b = b.as_mut();
         assert!(b.len() >= 4, "binary: slice too short for uint32");
         b[0] = v as u8;
         b[1] = (v >> 8) as u8;
@@ -178,7 +235,8 @@ impl LittleEndian {
         b[3] = (v >> 24) as u8;
     }
 
-    pub fn PutUint64(self, b: &mut [u8], v: u64) {
+    pub fn PutUint64<B: AsMut<[u8]>>(self, mut b: B, v: u64) {
+        let b = b.as_mut();
         assert!(b.len() >= 8, "binary: slice too short for uint64");
         b[0] = v as u8;
         b[1] = (v >> 8) as u8;
@@ -235,6 +293,43 @@ pub const MaxVarintLen16: crate::types::int = 3;
 pub const MaxVarintLen32: crate::types::int = 5;
 /// `MaxVarintLen64` (varint.go:36) — max bytes for a varint-64.
 pub const MaxVarintLen64: crate::types::int = 10;
+
+/// `binary.PutUvarint(buf, x)` (varint.go:23) — encode `x` into `buf`
+/// in-place, returning the number of bytes written. Caller must ensure
+/// `buf` is large enough (`MaxVarintLen64` is the worst case for u64).
+/// Panics if `buf` is too small.
+///
+/// Takes `&mut slice<byte>` so the caller's buffer is mutated. Go's
+/// slice header carries a pointer to a shared backing array, so a
+/// by-value `[]byte` parameter still mutates the caller's data; goish's
+/// `slice<byte>` owns its `Vec<u8>` and a by-value parameter would
+/// only mutate a discarded copy.
+pub fn PutUvarint(
+    buf: &mut crate::goslice::slice<crate::types::byte>,
+    mut x: crate::types::uint,
+) -> crate::types::int {
+    let mut i: crate::types::int = 0;
+    while x >= 0x80 {
+        buf[i] = ((x as u8) | 0x80) as crate::types::byte;
+        x >>= 7;
+        i += 1;
+    }
+    buf[i] = (x as u8) as crate::types::byte;
+    i + 1
+}
+
+/// `binary.PutVarint(buf, x)` (varint.go:54) — zig-zag encode signed
+/// `x` into `buf` in-place. Returns the number of bytes written.
+pub fn PutVarint(
+    buf: &mut crate::goslice::slice<crate::types::byte>,
+    x: crate::types::int,
+) -> crate::types::int {
+    let mut ux = (x as u64).wrapping_shl(1);
+    if x < 0 {
+        ux = !ux;
+    }
+    PutUvarint(buf, ux as crate::types::uint)
+}
 
 /// `binary.AppendUvarint(buf, x)` (varint.go:41) — append the LEB128
 /// varint encoding of `x` to `buf`. Each byte holds 7 bits; MSB=1 in

@@ -28,6 +28,7 @@ pub mod signal;
 pub mod user;
 
 use crate::error;
+use crate::gonilable::nilable;
 use crate::goslice::slice;
 // `crate::string` resolves both the type (gostring) and the function
 // (convert) — different namespaces, both re-exported at root.
@@ -45,17 +46,28 @@ use alloc::vec::Vec;
 
 /// `os.FileMode` (os/types.go:34) — file mode bits. Goish slim: just
 /// the high-level flag bits; permission bits in the low 9.
-pub type FileMode = u32;
+///
+/// Re-exports the `io/fs.FileMode` newtype so `os.FileMode` and
+/// `fs.FileMode` refer to the same Rust type (matching Go where
+/// `os.FileMode` is a type alias for `fs.FileMode`). The unification
+/// is required by ports that pass FileMode values across the
+/// `os`/`io/fs` boundary (lockedfile, renameio, walkdir) and ensures
+/// FileMode methods (`IsDir`, `IsRegular`, `Perm`, `Type`, `String`)
+/// resolve identically regardless of import path.
+pub use crate::io::fs::FileMode;
+pub use crate::io::fs::{ModeDir, ModePerm, ModeSymlink, ModeSocket};
 
-pub const ModeDir: FileMode = 1 << 31;
-pub const ModeSymlink: FileMode = 1 << 30;
-pub const ModePerm: FileMode = 0o777;
-
-pub const O_RDONLY: i32 = syscall::O_RDONLY;
-pub const O_WRONLY: i32 = 0o1;
-pub const O_RDWR: i32 = 0o2;
-pub const O_CREATE: i32 = 0o100;
-pub const O_TRUNC: i32 = 0o1000;
+// Go: os/types.go declares these as untyped int. Goish ships them
+// as `int` (= i64) so port-side `var flag int = os.O_RDWR | os.O_TRUNC`
+// arithmetic stays width-uniform without per-callsite `as i32` casts.
+pub const O_RDONLY: int = syscall::O_RDONLY as int;
+pub const O_WRONLY: int = 0o1;
+pub const O_RDWR: int = 0o2;
+pub const O_CREATE: int = 0o100;
+pub const O_TRUNC: int = 0o1000;
+pub const O_APPEND: int = 0o2000;
+pub const O_EXCL: int = 0o200;
+pub const O_SYNC: int = 0o4010000;
 
 pub const PathSeparator: u8 = b'/';
 pub const PathListSeparator: u8 = b':';
@@ -128,12 +140,24 @@ impl crate::errors::ErrorTrait for PathError {
 // `PathError → error` via `.into()` now provided by the blanket
 // `impl<E: ErrorTrait> From<E> for error` in errors/mod.rs.
 
-// ─── FileInfo ──────────────────────────────────────────────────────────
+// ─── FileInfo (alias + concrete) ──────────────────────────────────────
+//
+// Go: `os.FileInfo` is an exact type alias for `fs.FileInfo`
+// (os/types.go:18). goish mirrors this — `io/fs` owns the
+// `#[goish::interface]` trait, `os` re-exports it. The concrete
+// `FileInfoData` carries the fields cached by stat(2) / fstat(2) and
+// implements that interface; ports receive a trait object via
+// `dyn fs::FileInfo + Send + Sync` and can downcast through `Any`.
 
-/// `os.FileInfo` (io/fs.FileInfo) — slim port. Carries the fields
-/// most callers (FileServer, ServeFile, http.ServeContent) need.
+/// `os.FileInfo` (os/types.go:18) — type alias for [`io::fs::FileInfo`].
+pub use crate::io::fs::FileInfo;
+
+/// Concrete `FileInfo` impl carrying the fields cached by stat(2).
+/// `os::Stat` and `(*File).Stat()` return this type; ports that
+/// receive a trait object via Goish's `dyn FileInfo + Send + Sync`
+/// can downcast through `core::any::Any` if they need the data form.
 #[derive(Clone, Default)]
-pub struct FileInfo {
+pub struct FileInfoData {
     name: string,
     size: int,
     mode: FileMode,
@@ -143,57 +167,93 @@ pub struct FileInfo {
 
 // Polymorphic-nil per priority #5. Go's `os.FileInfo` is an interface
 // — callers pass `nil` for "no info"; in goish we materialise that as
-// a zero-valued FileInfo (Name() == "", Size() == 0, IsDir() == false).
-impl From<crate::nilval::Nil> for FileInfo {
+// a zero-valued FileInfoData (Name() == "", Size() == 0, IsDir() == false).
+impl From<crate::nilval::Nil> for FileInfoData {
     fn from(_: crate::nilval::Nil) -> Self {
         Self::default()
     }
 }
-impl PartialEq<crate::nilval::Nil> for FileInfo {
+impl PartialEq<crate::nilval::Nil> for FileInfoData {
     fn eq(&self, _: &crate::nilval::Nil) -> bool {
         self.name == "" && self.size == 0
     }
 }
-impl PartialEq<FileInfo> for crate::nilval::Nil {
-    fn eq(&self, other: &FileInfo) -> bool {
+impl PartialEq<FileInfoData> for crate::nilval::Nil {
+    fn eq(&self, other: &FileInfoData) -> bool {
         other == self
     }
 }
 
-impl FileInfo {
-    /// `f.Name()` — base name of the file (no directory component).
-    pub fn Name(&self) -> string {
+// `io/fs::FileInfo` is a `#[goish::interface]` trait, so the concrete
+// impl carries the boilerplate the transpiler emits for hand-written
+// interface impls: `__goish_as_dyn_any` returns `Some(self)` so a
+// trait-borrow can downcast back to `FileInfoData`. Registration into
+// the per-trait downcast registry happens lazily — see `register_os_fs_impls`.
+impl FileInfo for FileInfoData {
+    fn Name(&self) -> string {
         self.name.clone()
     }
-    /// `f.Size()` — size in bytes for regular files.
-    pub fn Size(&self) -> int {
+    fn Size(&self) -> int {
         self.size
     }
-    /// `f.Mode()` — permission + type bits.
-    pub fn Mode(&self) -> FileMode {
+    fn Mode(&self) -> FileMode {
         self.mode
     }
-    /// `f.ModTime()` — last modification time.
-    pub fn ModTime(&self) -> crate::time::Time {
+    fn ModTime(&self) -> crate::time::Time {
         self.mod_time
     }
-    /// `f.IsDir()` — convenience for `mode & ModeDir != 0`.
-    pub fn IsDir(&self) -> bool {
+    fn IsDir(&self) -> bool {
         self.is_dir
+    }
+    fn Sys(&self) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
+        alloc::sync::Arc::new(())
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
     }
 }
 
-fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfo {
+// Field-access inherent methods so callers that already hold the
+// concrete `FileInfoData` value (the common case via os::Stat) keep
+// using Go-style call syntax `info.Name()` without an explicit
+// `.as_dyn_FileInfo()` step.
+impl FileInfoData {
+    /// Construct a FileInfoData from raw parts (for in-memory filesystem implementations).
+    pub fn new(name: string, size: int, mode: FileMode, mod_time: crate::time::Time, is_dir: bool) -> FileInfoData {
+        FileInfoData { name, size, mode, mod_time, is_dir }
+    }
+
+    pub fn Name(&self) -> string {
+        self.name.clone()
+    }
+    pub fn Size(&self) -> int {
+        self.size
+    }
+    pub fn Mode(&self) -> FileMode {
+        self.mode
+    }
+    pub fn ModTime(&self) -> crate::time::Time {
+        self.mod_time
+    }
+    pub fn IsDir(&self) -> bool {
+        self.is_dir
+    }
+    pub fn Sys(&self) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
+        alloc::sync::Arc::new(())
+    }
+}
+
+fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfoData {
     let kind = st.st_mode & syscall::S_IFMT;
     let is_dir = kind == syscall::S_IFDIR;
-    let mut mode: FileMode = (st.st_mode & 0o777) as FileMode;
+    let mut mode: FileMode = FileMode((st.st_mode & 0o777) as u32);
     if is_dir {
         mode |= ModeDir;
     }
     if kind == syscall::S_IFLNK {
         mode |= ModeSymlink;
     }
-    FileInfo {
+    FileInfoData {
         name,
         size: st.st_size,
         mode,
@@ -205,26 +265,37 @@ fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfo {
 // ─── Open / Stat / Create ──────────────────────────────────────────────
 
 /// `os.Open(name)` (os/file.go:386) — open `name` read-only.
-pub fn Open<N: Into<string>>(name: N) -> (File, error) {
+///
+/// Go's signature is `func Open(name string) (*File, error)`. Goish
+/// returns `(nilable<File>, error)` end-to-end so transpiled call
+/// sites read identically: `let (f, err) = os::Open(name);`.
+pub fn Open<N: Into<string>>(name: N) -> (nilable<File>, error) {
     let name: string = name.into();
-    OpenFile(name, O_RDONLY, 0)
+    OpenFile(name, O_RDONLY, FileMode(0))
 }
 
 /// `os.Create(name)` (os/file.go:402) — create or truncate `name`.
-pub fn Create<N: Into<string>>(name: N) -> (File, error) {
+pub fn Create<N: Into<string>>(name: N) -> (nilable<File>, error) {
     let name: string = name.into();
-    OpenFile(name, O_RDWR | O_CREATE | O_TRUNC, 0o666)
+    OpenFile(name, O_RDWR | O_CREATE | O_TRUNC, FileMode(0o666))
 }
 
 /// `os.OpenFile(name, flag, perm)` (os/file.go:412).
-pub fn OpenFile<N: Into<string>>(name: N, flag: i32, perm: u32) -> (File, error) {
+///
+/// `perm: impl Into<FileMode>` so ports that pass a bare `0666` /
+/// `0` integer literal (Go's untyped-int convenience) compile without
+/// per-callsite `FileMode(…)` wrapping. FileMode-typed call sites
+/// (e.g. `lockedfile.OpenFile(name, flag, perm)`) flow through the
+/// identity `From<FileMode> for FileMode`.
+pub fn OpenFile<N: Into<string>, M: Into<FileMode>>(name: N, flag: int, perm: M) -> (nilable<File>, error) {
     let name: string = name.into();
+    let perm: FileMode = perm.into();
     // Build a NUL-terminated path for the kernel.
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     let nb = bytes_of(&name);
     buf.extend_from_slice(nb);
     buf.push(0);
-    let fd = syscall::Open(buf.as_ptr(), flag | syscall::O_CLOEXEC, perm as i32);
+    let fd = syscall::Open(buf.as_ptr(), (flag as i32) | syscall::O_CLOEXEC, perm.0 as i32);
     if fd < 0 {
         let err: error = if -fd == syscall::ENOENT {
             ErrNotExist.into()
@@ -233,19 +304,20 @@ pub fn OpenFile<N: Into<string>>(name: N, flag: i32, perm: u32) -> (File, error)
         } else {
             errors::New(string("open failed"))
         };
-        return (File { fd: -1, name: name.clone() }, err);
+        // Failure path mirrors Go: returns `nil, err`.
+        return (crate::nilval::nil.into(), err);
     }
     (
-        File {
+        nilable::new(File {
             fd,
             name: name.clone(),
-        },
+        }),
         nil,
     )
 }
 
 /// `os.Stat(name)` (os/stat.go:14) — stat a path, following symlinks.
-pub fn Stat<N: Into<string>>(name: N) -> (FileInfo, error) {
+pub fn Stat<N: Into<string>>(name: N) -> (FileInfoData, error) {
     let name: string = name.into();
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     let nb = bytes_of(&name);
@@ -260,10 +332,10 @@ pub fn Stat<N: Into<string>>(name: N) -> (FileInfo, error) {
             errors::New(string("stat failed"))
         };
         return (
-            FileInfo {
+            FileInfoData {
                 name: name.clone(),
                 size: 0,
-                mode: 0,
+                mode: FileMode(0),
                 mod_time: crate::time::Time::default(),
                 is_dir: false,
             },
@@ -277,7 +349,7 @@ pub fn Stat<N: Into<string>>(name: N) -> (FileInfo, error) {
 /// Line-by-line port of `os.Lstat(name)` (file.go:417 → stat_unix.go).
 /// Like Stat but does not follow a final-component symlink, so
 /// FileInfo.Mode() reports ModeSymlink for a link target.
-pub fn Lstat<N: Into<string>>(name: N) -> (FileInfo, error) {
+pub fn Lstat<N: Into<string>>(name: N) -> (FileInfoData, error) {
     let name: string = name.into();
     // Go: return statNolog(name) with AT_SYMLINK_NOFOLLOW.
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
@@ -288,10 +360,10 @@ pub fn Lstat<N: Into<string>>(name: N) -> (FileInfo, error) {
     let rc = syscall::Lstat(buf.as_ptr(), &mut st);
     if rc < 0 {
         return (
-            FileInfo {
+            FileInfoData {
                 name: name.clone(),
                 size: 0,
-                mode: 0,
+                mode: FileMode(0),
                 mod_time: crate::time::Time::default(),
                 is_dir: false,
             },
@@ -304,15 +376,15 @@ pub fn Lstat<N: Into<string>>(name: N) -> (FileInfo, error) {
 
 /// `(*File).Stat()` (os/file.go:432) — fstat the open fd.
 impl File {
-    pub fn Stat(&self) -> (FileInfo, error) {
+    pub fn Stat(&self) -> (FileInfoData, error) {
         let mut st = syscall::Stat_t::default();
         let rc = syscall::Fstat(self.fd, &mut st);
         if rc < 0 {
             return (
-                FileInfo {
+                FileInfoData {
                     name: self.name.clone(),
                     size: 0,
-                    mode: 0,
+                    mode: FileMode(0),
                     mod_time: crate::time::Time::default(),
                     is_dir: false,
                 },
@@ -397,6 +469,8 @@ pub fn ReadFile<N: Into<string>>(name: N) -> (slice<byte>, error) {
     if !err.IsNil() {
         return (slice::<byte>::__from_vec(Vec::new()), err);
     }
+    // err is nil ⇒ Open returned a non-nil File. Narrow.
+    let f = f.MustMut();
     let (fi, ferr) = f.Stat();
     if !ferr.IsNil() {
         let _ = f.Close();
@@ -513,6 +587,67 @@ pub fn Environ() -> slice<string> {
         out.push(string::from_bytes(b));
     }
     slice::__from_vec(out)
+}
+
+/// `os.ExpandEnv(s)` (env.go:20) — replace `${var}` or `$var` in `s`
+/// using `os.Getenv`. Equivalent to `os.Expand(s, os.Getenv)`.
+pub fn ExpandEnv<S: Into<string>>(s: S) -> string {
+    Expand(s, Getenv)
+}
+
+/// `os.Expand(s, mapping)` (env.go:27) — replace `${var}` and `$var`
+/// in `s` by calling `mapping(var)` for each substitution. The
+/// `$$` escape is replaced by a single `$`. Slim port of Go's
+/// `os/env.go:Expand` — byte-only scan (matches Go's behaviour for
+/// ASCII variable names, which is the overwhelming real-world case).
+pub fn Expand<S: Into<string>, F: Fn(string) -> string>(s: S, mapping: F) -> string {
+    let s = s.into();
+    let b = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(b.len());
+    let mut i = 0usize;
+    while i < b.len() {
+        if b[i] != b'$' || i + 1 >= b.len() {
+            out.push(b[i]);
+            i += 1;
+            continue;
+        }
+        // b[i] == '$'
+        // Check for '$$' → single '$'.
+        if b[i + 1] == b'$' {
+            out.push(b'$');
+            i += 2;
+            continue;
+        }
+        // '${...}' form
+        if b[i + 1] == b'{' {
+            // Find matching '}'.
+            let mut j = i + 2;
+            while j < b.len() && b[j] != b'}' {
+                j += 1;
+            }
+            let var = string::from_bytes(&b[i + 2..j]);
+            let val = mapping(var);
+            out.extend_from_slice(val.as_bytes());
+            i = if j < b.len() { j + 1 } else { j };
+            continue;
+        }
+        // '$name' form — name is [a-zA-Z0-9_] run after '$'.
+        let mut j = i + 1;
+        while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+            j += 1;
+        }
+        if j == i + 1 {
+            // No name chars — emit literal '$'.
+            out.push(b'$');
+            i += 1;
+        } else {
+            let var = string::from_bytes(&b[i + 1..j]);
+            let val = mapping(var);
+            out.extend_from_slice(val.as_bytes());
+            i = j;
+        }
+    }
+    string::__from_vec(out)
 }
 
 /// Line-by-line port of `os.Clearenv()` (env.go:134) — delete every
@@ -673,15 +808,19 @@ pub fn Chdir<N: Into<string>>(name: N) -> error {
 /// Line-by-line port of `os.Chmod(name, mode)` (file.go:647 →
 /// file_posix.go:76 chmod). Slim: no PathError wrapping, no EINTR
 /// retry loop (chmod(2) is not interruptible on Linux in practice).
-pub fn Chmod<N: Into<string>>(name: N, mode: FileMode) -> error {
+///
+/// `mode: impl Into<FileMode>` so ports passing a bare integer
+/// literal (Go's untyped-int) flow through `From<i32>`/`From<u32>`.
+pub fn Chmod<N: Into<string>, M: Into<FileMode>>(name: N, mode: M) -> error {
     let name: string = name.into();
+    let mode: FileMode = mode.into();
     // Go: longName := fixLongPath(name) — Linux no-op.
     // Go: e := ignoringEINTR(func() error { return syscall.Chmod(longName, syscallMode(mode)) })
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
     buf.push(0);
     // syscallMode(mode) for slim FileMode collapses to perm bits only.
-    let rc = syscall::Chmod(buf.as_ptr(), mode & 0o7777);
+    let rc = syscall::Chmod(buf.as_ptr(), mode.0 & 0o7777);
     if rc < 0 {
         // Go: return &PathError{Op: "chmod", Path: name, Err: e}
         return errors::New(string("chmod failed"));
@@ -953,12 +1092,13 @@ pub fn Hostname() -> (string, error) {
 // ─── Mkdir / Remove ──────────────────────────────────────────────────
 
 /// `os.Mkdir(name, perm)` (os/file.go) — create a single directory.
-pub fn Mkdir<N: Into<string>>(name: N, perm: u32) -> error {
+pub fn Mkdir<N: Into<string>, M: Into<FileMode>>(name: N, perm: M) -> error {
     let name: string = name.into();
+    let perm: FileMode = perm.into();
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
     buf.push(0);
-    let rc = syscall::Mkdir(buf.as_ptr(), perm);
+    let rc = syscall::Mkdir(buf.as_ptr(), perm.0);
     if rc < 0 {
         return errors::New(string("mkdir failed"));
     }
@@ -968,8 +1108,9 @@ pub fn Mkdir<N: Into<string>>(name: N, perm: u32) -> error {
 /// `os.MkdirAll(path, perm)` (os/path.go:19) — create `path` and any
 /// missing parent directories. If `path` is already a directory,
 /// returns nil.
-pub fn MkdirAll<P: Into<string>>(path: P, perm: u32) -> error {
+pub fn MkdirAll<P: Into<string>, M: Into<FileMode>>(path: P, perm: M) -> error {
     let path: string = path.into();
+    let perm: FileMode = perm.into();
     // Go: dir, err := Stat(path); if err == nil { if dir.IsDir() { return nil }; return ... }
     let (dir, err) = Stat(path.clone());
     if err.IsNil() {
@@ -1065,41 +1206,84 @@ pub fn Remove<N: Into<string>>(name: N) -> error {
 
 // ─── DirEntry / ReadDir ──────────────────────────────────────────────
 
-/// `os.DirEntry` (Go 1.16, os/dir.go:85). Slim subset: just name +
-/// type bits. `Type()` returns the FileMode portion populated from the
-/// directory's `d_type` (see `getdents64(2)`).
-#[derive(Clone)]
-pub struct DirEntry {
-    pub Name_: string,
-    pub Type_: FileMode,
+/// `os.DirEntry` (os/dir.go:91) — type alias for [`io::fs::DirEntry`].
+///
+/// Go's `os.DirEntry` is an exact alias for the `fs.DirEntry`
+/// interface; the concrete OS-filesystem implementation is the
+/// unexported [`unixDirent`].
+pub use crate::io::fs::DirEntry;
+
+/// `os.unixDirent` (file_unix.go:446) — concrete `fs.DirEntry` over a
+/// `getdents64` record. Carries the parent directory path so `Info()`
+/// can `lstat` the entry on demand (Go's `unixDirent.Info`).
+#[allow(non_camel_case_types)]
+struct unixDirent {
+    /// Parent directory path (so `Info()` can build `parent + "/" + name`).
+    parent: string,
+    /// Base name of the entry.
+    name: string,
+    /// Type bits from the directory's `d_type`.
+    typ: FileMode,
 }
 
-impl DirEntry {
-    /// `e.Name()` (fs/fs.go) — base name of the directory entry.
-    pub fn Name(&self) -> string {
-        self.Name_.clone()
+// `io/fs::DirEntry` is a `#[goish::interface]` trait — the concrete
+// impl carries the transpiler-emitted boilerplate (`__goish_as_dyn_any`
+// returns `Some(self)`); registration is lazy via `register_os_fs_impls`.
+impl DirEntry for unixDirent {
+    // Go: func (d *unixDirent) Name() string { return d.name }
+    fn Name(&self) -> string {
+        self.name.clone()
     }
-    /// `e.IsDir()` — convenience for `Type().IsDir()`.
-    pub fn IsDir(&self) -> bool {
-        (self.Type_ & ModeDir) != 0
+    // Go: func (d *unixDirent) IsDir() bool { return d.typ.IsDir() }
+    fn IsDir(&self) -> bool {
+        self.typ.IsDir()
     }
-    /// `e.Type()` — entry mode bits (directory / symlink / etc.).
-    pub fn Type(&self) -> FileMode {
-        self.Type_
+    // Go: func (d *unixDirent) Type() FileMode { return d.typ }
+    fn Type(&self) -> FileMode {
+        self.typ
     }
+    // Go: func (d *unixDirent) Info() (FileInfo, error) {
+    //         return lstat(d.parent + "/" + d.name)
+    //     }
+    fn Info(&self) -> (alloc::sync::Arc<dyn FileInfo + Send + Sync>, error) {
+        let mut full = self.parent.clone();
+        full = full + string::from_static("/");
+        full = full + self.name.clone();
+        let (info, err) = Lstat(full);
+        if !err.IsNil() {
+            return (crate::nil.into(), err);
+        }
+        (alloc::sync::Arc::new(info), nil)
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
+    }
+}
+
+/// Register the `os` concrete `#[goish::interface]` impls into their
+/// per-trait downcast registries (so `goish::cast!` can find them).
+/// Idempotent and cheap; called at the head of `ReadDir`.
+fn register_os_fs_impls() {
+    crate::io::fs::__goish_register_FileInfo_impl::<FileInfoData>();
+    crate::io::fs::__goish_register_DirEntry_impl::<unixDirent>();
 }
 
 /// `os.ReadDir(name)` (os/dir.go:114) — read directory entries from
 /// `name`, returning them sorted by filename. Slim port: relies on
-/// the Linux `getdents64(2)` syscall and returns `(slice<DirEntry>,
-/// error)` per goish convention.
-pub fn ReadDir<N: Into<string>>(name: N) -> (slice<DirEntry>, error) {
+/// the Linux `getdents64(2)` syscall. Like Go, the return type is a
+/// slice of the `fs.DirEntry` interface.
+pub fn ReadDir<N: Into<string>>(
+    name: N,
+) -> (slice<alloc::sync::Arc<dyn DirEntry + Send + Sync>>, error) {
+    register_os_fs_impls();
     let name: string = name.into();
-    let (mut f, err) = Open(name);
+    let (mut f, err) = Open(name.clone());
     if !err.IsNil() {
-        return (slice::<DirEntry>::__from_vec(Vec::new()), err);
+        return (slice::new(), err);
     }
-    let mut entries: Vec<DirEntry> = Vec::new();
+    // err is nil ⇒ Open returned a non-nil File. Narrow.
+    let f = f.MustMut();
+    let mut entries: Vec<alloc::sync::Arc<dyn DirEntry + Send + Sync>> = Vec::new();
     // 4 KiB buffer matches the kernel's per-call output size sweet spot.
     let mut buf: alloc::vec::Vec<u8> = alloc::vec![0u8; 4096];
     loop {
@@ -1107,7 +1291,7 @@ pub fn ReadDir<N: Into<string>>(name: N) -> (slice<DirEntry>, error) {
         if n < 0 {
             let _ = f.Close();
             return (
-                slice::<DirEntry>::__from_vec(entries),
+                slice::__from_vec(entries),
                 errors::New(string("readdir failed")),
             );
         }
@@ -1138,10 +1322,13 @@ pub fn ReadDir<N: Into<string>>(name: N) -> (slice<DirEntry>, error) {
             // Skip "." and ".." per Go's behavior.
             if name_bytes != b"." && name_bytes != b".." {
                 let mode = mode_from_dtype(dtype);
-                entries.push(DirEntry {
-                    Name_: string::from_bytes(name_bytes),
-                    Type_: mode,
-                });
+                let ent: alloc::sync::Arc<dyn DirEntry + Send + Sync> =
+                    alloc::sync::Arc::new(unixDirent {
+                        parent: name.clone(),
+                        name: string::from_bytes(name_bytes),
+                        typ: mode,
+                    });
+                entries.push(ent);
             }
             if reclen == 0 {
                 break;
@@ -1151,12 +1338,8 @@ pub fn ReadDir<N: Into<string>>(name: N) -> (slice<DirEntry>, error) {
     }
     let _ = f.Close();
     // Sort by name (Go uses slices.SortFunc on Name).
-    entries.sort_by(|a, b| {
-        let ab = bytes_of(&a.Name_);
-        let bb = bytes_of(&b.Name_);
-        ab.cmp(bb)
-    });
-    (slice::<DirEntry>::__from_vec(entries), nil)
+    entries.sort_by(|a, b| a.Name().as_bytes().cmp(b.Name().as_bytes()));
+    (slice::__from_vec(entries), nil)
 }
 
 /// Map a `getdents64` `d_type` byte into the goish FileMode bits.
@@ -1164,25 +1347,163 @@ fn mode_from_dtype(dt: u8) -> FileMode {
     match dt {
         x if x == syscall::DT_DIR => ModeDir,
         x if x == syscall::DT_LNK => ModeSymlink,
-        _ => 0,
+        _ => FileMode(0),
     }
 }
 
 /// `os.WriteFile(name, data, perm)` (os/file.go:763) — write `data`
 /// to the named file, creating or truncating it.
-pub fn WriteFile<N: Into<string>>(name: N, data: slice<byte>, perm: u32) -> error {
+pub fn WriteFile<N: Into<string>, M: Into<FileMode>>(name: N, data: slice<byte>, perm: M) -> error {
     let name: string = name.into();
+    let perm: FileMode = perm.into();
     use crate::io::Writer;
     let (mut f, err) = OpenFile(name, O_WRONLY | O_CREATE | O_TRUNC, perm);
     if !err.IsNil() {
         return err;
     }
+    // err is nil ⇒ OpenFile returned a non-nil File. Narrow.
+    let f = f.MustMut();
     let (_, werr) = f.Write(data);
     let cerr = f.Close();
     if !werr.IsNil() {
         return werr;
     }
     cerr
+}
+
+// ─── MkdirTemp / CreateTemp (Go 1.16+) ──────────────────────────────────
+
+/// Append a decimal `u64` to a byte buffer.
+fn append_u64(buf: &mut Vec<u8>, mut n: u64) {
+    let mut digits = [0u8; 20];
+    let mut i = digits.len();
+    if n == 0 {
+        i -= 1;
+        digits[i] = b'0';
+    } else {
+        while n > 0 {
+            i -= 1;
+            digits[i] = b'0' + (n % 10) as u8;
+            n /= 10;
+        }
+    }
+    buf.extend_from_slice(&digits[i..]);
+}
+
+/// Build a unique path from `dir`, `pattern` (which may contain a `*`
+/// as the insertion point per Go's os.MkdirTemp convention), and a
+/// pseudo-random suffix.
+///
+/// Port of Go's `os.nextRandom()` (os/tempfile.go): the suffix is a
+/// 9-digit decimal number derived from an LCG seeded at first use from
+/// the monotonic clock. This survives a process restart where a leaked
+/// temp file from a previous run would otherwise collide with O_EXCL.
+fn temp_path(dir: &string, pattern: &string) -> string {
+    use core::sync::atomic::{AtomicU64, Ordering};
+    static STATE: AtomicU64 = AtomicU64::new(0);
+
+    // Lazy seed from the monotonic clock on first call. The split-mix
+    // constant gives a decent initial spread even when UnixNano() has
+    // low entropy at startup.
+    let mut s = STATE.load(Ordering::Relaxed);
+    if s == 0 {
+        let ns = crate::time::Now().UnixNano() as u64;
+        s = ns ^ 0x9E3779B97F4A7C15;
+        if s == 0 {
+            s = 0xDEADBEEFCAFEBABE;
+        }
+    }
+    // LCG step (constants from Knuth / Numerical Recipes 64-bit).
+    s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    STATE.store(s, Ordering::Relaxed);
+    // Take the top bits — they have higher quality than the low ones.
+    let n = (s >> 32) % 1_000_000_000;
+
+    let base = if dir.Len() == 0 { TempDir() } else { dir.clone() };
+    let pb = bytes_of(pattern);
+
+    // Find the last '*' in the pattern; if absent insert the number at the end.
+    let star = pb.iter().rposition(|&b| b == b'*');
+
+    let mut path: Vec<u8> = Vec::new();
+    path.extend_from_slice(bytes_of(&base));
+    if !path.ends_with(b"/") {
+        path.push(b'/');
+    }
+    match star {
+        Some(pos) => {
+            path.extend_from_slice(&pb[..pos]);
+            append_u64(&mut path, n);
+            path.extend_from_slice(&pb[pos + 1..]);
+        }
+        None => {
+            path.extend_from_slice(pb);
+            append_u64(&mut path, n);
+        }
+    }
+    string::from_bytes(&path)
+}
+
+/// `os.MkdirTemp(dir, pattern)` (os/tempfile.go:96, Go 1.16+) — create
+/// a new temporary directory. The directory name is generated by appending
+/// a pseudo-random numeric suffix to `pattern` (replacing `*` if
+/// present, appending otherwise). Returns `(path, nil)` on success.
+///
+/// Matches Go's retry-on-EEXIST behavior — up to 10000 attempts before
+/// surfacing the underlying error.
+pub fn MkdirTemp<S1: Into<string>, S2: Into<string>>(
+    dir: S1,
+    pattern: S2,
+) -> (string, error) {
+    let dir: string = dir.into();
+    let pattern: string = pattern.into();
+    let mut tries = 0;
+    loop {
+        let name = temp_path(&dir, &pattern);
+        let err = Mkdir(name.clone(), FileMode(0o700));
+        if err.IsNil() {
+            return (name, nil);
+        }
+        if !IsExist(err.clone()) {
+            return (string::new(), err);
+        }
+        tries += 1;
+        if tries >= 10000 {
+            return (string::new(), err);
+        }
+    }
+}
+
+/// `os.CreateTemp(dir, pattern)` (os/tempfile.go:20, Go 1.16+) — create
+/// a new temporary file. The filename is generated by appending a
+/// pseudo-random numeric suffix to `pattern` (replacing `*` if
+/// present, appending otherwise). The file is opened with `O_RDWR |
+/// O_CREATE | O_EXCL` and mode 0600. Returns `(file, nil)` on success.
+///
+/// Matches Go's retry-on-EEXIST behavior — up to 10000 attempts before
+/// surfacing the underlying error. The caller is responsible for
+/// closing and, if needed, removing the file.
+pub fn CreateTemp<S1: Into<string>, S2: Into<string>>(
+    dir: S1,
+    pattern: S2,
+) -> (nilable<File>, error) {
+    let dir: string = dir.into();
+    let pattern: string = pattern.into();
+    let mut tries = 0;
+    loop {
+        let name = temp_path(&dir, &pattern);
+        let (f, err) = OpenFile(name, O_RDWR | O_CREATE | O_EXCL, FileMode(0o600));
+        if err.IsNil() {
+            return (f, nil);
+        }
+        if !IsExist(err.clone()) {
+            return (f, err);
+        }
+        tries += 1;
+        if tries >= 10000 {
+            return (f, err);
+        }
+    }
 }
 
 /// Compute the base-name (last path component).
@@ -1204,9 +1525,24 @@ fn base_name(p: &string) -> string {
 /// Wraps an open file descriptor. `Stdin/Stdout/Stderr` return prebuilt
 /// `File`s for fd 0/1/2; future `Open`/`Create` will return Files for
 /// real filesystem opens.
+///
+/// Default + Clone are provided so `var f *os.File` in Go (lowered to
+/// `nilable<File>` / `File` slots in Goish) get sensible defaults
+/// without explicit handling. A default File is fd=-1 (a sentinel
+/// invalid fd matching `os.NewFile(-1, "")`); Clone shares the fd
+/// (POSIX dup2 semantics aren't enforced — Go's behavior is that
+/// two File values pointing at the same fd interact through OS-level
+/// locks).
+#[derive(Clone)]
 pub struct File {
     fd: i32,
     name: string,
+}
+
+impl Default for File {
+    fn default() -> Self {
+        File { fd: -1, name: string::from_static("") }
+    }
 }
 
 impl File {
@@ -1221,9 +1557,11 @@ impl File {
         }
     }
 
-    /// `f.Fd()` — raw fd as int.
-    pub fn Fd(&self) -> int {
-        self.fd as int
+    /// `f.Fd()` (os/file_unix.go:50) — raw fd as `uintptr`, matching
+    /// Go's signature. Cast to `int` at call sites that need the
+    /// signed-integer form (`syscall::Flock(int(f.Fd()), …)`).
+    pub fn Fd(&self) -> crate::types::uintptr {
+        self.fd as crate::types::uintptr
     }
 
     /// `f.Name()` — the name passed to NewFile (or "/dev/stdout" for stdio).
@@ -1305,6 +1643,63 @@ impl File {
             errors::New("truncate failed")
         } else {
             nil
+        }
+    }
+
+    /// `(*File).Chmod(mode)` (os/file_posix.go:106) — change the mode of
+    /// the underlying file. Inherent so callers don't need to import
+    /// any extra trait; the call shape matches Go exactly:
+    /// `f.Chmod(0o644)` or `f.Chmod(mode)` where mode is a FileMode.
+    ///
+    /// Takes `&self` rather than `&mut self` so transpiled call sites
+    /// that hold a `nilable<File>` via `t.Must()` (the immutable-cell
+    /// reach-in) work without requiring a `MustMut()` rewrite. The fd
+    /// is unchanged by `fchmod(2)`; no mutation is required to model
+    /// the syscall faithfully.
+    pub fn Chmod<M: Into<FileMode>>(&self, mode: M) -> error {
+        if self.fd < 0 {
+            return ErrClosed.into();
+        }
+        let mode: FileMode = mode.into();
+        let rc = syscall::Fchmod(self.fd, mode.0 & 0o7777);
+        if rc < 0 {
+            errors::New("fchmod failed")
+        } else {
+            nil
+        }
+    }
+
+    /// `(*File).Write(p)` (os/file.go:188) — inherent forwarder so
+    /// `f.Write(data)` works without `use goish::io::Writer;` at the
+    /// call site. Mirrors Go where `(*os.File).Write` is a concrete
+    /// method on the type (the io.Writer interface is satisfied
+    /// structurally, not by trait-method dispatch).
+    ///
+    /// Takes `&self` for the same reason as `Chmod`: lets transpiled
+    /// callers reach in through `t.Must().File.Write(data)` (immutable
+    /// cell access). The underlying syscall doesn't mutate the `File`
+    /// struct itself — only the kernel's file-offset table.
+    pub fn Write(&self, p: slice<byte>) -> (int, error) {
+        let n = syscall::Write(self.fd, p.as_ptr(), p.len());
+        if n < 0 {
+            (0, errors::New("write failed"))
+        } else {
+            (n as int, nil)
+        }
+    }
+
+    /// `(*File).Read(p)` (os/file.go:118) — inherent forwarder, see
+    /// the rationale on `Write` above.
+    pub fn Read(&self, p: &mut slice<byte>) -> (int, error) {
+        let len = p.len();
+        let ptr = p.as_mut_ptr();
+        let n = syscall::Read(self.fd, ptr, len);
+        if n < 0 {
+            (0, errors::New("read failed"))
+        } else if n == 0 {
+            (0, io::EOF.into())
+        } else {
+            (n as int, nil)
         }
     }
 }

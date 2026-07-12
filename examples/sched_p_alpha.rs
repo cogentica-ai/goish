@@ -19,7 +19,8 @@ extern crate alloc;
 use core::sync::atomic::{AtomicI32, Ordering};
 
 use goish::runtime::sched::{
-    acquirep, current_p, for_each_p, num_ps, p_at, registered_m_count, releasep, P_IDLE, P_RUNNING,
+    acquirem, acquirep, current_m, current_p, for_each_p, num_ps, p_at, registered_m_count,
+    releasem, releasep, P_IDLE, P_RUNNING,
 };
 use goish::syscall;
 
@@ -58,16 +59,30 @@ fn test_bootstrap_count() {
 }
 
 fn test_main_m_binding() {
-    let p = current_p().expect("main M has bound P");
-    check(p.id == 0, b"main M bound to P[0]\n");
+    // `main` runs on the main *goroutine* (Go-faithful), dispatched by
+    // whichever M dequeued it — not necessarily the main M / P[0]. The
+    // invariant is per-M: the M running this code is bound to *a* P,
+    // that P is RUNNING, and the P's bound M is this M. Pin the M
+    // (acquirem) so no preemption can migrate us between the reads.
+    acquirem();
+    let p = current_p().expect("dispatching M has bound P");
+    check(
+        usize::try_from(p.id).unwrap_or(usize::MAX) < num_ps(),
+        b"bound P id in range\n",
+    );
     check(
         p.status.load(Ordering::Acquire) == P_RUNNING,
-        b"main P status running\n",
+        b"bound P status running\n",
     );
-    check(p.bound_m().is_some(), b"main P has bound M\n");
+    let my_id = current_m().lock().id;
+    let bound_id = p.bound_m().expect("P has bound M").m.lock().id;
+    check(bound_id == my_id, b"P bound to the M running main\n");
+    releasem();
 }
 
 fn test_release_reacquire() {
+    // Mutates this M's P binding — pin the M for the duration.
+    acquirem();
     let p = current_p().expect("bound at start");
     let id = p.id;
     let released = releasep().expect("releasep returns bound P");
@@ -86,6 +101,7 @@ fn test_release_reacquire() {
         p2.status.load(Ordering::Acquire) == P_RUNNING,
         b"P running again\n",
     );
+    releasem();
 }
 
 fn test_per_p_binding() {

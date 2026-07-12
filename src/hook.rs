@@ -5,32 +5,43 @@
 // level `var X SomeInterface` that callers replace via a `Register`
 // function. Rust statics are immutable; making them mutable requires
 // interior mutability + Sync. Plus the value is a `dyn Trait` (un-
-// sized), so the cell needs to hold `Box<dyn Trait>` rather than the
-// trait directly. `Hook<T>` wraps that combination.
+// sized), so the cell needs to hold a heap pointer to the trait
+// object. `Hook<T>` wraps that combination.
+//
+// Storage shape — `Arc<T>`, not `Box<T>`. The proc-macro-emitted
+// `<T>Ref` newtype that is the canonical user-facing interface-value
+// shape ALSO wraps `Arc<dyn T + Send + Sync>`. Aligning the storage
+// shapes lets `tracer = t` lower as a single `tracer.set(t.0)` —
+// `t.0` is already the right Arc shape, no Box↔Arc conversion noise.
 //
 // Goishc emits package-level `var X UserInterface` as
-// `static X: Hook<dyn UserInterface + Send + Sync> = Hook::new();`
-// and rewrites every use site:
-//   `X = t`      → `X.set(Box::new(t))`
+// `goish::var! { pub iface X: T; }` (which expands to
+// `static X: Hook<dyn T + Send + Sync> = Hook::new();`) and rewrites
+// every use site:
+//   `X = t`      → `X.set(t.0)` where `t: <T>Ref`
+//   `X = nil`    → `X.clear()`
 //   `X == nil`   → `!X.is_set()`
 //   `X != nil`   → `X.is_set()`
-//   `X.M(args)`  → `X.call(|h| h.M(args))`
+//   `X.M(args)`  → resolves through the `impl T for Hook<dyn T>`
+//                   forwarding impl (`#[goish::interface]` emits this)
 //
-// The `call` form returns `Option<R>` so missing-hook is observable
-// without a panic. Free functions that wrap the call with a nil-check
-// can `.unwrap()` once they know the hook is set.
+// The forwarding impl gives shared `&T` access to the stored trait
+// object — adequate for Go interfaces with `&self` methods. Stateful
+// concrete types that need `&mut self` semantics wrap their state
+// in `Arc<Mutex<…>>` (the standard interior-mutability pattern) and
+// impl the trait on that wrapper.
 
 #![allow(non_snake_case)]
 
 extern crate alloc;
 
-use alloc::boxed::Box;
+use alloc::sync::Arc;
 
 use crate::runtime::spin::SpinLock;
 
 /// Package-level mutable trait pointer.
 pub struct Hook<T: ?Sized + Send + Sync + 'static> {
-    inner: SpinLock<Option<Box<T>>>,
+    inner: SpinLock<Option<Arc<T>>>,
 }
 
 impl<T: ?Sized + Send + Sync + 'static> Hook<T> {
@@ -42,7 +53,7 @@ impl<T: ?Sized + Send + Sync + 'static> Hook<T> {
     }
 
     /// Install or replace the hook value.
-    pub fn set(&self, t: Box<T>) {
+    pub fn set(&self, t: Arc<T>) {
         *self.inner.lock() = Some(t);
     }
 
@@ -56,11 +67,32 @@ impl<T: ?Sized + Send + Sync + 'static> Hook<T> {
         self.inner.lock().is_some()
     }
 
-    /// Run `f` with `&mut T` if a hook is installed, returning the
+    /// Run `f` with `&T` if a hook is installed, returning the
     /// result wrapped in `Some`. Returns `None` if no hook.
-    pub fn call<R>(&self, f: impl FnOnce(&mut T) -> R) -> Option<R> {
-        let mut g = self.inner.lock();
-        g.as_mut().map(|t| f(&mut **t))
+    ///
+    /// `&T` (not `&mut T`) — Arc storage gives shared access only.
+    /// Stateful interface impls wrap their state in `Arc<Mutex<…>>`.
+    pub fn call<R>(&self, f: impl FnOnce(&T) -> R) -> Option<R> {
+        let g = self.inner.lock();
+        g.as_ref().map(|t| f(&**t))
+    }
+
+    /// Run `f` with `&T` if a hook is installed; panic with the
+    /// supplied message otherwise. Used by `#[goish::interface]`-
+    /// generated forwarding impls so user code can call
+    /// `tracer.M(args)` directly without a `.call(...).unwrap()`
+    /// closure dance. The panic message mirrors Go's nil-method-
+    /// dispatch runtime error so debugging signal stays Go-shaped.
+    pub fn call_or_panic<R>(
+        &self,
+        nil_msg: &'static str,
+        f: impl FnOnce(&T) -> R,
+    ) -> R {
+        let g = self.inner.lock();
+        match g.as_ref() {
+            ::core::option::Option::Some(t) => f(&**t),
+            ::core::option::Option::None => ::core::panic!("{}", nil_msg),
+        }
     }
 }
 
@@ -70,8 +102,27 @@ impl<T: ?Sized + Send + Sync + 'static> Default for Hook<T> {
     }
 }
 
-// Per-trait `From<Nil> for Box<dyn T + Send + Sync>` impls live in each
-// trait's module (e.g. `net::http::RoundTripper`). The standard goish
-// pattern: any trait whose value can be `nil`-returned in Go gets the
-// triple in priority #5 plus a stub impl that panics if a method is
-// invoked through the nil sentinel. The boxed shape is the carrier.
+// `Hook<T> == nil` / `Hook<T> != nil` — Goish-faithful nil check on
+// interface vars. Both `Hook` and `Nil` are local to goish, so the
+// orphan rule allows the impls; goishc lowers Go's `tracer == nil`
+// directly without a special-case `is_set()` rewrite. Reverse-direction
+// impl mirrors `nil == tracer` ergonomics.
+impl<T: ?Sized + Send + Sync + 'static> ::core::cmp::PartialEq<crate::Nil> for Hook<T> {
+    #[inline]
+    fn eq(&self, _: &crate::Nil) -> bool {
+        !self.is_set()
+    }
+}
+
+impl<T: ?Sized + Send + Sync + 'static> ::core::cmp::PartialEq<Hook<T>> for crate::Nil {
+    #[inline]
+    fn eq(&self, h: &Hook<T>) -> bool {
+        !h.is_set()
+    }
+}
+
+// Per-trait `From<Nil> for Arc<dyn T + Send + Sync>` impls live in
+// each trait's module (e.g. `net::http::RoundTripper`). The standard
+// Goish pattern: any trait whose value can be `nil`-returned in Go
+// gets the triple in priority #5 plus a stub impl that panics if a
+// method is invoked through the nil sentinel.

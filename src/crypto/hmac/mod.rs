@@ -6,7 +6,7 @@
 // goish has no fips140 internal layer.
 //
 // Slim deviations:
-//   * Constructor takes `fn() -> Box<dyn Hash>` (a function pointer
+//   * Constructor takes `fn() -> Box<dyn Hash + Send + Sync>` (a function pointer
 //     yielding boxed `hash.Hash`) instead of Go's `func() hash.Hash`
 //     interface return. Each hash module exposes a `NewHash` boxed
 //     wrapper for this purpose:
@@ -45,13 +45,13 @@ pub struct HMAC {
     // Goish-only: stashed constructor — we need it inside `Sum(&self)`
     // to build a fresh outer hasher (since Box<dyn Hash> isn't Clone
     // and Sum's contract is non-mutating).
-    h_ctor: fn() -> Box<dyn Hash>,
+    h_ctor: fn() -> Box<dyn Hash + Send + Sync>,
 }
 
 /// `hmac.New(h, key)` (hmac.go:39) — new HMAC using `h()` as the
 /// underlying hash. `h` must produce a fresh `Hash` on each call.
 ///
-/// Goish-specific: `h` is `fn() -> Box<dyn Hash>` (a function pointer
+/// Goish-specific: `h` is `fn() -> Box<dyn Hash + Send + Sync>` (a function pointer
 /// returning a boxed Hash). Use the per-hash `NewHash` helper:
 ///
 /// ```ignore
@@ -59,7 +59,7 @@ pub struct HMAC {
 /// hmac::New(crypto::sha1::NewHash, key)
 /// hmac::New(crypto::md5::NewHash, key)
 /// ```
-pub fn New(h: fn() -> Box<dyn Hash>, key: slice<byte>) -> HMAC {
+pub fn New(h: fn() -> Box<dyn Hash + Send + Sync>, key: slice<byte>) -> HMAC {
     // Go: hm := &HMAC{keyLen: len(key)}
     // Go: hm.outer = h(); hm.inner = h()
     let mut inner = h();

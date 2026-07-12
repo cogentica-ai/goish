@@ -273,7 +273,7 @@ fn decode_program(
     let mut line: i64 = 1;
     let mut is_stmt = default_is_stmt != 0;
     let _ = is_stmt;
-    let mut end_sequence = false;
+    let end_sequence = false;
     let _ = end_sequence;
 
     while *off < end {
@@ -287,8 +287,8 @@ fn decode_program(
             let ext_op = read_u8(buf, off)?;
             match ext_op {
                 1 => {
-                    // DW_LNE_end_sequence
-                    end_sequence = true;
+                    // DW_LNE_end_sequence — Goish doesn't propagate this
+                    // flag downstream yet; reset row state per DWARF spec.
                     address = 0;
                     file = 1;
                     line = 1;

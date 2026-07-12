@@ -42,6 +42,7 @@ extern crate alloc;
 use crate::errors::{error, ErrorTrait};
 use crate::goslice::slice;
 use crate::gostring::string;
+use crate::math::big;
 use crate::strconv;
 use crate::strings;
 use crate::types::{byte, int};
@@ -728,6 +729,95 @@ pub fn ParseTagAndLength(bytes: slice<byte>, init_offset: int) -> (TagAndLength,
         }
     }
     (ret, offset, crate::errors::nil)
+}
+
+// ─── RawValue helpers (new — ParseRaw + ParseBigInt) ─────────────────
+
+/// `ParseRaw` — read one complete TLV element from the front of `data`.
+/// Returns `(element, rest, error)`. `element.Bytes` contains the value
+/// octets only (tag + length stripped). `element.FullBytes` contains
+/// the full original TLV encoding.
+pub fn ParseRaw(data: slice<byte>) -> (RawValue, slice<byte>, error) {
+    let empty_raw = RawValue {
+        Class: 0,
+        Tag: 0,
+        IsCompound: false,
+        Bytes: slice::__from_vec(alloc::vec::Vec::<byte>::new()),
+        FullBytes: slice::__from_vec(alloc::vec::Vec::<byte>::new()),
+    };
+    if data.Len() == 0 {
+        return (empty_raw, data.clone(), syntax("empty input to ParseRaw"));
+    }
+    let (tl, value_offset, err) = ParseTagAndLength(data.clone(), 0);
+    if !err.IsNil() {
+        return (empty_raw, data.clone(), err);
+    }
+    let total_len = value_offset + tl.length;
+    if total_len > data.Len() {
+        return (
+            empty_raw,
+            data.clone(),
+            syntax("data truncated in ParseRaw"),
+        );
+    }
+    // Bytes = data[value_offset .. total_len]
+    let mut vbytes: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(tl.length as usize);
+    let mut i: int = value_offset;
+    while i < total_len {
+        vbytes.push(data[i]);
+        i += 1;
+    }
+    // FullBytes = data[0 .. total_len]
+    let mut full: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(total_len as usize);
+    let mut j: int = 0;
+    while j < total_len {
+        full.push(data[j]);
+        j += 1;
+    }
+    // rest = data[total_len ..]
+    let rest_len = data.Len() - total_len;
+    let mut rest: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(rest_len as usize);
+    let mut k: int = total_len;
+    let n = data.Len();
+    while k < n {
+        rest.push(data[k]);
+        k += 1;
+    }
+    let rv = RawValue {
+        Class: tl.class,
+        Tag: tl.tag,
+        IsCompound: tl.isCompound,
+        Bytes: slice::__from_vec(vbytes),
+        FullBytes: slice::__from_vec(full),
+    };
+    (rv, slice::__from_vec(rest), crate::errors::nil)
+}
+
+/// `ParseBigInt` — decode a DER INTEGER value-bytes slice into a
+/// `math/big::Int`. Handles two's-complement sign extension.
+/// Input is the *value* bytes only (tag + length already stripped).
+pub fn ParseBigInt(data: slice<byte>) -> (big::Int, error) {
+    let err = CheckInteger(data.clone());
+    if !err.IsNil() {
+        return (big::Int::new(), err);
+    }
+    let n = data.Len();
+    // Negative if top bit set (two's-complement DER).
+    // For our use case (RSA key components) all values are positive, but
+    // DER integers may have a leading 0x00 to keep the sign bit clear.
+    // Strip the leading 0x00 padding byte if present.
+    // Use 0i64 (int) to index into the goish slice<byte>.
+    let start: int = if n > 0 && data[0i64] == 0x00 { 1 } else { 0 };
+    let stripped_len = n - start;
+    let mut buf: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(stripped_len as usize); // goishlint:ignore GOISH005
+    let mut i: int = start;
+    while i < n {
+        buf.push(data[i]);
+        i += 1;
+    }
+    let mut z = big::Int::new();
+    z.SetBytes(slice::__from_vec(buf));
+    (z, crate::errors::nil)
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────

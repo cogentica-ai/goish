@@ -39,6 +39,7 @@ pub mod punycode;
 /// Implementations must be safe for concurrent use by multiple goroutines.
 /// An implementation that always returns "" is valid for testing but
 /// not secure (it lets foo.com set cookies for bar.com).
+#[goish::interface]
 pub trait PublicSuffixList: Send + Sync {
     /// Public suffix of `domain` (e.g. "co.uk" of "foo.co.uk").
     fn PublicSuffix(&self, domain: string) -> string;
@@ -602,7 +603,7 @@ fn errMalformedDomain() -> error {
 
 // Go: var endOfTime = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 fn endOfTime() -> time::Time {
-    time::Date(9999, 12, 31, 23, 59, 59, 0)
+    time::Date(9999, 12, 31, 23, 59, 59, 0, time::UTC)
 }
 
 // ─── String helper (avoids extra alloc for fmt.Sprintf) ──────────────

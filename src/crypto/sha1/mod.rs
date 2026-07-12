@@ -326,6 +326,6 @@ pub fn Sum(data: slice<byte>) -> [byte; 20] {
 
 /// `sha1.NewHash()` — boxed constructor matching `hash.Hash` interface.
 /// Use with `hmac::New(crypto::sha1::NewHash, key)`.
-pub fn NewHash() -> alloc::boxed::Box<dyn Hash> {
+pub fn NewHash() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
     alloc::boxed::Box::new(New())
 }

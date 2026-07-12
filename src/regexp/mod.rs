@@ -111,6 +111,20 @@ enum Node {
     AnchorStart,
     /// `$` — text end (matches only at end-of-input).
     AnchorEnd,
+    /// Internal-only continuation marker. Never produced by the parser.
+    /// Pushed onto the continuation by the Group matcher so the captured
+    /// group's end offset is recorded at the point in the match where
+    /// the inner subexpression's success has been verified together with
+    /// any trailing pattern. Backtrackable: the prior end is restored if
+    /// the continuation tail fails after this marker.
+    EndGroup(usize),
+    /// Internal-only continuation marker. Pushed onto the continuation
+    /// by `match_repeat` when chaining successive reps in CPS form.
+    /// Carries `last_pos` — the position at which the most recent rep
+    /// began — so the next invocation can detect a zero-width match
+    /// (current pos == last_pos) and terminate the chain instead of
+    /// recursing forever.
+    RepeatTail { node: Box<Node>, min: usize, max: usize, last_pos: usize },
 }
 
 // ─── Parser ────────────────────────────────────────────────────────────
@@ -288,35 +302,81 @@ impl<'a> Parser<'a> {
                 _ => {}
             }
             first = false;
-            let lo = self.parse_class_atom()?;
-            // Range `a-b`?
-            if self.peek() == Some(b'-') {
-                // Peek ahead — `-` followed by `]` is a literal `-`.
-                if self.src.get(self.pos + 1) == Some(&b']') {
-                    ranges.push((lo, lo));
-                    continue;
+            let atom = self.parse_class_atom()?;
+            match atom {
+                ClassAtom::Expanded(sub_ranges) => {
+                    // \w, \d, \s etc. inside a class — merge their ranges in
+                    ranges.extend(sub_ranges);
                 }
-                self.bump();
-                let hi = self.parse_class_atom()?;
-                if hi < lo { return Err("invalid character range"); }
-                ranges.push((lo, hi));
-            } else {
-                ranges.push((lo, lo));
+                ClassAtom::Byte(lo) => {
+                    // Range `a-b`?
+                    if self.peek() == Some(b'-') {
+                        // Peek ahead — `-` followed by `]` is a literal `-`.
+                        if self.src.get(self.pos + 1) == Some(&b']') {
+                            ranges.push((lo, lo));
+                            continue;
+                        }
+                        self.bump();
+                        let hi_atom = self.parse_class_atom()?;
+                        let hi = match hi_atom {
+                            ClassAtom::Byte(b) => b,
+                            ClassAtom::Expanded(_) => return Err("invalid character range"),
+                        };
+                        if hi < lo { return Err("invalid character range"); }
+                        ranges.push((lo, hi));
+                    } else {
+                        ranges.push((lo, lo));
+                    }
+                }
             }
         }
         Ok(Node::Class { negate, ranges })
     }
 
-    /// Parse one atom inside `[...]`. Returns the byte (or expanded
-    /// shorthand class atoms folded into `ranges`).
-    fn parse_class_atom(&mut self) -> Result<byte, &'static str> {
+    /// Parse one atom inside `[...]`. Returns a `ClassAtom`:
+    /// - `Byte(b)` for a single byte (literal or simple escape)
+    /// - `Expanded(ranges)` for shorthand classes like `\w`, `\d`, `\s`
+    fn parse_class_atom(&mut self) -> Result<ClassAtom, &'static str> {
         let b = self.bump().ok_or("unterminated character class")?;
         if b == b'\\' {
             let nb = self.bump().ok_or("trailing backslash in class")?;
-            return Ok(escape_byte(nb));
+            match nb {
+                b'd' => return Ok(ClassAtom::Expanded(vec![(b'0', b'9')])),
+                b'D' => return Ok(ClassAtom::Expanded(vec![(0u8, b'0'-1), (b'9'+1, 255u8)])),
+                b'w' => return Ok(ClassAtom::Expanded(word_ranges())),
+                b'W' => {
+                    // complement of word_ranges: [^0-9A-Z_a-z]
+                    return Ok(ClassAtom::Expanded(vec![
+                        (0u8, b'0'-1),
+                        (b'9'+1, b'A'-1),
+                        (b'Z'+1, b'_'-1),
+                        (b'_'+1, b'a'-1),
+                        (b'z'+1, 255u8),
+                    ]));
+                }
+                b's' => return Ok(ClassAtom::Expanded(space_ranges())),
+                b'S' => {
+                    return Ok(ClassAtom::Expanded(vec![
+                        (0u8, b'\t'-1),
+                        (b'\t'+1, b'\n'-1),
+                        (b'\n'+1, b'\x0C'-1),
+                        (b'\x0C'+1, b'\r'-1),
+                        (b'\r'+1, b' '-1),
+                        (b' '+1, 255u8),
+                    ]));
+                }
+                _ => return Ok(ClassAtom::Byte(escape_byte(nb))),
+            }
         }
-        Ok(b)
+        Ok(ClassAtom::Byte(b))
     }
+}
+
+/// Atom returned from `parse_class_atom` — either a single byte or
+/// multiple expanded ranges (from `\w`, `\d`, `\s`).
+enum ClassAtom {
+    Byte(byte),
+    Expanded(Vec<(byte, byte)>),
 }
 
 /// Translate a `\X` escape OUTSIDE a class to a Node. Predefined classes
@@ -362,10 +422,20 @@ fn escape_byte(b: byte) -> byte {
 pub struct Regexp {
     root: Arc<Node>,
     n_caps: usize,
+    /// Original source pattern. Returned by `String()` (Go's
+    /// `regexp.Regexp.String() string`, regexp.go:142).
+    pattern: string,
 }
 
 impl Regexp {
     fn n_groups(&self) -> usize { self.n_caps + 1 }
+
+    /// `Regexp.String() string` — returns the source text of the
+    /// pattern. Mirrors Go's `regexp.Regexp.String()`.
+    #[allow(non_snake_case)]
+    pub fn String(&self) -> string {
+        self.pattern.clone()
+    }
 }
 
 // ─── Compile / MustCompile ─────────────────────────────────────────────
@@ -374,22 +444,49 @@ impl Regexp {
 /// Regexp + nil on success, or empty Regexp + error on parse failure.
 pub fn Compile<S: Into<string>>(expr: S) -> (Regexp, error) {
     let expr_s = expr.into();
+    if !crate::unicode::utf8::Valid(expr_s.as_bytes()) {
+        return (
+            Regexp { root: Arc::new(Node::Concat(Vec::new())), n_caps: 0, pattern: expr_s.clone() },
+            compile_err(&expr_s, "invalid UTF-8"),
+        );
+    }
     let mut p = Parser::new(expr_s.as_bytes());
     match p.parse_alt() {
         Ok(node) => {
             if p.pos != p.src.len() {
                 return (
-                    Regexp { root: Arc::new(Node::Concat(Vec::new())), n_caps: 0 },
+                    Regexp { root: Arc::new(Node::Concat(Vec::new())), n_caps: 0, pattern: expr_s.clone() },
                     compile_err(&expr_s, "trailing junk in pattern"),
                 );
             }
-            (Regexp { root: Arc::new(node), n_caps: p.next_cap - 1 }, crate::nilval::nil.into())
+            (Regexp { root: Arc::new(node), n_caps: p.next_cap - 1, pattern: expr_s }, crate::nilval::nil.into())
         }
         Err(why) => (
-            Regexp { root: Arc::new(Node::Concat(Vec::new())), n_caps: 0 },
+            Regexp { root: Arc::new(Node::Concat(Vec::new())), n_caps: 0, pattern: expr_s.clone() },
             compile_err(&expr_s, why),
         ),
     }
+}
+
+/// `regexp.Match(pattern, b) (matched bool, err error)` — one-shot
+/// compile + match. Mirrors Go's `regexp.Match` (regexp.go:472) so
+/// callers don't pre-compile when they only need a single check.
+pub fn Match<S: Into<string>, B: AsRef<[byte]>>(pattern: S, b: B) -> (bool, error) {
+    let (re, err) = Compile(pattern);
+    if err != crate::nilval::nil {
+        return (false, err);
+    }
+    // Reuse MatchString's logic via a byte-side helper. The pattern
+    // matches if find_first returns Some.
+    let matched = re.find_first(b.as_ref()).is_some();
+    (matched, crate::nilval::nil.into())
+}
+
+/// `regexp.MatchString(pattern, s) (matched bool, err error)` — same
+/// shape as `Match` but for `string` input.
+pub fn MatchString<S: Into<string>, S2: Into<string>>(pattern: S, s: S2) -> (bool, error) {
+    let s = s.into();
+    Match(pattern, s.as_bytes())
 }
 
 /// `regexp.MustCompile(expr)` — panics on parse error.
@@ -414,26 +511,63 @@ fn compile_err(expr: &string, why: &'static str) -> error {
 
 // ─── Backtracking matcher ──────────────────────────────────────────────
 //
-// `try_match(node, text, pos, caps)` returns Some(end_pos) on success
-// after recording any new captures into `caps`, or None on failure.
-// Captures are written/restored across backtracks via push/pop.
+// Continuation-passing backtracker. `try_match(node, …, cont)` returns
+// `Some(end_pos)` if `node` matches at `pos` AND the remaining pattern
+// (`cont`) succeeds from wherever `node` ends, otherwise `None`. The
+// continuation is a flat slice of `Node`s yet to be matched — each
+// `Node` is matched in order via `match_cont`. Captures are
+// written/restored across backtracks per-node.
+//
+// Why CPS, not local matching: an alternation branch that locally
+// matches but is followed by a failing tail must yield to the next
+// alternative. Local matching commits prematurely. By threading the
+// outer-pattern continuation into every branch, Alt iterates branches
+// against the same tail and only commits when the *whole* remaining
+// pattern succeeds. Mirrors Go's `regexp` (NFA simulator) and
+// `backtrack.go` semantics; see exec.go:339 InstAlt and
+// backtrack.go:171 InstAlt for the equivalent reference behaviour.
 
 type Capture = (i32, i32);   // (-1, -1) = unset
 
+/// Walk the continuation: if empty, the match has succeeded at `pos`;
+/// otherwise dispatch to the head item with the rest as its cont.
+fn match_cont(
+    text: &[u8],
+    pos: usize,
+    caps: &mut Vec<Capture>,
+    cont: &[Node],
+) -> Option<usize> {
+    if cont.is_empty() {
+        return Some(pos);
+    }
+    try_match(&cont[0], text, pos, caps, &cont[1..])
+}
+
 /// Match the whole node tree starting at `pos`. `caps` is a flat array
 /// indexed by capture slot (index 0 = whole match, 1..=n_caps = groups).
+/// `cont` is the rest of the surrounding pattern, threaded through so
+/// alternation and grouping can backtrack across concat boundaries.
 fn try_match(
     node: &Node,
     text: &[u8],
     pos: usize,
     caps: &mut Vec<Capture>,
+    cont: &[Node],
 ) -> Option<usize> {
     match node {
         Node::Literal(b) => {
-            if pos < text.len() && text[pos] == *b { Some(pos + 1) } else { None }
+            if pos < text.len() && text[pos] == *b {
+                match_cont(text, pos + 1, caps, cont)
+            } else {
+                None
+            }
         }
         Node::AnyByte => {
-            if pos < text.len() { Some(pos + 1) } else { None }
+            if pos < text.len() {
+                match_cont(text, pos + 1, caps, cont)
+            } else {
+                None
+            }
         }
         Node::Class { negate, ranges } => {
             if pos >= text.len() { return None; }
@@ -442,19 +576,37 @@ fn try_match(
             for &(lo, hi) in ranges {
                 if c >= lo && c <= hi { hit = true; break; }
             }
-            if hit ^ *negate { Some(pos + 1) } else { None }
+            if hit ^ *negate {
+                match_cont(text, pos + 1, caps, cont)
+            } else {
+                None
+            }
         }
         Node::AnchorStart => {
-            if pos == 0 { Some(pos) } else { None }
+            if pos == 0 { match_cont(text, pos, caps, cont) } else { None }
         }
         Node::AnchorEnd => {
-            if pos == text.len() { Some(pos) } else { None }
+            if pos == text.len() { match_cont(text, pos, caps, cont) } else { None }
         }
-        Node::Concat(items) => match_concat(items, 0, text, pos, caps),
+        Node::Concat(items) => {
+            if items.is_empty() {
+                return match_cont(text, pos, caps, cont);
+            }
+            // Splice items[1..] in front of the outer cont; first item
+            // is matched immediately with the spliced cont as its tail.
+            let mut new_cont: Vec<Node> = Vec::with_capacity(items.len() - 1 + cont.len());
+            new_cont.extend_from_slice(&items[1..]);
+            new_cont.extend_from_slice(cont);
+            try_match(&items[0], text, pos, caps, &new_cont)
+        }
         Node::Alt(branches) => {
+            // Try each branch against the SAME outer cont so a branch
+            // that locally matches but fails downstream yields to the
+            // next branch. This is the fix for the alternation /
+            // concat-boundary backtracking gap.
             for b in branches {
                 let saved = caps.clone();
-                if let Some(end) = try_match(b, text, pos, caps) {
+                if let Some(end) = try_match(b, text, pos, caps, cont) {
                     return Some(end);
                 }
                 *caps = saved;
@@ -464,45 +616,51 @@ fn try_match(
         Node::Group { idx, inner } => {
             let prev = caps[*idx];
             caps[*idx] = (pos as i32, -1);
-            match try_match(inner, text, pos, caps) {
-                Some(end) => {
-                    caps[*idx] = (pos as i32, end as i32);
-                    Some(end)
-                }
+            // Insert EndGroup marker between the inner subexpression
+            // and the outer cont. The marker sets caps[idx].1 when
+            // reached and is reverted on tail failure.
+            let mut new_cont: Vec<Node> = Vec::with_capacity(1 + cont.len());
+            new_cont.push(Node::EndGroup(*idx));
+            new_cont.extend_from_slice(cont);
+            match try_match(inner, text, pos, caps, &new_cont) {
+                Some(end) => Some(end),
                 None => {
                     caps[*idx] = prev;
                     None
                 }
             }
         }
-        Node::NonCap(inner) => try_match(inner, text, pos, caps),
-        Node::Repeat { node, min, max } => match_repeat(node, *min, *max, text, pos, caps, &Node::Concat(Vec::new())),
+        Node::NonCap(inner) => try_match(inner, text, pos, caps, cont),
+        Node::Repeat { node, min, max } => {
+            match_repeat(node, *min, *max, text, pos, caps, cont, None)
+        }
+        Node::RepeatTail { node, min, max, last_pos } => {
+            match_repeat(node, *min, *max, text, pos, caps, cont, Some(*last_pos))
+        }
+        Node::EndGroup(idx) => {
+            let prev_end = caps[*idx].1;
+            caps[*idx].1 = pos as i32;
+            match match_cont(text, pos, caps, cont) {
+                Some(end) => Some(end),
+                None => {
+                    caps[*idx].1 = prev_end;
+                    None
+                }
+            }
+        }
     }
 }
 
-/// Match a concat starting at item index `i`. Recurses down so that
-/// quantifier inside Concat can pass the tail (the "rest of the
-/// concatenation") to match_repeat for proper greedy backtracking.
-fn match_concat(
-    items: &[Node],
-    i: usize,
-    text: &[u8],
-    pos: usize,
-    caps: &mut Vec<Capture>,
-) -> Option<usize> {
-    if i >= items.len() { return Some(pos); }
-    // Special-case Repeat so we can pass the tail context.
-    if let Node::Repeat { node, min, max } = &items[i] {
-        let tail_concat = Node::Concat(items[i+1..].to_vec());
-        return match_repeat(node, *min, *max, text, pos, caps, &tail_concat);
-    }
-    let end = try_match(&items[i], text, pos, caps)?;
-    match_concat(items, i + 1, text, end, caps)
-}
-
-/// Greedy `node{min,max}` followed by `tail`. Tries the longest
-/// possible match of `node` first, then backtracks one repetition at a
-/// time until `tail` also succeeds.
+/// Greedy `node{min,max}` followed by `cont`, CPS-style. Each rep
+/// attempts to match `node` against the continuation
+/// `[RepeatTail{...}, ...cont]`, so Alt and Group choices inside
+/// `node` can backtrack across rep counts AND across the outer
+/// continuation. On rep failure, falls back to "zero reps from here"
+/// when `min` is already satisfied. `prev_pos` is `Some(start_of_last_rep)`
+/// when re-entered via `RepeatTail` — equal-to-current-pos means the
+/// previous rep was zero-width, so the chain stops to avoid infinite
+/// recursion (mirrors Go's behavior on zero-width quantifiers; see
+/// `regexp/exec.go` InstAlt / NFA simulator).
 fn match_repeat(
     node: &Node,
     min: usize,
@@ -510,47 +668,38 @@ fn match_repeat(
     text: &[u8],
     pos: usize,
     caps: &mut Vec<Capture>,
-    tail: &Node,
+    cont: &[Node],
+    prev_pos: Option<usize>,
 ) -> Option<usize> {
-    // Eagerly consume up to `max` matches; record (caps_snapshot, end_pos)
-    // after each so we can backtrack.
-    let mut snapshots: Vec<(Vec<Capture>, usize)> = Vec::new();
-    snapshots.push((caps.clone(), pos));
-    let mut cur = pos;
-    let mut count = 0usize;
-    while count < max {
-        let saved = caps.clone();
-        match try_match(node, text, cur, caps) {
-            Some(end) if end > cur => {
-                cur = end;
-                count += 1;
-                snapshots.push((caps.clone(), cur));
-            }
-            Some(_) => {
-                // Zero-width — Go's regex would loop forever; stop.
-                *caps = saved;
-                break;
-            }
-            None => {
-                *caps = saved;
-                break;
-            }
+    if let Some(p) = prev_pos {
+        if pos == p {
+            return match_cont(text, pos, caps, cont);
         }
     }
-    // Backtrack from longest to shortest, accepting first that lets
-    // `tail` match too. Each iteration restores caps to that frame.
-    while snapshots.len() > min {
-        let (cap_snap, end_pos) = snapshots.last().unwrap().clone();
-        *caps = cap_snap;
-        if let Some(final_end) = try_match(tail, text, end_pos, caps) {
-            return Some(final_end);
-        }
-        snapshots.pop();
+    if max == 0 {
+        return match_cont(text, pos, caps, cont);
     }
-    if snapshots.len() == min + 1 {
-        let (cap_snap, end_pos) = snapshots.last().unwrap().clone();
-        *caps = cap_snap;
-        return try_match(tail, text, end_pos, caps);
+
+    let next_min = if min == 0 { 0 } else { min - 1 };
+    let next_max = if max == usize::MAX { usize::MAX } else { max - 1 };
+
+    let mut rep_cont: Vec<Node> = Vec::with_capacity(1 + cont.len());
+    rep_cont.push(Node::RepeatTail {
+        node: Box::new((*node).clone()),
+        min: next_min,
+        max: next_max,
+        last_pos: pos,
+    });
+    rep_cont.extend_from_slice(cont);
+
+    let saved = caps.clone();
+    if let Some(end) = try_match(node, text, pos, caps, &rep_cont) {
+        return Some(end);
+    }
+    *caps = saved;
+
+    if min == 0 {
+        return match_cont(text, pos, caps, cont);
     }
     None
 }
@@ -564,7 +713,7 @@ impl Regexp {
     fn match_at(&self, text: &[u8], pos: usize) -> Option<(usize, Vec<Capture>)> {
         let mut caps: Vec<Capture> = vec![(-1, -1); self.n_groups()];
         caps[0] = (pos as i32, -1);
-        let end = try_match(&self.root, text, pos, &mut caps)?;
+        let end = try_match(&self.root, text, pos, &mut caps, &[])?;
         caps[0] = (pos as i32, end as i32);
         Some((end, caps))
     }

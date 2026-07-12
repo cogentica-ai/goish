@@ -21,6 +21,14 @@ extern crate proc_macro;
 
 use proc_macro::{Delimiter, TokenStream, TokenTree};
 use std::fmt::Write as _;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Per-process counter for unique symbol names emitted by `import!`.
+/// Each invocation gets a fresh integer, used to disambiguate the
+/// `__goish_import_<N>` function and `__GOISH_IMPORT_<N>` static slot
+/// within a single crate's symbol table. Collisions across crates
+/// are impossible — they each have their own object file.
+static IMPORT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[proc_macro_attribute]
 pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -57,6 +65,18 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
     //    The signature is built as raw text; the body is appended as the
     //    original TokenTree::Group so all literals (including non-ASCII)
     //    are preserved verbatim.
+    //
+    //    Go's `runtime.main` calls `doInit(runtime_inittasks)` and
+    //    walks per-module init lists BEFORE the user `main` body
+    //    (proc.go:202, :255-7). We do the equivalent by prepending
+    //    `::goish::init()` — the state machine inside makes the call
+    //    idempotent so any port whose own `init()` already invokes it
+    //    pays nothing on the second pass.
+    //
+    //    Port-specific init still needs an explicit call at the top
+    //    of the user's main body — Cargo dependency graphs aren't
+    //    available at proc-macro expansion time, and the goish runtime
+    //    has no linker-driven `firstmoduledata` walk equivalent.
     let prefix: TokenStream = r#"
         #[no_mangle]
         pub extern "C" fn __goish_main()
@@ -64,11 +84,133 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
     .parse()
     .expect("goish::main: invalid fn prefix");
 
-    let body_stream: TokenStream = TokenTree::Group(body).into();
+    // Splice the init prelude as the first statements of the user
+    // body. Order:
+    //
+    //   1. `::goish::init()` — bootstrap goish-stdlib state
+    //      (crypto registry etc.). Idempotent via PkgInit.
+    //
+    //   2. `::goish::__run_pkg_inits()` — walk the `.init_array`
+    //      section so each `goish::import! { … }` block's port
+    //      `init()` runs. Mirrors Go's per-package init walk before
+    //      `main` (proc.go:202, :255-7).
+    //
+    // We rebuild the brace group rather than doing string surgery so
+    // any non-ASCII tokens inside body stay untouched.
+    let init_call: TokenStream = r#"
+        { ::goish::init(); ::goish::__run_pkg_inits(); }
+    "#
+    .parse()
+    .expect("goish::main: invalid init prelude");
+
+    let body_with_init = {
+        let mut inner = init_call.into_iter().collect::<Vec<_>>();
+        // The single brace group emitted by `{ ::goish::init(); }`.
+        let prelude_stream = match inner.pop().expect("init prelude empty") {
+            TokenTree::Group(g) if g.delimiter() == Delimiter::Brace => g.stream(),
+            _ => panic!("goish::main: init prelude not a brace group"),
+        };
+        let mut combined = prelude_stream;
+        combined.extend(body.stream());
+        proc_macro::Group::new(Delimiter::Brace, combined)
+    };
+
+    let body_stream: TokenStream = TokenTree::Group(body_with_init).into();
 
     let mut out = asm;
     out.extend(prefix);
     out.extend(body_stream);
+    out
+}
+
+// ─── #[goish::init] — package-level init wrapper ─────────────────────
+//
+// Decorates a port's `fn init() { … }` to wrap the body in the
+// `PkgInit::run_once` state machine. Mirrors Go's per-package init
+// task — see `goish::runtime::pkginit`.
+//
+// User writes:
+//
+//   #[goish::init]
+//   fn init() {
+//       goish::init();           // bootstrap deps
+//       RegisterAlgorithm(…);    // package-level state setup
+//   }
+//
+// Expands to:
+//
+//   pub fn init() {
+//       static __PKG_INIT: ::goish::runtime::pkginit::PkgInit =
+//           ::goish::runtime::pkginit::PkgInit::new(env!("CARGO_PKG_NAME"));
+//       __PKG_INIT.run_once(|| { /* original body, verbatim */ });
+//   }
+//
+// `env!("CARGO_PKG_NAME")` is a `&'static str` literal at compile
+// time, which `PkgInit::new` (a `const fn`) accepts as a static
+// initializer. The static slot is private to the function — Rust's
+// fn-local-static feature gives it the lifetime of the binary while
+// keeping the name out of the public API surface.
+//
+// Token-level body splicing (rather than stringification) preserves
+// non-ASCII char literals and any other source detail, exactly like
+// `#[goish::main]` already does.
+#[proc_macro_attribute]
+pub fn init(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let mut tokens: Vec<TokenTree> = item.into_iter().collect();
+    let body = match tokens.pop() {
+        Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => g,
+        _ => panic!("#[goish::init] must be placed on `fn init() {{ ... }}`"),
+    };
+
+    // Discard the original signature tokens — we rebuild the prefix.
+    // We don't validate the discarded tokens: the proc-macro is
+    // documented as "place on `fn init() { … }`", and a malformed
+    // signature surfaces as a clear error from rustc on the rebuilt
+    // form.
+
+    // `.parse()` rejects unbalanced fragments — every level of
+    // delimiter must be opened and closed within the same string.
+    // Build the output bottom-up: closure body → closure expr →
+    // call's parenthesised arg → fn body braces → outer signature.
+
+    // Closure literal: `|| { user_body }`. The two pipes are
+    // separate Punct tokens; `body` is the user's brace Group.
+    use proc_macro::{Group, Punct, Spacing};
+    let mut closure_inner: TokenStream = TokenStream::new();
+    closure_inner.extend(core::iter::once(TokenTree::Punct(Punct::new('|', Spacing::Joint))));
+    closure_inner.extend(core::iter::once(TokenTree::Punct(Punct::new('|', Spacing::Alone))));
+    closure_inner.extend(core::iter::once(TokenTree::Group(body)));
+
+    // Wrap closure in `( … )` for the run_once call argument.
+    let arg_paren: TokenTree =
+        TokenTree::Group(Group::new(Delimiter::Parenthesis, closure_inner));
+
+    // Inner fn body prelude. Balanced — declares the static, then
+    // names the run_once method (we append the parenthesised arg
+    // and a trailing semicolon next).
+    let inner_prefix: TokenStream = r#"
+        static __PKG_INIT: ::goish::runtime::pkginit::PkgInit =
+            ::goish::runtime::pkginit::PkgInit::new(env!("CARGO_PKG_NAME"));
+        __PKG_INIT.run_once
+    "#
+    .parse()
+    .expect("goish::init: invalid inner prelude");
+
+    let semi: TokenStream = ";".parse().expect("goish::init: missing semi");
+
+    let mut inner: TokenStream = inner_prefix;
+    inner.extend(core::iter::once(arg_paren));
+    inner.extend(semi);
+
+    // Outer signature, then fn body Group(Brace, inner).
+    let outer_sig: TokenStream = "pub fn init()"
+        .parse()
+        .expect("goish::init: invalid outer signature");
+
+    let fn_body = TokenTree::Group(Group::new(Delimiter::Brace, inner));
+
+    let mut out = outer_sig;
+    out.extend(core::iter::once(fn_body));
     out
 }
 
@@ -158,7 +300,7 @@ pub fn var_emit_error_marker(input: TokenStream) -> TokenStream {
     let src = format!(
         r#"
         #[doc(hidden)]
-        #[derive(::core::marker::Copy, ::core::clone::Clone)]
+        #[derive(::core::marker::Copy, ::core::clone::Clone, ::core::fmt::Debug)]
         {vis}struct {marker};
 
         #[allow(non_upper_case_globals)]
@@ -675,4 +817,1125 @@ fn parse_fields(body: TokenStream) -> Vec<ParsedField> {
     }
 
     fields
+}
+
+// ─── goish::import! { … } — file-scope side-effect import ────────────
+//
+// Mirrors Go's `import _ "pkg/path"` — pull in a port, run its
+// `init()` before main, and (unlike Go's blank import) also bring
+// the path into scope so user code can reference it.
+//
+// User writes at file scope:
+//
+//   goish::import! {
+//       opencontainers_go_digest as digest,
+//       cenkalti_backoff_v5,
+//   }
+//
+// The macro emits:
+//
+//   1. `use` lines so `digest::FromBytes(...)` resolves at call sites.
+//
+//   2. An `extern "C" fn __goish_import_<N>()` whose body calls
+//      `<path>::init()` for each listed port (in declaration order).
+//
+//   3. A `#[used] #[link_section = ".init_array"]` static function
+//      pointer to that fn. The linker concatenates `.init_array`
+//      sections from every translation unit; goish's `__goish_main`
+//      prelude walks the section before user code runs.
+//
+// Each invocation gets a unique `<N>` from a per-process counter, so
+// multiple `import!` blocks across files don't collide. Different
+// crates each have their own counter (per-process state in the proc-
+// macro driver), but their object files have separate symbol tables
+// regardless, so no inter-crate collision either.
+//
+// Path forms:
+//
+//   - `crate_name`               — `use crate_name; crate_name::init();`
+//   - `crate_name as alias`      — `use crate_name as alias; crate_name::init();`
+//   - `foo::bar`                 — `use foo::bar; foo::bar::init();`
+//   - `foo::bar as baz`          — `use foo::bar as baz; foo::bar::init();`
+//
+// The init call always uses the original path, never the alias —
+// which matches Go's `import _ "pkg/path"` (no alias, just side
+// effect) combined with the named-import case `import alias "pkg"`.
+#[proc_macro]
+pub fn import(input: TokenStream) -> TokenStream {
+    let entries = parse_imports(input);
+
+    let n = IMPORT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let fn_name = format!("__goish_import_{}", n);
+    let slot_name = format!("__GOISH_IMPORT_{}", n);
+
+    let mut out = String::new();
+
+    // Step 1: emit `use` lines.
+    for e in &entries {
+        if let Some(alias) = &e.alias {
+            let _ = writeln!(out, "#[allow(unused_imports)] use {} as {};", e.path, alias);
+        } else {
+            let _ = writeln!(out, "#[allow(unused_imports)] use {};", e.path);
+        }
+    }
+
+    // Step 2: the init dispatcher fn. extern "C" so the .init_array
+    // entry's function-pointer type matches the C ABI used by libc
+    // and by goish's rt0 walk.
+    let _ = writeln!(out, "extern \"C\" fn {}() {{", fn_name);
+    for e in &entries {
+        let _ = writeln!(out, "    {}::init();", e.path);
+    }
+    let _ = writeln!(out, "}}");
+
+    // Step 3: register the dispatcher in `.init_array`. The `#[used]`
+    // attribute keeps the linker from stripping the static; the
+    // `#[link_section = ".init_array"]` puts the fn pointer where
+    // goish's __run_pkg_inits walk will find it.
+    //
+    // `#[allow(non_upper_case_globals)]` — the auto-generated name
+    // is conventionally formatted, not user-visible.
+    let _ = writeln!(out, "#[used]");
+    let _ = writeln!(out, "#[allow(non_upper_case_globals)]");
+    let _ = writeln!(out, "#[link_section = \".init_array\"]");
+    let _ = writeln!(
+        out,
+        "static {}: extern \"C\" fn() = {};",
+        slot_name, fn_name
+    );
+
+    out.parse().expect("goish::import: emitted source failed to parse")
+}
+
+// `(path, alias?)` — one entry per comma-separated item in the
+// `import!` argument list.
+struct ImportEntry {
+    path: String,
+    alias: Option<String>,
+}
+
+fn parse_imports(input: TokenStream) -> Vec<ImportEntry> {
+    let tokens: Vec<TokenTree> = input.into_iter().collect();
+    let mut iter = tokens.into_iter().peekable();
+    let mut out = Vec::new();
+
+    while iter.peek().is_some() {
+        // Path: ident (:: ident)*. We greedy-consume idents and `::`
+        // pairs until we hit `as`, `,`, or end.
+        let mut path = String::new();
+        let mut after_segment = false;
+        loop {
+            match iter.peek() {
+                Some(TokenTree::Ident(id)) => {
+                    let s = id.to_string();
+                    if after_segment && s == "as" {
+                        break;
+                    }
+                    path.push_str(&s);
+                    iter.next();
+                    after_segment = true;
+                }
+                Some(TokenTree::Punct(p)) if p.as_char() == ':' => {
+                    // Expect `::` — two consecutive ':' Punct tokens.
+                    iter.next();
+                    match iter.peek() {
+                        Some(TokenTree::Punct(p2)) if p2.as_char() == ':' => {
+                            iter.next();
+                            path.push_str("::");
+                            after_segment = false;
+                        }
+                        other => panic!(
+                            "goish::import: expected `::` after `:`, got {:?}",
+                            other
+                        ),
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        if path.is_empty() {
+            panic!("goish::import: expected an import path");
+        }
+
+        // Optional `as <alias>`.
+        let alias = if let Some(TokenTree::Ident(id)) = iter.peek() {
+            if id.to_string() == "as" {
+                iter.next();
+                match iter.next() {
+                    Some(TokenTree::Ident(a)) => Some(a.to_string()),
+                    other => panic!(
+                        "goish::import: expected alias ident after `as`, got {:?}",
+                        other
+                    ),
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        out.push(ImportEntry { path, alias });
+
+        // Optional comma between entries; trailing comma allowed.
+        match iter.peek() {
+            Some(TokenTree::Punct(p)) if p.as_char() == ',' => {
+                iter.next();
+            }
+            None => {}
+            other => panic!("goish::import: expected `,` or end, got {:?}", other),
+        }
+    }
+
+    out
+}
+
+// ─── #[goish::interface] — Go-faithful interface declaration ─────────
+//
+// Decorate a trait declaration to give it Go-interface semantics:
+//
+//   1. `: Send + Sync` supertraits — every Goish iface value flows
+//      across goroutines.
+//   2. Hidden default-method `__is_nil_iface(&self) -> bool` returning
+//      `false`. Concrete impls inherit the default unchanged.
+//   3. A `__NilT` ZST whose every method panics with a clear
+//      "method call on nil T interface" message and whose
+//      `__is_nil_iface` returns `true`.
+//   4. `Default for Arc<dyn T + Send + Sync>` returning the sentinel —
+//      gives Go's `var x T` zero-value semantics. Cascades into
+//      `..Default::default()` working on structs that have an
+//      interface-typed field.
+//   5. `PartialEq<goish::Nil>` (both directions) on
+//      `Arc<dyn T + Send + Sync>` — implements Go's `if r == nil`
+//      check by dispatching through `__is_nil_iface`.
+//
+// User pattern:
+//
+//   #[goish::interface]
+//   pub trait Reader {
+//       fn Read(&self, p: slice<byte>) -> (int, error);
+//   }
+//
+//   impl Reader for MyFile {
+//       fn Read(&self, p: slice<byte>) -> (int, error) { … }
+//   }
+//
+//   pub struct Conn {
+//       pub reader: alloc::sync::Arc<dyn Reader + Send + Sync>,
+//       // #[derive(Default)] now compiles — was broken without the
+//       // attribute because dyn Reader had no Default.
+//   }
+//
+// Token-level parser (no syn/quote, matching the rest of this crate's
+// posture). Method signatures are reproduced verbatim from the trait
+// declaration into the sentinel impl, with each `;` swapped for
+// `{ panic!(…) }`.
+//
+// Limitations:
+//   * Trait must NOT have generics on the trait itself (Go interfaces
+//     don't either; emit error if encountered).
+//   * Methods must be `;`-terminated signatures, no default bodies
+//     (also matches Go interface declarations exactly).
+//   * Each method's signature is captured as raw token text and
+//     re-emitted; complex generic / where-clause shapes round-trip
+//     through `TokenStream::to_string()`.
+/// Returns true when the supertrait clause contains ONLY `Send`/`Sync`
+/// marker traits (or is empty). Returns false when any non-marker
+/// supertrait is present — that means the trait is "composite" and we
+/// cannot safely auto-emit a nil sentinel struct that impls all the
+/// foreign supertraits.
+///
+/// Recognized trivial tokens (case-sensitive):
+///   `Send`, `Sync`,
+///   `::core::marker::Send`, `::core::marker::Sync`,
+///   `core::marker::Send`, `core::marker::Sync`
+///
+/// Any other segment — even `io::Writer` or `metav1::Object` — is
+/// composite.
+fn supertraits_are_trivial(supertraits: &str) -> bool {
+    // Strip leading `: ` that parse_iface may have retained.
+    let s = supertraits.trim_start_matches(':').trim();
+    if s.is_empty() {
+        return true;
+    }
+    s.split('+').map(|x| x.trim()).all(|x| {
+        matches!(
+            x,
+            "Send"
+                | "Sync"
+                | "::core::marker::Send"
+                | "::core::marker::Sync"
+                | "core::marker::Send"
+                | "core::marker::Sync"
+        )
+    })
+}
+
+#[proc_macro_attribute]
+pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let parsed = parse_iface(item);
+    let name = &parsed.name;
+    let nil_name = format!("__Nil{}", name);
+    let vis = parsed.vis.as_deref().unwrap_or("");
+
+    // Determine whether the supertrait clause is trivial (only
+    // Send/Sync markers) or composite (includes foreign traits like
+    // `metav1::Object`). Composite → skip nil sentinel sections.
+    let composite = !supertraits_are_trivial(&parsed.supertraits);
+
+    // Compose the supertrait clause. We always require `Send + Sync`
+    // (every Goish iface flows across goroutines); pre-existing
+    // user supertraits (like `: io::Writer` for hash::Hash) are
+    // preserved by token-capturing them in parse_iface. Rust accepts
+    // duplicate trait bounds without warnings, so over-specifying is
+    // harmless if the user already wrote `: Send + Sync`.
+    //
+    // Note: we don't add `core::any::Any` as a supertrait — Any
+    // requires `Self: 'static`, which would break common forwarding
+    // impls like `impl<R: Reader + ?Sized> Reader for &mut R` where
+    // the borrow lifetime is shorter than 'static. Trait-borrow
+    // downcast (TRAIT-BORROW-DOWNCAST) instead routes through the
+    // per-trait `__as_dyn_any` method that we add below.
+    let supertraits = if parsed.supertraits.is_empty() {
+        String::from(": ::core::marker::Send + ::core::marker::Sync")
+    } else {
+        // parsed.supertraits starts with the leading `:` token.
+        format!(
+            "{} + ::core::marker::Send + ::core::marker::Sync",
+            parsed.supertraits
+        )
+    };
+
+    let mut out = String::new();
+
+    // ── (1) Trait redeclaration with supertraits + hidden helper ───
+    //
+    // `__is_nil_iface` is a default method on the trait itself (NOT a
+    // separate supertrait) so concrete impls inherit `false` for free
+    // and the nil sentinel overrides to `true`.
+    //
+    // `__GOISH_HAS_NIL_SENTINEL` is a doc-hidden associated const
+    // that records whether this trait has a nil sentinel at compile
+    // time. Trivial supertraits → true; composite → false. The
+    // `cast!` macro reads this via `__HasNilSentinel` and produces a
+    // clear compile error for composite-trait callers.
+    let has_sentinel_val = if composite { "false" } else { "true" };
+    let _ = writeln!(
+        out,
+        "{vis} trait {name}{supertraits} {{"
+    );
+    for m in &parsed.methods {
+        let _ = writeln!(out, "    {}", m.full_text);
+    }
+    out.push_str("    #[doc(hidden)]\n");
+    out.push_str("    fn __is_nil_iface(&self) -> bool { false }\n");
+    // `__goish_as_dyn_any` exposes a `&dyn Any` view for trait-borrow
+    // downcast (TRAIT-BORROW-DOWNCAST). Default body returns None —
+    // forwarding impls and the nil sentinel inherit this. Concrete
+    // user impls override to `Some(self)` (the transpiler emits the
+    // override at every `impl Trait for Concrete` site). Object-safe
+    // since the method has no generic params.
+    out.push_str("    #[doc(hidden)]\n");
+    out.push_str(
+        "    fn __goish_as_dyn_any(&self) \
+         -> ::core::option::Option<&(dyn ::core::any::Any \
+         + ::core::marker::Send + ::core::marker::Sync)> { ::core::option::Option::None }\n",
+    );
+    // `__goish_as_dyn_any_mut` — the `&mut` mirror, for `cast!(&mut x, J)`.
+    // Default None; concrete impls override to `Some(self)` alongside the
+    // `__goish_as_dyn_any` override (emitted at every `impl Trait for C` site).
+    out.push_str("    #[doc(hidden)]\n");
+    out.push_str(
+        "    fn __goish_as_dyn_any_mut(&mut self) \
+         -> ::core::option::Option<&mut (dyn ::core::any::Any \
+         + ::core::marker::Send + ::core::marker::Sync)> { ::core::option::Option::None }\n",
+    );
+    out.push_str("}\n\n");
+
+    // Emit __HasNilSentinel impl so cast!() can const-assert on the
+    // presence/absence of a nil sentinel. Both trivial and composite
+    // traits get this; only the constant VALUE differs.
+    let _ = writeln!(
+        out,
+        "impl ::goish::any::__HasNilSentinel \
+         for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
+    );
+    let _ = writeln!(
+        out,
+        "    const __GOISH_HAS_NIL_SENTINEL: bool = {has_sentinel_val};"
+    );
+    out.push_str("}\n\n");
+
+    // ── (2) Nil sentinel struct — TRIVIAL only ──────────────────────
+    //
+    // Skipped for composite traits (supertrait clause contains non-
+    // marker types like `metav1::Object`). Emitting the struct + impl
+    // would require also emitting `impl ForeignTrait for __NilT` which
+    // violates the orphan rule or fails when the foreign trait has
+    // non-default methods.
+    if !composite {
+        out.push_str("#[doc(hidden)]\n");
+        out.push_str("#[allow(non_camel_case_types)]\n");
+        let _ = writeln!(out, "pub struct {nil_name};");
+        out.push('\n');
+    }
+
+    // ── (3) impl Trait for __NilT — every method panics (TRIVIAL only)
+    if !composite {
+        let _ = writeln!(out, "impl {name} for {nil_name} {{");
+        for m in &parsed.methods {
+            let _ = writeln!(
+                out,
+                "    {} {{ panic!(\"goish: method call on nil {} interface\") }}",
+                m.sig_only.trim(), name
+            );
+        }
+        out.push_str("    fn __is_nil_iface(&self) -> bool { true }\n");
+        out.push_str("}\n\n");
+    }
+
+    // ── NO PER-TRAIT WRAPPER NEWTYPE ────────────────────────────────
+    //
+    // Earlier designs emitted `<Trait>Ref(pub Arc<dyn Trait + Send +
+    // Sync>)` to host orphan-rule-bound impls. That generated one
+    // new top-level type per user trait — visual clutter the Goish
+    // project rejects.
+    //
+    // Convention:
+    //   * Function params of interface type lower to
+    //     `impl Trait + 'static` (anonymous generic + bound). No
+    //     wrapper at the param position.
+    //   * Storage positions (struct fields, locals, returns, Hook<T>)
+    //     use `Arc<dyn Trait + Send + Sync>` directly.
+    //
+    // Orphan-rule subtlety: foreign-trait impls on `Arc<dyn LocalTrait>`
+    // are allowed IFF the foreign trait has at least one local type
+    // argument. Concretely:
+    //
+    //   * `PartialEq<Nil>` for `Arc<dyn T>` — OK. Nil is local; the
+    //     foreign-trait type arg covers Self.
+    //   * `From<Nil>` for `Arc<dyn T>` — OK. Same reason.
+    //   * `Default` for `Arc<dyn T>` — NOT OK. Default has no type
+    //     arguments, so Self alone determines coverage; Arc is
+    //     foreign at the outermost position and `dyn T` doesn't lift
+    //     covered-ness through Arc per RFC 2451.
+    //
+    // Sections (6.8) and (7) below emit the two ALLOWED impls so
+    // users can write `arc == nil` / `nil.into()` directly. Default
+    // is intentionally NOT emitted — structs with `Arc<dyn T>`-typed
+    // fields need either an explicit `Default` impl or to drop
+    // `#[derive(Default)]`.
+
+    // ── (6.5) Forwarding impl Trait for Hook<dyn T + Send + Sync> ─
+    //
+    // Lets `goish::var! { pub iface tracer: Tracer; }` users call
+    // `tracer.M(args)` directly — no `tracer.call(|h| h.M(args)).unwrap()`
+    // closure noise.
+    //
+    // SKIPPED for composite traits: Hook<dyn T> requires a nil sentinel
+    // for the "None" branch panic; composite traits have no sentinel.
+    let mut forwarding_impl_ok = !composite && !parsed.methods.is_empty();
+    for m in &parsed.methods {
+        if m.method_name.is_empty() {
+            forwarding_impl_ok = false;
+            break;
+        }
+        if m.receiver == "&mut self" {
+            forwarding_impl_ok = false;
+            break;
+        }
+    }
+    if forwarding_impl_ok {
+        let _ = writeln!(
+            out,
+            "impl {name} for ::goish::hook::Hook<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
+        );
+        for m in &parsed.methods {
+            let arg_list = m.arg_names.join(", ");
+            // `call_or_panic` (defined on Hook<T>) handles the lock +
+            // unwrap-or-panic dance, so the forwarding body is a
+            // single line. The trait method's `&self` / `&mut self`
+            // distinction doesn't matter at this layer — Hook always
+            // dispatches through `&mut T` (which auto-deref-coerces
+            // to `&T` for `&self` methods).
+            let body = format!(
+                "{{ self.call_or_panic(\"goish: method call on nil {name} interface\", |__t| __t.{method}({args})) }}",
+                name = name,
+                method = m.method_name,
+                args = arg_list,
+            );
+            let _ = writeln!(out, "    {} {}", m.sig_only.trim(), body);
+        }
+        out.push_str("}\n\n");
+    }
+
+    // ── (6.6) Forwarding impl Trait for nilable<__T: Trait + ?Sized> ──
+    //
+    // SKIPPED for composite traits: nilable<T> forwarding panics on nil
+    // via Must(), which is fine, but the impl itself requires that
+    // __NilT satisfies the supertrait — which it doesn't when the
+    // supertrait is foreign with non-default methods.
+    let mut nilable_impl_ok = !composite && !parsed.methods.is_empty();
+    for m in &parsed.methods {
+        if m.method_name.is_empty() || m.receiver == "&mut self" {
+            nilable_impl_ok = false;
+            break;
+        }
+    }
+    if nilable_impl_ok {
+        let _ = writeln!(
+            out,
+            "impl<__T: {name} + ?::core::marker::Sized> {name} for ::goish::nilable<__T> {{"
+        );
+        for m in &parsed.methods {
+            let arg_list = m.arg_names.join(", ");
+            let body = format!(
+                "{{ self.Must().{method}({args}) }}",
+                method = m.method_name,
+                args = arg_list,
+            );
+            let _ = writeln!(out, "    {} {}", m.sig_only.trim(), body);
+        }
+        out.push_str("}\n\n");
+    }
+
+    // ── (6.7a) Forwarding impl Trait for &T and &mut T blankets ────
+    //
+    // Rust doesn't auto-derive `impl Trait for &T` or `impl Trait for
+    // &mut T` from `impl Trait for T`. Goish-emitted code routinely
+    // borrows trait-implementing values into trait-object positions
+    // — `let h: &slogHandler = ...; h.Handle(...)` requires
+    // `&slogHandler: Handler`. Without these blankets, the borrow
+    // forms fail with E0277 even when the owned form satisfies the
+    // trait.
+    //
+    // Emission:
+    //   * `&mut T` blanket: ALWAYS emit when the trait's methods can
+    //     all be dispatched via auto-deref through `&mut`. Concretely:
+    //     `&mut T` derefs to `T`, and method resolution can find any
+    //     `&self` or `&mut self` method on T. So forwarding is
+    //     unconditional (every method body is `(**self).M(args)`,
+    //     which auto-borrows correctly).
+    //
+    //   * `&T` blanket: emit ONLY when every trait method takes
+    //     `&self` (no `&mut self` methods). Otherwise the impl can't
+    //     dispatch `&mut self` methods through a `&T` — no way to
+    //     promote a shared borrow to an exclusive one.
+    //
+    // Method bodies use fully-qualified dispatch
+    // `<__T as Trait>::M(self, args)` so they don't recurse into the
+    // forwarding impl. Skipped (forwarding_impl_ok) when method-shape
+    // parsing failed for any method.
+    // ── (6.7a) Forwarding impl Trait for &T and &mut T blankets ────
+    //
+    // SKIPPED for composite traits: the blanket `impl<__T: Composite>
+    // Composite for &mut __T` would require `&mut __T: Foreign`, which
+    // generally doesn't hold (foreign traits don't impl for &mut T
+    // unless they explicitly provide it). Composite-trait callers use
+    // the concrete type directly.
+    let blanket_methods_ok = !composite
+        && !parsed.methods.is_empty()
+        && parsed.methods.iter().all(|m| !m.method_name.is_empty());
+    let any_mut_self = parsed.methods.iter().any(|m| m.receiver == "&mut self");
+
+    if blanket_methods_ok {
+        // &mut T blanket — always valid (every method auto-borrows
+        // through &mut). Methods that take `&self` get an &mut → &
+        // demotion via auto-deref; methods that take `&mut self`
+        // re-borrow through the impl's `self: &mut &mut __T` → `&mut __T`.
+        let _ = writeln!(
+            out,
+            "impl<__T: {name} + ?::core::marker::Sized> {name} for &mut __T {{"
+        );
+        for m in &parsed.methods {
+            let arg_list = m.arg_names.join(", ");
+            let body = format!(
+                "{{ <__T as {name}>::{method}(self, {args}) }}",
+                name = name,
+                method = m.method_name,
+                args = arg_list,
+            );
+            let _ = writeln!(out, "    {} {}", m.sig_only.trim(), body);
+        }
+        out.push_str("}\n\n");
+
+        if !any_mut_self {
+            // &T blanket — only valid when no method needs &mut.
+            let _ = writeln!(
+                out,
+                "impl<__T: {name} + ?::core::marker::Sized> {name} for &__T {{"
+            );
+            for m in &parsed.methods {
+                let arg_list = m.arg_names.join(", ");
+                let body = format!(
+                    "{{ <__T as {name}>::{method}(*self, {args}) }}",
+                    name = name,
+                    method = m.method_name,
+                    args = arg_list,
+                );
+                let _ = writeln!(out, "    {} {}", m.sig_only.trim(), body);
+            }
+            out.push_str("}\n\n");
+        }
+    }
+
+    // ── (6.8) PartialEq<Nil> + From<Nil> for Arc<dyn T + Send + Sync> ──
+    //
+    // Lets users write `if sink == nil { ... }` and `if sink != nil`
+    // against `Arc<dyn Trait>`-typed bindings — Go's idiomatic
+    // interface-nil-check, preserved at the source level.
+    //
+    // Orphan-rule gate: these impls are only valid when `Nil` is local
+    // to the calling crate (per RFC 2451's "covered" requirement for
+    // `impl ForeignTrait<T_local> for Arc<dyn LocalTrait>`). Inside
+    // goish-v1, `::goish::Nil` IS local (`extern crate self as goish`
+    // makes it so). In a goishc-emitted port crate, `::goish::Nil` is
+    // foreign, and the orphan rule rejects the impl entirely.
+    //
+    // Detect the goish-v1 *lib* crate via CARGO_CRATE_NAME — the
+    // proc-macro reads the env var at expansion time, set to the
+    // crate currently being compiled. `Nil` is local only to the
+    // goish lib crate itself; it is foreign to a port crate AND to
+    // goish's own example crates (which share the `goish` *package*
+    // name but are distinct *crates*). CARGO_PKG_NAME would be
+    // "goish" for both the lib and its examples, wrongly emitting the
+    // orphan-violating impl in examples — CARGO_CRATE_NAME is "goish"
+    // for the lib alone.
+    //
+    // When not the lib crate, the goishc transpiler's nil-check
+    // rewrite (which lowers `arc == nil` to `(*arc).__is_nil_iface()`
+    // at the call site) is the path that makes user-facing `==` work.
+    //
+    // Dispatches through the `__is_nil_iface` default method: the
+    // private nil sentinel `__NilT` overrides it to return true; any
+    // concrete impl inherits the `false` default.
+    let inside_goish_runtime = ::std::env::var("CARGO_CRATE_NAME")
+        .map(|n| n == "goish")
+        .unwrap_or(false);
+    if inside_goish_runtime {
+        // PartialEq<Nil> dispatches through __is_nil_iface() — safe for
+        // both trivial and composite traits (no nil sentinel needed).
+        let _ = writeln!(out,
+            "impl ::core::cmp::PartialEq<::goish::Nil> \
+             for ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
+        );
+        let _ = writeln!(out,
+            "    #[inline] fn eq(&self, _: &::goish::Nil) -> bool {{ (**self).__is_nil_iface() }}"
+        );
+        out.push_str("}\n\n");
+        let _ = writeln!(out,
+            "impl ::core::cmp::PartialEq<::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync>> \
+             for ::goish::Nil {{"
+        );
+        let _ = writeln!(out,
+            "    #[inline] fn eq(&self, other: &::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync>) -> bool {{ (**other).__is_nil_iface() }}"
+        );
+        out.push_str("}\n\n");
+        // From<Nil> for Arc needs the nil sentinel struct — TRIVIAL only.
+        if !composite {
+            let _ = writeln!(out,
+                "impl ::core::convert::From<::goish::Nil> \
+                 for ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
+            );
+            let _ = writeln!(out,
+                "    #[inline] fn from(_: ::goish::Nil) -> Self {{ ::alloc::sync::Arc::new({nil_name}) }}"
+            );
+            out.push_str("}\n\n");
+        }
+    }
+
+    // ── (7) Backwards-compat From<Nil> for Box<dyn T> — TRIVIAL only ──
+    //
+    // Composite traits have no nil sentinel struct, so we cannot
+    // construct `Box::new(__NilT)` — skip this section entirely for
+    // composite. Trivial traits emit as before.
+    if !composite {
+        let _ = writeln!(out,
+            "impl ::core::convert::From<::goish::Nil> \
+             for ::alloc::boxed::Box<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
+        );
+        let _ = writeln!(out,
+            "    #[inline] fn from(_: ::goish::Nil) -> Self {{ ::alloc::boxed::Box::new({nil_name}) }}"
+        );
+        out.push_str("}\n\n");
+    }
+
+    // ── (8) DowncastableFromAny for `dyn Trait` + per-trait registry ─
+    //
+    // Lets `goish::Any::As::<dyn Trait>()` return `Some(&dyn Trait)`
+    // when the wrapped concrete type was registered via the
+    // matching `register_<trait>_impl` helper. Drives Go's
+    // trait-typed comma-ok type assertion `vv, ok := x.(Trait)`;
+    // the transpiler lowers it to `data.As::<dyn Trait>()`.
+    //
+    // Per-trait static + helper because the cast fn signature is
+    // trait-specific (returns `&dyn Trait`, a fat pointer with
+    // Trait's vtable). A trait-agnostic registry would lose the
+    // vtable on cast.
+    //
+    // The transpiler emits `register_<trait>_impl::<Concrete>()` at
+    // every `impl Trait for Concrete` site (typically inside the
+    // crate's `init()` so registration happens before any
+    // `As::<dyn Trait>()` call).
+    let registry_name = format!("__GOISH_{}_REGISTRY", name.to_uppercase());
+    let register_fn = format!("__goish_register_{}_impl", name);
+
+    let _ = writeln!(
+        out,
+        "#[doc(hidden)]\n\
+         pub static {registry_name}: \
+         ::goish::runtime::spin::SpinLock<::goish::any::TraitRegistry<\
+         dyn {name} + ::core::marker::Send + ::core::marker::Sync>> = \
+         ::goish::runtime::spin::SpinLock::new(::goish::any::TraitRegistry::new());"
+    );
+    out.push('\n');
+
+    let _ = writeln!(
+        out,
+        "#[doc(hidden)]\n\
+         pub fn {register_fn}<__C: 'static + {name} + \
+         ::core::marker::Send + ::core::marker::Sync>() {{"
+    );
+    out.push_str("    fn cast<__C: 'static + ");
+    out.push_str(&name);
+    out.push_str(" + ::core::marker::Send + ::core::marker::Sync>(\n");
+    out.push_str(
+        "        any_ref: &(dyn ::core::any::Any + ::core::marker::Send + \
+         ::core::marker::Sync),\n",
+    );
+    // Explicit 'static on the dyn return so the inferred fn-item
+    // lifetime matches `TraitProbe.cast`'s `for<'a> fn(&'a _) -> &'a
+    // Trait` shape (where Trait carries its own 'static object
+    // lifetime). Without the bound, Rust infers the return's dyn-
+    // object-lifetime as 'a, narrowing the type beyond the field.
+    let _ = writeln!(
+        out,
+        "    ) -> &(dyn {name} + ::core::marker::Send + ::core::marker::Sync + 'static) {{"
+    );
+    out.push_str("        any_ref.downcast_ref::<__C>()\n");
+    out.push_str(
+        "            .expect(\"goish::any: cast invoked with mismatched concrete type\")\n",
+    );
+    out.push_str("    }\n");
+    // Mutable cast mirror — recovers `&mut dyn Trait` from `&mut dyn Any`.
+    out.push_str("    fn cast_mut<__C: 'static + ");
+    out.push_str(&name);
+    out.push_str(" + ::core::marker::Send + ::core::marker::Sync>(\n");
+    out.push_str(
+        "        any_ref: &mut (dyn ::core::any::Any + ::core::marker::Send + \
+         ::core::marker::Sync),\n",
+    );
+    let _ = writeln!(
+        out,
+        "    ) -> &mut (dyn {name} + ::core::marker::Send + ::core::marker::Sync + 'static) {{"
+    );
+    out.push_str("        any_ref.downcast_mut::<__C>()\n");
+    out.push_str(
+        "            .expect(\"goish::any: cast_mut invoked with mismatched concrete type\")\n",
+    );
+    out.push_str("    }\n");
+    out.push_str(
+        "    let probe = ::goish::any::TraitProbe { concrete: \
+         ::core::any::TypeId::of::<__C>(), cast: cast::<__C>, cast_mut: cast_mut::<__C> };\n",
+    );
+    let _ = writeln!(
+        out,
+        "    ::goish::any::register_with(&{registry_name}, probe);"
+    );
+    out.push_str("}\n\n");
+
+    let _ = writeln!(
+        out,
+        "impl ::goish::any::DowncastableFromAny \
+         for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
+    );
+    out.push_str(
+        "    #[inline]\n    fn from_any(any_ref: &(dyn ::core::any::Any + \
+         ::core::marker::Send + ::core::marker::Sync)) -> ::core::option::Option<&Self> {\n",
+    );
+    let _ = writeln!(
+        out,
+        "        ::goish::any::lookup_with(&{registry_name}, any_ref)"
+    );
+    out.push_str("    }\n}\n\n");
+
+    // Mutable mirror of the DowncastableFromAny impl.
+    let _ = writeln!(
+        out,
+        "impl ::goish::any::DowncastableFromAnyMut \
+         for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
+    );
+    out.push_str(
+        "    #[inline]\n    fn from_any_mut(any_ref: &mut (dyn ::core::any::Any + \
+         ::core::marker::Send + ::core::marker::Sync)) -> ::core::option::Option<&mut Self> {\n",
+    );
+    let _ = writeln!(
+        out,
+        "        ::goish::any::lookup_with_mut(&{registry_name}, any_ref)"
+    );
+    out.push_str("    }\n}\n\n");
+
+    // ── (9) HasDynAny for `dyn Trait + Send + Sync` ─────────────────
+    //
+    // Routes `&dyn Trait`'s "give me an Any view" request through the
+    // trait's `__goish_as_dyn_any` method (added in section 1's
+    // trait-redecl). Concrete impls override to `Some(self)`; default
+    // is `None`. The `AsExt::As<T>` blanket consults HasDynAny, so
+    // `rd.As::<Reader>()` on `rd: &dyn Trait` works out-of-the-box
+    // for any concrete type that overrode `__goish_as_dyn_any`.
+    //
+    // Without this impl, `dyn Trait + Send + Sync: !HasDynAny`,
+    // because the blanket on Sized + 'static doesn't reach unsized
+    // dyn types. Path: TRAIT-BORROW-DOWNCAST.
+    let _ = writeln!(
+        out,
+        "impl ::goish::any::HasDynAny \
+         for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
+    );
+    out.push_str(
+        "    #[inline]\n    fn __goish_as_dyn_any(&self) \
+         -> ::core::option::Option<&(dyn ::core::any::Any + \
+         ::core::marker::Send + ::core::marker::Sync)> {\n",
+    );
+    let _ = writeln!(
+        out,
+        "        {name}::__goish_as_dyn_any(self)"
+    );
+    out.push_str("    }\n}\n\n");
+
+    // Mutable mirror — HasDynAnyMut for `dyn Trait + Send + Sync`.
+    let _ = writeln!(
+        out,
+        "impl ::goish::any::HasDynAnyMut \
+         for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
+    );
+    out.push_str(
+        "    #[inline]\n    fn __goish_as_dyn_any_mut(&mut self) \
+         -> ::core::option::Option<&mut (dyn ::core::any::Any + \
+         ::core::marker::Send + ::core::marker::Sync)> {\n",
+    );
+    let _ = writeln!(
+        out,
+        "        {name}::__goish_as_dyn_any_mut(self)"
+    );
+    out.push_str("    }\n}\n\n");
+
+    // ── (10) NilDyn for `dyn Trait + Send + Sync` — TRIVIAL only ───────
+    //
+    // Hands back a `&'static` borrow of the nil sentinel `__NilT`.
+    // Skipped for composite traits because __NilT doesn't exist there.
+    if !composite {
+        let _ = writeln!(
+            out,
+            "impl ::goish::any::NilDyn \
+             for dyn {name} + ::core::marker::Send + ::core::marker::Sync {{"
+        );
+        let _ = writeln!(
+            out,
+            "    #[inline]\n    fn __goish_nil_ref() \
+             -> &'static (dyn {name} + ::core::marker::Send + ::core::marker::Sync) {{"
+        );
+        let _ = writeln!(out, "        static __GOISH_NIL: {nil_name} = {nil_name};");
+        out.push_str("        &__GOISH_NIL\n");
+        out.push_str("    }\n}\n\n");
+    }
+
+    out.parse()
+        .expect("goish::interface: emitted source failed to parse")
+}
+
+struct ParsedIface {
+    vis: Option<String>,
+    name: String,
+    /// Verbatim text of any supertrait clause the user wrote (between
+    /// `trait Name` and the body brace), e.g. `: io::Writer` or `:
+    /// Send + Sync`. Empty when the user wrote no supertrait clause.
+    /// The macro always tacks on `+ Send + Sync` to whatever the user
+    /// wrote — Rust accepts duplicate trait bounds without diagnostic
+    /// warnings, so over-specifying is harmless.
+    supertraits: String,
+    methods: Vec<IfaceMethod>,
+}
+
+struct IfaceMethod {
+    /// Verbatim text for trait redeclaration — may end in `;`
+    /// (signature-only) OR a brace group (default-bodied method,
+    /// for Goish-specific traits with optional methods like
+    /// `context::Context::Value`).
+    full_text: String,
+    /// Signature-only text WITHOUT the trailing `;` or default body.
+    /// Used to build the sentinel impl: `<sig_only> { panic!(…) }`.
+    sig_only: String,
+    /// Method name (extracted from `fn <name>(…)`). Used by the
+    /// Hook-forwarding impl to emit `t.<name>(<args>)`.
+    method_name: String,
+    /// Argument names in source order, excluding `self` / `&self` /
+    /// `&mut self`. Used by the Hook-forwarding impl to thread args
+    /// into the inner call. Empty when the method takes only the
+    /// receiver (or when parsing failed — caller falls back to the
+    /// closure-form rewrite).
+    arg_names: Vec<String>,
+    /// Receiver shape — either "&self" or "&mut self". The
+    /// forwarding impl uses this to lock the SpinLock with `.lock()`
+    /// and call through the appropriate guard projection
+    /// (`as_ref()` for &self, `as_mut()` for &mut self).
+    receiver: String,
+}
+
+fn parse_iface(item: TokenStream) -> ParsedIface {
+    let tokens: Vec<TokenTree> = item.into_iter().collect();
+    let mut iter = tokens.into_iter().peekable();
+
+    // Skip outer attributes (e.g. doc comments): `# [ ... ]`.
+    loop {
+        match iter.peek() {
+            Some(TokenTree::Punct(p)) if p.as_char() == '#' => {
+                iter.next();
+                iter.next(); // bracket group
+            }
+            _ => break,
+        }
+    }
+
+    // Optional visibility.
+    let vis = consume_visibility(&mut iter);
+
+    // `trait` keyword.
+    match iter.next() {
+        Some(TokenTree::Ident(i)) if i.to_string() == "trait" => {}
+        other => panic!(
+            "#[goish::interface] expects `trait Name {{ ... }}`, got {:?}",
+            other
+        ),
+    }
+
+    // Trait name.
+    let name = match iter.next() {
+        Some(TokenTree::Ident(i)) => i.to_string(),
+        other => panic!("#[goish::interface]: expected trait name, got {:?}", other),
+    };
+
+    // Reject generics on the trait itself — Go interfaces don't
+    // have type parameters.
+    match iter.peek() {
+        Some(TokenTree::Punct(p)) if p.as_char() == '<' => panic!(
+            "#[goish::interface]: trait `{}` has generics, which Go interfaces don't support",
+            name
+        ),
+        _ => {}
+    }
+
+    // Capture the supertrait clause: every token between the trait
+    // name and the body brace group. Typically `: io::Writer + Send +
+    // Sync` or empty.
+    //
+    // We collect into a Vec<TokenTree> and reconstruct via
+    // TokenStream so that multi-char tokens like `::` (two Joint
+    // Punct tokens) round-trip correctly — iterating and calling
+    // tt.to_string() per token would insert spaces between the two
+    // `:` chars, producing `metav1 : : Object` instead of
+    // `metav1 :: Object`.
+    let mut supertrait_tokens: Vec<TokenTree> = Vec::new();
+    let body = loop {
+        match iter.next() {
+            Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => break g,
+            Some(tt) => supertrait_tokens.push(tt),
+            None => panic!(
+                "#[goish::interface]: expected trait body `{{ ... }}` after supertraits"
+            ),
+        }
+    };
+    let supertraits: TokenStream = supertrait_tokens.into_iter().collect();
+    let supertraits = supertraits.to_string();
+
+    let methods = parse_iface_methods(body.stream());
+    ParsedIface { vis, name, supertraits, methods }
+}
+
+fn parse_iface_methods(body: TokenStream) -> Vec<IfaceMethod> {
+    let mut methods = Vec::new();
+    let mut current: Vec<TokenTree> = Vec::new();
+
+    for tt in body {
+        let is_terminator = matches!(&tt, TokenTree::Punct(p) if p.as_char() == ';');
+        let is_brace_body =
+            matches!(&tt, TokenTree::Group(g) if g.delimiter() == Delimiter::Brace);
+
+        if is_terminator {
+            // Signature-only method: `fn name(...) -> ret;`
+            let sig_tokens: Vec<TokenTree> = current.drain(..).collect();
+            let (method_name, arg_names, receiver) = extract_method_shape(&sig_tokens);
+            let sig_only: TokenStream = sig_tokens.into_iter().collect();
+            let sig_only_text = sig_only.to_string();
+            let full_text = format!("{};", sig_only_text);
+            methods.push(IfaceMethod {
+                full_text,
+                sig_only: sig_only_text,
+                method_name,
+                arg_names,
+                receiver,
+            });
+        } else if is_brace_body {
+            // Default-bodied method: `fn name(...) -> ret { body }`.
+            // sig_only excludes the brace body; full_text includes it.
+            let sig_tokens: Vec<TokenTree> = current.drain(..).collect();
+            let (method_name, arg_names, receiver) = extract_method_shape(&sig_tokens);
+            let sig_only: TokenStream = sig_tokens.into_iter().collect();
+            let sig_only_text = sig_only.to_string();
+            let full_text = format!("{} {}", sig_only_text, tt.to_string());
+            methods.push(IfaceMethod {
+                full_text,
+                sig_only: sig_only_text,
+                method_name,
+                arg_names,
+                receiver,
+            });
+        } else {
+            current.push(tt);
+        }
+    }
+
+    if !current.is_empty() {
+        let sig: TokenStream = current.drain(..).collect();
+        let leftover = sig.to_string();
+        let trimmed = leftover.trim();
+        if !trimmed.is_empty() {
+            panic!(
+                "#[goish::interface]: trailing tokens after last method `{}`",
+                trimmed
+            );
+        }
+    }
+
+    methods
+}
+
+// extract_method_shape parses a method signature's token stream and
+// extracts (method_name, arg_names, receiver_form). The signature
+// shape is `fn NAME(RECV, NAME: TYPE, …) -> RETURN` where RECV is one
+// of `self`, `&self`, `&mut self`. We need:
+//
+//   * method_name — for `t.<NAME>(args)` in the forwarding impl.
+//   * arg_names   — for the comma-separated forward list.
+//   * receiver    — to pick `as_ref()` vs `as_mut()` on the lock guard.
+//
+// Returns ("", vec![], "&self") on parse failure — the Hook-forwarding
+// impl-emitter checks for empty method_name and skips when the parse
+// can't be trusted.
+fn extract_method_shape(sig: &[TokenTree]) -> (String, Vec<String>, String) {
+    let mut iter = sig.iter().peekable();
+
+    // Skip optional `pub` (interfaces don't have it but be defensive).
+    while let Some(TokenTree::Ident(i)) = iter.peek() {
+        let s = i.to_string();
+        if s == "pub" {
+            iter.next();
+            continue;
+        }
+        break;
+    }
+
+    // Expect `fn`.
+    match iter.next() {
+        Some(TokenTree::Ident(i)) if i.to_string() == "fn" => {}
+        _ => return (String::new(), Vec::new(), String::from("&self")),
+    }
+
+    // Method name.
+    let method_name = match iter.next() {
+        Some(TokenTree::Ident(i)) => i.to_string(),
+        _ => return (String::new(), Vec::new(), String::from("&self")),
+    };
+
+    // Optional generics on the method itself — skip the `<…>` group's
+    // tokens until matching `>`. Rare in Goish ifaces but defensive.
+    if let Some(TokenTree::Punct(p)) = iter.peek() {
+        if p.as_char() == '<' {
+            iter.next();
+            let mut depth = 1;
+            while depth > 0 {
+                match iter.next() {
+                    Some(TokenTree::Punct(p)) if p.as_char() == '<' => depth += 1,
+                    Some(TokenTree::Punct(p)) if p.as_char() == '>' => depth -= 1,
+                    Some(_) => {}
+                    None => return (method_name, Vec::new(), String::from("&self")),
+                }
+            }
+        }
+    }
+
+    // Parameter list — a single Group with parens.
+    let params_group = match iter.next() {
+        Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Parenthesis => g.clone(),
+        _ => return (method_name, Vec::new(), String::from("&self")),
+    };
+
+    // Walk the param tokens, splitting on top-level commas.
+    let mut top_level_params: Vec<Vec<TokenTree>> = vec![Vec::new()];
+    for tt in params_group.stream() {
+        if let TokenTree::Punct(p) = &tt {
+            if p.as_char() == ',' {
+                top_level_params.push(Vec::new());
+                continue;
+            }
+        }
+        top_level_params.last_mut().unwrap().push(tt);
+    }
+
+    // Drop trailing-empty (after final comma).
+    if top_level_params
+        .last()
+        .map(|p| p.is_empty())
+        .unwrap_or(false)
+    {
+        top_level_params.pop();
+    }
+    if top_level_params.is_empty() {
+        return (method_name, Vec::new(), String::from("&self"));
+    }
+
+    // First param is the receiver. Detect `&mut self`, `&self`, `self`.
+    let recv_str = top_level_params[0]
+        .iter()
+        .map(|t| t.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let receiver = if recv_str.contains("mut") && recv_str.contains("self") {
+        "&mut self".to_string()
+    } else if recv_str.contains("self") {
+        "&self".to_string()
+    } else {
+        // Atypical — e.g. associated fn with no `self`. Skip forwarding.
+        return (String::new(), Vec::new(), String::from("&self"));
+    };
+
+    // Each remaining param is `name: type`. Extract the leading ident
+    // name. `name` may be preceded by `mut` or `_` patterns; we take
+    // the LAST ident before the `:` to handle `mut foo: T`.
+    let mut arg_names: Vec<String> = Vec::new();
+    for param in top_level_params.iter().skip(1) {
+        let mut last_ident: Option<String> = None;
+        for tt in param {
+            match tt {
+                TokenTree::Ident(i) => {
+                    let s = i.to_string();
+                    // Skip pattern-binding `mut` or `ref` qualifiers.
+                    if s == "mut" || s == "ref" {
+                        continue;
+                    }
+                    last_ident = Some(s);
+                }
+                TokenTree::Punct(p) if p.as_char() == ':' => break,
+                _ => break,
+            }
+        }
+        match last_ident {
+            Some(name) if name != "_" => arg_names.push(name),
+            // Wildcard or unparseable — bail; caller falls back.
+            _ => return (String::new(), Vec::new(), receiver),
+        }
+    }
+
+    (method_name, arg_names, receiver)
 }

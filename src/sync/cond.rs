@@ -31,6 +31,7 @@ use super::sema::Sema;
 /// Locker — anything with `Lock` / `Unlock`. Mirrors Go's
 /// `sync.Locker` interface. `sync::Mutex` and `sync::RWMutex`
 /// implement this; user types can too.
+#[goish::interface]
 pub trait Locker {
     fn Lock(&self);
     fn Unlock(&self);

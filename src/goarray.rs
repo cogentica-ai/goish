@@ -27,6 +27,7 @@
 #![allow(non_camel_case_types)]
 
 extern crate alloc;
+use alloc::vec::Vec;
 use core::ops::{Deref, DerefMut, Index, IndexMut};
 
 use crate::builtin::Len as LenTrait;
@@ -83,6 +84,30 @@ impl<T: Clone, const N: usize> array<T, N> {
         let lo = low as usize;
         let hi = high as usize;
         slice::__from_vec(self.inner[lo..hi].to_vec())
+    }
+
+    /// `a[low:high:max]` — Go's three-index ("full") slice expression.
+    /// Length is `high - low`; capacity is `max - low`. Bounds checked
+    /// against `0 <= low <= high <= max <= N` (panic on violation,
+    /// matching Go's runtime panic).
+    ///
+    /// Same v1 deviation as `slice()` — returns an independent copy.
+    /// `max` is honored as the allocated capacity of the new backing
+    /// Vec, so subsequent `append` against the result reallocates at
+    /// the same boundary Go would.
+    pub fn slice3(&self, low: int, high: int, max: int) -> slice<T> {
+        let lo = low as usize;
+        let hi = high as usize;
+        let mx = max as usize;
+        if !(lo <= hi && hi <= mx && mx <= N) {
+            panic!(
+                "slice bounds out of range [{}:{}:{}] with array length {}",
+                lo, hi, mx, N
+            );
+        }
+        let mut v: Vec<T> = Vec::with_capacity(mx - lo);
+        v.extend_from_slice(&self.inner[lo..hi]);
+        slice::__from_vec(v)
     }
 
     /// `a[:]` — full subslice. Equivalent to `a.slice(0, len(a))`.

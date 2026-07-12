@@ -176,7 +176,6 @@ use crate::gomap::{map, MapRefIter};
 impl<'a, K, V> RangeIter for &'a map<K, V>
 where
     K: crate::gomap::GoHash + PartialEq,
-    V: Default,
 {
     type Item = (&'a K, &'a V);
     type Iter = MapRefIter<'a, K, V>;
@@ -190,7 +189,6 @@ where
 impl<'a, K, V> RangeIter for &&'a map<K, V>
 where
     K: crate::gomap::GoHash + PartialEq,
-    V: Default,
 {
     type Item = (&'a K, &'a V);
     type Iter = MapRefIter<'a, K, V>;

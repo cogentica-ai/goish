@@ -20,13 +20,12 @@
 //       Stop leaked unboundedly. Post-fix Stop pokes the loop's
 //       outer select and the loop returns at the next boundary.
 //
-// IMPORTANT: the test logic runs INSIDE a goroutine, not directly in
-// main. main is the bootstrap thread (no current_g), so its `Sleep`
-// falls back to `nanosleep(2)` which blocks the whole thread without
-// yielding to the scheduler — the watcher gor we're trying to
-// observe wouldn't get to run. Inside a real go!() goroutine,
-// `Sleep` parks via `timer_park`, the scheduler dispatches the
-// runnable watcher, and our measurements actually mean something.
+// Note: the test logic runs inside a spawned goroutine. This predates
+// main-on-goroutine (main used to run on the bootstrap thread with no
+// current_g, where `Sleep` blocked the whole thread); today main is
+// itself a goroutine and could host the tests directly, but the
+// wrapper is kept so the NumGoroutine baselines in each test stay one
+// level removed from the main G.
 
 #![no_std]
 #![no_main]
@@ -37,7 +36,7 @@ use goish::context::{Background, WithCancel};
 use goish::runtime::sched::schedule;
 use goish::runtime::NumGoroutine;
 use goish::time::{Milliseconds, NewTicker, NewTimer, Sleep};
-use goish::{int, syscall, KB};
+use goish::{int, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -244,7 +243,7 @@ static DONE: AtomicI64 = AtomicI64::new(0);
 
 #[goish::main]
 fn main() {
-    goish::go!(stack(64 * KB), || {
+    goish::go!(|| {
         test_context_chain_cancel();
         test_timer_stop();
         test_ticker_stop();

@@ -24,7 +24,7 @@ use goish::error;
 use goish::convert;
 use goish::errors;
 use goish::io;
-use goish::{go, make, string, syscall, KB};
+use goish::{go, make, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -60,7 +60,7 @@ fn main() {
     // ─── Test 2: Write -> Read; Writer.Close() -> Reader EOF ──────
     let (mut r1, mut w1) = io::Pipe();
 
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let payload = convert::bytes("Hello");
         let (n, err) = w1.Write(payload);
         check(err.IsNil(), b"io_pipe: T2 Write returned non-nil err\n");
@@ -68,7 +68,7 @@ fn main() {
         let _ = w1.Close();
     });
 
-    go!(stack(64 * KB), move || {
+    go!(move || {
         // First Read: get the 5 payload bytes.
         let mut buf = make!([]goish::byte, 16);
         let (n, err) = r1.Read(&mut buf);
@@ -94,11 +94,11 @@ fn main() {
     // ─── Test 3: Reader.Close() -> Writer sees ErrClosedPipe ──────
     let (mut r2, mut w2) = io::Pipe();
 
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let _ = r2.Close();
     });
 
-    go!(stack(64 * KB), move || {
+    go!(move || {
         // Even if our Write races and runs before close, the Write
         // blocks on the unbuffered chan, the close fires, and Write
         // unblocks with the error.
@@ -116,11 +116,11 @@ fn main() {
     let custom_err_for_writer = custom_err.clone();
     let (mut r3, w3) = io::Pipe();
 
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let _ = w3.CloseWithError(custom_err_for_writer);
     });
 
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let mut buf = make!([]goish::byte, 8);
         let (n, err) = r3.Read(&mut buf);
         check(n == 0, b"io_pipe: T4 Read n != 0\n");
@@ -135,7 +135,7 @@ fn main() {
     // gets dispatched after all the checker Gs have run-and-yielded
     // through their chan ops. Each test is self-verifying — if we
     // reach here, exit 0 means all checks passed.
-    go!(stack(64 * KB), || {
+    go!(|| {
         const OK: &[u8] = b"ok io_pipe (4 tests)\n";
         syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());
     });

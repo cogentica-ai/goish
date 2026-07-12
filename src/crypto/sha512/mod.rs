@@ -463,21 +463,21 @@ pub fn Sum512_256(data: slice<byte>) -> [byte; 32] {
 // ─── Boxed constructors for trait-object consumers (e.g. hmac::New) ───
 
 /// `sha512.NewHash()` — boxed constructor matching `hash.Hash` interface.
-pub fn NewHash() -> alloc::boxed::Box<dyn Hash> {
+pub fn NewHash() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
     alloc::boxed::Box::new(New())
 }
 
 /// `sha512.NewHash384()` — boxed SHA-384 constructor.
-pub fn NewHash384() -> alloc::boxed::Box<dyn Hash> {
+pub fn NewHash384() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
     alloc::boxed::Box::new(New384())
 }
 
 /// `sha512.NewHash512_224()` — boxed SHA-512/224 constructor.
-pub fn NewHash512_224() -> alloc::boxed::Box<dyn Hash> {
+pub fn NewHash512_224() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
     alloc::boxed::Box::new(New512_224())
 }
 
 /// `sha512.NewHash512_256()` — boxed SHA-512/256 constructor.
-pub fn NewHash512_256() -> alloc::boxed::Box<dyn Hash> {
+pub fn NewHash512_256() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
     alloc::boxed::Box::new(New512_256())
 }

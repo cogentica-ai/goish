@@ -25,8 +25,10 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::crypto::x509;
 use goish::encoding::asn1;
 use goish::gostring::string;
+use goish::math::big;
 use goish::types::byte;
 use goish::{slice, syscall, Println};
 
@@ -83,14 +85,14 @@ fn write_result(idx: u8, label: &[u8], pass: bool) {
 
 #[goish::main]
 fn main() {
-    goish::go!(stack(128 * KB), || {
+    goish::go!(|| {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
-            Println!("ok 10/10");
+            Println!("ok 13/13");
             syscall::Exit(0);
         } else {
-            Println!("FAIL", f as i64, "of 10");
+            Println!("FAIL", f as i64, "of 13");
             syscall::Exit(1);
         }
     });
@@ -108,6 +110,9 @@ fn run_tests() {
     test_8_parse_base128_int();
     test_9_parse_tag_and_length();
     test_10_parse_strings();
+    test_11_parse_raw_sequence();
+    test_12_parse_bigint_integer();
+    test_13_parse_pkcs8_rsa_key();
 }
 
 fn test_1_parse_bool() {
@@ -327,6 +332,164 @@ fn test_10_parse_strings() {
         && e_pr.IsNil() && check_str(&s_pr, "foo bar")
         && !e_pr_bad.IsNil();
     write_result(10, b"ParseUTF8/IA5/PrintableString", ok);
+    if !ok {
+        fail();
+    }
+}
+
+fn test_11_parse_raw_sequence() {
+    // Build: SEQUENCE { INTEGER 1, INTEGER 2 }
+    //   30 06          -- SEQUENCE, length 6
+    //     02 01 01     -- INTEGER, length 1, value 0x01
+    //     02 01 02     -- INTEGER, length 1, value 0x02
+    let der: &[u8] = &[0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02];
+    let (rv, rest, err) = asn1::ParseRaw(from_bytes(der));
+    let ok = err.IsNil()
+        && rv.Tag == asn1::TagSequence
+        && rv.IsCompound
+        && rv.Bytes.Len() == 6   // body = the 6 bytes inside the SEQUENCE
+        && rest.Len() == 0;      // nothing left after parsing
+    write_result(11, b"ParseRaw SEQUENCE            ", ok);
+    if !ok {
+        fail();
+    }
+}
+
+fn test_12_parse_bigint_integer() {
+    // DER INTEGER 0x42: tag=02, len=01, value=42
+    // The value bytes passed to ParseBigInt are just the content (no tag/len).
+    let value_bytes: &[u8] = &[0x42];
+    let (z, err) = asn1::ParseBigInt(from_bytes(value_bytes));
+    let ok = err.IsNil() && z.Int64() == 0x42;
+    write_result(12, b"ParseBigInt INTEGER          ", ok);
+    if !ok {
+        fail();
+    }
+}
+
+fn test_13_parse_pkcs8_rsa_key() {
+    // Hand-crafted tiny PKCS#8 / PKCS#1 RSA key.
+    //
+    // Parameters chosen so all maths are exact:
+    //   p = 11, q = 13, n = 143, e = 7, d = 103
+    //   (e*d ≡ 1 mod lcm(10,12)=60 → 7*103=721=12*60+1 ✓)
+    //   dp = d mod (p-1) = 103 mod 10 = 3
+    //   dq = d mod (q-1) = 103 mod 12 = 7
+    //   qinv = q^-1 mod p → 13^-1 mod 11 = 6  (13*6=78=7*11+1 ✓)
+    //
+    // DER encoding of the RSAPrivateKey SEQUENCE:
+    //   30 17            -- SEQUENCE, length 23
+    //     02 01 00       -- version = 0
+    //     02 01 8f       -- n = 143  (0x8f, needs 0x00 prefix to be positive)
+    //
+    // Wait — 0x8f has bit 7 set, so DER requires a leading 0x00 byte.
+    //
+    // Let's instead use:
+    //   n = 143 = 0x8f  → DER: 02 02 00 8f  (positive, 2 bytes)
+    //   e = 7   = 0x07  → DER: 02 01 07
+    //   d = 103 = 0x67  → DER: 02 01 67
+    //   p = 11  = 0x0b  → DER: 02 01 0b
+    //   q = 13  = 0x0d  → DER: 02 01 0d
+    //   dp = 3  = 0x03  → DER: 02 01 03
+    //   dq = 7  = 0x07  → DER: 02 01 07
+    //   qinv=6  = 0x06  → DER: 02 01 06
+    //   Total body = 3+2+2+2+2+2+2+2+2+2 = ... let me count precisely:
+    //   02 01 00 = 3 bytes (version)
+    //   02 02 00 8f = 4 bytes (n)
+    //   02 01 07 = 3 bytes (e)
+    //   02 01 67 = 3 bytes (d)
+    //   02 01 0b = 3 bytes (p)
+    //   02 01 0d = 3 bytes (q)
+    //   02 01 03 = 3 bytes (dp)
+    //   02 01 07 = 3 bytes (dq)
+    //   02 01 06 = 3 bytes (qinv)
+    //   Total body = 3+4+3+3+3+3+3+3+3 = 28 = 0x1c
+    //
+    // RSAPrivateKey DER = 30 1c  <28 bytes>
+    // OCTET STRING wrapping = 04 1e  (length = 2 + 28 = 30 = 0x1e)
+    // AlgorithmIdentifier = 30 0d
+    //   OID rsaEncryption = 06 09 2a 86 48 86 f7 0d 01 01 01
+    //   NULL = 05 00
+    // version = 02 01 00
+    // Outer body = 3 + (2+13) + (2+30) = 3 + 15 + 32 = 50 = 0x32
+    // Outer SEQUENCE = 30 32  <50 bytes>
+
+    // Build RSAPrivateKey body bytes:
+    let rsa_body: &[u8] = &[
+        // version = 0
+        0x02, 0x01, 0x00,
+        // n = 143 = 0x8f (needs leading 00 to be non-negative)
+        0x02, 0x02, 0x00, 0x8f,
+        // e = 7
+        0x02, 0x01, 0x07,
+        // d = 103 = 0x67
+        0x02, 0x01, 0x67,
+        // p = 11 = 0x0b
+        0x02, 0x01, 0x0b,
+        // q = 13 = 0x0d
+        0x02, 0x01, 0x0d,
+        // dp = 3
+        0x02, 0x01, 0x03,
+        // dq = 7
+        0x02, 0x01, 0x07,
+        // qinv = 6
+        0x02, 0x01, 0x06,
+    ];
+    // rsa_body.len() = 3+4+3+3+3+3+3+3+3 = 28 = 0x1c
+    // RSAPrivateKey SEQUENCE = 30 1c + rsa_body
+    let rsa_seq_len: u8 = rsa_body.len() as u8; // goishlint:ignore GOISH005
+
+    // AlgorithmIdentifier body = OID(11 bytes) + NULL(2 bytes) = 13 bytes
+    let alg_body: &[u8] = &[
+        0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, // OID
+        0x05, 0x00, // NULL
+    ];
+    let alg_seq_len: u8 = alg_body.len() as u8; // goishlint:ignore GOISH005
+
+    // OCTET STRING content = SEQUENCE tag(1) + length(1) + rsa_body
+    let octet_content_len = 2 + rsa_body.len(); // 30 = 0x1e
+
+    // Outer body = version(3) + alg(2+13) + octet(2+octet_content_len)
+    let outer_body_len = 3 + (2 + alg_body.len()) + (2 + octet_content_len); // 3+15+32=50=0x32
+    let outer_seq_len: u8 = outer_body_len as u8; // goishlint:ignore GOISH005
+
+    // Build the full DER
+    let mut der_vec: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    // outer SEQUENCE
+    der_vec.push(0x30);
+    der_vec.push(outer_seq_len);
+    // version = 0
+    der_vec.extend_from_slice(&[0x02, 0x01, 0x00]);
+    // AlgorithmIdentifier SEQUENCE
+    der_vec.push(0x30);
+    der_vec.push(alg_seq_len);
+    der_vec.extend_from_slice(alg_body);
+    // OCTET STRING
+    der_vec.push(0x04);
+    der_vec.push(octet_content_len as u8); // goishlint:ignore GOISH005
+    // inner RSAPrivateKey SEQUENCE
+    der_vec.push(0x30);
+    der_vec.push(rsa_seq_len);
+    der_vec.extend_from_slice(rsa_body);
+
+    let der = from_bytes(&der_vec);
+    let (key, err) = x509::ParsePKCS8PrivateKey(der);
+    if !err.IsNil() {
+        write_result(13, b"ParsePKCS8PrivateKey         ", false);
+        fail();
+        return;
+    }
+    // Verify: n = 143, e = 7, p*q = 11*13 = 143 = n
+    let n_ok = key.PublicKey.N.Int64() == 143;
+    let e_ok = key.PublicKey.E == 7;
+    // p * q should equal n
+    let p = key.Primes[0 as goish::int].clone();
+    let q = key.Primes[1 as goish::int].clone();
+    let mut pq = big::Int::new();
+    pq.Mul(&p, &q);
+    let pq_ok = pq.Int64() == 143;
+    let ok = n_ok && e_ok && pq_ok;
+    write_result(13, b"ParsePKCS8PrivateKey         ", ok);
     if !ok {
         fail();
     }

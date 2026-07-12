@@ -67,12 +67,12 @@ impl Dir {
 }
 
 /// `http.ServeFile(w, r, name)` (fs.go:814) — serve the named file.
-pub fn ServeFile<N: Into<string>>(w: &mut ResponseWriter, r: &Request, name: N){
+pub fn ServeFile<N: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request, name: N){
     let name: string = name.into();
     serve_file_path(w, r, name);
 }
 
-fn serve_file_path(w: &mut ResponseWriter, r: &Request, path: string) {
+fn serve_file_path(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request, path: string) {
     // Stat to verify existence and reject directories (slim — Go also
     // serves directory indexes).
     let (fi, err) = os::Stat(path.clone());
@@ -103,7 +103,7 @@ fn serve_file_path(w: &mut ResponseWriter, r: &Request, path: string) {
 /// directory listing — entries sorted by name, directories suffixed
 /// with `/`. Missing pieces vs Go: no URL-escape on the href (slim;
 /// goish has http::PathEscape but legacy dirList uses url.URL{Path:n}).
-fn dir_list(w: &mut ResponseWriter, _r: &Request, path: string) {
+fn dir_list(w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request, path: string) {
     let (entries, err) = os::ReadDir(path);
     if !err.IsNil() {
         super::server::Error(
@@ -172,7 +172,7 @@ fn html_replace(s: string) -> string {
     b.String()
 }
 
-fn serve_regular_file(w: &mut ResponseWriter, r: &Request, path: string, fi: os::FileInfo) {
+fn serve_regular_file(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request, path: string, fi: os::FileInfoData) {
     // Open + read fully into a slice<byte>. Range slicing happens
     // after the read since v1 has no streaming Read with seek loops.
     let (mut f, err) = os::Open(path.clone());
@@ -184,6 +184,8 @@ fn serve_regular_file(w: &mut ResponseWriter, r: &Request, path: string, fi: os:
         );
         return;
     }
+    // err is nil ⇒ Open returned a non-nil File. Narrow.
+    let f = f.MustMut();
     let want = fi.Size();
     let mut body = make_zero_buf(want);
     let (got, _e) = f.Read(&mut body);
@@ -312,7 +314,7 @@ struct FileHandler {
 }
 
 impl Handler for FileHandler {
-    fn ServeHTTP(&self, w: &mut ResponseWriter, r: &Request) {
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
         // Go: upath := r.URL.Path; if !strings.HasPrefix(upath, "/") { upath = "/" + upath; r.URL.Path = upath }
         let mut upath = r.URL.Path.clone();
         if !strings::HasPrefix(upath.clone(), string("/")) {

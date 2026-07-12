@@ -74,6 +74,60 @@ Rust's `Drop` already gives RAII. We add a `defer!{}` macro for
 early-return cleanup that doesn't fit a type's lifetime — same call
 site as Go, executed at scope exit via `Drop`-based shim.
 
+### Goroutine stacks — reserve-big, commit-lazy (M29, landed)
+Go grows stacks by copying (`morestack`); goish can't — relocating a
+Rust stack would require fixing up raw pointers the runtime cannot
+see, and stable Rust has no compiler hook for prologue checks. The
+stacker-style pivot ladder (`runtime::sched::maybe_grow`) works but
+only at annotated call sites. So goish grows the other way, using
+what x86-64 Linux gives us for free — abundant virtual address space
+with kernel-side lazy commit:
+
+| Spawn form | Stack | For |
+|------------|-------|-----|
+| `go!(closure)` | 1 MiB `MAP_NORESERVE` reservation + `PROT_NONE` guard page; physical 4 KiB pages committed on touch; recycled via pool + `MADV_DONTNEED` | everyday code — never size a stack |
+| `go!(stack(N), closure)`, N ≤ 32 KiB | sub-page carve from the chunked stackpool (no guard, no per-G VMA) | extreme density — 1M-goroutine workloads, where per-G mmaps would exhaust `vm.max_map_count` |
+| `go!(stack(N), closure)`, N > 32 KiB | direct mmap + guard page | goroutines needing more than 1 MiB |
+| `maybe_grow(red_zone, size, closure)` | scoped pivot region | >1 MiB excursions at a known recursion site |
+
+Overflow past a reservation hits the guard page and the SIGSEGV
+handler prints a spawn-site diagnostic (`created by file:line`). The
+main goroutine gets an 8 MiB reservation via the same machinery.
+
+### Request contexts — `net/http` × `context` (landed)
+Go cancels an inbound request's context when the handler finishes or
+the client's connection dies, and threads outbound cancellation
+through the transport. goish mirrors all of it:
+
+| Path | Mechanism |
+|------|-----------|
+| `r.Context()` (server) | per-request `context.WithCancel`; canceled when the response is finished (Go `finishRequest`) |
+| client disconnect mid-handler | watcher goroutine probes with `recv(MSG_PEEK \| MSG_DONTWAIT)` — peeking never consumes a pipelined next request — and parks on the netpoller; EOF/reset cancels the ctx. Aborted after the handler via a past netpoll read deadline (Go's `aLongTimeAgo`) and joined before the conn is reused, so the fd's read side has one owner at all times |
+| `Client.Timeout` | `Do` re-parents the request under `context.WithTimeout` (Go `setRequestCancel`) — one deadline spans every redirect hop, which also inherit the original ctx |
+| outbound ctx cancel | `RoundTrip` fast-fails an already-done ctx, folds `ctx.Deadline()` into the conn deadlines, and a cancel watcher kicks blocked I/O out with past netpoll deadlines; wire errors surface as `context.Canceled` / `DeadlineExceeded` |
+
+`http.TimeoutHandler` composes on top: the wrapped handler runs on
+its own goroutine against a buffered writer and observes its budget
+through `r.Context().Done()`. The TLS client path gets the same
+mid-I/O cancel as plaintext: `RoundTrip` dials the raw conn, arms the
+deadline + cancel watcher on the underlying socket, then runs the
+handshake — so cancel aborts a stuck handshake or mid-body TLS read.
+Not in v1: `Server.BaseContext` / `ConnContext` hooks (the base is
+always `Background`).
+
+### Preemption safety — the `m.locks` discipline (landed)
+`m.locks` is goish's `acquirem`/`releasem` depth counter (Go
+runtime1.go:631): while it is non-zero on an M, the SIGURG handler
+refuses trampoline injection and the cooperative safe point refuses
+`Gosched`. Two rr-traced bug classes hardened the discipline:
+
+| Invariant | Why |
+|-----------|-----|
+| the allocator runs masked (`mallocgc` parity) | a SIGURG landing mid-allocation migrated the G while the per-P mcache was half-mutated — a span with two owners livelocks the allocator at 100% CPU |
+| a bump/drop pair must never straddle a park | `gopark` can resume on a different M; a split pair leaves the parking M at +1 forever (silently unpreemptible) and wraps the resuming M to `u32::MAX`, after which preempt checks misread "one lock held" as "none" and fire inside `gopark`'s stash window — the commit fn is lost, a netpoll slot orphans at `PD_WAIT`, and the wakeup is dropped (the ~2% `select!` hang). `select!` now closes its mask epoch before the pass-2 park and reopens it after resume; user case bodies run unmasked |
+| `acquirem`/`releasem` are single fs-relative asm RMWs in `goish_rt_text` | debug builds don't inline `core::sync::atomic`, so a `fetch_add` is a call into plain `.text` where the SIGURG PC filter can't see it — injection between "materialize this M's counter address" and the RMW applies the RMW to the *old* M after a migration. `lock add/xadd fs:[offset]` always hits the M executing it |
+| `releasem` underflow is a debug panic | the tripwire turns any future straddle into an immediate diagnostic instead of a rare silent hang |
+
 ### Allocator maturation
 Phase 2a (today) is sufficient through M14. Higher tiers schedule
 against their forcing milestones:

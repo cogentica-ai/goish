@@ -23,7 +23,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use goish::runtime::lockfree_ring::LockFreeRing;
 use goish::runtime::sched::schedule;
 use goish::sync::WaitGroup;
-use goish::{go, syscall, KB};
+use goish::{go, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -39,7 +39,7 @@ fn check(cond: bool, msg: &[u8]) {
 #[goish::main]
 fn main() {
     // Scheduler-driven body so Wait() / WG-Drop can park properly.
-    go!(stack(64 * KB), || {
+    go!(|| {
         test_single_thread_round_trip();
         test_spsc_fifo();
         test_mpmc_no_loss_no_dup();

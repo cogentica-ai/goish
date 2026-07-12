@@ -51,6 +51,7 @@ pub mod pem;
 //   }
 /// `encoding.BinaryMarshaler` — types that can serialize themselves
 /// into a binary byte slice.
+#[goish::interface]
 pub trait BinaryMarshaler {
     fn MarshalBinary(&self) -> (slice<byte>, error);
 }
@@ -62,6 +63,7 @@ pub trait BinaryMarshaler {
 /// `encoding.BinaryUnmarshaler` — types that can read a binary
 /// representation of themselves. Implementations must copy `data` if
 /// they wish to retain it past the call.
+#[goish::interface]
 pub trait BinaryUnmarshaler {
     fn UnmarshalBinary(&mut self, data: slice<byte>) -> error;
 }
@@ -74,6 +76,7 @@ pub trait BinaryUnmarshaler {
 /// `self` to the end of `b` (growing if needed) and return the
 /// updated buffer. Implementations must not retain `b` nor mutate any
 /// bytes within `b[:len(b)]`.
+#[goish::interface]
 pub trait BinaryAppender {
     fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error);
 }
@@ -84,6 +87,7 @@ pub trait BinaryAppender {
 //   }
 /// `encoding.TextMarshaler` — types that can serialize themselves
 /// into UTF-8-encoded text bytes.
+#[goish::interface]
 pub trait TextMarshaler {
     fn MarshalText(&self) -> (slice<byte>, error);
 }
@@ -95,6 +99,7 @@ pub trait TextMarshaler {
 /// `encoding.TextUnmarshaler` — types that can read a textual
 /// representation of themselves. Implementations must copy `text` if
 /// they wish to retain it past the call.
+#[goish::interface]
 pub trait TextUnmarshaler {
     fn UnmarshalText(&mut self, text: slice<byte>) -> error;
 }
@@ -107,6 +112,7 @@ pub trait TextUnmarshaler {
 /// `self` to the end of `b` (growing if needed) and return the
 /// updated buffer. Implementations must not retain `b` nor mutate any
 /// bytes within `b[:len(b)]`.
+#[goish::interface]
 pub trait TextAppender {
     fn AppendText(&self, b: slice<byte>) -> (slice<byte>, error);
 }

@@ -79,4 +79,4 @@ pub use grow::{
     maybe_grow_step, DEFAULT_GROW_BARE_CAP, DEFAULT_GROW_RED_ZONE, GROW_TIER_2_SIZE,
     GROW_TIER_3_SIZE,
 };
-pub use stack::Stack;
+pub use stack::{reserve_pool_len, Stack, BARE_STACK_RESERVE, DEFAULT_STACK_SIZE, GUARD_SIZE};

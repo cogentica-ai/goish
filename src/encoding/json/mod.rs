@@ -15,7 +15,6 @@
 // v1 deviations from Go (doc'd in wip_json.md):
 //   * No reflection — user structs serialize via `Marshaler` trait;
 //     dynamic JSON uses the `Value` enum.
-//   * No `json.Number` (numbers always f64).
 //   * Object keys iterate sorted (BTreeMap-backed map<K, V>).
 
 #![allow(non_snake_case, non_upper_case_globals)]
@@ -28,7 +27,6 @@ use crate::gomap::map;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
-use crate::runtime::spin::SpinLock;
 use crate::strconv;
 use crate::types::{byte, float64, int};
 
@@ -206,6 +204,54 @@ impl PartialEq<Delim> for Token {
     }
 }
 
+/// `json.Number` — Go's `type Number string`. Surfaces when a Decoder
+/// is configured with `UseNumber()`, so JSON numbers preserve their
+/// original textual form (avoiding f64 precision loss for large ints
+/// or trailing-zero arbitrary-precision values). Convertible to int64
+/// or float64 on demand.
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
+pub struct Number(pub string);
+
+impl Number {
+    /// `(Number).String() string` — the textual form, identity.
+    #[allow(non_snake_case)]
+    pub fn String(&self) -> string {
+        self.0.clone()
+    }
+
+    /// `(Number).Int64() (int64, error)` — parse as signed 64-bit.
+    /// Returns Go's err on syntax/range failure.
+    #[allow(non_snake_case)]
+    pub fn Int64(&self) -> (int, error) {
+        strconv::ParseInt(self.0.clone(), 10, 64)
+    }
+
+    /// `(Number).Float64() (float64, error)` — parse as IEEE-754
+    /// double. Returns Go's err on syntax/range failure.
+    #[allow(non_snake_case)]
+    pub fn Float64(&self) -> (float64, error) {
+        strconv::ParseFloat(self.0.clone(), 64)
+    }
+}
+
+impl From<string> for Number {
+    fn from(s: string) -> Self {
+        Number(s)
+    }
+}
+
+impl From<&str> for Number {
+    fn from(s: &str) -> Self {
+        Number(string::from(s))
+    }
+}
+
+impl core::fmt::Display for Number {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl PartialEq<Token> for Delim {
     fn eq(&self, other: &Token) -> bool {
         matches!(other, Token::Delim(d) if d.0 == self.0)
@@ -213,14 +259,6 @@ impl PartialEq<Token> for Delim {
 }
 
 // ─── Sentinel errors ───────────────────────────────────────────────────
-
-fn cached_error(slot: &SpinLock<Option<error>>, init: fn() -> error) -> error {
-    let mut g = slot.lock();
-    if g.is_none() {
-        *g = Some(init());
-    }
-    g.as_ref().unwrap().clone()
-}
 
 crate::var! {
     pub ErrSyntax: error       = "json: invalid syntax";
@@ -395,10 +433,12 @@ impl<V: FromValue + Default + Clone> FromValue for map<string, V> {
 
 // ─── Marshaler / Unmarshaler traits ────────────────────────────────────
 
+#[goish::interface]
 pub trait Marshaler {
     fn MarshalJSON(&self) -> (slice<byte>, error);
 }
 
+#[goish::interface]
 pub trait Unmarshaler {
     fn UnmarshalJSON(&mut self, data: &[byte]) -> error;
 }
@@ -1308,12 +1348,63 @@ impl<W: io::Writer> Encoder<W> {
     }
 }
 
-pub struct Decoder<R: io::Reader> {
-    r: R,
+pub struct Decoder {
+    r: alloc::boxed::Box<dyn io::Reader>,
     buf: Vec<byte>,
     scan_pos: usize,
     token_state: u8,
     token_stack: Vec<u8>,
+    use_number: bool,
+}
+
+/// Cloning a Decoder shallow-copies the buffer + scan state but
+/// resets the underlying reader to empty. Mirrors what user-defined
+/// structs that embed `json.Decoder` expect from goishc's blanket
+/// `#[derive(Clone)]`. Semantically lossy at a real mid-stream
+/// position; in practice only the Default-shaped Decoders that come
+/// from struct initializers get cloned this way.
+impl Clone for Decoder {
+    fn clone(&self) -> Self {
+        struct EmptyReader;
+        impl io::Reader for EmptyReader {
+            fn Read(&mut self, _p: &mut crate::goslice::slice<byte>) -> (int, error) {
+                (0, errors::New(crate::gostring::string::from("EOF")))
+            }
+        }
+        Decoder {
+            r: alloc::boxed::Box::new(EmptyReader),
+            buf: self.buf.clone(),
+            scan_pos: self.scan_pos,
+            token_state: self.token_state,
+            token_stack: self.token_stack.clone(),
+            use_number: self.use_number,
+        }
+    }
+}
+
+impl Default for Decoder {
+    /// Default decoder wraps an empty byte source. Lets the Goish-
+    /// embedding pattern `struct UserDecoder { json::Decoder, … }`
+    /// derive `Default` without manually unwrapping the inner state.
+    fn default() -> Self {
+        // Empty reader — yields EOF on first Read. Suitable for
+        // struct-default initialization; the consumer will typically
+        // overwrite via assignment.
+        struct EmptyReader;
+        impl io::Reader for EmptyReader {
+            fn Read(&mut self, _p: &mut crate::goslice::slice<byte>) -> (int, error) {
+                (0, errors::New(crate::gostring::string::from("EOF")))
+            }
+        }
+        Decoder {
+            r: alloc::boxed::Box::new(EmptyReader),
+            buf: Vec::new(),
+            scan_pos: 0,
+            token_state: TOKEN_TOP_VALUE,
+            token_stack: Vec::new(),
+            use_number: false,
+        }
+    }
 }
 
 // Token-state constants — mirror Go's tokenTopValue .. tokenObjectComma.
@@ -1327,17 +1418,28 @@ const TOKEN_OBJECT_COLON: u8 = 6;
 const TOKEN_OBJECT_VALUE: u8 = 7;
 const TOKEN_OBJECT_COMMA: u8 = 8;
 
-pub fn NewDecoder<R: io::Reader>(r: R) -> Decoder<R> {
+pub fn NewDecoder<R: io::Reader + 'static>(r: R) -> Decoder {
     Decoder {
-        r,
+        r: alloc::boxed::Box::new(r),
         buf: Vec::new(),
         scan_pos: 0,
         token_state: TOKEN_TOP_VALUE,
         token_stack: Vec::new(),
+        use_number: false,
     }
 }
 
-impl<R: io::Reader> Decoder<R> {
+impl Decoder {
+    /// `(*Decoder) UseNumber()` — tells the Decoder to surface JSON
+    /// numbers as `Number` (the textual form) rather than `float64`.
+    /// State flag only; the Value-emit path consults it when assembling
+    /// number tokens. Returns `&mut Self` to chain Go-style.
+    #[allow(non_snake_case)]
+    pub fn UseNumber(&mut self) -> &mut Self {
+        self.use_number = true;
+        self
+    }
+
     /// Read all available bytes from the underlying reader and decode
     /// them as a single JSON value. v1: streaming-token decoding lands
     /// later; for now Decode reads to EOF and parses the whole buffer.

@@ -15,7 +15,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::go;
 use goish::runtime::sched::{schedule, Gosched};
-use goish::{syscall, KB};
+use goish::{syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -40,7 +40,7 @@ fn main() {
     //
     // Spawn one G that bumps a counter. Main returns immediately;
     // __goish_rt0's schedule() drains the queue and runs it.
-    go!(stack(64 * KB), || {
+    go!(|| {
         A_RAN.fetch_add(1, Ordering::Relaxed);
     });
 
@@ -49,7 +49,7 @@ fn main() {
     // The move closure captures `secret` by value; the captured
     // copy must survive the goroutine's stack switch.
     let secret: u64 = 0x_DEAD_BEEF_F00D_CAFE;
-    go!(stack(64 * KB), move || {
+    go!(move || {
         if secret == 0x_DEAD_BEEF_F00D_CAFE {
             B_RAN.fetch_add(1, Ordering::Relaxed);
         }
@@ -60,9 +60,9 @@ fn main() {
     // The outer G spawns 5 inner Gs, each of which bumps SPAWN_COUNT.
     // Verifies that newproc + schedule work re-entrantly inside a
     // running G.
-    go!(stack(64 * KB), || {
+    go!(|| {
         for _ in 0..5 {
-            go!(stack(64 * KB), || {
+            go!(|| {
                 SPAWN_COUNT.fetch_add(1, Ordering::Relaxed);
             });
         }
@@ -74,24 +74,39 @@ fn main() {
     // Gosched, Go #1 would run to completion before #2 starts. With
     // Gosched, they interleave. We log the sequence with 2-bit
     // markers so the test can spot if interleave was actually achieved.
-    go!(stack(64 * KB), || {
+    go!(|| {
         for _ in 0..3 {
-            let v = INTERLEAVE_LOG.load(Ordering::Relaxed);
-            INTERLEAVE_LOG.store((v << 2) | 1, Ordering::Relaxed);
+            // Atomic RMW: on multi-M two goroutines can run these
+            // lines simultaneously; a plain load/store pair loses one
+            // marker (lost update) and the count-==-9 check fails.
+            let _ = INTERLEAVE_LOG
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                    Some((v << 2) | 1)
+                });
             Gosched();
         }
     });
-    go!(stack(64 * KB), || {
+    go!(|| {
         for _ in 0..3 {
-            let v = INTERLEAVE_LOG.load(Ordering::Relaxed);
-            INTERLEAVE_LOG.store((v << 2) | 2, Ordering::Relaxed);
+            // Atomic RMW: on multi-M two goroutines can run these
+            // lines simultaneously; a plain load/store pair loses one
+            // marker (lost update) and the count-==-9 check fails.
+            let _ = INTERLEAVE_LOG
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                    Some((v << 2) | 2)
+                });
             Gosched();
         }
     });
-    go!(stack(64 * KB), || {
+    go!(|| {
         for _ in 0..3 {
-            let v = INTERLEAVE_LOG.load(Ordering::Relaxed);
-            INTERLEAVE_LOG.store((v << 2) | 3, Ordering::Relaxed);
+            // Atomic RMW: on multi-M two goroutines can run these
+            // lines simultaneously; a plain load/store pair loses one
+            // marker (lost update) and the count-==-9 check fails.
+            let _ = INTERLEAVE_LOG
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                    Some((v << 2) | 3)
+                });
             Gosched();
         }
     });
@@ -135,7 +150,7 @@ fn main() {
     // capacity, the per-G stack mmap, and Box drop on Dead Gs.
     static MANY: AtomicUsize = AtomicUsize::new(0);
     for _ in 0..1000 {
-        go!(stack(64 * KB), || {
+        go!(|| {
             MANY.fetch_add(1, Ordering::Relaxed);
         });
     }

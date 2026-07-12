@@ -212,9 +212,9 @@ pub fn New<S: __StringConv>(text: S) -> error {
     })))
 }
 
-/// `errors.ErrUnsupported` (errors/errors.go:90) — sentinel returned
-/// when a feature is unsupported. Use sites compare bare:
-/// `errors::Is(x, errors::ErrUnsupported)` and `if x == errors::ErrUnsupported`.
+// `errors.ErrUnsupported` (errors/errors.go:90) — sentinel returned
+// when a feature is unsupported. Use sites compare bare:
+// `errors::Is(x, errors::ErrUnsupported)` and `if x == errors::ErrUnsupported`.
 crate::var! { pub ErrUnsupported: error = "unsupported operation"; }
 
 impl error {
@@ -232,6 +232,23 @@ impl error {
         match As::<T>(self.clone()) {
             Some(arc) => (arc, true),
             None => (Arc::new(T::default()), false),
+        }
+    }
+
+    /// Panic-on-miss form. Mirrors Go's `merr := err.(*T)` (no comma-ok),
+    /// which panics at runtime when the dynamic type doesn't match.
+    /// Goishc lowers single-value type assertions into this; the
+    /// comma-ok form `v, ok := err.(*T)` lowers into `As<T>` instead.
+    ///
+    /// Unlike `As`, no `Default` bound is required — failure raises a
+    /// panic rather than synthesizing a zero `T`.
+    pub fn MustAs<T: ErrorTrait>(&self) -> Arc<T> {
+        match As::<T>(self.clone()) {
+            Some(arc) => arc,
+            None => panic!(
+                "interface conversion: error is not {}",
+                core::any::type_name::<T>()
+            ),
         }
     }
 }

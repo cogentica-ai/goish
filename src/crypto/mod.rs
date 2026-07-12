@@ -29,12 +29,19 @@ use alloc::boxed::Box;
 use core::any::Any;
 
 pub mod aes;
+pub mod chacha20;
+pub mod chacha20poly1305;
 pub mod cipher;
 pub mod des;
+pub mod ecdh;
+pub mod ecdsa;
+pub mod ed25519;
 pub mod hkdf;
 pub mod hmac;
+pub mod internal;
 pub mod md5;
 pub mod pbkdf2;
+pub mod poly1305;
 pub mod rand;
 pub mod rc4;
 pub mod rsa;
@@ -42,8 +49,10 @@ pub mod sha1;
 pub mod sha256;
 pub mod sha3;
 pub mod sha512;
+pub mod ssh;
 pub mod subtle;
 pub mod tls;
+pub mod x509;
 
 // ─── Hash identifier (Go: crypto.go:14) ───────────────────────────────
 
@@ -154,7 +163,7 @@ pub fn HashFunc(h: Hash) -> Hash {
 
 // ─── Hash registry (Go: crypto.go:123) ────────────────────────────────
 
-type HashCtor = Box<dyn Fn() -> Box<dyn HashTrait> + Send + Sync>;
+type HashCtor = Box<dyn Fn() -> Box<dyn HashTrait + Send + Sync> + Send + Sync>;
 
 /// Registry of `Hash → constructor`. Entries are populated by per-algorithm
 /// modules at call time; goish has no `init()` so consumers register
@@ -171,7 +180,7 @@ static HASH_REGISTRY: SpinLock<[Option<HashCtor>; maxHash as usize]> =
 /// `crypto.RegisterHash(h, f)` (crypto.go:145).
 pub fn RegisterHash<F>(h: Hash, f: F)
 where
-    F: Fn() -> Box<dyn HashTrait> + Send + Sync + 'static,
+    F: Fn() -> Box<dyn HashTrait + Send + Sync> + Send + Sync + 'static,
 {
     if h >= maxHash {
         panic!("crypto: RegisterHash of unknown hash function");
@@ -181,7 +190,7 @@ where
 }
 
 /// `Hash.New()` (crypto.go:127). Panics if the hash is not registered.
-pub fn HashNew(h: Hash) -> Box<dyn HashTrait> {
+pub fn HashNew(h: Hash) -> Box<dyn HashTrait + Send + Sync> {
     if h > 0 && h < maxHash {
         let g = HASH_REGISTRY.lock();
         if let Some(ref f) = g[h as usize] {
@@ -200,6 +209,31 @@ pub fn HashAvailable(h: Hash) -> bool {
     g[h as usize].is_some()
 }
 
+/// Register every hash algorithm shipped with goish's `crypto` tree so
+/// `crypto::HashNew(h)` resolves for the standard SHAs and MD5. Call
+/// once from a port's bootstrap path (or `#[goish::main]`) before the
+/// first lookup. Idempotent — re-registering replaces the existing
+/// constructor, which is harmless because every entry resolves to the
+/// same NewHash function.
+///
+/// Go side: each hash subpackage's `init()` calls
+/// `crypto.RegisterHash(crypto.SHA256, sha256.New)` etc. Goish has no
+/// per-package init driver, so the registration has to be explicit.
+pub fn RegisterStandardHashes() {
+    RegisterHash(MD5, crate::crypto::md5::NewHash);
+    RegisterHash(SHA1, crate::crypto::sha1::NewHash);
+    RegisterHash(SHA224, crate::crypto::sha256::NewHash224);
+    RegisterHash(SHA256, crate::crypto::sha256::NewHash);
+    RegisterHash(SHA384, crate::crypto::sha512::NewHash384);
+    RegisterHash(SHA512, crate::crypto::sha512::NewHash);
+    RegisterHash(SHA512_224, crate::crypto::sha512::NewHash512_224);
+    RegisterHash(SHA512_256, crate::crypto::sha512::NewHash512_256);
+    RegisterHash(SHA3_224, crate::crypto::sha3::NewHash224);
+    RegisterHash(SHA3_256, crate::crypto::sha3::NewHash256);
+    RegisterHash(SHA3_384, crate::crypto::sha3::NewHash384);
+    RegisterHash(SHA3_512, crate::crypto::sha3::NewHash512);
+}
+
 // ─── Signer / Decrypter trait surface (Go: crypto.go:152-240) ─────────
 
 /// `crypto.PublicKey` (crypto.go:152) — opaque public key. Concrete types
@@ -210,6 +244,7 @@ pub type PublicKey = Box<dyn Any + Send + Sync>;
 pub type PrivateKey = Box<dyn Any + Send + Sync>;
 
 /// `crypto.SignerOpts` (crypto.go:218) — options for `Signer.Sign`.
+#[goish::interface]
 pub trait SignerOpts: Send + Sync {
     /// Returns the hash function used; zero indicates no hashing.
     fn HashFunc(&self) -> Hash;
@@ -229,6 +264,7 @@ impl SignerOpts for HashOpts {
 }
 
 /// `crypto.Signer` (crypto.go:180) — opaque signing key.
+#[goish::interface]
 pub trait Signer: Send + Sync {
     fn Public(&self) -> PublicKey;
     fn Sign(
@@ -254,6 +290,7 @@ pub type DecrypterOpts = Box<dyn Any + Send + Sync>;
 
 /// `crypto.Decrypter` (crypto.go:229) — opaque private key for asymmetric
 /// decryption.
+#[goish::interface]
 pub trait Decrypter: Send + Sync {
     fn Public(&self) -> PublicKey;
     fn Decrypt(

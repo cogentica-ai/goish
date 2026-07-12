@@ -29,11 +29,12 @@
 //   - T::Skip, T::Skipf, T::SkipNow, T::Skipped
 //   - T::Run(name, fn) for subtests
 //   - T::Cleanup(fn) for deferred cleanup
+//   - T::TempDir for per-test scratch directories (auto-removed)
 //   - T::Helper (no-op in v1; affects file:line in failure messages
 //     in Go, which we don't track)
 //   - testing::Main(tests) — runner returning an exit code
 //
-// Not in v1: Parallel, TempDir, Context, Output, Attr, Setenv,
+// Not in v1: Parallel, Context, Output, Attr, Setenv,
 // Chdir, B (benchmarks), TestMain integration with -run/-v flags.
 
 #![allow(non_snake_case)]
@@ -120,7 +121,7 @@ impl T {
     pub fn Errorf<M: Into<string>>(
         &self,
         format: M,
-        args: crate::goslice::slice<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+        args: crate::goslice::slice<crate::goany::Any>,
     ) {
         let format: string = format.into();
         let msg: string = if args.Len() == 0 {
@@ -154,17 +155,27 @@ impl T {
         syscall::Exit(1);
     }
 
-    /// `t.Fatalf(msg)` — log error then FailNow.
-    pub fn Fatalf<M: Into<string>>(&self, msg: M) -> ! {
-        let msg: string = msg.into();
-        self.Errorf(msg, crate::goslice::slice::new());
+    /// `t.Fatalf(format, args)` — log + mark test as failed, then
+    /// abort the current test. Mirrors Go: `func (c *common) Fatalf(
+    /// format string, args ...any)` (testing.go) — `args` is the
+    /// runtime variadic slice that `fmt.Sprintf` would normally
+    /// spread. Same call-shape contract as `Errorf`:
+    ///   - `t.Fatalf("simple msg", goish::slice::new())` — no args
+    ///   - `t.Fatalf("got %v want %v", goish::slice!([]Any{a, b}))`
+    pub fn Fatalf<M: Into<string>>(
+        &self,
+        format: M,
+        args: crate::goslice::slice<crate::goany::Any>,
+    ) -> ! {
+        let format: string = format.into();
+        self.Errorf(format, args);
         self.FailNow();
     }
 
-    /// `t.Fatal(msg)` — alias for Fatalf.
+    /// `t.Fatal(msg)` — alias for Fatalf with no format args.
     pub fn Fatal<M: Into<string>>(&self, msg: M) -> ! {
         let msg: string = msg.into();
-        self.Fatalf(msg);
+        self.Fatalf(msg, crate::goslice::slice::new());
     }
 
     /// `t.Skip(msg)` — mark skipped + log + abort current test.
@@ -208,6 +219,71 @@ impl T {
     /// completes. Called in LIFO order. Mirrors `t.Cleanup`.
     pub fn Cleanup<F: FnOnce() + Send + 'static>(&self, f: F) {
         self.state.cleanups.Lock().push(Box::new(f));
+    }
+
+    /// `t.TempDir()` (testing/testing.go:1241) — return a unique
+    /// directory for use during this test, automatically removed
+    /// when the test (or its subtest) finishes. On failure to create
+    /// the directory, calls Fatalf.
+    ///
+    /// The directory name is `<os.TempDir()>/<sanitised name><N>`
+    /// where N is a process-local sequence number and path
+    /// separators in the test name are replaced with '_'.
+    pub fn TempDir(&mut self) -> string {
+        static SEQ: core::sync::atomic::AtomicU64 =
+            core::sync::atomic::AtomicU64::new(0);
+
+        let base = crate::os::TempDir();
+
+        let name_bytes_owned = self.name.clone();
+        let nb = name_bytes_owned.__as_bytes_internal();
+        let mut path: Vec<u8> = Vec::new();
+        let base_bytes = base.__as_bytes_internal();
+        path.extend_from_slice(base_bytes);
+        if !path.ends_with(b"/") {
+            path.push(b'/');
+        }
+        for &c in nb {
+            if c == b'/' || c == 0 {
+                path.push(b'_');
+            } else {
+                path.push(c);
+            }
+        }
+
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let mut tmp = [0u8; 20];
+        let mut idx = tmp.len();
+        let mut m = n;
+        if m == 0 {
+            idx -= 1;
+            tmp[idx] = b'0';
+        } else {
+            while m > 0 {
+                idx -= 1;
+                tmp[idx] = b'0' + (m % 10) as u8;
+                m /= 10;
+            }
+        }
+        path.extend_from_slice(&tmp[idx..]);
+
+        let dir = string::from_bytes(&path);
+        let err = crate::os::Mkdir(dir.clone(), 0o700);
+        if !err.IsNil() {
+            self.Fatalf(
+                string::from_static(
+                    "testing.T.TempDir: failed to create temp directory",
+                ),
+                crate::goslice::slice::new(),
+            );
+        }
+
+        let cleanup_path = dir.clone();
+        self.Cleanup(move || {
+            let _ = crate::os::RemoveAll(cleanup_path);
+        });
+
+        dir
     }
 
     /// `t.Run(name, f)` — run f as a sub-test under this test.

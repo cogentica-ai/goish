@@ -81,7 +81,7 @@ fn write_result(idx: u8, label: &[u8], pass: bool) {
 
 #[goish::main]
 fn main() {
-    goish::go!(stack(128 * KB), || {
+    goish::go!(|| {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {

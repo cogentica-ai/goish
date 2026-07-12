@@ -49,7 +49,7 @@ const N_GOROUTINES: i64 = 10;
 fn main() {
     static SURVIVOR_COUNT: AtomicI64 = AtomicI64::new(0);
 
-    go!(stack(64 * KB), || {
+    go!(|| {
         let wg = WaitGroup::new();
 
         for i in 0..N_GOROUTINES {

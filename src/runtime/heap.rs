@@ -173,6 +173,17 @@ fn route_to_mcentral(layout: Layout) -> bool {
 ///   3. Else fall back to `mcentral::alloc` (central partial-list scan).
 ///   4. On all-tier OOM: round to a page and try mheap.
 pub unsafe fn alloc(size: usize, align: usize) -> *mut u8 {
+    // Preemption mask — same discipline as `GlobalAlloc::alloc`
+    // (see the comment there); this free-fn entry is reached by
+    // `realloc` and runtime-internal callers.
+    crate::runtime::sched::acquirem();
+    let p = alloc_masked(size, align);
+    crate::runtime::sched::releasem();
+    p
+}
+
+#[inline]
+unsafe fn alloc_masked(size: usize, align: usize) -> *mut u8 {
     let layout = Layout::from_size_align_unchecked(size, align);
     if route_to_mheap(layout) {
         return mheap_alloc(layout);
@@ -203,21 +214,28 @@ pub unsafe fn alloc(size: usize, align: usize) -> *mut u8 {
     mheap_alloc(layout)
 }
 
-/// Reallocate via alloc + memcpy + free.
+/// Reallocate via alloc + memcpy + free. Preempt-masked end to end —
+/// `Vec` growth funnels through here, and the copy runs against span
+/// state the mask keeps owner-consistent.
 pub unsafe fn realloc(ptr: *mut u8, old_size: usize, new_size: usize, align: usize) -> *mut u8 {
-    let dst = alloc(new_size, align);
+    crate::runtime::sched::acquirem();
+    let dst = alloc_masked(new_size, align);
     if dst.is_null() {
+        crate::runtime::sched::releasem();
         return dst;
     }
     let n = old_size.min(new_size);
     core::ptr::copy_nonoverlapping(ptr, dst, n);
     dealloc_routed(ptr, old_size, align);
+    crate::runtime::sched::releasem();
     dst
 }
 
-/// Free a previously allocated block.
+/// Free a previously allocated block. Preempt-masked (see `alloc`).
 pub unsafe fn free(ptr: *mut u8, size: usize) {
+    crate::runtime::sched::acquirem();
     dealloc_routed(ptr, size, 8);
+    crate::runtime::sched::releasem();
 }
 
 /// Internal dealloc dispatch consulting mheap then mcentral.
@@ -240,37 +258,48 @@ unsafe fn dealloc_routed(ptr: *mut u8, size: usize, align: usize) {
 struct GoishAllocator;
 
 unsafe impl GlobalAlloc for GoishAllocator {
+    // **Preemption mask (Go parity)**: `mallocgc` opens with
+    // `mp := acquirem()` (malloc.go:1018) precisely because the
+    // mcache fast path mutates owner-P-private state (`alloc_cache`,
+    // `freeindex` — plain UnsafeCell writes under a "only the M
+    // bound to this P touches these" discipline). Without the mask,
+    // a SIGURG async preempt landing mid-`mcache_alloc` deschedules
+    // the G *while it owns the span cursor*; the G resumes on
+    // another M and keeps mutating a span that the original P's new
+    // occupant is also allocating from. The corrupted span
+    // accounting then wedges every allocating M in an
+    // uncache/cacheSpan retry storm — an allocator-wide livelock
+    // (all Ms at 100%, zero progress; bisected from
+    // http_complex_api's per-request goroutine churn).
+    // `acquirem` bumps `m.locks`, which both the SIGURG handler and
+    // the cooperative-preempt check treat as "do not preempt here".
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if route_to_mheap(layout) {
-            return mheap_alloc(layout);
-        }
-        if route_to_mcentral(layout) {
-            if let Some(p) = crate::runtime::sched::current_p() {
-                let q = p.mcache_alloc(layout.size(), layout.align());
-                if !q.is_null() {
-                    return q;
-                }
-            }
-            let p = crate::runtime::mcentral::alloc(layout.size(), layout.align());
-            if !p.is_null() {
-                return p;
-            }
-            return mheap_alloc(layout);
-        }
-        mheap_alloc(layout)
+        crate::runtime::sched::acquirem();
+        let p = alloc_masked(layout.size(), layout.align());
+        crate::runtime::sched::releasem();
+        p
     }
 
     #[inline]
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        crate::runtime::sched::acquirem();
+        // dealloc's span mutations (`alloc_bits` clear, central list
+        // moves) are lock/CAS-protected, but `mcentral::free`'s
+        // last-slot release path re-reads span state across several
+        // steps; keep the same non-preemptible discipline as alloc
+        // (Go's `mfree` paths run under the same acquirem).
         if route_to_mheap(layout) {
             mheap_free(ptr, layout);
+            crate::runtime::sched::releasem();
             return;
         }
         if crate::runtime::mcentral::ready() && crate::runtime::mcentral::free(ptr) {
+            crate::runtime::sched::releasem();
             return;
         }
         mheap_free(ptr, layout);
+        crate::runtime::sched::releasem();
     }
 
     #[inline]

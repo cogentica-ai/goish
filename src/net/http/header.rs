@@ -29,6 +29,29 @@ pub struct Header {
     inner: map<string, slice<string>>,
 }
 
+// `for k, v := range h.Header` — Go iterates the underlying
+// `map[string][]string` directly. The forwarding impl delegates to
+// the inner map's RangeIter, yielding `(&string, &slice<string>)`.
+// Without this, the transpiler emits `range!(req.Header)` which fails
+// to find a RangeIter impl on the Header newtype.
+impl<'a> crate::range::RangeIter for &'a Header {
+    type Item = <&'a map<string, slice<string>> as crate::range::RangeIter>::Item;
+    type Iter = <&'a map<string, slice<string>> as crate::range::RangeIter>::Iter;
+    fn range(self) -> Self::Iter {
+        crate::range::RangeIter::range(&self.inner)
+    }
+}
+
+// Symmetric: `range!(&h.Header)` produces `&&Header` — forward the
+// same way as `&Header`.
+impl<'a> crate::range::RangeIter for &&'a Header {
+    type Item = <&'a map<string, slice<string>> as crate::range::RangeIter>::Item;
+    type Iter = <&'a map<string, slice<string>> as crate::range::RangeIter>::Iter;
+    fn range(self) -> Self::Iter {
+        crate::range::RangeIter::range(&(*self).inner)
+    }
+}
+
 impl Header {
     /// `make(http.Header)` — fresh empty header map.
     pub fn new() -> Self {
@@ -259,6 +282,7 @@ fn parse_http_date(b: &[byte], sep: byte) -> Option<crate::time::Time> {
         mm as int,
         ss as int,
         0,
+        crate::time::UTC,
     ))
 }
 

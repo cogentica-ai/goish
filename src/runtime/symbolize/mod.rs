@@ -72,7 +72,7 @@ pub fn init() {
 
     // Open /proc/self/exe.
     let path = b"/proc/self/exe\0";
-    let fd = unsafe { syscall::Open(path.as_ptr(), syscall::O_RDONLY, 0) };
+    let fd = syscall::Open(path.as_ptr(), syscall::O_RDONLY, 0);
     if fd < 0 {
         return;
     }
@@ -81,7 +81,7 @@ pub fn init() {
     let mut st = syscall::Stat_t::default();
     let r = syscall::Fstat(fd, &mut st);
     if r != 0 || st.st_size <= 0 {
-        unsafe { syscall::Close(fd) };
+        syscall::Close(fd);
         return;
     }
     let size = st.st_size as usize;
@@ -96,7 +96,7 @@ pub fn init() {
         fd,
         0,
     );
-    unsafe { syscall::Close(fd) };
+    syscall::Close(fd);
     if (base as isize) <= 0 {
         return;
     }

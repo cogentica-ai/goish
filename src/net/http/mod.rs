@@ -61,13 +61,15 @@ pub use request::{
     MaxBytesError, MaxBytesReader, NewMaxBytesError, NewMaxBytesReader, ParseHTTPVersion,
     ProtocolError, ReadRequest, Request,
 };
-pub use response::ResponseWriter;
+pub use response::{
+    Flusher, HeaderHandle, Hijacker, PushOptions, Pusher, ResponseWriter,
+};
 pub use httputil::NewSingleHostReverseProxy;
 pub use server::{
     handler, AllowQuerySemicolons, DefaultServeMux, ErrAbortHandler, ErrBodyNotAllowed,
     ErrContentLength, ErrHandlerTimeout, ErrHijacked, ErrServerClosed, Error, Handle, HandleFunc,
     Handler, HandlerFunc, ListenAndServe, NewServeMux, NotFound, NotFoundHandler, Redirect,
-    RedirectHandler, Serve, ServeMux, Server, StripPrefix,
+    RedirectHandler, Serve, ServeMux, Server, StripPrefix, TimeoutHandler,
 };
 pub use sniff::DetectContentType;
 pub use status::{

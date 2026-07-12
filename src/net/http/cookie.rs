@@ -491,7 +491,7 @@ pub(crate) fn read_set_cookies(h: &Header) -> slice<Cookie> {
 /// `http.SetCookie(w, c)` — appends `Set-Cookie: c.String()` to the
 /// response header. Drops cookies with invalid names. Mirrors
 /// `SetCookie` (cookie.go:251).
-pub fn SetCookie(w: &mut super::ResponseWriter, c: &Cookie) {
+pub fn SetCookie(w: &(dyn super::ResponseWriter + Send + Sync + 'static), c: &Cookie) {
     let v = c.String();
     if v.Len() == 0 {
         return;
@@ -830,6 +830,7 @@ fn parse_cookie_date(b: &[u8], sep: u8) -> Option<time::Time> {
         mm as int,
         ss as int,
         0,
+        time::UTC,
     ))
 }
 

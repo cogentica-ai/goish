@@ -25,6 +25,7 @@ pub mod mheap;
 mod mem;
 pub mod netpoll;
 pub mod note;
+pub mod pkginit;
 pub mod preempt;
 pub mod rand;
 pub mod rt_section;
@@ -105,6 +106,20 @@ pub fn GC() {
     // Slim: no-op.
 }
 
+/// `runtime.SetFinalizer(obj, finalizer)` (Go mfinal.go:84) — register
+/// a finalizer that runs when `obj` becomes unreachable. Slim is a
+/// no-op: Goish v1 uses Arc/Box + RAII (`Drop`) for resource cleanup,
+/// so finalizer registration is redundant — the `Drop` impl on the
+/// concrete type already runs at the correct time.
+///
+/// Ports calling this for OS resource teardown (file descriptors,
+/// locks) should rely on the type's `Drop` impl instead. Surfaced by
+/// porting fluxcd/pkg/lockedfile, which uses SetFinalizer to ensure a
+/// lock file gets closed; the goish File's Drop handles that already.
+pub fn SetFinalizer<T, F>(_obj: T, _finalizer: F) {
+    // Slim: no-op. Drop handles cleanup.
+}
+
 /// `runtime.GOROOT()` (extern.go:285) — directory containing the
 /// Go installation. Goish doesn't ship as a tree (single-binary
 /// rlib), so this returns `""` to mirror Go's "not set" sentinel.
@@ -122,24 +137,193 @@ pub fn GoroutineProfile(_p: crate::goslice::slice<()>) -> (crate::types::int, bo
     (0, false)
 }
 
-// ─── Caller / FuncForPC — stack-frame introspection (slim) ───────────
+// ─── Caller / FuncForPC — stack-frame introspection ──────────────────
 //
-// Go: `runtime.Caller(skip)` (extern.go:235) returns
+// Go: `runtime.Caller(skip)` (extern.go:315) returns
 // `(pc uintptr, file string, line int, ok bool)` for the call site
-// `skip` frames up the stack. `runtime.FuncForPC(pc)` (symtab.go) maps
-// a PC to a `*Func` whose `.Name()` is the qualified function name.
+// `skip` frames up the stack. `runtime.Callers(skip, pcs)`
+// (extern.go:338) fills `pcs` with return PCs of the goroutine's
+// frames. `runtime.FuncForPC(pc)` (symtab.go) maps a PC to a `*Func`.
 //
-// goish v1 has no DWARF backtrace runtime — calling these returns the
-// "unknown" sentinel so callers (logr/funcr, glog, klog) compile and
-// produce log lines tagged "<unknown>" for caller info instead of
-// erroring out. Fill this in when a port forces actual frame walking.
+// Both are implemented via a frame-pointer walk. The build forces
+// frame pointers (`-C force-frame-pointers=yes`), so every function
+// has a valid `rbp` chain — `[rbp]` is the saved RBP, `[rbp+8]` is the
+// return PC. `runtime::segv::walk_frames` does the bounds-checked walk.
+//
+// Both must run on a real goroutine: the walk is bounded against the
+// running G's live stack window (`active_stack_lo`/`active_stack_hi`).
+// On g0 / the bootstrap thread (`current_g()` is `None`) there is no
+// safe bound, so `Caller` returns `ok == false` and `Callers` returns
+// `0` — matching Go's "unable to recover information" contract.
 
-/// `runtime.Caller(skip)` (Go 1.25 extern.go:235) — slim stub returning
-/// `(0, "", 0, false)`. Callers that branch on `ok` get the "unable to
-/// recover information" path, which logr/funcr renders as
-/// `Caller{File: "<unknown>", Line: 0}`.
-pub fn Caller(_skip: crate::types::int) -> (crate::types::uintptr, crate::gostring::string, crate::types::int, bool) {
-    (0, crate::gostring::string::from_static(""), 0, false)
+/// Read the caller's frame-base pointer (`rbp`). `#[inline(never)]` so
+/// the call site emits a real `call` and this helper sets up its own
+/// SysV frame (`push rbp; mov rbp, rsp`) — the returned value is *this
+/// helper's* `rbp`. The caller accounts for that extra frame in `skip`.
+#[inline(never)]
+fn caller_rbp() -> u64 {
+    let v: u64;
+    // SAFETY: a plain register read; no memory touched, no stack use.
+    unsafe {
+        core::arch::asm!("mov {}, rbp", out(reg) v, options(nomem, nostack));
+    }
+    v
+}
+
+/// Walk the current goroutine's `rbp` chain into `out`, returning the
+/// number of return PCs collected. `out[0]` is the return PC of the
+/// frame for the function that called `collect_frames` — i.e. the
+/// goish `Caller`/`Callers` body. Returns `0` (and writes nothing)
+/// when not running on a goroutine.
+///
+/// `#[inline(never)]` so it always occupies a real, separate frame —
+/// the `skip` arithmetic in `Caller`/`Callers` depends on exactly one
+/// helper frame (this one) sitting between the public API body and the
+/// frame `out[0]` should name.
+#[inline(never)]
+fn collect_frames(out: &mut [u64; segv::MAX_FRAMES]) -> usize {
+    // The running goroutine bounds the walk. No goroutine → no safe
+    // bound; refuse the walk.
+    let g_ptr = match sched::current_g() {
+        Some(g) => g,
+        None => return 0,
+    };
+    let g = unsafe { g_ptr.as_ref() };
+    let stack_lo = g
+        .active_stack_lo
+        .load(core::sync::atomic::Ordering::Acquire);
+    let stack_hi = g
+        .active_stack_hi
+        .load(core::sync::atomic::Ordering::Acquire);
+    if stack_hi <= stack_lo {
+        return 0;
+    }
+    // `caller_rbp` is `#[inline(never)]`: it has its own frame, so the
+    // value it returns is its own `rbp`. Walking from there yields, at
+    // index 0, the return PC of `caller_rbp`'s caller — which is this
+    // `collect_frames`. Step past `collect_frames`'s own frame so that
+    // `out[0]` lands on the public `Caller`/`Callers` body's frame.
+    let rbp = caller_rbp();
+    let n = segv::walk_frames(rbp, stack_lo, stack_hi, out);
+    if n == 0 {
+        return 0;
+    }
+    // Drop index 0 (the `collect_frames` frame) by shifting left.
+    let kept = n - 1;
+    let mut i = 0;
+    while i < kept {
+        out[i] = out[i + 1];
+        i += 1;
+    }
+    while i < segv::MAX_FRAMES {
+        out[i] = 0;
+        i += 1;
+    }
+    kept
+}
+
+/// `runtime.Caller(skip)` (Go 1.25 extern.go:315) — reports file/line
+/// information about a function invocation on the calling goroutine's
+/// stack. `skip == 0` identifies the caller of `Caller`. Returns the
+/// program counter, file name, line number, and an `ok` flag that is
+/// `false` when the information could not be recovered.
+///
+/// Implemented by walking the `rbp` chain. `ok` reflects whether a
+/// *frame* was recovered, not whether symbolization succeeded — if the
+/// symboliser misses, the recovered `pc` is still returned with
+/// `ok == true`, an empty `file`, and `line == 0`.
+pub fn Caller(
+    skip: crate::types::int,
+) -> (crate::types::uintptr, crate::gostring::string, crate::types::int, bool) {
+    let empty = crate::gostring::string::from_static("");
+    if skip < 0 {
+        return (0, empty, 0, false);
+    }
+    let mut frames = [0u64; segv::MAX_FRAMES];
+    let n = collect_frames(&mut frames);
+    // `frames[0]` is the `Caller` body's own frame; `skip == 0` wants
+    // the caller of `Caller`, i.e. `frames[1]`. Generally `frames[skip
+    // + 1]`.
+    let skip_us = match usize::try_from(skip) {
+        Ok(s) => s,
+        Err(_) => return (0, empty, 0, false),
+    };
+    let idx = match skip_us.checked_add(1) {
+        Some(i) => i,
+        None => return (0, empty, 0, false),
+    };
+    if idx >= n {
+        return (0, empty, 0, false);
+    }
+    let pc = frames[idx];
+    if pc == 0 {
+        return (0, empty, 0, false);
+    }
+    let mut info = symbolize::SymInfo::default();
+    let mut file = empty;
+    let mut line: crate::types::int = 0;
+    if symbolize::symbolize(pc, &mut info) {
+        if info.file_len > 0 {
+            file = crate::gostring::string::from_bytes(&info.file[..info.file_len]);
+        }
+        line = crate::types::int::from(info.line);
+    }
+    (pc, file, line, true)
+}
+
+/// `runtime.Callers(skip, pcs)` (Go 1.25 extern.go:338) — fills `pcs`
+/// with the return program counters of function invocations on the
+/// calling goroutine's stack. `skip == 0` identifies the frame for
+/// `Callers` itself; `skip == 1` the caller of `Callers`. Returns the
+/// number of entries written to `pcs`.
+///
+/// Implemented by walking the `rbp` chain. Writes at most `len(pcs)`
+/// entries. Returns `0` when `pcs` is empty or when not running on a
+/// goroutine (g0 / bootstrap thread — no safe stack bound).
+///
+/// `pcs` is taken by `&mut` — Go's `[]uintptr` is a write-through
+/// header over a caller-owned array; goish's `slice` owns its backing
+/// `Vec`, so the borrowed form preserves the "filled in place" contract
+/// (mirrors `io::Reader::Read`, whose `p []byte` is `&mut slice<byte>`).
+pub fn Callers(
+    skip: crate::types::int,
+    pcs: &mut crate::goslice::slice<crate::types::uintptr>,
+) -> crate::types::int {
+    let cap = pcs.Len();
+    if cap <= 0 || skip < 0 {
+        return 0;
+    }
+    let cap_us = match usize::try_from(cap) {
+        Ok(c) => c,
+        Err(_) => return 0,
+    };
+    let start = match usize::try_from(skip) {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let mut frames = [0u64; segv::MAX_FRAMES];
+    let n = collect_frames(&mut frames);
+    // `frames[0]` is the `Callers` body's own frame, which is exactly
+    // Go's `skip == 0`. Write `frames[skip ..]` into `pcs`.
+    if start >= n {
+        return 0;
+    }
+    let avail = n - start;
+    let want = if avail < cap_us { avail } else { cap_us };
+    let mut i = 0;
+    while i < want {
+        let pc = frames[start + i];
+        if pc == 0 {
+            break;
+        }
+        let slot = match crate::types::int::try_from(i) {
+            Ok(v) => v,
+            Err(_) => break,
+        };
+        pcs[slot] = pc;
+        i += 1;
+    }
+    crate::types::int::try_from(i).unwrap_or(0)
 }
 
 /// `runtime.Func` (Go 1.25 symtab.go) — opaque handle returned by
@@ -264,16 +448,39 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // Hand off to the user's main. The proc-macro #[goish::main]
     // generates a #[no_mangle] extern "C" fn __goish_main wrapping the
     // user's body, so the linker resolves this `extern` block to it.
+    //
+    // Mirror Go's `runtime.main`: the user's `main` runs on a regular
+    // goroutine (the "main goroutine"), NOT directly on m0's g0
+    // scheduler stack. Running it on a G means `current_g()` is set
+    // while user code executes, so blocking primitives (channel
+    // send/recv, sync.WaitGroup.Wait, sync.Mutex contention) can park
+    // and resume like in Go. Running it on g0 — as the previous direct
+    // call did — left `current_g() == None`, so any blocking channel op
+    // from `main`/test code fatal'd with "outside of any goroutine".
+    //
+    // The main goroutine gets a generous 8 MiB reservation (large
+    // `new_sized` path: lazily committed, guard page below) — main
+    // often hosts the deepest inline call chains, and the virtual
+    // size costs nothing until touched.
     extern "C" {
         fn __goish_main();
     }
-    unsafe { __goish_main() }
+    sched::newproc_with_stack_at(
+        8 * 1024 * 1024,
+        file!(),
+        line!(),
+        alloc::boxed::Box::new(|| unsafe { __goish_main() }),
+    );
 
-    // M17b-ε: schedule() under the mcall-pattern never returns. It
-    // drains the run queue; the main M exits via `Exit(0)` from
-    // `maybe_exit_main_m` once `LIVE_G_COUNT == 0`. Workers keep
-    // parking indefinitely, reaped by the main M's exit_group(2).
-    sched::schedule()
+    // M17b-ε: enter the dispatch loop on g0 — never returns. It
+    // dispatches the main goroutine (and any others), and the main M
+    // exits via `Exit(0)` from `maybe_exit_main_m` once
+    // `LIVE_G_COUNT == 0` (or the user calls syscall::Exit directly).
+    // Workers keep parking indefinitely, reaped by the main M's
+    // exit_group(2). (`m_schedule_loop`, not the public `schedule()`:
+    // the public entry is `-> ()` because from inside a goroutine it
+    // acts as a returning drain barrier.)
+    sched::m_schedule_loop()
 }
 
 // ─── panic handler ─────────────────────────────────────────────────────

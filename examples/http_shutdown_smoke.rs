@@ -17,7 +17,7 @@ use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use goish::io::{Closer, Reader, Writer};
 use goish::net;
 use goish::net::http;
-use goish::{bytes, go, make, string, syscall, time, KB};
+use goish::{bytes, go, make, string, syscall, time};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -56,7 +56,7 @@ fn main() {
     CLIENT_PORT.store(port as i32, Ordering::Release);
 
     let srv_run = srv.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let err = srv_run.Serve(ln);
         if err.Error() == "http: Server closed" {
             SERVE_ERR_IS_CLOSED.store(1, Ordering::Release);

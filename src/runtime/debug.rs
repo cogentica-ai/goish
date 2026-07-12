@@ -139,9 +139,8 @@ pub fn Stack() -> slice<byte> {
 /// `runtime/debug.PrintStack()` (stack.go:17) — write the formatted
 /// stack trace from `Stack()` to standard error.
 pub fn PrintStack() {
-    use crate::io::Writer as IoWriter;
     let s = Stack();
-    let mut e = crate::os::Stderr();
+    let e = crate::os::Stderr();
     // Best-effort write; ignore errors as Go does.
     let _ = e.Write(s);
 }

@@ -20,7 +20,9 @@ pub const SYS_WRITE: usize = 1;
 pub const SYS_OPEN: usize = 2;
 pub const SYS_CLOSE: usize = 3;
 pub const SYS_MMAP: usize = 9;
+pub const SYS_MPROTECT: usize = 10;
 pub const SYS_MUNMAP: usize = 11;
+pub const SYS_MADVISE: usize = 28;
 pub const SYS_CLONE: usize = 56;
 pub const SYS_EXIT: usize = 60; // per-thread exit (vs SYS_EXIT_GROUP)
 pub const SYS_SCHED_YIELD: usize = 24;
@@ -157,6 +159,17 @@ pub const PROT_EXEC: i32 = 4;
 
 pub const MAP_PRIVATE: i32 = 0x02;
 pub const MAP_ANONYMOUS: i32 = 0x20;
+/// Don't reserve swap / commit charge for this mapping — pages are
+/// accounted only as they're touched. Used for goroutine stack
+/// reservations, where the virtual size (1 MiB+) vastly exceeds
+/// typical use.
+pub const MAP_NORESERVE: i32 = 0x4000;
+
+/// `madvise(2)` advice: free the pages and reset them to zero-fill on
+/// next touch. Drops physical memory immediately (unlike MADV_FREE's
+/// lazy reclaim), so RSS reflects reality — same reasoning as Go's
+/// default `madvdontneed=1` since 1.16.
+pub const MADV_DONTNEED: i32 = 4;
 
 /// Sentinel returned by `mmap(2)` on failure (`(void*) -1`).
 pub const MAP_FAILED: *mut u8 = !0usize as *mut u8;
@@ -257,17 +270,108 @@ pub fn Read(fd: i32, p: *mut u8, n: usize) -> isize {
     unsafe { syscall3(SYS_READ, fd as usize, p as usize, n) }
 }
 
-/// Common errno values (Linux, from `<errno.h>`).
-pub const ENOENT: i32 = 2;
-pub const EACCES: i32 = 13;
-pub const EEXIST: i32 = 17;
-pub const ENOTDIR: i32 = 20;
-pub const EISDIR: i32 = 21;
-pub const ENOTEMPTY: i32 = 39;
-pub const EINTR: i32 = 4;
-pub const ENOSYS: i32 = 38;
-pub const ENOTSUP: i32 = 95;
-pub const EOPNOTSUPP: i32 = 95;
+// ─── Errno ────────────────────────────────────────────────────────────
+//
+// Go: `syscall.Errno` is `type Errno uintptr` (integer) that implements
+// the `error` interface (zerrors_linux_*.go:Errno.Error).
+//
+// Goish v1 ships it as a Copy newtype around i32 so we can:
+//   1. Use it as the return type of syscall fns (Go-shape: `error`).
+//   2. Compare values directly (`if err == syscall.EINTR { ... }`) since
+//      Errno is PartialEq.
+//   3. Cross-compare with raw i32 in internal goish-v1 paths that compare
+//      against the negated kernel rc (e.g. `if -rc == syscall::ENOENT`).
+//
+// The wrap-into-error path (`error::from(Errno)`) routes through
+// `errors::From<Errno>` so Go-shape returns `(T, error)` continue to
+// work — the error binding holds an `Errno`-typed Arc<dyn ErrorTrait>.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Default)]
+#[allow(non_camel_case_types)]
+pub struct Errno(pub i32);
+
+impl Errno {
+    /// `(e Errno) Error() string` — Linux errno → human name (Go's
+    /// `errnoErr` table is large; we ship a short table for the v1
+    /// surface and fall through to the numeric form for anything else).
+    #[allow(non_snake_case)]
+    pub fn Error(&self) -> crate::gostring::string {
+        crate::gostring::string::from_static(match self.0 {
+            2 => "no such file or directory",
+            4 => "interrupted system call",
+            13 => "permission denied",
+            17 => "file exists",
+            20 => "not a directory",
+            21 => "is a directory",
+            38 => "function not implemented",
+            39 => "directory not empty",
+            95 => "operation not supported",
+            _ => "errno",
+        })
+    }
+
+    /// `Is(target)` mirrors Go 1.13+ errno comparison helpers — e.g.
+    /// `errors.Is(err, syscall.EINTR)` walks the unwrap chain. We
+    /// expose value-equality as a fast path.
+    #[allow(non_snake_case)]
+    pub fn Is(&self, target: Errno) -> bool {
+        *self == target
+    }
+}
+
+impl crate::errors::ErrorTrait for Errno {
+    fn Error(&self) -> crate::gostring::string {
+        Self::Error(self)
+    }
+}
+
+// `From<Errno> for error` flows through the existing
+// `impl<E: ErrorTrait> From<E> for error` blanket in errors/mod.rs.
+// Errno(0) is the success sentinel (`syscall.Errno(0).Error() ==
+// "errno"`, but `errors.Is(syscall.Errno(0), nil)` is true in Go);
+// goish callers manage that bridge at the syscall fn body, returning
+// `errors::nil` for the zero case instead of `Errno(0).into()`.
+
+// Cross-equality with raw i32 so internal goish-v1 code that compares
+// `(-rc as i32) == syscall::ENOENT` keeps compiling without rewrite.
+impl PartialEq<i32> for Errno {
+    fn eq(&self, other: &i32) -> bool {
+        self.0 == *other
+    }
+}
+impl PartialEq<Errno> for i32 {
+    fn eq(&self, other: &Errno) -> bool {
+        *self == other.0
+    }
+}
+
+// Cross-equality with goish::error so port code `if err == syscall.EINTR`
+// (where err is the trait-object form) compares by underlying Errno
+// value. The implementation downcasts through `goish::Any::As` which
+// returns the Go-shape `(value, ok)` comma-ok pair.
+impl PartialEq<Errno> for crate::errors::error {
+    fn eq(&self, other: &Errno) -> bool {
+        let (e, ok) = self.As::<Errno>();
+        ok && *e == *other
+    }
+}
+impl PartialEq<crate::errors::error> for Errno {
+    fn eq(&self, other: &crate::errors::error) -> bool {
+        other == self
+    }
+}
+
+/// Common errno values (Linux, from `<errno.h>`). Match the Go-side
+/// `syscall.E*` consts in name; type is `Errno` to match Go shape.
+pub const ENOENT: Errno = Errno(2);
+pub const EACCES: Errno = Errno(13);
+pub const EEXIST: Errno = Errno(17);
+pub const ENOTDIR: Errno = Errno(20);
+pub const EISDIR: Errno = Errno(21);
+pub const ENOTEMPTY: Errno = Errno(39);
+pub const EINTR: Errno = Errno(4);
+pub const ENOSYS: Errno = Errno(38);
+pub const ENOTSUP: Errno = Errno(95);
+pub const EOPNOTSUPP: Errno = Errno(95);
 
 /// Open flags. Subset of `<fcntl.h>`.
 pub const O_RDONLY: i32 = 0;
@@ -441,9 +545,18 @@ pub fn Ftruncate(fd: i32, length: i64) -> i32 {
 
 /// `flock(fd, operation)` — advisory file lock.
 /// operation: LOCK_SH (shared), LOCK_EX (exclusive), LOCK_UN (unlock).
+///
+/// Go: `func Flock(fd int, how int) (err error)` (zsyscall_linux_*.go).
+/// Goish mirrors the `int`/`int` arg shape so port-side calls don't
+/// need cast preludes. Returns `nil` on success, `Errno(-rc).into()`
+/// on failure.
 #[allow(non_snake_case)]
-pub fn Flock(fd: i32, operation: i32) -> i32 {
-    unsafe { syscall2(SYS_FLOCK, fd as usize, operation as usize) as i32 }
+pub fn Flock(fd: crate::types::int, operation: crate::types::int) -> crate::errors::error {
+    let rc = unsafe { syscall2(SYS_FLOCK, fd as usize, operation as usize) as i32 };
+    if rc >= 0 {
+        return crate::errors::nil;
+    }
+    Errno(-rc).into()
 }
 
 // flock operations (linux/fcntl.h)
@@ -458,6 +571,7 @@ pub const SYS_MKDIR: usize = 83;
 pub const SYS_UNLINK: usize = 87;
 pub const SYS_RMDIR: usize = 84;
 pub const SYS_CHMOD: usize = 90;
+pub const SYS_FCHMOD: usize = 91;
 pub const SYS_SYMLINK: usize = 88;
 pub const SYS_READLINK: usize = 89;
 pub const SYS_RENAME: usize = 82;
@@ -506,6 +620,12 @@ pub fn Chdir(path: *const u8) -> i32 {
 #[allow(non_snake_case)]
 pub fn Chmod(path: *const u8, mode: u32) -> i32 {
     unsafe { syscall2(SYS_CHMOD, path as usize, mode as usize) as i32 }
+}
+
+/// `fchmod(fd, mode)`. Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Fchmod(fd: i32, mode: u32) -> i32 {
+    unsafe { syscall2(SYS_FCHMOD, fd as usize, mode as usize) as i32 }
 }
 
 /// `symlink(oldname, newname)`. Returns 0 on success, -errno on failure.
@@ -685,6 +805,45 @@ pub fn Mmap(addr: *mut u8, length: usize, prot: i32, flags: i32, fd: i32, offset
 #[allow(non_snake_case)]
 pub fn Munmap(addr: *mut u8, length: usize) -> isize {
     unsafe { syscall3(SYS_MUNMAP, addr as usize, length, 0) }
+}
+
+/// `mprotect(2)` — change protection on a region. Used to carve
+/// `PROT_NONE` guard pages out of goroutine stack reservations.
+#[allow(non_snake_case)]
+pub fn Mprotect(addr: *mut u8, length: usize, prot: i32) -> isize {
+    unsafe { syscall3(SYS_MPROTECT, addr as usize, length, prot as usize) }
+}
+
+/// `madvise(2)` — advise the kernel about a region's usage pattern.
+/// `MADV_DONTNEED` drops physical pages when a stack reservation is
+/// recycled into the reserve pool.
+#[allow(non_snake_case)]
+pub fn Madvise(addr: *mut u8, length: usize, advice: i32) -> isize {
+    unsafe { syscall3(SYS_MADVISE, addr as usize, length, advice as usize) }
+}
+
+/// `recv(2)` flag: peek at incoming data without consuming it.
+pub const MSG_PEEK: i32 = 0x2;
+/// `recv(2)` flag: non-blocking for this call only.
+pub const MSG_DONTWAIT: i32 = 0x40;
+
+/// `recvfrom(2)` with null src-addr — i.e. `recv(2)`. Returns the
+/// byte count, `0` on orderly peer shutdown, or `-errno`. Used with
+/// `MSG_PEEK | MSG_DONTWAIT` by net/http's client-disconnect watcher
+/// to probe a socket without consuming pipelined request bytes.
+#[allow(non_snake_case)]
+pub fn Recvfrom(fd: i32, buf: *mut u8, len: usize, flags: i32) -> isize {
+    unsafe {
+        syscall6(
+            SYS_RECVFROM,
+            fd as usize,
+            buf as usize,
+            len,
+            flags as usize,
+            0,
+            0,
+        )
+    }
 }
 
 /// `clock_gettime(2)` — read the value of `clk` into `tp`. Returns 0 on

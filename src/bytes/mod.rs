@@ -1004,7 +1004,13 @@ impl io::Reader for Buffer {
     }
 }
 
-/// `NewBuffer(buf)` — Buffer using `buf` as initial contents (read-from-front).
+/// `NewBuffer(buf)` — Buffer using `buf` as initial contents (read-
+/// from-front). Go's `bytes.NewBuffer` returns `*Buffer`; the Goish
+/// runtime returns owned `Buffer` to keep trait-impl dispatch (io::
+/// Writer, io::Reader, …) working without forwarding boilerplate.
+/// The transpiler wraps the call as `nilable::new(bytes::NewBuffer(…))`
+/// when feeding a `*Buffer` slot — see `PointerReturnSlots` in
+/// stdlib_registry.go.
 pub fn NewBuffer(buf: slice<byte>) -> Buffer {
     Buffer {
         buf: buf.__into_vec(),
@@ -1014,6 +1020,7 @@ pub fn NewBuffer(buf: slice<byte>) -> Buffer {
 }
 
 /// `NewBufferString(s)` — Buffer initialized with the bytes of `s`.
+/// Same return-shape rationale as `NewBuffer`.
 pub fn NewBufferString<S: Into<string>>(s: S) -> Buffer {
     let s = s.into();
     Buffer {
@@ -1228,13 +1235,20 @@ impl io::Reader for Reader {
     }
 }
 
+impl io::ByteReader for Reader {
+    fn ReadByte(&mut self) -> (byte, error) {
+        Reader::ReadByte(self)
+    }
+}
+
 impl io::WriterTo for Reader {
     fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
         Reader::WriteTo(self, w)
     }
 }
 
-/// `NewReader(b)` — `Reader` over `b`.
+/// `NewReader(b)` — `Reader` over `b`. Go: `*Reader`; Goish runtime
+/// returns owned `Reader` (see `NewBuffer` for the rationale).
 pub fn NewReader<B: Into<slice<byte>>>(b: B) -> Reader {
     let b = b.into();
     Reader {

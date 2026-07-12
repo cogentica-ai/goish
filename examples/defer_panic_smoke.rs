@@ -64,7 +64,7 @@ fn record(tag: i64) {
 
 #[goish::main]
 fn main() {
-    go!(stack(64 * KB), || {
+    go!(|| {
         let wg = WaitGroup::new();
 
         // ── Goroutine A: panics with 3 defers. Should record 3, 2, 1

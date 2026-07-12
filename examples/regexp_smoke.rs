@@ -94,6 +94,86 @@ fn main() {
     let (re8, _) = regexp::Compile("(?:ab)+");
     check!("Non-cap group match", re8.MatchString("ababab"));
 
+    // Concat-boundary backtracking across an Alt: `(a|ab)c` against
+    // `abc` must yield `ab + c`, not commit to `a` and then fail on `c`
+    // at position 1 (text[1]='b'). Equivalent shape to the semver
+    // constraint operator alternation `(=|!=|>=|...)X` where a
+    // short-then-long pair sits before a discriminating trailing item.
+    let (re_alt_concat, _) = regexp::Compile("(a|ab)c");
+    check!(
+        "Alt-in-Concat backtracks to longer branch",
+        re_alt_concat.MatchString("abc")
+    );
+    let alt_caps = re_alt_concat.FindStringSubmatch("abc");
+    check!(
+        "Alt-in-Concat captures `ab`",
+        alt_caps.Len() == 2 && alt_caps[1] == string("ab")
+    );
+
+    // Mirror the user-reported operator-alternation shape: a short
+    // operator listed before a longer one that shares its first byte.
+    // `(=|!=)1` against `!=1` must commit to `!=`.
+    let (re_op, _) = regexp::Compile("(=|!=)1");
+    check!(
+        "Op alt backtracks `=` -> `!=` before trailing digit",
+        re_op.MatchString("!=1")
+    );
+    let op_caps = re_op.FindStringSubmatch("!=1");
+    check!(
+        "Op alt captures `!=`",
+        op_caps.Len() == 2 && op_caps[1] == string("!=")
+    );
+
+    // Anchored version (mimicking semver constraint parsing where the
+    // operator is followed by whitespace then a digit).
+    let (re_constr, _) = regexp::Compile(
+        "^(=|!=|>|>=|<|<=)\\s*(\\d+)$"
+    );
+    let cm = re_constr.FindStringSubmatch(">=42");
+    check!(
+        "Semver-shape constraint matches `>=42`",
+        cm.Len() == 3 && cm[1] == string(">=") && cm[2] == string("42")
+    );
+
+    // Alternation INSIDE a quantified group: the engine must retry
+    // the Alt branch chosen in earlier reps when a later rep or the
+    // outer tail fails. Pattern `(?:bb|b)*bc` against `bbc` is the
+    // canonical failing case for snapshot-only Repeat — rep 1 must
+    // pick `b` (not `bb`) so the trailing `bc` can match at pos=1.
+    let (re_qg, _) = regexp::Compile("(?:bb|b)*bc");
+    check!(
+        "Alt-in-quantified-group backtracks across rep choices",
+        re_qg.MatchString("bbc")
+    );
+
+    // User-reported shape: ^(A)((?:B|C)(A))*$ where the inner Alt
+    // separates two A-flanked branches. With multi-length A and
+    // separator alternation, snapshot-only Repeat would commit to
+    // wrong branches and fail to validate well-formed inputs.
+    let (re_constr_list, _) = regexp::Compile(
+        "^(\\d+)((?:,|;)(\\d+))*$"
+    );
+    check!(
+        "Constraint-list anchored single",
+        re_constr_list.MatchString("1")
+    );
+    check!(
+        "Constraint-list anchored two with `,`",
+        re_constr_list.MatchString("1,2")
+    );
+    check!(
+        "Constraint-list anchored mixed separators",
+        re_constr_list.MatchString("1,2;3")
+    );
+    check!(
+        "Constraint-list rejects trailing separator",
+        !re_constr_list.MatchString("1,2,")
+    );
+    check!(
+        "Constraint-list rejects leading separator",
+        !re_constr_list.MatchString(",1,2")
+    );
+
     // The actual semver pattern fragment used by Masterminds/semver.
     let (sv, sv_err) = regexp::Compile(
         "^v?(0|[1-9]\\d*)(?:\\.(0|[1-9]\\d*))?(?:\\.(0|[1-9]\\d*))?$"

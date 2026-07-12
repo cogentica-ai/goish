@@ -19,7 +19,7 @@ use goish::{go, syscall, Println, KB};
 fn main() {
     // Run the test body in a dedicated goroutine — main can't block
     // on Sema-based waits (it has no current_g).
-    go!(stack(64 * KB), || run_tests());
+    go!(|| run_tests());
     schedule();
 }
 

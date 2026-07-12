@@ -6,7 +6,7 @@ resolver = "2"
 name = "goish"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.86"
 authors = ["Chanwit Kaewkasi <chanwit@gmail.com>"]
 description = "Goish v1 — Go-style stdlib for Rust, no_std and no glibc, built on raw Linux syscalls."
 license = "MIT OR Apache-2.0"
@@ -225,6 +225,10 @@ path = "examples/mcentral_smoke.rs"
 [[example]]
 name = "sched_swap"
 path = "examples/sched_swap.rs"
+
+[[example]]
+name = "stack_reserve_smoke"
+path = "examples/stack_reserve_smoke.rs"
 
 [[example]]
 name = "sched_go"
@@ -586,12 +590,36 @@ name = "production_http_server"
 path = "examples/production_http_server.rs"
 
 [[example]]
+name = "http_complex_api"
+path = "examples/http_complex_api.rs"
+
+[[example]]
 name = "tar_smoke"
 path = "examples/tar_smoke.rs"
 
 [[example]]
+name = "tar_writer_smoke"
+path = "examples/tar_writer_smoke.rs"
+
+[[example]]
 name = "math_big_smoke"
 path = "examples/math_big_smoke.rs"
+
+[[example]]
+name = "bigmod_smoke"
+path = "examples/bigmod_smoke.rs"
+
+[[example]]
+name = "io_fs_walkdir_smoke"
+path = "examples/io_fs_walkdir_smoke.rs"
+
+[[example]]
+name = "fips_rsa_smoke"
+path = "examples/fips_rsa_smoke.rs"
+
+[[example]]
+name = "crypto_rsa_smoke"
+path = "examples/crypto_rsa_smoke.rs"
 
 [[example]]
 name = "net_url_smoke"
@@ -602,9 +630,132 @@ name = "os_exec_smoke"
 path = "examples/os_exec_smoke.rs"
 
 [[example]]
+name = "cmd_stdout_pipe_test"
+path = "examples/cmd_stdout_pipe_test.rs"
+
+[[example]]
+name = "os_readdir_smoke"
+path = "examples/os_readdir_smoke.rs"
+
+[[example]]
 name = "var_marker_smoke"
 path = "examples/var_marker_smoke.rs"
 
 [[example]]
 name = "goarray_smoke"
 path = "examples/goarray_smoke.rs"
+
+[[example]]
+name = "gomap_no_zero_smoke"
+path = "examples/gomap_no_zero_smoke.rs"
+
+[[example]]
+name = "pkginit_smoke"
+path = "examples/pkginit_smoke.rs"
+
+[[example]]
+name = "import_smoke"
+path = "examples/import_smoke.rs"
+
+[[example]]
+name = "interface_smoke"
+path = "examples/interface_smoke.rs"
+
+[[example]]
+name = "stringer_ref_smoke"
+path = "examples/stringer_ref_smoke.rs"
+
+[[example]]
+name = "crypto_ed25519_smoke"
+path = "examples/crypto_ed25519_smoke.rs"
+
+[[example]]
+name = "edwards25519_field_smoke"
+path = "examples/edwards25519_field_smoke.rs"
+
+[[example]]
+name = "edwards25519_scalar_smoke"
+path = "examples/edwards25519_scalar_smoke.rs"
+
+[[example]]
+name = "edwards25519_point_smoke"
+path = "examples/edwards25519_point_smoke.rs"
+
+[[example]]
+name = "fips_ed25519_smoke"
+path = "examples/fips_ed25519_smoke.rs"
+
+[[example]]
+name = "flate_inflate_smoke"
+path = "examples/flate_inflate_smoke.rs"
+
+[[example]]
+name = "flate_huffman_smoke"
+path = "examples/flate_huffman_smoke.rs"
+
+[[example]]
+name = "flate_smoke"
+path = "examples/flate_smoke.rs"
+
+[[example]]
+name = "zlib_smoke"
+path = "examples/zlib_smoke.rs"
+
+[[example]]
+name = "gzip_smoke"
+path = "examples/gzip_smoke.rs"
+
+[[example]]
+name = "runtime_callers_smoke"
+path = "examples/runtime_callers_smoke.rs"
+
+[[example]]
+name = "x509_certpool_smoke"
+path = "examples/x509_certpool_smoke.rs"
+
+[[example]]
+name = "asn1_smoke"
+path = "examples/asn1_smoke.rs"
+
+[[example]]
+name = "ssh_smoke"
+path = "examples/ssh_smoke.rs"
+[[example]]
+name = "tls12_smoke"
+path = "examples/tls12_smoke.rs"
+
+[[example]]
+name = "ecdsa_smoke"
+path = "examples/ecdsa_smoke.rs"
+
+[[example]]
+name = "x509_ecdsa_smoke"
+path = "examples/x509_ecdsa_smoke.rs"
+
+[[example]]
+name = "https_real_smoke"
+path = "examples/https_real_smoke.rs"
+
+[[example]]
+name = "temp_uniqueness_smoke"
+path = "examples/temp_uniqueness_smoke.rs"
+
+[[example]]
+name = "bufio_pathological_smoke"
+path = "examples/bufio_pathological_smoke.rs"
+
+[[example]]
+name = "interface_auto_composite"
+path = "examples/interface_auto_composite.rs"
+
+[[example]]
+name = "chacha20poly1305_smoke"
+path = "examples/chacha20poly1305_smoke.rs"
+
+[[example]]
+name = "zlib_offset_smoke"
+path = "examples/zlib_offset_smoke.rs"
+
+[[example]]
+name = "cast_clean_scratch"
+path = "examples/cast_clean_scratch.rs"

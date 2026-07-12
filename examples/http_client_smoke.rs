@@ -24,7 +24,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{bytes, go, string, syscall, Println, KB};
+use goish::{bytes, go, string, syscall, Println};
 
 #[goish::main]
 fn main() {
@@ -83,11 +83,19 @@ fn main() {
         let _ = w.Write(bytes(""));
     });
     mux.HandleFunc(string("/stream"), |w, _r| {
-        let _ = w.Flush();
+        // Go: f, ok := w.(http.Flusher)
+        let (f, ok) = goish::cast!(w, http::Flusher);
+        if ok {
+            f.Flush();
+        }
         let _ = w.Write(bytes("alpha-"));
-        let _ = w.Flush();
+        if ok {
+            f.Flush();
+        }
         let _ = w.Write(bytes("beta-"));
-        let _ = w.Flush();
+        if ok {
+            f.Flush();
+        }
         let _ = w.Write(bytes("gamma"));
     });
     mux.HandleFunc(string("/setcookie"), |w, _r| {
@@ -109,7 +117,7 @@ fn main() {
     let addr = ln.Addr().String();
     let srv_arc = Arc::new(srv);
     let srv_for_serve = srv_arc.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         let _ = srv_for_serve.Serve(ln);
     });
     time::Sleep(time::Millisecond * 30);

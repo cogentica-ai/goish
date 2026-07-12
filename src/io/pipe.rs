@@ -24,14 +24,14 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 
-use crate::errors::{self, error};
+use crate::errors::error;
 use crate::gochan::chan;
 use crate::goslice::slice;
 use crate::errors::nil;
 use crate::sync::{Mutex, Once};
 use crate::types::{byte, int};
 
-use super::{cached_error, Closer, Reader, Writer, EOF};
+use super::{Closer, Reader, Writer, EOF};
 
 // ─── ErrClosedPipe (pipe.go:36) ───────────────────────────────────────
 
@@ -240,6 +240,10 @@ impl PipeData {
 
 /// `PipeReader` (pipe.go:126) — read half of a pipe. Reads block until
 /// a writer sends or the write end closes.
+///
+/// Clone shares the same underlying pipe (the `Arc<PipeData>`), matching
+/// Go's `*PipeReader`: handing the same pointer to several owners.
+#[derive(Clone)]
 pub struct PipeReader {
     p: Arc<PipeData>,
 }
@@ -280,6 +284,11 @@ impl Closer for PipeReader {
 
 /// `PipeWriter` (pipe.go:152) — write half of a pipe. Writes block
 /// until one or more readers consume the data or the read end closes.
+///
+/// Clone shares the same underlying pipe (the `Arc<PipeData>`), matching
+/// Go's `*PipeWriter`: handing the same pointer to several owners (e.g. a
+/// packfile encoder that writes, plus a goroutine that CloseWithError's it).
+#[derive(Clone)]
 pub struct PipeWriter {
     p: Arc<PipeData>,
 }

@@ -1,0 +1,1222 @@
+// crypto/tls/handshake_client_tls13.rs — TLS 1.3 client handshake.
+//
+// Port of:
+//   crypto/tls/handshake_client_tls13.go (key functions)
+//   crypto/tls/key_schedule.go (trafficKey, finishedHash, nextTrafficSecret)
+//
+// This file implements the TLS 1.3 client-side handshake as a self-contained
+// function `do_client_handshake_tls13` called from handshake_client.rs after
+// detecting supported_versions extension in ServerHello.
+//
+// TLS 1.3 flow:
+//   Client → Server: ClientHello (with key_share, supported_versions)
+//   Server → Client: ServerHello (with key_share response, supported_versions)
+//   [Server encrypts from here using server_handshake_traffic_secret]
+//   Server → Client: {EncryptedExtensions}
+//   Server → Client: {Certificate}
+//   Server → Client: {CertificateVerify}
+//   Server → Client: {Finished}
+//   [Client encrypts from here using client_handshake_traffic_secret]
+//   Client → Server: {Finished}
+//   [Both sides switch to application_traffic_secret]
+//
+// TLS 1.3 record encoding (RFC 8446 §5.2):
+//   - All post-ServerHello records are TLSCiphertext (content_type=23).
+//   - Plaintext = inner_plaintext || inner_content_type (1 byte).
+//   - Nonce = write_iv XOR (seq_num as 12-byte BE).
+//   - AAD = TLSCiphertext header bytes: type(1)||version(2)||length(2).
+//
+// Reference: RFC 8446.
+
+#![allow(non_snake_case, non_upper_case_globals)]
+
+extern crate alloc;
+
+use alloc::vec::Vec;
+
+use crate::crypto::ecdh;
+use crate::crypto::sha256;
+use crate::crypto::sha512;
+use crate::crypto::tls::key_schedule::{
+    self, CipherSuiteTls13, EarlySecret, TrafficKeys,
+    cipher_suite_tls13, finished_hash, traffic_keys,
+};
+use crate::crypto::tls::record::{
+    RECORD_ALERT, RECORD_APPLICATION, RECORD_CHANGE_CIPHER_SPEC, RECORD_HANDSHAKE,
+    encode_record, read_record,
+};
+use crate::errors::{self, error};
+use crate::goslice::slice;
+use crate::hash::Hash as HashTrait;
+use crate::io::Writer as WriterTrait;
+use crate::types::byte;
+
+// ─── TLS 1.3 message types ────────────────────────────────────────────
+
+const MSG_ENCRYPTED_EXTENSIONS: byte = 8;
+const MSG_CERTIFICATE: byte = 11;
+const MSG_CERTIFICATE_VERIFY: byte = 15;
+const MSG_FINISHED: byte = 20;
+
+// ─── TLS 1.3 SignatureScheme values (RFC 8446 §4.2.3) ─────────────────
+
+/// ecdsa_secp256r1_sha256 = 0x0403
+const SIG_ECDSA_SECP256R1_SHA256: u16 = 0x0403;
+/// ecdsa_secp384r1_sha384 = 0x0503
+const SIG_ECDSA_SECP384R1_SHA384: u16 = 0x0503;
+/// rsa_pkcs1_sha256 = 0x0401 (deprecated in TLS 1.3 but some servers send it)
+const SIG_RSA_PKCS1_SHA256: u16 = 0x0401;
+/// rsa_pkcs1_sha384 = 0x0501
+const SIG_RSA_PKCS1_SHA384: u16 = 0x0501;
+/// rsa_pkcs1_sha512 = 0x0601
+const SIG_RSA_PKCS1_SHA512: u16 = 0x0601;
+/// rsa_pss_rsae_sha256 = 0x0804
+const SIG_RSA_PSS_RSAE_SHA256: u16 = 0x0804;
+/// rsa_pss_rsae_sha384 = 0x0805
+const SIG_RSA_PSS_RSAE_SHA384: u16 = 0x0805;
+/// rsa_pss_rsae_sha512 = 0x0806
+const SIG_RSA_PSS_RSAE_SHA512: u16 = 0x0806;
+/// ed25519 = 0x0807
+const SIG_ED25519: u16 = 0x0807;
+
+// ─── SPKI AlgorithmIdentifier OID bytes ───────────────────────────────
+// These are the VALUE bytes of the OID TLV (after the 06 xx header).
+
+/// rsaEncryption: 1.2.840.113549.1.1.1
+const OID_RSA: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
+/// ecPublicKey: 1.2.840.10045.2.1
+const OID_EC_PUBLIC_KEY: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
+/// Ed25519: 1.3.101.112
+const OID_ED25519: &[u8] = &[0x2b, 0x65, 0x70];
+
+// ─── TLS 1.3 signedMessage (RFC 8446 §4.4.3) ──────────────────────────
+//
+// signed = 64 × 0x20 || context_string || 0x00 || transcript_hash
+// context_string for server = "TLS 1.3, server CertificateVerify"
+
+const SERVER_SIGNATURE_CONTEXT: &[u8] = b"TLS 1.3, server CertificateVerify\x00";
+
+/// Build the `signed` message that covers the TLS 1.3 CertificateVerify.
+/// RFC 8446 §4.4.3: for ECDSA (directSigning), this IS the message to be
+/// signed/verified (not pre-hashed here — ECDSA/Ed25519 will SHA-256 it internally
+/// as part of the scheme, but for VerifyP256 we must pass the SHA-256 digest).
+fn tls13_signed_message(transcript_hash: &[u8]) -> Vec<byte> {
+    let mut msg: Vec<byte> = Vec::with_capacity(64 + SERVER_SIGNATURE_CONTEXT.len() + transcript_hash.len());
+    for _ in 0..64 {
+        msg.push(0x20);
+    }
+    msg.extend_from_slice(SERVER_SIGNATURE_CONTEXT);
+    msg.extend_from_slice(transcript_hash);
+    msg
+}
+
+// ─── Server certificate key type ──────────────────────────────────────
+
+#[derive(Clone)]
+enum ServerPubKey {
+    EcdsaP256(crate::crypto::ecdsa::P256PublicKey),
+    Rsa(crate::crypto::rsa::PublicKey),
+    Ed25519(crate::crypto::ed25519::PublicKey),
+    Unknown,
+}
+
+/// Parse the server's public key type from a DER-encoded leaf certificate.
+/// Returns the key type enum.
+fn parse_server_pubkey(cert_der: &[u8]) -> ServerPubKey {
+    use crate::encoding::asn1;
+
+    let der_slice = slice::__from_vec(cert_der.to_vec());
+
+    // outer Certificate SEQUENCE
+    let (cert_rv, _, err) = asn1::ParseRaw(der_slice);
+    if !err.IsNil() { return ServerPubKey::Unknown; }
+
+    // TBSCertificate SEQUENCE
+    let (tbs_rv, _, err) = asn1::ParseRaw(cert_rv.Bytes.clone());
+    if !err.IsNil() { return ServerPubKey::Unknown; }
+
+    // Find SPKI
+    let (spki_bytes, spki_err) = crate::crypto::ecdsa::find_spki_in_tbs(&tbs_rv.Bytes);
+    if !spki_err.IsNil() { return ServerPubKey::Unknown; }
+
+    let (spki_rv, _, err) = asn1::ParseRaw(spki_bytes.clone());
+    if !err.IsNil() { return ServerPubKey::Unknown; }
+
+    // AlgorithmIdentifier SEQUENCE → get OID
+    let (alg_rv, rest_after_alg, err) = asn1::ParseRaw(spki_rv.Bytes.clone());
+    if !err.IsNil() { return ServerPubKey::Unknown; }
+
+    // Parse OID from AlgorithmIdentifier
+    let (oid_rv, _, err) = asn1::ParseRaw(alg_rv.Bytes.clone());
+    if !err.IsNil() { return ServerPubKey::Unknown; }
+
+    let oid_bytes: &[u8] = &oid_rv.Bytes;
+
+    if oid_bytes == OID_ED25519 {
+        // Ed25519: SPKI BIT STRING contains the 32-byte public key directly
+        let (bits_rv, _, err) = asn1::ParseRaw(rest_after_alg.clone());
+        if !err.IsNil() { return ServerPubKey::Unknown; }
+        let bs: &[u8] = &bits_rv.Bytes;
+        if bs.len() < 33 { return ServerPubKey::Unknown; }
+        // bs[0] = unused bits (0), bs[1..33] = key
+        let key_bytes = &bs[1..];
+        if key_bytes.len() < 32 { return ServerPubKey::Unknown; }
+        let key_s = slice::__from_vec(key_bytes[..32].to_vec());
+        let pk = crate::crypto::ed25519::PublicKey(key_s);
+        return ServerPubKey::Ed25519(pk);
+    }
+
+    if oid_bytes == OID_EC_PUBLIC_KEY {
+        // Try ECDSA P256
+        let (pk, err) = crate::crypto::ecdsa::decode_x509_ec_p256_pubkey(cert_der);
+        if err.IsNil() {
+            return ServerPubKey::EcdsaP256(pk);
+        }
+        return ServerPubKey::Unknown;
+    }
+
+    if oid_bytes == OID_RSA {
+        // RSA
+        let (pk, err) = crate::crypto::tls::record::decode_x509_rsa_pubkey(cert_der);
+        if err.IsNil() {
+            return ServerPubKey::Rsa(pk);
+        }
+        return ServerPubKey::Unknown;
+    }
+
+    ServerPubKey::Unknown
+}
+
+/// Parse the first leaf certificate DER bytes from a TLS 1.3 Certificate message body.
+/// TLS 1.3 Certificate message (after the 4-byte msg_type+length header):
+///   certificate_request_context: u8-length-prefixed
+///   certificate_list: u24-length-prefixed list of:
+///     cert_data: u24-length-prefixed DER bytes
+///     extensions: u16-length-prefixed
+fn parse_tls13_cert_message_leaf(plain: &[u8]) -> Option<Vec<u8>> {
+    // plain[0] = MSG_CERTIFICATE (11)
+    // plain[1..4] = u24 length of body
+    if plain.len() < 4 { return None; }
+    let body_len = ((plain[1] as usize) << 16) | ((plain[2] as usize) << 8) | (plain[3] as usize);
+    if plain.len() < 4 + body_len { return None; }
+    let mut pos = 4usize;
+
+    // certificate_request_context (u8 length-prefixed)
+    if pos >= plain.len() { return None; }
+    let ctx_len = plain[pos] as usize;
+    pos += 1 + ctx_len;
+
+    // certificate_list (u24 length-prefixed)
+    if pos + 3 > plain.len() { return None; }
+    let cert_list_len = ((plain[pos] as usize) << 16) | ((plain[pos+1] as usize) << 8) | (plain[pos+2] as usize);
+    pos += 3;
+    if pos + cert_list_len > plain.len() { return None; }
+    if cert_list_len == 0 { return None; }
+
+    // First entry: cert_data (u24 length-prefixed)
+    if pos + 3 > plain.len() { return None; }
+    let cert_len = ((plain[pos] as usize) << 16) | ((plain[pos+1] as usize) << 8) | (plain[pos+2] as usize);
+    pos += 3;
+    if pos + cert_len > plain.len() { return None; }
+
+    Some(plain[pos..pos + cert_len].to_vec())
+}
+
+/// Parse the CertificateVerify message body: (sig_alg: u16, signature: bytes).
+/// plain[0] = MSG_CERTIFICATE_VERIFY (15)
+/// plain[1..4] = u24 length
+/// body: sig_alg(2) || sig_len(2) || sig_bytes
+fn parse_tls13_cert_verify(plain: &[u8]) -> Option<(u16, Vec<u8>)> {
+    if plain.len() < 4 { return None; }
+    let mut pos = 4usize; // skip type+length
+    if pos + 2 > plain.len() { return None; }
+    let sig_alg = ((plain[pos] as u16) << 8) | (plain[pos+1] as u16);
+    pos += 2;
+    if pos + 2 > plain.len() { return None; }
+    let sig_len = ((plain[pos] as usize) << 8) | (plain[pos+1] as usize);
+    pos += 2;
+    if pos + sig_len > plain.len() { return None; }
+    Some((sig_alg, plain[pos..pos + sig_len].to_vec()))
+}
+
+/// Verify a TLS 1.3 CertificateVerify signature.
+/// transcript_hash = hash(ClientHello || ServerHello || EncryptedExtensions || Certificate)
+/// Returns nil on success.
+fn verify_cert_verify(
+    pubkey: &ServerPubKey,
+    sig_alg: u16,
+    signature: &[u8],
+    transcript_hash_bytes: &[u8],
+) -> error {
+    let signed_msg = tls13_signed_message(transcript_hash_bytes);
+
+    match sig_alg {
+        SIG_ECDSA_SECP256R1_SHA256 => {
+            let pk = match pubkey {
+                ServerPubKey::EcdsaP256(k) => k,
+                _ => return crate::errors::New("tls13: sig_alg is ECDSA-P256 but cert has different key type"),
+            };
+            // SHA-256 hash of signedMessage for VerifyP256
+            let digest = {
+                let mut h = crate::crypto::sha256::New();
+                let s = slice::__from_vec(signed_msg.clone());
+                let _ = crate::io::Writer::Write(&mut h, s);
+                let empty = slice::__from_vec(Vec::new());
+                crate::hash::Hash::Sum(&h, empty).__into_vec()
+            };
+            crate::crypto::ecdsa::VerifyP256(pk, &digest, signature)
+        }
+        SIG_RSA_PSS_RSAE_SHA256 => {
+            let pk = match pubkey {
+                ServerPubKey::Rsa(k) => k,
+                _ => return crate::errors::New("tls13: sig_alg is RSA-PSS but cert has different key type"),
+            };
+            // SHA-256 hash of signedMessage
+            let digest = {
+                let mut h = crate::crypto::sha256::New();
+                let s = slice::__from_vec(signed_msg.clone());
+                let _ = crate::io::Writer::Write(&mut h, s);
+                let empty = slice::__from_vec(Vec::new());
+                crate::hash::Hash::Sum(&h, empty).__into_vec()
+            };
+            let digest_s = slice::__from_vec(digest);
+            let sig_s = slice::__from_vec(signature.to_vec());
+            // PSSSaltLengthEqualsHash = 0 in Go's rsa.PSSSaltLengthEqualsHash
+            crate::crypto::rsa::VerifyPSS(pk, crate::crypto::SHA256, digest_s, sig_s, None)
+        }
+        SIG_RSA_PSS_RSAE_SHA384 => {
+            let pk = match pubkey {
+                ServerPubKey::Rsa(k) => k,
+                _ => return crate::errors::New("tls13: sig_alg is RSA-PSS-SHA384 but cert has different key type"),
+            };
+            let digest = {
+                let mut h = crate::crypto::sha512::New384();
+                let s = slice::__from_vec(signed_msg.clone());
+                let _ = crate::io::Writer::Write(&mut h, s);
+                let empty = slice::__from_vec(Vec::new());
+                crate::hash::Hash::Sum(&h, empty).__into_vec()
+            };
+            let digest_s = slice::__from_vec(digest);
+            let sig_s = slice::__from_vec(signature.to_vec());
+            crate::crypto::rsa::VerifyPSS(pk, crate::crypto::SHA384, digest_s, sig_s, None)
+        }
+        SIG_RSA_PSS_RSAE_SHA512 => {
+            let pk = match pubkey {
+                ServerPubKey::Rsa(k) => k,
+                _ => return crate::errors::New("tls13: sig_alg is RSA-PSS-SHA512 but cert has different key type"),
+            };
+            let digest = {
+                let mut h = crate::crypto::sha512::New();
+                let s = slice::__from_vec(signed_msg.clone());
+                let _ = crate::io::Writer::Write(&mut h, s);
+                let empty = slice::__from_vec(Vec::new());
+                crate::hash::Hash::Sum(&h, empty).__into_vec()
+            };
+            let digest_s = slice::__from_vec(digest);
+            let sig_s = slice::__from_vec(signature.to_vec());
+            crate::crypto::rsa::VerifyPSS(pk, crate::crypto::SHA512, digest_s, sig_s, None)
+        }
+        SIG_RSA_PKCS1_SHA256 => {
+            let pk = match pubkey {
+                ServerPubKey::Rsa(k) => k,
+                _ => return crate::errors::New("tls13: sig_alg is RSA-PKCS1-SHA256 but cert has different key type"),
+            };
+            let digest = {
+                let mut h = crate::crypto::sha256::New();
+                let s = slice::__from_vec(signed_msg.clone());
+                let _ = crate::io::Writer::Write(&mut h, s);
+                let empty = slice::__from_vec(Vec::new());
+                crate::hash::Hash::Sum(&h, empty).__into_vec()
+            };
+            let digest_s = slice::__from_vec(digest);
+            let sig_s = slice::__from_vec(signature.to_vec());
+            crate::crypto::rsa::VerifyPKCS1v15(pk, crate::crypto::SHA256, digest_s, sig_s)
+        }
+        SIG_RSA_PKCS1_SHA384 => {
+            let pk = match pubkey {
+                ServerPubKey::Rsa(k) => k,
+                _ => return crate::errors::New("tls13: sig_alg is RSA-PKCS1-SHA384 but cert has different key type"),
+            };
+            let digest = {
+                let mut h = crate::crypto::sha512::New384();
+                let s = slice::__from_vec(signed_msg.clone());
+                let _ = crate::io::Writer::Write(&mut h, s);
+                let empty = slice::__from_vec(Vec::new());
+                crate::hash::Hash::Sum(&h, empty).__into_vec()
+            };
+            let digest_s = slice::__from_vec(digest);
+            let sig_s = slice::__from_vec(signature.to_vec());
+            crate::crypto::rsa::VerifyPKCS1v15(pk, crate::crypto::SHA384, digest_s, sig_s)
+        }
+        SIG_RSA_PKCS1_SHA512 => {
+            let pk = match pubkey {
+                ServerPubKey::Rsa(k) => k,
+                _ => return crate::errors::New("tls13: sig_alg is RSA-PKCS1-SHA512 but cert has different key type"),
+            };
+            let digest = {
+                let mut h = crate::crypto::sha512::New();
+                let s = slice::__from_vec(signed_msg.clone());
+                let _ = crate::io::Writer::Write(&mut h, s);
+                let empty = slice::__from_vec(Vec::new());
+                crate::hash::Hash::Sum(&h, empty).__into_vec()
+            };
+            let digest_s = slice::__from_vec(digest);
+            let sig_s = slice::__from_vec(signature.to_vec());
+            crate::crypto::rsa::VerifyPKCS1v15(pk, crate::crypto::SHA512, digest_s, sig_s)
+        }
+        SIG_ED25519 => {
+            let pk = match pubkey {
+                ServerPubKey::Ed25519(k) => k,
+                _ => return crate::errors::New("tls13: sig_alg is Ed25519 but cert has different key type"),
+            };
+            // Ed25519: directSigning — pass the full signed_msg as the message (no pre-hash)
+            let msg_s = slice::__from_vec(signed_msg);
+            let sig_s = slice::__from_vec(signature.to_vec());
+            if crate::crypto::ed25519::Verify(pk, msg_s, sig_s) {
+                crate::errors::nil
+            } else {
+                crate::errors::New("tls13: Ed25519 certificate signature verification failed")
+            }
+        }
+        _ => {
+            // For unknown sig_alg: log and skip verification (InsecureSkipVerify for unknown)
+            crate::fmt::Printf!("[tls13-debug] WARNING: unknown sig_alg=0x%04x — skipping verification\n", sig_alg as u64);
+            crate::errors::nil
+        }
+    }
+}
+
+// ─── ConnAdapter ──────────────────────────────────────────────────────
+
+struct ConnReader<'a>(&'a mut dyn crate::net::Conn);
+
+impl<'a> crate::io::Reader for ConnReader<'a> {
+    fn Read(&mut self, p: &mut slice<byte>) -> (crate::types::int, error) {
+        self.0.Read(p)
+    }
+}
+
+// ─── TLS 1.3 AEAD encrypt/decrypt helpers ─────────────────────────────
+//
+// RFC 8446 §5.2: TLSCiphertext
+//   content_type = 23 (application_data)
+//   legacy_version = 0x0303
+//   length = len(encrypted_record)
+//
+// encrypted_record = AEAD(write_key, write_iv XOR seq, aad, TLSInnerPlaintext)
+// TLSInnerPlaintext = content || ContentType(1)
+//
+// nonce = write_iv(12) XOR (seq as 12-byte big-endian)
+// aad = record header (5 bytes): 23 || 03 03 || length_BE16
+
+fn tls13_nonce(iv: &[byte; 12], seq: u64) -> [byte; 12] {
+    let mut nonce = *iv;
+    let seq_bytes = seq.to_be_bytes();
+    // XOR last 8 bytes with the 8-byte sequence number
+    for i in 0..8 {
+        nonce[4 + i] ^= seq_bytes[i];
+    }
+    nonce
+}
+
+/// Encrypt a TLS 1.3 handshake/application record.
+/// inner_content_type: the actual content type being protected.
+/// Wraps in type=23 (application_data) on the wire.
+/// suite_id: cipher suite (0x1301/0x1302 = AES-GCM, 0x1303 = ChaCha20-Poly1305).
+pub fn tls13_encrypt_record(
+    keys: &TrafficKeys,
+    seq: u64,
+    inner_content_type: byte,
+    plaintext: &[byte],
+) -> (slice<byte>, error) {
+    tls13_encrypt_record_suite(keys, seq, inner_content_type, plaintext, 0x1301)
+}
+
+/// Same as `tls13_encrypt_record` but with explicit suite dispatch.
+pub fn tls13_encrypt_record_suite(
+    keys: &TrafficKeys,
+    seq: u64,
+    inner_content_type: byte,
+    plaintext: &[byte],
+    suite_id: u16,
+) -> (slice<byte>, error) {
+    use crate::crypto::{aes, cipher::{self, AEAD as AEADTrait}};
+
+    // TLSInnerPlaintext = plaintext || inner_content_type
+    let mut inner: Vec<byte> = Vec::with_capacity(plaintext.len() + 1);
+    inner.extend_from_slice(plaintext);
+    inner.push(inner_content_type);
+
+    // AAD = outer record header: 23 || 03 03 || length_BE16
+    // AEAD tag is always 16 bytes (GCM or Poly1305)
+    let ct_len = inner.len() + 16;
+    let ct_len_be = (ct_len as u16).to_be_bytes(); // goishlint:ignore GOISH005
+    let aad: [byte; 5] = [
+        RECORD_APPLICATION,
+        0x03, 0x03,
+        ct_len_be[0], ct_len_be[1],
+    ];
+
+    // Build nonce: iv XOR seq
+    let iv12: [byte; 12] = keys.iv.as_slice().try_into().unwrap_or([0u8; 12]);
+    let nonce12 = tls13_nonce(&iv12, seq);
+
+    let ct_tag_v: Vec<byte> = if suite_id == 0x1303 {
+        // ChaCha20-Poly1305
+        use crate::crypto::chacha20poly1305;
+        let key_s = slice::__from_vec(keys.key.clone());
+        let (cp_opt, cerr) = chacha20poly1305::New(key_s);
+        if !cerr.IsNil() {
+            return (slice::__from_vec(Vec::new()), cerr);
+        }
+        let cp = match cp_opt {
+            Some(c) => c,
+            None => return (slice::__from_vec(Vec::new()), errors::New("tls13: ChaCha20-Poly1305 init error")),
+        };
+        let nonce_s = slice::__from_vec(nonce12.to_vec());
+        let pt_s = slice::__from_vec(inner);
+        let aad_s = slice::__from_vec(aad.to_vec());
+        let empty = slice::__from_vec(Vec::new());
+        cipher::AEAD::Seal(&cp, empty, nonce_s, pt_s, aad_s).__into_vec()
+    } else {
+        // AES-GCM (0x1301, 0x1302)
+        let key_slice = slice::__from_vec(keys.key.clone());
+        let (cipher_opt, _) = aes::NewCipher(key_slice);
+        let cipher = match cipher_opt {
+            Some(c) => c,
+            None => return (slice::__from_vec(Vec::new()), errors::New("tls13: AES key error")),
+        };
+        let (gcm_opt, gerr) = cipher::NewGCM(cipher);
+        if !gerr.IsNil() {
+            return (slice::__from_vec(Vec::new()), gerr);
+        }
+        let gcm = match gcm_opt {
+            Some(g) => g,
+            None => return (slice::__from_vec(Vec::new()), errors::New("tls13: GCM init error")),
+        };
+        let nonce_s = slice::__from_vec(nonce12.to_vec());
+        let pt_s = slice::__from_vec(inner);
+        let aad_s = slice::__from_vec(aad.to_vec());
+        let empty = slice::__from_vec(Vec::new());
+        cipher::AEAD::Seal(&gcm, empty, nonce_s, pt_s, aad_s).__into_vec()
+    };
+
+    // Wire: header(5) + ciphertext+tag
+    let mut out: Vec<byte> = Vec::with_capacity(5 + ct_tag_v.len());
+    out.push(RECORD_APPLICATION); // 23
+    out.push(0x03);
+    out.push(0x03);
+    let plen_be = (ct_tag_v.len() as u16).to_be_bytes(); // goishlint:ignore GOISH005
+    out.extend_from_slice(&plen_be);
+    out.extend_from_slice(&ct_tag_v);
+
+    (slice::__from_vec(out), errors::nil)
+}
+
+/// Decrypt a TLS 1.3 record fragment (after the 5-byte header).
+/// Returns (inner_plaintext_without_content_type, inner_content_type, error).
+/// Uses AES-GCM by default (suite_id=0x1301/0x1302).
+pub fn tls13_decrypt_record(
+    keys: &TrafficKeys,
+    seq: u64,
+    fragment: &[byte],
+) -> (Vec<byte>, byte, error) {
+    tls13_decrypt_record_suite(keys, seq, fragment, 0x1301)
+}
+
+/// Same as `tls13_decrypt_record` but with explicit suite dispatch.
+pub fn tls13_decrypt_record_suite(
+    keys: &TrafficKeys,
+    seq: u64,
+    fragment: &[byte],
+    suite_id: u16,
+) -> (Vec<byte>, byte, error) {
+    use crate::crypto::{aes, cipher::{self, AEAD as AEADTrait}};
+
+    if fragment.len() < 16 {
+        return (Vec::new(), 0, errors::New("tls13: fragment too short for AEAD tag"));
+    }
+
+    let ct_and_tag = fragment;
+
+    // AAD = outer record header
+    let frag_len = fragment.len() as u16; // goishlint:ignore GOISH005
+    let frag_len_be = frag_len.to_be_bytes();
+    let aad: [byte; 5] = [
+        RECORD_APPLICATION,
+        0x03, 0x03,
+        frag_len_be[0], frag_len_be[1],
+    ];
+
+    let iv12: [byte; 12] = keys.iv.as_slice().try_into().unwrap_or([0u8; 12]);
+    let nonce12 = tls13_nonce(&iv12, seq);
+
+    let pt_v: Vec<byte> = if suite_id == 0x1303 {
+        // ChaCha20-Poly1305 decrypt
+        use crate::crypto::chacha20poly1305;
+        let key_s = slice::__from_vec(keys.key.clone());
+        let (cp_opt, cerr) = chacha20poly1305::New(key_s);
+        if !cerr.IsNil() {
+            return (Vec::new(), 0, cerr);
+        }
+        let cp = match cp_opt {
+            Some(c) => c,
+            None => return (Vec::new(), 0, errors::New("tls13: ChaCha20-Poly1305 init error")),
+        };
+        let nonce_s = slice::__from_vec(nonce12.to_vec());
+        let ct_s = slice::__from_vec(ct_and_tag.to_vec());
+        let aad_s = slice::__from_vec(aad.to_vec());
+        let empty = slice::__from_vec(Vec::new());
+        let (pt_s, derr) = cipher::AEAD::Open(&cp, empty, nonce_s, ct_s, aad_s);
+        if !derr.IsNil() {
+            return (Vec::new(), 0, derr);
+        }
+        pt_s.__into_vec()
+    } else {
+        // AES-GCM decrypt
+        let key_slice = slice::__from_vec(keys.key.clone());
+        let (cipher_opt, _) = aes::NewCipher(key_slice);
+        let cipher = match cipher_opt {
+            Some(c) => c,
+            None => return (Vec::new(), 0, errors::New("tls13: AES key error")),
+        };
+        let (gcm_opt, gerr) = cipher::NewGCM(cipher);
+        if !gerr.IsNil() {
+            return (Vec::new(), 0, gerr);
+        }
+        let gcm = match gcm_opt {
+            Some(g) => g,
+            None => return (Vec::new(), 0, errors::New("tls13: GCM init error")),
+        };
+        let nonce_s = slice::__from_vec(nonce12.to_vec());
+        let ct_s = slice::__from_vec(ct_and_tag.to_vec());
+        let aad_s = slice::__from_vec(aad.to_vec());
+        let empty = slice::__from_vec(Vec::new());
+        let (pt_s, derr) = cipher::AEAD::Open(&gcm, empty, nonce_s, ct_s, aad_s);
+        if !derr.IsNil() {
+            return (Vec::new(), 0, derr);
+        }
+        pt_s.__into_vec()
+    };
+
+    let mut inner = pt_v;
+    // Strip trailing zeros (padding) then inner_content_type byte
+    while inner.last() == Some(&0) {
+        inner.pop();
+    }
+    if inner.is_empty() {
+        return (Vec::new(), 0, errors::New("tls13: empty inner plaintext after decryption"));
+    }
+    let inner_content_type = *inner.last().unwrap();
+    inner.pop();
+
+    (inner, inner_content_type, errors::nil)
+}
+
+// ─── Transcript hash helper ────────────────────────────────────────────
+
+/// Compute the current transcript hash from all accumulated bytes.
+pub fn transcript_hash(
+    hash_fn: fn() -> alloc::boxed::Box<dyn HashTrait + Send + Sync>,
+    transcript: &[byte],
+) -> Vec<byte> {
+    let mut h = hash_fn();
+    let s = slice::__from_vec(transcript.to_vec());
+    let _ = WriterTrait::Write(&mut h, s);
+    let empty = slice::__from_vec(Vec::new());
+    h.Sum(empty).__into_vec()
+}
+
+// ─── Read one TLS 1.3 encrypted record ────────────────────────────────
+
+/// Read a decrypted TLS 1.3 record. Returns (plaintext, inner_type, error).
+fn read_tls13_record(
+    conn: &mut dyn crate::net::Conn,
+    server_hs_keys: &TrafficKeys,
+    server_seq: &mut u64,
+    suite_id: u16,
+) -> (Vec<byte>, byte, error) {
+    loop {
+        let (rtype, frag_s, err) = {
+            let mut adapter = ConnReader(conn);
+            read_record(&mut adapter)
+        };
+        let frag = frag_s.__into_vec();
+        if !err.IsNil() {
+            return (Vec::new(), 0, err);
+        }
+        // Skip ChangeCipherSpec (compatibility middlebox)
+        if rtype == RECORD_CHANGE_CIPHER_SPEC {
+            continue;
+        }
+        if rtype == RECORD_ALERT {
+            let desc = if frag.len() >= 2 { frag[1] } else { 0 };
+            crate::fmt::Printf!("[tls13-debug] TLS Alert: level=%d desc=%d\n",
+                if frag.is_empty() { 0i64 } else { frag[0] as i64 }, desc as i64);
+            return (Vec::new(), 0, errors::New("tls13: received TLS alert from server"));
+        }
+        if rtype != RECORD_APPLICATION {
+            crate::fmt::Printf!("[tls13-debug] unexpected record type=%d\n", rtype as i64);
+            return (Vec::new(), 0, errors::New("tls13: unexpected record type"));
+        }
+        let seq = *server_seq;
+        *server_seq += 1;
+        let (plain, inner_type, derr) = tls13_decrypt_record_suite(server_hs_keys, seq, &frag, suite_id);
+        if !derr.IsNil() {
+            crate::fmt::Printf!("[tls13-debug] decrypt error seq=%d: %v\n", seq, derr);
+            return (Vec::new(), 0, derr);
+        }
+        // In TLS 1.3, alerts are encrypted (outer type=23, inner_type=21=RECORD_ALERT)
+        if inner_type == RECORD_ALERT {
+            let level = if plain.len() >= 1 { plain[0] } else { 0 };
+            let desc  = if plain.len() >= 2 { plain[1] } else { 0 };
+            crate::fmt::Printf!("[tls13-debug] TLS Alert: level=%d desc=%d\n", level as i64, desc as i64);
+            return (Vec::new(), 0, errors::New("tls13: received TLS alert from server"));
+        }
+        return (plain, inner_type, errors::nil);
+    }
+}
+
+// ─── Handshake message reader (handles coalesced messages) ────────────
+//
+// TLS 1.3 allows multiple handshake messages to be coalesced into a single
+// encrypted record. We maintain a buffer and parse messages from it.
+
+struct Tls13HandshakeReader {
+    buf: Vec<byte>,  // buffered decrypted handshake bytes
+}
+
+impl Tls13HandshakeReader {
+    fn new() -> Self {
+        Tls13HandshakeReader { buf: Vec::new() }
+    }
+
+    /// Read the next handshake message. Returns (msg_bytes, error).
+    /// msg_bytes is the full message including type(1) + length(3) + body.
+    /// Reads more encrypted records from conn as needed.
+    fn next_msg(
+        &mut self,
+        conn: &mut dyn crate::net::Conn,
+        keys: &TrafficKeys,
+        seq: &mut u64,
+        suite_id: u16,
+    ) -> (Vec<byte>, error) {
+        loop {
+            // Try to parse a complete message from buffer
+            if self.buf.len() >= 4 {
+                let msg_len = ((self.buf[1] as usize) << 16)
+                    | ((self.buf[2] as usize) << 8)
+                    | (self.buf[3] as usize);
+                let total = 4 + msg_len;
+                if self.buf.len() >= total {
+                    let msg = self.buf[..total].to_vec();
+                    self.buf = self.buf[total..].to_vec();
+                    return (msg, errors::nil);
+                }
+            }
+            // Need more data: read another encrypted record
+            let (plain, inner_type, err) = read_tls13_record(conn, keys, seq, suite_id);
+            if !err.IsNil() {
+                return (Vec::new(), err);
+            }
+            if inner_type != RECORD_HANDSHAKE {
+                return (Vec::new(), errors::New("tls13: expected Handshake inner type in coalesced record"));
+            }
+            self.buf.extend_from_slice(&plain);
+        }
+    }
+}
+
+// ─── do_client_handshake_tls13 ────────────────────────────────────────
+
+/// TLS 1.3 client handshake, called after we have received and parsed a
+/// ServerHello that selected TLS 1.3 (supported_versions == 0x0304).
+///
+/// Parameters:
+///   conn         — TCP connection
+///   suite        — selected cipher suite descriptor
+///   transcript   — handshake transcript so far: ClientHello || ServerHello bytes
+///   client_random — the client_random from the ClientHello
+///   server_key_share_data — the server's key_share.data from ServerHello
+///   client_x25519_priv — the client's X25519 private key (used for server's X25519 share)
+///
+/// Returns (Tls13Keys, error) where Tls13Keys holds the application traffic secrets.
+pub struct Tls13Keys {
+    pub suite_id: u16,
+    pub client_app_keys: TrafficKeys,
+    pub server_app_keys: TrafficKeys,
+    /// Client application traffic secret (for updating keys)
+    pub client_app_secret: Vec<byte>,
+    /// Server application traffic secret
+    pub server_app_secret: Vec<byte>,
+    /// The client_app_seq after handshake (starts at 0)
+    pub client_seq: u64,
+    /// The server_app_seq after handshake (starts at 0)
+    pub server_seq: u64,
+    /// RFC 8446 §7.1: resumption_master_secret =
+    ///   Derive-Secret(MasterSecret, "res master", ClientHello…client Finished).
+    /// Stashed here so the connection can derive a resumption PSK from any
+    /// NewSessionTicket the server sends post-handshake.
+    pub resumption_master_secret: Vec<byte>,
+    /// Hash output size for the negotiated suite (32 for SHA-256, 48 for SHA-384).
+    pub hash_size: u16,
+}
+
+pub fn do_client_handshake_tls13(
+    conn: &mut dyn crate::net::Conn,
+    suite: &CipherSuiteTls13,
+    transcript: &[byte],
+    _client_random: &[byte; 32],
+    server_key_share_data: &[byte],
+    client_x25519_priv: &ecdh::X25519PrivateKey,
+) -> (Tls13Keys, error) {
+    // Compute X25519 shared secret
+    if server_key_share_data.len() != 32 {
+        crate::fmt::Printf!("[tls13-debug] server key share len=%d (expected 32 for x25519)\n",
+            server_key_share_data.len() as i64);
+        let dummy = Tls13Keys {
+            suite_id: suite.id,
+            client_app_keys: TrafficKeys { key: Vec::new(), iv: Vec::new() },
+            server_app_keys: TrafficKeys { key: Vec::new(), iv: Vec::new() },
+            client_app_secret: Vec::new(),
+            server_app_secret: Vec::new(),
+            client_seq: 0,
+            server_seq: 0,
+            resumption_master_secret: Vec::new(),
+            hash_size: 0,
+        };
+        return (dummy, errors::New("tls13: server key share not 32 bytes (X25519 only supported)"));
+    }
+    let mut server_pub_arr = [0u8; 32];
+    server_pub_arr.copy_from_slice(server_key_share_data);
+    let server_pub = ecdh::X25519PublicKey(server_pub_arr);
+    let shared_secret = ecdh::x25519_compute_shared(client_x25519_priv, &server_pub);
+
+    // Check for low-order point
+    let mut is_zero = 0u8;
+    for b in shared_secret.iter() { is_zero |= *b; }
+    if is_zero == 0 {
+        let dummy = Tls13Keys {
+            suite_id: suite.id,
+            client_app_keys: TrafficKeys { key: Vec::new(), iv: Vec::new() },
+            server_app_keys: TrafficKeys { key: Vec::new(), iv: Vec::new() },
+            client_app_secret: Vec::new(),
+            server_app_secret: Vec::new(),
+            client_seq: 0,
+            server_seq: 0,
+            resumption_master_secret: Vec::new(),
+            hash_size: 0,
+        };
+        return (dummy, errors::New("tls13: x25519 shared secret is all zeros"));
+    }
+
+    do_client_handshake_tls13_inner(conn, suite, transcript, &shared_secret)
+}
+
+/// TLS 1.3 handshake with a pre-computed ECDHE shared secret.
+/// Used for HRR path where ECDHE may be P-256 (not just X25519).
+pub fn do_client_handshake_tls13_with_ecdhe(
+    conn: &mut dyn crate::net::Conn,
+    suite: &CipherSuiteTls13,
+    transcript: &[byte],
+    shared_secret: &[byte; 32],
+) -> (Tls13Keys, error) {
+    do_client_handshake_tls13_inner_impl(conn, suite, transcript, shared_secret, None)
+}
+
+/// TLS 1.3 handshake with PSK resumption.
+///
+/// Called when the server's ServerHello contains a `pre_shared_key` extension
+/// with `selected_identity = 0`. The PSK replaces the all-zeros IKM in the
+/// EarlySecret derivation, and the server omits Certificate + CertificateVerify
+/// (RFC 8446 §4.4 — PSK authentication).
+pub fn do_client_handshake_tls13_with_psk(
+    conn: &mut dyn crate::net::Conn,
+    suite: &CipherSuiteTls13,
+    transcript: &[byte],
+    server_key_share_data: &[byte],
+    client_x25519_priv: &ecdh::X25519PrivateKey,
+    psk: &[byte],
+) -> (Tls13Keys, error) {
+    let dummy = Tls13Keys {
+        suite_id: suite.id,
+        client_app_keys: TrafficKeys { key: Vec::new(), iv: Vec::new() },
+        server_app_keys: TrafficKeys { key: Vec::new(), iv: Vec::new() },
+        client_app_secret: Vec::new(),
+        server_app_secret: Vec::new(),
+        client_seq: 0,
+        server_seq: 0,
+        resumption_master_secret: Vec::new(),
+        hash_size: 0,
+    };
+
+    if server_key_share_data.len() != 32 {
+        return (dummy, errors::New("tls13-psk: server key share not 32 bytes"));
+    }
+    let mut server_pub_arr = [0u8; 32];
+    server_pub_arr.copy_from_slice(server_key_share_data);
+    let server_pub = ecdh::X25519PublicKey(server_pub_arr);
+    let shared_secret = ecdh::x25519_compute_shared(client_x25519_priv, &server_pub);
+
+    let mut is_zero = 0u8;
+    for b in shared_secret.iter() { is_zero |= *b; }
+    if is_zero == 0 {
+        return (dummy, errors::New("tls13-psk: x25519 shared secret is all zeros"));
+    }
+
+    do_client_handshake_tls13_inner_impl(conn, suite, transcript, &shared_secret, Some(psk))
+}
+
+fn do_client_handshake_tls13_inner(
+    conn: &mut dyn crate::net::Conn,
+    suite: &CipherSuiteTls13,
+    transcript: &[byte],
+    shared_secret: &[byte; 32],
+) -> (Tls13Keys, error) {
+    do_client_handshake_tls13_inner_impl(conn, suite, transcript, shared_secret, None)
+}
+
+fn do_client_handshake_tls13_inner_impl(
+    conn: &mut dyn crate::net::Conn,
+    suite: &CipherSuiteTls13,
+    transcript: &[byte],
+    shared_secret: &[byte; 32],
+    psk: Option<&[byte]>,
+) -> (Tls13Keys, error) {
+    let dummy = Tls13Keys {
+        suite_id: suite.id,
+        client_app_keys: TrafficKeys { key: Vec::new(), iv: Vec::new() },
+        server_app_keys: TrafficKeys { key: Vec::new(), iv: Vec::new() },
+        client_app_secret: Vec::new(),
+        server_app_secret: Vec::new(),
+        client_seq: 0,
+        server_seq: 0,
+        resumption_master_secret: Vec::new(),
+        hash_size: 0,
+    };
+
+    let hash_fn = suite.hash_fn;
+    let key_len = suite.key_len;
+
+    let using_psk = psk.is_some();
+    if using_psk {
+        crate::fmt::Printf!("[tls13-debug] PSK resumption mode: using PSK for EarlySecret\n");
+    } else {
+        crate::fmt::Printf!("[tls13-debug] ECDHE shared secret computed OK\n");
+    }
+
+    // ── 2. Derive handshake traffic secrets ───────────────────────────
+    let early = EarlySecret::new(hash_fn, psk); // PSK or None (zeros)
+    let hs = early.HandshakeSecret(shared_secret);
+
+    let transcript_hash = key_schedule::transcript_hash_fn(hash_fn, transcript);
+
+    let client_hs_secret = hs.ClientHandshakeTrafficSecret(&transcript_hash);
+    let server_hs_secret = hs.ServerHandshakeTrafficSecret(&transcript_hash);
+    crate::fmt::Printf!("[tls13-debug] handshake traffic secrets derived\n");
+
+    // Derive traffic keys
+    let client_hs_keys = traffic_keys(hash_fn, &client_hs_secret, key_len);
+    let server_hs_keys = traffic_keys(hash_fn, &server_hs_secret, key_len);
+    crate::fmt::Printf!("[tls13-debug] server_hs_secret (hex first 8): %02x%02x%02x%02x%02x%02x%02x%02x\n",
+        server_hs_secret[0] as u64, server_hs_secret[1] as u64, server_hs_secret[2] as u64, server_hs_secret[3] as u64,
+        server_hs_secret[4] as u64, server_hs_secret[5] as u64, server_hs_secret[6] as u64, server_hs_secret[7] as u64);
+    crate::fmt::Printf!("[tls13-debug] server_hs_key (hex first 8): %02x%02x%02x%02x%02x%02x%02x%02x\n",
+        server_hs_keys.key[0] as u64, server_hs_keys.key[1] as u64, server_hs_keys.key[2] as u64, server_hs_keys.key[3] as u64,
+        server_hs_keys.key[4] as u64, server_hs_keys.key[5] as u64, server_hs_keys.key[6] as u64, server_hs_keys.key[7] as u64);
+    crate::fmt::Printf!("[tls13-debug] server_hs_iv (hex): %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+        server_hs_keys.iv[0] as u64, server_hs_keys.iv[1] as u64, server_hs_keys.iv[2] as u64, server_hs_keys.iv[3] as u64,
+        server_hs_keys.iv[4] as u64, server_hs_keys.iv[5] as u64, server_hs_keys.iv[6] as u64, server_hs_keys.iv[7] as u64,
+        server_hs_keys.iv[8] as u64, server_hs_keys.iv[9] as u64, server_hs_keys.iv[10] as u64, server_hs_keys.iv[11] as u64);
+
+    // Keep the master secret for later
+    let master = hs.MasterSecret();
+
+    // ── 3-6. Read handshake messages (EncryptedExtensions, Certificate,
+    //        CertificateVerify, Finished).
+    //
+    // TLS 1.3 servers MAY coalesce multiple handshake messages into a single
+    // encrypted record. Use Tls13HandshakeReader to handle both coalesced and
+    // per-message cases transparently.
+    let mut server_hs_seq: u64 = 0;
+    let mut local_transcript = transcript.to_vec();
+    let mut hs_reader = Tls13HandshakeReader::new();
+    // Set to true if the server sends CertificateRequest. RFC 8446 §4.4.2
+    // requires the client to send a Certificate message (empty list when no
+    // cert is available) before its Finished, otherwise the server aborts
+    // with unexpected_message.
+    let mut client_cert_requested = false;
+
+    // ── 3. Read EncryptedExtensions ───────────────────────────────────
+    {
+        let (plain, err) = hs_reader.next_msg(conn, &server_hs_keys, &mut server_hs_seq, suite.id);
+        if !err.IsNil() {
+            crate::fmt::Printf!("[tls13-debug] read EncryptedExtensions error: %v\n", err);
+            return (dummy, err);
+        }
+        if plain.is_empty() || plain[0] != MSG_ENCRYPTED_EXTENSIONS {
+            crate::fmt::Printf!("[tls13-debug] expected EncryptedExtensions(8), got=%d\n",
+                if plain.is_empty() { 0i64 } else { plain[0] as i64 });
+            return (dummy, errors::New("tls13: expected EncryptedExtensions message"));
+        }
+        crate::fmt::Printf!("[tls13-debug] EncryptedExtensions OK\n");
+        local_transcript.extend_from_slice(&plain);
+    }
+
+    // ── 4. Read Certificate (or CertificateRequest then Certificate) ──
+    // In PSK mode (using_psk == true), the server OMITS Certificate and
+    // CertificateVerify (RFC 8446 §4.4). The next message after
+    // EncryptedExtensions is Finished directly.
+    if !using_psk {
+        let server_pubkey: ServerPubKey;
+        {
+            let (plain, err) = hs_reader.next_msg(conn, &server_hs_keys, &mut server_hs_seq, suite.id);
+            if !err.IsNil() {
+                crate::fmt::Printf!("[tls13-debug] read cert/certreq error: %v\n", err);
+                return (dummy, err);
+            }
+            if plain.is_empty() {
+                return (dummy, errors::New("tls13: empty handshake record where Certificate expected"));
+            }
+            let msg_type = plain[0];
+
+            // If CertificateRequest, consume it and remember that we MUST
+            // send an empty client Certificate before client Finished
+            // (RFC 8446 §4.4.2 — "If the client did not select any certificate,
+            // the Certificate message will contain only the empty
+            // certificate_list field.").
+            let cert_plain = if msg_type == 13 {
+                crate::fmt::Printf!("[tls13-debug] CertificateRequest received — will send empty Certificate\n");
+                local_transcript.extend_from_slice(&plain);
+                client_cert_requested = true;
+                let (plain2, err2) = hs_reader.next_msg(conn, &server_hs_keys, &mut server_hs_seq, suite.id);
+                if !err2.IsNil() {
+                    return (dummy, err2);
+                }
+                if plain2.is_empty() || plain2[0] != MSG_CERTIFICATE {
+                    return (dummy, errors::New("tls13: expected Certificate after CertificateRequest"));
+                }
+                plain2
+            } else if msg_type == MSG_CERTIFICATE {
+                plain
+            } else {
+                crate::fmt::Printf!("[tls13-debug] expected Certificate(11), got=%d\n", msg_type as i64);
+                return (dummy, errors::New("tls13: expected Certificate message"));
+            };
+
+            crate::fmt::Printf!("[tls13-debug] Certificate message received (len=%d)\n", cert_plain.len() as i64);
+
+            // Extract leaf cert DER and parse the public key for CertificateVerify
+            server_pubkey = match parse_tls13_cert_message_leaf(&cert_plain) {
+                Some(cert_der) => {
+                    let pk = parse_server_pubkey(&cert_der);
+                    match &pk {
+                        ServerPubKey::EcdsaP256(_) => { let _ = crate::fmt::Printf!("[tls13-debug] server cert key type: ECDSA P256\n"); },
+                        ServerPubKey::Rsa(_)        => { let _ = crate::fmt::Printf!("[tls13-debug] server cert key type: RSA\n"); },
+                        ServerPubKey::Ed25519(_)    => { let _ = crate::fmt::Printf!("[tls13-debug] server cert key type: Ed25519\n"); },
+                        ServerPubKey::Unknown       => { let _ = crate::fmt::Printf!("[tls13-debug] server cert key type: unknown\n"); },
+                    }
+                    pk
+                }
+                None => {
+                    let _ = crate::fmt::Printf!("[tls13-debug] WARNING: could not parse Certificate message -- using Unknown key\n");
+                    ServerPubKey::Unknown
+                }
+            };
+
+            local_transcript.extend_from_slice(&cert_plain);
+        }
+
+        // ── 5. Read CertificateVerify ──────────────────────────────────────
+        // RFC 8446 §4.4.3: verify server's signature over the transcript hash.
+        // transcript_hash at this point covers: ClientHello || ServerHello ||
+        //   EncryptedExtensions || Certificate.
+        // The signed message = 64×0x20 || "TLS 1.3, server CertificateVerify\x00" || transcript_hash.
+        {
+            let (plain, err) = hs_reader.next_msg(conn, &server_hs_keys, &mut server_hs_seq, suite.id);
+            if !err.IsNil() {
+                crate::fmt::Printf!("[tls13-debug] read CertVerify error: %v\n", err);
+                return (dummy, err);
+            }
+            if plain.is_empty() || plain[0] != MSG_CERTIFICATE_VERIFY {
+                crate::fmt::Printf!("[tls13-debug] expected CertVerify(15), msg=%d\n",
+                    if plain.is_empty() { 0i64 } else { plain[0] as i64 });
+                return (dummy, errors::New("tls13: expected CertificateVerify message"));
+            }
+
+            // Parse sig_alg and signature from the message
+            match parse_tls13_cert_verify(&plain) {
+                Some((sig_alg, signature)) => {
+                    // Compute transcript hash BEFORE adding CertificateVerify
+                    let cert_verify_th = key_schedule::transcript_hash_fn(hash_fn, &local_transcript);
+                    let verify_err = verify_cert_verify(&server_pubkey, sig_alg, &signature, &cert_verify_th);
+                    if !verify_err.IsNil() {
+                        crate::fmt::Printf!("[tls13-debug] CertificateVerify sig_alg=0x%04x FAILED: %v\n",
+                            sig_alg as u64, verify_err);
+                        // RFC 8446: verification failure → abort with decrypt_error
+                        return (dummy, verify_err);
+                    }
+                    crate::fmt::Printf!("[tls13-debug] CertificateVerify verified OK sig_alg=0x%04x\n", sig_alg as u64);
+                }
+                None => {
+                    crate::fmt::Printf!("[tls13-debug] WARNING: could not parse CertificateVerify message\n");
+                    // Continue — don't abort for parse failure (shouldn't happen with well-formed servers)
+                }
+            }
+
+            local_transcript.extend_from_slice(&plain);
+        }
+        // server_pubkey is used within the inner blocks above; suppress unused warning
+        #[allow(unused_variables)]
+        let _pk_used = &server_pubkey;
+    } else {
+        crate::fmt::Printf!("[tls13-debug] PSK mode: skipping Certificate + CertificateVerify\n");
+    }
+
+    // ── 6. Read server Finished ────────────────────────────────────────
+    // The server Finished verify_data is computed BEFORE adding Finished to transcript.
+    {
+        let (plain, err) = hs_reader.next_msg(conn, &server_hs_keys, &mut server_hs_seq, suite.id);
+        if !err.IsNil() {
+            crate::fmt::Printf!("[tls13-debug] read server Finished error: %v\n", err);
+            return (dummy, err);
+        }
+        if plain.is_empty() || plain[0] != MSG_FINISHED {
+            crate::fmt::Printf!("[tls13-debug] expected Finished(20), msg=%d\n",
+                if plain.is_empty() { 0i64 } else { plain[0] as i64 });
+            return (dummy, errors::New("tls13: expected server Finished message"));
+        }
+        // Verify server Finished: verify_data = HMAC(server_hs_secret, transcript_hash)
+        // transcript at this point includes up to and including CertificateVerify
+        let current_th = key_schedule::transcript_hash_fn(hash_fn, &local_transcript);
+        let expected_vd = finished_hash(hash_fn, &server_hs_secret, &current_th);
+
+        // Finished body: type(1) + len(3) + verify_data
+        let body = &plain;
+        if body.len() < 4 {
+            return (dummy, errors::New("tls13: server Finished too short"));
+        }
+        let vd_len = (((body[1] as usize) << 16) | ((body[2] as usize) << 8) | (body[3] as usize));
+        if body.len() < 4 + vd_len {
+            return (dummy, errors::New("tls13: server Finished truncated"));
+        }
+        let their_vd = &body[4..4 + vd_len];
+
+        // Constant-time comparison
+        if their_vd.len() != expected_vd.len() {
+            return (dummy, errors::New("tls13: server Finished verify_data wrong length"));
+        }
+        let mut diff: byte = 0;
+        for i in 0..expected_vd.len() {
+            diff |= their_vd[i] ^ expected_vd[i];
+        }
+        if diff != 0 {
+            crate::fmt::Printf!("[tls13-debug] server Finished verify_data MISMATCH\n");
+            return (dummy, errors::New("tls13: server Finished verify_data mismatch"));
+        }
+        crate::fmt::Printf!("[tls13-debug] server Finished verified OK\n");
+
+        // Add server Finished to transcript (for application secret derivation)
+        local_transcript.extend_from_slice(&plain);
+    }
+
+    // ── 7. Derive application traffic secrets (before sending client Finished)
+    // RFC 8446: application secrets are derived from transcript up to server Finished
+    let app_transcript_hash = key_schedule::transcript_hash_fn(hash_fn, &local_transcript);
+    let client_app_secret = master.ClientApplicationTrafficSecret(&app_transcript_hash);
+    let server_app_secret = master.ServerApplicationTrafficSecret(&app_transcript_hash);
+    let client_app_keys = traffic_keys(hash_fn, &client_app_secret, key_len);
+    let server_app_keys = traffic_keys(hash_fn, &server_app_secret, key_len);
+    crate::fmt::Printf!("[tls13-debug] application traffic secrets derived\n");
+
+    // ── 8. Send ChangeCipherSpec (middlebox compatibility, RFC 8446 Appendix D.4) ──
+    let ccs_bytes = encode_record(RECORD_CHANGE_CIPHER_SPEC, &[1u8]);
+    let (_, werr) = conn.Write(ccs_bytes);
+    if !werr.IsNil() {
+        return (dummy, werr);
+    }
+
+    let mut client_hs_seq: u64 = 0;
+
+    // ── 8b. Empty client Certificate (only if server sent CertificateRequest)
+    // RFC 8446 §4.4.2: client MUST send Certificate before client Finished
+    // when CertificateRequest was received. With no cert, the message is the
+    // 8-byte sequence: type=11, len=4, cert_request_context_len=0,
+    // cert_list_len=0. Without this, servers that request client auth (e.g.,
+    // kube-apiserver with --client-ca-file) abort with unexpected_message.
+    if client_cert_requested {
+        let empty_cert_body: [byte; 8] = [
+            MSG_CERTIFICATE, 0x00, 0x00, 0x04,
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        let (cert_wire, enc_err) = tls13_encrypt_record_suite(
+            &client_hs_keys, client_hs_seq, RECORD_HANDSHAKE, &empty_cert_body, suite.id);
+        if !enc_err.IsNil() {
+            crate::fmt::Printf!("[tls13-debug] encrypt empty client Certificate error: %v\n", enc_err);
+            return (dummy, enc_err);
+        }
+        client_hs_seq += 1;
+        let (_, werr) = conn.Write(cert_wire);
+        if !werr.IsNil() {
+            return (dummy, werr);
+        }
+        local_transcript.extend_from_slice(&empty_cert_body);
+        crate::fmt::Printf!("[tls13-debug] empty client Certificate sent\n");
+    }
+
+    // ── 9. Send client Finished ────────────────────────────────────────
+    // transcript at this point: ClientHello || ServerHello || EncryptedExtensions || ...
+    // || server Finished || [optional empty client Certificate].
+    // For client Finished, we use transcript BEFORE client Finished.
+    let client_fin_transcript_hash = key_schedule::transcript_hash_fn(hash_fn, &local_transcript);
+    let client_fin_vd = finished_hash(hash_fn, &client_hs_secret, &client_fin_transcript_hash);
+
+    // Build Finished handshake message: type(1) + len(3) + verify_data
+    let vd_len = client_fin_vd.len();
+    let mut fin_body: Vec<byte> = Vec::with_capacity(4 + vd_len);
+    fin_body.push(MSG_FINISHED);
+    fin_body.push(((vd_len >> 16) & 0xFF) as byte);
+    fin_body.push(((vd_len >> 8) & 0xFF) as byte);
+    fin_body.push((vd_len & 0xFF) as byte);
+    fin_body.extend_from_slice(&client_fin_vd);
+
+    // Encrypt with client_hs_keys (client_hs_seq may already be 1 if we
+    // sent an empty Certificate above).
+    let (fin_wire, enc_err) = tls13_encrypt_record_suite(&client_hs_keys, client_hs_seq, RECORD_HANDSHAKE, &fin_body, suite.id);
+    if !enc_err.IsNil() {
+        crate::fmt::Printf!("[tls13-debug] encrypt client Finished error: %v\n", enc_err);
+        return (dummy, enc_err);
+    }
+    client_hs_seq += 1;
+    let _ = client_hs_seq; // suppress unused warning
+
+    let (_, werr) = conn.Write(fin_wire);
+    if !werr.IsNil() {
+        return (dummy, werr);
+    }
+    crate::fmt::Printf!("[tls13-debug] client Finished sent\n");
+
+    // ── 9b. Resumption master secret (RFC 8446 §7.1) ──────────────────
+    // resumption_master_secret = Derive-Secret(MasterSecret, "res master",
+    //     ClientHello…client Finished). Needed to derive a resumption PSK
+    //     from any NewSessionTicket the server later sends.
+    local_transcript.extend_from_slice(&fin_body);
+    let rms_transcript_hash = key_schedule::transcript_hash_fn(hash_fn, &local_transcript);
+    let resumption_master_secret =
+        key_schedule::DeriveSecret(hash_fn, &master.secret, "res master", &rms_transcript_hash);
+
+    // ── 10. Done: return application keys ─────────────────────────────
+    crate::fmt::Printf!("[tls13-debug] TLS 1.3 handshake complete! suite=0x%04x\n", suite.id as u64); // goishlint:ignore GOISH005
+
+    (Tls13Keys {
+        suite_id: suite.id,
+        client_app_keys,
+        server_app_keys,
+        client_app_secret,
+        server_app_secret,
+        client_seq: 0,
+        server_seq: 0,
+        resumption_master_secret,
+        hash_size: suite.hash_size as u16, // goishlint:ignore GOISH005
+    }, errors::nil)
+}

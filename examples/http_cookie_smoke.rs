@@ -17,7 +17,7 @@ use goish::io::{Closer, Reader, Writer};
 use goish::net;
 use goish::net::http::{self, Cookie, SameSite};
 use goish::time;
-use goish::{bytes, go, string, syscall, Println, KB};
+use goish::{bytes, go, string, syscall, Println};
 
 #[goish::main]
 fn main() {
@@ -148,7 +148,7 @@ fn main() {
     // 9. Expires round-trip via parse → String → parse.
     {
         let mut c = Cookie::new(string("e"), string("v"));
-        c.Expires = time::Date(2027, 1, 15, 10, 30, 45, 0);
+        c.Expires = time::Date(2027, 1, 15, 10, 30, 45, 0, goish::time::UTC);
         let s = c.String();
         let (parsed, _err) = http::ParseSetCookie(s.clone());
         let y = parsed.Expires.Year();
@@ -187,7 +187,7 @@ fn main() {
             let addr = ln.Addr().String();
             let srv_arc = Arc::new(srv);
             let srv_for_serve = srv_arc.clone();
-            go!(stack(64 * KB), move || {
+            go!(move || {
                 let _ = srv_for_serve.Serve(ln);
             });
             time::Sleep(time::Millisecond * 20);

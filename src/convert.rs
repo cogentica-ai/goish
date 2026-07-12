@@ -47,6 +47,17 @@ impl __StringConv for &'static str {
     }
 }
 
+// Borrowed-string passthrough — `string(self)` inside a `&self` method
+// on a `string`-typed alias (trait-ext lowering, e.g.
+// `type Algorithm = string`) lands here. Cloning the inner Arc is
+// O(1).
+impl __StringConv for &string {
+    #[inline]
+    fn __to_string(self) -> string {
+        self.clone()
+    }
+}
+
 impl __StringConv for rune {
     /// Go's `string(i rune)` — encode a single rune to UTF-8 (1..4 bytes).
     /// Note: this is the Go gotcha where `string(65)` == `"A"`, not `"65"`.
@@ -54,6 +65,29 @@ impl __StringConv for rune {
         let mut buf = [0u8; 4];
         let n = utf8::EncodeRune(&mut buf, self);
         string::from_bytes(&buf[..n as usize])
+    }
+}
+
+impl __StringConv for u8 {
+    /// Go's `string(b byte)` — same gotcha as `string(rune)`. The byte
+    /// is treated as a Unicode codepoint, so `string(byte('A'))` is
+    /// `"A"` (one byte ASCII) and `string(byte(0xC2))` is the U+00C2
+    /// codepoint encoded as two UTF-8 bytes.
+    #[inline]
+    fn __to_string(self) -> string {
+        let mut buf = [0u8; 4];
+        let n = utf8::EncodeRune(&mut buf, self as rune);
+        string::from_bytes(&buf[..n as usize])
+    }
+}
+
+/// Borrowed `&u8` passthrough — `range!(slice<byte>)` yields `&u8`,
+/// and `string(c)` inside the loop body would otherwise hit a missing
+/// `__StringConv` impl. Reads through with a deref.
+impl __StringConv for &u8 {
+    #[inline]
+    fn __to_string(self) -> string {
+        (*self).__to_string()
     }
 }
 
@@ -99,6 +133,16 @@ impl __BytesConv for string {
 impl __BytesConv for &'static str {
     fn __to_bytes(self) -> slice<byte> {
         slice::__from_vec(self.as_bytes().to_vec())
+    }
+}
+
+// `bytes(b"\xff\x06...")` for ports whose Go source uses byte-string
+// literals with non-UTF-8 bytes (e.g. snappy's `magicChunk` magic
+// prefix, file-format signatures, frame headers). Required at the
+// boundary where a Rust byte literal becomes a goish slice<byte>.
+impl __BytesConv for &'static [u8] {
+    fn __to_bytes(self) -> slice<byte> {
+        slice::__from_vec(self.to_vec())
     }
 }
 
@@ -203,6 +247,67 @@ __num_conv!(__Float32Conv, float32, float32);
 __num_conv!(__Float64Conv, float64, float64);
 __num_conv!(__RuneConv, rune, crate::types::rune);
 __num_conv!(__ByteConv, byte, crate::types::byte);
+
+// char → rune: Go character literals are rune-typed; in Rust they are `char`.
+// `rune('x')` should work the same as Go's `'x'` in a rune context.
+impl __RuneConv for char {
+    #[inline]
+    fn __conv(self) -> crate::types::rune { self as crate::types::rune }
+}
+// char → byte: `byte('x')` converts an ASCII char to a u8.
+impl __ByteConv for char {
+    #[inline]
+    fn __conv(self) -> crate::types::byte { self as crate::types::byte }
+}
+
+// ─── NumCast — type-parameter numeric conversion ────────────────────
+//
+// Go's `T(x)` where `T` is a constrained type parameter is a numeric
+// *conversion*, not a call. Rust cannot `as`-cast a generic operand,
+// nor can it "call" a type parameter, so the transpiler lowers it
+// through `NumCast`, which has both directions:
+//
+//   `T(x)`        — convert TO a type param:   `<T as NumCast>::from_<k>(x)`
+//   `int64(t)`    — convert FROM a type param: `NumCast::to_i64(t)`
+//
+// `<k>` is the source operand's basic kind (float → f64, signed → i64,
+// unsigned → u64). A generic function that performs either form gets a
+// `T: goish::NumCast` bound emitted on the corresponding type param.
+//
+// Implemented for the 12 Rust numeric primitives. Goish's `int`,
+// `uint`, `float64`, `float32`, `byte`, `rune` are plain aliases of
+// those primitives (see `types.rs`), so the alias set is covered too.
+pub trait NumCast: Sized + Copy {
+    #[doc(hidden)]
+    fn from_f64(v: f64) -> Self;
+    #[doc(hidden)]
+    fn from_i64(v: i64) -> Self;
+    #[doc(hidden)]
+    fn from_u64(v: u64) -> Self;
+    #[doc(hidden)]
+    fn to_f64(self) -> f64;
+    #[doc(hidden)]
+    fn to_i64(self) -> i64;
+    #[doc(hidden)]
+    fn to_u64(self) -> u64;
+}
+
+macro_rules! __num_cast_impl {
+    ($($t:ty),* $(,)?) => {
+        $(
+            impl NumCast for $t {
+                #[inline] fn from_f64(v: f64) -> Self { v as $t }
+                #[inline] fn from_i64(v: i64) -> Self { v as $t }
+                #[inline] fn from_u64(v: u64) -> Self { v as $t }
+                #[inline] fn to_f64(self) -> f64 { self as f64 }
+                #[inline] fn to_i64(self) -> i64 { self as i64 }
+                #[inline] fn to_u64(self) -> u64 { self as u64 }
+            }
+        )*
+    };
+}
+
+__num_cast_impl!(u8, i8, u16, i16, u32, i32, u64, i64, usize, isize, f32, f64);
 
 // ─── __SliceIndex — accept any integer type as a Go-style index ─────
 //

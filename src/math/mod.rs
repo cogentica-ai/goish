@@ -151,6 +151,28 @@ pub fn Mod(x: f64, y: f64) -> f64 {
     libm::fmod(x, y)
 }
 
+/// `math.Modf(f) (int float64, frac float64)` — splits `f` into integer
+/// and fractional parts, each with the same sign as `f`. NaN propagates
+/// to both halves; ±Inf returns (±Inf, NaN) per Go's `math/modf.go`.
+pub fn Modf(f: f64) -> (f64, f64) {
+    if f.is_nan() {
+        return (f, f);
+    }
+    if f.is_infinite() {
+        return (f, f64::NAN);
+    }
+    let i = libm::trunc(f);
+    let frac = f - i;
+    (i, frac)
+}
+
+/// `math.Copysign(magnitude, sign) float64` — returns a value with the
+/// magnitude of `magnitude` and the sign of `sign`. Mirrors Go's
+/// `math.Copysign` semantics including signed zeros and NaN sign.
+pub fn Copysign(magnitude: f64, sign: f64) -> f64 {
+    libm::copysign(magnitude, sign)
+}
+
 /// `math.Remainder(x, y) float64` — IEEE 754 remainder.
 pub fn Remainder(x: f64, y: f64) -> f64 {
     libm::remainder(x, y)
@@ -291,4 +313,32 @@ pub fn Float64bits(f: f64) -> u64 {
 /// `math.Float64frombits(b) float64`.
 pub fn Float64frombits(b: u64) -> f64 {
     f64::from_bits(b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modf_basic() {
+        let (i, frac) = Modf(3.75);
+        assert_eq!(i, 3.0);
+        assert!((frac - 0.75).abs() < 1e-12);
+        let (i, frac) = Modf(-2.25);
+        assert_eq!(i, -2.0);
+        assert!((frac - -0.25).abs() < 1e-12);
+        let (i, frac) = Modf(0.0);
+        assert_eq!(i, 0.0);
+        assert_eq!(frac, 0.0);
+    }
+
+    #[test]
+    fn copysign_basic() {
+        assert_eq!(Copysign(3.0, -1.0), -3.0);
+        assert_eq!(Copysign(-3.0, 1.0), 3.0);
+        assert_eq!(Copysign(0.0, -1.0), -0.0);
+        // Result sign always follows `sign` even if magnitude is NaN.
+        assert!(Copysign(f64::NAN, -1.0).is_nan());
+        assert!(Copysign(f64::NAN, -1.0).is_sign_negative());
+    }
 }

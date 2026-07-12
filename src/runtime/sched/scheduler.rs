@@ -423,29 +423,21 @@ fn unreachable_dead() -> ! {
 extern "C" fn g_entry() -> ! {
     // Install panic recovery + take entry in a sub-frame that's freed
     // before `entry()` runs — keeps g_entry's own frame minimal so
-    // small (2 KiB default) goroutine stacks don't bust the budget
-    // during the prologue.
+    // small explicit stacks (`go!(stack(2*KB))` pool carves) don't
+    // bust the budget during the prologue.
     let entry = unsafe { g_entry_setup() };
     entry();
     unsafe { g_entry_clear_recovery() };
     goexit();
 }
 
-/// Variant of `g_entry` for goroutines spawned with auto-grow
-/// (bare `go!()` form, `g.growable == true`). Wraps `entry()` in
-/// `runtime::sched::maybe_grow_step`, so the user closure runs
-/// inside the tier-aware grow scope: home (2 KiB) → tier-2 (64 KiB)
-/// → tier-3 (1 MiB), pivoting lazily as SP descends into each tier's
-/// red zone.
-///
-/// Goroutines spawned via `go!(stack(N), …)` / `go!(N, …)` skip this
-/// wrap (`g.growable == false`) and run on a strictly-N-byte stack.
-extern "C" fn g_entry_growable() -> ! {
-    let entry = unsafe { g_entry_setup() };
-    crate::runtime::sched::maybe_grow_step(entry);
-    unsafe { g_entry_clear_recovery() };
-    goexit();
-}
+// M29 note: the former `g_entry_growable` variant (bare `go!()`
+// wrapped in `maybe_grow_step`'s pivot ladder) was removed — bare
+// goroutines now run on a 1 MiB lazily-committed reservation
+// (`Stack::new_reserved`), so depth is handled by the kernel's
+// demand paging with no entry wrapper. The pivot ladder
+// (`maybe_grow` / `maybe_grow_step`) remains available as an opt-in
+// for fixed-stack goroutines and for >1 MiB excursions.
 
 #[inline(never)]
 unsafe fn g_entry_setup() -> alloc::boxed::Box<dyn FnOnce()> {
@@ -780,16 +772,13 @@ fn execute(mut g_ptr: NonNull<G>) -> ! {
     dispatch_validate_g(g_ptr);
     let g = unsafe { g_ptr.as_mut() };
     if g.status == GStatus::Idle {
-        // First-time dispatch: lay out gobuf for gogo. PC is either
-        // `g_entry` (fixed-stack goroutines: `go!(stack(N), …)` and
-        // `go!(N, …)`) or `g_entry_growable` (bare `go!()` — wraps
-        // user `entry()` in `maybe_grow_step` for tier-aware lazy
-        // growth). Sp = stack_top-8, with goexit_trampoline parked
-        // at [sp].
-        let entry_fn: extern "C" fn() -> ! =
-            if g.growable { g_entry_growable } else { g_entry };
+        // First-time dispatch: lay out gobuf for gogo. PC is
+        // `g_entry`; Sp = stack_top-8, with goexit_trampoline parked
+        // at [sp]. (M29: bare and fixed-stack goroutines share the
+        // same entry — bare Gs get depth from their lazily-committed
+        // 1 MiB reservation, not from an entry-side pivot wrapper.)
         unsafe {
-            make_context_gogo(&mut g.gobuf, g.stack.top(), entry_fn);
+            make_context_gogo(&mut g.gobuf, g.stack.top(), g_entry);
         }
     }
     g.status = GStatus::Running;
@@ -842,7 +831,7 @@ extern "C" fn gosched_m(g_ptr: *mut G) -> ! {
     // `next=false` matches Go's `goschedImpl(_, false)` — Gosched
     // yields to the back of the queue (proc.go:4307 globrunqput).
     enqueue_runnable(g, false);
-    schedule()
+    schedule_loop()
 }
 
 /// `park_m(gp)` — gopark continuation on g0. Mirrors Go's `park_m`
@@ -884,7 +873,7 @@ extern "C" fn park_m(g_ptr: *mut G) -> ! {
     } else {
         current_m().lock().waitlock = core::ptr::null();
     }
-    schedule()
+    schedule_loop()
 }
 
 /// `goexit0(gp)` — goexit continuation on g0. Mirrors Go's
@@ -926,36 +915,94 @@ extern "C" fn goexit0(g_ptr: *mut G) -> ! {
         // or stay parked (workers, reaped by exit_group).
         wake_all_idle_m();
     }
-    schedule()
+    schedule_loop()
 }
 
-/// Drain the run queue. Returns when **all live goroutines** have
-/// terminated (`LIVE_G_COUNT == 0`).
+/// Public scheduler entry — context-dependent.
 ///
-/// Called from `__goish_rt0` after the user's `fn main()` returns,
-/// so any goroutines spawned with `go!()` get to run. User code can
-/// also call this explicitly to interleave goroutine execution with
-/// main-thread work.
+/// **On g0 (no current G)**: enters the dispatch loop and never
+/// returns. This is the path `__goish_rt0` and worker Ms take.
+///
+/// **Inside a goroutine** — e.g. the main goroutine calling
+/// `schedule()` as an explicit drain point mid-`main` (the idiom all
+/// e2e examples use): acts as a **drain barrier**. Returns once the
+/// calling G is the only live goroutine, i.e. every other goroutine
+/// spawned so far has exited. While other Gs are retiring, the
+/// barrier yields via `Gosched()` so they get CPU; when a round of
+/// yielding retires nothing (the remainder are parked on timers or
+/// chan waits serviced by other Ms), it naps on the sysmon timer
+/// heap with exponential backoff (32 µs → 1 ms) instead of burning
+/// a core.
+///
+/// Why the split: before main-on-a-goroutine, the user's `main` ran
+/// directly on m0's g0, so `schedule()` at a drain point entered the
+/// dispatch loop and the process exited from `maybe_exit_main_m` —
+/// statements after the call were dead code. With `main` on a G
+/// (Go-faithful, so blocking primitives work from `main`), the same
+/// call site must *return* and let the rest of `main` run. Entering
+/// the dispatch loop from a G's stack is unsound: `execute()` would
+/// overwrite `m.curg` and `gogo` away without the calling G's gobuf
+/// ever being saved, permanently losing the G while it still counts
+/// in `LIVE_G_COUNT` — the process could then never drain to 0 and
+/// every M would park forever.
+///
+/// **Liveness assumption** (same as the old g0-only contract): the
+/// barrier won't return if some other goroutine is parked with no
+/// waker (a user-program deadlock). Only one G should drain at a
+/// time — two Gs both inside the barrier wait for each other and
+/// never reach `live == 1`.
+pub fn schedule() {
+    if current_g().is_none() {
+        schedule_loop();
+    }
+    // Drain barrier: nap durations in ns, doubling while no progress.
+    const NAP_MIN_NS: i64 = 32_000;
+    const NAP_MAX_NS: i64 = 1_000_000;
+    let mut nap_ns = NAP_MIN_NS;
+    loop {
+        let live = LIVE_G_COUNT.load(Ordering::Acquire);
+        if live <= 1 {
+            return;
+        }
+        Gosched();
+        let after = LIVE_G_COUNT.load(Ordering::Acquire);
+        if after <= 1 {
+            return;
+        }
+        if after < live {
+            // Goroutines are retiring — stay hot, keep yielding.
+            nap_ns = NAP_MIN_NS;
+            continue;
+        }
+        // No progress this round: the remaining Gs are parked
+        // (timers / chan waits). Sleep on the timer heap so sysmon
+        // wakes us instead of spinning.
+        crate::runtime::sysmon::timer_park(nap_ns);
+        if nap_ns < NAP_MAX_NS {
+            nap_ns *= 2;
+        }
+    }
+}
+
+/// Dispatch loop. Runs on g0's stack and never returns: picks a
+/// runnable G via `find_runnable` and hands off to `execute(g)`
+/// (which uses `gogo` to JMP into the G — also no return). When no
+/// work is left and `LIVE_G_COUNT == 0` the main M exits the process
+/// (`Exit(0)`); workers stay parked forever (process exit will reap
+/// them).
 ///
 /// In multi-M mode (M17a-δ.1+) the main M participates in dispatch
-/// alongside worker Ms — same code path. Workers call
-/// `m_schedule_loop` instead, which mirrors this loop but exits via
-/// `ExitThread(0)` when done.
+/// alongside worker Ms — same code path, entered via
+/// `m_schedule_loop` on workers and via `__goish_rt0`'s tail call on
+/// the main M.
 ///
-/// **Liveness assumption**: this loop won't return if there are
-/// parked goroutines with no waker (a user-program deadlock). Go's
-/// runtime detects this via `checkdead` (proc.go:5566); goish v1
-/// will hang in that case until M18b lands.
-///
-/// **M17b-ε**: under the mcall-pattern, `schedule()` runs on g0's
-/// stack and never returns. Picks a runnable G via `find_runnable`
-/// and hands off to `execute(g)` (which uses `gogo` to JMP into the
-/// G — also no return). When no work is left and `LIVE_G_COUNT == 0`
-/// the main M exits the process (`Exit(0)`); workers stay parked
-/// forever (process exit will reap them).
+/// **Liveness assumption**: this loop won't exit if there are parked
+/// goroutines with no waker (a user-program deadlock). Go's runtime
+/// detects this via `checkdead` (proc.go:5566); goish v1 will hang
+/// in that case until M18b lands.
 #[inline(never)]
 #[link_section = "goish_rt_text"]
-pub fn schedule() -> ! {
+pub(crate) fn schedule_loop() -> ! {
     loop {
         match find_runnable() {
             Some(g) => execute(g), // never returns
@@ -1174,10 +1221,10 @@ fn wake_all_idle_m() {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 pub fn m_schedule_loop() -> ! {
-    // M17b-ε: schedule() is the unified entry point under the mcall
-    // pattern; it never returns. The main-vs-worker shutdown branch
-    // lives inside `maybe_exit_main_m()` (workers stay parked).
-    schedule()
+    // M17b-ε: schedule_loop() is the unified dispatch loop under the
+    // mcall pattern; it never returns. The main-vs-worker shutdown
+    // branch lives inside `maybe_exit_main_m()` (workers stay parked).
+    schedule_loop()
 }
 
 /// Number of live goroutines (created via `newproc`, not yet exited).

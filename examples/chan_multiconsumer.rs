@@ -61,7 +61,7 @@ fn main() {
     for _ in 0..NWORK {
         let q = q.clone();
         let r = r.clone();
-        go!(stack(64 * goish::KB), move || {
+        go!(move || {
             loop {
                 let (v, ok) = q.Recv();
                 if !ok {
@@ -79,7 +79,7 @@ fn main() {
     // Feeder: produce NITER values, then close q.
     {
         let q = q.clone();
-        go!(stack(64 * goish::KB), move || {
+        go!(move || {
             let mut expect: i64 = 0;
             for i in 0..NITER {
                 let v = PRIMES[(i as usize) % PRIMES.len()];
@@ -95,7 +95,7 @@ fn main() {
     // Consumer: drain r and sum.
     {
         let r = r.clone();
-        go!(stack(64 * goish::KB), move || {
+        go!(move || {
             let mut n: i64 = 0;
             let mut s: i64 = 0;
             loop {

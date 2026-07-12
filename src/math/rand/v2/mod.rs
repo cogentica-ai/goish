@@ -34,6 +34,7 @@ use crate::types::{byte, int};
 // ─── Source trait (rand.go:29) ───────────────────────────────────────
 
 /// `rand.Source` — uniform uint64 source.
+#[goish::interface]
 pub trait Source {
     fn Uint64(&mut self) -> u64;
 }

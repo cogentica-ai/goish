@@ -21,7 +21,7 @@
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 
-use goish::runtime::sched::{current_m, MStorage};
+use goish::runtime::sched::{acquirem, current_m, releasem, MStorage};
 use goish::syscall;
 
 const N_WORKERS: usize = 4;
@@ -104,9 +104,17 @@ fn check(cond: bool, msg: &[u8]) {
 
 #[goish::main]
 fn main() {
-    // ── Test 1: main M's TLS read returns &MAIN_M.m (id=0) ────────
-    let main_id = current_m().lock().id;
-    check(main_id == 0, b"t1: main M id != 0\n");
+    // ── Test 1: the dispatching M's TLS reads are coherent ────────
+    //
+    // `main` runs on the main *goroutine*, dispatched by whichever M
+    // dequeued it — not necessarily MAIN_M (id 0). The TLS invariant
+    // to check is that `current_m()` via the fs-base read returns a
+    // stable M across reads (pinned so no migration between them).
+    acquirem();
+    let id_a = current_m().lock().id;
+    let id_b = current_m().lock().id;
+    releasem();
+    check(id_a == id_b, b"t1: TLS current_m read not stable\n");
 
     // ── Test 2: spawn 4 workers, each with its own MStorage ───────
     let entries: [extern "C" fn() -> !; N_WORKERS] = [

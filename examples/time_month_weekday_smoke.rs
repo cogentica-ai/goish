@@ -40,7 +40,7 @@ fn fail() {
 
 #[goish::main]
 fn main() {
-    go!(stack(128 * KB), || {
+    go!(|| {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
@@ -156,7 +156,7 @@ fn test_6_weekday_string_out_of_range() {
 
 fn test_7_time_month_typed() {
     // 2024-07-04 — well-known Independence Day.
-    let t = time::Date(2024, 7, 4, 12, 0, 0, 0);
+    let t = time::Date(2024, 7, 4, 12, 0, 0, 0, goish::time::UTC);
     let m = t.Month();
     if m == time::July && m.Int() == 7 {
         ok_line(b"[ 7] Time::Month -> typed Month  PASS\n");
@@ -168,7 +168,7 @@ fn test_7_time_month_typed() {
 
 fn test_8_time_weekday_typed() {
     // 2024-07-04 was a Thursday.
-    let t = time::Date(2024, 7, 4, 12, 0, 0, 0);
+    let t = time::Date(2024, 7, 4, 12, 0, 0, 0, goish::time::UTC);
     let wd = t.Weekday();
     if wd == time::Thursday && wd.Int() == 4 {
         ok_line(b"[ 8] Time::Weekday -> typed      PASS\n");

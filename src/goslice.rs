@@ -67,6 +67,20 @@ impl<T> slice<T> {
     pub fn Cap(&self) -> int {
         self.inner.capacity() as int
     }
+
+    /// `xs.swap(i, j)` — swap two elements in place.
+    ///
+    /// Goishc lowers Go's tuple-swap idiom `xs[i], xs[j] = xs[j],
+    /// xs[i]` (canonical in `sort.Interface.Swap`) to this call. The
+    /// underlying `[T]::swap` is reachable via `DerefMut`, but its
+    /// `usize` argument types would force callers to cast `int` →
+    /// `usize` at every site; this inherent shim accepts `int`
+    /// (Go's natural integer kind) and does the cast once. Works for
+    /// any element type — no `Copy` / `Clone` bound — because the
+    /// underlying swap is a pointer-level exchange.
+    pub fn swap(&mut self, i: int, j: int) {
+        self.inner.swap(i as usize, j as usize);
+    }
 }
 
 impl<T: Clone> slice<T> {
@@ -81,6 +95,34 @@ impl<T: Clone> slice<T> {
         Self {
             inner: self.inner[lo..hi].to_vec(),
         }
+    }
+
+    /// `xs[low:high:max]` — Go's three-index ("full") slice expression.
+    /// Length is `high - low`; capacity is `max - low`. Bounds checked
+    /// against `0 <= low <= high <= max <= cap(xs)` (panic on violation,
+    /// matching Go's runtime panic).
+    ///
+    /// **v1 deviation**: same as `slice()` — returns an independent copy
+    /// rather than a view. The `max` parameter is honored as the
+    /// allocated capacity of the new backing Vec, so subsequent
+    /// `append` against the result reallocates at the same boundary
+    /// Go would.
+    pub fn slice3(&self, low: int, high: int, max: int) -> Self {
+        let lo = low as usize;
+        let hi = high as usize;
+        let mx = max as usize;
+        if !(lo <= hi && hi <= mx && mx <= self.inner.capacity()) {
+            panic!(
+                "slice bounds out of range [{}:{}:{}] with capacity {}",
+                lo,
+                hi,
+                mx,
+                self.inner.capacity()
+            );
+        }
+        let mut v: Vec<T> = Vec::with_capacity(mx - lo);
+        v.extend_from_slice(&self.inner[lo..hi]);
+        Self { inner: v }
     }
 }
 
@@ -141,6 +183,113 @@ impl<T> PartialEq<crate::nilval::Nil> for slice<T> {
     #[inline]
     fn eq(&self, _: &crate::nilval::Nil) -> bool {
         self.Len() == 0
+    }
+}
+
+// Element-wise equality. Mirrors Go's `bytes.Equal` / element-by-
+// element `==` chain that Go's spec defines for slices via reflect
+// (with the caveat that `==` on slice values is a compile error in
+// Go for non-byte slices; Goish takes the more permissive route of
+// providing the operator for any cheap-clone `T: PartialEq`, since
+// the alternative — requiring callers to spell `bytes::Equal`
+// explicitly — adds noise without semantic value).
+//
+// Eq is intentionally NOT derived: Go's `[]float64` with NaN
+// elements would violate the Eq reflexivity contract.
+impl<T: PartialEq> PartialEq for slice<T> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+// Go's `[]rune(s)` and `[]byte(s)` string→slice conversions. Goish
+// emits these as `<slice<rune>>::from(s)` / `<slice<byte>>::from(s)`
+// at the buildTypeConversion call site.
+//
+// `[]rune(s)` decodes UTF-8 codepoints — each rune is the int32
+// code point. Mirrors Go's runtime behaviour where invalid bytes
+// emit U+FFFD (replacement char). `chars()` on `&str` does the
+// same routing through std::char::from_u32.
+//
+// `[]byte(s)` is a copy of the underlying byte buffer.
+
+impl From<&crate::gostring::string> for slice<crate::types::rune> {
+    fn from(s: &crate::gostring::string) -> Self {
+        let bytes = s.as_bytes();
+        let str_view = match core::str::from_utf8(bytes) {
+            Ok(v) => v,
+            Err(_) => {
+                // Invalid UTF-8 — Go's runtime would replace with
+                // U+FFFD; fall back to a lossy decode. The valid
+                // prefix is yielded; replacement filles the rest.
+                let mut out: alloc::vec::Vec<crate::types::rune> = alloc::vec::Vec::new();
+                let mut i = 0;
+                while i < bytes.len() {
+                    match core::str::from_utf8(&bytes[i..]) {
+                        Ok(rest) => {
+                            for c in rest.chars() {
+                                out.push(c as crate::types::rune);
+                            }
+                            i = bytes.len();
+                        }
+                        Err(e) => {
+                            let valid = e.valid_up_to();
+                            if valid > 0 {
+                                if let Ok(prefix) =
+                                    core::str::from_utf8(&bytes[i..i + valid])
+                                {
+                                    for c in prefix.chars() {
+                                        out.push(c as crate::types::rune);
+                                    }
+                                }
+                            }
+                            out.push(0xFFFD);
+                            i += valid + 1;
+                        }
+                    }
+                }
+                return slice::<crate::types::rune>::__from_vec(out);
+            }
+        };
+        let mut out: alloc::vec::Vec<crate::types::rune> =
+            alloc::vec::Vec::with_capacity(str_view.len());
+        for c in str_view.chars() {
+            out.push(c as crate::types::rune);
+        }
+        slice::<crate::types::rune>::__from_vec(out)
+    }
+}
+
+// `[]byte(s)` — Go's idiomatic string-to-bytes conversion. Goish's
+// `bytes(s)` builtin is the same op spelled differently; this impl
+// covers the explicit `slice<byte>::from(s)` path that some emit
+// sites take.
+impl From<&crate::gostring::string> for slice<crate::types::byte> {
+    fn from(s: &crate::gostring::string) -> Self {
+        let bytes = s.as_bytes();
+        let mut out: alloc::vec::Vec<crate::types::byte> =
+            alloc::vec::Vec::with_capacity(bytes.len());
+        out.extend_from_slice(bytes);
+        slice::<crate::types::byte>::__from_vec(out)
+    }
+}
+
+// Owned-string variants — emitted call sites often have `string` by
+// value rather than `&string`. Forwarding to the borrowed impls keeps
+// the conversion logic in one place; the `&` produces a temporary
+// borrow that's valid for the duration of the call.
+impl From<crate::gostring::string> for slice<crate::types::rune> {
+    #[inline]
+    fn from(s: crate::gostring::string) -> Self {
+        Self::from(&s)
+    }
+}
+
+impl From<crate::gostring::string> for slice<crate::types::byte> {
+    #[inline]
+    fn from(s: crate::gostring::string) -> Self {
+        Self::from(&s)
     }
 }
 
@@ -214,5 +363,17 @@ impl<T> AsRef<[T]> for slice<T> {
     #[inline]
     fn as_ref(&self) -> &[T] {
         &self.inner
+    }
+}
+
+// `AsMut<[T]>` is the by-value mirror used by stdlib write methods
+// (binary::BigEndian::PutUint32 et al) that take `impl AsMut<[u8]>`
+// so callers can pass `slice<byte>` directly. Mutation flows into
+// the slice's owned `Vec<T>` — caller must hold a `&mut` to the
+// slice for the AsMut bound to fire.
+impl<T> AsMut<[T]> for slice<T> {
+    #[inline]
+    fn as_mut(&mut self) -> &mut [T] {
+        &mut self.inner
     }
 }

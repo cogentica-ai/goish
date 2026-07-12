@@ -25,10 +25,9 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::errors::{self, error, nil};
+use crate::errors::{error, nil};
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::runtime::spin::SpinLock;
 use crate::types::{byte, rune};
 use crate::unicode::utf8;
 

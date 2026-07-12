@@ -68,7 +68,7 @@ fn make_request(method: &'static str, host: &'static str) -> http::Request {
 
 #[goish::main]
 fn main() {
-    goish::go!(stack(128 * KB), || {
+    goish::go!(|| {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {

@@ -44,7 +44,7 @@ fn fail() {
 
 #[goish::main]
 fn main() {
-    go!(stack(128 * KB), || {
+    go!(|| {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
@@ -190,7 +190,7 @@ fn test_9_concurrent_store_load() {
     for w in 0..writers {
         let v = v.clone();
         let wg2 = wg.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             for i in 0..iters {
                 v.Store(w * 1_000_000 + i);
             }
@@ -207,7 +207,7 @@ fn test_9_concurrent_store_load() {
     let reader_wg = Arc::new(WaitGroup::new());
     reader_wg.Add(1);
     let reader_wg2 = reader_wg.clone();
-    go!(stack(64 * KB), move || {
+    go!(move || {
         while !stop2.load(Ordering::Acquire) {
             let (_x, _ok) = v2.Load();
             observed2.fetch_add(1, Ordering::AcqRel);

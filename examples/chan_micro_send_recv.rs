@@ -27,7 +27,7 @@ use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use goish::gochan::chan;
 use goish::runtime::sched::schedule;
-use goish::{go, make, syscall, KB};
+use goish::{go, make, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -51,7 +51,7 @@ fn main() {
 
     {
         let cs = c.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             for _ in 0..N {
                 cs.Send(0);
                 SEND_TOTAL.fetch_add(1, Ordering::Relaxed);
@@ -61,7 +61,7 @@ fn main() {
     }
     {
         let cr = c.clone();
-        go!(stack(64 * KB), move || {
+        go!(move || {
             for _ in 0..N {
                 let _ = cr.Recv();
                 RECV_TOTAL.fetch_add(1, Ordering::Relaxed);
