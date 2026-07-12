@@ -115,6 +115,19 @@ handshake — so cancel aborts a stuck handshake or mid-body TLS read.
 Not in v1: `Server.BaseContext` / `ConnContext` hooks (the base is
 always `Background`).
 
+### Preemption safety — the `m.locks` discipline (landed)
+`m.locks` is goish's `acquirem`/`releasem` depth counter (Go
+runtime1.go:631): while it is non-zero on an M, the SIGURG handler
+refuses trampoline injection and the cooperative safe point refuses
+`Gosched`. Two rr-traced bug classes hardened the discipline:
+
+| Invariant | Why |
+|-----------|-----|
+| the allocator runs masked (`mallocgc` parity) | a SIGURG landing mid-allocation migrated the G while the per-P mcache was half-mutated — a span with two owners livelocks the allocator at 100% CPU |
+| a bump/drop pair must never straddle a park | `gopark` can resume on a different M; a split pair leaves the parking M at +1 forever (silently unpreemptible) and wraps the resuming M to `u32::MAX`, after which preempt checks misread "one lock held" as "none" and fire inside `gopark`'s stash window — the commit fn is lost, a netpoll slot orphans at `PD_WAIT`, and the wakeup is dropped (the ~2% `select!` hang). `select!` now closes its mask epoch before the pass-2 park and reopens it after resume; user case bodies run unmasked |
+| `acquirem`/`releasem` are single fs-relative asm RMWs in `goish_rt_text` | debug builds don't inline `core::sync::atomic`, so a `fetch_add` is a call into plain `.text` where the SIGURG PC filter can't see it — injection between "materialize this M's counter address" and the RMW applies the RMW to the *old* M after a migration. `lock add/xadd fs:[offset]` always hits the M executing it |
+| `releasem` underflow is a debug panic | the tripwire turns any future straddle into an immediate diagnostic instead of a rare silent hang |
+
 ### Allocator maturation
 Phase 2a (today) is sufficient through M14. Higher tiers schedule
 against their forcing milestones:
