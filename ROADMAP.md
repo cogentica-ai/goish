@@ -108,9 +108,12 @@ through the transport. goish mirrors all of it:
 
 `http.TimeoutHandler` composes on top: the wrapped handler runs on
 its own goroutine against a buffered writer and observes its budget
-through `r.Context().Done()`. Not in v1: `Server.BaseContext` /
-`ConnContext` hooks (the base is always `Background`), and mid-I/O
-cancel interruption on the TLS client path (deadline folding only).
+through `r.Context().Done()`. The TLS client path gets the same
+mid-I/O cancel as plaintext: `RoundTrip` dials the raw conn, arms the
+deadline + cancel watcher on the underlying socket, then runs the
+handshake — so cancel aborts a stuck handshake or mid-body TLS read.
+Not in v1: `Server.BaseContext` / `ConnContext` hooks (the base is
+always `Background`).
 
 ### Allocator maturation
 Phase 2a (today) is sufficient through M14. Higher tiers schedule
