@@ -23,7 +23,7 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicUsize, Ordering};
 
 use crate::bufio;
 use crate::errors::{self, error};
@@ -952,6 +952,49 @@ pub struct __ServerState {
     /// goroutine. Held inside an `Arc<Listener>` because the Serve
     /// loop also needs read access to call Accept.
     tracked_listener: Mutex<Option<Arc<net::Listener>>>,
+    /// Per-connection state registry — Go's `Server.activeConn` set
+    /// (server.go:3097) backing `closeIdleConns` (server.go:3229).
+    /// Each serve_conn inserts its `ConnTrack` on entry and removes
+    /// it on exit; `Shutdown`/`Close` walk it to kick parked conns.
+    tracked_conns: Mutex<Vec<Arc<ConnTrack>>>,
+    /// `RegisterOnShutdown` callbacks — Go's `Server.onShutdown`
+    /// (server.go:3101); each is spawned on its own goroutine once
+    /// when Shutdown/Close begins.
+    on_shutdown: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
+}
+
+/// Go `ConnState` subset tracked per connection (server.go:3520):
+/// enough for `closeIdleConns`' quiescence test. Hooks
+/// (`Server.ConnState`) stay deferred.
+const CONN_STATE_NEW: u8 = 0;
+const CONN_STATE_ACTIVE: u8 = 1;
+const CONN_STATE_IDLE: u8 = 2;
+
+/// Per-connection tracking record — goish's rendering of Go's
+/// `conn.curState` packed atomic (server.go:299,
+/// `packed (unixtime<<8|uint8(ConnState))`) plus the netpoll handle
+/// the shutdown path needs to kick a parked reader.
+pub(crate) struct ConnTrack {
+    /// CONN_STATE_* value.
+    state: AtomicU8,
+    /// CLOCK_MONOTONIC ns of the last state transition (Go stores
+    /// unix seconds; monotonic avoids wall-clock jumps and only
+    /// differences are consulted).
+    since_ns: AtomicI64,
+    /// The conn's read-side PollDesc address, for the past-deadline
+    /// kick (goish `aLongTimeAgo`). Go closes `c.rwc` outright; the
+    /// deadline slam is the goish-safe equivalent — the owning
+    /// serve_conn observes the timeout error and closes the fd
+    /// itself, so the fd always has exactly one closer.
+    pd_addr: AtomicUsize,
+}
+
+impl ConnTrack {
+    fn set_state(&self, st: u8) {
+        self.since_ns
+            .store(crate::runtime::sysmon::monotonic_ns(), Ordering::Relaxed);
+        self.state.store(st, Ordering::Release);
+    }
 }
 
 crate::var! {
@@ -978,6 +1021,42 @@ crate::var! {
 /// — bounds idle keep-alive at 5 seconds.
 const DEFAULT_READ_HEADER_TIMEOUT_NS: i64 = 5_000_000_000;
 
+/// Resolved wait policy for `Server::Shutdown`.
+#[doc(hidden)]
+pub enum __ShutdownWait {
+    /// Absolute CLOCK_MONOTONIC deadline ns (`i64::MAX` = forever).
+    Deadline(i64),
+    /// Live context — Shutdown returns `ctx.Err()` once it is done.
+    Ctx(Arc<dyn crate::context::Context>),
+}
+
+/// Argument polymorphism for `Server::Shutdown`: Go's signature is
+/// `Shutdown(ctx context.Context)`; goish also keeps the original
+/// `Shutdown(timeout time.Duration)` convenience for existing
+/// callers. Same pattern as `impl Into<string>` parameters.
+#[doc(hidden)]
+pub trait __ShutdownArg {
+    fn __into_shutdown_wait(self) -> __ShutdownWait;
+}
+
+impl __ShutdownArg for time::Duration {
+    fn __into_shutdown_wait(self) -> __ShutdownWait {
+        if self.0 > 0 {
+            __ShutdownWait::Deadline(
+                crate::runtime::sysmon::monotonic_ns().wrapping_add(self.0 as i64),
+            )
+        } else {
+            __ShutdownWait::Deadline(i64::MAX)
+        }
+    }
+}
+
+impl __ShutdownArg for Arc<dyn crate::context::Context> {
+    fn __into_shutdown_wait(self) -> __ShutdownWait {
+        __ShutdownWait::Ctx(self)
+    }
+}
+
 impl Default for Server {
     fn default() -> Self {
         Server {
@@ -1001,6 +1080,8 @@ impl Default for __ServerState {
             active_conns: AtomicUsize::new(0),
             tracked_listener: Mutex::new(None),
             conn_sem: Mutex::new(None),
+            tracked_conns: Mutex::new(Vec::new()),
+            on_shutdown: Mutex::new(Vec::new()),
         }
     }
 }
@@ -1122,15 +1203,19 @@ impl Server {
     /// `timeout` elapses. Mirrors Go's `Server.Shutdown(ctx)`
     /// (server.go:3179) with a Duration in place of context.
     ///
-    /// `timeout <= 0` waits indefinitely. On timeout, returns
-    /// `"shutdown: timeout"`.
+    /// `timeout <= 0` (Duration form) waits indefinitely. On expiry,
+    /// the Duration form returns `"shutdown: timeout"`; the Context
+    /// form returns `ctx.Err()` (Go parity, server.go:3208).
     ///
-    /// **Drain semantics**: connections currently parked in
-    /// ReadRequest waiting for the next keep-alive request will close
-    /// once the per-conn ReadHeaderTimeout fires (default 5s). To
-    /// drain faster, set `Server.ReadHeaderTimeout` to a smaller value
-    /// before invoking Serve.
-    pub fn Shutdown(self: Arc<Self>, timeout: time::Duration) -> error {
+    /// **Drain semantics** (Go closeIdleConns, server.go:3229):
+    /// connections parked waiting for the next keep-alive request
+    /// are actively kicked — each poll round slams a past read
+    /// deadline on every Idle conn (and every New conn that has not
+    /// produced a request header within 5s — Go issue 22682), so the
+    /// parked read returns immediately and the conn closes.
+    pub fn Shutdown<A: __ShutdownArg>(self: Arc<Self>, arg: A) -> error {
+        let wait = arg.__into_shutdown_wait();
+
         // Set the shutdown flag and take the listener under one lock
         // so Serve's mirror-image install/check sees a consistent
         // state. Without this, a Serve that hadn't reached its
@@ -1151,41 +1236,151 @@ impl Server {
             let _ = ln.Close();
         }
 
-        // Poll active_conns down to 0. Exponential backoff capped
-        // at 100ms (Go's pollIntervalBase doubles to 500ms).
-        let deadline_ns = if timeout.0 > 0 {
-            crate::runtime::sysmon::monotonic_ns().wrapping_add(timeout.0 as i64)
-        } else {
-            i64::MAX
-        };
+        // Spawn RegisterOnShutdown callbacks, each on its own
+        // goroutine (Go server.go:3184-3186).
+        {
+            let hooks: Vec<Arc<dyn Fn() + Send + Sync>> =
+                self.__state.on_shutdown.Lock().clone();
+            for f in hooks {
+                go!(move || f());
+            }
+        }
+
+        // Poll active_conns down to 0, kicking idle conns each round
+        // (Go's Shutdown loop over closeIdleConns, server.go:3202).
+        // Exponential backoff capped at 100ms. Re-kicking every round
+        // also closes the small race where a conn re-arms its own
+        // read deadline over our slam.
         let mut sleep_ns: i64 = 1_000_000; // 1ms
         loop {
+            self.kick_tracked_conns(false);
             if self.__state.active_conns.load(Ordering::Acquire) == 0 {
                 return errors::nil;
             }
-            if crate::runtime::sysmon::monotonic_ns() >= deadline_ns {
-                return errors::New(string("shutdown: timeout"));
+            match &wait {
+                __ShutdownWait::Deadline(d) => {
+                    if crate::runtime::sysmon::monotonic_ns() >= *d {
+                        return errors::New(string("shutdown: timeout"));
+                    }
+                }
+                __ShutdownWait::Ctx(ctx) => {
+                    let e = ctx.Err();
+                    if !e.IsNil() {
+                        return e;
+                    }
+                }
             }
             time::Sleep(time::Duration(sleep_ns));
             sleep_ns = (sleep_ns * 2).min(100_000_000); // cap 100ms
         }
     }
 
+    /// `(*Server).Close` (server.go:3129) — immediately close the
+    /// listener and kick every tracked connection regardless of
+    /// state. Does not wait for handlers to finish (use `Shutdown`
+    /// for graceful drain). In-flight handlers observe read/write
+    /// errors on their next conn operation.
+    pub fn Close(self: Arc<Self>) -> error {
+        let listener = {
+            let mut tracked = self.__state.tracked_listener.Lock();
+            self.__state.in_shutdown.store(true, Ordering::Release);
+            tracked.take()
+        };
+        if let Some(ln) = listener {
+            ln.__wake_accept();
+            let _ = ln.Close();
+        }
+        {
+            let hooks: Vec<Arc<dyn Fn() + Send + Sync>> =
+                self.__state.on_shutdown.Lock().clone();
+            for f in hooks {
+                go!(move || f());
+            }
+        }
+        self.kick_tracked_conns(true);
+        errors::nil
+    }
+
+    /// `(*Server).RegisterOnShutdown(f)` (server.go:3221) — register
+    /// a callback to run (on its own goroutine) when `Shutdown` or
+    /// `Close` begins.
+    pub fn RegisterOnShutdown(&self, f: Arc<dyn Fn() + Send + Sync>) {
+        self.__state.on_shutdown.Lock().push(f);
+    }
+
+    /// Kick tracked connections so their parked reads return — the
+    /// working half of Go's `closeIdleConns` (server.go:3229). With
+    /// `all == false`, kicks Idle conns plus New conns older than 5s
+    /// (Go issue 22682: a conn that never sent a request header);
+    /// with `all == true` (`Close`), kicks everything.
+    ///
+    /// The kick is a past netpoll read+write deadline rather than an
+    /// out-of-band `close(2)`: the owning serve_conn sees the timeout
+    /// error and closes the fd itself, keeping single-owner fd
+    /// discipline (no close/reuse race with an in-flight read).
+    fn kick_tracked_conns(&self, all: bool) {
+        let now = crate::runtime::sysmon::monotonic_ns();
+        let conns: Vec<Arc<ConnTrack>> = self.__state.tracked_conns.Lock().clone();
+        for t in conns {
+            let st = t.state.load(Ordering::Acquire);
+            let kick = all
+                || st == CONN_STATE_IDLE
+                || (st == CONN_STATE_NEW
+                    && now.wrapping_sub(t.since_ns.load(Ordering::Relaxed))
+                        > 5_000_000_000);
+            if !kick {
+                continue;
+            }
+            let pd_addr = t.pd_addr.load(Ordering::Acquire);
+            if pd_addr != 0 {
+                let pd = unsafe { &*(pd_addr as *const crate::runtime::netpoll::PollDesc) };
+                crate::runtime::netpoll::set_deadline(pd, -1, b'r');
+                if all {
+                    crate::runtime::netpoll::set_deadline(pd, -1, b'w');
+                }
+            }
+        }
+    }
+
     /// Per-connection serving loop. See keep-alive doc (M27f-β).
     fn serve_conn(self: Arc<Self>, mut conn: net::TCPConn) {
-        // Drop guard ensures active_conns is decremented even if a
-        // handler panics or an early return path is taken.
-        struct ActiveGuard<'a>(&'a AtomicUsize);
+        // Drop guard ensures active_conns is decremented (and the
+        // conn's tracking record removed) even if a handler panics or
+        // an early return path is taken.
+        struct ActiveGuard<'a> {
+            count: &'a AtomicUsize,
+            server: &'a __ServerState,
+            track: Arc<ConnTrack>,
+        }
         impl Drop for ActiveGuard<'_> {
             fn drop(&mut self) {
-                self.0.fetch_sub(1, Ordering::AcqRel);
+                self.server
+                    .tracked_conns
+                    .Lock()
+                    .retain(|t| !Arc::ptr_eq(t, &self.track));
+                self.count.fetch_sub(1, Ordering::AcqRel);
             }
         }
         self.__state.active_conns.fetch_add(1, Ordering::AcqRel);
-        let _guard = ActiveGuard(&self.__state.active_conns);
+        // Register the conn for shutdown kicks — Go's
+        // `c.setState(StateNew)` + activeConn insert (server.go:3457).
+        let (_, watch_pd_early) = conn.__disconnect_watch_parts();
+        let track = Arc::new(ConnTrack {
+            state: AtomicU8::new(CONN_STATE_NEW),
+            since_ns: AtomicI64::new(crate::runtime::sysmon::monotonic_ns()),
+            pd_addr: AtomicUsize::new(watch_pd_early as usize),
+        });
+        self.__state.tracked_conns.Lock().push(track.clone());
+        let _guard = ActiveGuard {
+            count: &self.__state.active_conns,
+            server: &self.__state,
+            track: track.clone(),
+        };
 
         let read_header_ns = self.read_header_timeout_ns();
+        let idle_ns = self.idle_timeout_ns();
         let write_timeout_ns = self.write_timeout_ns();
+        let mut first_request = true;
 
         loop {
             if self.__state.in_shutdown.load(Ordering::Acquire) {
@@ -1193,10 +1388,15 @@ impl Server {
                 return;
             }
 
-            // Arm the idle/header read deadline before each request.
-            // Cleared after the headers parse so handler body reads
-            // aren't artificially capped (large uploads).
-            let dl = time::Now().Add(time::Duration(read_header_ns));
+            // Arm the wait-for-request read deadline. First request:
+            // ReadHeaderTimeout. Between keep-alive requests: the
+            // idle bound — Go arms `idleTimeout()` while waiting for
+            // the next request's first byte (server.go:2135). Cleared
+            // after the headers parse so handler body reads aren't
+            // artificially capped (large uploads).
+            let wait_ns = if first_request { read_header_ns } else { idle_ns };
+            first_request = false;
+            let dl = time::Now().Add(time::Duration(wait_ns));
             let _ = conn.SetReadDeadline(dl);
 
             let (mut req, err) = {
@@ -1210,6 +1410,9 @@ impl Server {
             }
             // Clear the read deadline once headers are parsed.
             let _ = conn.SetReadDeadline(time::Time::default());
+            // Request in flight — Go's `c.setState(StateActive)`
+            // (server.go:2043): shutdown's idle-kick skips us now.
+            track.set_state(CONN_STATE_ACTIVE);
             // Apply WriteTimeout for the response phase if configured.
             if write_timeout_ns > 0 {
                 let wdl = time::Now().Add(time::Duration(write_timeout_ns));
@@ -1294,6 +1497,10 @@ impl Server {
                 let _ = conn.Close();
                 return;
             }
+            // Response finished, conn waiting for its next request —
+            // Go's `c.setState(StateIdle)` (server.go:2131): shutdown
+            // may kick us from here on.
+            track.set_state(CONN_STATE_IDLE);
         }
     }
 
@@ -1306,6 +1513,21 @@ impl Server {
             self.ReadTimeout.0 as i64
         } else {
             DEFAULT_READ_HEADER_TIMEOUT_NS
+        }
+    }
+
+    /// Resolve the idle keep-alive bound — Go's `Server.idleTimeout()`
+    /// (server.go:3636): `IdleTimeout` if set, else `ReadTimeout`.
+    /// goish keeps its v1 safety net when both are zero (Go leaves
+    /// idle conns unbounded; goish falls back to the header timeout
+    /// so an abandoned keep-alive conn always drains).
+    fn idle_timeout_ns(&self) -> i64 {
+        if self.IdleTimeout.0 > 0 {
+            self.IdleTimeout.0 as i64
+        } else if self.ReadTimeout.0 > 0 {
+            self.ReadTimeout.0 as i64
+        } else {
+            self.read_header_timeout_ns()
         }
     }
 
