@@ -176,6 +176,11 @@ struct CancelState {
 }
 
 struct CancelCtx {
+    /// Parent context — Go's `cancelCtx` embeds `Context`
+    /// (context.go:421) and delegates `Value` lookups to it; without
+    /// this, a `WithCancel` in the chain would sever every ancestor
+    /// `WithValue`.
+    parent: Arc<dyn Context>,
     parent_deadline: Option<Time>,
     own_deadline: Option<Time>,
     done: chan<()>,
@@ -223,10 +228,16 @@ impl Context for CancelCtx {
             s.cause.clone()
         }
     }
+    fn Value(&self, key: &str) -> Option<Arc<dyn core::any::Any + Send + Sync>> {
+        // Go `(*cancelCtx).Value` (context.go:429): everything except
+        // the internal cancelCtxKey delegates up the parent chain.
+        self.parent.Value(key)
+    }
 }
 
 fn build_cancel_ctx(parent: &Arc<dyn Context>, own_deadline: Option<Time>) -> Arc<CancelCtx> {
     let me = Arc::new(CancelCtx {
+        parent: parent.clone(),
         parent_deadline: parent.Deadline(),
         own_deadline,
         done: crate::make!(chan ()),
