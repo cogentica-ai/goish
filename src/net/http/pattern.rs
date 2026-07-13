@@ -298,9 +298,16 @@ impl Pattern {
         host: &string,
         path: &string,
     ) -> Option<map<string, string>> {
-        // Method match: empty Method = any method.
+        // Method match: empty Method = any method. A `GET` pattern
+        // also matches HEAD requests — Go's routing_tree.go:140
+        // ("GET matches HEAD too"); the response writer suppresses
+        // the body for HEAD.
         if self.Method.Len() > 0 && self.Method != *method {
-            return None;
+            let get_matches_head =
+                self.Method == string("GET") && *method == string("HEAD");
+            if !get_matches_head {
+                return None;
+            }
         }
         // Host match: empty Host = any host.
         if self.Host.Len() > 0 && self.Host != *host {
