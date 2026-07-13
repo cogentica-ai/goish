@@ -946,6 +946,10 @@ pub struct Server {
     /// the per-connection context derived from the base context;
     /// called once per accepted connection.
     pub ConnContext: Option<ConnContextFn>,
+    /// `Server.ErrorLog` (server.go:3053) — optional logger for
+    /// accept errors and handler panics. `None` → the `log` package's
+    /// standard logger (stderr).
+    pub ErrorLog: Option<Arc<crate::log::Logger>>,
 
     /// Internal runtime state. Bundled behind a single field so users
     /// can construct a `Server` with Go-style struct literal syntax —
@@ -1092,6 +1096,7 @@ impl Default for Server {
             MaxConcurrentConns: 0,
             BaseContext: None,
             ConnContext: None,
+            ErrorLog: None,
             __state: __ServerState::default(),
         }
     }
@@ -1210,6 +1215,11 @@ impl Server {
                     if temp_delay_ns > 1_000_000_000 {
                         temp_delay_ns = 1_000_000_000; // 1s cap
                     }
+                    self.logf(crate::Sprintf!(
+                        "http: Accept error: %v; retrying in %dms",
+                        err,
+                        temp_delay_ns / 1_000_000
+                    ));
                     time::Sleep(time::Duration(temp_delay_ns));
                     continue;
                 }
@@ -1521,9 +1531,36 @@ impl Server {
             // distinguishes the panic path from normal exit so the fd
             // survives for keep-alive reuse on success.
             let fd = w.__conn_fd();
+            let panic_remote = req.RemoteAddr.clone();
+            let panic_srv = self.clone();
+            let panic_track = track.clone();
             crate::defer!{
-                if crate::recover!() != crate::nil {
+                let pv = crate::recover!();
+                if pv != crate::nil {
+                    // Go logs "http: panic serving %v: %v\n%s" with a
+                    // stack (server.go:1944); goish logs addr + value
+                    // (the SIGSEGV/panic machinery prints its own
+                    // diagnostics separately).
+                    panic_srv.logf(crate::Sprintf!(
+                        "http: panic serving %s: %v",
+                        panic_remote,
+                        pv
+                    ));
                     let _ = crate::syscall::Close(fd);
+                    // goish panic recovery longjmps to the goroutine
+                    // entry without running Rust drops, so the
+                    // ActiveGuard above never fires on this path —
+                    // release the conn accounting here or Shutdown
+                    // waits on a ghost conn forever.
+                    panic_srv
+                        .__state
+                        .tracked_conns
+                        .Lock()
+                        .retain(|t| !Arc::ptr_eq(t, &panic_track));
+                    panic_srv
+                        .__state
+                        .active_conns
+                        .fetch_sub(1, Ordering::AcqRel);
                 }
             }
             self.Handler.ServeHTTP(&w, &req);
@@ -1554,6 +1591,19 @@ impl Server {
             // Go's `c.setState(StateIdle)` (server.go:2131): shutdown
             // may kick us from here on.
             track.set_state(CONN_STATE_IDLE);
+        }
+    }
+
+    /// `(*Server).logf` (server.go:3691): route a message through
+    /// `ErrorLog` when set, else the `log` package default (stderr).
+    fn logf(&self, msg: string) {
+        match &self.ErrorLog {
+            Some(l) => {
+                let _ = l.Output(2, msg);
+            }
+            None => {
+                crate::log::println_impl(&[crate::fmt::FmtArg::Val(&msg)]);
+            }
         }
     }
 
