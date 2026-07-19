@@ -767,3 +767,7 @@ path = "examples/zlib_offset_smoke.rs"
 [[example]]
 name = "cast_clean_scratch"
 path = "examples/cast_clean_scratch.rs"
+
+[[example]]
+name = "goginx"
+path = "examples/goginx.rs"
