@@ -1018,10 +1018,84 @@ pub(crate) fn schedule_loop() -> ! {
                     maybe_exit_main_m();
                 }
                 if !has_local_or_global_work() {
-                    park_m_idle();
+                    // One idle M becomes THE blocking netpoller and
+                    // parks in epoll_wait instead of a futex, so fd
+                    // readiness wakes it directly instead of waiting
+                    // for sysmon's ≤10 ms fallback tick (Go
+                    // findRunnable's blocking `netpoll(delay)` step,
+                    // proc.go:3630). Everyone else futex-parks.
+                    if NETPOLLER_BUSY
+                        .compare_exchange(
+                            false,
+                            true,
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        )
+                        .is_ok()
+                    {
+                        block_as_netpoller();
+                    } else {
+                        park_m_idle();
+                    }
                 }
             }
         }
+    }
+}
+
+/// True while some M is blocked in `netpoll::poll(>0)` as the
+/// designated blocking netpoller. At most one M blocks in epoll at a
+/// time; producers with no futex-parked M to wake kick it via
+/// `netpoll_break()` (Go's `wakep` → `netpollBreak`, proc.go:3240).
+static NETPOLLER_BUSY: AtomicBool = AtomicBool::new(false);
+
+/// Upper bound on one blocking-netpoll nap. A missed wakeup
+/// therefore degrades to the pre-blocking-poller behavior (a
+/// sysmon-tick-sized delay) instead of a hang; sysmon's own
+/// netpoll(0) tick stays on as the second backstop.
+const NETPOLL_BLOCK_MS: i32 = 10;
+
+/// Any runnable work anywhere — every P's local queue plus the
+/// global queue. The blocking netpoller must scan ALL queues before
+/// sleeping (Go findRunnable re-checks `stealWork` targets before
+/// its blocking netpoll, proc.go:3560): `netpoll_break` coalesces
+/// concurrent wakeups through `WAKE_SIG`, so a producer whose break
+/// was swallowed (a wakeup already in flight that we have since
+/// drained) has work visible only in its own P's queue.
+#[inline(never)]
+fn any_runnable_anywhere() -> bool {
+    if has_local_or_global_work() {
+        return true;
+    }
+    let mut found = false;
+    super::p::for_each_p(|p| {
+        if !found && !p.runqempty() {
+            found = true;
+        }
+    });
+    found
+}
+
+/// Block in `epoll_wait` as the designated netpoller, then ready
+/// whatever came in. The caller (schedule_loop) re-runs
+/// find_runnable, which picks readied work off the run queues.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
+fn block_as_netpoller() {
+    // Final re-check AFTER claiming the slot: a producer that pushed
+    // work before observing NETPOLLER_BUSY=true will not have sent a
+    // break, so we must not block over that work. Any producer after
+    // this check sees the flag and breaks us out; the eventfd is
+    // level-triggered, so a break that lands before epoll_wait
+    // starts is sticky rather than lost.
+    if any_runnable_anywhere() {
+        NETPOLLER_BUSY.store(false, Ordering::Release);
+        return;
+    }
+    let ready = crate::runtime::netpoll::poll(NETPOLL_BLOCK_MS);
+    NETPOLLER_BUSY.store(false, Ordering::Release);
+    for g in ready {
+        goready(g);
     }
 }
 
@@ -1188,7 +1262,16 @@ fn park_m_idle() {
 pub fn wake_idle_m() {
     let storage = match MIDLE.lock().pop() {
         Some(s) => s,
-        None => return,
+        None => {
+            // No futex-parked M to wake. If an M is blocked in
+            // epoll_wait as the netpoller, kick it via the eventfd
+            // so the new work runs now rather than on poll timeout
+            // (Go `wakep` → `netpollBreak`, proc.go:3240).
+            if NETPOLLER_BUSY.load(Ordering::Acquire) {
+                crate::runtime::netpoll::netpoll_break();
+            }
+            return;
+        }
     };
     storage.park.wakeup();
 }

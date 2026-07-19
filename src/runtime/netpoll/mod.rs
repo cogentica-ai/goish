@@ -103,6 +103,19 @@ pub struct PollDesc {
     /// longer matches `pd.fdseq.load()`. Mirrors Go's `pd.fdseq`
     /// (netpoll.go:79) — Go uses 24 bits, we use 16.
     pub fdseq: AtomicU32,
+
+    /// Client-disconnect watch (net/http serve loop). While armed,
+    /// `poll()` MSG_PEEKs this fd on every read-side event; on
+    /// EOF/reset it fires the hook once. This reproduces the
+    /// observable semantics of Go's connReader background read
+    /// (server.go:735 — cancel the request context if the client
+    /// goes away while the handler runs) without dedicating a
+    /// goroutine or paying per-request handoffs.
+    pub watch_on: AtomicBool,
+    /// The armed hook (request-context cancel). Guarded by a
+    /// SpinLock: `poll` takes it exactly once on disconnect;
+    /// disarm drops it.
+    pub watch_hook: crate::runtime::spin::SpinLock<Option<alloc::sync::Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl PollDesc {
@@ -119,7 +132,60 @@ impl PollDesc {
             // Start at 1 — Go reserves 0 (netpoll.go:256-258
             // "value 0 is special in setEventErr").
             fdseq: AtomicU32::new(1),
+            watch_on: AtomicBool::new(false),
+            watch_hook: crate::runtime::spin::SpinLock::new(None),
         }
+    }
+}
+
+/// Arm the client-disconnect watch: from now until `disarm_watch`
+/// (or the first disconnect), any read-side event on this pd
+/// triggers an MSG_PEEK probe; EOF or a fatal socket error fires
+/// `hook` exactly once.
+pub fn arm_watch(pd: &PollDesc, hook: alloc::sync::Arc<dyn Fn() + Send + Sync>) {
+    *pd.watch_hook.lock() = Some(hook);
+    pd.watch_on.store(true, Ordering::Release);
+}
+
+/// Disarm the watch. Idempotent; racing `poll`'s disconnect fire is
+/// benign (the hook cancels a request context that is finished or
+/// about to be — Go cancels it post-response anyway, server.go:1683).
+pub fn disarm_watch(pd: &PollDesc) {
+    pd.watch_on.store(false, Ordering::Release);
+    let _ = pd.watch_hook.lock().take();
+}
+
+/// MSG_PEEK probe run by `poll()` on read events for watched pds.
+/// Returns true if the peer is gone (orderly EOF or fatal error).
+fn watch_probe_disconnected(fd: i32) -> bool {
+    const EINTR: i32 = 4;
+    const EAGAIN: i32 = 11;
+    let mut probe = [0u8; 1];
+    loop {
+        let n = crate::syscall::Recvfrom(
+            fd,
+            probe.as_mut_ptr(),
+            1,
+            crate::syscall::MSG_PEEK | crate::syscall::MSG_DONTWAIT,
+        );
+        if n > 0 {
+            // Pipelined next request — client is alive.
+            return false;
+        }
+        if n == 0 {
+            // Orderly shutdown from the peer.
+            return true;
+        }
+        let errno = -(n as i32);
+        if errno == EINTR {
+            continue;
+        }
+        if errno == EAGAIN {
+            // Spurious/consumed readable — client still connected.
+            return false;
+        }
+        // ECONNRESET and friends.
+        return true;
     }
 }
 
@@ -695,6 +761,18 @@ pub fn poll(delay_ms: i32) -> Vec<NonNull<G>> {
                 | syscall::EPOLLERR)
             != 0
         {
+            // Client-disconnect watch: a readable event on a watched
+            // conn while its serve goroutine is mid-handler. Probe;
+            // on EOF/reset fire the cancel hook once.
+            if pd.watch_on.load(Ordering::Acquire)
+                && watch_probe_disconnected(pd.fd.load(Ordering::Acquire))
+            {
+                let hook = pd.watch_hook.lock().take();
+                pd.watch_on.store(false, Ordering::Release);
+                if let Some(h) = hook {
+                    h();
+                }
+            }
             if let Some(g) = unblock(pd, b'r', true) {
                 to_run.push(g);
             }
@@ -722,6 +800,11 @@ pub fn netpoll_break() {
     }
     let efd = EVENTFD_FD.load(Ordering::Acquire);
     if efd < 0 {
+        // Netpoll not initialized yet — nothing is blocked in
+        // epoll_wait, so the wakeup is moot. MUST reset WAKE_SIG:
+        // leaving it set would permanently swallow every future
+        // netpoll_break (the CAS above would never succeed again).
+        WAKE_SIG.store(0, Ordering::Release);
         return;
     }
     let one: u64 = 1;
