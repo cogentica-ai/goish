@@ -951,6 +951,13 @@ pub struct Server {
     /// standard logger (stderr).
     pub ErrorLog: Option<Arc<crate::log::Logger>>,
 
+    /// `Server.TLSConfig` (server.go:3006) — optional TLS
+    /// configuration for `ServeTLS`/`ListenAndServeTLS`. When set,
+    /// its `Certificates` are used; a cert/key file pair passed to
+    /// `ServeTLS` still overrides. `None` → the file pair is the only
+    /// certificate source.
+    pub TLSConfig: Option<crate::crypto::tls::Config>,
+
     /// Internal runtime state. Bundled behind a single field so users
     /// can construct a `Server` with Go-style struct literal syntax —
     /// `Server { Addr, Handler, ..., ..Default::default() }` — without
@@ -1097,6 +1104,7 @@ impl Default for Server {
             BaseContext: None,
             ConnContext: None,
             ErrorLog: None,
+            TLSConfig: None,
             __state: __ServerState::default(),
         }
     }
@@ -1594,6 +1602,12 @@ impl Server {
         }
     }
 
+    /// Whether `Shutdown`/`Close` has been initiated. Read by the
+    /// HTTPS serve loop (server_tls.rs) to stop accepting / draining.
+    pub(crate) fn __state_in_shutdown(&self) -> bool {
+        self.__state.in_shutdown.load(Ordering::Acquire)
+    }
+
     /// `(*Server).logf` (server.go:3691): route a message through
     /// `ErrorLog` when set, else the `log` package default (stderr).
     fn logf(&self, msg: string) {
@@ -1739,6 +1753,12 @@ pub fn Serve(ln: net::Listener, handler: Arc<dyn Handler>) -> error {
 ///
 /// HTTP/1.1: keep-alive default; `Connection: close` opts out.
 /// HTTP/1.0: close default; `Connection: keep-alive` opts in.
+/// `pub(crate)` wrapper over `request_keep_alive` for the HTTPS serve
+/// loop in server_tls.rs.
+pub(crate) fn request_keep_alive_pub(req: &Request) -> bool {
+    request_keep_alive(req)
+}
+
 fn request_keep_alive(req: &Request) -> bool {
     let conn_hdr = req.Header.Get(string("Connection"));
     let conn_bytes = conn_hdr.as_bytes();

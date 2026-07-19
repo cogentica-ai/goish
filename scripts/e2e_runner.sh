@@ -21,7 +21,7 @@ FILTER="${FILTER:-.*}"
 # Default skips: HTTP servers that don't self-terminate, very-large
 # stress workloads that take >TIMEOUT seconds, and tests whose
 # success requires external drivers.
-EXCLUDE="${EXCLUDE:-^(http_hello|spawn_million|spawn_density|preempt_sysmon|lockfree_ring_bench|segv_diagnostic_smoke)$}"
+EXCLUDE="${EXCLUDE:-^(http_hello|https_serve|spawn_million|spawn_density|preempt_sysmon|lockfree_ring_bench|segv_diagnostic_smoke)$}"
 TARGET_DIR="${TARGET_DIR:-target/x86_64-unknown-linux-gnu/debug}"
 
 # Per-example CLI args + stdin. Some demos parse argv (`sumargs N…`,

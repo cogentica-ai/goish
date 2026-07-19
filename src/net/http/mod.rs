@@ -32,6 +32,7 @@ pub mod protocols;
 pub mod request;
 pub mod response;
 pub mod server;
+pub mod server_tls;
 pub mod sniff;
 pub mod status;
 pub mod url;
@@ -71,6 +72,7 @@ pub use server::{
     Handler, HandlerFunc, ListenAndServe, NewServeMux, NotFound, NotFoundHandler, Redirect,
     RedirectHandler, Serve, ServeMux, Server, StripPrefix, TimeoutHandler,
 };
+pub use server_tls::ListenAndServeTLS;
 pub use sniff::DetectContentType;
 pub use status::{
     StatusAccepted, StatusBadGateway, StatusBadRequest, StatusConflict, StatusContinue,

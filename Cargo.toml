@@ -737,6 +737,14 @@ name = "https_real_smoke"
 path = "examples/https_real_smoke.rs"
 
 [[example]]
+name = "tls_server_smoke"
+path = "examples/tls_server_smoke.rs"
+
+[[example]]
+name = "https_serve"
+path = "examples/https_serve.rs"
+
+[[example]]
 name = "temp_uniqueness_smoke"
 path = "examples/temp_uniqueness_smoke.rs"
 
