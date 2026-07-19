@@ -13,6 +13,15 @@
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
+
+// Per-record/handshake debug prints — gated so production + e2e output
+// stays clean. Flip `TLS_DEBUG` to true (or wire an env check) when
+// diagnosing a handshake failure.
+const TLS_DEBUG: bool = false;
+macro_rules! tls_debug {
+    ($($arg:tt)*) => { if TLS_DEBUG { crate::fmt::Printf!($($arg)*); } };
+}
+
 extern crate alloc;
 
 use alloc::vec::Vec;
@@ -104,19 +113,19 @@ pub fn do_client_handshake(
     _server_name: &str,
     _skip_verify: bool,
 ) -> (KeyMaterial, error) {
-    crate::fmt::Printf!("[tls-debug] do_client_handshake: start server_name=%s\n", _server_name);
+    tls_debug!("[tls-debug] do_client_handshake: start server_name=%s\n", _server_name);
     // ── 1. Generate client_random ──────────────────────────────────
     let mut client_random = [0u8; 32];
     {
         let mut buf = slice::<byte>::__from_vec(alloc::vec![0u8; 32]);
         let (_, err) = rand::Read(&mut buf);
         if !err.IsNil() {
-            crate::fmt::Printf!("[tls-debug] rand::Read error: %v\n", err);
+            tls_debug!("[tls-debug] rand::Read error: %v\n", err);
             return (KeyMaterial::default(), err);
         }
         client_random.copy_from_slice(&buf.__into_vec()[..32]);
     }
-    crate::fmt::Printf!("[tls-debug] rand::Read OK for server_name=%s\n", _server_name);
+    tls_debug!("[tls-debug] rand::Read OK for server_name=%s\n", _server_name);
 
     // ── 1b. Generate X25519 keypair for TLS 1.3 key_share ─────────
     let (client_x25519_priv, client_x25519_pub) = ecdh::x25519_generate();
@@ -146,7 +155,7 @@ pub fn do_client_handshake(
                 .map(|cs| cs.hash_fn);
 
             if let Some(hash_fn) = hash_fn_opt {
-                crate::fmt::Printf!("[tls-debug] PSK: offering ticket for %s (suite=0x%04x hash_size=%d ticket_len=%d)\n",
+                tls_debug!("[tls-debug] PSK: offering ticket for %s (suite=0x%04x hash_size=%d ticket_len=%d)\n",
                     _server_name, sess.suite_id as u64, sess.hash_size as i64, sess.ticket.len() as i64); // goishlint:ignore GOISH005
                 let (mut ch, binders_len) = build_client_hello_with_psk(
                     &client_random,
@@ -158,14 +167,14 @@ pub fn do_client_handshake(
                 );
                 // Compute and patch the binder
                 patch_psk_binder(&mut ch, &sess.resumption_psk, hash_fn, binders_len);
-                crate::fmt::Printf!("[tls-debug] PSK: ClientHello with pre_shared_key built, len=%d\n", ch.len() as i64); // goishlint:ignore GOISH005
+                tls_debug!("[tls-debug] PSK: ClientHello with pre_shared_key built, len=%d\n", ch.len() as i64); // goishlint:ignore GOISH005
                 (ch, Some(sess))
             } else {
-                crate::fmt::Printf!("[tls-debug] PSK: unknown suite 0x%04x, falling back to full handshake\n", sess.suite_id as u64); // goishlint:ignore GOISH005
+                tls_debug!("[tls-debug] PSK: unknown suite 0x%04x, falling back to full handshake\n", sess.suite_id as u64); // goishlint:ignore GOISH005
                 (build_client_hello(&client_random, _server_name, &client_x25519_pub), None)
             }
         } else {
-            crate::fmt::Printf!("[tls-debug] PSK: session unsuitable (suite_ok=%v hash_size=%d), falling back\n",
+            tls_debug!("[tls-debug] PSK: session unsuitable (suite_ok=%v hash_size=%d), falling back\n",
                 suite_ok, sess.hash_size as i64); // goishlint:ignore GOISH005
             (build_client_hello(&client_random, _server_name, &client_x25519_pub), None)
         }
@@ -173,7 +182,7 @@ pub fn do_client_handshake(
         (build_client_hello(&client_random, _server_name, &client_x25519_pub), None)
     };
 
-    crate::fmt::Printf!("[tls-debug] ClientHello built, len=%d psk_offered=%v\n",
+    tls_debug!("[tls-debug] ClientHello built, len=%d psk_offered=%v\n",
         client_hello_body.len() as i64, offered_psk_session.is_some()); // goishlint:ignore GOISH005
 
     // Transcript accumulates all handshake messages
@@ -186,10 +195,10 @@ pub fn do_client_handshake(
     );
     let (_, werr) = conn.Write(record_slice);
     if !werr.IsNil() {
-        crate::fmt::Printf!("[tls-debug] Write ClientHello error: %v\n", werr);
+        tls_debug!("[tls-debug] Write ClientHello error: %v\n", werr);
         return (KeyMaterial::default(), werr);
     }
-    crate::fmt::Printf!("[tls-debug] ClientHello sent, waiting for ServerHello\n");
+    tls_debug!("[tls-debug] ClientHello sent, waiting for ServerHello\n");
 
     // ── 3. Receive ServerHello ─────────────────────────────────────
     let server_random;
@@ -209,27 +218,27 @@ pub fn do_client_handshake(
             crate::crypto::tls::record::read_record(&mut adapter)
         };
         let frag = frag_s.__into_vec();
-        crate::fmt::Printf!("[tls-debug] read_record: rtype=%d frag_len=%d err=%v\n", rtype as i64, frag.len() as i64, err);
+        tls_debug!("[tls-debug] read_record: rtype=%d frag_len=%d err=%v\n", rtype as i64, frag.len() as i64, err);
         if !err.IsNil() {
             return (KeyMaterial::default(), err);
         }
         if rtype == RECORD_ALERT {
             let alert_desc = if frag.len() >= 2 { frag[1] } else { 0 };
-            crate::fmt::Printf!("[tls-debug] TLS Alert received: level=%d desc=%d\n", if frag.len() >= 1 { frag[0] as i64 } else { 0 }, alert_desc as i64);
+            tls_debug!("[tls-debug] TLS Alert received: level=%d desc=%d\n", if frag.len() >= 1 { frag[0] as i64 } else { 0 }, alert_desc as i64);
             return (
                 KeyMaterial::default(),
                 errors::New("tls: received TLS alert from server"),
             );
         }
         if rtype != RECORD_HANDSHAKE {
-            crate::fmt::Printf!("[tls-debug] unexpected record type=%d expected=%d (Handshake)\n", rtype as i64, RECORD_HANDSHAKE as i64);
+            tls_debug!("[tls-debug] unexpected record type=%d expected=%d (Handshake)\n", rtype as i64, RECORD_HANDSHAKE as i64);
             return (
                 KeyMaterial::default(),
                 errors::New("tls: expected Handshake record for ServerHello"),
             );
         }
         if frag.len() < 4 || frag[0] != MSG_SERVER_HELLO {
-            crate::fmt::Printf!("[tls-debug] not ServerHello: frag[0]=%d\n", if frag.is_empty() { 0i64 } else { frag[0] as i64 });
+            tls_debug!("[tls-debug] not ServerHello: frag[0]=%d\n", if frag.is_empty() { 0i64 } else { frag[0] as i64 });
             return (KeyMaterial::default(), errors::New("tls: expected ServerHello message"));
         }
         transcript.extend_from_slice(&frag);
@@ -241,16 +250,16 @@ pub fn do_client_handshake(
         }
         let maj = body[0];
         let min = body[1];
-        crate::fmt::Printf!("[tls-debug] ServerHello version=%d.%d\n", maj as i64, min as i64);
+        tls_debug!("[tls-debug] ServerHello version=%d.%d\n", maj as i64, min as i64);
         // TLS 1.3 ServerHello uses legacy_version = 0x0303 but sets supported_versions = 0x0304
         if maj != TLS_VERSION_MAJOR || min != TLS_VERSION_MINOR {
-            crate::fmt::Printf!("[tls-debug] server not TLS 1.2 or 1.3: got %d.%d\n", maj as i64, min as i64);
+            tls_debug!("[tls-debug] server not TLS 1.2 or 1.3: got %d.%d\n", maj as i64, min as i64);
             return (KeyMaterial::default(), errors::New("tls: server version not 1.2 or 1.3"));
         }
         let mut sr = [0u8; 32];
         sr.copy_from_slice(&body[2..34]);
         server_random = sr;
-        crate::fmt::Printf!("[tls-debug] server_random first8: %02x%02x%02x%02x%02x%02x%02x%02x\n",
+        tls_debug!("[tls-debug] server_random first8: %02x%02x%02x%02x%02x%02x%02x%02x\n",
             sr[0] as u64, sr[1] as u64, sr[2] as u64, sr[3] as u64,
             sr[4] as u64, sr[5] as u64, sr[6] as u64, sr[7] as u64);
 
@@ -260,7 +269,7 @@ pub fn do_client_handshake(
             return (KeyMaterial::default(), errors::New("tls: ServerHello truncated at cipher suite"));
         }
         let cs = u16::from_be_bytes([body[sid_end], body[sid_end + 1]]);
-        crate::fmt::Printf!("[tls-debug] ServerHello cipher_suite=0x%04x\n", cs as u64);
+        tls_debug!("[tls-debug] ServerHello cipher_suite=0x%04x\n", cs as u64);
 
         // Check if extensions present (skip compression method byte)
         if body.len() > sid_end + 3 {
@@ -283,14 +292,14 @@ pub fn do_client_handshake(
                                 // Should be exactly 2 bytes: selected version
                                 if ext_len >= 2 {
                                     let selected = u16::from_be_bytes([ext_data[0], ext_data[1]]);
-                                    crate::fmt::Printf!("[tls-debug] ServerHello supported_versions=0x%04x\n", selected as u64);
+                                    tls_debug!("[tls-debug] ServerHello supported_versions=0x%04x\n", selected as u64);
                                     if selected == TLS_VERSION_TLS13 {
                                         // TLS 1.3 selected: check suite
                                         if cs != CIPHER_TLS13_AES128_GCM_SHA256
                                             && cs != CIPHER_TLS13_AES256_GCM_SHA384
                                             && cs != CIPHER_TLS13_CHACHA20_POLY1305_SHA256
                                         {
-                                            crate::fmt::Printf!("[tls-debug] TLS 1.3 but unsupported suite 0x%04x\n", cs as u64);
+                                            tls_debug!("[tls-debug] TLS 1.3 but unsupported suite 0x%04x\n", cs as u64);
                                             return (KeyMaterial::default(), errors::New("tls: TLS 1.3 server chose unsupported cipher suite"));
                                         }
                                         tls13_suite_id = cs;
@@ -304,14 +313,14 @@ pub fn do_client_handshake(
                                     let group = u16::from_be_bytes([ext_data[0], ext_data[1]]);
                                     if ext_len >= 4 {
                                         let ke_len = u16::from_be_bytes([ext_data[2], ext_data[3]]) as usize;
-                                        crate::fmt::Printf!("[tls-debug] ServerHello key_share group=0x%04x ke_len=%d\n", group as u64, ke_len as i64);
+                                        tls_debug!("[tls-debug] ServerHello key_share group=0x%04x ke_len=%d\n", group as u64, ke_len as i64);
                                         if group == 29 && ext_len >= 4 + ke_len { // X25519
                                             tls13_server_key_share = ext_data[4..4 + ke_len].to_vec();
                                         }
                                     } else {
                                         // HRR: only group (no key exchange) — save the requested group
                                         hrr_selected_group = group;
-                                        crate::fmt::Printf!("[tls-debug] HRR key_share selected_group=0x%04x\n", group as u64);
+                                        tls_debug!("[tls-debug] HRR key_share selected_group=0x%04x\n", group as u64);
                                     }
                                 }
                             }
@@ -321,7 +330,7 @@ pub fn do_client_handshake(
                                     let cookie_len = u16::from_be_bytes([ext_data[0], ext_data[1]]) as usize;
                                     if 2 + cookie_len <= ext_len {
                                         hrr_cookie = Some(ext_data[2..2 + cookie_len].to_vec());
-                                        crate::fmt::Printf!("[tls-debug] HRR cookie received (len=%d)\n", cookie_len as i64);
+                                        tls_debug!("[tls-debug] HRR cookie received (len=%d)\n", cookie_len as i64);
                                     }
                                 }
                             }
@@ -329,7 +338,7 @@ pub fn do_client_handshake(
                                 // pre_shared_key — ServerHello body is uint16 selected_identity
                                 if ext_len >= 2 {
                                     let sel_id = u16::from_be_bytes([ext_data[0], ext_data[1]]);
-                                    crate::fmt::Printf!("[tls-debug] PSK selected: selected_identity=%d\n", sel_id as i64); // goishlint:ignore GOISH005
+                                    tls_debug!("[tls-debug] PSK selected: selected_identity=%d\n", sel_id as i64); // goishlint:ignore GOISH005
                                     sh_selected_psk_identity = Some(sel_id);
                                 }
                             }
@@ -350,12 +359,12 @@ pub fn do_client_handshake(
                 && cs != CIPHER_SUITE_ECDHE_RSA_AES128_GCM_SHA256
                 && cs != CIPHER_SUITE_ECDHE_ECDSA_AES128_GCM_SHA256
             {
-                crate::fmt::Printf!("[tls-debug] unsupported cipher suite 0x%04x\n", cs as u64);
+                tls_debug!("[tls-debug] unsupported cipher suite 0x%04x\n", cs as u64);
                 return (KeyMaterial::default(), errors::New("tls: server chose unsupported cipher suite"));
             }
             negotiated_suite = cs;
         }
-        crate::fmt::Printf!("[tls-debug] negotiated suite=0x%04x tls13=%v\n", negotiated_suite as u64, tls13_suite_id != 0);
+        tls_debug!("[tls-debug] negotiated suite=0x%04x tls13=%v\n", negotiated_suite as u64, tls13_suite_id != 0);
     }
 
     // ── 3b. HRR detection and retry ───────────────────────────────
@@ -371,7 +380,7 @@ pub fn do_client_handshake(
         0x07, 0x9E, 0x09, 0xE2, 0xC8, 0xA8, 0x33, 0x9C,
     ];
     if tls13_suite_id != 0 && server_random == HRR_RANDOM {
-        crate::fmt::Printf!("[tls-debug] HelloRetryRequest detected (suite=0x%04x group=0x%04x) — retrying\n",
+        tls_debug!("[tls-debug] HelloRetryRequest detected (suite=0x%04x group=0x%04x) — retrying\n",
             tls13_suite_id as u64, hrr_selected_group as u64);
 
         // Get the hash function for the negotiated suite
@@ -462,7 +471,7 @@ pub fn do_client_handshake(
         if !werr2.IsNil() {
             return (KeyMaterial::default(), werr2);
         }
-        crate::fmt::Printf!("[tls-debug] HRR: sent new ClientHello (group=0x%04x)\n", use_group as u64);
+        tls_debug!("[tls-debug] HRR: sent new ClientHello (group=0x%04x)\n", use_group as u64);
 
         // Step 5: Read the real ServerHello
         // hrr_server2_group: the group from the 2nd ServerHello key_share
@@ -482,13 +491,13 @@ pub fn do_client_handshake(
                     return (KeyMaterial::default(), err2);
                 }
                 if rtype2 == crate::crypto::tls::record::RECORD_CHANGE_CIPHER_SPEC {
-                    crate::fmt::Printf!("[tls-debug] HRR: skipping server CCS\n");
+                    tls_debug!("[tls-debug] HRR: skipping server CCS\n");
                     continue;
                 }
                 if rtype2 != RECORD_HANDSHAKE {
-                    crate::fmt::Printf!("[tls-debug] HRR: 2nd ServerHello read got rtype=%d frag_len=%d\n", rtype2 as i64, frag2.len() as i64);
+                    tls_debug!("[tls-debug] HRR: 2nd ServerHello read got rtype=%d frag_len=%d\n", rtype2 as i64, frag2.len() as i64);
                     if rtype2 == RECORD_ALERT && frag2.len() >= 2 {
-                        crate::fmt::Printf!("[tls-debug] HRR: Alert level=%d desc=%d\n", frag2[0] as i64, frag2[1] as i64);
+                        tls_debug!("[tls-debug] HRR: Alert level=%d desc=%d\n", frag2[0] as i64, frag2[1] as i64);
                     }
                     return (KeyMaterial::default(), errors::New("tls13: HRR: expected Handshake record for 2nd ServerHello"));
                 }
@@ -514,7 +523,7 @@ pub fn do_client_handshake(
                     return (KeyMaterial::default(), errors::New("tls13: HRR: 2nd ServerHello truncated"));
                 }
                 let cs2 = u16::from_be_bytes([body2[sid_end2], body2[sid_end2 + 1]]);
-                crate::fmt::Printf!("[tls-debug] HRR: 2nd ServerHello cipher_suite=0x%04x\n", cs2 as u64);
+                tls_debug!("[tls-debug] HRR: 2nd ServerHello cipher_suite=0x%04x\n", cs2 as u64);
 
                 // Parse extensions
                 if body2.len() > sid_end2 + 3 {
@@ -552,7 +561,7 @@ pub fn do_client_handshake(
                                             if elen >= 4 + ke_len2 {
                                                 hrr_server2_group = group2;
                                                 hrr_server2_key_data = edata[4..4 + ke_len2].to_vec();
-                                                crate::fmt::Printf!("[tls-debug] HRR: 2nd ServerHello key_share group=0x%04x ke_len=%d\n",
+                                                tls_debug!("[tls-debug] HRR: 2nd ServerHello key_share group=0x%04x ke_len=%d\n",
                                                     group2 as u64, ke_len2 as i64);
                                                 // Also set tls13_server_key_share for X25519 fallback
                                                 if group2 == GROUP_X25519 {
@@ -578,7 +587,7 @@ pub fn do_client_handshake(
         if hrr_server2_key_data.is_empty() {
             return (KeyMaterial::default(), errors::New("tls13: HRR: no key_share in 2nd ServerHello"));
         }
-        crate::fmt::Printf!("[tls-debug] HRR: retry succeeded, suite=0x%04x server_group=0x%04x\n",
+        tls_debug!("[tls-debug] HRR: retry succeeded, suite=0x%04x server_group=0x%04x\n",
             tls13_suite_id as u64, hrr_server2_group as u64);
 
         // Compute ECDHE shared secret using the appropriate key type
@@ -594,7 +603,7 @@ pub fn do_client_handshake(
             if is_zero == 0 {
                 return (KeyMaterial::default(), errors::New("tls13: HRR: P-256 shared secret is all zeros"));
             }
-            crate::fmt::Printf!("[tls-debug] HRR: P-256 ECDHE shared secret computed OK\n");
+            tls_debug!("[tls-debug] HRR: P-256 ECDHE shared secret computed OK\n");
         } else if hrr_server2_group == GROUP_X25519 && hrr_server2_key_data.len() == 32 {
             // Server responded with X25519 key share
             let mut srv_pub = [0u8; 32];
@@ -607,9 +616,9 @@ pub fn do_client_handshake(
                 return (KeyMaterial::default(), errors::New("tls13: HRR: X25519 shared secret is all zeros"));
             }
             hrr_shared_secret = ss;
-            crate::fmt::Printf!("[tls-debug] HRR: X25519 ECDHE shared secret computed OK\n");
+            tls_debug!("[tls-debug] HRR: X25519 ECDHE shared secret computed OK\n");
         } else {
-            crate::fmt::Printf!("[tls-debug] HRR: unsupported server key share group=0x%04x len=%d\n",
+            tls_debug!("[tls-debug] HRR: unsupported server key share group=0x%04x len=%d\n",
                 hrr_server2_group as u64, hrr_server2_key_data.len() as i64);
             return (KeyMaterial::default(), errors::New("tls13: HRR: unsupported server key group"));
         }
@@ -626,7 +635,7 @@ pub fn do_client_handshake(
             &hrr_shared_secret,
         );
         if !err.IsNil() {
-            crate::fmt::Printf!("[tls-debug] HRR TLS 1.3 handshake error: %v\n", err);
+            tls_debug!("[tls-debug] HRR TLS 1.3 handshake error: %v\n", err);
             return (KeyMaterial::default(), err);
         }
         let mut km = KeyMaterial::default();
@@ -650,7 +659,7 @@ pub fn do_client_handshake(
 
     // ── 3b. TLS 1.3 dispatch ──────────────────────────────────────
     if tls13_suite_id != 0 {
-        crate::fmt::Printf!("[tls-debug] TLS 1.3 dispatch: suite=0x%04x\n", tls13_suite_id as u64); // goishlint:ignore GOISH005
+        tls_debug!("[tls-debug] TLS 1.3 dispatch: suite=0x%04x\n", tls13_suite_id as u64); // goishlint:ignore GOISH005
         if tls13_server_key_share.is_empty() {
             return (KeyMaterial::default(), errors::New("tls13: no key_share in ServerHello"));
         }
@@ -663,14 +672,14 @@ pub fn do_client_handshake(
         let accepted_psk: Option<Vec<byte>> = if sh_selected_psk_identity == Some(0) {
             // Server selected identity index 0 — use the PSK we offered
             if let Some(ref sess) = offered_psk_session {
-                crate::fmt::Printf!("[tls-debug] PSK accepted by server — using PSK for handshake\n");
+                tls_debug!("[tls-debug] PSK accepted by server — using PSK for handshake\n");
                 Some(sess.resumption_psk.clone())
             } else {
                 None
             }
         } else {
             if sh_selected_psk_identity.is_some() {
-                crate::fmt::Printf!("[tls-debug] PSK: server selected unknown identity %d, ignoring\n",
+                tls_debug!("[tls-debug] PSK: server selected unknown identity %d, ignoring\n",
                     sh_selected_psk_identity.unwrap() as i64); // goishlint:ignore GOISH005
             }
             None
@@ -696,7 +705,7 @@ pub fn do_client_handshake(
             )
         };
         if !err.IsNil() {
-            crate::fmt::Printf!("[tls-debug] TLS 1.3 handshake error: %v\n", err);
+            tls_debug!("[tls-debug] TLS 1.3 handshake error: %v\n", err);
             return (KeyMaterial::default(), err);
         }
 
@@ -729,12 +738,12 @@ pub fn do_client_handshake(
             crate::crypto::tls::record::read_record(&mut adapter)
         };
         let frag = frag_s.__into_vec();
-        crate::fmt::Printf!("[tls-debug] cert record: rtype=%d len=%d err=%v\n", rtype as i64, frag.len() as i64, err);
+        tls_debug!("[tls-debug] cert record: rtype=%d len=%d err=%v\n", rtype as i64, frag.len() as i64, err);
         if !err.IsNil() {
             return (KeyMaterial::default(), err);
         }
         if rtype != RECORD_HANDSHAKE || frag.is_empty() || frag[0] != MSG_CERTIFICATE {
-            crate::fmt::Printf!("[tls-debug] expected Certificate (11) got rtype=%d msg=%d\n", rtype as i64, if frag.is_empty() { 0i64 } else { frag[0] as i64 });
+            tls_debug!("[tls-debug] expected Certificate (11) got rtype=%d msg=%d\n", rtype as i64, if frag.is_empty() { 0i64 } else { frag[0] as i64 });
             return (KeyMaterial::default(), errors::New("tls: expected Certificate message"));
         }
         transcript.extend_from_slice(&frag);
@@ -755,18 +764,18 @@ pub fn do_client_handshake(
         if negotiated_suite == CIPHER_SUITE_ECDHE_ECDSA_AES128_GCM_SHA256 {
             let (ec_pk, pk_err) = decode_x509_ec_p256_pubkey(cert_der);
             if !pk_err.IsNil() {
-                crate::fmt::Printf!("[tls-debug] decode_x509_ec_p256_pubkey error: %v\n", pk_err);
+                tls_debug!("[tls-debug] decode_x509_ec_p256_pubkey error: %v\n", pk_err);
                 return (KeyMaterial::default(), pk_err);
             }
-            crate::fmt::Printf!("[tls-debug] Certificate decoded OK (ECDSA P-256)\n");
+            tls_debug!("[tls-debug] Certificate decoded OK (ECDSA P-256)\n");
             server_pub_key = ServerPublicKey::Ec(ec_pk);
         } else {
             let (pk, pk_err) = decode_x509_rsa_pubkey(cert_der);
             if !pk_err.IsNil() {
-                crate::fmt::Printf!("[tls-debug] decode_x509_rsa_pubkey error: %v\n", pk_err);
+                tls_debug!("[tls-debug] decode_x509_rsa_pubkey error: %v\n", pk_err);
                 return (KeyMaterial::default(), pk_err);
             }
-            crate::fmt::Printf!("[tls-debug] Certificate decoded OK (RSA)\n");
+            tls_debug!("[tls-debug] Certificate decoded OK (RSA)\n");
             server_pub_key = ServerPublicKey::Rsa(pk);
         }
     }
@@ -778,19 +787,19 @@ pub fn do_client_handshake(
     let ecdhe_client_pub: Option<Vec<byte>>;
     let is_ecdhe = negotiated_suite == CIPHER_SUITE_ECDHE_RSA_AES128_GCM_SHA256
         || negotiated_suite == CIPHER_SUITE_ECDHE_ECDSA_AES128_GCM_SHA256;
-    crate::fmt::Printf!("[tls-debug] suite=0x%04x expecting SKE=%v\n", negotiated_suite as u64, is_ecdhe);
+    tls_debug!("[tls-debug] suite=0x%04x expecting SKE=%v\n", negotiated_suite as u64, is_ecdhe);
     if is_ecdhe {
         let (rtype, frag_s, err) = {
             let mut adapter = ConnReader(conn);
             crate::crypto::tls::record::read_record(&mut adapter)
         };
         let frag = frag_s.__into_vec();
-        crate::fmt::Printf!("[tls-debug] SKE record: rtype=%d len=%d err=%v\n", rtype as i64, frag.len() as i64, err);
+        tls_debug!("[tls-debug] SKE record: rtype=%d len=%d err=%v\n", rtype as i64, frag.len() as i64, err);
         if !err.IsNil() {
             return (KeyMaterial::default(), err);
         }
         if rtype != RECORD_HANDSHAKE || frag.is_empty() || frag[0] != MSG_SERVER_KEY_EXCHANGE {
-            crate::fmt::Printf!("[tls-debug] expected SKE(12) got rtype=%d msg=%d\n", rtype as i64, if frag.is_empty() { 0i64 } else { frag[0] as i64 });
+            tls_debug!("[tls-debug] expected SKE(12) got rtype=%d msg=%d\n", rtype as i64, if frag.is_empty() { 0i64 } else { frag[0] as i64 });
             return (KeyMaterial::default(), errors::New("tls: expected ServerKeyExchange for ECDHE"));
         }
         transcript.extend_from_slice(&frag);
@@ -1928,7 +1937,7 @@ fn parse_server_key_exchange_ecdsa(
             }
         }
         _ => {
-            crate::fmt::Printf!("[tls-debug] SKE-ECDSA: unsupported named_curve=0x%04x\n", named_curve as u64);
+            tls_debug!("[tls-debug] SKE-ECDSA: unsupported named_curve=0x%04x\n", named_curve as u64);
             return (zero32, empty_vec, errors::New("tls: ServerKeyExchange: unsupported named_curve for ECDSA"));
         }
     }
@@ -1941,7 +1950,7 @@ fn parse_server_key_exchange_ecdsa(
     let sig_alg = body[4 + pubkey_len + 1];
     // Only support SHA-256 + ECDSA (4, 3)
     if hash_alg != 4 || sig_alg != 3 {
-        crate::fmt::Printf!("[tls-debug] SKE-ECDSA: unsupported hash_alg=%d sig_alg=%d\n", hash_alg as i64, sig_alg as i64);
+        tls_debug!("[tls-debug] SKE-ECDSA: unsupported hash_alg=%d sig_alg=%d\n", hash_alg as i64, sig_alg as i64);
         return (zero32, empty_vec, errors::New("tls: ServerKeyExchange: unsupported SignatureAndHashAlgorithm (only SHA256+ECDSA supported)"));
     }
     let sig_len = u16::from_be_bytes([body[4 + pubkey_len + 2], body[4 + pubkey_len + 3]]) as usize;
@@ -1976,11 +1985,11 @@ fn parse_server_key_exchange_ecdsa(
     {
         let verr = VerifyP256(server_ec_pubkey, &digest, signature);
         if !verr.IsNil() {
-            crate::fmt::Printf!("[tls-debug] ECDSA signature verify error: %v\n", verr);
+            tls_debug!("[tls-debug] ECDSA signature verify error: %v\n", verr);
             return (zero32, empty_vec, verr);
         }
     }
-    crate::fmt::Printf!("[tls-debug] ECDSA signature verified OK\n");
+    tls_debug!("[tls-debug] ECDSA signature verified OK\n");
 
     // Generate our ephemeral keypair and compute shared secret.
     // The ECDH key exchange uses the same curve as the server's ECDH key.
@@ -2186,7 +2195,7 @@ pub fn do_client_handshake_chacha20_only(
     _server_name: &str,
     _skip_verify: bool,
 ) -> (KeyMaterial, error) {
-    crate::fmt::Printf!("[tls-debug] do_client_handshake_chacha20_only: start server_name=%s\n", _server_name);
+    tls_debug!("[tls-debug] do_client_handshake_chacha20_only: start server_name=%s\n", _server_name);
     // ── 1. Generate client_random ──────────────────────────────────
     let mut client_random = [0u8; 32];
     {
@@ -2203,7 +2212,7 @@ pub fn do_client_handshake_chacha20_only(
 
     // ── 2. Build & send ClientHello (ChaCha20-only) ────────────────
     let client_hello_body = build_client_hello_chacha20_only(&client_random, _server_name, &client_x25519_pub);
-    crate::fmt::Printf!("[tls-debug] ChaCha20-only ClientHello built, len=%d\n", client_hello_body.len() as i64);
+    tls_debug!("[tls-debug] ChaCha20-only ClientHello built, len=%d\n", client_hello_body.len() as i64);
 
     let mut transcript: Vec<byte> = Vec::new();
     transcript.extend_from_slice(&client_hello_body);
@@ -2234,7 +2243,7 @@ pub fn do_client_handshake_chacha20_only(
         }
         if rtype == RECORD_ALERT {
             let alert_desc = if frag.len() >= 2 { frag[1] } else { 0 };
-            crate::fmt::Printf!("[tls-debug] TLS Alert level=%d desc=%d\n", if frag.len() >= 1 { frag[0] as i64 } else { 0 }, alert_desc as i64);
+            tls_debug!("[tls-debug] TLS Alert level=%d desc=%d\n", if frag.len() >= 1 { frag[0] as i64 } else { 0 }, alert_desc as i64);
             return (KeyMaterial::default(), errors::New("tls: received TLS alert from server"));
         }
         if rtype != RECORD_HANDSHAKE || frag.len() < 4 || frag[0] != MSG_SERVER_HELLO {
@@ -2261,7 +2270,7 @@ pub fn do_client_handshake_chacha20_only(
             return (KeyMaterial::default(), errors::New("tls: ServerHello truncated"));
         }
         let cs = u16::from_be_bytes([body[sid_end], body[sid_end + 1]]);
-        crate::fmt::Printf!("[tls-debug] ChaCha20-only ServerHello cipher_suite=0x%04x\n", cs as u64);
+        tls_debug!("[tls-debug] ChaCha20-only ServerHello cipher_suite=0x%04x\n", cs as u64);
 
         if body.len() > sid_end + 3 {
             let comp_method_offset = sid_end + 2;
@@ -2281,10 +2290,10 @@ pub fn do_client_handshake_chacha20_only(
                             EXT_SUPPORTED_VERSIONS => {
                                 if ext_len >= 2 {
                                     let selected = u16::from_be_bytes([ext_data[0], ext_data[1]]);
-                                    crate::fmt::Printf!("[tls-debug] ChaCha20-only supported_versions=0x%04x\n", selected as u64);
+                                    tls_debug!("[tls-debug] ChaCha20-only supported_versions=0x%04x\n", selected as u64);
                                     if selected == TLS_VERSION_TLS13 {
                                         if cs != CIPHER_TLS13_CHACHA20_POLY1305_SHA256 {
-                                            crate::fmt::Printf!("[tls-debug] ChaCha20-only: server chose suite 0x%04x, expected 0x1303\n", cs as u64);
+                                            tls_debug!("[tls-debug] ChaCha20-only: server chose suite 0x%04x, expected 0x1303\n", cs as u64);
                                             return (KeyMaterial::default(), errors::New("tls: server did not choose ChaCha20-Poly1305"));
                                         }
                                         tls13_suite_id = cs;
@@ -2333,7 +2342,7 @@ pub fn do_client_handshake_chacha20_only(
         0x07, 0x9E, 0x09, 0xE2, 0xC8, 0xA8, 0x33, 0x9C,
     ];
     let (client_x25519_priv, client_x25519_pub) = if server_random == HRR_RANDOM_CC {
-        crate::fmt::Printf!("[tls-debug] ChaCha20-only HRR detected\n");
+        tls_debug!("[tls-debug] ChaCha20-only HRR detected\n");
         let hrr_suite = match crate::crypto::tls::key_schedule::cipher_suite_tls13(tls13_suite_id) {
             Some(s) => s,
             None => return (KeyMaterial::default(), errors::New("tls13: unsupported cipher suite in HRR")),
@@ -2502,7 +2511,7 @@ pub fn do_client_handshake_chacha20_only(
         &client_x25519_priv,
     );
     if !err.IsNil() {
-        crate::fmt::Printf!("[tls-debug] ChaCha20-only TLS 1.3 handshake error: %v\n", err);
+        tls_debug!("[tls-debug] ChaCha20-only TLS 1.3 handshake error: %v\n", err);
         return (KeyMaterial::default(), err);
     }
     let mut km = KeyMaterial::default();

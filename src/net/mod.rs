@@ -1752,7 +1752,7 @@ fn is_tcp_network(s: &string) -> bool {
     bytes == b"tcp" || bytes == b"tcp4"
 }
 
-fn dead_listener() -> Listener {
+pub(crate) fn dead_listener() -> Listener {
     Listener {
         fd: -1,
         addr: TCPAddr::zero(),
