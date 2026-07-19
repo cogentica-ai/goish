@@ -1490,6 +1490,11 @@ impl Server {
                 let _ = conn.SetWriteDeadline(wdl);
             }
 
+            // Go conn.serve stamps `c.remoteAddr` at entry and
+            // readRequest copies it onto every request
+            // (server.go:2076 / :1120).
+            req.RemoteAddr = conn.RemoteAddr().String();
+
             // ── per-request context (Go readRequest, server.go:1112) ──
             // Every incoming request carries a cancellable context:
             // canceled when the response is finished, or earlier by
@@ -1606,6 +1611,22 @@ impl Server {
     /// HTTPS serve loop (server_tls.rs) to stop accepting / draining.
     pub(crate) fn __state_in_shutdown(&self) -> bool {
         self.__state.in_shutdown.load(Ordering::Acquire)
+    }
+
+    /// Install a listener into the shutdown-tracked slot — the same
+    /// critical section `Serve` runs at entry, factored out so the
+    /// HTTPS serve loop (server_tls.rs ServeTLS) gets identical
+    /// `Shutdown`/`Close` wakeup semantics: Shutdown takes the
+    /// tracked listener, wakes its parked Accept, and closes the fd.
+    /// Returns `false` if shutdown already began (caller must return
+    /// `ErrServerClosed` without accepting).
+    pub(crate) fn __track_listener(&self, ln: Arc<net::Listener>) -> bool {
+        let mut tracked = self.__state.tracked_listener.Lock();
+        if self.__state.in_shutdown.load(Ordering::Acquire) {
+            return false;
+        }
+        *tracked = Some(ln);
+        true
     }
 
     /// `(*Server).logf` (server.go:3691): route a message through

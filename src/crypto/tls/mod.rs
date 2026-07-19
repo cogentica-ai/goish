@@ -491,7 +491,10 @@ impl Conn {
     /// Writes larger than `maxPlaintext` (16384, RFC 8446 §5.1 /
     /// Go conn.go:64) are fragmented into multiple records — receivers
     /// MUST reject records with an oversized plaintext.
-    pub fn Write(&mut self, b: &[byte]) -> (int, error) {
+    /// Accepts `impl AsRef<[byte]>` so callers can pass `slice<byte>`,
+    /// `&[u8]`, or byte-string literals without conversion ceremony.
+    pub fn Write<B: AsRef<[byte]>>(&mut self, b: B) -> (int, error) {
+        let b = b.as_ref();
         const maxPlaintext: usize = 16384;
         if b.len() > maxPlaintext {
             let mut written: int = 0;
@@ -571,6 +574,20 @@ impl Conn {
     pub fn Close(&mut self) -> error {
         let mut conn_guard = self.inner_conn.Lock();
         conn_guard.Close()
+    }
+
+    /// `(*tls.Conn).LocalAddr()` (conn.go:130) — local address of the
+    /// underlying connection.
+    pub fn LocalAddr(&self) -> crate::net::TCPAddr {
+        let conn_guard = self.inner_conn.Lock();
+        (**conn_guard).LocalAddr()
+    }
+
+    /// `(*tls.Conn).RemoteAddr()` (conn.go:136) — remote address of
+    /// the underlying connection.
+    pub fn RemoteAddr(&self) -> crate::net::TCPAddr {
+        let conn_guard = self.inner_conn.Lock();
+        (**conn_guard).RemoteAddr()
     }
 
     /// `(*tls.Conn).SetDeadline(t)` — forward deadline to the underlying TCP conn.

@@ -282,7 +282,7 @@ fn serve_tls_conn(srv: Arc<Server>, tls_conn: tls::Conn, handler: Arc<dyn Handle
 
         // Read one request. The bufio reader borrows the tls::Conn
         // through the mutex guard for the duration of the parse.
-        let (req, err): (Request, error) = {
+        let (mut req, err): (Request, error) = {
             let mut c = conn.Lock();
             let mut br = bufio::NewReader(&mut *c);
             ReadRequestWithLimit(&mut br, max_header_bytes)
@@ -292,6 +292,12 @@ fn serve_tls_conn(srv: Arc<Server>, tls_conn: tls::Conn, handler: Arc<dyn Handle
             let _ = c.Close();
             return;
         }
+        // Go conn.serve stamps `c.remoteAddr` at entry and readRequest
+        // copies it onto every request (server.go:2076 / :1120).
+        req.RemoteAddr = {
+            let c = conn.Lock();
+            c.RemoteAddr().String()
+        };
 
         let keep_alive = request_keep_alive_pub(&req) && !srv.__state_in_shutdown();
         let w = tlsResponse::new(conn.clone());
@@ -328,20 +334,31 @@ impl Server {
             Ok(c) => c,
             Err(e) => return e,
         };
-        let tls_ln = tls::NewListener(ln, &cfg);
+        // Track the raw listener so `Shutdown`/`Close` can wake the
+        // parked Accept and close the fd — the same install `Serve`
+        // performs at entry (Go routes ServeTLS through Serve, which
+        // tracks the listener; server.go:3540 → :3405).
+        let ln = Arc::new(ln);
+        if !self.__track_listener(ln.clone()) {
+            return super::server::ErrServerClosed.into();
+        }
         let handler = self.Handler.clone();
         loop {
             if self.__state_in_shutdown() {
-                let _ = tls_ln.Close();
+                let _ = ln.Close();
                 return super::server::ErrServerClosed.into();
             }
-            let (conn, err) = tls_ln.Accept();
+            // Accept raw TCP, then wrap server-side TLS — what
+            // `tls::listener.Accept` (tls.go:77) does, inlined so the
+            // accept parks on the shutdown-tracked fd.
+            let (c, err) = ln.Accept();
             if !err.IsNil() {
                 if self.__state_in_shutdown() {
                     return super::server::ErrServerClosed.into();
                 }
                 return err;
             }
+            let conn = tls::Server(alloc::boxed::Box::new(c), &cfg);
             let srv = self.clone();
             let h = handler.clone();
             go!(stack(64 * 1024), move || {
