@@ -1254,6 +1254,12 @@ pub const SO_SNDTIMEO: i32 = 21;
 /// IPV6_V6ONLY: bind on AF_INET6 should not also accept AF_INET.
 pub const IPV6_V6ONLY: i32 = 26;
 
+/// IPPROTO_TCP option names (linux/tcp.h).
+pub const TCP_NODELAY: i32 = 1;
+pub const TCP_KEEPIDLE: i32 = 4;
+pub const TCP_KEEPINTVL: i32 = 5;
+pub const TCP_KEEPCNT: i32 = 6;
+
 /// `shutdown(2)` how.
 pub const SHUT_RD: i32 = 0;
 pub const SHUT_WR: i32 = 1;

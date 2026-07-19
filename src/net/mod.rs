@@ -69,6 +69,11 @@ pub use lookup::{
 /// `EAGAIN` / `EWOULDBLOCK` (Linux: same value, 11). The non-blocking
 /// I/O retry signal — caller parks on the netpoller and re-attempts.
 const EAGAIN: i32 = 11;
+const ECONNABORTED: i32 = 103;
+const EMFILE: i32 = 24;
+const ENFILE: i32 = 23;
+const ENOBUFS: i32 = 105;
+const ENOMEM: i32 = 12;
 /// `EINPROGRESS` (Linux: 115). Returned by non-blocking `connect(2)`
 /// to indicate the connection handshake is underway.
 const EINPROGRESS: i32 = 115;
@@ -103,6 +108,20 @@ impl Listener {
     /// while the accept queue is empty. Mirrors Go's
     /// `func (l *TCPListener) Accept() (TCPConn, error)` (net/tcpsock.go).
     pub fn Accept(&self) -> (TCPConn, error) {
+        let (conn, err, _temporary) = self.__accept_classified();
+        (conn, err)
+    }
+
+    /// Accept plus a Go `net.Error.Temporary()` verdict on the error.
+    /// goish has no typed `Errno` error carrier yet, so the http
+    /// server's Go-parity accept backoff (server.go:3428
+    /// `ne.Temporary()`) gets the classification out-of-band.
+    /// Temporary set mirrors `syscall.Errno.Temporary()`
+    /// (syscall/syscall_unix.go): EMFILE, ENFILE, plus the resource
+    /// errnos Linux accept(2) can transiently return (ENOBUFS,
+    /// ENOMEM). ECONNABORTED never surfaces — retried inline below,
+    /// mirroring Go's `internal/poll.FD.Accept`.
+    pub(crate) fn __accept_classified(&self) -> (TCPConn, error, bool) {
         loop {
             let mut peer = syscall::SockaddrIn::loopback(0);
             let mut peer_len: u32 = core::mem::size_of::<syscall::SockaddrIn>() as u32;
@@ -116,25 +135,30 @@ impl Listener {
                 return (
                     TCPConn::from_accepted(fd, self.addr.clone(), TCPAddr::from_sockaddr_in(&peer)),
                     errors::nil,
+                    false,
                 );
             }
             let errno = -fd;
-            if errno == EINTR {
+            if errno == EINTR || errno == ECONNABORTED {
                 continue;
             }
             if errno == EAGAIN {
                 let pd = self.ensure_pd();
                 if pd.is_null() {
-                    return (TCPConn::dead(), errno_error("accept", errno));
+                    return (TCPConn::dead(), errno_error("accept", errno), false);
                 }
                 match netpoll::block(unsafe { &*pd }, b'r') {
                     BlockResult::Ready | BlockResult::Aborted => continue,
                     BlockResult::Timedout => {
-                        return (TCPConn::dead(), timeout_error("accept"));
+                        return (TCPConn::dead(), timeout_error("accept"), false);
                     }
                 }
             }
-            return (TCPConn::dead(), errno_error("accept", errno));
+            let temporary = errno == EMFILE
+                || errno == ENFILE
+                || errno == ENOBUFS
+                || errno == ENOMEM;
+            return (TCPConn::dead(), errno_error("accept", errno), temporary);
         }
     }
 
@@ -326,6 +350,7 @@ impl TCPConn {
     /// Wrap a freshly-accepted fd. The fd is already SOCK_NONBLOCK
     /// (the Accept4 caller passed the flag).
     fn from_accepted(fd: i32, local: TCPAddr, remote: TCPAddr) -> Self {
+        set_tcp_conn_defaults(fd);
         TCPConn {
             fd,
             local,
@@ -1538,6 +1563,64 @@ pub fn Listen<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Listene
 /// `net.Dial` — connect to a TCP peer. `network` must be `"tcp"` or
 /// `"tcp4"`. `addr` is `"host:port"` with `host` an IPv4 literal
 /// (DNS resolution is not implemented in v1).
+/// Go-parity TCP connection defaults, applied to every dialed and
+/// accepted conn:
+///
+///   * `TCP_NODELAY = 1` — Go sets it on every TCP conn
+///     (`net/tcpsockopt_posix.go setNoDelay`, called from
+///     `newTCPConn`). Nagle off matters for small keep-alive
+///     responses behind an LB.
+///   * `SO_KEEPALIVE` with idle 15s / interval 15s / count 9 — Go's
+///     `defaultTCPKeepAliveIdle` / `Interval` / `Count`
+///     (`net/dial.go:19-26`), applied by `newTCPConn` on both the
+///     dial (`Dialer.KeepAlive` zero value) and accept
+///     (`ListenConfig.KeepAlive`) paths. Detects dead peers holding
+///     conns half-open.
+///
+/// Failures are ignored (Go's test hooks aside, these setsockopts
+/// are best-effort on exotic transports).
+fn set_tcp_conn_defaults(fd: i32) {
+    let one: i32 = 1;
+    let _ = syscall::Setsockopt(
+        fd,
+        syscall::IPPROTO_TCP,
+        syscall::TCP_NODELAY,
+        &one as *const i32 as *const u8,
+        core::mem::size_of::<i32>() as u32,
+    );
+    let _ = syscall::Setsockopt(
+        fd,
+        syscall::SOL_SOCKET,
+        syscall::SO_KEEPALIVE,
+        &one as *const i32 as *const u8,
+        core::mem::size_of::<i32>() as u32,
+    );
+    let idle_secs: i32 = 15;
+    let _ = syscall::Setsockopt(
+        fd,
+        syscall::IPPROTO_TCP,
+        syscall::TCP_KEEPIDLE,
+        &idle_secs as *const i32 as *const u8,
+        core::mem::size_of::<i32>() as u32,
+    );
+    let intvl_secs: i32 = 15;
+    let _ = syscall::Setsockopt(
+        fd,
+        syscall::IPPROTO_TCP,
+        syscall::TCP_KEEPINTVL,
+        &intvl_secs as *const i32 as *const u8,
+        core::mem::size_of::<i32>() as u32,
+    );
+    let cnt: i32 = 9;
+    let _ = syscall::Setsockopt(
+        fd,
+        syscall::IPPROTO_TCP,
+        syscall::TCP_KEEPCNT,
+        &cnt as *const i32 as *const u8,
+        core::mem::size_of::<i32>() as u32,
+    );
+}
+
 pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (TCPConn, error) {
     let network: string = network.into();
     let addr: string = addr.into();
@@ -1560,6 +1643,9 @@ pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (TCPConn, 
     if fd < 0 {
         return (TCPConn::dead(), errno_error("socket", -fd));
     }
+    // Options persist across connect(2); setting them here covers
+    // both the immediate- and in-flight-connect return paths.
+    set_tcp_conn_defaults(fd);
 
     // Non-blocking connect: returns 0 if the kernel completed the
     // handshake immediately (rare for TCP), or -EINPROGRESS while the

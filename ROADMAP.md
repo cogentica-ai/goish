@@ -112,8 +112,37 @@ through `r.Context().Done()`. The TLS client path gets the same
 mid-I/O cancel as plaintext: `RoundTrip` dials the raw conn, arms the
 deadline + cancel watcher on the underlying socket, then runs the
 handshake — so cancel aborts a stuck handshake or mid-body TLS read.
-Not in v1: `Server.BaseContext` / `ConnContext` hooks (the base is
-always `Background`).
+`Server.BaseContext` / `ConnContext` landed with M31 (below);
+request contexts root at the conn context.
+
+### Production deployment behind an LB — M31 (landed)
+The `net/http` server is deployable as an HTTP/1.1 REST backend
+behind a TLS-terminating load balancer / ingress. Each row is a
+verbatim Go 1.25.5 port; `examples/deploy_rest_api.rs` is the
+reference pattern and 14-assertion self-test:
+
+| Capability | Go anchor |
+|-----------|-----------|
+| HEAD/1xx/204/304 body suppression (`ErrBodyNotAllowed`) | server.go:1302/:1339/:1686, transfer.go:461 |
+| mux `GET` patterns match HEAD | routing_tree.go:140 |
+| accept-failure backoff (5ms→1s on EMFILE-class errors) | server.go:3421 |
+| `TCP_NODELAY` + 15s/15s/9 `SO_KEEPALIVE` on every conn | tcpsockopt_posix.go, dial.go:19-26 |
+| live `IdleTimeout` between keep-alive requests | server.go:2135 |
+| `Shutdown(ctx)`/`Shutdown(Duration)`, `Close`, `RegisterOnShutdown`, per-conn state + active idle-conn kick | server.go:3179/:3129/:3221/:3229 |
+| `BaseContext` / `ConnContext`; request ctx roots at the conn ctx | server.go:3081/:3087 |
+| `Expect: 100-continue` interim + 417 on unknown Expect | server.go:1022/:2103 |
+| `ErrorLog` (accept errors, handler panics) | server.go:3053/:3691 |
+| `signal::NotifyContext` — SIGTERM → graceful drain | signal.go:278 |
+
+Deferred from M31: server-side TLS (terminate at the LB; the gap
+analysis says the key schedule, record protection, and RSA/Ed25519
+signing are reusable — a TLS 1.3 server needs ClientHello parsing,
+server message builders, a handshake driver, ECDSA signing, and
+`X509KeyPair` loaders), HTTP/2, `SO_REUSEPORT`, streaming request
+bodies (bodies buffer fully in memory), `X-Forwarded-*` injection,
+HTTP/1.1 pipelining (keep-alive is fully supported; a pipelined
+second request racing the first response is dropped — LBs don't
+pipeline).
 
 ### Preemption safety — the `m.locks` discipline (landed)
 `m.locks` is goish's `acquirem`/`releasem` depth counter (Go

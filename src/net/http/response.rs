@@ -247,6 +247,24 @@ struct respInner {
     /// Set by the server before invoking the handler. Controls
     /// whether `flush` emits `Connection: close`.
     keep_alive: bool,
+    /// Set by the server when the request method is HEAD. Handler
+    /// writes are accepted and counted (so the derived Content-Length
+    /// matches what the equivalent GET would return) but the body is
+    /// never emitted — Go's `chunkWriter.Write` "Eat writes."
+    /// (server.go:1339).
+    is_head: bool,
+}
+
+/// `bodyAllowedForStatus` (transfer.go:461) — whether a response
+/// status permits a body: false for 1xx, 204, and 304.
+fn body_allowed_for_status(status: int) -> bool {
+    if (100..=199).contains(&status) {
+        return false;
+    }
+    if status == 204 || status == 304 {
+        return false;
+    }
+    true
 }
 
 impl response {
@@ -266,6 +284,7 @@ impl response {
                 body: Vec::new(),
                 chunked: false,
                 keep_alive: false,
+                is_head: false,
             }),
             header: Arc::new(SpinLock::new(h)),
         }
@@ -274,6 +293,14 @@ impl response {
     /// Server hook: enable/disable HTTP keep-alive on this response.
     pub fn __set_keep_alive(&self, keep_alive: bool) {
         self.inner.lock().keep_alive = keep_alive;
+    }
+
+    /// Server hook: mark this response as answering a HEAD request.
+    /// Mirrors Go's `isHEAD := w.req.Method == "HEAD"`
+    /// (server.go:1302): headers and derived Content-Length are
+    /// produced as for GET, but no body bytes reach the wire.
+    pub fn __set_head(&self, is_head: bool) {
+        self.inner.lock().is_head = is_head;
     }
 
     /// Server hook: raw fd of the underlying connection. Used by
@@ -300,12 +327,18 @@ impl response {
             return errors::nil;
         }
         g.chunked = true;
+        // A HEAD response has no body at all — no Transfer-Encoding,
+        // no chunks, no terminator (Go's chunkWriter eats the writes;
+        // TE is only set when a body follows, server.go:1442-1461).
+        let suppress_body = g.is_head || !body_allowed_for_status(g.status);
         // Build the head: set Transfer-Encoding, clear any user-set
         // Content-Length (mutually exclusive per RFC 7230 §3.3.2).
         let head = {
             let mut h = self.header.lock();
-            h.Del(string("Content-Length"));
-            h.Set(string("Transfer-Encoding"), string("chunked"));
+            if !suppress_body {
+                h.Del(string("Content-Length"));
+                h.Set(string("Transfer-Encoding"), string("chunked"));
+            }
             if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
                 h.Set(string("Connection"), string("close"));
             }
@@ -316,7 +349,7 @@ impl response {
             return err;
         }
         // Emit any buffered body as the initial chunk.
-        if !g.body.is_empty() {
+        if !g.body.is_empty() && !suppress_body {
             let body = core::mem::take(&mut g.body);
             let (_, werr) = write_chunk(&mut g.conn, &slice::<byte>::__from_vec(body));
             if !werr.IsNil() {
@@ -338,7 +371,13 @@ impl response {
         if !g.wrote_header {
             g.wrote_header = true;
         }
+        let suppress_body = g.is_head || !body_allowed_for_status(g.status);
         if g.chunked {
+            if suppress_body {
+                // No Transfer-Encoding was advertised and no chunks
+                // were sent — a terminator would itself be a body.
+                return errors::nil;
+            }
             // Streaming mode: emit the "0\r\n\r\n" terminator.
             let (_, err) = g.conn.Write(slice::<byte>::__from_vec(alloc::vec![
                 b'0', b'\r', b'\n', b'\r', b'\n'
@@ -349,15 +388,22 @@ impl response {
         // Buffered mode: emit Content-Length derived from buffered body.
         let buf = {
             let mut h = self.header.lock();
-            if h.Get(string("Content-Length")).Len() == 0 {
+            // HEAD still advertises the GET-equivalent length; 1xx/
+            // 204/304 must not carry an auto Content-Length at all
+            // (Go omits it for bodyless statuses, server.go:1533).
+            if body_allowed_for_status(g.status)
+                && h.Get(string("Content-Length")).Len() == 0
+            {
                 h.Set(string("Content-Length"), int_to_string(g.body.len() as i64));
             }
             if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
                 h.Set(string("Connection"), string("close"));
             }
             let mut buf = build_head(g.status, &h);
-            buf.reserve(g.body.len());
-            buf.extend_from_slice(&g.body);
+            if !suppress_body {
+                buf.reserve(g.body.len());
+                buf.extend_from_slice(&g.body);
+            }
             buf
         };
         let (_, err) = g.conn.Write(slice::<byte>::__from_vec(buf));
@@ -395,7 +441,18 @@ impl ResponseWriter for response {
         if !g.wrote_header {
             g.wrote_header = true;
         }
+        // `(*response).write` (server.go:1686): a status that forbids
+        // a body rejects handler writes with ErrBodyNotAllowed.
+        if p.len() > 0 && !body_allowed_for_status(g.status) {
+            return (0, super::server::ErrBodyNotAllowed.into());
+        }
+        // HEAD: eat writes (server.go:1339) — report success so the
+        // handler proceeds normally. In buffered mode the bytes are
+        // kept so `flush` derives the GET-equivalent Content-Length.
         if g.chunked {
+            if g.is_head {
+                return (p.len() as int, errors::nil);
+            }
             return write_chunk(&mut g.conn, &p);
         }
         g.body.extend_from_slice(&*p);
