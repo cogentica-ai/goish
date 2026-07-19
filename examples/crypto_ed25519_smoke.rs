@@ -229,23 +229,23 @@ fn test_5_public_equal() {
         ok = false;
     }
     // PublicKey.Equal is reflexive.
-    let self_box: crypto::PublicKey = alloc::boxed::Box::new(pub_.clone());
+    let self_box: crypto::PublicKey = alloc::sync::Arc::new(pub_.clone());
     if !pub_.Equal(&self_box) {
         ok = false;
     }
     // A different key must compare unequal.
     let (other_pub, _, _) = GenerateKey(None);
-    let other_box: crypto::PublicKey = alloc::boxed::Box::new(other_pub);
+    let other_box: crypto::PublicKey = alloc::sync::Arc::new(other_pub);
     if pub_.Equal(&other_box) {
         ok = false;
     }
     // PrivateKey.Equal — same key equal, distinct keys unequal.
-    let priv_box: crypto::PrivateKey = alloc::boxed::Box::new(priv_.clone());
+    let priv_box: crypto::PrivateKey = alloc::sync::Arc::new(priv_.clone());
     if !priv_.Equal(&priv_box) {
         ok = false;
     }
     let (_, other_priv, _) = GenerateKey(None);
-    let other_priv_box: crypto::PrivateKey = alloc::boxed::Box::new(other_priv);
+    let other_priv_box: crypto::PrivateKey = alloc::sync::Arc::new(other_priv);
     if priv_.Equal(&other_priv_box) {
         ok = false;
     }

@@ -108,7 +108,7 @@ impl PrivateKey {
     /// [`PublicKey`] corresponding to `priv` (the trailing 32 bytes of
     /// the encoding), boxed as a `crypto.PublicKey`.
     pub fn Public(&self) -> crypto::PublicKey {
-        Box::new(self.PublicKey())
+        alloc::sync::Arc::new(self.PublicKey())
     }
 
     /// `(PrivateKey).Public()` returning the concrete [`PublicKey`].

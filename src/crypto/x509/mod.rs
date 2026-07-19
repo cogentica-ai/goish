@@ -272,6 +272,15 @@ pub fn ParsePKCS8PrivateKey(
     pkcs8_parse_rsa_private_key(pk_rv.Bytes)
 }
 
+/// `x509.ParsePKCS1PrivateKey(der)` — parse an RSA private key in
+/// PKCS #1, ASN.1 DER form (`"RSA PRIVATE KEY"` PEM blocks).
+/// Reference: Go 1.25 src/crypto/x509/pkcs1.go:44.
+pub fn ParsePKCS1PrivateKey(
+    der: slice<byte>,
+) -> (crate::crypto::rsa::PrivateKey, crate::error) {
+    pkcs8_parse_rsa_private_key(der)
+}
+
 fn pkcs8_parse_rsa_private_key(
     der: slice<byte>,
 ) -> (crate::crypto::rsa::PrivateKey, crate::error) {
