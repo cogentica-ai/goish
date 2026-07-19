@@ -1511,22 +1511,23 @@ impl Server {
             // request context. Aborted + joined right after the
             // handler returns (Go abortPendingRead) so the keep-alive
             // loop regains exclusive read ownership of the fd.
-            let (watch_fd, watch_pd) = conn.__disconnect_watch_parts();
-            let watcher_done: Option<crate::gochan::chan<()>> = if !watch_pd.is_null() {
-                let ch = crate::gochan::chan::<()>::new_unbuffered();
-                let ch2 = ch.clone();
+            // ── client-disconnect watch (Go startBackgroundRead,
+            // server.go:735) ──  Arm a cancel hook on the conn's
+            // PollDesc: if a readable event lands mid-handler and an
+            // MSG_PEEK probe (run by whichever M polls) shows
+            // EOF/reset, the request context is canceled. No
+            // goroutine, no handoffs — v1's per-request watcher
+            // goroutine cost ~15% of server CPU in newproc/goexit
+            // alone and its join added a wakeup round-trip per
+            // request.
+            let (_, watch_pd) = conn.__disconnect_watch_parts();
+            if !watch_pd.is_null() {
                 let cancel2 = req_cancel.clone();
-                let pd_addr = watch_pd as usize;
-                go!(move || {
-                    if background_disconnect_watch(watch_fd, pd_addr) {
-                        (cancel2)();
-                    }
-                    ch2.Close();
-                });
-                Some(ch)
-            } else {
-                None
-            };
+                crate::runtime::netpoll::arm_watch(
+                    unsafe { &*watch_pd },
+                    Arc::new(move || (cancel2)()),
+                );
+            }
 
             let keep_alive = request_keep_alive(&req)
                 && !self.__state.in_shutdown.load(Ordering::Acquire);
@@ -1578,13 +1579,14 @@ impl Server {
             }
             self.Handler.ServeHTTP(&w, &req);
 
-            // Handler done — abort + join the watcher before touching
-            // the conn's read side again (Go abortPendingRead,
-            // server.go:756). set_deadline(-1) wakes a parked watcher
-            // with Timedout; the Recv on its done chan is the join.
-            if let Some(ch) = watcher_done {
-                crate::runtime::netpoll::set_deadline(unsafe { &*watch_pd }, -1, b'r');
-                let _ = ch.Recv();
+            // Handler done — disarm the disconnect watch before
+            // touching the conn's read side again (Go
+            // abortPendingRead, server.go:756). Nothing to join: the
+            // watch is a poller-side hook, and a racing disconnect
+            // fire merely cancels a request context that is already
+            // finishing (Go cancels it right below anyway).
+            if !watch_pd.is_null() {
+                crate::runtime::netpoll::disarm_watch(unsafe { &*watch_pd });
             }
 
             conn = w.__take_conn();
@@ -1675,65 +1677,6 @@ impl Server {
         } else {
             0
         }
-    }
-}
-
-/// Client-disconnect watcher body — goish's rendering of Go's
-/// `connReader.backgroundRead` (server.go:735). Runs on its own
-/// goroutine while a handler executes. Probes the socket with
-/// `recv(MSG_PEEK | MSG_DONTWAIT)` — peeking never consumes a
-/// pipelined next request — and parks on the netpoller between
-/// probes.
-///
-/// Returns `true` iff the client went away (EOF / reset) and the
-/// request context should be canceled. Returns `false` when either
-/// pipelined data shows up (next keep-alive request — stop watching,
-/// the conn is fine) or the serve loop aborted the watch by setting
-/// a past read deadline (`netpoll::set_deadline(pd, -1, 'r')` — the
-/// goish `aLongTimeAgo` abort).
-///
-/// `pd_addr` is the conn's `PollDesc` as a usize (raw pointers are
-/// not `Send`; the address crosses the `go!` closure instead). The
-/// serve loop joins this goroutine before closing or reusing the
-/// conn, so the PollDesc outlives every dereference here.
-fn background_disconnect_watch(fd: i32, pd_addr: usize) -> bool {
-    const EINTR: i32 = 4;
-    const EAGAIN: i32 = 11;
-    let pd = unsafe { &*(pd_addr as *const crate::runtime::netpoll::PollDesc) };
-    let mut probe = [0u8; 1];
-    loop {
-        let n = crate::syscall::Recvfrom(
-            fd,
-            probe.as_mut_ptr(),
-            1,
-            crate::syscall::MSG_PEEK | crate::syscall::MSG_DONTWAIT,
-        );
-        if n > 0 {
-            // Pipelined next request — client is alive; stop
-            // watching (Go remembers the byte; peeking means we
-            // don't have to).
-            return false;
-        }
-        if n == 0 {
-            // Orderly shutdown from the peer.
-            return true;
-        }
-        let errno = -(n as i32);
-        if errno == EINTR {
-            continue;
-        }
-        if errno == EAGAIN {
-            match crate::runtime::netpoll::block(pd, b'r') {
-                // Readable edge (data or EOF/RDHUP) — loop and peek.
-                crate::runtime::netpoll::BlockResult::Ready
-                | crate::runtime::netpoll::BlockResult::Aborted => continue,
-                // Past-deadline abort from the serve loop: handler
-                // finished first.
-                crate::runtime::netpoll::BlockResult::Timedout => return false,
-            }
-        }
-        // ECONNRESET and friends — connection is gone.
-        return true;
     }
 }
 
