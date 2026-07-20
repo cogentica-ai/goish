@@ -35,6 +35,9 @@
 //     injection and hop-by-hop header stripping on both legs
 //   - `listen ... ssl` TLS termination (one cert per listener;
 //     SNI-based per-vhost certs are out of scope)
+//   - `listen ... reuseport` — one SO_REUSEPORT listener per CPU
+//     (nginx: one per worker), bound via `net.ListenConfig.Control`,
+//     kernel hash-sharding accepts across the per-CPU accept loops
 //   - combined-ish access log, SIGTERM/SIGINT graceful drain
 //
 // Modes:
@@ -96,6 +99,7 @@ struct Location {
 struct ServerConf {
     Listen: string,
     TLS: bool,
+    ReusePort: bool,
     CertFile: string,
     KeyFile: string,
     ServerNames: slice<string>,
@@ -248,6 +252,7 @@ fn buildServer(block: &slice<Directive>) -> ServerConf {
     let mut sc = ServerConf {
         Listen: string("127.0.0.1:8080"),
         TLS: false,
+        ReusePort: false,
         CertFile: string(""),
         KeyFile: string(""),
         ServerNames: slice!([]string {}),
@@ -259,6 +264,9 @@ fn buildServer(block: &slice<Directive>) -> ServerConf {
             for (_, a) in range!(&d.Args) {
                 if *a == "ssl" {
                     sc.TLS = true;
+                }
+                if *a == "reuseport" {
+                    sc.ReusePort = true;
                 }
             }
         } else if d.Name == "server_name" {
@@ -638,6 +646,7 @@ struct ListenGroup {
     Key: string,
     Addr: string,
     TLS: bool,
+    ReusePort: bool,
     CertFile: string,
     KeyFile: string,
     Idxs: slice<int>,
@@ -671,6 +680,7 @@ fn groupListens(cfg: &Config) -> slice<ListenGroup> {
                     Key: key,
                     Addr: sc.Listen.clone(),
                     TLS: sc.TLS,
+                    ReusePort: sc.ReusePort,
                     CertFile: sc.CertFile.clone(),
                     KeyFile: sc.KeyFile.clone(),
                     Idxs: idxs,
@@ -681,9 +691,37 @@ fn groupListens(cfg: &Config) -> slice<ListenGroup> {
     groups
 }
 
+/// nginx `listen ... reuseport` — bind with SO_REUSEPORT set before
+/// bind, via the Go idiom: a `net.ListenConfig` whose `Control` hook
+/// runs setsockopt(2) on the raw fd pre-bind (Go deliberately has no
+/// first-class flag for this). Each such listener is its own kernel
+/// accept queue; the kernel hash-shards incoming connections across
+/// all listeners bound to the same address — exactly what nginx's
+/// per-worker `reuseport` sockets do.
+fn listenReusePort(addr: string) -> (net::Listener, error) {
+    let lc = net::ListenConfig {
+        Control: Some(Arc::new(
+            |_network: string, _address: string, c: syscall::RawConn| -> error {
+                c.Control(|fd| {
+                    let _ = syscall::SetsockoptInt(
+                        int(fd),
+                        int(syscall::SOL_SOCKET),
+                        int(syscall::SO_REUSEPORT),
+                        1,
+                    );
+                })
+            },
+        )),
+    };
+    lc.Listen(context::Background(), string("tcp"), addr)
+}
+
 /// Bind every listen group and start its serve loop. Returns the
 /// actual bound addresses (kernel-assigned ports resolved) in group
-/// order, plus the servers for graceful shutdown.
+/// order, plus the servers for graceful shutdown. A `reuseport`
+/// group binds one listener per CPU (nginx: one per worker), all
+/// served on the same `http::Server` so one `Shutdown` drains every
+/// accept loop.
 fn startServers(cfg: &Arc<Config>) -> (slice<string>, slice<Arc<http::Server>>, error) {
     let groups = groupListens(cfg);
     let mut bounds = slice!([]string {});
@@ -693,11 +731,16 @@ fn startServers(cfg: &Arc<Config>) -> (slice<string>, slice<Arc<http::Server>>, 
         if !strings::Contains(addr.clone(), ":") {
             addr = Sprintf!(":%s", addr);
         }
-        let (ln, err) = net::Listen(string("tcp"), addr);
+        let (ln, err) = if g.ReusePort {
+            listenReusePort(addr.clone())
+        } else {
+            net::Listen(string("tcp"), addr.clone())
+        };
         if !err.IsNil() {
             return (bounds, servers, err);
         }
-        let bound = Sprintf!("127.0.0.1:%d", ln.Addr().Port);
+        let port = ln.Addr().Port;
+        let bound = Sprintf!("127.0.0.1:%d", port);
         bounds = append!(bounds, bound.clone());
 
         let mux = http::ServeMux::new();
@@ -732,6 +775,30 @@ fn startServers(cfg: &Arc<Config>) -> (slice<string>, slice<Arc<http::Server>>, 
             go!(move || {
                 let _ = run.Serve(ln);
             });
+        }
+
+        // reuseport: the remaining per-CPU listeners bind the SAME
+        // host:port (resolved, so `listen 127.0.0.1:0 reuseport`
+        // works too) and serve on the same Server — its Shutdown
+        // closes every one of them.
+        if g.ReusePort && !is_tls {
+            let (host, _, herr) = net::SplitHostPort(addr.clone());
+            if !herr.IsNil() {
+                return (bounds, servers, herr);
+            }
+            let real_addr = Sprintf!("%s:%d", host, port);
+            let workers = goish::runtime::NumCPU();
+            for _ in 1..workers {
+                let (ln2, err2) = listenReusePort(real_addr.clone());
+                if !err2.IsNil() {
+                    return (bounds, servers, err2);
+                }
+                let run2 = srv.clone();
+                go!(move || {
+                    let _ = run2.Serve(ln2);
+                });
+            }
+            goish::Printf!("goginx: reuseport x%d on %s\n", workers, real_addr);
         }
     }
     (bounds, servers, nil.into())
@@ -1284,6 +1351,56 @@ fn selfTest() {
             plain_refused,
             tls_refused
         ));
+    }
+
+    // 18. listen ... reuseport — one kernel-sharded listener per CPU
+    // on the same port; every request lands on some listener, and a
+    // single Shutdown closes ALL of them (if even one leaked, the
+    // kernel would keep routing connects to it and the post-drain
+    // dial would succeed).
+    let mut rb = strings::Builder::new();
+    let _ = rb.WriteString(
+        "http {\n  server {\n    listen 127.0.0.1:0 reuseport;\n    server_name r.test;\n",
+    );
+    let _ = rb.WriteString(Sprintf!(
+        "    location / { root %s; index index.html; }\n  }\n}\n",
+        www_a.clone()
+    ));
+    let rcfg = Arc::new(loadConfig(rb.String()));
+    let (rbounds, rservers, rerr) = startServers(&rcfg);
+    if !rerr.IsNil() {
+        fail(Sprintf!("reuseport boot: %v", rerr));
+    } else {
+        let raddr = rbounds[0].clone();
+        let mut ok_count = int(0);
+        let total = goish::runtime::NumCPU() * 2;
+        for _ in 0..total {
+            let (st, body) = rawRoundtrip(
+                raddr.clone(),
+                string("GET / HTTP/1.1\r\nHost: r.test\r\nConnection: close\r\n\r\n"),
+            );
+            if st == 200 && strings::Contains(body.clone(), "site-a") {
+                ok_count += 1;
+            }
+        }
+        for (_, s) in range!(&rservers) {
+            let _ = s.clone().Shutdown(time::Second * 5);
+        }
+        let (mut rc, rderr) = net::Dial(string("tcp"), raddr.clone());
+        let refused = !rderr.IsNil();
+        if !refused {
+            let _ = rc.Close();
+        }
+        if ok_count == total && refused {
+            pass("reuseport: per-CPU listeners serve one port, Shutdown drains all");
+        } else {
+            fail(Sprintf!(
+                "reuseport: ok=%d/%d refused=%t",
+                ok_count,
+                total,
+                refused
+            ));
+        }
     }
 
     finish();
