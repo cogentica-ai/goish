@@ -1486,6 +1486,63 @@ pub fn Setsockopt(
     }
 }
 
+/// `syscall.SetsockoptInt(fd, level, opt, value int) error`
+/// (syscall/syscall_unix.go) — Go-shape wrapper around the raw
+/// `Setsockopt` above: the value is materialised as a 4-byte int32
+/// exactly like Go's `var n = int32(value); setsockopt(..., &n, 4)`.
+/// Returns `nil` on success, a `syscall.Errno` on failure.
+#[allow(non_snake_case)]
+pub fn SetsockoptInt(fd: crate::int, level: crate::int, opt: crate::int, value: crate::int) -> crate::error {
+    let n: i32 = value as i32;
+    let rc = Setsockopt(
+        fd as i32,
+        level as i32,
+        opt as i32,
+        &n as *const i32 as *const u8,
+        core::mem::size_of::<i32>() as u32,
+    );
+    if rc < 0 {
+        return Errno(-rc).into();
+    }
+    crate::errors::nil
+}
+
+// ─── RawConn ─────────────────────────────────────────────────────────
+//
+// Go: `syscall.RawConn` (syscall/net.go:8) is the interface handed to
+// `net.ListenConfig.Control` / `net.Dialer.Control` hooks so callers
+// can run setsockopt(2) etc. against the raw fd before bind/connect.
+//
+// Goish v1 ships it as a concrete struct (the only producer is the
+// pre-bind Control path in `net.ListenConfig.Listen`, where Go's
+// netFD incref bookkeeping — the interface's only failure mode —
+// doesn't exist yet). `Read` / `Write` (the "invoke f until it
+// reports done, blocking on readiness in between" forms) are
+// deferred until a consumer needs them.
+
+/// `syscall.RawConn` (syscall/net.go:8) — raw access to a socket fd
+/// inside a `net.ListenConfig.Control` hook. The fd is only
+/// guaranteed valid for the duration of the callback, mirroring the
+/// Go doc contract.
+pub struct RawConn {
+    fd: i32,
+}
+
+impl RawConn {
+    pub(crate) fn __from_fd(fd: i32) -> RawConn {
+        RawConn { fd }
+    }
+
+    /// `RawConn.Control(f func(fd uintptr)) error` — invoke `f` on
+    /// the underlying fd. The concrete v1 carrier has no incref
+    /// failure mode, so this always returns `nil`.
+    #[allow(non_snake_case)]
+    pub fn Control<F: Fn(crate::uintptr)>(&self, f: F) -> crate::error {
+        f(self.fd as crate::uintptr);
+        crate::errors::nil
+    }
+}
+
 /// `getsockopt(2)`. `len` is in/out. Returns `0` on success.
 #[allow(non_snake_case)]
 pub fn Getsockopt(
