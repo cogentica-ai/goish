@@ -1037,7 +1037,11 @@ pub(crate) fn schedule_loop() -> ! {
                     let prefer =
                         current_p().map(|p| p.id as usize).unwrap_or(0);
                     match crate::runtime::netpoll::try_claim_shard(prefer) {
-                        Some(shard) => block_as_netpoller(shard),
+                        Some(shard) => {
+                            if let Some(g) = block_as_netpoller(shard) {
+                                execute(g); // never returns
+                            }
+                        }
                         None => park_m_idle(),
                     }
                 }
@@ -1073,12 +1077,19 @@ fn any_runnable_anywhere() -> bool {
     found
 }
 
-/// Block in `epoll_wait` as `shard`'s designated blocking poller,
-/// then ready whatever came in. The caller (schedule_loop) re-runs
-/// find_runnable, which picks readied work off the run queues.
+/// Block in `epoll_wait` as `shard`'s designated blocking poller.
+/// Returns the HEAD ready G for the caller to `execute` directly on
+/// this M — Go's findRunnable does exactly this after its blocking
+/// netpoll: `gp := list.pop(); injectglist(&list); ...; return gp`
+/// (proc.go:3630-3650). Routing the head through goready instead
+/// cost a runq round-trip AND a spurious wake of another idle M per
+/// I/O wakeup (goready → wake_idle_m), which then raced this M to
+/// steal the G — pure churn in the one-conn-one-event case that
+/// dominates keep-alive serving. The tail (batch arrivals) is
+/// goready'd as before: those wakes recruit Ms for real work.
 #[inline(never)]
 #[link_section = "goish_rt_text"]
-fn block_as_netpoller(shard: usize) {
+fn block_as_netpoller(shard: usize) -> Option<NonNull<G>> {
     // Final re-check AFTER claiming the shard: a producer that
     // pushed work before observing our claim will not have sent a
     // break, so we must not block over that work. Any producer after
@@ -1087,13 +1098,22 @@ fn block_as_netpoller(shard: usize) {
     // starts is sticky rather than lost.
     if any_runnable_anywhere() {
         crate::runtime::netpoll::release_shard(shard);
-        return;
+        return None;
     }
     let ready = crate::runtime::netpoll::poll_shard(shard, NETPOLL_BLOCK_MS);
     crate::runtime::netpoll::release_shard(shard);
-    for g in ready {
+    let mut iter = ready.into_iter();
+    let head = iter.next();
+    if let Some(h) = head {
+        unsafe {
+            debug_assert_eq!((*h.as_ptr()).status, GStatus::Waiting);
+            (*h.as_ptr()).status = GStatus::Runnable;
+        }
+    }
+    for g in iter {
         goready(g);
     }
+    head
 }
 
 /// Exit the process if the calling thread is the main M (id == 0).
