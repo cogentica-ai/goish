@@ -505,7 +505,7 @@ pub(crate) fn build_head(status: int, header: &Header) -> Vec<u8> {
     push_dec(&mut buf, status as u32);
     buf.push(b' ');
     let st = status_text(status as u32);
-    buf.extend_from_slice(&*crate::convert::bytes(st));
+    buf.extend_from_slice(st.as_bytes());
     buf.extend_from_slice(b"\r\n");
     let inner = header.__inner();
     for (key, values) in inner.__iter() {

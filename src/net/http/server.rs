@@ -1462,6 +1462,15 @@ impl Server {
         let idle_ns = self.idle_timeout_ns();
         let write_timeout_ns = self.write_timeout_ns();
         let mut first_request = true;
+        // Go stamps `c.remoteAddr` ONCE at conn.serve entry
+        // (server.go:2076); readRequest copies it onto every request
+        // (:1120). Formatting it per request cost an alloc each.
+        let remote_addr = conn.RemoteAddr().String();
+        // Recycled bufio backing buffer — the per-conn analogue of
+        // Go's pooled `c.bufr` (newBufioReader, server.go:840). Each
+        // request's reader borrows the conn, so the reader itself is
+        // rebuilt per request, but the 4 KiB buffer survives.
+        let mut rbuf: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
 
         loop {
             if self.__state.in_shutdown.load(Ordering::Acquire) {
@@ -1482,10 +1491,17 @@ impl Server {
 
             let conn_fd = conn.__fd();
             let (mut req, err) = {
-                let mut br = bufio::NewReader(&mut conn);
+                let mut br =
+                    bufio::__new_reader_with_buf(&mut conn, core::mem::take(&mut rbuf));
                 // Server variant: carries the fd so the parser can
                 // emit `100 Continue` before the eager body read.
-                super::request::__read_request_server(&mut br, self.MaxHeaderBytes, conn_fd)
+                let out = super::request::__read_request_server(
+                    &mut br,
+                    self.MaxHeaderBytes,
+                    conn_fd,
+                );
+                rbuf = br.__into_buf();
+                out
             };
             if !err.IsNil() {
                 // Unknown Expect value → 417 + close (Go
@@ -1515,7 +1531,7 @@ impl Server {
             // Go conn.serve stamps `c.remoteAddr` at entry and
             // readRequest copies it onto every request
             // (server.go:2076 / :1120).
-            req.RemoteAddr = conn.RemoteAddr().String();
+            req.RemoteAddr = remote_addr.clone();
 
             // ── per-request context (Go readRequest, server.go:1112) ──
             // Every incoming request carries a cancellable context:
@@ -1544,11 +1560,11 @@ impl Server {
             // request.
             let (_, watch_pd) = conn.__disconnect_watch_parts();
             if !watch_pd.is_null() {
-                let cancel2 = req_cancel.clone();
-                crate::runtime::netpoll::arm_watch(
-                    unsafe { &*watch_pd },
-                    Arc::new(move || (cancel2)()),
-                );
+                // `Arc<CancelFunc>` (`CancelFunc = Box<dyn Fn()…>`)
+                // unsizes straight to `Arc<dyn Fn()…>` — no extra
+                // wrapper closure allocation per request.
+                let hook: Arc<dyn Fn() + Send + Sync> = req_cancel.clone();
+                crate::runtime::netpoll::arm_watch(unsafe { &*watch_pd }, hook);
             }
 
             let keep_alive = request_keep_alive(&req)
