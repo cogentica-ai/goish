@@ -8,13 +8,15 @@
 // What's ported (per doc/M27e-netpoller-design.md):
 //   PollDesc { fd, rg, wg, rd, wd, rseq, wseq }
 //                                — netpoll.go:75 (M27e-α + M27f-α deadlines)
-//   init()                       — netpoll_epoll.go:21 (epollcreate1 + eventfd2)
+//   init()                       — netpoll_epoll.go:21 (per-P: N × epollcreate1 + eventfd2)
 //   open(fd) -> *const PollDesc  — netpoll_epoll.go:49 (EPOLL_CTL_ADD, EPOLLIN|OUT|RDHUP|ET)
 //   close(pd)                    — netpoll_epoll.go:57
 //   block(pd, mode) -> BlockResult — netpoll.go:548 (Ready / Timedout / Aborted)
 //   unblock(pd, mode, ioready)   — netpoll.go:591
-//   poll(delay_ms) -> gList      — netpoll_epoll.go:99
-//   netpoll_break()              — netpoll_epoll.go:67
+//   poll_shard(s, delay_ms)      — netpoll_epoll.go:99, per shard (goish
+//   poll_all()                     deviation: per-P epoll shards — see
+//                                  the shard-model doc below)
+//   break_shard(s) / break_one_claimed() — netpoll_epoll.go:67
 //   set_deadline(pd, ns, mode)   — netpoll.go:371 poll_runtime_pollSetDeadline
 //   fire_expired_deadlines(now)  — netpoll.go:622 netpolldeadlineimpl
 //                                  (sysmon-driven; no per-pd timer object)
@@ -104,6 +106,11 @@ pub struct PollDesc {
     /// (netpoll.go:79) — Go uses 24 bits, we use 16.
     pub fdseq: AtomicU32,
 
+    /// Netpoll shard this fd is registered with (index into
+    /// `SHARDS`). Assigned round-robin by `open()`; constant for the
+    /// registration's lifetime; read by `close()` for EPOLL_CTL_DEL.
+    pub shard: AtomicU32,
+
     /// Client-disconnect watch (net/http serve loop). While armed,
     /// `poll()` MSG_PEEKs this fd on every read-side event; on
     /// EOF/reset it fires the hook once. This reproduces the
@@ -132,6 +139,7 @@ impl PollDesc {
             // Start at 1 — Go reserves 0 (netpoll.go:256-258
             // "value 0 is special in setEventErr").
             fdseq: AtomicU32::new(1),
+            shard: AtomicU32::new(0),
             watch_on: AtomicBool::new(false),
             watch_hook: crate::runtime::spin::SpinLock::new(None),
         }
@@ -217,23 +225,88 @@ pub enum BlockResult {
     Aborted,
 }
 
-// ─── Module-global state ─────────────────────────────────────────────
+// ─── Module-global state: per-P netpoll shards ───────────────────────
+//
+// goish deviates from Go here (Go has ONE epoll for the whole
+// runtime, netpoll_epoll.go:21) and follows nginx's per-worker-epoll
+// model instead: one epoll instance per P. Motivation (see
+// memory/project_so_reuseport_plan.md): with a single epoll, all
+// idle Ms contend on one kernel epoll instance and one blocking
+// netpoller M serializes every fd wakeup; SO_REUSEPORT's kernel-side
+// accept sharding then buys nothing (12 backlogs waking 12 accept Gs
+// through one poller regressed conn-churn 20%). With per-P shards,
+// up to `num_ps` Ms block in independent `epoll_wait`s concurrently
+// — runtime sharding aligned with kernel sharding.
+//
+// Shape:
+//   - fds are assigned to shards round-robin at `open()` (stored in
+//     `pd.shard`); Gs migrate across Ps freely, so P-affinity
+//     assignment would decay anyway — balance beats locality.
+//   - the find_runnable tail polls only the current P's shard
+//     (`poll_shard(p.id, 0)`) — non-blocking, zero cross-M contention.
+//   - each idle M claims any unclaimed shard (`try_claim_shard`,
+//     preferring its own P's) and blocks in `epoll_wait(10ms)` on it.
+//     With enough idle Ms, EVERY shard has a dedicated blocking
+//     poller — the nginx configuration.
+//   - sysmon's tick sweeps all shards (`poll_all`) as the backstop
+//     for shards that have neither an active owner-P nor an idle
+//     claimer (e.g. every M busy in long handlers).
+//   - `break_one_claimed()` replaces the single netpollBreak: a
+//     producer with no futex-parked M to wake kicks one blocking
+//     shard poller; the woken M re-runs find_runnable and picks the
+//     work up from any queue (work discovery is queue-based, not
+//     shard-based).
 
-/// epoll fd. `-1` until init() runs; thereafter constant for the
-/// process lifetime.
-static EPFD: AtomicI32 = AtomicI32::new(-1);
+/// Upper bound on shard count. Actual count is
+/// `min(num_ps(), MAX_SHARDS)`, fixed at `init()`.
+pub const MAX_SHARDS: usize = 64;
 
-/// eventfd backing netpoll_break. Address of this static is used as
-/// the magic `ev.data` value distinguishing the eventfd from
-/// PollDesc pointers (cf. netpoll_epoll.go:36 `&netpollEventFd`).
-static EVENTFD_FD: AtomicI32 = AtomicI32::new(-1);
+/// One netpoll shard: an epoll instance, its break eventfd, the
+/// break-coalescing flag, and the blocking-poller claim flag.
+struct Shard {
+    /// epoll fd. `-1` until init(); constant thereafter.
+    epfd: AtomicI32,
+    /// eventfd backing this shard's netpoll_break. Registered in
+    /// this shard's epoll with `data = shard index` (bit 48 clear —
+    /// see the event.data layout doc).
+    efd: AtomicI32,
+    /// Coalesces concurrent break_shard() calls. 1 while a wakeup is
+    /// in flight; cleared after a blocking poll drains the eventfd.
+    wake_sig: AtomicI32,
+    /// True while some M is blocked in `poll_shard(self, >0)` as
+    /// this shard's designated blocking poller. At most one blocking
+    /// poller per shard (Go's single `NETPOLLER_BUSY`, per-shard).
+    claimed: AtomicBool,
+}
 
-/// Coalesces concurrent netpoll_break() calls. Set to 1 when a wakeup
-/// is in flight; cleared after netpoll consumes the eventfd value.
-static WAKE_SIG: AtomicI32 = AtomicI32::new(0);
+#[allow(clippy::declare_interior_mutable_const)]
+static SHARDS: [Shard; MAX_SHARDS] = [const {
+    Shard {
+        epfd: AtomicI32::new(-1),
+        efd: AtomicI32::new(-1),
+        wake_sig: AtomicI32::new(0),
+        claimed: AtomicBool::new(false),
+    }
+}; MAX_SHARDS];
+
+/// Number of live shards. `0` until `init()`; the poll/break entry
+/// points gate on it.
+static NSHARDS: AtomicUsize = AtomicUsize::new(0);
+
+/// Round-robin cursor for fd→shard assignment at `open()`.
+static SHARD_RR: AtomicUsize = AtomicUsize::new(0);
+
+/// Round-robin cursor for `break_one_claimed`'s scan start, so
+/// repeated producer kicks spread across blocking pollers.
+static BREAK_RR: AtomicUsize = AtomicUsize::new(0);
 
 /// Init guard — set once by `init()`, idempotent.
 static INIT: SpinLock<bool> = SpinLock::new(false);
+
+#[inline]
+fn nshards() -> usize {
+    NSHARDS.load(Ordering::Acquire)
+}
 
 // ─── lifecycle counters ──────────────────────────────────────────────
 //
@@ -369,19 +442,22 @@ fn registry_get_weak(idx: u32) -> Option<Weak<PollDesc>> {
 // ─── event.data layout ───────────────────────────────────────────────
 //
 // `event.data` is a 64-bit cookie the kernel echoes back from
-// EPOLL_CTL_ADD on every event. We split it so a single equality
-// check against `eventfd_tag()` works AND we never alias with a
-// userspace-pointer-shaped value (the eventfd discriminator is
-// `&EVENTFD_FD as u64`, which has bits [48..] all zero on Linux):
+// EPOLL_CTL_ADD on every event. We split it so a single bit test
+// discriminates slab events from break-eventfd events:
 //
-//   bit  [48]     — `1` for slab events, `0` for the eventfd. This
-//                   is the cheap discriminator: any `data` with bit
-//                   48 set is a slab event, period.
+//   bit  [48]     — `1` for slab events, `0` for a shard's break
+//                   eventfd. This is the cheap discriminator: any
+//                   `data` with bit 48 set is a slab event, period.
 //   bits [32..48] — fdseq tag (low 16 bits of pd.fdseq) for stale-
 //                   event filtering across the EPOLL_CTL_DEL ↔
 //                   slab.take() window.
 //   bits [0..32]  — slot index (u32 from REGISTRY).
 //   bits [49..64] — reserved (zero).
+//
+// A shard's break eventfd registers with `data = shard index`
+// (< MAX_SHARDS = 64, so bit 48 is clear) — replacing the old
+// single-poller address-of-static tag (cf. netpoll_epoll.go:36
+// `&netpollEventFd`).
 //
 // The fdseq tag is no longer strictly required for safety (the slab
 // take() makes the slot lookup return None, so the deref simply never
@@ -410,49 +486,52 @@ fn unpack_tag(data: u64) -> u32 {
 
 // ─── init / open / close ─────────────────────────────────────────────
 
-/// One-time poller init. Creates the epoll fd and the eventfd, and
-/// registers the eventfd for EPOLLIN. Called lazily on first
-/// `open(fd)`. Idempotent — safe to call from multiple Ms.
+/// One-time poller init. Creates one epoll + break eventfd per shard
+/// (shard count = `min(num_ps(), MAX_SHARDS)`) and registers each
+/// eventfd for EPOLLIN in its own shard's epoll. Called lazily on
+/// first `open(fd)`. Idempotent — safe to call from multiple Ms.
 pub fn init() {
     let mut g = INIT.lock();
     if *g {
         return;
     }
 
-    let epfd = syscall::EpollCreate1(syscall::O_CLOEXEC);
-    if epfd < 0 {
-        panic!("netpoll: epoll_create1 failed");
-    }
-    let efd = syscall::Eventfd(0, syscall::EFD_CLOEXEC | syscall::EFD_NONBLOCK);
-    if efd < 0 {
-        let _ = syscall::Close(epfd);
-        panic!("netpoll: eventfd2 failed");
+    // Ps are bootstrapped in rt0, long before any user socket opens;
+    // clamp defensively anyway so a pre-bootstrap open still works.
+    let n = crate::runtime::sched::num_ps().clamp(1, MAX_SHARDS);
+
+    for s in 0..n {
+        let epfd = syscall::EpollCreate1(syscall::O_CLOEXEC);
+        if epfd < 0 {
+            panic!("netpoll: epoll_create1 failed");
+        }
+        let efd = syscall::Eventfd(0, syscall::EFD_CLOEXEC | syscall::EFD_NONBLOCK);
+        if efd < 0 {
+            let _ = syscall::Close(epfd);
+            panic!("netpoll: eventfd2 failed");
+        }
+
+        // Register the eventfd with EPOLLIN (level-triggered is fine
+        // — we drain to zero each time, matching Go). data = shard
+        // index; bit 48 clear ⇒ never aliases a slab event.
+        let mut ev = syscall::EpollEvent {
+            events: syscall::EPOLLIN,
+            data: s as u64,
+        };
+        let r = syscall::EpollCtl(epfd, syscall::EPOLL_CTL_ADD, efd, &mut ev);
+        if r < 0 {
+            let _ = syscall::Close(efd);
+            let _ = syscall::Close(epfd);
+            panic!("netpoll: epoll_ctl(eventfd) failed");
+        }
+
+        SHARDS[s].efd.store(efd, Ordering::Release);
+        SHARDS[s].epfd.store(epfd, Ordering::Release);
     }
 
-    // Register the eventfd with EPOLLIN (level-triggered is fine —
-    // we drain to zero each time, matching Go).
-    let mut ev = syscall::EpollEvent {
-        events: syscall::EPOLLIN,
-        data: eventfd_tag(),
-    };
-    let r = syscall::EpollCtl(epfd, syscall::EPOLL_CTL_ADD, efd, &mut ev);
-    if r < 0 {
-        let _ = syscall::Close(efd);
-        let _ = syscall::Close(epfd);
-        panic!("netpoll: epoll_ctl(eventfd) failed");
-    }
-
-    EVENTFD_FD.store(efd, Ordering::Release);
-    EPFD.store(epfd, Ordering::Release);
+    // Publish last — poll/break entry points gate on NSHARDS > 0.
+    NSHARDS.store(n, Ordering::Release);
     *g = true;
-}
-
-/// Tag value stored in `EpollEvent.data` for the netpollBreak eventfd.
-/// Mirrors Go's `*(**uintptr)(...) = &netpollEventFd` — the address of
-/// a unique static is used as the discriminator (cf. netpoll_epoll.go:36).
-#[inline]
-fn eventfd_tag() -> u64 {
-    &EVENTFD_FD as *const AtomicI32 as u64
 }
 
 /// Register `fd` with the poller and return an owning `Arc<PollDesc>`
@@ -473,7 +552,7 @@ fn eventfd_tag() -> u64 {
 /// `fd` should already be `O_NONBLOCK` — the caller arranges that via
 /// SOCK_NONBLOCK in socket()/accept4() or fcntl(F_SETFL).
 pub fn open(fd: i32) -> Option<Arc<PollDesc>> {
-    if EPFD.load(Ordering::Acquire) < 0 {
+    if nshards() == 0 {
         init();
     }
 
@@ -484,6 +563,11 @@ pub fn open(fd: i32) -> Option<Arc<PollDesc>> {
     let slot = registry_insert(&arc);
     arc.slot.store(slot, Ordering::Release);
 
+    // Round-robin shard assignment — balance over locality (Gs
+    // migrate across Ps anyway; see the shard-model doc above).
+    let shard = SHARD_RR.fetch_add(1, Ordering::Relaxed) % nshards();
+    arc.shard.store(shard as u32, Ordering::Release);
+
     let fdseq = arc.fdseq.load(Ordering::Relaxed);
     let mut ev = syscall::EpollEvent {
         events: syscall::EPOLLIN
@@ -493,7 +577,7 @@ pub fn open(fd: i32) -> Option<Arc<PollDesc>> {
         data: pack_event_data(slot, fdseq),
     };
     let r = syscall::EpollCtl(
-        EPFD.load(Ordering::Acquire),
+        SHARDS[shard].epfd.load(Ordering::Acquire),
         syscall::EPOLL_CTL_ADD,
         fd,
         &mut ev,
@@ -520,9 +604,10 @@ pub fn close(pd: Arc<PollDesc>) {
     // Best-effort EPOLL_CTL_DEL — the kernel may have already removed
     // the registration if the fd was closed.
     let fd = pd.fd.load(Ordering::Relaxed);
+    let shard = pd.shard.load(Ordering::Acquire) as usize;
     let mut ev = syscall::EpollEvent { events: 0, data: 0 };
     let _ = syscall::EpollCtl(
-        EPFD.load(Ordering::Acquire),
+        SHARDS[shard % MAX_SHARDS].epfd.load(Ordering::Acquire),
         syscall::EPOLL_CTL_DEL,
         fd,
         &mut ev,
@@ -678,18 +763,25 @@ fn unblock(pd: &PollDesc, mode: u8, ioready: bool) -> Option<NonNull<G>> {
 
 // ─── poll / netpoll_break ────────────────────────────────────────────
 
-/// Poll the epoll fd for ready descriptors. Returns the list of
-/// goroutines that became runnable. `delay_ms`:
+/// Poll one shard's epoll fd for ready descriptors. Returns the list
+/// of goroutines that became runnable. `delay_ms`:
 ///   `< 0` — block indefinitely (sysmon never uses this in v1).
-///   `== 0` — non-blocking sweep (the hot find_runnable path).
-///   `> 0` — block up to `delay_ms` milliseconds.
+///   `== 0` — non-blocking sweep (the hot find_runnable path polls
+///            the current P's shard).
+///   `> 0` — block up to `delay_ms` milliseconds (the per-shard
+///           blocking poller).
 ///
 /// Mirrors Go's `netpoll(delay int64) (gList, int32)`
-/// (netpoll_epoll.go:99). Returned Vec is heap-alloc only when the
-/// poll produces results — the empty case allocates zero.
+/// (netpoll_epoll.go:99), per shard. Returned Vec is heap-alloc only
+/// when the poll produces results — the empty case allocates zero.
 #[allow(non_upper_case_globals)]
-pub fn poll(delay_ms: i32) -> Vec<NonNull<G>> {
-    let epfd = EPFD.load(Ordering::Acquire);
+pub fn poll_shard(shard: usize, delay_ms: i32) -> Vec<NonNull<G>> {
+    let n_shards = nshards();
+    if n_shards == 0 {
+        return Vec::new();
+    }
+    let shard = shard % n_shards;
+    let epfd = SHARDS[shard].epfd.load(Ordering::Acquire);
     if epfd < 0 {
         return Vec::new();
     }
@@ -710,7 +802,6 @@ pub fn poll(delay_ms: i32) -> Vec<NonNull<G>> {
         return Vec::new();
     }
     let mut to_run: Vec<NonNull<G>> = Vec::new();
-    let evtag = eventfd_tag();
     for i in 0..n as usize {
         let ev = events[i];
         let data = ev.data;
@@ -718,19 +809,20 @@ pub fn poll(delay_ms: i32) -> Vec<NonNull<G>> {
         if evbits == 0 {
             continue;
         }
-        // The eventfd is registered with `data = &EVENTFD_FD as u64`
-        // (no fdseq tag, top bits zero), so the equality check works
-        // identically with or without tagging.
-        if data == evtag {
-            // Drain the eventfd counter (8-byte read).
+        // Bit 48 clear ⇒ this shard's break eventfd (data = shard
+        // index; only our own eventfd lives in our epoll).
+        if data & SLAB_DISCRIMINATOR == 0 {
+            // Drain the eventfd counter (8-byte read). Non-blocking
+            // sweeps leave it set so the break stays sticky for the
+            // shard's blocking poller (level-triggered).
             if delay_ms != 0 {
                 let mut one: u64 = 0;
                 let _ = syscall::Read(
-                    EVENTFD_FD.load(Ordering::Acquire),
+                    SHARDS[shard].efd.load(Ordering::Acquire),
                     &mut one as *mut u64 as *mut u8,
                     8,
                 );
-                WAKE_SIG.store(0, Ordering::Release);
+                SHARDS[shard].wake_sig.store(0, Ordering::Release);
             }
             continue;
         }
@@ -788,23 +880,47 @@ pub fn poll(delay_ms: i32) -> Vec<NonNull<G>> {
     to_run
 }
 
-/// Wake a blocked `poll(>0 or <0)` call. Coalesces — concurrent
-/// breaks past the first are no-ops until netpoll drains the eventfd.
-/// Mirrors `netpollBreak` (netpoll_epoll.go:67).
-pub fn netpoll_break() {
-    if WAKE_SIG
+/// Non-blocking sweep of EVERY shard. The sysmon-tick backstop: a
+/// shard whose owner P is stuck in a long handler and which no idle
+/// M has claimed still gets drained within one sysmon tick.
+pub fn poll_all() -> Vec<NonNull<G>> {
+    let n = nshards();
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut all: Vec<NonNull<G>> = Vec::new();
+    for s in 0..n {
+        let mut v = poll_shard(s, 0);
+        all.append(&mut v);
+    }
+    all
+}
+
+/// Wake a blocked `poll_shard(shard, >0)` call. Coalesces per shard —
+/// concurrent breaks past the first are no-ops until that shard's
+/// blocking poll drains the eventfd. Mirrors `netpollBreak`
+/// (netpoll_epoll.go:67), per shard.
+pub fn break_shard(shard: usize) {
+    let n_shards = nshards();
+    if n_shards == 0 {
+        return;
+    }
+    let sh = &SHARDS[shard % n_shards];
+    if sh
+        .wake_sig
         .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
     {
         return; // wakeup already in flight
     }
-    let efd = EVENTFD_FD.load(Ordering::Acquire);
+    let efd = sh.efd.load(Ordering::Acquire);
     if efd < 0 {
-        // Netpoll not initialized yet — nothing is blocked in
-        // epoll_wait, so the wakeup is moot. MUST reset WAKE_SIG:
+        // Shard not initialized yet — nothing is blocked in
+        // epoll_wait, so the wakeup is moot. MUST reset wake_sig:
         // leaving it set would permanently swallow every future
-        // netpoll_break (the CAS above would never succeed again).
-        WAKE_SIG.store(0, Ordering::Release);
+        // break on this shard (the CAS above would never succeed
+        // again).
+        sh.wake_sig.store(0, Ordering::Release);
         return;
     }
     let one: u64 = 1;
@@ -817,6 +933,70 @@ pub fn netpoll_break() {
         const EAGAIN: isize = 11;
         if n != -EAGAIN && n != -EINTR {
             panic!("netpoll: eventfd write failed");
+        }
+    }
+}
+
+// ─── blocking-poller claims ──────────────────────────────────────────
+//
+// The scheduler's idle path calls `try_claim_shard` to become one
+// shard's designated blocking poller (Go's single-M `netpoll(delay)`
+// step in findRunnable, proc.go:3630 — generalized to one M per
+// shard), and `release_shard` when the blocking poll returns.
+// Producers with no futex-parked M call `break_one_claimed` to kick
+// one of the blocking pollers awake (Go's wakep → netpollBreak,
+// proc.go:3240).
+
+/// Claim an unclaimed shard for blocking-poll duty, preferring
+/// `prefer` (normally the caller's P id, so the owner-P M and the
+/// blocking claimer coincide when possible). Returns the claimed
+/// shard index, or `None` when every shard already has a blocking
+/// poller (caller futex-parks instead).
+pub fn try_claim_shard(prefer: usize) -> Option<usize> {
+    let n = nshards();
+    if n == 0 {
+        return None;
+    }
+    let start = prefer % n;
+    for off in 0..n {
+        let s = (start + off) % n;
+        if SHARDS[s]
+            .claimed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            return Some(s);
+        }
+    }
+    None
+}
+
+/// Release a shard claimed via `try_claim_shard`.
+pub fn release_shard(shard: usize) {
+    let n = nshards();
+    if n == 0 {
+        return;
+    }
+    SHARDS[shard % n].claimed.store(false, Ordering::Release);
+}
+
+/// Kick ONE currently-claimed shard's blocking poller awake (round-
+/// robin start so repeated producer kicks spread out). The woken M
+/// re-runs find_runnable, which discovers the producer's work from
+/// the run queues — work discovery is queue-based, so ANY woken M
+/// suffices. No-op when no shard is claimed (every M is busy or
+/// futex-parked; futex parkers are woken by MIDLE pop instead).
+pub fn break_one_claimed() {
+    let n = nshards();
+    if n == 0 {
+        return;
+    }
+    let start = BREAK_RR.fetch_add(1, Ordering::Relaxed) % n;
+    for off in 0..n {
+        let s = (start + off) % n;
+        if SHARDS[s].claimed.load(Ordering::Acquire) {
+            break_shard(s);
+            return;
         }
     }
 }
