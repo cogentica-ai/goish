@@ -356,6 +356,10 @@ impl Server {
                 if self.__state_in_shutdown() {
                     return super::server::ErrServerClosed.into();
                 }
+                // Fatal accept error — remove this loop's listener
+                // from the shutdown-tracked set (Go's deferred
+                // `trackListener(&l, false)`).
+                self.__untrack_listener(&ln);
                 return err;
             }
             let conn = tls::Server(alloc::boxed::Box::new(c), &cfg);

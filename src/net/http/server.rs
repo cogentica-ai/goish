@@ -979,12 +979,17 @@ pub struct __ServerState {
     /// conn pushes one token and drains it on completion. Send blocks
     /// when the chan is full ⇒ accept loop pauses.
     conn_sem: Mutex<Option<crate::gochan::chan<()>>>,
-    /// Tracked listener for shutdown. `Mutex<Option<...>>` so the
-    /// Serve goroutine can install it on entry and Shutdown can
-    /// take it out (close it + wake parked Accept) from another
-    /// goroutine. Held inside an `Arc<Listener>` because the Serve
-    /// loop also needs read access to call Accept.
-    tracked_listener: Mutex<Option<Arc<net::Listener>>>,
+    /// Tracked listeners for shutdown — Go's `Server.listeners`
+    /// set (server.go:3096, `map[*net.Listener]struct{}` maintained
+    /// by `trackListener` server.go:3253). A `Vec` so N reuseport
+    /// listeners served by N `go srv.Serve(ln)` calls are ALL
+    /// closed by Shutdown/Close (`closeListenersLocked`,
+    /// server.go:3272). Each Serve goroutine installs its listener
+    /// on entry and removes it on exit; Shutdown drains the whole
+    /// vec (close + wake parked Accepts) from another goroutine.
+    /// Entries are `Arc<Listener>` because the Serve loop also
+    /// needs read access to call Accept.
+    tracked_listeners: Mutex<Vec<Arc<net::Listener>>>,
     /// Per-connection state registry — Go's `Server.activeConn` set
     /// (server.go:3097) backing `closeIdleConns` (server.go:3229).
     /// Each serve_conn inserts its `ConnTrack` on entry and removes
@@ -1115,7 +1120,7 @@ impl Default for __ServerState {
         __ServerState {
             in_shutdown: AtomicBool::new(false),
             active_conns: AtomicUsize::new(0),
-            tracked_listener: Mutex::new(None),
+            tracked_listeners: Mutex::new(Vec::new()),
             conn_sem: Mutex::new(None),
             tracked_conns: Mutex::new(Vec::new()),
             on_shutdown: Mutex::new(Vec::new()),
@@ -1154,23 +1159,29 @@ impl Server {
     /// break the Accept loop and close the socket.
     pub fn Serve(self: Arc<Self>, ln: net::Listener) -> error {
         let ln = Arc::new(ln);
-        // Install tracked_listener + initialize conn_sem (if backpressure
-        // configured) under one critical section; check in_shutdown
-        // atomically. Without this, a Shutdown that wins the race vs
-        // Serve's entry would observe an empty tracked_listener (so
-        // __wake_accept and Close run on nothing), and Serve would
-        // later install its listener and enter Accept on a fd that was
-        // never closed → permanent park.
+        // Install into tracked_listeners + initialize conn_sem (if
+        // backpressure configured) under one critical section; check
+        // in_shutdown atomically (Go `trackListener` returning false
+        // when shuttingDown, server.go:3253). Without this, a
+        // Shutdown that wins the race vs Serve's entry would observe
+        // no listener (so __wake_accept and Close run on nothing),
+        // and Serve would later install its listener and enter
+        // Accept on a fd that was never closed → permanent park.
         {
-            let mut tracked = self.__state.tracked_listener.Lock();
+            let mut tracked = self.__state.tracked_listeners.Lock();
             if self.__state.in_shutdown.load(Ordering::Acquire) {
                 return ErrServerClosed.into();
             }
-            *tracked = Some(ln.clone());
+            tracked.push(ln.clone());
             if self.MaxConcurrentConns > 0 {
-                let cap = self.MaxConcurrentConns as usize;
-                *self.__state.conn_sem.Lock() =
-                    Some(crate::gochan::chan::<()>::new_buffered(cap));
+                // Shared across all Serve loops on this server —
+                // only the first initializes it (serialized by the
+                // tracked_listeners lock held here).
+                let mut sem = self.__state.conn_sem.Lock();
+                if sem.is_none() {
+                    let cap = self.MaxConcurrentConns as usize;
+                    *sem = Some(crate::gochan::chan::<()>::new_buffered(cap));
+                }
             }
         }
 
@@ -1212,6 +1223,10 @@ impl Server {
                     let _ = sem.__try_recv();
                 }
                 if self.__state.in_shutdown.load(Ordering::Acquire) {
+                    // Shutdown already drained tracked_listeners;
+                    // untrack is a no-op here but kept for the
+                    // deferred-trackListener(false) shape.
+                    self.__untrack_listener(&ln);
                     return ErrServerClosed.into();
                 }
                 if temporary {
@@ -1231,6 +1246,11 @@ impl Server {
                     time::Sleep(time::Duration(temp_delay_ns));
                     continue;
                 }
+                // Fatal accept error: this Serve loop is done —
+                // remove its listener so a later Shutdown doesn't
+                // close a dead (possibly kernel-reused) fd (Go's
+                // `defer srv.trackListener(&l, false)`).
+                self.__untrack_listener(&ln);
                 return err;
             }
             temp_delay_ns = 0;
@@ -1271,22 +1291,24 @@ impl Server {
     pub fn Shutdown<A: __ShutdownArg>(self: Arc<Self>, arg: A) -> error {
         let wait = arg.__into_shutdown_wait();
 
-        // Set the shutdown flag and take the listener under one lock
-        // so Serve's mirror-image install/check sees a consistent
-        // state. Without this, a Serve that hadn't reached its
-        // tracked_listener install yet could install AFTER Shutdown
-        // observed None and proceeded — leaving a fd open with no
-        // wakeup.
-        let listener = {
-            let mut tracked = self.__state.tracked_listener.Lock();
+        // Set the shutdown flag and take ALL listeners under one
+        // lock so Serve's mirror-image install/check sees a
+        // consistent state. Without this, a Serve that hadn't
+        // reached its install yet could install AFTER Shutdown
+        // observed an empty vec and proceeded — leaving a fd open
+        // with no wakeup. Go: `closeListenersLocked` under
+        // `s.mu` (server.go:3195/3272).
+        let listeners = {
+            let mut tracked = self.__state.tracked_listeners.Lock();
             self.__state.in_shutdown.store(true, Ordering::Release);
-            tracked.take()
+            core::mem::take(&mut *tracked)
         };
 
-        // Order matters: wake first (so Accept's netpoll::block
-        // returns Timedout and the goroutine resumes), then close
-        // the fd (so the next Accept4 retry returns EBADF).
-        if let Some(ln) = listener {
+        // Order matters per listener: wake first (so Accept's
+        // netpoll::block returns Timedout and the goroutine
+        // resumes), then close the fd (so the next Accept4 retry
+        // returns EBADF).
+        for ln in listeners {
             ln.__wake_accept();
             let _ = ln.Close();
         }
@@ -1336,12 +1358,12 @@ impl Server {
     /// for graceful drain). In-flight handlers observe read/write
     /// errors on their next conn operation.
     pub fn Close(self: Arc<Self>) -> error {
-        let listener = {
-            let mut tracked = self.__state.tracked_listener.Lock();
+        let listeners = {
+            let mut tracked = self.__state.tracked_listeners.Lock();
             self.__state.in_shutdown.store(true, Ordering::Release);
-            tracked.take()
+            core::mem::take(&mut *tracked)
         };
-        if let Some(ln) = listener {
+        for ln in listeners {
             ln.__wake_accept();
             let _ = ln.Close();
         }
@@ -1615,20 +1637,30 @@ impl Server {
         self.__state.in_shutdown.load(Ordering::Acquire)
     }
 
-    /// Install a listener into the shutdown-tracked slot — the same
+    /// Install a listener into the shutdown-tracked set — the same
     /// critical section `Serve` runs at entry, factored out so the
     /// HTTPS serve loop (server_tls.rs ServeTLS) gets identical
-    /// `Shutdown`/`Close` wakeup semantics: Shutdown takes the
-    /// tracked listener, wakes its parked Accept, and closes the fd.
+    /// `Shutdown`/`Close` wakeup semantics: Shutdown drains the
+    /// tracked set, wakes each parked Accept, and closes each fd.
     /// Returns `false` if shutdown already began (caller must return
-    /// `ErrServerClosed` without accepting).
+    /// `ErrServerClosed` without accepting). Go: `trackListener(ln,
+    /// true)` (server.go:3253).
     pub(crate) fn __track_listener(&self, ln: Arc<net::Listener>) -> bool {
-        let mut tracked = self.__state.tracked_listener.Lock();
+        let mut tracked = self.__state.tracked_listeners.Lock();
         if self.__state.in_shutdown.load(Ordering::Acquire) {
             return false;
         }
-        *tracked = Some(ln);
+        tracked.push(ln);
         true
+    }
+
+    /// Remove a listener from the shutdown-tracked set — Go's
+    /// `trackListener(ln, false)`, run deferred when a Serve loop
+    /// exits, so a later Shutdown never closes a fd the kernel may
+    /// have reused. No-op if Shutdown already drained the set.
+    pub(crate) fn __untrack_listener(&self, ln: &Arc<net::Listener>) {
+        let mut tracked = self.__state.tracked_listeners.Lock();
+        tracked.retain(|t| !Arc::ptr_eq(t, ln));
     }
 
     /// `(*Server).logf` (server.go:3691): route a message through
