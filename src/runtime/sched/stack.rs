@@ -61,14 +61,65 @@ use crate::syscall;
 /// spawns; bare `go!()` uses `BARE_STACK_RESERVE` instead (M29).
 pub const DEFAULT_STACK_SIZE: usize = 2 * 1024;
 
-/// Virtual reservation for a bare `go!()` goroutine stack (M29).
-/// 1 MiB of `MAP_NORESERVE` address space, committed by the kernel
-/// one 4 KiB page at a time as the goroutine actually touches it.
-/// Matches the old auto-grow ladder's tier-3 cap, so "how deep can a
-/// bare goroutine go" is unchanged — it just no longer needs pivot
-/// annotations to get there. Goroutines needing more than 1 MiB use
-/// `go!(stack(N), …)`.
+/// Default virtual reservation for a bare `go!()` goroutine stack
+/// (M29). 1 MiB of `MAP_NORESERVE` address space, committed by the
+/// kernel one 4 KiB page at a time as the goroutine actually touches
+/// it. Matches the old auto-grow ladder's tier-3 cap, so "how deep
+/// can a bare goroutine go" is unchanged — it just no longer needs
+/// pivot annotations to get there.
+///
+/// The *live* reservation size is `bare_reserve()` below —
+/// `runtime/debug::SetMaxStack` adjusts it at runtime for
+/// deep-recursion workloads (compilers, tree walkers). Goroutines
+/// needing a one-off size use `go!(stack(N), …)` instead.
 pub const BARE_STACK_RESERVE: usize = 1024 * 1024;
+
+/// Live reservation size for bare `go!()` stacks. Reservations are
+/// `MAP_NORESERVE` + lazily committed, so raising this costs virtual
+/// address space only — a 512 MiB reservation whose goroutine stays
+/// shallow still occupies ~one physical page. Read at every bare
+/// spawn; written by `set_bare_reserve` (the `runtime/debug::
+/// SetMaxStack` backend).
+static BARE_RESERVE: core::sync::atomic::AtomicUsize =
+    core::sync::atomic::AtomicUsize::new(BARE_STACK_RESERVE);
+
+/// Current bare-`go!()` stack reservation in bytes.
+pub fn bare_reserve() -> usize {
+    BARE_RESERVE.load(core::sync::atomic::Ordering::Acquire)
+}
+
+/// Set the reservation size used for bare `go!()` goroutines spawned
+/// from now on (backend of `runtime/debug::SetMaxStack`). Returns the
+/// previous value. `bytes` is page-rounded and clamped to at least
+/// two pages (one usable page would fault on the first real frame).
+///
+/// Already-parked recycle-pool entries of the old size are munmapped
+/// here so the pool never hands out a stale-size reservation; live
+/// goroutines keep the reservation they were born with.
+pub fn set_bare_reserve(bytes: usize) -> usize {
+    let want = round_up_to_page(bytes.max(2 * PAGE_SIZE));
+    let prev = BARE_RESERVE.swap(want, core::sync::atomic::Ordering::AcqRel);
+    if prev != want {
+        // Flush mismatched pool entries. Collect under the lock,
+        // munmap after releasing it (no syscalls while spinning).
+        let mut stale: alloc::vec::Vec<(usize, usize)> = alloc::vec::Vec::new();
+        {
+            let mut pool = RESERVE_POOL.lock();
+            let mut i = 0;
+            while i < pool.len() {
+                if pool[i].1 != want {
+                    stale.push(pool.swap_remove(i));
+                } else {
+                    i += 1;
+                }
+            }
+        }
+        for (addr, size) in stale {
+            syscall::Munmap((addr - GUARD_SIZE) as *mut u8, size + GUARD_SIZE);
+        }
+    }
+    prev
+}
 
 /// Guard region below reserved / large stacks: one `PROT_NONE` page.
 /// Overflow lands here and `runtime::segv::classify` (which treats
@@ -182,20 +233,37 @@ impl Stack {
         }
     }
 
-    /// M29: allocate a bare-`go!()` stack — a `BARE_STACK_RESERVE`
-    /// (1 MiB) virtual reservation with lazy physical commit and a
-    /// bottom guard page. Recycled reservations are reused from
+    /// M29: allocate a bare-`go!()` stack — a `bare_reserve()`-sized
+    /// (default 1 MiB, adjustable via `runtime/debug::SetMaxStack`)
+    /// virtual reservation with lazy physical commit and a bottom
+    /// guard page. Recycled reservations are reused from
     /// `RESERVE_POOL` without any syscalls (their guard page is
     /// already in place and their physical pages were dropped at
-    /// recycle time).
+    /// recycle time); only same-size entries are eligible, and
+    /// `set_bare_reserve` flushes mismatches, so a pooled hit always
+    /// has the advertised size.
     pub fn new_reserved() -> Self {
-        let usable = match RESERVE_POOL.lock().pop() {
+        let want = bare_reserve();
+        let recycled = {
+            let mut pool = RESERVE_POOL.lock();
+            let mut found = None;
+            let mut i = pool.len();
+            while i > 0 {
+                i -= 1;
+                if pool[i].1 == want {
+                    found = Some(pool.swap_remove(i).0);
+                    break;
+                }
+            }
+            found
+        };
+        let usable = match recycled {
             Some(addr) => addr as *mut u8,
-            None => guarded_mmap(BARE_STACK_RESERVE),
+            None => guarded_mmap(want),
         };
         Stack {
             base: usable,
-            size: BARE_STACK_RESERVE,
+            size: want,
             owned: true,
             pool_span_idx: super::stackpool::NIL_SPAN,
             guarded: true,
@@ -280,11 +348,14 @@ fn guarded_mmap(usable: usize) -> *mut u8 {
     unsafe { p.add(GUARD_SIZE) }
 }
 
-/// Recycled `BARE_STACK_RESERVE` reservations, stored as usable-base
-/// addresses (guard page still protected below each). Physical pages
-/// were dropped with `MADV_DONTNEED` when the entry was pushed, so a
-/// parked entry costs virtual space + 2 VMAs only.
-static RESERVE_POOL: SpinLock<alloc::vec::Vec<usize>> = SpinLock::new(alloc::vec::Vec::new());
+/// Recycled bare-`go!()` reservations, stored as `(usable_base,
+/// usable_size)` pairs (guard page still protected below each; the
+/// size travels with the entry so `set_bare_reserve` transitions
+/// never hand out a mislabeled region). Physical pages were dropped
+/// with `MADV_DONTNEED` when the entry was pushed, so a parked entry
+/// costs virtual space + 2 VMAs only.
+static RESERVE_POOL: SpinLock<alloc::vec::Vec<(usize, usize)>> =
+    SpinLock::new(alloc::vec::Vec::new());
 
 /// Number of reservations currently parked in the reserve pool.
 /// Diagnostic — smoke tests assert recycling actually happens.
@@ -305,14 +376,21 @@ impl Drop for Stack {
         }
         if self.guarded {
             let map_base = unsafe { self.base.sub(GUARD_SIZE) };
-            if self.size == BARE_STACK_RESERVE {
+            if self.size == bare_reserve() {
                 // Recycle: drop physical pages now (so RSS reflects
                 // reality while the entry idles in the pool), keep
                 // the virtual region + guard for the next spawn.
+                // Size-checked against the *current* bare reserve, so
+                // stacks born before a SetMaxStack change munmap
+                // instead of poisoning the pool.
                 syscall::Madvise(self.base, self.size, syscall::MADV_DONTNEED);
                 let mut pool = RESERVE_POOL.lock();
-                if pool.len() < RESERVE_POOL_CAP {
-                    pool.push(self.base as usize);
+                // Re-check under the lock: `set_bare_reserve` swaps
+                // the size *before* taking this lock to flush, so a
+                // stale push either loses the re-check here or is
+                // caught by the flush — never both missed.
+                if self.size == bare_reserve() && pool.len() < RESERVE_POOL_CAP {
+                    pool.push((self.base as usize, self.size));
                     return;
                 }
                 drop(pool);

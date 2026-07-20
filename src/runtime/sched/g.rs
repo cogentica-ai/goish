@@ -159,9 +159,10 @@ pub struct G {
 }
 
 impl G {
-    /// Allocate a `G` for the bare `go!()` form: a
-    /// `BARE_STACK_RESERVE` (1 MiB) lazily-committed virtual
-    /// reservation with a bottom guard page (M29). The kernel commits
+    /// Allocate a `G` for the bare `go!()` form: a `bare_reserve()`-
+    /// sized (default 1 MiB, raisable via `runtime/debug::
+    /// SetMaxStack`) lazily-committed virtual reservation with a
+    /// bottom guard page (M29). The kernel commits
     /// physical pages as the goroutine actually touches them, so
     /// call depth needs no up-front sizing and a shallow goroutine
     /// costs ~one page of physical memory. Status starts as `Idle`;

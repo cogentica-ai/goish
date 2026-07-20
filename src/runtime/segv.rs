@@ -443,6 +443,7 @@ extern "C" fn goish_segv_sigtramp(
     write_str(b")\n");
     write_str(b"\nremedy:\n");
     write_str(b"\tbump the spawn-site stack:    go!(stack(4 * MB), || ...)\n");
+    write_str(b"\tor raise all bare-go stacks:  runtime::debug::SetMaxStack(64 * MB)\n");
     write_str(b"\tor wrap the recursion site:   runtime::sched::maybe_grow(64 * KB, 4 * MB, || ...)\n");
 
     syscall::Exit(2);
