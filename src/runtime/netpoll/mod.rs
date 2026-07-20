@@ -31,11 +31,9 @@
 
 extern crate alloc;
 
-use alloc::collections::BinaryHeap;
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use core::cmp::{Ordering as CmpOrdering, Reverse};
 use core::ptr::{self, NonNull};
 use core::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32, AtomicUsize, Ordering};
 
@@ -92,9 +90,12 @@ pub struct PollDesc {
     pub rd: AtomicI64,
     /// Write deadline. `0` = none, `-1` = expired.
     pub wd: AtomicI64,
-    /// Read-deadline generation counter. Bumped by `set_deadline`
-    /// before pushing onto `DEADLINE_HEAP`; sysmon discards heap
-    /// entries whose seq doesn't match. Mirrors Go's `pd.rseq`.
+    /// Read-deadline generation counter (mirrors Go's `pd.rseq`).
+    /// Bumped by `close()` so anything holding a stale reference to
+    /// this pd's deadline state self-invalidates. The deadline
+    /// itself needs no generation tracking anymore — sysmon reads
+    /// the live `rd`/`wd` value at scan time (see the Deadlines doc
+    /// below).
     pub rseq: AtomicU32,
     /// Write-deadline generation counter.
     pub wseq: AtomicU32,
@@ -426,17 +427,6 @@ fn registry_get(idx: u32) -> Option<Arc<PollDesc>> {
         return None;
     }
     g.slots[i].clone()
-}
-
-/// Look up a `Weak<PollDesc>` for `idx`. Used by the deadline heap so
-/// pending entries don't keep the PollDesc alive past close.
-fn registry_get_weak(idx: u32) -> Option<Weak<PollDesc>> {
-    let g = REGISTRY.lock();
-    let i = idx as usize;
-    if i >= g.slots.len() {
-        return None;
-    }
-    g.slots[i].as_ref().map(Arc::downgrade)
 }
 
 // ─── event.data layout ───────────────────────────────────────────────
@@ -1003,18 +993,26 @@ pub fn break_one_claimed() {
 
 // ─── Deadlines ────────────────────────────────────────────────────────
 //
-// V1 deadline strategy: a single global min-heap of `(deadline_ns,
-// pd, mode, seq)` entries, scanned by sysmon's tick. Each entry's
-// `seq` is matched against `pd.{rseq,wseq}` at fire time — stale
-// entries (deadline reset, deadline cleared, fd closed before fire)
-// are silently dropped.
+// Deadline strategy: the authoritative deadline lives ONLY in
+// `pd.rd` / `pd.wd`; sysmon's tick walks the registry slab and fires
+// any pd whose deadline has passed (`fire_expired_deadlines`).
 //
-// Trade vs. Go's per-pd `pd.rt`/`pd.wt` timer objects: simpler (no
-// per-pd timer init/stop), uses sysmon's existing tick instead of a
-// dedicated timer-fire path. Cost: heap entries accumulate at one
-// per `set_deadline` call until they fire — for HTTP keep-alive (one
-// SetReadDeadline per request), this is bounded by request rate
-// times max keep-alive timeout.
+// This replaced v1's global `(deadline_ns, pd, mode, seq)` min-heap,
+// which put two global-SpinLock hits (registry Weak resolve + heap
+// push) on EVERY SetReadDeadline — twice per HTTP request (arm +
+// clear) — and accumulated stale entries at request rate × timeout
+// window (~500K live entries at 100k req/s with a 5s header
+// timeout), all popped one by one under the heap lock by sysmon.
+// `set_deadline` is now pure per-pd atomic stores; the scan cost is
+// O(live fds) per sysmon tick, bounded by peak concurrent conns —
+// hundreds of loads per millisecond-scale tick.
+//
+// Trade vs. Go's per-pd `pd.rt`/`pd.wt` timer objects: Go re-arms a
+// runtime timer per deadline; goish reads the live value at scan
+// time, so clears and re-arms are free and nothing is ever stale.
+// Firing latency is one sysmon tick (≤10 ms past the deadline) —
+// same order as Go's timer wheel granularity under load, and
+// deadlines are seconds-scale.
 
 /// One pending deadline.
 ///
@@ -1028,33 +1026,6 @@ pub fn break_one_claimed() {
 /// on the way out, so any pending entries for a closed fd whose
 /// PollDesc happens to still be alive (because someone holds the Arc)
 /// also self-discard via the seq mismatch.
-struct DeadlineEntry {
-    deadline_ns: i64,
-    pd: Weak<PollDesc>,
-    mode: u8, // b'r' or b'w'
-    seq: u32,
-}
-
-impl PartialEq for DeadlineEntry {
-    fn eq(&self, other: &Self) -> bool {
-        self.deadline_ns == other.deadline_ns
-    }
-}
-impl Eq for DeadlineEntry {}
-impl Ord for DeadlineEntry {
-    fn cmp(&self, other: &Self) -> CmpOrdering {
-        self.deadline_ns.cmp(&other.deadline_ns)
-    }
-}
-impl PartialOrd for DeadlineEntry {
-    fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
-        Some(self.cmp(other))
-    }
-}
-
-static DEADLINE_HEAP: SpinLock<BinaryHeap<Reverse<DeadlineEntry>>> =
-    SpinLock::new(BinaryHeap::new());
-
 /// Set or clear a read/write deadline on `pd`.
 ///
 /// `deadline_ns == 0` clears the deadline (no expiration).
@@ -1064,17 +1035,12 @@ static DEADLINE_HEAP: SpinLock<BinaryHeap<Reverse<DeadlineEntry>>> =
 /// without parking).
 ///
 /// Mirrors Go's `poll_runtime_pollSetDeadline` (netpoll.go:371) — but
-/// without timer modify/stop (we push a new heap entry each call and
-/// rely on `seq` to invalidate stale entries).
+/// with no timer object at all: the stored value IS the deadline;
+/// sysmon's slab scan (`fire_expired_deadlines`) reads it live. This
+/// makes arm/clear pure atomic stores — the HTTP serve loop does two
+/// of these per request.
 pub fn set_deadline(pd: &PollDesc, deadline_ns: i64, mode: u8) {
-    let (dl, seq) = if mode == b'r' {
-        (&pd.rd, &pd.rseq)
-    } else {
-        (&pd.wd, &pd.wseq)
-    };
-
-    // Bump seq so any in-flight stale heap entry stops matching.
-    seq.fetch_add(1, Ordering::AcqRel);
+    let dl = if mode == b'r' { &pd.rd } else { &pd.wd };
 
     if deadline_ns == 0 {
         dl.store(0, Ordering::Release);
@@ -1091,71 +1057,56 @@ pub fn set_deadline(pd: &PollDesc, deadline_ns: i64, mode: u8) {
     }
 
     dl.store(deadline_ns, Ordering::Release);
-    // Resolve a Weak<PollDesc> via the slab. This avoids burdening
-    // callers with passing the Arc through, and the Weak naturally
-    // self-invalidates if the PollDesc is freed before the deadline
-    // fires.
-    let slot = pd.slot.load(Ordering::Acquire);
-    let weak = match registry_get_weak(slot) {
-        Some(w) => w,
-        // Slot was already removed (close raced this set_deadline) —
-        // nothing to do; any parker on this pd will see the dl<0
-        // store and timeout on its own.
-        None => return,
-    };
-    let entry = DeadlineEntry {
-        deadline_ns,
-        pd: weak,
-        mode,
-        seq: seq.load(Ordering::Acquire),
-    };
-    DEADLINE_HEAP.lock().push(Reverse(entry));
 }
 
 /// Fire all deadlines that expired at or before `now`. Called from
-/// sysmon's main tick (alongside the timer-heap scan). Stale entries
-/// (whose pd.{rseq,wseq} no longer matches the entry's seq, or whose
-/// pd.rd/wd was reset to a future value) are popped and discarded.
+/// sysmon's main tick (alongside the timer-heap scan). Walks the
+/// registry slab and reads each live pd's CURRENT `rd`/`wd` — a
+/// cleared or re-armed deadline is simply no longer expired, so
+/// nothing is ever stale by construction.
 ///
-/// Mirrors Go's `netpolldeadlineimpl` (netpoll.go:622) per-fire body
-/// driven by a heap pop loop instead of per-pd timers.
+/// The Arcs of expired pds are collected under the registry lock but
+/// fired outside it: `unblock` → `goready` can take scheduler locks
+/// and write a break eventfd, none of which belong under the slab
+/// SpinLock.
+///
+/// Mirrors Go's `netpolldeadlineimpl` (netpoll.go:622) per-fire body,
+/// driven by a slab scan instead of per-pd timers.
 pub fn fire_expired_deadlines(now: i64) {
-    loop {
-        let popped: Option<DeadlineEntry> = {
-            let mut heap = DEADLINE_HEAP.lock();
-            match heap.peek() {
-                Some(Reverse(entry)) if entry.deadline_ns <= now => {
-                    heap.pop().map(|r| r.0)
-                }
-                _ => return,
+    let mut expired: Vec<(Arc<PollDesc>, u8, i64)> = Vec::new();
+    {
+        let g = REGISTRY.lock();
+        for slot in g.slots.iter() {
+            let arc = match slot {
+                Some(a) => a,
+                None => continue,
+            };
+            let rd = arc.rd.load(Ordering::Acquire);
+            if rd > 0 && rd <= now {
+                expired.push((arc.clone(), b'r', rd));
             }
-        };
-        let entry = match popped {
-            Some(e) => e,
-            None => return,
-        };
-        // M27k: Weak::upgrade returns None if the PollDesc was freed
-        // since the entry was pushed (caller closed the conn / dropped
-        // their Arc). In that case the deadline is moot — drop it.
-        let arc = match entry.pd.upgrade() {
-            Some(a) => a,
-            None => continue,
-        };
+            let wd = arc.wd.load(Ordering::Acquire);
+            if wd > 0 && wd <= now {
+                expired.push((arc.clone(), b'w', wd));
+            }
+        }
+    }
+    for (arc, mode, observed) in expired {
         let pd: &PollDesc = &arc;
-        let (dl, seq) = if entry.mode == b'r' {
-            (&pd.rd, &pd.rseq)
-        } else {
-            (&pd.wd, &pd.wseq)
-        };
-        // The seq counter discriminates: bumped by `set_deadline`
-        // (deadline replaced/cleared) and by `close` (fd closed → all
-        // pending deadlines for this pd self-discard).
-        if seq.load(Ordering::Acquire) != entry.seq {
+        let dl = if mode == b'r' { &pd.rd } else { &pd.wd };
+        // Mark expired and wake the parked G (if any). CAS on the
+        // observed value: a concurrent set_deadline that cleared or
+        // re-armed since the scan read wins and this fire aborts —
+        // the caller's newer deadline stands (Go resolves the same
+        // netpolldeadlineimpl-vs-pollSetDeadline race with rseq
+        // under the pd lock).
+        if dl
+            .compare_exchange(observed, -1, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
             continue;
         }
-        // Mark expired and wake the parked G (if any).
-        dl.store(-1, Ordering::Release);
-        if let Some(g) = unblock(pd, entry.mode, false) {
+        if let Some(g) = unblock(pd, mode, false) {
             goready(g);
         }
     }
