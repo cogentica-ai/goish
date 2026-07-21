@@ -1810,6 +1810,53 @@ impl<T: Reflect + Clone> Reflect for slice<T> {
     }
 }
 
+// ─── Option<T> — Go `*T` optionality ─────────────────────────────────
+//
+// Goish models Go's nilable pointer fields as `Option<T>` (and the
+// `nilable<T>` wrapper on top of it). Reflect maps this to
+// Kind::Pointer with the established nil encoding:
+// `Value::Pointer(box Value::Invalid)` (the same shape `IsNil` above
+// already recognizes).
+
+impl<T: Reflect> Reflect for Option<T> {
+    fn __reflect_type() -> Type {
+        Type::__new(Kind::Pointer, "", &[]).__with_elem(<T as Reflect>::__reflect_type)
+    }
+    fn __reflect_value(&self) -> Value {
+        match self {
+            Some(v) => Value::Pointer(alloc::boxed::Box::new(v.__reflect_value())),
+            None => Value::Pointer(alloc::boxed::Box::new(Value::Invalid)),
+        }
+    }
+}
+
+impl<T: FromReflectValue> FromReflectValue for Option<T> {
+    fn from_reflect_value(v: Value) -> (Self, crate::error) {
+        match v {
+            Value::Invalid => (None, crate::errors::nil),
+            Value::Pointer(inner) => match *inner {
+                Value::Invalid => (None, crate::errors::nil),
+                other => {
+                    let (val, err) = T::from_reflect_value(other);
+                    if err != crate::errors::nil {
+                        (None, err)
+                    } else {
+                        (Some(val), crate::errors::nil)
+                    }
+                }
+            },
+            other => {
+                let (val, err) = T::from_reflect_value(other);
+                if err != crate::errors::nil {
+                    (None, err)
+                } else {
+                    (Some(val), crate::errors::nil)
+                }
+            }
+        }
+    }
+}
+
 // ─── map<K, V: Reflect> — generic Reflect impl ────────────────────────
 //
 // Goish's map<K,V> is BTreeMap-backed, so __iter() walks keys in sorted

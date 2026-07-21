@@ -637,6 +637,123 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
 
+    // ── impl json/v2 MarshalerTo / UnmarshalerFrom ─────────────────
+    // The compile-time equivalent of json/v2's cached reflection
+    // codec (encoding/json/v2/arshal_default.go): Go builds a struct
+    // codec at runtime from reflect.Type + json tags; here the field
+    // list and tags are known at macro time, so the object codec is
+    // generated directly. Field names come from the `json:"…"` tag
+    // segment (or the field name verbatim, matching v2's default);
+    // `-` skips the field; `omitempty` / `omitzero` route through the
+    // `v2::JsonOmit` helper trait. Unknown incoming names are skipped
+    // (v2 default), and a JSON null resets the struct to its zero
+    // value.
+    let _ = write!(
+        impl_text,
+        "impl ::goish::encoding::json::v2::MarshalerTo for {} {{\n\
+         \x20   fn MarshalJSONTo(&self, __enc: &mut ::goish::encoding::json::jsontext::Encoder) -> ::goish::error {{\n\
+         \x20       let mut __err = __enc.WriteToken(::goish::encoding::json::jsontext::BeginObject);\n\
+         \x20       if __err != ::goish::errors::nil {{ return __err; }}\n",
+        parsed.name
+    );
+    for f in &parsed.fields {
+        let (key, skip, omitempty, omitzero) = json_tag_parts(f.tag.as_deref(), &f.name);
+        if skip {
+            continue;
+        }
+        let key_lit = key.replace('\\', "\\\\").replace('"', "\\\"");
+        if omitempty {
+            let _ = write!(
+                impl_text,
+                "        if !::goish::encoding::json::v2::JsonOmit::__json_empty(&self.{}) {{\n",
+                f.name
+            );
+        } else if omitzero {
+            let _ = write!(
+                impl_text,
+                "        if !::goish::encoding::json::v2::JsonOmit::__json_zero(&self.{}) {{\n",
+                f.name
+            );
+        }
+        let _ = write!(
+            impl_text,
+            "        __err = __enc.WriteToken(::goish::encoding::json::jsontext::String(::goish::string::from_static(\"{}\")));\n\
+             \x20       if __err != ::goish::errors::nil {{ return __err; }}\n\
+             \x20       __err = <{} as ::goish::encoding::json::v2::MarshalerTo>::MarshalJSONTo(&self.{}, __enc);\n\
+             \x20       if __err != ::goish::errors::nil {{ return __err; }}\n",
+            key_lit, f.ty, f.name
+        );
+        if omitempty || omitzero {
+            impl_text.push_str("        }\n");
+        }
+    }
+    impl_text.push_str(
+        "        __enc.WriteToken(::goish::encoding::json::jsontext::EndObject)\n\
+         \x20   }\n\
+         }\n",
+    );
+
+    let _ = write!(
+        impl_text,
+        "impl ::goish::encoding::json::v2::UnmarshalerFrom for {} {{\n\
+         \x20   fn UnmarshalJSONFrom(&mut self, __dec: &mut ::goish::encoding::json::jsontext::Decoder) -> ::goish::error {{\n\
+         \x20       if __dec.PeekKind() == 'n' {{\n\
+         \x20           let (_, __err) = __dec.ReadToken();\n\
+         \x20           *self = <Self as ::core::default::Default>::default();\n\
+         \x20           return __err;\n\
+         \x20       }}\n\
+         \x20       let (__t, __err) = __dec.ReadToken();\n\
+         \x20       if __err != ::goish::errors::nil {{ return __err; }}\n\
+         \x20       if __t.Kind() != '{{' {{\n\
+         \x20           return ::goish::errors::New(\"json: cannot unmarshal non-object into struct\");\n\
+         \x20       }}\n\
+         \x20       while __dec.PeekKind() != '}}' {{\n\
+         \x20           if __dec.PeekKind() == ::goish::encoding::json::jsontext::Kind(0) {{\n\
+         \x20               return ::goish::io::ErrUnexpectedEOF.into();\n\
+         \x20           }}\n\
+         \x20           let (__name_tok, __err) = __dec.ReadToken();\n\
+         \x20           if __err != ::goish::errors::nil {{ return __err; }}\n\
+         \x20           let __name = __name_tok.String();\n\
+         \x20           match __name.as_bytes() {{\n",
+        parsed.name
+    );
+    for f in &parsed.fields {
+        let (key, skip, _, _) = json_tag_parts(f.tag.as_deref(), &f.name);
+        if skip {
+            continue;
+        }
+        let key_lit = key.replace('\\', "\\\\").replace('"', "\\\"");
+        let _ = write!(
+            impl_text,
+            "                b\"{}\" => {{\n\
+             \x20                   let __err = <{} as ::goish::encoding::json::v2::UnmarshalerFrom>::UnmarshalJSONFrom(&mut self.{}, __dec);\n\
+             \x20                   if __err != ::goish::errors::nil {{ return __err; }}\n\
+             \x20               }}\n",
+            key_lit, f.ty, f.name
+        );
+    }
+    impl_text.push_str(
+        "                _ => {\n\
+         \x20                   let __err = __dec.SkipValue();\n\
+         \x20                   if __err != ::goish::errors::nil { return __err; }\n\
+         \x20               }\n\
+         \x20           }\n\
+         \x20       }\n\
+         \x20       let (_, __err) = __dec.ReadToken();\n\
+         \x20       __err\n\
+         \x20   }\n\
+         }\n",
+    );
+
+    // Struct values are never considered empty/zero for omission
+    // purposes (documented v1 simplification; Go v2's omitzero on a
+    // struct compares against the zero value).
+    let _ = write!(
+        impl_text,
+        "impl ::goish::encoding::json::v2::JsonOmit for {} {{}}\n",
+        parsed.name
+    );
+
     let mut out: TokenStream = struct_text
         .parse()
         .expect("goish::reflect: failed to re-emit struct");
@@ -645,6 +762,57 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .expect("goish::reflect: failed to emit impl");
     out.extend(impl_ts);
     out
+}
+
+/// Macro-time parse of a `#[tag(...)]` literal's `json:"…"` segment.
+/// Returns `(effective_key, skip, omitempty, omitzero)`. The literal
+/// arrives as verbatim source text — either `"json:\"name,opt\""` or
+/// `r#"json:"name,opt""#` — so quoting is normalized first. Mirrors
+/// the runtime `__parse_json_tag` (and Go's tags.go) semantics:
+/// `-` alone skips; empty name falls back to the field name.
+fn json_tag_parts(tag_lit: Option<&str>, field_name: &str) -> (String, bool, bool, bool) {
+    let fallback = (field_name.to_string(), false, false, false);
+    let lit = match tag_lit {
+        Some(l) => l,
+        None => return fallback,
+    };
+    // Normalize the literal to its contents.
+    let inner = if let Some(stripped) = lit.strip_prefix("r#\"") {
+        stripped.strip_suffix("\"#").unwrap_or(stripped).to_string()
+    } else if let Some(stripped) = lit.strip_prefix('"') {
+        stripped
+            .strip_suffix('"')
+            .unwrap_or(stripped)
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
+    } else {
+        lit.to_string()
+    };
+    // Locate the json:"..." segment.
+    let seg = match inner.find("json:\"") {
+        Some(i) => &inner[i + 6..],
+        None => return fallback,
+    };
+    let body = match seg.find('"') {
+        Some(end) => &seg[..end],
+        None => seg,
+    };
+    let mut parts = body.split(',');
+    let name = parts.next().unwrap_or("");
+    if name == "-" && body == "-" {
+        return (String::new(), true, false, false);
+    }
+    let mut omitempty = false;
+    let mut omitzero = false;
+    for p in parts {
+        match p {
+            "omitempty" => omitempty = true,
+            "omitzero" => omitzero = true,
+            _ => {}
+        }
+    }
+    let key = if name.is_empty() { field_name.to_string() } else { name.to_string() };
+    (key, false, omitempty, omitzero)
 }
 
 // ─── manual struct parser ────────────────────────────────────────────

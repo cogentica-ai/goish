@@ -30,6 +30,9 @@ use crate::io;
 use crate::strconv;
 use crate::types::{byte, float64, int};
 
+pub mod jsontext;
+pub mod v2;
+
 // ─── Value ─────────────────────────────────────────────────────────────
 
 #[derive(Clone, Default)]
@@ -316,6 +319,24 @@ impl FromValue for bool {
         match v {
             Value::Bool(b) => (*b, nil),
             _ => (false, errors::New("json: cannot unmarshal into bool")),
+        }
+    }
+}
+
+/// `Option<T>` — Go `*T` optionality: JSON null (or absence) is
+/// `None`, anything else decodes into `Some(T)`.
+impl<T: FromValue> FromValue for Option<T> {
+    fn from_value(v: &Value) -> (Self, error) {
+        match v {
+            Value::Null => (None, nil),
+            other => {
+                let (val, err) = T::from_value(other);
+                if err != nil {
+                    (None, err)
+                } else {
+                    (Some(val), nil)
+                }
+            }
         }
     }
 }
