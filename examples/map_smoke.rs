@@ -100,12 +100,12 @@ fn main() {
 
     // ─── maps package: Keys / Values / Equal / Clone / Copy ───────────
 
-    let mut ks = maps::Keys(&m2);
+    let mut ks = slices::Collect(maps::Keys(&m2));
     ks.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
     check(slices::Equal(&ks, &want), b"map: maps::Keys wrong\n");
 
     // Verify all three values present (sum = 6).
-    let vs = maps::Values(&m2);
+    let vs = slices::Collect(maps::Values(&m2));
     let mut vsum: int = 0;
     for (_, v) in range!(vs) { vsum += v; }
     check(vsum == 6, b"map: maps::Values sum wrong\n");

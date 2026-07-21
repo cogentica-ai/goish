@@ -48,7 +48,7 @@ fn main() {
     check(count2 == 5, b"map range &&map: count wrong\n");
 
     // ── maps::Keys — all keys present ────────────────────────────────
-    let ks = maps::Keys(&m);
+    let ks = slices::Collect(maps::Keys(&m));
     check(len(&ks) == 5, b"maps::Keys len wrong\n");
     // Every key in the slice must exist in the map.
     for (_, k) in goish::range!(ks) {
@@ -56,7 +56,7 @@ fn main() {
     }
 
     // ── maps::Values — all values present ────────────────────────────
-    let vs = maps::Values(&m);
+    let vs = slices::Collect(maps::Values(&m));
     check(len(&vs) == 5, b"maps::Values len wrong\n");
     let mut vsum: int = 0;
     for (_, v) in goish::range!(vs) {

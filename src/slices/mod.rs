@@ -577,29 +577,104 @@ where
 // ─── Sorted (Go 1.23+) ────────────────────────────────────────────────
 //
 // Go's signature is `Sorted[E cmp.Ordered](seq iter.Seq[E]) []E`, but
-// goish has no iter.Seq yet, so the slim version takes `slice<T>` and
-// returns a fresh sorted slice.  Once an iter package lands, the
-// existing `Sorted(s)` callers can stay valid since `slice<T>` is the
-// natural single-pass source.
+// ─── iter.Seq-based functions (Go 1.23+, iter.go in this package) ────
+//
+// These take/return `iter::Seq` per Go 1.25.5. `slice<T>` itself
+// implements `iter::Seq<T>` (src/iter/mod.rs), so pre-iter call
+// sites like `Sorted(&s)` remain valid alongside seq chains like
+// `Sorted(maps::Keys(&m))`.
 
-/// `slices.Sorted(s)` (sort.go: Sorted) — clone `s`, sort ascending,
-/// return. Equivalent to `let s2 = s.clone(); slices::Sort!(s2); s2`.
-/// Slim: takes a `slice<T>` instead of `iter.Seq[T]`.
-pub fn Sorted<T: Ord + Clone>(s: &slice<T>) -> slice<T> {
+/// Drain a seq into a Vec (shared body of Collect/Sorted*).
+fn collect_vec<T>(seq: impl crate::iter::Seq<T>) -> Vec<T> {
+    let mut v: Vec<T> = Vec::new();
+    seq.run(&mut |x| {
+        v.push(x);
+        true
+    });
+    v
+}
+
+/// `slices.Collect(seq)` (iter.go:Collect) — gather the values of a
+/// seq into a new slice.
+pub fn Collect<T>(seq: impl crate::iter::Seq<T>) -> slice<T> {
+    slice::__from_vec(collect_vec(seq))
+}
+
+/// `slices.AppendSeq(s, seq)` (iter.go:AppendSeq) — append the values
+/// of `seq` to a copy of `s`, returning the extended slice.
+pub fn AppendSeq<T: Clone>(s: slice<T>, seq: impl crate::iter::Seq<T>) -> slice<T> {
+    let mut v = s.__into_vec();
+    seq.run(&mut |x| {
+        v.push(x);
+        true
+    });
+    slice::__from_vec(v)
+}
+
+/// `slices.Values(s)` (iter.go:Values) — seq over the elements of
+/// `s` (a snapshot of the handle at call time).
+pub fn Values<T>(s: &slice<T>) -> impl crate::iter::Seq<T>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    let snap = s.clone();
+    move |yield_: &mut dyn FnMut(T) -> bool| {
+        for v in snap.as_ref() {
+            if !yield_(v.clone()) {
+                return;
+            }
+        }
+    }
+}
+
+/// `slices.All(s)` (iter.go:All) — seq over (index, element) pairs.
+pub fn All<T>(s: &slice<T>) -> impl crate::iter::Seq2<int, T>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    let snap = s.clone();
+    move |yield_: &mut dyn FnMut(int, T) -> bool| {
+        for (i, v) in snap.as_ref().iter().enumerate() {
+            if !yield_(i as int, v.clone()) {
+                return;
+            }
+        }
+    }
+}
+
+/// `slices.Backward(s)` (iter.go:Backward) — seq over (index,
+/// element) pairs, walking backward.
+pub fn Backward<T>(s: &slice<T>) -> impl crate::iter::Seq2<int, T>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    let snap = s.clone();
+    move |yield_: &mut dyn FnMut(int, T) -> bool| {
+        for (i, v) in snap.as_ref().iter().enumerate().rev() {
+            if !yield_(i as int, v.clone()) {
+                return;
+            }
+        }
+    }
+}
+
+/// `slices.Sorted(seq)` (sort.go:Sorted) — collect `seq`, sort
+/// ascending, return.
+pub fn Sorted<T: Ord>(seq: impl crate::iter::Seq<T>) -> slice<T> {
     // Go: s := slices.Collect(seq); Sort(s); return s
-    let mut v = (s.clone()).__into_vec();
+    let mut v = collect_vec(seq);
     v.sort_unstable();
     slice::__from_vec(v)
 }
 
-/// `slices.SortedFunc(s, cmp)` (sort.go: SortedFunc) — clone `s`, sort
-/// using `cmp(a, b) -> int` (negative = a<b, 0 = equal, positive = a>b),
-/// return. Slim: takes a `slice<T>` instead of `iter.Seq[T]`.
-pub fn SortedFunc<T: Clone, F>(s: &slice<T>, mut cmp: F) -> slice<T>
+/// `slices.SortedFunc(seq, cmp)` (sort.go:SortedFunc) — collect
+/// `seq`, sort with `cmp(a, b) -> int` (negative = a<b, 0 = equal,
+/// positive = a>b), return.
+pub fn SortedFunc<T, F>(seq: impl crate::iter::Seq<T>, mut cmp: F) -> slice<T>
 where
     F: FnMut(&T, &T) -> int,
 {
-    let mut v = (s.clone()).__into_vec();
+    let mut v = collect_vec(seq);
     // Go: SortFunc(s, cmp)
     v.sort_unstable_by(|a, b| {
         let n = cmp(a, b);
@@ -614,13 +689,13 @@ where
     slice::__from_vec(v)
 }
 
-/// `slices.SortedStableFunc(s, cmp)` — stable variant of `SortedFunc`.
-/// Equal elements keep their original relative order.
-pub fn SortedStableFunc<T: Clone, F>(s: &slice<T>, mut cmp: F) -> slice<T>
+/// `slices.SortedStableFunc(seq, cmp)` — stable variant of
+/// `SortedFunc`. Equal elements keep their collection order.
+pub fn SortedStableFunc<T, F>(seq: impl crate::iter::Seq<T>, mut cmp: F) -> slice<T>
 where
     F: FnMut(&T, &T) -> int,
 {
-    let mut v = (s.clone()).__into_vec();
+    let mut v = collect_vec(seq);
     v.sort_by(|a, b| {
         let n = cmp(a, b);
         if n < 0 {

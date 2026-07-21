@@ -231,6 +231,18 @@ name = "stack_reserve_smoke"
 path = "examples/stack_reserve_smoke.rs"
 
 [[example]]
+name = "stack_maxstack_smoke"
+path = "examples/stack_maxstack_smoke.rs"
+
+[[example]]
+name = "json_v2_smoke"
+path = "examples/json_v2_smoke.rs"
+
+[[example]]
+name = "iter_seq_smoke"
+path = "examples/iter_seq_smoke.rs"
+
+[[example]]
 name = "sched_go"
 path = "examples/sched_go.rs"
 

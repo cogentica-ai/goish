@@ -1417,3 +1417,99 @@ impl Replacer {
         string::from_bytes(&out)
     }
 }
+
+// ─── iter.Seq-returning functions (Go 1.24+, strings/iter.go) ────────
+
+/// Byte length of the UTF-8 sequence starting with `b` (1 on invalid
+/// leading bytes, matching DecodeRuneInString's error advance).
+fn utf8_seq_len(b: byte) -> usize {
+    match b {
+        0x00..=0x7F => 1,
+        0xC0..=0xDF => 2,
+        0xE0..=0xEF => 3,
+        0xF0..=0xF7 => 4,
+        _ => 1,
+    }
+}
+
+/// Shared body of SplitSeq / SplitAfterSeq (strings/iter.go:36
+/// splitSeq) — `sep_save` bytes of each separator are kept in the
+/// yielded fragment (0 or len(sep)).
+fn split_seq(s: string, sep: string, sep_save: usize) -> impl crate::iter::Seq<string> {
+    move |yield_: &mut dyn FnMut(string) -> bool| {
+        let b = s.as_bytes();
+        let sepb = sep.as_bytes();
+        if sepb.is_empty() {
+            // Go: split into UTF-8 sequences (like Split(s, "")).
+            let mut pos = 0;
+            while pos < b.len() {
+                let size = utf8_seq_len(b[pos]).min(b.len() - pos);
+                if !yield_(string::from_bytes(&b[pos..pos + size])) {
+                    return;
+                }
+                pos += size;
+            }
+            return;
+        }
+        let mut pos = 0;
+        loop {
+            let found = b[pos..]
+                .windows(sepb.len())
+                .position(|w| w == sepb)
+                .map(|i| pos + i);
+            match found {
+                Some(i) => {
+                    if !yield_(string::from_bytes(&b[pos..i + sep_save])) {
+                        return;
+                    }
+                    pos = i + sepb.len();
+                }
+                None => break,
+            }
+        }
+        yield_(string::from_bytes(&b[pos..]));
+    }
+}
+
+/// `strings.SplitSeq(s, sep)` (strings/iter.go:70) — iterator over
+/// the substrings of `s` separated by `sep`; yields the same strings
+/// `Split(s, sep)` returns, without building the slice.
+pub fn SplitSeq<S1: Into<string>, S2: Into<string>>(
+    s: S1,
+    sep: S2,
+) -> impl crate::iter::Seq<string> {
+    split_seq(s.into(), sep.into(), 0)
+}
+
+/// `strings.SplitAfterSeq(s, sep)` (strings/iter.go:78) — like
+/// `SplitSeq` but each fragment keeps its trailing separator.
+pub fn SplitAfterSeq<S1: Into<string>, S2: Into<string>>(
+    s: S1,
+    sep: S2,
+) -> impl crate::iter::Seq<string> {
+    let sep = sep.into();
+    let n = sep.as_bytes().len();
+    split_seq(s.into(), sep, n)
+}
+
+/// `strings.Lines(s)` (strings/iter.go:12) — iterator over the
+/// newline-terminated lines of `s`. Each yielded line keeps its
+/// trailing `\n`; a final unterminated line is yielded as-is; the
+/// empty string yields nothing.
+pub fn Lines<S: Into<string>>(s: S) -> impl crate::iter::Seq<string> {
+    let s = s.into();
+    move |yield_: &mut dyn FnMut(string) -> bool| {
+        let b = s.as_bytes();
+        let mut pos = 0;
+        while pos < b.len() {
+            let end = match b[pos..].iter().position(|&c| c == b'\n') {
+                Some(i) => pos + i + 1,
+                None => b.len(),
+            };
+            if !yield_(string::from_bytes(&b[pos..end])) {
+                return;
+            }
+            pos = end;
+        }
+    }
+}

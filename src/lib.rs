@@ -84,6 +84,7 @@ pub mod hash;
 pub mod html;
 pub mod maps;
 pub mod io;
+pub mod iter;
 pub mod log;
 pub mod math;
 pub mod mime;
