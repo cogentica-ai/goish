@@ -638,6 +638,10 @@ name = "unicode_rangetable_smoke"
 path = "examples/unicode_rangetable_smoke.rs"
 
 [[example]]
+name = "sync_errgroup_smoke"
+path = "examples/sync_errgroup_smoke.rs"
+
+[[example]]
 name = "fips_rsa_smoke"
 path = "examples/fips_rsa_smoke.rs"
 
