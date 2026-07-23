@@ -341,6 +341,21 @@ impl<T: FromValue> FromValue for Option<T> {
     }
 }
 
+/// `nilable<T>` — Go `*T`: null/absent stays nil, anything else
+/// decodes into a fresh value.
+impl<T: FromValue> FromValue for crate::gonilable::nilable<T> {
+    fn from_value(v: &Value) -> (Self, error) {
+        let (opt, err) = <Option<T> as FromValue>::from_value(v);
+        if err != nil {
+            return (crate::gonilable::nilable::default(), err);
+        }
+        match opt {
+            Some(val) => (crate::gonilable::nilable::new(val), nil),
+            None => (crate::gonilable::nilable::default(), nil),
+        }
+    }
+}
+
 impl FromValue for crate::types::int {
     fn from_value(v: &Value) -> (Self, error) {
         match v {

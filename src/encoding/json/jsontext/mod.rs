@@ -279,6 +279,17 @@ impl Value {
         Kind(0)
     }
 
+    /// `Value.IsValid()` (value.go) — whether the value is a single
+    /// syntactically-complete JSON value.
+    pub fn IsValid(&self) -> bool {
+        let mut dec = Decoder::__from_bytes(self.0.as_ref(), Options::default());
+        if dec.SkipValue() != crate::errors::nil {
+            return false;
+        }
+        let (_, err) = dec.ReadToken();
+        err == crate::io::EOF
+    }
+
     /// Raw text as a goish string (Go: `string(v)`).
     pub fn String(&self) -> string {
         string::from_bytes(self.0.as_ref())

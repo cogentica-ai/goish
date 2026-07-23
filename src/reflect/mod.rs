@@ -1857,6 +1857,35 @@ impl<T: FromReflectValue> FromReflectValue for Option<T> {
     }
 }
 
+// `nilable<T>` — same Go-*T mapping as Option<T> above (nilable is
+// Option<Arc<T>>-backed; reflect sees through the Arc).
+
+impl<T: Reflect> Reflect for crate::gonilable::nilable<T> {
+    fn __reflect_type() -> Type {
+        Type::__new(Kind::Pointer, "", &[]).__with_elem(<T as Reflect>::__reflect_type)
+    }
+    fn __reflect_value(&self) -> Value {
+        if self.IsNil() {
+            Value::Pointer(alloc::boxed::Box::new(Value::Invalid))
+        } else {
+            Value::Pointer(alloc::boxed::Box::new(self.Must().__reflect_value()))
+        }
+    }
+}
+
+impl<T: FromReflectValue> FromReflectValue for crate::gonilable::nilable<T> {
+    fn from_reflect_value(v: Value) -> (Self, crate::error) {
+        let (opt, err) = <Option<T> as FromReflectValue>::from_reflect_value(v);
+        if err != crate::errors::nil {
+            return (crate::gonilable::nilable::default(), err);
+        }
+        match opt {
+            Some(val) => (crate::gonilable::nilable::new(val), crate::errors::nil),
+            None => (crate::gonilable::nilable::default(), crate::errors::nil),
+        }
+    }
+}
+
 // ─── map<K, V: Reflect> — generic Reflect impl ────────────────────────
 //
 // Goish's map<K,V> is BTreeMap-backed, so __iter() walks keys in sorted

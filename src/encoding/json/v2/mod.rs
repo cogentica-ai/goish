@@ -529,6 +529,45 @@ impl<T: UnmarshalerFrom + Default> UnmarshalerFrom for Option<T> {
     }
 }
 
+/// `nilable<T>` — Go `*T` fields (the goish nilable pointer): nil ⇄
+/// JSON null, non-nil ⇄ the pointee's encoding (arshal_default.go's
+/// pointer handling). Unmarshal allocates a fresh value like Go's
+/// `new(T)` + decode.
+impl<T: MarshalerTo> MarshalerTo for crate::gonilable::nilable<T> {
+    fn MarshalJSONTo(&self, enc: &mut jsontext::Encoder) -> error {
+        if self.IsNil() {
+            return enc.WriteToken(jsontext::Null);
+        }
+        self.Must().MarshalJSONTo(enc)
+    }
+}
+
+impl<T: UnmarshalerFrom + Default> UnmarshalerFrom for crate::gonilable::nilable<T> {
+    fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
+        if dec.PeekKind() == 'n' {
+            let (_, err) = dec.ReadToken();
+            *self = crate::gonilable::nilable::default();
+            return err;
+        }
+        let mut v = T::default();
+        let err = v.UnmarshalJSONFrom(dec);
+        if err != nil {
+            return err;
+        }
+        *self = crate::gonilable::nilable::new(v);
+        nil
+    }
+}
+
+impl<T: ?Sized> JsonOmit for crate::gonilable::nilable<T> {
+    fn __json_empty(&self) -> bool {
+        self.IsNil()
+    }
+    fn __json_zero(&self) -> bool {
+        self.IsNil()
+    }
+}
+
 /// `jsontext::Value` — raw passthrough in both directions
 /// (arshal_default.go's RawValue handling).
 impl MarshalerTo for jsontext::Value {

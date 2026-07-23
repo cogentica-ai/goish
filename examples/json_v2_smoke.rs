@@ -14,6 +14,9 @@
 //   5. Streaming: UnmarshalDecode pulls consecutive top-level values
 //      off one Decoder (the LSP jsonrpc read pattern);
 //      UnmarshalRead / MarshalIndent round out the entry points.
+//   6. Raw jsontext.Value passthrough through the dynamic layer.
+//   7. nilable<T> fields (Go *T): null/omitted/round-trip, plus
+//      jsontext.Value.IsValid.
 
 #![no_std]
 #![no_main]
@@ -79,6 +82,15 @@ pub struct Item {
     Internal: int,
     #[tag(r#"json:"extra,omitempty""#)]
     Extra: Option<int>,
+}
+
+/// Go `*T` fields — nilable<T> maps to JSON null / omitted.
+#[goish::reflect]
+pub struct Node {
+    #[tag(r#"json:"pos""#)]
+    Pos: goish::nilable<Position>,
+    #[tag(r#"json:"depth,omitempty""#)]
+    Depth: goish::nilable<i64>,
 }
 
 /// Custom codec the Go way — typescript-go's OrderedMap token walk
@@ -310,7 +322,44 @@ fn main() {
     check(err == goish::nil, b"t6: raw value marshal\n");
     check_bytes(&out, r#"{"anything":["goes",1]}"#, b"t6: raw passthrough\n");
 
-    let msg = b"JSON_V2_OK all 6 test groups passed\n";
+    // ─── 7. nilable<T> fields (Go *T) ──────────────────────────────
+    let n = Node { Pos: goish::nilable::default(), Depth: goish::nilable::default() };
+    let (out, err) = json::Marshal(&n, []);
+    check(err == goish::nil, b"t7: nil marshal err\n");
+    check_bytes(&out, r#"{"pos":null}"#, b"t7: nil pos null, nil depth omitted\n");
+
+    let n = Node {
+        Pos: goish::nilable::new(Position { Line: 4, Character: 2 }),
+        Depth: goish::nilable::new(9),
+    };
+    let (out, err) = json::Marshal(&n, []);
+    check(err == goish::nil, b"t7b: marshal err\n");
+    check_bytes(
+        &out,
+        r#"{"pos":{"line":4,"character":2},"depth":9}"#,
+        b"t7b: non-nil marshal\n",
+    );
+
+    let mut back = Node::default();
+    let err = json::Unmarshal(out.as_ref(), &mut back, []);
+    check(err == goish::nil, b"t7c: unmarshal err\n");
+    check(!back.Pos.IsNil() && back.Pos.Must().Line == 4, b"t7c: pos decoded\n");
+    check(!back.Depth.IsNil() && *back.Depth.Must() == 9, b"t7c: depth decoded\n");
+
+    let mut back = Node::default();
+    let err = json::Unmarshal(br#"{"pos":null}"#.as_ref(), &mut back, []);
+    check(err == goish::nil, b"t7d: null unmarshal err\n");
+    check(back.Pos.IsNil() && back.Depth.IsNil(), b"t7d: null/absent stay nil\n");
+
+    // jsontext.Value.IsValid (lsp/jsonrpc usage shape).
+    let good: jsontext::Value = r#"{"a":[1,2]}"#.into();
+    let bad: jsontext::Value = r#"{"a":"#.into();
+    let trailing: jsontext::Value = r#"1 2"#.into();
+    check(good.IsValid(), b"t7e: valid value\n");
+    check(!bad.IsValid(), b"t7e: truncated value invalid\n");
+    check(!trailing.IsValid(), b"t7e: trailing data invalid\n");
+
+    let msg = b"JSON_V2_OK all 7 test groups passed\n";
     syscall::Write(syscall::STDOUT, msg.as_ptr(), msg.len());
     syscall::Exit(0);
 }
