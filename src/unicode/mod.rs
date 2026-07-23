@@ -8,7 +8,155 @@
 pub mod utf16;
 pub mod utf8;
 
-use crate::types::rune;
+mod tables;
+pub use tables::{Mn, Zs};
+
+use crate::types::{int, rune};
+
+// Go: unicode/letter.go:9-14.
+/// `unicode.MaxRune` — maximum valid Unicode code point.
+pub const MaxRune: rune = '\u{10FFFF}' as rune;
+/// `unicode.ReplacementChar` — represents invalid code points.
+pub const ReplacementChar: rune = '\u{FFFD}' as rune;
+/// `unicode.MaxASCII` — maximum ASCII value.
+pub const MaxASCII: rune = '\u{007F}' as rune;
+/// `unicode.MaxLatin1` — maximum Latin-1 value.
+pub const MaxLatin1: rune = '\u{00FF}' as rune;
+
+// ─── RangeTable + Is (letter.go) ─────────────────────────────────────
+
+/// `unicode.Range16` (letter.go:29) — a range of 16-bit code points
+/// from `Lo` to `Hi` inclusive, at the given `Stride`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Range16 {
+    pub Lo: u16,
+    pub Hi: u16,
+    pub Stride: u16,
+}
+
+/// `unicode.Range32` (letter.go:38) — a range of code points where
+/// one or more values exceed 16 bits. `Lo` and `Hi` are always
+/// `>= 1<<16`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Range32 {
+    pub Lo: u32,
+    pub Hi: u32,
+    pub Stride: u32,
+}
+
+/// `unicode.RangeTable` (letter.go:21) — a set of Unicode code points
+/// as sorted, non-overlapping ranges, split into 16-bit and 32-bit
+/// slices to save space.
+///
+/// Goish deviation from the "no `&[T]` in public API" rule: table
+/// data is compile-time static (Go's are package-level generated
+/// vars; a scanner's ID_Start table is a `static`), so the fields are
+/// `&'static` slices — the only const-constructible spelling. Runtime
+/// slices never flow through here.
+#[derive(Copy, Clone, Debug)]
+pub struct RangeTable {
+    pub R16: &'static [Range16],
+    pub R32: &'static [Range32],
+    /// Number of entries in R16 with `Hi <= MaxLatin1`.
+    pub LatinOffset: int,
+}
+
+// Go: letter.go:87 — maximum table size for linear search of a
+// non-Latin1 rune. Derived by running 'go test -calibrate'.
+const LINEAR_MAX: usize = 18;
+
+// Go: letter.go:90 is16 — whether r is in the sorted slice of 16-bit
+// ranges.
+fn is16(ranges: &[Range16], r: u16) -> bool {
+    if ranges.len() <= LINEAR_MAX || r as rune <= MaxLatin1 {
+        for range_ in ranges {
+            if r < range_.Lo {
+                return false;
+            }
+            if r <= range_.Hi {
+                return range_.Stride == 1 || (r - range_.Lo) % range_.Stride == 0;
+            }
+        }
+        return false;
+    }
+
+    // binary search over ranges
+    let mut lo = 0usize;
+    let mut hi = ranges.len();
+    while lo < hi {
+        let m = (lo + hi) >> 1;
+        let range_ = &ranges[m];
+        if range_.Lo <= r && r <= range_.Hi {
+            return range_.Stride == 1 || (r - range_.Lo) % range_.Stride == 0;
+        }
+        if r < range_.Lo {
+            hi = m;
+        } else {
+            lo = m + 1;
+        }
+    }
+    false
+}
+
+// Go: letter.go:123 is32 — whether r is in the sorted slice of 32-bit
+// ranges.
+fn is32(ranges: &[Range32], r: u32) -> bool {
+    if ranges.len() <= LINEAR_MAX {
+        for range_ in ranges {
+            if r < range_.Lo {
+                return false;
+            }
+            if r <= range_.Hi {
+                return range_.Stride == 1 || (r - range_.Lo) % range_.Stride == 0;
+            }
+        }
+        return false;
+    }
+
+    // binary search over ranges
+    let mut lo = 0usize;
+    let mut hi = ranges.len();
+    while lo < hi {
+        let m = (lo + hi) >> 1;
+        let range_ = &ranges[m];
+        if range_.Lo <= r && r <= range_.Hi {
+            return range_.Stride == 1 || (r - range_.Lo) % range_.Stride == 0;
+        }
+        if r < range_.Lo {
+            hi = m;
+        } else {
+            lo = m + 1;
+        }
+    }
+    false
+}
+
+/// `unicode.Is(rangeTab, r)` (letter.go:156) — whether the rune is in
+/// the specified table of ranges.
+pub fn Is(range_tab: &RangeTable, r: rune) -> bool {
+    let r16 = range_tab.R16;
+    // Compare as u32 to correctly handle negative runes.
+    if !r16.is_empty() && (r as u32) <= r16[r16.len() - 1].Hi as u32 {
+        return is16(r16, r as u16);
+    }
+    let r32 = range_tab.R32;
+    if !r32.is_empty() && r >= r32[0].Lo as rune {
+        return is32(r32, r as u32);
+    }
+    false
+}
+
+/// `unicode.In(r, ranges...)` (letter.go:187) — whether the rune is a
+/// member of one of the tables (variadic → trailing slice, per the
+/// goish lowering).
+pub fn In(r: rune, ranges: &[&RangeTable]) -> bool {
+    for inside in ranges {
+        if Is(inside, r) {
+            return true;
+        }
+    }
+    false
+}
 
 /// `unicode.IsSpace(r)` — true if `r` is a whitespace character. v1
 /// covers the ASCII whitespace set Go matches via `unicode.IsSpace`:

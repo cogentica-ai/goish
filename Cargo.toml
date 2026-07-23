@@ -634,6 +634,10 @@ name = "os_dirfs_smoke"
 path = "examples/os_dirfs_smoke.rs"
 
 [[example]]
+name = "unicode_rangetable_smoke"
+path = "examples/unicode_rangetable_smoke.rs"
+
+[[example]]
 name = "fips_rsa_smoke"
 path = "examples/fips_rsa_smoke.rs"
 
