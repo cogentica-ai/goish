@@ -642,6 +642,10 @@ name = "sync_errgroup_smoke"
 path = "examples/sync_errgroup_smoke.rs"
 
 [[example]]
+name = "syscall_fswatch_smoke"
+path = "examples/syscall_fswatch_smoke.rs"
+
+[[example]]
 name = "fips_rsa_smoke"
 path = "examples/fips_rsa_smoke.rs"
 
