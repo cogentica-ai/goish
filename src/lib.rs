@@ -85,6 +85,7 @@ pub mod html;
 pub mod maps;
 pub mod io;
 pub mod iter;
+pub mod xxh3;
 pub mod log;
 pub mod math;
 pub mod mime;
