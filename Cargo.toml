@@ -239,6 +239,10 @@ name = "json_v2_smoke"
 path = "examples/json_v2_smoke.rs"
 
 [[example]]
+name = "jsonfloat_es6"
+path = "examples/jsonfloat_es6.rs"
+
+[[example]]
 name = "iter_seq_smoke"
 path = "examples/iter_seq_smoke.rs"
 

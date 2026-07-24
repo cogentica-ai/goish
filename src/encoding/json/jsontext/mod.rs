@@ -162,9 +162,62 @@ pub fn String<S: Into<string>>(s: S) -> Token {
     Token { repr: Repr::Str(s.into()) }
 }
 
-/// `jsontext.Float(f)` (token.go:137).
+/// `jsontext.Float(f)` (token.go:175). The textual form comes from
+/// [`AppendFloat`], not `strconv.FormatFloat(_, 'g', ...)` — JSON
+/// numbers use the ES6 conversion (token.go:312 formats num tokens
+/// through `jsonwire.AppendFloat`).
 pub fn Float(n: float64) -> Token {
-    Token { repr: Repr::Num(crate::strconv::FormatFloat(n, b'g', -1, 64)) }
+    Token { repr: Repr::Num(AppendFloatString(n, 64)) }
+}
+
+/// `jsontext.AppendFloat(dst, src, bits)` (value.go:32) ->
+/// `jsonwire.AppendFloat` (internal/jsonwire/encode.go:213).
+///
+/// Appends `src` to `dst` as a JSON number per RFC 7159, section 6.
+/// It formats numbers similar to the ES6 number-to-string conversion.
+/// See https://go.dev/issue/14135.
+///
+/// The output is identical to ECMA-262, 6th edition, section 7.1.12.1
+/// and with RFC 8785, section 3.2.2.3 for 64-bit floating-point numbers
+/// except for -0, which is formatted as -0 instead of just 0.
+///
+/// For 32-bit floating-point numbers, the output is a 32-bit equivalent
+/// of the algorithm.
+pub fn AppendFloat(
+    dst: &mut alloc::vec::Vec<crate::types::byte>,
+    src: float64,
+    bits: int,
+) {
+    dst.extend_from_slice(AppendFloatString(src, bits).as_bytes());
+}
+
+/// The formatting core shared by [`Float`] and [`AppendFloat`].
+fn AppendFloatString(src: float64, bits: int) -> string {
+    let src = if bits == 32 { src as crate::types::float32 as float64 } else { src };
+
+    let abs = crate::math::Abs(src);
+    let mut fmt = b'f';
+    if abs != 0.0
+        && (bits == 64 && (abs < 1e-6 || abs >= 1e21)
+            || bits == 32
+                && ((abs as crate::types::float32) < 1e-6f32
+                    || (abs as crate::types::float32) >= 1e21f32))
+    {
+        fmt = b'e';
+    }
+    let s = crate::strconv::FormatFloat(src, fmt, -1, bits);
+    if fmt == b'e' {
+        // Clean up e-09 to e-9.
+        let b = s.as_bytes();
+        let n = b.len();
+        if n >= 4 && b[n - 4] == b'e' && b[n - 3] == b'-' && b[n - 2] == b'0' {
+            let mut out = alloc::vec::Vec::with_capacity(n - 1);
+            out.extend_from_slice(&b[..n - 2]);
+            out.push(b[n - 1]);
+            return string::from_bytes(out.as_slice());
+        }
+    }
+    s
 }
 
 /// `jsontext.Int(i)` (token.go:152).

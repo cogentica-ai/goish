@@ -889,8 +889,9 @@ fn encode_number(out: &mut Vec<byte>, n: f64) {
         out.extend_from_slice(b"null");
         return;
     }
-    let s = strconv::FormatFloat(n, b'g', -1, 64);
-    out.extend_from_slice(s.as_bytes());
+    // Go formats JSON numbers with the ES6 conversion, not 'g'
+    // (encoding/json floatEncoder / jsonwire.AppendFloat).
+    jsontext::AppendFloat(out, n, 64);
 }
 
 fn encode_string(out: &mut Vec<byte>, s: &[byte]) {
