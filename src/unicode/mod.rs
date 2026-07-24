@@ -187,22 +187,60 @@ pub fn IsLower(r: rune) -> bool {
     r >= b'a' as rune && r <= b'z' as rune
 }
 
-/// `unicode.ToUpper(r)` — ASCII case fold.
-pub fn ToUpper(r: rune) -> rune {
-    if IsLower(r) {
-        r - 32
-    } else {
-        r
+#[path = "case_tables.rs"]
+mod case_tables;
+
+fn case_lookup(t: &[(u32, u32)], r: rune) -> rune {
+    if r < 0 {
+        return r;
+    }
+    match t.binary_search_by_key(&(r as u32), |e| e.0) {
+        Ok(i) => t[i].1 as rune,
+        Err(_) => r,
     }
 }
 
-/// `unicode.ToLower(r)` — ASCII case fold.
-pub fn ToLower(r: rune) -> rune {
-    if IsUpper(r) {
-        r + 32
-    } else {
-        r
+/// `unicode.ToUpper(r)` — full Unicode mapping (generated table;
+/// letters.go SpecialCase excluded, matching Go's ToUpper).
+pub fn ToUpper(r: rune) -> rune {
+    if r < 0x80 {
+        // ASCII fast path, mirroring Go's.
+        if r >= b'a' as rune && r <= b'z' as rune {
+            return r - 32;
+        }
+        return r;
     }
+    case_lookup(case_tables::UPPER, r)
+}
+
+/// `unicode.ToLower(r)` — full Unicode mapping.
+pub fn ToLower(r: rune) -> rune {
+    if r < 0x80 {
+        if r >= b'A' as rune && r <= b'Z' as rune {
+            return r + 32;
+        }
+        return r;
+    }
+    case_lookup(case_tables::LOWER, r)
+}
+
+/// `unicode.ToTitle(r)` — full Unicode mapping.
+pub fn ToTitle(r: rune) -> rune {
+    if r < 0x80 {
+        if r >= b'a' as rune && r <= b'z' as rune {
+            return r - 32;
+        }
+        return r;
+    }
+    case_lookup(case_tables::TITLE, r)
+}
+
+/// `unicode.SimpleFold(r)` (letter.go:344) — iterates the closed set
+/// of runes equivalent under simple case folding; returns the next
+/// rune in the orbit (the smallest > r, wrapping). Generated table
+/// stores the full next-in-orbit mapping.
+pub fn SimpleFold(r: rune) -> rune {
+    case_lookup(case_tables::FOLD, r)
 }
 
 /// `unicode.IsControl(r)` (graphic.go:81) — ASCII slim. Per Go,
@@ -274,10 +312,3 @@ pub fn IsTitle(_r: rune) -> bool {
     false
 }
 
-/// `unicode.ToTitle(r)` (letter.go) — ASCII slim. For ASCII letters
-/// titlecase == uppercase, so we delegate to ToUpper. Non-ASCII
-/// runes pass through unchanged.
-pub fn ToTitle(r: rune) -> rune {
-    // Go: To(_TitleCase, r) — for ASCII, _TitleCase folds identically to UpperCase.
-    ToUpper(r)
-}

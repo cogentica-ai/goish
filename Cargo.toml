@@ -662,6 +662,10 @@ name = "embed_smoke"
 path = "examples/embed_smoke.rs"
 
 [[example]]
+name = "unicode_case_smoke"
+path = "examples/unicode_case_smoke.rs"
+
+[[example]]
 name = "fips_rsa_smoke"
 path = "examples/fips_rsa_smoke.rs"
 

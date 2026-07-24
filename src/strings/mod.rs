@@ -404,23 +404,46 @@ pub fn TrimSuffix<S1: Into<string>, S2: Into<string>>(s: S1, suffix: S2) -> stri
 pub fn ToUpper<S: Into<string>>(s: S) -> string {
     let s = s.into();
     let bytes = s.as_bytes();
+    // ASCII fast path (Go strings.go ToUpper does the same scan).
     let mut has_lower = false;
+    let mut ascii = true;
     for &c in bytes {
-        if c >= b'a' && c <= b'z' {
-            has_lower = true;
+        if c >= 0x80 {
+            ascii = false;
             break;
         }
-    }
-    if !has_lower {
-        return s;
-    }
-    let mut v: Vec<byte> = Vec::with_capacity(bytes.len());
-    for &c in bytes {
-        if c >= b'a' && c <= b'z' {
-            v.push(c - (b'a' - b'A'));
-        } else {
-            v.push(c);
+        if c.is_ascii_lowercase() {
+            has_lower = true;
         }
+    }
+    if ascii {
+        if !has_lower {
+            return s;
+        }
+        let mut v: Vec<byte> = Vec::with_capacity(bytes.len());
+        for &c in bytes {
+            v.push(c.to_ascii_uppercase());
+        }
+        return string::__from_vec(v);
+    }
+    map_runes(bytes, crate::unicode::ToUpper)
+}
+
+// Rune-wise case map for the non-ASCII path of ToUpper/ToLower.
+fn map_runes(bytes: &[byte], f: fn(rune) -> rune) -> string {
+    let mut v: Vec<byte> = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let (r, size) = crate::unicode::utf8::DecodeRune(&bytes[i..]);
+        let m = f(r);
+        match char::from_u32(m as u32) {
+            Some(c) => {
+                let mut buf = [0u8; 4];
+                v.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+            }
+            None => v.extend_from_slice(&bytes[i..i + size as usize]),
+        }
+        i += size as usize;
     }
     string::__from_vec(v)
 }
@@ -429,24 +452,27 @@ pub fn ToLower<S: Into<string>>(s: S) -> string {
     let s = s.into();
     let bytes = s.as_bytes();
     let mut has_upper = false;
+    let mut ascii = true;
     for &c in bytes {
-        if c >= b'A' && c <= b'Z' {
-            has_upper = true;
+        if c >= 0x80 {
+            ascii = false;
             break;
         }
-    }
-    if !has_upper {
-        return s;
-    }
-    let mut v: Vec<byte> = Vec::with_capacity(bytes.len());
-    for &c in bytes {
-        if c >= b'A' && c <= b'Z' {
-            v.push(c + (b'a' - b'A'));
-        } else {
-            v.push(c);
+        if c.is_ascii_uppercase() {
+            has_upper = true;
         }
     }
-    string::__from_vec(v)
+    if ascii {
+        if !has_upper {
+            return s;
+        }
+        let mut v: Vec<byte> = Vec::with_capacity(bytes.len());
+        for &c in bytes {
+            v.push(c.to_ascii_lowercase());
+        }
+        return string::__from_vec(v);
+    }
+    map_runes(bytes, crate::unicode::ToLower)
 }
 
 /// `strings.ToTitle(s)` (strings.go:768) — title-case mapping over `s`.
@@ -556,32 +582,48 @@ pub fn Repeat<S: Into<string>>(s: S, count: int) -> string {
 pub fn EqualFold<S1: Into<string>, S2: Into<string>>(s: S1, t: S2) -> bool {
     let s = s.into();
     let t = t.into();
-    let sb = s.as_bytes();
-    let tb = t.as_bytes();
-    if sb.len() != tb.len() {
-        // ASCII-only path: equal-fold cannot change byte length. When
-        // unicode case folding lands, this fast reject goes away.
-        return false;
-    }
-    let mut i = 0usize;
-    while i < sb.len() {
-        let mut sr = sb[i];
-        let mut tr = tb[i];
+    let mut sb = s.as_bytes();
+    let mut tb = t.as_bytes();
+    // Go strings.go EqualFold: ASCII fast path byte-by-byte, general
+    // path rune-by-rune with the SimpleFold orbit walk.
+    while !sb.is_empty() && !tb.is_empty() {
+        let (sr, ssize) = if sb[0] < 0x80 {
+            (sb[0] as rune, 1usize)
+        } else {
+            let (r, n) = crate::unicode::utf8::DecodeRune(sb);
+            (r, n as usize)
+        };
+        let (tr, tsize) = if tb[0] < 0x80 {
+            (tb[0] as rune, 1usize)
+        } else {
+            let (r, n) = crate::unicode::utf8::DecodeRune(tb);
+            (r, n as usize)
+        };
+        sb = &sb[ssize..];
+        tb = &tb[tsize..];
         if sr == tr {
-            i += 1;
             continue;
         }
-        if sr > tr {
-            core::mem::swap(&mut sr, &mut tr);
+        // Order so sr <= tr (Go does the same swap).
+        let (sr, tr) = if tr < sr { (tr, sr) } else { (sr, tr) };
+        if tr < 0x80 {
+            // ASCII only: fold to lower and compare.
+            if (b'A' as rune..=b'Z' as rune).contains(&sr) && tr == sr + (b'a' as rune - b'A' as rune) {
+                continue;
+            }
+            return false;
         }
-        // sr <= tr; check if they differ by ASCII-case bit only.
-        if sr >= b'A' && sr <= b'Z' && tr == sr + (b'a' - b'A') {
-            i += 1;
+        // General case: walk sr's fold orbit looking for tr.
+        let mut r = crate::unicode::SimpleFold(sr);
+        while r != sr && r < tr {
+            r = crate::unicode::SimpleFold(r);
+        }
+        if r == tr {
             continue;
         }
         return false;
     }
-    true
+    sb.is_empty() && tb.is_empty()
 }
 
 // ─── Builder ──────────────────────────────────────────────────────────
