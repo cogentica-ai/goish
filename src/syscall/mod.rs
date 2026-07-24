@@ -146,6 +146,11 @@ pub struct Timespec {
     pub tv_nsec: i64,
 }
 
+/// `UTIME_OMIT` — sentinel tv_nsec value for `utimensat`: leave the
+/// corresponding timestamp unchanged (Go internal/syscall/unix
+/// at_sysnum_linux.go:26).
+pub const UTIME_OMIT: i64 = 0x3ffffffe;
+
 // ─── standard fds ──────────────────────────────────────────────────────
 pub const STDIN: i32 = 0;
 pub const STDOUT: i32 = 1;
@@ -376,6 +381,9 @@ pub const EOPNOTSUPP: Errno = Errno(95);
 /// Open flags. Subset of `<fcntl.h>`.
 pub const O_RDONLY: i32 = 0;
 pub const O_CLOEXEC: i32 = 0o2_000_000;
+/// `O_PATH` — obtain an fd that references a location without opening
+/// the file itself (follows symlinks; needs only search permission).
+pub const O_PATH: i32 = 0o10_000_000;
 
 /// `open(2)` — open a file. `path` must be a NUL-terminated C string.
 /// Returns the new fd on success, or a negative `-errno` on error.
@@ -580,6 +588,7 @@ pub const SYS_TRUNCATE: usize = 76;
 pub const SYS_FTRUNCATE: usize = 77;
 pub const SYS_PREAD64: usize = 17;
 pub const SYS_PWRITE64: usize = 18;
+pub const SYS_UTIMENSAT: usize = 280;
 pub const SYS_FLOCK: usize = 73;
 pub const SYS_PIPE2: usize = 293;
 pub const SYS_CHOWN: usize = 92;
@@ -639,6 +648,23 @@ pub fn Symlink(oldname: *const u8, newname: *const u8) -> i32 {
 #[allow(non_snake_case)]
 pub fn Readlink(path: *const u8, buf: *mut u8, bufsiz: usize) -> isize {
     unsafe { syscall3(SYS_READLINK, path as usize, buf as usize, bufsiz) as isize }
+}
+
+/// `utimensat(dirfd, path, times, flags)` — set file access/modification
+/// times with nanosecond precision. `times` points to `[atime, mtime]`;
+/// a `tv_nsec` of [`UTIME_OMIT`] leaves that timestamp unchanged.
+/// Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Utimensat(dirfd: i32, path: *const u8, times: *const Timespec, flags: i32) -> i32 {
+    unsafe {
+        syscall4(
+            SYS_UTIMENSAT,
+            dirfd as usize,
+            path as usize,
+            times as usize,
+            flags as usize,
+        ) as i32
+    }
 }
 
 /// `rename(oldpath, newpath)`. Returns 0 on success, -errno on failure.

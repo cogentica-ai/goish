@@ -868,6 +868,55 @@ pub fn Readlink<N: Into<string>>(name: N) -> (string, error) {
     }
 }
 
+/// `os.Executable()` (executable.go:19 → executable_procfs.go:15) —
+/// path name for the executable that started the current process, via
+/// `Readlink("/proc/self/exe")`. When the executable has been deleted,
+/// Readlink returns a path appended with " (deleted)"; trimmed here as
+/// in Go.
+pub fn Executable() -> (string, error) {
+    // Go: path, err := Readlink("/proc/self/exe")
+    let (path, err) = Readlink("/proc/self/exe");
+    // Go: return stringslite.TrimSuffix(path, " (deleted)"), err
+    let b = bytes_of(&path);
+    if b.ends_with(b" (deleted)") {
+        return (string::from_bytes(&b[..b.len() - b" (deleted)".len()]), err);
+    }
+    (path, err)
+}
+
+/// `os.Chtimes(name, atime, mtime)` (file_posix.go:179) — change the
+/// access and modification times of the named file. A zero time.Time
+/// leaves the corresponding timestamp unchanged (UTIME_OMIT), as in Go.
+pub fn Chtimes<N: Into<string>>(
+    name: N,
+    atime: crate::time::Time,
+    mtime: crate::time::Time,
+) -> error {
+    let name: string = name.into();
+    // Go: utimes := chtimesUtimes(atime, mtime) (file_posix.go:187)
+    let set = |t: crate::time::Time| -> syscall::Timespec {
+        if t.IsZero() {
+            // Go: utimes[i] = syscall.Timespec{Sec: _UTIME_OMIT, Nsec: _UTIME_OMIT}
+            syscall::Timespec { tv_sec: syscall::UTIME_OMIT, tv_nsec: syscall::UTIME_OMIT }
+        } else {
+            // Go: utimes[i] = syscall.NsecToTimespec(t.UnixNano())
+            let ns = t.UnixNano() as i64;
+            syscall::Timespec { tv_sec: ns / 1_000_000_000, tv_nsec: ns % 1_000_000_000 }
+        }
+    };
+    let utimes = [set(atime), set(mtime)];
+    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
+    buf.extend_from_slice(bytes_of(&name));
+    buf.push(0);
+    // Go: if e := syscall.UtimesNano(name, utimes[0:]); e != nil {
+    //         return &PathError{Op: "chtimes", Path: name, Err: e} }
+    let r = syscall::Utimensat(syscall::AT_FDCWD, buf.as_ptr(), utimes.as_ptr(), 0);
+    if r < 0 {
+        return errors::New(string("chtimes failed"));
+    }
+    nil
+}
+
 /// Line-by-line port of `os.Rename(oldpath, newpath)` (file.go:440 →
 /// file_unix.go:26 rename). Slim: drops the SameFile case-only-rename
 /// gymnastics (Linux is always case-sensitive) but preserves the
