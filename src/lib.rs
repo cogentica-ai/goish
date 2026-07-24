@@ -63,6 +63,7 @@ pub mod convert;
 pub mod crypto;
 pub mod database;
 pub mod defer;
+pub mod embed;
 pub mod encoding;
 pub mod errors;
 pub mod expvar;
@@ -225,6 +226,12 @@ pub use goish_macros::init;
 // AND registers a `.init_array` slot calling each port's init().
 // `__run_pkg_inits` (below) walks the section before main runs.
 pub use goish_macros::import;
+// Re-export the `goish::embed!` proc-macro — Go's //go:embed
+// directive. Declares string / slice<byte> / embed::FS statics from
+// files resolved relative to the invoking source file; see the
+// `embed` module docs. (The `goish::embed` module path coexists —
+// macros and modules occupy different namespaces.)
+pub use goish_macros::embed;
 // Re-export the `#[goish::interface]` attribute — Go-faithful interface
 // declaration. Auto-emits Send + Sync supertraits, a per-trait nil
 // sentinel, `Default for Arc<dyn T + Send + Sync>` returning the

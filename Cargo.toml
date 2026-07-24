@@ -658,6 +658,10 @@ name = "unicode_norm_smoke"
 path = "examples/unicode_norm_smoke.rs"
 
 [[example]]
+name = "embed_smoke"
+path = "examples/embed_smoke.rs"
+
+[[example]]
 name = "fips_rsa_smoke"
 path = "examples/fips_rsa_smoke.rs"
 
