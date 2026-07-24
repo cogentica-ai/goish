@@ -239,6 +239,10 @@ name = "json_v2_smoke"
 path = "examples/json_v2_smoke.rs"
 
 [[example]]
+name = "big_exp_diff"
+path = "examples/big_exp_diff.rs"
+
+[[example]]
 name = "jsonfloat_es6"
 path = "examples/jsonfloat_es6.rs"
 

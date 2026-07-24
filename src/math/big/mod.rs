@@ -922,10 +922,15 @@ impl Int {
         } else {
             divmod_limbs(&alloc::vec![1u32], m_abs).1
         };
-        // Walk the exponent bits LSB→MSB.
+        // Walk the exponent bits LSB→MSB, stopping at y's highest set
+        // bit. Using the full limb width instead would keep squaring
+        // `base` past the last significant bit: harmless-but-wasteful
+        // with a modulus (the value stays reduced), fatal without one —
+        // `Exp(2, 64, 0)` would square 2^(2^k) up to k=31 and never
+        // finish. Go's nat.expNN walks `y.bitLen()` for the same reason.
         let yw = &y.abs;
         let mut bit: usize = 0;
-        let total_bits = yw.len() * 32;
+        let total_bits = bit_len(yw) as usize;
         while bit < total_bits {
             let limb = yw[bit / 32];
             if (limb >> (bit % 32)) & 1 == 1 {
