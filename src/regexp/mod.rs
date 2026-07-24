@@ -865,4 +865,39 @@ impl Regexp {
         }
         string::__from_vec(out)
     }
+
+    /// `re.ReplaceAllStringFunc(src, repl)` (regexp.go:988) — returns a
+    /// copy of src in which all matches have been replaced by the
+    /// return value of `repl` applied to the matched string. No
+    /// Expand-style $-substitution is performed on the output.
+    pub fn ReplaceAllStringFunc<S: Into<string>, F: Fn(string) -> string>(
+        &self,
+        src: S,
+        repl: F,
+    ) -> string {
+        let src = src.into();
+        let text = src.as_bytes();
+        let mut out: Vec<u8> = Vec::with_capacity(text.len());
+        let mut i = 0usize;
+        while i <= text.len() {
+            if let Some((end, _)) = self.match_at(text, i) {
+                let replaced = repl(string::from_bytes(&text[i..end]));
+                out.extend_from_slice(replaced.as_bytes());
+                if end > i {
+                    i = end;
+                } else {
+                    if i < text.len() {
+                        out.push(text[i]);
+                    }
+                    i += 1;
+                }
+            } else if i < text.len() {
+                out.push(text[i]);
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        string::__from_vec(out)
+    }
 }
