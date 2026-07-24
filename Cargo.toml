@@ -239,6 +239,10 @@ name = "json_v2_smoke"
 path = "examples/json_v2_smoke.rs"
 
 [[example]]
+name = "map_clear_smoke"
+path = "examples/map_clear_smoke.rs"
+
+[[example]]
 name = "math_pow_diff"
 path = "examples/math_pow_diff.rs"
 
