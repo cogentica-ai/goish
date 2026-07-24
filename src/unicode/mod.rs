@@ -5,6 +5,7 @@
 
 #![allow(non_snake_case)]
 
+pub mod norm;
 pub mod utf16;
 pub mod utf8;
 

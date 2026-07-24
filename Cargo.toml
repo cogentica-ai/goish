@@ -650,6 +650,14 @@ name = "xxh3_smoke"
 path = "examples/xxh3_smoke.rs"
 
 [[example]]
+name = "text_language_smoke"
+path = "examples/text_language_smoke.rs"
+
+[[example]]
+name = "unicode_norm_smoke"
+path = "examples/unicode_norm_smoke.rs"
+
+[[example]]
 name = "fips_rsa_smoke"
 path = "examples/fips_rsa_smoke.rs"
 

@@ -7,4 +7,5 @@
 
 #![allow(non_snake_case)]
 
+pub mod language;
 pub mod tabwriter;
