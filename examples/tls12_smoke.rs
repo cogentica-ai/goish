@@ -268,6 +268,52 @@ fn test_record_mac_failure(t: &mut testing::T) {
 
 // ─── Test 6 — ClientHello byte layout ────────────────────────────────
 
+
+// ClientHello body layout (after the 4-byte handshake header), per
+// RFC 5246 Â§7.4.1.2 / RFC 8446 Â§4.1.2:
+//   version(2) + random(32) + sid_len(1) + sid + cs_len(2) + cs +
+//   comp_len(1) + comp + ext_total_len(2) + exts
+// The variable-length session id / cipher-suite sections mean fixed
+// offsets are wrong past body[34]; tests use this parser instead.
+struct CHLayout {
+    sid_len: usize,
+    cs_off: usize,
+    cs_len: usize,
+    comp_off: usize,
+    ext_off: usize,
+    ext_total_len: usize,
+}
+
+fn client_hello_layout(body: &[u8]) -> (CHLayout, bool) {
+    let bad = CHLayout { sid_len: 0, cs_off: 0, cs_len: 0, comp_off: 0, ext_off: 0, ext_total_len: 0 };
+    if body.len() < 35 {
+        return (bad, false);
+    }
+    let sid_len = body[34] as usize;
+    let cs_len_off = 35 + sid_len;
+    if body.len() < cs_len_off + 2 {
+        return (bad, false);
+    }
+    let cs_len = ((body[cs_len_off] as usize) << 8) | (body[cs_len_off + 1] as usize);
+    let cs_off = cs_len_off + 2;
+    let comp_off = cs_off + cs_len;
+    if body.len() < comp_off + 1 {
+        return (bad, false);
+    }
+    let comp_len = body[comp_off] as usize;
+    let ext_len_off = comp_off + 1 + comp_len;
+    if body.len() < ext_len_off + 2 {
+        return (bad, false);
+    }
+    let ext_total_len = ((body[ext_len_off] as usize) << 8) | (body[ext_len_off + 1] as usize);
+    let ext_off = ext_len_off + 2;
+    if body.len() < ext_off + ext_total_len {
+        return (bad, false);
+    }
+    let l = CHLayout { sid_len, cs_off, cs_len, comp_off, ext_off, ext_total_len };
+    (l, true)
+}
+
 fn test_client_hello_bytes(t: &mut testing::T) {
     use goish::crypto::tls::build_client_hello_bytes;
 
@@ -305,9 +351,7 @@ fn test_client_hello_bytes(t: &mut testing::T) {
         ));
         return;
     }
-    // Body starts at msg[4]
-    // Body layout: version(2) + random(32) + session_id_len(1) + cipher_suites_len(2)
-    //              + cipher_suite(2) + compression_methods_len(1) + null(1) + extensions(2)
+    // Body starts at msg[4]; see client_hello_layout for the wire shape.
     let body = &msg[4..];
     if body.len() < 42 {
         t.Fatal(fmt::Sprintf!("ClientHello: body too short: %d bytes", int64(body.len())));
@@ -327,47 +371,45 @@ fn test_client_hello_bytes(t: &mut testing::T) {
         t.Fatal(string::from_static("ClientHello: random bytes don't match input"));
         return;
     }
-    // session_id_len must be 0
-    if body[34] != 0 {
-        t.Fatal(fmt::Sprintf!("ClientHello: session_id_len = %d, want 0", int64(body[34])));
+    let (l, ok) = client_hello_layout(body);
+    if !ok {
+        t.Fatal(string::from_static("ClientHello: body truncated / malformed layout"));
         return;
     }
-    // cipher_suites length = 4 bytes => body[35..37] = 0x00, 0x04 (two suites: C02F, 002F)
-    if body[35] != 0 || body[36] != 4 {
+    // session_id: Go always sends a 32-byte random legacy session id
+    // (handshake_client.go makeClientHello â RFC 5077 resumption
+    // detection; RFC 8446 Â§4.1.2 compat mode).
+    if l.sid_len != 32 {
+        t.Fatal(fmt::Sprintf!("ClientHello: session_id_len = %d, want 32", int64(l.sid_len)));
+        return;
+    }
+    // cipher_suites: the 6 suites the client offers, TLS 1.3 first.
+    let want_suites: [u16; 6] = [0x1301, 0x1302, 0x1303, 0xC02B, 0xC02F, 0x002F];
+    if l.cs_len != want_suites.len() * 2 {
         t.Fatal(fmt::Sprintf!(
-            "ClientHello: cipher_suites_len = {0x{:02x}, 0x{:02x}}, want {0x00, 0x04}",
-            int64(body[35]), int64(body[36])
+            "ClientHello: cipher_suites_len = %d, want %d",
+            int64(l.cs_len), int64(want_suites.len() * 2)
         ));
         return;
     }
-    // First cipher suite = 0xC0, 0x2F (TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
-    if body[37] != 0xC0 || body[38] != 0x2F {
-        t.Fatal(fmt::Sprintf!(
-            "ClientHello: first cipher_suite = {0x{:02x}, 0x{:02x}}, want {0xC0, 0x2F}",
-            int64(body[37]), int64(body[38])
-        ));
-        return;
-    }
-    // Second cipher suite = 0x00, 0x2f (TLS_RSA_WITH_AES_128_CBC_SHA)
-    if body[39] != 0x00 || body[40] != 0x2f {
-        t.Fatal(fmt::Sprintf!(
-            "ClientHello: second cipher_suite = {0x{:02x}, 0x{:02x}}, want {0x00, 0x2f}",
-            int64(body[39]), int64(body[40])
-        ));
-        return;
+    for (i, want) in want_suites.iter().enumerate() {
+        let off = l.cs_off + i * 2;
+        let got = ((body[off] as u16) << 8) | (body[off + 1] as u16);
+        if got != *want {
+            t.Fatal(fmt::Sprintf!(
+                "ClientHello: cipher_suite[%d] = 0x{:04x}, want 0x{:04x}",
+                int64(i), int64(got), int64(*want)
+            ));
+            return;
+        }
     }
     // compression_methods length = 1, method = 0 (null)
-    if body[41] != 1 || body[42] != 0 {
+    if body[l.comp_off] != 1 || body[l.comp_off + 1] != 0 {
         t.Fatal(string::from_static("ClientHello: compression_methods incorrect"));
         return;
     }
     // Extensions should be present (supported_groups, ec_point_formats, sig_algs)
-    if body.len() < 45 {
-        t.Fatal(string::from_static("ClientHello: too short for extensions"));
-        return;
-    }
-    let ext_total_len = ((body[43] as usize) << 8) | (body[44] as usize);
-    if ext_total_len == 0 {
+    if l.ext_total_len == 0 {
         t.Fatal(string::from_static("ClientHello: expected extensions (supported_groups, etc.) to be present"));
     }
 }
@@ -1123,23 +1165,21 @@ fn test_client_hello_offers_ecdhe(t: &mut testing::T) {
     }
 
     let body = &msg[4..];
-    // body: version(2) + random(32) + sid_len(1) + cipher_suites_len(2) + cipher_suites + ...
-    if body.len() < 38 {
+    let (l, lok) = client_hello_layout(body);
+    if !lok {
         t.Fatal(fmt::Sprintf!("ClientHello body too short: %d bytes", int64(body.len())));
         return;
     }
-    // cipher_suites_len at body[35..37]
-    let cs_len = ((body[35] as usize) << 8) | (body[36] as usize);
-    if cs_len < 4 {
+    if l.cs_len < 4 {
         t.Fatal(fmt::Sprintf!(
             "ClientHello: cipher_suites_len = %d, expected >= 4 (two suites)",
-            int64(cs_len)
+            int64(l.cs_len)
         ));
         return;
     }
 
     // Check that 0xC02F is present in the cipher suites list
-    let cs_bytes = &body[37..37 + cs_len];
+    let cs_bytes = &body[l.cs_off..l.cs_off + l.cs_len];
     let mut found_c02f = false;
     let mut found_002f = false;
     let mut i = 0usize;
@@ -1176,22 +1216,21 @@ fn test_client_hello_includes_sni(t: &mut testing::T) {
     let client_random = [0x00u8; 32];
     let msg = build_client_hello_bytes(&client_random, "example.com");
 
-    // The extensions block starts at msg[4 + 2+32+1+2+4+1+1] = msg[4 + 43] = msg[47].
-    // body starts at msg[4]; within body: version(2) + random(32) + sid_len(1) + cs_len(2) +
-    //   cs(4) + comp_len(1) + comp(1) = 43 bytes before extensions_total_len.
+    // body starts at msg[4]; extension offset comes from client_hello_layout
+    // (session id and cipher-suite sections are variable-length).
     let body = &msg[4..];
-    if body.len() < 45 {
+    let (l, lok) = client_hello_layout(body);
+    if !lok {
         t.Fatal(fmt::Sprintf!("ClientHello body too short for extensions: %d", int64(body.len())));
         return;
     }
-    let ext_total_len = ((body[43] as usize) << 8) | (body[44] as usize);
-    if ext_total_len == 0 {
+    if l.ext_total_len == 0 {
         t.Fatal(string::from_static("TestClientHelloIncludesSNI: no extensions present"));
         return;
     }
 
     // Walk extension list to find type 0x0000 (server_name)
-    let exts = &body[45..45 + ext_total_len];
+    let exts = &body[l.ext_off..l.ext_off + l.ext_total_len];
     let mut pos = 0usize;
     let mut found_sni = false;
     while pos + 4 <= exts.len() {
@@ -1269,17 +1308,17 @@ fn test_client_hello_includes_supported_groups(t: &mut testing::T) {
     let msg = build_client_hello_bytes(&client_random, "example.com");
 
     let body = &msg[4..];
-    if body.len() < 45 {
+    let (l, lok) = client_hello_layout(body);
+    if !lok {
         t.Fatal(fmt::Sprintf!("ClientHello body too short for extensions: %d", int64(body.len())));
         return;
     }
-    let ext_total_len = ((body[43] as usize) << 8) | (body[44] as usize);
-    if ext_total_len == 0 {
+    if l.ext_total_len == 0 {
         t.Fatal(string::from_static("TestClientHelloIncludesSupportedGroups: no extensions"));
         return;
     }
 
-    let exts = &body[45..45 + ext_total_len];
+    let exts = &body[l.ext_off..l.ext_off + l.ext_total_len];
     let mut pos = 0usize;
     let mut found_groups = false;
     while pos + 4 <= exts.len() {
@@ -1766,23 +1805,13 @@ fn test_client_hello_empty_sni(t: &mut testing::T) {
     let msg = build_client_hello_bytes(&client_random, "");
 
     let body = &msg[4..];
-    if body.len() < 43 {
+    let (l, lok) = client_hello_layout(body);
+    if !lok || l.ext_total_len == 0 {
         // No extensions at all — SNI is definitely absent
         return;
     }
 
-    let ext_total_len = if body.len() >= 45 {
-        ((body[43] as usize) << 8) | (body[44] as usize)
-    } else {
-        0
-    };
-
-    if ext_total_len == 0 {
-        // No extensions — SNI absent, as expected
-        return;
-    }
-
-    let exts = &body[45..45 + ext_total_len];
+    let exts = &body[l.ext_off..l.ext_off + l.ext_total_len];
     let mut pos = 0usize;
     while pos + 4 <= exts.len() {
         let ext_type = ((exts[pos] as u16) << 8) | (exts[pos + 1] as u16);
