@@ -1,0 +1,7254 @@
+P 0 (?i)^(0|[1-9]\x5cd*)(?:\x5c.(0|[1-9]\x5cd*)(?:\x5c.(0|[1-9]\x5cd*)(?:-([a-z0-9-.]+))?(?:\x5c+([a-z0-9-.]+))?)?)?$
+M 0 0 false
+S 0 0 nil
+M 0 1 false
+S 0 1 nil
+M 0 2 false
+S 0 2 nil
+M 0 3 false
+S 0 3 nil
+M 0 4 false
+S 0 4 nil
+M 0 5 false
+S 0 5 nil
+M 0 6 false
+S 0 6 nil
+M 0 7 false
+S 0 7 nil
+M 0 8 false
+S 0 8 nil
+M 0 9 false
+S 0 9 nil
+M 0 10 false
+S 0 10 nil
+M 0 11 false
+S 0 11 nil
+M 0 12 false
+S 0 12 nil
+M 0 13 false
+S 0 13 nil
+M 0 14 false
+S 0 14 nil
+M 0 15 false
+S 0 15 nil
+M 0 16 false
+S 0 16 nil
+M 0 17 false
+S 0 17 nil
+M 0 18 false
+S 0 18 nil
+M 0 19 false
+S 0 19 nil
+M 0 20 false
+S 0 20 nil
+M 0 21 false
+S 0 21 nil
+M 0 22 false
+S 0 22 nil
+M 0 23 false
+S 0 23 nil
+M 0 24 true
+S 0 24 6 0 0 - - - -
+M 0 25 true
+S 0 25 6 9 9 - - - -
+M 0 26 true
+S 0 26 6 0.0.0 0 0 0 - -
+M 0 27 true
+S 0 27 6 1.2.3 1 2 3 - -
+M 0 28 true
+S 0 28 6 1.2.3-Alpha.1 1 2 3 Alpha.1 -
+M 0 29 true
+S 0 29 6 1.2.3-ALPHA.1+Build.5 1 2 3 ALPHA.1 Build.5
+M 0 30 true
+S 0 30 6 1.2.3+BUILD 1 2 3 - BUILD
+M 0 31 false
+S 0 31 nil
+M 0 32 false
+S 0 32 nil
+M 0 33 false
+S 0 33 nil
+M 0 34 false
+S 0 34 nil
+M 0 35 false
+S 0 35 nil
+M 0 36 false
+S 0 36 nil
+M 0 37 false
+S 0 37 nil
+M 0 38 false
+S 0 38 nil
+M 0 39 false
+S 0 39 nil
+M 0 40 false
+S 0 40 nil
+M 0 41 false
+S 0 41 nil
+M 0 42 false
+S 0 42 nil
+M 0 43 false
+S 0 43 nil
+M 0 44 false
+S 0 44 nil
+M 0 45 false
+S 0 45 nil
+M 0 46 false
+S 0 46 nil
+M 0 47 false
+S 0 47 nil
+M 0 48 false
+S 0 48 nil
+M 0 49 true
+S 0 49 6 1 1 - - - -
+M 0 50 true
+S 0 50 6 12 12 - - - -
+M 0 51 false
+S 0 51 nil
+M 0 52 false
+S 0 52 nil
+P 1 (?i)^(?:0|[1-9]\x5cd*|[a-z-][a-z0-9-]*)(?:\x5c.(?:0|[1-9]\x5cd*|[a-zA-Z-][a-zA-Z0-9-]*))*$
+M 1 0 false
+S 1 0 nil
+M 1 1 true
+S 1 1 1 a
+M 1 2 true
+S 1 2 1 A
+M 1 3 true
+S 1 3 1 b
+M 1 4 true
+S 1 4 1 B
+M 1 5 true
+S 1 5 1 ab
+M 1 6 true
+S 1 6 1 aB
+M 1 7 true
+S 1 7 1 Ab
+M 1 8 true
+S 1 8 1 AB
+M 1 9 true
+S 1 9 1 abc
+M 1 10 true
+S 1 10 1 ABC
+M 1 11 true
+S 1 11 1 aBc
+M 1 12 true
+S 1 12 1 c
+M 1 13 true
+S 1 13 1 C
+M 1 14 true
+S 1 14 1 cd
+M 1 15 true
+S 1 15 1 CD
+M 1 16 true
+S 1 16 1 Cd
+M 1 17 true
+S 1 17 1 z
+M 1 18 true
+S 1 18 1 Z
+M 1 19 true
+S 1 19 1 q
+M 1 20 true
+S 1 20 1 Q
+M 1 21 false
+S 1 21 nil
+M 1 22 true
+S 1 22 1 -
+M 1 23 false
+S 1 23 nil
+M 1 24 true
+S 1 24 1 0
+M 1 25 true
+S 1 25 1 9
+M 1 26 true
+S 1 26 1 0.0.0
+M 1 27 true
+S 1 27 1 1.2.3
+M 1 28 false
+S 1 28 nil
+M 1 29 false
+S 1 29 nil
+M 1 30 false
+S 1 30 nil
+M 1 31 false
+S 1 31 nil
+M 1 32 false
+S 1 32 nil
+M 1 33 true
+S 1 33 1 abcdef
+M 1 34 true
+S 1 34 1 ABCDEF
+M 1 35 true
+S 1 35 1 aBcDeF
+M 1 36 true
+S 1 36 1 gG
+M 1 37 true
+S 1 37 1 abC
+M 1 38 true
+S 1 38 1 aBC
+M 1 39 true
+S 1 39 1 AbC
+M 1 40 true
+S 1 40 1 abcD
+M 1 41 true
+S 1 41 1 aBcD
+M 1 42 false
+S 1 42 nil
+M 1 43 false
+S 1 43 nil
+M 1 44 false
+S 1 44 nil
+M 1 45 true
+S 1 45 1 a.b
+M 1 46 true
+S 1 46 1 aXb
+M 1 47 false
+S 1 47 nil
+M 1 48 false
+S 1 48 nil
+M 1 49 true
+S 1 49 1 1
+M 1 50 true
+S 1 50 1 12
+M 1 51 true
+S 1 51 1 aab
+M 1 52 true
+S 1 52 1 aaB
+P 2 (?i)^(?:0|[1-9]\x5cd*|[a-z-][a-z0-9-]*)$
+M 2 0 false
+S 2 0 nil
+M 2 1 true
+S 2 1 1 a
+M 2 2 true
+S 2 2 1 A
+M 2 3 true
+S 2 3 1 b
+M 2 4 true
+S 2 4 1 B
+M 2 5 true
+S 2 5 1 ab
+M 2 6 true
+S 2 6 1 aB
+M 2 7 true
+S 2 7 1 Ab
+M 2 8 true
+S 2 8 1 AB
+M 2 9 true
+S 2 9 1 abc
+M 2 10 true
+S 2 10 1 ABC
+M 2 11 true
+S 2 11 1 aBc
+M 2 12 true
+S 2 12 1 c
+M 2 13 true
+S 2 13 1 C
+M 2 14 true
+S 2 14 1 cd
+M 2 15 true
+S 2 15 1 CD
+M 2 16 true
+S 2 16 1 Cd
+M 2 17 true
+S 2 17 1 z
+M 2 18 true
+S 2 18 1 Z
+M 2 19 true
+S 2 19 1 q
+M 2 20 true
+S 2 20 1 Q
+M 2 21 false
+S 2 21 nil
+M 2 22 true
+S 2 22 1 -
+M 2 23 false
+S 2 23 nil
+M 2 24 true
+S 2 24 1 0
+M 2 25 true
+S 2 25 1 9
+M 2 26 false
+S 2 26 nil
+M 2 27 false
+S 2 27 nil
+M 2 28 false
+S 2 28 nil
+M 2 29 false
+S 2 29 nil
+M 2 30 false
+S 2 30 nil
+M 2 31 false
+S 2 31 nil
+M 2 32 false
+S 2 32 nil
+M 2 33 true
+S 2 33 1 abcdef
+M 2 34 true
+S 2 34 1 ABCDEF
+M 2 35 true
+S 2 35 1 aBcDeF
+M 2 36 true
+S 2 36 1 gG
+M 2 37 true
+S 2 37 1 abC
+M 2 38 true
+S 2 38 1 aBC
+M 2 39 true
+S 2 39 1 AbC
+M 2 40 true
+S 2 40 1 abcD
+M 2 41 true
+S 2 41 1 aBcD
+M 2 42 false
+S 2 42 nil
+M 2 43 false
+S 2 43 nil
+M 2 44 false
+S 2 44 nil
+M 2 45 false
+S 2 45 nil
+M 2 46 true
+S 2 46 1 aXb
+M 2 47 false
+S 2 47 nil
+M 2 48 false
+S 2 48 nil
+M 2 49 true
+S 2 49 1 1
+M 2 50 true
+S 2 50 1 12
+M 2 51 true
+S 2 51 1 aab
+M 2 52 true
+S 2 52 1 aaB
+P 3 (?i)^[a-z0-9-]+(?:\x5c.[a-z0-9-]+)*$
+M 3 0 false
+S 3 0 nil
+M 3 1 true
+S 3 1 1 a
+M 3 2 true
+S 3 2 1 A
+M 3 3 true
+S 3 3 1 b
+M 3 4 true
+S 3 4 1 B
+M 3 5 true
+S 3 5 1 ab
+M 3 6 true
+S 3 6 1 aB
+M 3 7 true
+S 3 7 1 Ab
+M 3 8 true
+S 3 8 1 AB
+M 3 9 true
+S 3 9 1 abc
+M 3 10 true
+S 3 10 1 ABC
+M 3 11 true
+S 3 11 1 aBc
+M 3 12 true
+S 3 12 1 c
+M 3 13 true
+S 3 13 1 C
+M 3 14 true
+S 3 14 1 cd
+M 3 15 true
+S 3 15 1 CD
+M 3 16 true
+S 3 16 1 Cd
+M 3 17 true
+S 3 17 1 z
+M 3 18 true
+S 3 18 1 Z
+M 3 19 true
+S 3 19 1 q
+M 3 20 true
+S 3 20 1 Q
+M 3 21 false
+S 3 21 nil
+M 3 22 true
+S 3 22 1 -
+M 3 23 false
+S 3 23 nil
+M 3 24 true
+S 3 24 1 0
+M 3 25 true
+S 3 25 1 9
+M 3 26 true
+S 3 26 1 0.0.0
+M 3 27 true
+S 3 27 1 1.2.3
+M 3 28 true
+S 3 28 1 1.2.3-Alpha.1
+M 3 29 false
+S 3 29 nil
+M 3 30 false
+S 3 30 nil
+M 3 31 true
+S 3 31 1 01
+M 3 32 true
+S 3 32 1 1.2.3-
+M 3 33 true
+S 3 33 1 abcdef
+M 3 34 true
+S 3 34 1 ABCDEF
+M 3 35 true
+S 3 35 1 aBcDeF
+M 3 36 true
+S 3 36 1 gG
+M 3 37 true
+S 3 37 1 abC
+M 3 38 true
+S 3 38 1 aBC
+M 3 39 true
+S 3 39 1 AbC
+M 3 40 true
+S 3 40 1 abcD
+M 3 41 true
+S 3 41 1 aBcD
+M 3 42 false
+S 3 42 nil
+M 3 43 false
+S 3 43 nil
+M 3 44 false
+S 3 44 nil
+M 3 45 true
+S 3 45 1 a.b
+M 3 46 true
+S 3 46 1 aXb
+M 3 47 false
+S 3 47 nil
+M 3 48 false
+S 3 48 nil
+M 3 49 true
+S 3 49 1 1
+M 3 50 true
+S 3 50 1 12
+M 3 51 true
+S 3 51 1 aab
+M 3 52 true
+S 3 52 1 aaB
+P 4 (?i)^[a-z0-9-]+$
+M 4 0 false
+S 4 0 nil
+M 4 1 true
+S 4 1 1 a
+M 4 2 true
+S 4 2 1 A
+M 4 3 true
+S 4 3 1 b
+M 4 4 true
+S 4 4 1 B
+M 4 5 true
+S 4 5 1 ab
+M 4 6 true
+S 4 6 1 aB
+M 4 7 true
+S 4 7 1 Ab
+M 4 8 true
+S 4 8 1 AB
+M 4 9 true
+S 4 9 1 abc
+M 4 10 true
+S 4 10 1 ABC
+M 4 11 true
+S 4 11 1 aBc
+M 4 12 true
+S 4 12 1 c
+M 4 13 true
+S 4 13 1 C
+M 4 14 true
+S 4 14 1 cd
+M 4 15 true
+S 4 15 1 CD
+M 4 16 true
+S 4 16 1 Cd
+M 4 17 true
+S 4 17 1 z
+M 4 18 true
+S 4 18 1 Z
+M 4 19 true
+S 4 19 1 q
+M 4 20 true
+S 4 20 1 Q
+M 4 21 false
+S 4 21 nil
+M 4 22 true
+S 4 22 1 -
+M 4 23 false
+S 4 23 nil
+M 4 24 true
+S 4 24 1 0
+M 4 25 true
+S 4 25 1 9
+M 4 26 false
+S 4 26 nil
+M 4 27 false
+S 4 27 nil
+M 4 28 false
+S 4 28 nil
+M 4 29 false
+S 4 29 nil
+M 4 30 false
+S 4 30 nil
+M 4 31 true
+S 4 31 1 01
+M 4 32 false
+S 4 32 nil
+M 4 33 true
+S 4 33 1 abcdef
+M 4 34 true
+S 4 34 1 ABCDEF
+M 4 35 true
+S 4 35 1 aBcDeF
+M 4 36 true
+S 4 36 1 gG
+M 4 37 true
+S 4 37 1 abC
+M 4 38 true
+S 4 38 1 aBC
+M 4 39 true
+S 4 39 1 AbC
+M 4 40 true
+S 4 40 1 abcD
+M 4 41 true
+S 4 41 1 aBcD
+M 4 42 false
+S 4 42 nil
+M 4 43 false
+S 4 43 nil
+M 4 44 false
+S 4 44 nil
+M 4 45 false
+S 4 45 nil
+M 4 46 true
+S 4 46 1 aXb
+M 4 47 false
+S 4 47 nil
+M 4 48 false
+S 4 48 nil
+M 4 49 true
+S 4 49 1 1
+M 4 50 true
+S 4 50 1 12
+M 4 51 true
+S 4 51 1 aab
+M 4 52 true
+S 4 52 1 aaB
+P 5 ^a(?i)b$
+M 5 0 false
+S 5 0 nil
+M 5 1 false
+S 5 1 nil
+M 5 2 false
+S 5 2 nil
+M 5 3 false
+S 5 3 nil
+M 5 4 false
+S 5 4 nil
+M 5 5 true
+S 5 5 1 ab
+M 5 6 true
+S 5 6 1 aB
+M 5 7 false
+S 5 7 nil
+M 5 8 false
+S 5 8 nil
+M 5 9 false
+S 5 9 nil
+M 5 10 false
+S 5 10 nil
+M 5 11 false
+S 5 11 nil
+M 5 12 false
+S 5 12 nil
+M 5 13 false
+S 5 13 nil
+M 5 14 false
+S 5 14 nil
+M 5 15 false
+S 5 15 nil
+M 5 16 false
+S 5 16 nil
+M 5 17 false
+S 5 17 nil
+M 5 18 false
+S 5 18 nil
+M 5 19 false
+S 5 19 nil
+M 5 20 false
+S 5 20 nil
+M 5 21 false
+S 5 21 nil
+M 5 22 false
+S 5 22 nil
+M 5 23 false
+S 5 23 nil
+M 5 24 false
+S 5 24 nil
+M 5 25 false
+S 5 25 nil
+M 5 26 false
+S 5 26 nil
+M 5 27 false
+S 5 27 nil
+M 5 28 false
+S 5 28 nil
+M 5 29 false
+S 5 29 nil
+M 5 30 false
+S 5 30 nil
+M 5 31 false
+S 5 31 nil
+M 5 32 false
+S 5 32 nil
+M 5 33 false
+S 5 33 nil
+M 5 34 false
+S 5 34 nil
+M 5 35 false
+S 5 35 nil
+M 5 36 false
+S 5 36 nil
+M 5 37 false
+S 5 37 nil
+M 5 38 false
+S 5 38 nil
+M 5 39 false
+S 5 39 nil
+M 5 40 false
+S 5 40 nil
+M 5 41 false
+S 5 41 nil
+M 5 42 false
+S 5 42 nil
+M 5 43 false
+S 5 43 nil
+M 5 44 false
+S 5 44 nil
+M 5 45 false
+S 5 45 nil
+M 5 46 false
+S 5 46 nil
+M 5 47 false
+S 5 47 nil
+M 5 48 false
+S 5 48 nil
+M 5 49 false
+S 5 49 nil
+M 5 50 false
+S 5 50 nil
+M 5 51 false
+S 5 51 nil
+M 5 52 false
+S 5 52 nil
+P 6 ^(a(?i)b)c$
+M 6 0 false
+S 6 0 nil
+M 6 1 false
+S 6 1 nil
+M 6 2 false
+S 6 2 nil
+M 6 3 false
+S 6 3 nil
+M 6 4 false
+S 6 4 nil
+M 6 5 false
+S 6 5 nil
+M 6 6 false
+S 6 6 nil
+M 6 7 false
+S 6 7 nil
+M 6 8 false
+S 6 8 nil
+M 6 9 true
+S 6 9 2 abc ab
+M 6 10 false
+S 6 10 nil
+M 6 11 true
+S 6 11 2 aBc aB
+M 6 12 false
+S 6 12 nil
+M 6 13 false
+S 6 13 nil
+M 6 14 false
+S 6 14 nil
+M 6 15 false
+S 6 15 nil
+M 6 16 false
+S 6 16 nil
+M 6 17 false
+S 6 17 nil
+M 6 18 false
+S 6 18 nil
+M 6 19 false
+S 6 19 nil
+M 6 20 false
+S 6 20 nil
+M 6 21 false
+S 6 21 nil
+M 6 22 false
+S 6 22 nil
+M 6 23 false
+S 6 23 nil
+M 6 24 false
+S 6 24 nil
+M 6 25 false
+S 6 25 nil
+M 6 26 false
+S 6 26 nil
+M 6 27 false
+S 6 27 nil
+M 6 28 false
+S 6 28 nil
+M 6 29 false
+S 6 29 nil
+M 6 30 false
+S 6 30 nil
+M 6 31 false
+S 6 31 nil
+M 6 32 false
+S 6 32 nil
+M 6 33 false
+S 6 33 nil
+M 6 34 false
+S 6 34 nil
+M 6 35 false
+S 6 35 nil
+M 6 36 false
+S 6 36 nil
+M 6 37 false
+S 6 37 nil
+M 6 38 false
+S 6 38 nil
+M 6 39 false
+S 6 39 nil
+M 6 40 false
+S 6 40 nil
+M 6 41 false
+S 6 41 nil
+M 6 42 false
+S 6 42 nil
+M 6 43 false
+S 6 43 nil
+M 6 44 false
+S 6 44 nil
+M 6 45 false
+S 6 45 nil
+M 6 46 false
+S 6 46 nil
+M 6 47 false
+S 6 47 nil
+M 6 48 false
+S 6 48 nil
+M 6 49 false
+S 6 49 nil
+M 6 50 false
+S 6 50 nil
+M 6 51 false
+S 6 51 nil
+M 6 52 false
+S 6 52 nil
+P 7 ^(?:a(?i)b)c$
+M 7 0 false
+S 7 0 nil
+M 7 1 false
+S 7 1 nil
+M 7 2 false
+S 7 2 nil
+M 7 3 false
+S 7 3 nil
+M 7 4 false
+S 7 4 nil
+M 7 5 false
+S 7 5 nil
+M 7 6 false
+S 7 6 nil
+M 7 7 false
+S 7 7 nil
+M 7 8 false
+S 7 8 nil
+M 7 9 true
+S 7 9 1 abc
+M 7 10 false
+S 7 10 nil
+M 7 11 true
+S 7 11 1 aBc
+M 7 12 false
+S 7 12 nil
+M 7 13 false
+S 7 13 nil
+M 7 14 false
+S 7 14 nil
+M 7 15 false
+S 7 15 nil
+M 7 16 false
+S 7 16 nil
+M 7 17 false
+S 7 17 nil
+M 7 18 false
+S 7 18 nil
+M 7 19 false
+S 7 19 nil
+M 7 20 false
+S 7 20 nil
+M 7 21 false
+S 7 21 nil
+M 7 22 false
+S 7 22 nil
+M 7 23 false
+S 7 23 nil
+M 7 24 false
+S 7 24 nil
+M 7 25 false
+S 7 25 nil
+M 7 26 false
+S 7 26 nil
+M 7 27 false
+S 7 27 nil
+M 7 28 false
+S 7 28 nil
+M 7 29 false
+S 7 29 nil
+M 7 30 false
+S 7 30 nil
+M 7 31 false
+S 7 31 nil
+M 7 32 false
+S 7 32 nil
+M 7 33 false
+S 7 33 nil
+M 7 34 false
+S 7 34 nil
+M 7 35 false
+S 7 35 nil
+M 7 36 false
+S 7 36 nil
+M 7 37 false
+S 7 37 nil
+M 7 38 false
+S 7 38 nil
+M 7 39 false
+S 7 39 nil
+M 7 40 false
+S 7 40 nil
+M 7 41 false
+S 7 41 nil
+M 7 42 false
+S 7 42 nil
+M 7 43 false
+S 7 43 nil
+M 7 44 false
+S 7 44 nil
+M 7 45 false
+S 7 45 nil
+M 7 46 false
+S 7 46 nil
+M 7 47 false
+S 7 47 nil
+M 7 48 false
+S 7 48 nil
+M 7 49 false
+S 7 49 nil
+M 7 50 false
+S 7 50 nil
+M 7 51 false
+S 7 51 nil
+M 7 52 false
+S 7 52 nil
+P 8 ^a(?i:b)c$
+M 8 0 false
+S 8 0 nil
+M 8 1 false
+S 8 1 nil
+M 8 2 false
+S 8 2 nil
+M 8 3 false
+S 8 3 nil
+M 8 4 false
+S 8 4 nil
+M 8 5 false
+S 8 5 nil
+M 8 6 false
+S 8 6 nil
+M 8 7 false
+S 8 7 nil
+M 8 8 false
+S 8 8 nil
+M 8 9 true
+S 8 9 1 abc
+M 8 10 false
+S 8 10 nil
+M 8 11 true
+S 8 11 1 aBc
+M 8 12 false
+S 8 12 nil
+M 8 13 false
+S 8 13 nil
+M 8 14 false
+S 8 14 nil
+M 8 15 false
+S 8 15 nil
+M 8 16 false
+S 8 16 nil
+M 8 17 false
+S 8 17 nil
+M 8 18 false
+S 8 18 nil
+M 8 19 false
+S 8 19 nil
+M 8 20 false
+S 8 20 nil
+M 8 21 false
+S 8 21 nil
+M 8 22 false
+S 8 22 nil
+M 8 23 false
+S 8 23 nil
+M 8 24 false
+S 8 24 nil
+M 8 25 false
+S 8 25 nil
+M 8 26 false
+S 8 26 nil
+M 8 27 false
+S 8 27 nil
+M 8 28 false
+S 8 28 nil
+M 8 29 false
+S 8 29 nil
+M 8 30 false
+S 8 30 nil
+M 8 31 false
+S 8 31 nil
+M 8 32 false
+S 8 32 nil
+M 8 33 false
+S 8 33 nil
+M 8 34 false
+S 8 34 nil
+M 8 35 false
+S 8 35 nil
+M 8 36 false
+S 8 36 nil
+M 8 37 false
+S 8 37 nil
+M 8 38 false
+S 8 38 nil
+M 8 39 false
+S 8 39 nil
+M 8 40 false
+S 8 40 nil
+M 8 41 false
+S 8 41 nil
+M 8 42 false
+S 8 42 nil
+M 8 43 false
+S 8 43 nil
+M 8 44 false
+S 8 44 nil
+M 8 45 false
+S 8 45 nil
+M 8 46 false
+S 8 46 nil
+M 8 47 false
+S 8 47 nil
+M 8 48 false
+S 8 48 nil
+M 8 49 false
+S 8 49 nil
+M 8 50 false
+S 8 50 nil
+M 8 51 false
+S 8 51 nil
+M 8 52 false
+S 8 52 nil
+P 9 ^(?i:ab)c$
+M 9 0 false
+S 9 0 nil
+M 9 1 false
+S 9 1 nil
+M 9 2 false
+S 9 2 nil
+M 9 3 false
+S 9 3 nil
+M 9 4 false
+S 9 4 nil
+M 9 5 false
+S 9 5 nil
+M 9 6 false
+S 9 6 nil
+M 9 7 false
+S 9 7 nil
+M 9 8 false
+S 9 8 nil
+M 9 9 true
+S 9 9 1 abc
+M 9 10 false
+S 9 10 nil
+M 9 11 true
+S 9 11 1 aBc
+M 9 12 false
+S 9 12 nil
+M 9 13 false
+S 9 13 nil
+M 9 14 false
+S 9 14 nil
+M 9 15 false
+S 9 15 nil
+M 9 16 false
+S 9 16 nil
+M 9 17 false
+S 9 17 nil
+M 9 18 false
+S 9 18 nil
+M 9 19 false
+S 9 19 nil
+M 9 20 false
+S 9 20 nil
+M 9 21 false
+S 9 21 nil
+M 9 22 false
+S 9 22 nil
+M 9 23 false
+S 9 23 nil
+M 9 24 false
+S 9 24 nil
+M 9 25 false
+S 9 25 nil
+M 9 26 false
+S 9 26 nil
+M 9 27 false
+S 9 27 nil
+M 9 28 false
+S 9 28 nil
+M 9 29 false
+S 9 29 nil
+M 9 30 false
+S 9 30 nil
+M 9 31 false
+S 9 31 nil
+M 9 32 false
+S 9 32 nil
+M 9 33 false
+S 9 33 nil
+M 9 34 false
+S 9 34 nil
+M 9 35 false
+S 9 35 nil
+M 9 36 false
+S 9 36 nil
+M 9 37 false
+S 9 37 nil
+M 9 38 false
+S 9 38 nil
+M 9 39 false
+S 9 39 nil
+M 9 40 false
+S 9 40 nil
+M 9 41 false
+S 9 41 nil
+M 9 42 false
+S 9 42 nil
+M 9 43 false
+S 9 43 nil
+M 9 44 false
+S 9 44 nil
+M 9 45 false
+S 9 45 nil
+M 9 46 false
+S 9 46 nil
+M 9 47 false
+S 9 47 nil
+M 9 48 false
+S 9 48 nil
+M 9 49 false
+S 9 49 nil
+M 9 50 false
+S 9 50 nil
+M 9 51 false
+S 9 51 nil
+M 9 52 false
+S 9 52 nil
+P 10 ^(?i)a(?-i)b$
+M 10 0 false
+S 10 0 nil
+M 10 1 false
+S 10 1 nil
+M 10 2 false
+S 10 2 nil
+M 10 3 false
+S 10 3 nil
+M 10 4 false
+S 10 4 nil
+M 10 5 true
+S 10 5 1 ab
+M 10 6 false
+S 10 6 nil
+M 10 7 true
+S 10 7 1 Ab
+M 10 8 false
+S 10 8 nil
+M 10 9 false
+S 10 9 nil
+M 10 10 false
+S 10 10 nil
+M 10 11 false
+S 10 11 nil
+M 10 12 false
+S 10 12 nil
+M 10 13 false
+S 10 13 nil
+M 10 14 false
+S 10 14 nil
+M 10 15 false
+S 10 15 nil
+M 10 16 false
+S 10 16 nil
+M 10 17 false
+S 10 17 nil
+M 10 18 false
+S 10 18 nil
+M 10 19 false
+S 10 19 nil
+M 10 20 false
+S 10 20 nil
+M 10 21 false
+S 10 21 nil
+M 10 22 false
+S 10 22 nil
+M 10 23 false
+S 10 23 nil
+M 10 24 false
+S 10 24 nil
+M 10 25 false
+S 10 25 nil
+M 10 26 false
+S 10 26 nil
+M 10 27 false
+S 10 27 nil
+M 10 28 false
+S 10 28 nil
+M 10 29 false
+S 10 29 nil
+M 10 30 false
+S 10 30 nil
+M 10 31 false
+S 10 31 nil
+M 10 32 false
+S 10 32 nil
+M 10 33 false
+S 10 33 nil
+M 10 34 false
+S 10 34 nil
+M 10 35 false
+S 10 35 nil
+M 10 36 false
+S 10 36 nil
+M 10 37 false
+S 10 37 nil
+M 10 38 false
+S 10 38 nil
+M 10 39 false
+S 10 39 nil
+M 10 40 false
+S 10 40 nil
+M 10 41 false
+S 10 41 nil
+M 10 42 false
+S 10 42 nil
+M 10 43 false
+S 10 43 nil
+M 10 44 false
+S 10 44 nil
+M 10 45 false
+S 10 45 nil
+M 10 46 false
+S 10 46 nil
+M 10 47 false
+S 10 47 nil
+M 10 48 false
+S 10 48 nil
+M 10 49 false
+S 10 49 nil
+M 10 50 false
+S 10 50 nil
+M 10 51 false
+S 10 51 nil
+M 10 52 false
+S 10 52 nil
+P 11 ^(?i)(?-i:a)b$
+M 11 0 false
+S 11 0 nil
+M 11 1 false
+S 11 1 nil
+M 11 2 false
+S 11 2 nil
+M 11 3 false
+S 11 3 nil
+M 11 4 false
+S 11 4 nil
+M 11 5 true
+S 11 5 1 ab
+M 11 6 true
+S 11 6 1 aB
+M 11 7 false
+S 11 7 nil
+M 11 8 false
+S 11 8 nil
+M 11 9 false
+S 11 9 nil
+M 11 10 false
+S 11 10 nil
+M 11 11 false
+S 11 11 nil
+M 11 12 false
+S 11 12 nil
+M 11 13 false
+S 11 13 nil
+M 11 14 false
+S 11 14 nil
+M 11 15 false
+S 11 15 nil
+M 11 16 false
+S 11 16 nil
+M 11 17 false
+S 11 17 nil
+M 11 18 false
+S 11 18 nil
+M 11 19 false
+S 11 19 nil
+M 11 20 false
+S 11 20 nil
+M 11 21 false
+S 11 21 nil
+M 11 22 false
+S 11 22 nil
+M 11 23 false
+S 11 23 nil
+M 11 24 false
+S 11 24 nil
+M 11 25 false
+S 11 25 nil
+M 11 26 false
+S 11 26 nil
+M 11 27 false
+S 11 27 nil
+M 11 28 false
+S 11 28 nil
+M 11 29 false
+S 11 29 nil
+M 11 30 false
+S 11 30 nil
+M 11 31 false
+S 11 31 nil
+M 11 32 false
+S 11 32 nil
+M 11 33 false
+S 11 33 nil
+M 11 34 false
+S 11 34 nil
+M 11 35 false
+S 11 35 nil
+M 11 36 false
+S 11 36 nil
+M 11 37 false
+S 11 37 nil
+M 11 38 false
+S 11 38 nil
+M 11 39 false
+S 11 39 nil
+M 11 40 false
+S 11 40 nil
+M 11 41 false
+S 11 41 nil
+M 11 42 false
+S 11 42 nil
+M 11 43 false
+S 11 43 nil
+M 11 44 false
+S 11 44 nil
+M 11 45 false
+S 11 45 nil
+M 11 46 false
+S 11 46 nil
+M 11 47 false
+S 11 47 nil
+M 11 48 false
+S 11 48 nil
+M 11 49 false
+S 11 49 nil
+M 11 50 false
+S 11 50 nil
+M 11 51 false
+S 11 51 nil
+M 11 52 false
+S 11 52 nil
+P 12 ^(?i)ab|cd$
+M 12 0 false
+S 12 0 nil
+M 12 1 false
+S 12 1 nil
+M 12 2 false
+S 12 2 nil
+M 12 3 false
+S 12 3 nil
+M 12 4 false
+S 12 4 nil
+M 12 5 true
+S 12 5 1 ab
+M 12 6 true
+S 12 6 1 aB
+M 12 7 true
+S 12 7 1 Ab
+M 12 8 true
+S 12 8 1 AB
+M 12 9 true
+S 12 9 1 ab
+M 12 10 true
+S 12 10 1 AB
+M 12 11 true
+S 12 11 1 aB
+M 12 12 false
+S 12 12 nil
+M 12 13 false
+S 12 13 nil
+M 12 14 true
+S 12 14 1 cd
+M 12 15 true
+S 12 15 1 CD
+M 12 16 true
+S 12 16 1 Cd
+M 12 17 false
+S 12 17 nil
+M 12 18 false
+S 12 18 nil
+M 12 19 false
+S 12 19 nil
+M 12 20 false
+S 12 20 nil
+M 12 21 false
+S 12 21 nil
+M 12 22 false
+S 12 22 nil
+M 12 23 false
+S 12 23 nil
+M 12 24 false
+S 12 24 nil
+M 12 25 false
+S 12 25 nil
+M 12 26 false
+S 12 26 nil
+M 12 27 false
+S 12 27 nil
+M 12 28 false
+S 12 28 nil
+M 12 29 false
+S 12 29 nil
+M 12 30 false
+S 12 30 nil
+M 12 31 false
+S 12 31 nil
+M 12 32 false
+S 12 32 nil
+M 12 33 true
+S 12 33 1 ab
+M 12 34 true
+S 12 34 1 AB
+M 12 35 true
+S 12 35 1 aB
+M 12 36 false
+S 12 36 nil
+M 12 37 true
+S 12 37 1 ab
+M 12 38 true
+S 12 38 1 aB
+M 12 39 true
+S 12 39 1 Ab
+M 12 40 true
+S 12 40 1 ab
+M 12 41 true
+S 12 41 1 aB
+M 12 42 false
+S 12 42 nil
+M 12 43 false
+S 12 43 nil
+M 12 44 false
+S 12 44 nil
+M 12 45 false
+S 12 45 nil
+M 12 46 false
+S 12 46 nil
+M 12 47 false
+S 12 47 nil
+M 12 48 false
+S 12 48 nil
+M 12 49 false
+S 12 49 nil
+M 12 50 false
+S 12 50 nil
+M 12 51 false
+S 12 51 nil
+M 12 52 false
+S 12 52 nil
+P 13 ^((?i)ab|cd)$
+M 13 0 false
+S 13 0 nil
+M 13 1 false
+S 13 1 nil
+M 13 2 false
+S 13 2 nil
+M 13 3 false
+S 13 3 nil
+M 13 4 false
+S 13 4 nil
+M 13 5 true
+S 13 5 2 ab ab
+M 13 6 true
+S 13 6 2 aB aB
+M 13 7 true
+S 13 7 2 Ab Ab
+M 13 8 true
+S 13 8 2 AB AB
+M 13 9 false
+S 13 9 nil
+M 13 10 false
+S 13 10 nil
+M 13 11 false
+S 13 11 nil
+M 13 12 false
+S 13 12 nil
+M 13 13 false
+S 13 13 nil
+M 13 14 true
+S 13 14 2 cd cd
+M 13 15 true
+S 13 15 2 CD CD
+M 13 16 true
+S 13 16 2 Cd Cd
+M 13 17 false
+S 13 17 nil
+M 13 18 false
+S 13 18 nil
+M 13 19 false
+S 13 19 nil
+M 13 20 false
+S 13 20 nil
+M 13 21 false
+S 13 21 nil
+M 13 22 false
+S 13 22 nil
+M 13 23 false
+S 13 23 nil
+M 13 24 false
+S 13 24 nil
+M 13 25 false
+S 13 25 nil
+M 13 26 false
+S 13 26 nil
+M 13 27 false
+S 13 27 nil
+M 13 28 false
+S 13 28 nil
+M 13 29 false
+S 13 29 nil
+M 13 30 false
+S 13 30 nil
+M 13 31 false
+S 13 31 nil
+M 13 32 false
+S 13 32 nil
+M 13 33 false
+S 13 33 nil
+M 13 34 false
+S 13 34 nil
+M 13 35 false
+S 13 35 nil
+M 13 36 false
+S 13 36 nil
+M 13 37 false
+S 13 37 nil
+M 13 38 false
+S 13 38 nil
+M 13 39 false
+S 13 39 nil
+M 13 40 false
+S 13 40 nil
+M 13 41 false
+S 13 41 nil
+M 13 42 false
+S 13 42 nil
+M 13 43 false
+S 13 43 nil
+M 13 44 false
+S 13 44 nil
+M 13 45 false
+S 13 45 nil
+M 13 46 false
+S 13 46 nil
+M 13 47 false
+S 13 47 nil
+M 13 48 false
+S 13 48 nil
+M 13 49 false
+S 13 49 nil
+M 13 50 false
+S 13 50 nil
+M 13 51 false
+S 13 51 nil
+M 13 52 false
+S 13 52 nil
+P 14 ^(?i)[a-f]+$
+M 14 0 false
+S 14 0 nil
+M 14 1 true
+S 14 1 1 a
+M 14 2 true
+S 14 2 1 A
+M 14 3 true
+S 14 3 1 b
+M 14 4 true
+S 14 4 1 B
+M 14 5 true
+S 14 5 1 ab
+M 14 6 true
+S 14 6 1 aB
+M 14 7 true
+S 14 7 1 Ab
+M 14 8 true
+S 14 8 1 AB
+M 14 9 true
+S 14 9 1 abc
+M 14 10 true
+S 14 10 1 ABC
+M 14 11 true
+S 14 11 1 aBc
+M 14 12 true
+S 14 12 1 c
+M 14 13 true
+S 14 13 1 C
+M 14 14 true
+S 14 14 1 cd
+M 14 15 true
+S 14 15 1 CD
+M 14 16 true
+S 14 16 1 Cd
+M 14 17 false
+S 14 17 nil
+M 14 18 false
+S 14 18 nil
+M 14 19 false
+S 14 19 nil
+M 14 20 false
+S 14 20 nil
+M 14 21 false
+S 14 21 nil
+M 14 22 false
+S 14 22 nil
+M 14 23 false
+S 14 23 nil
+M 14 24 false
+S 14 24 nil
+M 14 25 false
+S 14 25 nil
+M 14 26 false
+S 14 26 nil
+M 14 27 false
+S 14 27 nil
+M 14 28 false
+S 14 28 nil
+M 14 29 false
+S 14 29 nil
+M 14 30 false
+S 14 30 nil
+M 14 31 false
+S 14 31 nil
+M 14 32 false
+S 14 32 nil
+M 14 33 true
+S 14 33 1 abcdef
+M 14 34 true
+S 14 34 1 ABCDEF
+M 14 35 true
+S 14 35 1 aBcDeF
+M 14 36 false
+S 14 36 nil
+M 14 37 true
+S 14 37 1 abC
+M 14 38 true
+S 14 38 1 aBC
+M 14 39 true
+S 14 39 1 AbC
+M 14 40 true
+S 14 40 1 abcD
+M 14 41 true
+S 14 41 1 aBcD
+M 14 42 false
+S 14 42 nil
+M 14 43 false
+S 14 43 nil
+M 14 44 false
+S 14 44 nil
+M 14 45 false
+S 14 45 nil
+M 14 46 false
+S 14 46 nil
+M 14 47 false
+S 14 47 nil
+M 14 48 false
+S 14 48 nil
+M 14 49 false
+S 14 49 nil
+M 14 50 false
+S 14 50 nil
+M 14 51 true
+S 14 51 1 aab
+M 14 52 true
+S 14 52 1 aaB
+P 15 ^(?i)[^a-f]+$
+M 15 0 false
+S 15 0 nil
+M 15 1 false
+S 15 1 nil
+M 15 2 false
+S 15 2 nil
+M 15 3 false
+S 15 3 nil
+M 15 4 false
+S 15 4 nil
+M 15 5 false
+S 15 5 nil
+M 15 6 false
+S 15 6 nil
+M 15 7 false
+S 15 7 nil
+M 15 8 false
+S 15 8 nil
+M 15 9 false
+S 15 9 nil
+M 15 10 false
+S 15 10 nil
+M 15 11 false
+S 15 11 nil
+M 15 12 false
+S 15 12 nil
+M 15 13 false
+S 15 13 nil
+M 15 14 false
+S 15 14 nil
+M 15 15 false
+S 15 15 nil
+M 15 16 false
+S 15 16 nil
+M 15 17 true
+S 15 17 1 z
+M 15 18 true
+S 15 18 1 Z
+M 15 19 true
+S 15 19 1 q
+M 15 20 true
+S 15 20 1 Q
+M 15 21 true
+S 15 21 1 _
+M 15 22 true
+S 15 22 1 -
+M 15 23 true
+S 15 23 1 _-1
+M 15 24 true
+S 15 24 1 0
+M 15 25 true
+S 15 25 1 9
+M 15 26 true
+S 15 26 1 0.0.0
+M 15 27 true
+S 15 27 1 1.2.3
+M 15 28 false
+S 15 28 nil
+M 15 29 false
+S 15 29 nil
+M 15 30 false
+S 15 30 nil
+M 15 31 true
+S 15 31 1 01
+M 15 32 true
+S 15 32 1 1.2.3-
+M 15 33 false
+S 15 33 nil
+M 15 34 false
+S 15 34 nil
+M 15 35 false
+S 15 35 nil
+M 15 36 true
+S 15 36 1 gG
+M 15 37 false
+S 15 37 nil
+M 15 38 false
+S 15 38 nil
+M 15 39 false
+S 15 39 nil
+M 15 40 false
+S 15 40 nil
+M 15 41 false
+S 15 41 nil
+M 15 42 true
+S 15 42 1 [
+M 15 43 true
+S 15 43 1 ]
+M 15 44 true
+S 15 44 1 ^
+M 15 45 false
+S 15 45 nil
+M 15 46 false
+S 15 46 nil
+M 15 47 false
+S 15 47 nil
+M 15 48 true
+S 15 48 1 \x5c
+M 15 49 true
+S 15 49 1 1
+M 15 50 true
+S 15 50 1 12
+M 15 51 false
+S 15 51 nil
+M 15 52 false
+S 15 52 nil
+P 16 ^(?i)[a-fA-F0-9]+$
+M 16 0 false
+S 16 0 nil
+M 16 1 true
+S 16 1 1 a
+M 16 2 true
+S 16 2 1 A
+M 16 3 true
+S 16 3 1 b
+M 16 4 true
+S 16 4 1 B
+M 16 5 true
+S 16 5 1 ab
+M 16 6 true
+S 16 6 1 aB
+M 16 7 true
+S 16 7 1 Ab
+M 16 8 true
+S 16 8 1 AB
+M 16 9 true
+S 16 9 1 abc
+M 16 10 true
+S 16 10 1 ABC
+M 16 11 true
+S 16 11 1 aBc
+M 16 12 true
+S 16 12 1 c
+M 16 13 true
+S 16 13 1 C
+M 16 14 true
+S 16 14 1 cd
+M 16 15 true
+S 16 15 1 CD
+M 16 16 true
+S 16 16 1 Cd
+M 16 17 false
+S 16 17 nil
+M 16 18 false
+S 16 18 nil
+M 16 19 false
+S 16 19 nil
+M 16 20 false
+S 16 20 nil
+M 16 21 false
+S 16 21 nil
+M 16 22 false
+S 16 22 nil
+M 16 23 false
+S 16 23 nil
+M 16 24 true
+S 16 24 1 0
+M 16 25 true
+S 16 25 1 9
+M 16 26 false
+S 16 26 nil
+M 16 27 false
+S 16 27 nil
+M 16 28 false
+S 16 28 nil
+M 16 29 false
+S 16 29 nil
+M 16 30 false
+S 16 30 nil
+M 16 31 true
+S 16 31 1 01
+M 16 32 false
+S 16 32 nil
+M 16 33 true
+S 16 33 1 abcdef
+M 16 34 true
+S 16 34 1 ABCDEF
+M 16 35 true
+S 16 35 1 aBcDeF
+M 16 36 false
+S 16 36 nil
+M 16 37 true
+S 16 37 1 abC
+M 16 38 true
+S 16 38 1 aBC
+M 16 39 true
+S 16 39 1 AbC
+M 16 40 true
+S 16 40 1 abcD
+M 16 41 true
+S 16 41 1 aBcD
+M 16 42 false
+S 16 42 nil
+M 16 43 false
+S 16 43 nil
+M 16 44 false
+S 16 44 nil
+M 16 45 false
+S 16 45 nil
+M 16 46 false
+S 16 46 nil
+M 16 47 false
+S 16 47 nil
+M 16 48 false
+S 16 48 nil
+M 16 49 true
+S 16 49 1 1
+M 16 50 true
+S 16 50 1 12
+M 16 51 true
+S 16 51 1 aab
+M 16 52 true
+S 16 52 1 aaB
+P 17 ^(?i)[^0-9]$
+M 17 0 false
+S 17 0 nil
+M 17 1 true
+S 17 1 1 a
+M 17 2 true
+S 17 2 1 A
+M 17 3 true
+S 17 3 1 b
+M 17 4 true
+S 17 4 1 B
+M 17 5 false
+S 17 5 nil
+M 17 6 false
+S 17 6 nil
+M 17 7 false
+S 17 7 nil
+M 17 8 false
+S 17 8 nil
+M 17 9 false
+S 17 9 nil
+M 17 10 false
+S 17 10 nil
+M 17 11 false
+S 17 11 nil
+M 17 12 true
+S 17 12 1 c
+M 17 13 true
+S 17 13 1 C
+M 17 14 false
+S 17 14 nil
+M 17 15 false
+S 17 15 nil
+M 17 16 false
+S 17 16 nil
+M 17 17 true
+S 17 17 1 z
+M 17 18 true
+S 17 18 1 Z
+M 17 19 true
+S 17 19 1 q
+M 17 20 true
+S 17 20 1 Q
+M 17 21 true
+S 17 21 1 _
+M 17 22 true
+S 17 22 1 -
+M 17 23 false
+S 17 23 nil
+M 17 24 false
+S 17 24 nil
+M 17 25 false
+S 17 25 nil
+M 17 26 false
+S 17 26 nil
+M 17 27 false
+S 17 27 nil
+M 17 28 false
+S 17 28 nil
+M 17 29 false
+S 17 29 nil
+M 17 30 false
+S 17 30 nil
+M 17 31 false
+S 17 31 nil
+M 17 32 false
+S 17 32 nil
+M 17 33 false
+S 17 33 nil
+M 17 34 false
+S 17 34 nil
+M 17 35 false
+S 17 35 nil
+M 17 36 false
+S 17 36 nil
+M 17 37 false
+S 17 37 nil
+M 17 38 false
+S 17 38 nil
+M 17 39 false
+S 17 39 nil
+M 17 40 false
+S 17 40 nil
+M 17 41 false
+S 17 41 nil
+M 17 42 true
+S 17 42 1 [
+M 17 43 true
+S 17 43 1 ]
+M 17 44 true
+S 17 44 1 ^
+M 17 45 false
+S 17 45 nil
+M 17 46 false
+S 17 46 nil
+M 17 47 false
+S 17 47 nil
+M 17 48 true
+S 17 48 1 \x5c
+M 17 49 false
+S 17 49 nil
+M 17 50 false
+S 17 50 nil
+M 17 51 false
+S 17 51 nil
+M 17 52 false
+S 17 52 nil
+P 18 ^(?i)[z]$
+M 18 0 false
+S 18 0 nil
+M 18 1 false
+S 18 1 nil
+M 18 2 false
+S 18 2 nil
+M 18 3 false
+S 18 3 nil
+M 18 4 false
+S 18 4 nil
+M 18 5 false
+S 18 5 nil
+M 18 6 false
+S 18 6 nil
+M 18 7 false
+S 18 7 nil
+M 18 8 false
+S 18 8 nil
+M 18 9 false
+S 18 9 nil
+M 18 10 false
+S 18 10 nil
+M 18 11 false
+S 18 11 nil
+M 18 12 false
+S 18 12 nil
+M 18 13 false
+S 18 13 nil
+M 18 14 false
+S 18 14 nil
+M 18 15 false
+S 18 15 nil
+M 18 16 false
+S 18 16 nil
+M 18 17 true
+S 18 17 1 z
+M 18 18 true
+S 18 18 1 Z
+M 18 19 false
+S 18 19 nil
+M 18 20 false
+S 18 20 nil
+M 18 21 false
+S 18 21 nil
+M 18 22 false
+S 18 22 nil
+M 18 23 false
+S 18 23 nil
+M 18 24 false
+S 18 24 nil
+M 18 25 false
+S 18 25 nil
+M 18 26 false
+S 18 26 nil
+M 18 27 false
+S 18 27 nil
+M 18 28 false
+S 18 28 nil
+M 18 29 false
+S 18 29 nil
+M 18 30 false
+S 18 30 nil
+M 18 31 false
+S 18 31 nil
+M 18 32 false
+S 18 32 nil
+M 18 33 false
+S 18 33 nil
+M 18 34 false
+S 18 34 nil
+M 18 35 false
+S 18 35 nil
+M 18 36 false
+S 18 36 nil
+M 18 37 false
+S 18 37 nil
+M 18 38 false
+S 18 38 nil
+M 18 39 false
+S 18 39 nil
+M 18 40 false
+S 18 40 nil
+M 18 41 false
+S 18 41 nil
+M 18 42 false
+S 18 42 nil
+M 18 43 false
+S 18 43 nil
+M 18 44 false
+S 18 44 nil
+M 18 45 false
+S 18 45 nil
+M 18 46 false
+S 18 46 nil
+M 18 47 false
+S 18 47 nil
+M 18 48 false
+S 18 48 nil
+M 18 49 false
+S 18 49 nil
+M 18 50 false
+S 18 50 nil
+M 18 51 false
+S 18 51 nil
+M 18 52 false
+S 18 52 nil
+P 19 ^(?i)[a-]$
+M 19 0 false
+S 19 0 nil
+M 19 1 true
+S 19 1 1 a
+M 19 2 true
+S 19 2 1 A
+M 19 3 false
+S 19 3 nil
+M 19 4 false
+S 19 4 nil
+M 19 5 false
+S 19 5 nil
+M 19 6 false
+S 19 6 nil
+M 19 7 false
+S 19 7 nil
+M 19 8 false
+S 19 8 nil
+M 19 9 false
+S 19 9 nil
+M 19 10 false
+S 19 10 nil
+M 19 11 false
+S 19 11 nil
+M 19 12 false
+S 19 12 nil
+M 19 13 false
+S 19 13 nil
+M 19 14 false
+S 19 14 nil
+M 19 15 false
+S 19 15 nil
+M 19 16 false
+S 19 16 nil
+M 19 17 false
+S 19 17 nil
+M 19 18 false
+S 19 18 nil
+M 19 19 false
+S 19 19 nil
+M 19 20 false
+S 19 20 nil
+M 19 21 false
+S 19 21 nil
+M 19 22 true
+S 19 22 1 -
+M 19 23 false
+S 19 23 nil
+M 19 24 false
+S 19 24 nil
+M 19 25 false
+S 19 25 nil
+M 19 26 false
+S 19 26 nil
+M 19 27 false
+S 19 27 nil
+M 19 28 false
+S 19 28 nil
+M 19 29 false
+S 19 29 nil
+M 19 30 false
+S 19 30 nil
+M 19 31 false
+S 19 31 nil
+M 19 32 false
+S 19 32 nil
+M 19 33 false
+S 19 33 nil
+M 19 34 false
+S 19 34 nil
+M 19 35 false
+S 19 35 nil
+M 19 36 false
+S 19 36 nil
+M 19 37 false
+S 19 37 nil
+M 19 38 false
+S 19 38 nil
+M 19 39 false
+S 19 39 nil
+M 19 40 false
+S 19 40 nil
+M 19 41 false
+S 19 41 nil
+M 19 42 false
+S 19 42 nil
+M 19 43 false
+S 19 43 nil
+M 19 44 false
+S 19 44 nil
+M 19 45 false
+S 19 45 nil
+M 19 46 false
+S 19 46 nil
+M 19 47 false
+S 19 47 nil
+M 19 48 false
+S 19 48 nil
+M 19 49 false
+S 19 49 nil
+M 19 50 false
+S 19 50 nil
+M 19 51 false
+S 19 51 nil
+M 19 52 false
+S 19 52 nil
+P 20 ^(?i)[Z-a]+$
+M 20 0 false
+S 20 0 nil
+M 20 1 true
+S 20 1 1 a
+M 20 2 true
+S 20 2 1 A
+M 20 3 false
+S 20 3 nil
+M 20 4 false
+S 20 4 nil
+M 20 5 false
+S 20 5 nil
+M 20 6 false
+S 20 6 nil
+M 20 7 false
+S 20 7 nil
+M 20 8 false
+S 20 8 nil
+M 20 9 false
+S 20 9 nil
+M 20 10 false
+S 20 10 nil
+M 20 11 false
+S 20 11 nil
+M 20 12 false
+S 20 12 nil
+M 20 13 false
+S 20 13 nil
+M 20 14 false
+S 20 14 nil
+M 20 15 false
+S 20 15 nil
+M 20 16 false
+S 20 16 nil
+M 20 17 true
+S 20 17 1 z
+M 20 18 true
+S 20 18 1 Z
+M 20 19 false
+S 20 19 nil
+M 20 20 false
+S 20 20 nil
+M 20 21 true
+S 20 21 1 _
+M 20 22 false
+S 20 22 nil
+M 20 23 false
+S 20 23 nil
+M 20 24 false
+S 20 24 nil
+M 20 25 false
+S 20 25 nil
+M 20 26 false
+S 20 26 nil
+M 20 27 false
+S 20 27 nil
+M 20 28 false
+S 20 28 nil
+M 20 29 false
+S 20 29 nil
+M 20 30 false
+S 20 30 nil
+M 20 31 false
+S 20 31 nil
+M 20 32 false
+S 20 32 nil
+M 20 33 false
+S 20 33 nil
+M 20 34 false
+S 20 34 nil
+M 20 35 false
+S 20 35 nil
+M 20 36 false
+S 20 36 nil
+M 20 37 false
+S 20 37 nil
+M 20 38 false
+S 20 38 nil
+M 20 39 false
+S 20 39 nil
+M 20 40 false
+S 20 40 nil
+M 20 41 false
+S 20 41 nil
+M 20 42 true
+S 20 42 1 [
+M 20 43 true
+S 20 43 1 ]
+M 20 44 true
+S 20 44 1 ^
+M 20 45 false
+S 20 45 nil
+M 20 46 false
+S 20 46 nil
+M 20 47 false
+S 20 47 nil
+M 20 48 true
+S 20 48 1 \x5c
+M 20 49 false
+S 20 49 nil
+M 20 50 false
+S 20 50 nil
+M 20 51 false
+S 20 51 nil
+M 20 52 false
+S 20 52 nil
+P 21 ^(?i)\x5cw+$
+M 21 0 false
+S 21 0 nil
+M 21 1 true
+S 21 1 1 a
+M 21 2 true
+S 21 2 1 A
+M 21 3 true
+S 21 3 1 b
+M 21 4 true
+S 21 4 1 B
+M 21 5 true
+S 21 5 1 ab
+M 21 6 true
+S 21 6 1 aB
+M 21 7 true
+S 21 7 1 Ab
+M 21 8 true
+S 21 8 1 AB
+M 21 9 true
+S 21 9 1 abc
+M 21 10 true
+S 21 10 1 ABC
+M 21 11 true
+S 21 11 1 aBc
+M 21 12 true
+S 21 12 1 c
+M 21 13 true
+S 21 13 1 C
+M 21 14 true
+S 21 14 1 cd
+M 21 15 true
+S 21 15 1 CD
+M 21 16 true
+S 21 16 1 Cd
+M 21 17 true
+S 21 17 1 z
+M 21 18 true
+S 21 18 1 Z
+M 21 19 true
+S 21 19 1 q
+M 21 20 true
+S 21 20 1 Q
+M 21 21 true
+S 21 21 1 _
+M 21 22 false
+S 21 22 nil
+M 21 23 false
+S 21 23 nil
+M 21 24 true
+S 21 24 1 0
+M 21 25 true
+S 21 25 1 9
+M 21 26 false
+S 21 26 nil
+M 21 27 false
+S 21 27 nil
+M 21 28 false
+S 21 28 nil
+M 21 29 false
+S 21 29 nil
+M 21 30 false
+S 21 30 nil
+M 21 31 true
+S 21 31 1 01
+M 21 32 false
+S 21 32 nil
+M 21 33 true
+S 21 33 1 abcdef
+M 21 34 true
+S 21 34 1 ABCDEF
+M 21 35 true
+S 21 35 1 aBcDeF
+M 21 36 true
+S 21 36 1 gG
+M 21 37 true
+S 21 37 1 abC
+M 21 38 true
+S 21 38 1 aBC
+M 21 39 true
+S 21 39 1 AbC
+M 21 40 true
+S 21 40 1 abcD
+M 21 41 true
+S 21 41 1 aBcD
+M 21 42 false
+S 21 42 nil
+M 21 43 false
+S 21 43 nil
+M 21 44 false
+S 21 44 nil
+M 21 45 false
+S 21 45 nil
+M 21 46 true
+S 21 46 1 aXb
+M 21 47 false
+S 21 47 nil
+M 21 48 false
+S 21 48 nil
+M 21 49 true
+S 21 49 1 1
+M 21 50 true
+S 21 50 1 12
+M 21 51 true
+S 21 51 1 aab
+M 21 52 true
+S 21 52 1 aaB
+P 22 ^(?i)\x5cd+$
+M 22 0 false
+S 22 0 nil
+M 22 1 false
+S 22 1 nil
+M 22 2 false
+S 22 2 nil
+M 22 3 false
+S 22 3 nil
+M 22 4 false
+S 22 4 nil
+M 22 5 false
+S 22 5 nil
+M 22 6 false
+S 22 6 nil
+M 22 7 false
+S 22 7 nil
+M 22 8 false
+S 22 8 nil
+M 22 9 false
+S 22 9 nil
+M 22 10 false
+S 22 10 nil
+M 22 11 false
+S 22 11 nil
+M 22 12 false
+S 22 12 nil
+M 22 13 false
+S 22 13 nil
+M 22 14 false
+S 22 14 nil
+M 22 15 false
+S 22 15 nil
+M 22 16 false
+S 22 16 nil
+M 22 17 false
+S 22 17 nil
+M 22 18 false
+S 22 18 nil
+M 22 19 false
+S 22 19 nil
+M 22 20 false
+S 22 20 nil
+M 22 21 false
+S 22 21 nil
+M 22 22 false
+S 22 22 nil
+M 22 23 false
+S 22 23 nil
+M 22 24 true
+S 22 24 1 0
+M 22 25 true
+S 22 25 1 9
+M 22 26 false
+S 22 26 nil
+M 22 27 false
+S 22 27 nil
+M 22 28 false
+S 22 28 nil
+M 22 29 false
+S 22 29 nil
+M 22 30 false
+S 22 30 nil
+M 22 31 true
+S 22 31 1 01
+M 22 32 false
+S 22 32 nil
+M 22 33 false
+S 22 33 nil
+M 22 34 false
+S 22 34 nil
+M 22 35 false
+S 22 35 nil
+M 22 36 false
+S 22 36 nil
+M 22 37 false
+S 22 37 nil
+M 22 38 false
+S 22 38 nil
+M 22 39 false
+S 22 39 nil
+M 22 40 false
+S 22 40 nil
+M 22 41 false
+S 22 41 nil
+M 22 42 false
+S 22 42 nil
+M 22 43 false
+S 22 43 nil
+M 22 44 false
+S 22 44 nil
+M 22 45 false
+S 22 45 nil
+M 22 46 false
+S 22 46 nil
+M 22 47 false
+S 22 47 nil
+M 22 48 false
+S 22 48 nil
+M 22 49 true
+S 22 49 1 1
+M 22 50 true
+S 22 50 1 12
+M 22 51 false
+S 22 51 nil
+M 22 52 false
+S 22 52 nil
+P 23 ^(?i)\x5cW$
+M 23 0 false
+S 23 0 nil
+M 23 1 false
+S 23 1 nil
+M 23 2 false
+S 23 2 nil
+M 23 3 false
+S 23 3 nil
+M 23 4 false
+S 23 4 nil
+M 23 5 false
+S 23 5 nil
+M 23 6 false
+S 23 6 nil
+M 23 7 false
+S 23 7 nil
+M 23 8 false
+S 23 8 nil
+M 23 9 false
+S 23 9 nil
+M 23 10 false
+S 23 10 nil
+M 23 11 false
+S 23 11 nil
+M 23 12 false
+S 23 12 nil
+M 23 13 false
+S 23 13 nil
+M 23 14 false
+S 23 14 nil
+M 23 15 false
+S 23 15 nil
+M 23 16 false
+S 23 16 nil
+M 23 17 false
+S 23 17 nil
+M 23 18 false
+S 23 18 nil
+M 23 19 false
+S 23 19 nil
+M 23 20 false
+S 23 20 nil
+M 23 21 false
+S 23 21 nil
+M 23 22 true
+S 23 22 1 -
+M 23 23 false
+S 23 23 nil
+M 23 24 false
+S 23 24 nil
+M 23 25 false
+S 23 25 nil
+M 23 26 false
+S 23 26 nil
+M 23 27 false
+S 23 27 nil
+M 23 28 false
+S 23 28 nil
+M 23 29 false
+S 23 29 nil
+M 23 30 false
+S 23 30 nil
+M 23 31 false
+S 23 31 nil
+M 23 32 false
+S 23 32 nil
+M 23 33 false
+S 23 33 nil
+M 23 34 false
+S 23 34 nil
+M 23 35 false
+S 23 35 nil
+M 23 36 false
+S 23 36 nil
+M 23 37 false
+S 23 37 nil
+M 23 38 false
+S 23 38 nil
+M 23 39 false
+S 23 39 nil
+M 23 40 false
+S 23 40 nil
+M 23 41 false
+S 23 41 nil
+M 23 42 true
+S 23 42 1 [
+M 23 43 true
+S 23 43 1 ]
+M 23 44 true
+S 23 44 1 ^
+M 23 45 false
+S 23 45 nil
+M 23 46 false
+S 23 46 nil
+M 23 47 false
+S 23 47 nil
+M 23 48 true
+S 23 48 1 \x5c
+M 23 49 false
+S 23 49 nil
+M 23 50 false
+S 23 50 nil
+M 23 51 false
+S 23 51 nil
+M 23 52 false
+S 23 52 nil
+P 24 ^(?i)a\x5c.b$
+M 24 0 false
+S 24 0 nil
+M 24 1 false
+S 24 1 nil
+M 24 2 false
+S 24 2 nil
+M 24 3 false
+S 24 3 nil
+M 24 4 false
+S 24 4 nil
+M 24 5 false
+S 24 5 nil
+M 24 6 false
+S 24 6 nil
+M 24 7 false
+S 24 7 nil
+M 24 8 false
+S 24 8 nil
+M 24 9 false
+S 24 9 nil
+M 24 10 false
+S 24 10 nil
+M 24 11 false
+S 24 11 nil
+M 24 12 false
+S 24 12 nil
+M 24 13 false
+S 24 13 nil
+M 24 14 false
+S 24 14 nil
+M 24 15 false
+S 24 15 nil
+M 24 16 false
+S 24 16 nil
+M 24 17 false
+S 24 17 nil
+M 24 18 false
+S 24 18 nil
+M 24 19 false
+S 24 19 nil
+M 24 20 false
+S 24 20 nil
+M 24 21 false
+S 24 21 nil
+M 24 22 false
+S 24 22 nil
+M 24 23 false
+S 24 23 nil
+M 24 24 false
+S 24 24 nil
+M 24 25 false
+S 24 25 nil
+M 24 26 false
+S 24 26 nil
+M 24 27 false
+S 24 27 nil
+M 24 28 false
+S 24 28 nil
+M 24 29 false
+S 24 29 nil
+M 24 30 false
+S 24 30 nil
+M 24 31 false
+S 24 31 nil
+M 24 32 false
+S 24 32 nil
+M 24 33 false
+S 24 33 nil
+M 24 34 false
+S 24 34 nil
+M 24 35 false
+S 24 35 nil
+M 24 36 false
+S 24 36 nil
+M 24 37 false
+S 24 37 nil
+M 24 38 false
+S 24 38 nil
+M 24 39 false
+S 24 39 nil
+M 24 40 false
+S 24 40 nil
+M 24 41 false
+S 24 41 nil
+M 24 42 false
+S 24 42 nil
+M 24 43 false
+S 24 43 nil
+M 24 44 false
+S 24 44 nil
+M 24 45 true
+S 24 45 1 a.b
+M 24 46 false
+S 24 46 nil
+M 24 47 false
+S 24 47 nil
+M 24 48 false
+S 24 48 nil
+M 24 49 false
+S 24 49 nil
+M 24 50 false
+S 24 50 nil
+M 24 51 false
+S 24 51 nil
+M 24 52 false
+S 24 52 nil
+P 25 ^(?i)_-1$
+M 25 0 false
+S 25 0 nil
+M 25 1 false
+S 25 1 nil
+M 25 2 false
+S 25 2 nil
+M 25 3 false
+S 25 3 nil
+M 25 4 false
+S 25 4 nil
+M 25 5 false
+S 25 5 nil
+M 25 6 false
+S 25 6 nil
+M 25 7 false
+S 25 7 nil
+M 25 8 false
+S 25 8 nil
+M 25 9 false
+S 25 9 nil
+M 25 10 false
+S 25 10 nil
+M 25 11 false
+S 25 11 nil
+M 25 12 false
+S 25 12 nil
+M 25 13 false
+S 25 13 nil
+M 25 14 false
+S 25 14 nil
+M 25 15 false
+S 25 15 nil
+M 25 16 false
+S 25 16 nil
+M 25 17 false
+S 25 17 nil
+M 25 18 false
+S 25 18 nil
+M 25 19 false
+S 25 19 nil
+M 25 20 false
+S 25 20 nil
+M 25 21 false
+S 25 21 nil
+M 25 22 false
+S 25 22 nil
+M 25 23 true
+S 25 23 1 _-1
+M 25 24 false
+S 25 24 nil
+M 25 25 false
+S 25 25 nil
+M 25 26 false
+S 25 26 nil
+M 25 27 false
+S 25 27 nil
+M 25 28 false
+S 25 28 nil
+M 25 29 false
+S 25 29 nil
+M 25 30 false
+S 25 30 nil
+M 25 31 false
+S 25 31 nil
+M 25 32 false
+S 25 32 nil
+M 25 33 false
+S 25 33 nil
+M 25 34 false
+S 25 34 nil
+M 25 35 false
+S 25 35 nil
+M 25 36 false
+S 25 36 nil
+M 25 37 false
+S 25 37 nil
+M 25 38 false
+S 25 38 nil
+M 25 39 false
+S 25 39 nil
+M 25 40 false
+S 25 40 nil
+M 25 41 false
+S 25 41 nil
+M 25 42 false
+S 25 42 nil
+M 25 43 false
+S 25 43 nil
+M 25 44 false
+S 25 44 nil
+M 25 45 false
+S 25 45 nil
+M 25 46 false
+S 25 46 nil
+M 25 47 false
+S 25 47 nil
+M 25 48 false
+S 25 48 nil
+M 25 49 false
+S 25 49 nil
+M 25 50 false
+S 25 50 nil
+M 25 51 false
+S 25 51 nil
+M 25 52 false
+S 25 52 nil
+P 26 ^(?i)a*b+c?$
+M 26 0 false
+S 26 0 nil
+M 26 1 false
+S 26 1 nil
+M 26 2 false
+S 26 2 nil
+M 26 3 true
+S 26 3 1 b
+M 26 4 true
+S 26 4 1 B
+M 26 5 true
+S 26 5 1 ab
+M 26 6 true
+S 26 6 1 aB
+M 26 7 true
+S 26 7 1 Ab
+M 26 8 true
+S 26 8 1 AB
+M 26 9 true
+S 26 9 1 abc
+M 26 10 true
+S 26 10 1 ABC
+M 26 11 true
+S 26 11 1 aBc
+M 26 12 false
+S 26 12 nil
+M 26 13 false
+S 26 13 nil
+M 26 14 false
+S 26 14 nil
+M 26 15 false
+S 26 15 nil
+M 26 16 false
+S 26 16 nil
+M 26 17 false
+S 26 17 nil
+M 26 18 false
+S 26 18 nil
+M 26 19 false
+S 26 19 nil
+M 26 20 false
+S 26 20 nil
+M 26 21 false
+S 26 21 nil
+M 26 22 false
+S 26 22 nil
+M 26 23 false
+S 26 23 nil
+M 26 24 false
+S 26 24 nil
+M 26 25 false
+S 26 25 nil
+M 26 26 false
+S 26 26 nil
+M 26 27 false
+S 26 27 nil
+M 26 28 false
+S 26 28 nil
+M 26 29 false
+S 26 29 nil
+M 26 30 false
+S 26 30 nil
+M 26 31 false
+S 26 31 nil
+M 26 32 false
+S 26 32 nil
+M 26 33 false
+S 26 33 nil
+M 26 34 false
+S 26 34 nil
+M 26 35 false
+S 26 35 nil
+M 26 36 false
+S 26 36 nil
+M 26 37 true
+S 26 37 1 abC
+M 26 38 true
+S 26 38 1 aBC
+M 26 39 true
+S 26 39 1 AbC
+M 26 40 false
+S 26 40 nil
+M 26 41 false
+S 26 41 nil
+M 26 42 false
+S 26 42 nil
+M 26 43 false
+S 26 43 nil
+M 26 44 false
+S 26 44 nil
+M 26 45 false
+S 26 45 nil
+M 26 46 false
+S 26 46 nil
+M 26 47 false
+S 26 47 nil
+M 26 48 false
+S 26 48 nil
+M 26 49 false
+S 26 49 nil
+M 26 50 false
+S 26 50 nil
+M 26 51 true
+S 26 51 1 aab
+M 26 52 true
+S 26 52 1 aaB
+P 27 ^(?i)(ab)+$
+M 27 0 false
+S 27 0 nil
+M 27 1 false
+S 27 1 nil
+M 27 2 false
+S 27 2 nil
+M 27 3 false
+S 27 3 nil
+M 27 4 false
+S 27 4 nil
+M 27 5 true
+S 27 5 2 ab ab
+M 27 6 true
+S 27 6 2 aB aB
+M 27 7 true
+S 27 7 2 Ab Ab
+M 27 8 true
+S 27 8 2 AB AB
+M 27 9 false
+S 27 9 nil
+M 27 10 false
+S 27 10 nil
+M 27 11 false
+S 27 11 nil
+M 27 12 false
+S 27 12 nil
+M 27 13 false
+S 27 13 nil
+M 27 14 false
+S 27 14 nil
+M 27 15 false
+S 27 15 nil
+M 27 16 false
+S 27 16 nil
+M 27 17 false
+S 27 17 nil
+M 27 18 false
+S 27 18 nil
+M 27 19 false
+S 27 19 nil
+M 27 20 false
+S 27 20 nil
+M 27 21 false
+S 27 21 nil
+M 27 22 false
+S 27 22 nil
+M 27 23 false
+S 27 23 nil
+M 27 24 false
+S 27 24 nil
+M 27 25 false
+S 27 25 nil
+M 27 26 false
+S 27 26 nil
+M 27 27 false
+S 27 27 nil
+M 27 28 false
+S 27 28 nil
+M 27 29 false
+S 27 29 nil
+M 27 30 false
+S 27 30 nil
+M 27 31 false
+S 27 31 nil
+M 27 32 false
+S 27 32 nil
+M 27 33 false
+S 27 33 nil
+M 27 34 false
+S 27 34 nil
+M 27 35 false
+S 27 35 nil
+M 27 36 false
+S 27 36 nil
+M 27 37 false
+S 27 37 nil
+M 27 38 false
+S 27 38 nil
+M 27 39 false
+S 27 39 nil
+M 27 40 false
+S 27 40 nil
+M 27 41 false
+S 27 41 nil
+M 27 42 false
+S 27 42 nil
+M 27 43 false
+S 27 43 nil
+M 27 44 false
+S 27 44 nil
+M 27 45 false
+S 27 45 nil
+M 27 46 false
+S 27 46 nil
+M 27 47 false
+S 27 47 nil
+M 27 48 false
+S 27 48 nil
+M 27 49 false
+S 27 49 nil
+M 27 50 false
+S 27 50 nil
+M 27 51 false
+S 27 51 nil
+M 27 52 false
+S 27 52 nil
+P 28 (?i)
+M 28 0 true
+S 28 0 1 -
+M 28 1 true
+S 28 1 1 -
+M 28 2 true
+S 28 2 1 -
+M 28 3 true
+S 28 3 1 -
+M 28 4 true
+S 28 4 1 -
+M 28 5 true
+S 28 5 1 -
+M 28 6 true
+S 28 6 1 -
+M 28 7 true
+S 28 7 1 -
+M 28 8 true
+S 28 8 1 -
+M 28 9 true
+S 28 9 1 -
+M 28 10 true
+S 28 10 1 -
+M 28 11 true
+S 28 11 1 -
+M 28 12 true
+S 28 12 1 -
+M 28 13 true
+S 28 13 1 -
+M 28 14 true
+S 28 14 1 -
+M 28 15 true
+S 28 15 1 -
+M 28 16 true
+S 28 16 1 -
+M 28 17 true
+S 28 17 1 -
+M 28 18 true
+S 28 18 1 -
+M 28 19 true
+S 28 19 1 -
+M 28 20 true
+S 28 20 1 -
+M 28 21 true
+S 28 21 1 -
+M 28 22 true
+S 28 22 1 -
+M 28 23 true
+S 28 23 1 -
+M 28 24 true
+S 28 24 1 -
+M 28 25 true
+S 28 25 1 -
+M 28 26 true
+S 28 26 1 -
+M 28 27 true
+S 28 27 1 -
+M 28 28 true
+S 28 28 1 -
+M 28 29 true
+S 28 29 1 -
+M 28 30 true
+S 28 30 1 -
+M 28 31 true
+S 28 31 1 -
+M 28 32 true
+S 28 32 1 -
+M 28 33 true
+S 28 33 1 -
+M 28 34 true
+S 28 34 1 -
+M 28 35 true
+S 28 35 1 -
+M 28 36 true
+S 28 36 1 -
+M 28 37 true
+S 28 37 1 -
+M 28 38 true
+S 28 38 1 -
+M 28 39 true
+S 28 39 1 -
+M 28 40 true
+S 28 40 1 -
+M 28 41 true
+S 28 41 1 -
+M 28 42 true
+S 28 42 1 -
+M 28 43 true
+S 28 43 1 -
+M 28 44 true
+S 28 44 1 -
+M 28 45 true
+S 28 45 1 -
+M 28 46 true
+S 28 46 1 -
+M 28 47 true
+S 28 47 1 -
+M 28 48 true
+S 28 48 1 -
+M 28 49 true
+S 28 49 1 -
+M 28 50 true
+S 28 50 1 -
+M 28 51 true
+S 28 51 1 -
+M 28 52 true
+S 28 52 1 -
+P 29 ^(?i)$
+M 29 0 true
+S 29 0 1 -
+M 29 1 false
+S 29 1 nil
+M 29 2 false
+S 29 2 nil
+M 29 3 false
+S 29 3 nil
+M 29 4 false
+S 29 4 nil
+M 29 5 false
+S 29 5 nil
+M 29 6 false
+S 29 6 nil
+M 29 7 false
+S 29 7 nil
+M 29 8 false
+S 29 8 nil
+M 29 9 false
+S 29 9 nil
+M 29 10 false
+S 29 10 nil
+M 29 11 false
+S 29 11 nil
+M 29 12 false
+S 29 12 nil
+M 29 13 false
+S 29 13 nil
+M 29 14 false
+S 29 14 nil
+M 29 15 false
+S 29 15 nil
+M 29 16 false
+S 29 16 nil
+M 29 17 false
+S 29 17 nil
+M 29 18 false
+S 29 18 nil
+M 29 19 false
+S 29 19 nil
+M 29 20 false
+S 29 20 nil
+M 29 21 false
+S 29 21 nil
+M 29 22 false
+S 29 22 nil
+M 29 23 false
+S 29 23 nil
+M 29 24 false
+S 29 24 nil
+M 29 25 false
+S 29 25 nil
+M 29 26 false
+S 29 26 nil
+M 29 27 false
+S 29 27 nil
+M 29 28 false
+S 29 28 nil
+M 29 29 false
+S 29 29 nil
+M 29 30 false
+S 29 30 nil
+M 29 31 false
+S 29 31 nil
+M 29 32 false
+S 29 32 nil
+M 29 33 false
+S 29 33 nil
+M 29 34 false
+S 29 34 nil
+M 29 35 false
+S 29 35 nil
+M 29 36 false
+S 29 36 nil
+M 29 37 false
+S 29 37 nil
+M 29 38 false
+S 29 38 nil
+M 29 39 false
+S 29 39 nil
+M 29 40 false
+S 29 40 nil
+M 29 41 false
+S 29 41 nil
+M 29 42 false
+S 29 42 nil
+M 29 43 false
+S 29 43 nil
+M 29 44 false
+S 29 44 nil
+M 29 45 false
+S 29 45 nil
+M 29 46 false
+S 29 46 nil
+M 29 47 false
+S 29 47 nil
+M 29 48 false
+S 29 48 nil
+M 29 49 false
+S 29 49 nil
+M 29 50 false
+S 29 50 nil
+M 29 51 false
+S 29 51 nil
+M 29 52 false
+S 29 52 nil
+Q 0 a*
+FA 0 0 -1 [-]
+FI 0 0 -1 [0:0]
+FS 0 0 -1 [[-]]
+SP 0 0 -1 [-]
+FA 0 0 0 nil
+FI 0 0 0 nil
+FS 0 0 0 nil
+SP 0 0 0 nil
+FA 0 0 1 [-]
+FI 0 0 1 [0:0]
+FS 0 0 1 [[-]]
+SP 0 0 1 [-]
+FA 0 0 2 [-]
+FI 0 0 2 [0:0]
+FS 0 0 2 [[-]]
+SP 0 0 2 [-]
+FA 0 0 3 [-]
+FI 0 0 3 [0:0]
+FS 0 0 3 [[-]]
+SP 0 0 3 [-]
+FA 0 0 5 [-]
+FI 0 0 5 [0:0]
+FS 0 0 5 [[-]]
+SP 0 0 5 [-]
+FA 0 1 -1 [a]
+FI 0 1 -1 [0:1]
+FS 0 1 -1 [[a]]
+SP 0 1 -1 [- -]
+FA 0 1 0 nil
+FI 0 1 0 nil
+FS 0 1 0 nil
+SP 0 1 0 nil
+FA 0 1 1 [a]
+FI 0 1 1 [0:1]
+FS 0 1 1 [[a]]
+SP 0 1 1 [a]
+FA 0 1 2 [a]
+FI 0 1 2 [0:1]
+FS 0 1 2 [[a]]
+SP 0 1 2 [- -]
+FA 0 1 3 [a]
+FI 0 1 3 [0:1]
+FS 0 1 3 [[a]]
+SP 0 1 3 [- -]
+FA 0 1 5 [a]
+FI 0 1 5 [0:1]
+FS 0 1 5 [[a]]
+SP 0 1 5 [- -]
+FA 0 2 -1 [a aa a - a aaa -]
+FI 0 2 -1 [0:1 2:4 5:6 7:7 8:9 10:13 14:14]
+FS 0 2 -1 [[a] [aa] [a] [-] [a] [aaa] [-]]
+SP 0 2 -1 [- b b c c d e]
+FA 0 2 0 nil
+FI 0 2 0 nil
+FS 0 2 0 nil
+SP 0 2 0 nil
+FA 0 2 1 [a]
+FI 0 2 1 [0:1]
+FS 0 2 1 [[a]]
+SP 0 2 1 [abaabaccadaaae]
+FA 0 2 2 [a aa]
+FI 0 2 2 [0:1 2:4]
+FS 0 2 2 [[a] [aa]]
+SP 0 2 2 [- baabaccadaaae]
+FA 0 2 3 [a aa a]
+FI 0 2 3 [0:1 2:4 5:6]
+FS 0 2 3 [[a] [aa] [a]]
+SP 0 2 3 [- b baccadaaae]
+FA 0 2 5 [a aa a - a]
+FI 0 2 5 [0:1 2:4 5:6 7:7 8:9]
+FS 0 2 5 [[a] [aa] [a] [-] [a]]
+SP 0 2 5 [- b b c cadaaae]
+FA 0 3 -1 [a - - - - -]
+FI 0 3 -1 [0:1 2:2 3:3 4:4 5:5 6:6]
+FS 0 3 -1 [[a] [-] [-] [-] [-] [-]]
+SP 0 3 -1 [- , b , , c]
+FA 0 3 0 nil
+FI 0 3 0 nil
+FS 0 3 0 nil
+SP 0 3 0 nil
+FA 0 3 1 [a]
+FI 0 3 1 [0:1]
+FS 0 3 1 [[a]]
+SP 0 3 1 [a,b,,c]
+FA 0 3 2 [a -]
+FI 0 3 2 [0:1 2:2]
+FS 0 3 2 [[a] [-]]
+SP 0 3 2 [- ,b,,c]
+FA 0 3 3 [a - -]
+FI 0 3 3 [0:1 2:2 3:3]
+FS 0 3 3 [[a] [-] [-]]
+SP 0 3 3 [- , b,,c]
+FA 0 3 5 [a - - - -]
+FI 0 3 5 [0:1 2:2 3:3 4:4 5:5]
+FS 0 3 5 [[a] [-] [-] [-] [-]]
+SP 0 3 5 [- , b , ,c]
+FA 0 4 -1 [- - a - - - -]
+FI 0 4 -1 [0:0 1:1 2:3 4:4 5:5 6:6 7:7]
+FS 0 4 -1 [[-] [-] [a] [-] [-] [-] [-]]
+SP 0 4 -1 [\x20 \x20 \x20 \x20 b \x20]
+FA 0 4 0 nil
+FI 0 4 0 nil
+FS 0 4 0 nil
+SP 0 4 0 nil
+FA 0 4 1 [-]
+FI 0 4 1 [0:0]
+FS 0 4 1 [[-]]
+SP 0 4 1 [\x20\x20a\x20\x20b\x20]
+FA 0 4 2 [- -]
+FI 0 4 2 [0:0 1:1]
+FS 0 4 2 [[-] [-]]
+SP 0 4 2 [\x20 \x20a\x20\x20b\x20]
+FA 0 4 3 [- - a]
+FI 0 4 3 [0:0 1:1 2:3]
+FS 0 4 3 [[-] [-] [a]]
+SP 0 4 3 [\x20 \x20 \x20\x20b\x20]
+FA 0 4 5 [- - a - -]
+FI 0 4 5 [0:0 1:1 2:3 4:4 5:5]
+FS 0 4 5 [[-] [-] [a] [-] [-]]
+SP 0 4 5 [\x20 \x20 \x20 \x20 b\x20]
+FA 0 5 -1 [a - - - - - -]
+FI 0 5 -1 [0:1 2:2 3:3 4:4 5:5 6:6 7:7]
+FS 0 5 -1 [[a] [-] [-] [-] [-] [-] [-]]
+SP 0 5 -1 [- | | b | | c]
+FA 0 5 0 nil
+FI 0 5 0 nil
+FS 0 5 0 nil
+SP 0 5 0 nil
+FA 0 5 1 [a]
+FI 0 5 1 [0:1]
+FS 0 5 1 [[a]]
+SP 0 5 1 [a||b||c]
+FA 0 5 2 [a -]
+FI 0 5 2 [0:1 2:2]
+FS 0 5 2 [[a] [-]]
+SP 0 5 2 [- ||b||c]
+FA 0 5 3 [a - -]
+FI 0 5 3 [0:1 2:2 3:3]
+FS 0 5 3 [[a] [-] [-]]
+SP 0 5 3 [- | |b||c]
+FA 0 5 5 [a - - - -]
+FI 0 5 5 [0:1 2:2 3:3 4:4 5:5]
+FS 0 5 5 [[a] [-] [-] [-] [-]]
+SP 0 5 5 [- | | b ||c]
+FA 0 6 -1 [a - -]
+FI 0 6 -1 [0:1 2:2 3:3]
+FS 0 6 -1 [[a] [-] [-]]
+SP 0 6 -1 [- | b]
+FA 0 6 0 nil
+FI 0 6 0 nil
+FS 0 6 0 nil
+SP 0 6 0 nil
+FA 0 6 1 [a]
+FI 0 6 1 [0:1]
+FS 0 6 1 [[a]]
+SP 0 6 1 [a|b]
+FA 0 6 2 [a -]
+FI 0 6 2 [0:1 2:2]
+FS 0 6 2 [[a] [-]]
+SP 0 6 2 [- |b]
+FA 0 6 3 [a - -]
+FI 0 6 3 [0:1 2:2 3:3]
+FS 0 6 3 [[a] [-] [-]]
+SP 0 6 3 [- | b]
+FA 0 6 5 [a - -]
+FI 0 6 5 [0:1 2:2 3:3]
+FS 0 6 5 [[a] [-] [-]]
+SP 0 6 5 [- | b]
+FA 0 7 -1 [- a -]
+FI 0 7 -1 [0:0 1:2 3:3]
+FS 0 7 -1 [[-] [a] [-]]
+SP 0 7 -1 [, ,]
+FA 0 7 0 nil
+FI 0 7 0 nil
+FS 0 7 0 nil
+SP 0 7 0 nil
+FA 0 7 1 [-]
+FI 0 7 1 [0:0]
+FS 0 7 1 [[-]]
+SP 0 7 1 [,a,]
+FA 0 7 2 [- a]
+FI 0 7 2 [0:0 1:2]
+FS 0 7 2 [[-] [a]]
+SP 0 7 2 [, ,]
+FA 0 7 3 [- a -]
+FI 0 7 3 [0:0 1:2 3:3]
+FS 0 7 3 [[-] [a] [-]]
+SP 0 7 3 [, ,]
+FA 0 7 5 [- a -]
+FI 0 7 5 [0:0 1:2 3:3]
+FS 0 7 5 [[-] [a] [-]]
+SP 0 7 5 [, ,]
+FA 0 8 -1 [- - -]
+FI 0 8 -1 [0:0 1:1 2:2]
+FS 0 8 -1 [[-] [-] [-]]
+SP 0 8 -1 [, ,]
+FA 0 8 0 nil
+FI 0 8 0 nil
+FS 0 8 0 nil
+SP 0 8 0 nil
+FA 0 8 1 [-]
+FI 0 8 1 [0:0]
+FS 0 8 1 [[-]]
+SP 0 8 1 [,,]
+FA 0 8 2 [- -]
+FI 0 8 2 [0:0 1:1]
+FS 0 8 2 [[-] [-]]
+SP 0 8 2 [, ,]
+FA 0 8 3 [- - -]
+FI 0 8 3 [0:0 1:1 2:2]
+FS 0 8 3 [[-] [-] [-]]
+SP 0 8 3 [, ,]
+FA 0 8 5 [- - -]
+FI 0 8 5 [0:0 1:1 2:2]
+FS 0 8 5 [[-] [-] [-]]
+SP 0 8 5 [, ,]
+FA 0 9 -1 [- a a a]
+FI 0 9 -1 [0:0 1:2 3:4 5:6]
+FS 0 9 -1 [[-] [a] [a] [a]]
+SP 0 9 -1 [b n n -]
+FA 0 9 0 nil
+FI 0 9 0 nil
+FS 0 9 0 nil
+SP 0 9 0 nil
+FA 0 9 1 [-]
+FI 0 9 1 [0:0]
+FS 0 9 1 [[-]]
+SP 0 9 1 [banana]
+FA 0 9 2 [- a]
+FI 0 9 2 [0:0 1:2]
+FS 0 9 2 [[-] [a]]
+SP 0 9 2 [b nana]
+FA 0 9 3 [- a a]
+FI 0 9 3 [0:0 1:2 3:4]
+FS 0 9 3 [[-] [a] [a]]
+SP 0 9 3 [b n na]
+FA 0 9 5 [- a a a]
+FI 0 9 5 [0:0 1:2 3:4 5:6]
+FS 0 9 5 [[-] [a] [a] [a]]
+SP 0 9 5 [b n n -]
+FA 0 10 -1 [- a - - - -]
+FI 0 10 -1 [0:0 1:2 3:3 4:4 5:5 6:6]
+FS 0 10 -1 [[-] [a] [-] [-] [-] [-]]
+SP 0 10 -1 [A B b C c]
+FA 0 10 0 nil
+FI 0 10 0 nil
+FS 0 10 0 nil
+SP 0 10 0 nil
+FA 0 10 1 [-]
+FI 0 10 1 [0:0]
+FS 0 10 1 [[-]]
+SP 0 10 1 [AaBbCc]
+FA 0 10 2 [- a]
+FI 0 10 2 [0:0 1:2]
+FS 0 10 2 [[-] [a]]
+SP 0 10 2 [A BbCc]
+FA 0 10 3 [- a -]
+FI 0 10 3 [0:0 1:2 3:3]
+FS 0 10 3 [[-] [a] [-]]
+SP 0 10 3 [A B bCc]
+FA 0 10 5 [- a - - -]
+FI 0 10 5 [0:0 1:2 3:3 4:4 5:5]
+FS 0 10 5 [[-] [a] [-] [-] [-]]
+SP 0 10 5 [A B b C c]
+FA 0 11 -1 [- - - - - -]
+FI 0 11 -1 [0:0 1:1 3:3 4:4 5:5 6:6]
+FS 0 11 -1 [[-] [-] [-] [-] [-] [-]]
+SP 0 11 -1 [h \xc3\xa9 l l o]
+FA 0 11 0 nil
+FI 0 11 0 nil
+FS 0 11 0 nil
+SP 0 11 0 nil
+FA 0 11 1 [-]
+FI 0 11 1 [0:0]
+FS 0 11 1 [[-]]
+SP 0 11 1 [h\xc3\xa9llo]
+FA 0 11 2 [- -]
+FI 0 11 2 [0:0 1:1]
+FS 0 11 2 [[-] [-]]
+SP 0 11 2 [h \xc3\xa9llo]
+FA 0 11 3 [- - -]
+FI 0 11 3 [0:0 1:1 3:3]
+FS 0 11 3 [[-] [-] [-]]
+SP 0 11 3 [h \xc3\xa9 llo]
+FA 0 11 5 [- - - - -]
+FI 0 11 5 [0:0 1:1 3:3 4:4 5:5]
+FS 0 11 5 [[-] [-] [-] [-] [-]]
+SP 0 11 5 [h \xc3\xa9 l l o]
+FA 0 12 -1 [- - - -]
+FI 0 12 -1 [0:0 3:3 6:6 9:9]
+FS 0 12 -1 [[-] [-] [-] [-]]
+SP 0 12 -1 [\xe6\x97\xa5 \xe6\x9c\xac \xe8\xaa\x9e]
+FA 0 12 0 nil
+FI 0 12 0 nil
+FS 0 12 0 nil
+SP 0 12 0 nil
+FA 0 12 1 [-]
+FI 0 12 1 [0:0]
+FS 0 12 1 [[-]]
+SP 0 12 1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 0 12 2 [- -]
+FI 0 12 2 [0:0 3:3]
+FS 0 12 2 [[-] [-]]
+SP 0 12 2 [\xe6\x97\xa5 \xe6\x9c\xac\xe8\xaa\x9e]
+FA 0 12 3 [- - -]
+FI 0 12 3 [0:0 3:3 6:6]
+FS 0 12 3 [[-] [-] [-]]
+SP 0 12 3 [\xe6\x97\xa5 \xe6\x9c\xac \xe8\xaa\x9e]
+FA 0 12 5 [- - - -]
+FI 0 12 5 [0:0 3:3 6:6 9:9]
+FS 0 12 5 [[-] [-] [-] [-]]
+SP 0 12 5 [\xe6\x97\xa5 \xe6\x9c\xac \xe8\xaa\x9e]
+FA 0 13 -1 [a - a]
+FI 0 13 -1 [0:1 3:3 4:5]
+FS 0 13 -1 [[a] [-] [a]]
+SP 0 13 -1 [- \xc3\xa9 \x20 -]
+FA 0 13 0 nil
+FI 0 13 0 nil
+FS 0 13 0 nil
+SP 0 13 0 nil
+FA 0 13 1 [a]
+FI 0 13 1 [0:1]
+FS 0 13 1 [[a]]
+SP 0 13 1 [a\xc3\xa9\x20a]
+FA 0 13 2 [a -]
+FI 0 13 2 [0:1 3:3]
+FS 0 13 2 [[a] [-]]
+SP 0 13 2 [- \xc3\xa9\x20a]
+FA 0 13 3 [a - a]
+FI 0 13 3 [0:1 3:3 4:5]
+FS 0 13 3 [[a] [-] [a]]
+SP 0 13 3 [- \xc3\xa9 \x20a]
+FA 0 13 5 [a - a]
+FI 0 13 5 [0:1 3:3 4:5]
+FS 0 13 5 [[a] [-] [a]]
+SP 0 13 5 [- \xc3\xa9 \x20 -]
+Q 1 a
+FA 1 0 -1 nil
+FI 1 0 -1 nil
+FS 1 0 -1 nil
+SP 1 0 -1 [-]
+FA 1 0 0 nil
+FI 1 0 0 nil
+FS 1 0 0 nil
+SP 1 0 0 nil
+FA 1 0 1 nil
+FI 1 0 1 nil
+FS 1 0 1 nil
+SP 1 0 1 [-]
+FA 1 0 2 nil
+FI 1 0 2 nil
+FS 1 0 2 nil
+SP 1 0 2 [-]
+FA 1 0 3 nil
+FI 1 0 3 nil
+FS 1 0 3 nil
+SP 1 0 3 [-]
+FA 1 0 5 nil
+FI 1 0 5 nil
+FS 1 0 5 nil
+SP 1 0 5 [-]
+FA 1 1 -1 [a]
+FI 1 1 -1 [0:1]
+FS 1 1 -1 [[a]]
+SP 1 1 -1 [- -]
+FA 1 1 0 nil
+FI 1 1 0 nil
+FS 1 1 0 nil
+SP 1 1 0 nil
+FA 1 1 1 [a]
+FI 1 1 1 [0:1]
+FS 1 1 1 [[a]]
+SP 1 1 1 [a]
+FA 1 1 2 [a]
+FI 1 1 2 [0:1]
+FS 1 1 2 [[a]]
+SP 1 1 2 [- -]
+FA 1 1 3 [a]
+FI 1 1 3 [0:1]
+FS 1 1 3 [[a]]
+SP 1 1 3 [- -]
+FA 1 1 5 [a]
+FI 1 1 5 [0:1]
+FS 1 1 5 [[a]]
+SP 1 1 5 [- -]
+FA 1 2 -1 [a a a a a a a a]
+FI 1 2 -1 [0:1 2:3 3:4 5:6 8:9 10:11 11:12 12:13]
+FS 1 2 -1 [[a] [a] [a] [a] [a] [a] [a] [a]]
+SP 1 2 -1 [- b - b cc d - - e]
+FA 1 2 0 nil
+FI 1 2 0 nil
+FS 1 2 0 nil
+SP 1 2 0 nil
+FA 1 2 1 [a]
+FI 1 2 1 [0:1]
+FS 1 2 1 [[a]]
+SP 1 2 1 [abaabaccadaaae]
+FA 1 2 2 [a a]
+FI 1 2 2 [0:1 2:3]
+FS 1 2 2 [[a] [a]]
+SP 1 2 2 [- baabaccadaaae]
+FA 1 2 3 [a a a]
+FI 1 2 3 [0:1 2:3 3:4]
+FS 1 2 3 [[a] [a] [a]]
+SP 1 2 3 [- b abaccadaaae]
+FA 1 2 5 [a a a a a]
+FI 1 2 5 [0:1 2:3 3:4 5:6 8:9]
+FS 1 2 5 [[a] [a] [a] [a] [a]]
+SP 1 2 5 [- b - b ccadaaae]
+FA 1 3 -1 [a]
+FI 1 3 -1 [0:1]
+FS 1 3 -1 [[a]]
+SP 1 3 -1 [- ,b,,c]
+FA 1 3 0 nil
+FI 1 3 0 nil
+FS 1 3 0 nil
+SP 1 3 0 nil
+FA 1 3 1 [a]
+FI 1 3 1 [0:1]
+FS 1 3 1 [[a]]
+SP 1 3 1 [a,b,,c]
+FA 1 3 2 [a]
+FI 1 3 2 [0:1]
+FS 1 3 2 [[a]]
+SP 1 3 2 [- ,b,,c]
+FA 1 3 3 [a]
+FI 1 3 3 [0:1]
+FS 1 3 3 [[a]]
+SP 1 3 3 [- ,b,,c]
+FA 1 3 5 [a]
+FI 1 3 5 [0:1]
+FS 1 3 5 [[a]]
+SP 1 3 5 [- ,b,,c]
+FA 1 4 -1 [a]
+FI 1 4 -1 [2:3]
+FS 1 4 -1 [[a]]
+SP 1 4 -1 [\x20\x20 \x20\x20b\x20]
+FA 1 4 0 nil
+FI 1 4 0 nil
+FS 1 4 0 nil
+SP 1 4 0 nil
+FA 1 4 1 [a]
+FI 1 4 1 [2:3]
+FS 1 4 1 [[a]]
+SP 1 4 1 [\x20\x20a\x20\x20b\x20]
+FA 1 4 2 [a]
+FI 1 4 2 [2:3]
+FS 1 4 2 [[a]]
+SP 1 4 2 [\x20\x20 \x20\x20b\x20]
+FA 1 4 3 [a]
+FI 1 4 3 [2:3]
+FS 1 4 3 [[a]]
+SP 1 4 3 [\x20\x20 \x20\x20b\x20]
+FA 1 4 5 [a]
+FI 1 4 5 [2:3]
+FS 1 4 5 [[a]]
+SP 1 4 5 [\x20\x20 \x20\x20b\x20]
+FA 1 5 -1 [a]
+FI 1 5 -1 [0:1]
+FS 1 5 -1 [[a]]
+SP 1 5 -1 [- ||b||c]
+FA 1 5 0 nil
+FI 1 5 0 nil
+FS 1 5 0 nil
+SP 1 5 0 nil
+FA 1 5 1 [a]
+FI 1 5 1 [0:1]
+FS 1 5 1 [[a]]
+SP 1 5 1 [a||b||c]
+FA 1 5 2 [a]
+FI 1 5 2 [0:1]
+FS 1 5 2 [[a]]
+SP 1 5 2 [- ||b||c]
+FA 1 5 3 [a]
+FI 1 5 3 [0:1]
+FS 1 5 3 [[a]]
+SP 1 5 3 [- ||b||c]
+FA 1 5 5 [a]
+FI 1 5 5 [0:1]
+FS 1 5 5 [[a]]
+SP 1 5 5 [- ||b||c]
+FA 1 6 -1 [a]
+FI 1 6 -1 [0:1]
+FS 1 6 -1 [[a]]
+SP 1 6 -1 [- |b]
+FA 1 6 0 nil
+FI 1 6 0 nil
+FS 1 6 0 nil
+SP 1 6 0 nil
+FA 1 6 1 [a]
+FI 1 6 1 [0:1]
+FS 1 6 1 [[a]]
+SP 1 6 1 [a|b]
+FA 1 6 2 [a]
+FI 1 6 2 [0:1]
+FS 1 6 2 [[a]]
+SP 1 6 2 [- |b]
+FA 1 6 3 [a]
+FI 1 6 3 [0:1]
+FS 1 6 3 [[a]]
+SP 1 6 3 [- |b]
+FA 1 6 5 [a]
+FI 1 6 5 [0:1]
+FS 1 6 5 [[a]]
+SP 1 6 5 [- |b]
+FA 1 7 -1 [a]
+FI 1 7 -1 [1:2]
+FS 1 7 -1 [[a]]
+SP 1 7 -1 [, ,]
+FA 1 7 0 nil
+FI 1 7 0 nil
+FS 1 7 0 nil
+SP 1 7 0 nil
+FA 1 7 1 [a]
+FI 1 7 1 [1:2]
+FS 1 7 1 [[a]]
+SP 1 7 1 [,a,]
+FA 1 7 2 [a]
+FI 1 7 2 [1:2]
+FS 1 7 2 [[a]]
+SP 1 7 2 [, ,]
+FA 1 7 3 [a]
+FI 1 7 3 [1:2]
+FS 1 7 3 [[a]]
+SP 1 7 3 [, ,]
+FA 1 7 5 [a]
+FI 1 7 5 [1:2]
+FS 1 7 5 [[a]]
+SP 1 7 5 [, ,]
+FA 1 8 -1 nil
+FI 1 8 -1 nil
+FS 1 8 -1 nil
+SP 1 8 -1 [,,]
+FA 1 8 0 nil
+FI 1 8 0 nil
+FS 1 8 0 nil
+SP 1 8 0 nil
+FA 1 8 1 nil
+FI 1 8 1 nil
+FS 1 8 1 nil
+SP 1 8 1 [,,]
+FA 1 8 2 nil
+FI 1 8 2 nil
+FS 1 8 2 nil
+SP 1 8 2 [,,]
+FA 1 8 3 nil
+FI 1 8 3 nil
+FS 1 8 3 nil
+SP 1 8 3 [,,]
+FA 1 8 5 nil
+FI 1 8 5 nil
+FS 1 8 5 nil
+SP 1 8 5 [,,]
+FA 1 9 -1 [a a a]
+FI 1 9 -1 [1:2 3:4 5:6]
+FS 1 9 -1 [[a] [a] [a]]
+SP 1 9 -1 [b n n -]
+FA 1 9 0 nil
+FI 1 9 0 nil
+FS 1 9 0 nil
+SP 1 9 0 nil
+FA 1 9 1 [a]
+FI 1 9 1 [1:2]
+FS 1 9 1 [[a]]
+SP 1 9 1 [banana]
+FA 1 9 2 [a a]
+FI 1 9 2 [1:2 3:4]
+FS 1 9 2 [[a] [a]]
+SP 1 9 2 [b nana]
+FA 1 9 3 [a a a]
+FI 1 9 3 [1:2 3:4 5:6]
+FS 1 9 3 [[a] [a] [a]]
+SP 1 9 3 [b n na]
+FA 1 9 5 [a a a]
+FI 1 9 5 [1:2 3:4 5:6]
+FS 1 9 5 [[a] [a] [a]]
+SP 1 9 5 [b n n -]
+FA 1 10 -1 [a]
+FI 1 10 -1 [1:2]
+FS 1 10 -1 [[a]]
+SP 1 10 -1 [A BbCc]
+FA 1 10 0 nil
+FI 1 10 0 nil
+FS 1 10 0 nil
+SP 1 10 0 nil
+FA 1 10 1 [a]
+FI 1 10 1 [1:2]
+FS 1 10 1 [[a]]
+SP 1 10 1 [AaBbCc]
+FA 1 10 2 [a]
+FI 1 10 2 [1:2]
+FS 1 10 2 [[a]]
+SP 1 10 2 [A BbCc]
+FA 1 10 3 [a]
+FI 1 10 3 [1:2]
+FS 1 10 3 [[a]]
+SP 1 10 3 [A BbCc]
+FA 1 10 5 [a]
+FI 1 10 5 [1:2]
+FS 1 10 5 [[a]]
+SP 1 10 5 [A BbCc]
+FA 1 11 -1 nil
+FI 1 11 -1 nil
+FS 1 11 -1 nil
+SP 1 11 -1 [h\xc3\xa9llo]
+FA 1 11 0 nil
+FI 1 11 0 nil
+FS 1 11 0 nil
+SP 1 11 0 nil
+FA 1 11 1 nil
+FI 1 11 1 nil
+FS 1 11 1 nil
+SP 1 11 1 [h\xc3\xa9llo]
+FA 1 11 2 nil
+FI 1 11 2 nil
+FS 1 11 2 nil
+SP 1 11 2 [h\xc3\xa9llo]
+FA 1 11 3 nil
+FI 1 11 3 nil
+FS 1 11 3 nil
+SP 1 11 3 [h\xc3\xa9llo]
+FA 1 11 5 nil
+FI 1 11 5 nil
+FS 1 11 5 nil
+SP 1 11 5 [h\xc3\xa9llo]
+FA 1 12 -1 nil
+FI 1 12 -1 nil
+FS 1 12 -1 nil
+SP 1 12 -1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 1 12 0 nil
+FI 1 12 0 nil
+FS 1 12 0 nil
+SP 1 12 0 nil
+FA 1 12 1 nil
+FI 1 12 1 nil
+FS 1 12 1 nil
+SP 1 12 1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 1 12 2 nil
+FI 1 12 2 nil
+FS 1 12 2 nil
+SP 1 12 2 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 1 12 3 nil
+FI 1 12 3 nil
+FS 1 12 3 nil
+SP 1 12 3 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 1 12 5 nil
+FI 1 12 5 nil
+FS 1 12 5 nil
+SP 1 12 5 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 1 13 -1 [a a]
+FI 1 13 -1 [0:1 4:5]
+FS 1 13 -1 [[a] [a]]
+SP 1 13 -1 [- \xc3\xa9\x20 -]
+FA 1 13 0 nil
+FI 1 13 0 nil
+FS 1 13 0 nil
+SP 1 13 0 nil
+FA 1 13 1 [a]
+FI 1 13 1 [0:1]
+FS 1 13 1 [[a]]
+SP 1 13 1 [a\xc3\xa9\x20a]
+FA 1 13 2 [a a]
+FI 1 13 2 [0:1 4:5]
+FS 1 13 2 [[a] [a]]
+SP 1 13 2 [- \xc3\xa9\x20a]
+FA 1 13 3 [a a]
+FI 1 13 3 [0:1 4:5]
+FS 1 13 3 [[a] [a]]
+SP 1 13 3 [- \xc3\xa9\x20 -]
+FA 1 13 5 [a a]
+FI 1 13 5 [0:1 4:5]
+FS 1 13 5 [[a] [a]]
+SP 1 13 5 [- \xc3\xa9\x20 -]
+Q 2 ,
+FA 2 0 -1 nil
+FI 2 0 -1 nil
+FS 2 0 -1 nil
+SP 2 0 -1 [-]
+FA 2 0 0 nil
+FI 2 0 0 nil
+FS 2 0 0 nil
+SP 2 0 0 nil
+FA 2 0 1 nil
+FI 2 0 1 nil
+FS 2 0 1 nil
+SP 2 0 1 [-]
+FA 2 0 2 nil
+FI 2 0 2 nil
+FS 2 0 2 nil
+SP 2 0 2 [-]
+FA 2 0 3 nil
+FI 2 0 3 nil
+FS 2 0 3 nil
+SP 2 0 3 [-]
+FA 2 0 5 nil
+FI 2 0 5 nil
+FS 2 0 5 nil
+SP 2 0 5 [-]
+FA 2 1 -1 nil
+FI 2 1 -1 nil
+FS 2 1 -1 nil
+SP 2 1 -1 [a]
+FA 2 1 0 nil
+FI 2 1 0 nil
+FS 2 1 0 nil
+SP 2 1 0 nil
+FA 2 1 1 nil
+FI 2 1 1 nil
+FS 2 1 1 nil
+SP 2 1 1 [a]
+FA 2 1 2 nil
+FI 2 1 2 nil
+FS 2 1 2 nil
+SP 2 1 2 [a]
+FA 2 1 3 nil
+FI 2 1 3 nil
+FS 2 1 3 nil
+SP 2 1 3 [a]
+FA 2 1 5 nil
+FI 2 1 5 nil
+FS 2 1 5 nil
+SP 2 1 5 [a]
+FA 2 2 -1 nil
+FI 2 2 -1 nil
+FS 2 2 -1 nil
+SP 2 2 -1 [abaabaccadaaae]
+FA 2 2 0 nil
+FI 2 2 0 nil
+FS 2 2 0 nil
+SP 2 2 0 nil
+FA 2 2 1 nil
+FI 2 2 1 nil
+FS 2 2 1 nil
+SP 2 2 1 [abaabaccadaaae]
+FA 2 2 2 nil
+FI 2 2 2 nil
+FS 2 2 2 nil
+SP 2 2 2 [abaabaccadaaae]
+FA 2 2 3 nil
+FI 2 2 3 nil
+FS 2 2 3 nil
+SP 2 2 3 [abaabaccadaaae]
+FA 2 2 5 nil
+FI 2 2 5 nil
+FS 2 2 5 nil
+SP 2 2 5 [abaabaccadaaae]
+FA 2 3 -1 [, , ,]
+FI 2 3 -1 [1:2 3:4 4:5]
+FS 2 3 -1 [[,] [,] [,]]
+SP 2 3 -1 [a b - c]
+FA 2 3 0 nil
+FI 2 3 0 nil
+FS 2 3 0 nil
+SP 2 3 0 nil
+FA 2 3 1 [,]
+FI 2 3 1 [1:2]
+FS 2 3 1 [[,]]
+SP 2 3 1 [a,b,,c]
+FA 2 3 2 [, ,]
+FI 2 3 2 [1:2 3:4]
+FS 2 3 2 [[,] [,]]
+SP 2 3 2 [a b,,c]
+FA 2 3 3 [, , ,]
+FI 2 3 3 [1:2 3:4 4:5]
+FS 2 3 3 [[,] [,] [,]]
+SP 2 3 3 [a b ,c]
+FA 2 3 5 [, , ,]
+FI 2 3 5 [1:2 3:4 4:5]
+FS 2 3 5 [[,] [,] [,]]
+SP 2 3 5 [a b - c]
+FA 2 4 -1 nil
+FI 2 4 -1 nil
+FS 2 4 -1 nil
+SP 2 4 -1 [\x20\x20a\x20\x20b\x20]
+FA 2 4 0 nil
+FI 2 4 0 nil
+FS 2 4 0 nil
+SP 2 4 0 nil
+FA 2 4 1 nil
+FI 2 4 1 nil
+FS 2 4 1 nil
+SP 2 4 1 [\x20\x20a\x20\x20b\x20]
+FA 2 4 2 nil
+FI 2 4 2 nil
+FS 2 4 2 nil
+SP 2 4 2 [\x20\x20a\x20\x20b\x20]
+FA 2 4 3 nil
+FI 2 4 3 nil
+FS 2 4 3 nil
+SP 2 4 3 [\x20\x20a\x20\x20b\x20]
+FA 2 4 5 nil
+FI 2 4 5 nil
+FS 2 4 5 nil
+SP 2 4 5 [\x20\x20a\x20\x20b\x20]
+FA 2 5 -1 nil
+FI 2 5 -1 nil
+FS 2 5 -1 nil
+SP 2 5 -1 [a||b||c]
+FA 2 5 0 nil
+FI 2 5 0 nil
+FS 2 5 0 nil
+SP 2 5 0 nil
+FA 2 5 1 nil
+FI 2 5 1 nil
+FS 2 5 1 nil
+SP 2 5 1 [a||b||c]
+FA 2 5 2 nil
+FI 2 5 2 nil
+FS 2 5 2 nil
+SP 2 5 2 [a||b||c]
+FA 2 5 3 nil
+FI 2 5 3 nil
+FS 2 5 3 nil
+SP 2 5 3 [a||b||c]
+FA 2 5 5 nil
+FI 2 5 5 nil
+FS 2 5 5 nil
+SP 2 5 5 [a||b||c]
+FA 2 6 -1 nil
+FI 2 6 -1 nil
+FS 2 6 -1 nil
+SP 2 6 -1 [a|b]
+FA 2 6 0 nil
+FI 2 6 0 nil
+FS 2 6 0 nil
+SP 2 6 0 nil
+FA 2 6 1 nil
+FI 2 6 1 nil
+FS 2 6 1 nil
+SP 2 6 1 [a|b]
+FA 2 6 2 nil
+FI 2 6 2 nil
+FS 2 6 2 nil
+SP 2 6 2 [a|b]
+FA 2 6 3 nil
+FI 2 6 3 nil
+FS 2 6 3 nil
+SP 2 6 3 [a|b]
+FA 2 6 5 nil
+FI 2 6 5 nil
+FS 2 6 5 nil
+SP 2 6 5 [a|b]
+FA 2 7 -1 [, ,]
+FI 2 7 -1 [0:1 2:3]
+FS 2 7 -1 [[,] [,]]
+SP 2 7 -1 [- a -]
+FA 2 7 0 nil
+FI 2 7 0 nil
+FS 2 7 0 nil
+SP 2 7 0 nil
+FA 2 7 1 [,]
+FI 2 7 1 [0:1]
+FS 2 7 1 [[,]]
+SP 2 7 1 [,a,]
+FA 2 7 2 [, ,]
+FI 2 7 2 [0:1 2:3]
+FS 2 7 2 [[,] [,]]
+SP 2 7 2 [- a,]
+FA 2 7 3 [, ,]
+FI 2 7 3 [0:1 2:3]
+FS 2 7 3 [[,] [,]]
+SP 2 7 3 [- a -]
+FA 2 7 5 [, ,]
+FI 2 7 5 [0:1 2:3]
+FS 2 7 5 [[,] [,]]
+SP 2 7 5 [- a -]
+FA 2 8 -1 [, ,]
+FI 2 8 -1 [0:1 1:2]
+FS 2 8 -1 [[,] [,]]
+SP 2 8 -1 [- - -]
+FA 2 8 0 nil
+FI 2 8 0 nil
+FS 2 8 0 nil
+SP 2 8 0 nil
+FA 2 8 1 [,]
+FI 2 8 1 [0:1]
+FS 2 8 1 [[,]]
+SP 2 8 1 [,,]
+FA 2 8 2 [, ,]
+FI 2 8 2 [0:1 1:2]
+FS 2 8 2 [[,] [,]]
+SP 2 8 2 [- ,]
+FA 2 8 3 [, ,]
+FI 2 8 3 [0:1 1:2]
+FS 2 8 3 [[,] [,]]
+SP 2 8 3 [- - -]
+FA 2 8 5 [, ,]
+FI 2 8 5 [0:1 1:2]
+FS 2 8 5 [[,] [,]]
+SP 2 8 5 [- - -]
+FA 2 9 -1 nil
+FI 2 9 -1 nil
+FS 2 9 -1 nil
+SP 2 9 -1 [banana]
+FA 2 9 0 nil
+FI 2 9 0 nil
+FS 2 9 0 nil
+SP 2 9 0 nil
+FA 2 9 1 nil
+FI 2 9 1 nil
+FS 2 9 1 nil
+SP 2 9 1 [banana]
+FA 2 9 2 nil
+FI 2 9 2 nil
+FS 2 9 2 nil
+SP 2 9 2 [banana]
+FA 2 9 3 nil
+FI 2 9 3 nil
+FS 2 9 3 nil
+SP 2 9 3 [banana]
+FA 2 9 5 nil
+FI 2 9 5 nil
+FS 2 9 5 nil
+SP 2 9 5 [banana]
+FA 2 10 -1 nil
+FI 2 10 -1 nil
+FS 2 10 -1 nil
+SP 2 10 -1 [AaBbCc]
+FA 2 10 0 nil
+FI 2 10 0 nil
+FS 2 10 0 nil
+SP 2 10 0 nil
+FA 2 10 1 nil
+FI 2 10 1 nil
+FS 2 10 1 nil
+SP 2 10 1 [AaBbCc]
+FA 2 10 2 nil
+FI 2 10 2 nil
+FS 2 10 2 nil
+SP 2 10 2 [AaBbCc]
+FA 2 10 3 nil
+FI 2 10 3 nil
+FS 2 10 3 nil
+SP 2 10 3 [AaBbCc]
+FA 2 10 5 nil
+FI 2 10 5 nil
+FS 2 10 5 nil
+SP 2 10 5 [AaBbCc]
+FA 2 11 -1 nil
+FI 2 11 -1 nil
+FS 2 11 -1 nil
+SP 2 11 -1 [h\xc3\xa9llo]
+FA 2 11 0 nil
+FI 2 11 0 nil
+FS 2 11 0 nil
+SP 2 11 0 nil
+FA 2 11 1 nil
+FI 2 11 1 nil
+FS 2 11 1 nil
+SP 2 11 1 [h\xc3\xa9llo]
+FA 2 11 2 nil
+FI 2 11 2 nil
+FS 2 11 2 nil
+SP 2 11 2 [h\xc3\xa9llo]
+FA 2 11 3 nil
+FI 2 11 3 nil
+FS 2 11 3 nil
+SP 2 11 3 [h\xc3\xa9llo]
+FA 2 11 5 nil
+FI 2 11 5 nil
+FS 2 11 5 nil
+SP 2 11 5 [h\xc3\xa9llo]
+FA 2 12 -1 nil
+FI 2 12 -1 nil
+FS 2 12 -1 nil
+SP 2 12 -1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 2 12 0 nil
+FI 2 12 0 nil
+FS 2 12 0 nil
+SP 2 12 0 nil
+FA 2 12 1 nil
+FI 2 12 1 nil
+FS 2 12 1 nil
+SP 2 12 1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 2 12 2 nil
+FI 2 12 2 nil
+FS 2 12 2 nil
+SP 2 12 2 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 2 12 3 nil
+FI 2 12 3 nil
+FS 2 12 3 nil
+SP 2 12 3 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 2 12 5 nil
+FI 2 12 5 nil
+FS 2 12 5 nil
+SP 2 12 5 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 2 13 -1 nil
+FI 2 13 -1 nil
+FS 2 13 -1 nil
+SP 2 13 -1 [a\xc3\xa9\x20a]
+FA 2 13 0 nil
+FI 2 13 0 nil
+FS 2 13 0 nil
+SP 2 13 0 nil
+FA 2 13 1 nil
+FI 2 13 1 nil
+FS 2 13 1 nil
+SP 2 13 1 [a\xc3\xa9\x20a]
+FA 2 13 2 nil
+FI 2 13 2 nil
+FS 2 13 2 nil
+SP 2 13 2 [a\xc3\xa9\x20a]
+FA 2 13 3 nil
+FI 2 13 3 nil
+FS 2 13 3 nil
+SP 2 13 3 [a\xc3\xa9\x20a]
+FA 2 13 5 nil
+FI 2 13 5 nil
+FS 2 13 5 nil
+SP 2 13 5 [a\xc3\xa9\x20a]
+Q 3 \x5cs+
+FA 3 0 -1 nil
+FI 3 0 -1 nil
+FS 3 0 -1 nil
+SP 3 0 -1 [-]
+FA 3 0 0 nil
+FI 3 0 0 nil
+FS 3 0 0 nil
+SP 3 0 0 nil
+FA 3 0 1 nil
+FI 3 0 1 nil
+FS 3 0 1 nil
+SP 3 0 1 [-]
+FA 3 0 2 nil
+FI 3 0 2 nil
+FS 3 0 2 nil
+SP 3 0 2 [-]
+FA 3 0 3 nil
+FI 3 0 3 nil
+FS 3 0 3 nil
+SP 3 0 3 [-]
+FA 3 0 5 nil
+FI 3 0 5 nil
+FS 3 0 5 nil
+SP 3 0 5 [-]
+FA 3 1 -1 nil
+FI 3 1 -1 nil
+FS 3 1 -1 nil
+SP 3 1 -1 [a]
+FA 3 1 0 nil
+FI 3 1 0 nil
+FS 3 1 0 nil
+SP 3 1 0 nil
+FA 3 1 1 nil
+FI 3 1 1 nil
+FS 3 1 1 nil
+SP 3 1 1 [a]
+FA 3 1 2 nil
+FI 3 1 2 nil
+FS 3 1 2 nil
+SP 3 1 2 [a]
+FA 3 1 3 nil
+FI 3 1 3 nil
+FS 3 1 3 nil
+SP 3 1 3 [a]
+FA 3 1 5 nil
+FI 3 1 5 nil
+FS 3 1 5 nil
+SP 3 1 5 [a]
+FA 3 2 -1 nil
+FI 3 2 -1 nil
+FS 3 2 -1 nil
+SP 3 2 -1 [abaabaccadaaae]
+FA 3 2 0 nil
+FI 3 2 0 nil
+FS 3 2 0 nil
+SP 3 2 0 nil
+FA 3 2 1 nil
+FI 3 2 1 nil
+FS 3 2 1 nil
+SP 3 2 1 [abaabaccadaaae]
+FA 3 2 2 nil
+FI 3 2 2 nil
+FS 3 2 2 nil
+SP 3 2 2 [abaabaccadaaae]
+FA 3 2 3 nil
+FI 3 2 3 nil
+FS 3 2 3 nil
+SP 3 2 3 [abaabaccadaaae]
+FA 3 2 5 nil
+FI 3 2 5 nil
+FS 3 2 5 nil
+SP 3 2 5 [abaabaccadaaae]
+FA 3 3 -1 nil
+FI 3 3 -1 nil
+FS 3 3 -1 nil
+SP 3 3 -1 [a,b,,c]
+FA 3 3 0 nil
+FI 3 3 0 nil
+FS 3 3 0 nil
+SP 3 3 0 nil
+FA 3 3 1 nil
+FI 3 3 1 nil
+FS 3 3 1 nil
+SP 3 3 1 [a,b,,c]
+FA 3 3 2 nil
+FI 3 3 2 nil
+FS 3 3 2 nil
+SP 3 3 2 [a,b,,c]
+FA 3 3 3 nil
+FI 3 3 3 nil
+FS 3 3 3 nil
+SP 3 3 3 [a,b,,c]
+FA 3 3 5 nil
+FI 3 3 5 nil
+FS 3 3 5 nil
+SP 3 3 5 [a,b,,c]
+FA 3 4 -1 [\x20\x20 \x20\x20 \x20]
+FI 3 4 -1 [0:2 3:5 6:7]
+FS 3 4 -1 [[\x20\x20] [\x20\x20] [\x20]]
+SP 3 4 -1 [- a b -]
+FA 3 4 0 nil
+FI 3 4 0 nil
+FS 3 4 0 nil
+SP 3 4 0 nil
+FA 3 4 1 [\x20\x20]
+FI 3 4 1 [0:2]
+FS 3 4 1 [[\x20\x20]]
+SP 3 4 1 [\x20\x20a\x20\x20b\x20]
+FA 3 4 2 [\x20\x20 \x20\x20]
+FI 3 4 2 [0:2 3:5]
+FS 3 4 2 [[\x20\x20] [\x20\x20]]
+SP 3 4 2 [- a\x20\x20b\x20]
+FA 3 4 3 [\x20\x20 \x20\x20 \x20]
+FI 3 4 3 [0:2 3:5 6:7]
+FS 3 4 3 [[\x20\x20] [\x20\x20] [\x20]]
+SP 3 4 3 [- a b\x20]
+FA 3 4 5 [\x20\x20 \x20\x20 \x20]
+FI 3 4 5 [0:2 3:5 6:7]
+FS 3 4 5 [[\x20\x20] [\x20\x20] [\x20]]
+SP 3 4 5 [- a b -]
+FA 3 5 -1 nil
+FI 3 5 -1 nil
+FS 3 5 -1 nil
+SP 3 5 -1 [a||b||c]
+FA 3 5 0 nil
+FI 3 5 0 nil
+FS 3 5 0 nil
+SP 3 5 0 nil
+FA 3 5 1 nil
+FI 3 5 1 nil
+FS 3 5 1 nil
+SP 3 5 1 [a||b||c]
+FA 3 5 2 nil
+FI 3 5 2 nil
+FS 3 5 2 nil
+SP 3 5 2 [a||b||c]
+FA 3 5 3 nil
+FI 3 5 3 nil
+FS 3 5 3 nil
+SP 3 5 3 [a||b||c]
+FA 3 5 5 nil
+FI 3 5 5 nil
+FS 3 5 5 nil
+SP 3 5 5 [a||b||c]
+FA 3 6 -1 nil
+FI 3 6 -1 nil
+FS 3 6 -1 nil
+SP 3 6 -1 [a|b]
+FA 3 6 0 nil
+FI 3 6 0 nil
+FS 3 6 0 nil
+SP 3 6 0 nil
+FA 3 6 1 nil
+FI 3 6 1 nil
+FS 3 6 1 nil
+SP 3 6 1 [a|b]
+FA 3 6 2 nil
+FI 3 6 2 nil
+FS 3 6 2 nil
+SP 3 6 2 [a|b]
+FA 3 6 3 nil
+FI 3 6 3 nil
+FS 3 6 3 nil
+SP 3 6 3 [a|b]
+FA 3 6 5 nil
+FI 3 6 5 nil
+FS 3 6 5 nil
+SP 3 6 5 [a|b]
+FA 3 7 -1 nil
+FI 3 7 -1 nil
+FS 3 7 -1 nil
+SP 3 7 -1 [,a,]
+FA 3 7 0 nil
+FI 3 7 0 nil
+FS 3 7 0 nil
+SP 3 7 0 nil
+FA 3 7 1 nil
+FI 3 7 1 nil
+FS 3 7 1 nil
+SP 3 7 1 [,a,]
+FA 3 7 2 nil
+FI 3 7 2 nil
+FS 3 7 2 nil
+SP 3 7 2 [,a,]
+FA 3 7 3 nil
+FI 3 7 3 nil
+FS 3 7 3 nil
+SP 3 7 3 [,a,]
+FA 3 7 5 nil
+FI 3 7 5 nil
+FS 3 7 5 nil
+SP 3 7 5 [,a,]
+FA 3 8 -1 nil
+FI 3 8 -1 nil
+FS 3 8 -1 nil
+SP 3 8 -1 [,,]
+FA 3 8 0 nil
+FI 3 8 0 nil
+FS 3 8 0 nil
+SP 3 8 0 nil
+FA 3 8 1 nil
+FI 3 8 1 nil
+FS 3 8 1 nil
+SP 3 8 1 [,,]
+FA 3 8 2 nil
+FI 3 8 2 nil
+FS 3 8 2 nil
+SP 3 8 2 [,,]
+FA 3 8 3 nil
+FI 3 8 3 nil
+FS 3 8 3 nil
+SP 3 8 3 [,,]
+FA 3 8 5 nil
+FI 3 8 5 nil
+FS 3 8 5 nil
+SP 3 8 5 [,,]
+FA 3 9 -1 nil
+FI 3 9 -1 nil
+FS 3 9 -1 nil
+SP 3 9 -1 [banana]
+FA 3 9 0 nil
+FI 3 9 0 nil
+FS 3 9 0 nil
+SP 3 9 0 nil
+FA 3 9 1 nil
+FI 3 9 1 nil
+FS 3 9 1 nil
+SP 3 9 1 [banana]
+FA 3 9 2 nil
+FI 3 9 2 nil
+FS 3 9 2 nil
+SP 3 9 2 [banana]
+FA 3 9 3 nil
+FI 3 9 3 nil
+FS 3 9 3 nil
+SP 3 9 3 [banana]
+FA 3 9 5 nil
+FI 3 9 5 nil
+FS 3 9 5 nil
+SP 3 9 5 [banana]
+FA 3 10 -1 nil
+FI 3 10 -1 nil
+FS 3 10 -1 nil
+SP 3 10 -1 [AaBbCc]
+FA 3 10 0 nil
+FI 3 10 0 nil
+FS 3 10 0 nil
+SP 3 10 0 nil
+FA 3 10 1 nil
+FI 3 10 1 nil
+FS 3 10 1 nil
+SP 3 10 1 [AaBbCc]
+FA 3 10 2 nil
+FI 3 10 2 nil
+FS 3 10 2 nil
+SP 3 10 2 [AaBbCc]
+FA 3 10 3 nil
+FI 3 10 3 nil
+FS 3 10 3 nil
+SP 3 10 3 [AaBbCc]
+FA 3 10 5 nil
+FI 3 10 5 nil
+FS 3 10 5 nil
+SP 3 10 5 [AaBbCc]
+FA 3 11 -1 nil
+FI 3 11 -1 nil
+FS 3 11 -1 nil
+SP 3 11 -1 [h\xc3\xa9llo]
+FA 3 11 0 nil
+FI 3 11 0 nil
+FS 3 11 0 nil
+SP 3 11 0 nil
+FA 3 11 1 nil
+FI 3 11 1 nil
+FS 3 11 1 nil
+SP 3 11 1 [h\xc3\xa9llo]
+FA 3 11 2 nil
+FI 3 11 2 nil
+FS 3 11 2 nil
+SP 3 11 2 [h\xc3\xa9llo]
+FA 3 11 3 nil
+FI 3 11 3 nil
+FS 3 11 3 nil
+SP 3 11 3 [h\xc3\xa9llo]
+FA 3 11 5 nil
+FI 3 11 5 nil
+FS 3 11 5 nil
+SP 3 11 5 [h\xc3\xa9llo]
+FA 3 12 -1 nil
+FI 3 12 -1 nil
+FS 3 12 -1 nil
+SP 3 12 -1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 3 12 0 nil
+FI 3 12 0 nil
+FS 3 12 0 nil
+SP 3 12 0 nil
+FA 3 12 1 nil
+FI 3 12 1 nil
+FS 3 12 1 nil
+SP 3 12 1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 3 12 2 nil
+FI 3 12 2 nil
+FS 3 12 2 nil
+SP 3 12 2 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 3 12 3 nil
+FI 3 12 3 nil
+FS 3 12 3 nil
+SP 3 12 3 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 3 12 5 nil
+FI 3 12 5 nil
+FS 3 12 5 nil
+SP 3 12 5 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 3 13 -1 [\x20]
+FI 3 13 -1 [3:4]
+FS 3 13 -1 [[\x20]]
+SP 3 13 -1 [a\xc3\xa9 a]
+FA 3 13 0 nil
+FI 3 13 0 nil
+FS 3 13 0 nil
+SP 3 13 0 nil
+FA 3 13 1 [\x20]
+FI 3 13 1 [3:4]
+FS 3 13 1 [[\x20]]
+SP 3 13 1 [a\xc3\xa9\x20a]
+FA 3 13 2 [\x20]
+FI 3 13 2 [3:4]
+FS 3 13 2 [[\x20]]
+SP 3 13 2 [a\xc3\xa9 a]
+FA 3 13 3 [\x20]
+FI 3 13 3 [3:4]
+FS 3 13 3 [[\x20]]
+SP 3 13 3 [a\xc3\xa9 a]
+FA 3 13 5 [\x20]
+FI 3 13 5 [3:4]
+FS 3 13 5 [[\x20]]
+SP 3 13 5 [a\xc3\xa9 a]
+Q 4 \x5c|\x5c|
+FA 4 0 -1 nil
+FI 4 0 -1 nil
+FS 4 0 -1 nil
+SP 4 0 -1 [-]
+FA 4 0 0 nil
+FI 4 0 0 nil
+FS 4 0 0 nil
+SP 4 0 0 nil
+FA 4 0 1 nil
+FI 4 0 1 nil
+FS 4 0 1 nil
+SP 4 0 1 [-]
+FA 4 0 2 nil
+FI 4 0 2 nil
+FS 4 0 2 nil
+SP 4 0 2 [-]
+FA 4 0 3 nil
+FI 4 0 3 nil
+FS 4 0 3 nil
+SP 4 0 3 [-]
+FA 4 0 5 nil
+FI 4 0 5 nil
+FS 4 0 5 nil
+SP 4 0 5 [-]
+FA 4 1 -1 nil
+FI 4 1 -1 nil
+FS 4 1 -1 nil
+SP 4 1 -1 [a]
+FA 4 1 0 nil
+FI 4 1 0 nil
+FS 4 1 0 nil
+SP 4 1 0 nil
+FA 4 1 1 nil
+FI 4 1 1 nil
+FS 4 1 1 nil
+SP 4 1 1 [a]
+FA 4 1 2 nil
+FI 4 1 2 nil
+FS 4 1 2 nil
+SP 4 1 2 [a]
+FA 4 1 3 nil
+FI 4 1 3 nil
+FS 4 1 3 nil
+SP 4 1 3 [a]
+FA 4 1 5 nil
+FI 4 1 5 nil
+FS 4 1 5 nil
+SP 4 1 5 [a]
+FA 4 2 -1 nil
+FI 4 2 -1 nil
+FS 4 2 -1 nil
+SP 4 2 -1 [abaabaccadaaae]
+FA 4 2 0 nil
+FI 4 2 0 nil
+FS 4 2 0 nil
+SP 4 2 0 nil
+FA 4 2 1 nil
+FI 4 2 1 nil
+FS 4 2 1 nil
+SP 4 2 1 [abaabaccadaaae]
+FA 4 2 2 nil
+FI 4 2 2 nil
+FS 4 2 2 nil
+SP 4 2 2 [abaabaccadaaae]
+FA 4 2 3 nil
+FI 4 2 3 nil
+FS 4 2 3 nil
+SP 4 2 3 [abaabaccadaaae]
+FA 4 2 5 nil
+FI 4 2 5 nil
+FS 4 2 5 nil
+SP 4 2 5 [abaabaccadaaae]
+FA 4 3 -1 nil
+FI 4 3 -1 nil
+FS 4 3 -1 nil
+SP 4 3 -1 [a,b,,c]
+FA 4 3 0 nil
+FI 4 3 0 nil
+FS 4 3 0 nil
+SP 4 3 0 nil
+FA 4 3 1 nil
+FI 4 3 1 nil
+FS 4 3 1 nil
+SP 4 3 1 [a,b,,c]
+FA 4 3 2 nil
+FI 4 3 2 nil
+FS 4 3 2 nil
+SP 4 3 2 [a,b,,c]
+FA 4 3 3 nil
+FI 4 3 3 nil
+FS 4 3 3 nil
+SP 4 3 3 [a,b,,c]
+FA 4 3 5 nil
+FI 4 3 5 nil
+FS 4 3 5 nil
+SP 4 3 5 [a,b,,c]
+FA 4 4 -1 nil
+FI 4 4 -1 nil
+FS 4 4 -1 nil
+SP 4 4 -1 [\x20\x20a\x20\x20b\x20]
+FA 4 4 0 nil
+FI 4 4 0 nil
+FS 4 4 0 nil
+SP 4 4 0 nil
+FA 4 4 1 nil
+FI 4 4 1 nil
+FS 4 4 1 nil
+SP 4 4 1 [\x20\x20a\x20\x20b\x20]
+FA 4 4 2 nil
+FI 4 4 2 nil
+FS 4 4 2 nil
+SP 4 4 2 [\x20\x20a\x20\x20b\x20]
+FA 4 4 3 nil
+FI 4 4 3 nil
+FS 4 4 3 nil
+SP 4 4 3 [\x20\x20a\x20\x20b\x20]
+FA 4 4 5 nil
+FI 4 4 5 nil
+FS 4 4 5 nil
+SP 4 4 5 [\x20\x20a\x20\x20b\x20]
+FA 4 5 -1 [|| ||]
+FI 4 5 -1 [1:3 4:6]
+FS 4 5 -1 [[||] [||]]
+SP 4 5 -1 [a b c]
+FA 4 5 0 nil
+FI 4 5 0 nil
+FS 4 5 0 nil
+SP 4 5 0 nil
+FA 4 5 1 [||]
+FI 4 5 1 [1:3]
+FS 4 5 1 [[||]]
+SP 4 5 1 [a||b||c]
+FA 4 5 2 [|| ||]
+FI 4 5 2 [1:3 4:6]
+FS 4 5 2 [[||] [||]]
+SP 4 5 2 [a b||c]
+FA 4 5 3 [|| ||]
+FI 4 5 3 [1:3 4:6]
+FS 4 5 3 [[||] [||]]
+SP 4 5 3 [a b c]
+FA 4 5 5 [|| ||]
+FI 4 5 5 [1:3 4:6]
+FS 4 5 5 [[||] [||]]
+SP 4 5 5 [a b c]
+FA 4 6 -1 nil
+FI 4 6 -1 nil
+FS 4 6 -1 nil
+SP 4 6 -1 [a|b]
+FA 4 6 0 nil
+FI 4 6 0 nil
+FS 4 6 0 nil
+SP 4 6 0 nil
+FA 4 6 1 nil
+FI 4 6 1 nil
+FS 4 6 1 nil
+SP 4 6 1 [a|b]
+FA 4 6 2 nil
+FI 4 6 2 nil
+FS 4 6 2 nil
+SP 4 6 2 [a|b]
+FA 4 6 3 nil
+FI 4 6 3 nil
+FS 4 6 3 nil
+SP 4 6 3 [a|b]
+FA 4 6 5 nil
+FI 4 6 5 nil
+FS 4 6 5 nil
+SP 4 6 5 [a|b]
+FA 4 7 -1 nil
+FI 4 7 -1 nil
+FS 4 7 -1 nil
+SP 4 7 -1 [,a,]
+FA 4 7 0 nil
+FI 4 7 0 nil
+FS 4 7 0 nil
+SP 4 7 0 nil
+FA 4 7 1 nil
+FI 4 7 1 nil
+FS 4 7 1 nil
+SP 4 7 1 [,a,]
+FA 4 7 2 nil
+FI 4 7 2 nil
+FS 4 7 2 nil
+SP 4 7 2 [,a,]
+FA 4 7 3 nil
+FI 4 7 3 nil
+FS 4 7 3 nil
+SP 4 7 3 [,a,]
+FA 4 7 5 nil
+FI 4 7 5 nil
+FS 4 7 5 nil
+SP 4 7 5 [,a,]
+FA 4 8 -1 nil
+FI 4 8 -1 nil
+FS 4 8 -1 nil
+SP 4 8 -1 [,,]
+FA 4 8 0 nil
+FI 4 8 0 nil
+FS 4 8 0 nil
+SP 4 8 0 nil
+FA 4 8 1 nil
+FI 4 8 1 nil
+FS 4 8 1 nil
+SP 4 8 1 [,,]
+FA 4 8 2 nil
+FI 4 8 2 nil
+FS 4 8 2 nil
+SP 4 8 2 [,,]
+FA 4 8 3 nil
+FI 4 8 3 nil
+FS 4 8 3 nil
+SP 4 8 3 [,,]
+FA 4 8 5 nil
+FI 4 8 5 nil
+FS 4 8 5 nil
+SP 4 8 5 [,,]
+FA 4 9 -1 nil
+FI 4 9 -1 nil
+FS 4 9 -1 nil
+SP 4 9 -1 [banana]
+FA 4 9 0 nil
+FI 4 9 0 nil
+FS 4 9 0 nil
+SP 4 9 0 nil
+FA 4 9 1 nil
+FI 4 9 1 nil
+FS 4 9 1 nil
+SP 4 9 1 [banana]
+FA 4 9 2 nil
+FI 4 9 2 nil
+FS 4 9 2 nil
+SP 4 9 2 [banana]
+FA 4 9 3 nil
+FI 4 9 3 nil
+FS 4 9 3 nil
+SP 4 9 3 [banana]
+FA 4 9 5 nil
+FI 4 9 5 nil
+FS 4 9 5 nil
+SP 4 9 5 [banana]
+FA 4 10 -1 nil
+FI 4 10 -1 nil
+FS 4 10 -1 nil
+SP 4 10 -1 [AaBbCc]
+FA 4 10 0 nil
+FI 4 10 0 nil
+FS 4 10 0 nil
+SP 4 10 0 nil
+FA 4 10 1 nil
+FI 4 10 1 nil
+FS 4 10 1 nil
+SP 4 10 1 [AaBbCc]
+FA 4 10 2 nil
+FI 4 10 2 nil
+FS 4 10 2 nil
+SP 4 10 2 [AaBbCc]
+FA 4 10 3 nil
+FI 4 10 3 nil
+FS 4 10 3 nil
+SP 4 10 3 [AaBbCc]
+FA 4 10 5 nil
+FI 4 10 5 nil
+FS 4 10 5 nil
+SP 4 10 5 [AaBbCc]
+FA 4 11 -1 nil
+FI 4 11 -1 nil
+FS 4 11 -1 nil
+SP 4 11 -1 [h\xc3\xa9llo]
+FA 4 11 0 nil
+FI 4 11 0 nil
+FS 4 11 0 nil
+SP 4 11 0 nil
+FA 4 11 1 nil
+FI 4 11 1 nil
+FS 4 11 1 nil
+SP 4 11 1 [h\xc3\xa9llo]
+FA 4 11 2 nil
+FI 4 11 2 nil
+FS 4 11 2 nil
+SP 4 11 2 [h\xc3\xa9llo]
+FA 4 11 3 nil
+FI 4 11 3 nil
+FS 4 11 3 nil
+SP 4 11 3 [h\xc3\xa9llo]
+FA 4 11 5 nil
+FI 4 11 5 nil
+FS 4 11 5 nil
+SP 4 11 5 [h\xc3\xa9llo]
+FA 4 12 -1 nil
+FI 4 12 -1 nil
+FS 4 12 -1 nil
+SP 4 12 -1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 4 12 0 nil
+FI 4 12 0 nil
+FS 4 12 0 nil
+SP 4 12 0 nil
+FA 4 12 1 nil
+FI 4 12 1 nil
+FS 4 12 1 nil
+SP 4 12 1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 4 12 2 nil
+FI 4 12 2 nil
+FS 4 12 2 nil
+SP 4 12 2 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 4 12 3 nil
+FI 4 12 3 nil
+FS 4 12 3 nil
+SP 4 12 3 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 4 12 5 nil
+FI 4 12 5 nil
+FS 4 12 5 nil
+SP 4 12 5 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 4 13 -1 nil
+FI 4 13 -1 nil
+FS 4 13 -1 nil
+SP 4 13 -1 [a\xc3\xa9\x20a]
+FA 4 13 0 nil
+FI 4 13 0 nil
+FS 4 13 0 nil
+SP 4 13 0 nil
+FA 4 13 1 nil
+FI 4 13 1 nil
+FS 4 13 1 nil
+SP 4 13 1 [a\xc3\xa9\x20a]
+FA 4 13 2 nil
+FI 4 13 2 nil
+FS 4 13 2 nil
+SP 4 13 2 [a\xc3\xa9\x20a]
+FA 4 13 3 nil
+FI 4 13 3 nil
+FS 4 13 3 nil
+SP 4 13 3 [a\xc3\xa9\x20a]
+FA 4 13 5 nil
+FI 4 13 5 nil
+FS 4 13 5 nil
+SP 4 13 5 [a\xc3\xa9\x20a]
+Q 5 x*
+FA 5 0 -1 [-]
+FI 5 0 -1 [0:0]
+FS 5 0 -1 [[-]]
+SP 5 0 -1 [-]
+FA 5 0 0 nil
+FI 5 0 0 nil
+FS 5 0 0 nil
+SP 5 0 0 nil
+FA 5 0 1 [-]
+FI 5 0 1 [0:0]
+FS 5 0 1 [[-]]
+SP 5 0 1 [-]
+FA 5 0 2 [-]
+FI 5 0 2 [0:0]
+FS 5 0 2 [[-]]
+SP 5 0 2 [-]
+FA 5 0 3 [-]
+FI 5 0 3 [0:0]
+FS 5 0 3 [[-]]
+SP 5 0 3 [-]
+FA 5 0 5 [-]
+FI 5 0 5 [0:0]
+FS 5 0 5 [[-]]
+SP 5 0 5 [-]
+FA 5 1 -1 [- -]
+FI 5 1 -1 [0:0 1:1]
+FS 5 1 -1 [[-] [-]]
+SP 5 1 -1 [a]
+FA 5 1 0 nil
+FI 5 1 0 nil
+FS 5 1 0 nil
+SP 5 1 0 nil
+FA 5 1 1 [-]
+FI 5 1 1 [0:0]
+FS 5 1 1 [[-]]
+SP 5 1 1 [a]
+FA 5 1 2 [- -]
+FI 5 1 2 [0:0 1:1]
+FS 5 1 2 [[-] [-]]
+SP 5 1 2 [a]
+FA 5 1 3 [- -]
+FI 5 1 3 [0:0 1:1]
+FS 5 1 3 [[-] [-]]
+SP 5 1 3 [a]
+FA 5 1 5 [- -]
+FI 5 1 5 [0:0 1:1]
+FS 5 1 5 [[-] [-]]
+SP 5 1 5 [a]
+FA 5 2 -1 [- - - - - - - - - - - - - - -]
+FI 5 2 -1 [0:0 1:1 2:2 3:3 4:4 5:5 6:6 7:7 8:8 9:9 10:10 11:11 12:12 13:13 14:14]
+FS 5 2 -1 [[-] [-] [-] [-] [-] [-] [-] [-] [-] [-] [-] [-] [-] [-] [-]]
+SP 5 2 -1 [a b a a b a c c a d a a a e]
+FA 5 2 0 nil
+FI 5 2 0 nil
+FS 5 2 0 nil
+SP 5 2 0 nil
+FA 5 2 1 [-]
+FI 5 2 1 [0:0]
+FS 5 2 1 [[-]]
+SP 5 2 1 [abaabaccadaaae]
+FA 5 2 2 [- -]
+FI 5 2 2 [0:0 1:1]
+FS 5 2 2 [[-] [-]]
+SP 5 2 2 [a baabaccadaaae]
+FA 5 2 3 [- - -]
+FI 5 2 3 [0:0 1:1 2:2]
+FS 5 2 3 [[-] [-] [-]]
+SP 5 2 3 [a b aabaccadaaae]
+FA 5 2 5 [- - - - -]
+FI 5 2 5 [0:0 1:1 2:2 3:3 4:4]
+FS 5 2 5 [[-] [-] [-] [-] [-]]
+SP 5 2 5 [a b a a baccadaaae]
+FA 5 3 -1 [- - - - - - -]
+FI 5 3 -1 [0:0 1:1 2:2 3:3 4:4 5:5 6:6]
+FS 5 3 -1 [[-] [-] [-] [-] [-] [-] [-]]
+SP 5 3 -1 [a , b , , c]
+FA 5 3 0 nil
+FI 5 3 0 nil
+FS 5 3 0 nil
+SP 5 3 0 nil
+FA 5 3 1 [-]
+FI 5 3 1 [0:0]
+FS 5 3 1 [[-]]
+SP 5 3 1 [a,b,,c]
+FA 5 3 2 [- -]
+FI 5 3 2 [0:0 1:1]
+FS 5 3 2 [[-] [-]]
+SP 5 3 2 [a ,b,,c]
+FA 5 3 3 [- - -]
+FI 5 3 3 [0:0 1:1 2:2]
+FS 5 3 3 [[-] [-] [-]]
+SP 5 3 3 [a , b,,c]
+FA 5 3 5 [- - - - -]
+FI 5 3 5 [0:0 1:1 2:2 3:3 4:4]
+FS 5 3 5 [[-] [-] [-] [-] [-]]
+SP 5 3 5 [a , b , ,c]
+FA 5 4 -1 [- - - - - - - -]
+FI 5 4 -1 [0:0 1:1 2:2 3:3 4:4 5:5 6:6 7:7]
+FS 5 4 -1 [[-] [-] [-] [-] [-] [-] [-] [-]]
+SP 5 4 -1 [\x20 \x20 a \x20 \x20 b \x20]
+FA 5 4 0 nil
+FI 5 4 0 nil
+FS 5 4 0 nil
+SP 5 4 0 nil
+FA 5 4 1 [-]
+FI 5 4 1 [0:0]
+FS 5 4 1 [[-]]
+SP 5 4 1 [\x20\x20a\x20\x20b\x20]
+FA 5 4 2 [- -]
+FI 5 4 2 [0:0 1:1]
+FS 5 4 2 [[-] [-]]
+SP 5 4 2 [\x20 \x20a\x20\x20b\x20]
+FA 5 4 3 [- - -]
+FI 5 4 3 [0:0 1:1 2:2]
+FS 5 4 3 [[-] [-] [-]]
+SP 5 4 3 [\x20 \x20 a\x20\x20b\x20]
+FA 5 4 5 [- - - - -]
+FI 5 4 5 [0:0 1:1 2:2 3:3 4:4]
+FS 5 4 5 [[-] [-] [-] [-] [-]]
+SP 5 4 5 [\x20 \x20 a \x20 \x20b\x20]
+FA 5 5 -1 [- - - - - - - -]
+FI 5 5 -1 [0:0 1:1 2:2 3:3 4:4 5:5 6:6 7:7]
+FS 5 5 -1 [[-] [-] [-] [-] [-] [-] [-] [-]]
+SP 5 5 -1 [a | | b | | c]
+FA 5 5 0 nil
+FI 5 5 0 nil
+FS 5 5 0 nil
+SP 5 5 0 nil
+FA 5 5 1 [-]
+FI 5 5 1 [0:0]
+FS 5 5 1 [[-]]
+SP 5 5 1 [a||b||c]
+FA 5 5 2 [- -]
+FI 5 5 2 [0:0 1:1]
+FS 5 5 2 [[-] [-]]
+SP 5 5 2 [a ||b||c]
+FA 5 5 3 [- - -]
+FI 5 5 3 [0:0 1:1 2:2]
+FS 5 5 3 [[-] [-] [-]]
+SP 5 5 3 [a | |b||c]
+FA 5 5 5 [- - - - -]
+FI 5 5 5 [0:0 1:1 2:2 3:3 4:4]
+FS 5 5 5 [[-] [-] [-] [-] [-]]
+SP 5 5 5 [a | | b ||c]
+FA 5 6 -1 [- - - -]
+FI 5 6 -1 [0:0 1:1 2:2 3:3]
+FS 5 6 -1 [[-] [-] [-] [-]]
+SP 5 6 -1 [a | b]
+FA 5 6 0 nil
+FI 5 6 0 nil
+FS 5 6 0 nil
+SP 5 6 0 nil
+FA 5 6 1 [-]
+FI 5 6 1 [0:0]
+FS 5 6 1 [[-]]
+SP 5 6 1 [a|b]
+FA 5 6 2 [- -]
+FI 5 6 2 [0:0 1:1]
+FS 5 6 2 [[-] [-]]
+SP 5 6 2 [a |b]
+FA 5 6 3 [- - -]
+FI 5 6 3 [0:0 1:1 2:2]
+FS 5 6 3 [[-] [-] [-]]
+SP 5 6 3 [a | b]
+FA 5 6 5 [- - - -]
+FI 5 6 5 [0:0 1:1 2:2 3:3]
+FS 5 6 5 [[-] [-] [-] [-]]
+SP 5 6 5 [a | b]
+FA 5 7 -1 [- - - -]
+FI 5 7 -1 [0:0 1:1 2:2 3:3]
+FS 5 7 -1 [[-] [-] [-] [-]]
+SP 5 7 -1 [, a ,]
+FA 5 7 0 nil
+FI 5 7 0 nil
+FS 5 7 0 nil
+SP 5 7 0 nil
+FA 5 7 1 [-]
+FI 5 7 1 [0:0]
+FS 5 7 1 [[-]]
+SP 5 7 1 [,a,]
+FA 5 7 2 [- -]
+FI 5 7 2 [0:0 1:1]
+FS 5 7 2 [[-] [-]]
+SP 5 7 2 [, a,]
+FA 5 7 3 [- - -]
+FI 5 7 3 [0:0 1:1 2:2]
+FS 5 7 3 [[-] [-] [-]]
+SP 5 7 3 [, a ,]
+FA 5 7 5 [- - - -]
+FI 5 7 5 [0:0 1:1 2:2 3:3]
+FS 5 7 5 [[-] [-] [-] [-]]
+SP 5 7 5 [, a ,]
+FA 5 8 -1 [- - -]
+FI 5 8 -1 [0:0 1:1 2:2]
+FS 5 8 -1 [[-] [-] [-]]
+SP 5 8 -1 [, ,]
+FA 5 8 0 nil
+FI 5 8 0 nil
+FS 5 8 0 nil
+SP 5 8 0 nil
+FA 5 8 1 [-]
+FI 5 8 1 [0:0]
+FS 5 8 1 [[-]]
+SP 5 8 1 [,,]
+FA 5 8 2 [- -]
+FI 5 8 2 [0:0 1:1]
+FS 5 8 2 [[-] [-]]
+SP 5 8 2 [, ,]
+FA 5 8 3 [- - -]
+FI 5 8 3 [0:0 1:1 2:2]
+FS 5 8 3 [[-] [-] [-]]
+SP 5 8 3 [, ,]
+FA 5 8 5 [- - -]
+FI 5 8 5 [0:0 1:1 2:2]
+FS 5 8 5 [[-] [-] [-]]
+SP 5 8 5 [, ,]
+FA 5 9 -1 [- - - - - - -]
+FI 5 9 -1 [0:0 1:1 2:2 3:3 4:4 5:5 6:6]
+FS 5 9 -1 [[-] [-] [-] [-] [-] [-] [-]]
+SP 5 9 -1 [b a n a n a]
+FA 5 9 0 nil
+FI 5 9 0 nil
+FS 5 9 0 nil
+SP 5 9 0 nil
+FA 5 9 1 [-]
+FI 5 9 1 [0:0]
+FS 5 9 1 [[-]]
+SP 5 9 1 [banana]
+FA 5 9 2 [- -]
+FI 5 9 2 [0:0 1:1]
+FS 5 9 2 [[-] [-]]
+SP 5 9 2 [b anana]
+FA 5 9 3 [- - -]
+FI 5 9 3 [0:0 1:1 2:2]
+FS 5 9 3 [[-] [-] [-]]
+SP 5 9 3 [b a nana]
+FA 5 9 5 [- - - - -]
+FI 5 9 5 [0:0 1:1 2:2 3:3 4:4]
+FS 5 9 5 [[-] [-] [-] [-] [-]]
+SP 5 9 5 [b a n a na]
+FA 5 10 -1 [- - - - - - -]
+FI 5 10 -1 [0:0 1:1 2:2 3:3 4:4 5:5 6:6]
+FS 5 10 -1 [[-] [-] [-] [-] [-] [-] [-]]
+SP 5 10 -1 [A a B b C c]
+FA 5 10 0 nil
+FI 5 10 0 nil
+FS 5 10 0 nil
+SP 5 10 0 nil
+FA 5 10 1 [-]
+FI 5 10 1 [0:0]
+FS 5 10 1 [[-]]
+SP 5 10 1 [AaBbCc]
+FA 5 10 2 [- -]
+FI 5 10 2 [0:0 1:1]
+FS 5 10 2 [[-] [-]]
+SP 5 10 2 [A aBbCc]
+FA 5 10 3 [- - -]
+FI 5 10 3 [0:0 1:1 2:2]
+FS 5 10 3 [[-] [-] [-]]
+SP 5 10 3 [A a BbCc]
+FA 5 10 5 [- - - - -]
+FI 5 10 5 [0:0 1:1 2:2 3:3 4:4]
+FS 5 10 5 [[-] [-] [-] [-] [-]]
+SP 5 10 5 [A a B b Cc]
+FA 5 11 -1 [- - - - - -]
+FI 5 11 -1 [0:0 1:1 3:3 4:4 5:5 6:6]
+FS 5 11 -1 [[-] [-] [-] [-] [-] [-]]
+SP 5 11 -1 [h \xc3\xa9 l l o]
+FA 5 11 0 nil
+FI 5 11 0 nil
+FS 5 11 0 nil
+SP 5 11 0 nil
+FA 5 11 1 [-]
+FI 5 11 1 [0:0]
+FS 5 11 1 [[-]]
+SP 5 11 1 [h\xc3\xa9llo]
+FA 5 11 2 [- -]
+FI 5 11 2 [0:0 1:1]
+FS 5 11 2 [[-] [-]]
+SP 5 11 2 [h \xc3\xa9llo]
+FA 5 11 3 [- - -]
+FI 5 11 3 [0:0 1:1 3:3]
+FS 5 11 3 [[-] [-] [-]]
+SP 5 11 3 [h \xc3\xa9 llo]
+FA 5 11 5 [- - - - -]
+FI 5 11 5 [0:0 1:1 3:3 4:4 5:5]
+FS 5 11 5 [[-] [-] [-] [-] [-]]
+SP 5 11 5 [h \xc3\xa9 l l o]
+FA 5 12 -1 [- - - -]
+FI 5 12 -1 [0:0 3:3 6:6 9:9]
+FS 5 12 -1 [[-] [-] [-] [-]]
+SP 5 12 -1 [\xe6\x97\xa5 \xe6\x9c\xac \xe8\xaa\x9e]
+FA 5 12 0 nil
+FI 5 12 0 nil
+FS 5 12 0 nil
+SP 5 12 0 nil
+FA 5 12 1 [-]
+FI 5 12 1 [0:0]
+FS 5 12 1 [[-]]
+SP 5 12 1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 5 12 2 [- -]
+FI 5 12 2 [0:0 3:3]
+FS 5 12 2 [[-] [-]]
+SP 5 12 2 [\xe6\x97\xa5 \xe6\x9c\xac\xe8\xaa\x9e]
+FA 5 12 3 [- - -]
+FI 5 12 3 [0:0 3:3 6:6]
+FS 5 12 3 [[-] [-] [-]]
+SP 5 12 3 [\xe6\x97\xa5 \xe6\x9c\xac \xe8\xaa\x9e]
+FA 5 12 5 [- - - -]
+FI 5 12 5 [0:0 3:3 6:6 9:9]
+FS 5 12 5 [[-] [-] [-] [-]]
+SP 5 12 5 [\xe6\x97\xa5 \xe6\x9c\xac \xe8\xaa\x9e]
+FA 5 13 -1 [- - - - -]
+FI 5 13 -1 [0:0 1:1 3:3 4:4 5:5]
+FS 5 13 -1 [[-] [-] [-] [-] [-]]
+SP 5 13 -1 [a \xc3\xa9 \x20 a]
+FA 5 13 0 nil
+FI 5 13 0 nil
+FS 5 13 0 nil
+SP 5 13 0 nil
+FA 5 13 1 [-]
+FI 5 13 1 [0:0]
+FS 5 13 1 [[-]]
+SP 5 13 1 [a\xc3\xa9\x20a]
+FA 5 13 2 [- -]
+FI 5 13 2 [0:0 1:1]
+FS 5 13 2 [[-] [-]]
+SP 5 13 2 [a \xc3\xa9\x20a]
+FA 5 13 3 [- - -]
+FI 5 13 3 [0:0 1:1 3:3]
+FS 5 13 3 [[-] [-] [-]]
+SP 5 13 3 [a \xc3\xa9 \x20a]
+FA 5 13 5 [- - - - -]
+FI 5 13 5 [0:0 1:1 3:3 4:4 5:5]
+FS 5 13 5 [[-] [-] [-] [-] [-]]
+SP 5 13 5 [a \xc3\xa9 \x20 a]
+Q 6 (a)(b)?
+FA 6 0 -1 nil
+FI 6 0 -1 nil
+FS 6 0 -1 nil
+SP 6 0 -1 [-]
+FA 6 0 0 nil
+FI 6 0 0 nil
+FS 6 0 0 nil
+SP 6 0 0 nil
+FA 6 0 1 nil
+FI 6 0 1 nil
+FS 6 0 1 nil
+SP 6 0 1 [-]
+FA 6 0 2 nil
+FI 6 0 2 nil
+FS 6 0 2 nil
+SP 6 0 2 [-]
+FA 6 0 3 nil
+FI 6 0 3 nil
+FS 6 0 3 nil
+SP 6 0 3 [-]
+FA 6 0 5 nil
+FI 6 0 5 nil
+FS 6 0 5 nil
+SP 6 0 5 [-]
+FA 6 1 -1 [a]
+FI 6 1 -1 [0:1]
+FS 6 1 -1 [[a a -]]
+SP 6 1 -1 [- -]
+FA 6 1 0 nil
+FI 6 1 0 nil
+FS 6 1 0 nil
+SP 6 1 0 nil
+FA 6 1 1 [a]
+FI 6 1 1 [0:1]
+FS 6 1 1 [[a a -]]
+SP 6 1 1 [a]
+FA 6 1 2 [a]
+FI 6 1 2 [0:1]
+FS 6 1 2 [[a a -]]
+SP 6 1 2 [- -]
+FA 6 1 3 [a]
+FI 6 1 3 [0:1]
+FS 6 1 3 [[a a -]]
+SP 6 1 3 [- -]
+FA 6 1 5 [a]
+FI 6 1 5 [0:1]
+FS 6 1 5 [[a a -]]
+SP 6 1 5 [- -]
+FA 6 2 -1 [ab a ab a a a a a]
+FI 6 2 -1 [0:2 2:3 3:5 5:6 8:9 10:11 11:12 12:13]
+FS 6 2 -1 [[ab a b] [a a -] [ab a b] [a a -] [a a -] [a a -] [a a -] [a a -]]
+SP 6 2 -1 [- - - - cc d - - e]
+FA 6 2 0 nil
+FI 6 2 0 nil
+FS 6 2 0 nil
+SP 6 2 0 nil
+FA 6 2 1 [ab]
+FI 6 2 1 [0:2]
+FS 6 2 1 [[ab a b]]
+SP 6 2 1 [abaabaccadaaae]
+FA 6 2 2 [ab a]
+FI 6 2 2 [0:2 2:3]
+FS 6 2 2 [[ab a b] [a a -]]
+SP 6 2 2 [- aabaccadaaae]
+FA 6 2 3 [ab a ab]
+FI 6 2 3 [0:2 2:3 3:5]
+FS 6 2 3 [[ab a b] [a a -] [ab a b]]
+SP 6 2 3 [- - abaccadaaae]
+FA 6 2 5 [ab a ab a a]
+FI 6 2 5 [0:2 2:3 3:5 5:6 8:9]
+FS 6 2 5 [[ab a b] [a a -] [ab a b] [a a -] [a a -]]
+SP 6 2 5 [- - - - ccadaaae]
+FA 6 3 -1 [a]
+FI 6 3 -1 [0:1]
+FS 6 3 -1 [[a a -]]
+SP 6 3 -1 [- ,b,,c]
+FA 6 3 0 nil
+FI 6 3 0 nil
+FS 6 3 0 nil
+SP 6 3 0 nil
+FA 6 3 1 [a]
+FI 6 3 1 [0:1]
+FS 6 3 1 [[a a -]]
+SP 6 3 1 [a,b,,c]
+FA 6 3 2 [a]
+FI 6 3 2 [0:1]
+FS 6 3 2 [[a a -]]
+SP 6 3 2 [- ,b,,c]
+FA 6 3 3 [a]
+FI 6 3 3 [0:1]
+FS 6 3 3 [[a a -]]
+SP 6 3 3 [- ,b,,c]
+FA 6 3 5 [a]
+FI 6 3 5 [0:1]
+FS 6 3 5 [[a a -]]
+SP 6 3 5 [- ,b,,c]
+FA 6 4 -1 [a]
+FI 6 4 -1 [2:3]
+FS 6 4 -1 [[a a -]]
+SP 6 4 -1 [\x20\x20 \x20\x20b\x20]
+FA 6 4 0 nil
+FI 6 4 0 nil
+FS 6 4 0 nil
+SP 6 4 0 nil
+FA 6 4 1 [a]
+FI 6 4 1 [2:3]
+FS 6 4 1 [[a a -]]
+SP 6 4 1 [\x20\x20a\x20\x20b\x20]
+FA 6 4 2 [a]
+FI 6 4 2 [2:3]
+FS 6 4 2 [[a a -]]
+SP 6 4 2 [\x20\x20 \x20\x20b\x20]
+FA 6 4 3 [a]
+FI 6 4 3 [2:3]
+FS 6 4 3 [[a a -]]
+SP 6 4 3 [\x20\x20 \x20\x20b\x20]
+FA 6 4 5 [a]
+FI 6 4 5 [2:3]
+FS 6 4 5 [[a a -]]
+SP 6 4 5 [\x20\x20 \x20\x20b\x20]
+FA 6 5 -1 [a]
+FI 6 5 -1 [0:1]
+FS 6 5 -1 [[a a -]]
+SP 6 5 -1 [- ||b||c]
+FA 6 5 0 nil
+FI 6 5 0 nil
+FS 6 5 0 nil
+SP 6 5 0 nil
+FA 6 5 1 [a]
+FI 6 5 1 [0:1]
+FS 6 5 1 [[a a -]]
+SP 6 5 1 [a||b||c]
+FA 6 5 2 [a]
+FI 6 5 2 [0:1]
+FS 6 5 2 [[a a -]]
+SP 6 5 2 [- ||b||c]
+FA 6 5 3 [a]
+FI 6 5 3 [0:1]
+FS 6 5 3 [[a a -]]
+SP 6 5 3 [- ||b||c]
+FA 6 5 5 [a]
+FI 6 5 5 [0:1]
+FS 6 5 5 [[a a -]]
+SP 6 5 5 [- ||b||c]
+FA 6 6 -1 [a]
+FI 6 6 -1 [0:1]
+FS 6 6 -1 [[a a -]]
+SP 6 6 -1 [- |b]
+FA 6 6 0 nil
+FI 6 6 0 nil
+FS 6 6 0 nil
+SP 6 6 0 nil
+FA 6 6 1 [a]
+FI 6 6 1 [0:1]
+FS 6 6 1 [[a a -]]
+SP 6 6 1 [a|b]
+FA 6 6 2 [a]
+FI 6 6 2 [0:1]
+FS 6 6 2 [[a a -]]
+SP 6 6 2 [- |b]
+FA 6 6 3 [a]
+FI 6 6 3 [0:1]
+FS 6 6 3 [[a a -]]
+SP 6 6 3 [- |b]
+FA 6 6 5 [a]
+FI 6 6 5 [0:1]
+FS 6 6 5 [[a a -]]
+SP 6 6 5 [- |b]
+FA 6 7 -1 [a]
+FI 6 7 -1 [1:2]
+FS 6 7 -1 [[a a -]]
+SP 6 7 -1 [, ,]
+FA 6 7 0 nil
+FI 6 7 0 nil
+FS 6 7 0 nil
+SP 6 7 0 nil
+FA 6 7 1 [a]
+FI 6 7 1 [1:2]
+FS 6 7 1 [[a a -]]
+SP 6 7 1 [,a,]
+FA 6 7 2 [a]
+FI 6 7 2 [1:2]
+FS 6 7 2 [[a a -]]
+SP 6 7 2 [, ,]
+FA 6 7 3 [a]
+FI 6 7 3 [1:2]
+FS 6 7 3 [[a a -]]
+SP 6 7 3 [, ,]
+FA 6 7 5 [a]
+FI 6 7 5 [1:2]
+FS 6 7 5 [[a a -]]
+SP 6 7 5 [, ,]
+FA 6 8 -1 nil
+FI 6 8 -1 nil
+FS 6 8 -1 nil
+SP 6 8 -1 [,,]
+FA 6 8 0 nil
+FI 6 8 0 nil
+FS 6 8 0 nil
+SP 6 8 0 nil
+FA 6 8 1 nil
+FI 6 8 1 nil
+FS 6 8 1 nil
+SP 6 8 1 [,,]
+FA 6 8 2 nil
+FI 6 8 2 nil
+FS 6 8 2 nil
+SP 6 8 2 [,,]
+FA 6 8 3 nil
+FI 6 8 3 nil
+FS 6 8 3 nil
+SP 6 8 3 [,,]
+FA 6 8 5 nil
+FI 6 8 5 nil
+FS 6 8 5 nil
+SP 6 8 5 [,,]
+FA 6 9 -1 [a a a]
+FI 6 9 -1 [1:2 3:4 5:6]
+FS 6 9 -1 [[a a -] [a a -] [a a -]]
+SP 6 9 -1 [b n n -]
+FA 6 9 0 nil
+FI 6 9 0 nil
+FS 6 9 0 nil
+SP 6 9 0 nil
+FA 6 9 1 [a]
+FI 6 9 1 [1:2]
+FS 6 9 1 [[a a -]]
+SP 6 9 1 [banana]
+FA 6 9 2 [a a]
+FI 6 9 2 [1:2 3:4]
+FS 6 9 2 [[a a -] [a a -]]
+SP 6 9 2 [b nana]
+FA 6 9 3 [a a a]
+FI 6 9 3 [1:2 3:4 5:6]
+FS 6 9 3 [[a a -] [a a -] [a a -]]
+SP 6 9 3 [b n na]
+FA 6 9 5 [a a a]
+FI 6 9 5 [1:2 3:4 5:6]
+FS 6 9 5 [[a a -] [a a -] [a a -]]
+SP 6 9 5 [b n n -]
+FA 6 10 -1 [a]
+FI 6 10 -1 [1:2]
+FS 6 10 -1 [[a a -]]
+SP 6 10 -1 [A BbCc]
+FA 6 10 0 nil
+FI 6 10 0 nil
+FS 6 10 0 nil
+SP 6 10 0 nil
+FA 6 10 1 [a]
+FI 6 10 1 [1:2]
+FS 6 10 1 [[a a -]]
+SP 6 10 1 [AaBbCc]
+FA 6 10 2 [a]
+FI 6 10 2 [1:2]
+FS 6 10 2 [[a a -]]
+SP 6 10 2 [A BbCc]
+FA 6 10 3 [a]
+FI 6 10 3 [1:2]
+FS 6 10 3 [[a a -]]
+SP 6 10 3 [A BbCc]
+FA 6 10 5 [a]
+FI 6 10 5 [1:2]
+FS 6 10 5 [[a a -]]
+SP 6 10 5 [A BbCc]
+FA 6 11 -1 nil
+FI 6 11 -1 nil
+FS 6 11 -1 nil
+SP 6 11 -1 [h\xc3\xa9llo]
+FA 6 11 0 nil
+FI 6 11 0 nil
+FS 6 11 0 nil
+SP 6 11 0 nil
+FA 6 11 1 nil
+FI 6 11 1 nil
+FS 6 11 1 nil
+SP 6 11 1 [h\xc3\xa9llo]
+FA 6 11 2 nil
+FI 6 11 2 nil
+FS 6 11 2 nil
+SP 6 11 2 [h\xc3\xa9llo]
+FA 6 11 3 nil
+FI 6 11 3 nil
+FS 6 11 3 nil
+SP 6 11 3 [h\xc3\xa9llo]
+FA 6 11 5 nil
+FI 6 11 5 nil
+FS 6 11 5 nil
+SP 6 11 5 [h\xc3\xa9llo]
+FA 6 12 -1 nil
+FI 6 12 -1 nil
+FS 6 12 -1 nil
+SP 6 12 -1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 6 12 0 nil
+FI 6 12 0 nil
+FS 6 12 0 nil
+SP 6 12 0 nil
+FA 6 12 1 nil
+FI 6 12 1 nil
+FS 6 12 1 nil
+SP 6 12 1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 6 12 2 nil
+FI 6 12 2 nil
+FS 6 12 2 nil
+SP 6 12 2 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 6 12 3 nil
+FI 6 12 3 nil
+FS 6 12 3 nil
+SP 6 12 3 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 6 12 5 nil
+FI 6 12 5 nil
+FS 6 12 5 nil
+SP 6 12 5 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 6 13 -1 [a a]
+FI 6 13 -1 [0:1 4:5]
+FS 6 13 -1 [[a a -] [a a -]]
+SP 6 13 -1 [- \xc3\xa9\x20 -]
+FA 6 13 0 nil
+FI 6 13 0 nil
+FS 6 13 0 nil
+SP 6 13 0 nil
+FA 6 13 1 [a]
+FI 6 13 1 [0:1]
+FS 6 13 1 [[a a -]]
+SP 6 13 1 [a\xc3\xa9\x20a]
+FA 6 13 2 [a a]
+FI 6 13 2 [0:1 4:5]
+FS 6 13 2 [[a a -] [a a -]]
+SP 6 13 2 [- \xc3\xa9\x20a]
+FA 6 13 3 [a a]
+FI 6 13 3 [0:1 4:5]
+FS 6 13 3 [[a a -] [a a -]]
+SP 6 13 3 [- \xc3\xa9\x20 -]
+FA 6 13 5 [a a]
+FI 6 13 5 [0:1 4:5]
+FS 6 13 5 [[a a -] [a a -]]
+SP 6 13 5 [- \xc3\xa9\x20 -]
+Q 7 (?i)a+
+FA 7 0 -1 nil
+FI 7 0 -1 nil
+FS 7 0 -1 nil
+SP 7 0 -1 [-]
+FA 7 0 0 nil
+FI 7 0 0 nil
+FS 7 0 0 nil
+SP 7 0 0 nil
+FA 7 0 1 nil
+FI 7 0 1 nil
+FS 7 0 1 nil
+SP 7 0 1 [-]
+FA 7 0 2 nil
+FI 7 0 2 nil
+FS 7 0 2 nil
+SP 7 0 2 [-]
+FA 7 0 3 nil
+FI 7 0 3 nil
+FS 7 0 3 nil
+SP 7 0 3 [-]
+FA 7 0 5 nil
+FI 7 0 5 nil
+FS 7 0 5 nil
+SP 7 0 5 [-]
+FA 7 1 -1 [a]
+FI 7 1 -1 [0:1]
+FS 7 1 -1 [[a]]
+SP 7 1 -1 [- -]
+FA 7 1 0 nil
+FI 7 1 0 nil
+FS 7 1 0 nil
+SP 7 1 0 nil
+FA 7 1 1 [a]
+FI 7 1 1 [0:1]
+FS 7 1 1 [[a]]
+SP 7 1 1 [a]
+FA 7 1 2 [a]
+FI 7 1 2 [0:1]
+FS 7 1 2 [[a]]
+SP 7 1 2 [- -]
+FA 7 1 3 [a]
+FI 7 1 3 [0:1]
+FS 7 1 3 [[a]]
+SP 7 1 3 [- -]
+FA 7 1 5 [a]
+FI 7 1 5 [0:1]
+FS 7 1 5 [[a]]
+SP 7 1 5 [- -]
+FA 7 2 -1 [a aa a a aaa]
+FI 7 2 -1 [0:1 2:4 5:6 8:9 10:13]
+FS 7 2 -1 [[a] [aa] [a] [a] [aaa]]
+SP 7 2 -1 [- b b cc d e]
+FA 7 2 0 nil
+FI 7 2 0 nil
+FS 7 2 0 nil
+SP 7 2 0 nil
+FA 7 2 1 [a]
+FI 7 2 1 [0:1]
+FS 7 2 1 [[a]]
+SP 7 2 1 [abaabaccadaaae]
+FA 7 2 2 [a aa]
+FI 7 2 2 [0:1 2:4]
+FS 7 2 2 [[a] [aa]]
+SP 7 2 2 [- baabaccadaaae]
+FA 7 2 3 [a aa a]
+FI 7 2 3 [0:1 2:4 5:6]
+FS 7 2 3 [[a] [aa] [a]]
+SP 7 2 3 [- b baccadaaae]
+FA 7 2 5 [a aa a a aaa]
+FI 7 2 5 [0:1 2:4 5:6 8:9 10:13]
+FS 7 2 5 [[a] [aa] [a] [a] [aaa]]
+SP 7 2 5 [- b b cc daaae]
+FA 7 3 -1 [a]
+FI 7 3 -1 [0:1]
+FS 7 3 -1 [[a]]
+SP 7 3 -1 [- ,b,,c]
+FA 7 3 0 nil
+FI 7 3 0 nil
+FS 7 3 0 nil
+SP 7 3 0 nil
+FA 7 3 1 [a]
+FI 7 3 1 [0:1]
+FS 7 3 1 [[a]]
+SP 7 3 1 [a,b,,c]
+FA 7 3 2 [a]
+FI 7 3 2 [0:1]
+FS 7 3 2 [[a]]
+SP 7 3 2 [- ,b,,c]
+FA 7 3 3 [a]
+FI 7 3 3 [0:1]
+FS 7 3 3 [[a]]
+SP 7 3 3 [- ,b,,c]
+FA 7 3 5 [a]
+FI 7 3 5 [0:1]
+FS 7 3 5 [[a]]
+SP 7 3 5 [- ,b,,c]
+FA 7 4 -1 [a]
+FI 7 4 -1 [2:3]
+FS 7 4 -1 [[a]]
+SP 7 4 -1 [\x20\x20 \x20\x20b\x20]
+FA 7 4 0 nil
+FI 7 4 0 nil
+FS 7 4 0 nil
+SP 7 4 0 nil
+FA 7 4 1 [a]
+FI 7 4 1 [2:3]
+FS 7 4 1 [[a]]
+SP 7 4 1 [\x20\x20a\x20\x20b\x20]
+FA 7 4 2 [a]
+FI 7 4 2 [2:3]
+FS 7 4 2 [[a]]
+SP 7 4 2 [\x20\x20 \x20\x20b\x20]
+FA 7 4 3 [a]
+FI 7 4 3 [2:3]
+FS 7 4 3 [[a]]
+SP 7 4 3 [\x20\x20 \x20\x20b\x20]
+FA 7 4 5 [a]
+FI 7 4 5 [2:3]
+FS 7 4 5 [[a]]
+SP 7 4 5 [\x20\x20 \x20\x20b\x20]
+FA 7 5 -1 [a]
+FI 7 5 -1 [0:1]
+FS 7 5 -1 [[a]]
+SP 7 5 -1 [- ||b||c]
+FA 7 5 0 nil
+FI 7 5 0 nil
+FS 7 5 0 nil
+SP 7 5 0 nil
+FA 7 5 1 [a]
+FI 7 5 1 [0:1]
+FS 7 5 1 [[a]]
+SP 7 5 1 [a||b||c]
+FA 7 5 2 [a]
+FI 7 5 2 [0:1]
+FS 7 5 2 [[a]]
+SP 7 5 2 [- ||b||c]
+FA 7 5 3 [a]
+FI 7 5 3 [0:1]
+FS 7 5 3 [[a]]
+SP 7 5 3 [- ||b||c]
+FA 7 5 5 [a]
+FI 7 5 5 [0:1]
+FS 7 5 5 [[a]]
+SP 7 5 5 [- ||b||c]
+FA 7 6 -1 [a]
+FI 7 6 -1 [0:1]
+FS 7 6 -1 [[a]]
+SP 7 6 -1 [- |b]
+FA 7 6 0 nil
+FI 7 6 0 nil
+FS 7 6 0 nil
+SP 7 6 0 nil
+FA 7 6 1 [a]
+FI 7 6 1 [0:1]
+FS 7 6 1 [[a]]
+SP 7 6 1 [a|b]
+FA 7 6 2 [a]
+FI 7 6 2 [0:1]
+FS 7 6 2 [[a]]
+SP 7 6 2 [- |b]
+FA 7 6 3 [a]
+FI 7 6 3 [0:1]
+FS 7 6 3 [[a]]
+SP 7 6 3 [- |b]
+FA 7 6 5 [a]
+FI 7 6 5 [0:1]
+FS 7 6 5 [[a]]
+SP 7 6 5 [- |b]
+FA 7 7 -1 [a]
+FI 7 7 -1 [1:2]
+FS 7 7 -1 [[a]]
+SP 7 7 -1 [, ,]
+FA 7 7 0 nil
+FI 7 7 0 nil
+FS 7 7 0 nil
+SP 7 7 0 nil
+FA 7 7 1 [a]
+FI 7 7 1 [1:2]
+FS 7 7 1 [[a]]
+SP 7 7 1 [,a,]
+FA 7 7 2 [a]
+FI 7 7 2 [1:2]
+FS 7 7 2 [[a]]
+SP 7 7 2 [, ,]
+FA 7 7 3 [a]
+FI 7 7 3 [1:2]
+FS 7 7 3 [[a]]
+SP 7 7 3 [, ,]
+FA 7 7 5 [a]
+FI 7 7 5 [1:2]
+FS 7 7 5 [[a]]
+SP 7 7 5 [, ,]
+FA 7 8 -1 nil
+FI 7 8 -1 nil
+FS 7 8 -1 nil
+SP 7 8 -1 [,,]
+FA 7 8 0 nil
+FI 7 8 0 nil
+FS 7 8 0 nil
+SP 7 8 0 nil
+FA 7 8 1 nil
+FI 7 8 1 nil
+FS 7 8 1 nil
+SP 7 8 1 [,,]
+FA 7 8 2 nil
+FI 7 8 2 nil
+FS 7 8 2 nil
+SP 7 8 2 [,,]
+FA 7 8 3 nil
+FI 7 8 3 nil
+FS 7 8 3 nil
+SP 7 8 3 [,,]
+FA 7 8 5 nil
+FI 7 8 5 nil
+FS 7 8 5 nil
+SP 7 8 5 [,,]
+FA 7 9 -1 [a a a]
+FI 7 9 -1 [1:2 3:4 5:6]
+FS 7 9 -1 [[a] [a] [a]]
+SP 7 9 -1 [b n n -]
+FA 7 9 0 nil
+FI 7 9 0 nil
+FS 7 9 0 nil
+SP 7 9 0 nil
+FA 7 9 1 [a]
+FI 7 9 1 [1:2]
+FS 7 9 1 [[a]]
+SP 7 9 1 [banana]
+FA 7 9 2 [a a]
+FI 7 9 2 [1:2 3:4]
+FS 7 9 2 [[a] [a]]
+SP 7 9 2 [b nana]
+FA 7 9 3 [a a a]
+FI 7 9 3 [1:2 3:4 5:6]
+FS 7 9 3 [[a] [a] [a]]
+SP 7 9 3 [b n na]
+FA 7 9 5 [a a a]
+FI 7 9 5 [1:2 3:4 5:6]
+FS 7 9 5 [[a] [a] [a]]
+SP 7 9 5 [b n n -]
+FA 7 10 -1 [Aa]
+FI 7 10 -1 [0:2]
+FS 7 10 -1 [[Aa]]
+SP 7 10 -1 [- BbCc]
+FA 7 10 0 nil
+FI 7 10 0 nil
+FS 7 10 0 nil
+SP 7 10 0 nil
+FA 7 10 1 [Aa]
+FI 7 10 1 [0:2]
+FS 7 10 1 [[Aa]]
+SP 7 10 1 [AaBbCc]
+FA 7 10 2 [Aa]
+FI 7 10 2 [0:2]
+FS 7 10 2 [[Aa]]
+SP 7 10 2 [- BbCc]
+FA 7 10 3 [Aa]
+FI 7 10 3 [0:2]
+FS 7 10 3 [[Aa]]
+SP 7 10 3 [- BbCc]
+FA 7 10 5 [Aa]
+FI 7 10 5 [0:2]
+FS 7 10 5 [[Aa]]
+SP 7 10 5 [- BbCc]
+FA 7 11 -1 nil
+FI 7 11 -1 nil
+FS 7 11 -1 nil
+SP 7 11 -1 [h\xc3\xa9llo]
+FA 7 11 0 nil
+FI 7 11 0 nil
+FS 7 11 0 nil
+SP 7 11 0 nil
+FA 7 11 1 nil
+FI 7 11 1 nil
+FS 7 11 1 nil
+SP 7 11 1 [h\xc3\xa9llo]
+FA 7 11 2 nil
+FI 7 11 2 nil
+FS 7 11 2 nil
+SP 7 11 2 [h\xc3\xa9llo]
+FA 7 11 3 nil
+FI 7 11 3 nil
+FS 7 11 3 nil
+SP 7 11 3 [h\xc3\xa9llo]
+FA 7 11 5 nil
+FI 7 11 5 nil
+FS 7 11 5 nil
+SP 7 11 5 [h\xc3\xa9llo]
+FA 7 12 -1 nil
+FI 7 12 -1 nil
+FS 7 12 -1 nil
+SP 7 12 -1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 7 12 0 nil
+FI 7 12 0 nil
+FS 7 12 0 nil
+SP 7 12 0 nil
+FA 7 12 1 nil
+FI 7 12 1 nil
+FS 7 12 1 nil
+SP 7 12 1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 7 12 2 nil
+FI 7 12 2 nil
+FS 7 12 2 nil
+SP 7 12 2 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 7 12 3 nil
+FI 7 12 3 nil
+FS 7 12 3 nil
+SP 7 12 3 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 7 12 5 nil
+FI 7 12 5 nil
+FS 7 12 5 nil
+SP 7 12 5 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 7 13 -1 [a a]
+FI 7 13 -1 [0:1 4:5]
+FS 7 13 -1 [[a] [a]]
+SP 7 13 -1 [- \xc3\xa9\x20 -]
+FA 7 13 0 nil
+FI 7 13 0 nil
+FS 7 13 0 nil
+SP 7 13 0 nil
+FA 7 13 1 [a]
+FI 7 13 1 [0:1]
+FS 7 13 1 [[a]]
+SP 7 13 1 [a\xc3\xa9\x20a]
+FA 7 13 2 [a a]
+FI 7 13 2 [0:1 4:5]
+FS 7 13 2 [[a] [a]]
+SP 7 13 2 [- \xc3\xa9\x20a]
+FA 7 13 3 [a a]
+FI 7 13 3 [0:1 4:5]
+FS 7 13 3 [[a] [a]]
+SP 7 13 3 [- \xc3\xa9\x20 -]
+FA 7 13 5 [a a]
+FI 7 13 5 [0:1 4:5]
+FS 7 13 5 [[a] [a]]
+SP 7 13 5 [- \xc3\xa9\x20 -]
+Q 8 (?i)[a-c]
+FA 8 0 -1 nil
+FI 8 0 -1 nil
+FS 8 0 -1 nil
+SP 8 0 -1 [-]
+FA 8 0 0 nil
+FI 8 0 0 nil
+FS 8 0 0 nil
+SP 8 0 0 nil
+FA 8 0 1 nil
+FI 8 0 1 nil
+FS 8 0 1 nil
+SP 8 0 1 [-]
+FA 8 0 2 nil
+FI 8 0 2 nil
+FS 8 0 2 nil
+SP 8 0 2 [-]
+FA 8 0 3 nil
+FI 8 0 3 nil
+FS 8 0 3 nil
+SP 8 0 3 [-]
+FA 8 0 5 nil
+FI 8 0 5 nil
+FS 8 0 5 nil
+SP 8 0 5 [-]
+FA 8 1 -1 [a]
+FI 8 1 -1 [0:1]
+FS 8 1 -1 [[a]]
+SP 8 1 -1 [- -]
+FA 8 1 0 nil
+FI 8 1 0 nil
+FS 8 1 0 nil
+SP 8 1 0 nil
+FA 8 1 1 [a]
+FI 8 1 1 [0:1]
+FS 8 1 1 [[a]]
+SP 8 1 1 [a]
+FA 8 1 2 [a]
+FI 8 1 2 [0:1]
+FS 8 1 2 [[a]]
+SP 8 1 2 [- -]
+FA 8 1 3 [a]
+FI 8 1 3 [0:1]
+FS 8 1 3 [[a]]
+SP 8 1 3 [- -]
+FA 8 1 5 [a]
+FI 8 1 5 [0:1]
+FS 8 1 5 [[a]]
+SP 8 1 5 [- -]
+FA 8 2 -1 [a b a a b a c c a a a a]
+FI 8 2 -1 [0:1 1:2 2:3 3:4 4:5 5:6 6:7 7:8 8:9 10:11 11:12 12:13]
+FS 8 2 -1 [[a] [b] [a] [a] [b] [a] [c] [c] [a] [a] [a] [a]]
+SP 8 2 -1 [- - - - - - - - - d - - e]
+FA 8 2 0 nil
+FI 8 2 0 nil
+FS 8 2 0 nil
+SP 8 2 0 nil
+FA 8 2 1 [a]
+FI 8 2 1 [0:1]
+FS 8 2 1 [[a]]
+SP 8 2 1 [abaabaccadaaae]
+FA 8 2 2 [a b]
+FI 8 2 2 [0:1 1:2]
+FS 8 2 2 [[a] [b]]
+SP 8 2 2 [- baabaccadaaae]
+FA 8 2 3 [a b a]
+FI 8 2 3 [0:1 1:2 2:3]
+FS 8 2 3 [[a] [b] [a]]
+SP 8 2 3 [- - aabaccadaaae]
+FA 8 2 5 [a b a a b]
+FI 8 2 5 [0:1 1:2 2:3 3:4 4:5]
+FS 8 2 5 [[a] [b] [a] [a] [b]]
+SP 8 2 5 [- - - - baccadaaae]
+FA 8 3 -1 [a b c]
+FI 8 3 -1 [0:1 2:3 5:6]
+FS 8 3 -1 [[a] [b] [c]]
+SP 8 3 -1 [- , ,, -]
+FA 8 3 0 nil
+FI 8 3 0 nil
+FS 8 3 0 nil
+SP 8 3 0 nil
+FA 8 3 1 [a]
+FI 8 3 1 [0:1]
+FS 8 3 1 [[a]]
+SP 8 3 1 [a,b,,c]
+FA 8 3 2 [a b]
+FI 8 3 2 [0:1 2:3]
+FS 8 3 2 [[a] [b]]
+SP 8 3 2 [- ,b,,c]
+FA 8 3 3 [a b c]
+FI 8 3 3 [0:1 2:3 5:6]
+FS 8 3 3 [[a] [b] [c]]
+SP 8 3 3 [- , ,,c]
+FA 8 3 5 [a b c]
+FI 8 3 5 [0:1 2:3 5:6]
+FS 8 3 5 [[a] [b] [c]]
+SP 8 3 5 [- , ,, -]
+FA 8 4 -1 [a b]
+FI 8 4 -1 [2:3 5:6]
+FS 8 4 -1 [[a] [b]]
+SP 8 4 -1 [\x20\x20 \x20\x20 \x20]
+FA 8 4 0 nil
+FI 8 4 0 nil
+FS 8 4 0 nil
+SP 8 4 0 nil
+FA 8 4 1 [a]
+FI 8 4 1 [2:3]
+FS 8 4 1 [[a]]
+SP 8 4 1 [\x20\x20a\x20\x20b\x20]
+FA 8 4 2 [a b]
+FI 8 4 2 [2:3 5:6]
+FS 8 4 2 [[a] [b]]
+SP 8 4 2 [\x20\x20 \x20\x20b\x20]
+FA 8 4 3 [a b]
+FI 8 4 3 [2:3 5:6]
+FS 8 4 3 [[a] [b]]
+SP 8 4 3 [\x20\x20 \x20\x20 \x20]
+FA 8 4 5 [a b]
+FI 8 4 5 [2:3 5:6]
+FS 8 4 5 [[a] [b]]
+SP 8 4 5 [\x20\x20 \x20\x20 \x20]
+FA 8 5 -1 [a b c]
+FI 8 5 -1 [0:1 3:4 6:7]
+FS 8 5 -1 [[a] [b] [c]]
+SP 8 5 -1 [- || || -]
+FA 8 5 0 nil
+FI 8 5 0 nil
+FS 8 5 0 nil
+SP 8 5 0 nil
+FA 8 5 1 [a]
+FI 8 5 1 [0:1]
+FS 8 5 1 [[a]]
+SP 8 5 1 [a||b||c]
+FA 8 5 2 [a b]
+FI 8 5 2 [0:1 3:4]
+FS 8 5 2 [[a] [b]]
+SP 8 5 2 [- ||b||c]
+FA 8 5 3 [a b c]
+FI 8 5 3 [0:1 3:4 6:7]
+FS 8 5 3 [[a] [b] [c]]
+SP 8 5 3 [- || ||c]
+FA 8 5 5 [a b c]
+FI 8 5 5 [0:1 3:4 6:7]
+FS 8 5 5 [[a] [b] [c]]
+SP 8 5 5 [- || || -]
+FA 8 6 -1 [a b]
+FI 8 6 -1 [0:1 2:3]
+FS 8 6 -1 [[a] [b]]
+SP 8 6 -1 [- | -]
+FA 8 6 0 nil
+FI 8 6 0 nil
+FS 8 6 0 nil
+SP 8 6 0 nil
+FA 8 6 1 [a]
+FI 8 6 1 [0:1]
+FS 8 6 1 [[a]]
+SP 8 6 1 [a|b]
+FA 8 6 2 [a b]
+FI 8 6 2 [0:1 2:3]
+FS 8 6 2 [[a] [b]]
+SP 8 6 2 [- |b]
+FA 8 6 3 [a b]
+FI 8 6 3 [0:1 2:3]
+FS 8 6 3 [[a] [b]]
+SP 8 6 3 [- | -]
+FA 8 6 5 [a b]
+FI 8 6 5 [0:1 2:3]
+FS 8 6 5 [[a] [b]]
+SP 8 6 5 [- | -]
+FA 8 7 -1 [a]
+FI 8 7 -1 [1:2]
+FS 8 7 -1 [[a]]
+SP 8 7 -1 [, ,]
+FA 8 7 0 nil
+FI 8 7 0 nil
+FS 8 7 0 nil
+SP 8 7 0 nil
+FA 8 7 1 [a]
+FI 8 7 1 [1:2]
+FS 8 7 1 [[a]]
+SP 8 7 1 [,a,]
+FA 8 7 2 [a]
+FI 8 7 2 [1:2]
+FS 8 7 2 [[a]]
+SP 8 7 2 [, ,]
+FA 8 7 3 [a]
+FI 8 7 3 [1:2]
+FS 8 7 3 [[a]]
+SP 8 7 3 [, ,]
+FA 8 7 5 [a]
+FI 8 7 5 [1:2]
+FS 8 7 5 [[a]]
+SP 8 7 5 [, ,]
+FA 8 8 -1 nil
+FI 8 8 -1 nil
+FS 8 8 -1 nil
+SP 8 8 -1 [,,]
+FA 8 8 0 nil
+FI 8 8 0 nil
+FS 8 8 0 nil
+SP 8 8 0 nil
+FA 8 8 1 nil
+FI 8 8 1 nil
+FS 8 8 1 nil
+SP 8 8 1 [,,]
+FA 8 8 2 nil
+FI 8 8 2 nil
+FS 8 8 2 nil
+SP 8 8 2 [,,]
+FA 8 8 3 nil
+FI 8 8 3 nil
+FS 8 8 3 nil
+SP 8 8 3 [,,]
+FA 8 8 5 nil
+FI 8 8 5 nil
+FS 8 8 5 nil
+SP 8 8 5 [,,]
+FA 8 9 -1 [b a a a]
+FI 8 9 -1 [0:1 1:2 3:4 5:6]
+FS 8 9 -1 [[b] [a] [a] [a]]
+SP 8 9 -1 [- - n n -]
+FA 8 9 0 nil
+FI 8 9 0 nil
+FS 8 9 0 nil
+SP 8 9 0 nil
+FA 8 9 1 [b]
+FI 8 9 1 [0:1]
+FS 8 9 1 [[b]]
+SP 8 9 1 [banana]
+FA 8 9 2 [b a]
+FI 8 9 2 [0:1 1:2]
+FS 8 9 2 [[b] [a]]
+SP 8 9 2 [- anana]
+FA 8 9 3 [b a a]
+FI 8 9 3 [0:1 1:2 3:4]
+FS 8 9 3 [[b] [a] [a]]
+SP 8 9 3 [- - nana]
+FA 8 9 5 [b a a a]
+FI 8 9 5 [0:1 1:2 3:4 5:6]
+FS 8 9 5 [[b] [a] [a] [a]]
+SP 8 9 5 [- - n n -]
+FA 8 10 -1 [A a B b C c]
+FI 8 10 -1 [0:1 1:2 2:3 3:4 4:5 5:6]
+FS 8 10 -1 [[A] [a] [B] [b] [C] [c]]
+SP 8 10 -1 [- - - - - - -]
+FA 8 10 0 nil
+FI 8 10 0 nil
+FS 8 10 0 nil
+SP 8 10 0 nil
+FA 8 10 1 [A]
+FI 8 10 1 [0:1]
+FS 8 10 1 [[A]]
+SP 8 10 1 [AaBbCc]
+FA 8 10 2 [A a]
+FI 8 10 2 [0:1 1:2]
+FS 8 10 2 [[A] [a]]
+SP 8 10 2 [- aBbCc]
+FA 8 10 3 [A a B]
+FI 8 10 3 [0:1 1:2 2:3]
+FS 8 10 3 [[A] [a] [B]]
+SP 8 10 3 [- - BbCc]
+FA 8 10 5 [A a B b C]
+FI 8 10 5 [0:1 1:2 2:3 3:4 4:5]
+FS 8 10 5 [[A] [a] [B] [b] [C]]
+SP 8 10 5 [- - - - Cc]
+FA 8 11 -1 nil
+FI 8 11 -1 nil
+FS 8 11 -1 nil
+SP 8 11 -1 [h\xc3\xa9llo]
+FA 8 11 0 nil
+FI 8 11 0 nil
+FS 8 11 0 nil
+SP 8 11 0 nil
+FA 8 11 1 nil
+FI 8 11 1 nil
+FS 8 11 1 nil
+SP 8 11 1 [h\xc3\xa9llo]
+FA 8 11 2 nil
+FI 8 11 2 nil
+FS 8 11 2 nil
+SP 8 11 2 [h\xc3\xa9llo]
+FA 8 11 3 nil
+FI 8 11 3 nil
+FS 8 11 3 nil
+SP 8 11 3 [h\xc3\xa9llo]
+FA 8 11 5 nil
+FI 8 11 5 nil
+FS 8 11 5 nil
+SP 8 11 5 [h\xc3\xa9llo]
+FA 8 12 -1 nil
+FI 8 12 -1 nil
+FS 8 12 -1 nil
+SP 8 12 -1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 8 12 0 nil
+FI 8 12 0 nil
+FS 8 12 0 nil
+SP 8 12 0 nil
+FA 8 12 1 nil
+FI 8 12 1 nil
+FS 8 12 1 nil
+SP 8 12 1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 8 12 2 nil
+FI 8 12 2 nil
+FS 8 12 2 nil
+SP 8 12 2 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 8 12 3 nil
+FI 8 12 3 nil
+FS 8 12 3 nil
+SP 8 12 3 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 8 12 5 nil
+FI 8 12 5 nil
+FS 8 12 5 nil
+SP 8 12 5 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 8 13 -1 [a a]
+FI 8 13 -1 [0:1 4:5]
+FS 8 13 -1 [[a] [a]]
+SP 8 13 -1 [- \xc3\xa9\x20 -]
+FA 8 13 0 nil
+FI 8 13 0 nil
+FS 8 13 0 nil
+SP 8 13 0 nil
+FA 8 13 1 [a]
+FI 8 13 1 [0:1]
+FS 8 13 1 [[a]]
+SP 8 13 1 [a\xc3\xa9\x20a]
+FA 8 13 2 [a a]
+FI 8 13 2 [0:1 4:5]
+FS 8 13 2 [[a] [a]]
+SP 8 13 2 [- \xc3\xa9\x20a]
+FA 8 13 3 [a a]
+FI 8 13 3 [0:1 4:5]
+FS 8 13 3 [[a] [a]]
+SP 8 13 3 [- \xc3\xa9\x20 -]
+FA 8 13 5 [a a]
+FI 8 13 5 [0:1 4:5]
+FS 8 13 5 [[a] [a]]
+SP 8 13 5 [- \xc3\xa9\x20 -]
+Q 9 ^
+FA 9 0 -1 [-]
+FI 9 0 -1 [0:0]
+FS 9 0 -1 [[-]]
+SP 9 0 -1 [-]
+FA 9 0 0 nil
+FI 9 0 0 nil
+FS 9 0 0 nil
+SP 9 0 0 nil
+FA 9 0 1 [-]
+FI 9 0 1 [0:0]
+FS 9 0 1 [[-]]
+SP 9 0 1 [-]
+FA 9 0 2 [-]
+FI 9 0 2 [0:0]
+FS 9 0 2 [[-]]
+SP 9 0 2 [-]
+FA 9 0 3 [-]
+FI 9 0 3 [0:0]
+FS 9 0 3 [[-]]
+SP 9 0 3 [-]
+FA 9 0 5 [-]
+FI 9 0 5 [0:0]
+FS 9 0 5 [[-]]
+SP 9 0 5 [-]
+FA 9 1 -1 [-]
+FI 9 1 -1 [0:0]
+FS 9 1 -1 [[-]]
+SP 9 1 -1 [a]
+FA 9 1 0 nil
+FI 9 1 0 nil
+FS 9 1 0 nil
+SP 9 1 0 nil
+FA 9 1 1 [-]
+FI 9 1 1 [0:0]
+FS 9 1 1 [[-]]
+SP 9 1 1 [a]
+FA 9 1 2 [-]
+FI 9 1 2 [0:0]
+FS 9 1 2 [[-]]
+SP 9 1 2 [a]
+FA 9 1 3 [-]
+FI 9 1 3 [0:0]
+FS 9 1 3 [[-]]
+SP 9 1 3 [a]
+FA 9 1 5 [-]
+FI 9 1 5 [0:0]
+FS 9 1 5 [[-]]
+SP 9 1 5 [a]
+FA 9 2 -1 [-]
+FI 9 2 -1 [0:0]
+FS 9 2 -1 [[-]]
+SP 9 2 -1 [abaabaccadaaae]
+FA 9 2 0 nil
+FI 9 2 0 nil
+FS 9 2 0 nil
+SP 9 2 0 nil
+FA 9 2 1 [-]
+FI 9 2 1 [0:0]
+FS 9 2 1 [[-]]
+SP 9 2 1 [abaabaccadaaae]
+FA 9 2 2 [-]
+FI 9 2 2 [0:0]
+FS 9 2 2 [[-]]
+SP 9 2 2 [abaabaccadaaae]
+FA 9 2 3 [-]
+FI 9 2 3 [0:0]
+FS 9 2 3 [[-]]
+SP 9 2 3 [abaabaccadaaae]
+FA 9 2 5 [-]
+FI 9 2 5 [0:0]
+FS 9 2 5 [[-]]
+SP 9 2 5 [abaabaccadaaae]
+FA 9 3 -1 [-]
+FI 9 3 -1 [0:0]
+FS 9 3 -1 [[-]]
+SP 9 3 -1 [a,b,,c]
+FA 9 3 0 nil
+FI 9 3 0 nil
+FS 9 3 0 nil
+SP 9 3 0 nil
+FA 9 3 1 [-]
+FI 9 3 1 [0:0]
+FS 9 3 1 [[-]]
+SP 9 3 1 [a,b,,c]
+FA 9 3 2 [-]
+FI 9 3 2 [0:0]
+FS 9 3 2 [[-]]
+SP 9 3 2 [a,b,,c]
+FA 9 3 3 [-]
+FI 9 3 3 [0:0]
+FS 9 3 3 [[-]]
+SP 9 3 3 [a,b,,c]
+FA 9 3 5 [-]
+FI 9 3 5 [0:0]
+FS 9 3 5 [[-]]
+SP 9 3 5 [a,b,,c]
+FA 9 4 -1 [-]
+FI 9 4 -1 [0:0]
+FS 9 4 -1 [[-]]
+SP 9 4 -1 [\x20\x20a\x20\x20b\x20]
+FA 9 4 0 nil
+FI 9 4 0 nil
+FS 9 4 0 nil
+SP 9 4 0 nil
+FA 9 4 1 [-]
+FI 9 4 1 [0:0]
+FS 9 4 1 [[-]]
+SP 9 4 1 [\x20\x20a\x20\x20b\x20]
+FA 9 4 2 [-]
+FI 9 4 2 [0:0]
+FS 9 4 2 [[-]]
+SP 9 4 2 [\x20\x20a\x20\x20b\x20]
+FA 9 4 3 [-]
+FI 9 4 3 [0:0]
+FS 9 4 3 [[-]]
+SP 9 4 3 [\x20\x20a\x20\x20b\x20]
+FA 9 4 5 [-]
+FI 9 4 5 [0:0]
+FS 9 4 5 [[-]]
+SP 9 4 5 [\x20\x20a\x20\x20b\x20]
+FA 9 5 -1 [-]
+FI 9 5 -1 [0:0]
+FS 9 5 -1 [[-]]
+SP 9 5 -1 [a||b||c]
+FA 9 5 0 nil
+FI 9 5 0 nil
+FS 9 5 0 nil
+SP 9 5 0 nil
+FA 9 5 1 [-]
+FI 9 5 1 [0:0]
+FS 9 5 1 [[-]]
+SP 9 5 1 [a||b||c]
+FA 9 5 2 [-]
+FI 9 5 2 [0:0]
+FS 9 5 2 [[-]]
+SP 9 5 2 [a||b||c]
+FA 9 5 3 [-]
+FI 9 5 3 [0:0]
+FS 9 5 3 [[-]]
+SP 9 5 3 [a||b||c]
+FA 9 5 5 [-]
+FI 9 5 5 [0:0]
+FS 9 5 5 [[-]]
+SP 9 5 5 [a||b||c]
+FA 9 6 -1 [-]
+FI 9 6 -1 [0:0]
+FS 9 6 -1 [[-]]
+SP 9 6 -1 [a|b]
+FA 9 6 0 nil
+FI 9 6 0 nil
+FS 9 6 0 nil
+SP 9 6 0 nil
+FA 9 6 1 [-]
+FI 9 6 1 [0:0]
+FS 9 6 1 [[-]]
+SP 9 6 1 [a|b]
+FA 9 6 2 [-]
+FI 9 6 2 [0:0]
+FS 9 6 2 [[-]]
+SP 9 6 2 [a|b]
+FA 9 6 3 [-]
+FI 9 6 3 [0:0]
+FS 9 6 3 [[-]]
+SP 9 6 3 [a|b]
+FA 9 6 5 [-]
+FI 9 6 5 [0:0]
+FS 9 6 5 [[-]]
+SP 9 6 5 [a|b]
+FA 9 7 -1 [-]
+FI 9 7 -1 [0:0]
+FS 9 7 -1 [[-]]
+SP 9 7 -1 [,a,]
+FA 9 7 0 nil
+FI 9 7 0 nil
+FS 9 7 0 nil
+SP 9 7 0 nil
+FA 9 7 1 [-]
+FI 9 7 1 [0:0]
+FS 9 7 1 [[-]]
+SP 9 7 1 [,a,]
+FA 9 7 2 [-]
+FI 9 7 2 [0:0]
+FS 9 7 2 [[-]]
+SP 9 7 2 [,a,]
+FA 9 7 3 [-]
+FI 9 7 3 [0:0]
+FS 9 7 3 [[-]]
+SP 9 7 3 [,a,]
+FA 9 7 5 [-]
+FI 9 7 5 [0:0]
+FS 9 7 5 [[-]]
+SP 9 7 5 [,a,]
+FA 9 8 -1 [-]
+FI 9 8 -1 [0:0]
+FS 9 8 -1 [[-]]
+SP 9 8 -1 [,,]
+FA 9 8 0 nil
+FI 9 8 0 nil
+FS 9 8 0 nil
+SP 9 8 0 nil
+FA 9 8 1 [-]
+FI 9 8 1 [0:0]
+FS 9 8 1 [[-]]
+SP 9 8 1 [,,]
+FA 9 8 2 [-]
+FI 9 8 2 [0:0]
+FS 9 8 2 [[-]]
+SP 9 8 2 [,,]
+FA 9 8 3 [-]
+FI 9 8 3 [0:0]
+FS 9 8 3 [[-]]
+SP 9 8 3 [,,]
+FA 9 8 5 [-]
+FI 9 8 5 [0:0]
+FS 9 8 5 [[-]]
+SP 9 8 5 [,,]
+FA 9 9 -1 [-]
+FI 9 9 -1 [0:0]
+FS 9 9 -1 [[-]]
+SP 9 9 -1 [banana]
+FA 9 9 0 nil
+FI 9 9 0 nil
+FS 9 9 0 nil
+SP 9 9 0 nil
+FA 9 9 1 [-]
+FI 9 9 1 [0:0]
+FS 9 9 1 [[-]]
+SP 9 9 1 [banana]
+FA 9 9 2 [-]
+FI 9 9 2 [0:0]
+FS 9 9 2 [[-]]
+SP 9 9 2 [banana]
+FA 9 9 3 [-]
+FI 9 9 3 [0:0]
+FS 9 9 3 [[-]]
+SP 9 9 3 [banana]
+FA 9 9 5 [-]
+FI 9 9 5 [0:0]
+FS 9 9 5 [[-]]
+SP 9 9 5 [banana]
+FA 9 10 -1 [-]
+FI 9 10 -1 [0:0]
+FS 9 10 -1 [[-]]
+SP 9 10 -1 [AaBbCc]
+FA 9 10 0 nil
+FI 9 10 0 nil
+FS 9 10 0 nil
+SP 9 10 0 nil
+FA 9 10 1 [-]
+FI 9 10 1 [0:0]
+FS 9 10 1 [[-]]
+SP 9 10 1 [AaBbCc]
+FA 9 10 2 [-]
+FI 9 10 2 [0:0]
+FS 9 10 2 [[-]]
+SP 9 10 2 [AaBbCc]
+FA 9 10 3 [-]
+FI 9 10 3 [0:0]
+FS 9 10 3 [[-]]
+SP 9 10 3 [AaBbCc]
+FA 9 10 5 [-]
+FI 9 10 5 [0:0]
+FS 9 10 5 [[-]]
+SP 9 10 5 [AaBbCc]
+FA 9 11 -1 [-]
+FI 9 11 -1 [0:0]
+FS 9 11 -1 [[-]]
+SP 9 11 -1 [h\xc3\xa9llo]
+FA 9 11 0 nil
+FI 9 11 0 nil
+FS 9 11 0 nil
+SP 9 11 0 nil
+FA 9 11 1 [-]
+FI 9 11 1 [0:0]
+FS 9 11 1 [[-]]
+SP 9 11 1 [h\xc3\xa9llo]
+FA 9 11 2 [-]
+FI 9 11 2 [0:0]
+FS 9 11 2 [[-]]
+SP 9 11 2 [h\xc3\xa9llo]
+FA 9 11 3 [-]
+FI 9 11 3 [0:0]
+FS 9 11 3 [[-]]
+SP 9 11 3 [h\xc3\xa9llo]
+FA 9 11 5 [-]
+FI 9 11 5 [0:0]
+FS 9 11 5 [[-]]
+SP 9 11 5 [h\xc3\xa9llo]
+FA 9 12 -1 [-]
+FI 9 12 -1 [0:0]
+FS 9 12 -1 [[-]]
+SP 9 12 -1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 9 12 0 nil
+FI 9 12 0 nil
+FS 9 12 0 nil
+SP 9 12 0 nil
+FA 9 12 1 [-]
+FI 9 12 1 [0:0]
+FS 9 12 1 [[-]]
+SP 9 12 1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 9 12 2 [-]
+FI 9 12 2 [0:0]
+FS 9 12 2 [[-]]
+SP 9 12 2 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 9 12 3 [-]
+FI 9 12 3 [0:0]
+FS 9 12 3 [[-]]
+SP 9 12 3 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 9 12 5 [-]
+FI 9 12 5 [0:0]
+FS 9 12 5 [[-]]
+SP 9 12 5 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 9 13 -1 [-]
+FI 9 13 -1 [0:0]
+FS 9 13 -1 [[-]]
+SP 9 13 -1 [a\xc3\xa9\x20a]
+FA 9 13 0 nil
+FI 9 13 0 nil
+FS 9 13 0 nil
+SP 9 13 0 nil
+FA 9 13 1 [-]
+FI 9 13 1 [0:0]
+FS 9 13 1 [[-]]
+SP 9 13 1 [a\xc3\xa9\x20a]
+FA 9 13 2 [-]
+FI 9 13 2 [0:0]
+FS 9 13 2 [[-]]
+SP 9 13 2 [a\xc3\xa9\x20a]
+FA 9 13 3 [-]
+FI 9 13 3 [0:0]
+FS 9 13 3 [[-]]
+SP 9 13 3 [a\xc3\xa9\x20a]
+FA 9 13 5 [-]
+FI 9 13 5 [0:0]
+FS 9 13 5 [[-]]
+SP 9 13 5 [a\xc3\xa9\x20a]
+Q 10 $
+FA 10 0 -1 [-]
+FI 10 0 -1 [0:0]
+FS 10 0 -1 [[-]]
+SP 10 0 -1 [-]
+FA 10 0 0 nil
+FI 10 0 0 nil
+FS 10 0 0 nil
+SP 10 0 0 nil
+FA 10 0 1 [-]
+FI 10 0 1 [0:0]
+FS 10 0 1 [[-]]
+SP 10 0 1 [-]
+FA 10 0 2 [-]
+FI 10 0 2 [0:0]
+FS 10 0 2 [[-]]
+SP 10 0 2 [-]
+FA 10 0 3 [-]
+FI 10 0 3 [0:0]
+FS 10 0 3 [[-]]
+SP 10 0 3 [-]
+FA 10 0 5 [-]
+FI 10 0 5 [0:0]
+FS 10 0 5 [[-]]
+SP 10 0 5 [-]
+FA 10 1 -1 [-]
+FI 10 1 -1 [1:1]
+FS 10 1 -1 [[-]]
+SP 10 1 -1 [a]
+FA 10 1 0 nil
+FI 10 1 0 nil
+FS 10 1 0 nil
+SP 10 1 0 nil
+FA 10 1 1 [-]
+FI 10 1 1 [1:1]
+FS 10 1 1 [[-]]
+SP 10 1 1 [a]
+FA 10 1 2 [-]
+FI 10 1 2 [1:1]
+FS 10 1 2 [[-]]
+SP 10 1 2 [a]
+FA 10 1 3 [-]
+FI 10 1 3 [1:1]
+FS 10 1 3 [[-]]
+SP 10 1 3 [a]
+FA 10 1 5 [-]
+FI 10 1 5 [1:1]
+FS 10 1 5 [[-]]
+SP 10 1 5 [a]
+FA 10 2 -1 [-]
+FI 10 2 -1 [14:14]
+FS 10 2 -1 [[-]]
+SP 10 2 -1 [abaabaccadaaae]
+FA 10 2 0 nil
+FI 10 2 0 nil
+FS 10 2 0 nil
+SP 10 2 0 nil
+FA 10 2 1 [-]
+FI 10 2 1 [14:14]
+FS 10 2 1 [[-]]
+SP 10 2 1 [abaabaccadaaae]
+FA 10 2 2 [-]
+FI 10 2 2 [14:14]
+FS 10 2 2 [[-]]
+SP 10 2 2 [abaabaccadaaae]
+FA 10 2 3 [-]
+FI 10 2 3 [14:14]
+FS 10 2 3 [[-]]
+SP 10 2 3 [abaabaccadaaae]
+FA 10 2 5 [-]
+FI 10 2 5 [14:14]
+FS 10 2 5 [[-]]
+SP 10 2 5 [abaabaccadaaae]
+FA 10 3 -1 [-]
+FI 10 3 -1 [6:6]
+FS 10 3 -1 [[-]]
+SP 10 3 -1 [a,b,,c]
+FA 10 3 0 nil
+FI 10 3 0 nil
+FS 10 3 0 nil
+SP 10 3 0 nil
+FA 10 3 1 [-]
+FI 10 3 1 [6:6]
+FS 10 3 1 [[-]]
+SP 10 3 1 [a,b,,c]
+FA 10 3 2 [-]
+FI 10 3 2 [6:6]
+FS 10 3 2 [[-]]
+SP 10 3 2 [a,b,,c]
+FA 10 3 3 [-]
+FI 10 3 3 [6:6]
+FS 10 3 3 [[-]]
+SP 10 3 3 [a,b,,c]
+FA 10 3 5 [-]
+FI 10 3 5 [6:6]
+FS 10 3 5 [[-]]
+SP 10 3 5 [a,b,,c]
+FA 10 4 -1 [-]
+FI 10 4 -1 [7:7]
+FS 10 4 -1 [[-]]
+SP 10 4 -1 [\x20\x20a\x20\x20b\x20]
+FA 10 4 0 nil
+FI 10 4 0 nil
+FS 10 4 0 nil
+SP 10 4 0 nil
+FA 10 4 1 [-]
+FI 10 4 1 [7:7]
+FS 10 4 1 [[-]]
+SP 10 4 1 [\x20\x20a\x20\x20b\x20]
+FA 10 4 2 [-]
+FI 10 4 2 [7:7]
+FS 10 4 2 [[-]]
+SP 10 4 2 [\x20\x20a\x20\x20b\x20]
+FA 10 4 3 [-]
+FI 10 4 3 [7:7]
+FS 10 4 3 [[-]]
+SP 10 4 3 [\x20\x20a\x20\x20b\x20]
+FA 10 4 5 [-]
+FI 10 4 5 [7:7]
+FS 10 4 5 [[-]]
+SP 10 4 5 [\x20\x20a\x20\x20b\x20]
+FA 10 5 -1 [-]
+FI 10 5 -1 [7:7]
+FS 10 5 -1 [[-]]
+SP 10 5 -1 [a||b||c]
+FA 10 5 0 nil
+FI 10 5 0 nil
+FS 10 5 0 nil
+SP 10 5 0 nil
+FA 10 5 1 [-]
+FI 10 5 1 [7:7]
+FS 10 5 1 [[-]]
+SP 10 5 1 [a||b||c]
+FA 10 5 2 [-]
+FI 10 5 2 [7:7]
+FS 10 5 2 [[-]]
+SP 10 5 2 [a||b||c]
+FA 10 5 3 [-]
+FI 10 5 3 [7:7]
+FS 10 5 3 [[-]]
+SP 10 5 3 [a||b||c]
+FA 10 5 5 [-]
+FI 10 5 5 [7:7]
+FS 10 5 5 [[-]]
+SP 10 5 5 [a||b||c]
+FA 10 6 -1 [-]
+FI 10 6 -1 [3:3]
+FS 10 6 -1 [[-]]
+SP 10 6 -1 [a|b]
+FA 10 6 0 nil
+FI 10 6 0 nil
+FS 10 6 0 nil
+SP 10 6 0 nil
+FA 10 6 1 [-]
+FI 10 6 1 [3:3]
+FS 10 6 1 [[-]]
+SP 10 6 1 [a|b]
+FA 10 6 2 [-]
+FI 10 6 2 [3:3]
+FS 10 6 2 [[-]]
+SP 10 6 2 [a|b]
+FA 10 6 3 [-]
+FI 10 6 3 [3:3]
+FS 10 6 3 [[-]]
+SP 10 6 3 [a|b]
+FA 10 6 5 [-]
+FI 10 6 5 [3:3]
+FS 10 6 5 [[-]]
+SP 10 6 5 [a|b]
+FA 10 7 -1 [-]
+FI 10 7 -1 [3:3]
+FS 10 7 -1 [[-]]
+SP 10 7 -1 [,a,]
+FA 10 7 0 nil
+FI 10 7 0 nil
+FS 10 7 0 nil
+SP 10 7 0 nil
+FA 10 7 1 [-]
+FI 10 7 1 [3:3]
+FS 10 7 1 [[-]]
+SP 10 7 1 [,a,]
+FA 10 7 2 [-]
+FI 10 7 2 [3:3]
+FS 10 7 2 [[-]]
+SP 10 7 2 [,a,]
+FA 10 7 3 [-]
+FI 10 7 3 [3:3]
+FS 10 7 3 [[-]]
+SP 10 7 3 [,a,]
+FA 10 7 5 [-]
+FI 10 7 5 [3:3]
+FS 10 7 5 [[-]]
+SP 10 7 5 [,a,]
+FA 10 8 -1 [-]
+FI 10 8 -1 [2:2]
+FS 10 8 -1 [[-]]
+SP 10 8 -1 [,,]
+FA 10 8 0 nil
+FI 10 8 0 nil
+FS 10 8 0 nil
+SP 10 8 0 nil
+FA 10 8 1 [-]
+FI 10 8 1 [2:2]
+FS 10 8 1 [[-]]
+SP 10 8 1 [,,]
+FA 10 8 2 [-]
+FI 10 8 2 [2:2]
+FS 10 8 2 [[-]]
+SP 10 8 2 [,,]
+FA 10 8 3 [-]
+FI 10 8 3 [2:2]
+FS 10 8 3 [[-]]
+SP 10 8 3 [,,]
+FA 10 8 5 [-]
+FI 10 8 5 [2:2]
+FS 10 8 5 [[-]]
+SP 10 8 5 [,,]
+FA 10 9 -1 [-]
+FI 10 9 -1 [6:6]
+FS 10 9 -1 [[-]]
+SP 10 9 -1 [banana]
+FA 10 9 0 nil
+FI 10 9 0 nil
+FS 10 9 0 nil
+SP 10 9 0 nil
+FA 10 9 1 [-]
+FI 10 9 1 [6:6]
+FS 10 9 1 [[-]]
+SP 10 9 1 [banana]
+FA 10 9 2 [-]
+FI 10 9 2 [6:6]
+FS 10 9 2 [[-]]
+SP 10 9 2 [banana]
+FA 10 9 3 [-]
+FI 10 9 3 [6:6]
+FS 10 9 3 [[-]]
+SP 10 9 3 [banana]
+FA 10 9 5 [-]
+FI 10 9 5 [6:6]
+FS 10 9 5 [[-]]
+SP 10 9 5 [banana]
+FA 10 10 -1 [-]
+FI 10 10 -1 [6:6]
+FS 10 10 -1 [[-]]
+SP 10 10 -1 [AaBbCc]
+FA 10 10 0 nil
+FI 10 10 0 nil
+FS 10 10 0 nil
+SP 10 10 0 nil
+FA 10 10 1 [-]
+FI 10 10 1 [6:6]
+FS 10 10 1 [[-]]
+SP 10 10 1 [AaBbCc]
+FA 10 10 2 [-]
+FI 10 10 2 [6:6]
+FS 10 10 2 [[-]]
+SP 10 10 2 [AaBbCc]
+FA 10 10 3 [-]
+FI 10 10 3 [6:6]
+FS 10 10 3 [[-]]
+SP 10 10 3 [AaBbCc]
+FA 10 10 5 [-]
+FI 10 10 5 [6:6]
+FS 10 10 5 [[-]]
+SP 10 10 5 [AaBbCc]
+FA 10 11 -1 [-]
+FI 10 11 -1 [6:6]
+FS 10 11 -1 [[-]]
+SP 10 11 -1 [h\xc3\xa9llo]
+FA 10 11 0 nil
+FI 10 11 0 nil
+FS 10 11 0 nil
+SP 10 11 0 nil
+FA 10 11 1 [-]
+FI 10 11 1 [6:6]
+FS 10 11 1 [[-]]
+SP 10 11 1 [h\xc3\xa9llo]
+FA 10 11 2 [-]
+FI 10 11 2 [6:6]
+FS 10 11 2 [[-]]
+SP 10 11 2 [h\xc3\xa9llo]
+FA 10 11 3 [-]
+FI 10 11 3 [6:6]
+FS 10 11 3 [[-]]
+SP 10 11 3 [h\xc3\xa9llo]
+FA 10 11 5 [-]
+FI 10 11 5 [6:6]
+FS 10 11 5 [[-]]
+SP 10 11 5 [h\xc3\xa9llo]
+FA 10 12 -1 [-]
+FI 10 12 -1 [9:9]
+FS 10 12 -1 [[-]]
+SP 10 12 -1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 10 12 0 nil
+FI 10 12 0 nil
+FS 10 12 0 nil
+SP 10 12 0 nil
+FA 10 12 1 [-]
+FI 10 12 1 [9:9]
+FS 10 12 1 [[-]]
+SP 10 12 1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 10 12 2 [-]
+FI 10 12 2 [9:9]
+FS 10 12 2 [[-]]
+SP 10 12 2 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 10 12 3 [-]
+FI 10 12 3 [9:9]
+FS 10 12 3 [[-]]
+SP 10 12 3 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 10 12 5 [-]
+FI 10 12 5 [9:9]
+FS 10 12 5 [[-]]
+SP 10 12 5 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 10 13 -1 [-]
+FI 10 13 -1 [5:5]
+FS 10 13 -1 [[-]]
+SP 10 13 -1 [a\xc3\xa9\x20a]
+FA 10 13 0 nil
+FI 10 13 0 nil
+FS 10 13 0 nil
+SP 10 13 0 nil
+FA 10 13 1 [-]
+FI 10 13 1 [5:5]
+FS 10 13 1 [[-]]
+SP 10 13 1 [a\xc3\xa9\x20a]
+FA 10 13 2 [-]
+FI 10 13 2 [5:5]
+FS 10 13 2 [[-]]
+SP 10 13 2 [a\xc3\xa9\x20a]
+FA 10 13 3 [-]
+FI 10 13 3 [5:5]
+FS 10 13 3 [[-]]
+SP 10 13 3 [a\xc3\xa9\x20a]
+FA 10 13 5 [-]
+FI 10 13 5 [5:5]
+FS 10 13 5 [[-]]
+SP 10 13 5 [a\xc3\xa9\x20a]
+Q 11 -
+FA 11 0 -1 [-]
+FI 11 0 -1 [0:0]
+FS 11 0 -1 [[-]]
+SP 11 0 -1 []
+FA 11 0 0 nil
+FI 11 0 0 nil
+FS 11 0 0 nil
+SP 11 0 0 nil
+FA 11 0 1 [-]
+FI 11 0 1 [0:0]
+FS 11 0 1 [[-]]
+SP 11 0 1 []
+FA 11 0 2 [-]
+FI 11 0 2 [0:0]
+FS 11 0 2 [[-]]
+SP 11 0 2 []
+FA 11 0 3 [-]
+FI 11 0 3 [0:0]
+FS 11 0 3 [[-]]
+SP 11 0 3 []
+FA 11 0 5 [-]
+FI 11 0 5 [0:0]
+FS 11 0 5 [[-]]
+SP 11 0 5 []
+FA 11 1 -1 [- -]
+FI 11 1 -1 [0:0 1:1]
+FS 11 1 -1 [[-] [-]]
+SP 11 1 -1 [a]
+FA 11 1 0 nil
+FI 11 1 0 nil
+FS 11 1 0 nil
+SP 11 1 0 nil
+FA 11 1 1 [-]
+FI 11 1 1 [0:0]
+FS 11 1 1 [[-]]
+SP 11 1 1 [a]
+FA 11 1 2 [- -]
+FI 11 1 2 [0:0 1:1]
+FS 11 1 2 [[-] [-]]
+SP 11 1 2 [a]
+FA 11 1 3 [- -]
+FI 11 1 3 [0:0 1:1]
+FS 11 1 3 [[-] [-]]
+SP 11 1 3 [a]
+FA 11 1 5 [- -]
+FI 11 1 5 [0:0 1:1]
+FS 11 1 5 [[-] [-]]
+SP 11 1 5 [a]
+FA 11 2 -1 [- - - - - - - - - - - - - - -]
+FI 11 2 -1 [0:0 1:1 2:2 3:3 4:4 5:5 6:6 7:7 8:8 9:9 10:10 11:11 12:12 13:13 14:14]
+FS 11 2 -1 [[-] [-] [-] [-] [-] [-] [-] [-] [-] [-] [-] [-] [-] [-] [-]]
+SP 11 2 -1 [a b a a b a c c a d a a a e]
+FA 11 2 0 nil
+FI 11 2 0 nil
+FS 11 2 0 nil
+SP 11 2 0 nil
+FA 11 2 1 [-]
+FI 11 2 1 [0:0]
+FS 11 2 1 [[-]]
+SP 11 2 1 [abaabaccadaaae]
+FA 11 2 2 [- -]
+FI 11 2 2 [0:0 1:1]
+FS 11 2 2 [[-] [-]]
+SP 11 2 2 [a baabaccadaaae]
+FA 11 2 3 [- - -]
+FI 11 2 3 [0:0 1:1 2:2]
+FS 11 2 3 [[-] [-] [-]]
+SP 11 2 3 [a b aabaccadaaae]
+FA 11 2 5 [- - - - -]
+FI 11 2 5 [0:0 1:1 2:2 3:3 4:4]
+FS 11 2 5 [[-] [-] [-] [-] [-]]
+SP 11 2 5 [a b a a baccadaaae]
+FA 11 3 -1 [- - - - - - -]
+FI 11 3 -1 [0:0 1:1 2:2 3:3 4:4 5:5 6:6]
+FS 11 3 -1 [[-] [-] [-] [-] [-] [-] [-]]
+SP 11 3 -1 [a , b , , c]
+FA 11 3 0 nil
+FI 11 3 0 nil
+FS 11 3 0 nil
+SP 11 3 0 nil
+FA 11 3 1 [-]
+FI 11 3 1 [0:0]
+FS 11 3 1 [[-]]
+SP 11 3 1 [a,b,,c]
+FA 11 3 2 [- -]
+FI 11 3 2 [0:0 1:1]
+FS 11 3 2 [[-] [-]]
+SP 11 3 2 [a ,b,,c]
+FA 11 3 3 [- - -]
+FI 11 3 3 [0:0 1:1 2:2]
+FS 11 3 3 [[-] [-] [-]]
+SP 11 3 3 [a , b,,c]
+FA 11 3 5 [- - - - -]
+FI 11 3 5 [0:0 1:1 2:2 3:3 4:4]
+FS 11 3 5 [[-] [-] [-] [-] [-]]
+SP 11 3 5 [a , b , ,c]
+FA 11 4 -1 [- - - - - - - -]
+FI 11 4 -1 [0:0 1:1 2:2 3:3 4:4 5:5 6:6 7:7]
+FS 11 4 -1 [[-] [-] [-] [-] [-] [-] [-] [-]]
+SP 11 4 -1 [\x20 \x20 a \x20 \x20 b \x20]
+FA 11 4 0 nil
+FI 11 4 0 nil
+FS 11 4 0 nil
+SP 11 4 0 nil
+FA 11 4 1 [-]
+FI 11 4 1 [0:0]
+FS 11 4 1 [[-]]
+SP 11 4 1 [\x20\x20a\x20\x20b\x20]
+FA 11 4 2 [- -]
+FI 11 4 2 [0:0 1:1]
+FS 11 4 2 [[-] [-]]
+SP 11 4 2 [\x20 \x20a\x20\x20b\x20]
+FA 11 4 3 [- - -]
+FI 11 4 3 [0:0 1:1 2:2]
+FS 11 4 3 [[-] [-] [-]]
+SP 11 4 3 [\x20 \x20 a\x20\x20b\x20]
+FA 11 4 5 [- - - - -]
+FI 11 4 5 [0:0 1:1 2:2 3:3 4:4]
+FS 11 4 5 [[-] [-] [-] [-] [-]]
+SP 11 4 5 [\x20 \x20 a \x20 \x20b\x20]
+FA 11 5 -1 [- - - - - - - -]
+FI 11 5 -1 [0:0 1:1 2:2 3:3 4:4 5:5 6:6 7:7]
+FS 11 5 -1 [[-] [-] [-] [-] [-] [-] [-] [-]]
+SP 11 5 -1 [a | | b | | c]
+FA 11 5 0 nil
+FI 11 5 0 nil
+FS 11 5 0 nil
+SP 11 5 0 nil
+FA 11 5 1 [-]
+FI 11 5 1 [0:0]
+FS 11 5 1 [[-]]
+SP 11 5 1 [a||b||c]
+FA 11 5 2 [- -]
+FI 11 5 2 [0:0 1:1]
+FS 11 5 2 [[-] [-]]
+SP 11 5 2 [a ||b||c]
+FA 11 5 3 [- - -]
+FI 11 5 3 [0:0 1:1 2:2]
+FS 11 5 3 [[-] [-] [-]]
+SP 11 5 3 [a | |b||c]
+FA 11 5 5 [- - - - -]
+FI 11 5 5 [0:0 1:1 2:2 3:3 4:4]
+FS 11 5 5 [[-] [-] [-] [-] [-]]
+SP 11 5 5 [a | | b ||c]
+FA 11 6 -1 [- - - -]
+FI 11 6 -1 [0:0 1:1 2:2 3:3]
+FS 11 6 -1 [[-] [-] [-] [-]]
+SP 11 6 -1 [a | b]
+FA 11 6 0 nil
+FI 11 6 0 nil
+FS 11 6 0 nil
+SP 11 6 0 nil
+FA 11 6 1 [-]
+FI 11 6 1 [0:0]
+FS 11 6 1 [[-]]
+SP 11 6 1 [a|b]
+FA 11 6 2 [- -]
+FI 11 6 2 [0:0 1:1]
+FS 11 6 2 [[-] [-]]
+SP 11 6 2 [a |b]
+FA 11 6 3 [- - -]
+FI 11 6 3 [0:0 1:1 2:2]
+FS 11 6 3 [[-] [-] [-]]
+SP 11 6 3 [a | b]
+FA 11 6 5 [- - - -]
+FI 11 6 5 [0:0 1:1 2:2 3:3]
+FS 11 6 5 [[-] [-] [-] [-]]
+SP 11 6 5 [a | b]
+FA 11 7 -1 [- - - -]
+FI 11 7 -1 [0:0 1:1 2:2 3:3]
+FS 11 7 -1 [[-] [-] [-] [-]]
+SP 11 7 -1 [, a ,]
+FA 11 7 0 nil
+FI 11 7 0 nil
+FS 11 7 0 nil
+SP 11 7 0 nil
+FA 11 7 1 [-]
+FI 11 7 1 [0:0]
+FS 11 7 1 [[-]]
+SP 11 7 1 [,a,]
+FA 11 7 2 [- -]
+FI 11 7 2 [0:0 1:1]
+FS 11 7 2 [[-] [-]]
+SP 11 7 2 [, a,]
+FA 11 7 3 [- - -]
+FI 11 7 3 [0:0 1:1 2:2]
+FS 11 7 3 [[-] [-] [-]]
+SP 11 7 3 [, a ,]
+FA 11 7 5 [- - - -]
+FI 11 7 5 [0:0 1:1 2:2 3:3]
+FS 11 7 5 [[-] [-] [-] [-]]
+SP 11 7 5 [, a ,]
+FA 11 8 -1 [- - -]
+FI 11 8 -1 [0:0 1:1 2:2]
+FS 11 8 -1 [[-] [-] [-]]
+SP 11 8 -1 [, ,]
+FA 11 8 0 nil
+FI 11 8 0 nil
+FS 11 8 0 nil
+SP 11 8 0 nil
+FA 11 8 1 [-]
+FI 11 8 1 [0:0]
+FS 11 8 1 [[-]]
+SP 11 8 1 [,,]
+FA 11 8 2 [- -]
+FI 11 8 2 [0:0 1:1]
+FS 11 8 2 [[-] [-]]
+SP 11 8 2 [, ,]
+FA 11 8 3 [- - -]
+FI 11 8 3 [0:0 1:1 2:2]
+FS 11 8 3 [[-] [-] [-]]
+SP 11 8 3 [, ,]
+FA 11 8 5 [- - -]
+FI 11 8 5 [0:0 1:1 2:2]
+FS 11 8 5 [[-] [-] [-]]
+SP 11 8 5 [, ,]
+FA 11 9 -1 [- - - - - - -]
+FI 11 9 -1 [0:0 1:1 2:2 3:3 4:4 5:5 6:6]
+FS 11 9 -1 [[-] [-] [-] [-] [-] [-] [-]]
+SP 11 9 -1 [b a n a n a]
+FA 11 9 0 nil
+FI 11 9 0 nil
+FS 11 9 0 nil
+SP 11 9 0 nil
+FA 11 9 1 [-]
+FI 11 9 1 [0:0]
+FS 11 9 1 [[-]]
+SP 11 9 1 [banana]
+FA 11 9 2 [- -]
+FI 11 9 2 [0:0 1:1]
+FS 11 9 2 [[-] [-]]
+SP 11 9 2 [b anana]
+FA 11 9 3 [- - -]
+FI 11 9 3 [0:0 1:1 2:2]
+FS 11 9 3 [[-] [-] [-]]
+SP 11 9 3 [b a nana]
+FA 11 9 5 [- - - - -]
+FI 11 9 5 [0:0 1:1 2:2 3:3 4:4]
+FS 11 9 5 [[-] [-] [-] [-] [-]]
+SP 11 9 5 [b a n a na]
+FA 11 10 -1 [- - - - - - -]
+FI 11 10 -1 [0:0 1:1 2:2 3:3 4:4 5:5 6:6]
+FS 11 10 -1 [[-] [-] [-] [-] [-] [-] [-]]
+SP 11 10 -1 [A a B b C c]
+FA 11 10 0 nil
+FI 11 10 0 nil
+FS 11 10 0 nil
+SP 11 10 0 nil
+FA 11 10 1 [-]
+FI 11 10 1 [0:0]
+FS 11 10 1 [[-]]
+SP 11 10 1 [AaBbCc]
+FA 11 10 2 [- -]
+FI 11 10 2 [0:0 1:1]
+FS 11 10 2 [[-] [-]]
+SP 11 10 2 [A aBbCc]
+FA 11 10 3 [- - -]
+FI 11 10 3 [0:0 1:1 2:2]
+FS 11 10 3 [[-] [-] [-]]
+SP 11 10 3 [A a BbCc]
+FA 11 10 5 [- - - - -]
+FI 11 10 5 [0:0 1:1 2:2 3:3 4:4]
+FS 11 10 5 [[-] [-] [-] [-] [-]]
+SP 11 10 5 [A a B b Cc]
+FA 11 11 -1 [- - - - - -]
+FI 11 11 -1 [0:0 1:1 3:3 4:4 5:5 6:6]
+FS 11 11 -1 [[-] [-] [-] [-] [-] [-]]
+SP 11 11 -1 [h \xc3\xa9 l l o]
+FA 11 11 0 nil
+FI 11 11 0 nil
+FS 11 11 0 nil
+SP 11 11 0 nil
+FA 11 11 1 [-]
+FI 11 11 1 [0:0]
+FS 11 11 1 [[-]]
+SP 11 11 1 [h\xc3\xa9llo]
+FA 11 11 2 [- -]
+FI 11 11 2 [0:0 1:1]
+FS 11 11 2 [[-] [-]]
+SP 11 11 2 [h \xc3\xa9llo]
+FA 11 11 3 [- - -]
+FI 11 11 3 [0:0 1:1 3:3]
+FS 11 11 3 [[-] [-] [-]]
+SP 11 11 3 [h \xc3\xa9 llo]
+FA 11 11 5 [- - - - -]
+FI 11 11 5 [0:0 1:1 3:3 4:4 5:5]
+FS 11 11 5 [[-] [-] [-] [-] [-]]
+SP 11 11 5 [h \xc3\xa9 l l o]
+FA 11 12 -1 [- - - -]
+FI 11 12 -1 [0:0 3:3 6:6 9:9]
+FS 11 12 -1 [[-] [-] [-] [-]]
+SP 11 12 -1 [\xe6\x97\xa5 \xe6\x9c\xac \xe8\xaa\x9e]
+FA 11 12 0 nil
+FI 11 12 0 nil
+FS 11 12 0 nil
+SP 11 12 0 nil
+FA 11 12 1 [-]
+FI 11 12 1 [0:0]
+FS 11 12 1 [[-]]
+SP 11 12 1 [\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e]
+FA 11 12 2 [- -]
+FI 11 12 2 [0:0 3:3]
+FS 11 12 2 [[-] [-]]
+SP 11 12 2 [\xe6\x97\xa5 \xe6\x9c\xac\xe8\xaa\x9e]
+FA 11 12 3 [- - -]
+FI 11 12 3 [0:0 3:3 6:6]
+FS 11 12 3 [[-] [-] [-]]
+SP 11 12 3 [\xe6\x97\xa5 \xe6\x9c\xac \xe8\xaa\x9e]
+FA 11 12 5 [- - - -]
+FI 11 12 5 [0:0 3:3 6:6 9:9]
+FS 11 12 5 [[-] [-] [-] [-]]
+SP 11 12 5 [\xe6\x97\xa5 \xe6\x9c\xac \xe8\xaa\x9e]
+FA 11 13 -1 [- - - - -]
+FI 11 13 -1 [0:0 1:1 3:3 4:4 5:5]
+FS 11 13 -1 [[-] [-] [-] [-] [-]]
+SP 11 13 -1 [a \xc3\xa9 \x20 a]
+FA 11 13 0 nil
+FI 11 13 0 nil
+FS 11 13 0 nil
+SP 11 13 0 nil
+FA 11 13 1 [-]
+FI 11 13 1 [0:0]
+FS 11 13 1 [[-]]
+SP 11 13 1 [a\xc3\xa9\x20a]
+FA 11 13 2 [- -]
+FI 11 13 2 [0:0 1:1]
+FS 11 13 2 [[-] [-]]
+SP 11 13 2 [a \xc3\xa9\x20a]
+FA 11 13 3 [- - -]
+FI 11 13 3 [0:0 1:1 3:3]
+FS 11 13 3 [[-] [-] [-]]
+SP 11 13 3 [a \xc3\xa9 \x20a]
+FA 11 13 5 [- - - - -]
+FI 11 13 5 [0:0 1:1 3:3 4:4 5:5]
+FS 11 13 5 [[-] [-] [-] [-] [-]]
+SP 11 13 5 [a \xc3\xa9 \x20 a]

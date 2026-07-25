@@ -843,3 +843,7 @@ path = "examples/cast_clean_scratch.rs"
 [[example]]
 name = "goginx"
 path = "examples/goginx.rs"
+
+[[example]]
+name = "regexp_fold_diff"
+path = "examples/regexp_fold_diff.rs"
