@@ -20,11 +20,17 @@
 //                          :232, WithIndentPrefix :265)
 //
 // Goish v1 simplifications (documented deviations):
-//   - `AllowInvalidUTF8` / `AllowDuplicateNames` are accepted and
-//     recorded but not enforced: the tokenizer always passes byte
-//     content through verbatim (i.e. behaves as AllowInvalidUTF8(
-//     true)) and never tracks duplicate object names. This matches
-//     the options typescript-go's json shim sets globally.
+//   - `AllowInvalidUTF8` is accepted and recorded but not enforced:
+//     the tokenizer always passes byte content through verbatim (i.e.
+//     behaves as AllowInvalidUTF8(true)), which is the option
+//     typescript-go's json shim sets globally
+//     (internal/json/json.go:12).
+//     `AllowDuplicateNames` IS enforced by the Decoder: names are
+//     tracked per open object frame and a repeat is an error unless
+//     the option is true. An earlier version of this note claimed
+//     typescript-go set that option globally too — it does not, and a
+//     package.json with a repeated key was being silently accepted
+//     where tsc rejects it.
 //   - `WriteValue` emits the raw value verbatim (compact reformat /
 //     re-indent of nested values is not performed).
 //   - StackPointer / StackIndex / OutputOffset / AvailableBuffer /
@@ -35,6 +41,7 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
+use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
 use crate::errors::{self, error, nil};
@@ -100,6 +107,35 @@ impl PartialEq<Kind> for char {
 }
 
 /// Map the first byte of a JSON value to its Kind (0 = invalid).
+/// Quote `s` as a JSON string literal. Go's jsontext puts the member
+/// name and the JSON pointer into its error messages this way, which is
+/// NOT `strconv.Quote`: a name like "é" stays raw UTF-8 here where
+/// strconv.Quote would render it `\xc3\xa9`.
+fn json_quote(s: &[u8]) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::with_capacity(s.len() + 2);
+    out.push(b'"');
+    for &b in s {
+        match b {
+            b'"' => out.extend_from_slice(b"\\\""),
+            b'\\' => out.extend_from_slice(b"\\\\"),
+            0x08 => out.extend_from_slice(b"\\b"),
+            0x0C => out.extend_from_slice(b"\\f"),
+            b'\n' => out.extend_from_slice(b"\\n"),
+            b'\r' => out.extend_from_slice(b"\\r"),
+            b'\t' => out.extend_from_slice(b"\\t"),
+            c if c < 0x20 => {
+                let hex = b"0123456789abcdef";
+                out.extend_from_slice(b"\\u00");
+                out.push(hex[(c >> 4) as usize]);
+                out.push(hex[(c & 0xf) as usize]);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push(b'"');
+    out
+}
+
 fn kind_of_byte(b: byte) -> Kind {
     Kind(match b {
         b'n' => b'n',
@@ -718,6 +754,15 @@ pub struct Decoder {
     eof: bool,
     stack: Vec<u8>,
     counts: Vec<u64>,
+    /// Member names seen so far in each OPEN OBJECT frame, so a
+    /// duplicate can be rejected (decode.go's `namespaces`). One entry
+    /// per frame in `stack`, `None` for an array frame. Only populated
+    /// when duplicates are disallowed, which is the default.
+    names: Vec<Option<BTreeSet<Vec<u8>>>>,
+    /// Most recent member name read in each open object frame. With
+    /// `counts` (the element index for array frames) this is the JSON
+    /// pointer Go appends to a duplicate-name error as `within "..."`.
+    cur_name: Vec<Option<Vec<u8>>>,
     /// Separator for the upcoming token has been consumed (PeekKind
     /// runs the same preparation as ReadToken; this keeps it
     /// idempotent for the strict `:` case).
@@ -737,6 +782,8 @@ pub fn NewDecoder<R: crate::io::Reader + Send + 'static>(
         eof: false,
         stack: Vec::new(),
         counts: Vec::new(),
+        names: Vec::new(),
+        cur_name: Vec::new(),
         sep_done: false,
         opts: Options::__merged(opts.as_ref()),
     }
@@ -752,6 +799,8 @@ impl Decoder {
             eof: true,
             stack: Vec::new(),
             counts: Vec::new(),
+            names: Vec::new(),
+            cur_name: Vec::new(),
             sep_done: false,
             opts,
         }
@@ -886,6 +935,93 @@ impl Decoder {
         }
     }
 
+    /// True when the next token at this level is an OBJECT MEMBER NAME
+    /// rather than a value: inside an object frame, with an even number
+    /// of tokens consumed so far (name and value alternate). Same test
+    /// the "object name without value" check uses from the other side.
+    fn expecting_name(&self) -> bool {
+        self.stack.last() == Some(&b'{') && self.counts.last().is_some_and(|c| c % 2 == 0)
+    }
+
+    /// Go: decode.go's duplicate-name check. Records `name` in the
+    /// current object's namespace, or reports it as a duplicate.
+    /// A no-op when `AllowDuplicateNames(true)` is in effect.
+    fn record_name(&mut self, name: &[u8]) -> error {
+        if let Some(slot) = self.cur_name.last_mut() {
+            *slot = Some(name.to_vec());
+        }
+        if self.opts.allow_duplicate_names.unwrap_or(false) {
+            return nil;
+        }
+        let fresh = match self.names.last_mut() {
+            Some(Some(set)) => set.insert(name.to_vec()),
+            // No object frame — not a member name after all.
+            _ => true,
+        };
+        if fresh {
+            return nil;
+        }
+        // Go quotes the name as a JSON string, and appends the JSON
+        // pointer of the CONTAINING object when it is not the root.
+        let mut msg = string::from_static("jsontext: duplicate object member name ")
+            + string::from_bytes(&json_quote(name));
+        let ptr = self.stack_pointer_to_parent();
+        if !ptr.is_empty() {
+            msg = msg + " within " + string::from_bytes(&json_quote(&ptr));
+        }
+        errors::New(msg)
+    }
+
+    /// The JSON pointer of the object the CURRENT frame is, built from
+    /// the frames above it: each object contributes its current member
+    /// name, each array its current element index. Empty at the root,
+    /// which is where Go omits the `within` clause.
+    fn stack_pointer_to_parent(&self) -> Vec<u8> {
+        let mut out: Vec<u8> = Vec::new();
+        if self.stack.len() < 2 {
+            return out;
+        }
+        for i in 0..self.stack.len() - 1 {
+            out.push(b'/');
+            if self.stack[i] == b'{' {
+                if let Some(Some(n)) = self.cur_name.get(i) {
+                    // Go escapes `~` as `~0` and `/` as `~1`
+                    // (RFC 6901), so a name containing either does not
+                    // fake a path separator.
+                    for &b in n {
+                        match b {
+                            b'~' => out.extend_from_slice(b"~0"),
+                            b'/' => out.extend_from_slice(b"~1"),
+                            _ => out.push(b),
+                        }
+                    }
+                }
+            } else {
+                let idx = self.counts.get(i).copied().unwrap_or(0);
+                out.extend_from_slice(crate::strconv::FormatUint(idx, 10).as_bytes());
+            }
+        }
+        out
+    }
+
+    /// Decode the member name at `pos` WITHOUT consuming it, so
+    /// ReadValue and SkipValue can record it before scanning the raw
+    /// bytes. Decoding matters: `{"a":1,"\u0061":2}` is a duplicate,
+    /// and comparing the raw literals would miss it.
+    fn record_name_at_pos(&mut self) -> error {
+        if !self.expecting_name() || self.peek_at(0) != Some(b'"') {
+            return nil;
+        }
+        let saved = self.pos;
+        let decoded = self.scan_string_decoded();
+        self.pos = saved;
+        match decoded {
+            Ok(name) => self.record_name(name.as_bytes()),
+            // A malformed name: let the normal scan report it.
+            Err(_) => nil,
+        }
+    }
+
     /// Book-keeping after one whole value (or structural token) was
     /// consumed at the current level.
     fn after_token(&mut self, k: Kind) {
@@ -894,10 +1030,17 @@ impl Decoder {
             b'{' | b'[' => {
                 self.stack.push(k.0);
                 self.counts.push(0);
+                // One namespace per frame, kept in lockstep with
+                // `stack` so the pop below cannot get out of step.
+                self.names
+                    .push(if k.0 == b'{' { Some(BTreeSet::new()) } else { None });
+                self.cur_name.push(None);
             }
             b'}' | b']' => {
                 self.stack.pop();
                 self.counts.pop();
+                self.names.pop();
+                self.cur_name.pop();
                 self.bump_count();
             }
             _ => self.bump_count(),
@@ -991,6 +1134,12 @@ impl Decoder {
             }
             b'"' => match self.scan_string_decoded() {
                 Ok(s) => {
+                    if self.expecting_name() {
+                        let err = self.record_name(s.as_bytes());
+                        if err != nil {
+                            return (invalid, err);
+                        }
+                    }
                     self.after_token(Kind(b'"'));
                     (Token { repr: Repr::Str(s) }, nil)
                 }
@@ -1152,6 +1301,10 @@ impl Decoder {
             }
             return (Value::default(), crate::io::ErrUnexpectedEOF.into());
         }
+        let err = self.record_name_at_pos();
+        if err != nil {
+            return (Value::default(), err);
+        }
         let start = self.pos;
         let err = self.scan_whole_value();
         if err != nil {
@@ -1178,6 +1331,10 @@ impl Decoder {
                 return crate::io::EOF.into();
             }
             return crate::io::ErrUnexpectedEOF.into();
+        }
+        let err = self.record_name_at_pos();
+        if err != nil {
+            return err;
         }
         let err = self.scan_whole_value();
         if err != nil {

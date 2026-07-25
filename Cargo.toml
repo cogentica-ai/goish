@@ -847,3 +847,7 @@ path = "examples/goginx.rs"
 [[example]]
 name = "regexp_fold_diff"
 path = "examples/regexp_fold_diff.rs"
+
+[[example]]
+name = "json_dup_diff"
+path = "examples/json_dup_diff.rs"
