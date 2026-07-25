@@ -21,7 +21,7 @@
 //
 // Scope (surface-driven, like the rest of the tsgo campaign): the
 // 128-bit API only — Hash128 / HashString128 / Uint128 / Hasher
-// {Write, WriteString, Sum128, Reset} — which is every xxh3 call
+// {Write, WriteString, Sum64, Sum128, Reset} — which is every xxh3 call
 // typescript-go makes. Deferred until a consumer appears: the 64-bit
 // one-shots/Sum64, seeded variants, and the SIMD accumulators (this
 // is the scalar path; a perf lever if hashing ever profiles hot).
@@ -94,6 +94,17 @@ fn mul_fold64(x: u64, y: u64) -> u64 {
     (p as u64) ^ ((p >> 64) as u64)
 }
 
+// utils.go rrmxmx.
+#[inline(always)]
+fn rrmxmx(mut h64: u64, len: u64) -> u64 {
+    h64 ^= h64.rotate_left(49) ^ h64.rotate_left(24);
+    h64 = h64.wrapping_mul(0x9fb21c651e98df25);
+    h64 ^= (h64 >> 35).wrapping_add(len);
+    h64 = h64.wrapping_mul(0x9fb21c651e98df25);
+    h64 ^= h64 >> 28;
+    h64
+}
+
 // utils.go xxh3Avalanche.
 #[inline(always)]
 fn xxh3_avalanche(mut x: u64) -> u64 {
@@ -129,6 +140,162 @@ impl Uint128 {
         out[8..].copy_from_slice(&self.Lo.to_be_bytes());
         out
     }
+}
+
+/// `xxh3.Hash(b)` (hash64.go:6) — one-shot 64-bit hash.
+pub fn Hash(b: impl AsRef<[byte]>) -> u64 {
+    hash_any_64(b.as_ref())
+}
+
+/// `xxh3.HashString(s)` (hash64.go:11) — one-shot 64-bit hash of a
+/// string (accepts goish `string`, `&str`, `String`).
+pub fn HashString<S: AsRef<str>>(s: S) -> u64 {
+    hash_any_64(s.as_ref().as_bytes())
+}
+
+// hash64.go hashAny — the size-class dispatch. Mirrors hash_any_128
+// below; the two share every helper and differ only in finalization.
+fn hash_any_64(p: &[u8]) -> u64 {
+    let l = p.len();
+    let mut acc: u64;
+
+    if l <= 16 {
+        if l > 8 {
+            // 9-16
+            let inputlo = read_u64(p, 0) ^ (k64(24) ^ k64(32));
+            let inputhi = read_u64(p, l - 8) ^ (k64(40) ^ k64(48));
+            let folded = mul_fold64(inputlo, inputhi);
+            return xxh3_avalanche(
+                (l as u64)
+                    .wrapping_add(inputlo.swap_bytes())
+                    .wrapping_add(inputhi)
+                    .wrapping_add(folded),
+            );
+        }
+        if l > 3 {
+            // 4-8
+            let input1 = read_u32(p, 0);
+            let input2 = read_u32(p, l - 4);
+            let input64 = (input2 as u64).wrapping_add((input1 as u64) << 32);
+            let keyed = input64 ^ (k64(8) ^ k64(16));
+            return rrmxmx(keyed, l as u64);
+        }
+        match l {
+            3 => {
+                let c12 = u16::from_le_bytes([p[0], p[1]]) as u64;
+                let c3 = p[2] as u64;
+                acc = (c12 << 16).wrapping_add(c3).wrapping_add(3 << 8);
+            }
+            2 => {
+                let c12 = u16::from_le_bytes([p[0], p[1]]) as u64;
+                acc = (c12.wrapping_mul((1 << 24) + 1) >> 8).wrapping_add(2 << 8);
+            }
+            1 => {
+                let c1 = p[0] as u64;
+                acc = c1
+                    .wrapping_mul((1 << 24) + (1 << 16) + 1)
+                    .wrapping_add(1 << 8);
+            }
+            _ => {
+                // 0 — xxh_avalanche(key64_056 ^ key64_064)
+                return 0x2d06800538d394c2;
+            }
+        }
+        acc ^= (k32(0) ^ k32(4)) as u64;
+        return xxh64_avalanche_small(acc);
+    }
+
+    if l <= 128 {
+        acc = (l as u64).wrapping_mul(PRIME64_1);
+
+        if l > 32 {
+            if l > 64 {
+                if l > 96 {
+                    acc = acc.wrapping_add(mul_fold64(
+                        read_u64(p, 6 * 8) ^ k64(96),
+                        read_u64(p, 7 * 8) ^ k64(104),
+                    ));
+                    acc = acc.wrapping_add(mul_fold64(
+                        read_u64(p, l - 8 * 8) ^ k64(112),
+                        read_u64(p, l - 7 * 8) ^ k64(120),
+                    ));
+                } // 96
+                acc = acc.wrapping_add(mul_fold64(
+                    read_u64(p, 4 * 8) ^ k64(64),
+                    read_u64(p, 5 * 8) ^ k64(72),
+                ));
+                acc = acc.wrapping_add(mul_fold64(
+                    read_u64(p, l - 6 * 8) ^ k64(80),
+                    read_u64(p, l - 5 * 8) ^ k64(88),
+                ));
+            } // 64
+            acc = acc.wrapping_add(mul_fold64(
+                read_u64(p, 2 * 8) ^ k64(32),
+                read_u64(p, 3 * 8) ^ k64(40),
+            ));
+            acc = acc.wrapping_add(mul_fold64(
+                read_u64(p, l - 4 * 8) ^ k64(48),
+                read_u64(p, l - 3 * 8) ^ k64(56),
+            ));
+        } // 32
+        acc = acc.wrapping_add(mul_fold64(
+            read_u64(p, 0) ^ k64(0),
+            read_u64(p, 8) ^ k64(8),
+        ));
+        acc = acc.wrapping_add(mul_fold64(
+            read_u64(p, l - 2 * 8) ^ k64(16),
+            read_u64(p, l - 8) ^ k64(24),
+        ));
+
+        return xxh3_avalanche(acc);
+    }
+
+    if l <= 240 {
+        acc = (l as u64).wrapping_mul(PRIME64_1);
+
+        for i in 0..8usize {
+            acc = acc.wrapping_add(mul_fold64(
+                read_u64(p, i * 16) ^ k64(i * 16),
+                read_u64(p, i * 16 + 8) ^ k64(i * 16 + 8),
+            ));
+        }
+
+        // avalanche
+        acc = xxh3_avalanche(acc);
+
+        // trailing groups after 128
+        let top = l & !15;
+        let mut i = 8 * 16;
+        while i < top {
+            acc = acc.wrapping_add(mul_fold64(
+                read_u64(p, i) ^ read_u64(&KEY, i - 125),
+                read_u64(p, i + 8) ^ read_u64(&KEY, i - 117),
+            ));
+            i += 16;
+        }
+
+        // last 16 bytes
+        acc = acc.wrapping_add(mul_fold64(
+            read_u64(p, l - 16) ^ k64(119),
+            read_u64(p, l - 8) ^ k64(127),
+        ));
+
+        return xxh3_avalanche(acc);
+    }
+
+    acc = (l as u64).wrapping_mul(PRIME64_1);
+    let mut accs = INITIAL_ACCS;
+    accum_scalar(&mut accs, p);
+    merge_accs_64(acc, &accs)
+}
+
+// hash64.go's merge-accs tail, shared by hashAny and Hasher.Sum64.
+fn merge_accs_64(mut acc: u64, accs: &[u64; 8]) -> u64 {
+    acc = acc.wrapping_add(mul_fold64(accs[0] ^ k64(11), accs[1] ^ k64(19)));
+    acc = acc.wrapping_add(mul_fold64(accs[2] ^ k64(27), accs[3] ^ k64(35)));
+    acc = acc.wrapping_add(mul_fold64(accs[4] ^ k64(43), accs[5] ^ k64(51)));
+    acc = acc.wrapping_add(mul_fold64(accs[6] ^ k64(59), accs[7] ^ k64(67)));
+    xxh3_avalanche(acc)
 }
 
 /// `xxh3.Hash128(b)` (hash128.go:8) — one-shot 128-bit hash.
@@ -526,6 +693,24 @@ impl Hasher {
             head[..STRIPE].copy_from_slice(tail);
             self.len = STRIPE;
         }
+    }
+
+    /// `Hasher.Sum64()` (hasher.go:131) — the 64-bit hash of the
+    /// written data. Does not change the hash state.
+    pub fn Sum64(&self) -> u64 {
+        if self.blk == 0 {
+            return hash_any_64(&self.buf[..self.len]);
+        }
+
+        let l = self.blk.wrapping_mul(BLOCK as u64).wrapping_add(self.len as u64);
+        let acc = l.wrapping_mul(PRIME64_1);
+        let mut accs = self.acc;
+
+        if self.len > 0 {
+            accum_scalar(&mut accs, &self.buf[..self.len]);
+        }
+
+        merge_accs_64(acc, &accs)
     }
 
     /// `Hasher.Sum128()` (hasher.go:205) — the 128-bit hash of the

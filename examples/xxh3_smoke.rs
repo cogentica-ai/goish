@@ -1,9 +1,10 @@
 // xxh3_smoke — the github.com/zeebo/xxh3 port surface typescript-go
 // hashes content with: Hash128 / HashString128 / Uint128 / streaming
-// Hasher. Assertion values are reference vectors produced by the real
-// zeebo/xxh3 v1.1.0 (Go) over deterministic xorshift buffers — a
-// 102-vector differential sweep matched exactly at port time
-// (2026-07-23); this smoke pins a representative subset.
+// Hasher, plus the 64-bit family (Hash / HashString / Hasher.Sum64)
+// that tracing's stable thread IDs need. Assertion values are reference
+// vectors produced by the real zeebo/xxh3 (Go) over deterministic
+// xorshift buffers; the 128-bit sweep matched exactly at port time
+// (2026-07-23) and the 64-bit family was added and swept the same way.
 
 #![no_std]
 #![no_main]
@@ -36,6 +37,14 @@ fn fill(n: usize) -> Vec<u8> {
         b[i] = state as u8;
     }
     b
+}
+
+include!("include/xxh3_sweep64.rs");
+
+fn expect64(n: usize, want: u64, msg: &[u8]) {
+    if xxh3::Hash(&fill(n)[..]) != want {
+        die(msg);
+    }
 }
 
 fn expect(n: usize, hi: u64, lo: u64, msg: &[u8]) {
@@ -122,7 +131,69 @@ fn main() {
     let _ = h.WriteString("different");
     check(h.Sum128() != first, b"t3c: different input differs\n");
 
-    let msg = b"XXH3_OK all 3 test groups passed\n";
+    // ─── 4. the 64-bit family ──────────────────────────────────────
+    // One-shot vectors across every size class.
+    expect64(0, 0x2d06800538d394c2, b"t4: len 0\n");
+    expect64(1, 0xf538d79fd227fb5a, b"t4: len 1\n");
+    expect64(3, 0xa923e223fb2db579, b"t4: len 3\n");
+    expect64(8, 0xc709accf2cba8434, b"t4: len 8 (4-8 class)\n");
+    expect64(16, 0xf39430324abc1245, b"t4: len 16 (9-16 class)\n");
+    expect64(100, 0xde6353941816ab56, b"t4: len 100 (17-128)\n");
+    expect64(240, 0xc20b499b4eca149d, b"t4: len 240 (129-240)\n");
+    expect64(241, 0x15d313c6669c668c, b"t4: len 241 (long head)\n");
+    expect64(1024, 0x167a4ff2b7f6e8df, b"t4: len 1024 (block edge)\n");
+    expect64(1025, 0x175b38b1d35c8b95, b"t4: len 1025\n");
+    expect64(1089, 0xcf5fb001e32a4dd5, b"t4: len 1089 (buf edge)\n");
+    expect64(100000, 0x37ae5ab7973f0fce, b"t4: len 100000\n");
+
+    // Exhaustive sweep of EVERY length 0..=300, so no size-class
+    // boundary can be missed by a hand-picked list.
+    for n in 0..=300usize {
+        if xxh3::Hash(&fill(n)[..]) != SWEEP64[n] {
+            die(b"t4b: sweep64 mismatch\n");
+        }
+    }
+
+    // HashString agrees with Hash over the same bytes.
+    check(
+        xxh3::HashString("hello, goish") == xxh3::Hash(b"hello, goish"),
+        b"t4c: HashString literal\n",
+    );
+    check(
+        xxh3::HashString("") == xxh3::Hash(b""),
+        b"t4c: HashString empty\n",
+    );
+
+    // Streaming Sum64 == one-shot, at every chunking, including the
+    // block-carry path above 1024 bytes.
+    let b64 = fill(100000);
+    for &chunk in [1usize, 7, 64, 100, 1024, 4096].iter() {
+        let mut h = xxh3::New();
+        let mut off = 0;
+        while off < b64.len() {
+            let end = (off + chunk).min(b64.len());
+            let _ = h.Write(&b64[off..end]);
+            off = end;
+        }
+        check(h.Sum64() == 0x37ae5ab7973f0fce, b"t4d: streamed 100000\n");
+    }
+    // Sub-block sizes go through the blk==0 path.
+    for &n in [0usize, 5, 64, 100, 240, 241, 1024, 1088, 1089].iter() {
+        let b = fill(n);
+        let mut h = xxh3::New();
+        let _ = h.Write(&b[..n / 2]);
+        let _ = h.Write(&b[n / 2..]);
+        check(h.Sum64() == xxh3::Hash(&b[..]), b"t4d: split == one-shot\n");
+    }
+    // Sum64 and Sum128 share a hasher without disturbing each other.
+    let mut h = xxh3::New();
+    let _ = h.WriteString("shared state");
+    let s64 = h.Sum64();
+    let s128 = h.Sum128();
+    check(h.Sum64() == s64, b"t4e: Sum64 is non-destructive\n");
+    check(h.Sum128() == s128, b"t4e: Sum128 is non-destructive\n");
+
+    let msg = b"XXH3_OK all 4 test groups passed\n";
     syscall::Write(syscall::STDOUT, msg.as_ptr(), msg.len());
     syscall::Exit(0);
 }
