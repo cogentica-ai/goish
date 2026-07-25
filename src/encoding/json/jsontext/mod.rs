@@ -311,6 +311,17 @@ impl Token {
     /// `Token.Int()` (token.go:351). Integral text parses exactly;
     /// non-integral numbers truncate via float (Go clamps/rounds
     /// similarly for representable values).
+    /// The RAW number literal, as it appeared in the input. Go's
+    /// integer decoders need it: `1.0` and `1e2` are "invalid syntax"
+    /// for an int target, not 1 and 100, so the decision cannot be made
+    /// from a parsed float.
+    pub fn __number_text(&self) -> string {
+        match &self.repr {
+            Repr::Num(s) => s.clone(),
+            _ => panic!("invalid jsontext.Token.__number_text call"),
+        }
+    }
+
     pub fn Int(&self) -> int {
         match &self.repr {
             Repr::Num(s) => {

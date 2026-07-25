@@ -851,3 +851,11 @@ path = "examples/regexp_fold_diff.rs"
 [[example]]
 name = "json_dup_diff"
 path = "examples/json_dup_diff.rs"
+
+[[example]]
+name = "json_int_diff"
+path = "examples/json_int_diff.rs"
+
+[[example]]
+name = "json_map_diff"
+path = "examples/json_map_diff.rs"

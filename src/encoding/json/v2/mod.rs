@@ -303,7 +303,7 @@ impl UnmarshalerFrom for string {
 /// Signed/unsigned integers (covers the goish aliases int / int8… /
 /// uint / byte / rune, which alias these primitives).
 macro_rules! impl_json_int {
-    ($($t:ty),*) => {$(
+    ($($t:ty, $bits:expr, $signed:expr, $name:expr);* $(;)?) => {$(
         impl MarshalerTo for $t {
             fn MarshalJSONTo(&self, enc: &mut jsontext::Encoder) -> error {
                 enc.WriteToken(jsontext::Int(*self as int))
@@ -316,11 +316,43 @@ macro_rules! impl_json_int {
                     return err;
                 }
                 match t.Kind().0 {
-                    b'0' => *self = t.Int() as $t,
+                    b'0' => {
+                        // Go parses the RAW LITERAL as an integer, so a
+                        // number that is merely integer-VALUED — `1.0`,
+                        // `1e2` — is rejected as "invalid syntax", and
+                        // one past the target's width as "value out of
+                        // range". Parsing a float and truncating, which
+                        // this used to do, silently accepted both.
+                        let raw = t.__number_text();
+                        let e = if $signed {
+                            let (v, e) = crate::strconv::ParseInt(raw.clone(), 10, $bits);
+                            if e == nil { *self = v as $t; }
+                            e
+                        } else {
+                            let (v, e) = crate::strconv::ParseUint(raw.clone(), 10, $bits);
+                            if e == nil { *self = v as $t; }
+                            e
+                        };
+                        if e != nil {
+                            return errors::New(
+                                crate::gostring::string::from_static(
+                                    "json: unable to unmarshal JSON number ")
+                                    + raw
+                                    + " into Go "
+                                    + $name
+                                    + ": "
+                                    + numeric_reason(&e),
+                            );
+                        }
+                    }
                     b'n' => *self = 0,
                     _ => {
                         return errors::New(
-                            "json: cannot unmarshal non-number into integer",
+                            crate::gostring::string::from_static(
+                                "json: unable to unmarshal JSON ")
+                                + t.Kind().String()
+                                + " into Go "
+                                + $name,
                         )
                     }
                 }
@@ -329,7 +361,34 @@ macro_rules! impl_json_int {
         }
     )*};
 }
-impl_json_int!(i8, i16, i32, i64, u8, u16, u32);
+
+/// Go appends strconv's reason to the message: "invalid syntax" for a
+/// literal that is not a plain integer, "value out of range" for one
+/// that does not fit. goish's strconv errors carry the same two texts,
+/// so the tail of the message is what distinguishes them.
+fn numeric_reason(e: &error) -> crate::gostring::string {
+    let text = e.Error();
+    if crate::strings::Contains(text.clone(), "out of range") {
+        crate::gostring::string::from_static("value out of range")
+    } else {
+        crate::gostring::string::from_static("invalid syntax")
+    }
+}
+
+// NOTE the type names: Go reports its own spelling ("int", "int32"),
+// and goish cannot tell the `int` alias from `i64`, so the message
+// names the underlying Rust primitive. The BEHAVIOUR — which inputs
+// are accepted, which rejected, and with which of the two reasons — is
+// Go's, and that is what examples/json_int_diff.rs compares.
+impl_json_int!(
+    i8, 8, true, "i8";
+    i16, 16, true, "i16";
+    i32, 32, true, "i32";
+    i64, 64, true, "i64";
+    u8, 8, false, "u8";
+    u16, 16, false, "u16";
+    u32, 32, false, "u32";
+);
 
 /// u64 keeps full range via the Uint token.
 impl MarshalerTo for u64 {
@@ -490,12 +549,20 @@ where
             if err != nil {
                 return err;
             }
+            // Go stores the key with its ZERO value before decoding,
+            // so a failed value decode leaves the key PRESENT and empty
+            // and the walk stops there — `{"a":1}` into a
+            // map[string]string yields {"a": ""} plus an error, not an
+            // empty map. packagejson's Expected[T] keeps the partially
+            // decoded value, so this is observable, not just internal.
+            let key = name.String();
+            self.Set(key.clone(), V::default());
             let mut val = V::default();
             let err = val.UnmarshalJSONFrom(dec);
             if err != nil {
                 return err;
             }
-            self.Set(name.String(), val);
+            self.Set(key, val);
         }
         let (_, err) = dec.ReadToken(); // consume '}'
         err
