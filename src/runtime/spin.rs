@@ -144,6 +144,15 @@ pub struct Guard<'a, T> {
     lock: &'a SpinLock<T>,
 }
 
+/// Go's zero value: an unlocked lock around T's zero value. Lets
+/// structs holding SpinLock fields derive Default the way Go's
+/// `&T{}` zero-initializes an embedded sync.Mutex/Once.
+impl<T: Default> Default for SpinLock<T> {
+    fn default() -> Self {
+        SpinLock::new(T::default())
+    }
+}
+
 impl<T> SpinLock<T> {
     pub const fn new(data: T) -> Self {
         Self {
