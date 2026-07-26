@@ -32,8 +32,38 @@ goish-v1/                         ← this repo (the goish runtime)
 |---|---|
 | `cargo check --lib` | typecheck goish runtime |
 | `cargo build --examples` | build all e2e examples |
-| `make e2e LOOPS=1` | run all examples once each |
+| `make e2e` | **tiered**: each example at its own loop count |
+| `make e2e-full` | everything x50 — required for runtime-core changes |
+| `make e2e LOOPS=1` | force one run each (uniform; overrides tiers) |
 | `make e2e LOOPS=10 FILTER='^chan_'` | stress one family |
+
+#### e2e loop tiers — the loop count is a property of the TEST
+
+`make e2e` runs each example at the tier its own subject matter needs
+(classified in `scripts/e2e_runner.sh`'s `loops_for`):
+
+| Tier | Loops | What belongs there |
+|---|---|---|
+| functional | 1 | deterministic: parsers, crypto, json, unicode, http parsing |
+| memory | 10 | `alloc_*`, `mheap_*`, `mcentral`, `leak_proof`, introspection |
+| races/stress | 50 | chan/select, preempt, sched, sync, timers, stacks, server lifecycle (shutdown/keepalive/goginx), TLS conns |
+
+Two rules go with it:
+
+- **Adding an example that touches goroutines, timers, sockets or
+  server lifecycle? Add it to the tier-3 patterns.** Unmatched names
+  default to tier 1, and a race test that runs once is not a test.
+  Tier 3 stays at 50 deliberately: the historical lost-wakeup bug
+  reproduced ~2% of the time, so 10 loops would hide it ~80% of the
+  time.
+- **Changing the scheduler, allocator, or anything in `runtime/`?
+  `make e2e-full` (all x50), not `make e2e`.** Those bugs surface in
+  tests that look unrelated to the change — per-test tiers are not
+  enough there.
+
+Tests that reach the real internet (`NETWORK_FLAKY` in the runner —
+currently `https_real_smoke`) tolerate timeouts as long as at least one
+iteration passes and nothing panics; anything else is a real failure.
 
 ### Conventions
 
