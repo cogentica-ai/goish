@@ -32,7 +32,7 @@
 
 use core::cell::UnsafeCell;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicPtr, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
 use super::g::G;
 use super::p::P;
@@ -208,6 +208,20 @@ pub static MAIN_M: MStorage = MStorage::new(0);
 /// `fs` base is planted by `clone(2)` with `CLONE_SETTLS` atomically
 /// with thread creation, before any user code on the worker runs.
 static TLS_READY: AtomicBool = AtomicBool::new(false);
+
+/// Pre-goish fs base (the glibc TCB planted by ld.so), saved by
+/// `setup_main_tls` before fs is hijacked for the M slot. Zero in
+/// static builds and before `setup_main_tls` runs. FFI workers that
+/// must call glibc-using foreign code (CUDA etc.) spawn via
+/// `clone(2)` with `CLONE_SETTLS` set to this value.
+static PRE_GOISH_FS_BASE: AtomicUsize = AtomicUsize::new(0);
+
+/// The fs base this process had before goish planted its M slot
+/// (0 = none/static build/not yet saved).
+#[inline]
+pub fn pre_goish_fs_base() -> usize {
+    PRE_GOISH_FS_BASE.load(Ordering::Acquire)
+}
 
 /// M17b-ε.α.5: pointer to the current M's `g0.gobuf` — the
 /// scheduler-context save slot. Used as the `swap_context` "from"
@@ -390,6 +404,21 @@ pub fn install_signal_stack() {
 /// After this call, every subsequent `current_m()` on the main
 /// thread reads `&MAIN_M.m` via `mov %fs:0`.
 pub fn setup_main_tls() {
+    // Preserve the pre-goish fs base before hijacking fs for the M
+    // slot. In dynamically-linked processes ld.so has already planted
+    // the glibc TCB here; glibc-using foreign code (CUDA, libstdc++)
+    // can only run on a thread whose fs points at that TCB — e.g. an
+    // FFI worker spawned with CLONE_SETTLS = pre_goish_fs_base().
+    // Zero in static builds (no ld.so, nothing to preserve).
+    // NB: ARCH_GET_FS *writes* the base to the given address.
+    let mut saved_base: usize = 0;
+    let r = syscall::ArchPrctl(
+        syscall::ARCH_GET_FS,
+        &mut saved_base as *mut usize as usize,
+    );
+    if r == 0 && saved_base != 0 {
+        PRE_GOISH_FS_BASE.store(saved_base, Ordering::Release);
+    }
     MAIN_M.init_tls_self();
     let fs_base = MAIN_M.fs_base();
     let r = syscall::ArchPrctl(syscall::ARCH_SET_FS, fs_base);
