@@ -415,7 +415,7 @@ impl PrivateKey {
 
 impl crate::crypto::Signer for PrivateKey {
     fn Public(&self) -> crate::crypto::PublicKey {
-        alloc::boxed::Box::new(self.PublicKey.clone())
+        alloc::sync::Arc::new(self.PublicKey.clone())
     }
     fn Sign(
         &self,
@@ -429,7 +429,7 @@ impl crate::crypto::Signer for PrivateKey {
 
 impl crate::crypto::Decrypter for PrivateKey {
     fn Public(&self) -> crate::crypto::PublicKey {
-        alloc::boxed::Box::new(self.PublicKey.clone())
+        alloc::sync::Arc::new(self.PublicKey.clone())
     }
     fn Decrypt(
         &self,

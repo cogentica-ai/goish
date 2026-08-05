@@ -29,7 +29,7 @@ use crate::io::{self, Reader};
 use crate::string;
 use crate::types::{byte, int};
 
-use super::header::{canonical_key, Header};
+use super::header::Header;
 use super::url::{parse_request_uri, URL};
 
 /// `net/http.Request`. Slim — only fields a handler typically reads.
@@ -471,14 +471,13 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         ctx: None,
     };
 
-    // Request-line: METHOD SP request-target SP HTTP-version CRLF
-    let line = match read_line(br, max_line) {
-        Ok(l) => l,
+    // Request-line: METHOD SP request-target SP HTTP-version CRLF —
+    // parsed from a borrowed view of the bufio buffer; only the
+    // three kept substrings are materialized (method/proto interned).
+    let (method, target, proto) = match read_line_with(br, max_line, parse_request_line) {
+        Ok(Some(t)) => t,
+        Ok(None) => return (req, errors::New(string("net/http: malformed request line"))),
         Err(e) => return (req, e),
-    };
-    let (method, target, proto) = match parse_request_line(&line) {
-        Some(t) => t,
-        None => return (req, errors::New(string("net/http: malformed request line"))),
     };
 
     if !valid_method(method.as_bytes()) {
@@ -501,29 +500,45 @@ pub(crate) fn __read_request_server<R: io::Reader>(
     req.ProtoMinor = minor;
 
     // Headers: lines of `Name: value` ending with an empty line.
+    // Each line is parsed from a borrowed buffer view; the name
+    // comes back pre-canonicalized (interned for common names), so
+    // no canonicalization happens on the Add path.
+    enum HeaderLine {
+        End,
+        Malformed,
+        Field(string, string),
+    }
     let mut count = 0;
     loop {
-        let line = match read_line(br, max_line) {
-            Ok(l) => l,
+        let item = match read_line_with(br, max_line, |line| {
+            if line.is_empty() {
+                return HeaderLine::End;
+            }
+            match parse_header_line(line) {
+                Some((n, v)) => HeaderLine::Field(n, v),
+                None => HeaderLine::Malformed,
+            }
+        }) {
+            Ok(v) => v,
             Err(e) => return (req, e),
         };
-        if line.as_bytes().is_empty() {
-            break; // end of headers
-        }
-        count += 1;
-        if count > MAX_HEADERS {
-            return (req, errors::New(string("net/http: too many headers")));
-        }
-        let (name, value) = match parse_header_line(&line) {
-            Some(t) => t,
-            None => return (req, errors::New(string("net/http: malformed header"))),
-        };
-        // Special-case Host: into req.Host, not into Header.
-        let canon = canonical_key(&name);
-        if canon.as_bytes() == b"Host" {
-            req.Host = value;
-        } else {
-            req.Header.Add(name, value);
+        match item {
+            HeaderLine::End => break,
+            HeaderLine::Malformed => {
+                return (req, errors::New(string("net/http: malformed header")))
+            }
+            HeaderLine::Field(name, value) => {
+                count += 1;
+                if count > MAX_HEADERS {
+                    return (req, errors::New(string("net/http: too many headers")));
+                }
+                // Special-case Host: into req.Host, not into Header.
+                if name.as_bytes() == b"Host" {
+                    req.Host = value;
+                } else {
+                    req.Header.__add_canonical(name, value);
+                }
+            }
         }
     }
 
@@ -676,8 +691,6 @@ fn is_chunked(value: &[u8]) -> bool {
 
 // ─── parsers ─────────────────────────────────────────────────────────
 
-/// Read a CRLF-terminated line via `bufio.Reader`. Returns the line
-/// **without** the trailing CRLF, or an error on EOF / oversize.
 crate::var! {
     /// Sentinel returned by the server-side request parser when the
     /// request carries an `Expect` header other than `100-continue`.
@@ -709,47 +722,103 @@ fn write_interim_100(fd: i32) {
     }
 }
 
-fn read_line<R: io::Reader>(
+/// Read one header/request line into an OWNED Vec — the slow path,
+/// used only when the line doesn't fit the bufio buffer whole (rare:
+/// requires a header line > 4 KiB). The hot path is the zero-copy
+/// `__read_line_view` inside `read_line_with`.
+fn read_line_owned<R: io::Reader>(
     br: &mut bufio::Reader<R>,
     max: usize,
-) -> Result<string, error> {
+) -> Result<Vec<u8>, error> {
     let (line_bytes, err) = br.ReadBytes(b'\n');
     if !err.IsNil() {
         return Err(err);
     }
-    // Deref slice<byte> → &[u8] for bounds + indexing.
-    let bs: &[u8] = &*line_bytes;
+    let mut bs: Vec<u8> = line_bytes.__into_vec();
     if bs.len() > max {
         return Err(errors::New(string("net/http: header line too long")));
     }
     // Strip trailing \n and optional \r.
-    let mut end = bs.len();
-    if end > 0 && bs[end - 1] == b'\n' {
-        end -= 1;
+    if bs.last() == Some(&b'\n') {
+        bs.pop();
     }
-    if end > 0 && bs[end - 1] == b'\r' {
-        end -= 1;
+    if bs.last() == Some(&b'\r') {
+        bs.pop();
     }
-    Ok(string::from_bytes(&bs[..end]))
+    Ok(bs)
+}
+
+/// Read the next line and run `f` over its bytes without copying the
+/// line itself — the view borrows the bufio buffer (valid for the
+/// duration of `f`, invalidated by the next read; same contract as
+/// Go's ReadSlice-based textproto reading). `f` copies out only the
+/// substrings it keeps. Falls back to an owned read for
+/// buffer-spanning lines.
+fn read_line_with<R: io::Reader, T>(
+    br: &mut bufio::Reader<R>,
+    max: usize,
+    f: impl FnOnce(&[u8]) -> T,
+) -> Result<T, error> {
+    match br.__read_line_view() {
+        Ok(Some(line)) => {
+            if line.len() > max {
+                return Err(errors::New(string("net/http: header line too long")));
+            }
+            Ok(f(line))
+        }
+        Ok(None) => {
+            let owned = read_line_owned(br, max)?;
+            Ok(f(&owned))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Intern the method token for the requests that dominate real
+/// traffic — `from_static` is zero-alloc. Mirrors the effect of Go's
+/// method-name string constants staying shared.
+fn intern_method(b: &[u8]) -> string {
+    string::from_static(match b {
+        b"GET" => "GET",
+        b"POST" => "POST",
+        b"PUT" => "PUT",
+        b"DELETE" => "DELETE",
+        b"HEAD" => "HEAD",
+        b"OPTIONS" => "OPTIONS",
+        b"PATCH" => "PATCH",
+        b"CONNECT" => "CONNECT",
+        b"TRACE" => "TRACE",
+        _ => return string::from_bytes(b),
+    })
+}
+
+/// Intern the protocol token (all real traffic is one of two).
+fn intern_proto(b: &[u8]) -> string {
+    string::from_static(match b {
+        b"HTTP/1.1" => "HTTP/1.1",
+        b"HTTP/1.0" => "HTTP/1.0",
+        _ => return string::from_bytes(b),
+    })
 }
 
 /// `parseRequestLine` (request.go:961) — split "METHOD SP target SP
-/// proto" on the two spaces.
-fn parse_request_line(line: &string) -> Option<(string, string, string)> {
-    let bytes = line.as_bytes();
+/// proto" on the two spaces. Byte-view in; owned strings out (method
+/// and proto interned).
+fn parse_request_line(bytes: &[u8]) -> Option<(string, string, string)> {
     let s1 = bytes.iter().position(|&b| b == b' ')?;
     let s2 = bytes[s1 + 1..].iter().position(|&b| b == b' ')? + s1 + 1;
     Some((
-        string::from_bytes(&bytes[..s1]),
+        intern_method(&bytes[..s1]),
         string::from_bytes(&bytes[s1 + 1..s2]),
-        string::from_bytes(&bytes[s2 + 1..]),
+        intern_proto(&bytes[s2 + 1..]),
     ))
 }
 
-/// `parseHeaderLine` — split "Name: value" on the first colon.
-/// Trims optional whitespace around `value`.
-fn parse_header_line(line: &string) -> Option<(string, string)> {
-    let bytes = line.as_bytes();
+/// `parseHeaderLine` — split "Name: value" on the first colon and
+/// trim optional whitespace around `value`. Byte-view in; the name
+/// comes back ALREADY canonicalized (interned for the common header
+/// names — zero-alloc), so the caller skips `canonical_key`.
+fn parse_header_line(bytes: &[u8]) -> Option<(string, string)> {
     let colon = bytes.iter().position(|&b| b == b':')?;
     let name = &bytes[..colon];
     if name.is_empty() {
@@ -764,7 +833,7 @@ fn parse_header_line(line: &string) -> Option<(string, string)> {
         end -= 1;
     }
     Some((
-        string::from_bytes(name),
+        super::header::canonical_key_bytes(name),
         string::from_bytes(&bytes[start..end]),
     ))
 }

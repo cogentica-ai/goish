@@ -22,6 +22,12 @@
 // `f64` methods backed by LLVM intrinsics on x86-64. If a future
 // target requires libm, add `libm = "0.2"` to Cargo.toml and swap
 // the bodies. The intrinsic path is zero-overhead on the current target.
+//
+// KNOWN DIVERGENCE from Go: Exp and Log are hand-written amd64
+// assembly in Go (exp_amd64.s, log_amd64.s), so goish's libm-backed
+// versions differ by up to 2 ULP. That leaks into Pow for fractional
+// exponents only — Pow's integer path is Go's own algorithm and is
+// bit-exact (examples/math_pow_diff.rs asserts both halves).
 
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
@@ -91,7 +97,11 @@ pub fn Inf(sign: crate::types::int) -> f64 {
 
 /// `math.NaN() float64` — returns an IEEE 754 NaN.
 pub fn NaN() -> f64 {
-    f64::NAN
+    // Go: math/bits.go — `NaN() float64 { return Float64frombits(uvnan) }`
+    // with uvnan = 0x7FF8000000000001. Rust's f64::NAN has payload 0,
+    // which is a different bit pattern; anything comparing NaN bits
+    // against Go output (differential sweeps, serialized floats) sees it.
+    f64::from_bits(0x7FF8000000000001)
 }
 
 /// `math.Signbit(x) bool` — reports whether x is negative or negative zero.
@@ -133,12 +143,223 @@ pub fn Abs(x: f64) -> f64 {
 
 /// `math.Sqrt(x) float64`.
 pub fn Sqrt(x: f64) -> f64 {
+    if x < 0.0 {
+        // Go compiles Sqrt to the SQRTSD instruction on amd64, whose
+        // invalid-operation result is the x86 default NaN
+        // (0xFFF8000000000000 — sign bit set). libm's software sqrt
+        // returns a positive NaN instead, which differs bit-for-bit
+        // from every Go reference produced on this target.
+        return f64::from_bits(0xFFF8000000000000);
+    }
     libm::sqrt(x)
 }
 
 /// `math.Pow(x, y) float64`.
 pub fn Pow(x: f64, y: f64) -> f64 {
-    libm::pow(x, y)
+    // Go: math/pow.go:63 — ported verbatim. libm::pow (musl/fdlibm)
+    // differs from Go by up to 1 ULP on integer exponents, e.g.
+    // Pow(7, -2) yields 0.020408163265306124 there and
+    // 0.02040816326530612 here (and in Go). Callers that compare
+    // against Go output — typescript-go's jsnum.Exponentiate, which
+    // feeds JS number formatting — see the difference.
+    match () {
+        _ if y == 0.0 || x == 1.0 => return 1.0,
+        _ if y == 1.0 => return x,
+        _ if IsNaN(x) || IsNaN(y) => return NaN(),
+        _ if x == 0.0 => {
+            if y < 0.0 {
+                if Signbit(x) && isOddInt(y) {
+                    return Inf(-1);
+                }
+                return Inf(1);
+            }
+            if y > 0.0 {
+                if Signbit(x) && isOddInt(y) {
+                    return x;
+                }
+                return 0.0;
+            }
+        }
+        _ if IsInf(y, 0) => {
+            if x == -1.0 {
+                return 1.0;
+            }
+            if (Abs(x) < 1.0) == IsInf(y, 1) {
+                return 0.0;
+            }
+            return Inf(1);
+        }
+        _ if IsInf(x, 0) => {
+            if IsInf(x, -1) {
+                return Pow(1.0 / x, -y); // Pow(-0, -y)
+            }
+            if y < 0.0 {
+                return 0.0;
+            }
+            if y > 0.0 {
+                return Inf(1);
+            }
+        }
+        _ if y == 0.5 => return Sqrt(x),
+        _ if y == -0.5 => return 1.0 / Sqrt(x),
+        _ => {}
+    }
+
+    let (mut yi, mut yf) = Modf(Abs(y));
+    if yf != 0.0 && x < 0.0 {
+        return NaN();
+    }
+    if yi >= 9223372036854775808.0 {
+        // 1<<63
+        // yi is a large even int that will lead to overflow (or underflow to 0)
+        // for all x except -1 (x == 1 was handled earlier)
+        if x == -1.0 {
+            return 1.0;
+        }
+        if (Abs(x) < 1.0) == (y > 0.0) {
+            return 0.0;
+        }
+        return Inf(1);
+    }
+
+    // ans = a1 * 2**ae (= 1 for now).
+    let mut a1 = 1.0_f64;
+    // Go's `ae int` is 64-bit on the platforms goish targets.
+    let mut ae: crate::types::int = 0;
+
+    // ans *= x**yf
+    if yf != 0.0 {
+        if yf > 0.5 {
+            yf -= 1.0;
+            yi += 1.0;
+        }
+        a1 = Exp(yf * Log(x));
+    }
+
+    // ans *= x**yi
+    // by multiplying in successive squarings
+    // of x according to bits of yi.
+    // accumulate powers of two into exp.
+    let (mut x1, mut xe) = Frexp(x);
+    let mut i = yi as i64;
+    while i != 0 {
+        if xe < -(1 << 12) || (1 << 12) < xe {
+            // catch xe before it overflows the left shift below
+            // Since i !=0 it has at least one bit still set, so ae will accumulate xe
+            // on at least one more iteration, ae += xe is a lower bound on ae
+            // the lower bound on ae exceeds the size of a float64 exp
+            // so the final call to Ldexp will produce under/overflow (0/Inf)
+            ae += xe;
+            break;
+        }
+        if i & 1 == 1 {
+            a1 *= x1;
+            ae += xe;
+        }
+        x1 *= x1;
+        xe <<= 1;
+        if x1 < 0.5 {
+            x1 += x1;
+            xe -= 1;
+        }
+        i >>= 1;
+    }
+
+    // ans = a1*2**ae
+    // if y < 0 { ans = 1 / ans }
+    // but in the opposite order
+    if y < 0.0 {
+        a1 = 1.0 / a1;
+        ae = -ae;
+    }
+    Ldexp(a1, ae)
+}
+
+/// `math.isOddInt(x)` (pow.go:7).
+#[allow(non_snake_case)]
+fn isOddInt(x: f64) -> bool {
+    if Abs(x) >= 9007199254740992.0 {
+        // 1 << 53 is the largest exact integer in the float64 format.
+        // Any number outside this range will be truncated before the decimal point and therefore will always be
+        // an even integer.
+        return false;
+    }
+    let (xi, xf) = Modf(x);
+    xf == 0.0 && (xi as i64) & 1 == 1
+}
+
+const _MATH_SHIFT: u64 = 64 - 11 - 1;
+const _MATH_MASK: u64 = 0x7FF;
+const _MATH_BIAS: i64 = 1023;
+
+/// `math.normalize(x)` (bits.go:44).
+#[allow(non_snake_case)]
+fn normalize(x: f64) -> (f64, crate::types::int) {
+    const SMALLEST_NORMAL: f64 = 2.2250738585072014e-308; // 2**-1022
+    if Abs(x) < SMALLEST_NORMAL {
+        return (x * ((1u64 << 52) as f64), -52);
+    }
+    (x, 0)
+}
+
+/// `math.Frexp(f) (frac float64, exp int)` (frexp.go:15) — breaks f into
+/// a normalized fraction and an integral power of two, such that
+/// `f == frac x 2**exp` with `|frac|` in [1/2, 1).
+#[allow(non_snake_case)]
+pub fn Frexp(f: f64) -> (f64, crate::types::int) {
+    // special cases
+    if f == 0.0 {
+        return (f, 0); // correctly return -0
+    }
+    if IsInf(f, 0) || IsNaN(f) {
+        return (f, 0);
+    }
+    let (f, mut exp) = normalize(f);
+    let mut x = Float64bits(f);
+    exp += ((x >> _MATH_SHIFT) & _MATH_MASK) as crate::types::int - _MATH_BIAS as crate::types::int
+        + 1;
+    x &= !(_MATH_MASK << _MATH_SHIFT);
+    x |= ((-1 + _MATH_BIAS) as u64) << _MATH_SHIFT;
+    (Float64frombits(x), exp)
+}
+
+/// `math.Ldexp(frac, exp) float64` (ldexp.go:12) — the inverse of
+/// [`Frexp`]: returns `frac x 2**exp`.
+#[allow(non_snake_case)]
+pub fn Ldexp(frac: f64, exp: crate::types::int) -> f64 {
+    // special cases
+    if frac == 0.0 {
+        return frac; // correctly return -0
+    }
+    if IsInf(frac, 0) || IsNaN(frac) {
+        return frac;
+    }
+    let (frac, e) = normalize(frac);
+    let mut exp = exp + e;
+    let mut x = Float64bits(frac);
+    // Go: `exp += int(x>>shift)&mask - bias` — Go's `&` binds tighter
+    // than `-`, Rust's binds looser, so the parens are load-bearing.
+    exp += (((x >> _MATH_SHIFT) as crate::types::int) & (_MATH_MASK as crate::types::int))
+        - _MATH_BIAS as crate::types::int;
+    if exp < -1075 {
+        return Copysign(0.0, frac); // underflow
+    }
+    if exp > 1023 {
+        // overflow
+        if frac < 0.0 {
+            return Inf(-1);
+        }
+        return Inf(1);
+    }
+    let mut m = 1.0_f64;
+    if exp < -1022 {
+        // denormal
+        exp += 53;
+        m = 1.0 / ((1u64 << 53) as f64); // 2**-53
+    }
+    x &= !(_MATH_MASK << _MATH_SHIFT);
+    x |= ((exp + _MATH_BIAS as crate::types::int) as u64) << _MATH_SHIFT;
+    m * Float64frombits(x)
 }
 
 /// `math.Pow10(n int) float64`.

@@ -30,6 +30,9 @@ use crate::io;
 use crate::strconv;
 use crate::types::{byte, float64, int};
 
+pub mod jsontext;
+pub mod v2;
+
 // ─── Value ─────────────────────────────────────────────────────────────
 
 #[derive(Clone, Default)]
@@ -316,6 +319,39 @@ impl FromValue for bool {
         match v {
             Value::Bool(b) => (*b, nil),
             _ => (false, errors::New("json: cannot unmarshal into bool")),
+        }
+    }
+}
+
+/// `Option<T>` — Go `*T` optionality: JSON null (or absence) is
+/// `None`, anything else decodes into `Some(T)`.
+impl<T: FromValue> FromValue for Option<T> {
+    fn from_value(v: &Value) -> (Self, error) {
+        match v {
+            Value::Null => (None, nil),
+            other => {
+                let (val, err) = T::from_value(other);
+                if err != nil {
+                    (None, err)
+                } else {
+                    (Some(val), nil)
+                }
+            }
+        }
+    }
+}
+
+/// `nilable<T>` — Go `*T`: null/absent stays nil, anything else
+/// decodes into a fresh value.
+impl<T: FromValue> FromValue for crate::gonilable::nilable<T> {
+    fn from_value(v: &Value) -> (Self, error) {
+        let (opt, err) = <Option<T> as FromValue>::from_value(v);
+        if err != nil {
+            return (crate::gonilable::nilable::default(), err);
+        }
+        match opt {
+            Some(val) => (crate::gonilable::nilable::new(val), nil),
+            None => (crate::gonilable::nilable::default(), nil),
         }
     }
 }
@@ -853,8 +889,9 @@ fn encode_number(out: &mut Vec<byte>, n: f64) {
         out.extend_from_slice(b"null");
         return;
     }
-    let s = strconv::FormatFloat(n, b'g', -1, 64);
-    out.extend_from_slice(s.as_bytes());
+    // Go formats JSON numbers with the ES6 conversion, not 'g'
+    // (encoding/json floatEncoder / jsonwire.AppendFloat).
+    jsontext::AppendFloat(out, n, 64);
 }
 
 fn encode_string(out: &mut Vec<byte>, s: &[byte]) {

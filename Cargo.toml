@@ -231,6 +231,34 @@ name = "stack_reserve_smoke"
 path = "examples/stack_reserve_smoke.rs"
 
 [[example]]
+name = "stack_maxstack_smoke"
+path = "examples/stack_maxstack_smoke.rs"
+
+[[example]]
+name = "json_v2_smoke"
+path = "examples/json_v2_smoke.rs"
+
+[[example]]
+name = "map_clear_smoke"
+path = "examples/map_clear_smoke.rs"
+
+[[example]]
+name = "math_pow_diff"
+path = "examples/math_pow_diff.rs"
+
+[[example]]
+name = "big_exp_diff"
+path = "examples/big_exp_diff.rs"
+
+[[example]]
+name = "jsonfloat_es6"
+path = "examples/jsonfloat_es6.rs"
+
+[[example]]
+name = "iter_seq_smoke"
+path = "examples/iter_seq_smoke.rs"
+
+[[example]]
 name = "sched_go"
 path = "examples/sched_go.rs"
 
@@ -614,6 +642,50 @@ name = "io_fs_walkdir_smoke"
 path = "examples/io_fs_walkdir_smoke.rs"
 
 [[example]]
+name = "io_fs_smoke"
+path = "examples/io_fs_smoke.rs"
+
+[[example]]
+name = "os_dirfs_smoke"
+path = "examples/os_dirfs_smoke.rs"
+
+[[example]]
+name = "unicode_rangetable_smoke"
+path = "examples/unicode_rangetable_smoke.rs"
+
+[[example]]
+name = "sync_errgroup_smoke"
+path = "examples/sync_errgroup_smoke.rs"
+
+[[example]]
+name = "syscall_fswatch_smoke"
+path = "examples/syscall_fswatch_smoke.rs"
+
+[[example]]
+name = "xxh3_smoke"
+path = "examples/xxh3_smoke.rs"
+
+[[example]]
+name = "text_language_smoke"
+path = "examples/text_language_smoke.rs"
+
+[[example]]
+name = "unicode_norm_smoke"
+path = "examples/unicode_norm_smoke.rs"
+
+[[example]]
+name = "fstest_smoke"
+path = "examples/fstest_smoke.rs"
+
+[[example]]
+name = "embed_smoke"
+path = "examples/embed_smoke.rs"
+
+[[example]]
+name = "unicode_case_smoke"
+path = "examples/unicode_case_smoke.rs"
+
+[[example]]
 name = "fips_rsa_smoke"
 path = "examples/fips_rsa_smoke.rs"
 
@@ -737,6 +809,14 @@ name = "https_real_smoke"
 path = "examples/https_real_smoke.rs"
 
 [[example]]
+name = "tls_server_smoke"
+path = "examples/tls_server_smoke.rs"
+
+[[example]]
+name = "https_serve"
+path = "examples/https_serve.rs"
+
+[[example]]
 name = "temp_uniqueness_smoke"
 path = "examples/temp_uniqueness_smoke.rs"
 
@@ -759,3 +839,23 @@ path = "examples/zlib_offset_smoke.rs"
 [[example]]
 name = "cast_clean_scratch"
 path = "examples/cast_clean_scratch.rs"
+
+[[example]]
+name = "goginx"
+path = "examples/goginx.rs"
+
+[[example]]
+name = "regexp_fold_diff"
+path = "examples/regexp_fold_diff.rs"
+
+[[example]]
+name = "json_dup_diff"
+path = "examples/json_dup_diff.rs"
+
+[[example]]
+name = "json_int_diff"
+path = "examples/json_int_diff.rs"
+
+[[example]]
+name = "json_map_diff"
+path = "examples/json_map_diff.rs"

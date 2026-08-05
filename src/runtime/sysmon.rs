@@ -269,13 +269,14 @@ extern "C" fn sysmon_main() -> ! {
         // too long and force-preempt them via SIGURG.
         check_force_preempt(now);
 
-        // M27e: drain ready I/O events. Sysmon is the fallback poller
-        // when every worker M is parked (idle or in syscall) — without
-        // this tick, a connection arriving while all Ms are idle would
-        // never wake the listener G. Goready transitions each ready G
-        // Waiting → Runnable, enqueues onto local-or-global runq, and
-        // wakes a parked M via `wake_idle_m`.
-        let ready = crate::runtime::netpoll::poll(0);
+        // M27e: drain ready I/O events across EVERY netpoll shard.
+        // Sysmon is the fallback poller for shards with neither an
+        // active owner-P M (long CPU-bound handler) nor an idle
+        // blocking claimer — without this tick, events on such a
+        // shard would linger unboundedly. Goready transitions each
+        // ready G Waiting → Runnable, enqueues onto local-or-global
+        // runq, and wakes a parked M via `wake_idle_m`.
+        let ready = crate::runtime::netpoll::poll_all();
         for g in ready {
             goready(g);
         }

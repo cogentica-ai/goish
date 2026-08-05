@@ -1478,15 +1478,74 @@ fn addr_error(addr: crate::string, why: &'static str) -> crate::error {
 
 // ─── Listen / Dial ───────────────────────────────────────────────────
 
+/// `net.ListenConfig.Control`'s function shape (dial.go:751) — called
+/// after socket creation (and the default listener sockopts) but
+/// before bind, with the resolved network ("tcp4"), the resolved
+/// listen address, and a `syscall.RawConn` giving raw fd access.
+/// Named so user code can spell the field type without writing the
+/// `dyn Fn` form (same pattern as `http::BaseContextFn`).
+pub type ControlFn = Arc<
+    dyn Fn(string, string, syscall::RawConn) -> error + Send + Sync,
+>;
+
+/// `net.ListenConfig` (dial.go:741) — options for listening to an
+/// address. v1 carries the `Control` hook (the field callers use for
+/// SO_REUSEPORT and friends, since Go deliberately has no first-class
+/// flag for it); `KeepAlive` / `KeepAliveConfig` / MPTCP are deferred
+/// — accepted-conn keep-alive currently applies the Go defaults
+/// unconditionally (`set_tcp_conn_defaults`).
+pub struct ListenConfig {
+    /// If set, called after creating the socket but before binding
+    /// it. The network/address arguments are the resolved forms
+    /// ("tcp4", "127.0.0.1:8091"), not necessarily what was passed
+    /// to Listen — mirroring the Go doc.
+    pub Control: Option<ControlFn>,
+}
+
+impl Default for ListenConfig {
+    fn default() -> Self {
+        ListenConfig { Control: None }
+    }
+}
+
+impl ListenConfig {
+    /// `(*ListenConfig).Listen(ctx, network, address)` (dial.go:804)
+    /// — announce on the local network address. In Go the ctx only
+    /// scopes address resolution; v1 does no resolution, so it is
+    /// accepted for shape and unused.
+    #[allow(non_snake_case)]
+    pub fn Listen<N: Into<string>, A: Into<string>>(
+        &self,
+        _ctx: Arc<dyn crate::context::Context>,
+        network: N,
+        address: A,
+    ) -> (Listener, error) {
+        listen_with_config(network.into(), address.into(), self.Control.as_ref())
+    }
+}
+
 /// `net.Listen` — open a listening socket. `network` must be `"tcp"`
 /// or `"tcp4"`; other values return an error. `addr` is in
 /// `"host:port"` form. `host` may be empty (binds wildcard) or an
 /// IPv4 dotted literal; hostname resolution is not implemented in
 /// v1. Port `:0` lets the kernel pick a free port (recovered via
 /// `Listener.Addr()`).
+///
+/// Go-shape: a zero `ListenConfig` delegating to
+/// `ListenConfig.Listen` (dial.go:897).
 pub fn Listen<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Listener, error) {
-    let network: string = network.into();
-    let addr: string = addr.into();
+    listen_with_config(network.into(), addr.into(), None)
+}
+
+/// Shared body of `Listen` / `ListenConfig.Listen` — Go's
+/// `sysListener.listenTCP` → `netFD.listenStream`
+/// (net/sock_posix.go:171): socket → default listener sockopts →
+/// Control hook → bind → listen.
+fn listen_with_config(
+    network: string,
+    addr: string,
+    control: Option<&ControlFn>,
+) -> (Listener, error) {
     if !is_tcp_network(&network) {
         return (
             dead_listener(),
@@ -1507,7 +1566,8 @@ pub fn Listen<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Listene
         return (dead_listener(), errno_error("socket", -fd));
     }
 
-    // SO_REUSEADDR so a quick restart doesn't fail on TIME_WAIT.
+    // SO_REUSEADDR so a quick restart doesn't fail on TIME_WAIT
+    // (Go `setDefaultListenerSockopts`, net/sockopt_linux.go:14).
     let one: i32 = 1;
     let _ = syscall::Setsockopt(
         fd,
@@ -1516,6 +1576,22 @@ pub fn Listen<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (Listene
         &one as *const i32 as *const u8,
         core::mem::size_of::<i32>() as u32,
     );
+
+    // Control hook — after default sockopts, before bind
+    // (net/sock_posix.go:190, `listenStream`'s ctrlCtxFn call).
+    // The network/address handed to the hook are the resolved forms
+    // (`fd.ctrlNetwork()` / `laddr.String()`).
+    if let Some(ctrl) = control {
+        let e = ctrl(
+            string("tcp4"),
+            TCPAddr::from_sockaddr_in(&parsed).String(),
+            syscall::RawConn::__from_fd(fd),
+        );
+        if !e.IsNil() {
+            let _ = syscall::Close(fd);
+            return (dead_listener(), e);
+        }
+    }
 
     let r = syscall::Bind(
         fd,
@@ -1752,7 +1828,7 @@ fn is_tcp_network(s: &string) -> bool {
     bytes == b"tcp" || bytes == b"tcp4"
 }
 
-fn dead_listener() -> Listener {
+pub(crate) fn dead_listener() -> Listener {
     Listener {
         fd: -1,
         addr: TCPAddr::zero(),

@@ -79,27 +79,12 @@ pub fn IsPathSeparator(c: u8) -> bool {
     c == PathSeparator
 }
 
-// os sentinels — Doctrine 2 marker form. Identity-stable, so
-// `errors::Is(err, os::ErrNotExist)` works across the program.
-// (Previous fn-form returned a fresh errors::New() each call — the
-// Is() check could spuriously fail for sentinels stored at module
-// boundary.)
-crate::var! {
-    /// `os.ErrInvalid` (os/error.go:19) — "invalid argument".
-    pub ErrInvalid: error    = "invalid argument";
-
-    /// `os.ErrPermission` (os/error.go:21) — "permission denied".
-    pub ErrPermission: error = "permission denied";
-
-    /// `os.ErrExist` (os/error.go:22) — "file already exists".
-    pub ErrExist: error      = "file already exists";
-
-    /// `os.ErrNotExist` (os/error.go:23) — "file does not exist".
-    pub ErrNotExist: error   = "file does not exist";
-
-    /// `os.ErrClosed` (os/error.go:24) — "file already closed".
-    pub ErrClosed: error     = "file already closed";
-}
+// os sentinels — defined in `io/fs` and aliased here, matching Go's
+// layering (os/error.go:19-24 aliases fs.ErrInvalid etc., which live
+// in io/fs/fs.go via internal/oserror). One shared identity, so
+// `errors::Is(err, os::ErrNotExist)` and `errors::Is(err,
+// fs::ErrNotExist)` are the same check, exactly as in Go.
+pub use crate::io::fs::{ErrClosed, ErrExist, ErrInvalid, ErrNotExist, ErrPermission};
 
 /// `os.IsNotExist(err)` (os/error.go:91) — reports whether `err` is known
 /// to report that a file or directory does not exist.
@@ -883,6 +868,55 @@ pub fn Readlink<N: Into<string>>(name: N) -> (string, error) {
     }
 }
 
+/// `os.Executable()` (executable.go:19 → executable_procfs.go:15) —
+/// path name for the executable that started the current process, via
+/// `Readlink("/proc/self/exe")`. When the executable has been deleted,
+/// Readlink returns a path appended with " (deleted)"; trimmed here as
+/// in Go.
+pub fn Executable() -> (string, error) {
+    // Go: path, err := Readlink("/proc/self/exe")
+    let (path, err) = Readlink("/proc/self/exe");
+    // Go: return stringslite.TrimSuffix(path, " (deleted)"), err
+    let b = bytes_of(&path);
+    if b.ends_with(b" (deleted)") {
+        return (string::from_bytes(&b[..b.len() - b" (deleted)".len()]), err);
+    }
+    (path, err)
+}
+
+/// `os.Chtimes(name, atime, mtime)` (file_posix.go:179) — change the
+/// access and modification times of the named file. A zero time.Time
+/// leaves the corresponding timestamp unchanged (UTIME_OMIT), as in Go.
+pub fn Chtimes<N: Into<string>>(
+    name: N,
+    atime: crate::time::Time,
+    mtime: crate::time::Time,
+) -> error {
+    let name: string = name.into();
+    // Go: utimes := chtimesUtimes(atime, mtime) (file_posix.go:187)
+    let set = |t: crate::time::Time| -> syscall::Timespec {
+        if t.IsZero() {
+            // Go: utimes[i] = syscall.Timespec{Sec: _UTIME_OMIT, Nsec: _UTIME_OMIT}
+            syscall::Timespec { tv_sec: syscall::UTIME_OMIT, tv_nsec: syscall::UTIME_OMIT }
+        } else {
+            // Go: utimes[i] = syscall.NsecToTimespec(t.UnixNano())
+            let ns = t.UnixNano() as i64;
+            syscall::Timespec { tv_sec: ns / 1_000_000_000, tv_nsec: ns % 1_000_000_000 }
+        }
+    };
+    let utimes = [set(atime), set(mtime)];
+    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
+    buf.extend_from_slice(bytes_of(&name));
+    buf.push(0);
+    // Go: if e := syscall.UtimesNano(name, utimes[0:]); e != nil {
+    //         return &PathError{Op: "chtimes", Path: name, Err: e} }
+    let r = syscall::Utimensat(syscall::AT_FDCWD, buf.as_ptr(), utimes.as_ptr(), 0);
+    if r < 0 {
+        return errors::New(string("chtimes failed"));
+    }
+    nil
+}
+
 /// Line-by-line port of `os.Rename(oldpath, newpath)` (file.go:440 →
 /// file_unix.go:26 rename). Slim: drops the SameFile case-only-rename
 /// gymnastics (Linux is always case-sensitive) but preserves the
@@ -1353,7 +1387,11 @@ fn mode_from_dtype(dt: u8) -> FileMode {
 
 /// `os.WriteFile(name, data, perm)` (os/file.go:763) — write `data`
 /// to the named file, creating or truncating it.
-pub fn WriteFile<N: Into<string>, M: Into<FileMode>>(name: N, data: slice<byte>, perm: M) -> error {
+pub fn WriteFile<N: Into<string>, D: AsRef<[byte]>, M: Into<FileMode>>(
+    name: N,
+    data: D,
+    perm: M,
+) -> error {
     let name: string = name.into();
     let perm: FileMode = perm.into();
     use crate::io::Writer;
@@ -1363,7 +1401,7 @@ pub fn WriteFile<N: Into<string>, M: Into<FileMode>>(name: N, data: slice<byte>,
     }
     // err is nil ⇒ OpenFile returned a non-nil File. Narrow.
     let f = f.MustMut();
-    let (_, werr) = f.Write(data);
+    let (_, werr) = f.Write(slice::__from_vec(data.as_ref().to_vec()));
     let cerr = f.Close();
     if !werr.IsNil() {
         return werr;
@@ -1806,4 +1844,196 @@ unsafe fn cstrlen(p: *const u8) -> usize {
 /// re-exported here under the Go-shaped path.
 pub fn Exit(code: int) -> ! {
     syscall::Exit(code as i32);
+}
+
+// ─── os.DirFS (os/file.go:717) ─────────────────────────────────────────
+
+// os::File as an `fs::File` interface value. The fs trait takes
+// `&self` everywhere (Go interface values), while os::File's Close
+// needs `&mut` — so the adapter owns the File behind a lock and
+// Close takes it out. Reads hold the lock across the read(2); a
+// single fs::File handle is never shared hot, so a spinlock is fine.
+struct dirFSFile {
+    inner: runtime::spin::SpinLock<Option<File>>,
+}
+
+impl crate::io::fs::File for dirFSFile {
+    fn Stat(&self) -> (alloc::sync::Arc<dyn FileInfo + Send + Sync>, error) {
+        let g = self.inner.lock();
+        match g.as_ref() {
+            Some(f) => {
+                let (info, err) = f.Stat();
+                if !err.IsNil() {
+                    return (crate::nil.into(), err);
+                }
+                (alloc::sync::Arc::new(info), nil)
+            }
+            None => (crate::nil.into(), ErrClosed.into()),
+        }
+    }
+    fn Read(&self, p: &mut slice<byte>) -> (int, error) {
+        let g = self.inner.lock();
+        match g.as_ref() {
+            Some(f) => f.Read(p),
+            None => (0, ErrClosed.into()),
+        }
+    }
+    fn Close(&self) -> error {
+        match self.inner.lock().take() {
+            Some(mut f) => f.Close(),
+            None => ErrClosed.into(),
+        }
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
+    }
+}
+
+// Go: `type dirFS string` (os/file.go:754).
+struct dirFS {
+    dir: string,
+}
+
+impl dirFS {
+    // Go: dirFS.join (os/file.go:830) — dir/name with validity check.
+    fn join(&self, op: &'static str, name: &string) -> (string, error) {
+        if !crate::io::fs::ValidPath(name.clone()) {
+            return (
+                string::new(),
+                errors::Wrap(crate::io::fs::PathError {
+                    Op: string::from_static(op),
+                    Path: name.clone(),
+                    Err: ErrInvalid.into(),
+                }),
+            );
+        }
+        // Go routes through filepath, cleaning "." away; the common
+        // case is special-cased here instead.
+        if name.as_bytes() == b"." {
+            return (self.dir.clone(), nil);
+        }
+        let mut joined: Vec<u8> = Vec::new();
+        joined.extend_from_slice(self.dir.as_bytes());
+        if !self.dir.as_bytes().ends_with(b"/") {
+            joined.push(b'/');
+        }
+        joined.extend_from_slice(name.as_bytes());
+        (string::from_bytes(&joined), nil)
+    }
+}
+
+impl crate::io::fs::FS for dirFS {
+    // Go: dirFS.Open (os/file.go:766).
+    fn Open(
+        &self,
+        name: string,
+    ) -> (alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>, error) {
+        let (full, err) = self.join("open", &name);
+        if !err.IsNil() {
+            return (crate::nil.into(), err);
+        }
+        let (f, err) = Open(full);
+        if !err.IsNil() {
+            return (crate::nil.into(), err);
+        }
+        (
+            alloc::sync::Arc::new(dirFSFile {
+                inner: runtime::spin::SpinLock::new(Some(f.MustTake())),
+            }),
+            nil,
+        )
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
+    }
+}
+
+impl crate::io::fs::StatFS for dirFS {
+    fn Open(
+        &self,
+        name: string,
+    ) -> (alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>, error) {
+        crate::io::fs::FS::Open(self, name)
+    }
+    // Go: dirFS.Stat (os/file.go:806).
+    fn Stat(
+        &self,
+        name: string,
+    ) -> (alloc::sync::Arc<dyn FileInfo + Send + Sync>, error) {
+        let (full, err) = self.join("stat", &name);
+        if !err.IsNil() {
+            return (crate::nil.into(), err);
+        }
+        let (info, err) = Stat(full);
+        if !err.IsNil() {
+            return (crate::nil.into(), err);
+        }
+        (alloc::sync::Arc::new(info), nil)
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
+    }
+}
+
+impl crate::io::fs::ReadFileFS for dirFS {
+    fn Open(
+        &self,
+        name: string,
+    ) -> (alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>, error) {
+        crate::io::fs::FS::Open(self, name)
+    }
+    // Go: dirFS.ReadFile (os/file.go:782).
+    fn ReadFile(&self, name: string) -> (slice<byte>, error) {
+        let (full, err) = self.join("readfile", &name);
+        if !err.IsNil() {
+            return (slice::new(), err);
+        }
+        ReadFile(full)
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
+    }
+}
+
+impl crate::io::fs::ReadDirFS for dirFS {
+    fn Open(
+        &self,
+        name: string,
+    ) -> (alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>, error) {
+        crate::io::fs::FS::Open(self, name)
+    }
+    // Go: dirFS.ReadDir (os/file.go:794).
+    fn ReadDir(
+        &self,
+        name: string,
+    ) -> (slice<alloc::sync::Arc<dyn DirEntry + Send + Sync>>, error) {
+        let (full, err) = self.join("readdir", &name);
+        if !err.IsNil() {
+            return (slice::new(), err);
+        }
+        ReadDir(full)
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
+    }
+}
+
+fn register_dirfs_impls() {
+    crate::io::fs::__goish_register_StatFS_impl::<dirFS>();
+    crate::io::fs::__goish_register_ReadFileFS_impl::<dirFS>();
+    crate::io::fs::__goish_register_ReadDirFS_impl::<dirFS>();
+    crate::io::fs::__goish_register_File_impl::<dirFSFile>();
+}
+
+/// `os.DirFS(dir)` (os/file.go:717) — an `fs::FS` for the tree of
+/// files rooted at the directory `dir`. Implements the optimized
+/// `StatFS` / `ReadFileFS` / `ReadDirFS` paths, so `fs::Stat`,
+/// `fs::ReadFile`, `fs::ReadDir`, and `fs::WalkDir` all route through
+/// the direct os calls.
+pub fn DirFS<S: Into<string>>(
+    dir: S,
+) -> alloc::sync::Arc<dyn crate::io::fs::FS + Send + Sync> {
+    register_os_fs_impls();
+    register_dirfs_impls();
+    alloc::sync::Arc::new(dirFS { dir: dir.into() })
 }

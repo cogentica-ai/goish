@@ -483,6 +483,30 @@ where
         Self::delete_from_bucket(bucket, top, &k, &mut self.count);
     }
 
+    /// `clear(m)` — delete all entries, keeping the allocated buckets so
+    /// a map that is repeatedly filled and cleared does not re-grow.
+    /// Go's `clear` builtin on a map (spec: "deletes all entries,
+    /// resulting in an empty map"); the length becomes 0 and the map
+    /// stays usable.
+    #[allow(non_snake_case)]
+    pub fn Clear(&mut self) {
+        if self.count == 0 {
+            return;
+        }
+        for bucket in self.buckets.iter_mut() {
+            let mut b = Some(bucket);
+            while let Some(cur) = b {
+                for i in 0..BUCKET_COUNT {
+                    cur.tophash[i] = EMPTY_ONE;
+                    cur.keys[i] = None;
+                    cur.elems[i] = None;
+                }
+                b = cur.overflow.as_mut();
+            }
+        }
+        self.count = 0;
+    }
+
     /// All keys, in bucket-walk order (Go's randomized iteration order).
     #[allow(non_snake_case)]
     pub fn Keys(&self) -> slice<K>

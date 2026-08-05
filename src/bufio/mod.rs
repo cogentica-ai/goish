@@ -435,6 +435,12 @@ pub struct Reader<R: io::Reader> {
     err: error,
     last_byte: int,      // last byte read, -1 if invalid for UnreadByte
     last_rune_size: int, // size of last rune, -1 if invalid for UnreadRune
+    /// Recycled staging Vec for `fill()` — `io::Reader::Read` takes
+    /// an owned `slice<byte>`, so reads can't land directly in
+    /// `buf[w..]`; without recycling, every fill allocated and
+    /// zeroed a fresh scratch Vec (once per HTTP request on the
+    /// serve path).
+    scratch: Vec<byte>,
 }
 
 /// `bufio.NewReader(rd)` — buffered reader with the default size.
@@ -456,6 +462,31 @@ pub fn NewReaderSize<R: io::Reader>(rd: R, size: int) -> Reader<R> {
         err: nil,
         last_byte: -1,
         last_rune_size: -1,
+        scratch: Vec::new(),
+    }
+}
+
+/// Crate-internal constructor reusing a caller-recycled backing
+/// buffer — the analogue of Go's server-side pooled bufio.Reader
+/// (`newBufioReader` + `putBufioReader`, net/http/server.go:840):
+/// the HTTP keep-alive loop hands the same Vec back in every
+/// request, so the per-request 4 KiB allocate-and-zero disappears.
+/// An undersized (e.g. first-use empty) Vec is grown to
+/// `defaultBufSize` once; the zeroing only touches the grown region.
+pub(crate) fn __new_reader_with_buf<R: io::Reader>(rd: R, mut buf: Vec<byte>) -> Reader<R> {
+    let sz = (defaultBufSize as usize).max(minReadBufferSize);
+    if buf.len() < sz {
+        buf.resize(sz, 0);
+    }
+    Reader {
+        buf,
+        rd,
+        r: 0,
+        w: 0,
+        err: nil,
+        last_byte: -1,
+        last_rune_size: -1,
+        scratch: Vec::new(),
     }
 }
 
@@ -480,6 +511,52 @@ impl<R: io::Reader> Reader<R> {
         (self.w - self.r) as int
     }
 
+    /// Crate-internal: recover the backing buffer for recycling into
+    /// the next `__new_reader_with_buf` (the put half of Go's bufio
+    /// reader pool, net/http/server.go:857). Buffered-but-unconsumed
+    /// bytes are discarded, matching the previous
+    /// fresh-reader-per-request behavior.
+    pub(crate) fn __into_buf(self) -> Vec<byte> {
+        self.buf
+    }
+
+    /// Crate-internal zero-copy line read for the HTTP parser: borrow
+    /// the next `\n`-terminated line (with the trailing `\n` and any
+    /// preceding `\r` stripped) directly from the internal buffer.
+    ///
+    ///   * `Ok(Some(line))` — full line was in (or read into) the
+    ///     buffer; consumed. The borrow is valid until the next read
+    ///     call on this reader — the same contract as Go's
+    ///     `ReadSlice` view (bufio.go:345), which is exactly what
+    ///     `textproto`-style parsing needs: copy out only the
+    ///     substrings that outlive the line.
+    ///   * `Ok(None)` — the line is longer than the whole buffer;
+    ///     caller falls back to the allocating `ReadBytes` path.
+    ///   * `Err(e)` — underlying read error before any delimiter.
+    pub(crate) fn __read_line_view(&mut self) -> Result<Option<&[byte]>, error> {
+        let (start, end, consume_to) = loop {
+            if let Some(i) = index_byte(&self.buf[self.r..self.w], b'\n') {
+                let start = self.r;
+                let mut end = start + i;
+                if end > start && self.buf[end - 1] == b'\r' {
+                    end -= 1;
+                }
+                break (start, end, start + i + 1);
+            }
+            if self.err != nil {
+                return Err(self.read_err());
+            }
+            if self.w - self.r >= self.buf.len() {
+                return Ok(None); // line spans the whole buffer
+            }
+            self.fill();
+        };
+        self.r = consume_to;
+        self.last_byte = b'\n' as int;
+        self.last_rune_size = -1;
+        Ok(Some(&self.buf[start..end]))
+    }
+
     fn read_err(&mut self) -> error {
         let e = self.err.clone();
         self.err = nil;
@@ -498,21 +575,25 @@ impl<R: io::Reader> Reader<R> {
         let mut tries = maxConsecutiveEmptyReads;
         while tries > 0 {
             let want = self.buf.len() - self.w;
-            let mut tmp: slice<byte> = slice::__from_vec({
-                let mut v: Vec<byte> = Vec::with_capacity(want);
-                v.resize(want, 0);
-                v
-            });
+            // Stage through the recycled scratch Vec — resize only
+            // zeroes newly-grown bytes, so the steady state is
+            // alloc-free and memset-free.
+            let mut sv = core::mem::take(&mut self.scratch);
+            if sv.len() != want {
+                sv.resize(want, 0);
+            }
+            let mut tmp: slice<byte> = slice::__from_vec(sv);
             let (n, err) = self.rd.Read(&mut tmp);
             if n < 0 {
                 panic!("bufio: reader returned negative count from Read");
             }
+            let src = tmp.__into_vec();
             if n > 0 {
-                let src = tmp.__into_vec();
                 self.buf[self.w..self.w + n as usize]
                     .copy_from_slice(&src[..n as usize]);
                 self.w += n as usize;
             }
+            self.scratch = src;
             if err != nil {
                 self.err = err;
                 return;

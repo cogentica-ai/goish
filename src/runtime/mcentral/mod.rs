@@ -70,7 +70,16 @@ pub struct MCentral {
     /// span owns that page. `page_idx` is computed relative to the
     /// arena base; outside the tracked range, the small path returns
     /// failure and the caller falls back to the large path.
-    pub page_to_span: [u16; MAX_TRACKED_PAGES],
+    ///
+    /// Atomic so `free` can perform the pointer → span lookup
+    /// WITHOUT the central lock (the Go `spanOf` fast path,
+    /// mheap.go:717): writers store under the lock with `Release`,
+    /// the lock-free reader `Acquire`-loads. Correctness leans on
+    /// the pinning invariant — a pointer being freed is a live
+    /// allocated slot, so its span cannot be empty, cannot be
+    /// released, and its page mapping / descriptive fields are
+    /// stable for the duration of the free.
+    pub page_to_span: [core::sync::atomic::AtomicU16; MAX_TRACKED_PAGES],
 
     /// Arena base address — used to translate raw pointers into
     /// page indices.
@@ -94,7 +103,8 @@ impl MCentral {
             spans: [const { Span::new() }; MAX_SPANS],
             spans_bump: 0,
             spans_free_head: NIL_SPAN,
-            page_to_span: [NIL_SPAN; MAX_TRACKED_PAGES],
+            page_to_span: [const { core::sync::atomic::AtomicU16::new(NIL_SPAN) };
+                MAX_TRACKED_PAGES],
             arena_base: 0,
         }
     }
@@ -206,13 +216,46 @@ impl MCentral {
         s.next = NIL_SPAN;
         s.prev = NIL_SPAN;
 
-        // Register this span's pages in the page → span map.
+        // Register this span's pages in the page → span map. Release
+        // stores publish the descriptive-field writes above to the
+        // lock-free `free` reader (which Acquire-loads the entry).
         let first_page = (base - self.arena_base) / PAGE_SIZE;
         for p in first_page..(first_page + npages as usize) {
             if p < MAX_TRACKED_PAGES {
-                self.page_to_span[p] = idx;
+                self.page_to_span[p].store(idx, Ordering::Release);
             }
         }
+    }
+
+    /// **Full-list rescue** — walk `full[class]` and move any span
+    /// that has regained free slots back to `partial[class]`,
+    /// returning the first such span (or `NIL_SPAN`).
+    ///
+    /// Needed because the lock-free `free` fast path can race a
+    /// concurrent `uncacheSpan`: the uncache routes the span to the
+    /// full list a moment before the free's atomic bit-clear lands,
+    /// stranding a span with free slots where `alloc`/`cacheSpan`
+    /// never look. The race is rare; reclaiming lazily when the
+    /// partial list runs dry keeps the free path lock-free. Scan is
+    /// bounded to keep the lock hold short.
+    fn rescue_full(&mut self, class: u8) -> u16 {
+        const RESCUE_SCAN_BOUND: usize = 64;
+        let mut idx = self.full[class as usize];
+        let mut scanned = 0usize;
+        let mut first = NIL_SPAN;
+        while idx != NIL_SPAN && scanned < RESCUE_SCAN_BOUND {
+            let next = self.spans[idx as usize].next;
+            if !self.spans[idx as usize].is_full() {
+                self.list_remove(idx);
+                self.partial_push(idx);
+                if first == NIL_SPAN {
+                    first = idx;
+                }
+            }
+            idx = next;
+            scanned += 1;
+        }
+        first
     }
 }
 
@@ -258,6 +301,11 @@ pub unsafe fn alloc(size: usize, align: usize) -> *mut u8 {
     let mut g = MCENTRAL.lock();
     let mut idx = g.partial[class as usize];
     if idx == NIL_SPAN {
+        // Reclaim any full-list spans that regained free slots via
+        // the lock-free free path before drawing fresh pages.
+        idx = g.rescue_full(class);
+    }
+    if idx == NIL_SPAN {
         // No partial span — allocate fresh from mheap.
         let npages = NPAGES_OF_CLASS[class as usize] as usize;
         // Drop the lock during the mheap call (mheap has its own lock).
@@ -301,18 +349,34 @@ pub unsafe fn alloc(size: usize, align: usize) -> *mut u8 {
 /// success, false if `ptr` is not owned by mcentral (caller should
 /// route to mheap).
 ///
-/// **Concurrency** (post task #106). The lookup phase
-/// (`page_to_span`, span bounds, `cached` flag) needs to consult
-/// `MCentral` state; the lock is held briefly to read it. Once we
-/// know the span is *cached*, the actual bit clear + count decrement
-/// happen via atomic ops (`free_slot_atomic`) **after the lock is
-/// dropped** — this is the path that the per-P mcache hot-path free
-/// takes. For uncached spans, the lock is reacquired (or held) for
-/// list manipulation and possible mheap return.
+/// **Concurrency** (lock-free lookup, post the goginx profiling
+/// pass). The pointer → span lookup takes NO lock — the Go `spanOf`
+/// fast path (mheap.go:717). Soundness rests on the pinning
+/// invariant: the pointer being freed is a live allocated slot, so
+/// its span has `alloc_count >= 1`, can never be observed empty,
+/// can never be released, and therefore its `page_to_span` entries
+/// and descriptive fields (`base`, `npages`, `elemsize`) are stable
+/// for the duration of this call. `init_span` publishes those
+/// fields with a `Release` store of the page entry; the `Acquire`
+/// load below pairs with it.
+///
+/// Cached spans (the common case for the short-lived objects a
+/// request allocates and drops) complete entirely lock-free via
+/// `free_slot_atomic`. Uncached spans take the central lock for
+/// list maintenance and re-check `cached` under it (cacheSpan /
+/// uncacheSpan run under the same lock, so the flag is stable once
+/// the lock is held). The one unclosed race — `uncacheSpan` routing
+/// a span to the full list a beat before a concurrent lock-free
+/// bit-clear lands — strands a span with free slots on the full
+/// list; `rescue_full` reclaims those when the partial list runs
+/// dry.
 pub unsafe fn free(ptr: *mut u8) -> bool {
     let p = ptr as usize;
-    let mut g = MCENTRAL.lock();
-    let arena_base = g.arena_base;
+    // Lock-free lookup. `arena_base` is written once during
+    // `mcentral_init`, before `MCENTRAL_READY` is released; every
+    // caller observes it via the `ready()` Acquire load.
+    let mc: &MCentral = MCENTRAL.data_unchecked();
+    let arena_base = mc.arena_base;
     if p < arena_base {
         return false;
     }
@@ -320,31 +384,33 @@ pub unsafe fn free(ptr: *mut u8) -> bool {
     if page_idx >= MAX_TRACKED_PAGES {
         return false;
     }
-    let idx = g.page_to_span[page_idx];
+    let idx = mc.page_to_span[page_idx].load(Ordering::Acquire);
     if idx == NIL_SPAN {
         return false;
     }
-    let span = &g.spans[idx as usize];
+    let span = span_by_idx(idx);
     if p < span.base || p >= span.base + span.npages as usize * PAGE_SIZE {
         return false;
     }
-    let was_cached = span.cached.load(Ordering::Acquire);
     let slot = span.slot_of(p);
 
-    if was_cached {
-        // Lock-free fast path: cached span lives on no central list,
-        // so list manipulation is unnecessary. Drop the central lock
-        // before the atomic bit clear so other Ms aren't blocked on
-        // it. The owning P sees the freed slot on its next
-        // `refill_alloc_cache` (which OR-claims fresh free bits) or
-        // on `uncacheSpan` (which releases unsold reserved bits).
+    if span.cached.load(Ordering::Acquire) {
+        // Cached span: it lives on no central list, so there is no
+        // list state to maintain — the atomic bit clear + count
+        // decrement are the whole free. The owning P re-discovers
+        // the slot on its next `refill_alloc_cache` (which OR-claims
+        // fresh free bits) or `uncacheSpan` releases it centrally.
+        span.free_slot_atomic(slot);
+        return true;
+    }
+
+    // Uncached span: central list maintenance under the lock.
+    let mut g = MCENTRAL.lock();
+    // Re-check under the lock — the span may have been cached by a P
+    // between the lock-free check and lock acquisition.
+    if g.spans[idx as usize].cached.load(Ordering::Acquire) {
         drop(g);
-        // Re-borrow span via the static for lock-free atomic ops.
-        // Safe: spans live in a fixed-size static; index is stable
-        // once allocated. The atomic ops on alloc_bits/alloc_count
-        // are the only mutations.
-        let span_ref = span_by_idx(idx);
-        span_ref.free_slot_atomic(slot);
+        span.free_slot_atomic(slot);
         return true;
     }
 
@@ -364,7 +430,7 @@ pub unsafe fn free(ptr: *mut u8) -> bool {
         let first_page = (base - arena_base) / PAGE_SIZE;
         for pp in first_page..(first_page + npages) {
             if pp < MAX_TRACKED_PAGES {
-                g.page_to_span[pp] = NIL_SPAN;
+                g.page_to_span[pp].store(NIL_SPAN, Ordering::Release);
             }
         }
         g.list_remove(idx);
@@ -411,7 +477,12 @@ pub unsafe fn cacheSpan(class: u8) -> u16 {
     if class == 0 || (class as usize) >= NUM_SIZE_CLASSES {
         return NIL_SPAN;
     }
-    let idx = g.partial[class as usize];
+    let mut idx = g.partial[class as usize];
+    if idx == NIL_SPAN {
+        // Reclaim full-list spans that regained free slots via the
+        // lock-free free path.
+        idx = g.rescue_full(class);
+    }
     if idx != NIL_SPAN {
         g.list_remove(idx);
         // Reset freeindex and prime alloc_cache so the owner P starts
@@ -477,7 +548,7 @@ pub unsafe fn uncacheSpan(idx: u16) {
         let first_page = (base - arena_base) / PAGE_SIZE;
         for pp in first_page..(first_page + npages) {
             if pp < MAX_TRACKED_PAGES {
-                g.page_to_span[pp] = NIL_SPAN;
+                g.page_to_span[pp].store(NIL_SPAN, Ordering::Release);
             }
         }
         g.release_span_idx(idx);

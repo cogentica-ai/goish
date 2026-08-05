@@ -642,6 +642,216 @@ pub fn WalkDir<S: Into<string>, F: WalkDirFunc>(
     err
 }
 
+// ─── ReadFile (readfile.go) ──────────────────────────────────────────
+
+/// `fs.ReadFileFS` (readfile.go:14) — a file system with an optimized
+/// `ReadFile` implementation. Embeds [`FS`] in Go (re-declared here;
+/// see the interface-embedding note above).
+#[goish::interface]
+pub trait ReadFileFS {
+    /// `Open(name)` — open the named file (from embedded [`FS`]).
+    fn Open(&self, name: string) -> (Arc<dyn File + Send + Sync>, error);
+    /// `ReadFile(name)` — the full contents of the named file. A
+    /// successful call returns a nil error, not `io::EOF`.
+    fn ReadFile(&self, name: string) -> (slice<byte>, error);
+}
+
+/// `fs.ReadFile(fsys, name)` (readfile.go:24) — read the named file
+/// and return its contents. A successful call returns a nil error,
+/// not `io::EOF` (reads the whole file).
+///
+/// If `fsys` implements [`ReadFileFS`], `ReadFile` calls its
+/// `ReadFile`. Otherwise it opens the file and reads until EOF.
+pub fn ReadFile<S: Into<string>>(
+    fsys: &(dyn FS + Send + Sync + 'static),
+    name: S,
+) -> (slice<byte>, error) {
+    let name: string = name.into();
+
+    // Go: if fsys, ok := fsys.(ReadFileFS); ok { return fsys.ReadFile(name) }
+    let (rffs, ok) = goish::cast!(fsys, ReadFileFS);
+    if ok {
+        return rffs.ReadFile(name);
+    }
+
+    // Go: file, err := fsys.Open(name); if err != nil { return nil, err }
+    let (file, err) = fsys.Open(name);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    // Go: defer file.Close(); read until error/EOF.
+    let mut out: Vec<u8> = Vec::new();
+    let mut chunk: slice<byte> = slice::__from_vec(alloc::vec![0u8; 4096]);
+    loop {
+        let (n, err) = file.Read(&mut chunk);
+        if n > 0 {
+            out.extend_from_slice(&chunk.as_ref()[..n as usize]);
+        }
+        if err != errors::nil {
+            let _ = file.Close();
+            if err == crate::io::EOF {
+                return (slice::__from_vec(out), errors::nil);
+            }
+            return (slice::__from_vec(out), err);
+        }
+        if n == 0 {
+            // A zero-byte, nil-error Read from a well-behaved File
+            // only happens at EOF; stop rather than spin.
+            let _ = file.Close();
+            return (slice::__from_vec(out), errors::nil);
+        }
+    }
+}
+
+// ─── Sub (sub.go) ────────────────────────────────────────────────────
+
+/// `fs.SubFS` (sub.go:12) — a file system with an optimized `Sub`
+/// implementation. Embeds [`FS`] in Go (re-declared; see note above).
+#[goish::interface]
+pub trait SubFS {
+    /// `Open(name)` — open the named file (from embedded [`FS`]).
+    fn Open(&self, name: string) -> (Arc<dyn File + Send + Sync>, error);
+    /// `Sub(dir)` — an FS corresponding to the subtree rooted at dir.
+    fn Sub(&self, dir: string) -> (Arc<dyn FS + Send + Sync>, error);
+}
+
+/// `fs.Sub(fsys, dir)` (sub.go:25) — an FS corresponding to the
+/// subtree rooted at `fsys`'s `dir`.
+///
+/// If `dir` is `.`, `Sub` returns `fsys` unchanged. If `fsys`
+/// implements [`SubFS`], `Sub` calls its `Sub`. Otherwise it returns
+/// a wrapper that translates paths (the wrapper forwards optimized
+/// `ReadDir` / `ReadFile` / `Stat` through the free functions; Go's
+/// error-path shortening inside the wrapper is not replicated).
+pub fn Sub<S: Into<string>>(
+    fsys: Arc<dyn FS + Send + Sync>,
+    dir: S,
+) -> (Arc<dyn FS + Send + Sync>, error) {
+    let dir: string = dir.into();
+    // Go: if !ValidPath(dir) { return nil, &PathError{...} }
+    if !ValidPath(dir.clone()) {
+        return (
+            crate::nil.into(),
+            errors::Wrap(PathError {
+                Op: string::from_static("sub"),
+                Path: dir,
+                Err: errors::New("invalid name"),
+            }),
+        );
+    }
+    // Go: if dir == "." { return fsys, nil }
+    if dir.as_bytes() == b"." {
+        return (fsys, errors::nil);
+    }
+    // Go: if fsys, ok := fsys.(SubFS); ok { return fsys.Sub(dir) }
+    let (sfs, ok) = goish::cast!(&*fsys, SubFS);
+    if ok {
+        return sfs.Sub(dir);
+    }
+    register_subfs_impls();
+    (Arc::new(subFS { fsys, dir }), errors::nil)
+}
+
+// Go: `type subFS struct { fsys FS; dir string }` (sub.go:53)
+struct subFS {
+    fsys: Arc<dyn FS + Send + Sync>,
+    dir: string,
+}
+
+impl subFS {
+    // Go: subFS.fullName (sub.go:59) — maps name to the fully
+    // qualified name dir/name.
+    fn full_name(&self, op: &'static str, name: &string) -> (string, error) {
+        if !ValidPath(name.clone()) {
+            return (
+                string::new(),
+                errors::Wrap(PathError {
+                    Op: string::from_static(op),
+                    Path: name.clone(),
+                    Err: errors::New("invalid name"),
+                }),
+            );
+        }
+        // Go routes through path.Join, which cleans "." away; the
+        // common case is special-cased here instead.
+        if name.as_bytes() == b"." {
+            return (self.dir.clone(), errors::nil);
+        }
+        let mut joined: Vec<u8> = Vec::new();
+        joined.extend_from_slice(self.dir.as_bytes());
+        joined.push(b'/');
+        joined.extend_from_slice(name.as_bytes());
+        (string::from_bytes(&joined), errors::nil)
+    }
+}
+
+impl FS for subFS {
+    fn Open(&self, name: string) -> (Arc<dyn File + Send + Sync>, error) {
+        let (full, err) = self.full_name("open", &name);
+        if err != errors::nil {
+            return (crate::nil.into(), err);
+        }
+        self.fsys.Open(full)
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
+    }
+}
+
+impl ReadDirFS for subFS {
+    fn Open(&self, name: string) -> (Arc<dyn File + Send + Sync>, error) {
+        FS::Open(self, name)
+    }
+    fn ReadDir(&self, name: string) -> (slice<Arc<dyn DirEntry + Send + Sync>>, error) {
+        let (full, err) = self.full_name("readdir", &name);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        ReadDir(&*self.fsys, full)
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
+    }
+}
+
+impl ReadFileFS for subFS {
+    fn Open(&self, name: string) -> (Arc<dyn File + Send + Sync>, error) {
+        FS::Open(self, name)
+    }
+    fn ReadFile(&self, name: string) -> (slice<byte>, error) {
+        let (full, err) = self.full_name("readfile", &name);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        ReadFile(&*self.fsys, full)
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
+    }
+}
+
+impl StatFS for subFS {
+    fn Open(&self, name: string) -> (Arc<dyn File + Send + Sync>, error) {
+        FS::Open(self, name)
+    }
+    fn Stat(&self, name: string) -> (Arc<dyn FileInfo + Send + Sync>, error) {
+        let (full, err) = self.full_name("stat", &name);
+        if err != errors::nil {
+            return (crate::nil.into(), err);
+        }
+        Stat(&*self.fsys, full)
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        Some(self)
+    }
+}
+
+fn register_subfs_impls() {
+    __goish_register_ReadDirFS_impl::<subFS>();
+    __goish_register_ReadFileFS_impl::<subFS>();
+    __goish_register_StatFS_impl::<subFS>();
+}
+
 // Suppress unused-import warnings for items pulled in for completeness.
 #[allow(dead_code)]
 fn _unused_imports() {

@@ -1,5 +1,6 @@
 // netpoll_init_smoke — minimal sanity check that netpoll::init runs
-// without panic and a subsequent netpoll::poll(0) returns empty.
+// without panic and a subsequent non-blocking sweep of every shard
+// (poll_all) returns empty.
 
 #![no_std]
 #![no_main]
@@ -16,7 +17,7 @@ fn print(msg: &[u8]) {
 #[goish::main]
 fn main() {
     netpoll::init();
-    let v = netpoll::poll(0);
+    let v = netpoll::poll_all();
     if v.is_empty() {
         print(b"netpoll init OK, poll(0) empty\n");
     } else {

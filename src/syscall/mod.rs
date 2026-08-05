@@ -146,6 +146,11 @@ pub struct Timespec {
     pub tv_nsec: i64,
 }
 
+/// `UTIME_OMIT` — sentinel tv_nsec value for `utimensat`: leave the
+/// corresponding timestamp unchanged (Go internal/syscall/unix
+/// at_sysnum_linux.go:26).
+pub const UTIME_OMIT: i64 = 0x3ffffffe;
+
 // ─── standard fds ──────────────────────────────────────────────────────
 pub const STDIN: i32 = 0;
 pub const STDOUT: i32 = 1;
@@ -376,6 +381,9 @@ pub const EOPNOTSUPP: Errno = Errno(95);
 /// Open flags. Subset of `<fcntl.h>`.
 pub const O_RDONLY: i32 = 0;
 pub const O_CLOEXEC: i32 = 0o2_000_000;
+/// `O_PATH` — obtain an fd that references a location without opening
+/// the file itself (follows symlinks; needs only search permission).
+pub const O_PATH: i32 = 0o10_000_000;
 
 /// `open(2)` — open a file. `path` must be a NUL-terminated C string.
 /// Returns the new fd on success, or a negative `-errno` on error.
@@ -580,6 +588,7 @@ pub const SYS_TRUNCATE: usize = 76;
 pub const SYS_FTRUNCATE: usize = 77;
 pub const SYS_PREAD64: usize = 17;
 pub const SYS_PWRITE64: usize = 18;
+pub const SYS_UTIMENSAT: usize = 280;
 pub const SYS_FLOCK: usize = 73;
 pub const SYS_PIPE2: usize = 293;
 pub const SYS_CHOWN: usize = 92;
@@ -639,6 +648,23 @@ pub fn Symlink(oldname: *const u8, newname: *const u8) -> i32 {
 #[allow(non_snake_case)]
 pub fn Readlink(path: *const u8, buf: *mut u8, bufsiz: usize) -> isize {
     unsafe { syscall3(SYS_READLINK, path as usize, buf as usize, bufsiz) as isize }
+}
+
+/// `utimensat(dirfd, path, times, flags)` — set file access/modification
+/// times with nanosecond precision. `times` points to `[atime, mtime]`;
+/// a `tv_nsec` of [`UTIME_OMIT`] leaves that timestamp unchanged.
+/// Returns 0 on success, -errno on failure.
+#[allow(non_snake_case)]
+pub fn Utimensat(dirfd: i32, path: *const u8, times: *const Timespec, flags: i32) -> i32 {
+    unsafe {
+        syscall4(
+            SYS_UTIMENSAT,
+            dirfd as usize,
+            path as usize,
+            times as usize,
+            flags as usize,
+        ) as i32
+    }
 }
 
 /// `rename(oldpath, newpath)`. Returns 0 on success, -errno on failure.
@@ -1486,6 +1512,63 @@ pub fn Setsockopt(
     }
 }
 
+/// `syscall.SetsockoptInt(fd, level, opt, value int) error`
+/// (syscall/syscall_unix.go) — Go-shape wrapper around the raw
+/// `Setsockopt` above: the value is materialised as a 4-byte int32
+/// exactly like Go's `var n = int32(value); setsockopt(..., &n, 4)`.
+/// Returns `nil` on success, a `syscall.Errno` on failure.
+#[allow(non_snake_case)]
+pub fn SetsockoptInt(fd: crate::int, level: crate::int, opt: crate::int, value: crate::int) -> crate::error {
+    let n: i32 = value as i32;
+    let rc = Setsockopt(
+        fd as i32,
+        level as i32,
+        opt as i32,
+        &n as *const i32 as *const u8,
+        core::mem::size_of::<i32>() as u32,
+    );
+    if rc < 0 {
+        return Errno(-rc).into();
+    }
+    crate::errors::nil
+}
+
+// ─── RawConn ─────────────────────────────────────────────────────────
+//
+// Go: `syscall.RawConn` (syscall/net.go:8) is the interface handed to
+// `net.ListenConfig.Control` / `net.Dialer.Control` hooks so callers
+// can run setsockopt(2) etc. against the raw fd before bind/connect.
+//
+// Goish v1 ships it as a concrete struct (the only producer is the
+// pre-bind Control path in `net.ListenConfig.Listen`, where Go's
+// netFD incref bookkeeping — the interface's only failure mode —
+// doesn't exist yet). `Read` / `Write` (the "invoke f until it
+// reports done, blocking on readiness in between" forms) are
+// deferred until a consumer needs them.
+
+/// `syscall.RawConn` (syscall/net.go:8) — raw access to a socket fd
+/// inside a `net.ListenConfig.Control` hook. The fd is only
+/// guaranteed valid for the duration of the callback, mirroring the
+/// Go doc contract.
+pub struct RawConn {
+    fd: i32,
+}
+
+impl RawConn {
+    pub(crate) fn __from_fd(fd: i32) -> RawConn {
+        RawConn { fd }
+    }
+
+    /// `RawConn.Control(f func(fd uintptr)) error` — invoke `f` on
+    /// the underlying fd. The concrete v1 carrier has no incref
+    /// failure mode, so this always returns `nil`.
+    #[allow(non_snake_case)]
+    pub fn Control<F: Fn(crate::uintptr)>(&self, f: F) -> crate::error {
+        f(self.fd as crate::uintptr);
+        crate::errors::nil
+    }
+}
+
 /// `getsockopt(2)`. `len` is in/out. Returns `0` on success.
 #[allow(non_snake_case)]
 pub fn Getsockopt(
@@ -1589,4 +1672,374 @@ pub fn EpollPwait(
             sigsetsize,
         ) as i32
     }
+}
+
+// ─── inotify / fanotify (fs event notification) ──────────────────────
+//
+// The syscall surface behind Go's x/sys/unix inotify/fanotify API —
+// what a file watcher (typescript-go internal/fswatch shape: fanotify
+// preferred, inotify fallback) needs on Linux. Constants and struct
+// layouts verified against golang.org/x/sys zerrors_linux*.go /
+// ztypes_linux.go; syscall numbers from zsysnum_linux_amd64.go.
+//
+// Wrappers follow the x/sys signatures (Go-shaped, string paths,
+// (value, error) returns); the raw -errno forms stay private.
+
+pub const SYS_POLL: usize = 7;
+pub const SYS_INOTIFY_ADD_WATCH: usize = 254;
+pub const SYS_INOTIFY_RM_WATCH: usize = 255;
+pub const SYS_STATFS: usize = 137;
+pub const SYS_INOTIFY_INIT1: usize = 294;
+pub const SYS_FANOTIFY_INIT: usize = 300;
+pub const SYS_FANOTIFY_MARK: usize = 301;
+pub const SYS_NAME_TO_HANDLE_AT: usize = 303;
+
+// inotify flags (zerrors_linux_amd64.go).
+pub const IN_CLOEXEC: i32 = 0x80000;
+pub const IN_NONBLOCK: i32 = 0x800;
+
+// inotify event masks (zerrors_linux.go).
+pub const IN_MODIFY: u32 = 0x2;
+pub const IN_MOVED_FROM: u32 = 0x40;
+pub const IN_MOVED_TO: u32 = 0x80;
+pub const IN_CREATE: u32 = 0x100;
+pub const IN_DELETE: u32 = 0x200;
+pub const IN_DELETE_SELF: u32 = 0x400;
+pub const IN_MOVE_SELF: u32 = 0x800;
+pub const IN_Q_OVERFLOW: u32 = 0x4000;
+pub const IN_ONLYDIR: u32 = 0x0100_0000;
+pub const IN_DONT_FOLLOW: u32 = 0x0200_0000;
+pub const IN_EXCL_UNLINK: u32 = 0x0400_0000;
+pub const IN_ISDIR: u32 = 0x4000_0000;
+
+/// `unix.InotifyEvent` (ztypes_linux.go:781) — fixed header of each
+/// inotify record; `Len` bytes of NUL-padded name follow it.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct InotifyEvent {
+    pub Wd: i32,
+    pub Mask: u32,
+    pub Cookie: u32,
+    pub Len: u32,
+}
+
+/// `unix.SizeofInotifyEvent` (ztypes_linux.go:788).
+pub const SizeofInotifyEvent: usize = 0x10;
+
+// fanotify_init flags (zerrors_linux.go).
+pub const FAN_CLASS_NOTIF: u32 = 0x0;
+pub const FAN_CLOEXEC: u32 = 0x1;
+pub const FAN_NONBLOCK: u32 = 0x2;
+pub const FAN_REPORT_FID: u32 = 0x200;
+pub const FAN_REPORT_DIR_FID: u32 = 0x400;
+pub const FAN_REPORT_NAME: u32 = 0x800;
+pub const FAN_REPORT_DFID_NAME: u32 = 0xc00;
+
+// fanotify event masks (zerrors_linux.go).
+pub const FAN_MODIFY: u64 = 0x2;
+pub const FAN_MOVED_FROM: u64 = 0x40;
+pub const FAN_MOVED_TO: u64 = 0x80;
+pub const FAN_CREATE: u64 = 0x100;
+pub const FAN_DELETE: u64 = 0x200;
+pub const FAN_DELETE_SELF: u64 = 0x400;
+pub const FAN_MOVE_SELF: u64 = 0x800;
+pub const FAN_Q_OVERFLOW: u64 = 0x20;
+pub const FAN_EVENT_ON_CHILD: u64 = 0x0800_0000;
+pub const FAN_RENAME: u64 = 0x1000_0000;
+pub const FAN_ONDIR: u64 = 0x4000_0000;
+
+// fanotify_mark flags (zerrors_linux.go).
+pub const FAN_MARK_ADD: u32 = 0x1;
+pub const FAN_MARK_REMOVE: u32 = 0x2;
+pub const FAN_MARK_DONT_FOLLOW: u32 = 0x4;
+pub const FAN_MARK_ONLYDIR: u32 = 0x8;
+
+// fanotify info-record types (zerrors_linux.go).
+pub const FAN_EVENT_INFO_TYPE_FID: u8 = 0x1;
+pub const FAN_EVENT_INFO_TYPE_DFID_NAME: u8 = 0x2;
+pub const FAN_EVENT_INFO_TYPE_DFID: u8 = 0x3;
+pub const FAN_EVENT_INFO_TYPE_OLD_DFID_NAME: u8 = 0xa;
+pub const FAN_EVENT_INFO_TYPE_NEW_DFID_NAME: u8 = 0xc;
+
+/// `unix.FANOTIFY_METADATA_VERSION` (zerrors_linux.go).
+pub const FANOTIFY_METADATA_VERSION: u8 = 0x3;
+
+/// `unix.FanotifyEventMetadata` (ztypes_linux.go:2496) — fixed
+/// header of each fanotify record (`Event_len` covers the trailing
+/// info records in FID-reporting modes).
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct FanotifyEventMetadata {
+    pub Event_len: u32,
+    pub Vers: u8,
+    pub Reserved: u8,
+    pub Metadata_len: u16,
+    pub Mask: u64,
+    pub Fd: i32,
+    pub Pid: i32,
+}
+
+/// `unix.FanotifyEventInfoHeader` (ztypes_linux.go) — header of each
+/// variable-length info record following the metadata in
+/// FAN_REPORT_* modes.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct FanotifyEventInfoHeader {
+    pub Info_type: u8,
+    pub Pad: u8,
+    pub Len: u16,
+}
+
+// NUL-terminate a goish string for the kernel.
+fn __c_path(path: crate::string) -> alloc::vec::Vec<u8> {
+    let mut v = alloc::vec::Vec::with_capacity(path.as_bytes().len() + 1);
+    v.extend_from_slice(path.as_bytes());
+    v.push(0);
+    v
+}
+
+/// `unix.InotifyInit1(flags)` — create an inotify instance.
+pub fn InotifyInit1(flags: crate::int) -> (crate::int, crate::error) {
+    let rc = unsafe { syscall1(SYS_INOTIFY_INIT1, flags as usize) };
+    if rc < 0 {
+        return (-1, Errno(-(rc as i32)).into());
+    }
+    (rc as crate::int, crate::errors::nil)
+}
+
+/// `unix.InotifyAddWatch(fd, pathname, mask)` — add or modify a
+/// watch; returns the watch descriptor.
+pub fn InotifyAddWatch<P: Into<crate::string>>(
+    fd: crate::int,
+    pathname: P,
+    mask: u32,
+) -> (crate::int, crate::error) {
+    let p = __c_path(pathname.into());
+    let rc = unsafe {
+        syscall3(
+            SYS_INOTIFY_ADD_WATCH,
+            fd as usize,
+            p.as_ptr() as usize,
+            mask as usize,
+        )
+    };
+    if rc < 0 {
+        return (-1, Errno(-(rc as i32)).into());
+    }
+    (rc as crate::int, crate::errors::nil)
+}
+
+/// `unix.InotifyRmWatch(fd, watchdesc)` — remove a watch.
+pub fn InotifyRmWatch(fd: crate::int, watchdesc: u32) -> (crate::int, crate::error) {
+    let rc = unsafe { syscall2(SYS_INOTIFY_RM_WATCH, fd as usize, watchdesc as usize) };
+    if rc < 0 {
+        return (-1, Errno(-(rc as i32)).into());
+    }
+    (rc as crate::int, crate::errors::nil)
+}
+
+/// `unix.FanotifyInit(flags, event_f_flags)` — create a fanotify
+/// group. Most reporting modes need CAP_SYS_ADMIN; unprivileged
+/// callers get EPERM (the watcher's cue to fall back to inotify).
+pub fn FanotifyInit(flags: u32, event_f_flags: u32) -> (crate::int, crate::error) {
+    let rc = unsafe {
+        syscall2(SYS_FANOTIFY_INIT, flags as usize, event_f_flags as usize)
+    };
+    if rc < 0 {
+        return (-1, Errno(-(rc as i32)).into());
+    }
+    (rc as crate::int, crate::errors::nil)
+}
+
+/// `unix.FanotifyMark(fd, flags, mask, dirFd, pathname)` — add,
+/// remove, or flush marks. An empty `pathname` marks `dirFd` itself
+/// (NULL path, as the kernel expects).
+pub fn FanotifyMark<P: Into<crate::string>>(
+    fd: crate::int,
+    flags: u32,
+    mask: u64,
+    dirFd: crate::int,
+    pathname: P,
+) -> crate::error {
+    let path: crate::string = pathname.into();
+    let (pptr, _keep);
+    if path.as_bytes().is_empty() {
+        pptr = 0usize;
+        _keep = alloc::vec::Vec::new();
+    } else {
+        let v = __c_path(path);
+        pptr = v.as_ptr() as usize;
+        _keep = v;
+    }
+    let rc = unsafe {
+        syscall6(
+            SYS_FANOTIFY_MARK,
+            fd as usize,
+            flags as usize,
+            mask as usize,
+            dirFd as usize,
+            pptr,
+            0,
+        )
+    };
+    if rc < 0 {
+        return Errno(-(rc as i32)).into();
+    }
+    crate::errors::nil
+}
+
+// ─── name_to_handle_at (fanotify FID decoding) ───────────────────────
+
+/// Kernel MAX_HANDLE_SZ.
+const MAX_HANDLE_SZ: usize = 128;
+
+#[repr(C)]
+struct RawFileHandle {
+    handle_bytes: u32,
+    handle_type: i32,
+    f_handle: [u8; MAX_HANDLE_SZ],
+}
+
+/// `unix.FileHandle` (syscall_linux.go:2275) — an opaque fs object
+/// handle, as produced by [`NameToHandleAt`] and embedded in
+/// fanotify FID info records.
+#[derive(Clone, Default)]
+pub struct FileHandle {
+    handle_type: i32,
+    bytes: crate::slice<u8>,
+}
+
+impl core::fmt::Debug for FileHandle {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "FileHandle{{type: {}, {} bytes}}", self.handle_type, self.bytes.as_ref().len())
+    }
+}
+
+impl FileHandle {
+    /// `unix.NewFileHandle(handleType, bytes)`.
+    pub fn New(handle_type: i32, bytes: crate::slice<u8>) -> FileHandle {
+        FileHandle { handle_type, bytes }
+    }
+    /// `FileHandle.Type()`.
+    pub fn Type(&self) -> i32 {
+        self.handle_type
+    }
+    /// `FileHandle.Bytes()`.
+    pub fn Bytes(&self) -> crate::slice<u8> {
+        self.bytes.clone()
+    }
+    /// `FileHandle.Size()`.
+    pub fn Size(&self) -> crate::int {
+        self.bytes.as_ref().len() as crate::int
+    }
+}
+
+/// `unix.NameToHandleAt(dirfd, path, flags)` (syscall_linux.go:2302)
+/// — returns a FileHandle for the object at `path` plus the mount ID
+/// it lives on. EOPNOTSUPP on filesystems without export support.
+pub fn NameToHandleAt<P: Into<crate::string>>(
+    dirfd: crate::int,
+    path: P,
+    flags: crate::int,
+) -> (FileHandle, crate::int, crate::error) {
+    let p = __c_path(path.into());
+    let mut raw = RawFileHandle {
+        handle_bytes: MAX_HANDLE_SZ as u32,
+        handle_type: 0,
+        f_handle: [0; MAX_HANDLE_SZ],
+    };
+    let mut mount_id: i32 = 0;
+    let rc = unsafe {
+        syscall6(
+            SYS_NAME_TO_HANDLE_AT,
+            dirfd as usize,
+            p.as_ptr() as usize,
+            &mut raw as *mut RawFileHandle as usize,
+            &mut mount_id as *mut i32 as usize,
+            flags as usize,
+            0,
+        )
+    };
+    if rc < 0 {
+        return (FileHandle::default(), 0, Errno(-(rc as i32)).into());
+    }
+    let n = (raw.handle_bytes as usize).min(MAX_HANDLE_SZ);
+    (
+        FileHandle {
+            handle_type: raw.handle_type,
+            bytes: crate::slice::__from_vec(raw.f_handle[..n].to_vec()),
+        },
+        mount_id as crate::int,
+        crate::errors::nil,
+    )
+}
+
+// ─── poll(2) + statfs(2) (watcher support calls) ─────────────────────
+
+/// `unix.POLLIN`.
+pub const POLLIN: i16 = 0x1;
+/// `unix.POLLERR`.
+pub const POLLERR: i16 = 0x8;
+/// `unix.POLLHUP`.
+pub const POLLHUP: i16 = 0x10;
+/// `unix.POLLNVAL`.
+pub const POLLNVAL: i16 = 0x20;
+
+/// `unix.PollFd` — one entry of the poll(2) fd set.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct PollFd {
+    pub Fd: i32,
+    pub Events: i16,
+    pub Revents: i16,
+}
+
+/// `unix.Poll(fds, timeout)` — wait for events on the fd set;
+/// `timeout` in milliseconds, negative = infinite. Returns the
+/// number of ready fds.
+pub fn Poll(fds: &mut [PollFd], timeout: crate::int) -> (crate::int, crate::error) {
+    let rc = unsafe {
+        syscall3(
+            SYS_POLL,
+            fds.as_mut_ptr() as usize,
+            fds.len(),
+            timeout as usize,
+        )
+    };
+    if rc < 0 {
+        return (0, Errno(-(rc as i32)).into());
+    }
+    (rc as crate::int, crate::errors::nil)
+}
+
+/// Linux x86-64 `struct statfs` (`unix.Statfs_t`).
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct Statfs_t {
+    pub Type: i64,
+    pub Bsize: i64,
+    pub Blocks: u64,
+    pub Bfree: u64,
+    pub Bavail: u64,
+    pub Files: u64,
+    pub Ffree: u64,
+    pub Fsid: [i32; 2],
+    pub Namelen: i64,
+    pub Frsize: i64,
+    pub Flags: i64,
+    pub Spare: [i64; 4],
+}
+
+/// `unix.Statfs(path, buf)` — filesystem statistics for the fs
+/// containing `path` (watchers check `buf.Type` for supported
+/// filesystems).
+pub fn Statfs<P: Into<crate::string>>(path: P, buf: &mut Statfs_t) -> crate::error {
+    let p = __c_path(path.into());
+    let rc = unsafe {
+        syscall2(SYS_STATFS, p.as_ptr() as usize, buf as *mut Statfs_t as usize)
+    };
+    if rc < 0 {
+        return Errno(-(rc as i32)).into();
+    }
+    crate::errors::nil
 }

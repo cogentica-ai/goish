@@ -123,15 +123,20 @@ fn find_runnable() -> Option<NonNull<G>> {
     poll_netpoll_take_one()
 }
 
-/// Non-blocking netpoll drain. Returns the head G (transitioned
-/// Waiting → Runnable; execute() will move it to Running). The tail,
-/// if any, is goready'd so other Ms can pick the rest up via
-/// `wake_idle_m`. Mirrors Go's findRunnable netpoll branch
-/// (proc.go:3553) which calls `netpoll(0)` and `injectglist(&list)`.
+/// Non-blocking netpoll drain of the CURRENT P's shard. Returns the
+/// head G (transitioned Waiting → Runnable; execute() will move it
+/// to Running). The tail, if any, is goready'd so other Ms can pick
+/// the rest up via `wake_idle_m`. Mirrors Go's findRunnable netpoll
+/// branch (proc.go:3553) which calls `netpoll(0)` and
+/// `injectglist(&list)` — but per shard: each active M sweeps only
+/// its own P's epoll (zero cross-M epoll contention); other shards
+/// are covered by their own Ps, the idle blocking claimers, and
+/// sysmon's `poll_all` backstop.
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 fn poll_netpoll_take_one() -> Option<NonNull<G>> {
-    let ready = crate::runtime::netpoll::poll(0);
+    let shard = current_p().map(|p| p.id as usize).unwrap_or(0);
+    let ready = crate::runtime::netpoll::poll_shard(shard, 0);
     if ready.is_empty() {
         return None;
     }
@@ -1018,11 +1023,97 @@ pub(crate) fn schedule_loop() -> ! {
                     maybe_exit_main_m();
                 }
                 if !has_local_or_global_work() {
-                    park_m_idle();
+                    // Each idle M becomes the blocking poller for
+                    // one unclaimed netpoll shard and parks in that
+                    // shard's epoll_wait instead of a futex, so fd
+                    // readiness wakes it directly instead of waiting
+                    // for sysmon's ≤10 ms fallback tick (Go
+                    // findRunnable's blocking `netpoll(delay)` step,
+                    // proc.go:3630 — generalized to one blocking M
+                    // per per-P epoll shard; with enough idle Ms
+                    // every shard has a dedicated poller, the nginx
+                    // per-worker-epoll configuration). Ms left over
+                    // once all shards are claimed futex-park.
+                    let prefer =
+                        current_p().map(|p| p.id as usize).unwrap_or(0);
+                    match crate::runtime::netpoll::try_claim_shard(prefer) {
+                        Some(shard) => {
+                            if let Some(g) = block_as_netpoller(shard) {
+                                execute(g); // never returns
+                            }
+                        }
+                        None => park_m_idle(),
+                    }
                 }
             }
         }
     }
+}
+
+/// Upper bound on one blocking-netpoll nap. A missed wakeup
+/// therefore degrades to the pre-blocking-poller behavior (a
+/// sysmon-tick-sized delay) instead of a hang; sysmon's own
+/// netpoll(0) tick stays on as the second backstop.
+const NETPOLL_BLOCK_MS: i32 = 10;
+
+/// Any runnable work anywhere — every P's local queue plus the
+/// global queue. The blocking netpoller must scan ALL queues before
+/// sleeping (Go findRunnable re-checks `stealWork` targets before
+/// its blocking netpoll, proc.go:3560): `netpoll_break` coalesces
+/// concurrent wakeups through `WAKE_SIG`, so a producer whose break
+/// was swallowed (a wakeup already in flight that we have since
+/// drained) has work visible only in its own P's queue.
+#[inline(never)]
+fn any_runnable_anywhere() -> bool {
+    if has_local_or_global_work() {
+        return true;
+    }
+    let mut found = false;
+    super::p::for_each_p(|p| {
+        if !found && !p.runqempty() {
+            found = true;
+        }
+    });
+    found
+}
+
+/// Block in `epoll_wait` as `shard`'s designated blocking poller.
+/// Returns the HEAD ready G for the caller to `execute` directly on
+/// this M — Go's findRunnable does exactly this after its blocking
+/// netpoll: `gp := list.pop(); injectglist(&list); ...; return gp`
+/// (proc.go:3630-3650). Routing the head through goready instead
+/// cost a runq round-trip AND a spurious wake of another idle M per
+/// I/O wakeup (goready → wake_idle_m), which then raced this M to
+/// steal the G — pure churn in the one-conn-one-event case that
+/// dominates keep-alive serving. The tail (batch arrivals) is
+/// goready'd as before: those wakes recruit Ms for real work.
+#[inline(never)]
+#[link_section = "goish_rt_text"]
+fn block_as_netpoller(shard: usize) -> Option<NonNull<G>> {
+    // Final re-check AFTER claiming the shard: a producer that
+    // pushed work before observing our claim will not have sent a
+    // break, so we must not block over that work. Any producer after
+    // this check sees the claim and can break us out; the eventfd is
+    // level-triggered, so a break that lands before epoll_wait
+    // starts is sticky rather than lost.
+    if any_runnable_anywhere() {
+        crate::runtime::netpoll::release_shard(shard);
+        return None;
+    }
+    let ready = crate::runtime::netpoll::poll_shard(shard, NETPOLL_BLOCK_MS);
+    crate::runtime::netpoll::release_shard(shard);
+    let mut iter = ready.into_iter();
+    let head = iter.next();
+    if let Some(h) = head {
+        unsafe {
+            debug_assert_eq!((*h.as_ptr()).status, GStatus::Waiting);
+            (*h.as_ptr()).status = GStatus::Runnable;
+        }
+    }
+    for g in iter {
+        goready(g);
+    }
+    head
 }
 
 /// Exit the process if the calling thread is the main M (id == 0).
@@ -1188,7 +1279,18 @@ fn park_m_idle() {
 pub fn wake_idle_m() {
     let storage = match MIDLE.lock().pop() {
         Some(s) => s,
-        None => return,
+        None => {
+            // No futex-parked M to wake. If Ms are blocked in
+            // per-shard epoll_waits as blocking pollers, kick ONE
+            // via its eventfd so the new work runs now rather than
+            // on poll timeout (Go `wakep` → `netpollBreak`,
+            // proc.go:3240). Any woken M finds the work via the run
+            // queues, so one kick suffices; no-op when nothing is
+            // claimed (every M busy — they'll find the work in
+            // their own find_runnable pass).
+            crate::runtime::netpoll::break_one_claimed();
+            return;
+        }
     };
     storage.park.wakeup();
 }

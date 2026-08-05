@@ -237,11 +237,14 @@ pub fn RegisterStandardHashes() {
 // ─── Signer / Decrypter trait surface (Go: crypto.go:152-240) ─────────
 
 /// `crypto.PublicKey` (crypto.go:152) — opaque public key. Concrete types
-/// live in `crypto/rsa`, `crypto/ecdsa`, etc.
-pub type PublicKey = Box<dyn Any + Send + Sync>;
+/// live in `crypto/rsa`, `crypto/ecdsa`, etc. Arc-backed (not Box) so
+/// the carrier is cheaply clonable — Go interface values copy by
+/// reference, and `tls.Certificate` embeds a `crypto.PrivateKey` in a
+/// `Clone`-able struct.
+pub type PublicKey = alloc::sync::Arc<dyn Any + Send + Sync>;
 
 /// `crypto.PrivateKey` (crypto.go:164) — opaque private key.
-pub type PrivateKey = Box<dyn Any + Send + Sync>;
+pub type PrivateKey = alloc::sync::Arc<dyn Any + Send + Sync>;
 
 /// `crypto.SignerOpts` (crypto.go:218) — options for `Signer.Sign`.
 #[goish::interface]

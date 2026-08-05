@@ -27,24 +27,59 @@ use alloc::vec::Vec;
 use crate::gomap::map;
 use crate::goslice::slice;
 
-/// `maps.Keys(m)` — slice of keys, sorted (v1 BTreeMap backing).
-pub fn Keys<K, V>(m: &map<K, V>) -> slice<K>
+/// `maps.Keys(m)` (iter.go:Keys, Go 1.23+) — `iter.Seq` over the
+/// keys. Consumed via `slices::Collect(maps::Keys(&m))` /
+/// `slices::Sorted(maps::Keys(&m))`, exactly like modern Go.
+///
+/// Goish deviation: the seq iterates a snapshot of the keys taken at
+/// call time (Go iterates the live map with undefined interleaving
+/// under mutation; a snapshot is the sound analogue).
+pub fn Keys<K, V>(m: &map<K, V>) -> impl crate::iter::Seq<K>
 where
-    K: crate::gomap::GoHash + PartialEq + Clone,
-    V: Default,
+    K: crate::gomap::GoHash + PartialEq + Clone + Send + Sync + 'static,
 {
-    let v: Vec<K> = m.__iter().map(|(k, _)| k.clone()).collect();
-    slice::__from_vec(v)
+    let snap: Vec<K> = m.__iter().map(|(k, _)| k.clone()).collect();
+    move |yield_: &mut dyn FnMut(K) -> bool| {
+        for k in &snap {
+            if !yield_(k.clone()) {
+                return;
+            }
+        }
+    }
 }
 
-/// `maps.Values(m)` — slice of values, in key-sorted order.
-pub fn Values<K, V>(m: &map<K, V>) -> slice<V>
+/// `maps.Values(m)` (iter.go:Values, Go 1.23+) — `iter.Seq` over the
+/// values (snapshot semantics; see `Keys`).
+pub fn Values<K, V>(m: &map<K, V>) -> impl crate::iter::Seq<V>
 where
     K: crate::gomap::GoHash + PartialEq,
-    V: Default + Clone,
+    V: Clone + Send + Sync + 'static,
 {
-    let v: Vec<V> = m.__iter().map(|(_, v)| v.clone()).collect();
-    slice::__from_vec(v)
+    let snap: Vec<V> = m.__iter().map(|(_, v)| v.clone()).collect();
+    move |yield_: &mut dyn FnMut(V) -> bool| {
+        for v in &snap {
+            if !yield_(v.clone()) {
+                return;
+            }
+        }
+    }
+}
+
+/// `maps.All(m)` (iter.go:All, Go 1.23+) — `iter.Seq2` over
+/// (key, value) pairs (snapshot semantics; see `Keys`).
+pub fn All<K, V>(m: &map<K, V>) -> impl crate::iter::Seq2<K, V>
+where
+    K: crate::gomap::GoHash + PartialEq + Clone + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+{
+    let snap: Vec<(K, V)> = m.__iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    move |yield_: &mut dyn FnMut(K, V) -> bool| {
+        for (k, v) in &snap {
+            if !yield_(k.clone(), v.clone()) {
+                return;
+            }
+        }
+    }
 }
 
 /// `maps.Equal(m1, m2)` — same keys with equal values.

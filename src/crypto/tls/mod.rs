@@ -28,6 +28,23 @@ pub mod key_schedule;
 pub mod handshake_client_tls13;
 pub mod session;
 mod handshake_client;
+mod handshake_messages;
+mod handshake_server_tls13;
+
+/// Gate for the per-record debug prints in `Conn::Read`/`Conn::Write`.
+/// The one-shot client-handshake prints stay unconditional (once per
+/// connection); these fire on every record, which a TLS *server*
+/// cannot afford on stdout. Flip to `true` when debugging the record
+/// layer.
+const DEBUG: bool = false;
+
+macro_rules! tls_debug {
+    ($($arg:tt)*) => {
+        if DEBUG {
+            crate::fmt::Printf!($($arg)*);
+        }
+    };
+}
 
 /// Helper: return the actual key length for TLS 1.3 based on suite ID.
 fn tls13_key_len(km: &record::KeyMaterial) -> usize {
@@ -87,6 +104,14 @@ pub struct Config {
     /// RootCAs defines the set of root certificate authorities that clients
     /// use when verifying server certificates.
     pub RootCAs: Option<crate::crypto::x509::CertPool>,
+    /// Certificates contains one or more certificate chains to present
+    /// to the other side of the connection (server side). The first
+    /// entry is used; SNI-based selection (`GetCertificate`) is not
+    /// wired yet. Reference: common.go:570.
+    pub Certificates: slice<Certificate>,
+    /// NextProtos is a list of supported application level protocols,
+    /// in order of preference (ALPN). Reference: common.go:604.
+    pub NextProtos: slice<string>,
 }
 
 // Common TLS protocol-version constants.
@@ -108,6 +133,8 @@ impl PartialEq<crate::nilval::Nil> for Config {
             && self.MinVersion == 0
             && self.MaxVersion == 0
             && self.RootCAs.is_none()
+            && self.Certificates.Len() == 0
+            && self.NextProtos.Len() == 0
     }
 }
 impl PartialEq<Config> for crate::nilval::Nil {
@@ -151,6 +178,10 @@ pub struct Conn {
     inner_conn: Arc<Mutex<Box<dyn crate::net::Conn>>>,
     state: Arc<Mutex<ConnInner>>,
     config: Config,
+    /// Handshake role — mirrors Go's `Conn.isClient` (conn.go:44).
+    /// Selects which handshake driver runs and which traffic-key
+    /// direction Read/Write use.
+    is_client: bool,
 }
 
 // Send + Sync are sound because every mutable field is behind Arc<Mutex<>>.
@@ -165,6 +196,10 @@ impl Conn {
             if st.handshake_complete {
                 return errors::nil;
             }
+        }
+
+        if !self.is_client {
+            return self.server_handshake();
         }
 
         // We need to pass the conn to the handshake driver.
@@ -255,7 +290,7 @@ impl Conn {
         // Treat close_notify (desc=0) as EOF and other alerts as errors.
         if rtype == record::RECORD_ALERT {
             let desc = if frag.len() >= 2 { frag[1] } else { 0 };
-            crate::fmt::Printf!("[tls-debug] plaintext TLS Alert: level=%d desc=%d\n",
+            tls_debug!("[tls-debug] plaintext TLS Alert: level=%d desc=%d\n",
                 if frag.is_empty() { 0i64 } else { frag[0] as i64 }, desc as i64);
             if desc == 0 {
                 return (0, crate::io::EOF.into());
@@ -263,18 +298,38 @@ impl Conn {
             return (0, crate::errors::New("tls: received alert from server"));
         }
 
+        let is_client = self.is_client;
         let plaintext = {
             let mut st = self.state.Lock();
-            let seq = st.server_seq;
-            st.server_seq += 1;
-            crate::fmt::Printf!("[tls-debug] conn.Read: suite=0x%04x is_tls13=%v rtype=%d seq=%d frag_len=%d\n",
+            // Inbound direction: a client decrypts server-write records,
+            // a server decrypts client-write records. The seq counters
+            // follow the *sender* role (client_seq counts records sealed
+            // with the client-write keys), so both role and counter flip
+            // together.
+            let seq = if is_client {
+                let s = st.server_seq;
+                st.server_seq += 1;
+                s
+            } else {
+                let s = st.client_seq;
+                st.client_seq += 1;
+                s
+            };
+            tls_debug!("[tls-debug] conn.Read: suite=0x%04x is_tls13=%v rtype=%d seq=%d frag_len=%d\n",
                 st.keys.suite as u64, st.keys.is_tls13, rtype as i64, seq, frag.len() as i64);
             if st.keys.is_tls13 {
                 // TLS 1.3: decrypt inner content
                 use handshake_client_tls13::tls13_decrypt_record_suite;
-                let tks = key_schedule::TrafficKeys {
-                    key: st.keys.tls13_server_key[..tls13_key_len(&st.keys)].to_vec(),
-                    iv: st.keys.tls13_server_iv.to_vec(),
+                let tks = if is_client {
+                    key_schedule::TrafficKeys {
+                        key: st.keys.tls13_server_key[..tls13_key_len(&st.keys)].to_vec(),
+                        iv: st.keys.tls13_server_iv.to_vec(),
+                    }
+                } else {
+                    key_schedule::TrafficKeys {
+                        key: st.keys.tls13_client_key[..tls13_key_len(&st.keys)].to_vec(),
+                        iv: st.keys.tls13_client_iv.to_vec(),
+                    }
                 };
                 let (inner, inner_type, derr) = tls13_decrypt_record_suite(&tks, seq, &frag, st.keys.suite);
                 if !derr.IsNil() { return (0, derr); }
@@ -282,11 +337,11 @@ impl Conn {
                 // 22 = RECORD_HANDSHAKE (post-handshake, e.g. NewSessionTicket) → skip
                 // 21 = RECORD_ALERT (encrypted alert, e.g. close_notify) → return EOF
                 // 23 = RECORD_APPLICATION → return data
-                crate::fmt::Printf!("[tls-debug] conn.Read: inner_type=%d inner_len=%d\n",
+                tls_debug!("[tls-debug] conn.Read: inner_type=%d inner_len=%d\n",
                     inner_type as i64, inner.len() as i64);
                 if inner_type == record::RECORD_HANDSHAKE {
                     let msg_type = if inner.is_empty() { 0u8 } else { inner[0] };
-                    crate::fmt::Printf!("[tls-debug] conn.Read: post-handshake msg type=%d\n",
+                    tls_debug!("[tls-debug] conn.Read: post-handshake msg type=%d\n",
                         msg_type as i64);
                     if msg_type == 24 {
                         // KeyUpdate (RFC 8446 §4.6.3): update server application traffic keys.
@@ -294,24 +349,40 @@ impl Conn {
                         // Derive new server_app_secret via HKDF-Expand-Label(..., "traffic upd", ...).
                         let suite_id = st.keys.suite;
                         if let Some(cs) = key_schedule::cipher_suite_tls13(suite_id) {
-                            let old_secret = st.keys.tls13_server_app_secret.clone();
+                            // Rotate the *inbound* (peer-write) secret:
+                            // server-write keys on a client Conn,
+                            // client-write keys on a server Conn.
+                            let old_secret = if is_client {
+                                st.keys.tls13_server_app_secret.clone()
+                            } else {
+                                st.keys.tls13_client_app_secret.clone()
+                            };
                             if !old_secret.is_empty() {
                                 let new_secret = key_schedule::next_traffic_secret(cs.hash_fn, &old_secret);
                                 let new_keys = key_schedule::traffic_keys(cs.hash_fn, &new_secret, cs.key_len);
                                 let key_len = new_keys.key.len().min(32);
                                 let iv_len = new_keys.iv.len().min(12);
-                                st.keys.tls13_server_key = [0u8; 32];
-                                st.keys.tls13_server_key[..key_len].copy_from_slice(&new_keys.key[..key_len]);
-                                st.keys.tls13_server_iv = [0u8; 12];
-                                st.keys.tls13_server_iv[..iv_len].copy_from_slice(&new_keys.iv[..iv_len]);
-                                st.keys.tls13_server_app_secret = new_secret;
-                                st.server_seq = 0;
-                                crate::fmt::Printf!("[tls-debug] KeyUpdate: rotated server app keys, seq reset to 0\n");
+                                if is_client {
+                                    st.keys.tls13_server_key = [0u8; 32];
+                                    st.keys.tls13_server_key[..key_len].copy_from_slice(&new_keys.key[..key_len]);
+                                    st.keys.tls13_server_iv = [0u8; 12];
+                                    st.keys.tls13_server_iv[..iv_len].copy_from_slice(&new_keys.iv[..iv_len]);
+                                    st.keys.tls13_server_app_secret = new_secret;
+                                    st.server_seq = 0;
+                                } else {
+                                    st.keys.tls13_client_key = [0u8; 32];
+                                    st.keys.tls13_client_key[..key_len].copy_from_slice(&new_keys.key[..key_len]);
+                                    st.keys.tls13_client_iv = [0u8; 12];
+                                    st.keys.tls13_client_iv[..iv_len].copy_from_slice(&new_keys.iv[..iv_len]);
+                                    st.keys.tls13_client_app_secret = new_secret;
+                                    st.client_seq = 0;
+                                }
+                                tls_debug!("[tls-debug] KeyUpdate: rotated inbound app keys, seq reset to 0\n");
                             } else {
-                                crate::fmt::Printf!("[tls-debug] KeyUpdate: server_app_secret is empty, cannot rotate\n");
+                                tls_debug!("[tls-debug] KeyUpdate: inbound app secret is empty, cannot rotate\n");
                             }
                         } else {
-                            crate::fmt::Printf!("[tls-debug] KeyUpdate: unknown suite 0x%04x, skipping key rotation\n",
+                            tls_debug!("[tls-debug] KeyUpdate: unknown suite 0x%04x, skipping key rotation\n",
                                 suite_id as u64);
                         }
                         drop(st);
@@ -351,22 +422,22 @@ impl Conn {
                                             hash_size,
                                         };
                                         let sn_str: &str = server_name.as_ref();
-                                        crate::fmt::Printf!("[tls-debug] NewSessionTicket: stored for %s (lifetime=%ds, ticket_len=%d)\n",
+                                        tls_debug!("[tls-debug] NewSessionTicket: stored for %s (lifetime=%ds, ticket_len=%d)\n",
                                             sn_str,
                                             nst.ticket_lifetime as i64,
                                             state.ticket.len() as i64);
                                         session::put(server_name, state);
                                     } else {
-                                        crate::fmt::Printf!("[tls-debug] NewSessionTicket: unknown suite 0x%04x, dropping\n",
+                                        tls_debug!("[tls-debug] NewSessionTicket: unknown suite 0x%04x, dropping\n",
                                             suite_id as u64);
                                     }
                                 } else {
-                                    crate::fmt::Printf!("[tls-debug] NewSessionTicket: no resumption_master_secret, dropping\n");
+                                    tls_debug!("[tls-debug] NewSessionTicket: no resumption_master_secret, dropping\n");
                                 }
                                 return Conn::Read(self, b);
                             }
                             None => {
-                                crate::fmt::Printf!("[tls-debug] NewSessionTicket: parse failed (len=%d)\n",
+                                tls_debug!("[tls-debug] NewSessionTicket: parse failed (len=%d)\n",
                                     inner.len() as i64);
                                 drop(st);
                                 return Conn::Read(self, b);
@@ -380,7 +451,7 @@ impl Conn {
                 if inner_type == record::RECORD_ALERT {
                     let level = if inner.len() >= 1 { inner[0] } else { 0 };
                     let desc = if inner.len() >= 2 { inner[1] } else { 0 };
-                    crate::fmt::Printf!("[tls-debug] encrypted alert level=%d desc=%d\n",
+                    tls_debug!("[tls-debug] encrypted alert level=%d desc=%d\n",
                         level as i64, desc as i64);
                     if desc == 0 {
                         // close_notify
@@ -417,7 +488,28 @@ impl Conn {
     }
 
     /// `(*tls.Conn).Write(b)` — encrypt and send application data.
-    pub fn Write(&mut self, b: &[byte]) -> (int, error) {
+    /// Writes larger than `maxPlaintext` (16384, RFC 8446 §5.1 /
+    /// Go conn.go:64) are fragmented into multiple records — receivers
+    /// MUST reject records with an oversized plaintext.
+    /// Accepts `impl AsRef<[byte]>` so callers can pass `slice<byte>`,
+    /// `&[u8]`, or byte-string literals without conversion ceremony.
+    pub fn Write<B: AsRef<[byte]>>(&mut self, b: B) -> (int, error) {
+        let b = b.as_ref();
+        const maxPlaintext: usize = 16384;
+        if b.len() > maxPlaintext {
+            let mut written: int = 0;
+            let mut off = 0usize;
+            while off < b.len() {
+                let end = core::cmp::min(off + maxPlaintext, b.len());
+                let (n, err) = self.Write(&b[off..end]);
+                written += n;
+                if !err.IsNil() {
+                    return (written, err);
+                }
+                off = end;
+            }
+            return (written, errors::nil);
+        }
         {
             let st = self.state.Lock();
             if !st.handshake_complete {
@@ -429,15 +521,32 @@ impl Conn {
             }
         }
 
+        let is_client = self.is_client;
         let wire = {
             let mut st = self.state.Lock();
-            let seq = st.client_seq;
-            st.client_seq += 1;
+            // Outbound direction: a client seals with the client-write
+            // keys, a server with the server-write keys.
+            let seq = if is_client {
+                let s = st.client_seq;
+                st.client_seq += 1;
+                s
+            } else {
+                let s = st.server_seq;
+                st.server_seq += 1;
+                s
+            };
             let wire_s = if st.keys.is_tls13 {
                 use handshake_client_tls13::tls13_encrypt_record_suite;
-                let tks = key_schedule::TrafficKeys {
-                    key: st.keys.tls13_client_key[..tls13_key_len(&st.keys)].to_vec(),
-                    iv: st.keys.tls13_client_iv.to_vec(),
+                let tks = if is_client {
+                    key_schedule::TrafficKeys {
+                        key: st.keys.tls13_client_key[..tls13_key_len(&st.keys)].to_vec(),
+                        iv: st.keys.tls13_client_iv.to_vec(),
+                    }
+                } else {
+                    key_schedule::TrafficKeys {
+                        key: st.keys.tls13_server_key[..tls13_key_len(&st.keys)].to_vec(),
+                        iv: st.keys.tls13_server_iv.to_vec(),
+                    }
                 };
                 let suite_id = st.keys.suite;
                 let (s, enc_err) = tls13_encrypt_record_suite(&tks, seq, record::RECORD_APPLICATION, b, suite_id);
@@ -467,6 +576,20 @@ impl Conn {
         conn_guard.Close()
     }
 
+    /// `(*tls.Conn).LocalAddr()` (conn.go:130) — local address of the
+    /// underlying connection.
+    pub fn LocalAddr(&self) -> crate::net::TCPAddr {
+        let conn_guard = self.inner_conn.Lock();
+        (**conn_guard).LocalAddr()
+    }
+
+    /// `(*tls.Conn).RemoteAddr()` (conn.go:136) — remote address of
+    /// the underlying connection.
+    pub fn RemoteAddr(&self) -> crate::net::TCPAddr {
+        let conn_guard = self.inner_conn.Lock();
+        (**conn_guard).RemoteAddr()
+    }
+
     /// `(*tls.Conn).SetDeadline(t)` — forward deadline to the underlying TCP conn.
     /// This is NOT part of Go's tls.Conn public API (Go uses context cancellation
     /// instead) but we expose it as a Goish extension so the HTTP Transport can
@@ -474,6 +597,74 @@ impl Conn {
     pub fn SetDeadline(&self, t: crate::time::Time) -> error {
         let conn_guard = self.inner_conn.Lock();
         (**conn_guard).SetDeadline(t)
+    }
+
+    /// `Conn.serverHandshake` (handshake_server.go:39) — accept-side
+    /// TLS 1.3 handshake. Extracts the certificate chain + private key
+    /// from `Config.Certificates[0]` and drives
+    /// `do_server_handshake_tls13`.
+    fn server_handshake(&mut self) -> error {
+        use handshake_server_tls13::ServerPrivateKey;
+
+        if self.config.Certificates.Len() == 0 {
+            return errors::New(
+                "tls: no certificates configured (set Config.Certificates via X509KeyPair)",
+            );
+        }
+        let cert = &self.config.Certificates[0 as crate::types::int];
+        let mut chain: Vec<Vec<byte>> = Vec::new();
+        {
+            let mut i: crate::types::int = 0;
+            while i < cert.Certificate.Len() {
+                chain.push(cert.Certificate[i].clone().__into_vec());
+                i += 1;
+            }
+        }
+        let private_key = if let Some(k) = cert
+            .PrivateKey
+            .downcast_ref::<crate::crypto::rsa::PrivateKey>()
+        {
+            ServerPrivateKey::Rsa(k.clone())
+        } else if let Some(k) = cert
+            .PrivateKey
+            .downcast_ref::<crate::crypto::ed25519::PrivateKey>()
+        {
+            ServerPrivateKey::Ed25519(k.clone())
+        } else {
+            return errors::New(
+                "tls: unsupported certificate private key type (RSA and Ed25519 supported)",
+            );
+        };
+        let mut next_protos: Vec<alloc::string::String> = Vec::new();
+        {
+            let mut i: crate::types::int = 0;
+            while i < self.config.NextProtos.Len() {
+                let p: &str = self.config.NextProtos[i].as_ref();
+                next_protos.push(alloc::string::String::from(p));
+                i += 1;
+            }
+        }
+
+        let (km, _info, err) = {
+            let mut conn_guard = self.inner_conn.Lock();
+            handshake_server_tls13::do_server_handshake_tls13(
+                conn_guard.as_mut(),
+                &chain,
+                &private_key,
+                &next_protos,
+            )
+        };
+        if !err.IsNil() {
+            return err;
+        }
+
+        let mut st = self.state.Lock();
+        st.handshake_complete = true;
+        st.keys = km;
+        // TLS 1.3 application records restart both sequence counters.
+        st.client_seq = 0;
+        st.server_seq = 0;
+        errors::nil
     }
 }
 
@@ -505,6 +696,21 @@ pub fn Client(conn: Box<dyn crate::net::Conn>, cfg: &Config) -> Conn {
         inner_conn: Arc::new(Mutex::new(conn)),
         state: Arc::new(Mutex::new(ConnInner::default())),
         config: cfg.clone(),
+        is_client: true,
+    }
+}
+
+/// `tls.Server(conn, cfg)` (tls.go:47) — returns a new TLS server side
+/// connection using `conn` as the underlying transport. The
+/// configuration must include at least one certificate in
+/// `Config.Certificates`. The handshake is NOT driven yet; call
+/// `.Handshake()` or the first `Read`/`Write` drives it.
+pub fn Server(conn: Box<dyn crate::net::Conn>, cfg: &Config) -> Conn {
+    Conn {
+        inner_conn: Arc::new(Mutex::new(conn)),
+        state: Arc::new(Mutex::new(ConnInner::default())),
+        config: cfg.clone(),
+        is_client: false,
     }
 }
 
@@ -618,6 +824,7 @@ where
             pending: alloc::vec::Vec::new(),
         })),
         config: effective_cfg,
+        is_client: true,
     };
     (tls_conn, errors::nil)
 }
@@ -632,6 +839,7 @@ fn make_dead_conn(cfg: &Config) -> Conn {
         inner_conn: Arc::new(Mutex::new(alloc::boxed::Box::new(DeadConn))),
         state: Arc::new(Mutex::new(ConnInner::default())),
         config: cfg.clone(),
+        is_client: true,
     }
 }
 
@@ -682,6 +890,302 @@ impl crate::net::Conn for DeadConn {
     fn SetWriteDeadline(&self, _t: crate::time::Time) -> error {
         errors::nil
     }
+}
+
+// ─── Certificate + key-pair loaders (tls.go:243) ──────────────────────
+
+/// `tls.Certificate` (common.go:1553) — a chain of one or more
+/// certificates, leaf first, plus the leaf's private key.
+#[derive(Clone)]
+pub struct Certificate {
+    /// Certificate contains a chain of one or more certificates,
+    /// leaf first, in DER form.
+    pub Certificate: slice<slice<byte>>,
+    /// `crypto.PrivateKey` — the leaf certificate's private key.
+    /// Supported concrete types: `rsa::PrivateKey`, `ed25519::PrivateKey`.
+    pub PrivateKey: crate::crypto::PrivateKey,
+}
+
+impl Default for Certificate {
+    fn default() -> Self {
+        Certificate {
+            Certificate: slice::<slice<byte>>::new(),
+            // Unit sentinel — downcasts to no key type, so a
+            // default-constructed Certificate fails the handshake with
+            // a clean "unsupported private key type" error.
+            PrivateKey: Arc::new(()),
+        }
+    }
+}
+
+/// `tls.X509KeyPair(certPEMBlock, keyPEMBlock)` (tls.go:263) — parse a
+/// public/private key pair from PEM data. The certificate input may
+/// contain intermediates after the leaf to form a chain.
+///
+/// Goish deviation: `Certificate.Leaf` is not populated (no full
+/// X.509 parser), and the key/cert consistency check Go performs is
+/// applied for RSA keys only.
+pub fn X509KeyPair(
+    certPEMBlock: impl AsRef<[byte]>,
+    keyPEMBlock: impl AsRef<[byte]>,
+) -> (Certificate, error) {
+    use crate::encoding::pem;
+
+    // Go: for { certDERBlock, certPEMBlock = pem.Decode(certPEMBlock); ... }
+    let mut chain: Vec<slice<byte>> = Vec::new();
+    let mut skipped_types: Vec<string> = Vec::new();
+    let mut rest: Vec<byte> = certPEMBlock.as_ref().to_vec();
+    loop {
+        let (block_opt, new_rest) = pem::Decode(slice::<byte>::__from_vec(rest));
+        match block_opt {
+            None => break,
+            Some(blk) => {
+                let t: &str = blk.Type.as_ref();
+                if t == "CERTIFICATE" {
+                    chain.push(blk.Bytes);
+                } else {
+                    skipped_types.push(blk.Type.clone());
+                }
+                rest = new_rest.__into_vec();
+                if rest.is_empty() {
+                    break;
+                }
+            }
+        }
+    }
+
+    if chain.is_empty() {
+        if skipped_types.is_empty() {
+            return (
+                Certificate::default(),
+                errors::New("tls: failed to find any PEM data in certificate input"),
+            );
+        }
+        if skipped_types.len() == 1 {
+            let t: &str = skipped_types[0].as_ref();
+            if t.ends_with("PRIVATE KEY") {
+                return (
+                    Certificate::default(),
+                    errors::New("tls: failed to find certificate PEM data in certificate input, but did find a private key; PEM inputs may have been switched"),
+                );
+            }
+        }
+        return (
+            Certificate::default(),
+            errors::New("tls: failed to find \"CERTIFICATE\" PEM block in certificate input"),
+        );
+    }
+
+    // Key input: skip non-key blocks until one whose type is
+    // "PRIVATE KEY" or ends in " PRIVATE KEY" (tls.go:299).
+    let mut key_der: Option<slice<byte>> = None;
+    let mut rest: Vec<byte> = keyPEMBlock.as_ref().to_vec();
+    loop {
+        let (block_opt, new_rest) = pem::Decode(slice::<byte>::__from_vec(rest));
+        match block_opt {
+            None => {
+                return (
+                    Certificate::default(),
+                    errors::New("tls: failed to find PEM block with type ending in \"PRIVATE KEY\" in key input"),
+                );
+            }
+            Some(blk) => {
+                let t: &str = blk.Type.as_ref();
+                if t == "PRIVATE KEY" || t.ends_with(" PRIVATE KEY") {
+                    key_der = Some(blk.Bytes);
+                    break;
+                }
+                rest = new_rest.__into_vec();
+                if rest.is_empty() {
+                    return (
+                        Certificate::default(),
+                        errors::New("tls: failed to find PEM block with type ending in \"PRIVATE KEY\" in key input"),
+                    );
+                }
+            }
+        }
+    }
+    let key_der = key_der.unwrap();
+
+    let (private_key, err) = parsePrivateKey(key_der);
+    if !err.IsNil() {
+        return (Certificate::default(), err);
+    }
+
+    // Go verifies the private key matches the leaf public key
+    // (tls.go:320). Our X.509 parser extracts RSA public keys only, so
+    // the check runs for RSA and is skipped for Ed25519.
+    if let Some(rsa_key) = private_key.downcast_ref::<crate::crypto::rsa::PrivateKey>() {
+        let leaf: &slice<byte> = &chain[0];
+        let leaf_raw: &[byte] = leaf;
+        let (leaf_pub, perr) = record::decode_x509_rsa_pubkey(leaf_raw);
+        if perr.IsNil() {
+            if leaf_pub.N.Cmp(&rsa_key.PublicKey.N) != 0 || leaf_pub.E != rsa_key.PublicKey.E {
+                return (
+                    Certificate::default(),
+                    errors::New("tls: private key does not match public key"),
+                );
+            }
+        }
+    }
+
+    (
+        Certificate {
+            Certificate: slice::<slice<byte>>::__from_vec(chain),
+            PrivateKey: private_key,
+        },
+        errors::nil,
+    )
+}
+
+/// `tls.LoadX509KeyPair(certFile, keyFile)` (tls.go:243) — read and
+/// parse a key pair from a pair of PEM files.
+pub fn LoadX509KeyPair<C, K>(certFile: C, keyFile: K) -> (Certificate, error)
+where
+    C: Into<string>,
+    K: Into<string>,
+{
+    let (cert_pem, err) = crate::os::ReadFile(certFile);
+    if !err.IsNil() {
+        return (Certificate::default(), err);
+    }
+    let (key_pem, err) = crate::os::ReadFile(keyFile);
+    if !err.IsNil() {
+        return (Certificate::default(), err);
+    }
+    let cert_raw: &[byte] = &cert_pem;
+    let key_raw: &[byte] = &key_pem;
+    X509KeyPair(cert_raw, key_raw)
+}
+
+/// `parsePrivateKey(der)` (tls.go:361) — attempt to parse the DER key
+/// as PKCS#1 (RSA), then PKCS#8 (RSA or Ed25519). OpenSSL 3.x writes
+/// PKCS#8 by default; OpenSSL 1.x with `-traditional` writes PKCS#1.
+/// EC (SEC1/ECDSA) keys are rejected — no ECDSA signer yet.
+fn parsePrivateKey(der: slice<byte>) -> (crate::crypto::PrivateKey, error) {
+    // PKCS#1.
+    let (k, err) = crate::crypto::x509::ParsePKCS1PrivateKey(der.clone());
+    if err.IsNil() {
+        return (Arc::new(k), errors::nil);
+    }
+    // PKCS#8, RSA algorithm OID.
+    let (k, err) = crate::crypto::x509::ParsePKCS8PrivateKey(der.clone());
+    if err.IsNil() {
+        return (Arc::new(k), errors::nil);
+    }
+    // PKCS#8, Ed25519 (RFC 8410) — goish's x509.ParsePKCS8PrivateKey
+    // handles the rsaEncryption OID only, so the Ed25519 shape is
+    // parsed here.
+    if let Some(k) = parse_pkcs8_ed25519(&der) {
+        return (Arc::new(k), errors::nil);
+    }
+    (
+        Arc::new(()),
+        errors::New("tls: failed to parse private key (PKCS#1/PKCS#8 RSA and PKCS#8 Ed25519 supported)"),
+    )
+}
+
+/// Parse a PKCS#8 PrivateKeyInfo carrying an Ed25519 key (RFC 8410):
+///   SEQUENCE { INTEGER 0, SEQUENCE { OID 1.3.101.112 },
+///              OCTET STRING { OCTET STRING seed[32] } }
+fn parse_pkcs8_ed25519(der: &slice<byte>) -> Option<crate::crypto::ed25519::PrivateKey> {
+    use crate::encoding::asn1;
+    const OID_ED25519: &[u8] = &[0x2b, 0x65, 0x70];
+
+    let (outer, _, err) = asn1::ParseRaw(der.clone());
+    if !err.IsNil() || outer.Tag != asn1::TagSequence {
+        return None;
+    }
+    // version INTEGER (0)
+    let (ver, rest1, err) = asn1::ParseRaw(outer.Bytes.clone());
+    if !err.IsNil() || ver.Tag != asn1::TagInteger {
+        return None;
+    }
+    // AlgorithmIdentifier SEQUENCE { OID }
+    let (alg, rest2, err) = asn1::ParseRaw(rest1.clone());
+    if !err.IsNil() || alg.Tag != asn1::TagSequence {
+        return None;
+    }
+    let (oid, _, err) = asn1::ParseRaw(alg.Bytes.clone());
+    if !err.IsNil() || oid.Tag != asn1::TagOID {
+        return None;
+    }
+    let oid_raw: &[byte] = &oid.Bytes;
+    if oid_raw != OID_ED25519 {
+        return None;
+    }
+    // privateKey OCTET STRING wrapping "04 20 <seed>"
+    let (pk, _, err) = asn1::ParseRaw(rest2.clone());
+    if !err.IsNil() || pk.Tag != asn1::TagOctetString {
+        return None;
+    }
+    let (inner, _, err) = asn1::ParseRaw(pk.Bytes.clone());
+    if !err.IsNil() || inner.Tag != asn1::TagOctetString || inner.Bytes.Len() != 32 {
+        return None;
+    }
+    Some(crate::crypto::ed25519::NewKeyFromSeed(inner.Bytes.clone()))
+}
+
+// ─── listener / NewListener / Listen (tls.go:70) ──────────────────────
+
+/// `tls.listener` (tls.go:70) — a network listener for TLS
+/// connections, wrapping an inner `net::Listener`.
+#[allow(non_camel_case_types)]
+pub struct listener {
+    inner: crate::net::Listener,
+    config: Config,
+}
+
+impl listener {
+    /// `(*listener).Accept()` (tls.go:77) — waits for and returns the
+    /// next incoming TLS connection. The handshake has not run yet.
+    pub fn Accept(&self) -> (Conn, error) {
+        let (c, err) = self.inner.Accept();
+        if !err.IsNil() {
+            return (make_dead_conn(&self.config), err);
+        }
+        (Server(Box::new(c), &self.config), errors::nil)
+    }
+
+    pub fn Close(&self) -> error {
+        self.inner.Close()
+    }
+
+    pub fn Addr(&self) -> crate::net::TCPAddr {
+        self.inner.Addr()
+    }
+}
+
+/// `tls.NewListener(inner, config)` (tls.go:87) — creates a Listener
+/// which accepts connections from an inner Listener and wraps each
+/// connection with [`Server`].
+pub fn NewListener(inner: crate::net::Listener, config: &Config) -> listener {
+    listener {
+        inner,
+        config: config.clone(),
+    }
+}
+
+/// `tls.Listen(network, laddr, config)` (tls.go:98) — creates a TLS
+/// listener on the given address. The configuration must include at
+/// least one certificate. On error the returned listener is dead and
+/// must not be used.
+pub fn Listen<N, A>(network: N, laddr: A, config: &Config) -> (listener, error)
+where
+    N: Into<string>,
+    A: Into<string>,
+{
+    if config.Certificates.Len() == 0 {
+        return (
+            NewListener(crate::net::dead_listener(), config),
+            errors::New("tls: neither Certificates, GetCertificate, nor GetConfigForClient set in Config"),
+        );
+    }
+    let (l, err) = crate::net::Listen(network, laddr);
+    if !err.IsNil() {
+        return (NewListener(l, config), err);
+    }
+    (NewListener(l, config), errors::nil)
 }
 
 // ─── NewSessionTicket parser ──────────────────────────────────────────

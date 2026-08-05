@@ -229,16 +229,32 @@ pub fn FreeOSMemory() {
     // intentionally empty
 }
 
-/// Initial max-stack — Go's 64-bit default is 1 GiB.
-const DEFAULT_MAX_STACK: i64 = 1 << 30;
-static MAX_STACK_CACHE: AtomicI64 = AtomicI64::new(DEFAULT_MAX_STACK);
-
 /// `runtime/debug.SetMaxStack(bytes) -> previous` (garbage.go:117).
-/// Slim: remembers the value. Goish per-G stacks are sized at spawn
-/// via `go!(stack(N), ...)`; this knob does not currently bound
-/// growth.
+///
+/// Go semantics: the limit a goroutine stack may *grow* to before
+/// the program crashes (64-bit default 1 GiB). Goish stacks don't
+/// grow — a bare `go!()` goroutine gets a fixed-size `MAP_NORESERVE`
+/// virtual reservation, lazily committed a page at a time, with a
+/// guard page below it. The reservation *is* the crash limit: run
+/// past it and the guard page faults with a spawn-site diagnostic —
+/// the same observable behavior as Go's limit, at the same cost
+/// (virtual space only, until touched).
+///
+/// So in goish this knob sets the reservation size used for bare
+/// `go!()` goroutines spawned **after** the call (including
+/// `WaitGroup.Go` / anything built on bare spawns). Deep-recursion
+/// workloads — compilers, tree walkers — call it once at startup:
+///
+/// ```ignore
+/// debug::SetMaxStack(512 * 1024 * 1024); // 512 MiB reservations
+/// ```
+///
+/// Documented deviations from Go: the initial value is 1 MiB (Go:
+/// 1 GiB — goish keeps bare goroutines VMA-cheap by default), and
+/// already-running goroutines keep the reservation they were born
+/// with. One-off sizes are better served by `go!(stack(N), …)`.
 pub fn SetMaxStack(bytes: int) -> int {
-    let prev = MAX_STACK_CACHE.swap(bytes as i64, Ordering::AcqRel);
+    let prev = crate::runtime::sched::set_bare_reserve(bytes as usize);
     prev as int
 }
 

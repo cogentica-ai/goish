@@ -1,0 +1,32 @@
+M 0 {} err=false {}
+I 0 {} err=false {}
+M 1 {"a":"x"} err=false {a=x}
+I 1 {"a":"x"} err=true {a=0}
+M 2 {"a":"x","b":"y"} err=false {a=x b=y}
+I 2 {"a":"x","b":"y"} err=true {a=0}
+M 3 {"b":"y","a":"x"} err=false {a=x b=y}
+I 3 {"b":"y","a":"x"} err=true {b=0}
+M 4 {"a":1} err=true {a=-}
+I 4 {"a":1} err=false {a=1}
+M 5 {"a":"x","b":1} err=true {a=x b=-}
+I 5 {"a":"x","b":1} err=true {a=0}
+M 6 {"a":1,"b":"x"} err=true {a=-}
+I 6 {"a":1,"b":"x"} err=true {a=1 b=0}
+M 7 {"a":"x","b":1,"c":"z"} err=true {a=x b=-}
+I 7 {"a":"x","b":1,"c":"z"} err=true {a=0}
+M 8 {"a":[1]} err=true {a=-}
+I 8 {"a":[1]} err=true {a=0}
+M 9 {"a":{}} err=true {a=-}
+I 9 {"a":{}} err=true {a=0}
+M 10 {"a":null} err=false {a=-}
+I 10 {"a":null} err=false {a=0}
+M 11 {"a":true} err=true {a=-}
+I 11 {"a":true} err=true {a=0}
+M 12 null err=false {}
+I 12 null err=false {}
+M 13 [] err=true {}
+I 13 [] err=true {}
+M 14 "x" err=true {}
+I 14 "x" err=true {}
+M 15 1 err=true {}
+I 15 1 err=true {}

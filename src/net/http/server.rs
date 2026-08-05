@@ -951,6 +951,13 @@ pub struct Server {
     /// standard logger (stderr).
     pub ErrorLog: Option<Arc<crate::log::Logger>>,
 
+    /// `Server.TLSConfig` (server.go:3006) — optional TLS
+    /// configuration for `ServeTLS`/`ListenAndServeTLS`. When set,
+    /// its `Certificates` are used; a cert/key file pair passed to
+    /// `ServeTLS` still overrides. `None` → the file pair is the only
+    /// certificate source.
+    pub TLSConfig: Option<crate::crypto::tls::Config>,
+
     /// Internal runtime state. Bundled behind a single field so users
     /// can construct a `Server` with Go-style struct literal syntax —
     /// `Server { Addr, Handler, ..., ..Default::default() }` — without
@@ -972,12 +979,17 @@ pub struct __ServerState {
     /// conn pushes one token and drains it on completion. Send blocks
     /// when the chan is full ⇒ accept loop pauses.
     conn_sem: Mutex<Option<crate::gochan::chan<()>>>,
-    /// Tracked listener for shutdown. `Mutex<Option<...>>` so the
-    /// Serve goroutine can install it on entry and Shutdown can
-    /// take it out (close it + wake parked Accept) from another
-    /// goroutine. Held inside an `Arc<Listener>` because the Serve
-    /// loop also needs read access to call Accept.
-    tracked_listener: Mutex<Option<Arc<net::Listener>>>,
+    /// Tracked listeners for shutdown — Go's `Server.listeners`
+    /// set (server.go:3096, `map[*net.Listener]struct{}` maintained
+    /// by `trackListener` server.go:3253). A `Vec` so N reuseport
+    /// listeners served by N `go srv.Serve(ln)` calls are ALL
+    /// closed by Shutdown/Close (`closeListenersLocked`,
+    /// server.go:3272). Each Serve goroutine installs its listener
+    /// on entry and removes it on exit; Shutdown drains the whole
+    /// vec (close + wake parked Accepts) from another goroutine.
+    /// Entries are `Arc<Listener>` because the Serve loop also
+    /// needs read access to call Accept.
+    tracked_listeners: Mutex<Vec<Arc<net::Listener>>>,
     /// Per-connection state registry — Go's `Server.activeConn` set
     /// (server.go:3097) backing `closeIdleConns` (server.go:3229).
     /// Each serve_conn inserts its `ConnTrack` on entry and removes
@@ -1097,6 +1109,7 @@ impl Default for Server {
             BaseContext: None,
             ConnContext: None,
             ErrorLog: None,
+            TLSConfig: None,
             __state: __ServerState::default(),
         }
     }
@@ -1107,7 +1120,7 @@ impl Default for __ServerState {
         __ServerState {
             in_shutdown: AtomicBool::new(false),
             active_conns: AtomicUsize::new(0),
-            tracked_listener: Mutex::new(None),
+            tracked_listeners: Mutex::new(Vec::new()),
             conn_sem: Mutex::new(None),
             tracked_conns: Mutex::new(Vec::new()),
             on_shutdown: Mutex::new(Vec::new()),
@@ -1146,23 +1159,29 @@ impl Server {
     /// break the Accept loop and close the socket.
     pub fn Serve(self: Arc<Self>, ln: net::Listener) -> error {
         let ln = Arc::new(ln);
-        // Install tracked_listener + initialize conn_sem (if backpressure
-        // configured) under one critical section; check in_shutdown
-        // atomically. Without this, a Shutdown that wins the race vs
-        // Serve's entry would observe an empty tracked_listener (so
-        // __wake_accept and Close run on nothing), and Serve would
-        // later install its listener and enter Accept on a fd that was
-        // never closed → permanent park.
+        // Install into tracked_listeners + initialize conn_sem (if
+        // backpressure configured) under one critical section; check
+        // in_shutdown atomically (Go `trackListener` returning false
+        // when shuttingDown, server.go:3253). Without this, a
+        // Shutdown that wins the race vs Serve's entry would observe
+        // no listener (so __wake_accept and Close run on nothing),
+        // and Serve would later install its listener and enter
+        // Accept on a fd that was never closed → permanent park.
         {
-            let mut tracked = self.__state.tracked_listener.Lock();
+            let mut tracked = self.__state.tracked_listeners.Lock();
             if self.__state.in_shutdown.load(Ordering::Acquire) {
                 return ErrServerClosed.into();
             }
-            *tracked = Some(ln.clone());
+            tracked.push(ln.clone());
             if self.MaxConcurrentConns > 0 {
-                let cap = self.MaxConcurrentConns as usize;
-                *self.__state.conn_sem.Lock() =
-                    Some(crate::gochan::chan::<()>::new_buffered(cap));
+                // Shared across all Serve loops on this server —
+                // only the first initializes it (serialized by the
+                // tracked_listeners lock held here).
+                let mut sem = self.__state.conn_sem.Lock();
+                if sem.is_none() {
+                    let cap = self.MaxConcurrentConns as usize;
+                    *sem = Some(crate::gochan::chan::<()>::new_buffered(cap));
+                }
             }
         }
 
@@ -1204,6 +1223,10 @@ impl Server {
                     let _ = sem.__try_recv();
                 }
                 if self.__state.in_shutdown.load(Ordering::Acquire) {
+                    // Shutdown already drained tracked_listeners;
+                    // untrack is a no-op here but kept for the
+                    // deferred-trackListener(false) shape.
+                    self.__untrack_listener(&ln);
                     return ErrServerClosed.into();
                 }
                 if temporary {
@@ -1223,6 +1246,11 @@ impl Server {
                     time::Sleep(time::Duration(temp_delay_ns));
                     continue;
                 }
+                // Fatal accept error: this Serve loop is done —
+                // remove its listener so a later Shutdown doesn't
+                // close a dead (possibly kernel-reused) fd (Go's
+                // `defer srv.trackListener(&l, false)`).
+                self.__untrack_listener(&ln);
                 return err;
             }
             temp_delay_ns = 0;
@@ -1263,22 +1291,24 @@ impl Server {
     pub fn Shutdown<A: __ShutdownArg>(self: Arc<Self>, arg: A) -> error {
         let wait = arg.__into_shutdown_wait();
 
-        // Set the shutdown flag and take the listener under one lock
-        // so Serve's mirror-image install/check sees a consistent
-        // state. Without this, a Serve that hadn't reached its
-        // tracked_listener install yet could install AFTER Shutdown
-        // observed None and proceeded — leaving a fd open with no
-        // wakeup.
-        let listener = {
-            let mut tracked = self.__state.tracked_listener.Lock();
+        // Set the shutdown flag and take ALL listeners under one
+        // lock so Serve's mirror-image install/check sees a
+        // consistent state. Without this, a Serve that hadn't
+        // reached its install yet could install AFTER Shutdown
+        // observed an empty vec and proceeded — leaving a fd open
+        // with no wakeup. Go: `closeListenersLocked` under
+        // `s.mu` (server.go:3195/3272).
+        let listeners = {
+            let mut tracked = self.__state.tracked_listeners.Lock();
             self.__state.in_shutdown.store(true, Ordering::Release);
-            tracked.take()
+            core::mem::take(&mut *tracked)
         };
 
-        // Order matters: wake first (so Accept's netpoll::block
-        // returns Timedout and the goroutine resumes), then close
-        // the fd (so the next Accept4 retry returns EBADF).
-        if let Some(ln) = listener {
+        // Order matters per listener: wake first (so Accept's
+        // netpoll::block returns Timedout and the goroutine
+        // resumes), then close the fd (so the next Accept4 retry
+        // returns EBADF).
+        for ln in listeners {
             ln.__wake_accept();
             let _ = ln.Close();
         }
@@ -1328,12 +1358,12 @@ impl Server {
     /// for graceful drain). In-flight handlers observe read/write
     /// errors on their next conn operation.
     pub fn Close(self: Arc<Self>) -> error {
-        let listener = {
-            let mut tracked = self.__state.tracked_listener.Lock();
+        let listeners = {
+            let mut tracked = self.__state.tracked_listeners.Lock();
             self.__state.in_shutdown.store(true, Ordering::Release);
-            tracked.take()
+            core::mem::take(&mut *tracked)
         };
-        if let Some(ln) = listener {
+        for ln in listeners {
             ln.__wake_accept();
             let _ = ln.Close();
         }
@@ -1432,6 +1462,15 @@ impl Server {
         let idle_ns = self.idle_timeout_ns();
         let write_timeout_ns = self.write_timeout_ns();
         let mut first_request = true;
+        // Go stamps `c.remoteAddr` ONCE at conn.serve entry
+        // (server.go:2076); readRequest copies it onto every request
+        // (:1120). Formatting it per request cost an alloc each.
+        let remote_addr = conn.RemoteAddr().String();
+        // Recycled bufio backing buffer — the per-conn analogue of
+        // Go's pooled `c.bufr` (newBufioReader, server.go:840). Each
+        // request's reader borrows the conn, so the reader itself is
+        // rebuilt per request, but the 4 KiB buffer survives.
+        let mut rbuf: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
 
         loop {
             if self.__state.in_shutdown.load(Ordering::Acquire) {
@@ -1452,10 +1491,17 @@ impl Server {
 
             let conn_fd = conn.__fd();
             let (mut req, err) = {
-                let mut br = bufio::NewReader(&mut conn);
+                let mut br =
+                    bufio::__new_reader_with_buf(&mut conn, core::mem::take(&mut rbuf));
                 // Server variant: carries the fd so the parser can
                 // emit `100 Continue` before the eager body read.
-                super::request::__read_request_server(&mut br, self.MaxHeaderBytes, conn_fd)
+                let out = super::request::__read_request_server(
+                    &mut br,
+                    self.MaxHeaderBytes,
+                    conn_fd,
+                );
+                rbuf = br.__into_buf();
+                out
             };
             if !err.IsNil() {
                 // Unknown Expect value → 417 + close (Go
@@ -1482,6 +1528,11 @@ impl Server {
                 let _ = conn.SetWriteDeadline(wdl);
             }
 
+            // Go conn.serve stamps `c.remoteAddr` at entry and
+            // readRequest copies it onto every request
+            // (server.go:2076 / :1120).
+            req.RemoteAddr = remote_addr.clone();
+
             // ── per-request context (Go readRequest, server.go:1112) ──
             // Every incoming request carries a cancellable context:
             // canceled when the response is finished, or earlier by
@@ -1498,22 +1549,23 @@ impl Server {
             // request context. Aborted + joined right after the
             // handler returns (Go abortPendingRead) so the keep-alive
             // loop regains exclusive read ownership of the fd.
-            let (watch_fd, watch_pd) = conn.__disconnect_watch_parts();
-            let watcher_done: Option<crate::gochan::chan<()>> = if !watch_pd.is_null() {
-                let ch = crate::gochan::chan::<()>::new_unbuffered();
-                let ch2 = ch.clone();
-                let cancel2 = req_cancel.clone();
-                let pd_addr = watch_pd as usize;
-                go!(move || {
-                    if background_disconnect_watch(watch_fd, pd_addr) {
-                        (cancel2)();
-                    }
-                    ch2.Close();
-                });
-                Some(ch)
-            } else {
-                None
-            };
+            // ── client-disconnect watch (Go startBackgroundRead,
+            // server.go:735) ──  Arm a cancel hook on the conn's
+            // PollDesc: if a readable event lands mid-handler and an
+            // MSG_PEEK probe (run by whichever M polls) shows
+            // EOF/reset, the request context is canceled. No
+            // goroutine, no handoffs — v1's per-request watcher
+            // goroutine cost ~15% of server CPU in newproc/goexit
+            // alone and its join added a wakeup round-trip per
+            // request.
+            let (_, watch_pd) = conn.__disconnect_watch_parts();
+            if !watch_pd.is_null() {
+                // `Arc<CancelFunc>` (`CancelFunc = Box<dyn Fn()…>`)
+                // unsizes straight to `Arc<dyn Fn()…>` — no extra
+                // wrapper closure allocation per request.
+                let hook: Arc<dyn Fn() + Send + Sync> = req_cancel.clone();
+                crate::runtime::netpoll::arm_watch(unsafe { &*watch_pd }, hook);
+            }
 
             let keep_alive = request_keep_alive(&req)
                 && !self.__state.in_shutdown.load(Ordering::Acquire);
@@ -1565,13 +1617,14 @@ impl Server {
             }
             self.Handler.ServeHTTP(&w, &req);
 
-            // Handler done — abort + join the watcher before touching
-            // the conn's read side again (Go abortPendingRead,
-            // server.go:756). set_deadline(-1) wakes a parked watcher
-            // with Timedout; the Recv on its done chan is the join.
-            if let Some(ch) = watcher_done {
-                crate::runtime::netpoll::set_deadline(unsafe { &*watch_pd }, -1, b'r');
-                let _ = ch.Recv();
+            // Handler done — disarm the disconnect watch before
+            // touching the conn's read side again (Go
+            // abortPendingRead, server.go:756). Nothing to join: the
+            // watch is a poller-side hook, and a racing disconnect
+            // fire merely cancels a request context that is already
+            // finishing (Go cancels it right below anyway).
+            if !watch_pd.is_null() {
+                crate::runtime::netpoll::disarm_watch(unsafe { &*watch_pd });
             }
 
             conn = w.__take_conn();
@@ -1592,6 +1645,38 @@ impl Server {
             // may kick us from here on.
             track.set_state(CONN_STATE_IDLE);
         }
+    }
+
+    /// Whether `Shutdown`/`Close` has been initiated. Read by the
+    /// HTTPS serve loop (server_tls.rs) to stop accepting / draining.
+    pub(crate) fn __state_in_shutdown(&self) -> bool {
+        self.__state.in_shutdown.load(Ordering::Acquire)
+    }
+
+    /// Install a listener into the shutdown-tracked set — the same
+    /// critical section `Serve` runs at entry, factored out so the
+    /// HTTPS serve loop (server_tls.rs ServeTLS) gets identical
+    /// `Shutdown`/`Close` wakeup semantics: Shutdown drains the
+    /// tracked set, wakes each parked Accept, and closes each fd.
+    /// Returns `false` if shutdown already began (caller must return
+    /// `ErrServerClosed` without accepting). Go: `trackListener(ln,
+    /// true)` (server.go:3253).
+    pub(crate) fn __track_listener(&self, ln: Arc<net::Listener>) -> bool {
+        let mut tracked = self.__state.tracked_listeners.Lock();
+        if self.__state.in_shutdown.load(Ordering::Acquire) {
+            return false;
+        }
+        tracked.push(ln);
+        true
+    }
+
+    /// Remove a listener from the shutdown-tracked set — Go's
+    /// `trackListener(ln, false)`, run deferred when a Serve loop
+    /// exits, so a later Shutdown never closes a fd the kernel may
+    /// have reused. No-op if Shutdown already drained the set.
+    pub(crate) fn __untrack_listener(&self, ln: &Arc<net::Listener>) {
+        let mut tracked = self.__state.tracked_listeners.Lock();
+        tracked.retain(|t| !Arc::ptr_eq(t, ln));
     }
 
     /// `(*Server).logf` (server.go:3691): route a message through
@@ -1643,65 +1728,6 @@ impl Server {
     }
 }
 
-/// Client-disconnect watcher body — goish's rendering of Go's
-/// `connReader.backgroundRead` (server.go:735). Runs on its own
-/// goroutine while a handler executes. Probes the socket with
-/// `recv(MSG_PEEK | MSG_DONTWAIT)` — peeking never consumes a
-/// pipelined next request — and parks on the netpoller between
-/// probes.
-///
-/// Returns `true` iff the client went away (EOF / reset) and the
-/// request context should be canceled. Returns `false` when either
-/// pipelined data shows up (next keep-alive request — stop watching,
-/// the conn is fine) or the serve loop aborted the watch by setting
-/// a past read deadline (`netpoll::set_deadline(pd, -1, 'r')` — the
-/// goish `aLongTimeAgo` abort).
-///
-/// `pd_addr` is the conn's `PollDesc` as a usize (raw pointers are
-/// not `Send`; the address crosses the `go!` closure instead). The
-/// serve loop joins this goroutine before closing or reusing the
-/// conn, so the PollDesc outlives every dereference here.
-fn background_disconnect_watch(fd: i32, pd_addr: usize) -> bool {
-    const EINTR: i32 = 4;
-    const EAGAIN: i32 = 11;
-    let pd = unsafe { &*(pd_addr as *const crate::runtime::netpoll::PollDesc) };
-    let mut probe = [0u8; 1];
-    loop {
-        let n = crate::syscall::Recvfrom(
-            fd,
-            probe.as_mut_ptr(),
-            1,
-            crate::syscall::MSG_PEEK | crate::syscall::MSG_DONTWAIT,
-        );
-        if n > 0 {
-            // Pipelined next request — client is alive; stop
-            // watching (Go remembers the byte; peeking means we
-            // don't have to).
-            return false;
-        }
-        if n == 0 {
-            // Orderly shutdown from the peer.
-            return true;
-        }
-        let errno = -(n as i32);
-        if errno == EINTR {
-            continue;
-        }
-        if errno == EAGAIN {
-            match crate::runtime::netpoll::block(pd, b'r') {
-                // Readable edge (data or EOF/RDHUP) — loop and peek.
-                crate::runtime::netpoll::BlockResult::Ready
-                | crate::runtime::netpoll::BlockResult::Aborted => continue,
-                // Past-deadline abort from the serve loop: handler
-                // finished first.
-                crate::runtime::netpoll::BlockResult::Timedout => return false,
-            }
-        }
-        // ECONNRESET and friends — connection is gone.
-        return true;
-    }
-}
-
 // ─── Free-function wrappers (Go-faithful one-liners) ─────────────────
 
 /// `http.ListenAndServe(addr, handler)` — bind + accept loop +
@@ -1739,6 +1765,12 @@ pub fn Serve(ln: net::Listener, handler: Arc<dyn Handler>) -> error {
 ///
 /// HTTP/1.1: keep-alive default; `Connection: close` opts out.
 /// HTTP/1.0: close default; `Connection: keep-alive` opts in.
+/// `pub(crate)` wrapper over `request_keep_alive` for the HTTPS serve
+/// loop in server_tls.rs.
+pub(crate) fn request_keep_alive_pub(req: &Request) -> bool {
+    request_keep_alive(req)
+}
+
 fn request_keep_alive(req: &Request) -> bool {
     let conn_hdr = req.Header.Get(string("Connection"));
     let conn_bytes = conn_hdr.as_bytes();

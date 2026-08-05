@@ -88,6 +88,10 @@ pub struct KeyMaterial {
     pub tls13_server_iv: [byte; 12],
     /// TLS 1.3 server application traffic secret (stored for KeyUpdate).
     pub tls13_server_app_secret: Vec<byte>,
+    /// TLS 1.3 client application traffic secret. Populated by the
+    /// server-side handshake so a server Conn can rotate its inbound
+    /// (client-write) keys on KeyUpdate; empty on client Conns.
+    pub tls13_client_app_secret: Vec<byte>,
     /// TLS 1.3 resumption_master_secret. Used when a NewSessionTicket arrives
     /// post-handshake: PSK = HKDF-Expand-Label(rms, "resumption", ticket_nonce, hash_size).
     /// Empty when not TLS 1.3 or when the handshake hasn't completed yet.

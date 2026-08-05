@@ -1,8 +1,27 @@
 #!/usr/bin/env bash
-# e2e_runner.sh — run every declared example LOOPS times, report PASS/FAIL.
+# e2e_runner.sh — run every declared example N times, report PASS/FAIL.
+#
+# LOOP TIERS (default mode, LOOPS unset): each example runs at its
+# tier's loop count — the loop count is a property of what the TEST
+# exercises, not of the change being validated:
+#   tier 1 (TIER1=1)   functional/deterministic tests — parsers, crypto,
+#                      json, unicode, http parsing … : one run proves it.
+#   tier 2 (TIER2=10)  memory/allocator/runtime-introspection tests —
+#                      alloc_*, mheap_*, mcentral, leak_proof …
+#   tier 3 (TIER3=50)  scheduling/racing/stress tests — chan/select,
+#                      preempt, sched, sync, timers, stacks, server
+#                      lifecycle (shutdown/keepalive/goginx), TLS conns.
+#                      50 stays 50: the historical lost-wakeup bug was
+#                      ~2% — at 10 loops it hides ~80% of the time.
+# Setting LOOPS=N forces every example to N (the old uniform behavior;
+# `make e2e-full` uses LOOPS=50 — REQUIRED for scheduler/allocator/
+# runtime-core changes, where races surface in unrelated tests).
+# NEW TESTS: anything goroutine/timer/socket-lifecycle-coupled MUST be
+# added to the tier-3 patterns below; unmatched names default to tier 1.
 #
 # Env knobs:
-#   LOOPS=50         number of iterations per example
+#   LOOPS=N          force a uniform loop count (disables tiers)
+#   TIER1/2/3=N      override a tier's loop count (default 1/10/50)
 #   TIMEOUT=15       per-run timeout (seconds)
 #   ARTIFACTS=...    where to save failure logs (default scripts/.e2e-artifacts)
 #   FILTER=regex     only run examples whose name matches (default: all)
@@ -14,14 +33,44 @@
 
 set -u
 
-LOOPS="${LOOPS:-50}"
+LOOPS="${LOOPS:-}"
+TIER1="${TIER1:-1}"
+TIER2="${TIER2:-10}"
+TIER3="${TIER3:-50}"
 TIMEOUT="${TIMEOUT:-15}"
+
+# Tier classification — ordered, first match wins; see the header.
+loops_for() {
+  if [[ -n "$LOOPS" ]]; then echo "$LOOPS"; return; fi
+  case "$1" in
+    # tier 3 — scheduling / racing / stress
+    chan_*|select_*|preempt_*|sched_*|sync_*|spawn_*|stack_*|lockfree_*|\
+    time_sleep|time_timer|stopwatch|signal_smoke|sigaltstack_offline_proof|\
+    context_*|cmd_stdout_pipe_test|syscall_fswatch_smoke|m20_smoke|\
+    goginx|https_real_smoke|http_shutdown_smoke|http_keepalive_smoke|\
+    http_panic_demo|production_http_server|tls_smoke|tls_server_smoke)
+      echo "$TIER3" ;;
+    # tier 2 — memory / allocator / runtime introspection
+    alloc_*|mheap_*|mcentral_*|leak_proof|rt_section_smoke|\
+    runtime_callers_smoke|temp_uniqueness_smoke)
+      echo "$TIER2" ;;
+    # tier 1 — functional/deterministic (the default)
+    *)
+      echo "$TIER1" ;;
+  esac
+}
 ARTIFACTS="${ARTIFACTS:-scripts/.e2e-artifacts}"
 FILTER="${FILTER:-.*}"
 # Default skips: HTTP servers that don't self-terminate, very-large
 # stress workloads that take >TIMEOUT seconds, and tests whose
 # success requires external drivers.
-EXCLUDE="${EXCLUDE:-^(http_hello|spawn_million|spawn_density|preempt_sysmon|lockfree_ring_bench|segv_diagnostic_smoke)$}"
+EXCLUDE="${EXCLUDE:-^(http_hello|https_serve|spawn_million|spawn_density|preempt_sysmon|lockfree_ring_bench|segv_diagnostic_smoke)$}"
+# Tests that talk to the REAL internet: a timeout is network latency,
+# not a runtime bug (the artifact still gets saved). Such a test fails
+# the suite only on panic/fail or if NO iteration succeeded. This
+# mechanizes the long-standing "199/200 with the https_real_smoke
+# timing flake is green" convention instead of leaving it tribal.
+NETWORK_FLAKY="^(https_real_smoke)$"
 TARGET_DIR="${TARGET_DIR:-target/x86_64-unknown-linux-gnu/debug}"
 
 # Per-example CLI args + stdin. Some demos parse argv (`sumargs N…`,
@@ -61,7 +110,11 @@ while IFS= read -r name; do
 done <<< "$DECLARED"
 
 NUM_TARGETS=${#TARGETS[@]}
-echo "e2e suite — $NUM_TARGETS examples × $LOOPS loops (timeout=${TIMEOUT}s each)"
+if [[ -n "$LOOPS" ]]; then
+  echo "e2e suite — $NUM_TARGETS examples × $LOOPS loops (uniform; timeout=${TIMEOUT}s each)"
+else
+  echo "e2e suite — $NUM_TARGETS examples, tiered loops (functional=$TIER1 memory=$TIER2 stress=$TIER3; timeout=${TIMEOUT}s each)"
+fi
 if [[ ${#SKIPPED[@]} -gt 0 ]]; then
   echo "  skipped (EXCLUDE): ${SKIPPED[*]}"
 fi
@@ -71,6 +124,7 @@ TOTAL_PASS=0
 TOTAL_FAIL=0
 TOTAL_TIMEOUT=0
 TOTAL_PANIC=0
+TOTAL_ITERS=0
 FAILED_EXAMPLES=()
 
 START=$(date +%s)
@@ -84,13 +138,14 @@ for name in "${TARGETS[@]}"; do
   fi
 
   pass=0; fail=0; tout=0; panic=0
+  loops=$(loops_for "$name")
   first_log="$ARTIFACTS/$name.first_failure.log"
 
   inp=$(example_inputs "$name")
   ex_args="${inp%%||*}"
   ex_stdin="${inp#*||}"
 
-  for i in $(seq 1 "$LOOPS"); do
+  for i in $(seq 1 "$loops"); do
     if [[ -n "$ex_stdin" ]]; then
       # Stdin-driven demo (e.g. json_pretty).
       # shellcheck disable=SC2086
@@ -128,10 +183,13 @@ for name in "${TARGETS[@]}"; do
 
   bad=$((fail+tout+panic))
   if [[ $bad -eq 0 ]]; then
-    printf "  %-40s %d/%d\n" "$name" "$pass" "$LOOPS"
+    printf "  %-40s %d/%d\n" "$name" "$pass" "$loops"
+  elif [[ "$name" =~ $NETWORK_FLAKY && $panic -eq 0 && $fail -eq 0 && $pass -gt 0 ]]; then
+    printf "  %-40s %d/%d  (timeout=%d — network-flaky, tolerated) → %s\n" \
+      "$name" "$pass" "$loops" "$tout" "$first_log"
   else
     printf "  %-40s %d/%d  (panic=%d timeout=%d fail=%d) → %s\n" \
-      "$name" "$pass" "$LOOPS" "$panic" "$tout" "$fail" "$first_log"
+      "$name" "$pass" "$loops" "$panic" "$tout" "$fail" "$first_log"
     FAILED_EXAMPLES+=("$name:p=$panic,t=$tout,f=$fail")
   fi
 
@@ -139,6 +197,7 @@ for name in "${TARGETS[@]}"; do
   TOTAL_FAIL=$((TOTAL_FAIL+fail))
   TOTAL_TIMEOUT=$((TOTAL_TIMEOUT+tout))
   TOTAL_PANIC=$((TOTAL_PANIC+panic))
+  TOTAL_ITERS=$((TOTAL_ITERS+loops))
 done
 
 ELAPSED=$(($(date +%s) - START))
@@ -146,7 +205,7 @@ ELAPSED=$(($(date +%s) - START))
 echo
 echo "─── e2e summary ──────────────────────────────────────────"
 printf "  examples:  %d (skipped %d)\n" "$NUM_TARGETS" "${#SKIPPED[@]}"
-printf "  iterations: %d total\n" "$((NUM_TARGETS * LOOPS))"
+printf "  iterations: %d total\n" "$TOTAL_ITERS"
 printf "  pass:      %d\n" "$TOTAL_PASS"
 printf "  panic:     %d\n" "$TOTAL_PANIC"
 printf "  timeout:   %d\n" "$TOTAL_TIMEOUT"
@@ -155,7 +214,7 @@ printf "  elapsed:   %ds (%dm%ds)\n" "$ELAPSED" $((ELAPSED/60)) $((ELAPSED%60))
 
 {
   echo "e2e summary $(date -Iseconds)"
-  echo "examples=$NUM_TARGETS loops=$LOOPS timeout=${TIMEOUT}s"
+  echo "examples=$NUM_TARGETS loops=${LOOPS:-tiered($TIER1/$TIER2/$TIER3)} iterations=$TOTAL_ITERS timeout=${TIMEOUT}s"
   echo "pass=$TOTAL_PASS panic=$TOTAL_PANIC timeout=$TOTAL_TIMEOUT fail=$TOTAL_FAIL elapsed=${ELAPSED}s"
   if [[ ${#FAILED_EXAMPLES[@]} -gt 0 ]]; then
     echo "failed:"

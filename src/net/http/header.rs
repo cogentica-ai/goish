@@ -76,13 +76,20 @@ impl Header {
     /// `h.Add(key, value)` — appends to any existing values.
     pub fn Add<K: Into<string>, V: Into<string>>(&mut self, key: K, value: V) {
         let k = canonical_key(&key.into());
+        self.__add_canonical(k, value.into());
+    }
+
+    /// Crate-internal Add for callers whose key is ALREADY in
+    /// canonical form (the request parser emits pre-canonicalized,
+    /// mostly interned names) — skips the canonicalization pass.
+    pub(crate) fn __add_canonical(&mut self, k: string, value: string) {
         let (existing, ok) = self.inner.Get(k.clone());
         let mut v: Vec<string> = if ok {
             existing.__into_vec()
         } else {
             Vec::with_capacity(1)
         };
-        v.push(value.into());
+        v.push(value);
         self.inner.Set(k, slice::<string>::__from_vec(v));
     }
 
@@ -345,7 +352,72 @@ pub fn CanonicalHeaderKey<S: Into<string>>(s: S) -> string {
 ///
 /// Mirrors `net/textproto.CanonicalMIMEHeaderKey` for ASCII.
 pub(crate) fn canonical_key(s: &string) -> string {
-    let bytes = s.as_bytes();
+    canonical_key_bytes(s.as_bytes())
+}
+
+/// Canonical-form interning for the header names that dominate real
+/// traffic — Go keeps a `commonHeader` map for exactly this
+/// (net/textproto/reader.go:715 `canonicalMIMEHeaderKey` common-key
+/// lookup). `from_static` is zero-alloc, so both the parse path and
+/// every literal-keyed `Header.Get("Content-Length")` call become
+/// allocation-free.
+fn intern_header_name(canon: &[u8]) -> Option<&'static str> {
+    Some(match canon {
+        b"Host" => "Host",
+        b"User-Agent" => "User-Agent",
+        b"Accept" => "Accept",
+        b"Accept-Encoding" => "Accept-Encoding",
+        b"Accept-Language" => "Accept-Language",
+        b"Connection" => "Connection",
+        b"Content-Length" => "Content-Length",
+        b"Content-Type" => "Content-Type",
+        b"Transfer-Encoding" => "Transfer-Encoding",
+        b"Expect" => "Expect",
+        b"Cookie" => "Cookie",
+        b"Set-Cookie" => "Set-Cookie",
+        b"Authorization" => "Authorization",
+        b"Cache-Control" => "Cache-Control",
+        b"Origin" => "Origin",
+        b"Referer" => "Referer",
+        b"Location" => "Location",
+        b"Date" => "Date",
+        b"Server" => "Server",
+        b"X-Forwarded-For" => "X-Forwarded-For",
+        b"X-Forwarded-Proto" => "X-Forwarded-Proto",
+        b"X-Forwarded-Host" => "X-Forwarded-Host",
+        b"Upgrade" => "Upgrade",
+        b"If-Modified-Since" => "If-Modified-Since",
+        b"If-None-Match" => "If-None-Match",
+        b"Last-Modified" => "Last-Modified",
+        b"Range" => "Range",
+        _ => return None,
+    })
+}
+
+/// Byte-slice canonicalization used directly by the request parser
+/// (no intermediate `string` for the raw name). Canonical form is
+/// built in a stack buffer for typical-length names, matched against
+/// the interned common set, and only materialized on the heap for
+/// uncommon names.
+pub(crate) fn canonical_key_bytes(bytes: &[u8]) -> string {
+    if bytes.len() <= 64 {
+        let mut stack = [0u8; 64];
+        let mut upper = true;
+        for (i, &b) in bytes.iter().enumerate() {
+            stack[i] = if upper {
+                ascii_to_upper(b)
+            } else {
+                ascii_to_lower(b)
+            };
+            upper = b == b'-';
+        }
+        let canon = &stack[..bytes.len()];
+        if let Some(s) = intern_header_name(canon) {
+            return string::from_static(s);
+        }
+        return string::from_bytes(canon);
+    }
+    // Long-tail names: heap-build the canonical form.
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut upper = true;
     for &b in bytes {

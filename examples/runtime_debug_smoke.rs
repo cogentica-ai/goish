@@ -54,12 +54,16 @@ fn main() {
         Println!("[ 3] FreeOSMemory                PASS");
     }
 
-    // 4. SetMaxStack — round-trip.
+    // 4. SetMaxStack — round-trip. In goish this knob is real: it
+    // sets the bare-go!() stack reservation for future spawns. The
+    // initial value is 1 MiB (goish default; Go's is 1 GiB — see
+    // runtime/debug.rs). Deep-recursion behavior is exercised by
+    // stack_maxstack_smoke; here we only verify the round-trip.
     {
-        let prev1 = debug::SetMaxStack(1 << 20);
-        let prev2 = debug::SetMaxStack(2 << 20);
-        let _ = debug::SetMaxStack(1 << 30); // restore default
-        if prev1 == (1 << 30) && prev2 == (1 << 20) {
+        let prev1 = debug::SetMaxStack(2 << 20);
+        let prev2 = debug::SetMaxStack(4 << 20);
+        let _ = debug::SetMaxStack(1 << 20); // restore goish default
+        if prev1 == (1 << 20) && prev2 == (2 << 20) {
             Println!("[ 4] SetMaxStack round-trip     PASS");
         } else {
             Println!("[ 4] SetMaxStack round-trip     FAIL");

@@ -34,6 +34,7 @@ fn probe_f_attempt(host: &str, addr: &str, path: &str) -> bool {
         MinVersion: 0,
         MaxVersion: 0,
         RootCAs: None,
+        ..Default::default()
     };
     let (mut conn, err) = tls::DialChaCha20Only("tcp", addr, &cfg);
     if err != goish::nil {

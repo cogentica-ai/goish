@@ -637,6 +637,123 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
 
+    // ── impl json/v2 MarshalerTo / UnmarshalerFrom ─────────────────
+    // The compile-time equivalent of json/v2's cached reflection
+    // codec (encoding/json/v2/arshal_default.go): Go builds a struct
+    // codec at runtime from reflect.Type + json tags; here the field
+    // list and tags are known at macro time, so the object codec is
+    // generated directly. Field names come from the `json:"…"` tag
+    // segment (or the field name verbatim, matching v2's default);
+    // `-` skips the field; `omitempty` / `omitzero` route through the
+    // `v2::JsonOmit` helper trait. Unknown incoming names are skipped
+    // (v2 default), and a JSON null resets the struct to its zero
+    // value.
+    let _ = write!(
+        impl_text,
+        "impl ::goish::encoding::json::v2::MarshalerTo for {} {{\n\
+         \x20   fn MarshalJSONTo(&self, __enc: &mut ::goish::encoding::json::jsontext::Encoder) -> ::goish::error {{\n\
+         \x20       let mut __err = __enc.WriteToken(::goish::encoding::json::jsontext::BeginObject);\n\
+         \x20       if __err != ::goish::errors::nil {{ return __err; }}\n",
+        parsed.name
+    );
+    for f in &parsed.fields {
+        let (key, skip, omitempty, omitzero) = json_tag_parts(f.tag.as_deref(), &f.name);
+        if skip {
+            continue;
+        }
+        let key_lit = key.replace('\\', "\\\\").replace('"', "\\\"");
+        if omitempty {
+            let _ = write!(
+                impl_text,
+                "        if !::goish::encoding::json::v2::JsonOmit::__json_empty(&self.{}) {{\n",
+                f.name
+            );
+        } else if omitzero {
+            let _ = write!(
+                impl_text,
+                "        if !::goish::encoding::json::v2::JsonOmit::__json_zero(&self.{}) {{\n",
+                f.name
+            );
+        }
+        let _ = write!(
+            impl_text,
+            "        __err = __enc.WriteToken(::goish::encoding::json::jsontext::String(::goish::string::from_static(\"{}\")));\n\
+             \x20       if __err != ::goish::errors::nil {{ return __err; }}\n\
+             \x20       __err = <{} as ::goish::encoding::json::v2::MarshalerTo>::MarshalJSONTo(&self.{}, __enc);\n\
+             \x20       if __err != ::goish::errors::nil {{ return __err; }}\n",
+            key_lit, f.ty, f.name
+        );
+        if omitempty || omitzero {
+            impl_text.push_str("        }\n");
+        }
+    }
+    impl_text.push_str(
+        "        __enc.WriteToken(::goish::encoding::json::jsontext::EndObject)\n\
+         \x20   }\n\
+         }\n",
+    );
+
+    let _ = write!(
+        impl_text,
+        "impl ::goish::encoding::json::v2::UnmarshalerFrom for {} {{\n\
+         \x20   fn UnmarshalJSONFrom(&mut self, __dec: &mut ::goish::encoding::json::jsontext::Decoder) -> ::goish::error {{\n\
+         \x20       if __dec.PeekKind() == 'n' {{\n\
+         \x20           let (_, __err) = __dec.ReadToken();\n\
+         \x20           *self = <Self as ::core::default::Default>::default();\n\
+         \x20           return __err;\n\
+         \x20       }}\n\
+         \x20       let (__t, __err) = __dec.ReadToken();\n\
+         \x20       if __err != ::goish::errors::nil {{ return __err; }}\n\
+         \x20       if __t.Kind() != '{{' {{\n\
+         \x20           return ::goish::errors::New(\"json: cannot unmarshal non-object into struct\");\n\
+         \x20       }}\n\
+         \x20       while __dec.PeekKind() != '}}' {{\n\
+         \x20           if __dec.PeekKind() == ::goish::encoding::json::jsontext::Kind(0) {{\n\
+         \x20               return ::goish::io::ErrUnexpectedEOF.into();\n\
+         \x20           }}\n\
+         \x20           let (__name_tok, __err) = __dec.ReadToken();\n\
+         \x20           if __err != ::goish::errors::nil {{ return __err; }}\n\
+         \x20           let __name = __name_tok.String();\n\
+         \x20           match __name.as_bytes() {{\n",
+        parsed.name
+    );
+    for f in &parsed.fields {
+        let (key, skip, _, _) = json_tag_parts(f.tag.as_deref(), &f.name);
+        if skip {
+            continue;
+        }
+        let key_lit = key.replace('\\', "\\\\").replace('"', "\\\"");
+        let _ = write!(
+            impl_text,
+            "                b\"{}\" => {{\n\
+             \x20                   let __err = <{} as ::goish::encoding::json::v2::UnmarshalerFrom>::UnmarshalJSONFrom(&mut self.{}, __dec);\n\
+             \x20                   if __err != ::goish::errors::nil {{ return __err; }}\n\
+             \x20               }}\n",
+            key_lit, f.ty, f.name
+        );
+    }
+    impl_text.push_str(
+        "                _ => {\n\
+         \x20                   let __err = __dec.SkipValue();\n\
+         \x20                   if __err != ::goish::errors::nil { return __err; }\n\
+         \x20               }\n\
+         \x20           }\n\
+         \x20       }\n\
+         \x20       let (_, __err) = __dec.ReadToken();\n\
+         \x20       __err\n\
+         \x20   }\n\
+         }\n",
+    );
+
+    // Struct values are never considered empty/zero for omission
+    // purposes (documented v1 simplification; Go v2's omitzero on a
+    // struct compares against the zero value).
+    let _ = write!(
+        impl_text,
+        "impl ::goish::encoding::json::v2::JsonOmit for {} {{}}\n",
+        parsed.name
+    );
+
     let mut out: TokenStream = struct_text
         .parse()
         .expect("goish::reflect: failed to re-emit struct");
@@ -645,6 +762,57 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .expect("goish::reflect: failed to emit impl");
     out.extend(impl_ts);
     out
+}
+
+/// Macro-time parse of a `#[tag(...)]` literal's `json:"…"` segment.
+/// Returns `(effective_key, skip, omitempty, omitzero)`. The literal
+/// arrives as verbatim source text — either `"json:\"name,opt\""` or
+/// `r#"json:"name,opt""#` — so quoting is normalized first. Mirrors
+/// the runtime `__parse_json_tag` (and Go's tags.go) semantics:
+/// `-` alone skips; empty name falls back to the field name.
+fn json_tag_parts(tag_lit: Option<&str>, field_name: &str) -> (String, bool, bool, bool) {
+    let fallback = (field_name.to_string(), false, false, false);
+    let lit = match tag_lit {
+        Some(l) => l,
+        None => return fallback,
+    };
+    // Normalize the literal to its contents.
+    let inner = if let Some(stripped) = lit.strip_prefix("r#\"") {
+        stripped.strip_suffix("\"#").unwrap_or(stripped).to_string()
+    } else if let Some(stripped) = lit.strip_prefix('"') {
+        stripped
+            .strip_suffix('"')
+            .unwrap_or(stripped)
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
+    } else {
+        lit.to_string()
+    };
+    // Locate the json:"..." segment.
+    let seg = match inner.find("json:\"") {
+        Some(i) => &inner[i + 6..],
+        None => return fallback,
+    };
+    let body = match seg.find('"') {
+        Some(end) => &seg[..end],
+        None => seg,
+    };
+    let mut parts = body.split(',');
+    let name = parts.next().unwrap_or("");
+    if name == "-" && body == "-" {
+        return (String::new(), true, false, false);
+    }
+    let mut omitempty = false;
+    let mut omitzero = false;
+    for p in parts {
+        match p {
+            "omitempty" => omitempty = true,
+            "omitzero" => omitzero = true,
+            _ => {}
+        }
+    }
+    let key = if name.is_empty() { field_name.to_string() } else { name.to_string() };
+    (key, false, omitempty, omitzero)
 }
 
 // ─── manual struct parser ────────────────────────────────────────────
@@ -1938,4 +2106,360 @@ fn extract_method_shape(sig: &[TokenTree]) -> (String, Vec<String>, String) {
     }
 
     (method_name, arg_names, receiver)
+}
+
+// ─── goish::embed! — Go's //go:embed directive ──────────────────────
+//
+// Mirrors the Go declaration shape:
+//
+//   //go:embed hello.txt                 goish::embed! {
+//   var s string                             #[embed("hello.txt")]
+//                                            static s: string;
+//   //go:embed image/* html/index.html
+//   var content embed.FS                     #[embed("image/*", "html/index.html")]
+//                                            static content: embed::FS;
+//                                        }
+//
+// Patterns are interpreted relative to the directory of the source
+// file containing the declaration (Go: "relative to the package
+// directory containing the source file"), resolved at compile time via
+// Span::local_file(). Semantics per src/embed/embed.go:
+//   * no '.', '..', empty elements; no leading/trailing '/';
+//   * a pattern naming a directory embeds the whole subtree,
+//     excluding '.'/'_'-prefixed names unless prefixed with `all:`;
+//   * glob elements support '*' and '?' (path.Match char classes are
+//     rejected with a compile error);
+//   * string / slice<byte> variables: exactly one pattern matching
+//     exactly one file;
+//   * every pattern must match at least one file.
+//
+// string / slice<byte> statics expand to `goish::lazy::Lazy` cells
+// (contents still embedded at compile time via include_bytes!; the
+// Lazy only defers the goish-string allocation). embed::FS statics
+// are fully const.
+
+#[proc_macro]
+pub fn embed(input: TokenStream) -> TokenStream {
+    match embed_impl(input) {
+        Ok(ts) => ts,
+        Err(msg) => format!("compile_error!({msg:?});").parse().unwrap(),
+    }
+}
+
+fn embed_glob_match(pat: &str, name: &str) -> bool {
+    // path.Match subset over a single element: '*' (any run of
+    // non-separator chars) and '?' (one char). No char classes.
+    let p: Vec<char> = pat.chars().collect();
+    let n: Vec<char> = name.chars().collect();
+    fn m(p: &[char], n: &[char]) -> bool {
+        if p.is_empty() {
+            return n.is_empty();
+        }
+        match p[0] {
+            '*' => {
+                for skip in 0..=n.len() {
+                    if m(&p[1..], &n[skip..]) {
+                        return true;
+                    }
+                }
+                false
+            }
+            '?' => !n.is_empty() && m(&p[1..], &n[1..]),
+            c => !n.is_empty() && n[0] == c && m(&p[1..], &n[1..]),
+        }
+    }
+    m(&p, &n)
+}
+
+// Walk `dir` recursively, collecting files (rel paths under `rel`).
+// Skips '.'/'_'-prefixed names unless `all`.
+fn embed_walk(
+    dir: &std::path::Path,
+    rel: &str,
+    all: bool,
+    out: &mut Vec<String>,
+) -> Result<(), String> {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)
+        .map_err(|e| format!("goish::embed: reading {}: {}", dir.display(), e))?
+        .filter_map(|e| e.ok())
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+    for e in entries {
+        let name = e.file_name().into_string().map_err(|_| {
+            format!("goish::embed: non-UTF-8 file name under {}", dir.display())
+        })?;
+        if !all && (name.starts_with('.') || name.starts_with('_')) {
+            continue;
+        }
+        let sub_rel = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+        let path = e.path();
+        if path.is_dir() {
+            embed_walk(&path, &sub_rel, all, out)?;
+        } else if path.is_file() {
+            out.push(sub_rel);
+        }
+    }
+    Ok(())
+}
+
+// Expand one pattern (Go semantics) into matching file rel-paths.
+fn embed_expand(base: &std::path::Path, pattern: &str) -> Result<Vec<String>, String> {
+    let (all, pat) = match pattern.strip_prefix("all:") {
+        Some(rest) => (true, rest),
+        None => (false, pattern),
+    };
+    if pat.is_empty() || pat.starts_with('/') || pat.ends_with('/') {
+        return Err(format!("goish::embed: invalid pattern {pattern:?}"));
+    }
+    for el in pat.split('/') {
+        if el.is_empty() || el == "." || el == ".." {
+            return Err(format!("goish::embed: invalid pattern {pattern:?}"));
+        }
+        if el.contains('[') || el.contains(']') || el.contains('\\') {
+            return Err(format!(
+                "goish::embed: pattern {pattern:?}: character classes are not supported (only * and ?)"
+            ));
+        }
+    }
+    // Resolve glob elements level by level.
+    let mut cur: Vec<String> = vec![String::new()]; // rel dirs ("" = base)
+    let elements: Vec<&str> = pat.split('/').collect();
+    for (i, el) in elements.iter().enumerate() {
+        let last = i == elements.len() - 1;
+        let mut next: Vec<String> = Vec::new();
+        for prefix in &cur {
+            let dir = if prefix.is_empty() { base.to_path_buf() } else { base.join(prefix) };
+            if el.contains('*') || el.contains('?') {
+                let mut entries: Vec<_> = std::fs::read_dir(&dir)
+                    .map_err(|e| format!("goish::embed: reading {}: {}", dir.display(), e))?
+                    .filter_map(|e| e.ok())
+                    .collect();
+                entries.sort_by_key(|e| e.file_name());
+                for e in entries {
+                    let Ok(name) = e.file_name().into_string() else { continue };
+                    if embed_glob_match(el, &name) {
+                        let sub = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
+                        next.push(sub);
+                    }
+                }
+            } else {
+                let sub = if prefix.is_empty() { (*el).to_string() } else { format!("{prefix}/{el}") };
+                if dir.join(el).exists() {
+                    next.push(sub);
+                }
+            }
+        }
+        cur = next;
+        if !last {
+            // Intermediate elements must be directories.
+            cur.retain(|p| base.join(p).is_dir());
+        }
+    }
+    // Final expansion: files stay; directories embed their subtree.
+    // Go: a glob match on a dot/underscore name is kept for the '*'
+    // form at the top level but the recursive walk still excludes them.
+    let mut out: Vec<String> = Vec::new();
+    for p in cur {
+        let full = base.join(&p);
+        if full.is_dir() {
+            embed_walk(&full, &p, all, &mut out)?;
+        } else if full.is_file() {
+            out.push(p);
+        }
+    }
+    if out.is_empty() {
+        return Err(format!("goish::embed: pattern {pattern:?}: no matching files found"));
+    }
+    Ok(out)
+}
+
+fn embed_impl(input: TokenStream) -> Result<TokenStream, String> {
+    use proc_macro::TokenTree as TT;
+
+    // local_file() may be relative to rustc's working directory (the
+    // package root); canonicalize so emitted include_bytes! paths are
+    // unambiguous absolutes.
+    let base = proc_macro::Span::call_site()
+        .local_file()
+        .and_then(|p| std::fs::canonicalize(p).ok())
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .ok_or_else(|| "goish::embed: cannot resolve invoking source file".to_string())?;
+
+    let mut toks = input.into_iter().peekable();
+    let mut out = String::new();
+
+    while toks.peek().is_some() {
+        // #[embed("pat", ...)]
+        match toks.next() {
+            Some(TT::Punct(p)) if p.as_char() == '#' => {}
+            Some(other) => return Err(format!("goish::embed: expected #[embed(...)], got {other}")),
+            None => break,
+        }
+        let attr = match toks.next() {
+            Some(TT::Group(g)) if g.delimiter() == proc_macro::Delimiter::Bracket => g,
+            _ => return Err("goish::embed: expected #[embed(...)]".to_string()),
+        };
+        let mut patterns: Vec<String> = Vec::new();
+        {
+            let mut it = attr.stream().into_iter();
+            match it.next() {
+                Some(TT::Ident(id)) if id.to_string() == "embed" => {}
+                _ => return Err("goish::embed: attribute must be #[embed(...)]".to_string()),
+            }
+            let args = match it.next() {
+                Some(TT::Group(g)) if g.delimiter() == proc_macro::Delimiter::Parenthesis => g,
+                _ => return Err("goish::embed: attribute must be #[embed(\"pattern\", ...)]".to_string()),
+            };
+            for t in args.stream() {
+                match t {
+                    TT::Literal(l) => {
+                        let s = l.to_string();
+                        let Some(stripped) = s.strip_prefix('"').and_then(|s| s.strip_suffix('"'))
+                        else {
+                            return Err("goish::embed: patterns must be plain string literals".to_string());
+                        };
+                        patterns.push(stripped.to_string());
+                    }
+                    TT::Punct(p) if p.as_char() == ',' => {}
+                    other => return Err(format!("goish::embed: unexpected token {other} in pattern list")),
+                }
+            }
+        }
+        if patterns.is_empty() {
+            return Err("goish::embed: at least one pattern required".to_string());
+        }
+
+        // [pub] static NAME : TYPE ;
+        let mut vis = String::new();
+        let mut t = toks.next();
+        if let Some(TT::Ident(id)) = &t {
+            if id.to_string() == "pub" {
+                vis = "pub ".to_string();
+                t = toks.next();
+                // pub(crate) etc.
+                if let Some(TT::Group(g)) = &t {
+                    if g.delimiter() == proc_macro::Delimiter::Parenthesis {
+                        vis = format!("pub({}) ", g.stream());
+                        t = toks.next();
+                    }
+                }
+            }
+        }
+        match &t {
+            Some(TT::Ident(id)) if id.to_string() == "static" => {}
+            _ => return Err("goish::embed: expected `static`".to_string()),
+        }
+        let name = match toks.next() {
+            Some(TT::Ident(id)) => id.to_string(),
+            _ => return Err("goish::embed: expected variable name".to_string()),
+        };
+        match toks.next() {
+            Some(TT::Punct(p)) if p.as_char() == ':' => {}
+            _ => return Err("goish::embed: expected `:` after variable name".to_string()),
+        }
+        let mut ty = String::new();
+        for t in toks.by_ref() {
+            if let TT::Punct(p) = &t {
+                if p.as_char() == ';' {
+                    break;
+                }
+            }
+            ty.push_str(&t.to_string());
+        }
+        let ty_norm: String = ty.chars().filter(|c| !c.is_whitespace()).collect();
+
+        // Expand patterns.
+        let mut files: Vec<String> = Vec::new();
+        for pat in &patterns {
+            for f in embed_expand(&base, pat)? {
+                if !files.contains(&f) {
+                    files.push(f);
+                }
+            }
+        }
+
+        match ty_norm.as_str() {
+            "string" | "goish::string" | "::goish::string" => {
+                if patterns.len() != 1 || files.len() != 1 {
+                    return Err(format!(
+                        "goish::embed: {name}: string variables take one pattern matching one file"
+                    ));
+                }
+                let abs = base.join(&files[0]);
+                out.push_str(&format!(
+                    "{vis}static {name}: ::goish::lazy::Lazy<::goish::string> = \
+                     ::goish::lazy::Lazy::new(|| ::goish::string::from_bytes(\
+                     include_bytes!({:?})));\n",
+                    abs.display().to_string(),
+                ));
+            }
+            "slice<byte>" | "slice<u8>" | "goish::slice<byte>" | "::goish::slice<byte>" => {
+                if patterns.len() != 1 || files.len() != 1 {
+                    return Err(format!(
+                        "goish::embed: {name}: slice<byte> variables take one pattern matching one file"
+                    ));
+                }
+                let abs = base.join(&files[0]);
+                out.push_str(&format!(
+                    "{vis}static {name}: ::goish::lazy::Lazy<::goish::slice<::goish::byte>> = \
+                     ::goish::lazy::Lazy::new(|| ::goish::goslice::slice::__from_vec(\
+                     include_bytes!({:?}).to_vec()));\n",
+                    abs.display().to_string(),
+                ));
+            }
+            "embed::FS" | "FS" | "goish::embed::FS" | "::goish::embed::FS" => {
+                // Full entry table: files plus synthesized parent dirs,
+                // sorted by (dir, base) like Go's sortedList.
+                let mut entries: Vec<(String, bool)> = Vec::new(); // (rel, is_dir)
+                for f in &files {
+                    entries.push((f.clone(), false));
+                    let mut p = f.as_str();
+                    while let Some(i) = p.rfind('/') {
+                        p = &p[..i];
+                        if !entries.iter().any(|(e, d)| *d && e == p) {
+                            entries.push((p.to_string(), true));
+                        }
+                    }
+                }
+                entries.sort_by(|a, b| {
+                    let split = |s: &str| -> (String, String) {
+                        match s.rfind('/') {
+                            Some(i) => (s[..i].to_string(), s[i + 1..].to_string()),
+                            None => (String::new(), s.to_string()),
+                        }
+                    };
+                    split(&a.0).cmp(&split(&b.0))
+                });
+                let mut table = String::new();
+                for (rel, is_dir) in &entries {
+                    if *is_dir {
+                        table.push_str(&format!(
+                            "::goish::embed::__File {{ name: {:?}, data: b\"\" }},\n",
+                            format!("{rel}/"),
+                        ));
+                    } else {
+                        let abs = base.join(rel);
+                        table.push_str(&format!(
+                            "::goish::embed::__File {{ name: {:?}, data: include_bytes!({:?}) }},\n",
+                            rel,
+                            abs.display().to_string(),
+                        ));
+                    }
+                }
+                out.push_str(&format!(
+                    "{vis}static {name}: ::goish::embed::FS = \
+                     ::goish::embed::FS::__new(&[\n{table}]);\n",
+                ));
+            }
+            other => {
+                return Err(format!(
+                    "goish::embed: {name}: unsupported type `{other}` \
+                     (use string, slice<byte>, or embed::FS)"
+                ));
+            }
+        }
+    }
+
+    out.parse()
+        .map_err(|e| format!("goish::embed: generated code failed to parse: {e:?}"))
 }

@@ -62,7 +62,7 @@ pub use gobuf::{gogo, make_context, make_context_gogo, swap_context, Gobuf};
 pub(crate) use gobuf::mcall_asm;
 pub use m::{
     acquirem, current_g0_gobuf, current_m, current_m_locks, current_m_storage, is_tls_ready,
-    releasem, setup_main_g0, setup_main_tls, MStorage, ParkCommit, M, MAIN_M,
+    pre_goish_fs_base, releasem, setup_main_g0, setup_main_tls, MStorage, ParkCommit, M, MAIN_M,
 };
 pub use p::{
     acquirep, bootstrap_ps, current_p, for_each_p, num_ps, p_at, releasep, LOCAL_RUNQ_SIZE,
@@ -79,4 +79,7 @@ pub use grow::{
     maybe_grow_step, DEFAULT_GROW_BARE_CAP, DEFAULT_GROW_RED_ZONE, GROW_TIER_2_SIZE,
     GROW_TIER_3_SIZE,
 };
-pub use stack::{reserve_pool_len, Stack, BARE_STACK_RESERVE, DEFAULT_STACK_SIZE, GUARD_SIZE};
+pub use stack::{
+    bare_reserve, reserve_pool_len, set_bare_reserve, Stack, BARE_STACK_RESERVE,
+    DEFAULT_STACK_SIZE, GUARD_SIZE,
+};

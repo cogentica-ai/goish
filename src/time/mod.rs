@@ -1199,9 +1199,210 @@ fn format_layout(
         out.push(b'Z');
         return string::from_bytes(&out);
     }
-    // Unrecognized layout — return the layout literal back, mirroring
-    // Go's behavior of emitting un-tokenized text verbatim.
-    l
+    // General layout: token-scan port of Go's `nextStdChunk`
+    // (format.go:190). The named-layout arms above stay as fast
+    // paths; anything else — custom layouts like the nginx access-log
+    // `02/Jan/2006:15:04:05` — is emitted chunk by chunk here.
+    format_layout_scan(&l, y, m, d, hh, mm, ss, wd, _nano)
+}
+
+/// Port of Go's layout scanner + emit loop (format.go `nextStdChunk`
+/// :190 and `Time.AppendFormat` :690), collapsed into one pass. Slim
+/// deviations (v1 is UTC-only, no year-day):
+///   - zone chunks render the UTC fixed forms: `MST` → "UTC",
+///     `-0700`/`-07:00`/`-07` → "+0000"/"+00:00"/"+00", `Z0700`/
+///     `Z07:00` → "Z" (Go emits "Z" for zero offset too);
+///   - year-day chunks (`002`, `__2`) are not recognized.
+fn format_layout_scan(
+    layout: &crate::gostring::string,
+    y: int,
+    m: int,
+    d: int,
+    hh: int,
+    mm: int,
+    ss: int,
+    wd: int,
+    nano: int,
+) -> crate::gostring::string {
+    use crate::gostring::string;
+    let lb = layout.as_bytes();
+    let n = lb.len();
+    let mut out: Vec<u8> = Vec::with_capacity(n + 8);
+
+    // hour-12 with Go's 0→12 mapping (format.go stdHour12 emit).
+    let h12 = {
+        let h = hh % 12;
+        if h == 0 {
+            12
+        } else {
+            h
+        }
+    };
+    let starts = |i: usize, pat: &[u8]| -> bool { lb[i..].starts_with(pat) };
+    // push a value without zero padding (Go appendInt(b, v, 0)).
+    let push_num = |out: &mut Vec<u8>, v: int| {
+        let mut buf = [0u8; 20];
+        let mut i = buf.len();
+        let mut x = if v < 0 { -v } else { v };
+        if x == 0 {
+            i -= 1;
+            buf[i] = b'0';
+        }
+        while x > 0 {
+            i -= 1;
+            buf[i] = b'0' + (x % 10) as u8;
+            x /= 10;
+        }
+        if v < 0 {
+            i -= 1;
+            buf[i] = b'-';
+        }
+        out.extend_from_slice(&buf[i..]);
+    };
+
+    let mut i = 0usize;
+    while i < n {
+        let c = lb[i];
+        match c {
+            b'J' if starts(i, b"January") => {
+                // MONTH_LONG is 0-based; MONTH_SHORT carries a dummy
+                // slot 0 and is 1-based.
+                out.extend_from_slice(MONTH_LONG[m as usize - 1].as_bytes());
+                i += 7;
+            }
+            b'J' if starts(i, b"Jan") => {
+                out.extend_from_slice(MONTH_SHORT[m as usize].as_bytes());
+                i += 3;
+            }
+            b'M' if starts(i, b"Monday") => {
+                out.extend_from_slice(DAY_LONG[wd as usize].as_bytes());
+                i += 6;
+            }
+            b'M' if starts(i, b"Mon") => {
+                out.extend_from_slice(DAY_SHORT[wd as usize].as_bytes());
+                i += 3;
+            }
+            b'M' if starts(i, b"MST") => {
+                out.extend_from_slice(b"UTC");
+                i += 3;
+            }
+            b'2' if starts(i, b"2006") => {
+                out.extend_from_slice(&pad4(y));
+                i += 4;
+            }
+            b'2' => {
+                push_num(&mut out, d);
+                i += 1;
+            }
+            b'1' if starts(i, b"15") => {
+                out.extend_from_slice(&pad2(hh));
+                i += 2;
+            }
+            b'1' => {
+                push_num(&mut out, m);
+                i += 1;
+            }
+            b'0' if i + 1 < n && lb[i + 1] >= b'1' && lb[i + 1] <= b'6' => {
+                match lb[i + 1] {
+                    b'1' => out.extend_from_slice(&pad2(m)),
+                    b'2' => out.extend_from_slice(&pad2(d)),
+                    b'3' => out.extend_from_slice(&pad2(h12)),
+                    b'4' => out.extend_from_slice(&pad2(mm)),
+                    b'5' => out.extend_from_slice(&pad2(ss)),
+                    // "06" — two-digit year.
+                    _ => out.extend_from_slice(&pad2(y % 100)),
+                }
+                i += 2;
+            }
+            b'_' if starts(i, b"_2") => {
+                // stdUnderDay: space-padded day, width 2.
+                if d < 10 {
+                    out.push(b' ');
+                }
+                push_num(&mut out, d);
+                i += 2;
+            }
+            b'3' => {
+                push_num(&mut out, h12);
+                i += 1;
+            }
+            b'4' => {
+                push_num(&mut out, mm);
+                i += 1;
+            }
+            b'5' => {
+                push_num(&mut out, ss);
+                i += 1;
+            }
+            b'P' if starts(i, b"PM") => {
+                out.extend_from_slice(if hh < 12 { b"AM" } else { b"PM" });
+                i += 2;
+            }
+            b'p' if starts(i, b"pm") => {
+                out.extend_from_slice(if hh < 12 { b"am" } else { b"pm" });
+                i += 2;
+            }
+            b'-' if starts(i, b"-07:00") => {
+                out.extend_from_slice(b"+00:00");
+                i += 6;
+            }
+            b'-' if starts(i, b"-0700") => {
+                out.extend_from_slice(b"+0000");
+                i += 5;
+            }
+            b'-' if starts(i, b"-07") => {
+                out.extend_from_slice(b"+00");
+                i += 3;
+            }
+            b'Z' if starts(i, b"Z07:00") => {
+                out.push(b'Z');
+                i += 6;
+            }
+            b'Z' if starts(i, b"Z0700") => {
+                out.push(b'Z');
+                i += 5;
+            }
+            b'.' | b',' if i + 1 < n && (lb[i + 1] == b'0' || lb[i + 1] == b'9') => {
+                // Fractional seconds (Go stdFrac0 / stdFrac9): count
+                // the digit run, emit that many nanosecond digits;
+                // the 9-form trims trailing zeros (and the separator
+                // when all zero).
+                let digit = lb[i + 1];
+                let mut w = 0usize;
+                while i + 1 + w < n && lb[i + 1 + w] == digit {
+                    w += 1;
+                }
+                let mut frac: [u8; 9] = [b'0'; 9];
+                let mut v = nano as u64;
+                let mut j = 9;
+                while j > 0 {
+                    j -= 1;
+                    frac[j] = b'0' + (v % 10) as u8;
+                    v /= 10;
+                }
+                let take = if w > 9 { 9 } else { w };
+                if digit == b'0' {
+                    out.push(c);
+                    out.extend_from_slice(&frac[..take]);
+                } else {
+                    let mut len = take;
+                    while len > 0 && frac[len - 1] == b'0' {
+                        len -= 1;
+                    }
+                    if len > 0 {
+                        out.push(c);
+                        out.extend_from_slice(&frac[..len]);
+                    }
+                }
+                i += 1 + w;
+            }
+            _ => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    string::from_bytes(&out)
 }
 
 // Civil date from Unix seconds. Returns (year, month, day, hour, min, sec)

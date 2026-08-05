@@ -151,6 +151,13 @@ impl HeaderHandle {
         HeaderHandle(Arc::new(SpinLock::new(header)))
     }
 
+    /// Wrap an existing shared header cell — used by the HTTPS
+    /// response writer (server_tls.rs), which owns its own
+    /// `Arc<SpinLock<Header>>`.
+    pub(crate) fn __from_arc(inner: Arc<SpinLock<Header>>) -> Self {
+        HeaderHandle(inner)
+    }
+
     /// Snapshot: clone the current header state. Use in tests to read back
     /// what was written into the handle.
     pub fn snapshot(&self) -> Header {
@@ -257,7 +264,7 @@ struct respInner {
 
 /// `bodyAllowedForStatus` (transfer.go:461) — whether a response
 /// status permits a body: false for 1xx, 204, and 304.
-fn body_allowed_for_status(status: int) -> bool {
+pub(crate) fn body_allowed_for_status(status: int) -> bool {
     if (100..=199).contains(&status) {
         return false;
     }
@@ -492,13 +499,13 @@ impl Flusher for response {
 
 /// Build the response head (status line + headers + final CRLF).
 /// Shared between buffered and streaming modes.
-fn build_head(status: int, header: &Header) -> Vec<u8> {
+pub(crate) fn build_head(status: int, header: &Header) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::with_capacity(256);
     buf.extend_from_slice(b"HTTP/1.1 ");
     push_dec(&mut buf, status as u32);
     buf.push(b' ');
     let st = status_text(status as u32);
-    buf.extend_from_slice(&*crate::convert::bytes(st));
+    buf.extend_from_slice(st.as_bytes());
     buf.extend_from_slice(b"\r\n");
     let inner = header.__inner();
     for (key, values) in inner.__iter() {
@@ -536,7 +543,7 @@ fn write_chunk(conn: &mut TCPConn, data: &slice<byte>) -> (int, error) {
     (n, terr)
 }
 
-fn push_hex(buf: &mut Vec<u8>, mut n: u64) {
+pub(crate) fn push_hex(buf: &mut Vec<u8>, mut n: u64) {
     if n == 0 {
         buf.push(b'0');
         return;
