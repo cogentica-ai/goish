@@ -49,17 +49,19 @@ pub const LARGE_THRESHOLD: usize = 32 * 1024;
 const INITIAL_ARENA_CHUNKS: usize = 256;
 
 /// Maximum mheap arena size — chunks the radix tree's metadata is
-/// pre-sized to cover. With 4 MiB chunks, 8192 chunks is a 32 GiB
+/// pre-sized to cover. With 4 MiB chunks, 81920 chunks is a 320 GiB
 /// total heap. Demand-paging means metadata RSS scales with usage —
-/// the pre-size cost is virtual address space plus a few hundred KB
-/// of bitmap metadata, not resident memory.
+/// the pre-size cost is virtual address space plus ~6 MiB of bitmap
+/// metadata (~73 B/chunk), not resident memory.
 ///
-/// Raised from 512 (2 GiB) for goish-vllm-port M15: dequantizing one
-/// REAL Kimi-K3 dense layer to f32 is ~2.9 GB in a single allocation,
-/// and a 4-layer slice needs ~11 GB of f32 tensors live at once. The
-/// old cap made `k3k-cli` die with "mheap: arena exhausted" on the
-/// first real checkpoint it ever loaded.
-const MAX_ARENA_CHUNKS: usize = 8192;
+/// Raised from 512 (2 GiB) → 8192 (32 GiB) → 81920 for goish-vllm-port
+/// M15: the FULL 93-layer Kimi-K3 checkpoint dequantizes ~203 GiB of
+/// non-expert f32 into the heap (census against the real shard
+/// headers), and the cap must clear that plus load transients. The
+/// arena mapping is MAP_NORESERVE, so the reservation neither commits
+/// memory nor trips overcommit accounting on boxes smaller than the
+/// cap.
+const MAX_ARENA_CHUNKS: usize = 81920;
 
 // ─── mheap ────────────────────────────────────────────────────────────
 
@@ -71,11 +73,14 @@ unsafe fn map_arena(n_chunks: usize) -> usize {
     // Over-reserve by one chunk so we can always trim down to a
     // chunk-aligned base.
     let total = n_chunks * PALLOC_CHUNK_BYTES + PALLOC_CHUNK_BYTES;
+    // MAP_NORESERVE: this is a demand-paged reservation, not a commit.
+    // Without it, a 320 GiB arena mapping is refused at startup by
+    // overcommit accounting on any box smaller than the cap.
     let raw = syscall::Mmap(
         core::ptr::null_mut(),
         total,
         syscall::PROT_READ | syscall::PROT_WRITE,
-        syscall::MAP_PRIVATE | syscall::MAP_ANONYMOUS,
+        syscall::MAP_PRIVATE | syscall::MAP_ANONYMOUS | syscall::MAP_NORESERVE,
         -1,
         0,
     );
