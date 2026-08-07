@@ -373,6 +373,11 @@ impl PageAlloc {
         self.update(base, npages);
     }
 
+    /// Total chunk capacity the metadata was pre-sized for (`max_chunks`).
+    pub fn capacity_chunks(&self) -> usize {
+        self.chunks_capacity
+    }
+
     /// `(*pageAlloc).grow` — extend the heap by `n_more` chunks of
     /// fresh memory contiguous with the existing arena. The caller is
     /// responsible for ensuring the new range is mmap'd and writable.

@@ -49,11 +49,17 @@ pub const LARGE_THRESHOLD: usize = 32 * 1024;
 const INITIAL_ARENA_CHUNKS: usize = 256;
 
 /// Maximum mheap arena size — chunks the radix tree's metadata is
-/// pre-sized to cover. With 4 MiB chunks, 512 chunks is a 2 GiB
-/// total heap. Demand-paging means metadata RSS scales with usage.
-/// Sized to accommodate 1 M-goroutine workloads where each G + its
-/// closure box land in mcentral-managed spans.
-const MAX_ARENA_CHUNKS: usize = 512;
+/// pre-sized to cover. With 4 MiB chunks, 8192 chunks is a 32 GiB
+/// total heap. Demand-paging means metadata RSS scales with usage —
+/// the pre-size cost is virtual address space plus a few hundred KB
+/// of bitmap metadata, not resident memory.
+///
+/// Raised from 512 (2 GiB) for goish-vllm-port M15: dequantizing one
+/// REAL Kimi-K3 dense layer to f32 is ~2.9 GB in a single allocation,
+/// and a 4-layer slice needs ~11 GB of f32 tensors live at once. The
+/// old cap made `k3k-cli` die with "mheap: arena exhausted" on the
+/// first real checkpoint it ever loaded.
+const MAX_ARENA_CHUNKS: usize = 8192;
 
 // ─── mheap ────────────────────────────────────────────────────────────
 
@@ -88,7 +94,11 @@ pub unsafe fn mheap_init() {
     if MHEAP_READY.load(Ordering::Acquire) {
         return;
     }
-    let arena_base = map_arena(INITIAL_ARENA_CHUNKS);
+    // Reserve the FULL max range up front: anonymous mmap is
+    // demand-paged, so the cost is virtual address space only, and it
+    // guarantees grow() always has contiguous room without MAP_FIXED
+    // games.
+    let arena_base = map_arena(MAX_ARENA_CHUNKS);
     let pages = PageAlloc::new(arena_base, INITIAL_ARENA_CHUNKS, MAX_ARENA_CHUNKS);
     *MHEAP.lock() = Some(pages);
     MHEAP_READY.store(true, Ordering::Release);
@@ -102,6 +112,12 @@ pub fn mheap_arena_base() -> usize {
 }
 
 /// Page-grain mheap alloc. Public so mcentral can draw spans.
+///
+/// Grows the arena ON DEMAND: `PageAlloc::grow` existed but had no
+/// caller, so the heap silently capped at INITIAL_ARENA_CHUNKS (1 GiB)
+/// and the first real-checkpoint load died with "arena exhausted".
+/// The full MAX range is reserved at init, so growth is just extending
+/// the active chunk count over already-mapped, demand-paged memory.
 pub unsafe fn mheap_alloc_pages(npages: usize) -> usize {
     let mut g = MHEAP.lock();
     let h = g.as_mut().unwrap_or_else(|| {
@@ -109,6 +125,19 @@ pub unsafe fn mheap_alloc_pages(npages: usize) -> usize {
         syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
         syscall::Exit(2);
     });
+    let addr = h.alloc(npages);
+    if addr != ALLOC_FAILED {
+        return addr;
+    }
+    // Enough chunks for this request (it may not fit even in a fresh
+    // region if growth were too small), plus a step to amortize.
+    let need = (npages * PAGE_SIZE + PALLOC_CHUNK_BYTES - 1) / PALLOC_CHUNK_BYTES;
+    let room = h.capacity_chunks() - h.end_chunk;
+    let step = need.max(64).min(room);
+    if step < need {
+        return ALLOC_FAILED; // truly out: request exceeds MAX
+    }
+    h.grow(step);
     h.alloc(npages)
 }
 
