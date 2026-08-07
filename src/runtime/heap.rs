@@ -146,6 +146,17 @@ pub unsafe fn mheap_alloc_pages(npages: usize) -> usize {
     h.alloc(npages)
 }
 
+/// Total page capacity of the arena (`MAX_ARENA_CHUNKS` worth) — what
+/// mcentral sizes its page → span map to, so no mheap-backed span can
+/// ever be untracked.
+pub fn mheap_capacity_pages() -> usize {
+    let g = MHEAP.lock();
+    match g.as_ref() {
+        Some(h) => h.capacity_chunks() * (PALLOC_CHUNK_BYTES / PAGE_SIZE),
+        None => 0,
+    }
+}
+
 /// Page-grain mheap free. Public so mcentral can return empty spans.
 pub unsafe fn mheap_free_pages(base: usize, npages: usize) {
     let mut g = MHEAP.lock();
