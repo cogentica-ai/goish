@@ -864,4 +864,6 @@ path = "examples/json_int_diff.rs"
 name = "json_map_diff"
 path = "examples/json_map_diff.rs"
 
-
+[[example]]
+name = "term_pty_smoke"
+path = "examples/term_pty_smoke.rs"

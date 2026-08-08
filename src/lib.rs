@@ -104,6 +104,7 @@ pub mod strconv;
 pub mod strings;
 pub mod sync;
 pub mod syscall;
+pub mod term;
 pub mod testing;
 pub mod text;
 pub mod time;
