@@ -15,6 +15,7 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::time;
@@ -51,9 +52,11 @@ fn main() {
     // 1. FileServer dispatch via /static/passwd → /etc/passwd.
     {
         let url = build_url(&addr, "/static/passwd");
-        let (resp, _) = http::Get(url);
-        if resp.StatusCode == 200 && resp.Body.Len() > 0 {
-            Println!("[ 1] FileServer 200            PASS body={}B", resp.Body.Len());
+        let (mut resp, _) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 200 && body.Len() > 0 {
+            Println!("[ 1] FileServer 200            PASS body={}B", body.Len());
         } else {
             Println!("[ 1] FileServer 200            FAIL status={}", resp.StatusCode);
             failed += 1;
@@ -86,9 +89,11 @@ fn main() {
     // 4. ServeFile direct route.
     {
         let url = build_url(&addr, "/raw/passwd");
-        let (resp, _) = http::Get(url);
-        if resp.StatusCode == 200 && resp.Body.Len() > 0 {
-            Println!("[ 4] ServeFile direct          PASS body={}B", resp.Body.Len());
+        let (mut resp, _) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 200 && body.Len() > 0 {
+            Println!("[ 4] ServeFile direct          PASS body={}B", body.Len());
         } else {
             Println!("[ 4] ServeFile direct          FAIL status={}", resp.StatusCode);
             failed += 1;

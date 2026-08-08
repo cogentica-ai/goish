@@ -48,6 +48,7 @@ loops_for() {
     time_sleep|time_timer|stopwatch|signal_smoke|signal_winch_smoke|sigaltstack_offline_proof|\
     context_*|cmd_stdout_pipe_test|syscall_fswatch_smoke|m20_smoke|\
     goginx|https_real_smoke|http_shutdown_smoke|http_keepalive_smoke|\
+    http_stream_body_smoke|\
     http_panic_demo|production_http_server|tls_smoke|tls_server_smoke)
       echo "$TIER3" ;;
     # tier 2 — memory / allocator / runtime introspection

@@ -11,6 +11,7 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::time;
@@ -38,8 +39,10 @@ fn main() {
     time::Sleep(time::Millisecond * 30);
 
     let url = build_url(&addr, "/hello");
-    let (resp, _) = http::Get(url);
-    if resp.StatusCode == 200 && body_eq(&resp.Body, b"from default mux\n") {
+    let (mut resp, _) = http::Get(url);
+    let (body, _) = io::ReadAll(&mut resp.Body);
+    let _ = io::Closer::Close(&mut resp.Body);
+    if resp.StatusCode == 200 && body_eq(&body, b"from default mux\n") {
         Println!("[ 1] DefaultServeMux dispatch  PASS");
     } else {
         Println!("[ 1] DefaultServeMux dispatch  FAIL status={}", resp.StatusCode);

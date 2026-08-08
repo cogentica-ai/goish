@@ -448,6 +448,16 @@ pub fn NewReader<R: io::Reader>(rd: R) -> Reader<R> {
     NewReaderSize(rd, defaultBufSize)
 }
 
+impl<R: io::Reader> Reader<R> {
+    /// Crate-internal: mutable access to the wrapped reader. The
+    /// streaming `http::Body` owns its connection through a
+    /// `bufio::Reader` (which may hold read-ahead response bytes) and
+    /// closes the conn through here.
+    pub(crate) fn __rd_mut(&mut self) -> &mut R {
+        &mut self.rd
+    }
+}
+
 /// `bufio.NewReaderSize(rd, size)` — buffered reader with the given
 /// minimum buffer size (silently floored to `minReadBufferSize`).
 pub fn NewReaderSize<R: io::Reader>(rd: R, size: int) -> Reader<R> {

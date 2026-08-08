@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 
 use goish::bytes::NewReader;
 use goish::goslice::slice;
-use goish::io::Reader;
+use goish::io::{self, Reader};
 use goish::net;
 use goish::net::http;
 use goish::time;
@@ -45,11 +45,13 @@ fn main() {
     // Error handler — 500, body "oops\n", Content-Type: text/plain, X-Content-Type-Options: nosniff.
     {
         let url = build_url(&addr, "/err");
-        let (resp, _) = http::Get(url);
+        let (mut resp, _) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = io::Closer::Close(&mut resp.Body);
         let ct = resp.Header.Get(string("Content-Type"));
         let ncto = resp.Header.Get(string("X-Content-Type-Options"));
         if resp.StatusCode == 500
-            && body_eq(&resp.Body, b"oops\n")
+            && body_eq(&body, b"oops\n")
             && ct == "text/plain; charset=utf-8"
             && ncto == "nosniff"
         {
@@ -63,8 +65,10 @@ fn main() {
     // NotFound handler — 404, "404 page not found\n".
     {
         let url = build_url(&addr, "/missing");
-        let (resp, _) = http::Get(url);
-        if resp.StatusCode == 404 && body_eq(&resp.Body, b"404 page not found\n") {
+        let (mut resp, _) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 404 && body_eq(&body, b"404 page not found\n") {
             Println!("[ 2] http::NotFound            PASS");
         } else {
             Println!("[ 2] http::NotFound            FAIL status={}", resp.StatusCode);

@@ -102,6 +102,13 @@ pub fn NewChunkedReader<R: Reader>(r: R) -> ChunkedReader<R> {
 }
 
 impl<R: Reader> ChunkedReader<R> {
+    /// Crate-internal: mutable access to the internal buffered reader,
+    /// and through it (`__rd_mut`) the wrapped source. The streaming
+    /// `http::Body` closes its connection down this path.
+    pub(crate) fn __bufio_mut(&mut self) -> &mut bufio::Reader<R> {
+        &mut self.r
+    }
+
     /// Line-by-line port of `(*chunkedReader).beginChunk`
     /// (chunked.go:46).
     fn begin_chunk(&mut self) {

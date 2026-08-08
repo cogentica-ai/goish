@@ -13,6 +13,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use goish::convert::bytes;
+use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::os;
@@ -47,8 +48,10 @@ fn main() {
     // 1. GET / → 200 + HTML body containing both file links.
     {
         let url = build_url(&addr, "/");
-        let (resp, _) = http::Get(url);
-        let body = body_str(&resp.Body);
+        let (mut resp, _) = http::Get(url);
+        let (body_bytes, _) = io::ReadAll(&mut resp.Body);
+        let _ = io::Closer::Close(&mut resp.Body);
+        let body = body_str(&body_bytes);
         let ct = resp.Header.Get(string("Content-Type"));
         let has_a = goish::strings::Contains(body.clone(), string(">a.txt</a>"));
         let has_b = goish::strings::Contains(body.clone(), string(">b.txt</a>"));

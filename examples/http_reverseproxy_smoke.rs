@@ -13,6 +13,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use goish::convert::bytes;
+use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::time;
@@ -69,8 +70,10 @@ fn main() {
     // 1. GET front:/api/echo → 200, body proxied from backend.
     {
         let url = build_url(&front_addr, "/api/echo");
-        let (resp, _) = http::Get(url);
-        let body = body_str(&resp.Body);
+        let (mut resp, _) = http::Get(url);
+        let (body_bytes, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
+        let body = body_str(&body_bytes);
         let xb = resp.Header.Get(string("X-Backend"));
         if resp.StatusCode == 200
             && goish::strings::Contains(body.clone(), string("backend says hello"))
@@ -89,8 +92,10 @@ fn main() {
     // 2. Query string is forwarded.
     {
         let url = build_url(&front_addr, "/api/q?a=1&b=two");
-        let (resp, _) = http::Get(url);
-        let body = body_str(&resp.Body);
+        let (mut resp, _) = http::Get(url);
+        let (body_bytes, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
+        let body = body_str(&body_bytes);
         if resp.StatusCode == 200 && body == "a=1&b=two" {
             Println!("[ 2] query forwarded           PASS");
         } else {
@@ -102,7 +107,9 @@ fn main() {
     // 3. Backend not on a route → 404 propagates.
     {
         let url = build_url(&front_addr, "/no-such-route");
-        let (resp, _) = http::Get(url);
+        let (mut resp, _) = http::Get(url);
+        let (_, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 404 {
             Println!("[ 3] 404 propagates            PASS");
         } else {

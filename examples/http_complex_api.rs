@@ -581,18 +581,20 @@ fn main() {
 
         // 1. POST create → 201 + Location + JSON body.
         let name = "POST /api/tasks creates -> 201";
-        let (resp, err) = client.Post(
+        let (mut resp, err) = client.Post(
             Sprintf!("%s/api/tasks", base),
             "application/json",
             r#"{"title":"write complex example","done":false}"#,
         );
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = resp.Body.Close();
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 201 {
             fail(Sprintf!("%s: status %d", name, resp.StatusCode));
         } else if resp.Header.Get("Location") != "/api/tasks/1" {
             fail(Sprintf!("%s: Location %s", name, resp.Header.Get("Location")));
-        } else if !gobytes::Contains(&resp.Body, bytes("\"id\":1")) {
+        } else if !gobytes::Contains(&body, bytes("\"id\":1")) {
             fail(Sprintf!("%s: bad body", name));
         } else {
             pass(name);
@@ -616,7 +618,9 @@ fn main() {
         // 3. GET single → 200 + ETag, body round-trips the struct.
         let name = "GET /api/tasks/1 -> 200 + ETag";
         let mut etag = string::new();
-        let (resp, err) = http::Get(Sprintf!("%s/api/tasks/1", base));
+        let (mut resp, err) = http::Get(Sprintf!("%s/api/tasks/1", base));
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = resp.Body.Close();
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
@@ -629,7 +633,7 @@ fn main() {
                 Done: false,
                 Version: 0,
             };
-            let uerr = json::Unmarshal(&resp.Body, &mut t);
+            let uerr = json::Unmarshal(&body, &mut t);
             if uerr != nil {
                 fail(Sprintf!("%s: unmarshal: %s", name, uerr.Error()));
             } else if t.ID != 1 || t.Title != "write complex example" || t.Version != 1 {
@@ -667,12 +671,14 @@ fn main() {
             req.Body = bytes(r#"{"title":"write complex example","done":true}"#);
             req.ContentLength = req.Body.Len();
             req.Header.Set("Content-Type", "application/json");
-            let (resp, err) = client.Do(&req);
+            let (mut resp, err) = client.Do(&req);
+            let (body, _) = io::ReadAll(&mut resp.Body);
+            let _ = resp.Body.Close();
             if err != nil {
                 fail(Sprintf!("%s: %s", name, err.Error()));
             } else if resp.StatusCode != 200 {
                 fail(Sprintf!("%s: status %d", name, resp.StatusCode));
-            } else if !gobytes::Contains(&resp.Body, bytes("\"version\":2")) {
+            } else if !gobytes::Contains(&body, bytes("\"version\":2")) {
                 fail(Sprintf!("%s: version not bumped", name));
             } else {
                 // old etag must now miss.
@@ -702,7 +708,9 @@ fn main() {
                 fail(Sprintf!("%s: seed create: %s", name, cerr.Error()));
             }
         }
-        let (resp, err) = http::Get(Sprintf!("%s/api/tasks?offset=2&limit=3", base));
+        let (mut resp, err) = http::Get(Sprintf!("%s/api/tasks?offset=2&limit=3", base));
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = resp.Body.Close();
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
@@ -711,7 +719,7 @@ fn main() {
             fail(Sprintf!("%s: total %s", name, resp.Header.Get("X-Total-Count")));
         } else {
             let mut items = make!([]Task, 0);
-            let uerr = json::Unmarshal(&resp.Body, &mut items);
+            let uerr = json::Unmarshal(&body, &mut items);
             if uerr != nil {
                 fail(Sprintf!("%s: unmarshal: %s", name, uerr.Error()));
             } else if items.Len() != 3 || items[0].ID != 3 || items[2].ID != 5 {
@@ -762,7 +770,9 @@ fn main() {
 
         // 9. Request-ID middleware: header present and context-visible.
         let name = "X-Request-Id header matches ctx value";
-        let (resp, err) = http::Get(Sprintf!("%s/api/whoami", base));
+        let (mut resp, err) = http::Get(Sprintf!("%s/api/whoami", base));
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = resp.Body.Close();
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
@@ -772,7 +782,7 @@ fn main() {
             let want = Sprintf!("reqid=%s\n", hdr);
             if hdr.Len() == 0 {
                 fail(Sprintf!("%s: header missing", name));
-            } else if string::from_bytes(&resp.Body.__into_vec()) != want {
+            } else if string::from_bytes(&body.__into_vec()) != want {
                 fail(Sprintf!("%s: body mismatch", name));
             } else {
                 pass(name);
@@ -782,13 +792,15 @@ fn main() {
         // 10. TimeoutHandler: slow handler → 503 + custom message.
         let name = "GET /api/slow times out -> 503";
         let t0 = time::Now();
-        let (resp, err) = http::Get(Sprintf!("%s/api/slow", base));
+        let (mut resp, err) = http::Get(Sprintf!("%s/api/slow", base));
         let took = time::Since(t0);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = resp.Body.Close();
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 503 {
             fail(Sprintf!("%s: status %d", name, resp.StatusCode));
-        } else if !gobytes::Contains(&resp.Body, bytes("too slow")) {
+        } else if !gobytes::Contains(&body, bytes("too slow")) {
             fail(Sprintf!("%s: bad body", name));
         } else if took >= time::Millisecond * 380 {
             fail(Sprintf!("%s: reply not early", name));
@@ -798,12 +810,14 @@ fn main() {
 
         // 11. TimeoutHandler fast path unaffected.
         let name = "GET /api/fast under timeout -> 200";
-        let (resp, err) = http::Get(Sprintf!("%s/api/fast", base));
+        let (mut resp, err) = http::Get(Sprintf!("%s/api/fast", base));
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = resp.Body.Close();
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
             fail(Sprintf!("%s: status %d", name, resp.StatusCode));
-        } else if !gobytes::Contains(&resp.Body, bytes("quick")) {
+        } else if !gobytes::Contains(&body, bytes("quick")) {
             fail(Sprintf!("%s: bad body", name));
         } else {
             pass(name);
@@ -933,12 +947,14 @@ fn main() {
             pass(name);
         }
         let name = "POST /api/import small -> 200";
-        let (resp, err) = client.Post(Sprintf!("%s/api/import", base), "text/plain", "tiny");
+        let (mut resp, err) = client.Post(Sprintf!("%s/api/import", base), "text/plain", "tiny");
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = resp.Body.Close();
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
             fail(Sprintf!("%s: status %d", name, resp.StatusCode));
-        } else if !gobytes::Contains(&resp.Body, bytes("imported 4 bytes")) {
+        } else if !gobytes::Contains(&body, bytes("imported 4 bytes")) {
             fail(Sprintf!("%s: bad body", name));
         } else {
             pass(name);
@@ -962,13 +978,15 @@ fn main() {
             req.Body = buf.Bytes();
             req.ContentLength = req.Body.Len();
             req.Header.Set("Content-Type", &ct);
-            let (resp, err) = client.Do(&req);
+            let (mut resp, err) = client.Do(&req);
+            let (body, _) = io::ReadAll(&mut resp.Body);
+            let _ = resp.Body.Close();
             if err != nil {
                 fail(Sprintf!("%s: %s", name, err.Error()));
             } else if resp.StatusCode != 200 {
                 fail(Sprintf!("%s: status %d", name, resp.StatusCode));
             } else if !gobytes::Contains(
-                &resp.Body,
+                &body,
                 bytes("file=report.bin size=16 meta=quarterly report"),
             ) {
                 fail(Sprintf!("%s: bad body", name));
@@ -1031,12 +1049,14 @@ fn main() {
         // 15. Reverse proxy hop: same resource through the proxy port.
         let name = "GET /api/tasks/1 via reverse proxy";
         let proxy_base = Sprintf!("http://127.0.0.1:%d", int(PROXY_PORT.Load()));
-        let (resp, err) = http::Get(Sprintf!("%s/api/tasks/1", proxy_base));
+        let (mut resp, err) = http::Get(Sprintf!("%s/api/tasks/1", proxy_base));
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = resp.Body.Close();
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
             fail(Sprintf!("%s: status %d", name, resp.StatusCode));
-        } else if !gobytes::Contains(&resp.Body, bytes("\"id\":1")) {
+        } else if !gobytes::Contains(&body, bytes("\"id\":1")) {
             fail(Sprintf!("%s: bad body", name));
         } else if resp.Header.Get("X-Request-Id").Len() == 0 {
             fail(Sprintf!("%s: middleware header lost in proxy hop", name));
