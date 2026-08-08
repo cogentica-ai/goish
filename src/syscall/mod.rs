@@ -84,9 +84,15 @@ pub const SIGPIPE: i32 = 13;
 pub const SIGALRM: i32 = 14;
 pub const SIGTERM: i32 = 15;
 pub const SIGCHLD: i32 = 17;
+pub const SIGCONT: i32 = 18;
+pub const SIGSTOP: i32 = 19;
+pub const SIGTSTP: i32 = 20;
+pub const SIGTTIN: i32 = 21;
+pub const SIGTTOU: i32 = 22;
 pub const SIGURG: i32 = 23;
 pub const SIGXCPU: i32 = 24;
 pub const SIGXFSZ: i32 = 25;
+pub const SIGWINCH: i32 = 28;
 
 // sigaction flags. SA_RESTORER tells the kernel to use the
 // userspace-provided sigreturn trampoline (mandatory on amd64

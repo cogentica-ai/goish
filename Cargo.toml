@@ -391,6 +391,10 @@ name = "signal_smoke"
 path = "examples/signal_smoke.rs"
 
 [[example]]
+name = "signal_winch_smoke"
+path = "examples/signal_winch_smoke.rs"
+
+[[example]]
 name = "leak_proof"
 path = "examples/leak_proof.rs"
 
@@ -859,3 +863,5 @@ path = "examples/json_int_diff.rs"
 [[example]]
 name = "json_map_diff"
 path = "examples/json_map_diff.rs"
+
+
