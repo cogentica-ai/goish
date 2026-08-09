@@ -782,8 +782,6 @@ pub fn lookup_a(host: &str) -> Result<[u8; 4], string> {
         }
     }
 
-    crate::fmt::Println!(crate::gostring::string::from_static("[dns-debug] lookup_a host=") + crate::gostring::string::from_bytes(host.as_bytes()));
-
     let cfg = get_system_dns_config();
     let (addrs, _cname, e) = go_lookup_ip_cname_order(&cfg, "ip4", host);
     if e != errors::nil {
@@ -791,7 +789,6 @@ pub fn lookup_a(host: &str) -> Result<[u8; 4], string> {
         let msg = e.Error();
         return Err(msg);
     }
-    crate::fmt::Println!(crate::gostring::string::from_static("[dns-debug] go_lookup_ip_cname_order got addrs.len=") + crate::strconv::Itoa(addrs.len() as i64) + crate::gostring::string::from_static(" for host=") + crate::gostring::string::from_bytes(host.as_bytes()));
     for addr in &addrs {
         if let Some(v4) = addr.as_ipv4() {
             return Ok(v4);
