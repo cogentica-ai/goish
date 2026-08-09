@@ -74,7 +74,7 @@ use goish::strings;
 use goish::sync::atomic;
 use goish::sync::Mutex;
 use goish::{
-    append, bytes, chan, error, go, int, len, make, map, nil, range, select, slice, string,
+    append, byte, bytes, chan, error, go, int, len, make, map, nil, range, select, slice, string,
     syscall, time, Sprintf,
 };
 
@@ -156,7 +156,7 @@ fn tokenize(src: string) -> slice<string> {
             i += 1;
             continue;
         }
-        let mut word = slice!([]goish::byte {});
+        let mut word = slice!([]byte {});
         while i < n {
             let d = b[i];
             if d == b' '
@@ -904,9 +904,9 @@ fn rawRoundtrip(addr: string, req: string) -> (int, string) {
     }
     let _ = conn.Write(bytes(req));
     let _ = conn.SetReadDeadline(time::Now().Add(time::Second * 3));
-    let mut out = slice!([]goish::byte {});
+    let mut out = slice!([]byte {});
     loop {
-        let mut buf = make!([]goish::byte, 4096);
+        let mut buf = make!([]byte, 4096);
         let (nr, rerr) = conn.Read(&mut buf);
         let mut i: int = 0;
         while i < nr {
@@ -935,9 +935,9 @@ fn tlsRoundtrip(addr: string, req: string) -> (int, string) {
         return (-1, Sprintf!("tls dial: %v", err));
     }
     let _ = conn.Write(bytes(req));
-    let mut out = slice!([]goish::byte {});
+    let mut out = slice!([]byte {});
     loop {
-        let mut buf = make!([]goish::byte, 8192);
+        let mut buf = make!([]byte, 8192);
         let (nr, rerr) = conn.Read(&mut buf);
         let mut i: int = 0;
         while i < nr {
