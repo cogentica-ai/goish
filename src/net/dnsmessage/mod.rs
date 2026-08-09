@@ -883,7 +883,6 @@ fn unpack_svcb_resource(msg: &[u8], off: usize, length: u16) -> Result<SVCBResou
 
     // First pass: count params
     let mut n = 0usize;
-    let mut total_vlen = 0u32;
     let mut tmp_off = params_off;
     let mut prev_key: Option<u16> = None;
     while tmp_off < body_end {
@@ -894,7 +893,6 @@ fn unpack_svcb_resource(msg: &[u8], off: usize, length: u16) -> Result<SVCBResou
         prev_key = Some(key);
         let (len, no) = unpack_u16(msg, no).map_err(|e| nested_err("Params value length", e))?;
         if no + len as usize > body_end { return Err(err_resource_len()); }
-        total_vlen += len as u32;
         tmp_off = no + len as usize;
         n += 1;
     }

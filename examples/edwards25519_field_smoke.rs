@@ -27,7 +27,6 @@ use goish::crypto::internal::fips140::edwards25519::field::Element;
 use goish::types::byte;
 use goish::{slice, syscall, Println};
 
-const KB: usize = 1024;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 

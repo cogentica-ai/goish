@@ -9,7 +9,7 @@ extern crate alloc;
 extern crate goish;
 
 use goish::bytes;
-use goish::io::{self, ByteReader, ByteScanner, ByteWriter, ReaderAt, Seeker, StringWriter};
+use goish::io::{self};
 use goish::strings;
 use goish::{byte, string, syscall, Println};
 

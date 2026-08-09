@@ -17,7 +17,7 @@
 
 extern crate alloc;
 
-use crate::errors::{ErrorTrait, error};
+use crate::errors::error;
 use crate::goslice::slice;
 use crate::types::byte;
 
@@ -61,13 +61,6 @@ fn quarterRound(a: u32, b: u32, c: u32, d: u32) -> (u32, u32, u32, u32) {
 #[inline(always)]
 fn read_u32_le(b: &[byte]) -> u32 {
     u32::from_le_bytes([b[0], b[1], b[2], b[3]])
-}
-
-/// XOR `src` 4-byte chunk with (a+b) and write little-endian to `dst`.
-#[inline(always)]
-fn addXor(dst: &mut [byte], src: &[byte], a: u32, b: u32) {
-    let v = read_u32_le(&src[..4]) ^ a.wrapping_add(b);
-    dst[..4].copy_from_slice(&v.to_le_bytes());
 }
 
 impl Cipher {

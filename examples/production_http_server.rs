@@ -51,7 +51,7 @@ use goish::sync::atomic::Uint64;
 use goish::time;
 use goish::{
     append, bytes, float64, go, int, int64, make, nil, string, uint64, Eprintln, Printf, Println,
-    Sprintf, KB,
+    Sprintf,
 };
 
 // ─── shared server state ─────────────────────────────────────────────

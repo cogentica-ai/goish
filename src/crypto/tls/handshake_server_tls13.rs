@@ -44,7 +44,7 @@ use alloc::vec::Vec;
 
 use crate::crypto::ecdh;
 use crate::crypto::tls::handshake_client_tls13::{
-    read_tls13_record, tls13_encrypt_record_suite, tls13_signed_message, Tls13HandshakeReader,
+    tls13_encrypt_record_suite, tls13_signed_message, Tls13HandshakeReader,
 };
 use crate::crypto::tls::handshake_messages::{
     certificateMsgTLS13, certificateVerifyMsg, clientHelloMsg, compressionNone,
@@ -223,6 +223,8 @@ fn read_client_hello_bytes(conn: &mut dyn crate::net::Conn) -> (Vec<byte>, error
 /// Result of a completed server handshake, alongside the record-layer
 /// key material: connection-level facts the caller may expose
 /// (Go: fields set on `Conn` by the handshake).
+// Go-shape Conn facts; unread until tls.ConnectionState is surfaced.
+#[allow(dead_code)]
 pub(crate) struct ServerHandshakeInfo {
     /// Negotiated ALPN protocol ("" if none).
     pub alpn_protocol: alloc::string::String,

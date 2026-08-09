@@ -28,8 +28,6 @@ use goish::math::big;
 use goish::types::byte;
 use goish::{slice, syscall, Println};
 
-const KB: usize = 1024;
-const TOTAL: usize = 10;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 

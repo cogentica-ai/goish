@@ -15,7 +15,6 @@
 #![no_main]
 
 use goish::encoding::json;
-use goish::io::Writer as _;
 use goish::{append, byte, bytes, int, make, nil, os, slice, string, Fprintln};
 
 fn read_all<R: goish::io::Reader>(mut r: R) -> slice<byte> {
@@ -51,7 +50,7 @@ fn main() {
         os::Exit(1);
     }
     let (out, _) = json::MarshalIndent(&v, "", "  ");
-    let mut o = os::Stdout();
+    let o = os::Stdout();
     let _ = o.Write(out);
     let _ = o.Write(bytes(string("\n")));
 }

@@ -859,6 +859,7 @@ macro_rules! __var_munch {
         $($rest:tt)*
     ) => {
         $(#[$attr])*
+        #[allow(non_upper_case_globals)]
         $vis const $name: $ty = $val;
         $crate::__var_munch!( $($rest)* );
     };

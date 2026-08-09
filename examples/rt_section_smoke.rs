@@ -39,7 +39,7 @@ fn write_hex(label: &[u8], v: u64) {
     let mut buf = [0u8; 18];
     buf[0] = b'0';
     buf[1] = b'x';
-    let mut x = v;
+    let x = v;
     for i in 0..16 {
         let nib = ((x >> ((15 - i) * 4)) & 0xf) as u8;
         buf[2 + i] = if nib < 10 { b'0' + nib } else { b'a' + (nib - 10) };
@@ -56,8 +56,8 @@ fn main() {
     write_hex(b"end   = ", end);
     write_hex(b"len   = ", len);
 
-    let tagged_pc = tagged_function as usize as u64;
-    let untagged_pc = untagged_function as usize as u64;
+    let tagged_pc = tagged_function as *const () as usize as u64;
+    let untagged_pc = untagged_function as *const () as usize as u64;
     write_hex(b"tagged_function    = ", tagged_pc);
     write_hex(b"untagged_function  = ", untagged_pc);
 

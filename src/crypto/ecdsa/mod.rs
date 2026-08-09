@@ -10,9 +10,7 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
-use crate::errors::{self, error};
-use crate::goslice::slice;
+use crate::errors::error;
 use crate::types::byte;
 
 // ─── P-256 curve parameters ────────────────────────────────────────────────────
@@ -261,7 +259,7 @@ struct JacobianPoint {
 impl JacobianPoint {
     fn identity() -> Self {
         // Point at infinity: Z = 0
-        let mut z = [0u8; 32];
+        let z = [0u8; 32];
         JacobianPoint { x: [0u8; 32], y: [0u8; 32], z }
     }
 
@@ -295,7 +293,7 @@ fn point_double(p: &JacobianPoint) -> JacobianPoint {
     if p.is_identity() {
         return p.clone();
     }
-    let pr = &P256_P;
+    let _pr = &P256_P;
 
     // Using "dbl-1998-cmo-2" algorithm:
     // W = a*Z^4 + 3*X^2  (but a=-3, so W = 3*(X^2 - Z^4) = 3*(X-Z^2)*(X+Z^2))
@@ -699,7 +697,7 @@ fn u256_mul_mod_n(a: &U256, b: &U256) -> U256 {
 /// On error, returns all-zeros for client_priv_bytes.
 pub fn p256_ecdh_generate_and_compute(server_pub_65: &[u8]) -> ([u8; 32], [u8; 32], [u8; 32]) {
     let zero32 = [0u8; 32];
-    let zero65 = [0u8; 65];
+    let _zero65 = [0u8; 65];
 
     if server_pub_65.len() < 65 || server_pub_65[0] != 0x04 {
         return (zero32, zero32, zero32);
@@ -727,7 +725,7 @@ pub fn p256_ecdh_generate_and_compute(server_pub_65: &[u8]) -> ([u8; 32], [u8; 3
 
     // Compute client public key: scalar * G
     let client_pub_jacobian = point_scalar_mul_affine(&scalar, &P256_GX, &P256_GY);
-    let (client_pub_x, client_pub_y) = match client_pub_jacobian.to_affine() {
+    let (client_pub_x, _client_pub_y) = match client_pub_jacobian.to_affine() {
         Some(pt) => pt,
         None => return (zero32, zero32, zero32),
     };

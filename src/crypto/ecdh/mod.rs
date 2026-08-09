@@ -77,7 +77,7 @@ fn fe_from_bytes(b: &[u8; 32]) -> Fe {
 
 /// Write a field element to 32 bytes in canonical form.
 fn fe_to_bytes(f: &Fe) -> [u8; 32] {
-    let mut h = fe_reduce(f);
+    let h = fe_reduce(f);
 
     let mut out = [0u8; 32];
     out[0]  = (h[0])                        as u8; // goishlint:ignore GOISH005

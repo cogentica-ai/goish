@@ -170,7 +170,7 @@ pub unsafe fn make_context(gobuf: &mut Gobuf, stack_top: usize, entry: extern "C
 
     let sp = stack_top - 16;
     // Topmost slot — return address if `entry` ever falls through.
-    *((stack_top - 8) as *mut usize) = goexit_trampoline as usize;
+    *((stack_top - 8) as *mut usize) = goexit_trampoline as *const () as usize;
     // Below — first PC popped by the initial RET.
     *(sp as *mut usize) = entry as usize;
 
@@ -338,7 +338,7 @@ pub unsafe fn make_context_gogo(
     debug_assert!(stack_top % 16 == 0, "stack_top not 16-byte aligned");
     let sp = stack_top - 8;
     // Trampoline catches the case where `entry` returns.
-    *(sp as *mut usize) = goexit_trampoline as usize;
+    *(sp as *mut usize) = goexit_trampoline as *const () as usize;
     *gobuf = Gobuf::new();
     gobuf.rsp = sp as u64;
     gobuf.pc = entry as u64;

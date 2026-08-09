@@ -237,7 +237,6 @@ impl<V: Clone + Default + Send + 'static> Group<V> {
         //   Library-internal go!() opts up to 64 KiB stack — closure
         //   captures user-supplied fn_ which may want a roomier stack
         //   in debug builds.
-        const KB: usize = 1024;
         let g = self.clone();
         let c2 = c.clone();
         let key2 = key.clone();

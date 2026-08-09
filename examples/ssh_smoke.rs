@@ -17,7 +17,6 @@ extern crate alloc;
 use goish::fmt;
 use goish::syscall;
 use goish::testing;
-use goish::gostring::string;
 use goish::crypto::ssh;
 use goish::int32;
 

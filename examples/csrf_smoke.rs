@@ -28,7 +28,6 @@ use goish::gostring::string;
 use goish::net::http;
 use goish::{syscall, Println};
 
-const KB: usize = 1024;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 

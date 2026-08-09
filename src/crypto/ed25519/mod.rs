@@ -26,7 +26,6 @@
 
 extern crate alloc;
 
-use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::crypto;

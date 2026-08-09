@@ -31,7 +31,6 @@ use goish::sync::singleflight::Group;
 use goish::sync::WaitGroup;
 use goish::{go, syscall, time, Println};
 
-const KB: usize = 1024;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 

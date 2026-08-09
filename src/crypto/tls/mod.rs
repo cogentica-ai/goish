@@ -978,7 +978,7 @@ pub fn X509KeyPair(
 
     // Key input: skip non-key blocks until one whose type is
     // "PRIVATE KEY" or ends in " PRIVATE KEY" (tls.go:299).
-    let mut key_der: Option<slice<byte>> = None;
+    let key_der: slice<byte>;
     let mut rest: Vec<byte> = keyPEMBlock.as_ref().to_vec();
     loop {
         let (block_opt, new_rest) = pem::Decode(slice::<byte>::__from_vec(rest));
@@ -992,7 +992,7 @@ pub fn X509KeyPair(
             Some(blk) => {
                 let t: &str = blk.Type.as_ref();
                 if t == "PRIVATE KEY" || t.ends_with(" PRIVATE KEY") {
-                    key_der = Some(blk.Bytes);
+                    key_der = blk.Bytes;
                     break;
                 }
                 rest = new_rest.__into_vec();
@@ -1005,8 +1005,6 @@ pub fn X509KeyPair(
             }
         }
     }
-    let key_der = key_der.unwrap();
-
     let (private_key, err) = parsePrivateKey(key_der);
     if !err.IsNil() {
         return (Certificate::default(), err);

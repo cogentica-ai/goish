@@ -21,7 +21,6 @@ use goish::compress::flate;
 use goish::runtime::sched::schedule;
 use goish::{go, syscall, Println};
 
-const KB: usize = 1024;
 
 #[goish::main]
 fn main() {

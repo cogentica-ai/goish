@@ -28,7 +28,6 @@ use goish::sync::atomic::Pointer;
 use goish::sync::WaitGroup;
 use goish::{go, syscall, Println};
 
-const KB: usize = 1024;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 

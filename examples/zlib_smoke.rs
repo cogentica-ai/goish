@@ -38,7 +38,6 @@ use goish::runtime::sched::schedule;
 use goish::types::{byte, int};
 use goish::{bytes, go, syscall, Println};
 
-const KB: usize = 1024;
 const TOTAL: usize = 12;
 
 // Linux open(2) flags not exported by goish::syscall.

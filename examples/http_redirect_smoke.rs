@@ -10,7 +10,7 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use goish::io::{self, Writer};
+use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::time;

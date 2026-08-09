@@ -111,7 +111,7 @@ fn test_per_p_binding() {
     let n = num_ps();
     let mut bound = 0usize;
     let mut max_id: i32 = -1;
-    let mut id_seen = AtomicI32::new(0);
+    let id_seen = AtomicI32::new(0);
     for_each_p(|p| {
         if let Some(m_storage) = p.bound_m() {
             bound += 1;

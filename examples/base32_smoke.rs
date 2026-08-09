@@ -11,16 +11,11 @@
 extern crate alloc;
 extern crate goish;
 
-use alloc::vec::Vec;
 use goish::convert::{bytes as to_bytes, string as to_string};
 use goish::encoding::base32;
 use goish::goslice::slice;
 use goish::types::byte;
 use goish::{syscall, Println};
-
-fn empty_buf() -> slice<byte> {
-    slice::<byte>::__from_vec(Vec::new())
-}
 
 fn raw(s: &slice<byte>) -> &[byte] {
     s

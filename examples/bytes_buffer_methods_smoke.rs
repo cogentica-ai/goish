@@ -9,7 +9,7 @@ extern crate alloc;
 extern crate goish;
 
 use goish::bytes;
-use goish::{string, syscall, Println};
+use goish::{syscall, Println};
 
 #[goish::main]
 fn main() {

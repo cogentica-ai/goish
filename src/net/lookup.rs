@@ -21,7 +21,7 @@ use alloc::vec::Vec;
 use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::types::{byte, int, uint16};
+use crate::types::{byte, uint16};
 use crate::context;
 use crate::nilable;
 
@@ -305,9 +305,6 @@ impl Resolver {
         let mut out = slice::<string>::new();
         for n in &names {
             out = crate::append!(out, string::from_bytes(n.as_bytes()));
-        }
-        if names.len() < /* original len if we tracked filtered */ 0 {
-            // filtered case — unreachable here since we only push valid ones
         }
         (out, errors::nil)
     }

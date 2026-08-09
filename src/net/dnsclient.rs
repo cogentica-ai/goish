@@ -23,7 +23,6 @@ extern crate alloc;
 use alloc::vec::Vec;
 use alloc::vec;
 use alloc::string::String;
-use alloc::borrow::ToOwned;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::errors::{self, error};

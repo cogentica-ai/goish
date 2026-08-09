@@ -82,9 +82,9 @@ extern "C" fn goish_sigtramp(sig: i32) {
 /// over the same signal is fine.
 pub fn install_handler(sig: i32) {
     let sa = syscall::Sigaction {
-        sa_handler: goish_sigtramp as usize,
+        sa_handler: goish_sigtramp as *const () as usize,
         sa_flags: syscall::SA_RESTORER | syscall::SA_RESTART,
-        sa_restorer: syscall::SigreturnTrampoline as usize,
+        sa_restorer: syscall::SigreturnTrampoline as *const () as usize,
         sa_mask: 0,
     };
     unsafe {

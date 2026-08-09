@@ -36,7 +36,6 @@ use goish::math::big;
 use goish::types::byte;
 use goish::{slice, syscall, Println};
 
-const KB: usize = 1024;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
@@ -81,9 +80,7 @@ fn test_key() -> PrivateKey {
 // SHA-256 digest of a fixed message, used as the signing input.
 fn sha256_digest() -> slice<byte> {
     let mut h = sha256::New();
-    use goish::io::Writer;
     let _ = h.Write(from_bytes(b"the quick brown fox"));
-    use goish::hash::Hash;
     h.Sum(slice::new())
 }
 

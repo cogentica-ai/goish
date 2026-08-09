@@ -7,7 +7,7 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::io::{Closer, Reader};
+use goish::io::Reader;
 use goish::os;
 use goish::{string, syscall, Println};
 

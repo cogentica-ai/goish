@@ -10,7 +10,6 @@ extern crate goish;
 use goish::convert::bytes;
 use goish::goslice::slice;
 use goish::io;
-use goish::io::{Closer, Reader, Writer};
 use goish::os;
 use goish::types::byte;
 use goish::{syscall, Println};
@@ -48,10 +47,10 @@ fn main() {
         }
     }
 
-    // 2. Pipe fds are valid (non-negative).
+    // 2. Pipe succeeds and hands back two distinct fds.
     {
-        let (r, w, _) = os::Pipe();
-        if r.Fd() >= 0 && w.Fd() >= 0 {
+        let (r, w, e) = os::Pipe();
+        if e.IsNil() && r.Fd() != w.Fd() {
             Println!("[ 2] Pipe fds valid            PASS");
         } else {
             Println!("[ 2] Pipe fds valid            FAIL");

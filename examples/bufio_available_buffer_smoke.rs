@@ -24,7 +24,7 @@ fn main() {
     // 1. AvailableBuffer on a fresh writer returns len=0, cap≥avail.
     {
         let buf = bytes::NewBuffer(slice::<byte>::__from_vec(Vec::new()));
-        let mut w = bufio::NewWriterSize(buf, 64);
+        let w = bufio::NewWriterSize(buf, 64);
         let av = w.AvailableBuffer();
         if av.Len() == 0 {
             Println!("[ 1] AvailableBuffer fresh len PASS");
@@ -70,7 +70,7 @@ fn main() {
     //    each other's capacity.
     {
         let buf = bytes::NewBuffer(slice::<byte>::__from_vec(Vec::new()));
-        let mut w = bufio::NewWriterSize(buf, 64);
+        let w = bufio::NewWriterSize(buf, 64);
         let a = w.AvailableBuffer();
         let b = w.AvailableBuffer();
         if a.Len() == 0 && b.Len() == 0 {

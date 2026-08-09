@@ -11,7 +11,6 @@ extern crate goish;
 use alloc::vec::Vec;
 
 use goish::convert::bytes;
-use goish::io::Writer;
 use goish::net::http;
 use goish::{string, syscall, Println};
 

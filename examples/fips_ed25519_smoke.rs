@@ -31,7 +31,6 @@ use goish::crypto::internal::fips140::ed25519::{
 use goish::types::byte;
 use goish::{slice, syscall, Println};
 
-const KB: usize = 1024;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 const TOTAL: u8 = 7;
