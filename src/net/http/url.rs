@@ -954,7 +954,13 @@ pub fn ValuesEncode(v: crate::gomap::map<string, crate::goslice::slice<string>>)
     // Go: var buf strings.Builder
     let mut buf = crate::strings::Builder::new();
     // Go: for _, k := range slices.Sorted(maps.Keys(v)) { ... }
-    let keys = v.Keys(); // gomap::Keys returns BTreeMap-sorted slice
+    // gomap is a hash table (bucket-walk Keys order), so sort here —
+    // Go's Encode output is key-sorted.
+    let keys = {
+        let mut kv = crate::goslice::slice::__into_vec(v.Keys());
+        kv.sort();
+        crate::goslice::slice::__from_vec(kv)
+    };
     let mut i: int = 0;
     while i < keys.Len() {
         let k = keys[i].clone();

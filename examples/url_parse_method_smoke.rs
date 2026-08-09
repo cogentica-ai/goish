@@ -91,7 +91,7 @@ fn main() {
     {
         let mut v: map<string, slice<string>> = map::<string, slice<string>>::new();
         let mut s: slice<string> = slice::__from_vec(alloc::vec::Vec::new());
-        s = goish::append!(s, string("v1"));
+        s = goish::append!(s, "v1");
         v.Set(string("k"), s);
         if ValuesHas(&v, string("k")) {
             Println!("[ 6] ValuesHas present         PASS");
