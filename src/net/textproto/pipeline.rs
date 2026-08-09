@@ -1,6 +1,6 @@
 // net/textproto/pipeline.rs — line-by-line port of Go 1.25 net/textproto/pipeline.go.
 //
-// Source: /nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/net/textproto/pipeline.go
+// Source: go1.25.5/src/net/textproto/pipeline.go
 //
 // Pipeline manages an in-order request/response sequence over a single
 // connection (HTTP keep-alive, SMTP, NNTP). Internally it owns two

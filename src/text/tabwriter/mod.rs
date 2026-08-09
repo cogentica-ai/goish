@@ -1,7 +1,7 @@
 // text/tabwriter — write filter that aligns tab-delimited columns.
 //
 // Line-by-line port of:
-//   /nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/
+//   go1.25.5/src/
 //     text/tabwriter/tabwriter.go
 //
 // The package is using the Elastic Tabstops algorithm described at

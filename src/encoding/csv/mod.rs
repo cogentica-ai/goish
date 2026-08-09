@@ -1,7 +1,7 @@
 // encoding/csv — comma-separated values reader/writer.
 //
 // Line-by-line port of:
-//   /nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/
+//   go1.25.5/src/
 //     encoding/csv/reader.go
 //     encoding/csv/writer.go
 //

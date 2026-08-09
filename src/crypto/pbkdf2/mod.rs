@@ -1,7 +1,7 @@
 // crypto/pbkdf2 — PBKDF2 key derivation (RFC 8018 / PKCS #5 v2.1).
 //
 // Source files:
-//   /nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/
+//   go1.25.5/src/
 //     crypto/pbkdf2/pbkdf2.go
 //     crypto/internal/fips140/pbkdf2/pbkdf2.go  (inlined)
 //

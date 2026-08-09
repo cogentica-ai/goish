@@ -7,7 +7,7 @@
 // http.DetectContentType also covers, plus common text formats that
 // the WhatWG sniff algorithm wouldn't catch (CSS, JS, JSON, etc.).
 //
-// Reference: /nix/store/.../mime/type.go and /etc/mime.types.
+// Reference: go1.25.5/src/mime/type.go and /etc/mime.types.
 
 #![allow(non_snake_case)]
 
