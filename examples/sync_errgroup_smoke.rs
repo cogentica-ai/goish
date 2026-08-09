@@ -18,7 +18,6 @@ extern crate alloc;
 
 use core::sync::atomic::{AtomicI64, Ordering};
 
-use goish::error;
 use goish::sync::errgroup;
 use goish::{chan, context, errors, make, syscall, time};
 

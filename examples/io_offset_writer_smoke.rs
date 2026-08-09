@@ -26,10 +26,6 @@ impl PageSink {
     fn new(size: usize) -> Self {
         Self { buf: alloc::vec![0u8; size] }
     }
-
-    fn dump(&self) -> slice<byte> {
-        slice::__from_vec(self.buf.clone())
-    }
 }
 
 impl WriterAt for PageSink {

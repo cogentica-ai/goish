@@ -92,7 +92,7 @@ fn main() {
     });
 
     // ─── Test 3: Reader.Close() -> Writer sees ErrClosedPipe ──────
-    let (mut r2, mut w2) = io::Pipe();
+    let (r2, mut w2) = io::Pipe();
 
     go!(move || {
         let _ = r2.Close();

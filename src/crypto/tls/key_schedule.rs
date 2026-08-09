@@ -19,7 +19,6 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::crypto::{hkdf, hmac};
-use crate::errors::error;
 use crate::goslice::slice;
 use crate::hash::Hash as HashTrait;
 use crate::io::Writer as WriterTrait;
@@ -182,7 +181,7 @@ impl EarlySecret {
         let hash_fn = self.hash_fn;
         // derived = DeriveSecret(earlySecret, "derived", hash_of_empty)
         let empty_hash = {
-            let mut h = hash_fn();
+            let h = hash_fn();
             let empty_slice = slice::__from_vec(Vec::new());
             h.Sum(empty_slice).__into_vec()
         };
@@ -214,7 +213,7 @@ impl HandshakeSecret {
     pub fn MasterSecret(self) -> MasterSecret {
         let hash_fn = self.hash_fn;
         let empty_hash = {
-            let mut h = hash_fn();
+            let h = hash_fn();
             let empty_slice = slice::__from_vec(Vec::new());
             h.Sum(empty_slice).__into_vec()
         };

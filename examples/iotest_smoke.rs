@@ -50,13 +50,11 @@ fn main() {
                     break;
                 }
                 Println!("[ 2] OneByteReader drain     FAIL unexpected err");
-                failed += 1;
-                return;
+                syscall::Exit(1);
             }
             if n != 1 {
                 Println!("[ 2] OneByteReader drain     FAIL got n={}", n);
-                failed += 1;
-                return;
+                syscall::Exit(1);
             }
             got.push(b[0]);
         }
@@ -163,8 +161,8 @@ fn main() {
         let mut der = DataErrReader(buf);
         let mut b: slice<byte> = slice::__from_vec(alloc::vec![0u8; 3]);
         let mut got = alloc::vec::Vec::new();
-        let mut last_n: i64 = 0;
-        let mut last_err = errors::nil;
+        let mut last_n: i64;
+        let mut last_err: goish::error;
         loop {
             let (n, e) = der.Read(&mut b);
             for i in 0..n as usize {

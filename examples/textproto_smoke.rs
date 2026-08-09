@@ -10,13 +10,11 @@ extern crate goish;
 
 use goish::bufio;
 use goish::bytes;
-use goish::errors;
 use goish::net::textproto::{
-    self, Add, CanonicalMIMEHeaderKey, Del, Error, Get, MIMEHeader, NewWriter, ProtocolError, Set,
+    Add, CanonicalMIMEHeaderKey, Del, Error, Get, MIMEHeader, NewWriter, ProtocolError, Set,
     TrimBytes, TrimString, Values,
 };
-use goish::types::int;
-use goish::{bytes as bytes_helper, errors as errors_helper, string, syscall, Println};
+use goish::{string, syscall, Println};
 
 #[goish::main]
 fn main() {

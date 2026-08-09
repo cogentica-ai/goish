@@ -11,7 +11,7 @@ extern crate goish;
 use goish::convert::bytes;
 use goish::io::{self, Closer, Reader, Writer};
 use goish::types::byte;
-use goish::{errors, string, syscall, Println};
+use goish::{errors, syscall, Println};
 
 #[goish::main]
 fn main() {

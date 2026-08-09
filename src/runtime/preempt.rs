@@ -210,8 +210,8 @@ pub fn skip_breakdown() -> (u64, u64, u64, u64, u64, u64) {
 
 #[inline]
 fn is_in_trampoline(pc: u64) -> bool {
-    let start = goish_async_preempt as usize as u64;
-    let end = goish_async_preempt_end as usize as u64;
+    let start = goish_async_preempt as *const () as usize as u64;
+    let end = goish_async_preempt_end as *const () as usize as u64;
     pc >= start && pc < end
 }
 
@@ -224,8 +224,8 @@ fn is_in_trampoline(pc: u64) -> bool {
 /// PCDATA_UnsafePoint marking on `runtime/asm_amd64.s:gogo`.
 #[inline]
 fn is_in_swap_context(pc: u64) -> bool {
-    let start = crate::runtime::sched::swap_context as usize as u64;
-    let end = goish_swap_context_end as usize as u64;
+    let start = crate::runtime::sched::swap_context as *const () as usize as u64;
+    let end = goish_swap_context_end as *const () as usize as u64;
     pc >= start && pc < end
 }
 
@@ -238,8 +238,8 @@ fn is_in_swap_context(pc: u64) -> bool {
 /// resume PC.
 #[inline]
 fn is_in_gogo(pc: u64) -> bool {
-    let start = crate::runtime::sched::gogo as usize as u64;
-    let end = goish_gogo_end as usize as u64;
+    let start = crate::runtime::sched::gogo as *const () as usize as u64;
+    let end = goish_gogo_end as *const () as usize as u64;
     pc >= start && pc < end
 }
 
@@ -251,8 +251,8 @@ fn is_in_gogo(pc: u64) -> bool {
 fn is_in_mcall_asm(pc: u64) -> bool {
     // mcall_asm is `pub(crate)` so we can't take its address through
     // a `pub use`; reach into the module directly.
-    let start = crate::runtime::sched::mcall_asm as usize as u64;
-    let end = goish_mcall_end as usize as u64;
+    let start = crate::runtime::sched::mcall_asm as *const () as usize as u64;
+    let end = goish_mcall_end as *const () as usize as u64;
     pc >= start && pc < end
 }
 
@@ -656,7 +656,7 @@ extern "C" fn goish_preempt_sigtramp(
     unsafe {
         ((sp - 144) as *mut u64).write(pc);
         (*ctx).uc_mcontext.gregs[REG_RSP] = (sp - 8) as u64;
-        (*ctx).uc_mcontext.gregs[REG_RIP] = goish_async_preempt as u64;
+        (*ctx).uc_mcontext.gregs[REG_RIP] = goish_async_preempt as *const () as u64;
     }
 
     // Clear the cooperative-preempt flag (M18b-β/γ): we're about to
@@ -691,12 +691,12 @@ pub fn install() {
     // without SA_ONSTACK, the kernel's sigframe could overlap the
     // slot (FPU xstate size is host-CPU dependent).
     let sa = syscall::Sigaction {
-        sa_handler: goish_preempt_sigtramp as usize,
+        sa_handler: goish_preempt_sigtramp as *const () as usize,
         sa_flags: syscall::SA_SIGINFO
             | syscall::SA_RESTORER
             | syscall::SA_RESTART
             | syscall::SA_ONSTACK,
-        sa_restorer: syscall::SigreturnTrampoline as usize,
+        sa_restorer: syscall::SigreturnTrampoline as *const () as usize,
         sa_mask: 0,
     };
     unsafe {

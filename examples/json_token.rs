@@ -4,7 +4,7 @@
 extern crate alloc;
 
 use goish::encoding::json;
-use goish::{bytes, nil, slice, string};
+use goish::{bytes, nil, string};
 
 #[goish::main]
 fn main() {

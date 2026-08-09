@@ -11,7 +11,6 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use goish::io::{Closer, Reader, Writer};
 use goish::net;
 use goish::net::http;
 use goish::time;

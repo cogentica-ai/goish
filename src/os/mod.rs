@@ -1853,6 +1853,7 @@ pub fn Exit(code: int) -> ! {
 // needs `&mut` — so the adapter owns the File behind a lock and
 // Close takes it out. Reads hold the lock across the read(2); a
 // single fs::File handle is never shared hot, so a spinlock is fine.
+#[allow(non_camel_case_types)] // Go name (os/file.go)
 struct dirFSFile {
     inner: runtime::spin::SpinLock<Option<File>>,
 }
@@ -1890,6 +1891,7 @@ impl crate::io::fs::File for dirFSFile {
 }
 
 // Go: `type dirFS string` (os/file.go:754).
+#[allow(non_camel_case_types)] // Go name
 struct dirFS {
     dir: string,
 }

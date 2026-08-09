@@ -9,7 +9,7 @@ extern crate goish;
 
 use goish::goslice::slice;
 use goish::net::http;
-use goish::{string, syscall, Println};
+use goish::{syscall, Println};
 
 #[goish::main]
 fn main() {

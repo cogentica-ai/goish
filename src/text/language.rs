@@ -151,7 +151,8 @@ impl Tag {
     }
 
     // Variants + private-use portion of rest (extensions excluded) —
-    // x/text VariantOrPrivateUseTags, used by equalsRest.
+    // x/text VariantOrPrivateUseTags; kept for the equalsRest port.
+    #[allow(dead_code)]
     fn variant_or_private(&self) -> String {
         let mut out = String::new();
         let Some(rest) = self.rest.as_deref() else {
@@ -574,7 +575,7 @@ fn parse_inner(input: &str) -> (WTag, bool) {
         return (w, false);
     }
 
-    let mut i = 0;
+    let mut i;
 
     // Language subtag (or whole-tag private use).
     let t0 = toks[0];

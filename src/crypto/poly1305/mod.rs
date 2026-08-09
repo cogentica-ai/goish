@@ -15,7 +15,6 @@
 
 extern crate alloc;
 
-use crate::goslice::slice;
 use crate::types::byte;
 
 /// TagSize is the size, in bytes, of a Poly1305 authenticator.

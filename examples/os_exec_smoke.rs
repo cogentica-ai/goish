@@ -4,11 +4,9 @@
 #![no_main]
 
 extern crate alloc;
-use alloc::vec::Vec;
 
-use goish::{byte, int, nil, slice, string, syscall};
+use goish::{nil, string, syscall};
 use goish::os::exec;
-use goish::io;
 use goish::bytes;
 
 fn die(msg: &[u8]) -> ! {

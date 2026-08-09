@@ -12,7 +12,7 @@ use goish::convert::bytes;
 use goish::io::Reader;
 use goish::net::http;
 use goish::types::byte;
-use goish::{errors, string, syscall, Println};
+use goish::{errors, syscall, Println};
 
 #[goish::main]
 fn main() {

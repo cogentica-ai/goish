@@ -7,7 +7,6 @@
 #![no_std]
 #![no_main]
 
-use goish::io::Writer;
 use goish::{bytes, len, os, range, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
@@ -34,14 +33,14 @@ fn main() {
     check(args[0].Len() > 0, b"os: argv[0] empty\n");
 
     // (3) os::Stdout returns a usable io::Writer.
-    let mut out = os::Stdout();
+    let out = os::Stdout();
     let payload = bytes(string("os: write via Stdout — "));
     let (n, err) = out.Write(payload);
     check(n > 0, b"os: Stdout.Write n=0\n");
     check(err == goish::nil, b"os: Stdout.Write err\n");
 
     // (4) Stderr likewise.
-    let mut errf = os::Stderr();
+    let errf = os::Stderr();
     let stderr_msg = bytes(string("os: stderr ok\n"));
     let (n, err) = errf.Write(stderr_msg);
     check(n > 0, b"os: Stderr.Write n=0\n");

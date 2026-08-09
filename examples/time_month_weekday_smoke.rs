@@ -26,7 +26,6 @@ use goish::runtime::sched::schedule;
 use goish::time::{self, Month, Weekday};
 use goish::{go, syscall, Println, Sprintf};
 
-const KB: usize = 1024;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 

@@ -30,6 +30,7 @@ use goish::runtime::sched;
 use goish::{go, syscall, KB};
 
 #[inline(never)]
+#[allow(unconditional_recursion)] // the point: recurse until the guard page fires
 fn overflow(n: i64) -> i64 {
     // Big stack frame so we exhaust the 2 KiB home stack quickly
     // without auto-grow (`stack(2 * KB)` opts out of grow).

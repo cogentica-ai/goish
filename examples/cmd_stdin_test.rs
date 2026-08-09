@@ -16,7 +16,6 @@ use goish::{byte, nil, slice, string, syscall};
 use goish::bytes;
 use goish::os::exec;
 use goish::io;
-use goish::strings;
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());

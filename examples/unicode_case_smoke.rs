@@ -34,7 +34,7 @@ fn check(cond: bool, msg: &[u8]) {
 fn main() {
     // ─── 1. exhaustive sweep hash vs real Go ───────────────────────
     let mut h: u64 = 0xcbf29ce484222325;
-    let mut mix = |hh: &mut u64, v: u64| {
+    let mix = |hh: &mut u64, v: u64| {
         let mut i = 0;
         while i < 8 {
             *hh ^= (v >> (8 * i)) & 0xff;

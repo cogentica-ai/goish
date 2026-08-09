@@ -17,7 +17,6 @@ use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use goish::io::{Closer, Reader, Writer};
 use goish::net;
 use goish::net::http;
-use goish::runtime::sched::schedule;
 use goish::{bytes, go, make, string, syscall};
 
 fn die(msg: &[u8]) -> ! {

@@ -44,11 +44,8 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::crypto::ecdh;
-use crate::crypto::sha256;
-use crate::crypto::sha512;
 use crate::crypto::tls::key_schedule::{
-    self, CipherSuiteTls13, EarlySecret, TrafficKeys,
-    cipher_suite_tls13, finished_hash, traffic_keys,
+    self, CipherSuiteTls13, EarlySecret, TrafficKeys, finished_hash, traffic_keys,
 };
 use crate::crypto::tls::record::{
     RECORD_ALERT, RECORD_APPLICATION, RECORD_CHANGE_CIPHER_SPEC, RECORD_HANDSHAKE,
@@ -72,6 +69,7 @@ const MSG_FINISHED: byte = 20;
 /// ecdsa_secp256r1_sha256 = 0x0403
 const SIG_ECDSA_SECP256R1_SHA256: u16 = 0x0403;
 /// ecdsa_secp384r1_sha384 = 0x0503
+#[allow(dead_code)] // RFC 8446 registry completeness; scheme not offered yet
 const SIG_ECDSA_SECP384R1_SHA384: u16 = 0x0503;
 /// rsa_pkcs1_sha256 = 0x0401 (deprecated in TLS 1.3 but some servers send it)
 const SIG_RSA_PKCS1_SHA256: u16 = 0x0401;
@@ -451,7 +449,7 @@ pub fn tls13_encrypt_record_suite(
     plaintext: &[byte],
     suite_id: u16,
 ) -> (slice<byte>, error) {
-    use crate::crypto::{aes, cipher::{self, AEAD as AEADTrait}};
+    use crate::crypto::{aes, cipher::{self}};
 
     // TLSInnerPlaintext = plaintext || inner_content_type
     let mut inner: Vec<byte> = Vec::with_capacity(plaintext.len() + 1);
@@ -542,7 +540,7 @@ pub fn tls13_decrypt_record_suite(
     fragment: &[byte],
     suite_id: u16,
 ) -> (Vec<byte>, byte, error) {
-    use crate::crypto::{aes, cipher::{self, AEAD as AEADTrait}};
+    use crate::crypto::{aes, cipher::{self}};
 
     if fragment.len() < 16 {
         return (Vec::new(), 0, errors::New("tls13: fragment too short for AEAD tag"));
@@ -1110,7 +1108,7 @@ fn do_client_handshake_tls13_inner_impl(
         if body.len() < 4 {
             return (dummy, errors::New("tls13: server Finished too short"));
         }
-        let vd_len = (((body[1] as usize) << 16) | ((body[2] as usize) << 8) | (body[3] as usize));
+        let vd_len = ((body[1] as usize) << 16) | ((body[2] as usize) << 8) | (body[3] as usize);
         if body.len() < 4 + vd_len {
             return (dummy, errors::New("tls13: server Finished truncated"));
         }

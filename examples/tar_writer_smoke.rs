@@ -37,7 +37,6 @@ use goish::runtime::spin::SpinLock;
 use goish::types::{byte, int};
 use goish::{io, nil, slice, string, syscall, Println};
 
-const KB: usize = 1024;
 const TOTAL: usize = 11;
 
 // Linux open(2) flags not exported by goish::syscall.

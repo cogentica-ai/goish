@@ -29,12 +29,10 @@ use goish::crypto::{
     SignerOpts,
 };
 use goish::gostring::string;
-use goish::hash::Hash as HashTrait;
 use goish::io::Writer;
 use goish::types::byte;
 use goish::{slice, syscall, Println};
 
-const KB: usize = 1024;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 

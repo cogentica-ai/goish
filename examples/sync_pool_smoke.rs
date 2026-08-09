@@ -11,7 +11,7 @@ extern crate goish;
 use core::sync::atomic::{AtomicI64, Ordering};
 use goish::runtime::sched::schedule;
 use goish::sync::{Pool, WaitGroup};
-use goish::{go, syscall, Println, KB};
+use goish::{go, syscall, Println};
 
 #[goish::main]
 fn main() {

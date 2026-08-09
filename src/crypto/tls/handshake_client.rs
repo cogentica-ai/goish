@@ -33,7 +33,6 @@ use crate::crypto::rsa;
 use crate::crypto::sha256;
 use crate::crypto::tls::record::{
     RECORD_ALERT, RECORD_CHANGE_CIPHER_SPEC, RECORD_HANDSHAKE,
-    AeadDirectionKeys, AeadKeyMaterial,
     decode_x509_rsa_pubkey, decrypt_record, decrypt_record_aead,
     derive_key_material, derive_aead_key_material,
     derive_master_secret, encrypt_record, encrypt_record_aead, prf12,
@@ -86,7 +85,6 @@ const CIPHER_TLS13_CHACHA20_POLY1305_SHA256: u16 = 0x1303;
 
 // TLS version bytes
 const TLS_VERSION_TLS13: u16 = 0x0304;
-const TLS_VERSION_TLS12_U16: u16 = 0x0303;
 
 // ─── ConnAdapter ─────────────────────────────────────────────────────
 //
@@ -477,7 +475,6 @@ pub fn do_client_handshake(
         // hrr_server2_group: the group from the 2nd ServerHello key_share
         let mut hrr_server2_group: u16 = 0;
         let mut hrr_server2_key_data: Vec<byte> = Vec::new();
-        tls13_server_key_share = Vec::new();
         tls13_suite_id = 0;
         {
             // Skip ChangeCipherSpec if server sends one
@@ -563,10 +560,6 @@ pub fn do_client_handshake(
                                                 hrr_server2_key_data = edata[4..4 + ke_len2].to_vec();
                                                 tls_debug!("[tls-debug] HRR: 2nd ServerHello key_share group=0x%04x ke_len=%d\n",
                                                     group2 as u64, ke_len2 as i64);
-                                                // Also set tls13_server_key_share for X25519 fallback
-                                                if group2 == GROUP_X25519 {
-                                                    tls13_server_key_share = hrr_server2_key_data.clone();
-                                                }
                                             }
                                         }
                                     }
@@ -957,7 +950,7 @@ pub fn do_client_handshake(
 
     let master = derive_master_secret(actual_premaster, &client_random, &server_random);
 
-    let mut km = if is_aead {
+    let km = if is_aead {
         let aead_km = derive_aead_key_material(&master, &client_random, &server_random);
         let mut k = KeyMaterial::default();
         k.suite = negotiated_suite;
@@ -1286,17 +1279,6 @@ fn build_client_hello_hrr_group(
 }
 
 /// Build a second ClientHello for HelloRetryRequest response.
-/// If `cookie` is Some, includes the cookie extension (type=0x002C) as required by RFC 8446 §4.2.2.
-fn build_client_hello_hrr(client_random: &[byte; 32], server_name: &str, x25519_pub: &ecdh::X25519PublicKey, cookie: Option<&[byte]>) -> Vec<byte> {
-    if let Some(c) = cookie {
-        // Build the base ClientHello, then insert the cookie extension before the extensions length
-        // Easier: build extensions with cookie included by calling build_client_hello_inner
-        build_client_hello_inner(client_random, server_name, x25519_pub, Some(c))
-    } else {
-        build_client_hello_inner(client_random, server_name, x25519_pub, None)
-    }
-}
-
 fn build_client_hello(client_random: &[byte; 32], server_name: &str, x25519_pub: &ecdh::X25519PublicKey) -> Vec<byte> {
     build_client_hello_inner(client_random, server_name, x25519_pub, None)
 }
@@ -1734,8 +1716,7 @@ fn patch_psk_binder(
     hash_fn: fn() -> alloc::boxed::Box<dyn crate::hash::Hash + Send + Sync>,
     binders_len: usize,
 ) {
-    use crate::crypto::tls::key_schedule::{EarlySecret, DeriveSecret, ExpandLabel, finished_hash};
-    use crate::hash::Hash as HashTrait;
+    use crate::crypto::tls::key_schedule::{EarlySecret, finished_hash};
     use crate::io::Writer as WriterTrait;
 
     let hash_size = hash_fn().Size() as usize;
@@ -2231,7 +2212,10 @@ pub fn do_client_handshake_chacha20_only(
     let mut tls13_suite_id: u16 = 0;
     let mut tls13_server_key_share: Vec<byte> = Vec::new();
     let mut hrr_cookie: Option<Vec<byte>> = None;
-    let mut hrr_selected_group: u16 = 0;
+    // HRR selected_group is parsed but unused here: this path has no
+    // second-ClientHello support; an HRR fails later at the
+    // no-key_share check.
+    let mut _hrr_selected_group: u16 = 0;
     {
         let (rtype, frag_s, err) = {
             let mut adapter = ConnReader(conn);
@@ -2309,7 +2293,7 @@ pub fn do_client_handshake_chacha20_only(
                                             tls13_server_key_share = ext_data[4..4 + ke_len].to_vec();
                                         }
                                     } else {
-                                        hrr_selected_group = group;
+                                        _hrr_selected_group = group;
                                     }
                                 }
                             }
@@ -2341,7 +2325,7 @@ pub fn do_client_handshake_chacha20_only(
         0xC2, 0xA2, 0x11, 0x16, 0x7A, 0xBB, 0x8C, 0x5E,
         0x07, 0x9E, 0x09, 0xE2, 0xC8, 0xA8, 0x33, 0x9C,
     ];
-    let (client_x25519_priv, client_x25519_pub) = if server_random == HRR_RANDOM_CC {
+    let (client_x25519_priv, _client_x25519_pub) = if server_random == HRR_RANDOM_CC {
         tls_debug!("[tls-debug] ChaCha20-only HRR detected\n");
         let hrr_suite = match crate::crypto::tls::key_schedule::cipher_suite_tls13(tls13_suite_id) {
             Some(s) => s,

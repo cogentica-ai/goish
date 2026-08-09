@@ -19,7 +19,7 @@ fn main() {
 
     // 1. PCG(1, 2) Uint64 sequence — verified against Go 1.25.
     {
-        let mut p = rand::NewPCG(1, 2);
+        let p = rand::NewPCG(1, 2);
         let mut r = rand::New(p);
         let want: [u64; 5] = [
             14192431797130687760,
@@ -189,7 +189,7 @@ fn main() {
         let _ = p.Uint64();
         p.Seed(123, 456);
         let mut r = rand::New(p);
-        let mut q = rand::NewPCG(123, 456);
+        let q = rand::NewPCG(123, 456);
         let mut s = rand::New(q);
         let mut ok = true;
         for _ in 0..10 {

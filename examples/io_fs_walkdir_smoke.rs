@@ -32,7 +32,6 @@ use goish::string;
 use goish::types::{byte, int};
 use goish::{syscall, Println};
 
-const KB: usize = 1024;
 const TOTAL: usize = 12;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);

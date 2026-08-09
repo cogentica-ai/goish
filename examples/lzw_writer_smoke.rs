@@ -37,13 +37,8 @@ use goish::runtime::sched::schedule;
 use goish::types::{byte, int};
 use goish::{go, syscall, Println};
 
-const KB: usize = 1024;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
-
-fn ok_line(msg: &[u8]) {
-    syscall::Write(syscall::STDOUT, msg.as_ptr(), msg.len());
-}
 
 fn fail() {
     FAILED.fetch_add(1, Ordering::AcqRel);
@@ -85,32 +80,6 @@ fn from_bytes(b: &[u8]) -> slice<byte> {
     }
     slice::__from_vec(v)
 }
-
-// `bytes::Buffer` is the goish equivalent of bytes.Buffer; we use it
-// as the destination Writer for the lzw::Writer.
-fn compress_with(input: &[u8], order: lzw::Order, lit_width: int) -> alloc::vec::Vec<byte> {
-    let buf = bytes::Buffer::new();
-    let mut w = lzw::NewWriter(buf, order, lit_width);
-    let p = from_bytes(input);
-    let (_n, err) = w.Write(p);
-    if !err.IsNil() {
-        return alloc::vec::Vec::new();
-    }
-    let _ = w.Close();
-    // Recover the underlying bytes.Buffer via destructuring.
-    // bufio::Writer<bytes::Buffer>'s underlying writer was moved in,
-    // so to inspect what we wrote we instead use the alternative
-    // pattern: write to a captured Buffer and compress. Since the
-    // Writer consumed the buffer, we re-collect via a capturing
-    // closure approach. Goish bufio::Writer doesn't expose the inner;
-    // simpler approach is to write to a shared mutable buffer using
-    // bytes::Buffer's `Write` and take a snapshot from Bytes() before
-    // moving it in. Instead we cheat: rebuild via a Vec-backed Writer.
-    alloc::vec::Vec::new()
-}
-
-// Helper Writer that captures bytes into a Vec via Rc/RefCell-style.
-// Goish has no Rc; we use a static buffer keyed by test number.
 
 fn read_all(r: &mut lzw::Reader<bytes::Reader>) -> (alloc::vec::Vec<byte>, error) {
     let mut out: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
@@ -219,25 +188,6 @@ fn compress(slot: usize, input: &[u8], order: lzw::Order, lit_width: int) -> boo
     }
     let cerr = w.Close();
     cerr.IsNil()
-}
-
-fn assert_compressed_eq(idx: u8, label: &[u8], slot: usize, want: &[u8]) {
-    let got = slot_get(slot);
-    let mut ok = got.len() == want.len();
-    if ok {
-        for i in 0..want.len() {
-            if got[i] != want[i] {
-                ok = false;
-                break;
-            }
-        }
-    }
-    if ok {
-        write_result(idx, label, true);
-    } else {
-        write_result(idx, label, false);
-        fail();
-    }
 }
 
 fn test_1_empty_lsb_format() {

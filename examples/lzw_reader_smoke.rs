@@ -35,13 +35,8 @@ use goish::runtime::sched::schedule;
 use goish::types::{byte, int};
 use goish::{go, syscall, Println};
 
-const KB: usize = 1024;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
-
-fn ok_line(msg: &[u8]) {
-    syscall::Write(syscall::STDOUT, msg.as_ptr(), msg.len());
-}
 
 fn fail() {
     FAILED.fetch_add(1, Ordering::AcqRel);

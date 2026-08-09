@@ -17,7 +17,6 @@ extern crate goish;
 use core::sync::atomic::{AtomicI32, Ordering};
 use goish::net;
 use goish::runtime::netpoll;
-use goish::runtime::sched::schedule;
 use goish::{go, string, syscall};
 
 fn die(msg: &[u8]) -> ! {

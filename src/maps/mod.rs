@@ -25,7 +25,6 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::gomap::map;
-use crate::goslice::slice;
 
 /// `maps.Keys(m)` (iter.go:Keys, Go 1.23+) — `iter.Seq` over the
 /// keys. Consumed via `slices::Collect(maps::Keys(&m))` /

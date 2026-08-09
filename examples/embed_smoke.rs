@@ -36,7 +36,6 @@ use goish::embed;
 use goish::errors;
 use goish::io::fs;
 use goish::io::fs::ReadDirFile;
-use goish::io::Reader as _;
 use goish::strings;
 use goish::{string, syscall, Println};
 

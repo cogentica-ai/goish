@@ -36,7 +36,7 @@ use crate::sync::Mutex;
 use crate::time;
 use crate::types::int;
 
-use super::request::{ReadRequestWithLimit, Request};
+use super::request::Request;
 use super::response::{response, ResponseWriter};
 
 /// `http.Handler` — types that can serve HTTP requests. Mirrors

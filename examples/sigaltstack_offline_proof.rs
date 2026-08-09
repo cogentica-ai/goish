@@ -48,7 +48,7 @@
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use goish::syscall::{
-    self, syscall1, syscall2, syscall3, syscall6, Sigaction, SigreturnTrampoline,
+    self, syscall2, Sigaction, SigreturnTrampoline,
     Timespec, MAP_ANONYMOUS, MAP_FAILED, MAP_PRIVATE, PROT_READ, PROT_WRITE, SA_RESTART,
     SA_RESTORER, SA_SIGINFO, SIGURG, STDERR, STDOUT, SYS_NANOSLEEP, SYS_TGKILL,
 };
@@ -181,9 +181,9 @@ unsafe fn install_handler(on_stack: bool) {
         flags |= SA_ONSTACK;
     }
     let sa = Sigaction {
-        sa_handler: handler as usize,
+        sa_handler: handler as *const () as usize,
         sa_flags: flags,
-        sa_restorer: SigreturnTrampoline as usize,
+        sa_restorer: SigreturnTrampoline as *const () as usize,
         sa_mask: 0,
     };
     let r = syscall::RtSigaction(SIGURG, &sa as *const _, core::ptr::null_mut());

@@ -35,7 +35,6 @@ use goish::runtime::sched::schedule;
 use goish::types::{byte, int};
 use goish::{go, syscall, Println};
 
-const KB: usize = 1024;
 const TOTAL: usize = 10;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
