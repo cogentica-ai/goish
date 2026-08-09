@@ -74,8 +74,8 @@ use goish::strings;
 use goish::sync::atomic;
 use goish::sync::Mutex;
 use goish::{
-    append, bytes, chan, error, go, int, len, make, map, nil, range, slice, string, syscall, time,
-    Sprintf,
+    append, bytes, chan, error, go, int, len, make, map, nil, range, select, slice, string,
+    syscall, time, Sprintf,
 };
 
 // ─── configuration model ────────────────────────────────────────────
@@ -424,7 +424,7 @@ fn serveStatic(
     // `root` semantics: file = root + full URI path.
     let fpath = Sprintf!("%s%s", loc.Root, path);
     let (fi, serr) = os::Stat(fpath.clone());
-    if !serr.IsNil() {
+    if serr != nil {
         return errorPage(w, 404);
     }
     if fi.IsDir() {
@@ -435,7 +435,7 @@ fn serveStatic(
         }
         let ipath = Sprintf!("%s%s", fpath, loc.Index);
         let (ifi, ierr) = os::Stat(ipath.clone());
-        if ierr.IsNil() && !ifi.IsDir() {
+        if ierr == nil && !ifi.IsDir() {
             return sendFile(cfg, w, ipath);
         }
         if loc.Autoindex {
@@ -452,7 +452,7 @@ fn sendFile(
     fpath: string,
 ) -> (int, int) {
     let (data, err) = os::ReadFile(fpath.clone());
-    if !err.IsNil() {
+    if err != nil {
         return errorPage(w, 500);
     }
     w.Header().Set("Content-Type", mimeOf(cfg, &fpath));
@@ -485,7 +485,7 @@ fn sendListing(
     urlpath: string,
 ) -> (int, int) {
     let (entries, err) = os::ReadDir(dir);
-    if !err.IsNil() {
+    if err != nil {
         return errorPage(w, 500);
     }
     let mut b = strings::Builder::new();
@@ -587,7 +587,7 @@ fn proxyTo(
             url = Sprintf!("%s?%s", url, r.URL.RawQuery.clone());
         }
         let (mut outreq, rqerr) = http::NewRequest(r.Method.clone(), url, r.Body.clone());
-        if !rqerr.IsNil() {
+        if rqerr != nil {
             continue;
         }
         // Copy end-to-end headers; drop hop-by-hop ones (RFC 7230).
@@ -619,7 +619,7 @@ fn proxyTo(
 
         let client = http::Client::default();
         let (mut resp, derr) = client.Do(&outreq);
-        if !derr.IsNil() {
+        if derr != nil {
             // proxy_next_upstream: try the next peer.
             continue;
         }
@@ -716,7 +716,7 @@ fn listenReusePort(addr: string) -> (net::Listener, error) {
             },
         )),
     };
-    lc.Listen(context::Background(), string("tcp"), addr)
+    lc.Listen(context::Background(), "tcp", addr)
 }
 
 /// Bind every listen group and start its serve loop. Returns the
@@ -737,9 +737,9 @@ fn startServers(cfg: &Arc<Config>) -> (slice<string>, slice<Arc<http::Server>>, 
         let (ln, err) = if g.ReusePort {
             listenReusePort(addr.clone())
         } else {
-            net::Listen(string("tcp"), addr.clone())
+            net::Listen("tcp", addr.clone())
         };
-        if !err.IsNil() {
+        if err != nil {
             return (bounds, servers, err);
         }
         let port = ln.Addr().Port;
@@ -786,14 +786,14 @@ fn startServers(cfg: &Arc<Config>) -> (slice<string>, slice<Arc<http::Server>>, 
         // closes every one of them.
         if g.ReusePort && !is_tls {
             let (host, _, herr) = net::SplitHostPort(addr.clone());
-            if !herr.IsNil() {
+            if herr != nil {
                 return (bounds, servers, herr);
             }
             let real_addr = Sprintf!("%s:%d", host, port);
             let workers = goish::runtime::NumCPU();
             for _ in 1..workers {
                 let (ln2, err2) = listenReusePort(real_addr.clone());
-                if !err2.IsNil() {
+                if err2 != nil {
                     return (bounds, servers, err2);
                 }
                 let run2 = srv.clone();
@@ -838,13 +838,13 @@ fn main() {
 
 fn runStandalone(conf_path: string) {
     let (data, err) = os::ReadFile(conf_path.clone());
-    if !err.IsNil() {
+    if err != nil {
         goish::Printf!("goginx: %s: %v\n", conf_path, err);
         os::Exit(1);
     }
     let cfg = Arc::new(loadConfig(string(data)));
     let (_, servers, lerr) = startServers(&cfg);
-    if !lerr.IsNil() {
+    if lerr != nil {
         goish::Printf!("goginx: listen: %v\n", lerr);
         os::Exit(1);
     }
@@ -861,12 +861,12 @@ static FAILED: atomic::Int64 = atomic::Int64::new(0);
 
 fn pass(name: &'static str) {
     PASSED.Add(1);
-    goish::Printf!("PASS: %s\n", string(name));
+    goish::Printf!("PASS: %s\n", name);
 }
 
-fn fail(msg: string) {
+fn fail<S: Into<string>>(msg: S) {
     FAILED.Add(1);
-    goish::Printf!("FAIL: %s\n", msg);
+    goish::Printf!("FAIL: %s\n", msg.into());
 }
 
 fn finish() {
@@ -883,7 +883,7 @@ fn finish() {
 /// Fetch via the goish HTTP client: (status, body, content-type).
 fn get(url: string) -> (int, string, string) {
     let (mut resp, err) = http::Get(url.clone());
-    if !err.IsNil() {
+    if err != nil {
         return (-1, Sprintf!("get %s: %v", url, err), string(""));
     }
     let (body, _) = io::ReadAll(&mut resp.Body);
@@ -898,8 +898,8 @@ fn get(url: string) -> (int, string, string) {
 /// One raw HTTP/1.1 request (Connection: close) over plain TCP —
 /// used where the test needs Host-header or redirect control.
 fn rawRoundtrip(addr: string, req: string) -> (int, string) {
-    let (mut conn, err) = net::Dial(string("tcp"), addr);
-    if !err.IsNil() {
+    let (mut conn, err) = net::Dial("tcp", addr);
+    if err != nil {
         return (-1, string(""));
     }
     let _ = conn.Write(bytes(req));
@@ -913,7 +913,7 @@ fn rawRoundtrip(addr: string, req: string) -> (int, string) {
             out = append!(out, buf[i]);
             i += 1;
         }
-        if nr == 0 || !rerr.IsNil() {
+        if nr == 0 || rerr != nil {
             break;
         }
     }
@@ -930,8 +930,8 @@ fn tlsRoundtrip(addr: string, req: string) -> (int, string) {
         ServerName: string("localhost"),
         ..Default::default()
     };
-    let (mut conn, err) = tls::Dial(string("tcp"), addr, &cfg);
-    if !err.IsNil() {
+    let (mut conn, err) = tls::Dial("tcp", addr, &cfg);
+    if err != nil {
         return (-1, Sprintf!("tls dial: %v", err));
     }
     let _ = conn.Write(bytes(req));
@@ -944,7 +944,7 @@ fn tlsRoundtrip(addr: string, req: string) -> (int, string) {
             out = append!(out, buf[i]);
             i += 1;
         }
-        if nr == 0 || !rerr.IsNil() {
+        if nr == 0 || rerr != nil {
             break;
         }
     }
@@ -961,7 +961,7 @@ fn parseStatus(resp: &string) -> int {
     }
     let (code, _, _) = strings::Cut(rest, " ");
     let (n, err) = strconv::Atoi(code);
-    if !err.IsNil() {
+    if err != nil {
         return -1;
     }
     n
@@ -981,8 +981,8 @@ fn startBackend(name: &'static str) -> string {
             r.URL.Path.clone()
         )));
     });
-    let (ln, err) = net::Listen(string("tcp"), string("127.0.0.1:0"));
-    if !err.IsNil() {
+    let (ln, err) = net::Listen("tcp", "127.0.0.1:0");
+    if err != nil {
         fail(Sprintf!("backend listen: %v", err));
         return string("");
     }
@@ -998,8 +998,8 @@ fn startBackend(name: &'static str) -> string {
 
 /// An address that is guaranteed dead: bind, read the port, close.
 fn deadAddr() -> string {
-    let (ln, err) = net::Listen(string("tcp"), string("127.0.0.1:0"));
-    if !err.IsNil() {
+    let (ln, err) = net::Listen("tcp", "127.0.0.1:0");
+    if err != nil {
         return string("127.0.0.1:9");
     }
     let addr = Sprintf!("127.0.0.1:%d", ln.Addr().Port);
@@ -1066,7 +1066,7 @@ fn selfTest() {
 
     // ── build a doc tree + certs in a temp dir ──
     let (dir, terr) = os::MkdirTemp(os::TempDir(), "goginx-");
-    if !terr.IsNil() {
+    if terr != nil {
         fail(Sprintf!("MkdirTemp: %v", terr));
         finish();
     }
@@ -1148,7 +1148,7 @@ fn selfTest() {
     let _ = os::WriteFile(conf_path.clone(), bytes(cb.String()), 0o644);
 
     let (cdata, cerr) = os::ReadFile(conf_path.clone());
-    if !cerr.IsNil() {
+    if cerr != nil {
         fail(Sprintf!("read conf: %v", cerr));
         finish();
     }
@@ -1167,7 +1167,7 @@ fn selfTest() {
 
     // ── boot ──
     let (bounds, servers, lerr) = startServers(&cfg);
-    if !lerr.IsNil() || len(&bounds) != 2 {
+    if lerr != nil || len(&bounds) != 2 {
         fail(Sprintf!("startServers: %v (groups=%d)", lerr, len(&bounds)));
         finish();
     }
@@ -1337,14 +1337,19 @@ fn selfTest() {
     let done = make!(chan bool);
     installSignalDrain(servers.clone(), done.clone());
     syscall::Kill(syscall::Getpid(), syscall::SIGTERM);
-    let _ = done.Recv();
-    let (mut c, derr) = net::Dial(string("tcp"), plain.clone());
-    let plain_refused = !derr.IsNil();
+    select! {
+        let _ = done.Recv() => {},
+        let _ = (time::After(time::Second * 10)).Recv() => {
+            fail("drain: timed out waiting for done");
+        },
+    }
+    let (mut c, derr) = net::Dial("tcp", plain.clone());
+    let plain_refused = derr != nil;
     if !plain_refused {
         let _ = c.Close();
     }
-    let (mut c2, derr2) = net::Dial(string("tcp"), tls_addr.clone());
-    let tls_refused = !derr2.IsNil();
+    let (mut c2, derr2) = net::Dial("tcp", tls_addr.clone());
+    let tls_refused = derr2 != nil;
     if !tls_refused {
         let _ = c2.Close();
     }
@@ -1373,7 +1378,7 @@ fn selfTest() {
     ));
     let rcfg = Arc::new(loadConfig(rb.String()));
     let (rbounds, rservers, rerr) = startServers(&rcfg);
-    if !rerr.IsNil() {
+    if rerr != nil {
         fail(Sprintf!("reuseport boot: %v", rerr));
     } else {
         let raddr = rbounds[0].clone();
@@ -1391,8 +1396,8 @@ fn selfTest() {
         for (_, s) in range!(&rservers) {
             let _ = s.clone().Shutdown(time::Second * 5);
         }
-        let (mut rc, rderr) = net::Dial(string("tcp"), raddr.clone());
-        let refused = !rderr.IsNil();
+        let (mut rc, rderr) = net::Dial("tcp", raddr.clone());
+        let refused = rderr != nil;
         if !refused {
             let _ = rc.Close();
         }
