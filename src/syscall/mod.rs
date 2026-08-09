@@ -61,6 +61,8 @@ pub const SYS_EPOLL_CREATE1: usize = 291;
 pub const SYS_EPOLL_CTL: usize = 233;
 pub const SYS_EPOLL_PWAIT: usize = 281;
 pub const SYS_EVENTFD2: usize = 290;
+// Terminal control (term port — QuCode T1).
+pub const SYS_IOCTL: usize = 16;
 // Process family (os/exec port — M27 follow-up).
 pub const SYS_FORK: usize = 57;
 pub const SYS_EXECVE: usize = 59;
@@ -84,9 +86,15 @@ pub const SIGPIPE: i32 = 13;
 pub const SIGALRM: i32 = 14;
 pub const SIGTERM: i32 = 15;
 pub const SIGCHLD: i32 = 17;
+pub const SIGCONT: i32 = 18;
+pub const SIGSTOP: i32 = 19;
+pub const SIGTSTP: i32 = 20;
+pub const SIGTTIN: i32 = 21;
+pub const SIGTTOU: i32 = 22;
 pub const SIGURG: i32 = 23;
 pub const SIGXCPU: i32 = 24;
 pub const SIGXFSZ: i32 = 25;
+pub const SIGWINCH: i32 = 28;
 
 // sigaction flags. SA_RESTORER tells the kernel to use the
 // userspace-provided sigreturn trampoline (mandatory on amd64
@@ -274,6 +282,90 @@ pub fn Write(fd: i32, p: *const u8, n: usize) -> isize {
 pub fn Read(fd: i32, p: *mut u8, n: usize) -> isize {
     unsafe { syscall3(SYS_READ, fd as usize, p as usize, n) }
 }
+
+/// `ioctl(2)` — device control. `req` selects the operation (TCGETS,
+/// TIOCGWINSZ, …); `arg` is usually a pointer to the in/out struct,
+/// passed as `usize` like the kernel ABI takes it. Returns the raw
+/// syscall result: `0` (or a positive value, request-specific) on
+/// success, negative `-errno` on error. Mirrors the
+/// `unix.IoctlGetTermios`-family plumbing in golang.org/x/sys.
+#[allow(non_snake_case)]
+pub fn Ioctl(fd: i32, req: usize, arg: usize) -> isize {
+    unsafe { syscall3(SYS_IOCTL, fd as usize, req, arg) }
+}
+
+// ─── termios (ztypes_linux_amd64.go) ──────────────────────────────────
+//
+// Layout is Go's `syscall.Termios` on linux/amd64 — itself the kernel's
+// `struct termios` (asm-generic/termbits.h, NCCS=19) padded out to the
+// glibc-compatible 32-slot Cc array plus speed fields. TCGETS/TCSETS
+// only touch the first 36 bytes; the tail exists for layout fidelity.
+
+/// `syscall.Termios` (ztypes_linux_amd64.go:718).
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+#[allow(missing_docs)]
+pub struct Termios {
+    pub Iflag: u32,
+    pub Oflag: u32,
+    pub Cflag: u32,
+    pub Lflag: u32,
+    pub Line: u8,
+    pub Cc: [u8; 32],
+    pub Pad_cgo_0: [u8; 3],
+    pub Ispeed: u32,
+    pub Ospeed: u32,
+}
+
+/// `syscall.Winsize` (ztypes_linux_amd64.go) — the TIOCGWINSZ /
+/// TIOCSWINSZ payload.
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+#[allow(missing_docs)]
+pub struct Winsize {
+    pub Row: u16,
+    pub Col: u16,
+    pub Xpixel: u16,
+    pub Ypixel: u16,
+}
+
+// ioctl request numbers (ztypes_linux_amd64.go / zerrors_linux_amd64.go).
+pub const TCGETS: usize = 0x5401;
+pub const TCSETS: usize = 0x5402;
+pub const TIOCGWINSZ: usize = 0x5413;
+pub const TIOCSWINSZ: usize = 0x5414;
+pub const TIOCGPTN: usize = 0x80045430;
+pub const TIOCSPTLCK: usize = 0x40045431;
+
+// c_iflag bits (ztypes_linux_amd64.go:635).
+pub const IGNBRK: u32 = 0x1;
+pub const BRKINT: u32 = 0x2;
+pub const PARMRK: u32 = 0x8;
+pub const ISTRIP: u32 = 0x20;
+pub const INLCR: u32 = 0x40;
+pub const IGNCR: u32 = 0x80;
+pub const ICRNL: u32 = 0x100;
+pub const IXON: u32 = 0x400;
+
+// c_oflag bits.
+pub const OPOST: u32 = 0x1;
+
+// c_cflag bits.
+pub const CSIZE: u32 = 0x30;
+pub const CS8: u32 = 0x30;
+pub const PARENB: u32 = 0x100;
+
+// c_lflag bits.
+pub const ISIG: u32 = 0x1;
+pub const ICANON: u32 = 0x2;
+pub const ECHO: u32 = 0x8;
+pub const ECHONL: u32 = 0x40;
+pub const IEXTEN: u32 = 0x8000;
+
+// c_cc indices (ztypes_linux_amd64.go:623). `usize` so `Cc[VMIN]`
+// indexes directly, matching Go's untyped-const ergonomics.
+pub const VTIME: usize = 0x5;
+pub const VMIN: usize = 0x6;
 
 // ─── Errno ────────────────────────────────────────────────────────────
 //

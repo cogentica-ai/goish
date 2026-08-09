@@ -21,6 +21,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::time;
@@ -130,12 +131,14 @@ fn main() {
     // 1. Get 200.
     {
         let url = url_join(&base_url, "/hello");
-        let (resp, err) = http::Get(url);
+        let (mut resp, err) = http::Get(url);
         if !err.IsNil() {
             Println!("[ 1] Get hello FAIL err={}", err);
             failed += 1;
         } else {
-            let body_ok = body_eq(&resp.Body, b"hello, client\n");
+            let (body, _) = io::ReadAll(&mut resp.Body);
+            let _ = io::Closer::Close(&mut resp.Body);
+            let body_ok = body_eq(&body, b"hello, client\n");
             if resp.StatusCode == 200 && body_ok {
                 Println!("[ 1] Get 200 OK               PASS");
             } else {
@@ -151,8 +154,10 @@ fn main() {
     // 2. Get 404.
     {
         let url = url_join(&base_url, "/notfound");
-        let (resp, _err) = http::Get(url);
-        if resp.StatusCode == 404 && body_eq(&resp.Body, b"missing\n") {
+        let (mut resp, _err) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 404 && body_eq(&body, b"missing\n") {
             Println!("[ 2] Get 404                  PASS");
         } else {
             Println!("[ 2] Get 404                  FAIL status={}", resp.StatusCode);
@@ -164,16 +169,18 @@ fn main() {
     {
         let url = url_join(&base_url, "/echo");
         let body = bytes(r#"{"k":"v"}"#);
-        let (resp, err) = http::Post(url, string("application/json"), body);
+        let (mut resp, err) = http::Post(url, string("application/json"), body);
         let seen_len = echo_seen_len.load(Ordering::SeqCst);
         let seen_ct = echo_seen_ct.Lock().clone();
+        let (resp_body, _) = io::ReadAll(&mut resp.Body);
+        let _ = io::Closer::Close(&mut resp.Body);
         if !err.IsNil() {
             Println!("[ 3] Post JSON                FAIL err={}", err);
             failed += 1;
         } else if resp.StatusCode == 200
             && seen_len == 9
             && seen_ct == "application/json"
-            && body_eq(&resp.Body, br#"{"k":"v"}"#)
+            && body_eq(&resp_body, br#"{"k":"v"}"#)
         {
             Println!("[ 3] Post JSON                PASS");
         } else {
@@ -209,8 +216,10 @@ fn main() {
     // 5. Redirect (302 → /hello).
     {
         let url = url_join(&base_url, "/redir");
-        let (resp, _err) = http::Get(url);
-        if resp.StatusCode == 200 && body_eq(&resp.Body, b"hello, client\n") {
+        let (mut resp, _err) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 200 && body_eq(&body, b"hello, client\n") {
             Println!("[ 5] Redirect 302→200         PASS");
         } else {
             Println!("[ 5] Redirect 302→200         FAIL status={}", resp.StatusCode);
@@ -221,16 +230,18 @@ fn main() {
     // 6. Chunked response.
     {
         let url = url_join(&base_url, "/stream");
-        let (resp, _err) = http::Get(url);
+        let (mut resp, _err) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 200
-            && body_eq(&resp.Body, b"alpha-beta-gamma")
+            && body_eq(&body, b"alpha-beta-gamma")
             && resp.ContentLength == -1
         {
             Println!("[ 6] Chunked response         PASS");
         } else {
             Println!(
                 "[ 6] Chunked response         FAIL status={} cl={} body_len={}",
-                resp.StatusCode, resp.ContentLength, resp.Body.Len()
+                resp.StatusCode, resp.ContentLength, body.Len()
             );
             failed += 1;
         }

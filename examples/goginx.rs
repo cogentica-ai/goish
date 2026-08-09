@@ -62,6 +62,7 @@ use alloc::sync::Arc;
 
 use goish::context;
 use goish::crypto::tls;
+use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::net::http::ResponseWriter;
@@ -617,7 +618,7 @@ fn proxyTo(
         outreq.Header.Set("X-Forwarded-Host", r.Host.clone());
 
         let client = http::Client::default();
-        let (resp, derr) = client.Do(&outreq);
+        let (mut resp, derr) = client.Do(&outreq);
         if !derr.IsNil() {
             // proxy_next_upstream: try the next peer.
             continue;
@@ -632,8 +633,10 @@ fn proxyTo(
         }
         w.Header().Set("Server", "goginx/0.1");
         w.WriteHeader(resp.StatusCode);
-        let nb = len(&resp.Body);
-        let _ = w.Write(resp.Body);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = io::Closer::Close(&mut resp.Body);
+        let nb = len(&body);
+        let _ = w.Write(body);
         return (resp.StatusCode, nb);
     }
     errorPage(w, 502)
@@ -879,13 +882,15 @@ fn finish() {
 
 /// Fetch via the goish HTTP client: (status, body, content-type).
 fn get(url: string) -> (int, string, string) {
-    let (resp, err) = http::Get(url.clone());
+    let (mut resp, err) = http::Get(url.clone());
     if !err.IsNil() {
         return (-1, Sprintf!("get %s: %v", url, err), string(""));
     }
+    let (body, _) = io::ReadAll(&mut resp.Body);
+    let _ = io::Closer::Close(&mut resp.Body);
     (
         resp.StatusCode,
-        string(resp.Body),
+        string(body),
         resp.Header.Get("Content-Type"),
     )
 }

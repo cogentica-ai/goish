@@ -41,6 +41,7 @@ use alloc::sync::Arc;
 // `strings::HasPrefix(...)` once `strings` is in scope.
 use goish::bytes as gobytes;
 use goish::encoding::json;
+use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::os;
@@ -358,12 +359,14 @@ fn main() {
 
         // Test 1: /healthz → 200 with JSON body.
         let name = "GET /healthz returns JSON 200";
-        let (resp, err) = http::Get(urlAt("/healthz"));
+        let (mut resp, err) = http::Get(urlAt("/healthz"));
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
             fail(Sprintf!("%s: status %d", name, resp.StatusCode));
-        } else if !gobytes::Contains(&resp.Body, bytes("\"status\"")) {
+        } else if !gobytes::Contains(&body, bytes("\"status\"")) {
             fail(Sprintf!("%s: missing \"status\" field", name));
         } else {
             pass(name);
@@ -371,12 +374,14 @@ fn main() {
 
         // Test 2: / root → 200 hello.
         let name = "GET / returns hello world";
-        let (resp, err) = http::Get(urlAt("/"));
+        let (mut resp, err) = http::Get(urlAt("/"));
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
             fail(Sprintf!("%s: status %d", name, resp.StatusCode));
-        } else if !gobytes::HasPrefix(&resp.Body, bytes("hello world")) {
+        } else if !gobytes::HasPrefix(&body, bytes("hello world")) {
             fail(Sprintf!("%s: bad body", name));
         } else {
             pass(name);
@@ -384,12 +389,14 @@ fn main() {
 
         // Test 3: /unknown → 404 custom.
         let name = "GET /unknown returns custom 404";
-        let (resp, err) = http::Get(urlAt("/unknown"));
+        let (mut resp, err) = http::Get(urlAt("/unknown"));
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 404 {
             fail(Sprintf!("%s: status %d", name, resp.StatusCode));
-        } else if !gobytes::Contains(&resp.Body, bytes("custom 404")) {
+        } else if !gobytes::Contains(&body, bytes("custom 404")) {
             fail(Sprintf!("%s: bad body", name));
         } else {
             pass(name);
@@ -397,12 +404,14 @@ fn main() {
 
         // Test 4: /api/users/{id} wildcard binding.
         let name = "GET /api/users/42 binds wildcard";
-        let (resp, err) = http::Get(urlAt("/api/users/42"));
+        let (mut resp, err) = http::Get(urlAt("/api/users/42"));
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
             fail(Sprintf!("%s: status %d", name, resp.StatusCode));
-        } else if !gobytes::Contains(&resp.Body, bytes("\"id\":\"42\"")) {
+        } else if !gobytes::Contains(&body, bytes("\"id\":\"42\"")) {
             fail(Sprintf!("%s: id not bound", name));
         } else {
             pass(name);
@@ -443,12 +452,14 @@ fn main() {
             fail(Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
             req.Header.Set("Authorization", "Bearer s3cret");
-            let (resp, err) = client.Do(&req);
+            let (mut resp, err) = client.Do(&req);
+            let (body, _) = io::ReadAll(&mut resp.Body);
+            let _ = goish::io::Closer::Close(&mut resp.Body);
             if err != nil {
                 fail(Sprintf!("%s: %s", name, err.Error()));
             } else if resp.StatusCode != 200 {
                 fail(Sprintf!("%s: status %d", name, resp.StatusCode));
-            } else if !gobytes::Contains(&resp.Body, bytes("admin only")) {
+            } else if !gobytes::Contains(&body, bytes("admin only")) {
                 fail(Sprintf!("%s: bad body", name));
             } else {
                 pass(name);
@@ -503,12 +514,14 @@ fn main() {
             fail(Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
             req.Header.Set("Cookie", "sid=abc123");
-            let (resp, err) = client.Do(&req);
+            let (mut resp, err) = client.Do(&req);
+            let (body, _) = io::ReadAll(&mut resp.Body);
+            let _ = goish::io::Closer::Close(&mut resp.Body);
             if err != nil {
                 fail(Sprintf!("%s: %s", name, err.Error()));
             } else if resp.StatusCode != 200 {
                 fail(Sprintf!("%s: status %d", name, resp.StatusCode));
-            } else if !gobytes::Contains(&resp.Body, bytes("sid=abc123")) {
+            } else if !gobytes::Contains(&body, bytes("sid=abc123")) {
                 fail(Sprintf!("%s: server didn't see cookie", name));
             } else {
                 pass(name);
@@ -517,11 +530,13 @@ fn main() {
 
         // Test 11: form query parsing via FormValue (handler-side parse).
         let name = "Form query parsed via FormValue";
-        let (resp, err) = http::Get(urlAt("/form?name=alice&age=30"));
+        let (mut resp, err) = http::Get(urlAt("/form?name=alice&age=30"));
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
-        } else if !gobytes::Contains(&resp.Body, bytes("name=alice"))
-            || !gobytes::Contains(&resp.Body, bytes("age=30"))
+        } else if !gobytes::Contains(&body, bytes("name=alice"))
+            || !gobytes::Contains(&body, bytes("age=30"))
         {
             fail(Sprintf!("%s: bad body", name));
         } else {
@@ -538,13 +553,15 @@ fn main() {
             req.Body = payload.clone();
             req.ContentLength = payload.Len();
             req.Header.Set("Content-Type", "application/json");
-            let (resp, err) = client.Do(&req);
+            let (mut resp, err) = client.Do(&req);
+            let (body, _) = io::ReadAll(&mut resp.Body);
+            let _ = goish::io::Closer::Close(&mut resp.Body);
             if err != nil {
                 fail(Sprintf!("%s: %s", name, err.Error()));
             } else if resp.StatusCode != 200 {
                 fail(Sprintf!("%s: status %d", name, resp.StatusCode));
-            } else if !gobytes::Contains(&resp.Body, bytes("\"name\":\"widget\""))
-                || !gobytes::Contains(&resp.Body, bytes("\"item_count\":4"))
+            } else if !gobytes::Contains(&body, bytes("\"name\":\"widget\""))
+                || !gobytes::Contains(&body, bytes("\"item_count\":4"))
             {
                 fail(Sprintf!("%s: bad body", name));
             } else {
@@ -603,14 +620,16 @@ fn main() {
 
         // Test 16: GET /api/stats — nested JSON response.
         let name = "GET /api/stats returns nested JSON";
-        let (resp, err) = http::Get(urlAt("/api/stats"));
+        let (mut resp, err) = http::Get(urlAt("/api/stats"));
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
         if err != nil {
             fail(Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
             fail(Sprintf!("%s: status %d", name, resp.StatusCode));
-        } else if !gobytes::Contains(&resp.Body, bytes("\"service\""))
-            || !gobytes::Contains(&resp.Body, bytes("\"shards\""))
-            || !gobytes::Contains(&resp.Body, bytes("\"healthy\":true"))
+        } else if !gobytes::Contains(&body, bytes("\"service\""))
+            || !gobytes::Contains(&body, bytes("\"shards\""))
+            || !gobytes::Contains(&body, bytes("\"healthy\":true"))
         {
             fail(Sprintf!("%s: bad body", name));
         } else {

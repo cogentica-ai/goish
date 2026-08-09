@@ -16,6 +16,7 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::time;
@@ -76,8 +77,10 @@ fn main() {
     // 1. Plain literal still routes (regression).
     {
         let url = url_join(&base_url, "/health");
-        let (resp, _) = http::Get(url);
-        if resp.StatusCode == 200 && body_eq(&resp.Body, b"alive\n") {
+        let (mut resp, _) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 200 && body_eq(&body, b"alive\n") {
             Println!("[ 1] literal route             PASS");
         } else {
             Println!("[ 1] literal route             FAIL status={}", resp.StatusCode);
@@ -88,8 +91,10 @@ fn main() {
     // 2. Single-segment wildcard binding.
     {
         let url = url_join(&base_url, "/users/42");
-        let (resp, _) = http::Get(url);
-        if resp.StatusCode == 200 && body_eq(&resp.Body, b"user-id=42\n") {
+        let (mut resp, _) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 200 && body_eq(&body, b"user-id=42\n") {
             Println!("[ 2] {{id}} bind               PASS");
         } else {
             Println!("[ 2] {{id}} bind               FAIL");
@@ -100,8 +105,10 @@ fn main() {
     // 3. Exact match wins over wildcard.
     {
         let url = url_join(&base_url, "/users/me");
-        let (resp, _) = http::Get(url);
-        if resp.StatusCode == 200 && body_eq(&resp.Body, b"self\n") {
+        let (mut resp, _) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 200 && body_eq(&body, b"self\n") {
             Println!("[ 3] exact > wildcard          PASS");
         } else {
             Println!("[ 3] exact > wildcard          FAIL");
@@ -112,11 +119,13 @@ fn main() {
     // 4. Trailing multi-segment wildcard binds the rest.
     {
         let url = url_join(&base_url, "/files/a/b/c.txt");
-        let (resp, _) = http::Get(url);
-        if resp.StatusCode == 200 && body_eq(&resp.Body, b"file-path=a/b/c.txt\n") {
+        let (mut resp, _) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 200 && body_eq(&body, b"file-path=a/b/c.txt\n") {
             Println!("[ 4] {{path...}} bind          PASS");
         } else {
-            Println!("[ 4] {{path...}} bind          FAIL body_len={}", resp.Body.Len());
+            Println!("[ 4] {{path...}} bind          FAIL body_len={}", body.Len());
             failed += 1;
         }
     }
@@ -124,8 +133,10 @@ fn main() {
     // 5. Method-prefixed wildcard matches GET.
     {
         let url = url_join(&base_url, "/api/widgets");
-        let (resp, _) = http::Get(url);
-        if resp.StatusCode == 200 && body_eq(&resp.Body, b"api-get=widgets\n") {
+        let (mut resp, _) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 200 && body_eq(&body, b"api-get=widgets\n") {
             Println!("[ 5] GET /api/{{resource}}     PASS");
         } else {
             Println!("[ 5] GET /api/{{resource}}     FAIL");

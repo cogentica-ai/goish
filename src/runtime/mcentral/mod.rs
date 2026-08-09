@@ -43,10 +43,14 @@ use span::{Span, NIL_SPAN};
 /// expect ~50 K spans of small classes — fits comfortably.
 pub const MAX_SPANS: usize = 65535;
 
-/// Maximum number of pages the page → span map covers. 256 K pages
-/// × 8 KiB = 2 GiB of tracked arena. Sized for 1 M-goroutine
-/// workloads (~450 MB G + closure heap, plus headroom).
-pub const MAX_TRACKED_PAGES: usize = 256 * 1024;
+// NOTE: the page → span map is sized to the FULL mheap arena capacity
+// at `mcentral_init` (2 bytes per page, mmap-zeroed, demand-paged).
+// It used to be a fixed 256 K-page (2 GiB) inline array; spans based
+// above that line were silently untracked, so `free` disowned their
+// objects, `dealloc_routed` fell back to a 1-page `mheap_free` INSIDE
+// the live span, and the page allocator re-issued memory that the span
+// was still serving — heap corruption that goish-vllm-port hit ~144 GiB
+// into loading the real Kimi-K3 checkpoint.
 
 /// `MCentral` — per-size-class central span lists, plus the span
 /// pool and page-to-span map.
@@ -68,8 +72,10 @@ pub struct MCentral {
 
     /// `page_to_span[page_idx]` = span index, or `NIL_SPAN` if no
     /// span owns that page. `page_idx` is computed relative to the
-    /// arena base; outside the tracked range, the small path returns
-    /// failure and the caller falls back to the large path.
+    /// arena base. Allocated at `mcentral_init` sized to the full
+    /// mheap arena capacity, so every span the mheap can ever hand
+    /// out is trackable — an untracked span is a heap-corruption
+    /// hazard (see the module note above).
     ///
     /// Atomic so `free` can perform the pointer → span lookup
     /// WITHOUT the central lock (the Go `spanOf` fast path,
@@ -78,8 +84,12 @@ pub struct MCentral {
     /// the pinning invariant — a pointer being freed is a live
     /// allocated slot, so its span cannot be empty, cannot be
     /// released, and its page mapping / descriptive fields are
-    /// stable for the duration of the free.
-    pub page_to_span: [core::sync::atomic::AtomicU16; MAX_TRACKED_PAGES],
+    /// stable for the duration of the free. The ptr/len pair itself
+    /// is written once in `mcentral_init` before `MCENTRAL_READY` is
+    /// released, same publication discipline as `arena_base`.
+    pub page_to_span: *const core::sync::atomic::AtomicU16,
+    /// Number of entries behind `page_to_span`.
+    pub tracked_pages: usize,
 
     /// Arena base address — used to translate raw pointers into
     /// page indices.
@@ -103,8 +113,8 @@ impl MCentral {
             spans: [const { Span::new() }; MAX_SPANS],
             spans_bump: 0,
             spans_free_head: NIL_SPAN,
-            page_to_span: [const { core::sync::atomic::AtomicU16::new(NIL_SPAN) };
-                MAX_TRACKED_PAGES],
+            page_to_span: core::ptr::null(),
+            tracked_pages: 0,
             arena_base: 0,
         }
     }
@@ -219,12 +229,19 @@ impl MCentral {
         // Register this span's pages in the page → span map. Release
         // stores publish the descriptive-field writes above to the
         // lock-free `free` reader (which Acquire-loads the entry).
+        // The map covers the full arena capacity, so every page of a
+        // legitimately mheap-backed span is in range.
         let first_page = (base - self.arena_base) / PAGE_SIZE;
         for p in first_page..(first_page + npages as usize) {
-            if p < MAX_TRACKED_PAGES {
-                self.page_to_span[p].store(idx, Ordering::Release);
-            }
+            debug_assert!(p < self.tracked_pages, "span page beyond arena capacity");
+            self.pts(p).store(idx, Ordering::Release);
         }
+    }
+
+    /// Entry `i` of the page → span map (allocated at `mcentral_init`).
+    #[inline]
+    fn pts(&self, i: usize) -> &core::sync::atomic::AtomicU16 {
+        unsafe { &*self.page_to_span.add(i) }
     }
 
     /// **Full-list rescue** — walk `full[class]` and move any span
@@ -275,8 +292,20 @@ static MCENTRAL_READY: AtomicBool = AtomicBool::new(false);
 
 /// One-time init. Called from `__goish_rt0` *after* `mheap_init`.
 pub unsafe fn mcentral_init(arena_base: usize) {
+    // Size the page → span map to cover the FULL arena capacity so no
+    // span the mheap can hand out is ever untracked. 2 B/page: a
+    // 320 GiB arena costs 80 MB of demand-paged virtual space.
+    let pages = crate::runtime::mheap_capacity_pages();
+    if pages == 0 {
+        oom(b"goish: mcentral: init before mheap\n");
+    }
+    let map = crate::runtime::mheap::mmap_zeroed(
+        pages * core::mem::size_of::<core::sync::atomic::AtomicU16>(),
+    ) as *const core::sync::atomic::AtomicU16;
     let mut g = MCENTRAL.lock();
     g.arena_base = arena_base;
+    g.page_to_span = map;
+    g.tracked_pages = pages;
     drop(g);
     MCENTRAL_READY.store(true, Ordering::Release);
 }
@@ -381,10 +410,10 @@ pub unsafe fn free(ptr: *mut u8) -> bool {
         return false;
     }
     let page_idx = (p - arena_base) / PAGE_SIZE;
-    if page_idx >= MAX_TRACKED_PAGES {
+    if page_idx >= mc.tracked_pages {
         return false;
     }
-    let idx = mc.page_to_span[page_idx].load(Ordering::Acquire);
+    let idx = mc.pts(page_idx).load(Ordering::Acquire);
     if idx == NIL_SPAN {
         return false;
     }
@@ -429,8 +458,8 @@ pub unsafe fn free(ptr: *mut u8) -> bool {
         // Clear page → span map for these pages.
         let first_page = (base - arena_base) / PAGE_SIZE;
         for pp in first_page..(first_page + npages) {
-            if pp < MAX_TRACKED_PAGES {
-                g.page_to_span[pp].store(NIL_SPAN, Ordering::Release);
+            if pp < g.tracked_pages {
+                g.pts(pp).store(NIL_SPAN, Ordering::Release);
             }
         }
         g.list_remove(idx);
@@ -547,8 +576,8 @@ pub unsafe fn uncacheSpan(idx: u16) {
         // released to mheap. Mirrors the last-slot path in `free`.
         let first_page = (base - arena_base) / PAGE_SIZE;
         for pp in first_page..(first_page + npages) {
-            if pp < MAX_TRACKED_PAGES {
-                g.page_to_span[pp].store(NIL_SPAN, Ordering::Release);
+            if pp < g.tracked_pages {
+                g.pts(pp).store(NIL_SPAN, Ordering::Release);
             }
         }
         g.release_span_idx(idx);

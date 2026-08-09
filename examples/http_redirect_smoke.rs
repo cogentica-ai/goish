@@ -10,7 +10,7 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use goish::io::Writer;
+use goish::io::{self, Writer};
 use goish::net;
 use goish::net::http;
 use goish::time;
@@ -62,8 +62,10 @@ fn main() {
     // 1. StripPrefix routes /api/status → inner /status.
     {
         let url = build_url(&addr, "/api/status");
-        let (resp, _) = http::Get(url);
-        if resp.StatusCode == 200 && body_eq(&resp.Body, b"inner-status\n") {
+        let (mut resp, _) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 200 && body_eq(&body, b"inner-status\n") {
             Println!("[ 1] StripPrefix routes        PASS");
         } else {
             Println!("[ 1] StripPrefix routes        FAIL status={}", resp.StatusCode);
@@ -74,8 +76,10 @@ fn main() {
     // 2. RedirectHandler returns 301 → client follows → 200 from /new.
     {
         let url = build_url(&addr, "/old");
-        let (resp, _) = http::Get(url);
-        if resp.StatusCode == 200 && body_eq(&resp.Body, b"welcome to /new\n") {
+        let (mut resp, _) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 200 && body_eq(&body, b"welcome to /new\n") {
             Println!("[ 2] RedirectHandler 301→200   PASS");
         } else {
             Println!("[ 2] RedirectHandler 301→200   FAIL status={}", resp.StatusCode);
@@ -86,8 +90,10 @@ fn main() {
     // 3. Redirect() inline returns 302 → client follows → 200.
     {
         let url = build_url(&addr, "/custom-redirect");
-        let (resp, _) = http::Get(url);
-        if resp.StatusCode == 200 && body_eq(&resp.Body, b"welcome to /new\n") {
+        let (mut resp, _) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 200 && body_eq(&body, b"welcome to /new\n") {
             Println!("[ 3] inline Redirect()         PASS");
         } else {
             Println!("[ 3] inline Redirect()         FAIL status={}", resp.StatusCode);

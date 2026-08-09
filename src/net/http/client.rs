@@ -24,8 +24,16 @@
 //     watcher interrupts blocked I/O (HTTP path; TLS gets deadline
 //     folding only). `Client.Timeout` re-parents the request under
 //     `context.WithTimeout` — one deadline across all redirect hops.
-//   * `Request.Body` and `Response.Body` are pre-buffered `slice<byte>`
-//     (matches the existing Request type in goish v1).
+//   * `Request.Body` is a pre-buffered `slice<byte>` (matches the
+//     existing Request type in goish v1).
+//   * `Response.Body` is a streaming `Body` (Go's `io.ReadCloser`
+//     shape): `RoundTrip` returns after parsing the response head,
+//     and the conn lives inside the Body until `Close`. Read sees
+//     flushed chunks as they arrive — the substrate for SSE/LLM
+//     token streaming. Callers `io::ReadAll(&mut resp.Body)` +
+//     `resp.Body.Close()` exactly like Go. (The public
+//     `ReadResponse` helper still returns a pre-drained Body — its
+//     borrowed-reader signature can't carry ownership.)
 //   * No automatic decompression (no `Accept-Encoding: gzip`).
 
 #![allow(non_snake_case)]
@@ -55,8 +63,8 @@ use super::url::URL;
 
 // ─── Response ────────────────────────────────────────────────────────
 
-/// `http.Response` (response.go:35). v1 buffers Body fully (matches
-/// our Request convention).
+/// `http.Response` (response.go:35). `Body` streams from the wire
+/// (Go's `io.ReadCloser` shape) — see the `Body` type below.
 #[derive(Clone)]
 pub struct Response {
     pub Status: string,    // "200 OK"
@@ -65,7 +73,7 @@ pub struct Response {
     pub ProtoMajor: int,
     pub ProtoMinor: int,
     pub Header: Header,
-    pub Body: slice<byte>,
+    pub Body: Body,
     /// `-1` if unknown (chunked / no Content-Length on a non-empty body).
     pub ContentLength: int,
     /// Whether the connection should be closed after reading Body.
@@ -85,11 +93,264 @@ impl Default for Response {
             ProtoMajor: 0,
             ProtoMinor: 0,
             Header: Header::new(),
-            Body: slice::<byte>::__from_vec(Vec::new()),
+            Body: Body::default(),
             ContentLength: 0,
             Close: false,
             Request: nilable::nil(),
         }
+    }
+}
+
+// ─── Body — Go's `Response.Body io.ReadCloser`, streaming ────────────
+//
+// The conn (TCP or TLS), wrapped in the head-parse's bufio reader
+// (which may hold read-ahead body bytes), moves INTO the Body when
+// `RoundTrip` returns. `Read` pulls framed bytes off the wire on
+// demand; `Close` stops the ctx-cancel watcher and closes the conn.
+// Interior `Arc<sync::Mutex<…>>` keeps `Response: Clone` working —
+// clones share one read cursor, exactly like Go sharing one
+// `io.ReadCloser` value.
+
+/// Which conn a streaming body reads from. The bufio layer is the one
+/// `read_response_head` parsed the head through — its buffer may
+/// already hold the first body bytes.
+enum ConnSrc {
+    Tcp(bufio::Reader<crate::net::TCPConn>),
+    Tls(bufio::Reader<crate::crypto::tls::Conn>),
+}
+
+impl Reader for ConnSrc {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        match self {
+            ConnSrc::Tcp(br) => br.Read(p),
+            ConnSrc::Tls(br) => br.Read(p),
+        }
+    }
+}
+
+impl ConnSrc {
+    fn close_conn(&mut self) -> error {
+        match self {
+            ConnSrc::Tcp(br) => br.__rd_mut().Close(),
+            ConnSrc::Tls(br) => br.__rd_mut().Close(),
+        }
+    }
+}
+
+/// Wire framing of a body-in-progress. Mirrors Go's transfer.go body
+/// readers: `body` over a LimitedReader (Content-Length), over a
+/// chunkedReader (TE: chunked), or straight to EOF (Connection:
+/// close). `Eager` is a fully-materialized body (ReadResponse,
+/// DumpResponse replacement, `Body::from`).
+enum FramedBody {
+    Eager { data: slice<byte>, off: int },
+    Cl { src: ConnSrc, remaining: int },
+    Chunked { cr: super::chunked::ChunkedReader<ConnSrc> },
+    UntilEof { src: ConnSrc },
+    Closed,
+}
+
+struct BodyState {
+    framing: FramedBody,
+    /// Request ctx — a Read kicked out by the cancel watcher maps its
+    /// wire error to ctx.Err(), like `ctx_err_or` on the head path.
+    ctx: Option<Arc<dyn crate::context::Context>>,
+    /// The ctx-cancel watcher (see `arm_cancel_watch`). MUST be
+    /// stopped before the conn closes — it dereferences the conn's
+    /// PollDesc.
+    watch: Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)>,
+    /// `Client.Timeout`'s WithTimeout release — Go's setRequestCancel
+    /// stops the timer when the body is closed, not when Do returns
+    /// (the deadline covers body reads).
+    cancel: Option<crate::context::CancelFunc>,
+}
+
+fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
+    let (n, err) = match &mut st.framing {
+        FramedBody::Eager { data, off } => {
+            let total = data.Len();
+            if *off >= total {
+                (0, io::EOF.into())
+            } else {
+                let want = (total - *off).min(p.Len());
+                for i in 0..want {
+                    p[i] = data[*off + i];
+                }
+                *off += want;
+                (want, errors::nil)
+            }
+        }
+        FramedBody::Cl { src, remaining } => {
+            if *remaining <= 0 {
+                (0, io::EOF.into())
+            } else {
+                // Never read past the framing boundary off the conn.
+                let want = (*remaining).min(p.Len());
+                let (n, e) = if p.Len() > want {
+                    let mut tmp = make!([]byte, want);
+                    let (n, e) = src.Read(&mut tmp);
+                    for i in 0..n {
+                        p[i] = tmp[i];
+                    }
+                    (n, e)
+                } else {
+                    src.Read(p)
+                };
+                *remaining -= n;
+                if !e.IsNil() && errors::Is(e.clone(), io::EOF) && *remaining > 0 {
+                    // Conn died mid-body — Go surfaces ErrUnexpectedEOF.
+                    (n, io::ErrUnexpectedEOF.into())
+                } else {
+                    (n, e)
+                }
+            }
+        }
+        FramedBody::Chunked { cr } => cr.Read(p),
+        FramedBody::UntilEof { src } => src.Read(p),
+        FramedBody::Closed => (
+            0,
+            errors::New(string("http: read on closed response body")),
+        ),
+    };
+    // A read interrupted by the cancel watcher surfaces as a timeout
+    // off the netpoller; prefer ctx.Err() (context canceled /
+    // deadline exceeded), matching Go's url.Error unwrapping.
+    if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
+        if let Some(c) = &st.ctx {
+            let ce = c.Err();
+            if !ce.IsNil() {
+                return (n, ce);
+            }
+        }
+    }
+    (n, err)
+}
+
+fn close_locked(st: &mut BodyState) -> error {
+    // Watcher first — it holds a raw PollDesc pointer into the conn.
+    if let Some(w) = st.watch.take() {
+        stop_cancel_watch(Some(w));
+    }
+    let err = match &mut st.framing {
+        FramedBody::Cl { src, .. } | FramedBody::UntilEof { src } => src.close_conn(),
+        FramedBody::Chunked { cr } => cr.__bufio_mut().__rd_mut().close_conn(),
+        _ => errors::nil,
+    };
+    st.framing = FramedBody::Closed;
+    // Release the Client.Timeout timer, if we carry one.
+    if let Some(c) = st.cancel.take() {
+        c();
+    }
+    err
+}
+
+impl Drop for BodyState {
+    fn drop(&mut self) {
+        // Un-Closed stream dropped (body leaked without Close, or a
+        // redirect hop discarded) — release the conn + watcher.
+        let _ = close_locked(self);
+    }
+}
+
+/// `http.Response.Body` — a streaming `io.ReadCloser`.
+///
+///   let (body, err) = io::ReadAll(&mut resp.Body);   // io.ReadAll(resp.Body)
+///   let _ = resp.Body.Close();                       // resp.Body.Close()
+///
+/// Incremental reads see flushed chunks the moment they arrive.
+#[derive(Clone)]
+pub struct Body {
+    inner: Arc<crate::sync::Mutex<BodyState>>,
+}
+
+impl Body {
+    fn from_parts(
+        framing: FramedBody,
+        ctx: Option<Arc<dyn crate::context::Context>>,
+        watch: Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)>,
+    ) -> Body {
+        Body {
+            inner: Arc::new(crate::sync::Mutex::new(BodyState {
+                framing,
+                ctx,
+                watch,
+                cancel: None,
+            })),
+        }
+    }
+
+    /// Fully-materialized body over `data` — the shape `ReadResponse`
+    /// returns and `httputil` reconstructs. Reads walk the bytes,
+    /// then EOF; Close is a no-op state flip.
+    pub fn from_bytes(data: slice<byte>) -> Body {
+        Body::from_parts(FramedBody::Eager { data, off: 0 }, None, None)
+    }
+
+    /// Crate-internal: hand the `Client.Timeout` WithTimeout release
+    /// to the body — invoked on Close/Drop (Go client.go:394 shape).
+    pub(crate) fn __set_cancel(&self, cancel: crate::context::CancelFunc) {
+        let mut g = self.inner.Lock();
+        g.cancel = Some(cancel);
+    }
+
+    /// Crate-internal (DumpResponse): drain the unread remainder,
+    /// close any underlying conn, and leave the body re-readable as
+    /// an Eager copy of that remainder — Go's `drainBody` shape.
+    pub(crate) fn __drain_remainder(&self) -> (slice<byte>, error) {
+        let mut g = self.inner.Lock();
+        let mut out = make!([]byte, 0);
+        let mut chunk = make!([]byte, 4096);
+        loop {
+            let (n, err) = read_locked(&mut g, &mut chunk);
+            for i in 0..n {
+                out = append!(out, chunk[i]);
+            }
+            if !err.IsNil() {
+                if errors::Is(err.clone(), io::EOF) {
+                    break;
+                }
+                return (out, err);
+            }
+        }
+        // Release conn + watcher, then become the remainder.
+        let _ = close_locked(&mut g);
+        g.framing = FramedBody::Eager {
+            data: out.clone(),
+            off: 0,
+        };
+        (out, errors::nil)
+    }
+
+    /// Crate-internal: Close through a shared handle (`&self`) — the
+    /// redirect loop discards hop responses without a `mut` binding.
+    pub(crate) fn __close_shared(&self) -> error {
+        let mut g = self.inner.Lock();
+        close_locked(&mut g)
+    }
+}
+
+impl Default for Body {
+    fn default() -> Self {
+        Body::from_bytes(slice::<byte>::__from_vec(Vec::new()))
+    }
+}
+
+impl From<slice<byte>> for Body {
+    fn from(data: slice<byte>) -> Body {
+        Body::from_bytes(data)
+    }
+}
+
+impl Reader for Body {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        let mut g = self.inner.Lock();
+        read_locked(&mut g, p)
+    }
+}
+
+impl Closer for Body {
+    fn Close(&mut self) -> error {
+        self.__close_shared()
     }
 }
 
@@ -151,16 +412,81 @@ impl Response {
 
 // ─── ReadResponse ────────────────────────────────────────────────────
 
+/// Body framing of a parsed response head — which wire discipline the
+/// body bytes follow. Mirrors the transfer.go decision tree.
+pub(crate) enum BodyKind {
+    /// HEAD / 1xx / 204 / 304, or no CL + no TE + no close.
+    Empty,
+    /// `Transfer-Encoding: chunked`.
+    Chunked,
+    /// `Content-Length: n` with n > 0.
+    Cl(int),
+    /// No CL, no TE, `Connection: close` — body runs to conn EOF.
+    UntilEof,
+}
+
 /// `http.ReadResponse(b, req)` — parse an HTTP/1.x response from the
 /// buffered reader. Mirrors response.go:154.
 ///
-/// On success the reader has consumed up through the response body.
+/// On success the reader has consumed up through the response body,
+/// which is returned pre-drained (an `Eager` Body) — the borrowed
+/// reader can't move into a streaming Body. The client's `RoundTrip`
+/// uses `read_response_head` + an owned reader to stream instead.
 /// The `req` argument is recorded into `Response.Request` so callers
 /// can chain `Location()` etc.
 pub fn ReadResponse<R: Reader>(
     br: &mut bufio::Reader<R>,
     req: Option<Request>,
 ) -> (Response, error) {
+    let (mut resp, kind, err) = read_response_head(br, req);
+    if !err.IsNil() {
+        return (resp, err);
+    }
+    match kind {
+        BodyKind::Empty => {
+            resp.Body = Body::default();
+        }
+        BodyKind::Chunked => {
+            let body = make!([]byte, 0);
+            let mut cr = super::chunked::NewChunkedReader(BufioPassthrough { inner: br });
+            let (b, err) = drain_to_eof(&mut cr, body);
+            if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
+                return (resp, err);
+            }
+            resp.Body = Body::from_bytes(b);
+        }
+        BodyKind::Cl(n) => {
+            let want = n;
+            let mut body = make!([]byte, want);
+            // Go: io.ReadFull(r, body)
+            let (got, ferr) = read_full_into(br, &mut body);
+            if !ferr.IsNil() && !errors::Is(ferr.clone(), io::EOF) {
+                return (resp, ferr);
+            }
+            if got < want {
+                body = body.slice(0, got);
+            }
+            resp.Body = Body::from_bytes(body);
+        }
+        BodyKind::UntilEof => {
+            let body = make!([]byte, 0);
+            let (b, err) = drain_to_eof(br, body);
+            if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
+                return (resp, err);
+            }
+            resp.Body = Body::from_bytes(b);
+        }
+    }
+    (resp, errors::nil)
+}
+
+/// Parse status line + headers + framing decision, WITHOUT touching
+/// body bytes. `resp.ContentLength` / `resp.Close` are set; the
+/// returned `BodyKind` says how the bytes that follow are framed.
+pub(crate) fn read_response_head<R: Reader>(
+    br: &mut bufio::Reader<R>,
+    req: Option<Request>,
+) -> (Response, BodyKind, error) {
     let mut resp = Response::default();
     resp.Request = match req {
         Some(r) => nilable::new(r),
@@ -170,24 +496,38 @@ pub fn ReadResponse<R: Reader>(
     // Status line: "HTTP/1.1 200 OK\r\n"
     let line = match read_crlf_line(br) {
         Ok(l) => l,
-        Err(e) => return (resp, e),
+        Err(e) => return (resp, BodyKind::Empty, e),
     };
     let lb = line.as_bytes();
     let sp1 = match lb.iter().position(|&b| b == b' ') {
         Some(i) => i,
-        None => return (resp, errors::New(string("http: malformed response status line"))),
+        None => {
+            return (
+                resp,
+                BodyKind::Empty,
+                errors::New(string("http: malformed response status line")),
+            )
+        }
     };
     resp.Proto = string::from_bytes(&lb[..sp1]);
     let rest = &lb[sp1 + 1..];
     let sp2 = rest.iter().position(|&b| b == b' ').unwrap_or(rest.len());
     let code_b = &rest[..sp2];
     if code_b.len() != 3 {
-        return (resp, errors::New(string("http: malformed HTTP status code")));
+        return (
+            resp,
+            BodyKind::Empty,
+            errors::New(string("http: malformed HTTP status code")),
+        );
     }
     let mut code: int = 0;
     for &b in code_b {
         if !b.is_ascii_digit() {
-            return (resp, errors::New(string("http: malformed HTTP status code")));
+            return (
+                resp,
+                BodyKind::Empty,
+                errors::New(string("http: malformed HTTP status code")),
+            );
         }
         code = code * 10 + (b - b'0') as int;
     }
@@ -195,7 +535,11 @@ pub fn ReadResponse<R: Reader>(
     resp.Status = string::from_bytes(rest);
     let (major, minor) = parse_http_version(&resp.Proto);
     if major == 0 {
-        return (resp, errors::New(string("http: malformed HTTP version")));
+        return (
+            resp,
+            BodyKind::Empty,
+            errors::New(string("http: malformed HTTP version")),
+        );
     }
     resp.ProtoMajor = major;
     resp.ProtoMinor = minor;
@@ -204,7 +548,7 @@ pub fn ReadResponse<R: Reader>(
     loop {
         let h = match read_crlf_line(br) {
             Ok(l) => l,
-            Err(e) => return (resp, e),
+            Err(e) => return (resp, BodyKind::Empty, e),
         };
         if h.Len() == 0 {
             break;
@@ -212,7 +556,13 @@ pub fn ReadResponse<R: Reader>(
         let hb = h.as_bytes();
         let colon = match hb.iter().position(|&b| b == b':') {
             Some(i) => i,
-            None => return (resp, errors::New(string("http: malformed response header"))),
+            None => {
+                return (
+                    resp,
+                    BodyKind::Empty,
+                    errors::New(string("http: malformed response header")),
+                )
+            }
         };
         let name = string::from_bytes(&hb[..colon]);
         let mut value_start = colon + 1;
@@ -248,52 +598,37 @@ pub fn ReadResponse<R: Reader>(
 
     if no_body {
         resp.ContentLength = 0;
-        resp.Body = make!([]byte, 0);
-    } else if chunked {
+        return (resp, BodyKind::Empty, errors::nil);
+    }
+    if chunked {
         // Go: resp.TransferEncoding = []string{"chunked"}; resp.ContentLength = -1
-        // Go: resp.Body = http.internal.NewChunkedReader(r) — drained into Body.
         resp.ContentLength = -1;
-        let body = make!([]byte, 0);
-        let mut cr = super::chunked::NewChunkedReader(BufioPassthrough { inner: br });
-        let (b, err) = drain_to_eof(&mut cr, body);
-        if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
-            return (resp, err);
-        }
-        resp.Body = b;
-    } else if cl_str.Len() > 0 {
+        return (resp, BodyKind::Chunked, errors::nil);
+    }
+    if cl_str.Len() > 0 {
         // Go: cl, err := strconv.ParseInt(cls, 10, 64)
         let (n, perr) = crate::strconv::Atoi(cl_str);
         if !perr.IsNil() || n < 0 {
-            return (resp, errors::New(string("http: invalid Content-Length")));
+            return (
+                resp,
+                BodyKind::Empty,
+                errors::New(string("http: invalid Content-Length")),
+            );
         }
         resp.ContentLength = n;
-        let want = n as int;
-        let mut body = make!([]byte, want);
-        // Go: io.ReadFull(r, body)
-        let (got, ferr) = read_full_into(br, &mut body);
-        if !ferr.IsNil() && !errors::Is(ferr.clone(), io::EOF) {
-            return (resp, ferr);
+        if n == 0 {
+            return (resp, BodyKind::Empty, errors::nil);
         }
-        if got < want {
-            body = body.slice(0, got);
-        }
-        resp.Body = body;
-    } else if resp.Close {
-        // Go: no CL, no TE, Connection: close → io.ReadAll(r)
-        resp.ContentLength = -1;
-        let body = make!([]byte, 0);
-        let (b, err) = drain_to_eof(br, body);
-        if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
-            return (resp, err);
-        }
-        resp.Body = b;
-    } else {
-        // Go: no CL, no TE, no close — body is empty.
-        resp.ContentLength = 0;
-        resp.Body = make!([]byte, 0);
+        return (resp, BodyKind::Cl(n), errors::nil);
     }
-
-    (resp, errors::nil)
+    if resp.Close {
+        // Go: no CL, no TE, Connection: close → body runs to conn EOF.
+        resp.ContentLength = -1;
+        return (resp, BodyKind::UntilEof, errors::nil);
+    }
+    // Go: no CL, no TE, no close — body is empty.
+    resp.ContentLength = 0;
+    (resp, BodyKind::Empty, errors::nil)
 }
 
 /// Read until EOF into `body`, returning the appended slice and any
@@ -554,17 +889,18 @@ impl RoundTripper for Transport {
                 return (Response::default(), ctx_err_or(&ctx, werr));
             }
 
-            // Read the response.
-            let (resp, rerr) = {
-                let mut br = bufio::NewReader(&mut tls_conn);
-                ReadResponse(&mut br, Some(req.clone()))
-            };
-            stop_cancel_watch(watch);
-            let _ = tls_conn.Close();
+            // Read the response head; the conn moves into the bufio
+            // reader and onward into resp.Body, which streams the
+            // body bytes until the caller Closes it.
+            let mut br = bufio::NewReader(tls_conn);
+            let (mut resp, kind, rerr) = read_response_head(&mut br, Some(req.clone()));
             if !rerr.IsNil() {
+                stop_cancel_watch(watch);
+                let _ = br.__rd_mut().Close();
                 return (resp, ctx_err_or(&ctx, rerr));
             }
-            (resp, rerr)
+            attach_stream_body(&mut resp, kind, ConnSrc::Tls(br), ctx, watch);
+            (resp, errors::nil)
         } else {
             // ── HTTP path ────────────────────────────────────────────────
             let dial_addr = ensure_default_port(&host, 80);
@@ -592,17 +928,59 @@ impl RoundTripper for Transport {
                 return (Response::default(), ctx_err_or(&ctx, werr));
             }
 
-            // Read the response.
-            let (resp, rerr) = {
-                let mut br = bufio::NewReader(&mut conn);
-                ReadResponse(&mut br, Some(req.clone()))
-            };
-            stop_cancel_watch(watch);
-            let _ = conn.Close();
+            // Read the response head; the conn moves into the bufio
+            // reader and onward into resp.Body, which streams the
+            // body bytes until the caller Closes it.
+            let mut br = bufio::NewReader(conn);
+            let (mut resp, kind, rerr) = read_response_head(&mut br, Some(req.clone()));
             if !rerr.IsNil() {
+                stop_cancel_watch(watch);
+                let _ = br.__rd_mut().Close();
                 return (resp, ctx_err_or(&ctx, rerr));
             }
-            (resp, rerr)
+            attach_stream_body(&mut resp, kind, ConnSrc::Tcp(br), ctx, watch);
+            (resp, errors::nil)
+        }
+    }
+}
+
+/// Wire a parsed head + owned conn into a streaming `resp.Body`. For
+/// `Empty` framing there is nothing left on the wire: the watcher
+/// stops and the conn closes immediately (v1 has no idle pool).
+fn attach_stream_body(
+    resp: &mut Response,
+    kind: BodyKind,
+    mut src: ConnSrc,
+    ctx: Option<Arc<dyn crate::context::Context>>,
+    watch: Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)>,
+) {
+    match kind {
+        BodyKind::Empty => {
+            stop_cancel_watch(watch);
+            let _ = src.close_conn();
+            resp.Body = Body::default();
+        }
+        BodyKind::Cl(n) => {
+            resp.Body = Body::from_parts(
+                FramedBody::Cl {
+                    src,
+                    remaining: n,
+                },
+                ctx,
+                watch,
+            );
+        }
+        BodyKind::Chunked => {
+            resp.Body = Body::from_parts(
+                FramedBody::Chunked {
+                    cr: super::chunked::NewChunkedReader(src),
+                },
+                ctx,
+                watch,
+            );
+        }
+        BodyKind::UntilEof => {
+            resp.Body = Body::from_parts(FramedBody::UntilEof { src }, ctx, watch);
         }
     }
 }
@@ -755,8 +1133,11 @@ impl Client {
     /// deadline into its connection deadlines.
     pub fn Do(&self, req: &Request) -> (Response, error) {
         let mut current = req.clone();
-        // Whole-exchange deadline via ctx (canceled on every return
-        // path by the drop guard, releasing the timer).
+        // Whole-exchange deadline via ctx. The drop guard covers the
+        // error paths; on success the release migrates into the
+        // returned Body (Go's setRequestCancel stops the timer on
+        // body Close, not on Do return — the deadline covers body
+        // reads).
         let mut _cancel_guard = __CancelOnDrop(None);
         if self.Timeout.0 > 0 {
             let (ctx, cancel) = crate::context::WithTimeout(current.Context(), self.Timeout);
@@ -773,8 +1154,14 @@ impl Client {
                 301 | 302 | 303 | 307 | 308 => {
                     let (loc, lerr) = resp.Location();
                     if !lerr.IsNil() {
-                        return (resp, errors::nil); // no Location → return as-is
+                        // No Location → return as-is.
+                        if let Some(c) = _cancel_guard.0.take() {
+                            resp.Body.__set_cancel(c);
+                        }
+                        return (resp, errors::nil);
                     }
+                    // Go: the hop's body is closed before following.
+                    let _ = resp.Body.__close_shared();
                     let next_method = if resp.StatusCode == 303 {
                         // 303 → GET
                         string("GET")
@@ -815,7 +1202,14 @@ impl Client {
                     current = next;
                     continue;
                 }
-                _ => return (resp, errors::nil),
+                _ => {
+                    // Final response: the Timeout release rides along
+                    // in the Body, invoked on Close/Drop.
+                    if let Some(c) = _cancel_guard.0.take() {
+                        resp.Body.__set_cancel(c);
+                    }
+                    return (resp, errors::nil);
+                }
             }
         }
         (

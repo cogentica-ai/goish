@@ -12,6 +12,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use goish::convert::bytes;
+use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::os;
@@ -46,13 +47,15 @@ fn main() {
     // 1. Whole file: 200 + full body.
     {
         let url = build_url(&addr, "/file");
-        let (resp, _) = http::Get(url);
-        if resp.StatusCode == 200 && resp.Body.Len() == 36 {
+        let (mut resp, _) = http::Get(url);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 200 && body.Len() == 36 {
             Println!("[ 1] full body 200             PASS");
         } else {
             Println!(
                 "[ 1] full body 200             FAIL status={} len={}",
-                resp.StatusCode, resp.Body.Len()
+                resp.StatusCode, body.Len()
             );
             failed += 1;
         }
@@ -63,14 +66,16 @@ fn main() {
         let mut req = make_req(&addr, "/file");
         req.Header.Set(string("Range"), string("bytes=0-9"));
         let cli = http::Client::default();
-        let (resp, _) = cli.Do(&req);
+        let (mut resp, _) = cli.Do(&req);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = io::Closer::Close(&mut resp.Body);
         let cr = resp.Header.Get(string("Content-Range"));
-        if resp.StatusCode == 206 && resp.Body.Len() == 10 && cr == "bytes 0-9/36" {
+        if resp.StatusCode == 206 && body.Len() == 10 && cr == "bytes 0-9/36" {
             Println!("[ 2] Range 0-9 → 206           PASS");
         } else {
             Println!(
                 "[ 2] Range 0-9 → 206           FAIL status={} len={} cr={}",
-                resp.StatusCode, resp.Body.Len(), cr
+                resp.StatusCode, body.Len(), cr
             );
             failed += 1;
         }
@@ -81,10 +86,12 @@ fn main() {
         let mut req = make_req(&addr, "/file");
         req.Header.Set(string("Range"), string("bytes=-5"));
         let cli = http::Client::default();
-        let (resp, _) = cli.Do(&req);
-        if resp.StatusCode == 206 && resp.Body.Len() == 5 {
+        let (mut resp, _) = cli.Do(&req);
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = io::Closer::Close(&mut resp.Body);
+        if resp.StatusCode == 206 && body.Len() == 5 {
             // Last 5 bytes are "VWXYZ".
-            let last5 = body_as_bytes(&resp.Body);
+            let last5 = body_as_bytes(&body);
             if &last5[..] == b"VWXYZ" {
                 Println!("[ 3] suffix Range → 206        PASS");
             } else {

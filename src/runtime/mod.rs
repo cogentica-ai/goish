@@ -36,7 +36,7 @@ pub mod symbolize;
 pub mod spin;
 pub mod sysmon;
 pub use debug::{NumCPU, NumGoroutine, GOMAXPROCS};
-pub use heap::{alloc, free, mheap_alloc_pages, mheap_free_pages, realloc};
+pub use heap::{alloc, free, mheap_alloc_pages, mheap_capacity_pages, mheap_free_pages, realloc};
 
 // ─── GOOS / GOARCH / Compiler — Go runtime build identifiers ─────────
 //

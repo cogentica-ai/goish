@@ -2,7 +2,7 @@
 
 **A Go-style standard library and runtime, implemented in `no_std` Rust on top of raw Linux syscalls.**
 
-No `glibc`, no `std`, no Tokio. Goish ships its own `_start`, page allocator, size-class heap, M:N scheduler, channels, `select!`, `sync` primitives, async preemption, and ~30 ports of Go's standard library packages — all in one statically-linked binary.
+No `glibc`, no `std`, no Tokio. Goish ships its own `_start`, page allocator, size-class heap, M:N scheduler, channels, `select!`, `sync` primitives, async preemption, and ~80 ports of Go standard-library and `golang.org/x` packages — all in one statically-linked binary.
 
 ```rust
 use goish::{go, KB};
@@ -33,7 +33,7 @@ That's a million real goroutines on 13 OS threads, ~2 GiB virtual / ~2.4 GiB pea
 
 ## Status
 
-Active development. `dev` is green: 171/171 on the full e2e example suite, 320/320 across the scheduler/chan/sync/select/time stress families at 10 loops each, and 1M goroutines in `spawn_million`.
+Active development. The e2e suite spans 406 examples, run at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
 
 Goish is **single-target**: `x86_64-unknown-linux-gnu`. Other targets are deliberately out of scope.
 
@@ -50,7 +50,7 @@ Goish is **single-target**: `x86_64-unknown-linux-gnu`. Other targets are delibe
 - **GOMAXPROCS**: sized from `sched_getaffinity(2)`; one P per CPU.
 
 ### Memory
-- **Page allocator** (`mheap`): radix-tree port of Go's `runtime/mpallocbits.go` — leaf summaries, four-level summary tree, demand-paged metadata via raw `mmap`.
+- **Page allocator** (`mheap`): radix-tree port of Go's `runtime/mpallocbits.go` — leaf summaries, four-level summary tree, demand-paged metadata via raw `mmap`. The arena is a `MAP_NORESERVE` reservation grown on demand, capped at 320 GiB.
 - **Size-class heap** (`mcentral`): 67 size classes from Go's `internal/runtime/gc/sizeclasses.go`. Lock-free hot path via atomic `alloc_bits` + Go-style `allocCache` discipline (`runtime/mcache.go:14`).
 - **Per-P mcache**: cached span per size-class; mcache hot path takes no central lock.
 - **Reserved goroutine stacks** (M29): bare `go!()` gets a 1 MiB `MAP_NORESERVE` virtual reservation with a `PROT_NONE` guard page — the kernel commits physical 4 KiB pages as the goroutine touches them, so nobody sizes a stack and a shallow goroutine costs ~one page. Dead reservations recycle through a pool (`MADV_DONTNEED` drops their pages). Overflow past 1 MiB hits the guard and the SIGSEGV handler prints a spawn-site diagnostic.
@@ -64,13 +64,22 @@ Goish is **single-target**: `x86_64-unknown-linux-gnu`. Other targets are delibe
 - **`context`**: `Background`, `WithCancel` / `WithTimeout` / `WithDeadline` / `WithValue`, `Cause`. `Done()` returns a real `chan<()>` that composes with `select!`; nil for non-cancellable contexts, exactly like Go.
 
 ### Networking & web
-- **`net`** (M17): TCP/UDP over raw sockets, integrated with an **epoll netpoller** — a blocking `Read`/`Write` parks the goroutine instead of the thread; `SetDeadline` flows through a netpoll deadline heap swept by sysmon.
-- **`net/http` server** (M18, production-hardened in M31): HTTP/1.1 with keep-alive, Go 1.22 `ServeMux` patterns (`"GET /users/{id}"` wildcards, GET-matches-HEAD, 405 + `Allow` on method mismatch), composable `Handler` middleware, `Flusher` chunked streaming, `TimeoutHandler`, `FileServer` + range requests, `httputil` reverse proxy. Deployment-grade operations: `Shutdown(ctx)` with active idle-conn draining, `Close`, `RegisterOnShutdown`, live `IdleTimeout`, `BaseContext`/`ConnContext`, `ErrorLog`, `Expect: 100-continue`, HEAD body suppression, accept-failure backoff, `TCP_NODELAY` + keep-alive socket defaults, and `signal::NotifyContext` for SIGTERM-triggered graceful drain — see `examples/deploy_rest_api.rs` for the blessed pattern.
-- **Live request contexts**: every inbound request carries a cancellable `r.Context()` — canceled when the response finishes, or the moment the client disconnects mid-handler. Disconnect detection is Go's `startBackgroundRead` shape: a watcher goroutine probes the socket with `recv(MSG_PEEK | MSG_DONTWAIT)` (peeking never eats a pipelined request) and parks on the netpoller; the serve loop aborts it after the handler via a past netpoll deadline (goish's `aLongTimeAgo`).
-- **`net/http` client**: `Get` / `Post` / `Do` with redirects and cookies. `Client.Timeout` re-parents the request under `context.WithTimeout` — one deadline covers every redirect hop — and a mid-flight `ctx` cancel interrupts blocked I/O through the netpoller, surfacing `context.Canceled` / `DeadlineExceeded` like Go's `url.Error` unwrapping.
+- **`net`** (M17): TCP/UDP over raw sockets, integrated with an **epoll netpoller** — a blocking `Read`/`Write` parks the goroutine instead of the thread. The poller is sharded **per-P epoll** (nginx-model), with a dedicated blocking-poller M woken via `netpollBreak`, and `SetDeadline` handled by a slab scan — no global heap on the request path. `ListenConfig.Control` + `syscall.RawConn` expose pre-bind socket options (`SO_REUSEPORT` per-CPU listeners work out of the box).
+- **DNS resolver**: `LookupHost` / `LookupIP` / `LookupCNAME` / `LookupAddr` / `LookupTXT` / `LookupNS` / `LookupMX` / `LookupSRV` over a port of Go's `dnsclient_unix.go` — `/etc/resolv.conf` config, `dnsmessage` wire format, UDP round-trips through the netpoller.
+- **`crypto/tls`**: client-side TLS 1.2 + 1.3 and server-side TLS 1.3 handshakes (M32), backed by goish's own `crypto/{aes, sha256, ecdh, ed25519, x509, …}` ports.
+- **`net/http` server** (M18, production-hardened in M31): HTTP/1.1 with keep-alive, Go 1.22 `ServeMux` patterns (`"GET /users/{id}"` wildcards, GET-matches-HEAD, 405 + `Allow` on method mismatch), composable `Handler` middleware, `Flusher` chunked streaming, `TimeoutHandler`, `FileServer` + range requests, `httputil` reverse proxy, and an **allocation-free hot request path** through `bufio`. `ListenAndServeTLS` / `ServeTLS` serve HTTPS over the TLS 1.3 stack. Deployment-grade operations: `Shutdown(ctx)` draining every tracked listener and idle conn, `Close`, `RegisterOnShutdown`, live `IdleTimeout`, `BaseContext`/`ConnContext`, `ErrorLog`, `Expect: 100-continue`, HEAD body suppression, accept-failure backoff, `TCP_NODELAY` + keep-alive socket defaults, and `signal::NotifyContext` for SIGTERM-triggered graceful drain — see `examples/deploy_rest_api.rs` for the blessed pattern.
+- **Live request contexts**: every inbound request carries a cancellable `r.Context()` — canceled when the response finishes, or the moment the client disconnects mid-handler. Disconnect detection is wired at the netpoller `PollDesc` level (probing with `recv(MSG_PEEK | MSG_DONTWAIT)` so a pipelined request is never eaten) — no per-request watcher goroutine.
+- **`net/http` client**: `Get` / `Post` / `Do` with redirects, cookies, and a **streaming `Response.Body`** (`io.ReadCloser` shape). `Client.Timeout` re-parents the request under `context.WithTimeout` — one deadline covers every redirect hop — and a mid-flight `ctx` cancel interrupts blocked I/O through the netpoller, surfacing `context.Canceled` / `DeadlineExceeded` like Go's `url.Error` unwrapping.
+- **`goginx`** (`examples/goginx.rs`): an nginx clone in Goish — `nginx.conf`-style config, virtual hosts, longest-prefix `location` matching, autoindex, upstream round-robin proxying with next-upstream retry, TLS termination, `listen … reuseport` per-CPU accept loops, access logs, graceful SIGTERM drain.
 
 ### Standard library ports (Go 1.25-faithful)
-`bufio`, `bytes`, `context`, `encoding/{binary, hex, base64, json}`, `errors`, `flag`, `fmt`, `io`, `log`, `maps`, `os`, `path`/`path/filepath`, `reflect` (3 tiers), `slices`, `strconv` (ints + bool + floats), `strings`, `sync`, `sync/atomic`, `testing`, `time`, `unicode/utf8`. Plus `make!` / `slice!` / `append!` / `range!` / `defer!` / `select!` / `go!` macros.
+- **Core**: `bufio`, `bytes`, `cmp`, `context`, `errors`, `flag`, `fmt`, `io` + `io/fs`, `iter` (Go 1.23 function iterators), `log` + `log/slog`, `maps`, `os` + `os/{exec, signal, user}`, `path` + `path/filepath`, `reflect` (3 tiers), `slices`, `sort`, `strconv`, `strings`, `sync` + `sync/atomic`, `syscall`, `testing` (+ `testing/fstest`), `time`, `unicode` (full case mapping) + `unicode/{utf8, utf16}`, `expvar`, `html`, `embed` (`//go:embed` as the `embed!` macro).
+- **Encoding**: `encoding/{ascii85, asn1, base32, base64, binary, csv, hex, json, pem}` — including the `encoding/json/v2` + `jsontext` port with compile-time struct codecs.
+- **Compression & archives**: `compress/{flate, gzip, lzw, zlib}`, `archive/tar`.
+- **Crypto**: `crypto/{aes, cipher, chacha20, chacha20poly1305, des, ecdh, ecdsa, ed25519, hkdf, hmac, md5, pbkdf2, poly1305, rand, rc4, rsa, sha1, sha256, sha3, sha512, subtle, x509}`, plus `crypto/tls` (above) and a minimum-viable `crypto/ssh` SSH-2.0 client.
+- **Math, hashing & text**: `math` + `math/{big, bits, rand}`, `hash/{adler32, crc32, crc64, fnv, maphash}`, `container/{heap, list, ring}`, `regexp`, `mime` + `mime/{multipart, quotedprintable}`, `net/{mail, textproto, url}`, `text/tabwriter`.
+- **`golang.org/x` ports**: `x/term`, `x/sync/errgroup`, `x/text` (BCP 47 language tags + NFD normalization), plus `xxh3`.
+- **Macros**: `make!` / `slice!` / `append!` / `range!` / `defer!` / `select!` / `go!` / `var!` / `cast!` / `embed!`, and `#[goish::interface]` for Go interfaces with comma-ok type assertions.
 
 ### Public API discipline
 Public Go-API surfaces use lowercase types: `string` (gostring), `slice<T>` (goslice), `map<K, V>` (gomap), `chan<T>` (gochan), `byte`, `rune`, `int`. `Vec<u8>`, `String`, `&str`, `&[u8]` are explicitly absent from public signatures — converted at the boundary via zero-cost wrappers.
@@ -135,11 +144,12 @@ ts  vmsize_kb  vmrss_kb  vmpeak_kb  vmhwm_kb  threads
 │  runtime::sched   G/M/P · runq · stealing        │
 │  runtime::preempt SIGURG handler · trampoline    │
 │  runtime::sysmon  timer heap · force-preempt     │
+│  runtime::netpoll per-P epoll shards · deadlines │
 ├──────────────────────────────────────────────────┤
 │  runtime::sched::stack       1M lazy reservations│
 │  runtime::sched::stackpool   2K..32K span pool   │
 │  runtime::mcentral           67 size classes     │
-│  runtime::mheap              page allocator       │
+│  runtime::mheap              page allocator      │
 ├──────────────────────────────────────────────────┤
 │  syscall (mmap, futex, clone, rt_sigaction, …)   │
 └──────────────────────────────────────────────────┘

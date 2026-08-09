@@ -21,6 +21,7 @@ extern crate alloc;
 extern crate goish;
 
 use goish::fmt;
+use goish::io;
 use goish::net::http;
 use goish::{string, syscall};
 use goish::crypto::tls;
@@ -102,7 +103,7 @@ fn probe_f_chacha20_only() -> bool {
 
 fn probe(label: &'static str, url: &'static str, expect_min_size: usize, expect_magic: Option<&'static [u8]>) -> bool {
     fmt::Println!(fmt::Sprintf!("[probe %s] GET %s", label, url));
-    let (resp, err) = http::Get(string(url));
+    let (mut resp, err) = http::Get(string(url));
     if err != goish::nil {
         fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: http::Get err=%v", label, err));
         return false;
@@ -112,14 +113,16 @@ fn probe(label: &'static str, url: &'static str, expect_min_size: usize, expect_
         fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: expected status 200, got %d", label, resp.StatusCode));
         return false;
     }
-    let body_len = resp.Body.Len();
+    let (body, _) = io::ReadAll(&mut resp.Body);
+    let _ = goish::io::Closer::Close(&mut resp.Body);
+    let body_len = body.Len();
     fmt::Println!(fmt::Sprintf!("[probe %s] body.Len=%d (expect >= %d)", label, body_len, expect_min_size as i64));
     if (body_len as usize) < expect_min_size {
         fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: body too short", label));
         return false;
     }
     if let Some(magic) = expect_magic {
-        let body_bytes: &[u8] = &resp.Body;
+        let body_bytes: &[u8] = &body;
         if body_bytes.len() < magic.len() {
             fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: body shorter than magic prefix", label));
             return false;
@@ -216,7 +219,7 @@ fn probe_g_psk_resumption() -> bool {
     let url = string("https://stefanprodan.github.io/podinfo/index.yaml");
 
     fmt::Println!(fmt::Sprintf!("[probe %s] first GET (issues ticket)", label));
-    let (resp1, err1) = http::Get(url.clone());
+    let (mut resp1, err1) = http::Get(url.clone());
     if err1 != goish::nil {
         fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: first GET err=%v", label, err1));
         return false;
@@ -225,7 +228,9 @@ fn probe_g_psk_resumption() -> bool {
         fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: first GET status=%d", label, resp1.StatusCode));
         return false;
     }
-    fmt::Println!(fmt::Sprintf!("[probe %s] first GET OK (body=%d bytes)", label, resp1.Body.Len() as i64));
+    let (body1, _) = io::ReadAll(&mut resp1.Body);
+    let _ = goish::io::Closer::Close(&mut resp1.Body);
+    fmt::Println!(fmt::Sprintf!("[probe %s] first GET OK (body=%d bytes)", label, body1.Len() as i64));
 
     // Allow whichever read path the runtime needs to drain the ticket record.
     // The NewSessionTicket arrives on its own record after server Finished;
@@ -240,7 +245,7 @@ fn probe_g_psk_resumption() -> bool {
     }
 
     fmt::Println!(fmt::Sprintf!("[probe %s] second GET (should resume)", label));
-    let (resp2, err2) = http::Get(url);
+    let (mut resp2, err2) = http::Get(url);
     if err2 != goish::nil {
         fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: second GET err=%v", label, err2));
         return false;
@@ -249,7 +254,9 @@ fn probe_g_psk_resumption() -> bool {
         fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: second GET status=%d", label, resp2.StatusCode));
         return false;
     }
-    fmt::Println!(fmt::Sprintf!("[probe %s] second GET OK (body=%d bytes) — check tls-debug lines for PSK selected", label, resp2.Body.Len() as i64));
+    let (body2, _) = io::ReadAll(&mut resp2.Body);
+    let _ = goish::io::Closer::Close(&mut resp2.Body);
+    fmt::Println!(fmt::Sprintf!("[probe %s] second GET OK (body=%d bytes) — check tls-debug lines for PSK selected", label, body2.Len() as i64));
     fmt::Println!(fmt::Sprintf!("[probe %s] PASS", label));
     true
 }

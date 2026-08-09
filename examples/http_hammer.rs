@@ -166,15 +166,19 @@ fn main() {
         WG.Add(N);
         for _ in 0..N {
             go!(move || {
-                let (resp, err) = http::Get(url_at("/healthz"));
+                let (mut resp, err) = http::Get(url_at("/healthz"));
                 if err != nil {
                     FAIL_COUNT.Add(1);
                 } else if resp.StatusCode != 200 {
                     FAIL_COUNT.Add(1);
-                } else if !goish::bytes::Contains(&resp.Body, bytes("\"ok\":true")) {
-                    FAIL_COUNT.Add(1);
                 } else {
-                    OK_COUNT.Add(1);
+                    let (body, _) = goish::io::ReadAll(&mut resp.Body);
+                    let _ = goish::io::Closer::Close(&mut resp.Body);
+                    if !goish::bytes::Contains(&body, bytes("\"ok\":true")) {
+                        FAIL_COUNT.Add(1);
+                    } else {
+                        OK_COUNT.Add(1);
+                    }
                 }
                 WG.Done();
             });

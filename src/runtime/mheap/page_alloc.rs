@@ -373,6 +373,11 @@ impl PageAlloc {
         self.update(base, npages);
     }
 
+    /// Total chunk capacity the metadata was pre-sized for (`max_chunks`).
+    pub fn capacity_chunks(&self) -> usize {
+        self.chunks_capacity
+    }
+
     /// `(*pageAlloc).grow` — extend the heap by `n_more` chunks of
     /// fresh memory contiguous with the existing arena. The caller is
     /// responsible for ensuring the new range is mmap'd and writable.
@@ -479,5 +484,90 @@ mod tests {
         let mut p = fresh(1);
         let _ = p.alloc(PALLOC_CHUNK_PAGES);
         assert_eq!(p.alloc(1), ALLOC_FAILED);
+    }
+
+    /// Replay the goish-vllm-port full-checkpoint load pattern at the
+    /// 81920-chunk (320 GiB) capacity: grow-on-demand in 64-chunk
+    /// steps from a 256-chunk start, interleaving multi-GiB tensor
+    /// allocations with 1-page metadata allocations, freeing some.
+    /// Every live span is checked against every other for overlap and
+    /// for containment in the active arena. The real loader corrupted
+    /// tensor dims once the heap crossed ~144 GiB — an overlap here is
+    /// that bug.
+    #[test]
+    fn no_overlap_at_full_checkpoint_scale() {
+        const MAX_CHUNKS: usize = 81920;
+        let mut p = PageAlloc::new(0x10_0000_0000usize, 256, MAX_CHUNKS);
+        // (base, npages) of live allocations
+        let mut live: Vec<(usize, usize)> = Vec::new();
+        // Deterministic xorshift so failures replay
+        let mut rng = 0x9e3779b97f4a7c15u64;
+        let mut next = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng
+        };
+        // Sizes drawn from the real load: KDA in_proj f32 = 1.416 GB
+        // (~173k pages @8K), attn tensors ~350 MB, norms ~1 page.
+        let big_sizes = [173_000usize, 43_000, 10_800, 86_000];
+        let mut alloc_like_loader = |p: &mut PageAlloc,
+                                     live: &mut Vec<(usize, usize)>,
+                                     npages: usize| {
+            let mut addr = p.alloc(npages);
+            if addr == ALLOC_FAILED {
+                // mheap_alloc_pages grow-on-demand replica
+                let need = npages.div_ceil(PALLOC_CHUNK_PAGES);
+                let room = p.capacity_chunks() - p.end_chunk;
+                let step = need.max(64).min(room);
+                assert!(step >= need, "arena truly exhausted mid-test");
+                p.grow(step);
+                addr = p.alloc(npages);
+            }
+            assert!(addr != ALLOC_FAILED, "alloc failed after grow");
+            let end = addr + npages * PAGE_SIZE;
+            assert!(addr >= p.arena_base, "span below arena");
+            assert!(
+                end <= p.arena_base + p.end_chunk * PALLOC_CHUNK_BYTES,
+                "span past active arena end (addr {:#x} npages {})",
+                addr,
+                npages
+            );
+            for &(b, n) in live.iter() {
+                let e = b + n * PAGE_SIZE;
+                assert!(
+                    end <= b || addr >= e,
+                    "OVERLAP: new [{:#x},{:#x}) vs live [{:#x},{:#x})",
+                    addr,
+                    end,
+                    b,
+                    e
+                );
+            }
+            live.push((addr, npages));
+        };
+        // ~93 layers x (1 big in_proj + several mid + ~6 small)
+        for _layer in 0..93 {
+            alloc_like_loader(&mut p, &mut live, big_sizes[0]);
+            for _ in 0..4 {
+                let s = big_sizes[1 + (next() as usize % 3)];
+                alloc_like_loader(&mut p, &mut live, s);
+            }
+            for _ in 0..6 {
+                alloc_like_loader(&mut p, &mut live, 1);
+            }
+            // The loader frees cat temporaries: drop ~1 in 3 mid-size
+            if live.len() > 8 && next() % 3 == 0 {
+                let idx = live.len() - 2;
+                let (b, n) = live.swap_remove(idx);
+                p.free(b, n);
+            }
+        }
+        // Sanity: we really did cross into high-chunk territory.
+        assert!(
+            p.end_chunk > 16384,
+            "test never left low-chunk range (end_chunk {})",
+            p.end_chunk
+        );
     }
 }

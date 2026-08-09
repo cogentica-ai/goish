@@ -145,8 +145,20 @@ pub fn DumpRequest(req: &Request, body: bool) -> (slice<byte>, error) {
 /// Response.Write yet; we inline the wire serialization (status line +
 /// headers + optional body) which is the dominant path anyway.
 pub fn DumpResponse(resp: &Response, body: bool) -> (slice<byte>, error) {
+    // Go: drainBody — read the body fully, then leave the Response
+    // holding an equivalent re-readable copy. Streaming bodies get
+    // drained off the conn here (and the conn released).
+    let mut body_bytes = slice::<byte>::__from_vec(alloc::vec::Vec::new());
+    if body {
+        let (bb, derr) = resp.Body.__drain_remainder();
+        if !derr.IsNil() {
+            return (slice::<byte>::__from_vec(alloc::vec::Vec::new()), derr);
+        }
+        body_bytes = bb;
+    }
+
     let mut b = strings::Builder::new();
-    b.Grow(256 + resp.Body.Len());
+    b.Grow(256 + body_bytes.Len());
 
     // Status line: "HTTP/X.Y CODE STATUS_TEXT\r\n"
     let _ = b.WriteString(string("HTTP/"));
@@ -209,9 +221,9 @@ pub fn DumpResponse(resp: &Response, body: bool) -> (slice<byte>, error) {
 
     // Optional body.
     let mut out = crate::convert::bytes(b.String());
-    if body && resp.Body.Len() > 0 {
-        for i in 0..resp.Body.Len() {
-            out = crate::append!(out, resp.Body[i]);
+    if body && body_bytes.Len() > 0 {
+        for i in 0..body_bytes.Len() {
+            out = crate::append!(out, body_bytes[i]);
         }
     }
     (out, errors::nil)
@@ -338,7 +350,7 @@ impl super::server::Handler for reverseProxyHandler {
         }
 
         // Go: roundTrip via Transport / our Client.
-        let (resp, err) = self.client.Do(&outreq);
+        let (mut resp, err) = self.client.Do(&outreq);
         if !err.IsNil() {
             super::server::Error(
                 w,
@@ -362,7 +374,25 @@ impl super::server::Handler for reverseProxyHandler {
         // Go: rw.WriteHeader(res.StatusCode)
         w.WriteHeader(resp.StatusCode);
 
-        // Go: io.Copy(rw, res.Body)
-        let _ = w.Write(resp.Body);
+        // Go: io.Copy(rw, res.Body) — streamed chunk-by-chunk, with a
+        // Flush after each write so flushed upstream chunks (SSE, LLM
+        // token streams) pass through the proxy live instead of
+        // buffering until upstream EOF. (Go gets the same effect via
+        // ReverseProxy.FlushInterval / the periodicFlusher.)
+        let (fl, has_fl) = crate::cast!(w, super::response::Flusher);
+        loop {
+            let mut buf = crate::make!([]byte, 32 * 1024);
+            let (n, rerr) = crate::io::Reader::Read(&mut resp.Body, &mut buf);
+            if n > 0 {
+                let _ = w.Write(buf.slice(0, n));
+                if has_fl {
+                    fl.Flush();
+                }
+            }
+            if !rerr.IsNil() {
+                break;
+            }
+        }
+        let _ = crate::io::Closer::Close(&mut resp.Body);
     }
 }

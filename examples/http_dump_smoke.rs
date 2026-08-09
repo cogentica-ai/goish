@@ -77,7 +77,7 @@ fn main() {
         resp.ProtoMajor = 1;
         resp.ProtoMinor = 1;
         resp.ContentLength = 5;
-        resp.Body = bytes("brew\n");
+        resp.Body = http::Body::from(bytes("brew\n"));
         resp.Header.Set(string("X-Mark"), string("z"));
         let (rdump, _err) = http::httputil::DumpResponse(&resp, true);
         let mut h2 = alloc::vec::Vec::new();

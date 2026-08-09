@@ -290,7 +290,7 @@ fn s5_readresponse_chunked_one_byte() -> bool {
     let r = OneByte::new(data);
     let mut br = bufio::NewReader(r);
 
-    let (resp, err) = http::ReadResponse(&mut br, None);
+    let (mut resp, err) = http::ReadResponse(&mut br, None);
     if err != nil {
         fail_s("S5", fmt::Sprintf!("ReadResponse error: %v", err));
         return false;
@@ -299,7 +299,9 @@ fn s5_readresponse_chunked_one_byte() -> bool {
         fail_s("S5", fmt::Sprintf!("StatusCode=%d, want 200", resp.StatusCode));
         return false;
     }
-    let body = string::from_bytes(&resp.Body);
+    let (body_bytes, _) = io::ReadAll(&mut resp.Body);
+    let _ = io::Closer::Close(&mut resp.Body);
+    let body = string::from_bytes(&body_bytes);
     if body != "hello world" {
         fail_s("S5", fmt::Sprintf!("body=%q, want \"hello world\"", body));
         return false;
@@ -321,7 +323,7 @@ fn s6_readresponse_content_length_mixed_chunks() -> bool {
     let r = ChunkedReader::new(&data, &[5, 4096, 899]);
     let mut br = bufio::NewReader(r);
 
-    let (resp, err) = http::ReadResponse(&mut br, None);
+    let (mut resp, err) = http::ReadResponse(&mut br, None);
     if err != nil {
         fail_s("S6", fmt::Sprintf!("ReadResponse error: %v", err));
         return false;
@@ -330,14 +332,16 @@ fn s6_readresponse_content_length_mixed_chunks() -> bool {
         fail_s("S6", fmt::Sprintf!("StatusCode=%d, want 200", resp.StatusCode));
         return false;
     }
-    if resp.Body.Len() != body_len as int {
-        fail_s("S6", fmt::Sprintf!("body.Len()=%d, want %d", resp.Body.Len(), body_len as i64));
+    let (body, _) = io::ReadAll(&mut resp.Body);
+    let _ = io::Closer::Close(&mut resp.Body);
+    if body.Len() != body_len as int {
+        fail_s("S6", fmt::Sprintf!("body.Len()=%d, want %d", body.Len(), body_len as i64));
         return false;
     }
     // All bytes should be 'z'.
-    for i in 0..resp.Body.Len() {
-        if resp.Body[i] != b'z' {
-            fail_s("S6", fmt::Sprintf!("body[%d]=%d, want %d", i, resp.Body[i] as i64, b'z' as i64));
+    for i in 0..body.Len() {
+        if body[i] != b'z' {
+            fail_s("S6", fmt::Sprintf!("body[%d]=%d, want %d", i, body[i] as i64, b'z' as i64));
             return false;
         }
     }
@@ -364,7 +368,7 @@ fn s7_drain_to_eof_zero_bytes() -> bool {
     let r = ZeroByteReader::new(&data, 2);
     let mut br = bufio::NewReader(r);
 
-    let (resp, err) = http::ReadResponse(&mut br, None);
+    let (mut resp, err) = http::ReadResponse(&mut br, None);
     // On Connection: close, ReadResponse drains until EOF.
     // err here could be nil (drain returned full body before EOF) — depends
     // on whether drain_to_eof exits early on (0, nil).
@@ -376,7 +380,9 @@ fn s7_drain_to_eof_zero_bytes() -> bool {
         fail_s("S7", fmt::Sprintf!("StatusCode=%d, want 200", resp.StatusCode));
         return false;
     }
-    let got_len = resp.Body.Len();
+    let (got_body, _) = io::ReadAll(&mut resp.Body);
+    let _ = io::Closer::Close(&mut resp.Body);
+    let got_len = got_body.Len();
     let want_len = body.len() as int;
     if got_len != want_len {
         fail_s("S7", fmt::Sprintf!("body.Len()=%d, want %d (drain_to_eof stopped early on 0-byte read?)", got_len, want_len));
