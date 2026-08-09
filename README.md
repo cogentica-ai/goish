@@ -144,7 +144,7 @@ It speaks an `nginx.conf` subset (upstream pools, `reuseport`/`ssl` listeners, v
 fn get(url: string) -> (int, string, string) {
     let (mut resp, err) = http::Get(url.clone());
     if err != nil {
-        return (-1, Sprintf!("get %s: %v", url, err), string(""));
+        return (-1, fmt::Sprintf!("get %s: %v", url, err), string(""));
     }
     let (body, _) = io::ReadAll(&mut resp.Body);
     let _ = io::Closer::Close(&mut resp.Body);
@@ -167,7 +167,7 @@ fn installSignalDrain(servers: slice<Arc<http::Server>>, done: chan<bool>) {
     );
     go!(move || {
         let _ = sig_ctx.Done().Recv();
-        goish::Printf!("goginx: signal received, draining\n");
+        fmt::Printf!("goginx: signal received, draining\n");
         for (_, s) in range!(&servers) {
             let _ = s.clone().Shutdown(time::Second * 10);
         }
