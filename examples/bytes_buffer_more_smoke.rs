@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::io;
-use goish::{make, string, syscall, Println};
+use goish::{make, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -23,9 +24,9 @@ fn main() {
         if head.Len() == 3 && head[0] == b'a' && head[1] == b'b' && head[2] == b'c'
             && b.String() == "defgh"
         {
-            Println!("[ 1] Next(3)                   PASS");
+            fmt::Println!("[ 1] Next(3)                   PASS");
         } else {
-            Println!("[ 1] Next(3)                   FAIL");
+            fmt::Println!("[ 1] Next(3)                   FAIL");
             failed += 1;
         }
     }
@@ -35,9 +36,9 @@ fn main() {
         let mut b = bytes::NewBufferString(string("hi"));
         let all = b.Next(100);
         if all.Len() == 2 && b.Len() == 0 {
-            Println!("[ 2] Next(big)                 PASS");
+            fmt::Println!("[ 2] Next(big)                 PASS");
         } else {
-            Println!("[ 2] Next(big)                 FAIL got_len={}", all.Len());
+            fmt::Println!("[ 2] Next(big)                 FAIL got_len={}", all.Len());
             failed += 1;
         }
     }
@@ -47,9 +48,9 @@ fn main() {
         let mut b = bytes::NewBufferString(string("xyz"));
         let none = b.Next(0);
         if none.Len() == 0 && b.Len() == 3 {
-            Println!("[ 3] Next(0)                   PASS");
+            fmt::Println!("[ 3] Next(0)                   PASS");
         } else {
-            Println!("[ 3] Next(0)                   FAIL");
+            fmt::Println!("[ 3] Next(0)                   FAIL");
             failed += 1;
         }
     }
@@ -59,9 +60,9 @@ fn main() {
         let mut b = bytes::NewBuffer(make!([]goish::byte, 0));
         b.Grow(64);
         if b.Available() >= 64 {
-            Println!("[ 4] Available after Grow      PASS");
+            fmt::Println!("[ 4] Available after Grow      PASS");
         } else {
-            Println!("[ 4] Available after Grow      FAIL got={}", b.Available());
+            fmt::Println!("[ 4] Available after Grow      FAIL got={}", b.Available());
             failed += 1;
         }
     }
@@ -71,9 +72,9 @@ fn main() {
         let b = bytes::NewBuffer(make!([]goish::byte, 0));
         let buf = b.AvailableBuffer();
         if buf.Len() == 0 {
-            Println!("[ 5] AvailableBuffer empty     PASS");
+            fmt::Println!("[ 5] AvailableBuffer empty     PASS");
         } else {
-            Println!("[ 5] AvailableBuffer empty     FAIL");
+            fmt::Println!("[ 5] AvailableBuffer empty     FAIL");
             failed += 1;
         }
     }
@@ -83,9 +84,9 @@ fn main() {
         let mut b = bytes::NewBufferString(string("Ab"));
         let (r, n, err) = b.ReadRune();
         if err.IsNil() && r == 'A' as goish::rune && n == 1 && b.String() == "b" {
-            Println!("[ 6] ReadRune ASCII            PASS");
+            fmt::Println!("[ 6] ReadRune ASCII            PASS");
         } else {
-            Println!("[ 6] ReadRune ASCII            FAIL r={} n={}", r, n);
+            fmt::Println!("[ 6] ReadRune ASCII            FAIL r={} n={}", r, n);
             failed += 1;
         }
     }
@@ -96,9 +97,9 @@ fn main() {
         let _ = b.WriteRune(0x00E9 as goish::rune); // 'é'
         let (r, n, err) = b.ReadRune();
         if err.IsNil() && r == 0x00E9 && n == 2 && b.Len() == 0 {
-            Println!("[ 7] ReadRune UTF-8 2-byte     PASS");
+            fmt::Println!("[ 7] ReadRune UTF-8 2-byte     PASS");
         } else {
-            Println!("[ 7] ReadRune UTF-8 2-byte     FAIL r={} n={}", r, n);
+            fmt::Println!("[ 7] ReadRune UTF-8 2-byte     FAIL r={} n={}", r, n);
             failed += 1;
         }
     }
@@ -108,9 +109,9 @@ fn main() {
         let mut b = bytes::NewBuffer(make!([]goish::byte, 0));
         let (r, n, err) = b.ReadRune();
         if !err.IsNil() && r == 0 && n == 0 && goish::errors::Is(err, io::EOF) {
-            Println!("[ 8] ReadRune empty EOF        PASS");
+            fmt::Println!("[ 8] ReadRune empty EOF        PASS");
         } else {
-            Println!("[ 8] ReadRune empty EOF        FAIL");
+            fmt::Println!("[ 8] ReadRune empty EOF        FAIL");
             failed += 1;
         }
     }
@@ -121,9 +122,9 @@ fn main() {
         let _ = b.ReadRune();
         let err = b.UnreadRune();
         if err.IsNil() && b.String() == "xy" {
-            Println!("[ 9] UnreadRune restores       PASS");
+            fmt::Println!("[ 9] UnreadRune restores       PASS");
         } else {
-            Println!("[ 9] UnreadRune restores       FAIL");
+            fmt::Println!("[ 9] UnreadRune restores       FAIL");
             failed += 1;
         }
     }
@@ -133,9 +134,9 @@ fn main() {
         let mut b = bytes::NewBufferString(string("a"));
         let err = b.UnreadRune();
         if !err.IsNil() {
-            Println!("[10] UnreadRune unprovoked     PASS");
+            fmt::Println!("[10] UnreadRune unprovoked     PASS");
         } else {
-            Println!("[10] UnreadRune unprovoked     FAIL");
+            fmt::Println!("[10] UnreadRune unprovoked     FAIL");
             failed += 1;
         }
     }
@@ -147,9 +148,9 @@ fn main() {
         let _ = b.WriteByte(b'q');
         let err = b.UnreadRune();
         if !err.IsNil() {
-            Println!("[11] UnreadRune after write    PASS");
+            fmt::Println!("[11] UnreadRune after write    PASS");
         } else {
-            Println!("[11] UnreadRune after write    FAIL");
+            fmt::Println!("[11] UnreadRune after write    FAIL");
             failed += 1;
         }
     }
@@ -162,18 +163,18 @@ fn main() {
         let _ = b.UnreadRune();
         let (r2, _, _) = b.ReadRune();
         if r1 == 0x00E9 && r2 == 0x00E9 && b.Len() == 0 {
-            Println!("[12] WriteRune+RR+UR+RR        PASS");
+            fmt::Println!("[12] WriteRune+RR+UR+RR        PASS");
         } else {
-            Println!("[12] WriteRune+RR+UR+RR        FAIL");
+            fmt::Println!("[12] WriteRune+RR+UR+RR        FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 12", failed);
+        fmt::Println!("FAIL {} of 12", failed);
         syscall::Exit(1);
     }
 }

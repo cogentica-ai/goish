@@ -8,8 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::time::{Unix, UnixMicro, UnixMilli};
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -20,9 +21,9 @@ fn main() {
         let a = UnixMilli(0);
         let b = Unix(0, 0);
         if a.Equal(b) {
-            Println!("[ 1] UnixMilli(0) == Unix(0,0)  PASS");
+            fmt::Println!("[ 1] UnixMilli(0) == Unix(0,0)  PASS");
         } else {
-            Println!("[ 1] UnixMilli(0) == Unix(0,0)  FAIL");
+            fmt::Println!("[ 1] UnixMilli(0) == Unix(0,0)  FAIL");
             failed += 1;
         }
     }
@@ -31,9 +32,9 @@ fn main() {
     {
         let t = UnixMilli(1234);
         if t.Unix() == 1 && t.UnixMilli() == 1234 {
-            Println!("[ 2] UnixMilli(1234) round-trip PASS");
+            fmt::Println!("[ 2] UnixMilli(1234) round-trip PASS");
         } else {
-            Println!("[ 2] UnixMilli(1234) round-trip FAIL sec=", t.Unix(), "ms=", t.UnixMilli());
+            fmt::Println!("[ 2] UnixMilli(1234) round-trip FAIL sec=", t.Unix(), "ms=", t.UnixMilli());
             failed += 1;
         }
     }
@@ -44,9 +45,9 @@ fn main() {
     {
         let t = UnixMilli(-1);
         if t.UnixMilli() == -1 {
-            Println!("[ 3] UnixMilli(-1) round-trip   PASS");
+            fmt::Println!("[ 3] UnixMilli(-1) round-trip   PASS");
         } else {
-            Println!("[ 3] UnixMilli(-1) round-trip   FAIL ms=", t.UnixMilli());
+            fmt::Println!("[ 3] UnixMilli(-1) round-trip   FAIL ms=", t.UnixMilli());
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
         let a = UnixMicro(0);
         let b = Unix(0, 0);
         if a.Equal(b) {
-            Println!("[ 4] UnixMicro(0) == Unix(0,0)  PASS");
+            fmt::Println!("[ 4] UnixMicro(0) == Unix(0,0)  PASS");
         } else {
-            Println!("[ 4] UnixMicro(0) == Unix(0,0)  FAIL");
+            fmt::Println!("[ 4] UnixMicro(0) == Unix(0,0)  FAIL");
             failed += 1;
         }
     }
@@ -67,9 +68,9 @@ fn main() {
     {
         let t = UnixMicro(1_500_000);
         if t.Unix() == 1 && t.UnixMicro() == 1_500_000 {
-            Println!("[ 5] UnixMicro(1.5e6) round     PASS");
+            fmt::Println!("[ 5] UnixMicro(1.5e6) round     PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 5] UnixMicro(1.5e6) round     FAIL sec=", t.Unix(), "us=", t.UnixMicro()
             );
             failed += 1;
@@ -82,9 +83,9 @@ fn main() {
         let usec: i64 = 1_767_225_600_000_000;
         let t = UnixMicro(usec);
         if t.UnixMicro() == usec {
-            Println!("[ 6] UnixMicro(future) round    PASS");
+            fmt::Println!("[ 6] UnixMicro(future) round    PASS");
         } else {
-            Println!("[ 6] UnixMicro(future) round    FAIL got=", t.UnixMicro());
+            fmt::Println!("[ 6] UnixMicro(future) round    FAIL got=", t.UnixMicro());
             failed += 1;
         }
     }
@@ -96,18 +97,18 @@ fn main() {
         let t1 = UnixMilli(ms);
         let t2 = UnixMicro(us);
         if t1.Equal(t2) {
-            Println!("[ 7] UnixMilli ≈ UnixMicro     PASS");
+            fmt::Println!("[ 7] UnixMilli ≈ UnixMicro     PASS");
         } else {
-            Println!("[ 7] UnixMilli ≈ UnixMicro     FAIL");
+            fmt::Println!("[ 7] UnixMilli ≈ UnixMicro     FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 7/7");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 7");
+        fmt::Println!("FAIL", failed, "of 7");
         syscall::Exit(1);
     }
 }

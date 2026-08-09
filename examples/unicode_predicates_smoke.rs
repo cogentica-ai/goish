@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::types::rune;
 use goish::unicode;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -22,9 +23,9 @@ fn main() {
             && unicode::IsControl(0x1F) && unicode::IsControl(0x7F)
             && unicode::IsControl(0x80) && unicode::IsControl(0x9F)
         {
-            Println!("[ 1] IsControl ctrl chars      PASS");
+            fmt::Println!("[ 1] IsControl ctrl chars      PASS");
         } else {
-            Println!("[ 1] IsControl ctrl chars      FAIL");
+            fmt::Println!("[ 1] IsControl ctrl chars      FAIL");
             failed += 1;
         }
     }
@@ -34,9 +35,9 @@ fn main() {
         if !unicode::IsControl(b'A' as rune) && !unicode::IsControl(b' ' as rune)
             && !unicode::IsControl(0xA0) && !unicode::IsControl(-1)
         {
-            Println!("[ 2] IsControl non-ctrl        PASS");
+            fmt::Println!("[ 2] IsControl non-ctrl        PASS");
         } else {
-            Println!("[ 2] IsControl non-ctrl        FAIL");
+            fmt::Println!("[ 2] IsControl non-ctrl        FAIL");
             failed += 1;
         }
     }
@@ -46,9 +47,9 @@ fn main() {
         if unicode::IsPrint(b' ' as rune) && unicode::IsPrint(b'~' as rune)
             && unicode::IsPrint(b'A' as rune)
         {
-            Println!("[ 3] IsPrint ASCII             PASS");
+            fmt::Println!("[ 3] IsPrint ASCII             PASS");
         } else {
-            Println!("[ 3] IsPrint ASCII             FAIL");
+            fmt::Println!("[ 3] IsPrint ASCII             FAIL");
             failed += 1;
         }
     }
@@ -58,9 +59,9 @@ fn main() {
         if !unicode::IsPrint(0x00) && !unicode::IsPrint(0x7F)
             && !unicode::IsPrint(-1) && !unicode::IsPrint(0x110000)
         {
-            Println!("[ 4] IsPrint non-printable     PASS");
+            fmt::Println!("[ 4] IsPrint non-printable     PASS");
         } else {
-            Println!("[ 4] IsPrint non-printable     FAIL");
+            fmt::Println!("[ 4] IsPrint non-printable     FAIL");
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
     // 5. IsGraphic: includes U+00A0 (NBSP), unlike IsPrint.
     {
         if unicode::IsGraphic(0xA0) && !unicode::IsPrint(0xA0) {
-            Println!("[ 5] IsGraphic vs IsPrint NBSP PASS");
+            fmt::Println!("[ 5] IsGraphic vs IsPrint NBSP PASS");
         } else {
-            Println!("[ 5] IsGraphic vs IsPrint NBSP FAIL");
+            fmt::Println!("[ 5] IsGraphic vs IsPrint NBSP FAIL");
             failed += 1;
         }
     }
@@ -80,9 +81,9 @@ fn main() {
         if unicode::IsGraphic(b'A' as rune) && unicode::IsGraphic(b'!' as rune)
             && !unicode::IsGraphic(0x00) && !unicode::IsGraphic(0x7F)
         {
-            Println!("[ 6] IsGraphic agrees w/ Print PASS");
+            fmt::Println!("[ 6] IsGraphic agrees w/ Print PASS");
         } else {
-            Println!("[ 6] IsGraphic agrees w/ Print FAIL");
+            fmt::Println!("[ 6] IsGraphic agrees w/ Print FAIL");
             failed += 1;
         }
     }
@@ -93,9 +94,9 @@ fn main() {
             && unicode::IsPunct(b':' as rune) && unicode::IsPunct(b'?' as rune)
             && unicode::IsPunct(b'[' as rune) && unicode::IsPunct(b'{' as rune)
         {
-            Println!("[ 7] IsPunct ASCII punct       PASS");
+            fmt::Println!("[ 7] IsPunct ASCII punct       PASS");
         } else {
-            Println!("[ 7] IsPunct ASCII punct       FAIL");
+            fmt::Println!("[ 7] IsPunct ASCII punct       FAIL");
             failed += 1;
         }
     }
@@ -105,9 +106,9 @@ fn main() {
         if !unicode::IsPunct(b'A' as rune) && !unicode::IsPunct(b'0' as rune)
             && !unicode::IsPunct(b' ' as rune) && !unicode::IsPunct(0x00)
         {
-            Println!("[ 8] IsPunct non-punct         PASS");
+            fmt::Println!("[ 8] IsPunct non-punct         PASS");
         } else {
-            Println!("[ 8] IsPunct non-punct         FAIL");
+            fmt::Println!("[ 8] IsPunct non-punct         FAIL");
             failed += 1;
         }
     }
@@ -117,9 +118,9 @@ fn main() {
         if !unicode::IsTitle(b'A' as rune) && !unicode::IsTitle(b'a' as rune)
             && !unicode::IsTitle(0x01C5) /* LJ-titlecase */
         {
-            Println!("[ 9] IsTitle ASCII slim        PASS");
+            fmt::Println!("[ 9] IsTitle ASCII slim        PASS");
         } else {
-            Println!("[ 9] IsTitle ASCII slim        FAIL");
+            fmt::Println!("[ 9] IsTitle ASCII slim        FAIL");
             failed += 1;
         }
     }
@@ -131,18 +132,18 @@ fn main() {
             && unicode::ToTitle(b'5' as rune) == b'5' as rune
             && unicode::ToTitle(b' ' as rune) == b' ' as rune
         {
-            Println!("[10] ToTitle ASCII             PASS");
+            fmt::Println!("[10] ToTitle ASCII             PASS");
         } else {
-            Println!("[10] ToTitle ASCII             FAIL");
+            fmt::Println!("[10] ToTitle ASCII             FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

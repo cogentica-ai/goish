@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::errors::{self, error, ErrorTrait};
 use goish::gostring::string;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 // Custom typed error 1.
 struct ParseError {
@@ -57,14 +58,14 @@ fn main() {
         match errors::As::<ParseError>(e) {
             Some(pe) => {
                 if pe.line == 7 && pe.col == 12 {
-                    Println!("[ 1] As head match           PASS");
+                    fmt::Println!("[ 1] As head match           PASS");
                 } else {
-                    Println!("[ 1] As head match           FAIL line={} col={}", pe.line, pe.col);
+                    fmt::Println!("[ 1] As head match           FAIL line={} col={}", pe.line, pe.col);
                     failed += 1;
                 }
             }
             None => {
-                Println!("[ 1] As head match           FAIL None");
+                fmt::Println!("[ 1] As head match           FAIL None");
                 failed += 1;
             }
         }
@@ -74,9 +75,9 @@ fn main() {
     {
         let e = errors::Wrap(ParseError { line: 1, col: 1 });
         if errors::As::<IOError>(e).is_none() {
-            Println!("[ 2] As mismatch None        PASS");
+            fmt::Println!("[ 2] As mismatch None        PASS");
         } else {
-            Println!("[ 2] As mismatch None        FAIL");
+            fmt::Println!("[ 2] As mismatch None        FAIL");
             failed += 1;
         }
     }
@@ -88,14 +89,14 @@ fn main() {
         match errors::As::<IOError>(outer) {
             Some(io) => {
                 if io.code == 42 {
-                    Println!("[ 3] As walk chain           PASS");
+                    fmt::Println!("[ 3] As walk chain           PASS");
                 } else {
-                    Println!("[ 3] As walk chain           FAIL code={}", io.code);
+                    fmt::Println!("[ 3] As walk chain           FAIL code={}", io.code);
                     failed += 1;
                 }
             }
             None => {
-                Println!("[ 3] As walk chain           FAIL None");
+                fmt::Println!("[ 3] As walk chain           FAIL None");
                 failed += 1;
             }
         }
@@ -104,9 +105,9 @@ fn main() {
     // 4. As on nil returns None.
     {
         if errors::As::<ParseError>(errors::nil).is_none() {
-            Println!("[ 4] As nil None             PASS");
+            fmt::Println!("[ 4] As nil None             PASS");
         } else {
-            Println!("[ 4] As nil None             FAIL");
+            fmt::Println!("[ 4] As nil None             FAIL");
             failed += 1;
         }
     }
@@ -118,10 +119,10 @@ fn main() {
         // Asking for WrappedError should match the head, not skip to inner.
         match errors::As::<WrappedError>(outer) {
             Some(_) => {
-                Println!("[ 5] As outer level          PASS");
+                fmt::Println!("[ 5] As outer level          PASS");
             }
             None => {
-                Println!("[ 5] As outer level          FAIL");
+                fmt::Println!("[ 5] As outer level          FAIL");
                 failed += 1;
             }
         }
@@ -131,9 +132,9 @@ fn main() {
     {
         let e = errors::New("plain message");
         if errors::As::<ParseError>(e).is_none() {
-            Println!("[ 6] As skips New            PASS");
+            fmt::Println!("[ 6] As skips New            PASS");
         } else {
-            Println!("[ 6] As skips New            FAIL");
+            fmt::Println!("[ 6] As skips New            FAIL");
             failed += 1;
         }
     }
@@ -143,9 +144,9 @@ fn main() {
         let sentinel: error = errors::ErrUnsupported.into();
         let same: error = errors::ErrUnsupported.into();
         if errors::Is(sentinel, same) {
-            Println!("[ 7] Is still works          PASS");
+            fmt::Println!("[ 7] Is still works          PASS");
         } else {
-            Println!("[ 7] Is still works          FAIL");
+            fmt::Println!("[ 7] Is still works          FAIL");
             failed += 1;
         }
     }
@@ -158,9 +159,9 @@ fn main() {
         });
         let unwrapped = errors::Unwrap(outer);
         if !unwrapped.IsNil() && unwrapped.Error() == inner.Error() {
-            Println!("[ 8] Unwrap still works      PASS");
+            fmt::Println!("[ 8] Unwrap still works      PASS");
         } else {
-            Println!("[ 8] Unwrap still works      FAIL");
+            fmt::Println!("[ 8] Unwrap still works      FAIL");
             failed += 1;
         }
     }
@@ -173,24 +174,24 @@ fn main() {
         match errors::As::<ParseError>(outer) {
             Some(pe) => {
                 if pe.line == 100 && pe.col == 200 {
-                    Println!("[ 9] As walks past wrapper   PASS");
+                    fmt::Println!("[ 9] As walks past wrapper   PASS");
                 } else {
-                    Println!("[ 9] As walks past wrapper   FAIL line={}", pe.line);
+                    fmt::Println!("[ 9] As walks past wrapper   FAIL line={}", pe.line);
                     failed += 1;
                 }
             }
             None => {
-                Println!("[ 9] As walks past wrapper   FAIL None");
+                fmt::Println!("[ 9] As walks past wrapper   FAIL None");
                 failed += 1;
             }
         }
     }
 
     if failed == 0 {
-        Println!("ok 9/9");
+        fmt::Println!("ok 9/9");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 9");
+        fmt::Println!("FAIL", failed, "of 9");
         syscall::Exit(1);
     }
 }

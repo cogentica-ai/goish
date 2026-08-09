@@ -8,13 +8,14 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bufio;
 use goish::bytes;
 use goish::net::textproto::{
     Add, CanonicalMIMEHeaderKey, Del, Error, Get, MIMEHeader, NewWriter, ProtocolError, Set,
     TrimBytes, TrimString, Values,
 };
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -24,9 +25,9 @@ fn main() {
     {
         let s = TrimString(string("  hello world\t\n\r"));
         if s == "hello world" {
-            Println!("[ 1] TrimString               PASS");
+            fmt::Println!("[ 1] TrimString               PASS");
         } else {
-            Println!("[ 1] TrimString               FAIL got {}", s);
+            fmt::Println!("[ 1] TrimString               FAIL got {}", s);
             failed += 1;
         }
     }
@@ -37,9 +38,9 @@ fn main() {
         let trimmed = TrimBytes(b);
         let raw: &[goish::types::byte] = &trimmed;
         if raw == b"abc" {
-            Println!("[ 2] TrimBytes                PASS");
+            fmt::Println!("[ 2] TrimBytes                PASS");
         } else {
-            Println!("[ 2] TrimBytes                FAIL");
+            fmt::Println!("[ 2] TrimBytes                FAIL");
             failed += 1;
         }
     }
@@ -49,9 +50,9 @@ fn main() {
         let k = CanonicalMIMEHeaderKey(string("content-type"));
         let k2 = CanonicalMIMEHeaderKey(string("ACCEPT-encoding"));
         if k == "Content-Type" && k2 == "Accept-Encoding" {
-            Println!("[ 3] Canonical key            PASS");
+            fmt::Println!("[ 3] Canonical key            PASS");
         } else {
-            Println!("[ 3] Canonical key            FAIL");
+            fmt::Println!("[ 3] Canonical key            FAIL");
             failed += 1;
         }
     }
@@ -64,9 +65,9 @@ fn main() {
         let g = Get(&h, string("foo"));
         let vs = Values(&h, string("Foo"));
         if g == "a" && vs.Len() == 2 && vs[0] == "a" && vs[1] == "b" {
-            Println!("[ 4] Add/Get/Values           PASS");
+            fmt::Println!("[ 4] Add/Get/Values           PASS");
         } else {
-            Println!("[ 4] Add/Get/Values           FAIL");
+            fmt::Println!("[ 4] Add/Get/Values           FAIL");
             failed += 1;
         }
     }
@@ -79,9 +80,9 @@ fn main() {
         Set(&mut h, string("x"), string("new"));
         let vs = Values(&h, string("X"));
         if vs.Len() == 1 && vs[0] == "new" {
-            Println!("[ 5] Set replaces             PASS");
+            fmt::Println!("[ 5] Set replaces             PASS");
         } else {
-            Println!("[ 5] Set replaces             FAIL n={}", vs.Len());
+            fmt::Println!("[ 5] Set replaces             FAIL n={}", vs.Len());
             failed += 1;
         }
     }
@@ -92,9 +93,9 @@ fn main() {
         Add(&mut h, string("X"), string("v"));
         Del(&mut h, string("x"));
         if Get(&h, string("X")) == "" {
-            Println!("[ 6] Del                      PASS");
+            fmt::Println!("[ 6] Del                      PASS");
         } else {
-            Println!("[ 6] Del                      FAIL");
+            fmt::Println!("[ 6] Del                      FAIL");
             failed += 1;
         }
     }
@@ -103,9 +104,9 @@ fn main() {
     {
         let h: MIMEHeader = goish::gomap::map::new();
         if Get(&h, string("missing")) == "" {
-            Println!("[ 7] Get missing              PASS");
+            fmt::Println!("[ 7] Get missing              PASS");
         } else {
-            Println!("[ 7] Get missing              FAIL");
+            fmt::Println!("[ 7] Get missing              FAIL");
             failed += 1;
         }
     }
@@ -119,9 +120,9 @@ fn main() {
         use goish::errors::ErrorTrait;
         let s = e.Error();
         if s == "042 not found" {
-            Println!("[ 8] Error %03d format        PASS");
+            fmt::Println!("[ 8] Error %03d format        PASS");
         } else {
-            Println!("[ 8] Error %03d format        FAIL got {}", s);
+            fmt::Println!("[ 8] Error %03d format        FAIL got {}", s);
             failed += 1;
         }
     }
@@ -132,9 +133,9 @@ fn main() {
         use goish::errors::ErrorTrait;
         let s = p.Error();
         if s == "oops" {
-            Println!("[ 9] ProtocolError            PASS");
+            fmt::Println!("[ 9] ProtocolError            PASS");
         } else {
-            Println!("[ 9] ProtocolError            FAIL");
+            fmt::Println!("[ 9] ProtocolError            FAIL");
             failed += 1;
         }
     }
@@ -147,9 +148,9 @@ fn main() {
         let _ = w.PrintfLine(string("HELLO 1"));
         let s = buf.String();
         if s == "HELLO 1\r\n" {
-            Println!("[10] PrintfLine \\r\\n          PASS");
+            fmt::Println!("[10] PrintfLine \\r\\n          PASS");
         } else {
-            Println!("[10] PrintfLine \\r\\n          FAIL got {}", s);
+            fmt::Println!("[10] PrintfLine \\r\\n          FAIL got {}", s);
             failed += 1;
         }
     }
@@ -165,9 +166,9 @@ fn main() {
         }
         let s = buf.String();
         if s == ".\r\n" {
-            Println!("[11] DotWriter empty           PASS");
+            fmt::Println!("[11] DotWriter empty           PASS");
         } else {
-            Println!("[11] DotWriter empty           FAIL got {:?}", s.Len());
+            fmt::Println!("[11] DotWriter empty           FAIL got {:?}", s.Len());
             failed += 1;
         }
     }
@@ -186,18 +187,18 @@ fn main() {
         // Expected: "..dotted\r\n.\r\n" — leading dot doubled; \n→\r\n;
         // closer adds .\r\n on a fresh line.
         if s == "..dotted\r\n.\r\n" {
-            Println!("[12] DotWriter dot escape      PASS");
+            fmt::Println!("[12] DotWriter dot escape      PASS");
         } else {
-            Println!("[12] DotWriter dot escape      FAIL got len={}", s.Len());
+            fmt::Println!("[12] DotWriter dot escape      FAIL got len={}", s.Len());
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

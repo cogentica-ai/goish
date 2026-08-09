@@ -14,13 +14,14 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::encoding::{
     BinaryAppender, BinaryMarshaler, BinaryUnmarshaler, TextAppender,
     TextMarshaler, TextUnmarshaler,
 };
 use goish::errors::{error, nil};
 use goish::types::byte;
-use goish::{slice, syscall, Println};
+use goish::{slice, syscall};
 
 // A pair-of-bytes type that implements BOTH binary and text variants.
 // Binary form: 2 raw bytes [hi, lo].
@@ -145,9 +146,9 @@ fn main() {
         let mut q = Pair { hi: 0, lo: 0 };
         let err = q.UnmarshalBinary(bin);
         if err.IsNil() && q.hi == 0xAB && q.lo == 0xCD {
-            Println!("[ 1] BinaryMarshaler RT         PASS");
+            fmt::Println!("[ 1] BinaryMarshaler RT         PASS");
         } else {
-            Println!("[ 1] BinaryMarshaler RT         FAIL");
+            fmt::Println!("[ 1] BinaryMarshaler RT         FAIL");
             failed += 1;
         }
     }
@@ -160,15 +161,15 @@ fn main() {
             alloc::vec![b'A', b'B', b':', b'C', b'D'];
         let text_v: alloc::vec::Vec<byte> = text.clone().__into_vec();
         if text_v != want_text {
-            Println!("[ 2] TextMarshaler RT          FAIL marshal");
+            fmt::Println!("[ 2] TextMarshaler RT          FAIL marshal");
             failed += 1;
         } else {
             let mut q = Pair { hi: 0, lo: 0 };
             let err = q.UnmarshalText(text);
             if err.IsNil() && q.hi == 0xAB && q.lo == 0xCD {
-                Println!("[ 2] TextMarshaler RT           PASS");
+                fmt::Println!("[ 2] TextMarshaler RT           PASS");
             } else {
-                Println!("[ 2] TextMarshaler RT           FAIL unmarshal");
+                fmt::Println!("[ 2] TextMarshaler RT           FAIL unmarshal");
                 failed += 1;
             }
         }
@@ -184,9 +185,9 @@ fn main() {
             alloc::vec![b'>', b' ', 0x12, 0x34];
         let out_v: alloc::vec::Vec<byte> = out.__into_vec();
         if err.IsNil() && out_v == want {
-            Println!("[ 3] BinaryAppender             PASS");
+            fmt::Println!("[ 3] BinaryAppender             PASS");
         } else {
-            Println!("[ 3] BinaryAppender             FAIL");
+            fmt::Println!("[ 3] BinaryAppender             FAIL");
             failed += 1;
         }
     }
@@ -202,9 +203,9 @@ fn main() {
         ];
         let out_v: alloc::vec::Vec<byte> = out.__into_vec();
         if err.IsNil() && out_v == want {
-            Println!("[ 4] TextAppender               PASS");
+            fmt::Println!("[ 4] TextAppender               PASS");
         } else {
-            Println!("[ 4] TextAppender               FAIL");
+            fmt::Println!("[ 4] TextAppender               FAIL");
             failed += 1;
         }
     }
@@ -215,9 +216,9 @@ fn main() {
         let mut p = Pair { hi: 0, lo: 0 };
         let err = p.UnmarshalBinary(bad);
         if !err.IsNil() {
-            Println!("[ 5] UnmarshalBinary error path PASS");
+            fmt::Println!("[ 5] UnmarshalBinary error path PASS");
         } else {
-            Println!("[ 5] UnmarshalBinary error path FAIL");
+            fmt::Println!("[ 5] UnmarshalBinary error path FAIL");
             failed += 1;
         }
     }
@@ -230,9 +231,9 @@ fn main() {
         let mut p = Pair { hi: 0, lo: 0 };
         let err = p.UnmarshalText(bad);
         if !err.IsNil() {
-            Println!("[ 6] UnmarshalText error path   PASS");
+            fmt::Println!("[ 6] UnmarshalText error path   PASS");
         } else {
-            Println!("[ 6] UnmarshalText error path   FAIL");
+            fmt::Println!("[ 6] UnmarshalText error path   FAIL");
             failed += 1;
         }
     }
@@ -244,9 +245,9 @@ fn main() {
         let (m, _) = p.MarshalBinary();
         let (a, _) = p.AppendBinary(slice::new());
         if m.__into_vec() == a.__into_vec() {
-            Println!("[ 7] AppendBinary(nil)≡Marshal  PASS");
+            fmt::Println!("[ 7] AppendBinary(nil)≡Marshal  PASS");
         } else {
-            Println!("[ 7] AppendBinary(nil)≡Marshal  FAIL");
+            fmt::Println!("[ 7] AppendBinary(nil)≡Marshal  FAIL");
             failed += 1;
         }
     }
@@ -257,18 +258,18 @@ fn main() {
         let (m, _) = p.MarshalText();
         let (a, _) = p.AppendText(slice::new());
         if m.__into_vec() == a.__into_vec() {
-            Println!("[ 8] AppendText(nil)≡Marshal    PASS");
+            fmt::Println!("[ 8] AppendText(nil)≡Marshal    PASS");
         } else {
-            Println!("[ 8] AppendText(nil)≡Marshal    FAIL");
+            fmt::Println!("[ 8] AppendText(nil)≡Marshal    FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

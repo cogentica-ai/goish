@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::os;
 use goish::path::filepath;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -19,19 +20,19 @@ fn main() {
     // 1. Getwd returns a non-empty absolute path.
     let (cwd_initial, e) = os::Getwd();
     if !e.IsNil() || cwd_initial.Len() == 0 || cwd_initial[0i64] != b'/' {
-        Println!("[ 1] Getwd absolute            FAIL cwd=", cwd_initial);
+        fmt::Println!("[ 1] Getwd absolute            FAIL cwd=", cwd_initial);
         failed += 1;
     } else {
-        Println!("[ 1] Getwd absolute            PASS");
+        fmt::Println!("[ 1] Getwd absolute            PASS");
     }
 
     // 2. Abs on absolute path → Clean(path).
     {
         let (a, e) = filepath::Abs(string("/foo/./bar/../baz"));
         if e.IsNil() && a == "/foo/baz" {
-            Println!("[ 2] Abs absolute path         PASS");
+            fmt::Println!("[ 2] Abs absolute path         PASS");
         } else {
-            Println!("[ 2] Abs absolute path         FAIL got=", a);
+            fmt::Println!("[ 2] Abs absolute path         FAIL got=", a);
             failed += 1;
         }
     }
@@ -42,9 +43,9 @@ fn main() {
         let (a, e) = filepath::Abs(string("relative.txt"));
         let starts_ok = a.Len() > cwd_initial.Len() && a[0i64] == b'/';
         if e.IsNil() && starts_ok {
-            Println!("[ 3] Abs relative path         PASS");
+            fmt::Println!("[ 3] Abs relative path         PASS");
         } else {
-            Println!("[ 3] Abs relative path         FAIL got=", a);
+            fmt::Println!("[ 3] Abs relative path         FAIL got=", a);
             failed += 1;
         }
     }
@@ -54,9 +55,9 @@ fn main() {
         let (a, e) = filepath::Abs(string(""));
         // Join("/cwd", "") ≡ Clean("/cwd") in path.Join semantics.
         if e.IsNil() && a.Len() > 0 && a[0i64] == b'/' {
-            Println!("[ 4] Abs empty                 PASS");
+            fmt::Println!("[ 4] Abs empty                 PASS");
         } else {
-            Println!("[ 4] Abs empty                 FAIL");
+            fmt::Println!("[ 4] Abs empty                 FAIL");
             failed += 1;
         }
     }
@@ -66,15 +67,15 @@ fn main() {
         let cwd_before = cwd_initial.clone();
         let e1 = os::Chdir(string("/"));
         if !e1.IsNil() {
-            Println!("[ 5] Chdir /                   FAIL chdir-err");
+            fmt::Println!("[ 5] Chdir /                   FAIL chdir-err");
             failed += 1;
         } else {
             let (cwd_after, _) = os::Getwd();
             let restored = os::Chdir(cwd_before.clone());
             if cwd_after == "/" && restored.IsNil() {
-                Println!("[ 5] Chdir / round trip        PASS");
+                fmt::Println!("[ 5] Chdir / round trip        PASS");
             } else {
-                Println!("[ 5] Chdir / round trip        FAIL after=", cwd_after);
+                fmt::Println!("[ 5] Chdir / round trip        FAIL after=", cwd_after);
                 failed += 1;
             }
         }
@@ -84,18 +85,18 @@ fn main() {
     {
         let e = os::Chdir(string("/nonexistent_path_for_test_xyz_42"));
         if !e.IsNil() {
-            Println!("[ 6] Chdir bogus path          PASS");
+            fmt::Println!("[ 6] Chdir bogus path          PASS");
         } else {
-            Println!("[ 6] Chdir bogus path          FAIL");
+            fmt::Println!("[ 6] Chdir bogus path          FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 6");
+        fmt::Println!("FAIL", failed, "of 6");
         syscall::Exit(1);
     }
 }

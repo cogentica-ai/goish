@@ -9,10 +9,11 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::encoding::binary;
 use goish::goslice::slice;
 use goish::types::{byte, int, uint};
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -26,9 +27,9 @@ fn main() {
     {
         let buf = binary::AppendUvarint(empty_buf(), 0x42);
         if buf.Len() == 1 && buf[0] == 0x42 {
-            Println!("[ 1] AppendUvarint small       PASS");
+            fmt::Println!("[ 1] AppendUvarint small       PASS");
         } else {
-            Println!("[ 1] AppendUvarint small       FAIL");
+            fmt::Println!("[ 1] AppendUvarint small       FAIL");
             failed += 1;
         }
     }
@@ -37,9 +38,9 @@ fn main() {
     {
         let buf = binary::AppendUvarint(empty_buf(), 150);
         if buf.Len() == 2 && buf[0] == 0x96 && buf[1] == 0x01 {
-            Println!("[ 2] AppendUvarint 150         PASS");
+            fmt::Println!("[ 2] AppendUvarint 150         PASS");
         } else {
-            Println!("[ 2] AppendUvarint 150         FAIL");
+            fmt::Println!("[ 2] AppendUvarint 150         FAIL");
             failed += 1;
         }
     }
@@ -57,9 +58,9 @@ fn main() {
             }
         }
         if all_ok {
-            Println!("[ 3] Uvarint round-trip        PASS");
+            fmt::Println!("[ 3] Uvarint round-trip        PASS");
         } else {
-            Println!("[ 3] Uvarint round-trip        FAIL");
+            fmt::Println!("[ 3] Uvarint round-trip        FAIL");
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
     {
         let (v, n) = binary::Uvarint(empty_buf());
         if v == 0 && n == 0 {
-            Println!("[ 4] Uvarint empty             PASS");
+            fmt::Println!("[ 4] Uvarint empty             PASS");
         } else {
-            Println!("[ 4] Uvarint empty             FAIL");
+            fmt::Println!("[ 4] Uvarint empty             FAIL");
             failed += 1;
         }
     }
@@ -88,9 +89,9 @@ fn main() {
             }
         }
         if all_ok {
-            Println!("[ 5] Varint round-trip         PASS");
+            fmt::Println!("[ 5] Varint round-trip         PASS");
         } else {
-            Println!("[ 5] Varint round-trip         FAIL");
+            fmt::Println!("[ 5] Varint round-trip         FAIL");
             failed += 1;
         }
     }
@@ -99,9 +100,9 @@ fn main() {
     {
         let buf = binary::AppendVarint(empty_buf(), -1);
         if buf.Len() == 1 && buf[0] == 0x01 {
-            Println!("[ 6] AppendVarint -1           PASS");
+            fmt::Println!("[ 6] AppendVarint -1           PASS");
         } else {
-            Println!("[ 6] AppendVarint -1           FAIL");
+            fmt::Println!("[ 6] AppendVarint -1           FAIL");
             failed += 1;
         }
     }
@@ -112,9 +113,9 @@ fn main() {
             && binary::MaxVarintLen32 == 5
             && binary::MaxVarintLen64 == 10
         {
-            Println!("[ 7] MaxVarintLenN             PASS");
+            fmt::Println!("[ 7] MaxVarintLenN             PASS");
         } else {
-            Println!("[ 7] MaxVarintLenN             FAIL");
+            fmt::Println!("[ 7] MaxVarintLenN             FAIL");
             failed += 1;
         }
     }
@@ -123,9 +124,9 @@ fn main() {
     {
         let buf = binary::BigEndian.AppendUint16(empty_buf(), 0x1234);
         if buf.Len() == 2 && buf[0] == 0x12 && buf[1] == 0x34 {
-            Println!("[ 8] BE.AppendUint16           PASS");
+            fmt::Println!("[ 8] BE.AppendUint16           PASS");
         } else {
-            Println!("[ 8] BE.AppendUint16           FAIL");
+            fmt::Println!("[ 8] BE.AppendUint16           FAIL");
             failed += 1;
         }
     }
@@ -139,9 +140,9 @@ fn main() {
             && buf[2] == 0xBE
             && buf[3] == 0xEF
         {
-            Println!("[ 9] BE.AppendUint32           PASS");
+            fmt::Println!("[ 9] BE.AppendUint32           PASS");
         } else {
-            Println!("[ 9] BE.AppendUint32           FAIL");
+            fmt::Println!("[ 9] BE.AppendUint32           FAIL");
             failed += 1;
         }
     }
@@ -153,9 +154,9 @@ fn main() {
             && buf[0] == 0x01
             && buf[7] == 0x08
         {
-            Println!("[10] BE.AppendUint64           PASS");
+            fmt::Println!("[10] BE.AppendUint64           PASS");
         } else {
-            Println!("[10] BE.AppendUint64           FAIL");
+            fmt::Println!("[10] BE.AppendUint64           FAIL");
             failed += 1;
         }
     }
@@ -169,9 +170,9 @@ fn main() {
             && buf[2] == 0xAD
             && buf[3] == 0xDE
         {
-            Println!("[11] LE.AppendUint32           PASS");
+            fmt::Println!("[11] LE.AppendUint32           PASS");
         } else {
-            Println!("[11] LE.AppendUint32           FAIL");
+            fmt::Println!("[11] LE.AppendUint32           FAIL");
             failed += 1;
         }
     }
@@ -186,18 +187,18 @@ fn main() {
             && buf[2] == 0x12
             && buf[3] == 0x34
         {
-            Println!("[12] AppendUint16 prefix       PASS");
+            fmt::Println!("[12] AppendUint16 prefix       PASS");
         } else {
-            Println!("[12] AppendUint16 prefix       FAIL");
+            fmt::Println!("[12] AppendUint16 prefix       FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

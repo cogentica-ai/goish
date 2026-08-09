@@ -11,13 +11,14 @@ extern crate goish;
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicI64, Ordering};
 
+use goish::fmt;
 use goish::context;
 use goish::errors;
 use goish::net::http::httptrace::{
     self, ClientTrace, ContextClientTrace, DNSDoneInfo, DNSStartInfo, WithClientTrace,
     WroteRequestInfo,
 };
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -28,9 +29,9 @@ fn main() {
         let trace = ClientTrace::default();
         let ctx = WithClientTrace(context::Background(), trace);
         if ContextClientTrace(&ctx).is_some() {
-            Println!("[ 1] Context round-trip        PASS");
+            fmt::Println!("[ 1] Context round-trip        PASS");
         } else {
-            Println!("[ 1] Context round-trip        FAIL");
+            fmt::Println!("[ 1] Context round-trip        FAIL");
             failed += 1;
         }
     }
@@ -39,9 +40,9 @@ fn main() {
     {
         let ctx = context::Background();
         if ContextClientTrace(&ctx).is_none() {
-            Println!("[ 2] Background None           PASS");
+            fmt::Println!("[ 2] Background None           PASS");
         } else {
-            Println!("[ 2] Background None           FAIL");
+            fmt::Println!("[ 2] Background None           FAIL");
             failed += 1;
         }
     }
@@ -61,9 +62,9 @@ fn main() {
             h(string("example.com:80"));
         }
         if CALLED.load(Ordering::SeqCst) == 1 {
-            Println!("[ 3] GetConn hook              PASS");
+            fmt::Println!("[ 3] GetConn hook              PASS");
         } else {
-            Println!("[ 3] GetConn hook              FAIL");
+            fmt::Println!("[ 3] GetConn hook              FAIL");
             failed += 1;
         }
     }
@@ -84,9 +85,9 @@ fn main() {
             h();
         }
         if CALLED.load(Ordering::SeqCst) == 10 {
-            Println!("[ 4] compose adopt old         PASS");
+            fmt::Println!("[ 4] compose adopt old         PASS");
         } else {
-            Println!("[ 4] compose adopt old         FAIL got {}", CALLED.load(Ordering::SeqCst));
+            fmt::Println!("[ 4] compose adopt old         FAIL got {}", CALLED.load(Ordering::SeqCst));
             failed += 1;
         }
     }
@@ -112,9 +113,9 @@ fn main() {
             h();
         }
         if SEQ.load(Ordering::SeqCst) == 12 {
-            Println!("[ 5] compose new-then-old      PASS");
+            fmt::Println!("[ 5] compose new-then-old      PASS");
         } else {
-            Println!("[ 5] compose new-then-old      FAIL got {}", SEQ.load(Ordering::SeqCst));
+            fmt::Println!("[ 5] compose new-then-old      FAIL got {}", SEQ.load(Ordering::SeqCst));
             failed += 1;
         }
     }
@@ -145,9 +146,9 @@ fn main() {
             h(string("tcp"), string("1.2.3.4:80"));
         }
         if N.load(Ordering::SeqCst) == 3 {
-            Println!("[ 6] compose ConnectStart      PASS");
+            fmt::Println!("[ 6] compose ConnectStart      PASS");
         } else {
-            Println!("[ 6] compose ConnectStart      FAIL got {}", N.load(Ordering::SeqCst));
+            fmt::Println!("[ 6] compose ConnectStart      FAIL got {}", N.load(Ordering::SeqCst));
             failed += 1;
         }
     }
@@ -163,9 +164,9 @@ fn main() {
         trace3.GetConn = Some(Arc::new(|_| {}));
         let h2 = trace3.hasNetHooks(); // Only GetConn — not net.
         if !h0 && h1 && !h2 {
-            Println!("[ 7] hasNetHooks               PASS");
+            fmt::Println!("[ 7] hasNetHooks               PASS");
         } else {
-            Println!("[ 7] hasNetHooks               FAIL h0={} h1={} h2={}", h0, h1, h2);
+            fmt::Println!("[ 7] hasNetHooks               FAIL h0={} h1={} h2={}", h0, h1, h2);
             failed += 1;
         }
     }
@@ -199,9 +200,9 @@ fn main() {
             });
         }
         if GOT_HOST.load(Ordering::SeqCst) == 11 {
-            Println!("[ 8] DNS info structs          PASS");
+            fmt::Println!("[ 8] DNS info structs          PASS");
         } else {
-            Println!("[ 8] DNS info structs          FAIL");
+            fmt::Println!("[ 8] DNS info structs          FAIL");
             failed += 1;
         }
     }
@@ -223,9 +224,9 @@ fn main() {
             });
         }
         if SAW_ERR.load(Ordering::SeqCst) == 1 {
-            Println!("[ 9] WroteRequestInfo          PASS");
+            fmt::Println!("[ 9] WroteRequestInfo          PASS");
         } else {
-            Println!("[ 9] WroteRequestInfo          FAIL");
+            fmt::Println!("[ 9] WroteRequestInfo          FAIL");
             failed += 1;
         }
     }
@@ -237,9 +238,9 @@ fn main() {
         // Add a value below the trace — trace remains visible.
         let ctx2 = context::WithValue(ctx1, "k", 1i64);
         if ContextClientTrace(&ctx2).is_some() {
-            Println!("[10] Inherit through WithValue PASS");
+            fmt::Println!("[10] Inherit through WithValue PASS");
         } else {
-            Println!("[10] Inherit through WithValue FAIL");
+            fmt::Println!("[10] Inherit through WithValue FAIL");
             failed += 1;
         }
     }
@@ -264,9 +265,9 @@ fn main() {
         cb2.GotFirstResponseByte.as_ref().unwrap()();
         cb2.GotFirstResponseByte.as_ref().unwrap()();
         if A.load(Ordering::SeqCst) == 1 && B.load(Ordering::SeqCst) == 2 {
-            Println!("[11] Independent contexts      PASS");
+            fmt::Println!("[11] Independent contexts      PASS");
         } else {
-            Println!("[11] Independent contexts      FAIL");
+            fmt::Println!("[11] Independent contexts      FAIL");
             failed += 1;
         }
     }
@@ -280,19 +281,19 @@ fn main() {
         cancel();
         let post = !ctx.Err().IsNil();
         if pre && post && ContextClientTrace(&ctx).is_some() {
-            Println!("[12] Cancel forwarded          PASS");
+            fmt::Println!("[12] Cancel forwarded          PASS");
         } else {
-            Println!("[12] Cancel forwarded          FAIL");
+            fmt::Println!("[12] Cancel forwarded          FAIL");
             failed += 1;
         }
     }
     let _ = httptrace::ContextClientTrace;
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

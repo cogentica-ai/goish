@@ -7,8 +7,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net::http;
-use goish::{bytes, string, syscall, Println};
+use goish::{bytes, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -20,7 +21,7 @@ fn main() {
     req.Header.Set(string("X-Test"), string("y"));
     let (dump, err) = http::httputil::DumpRequest(&req, true);
     if !err.IsNil() {
-        Println!("DumpRequest err");
+        fmt::Println!("DumpRequest err");
         syscall::Exit(1);
     }
     // Convert dump to string for printing.
@@ -40,9 +41,9 @@ fn main() {
     }
     for (i, n) in needles.iter().enumerate() {
         if find_subseq(&hay, n) {
-            Println!("[{}] needle present            PASS", i);
+            fmt::Println!("[{}] needle present            PASS", i);
         } else {
-            Println!("[{}] needle missing            FAIL n={}", i, n.len());
+            fmt::Println!("[{}] needle missing            FAIL n={}", i, n.len());
             failed += 1;
         }
     }
@@ -51,9 +52,9 @@ fn main() {
     if http::CanonicalHeaderKey(string("content-type")) == "Content-Type"
         && http::CanonicalHeaderKey(string("ACCEPT-ENCODING")) == "Accept-Encoding"
     {
-        Println!("[+] CanonicalHeaderKey         PASS");
+        fmt::Println!("[+] CanonicalHeaderKey         PASS");
     } else {
-        Println!("[+] CanonicalHeaderKey         FAIL");
+        fmt::Println!("[+] CanonicalHeaderKey         FAIL");
         failed += 1;
     }
 
@@ -62,9 +63,9 @@ fn main() {
         let (a, b, ok1) = http::ParseHTTPVersion(string("HTTP/1.1"));
         let (_c, _d, ok_bad) = http::ParseHTTPVersion(string("HTTP/2"));
         if ok1 && a == 1 && b == 1 && !ok_bad {
-            Println!("[+] ParseHTTPVersion           PASS");
+            fmt::Println!("[+] ParseHTTPVersion           PASS");
         } else {
-            Println!("[+] ParseHTTPVersion           FAIL");
+            fmt::Println!("[+] ParseHTTPVersion           FAIL");
             failed += 1;
         }
     }
@@ -97,18 +98,18 @@ fn main() {
             }
         }
         if !bad {
-            Println!("[+] DumpResponse               PASS");
+            fmt::Println!("[+] DumpResponse               PASS");
         } else {
-            Println!("[+] DumpResponse               FAIL");
+            fmt::Println!("[+] DumpResponse               FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok dump smoke");
+        fmt::Println!("ok dump smoke");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {}", failed);
+        fmt::Println!("FAIL {}", failed);
         syscall::Exit(1);
     }
 }

@@ -9,9 +9,10 @@ extern crate alloc;
 extern crate goish;
 
 use core::sync::atomic::{AtomicI32, Ordering};
+use goish::fmt;
 use goish::time;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 static FIRED: AtomicI32 = AtomicI32::new(0);
 static FIRED_NO_STOP: AtomicI32 = AtomicI32::new(0);
@@ -28,9 +29,9 @@ fn main() {
         });
         time::Sleep(time::Millisecond * 120);
         if FIRED.load(Ordering::SeqCst) == 1 {
-            Println!("[ 1] AfterFunc fired            PASS");
+            fmt::Println!("[ 1] AfterFunc fired            PASS");
         } else {
-            Println!("[ 1] AfterFunc fired            FAIL");
+            fmt::Println!("[ 1] AfterFunc fired            FAIL");
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
         let stopped = t.Stop();
         time::Sleep(time::Millisecond * 150);
         if stopped && FIRED.load(Ordering::SeqCst) == 0 {
-            Println!("[ 2] Stop cancels               PASS");
+            fmt::Println!("[ 2] Stop cancels               PASS");
         } else {
-            Println!("[ 2] Stop cancels               FAIL stopped=", stopped, " fired=", FIRED.load(Ordering::SeqCst));
+            fmt::Println!("[ 2] Stop cancels               FAIL stopped=", stopped, " fired=", FIRED.load(Ordering::SeqCst));
             failed += 1;
         }
     }
@@ -63,9 +64,9 @@ fn main() {
         });
         time::Sleep(time::Millisecond * 120);
         if FIRED_NO_STOP.load(Ordering::SeqCst) == 1 {
-            Println!("[ 3] f ran without Stop        PASS");
+            fmt::Println!("[ 3] f ran without Stop        PASS");
         } else {
-            Println!("[ 3] f ran without Stop        FAIL");
+            fmt::Println!("[ 3] f ran without Stop        FAIL");
             failed += 1;
         }
     }
@@ -76,19 +77,19 @@ fn main() {
         let s1 = t.Stop();
         let s2 = t.Stop();
         if s1 && !s2 {
-            Println!("[ 4] Stop idempotent            PASS");
+            fmt::Println!("[ 4] Stop idempotent            PASS");
         } else {
-            Println!("[ 4] Stop idempotent            FAIL");
+            fmt::Println!("[ 4] Stop idempotent            FAIL");
             failed += 1;
         }
     }
 
     let total: int = 4;
     if failed == 0 {
-        Println!("ok 4/4");
+        fmt::Println!("ok 4/4");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of", total);
+        fmt::Println!("FAIL", failed, "of", total);
         syscall::Exit(1);
     }
 }

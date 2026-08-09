@@ -11,7 +11,8 @@
 #![no_std]
 #![no_main]
 
-use goish::{bufio, int, make, os, range, slices, string, strings, Printf};
+use goish::fmt;
+use goish::{bufio, int, make, os, range, slices, string, strings};
 
 #[goish::main]
 fn main() {
@@ -29,6 +30,6 @@ fn main() {
 
     for (_, k) in range!(keys) {
         let n = counts[k.clone()];
-        Printf!("%6d %s\n", n, k.clone());
+        fmt::Printf!("%6d %s\n", n, k.clone());
     }
 }

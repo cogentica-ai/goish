@@ -3,7 +3,8 @@
 #![no_std]
 #![no_main]
 
-use goish::{flag, slice, slices, string, syscall, time, Sprintf};
+use goish::fmt;
+use goish::{flag, slice, slices, string, syscall, time};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -21,27 +22,27 @@ fn main() {
     // ─── fmt width specifiers ─────────────────────────────────────────
 
     // %6d — right-align, space pad
-    let s = Sprintf!("[%6d]", 42 as goish::int);
+    let s = fmt::Sprintf!("[%6d]", 42 as goish::int);
     check(s == "[    42]", b"polish: %6d wrong\n");
 
     // %-6d — left-align, space pad
-    let s = Sprintf!("[%-6d]", 42 as goish::int);
+    let s = fmt::Sprintf!("[%-6d]", 42 as goish::int);
     check(s == "[42    ]", b"polish: %-6d wrong\n");
 
     // %06d — zero pad
-    let s = Sprintf!("[%06d]", 42 as goish::int);
+    let s = fmt::Sprintf!("[%06d]", 42 as goish::int);
     check(s == "[000042]", b"polish: %06d wrong\n");
 
     // %10s — string right-aligned
-    let s = Sprintf!("[%10s]", string("hi"));
+    let s = fmt::Sprintf!("[%10s]", string("hi"));
     check(s == "[        hi]", b"polish: %10s wrong\n");
 
     // %-10s — string left-aligned
-    let s = Sprintf!("[%-10s]", string("hi"));
+    let s = fmt::Sprintf!("[%-10s]", string("hi"));
     check(s == "[hi        ]", b"polish: %-10s wrong\n");
 
     // No padding when width is already exceeded.
-    let s = Sprintf!("[%3d]", 1234 as goish::int);
+    let s = fmt::Sprintf!("[%3d]", 1234 as goish::int);
     check(s == "[1234]", b"polish: width-exceeded wrong\n");
 
     // ─── time Y/M/D — Howard Hinnant algorithm ───────────────────────

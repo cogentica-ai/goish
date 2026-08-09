@@ -15,11 +15,12 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{bytes, go, string, syscall, Println};
+use goish::{bytes, go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -56,9 +57,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 200 && body.Len() > 0 {
-            Println!("[ 1] FileServer 200            PASS body={}B", body.Len());
+            fmt::Println!("[ 1] FileServer 200            PASS body={}B", body.Len());
         } else {
-            Println!("[ 1] FileServer 200            FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 1] FileServer 200            FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
         let url = build_url(&addr, "/static/no-such-file-here");
         let (resp, _) = http::Get(url);
         if resp.StatusCode == 404 {
-            Println!("[ 2] missing → 404             PASS");
+            fmt::Println!("[ 2] missing → 404             PASS");
         } else {
-            Println!("[ 2] missing → 404             FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 2] missing → 404             FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -83,7 +84,7 @@ fn main() {
         // (its own URL.Path doesn't go through StripPrefix in this raw form).
         // We just want to confirm we don't crash and don't serve /etc/shadow.
         let _ = resp;
-        Println!("[ 3] traversal handled         PASS");
+        fmt::Println!("[ 3] traversal handled         PASS");
     }
 
     // 4. ServeFile direct route.
@@ -93,9 +94,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 200 && body.Len() > 0 {
-            Println!("[ 4] ServeFile direct          PASS body={}B", body.Len());
+            fmt::Println!("[ 4] ServeFile direct          PASS body={}B", body.Len());
         } else {
-            Println!("[ 4] ServeFile direct          FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 4] ServeFile direct          FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -110,23 +111,23 @@ fn main() {
             let (resp, _) = http::Get(url);
             let ct = resp.Header.Get(string("Content-Type"));
             if resp.StatusCode == 200 && ct.Len() > 0 {
-                Println!("[ 5] Content-Type sniff        PASS ct={}", ct);
+                fmt::Println!("[ 5] Content-Type sniff        PASS ct={}", ct);
             } else {
-                Println!("[ 5] Content-Type sniff        FAIL");
+                fmt::Println!("[ 5] Content-Type sniff        FAIL");
                 failed += 1;
             }
         } else {
-            Println!("[ 5] Content-Type sniff        SKIP (no /etc/hostname)");
+            fmt::Println!("[ 5] Content-Type sniff        SKIP (no /etc/hostname)");
         }
     }
 
     let _ = srv_arc.Shutdown(time::Second);
 
     if failed == 0 {
-        Println!("ok fileserver smoke");
+        fmt::Println!("ok fileserver smoke");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {}", failed);
+        fmt::Println!("FAIL {}", failed);
         syscall::Exit(1);
     }
 }

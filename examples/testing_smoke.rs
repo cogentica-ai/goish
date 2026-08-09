@@ -6,10 +6,11 @@
 #![no_std]
 #![no_main]
 
+use goish::fmt;
 use goish::gostring::string;
 use goish::testing;
 use goish::types::int;
-use goish::{syscall, Sprintf};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -28,7 +29,7 @@ fn main() {
 fn test_arithmetic(t: &mut testing::T) {
     let got: int = 2 + 3;
     if got != 5 {
-        t.Error(Sprintf!("2+3 = %d, want 5", got));
+        t.Error(fmt::Sprintf!("2+3 = %d, want 5", got));
     }
     t.Logf(string::from_static("arithmetic looks fine"));
 }
@@ -39,14 +40,14 @@ fn test_subtests(t: &mut testing::T) {
     t.Run(string::from_static("addition"), |t| {
         let got: int = 1 + 1;
         if got != 2 {
-            t.Error(Sprintf!("1+1 = %d, want 2", got));
+            t.Error(fmt::Sprintf!("1+1 = %d, want 2", got));
         }
     });
 
     t.Run(string::from_static("multiplication"), |t| {
         let got: int = 6 * 7;
         if got != 42 {
-            t.Error(Sprintf!("6*7 = %d, want 42", got));
+            t.Error(fmt::Sprintf!("6*7 = %d, want 42", got));
         }
     });
 }

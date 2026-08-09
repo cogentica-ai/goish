@@ -9,10 +9,11 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::types::rune;
 use goish::unicode::utf16;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn slice_u16(v: Vec<u16>) -> slice<u16> {
     slice::<u16>::__from_vec(v)
@@ -35,9 +36,9 @@ fn main() {
             && !utf16::IsSurrogate(0xE000)
             && !utf16::IsSurrogate('A' as rune)
         {
-            Println!("[ 1] IsSurrogate                PASS");
+            fmt::Println!("[ 1] IsSurrogate                PASS");
         } else {
-            Println!("[ 1] IsSurrogate                FAIL");
+            fmt::Println!("[ 1] IsSurrogate                FAIL");
             failed += 1;
         }
     }
@@ -48,9 +49,9 @@ fn main() {
         let (r1, r2) = utf16::EncodeRune(r);
         // 0x1F600 -> high surrogate 0xD83D, low 0xDE00.
         if r1 == 0xD83D && r2 == 0xDE00 && utf16::DecodeRune(r1, r2) == r {
-            Println!("[ 2] Encode/DecodeRune trip     PASS");
+            fmt::Println!("[ 2] Encode/DecodeRune trip     PASS");
         } else {
-            Println!("[ 2] Encode/DecodeRune trip     FAIL");
+            fmt::Println!("[ 2] Encode/DecodeRune trip     FAIL");
             failed += 1;
         }
     }
@@ -59,9 +60,9 @@ fn main() {
     {
         let (r1, r2) = utf16::EncodeRune('A' as rune);
         if r1 == 0xFFFD && r2 == 0xFFFD {
-            Println!("[ 3] Encode BMP rejected        PASS");
+            fmt::Println!("[ 3] Encode BMP rejected        PASS");
         } else {
-            Println!("[ 3] Encode BMP rejected        FAIL");
+            fmt::Println!("[ 3] Encode BMP rejected        FAIL");
             failed += 1;
         }
     }
@@ -70,9 +71,9 @@ fn main() {
     {
         let (r1, r2) = utf16::EncodeRune(0x110000);
         if r1 == 0xFFFD && r2 == 0xFFFD {
-            Println!("[ 4] Encode invalid             PASS");
+            fmt::Println!("[ 4] Encode invalid             PASS");
         } else {
-            Println!("[ 4] Encode invalid             FAIL");
+            fmt::Println!("[ 4] Encode invalid             FAIL");
             failed += 1;
         }
     }
@@ -80,9 +81,9 @@ fn main() {
     // 5. DecodeRune — invalid pair returns U+FFFD.
     {
         if utf16::DecodeRune(0x0041, 0x0042) == 0xFFFD {
-            Println!("[ 5] Decode bad pair            PASS");
+            fmt::Println!("[ 5] Decode bad pair            PASS");
         } else {
-            Println!("[ 5] Decode bad pair            FAIL");
+            fmt::Println!("[ 5] Decode bad pair            FAIL");
             failed += 1;
         }
     }
@@ -97,9 +98,9 @@ fn main() {
             && utf16::RuneLen(0x110000) == -1
             && utf16::RuneLen(-1) == -1
         {
-            Println!("[ 6] RuneLen                    PASS");
+            fmt::Println!("[ 6] RuneLen                    PASS");
         } else {
-            Println!("[ 6] RuneLen                    FAIL");
+            fmt::Println!("[ 6] RuneLen                    FAIL");
             failed += 1;
         }
     }
@@ -121,9 +122,9 @@ fn main() {
             && raw[3] == 0xDE00
             && raw[4] == 0x0021
         {
-            Println!("[ 7] Encode mixed               PASS");
+            fmt::Println!("[ 7] Encode mixed               PASS");
         } else {
-            Println!("[ 7] Encode mixed               FAIL");
+            fmt::Println!("[ 7] Encode mixed               FAIL");
             failed += 1;
         }
     }
@@ -144,9 +145,9 @@ fn main() {
             && raw[2] == 0x1F600
             && raw[3] == '!' as rune
         {
-            Println!("[ 8] Decode mixed               PASS");
+            fmt::Println!("[ 8] Decode mixed               PASS");
         } else {
-            Println!("[ 8] Decode mixed               FAIL");
+            fmt::Println!("[ 8] Decode mixed               FAIL");
             failed += 1;
         }
     }
@@ -159,9 +160,9 @@ fn main() {
         let decoded = utf16::Decode(slice_u16(u));
         let raw: &[rune] = &decoded;
         if raw.len() == 2 && raw[0] == 0xFFFD && raw[1] == 'A' as rune {
-            Println!("[ 9] Decode lone high           PASS");
+            fmt::Println!("[ 9] Decode lone high           PASS");
         } else {
-            Println!("[ 9] Decode lone high           FAIL");
+            fmt::Println!("[ 9] Decode lone high           FAIL");
             failed += 1;
         }
     }
@@ -179,9 +180,9 @@ fn main() {
             && raw[2] == 0xDE00
             && raw[3] == 0xFFFD
         {
-            Println!("[10] AppendRune mixed           PASS");
+            fmt::Println!("[10] AppendRune mixed           PASS");
         } else {
-            Println!("[10] AppendRune mixed           FAIL");
+            fmt::Println!("[10] AppendRune mixed           FAIL");
             failed += 1;
         }
     }
@@ -192,9 +193,9 @@ fn main() {
         let encoded = utf16::Encode(slice_rune(runes_v));
         let raw: &[u16] = &encoded;
         if raw.is_empty() {
-            Println!("[11] Encode empty               PASS");
+            fmt::Println!("[11] Encode empty               PASS");
         } else {
-            Println!("[11] Encode empty               FAIL");
+            fmt::Println!("[11] Encode empty               FAIL");
             failed += 1;
         }
     }
@@ -206,18 +207,18 @@ fn main() {
         let encoded = utf16::Encode(slice_rune(runes_v));
         let raw: &[u16] = &encoded;
         if raw.len() == 1 && raw[0] == 0xFFFD {
-            Println!("[12] Encode invalid replaced    PASS");
+            fmt::Println!("[12] Encode invalid replaced    PASS");
         } else {
-            Println!("[12] Encode invalid replaced    FAIL");
+            fmt::Println!("[12] Encode invalid replaced    FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

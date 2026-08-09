@@ -18,13 +18,14 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::convert::{bytes as to_bytes, string as to_string};
 use goish::goslice::slice;
 use goish::hash::maphash;
 use goish::hash::Hash;
 use goish::io::Writer as _;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -44,9 +45,9 @@ fn main() {
         let h1 = maphash::Bytes(s1, empty_buf());
         let h2 = maphash::Bytes(s2, empty_buf());
         if h1 != 0 && h2 != 0 && h1 != h2 {
-            Println!("[ 1] MakeSeed distinct          PASS");
+            fmt::Println!("[ 1] MakeSeed distinct          PASS");
         } else {
-            Println!("[ 1] MakeSeed distinct          FAIL");
+            fmt::Println!("[ 1] MakeSeed distinct          FAIL");
             failed += 1;
         }
     }
@@ -57,9 +58,9 @@ fn main() {
         let h1 = maphash::Bytes(s, to_bytes("hello world"));
         let h2 = maphash::Bytes(s, to_bytes("hello world"));
         if h1 == h2 {
-            Println!("[ 2] Bytes deterministic        PASS");
+            fmt::Println!("[ 2] Bytes deterministic        PASS");
         } else {
-            Println!("[ 2] Bytes deterministic        FAIL");
+            fmt::Println!("[ 2] Bytes deterministic        FAIL");
             failed += 1;
         }
     }
@@ -71,9 +72,9 @@ fn main() {
         let h1 = maphash::Bytes(s1, to_bytes("hello world"));
         let h2 = maphash::Bytes(s2, to_bytes("hello world"));
         if h1 != h2 {
-            Println!("[ 3] Bytes seed-sensitive       PASS");
+            fmt::Println!("[ 3] Bytes seed-sensitive       PASS");
         } else {
-            Println!("[ 3] Bytes seed-sensitive       FAIL");
+            fmt::Println!("[ 3] Bytes seed-sensitive       FAIL");
             failed += 1;
         }
     }
@@ -84,9 +85,9 @@ fn main() {
         let h1 = maphash::Bytes(s, to_bytes("foobar"));
         let h2 = maphash::String(s, to_string("foobar"));
         if h1 == h2 {
-            Println!("[ 4] String == Bytes            PASS");
+            fmt::Println!("[ 4] String == Bytes            PASS");
         } else {
-            Println!("[ 4] String == Bytes            FAIL");
+            fmt::Println!("[ 4] String == Bytes            FAIL");
             failed += 1;
         }
     }
@@ -97,9 +98,9 @@ fn main() {
         let h1 = maphash::Bytes(s, to_bytes("foo"));
         let h2 = maphash::Bytes(s, to_bytes("bar"));
         if h1 != h2 {
-            Println!("[ 5] Bytes input-sensitive      PASS");
+            fmt::Println!("[ 5] Bytes input-sensitive      PASS");
         } else {
-            Println!("[ 5] Bytes input-sensitive      FAIL");
+            fmt::Println!("[ 5] Bytes input-sensitive      FAIL");
             failed += 1;
         }
     }
@@ -110,9 +111,9 @@ fn main() {
         let h_empty1 = maphash::Bytes(s, empty_buf());
         let h_empty2 = maphash::Bytes(s, empty_buf());
         if h_empty1 == h_empty2 && h_empty1 != 0 {
-            Println!("[ 6] Bytes empty stable         PASS");
+            fmt::Println!("[ 6] Bytes empty stable         PASS");
         } else {
-            Println!("[ 6] Bytes empty stable         FAIL");
+            fmt::Println!("[ 6] Bytes empty stable         FAIL");
             failed += 1;
         }
     }
@@ -127,9 +128,9 @@ fn main() {
         let _ = h.Write(to_bytes("def"));
         let got = h.Sum64();
         if want == got {
-            Println!("[ 7] Hash incremental == Bytes  PASS");
+            fmt::Println!("[ 7] Hash incremental == Bytes  PASS");
         } else {
-            Println!("[ 7] Hash incremental == Bytes  FAIL");
+            fmt::Println!("[ 7] Hash incremental == Bytes  FAIL");
             failed += 1;
         }
     }
@@ -147,9 +148,9 @@ fn main() {
         let _ = h2.WriteString(to_string("xyzzy"));
         let v2 = h2.Sum64();
         if v1 == v2 {
-            Println!("[ 8] WriteString == Write       PASS");
+            fmt::Println!("[ 8] WriteString == Write       PASS");
         } else {
-            Println!("[ 8] WriteString == Write       FAIL");
+            fmt::Println!("[ 8] WriteString == Write       FAIL");
             failed += 1;
         }
     }
@@ -164,9 +165,9 @@ fn main() {
         h.Reset();
         let after = h.Sum64();
         if baseline == after {
-            Println!("[ 9] Reset preserves seed       PASS");
+            fmt::Println!("[ 9] Reset preserves seed       PASS");
         } else {
-            Println!("[ 9] Reset preserves seed       FAIL");
+            fmt::Println!("[ 9] Reset preserves seed       FAIL");
             failed += 1;
         }
     }
@@ -181,9 +182,9 @@ fn main() {
         let v = h.Sum64();
         let want = maphash::Bytes(s, empty_buf());
         if v == want {
-            Println!("[10] SetSeed clears buffer      PASS");
+            fmt::Println!("[10] SetSeed clears buffer      PASS");
         } else {
-            Println!("[10] SetSeed clears buffer      FAIL");
+            fmt::Println!("[10] SetSeed clears buffer      FAIL");
             failed += 1;
         }
     }
@@ -206,9 +207,9 @@ fn main() {
         let stream = h.Sum64();
 
         if one == stream {
-            Println!("[11] >bufSize multi-flush       PASS");
+            fmt::Println!("[11] >bufSize multi-flush       PASS");
         } else {
-            Println!("[11] >bufSize multi-flush       FAIL");
+            fmt::Println!("[11] >bufSize multi-flush       FAIL");
             failed += 1;
         }
     }
@@ -229,9 +230,9 @@ fn main() {
         let v2 = h2.Sum64();
 
         if v1 == v2 {
-            Println!("[12] WriteByte == Write byte    PASS");
+            fmt::Println!("[12] WriteByte == Write byte    PASS");
         } else {
-            Println!("[12] WriteByte == Write byte    FAIL");
+            fmt::Println!("[12] WriteByte == Write byte    FAIL");
             failed += 1;
         }
     }
@@ -240,9 +241,9 @@ fn main() {
     {
         let h = maphash::Hash::new();
         if h.Size() == 8 && h.BlockSize() == 128 {
-            Println!("[13] Size/BlockSize             PASS");
+            fmt::Println!("[13] Size/BlockSize             PASS");
         } else {
-            Println!("[13] Size/BlockSize             FAIL");
+            fmt::Println!("[13] Size/BlockSize             FAIL");
             failed += 1;
         }
     }
@@ -265,18 +266,18 @@ fn main() {
             | ((raw[6] as u64) << 48)
             | ((raw[7] as u64) << 56);
         if raw.len() == 8 && recovered == v {
-            Println!("[14] Sum -> LE u64              PASS");
+            fmt::Println!("[14] Sum -> LE u64              PASS");
         } else {
-            Println!("[14] Sum -> LE u64              FAIL");
+            fmt::Println!("[14] Sum -> LE u64              FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 14/14");
+        fmt::Println!("ok 14/14");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 14");
+        fmt::Println!("FAIL", failed, "of 14");
         syscall::Exit(1);
     }
 }

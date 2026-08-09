@@ -9,8 +9,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net::http;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -20,9 +21,9 @@ fn main() {
     {
         let got = http::QueryEscape(string("hello world & friends"));
         if got == "hello+world+%26+friends" {
-            Println!("[ 1] QueryEscape spaces+amp     PASS");
+            fmt::Println!("[ 1] QueryEscape spaces+amp     PASS");
         } else {
-            Println!("[ 1] QueryEscape spaces+amp     FAIL got={}", got);
+            fmt::Println!("[ 1] QueryEscape spaces+amp     FAIL got={}", got);
             failed += 1;
         }
     }
@@ -31,9 +32,9 @@ fn main() {
     {
         let got = http::PathEscape(string("foo/bar baz?,"));
         if got == "foo%2Fbar%20baz%3F%2C" {
-            Println!("[ 2] PathEscape segment         PASS");
+            fmt::Println!("[ 2] PathEscape segment         PASS");
         } else {
-            Println!("[ 2] PathEscape segment         FAIL got={}", got);
+            fmt::Println!("[ 2] PathEscape segment         FAIL got={}", got);
             failed += 1;
         }
     }
@@ -44,9 +45,9 @@ fn main() {
         let q = http::QueryEscape(s.clone());
         let p = http::PathEscape(s.clone());
         if q == "AaZz09-_.~" && p == "AaZz09-_.~" {
-            Println!("[ 3] unreserved untouched      PASS");
+            fmt::Println!("[ 3] unreserved untouched      PASS");
         } else {
-            Println!("[ 3] unreserved untouched      FAIL q={} p={}", q, p);
+            fmt::Println!("[ 3] unreserved untouched      FAIL q={} p={}", q, p);
             failed += 1;
         }
     }
@@ -57,9 +58,9 @@ fn main() {
         let q = http::QueryEscape(s.clone());
         let (back, err) = http::QueryUnescape(q);
         if err.IsNil() && back == s {
-            Println!("[ 4] Query round-trip           PASS");
+            fmt::Println!("[ 4] Query round-trip           PASS");
         } else {
-            Println!("[ 4] Query round-trip           FAIL");
+            fmt::Println!("[ 4] Query round-trip           FAIL");
             failed += 1;
         }
     }
@@ -70,9 +71,9 @@ fn main() {
         let p = http::PathEscape(s.clone());
         let (back, err) = http::PathUnescape(p);
         if err.IsNil() && back == s {
-            Println!("[ 5] Path round-trip            PASS");
+            fmt::Println!("[ 5] Path round-trip            PASS");
         } else {
-            Println!("[ 5] Path round-trip            FAIL");
+            fmt::Println!("[ 5] Path round-trip            FAIL");
             failed += 1;
         }
     }
@@ -82,9 +83,9 @@ fn main() {
         if http::QueryEscape(string("")).Len() == 0
             && http::PathEscape(string("")).Len() == 0
         {
-            Println!("[ 6] empty                      PASS");
+            fmt::Println!("[ 6] empty                      PASS");
         } else {
-            Println!("[ 6] empty                      FAIL");
+            fmt::Println!("[ 6] empty                      FAIL");
             failed += 1;
         }
     }
@@ -93,18 +94,18 @@ fn main() {
     {
         let got = http::PathEscape(string(":@$&+="));
         if got == ":@$&+=" {
-            Println!("[ 7] PathEscape sub-delims      PASS");
+            fmt::Println!("[ 7] PathEscape sub-delims      PASS");
         } else {
-            Println!("[ 7] PathEscape sub-delims      FAIL got={}", got);
+            fmt::Println!("[ 7] PathEscape sub-delims      FAIL got={}", got);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 7/7");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 7", failed);
+        fmt::Println!("FAIL {} of 7", failed);
         syscall::Exit(1);
     }
 }

@@ -9,10 +9,11 @@ extern crate alloc;
 extern crate goish;
 
 use core::sync::atomic::{AtomicI64, Ordering};
+use goish::fmt;
 use goish::gostring::string;
 use goish::runtime::sched::schedule;
 use goish::sync::{Map, WaitGroup};
-use goish::{go, syscall, Println, KB};
+use goish::{go, syscall, KB};
 
 #[goish::main]
 fn main() {
@@ -28,9 +29,9 @@ fn run_tests() {
         let m: Map<string, i64> = Map::new();
         let (v, ok) = m.Load(string::from_static("missing"));
         if v == 0 && !ok {
-            Println!("[ 1] Load on empty           PASS");
+            fmt::Println!("[ 1] Load on empty           PASS");
         } else {
-            Println!("[ 1] Load on empty           FAIL");
+            fmt::Println!("[ 1] Load on empty           FAIL");
             failed += 1;
         }
     }
@@ -41,9 +42,9 @@ fn run_tests() {
         m.Store(string::from_static("k"), 42);
         let (v, ok) = m.Load(string::from_static("k"));
         if v == 42 && ok {
-            Println!("[ 2] Store/Load              PASS");
+            fmt::Println!("[ 2] Store/Load              PASS");
         } else {
-            Println!("[ 2] Store/Load              FAIL v={} ok={}", v, ok);
+            fmt::Println!("[ 2] Store/Load              FAIL v={} ok={}", v, ok);
             failed += 1;
         }
     }
@@ -55,9 +56,9 @@ fn run_tests() {
         m.Delete(string::from_static("k"));
         let (_v, ok) = m.Load(string::from_static("k"));
         if !ok {
-            Println!("[ 3] Delete                  PASS");
+            fmt::Println!("[ 3] Delete                  PASS");
         } else {
-            Println!("[ 3] Delete                  FAIL");
+            fmt::Println!("[ 3] Delete                  FAIL");
             failed += 1;
         }
     }
@@ -67,9 +68,9 @@ fn run_tests() {
         let m: Map<string, i64> = Map::new();
         let (actual, loaded) = m.LoadOrStore(string::from_static("k"), 7);
         if actual == 7 && !loaded {
-            Println!("[ 4] LoadOrStore absent      PASS");
+            fmt::Println!("[ 4] LoadOrStore absent      PASS");
         } else {
-            Println!("[ 4] LoadOrStore absent      FAIL");
+            fmt::Println!("[ 4] LoadOrStore absent      FAIL");
             failed += 1;
         }
     }
@@ -81,9 +82,9 @@ fn run_tests() {
         let (actual, loaded) = m.LoadOrStore(string::from_static("k"), 999);
         let (after, _) = m.Load(string::from_static("k"));
         if actual == 100 && loaded && after == 100 {
-            Println!("[ 5] LoadOrStore present     PASS");
+            fmt::Println!("[ 5] LoadOrStore present     PASS");
         } else {
-            Println!("[ 5] LoadOrStore present     FAIL actual={} after={}", actual, after);
+            fmt::Println!("[ 5] LoadOrStore present     FAIL actual={} after={}", actual, after);
             failed += 1;
         }
     }
@@ -95,9 +96,9 @@ fn run_tests() {
         let (v, ok) = m.LoadAndDelete(string::from_static("k"));
         let (_, after_ok) = m.Load(string::from_static("k"));
         if v == 5 && ok && !after_ok {
-            Println!("[ 6] LoadAndDelete present   PASS");
+            fmt::Println!("[ 6] LoadAndDelete present   PASS");
         } else {
-            Println!("[ 6] LoadAndDelete present   FAIL");
+            fmt::Println!("[ 6] LoadAndDelete present   FAIL");
             failed += 1;
         }
     }
@@ -107,9 +108,9 @@ fn run_tests() {
         let m: Map<string, i64> = Map::new();
         let (v, ok) = m.LoadAndDelete(string::from_static("missing"));
         if v == 0 && !ok {
-            Println!("[ 7] LoadAndDelete absent    PASS");
+            fmt::Println!("[ 7] LoadAndDelete absent    PASS");
         } else {
-            Println!("[ 7] LoadAndDelete absent    FAIL");
+            fmt::Println!("[ 7] LoadAndDelete absent    FAIL");
             failed += 1;
         }
     }
@@ -121,9 +122,9 @@ fn run_tests() {
         let (prev, loaded) = m.Swap(string::from_static("k"), 20);
         let (after, _) = m.Load(string::from_static("k"));
         if prev == 10 && loaded && after == 20 {
-            Println!("[ 8] Swap present            PASS");
+            fmt::Println!("[ 8] Swap present            PASS");
         } else {
-            Println!("[ 8] Swap present            FAIL");
+            fmt::Println!("[ 8] Swap present            FAIL");
             failed += 1;
         }
     }
@@ -134,9 +135,9 @@ fn run_tests() {
         let (prev, loaded) = m.Swap(string::from_static("k"), 5);
         let (after, _) = m.Load(string::from_static("k"));
         if prev == 0 && !loaded && after == 5 {
-            Println!("[ 9] Swap absent             PASS");
+            fmt::Println!("[ 9] Swap absent             PASS");
         } else {
-            Println!("[ 9] Swap absent             FAIL");
+            fmt::Println!("[ 9] Swap absent             FAIL");
             failed += 1;
         }
     }
@@ -154,9 +155,9 @@ fn run_tests() {
             true
         });
         if counter.load(Ordering::Relaxed) == 6 {
-            Println!("[10] Range visits all        PASS");
+            fmt::Println!("[10] Range visits all        PASS");
         } else {
-            Println!("[10] Range visits all        FAIL sum={}", counter.load(Ordering::Relaxed));
+            fmt::Println!("[10] Range visits all        FAIL sum={}", counter.load(Ordering::Relaxed));
             failed += 1;
         }
     }
@@ -175,9 +176,9 @@ fn run_tests() {
             false
         });
         if counter.load(Ordering::Relaxed) == 1 {
-            Println!("[11] Range short-circuit     PASS");
+            fmt::Println!("[11] Range short-circuit     PASS");
         } else {
-            Println!("[11] Range short-circuit     FAIL count={}", counter.load(Ordering::Relaxed));
+            fmt::Println!("[11] Range short-circuit     FAIL count={}", counter.load(Ordering::Relaxed));
             failed += 1;
         }
     }
@@ -191,9 +192,9 @@ fn run_tests() {
         let (_, ok_a) = m.Load(string::from_static("a"));
         let (_, ok_b) = m.Load(string::from_static("b"));
         if !ok_a && !ok_b {
-            Println!("[12] Clear                   PASS");
+            fmt::Println!("[12] Clear                   PASS");
         } else {
-            Println!("[12] Clear                   FAIL");
+            fmt::Println!("[12] Clear                   FAIL");
             failed += 1;
         }
     }
@@ -219,18 +220,18 @@ fn run_tests() {
             true
         });
         if counter.load(Ordering::Relaxed) == 200 {
-            Println!("[13] Concurrent Store        PASS");
+            fmt::Println!("[13] Concurrent Store        PASS");
         } else {
-            Println!("[13] Concurrent Store        FAIL n={}", counter.load(Ordering::Relaxed));
+            fmt::Println!("[13] Concurrent Store        FAIL n={}", counter.load(Ordering::Relaxed));
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 13/13");
+        fmt::Println!("ok 13/13");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 13");
+        fmt::Println!("FAIL", failed, "of 13");
         syscall::Exit(1);
     }
 }

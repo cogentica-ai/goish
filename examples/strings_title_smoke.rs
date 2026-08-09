@@ -8,8 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::strings;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -19,9 +20,9 @@ fn main() {
     {
         let s = strings::Title(string("hello world"));
         if s == "Hello World" {
-            Println!("[ 1] Title two words           PASS");
+            fmt::Println!("[ 1] Title two words           PASS");
         } else {
-            Println!("[ 1] Title two words           FAIL got=", s);
+            fmt::Println!("[ 1] Title two words           FAIL got=", s);
             failed += 1;
         }
     }
@@ -30,9 +31,9 @@ fn main() {
     {
         let s = strings::Title(string("HELLO world"));
         if s == "HELLO World" {
-            Println!("[ 2] Title preserves upper     PASS");
+            fmt::Println!("[ 2] Title preserves upper     PASS");
         } else {
-            Println!("[ 2] Title preserves upper     FAIL got=", s);
+            fmt::Println!("[ 2] Title preserves upper     FAIL got=", s);
             failed += 1;
         }
     }
@@ -41,9 +42,9 @@ fn main() {
     {
         let s = strings::Title(string("hello-world_42"));
         if s == "Hello-World_42" {
-            Println!("[ 3] Title hyphen sep          PASS");
+            fmt::Println!("[ 3] Title hyphen sep          PASS");
         } else {
-            Println!("[ 3] Title hyphen sep          FAIL got=", s);
+            fmt::Println!("[ 3] Title hyphen sep          FAIL got=", s);
             failed += 1;
         }
     }
@@ -52,9 +53,9 @@ fn main() {
     {
         let s = strings::Title(string(""));
         if s.Len() == 0 {
-            Println!("[ 4] Title empty               PASS");
+            fmt::Println!("[ 4] Title empty               PASS");
         } else {
-            Println!("[ 4] Title empty               FAIL");
+            fmt::Println!("[ 4] Title empty               FAIL");
             failed += 1;
         }
     }
@@ -63,9 +64,9 @@ fn main() {
     {
         let s = strings::Title(string("a"));
         if s == "A" {
-            Println!("[ 5] Title single letter       PASS");
+            fmt::Println!("[ 5] Title single letter       PASS");
         } else {
-            Println!("[ 5] Title single letter       FAIL got=", s);
+            fmt::Println!("[ 5] Title single letter       FAIL got=", s);
             failed += 1;
         }
     }
@@ -74,9 +75,9 @@ fn main() {
     {
         let s = strings::Title(string(" hello"));
         if s == " Hello" {
-            Println!("[ 6] Title leading space       PASS");
+            fmt::Println!("[ 6] Title leading space       PASS");
         } else {
-            Println!("[ 6] Title leading space       FAIL got=", s);
+            fmt::Println!("[ 6] Title leading space       FAIL got=", s);
             failed += 1;
         }
     }
@@ -86,9 +87,9 @@ fn main() {
     {
         let s = strings::Title(string("h\u{00e9}llo"));
         if s == "H\u{00e9}llo" {
-            Println!("[ 7] Title preserves non-ASCII PASS");
+            fmt::Println!("[ 7] Title preserves non-ASCII PASS");
         } else {
-            Println!("[ 7] Title preserves non-ASCII FAIL got=", s);
+            fmt::Println!("[ 7] Title preserves non-ASCII FAIL got=", s);
             failed += 1;
         }
     }
@@ -97,18 +98,18 @@ fn main() {
     {
         let s = strings::Title(string("a\tb"));
         if s == "A\tB" {
-            Println!("[ 8] Title tab separator       PASS");
+            fmt::Println!("[ 8] Title tab separator       PASS");
         } else {
-            Println!("[ 8] Title tab separator       FAIL got=", s);
+            fmt::Println!("[ 8] Title tab separator       FAIL got=", s);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

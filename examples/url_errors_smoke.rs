@@ -19,12 +19,12 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::fmt;
 use goish::errors::{self, error};
 use goish::gostring::string;
 use goish::net::http::url::{self, EscapeError, InvalidHostError};
 use goish::runtime::sched::schedule;
-use goish::{go, syscall, Println};
-
+use goish::{go, syscall};
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
@@ -42,10 +42,10 @@ fn main() {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
-            Println!("ok 8/8");
+            fmt::Println!("ok 8/8");
             syscall::Exit(0);
         } else {
-            Println!("FAIL", f as i64, "of 8");
+            fmt::Println!("FAIL", f as i64, "of 8");
             syscall::Exit(1);
         }
     });

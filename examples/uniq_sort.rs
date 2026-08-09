@@ -18,9 +18,8 @@
 #![no_std]
 #![no_main]
 
-use goish::{
-    append, int, len, make, nil, os, range, slices, strconv, Fprintf, Fprintln, Println,
-};
+use goish::fmt;
+use goish::{append, int, len, make, nil, os, range, slices, strconv};
 
 #[goish::main]
 fn main() {
@@ -29,7 +28,7 @@ fn main() {
 
     if len(&args) == 0 {
         let mut e = os::Stderr();
-        Fprintln!(e, "usage: uniq_sort N...");
+        fmt::Fprintln!(e, "usage: uniq_sort N...");
         os::Exit(1);
     }
 
@@ -38,7 +37,7 @@ fn main() {
     for (i, arg) in range!(args) {
         let (n, err) = strconv::Atoi(arg.clone());
         if err != nil {
-            Fprintf!(errf, "arg %d: %v\n", i, err);
+            fmt::Fprintf!(errf, "arg %d: %v\n", i, err);
             os::Exit(1);
         }
         nums = append!(nums, n);
@@ -48,6 +47,6 @@ fn main() {
     let nums = slices::Compact(nums);
 
     for (_, n) in range!(nums) {
-        Println!(*n);
+        fmt::Println!(*n);
     }
 }

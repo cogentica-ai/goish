@@ -12,11 +12,12 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::encoding::ascii85;
 use goish::io;
 use goish::types::byte;
-use goish::{slice, syscall, Println};
+use goish::{slice, syscall};
 
 #[goish::main]
 fn main() {
@@ -33,16 +34,16 @@ fn main() {
             let (_, werr) = e.Write(payload);
             let cerr = e.Close();
             if !werr.IsNil() || !cerr.IsNil() {
-                Println!("[ 1] NewEncoder single block    FAIL write/close err");
+                fmt::Println!("[ 1] NewEncoder single block    FAIL write/close err");
                 failed += 1;
             }
         }
         let got = buf.String();
         let want: goish::string = "@:E_W".into();
         if got == want {
-            Println!("[ 1] NewEncoder single block    PASS");
+            fmt::Println!("[ 1] NewEncoder single block    PASS");
         } else {
-            Println!("[ 1] NewEncoder single block    FAIL got=", got);
+            fmt::Println!("[ 1] NewEncoder single block    FAIL got=", got);
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
         }
         let got = buf.String();
         if got == "" {
-            Println!("[ 2] NewEncoder empty input     PASS");
+            fmt::Println!("[ 2] NewEncoder empty input     PASS");
         } else {
-            Println!("[ 2] NewEncoder empty input     FAIL got=", got);
+            fmt::Println!("[ 2] NewEncoder empty input     FAIL got=", got);
             failed += 1;
         }
     }
@@ -85,9 +86,9 @@ fn main() {
         let want = goish::string::from_bytes(&out_v);
 
         if stream_out == want {
-            Println!("[ 3] NewEncoder short tail      PASS");
+            fmt::Println!("[ 3] NewEncoder short tail      PASS");
         } else {
-            Println!("[ 3] NewEncoder short tail      FAIL got=", stream_out);
+            fmt::Println!("[ 3] NewEncoder short tail      FAIL got=", stream_out);
             failed += 1;
         }
     }
@@ -114,9 +115,9 @@ fn main() {
         out_v.truncate(n as usize);
         let want = goish::string::from_bytes(&out_v);
         if got == want {
-            Println!("[ 4] NewEncoder byte-by-byte    PASS");
+            fmt::Println!("[ 4] NewEncoder byte-by-byte    PASS");
         } else {
-            Println!("[ 4] NewEncoder byte-by-byte    FAIL got=", got);
+            fmt::Println!("[ 4] NewEncoder byte-by-byte    FAIL got=", got);
             failed += 1;
         }
     }
@@ -147,9 +148,9 @@ fn main() {
         out_v.truncate(n as usize);
         let want = goish::string::from_bytes(&out_v);
         if got == want {
-            Println!("[ 5] NewEncoder large interior  PASS");
+            fmt::Println!("[ 5] NewEncoder large interior  PASS");
         } else {
-            Println!("[ 5] NewEncoder large interior  FAIL");
+            fmt::Println!("[ 5] NewEncoder large interior  FAIL");
             failed += 1;
         }
     }
@@ -166,9 +167,9 @@ fn main() {
         let got = buf.String();
         let want: goish::string = "zz".into();
         if got == want {
-            Println!("[ 6] NewEncoder zero special    PASS");
+            fmt::Println!("[ 6] NewEncoder zero special    PASS");
         } else {
-            Println!("[ 6] NewEncoder zero special    FAIL got=", got);
+            fmt::Println!("[ 6] NewEncoder zero special    FAIL got=", got);
             failed += 1;
         }
     }
@@ -184,9 +185,9 @@ fn main() {
         let mut got_v = out.__into_vec();
         got_v.truncate(n as usize);
         if err.IsNil() && got_v == b"abcd".to_vec() {
-            Println!("[ 7] NewDecoder single Read     PASS");
+            fmt::Println!("[ 7] NewDecoder single Read     PASS");
         } else {
-            Println!("[ 7] NewDecoder single Read     FAIL");
+            fmt::Println!("[ 7] NewDecoder single Read     FAIL");
             failed += 1;
         }
     }
@@ -208,9 +209,9 @@ fn main() {
         let mut dec = ascii85::NewDecoder(r);
         let (got, err) = io::ReadAll(&mut dec);
         if err.IsNil() && got.__into_vec() == plain {
-            Println!("[ 8] NewDecoder ReadAll         PASS");
+            fmt::Println!("[ 8] NewDecoder ReadAll         PASS");
         } else {
-            Println!("[ 8] NewDecoder ReadAll         FAIL");
+            fmt::Println!("[ 8] NewDecoder ReadAll         FAIL");
             failed += 1;
         }
     }
@@ -245,9 +246,9 @@ fn main() {
             }
         }
         if got == plain {
-            Println!("[ 9] NewDecoder 1-byte staging  PASS");
+            fmt::Println!("[ 9] NewDecoder 1-byte staging  PASS");
         } else {
-            Println!("[ 9] NewDecoder 1-byte staging  FAIL");
+            fmt::Println!("[ 9] NewDecoder 1-byte staging  FAIL");
             failed += 1;
         }
     }
@@ -261,9 +262,9 @@ fn main() {
         let mut dec = ascii85::NewDecoder(r);
         let (got, err) = io::ReadAll(&mut dec);
         if err.IsNil() && got.__into_vec() == b"abcd".to_vec() {
-            Println!("[10] NewDecoder ignores ws      PASS");
+            fmt::Println!("[10] NewDecoder ignores ws      PASS");
         } else {
-            Println!("[10] NewDecoder ignores ws      FAIL");
+            fmt::Println!("[10] NewDecoder ignores ws      FAIL");
             failed += 1;
         }
     }
@@ -287,9 +288,9 @@ fn main() {
         let mut dec = ascii85::NewDecoder(r);
         let (got, err) = io::ReadAll(&mut dec);
         if err.IsNil() && got.__into_vec() == payload {
-            Println!("[11] enc→dec 257-byte RT        PASS");
+            fmt::Println!("[11] enc→dec 257-byte RT        PASS");
         } else {
-            Println!("[11] enc→dec 257-byte RT        FAIL");
+            fmt::Println!("[11] enc→dec 257-byte RT        FAIL");
             failed += 1;
         }
     }
@@ -315,18 +316,18 @@ fn main() {
             }
         }
         if saw_err {
-            Println!("[12] NewDecoder rejects corrupt PASS");
+            fmt::Println!("[12] NewDecoder rejects corrupt PASS");
         } else {
-            Println!("[12] NewDecoder rejects corrupt FAIL");
+            fmt::Println!("[12] NewDecoder rejects corrupt FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

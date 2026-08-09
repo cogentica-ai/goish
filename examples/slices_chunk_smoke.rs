@@ -9,10 +9,11 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::slices;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn make_int_slice(v: alloc::vec::Vec<int>) -> slice<int> {
     slice::<int>::__from_vec(v)
@@ -41,9 +42,9 @@ fn main() {
                 c2 == &[5i64, 6]
             };
         if ok {
-            Println!("[ 1] Chunk even               PASS");
+            fmt::Println!("[ 1] Chunk even               PASS");
         } else {
-            Println!("[ 1] Chunk even               FAIL");
+            fmt::Println!("[ 1] Chunk even               FAIL");
             failed += 1;
         }
     }
@@ -67,9 +68,9 @@ fn main() {
                 c2 == &[5i64]
             };
         if ok {
-            Println!("[ 2] Chunk leftover           PASS");
+            fmt::Println!("[ 2] Chunk leftover           PASS");
         } else {
-            Println!("[ 2] Chunk leftover           FAIL");
+            fmt::Println!("[ 2] Chunk leftover           FAIL");
             failed += 1;
         }
     }
@@ -84,9 +85,9 @@ fn main() {
             c0 == &[1i64, 2, 3]
         };
         if ok {
-            Println!("[ 3] Chunk n>len              PASS");
+            fmt::Println!("[ 3] Chunk n>len              PASS");
         } else {
-            Println!("[ 3] Chunk n>len              FAIL");
+            fmt::Println!("[ 3] Chunk n>len              FAIL");
             failed += 1;
         }
     }
@@ -97,9 +98,9 @@ fn main() {
         let cs = slices::Chunk(s, 4);
         let raw: &[slice<int>] = &cs;
         if raw.is_empty() {
-            Println!("[ 4] Chunk empty in            PASS");
+            fmt::Println!("[ 4] Chunk empty in            PASS");
         } else {
-            Println!("[ 4] Chunk empty in            FAIL");
+            fmt::Println!("[ 4] Chunk empty in            FAIL");
             failed += 1;
         }
     }
@@ -123,9 +124,9 @@ fn main() {
                 c2 == &[9i64]
             };
         if ok {
-            Println!("[ 5] Chunk n=1                 PASS");
+            fmt::Println!("[ 5] Chunk n=1                 PASS");
         } else {
-            Println!("[ 5] Chunk n=1                 FAIL");
+            fmt::Println!("[ 5] Chunk n=1                 FAIL");
             failed += 1;
         }
     }
@@ -140,18 +141,18 @@ fn main() {
         let c0: &[int] = &raw[0];
         let c1: &[int] = &raw[1];
         if c0 == &[10i64, 20] && c1 == &[30i64, 40] {
-            Println!("[ 6] Chunk independent         PASS");
+            fmt::Println!("[ 6] Chunk independent         PASS");
         } else {
-            Println!("[ 6] Chunk independent         FAIL");
+            fmt::Println!("[ 6] Chunk independent         FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 6");
+        fmt::Println!("FAIL", failed, "of 6");
         syscall::Exit(1);
     }
 }

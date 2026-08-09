@@ -9,9 +9,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::os;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -30,9 +31,9 @@ fn main() {
         let err = os::Chmod(target.clone(), 0o600);
         let (fi, e) = os::Stat(target.clone());
         if err.IsNil() && e.IsNil() && (fi.Mode() & 0o777) == 0o600 {
-            Println!("[ 1] Chmod 0600                PASS");
+            fmt::Println!("[ 1] Chmod 0600                PASS");
         } else {
-            Println!("[ 1] Chmod 0600                FAIL mode=", fi.Mode().Bits());
+            fmt::Println!("[ 1] Chmod 0600                FAIL mode=", fi.Mode().Bits());
             failed += 1;
         }
     }
@@ -42,9 +43,9 @@ fn main() {
         let err = os::Chmod(target.clone(), 0o755);
         let (fi, e) = os::Stat(target.clone());
         if err.IsNil() && e.IsNil() && (fi.Mode() & 0o777) == 0o755 {
-            Println!("[ 2] Chmod 0755 round trip     PASS");
+            fmt::Println!("[ 2] Chmod 0755 round trip     PASS");
         } else {
-            Println!("[ 2] Chmod 0755 round trip     FAIL");
+            fmt::Println!("[ 2] Chmod 0755 round trip     FAIL");
             failed += 1;
         }
     }
@@ -53,9 +54,9 @@ fn main() {
     {
         let err = os::Chmod(string("/tmp/goish-chmod-nonexistent-xyz"), 0o600);
         if !err.IsNil() {
-            Println!("[ 3] Chmod missing → err       PASS");
+            fmt::Println!("[ 3] Chmod missing → err       PASS");
         } else {
-            Println!("[ 3] Chmod missing → err       FAIL");
+            fmt::Println!("[ 3] Chmod missing → err       FAIL");
             failed += 1;
         }
     }
@@ -65,9 +66,9 @@ fn main() {
         let err = os::Symlink(target.clone(), link.clone());
         let (got, rerr) = os::Readlink(link.clone());
         if err.IsNil() && rerr.IsNil() && got == target {
-            Println!("[ 4] Symlink + Readlink        PASS");
+            fmt::Println!("[ 4] Symlink + Readlink        PASS");
         } else {
-            Println!("[ 4] Symlink + Readlink        FAIL got=", got);
+            fmt::Println!("[ 4] Symlink + Readlink        FAIL got=", got);
             failed += 1;
         }
     }
@@ -76,9 +77,9 @@ fn main() {
     {
         let (_, err) = os::Readlink(target.clone());
         if !err.IsNil() {
-            Println!("[ 5] Readlink regular → err    PASS");
+            fmt::Println!("[ 5] Readlink regular → err    PASS");
         } else {
-            Println!("[ 5] Readlink regular → err    FAIL");
+            fmt::Println!("[ 5] Readlink regular → err    FAIL");
             failed += 1;
         }
     }
@@ -87,9 +88,9 @@ fn main() {
     {
         let err = os::Symlink(target.clone(), link.clone());
         if !err.IsNil() {
-            Println!("[ 6] Symlink dup → err         PASS");
+            fmt::Println!("[ 6] Symlink dup → err         PASS");
         } else {
-            Println!("[ 6] Symlink dup → err         FAIL");
+            fmt::Println!("[ 6] Symlink dup → err         FAIL");
             failed += 1;
         }
     }
@@ -98,9 +99,9 @@ fn main() {
     {
         let (_, err) = os::Readlink(string("/tmp/goish-readlink-nonexistent-xyz"));
         if !err.IsNil() {
-            Println!("[ 7] Readlink missing → err    PASS");
+            fmt::Println!("[ 7] Readlink missing → err    PASS");
         } else {
-            Println!("[ 7] Readlink missing → err    FAIL");
+            fmt::Println!("[ 7] Readlink missing → err    FAIL");
             failed += 1;
         }
     }
@@ -111,9 +112,9 @@ fn main() {
         let _ = os::Symlink(string("../some/relative/path"), rel_link.clone());
         let (got, err) = os::Readlink(rel_link);
         if err.IsNil() && got == "../some/relative/path" {
-            Println!("[ 8] Readlink relative target  PASS");
+            fmt::Println!("[ 8] Readlink relative target  PASS");
         } else {
-            Println!("[ 8] Readlink relative target  FAIL got=", got);
+            fmt::Println!("[ 8] Readlink relative target  FAIL got=", got);
             failed += 1;
         }
     }
@@ -121,10 +122,10 @@ fn main() {
     let _ = os::RemoveAll(dir);
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

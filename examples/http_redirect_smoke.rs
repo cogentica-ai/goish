@@ -10,11 +10,12 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{bytes, go, string, syscall, Println};
+use goish::{bytes, go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -66,9 +67,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 200 && body_eq(&body, b"inner-status\n") {
-            Println!("[ 1] StripPrefix routes        PASS");
+            fmt::Println!("[ 1] StripPrefix routes        PASS");
         } else {
-            Println!("[ 1] StripPrefix routes        FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 1] StripPrefix routes        FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -80,9 +81,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 200 && body_eq(&body, b"welcome to /new\n") {
-            Println!("[ 2] RedirectHandler 301→200   PASS");
+            fmt::Println!("[ 2] RedirectHandler 301→200   PASS");
         } else {
-            Println!("[ 2] RedirectHandler 301→200   FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 2] RedirectHandler 301→200   FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -94,9 +95,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 200 && body_eq(&body, b"welcome to /new\n") {
-            Println!("[ 3] inline Redirect()         PASS");
+            fmt::Println!("[ 3] inline Redirect()         PASS");
         } else {
-            Println!("[ 3] inline Redirect()         FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 3] inline Redirect()         FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -104,10 +105,10 @@ fn main() {
     let _ = srv_arc.Shutdown(time::Second);
 
     if failed == 0 {
-        Println!("ok 3/3");
+        fmt::Println!("ok 3/3");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 3", failed);
+        fmt::Println!("FAIL {} of 3", failed);
         syscall::Exit(1);
     }
 }

@@ -8,8 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::time;
-use goish::{make, syscall, Println};
+use goish::{make, syscall};
 
 #[goish::main]
 fn main() {
@@ -20,9 +21,9 @@ fn main() {
         let t = time::Unix(1_700_000_000, 123_456_789);
         let (b, err) = t.MarshalBinary();
         if err.IsNil() && b.Len() == 15 {
-            Println!("[ 1] MarshalBinary len=15       PASS");
+            fmt::Println!("[ 1] MarshalBinary len=15       PASS");
         } else {
-            Println!("[ 1] MarshalBinary len=15       FAIL len={}", b.Len());
+            fmt::Println!("[ 1] MarshalBinary len=15       FAIL len={}", b.Len());
             failed += 1;
         }
     }
@@ -32,9 +33,9 @@ fn main() {
         let t = time::Unix(0, 0);
         let (b, _) = t.MarshalBinary();
         if b[0] == 1 {
-            Println!("[ 2] version byte == V1         PASS");
+            fmt::Println!("[ 2] version byte == V1         PASS");
         } else {
-            Println!("[ 2] version byte == V1         FAIL got={}", b[0]);
+            fmt::Println!("[ 2] version byte == V1         FAIL got={}", b[0]);
             failed += 1;
         }
     }
@@ -44,9 +45,9 @@ fn main() {
         let t = time::Unix(42, 0);
         let (b, _) = t.MarshalBinary();
         if b[13] == 0xff && b[14] == 0xff {
-            Println!("[ 3] offset bytes = -1          PASS");
+            fmt::Println!("[ 3] offset bytes = -1          PASS");
         } else {
-            Println!("[ 3] offset bytes = -1          FAIL {:x} {:x}", b[13], b[14]);
+            fmt::Println!("[ 3] offset bytes = -1          FAIL {:x} {:x}", b[13], b[14]);
             failed += 1;
         }
     }
@@ -58,9 +59,9 @@ fn main() {
         let mut t2 = time::Unix(0, 0);
         let err = t2.UnmarshalBinary(b);
         if err.IsNil() && t2.Unix() == 1_700_000_000 && t2.UnixNano() == 1_700_000_000 * 1_000_000_000 + 123_456_789 {
-            Println!("[ 4] round-trip preserves       PASS");
+            fmt::Println!("[ 4] round-trip preserves       PASS");
         } else {
-            Println!("[ 4] round-trip preserves       FAIL");
+            fmt::Println!("[ 4] round-trip preserves       FAIL");
             failed += 1;
         }
     }
@@ -70,9 +71,9 @@ fn main() {
         let mut t = time::Unix(0, 0);
         let err = t.UnmarshalBinary(make!([]goish::byte, 0));
         if !err.IsNil() {
-            Println!("[ 5] empty data error           PASS");
+            fmt::Println!("[ 5] empty data error           PASS");
         } else {
-            Println!("[ 5] empty data error           FAIL");
+            fmt::Println!("[ 5] empty data error           FAIL");
             failed += 1;
         }
     }
@@ -84,9 +85,9 @@ fn main() {
         buf[0] = 99;
         let err = t.UnmarshalBinary(buf);
         if !err.IsNil() {
-            Println!("[ 6] bad version rejected       PASS");
+            fmt::Println!("[ 6] bad version rejected       PASS");
         } else {
-            Println!("[ 6] bad version rejected       FAIL");
+            fmt::Println!("[ 6] bad version rejected       FAIL");
             failed += 1;
         }
     }
@@ -98,9 +99,9 @@ fn main() {
         buf[0] = 1; // version V1 but length is wrong
         let err = t.UnmarshalBinary(buf);
         if !err.IsNil() {
-            Println!("[ 7] short buffer rejected      PASS");
+            fmt::Println!("[ 7] short buffer rejected      PASS");
         } else {
-            Println!("[ 7] short buffer rejected      FAIL");
+            fmt::Println!("[ 7] short buffer rejected      FAIL");
             failed += 1;
         }
     }
@@ -114,9 +115,9 @@ fn main() {
         prefix[2] = 0xCC;
         let (b, err) = t.AppendBinary(prefix);
         if err.IsNil() && b.Len() == 3 + 15 && b[0] == 0xAA && b[1] == 0xBB && b[2] == 0xCC && b[3] == 1 {
-            Println!("[ 8] AppendBinary preserves     PASS");
+            fmt::Println!("[ 8] AppendBinary preserves     PASS");
         } else {
-            Println!("[ 8] AppendBinary preserves     FAIL len={}", b.Len());
+            fmt::Println!("[ 8] AppendBinary preserves     FAIL len={}", b.Len());
             failed += 1;
         }
     }
@@ -133,9 +134,9 @@ fn main() {
             }
         }
         if equal {
-            Println!("[ 9] GobEncode == MarshalBinary PASS");
+            fmt::Println!("[ 9] GobEncode == MarshalBinary PASS");
         } else {
-            Println!("[ 9] GobEncode == MarshalBinary FAIL");
+            fmt::Println!("[ 9] GobEncode == MarshalBinary FAIL");
             failed += 1;
         }
     }
@@ -147,9 +148,9 @@ fn main() {
         let mut t2 = time::Unix(0, 0);
         let err = t2.GobDecode(b);
         if err.IsNil() && t2.Unix() == 99_999 && t2.UnixNano() == 99_999 * 1_000_000_000 + 12_345 {
-            Println!("[10] GobDecode round-trip       PASS");
+            fmt::Println!("[10] GobDecode round-trip       PASS");
         } else {
-            Println!("[10] GobDecode round-trip       FAIL");
+            fmt::Println!("[10] GobDecode round-trip       FAIL");
             failed += 1;
         }
     }
@@ -164,9 +165,9 @@ fn main() {
         let mut t = time::Unix(0, 0);
         let err = t.UnmarshalBinary(buf);
         if err.IsNil() && t.Unix() == 42 {
-            Println!("[11] V2 accepted                PASS");
+            fmt::Println!("[11] V2 accepted                PASS");
         } else {
-            Println!("[11] V2 accepted                FAIL");
+            fmt::Println!("[11] V2 accepted                FAIL");
             failed += 1;
         }
     }
@@ -178,18 +179,18 @@ fn main() {
         let mut t2 = time::Unix(0, 0);
         let _ = t2.UnmarshalBinary(b);
         if t2.Unix() == 0 && t2.UnixNano() == 999_999_999 {
-            Println!("[12] nano-only round-trip       PASS");
+            fmt::Println!("[12] nano-only round-trip       PASS");
         } else {
-            Println!("[12] nano-only round-trip       FAIL");
+            fmt::Println!("[12] nano-only round-trip       FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 12", failed);
+        fmt::Println!("FAIL {} of 12", failed);
         syscall::Exit(1);
     }
 }

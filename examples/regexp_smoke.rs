@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::regexp;
 use goish::strconv;
-use goish::{nil, string, Println, Sprint};
+use goish::{nil, string};
 
 #[goish::main]
 fn main() {
@@ -22,9 +23,9 @@ fn main() {
             total += 1;
             if $cond {
                 pass += 1;
-                Println!("PASS ", $name);
+                fmt::Println!("PASS ", $name);
             } else {
-                Println!("FAIL ", $name);
+                fmt::Println!("FAIL ", $name);
             }
         }};
     }
@@ -188,13 +189,13 @@ fn main() {
     // Mirror the original "X / Y" summary shape — same form as
     // `fmt_sprint_smoke` / other goish smoke tests so a single grep
     // ("ok N/M") catches the result line in CI.
-    let summary = Sprint!(
+    let summary = fmt::Sprint!(
         string("ok "),
         strconv::Itoa(pass),
         string("/"),
         strconv::Itoa(total)
     );
-    Println!(summary);
+    fmt::Println!(summary);
     if pass != total {
         goish::os::Exit(1);
     }

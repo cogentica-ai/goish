@@ -12,8 +12,9 @@ extern crate goish;
 
 use core::any::Any as CoreAny;
 
+use goish::fmt;
 use goish::gostring::string;
-use goish::{cast, d, syscall, Println};
+use goish::{cast, d, syscall};
 
 // Carrier interface — the static type we hold a `&mut` to.
 #[goish::interface]
@@ -108,10 +109,10 @@ fn main() {
     }
 
     if bad == 0 {
-        Println!(string::from_static("PASS: cast!(&mut x, J) mutable interface assertion works"));
+        fmt::Println!(string::from_static("PASS: cast!(&mut x, J) mutable interface assertion works"));
         syscall::Exit(0);
     } else {
-        Println!(string::from_static("FAIL"));
+        fmt::Println!(string::from_static("FAIL"));
         syscall::Exit(1);
     }
 }

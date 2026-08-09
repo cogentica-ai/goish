@@ -7,9 +7,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::errors;
 use goish::goslice::slice;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 fn errs(items: &[goish::error]) -> slice<goish::error> {
     let mut s: slice<goish::error> = slice::__from_vec(alloc::vec::Vec::new());
@@ -33,9 +34,9 @@ fn main() {
         let nil_b = errors::nil.clone();
         let j = errors::Join(errs(&[nil_a, nil_b]));
         if j.IsNil() {
-            Println!("[ 1] all nil → nil             PASS");
+            fmt::Println!("[ 1] all nil → nil             PASS");
         } else {
-            Println!("[ 1] all nil → nil             FAIL");
+            fmt::Println!("[ 1] all nil → nil             FAIL");
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
         let nil_a = errors::nil.clone();
         let j = errors::Join(errs(&[nil_a, e1.clone()]));
         if !j.IsNil() && j.Error() == "first" {
-            Println!("[ 2] single non-nil            PASS");
+            fmt::Println!("[ 2] single non-nil            PASS");
         } else {
-            Println!("[ 2] single non-nil            FAIL");
+            fmt::Println!("[ 2] single non-nil            FAIL");
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
     {
         let j = errors::Join(errs(&[e1.clone(), e2.clone()]));
         if !j.IsNil() && j.Error() == "first\nsecond" {
-            Println!("[ 3] two joined                PASS");
+            fmt::Println!("[ 3] two joined                PASS");
         } else {
-            Println!("[ 3] two joined                FAIL got={}", j.Error());
+            fmt::Println!("[ 3] two joined                FAIL got={}", j.Error());
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
         let nil_a = errors::nil.clone();
         let j = errors::Join(errs(&[e1.clone(), nil_a, e2.clone(), e3.clone()]));
         if !j.IsNil() && j.Error() == "first\nsecond\nthird" {
-            Println!("[ 4] mixed nil + non-nil       PASS");
+            fmt::Println!("[ 4] mixed nil + non-nil       PASS");
         } else {
-            Println!("[ 4] mixed nil + non-nil       FAIL got={}", j.Error());
+            fmt::Println!("[ 4] mixed nil + non-nil       FAIL got={}", j.Error());
             failed += 1;
         }
     }
@@ -79,9 +80,9 @@ fn main() {
     {
         let j = errors::Join(errs(&[]));
         if j.IsNil() {
-            Println!("[ 5] empty → nil               PASS");
+            fmt::Println!("[ 5] empty → nil               PASS");
         } else {
-            Println!("[ 5] empty → nil               FAIL");
+            fmt::Println!("[ 5] empty → nil               FAIL");
             failed += 1;
         }
     }
@@ -90,18 +91,18 @@ fn main() {
     {
         let j = errors::Join(errs(&[e1.clone(), e2.clone()]));
         if errors::Is(j, e1.clone()) {
-            Println!("[ 6] Is(joined, first)         PASS");
+            fmt::Println!("[ 6] Is(joined, first)         PASS");
         } else {
-            Println!("[ 6] Is(joined, first)         FAIL");
+            fmt::Println!("[ 6] Is(joined, first)         FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 6", failed);
+        fmt::Println!("FAIL {} of 6", failed);
         syscall::Exit(1);
     }
 }

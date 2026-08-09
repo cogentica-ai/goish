@@ -11,13 +11,14 @@ extern crate goish;
 
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::errors;
 use goish::io;
 use goish::mime::multipart;
 use goish::net::http;
 use goish::types::byte;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -52,7 +53,7 @@ fn main() {
 
         let (mut mr, err) = req.MultipartReader();
         if !err.IsNil() {
-            Println!("[ 1] MultipartReader err       FAIL");
+            fmt::Println!("[ 1] MultipartReader err       FAIL");
             failed += 1;
         } else {
             let (p1, e1) = mr.NextPart();
@@ -67,9 +68,9 @@ fn main() {
                 && body_str(&p2.Body) == "PNGBYTES"
                 && errors::Is(e3, io::EOF);
             if ok {
-                Println!("[ 1] MultipartReader 2 parts   PASS");
+                fmt::Println!("[ 1] MultipartReader 2 parts   PASS");
             } else {
-                Println!("[ 1] MultipartReader 2 parts   FAIL");
+                fmt::Println!("[ 1] MultipartReader 2 parts   FAIL");
                 failed += 1;
             }
         }
@@ -82,9 +83,9 @@ fn main() {
         req.Header.Set(string("Content-Type"), string("text/plain"));
         let (_mr, err) = req.MultipartReader();
         if errors::Is(err, http::ErrNotMultipart) {
-            Println!("[ 2] non-multipart err         PASS");
+            fmt::Println!("[ 2] non-multipart err         PASS");
         } else {
-            Println!("[ 2] non-multipart err         FAIL");
+            fmt::Println!("[ 2] non-multipart err         FAIL");
             failed += 1;
         }
     }
@@ -97,18 +98,18 @@ fn main() {
             .Set(string("Content-Type"), string("multipart/form-data"));
         let (_mr, err) = req.MultipartReader();
         if errors::Is(err, http::ErrMissingBoundary) {
-            Println!("[ 3] missing boundary err      PASS");
+            fmt::Println!("[ 3] missing boundary err      PASS");
         } else {
-            Println!("[ 3] missing boundary err      FAIL");
+            fmt::Println!("[ 3] missing boundary err      FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 3/3");
+        fmt::Println!("ok 3/3");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 3", failed);
+        fmt::Println!("FAIL {} of 3", failed);
         syscall::Exit(1);
     }
 }

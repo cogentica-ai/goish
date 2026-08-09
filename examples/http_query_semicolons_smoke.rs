@@ -11,12 +11,13 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{go, string, syscall, Println};
+use goish::{go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -61,9 +62,9 @@ fn main() {
         let _ = io::Closer::Close(&mut resp.Body);
         let body = body_str(&body_bytes);
         if resp.StatusCode == 200 && body == "a=1&b=2\na=1" {
-            Println!("[ 1] no semicolons              PASS");
+            fmt::Println!("[ 1] no semicolons              PASS");
         } else {
-            Println!("[ 1] no semicolons              FAIL body={}", body);
+            fmt::Println!("[ 1] no semicolons              FAIL body={}", body);
             failed += 1;
         }
     }
@@ -77,9 +78,9 @@ fn main() {
         let body = body_str(&body_bytes);
         // Server-side handler observes the rewritten RawQuery.
         if resp.StatusCode == 200 && body == "a=1&b=2\na=1" {
-            Println!("[ 2] semicolon rewritten       PASS");
+            fmt::Println!("[ 2] semicolon rewritten       PASS");
         } else {
-            Println!("[ 2] semicolon rewritten       FAIL body={}", body);
+            fmt::Println!("[ 2] semicolon rewritten       FAIL body={}", body);
             failed += 1;
         }
     }
@@ -92,9 +93,9 @@ fn main() {
         let _ = io::Closer::Close(&mut resp.Body);
         let body = body_str(&body_bytes);
         if resp.StatusCode == 200 && body == "a=1&b=2&c=3\na=1" {
-            Println!("[ 3] multiple semicolons       PASS");
+            fmt::Println!("[ 3] multiple semicolons       PASS");
         } else {
-            Println!("[ 3] multiple semicolons       FAIL body={}", body);
+            fmt::Println!("[ 3] multiple semicolons       FAIL body={}", body);
             failed += 1;
         }
     }
@@ -104,9 +105,9 @@ fn main() {
         let url = build_url(&addr, "/nope");
         let (resp, _) = http::Get(url);
         if resp.StatusCode == 404 {
-            Println!("[ 4] NewServeMux 404           PASS");
+            fmt::Println!("[ 4] NewServeMux 404           PASS");
         } else {
-            Println!("[ 4] NewServeMux 404           FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 4] NewServeMux 404           FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -114,10 +115,10 @@ fn main() {
     let _ = srv_arc.Shutdown(time::Second);
 
     if failed == 0 {
-        Println!("ok 4/4");
+        fmt::Println!("ok 4/4");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 4", failed);
+        fmt::Println!("FAIL {} of 4", failed);
         syscall::Exit(1);
     }
 }

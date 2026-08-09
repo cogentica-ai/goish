@@ -7,9 +7,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::goslice::slice;
 use goish::net::http;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -37,9 +38,9 @@ fn main() {
         let s = slice::<u8>::__from_vec(data.to_vec());
         let got = http::DetectContentType(s);
         if got == *want {
-            Println!("[{:2}] {} → {}", i, *want, got);
+            fmt::Println!("[{:2}] {} → {}", i, *want, got);
         } else {
-            Println!(
+            fmt::Println!(
                 "[{:2}] FAIL want={:?} got={}",
                 i, *want, got
             );
@@ -48,10 +49,10 @@ fn main() {
     }
 
     if failed == 0 {
-        Println!("ok sniff smoke");
+        fmt::Println!("ok sniff smoke");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {}", failed);
+        fmt::Println!("FAIL {}", failed);
         syscall::Exit(1);
     }
 }

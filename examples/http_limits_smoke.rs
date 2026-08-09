@@ -19,11 +19,12 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 
+use goish::fmt;
 use goish::io::{Closer, Reader, Writer};
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{bytes, go, string, syscall, Println};
+use goish::{bytes, go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -42,7 +43,7 @@ fn main() {
 
         let (ln, err) = net::Listen(string("tcp"), string("127.0.0.1:0"));
         if !err.IsNil() {
-            Println!("[ 1] Listen FAIL");
+            fmt::Println!("[ 1] Listen FAIL");
             failed += 1;
         } else {
             let addr = ln.Addr().String();
@@ -56,7 +57,7 @@ fn main() {
             // Send a request line that exceeds 200 bytes.
             let (mut conn, derr) = net::Dial(string("tcp"), addr);
             if !derr.IsNil() {
-                Println!("[ 1] Dial FAIL");
+                fmt::Println!("[ 1] Dial FAIL");
                 failed += 1;
             } else {
                 // Build "GET /<300 chars> HTTP/1.1\r\nHost: x\r\n\r\n".
@@ -90,9 +91,9 @@ fn main() {
                 let has_200 = find_marker(&whole, b"200 OK").is_some();
                 let _ = total;
                 if !has_200 {
-                    Println!("[ 1] MaxHeaderBytes reject     PASS");
+                    fmt::Println!("[ 1] MaxHeaderBytes reject     PASS");
                 } else {
-                    Println!("[ 1] MaxHeaderBytes reject     FAIL got 200 OK");
+                    fmt::Println!("[ 1] MaxHeaderBytes reject     FAIL got 200 OK");
                     failed += 1;
                 }
             }
@@ -131,7 +132,7 @@ fn main() {
 
         let (ln, err) = net::Listen(string("tcp"), string("127.0.0.1:0"));
         if !err.IsNil() {
-            Println!("[ 2] Listen FAIL");
+            fmt::Println!("[ 2] Listen FAIL");
             failed += 1;
         } else {
             let addr = ln.Addr().String();
@@ -159,9 +160,9 @@ fn main() {
             let p = peak.load(Ordering::SeqCst);
             let done = completed.load(Ordering::SeqCst);
             if done == 4 && p <= 2 {
-                Println!("[ 2] MaxConcurrentConns peak<=2 PASS done={}", done);
+                fmt::Println!("[ 2] MaxConcurrentConns peak<=2 PASS done={}", done);
             } else {
-                Println!("[ 2] MaxConcurrentConns peak<=2 FAIL peak={} done={}", p, done);
+                fmt::Println!("[ 2] MaxConcurrentConns peak<=2 FAIL peak={} done={}", p, done);
                 failed += 1;
             }
             let _ = srv_arc.Shutdown(time::Second);
@@ -169,10 +170,10 @@ fn main() {
     }
 
     if failed == 0 {
-        Println!("ok 2/2");
+        fmt::Println!("ok 2/2");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 2", failed);
+        fmt::Println!("FAIL {} of 2", failed);
         syscall::Exit(1);
     }
 }

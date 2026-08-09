@@ -9,8 +9,9 @@
 
 extern crate goish;
 
+use goish::fmt;
 use goish::math::bits;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -19,9 +20,9 @@ fn main() {
     // 1. UintSize.
     {
         if bits::UintSize == 64 {
-            Println!("[ 1] UintSize 64               PASS");
+            fmt::Println!("[ 1] UintSize 64               PASS");
         } else {
-            Println!("[ 1] UintSize 64               FAIL");
+            fmt::Println!("[ 1] UintSize 64               FAIL");
             failed += 1;
         }
     }
@@ -39,9 +40,9 @@ fn main() {
             && bits::LeadingZeros64(1) == 63
             && bits::LeadingZeros(1) == 63
         {
-            Println!("[ 2] LeadingZeros family       PASS");
+            fmt::Println!("[ 2] LeadingZeros family       PASS");
         } else {
-            Println!("[ 2] LeadingZeros family       FAIL");
+            fmt::Println!("[ 2] LeadingZeros family       FAIL");
             failed += 1;
         }
     }
@@ -59,9 +60,9 @@ fn main() {
             && bits::TrailingZeros64(0xE000_0000_0000_0000) == 61
             && bits::TrailingZeros(1) == 0
         {
-            Println!("[ 3] TrailingZeros family      PASS");
+            fmt::Println!("[ 3] TrailingZeros family      PASS");
         } else {
-            Println!("[ 3] TrailingZeros family      FAIL");
+            fmt::Println!("[ 3] TrailingZeros family      FAIL");
             failed += 1;
         }
     }
@@ -76,9 +77,9 @@ fn main() {
             && bits::OnesCount64(0xFFFFFFFFFFFFFFFF) == 64
             && bits::OnesCount(0) == 0
         {
-            Println!("[ 4] OnesCount family          PASS");
+            fmt::Println!("[ 4] OnesCount family          PASS");
         } else {
-            Println!("[ 4] OnesCount family          FAIL");
+            fmt::Println!("[ 4] OnesCount family          FAIL");
             failed += 1;
         }
     }
@@ -91,9 +92,9 @@ fn main() {
             && bits::RotateLeft32(0x12345678, 32) == 0x12345678
             && bits::RotateLeft8(0xC3, 1) == 0x87
         {
-            Println!("[ 5] RotateLeft 32             PASS");
+            fmt::Println!("[ 5] RotateLeft 32             PASS");
         } else {
-            Println!("[ 5] RotateLeft 32             FAIL");
+            fmt::Println!("[ 5] RotateLeft 32             FAIL");
             failed += 1;
         }
     }
@@ -108,9 +109,9 @@ fn main() {
             && bits::Reverse32(1) == 0x80000000
             && bits::Reverse64(1) == 0x8000_0000_0000_0000
         {
-            Println!("[ 6] Reverse family            PASS");
+            fmt::Println!("[ 6] Reverse family            PASS");
         } else {
-            Println!("[ 6] Reverse family            FAIL");
+            fmt::Println!("[ 6] Reverse family            FAIL");
             failed += 1;
         }
     }
@@ -122,9 +123,9 @@ fn main() {
             && bits::ReverseBytes64(0x0123456789ABCDEF) == 0xEFCDAB8967452301
             && bits::ReverseBytes(0x0123456789ABCDEF) == 0xEFCDAB8967452301
         {
-            Println!("[ 7] ReverseBytes family       PASS");
+            fmt::Println!("[ 7] ReverseBytes family       PASS");
         } else {
-            Println!("[ 7] ReverseBytes family       FAIL");
+            fmt::Println!("[ 7] ReverseBytes family       FAIL");
             failed += 1;
         }
     }
@@ -139,9 +140,9 @@ fn main() {
             && bits::Len64(0x8000_0000_0000_0000) == 64
             && bits::Len(0) == 0
         {
-            Println!("[ 8] Len family                PASS");
+            fmt::Println!("[ 8] Len family                PASS");
         } else {
-            Println!("[ 8] Len family                FAIL");
+            fmt::Println!("[ 8] Len family                FAIL");
             failed += 1;
         }
     }
@@ -150,9 +151,9 @@ fn main() {
     {
         let (hi, lo) = bits::Mul64(0xFFFF_FFFF_FFFF_FFFF, 2);
         if hi == 1 && lo == 0xFFFF_FFFF_FFFF_FFFE {
-            Println!("[ 9] Mul64 *2                  PASS");
+            fmt::Println!("[ 9] Mul64 *2                  PASS");
         } else {
-            Println!("[ 9] Mul64 *2                  FAIL");
+            fmt::Println!("[ 9] Mul64 *2                  FAIL");
             failed += 1;
         }
     }
@@ -161,9 +162,9 @@ fn main() {
     {
         let (hi, lo) = bits::Mul64(0, 0xDEADBEEF);
         if hi == 0 && lo == 0 {
-            Println!("[10] Mul64 zero                PASS");
+            fmt::Println!("[10] Mul64 zero                PASS");
         } else {
-            Println!("[10] Mul64 zero                FAIL");
+            fmt::Println!("[10] Mul64 zero                FAIL");
             failed += 1;
         }
     }
@@ -173,9 +174,9 @@ fn main() {
         let (hi, lo) = bits::Mul64(0xFFFFFFFF, 0xFFFFFFFF);
         // 0xFFFFFFFE_00000001 with hi=0.
         if hi == 0 && lo == 0xFFFF_FFFE_0000_0001 {
-            Println!("[11] Mul64 32×32               PASS");
+            fmt::Println!("[11] Mul64 32×32               PASS");
         } else {
-            Println!("[11] Mul64 32×32               FAIL");
+            fmt::Println!("[11] Mul64 32×32               FAIL");
             failed += 1;
         }
     }
@@ -185,18 +186,18 @@ fn main() {
         // 0x100000001 * 0x100000001 = 0x10000_00020000_0001.
         let (hi, lo) = bits::Mul64(0x1_0000_0001, 0x1_0000_0001);
         if hi == 0x1 && lo == 0x2_0000_0001 {
-            Println!("[12] Mul64 generic             PASS");
+            fmt::Println!("[12] Mul64 generic             PASS");
         } else {
-            Println!("[12] Mul64 generic             FAIL");
+            fmt::Println!("[12] Mul64 generic             FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

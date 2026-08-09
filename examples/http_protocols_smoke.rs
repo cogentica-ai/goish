@@ -7,10 +7,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::errors;
 use goish::io;
 use goish::net::http;
-use goish::{make, string, syscall, Println};
+use goish::{make, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -20,9 +21,9 @@ fn main() {
     {
         let p = http::Protocols::new();
         if !p.HTTP1() && !p.HTTP2() && !p.UnencryptedHTTP2() {
-            Println!("[ 1] zero is empty             PASS");
+            fmt::Println!("[ 1] zero is empty             PASS");
         } else {
-            Println!("[ 1] zero is empty             FAIL");
+            fmt::Println!("[ 1] zero is empty             FAIL");
             failed += 1;
         }
     }
@@ -32,9 +33,9 @@ fn main() {
         let mut p = http::Protocols::new();
         p.SetHTTP1(true);
         if p.HTTP1() && !p.HTTP2() && !p.UnencryptedHTTP2() {
-            Println!("[ 2] SetHTTP1(true) flips      PASS");
+            fmt::Println!("[ 2] SetHTTP1(true) flips      PASS");
         } else {
-            Println!("[ 2] SetHTTP1(true) flips      FAIL");
+            fmt::Println!("[ 2] SetHTTP1(true) flips      FAIL");
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
         p.SetHTTP1(true);
         p.SetHTTP1(false);
         if !p.HTTP1() {
-            Println!("[ 3] SetHTTP1(false) clears    PASS");
+            fmt::Println!("[ 3] SetHTTP1(false) clears    PASS");
         } else {
-            Println!("[ 3] SetHTTP1(false) clears    FAIL");
+            fmt::Println!("[ 3] SetHTTP1(false) clears    FAIL");
             failed += 1;
         }
     }
@@ -58,9 +59,9 @@ fn main() {
         p.SetHTTP2(true);
         p.SetUnencryptedHTTP2(true);
         if p.HTTP2() && p.UnencryptedHTTP2() && !p.HTTP1() {
-            Println!("[ 4] HTTP2 bits independent    PASS");
+            fmt::Println!("[ 4] HTTP2 bits independent    PASS");
         } else {
-            Println!("[ 4] HTTP2 bits independent    FAIL");
+            fmt::Println!("[ 4] HTTP2 bits independent    FAIL");
             failed += 1;
         }
     }
@@ -69,9 +70,9 @@ fn main() {
     {
         let p = http::Protocols::new();
         if p.String() == "{}" {
-            Println!("[ 5] String() empty            PASS");
+            fmt::Println!("[ 5] String() empty            PASS");
         } else {
-            Println!("[ 5] String() empty            FAIL got={}", p.String());
+            fmt::Println!("[ 5] String() empty            FAIL got={}", p.String());
             failed += 1;
         }
     }
@@ -84,9 +85,9 @@ fn main() {
         p.SetUnencryptedHTTP2(true);
         let s = p.String();
         if s == "{HTTP1,HTTP2,UnencryptedHTTP2}" {
-            Println!("[ 6] String() full             PASS");
+            fmt::Println!("[ 6] String() full             PASS");
         } else {
-            Println!("[ 6] String() full             FAIL got={}", s);
+            fmt::Println!("[ 6] String() full             FAIL got={}", s);
             failed += 1;
         }
     }
@@ -98,9 +99,9 @@ fn main() {
         p.SetUnencryptedHTTP2(true);
         let s = p.String();
         if s == "{HTTP1,UnencryptedHTTP2}" {
-            Println!("[ 7] String() mixed            PASS");
+            fmt::Println!("[ 7] String() mixed            PASS");
         } else {
-            Println!("[ 7] String() mixed            FAIL got={}", s);
+            fmt::Println!("[ 7] String() mixed            FAIL got={}", s);
             failed += 1;
         }
     }
@@ -111,9 +112,9 @@ fn main() {
         let mut buf = make!([]goish::byte, 16);
         let (n, err) = io::Reader::Read(&mut nb, &mut buf);
         if n == 0 && errors::Is(err, io::EOF) {
-            Println!("[ 8] NoBody.Read=(0,EOF)       PASS");
+            fmt::Println!("[ 8] NoBody.Read=(0,EOF)       PASS");
         } else {
-            Println!("[ 8] NoBody.Read=(0,EOF)       FAIL n={}", n);
+            fmt::Println!("[ 8] NoBody.Read=(0,EOF)       FAIL n={}", n);
             failed += 1;
         }
     }
@@ -123,9 +124,9 @@ fn main() {
         let mut nb = http::NoBody();
         let err = io::Closer::Close(&mut nb);
         if err.IsNil() {
-            Println!("[ 9] NoBody.Close=nil          PASS");
+            fmt::Println!("[ 9] NoBody.Close=nil          PASS");
         } else {
-            Println!("[ 9] NoBody.Close=nil          FAIL");
+            fmt::Println!("[ 9] NoBody.Close=nil          FAIL");
             failed += 1;
         }
     }
@@ -136,9 +137,9 @@ fn main() {
         let mut buf = goish::bytes::NewBuffer(make!([]goish::byte, 0));
         let (n, err) = io::WriterTo::WriteTo(&mut nb, &mut buf);
         if n == 0 && err.IsNil() && buf.Len() == 0 {
-            Println!("[10] NoBody.WriteTo=(0,nil)    PASS");
+            fmt::Println!("[10] NoBody.WriteTo=(0,nil)    PASS");
         } else {
-            Println!("[10] NoBody.WriteTo=(0,nil)    FAIL n={} buflen={}", n, buf.Len());
+            fmt::Println!("[10] NoBody.WriteTo=(0,nil)    FAIL n={} buflen={}", n, buf.Len());
             failed += 1;
         }
     }
@@ -147,10 +148,10 @@ fn main() {
     let _ = string("ok");
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 10", failed);
+        fmt::Println!("FAIL {} of 10", failed);
         syscall::Exit(1);
     }
 }

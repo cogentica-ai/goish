@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::encoding::csv;
 use goish::strings;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -23,9 +24,9 @@ fn main() {
         let mut cr = csv::NewReader(r);
         let (rec, err) = cr.Read();
         if err.IsNil() && rec.Len() == 3 && rec[0] == "a" && rec[1] == "b" && rec[2] == "c" {
-            Println!("[ 1] Read simple              PASS");
+            fmt::Println!("[ 1] Read simple              PASS");
         } else {
-            Println!("[ 1] Read simple              FAIL");
+            fmt::Println!("[ 1] Read simple              FAIL");
             failed += 1;
         }
     }
@@ -37,9 +38,9 @@ fn main() {
         let mut cr = csv::NewReader(r);
         let (rec, err) = cr.Read();
         if err.IsNil() && rec.Len() == 3 && rec[0] == "hello, world" && rec[1] == "a\"b" && rec[2] == "c" {
-            Println!("[ 2] Quoted comma + escape    PASS");
+            fmt::Println!("[ 2] Quoted comma + escape    PASS");
         } else {
-            Println!("[ 2] Quoted comma + escape    FAIL");
+            fmt::Println!("[ 2] Quoted comma + escape    FAIL");
             failed += 1;
         }
     }
@@ -50,9 +51,9 @@ fn main() {
         let mut cr = csv::NewReader(r);
         let (recs, err) = cr.ReadAll();
         if err.IsNil() && recs.Len() == 3 && recs[0][0] == "a" && recs[2][1] == "f" {
-            Println!("[ 3] ReadAll                  PASS");
+            fmt::Println!("[ 3] ReadAll                  PASS");
         } else {
-            Println!("[ 3] ReadAll                  FAIL n={}", recs.Len());
+            fmt::Println!("[ 3] ReadAll                  FAIL n={}", recs.Len());
             failed += 1;
         }
     }
@@ -63,9 +64,9 @@ fn main() {
         let mut cr = csv::NewReader(r);
         let (recs, err) = cr.ReadAll();
         if err.IsNil() && recs.Len() == 2 && recs[0][1] == "b" && recs[1][1] == "d" {
-            Println!("[ 4] CRLF normalize           PASS");
+            fmt::Println!("[ 4] CRLF normalize           PASS");
         } else {
-            Println!("[ 4] CRLF normalize           FAIL");
+            fmt::Println!("[ 4] CRLF normalize           FAIL");
             failed += 1;
         }
     }
@@ -77,9 +78,9 @@ fn main() {
         cr.Comment = '#' as goish::types::rune;
         let (recs, err) = cr.ReadAll();
         if err.IsNil() && recs.Len() == 2 {
-            Println!("[ 5] Comment skip             PASS");
+            fmt::Println!("[ 5] Comment skip             PASS");
         } else {
-            Println!("[ 5] Comment skip             FAIL n={}", recs.Len());
+            fmt::Println!("[ 5] Comment skip             FAIL n={}", recs.Len());
             failed += 1;
         }
     }
@@ -92,9 +93,9 @@ fn main() {
         let (_, _) = cr.Read();
         let (_, err) = cr.Read();
         if !err.IsNil() {
-            Println!("[ 6] FieldsPerRecord err      PASS");
+            fmt::Println!("[ 6] FieldsPerRecord err      PASS");
         } else {
-            Println!("[ 6] FieldsPerRecord err      FAIL");
+            fmt::Println!("[ 6] FieldsPerRecord err      FAIL");
             failed += 1;
         }
     }
@@ -105,9 +106,9 @@ fn main() {
         let mut cr = csv::NewReader(r);
         let (_, err) = cr.Read();
         if !err.IsNil() {
-            Println!("[ 7] Bare quote err           PASS");
+            fmt::Println!("[ 7] Bare quote err           PASS");
         } else {
-            Println!("[ 7] Bare quote err           FAIL");
+            fmt::Println!("[ 7] Bare quote err           FAIL");
             failed += 1;
         }
     }
@@ -119,9 +120,9 @@ fn main() {
         cr.LazyQuotes = true;
         let (rec, err) = cr.Read();
         if err.IsNil() && rec.Len() == 2 && rec[0] == "a\"b" {
-            Println!("[ 8] LazyQuotes accept        PASS");
+            fmt::Println!("[ 8] LazyQuotes accept        PASS");
         } else {
-            Println!("[ 8] LazyQuotes accept        FAIL");
+            fmt::Println!("[ 8] LazyQuotes accept        FAIL");
             failed += 1;
         }
     }
@@ -133,9 +134,9 @@ fn main() {
         cr.TrimLeadingSpace = true;
         let (rec, err) = cr.Read();
         if err.IsNil() && rec.Len() == 3 && rec[0] == "a" && rec[1] == "b " && rec[2] == "c" {
-            Println!("[ 9] TrimLeadingSpace         PASS");
+            fmt::Println!("[ 9] TrimLeadingSpace         PASS");
         } else {
-            Println!("[ 9] TrimLeadingSpace         FAIL");
+            fmt::Println!("[ 9] TrimLeadingSpace         FAIL");
             failed += 1;
         }
     }
@@ -149,9 +150,9 @@ fn main() {
         w.Flush();
         let s = buf.String();
         if s == "a,b,c\n" {
-            Println!("[10] Writer simple            PASS");
+            fmt::Println!("[10] Writer simple            PASS");
         } else {
-            Println!("[10] Writer simple            FAIL got {}", s);
+            fmt::Println!("[10] Writer simple            FAIL got {}", s);
             failed += 1;
         }
     }
@@ -165,9 +166,9 @@ fn main() {
         w.Flush();
         let s = buf.String();
         if s == "\"hello, world\",plain\n" {
-            Println!("[11] Writer quote-on-comma    PASS");
+            fmt::Println!("[11] Writer quote-on-comma    PASS");
         } else {
-            Println!("[11] Writer quote-on-comma    FAIL got {}", s);
+            fmt::Println!("[11] Writer quote-on-comma    FAIL got {}", s);
             failed += 1;
         }
     }
@@ -181,9 +182,9 @@ fn main() {
         w.Flush();
         let s = buf.String();
         if s == "\"she said \"\"hi\"\"\",ok\n" {
-            Println!("[12] Writer quote escape      PASS");
+            fmt::Println!("[12] Writer quote escape      PASS");
         } else {
-            Println!("[12] Writer quote escape      FAIL got {}", s);
+            fmt::Println!("[12] Writer quote escape      FAIL got {}", s);
             failed += 1;
         }
     }
@@ -208,9 +209,9 @@ fn main() {
             && recs[1][0] == "\"d\""
             && recs[1][1] == "e"
         {
-            Println!("[13] Round-trip               PASS");
+            fmt::Println!("[13] Round-trip               PASS");
         } else {
-            Println!("[13] Round-trip               FAIL");
+            fmt::Println!("[13] Round-trip               FAIL");
             failed += 1;
         }
     }
@@ -225,18 +226,18 @@ fn main() {
         w.Flush();
         let s = buf.String();
         if s == "a,b\r\n" {
-            Println!("[14] UseCRLF                  PASS");
+            fmt::Println!("[14] UseCRLF                  PASS");
         } else {
-            Println!("[14] UseCRLF                  FAIL got {}", s);
+            fmt::Println!("[14] UseCRLF                  FAIL got {}", s);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 14/14");
+        fmt::Println!("ok 14/14");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 14");
+        fmt::Println!("FAIL", failed, "of 14");
         syscall::Exit(1);
     }
 }

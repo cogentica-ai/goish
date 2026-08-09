@@ -7,12 +7,13 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::goslice::slice;
 use goish::io;
 use goish::os;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -22,7 +23,7 @@ fn main() {
     {
         let (mut r, mut w, err) = os::Pipe();
         if !err.IsNil() {
-            Println!("[ 1] Pipe round trip           FAIL pipe-err");
+            fmt::Println!("[ 1] Pipe round trip           FAIL pipe-err");
             failed += 1;
         } else {
             let payload = bytes("hello pipe");
@@ -37,9 +38,9 @@ fn main() {
             let _ = r.Close();
             let _ = w.Close();
             if w_err.IsNil() && r_err.IsNil() && n_w == 10 && n_r == 10 {
-                Println!("[ 1] Pipe round trip           PASS");
+                fmt::Println!("[ 1] Pipe round trip           PASS");
             } else {
-                Println!(
+                fmt::Println!(
                     "[ 1] Pipe round trip           FAIL n_r=", n_r as i64
                 );
                 failed += 1;
@@ -51,9 +52,9 @@ fn main() {
     {
         let (r, w, e) = os::Pipe();
         if e.IsNil() && r.Fd() != w.Fd() {
-            Println!("[ 2] Pipe fds valid            PASS");
+            fmt::Println!("[ 2] Pipe fds valid            PASS");
         } else {
-            Println!("[ 2] Pipe fds valid            FAIL");
+            fmt::Println!("[ 2] Pipe fds valid            FAIL");
             failed += 1;
         }
         let mut r2 = r;
@@ -85,9 +86,9 @@ fn main() {
         let _ = r.Close();
         let _ = e2;
         if n == 7 && n2 == 0 {
-            Println!("[ 3] Pipe EOF after writer     PASS");
+            fmt::Println!("[ 3] Pipe EOF after writer     PASS");
         } else {
-            Println!("[ 3] Pipe EOF after writer     FAIL n=", n as i64);
+            fmt::Println!("[ 3] Pipe EOF after writer     FAIL n=", n as i64);
             failed += 1;
         }
         let _ = io::EOF;
@@ -97,9 +98,9 @@ fn main() {
     {
         let (r, w, _) = os::Pipe();
         if r.Name() == "|0" && w.Name() == "|1" {
-            Println!("[ 4] Pipe end names            PASS");
+            fmt::Println!("[ 4] Pipe end names            PASS");
         } else {
-            Println!("[ 4] Pipe end names            FAIL");
+            fmt::Println!("[ 4] Pipe end names            FAIL");
             failed += 1;
         }
         let mut r2 = r;
@@ -109,10 +110,10 @@ fn main() {
     }
 
     if failed == 0 {
-        Println!("ok 4/4");
+        fmt::Println!("ok 4/4");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 4");
+        fmt::Println!("FAIL", failed, "of 4");
         syscall::Exit(1);
     }
 }

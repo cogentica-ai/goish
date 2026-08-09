@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::errors;
 use goish::os;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -21,9 +22,9 @@ fn main() {
     {
         let (groups, err) = os::Getgroups();
         if errors::Is(err, errors::nil) {
-            Println!("[ 1] Getgroups no error        PASS count=", groups.Len());
+            fmt::Println!("[ 1] Getgroups no error        PASS count=", groups.Len());
         } else {
-            Println!("[ 1] Getgroups no error        FAIL");
+            fmt::Println!("[ 1] Getgroups no error        FAIL");
             failed += 1;
         }
     }
@@ -33,9 +34,9 @@ fn main() {
         let (g1, _) = os::Getgroups();
         let (g2, _) = os::Getgroups();
         if g1.Len() == g2.Len() {
-            Println!("[ 2] Getgroups stable          PASS");
+            fmt::Println!("[ 2] Getgroups stable          PASS");
         } else {
-            Println!("[ 2] Getgroups stable          FAIL");
+            fmt::Println!("[ 2] Getgroups stable          FAIL");
             failed += 1;
         }
     }
@@ -54,9 +55,9 @@ fn main() {
             i += 1;
         }
         if all_ok {
-            Println!("[ 3] All gids non-negative     PASS");
+            fmt::Println!("[ 3] All gids non-negative     PASS");
         } else {
-            Println!("[ 3] All gids non-negative     FAIL");
+            fmt::Println!("[ 3] All gids non-negative     FAIL");
             failed += 1;
         }
     }
@@ -65,18 +66,18 @@ fn main() {
     {
         let n = syscall::Getgroups(0, core::ptr::null_mut());
         if n >= 0 {
-            Println!("[ 4] syscall probe non-neg     PASS n=", n as int);
+            fmt::Println!("[ 4] syscall probe non-neg     PASS n=", n as int);
         } else {
-            Println!("[ 4] syscall probe non-neg     FAIL");
+            fmt::Println!("[ 4] syscall probe non-neg     FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 4/4");
+        fmt::Println!("ok 4/4");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 4");
+        fmt::Println!("FAIL", failed, "of 4");
         syscall::Exit(1);
     }
 }

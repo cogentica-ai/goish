@@ -17,20 +17,20 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::compress::flate;
 use goish::runtime::sched::schedule;
-use goish::{go, syscall, Println};
-
+use goish::{go, syscall};
 
 #[goish::main]
 fn main() {
     go!(|| {
         let (passed, total) = flate::__huffman_writer_roundtrip();
         if passed == total {
-            Println!("ok", passed, "/", total);
+            fmt::Println!("ok", passed, "/", total);
             syscall::Exit(0);
         } else {
-            Println!("FAIL", passed, "/", total);
+            fmt::Println!("FAIL", passed, "/", total);
             syscall::Exit(1);
         }
     });

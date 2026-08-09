@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::io;
 use goish::strings;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -26,9 +27,9 @@ fn main() {
         let (b2, e2) = r.ReadByte();
         let (_, e3) = r.ReadByte();
         if e1.IsNil() && e2.IsNil() && b1 == b'A' && b2 == b'B' && goish::errors::Is(e3, io::EOF) {
-            Println!("[ 1] bytes.Reader ReadByte     PASS");
+            fmt::Println!("[ 1] bytes.Reader ReadByte     PASS");
         } else {
-            Println!("[ 1] bytes.Reader ReadByte     FAIL");
+            fmt::Println!("[ 1] bytes.Reader ReadByte     FAIL");
             failed += 1;
         }
     }
@@ -40,9 +41,9 @@ fn main() {
         let err = r.UnreadByte();
         let (b2, _) = r.ReadByte();
         if err.IsNil() && b2 == b'X' {
-            Println!("[ 2] bytes.Reader UnreadByte   PASS");
+            fmt::Println!("[ 2] bytes.Reader UnreadByte   PASS");
         } else {
-            Println!("[ 2] bytes.Reader UnreadByte   FAIL");
+            fmt::Println!("[ 2] bytes.Reader UnreadByte   FAIL");
             failed += 1;
         }
     }
@@ -52,9 +53,9 @@ fn main() {
         let mut r = bytes::NewReader(goish::convert::bytes("hi"));
         let err = r.UnreadByte();
         if !err.IsNil() {
-            Println!("[ 3] UnreadByte at start       PASS");
+            fmt::Println!("[ 3] UnreadByte at start       PASS");
         } else {
-            Println!("[ 3] UnreadByte at start       FAIL");
+            fmt::Println!("[ 3] UnreadByte at start       FAIL");
             failed += 1;
         }
     }
@@ -64,9 +65,9 @@ fn main() {
         let mut r = bytes::NewReader(goish::convert::bytes("z"));
         let (ch, sz, err) = r.ReadRune();
         if err.IsNil() && ch == 'z' as goish::rune && sz == 1 {
-            Println!("[ 4] bytes.Reader ReadRune ASC PASS");
+            fmt::Println!("[ 4] bytes.Reader ReadRune ASC PASS");
         } else {
-            Println!("[ 4] bytes.Reader ReadRune ASC FAIL");
+            fmt::Println!("[ 4] bytes.Reader ReadRune ASC FAIL");
             failed += 1;
         }
     }
@@ -80,9 +81,9 @@ fn main() {
         let _ = r.ReadByte(); // skip 'a'
         let (ch, sz, _) = r.ReadRune();
         if ch == 0x00E9 && sz == 2 {
-            Println!("[ 5] bytes.Reader ReadRune utf PASS");
+            fmt::Println!("[ 5] bytes.Reader ReadRune utf PASS");
         } else {
-            Println!("[ 5] bytes.Reader ReadRune utf FAIL ch={} sz={}", ch, sz);
+            fmt::Println!("[ 5] bytes.Reader ReadRune utf FAIL ch={} sz={}", ch, sz);
             failed += 1;
         }
     }
@@ -94,9 +95,9 @@ fn main() {
         let err = r.UnreadRune();
         let (ch, _, _) = r.ReadRune();
         if err.IsNil() && ch == 'a' as goish::rune {
-            Println!("[ 6] bytes.Reader UnreadRune   PASS");
+            fmt::Println!("[ 6] bytes.Reader UnreadRune   PASS");
         } else {
-            Println!("[ 6] bytes.Reader UnreadRune   FAIL");
+            fmt::Println!("[ 6] bytes.Reader UnreadRune   FAIL");
             failed += 1;
         }
     }
@@ -108,9 +109,9 @@ fn main() {
         let _ = r.ReadByte();
         let err = r.UnreadRune();
         if !err.IsNil() {
-            Println!("[ 7] UnreadRune after ReadByte PASS");
+            fmt::Println!("[ 7] UnreadRune after ReadByte PASS");
         } else {
-            Println!("[ 7] UnreadRune after ReadByte FAIL");
+            fmt::Println!("[ 7] UnreadRune after ReadByte FAIL");
             failed += 1;
         }
     }
@@ -120,9 +121,9 @@ fn main() {
         let mut r = bytes::NewReader(goish::convert::bytes(""));
         let (ch, sz, err) = r.ReadRune();
         if !err.IsNil() && ch == 0 && sz == 0 {
-            Println!("[ 8] bytes.Reader empty ReadRune PASS");
+            fmt::Println!("[ 8] bytes.Reader empty ReadRune PASS");
         } else {
-            Println!("[ 8] bytes.Reader empty ReadRune FAIL");
+            fmt::Println!("[ 8] bytes.Reader empty ReadRune FAIL");
             failed += 1;
         }
     }
@@ -135,9 +136,9 @@ fn main() {
         let (b1, _) = r.ReadByte();
         let (b2, _) = r.ReadByte();
         if b1 == b'C' && b2 == b'D' {
-            Println!("[ 9] strings.Reader ReadByte   PASS");
+            fmt::Println!("[ 9] strings.Reader ReadByte   PASS");
         } else {
-            Println!("[ 9] strings.Reader ReadByte   FAIL");
+            fmt::Println!("[ 9] strings.Reader ReadByte   FAIL");
             failed += 1;
         }
     }
@@ -149,9 +150,9 @@ fn main() {
         let err = r.UnreadByte();
         let (b2, _) = r.ReadByte();
         if err.IsNil() && b2 == b'Z' {
-            Println!("[10] strings.Reader UnreadByte PASS");
+            fmt::Println!("[10] strings.Reader UnreadByte PASS");
         } else {
-            Println!("[10] strings.Reader UnreadByte FAIL");
+            fmt::Println!("[10] strings.Reader UnreadByte FAIL");
             failed += 1;
         }
     }
@@ -161,9 +162,9 @@ fn main() {
         let mut r = strings::NewReader(string("Q"));
         let (ch, sz, err) = r.ReadRune();
         if err.IsNil() && ch == 'Q' as goish::rune && sz == 1 {
-            Println!("[11] strings.Reader ReadRune A PASS");
+            fmt::Println!("[11] strings.Reader ReadRune A PASS");
         } else {
-            Println!("[11] strings.Reader ReadRune A FAIL");
+            fmt::Println!("[11] strings.Reader ReadRune A FAIL");
             failed += 1;
         }
     }
@@ -176,9 +177,9 @@ fn main() {
         let mut r = strings::NewReader(s);
         let (ch, sz, _) = r.ReadRune();
         if ch == 0x00E9 && sz == 2 {
-            Println!("[12] strings.Reader ReadRune u PASS");
+            fmt::Println!("[12] strings.Reader ReadRune u PASS");
         } else {
-            Println!("[12] strings.Reader ReadRune u FAIL");
+            fmt::Println!("[12] strings.Reader ReadRune u FAIL");
             failed += 1;
         }
     }
@@ -190,9 +191,9 @@ fn main() {
         let err = r.UnreadRune();
         let (ch, _, _) = r.ReadRune();
         if err.IsNil() && ch == 'a' as goish::rune {
-            Println!("[13] strings.Reader UnreadRune PASS");
+            fmt::Println!("[13] strings.Reader UnreadRune PASS");
         } else {
-            Println!("[13] strings.Reader UnreadRune FAIL");
+            fmt::Println!("[13] strings.Reader UnreadRune FAIL");
             failed += 1;
         }
     }
@@ -203,18 +204,18 @@ fn main() {
         let _ = r.ReadByte();
         let err = r.UnreadRune();
         if !err.IsNil() {
-            Println!("[14] strings UnreadRune err    PASS");
+            fmt::Println!("[14] strings UnreadRune err    PASS");
         } else {
-            Println!("[14] strings UnreadRune err    FAIL");
+            fmt::Println!("[14] strings UnreadRune err    FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 14/14");
+        fmt::Println!("ok 14/14");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 14", failed);
+        fmt::Println!("FAIL {} of 14", failed);
         syscall::Exit(1);
     }
 }

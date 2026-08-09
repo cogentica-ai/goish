@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::os;
 use goish::strings;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -31,9 +32,9 @@ fn main() {
             i += 1;
         }
         if env.Len() > 0 && found_assignment {
-            Println!("[ 1] Environ has KEY=VALUE     PASS");
+            fmt::Println!("[ 1] Environ has KEY=VALUE     PASS");
         } else {
-            Println!("[ 1] Environ has KEY=VALUE     FAIL n=", env.Len() as i64);
+            fmt::Println!("[ 1] Environ has KEY=VALUE     FAIL n=", env.Len() as i64);
             failed += 1;
         }
     }
@@ -52,9 +53,9 @@ fn main() {
             i += 1;
         }
         if found {
-            Println!("[ 2] Setenv → Environ          PASS");
+            fmt::Println!("[ 2] Setenv → Environ          PASS");
         } else {
-            Println!("[ 2] Setenv → Environ          FAIL");
+            fmt::Println!("[ 2] Setenv → Environ          FAIL");
             failed += 1;
         }
     }
@@ -73,9 +74,9 @@ fn main() {
             i += 1;
         }
         if !found {
-            Println!("[ 3] Unsetenv hides Environ    PASS");
+            fmt::Println!("[ 3] Unsetenv hides Environ    PASS");
         } else {
-            Println!("[ 3] Unsetenv hides Environ    FAIL");
+            fmt::Println!("[ 3] Unsetenv hides Environ    FAIL");
             failed += 1;
         }
     }
@@ -96,9 +97,9 @@ fn main() {
             }
             // Should appear exactly once with overridden value.
             if count_path == 1 && os::Getenv(string("PATH")) == "/overridden" {
-                Println!("[ 4] Setenv override unique    PASS");
+                fmt::Println!("[ 4] Setenv override unique    PASS");
             } else {
-                Println!(
+                fmt::Println!(
                     "[ 4] Setenv override unique    FAIL count=",
                     count_path as i64
                 );
@@ -106,7 +107,7 @@ fn main() {
             }
             let _ = os::Setenv(string("PATH"), path_orig);
         } else {
-            Println!("[ 4] Setenv override unique    SKIP");
+            fmt::Println!("[ 4] Setenv override unique    SKIP");
         }
     }
 
@@ -128,18 +129,18 @@ fn main() {
             i += 1;
         }
         if cleared {
-            Println!("[ 5] Clearenv empties          PASS");
+            fmt::Println!("[ 5] Clearenv empties          PASS");
         } else {
-            Println!("[ 5] Clearenv empties          FAIL n=", env.Len() as i64);
+            fmt::Println!("[ 5] Clearenv empties          FAIL n=", env.Len() as i64);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 5");
+        fmt::Println!("FAIL", failed, "of 5");
         syscall::Exit(1);
     }
 }

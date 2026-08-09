@@ -15,10 +15,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::convert;
 use goish::io;
-use goish::{make, syscall, Println};
+use goish::{make, syscall};
 
 #[goish::main]
 fn main() {
@@ -31,9 +32,9 @@ fn main() {
         let buf = make!([]goish::byte, 16);
         let (n, err) = io::CopyBuffer(&mut dst, &mut src, buf);
         if err.IsNil() && n == 13 && dst.String() == "Hello, world!" {
-            Println!("[ 1] CopyBuffer 16-byte buf    PASS");
+            fmt::Println!("[ 1] CopyBuffer 16-byte buf    PASS");
         } else {
-            Println!("[ 1] CopyBuffer 16-byte buf    FAIL n={} dst={}", n, dst.String());
+            fmt::Println!("[ 1] CopyBuffer 16-byte buf    FAIL n={} dst={}", n, dst.String());
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
         let buf = make!([]goish::byte, 4);
         let (n, err) = io::CopyBuffer(&mut dst, &mut src, buf);
         if err.IsNil() && n == 8 && dst.String() == "ABCDEFGH" {
-            Println!("[ 2] CopyBuffer 4-byte loops   PASS");
+            fmt::Println!("[ 2] CopyBuffer 4-byte loops   PASS");
         } else {
-            Println!("[ 2] CopyBuffer 4-byte loops   FAIL n={}", n);
+            fmt::Println!("[ 2] CopyBuffer 4-byte loops   FAIL n={}", n);
             failed += 1;
         }
     }
@@ -59,9 +60,9 @@ fn main() {
         let buf = make!([]goish::byte, 0);
         let (n, err) = io::CopyBuffer(&mut dst, &mut src, buf);
         if err.IsNil() && n == 1 && dst.String() == "x" {
-            Println!("[ 3] CopyBuffer len=0 default  PASS");
+            fmt::Println!("[ 3] CopyBuffer len=0 default  PASS");
         } else {
-            Println!("[ 3] CopyBuffer len=0 default  FAIL");
+            fmt::Println!("[ 3] CopyBuffer len=0 default  FAIL");
             failed += 1;
         }
     }
@@ -73,9 +74,9 @@ fn main() {
         let buf = make!([]goish::byte, 64);
         let (n, err) = io::CopyBuffer(&mut dst, &mut src, buf);
         if err.IsNil() && n == 0 && dst.String() == "" {
-            Println!("[ 4] CopyBuffer empty source   PASS");
+            fmt::Println!("[ 4] CopyBuffer empty source   PASS");
         } else {
-            Println!("[ 4] CopyBuffer empty source   FAIL");
+            fmt::Println!("[ 4] CopyBuffer empty source   FAIL");
             failed += 1;
         }
     }
@@ -102,18 +103,18 @@ fn main() {
             }
         }
         if err.IsNil() && n == 1024 && all_ok {
-            Println!("[ 5] CopyBuffer 1024 round     PASS");
+            fmt::Println!("[ 5] CopyBuffer 1024 round     PASS");
         } else {
-            Println!("[ 5] CopyBuffer 1024 round     FAIL n={}", n);
+            fmt::Println!("[ 5] CopyBuffer 1024 round     FAIL n={}", n);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 5", failed);
+        fmt::Println!("FAIL {} of 5", failed);
         syscall::Exit(1);
     }
 }

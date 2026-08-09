@@ -34,10 +34,11 @@ extern crate goish;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::fmt;
 use goish::crypto::tls;
 use alloc::sync::Arc;
 use goish::sync::WaitGroup;
-use goish::{go, string, Sprintf};
+use goish::{go, string};
 
 // ─── embedded test certificate (RSA-2048, CN=localhost) ─────────────
 
@@ -100,12 +101,12 @@ static FAILED: AtomicUsize = AtomicUsize::new(0);
 
 fn pass(name: &'static str) {
     PASSED.fetch_add(1, Ordering::Relaxed);
-    goish::Printf!("PASS: %s\n", name);
+    fmt::Printf!("PASS: %s\n", name);
 }
 
 fn fail(msg: goish::string) {
     FAILED.fetch_add(1, Ordering::Relaxed);
-    goish::Printf!("FAIL: %s\n", msg);
+    fmt::Printf!("FAIL: %s\n", msg);
 }
 
 /// Echo server conn handler: read until '\n', write the line back
@@ -143,21 +144,21 @@ fn client_roundtrip(port: i64, chacha_only: bool, payload: &[u8]) -> bool {
         ServerName: string("localhost"),
         ..Default::default()
     };
-    let addr = Sprintf!("127.0.0.1:%d", port);
+    let addr = fmt::Sprintf!("127.0.0.1:%d", port);
     let (mut conn, err) = if chacha_only {
         tls::DialChaCha20Only(string("tcp"), addr, &cfg)
     } else {
         tls::Dial(string("tcp"), addr, &cfg)
     };
     if !err.IsNil() {
-        goish::Printf!("client dial/handshake error: %v\n", err);
+        fmt::Printf!("client dial/handshake error: %v\n", err);
         return false;
     }
     let mut req: Vec<u8> = payload.to_vec();
     req.push(b'\n');
     let (_, werr) = conn.Write(&req);
     if !werr.IsNil() {
-        goish::Printf!("client write error: %v\n", werr);
+        fmt::Printf!("client write error: %v\n", werr);
         return false;
     }
     let mut got: Vec<u8> = Vec::new();
@@ -176,7 +177,7 @@ fn client_roundtrip(port: i64, chacha_only: bool, payload: &[u8]) -> bool {
     }
     let _ = conn.Close();
     if got.len() != want_len || &got[..5] != b"pong:" || &got[5..] != &req[..] {
-        goish::Printf!(
+        fmt::Printf!(
             "client echo mismatch: got %d bytes, want %d\n",
             got.len() as i64,
             want_len as i64
@@ -193,8 +194,8 @@ fn main() {
     if err.IsNil() && cert.Certificate.Len() == 1 {
         pass("X509KeyPair parses embedded RSA cert+key");
     } else {
-        fail(Sprintf!("X509KeyPair: %v", err));
-        goish::Printf!("TLS_SERVER_SMOKE_FAIL\n");
+        fail(fmt::Sprintf!("X509KeyPair: %v", err));
+        fmt::Printf!("TLS_SERVER_SMOKE_FAIL\n");
         goish::os::Exit(1);
     }
     // Swapped inputs must fail.
@@ -212,8 +213,8 @@ fn main() {
     };
     let (ln, err) = tls::Listen(string("tcp"), string("127.0.0.1:0"), &cfg);
     if !err.IsNil() {
-        fail(Sprintf!("tls.Listen: %v", err));
-        goish::Printf!("TLS_SERVER_SMOKE_FAIL\n");
+        fail(fmt::Sprintf!("tls.Listen: %v", err));
+        fmt::Printf!("TLS_SERVER_SMOKE_FAIL\n");
         goish::os::Exit(1);
     }
     let port = ln.Addr().Port;
@@ -232,7 +233,7 @@ fn main() {
     // ── 2. three sequential full handshakes + round trips ──
     let mut seq_ok = true;
     for i in 0..3i64 {
-        let payload = Sprintf!("ping %d", i);
+        let payload = fmt::Sprintf!("ping %d", i);
         let ps: &str = payload.as_ref();
         if !client_roundtrip(port, false, ps.as_bytes()) {
             seq_ok = false;
@@ -266,7 +267,7 @@ fn main() {
         wg.Add(1);
         let wg2 = wg.clone();
         go!(move || {
-            let payload = Sprintf!("conc %d", i);
+            let payload = fmt::Sprintf!("conc %d", i);
             let ps: &str = payload.as_ref();
             if client_roundtrip(port, false, ps.as_bytes()) {
                 CONC_OK.fetch_add(1, Ordering::Relaxed);
@@ -278,7 +279,7 @@ fn main() {
     if CONC_OK.load(Ordering::Relaxed) == 4 {
         pass("4 concurrent client handshakes");
     } else {
-        fail(Sprintf!(
+        fail(fmt::Sprintf!(
             "concurrent handshakes: %d/4",
             CONC_OK.load(Ordering::Relaxed) as i64
         ));
@@ -287,12 +288,12 @@ fn main() {
     let p = PASSED.load(Ordering::Relaxed);
     let f = FAILED.load(Ordering::Relaxed);
     if f == 0 {
-        goish::Printf!("TLS_SERVER_SMOKE_OK %d/%d\n", p as i64, (p + f) as i64);
+        fmt::Printf!("TLS_SERVER_SMOKE_OK %d/%d\n", p as i64, (p + f) as i64);
         // The accept-loop goroutine blocks in Accept() forever; the
         // goish runtime exits on LIVE_G_COUNT == 0, so exit explicitly.
         goish::os::Exit(0);
     } else {
-        goish::Printf!("TLS_SERVER_SMOKE_FAIL %d failed\n", f as i64);
+        fmt::Printf!("TLS_SERVER_SMOKE_FAIL %d failed\n", f as i64);
         goish::os::Exit(1);
     }
 }

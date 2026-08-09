@@ -8,8 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::os;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -19,9 +20,9 @@ fn main() {
     {
         let uid = os::Getuid();
         if uid >= 0 {
-            Println!("[ 1] Getuid non-negative       PASS");
+            fmt::Println!("[ 1] Getuid non-negative       PASS");
         } else {
-            Println!("[ 1] Getuid non-negative       FAIL uid=", uid);
+            fmt::Println!("[ 1] Getuid non-negative       FAIL uid=", uid);
             failed += 1;
         }
     }
@@ -30,9 +31,9 @@ fn main() {
     {
         let euid = os::Geteuid();
         if euid >= 0 {
-            Println!("[ 2] Geteuid non-negative      PASS");
+            fmt::Println!("[ 2] Geteuid non-negative      PASS");
         } else {
-            Println!("[ 2] Geteuid non-negative      FAIL");
+            fmt::Println!("[ 2] Geteuid non-negative      FAIL");
             failed += 1;
         }
     }
@@ -42,9 +43,9 @@ fn main() {
         let gid = os::Getgid();
         let egid = os::Getegid();
         if gid >= 0 && egid >= 0 {
-            Println!("[ 3] Getgid + Getegid          PASS");
+            fmt::Println!("[ 3] Getgid + Getegid          PASS");
         } else {
-            Println!("[ 3] Getgid + Getegid          FAIL");
+            fmt::Println!("[ 3] Getgid + Getegid          FAIL");
             failed += 1;
         }
     }
@@ -53,9 +54,9 @@ fn main() {
     {
         let pid = os::Getpid();
         if pid > 1 {
-            Println!("[ 4] Getpid > 1                PASS");
+            fmt::Println!("[ 4] Getpid > 1                PASS");
         } else {
-            Println!("[ 4] Getpid > 1                FAIL pid=", pid);
+            fmt::Println!("[ 4] Getpid > 1                FAIL pid=", pid);
             failed += 1;
         }
     }
@@ -64,9 +65,9 @@ fn main() {
     {
         let ppid = os::Getppid();
         if ppid > 0 {
-            Println!("[ 5] Getppid > 0               PASS");
+            fmt::Println!("[ 5] Getppid > 0               PASS");
         } else {
-            Println!("[ 5] Getppid > 0               FAIL ppid=", ppid);
+            fmt::Println!("[ 5] Getppid > 0               FAIL ppid=", ppid);
             failed += 1;
         }
     }
@@ -76,18 +77,18 @@ fn main() {
         let p1 = os::Getpid();
         let p2 = os::Getpid();
         if p1 == p2 {
-            Println!("[ 6] Getpid stable             PASS");
+            fmt::Println!("[ 6] Getpid stable             PASS");
         } else {
-            Println!("[ 6] Getpid stable             FAIL");
+            fmt::Println!("[ 6] Getpid stable             FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 6");
+        fmt::Println!("FAIL", failed, "of 6");
         syscall::Exit(1);
     }
 }

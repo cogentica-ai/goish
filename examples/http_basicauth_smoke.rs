@@ -7,8 +7,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net::http;
-use goish::{bytes, string, syscall, Println};
+use goish::{bytes, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -21,16 +22,16 @@ fn main() {
         let auth = req.Header.Get(string("Authorization"));
         // The classic "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==" example.
         if auth == "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==" {
-            Println!("[ 1] SetBasicAuth wire form     PASS");
+            fmt::Println!("[ 1] SetBasicAuth wire form     PASS");
         } else {
-            Println!("[ 1] SetBasicAuth wire form     FAIL got {}", auth);
+            fmt::Println!("[ 1] SetBasicAuth wire form     FAIL got {}", auth);
             failed += 1;
         }
         let (u, p, ok) = req.BasicAuth();
         if ok && u == "Aladdin" && p == "open sesame" {
-            Println!("[ 2] BasicAuth decode           PASS");
+            fmt::Println!("[ 2] BasicAuth decode           PASS");
         } else {
-            Println!("[ 2] BasicAuth decode           FAIL");
+            fmt::Println!("[ 2] BasicAuth decode           FAIL");
             failed += 1;
         }
     }
@@ -40,9 +41,9 @@ fn main() {
         let (req, _) = http::NewRequest(string("GET"), string("http://x/"), bytes(""));
         let (_, _, ok) = req.BasicAuth();
         if !ok {
-            Println!("[ 3] no auth header → ok=false  PASS");
+            fmt::Println!("[ 3] no auth header → ok=false  PASS");
         } else {
-            Println!("[ 3] no auth header → ok=false  FAIL");
+            fmt::Println!("[ 3] no auth header → ok=false  FAIL");
             failed += 1;
         }
     }
@@ -53,18 +54,18 @@ fn main() {
         req.Header.Set(string("User-Agent"), string("test/1.0"));
         req.Header.Set(string("Referer"), string("http://prev/"));
         if req.UserAgent() == "test/1.0" && req.Referer() == "http://prev/" {
-            Println!("[ 4] UserAgent + Referer        PASS");
+            fmt::Println!("[ 4] UserAgent + Referer        PASS");
         } else {
-            Println!("[ 4] UserAgent + Referer        FAIL");
+            fmt::Println!("[ 4] UserAgent + Referer        FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 4/4");
+        fmt::Println!("ok 4/4");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 4", failed);
+        fmt::Println!("FAIL {} of 4", failed);
         syscall::Exit(1);
     }
 }

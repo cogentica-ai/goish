@@ -13,7 +13,8 @@
 #![no_std]
 #![no_main]
 
-use goish::{error, errors, len, nil, os, range, string, Fprintf, Fprintln, Println, Sprintf};
+use goish::fmt;
+use goish::{error, errors, len, nil, os, range, string};
 
 // Stand-in for `strings::ToUpper` (M10). Just uppercases ASCII letters,
 // leaves the rest alone — fine for this demo's input.
@@ -39,7 +40,7 @@ fn greet(name: string) -> (string, error) {
     if name == "" {
         return (string(""), errors::New("name cannot be empty"));
     }
-    (Sprintf!("Hello, %s!", ascii_upper(name)), nil.into())
+    (fmt::Sprintf!("Hello, %s!", ascii_upper(name)), nil.into())
 }
 
 #[goish::main]
@@ -51,7 +52,7 @@ fn main() {
 
     if len(&args) == 0 {
         let mut e = os::Stderr();
-        Fprintln!(e, "usage: greet NAME...");
+        fmt::Fprintln!(e, "usage: greet NAME...");
         os::Exit(1);
     }
 
@@ -59,9 +60,9 @@ fn main() {
     for (i, name) in range!(args) {
         let (msg, err) = greet(name.clone());
         if err != nil {
-            Fprintf!(errf, "arg %d: %v\n", i, err);
+            fmt::Fprintf!(errf, "arg %d: %v\n", i, err);
             continue;
         }
-        Println!(msg);
+        fmt::Println!(msg);
     }
 }

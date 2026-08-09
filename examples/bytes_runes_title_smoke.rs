@@ -9,10 +9,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::convert::bytes as as_bytes;
 use goish::types::rune;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -34,9 +35,9 @@ fn main() {
             }
         }
         if ok {
-            Println!("[ 1] Runes ascii              PASS");
+            fmt::Println!("[ 1] Runes ascii              PASS");
         } else {
-            Println!("[ 1] Runes ascii              FAIL");
+            fmt::Println!("[ 1] Runes ascii              FAIL");
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
     {
         let r = bytes::Runes(as_bytes(string("")));
         if r.Len() == 0 {
-            Println!("[ 2] Runes empty              PASS");
+            fmt::Println!("[ 2] Runes empty              PASS");
         } else {
-            Println!("[ 2] Runes empty              FAIL");
+            fmt::Println!("[ 2] Runes empty              FAIL");
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
     {
         let r = bytes::Runes(as_bytes(string("h\u{00e9}llo")));
         if r.Len() == 5 && r[0i64] == b'h' as rune && r[1i64] == 0xE9 && r[4i64] == b'o' as rune {
-            Println!("[ 3] Runes Latin-1 é         PASS");
+            fmt::Println!("[ 3] Runes Latin-1 é         PASS");
         } else {
-            Println!("[ 3] Runes Latin-1 é         FAIL len=", r.Len());
+            fmt::Println!("[ 3] Runes Latin-1 é         FAIL len=", r.Len());
             failed += 1;
         }
     }
@@ -69,9 +70,9 @@ fn main() {
         let raw: [u8; 5] = [b'a', 0xF0, 0x9F, 0x98, 0x80];
         let r = bytes::Runes(as_bytes(string::from_bytes(&raw)));
         if r.Len() == 2 && r[0i64] == b'a' as rune && r[1i64] == 0x1F600 {
-            Println!("[ 4] Runes SMP scalar         PASS");
+            fmt::Println!("[ 4] Runes SMP scalar         PASS");
         } else {
-            Println!("[ 4] Runes SMP scalar         FAIL len=", r.Len());
+            fmt::Println!("[ 4] Runes SMP scalar         FAIL len=", r.Len());
             failed += 1;
         }
     }
@@ -81,9 +82,9 @@ fn main() {
         let t = bytes::Title(as_bytes(string("hello world")));
         let s = string::from_bytes(&t.__into_vec());
         if s == "Hello World" {
-            Println!("[ 5] Title two words          PASS");
+            fmt::Println!("[ 5] Title two words          PASS");
         } else {
-            Println!("[ 5] Title two words          FAIL got=", s);
+            fmt::Println!("[ 5] Title two words          FAIL got=", s);
             failed += 1;
         }
     }
@@ -93,9 +94,9 @@ fn main() {
         let t = bytes::Title(as_bytes(string("HELLO world")));
         let s = string::from_bytes(&t.__into_vec());
         if s == "HELLO World" {
-            Println!("[ 6] Title preserves upper    PASS");
+            fmt::Println!("[ 6] Title preserves upper    PASS");
         } else {
-            Println!("[ 6] Title preserves upper    FAIL got=", s);
+            fmt::Println!("[ 6] Title preserves upper    FAIL got=", s);
             failed += 1;
         }
     }
@@ -109,9 +110,9 @@ fn main() {
         //   '-' separator, next 'w' → W
         //   ... 'world_42' contains '_' and digits — none start a new word.
         if s == "Hello-World_42" {
-            Println!("[ 7] Title hyphen separator   PASS");
+            fmt::Println!("[ 7] Title hyphen separator   PASS");
         } else {
-            Println!("[ 7] Title hyphen separator   FAIL got=", s);
+            fmt::Println!("[ 7] Title hyphen separator   FAIL got=", s);
             failed += 1;
         }
     }
@@ -120,9 +121,9 @@ fn main() {
     {
         let t = bytes::Title(as_bytes(string("")));
         if t.Len() == 0 {
-            Println!("[ 8] Title empty              PASS");
+            fmt::Println!("[ 8] Title empty              PASS");
         } else {
-            Println!("[ 8] Title empty              FAIL");
+            fmt::Println!("[ 8] Title empty              FAIL");
             failed += 1;
         }
     }
@@ -132,9 +133,9 @@ fn main() {
         let t = bytes::Title(as_bytes(string("a")));
         let s = string::from_bytes(&t.__into_vec());
         if s == "A" {
-            Println!("[ 9] Title single letter      PASS");
+            fmt::Println!("[ 9] Title single letter      PASS");
         } else {
-            Println!("[ 9] Title single letter      FAIL got=", s);
+            fmt::Println!("[ 9] Title single letter      FAIL got=", s);
             failed += 1;
         }
     }
@@ -144,18 +145,18 @@ fn main() {
         let t = bytes::Title(as_bytes(string(" hello")));
         let s = string::from_bytes(&t.__into_vec());
         if s == " Hello" {
-            Println!("[10] Title leading space      PASS");
+            fmt::Println!("[10] Title leading space      PASS");
         } else {
-            Println!("[10] Title leading space      FAIL got=", s);
+            fmt::Println!("[10] Title leading space      FAIL got=", s);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::context;
 use goish::convert::bytes;
 use goish::net::http;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -25,9 +26,9 @@ fn main() {
             && http::SameSiteStrictMode == http::SameSite::StrictMode
             && http::SameSiteNoneMode == http::SameSite::NoneMode
         {
-            Println!("[ 1] SameSite* constants       PASS");
+            fmt::Println!("[ 1] SameSite* constants       PASS");
         } else {
-            Println!("[ 1] SameSite* constants       FAIL");
+            fmt::Println!("[ 1] SameSite* constants       FAIL");
             failed += 1;
         }
     }
@@ -40,9 +41,9 @@ fn main() {
         c.SameSite = http::SameSiteLaxMode;
         let s = c.String();
         if goish::strings::Contains(s.clone(), string("SameSite=Lax")) {
-            Println!("[ 2] Cookie SameSite=Lax       PASS");
+            fmt::Println!("[ 2] Cookie SameSite=Lax       PASS");
         } else {
-            Println!("[ 2] Cookie SameSite=Lax       FAIL got={}", s);
+            fmt::Println!("[ 2] Cookie SameSite=Lax       FAIL got={}", s);
             failed += 1;
         }
     }
@@ -57,18 +58,18 @@ fn main() {
             bytes(""),
         );
         if err.IsNil() && req.Method == "GET" && req.URL.Host == "example.com" {
-            Println!("[ 3] NewRequestWithContext     PASS");
+            fmt::Println!("[ 3] NewRequestWithContext     PASS");
         } else {
-            Println!("[ 3] NewRequestWithContext     FAIL");
+            fmt::Println!("[ 3] NewRequestWithContext     FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 3/3");
+        fmt::Println!("ok 3/3");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 3", failed);
+        fmt::Println!("FAIL {} of 3", failed);
         syscall::Exit(1);
     }
 }

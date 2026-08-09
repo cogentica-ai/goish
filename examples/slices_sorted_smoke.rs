@@ -8,11 +8,12 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::goslice::slice;
 use goish::slices;
 use goish::string;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -24,9 +25,9 @@ fn main() {
         let out = slices::Sorted(&xs);
         let raw: &[int] = &out;
         if raw == [1, 1, 2, 3, 4, 5, 6, 9] {
-            Println!("[ 1] Sorted ints               PASS");
+            fmt::Println!("[ 1] Sorted ints               PASS");
         } else {
-            Println!("[ 1] Sorted ints               FAIL");
+            fmt::Println!("[ 1] Sorted ints               FAIL");
             failed += 1;
         }
     }
@@ -37,9 +38,9 @@ fn main() {
         let _ = slices::Sorted(&xs);
         let raw: &[int] = &xs;
         if raw == [3, 1, 2] {
-            Println!("[ 2] Sorted preserves input    PASS");
+            fmt::Println!("[ 2] Sorted preserves input    PASS");
         } else {
-            Println!("[ 2] Sorted preserves input    FAIL");
+            fmt::Println!("[ 2] Sorted preserves input    FAIL");
             failed += 1;
         }
     }
@@ -49,9 +50,9 @@ fn main() {
         let xs: slice<int> = slice::__from_vec(alloc::vec![]);
         let out = slices::Sorted(&xs);
         if out.Len() == 0 {
-            Println!("[ 3] Sorted empty              PASS");
+            fmt::Println!("[ 3] Sorted empty              PASS");
         } else {
-            Println!("[ 3] Sorted empty              FAIL");
+            fmt::Println!("[ 3] Sorted empty              FAIL");
             failed += 1;
         }
     }
@@ -62,9 +63,9 @@ fn main() {
             slice::__from_vec(alloc::vec![string("c"), string("a"), string("b")]);
         let out = slices::Sorted(&xs);
         if out[0] == string("a") && out[1] == string("b") && out[2] == string("c") {
-            Println!("[ 4] Sorted strings            PASS");
+            fmt::Println!("[ 4] Sorted strings            PASS");
         } else {
-            Println!("[ 4] Sorted strings            FAIL");
+            fmt::Println!("[ 4] Sorted strings            FAIL");
             failed += 1;
         }
     }
@@ -75,9 +76,9 @@ fn main() {
         let out = slices::SortedFunc(&xs, |a, b| *b - *a);
         let raw: &[int] = &out;
         if raw == [5, 4, 3, 1, 1] {
-            Println!("[ 5] SortedFunc descending     PASS");
+            fmt::Println!("[ 5] SortedFunc descending     PASS");
         } else {
-            Println!("[ 5] SortedFunc descending     FAIL");
+            fmt::Println!("[ 5] SortedFunc descending     FAIL");
             failed += 1;
         }
     }
@@ -88,9 +89,9 @@ fn main() {
         let out = slices::SortedFunc(&xs, |a, b| a.abs() - b.abs());
         let raw: &[int] = &out;
         if raw == [1, -2, -3, 4, -5] {
-            Println!("[ 6] SortedFunc by abs         PASS");
+            fmt::Println!("[ 6] SortedFunc by abs         PASS");
         } else {
-            Println!("[ 6] SortedFunc by abs         FAIL");
+            fmt::Println!("[ 6] SortedFunc by abs         FAIL");
             failed += 1;
         }
     }
@@ -109,9 +110,9 @@ fn main() {
         let out = slices::SortedStableFunc(&pairs, |a, b| a.0 - b.0);
         let raw: &[(int, int)] = &out;
         if raw == [(1, 10), (1, 11), (1, 12), (2, 20), (2, 21)] {
-            Println!("[ 7] SortedStableFunc          PASS");
+            fmt::Println!("[ 7] SortedStableFunc          PASS");
         } else {
-            Println!("[ 7] SortedStableFunc          FAIL");
+            fmt::Println!("[ 7] SortedStableFunc          FAIL");
             failed += 1;
         }
     }
@@ -121,18 +122,18 @@ fn main() {
         let xs: slice<int> = slice::__from_vec(alloc::vec![42]);
         let out = slices::Sorted(&xs);
         if out.Len() == 1 && out[0] == 42 {
-            Println!("[ 8] Sorted single             PASS");
+            fmt::Println!("[ 8] Sorted single             PASS");
         } else {
-            Println!("[ 8] Sorted single             FAIL");
+            fmt::Println!("[ 8] Sorted single             FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

@@ -10,11 +10,12 @@ extern crate goish;
 
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::io::{Closer, Reader, Writer};
 use goish::net::http;
 use goish::net::http::httputil;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -46,9 +47,9 @@ fn main() {
             && goish::strings::Contains(s.clone(), string("5\r\nworld\r\n"))
             && goish::strings::Contains(s.clone(), string("0\r\n"));
         if has_chunks {
-            Println!("[ 1] httputil writer wire      PASS");
+            fmt::Println!("[ 1] httputil writer wire      PASS");
         } else {
-            Println!("[ 1] httputil writer wire      FAIL");
+            fmt::Println!("[ 1] httputil writer wire      FAIL");
             failed += 1;
         }
 
@@ -70,9 +71,9 @@ fn main() {
         }
         let got = goish::string::from_bytes(&decoded);
         if got == "hello world" {
-            Println!("[ 2] httputil reader round-tr  PASS");
+            fmt::Println!("[ 2] httputil reader round-tr  PASS");
         } else {
-            Println!("[ 2] httputil reader round-tr  FAIL got={}", got);
+            fmt::Println!("[ 2] httputil reader round-tr  FAIL got={}", got);
             failed += 1;
         }
     }
@@ -81,9 +82,9 @@ fn main() {
     {
         let e: goish::error = httputil::ErrLineTooLong.into();
         if !e.IsNil() && e.Error() == "http: chunked header line too long" {
-            Println!("[ 3] ErrLineTooLong            PASS");
+            fmt::Println!("[ 3] ErrLineTooLong            PASS");
         } else {
-            Println!("[ 3] ErrLineTooLong            FAIL msg={}", e.Error());
+            fmt::Println!("[ 3] ErrLineTooLong            FAIL msg={}", e.Error());
             failed += 1;
         }
     }
@@ -98,9 +99,9 @@ fn main() {
         let not12 = !r.ProtoAtLeast(1, 2);
         let not2 = !r.ProtoAtLeast(2, 0);
         if ok10 && ok11 && not12 && not2 {
-            Println!("[ 4] ProtoAtLeast HTTP/1.1     PASS");
+            fmt::Println!("[ 4] ProtoAtLeast HTTP/1.1     PASS");
         } else {
-            Println!("[ 4] ProtoAtLeast HTTP/1.1     FAIL");
+            fmt::Println!("[ 4] ProtoAtLeast HTTP/1.1     FAIL");
             failed += 1;
         }
     }
@@ -114,18 +115,18 @@ fn main() {
         let ok20 = r.ProtoAtLeast(2, 0);
         let not21 = !r.ProtoAtLeast(2, 1);
         if ok11 && ok20 && not21 {
-            Println!("[ 5] ProtoAtLeast HTTP/2.0     PASS");
+            fmt::Println!("[ 5] ProtoAtLeast HTTP/2.0     PASS");
         } else {
-            Println!("[ 5] ProtoAtLeast HTTP/2.0     FAIL");
+            fmt::Println!("[ 5] ProtoAtLeast HTTP/2.0     FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 5", failed);
+        fmt::Println!("FAIL {} of 5", failed);
         syscall::Exit(1);
     }
 }

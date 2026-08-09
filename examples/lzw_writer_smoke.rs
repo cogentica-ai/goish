@@ -27,6 +27,7 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::fmt;
 use goish::error;
 use goish::bytes;
 use goish::compress::lzw::{self, LSB, MSB};
@@ -35,8 +36,7 @@ use goish::goslice::slice;
 use goish::io;
 use goish::runtime::sched::schedule;
 use goish::types::{byte, int};
-use goish::{go, syscall, Println};
-
+use goish::{go, syscall};
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
@@ -50,10 +50,10 @@ fn main() {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
-            Println!("ok 10/10");
+            fmt::Println!("ok 10/10");
             syscall::Exit(0);
         } else {
-            Println!("FAIL", f as i64, "of 10");
+            fmt::Println!("FAIL", f as i64, "of 10");
             syscall::Exit(1);
         }
     });

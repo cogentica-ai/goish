@@ -11,15 +11,16 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::time;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn check(label: &'static str, t: time::Time, want_y: i64, want_w: i64, failed: &mut i64) {
     let (y, w) = t.ISOWeek();
     if y == want_y as i64 && w == want_w as i64 {
-        Println!("[", label, "]   PASS");
+        fmt::Println!("[", label, "]   PASS");
     } else {
-        Println!("[", label, "]   FAIL  got year=", y, " week=", w);
+        fmt::Println!("[", label, "]   FAIL  got year=", y, " week=", w);
         *failed += 1;
     }
 }
@@ -60,10 +61,10 @@ fn main() {
     check("10", time::Date(2027, 1, 3, 0, 0, 0, 0, goish::time::UTC), 2026, 53, &mut failed);
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

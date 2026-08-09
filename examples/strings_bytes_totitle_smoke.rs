@@ -9,11 +9,12 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::convert::bytes as to_bytes;
 use goish::strings;
 use goish::string;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -23,9 +24,9 @@ fn main() {
     {
         let out = strings::ToTitle(string("hello, world!"));
         if out == string("HELLO, WORLD!") {
-            Println!("[ 1] strings.ToTitle ASCII     PASS");
+            fmt::Println!("[ 1] strings.ToTitle ASCII     PASS");
         } else {
-            Println!("[ 1] strings.ToTitle ASCII     FAIL");
+            fmt::Println!("[ 1] strings.ToTitle ASCII     FAIL");
             failed += 1;
         }
     }
@@ -34,9 +35,9 @@ fn main() {
     {
         let out = strings::ToTitle(string("ALREADY UPPER"));
         if out == string("ALREADY UPPER") {
-            Println!("[ 2] strings.ToTitle upper     PASS");
+            fmt::Println!("[ 2] strings.ToTitle upper     PASS");
         } else {
-            Println!("[ 2] strings.ToTitle upper     FAIL");
+            fmt::Println!("[ 2] strings.ToTitle upper     FAIL");
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
     {
         let out = strings::ToTitle(string(""));
         if out == string("") {
-            Println!("[ 3] strings.ToTitle empty     PASS");
+            fmt::Println!("[ 3] strings.ToTitle empty     PASS");
         } else {
-            Println!("[ 3] strings.ToTitle empty     FAIL");
+            fmt::Println!("[ 3] strings.ToTitle empty     FAIL");
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
     {
         let out = strings::ToTitle(string("123 !@#"));
         if out == string("123 !@#") {
-            Println!("[ 4] strings.ToTitle non-alpha PASS");
+            fmt::Println!("[ 4] strings.ToTitle non-alpha PASS");
         } else {
-            Println!("[ 4] strings.ToTitle non-alpha FAIL");
+            fmt::Println!("[ 4] strings.ToTitle non-alpha FAIL");
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
         let out = bytes::ToTitle(to_bytes("hello"));
         let want = to_bytes("HELLO");
         if bytes::Equal(out, want) {
-            Println!("[ 5] bytes.ToTitle ASCII       PASS");
+            fmt::Println!("[ 5] bytes.ToTitle ASCII       PASS");
         } else {
-            Println!("[ 5] bytes.ToTitle ASCII       FAIL");
+            fmt::Println!("[ 5] bytes.ToTitle ASCII       FAIL");
             failed += 1;
         }
     }
@@ -80,9 +81,9 @@ fn main() {
         let out = bytes::ToTitle(to_bytes(""));
         let want = to_bytes("");
         if bytes::Equal(out, want) {
-            Println!("[ 6] bytes.ToTitle empty       PASS");
+            fmt::Println!("[ 6] bytes.ToTitle empty       PASS");
         } else {
-            Println!("[ 6] bytes.ToTitle empty       FAIL");
+            fmt::Println!("[ 6] bytes.ToTitle empty       FAIL");
             failed += 1;
         }
     }
@@ -92,18 +93,18 @@ fn main() {
         let out = bytes::ToTitle(to_bytes("MixedCase 123"));
         let want = to_bytes("MIXEDCASE 123");
         if bytes::Equal(out, want) {
-            Println!("[ 7] bytes.ToTitle mixed       PASS");
+            fmt::Println!("[ 7] bytes.ToTitle mixed       PASS");
         } else {
-            Println!("[ 7] bytes.ToTitle mixed       FAIL");
+            fmt::Println!("[ 7] bytes.ToTitle mixed       FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 7/7");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 7");
+        fmt::Println!("FAIL", failed, "of 7");
         syscall::Exit(1);
     }
 }

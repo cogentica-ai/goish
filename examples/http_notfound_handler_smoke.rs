@@ -11,9 +11,10 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::sync::Arc;
+use goish::fmt;
 use goish::net::http::{Handler, NewServeMux, NotFoundHandler};
 use goish::string;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -24,9 +25,9 @@ fn main() {
         let h: Arc<dyn Handler> = NotFoundHandler();
         // Strong-count > 0 means the Arc is live; sanity check.
         if Arc::strong_count(&h) >= 1 {
-            Println!("[ 1] NotFoundHandler() returns PASS");
+            fmt::Println!("[ 1] NotFoundHandler() returns PASS");
         } else {
-            Println!("[ 1] NotFoundHandler() returns FAIL");
+            fmt::Println!("[ 1] NotFoundHandler() returns FAIL");
             failed += 1;
         }
     }
@@ -36,7 +37,7 @@ fn main() {
         let mux = NewServeMux();
         let h = NotFoundHandler();
         mux.Handle(string("/missing"), h);
-        Println!("[ 2] Registers on ServeMux    PASS");
+        fmt::Println!("[ 2] Registers on ServeMux    PASS");
     }
 
     // 3. Handler trait dispatch — repeated NotFoundHandler() calls hand
@@ -45,18 +46,18 @@ fn main() {
         let h1 = NotFoundHandler();
         let h2 = NotFoundHandler();
         if Arc::strong_count(&h1) >= 1 && Arc::strong_count(&h2) >= 1 {
-            Println!("[ 3] Multiple instances        PASS");
+            fmt::Println!("[ 3] Multiple instances        PASS");
         } else {
-            Println!("[ 3] Multiple instances        FAIL");
+            fmt::Println!("[ 3] Multiple instances        FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 3/3");
+        fmt::Println!("ok 3/3");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 3");
+        fmt::Println!("FAIL", failed, "of 3");
         syscall::Exit(1);
     }
 }

@@ -8,12 +8,13 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bufio;
 use goish::bytes;
 use goish::errors;
 use goish::io;
 use goish::net::textproto;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -31,9 +32,9 @@ fn main() {
             && l1 == string("Hello world")
             && l2 == string("Second")
         {
-            Println!("[ 1] ReadLine                PASS");
+            fmt::Println!("[ 1] ReadLine                PASS");
         } else {
-            Println!("[ 1] ReadLine                FAIL got '{}'/'{}'", l1, l2);
+            fmt::Println!("[ 1] ReadLine                FAIL got '{}'/'{}'", l1, l2);
             failed += 1;
         }
     }
@@ -46,9 +47,9 @@ fn main() {
         let (_, _) = r.ReadLine();
         let (_, e2) = r.ReadLine();
         if errors::Is(e2, io::EOF) {
-            Println!("[ 2] ReadLine EOF            PASS");
+            fmt::Println!("[ 2] ReadLine EOF            PASS");
         } else {
-            Println!("[ 2] ReadLine EOF            FAIL");
+            fmt::Println!("[ 2] ReadLine EOF            FAIL");
             failed += 1;
         }
     }
@@ -65,9 +66,9 @@ fn main() {
             && l1 == string("Line 1 continued...")
             && l2 == string("Line 2")
         {
-            Println!("[ 3] ReadContinuedLine       PASS");
+            fmt::Println!("[ 3] ReadContinuedLine       PASS");
         } else {
-            Println!("[ 3] ReadContinuedLine       FAIL got '{}'/'{}'", l1, l2);
+            fmt::Println!("[ 3] ReadContinuedLine       FAIL got '{}'/'{}'", l1, l2);
             failed += 1;
         }
     }
@@ -97,9 +98,9 @@ fn main() {
             && lk_vals.Len() == 1
             && lk_vals[0i64] == string("Even Longer Value");
         if ok {
-            Println!("[ 4] ReadMIMEHeader basic    PASS");
+            fmt::Println!("[ 4] ReadMIMEHeader basic    PASS");
         } else {
-            Println!("[ 4] ReadMIMEHeader basic    FAIL");
+            fmt::Println!("[ 4] ReadMIMEHeader basic    FAIL");
             failed += 1;
         }
     }
@@ -112,9 +113,9 @@ fn main() {
         let (h, err) = r.ReadMIMEHeader();
         let v = textproto::Get(&h, string("content-type"));
         if err.IsNil() && v == string("text/html") && h.Has(string("Content-Type")) {
-            Println!("[ 5] MIMEHeader canonical    PASS");
+            fmt::Println!("[ 5] MIMEHeader canonical    PASS");
         } else {
-            Println!("[ 5] MIMEHeader canonical    FAIL got {}", v);
+            fmt::Println!("[ 5] MIMEHeader canonical    FAIL got {}", v);
             failed += 1;
         }
     }
@@ -126,9 +127,9 @@ fn main() {
         let mut r = textproto::NewReader(br);
         let (_, err) = r.ReadMIMEHeader();
         if !err.IsNil() {
-            Println!("[ 6] MIMEHeader bad line     PASS");
+            fmt::Println!("[ 6] MIMEHeader bad line     PASS");
         } else {
-            Println!("[ 6] MIMEHeader bad line     FAIL");
+            fmt::Println!("[ 6] MIMEHeader bad line     FAIL");
             failed += 1;
         }
     }
@@ -140,9 +141,9 @@ fn main() {
         let mut r = textproto::NewReader(br);
         let (_, err) = r.ReadMIMEHeader();
         if !err.IsNil() {
-            Println!("[ 7] MIMEHeader bad first    PASS");
+            fmt::Println!("[ 7] MIMEHeader bad first    PASS");
         } else {
-            Println!("[ 7] MIMEHeader bad first    FAIL");
+            fmt::Println!("[ 7] MIMEHeader bad first    FAIL");
             failed += 1;
         }
     }
@@ -160,9 +161,9 @@ fn main() {
         let v_bad =
             !textproto::validHeaderValueByte(b'\n') && !textproto::validHeaderValueByte(0x7f);
         if f_ok && f_bad && v_ok && v_bad {
-            Println!("[ 8] valid byte predicates   PASS");
+            fmt::Println!("[ 8] valid byte predicates   PASS");
         } else {
-            Println!("[ 8] valid byte predicates   FAIL");
+            fmt::Println!("[ 8] valid byte predicates   FAIL");
             failed += 1;
         }
     }
@@ -174,9 +175,9 @@ fn main() {
         let mut r = textproto::NewReader(br);
         let (h, err) = r.ReadMIMEHeader();
         if errors::Is(err, io::EOF) && h.Len() == 0 {
-            Println!("[ 9] MIMEHeader empty input  PASS");
+            fmt::Println!("[ 9] MIMEHeader empty input  PASS");
         } else {
-            Println!("[ 9] MIMEHeader empty input  FAIL");
+            fmt::Println!("[ 9] MIMEHeader empty input  FAIL");
             failed += 1;
         }
     }
@@ -189,9 +190,9 @@ fn main() {
         let (b, err) = r.ReadLineBytes();
         let raw: &[u8] = b.as_ref();
         if err.IsNil() && raw == b"hello" {
-            Println!("[10] ReadLineBytes           PASS");
+            fmt::Println!("[10] ReadLineBytes           PASS");
         } else {
-            Println!("[10] ReadLineBytes           FAIL");
+            fmt::Println!("[10] ReadLineBytes           FAIL");
             failed += 1;
         }
     }
@@ -210,18 +211,18 @@ fn main() {
             && h.Has(string("B"))
             && rest == string("body-bytes")
         {
-            Println!("[11] header then body        PASS");
+            fmt::Println!("[11] header then body        PASS");
         } else {
-            Println!("[11] header then body        FAIL rest='{}'", rest);
+            fmt::Println!("[11] header then body        FAIL rest='{}'", rest);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 11/11");
+        fmt::Println!("ok 11/11");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 11");
+        fmt::Println!("FAIL", failed, "of 11");
         syscall::Exit(1);
     }
 }

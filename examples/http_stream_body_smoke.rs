@@ -34,7 +34,7 @@ use goish::io::{self, Closer, Reader};
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{bytes, fmt, go, make, nil, string, syscall, Println};
+use goish::{bytes, fmt, go, make, nil, string, syscall};
 
 static SERVER_PAST_GATE: AtomicUsize = AtomicUsize::new(0);
 
@@ -111,7 +111,7 @@ fn main() {
         let url = fmt::Sprintf!("http://%s/stream", addr.clone());
         let (mut resp, err) = http::Get(url);
         if !err.IsNil() {
-            Println!("[ 1] chunked streaming         FAIL Get err");
+            fmt::Println!("[ 1] chunked streaming         FAIL Get err");
             failed += 1;
         } else {
             let mut ok = resp.StatusCode == 200 && resp.ContentLength == -1;
@@ -122,11 +122,11 @@ fn main() {
             let (n, rerr) = resp.Body.Read(&mut dst);
             let first = dst.slice(0, n);
             if !(rerr.IsNil() && slice_eq(&first, b"first|")) {
-                Println!("[ 1] chunked streaming         FAIL first read n={}", n);
+                fmt::Println!("[ 1] chunked streaming         FAIL first read n={}", n);
                 ok = false;
             }
             if SERVER_PAST_GATE.load(Ordering::Acquire) != 0 {
-                Println!("[ 1] chunked streaming         FAIL server past gate before first read returned");
+                fmt::Println!("[ 1] chunked streaming         FAIL server past gate before first read returned");
                 ok = false;
             }
 
@@ -134,18 +134,18 @@ fn main() {
             gate.Close();
             let (rest, aerr) = io::ReadAll(&mut resp.Body);
             if !(aerr.IsNil() && slice_eq(&rest, b"second|")) {
-                Println!("[ 1] chunked streaming         FAIL rest read");
+                fmt::Println!("[ 1] chunked streaming         FAIL rest read");
                 ok = false;
             }
             // Post-EOF read: (0, EOF).
             let (n2, e2) = resp.Body.Read(&mut dst);
             if !(n2 == 0 && goish::errors::Is(e2, io::EOF)) {
-                Println!("[ 1] chunked streaming         FAIL post-EOF read");
+                fmt::Println!("[ 1] chunked streaming         FAIL post-EOF read");
                 ok = false;
             }
             let _ = resp.Body.Close();
             if ok {
-                Println!("[ 1] chunked streaming         PASS");
+                fmt::Println!("[ 1] chunked streaming         PASS");
             } else {
                 failed += 1;
             }
@@ -157,18 +157,18 @@ fn main() {
         let url = fmt::Sprintf!("http://%s/fixed", addr.clone());
         let (mut resp, err) = http::Get(url);
         if !err.IsNil() {
-            Println!("[ 2] content-length ReadAll    FAIL Get err");
+            fmt::Println!("[ 2] content-length ReadAll    FAIL Get err");
             failed += 1;
         } else {
             let mut ok = resp.StatusCode == 200 && resp.ContentLength == 22;
             let (body, aerr) = io::ReadAll(&mut resp.Body);
             if !(aerr.IsNil() && slice_eq(&body, b"hello, streaming world")) {
-                Println!("[ 2] content-length ReadAll    FAIL body");
+                fmt::Println!("[ 2] content-length ReadAll    FAIL body");
                 ok = false;
             }
             let _ = resp.Body.Close();
             if ok {
-                Println!("[ 2] content-length ReadAll    PASS");
+                fmt::Println!("[ 2] content-length ReadAll    PASS");
             } else {
                 failed += 1;
             }
@@ -181,13 +181,13 @@ fn main() {
         let (ctx, cancel) = goish::context::WithCancel(goish::context::Background());
         let (req, rerr) = http::NewRequestWithContext(ctx, string("GET"), url, nil);
         if !rerr.IsNil() {
-            Println!("[ 3] ctx cancel mid-body       FAIL NewRequest err");
+            fmt::Println!("[ 3] ctx cancel mid-body       FAIL NewRequest err");
             failed += 1;
         } else {
             let client = http::Client::default();
             let (mut resp, err) = client.Do(&req);
             if !err.IsNil() {
-                Println!("[ 3] ctx cancel mid-body       FAIL Do err");
+                fmt::Println!("[ 3] ctx cancel mid-body       FAIL Do err");
                 failed += 1;
             } else {
                 let mut ok = true;
@@ -195,7 +195,7 @@ fn main() {
                 let (n, e1) = resp.Body.Read(&mut dst);
                 let part = dst.slice(0, n);
                 if !(e1.IsNil() && slice_eq(&part, b"part1")) {
-                    Println!("[ 3] ctx cancel mid-body       FAIL first read");
+                    fmt::Println!("[ 3] ctx cancel mid-body       FAIL first read");
                     ok = false;
                 }
                 // Cancel from another goroutine after this read parks.
@@ -207,12 +207,12 @@ fn main() {
                 });
                 let (_n2, e2) = resp.Body.Read(&mut dst);
                 if e2.IsNil() {
-                    Println!("[ 3] ctx cancel mid-body       FAIL read after cancel returned nil err");
+                    fmt::Println!("[ 3] ctx cancel mid-body       FAIL read after cancel returned nil err");
                     ok = false;
                 }
                 let _ = resp.Body.Close();
                 if ok {
-                    Println!("[ 3] ctx cancel mid-body       PASS");
+                    fmt::Println!("[ 3] ctx cancel mid-body       PASS");
                 } else {
                     failed += 1;
                 }

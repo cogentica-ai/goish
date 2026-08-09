@@ -15,11 +15,12 @@ extern crate goish;
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::math::rand;
 use goish::strconv;
 use goish::syscall;
 use goish::types::{byte, int};
-use goish::{slice, Println};
+use goish::{slice};
 
 const GOLDEN: &str = include_str!(
     "../src/math/rand/testdata/golden.json"
@@ -137,7 +138,7 @@ fn check_int63() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             let got = r.Int63();
             if got as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    Int63 MISMATCH seed=", seed, " idx=", i,
                     " got=", got, " want=", *want as i64);
                 ok = false;
@@ -154,7 +155,7 @@ fn check_uint64() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             let got = r.Uint64();
             if got as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    Uint64 MISMATCH seed=", seed, " idx=", i,
                     " got=", got, " want=", *want as u64);
                 ok = false;
@@ -171,7 +172,7 @@ fn check_uint32() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             let got = r.Uint32();
             if got as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    Uint32 MISMATCH seed=", seed, " idx=", i,
                     " got=", got as u64, " want=", *want as u32 as u64);
                 ok = false;
@@ -188,7 +189,7 @@ fn check_int31() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             let got = r.Int31();
             if got as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    Int31 MISMATCH seed=", seed, " idx=", i,
                     " got=", got as i64, " want=", *want as i64);
                 ok = false;
@@ -205,7 +206,7 @@ fn check_float64() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             let got_bits = r.Float64().to_bits();
             if got_bits as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    Float64-bits MISMATCH seed=", seed, " idx=", i,
                     " got=", got_bits, " want=", *want as u64);
                 ok = false;
@@ -222,7 +223,7 @@ fn check_float32() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             let got_bits = r.Float32().to_bits();
             if got_bits as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    Float32-bits MISMATCH seed=", seed, " idx=", i,
                     " got=", got_bits as u64, " want=", *want as u32 as u64);
                 ok = false;
@@ -239,7 +240,7 @@ fn check_int63n() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             let got = r.Int63n(100);
             if got as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    Int63n MISMATCH seed=", seed, " idx=", i,
                     " got=", got, " want=", *want as i64);
                 ok = false;
@@ -256,7 +257,7 @@ fn check_int31n() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             let got = r.Int31n(100);
             if got as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    Int31n MISMATCH seed=", seed, " idx=", i,
                     " got=", got as i64, " want=", *want as i64);
                 ok = false;
@@ -273,7 +274,7 @@ fn check_intn() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             let got = r.Intn(100);
             if got as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    Intn MISMATCH seed=", seed, " idx=", i,
                     " got=", got, " want=", *want as i64);
                 ok = false;
@@ -291,7 +292,7 @@ fn check_perm() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             let g: i64 = got[i as int];
             if g as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    Perm MISMATCH seed=", seed, " idx=", i,
                     " got=", g, " want=", *want as i64);
                 ok = false;
@@ -315,7 +316,7 @@ fn check_shuffle() -> bool {
         });
         for (i, want) in want_row.iter().enumerate() {
             if a[i] as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    Shuffle MISMATCH seed=", seed, " idx=", i,
                     " got=", a[i], " want=", *want as i64);
                 ok = false;
@@ -334,7 +335,7 @@ fn check_read() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             let g: u8 = buf[i as int];
             if g as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    Read MISMATCH seed=", seed, " idx=", i,
                     " got=", g as u64, " want=", *want as u64);
                 ok = false;
@@ -351,7 +352,7 @@ fn check_normfloat64() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             let got_bits = r.NormFloat64().to_bits();
             if got_bits as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    NormFloat64-bits MISMATCH seed=", seed, " idx=", i,
                     " got=", got_bits, " want=", *want as u64);
                 ok = false;
@@ -368,7 +369,7 @@ fn check_expfloat64() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             let got_bits = r.ExpFloat64().to_bits();
             if got_bits as i128 != *want {
-                Println!(
+                fmt::Println!(
                     "    ExpFloat64-bits MISMATCH seed=", seed, " idx=", i,
                     " got=", got_bits, " want=", *want as u64);
                 ok = false;
@@ -399,16 +400,16 @@ fn main() {
     ];
     for (name, f) in cases.iter() {
         if f() {
-            Println!("[ ok ] math/rand bit-identical: ", *name);
+            fmt::Println!("[ ok ] math/rand bit-identical: ", *name);
         } else {
-            Println!("[FAIL] math/rand bit-identical: ", *name);
+            fmt::Println!("[FAIL] math/rand bit-identical: ", *name);
             failed += 1;
         }
     }
     if failed == 0 {
-        Println!("math_rand_golden: ALL PASS (14 methods)");
+        fmt::Println!("math_rand_golden: ALL PASS (14 methods)");
     } else {
-        Println!("math_rand_golden: ", failed as i64, " FAILED");
+        fmt::Println!("math_rand_golden: ", failed as i64, " FAILED");
         syscall::Exit(1);
     }
 }

@@ -8,6 +8,7 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::error;
 use goish::bytes;
 use goish::crypto::cipher;
@@ -16,7 +17,7 @@ use goish::errors;
 use goish::io;
 use goish::io::{Closer, Reader, Writer};
 use goish::types::byte;
-use goish::{slice, syscall, Println};
+use goish::{slice, syscall};
 
 #[goish::main]
 fn main() {
@@ -33,7 +34,7 @@ fn main() {
         ]);
         let (cipher_opt, err) = rc4::NewCipher(key);
         if !err.IsNil() || cipher_opt.is_none() {
-            Println!("[ 1] StreamReader cypherpunk    FAIL setup");
+            fmt::Println!("[ 1] StreamReader cypherpunk    FAIL setup");
             failed += 1;
         } else {
             // Provide ciphertext to the reader; XORKeyStream re-XORs to
@@ -49,9 +50,9 @@ fn main() {
             let mut got = out.__into_vec();
             got.truncate(n as usize);
             if rerr.IsNil() && got == alloc::vec![0u8; 8] {
-                Println!("[ 1] StreamReader cypherpunk    PASS");
+                fmt::Println!("[ 1] StreamReader cypherpunk    PASS");
             } else {
-                Println!("[ 1] StreamReader cypherpunk    FAIL");
+                fmt::Println!("[ 1] StreamReader cypherpunk    FAIL");
                 failed += 1;
             }
         }
@@ -95,9 +96,9 @@ fn main() {
         let (n2, _) = sr.Read(&mut buf2);
         got.extend_from_slice(&buf2.__into_vec()[..n2 as usize]);
         if got == alloc::vec![0u8; 16] {
-            Println!("[ 2] StreamReader split reads   PASS");
+            fmt::Println!("[ 2] StreamReader split reads   PASS");
         } else {
-            Println!("[ 2] StreamReader split reads   FAIL");
+            fmt::Println!("[ 2] StreamReader split reads   FAIL");
             failed += 1;
         }
     }
@@ -114,9 +115,9 @@ fn main() {
         let mut sr = cipher::StreamReader { S: cipher_opt.unwrap(), R: r };
         let (got, err) = io::ReadAll(&mut sr);
         if err.IsNil() && got.__into_vec() == alloc::vec![0u8; 8] {
-            Println!("[ 3] StreamReader ReadAll       PASS");
+            fmt::Println!("[ 3] StreamReader ReadAll       PASS");
         } else {
-            Println!("[ 3] StreamReader ReadAll       FAIL");
+            fmt::Println!("[ 3] StreamReader ReadAll       FAIL");
             failed += 1;
         }
     }
@@ -138,9 +139,9 @@ fn main() {
         let want = alloc::vec![0x74, 0x94, 0xc2, 0xe7, 0x10, 0x4b, 0x08, 0x79];
         let got = sw.W.Bytes().__into_vec();
         if werr.IsNil() && n == 8 && got == want {
-            Println!("[ 4] StreamWriter encrypt       PASS");
+            fmt::Println!("[ 4] StreamWriter encrypt       PASS");
         } else {
-            Println!("[ 4] StreamWriter encrypt       FAIL");
+            fmt::Println!("[ 4] StreamWriter encrypt       FAIL");
             failed += 1;
         }
     }
@@ -166,9 +167,9 @@ fn main() {
         let want = alloc::vec![0x74, 0x94, 0xc2, 0xe7, 0x10, 0x4b, 0x08, 0x79];
         let got = sw.W.Bytes().__into_vec();
         if got == want {
-            Println!("[ 5] StreamWriter split writes  PASS");
+            fmt::Println!("[ 5] StreamWriter split writes  PASS");
         } else {
-            Println!("[ 5] StreamWriter split writes  FAIL");
+            fmt::Println!("[ 5] StreamWriter split writes  FAIL");
             failed += 1;
         }
     }
@@ -202,9 +203,9 @@ fn main() {
         let mut sr = cipher::StreamReader { S: c_dec.unwrap(), R: r };
         let (recovered, err) = io::ReadAll(&mut sr);
         if err.IsNil() && recovered.__into_vec() == plain {
-            Println!("[ 6] StreamWriter→Reader RT     PASS");
+            fmt::Println!("[ 6] StreamWriter→Reader RT     PASS");
         } else {
-            Println!("[ 6] StreamWriter→Reader RT     FAIL");
+            fmt::Println!("[ 6] StreamWriter→Reader RT     FAIL");
             failed += 1;
         }
     }
@@ -221,9 +222,9 @@ fn main() {
             goish::slice::__from_vec(alloc::vec![0u8; 4]);
         let (n, err) = sr.Read(&mut buf);
         if n == 0 && goish::errors::Is(err.clone(), io::EOF) {
-            Println!("[ 7] StreamReader empty src     PASS");
+            fmt::Println!("[ 7] StreamReader empty src     PASS");
         } else {
-            Println!("[ 7] StreamReader empty src     FAIL");
+            fmt::Println!("[ 7] StreamReader empty src     FAIL");
             failed += 1;
         }
     }
@@ -260,18 +261,18 @@ fn main() {
         let _ = sw.Write(goish::slice::__from_vec(alloc::vec![1u8, 2, 3]));
         let cerr = sw.Close();
         if cerr.IsNil() && sw.W.closed && sw.W.buf.len() == 3 {
-            Println!("[ 8] StreamWriter::Close fwd    PASS");
+            fmt::Println!("[ 8] StreamWriter::Close fwd    PASS");
         } else {
-            Println!("[ 8] StreamWriter::Close fwd    FAIL");
+            fmt::Println!("[ 8] StreamWriter::Close fwd    FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

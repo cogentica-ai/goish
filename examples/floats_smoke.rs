@@ -3,7 +3,8 @@
 #![no_std]
 #![no_main]
 
-use goish::{errors, float64, nil, slice, strconv, syscall, Sprintf};
+use goish::fmt;
+use goish::{errors, float64, nil, slice, strconv, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -142,16 +143,16 @@ fn main() {
 
     // ─── fmt::Format integration: %v / %g / %f / %e via Sprintf ───────
 
-    let s = Sprintf!("%v", 1.5_f64);
+    let s = fmt::Sprintf!("%v", 1.5_f64);
     check(s == "1.5", b"floats: Sprintf %v wrong\n");
 
-    let s = Sprintf!("%g", 0.001_f64);
+    let s = fmt::Sprintf!("%g", 0.001_f64);
     check(s == "0.001", b"floats: Sprintf %g wrong\n");
 
-    let s = Sprintf!("%f", 3.14_f64);
+    let s = fmt::Sprintf!("%f", 3.14_f64);
     check(s == "3.14", b"floats: Sprintf %f wrong\n");
 
-    let s = Sprintf!("%e", 1234.5_f64);
+    let s = fmt::Sprintf!("%e", 1234.5_f64);
     check(s == "1.2345e+03", b"floats: Sprintf %e wrong\n");
 
     const OK: &[u8] = b"floats: ok\n";

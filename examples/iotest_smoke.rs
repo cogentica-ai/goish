@@ -8,6 +8,7 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::convert;
 use goish::errors;
@@ -17,7 +18,7 @@ use goish::testing::iotest::{
     DataErrReader, ErrReader, ErrTimeout, HalfReader, OneByteReader, TimeoutReader,
 };
 use goish::types::byte;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -30,9 +31,9 @@ fn main() {
         let mut b: slice<byte> = slice::__from_vec(alloc::vec![0u8; 3]);
         let (n, e) = obr.Read(&mut b);
         if n == 1 && e.IsNil() && b[0] == b'H' {
-            Println!("[ 1] OneByteReader basic     PASS");
+            fmt::Println!("[ 1] OneByteReader basic     PASS");
         } else {
-            Println!("[ 1] OneByteReader basic     FAIL n={}", n);
+            fmt::Println!("[ 1] OneByteReader basic     FAIL n={}", n);
             failed += 1;
         }
     }
@@ -49,19 +50,19 @@ fn main() {
                 if errors::Is(e, io::EOF) {
                     break;
                 }
-                Println!("[ 2] OneByteReader drain     FAIL unexpected err");
+                fmt::Println!("[ 2] OneByteReader drain     FAIL unexpected err");
                 syscall::Exit(1);
             }
             if n != 1 {
-                Println!("[ 2] OneByteReader drain     FAIL got n={}", n);
+                fmt::Println!("[ 2] OneByteReader drain     FAIL got n={}", n);
                 syscall::Exit(1);
             }
             got.push(b[0]);
         }
         if got == alloc::vec![b'a', b'b', b'c'] {
-            Println!("[ 2] OneByteReader drain     PASS");
+            fmt::Println!("[ 2] OneByteReader drain     PASS");
         } else {
-            Println!("[ 2] OneByteReader drain     FAIL");
+            fmt::Println!("[ 2] OneByteReader drain     FAIL");
             failed += 1;
         }
     }
@@ -74,9 +75,9 @@ fn main() {
         // (4+1)/2 == 2 bytes.
         let (n, e) = hr.Read(&mut b);
         if n == 2 && e.IsNil() && b[0] == b'A' && b[1] == b'B' {
-            Println!("[ 3] HalfReader 2 of 4       PASS");
+            fmt::Println!("[ 3] HalfReader 2 of 4       PASS");
         } else {
-            Println!("[ 3] HalfReader 2 of 4       FAIL n={}", n);
+            fmt::Println!("[ 3] HalfReader 2 of 4       FAIL n={}", n);
             failed += 1;
         }
     }
@@ -88,9 +89,9 @@ fn main() {
         let mut b: slice<byte> = slice::__from_vec(alloc::vec![0u8; 1]);
         let (n, e) = hr.Read(&mut b);
         if n == 1 && e.IsNil() && b[0] == b'x' {
-            Println!("[ 4] HalfReader 1 of 1       PASS");
+            fmt::Println!("[ 4] HalfReader 1 of 1       PASS");
         } else {
-            Println!("[ 4] HalfReader 1 of 1       FAIL n={}", n);
+            fmt::Println!("[ 4] HalfReader 1 of 1       FAIL n={}", n);
             failed += 1;
         }
     }
@@ -105,9 +106,9 @@ fn main() {
         // First call succeeds, second returns ErrTimeout (count == 2).
         let __ev_timeout_msg: goish::error = ErrTimeout.into(); let timeout_msg = __ev_timeout_msg.Error();
         if n1 > 0 && e1.IsNil() && n2 == 0 && !e2.IsNil() && e2.Error() == timeout_msg {
-            Println!("[ 5] TimeoutReader 2nd call  PASS");
+            fmt::Println!("[ 5] TimeoutReader 2nd call  PASS");
         } else {
-            Println!("[ 5] TimeoutReader 2nd call  FAIL");
+            fmt::Println!("[ 5] TimeoutReader 2nd call  FAIL");
             failed += 1;
         }
     }
@@ -121,9 +122,9 @@ fn main() {
         let (_n2, _e2) = tor.Read(&mut b); // ErrTimeout
         let (n3, e3) = tor.Read(&mut b);
         if n3 > 0 && e3.IsNil() {
-            Println!("[ 6] TimeoutReader 3rd call  PASS");
+            fmt::Println!("[ 6] TimeoutReader 3rd call  PASS");
         } else {
-            Println!("[ 6] TimeoutReader 3rd call  FAIL n={}", n3);
+            fmt::Println!("[ 6] TimeoutReader 3rd call  FAIL n={}", n3);
             failed += 1;
         }
     }
@@ -135,9 +136,9 @@ fn main() {
         let mut b: slice<byte> = slice::__from_vec(alloc::vec![0u8; 4]);
         let (n, e) = er.Read(&mut b);
         if n == 0 && e.Error() == sentinel.Error() {
-            Println!("[ 7] ErrReader returns err   PASS");
+            fmt::Println!("[ 7] ErrReader returns err   PASS");
         } else {
-            Println!("[ 7] ErrReader returns err   FAIL");
+            fmt::Println!("[ 7] ErrReader returns err   FAIL");
             failed += 1;
         }
     }
@@ -148,9 +149,9 @@ fn main() {
         let mut b: slice<byte> = slice::__from_vec(alloc::vec![0u8; 4]);
         let (n, e) = er.Read(&mut b);
         if n == 0 && errors::Is(e, io::EOF) {
-            Println!("[ 8] ErrReader EOF           PASS");
+            fmt::Println!("[ 8] ErrReader EOF           PASS");
         } else {
-            Println!("[ 8] ErrReader EOF           FAIL");
+            fmt::Println!("[ 8] ErrReader EOF           FAIL");
             failed += 1;
         }
     }
@@ -178,9 +179,9 @@ fn main() {
         let want = convert::bytes("Hello, World!");
         let want_raw: &[byte] = &want;
         if last_n > 0 && errors::Is(last_err, io::EOF) && got.as_slice() == want_raw {
-            Println!("[ 9] DataErrReader drain     PASS");
+            fmt::Println!("[ 9] DataErrReader drain     PASS");
         } else {
-            Println!("[ 9] DataErrReader drain     FAIL last_n={}", last_n);
+            fmt::Println!("[ 9] DataErrReader drain     FAIL last_n={}", last_n);
             failed += 1;
         }
     }
@@ -192,9 +193,9 @@ fn main() {
         let mut b: slice<byte> = slice::__from_vec(alloc::vec![0u8; 5]);
         let (n, e) = der.Read(&mut b);
         if n == 0 && errors::Is(e, io::EOF) {
-            Println!("[10] DataErrReader empty     PASS");
+            fmt::Println!("[10] DataErrReader empty     PASS");
         } else {
-            Println!("[10] DataErrReader empty     FAIL n={}", n);
+            fmt::Println!("[10] DataErrReader empty     FAIL n={}", n);
             failed += 1;
         }
     }
@@ -204,18 +205,18 @@ fn main() {
         let e1: goish::error = ErrTimeout.into();
         let e2: goish::error = ErrTimeout.into();
         if e1.Error() == string("timeout") && e2.Error() == string("timeout") {
-            Println!("[11] ErrTimeout message      PASS");
+            fmt::Println!("[11] ErrTimeout message      PASS");
         } else {
-            Println!("[11] ErrTimeout message      FAIL");
+            fmt::Println!("[11] ErrTimeout message      FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 11/11");
+        fmt::Println!("ok 11/11");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 11");
+        fmt::Println!("FAIL", failed, "of 11");
         syscall::Exit(1);
     }
 }

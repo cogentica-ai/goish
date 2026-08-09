@@ -62,6 +62,7 @@ use alloc::sync::Arc;
 
 use goish::context;
 use goish::crypto::tls;
+use goish::fmt;
 use goish::io;
 use goish::net;
 use goish::net::http;
@@ -74,8 +75,8 @@ use goish::strings;
 use goish::sync::atomic;
 use goish::sync::Mutex;
 use goish::{
-    append, bytes, chan, error, go, int, len, make, map, nil, range, select, slice, string,
-    syscall, time, Sprintf,
+    append, byte, bytes, chan, error, go, int, len, make, map, nil, range, select, slice, string,
+    syscall, time,
 };
 
 // ─── configuration model ────────────────────────────────────────────
@@ -156,7 +157,7 @@ fn tokenize(src: string) -> slice<string> {
             i += 1;
             continue;
         }
-        let mut word = slice!([]goish::byte {});
+        let mut word = slice!([]byte {});
         while i < n {
             let d = b[i];
             if d == b' '
@@ -396,7 +397,7 @@ fn serveOne(
     };
     // combined-ish access log
     let (ip, _, _) = strings::Cut(r.RemoteAddr.clone(), ":");
-    goish::Printf!(
+    fmt::Printf!(
         "%s - - [%s] \"%s %s %s\" %d %d\n",
         ip,
         start.Format("02/Jan/2006:15:04:05"),
@@ -422,7 +423,7 @@ fn serveStatic(
         return errorPage(w, 403);
     }
     // `root` semantics: file = root + full URI path.
-    let fpath = Sprintf!("%s%s", loc.Root, path);
+    let fpath = fmt::Sprintf!("%s%s", loc.Root, path);
     let (fi, serr) = os::Stat(fpath.clone());
     if serr != nil {
         return errorPage(w, 404);
@@ -430,10 +431,10 @@ fn serveStatic(
     if fi.IsDir() {
         if !strings::HasSuffix(path.clone(), "/") {
             // nginx replies 301 with the slash-terminated URI.
-            w.Header().Set("Location", Sprintf!("%s/", path));
+            w.Header().Set("Location", fmt::Sprintf!("%s/", path));
             return errorPage(w, 301);
         }
-        let ipath = Sprintf!("%s%s", fpath, loc.Index);
+        let ipath = fmt::Sprintf!("%s%s", fpath, loc.Index);
         let (ifi, ierr) = os::Stat(ipath.clone());
         if ierr == nil && !ifi.IsDir() {
             return sendFile(cfg, w, ipath);
@@ -489,7 +490,7 @@ fn sendListing(
         return errorPage(w, 500);
     }
     let mut b = strings::Builder::new();
-    let _ = b.WriteString(Sprintf!(
+    let _ = b.WriteString(fmt::Sprintf!(
         "<html>\r\n<head><title>Index of %s</title></head>\r\n<body>\r\n<h1>Index of %s</h1><hr><pre><a href=\"../\">../</a>\n",
         urlpath.clone(),
         urlpath
@@ -497,9 +498,9 @@ fn sendListing(
     for (_, e) in range!(&entries) {
         let mut name = e.Name();
         if e.IsDir() {
-            name = Sprintf!("%s/", name);
+            name = fmt::Sprintf!("%s/", name);
         }
-        let _ = b.WriteString(Sprintf!("<a href=\"%s\">%s</a>\n", name.clone(), name));
+        let _ = b.WriteString(fmt::Sprintf!("<a href=\"%s\">%s</a>\n", name.clone(), name));
     }
     let _ = b.WriteString("</pre><hr></body>\r\n</html>\r\n");
     let body = bytes(b.String());
@@ -514,7 +515,7 @@ fn sendListing(
 /// nginx-style error / redirect page.
 fn errorPage(w: &(dyn ResponseWriter + Send + Sync + 'static), code: int) -> (int, int) {
     let text = http::StatusText(code);
-    let body = bytes(Sprintf!(
+    let body = bytes(fmt::Sprintf!(
         "<html>\r\n<head><title>%d %s</title></head>\r\n<body>\r\n<center><h1>%d %s</h1></center>\r\n<hr><center>goginx/0.1</center>\r\n</body>\r\n</html>\r\n",
         code,
         text.clone(),
@@ -582,9 +583,9 @@ fn proxyTo(
         let addr = pool[(rr_start + attempt) % n].clone();
         attempt += 1;
 
-        let mut url = Sprintf!("http://%s%s", addr, r.URL.Path.clone());
+        let mut url = fmt::Sprintf!("http://%s%s", addr, r.URL.Path.clone());
         if r.URL.RawQuery.Len() > 0 {
-            url = Sprintf!("%s?%s", url, r.URL.RawQuery.clone());
+            url = fmt::Sprintf!("%s?%s", url, r.URL.RawQuery.clone());
         }
         let (mut outreq, rqerr) = http::NewRequest(r.Method.clone(), url, r.Body.clone());
         if rqerr != nil {
@@ -605,7 +606,7 @@ fn proxyTo(
         if prior.Len() > 0 {
             outreq
                 .Header
-                .Set("X-Forwarded-For", Sprintf!("%s, %s", prior, client_ip));
+                .Set("X-Forwarded-For", fmt::Sprintf!("%s, %s", prior, client_ip));
         } else {
             outreq.Header.Set("X-Forwarded-For", client_ip);
         }
@@ -660,7 +661,7 @@ struct ListenGroup {
 fn groupListens(cfg: &Config) -> slice<ListenGroup> {
     let mut groups = slice!([]ListenGroup {});
     for (i, sc) in range!(&cfg.Servers) {
-        let key = Sprintf!("%s|%t", sc.Listen.clone(), sc.TLS);
+        let key = fmt::Sprintf!("%s|%t", sc.Listen.clone(), sc.TLS);
         let mut found = false;
         let mut gi: int = 0;
         for (j, g) in range!(&groups) {
@@ -732,7 +733,7 @@ fn startServers(cfg: &Arc<Config>) -> (slice<string>, slice<Arc<http::Server>>, 
     for (_, g) in range!(&groups) {
         let mut addr = g.Addr.clone();
         if !strings::Contains(addr.clone(), ":") {
-            addr = Sprintf!(":%s", addr);
+            addr = fmt::Sprintf!(":%s", addr);
         }
         let (ln, err) = if g.ReusePort {
             listenReusePort(addr.clone())
@@ -743,7 +744,7 @@ fn startServers(cfg: &Arc<Config>) -> (slice<string>, slice<Arc<http::Server>>, 
             return (bounds, servers, err);
         }
         let port = ln.Addr().Port;
-        let bound = Sprintf!("127.0.0.1:%d", port);
+        let bound = fmt::Sprintf!("127.0.0.1:%d", port);
         bounds = append!(bounds, bound.clone());
 
         let mux = http::ServeMux::new();
@@ -766,7 +767,7 @@ fn startServers(cfg: &Arc<Config>) -> (slice<string>, slice<Arc<http::Server>>, 
         } else {
             string("http")
         };
-        goish::Printf!("goginx: %s server on %s\n", scheme, bound);
+        fmt::Printf!("goginx: %s server on %s\n", scheme, bound);
         let run = srv.clone();
         if is_tls {
             let cert = g.CertFile.clone();
@@ -789,7 +790,7 @@ fn startServers(cfg: &Arc<Config>) -> (slice<string>, slice<Arc<http::Server>>, 
             if herr != nil {
                 return (bounds, servers, herr);
             }
-            let real_addr = Sprintf!("%s:%d", host, port);
+            let real_addr = fmt::Sprintf!("%s:%d", host, port);
             let workers = goish::runtime::NumCPU();
             for _ in 1..workers {
                 let (ln2, err2) = listenReusePort(real_addr.clone());
@@ -801,7 +802,7 @@ fn startServers(cfg: &Arc<Config>) -> (slice<string>, slice<Arc<http::Server>>, 
                     let _ = run2.Serve(ln2);
                 });
             }
-            goish::Printf!("goginx: reuseport x%d on %s\n", workers, real_addr);
+            fmt::Printf!("goginx: reuseport x%d on %s\n", workers, real_addr);
         }
     }
     (bounds, servers, nil.into())
@@ -816,7 +817,7 @@ fn installSignalDrain(servers: slice<Arc<http::Server>>, done: chan<bool>) {
     );
     go!(move || {
         let _ = sig_ctx.Done().Recv();
-        goish::Printf!("goginx: signal received, draining\n");
+        fmt::Printf!("goginx: signal received, draining\n");
         for (_, s) in range!(&servers) {
             let _ = s.clone().Shutdown(time::Second * 10);
         }
@@ -839,19 +840,19 @@ fn main() {
 fn runStandalone(conf_path: string) {
     let (data, err) = os::ReadFile(conf_path.clone());
     if err != nil {
-        goish::Printf!("goginx: %s: %v\n", conf_path, err);
+        fmt::Printf!("goginx: %s: %v\n", conf_path, err);
         os::Exit(1);
     }
     let cfg = Arc::new(loadConfig(string(data)));
     let (_, servers, lerr) = startServers(&cfg);
     if lerr != nil {
-        goish::Printf!("goginx: listen: %v\n", lerr);
+        fmt::Printf!("goginx: listen: %v\n", lerr);
         os::Exit(1);
     }
     let done = make!(chan bool);
     installSignalDrain(servers, done.clone());
     let _ = done.Recv();
-    goish::Printf!("goginx: bye\n");
+    fmt::Printf!("goginx: bye\n");
 }
 
 // ─── self-test ──────────────────────────────────────────────────────
@@ -861,22 +862,22 @@ static FAILED: atomic::Int64 = atomic::Int64::new(0);
 
 fn pass(name: &'static str) {
     PASSED.Add(1);
-    goish::Printf!("PASS: %s\n", name);
+    fmt::Printf!("PASS: %s\n", name);
 }
 
 fn fail<S: Into<string>>(msg: S) {
     FAILED.Add(1);
-    goish::Printf!("FAIL: %s\n", msg.into());
+    fmt::Printf!("FAIL: %s\n", msg.into());
 }
 
 fn finish() {
     let p = PASSED.Load();
     let f = FAILED.Load();
     if f == 0 {
-        goish::Printf!("GOGINX_OK %d/%d\n", p, p);
+        fmt::Printf!("GOGINX_OK %d/%d\n", p, p);
         os::Exit(0);
     }
-    goish::Printf!("GOGINX_FAIL %d failures\n", f);
+    fmt::Printf!("GOGINX_FAIL %d failures\n", f);
     os::Exit(1);
 }
 
@@ -884,7 +885,7 @@ fn finish() {
 fn get(url: string) -> (int, string, string) {
     let (mut resp, err) = http::Get(url.clone());
     if err != nil {
-        return (-1, Sprintf!("get %s: %v", url, err), string(""));
+        return (-1, fmt::Sprintf!("get %s: %v", url, err), string(""));
     }
     let (body, _) = io::ReadAll(&mut resp.Body);
     let _ = io::Closer::Close(&mut resp.Body);
@@ -904,9 +905,9 @@ fn rawRoundtrip(addr: string, req: string) -> (int, string) {
     }
     let _ = conn.Write(bytes(req));
     let _ = conn.SetReadDeadline(time::Now().Add(time::Second * 3));
-    let mut out = slice!([]goish::byte {});
+    let mut out = slice!([]byte {});
     loop {
-        let mut buf = make!([]goish::byte, 4096);
+        let mut buf = make!([]byte, 4096);
         let (nr, rerr) = conn.Read(&mut buf);
         let mut i: int = 0;
         while i < nr {
@@ -932,12 +933,12 @@ fn tlsRoundtrip(addr: string, req: string) -> (int, string) {
     };
     let (mut conn, err) = tls::Dial("tcp", addr, &cfg);
     if err != nil {
-        return (-1, Sprintf!("tls dial: %v", err));
+        return (-1, fmt::Sprintf!("tls dial: %v", err));
     }
     let _ = conn.Write(bytes(req));
-    let mut out = slice!([]goish::byte {});
+    let mut out = slice!([]byte {});
     loop {
-        let mut buf = make!([]goish::byte, 8192);
+        let mut buf = make!([]byte, 8192);
         let (nr, rerr) = conn.Read(&mut buf);
         let mut i: int = 0;
         while i < nr {
@@ -973,7 +974,7 @@ fn startBackend(name: &'static str) -> string {
     let mux = http::ServeMux::new();
     let label = string(name);
     mux.HandleFunc("/", move |w, r| {
-        let _ = w.Write(bytes(Sprintf!(
+        let _ = w.Write(bytes(fmt::Sprintf!(
             "%s xff=%s xfh=%s path=%s",
             label.clone(),
             r.Header.Get("X-Forwarded-For"),
@@ -983,10 +984,10 @@ fn startBackend(name: &'static str) -> string {
     });
     let (ln, err) = net::Listen("tcp", "127.0.0.1:0");
     if err != nil {
-        fail(Sprintf!("backend listen: %v", err));
+        fail(fmt::Sprintf!("backend listen: %v", err));
         return string("");
     }
-    let addr = Sprintf!("127.0.0.1:%d", ln.Addr().Port);
+    let addr = fmt::Sprintf!("127.0.0.1:%d", ln.Addr().Port);
     let mut s = http::Server::default();
     s.Handler = Arc::new(mux);
     let srv = Arc::new(s);
@@ -1002,7 +1003,7 @@ fn deadAddr() -> string {
     if err != nil {
         return string("127.0.0.1:9");
     }
-    let addr = Sprintf!("127.0.0.1:%d", ln.Addr().Port);
+    let addr = fmt::Sprintf!("127.0.0.1:%d", ln.Addr().Port);
     let _ = ln.Close();
     addr
 }
@@ -1062,38 +1063,38 @@ rTXGcd5XGWoS0+AF8t1cUw==
 ";
 
 fn selfTest() {
-    goish::Printf!("goginx self-test\n");
+    fmt::Printf!("goginx self-test\n");
 
     // ── build a doc tree + certs in a temp dir ──
     let (dir, terr) = os::MkdirTemp(os::TempDir(), "goginx-");
     if terr != nil {
-        fail(Sprintf!("MkdirTemp: %v", terr));
+        fail(fmt::Sprintf!("MkdirTemp: %v", terr));
         finish();
     }
-    let www_a = Sprintf!("%s/site-a", dir);
-    let www_b = Sprintf!("%s/site-b", dir);
-    let _ = os::MkdirAll(Sprintf!("%s/sub", www_a), 0o755);
-    let _ = os::MkdirAll(Sprintf!("%s/files", www_a), 0o755);
+    let www_a = fmt::Sprintf!("%s/site-a", dir);
+    let www_b = fmt::Sprintf!("%s/site-b", dir);
+    let _ = os::MkdirAll(fmt::Sprintf!("%s/sub", www_a), 0o755);
+    let _ = os::MkdirAll(fmt::Sprintf!("%s/files", www_a), 0o755);
     let _ = os::MkdirAll(www_b.clone(), 0o755);
-    let _ = os::WriteFile(Sprintf!("%s/index.html", www_a), bytes("<h1>site-a</h1>\n"), 0o644);
+    let _ = os::WriteFile(fmt::Sprintf!("%s/index.html", www_a), bytes("<h1>site-a</h1>\n"), 0o644);
     let _ = os::WriteFile(
-        Sprintf!("%s/hello.txt", www_a),
+        fmt::Sprintf!("%s/hello.txt", www_a),
         bytes("hello from goginx\n"),
         0o644,
     );
     let _ = os::WriteFile(
-        Sprintf!("%s/app.js", www_a),
+        fmt::Sprintf!("%s/app.js", www_a),
         bytes("console.log(\"goginx\");\n"),
         0o644,
     );
-    let _ = os::WriteFile(Sprintf!("%s/sub/index.html", www_a), bytes("sub index\n"), 0o644);
-    let _ = os::WriteFile(Sprintf!("%s/files/a.txt", www_a), bytes("A\n"), 0o644);
-    let _ = os::WriteFile(Sprintf!("%s/files/b.txt", www_a), bytes("B\n"), 0o644);
-    let _ = os::WriteFile(Sprintf!("%s/index.html", www_b), bytes("<h1>site-b</h1>\n"), 0o644);
+    let _ = os::WriteFile(fmt::Sprintf!("%s/sub/index.html", www_a), bytes("sub index\n"), 0o644);
+    let _ = os::WriteFile(fmt::Sprintf!("%s/files/a.txt", www_a), bytes("A\n"), 0o644);
+    let _ = os::WriteFile(fmt::Sprintf!("%s/files/b.txt", www_a), bytes("B\n"), 0o644);
+    let _ = os::WriteFile(fmt::Sprintf!("%s/index.html", www_b), bytes("<h1>site-b</h1>\n"), 0o644);
     // Outside every root — must never be reachable.
-    let _ = os::WriteFile(Sprintf!("%s/secret.txt", dir), bytes("TOPSECRET\n"), 0o644);
-    let cert_path = Sprintf!("%s/cert.pem", dir);
-    let key_path = Sprintf!("%s/key.pem", dir);
+    let _ = os::WriteFile(fmt::Sprintf!("%s/secret.txt", dir), bytes("TOPSECRET\n"), 0o644);
+    let cert_path = fmt::Sprintf!("%s/cert.pem", dir);
+    let key_path = fmt::Sprintf!("%s/key.pem", dir);
     let _ = os::WriteFile(cert_path.clone(), bytes(CERT_PEM), 0o644);
     let _ = os::WriteFile(key_path.clone(), bytes(KEY_PEM), 0o600);
 
@@ -1107,49 +1108,49 @@ fn selfTest() {
     let _ = cb.WriteString("# generated by the goginx self-test\n");
     let _ = cb.WriteString("events { worker_connections 1024; }\n");
     let _ = cb.WriteString("http {\n");
-    let _ = cb.WriteString(Sprintf!(
+    let _ = cb.WriteString(fmt::Sprintf!(
         "  upstream backend {\n    server %s;\n    server %s;\n  }\n",
         back_a,
         back_b
     ));
-    let _ = cb.WriteString(Sprintf!(
+    let _ = cb.WriteString(fmt::Sprintf!(
         "  upstream flaky {\n    server %s;\n    server %s;\n  }\n",
         dead,
         back_a
     ));
     let _ = cb.WriteString("  server {\n    listen 127.0.0.1:0;\n    server_name a.test;\n");
-    let _ = cb.WriteString(Sprintf!(
+    let _ = cb.WriteString(fmt::Sprintf!(
         "    location / { root %s; index index.html; }\n    location /files/ { root %s; autoindex on; }\n",
         www_a.clone(),
         www_a.clone()
     ));
     let _ = cb.WriteString("    location /api/ { proxy_pass http://backend; }\n");
     let _ = cb.WriteString("    location /flaky/ { proxy_pass http://flaky; }\n");
-    let _ = cb.WriteString(Sprintf!(
+    let _ = cb.WriteString(fmt::Sprintf!(
         "    location /down/ { proxy_pass http://%s; }\n  }\n",
         dead.clone()
     ));
     let _ = cb.WriteString("  server {\n    listen 127.0.0.1:0;\n    server_name b.test;\n");
-    let _ = cb.WriteString(Sprintf!(
+    let _ = cb.WriteString(fmt::Sprintf!(
         "    location / { root %s; index index.html; }\n  }\n",
         www_b.clone()
     ));
     let _ = cb.WriteString("  server {\n    listen 127.0.0.1:0 ssl;\n    server_name tls.test;\n");
-    let _ = cb.WriteString(Sprintf!(
+    let _ = cb.WriteString(fmt::Sprintf!(
         "    ssl_certificate %s;\n    ssl_certificate_key %s;\n",
         cert_path.clone(),
         key_path.clone()
     ));
-    let _ = cb.WriteString(Sprintf!(
+    let _ = cb.WriteString(fmt::Sprintf!(
         "    location / { root %s; index index.html; }\n  }\n}\n",
         www_a.clone()
     ));
-    let conf_path = Sprintf!("%s/goginx.conf", dir);
+    let conf_path = fmt::Sprintf!("%s/goginx.conf", dir);
     let _ = os::WriteFile(conf_path.clone(), bytes(cb.String()), 0o644);
 
     let (cdata, cerr) = os::ReadFile(conf_path.clone());
     if cerr != nil {
-        fail(Sprintf!("read conf: %v", cerr));
+        fail(fmt::Sprintf!("read conf: %v", cerr));
         finish();
     }
     let cfg = Arc::new(loadConfig(string(cdata)));
@@ -1158,7 +1159,7 @@ fn selfTest() {
     if len(&cfg.Servers) == 3 && len(&cfg.Upstreams) == 2 {
         pass("config parse: 3 server blocks, 2 upstreams");
     } else {
-        fail(Sprintf!(
+        fail(fmt::Sprintf!(
             "config parse: servers=%d upstreams=%d",
             len(&cfg.Servers),
             len(&cfg.Upstreams)
@@ -1168,7 +1169,7 @@ fn selfTest() {
     // ── boot ──
     let (bounds, servers, lerr) = startServers(&cfg);
     if lerr != nil || len(&bounds) != 2 {
-        fail(Sprintf!("startServers: %v (groups=%d)", lerr, len(&bounds)));
+        fail(fmt::Sprintf!("startServers: %v (groups=%d)", lerr, len(&bounds)));
         finish();
     }
     let plain = bounds[0].clone(); // a.test + b.test vhosts
@@ -1176,37 +1177,37 @@ fn selfTest() {
     time::Sleep(time::Millisecond * 50);
 
     // 2. static index + MIME
-    let (st, body, ct) = get(Sprintf!("http://%s/", plain));
+    let (st, body, ct) = get(fmt::Sprintf!("http://%s/", plain));
     if st == 200 && strings::Contains(body.clone(), "site-a") && strings::Contains(ct.clone(), "text/html")
     {
         pass("GET / -> 200 index.html, text/html");
     } else {
-        fail(Sprintf!("GET /: st=%d ct=%s body=%s", st, ct, body));
+        fail(fmt::Sprintf!("GET /: st=%d ct=%s body=%s", st, ct, body));
     }
 
     // 3. plain file + text/plain
-    let (st, body, ct) = get(Sprintf!("http://%s/hello.txt", plain));
+    let (st, body, ct) = get(fmt::Sprintf!("http://%s/hello.txt", plain));
     if st == 200 && body == "hello from goginx\n" && strings::Contains(ct.clone(), "text/plain") {
         pass("GET /hello.txt -> exact bytes, text/plain");
     } else {
-        fail(Sprintf!("hello.txt: st=%d ct=%s", st, ct));
+        fail(fmt::Sprintf!("hello.txt: st=%d ct=%s", st, ct));
     }
 
     // 4. MIME by extension
-    let (st, _, ct) = get(Sprintf!("http://%s/app.js", plain));
+    let (st, _, ct) = get(fmt::Sprintf!("http://%s/app.js", plain));
     if st == 200 && strings::Contains(ct.clone(), "application/javascript") {
         pass("GET /app.js -> application/javascript");
     } else {
-        fail(Sprintf!("app.js: st=%d ct=%s", st, ct));
+        fail(fmt::Sprintf!("app.js: st=%d ct=%s", st, ct));
     }
 
     // 5. nginx-style 404 page
-    let (st, body, _) = get(Sprintf!("http://%s/missing", plain));
+    let (st, body, _) = get(fmt::Sprintf!("http://%s/missing", plain));
     if st == 404 && strings::Contains(body.clone(), "404 Not Found") && strings::Contains(body.clone(), "goginx")
     {
         pass("GET /missing -> nginx-style 404 page");
     } else {
-        fail(Sprintf!("404 page: st=%d body=%s", st, body));
+        fail(fmt::Sprintf!("404 page: st=%d body=%s", st, body));
     }
 
     // 6. dot-dot traversal blocked
@@ -1217,7 +1218,7 @@ fn selfTest() {
     if st != 200 && !strings::Contains(body.clone(), "TOPSECRET") {
         pass("dot-dot traversal blocked");
     } else {
-        fail(Sprintf!("traversal: st=%d", st));
+        fail(fmt::Sprintf!("traversal: st=%d", st));
     }
 
     // 7. directory 301 redirect
@@ -1228,24 +1229,24 @@ fn selfTest() {
     if st == 301 && strings::Contains(body.clone(), "Location: /sub/") {
         pass("GET /sub -> 301 Location: /sub/");
     } else {
-        fail(Sprintf!("dir redirect: st=%d", st));
+        fail(fmt::Sprintf!("dir redirect: st=%d", st));
     }
 
     // 8. index resolution inside a subdirectory
-    let (st, body, _) = get(Sprintf!("http://%s/sub/", plain));
+    let (st, body, _) = get(fmt::Sprintf!("http://%s/sub/", plain));
     if st == 200 && strings::Contains(body.clone(), "sub index") {
         pass("GET /sub/ -> subdirectory index.html");
     } else {
-        fail(Sprintf!("sub index: st=%d", st));
+        fail(fmt::Sprintf!("sub index: st=%d", st));
     }
 
     // 9. autoindex listing
-    let (st, body, _) = get(Sprintf!("http://%s/files/", plain));
+    let (st, body, _) = get(fmt::Sprintf!("http://%s/files/", plain));
     if st == 200 && strings::Contains(body.clone(), "a.txt") && strings::Contains(body.clone(), "b.txt")
     {
         pass("autoindex on -> directory listing");
     } else {
-        fail(Sprintf!("autoindex: st=%d body=%s", st, body));
+        fail(fmt::Sprintf!("autoindex: st=%d body=%s", st, body));
     }
 
     // 10. upstream round-robin (4 requests -> 2 hits per backend)
@@ -1253,7 +1254,7 @@ fn selfTest() {
     let mut seen_b: int = 0;
     let mut k: int = 0;
     while k < 4 {
-        let (st, body, _) = get(Sprintf!("http://%s/api/ping", plain));
+        let (st, body, _) = get(fmt::Sprintf!("http://%s/api/ping", plain));
         if st == 200 {
             if strings::Contains(body.clone(), "backend-a") {
                 seen_a += 1;
@@ -1267,34 +1268,34 @@ fn selfTest() {
     if seen_a == 2 && seen_b == 2 {
         pass("proxy_pass round-robin: 2+2 across the pool");
     } else {
-        fail(Sprintf!("round-robin: a=%d b=%d", seen_a, seen_b));
+        fail(fmt::Sprintf!("round-robin: a=%d b=%d", seen_a, seen_b));
     }
 
     // 11. forwarding headers reach the upstream
-    let (st, body, _) = get(Sprintf!("http://%s/api/ping", plain));
+    let (st, body, _) = get(fmt::Sprintf!("http://%s/api/ping", plain));
     if st == 200
         && strings::Contains(body.clone(), "xff=127.0.0.1")
         && strings::Contains(body.clone(), "path=/api/ping")
     {
         pass("X-Forwarded-For + full path forwarded upstream");
     } else {
-        fail(Sprintf!("fwd headers: st=%d body=%s", st, body));
+        fail(fmt::Sprintf!("fwd headers: st=%d body=%s", st, body));
     }
 
     // 12. retry-next-upstream: first peer dead, second alive
-    let (st, body, _) = get(Sprintf!("http://%s/flaky/", plain));
+    let (st, body, _) = get(fmt::Sprintf!("http://%s/flaky/", plain));
     if st == 200 && strings::Contains(body.clone(), "backend-a") {
         pass("proxy_next_upstream: dead peer skipped");
     } else {
-        fail(Sprintf!("flaky: st=%d body=%s", st, body));
+        fail(fmt::Sprintf!("flaky: st=%d body=%s", st, body));
     }
 
     // 13. whole pool down -> 502
-    let (st, body, _) = get(Sprintf!("http://%s/down/", plain));
+    let (st, body, _) = get(fmt::Sprintf!("http://%s/down/", plain));
     if st == 502 && strings::Contains(body.clone(), "502 Bad Gateway") {
         pass("all upstreams down -> nginx-style 502");
     } else {
-        fail(Sprintf!("502: st=%d body=%s", st, body));
+        fail(fmt::Sprintf!("502: st=%d body=%s", st, body));
     }
 
     // 14. virtual hosts on one listener
@@ -1305,7 +1306,7 @@ fn selfTest() {
     if st == 200 && strings::Contains(body.clone(), "site-b") {
         pass("vhost: Host: b.test -> site-b root");
     } else {
-        fail(Sprintf!("vhost: st=%d", st));
+        fail(fmt::Sprintf!("vhost: st=%d", st));
     }
 
     // 15. HEAD suppression with correct Content-Length
@@ -1319,7 +1320,7 @@ fn selfTest() {
     {
         pass("HEAD -> headers + Content-Length, no body");
     } else {
-        fail(Sprintf!("HEAD: st=%d body=%s", st, body));
+        fail(fmt::Sprintf!("HEAD: st=%d body=%s", st, body));
     }
 
     // 16. TLS termination (listen ... ssl) — M32 server-side TLS 1.3
@@ -1330,7 +1331,7 @@ fn selfTest() {
     if st == 200 && strings::Contains(body.clone(), "site-a") {
         pass("listen ssl -> TLS 1.3 handshake + response");
     } else {
-        fail(Sprintf!("tls: st=%d body=%s", st, body));
+        fail(fmt::Sprintf!("tls: st=%d body=%s", st, body));
     }
 
     // 17. SIGTERM graceful drain closes every listener
@@ -1356,7 +1357,7 @@ fn selfTest() {
     if plain_refused && tls_refused {
         pass("SIGTERM drain: both listeners closed");
     } else {
-        fail(Sprintf!(
+        fail(fmt::Sprintf!(
             "drain: plain_refused=%t tls_refused=%t",
             plain_refused,
             tls_refused
@@ -1372,14 +1373,14 @@ fn selfTest() {
     let _ = rb.WriteString(
         "http {\n  server {\n    listen 127.0.0.1:0 reuseport;\n    server_name r.test;\n",
     );
-    let _ = rb.WriteString(Sprintf!(
+    let _ = rb.WriteString(fmt::Sprintf!(
         "    location / { root %s; index index.html; }\n  }\n}\n",
         www_a.clone()
     ));
     let rcfg = Arc::new(loadConfig(rb.String()));
     let (rbounds, rservers, rerr) = startServers(&rcfg);
     if rerr != nil {
-        fail(Sprintf!("reuseport boot: %v", rerr));
+        fail(fmt::Sprintf!("reuseport boot: %v", rerr));
     } else {
         let raddr = rbounds[0].clone();
         let mut ok_count = int(0);
@@ -1404,7 +1405,7 @@ fn selfTest() {
         if ok_count == total && refused {
             pass("reuseport: per-CPU listeners serve one port, Shutdown drains all");
         } else {
-            fail(Sprintf!(
+            fail(fmt::Sprintf!(
                 "reuseport: ok=%d/%d refused=%t",
                 ok_count,
                 total,

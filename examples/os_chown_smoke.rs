@@ -9,9 +9,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::os;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -27,9 +28,9 @@ fn main() {
     {
         let err = os::Chown(target.clone(), -1, -1);
         if err.IsNil() {
-            Println!("[ 1] Chown -1,-1 no-op         PASS");
+            fmt::Println!("[ 1] Chown -1,-1 no-op         PASS");
         } else {
-            Println!("[ 1] Chown -1,-1 no-op         FAIL");
+            fmt::Println!("[ 1] Chown -1,-1 no-op         FAIL");
             failed += 1;
         }
     }
@@ -38,9 +39,9 @@ fn main() {
     {
         let err = os::Lchown(target.clone(), -1, -1);
         if err.IsNil() {
-            Println!("[ 2] Lchown -1,-1 no-op        PASS");
+            fmt::Println!("[ 2] Lchown -1,-1 no-op        PASS");
         } else {
-            Println!("[ 2] Lchown -1,-1 no-op        FAIL");
+            fmt::Println!("[ 2] Lchown -1,-1 no-op        FAIL");
             failed += 1;
         }
     }
@@ -49,9 +50,9 @@ fn main() {
     {
         let err = os::Chown(string("/tmp/goish-chown-nonexistent-xyz"), -1, -1);
         if !err.IsNil() {
-            Println!("[ 3] Chown missing → err       PASS");
+            fmt::Println!("[ 3] Chown missing → err       PASS");
         } else {
-            Println!("[ 3] Chown missing → err       FAIL");
+            fmt::Println!("[ 3] Chown missing → err       FAIL");
             failed += 1;
         }
     }
@@ -60,9 +61,9 @@ fn main() {
     {
         let err = os::Lchown(string("/tmp/goish-chown-nonexistent-xyz"), -1, -1);
         if !err.IsNil() {
-            Println!("[ 4] Lchown missing → err      PASS");
+            fmt::Println!("[ 4] Lchown missing → err      PASS");
         } else {
-            Println!("[ 4] Lchown missing → err      FAIL");
+            fmt::Println!("[ 4] Lchown missing → err      FAIL");
             failed += 1;
         }
     }
@@ -74,9 +75,9 @@ fn main() {
         // Lchown on a symlink with -1,-1 should succeed (no-op).
         let err = os::Lchown(link, -1, -1);
         if err.IsNil() {
-            Println!("[ 5] Lchown symlink no-op      PASS");
+            fmt::Println!("[ 5] Lchown symlink no-op      PASS");
         } else {
-            Println!("[ 5] Lchown symlink no-op      FAIL");
+            fmt::Println!("[ 5] Lchown symlink no-op      FAIL");
             failed += 1;
         }
     }
@@ -84,10 +85,10 @@ fn main() {
     let _ = os::RemoveAll(dir);
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 5");
+        fmt::Println!("FAIL", failed, "of 5");
         syscall::Exit(1);
     }
 }

@@ -12,13 +12,14 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::os;
 use goish::time;
-use goish::{go, string, syscall, Println};
+use goish::{go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -57,9 +58,9 @@ fn main() {
         let has_b = goish::strings::Contains(body.clone(), string(">b.txt</a>"));
         let has_pre = goish::strings::Contains(body.clone(), string("<pre>"));
         if resp.StatusCode == 200 && ct == "text/html; charset=utf-8" && has_a && has_b && has_pre {
-            Println!("[ 1] dir index 200             PASS");
+            fmt::Println!("[ 1] dir index 200             PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 1] dir index 200             FAIL status={} ct={} a={} b={}",
                 resp.StatusCode, ct, has_a, has_b
             );
@@ -70,10 +71,10 @@ fn main() {
     let _ = srv_arc.Shutdown(time::Second);
 
     if failed == 0 {
-        Println!("ok 1/1");
+        fmt::Println!("ok 1/1");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 1", failed);
+        fmt::Println!("FAIL {} of 1", failed);
         syscall::Exit(1);
     }
 }

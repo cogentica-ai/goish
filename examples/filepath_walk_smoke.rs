@@ -9,11 +9,12 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::convert::bytes;
 use goish::errors;
 use goish::os;
 use goish::path::filepath;
-use goish::{nil, string, syscall, Println};
+use goish::{nil, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -41,9 +42,9 @@ fn main() {
             nil.into()
         });
         if err.IsNil() && count == 9 {
-            Println!("[ 1] WalkDir all entries       PASS");
+            fmt::Println!("[ 1] WalkDir all entries       PASS");
         } else {
-            Println!("[ 1] WalkDir all entries       FAIL count=", count);
+            fmt::Println!("[ 1] WalkDir all entries       FAIL count=", count);
             failed += 1;
         }
     }
@@ -59,9 +60,9 @@ fn main() {
         });
         // First entry is root itself.
         if paths.len() >= 2 && paths[0] == root && paths[1] == "/tmp/goish-walk-smoke/a.txt" {
-            Println!("[ 2] WalkDir root-first        PASS");
+            fmt::Println!("[ 2] WalkDir root-first        PASS");
         } else {
-            Println!("[ 2] WalkDir root-first        FAIL");
+            fmt::Println!("[ 2] WalkDir root-first        FAIL");
             failed += 1;
         }
     }
@@ -79,9 +80,9 @@ fn main() {
             nil.into()
         });
         if !visited_secret {
-            Println!("[ 3] WalkDir SkipDir skips     PASS");
+            fmt::Println!("[ 3] WalkDir SkipDir skips     PASS");
         } else {
-            Println!("[ 3] WalkDir SkipDir skips     FAIL");
+            fmt::Println!("[ 3] WalkDir SkipDir skips     FAIL");
             failed += 1;
         }
     }
@@ -97,9 +98,9 @@ fn main() {
             nil.into()
         });
         if err.IsNil() && count == 2 {
-            Println!("[ 4] WalkDir SkipAll bails     PASS");
+            fmt::Println!("[ 4] WalkDir SkipAll bails     PASS");
         } else {
-            Println!("[ 4] WalkDir SkipAll bails     FAIL count=", count);
+            fmt::Println!("[ 4] WalkDir SkipAll bails     FAIL count=", count);
             failed += 1;
         }
     }
@@ -116,9 +117,9 @@ fn main() {
             nil.into()
         });
         if !err.IsNil() && count == 3 {
-            Println!("[ 5] WalkDir error propagates  PASS");
+            fmt::Println!("[ 5] WalkDir error propagates  PASS");
         } else {
-            Println!("[ 5] WalkDir error propagates  FAIL");
+            fmt::Println!("[ 5] WalkDir error propagates  FAIL");
             failed += 1;
         }
     }
@@ -131,9 +132,9 @@ fn main() {
             nil.into()
         });
         if calls == 1 {
-            Println!("[ 6] WalkDir bad root reports  PASS");
+            fmt::Println!("[ 6] WalkDir bad root reports  PASS");
         } else {
-            Println!("[ 6] WalkDir bad root reports  FAIL calls=", calls);
+            fmt::Println!("[ 6] WalkDir bad root reports  FAIL calls=", calls);
             failed += 1;
         }
     }
@@ -148,9 +149,9 @@ fn main() {
             nil.into()
         });
         if err.IsNil() && count == 9 {
-            Println!("[ 7] Walk total nodes          PASS");
+            fmt::Println!("[ 7] Walk total nodes          PASS");
         } else {
-            Println!("[ 7] Walk total nodes          FAIL count=", count);
+            fmt::Println!("[ 7] Walk total nodes          FAIL count=", count);
             failed += 1;
         }
     }
@@ -168,9 +169,9 @@ fn main() {
             nil.into()
         });
         if !visited_inner {
-            Println!("[ 8] Walk SkipDir on subdir    PASS");
+            fmt::Println!("[ 8] Walk SkipDir on subdir    PASS");
         } else {
-            Println!("[ 8] Walk SkipDir on subdir    FAIL");
+            fmt::Println!("[ 8] Walk SkipDir on subdir    FAIL");
             failed += 1;
         }
     }
@@ -178,10 +179,10 @@ fn main() {
     let _ = os::RemoveAll(root);
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

@@ -9,10 +9,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::goslice::slice;
 use goish::slices;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn make_int_slice(xs: &[int]) -> slice<int> {
     let mut v: alloc::vec::Vec<int> = alloc::vec::Vec::with_capacity(xs.len());
@@ -46,9 +47,9 @@ fn main() {
         let v = make_int_slice(&[9]);
         let r = slices::Insert(s, 0, &v);
         if slice_eq(&r, &[9, 1, 2, 3]) {
-            Println!("[ 1] Insert at 0              PASS");
+            fmt::Println!("[ 1] Insert at 0              PASS");
         } else {
-            Println!("[ 1] Insert at 0              FAIL");
+            fmt::Println!("[ 1] Insert at 0              FAIL");
             failed += 1;
         }
     }
@@ -59,9 +60,9 @@ fn main() {
         let v = make_int_slice(&[3, 4]);
         let r = slices::Insert(s, 2, &v);
         if slice_eq(&r, &[1, 2, 3, 4, 5]) {
-            Println!("[ 2] Insert in middle         PASS");
+            fmt::Println!("[ 2] Insert in middle         PASS");
         } else {
-            Println!("[ 2] Insert in middle         FAIL");
+            fmt::Println!("[ 2] Insert in middle         FAIL");
             failed += 1;
         }
     }
@@ -72,9 +73,9 @@ fn main() {
         let v = make_int_slice(&[3, 4]);
         let r = slices::Insert(s, 2, &v);
         if slice_eq(&r, &[1, 2, 3, 4]) {
-            Println!("[ 3] Insert at end            PASS");
+            fmt::Println!("[ 3] Insert at end            PASS");
         } else {
-            Println!("[ 3] Insert at end            FAIL");
+            fmt::Println!("[ 3] Insert at end            FAIL");
             failed += 1;
         }
     }
@@ -85,9 +86,9 @@ fn main() {
         let v: slice<int> = slice::__from_vec(alloc::vec::Vec::new());
         let r = slices::Insert(s, 1, &v);
         if slice_eq(&r, &[1, 2, 3]) {
-            Println!("[ 4] Insert empty v unchanged PASS");
+            fmt::Println!("[ 4] Insert empty v unchanged PASS");
         } else {
-            Println!("[ 4] Insert empty v unchanged FAIL");
+            fmt::Println!("[ 4] Insert empty v unchanged FAIL");
             failed += 1;
         }
     }
@@ -98,9 +99,9 @@ fn main() {
         let v = make_int_slice(&[9]);
         let r = slices::Replace(s, 1, 4, &v);
         if slice_eq(&r, &[1, 9, 5]) {
-            Println!("[ 5] Replace shrink           PASS");
+            fmt::Println!("[ 5] Replace shrink           PASS");
         } else {
-            Println!("[ 5] Replace shrink           FAIL");
+            fmt::Println!("[ 5] Replace shrink           FAIL");
             failed += 1;
         }
     }
@@ -111,9 +112,9 @@ fn main() {
         let v = make_int_slice(&[3, 4]);
         let r = slices::Replace(s, 1, 2, &v);
         if slice_eq(&r, &[1, 3, 4, 5]) {
-            Println!("[ 6] Replace expand           PASS");
+            fmt::Println!("[ 6] Replace expand           PASS");
         } else {
-            Println!("[ 6] Replace expand           FAIL");
+            fmt::Println!("[ 6] Replace expand           FAIL");
             failed += 1;
         }
     }
@@ -124,9 +125,9 @@ fn main() {
         let v = make_int_slice(&[9]);
         let r = slices::Replace(s, 1, 1, &v);
         if slice_eq(&r, &[1, 9, 2, 3]) {
-            Println!("[ 7] Replace i==j → Insert    PASS");
+            fmt::Println!("[ 7] Replace i==j → Insert    PASS");
         } else {
-            Println!("[ 7] Replace i==j → Insert    FAIL");
+            fmt::Println!("[ 7] Replace i==j → Insert    FAIL");
             failed += 1;
         }
     }
@@ -137,9 +138,9 @@ fn main() {
         let v = make_int_slice(&[9, 9]);
         let r = slices::Replace(s, 2, 3, &v);
         if slice_eq(&r, &[1, 2, 9, 9]) {
-            Println!("[ 8] Replace tail expand      PASS");
+            fmt::Println!("[ 8] Replace tail expand      PASS");
         } else {
-            Println!("[ 8] Replace tail expand      FAIL");
+            fmt::Println!("[ 8] Replace tail expand      FAIL");
             failed += 1;
         }
     }
@@ -149,9 +150,9 @@ fn main() {
         let s = make_int_slice(&[1, 2, 3]);
         let r = slices::Grow(s, 100);
         if slice_eq(&r, &[1, 2, 3]) {
-            Println!("[ 9] Grow keeps content+len   PASS");
+            fmt::Println!("[ 9] Grow keeps content+len   PASS");
         } else {
-            Println!("[ 9] Grow keeps content+len   FAIL");
+            fmt::Println!("[ 9] Grow keeps content+len   FAIL");
             failed += 1;
         }
     }
@@ -161,9 +162,9 @@ fn main() {
         let s: slice<int> = slice::__from_vec(alloc::vec::Vec::new());
         let r = slices::Grow(s, 50);
         if r.Len() == 0 {
-            Println!("[10] Grow empty               PASS");
+            fmt::Println!("[10] Grow empty               PASS");
         } else {
-            Println!("[10] Grow empty               FAIL");
+            fmt::Println!("[10] Grow empty               FAIL");
             failed += 1;
         }
     }
@@ -173,9 +174,9 @@ fn main() {
         let s = make_int_slice(&[1, 2, 3, 4]);
         let r = slices::Clip(s);
         if slice_eq(&r, &[1, 2, 3, 4]) {
-            Println!("[11] Clip keeps content+len   PASS");
+            fmt::Println!("[11] Clip keeps content+len   PASS");
         } else {
-            Println!("[11] Clip keeps content+len   FAIL");
+            fmt::Println!("[11] Clip keeps content+len   FAIL");
             failed += 1;
         }
     }
@@ -186,18 +187,18 @@ fn main() {
         let g = slices::Grow(s, 1000);
         let r = slices::Clip(g);
         if slice_eq(&r, &[7, 8, 9]) {
-            Println!("[12] Grow+Clip round-trip     PASS");
+            fmt::Println!("[12] Grow+Clip round-trip     PASS");
         } else {
-            Println!("[12] Grow+Clip round-trip     FAIL");
+            fmt::Println!("[12] Grow+Clip round-trip     FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

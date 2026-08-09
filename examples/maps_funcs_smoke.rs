@@ -8,11 +8,12 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::gomap::map;
 use goish::maps;
 use goish::string;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn make_str_int_map(pairs: &'static [(&'static str, int)]) -> map<string, int> {
     let mut m: map<string, int> = map::new();
@@ -31,9 +32,9 @@ fn main() {
         let m1 = make_str_int_map(&[("a", 1), ("b", 2)]);
         let m2 = make_str_int_map(&[("a", 1), ("b", 2)]);
         if maps::EqualFunc(&m1, &m2, |a, b| a == b) {
-            Println!("[ 1] EqualFunc identical       PASS");
+            fmt::Println!("[ 1] EqualFunc identical       PASS");
         } else {
-            Println!("[ 1] EqualFunc identical       FAIL");
+            fmt::Println!("[ 1] EqualFunc identical       FAIL");
             failed += 1;
         }
     }
@@ -43,9 +44,9 @@ fn main() {
         let m1 = make_str_int_map(&[("a", 1)]);
         let m2 = make_str_int_map(&[("a", 1), ("b", 2)]);
         if !maps::EqualFunc(&m1, &m2, |a, b| a == b) {
-            Println!("[ 2] EqualFunc len mismatch    PASS");
+            fmt::Println!("[ 2] EqualFunc len mismatch    PASS");
         } else {
-            Println!("[ 2] EqualFunc len mismatch    FAIL");
+            fmt::Println!("[ 2] EqualFunc len mismatch    FAIL");
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
         let m2 = make_str_int_map(&[("a", 11), ("b", 19)]);
         let close = |a: &int, b: &int| (*a - *b).abs() <= 1;
         if maps::EqualFunc(&m1, &m2, close) {
-            Println!("[ 3] EqualFunc close-enough    PASS");
+            fmt::Println!("[ 3] EqualFunc close-enough    PASS");
         } else {
-            Println!("[ 3] EqualFunc close-enough    FAIL");
+            fmt::Println!("[ 3] EqualFunc close-enough    FAIL");
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
         let m1 = make_str_int_map(&[("a", 1), ("b", 2)]);
         let m2 = make_str_int_map(&[("a", 1), ("c", 2)]);
         if !maps::EqualFunc(&m1, &m2, |a, b| a == b) {
-            Println!("[ 4] EqualFunc key mismatch    PASS");
+            fmt::Println!("[ 4] EqualFunc key mismatch    PASS");
         } else {
-            Println!("[ 4] EqualFunc key mismatch    FAIL");
+            fmt::Println!("[ 4] EqualFunc key mismatch    FAIL");
             failed += 1;
         }
     }
@@ -80,9 +81,9 @@ fn main() {
         let mut m = make_str_int_map(&[("a", 1), ("b", 2), ("c", 3), ("d", 4)]);
         maps::DeleteFunc(&mut m, |_k, v| v % 2 == 0);
         if m.Len() == 2 {
-            Println!("[ 5] DeleteFunc even values    PASS");
+            fmt::Println!("[ 5] DeleteFunc even values    PASS");
         } else {
-            Println!("[ 5] DeleteFunc even values    FAIL");
+            fmt::Println!("[ 5] DeleteFunc even values    FAIL");
             failed += 1;
         }
     }
@@ -95,9 +96,9 @@ fn main() {
         });
         // bar_1 + baz remain.
         if m.Len() == 2 {
-            Println!("[ 6] DeleteFunc by key prefix  PASS");
+            fmt::Println!("[ 6] DeleteFunc by key prefix  PASS");
         } else {
-            Println!("[ 6] DeleteFunc by key prefix  FAIL");
+            fmt::Println!("[ 6] DeleteFunc by key prefix  FAIL");
             failed += 1;
         }
     }
@@ -107,9 +108,9 @@ fn main() {
         let mut m = make_str_int_map(&[("a", 1), ("b", 2)]);
         maps::DeleteFunc(&mut m, |_k, _v| false);
         if m.Len() == 2 {
-            Println!("[ 7] DeleteFunc no-op          PASS");
+            fmt::Println!("[ 7] DeleteFunc no-op          PASS");
         } else {
-            Println!("[ 7] DeleteFunc no-op          FAIL");
+            fmt::Println!("[ 7] DeleteFunc no-op          FAIL");
             failed += 1;
         }
     }
@@ -119,18 +120,18 @@ fn main() {
         let mut m = make_str_int_map(&[("a", 1), ("b", 2)]);
         maps::DeleteFunc(&mut m, |_k, _v| true);
         if m.Len() == 0 {
-            Println!("[ 8] DeleteFunc clear-all      PASS");
+            fmt::Println!("[ 8] DeleteFunc clear-all      PASS");
         } else {
-            Println!("[ 8] DeleteFunc clear-all      FAIL");
+            fmt::Println!("[ 8] DeleteFunc clear-all      FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

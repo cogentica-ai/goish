@@ -11,9 +11,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::runtime::debug;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -26,9 +27,9 @@ fn main() {
         let txt = goish::string::from_bytes(raw);
         let needle: goish::string = "stack trace".into();
         if raw.len() > 0 && goish::strings::Contains(txt.clone(), needle) {
-            Println!("[ 1] Stack non-empty            PASS");
+            fmt::Println!("[ 1] Stack non-empty            PASS");
         } else {
-            Println!("[ 1] Stack non-empty            FAIL got=", txt);
+            fmt::Println!("[ 1] Stack non-empty            FAIL got=", txt);
             failed += 1;
         }
     }
@@ -41,9 +42,9 @@ fn main() {
         // Restore default for cleanliness.
         let _ = debug::SetGCPercent(100);
         if prev1 == 100 && prev2 == 50 {
-            Println!("[ 2] SetGCPercent round-trip    PASS");
+            fmt::Println!("[ 2] SetGCPercent round-trip    PASS");
         } else {
-            Println!("[ 2] SetGCPercent round-trip    FAIL");
+            fmt::Println!("[ 2] SetGCPercent round-trip    FAIL");
             failed += 1;
         }
     }
@@ -51,7 +52,7 @@ fn main() {
     // 3. FreeOSMemory — no-op, just check it doesn't panic.
     {
         debug::FreeOSMemory();
-        Println!("[ 3] FreeOSMemory                PASS");
+        fmt::Println!("[ 3] FreeOSMemory                PASS");
     }
 
     // 4. SetMaxStack — round-trip. In goish this knob is real: it
@@ -64,9 +65,9 @@ fn main() {
         let prev2 = debug::SetMaxStack(4 << 20);
         let _ = debug::SetMaxStack(1 << 20); // restore goish default
         if prev1 == (1 << 20) && prev2 == (2 << 20) {
-            Println!("[ 4] SetMaxStack round-trip     PASS");
+            fmt::Println!("[ 4] SetMaxStack round-trip     PASS");
         } else {
-            Println!("[ 4] SetMaxStack round-trip     FAIL");
+            fmt::Println!("[ 4] SetMaxStack round-trip     FAIL");
             failed += 1;
         }
     }
@@ -77,9 +78,9 @@ fn main() {
         let prev2 = debug::SetMaxThreads(1000);
         let _ = debug::SetMaxThreads(10_000); // restore default
         if prev1 == 10_000 && prev2 == 500 {
-            Println!("[ 5] SetMaxThreads round-trip   PASS");
+            fmt::Println!("[ 5] SetMaxThreads round-trip   PASS");
         } else {
-            Println!("[ 5] SetMaxThreads round-trip   FAIL");
+            fmt::Println!("[ 5] SetMaxThreads round-trip   FAIL");
             failed += 1;
         }
     }
@@ -89,9 +90,9 @@ fn main() {
         let prev1 = debug::SetPanicOnFault(true);
         let prev2 = debug::SetPanicOnFault(false);
         if prev1 == false && prev2 == true {
-            Println!("[ 6] SetPanicOnFault round-trip PASS");
+            fmt::Println!("[ 6] SetPanicOnFault round-trip PASS");
         } else {
-            Println!("[ 6] SetPanicOnFault round-trip FAIL");
+            fmt::Println!("[ 6] SetPanicOnFault round-trip FAIL");
             failed += 1;
         }
     }
@@ -103,9 +104,9 @@ fn main() {
         let read_back = debug::SetMemoryLimit(-1);
         let _ = debug::SetMemoryLimit(default); // restore
         if default == i64::MAX && prev1 == i64::MAX && read_back == (1 << 30) {
-            Println!("[ 7] SetMemoryLimit             PASS");
+            fmt::Println!("[ 7] SetMemoryLimit             PASS");
         } else {
-            Println!("[ 7] SetMemoryLimit             FAIL");
+            fmt::Println!("[ 7] SetMemoryLimit             FAIL");
             failed += 1;
         }
     }
@@ -114,7 +115,7 @@ fn main() {
     {
         debug::SetTraceback("all");
         debug::SetTraceback("system");
-        Println!("[ 8] SetTraceback                PASS");
+        fmt::Println!("[ 8] SetTraceback                PASS");
     }
 
     // 9. GCStats / ReadGCStats — fills with zeros (slim port).
@@ -128,9 +129,9 @@ fn main() {
             && s.PauseEnd.len() == 0
             && s.PauseQuantiles.len() == 0
         {
-            Println!("[ 9] ReadGCStats zero-fill      PASS");
+            fmt::Println!("[ 9] ReadGCStats zero-fill      PASS");
         } else {
-            Println!("[ 9] ReadGCStats zero-fill      FAIL");
+            fmt::Println!("[ 9] ReadGCStats zero-fill      FAIL");
             failed += 1;
         }
     }
@@ -139,9 +140,9 @@ fn main() {
     {
         let (_info, ok) = debug::ReadBuildInfo();
         if !ok {
-            Println!("[10] ReadBuildInfo no-info     PASS");
+            fmt::Println!("[10] ReadBuildInfo no-info     PASS");
         } else {
-            Println!("[10] ReadBuildInfo no-info     FAIL");
+            fmt::Println!("[10] ReadBuildInfo no-info     FAIL");
             failed += 1;
         }
     }
@@ -165,9 +166,9 @@ fn main() {
             }
         }
         if all_zero {
-            Println!("[11] PauseQuantiles zeroed     PASS");
+            fmt::Println!("[11] PauseQuantiles zeroed     PASS");
         } else {
-            Println!("[11] PauseQuantiles zeroed     FAIL");
+            fmt::Println!("[11] PauseQuantiles zeroed     FAIL");
             failed += 1;
         }
     }
@@ -177,18 +178,18 @@ fn main() {
         let opts = debug::CrashOptions::default();
         let err = debug::SetCrashOutput((), opts);
         if err.IsNil() {
-            Println!("[12] SetCrashOutput nil-err    PASS");
+            fmt::Println!("[12] SetCrashOutput nil-err    PASS");
         } else {
-            Println!("[12] SetCrashOutput nil-err    FAIL");
+            fmt::Println!("[12] SetCrashOutput nil-err    FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

@@ -16,10 +16,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::error;
 use goish::errors;
 use goish::net::http;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -30,9 +31,9 @@ fn main() {
         let a: error = http::ErrNotSupported.into();
         let b: error = http::ErrNotSupported.into();
         if !a.IsNil() && errors::Is(a, b) {
-            Println!("[ 1] ErrNotSupported stable    PASS");
+            fmt::Println!("[ 1] ErrNotSupported stable    PASS");
         } else {
-            Println!("[ 1] ErrNotSupported stable    FAIL");
+            fmt::Println!("[ 1] ErrNotSupported stable    FAIL");
             failed += 1;
         }
     }
@@ -41,9 +42,9 @@ fn main() {
     {
         let __e_s: error = http::ErrNotSupported.into(); let s = __e_s.Error();
         if s == "feature not supported" {
-            Println!("[ 2] ErrNotSupported message   PASS");
+            fmt::Println!("[ 2] ErrNotSupported message   PASS");
         } else {
-            Println!("[ 2] ErrNotSupported message   FAIL got={}", s);
+            fmt::Println!("[ 2] ErrNotSupported message   FAIL got={}", s);
             failed += 1;
         }
     }
@@ -51,9 +52,9 @@ fn main() {
     // 3. ErrNotSupported chains to errors.ErrUnsupported.
     {
         if errors::Is(http::ErrNotSupported.into(), errors::ErrUnsupported) {
-            Println!("[ 3] ErrNotSupported→ErrUnsup  PASS");
+            fmt::Println!("[ 3] ErrNotSupported→ErrUnsup  PASS");
         } else {
-            Println!("[ 3] ErrNotSupported→ErrUnsup  FAIL");
+            fmt::Println!("[ 3] ErrNotSupported→ErrUnsup  FAIL");
             failed += 1;
         }
     }
@@ -65,9 +66,9 @@ fn main() {
         if errors::Is(a.clone(), http::ErrUnexpectedTrailer)
             && s == "trailer header without chunked transfer encoding"
         {
-            Println!("[ 4] ErrUnexpectedTrailer      PASS");
+            fmt::Println!("[ 4] ErrUnexpectedTrailer      PASS");
         } else {
-            Println!("[ 4] ErrUnexpectedTrailer      FAIL got={}", s);
+            fmt::Println!("[ 4] ErrUnexpectedTrailer      FAIL got={}", s);
             failed += 1;
         }
     }
@@ -76,9 +77,9 @@ fn main() {
     {
         let __e_s: error = http::ErrHeaderTooLong.into(); let s = __e_s.Error();
         if s == "header too long" {
-            Println!("[ 5] ErrHeaderTooLong message  PASS");
+            fmt::Println!("[ 5] ErrHeaderTooLong message  PASS");
         } else {
-            Println!("[ 5] ErrHeaderTooLong message  FAIL got={}", s);
+            fmt::Println!("[ 5] ErrHeaderTooLong message  FAIL got={}", s);
             failed += 1;
         }
     }
@@ -87,9 +88,9 @@ fn main() {
     {
         let __e_s: error = http::ErrShortBody.into(); let s = __e_s.Error();
         if s == "entity body too short" {
-            Println!("[ 6] ErrShortBody message      PASS");
+            fmt::Println!("[ 6] ErrShortBody message      PASS");
         } else {
-            Println!("[ 6] ErrShortBody message      FAIL got={}", s);
+            fmt::Println!("[ 6] ErrShortBody message      FAIL got={}", s);
             failed += 1;
         }
     }
@@ -98,9 +99,9 @@ fn main() {
     {
         let __e_s: error = http::ErrMissingContentLength.into(); let s = __e_s.Error();
         if s == "missing ContentLength in HEAD response" {
-            Println!("[ 7] ErrMissingContentLength   PASS");
+            fmt::Println!("[ 7] ErrMissingContentLength   PASS");
         } else {
-            Println!("[ 7] ErrMissingContentLength   FAIL got={}", s);
+            fmt::Println!("[ 7] ErrMissingContentLength   FAIL got={}", s);
             failed += 1;
         }
     }
@@ -113,9 +114,9 @@ fn main() {
             || errors::Is(http::ErrShortBody.into(),         errors::ErrUnsupported)
             || errors::Is(http::ErrMissingContentLength.into(), errors::ErrUnsupported);
         if !any_chain {
-            Println!("[ 8] other sentinels !ErrUnsup PASS");
+            fmt::Println!("[ 8] other sentinels !ErrUnsup PASS");
         } else {
-            Println!("[ 8] other sentinels !ErrUnsup FAIL");
+            fmt::Println!("[ 8] other sentinels !ErrUnsup FAIL");
             failed += 1;
         }
     }
@@ -126,9 +127,9 @@ fn main() {
         let e: error = errors::Wrap(pe);
         let s = e.Error();
         if s == "custom oops" {
-            Println!("[ 9] ProtocolError user ctor   PASS");
+            fmt::Println!("[ 9] ProtocolError user ctor   PASS");
         } else {
-            Println!("[ 9] ProtocolError user ctor   FAIL got={}", s);
+            fmt::Println!("[ 9] ProtocolError user ctor   FAIL got={}", s);
             failed += 1;
         }
     }
@@ -138,9 +139,9 @@ fn main() {
         let pe = http::ProtocolError { ErrorString: goish::string("feature not supported") };
         let e: error = errors::Wrap(pe);
         if !errors::Is(e, errors::ErrUnsupported) {
-            Println!("[10] user pe !ErrUnsup chain   PASS");
+            fmt::Println!("[10] user pe !ErrUnsup chain   PASS");
         } else {
-            Println!("[10] user pe !ErrUnsup chain   FAIL");
+            fmt::Println!("[10] user pe !ErrUnsup chain   FAIL");
             failed += 1;
         }
     }
@@ -152,9 +153,9 @@ fn main() {
         if !errors::Is(__htl.clone(), http::ErrShortBody)
             && !errors::Is(__sb.clone(), http::ErrHeaderTooLong)
         {
-            Println!("[11] sentinels are distinct   PASS");
+            fmt::Println!("[11] sentinels are distinct   PASS");
         } else {
-            Println!("[11] sentinels are distinct   FAIL");
+            fmt::Println!("[11] sentinels are distinct   FAIL");
             failed += 1;
         }
     }
@@ -164,18 +165,18 @@ fn main() {
         let a: error = errors::ErrUnsupported.into();
         let b: error = errors::ErrUnsupported.into();
         if !a.IsNil() && a.Error() == "unsupported operation" && errors::Is(a, b) {
-            Println!("[12] errors.ErrUnsupported     PASS");
+            fmt::Println!("[12] errors.ErrUnsupported     PASS");
         } else {
-            Println!("[12] errors.ErrUnsupported     FAIL");
+            fmt::Println!("[12] errors.ErrUnsupported     FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 12", failed);
+        fmt::Println!("FAIL {} of 12", failed);
         syscall::Exit(1);
     }
 }

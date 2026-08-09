@@ -12,12 +12,13 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{go, string, syscall, Println};
+use goish::{go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -79,9 +80,9 @@ fn main() {
             && goish::strings::Contains(body.clone(), string("backend says hello"))
             && xb == "goish"
         {
-            Println!("[ 1] proxy passthrough         PASS");
+            fmt::Println!("[ 1] proxy passthrough         PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 1] proxy passthrough         FAIL status={} body={}",
                 resp.StatusCode, body
             );
@@ -97,9 +98,9 @@ fn main() {
         let _ = goish::io::Closer::Close(&mut resp.Body);
         let body = body_str(&body_bytes);
         if resp.StatusCode == 200 && body == "a=1&b=two" {
-            Println!("[ 2] query forwarded           PASS");
+            fmt::Println!("[ 2] query forwarded           PASS");
         } else {
-            Println!("[ 2] query forwarded           FAIL body={}", body);
+            fmt::Println!("[ 2] query forwarded           FAIL body={}", body);
             failed += 1;
         }
     }
@@ -111,9 +112,9 @@ fn main() {
         let (_, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 404 {
-            Println!("[ 3] 404 propagates            PASS");
+            fmt::Println!("[ 3] 404 propagates            PASS");
         } else {
-            Println!("[ 3] 404 propagates            FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 3] 404 propagates            FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -122,10 +123,10 @@ fn main() {
     let _ = back_arc.Shutdown(time::Second);
 
     if failed == 0 {
-        Println!("ok 3/3");
+        fmt::Println!("ok 3/3");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 3", failed);
+        fmt::Println!("FAIL {} of 3", failed);
         syscall::Exit(1);
     }
 }

@@ -7,8 +7,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::os;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -18,9 +19,9 @@ fn main() {
     {
         let p = os::Getenv(string("PATH"));
         if p.Len() > 0 {
-            Println!("[ 1] Getenv(PATH)              PASS");
+            fmt::Println!("[ 1] Getenv(PATH)              PASS");
         } else {
-            Println!("[ 1] Getenv(PATH)              FAIL");
+            fmt::Println!("[ 1] Getenv(PATH)              FAIL");
             failed += 1;
         }
     }
@@ -29,9 +30,9 @@ fn main() {
     {
         let (_v, ok) = os::LookupEnv(string("GOISH_NO_SUCH_VAR_42"));
         if !ok {
-            Println!("[ 2] LookupEnv missing         PASS");
+            fmt::Println!("[ 2] LookupEnv missing         PASS");
         } else {
-            Println!("[ 2] LookupEnv missing         FAIL");
+            fmt::Println!("[ 2] LookupEnv missing         FAIL");
             failed += 1;
         }
     }
@@ -40,9 +41,9 @@ fn main() {
     {
         let t = os::TempDir();
         if t.Len() > 0 {
-            Println!("[ 3] TempDir                   PASS ({})", t);
+            fmt::Println!("[ 3] TempDir                   PASS ({})", t);
         } else {
-            Println!("[ 3] TempDir                   FAIL");
+            fmt::Println!("[ 3] TempDir                   FAIL");
             failed += 1;
         }
     }
@@ -51,18 +52,18 @@ fn main() {
     {
         let (h, err) = os::Hostname();
         if err.IsNil() && h.Len() > 0 {
-            Println!("[ 4] Hostname                  PASS ({})", h);
+            fmt::Println!("[ 4] Hostname                  PASS ({})", h);
         } else {
-            Println!("[ 4] Hostname                  FAIL");
+            fmt::Println!("[ 4] Hostname                  FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 4/4");
+        fmt::Println!("ok 4/4");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 4", failed);
+        fmt::Println!("FAIL {} of 4", failed);
         syscall::Exit(1);
     }
 }

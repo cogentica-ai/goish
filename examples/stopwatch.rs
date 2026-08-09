@@ -7,25 +7,26 @@
 #![no_std]
 #![no_main]
 
-use goish::{len, nil, os, strconv, time, Fprintln, Println};
+use goish::fmt;
+use goish::{len, nil, os, strconv, time};
 
 #[goish::main]
 fn main() {
     let all = os::Args();
     if len(&all) != 2 {
         let mut e = os::Stderr();
-        Fprintln!(e, "usage: stopwatch MILLIS");
+        fmt::Fprintln!(e, "usage: stopwatch MILLIS");
         os::Exit(1);
     }
     let (ms, err) = strconv::Atoi(all[1].clone());
     if err != nil {
         let mut e = os::Stderr();
-        Fprintln!(e, "parse:", err);
+        fmt::Fprintln!(e, "parse:", err);
         os::Exit(1);
     }
     let start = time::Now();
     time::Sleep(time::Millisecond * ms);
     let elapsed = time::Since(start);
-    Println!("requested:", ms, "ms");
-    Println!("elapsed:", elapsed);
+    fmt::Println!("requested:", ms, "ms");
+    fmt::Println!("elapsed:", elapsed);
 }

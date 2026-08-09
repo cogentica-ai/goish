@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net::http::internal::ascii;
 use goish::string;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -21,9 +22,9 @@ fn main() {
         if ascii::EqualFold(string("Content-Type"), string("CONTENT-TYPE"))
             && ascii::EqualFold(string("HoSt"), string("host"))
         {
-            Println!("[ 1] EqualFold mixed case      PASS");
+            fmt::Println!("[ 1] EqualFold mixed case      PASS");
         } else {
-            Println!("[ 1] EqualFold mixed case      FAIL");
+            fmt::Println!("[ 1] EqualFold mixed case      FAIL");
             failed += 1;
         }
     }
@@ -31,9 +32,9 @@ fn main() {
     // 2. EqualFold different length → false.
     {
         if !ascii::EqualFold(string("abc"), string("abcd")) {
-            Println!("[ 2] EqualFold len mismatch    PASS");
+            fmt::Println!("[ 2] EqualFold len mismatch    PASS");
         } else {
-            Println!("[ 2] EqualFold len mismatch    FAIL");
+            fmt::Println!("[ 2] EqualFold len mismatch    FAIL");
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
     //    match if the bytes are byte-equal, which they aren't here.
     {
         if !ascii::EqualFold(string("À"), string("à")) {
-            Println!("[ 3] EqualFold ASCII-only      PASS");
+            fmt::Println!("[ 3] EqualFold ASCII-only      PASS");
         } else {
-            Println!("[ 3] EqualFold ASCII-only      FAIL");
+            fmt::Println!("[ 3] EqualFold ASCII-only      FAIL");
             failed += 1;
         }
     }
@@ -57,9 +58,9 @@ fn main() {
         if ascii::EqualFold(string("hello"), string("hello"))
             && ascii::EqualFold(string(""), string(""))
         {
-            Println!("[ 4] EqualFold equal           PASS");
+            fmt::Println!("[ 4] EqualFold equal           PASS");
         } else {
-            Println!("[ 4] EqualFold equal           FAIL");
+            fmt::Println!("[ 4] EqualFold equal           FAIL");
             failed += 1;
         }
     }
@@ -71,9 +72,9 @@ fn main() {
             && ascii::IsPrint(string("Hello, World!"))
             && ascii::IsPrint(string(""))
         {
-            Println!("[ 5] IsPrint printable         PASS");
+            fmt::Println!("[ 5] IsPrint printable         PASS");
         } else {
-            Println!("[ 5] IsPrint printable         FAIL");
+            fmt::Println!("[ 5] IsPrint printable         FAIL");
             failed += 1;
         }
     }
@@ -85,9 +86,9 @@ fn main() {
             && !ascii::IsPrint(string("\u{0080}"))   // first non-ASCII byte
             && !ascii::IsPrint(string("a\nb"))       // embedded newline
         {
-            Println!("[ 6] IsPrint rejects ctrl      PASS");
+            fmt::Println!("[ 6] IsPrint rejects ctrl      PASS");
         } else {
-            Println!("[ 6] IsPrint rejects ctrl      FAIL");
+            fmt::Println!("[ 6] IsPrint rejects ctrl      FAIL");
             failed += 1;
         }
     }
@@ -98,9 +99,9 @@ fn main() {
             && !ascii::Is(string("\u{0080}"))
             && !ascii::Is(string("héllo"))           // 'é' is >0x7F bytes
         {
-            Println!("[ 7] Is ASCII boundary         PASS");
+            fmt::Println!("[ 7] Is ASCII boundary         PASS");
         } else {
-            Println!("[ 7] Is ASCII boundary         FAIL");
+            fmt::Println!("[ 7] Is ASCII boundary         FAIL");
             failed += 1;
         }
     }
@@ -109,9 +110,9 @@ fn main() {
     {
         let (lo, ok) = ascii::ToLower(string("Content-Type"));
         if ok && lo == string("content-type") {
-            Println!("[ 8] ToLower printable         PASS");
+            fmt::Println!("[ 8] ToLower printable         PASS");
         } else {
-            Println!("[ 8] ToLower printable         FAIL");
+            fmt::Println!("[ 8] ToLower printable         FAIL");
             failed += 1;
         }
     }
@@ -120,9 +121,9 @@ fn main() {
     {
         let (lo, ok) = ascii::ToLower(string("héllo"));
         if !ok && lo == string("") {
-            Println!("[ 9] ToLower non-printable     PASS");
+            fmt::Println!("[ 9] ToLower non-printable     PASS");
         } else {
-            Println!("[ 9] ToLower non-printable     FAIL");
+            fmt::Println!("[ 9] ToLower non-printable     FAIL");
             failed += 1;
         }
     }
@@ -132,18 +133,18 @@ fn main() {
         let (a, oka) = ascii::ToLower(string(""));
         let (b, okb) = ascii::ToLower(string("already-lower"));
         if oka && a == string("") && okb && b == string("already-lower") {
-            Println!("[10] ToLower edge inputs       PASS");
+            fmt::Println!("[10] ToLower edge inputs       PASS");
         } else {
-            Println!("[10] ToLower edge inputs       FAIL");
+            fmt::Println!("[10] ToLower edge inputs       FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

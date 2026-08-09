@@ -36,6 +36,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 
+use goish::fmt;
 use goish::context;
 use goish::io::{Closer, Writer};
 use goish::net;
@@ -43,7 +44,7 @@ use goish::net::http;
 use goish::os;
 use goish::os::signal;
 use goish::sync::Mutex;
-use goish::{bytes, go, string, syscall, time, Sprintf};
+use goish::{bytes, go, string, syscall, time};
 
 // ─── test harness ────────────────────────────────────────────────────
 
@@ -52,12 +53,12 @@ static FAILED: AtomicUsize = AtomicUsize::new(0);
 
 fn pass(name: &'static str) {
     PASSED.fetch_add(1, Ordering::Relaxed);
-    goish::Printf!("PASS: %s\n", name);
+    fmt::Printf!("PASS: %s\n", name);
 }
 
 fn fail(msg: goish::string) {
     FAILED.fetch_add(1, Ordering::Relaxed);
-    goish::Printf!("FAIL: %s\n", msg);
+    fmt::Printf!("FAIL: %s\n", msg);
 }
 
 // ─── service state ───────────────────────────────────────────────────
@@ -79,7 +80,7 @@ impl goish::io::Writer for LogCapture {
 
 /// One request on a fresh conn; returns the full raw response bytes.
 fn raw_roundtrip(port: i64, req: &[u8]) -> Vec<u8> {
-    let (mut conn, err) = net::Dial(string("tcp"), Sprintf!("127.0.0.1:%d", port));
+    let (mut conn, err) = net::Dial(string("tcp"), fmt::Sprintf!("127.0.0.1:%d", port));
     if !err.IsNil() {
         return Vec::new();
     }
@@ -163,7 +164,7 @@ fn main() {
     // 127.0.0.1:0 and reads back the kernel-assigned port.
     let env_port = os::Getenv("PORT");
     let bind_addr = if env_port.Len() > 0 {
-        Sprintf!("0.0.0.0:%s", env_port)
+        fmt::Sprintf!("0.0.0.0:%s", env_port)
     } else {
         string("127.0.0.1:0")
     };
@@ -201,7 +202,7 @@ fn main() {
             .and_then(|v| v.downcast_ref::<&'static str>().copied())
             .unwrap_or("?");
         let conn_tagged = ctx.Value("conn-tag").is_some();
-        let _ = w.Write(goish::convert::bytes(Sprintf!(
+        let _ = w.Write(goish::convert::bytes(fmt::Sprintf!(
             "service=%s conn-tag=%t\n",
             string(svc),
             conn_tagged
@@ -214,9 +215,9 @@ fn main() {
             return;
         }
         let id = NOTE_SEQ.fetch_add(1, Ordering::AcqRel) + 1;
-        w.Header().Set("Location", Sprintf!("/api/notes/%d", id));
+        w.Header().Set("Location", fmt::Sprintf!("/api/notes/%d", id));
         w.WriteHeader(201);
-        let _ = w.Write(goish::convert::bytes(Sprintf!("{\"id\":%d}", id)));
+        let _ = w.Write(goish::convert::bytes(fmt::Sprintf!("{\"id\":%d}", id)));
     });
     // Slow endpoint for the drain test.
     mux.HandleFunc("GET /api/slow", |w, _r| {
@@ -252,8 +253,8 @@ fn main() {
     // ── bind + serve ──
     let (ln, err) = net::Listen(string("tcp"), bind_addr);
     if !err.IsNil() {
-        fail(Sprintf!("Listen: %v", err));
-        goish::Printf!("DEPLOY_REST_API_FAIL\n");
+        fail(fmt::Sprintf!("Listen: %v", err));
+        fmt::Printf!("DEPLOY_REST_API_FAIL\n");
         os::Exit(1);
     }
     let port = ln.Addr().Port as i64;
@@ -300,13 +301,13 @@ fn main() {
     if status_of(&resp) == 200 {
         pass("GET /healthz -> 200");
     } else {
-        fail(Sprintf!("healthz status %d", status_of(&resp)));
+        fail(fmt::Sprintf!("healthz status %d", status_of(&resp)));
     }
 
     // 2. HEAD suppression on a keep-alive conn: HEAD then GET must
     //    both parse; HEAD must carry Content-Length but no body.
     {
-        let (mut conn, err) = net::Dial(string("tcp"), Sprintf!("127.0.0.1:%d", port));
+        let (mut conn, err) = net::Dial(string("tcp"), fmt::Sprintf!("127.0.0.1:%d", port));
         if err.IsNil() {
             let _ = conn.Write(goish::slice::<goish::byte>::__from_vec(
                 b"HEAD /healthz HTTP/1.1\r\nHost: t\r\n\r\n".to_vec(),
@@ -324,7 +325,7 @@ fn main() {
             if ok_status && has_cl && get_ok {
                 pass("HEAD suppresses body, keep-alive intact");
             } else {
-                fail(Sprintf!(
+                fail(fmt::Sprintf!(
                     "HEAD test: status=%t cl=%t get=%t",
                     ok_status,
                     has_cl,
@@ -342,7 +343,7 @@ fn main() {
     if status_of(&resp) == 200 {
         pass("GET /readyz -> 200 before shutdown");
     } else {
-        fail(Sprintf!("readyz status %d", status_of(&resp)));
+        fail(fmt::Sprintf!("readyz status %d", status_of(&resp)));
     }
 
     // 4. REST create
@@ -353,7 +354,7 @@ fn main() {
     if status_of(&resp) == 201 && find_ci(&resp, b"location: /api/notes/1").is_some() {
         pass("POST /api/notes -> 201 + Location");
     } else {
-        fail(Sprintf!("create status %d", status_of(&resp)));
+        fail(fmt::Sprintf!("create status %d", status_of(&resp)));
     }
 
     // 5. context hooks
@@ -361,7 +362,7 @@ fn main() {
     if find(&resp, b"service=taskd conn-tag=true").is_some() {
         pass("BaseContext + ConnContext values reach r.Context()");
     } else {
-        fail(Sprintf!(
+        fail(fmt::Sprintf!(
             "whoami: hook values missing; got %s",
             goish::string::from_bytes(&resp)
         ));
@@ -369,7 +370,7 @@ fn main() {
 
     // 6. Expect: 100-continue — two-phase send.
     {
-        let (mut conn, err) = net::Dial(string("tcp"), Sprintf!("127.0.0.1:%d", port));
+        let (mut conn, err) = net::Dial(string("tcp"), fmt::Sprintf!("127.0.0.1:%d", port));
         if err.IsNil() {
             let _ = conn.Write(goish::slice::<goish::byte>::__from_vec(
                 b"POST /api/notes HTTP/1.1\r\nHost: t\r\nExpect: 100-continue\r\nContent-Length: 4\r\nConnection: close\r\n\r\n"
@@ -389,7 +390,7 @@ fn main() {
             if got_100 && status_of(&final_resp) == 201 {
                 pass("Expect: 100-continue -> interim then 201");
             } else {
-                fail(Sprintf!(
+                fail(fmt::Sprintf!(
                     "100-continue: interim=%t final=%d",
                     got_100,
                     status_of(&final_resp)
@@ -409,12 +410,12 @@ fn main() {
     if status_of(&resp) == 417 {
         pass("unknown Expect -> 417");
     } else {
-        fail(Sprintf!("Expect: teleport -> %d, want 417", status_of(&resp)));
+        fail(fmt::Sprintf!("Expect: teleport -> %d, want 417", status_of(&resp)));
     }
 
     // 8. IdleTimeout closes idle keep-alive conns (configured 400ms).
     {
-        let (mut conn, err) = net::Dial(string("tcp"), Sprintf!("127.0.0.1:%d", port));
+        let (mut conn, err) = net::Dial(string("tcp"), fmt::Sprintf!("127.0.0.1:%d", port));
         if err.IsNil() {
             let _ = conn.Write(goish::slice::<goish::byte>::__from_vec(
                 b"GET /healthz HTTP/1.1\r\nHost: t\r\n\r\n".to_vec(),
@@ -430,7 +431,7 @@ fn main() {
             if first_ok && n == 0 && !rerr.IsNil() {
                 pass("IdleTimeout closes idle keep-alive conn");
             } else {
-                fail(Sprintf!("idle test: first=%t n=%d", first_ok, n));
+                fail(fmt::Sprintf!("idle test: first=%t n=%d", first_ok, n));
             }
             let _ = conn.Close();
         } else {
@@ -472,7 +473,7 @@ fn main() {
     if status_of(&resp) == 503 {
         pass("readyz -> 503 after SIGTERM (LB drain signal)");
     } else {
-        fail(Sprintf!("readyz after SIGTERM: %d, want 503", status_of(&resp)));
+        fail(fmt::Sprintf!("readyz after SIGTERM: %d, want 503", status_of(&resp)));
     }
 
     // Wait for the drain to finish.
@@ -489,7 +490,7 @@ fn main() {
     if SLOW_DONE.load(Ordering::Acquire) == 1 && SLOW_STATUS.load(Ordering::Acquire) == 200 {
         pass("in-flight request completed during drain");
     } else {
-        fail(Sprintf!(
+        fail(fmt::Sprintf!(
             "slow request: done=%d status=%d",
             SLOW_DONE.load(Ordering::Acquire) as i64,
             SLOW_STATUS.load(Ordering::Acquire)
@@ -502,7 +503,7 @@ fn main() {
     }
 
     // 11. post-shutdown: connections refused.
-    let (mut c2, derr) = net::Dial(string("tcp"), Sprintf!("127.0.0.1:%d", port));
+    let (mut c2, derr) = net::Dial(string("tcp"), fmt::Sprintf!("127.0.0.1:%d", port));
     if !derr.IsNil() {
         pass("post-shutdown connect refused");
     } else {
@@ -515,10 +516,10 @@ fn main() {
     let p = PASSED.load(Ordering::Relaxed);
     let f = FAILED.load(Ordering::Relaxed);
     if f == 0 {
-        goish::Printf!("DEPLOY_REST_API_OK %d/%d\n", p as i64, p as i64);
+        fmt::Printf!("DEPLOY_REST_API_OK %d/%d\n", p as i64, p as i64);
         os::Exit(0);
     } else {
-        goish::Printf!("DEPLOY_REST_API_FAIL %d failures\n", f as i64);
+        fmt::Printf!("DEPLOY_REST_API_FAIL %d failures\n", f as i64);
         os::Exit(1);
     }
 }

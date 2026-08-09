@@ -29,6 +29,7 @@ extern crate goish;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::fmt;
 use goish::compress::zlib;
 use goish::error;
 use goish::errors;
@@ -36,7 +37,7 @@ use goish::goslice::slice;
 use goish::io;
 use goish::runtime::sched::schedule;
 use goish::types::{byte, int};
-use goish::{bytes, go, syscall, Println};
+use goish::{bytes, go, syscall};
 
 const TOTAL: usize = 12;
 
@@ -74,10 +75,10 @@ fn main() {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
-            Println!("ok 12/12");
+            fmt::Println!("ok 12/12");
             syscall::Exit(0);
         } else {
-            Println!("FAIL", f as i64, "of 12");
+            fmt::Println!("FAIL", f as i64, "of 12");
             syscall::Exit(1);
         }
     });

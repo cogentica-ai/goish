@@ -12,7 +12,8 @@
 #![no_std]
 #![no_main]
 
-use goish::{int, len, nil, os, range, strconv, Fprintf, Fprintln, Println};
+use goish::fmt;
+use goish::{int, len, nil, os, range, strconv};
 
 #[goish::main]
 fn main() {
@@ -22,7 +23,7 @@ fn main() {
 
     if len(&args) == 0 {
         let mut e = os::Stderr();
-        Fprintln!(e, "usage: sumargs N...");
+        fmt::Fprintln!(e, "usage: sumargs N...");
         os::Exit(1);
     }
 
@@ -31,10 +32,10 @@ fn main() {
     for (i, arg) in range!(args) {
         let (n, err) = strconv::Atoi(arg.clone());
         if err != nil {
-            Fprintf!(errf, "arg %d: %v\n", i, err);
+            fmt::Fprintf!(errf, "arg %d: %v\n", i, err);
             os::Exit(1);
         }
         sum += n;
     }
-    Println!("sum =", strconv::Itoa(sum));
+    fmt::Println!("sum =", strconv::Itoa(sum));
 }

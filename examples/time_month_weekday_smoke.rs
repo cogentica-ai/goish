@@ -21,11 +21,11 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::fmt;
 use goish::gostring::string;
 use goish::runtime::sched::schedule;
 use goish::time::{self, Month, Weekday};
-use goish::{go, syscall, Println, Sprintf};
-
+use goish::{go, syscall};
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
@@ -43,10 +43,10 @@ fn main() {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
-            Println!("ok 10/10");
+            fmt::Println!("ok 10/10");
             syscall::Exit(0);
         } else {
-            Println!("FAIL", f as i64, "of 10");
+            fmt::Println!("FAIL", f as i64, "of 10");
             syscall::Exit(1);
         }
     });
@@ -195,10 +195,10 @@ fn test_10_format_dispatch() {
     // %s / %v → name; %d → number.
     let m = time::October;
     let w = time::Tuesday;
-    let s_name = Sprintf!("%s", m);
-    let v_name = Sprintf!("%v", w);
-    let d_num = Sprintf!("%d", m);
-    let d_num_w = Sprintf!("%d", w);
+    let s_name = fmt::Sprintf!("%s", m);
+    let v_name = fmt::Sprintf!("%v", w);
+    let d_num = fmt::Sprintf!("%d", m);
+    let d_num_w = fmt::Sprintf!("%d", w);
     if s_name == s("October")
         && v_name == s("Tuesday")
         && d_num == s("10")

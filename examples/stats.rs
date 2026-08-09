@@ -10,7 +10,8 @@
 #![no_std]
 #![no_main]
 
-use goish::{bufio, float64, int, nil, os, strconv, Println, Printf};
+use goish::fmt;
+use goish::{bufio, float64, int, nil, os, strconv};
 
 #[goish::main]
 fn main() {
@@ -34,12 +35,12 @@ fn main() {
         }
     }
     if n == 0 {
-        Println!("(no numbers)");
+        fmt::Println!("(no numbers)");
         return;
     }
-    Printf!("count: %d\n", n);
-    Printf!("sum:   %g\n", sum);
-    Printf!("mean:  %g\n", sum / (n as float64));
-    Printf!("min:   %g\n", min_v);
-    Printf!("max:   %g\n", max_v);
+    fmt::Printf!("count: %d\n", n);
+    fmt::Printf!("sum:   %g\n", sum);
+    fmt::Printf!("mean:  %g\n", sum / (n as float64));
+    fmt::Printf!("min:   %g\n", min_v);
+    fmt::Printf!("max:   %g\n", max_v);
 }

@@ -10,8 +10,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::strings;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -21,9 +22,9 @@ fn main() {
     {
         let got = strings::ToValidUTF8(string("hello"), string("X"));
         if got == "hello" {
-            Println!("[ 1] ASCII unchanged           PASS");
+            fmt::Println!("[ 1] ASCII unchanged           PASS");
         } else {
-            Println!("[ 1] ASCII unchanged           FAIL got=", got);
+            fmt::Println!("[ 1] ASCII unchanged           FAIL got=", got);
             failed += 1;
         }
     }
@@ -32,9 +33,9 @@ fn main() {
     {
         let got = strings::ToValidUTF8(string(""), string("X"));
         if got == "" {
-            Println!("[ 2] empty input               PASS");
+            fmt::Println!("[ 2] empty input               PASS");
         } else {
-            Println!("[ 2] empty input               FAIL got=", got);
+            fmt::Println!("[ 2] empty input               FAIL got=", got);
             failed += 1;
         }
     }
@@ -43,9 +44,9 @@ fn main() {
     {
         let got = strings::ToValidUTF8(string("h\u{00e9}llo"), string("X"));
         if got == "h\u{00e9}llo" {
-            Println!("[ 3] valid multi-byte          PASS");
+            fmt::Println!("[ 3] valid multi-byte          PASS");
         } else {
-            Println!("[ 3] valid multi-byte          FAIL got=", got);
+            fmt::Println!("[ 3] valid multi-byte          FAIL got=", got);
             failed += 1;
         }
     }
@@ -57,9 +58,9 @@ fn main() {
         let s = string::from_bytes(&raw);
         let got = strings::ToValidUTF8(s, string("?"));
         if got == "ab?cd" {
-            Println!("[ 4] single bad byte           PASS");
+            fmt::Println!("[ 4] single bad byte           PASS");
         } else {
-            Println!("[ 4] single bad byte           FAIL got=", got);
+            fmt::Println!("[ 4] single bad byte           FAIL got=", got);
             failed += 1;
         }
     }
@@ -70,9 +71,9 @@ fn main() {
         let s = string::from_bytes(&raw);
         let got = strings::ToValidUTF8(s, string("?"));
         if got == "a?cd" {
-            Println!("[ 5] run of bad bytes          PASS");
+            fmt::Println!("[ 5] run of bad bytes          PASS");
         } else {
-            Println!("[ 5] run of bad bytes          FAIL got=", got);
+            fmt::Println!("[ 5] run of bad bytes          FAIL got=", got);
             failed += 1;
         }
     }
@@ -83,9 +84,9 @@ fn main() {
         let s = string::from_bytes(&raw);
         let got = strings::ToValidUTF8(s, string(""));
         if got == "abcd" {
-            Println!("[ 6] empty replacement drops   PASS");
+            fmt::Println!("[ 6] empty replacement drops   PASS");
         } else {
-            Println!("[ 6] empty replacement drops   FAIL got=", got);
+            fmt::Println!("[ 6] empty replacement drops   FAIL got=", got);
             failed += 1;
         }
     }
@@ -96,9 +97,9 @@ fn main() {
         let s = string::from_bytes(&raw);
         let got = strings::ToValidUTF8(s, string("?"));
         if got == "a?b?c?d" {
-            Println!("[ 7] multiple invalid runs     PASS");
+            fmt::Println!("[ 7] multiple invalid runs     PASS");
         } else {
-            Println!("[ 7] multiple invalid runs     FAIL got=", got);
+            fmt::Println!("[ 7] multiple invalid runs     FAIL got=", got);
             failed += 1;
         }
     }
@@ -109,9 +110,9 @@ fn main() {
         let s = string::from_bytes(&raw);
         let got = strings::ToValidUTF8(s, string("REPL"));
         if got == "aREPLb" {
-            Println!("[ 8] multi-byte replacement    PASS");
+            fmt::Println!("[ 8] multi-byte replacement    PASS");
         } else {
-            Println!("[ 8] multi-byte replacement    FAIL got=", got);
+            fmt::Println!("[ 8] multi-byte replacement    FAIL got=", got);
             failed += 1;
         }
     }
@@ -122,9 +123,9 @@ fn main() {
         let s = string::from_bytes(&raw);
         let got = strings::ToValidUTF8(s, string("?"));
         if got == "hi?" {
-            Println!("[ 9] trailing invalid          PASS");
+            fmt::Println!("[ 9] trailing invalid          PASS");
         } else {
-            Println!("[ 9] trailing invalid          FAIL got=", got);
+            fmt::Println!("[ 9] trailing invalid          FAIL got=", got);
             failed += 1;
         }
     }
@@ -135,18 +136,18 @@ fn main() {
         let s = string::from_bytes(&raw);
         let got = strings::ToValidUTF8(s, string("?"));
         if got == "?ab" {
-            Println!("[10] leading invalid           PASS");
+            fmt::Println!("[10] leading invalid           PASS");
         } else {
-            Println!("[10] leading invalid           FAIL got=", got);
+            fmt::Println!("[10] leading invalid           FAIL got=", got);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

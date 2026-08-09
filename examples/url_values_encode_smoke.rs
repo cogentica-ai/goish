@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::gomap::map;
 use goish::goslice::slice;
 use goish::net::http;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -21,9 +22,9 @@ fn main() {
     {
         let v: map<string, slice<string>> = map::new();
         if http::ValuesEncode(v).Len() == 0 {
-            Println!("[ 1] empty                      PASS");
+            fmt::Println!("[ 1] empty                      PASS");
         } else {
-            Println!("[ 1] empty                      FAIL");
+            fmt::Println!("[ 1] empty                      FAIL");
             failed += 1;
         }
     }
@@ -36,9 +37,9 @@ fn main() {
         v.Set(string("greeting"), s);
         let got = http::ValuesEncode(v);
         if got == "greeting=hello" {
-            Println!("[ 2] single pair                PASS");
+            fmt::Println!("[ 2] single pair                PASS");
         } else {
-            Println!("[ 2] single pair                FAIL got=", got);
+            fmt::Println!("[ 2] single pair                FAIL got=", got);
             failed += 1;
         }
     }
@@ -54,9 +55,9 @@ fn main() {
         v.Set(string("a"), b);
         let got = http::ValuesEncode(v);
         if got == "a=2&z=1" {
-            Println!("[ 3] sorted keys                PASS");
+            fmt::Println!("[ 3] sorted keys                PASS");
         } else {
-            Println!("[ 3] sorted keys                FAIL got=", got);
+            fmt::Println!("[ 3] sorted keys                FAIL got=", got);
             failed += 1;
         }
     }
@@ -71,9 +72,9 @@ fn main() {
         v.Set(string("k"), s);
         let got = http::ValuesEncode(v);
         if got == "k=1&k=2&k=3" {
-            Println!("[ 4] multi-value                PASS");
+            fmt::Println!("[ 4] multi-value                PASS");
         } else {
-            Println!("[ 4] multi-value                FAIL got=", got);
+            fmt::Println!("[ 4] multi-value                FAIL got=", got);
             failed += 1;
         }
     }
@@ -87,18 +88,18 @@ fn main() {
         v.Set(string("name=key"), s);
         let got = http::ValuesEncode(v);
         if got == "name%3Dkey=hello+world" {
-            Println!("[ 5] special chars escaped      PASS");
+            fmt::Println!("[ 5] special chars escaped      PASS");
         } else {
-            Println!("[ 5] special chars escaped      FAIL got=", got);
+            fmt::Println!("[ 5] special chars escaped      FAIL got=", got);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 5");
+        fmt::Println!("FAIL", failed, "of 5");
         syscall::Exit(1);
     }
 }

@@ -8,6 +8,7 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::convert;
 use goish::goslice::slice;
@@ -15,7 +16,7 @@ use goish::io::{self, Closer, Reader, Writer};
 use goish::mime::quotedprintable::{NewReader, NewWriter};
 use goish::strings;
 use goish::types::byte;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 fn read_all<R: Reader>(r: &mut R) -> alloc::vec::Vec<byte> {
     let mut out: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
@@ -47,9 +48,9 @@ fn main() {
         let s = buf.String();
         // Go reference: "Hello, World!\r\nfoo\tbar=3Dbaz"
         if s == string("Hello, World!\r\nfoo\tbar=3Dbaz") {
-            Println!("[ 1] encode mixed            PASS");
+            fmt::Println!("[ 1] encode mixed            PASS");
         } else {
-            Println!("[ 1] encode mixed            FAIL got {}", s);
+            fmt::Println!("[ 1] encode mixed            FAIL got {}", s);
             failed += 1;
         }
     }
@@ -61,9 +62,9 @@ fn main() {
         let out = read_all(&mut r);
         let want: &[u8] = b"hello\r\n";
         if out.as_slice() == want {
-            Println!("[ 2] decode hex              PASS");
+            fmt::Println!("[ 2] decode hex              PASS");
         } else {
-            Println!("[ 2] decode hex              FAIL");
+            fmt::Println!("[ 2] decode hex              FAIL");
             failed += 1;
         }
     }
@@ -75,9 +76,9 @@ fn main() {
         let out = read_all(&mut r);
         let want: &[u8] = b"foobar";
         if out.as_slice() == want {
-            Println!("[ 3] decode soft break       PASS");
+            fmt::Println!("[ 3] decode soft break       PASS");
         } else {
-            Println!("[ 3] decode soft break       FAIL");
+            fmt::Println!("[ 3] decode soft break       FAIL");
             failed += 1;
         }
     }
@@ -89,9 +90,9 @@ fn main() {
         let out = read_all(&mut r);
         let want: &[u8] = b"foobar";
         if out.as_slice() == want {
-            Println!("[ 4] decode soft break LF    PASS");
+            fmt::Println!("[ 4] decode soft break LF    PASS");
         } else {
-            Println!("[ 4] decode soft break LF    FAIL");
+            fmt::Println!("[ 4] decode soft break LF    FAIL");
             failed += 1;
         }
     }
@@ -105,9 +106,9 @@ fn main() {
         let s = buf.String();
         // Each byte becomes =XX
         if s == string("=DE=AD=BE=EF") {
-            Println!("[ 5] encode binary           PASS");
+            fmt::Println!("[ 5] encode binary           PASS");
         } else {
-            Println!("[ 5] encode binary           FAIL got {}", s);
+            fmt::Println!("[ 5] encode binary           FAIL got {}", s);
             failed += 1;
         }
     }
@@ -119,9 +120,9 @@ fn main() {
         let out = read_all(&mut r);
         let want: &[u8] = &[0xde, 0xad, 0xbe, 0xef];
         if out.as_slice() == want {
-            Println!("[ 6] decode binary           PASS");
+            fmt::Println!("[ 6] decode binary           PASS");
         } else {
-            Println!("[ 6] decode binary           FAIL");
+            fmt::Println!("[ 6] decode binary           FAIL");
             failed += 1;
         }
     }
@@ -136,9 +137,9 @@ fn main() {
         let s = buf.String();
         // The encoded should contain at least one soft break "=\r\n".
         if strings::Contains(s.clone(), string("=\r\n")) {
-            Println!("[ 7] encode wraps at 76      PASS");
+            fmt::Println!("[ 7] encode wraps at 76      PASS");
         } else {
-            Println!("[ 7] encode wraps at 76      FAIL");
+            fmt::Println!("[ 7] encode wraps at 76      FAIL");
             failed += 1;
         }
     }
@@ -150,9 +151,9 @@ fn main() {
         let out = read_all(&mut r);
         let want: &[u8] = &[0xab, 0xcd];
         if out.as_slice() == want {
-            Println!("[ 8] decode lowercase hex    PASS");
+            fmt::Println!("[ 8] decode lowercase hex    PASS");
         } else {
-            Println!("[ 8] decode lowercase hex    FAIL");
+            fmt::Println!("[ 8] decode lowercase hex    FAIL");
             failed += 1;
         }
     }
@@ -167,9 +168,9 @@ fn main() {
         let mut r = NewReader(buf);
         let out = read_all(&mut r);
         if out.as_slice() == original.as_bytes() {
-            Println!("[ 9] round-trip ASCII        PASS");
+            fmt::Println!("[ 9] round-trip ASCII        PASS");
         } else {
-            Println!("[ 9] round-trip ASCII        FAIL");
+            fmt::Println!("[ 9] round-trip ASCII        FAIL");
             failed += 1;
         }
     }
@@ -183,9 +184,9 @@ fn main() {
         let s = buf.String();
         // Trailing space before \n should be encoded as =20.
         if strings::Contains(s.clone(), string("=20")) {
-            Println!("[10] encode trailing space   PASS");
+            fmt::Println!("[10] encode trailing space   PASS");
         } else {
-            Println!("[10] encode trailing space   FAIL got {}", s);
+            fmt::Println!("[10] encode trailing space   FAIL got {}", s);
             failed += 1;
         }
     }
@@ -197,18 +198,18 @@ fn main() {
         let mut buf: slice<byte> = slice::__from_vec(alloc::vec![0u8; 16]);
         let (n, e) = r.Read(&mut buf);
         if n == 0 && goish::errors::Is(e, io::EOF) {
-            Println!("[11] decode empty            PASS");
+            fmt::Println!("[11] decode empty            PASS");
         } else {
-            Println!("[11] decode empty            FAIL n={}", n);
+            fmt::Println!("[11] decode empty            FAIL n={}", n);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 11/11");
+        fmt::Println!("ok 11/11");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 11");
+        fmt::Println!("FAIL", failed, "of 11");
         syscall::Exit(1);
     }
 }

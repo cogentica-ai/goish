@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net;
 use goish::string;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -20,9 +21,9 @@ fn main() {
     {
         let ip = net::IPv4(192, 0, 2, 1);
         if ip.String() == string("192.0.2.1") {
-            Println!("[ 1] IPv4 + String             PASS");
+            fmt::Println!("[ 1] IPv4 + String             PASS");
         } else {
-            Println!("[ 1] IPv4 + String             FAIL");
+            fmt::Println!("[ 1] IPv4 + String             FAIL");
             failed += 1;
         }
     }
@@ -32,9 +33,9 @@ fn main() {
         let zero = net::IPv4(0, 0, 0, 0);
         let max = net::IPv4(255, 255, 255, 255);
         if zero.String() == string("0.0.0.0") && max.String() == string("255.255.255.255") {
-            Println!("[ 2] IPv4 boundary             PASS");
+            fmt::Println!("[ 2] IPv4 boundary             PASS");
         } else {
-            Println!("[ 2] IPv4 boundary             FAIL");
+            fmt::Println!("[ 2] IPv4 boundary             FAIL");
             failed += 1;
         }
     }
@@ -43,9 +44,9 @@ fn main() {
     {
         let ip = net::ParseIP(string("127.0.0.1"));
         if !ip.IsNil() && ip.String() == string("127.0.0.1") {
-            Println!("[ 3] ParseIP 127.0.0.1         PASS");
+            fmt::Println!("[ 3] ParseIP 127.0.0.1         PASS");
         } else {
-            Println!("[ 3] ParseIP 127.0.0.1         FAIL");
+            fmt::Println!("[ 3] ParseIP 127.0.0.1         FAIL");
             failed += 1;
         }
     }
@@ -74,9 +75,9 @@ fn main() {
             i += 1;
         }
         if all_nil {
-            Println!("[ 4] ParseIP rejects bad       PASS");
+            fmt::Println!("[ 4] ParseIP rejects bad       PASS");
         } else {
-            Println!("[ 4] ParseIP rejects bad       FAIL");
+            fmt::Println!("[ 4] ParseIP rejects bad       FAIL");
             failed += 1;
         }
     }
@@ -85,9 +86,9 @@ fn main() {
     {
         let ip = net::ParseIP(string("0.0.0.0"));
         if !ip.IsNil() && ip.String() == string("0.0.0.0") {
-            Println!("[ 5] ParseIP 0.0.0.0           PASS");
+            fmt::Println!("[ 5] ParseIP 0.0.0.0           PASS");
         } else {
-            Println!("[ 5] ParseIP 0.0.0.0           FAIL");
+            fmt::Println!("[ 5] ParseIP 0.0.0.0           FAIL");
             failed += 1;
         }
     }
@@ -97,9 +98,9 @@ fn main() {
         let ip = net::IPv4(10, 0, 0, 1);
         let v4 = ip.To4();
         if !v4.IsNil() && v4.String() == string("10.0.0.1") {
-            Println!("[ 6] To4 on IPv4               PASS");
+            fmt::Println!("[ 6] To4 on IPv4               PASS");
         } else {
-            Println!("[ 6] To4 on IPv4               FAIL");
+            fmt::Println!("[ 6] To4 on IPv4               FAIL");
             failed += 1;
         }
     }
@@ -108,9 +109,9 @@ fn main() {
     {
         let nil_ip = net::IP::default();
         if nil_ip.To4().IsNil() {
-            Println!("[ 7] To4 on nil-IP             PASS");
+            fmt::Println!("[ 7] To4 on nil-IP             PASS");
         } else {
-            Println!("[ 7] To4 on nil-IP             FAIL");
+            fmt::Println!("[ 7] To4 on nil-IP             FAIL");
             failed += 1;
         }
     }
@@ -119,18 +120,18 @@ fn main() {
     {
         let nil_ip = net::IP::default();
         if nil_ip.String() == string("<nil>") {
-            Println!("[ 8] nil IP String             PASS");
+            fmt::Println!("[ 8] nil IP String             PASS");
         } else {
-            Println!("[ 8] nil IP String             FAIL");
+            fmt::Println!("[ 8] nil IP String             FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

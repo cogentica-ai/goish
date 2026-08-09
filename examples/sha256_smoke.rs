@@ -12,12 +12,13 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::crypto::sha256;
 use goish::goslice::slice;
 use goish::hash::Hash;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -92,9 +93,9 @@ fn main() {
     {
         let s = sha256::Sum256(to_bytes(""));
         if array32_eq(&SHA256_EMPTY, &s) {
-            Println!("[ 1] Sum256 empty              PASS");
+            fmt::Println!("[ 1] Sum256 empty              PASS");
         } else {
-            Println!("[ 1] Sum256 empty              FAIL");
+            fmt::Println!("[ 1] Sum256 empty              FAIL");
             failed += 1;
         }
     }
@@ -103,9 +104,9 @@ fn main() {
     {
         let s = sha256::Sum256(to_bytes("abc"));
         if array32_eq(&SHA256_ABC, &s) {
-            Println!("[ 2] Sum256 \"abc\"              PASS");
+            fmt::Println!("[ 2] Sum256 \"abc\"              PASS");
         } else {
-            Println!("[ 2] Sum256 \"abc\"              FAIL");
+            fmt::Println!("[ 2] Sum256 \"abc\"              FAIL");
             failed += 1;
         }
     }
@@ -117,9 +118,9 @@ fn main() {
             "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
         ));
         if array32_eq(&SHA256_FIPS_LONG, &s) {
-            Println!("[ 3] Sum256 FIPS multi-block   PASS");
+            fmt::Println!("[ 3] Sum256 FIPS multi-block   PASS");
         } else {
-            Println!("[ 3] Sum256 FIPS multi-block   FAIL");
+            fmt::Println!("[ 3] Sum256 FIPS multi-block   FAIL");
             failed += 1;
         }
     }
@@ -128,9 +129,9 @@ fn main() {
     {
         let s = sha256::Sum224(to_bytes(""));
         if array28_eq(&SHA224_EMPTY, &s) {
-            Println!("[ 4] Sum224 empty              PASS");
+            fmt::Println!("[ 4] Sum224 empty              PASS");
         } else {
-            Println!("[ 4] Sum224 empty              FAIL");
+            fmt::Println!("[ 4] Sum224 empty              FAIL");
             failed += 1;
         }
     }
@@ -139,9 +140,9 @@ fn main() {
     {
         let s = sha256::Sum224(to_bytes("abc"));
         if array28_eq(&SHA224_ABC, &s) {
-            Println!("[ 5] Sum224 \"abc\"              PASS");
+            fmt::Println!("[ 5] Sum224 \"abc\"              PASS");
         } else {
-            Println!("[ 5] Sum224 \"abc\"              FAIL");
+            fmt::Println!("[ 5] Sum224 \"abc\"              FAIL");
             failed += 1;
         }
     }
@@ -154,9 +155,9 @@ fn main() {
         let out = h.Sum(empty_buf());
         let raw: &[byte] = &out;
         if array32_eq(&SHA256_ABC, raw) {
-            Println!("[ 6] streaming                 PASS");
+            fmt::Println!("[ 6] streaming                 PASS");
         } else {
-            Println!("[ 6] streaming                 FAIL");
+            fmt::Println!("[ 6] streaming                 FAIL");
             failed += 1;
         }
     }
@@ -169,9 +170,9 @@ fn main() {
         let out = h.Sum(empty_buf());
         let raw: &[byte] = &out;
         if array32_eq(&SHA256_EMPTY, raw) {
-            Println!("[ 7] Reset                     PASS");
+            fmt::Println!("[ 7] Reset                     PASS");
         } else {
-            Println!("[ 7] Reset                     FAIL");
+            fmt::Println!("[ 7] Reset                     FAIL");
             failed += 1;
         }
     }
@@ -187,9 +188,9 @@ fn main() {
             && &raw[0..4] == b"PRE:"
             && array32_eq(&SHA256_ABC, &raw[4..])
         {
-            Println!("[ 8] Sum prefix                PASS");
+            fmt::Println!("[ 8] Sum prefix                PASS");
         } else {
-            Println!("[ 8] Sum prefix                FAIL");
+            fmt::Println!("[ 8] Sum prefix                FAIL");
             failed += 1;
         }
     }
@@ -211,9 +212,9 @@ fn main() {
         let s_stream = h.Sum(empty_buf());
         let raw: &[byte] = &s_stream;
         if array32_eq(&s_one, raw) {
-            Println!("[ 9] >block boundary           PASS");
+            fmt::Println!("[ 9] >block boundary           PASS");
         } else {
-            Println!("[ 9] >block boundary           FAIL");
+            fmt::Println!("[ 9] >block boundary           FAIL");
             failed += 1;
         }
     }
@@ -226,9 +227,9 @@ fn main() {
             && h224.Size() == sha256::Size224
             && h.BlockSize() == sha256::BlockSize
         {
-            Println!("[10] Size/BlockSize            PASS");
+            fmt::Println!("[10] Size/BlockSize            PASS");
         } else {
-            Println!("[10] Size/BlockSize            FAIL");
+            fmt::Println!("[10] Size/BlockSize            FAIL");
             failed += 1;
         }
     }
@@ -242,9 +243,9 @@ fn main() {
         let r1: &[byte] = &s1;
         let r2: &[byte] = &s2;
         if r1 == r2 && array32_eq(&SHA256_ABC, r1) {
-            Println!("[11] Sum non-mutating          PASS");
+            fmt::Println!("[11] Sum non-mutating          PASS");
         } else {
-            Println!("[11] Sum non-mutating          FAIL");
+            fmt::Println!("[11] Sum non-mutating          FAIL");
             failed += 1;
         }
     }
@@ -258,18 +259,18 @@ fn main() {
         let out = h.Sum(empty_buf());
         let raw: &[byte] = &out;
         if array32_eq(&SHA256_ABC, raw) {
-            Println!("[12] write-after-Sum           PASS");
+            fmt::Println!("[12] write-after-Sum           PASS");
         } else {
-            Println!("[12] write-after-Sum           FAIL");
+            fmt::Println!("[12] write-after-Sum           FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

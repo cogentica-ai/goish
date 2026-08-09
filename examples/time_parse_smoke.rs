@@ -7,8 +7,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::time;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -25,9 +26,9 @@ fn main() {
             && got.Day() == 2
             && got.Hour() == 3
         {
-            Println!("[ 1] RFC3339 round-trip        PASS");
+            fmt::Println!("[ 1] RFC3339 round-trip        PASS");
         } else {
-            Println!("[ 1] RFC3339 round-trip        FAIL");
+            fmt::Println!("[ 1] RFC3339 round-trip        FAIL");
             failed += 1;
         }
     }
@@ -38,9 +39,9 @@ fn main() {
         let s = want.Format(string(time::DateTime));
         let (got, err) = time::Parse(string(time::DateTime), s);
         if err.IsNil() && got.Year() == 2025 && got.Day() == 31 {
-            Println!("[ 2] DateTime round-trip       PASS");
+            fmt::Println!("[ 2] DateTime round-trip       PASS");
         } else {
-            Println!("[ 2] DateTime round-trip       FAIL");
+            fmt::Println!("[ 2] DateTime round-trip       FAIL");
             failed += 1;
         }
     }
@@ -49,9 +50,9 @@ fn main() {
     {
         let (got, err) = time::Parse(string(time::DateOnly), string("2024-07-04"));
         if err.IsNil() && got.Year() == 2024 && got.Month() == 7 && got.Day() == 4 {
-            Println!("[ 3] DateOnly                  PASS");
+            fmt::Println!("[ 3] DateOnly                  PASS");
         } else {
-            Println!("[ 3] DateOnly                  FAIL");
+            fmt::Println!("[ 3] DateOnly                  FAIL");
             failed += 1;
         }
     }
@@ -70,9 +71,9 @@ fn main() {
             && got.Minute() == 4
             && got.Second() == 5
         {
-            Println!("[ 4] RFC1123                   PASS");
+            fmt::Println!("[ 4] RFC1123                   PASS");
         } else {
-            Println!("[ 4] RFC1123                   FAIL");
+            fmt::Println!("[ 4] RFC1123                   FAIL");
             failed += 1;
         }
     }
@@ -84,9 +85,9 @@ fn main() {
             string("Mon Jul  4 12:00:00 2024"),
         );
         if err.IsNil() && got.Year() == 2024 && got.Month() == 7 && got.Day() == 4 {
-            Println!("[ 5] ANSIC                     PASS");
+            fmt::Println!("[ 5] ANSIC                     PASS");
         } else {
-            Println!("[ 5] ANSIC                     FAIL");
+            fmt::Println!("[ 5] ANSIC                     FAIL");
             failed += 1;
         }
     }
@@ -95,9 +96,9 @@ fn main() {
     {
         let (_t, err) = time::Parse(string(time::RFC3339), string("nope"));
         if !err.IsNil() {
-            Println!("[ 6] malformed → err           PASS");
+            fmt::Println!("[ 6] malformed → err           PASS");
         } else {
-            Println!("[ 6] malformed → err           FAIL");
+            fmt::Println!("[ 6] malformed → err           FAIL");
             failed += 1;
         }
     }
@@ -106,18 +107,18 @@ fn main() {
     {
         let (_t, err) = time::Parse(string("01/02 03:04:05PM '06 -0700"), string("anything"));
         if !err.IsNil() {
-            Println!("[ 7] unsupported layout → err  PASS");
+            fmt::Println!("[ 7] unsupported layout → err  PASS");
         } else {
-            Println!("[ 7] unsupported layout → err  FAIL");
+            fmt::Println!("[ 7] unsupported layout → err  FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 7/7");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 7", failed);
+        fmt::Println!("FAIL {} of 7", failed);
         syscall::Exit(1);
     }
 }

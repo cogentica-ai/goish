@@ -19,10 +19,11 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{bytes, go, string, syscall, Println};
+use goish::{bytes, go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -83,9 +84,9 @@ fn main() {
         let (resp, _) = http::Get(url);
         let v = q_seen.Lock().clone();
         if resp.StatusCode == 200 && v == "hello" {
-            Println!("[ 1] FormValue from query      PASS");
+            fmt::Println!("[ 1] FormValue from query      PASS");
         } else {
-            Println!("[ 1] FormValue from query      FAIL got={}", v);
+            fmt::Println!("[ 1] FormValue from query      FAIL got={}", v);
             failed += 1;
         }
     }
@@ -101,9 +102,9 @@ fn main() {
         );
         let v = pf_name.Lock().clone();
         if resp.StatusCode == 200 && v == "world" {
-            Println!("[ 2] PostFormValue             PASS");
+            fmt::Println!("[ 2] PostFormValue             PASS");
         } else {
-            Println!("[ 2] PostFormValue             FAIL got={}", v);
+            fmt::Println!("[ 2] PostFormValue             FAIL got={}", v);
             failed += 1;
         }
     }
@@ -120,9 +121,9 @@ fn main() {
         );
         let v = merged.Lock().clone();
         if resp.StatusCode == 200 && v == "body" {
-            Println!("[ 3] body > query precedence   PASS");
+            fmt::Println!("[ 3] body > query precedence   PASS");
         } else {
-            Println!("[ 3] body > query precedence   FAIL got={}", v);
+            fmt::Println!("[ 3] body > query precedence   FAIL got={}", v);
             failed += 1;
         }
     }
@@ -133,9 +134,9 @@ fn main() {
         let (resp, _) = http::Get(url);
         let v = decoded.Lock().clone();
         if resp.StatusCode == 200 && v == "hello world goodbye" {
-            Println!("[ 4] %20 / + decode            PASS");
+            fmt::Println!("[ 4] %20 / + decode            PASS");
         } else {
-            Println!("[ 4] %20 / + decode            FAIL got={}", v);
+            fmt::Println!("[ 4] %20 / + decode            FAIL got={}", v);
             failed += 1;
         }
     }
@@ -143,10 +144,10 @@ fn main() {
     let _ = srv_arc.Shutdown(time::Second);
 
     if failed == 0 {
-        Println!("ok 4/4");
+        fmt::Println!("ok 4/4");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 4", failed);
+        fmt::Println!("FAIL {} of 4", failed);
         syscall::Exit(1);
     }
 }

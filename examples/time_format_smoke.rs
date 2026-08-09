@@ -8,8 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::time;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -24,9 +25,9 @@ fn main() {
         let m = t.Month();
         let d = t.Day();
         if y == 2024 && m == 1 && d == 2 {
-            Println!("[ 0] Date round-trip           PASS");
+            fmt::Println!("[ 0] Date round-trip           PASS");
         } else {
-            Println!("[ 0] Date round-trip           FAIL y={} m={} d={}", y, m, d);
+            fmt::Println!("[ 0] Date round-trip           FAIL y={} m={} d={}", y, m, d);
             failed += 1;
         }
     }
@@ -35,9 +36,9 @@ fn main() {
     {
         let s = t.Format(string(time::RFC3339));
         if s == "2024-01-02T03:04:05Z" {
-            Println!("[ 1] RFC3339                   PASS");
+            fmt::Println!("[ 1] RFC3339                   PASS");
         } else {
-            Println!("[ 1] RFC3339                   FAIL got={}", s);
+            fmt::Println!("[ 1] RFC3339                   FAIL got={}", s);
             failed += 1;
         }
     }
@@ -46,9 +47,9 @@ fn main() {
     {
         let s = t.Format(string(time::DateTime));
         if s == "2024-01-02 03:04:05" {
-            Println!("[ 2] DateTime                  PASS");
+            fmt::Println!("[ 2] DateTime                  PASS");
         } else {
-            Println!("[ 2] DateTime                  FAIL got={}", s);
+            fmt::Println!("[ 2] DateTime                  FAIL got={}", s);
             failed += 1;
         }
     }
@@ -57,9 +58,9 @@ fn main() {
     {
         let s = t.Format(string(time::DateOnly));
         if s == "2024-01-02" {
-            Println!("[ 3] DateOnly                  PASS");
+            fmt::Println!("[ 3] DateOnly                  PASS");
         } else {
-            Println!("[ 3] DateOnly                  FAIL got={}", s);
+            fmt::Println!("[ 3] DateOnly                  FAIL got={}", s);
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
     {
         let s = t.Format(string(time::TimeOnly));
         if s == "03:04:05" {
-            Println!("[ 4] TimeOnly                  PASS");
+            fmt::Println!("[ 4] TimeOnly                  PASS");
         } else {
-            Println!("[ 4] TimeOnly                  FAIL got={}", s);
+            fmt::Println!("[ 4] TimeOnly                  FAIL got={}", s);
             failed += 1;
         }
     }
@@ -79,9 +80,9 @@ fn main() {
     {
         let s = t.Format(string(time::RFC1123));
         if s == "Tue, 02 Jan 2024 03:04:05 GMT" {
-            Println!("[ 5] RFC1123                   PASS");
+            fmt::Println!("[ 5] RFC1123                   PASS");
         } else {
-            Println!("[ 5] RFC1123                   FAIL got={}", s);
+            fmt::Println!("[ 5] RFC1123                   FAIL got={}", s);
             failed += 1;
         }
     }
@@ -90,9 +91,9 @@ fn main() {
     {
         let s = t.Format(string(time::Kitchen));
         if s == "3:04AM" {
-            Println!("[ 6] Kitchen AM                PASS");
+            fmt::Println!("[ 6] Kitchen AM                PASS");
         } else {
-            Println!("[ 6] Kitchen AM                FAIL got={}", s);
+            fmt::Println!("[ 6] Kitchen AM                FAIL got={}", s);
             failed += 1;
         }
     }
@@ -102,9 +103,9 @@ fn main() {
         let pm = time::Date(2024, 1, 2, 13, 0, 0, 0, goish::time::UTC);
         let s = pm.Format(string(time::Kitchen));
         if s == "1:00PM" {
-            Println!("[ 7] Kitchen PM                PASS");
+            fmt::Println!("[ 7] Kitchen PM                PASS");
         } else {
-            Println!("[ 7] Kitchen PM                FAIL got={}", s);
+            fmt::Println!("[ 7] Kitchen PM                FAIL got={}", s);
             failed += 1;
         }
     }
@@ -113,9 +114,9 @@ fn main() {
     {
         let s = t.Format(string(time::ANSIC));
         if s == "Tue Jan  2 03:04:05 2024" {
-            Println!("[ 8] ANSIC                     PASS");
+            fmt::Println!("[ 8] ANSIC                     PASS");
         } else {
-            Println!("[ 8] ANSIC                     FAIL got={}", s);
+            fmt::Println!("[ 8] ANSIC                     FAIL got={}", s);
             failed += 1;
         }
     }
@@ -124,18 +125,18 @@ fn main() {
     {
         let s = t.Format(string(time::RFC850));
         if s == "Tuesday, 02-Jan-24 03:04:05 GMT" {
-            Println!("[ 9] RFC850                    PASS");
+            fmt::Println!("[ 9] RFC850                    PASS");
         } else {
-            Println!("[ 9] RFC850                    FAIL got={}", s);
+            fmt::Println!("[ 9] RFC850                    FAIL got={}", s);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 10", failed);
+        fmt::Println!("FAIL {} of 10", failed);
         syscall::Exit(1);
     }
 }

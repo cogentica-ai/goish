@@ -8,11 +8,12 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::boxed::Box;
+use goish::fmt;
 use goish::bytes;
 use goish::goslice::slice;
 use goish::io::{self, Reader, Writer};
 use goish::strings;
-use goish::{byte, string, syscall, Println};
+use goish::{byte, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -30,9 +31,9 @@ fn main() {
         let mut buf = bytes::NewBuffer(goish::make!([]byte, 0));
         let (n, err) = io::Copy(&mut buf, &mut mr);
         if err.IsNil() && n == 12 && buf.String() == "hello, world" {
-            Println!("[ 1] MultiReader concat        PASS");
+            fmt::Println!("[ 1] MultiReader concat        PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 1] MultiReader concat        FAIL n={} got={}",
                 n,
                 buf.String()
@@ -50,9 +51,9 @@ fn main() {
         let (n, err) = mr.Read(&mut p);
         let eof = io::EOF;
         if n == 0 && err == eof {
-            Println!("[ 2] MultiReader empty=EOF     PASS");
+            fmt::Println!("[ 2] MultiReader empty=EOF     PASS");
         } else {
-            Println!("[ 2] MultiReader empty=EOF     FAIL");
+            fmt::Println!("[ 2] MultiReader empty=EOF     FAIL");
             failed += 1;
         }
     }
@@ -67,9 +68,9 @@ fn main() {
         let payload = goish::convert::bytes("tee-output");
         let (n, err) = mw.Write(payload);
         if err.IsNil() && n == 10 {
-            Println!("[ 3] MultiWriter Write returns PASS");
+            fmt::Println!("[ 3] MultiWriter Write returns PASS");
         } else {
-            Println!("[ 3] MultiWriter Write returns FAIL n={}", n);
+            fmt::Println!("[ 3] MultiWriter Write returns FAIL n={}", n);
             failed += 1;
         }
     }
@@ -82,9 +83,9 @@ fn main() {
         let payload = goish::convert::bytes("x");
         let (n, err) = mw.Write(payload);
         if err.IsNil() && n == 1 {
-            Println!("[ 4] MultiWriter empty noop    PASS");
+            fmt::Println!("[ 4] MultiWriter empty noop    PASS");
         } else {
-            Println!("[ 4] MultiWriter empty noop    FAIL n={}", n);
+            fmt::Println!("[ 4] MultiWriter empty noop    FAIL n={}", n);
             failed += 1;
         }
     }
@@ -112,9 +113,9 @@ fn main() {
             && p1[0] == b'a' && p1[1] == b'b'
             && p2[0] == b'c' && p2[1] == b'd'
         {
-            Println!("[ 5] MultiReader boundaries    PASS");
+            fmt::Println!("[ 5] MultiReader boundaries    PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 5] MultiReader boundaries    FAIL n1={} n2={} n3={}",
                 n1, n2, n3
             );
@@ -123,10 +124,10 @@ fn main() {
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 5", failed);
+        fmt::Println!("FAIL {} of 5", failed);
         syscall::Exit(1);
     }
 }

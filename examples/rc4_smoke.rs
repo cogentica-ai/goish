@@ -12,10 +12,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::crypto::cipher::Stream;
 use goish::crypto::rc4;
 use goish::errors;
-use goish::{slice, syscall, Println};
+use goish::{slice, syscall};
 
 #[goish::main]
 fn main() {
@@ -31,7 +32,7 @@ fn main() {
         let want = alloc::vec![0x74, 0x94, 0xc2, 0xe7, 0x10, 0x4b, 0x08, 0x79];
         let (mut c, err) = rc4::NewCipher(key);
         if !err.IsNil() || c.is_none() {
-            Println!("[ 1] cypherpunk vector #1       FAIL");
+            fmt::Println!("[ 1] cypherpunk vector #1       FAIL");
             failed += 1;
         } else {
             let cipher = c.as_mut().unwrap();
@@ -39,9 +40,9 @@ fn main() {
             let mut dst = slice::__from_vec(alloc::vec![0u8; 8]);
             cipher.XORKeyStream(&mut dst, src);
             if dst.__into_vec() == want {
-                Println!("[ 1] cypherpunk vector #1       PASS");
+                fmt::Println!("[ 1] cypherpunk vector #1       PASS");
             } else {
-                Println!("[ 1] cypherpunk vector #1       FAIL");
+                fmt::Println!("[ 1] cypherpunk vector #1       FAIL");
                 failed += 1;
             }
         }
@@ -55,7 +56,7 @@ fn main() {
         let want = alloc::vec![0xde, 0x18, 0x89, 0x41, 0xa3, 0x37, 0x5d, 0x3a];
         let (mut c, err) = rc4::NewCipher(key);
         if !err.IsNil() || c.is_none() {
-            Println!("[ 2] all-zero key vector        FAIL");
+            fmt::Println!("[ 2] all-zero key vector        FAIL");
             failed += 1;
         } else {
             let cipher = c.as_mut().unwrap();
@@ -63,9 +64,9 @@ fn main() {
             let mut dst = slice::__from_vec(alloc::vec![0u8; 8]);
             cipher.XORKeyStream(&mut dst, src);
             if dst.__into_vec() == want {
-                Println!("[ 2] all-zero key vector        PASS");
+                fmt::Println!("[ 2] all-zero key vector        PASS");
             } else {
-                Println!("[ 2] all-zero key vector        FAIL");
+                fmt::Println!("[ 2] all-zero key vector        FAIL");
                 failed += 1;
             }
         }
@@ -81,7 +82,7 @@ fn main() {
         ];
         let (mut c, err) = rc4::NewCipher(key);
         if !err.IsNil() || c.is_none() {
-            Println!("[ 3] short key + 10-byte stream FAIL");
+            fmt::Println!("[ 3] short key + 10-byte stream FAIL");
             failed += 1;
         } else {
             let cipher = c.as_mut().unwrap();
@@ -89,9 +90,9 @@ fn main() {
             let mut dst = slice::__from_vec(alloc::vec![0u8; 10]);
             cipher.XORKeyStream(&mut dst, src);
             if dst.__into_vec() == want {
-                Println!("[ 3] short key + 10-byte stream PASS");
+                fmt::Println!("[ 3] short key + 10-byte stream PASS");
             } else {
-                Println!("[ 3] short key + 10-byte stream FAIL");
+                fmt::Println!("[ 3] short key + 10-byte stream FAIL");
                 failed += 1;
             }
         }
@@ -107,7 +108,7 @@ fn main() {
         ];
         let (mut c, err) = rc4::NewCipher(key);
         if !err.IsNil() || c.is_none() {
-            Println!("[ 4] Wikipedia 'Key' vector     FAIL");
+            fmt::Println!("[ 4] Wikipedia 'Key' vector     FAIL");
             failed += 1;
         } else {
             let cipher = c.as_mut().unwrap();
@@ -115,9 +116,9 @@ fn main() {
             let mut dst = slice::__from_vec(alloc::vec![0u8; 10]);
             cipher.XORKeyStream(&mut dst, src);
             if dst.__into_vec() == want {
-                Println!("[ 4] Wikipedia 'Key' vector     PASS");
+                fmt::Println!("[ 4] Wikipedia 'Key' vector     PASS");
             } else {
-                Println!("[ 4] Wikipedia 'Key' vector     FAIL");
+                fmt::Println!("[ 4] Wikipedia 'Key' vector     FAIL");
                 failed += 1;
             }
         }
@@ -131,7 +132,7 @@ fn main() {
         let want = alloc::vec![0x60, 0x44, 0xdb, 0x6d, 0x41, 0xb7];
         let (mut c, err) = rc4::NewCipher(key);
         if !err.IsNil() || c.is_none() {
-            Println!("[ 5] Wikipedia 'Wiki' vector    FAIL");
+            fmt::Println!("[ 5] Wikipedia 'Wiki' vector    FAIL");
             failed += 1;
         } else {
             let cipher = c.as_mut().unwrap();
@@ -139,9 +140,9 @@ fn main() {
             let mut dst = slice::__from_vec(alloc::vec![0u8; 6]);
             cipher.XORKeyStream(&mut dst, src);
             if dst.__into_vec() == want {
-                Println!("[ 5] Wikipedia 'Wiki' vector    PASS");
+                fmt::Println!("[ 5] Wikipedia 'Wiki' vector    PASS");
             } else {
-                Println!("[ 5] Wikipedia 'Wiki' vector    FAIL");
+                fmt::Println!("[ 5] Wikipedia 'Wiki' vector    FAIL");
                 failed += 1;
             }
         }
@@ -166,9 +167,9 @@ fn main() {
         c2.as_mut().unwrap().XORKeyStream(&mut dec, enc);
 
         if dec.__into_vec() == plain {
-            Println!("[ 6] enc/dec round-trip         PASS");
+            fmt::Println!("[ 6] enc/dec round-trip         PASS");
         } else {
-            Println!("[ 6] enc/dec round-trip         FAIL");
+            fmt::Println!("[ 6] enc/dec round-trip         FAIL");
             failed += 1;
         }
     }
@@ -192,9 +193,9 @@ fn main() {
             k += 1;
         }
         if got == want_full {
-            Println!("[ 7] state across 1-byte calls  PASS");
+            fmt::Println!("[ 7] state across 1-byte calls  PASS");
         } else {
-            Println!("[ 7] state across 1-byte calls  FAIL");
+            fmt::Println!("[ 7] state across 1-byte calls  FAIL");
             failed += 1;
         }
     }
@@ -207,13 +208,13 @@ fn main() {
             // Make sure errors::As recovers the typed error.
             let typed = errors::As::<rc4::KeySizeError>(err);
             if typed.is_some() && typed.unwrap().0 == 0 {
-                Println!("[ 8] NewCipher empty key err    PASS");
+                fmt::Println!("[ 8] NewCipher empty key err    PASS");
             } else {
-                Println!("[ 8] NewCipher empty key err    FAIL");
+                fmt::Println!("[ 8] NewCipher empty key err    FAIL");
                 failed += 1;
             }
         } else {
-            Println!("[ 8] NewCipher empty key err    FAIL");
+            fmt::Println!("[ 8] NewCipher empty key err    FAIL");
             failed += 1;
         }
     }
@@ -225,13 +226,13 @@ fn main() {
         if c.is_none() && !err.IsNil() {
             let msg = err.Error();
             if msg == "crypto/rc4: invalid key size 257" {
-                Println!("[ 9] NewCipher 257-byte err     PASS");
+                fmt::Println!("[ 9] NewCipher 257-byte err     PASS");
             } else {
-                Println!("[ 9] NewCipher 257-byte err     FAIL");
+                fmt::Println!("[ 9] NewCipher 257-byte err     FAIL");
                 failed += 1;
             }
         } else {
-            Println!("[ 9] NewCipher 257-byte err     FAIL");
+            fmt::Println!("[ 9] NewCipher 257-byte err     FAIL");
             failed += 1;
         }
     }
@@ -263,9 +264,9 @@ fn main() {
         cipher.XORKeyStream(&mut b, src_b);
 
         if a.__into_vec() == b.__into_vec() {
-            Println!("[10] Reset is deterministic     PASS");
+            fmt::Println!("[10] Reset is deterministic     PASS");
         } else {
-            Println!("[10] Reset is deterministic     FAIL");
+            fmt::Println!("[10] Reset is deterministic     FAIL");
             failed += 1;
         }
     }
@@ -287,9 +288,9 @@ fn main() {
         let zeros = slice::__from_vec(alloc::vec![0u8; 10]);
         let out = xor_via_stream(c.as_mut().unwrap(), zeros);
         if out.__into_vec() == want {
-            Println!("[11] cipher::Stream bound       PASS");
+            fmt::Println!("[11] cipher::Stream bound       PASS");
         } else {
-            Println!("[11] cipher::Stream bound       FAIL");
+            fmt::Println!("[11] cipher::Stream bound       FAIL");
             failed += 1;
         }
     }
@@ -309,18 +310,18 @@ fn main() {
         cipher.XORKeyStream(&mut got, src);
         let v = got.__into_vec();
         if v.len() == 1 && v[0] == 0xeb {
-            Println!("[12] empty src no-op            PASS");
+            fmt::Println!("[12] empty src no-op            PASS");
         } else {
-            Println!("[12] empty src no-op            FAIL");
+            fmt::Println!("[12] empty src no-op            FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

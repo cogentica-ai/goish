@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::goslice::slice;
 use goish::runtime;
 use goish::string;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -21,15 +22,15 @@ fn main() {
     {
         runtime::LockOSThread();
         runtime::UnlockOSThread();
-        Println!("[ 1] Lock/UnlockOSThread        PASS");
+        fmt::Println!("[ 1] Lock/UnlockOSThread        PASS");
     }
 
     // 2. NumCgoCall — slim has no cgo.
     {
         if runtime::NumCgoCall() == 0 {
-            Println!("[ 2] NumCgoCall                PASS");
+            fmt::Println!("[ 2] NumCgoCall                PASS");
         } else {
-            Println!("[ 2] NumCgoCall                FAIL");
+            fmt::Println!("[ 2] NumCgoCall                FAIL");
             failed += 1;
         }
     }
@@ -37,15 +38,15 @@ fn main() {
     // 3. GC — no-op, just check callable.
     {
         runtime::GC();
-        Println!("[ 3] GC                        PASS");
+        fmt::Println!("[ 3] GC                        PASS");
     }
 
     // 4. GOROOT — empty string in slim.
     {
         if runtime::GOROOT() == string("") {
-            Println!("[ 4] GOROOT                    PASS");
+            fmt::Println!("[ 4] GOROOT                    PASS");
         } else {
-            Println!("[ 4] GOROOT                    FAIL");
+            fmt::Println!("[ 4] GOROOT                    FAIL");
             failed += 1;
         }
     }
@@ -55,9 +56,9 @@ fn main() {
         let buf: slice<()> = slice::__from_vec(alloc::vec::Vec::new());
         let (n, ok) = runtime::GoroutineProfile(buf);
         if n == 0 && !ok {
-            Println!("[ 5] GoroutineProfile          PASS");
+            fmt::Println!("[ 5] GoroutineProfile          PASS");
         } else {
-            Println!("[ 5] GoroutineProfile          FAIL");
+            fmt::Println!("[ 5] GoroutineProfile          FAIL");
             failed += 1;
         }
     }
@@ -68,18 +69,18 @@ fn main() {
             && runtime::GOARCH == "amd64"
             && runtime::Compiler == "goish"
         {
-            Println!("[ 6] GOOS/GOARCH/Compiler      PASS");
+            fmt::Println!("[ 6] GOOS/GOARCH/Compiler      PASS");
         } else {
-            Println!("[ 6] GOOS/GOARCH/Compiler      FAIL");
+            fmt::Println!("[ 6] GOOS/GOARCH/Compiler      FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 6");
+        fmt::Println!("FAIL", failed, "of 6");
         syscall::Exit(1);
     }
 }

@@ -10,8 +10,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net::http;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -21,9 +22,9 @@ fn main() {
     let check = |idx: i32, base: &'static str, reference: &'static str, want: &'static str, fail: &mut i32| {
         let got = http::ResolvePath(string(base), string(reference));
         if got == want {
-            Println!("[{}] resolvePath PASS", idx);
+            fmt::Println!("[{}] resolvePath PASS", idx);
         } else {
-            Println!(
+            fmt::Println!(
                 "[{}] resolvePath FAIL base={} ref={} got={} want={}",
                 idx, base, reference, got, want
             );
@@ -63,10 +64,10 @@ fn main() {
     check(15, "/", "", "/", &mut failed);
 
     if failed == 0 {
-        Println!("ok 15/15");
+        fmt::Println!("ok 15/15");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 15", failed);
+        fmt::Println!("FAIL {} of 15", failed);
         syscall::Exit(1);
     }
 }

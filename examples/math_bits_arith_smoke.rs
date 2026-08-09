@@ -7,8 +7,9 @@
 
 extern crate goish;
 
+use goish::fmt;
 use goish::math::bits;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -19,9 +20,9 @@ fn main() {
     {
         let (s, c) = bits::Add64(1, 2, 0);
         if s == 3 && c == 0 {
-            Println!("[ 1] Add64 1+2+0=(3,0)         PASS");
+            fmt::Println!("[ 1] Add64 1+2+0=(3,0)         PASS");
         } else {
-            Println!("[ 1] Add64 1+2+0=(3,0)         FAIL");
+            fmt::Println!("[ 1] Add64 1+2+0=(3,0)         FAIL");
             failed += 1;
         }
     }
@@ -31,9 +32,9 @@ fn main() {
     {
         let (s, c) = bits::Add64(u64::MAX, 1, 0);
         if s == 0 && c == 1 {
-            Println!("[ 2] Add64 carry-out           PASS");
+            fmt::Println!("[ 2] Add64 carry-out           PASS");
         } else {
-            Println!("[ 2] Add64 carry-out           FAIL");
+            fmt::Println!("[ 2] Add64 carry-out           FAIL");
             failed += 1;
         }
     }
@@ -44,9 +45,9 @@ fn main() {
         let (s, c) = bits::Add32(u32::MAX, u32::MAX, 1);
         // 0xFFFFFFFF + 0xFFFFFFFF + 1 = 0x1_FFFFFFFF
         if s == 0xFFFFFFFFu32 && c == 1 {
-            Println!("[ 3] Add32 max+max+1           PASS");
+            fmt::Println!("[ 3] Add32 max+max+1           PASS");
         } else {
-            Println!("[ 3] Add32 max+max+1           FAIL");
+            fmt::Println!("[ 3] Add32 max+max+1           FAIL");
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
     {
         let (d, b) = bits::Sub64(5, 3, 0);
         if d == 2 && b == 0 {
-            Println!("[ 4] Sub64 5-3-0=(2,0)         PASS");
+            fmt::Println!("[ 4] Sub64 5-3-0=(2,0)         PASS");
         } else {
-            Println!("[ 4] Sub64 5-3-0=(2,0)         FAIL");
+            fmt::Println!("[ 4] Sub64 5-3-0=(2,0)         FAIL");
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
     {
         let (d, b) = bits::Sub64(0, 1, 0);
         if d == u64::MAX && b == 1 {
-            Println!("[ 5] Sub64 borrow-out          PASS");
+            fmt::Println!("[ 5] Sub64 borrow-out          PASS");
         } else {
-            Println!("[ 5] Sub64 borrow-out          FAIL");
+            fmt::Println!("[ 5] Sub64 borrow-out          FAIL");
             failed += 1;
         }
     }
@@ -80,9 +81,9 @@ fn main() {
     {
         let (d, b) = bits::Sub32(5, 5, 1);
         if d == u32::MAX && b == 1 {
-            Println!("[ 6] Sub32 borrow chain        PASS");
+            fmt::Println!("[ 6] Sub32 borrow chain        PASS");
         } else {
-            Println!("[ 6] Sub32 borrow chain        FAIL");
+            fmt::Println!("[ 6] Sub32 borrow chain        FAIL");
             failed += 1;
         }
     }
@@ -92,9 +93,9 @@ fn main() {
     {
         let (hi, lo) = bits::Mul32(0xFFFF, 0xFFFF);
         if hi == 0 && lo == 0xFFFE_0001 {
-            Println!("[ 7] Mul32 16×16               PASS");
+            fmt::Println!("[ 7] Mul32 16×16               PASS");
         } else {
-            Println!("[ 7] Mul32 16×16               FAIL");
+            fmt::Println!("[ 7] Mul32 16×16               FAIL");
             failed += 1;
         }
     }
@@ -104,9 +105,9 @@ fn main() {
     {
         let (hi, lo) = bits::Mul32(0xFFFFFFFF, 2);
         if hi == 1 && lo == 0xFFFFFFFE {
-            Println!("[ 8] Mul32 full-width          PASS");
+            fmt::Println!("[ 8] Mul32 full-width          PASS");
         } else {
-            Println!("[ 8] Mul32 full-width          FAIL");
+            fmt::Println!("[ 8] Mul32 full-width          FAIL");
             failed += 1;
         }
     }
@@ -116,9 +117,9 @@ fn main() {
     {
         let (q, r) = bits::Div64(0, 100, 7);
         if q == 14 && r == 2 {
-            Println!("[ 9] Div64 hi=0 fast path      PASS");
+            fmt::Println!("[ 9] Div64 hi=0 fast path      PASS");
         } else {
-            Println!("[ 9] Div64 hi=0 fast path      FAIL");
+            fmt::Println!("[ 9] Div64 hi=0 fast path      FAIL");
             failed += 1;
         }
     }
@@ -128,9 +129,9 @@ fn main() {
     {
         let (q, r) = bits::Div64(1, 0, 3);
         if q == 0x5555_5555_5555_5555 && r == 1 {
-            Println!("[10] Div64 wide dividend       PASS");
+            fmt::Println!("[10] Div64 wide dividend       PASS");
         } else {
-            Println!("[10] Div64 wide dividend       FAIL");
+            fmt::Println!("[10] Div64 wide dividend       FAIL");
             failed += 1;
         }
     }
@@ -140,9 +141,9 @@ fn main() {
     {
         let (q, r) = bits::Div32(1, 0, 3);
         if q == 0x5555_5555 && r == 1 {
-            Println!("[11] Div32 wide dividend       PASS");
+            fmt::Println!("[11] Div32 wide dividend       PASS");
         } else {
-            Println!("[11] Div32 wide dividend       FAIL");
+            fmt::Println!("[11] Div32 wide dividend       FAIL");
             failed += 1;
         }
     }
@@ -158,9 +159,9 @@ fn main() {
         // 2^3 = 8 ≡ 1 mod 7, 2^64 = 2^(3*21+1) = 2). So 3*2^64 mod 7
         // = 6 mod 7 = 6. Plus 5 = 11 mod 7 = 4.
         if r == 4 {
-            Println!("[12] Rem64 large hi            PASS");
+            fmt::Println!("[12] Rem64 large hi            PASS");
         } else {
-            Println!("[12] Rem64 large hi            FAIL");
+            fmt::Println!("[12] Rem64 large hi            FAIL");
             failed += 1;
         }
     }
@@ -169,9 +170,9 @@ fn main() {
     {
         let (s, c) = bits::Add(u64::MAX as goish::types::uint, 1, 0);
         if s == 0 && c == 1 {
-            Println!("[13] Add → Add64               PASS");
+            fmt::Println!("[13] Add → Add64               PASS");
         } else {
-            Println!("[13] Add → Add64               FAIL");
+            fmt::Println!("[13] Add → Add64               FAIL");
             failed += 1;
         }
     }
@@ -180,9 +181,9 @@ fn main() {
     {
         let (d, b) = bits::Sub(0, 1, 0);
         if d == u64::MAX as goish::types::uint && b == 1 {
-            Println!("[14] Sub → Sub64               PASS");
+            fmt::Println!("[14] Sub → Sub64               PASS");
         } else {
-            Println!("[14] Sub → Sub64               FAIL");
+            fmt::Println!("[14] Sub → Sub64               FAIL");
             failed += 1;
         }
     }
@@ -192,18 +193,18 @@ fn main() {
         let (hi, lo) = bits::Mul(0xFFFF_FFFF_FFFF_FFFF, 2);
         // Equivalent of Mul64.
         if hi == 1 && lo == 0xFFFF_FFFF_FFFF_FFFE {
-            Println!("[15] Mul → Mul64               PASS");
+            fmt::Println!("[15] Mul → Mul64               PASS");
         } else {
-            Println!("[15] Mul → Mul64               FAIL");
+            fmt::Println!("[15] Mul → Mul64               FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 15/15");
+        fmt::Println!("ok 15/15");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 15");
+        fmt::Println!("FAIL", failed, "of 15");
         syscall::Exit(1);
     }
 }

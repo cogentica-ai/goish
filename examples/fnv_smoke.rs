@@ -12,13 +12,14 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::goslice::slice;
 use goish::hash::fnv;
 use goish::hash::{Hash, Hash32, Hash64};
 use goish::io::Writer as _;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -38,9 +39,9 @@ fn main() {
     {
         let h = fnv::New32();
         if h.Sum32() == 2166136261 && h.Size() == 4 && h.BlockSize() == 1 {
-            Println!("[ 1] New32 init                PASS");
+            fmt::Println!("[ 1] New32 init                PASS");
         } else {
-            Println!("[ 1] New32 init                FAIL");
+            fmt::Println!("[ 1] New32 init                FAIL");
             failed += 1;
         }
     }
@@ -49,9 +50,9 @@ fn main() {
     {
         let h = fnv::New32a();
         if h.Sum32() == 2166136261 {
-            Println!("[ 2] New32a init               PASS");
+            fmt::Println!("[ 2] New32a init               PASS");
         } else {
-            Println!("[ 2] New32a init               FAIL");
+            fmt::Println!("[ 2] New32a init               FAIL");
             failed += 1;
         }
     }
@@ -62,9 +63,9 @@ fn main() {
         let mut h = fnv::New32();
         let _ = h.Write(to_bytes("a"));
         if h.Sum32() == 0x050C5D7E {
-            Println!("[ 3] FNV-1 32 \"a\"              PASS");
+            fmt::Println!("[ 3] FNV-1 32 \"a\"              PASS");
         } else {
-            Println!("[ 3] FNV-1 32 \"a\"              FAIL");
+            fmt::Println!("[ 3] FNV-1 32 \"a\"              FAIL");
             failed += 1;
         }
     }
@@ -75,9 +76,9 @@ fn main() {
         let mut h = fnv::New32a();
         let _ = h.Write(to_bytes("a"));
         if h.Sum32() == 0xE40C292C {
-            Println!("[ 4] FNV-1a 32 \"a\"             PASS");
+            fmt::Println!("[ 4] FNV-1a 32 \"a\"             PASS");
         } else {
-            Println!("[ 4] FNV-1a 32 \"a\"             FAIL");
+            fmt::Println!("[ 4] FNV-1a 32 \"a\"             FAIL");
             failed += 1;
         }
     }
@@ -87,9 +88,9 @@ fn main() {
         let mut h = fnv::New64();
         let _ = h.Write(to_bytes("a"));
         if h.Sum64() == 0xAF63BD4C8601B7BE {
-            Println!("[ 5] FNV-1 64 \"a\"              PASS");
+            fmt::Println!("[ 5] FNV-1 64 \"a\"              PASS");
         } else {
-            Println!("[ 5] FNV-1 64 \"a\"              FAIL");
+            fmt::Println!("[ 5] FNV-1 64 \"a\"              FAIL");
             failed += 1;
         }
     }
@@ -99,9 +100,9 @@ fn main() {
         let mut h = fnv::New64a();
         let _ = h.Write(to_bytes("a"));
         if h.Sum64() == 0xAF63DC4C8601EC8C {
-            Println!("[ 6] FNV-1a 64 \"a\"             PASS");
+            fmt::Println!("[ 6] FNV-1a 64 \"a\"             PASS");
         } else {
-            Println!("[ 6] FNV-1a 64 \"a\"             FAIL");
+            fmt::Println!("[ 6] FNV-1a 64 \"a\"             FAIL");
             failed += 1;
         }
     }
@@ -114,9 +115,9 @@ fn main() {
         let mut b = fnv::New32a();
         let _ = b.Write(to_bytes("foobar"));
         if a.Sum32() == b.Sum32() {
-            Println!("[ 7] FNV-1a 32 incremental     PASS");
+            fmt::Println!("[ 7] FNV-1a 32 incremental     PASS");
         } else {
-            Println!("[ 7] FNV-1a 32 incremental     FAIL");
+            fmt::Println!("[ 7] FNV-1a 32 incremental     FAIL");
             failed += 1;
         }
     }
@@ -127,9 +128,9 @@ fn main() {
         let _ = h.Write(to_bytes("hello"));
         h.Reset();
         if h.Sum64() == 14695981039346656037 {
-            Println!("[ 8] Reset → offset64           PASS");
+            fmt::Println!("[ 8] Reset → offset64           PASS");
         } else {
-            Println!("[ 8] Reset → offset64           FAIL");
+            fmt::Println!("[ 8] Reset → offset64           FAIL");
             failed += 1;
         }
     }
@@ -147,9 +148,9 @@ fn main() {
         want_v.push(0x2C);
         let want = slice::<byte>::__from_vec(want_v);
         if equal_bytes(out, want) {
-            Println!("[ 9] Sum32a BE append          PASS");
+            fmt::Println!("[ 9] Sum32a BE append          PASS");
         } else {
-            Println!("[ 9] Sum32a BE append          FAIL");
+            fmt::Println!("[ 9] Sum32a BE append          FAIL");
             failed += 1;
         }
     }
@@ -170,9 +171,9 @@ fn main() {
             && raw[9] == 0x5D
             && raw[10] == 0x7E
         {
-            Println!("[10] Sum prefix                PASS");
+            fmt::Println!("[10] Sum prefix                PASS");
         } else {
-            Println!("[10] Sum prefix                FAIL");
+            fmt::Println!("[10] Sum prefix                FAIL");
             failed += 1;
         }
     }
@@ -190,18 +191,18 @@ fn main() {
             && h32.BlockSize() == 1
             && h64a.BlockSize() == 1
         {
-            Println!("[11] Size/BlockSize            PASS");
+            fmt::Println!("[11] Size/BlockSize            PASS");
         } else {
-            Println!("[11] Size/BlockSize            FAIL");
+            fmt::Println!("[11] Size/BlockSize            FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 11/11");
+        fmt::Println!("ok 11/11");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 11");
+        fmt::Println!("FAIL", failed, "of 11");
         syscall::Exit(1);
     }
 }

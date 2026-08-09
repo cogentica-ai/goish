@@ -11,12 +11,13 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::convert;
 use goish::encoding::base64;
 use goish::io;
 use goish::types::byte;
-use goish::{slice, syscall, Println};
+use goish::{slice, syscall};
 
 #[goish::main]
 fn main() {
@@ -33,9 +34,9 @@ fn main() {
         let got = out.slice(0, n);
         let want_str: goish::string = "Hello, World!".into();
         if goish::string::from_bytes(&got) == want_str {
-            Println!("[ 1] Decoder single Read        PASS");
+            fmt::Println!("[ 1] Decoder single Read        PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 1] Decoder single Read        FAIL got=",
                 goish::string::from_bytes(&got)
             );
@@ -52,9 +53,9 @@ fn main() {
         let (got, err) = io::ReadAll(&mut dec);
         let want_str: goish::string = "Hello, World!".into();
         if err.IsNil() && goish::string::from_bytes(&got) == want_str {
-            Println!("[ 2] Decoder + io::ReadAll      PASS");
+            fmt::Println!("[ 2] Decoder + io::ReadAll      PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 2] Decoder + io::ReadAll      FAIL got=",
                 goish::string::from_bytes(&got)
             );
@@ -86,9 +87,9 @@ fn main() {
         let got = goish::string::from_bytes(&collected);
         let want: goish::string = "Hello, World!".into();
         if got == want {
-            Println!("[ 3] Decoder byte-by-byte       PASS");
+            fmt::Println!("[ 3] Decoder byte-by-byte       PASS");
         } else {
-            Println!("[ 3] Decoder byte-by-byte       FAIL got=", got);
+            fmt::Println!("[ 3] Decoder byte-by-byte       FAIL got=", got);
             failed += 1;
         }
     }
@@ -101,9 +102,9 @@ fn main() {
         let (n, err) = dec.Read(&mut out);
         let eof = io::EOF;
         if n == 0 && goish::errors::Is(err, eof) {
-            Println!("[ 4] Decoder empty input → EOF  PASS");
+            fmt::Println!("[ 4] Decoder empty input → EOF  PASS");
         } else {
-            Println!("[ 4] Decoder empty input → EOF  FAIL");
+            fmt::Println!("[ 4] Decoder empty input → EOF  FAIL");
             failed += 1;
         }
     }
@@ -117,9 +118,9 @@ fn main() {
         let (got, err) = io::ReadAll(&mut dec);
         let want: goish::string = "Hello, World!".into();
         if err.IsNil() && goish::string::from_bytes(&got) == want {
-            Println!("[ 5] Decoder \\n tolerance       PASS");
+            fmt::Println!("[ 5] Decoder \\n tolerance       PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 5] Decoder \\n tolerance       FAIL got=",
                 goish::string::from_bytes(&got)
             );
@@ -136,9 +137,9 @@ fn main() {
         let (got, err) = io::ReadAll(&mut dec);
         let want: goish::string = "Hello, World!".into();
         if err.IsNil() && goish::string::from_bytes(&got) == want {
-            Println!("[ 6] Decoder CRLF tolerance     PASS");
+            fmt::Println!("[ 6] Decoder CRLF tolerance     PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 6] Decoder CRLF tolerance     FAIL got=",
                 goish::string::from_bytes(&got)
             );
@@ -154,9 +155,9 @@ fn main() {
         let (got, err) = io::ReadAll(&mut dec);
         let want: goish::string = "Hi".into();
         if err.IsNil() && goish::string::from_bytes(&got) == want {
-            Println!("[ 7] Decoder RawStdEncoding     PASS");
+            fmt::Println!("[ 7] Decoder RawStdEncoding     PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 7] Decoder RawStdEncoding     FAIL got=",
                 goish::string::from_bytes(&got)
             );
@@ -178,9 +179,9 @@ fn main() {
         let (got, err) = io::ReadAll(&mut dec);
         let got_v = got.__into_vec();
         if err.IsNil() && got_v == payload_v {
-            Println!("[ 8] Decoder 2049 bytes         PASS");
+            fmt::Println!("[ 8] Decoder 2049 bytes         PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 8] Decoder 2049 bytes         FAIL got_len=",
                 got_v.len() as goish::types::int
             );
@@ -197,9 +198,9 @@ fn main() {
         // Must surface a non-nil, non-EOF error (corrupt input).
         let eof = io::EOF;
         if !err.IsNil() && !goish::errors::Is(err.clone(), eof) {
-            Println!("[ 9] Decoder corrupt input      PASS");
+            fmt::Println!("[ 9] Decoder corrupt input      PASS");
         } else {
-            Println!("[ 9] Decoder corrupt input      FAIL");
+            fmt::Println!("[ 9] Decoder corrupt input      FAIL");
             failed += 1;
         }
     }
@@ -221,18 +222,18 @@ fn main() {
         let (got, err) = io::ReadAll(&mut dec);
         let got_v = got.__into_vec();
         if err.IsNil() && got_v == original.to_vec() {
-            Println!("[10] NewEncoder→NewDecoder rt   PASS");
+            fmt::Println!("[10] NewEncoder→NewDecoder rt   PASS");
         } else {
-            Println!("[10] NewEncoder→NewDecoder rt   FAIL");
+            fmt::Println!("[10] NewEncoder→NewDecoder rt   FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

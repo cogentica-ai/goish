@@ -8,13 +8,14 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::crypto::subtle::{
     ConstantTimeByteEq, ConstantTimeCompare, ConstantTimeCopy, ConstantTimeEq,
     ConstantTimeLessOrEq, ConstantTimeLessOrEqBytes, ConstantTimeSelect, XORBytes,
 };
 use goish::goslice::slice;
 use goish::types::byte;
-use goish::{convert, syscall, Println};
+use goish::{convert, syscall};
 
 #[goish::main]
 fn main() {
@@ -30,9 +31,9 @@ fn main() {
         let r2 = ConstantTimeCompare(&a, &c); // diff content
         let r3 = ConstantTimeCompare(&a, &d); // length mismatch
         if r1 == 1 && r2 == 0 && r3 == 0 {
-            Println!("[ 1] Compare                   PASS");
+            fmt::Println!("[ 1] Compare                   PASS");
         } else {
-            Println!("[ 1] Compare                   FAIL r1={} r2={} r3={}", r1, r2, r3);
+            fmt::Println!("[ 1] Compare                   FAIL r1={} r2={} r3={}", r1, r2, r3);
             failed += 1;
         }
     }
@@ -44,9 +45,9 @@ fn main() {
         let r3 = ConstantTimeByteEq(0xff, 0xff);
         let r4 = ConstantTimeByteEq(0x00, 0xff);
         if r1 == 1 && r2 == 0 && r3 == 1 && r4 == 0 {
-            Println!("[ 2] ByteEq                    PASS");
+            fmt::Println!("[ 2] ByteEq                    PASS");
         } else {
-            Println!("[ 2] ByteEq                    FAIL");
+            fmt::Println!("[ 2] ByteEq                    FAIL");
             failed += 1;
         }
     }
@@ -60,9 +61,9 @@ fn main() {
         let r5 = ConstantTimeEq(i32::MAX, i32::MAX);
         let r6 = ConstantTimeEq(i32::MAX, i32::MIN);
         if r1 == 1 && r2 == 1 && r3 == 1 && r4 == 0 && r5 == 1 && r6 == 0 {
-            Println!("[ 3] Eq (i32)                  PASS");
+            fmt::Println!("[ 3] Eq (i32)                  PASS");
         } else {
-            Println!("[ 3] Eq (i32)                  FAIL");
+            fmt::Println!("[ 3] Eq (i32)                  FAIL");
             failed += 1;
         }
     }
@@ -74,9 +75,9 @@ fn main() {
         let r3 = ConstantTimeSelect(1, -5, 7);
         let r4 = ConstantTimeSelect(0, -5, 7);
         if r1 == 100 && r2 == 200 && r3 == -5 && r4 == 7 {
-            Println!("[ 4] Select                    PASS");
+            fmt::Println!("[ 4] Select                    PASS");
         } else {
-            Println!("[ 4] Select                    FAIL");
+            fmt::Println!("[ 4] Select                    FAIL");
             failed += 1;
         }
     }
@@ -88,9 +89,9 @@ fn main() {
         let r3 = ConstantTimeLessOrEq(11, 10); // 0
         let r4 = ConstantTimeLessOrEq(0, 0);   // 1
         if r1 == 1 && r2 == 1 && r3 == 0 && r4 == 1 {
-            Println!("[ 5] LessOrEq                  PASS");
+            fmt::Println!("[ 5] LessOrEq                  PASS");
         } else {
-            Println!("[ 5] LessOrEq                  FAIL");
+            fmt::Println!("[ 5] LessOrEq                  FAIL");
             failed += 1;
         }
     }
@@ -110,9 +111,9 @@ fn main() {
         let ok2 = raw2 == b"ABCD";
 
         if ok1 && ok2 {
-            Println!("[ 6] Copy                      PASS");
+            fmt::Println!("[ 6] Copy                      PASS");
         } else {
-            Println!("[ 6] Copy                      FAIL");
+            fmt::Println!("[ 6] Copy                      FAIL");
             failed += 1;
         }
     }
@@ -128,9 +129,9 @@ fn main() {
         let raw: &[byte] = &dst;
         let want: &[u8] = &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
         if n == 8 && raw == want {
-            Println!("[ 7] XORBytes                  PASS");
+            fmt::Println!("[ 7] XORBytes                  PASS");
         } else {
-            Println!("[ 7] XORBytes                  FAIL n={}", n);
+            fmt::Println!("[ 7] XORBytes                  FAIL n={}", n);
             failed += 1;
         }
     }
@@ -145,9 +146,9 @@ fn main() {
         // Only first 2 bytes XOR'd; rest left untouched (== 0).
         let want: &[u8] = &[0xff, 0xff, 0x00, 0x00];
         if n == 2 && raw == want {
-            Println!("[ 8] XORBytes shorter          PASS");
+            fmt::Println!("[ 8] XORBytes shorter          PASS");
         } else {
-            Println!("[ 8] XORBytes shorter          FAIL n={}", n);
+            fmt::Println!("[ 8] XORBytes shorter          FAIL n={}", n);
             failed += 1;
         }
     }
@@ -164,9 +165,9 @@ fn main() {
         let r3 = ConstantTimeLessOrEqBytes(&a, &d);
         let r4 = ConstantTimeLessOrEqBytes(&a, &e);
         if r1 == 1 && r2 == 1 && r3 == 0 && r4 == 0 {
-            Println!("[ 9] LessOrEqBytes short       PASS");
+            fmt::Println!("[ 9] LessOrEqBytes short       PASS");
         } else {
-            Println!("[ 9] LessOrEqBytes short       FAIL r={},{},{},{}", r1, r2, r3, r4);
+            fmt::Println!("[ 9] LessOrEqBytes short       FAIL r={},{},{},{}", r1, r2, r3, r4);
             failed += 1;
         }
     }
@@ -186,9 +187,9 @@ fn main() {
         let r2 = ConstantTimeLessOrEqBytes(&a, &c);
         let r3 = ConstantTimeLessOrEqBytes(&a, &a);
         if r1 == 1 && r2 == 0 && r3 == 1 {
-            Println!("[10] LessOrEqBytes multi       PASS");
+            fmt::Println!("[10] LessOrEqBytes multi       PASS");
         } else {
-            Println!("[10] LessOrEqBytes multi       FAIL");
+            fmt::Println!("[10] LessOrEqBytes multi       FAIL");
             failed += 1;
         }
     }
@@ -199,18 +200,18 @@ fn main() {
         let r1 = ConstantTimeCompare(&empty, &empty);
         let r2 = ConstantTimeLessOrEqBytes(&empty, &empty);
         if r1 == 1 && r2 == 1 {
-            Println!("[11] Empty slices              PASS");
+            fmt::Println!("[11] Empty slices              PASS");
         } else {
-            Println!("[11] Empty slices              FAIL");
+            fmt::Println!("[11] Empty slices              FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 11/11");
+        fmt::Println!("ok 11/11");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 11");
+        fmt::Println!("FAIL", failed, "of 11");
         syscall::Exit(1);
     }
 }

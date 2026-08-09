@@ -8,8 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::time;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -19,9 +20,9 @@ fn main() {
     {
         let (d, err) = time::ParseDuration(string("0"));
         if err.IsNil() && d.Nanoseconds() == 0 {
-            Println!("[ 1] zero string               PASS");
+            fmt::Println!("[ 1] zero string               PASS");
         } else {
-            Println!("[ 1] zero string               FAIL ns={}", d.Nanoseconds());
+            fmt::Println!("[ 1] zero string               FAIL ns={}", d.Nanoseconds());
             failed += 1;
         }
     }
@@ -30,9 +31,9 @@ fn main() {
     {
         let (d, err) = time::ParseDuration(string("5s"));
         if err.IsNil() && d.Nanoseconds() == 5 * 1_000_000_000 {
-            Println!("[ 2] 5s                        PASS");
+            fmt::Println!("[ 2] 5s                        PASS");
         } else {
-            Println!("[ 2] 5s                        FAIL ns={}", d.Nanoseconds());
+            fmt::Println!("[ 2] 5s                        FAIL ns={}", d.Nanoseconds());
             failed += 1;
         }
     }
@@ -41,9 +42,9 @@ fn main() {
     {
         let (d, err) = time::ParseDuration(string("300ms"));
         if err.IsNil() && d.Nanoseconds() == 300 * 1_000_000 {
-            Println!("[ 3] 300ms                     PASS");
+            fmt::Println!("[ 3] 300ms                     PASS");
         } else {
-            Println!("[ 3] 300ms                     FAIL ns={}", d.Nanoseconds());
+            fmt::Println!("[ 3] 300ms                     FAIL ns={}", d.Nanoseconds());
             failed += 1;
         }
     }
@@ -52,9 +53,9 @@ fn main() {
     {
         let (d, err) = time::ParseDuration(string("-1.5h"));
         if err.IsNil() && d.Nanoseconds() == -90i64 * 60 * 1_000_000_000 {
-            Println!("[ 4] -1.5h                     PASS");
+            fmt::Println!("[ 4] -1.5h                     PASS");
         } else {
-            Println!("[ 4] -1.5h                     FAIL ns={}", d.Nanoseconds());
+            fmt::Println!("[ 4] -1.5h                     FAIL ns={}", d.Nanoseconds());
             failed += 1;
         }
     }
@@ -64,9 +65,9 @@ fn main() {
         let (d, err) = time::ParseDuration(string("2h45m"));
         let want = 2i64 * 60 * 60 * 1_000_000_000 + 45i64 * 60 * 1_000_000_000;
         if err.IsNil() && d.Nanoseconds() == want {
-            Println!("[ 5] 2h45m                     PASS");
+            fmt::Println!("[ 5] 2h45m                     PASS");
         } else {
-            Println!("[ 5] 2h45m                     FAIL ns={}", d.Nanoseconds());
+            fmt::Println!("[ 5] 2h45m                     FAIL ns={}", d.Nanoseconds());
             failed += 1;
         }
     }
@@ -79,9 +80,9 @@ fn main() {
             + 3i64 * 1_000_000_000
             + 456i64 * 1_000_000;
         if err.IsNil() && d.Nanoseconds() == want {
-            Println!("[ 6] 1h2m3.456s                PASS");
+            fmt::Println!("[ 6] 1h2m3.456s                PASS");
         } else {
-            Println!("[ 6] 1h2m3.456s                FAIL ns={} want={}", d.Nanoseconds(), want);
+            fmt::Println!("[ 6] 1h2m3.456s                FAIL ns={} want={}", d.Nanoseconds(), want);
             failed += 1;
         }
     }
@@ -90,9 +91,9 @@ fn main() {
     {
         let (d, err) = time::ParseDuration(string("100ns"));
         if err.IsNil() && d.Nanoseconds() == 100 {
-            Println!("[ 7] 100ns                     PASS");
+            fmt::Println!("[ 7] 100ns                     PASS");
         } else {
-            Println!("[ 7] 100ns                     FAIL");
+            fmt::Println!("[ 7] 100ns                     FAIL");
             failed += 1;
         }
     }
@@ -102,9 +103,9 @@ fn main() {
         let (a, ea) = time::ParseDuration(string("1us"));
         let (b, eb) = time::ParseDuration(string("1µs"));
         if ea.IsNil() && eb.IsNil() && a.Nanoseconds() == 1_000 && b.Nanoseconds() == 1_000 {
-            Println!("[ 8] us == µs                  PASS");
+            fmt::Println!("[ 8] us == µs                  PASS");
         } else {
-            Println!("[ 8] us == µs                  FAIL a={} b={}", a.Nanoseconds(), b.Nanoseconds());
+            fmt::Println!("[ 8] us == µs                  FAIL a={} b={}", a.Nanoseconds(), b.Nanoseconds());
             failed += 1;
         }
     }
@@ -113,9 +114,9 @@ fn main() {
     {
         let (_d, err) = time::ParseDuration(string(""));
         if !err.IsNil() {
-            Println!("[ 9] empty errors              PASS");
+            fmt::Println!("[ 9] empty errors              PASS");
         } else {
-            Println!("[ 9] empty errors              FAIL");
+            fmt::Println!("[ 9] empty errors              FAIL");
             failed += 1;
         }
     }
@@ -124,9 +125,9 @@ fn main() {
     {
         let (_d, err) = time::ParseDuration(string("abc"));
         if !err.IsNil() {
-            Println!("[10] abc errors                PASS");
+            fmt::Println!("[10] abc errors                PASS");
         } else {
-            Println!("[10] abc errors                FAIL");
+            fmt::Println!("[10] abc errors                FAIL");
             failed += 1;
         }
     }
@@ -135,9 +136,9 @@ fn main() {
     {
         let (_d, err) = time::ParseDuration(string("5"));
         if !err.IsNil() {
-            Println!("[11] missing unit              PASS");
+            fmt::Println!("[11] missing unit              PASS");
         } else {
-            Println!("[11] missing unit              FAIL");
+            fmt::Println!("[11] missing unit              FAIL");
             failed += 1;
         }
     }
@@ -146,18 +147,18 @@ fn main() {
     {
         let (d, err) = time::ParseDuration(string("+1m"));
         if err.IsNil() && d.Nanoseconds() == 60 * 1_000_000_000 {
-            Println!("[12] leading + sign            PASS");
+            fmt::Println!("[12] leading + sign            PASS");
         } else {
-            Println!("[12] leading + sign            FAIL");
+            fmt::Println!("[12] leading + sign            FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 12", failed);
+        fmt::Println!("FAIL {} of 12", failed);
         syscall::Exit(1);
     }
 }

@@ -12,13 +12,14 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::goslice::slice;
 use goish::hash::crc64;
 use goish::hash::{Hash, Hash64};
 use goish::io::Writer as _;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -38,9 +39,9 @@ fn main() {
     {
         let tab = crc64::ISOTable();
         if crc64::Checksum(to_bytes(""), &tab) == 0 {
-            Println!("[ 1] ISO empty                 PASS");
+            fmt::Println!("[ 1] ISO empty                 PASS");
         } else {
-            Println!("[ 1] ISO empty                 FAIL");
+            fmt::Println!("[ 1] ISO empty                 FAIL");
             failed += 1;
         }
     }
@@ -49,9 +50,9 @@ fn main() {
     {
         let tab = crc64::ECMATable();
         if crc64::Checksum(to_bytes(""), &tab) == 0 {
-            Println!("[ 2] ECMA empty                PASS");
+            fmt::Println!("[ 2] ECMA empty                PASS");
         } else {
-            Println!("[ 2] ECMA empty                FAIL");
+            fmt::Println!("[ 2] ECMA empty                FAIL");
             failed += 1;
         }
     }
@@ -60,9 +61,9 @@ fn main() {
     {
         let tab = crc64::ISOTable();
         if crc64::Checksum(to_bytes("a"), &tab) == 0x3420000000000000 {
-            Println!("[ 3] ISO \"a\"                   PASS");
+            fmt::Println!("[ 3] ISO \"a\"                   PASS");
         } else {
-            Println!("[ 3] ISO \"a\"                   FAIL");
+            fmt::Println!("[ 3] ISO \"a\"                   FAIL");
             failed += 1;
         }
     }
@@ -71,9 +72,9 @@ fn main() {
     {
         let tab = crc64::ECMATable();
         if crc64::Checksum(to_bytes("a"), &tab) == 0x330284772e652b05 {
-            Println!("[ 4] ECMA \"a\"                  PASS");
+            fmt::Println!("[ 4] ECMA \"a\"                  PASS");
         } else {
-            Println!("[ 4] ECMA \"a\"                  FAIL");
+            fmt::Println!("[ 4] ECMA \"a\"                  FAIL");
             failed += 1;
         }
     }
@@ -82,9 +83,9 @@ fn main() {
     {
         let tab = crc64::ECMATable();
         if crc64::Checksum(to_bytes("abc"), &tab) == 0x2cd8094a1a277627 {
-            Println!("[ 5] ECMA \"abc\"                PASS");
+            fmt::Println!("[ 5] ECMA \"abc\"                PASS");
         } else {
-            Println!("[ 5] ECMA \"abc\"                FAIL");
+            fmt::Println!("[ 5] ECMA \"abc\"                FAIL");
             failed += 1;
         }
     }
@@ -93,9 +94,9 @@ fn main() {
     {
         let tab = crc64::ISOTable();
         if crc64::Checksum(to_bytes("abcdefghij"), &tab) == 0x7f5b6e21b002d367 {
-            Println!("[ 6] ISO \"abcdefghij\"          PASS");
+            fmt::Println!("[ 6] ISO \"abcdefghij\"          PASS");
         } else {
-            Println!("[ 6] ISO \"abcdefghij\"          FAIL");
+            fmt::Println!("[ 6] ISO \"abcdefghij\"          FAIL");
             failed += 1;
         }
     }
@@ -107,9 +108,9 @@ fn main() {
         let _ = h.Write(to_bytes("ab"));
         let _ = h.Write(to_bytes("c"));
         if h.Sum64() == 0x2cd8094a1a277627 {
-            Println!("[ 7] ECMA streaming            PASS");
+            fmt::Println!("[ 7] ECMA streaming            PASS");
         } else {
-            Println!("[ 7] ECMA streaming            FAIL");
+            fmt::Println!("[ 7] ECMA streaming            FAIL");
             failed += 1;
         }
     }
@@ -121,9 +122,9 @@ fn main() {
         let _ = h.Write(to_bytes("hello"));
         h.Reset();
         if h.Sum64() == 0 {
-            Println!("[ 8] Reset                     PASS");
+            fmt::Println!("[ 8] Reset                     PASS");
         } else {
-            Println!("[ 8] Reset                     FAIL");
+            fmt::Println!("[ 8] Reset                     FAIL");
             failed += 1;
         }
     }
@@ -145,9 +146,9 @@ fn main() {
         want_v.push(0x05);
         let want = slice::<byte>::__from_vec(want_v);
         if equal_bytes(out, want) {
-            Println!("[ 9] Sum BE 8-byte append      PASS");
+            fmt::Println!("[ 9] Sum BE 8-byte append      PASS");
         } else {
-            Println!("[ 9] Sum BE 8-byte append      FAIL");
+            fmt::Println!("[ 9] Sum BE 8-byte append      FAIL");
             failed += 1;
         }
     }
@@ -165,9 +166,9 @@ fn main() {
             && raw[4] == 0x33
             && raw[11] == 0x05
         {
-            Println!("[10] Sum prefix                PASS");
+            fmt::Println!("[10] Sum prefix                PASS");
         } else {
-            Println!("[10] Sum prefix                FAIL");
+            fmt::Println!("[10] Sum prefix                FAIL");
             failed += 1;
         }
     }
@@ -181,9 +182,9 @@ fn main() {
         let mut h = crc64::New(tab);
         let _ = h.Write(to_bytes("foobar"));
         if crc == h.Sum64() {
-            Println!("[11] Update incremental        PASS");
+            fmt::Println!("[11] Update incremental        PASS");
         } else {
-            Println!("[11] Update incremental        FAIL");
+            fmt::Println!("[11] Update incremental        FAIL");
             failed += 1;
         }
     }
@@ -195,9 +196,9 @@ fn main() {
         let c = crc64::ECMATable();
         // Same poly → entries match; different poly → entries differ.
         if a.at(1) == b.at(1) && a.at(255) == b.at(255) && a.at(1) != c.at(1) {
-            Println!("[12] Table singletons          PASS");
+            fmt::Println!("[12] Table singletons          PASS");
         } else {
-            Println!("[12] Table singletons          FAIL");
+            fmt::Println!("[12] Table singletons          FAIL");
             failed += 1;
         }
     }
@@ -207,18 +208,18 @@ fn main() {
         let tab = crc64::ISOTable();
         let h = crc64::New(tab);
         if h.Size() == crc64::Size && h.BlockSize() == 1 {
-            Println!("[13] Size/BlockSize            PASS");
+            fmt::Println!("[13] Size/BlockSize            PASS");
         } else {
-            Println!("[13] Size/BlockSize            FAIL");
+            fmt::Println!("[13] Size/BlockSize            FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 13/13");
+        fmt::Println!("ok 13/13");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 13");
+        fmt::Println!("FAIL", failed, "of 13");
         syscall::Exit(1);
     }
 }

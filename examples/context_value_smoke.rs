@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::context;
 use goish::time::Milliseconds;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -23,17 +24,17 @@ fn main() {
         if let Some(any) = v {
             if let Some(n) = any.downcast_ref::<i64>() {
                 if *n == 42 {
-                    Println!("[ 1] WithValue + Value         PASS");
+                    fmt::Println!("[ 1] WithValue + Value         PASS");
                 } else {
-                    Println!("[ 1] WithValue + Value         FAIL");
+                    fmt::Println!("[ 1] WithValue + Value         FAIL");
                     failed += 1;
                 }
             } else {
-                Println!("[ 1] WithValue + Value         FAIL downcast");
+                fmt::Println!("[ 1] WithValue + Value         FAIL downcast");
                 failed += 1;
             }
         } else {
-            Println!("[ 1] WithValue + Value         FAIL None");
+            fmt::Println!("[ 1] WithValue + Value         FAIL None");
             failed += 1;
         }
     }
@@ -42,9 +43,9 @@ fn main() {
     {
         let ctx = context::WithValue(context::Background(), "k", 1u32);
         if ctx.Value("missing").is_none() {
-            Println!("[ 2] missing key None          PASS");
+            fmt::Println!("[ 2] missing key None          PASS");
         } else {
-            Println!("[ 2] missing key None          FAIL");
+            fmt::Println!("[ 2] missing key None          FAIL");
             failed += 1;
         }
     }
@@ -53,9 +54,9 @@ fn main() {
     {
         let ctx = context::Background();
         if ctx.Value("anything").is_none() {
-            Println!("[ 3] Background None           PASS");
+            fmt::Println!("[ 3] Background None           PASS");
         } else {
-            Println!("[ 3] Background None           FAIL");
+            fmt::Println!("[ 3] Background None           FAIL");
             failed += 1;
         }
     }
@@ -77,9 +78,9 @@ fn main() {
             .map(|n| *n == 200)
             .unwrap_or(false);
         if ok_a && ok_b {
-            Println!("[ 4] Nested WithValue          PASS");
+            fmt::Println!("[ 4] Nested WithValue          PASS");
         } else {
-            Println!("[ 4] Nested WithValue          FAIL");
+            fmt::Println!("[ 4] Nested WithValue          FAIL");
             failed += 1;
         }
     }
@@ -95,9 +96,9 @@ fn main() {
             .map(|n| *n == 2)
             .unwrap_or(false);
         if ok {
-            Println!("[ 5] Child shadows parent      PASS");
+            fmt::Println!("[ 5] Child shadows parent      PASS");
         } else {
-            Println!("[ 5] Child shadows parent      FAIL");
+            fmt::Println!("[ 5] Child shadows parent      FAIL");
             failed += 1;
         }
     }
@@ -112,9 +113,9 @@ fn main() {
         // After cancel, Err should be non-nil.
         let post_err = !ctx2.Err().IsNil();
         if pre_err && post_err {
-            Println!("[ 6] WithValue + Cancel        PASS");
+            fmt::Println!("[ 6] WithValue + Cancel        PASS");
         } else {
-            Println!("[ 6] WithValue + Cancel        FAIL");
+            fmt::Println!("[ 6] WithValue + Cancel        FAIL");
             failed += 1;
         }
     }
@@ -133,9 +134,9 @@ fn main() {
             .map(|s| s == "alice")
             .unwrap_or(false);
         if ok {
-            Println!("[ 7] String value              PASS");
+            fmt::Println!("[ 7] String value              PASS");
         } else {
-            Println!("[ 7] String value              FAIL");
+            fmt::Println!("[ 7] String value              FAIL");
             failed += 1;
         }
     }
@@ -146,18 +147,18 @@ fn main() {
             context::WithTimeout(context::Background(), Milliseconds(100));
         let ctx2 = context::WithValue(ctx, "k", 1i64);
         if ctx2.Deadline().is_some() {
-            Println!("[ 8] Deadline forwarded        PASS");
+            fmt::Println!("[ 8] Deadline forwarded        PASS");
         } else {
-            Println!("[ 8] Deadline forwarded        FAIL");
+            fmt::Println!("[ 8] Deadline forwarded        FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

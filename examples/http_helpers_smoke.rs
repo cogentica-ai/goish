@@ -9,10 +9,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net::http::helpers::{
     hasPort, hexEscapeNonASCII, isToken, removeEmptyPort, stringContainsCTLByte,
 };
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -21,9 +22,9 @@ fn main() {
     // 1. hasPort: "host:port" → true.
     {
         if hasPort(&string("example.com:80")) {
-            Println!("[ 1] hasPort host:port         PASS");
+            fmt::Println!("[ 1] hasPort host:port         PASS");
         } else {
-            Println!("[ 1] hasPort host:port         FAIL");
+            fmt::Println!("[ 1] hasPort host:port         FAIL");
             failed += 1;
         }
     }
@@ -31,9 +32,9 @@ fn main() {
     // 2. hasPort: bare host → false.
     {
         if !hasPort(&string("example.com")) {
-            Println!("[ 2] hasPort bare host         PASS");
+            fmt::Println!("[ 2] hasPort bare host         PASS");
         } else {
-            Println!("[ 2] hasPort bare host         FAIL");
+            fmt::Println!("[ 2] hasPort bare host         FAIL");
             failed += 1;
         }
     }
@@ -41,9 +42,9 @@ fn main() {
     // 3. hasPort: "[::1]:8080" → true (port follows ']').
     {
         if hasPort(&string("[::1]:8080")) {
-            Println!("[ 3] hasPort ipv6 with port    PASS");
+            fmt::Println!("[ 3] hasPort ipv6 with port    PASS");
         } else {
-            Println!("[ 3] hasPort ipv6 with port    FAIL");
+            fmt::Println!("[ 3] hasPort ipv6 with port    FAIL");
             failed += 1;
         }
     }
@@ -51,9 +52,9 @@ fn main() {
     // 4. hasPort: "[::1]" → false (last ':' inside brackets).
     {
         if !hasPort(&string("[::1]")) {
-            Println!("[ 4] hasPort ipv6 no port      PASS");
+            fmt::Println!("[ 4] hasPort ipv6 no port      PASS");
         } else {
-            Println!("[ 4] hasPort ipv6 no port      FAIL");
+            fmt::Println!("[ 4] hasPort ipv6 no port      FAIL");
             failed += 1;
         }
     }
@@ -62,9 +63,9 @@ fn main() {
     {
         let got = removeEmptyPort(string("example.com:"));
         if got == "example.com" {
-            Println!("[ 5] removeEmptyPort strip     PASS");
+            fmt::Println!("[ 5] removeEmptyPort strip     PASS");
         } else {
-            Println!("[ 5] removeEmptyPort strip     FAIL got={}", got);
+            fmt::Println!("[ 5] removeEmptyPort strip     FAIL got={}", got);
             failed += 1;
         }
     }
@@ -73,9 +74,9 @@ fn main() {
     {
         let got = removeEmptyPort(string("example.com:80"));
         if got == "example.com:80" {
-            Println!("[ 6] removeEmptyPort keep      PASS");
+            fmt::Println!("[ 6] removeEmptyPort keep      PASS");
         } else {
-            Println!("[ 6] removeEmptyPort keep      FAIL got={}", got);
+            fmt::Println!("[ 6] removeEmptyPort keep      FAIL got={}", got);
             failed += 1;
         }
     }
@@ -84,9 +85,9 @@ fn main() {
     {
         let got = removeEmptyPort(string("example.com"));
         if got == "example.com" {
-            Println!("[ 7] removeEmptyPort bare      PASS");
+            fmt::Println!("[ 7] removeEmptyPort bare      PASS");
         } else {
-            Println!("[ 7] removeEmptyPort bare      FAIL got={}", got);
+            fmt::Println!("[ 7] removeEmptyPort bare      FAIL got={}", got);
             failed += 1;
         }
     }
@@ -94,9 +95,9 @@ fn main() {
     // 8. isToken: "Content-Type" → true.
     {
         if isToken(&string("Content-Type")) {
-            Println!("[ 8] isToken header name       PASS");
+            fmt::Println!("[ 8] isToken header name       PASS");
         } else {
-            Println!("[ 8] isToken header name       FAIL");
+            fmt::Println!("[ 8] isToken header name       FAIL");
             failed += 1;
         }
     }
@@ -104,9 +105,9 @@ fn main() {
     // 9. isToken: empty → false.
     {
         if !isToken(&string("")) {
-            Println!("[ 9] isToken empty             PASS");
+            fmt::Println!("[ 9] isToken empty             PASS");
         } else {
-            Println!("[ 9] isToken empty             FAIL");
+            fmt::Println!("[ 9] isToken empty             FAIL");
             failed += 1;
         }
     }
@@ -114,9 +115,9 @@ fn main() {
     // 10. isToken: contains space → false.
     {
         if !isToken(&string("Bad Header")) {
-            Println!("[10] isToken with space        PASS");
+            fmt::Println!("[10] isToken with space        PASS");
         } else {
-            Println!("[10] isToken with space        FAIL");
+            fmt::Println!("[10] isToken with space        FAIL");
             failed += 1;
         }
     }
@@ -124,9 +125,9 @@ fn main() {
     // 11. isToken: contains '(' (separator) → false.
     {
         if !isToken(&string("Foo(Bar)")) {
-            Println!("[11] isToken with separator    PASS");
+            fmt::Println!("[11] isToken with separator    PASS");
         } else {
-            Println!("[11] isToken with separator    FAIL");
+            fmt::Println!("[11] isToken with separator    FAIL");
             failed += 1;
         }
     }
@@ -134,9 +135,9 @@ fn main() {
     // 12. stringContainsCTLByte: clean ASCII → false.
     {
         if !stringContainsCTLByte(&string("hello world")) {
-            Println!("[12] CTLByte clean             PASS");
+            fmt::Println!("[12] CTLByte clean             PASS");
         } else {
-            Println!("[12] CTLByte clean             FAIL");
+            fmt::Println!("[12] CTLByte clean             FAIL");
             failed += 1;
         }
     }
@@ -144,9 +145,9 @@ fn main() {
     // 13. stringContainsCTLByte: embedded \n → true.
     {
         if stringContainsCTLByte(&string("hello\nworld")) {
-            Println!("[13] CTLByte with newline      PASS");
+            fmt::Println!("[13] CTLByte with newline      PASS");
         } else {
-            Println!("[13] CTLByte with newline      FAIL");
+            fmt::Println!("[13] CTLByte with newline      FAIL");
             failed += 1;
         }
     }
@@ -155,9 +156,9 @@ fn main() {
     {
         let s = string::from_bytes(b"abc\x7fdef");
         if stringContainsCTLByte(&s) {
-            Println!("[14] CTLByte with DEL          PASS");
+            fmt::Println!("[14] CTLByte with DEL          PASS");
         } else {
-            Println!("[14] CTLByte with DEL          FAIL");
+            fmt::Println!("[14] CTLByte with DEL          FAIL");
             failed += 1;
         }
     }
@@ -166,9 +167,9 @@ fn main() {
     {
         let got = hexEscapeNonASCII(string("/foo/bar"));
         if got == "/foo/bar" {
-            Println!("[15] hexEscape ascii           PASS");
+            fmt::Println!("[15] hexEscape ascii           PASS");
         } else {
-            Println!("[15] hexEscape ascii           FAIL got={}", got);
+            fmt::Println!("[15] hexEscape ascii           FAIL got={}", got);
             failed += 1;
         }
     }
@@ -178,9 +179,9 @@ fn main() {
         let s = string::from_bytes(b"r\xc3\xa9");
         let got = hexEscapeNonASCII(s);
         if got == "r%c3%a9" {
-            Println!("[16] hexEscape utf-8 e-acute   PASS");
+            fmt::Println!("[16] hexEscape utf-8 e-acute   PASS");
         } else {
-            Println!("[16] hexEscape utf-8 e-acute   FAIL got={}", got);
+            fmt::Println!("[16] hexEscape utf-8 e-acute   FAIL got={}", got);
             failed += 1;
         }
     }
@@ -190,9 +191,9 @@ fn main() {
         let s = string::from_bytes(b"abc\xff");
         let got = hexEscapeNonASCII(s);
         if got == "abc%ff" {
-            Println!("[17] hexEscape trailing        PASS");
+            fmt::Println!("[17] hexEscape trailing        PASS");
         } else {
-            Println!("[17] hexEscape trailing        FAIL got={}", got);
+            fmt::Println!("[17] hexEscape trailing        FAIL got={}", got);
             failed += 1;
         }
     }
@@ -202,18 +203,18 @@ fn main() {
         let s = string::from_bytes(b"\x80\x81");
         let got = hexEscapeNonASCII(s);
         if got == "%80%81" {
-            Println!("[18] hexEscape only non-ascii  PASS");
+            fmt::Println!("[18] hexEscape only non-ascii  PASS");
         } else {
-            Println!("[18] hexEscape only non-ascii  FAIL got={}", got);
+            fmt::Println!("[18] hexEscape only non-ascii  FAIL got={}", got);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 18/18");
+        fmt::Println!("ok 18/18");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 18", failed);
+        fmt::Println!("FAIL {} of 18", failed);
         syscall::Exit(1);
     }
 }

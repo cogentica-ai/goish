@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::net::http;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -24,9 +25,9 @@ fn main() {
             bytes(""),
         );
         if req.URL.IsAbs() && req.URL.RequestURI() == "/path?a=1" {
-            Println!("[ 1] absolute URL IsAbs+ReqURI  PASS");
+            fmt::Println!("[ 1] absolute URL IsAbs+ReqURI  PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 1] absolute URL IsAbs+ReqURI  FAIL abs={} reqURI={}",
                 req.URL.IsAbs(),
                 req.URL.RequestURI()
@@ -43,9 +44,9 @@ fn main() {
             bytes(""),
         );
         if req.URL.Hostname() == "example.com" && req.URL.Port() == "8080" {
-            Println!("[ 2] hostname:port              PASS");
+            fmt::Println!("[ 2] hostname:port              PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 2] hostname:port              FAIL host={} port={}",
                 req.URL.Hostname(),
                 req.URL.Port()
@@ -59,9 +60,9 @@ fn main() {
         let (req, _) =
             http::NewRequest(string("GET"), string("http://example.com/foo"), bytes(""));
         if req.URL.Hostname() == "example.com" && req.URL.Port() == "" {
-            Println!("[ 3] hostname no port           PASS");
+            fmt::Println!("[ 3] hostname no port           PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 3] hostname no port           FAIL host={} port={}",
                 req.URL.Hostname(),
                 req.URL.Port()
@@ -84,9 +85,9 @@ fn main() {
             && ok_b
             && b_vals[0] == "two"
         {
-            Println!("[ 4] URL.Query                  PASS");
+            fmt::Println!("[ 4] URL.Query                  PASS");
         } else {
-            Println!("[ 4] URL.Query                  FAIL");
+            fmt::Println!("[ 4] URL.Query                  FAIL");
             failed += 1;
         }
     }
@@ -95,9 +96,9 @@ fn main() {
     {
         let (req, _) = http::NewRequest(string("GET"), string("http://example.com"), bytes(""));
         if req.URL.RequestURI() == "/" {
-            Println!("[ 5] empty path → /             PASS");
+            fmt::Println!("[ 5] empty path → /             PASS");
         } else {
-            Println!("[ 5] empty path → /             FAIL got={}", req.URL.RequestURI());
+            fmt::Println!("[ 5] empty path → /             FAIL got={}", req.URL.RequestURI());
             failed += 1;
         }
     }
@@ -106,9 +107,9 @@ fn main() {
     {
         let (req, _) = http::NewRequest(string("GET"), string("/just/path"), bytes(""));
         if !req.URL.IsAbs() && req.URL.RequestURI() == "/just/path" {
-            Println!("[ 6] origin form !IsAbs         PASS");
+            fmt::Println!("[ 6] origin form !IsAbs         PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 6] origin form !IsAbs         FAIL abs={} req={}",
                 req.URL.IsAbs(),
                 req.URL.RequestURI()
@@ -124,9 +125,9 @@ fn main() {
             http::NewRequest(string("GET"), string("http://placeholder/"), bytes(""));
         req.URL.Host = string("[::1]:443");
         if req.URL.Hostname() == "::1" && req.URL.Port() == "443" {
-            Println!("[ 7] IPv6 host bracket strip    PASS");
+            fmt::Println!("[ 7] IPv6 host bracket strip    PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 7] IPv6 host bracket strip    FAIL host={} port={}",
                 req.URL.Hostname(),
                 req.URL.Port()
@@ -136,10 +137,10 @@ fn main() {
     }
 
     if failed == 0 {
-        Println!("ok 7/7");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 7", failed);
+        fmt::Println!("FAIL {} of 7", failed);
         syscall::Exit(1);
     }
 }

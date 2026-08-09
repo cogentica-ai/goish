@@ -16,11 +16,12 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{bytes, go, string, syscall, Println};
+use goish::{bytes, go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -39,19 +40,19 @@ fn main() {
     // Single-segment wildcard.
     mux.HandleFunc(string("/users/{id}"), |w, r| {
         let id = r.PathValue(string("id"));
-        let s = goish::Sprintf!("user-id=%s\n", id);
+        let s = fmt::Sprintf!("user-id=%s\n", id);
         let _ = w.Write(bytes(s));
     });
     // Trailing multi-segment wildcard.
     mux.HandleFunc(string("/files/{path...}"), |w, r| {
         let p = r.PathValue(string("path"));
-        let s = goish::Sprintf!("file-path=%s\n", p);
+        let s = fmt::Sprintf!("file-path=%s\n", p);
         let _ = w.Write(bytes(s));
     });
     // Method-prefixed wildcard.
     mux.HandleFunc(string("GET /api/{resource}"), |w, r| {
         let res = r.PathValue(string("resource"));
-        let s = goish::Sprintf!("api-get=%s\n", res);
+        let s = fmt::Sprintf!("api-get=%s\n", res);
         let _ = w.Write(bytes(s));
     });
 
@@ -61,7 +62,7 @@ fn main() {
 
     let (ln, lerr) = net::Listen(string("tcp"), string("127.0.0.1:0"));
     if !lerr.IsNil() {
-        Println!("Listen FAIL");
+        fmt::Println!("Listen FAIL");
         syscall::Exit(1);
     }
     let addr = ln.Addr().String();
@@ -81,9 +82,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 200 && body_eq(&body, b"alive\n") {
-            Println!("[ 1] literal route             PASS");
+            fmt::Println!("[ 1] literal route             PASS");
         } else {
-            Println!("[ 1] literal route             FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 1] literal route             FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -95,9 +96,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 200 && body_eq(&body, b"user-id=42\n") {
-            Println!("[ 2] {{id}} bind               PASS");
+            fmt::Println!("[ 2] {{id}} bind               PASS");
         } else {
-            Println!("[ 2] {{id}} bind               FAIL");
+            fmt::Println!("[ 2] {{id}} bind               FAIL");
             failed += 1;
         }
     }
@@ -109,9 +110,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 200 && body_eq(&body, b"self\n") {
-            Println!("[ 3] exact > wildcard          PASS");
+            fmt::Println!("[ 3] exact > wildcard          PASS");
         } else {
-            Println!("[ 3] exact > wildcard          FAIL");
+            fmt::Println!("[ 3] exact > wildcard          FAIL");
             failed += 1;
         }
     }
@@ -123,9 +124,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 200 && body_eq(&body, b"file-path=a/b/c.txt\n") {
-            Println!("[ 4] {{path...}} bind          PASS");
+            fmt::Println!("[ 4] {{path...}} bind          PASS");
         } else {
-            Println!("[ 4] {{path...}} bind          FAIL body_len={}", body.Len());
+            fmt::Println!("[ 4] {{path...}} bind          FAIL body_len={}", body.Len());
             failed += 1;
         }
     }
@@ -137,9 +138,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 200 && body_eq(&body, b"api-get=widgets\n") {
-            Println!("[ 5] GET /api/{{resource}}     PASS");
+            fmt::Println!("[ 5] GET /api/{{resource}}     PASS");
         } else {
-            Println!("[ 5] GET /api/{{resource}}     FAIL");
+            fmt::Println!("[ 5] GET /api/{{resource}}     FAIL");
             failed += 1;
         }
     }
@@ -150,9 +151,9 @@ fn main() {
         let url = url_join(&base_url, "/users/");
         let (resp, _) = http::Get(url);
         if resp.StatusCode == 404 {
-            Println!("[ 6] /users/ → 404             PASS");
+            fmt::Println!("[ 6] /users/ → 404             PASS");
         } else {
-            Println!("[ 6] /users/ → 404             FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 6] /users/ → 404             FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -160,10 +161,10 @@ fn main() {
     let _ = srv_arc.Shutdown(time::Second);
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 6", failed);
+        fmt::Println!("FAIL {} of 6", failed);
         syscall::Exit(1);
     }
 }

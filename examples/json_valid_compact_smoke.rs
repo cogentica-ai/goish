@@ -9,11 +9,12 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::encoding::json;
 use goish::goslice::slice;
 use goish::types::{byte, int};
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -32,9 +33,9 @@ fn main() {
     // 1. Valid — well-formed object.
     {
         if json::Valid(to_bytes("{\"a\":1,\"b\":[true,null]}")) {
-            Println!("[ 1] Valid object              PASS");
+            fmt::Println!("[ 1] Valid object              PASS");
         } else {
-            Println!("[ 1] Valid object              FAIL");
+            fmt::Println!("[ 1] Valid object              FAIL");
             failed += 1;
         }
     }
@@ -47,9 +48,9 @@ fn main() {
             && json::Valid(to_bytes("null"))
             && json::Valid(to_bytes("[1,2,3]"))
         {
-            Println!("[ 2] Valid bare                PASS");
+            fmt::Println!("[ 2] Valid bare                PASS");
         } else {
-            Println!("[ 2] Valid bare                FAIL");
+            fmt::Println!("[ 2] Valid bare                FAIL");
             failed += 1;
         }
     }
@@ -57,9 +58,9 @@ fn main() {
     // 3. Valid — surrounding whitespace OK.
     {
         if json::Valid(to_bytes("  \n\t {\"x\": 1} \r\n")) {
-            Println!("[ 3] Valid whitespace          PASS");
+            fmt::Println!("[ 3] Valid whitespace          PASS");
         } else {
-            Println!("[ 3] Valid whitespace          FAIL");
+            fmt::Println!("[ 3] Valid whitespace          FAIL");
             failed += 1;
         }
     }
@@ -67,9 +68,9 @@ fn main() {
     // 4. Valid — invalid trailing junk.
     {
         if !json::Valid(to_bytes("{\"a\":1}garbage")) {
-            Println!("[ 4] Valid trailing junk       PASS");
+            fmt::Println!("[ 4] Valid trailing junk       PASS");
         } else {
-            Println!("[ 4] Valid trailing junk       FAIL");
+            fmt::Println!("[ 4] Valid trailing junk       FAIL");
             failed += 1;
         }
     }
@@ -77,9 +78,9 @@ fn main() {
     // 5. Valid — unterminated string.
     {
         if !json::Valid(to_bytes("{\"a\":\"unterm")) {
-            Println!("[ 5] Valid unterminated str    PASS");
+            fmt::Println!("[ 5] Valid unterminated str    PASS");
         } else {
-            Println!("[ 5] Valid unterminated str    FAIL");
+            fmt::Println!("[ 5] Valid unterminated str    FAIL");
             failed += 1;
         }
     }
@@ -87,9 +88,9 @@ fn main() {
     // 6. Valid — empty input invalid.
     {
         if !json::Valid(to_bytes("")) {
-            Println!("[ 6] Valid empty               PASS");
+            fmt::Println!("[ 6] Valid empty               PASS");
         } else {
-            Println!("[ 6] Valid empty               FAIL");
+            fmt::Println!("[ 6] Valid empty               FAIL");
             failed += 1;
         }
     }
@@ -98,9 +99,9 @@ fn main() {
     {
         let (out, err) = json::Compact(empty_buf(), to_bytes("{ \"a\" : 1 ,  \"b\" : 2 }"));
         if err.IsNil() && equal_bytes(out, to_bytes("{\"a\":1,\"b\":2}")) {
-            Println!("[ 7] Compact obj               PASS");
+            fmt::Println!("[ 7] Compact obj               PASS");
         } else {
-            Println!("[ 7] Compact obj               FAIL");
+            fmt::Println!("[ 7] Compact obj               FAIL");
             failed += 1;
         }
     }
@@ -109,9 +110,9 @@ fn main() {
     {
         let (out, err) = json::Compact(empty_buf(), to_bytes("[ 1 , 2 ,  3 ]"));
         if err.IsNil() && equal_bytes(out, to_bytes("[1,2,3]")) {
-            Println!("[ 8] Compact arr               PASS");
+            fmt::Println!("[ 8] Compact arr               PASS");
         } else {
-            Println!("[ 8] Compact arr               FAIL");
+            fmt::Println!("[ 8] Compact arr               FAIL");
             failed += 1;
         }
     }
@@ -121,9 +122,9 @@ fn main() {
         let prefix = to_bytes("PREFIX:");
         let (out, err) = json::Compact(prefix, to_bytes(" [1, 2] "));
         if err.IsNil() && equal_bytes(out, to_bytes("PREFIX:[1,2]")) {
-            Println!("[ 9] Compact prefix            PASS");
+            fmt::Println!("[ 9] Compact prefix            PASS");
         } else {
-            Println!("[ 9] Compact prefix            FAIL");
+            fmt::Println!("[ 9] Compact prefix            FAIL");
             failed += 1;
         }
     }
@@ -132,19 +133,19 @@ fn main() {
     {
         let (_, err) = json::Compact(empty_buf(), to_bytes("not-json"));
         if !err.IsNil() {
-            Println!("[10] Compact invalid           PASS");
+            fmt::Println!("[10] Compact invalid           PASS");
         } else {
-            Println!("[10] Compact invalid           FAIL");
+            fmt::Println!("[10] Compact invalid           FAIL");
             failed += 1;
         }
     }
 
     let total: int = 10;
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of", total);
+        fmt::Println!("FAIL", failed, "of", total);
         syscall::Exit(1);
     }
 }

@@ -9,9 +9,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::container::ring;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 // Initialise an n-element ring with 0..n stored at successive
 // positions. Returns the head handle (still pointing at element with
@@ -45,9 +46,9 @@ fn main() {
         let r0 = ring::New::<int>(0);
         let rneg = ring::New::<int>(-3);
         if r0.is_none() && rneg.is_none() {
-            Println!("[ 1] New(<=0) -> None           PASS");
+            fmt::Println!("[ 1] New(<=0) -> None           PASS");
         } else {
-            Println!("[ 1] New(<=0) -> None           FAIL");
+            fmt::Println!("[ 1] New(<=0) -> None           FAIL");
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
     {
         let r = ring::New::<int>(4).expect("ring of 4");
         if r.Len() == 4 {
-            Println!("[ 2] New(4).Len() == 4          PASS");
+            fmt::Println!("[ 2] New(4).Len() == 4          PASS");
         } else {
-            Println!("[ 2] New(4).Len() == 4          FAIL got=", r.Len());
+            fmt::Println!("[ 2] New(4).Len() == 4          FAIL got=", r.Len());
             failed += 1;
         }
     }
@@ -77,9 +78,9 @@ fn main() {
         }
         let want: alloc::vec::Vec<int> = alloc::vec![0, 1, 2, 3, 4];
         if got == want {
-            Println!("[ 3] Next forward walk          PASS");
+            fmt::Println!("[ 3] Next forward walk          PASS");
         } else {
-            Println!("[ 3] Next forward walk          FAIL");
+            fmt::Println!("[ 3] Next forward walk          FAIL");
             failed += 1;
         }
     }
@@ -96,9 +97,9 @@ fn main() {
         }
         let want: alloc::vec::Vec<int> = alloc::vec![4, 3, 2, 1, 0];
         if got == want {
-            Println!("[ 4] Prev backward walk         PASS");
+            fmt::Println!("[ 4] Prev backward walk         PASS");
         } else {
-            Println!("[ 4] Prev backward walk         FAIL");
+            fmt::Println!("[ 4] Prev backward walk         FAIL");
             failed += 1;
         }
     }
@@ -110,9 +111,9 @@ fn main() {
         let got = collect(&r);
         let want: alloc::vec::Vec<int> = alloc::vec![0, 1, 2, 3, 4];
         if got == want {
-            Println!("[ 5] Do forward iteration       PASS");
+            fmt::Println!("[ 5] Do forward iteration       PASS");
         } else {
-            Println!("[ 5] Do forward iteration       FAIL");
+            fmt::Println!("[ 5] Do forward iteration       FAIL");
             failed += 1;
         }
     }
@@ -125,9 +126,9 @@ fn main() {
         let got = collect(&r2);
         let want: alloc::vec::Vec<int> = alloc::vec![3, 4, 0, 1, 2];
         if got == want {
-            Println!("[ 6] Move(3) rotate forward     PASS");
+            fmt::Println!("[ 6] Move(3) rotate forward     PASS");
         } else {
-            Println!("[ 6] Move(3) rotate forward     FAIL");
+            fmt::Println!("[ 6] Move(3) rotate forward     FAIL");
             failed += 1;
         }
     }
@@ -140,9 +141,9 @@ fn main() {
         let got = collect(&r2);
         let want: alloc::vec::Vec<int> = alloc::vec![3, 4, 0, 1, 2];
         if got == want {
-            Println!("[ 7] Move(-2) rotate backward   PASS");
+            fmt::Println!("[ 7] Move(-2) rotate backward   PASS");
         } else {
-            Println!("[ 7] Move(-2) rotate backward   FAIL");
+            fmt::Println!("[ 7] Move(-2) rotate backward   FAIL");
             failed += 1;
         }
     }
@@ -172,9 +173,9 @@ fn main() {
         let got = collect(&rs);
         let want: alloc::vec::Vec<int> = alloc::vec![0, 0, 1, 1];
         if got == want && rs.Len() == 4 {
-            Println!("[ 8] Link two rings             PASS");
+            fmt::Println!("[ 8] Link two rings             PASS");
         } else {
-            Println!("[ 8] Link two rings             FAIL");
+            fmt::Println!("[ 8] Link two rings             FAIL");
             failed += 1;
         }
     }
@@ -197,9 +198,9 @@ fn main() {
             && r.Len() == 3
             && removed.Len() == 3
         {
-            Println!("[ 9] Unlink(3) splits ring      PASS");
+            fmt::Println!("[ 9] Unlink(3) splits ring      PASS");
         } else {
-            Println!("[ 9] Unlink(3) splits ring      FAIL");
+            fmt::Println!("[ 9] Unlink(3) splits ring      FAIL");
             failed += 1;
         }
     }
@@ -212,9 +213,9 @@ fn main() {
         let got = collect(&r);
         let want: alloc::vec::Vec<int> = alloc::vec![0, 1, 2, 3];
         if none.is_none() && got == want && r.Len() == 4 {
-            Println!("[10] Unlink(0) -> None          PASS");
+            fmt::Println!("[10] Unlink(0) -> None          PASS");
         } else {
-            Println!("[10] Unlink(0) -> None          FAIL");
+            fmt::Println!("[10] Unlink(0) -> None          FAIL");
             failed += 1;
         }
     }
@@ -231,9 +232,9 @@ fn main() {
             && p.Value() == Some(42)
             && m.Value() == Some(42)
         {
-            Println!("[11] Single-element ring        PASS");
+            fmt::Println!("[11] Single-element ring        PASS");
         } else {
-            Println!("[11] Single-element ring        FAIL");
+            fmt::Println!("[11] Single-element ring        FAIL");
             failed += 1;
         }
     }
@@ -249,9 +250,9 @@ fn main() {
             && n.Value().is_none()
             && p.Value().is_none()
         {
-            Println!("[12] Lazy init via Next/Prev    PASS");
+            fmt::Println!("[12] Lazy init via Next/Prev    PASS");
         } else {
-            Println!("[12] Lazy init via Next/Prev    FAIL");
+            fmt::Println!("[12] Lazy init via Next/Prev    FAIL");
             failed += 1;
         }
     }
@@ -262,9 +263,9 @@ fn main() {
         let _ = fill(&r, 3);
         let r2 = r.Move(0);
         if r2.Value() == Some(0) && r.Value() == Some(0) {
-            Println!("[13] Move(0) no-op              PASS");
+            fmt::Println!("[13] Move(0) no-op              PASS");
         } else {
-            Println!("[13] Move(0) no-op              FAIL");
+            fmt::Println!("[13] Move(0) no-op              FAIL");
             failed += 1;
         }
     }
@@ -275,9 +276,9 @@ fn main() {
         let alias = r.clone();
         r.SetValue(99);
         if alias.Value() == Some(99) {
-            Println!("[14] Clone aliases same node    PASS");
+            fmt::Println!("[14] Clone aliases same node    PASS");
         } else {
-            Println!("[14] Clone aliases same node    FAIL");
+            fmt::Println!("[14] Clone aliases same node    FAIL");
             failed += 1;
         }
     }
@@ -296,18 +297,18 @@ fn main() {
             cur = cur.Prev();
         }
         if cur.Value() == Some(0) && r.Len() == 32 {
-            Println!("[15] 32-elt forward+back        PASS");
+            fmt::Println!("[15] 32-elt forward+back        PASS");
         } else {
-            Println!("[15] 32-elt forward+back        FAIL");
+            fmt::Println!("[15] 32-elt forward+back        FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 15/15");
+        fmt::Println!("ok 15/15");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 15");
+        fmt::Println!("FAIL", failed, "of 15");
         syscall::Exit(1);
     }
 }

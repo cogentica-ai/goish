@@ -10,10 +10,11 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use goish::fmt;
 use goish::net::textproto::Pipeline;
 use goish::runtime::sched::schedule;
 use goish::sync::WaitGroup;
-use goish::{go, syscall, Println, KB};
+use goish::{go, syscall, KB};
 
 #[goish::main]
 fn main() {
@@ -33,9 +34,9 @@ fn run_tests() {
         let b = p.Next();
         let c = p.Next();
         if a == 0 && b == 1 && c == 2 {
-            Println!("[ 1] Next sequential         PASS");
+            fmt::Println!("[ 1] Next sequential         PASS");
         } else {
-            Println!("[ 1] Next sequential         FAIL");
+            fmt::Println!("[ 1] Next sequential         FAIL");
             failed += 1;
         }
     }
@@ -48,7 +49,7 @@ fn run_tests() {
         p.EndRequest(id);
         p.StartResponse(id);
         p.EndResponse(id);
-        Println!("[ 2] Single id no block      PASS");
+        fmt::Println!("[ 2] Single id no block      PASS");
     }
 
     // 3. FIFO request ordering: spawn N goroutines that race to
@@ -83,9 +84,9 @@ fn run_tests() {
             }
         }
         if ok {
-            Println!("[ 3] FIFO request ordering   PASS");
+            fmt::Println!("[ 3] FIFO request ordering   PASS");
         } else {
-            Println!("[ 3] FIFO request ordering   FAIL");
+            fmt::Println!("[ 3] FIFO request ordering   FAIL");
             failed += 1;
         }
     }
@@ -121,9 +122,9 @@ fn run_tests() {
             }
         }
         if ok {
-            Println!("[ 4] FIFO response ordering  PASS");
+            fmt::Println!("[ 4] FIFO response ordering  PASS");
         } else {
-            Println!("[ 4] FIFO response ordering  FAIL");
+            fmt::Println!("[ 4] FIFO response ordering  FAIL");
             failed += 1;
         }
     }
@@ -141,14 +142,14 @@ fn run_tests() {
         p.EndRequest(id1);
         p.StartResponse(id1);
         p.EndResponse(id1);
-        Println!("[ 5] Independent sequencers  PASS");
+        fmt::Println!("[ 5] Independent sequencers  PASS");
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 5");
+        fmt::Println!("FAIL", failed, "of 5");
         syscall::Exit(1);
     }
 }

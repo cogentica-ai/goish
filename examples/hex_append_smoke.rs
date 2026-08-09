@@ -9,11 +9,12 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::encoding::hex;
 use goish::goslice::slice;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -34,9 +35,9 @@ fn main() {
         let out = hex::AppendEncode(empty_buf(), empty_buf());
         let raw: &[byte] = &out;
         if raw.is_empty() {
-            Println!("[ 1] empty AppendEncode        PASS");
+            fmt::Println!("[ 1] empty AppendEncode        PASS");
         } else {
-            Println!("[ 1] empty AppendEncode        FAIL");
+            fmt::Println!("[ 1] empty AppendEncode        FAIL");
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
     {
         let out = hex::AppendEncode(empty_buf(), to_bytes("abc"));
         if equal_bytes(out, to_bytes("616263")) {
-            Println!("[ 2] AppendEncode \"abc\"        PASS");
+            fmt::Println!("[ 2] AppendEncode \"abc\"        PASS");
         } else {
-            Println!("[ 2] AppendEncode \"abc\"        FAIL");
+            fmt::Println!("[ 2] AppendEncode \"abc\"        FAIL");
             failed += 1;
         }
     }
@@ -58,9 +59,9 @@ fn main() {
         let out = hex::AppendEncode(dst, to_bytes("a"));
         // "PREFIX:" + "61"
         if equal_bytes(out, to_bytes("PREFIX:61")) {
-            Println!("[ 3] AppendEncode prefix       PASS");
+            fmt::Println!("[ 3] AppendEncode prefix       PASS");
         } else {
-            Println!("[ 3] AppendEncode prefix       FAIL");
+            fmt::Println!("[ 3] AppendEncode prefix       FAIL");
             failed += 1;
         }
     }
@@ -75,9 +76,9 @@ fn main() {
         let src = slice::<byte>::__from_vec(v);
         let out = hex::AppendEncode(empty_buf(), src);
         if equal_bytes(out, to_bytes("00ff10")) {
-            Println!("[ 4] AppendEncode binary       PASS");
+            fmt::Println!("[ 4] AppendEncode binary       PASS");
         } else {
-            Println!("[ 4] AppendEncode binary       FAIL");
+            fmt::Println!("[ 4] AppendEncode binary       FAIL");
             failed += 1;
         }
     }
@@ -86,9 +87,9 @@ fn main() {
     {
         let (out, err) = hex::AppendDecode(empty_buf(), to_bytes("616263"));
         if err.IsNil() && equal_bytes(out, to_bytes("abc")) {
-            Println!("[ 5] AppendDecode \"616263\"     PASS");
+            fmt::Println!("[ 5] AppendDecode \"616263\"     PASS");
         } else {
-            Println!("[ 5] AppendDecode \"616263\"     FAIL");
+            fmt::Println!("[ 5] AppendDecode \"616263\"     FAIL");
             failed += 1;
         }
     }
@@ -99,9 +100,9 @@ fn main() {
         let (out, err) = hex::AppendDecode(dst, to_bytes("4869"));
         // "DST:" + "Hi"
         if err.IsNil() && equal_bytes(out, to_bytes("DST:Hi")) {
-            Println!("[ 6] AppendDecode prefix       PASS");
+            fmt::Println!("[ 6] AppendDecode prefix       PASS");
         } else {
-            Println!("[ 6] AppendDecode prefix       FAIL");
+            fmt::Println!("[ 6] AppendDecode prefix       FAIL");
             failed += 1;
         }
     }
@@ -113,9 +114,9 @@ fn main() {
         let (out, err) = hex::AppendDecode(empty_buf(), to_bytes("61626"));
         let raw: &[byte] = &out;
         if !err.IsNil() && raw == b"ab" {
-            Println!("[ 7] AppendDecode odd len      PASS");
+            fmt::Println!("[ 7] AppendDecode odd len      PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 7] AppendDecode odd len      FAIL nil_err=",
                 if err.IsNil() { 1 } else { 0 }
             );
@@ -131,9 +132,9 @@ fn main() {
         let (out, err) = hex::AppendDecode(empty_buf(), to_bytes("61ZZ"));
         let raw: &[byte] = &out;
         if !err.IsNil() && raw == b"a" {
-            Println!("[ 8] AppendDecode invalid      PASS");
+            fmt::Println!("[ 8] AppendDecode invalid      PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 8] AppendDecode invalid      FAIL nil_err=",
                 if err.IsNil() { 1 } else { 0 }
             );
@@ -148,15 +149,15 @@ fn main() {
         let encoded = hex::AppendEncode(dst1, to_bytes("hi"));
         // encoded = "ENC:6869"
         if !equal_bytes(encoded.clone(), to_bytes("ENC:6869")) {
-            Println!("[ 9] round-trip                FAIL enc");
+            fmt::Println!("[ 9] round-trip                FAIL enc");
             failed += 1;
         } else {
             // Decode just the hex tail; pre-existing DecodeString does that.
             let (decoded, err) = hex::DecodeString("6869");
             if err.IsNil() && equal_bytes(decoded, to_bytes("hi")) {
-                Println!("[ 9] round-trip                PASS");
+                fmt::Println!("[ 9] round-trip                PASS");
             } else {
-                Println!("[ 9] round-trip                FAIL dec");
+                fmt::Println!("[ 9] round-trip                FAIL dec");
                 failed += 1;
             }
         }
@@ -168,18 +169,18 @@ fn main() {
         // Just confirm error is non-nil; typed-error introspection
         // for InvalidByteError isn't exposed.
         if !err.IsNil() {
-            Println!("[10] error non-nil             PASS");
+            fmt::Println!("[10] error non-nil             PASS");
         } else {
-            Println!("[10] error non-nil             FAIL");
+            fmt::Println!("[10] error non-nil             FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

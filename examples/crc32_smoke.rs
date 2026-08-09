@@ -12,13 +12,14 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::goslice::slice;
 use goish::hash::crc32;
 use goish::hash::{Hash, Hash32};
 use goish::io::Writer as _;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -37,9 +38,9 @@ fn main() {
     // 1. ChecksumIEEE("") = 0.
     {
         if crc32::ChecksumIEEE(to_bytes("")) == 0 {
-            Println!("[ 1] IEEE empty                PASS");
+            fmt::Println!("[ 1] IEEE empty                PASS");
         } else {
-            Println!("[ 1] IEEE empty                FAIL");
+            fmt::Println!("[ 1] IEEE empty                FAIL");
             failed += 1;
         }
     }
@@ -47,9 +48,9 @@ fn main() {
     // 2. ChecksumIEEE("a") = 0xE8B7BE43.
     {
         if crc32::ChecksumIEEE(to_bytes("a")) == 0xE8B7BE43 {
-            Println!("[ 2] IEEE \"a\"                  PASS");
+            fmt::Println!("[ 2] IEEE \"a\"                  PASS");
         } else {
-            Println!("[ 2] IEEE \"a\"                  FAIL");
+            fmt::Println!("[ 2] IEEE \"a\"                  FAIL");
             failed += 1;
         }
     }
@@ -57,9 +58,9 @@ fn main() {
     // 3. ChecksumIEEE("123456789") = 0xCBF43926.
     {
         if crc32::ChecksumIEEE(to_bytes("123456789")) == 0xCBF43926 {
-            Println!("[ 3] IEEE \"123456789\"          PASS");
+            fmt::Println!("[ 3] IEEE \"123456789\"          PASS");
         } else {
-            Println!("[ 3] IEEE \"123456789\"          FAIL");
+            fmt::Println!("[ 3] IEEE \"123456789\"          FAIL");
             failed += 1;
         }
     }
@@ -70,9 +71,9 @@ fn main() {
         let _ = h.Write(to_bytes("123"));
         let _ = h.Write(to_bytes("456789"));
         if h.Sum32() == 0xCBF43926 {
-            Println!("[ 4] IEEE streaming            PASS");
+            fmt::Println!("[ 4] IEEE streaming            PASS");
         } else {
-            Println!("[ 4] IEEE streaming            FAIL");
+            fmt::Println!("[ 4] IEEE streaming            FAIL");
             failed += 1;
         }
     }
@@ -83,9 +84,9 @@ fn main() {
         let _ = h.Write(to_bytes("hello"));
         h.Reset();
         if h.Sum32() == 0 {
-            Println!("[ 5] Reset                     PASS");
+            fmt::Println!("[ 5] Reset                     PASS");
         } else {
-            Println!("[ 5] Reset                     FAIL");
+            fmt::Println!("[ 5] Reset                     FAIL");
             failed += 1;
         }
     }
@@ -103,9 +104,9 @@ fn main() {
         want_v.push(0x26);
         let want = slice::<byte>::__from_vec(want_v);
         if equal_bytes(out, want) {
-            Println!("[ 6] Sum BE append             PASS");
+            fmt::Println!("[ 6] Sum BE append             PASS");
         } else {
-            Println!("[ 6] Sum BE append             FAIL");
+            fmt::Println!("[ 6] Sum BE append             FAIL");
             failed += 1;
         }
     }
@@ -125,9 +126,9 @@ fn main() {
             && raw[6] == 0xBE
             && raw[7] == 0x43
         {
-            Println!("[ 7] Sum prefix                PASS");
+            fmt::Println!("[ 7] Sum prefix                PASS");
         } else {
-            Println!("[ 7] Sum prefix                FAIL");
+            fmt::Println!("[ 7] Sum prefix                FAIL");
             failed += 1;
         }
     }
@@ -137,9 +138,9 @@ fn main() {
         let tab = crc32::MakeTable(crc32::Castagnoli);
         let v = crc32::Checksum(to_bytes("123456789"), &tab);
         if v == 0xE3069283 {
-            Println!("[ 8] Castagnoli check          PASS");
+            fmt::Println!("[ 8] Castagnoli check          PASS");
         } else {
-            Println!("[ 8] Castagnoli check          FAIL");
+            fmt::Println!("[ 8] Castagnoli check          FAIL");
             failed += 1;
         }
     }
@@ -152,9 +153,9 @@ fn main() {
         crc = crc32::Update(crc, &tab, to_bytes("bar"));
         let one_shot = crc32::ChecksumIEEE(to_bytes("foobar"));
         if crc == one_shot {
-            Println!("[ 9] Update incremental        PASS");
+            fmt::Println!("[ 9] Update incremental        PASS");
         } else {
-            Println!("[ 9] Update incremental        FAIL");
+            fmt::Println!("[ 9] Update incremental        FAIL");
             failed += 1;
         }
     }
@@ -165,9 +166,9 @@ fn main() {
         let b = crc32::IEEETable();
         // Compare table entries: should be byte-identical.
         if a.at(0) == b.at(0) && a.at(255) == b.at(255) {
-            Println!("[10] IEEETable singleton       PASS");
+            fmt::Println!("[10] IEEETable singleton       PASS");
         } else {
-            Println!("[10] IEEETable singleton       FAIL");
+            fmt::Println!("[10] IEEETable singleton       FAIL");
             failed += 1;
         }
     }
@@ -176,18 +177,18 @@ fn main() {
     {
         let h = crc32::NewIEEE();
         if h.Size() == crc32::Size && h.BlockSize() == 1 {
-            Println!("[11] Size/BlockSize            PASS");
+            fmt::Println!("[11] Size/BlockSize            PASS");
         } else {
-            Println!("[11] Size/BlockSize            FAIL");
+            fmt::Println!("[11] Size/BlockSize            FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 11/11");
+        fmt::Println!("ok 11/11");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 11");
+        fmt::Println!("FAIL", failed, "of 11");
         syscall::Exit(1);
     }
 }

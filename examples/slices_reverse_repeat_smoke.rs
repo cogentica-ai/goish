@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::goslice::slice;
 use goish::slices;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn make_int_slice(xs: &[int]) -> slice<int> {
     let mut v: alloc::vec::Vec<int> = alloc::vec::Vec::with_capacity(xs.len());
@@ -44,9 +45,9 @@ fn main() {
         let mut s = make_int_slice(&[1, 2, 3, 4, 5]);
         slices::Reverse(&mut s);
         if slice_eq(&s, &[5, 4, 3, 2, 1]) {
-            Println!("[ 1] Reverse 5 elem             PASS");
+            fmt::Println!("[ 1] Reverse 5 elem             PASS");
         } else {
-            Println!("[ 1] Reverse 5 elem             FAIL");
+            fmt::Println!("[ 1] Reverse 5 elem             FAIL");
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
         let mut s = make_int_slice(&[1, 2, 3, 4]);
         slices::Reverse(&mut s);
         if slice_eq(&s, &[4, 3, 2, 1]) {
-            Println!("[ 2] Reverse 4 elem             PASS");
+            fmt::Println!("[ 2] Reverse 4 elem             PASS");
         } else {
-            Println!("[ 2] Reverse 4 elem             FAIL");
+            fmt::Println!("[ 2] Reverse 4 elem             FAIL");
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
         let mut s = make_int_slice(&[42]);
         slices::Reverse(&mut s);
         if slice_eq(&s, &[42]) {
-            Println!("[ 3] Reverse 1 elem             PASS");
+            fmt::Println!("[ 3] Reverse 1 elem             PASS");
         } else {
-            Println!("[ 3] Reverse 1 elem             FAIL");
+            fmt::Println!("[ 3] Reverse 1 elem             FAIL");
             failed += 1;
         }
     }
@@ -80,9 +81,9 @@ fn main() {
         let mut s: slice<int> = slice::__from_vec(alloc::vec::Vec::new());
         slices::Reverse(&mut s);
         if s.Len() == 0 {
-            Println!("[ 4] Reverse empty             PASS");
+            fmt::Println!("[ 4] Reverse empty             PASS");
         } else {
-            Println!("[ 4] Reverse empty             FAIL");
+            fmt::Println!("[ 4] Reverse empty             FAIL");
             failed += 1;
         }
     }
@@ -92,9 +93,9 @@ fn main() {
         let s = make_int_slice(&[1, 2]);
         let r = slices::Repeat(&s, 3);
         if slice_eq(&r, &[1, 2, 1, 2, 1, 2]) {
-            Println!("[ 5] Repeat (1,2)*3            PASS");
+            fmt::Println!("[ 5] Repeat (1,2)*3            PASS");
         } else {
-            Println!("[ 5] Repeat (1,2)*3            FAIL");
+            fmt::Println!("[ 5] Repeat (1,2)*3            FAIL");
             failed += 1;
         }
     }
@@ -104,9 +105,9 @@ fn main() {
         let s = make_int_slice(&[1, 2, 3]);
         let r = slices::Repeat(&s, 0);
         if r.Len() == 0 {
-            Println!("[ 6] Repeat *0 empty           PASS");
+            fmt::Println!("[ 6] Repeat *0 empty           PASS");
         } else {
-            Println!("[ 6] Repeat *0 empty           FAIL len=", r.Len());
+            fmt::Println!("[ 6] Repeat *0 empty           FAIL len=", r.Len());
             failed += 1;
         }
     }
@@ -116,9 +117,9 @@ fn main() {
         let s: slice<int> = slice::__from_vec(alloc::vec::Vec::new());
         let r = slices::Repeat(&s, 5);
         if r.Len() == 0 {
-            Println!("[ 7] Repeat empty*5            PASS");
+            fmt::Println!("[ 7] Repeat empty*5            PASS");
         } else {
-            Println!("[ 7] Repeat empty*5            FAIL");
+            fmt::Println!("[ 7] Repeat empty*5            FAIL");
             failed += 1;
         }
     }
@@ -128,18 +129,18 @@ fn main() {
         let s = make_int_slice(&[7]);
         let r = slices::Repeat(&s, 4);
         if slice_eq(&r, &[7, 7, 7, 7]) {
-            Println!("[ 8] Repeat (7)*4              PASS");
+            fmt::Println!("[ 8] Repeat (7)*4              PASS");
         } else {
-            Println!("[ 8] Repeat (7)*4              FAIL");
+            fmt::Println!("[ 8] Repeat (7)*4              FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

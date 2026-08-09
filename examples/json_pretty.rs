@@ -14,8 +14,9 @@
 #![no_std]
 #![no_main]
 
+use goish::fmt;
 use goish::encoding::json;
-use goish::{append, byte, bytes, int, make, nil, os, slice, string, Fprintln};
+use goish::{append, byte, bytes, int, make, nil, os, slice, string};
 
 fn read_all<R: goish::io::Reader>(mut r: R) -> slice<byte> {
     let mut out = make!([]byte, 0, 1024);
@@ -46,7 +47,7 @@ fn main() {
     let mut v = json::Value::Null; let err = json::Unmarshal(raw_bytes, &mut v);
     if err != nil {
         let mut e = os::Stderr();
-        Fprintln!(e, "parse:", err);
+        fmt::Fprintln!(e, "parse:", err);
         os::Exit(1);
     }
     let (out, _) = json::MarshalIndent(&v, "", "  ");
