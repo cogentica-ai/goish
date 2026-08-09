@@ -7,9 +7,10 @@ use goish::crypto::ecdsa::decode_x509_ec_p256_pubkey;
 use goish::syscall;
 use goish::fmt;
 
-// github.com DER cert dumped to /tmp/github.com.der and inlined as bytes.
-// (1010 bytes total)
-const CERT_DER: &[u8] = include_bytes!("/tmp/github.com.der");
+// github.com DER cert snapshot committed as a fixture (1010 bytes).
+// The test only decodes the P-256 pubkey — no validity-window checks —
+// so the snapshot never goes stale.
+const CERT_DER: &[u8] = include_bytes!("testdata/github.com.der");
 
 #[goish::main]
 fn main() {
