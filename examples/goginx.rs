@@ -142,17 +142,17 @@ fn tokenize(src: string) -> slice<string> {
             continue;
         }
         if c == b'{' {
-            toks = append!(toks, string("{"));
+            toks = append!(toks, "{");
             i += 1;
             continue;
         }
         if c == b'}' {
-            toks = append!(toks, string("}"));
+            toks = append!(toks, "}");
             i += 1;
             continue;
         }
         if c == b';' {
-            toks = append!(toks, string(";"));
+            toks = append!(toks, ";");
             i += 1;
             continue;
         }
