@@ -1,7 +1,7 @@
 // net/http/cookiejar/punycode — RFC 3492 + IDNA toASCII
 //
 // Line-by-line port of:
-//   /nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/
+//   go1.25.5/src/
 //     net/http/cookiejar/punycode.go
 //
 // All computation is done with int32s, so overflow behaviour is identical

@@ -1,8 +1,8 @@
 // sort — Go's `sort` package, slim port.
 //
 // Source files:
-//   /nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/sort/sort.go
-//   /nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/sort/search.go
+//   go1.25.5/src/sort/sort.go
+//   go1.25.5/src/sort/search.go
 //
 // What this slim port covers:
 //   * `Interface` (Len / Less / Swap)

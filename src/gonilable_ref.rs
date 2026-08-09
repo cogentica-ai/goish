@@ -19,8 +19,7 @@
 // hides the lifetime parameter via the per-position naming convention
 // (`nilable<&T>` at param position is `nilable_ref<'_, T>` with elision).
 //
-// This is Design B's empty-cell filler. See goishc/todos/121.md and
-// goishc/todos/POINTER_DESIGN_B.md.
+// This is pointer-Design B's empty-cell filler.
 //
 // API surface (mirrors nilable<T> where the operation is meaningful for
 // borrows — owning operations like MustTake and OrDefault don't appear

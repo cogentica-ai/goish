@@ -1,7 +1,7 @@
 // crypto/hkdf — HKDF Extract / Expand / Key (RFC 5869).
 //
 // Source files:
-//   /nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/
+//   go1.25.5/src/
 //     crypto/hkdf/hkdf.go
 //     crypto/internal/fips140/hkdf/hkdf.go  (inlined — Extract/Expand bodies)
 //

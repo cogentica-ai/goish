@@ -4,8 +4,8 @@
 //   type Seq[V any]     func(yield func(V) bool)
 //   type Seq2[K, V any] func(yield func(K, V) bool)
 //
-// Goish models these as traits (the settled v1 decision — see
-// ../goishc/RANGE_OVER_FUNC.md §3.1): a push iterator is anything
+// Goish models these as traits (the settled v1 decision): a push
+// iterator is anything
 // with `run(&self, yield)`, where the yield callback returns `false`
 // to stop early (Go's `break`). The blanket impls below make plain
 // closures the everyday spelling, so an iterator-returning function

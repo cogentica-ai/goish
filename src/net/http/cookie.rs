@@ -23,7 +23,7 @@
 //     legacy `Mon, 02-Jan-2006 15:04:05 MST` form is also accepted on
 //     read.
 //
-// Reference: /nix/store/.../net/http/cookie.go.
+// Reference: go1.25.5/src/net/http/cookie.go.
 
 #![allow(non_snake_case)]
 

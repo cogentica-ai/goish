@@ -1,6 +1,6 @@
 // net/textproto/reader.rs — slim line-by-line port of Go 1.25 net/textproto/reader.go.
 //
-// Source: /nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/net/textproto/reader.go
+// Source: go1.25.5/src/net/textproto/reader.go
 //
 // Slim deviations:
 //   * `dotReader`, `ReadCodeLine`, `ReadResponse`, `ReadDotBytes`, `ReadDotLines`

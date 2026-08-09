@@ -1,7 +1,7 @@
 // net/http/cookiejar — in-memory RFC 6265-compliant http.CookieJar.
 //
 // Line-by-line port of:
-//   /nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/
+//   go1.25.5/src/
 //     net/http/cookiejar/jar.go
 //     net/http/cookiejar/punycode.go (in punycode.rs)
 //

@@ -1,6 +1,6 @@
 // io/fs — port of Go 1.25 io/fs (fs.go / readdir.go / stat.go / walk.go).
 //
-// Source: /nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/io/fs/
+// Source: go1.25.5/src/io/fs/
 //
 // What this port covers:
 //   * `FileMode` newtype + all bits + String/IsDir/IsRegular/Perm/Type

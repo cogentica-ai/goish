@@ -1,7 +1,7 @@
 // net/http/internal/ascii — ASCII-only fast paths used by net/http.
 //
 // Line-by-line port of:
-//   /nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/
+//   go1.25.5/src/
 //     net/http/internal/ascii/print.go
 //
 //   Go                                       goish

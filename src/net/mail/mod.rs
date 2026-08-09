@@ -1,7 +1,7 @@
 // net/mail — RFC 5322 mail message parsing (slim).
 //
 // Line-by-line port of:
-//   /nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src/
+//   go1.25.5/src/
 //     net/mail/message.go        (Message, ReadMessage, readHeader, Header)
 //
 // Slim deviations:
