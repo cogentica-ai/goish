@@ -52,7 +52,7 @@ static FAILED: AtomicUsize = AtomicUsize::new(0);
 
 fn pass(name: &'static str) {
     PASSED.fetch_add(1, Ordering::Relaxed);
-    goish::Printf!("PASS: %s\n", string(name));
+    goish::Printf!("PASS: %s\n", name);
 }
 
 fn fail(msg: goish::string) {
