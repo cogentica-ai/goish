@@ -138,20 +138,52 @@ ts  vmsize_kb  vmrss_kb  vmpeak_kb  vmhwm_kb  threads
 
 [`examples/goginx.rs`](examples/goginx.rs) is the showcase app: a single-binary web server / reverse proxy driven by an `nginx.conf`-style configuration file, exercising the whole goish net stack at once.
 
-```nginx
-events { worker_connections 1024; }
-http {
-  upstream backend {
-    server 127.0.0.1:9001;              # round-robin pool with
-    server 127.0.0.1:9002;              # retry-next-upstream
-  }
-  server {
-    listen 8080 reuseport;              # one SO_REUSEPORT listener per CPU
-    server_name a.test www.a.test;      # Host-based virtual hosts
-    location /       { root /srv/www; index index.html; }
-    location /files/ { root /srv/www; autoindex on; }
-    location /api/   { proxy_pass http://backend; }
-  }
+It speaks an `nginx.conf` subset (upstream pools, `reuseport`/`ssl` listeners, virtual hosts, locations), and the code reads like the Go you'd write for the same job. Three excerpts, verbatim. Multi-return tuples and `if err != nil`:
+
+```rust
+fn get(url: string) -> (int, string, string) {
+    let (mut resp, err) = http::Get(url.clone());
+    if err != nil {
+        return (-1, Sprintf!("get %s: %v", url, err), string(""));
+    }
+    let (body, _) = io::ReadAll(&mut resp.Body);
+    let _ = io::Closer::Close(&mut resp.Body);
+    (
+        resp.StatusCode,
+        string(body),
+        resp.Header.Get("Content-Type"),
+    )
+}
+```
+
+`go!`, channels, `range!`, and `signal.NotifyContext` - the SIGTERM graceful drain:
+
+```rust
+/// On SIGTERM/SIGINT: drain every listener via Server::Shutdown.
+fn installSignalDrain(servers: slice<Arc<http::Server>>, done: chan<bool>) {
+    let (sig_ctx, _sig_stop) = signal::NotifyContext(
+        context::Background(),
+        &[syscall::SIGTERM, syscall::SIGINT],
+    );
+    go!(move || {
+        let _ = sig_ctx.Done().Recv();
+        goish::Printf!("goginx: signal received, draining\n");
+        for (_, s) in range!(&servers) {
+            let _ = s.clone().Shutdown(time::Second * 10);
+        }
+        done.Send(true);
+    });
+}
+```
+
+And the self-test waits on that drain with `select!` - Go's `select` with a timeout arm:
+
+```rust
+select! {
+    let _ = done.Recv() => {},
+    let _ = (time::After(time::Second * 10)).Recv() => {
+        fail("drain: timed out waiting for done");
+    },
 }
 ```
 
