@@ -10,8 +10,9 @@
 #![no_std]
 #![no_main]
 
+use goish::fmt;
 use goish::strings;
-use goish::{range, string, syscall, Println};
+use goish::{range, string, syscall};
 
 fn normalize(input: string) -> string {
     let parts = strings::Split(input, ",");
@@ -49,7 +50,7 @@ fn main() {
     // (1) The headline normalize example.
     let got = normalize(string("Hello,  WORLD , #goish, , Rust"));
     check(got == "hello, world, goish, rust", b"strings: normalize wrong\n");
-    Println!(got);
+    fmt::Println!(got);
 
     // (2) Spot-checks for each public function used in the design table.
     check(

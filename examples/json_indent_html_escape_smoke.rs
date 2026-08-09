@@ -9,11 +9,12 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::encoding::json;
 use goish::goslice::slice;
 use goish::types::{byte, int};
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -33,9 +34,9 @@ fn main() {
     {
         let (out, err) = json::Indent(empty_buf(), to_bytes("[]"), "", "  ");
         if err.IsNil() && equal_bytes(out, to_bytes("[]")) {
-            Println!("[ 1] Indent empty arr          PASS");
+            fmt::Println!("[ 1] Indent empty arr          PASS");
         } else {
-            Println!("[ 1] Indent empty arr          FAIL");
+            fmt::Println!("[ 1] Indent empty arr          FAIL");
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
         let (out, err) = json::Indent(empty_buf(), to_bytes("[1,2,3]"), "", "  ");
         let expect = to_bytes("[\n  1,\n  2,\n  3\n]");
         if err.IsNil() && equal_bytes(out, expect) {
-            Println!("[ 2] Indent flat arr           PASS");
+            fmt::Println!("[ 2] Indent flat arr           PASS");
         } else {
-            Println!("[ 2] Indent flat arr           FAIL");
+            fmt::Println!("[ 2] Indent flat arr           FAIL");
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
     {
         let (out, err) = json::Indent(empty_buf(), to_bytes("{}"), "", "  ");
         if err.IsNil() && equal_bytes(out, to_bytes("{}")) {
-            Println!("[ 3] Indent empty obj          PASS");
+            fmt::Println!("[ 3] Indent empty obj          PASS");
         } else {
-            Println!("[ 3] Indent empty obj          FAIL");
+            fmt::Println!("[ 3] Indent empty obj          FAIL");
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
         let (out, err) = json::Indent(empty_buf(), to_bytes("{\"a\":[1,2]}"), "", "  ");
         let expect = to_bytes("{\n  \"a\": [\n    1,\n    2\n  ]\n}");
         if err.IsNil() && equal_bytes(out, expect) {
-            Println!("[ 4] Indent nested             PASS");
+            fmt::Println!("[ 4] Indent nested             PASS");
         } else {
-            Println!("[ 4] Indent nested             FAIL");
+            fmt::Println!("[ 4] Indent nested             FAIL");
             failed += 1;
         }
     }
@@ -81,9 +82,9 @@ fn main() {
         let (out, err) = json::Indent(dst, to_bytes("[1]"), "", "  ");
         let expect = to_bytes("PRE:[\n  1\n]");
         if err.IsNil() && equal_bytes(out, expect) {
-            Println!("[ 5] Indent dst prefix         PASS");
+            fmt::Println!("[ 5] Indent dst prefix         PASS");
         } else {
-            Println!("[ 5] Indent dst prefix         FAIL");
+            fmt::Println!("[ 5] Indent dst prefix         FAIL");
             failed += 1;
         }
     }
@@ -92,9 +93,9 @@ fn main() {
     {
         let (_, err) = json::Indent(empty_buf(), to_bytes("not-json"), "", "  ");
         if !err.IsNil() {
-            Println!("[ 6] Indent invalid            PASS");
+            fmt::Println!("[ 6] Indent invalid            PASS");
         } else {
-            Println!("[ 6] Indent invalid            FAIL");
+            fmt::Println!("[ 6] Indent invalid            FAIL");
             failed += 1;
         }
     }
@@ -104,9 +105,9 @@ fn main() {
         let (out, err) = json::Indent(empty_buf(), to_bytes("[1,2]"), ">>", "..");
         let expect = to_bytes("[\n>>..1,\n>>..2\n>>]");
         if err.IsNil() && equal_bytes(out, expect) {
-            Println!("[ 7] Indent prefix             PASS");
+            fmt::Println!("[ 7] Indent prefix             PASS");
         } else {
-            Println!("[ 7] Indent prefix             FAIL");
+            fmt::Println!("[ 7] Indent prefix             FAIL");
             failed += 1;
         }
     }
@@ -116,9 +117,9 @@ fn main() {
         let out = json::HTMLEscape(empty_buf(), to_bytes("<a&b>"));
         let expect = to_bytes("\\u003ca\\u0026b\\u003e");
         if equal_bytes(out, expect) {
-            Println!("[ 8] HTMLEscape angle/amp      PASS");
+            fmt::Println!("[ 8] HTMLEscape angle/amp      PASS");
         } else {
-            Println!("[ 8] HTMLEscape angle/amp      FAIL");
+            fmt::Println!("[ 8] HTMLEscape angle/amp      FAIL");
             failed += 1;
         }
     }
@@ -127,9 +128,9 @@ fn main() {
     {
         let out = json::HTMLEscape(empty_buf(), to_bytes(""));
         if equal_bytes(out, to_bytes("")) {
-            Println!("[ 9] HTMLEscape empty          PASS");
+            fmt::Println!("[ 9] HTMLEscape empty          PASS");
         } else {
-            Println!("[ 9] HTMLEscape empty          FAIL");
+            fmt::Println!("[ 9] HTMLEscape empty          FAIL");
             failed += 1;
         }
     }
@@ -138,9 +139,9 @@ fn main() {
     {
         let out = json::HTMLEscape(empty_buf(), to_bytes("hello world 123"));
         if equal_bytes(out, to_bytes("hello world 123")) {
-            Println!("[10] HTMLEscape benign         PASS");
+            fmt::Println!("[10] HTMLEscape benign         PASS");
         } else {
-            Println!("[10] HTMLEscape benign         FAIL");
+            fmt::Println!("[10] HTMLEscape benign         FAIL");
             failed += 1;
         }
     }
@@ -151,9 +152,9 @@ fn main() {
         let out = json::HTMLEscape(dst, to_bytes("<x>"));
         let expect = to_bytes("KEEP:\\u003cx\\u003e");
         if equal_bytes(out, expect) {
-            Println!("[11] HTMLEscape dst prefix     PASS");
+            fmt::Println!("[11] HTMLEscape dst prefix     PASS");
         } else {
-            Println!("[11] HTMLEscape dst prefix     FAIL");
+            fmt::Println!("[11] HTMLEscape dst prefix     FAIL");
             failed += 1;
         }
     }
@@ -169,9 +170,9 @@ fn main() {
         let out = json::HTMLEscape(empty_buf(), raw);
         let expect = to_bytes("\\u2028");
         if equal_bytes(out, expect) {
-            Println!("[12] HTMLEscape U+2028         PASS");
+            fmt::Println!("[12] HTMLEscape U+2028         PASS");
         } else {
-            Println!("[12] HTMLEscape U+2028         FAIL");
+            fmt::Println!("[12] HTMLEscape U+2028         FAIL");
             failed += 1;
         }
     }
@@ -186,19 +187,19 @@ fn main() {
         let out = json::HTMLEscape(empty_buf(), raw);
         let expect = to_bytes("\\u2029");
         if equal_bytes(out, expect) {
-            Println!("[13] HTMLEscape U+2029         PASS");
+            fmt::Println!("[13] HTMLEscape U+2029         PASS");
         } else {
-            Println!("[13] HTMLEscape U+2029         FAIL");
+            fmt::Println!("[13] HTMLEscape U+2029         FAIL");
             failed += 1;
         }
     }
 
     let total: int = 13;
     if failed == 0 {
-        Println!("ok 13/13");
+        fmt::Println!("ok 13/13");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of", total);
+        fmt::Println!("FAIL", failed, "of", total);
         syscall::Exit(1);
     }
 }

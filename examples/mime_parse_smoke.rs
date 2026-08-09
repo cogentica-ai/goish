@@ -8,8 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::mime;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -19,9 +20,9 @@ fn main() {
     {
         let (mt, params, err) = mime::ParseMediaType(string("text/plain"));
         if err.IsNil() && mt == "text/plain" && params.Len() == 0 {
-            Println!("[ 1] bare type                  PASS");
+            fmt::Println!("[ 1] bare type                  PASS");
         } else {
-            Println!("[ 1] bare type                  FAIL mt={}", mt);
+            fmt::Println!("[ 1] bare type                  FAIL mt={}", mt);
             failed += 1;
         }
     }
@@ -32,9 +33,9 @@ fn main() {
             mime::ParseMediaType(string("text/html; charset=utf-8"));
         let (cs, _) = params.Get(string("charset"));
         if err.IsNil() && mt == "text/html" && cs == "utf-8" && params.Len() == 1 {
-            Println!("[ 2] type + charset             PASS");
+            fmt::Println!("[ 2] type + charset             PASS");
         } else {
-            Println!("[ 2] type + charset             FAIL mt={} cs={}", mt, cs);
+            fmt::Println!("[ 2] type + charset             FAIL mt={} cs={}", mt, cs);
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
             mime::ParseMediaType(string("application/x; foo=\"bar baz\""));
         let (foo, _) = params.Get(string("foo"));
         if err.IsNil() && mt == "application/x" && foo == "bar baz" {
-            Println!("[ 3] quoted value               PASS");
+            fmt::Println!("[ 3] quoted value               PASS");
         } else {
-            Println!("[ 3] quoted value               FAIL foo={}", foo);
+            fmt::Println!("[ 3] quoted value               FAIL foo={}", foo);
             failed += 1;
         }
     }
@@ -58,9 +59,9 @@ fn main() {
             mime::ParseMediaType(string("Text/HTML; CharSet=UTF-8"));
         let (cs, _) = params.Get(string("charset"));
         if err.IsNil() && mt == "text/html" && cs == "UTF-8" {
-            Println!("[ 4] case folding              PASS");
+            fmt::Println!("[ 4] case folding              PASS");
         } else {
-            Println!("[ 4] case folding              FAIL mt={} cs={}", mt, cs);
+            fmt::Println!("[ 4] case folding              FAIL mt={} cs={}", mt, cs);
             failed += 1;
         }
     }
@@ -72,9 +73,9 @@ fn main() {
         let (b, _) = params.Get(string("boundary"));
         let (cs, _) = params.Get(string("charset"));
         if err.IsNil() && mt == "multipart/form-data" && b == "abc" && cs == "utf-8" {
-            Println!("[ 5] multiple params           PASS");
+            fmt::Println!("[ 5] multiple params           PASS");
         } else {
-            Println!("[ 5] multiple params           FAIL");
+            fmt::Println!("[ 5] multiple params           FAIL");
             failed += 1;
         }
     }
@@ -83,9 +84,9 @@ fn main() {
     {
         let (_mt, _params, err) = mime::ParseMediaType(string(""));
         if !err.IsNil() {
-            Println!("[ 6] empty input err           PASS");
+            fmt::Println!("[ 6] empty input err           PASS");
         } else {
-            Println!("[ 6] empty input err           FAIL");
+            fmt::Println!("[ 6] empty input err           FAIL");
             failed += 1;
         }
     }
@@ -94,9 +95,9 @@ fn main() {
     {
         let (_mt, _params, err) = mime::ParseMediaType(string("text/"));
         if !err.IsNil() {
-            Println!("[ 7] no subtype err            PASS");
+            fmt::Println!("[ 7] no subtype err            PASS");
         } else {
-            Println!("[ 7] no subtype err            FAIL");
+            fmt::Println!("[ 7] no subtype err            FAIL");
             failed += 1;
         }
     }
@@ -107,9 +108,9 @@ fn main() {
             mime::ParseMediaType(string("text/x; q=\"a\\\"b\""));
         let (q, _) = params.Get(string("q"));
         if err.IsNil() && q == "a\"b" {
-            Println!("[ 8] backslash-escape          PASS");
+            fmt::Println!("[ 8] backslash-escape          PASS");
         } else {
-            Println!("[ 8] backslash-escape          FAIL q={}", q);
+            fmt::Println!("[ 8] backslash-escape          FAIL q={}", q);
             failed += 1;
         }
     }
@@ -120,9 +121,9 @@ fn main() {
         params.Set(string("charset"), string("utf-8"));
         let s = mime::FormatMediaType(string("text/plain"), params);
         if s == "text/plain; charset=utf-8" {
-            Println!("[ 9] Format simple             PASS");
+            fmt::Println!("[ 9] Format simple             PASS");
         } else {
-            Println!("[ 9] Format simple             FAIL got={}", s);
+            fmt::Println!("[ 9] Format simple             FAIL got={}", s);
             failed += 1;
         }
     }
@@ -133,9 +134,9 @@ fn main() {
         params.Set(string("filename"), string("hello world.txt"));
         let s = mime::FormatMediaType(string("attachment"), params);
         if s == "attachment; filename=\"hello world.txt\"" {
-            Println!("[10] Format quoted value       PASS");
+            fmt::Println!("[10] Format quoted value       PASS");
         } else {
-            Println!("[10] Format quoted value       FAIL got={}", s);
+            fmt::Println!("[10] Format quoted value       FAIL got={}", s);
             failed += 1;
         }
     }
@@ -145,9 +146,9 @@ fn main() {
         let params: goish::gomap::map<string, string> = goish::gomap::map::new();
         let s = mime::FormatMediaType(string("bad type"), params);
         if s.Len() == 0 {
-            Println!("[11] Format invalid type       PASS");
+            fmt::Println!("[11] Format invalid type       PASS");
         } else {
-            Println!("[11] Format invalid type       FAIL");
+            fmt::Println!("[11] Format invalid type       FAIL");
             failed += 1;
         }
     }
@@ -162,18 +163,18 @@ fn main() {
         let (b, _) = p.Get(string("boundary"));
         let (cs, _) = p.Get(string("charset"));
         if err.IsNil() && mt == "multipart/form-data" && b == "X-Boundary-1234" && cs == "utf-8" {
-            Println!("[12] Format → Parse round-tr   PASS");
+            fmt::Println!("[12] Format → Parse round-tr   PASS");
         } else {
-            Println!("[12] Format → Parse round-tr   FAIL");
+            fmt::Println!("[12] Format → Parse round-tr   FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 12", failed);
+        fmt::Println!("FAIL {} of 12", failed);
         syscall::Exit(1);
     }
 }

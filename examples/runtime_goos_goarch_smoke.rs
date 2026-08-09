@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::runtime;
 use goish::string;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -19,9 +20,9 @@ fn main() {
     // 1. GOOS == "linux" — goish v1 is Linux-only.
     {
         if runtime::GOOS == "linux" {
-            Println!("[ 1] GOOS == \"linux\"          PASS");
+            fmt::Println!("[ 1] GOOS == \"linux\"          PASS");
         } else {
-            Println!("[ 1] GOOS == \"linux\"          FAIL got=", runtime::GOOS);
+            fmt::Println!("[ 1] GOOS == \"linux\"          FAIL got=", runtime::GOOS);
             failed += 1;
         }
     }
@@ -29,9 +30,9 @@ fn main() {
     // 2. GOARCH == "amd64" — goish v1 is x86_64-only.
     {
         if runtime::GOARCH == "amd64" {
-            Println!("[ 2] GOARCH == \"amd64\"        PASS");
+            fmt::Println!("[ 2] GOARCH == \"amd64\"        PASS");
         } else {
-            Println!("[ 2] GOARCH == \"amd64\"        FAIL got=", runtime::GOARCH);
+            fmt::Println!("[ 2] GOARCH == \"amd64\"        FAIL got=", runtime::GOARCH);
             failed += 1;
         }
     }
@@ -39,9 +40,9 @@ fn main() {
     // 3. Compiler == "goish".
     {
         if runtime::Compiler == "goish" {
-            Println!("[ 3] Compiler == \"goish\"      PASS");
+            fmt::Println!("[ 3] Compiler == \"goish\"      PASS");
         } else {
-            Println!("[ 3] Compiler == \"goish\"      FAIL");
+            fmt::Println!("[ 3] Compiler == \"goish\"      FAIL");
             failed += 1;
         }
     }
@@ -50,9 +51,9 @@ fn main() {
     {
         let v = runtime::Version();
         if v.Len() > 0 && goish::strings::HasPrefix(v.clone(), string("goish")) {
-            Println!("[ 4] Version() shape           PASS");
+            fmt::Println!("[ 4] Version() shape           PASS");
         } else {
-            Println!("[ 4] Version() shape           FAIL");
+            fmt::Println!("[ 4] Version() shape           FAIL");
             failed += 1;
         }
     }
@@ -61,18 +62,18 @@ fn main() {
     {
         let goos_str: string = string(runtime::GOOS);
         if goos_str == string("linux") {
-            Println!("[ 5] GOOS via string()         PASS");
+            fmt::Println!("[ 5] GOOS via string()         PASS");
         } else {
-            Println!("[ 5] GOOS via string()         FAIL");
+            fmt::Println!("[ 5] GOOS via string()         FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 5");
+        fmt::Println!("FAIL", failed, "of 5");
         syscall::Exit(1);
     }
 }

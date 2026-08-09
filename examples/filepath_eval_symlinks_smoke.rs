@@ -9,10 +9,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::os;
 use goish::path::filepath;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -31,9 +32,9 @@ fn main() {
         let _ = os::Symlink(target.clone(), link.clone());
         let (fi, err) = os::Lstat(link.clone());
         if err.IsNil() && (fi.Mode() & os::ModeSymlink) != 0 {
-            Println!("[ 1] Lstat sees ModeSymlink     PASS");
+            fmt::Println!("[ 1] Lstat sees ModeSymlink     PASS");
         } else {
-            Println!("[ 1] Lstat sees ModeSymlink     FAIL");
+            fmt::Println!("[ 1] Lstat sees ModeSymlink     FAIL");
             failed += 1;
         }
     }
@@ -42,9 +43,9 @@ fn main() {
     {
         let (fi, err) = os::Stat(link.clone());
         if err.IsNil() && (fi.Mode() & os::ModeSymlink) == 0 {
-            Println!("[ 2] Stat follows symlink      PASS");
+            fmt::Println!("[ 2] Stat follows symlink      PASS");
         } else {
-            Println!("[ 2] Stat follows symlink      FAIL");
+            fmt::Println!("[ 2] Stat follows symlink      FAIL");
             failed += 1;
         }
     }
@@ -53,9 +54,9 @@ fn main() {
     {
         let (got, err) = filepath::EvalSymlinks(link.clone());
         if err.IsNil() && got == target {
-            Println!("[ 3] EvalSymlinks abs link     PASS");
+            fmt::Println!("[ 3] EvalSymlinks abs link     PASS");
         } else {
-            Println!("[ 3] EvalSymlinks abs link     FAIL got=", got);
+            fmt::Println!("[ 3] EvalSymlinks abs link     FAIL got=", got);
             failed += 1;
         }
     }
@@ -64,9 +65,9 @@ fn main() {
     {
         let (got, err) = filepath::EvalSymlinks(target.clone());
         if err.IsNil() && got == target {
-            Println!("[ 4] EvalSymlinks no link      PASS");
+            fmt::Println!("[ 4] EvalSymlinks no link      PASS");
         } else {
-            Println!("[ 4] EvalSymlinks no link      FAIL got=", got);
+            fmt::Println!("[ 4] EvalSymlinks no link      FAIL got=", got);
             failed += 1;
         }
     }
@@ -77,9 +78,9 @@ fn main() {
         let _ = os::Symlink(string("target.txt"), rel_link.clone());
         let (got, err) = filepath::EvalSymlinks(rel_link);
         if err.IsNil() && got == target {
-            Println!("[ 5] EvalSymlinks rel link     PASS");
+            fmt::Println!("[ 5] EvalSymlinks rel link     PASS");
         } else {
-            Println!("[ 5] EvalSymlinks rel link     FAIL got=", got);
+            fmt::Println!("[ 5] EvalSymlinks rel link     FAIL got=", got);
             failed += 1;
         }
     }
@@ -92,9 +93,9 @@ fn main() {
         let _ = os::Symlink(chain1.clone(), chain2.clone());
         let (got, err) = filepath::EvalSymlinks(chain2);
         if err.IsNil() && got == target {
-            Println!("[ 6] EvalSymlinks chain        PASS");
+            fmt::Println!("[ 6] EvalSymlinks chain        PASS");
         } else {
-            Println!("[ 6] EvalSymlinks chain        FAIL got=", got);
+            fmt::Println!("[ 6] EvalSymlinks chain        FAIL got=", got);
             failed += 1;
         }
     }
@@ -104,9 +105,9 @@ fn main() {
         let p = string("/tmp/goish-evalsymlinks-smoke/./target.txt");
         let (got, err) = filepath::EvalSymlinks(p);
         if err.IsNil() && got == target {
-            Println!("[ 7] EvalSymlinks dot          PASS");
+            fmt::Println!("[ 7] EvalSymlinks dot          PASS");
         } else {
-            Println!("[ 7] EvalSymlinks dot          FAIL got=", got);
+            fmt::Println!("[ 7] EvalSymlinks dot          FAIL got=", got);
             failed += 1;
         }
     }
@@ -118,9 +119,9 @@ fn main() {
         let _ = os::Mkdir(string("/tmp/goish-evalsymlinks-smoke/sub"), 0o755);
         let (got, err) = filepath::EvalSymlinks(p);
         if err.IsNil() && got == target {
-            Println!("[ 8] EvalSymlinks dotdot       PASS");
+            fmt::Println!("[ 8] EvalSymlinks dotdot       PASS");
         } else {
-            Println!("[ 8] EvalSymlinks dotdot       FAIL got=", got);
+            fmt::Println!("[ 8] EvalSymlinks dotdot       FAIL got=", got);
             failed += 1;
         }
     }
@@ -131,9 +132,9 @@ fn main() {
             "/tmp/goish-evalsymlinks-smoke/missing.txt",
         ));
         if !err.IsNil() {
-            Println!("[ 9] EvalSymlinks missing      PASS");
+            fmt::Println!("[ 9] EvalSymlinks missing      PASS");
         } else {
-            Println!("[ 9] EvalSymlinks missing      FAIL");
+            fmt::Println!("[ 9] EvalSymlinks missing      FAIL");
             failed += 1;
         }
     }
@@ -146,9 +147,9 @@ fn main() {
         let _ = os::Symlink(string("cycA"), b.clone());
         let (_, err) = filepath::EvalSymlinks(a);
         if !err.IsNil() {
-            Println!("[10] EvalSymlinks cycle        PASS");
+            fmt::Println!("[10] EvalSymlinks cycle        PASS");
         } else {
-            Println!("[10] EvalSymlinks cycle        FAIL");
+            fmt::Println!("[10] EvalSymlinks cycle        FAIL");
             failed += 1;
         }
     }
@@ -156,10 +157,10 @@ fn main() {
     let _ = os::RemoveAll(dir);
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

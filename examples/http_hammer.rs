@@ -22,6 +22,7 @@ extern crate goish;
 
 use alloc::sync::Arc;
 
+use goish::fmt;
 use goish::encoding::json;
 use goish::net;
 use goish::net::http;
@@ -30,9 +31,7 @@ use goish::runtime::sched::schedule;
 use goish::sync::atomic::Uint64;
 use goish::sync::WaitGroup;
 use goish::time;
-use goish::{
-    bytes, float64, go, int, make, nil, string, syscall, uint64, Eprintln, Println, Sprintf, KB,
-};
+use goish::{bytes, float64, go, int, make, nil, string, syscall, uint64, KB};
 
 const N: i64 = 5_000;
 const CLIENT_STACK: usize = 64 * KB;
@@ -112,7 +111,7 @@ fn find_line<'a>(data: &'a [u8], prefix: &[u8]) -> Option<&'a [u8]> {
 
 fn url_at(path: &str) -> string {
     let port = int(SERVER_PORT.Load());
-    Sprintf!("http://127.0.0.1:%d%s", port, path)
+    fmt::Sprintf!("http://127.0.0.1:%d%s", port, path)
 }
 
 // ─── main ────────────────────────────────────────────────────────────
@@ -120,18 +119,18 @@ fn url_at(path: &str) -> string {
 #[goish::main]
 fn main() {
     let pid = syscall::Getpid();
-    Println!("http_hammer PID:", int(pid));
-    Println!("target: N=", int(N), " concurrent clients @ ", int(CLIENT_STACK), " B stack each");
+    fmt::Println!("http_hammer PID:", int(pid));
+    fmt::Println!("target: N=", int(N), " concurrent clients @ ", int(CLIENT_STACK), " B stack each");
 
     // Bind first, then report port.
     let (ln, err) = net::Listen("tcp", "127.0.0.1:0");
     if err != nil {
-        Eprintln!("listen failed:", err.Error());
+        fmt::Eprintln!("listen failed:", err.Error());
         os::Exit(1);
     }
     let port = ln.Addr().Port;
     SERVER_PORT.Store(uint64(port));
-    Println!("server listening on", int(port));
+    fmt::Println!("server listening on", int(port));
 
     let mux = http::ServeMux::new();
     mux.HandleFunc("/healthz", healthz);
@@ -192,13 +191,13 @@ fn main() {
         let fl = FAIL_COUNT.Load();
         let secs = elapsed.Seconds();
         let rps = if secs > 0.0 { float64(ok) / secs } else { 0.0_f64 };
-        Println!("storm complete: ok=", int(ok), "/", int(N), "  fail=", int(fl));
-        Println!("elapsed:", Sprintf!("%.3f", secs), "s  rps:", Sprintf!("%.0f", rps));
+        fmt::Println!("storm complete: ok=", int(ok), "/", int(N), "  fail=", int(fl));
+        fmt::Println!("elapsed:", fmt::Sprintf!("%.3f", secs), "s  rps:", fmt::Sprintf!("%.0f", rps));
 
         // Graceful shutdown.
         let err = srv_for_shutdown.Shutdown(time::Second * 5);
         if err != nil {
-            Eprintln!("Shutdown error:", err.Error());
+            fmt::Eprintln!("Shutdown error:", err.Error());
         }
         let mut tries = 0;
         while SERVE_DONE.Load() == 0 && tries < 60 {
@@ -207,10 +206,10 @@ fn main() {
         }
 
         if int(ok) != N || int(fl) != 0 {
-            Eprintln!("HAMMER_FAIL", int(ok), "/", int(N));
+            fmt::Eprintln!("HAMMER_FAIL", int(ok), "/", int(N));
             os::Exit(1);
         }
-        Println!("HAMMER_OK", int(N));
+        fmt::Println!("HAMMER_OK", int(N));
         os::Exit(0);
     });
 

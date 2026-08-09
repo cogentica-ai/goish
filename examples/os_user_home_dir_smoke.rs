@@ -9,8 +9,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::os;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -25,13 +26,13 @@ fn main() {
             // Just confirm absolute path.
             let leading_slash = home.Len() > 0 && home[0i64] == b'/';
             if leading_slash {
-                Println!("[ 1] $HOME set returns dir     PASS home=", home);
+                fmt::Println!("[ 1] $HOME set returns dir     PASS home=", home);
             } else {
-                Println!("[ 1] $HOME set returns dir     FAIL home=", home);
+                fmt::Println!("[ 1] $HOME set returns dir     FAIL home=", home);
                 failed += 1;
             }
         } else {
-            Println!("[ 1] $HOME set returns dir     FAIL err=", err.Error());
+            fmt::Println!("[ 1] $HOME set returns dir     FAIL err=", err.Error());
             failed += 1;
         }
     }
@@ -41,18 +42,18 @@ fn main() {
         let (home, _) = os::UserHomeDir();
         let env_home = os::Getenv(string("HOME"));
         if home == env_home {
-            Println!("[ 2] matches Getenv HOME       PASS");
+            fmt::Println!("[ 2] matches Getenv HOME       PASS");
         } else {
-            Println!("[ 2] matches Getenv HOME       FAIL");
+            fmt::Println!("[ 2] matches Getenv HOME       FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 2/2");
+        fmt::Println!("ok 2/2");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 2");
+        fmt::Println!("FAIL", failed, "of 2");
         syscall::Exit(1);
     }
 }

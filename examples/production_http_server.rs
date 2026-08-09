@@ -39,6 +39,7 @@ use alloc::sync::Arc;
 
 // Go-shape package imports — `strings.HasPrefix(...)` reads as
 // `strings::HasPrefix(...)` once `strings` is in scope.
+use goish::fmt;
 use goish::bytes as gobytes;
 use goish::encoding::json;
 use goish::io;
@@ -49,10 +50,7 @@ use goish::runtime::sched::schedule;
 use goish::strings;
 use goish::sync::atomic::Uint64;
 use goish::time;
-use goish::{
-    append, bytes, float64, go, int, int64, make, nil, string, uint64, Eprintln, Printf, Println,
-    Sprintf,
-};
+use goish::{append, bytes, float64, go, int, int64, make, nil, string, uint64};
 
 // ─── shared server state ─────────────────────────────────────────────
 
@@ -63,11 +61,11 @@ static CLIENT_PORT: Uint64 = Uint64::new(0);
 
 fn fail<S: Into<string>>(name: S) {
     FAILED.Add(1);
-    Eprintln!("FAIL:", name.into());
+    fmt::Eprintln!("FAIL:", name.into());
 }
 
 fn pass<S: Into<string>>(name: S) {
-    Println!("PASS:", name.into());
+    fmt::Println!("PASS:", name.into());
 }
 
 // ─── handlers ────────────────────────────────────────────────────────
@@ -293,7 +291,7 @@ fn cors(next: Arc<dyn http::Handler>) -> Arc<dyn http::Handler> {
 
 fn urlAt<S: Into<string>>(path: S) -> string {
     let port = int(CLIENT_PORT.Load());
-    Sprintf!("http://127.0.0.1:%d%s", port, path.into())
+    fmt::Sprintf!("http://127.0.0.1:%d%s", port, path.into())
 }
 
 // ─── main ────────────────────────────────────────────────────────────
@@ -303,7 +301,7 @@ fn main() {
     // Bind first so we can report the port.
     let (ln, e) = net::Listen("tcp", "127.0.0.1:0");
     if e != nil {
-        Println!("listen failed");
+        fmt::Println!("listen failed");
         os::Exit(1);
     }
     let port = ln.Addr().Port;
@@ -363,11 +361,11 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if err != nil {
-            fail(Sprintf!("%s: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
-            fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+            fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
         } else if !gobytes::Contains(&body, bytes("\"status\"")) {
-            fail(Sprintf!("%s: missing \"status\" field", name));
+            fail(fmt::Sprintf!("%s: missing \"status\" field", name));
         } else {
             pass(name);
         }
@@ -378,11 +376,11 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if err != nil {
-            fail(Sprintf!("%s: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
-            fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+            fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
         } else if !gobytes::HasPrefix(&body, bytes("hello world")) {
-            fail(Sprintf!("%s: bad body", name));
+            fail(fmt::Sprintf!("%s: bad body", name));
         } else {
             pass(name);
         }
@@ -393,11 +391,11 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if err != nil {
-            fail(Sprintf!("%s: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 404 {
-            fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+            fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
         } else if !gobytes::Contains(&body, bytes("custom 404")) {
-            fail(Sprintf!("%s: bad body", name));
+            fail(fmt::Sprintf!("%s: bad body", name));
         } else {
             pass(name);
         }
@@ -408,11 +406,11 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if err != nil {
-            fail(Sprintf!("%s: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
-            fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+            fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
         } else if !gobytes::Contains(&body, bytes("\"id\":\"42\"")) {
-            fail(Sprintf!("%s: id not bound", name));
+            fail(fmt::Sprintf!("%s: id not bound", name));
         } else {
             pass(name);
         }
@@ -421,9 +419,9 @@ fn main() {
         let name = "GET /admin/secret unauth -> 401";
         let (resp, err) = http::Get(urlAt("/admin/secret"));
         if err != nil {
-            fail(Sprintf!("%s: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 401 {
-            fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+            fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
         } else {
             pass(name);
         }
@@ -432,14 +430,14 @@ fn main() {
         let name = "GET /admin/secret bad token -> 401";
         let (mut req, err) = http::NewRequest("GET", urlAt("/admin/secret"), nil);
         if err != nil {
-            fail(Sprintf!("%s: NewRequest: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
             req.Header.Set("Authorization", "Bearer wrong");
             let (resp, err) = client.Do(&req);
             if err != nil {
-                fail(Sprintf!("%s: %s", name, err.Error()));
+                fail(fmt::Sprintf!("%s: %s", name, err.Error()));
             } else if resp.StatusCode != 401 {
-                fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+                fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
             } else {
                 pass(name);
             }
@@ -449,18 +447,18 @@ fn main() {
         let name = "GET /admin/secret with token -> 200";
         let (mut req, err) = http::NewRequest("GET", urlAt("/admin/secret"), nil);
         if err != nil {
-            fail(Sprintf!("%s: NewRequest: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
             req.Header.Set("Authorization", "Bearer s3cret");
             let (mut resp, err) = client.Do(&req);
             let (body, _) = io::ReadAll(&mut resp.Body);
             let _ = goish::io::Closer::Close(&mut resp.Body);
             if err != nil {
-                fail(Sprintf!("%s: %s", name, err.Error()));
+                fail(fmt::Sprintf!("%s: %s", name, err.Error()));
             } else if resp.StatusCode != 200 {
-                fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+                fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
             } else if !gobytes::Contains(&body, bytes("admin only")) {
-                fail(Sprintf!("%s: bad body", name));
+                fail(fmt::Sprintf!("%s: bad body", name));
             } else {
                 pass(name);
             }
@@ -470,9 +468,9 @@ fn main() {
         let name = "CORS header on response";
         let (resp, err) = http::Get(urlAt("/"));
         if err != nil {
-            fail(Sprintf!("%s: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: %s", name, err.Error()));
         } else if resp.Header.Get("Access-Control-Allow-Origin").Len() == 0 {
-            fail(Sprintf!("%s: header missing", name));
+            fail(fmt::Sprintf!("%s: header missing", name));
         } else {
             pass(name);
         }
@@ -481,13 +479,13 @@ fn main() {
         let name = "OPTIONS preflight -> 204";
         let (req, err) = http::NewRequest("OPTIONS", urlAt("/"), nil);
         if err != nil {
-            fail(Sprintf!("%s: NewRequest: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
             let (resp, err) = client.Do(&req);
             if err != nil {
-                fail(Sprintf!("%s: %s", name, err.Error()));
+                fail(fmt::Sprintf!("%s: %s", name, err.Error()));
             } else if resp.StatusCode != 204 {
-                fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+                fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
             } else {
                 pass(name);
             }
@@ -497,11 +495,11 @@ fn main() {
         let name = "Set-Cookie returned";
         let (resp, err) = http::Get(urlAt("/session/set"));
         if err != nil {
-            fail(Sprintf!("%s: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: %s", name, err.Error()));
         } else {
             let sc = resp.Header.Get("Set-Cookie");
             if !strings::HasPrefix(&sc, "sid=abc123") {
-                fail(Sprintf!("%s: got %s", name, &sc));
+                fail(fmt::Sprintf!("%s: got %s", name, &sc));
             } else {
                 pass(name);
             }
@@ -511,18 +509,18 @@ fn main() {
         let name = "Cookie roundtrip";
         let (mut req, err) = http::NewRequest("GET", urlAt("/session/get"), nil);
         if err != nil {
-            fail(Sprintf!("%s: NewRequest: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
             req.Header.Set("Cookie", "sid=abc123");
             let (mut resp, err) = client.Do(&req);
             let (body, _) = io::ReadAll(&mut resp.Body);
             let _ = goish::io::Closer::Close(&mut resp.Body);
             if err != nil {
-                fail(Sprintf!("%s: %s", name, err.Error()));
+                fail(fmt::Sprintf!("%s: %s", name, err.Error()));
             } else if resp.StatusCode != 200 {
-                fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+                fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
             } else if !gobytes::Contains(&body, bytes("sid=abc123")) {
-                fail(Sprintf!("%s: server didn't see cookie", name));
+                fail(fmt::Sprintf!("%s: server didn't see cookie", name));
             } else {
                 pass(name);
             }
@@ -534,11 +532,11 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if err != nil {
-            fail(Sprintf!("%s: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: %s", name, err.Error()));
         } else if !gobytes::Contains(&body, bytes("name=alice"))
             || !gobytes::Contains(&body, bytes("age=30"))
         {
-            fail(Sprintf!("%s: bad body", name));
+            fail(fmt::Sprintf!("%s: bad body", name));
         } else {
             pass(name);
         }
@@ -548,7 +546,7 @@ fn main() {
         let payload = bytes(r#"{"name":"widget","items":[1,"two",true,null]}"#);
         let (mut req, err) = http::NewRequest("POST", urlAt("/api/echo"), nil);
         if err != nil {
-            fail(Sprintf!("%s: NewRequest: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
             req.Body = payload.clone();
             req.ContentLength = payload.Len();
@@ -557,13 +555,13 @@ fn main() {
             let (body, _) = io::ReadAll(&mut resp.Body);
             let _ = goish::io::Closer::Close(&mut resp.Body);
             if err != nil {
-                fail(Sprintf!("%s: %s", name, err.Error()));
+                fail(fmt::Sprintf!("%s: %s", name, err.Error()));
             } else if resp.StatusCode != 200 {
-                fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+                fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
             } else if !gobytes::Contains(&body, bytes("\"name\":\"widget\""))
                 || !gobytes::Contains(&body, bytes("\"item_count\":4"))
             {
-                fail(Sprintf!("%s: bad body", name));
+                fail(fmt::Sprintf!("%s: bad body", name));
             } else {
                 pass(name);
             }
@@ -573,16 +571,16 @@ fn main() {
         let name = "POST /api/echo rejects malformed JSON";
         let (mut req, err) = http::NewRequest("POST", urlAt("/api/echo"), nil);
         if err != nil {
-            fail(Sprintf!("%s: NewRequest: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
             req.Body = bytes("not-json{");
             req.ContentLength = req.Body.Len();
             req.Header.Set("Content-Type", "application/json");
             let (resp, err) = client.Do(&req);
             if err != nil {
-                fail(Sprintf!("%s: %s", name, err.Error()));
+                fail(fmt::Sprintf!("%s: %s", name, err.Error()));
             } else if resp.StatusCode != 400 {
-                fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+                fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
             } else {
                 pass(name);
             }
@@ -592,16 +590,16 @@ fn main() {
         let name = "POST /api/echo rejects bad schema";
         let (mut req, err) = http::NewRequest("POST", urlAt("/api/echo"), nil);
         if err != nil {
-            fail(Sprintf!("%s: NewRequest: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
             req.Body = bytes(r#"{"name":"x"}"#);
             req.ContentLength = req.Body.Len();
             req.Header.Set("Content-Type", "application/json");
             let (resp, err) = client.Do(&req);
             if err != nil {
-                fail(Sprintf!("%s: %s", name, err.Error()));
+                fail(fmt::Sprintf!("%s: %s", name, err.Error()));
             } else if resp.StatusCode != 400 {
-                fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+                fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
             } else {
                 pass(name);
             }
@@ -611,9 +609,9 @@ fn main() {
         let name = "GET /api/echo returns 405";
         let (resp, err) = http::Get(urlAt("/api/echo"));
         if err != nil {
-            fail(Sprintf!("%s: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 405 {
-            fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+            fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
         } else {
             pass(name);
         }
@@ -624,14 +622,14 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = goish::io::Closer::Close(&mut resp.Body);
         if err != nil {
-            fail(Sprintf!("%s: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: %s", name, err.Error()));
         } else if resp.StatusCode != 200 {
-            fail(Sprintf!("%s: status %d", name, resp.StatusCode));
+            fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
         } else if !gobytes::Contains(&body, bytes("\"service\""))
             || !gobytes::Contains(&body, bytes("\"shards\""))
             || !gobytes::Contains(&body, bytes("\"healthy\":true"))
         {
-            fail(Sprintf!("%s: bad body", name));
+            fail(fmt::Sprintf!("%s: bad body", name));
         } else {
             pass(name);
         }
@@ -640,7 +638,7 @@ fn main() {
         let name = "Server.Shutdown returns nil";
         let err = srv_for_shutdown.Shutdown(time::Second);
         if err != nil {
-            fail(Sprintf!("%s: %s", name, err.Error()));
+            fail(fmt::Sprintf!("%s: %s", name, err.Error()));
         } else {
             pass(name);
         }
@@ -653,24 +651,24 @@ fn main() {
             tries += 1;
         }
         if SERVE_DONE.Load() != 1 {
-            fail(Sprintf!("%s: serve still running", name));
+            fail(fmt::Sprintf!("%s: serve still running", name));
         } else {
             pass(name);
         }
 
         let f = int64(FAILED.Load());
         if f == 0 {
-            Println!("PRODUCTION_HTTP_OK 17/17");
+            fmt::Println!("PRODUCTION_HTTP_OK 17/17");
             os::Exit(0);
         } else {
-            Printf!("PRODUCTION_HTTP_FAIL %d / 17\n", f);
+            fmt::Printf!("PRODUCTION_HTTP_FAIL %d / 17\n", f);
             os::Exit(1);
         }
     });
 
     go!(move || {
         time::Sleep(time::Second * 30);
-        Println!("TIMEOUT");
+        fmt::Println!("TIMEOUT");
         os::Exit(2);
     });
 

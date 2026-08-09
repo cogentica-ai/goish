@@ -7,9 +7,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::goslice::slice;
 use goish::strings;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 fn pairs(items: &'static [&'static str]) -> slice<goish::string> {
     let mut s: slice<goish::string> = slice::__from_vec(alloc::vec::Vec::new());
@@ -28,9 +29,9 @@ fn main() {
         let r = strings::NewReplacer(pairs(&["&", "&amp;", "<", "&lt;"]));
         let out = r.Replace(string("a&b<c"));
         if out == "a&amp;b&lt;c" {
-            Println!("[ 1] HTML-style escapes        PASS");
+            fmt::Println!("[ 1] HTML-style escapes        PASS");
         } else {
-            Println!("[ 1] HTML-style escapes        FAIL got={}", out);
+            fmt::Println!("[ 1] HTML-style escapes        FAIL got={}", out);
             failed += 1;
         }
     }
@@ -40,9 +41,9 @@ fn main() {
         let r = strings::NewReplacer(pairs(&["foo", "X", "bar", "Y"]));
         let out = r.Replace(string("foobar foobaz"));
         if out == "XY Xbaz" {
-            Println!("[ 2] multi → single            PASS");
+            fmt::Println!("[ 2] multi → single            PASS");
         } else {
-            Println!("[ 2] multi → single            FAIL got={}", out);
+            fmt::Println!("[ 2] multi → single            FAIL got={}", out);
             failed += 1;
         }
     }
@@ -52,9 +53,9 @@ fn main() {
         let r = strings::NewReplacer(pairs(&["zzz", "!"]));
         let out = r.Replace(string("hello"));
         if out == "hello" {
-            Println!("[ 3] no match                  PASS");
+            fmt::Println!("[ 3] no match                  PASS");
         } else {
-            Println!("[ 3] no match                  FAIL got={}", out);
+            fmt::Println!("[ 3] no match                  FAIL got={}", out);
             failed += 1;
         }
     }
@@ -65,9 +66,9 @@ fn main() {
         let out = r.Replace(string("foobar"));
         // "foo" matches first → "1bar"
         if out == "1bar" {
-            Println!("[ 4] first pair wins           PASS");
+            fmt::Println!("[ 4] first pair wins           PASS");
         } else {
-            Println!("[ 4] first pair wins           FAIL got={}", out);
+            fmt::Println!("[ 4] first pair wins           FAIL got={}", out);
             failed += 1;
         }
     }
@@ -77,18 +78,18 @@ fn main() {
         let r = strings::NewReplacer(pairs(&["x", "x"]));
         let out = r.Replace(string("xxx"));
         if out == "xxx" {
-            Println!("[ 5] identity                  PASS");
+            fmt::Println!("[ 5] identity                  PASS");
         } else {
-            Println!("[ 5] identity                  FAIL");
+            fmt::Println!("[ 5] identity                  FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 5", failed);
+        fmt::Println!("FAIL {} of 5", failed);
         syscall::Exit(1);
     }
 }

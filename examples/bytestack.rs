@@ -10,14 +10,15 @@
 #![no_std]
 #![no_main]
 
-use goish::{bufio, len, nil, os, range, Fprintln, Printf};
+use goish::fmt;
+use goish::{bufio, len, nil, os, range};
 
 #[goish::main]
 fn main() {
     let all = os::Args();
     if len(&all) != 2 {
         let mut e = os::Stderr();
-        Fprintln!(e, "usage: bytestack SEP");
+        fmt::Fprintln!(e, "usage: bytestack SEP");
         os::Exit(1);
     }
     // os.Args[1] is the separator as a string; convert to slice<byte>.
@@ -32,13 +33,13 @@ fn main() {
                 continue;
             }
             let field = goish::bytes::ToUpper(field);
-            Printf!("  - %s\n", goish::string(field));
+            fmt::Printf!("  - %s\n", goish::string(field));
         }
     }
     let err = sc.Err();
     if err != nil {
         let mut e = os::Stderr();
-        Fprintln!(e, "scan:", err);
+        fmt::Fprintln!(e, "scan:", err);
         os::Exit(1);
     }
 }

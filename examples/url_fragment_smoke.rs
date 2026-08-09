@@ -7,8 +7,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net::http::url;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -22,9 +23,9 @@ fn main() {
             && u.Path == "/path"
             && u.RawQuery == "q=1"
         {
-            Println!("[ 1] Parse fragment           PASS");
+            fmt::Println!("[ 1] Parse fragment           PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 1] Parse fragment           FAIL frag={} path={}",
                 u.Fragment, u.Path
             );
@@ -37,9 +38,9 @@ fn main() {
         let (u, _) = url::Parse(string("http://x/p?a=1#frag"));
         let s = u.String();
         if s == "http://x/p?a=1#frag" {
-            Println!("[ 2] String roundtrip          PASS");
+            fmt::Println!("[ 2] String roundtrip          PASS");
         } else {
-            Println!("[ 2] String roundtrip          FAIL got={}", s);
+            fmt::Println!("[ 2] String roundtrip          FAIL got={}", s);
             failed += 1;
         }
     }
@@ -49,9 +50,9 @@ fn main() {
         let (u, _) = url::Parse(string("http://x/p"));
         let s = u.String();
         if s == "http://x/p" {
-            Println!("[ 3] no fragment               PASS");
+            fmt::Println!("[ 3] no fragment               PASS");
         } else {
-            Println!("[ 3] no fragment               FAIL got={}", s);
+            fmt::Println!("[ 3] no fragment               FAIL got={}", s);
             failed += 1;
         }
     }
@@ -61,9 +62,9 @@ fn main() {
         let (u, _) = url::Parse(string("http://x/p#hello"));
         let ef = u.EscapedFragment();
         if ef == "hello" {
-            Println!("[ 4] EscapedFragment           PASS");
+            fmt::Println!("[ 4] EscapedFragment           PASS");
         } else {
-            Println!("[ 4] EscapedFragment           FAIL got={}", ef);
+            fmt::Println!("[ 4] EscapedFragment           FAIL got={}", ef);
             failed += 1;
         }
     }
@@ -73,18 +74,18 @@ fn main() {
     {
         let (u, _) = url::Parse(string("http://x/p#"));
         if u.Fragment == "" {
-            Println!("[ 5] empty fragment            PASS");
+            fmt::Println!("[ 5] empty fragment            PASS");
         } else {
-            Println!("[ 5] empty fragment            FAIL");
+            fmt::Println!("[ 5] empty fragment            FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 5", failed);
+        fmt::Println!("FAIL {} of 5", failed);
         syscall::Exit(1);
     }
 }

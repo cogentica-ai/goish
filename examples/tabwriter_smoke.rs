@@ -9,11 +9,12 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::string;
 use goish::text::tabwriter;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 // Format `body` through a fresh tabwriter and return the resulting string.
 fn run(
@@ -58,9 +59,9 @@ fn main() {
         let want: goish::string =
             "a\tb\tc\td\t\t.\n123\t12345\t1234567\t123456789\t.\n\n".into();
         if got == want {
-            Println!("[ 1] tab-padded minwidth=0      PASS");
+            fmt::Println!("[ 1] tab-padded minwidth=0      PASS");
         } else {
-            Println!("[ 1] tab-padded minwidth=0      FAIL");
+            fmt::Println!("[ 1] tab-padded minwidth=0      FAIL");
             failed += 1;
         }
     }
@@ -80,9 +81,9 @@ fn main() {
             "    a     b       c         d.\n  123 12345 1234567 123456789.\n\n",
         );
         if got == want {
-            Println!("[ 2] right-aligned minwidth=5   PASS");
+            fmt::Println!("[ 2] right-aligned minwidth=5   PASS");
         } else {
-            Println!("[ 2] right-aligned minwidth=5   FAIL");
+            fmt::Println!("[ 2] right-aligned minwidth=5   FAIL");
             failed += 1;
         }
     }
@@ -99,9 +100,9 @@ fn main() {
         );
         let want = string("....a|..b|c\n...aa|.bb|cc\n..aaa|\n.aaaa|.dddd|eeee\n");
         if got == want {
-            Println!("[ 3] elastic + debug bars       PASS");
+            fmt::Println!("[ 3] elastic + debug bars       PASS");
         } else {
-            Println!("[ 3] elastic + debug bars       FAIL");
+            fmt::Println!("[ 3] elastic + debug bars       FAIL");
             failed += 1;
         }
     }
@@ -120,9 +121,9 @@ fn main() {
             "------a|------b|---aligned|\n-----aa|-----bb|---aligned|\n----aaa|----bbb|unaligned\n---aaaa|---bbbb|---aligned|\n",
         );
         if got == want {
-            Println!("[ 4] trailing-tab discipline    PASS");
+            fmt::Println!("[ 4] trailing-tab discipline    PASS");
         } else {
-            Println!("[ 4] trailing-tab discipline    FAIL");
+            fmt::Println!("[ 4] trailing-tab discipline    FAIL");
             failed += 1;
         }
     }
@@ -131,9 +132,9 @@ fn main() {
     {
         let got = run("", 0, 8, 0, b' ', 0);
         if got == "" {
-            Println!("[ 5] empty input                PASS");
+            fmt::Println!("[ 5] empty input                PASS");
         } else {
-            Println!("[ 5] empty input                FAIL");
+            fmt::Println!("[ 5] empty input                FAIL");
             failed += 1;
         }
     }
@@ -142,9 +143,9 @@ fn main() {
     {
         let got = run("hello world\n", 0, 8, 0, b' ', 0);
         if got == "hello world\n" {
-            Println!("[ 6] no-tabs passthrough        PASS");
+            fmt::Println!("[ 6] no-tabs passthrough        PASS");
         } else {
-            Println!("[ 6] no-tabs passthrough        FAIL");
+            fmt::Println!("[ 6] no-tabs passthrough        FAIL");
             failed += 1;
         }
     }
@@ -163,9 +164,9 @@ fn main() {
         // "a" → 1 byte text + 4 spaces; "ccc" → 3 bytes + 2 spaces.
         let want: goish::string = "a    b\nccc  dd\n".into();
         if got == want {
-            Println!("[ 7] left-align padding=2       PASS");
+            fmt::Println!("[ 7] left-align padding=2       PASS");
         } else {
-            Println!("[ 7] left-align padding=2       FAIL");
+            fmt::Println!("[ 7] left-align padding=2       FAIL");
             failed += 1;
         }
     }
@@ -188,9 +189,9 @@ fn main() {
         // Column 2: last (not aligned).
         let want = string("a  c\nbb dd\n");
         if got == want {
-            Println!("[ 8] DiscardEmptyColumns        PASS");
+            fmt::Println!("[ 8] DiscardEmptyColumns        PASS");
         } else {
-            Println!("[ 8] DiscardEmptyColumns        FAIL");
+            fmt::Println!("[ 8] DiscardEmptyColumns        FAIL");
             failed += 1;
         }
     }
@@ -203,9 +204,9 @@ fn main() {
         // Output uses spaces for padding so width-by-rune controls layout.
         let want = string("é  x\néé yy\n");
         if got == want {
-            Println!("[ 9] UTF-8 rune-width padding   PASS");
+            fmt::Println!("[ 9] UTF-8 rune-width padding   PASS");
         } else {
-            Println!("[ 9] UTF-8 rune-width padding   FAIL");
+            fmt::Println!("[ 9] UTF-8 rune-width padding   FAIL");
             failed += 1;
         }
     }
@@ -221,18 +222,18 @@ fn main() {
         // Section 2: "y\tzzzz\n" → col 0 width=1+padding=2 → "y.zzzz\n".
         let want: goish::string = "aaa.x\n\ny.zzzz\n".into();
         if got == want {
-            Println!("[10] formfeed forces re-align   PASS");
+            fmt::Println!("[10] formfeed forces re-align   PASS");
         } else {
-            Println!("[10] formfeed forces re-align   FAIL");
+            fmt::Println!("[10] formfeed forces re-align   FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

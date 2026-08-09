@@ -7,8 +7,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::time;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -25,9 +26,9 @@ fn main() {
     {
         let r = t.Truncate(time::Second);
         if r.UnixNano() == sec_in.wrapping_mul(1_000_000_000) {
-            Println!("[ 1] Truncate(Second)            PASS");
+            fmt::Println!("[ 1] Truncate(Second)            PASS");
         } else {
-            Println!("[ 1] Truncate(Second)            FAIL got={}", r.UnixNano());
+            fmt::Println!("[ 1] Truncate(Second)            FAIL got={}", r.UnixNano());
             failed += 1;
         }
     }
@@ -37,9 +38,9 @@ fn main() {
         let r = t.Truncate(time::Minute);
         let ns = r.UnixNano();
         if ns % (60 * 1_000_000_000) == 0 && ns <= t.UnixNano() {
-            Println!("[ 2] Truncate(Minute)            PASS");
+            fmt::Println!("[ 2] Truncate(Minute)            PASS");
         } else {
-            Println!("[ 2] Truncate(Minute)            FAIL");
+            fmt::Println!("[ 2] Truncate(Minute)            FAIL");
             failed += 1;
         }
     }
@@ -48,9 +49,9 @@ fn main() {
     {
         let r = t.Round(time::Second);
         if r.UnixNano() == (sec_in + 1).wrapping_mul(1_000_000_000) {
-            Println!("[ 3] Round up                    PASS");
+            fmt::Println!("[ 3] Round up                    PASS");
         } else {
-            Println!("[ 3] Round up                    FAIL got={}", r.UnixNano());
+            fmt::Println!("[ 3] Round up                    FAIL got={}", r.UnixNano());
             failed += 1;
         }
     }
@@ -60,9 +61,9 @@ fn main() {
         let t2 = time::Unix(sec_in, 200_000_000);
         let r = t2.Round(time::Second);
         if r.UnixNano() == sec_in.wrapping_mul(1_000_000_000) {
-            Println!("[ 4] Round down                  PASS");
+            fmt::Println!("[ 4] Round down                  PASS");
         } else {
-            Println!("[ 4] Round down                  FAIL got={}", r.UnixNano());
+            fmt::Println!("[ 4] Round down                  FAIL got={}", r.UnixNano());
             failed += 1;
         }
     }
@@ -72,9 +73,9 @@ fn main() {
         let t3 = time::Unix(sec_in, 500_000_000);
         let r = t3.Round(time::Second);
         if r.UnixNano() == (sec_in + 1).wrapping_mul(1_000_000_000) {
-            Println!("[ 5] Halfway rounds up           PASS");
+            fmt::Println!("[ 5] Halfway rounds up           PASS");
         } else {
-            Println!("[ 5] Halfway rounds up           FAIL got={}", r.UnixNano());
+            fmt::Println!("[ 5] Halfway rounds up           FAIL got={}", r.UnixNano());
             failed += 1;
         }
     }
@@ -83,9 +84,9 @@ fn main() {
     {
         let r = t.Truncate(time::Duration(0));
         if r.UnixNano() == t.UnixNano() {
-            Println!("[ 6] Truncate(0) is noop         PASS");
+            fmt::Println!("[ 6] Truncate(0) is noop         PASS");
         } else {
-            Println!("[ 6] Truncate(0) is noop         FAIL");
+            fmt::Println!("[ 6] Truncate(0) is noop         FAIL");
             failed += 1;
         }
     }
@@ -94,9 +95,9 @@ fn main() {
     {
         let r = t.Round(time::Duration(-1));
         if r.UnixNano() == t.UnixNano() {
-            Println!("[ 7] Round(-1) is noop           PASS");
+            fmt::Println!("[ 7] Round(-1) is noop           PASS");
         } else {
-            Println!("[ 7] Round(-1) is noop           FAIL");
+            fmt::Println!("[ 7] Round(-1) is noop           FAIL");
             failed += 1;
         }
     }
@@ -106,9 +107,9 @@ fn main() {
         let u = t.UTC();
         let l = t.Local();
         if u.UnixNano() == t.UnixNano() && l.UnixNano() == t.UnixNano() {
-            Println!("[ 8] UTC/Local identity          PASS");
+            fmt::Println!("[ 8] UTC/Local identity          PASS");
         } else {
-            Println!("[ 8] UTC/Local identity          FAIL");
+            fmt::Println!("[ 8] UTC/Local identity          FAIL");
             failed += 1;
         }
     }
@@ -120,9 +121,9 @@ fn main() {
         let s = goish::string::from_bytes(&appended);
         // RFC3339 layout produces the date-time including 'Z'.
         if goish::strings::HasPrefix(s.clone(), string("ts=")) && s.Len() > 3 {
-            Println!("[ 9] AppendFormat prefix       PASS");
+            fmt::Println!("[ 9] AppendFormat prefix       PASS");
         } else {
-            Println!("[ 9] AppendFormat prefix       FAIL got={}", s);
+            fmt::Println!("[ 9] AppendFormat prefix       FAIL got={}", s);
             failed += 1;
         }
     }
@@ -131,9 +132,9 @@ fn main() {
     {
         let (name, off) = t.Zone();
         if name == "UTC" && off == 0 {
-            Println!("[10] Zone UTC                  PASS");
+            fmt::Println!("[10] Zone UTC                  PASS");
         } else {
-            Println!("[10] Zone UTC                  FAIL");
+            fmt::Println!("[10] Zone UTC                  FAIL");
             failed += 1;
         }
     }
@@ -141,9 +142,9 @@ fn main() {
     // 11. IsDST() always returns false.
     {
         if !t.IsDST() {
-            Println!("[11] IsDST=false               PASS");
+            fmt::Println!("[11] IsDST=false               PASS");
         } else {
-            Println!("[11] IsDST=false               FAIL");
+            fmt::Println!("[11] IsDST=false               FAIL");
             failed += 1;
         }
     }
@@ -153,25 +154,25 @@ fn main() {
         let t_anchor = time::Unix(1_700_000_000, 0);
         let (data, err) = t_anchor.MarshalText();
         if !err.IsNil() {
-            Println!("[12] MarshalText/Unmarshal     FAIL marshal");
+            fmt::Println!("[12] MarshalText/Unmarshal     FAIL marshal");
             failed += 1;
         } else {
             let mut got = time::Unix(0, 0);
             let uerr = got.UnmarshalText(data);
             if uerr.IsNil() && got.Unix() == 1_700_000_000 {
-                Println!("[12] MarshalText/Unmarshal     PASS");
+                fmt::Println!("[12] MarshalText/Unmarshal     PASS");
             } else {
-                Println!("[12] MarshalText/Unmarshal     FAIL unix={}", got.Unix());
+                fmt::Println!("[12] MarshalText/Unmarshal     FAIL unix={}", got.Unix());
                 failed += 1;
             }
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 12", failed);
+        fmt::Println!("FAIL {} of 12", failed);
         syscall::Exit(1);
     }
 }

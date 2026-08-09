@@ -22,11 +22,12 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::fmt;
 use goish::io::{Closer, Reader, Writer};
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{bytes, go, string, syscall, Println};
+use goish::{bytes, go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -51,9 +52,9 @@ fn main() {
         // Expected: "6\r\nhello \r\n5\r\nworld\r\n0\r\n"
         let expected = b"6\r\nhello \r\n5\r\nworld\r\n0\r\n";
         if got.as_slice() == expected {
-            Println!("[ 1] writer wire format        PASS");
+            fmt::Println!("[ 1] writer wire format        PASS");
         } else {
-            Println!("[ 1] writer wire format        FAIL got len={} expected len={}", got.len(), expected.len());
+            fmt::Println!("[ 1] writer wire format        FAIL got len={} expected len={}", got.len(), expected.len());
             failed += 1;
         }
     }
@@ -79,9 +80,9 @@ fn main() {
             }
         }
         if out.as_slice() == b"hello world" {
-            Println!("[ 2] reader decode             PASS");
+            fmt::Println!("[ 2] reader decode             PASS");
         } else {
-            Println!("[ 2] reader decode             FAIL got {} bytes", out.len());
+            fmt::Println!("[ 2] reader decode             FAIL got {} bytes", out.len());
             failed += 1;
         }
     }
@@ -112,7 +113,7 @@ fn main() {
         srv.Handler = mux_arc;
         let (ln, err) = net::Listen(string("tcp"), string("127.0.0.1:0"));
         if !err.IsNil() {
-            Println!("[ 3] Listen FAIL");
+            fmt::Println!("[ 3] Listen FAIL");
             failed += 1;
         } else {
             let addr = ln.Addr().String();
@@ -125,7 +126,7 @@ fn main() {
 
             let (mut conn, derr) = net::Dial(string("tcp"), addr);
             if !derr.IsNil() {
-                Println!("[ 3] Dial FAIL");
+                fmt::Println!("[ 3] Dial FAIL");
                 failed += 1;
             } else {
                 let _ = conn.Write(bytes(
@@ -148,7 +149,7 @@ fn main() {
                 let split = find_marker(&whole, b"\r\n\r\n");
                 match split {
                     None => {
-                        Println!("[ 3] streaming response        FAIL no head/body split");
+                        fmt::Println!("[ 3] streaming response        FAIL no head/body split");
                         failed += 1;
                     }
                     Some(i) => {
@@ -158,9 +159,9 @@ fn main() {
                         // Decode the chunked body off the wire.
                         let decoded = decode_chunked(body_wire);
                         if has_te && decoded.as_slice() == b"AAABBBCCC" {
-                            Println!("[ 3] streaming response        PASS");
+                            fmt::Println!("[ 3] streaming response        PASS");
                         } else {
-                            Println!(
+                            fmt::Println!(
                                 "[ 3] streaming response        FAIL has_te={} decoded.len={}",
                                 has_te, decoded.len()
                             );
@@ -207,7 +208,7 @@ fn main() {
         srv.Handler = mux_arc;
         let (ln, err) = net::Listen(string("tcp"), string("127.0.0.1:0"));
         if !err.IsNil() {
-            Println!("[ 4] Listen FAIL");
+            fmt::Println!("[ 4] Listen FAIL");
             failed += 1;
         } else {
             let addr = ln.Addr().String();
@@ -220,7 +221,7 @@ fn main() {
 
             let (mut conn, derr) = net::Dial(string("tcp"), addr);
             if !derr.IsNil() {
-                Println!("[ 4] Dial FAIL");
+                fmt::Println!("[ 4] Dial FAIL");
                 failed += 1;
             } else {
                 // POST with chunked body: "hello " then "world!".
@@ -246,9 +247,9 @@ fn main() {
                 let cl = result_cl.load(Ordering::SeqCst);
                 let m = result_match.load(Ordering::SeqCst);
                 if body_len == 12 && cl == -1 && m == 1 {
-                    Println!("[ 4] chunked request upload    PASS");
+                    fmt::Println!("[ 4] chunked request upload    PASS");
                 } else {
-                    Println!(
+                    fmt::Println!(
                         "[ 4] chunked request upload    FAIL body_len={} cl={} match={}",
                         body_len, cl, m
                     );
@@ -261,10 +262,10 @@ fn main() {
     }
 
     if failed == 0 {
-        Println!("ok 4/4");
+        fmt::Println!("ok 4/4");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 4", failed);
+        fmt::Println!("FAIL {} of 4", failed);
         syscall::Exit(1);
     }
 }

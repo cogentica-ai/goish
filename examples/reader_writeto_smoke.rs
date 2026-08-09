@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::io;
 use goish::strings;
-use goish::{make, string, syscall, Println};
+use goish::{make, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -23,9 +24,9 @@ fn main() {
         let mut dst = bytes::NewBuffer(make!([]goish::byte, 0));
         let (n, err) = r.WriteTo(&mut dst);
         if err.IsNil() && n == 6 && dst.String() == "abcdef" {
-            Println!("[ 1] bytes.Reader.WriteTo      PASS");
+            fmt::Println!("[ 1] bytes.Reader.WriteTo      PASS");
         } else {
-            Println!("[ 1] bytes.Reader.WriteTo      FAIL n={} dst={}", n, dst.String());
+            fmt::Println!("[ 1] bytes.Reader.WriteTo      FAIL n={} dst={}", n, dst.String());
             failed += 1;
         }
     }
@@ -36,9 +37,9 @@ fn main() {
         let mut dst = bytes::NewBuffer(make!([]goish::byte, 0));
         let _ = r.WriteTo(&mut dst);
         if r.Len() == 0 {
-            Println!("[ 2] bytes.Reader exhausted    PASS");
+            fmt::Println!("[ 2] bytes.Reader exhausted    PASS");
         } else {
-            Println!("[ 2] bytes.Reader exhausted    FAIL len={}", r.Len());
+            fmt::Println!("[ 2] bytes.Reader exhausted    FAIL len={}", r.Len());
             failed += 1;
         }
     }
@@ -51,9 +52,9 @@ fn main() {
         let mut dst2 = bytes::NewBuffer(make!([]goish::byte, 0));
         let (n, err) = r.WriteTo(&mut dst2);
         if err.IsNil() && n == 0 && dst2.Len() == 0 {
-            Println!("[ 3] WriteTo on drained        PASS");
+            fmt::Println!("[ 3] WriteTo on drained        PASS");
         } else {
-            Println!("[ 3] WriteTo on drained        FAIL");
+            fmt::Println!("[ 3] WriteTo on drained        FAIL");
             failed += 1;
         }
     }
@@ -64,9 +65,9 @@ fn main() {
         let mut dst = bytes::NewBuffer(make!([]goish::byte, 0));
         let (n, err) = r.WriteTo(&mut dst);
         if err.IsNil() && n == 5 && dst.String() == "hello" {
-            Println!("[ 4] strings.Reader.WriteTo    PASS");
+            fmt::Println!("[ 4] strings.Reader.WriteTo    PASS");
         } else {
-            Println!("[ 4] strings.Reader.WriteTo    FAIL n={}", n);
+            fmt::Println!("[ 4] strings.Reader.WriteTo    FAIL n={}", n);
             failed += 1;
         }
     }
@@ -77,9 +78,9 @@ fn main() {
         let mut dst = bytes::NewBuffer(make!([]goish::byte, 0));
         let (n, err) = io::WriterTo::WriteTo(&mut r, &mut dst);
         if err.IsNil() && n == 5 && dst.String() == "trait" {
-            Println!("[ 5] io.WriterTo trait         PASS");
+            fmt::Println!("[ 5] io.WriterTo trait         PASS");
         } else {
-            Println!("[ 5] io.WriterTo trait         FAIL");
+            fmt::Println!("[ 5] io.WriterTo trait         FAIL");
             failed += 1;
         }
     }
@@ -92,18 +93,18 @@ fn main() {
         let mut dst = bytes::NewBuffer(make!([]goish::byte, 0));
         let (n, _) = r.WriteTo(&mut dst);
         if n == 7 && dst.String() == "3456789" {
-            Println!("[ 6] mid-stream WriteTo        PASS");
+            fmt::Println!("[ 6] mid-stream WriteTo        PASS");
         } else {
-            Println!("[ 6] mid-stream WriteTo        FAIL got={}", dst.String());
+            fmt::Println!("[ 6] mid-stream WriteTo        FAIL got={}", dst.String());
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 6", failed);
+        fmt::Println!("FAIL {} of 6", failed);
         syscall::Exit(1);
     }
 }

@@ -11,11 +11,12 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert::{bytes as to_bytes, string as to_string};
 use goish::encoding::base32;
 use goish::goslice::slice;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn raw(s: &slice<byte>) -> &[byte] {
     s
@@ -49,9 +50,9 @@ fn main() {
     {
         let s = std.EncodeToString(to_bytes(""));
         if str_eq(&s, "") {
-            Println!("[ 1] EncodeToString empty      PASS");
+            fmt::Println!("[ 1] EncodeToString empty      PASS");
         } else {
-            Println!("[ 1] EncodeToString empty      FAIL");
+            fmt::Println!("[ 1] EncodeToString empty      FAIL");
             failed += 1;
         }
     }
@@ -60,9 +61,9 @@ fn main() {
     {
         let s = std.EncodeToString(to_bytes("f"));
         if str_eq(&s, "MY======") {
-            Println!("[ 2] EncodeToString \"f\"       PASS");
+            fmt::Println!("[ 2] EncodeToString \"f\"       PASS");
         } else {
-            Println!("[ 2] EncodeToString \"f\"       FAIL");
+            fmt::Println!("[ 2] EncodeToString \"f\"       FAIL");
             failed += 1;
         }
     }
@@ -71,9 +72,9 @@ fn main() {
     {
         let s = std.EncodeToString(to_bytes("fo"));
         if str_eq(&s, "MZXQ====") {
-            Println!("[ 3] EncodeToString \"fo\"      PASS");
+            fmt::Println!("[ 3] EncodeToString \"fo\"      PASS");
         } else {
-            Println!("[ 3] EncodeToString \"fo\"      FAIL");
+            fmt::Println!("[ 3] EncodeToString \"fo\"      FAIL");
             failed += 1;
         }
     }
@@ -82,9 +83,9 @@ fn main() {
     {
         let s = std.EncodeToString(to_bytes("foo"));
         if str_eq(&s, "MZXW6===") {
-            Println!("[ 4] EncodeToString \"foo\"     PASS");
+            fmt::Println!("[ 4] EncodeToString \"foo\"     PASS");
         } else {
-            Println!("[ 4] EncodeToString \"foo\"     FAIL");
+            fmt::Println!("[ 4] EncodeToString \"foo\"     FAIL");
             failed += 1;
         }
     }
@@ -93,9 +94,9 @@ fn main() {
     {
         let s = std.EncodeToString(to_bytes("foob"));
         if str_eq(&s, "MZXW6YQ=") {
-            Println!("[ 5] EncodeToString \"foob\"    PASS");
+            fmt::Println!("[ 5] EncodeToString \"foob\"    PASS");
         } else {
-            Println!("[ 5] EncodeToString \"foob\"    FAIL");
+            fmt::Println!("[ 5] EncodeToString \"foob\"    FAIL");
             failed += 1;
         }
     }
@@ -104,9 +105,9 @@ fn main() {
     {
         let s = std.EncodeToString(to_bytes("fooba"));
         if str_eq(&s, "MZXW6YTB") {
-            Println!("[ 6] EncodeToString \"fooba\"   PASS");
+            fmt::Println!("[ 6] EncodeToString \"fooba\"   PASS");
         } else {
-            Println!("[ 6] EncodeToString \"fooba\"   FAIL");
+            fmt::Println!("[ 6] EncodeToString \"fooba\"   FAIL");
             failed += 1;
         }
     }
@@ -115,9 +116,9 @@ fn main() {
     {
         let s = std.EncodeToString(to_bytes("foobar"));
         if str_eq(&s, "MZXW6YTBOI======") {
-            Println!("[ 7] EncodeToString \"foobar\"  PASS");
+            fmt::Println!("[ 7] EncodeToString \"foobar\"  PASS");
         } else {
-            Println!("[ 7] EncodeToString \"foobar\"  FAIL");
+            fmt::Println!("[ 7] EncodeToString \"foobar\"  FAIL");
             failed += 1;
         }
     }
@@ -126,9 +127,9 @@ fn main() {
     {
         let (out, err) = std.DecodeString(to_string("MZXW6YTBOI======"));
         if err.IsNil() && raw(&out) == b"foobar" {
-            Println!("[ 8] DecodeString round-trip   PASS");
+            fmt::Println!("[ 8] DecodeString round-trip   PASS");
         } else {
-            Println!("[ 8] DecodeString round-trip   FAIL");
+            fmt::Println!("[ 8] DecodeString round-trip   FAIL");
             failed += 1;
         }
     }
@@ -137,9 +138,9 @@ fn main() {
     {
         let (out, err) = std.DecodeString(to_string(""));
         if err.IsNil() && out.Len() == 0 {
-            Println!("[ 9] DecodeString empty        PASS");
+            fmt::Println!("[ 9] DecodeString empty        PASS");
         } else {
-            Println!("[ 9] DecodeString empty        FAIL");
+            fmt::Println!("[ 9] DecodeString empty        FAIL");
             failed += 1;
         }
     }
@@ -148,9 +149,9 @@ fn main() {
     {
         let (out, err) = std.DecodeString(to_string("MY======"));
         if err.IsNil() && raw(&out) == b"f" {
-            Println!("[10] DecodeString \"f\"         PASS");
+            fmt::Println!("[10] DecodeString \"f\"         PASS");
         } else {
-            Println!("[10] DecodeString \"f\"         FAIL");
+            fmt::Println!("[10] DecodeString \"f\"         FAIL");
             failed += 1;
         }
     }
@@ -159,9 +160,9 @@ fn main() {
     {
         let (_out, err) = std.DecodeString(to_string("M!XW6==="));
         if !err.IsNil() {
-            Println!("[11] Decode invalid -> err     PASS");
+            fmt::Println!("[11] Decode invalid -> err     PASS");
         } else {
-            Println!("[11] Decode invalid -> err     FAIL");
+            fmt::Println!("[11] Decode invalid -> err     FAIL");
             failed += 1;
         }
     }
@@ -173,9 +174,9 @@ fn main() {
         if n == 16 && m == 10 {
             // DecodedLen for padded 16 bytes = 16/8*5 = 10 (max). The
             // actual decoded payload size depends on padding count.
-            Println!("[12] EncodedLen/DecodedLen     PASS");
+            fmt::Println!("[12] EncodedLen/DecodedLen     PASS");
         } else {
-            Println!("[12] EncodedLen/DecodedLen     FAIL");
+            fmt::Println!("[12] EncodedLen/DecodedLen     FAIL");
             failed += 1;
         }
     }
@@ -187,13 +188,13 @@ fn main() {
             // Decode it back.
             let (out, err) = hex.DecodeString(to_string("CPNMUOJ1E8======"));
             if err.IsNil() && raw(&out) == b"foobar" {
-                Println!("[13] HexEncoding round-trip    PASS");
+                fmt::Println!("[13] HexEncoding round-trip    PASS");
             } else {
-                Println!("[13] HexEncoding round-trip    FAIL");
+                fmt::Println!("[13] HexEncoding round-trip    FAIL");
                 failed += 1;
             }
         } else {
-            Println!("[13] HexEncoding round-trip    FAIL");
+            fmt::Println!("[13] HexEncoding round-trip    FAIL");
             failed += 1;
         }
     }
@@ -204,9 +205,9 @@ fn main() {
         let out = std.AppendEncode(dst, to_bytes("f"));
         let r = raw(&out);
         if r.starts_with(b"PRE:") && &r[4..] == b"MY======" {
-            Println!("[14] AppendEncode prefix       PASS");
+            fmt::Println!("[14] AppendEncode prefix       PASS");
         } else {
-            Println!("[14] AppendEncode prefix       FAIL");
+            fmt::Println!("[14] AppendEncode prefix       FAIL");
             failed += 1;
         }
     }
@@ -217,9 +218,9 @@ fn main() {
         let (out, err) = std.AppendDecode(dst, to_bytes("MZXW6YTBOI======"));
         let r = raw(&out);
         if err.IsNil() && r.starts_with(b"PRE:") && &r[4..] == b"foobar" {
-            Println!("[15] AppendDecode prefix       PASS");
+            fmt::Println!("[15] AppendDecode prefix       PASS");
         } else {
-            Println!("[15] AppendDecode prefix       FAIL");
+            fmt::Println!("[15] AppendDecode prefix       FAIL");
             failed += 1;
         }
     }
@@ -228,18 +229,18 @@ fn main() {
     {
         let (out, err) = std.DecodeString(to_string("MZXW6\nYTBOI=\r\n====="));
         if err.IsNil() && raw(&out) == b"foobar" {
-            Println!("[16] Decode strip newlines     PASS");
+            fmt::Println!("[16] Decode strip newlines     PASS");
         } else {
-            Println!("[16] Decode strip newlines     FAIL");
+            fmt::Println!("[16] Decode strip newlines     FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 16/16");
+        fmt::Println!("ok 16/16");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 16");
+        fmt::Println!("FAIL", failed, "of 16");
         syscall::Exit(1);
     }
 }

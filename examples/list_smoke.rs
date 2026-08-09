@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::container::list;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 // Walk a list front→back, collecting Values (T = int).
 fn collect(l: &list::List<int>) -> alloc::vec::Vec<int> {
@@ -42,9 +43,9 @@ fn main() {
     {
         let l: list::List<int> = list::New();
         if l.Len() == 0 && l.Front().is_none() && l.Back().is_none() {
-            Println!("[ 1] New empty                PASS");
+            fmt::Println!("[ 1] New empty                PASS");
         } else {
-            Println!("[ 1] New empty                FAIL");
+            fmt::Println!("[ 1] New empty                FAIL");
             failed += 1;
         }
     }
@@ -57,9 +58,9 @@ fn main() {
         l.PushBack(3);
         let want: alloc::vec::Vec<int> = alloc::vec![1, 2, 3];
         if collect(&l) == want && l.Len() == 3 {
-            Println!("[ 2] PushBack                 PASS");
+            fmt::Println!("[ 2] PushBack                 PASS");
         } else {
-            Println!("[ 2] PushBack                 FAIL");
+            fmt::Println!("[ 2] PushBack                 FAIL");
             failed += 1;
         }
     }
@@ -72,9 +73,9 @@ fn main() {
         l.PushFront(3);
         let want: alloc::vec::Vec<int> = alloc::vec![3, 2, 1];
         if collect(&l) == want {
-            Println!("[ 3] PushFront                PASS");
+            fmt::Println!("[ 3] PushFront                PASS");
         } else {
-            Println!("[ 3] PushFront                FAIL");
+            fmt::Println!("[ 3] PushFront                FAIL");
             failed += 1;
         }
     }
@@ -90,9 +91,9 @@ fn main() {
         let want_fwd: alloc::vec::Vec<int> = alloc::vec![1, 2, 3, 4, 5];
         let want_rev: alloc::vec::Vec<int> = alloc::vec![5, 4, 3, 2, 1];
         if fwd == want_fwd && rev == want_rev {
-            Println!("[ 4] Front/Back/Next/Prev     PASS");
+            fmt::Println!("[ 4] Front/Back/Next/Prev     PASS");
         } else {
-            Println!("[ 4] Front/Back/Next/Prev     FAIL");
+            fmt::Println!("[ 4] Front/Back/Next/Prev     FAIL");
             failed += 1;
         }
     }
@@ -106,9 +107,9 @@ fn main() {
         let v = l.Remove(&m);
         let want: alloc::vec::Vec<int> = alloc::vec![10, 30];
         if v == 20 && collect(&l) == want && l.Len() == 2 {
-            Println!("[ 5] Remove middle            PASS");
+            fmt::Println!("[ 5] Remove middle            PASS");
         } else {
-            Println!("[ 5] Remove middle            FAIL v=", v);
+            fmt::Println!("[ 5] Remove middle            FAIL v=", v);
             failed += 1;
         }
     }
@@ -124,9 +125,9 @@ fn main() {
         let _ = l.InsertBefore(0, &a).unwrap();
         let want: alloc::vec::Vec<int> = alloc::vec![0, 1, 2, 3];
         if collect(&l) == want {
-            Println!("[ 6] InsertBefore/After       PASS");
+            fmt::Println!("[ 6] InsertBefore/After       PASS");
         } else {
-            Println!("[ 6] InsertBefore/After       FAIL");
+            fmt::Println!("[ 6] InsertBefore/After       FAIL");
             failed += 1;
         }
     }
@@ -144,9 +145,9 @@ fn main() {
         let want_front: alloc::vec::Vec<int> = alloc::vec![2, 1, 3];
         let want_back: alloc::vec::Vec<int> = alloc::vec![1, 3, 2];
         if after_front == want_front && after_back == want_back {
-            Println!("[ 7] MoveToFront/Back         PASS");
+            fmt::Println!("[ 7] MoveToFront/Back         PASS");
         } else {
-            Println!("[ 7] MoveToFront/Back         FAIL");
+            fmt::Println!("[ 7] MoveToFront/Back         FAIL");
             failed += 1;
         }
     }
@@ -166,9 +167,9 @@ fn main() {
         let want1: alloc::vec::Vec<int> = alloc::vec![2, 1, 3];
         let want2: alloc::vec::Vec<int> = alloc::vec![1, 3, 2];
         if s1 == want1 && s2 == want2 {
-            Println!("[ 8] MoveBefore/After         PASS");
+            fmt::Println!("[ 8] MoveBefore/After         PASS");
         } else {
-            Println!("[ 8] MoveBefore/After         FAIL");
+            fmt::Println!("[ 8] MoveBefore/After         FAIL");
             failed += 1;
         }
     }
@@ -184,9 +185,9 @@ fn main() {
         l1.PushBackList(&l2);
         let want: alloc::vec::Vec<int> = alloc::vec![1, 2, 3, 4];
         if collect(&l1) == want && l2.Len() == 2 && collect(&l2) == alloc::vec![3, 4] {
-            Println!("[ 9] PushBackList             PASS");
+            fmt::Println!("[ 9] PushBackList             PASS");
         } else {
-            Println!("[ 9] PushBackList             FAIL");
+            fmt::Println!("[ 9] PushBackList             FAIL");
             failed += 1;
         }
     }
@@ -202,9 +203,9 @@ fn main() {
         l1.PushFrontList(&l2);
         let want: alloc::vec::Vec<int> = alloc::vec![1, 2, 3, 4];
         if collect(&l1) == want {
-            Println!("[10] PushFrontList            PASS");
+            fmt::Println!("[10] PushFrontList            PASS");
         } else {
-            Println!("[10] PushFrontList            FAIL");
+            fmt::Println!("[10] PushFrontList            FAIL");
             failed += 1;
         }
     }
@@ -216,9 +217,9 @@ fn main() {
         l.PushBack(2);
         l.Init();
         if l.Len() == 0 && l.Front().is_none() && l.Back().is_none() {
-            Println!("[11] Init clears              PASS");
+            fmt::Println!("[11] Init clears              PASS");
         } else {
-            Println!("[11] Init clears              FAIL");
+            fmt::Println!("[11] Init clears              FAIL");
             failed += 1;
         }
     }
@@ -232,9 +233,9 @@ fn main() {
         // Both handles see 42; the list's Front() also reflects it.
         let f = l.Front().unwrap();
         if e.Value() == 42 && e2.Value() == 42 && f.Value() == 42 {
-            Println!("[12] SetValue shared          PASS");
+            fmt::Println!("[12] SetValue shared          PASS");
         } else {
-            Println!("[12] SetValue shared          FAIL");
+            fmt::Println!("[12] SetValue shared          FAIL");
             failed += 1;
         }
     }
@@ -246,9 +247,9 @@ fn main() {
         let v = l.Remove(&e);
         // Handle persists; Value() returns the captured cell.
         if v == 99 && e.Value() == 99 && l.Len() == 0 {
-            Println!("[13] Remove preserves Value   PASS");
+            fmt::Println!("[13] Remove preserves Value   PASS");
         } else {
-            Println!("[13] Remove preserves Value   FAIL v=", v);
+            fmt::Println!("[13] Remove preserves Value   FAIL v=", v);
             failed += 1;
         }
     }
@@ -264,9 +265,9 @@ fn main() {
         // l2.InsertBefore(99, &e1) — e1 is not in l2, must return None.
         let opt = l2.InsertBefore(99, &e1);
         if l1.Len() == 1 && l2.Len() == 1 && opt.is_none() {
-            Println!("[14] Cross-list rejected      PASS");
+            fmt::Println!("[14] Cross-list rejected      PASS");
         } else {
-            Println!("[14] Cross-list rejected      FAIL");
+            fmt::Println!("[14] Cross-list rejected      FAIL");
             failed += 1;
         }
     }
@@ -286,18 +287,18 @@ fn main() {
         }
         let want: alloc::vec::Vec<int> = (0..50).filter(|x| x % 2 == 0).collect();
         if collect(&l) == want && l.Len() == 25 {
-            Println!("[15] Stress push/remove       PASS");
+            fmt::Println!("[15] Stress push/remove       PASS");
         } else {
-            Println!("[15] Stress push/remove       FAIL");
+            fmt::Println!("[15] Stress push/remove       FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 15/15");
+        fmt::Println!("ok 15/15");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 15");
+        fmt::Println!("FAIL", failed, "of 15");
         syscall::Exit(1);
     }
 }

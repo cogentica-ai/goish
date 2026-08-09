@@ -11,10 +11,11 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{bytes, go, string, syscall, Println};
+use goish::{bytes, go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -34,9 +35,9 @@ fn main() {
     for &(code, want) in &cases {
         let got = http::StatusText(code);
         if got == want {
-            Println!("[ok] StatusText({}) = {}", code, got);
+            fmt::Println!("[ok] StatusText({}) = {}", code, got);
         } else {
-            Println!("[FAIL] StatusText({}) want={:?} got={}", code, want, got);
+            fmt::Println!("[FAIL] StatusText({}) want={:?} got={}", code, want, got);
             failed += 1;
         }
     }
@@ -67,23 +68,23 @@ fn main() {
         // Expected: "418 I'm a teapot"
         let s = resp.Status.clone();
         if parts.Len() >= 2 && goish::strings::Contains(s, string("teapot")) {
-            Println!("[ok] wire 418 → I'm a teapot");
+            fmt::Println!("[ok] wire 418 → I'm a teapot");
         } else {
-            Println!("[FAIL] wire 418 — Status={}", resp.Status);
+            fmt::Println!("[FAIL] wire 418 — Status={}", resp.Status);
             failed += 1;
         }
     } else {
-        Println!("[FAIL] wire 418 status={}", resp.StatusCode);
+        fmt::Println!("[FAIL] wire 418 status={}", resp.StatusCode);
         failed += 1;
     }
 
     let _ = srv_arc.Shutdown(time::Second);
 
     if failed == 0 {
-        Println!("ok status smoke");
+        fmt::Println!("ok status smoke");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {}", failed);
+        fmt::Println!("FAIL {}", failed);
         syscall::Exit(1);
     }
 }

@@ -24,13 +24,13 @@ extern crate goish;
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
+use goish::fmt;
 use goish::errors::nil;
 use goish::gostring::string;
 use goish::runtime::sched::schedule;
 use goish::sync::singleflight::Group;
 use goish::sync::WaitGroup;
-use goish::{go, syscall, time, Println};
-
+use goish::{go, syscall, time};
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
@@ -49,10 +49,10 @@ fn main() {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
-            Println!("ok 8/8");
+            fmt::Println!("ok 8/8");
             syscall::Exit(0);
         } else {
-            Println!("FAIL", f as i64, "of 8");
+            fmt::Println!("FAIL", f as i64, "of 8");
             syscall::Exit(1);
         }
     });

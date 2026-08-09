@@ -15,11 +15,12 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::crypto::tls;
 use goish::crypto::x509::NewCertPool;
 use goish::goslice::slice;
 use goish::types::byte;
-use goish::{convert, syscall, Println};
+use goish::{convert, syscall};
 
 /// A minimal but structurally-valid PEM CERTIFICATE block.
 ///
@@ -40,14 +41,14 @@ fn test_certpool_append_pem() -> bool {
     let pem_slice: slice<byte> = convert::bytes(TEST_CERT_PEM);
     let added = pool.AppendCertsFromPEM(pem_slice);
     if !added {
-        Println!("[1] AppendCertsFromPEM returned false — FAIL");
+        fmt::Println!("[1] AppendCertsFromPEM returned false — FAIL");
         return false;
     }
     if pool.Len() != 1 {
-        Println!("[1] pool.Len() =", pool.Len(), " want 1 — FAIL");
+        fmt::Println!("[1] pool.Len() =", pool.Len(), " want 1 — FAIL");
         return false;
     }
-    Println!("[1] test_certpool_append_pem                  PASS");
+    fmt::Println!("[1] test_certpool_append_pem                  PASS");
     true
 }
 
@@ -58,17 +59,17 @@ fn test_certpool_subjects_returns_der() -> bool {
 
     let subjects = pool.Subjects();
     if subjects.Len() != 1 {
-        Println!("[2] Subjects().Len() =", subjects.Len(), " want 1 — FAIL");
+        fmt::Println!("[2] Subjects().Len() =", subjects.Len(), " want 1 — FAIL");
         return false;
     }
     // The first element must contain the DER bytes we loaded.
     let entry: &slice<byte> = &subjects[0];
     let raw: &[byte] = entry.as_ref();
     if raw != TEST_CERT_DER {
-        Println!("[2] Subjects()[0] bytes mismatch — FAIL");
+        fmt::Println!("[2] Subjects()[0] bytes mismatch — FAIL");
         return false;
     }
-    Println!("[2] test_certpool_subjects_returns_der        PASS");
+    fmt::Println!("[2] test_certpool_subjects_returns_der        PASS");
     true
 }
 
@@ -88,17 +89,17 @@ fn test_tls_config_has_rootcas_field() -> bool {
     // should still have Len() == 1.
     match &cfg.RootCAs {
         None => {
-            Println!("[3] RootCAs is None — FAIL");
+            fmt::Println!("[3] RootCAs is None — FAIL");
             return false;
         }
         Some(p) => {
             if p.Len() != 1 {
-                Println!("[3] RootCAs pool.Len() =", p.Len(), " want 1 — FAIL");
+                fmt::Println!("[3] RootCAs pool.Len() =", p.Len(), " want 1 — FAIL");
                 return false;
             }
         }
     }
-    Println!("[3] test_tls_config_has_rootcas_field         PASS");
+    fmt::Println!("[3] test_tls_config_has_rootcas_field         PASS");
     true
 }
 
@@ -123,10 +124,10 @@ fn main() {
     }
 
     if passed == total {
-        Println!("ok", passed, "/", total);
+        fmt::Println!("ok", passed, "/", total);
         syscall::Exit(0);
     } else {
-        Println!("FAIL", passed, "of", total, "passed");
+        fmt::Println!("FAIL", passed, "of", total, "passed");
         syscall::Exit(1);
     }
 }

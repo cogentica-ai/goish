@@ -19,10 +19,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::crypto::cipher;
 use goish::crypto::cipher::{Block, Stream};
 use goish::types::{byte, int};
-use goish::{slice, syscall, Println};
+use goish::{slice, syscall};
 
 // Toy block cipher with an 8-byte block size. Encrypt(dst, src) =
 // rotate-left(src ^ key, 3). Reversible enough for the OFB
@@ -74,9 +75,9 @@ fn main() {
         let ct = dst.__into_vec();
         if ct != plain {
             // Sanity: ciphertext must differ from plaintext (with non-zero key).
-            Println!("[ 1] OFB single 16-byte         PASS");
+            fmt::Println!("[ 1] OFB single 16-byte         PASS");
         } else {
-            Println!("[ 1] OFB single 16-byte         FAIL ct==pt");
+            fmt::Println!("[ 1] OFB single 16-byte         FAIL ct==pt");
             failed += 1;
         }
     }
@@ -98,9 +99,9 @@ fn main() {
         let mut pt2 = slice::__from_vec(alloc::vec![0u8; n]);
         dec.XORKeyStream(&mut pt2, slice::__from_vec(ct_v));
         if pt2.__into_vec() == plain {
-            Println!("[ 2] OFB enc→dec round-trip     PASS");
+            fmt::Println!("[ 2] OFB enc→dec round-trip     PASS");
         } else {
-            Println!("[ 2] OFB enc→dec round-trip     FAIL");
+            fmt::Println!("[ 2] OFB enc→dec round-trip     FAIL");
             failed += 1;
         }
     }
@@ -127,9 +128,9 @@ fn main() {
             got.extend_from_slice(&chunk.__into_vec());
         }
         if got == want {
-            Println!("[ 3] OFB split calls equivalent PASS");
+            fmt::Println!("[ 3] OFB split calls equivalent PASS");
         } else {
-            Println!("[ 3] OFB split calls equivalent FAIL");
+            fmt::Println!("[ 3] OFB split calls equivalent FAIL");
             failed += 1;
         }
     }
@@ -150,9 +151,9 @@ fn main() {
         let mut pt2 = slice::__from_vec(alloc::vec![0u8; 2048]);
         dec.XORKeyStream(&mut pt2, slice::__from_vec(ct_v));
         if pt2.__into_vec() == plain {
-            Println!("[ 4] OFB 2 KiB refill round     PASS");
+            fmt::Println!("[ 4] OFB 2 KiB refill round     PASS");
         } else {
-            Println!("[ 4] OFB 2 KiB refill round     FAIL");
+            fmt::Println!("[ 4] OFB 2 KiB refill round     FAIL");
             failed += 1;
         }
     }
@@ -177,9 +178,9 @@ fn main() {
             got.extend_from_slice(&one.__into_vec());
         }
         if got == want {
-            Println!("[ 5] OFB byte-by-byte           PASS");
+            fmt::Println!("[ 5] OFB byte-by-byte           PASS");
         } else {
-            Println!("[ 5] OFB byte-by-byte           FAIL");
+            fmt::Println!("[ 5] OFB byte-by-byte           FAIL");
             failed += 1;
         }
     }
@@ -198,9 +199,9 @@ fn main() {
         s2.XORKeyStream(&mut ct2, slice::__from_vec(plain));
 
         if ct1.__into_vec() == ct2.__into_vec() {
-            Println!("[ 6] OFB deterministic stream   PASS");
+            fmt::Println!("[ 6] OFB deterministic stream   PASS");
         } else {
-            Println!("[ 6] OFB deterministic stream   FAIL");
+            fmt::Println!("[ 6] OFB deterministic stream   FAIL");
             failed += 1;
         }
     }
@@ -222,9 +223,9 @@ fn main() {
         s2.XORKeyStream(&mut ct2, slice::__from_vec(plain));
 
         if ct1.__into_vec() != ct2.__into_vec() {
-            Println!("[ 7] OFB IV affects keystream   PASS");
+            fmt::Println!("[ 7] OFB IV affects keystream   PASS");
         } else {
-            Println!("[ 7] OFB IV affects keystream   FAIL");
+            fmt::Println!("[ 7] OFB IV affects keystream   FAIL");
             failed += 1;
         }
     }
@@ -236,18 +237,18 @@ fn main() {
         let before = dst.clone().__into_vec();
         s.XORKeyStream(&mut dst, slice::__from_vec(alloc::vec![]));
         if dst.__into_vec() == before {
-            Println!("[ 8] OFB empty src no-op        PASS");
+            fmt::Println!("[ 8] OFB empty src no-op        PASS");
         } else {
-            Println!("[ 8] OFB empty src no-op        FAIL");
+            fmt::Println!("[ 8] OFB empty src no-op        FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

@@ -19,9 +19,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::gomap::map;
 use goish::text::language;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -281,11 +282,11 @@ fn main() {
         let (tag, err) = language::Parse(*input);
         let got = tag.String();
         if got.as_bytes() != want.as_bytes() {
-            Println!("parse:", *input, "got", got, "want", *want);
+            fmt::Println!("parse:", *input, "got", got, "want", *want);
             die(b"t1: Parse canonical mismatch\n");
         }
         if (err != goish::nil) != *want_err {
-            Println!("parse err:", *input);
+            fmt::Println!("parse err:", *input);
             die(b"t1: Parse error-flag mismatch\n");
         }
     }
@@ -308,7 +309,7 @@ fn main() {
         }
         let (_, idx, conf) = matcher.Match([tag]);
         if idx != *want_idx || conf_int(conf) != *want_conf {
-            Println!("match:", *input, "got", idx, conf_int(conf), "want", *want_idx, *want_conf);
+            fmt::Println!("match:", *input, "got", idx, conf_int(conf), "want", *want_idx, *want_conf);
             die(b"t2: Match mismatch\n");
         }
     }

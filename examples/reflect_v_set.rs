@@ -7,7 +7,8 @@
 #![no_std]
 #![no_main]
 
-use goish::{int, reflect, slice, string, syscall, Sprintf};
+use goish::fmt;
+use goish::{int, reflect, slice, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -36,10 +37,10 @@ pub struct Bag {
 fn main() {
     // ─── #2: %v / %+v on a reflect struct ────────────────────────────
     let p = Person { Name: string("alice"), Age: 30 };
-    let v = Sprintf!("%v", &p);
+    let v = fmt::Sprintf!("%v", &p);
     check(v == "{alice 30}", b"reflect-v: %v body\n");
 
-    let pv = Sprintf!("%+v", &p);
+    let pv = fmt::Sprintf!("%+v", &p);
     check(pv == "{Name:alice Age:30}", b"reflect-v: %+v body\n");
 
     // ─── %v on nested slice<string> field ────────────────────────────
@@ -47,10 +48,10 @@ fn main() {
         Items: goish::slice!([]string{"x", "y", "z"}),
         Count: 3,
     };
-    let s = Sprintf!("%v", &bag);
+    let s = fmt::Sprintf!("%v", &bag);
     check(s == "{[x y z] 3}", b"reflect-v: bag %v\n");
 
-    let sp = Sprintf!("%+v", &bag);
+    let sp = fmt::Sprintf!("%+v", &bag);
     check(sp == "{Items:[x y z] Count:3}", b"reflect-v: bag %+v\n");
 
     // ─── #1: SetField by index ───────────────────────────────────────
@@ -94,7 +95,7 @@ fn main() {
     check(bag.Items[0] == "a", b"reflect-set: slice[0]\n");
 
     // ─── %v after mutation reflects new state ────────────────────────
-    let after = Sprintf!("%+v", &p);
+    let after = fmt::Sprintf!("%+v", &p);
     check(
         after == "{Name:alice Age:99}",
         b"reflect-v: after-mutation %+v\n",

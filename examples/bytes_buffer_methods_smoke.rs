@@ -8,8 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -20,9 +21,9 @@ fn main() {
         let mut b = bytes::NewBufferString("0123456789");
         b.Truncate(4);
         if b.String() == "0123" && b.Len() == 4 {
-            Println!("[ 1] Truncate keeps prefix     PASS");
+            fmt::Println!("[ 1] Truncate keeps prefix     PASS");
         } else {
-            Println!("[ 1] Truncate keeps prefix     FAIL got={}", b.String());
+            fmt::Println!("[ 1] Truncate keeps prefix     FAIL got={}", b.String());
             failed += 1;
         }
     }
@@ -32,9 +33,9 @@ fn main() {
         let mut b = bytes::NewBufferString("hello");
         b.Truncate(0);
         if b.Len() == 0 {
-            Println!("[ 2] Truncate(0) resets        PASS");
+            fmt::Println!("[ 2] Truncate(0) resets        PASS");
         } else {
-            Println!("[ 2] Truncate(0) resets        FAIL");
+            fmt::Println!("[ 2] Truncate(0) resets        FAIL");
             failed += 1;
         }
     }
@@ -50,9 +51,9 @@ fn main() {
             && c2 == b'b' && e2.IsNil()
             && c3 == 0 && e3 == eof
         {
-            Println!("[ 3] ReadByte sequence + EOF   PASS");
+            fmt::Println!("[ 3] ReadByte sequence + EOF   PASS");
         } else {
-            Println!("[ 3] ReadByte sequence + EOF   FAIL");
+            fmt::Println!("[ 3] ReadByte sequence + EOF   FAIL");
             failed += 1;
         }
     }
@@ -64,9 +65,9 @@ fn main() {
         let err = b.UnreadByte();
         let (c, _) = b.ReadByte();
         if err.IsNil() && c == b'x' {
-            Println!("[ 4] UnreadByte rewinds        PASS");
+            fmt::Println!("[ 4] UnreadByte rewinds        PASS");
         } else {
-            Println!("[ 4] UnreadByte rewinds        FAIL");
+            fmt::Println!("[ 4] UnreadByte rewinds        FAIL");
             failed += 1;
         }
     }
@@ -76,9 +77,9 @@ fn main() {
         let mut b = bytes::NewBufferString("a");
         let err = b.UnreadByte();
         if !err.IsNil() {
-            Println!("[ 5] UnreadByte at start err   PASS");
+            fmt::Println!("[ 5] UnreadByte at start err   PASS");
         } else {
-            Println!("[ 5] UnreadByte at start err   FAIL");
+            fmt::Println!("[ 5] UnreadByte at start err   FAIL");
             failed += 1;
         }
     }
@@ -90,9 +91,9 @@ fn main() {
         if err.IsNil() && line.Len() == 4
             && line[0] == b'f' && line[3] == b','
         {
-            Println!("[ 6] ReadBytes incl delim      PASS");
+            fmt::Println!("[ 6] ReadBytes incl delim      PASS");
         } else {
-            Println!("[ 6] ReadBytes incl delim      FAIL n={}", line.Len());
+            fmt::Println!("[ 6] ReadBytes incl delim      FAIL n={}", line.Len());
             failed += 1;
         }
     }
@@ -103,18 +104,18 @@ fn main() {
         let (s, err) = b.ReadString(b'\n');
         let eof = goish::io::EOF;
         if err == eof && s == "notfound" {
-            Println!("[ 7] ReadString no delim → EOF PASS");
+            fmt::Println!("[ 7] ReadString no delim → EOF PASS");
         } else {
-            Println!("[ 7] ReadString no delim → EOF FAIL got={}", s);
+            fmt::Println!("[ 7] ReadString no delim → EOF FAIL got={}", s);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 7/7");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 7", failed);
+        fmt::Println!("FAIL {} of 7", failed);
         syscall::Exit(1);
     }
 }

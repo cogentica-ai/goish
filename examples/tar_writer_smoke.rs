@@ -29,13 +29,14 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::fmt;
 use goish::archive::tar;
 use goish::bytes;
 use goish::errors::{self, error};
 use goish::io::fs;
 use goish::runtime::spin::SpinLock;
 use goish::types::{byte, int};
-use goish::{io, nil, slice, string, syscall, Println};
+use goish::{io, nil, slice, string, syscall};
 
 const TOTAL: usize = 11;
 
@@ -779,10 +780,10 @@ fn main() {
         let f = FAILED.load(Ordering::Acquire);
         let pass = TOTAL - f;
         if f == 0 {
-            Println!("ok 11/11");
+            fmt::Println!("ok 11/11");
             syscall::Exit(0);
         } else {
-            Println!("FAIL", pass as i64, "of", TOTAL as i64);
+            fmt::Println!("FAIL", pass as i64, "of", TOTAL as i64);
             syscall::Exit(1);
         }
     });

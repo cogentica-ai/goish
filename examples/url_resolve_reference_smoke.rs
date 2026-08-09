@@ -8,8 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net::http;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -22,9 +23,9 @@ fn main() {
         let merged = b.ResolveReference(&r);
         let got = merged.String();
         if got == want {
-            Println!(label, "PASS");
+            fmt::Println!(label, "PASS");
         } else {
-            Println!(label, "FAIL base=", base, "ref=", reference, "got=", got, "want=", want);
+            fmt::Println!(label, "FAIL base=", base, "ref=", reference, "got=", got, "want=", want);
             *fail += 1;
         }
     };
@@ -36,9 +37,9 @@ fn main() {
         let (u, _) = http::ParseURL(string("http://example.com/foo/bar"));
         let got = u.EscapedPath();
         if got == "/foo/bar" {
-            Println!("[ 1] EscapedPath plain          PASS");
+            fmt::Println!("[ 1] EscapedPath plain          PASS");
         } else {
-            Println!("[ 1] EscapedPath plain          FAIL got={}", got);
+            fmt::Println!("[ 1] EscapedPath plain          FAIL got={}", got);
             failed += 1;
         }
     }
@@ -48,9 +49,9 @@ fn main() {
         let mut u = http::URL::default();
         u.Path = string("*");
         if u.EscapedPath() == "*" {
-            Println!("[ 2] EscapedPath star            PASS");
+            fmt::Println!("[ 2] EscapedPath star            PASS");
         } else {
-            Println!("[ 2] EscapedPath star            FAIL got={}", u.EscapedPath());
+            fmt::Println!("[ 2] EscapedPath star            FAIL got={}", u.EscapedPath());
             failed += 1;
         }
     }
@@ -59,9 +60,9 @@ fn main() {
     {
         let u = http::URL::default();
         if u.EscapedPath() == "" {
-            Println!("[ 3] EscapedPath empty           PASS");
+            fmt::Println!("[ 3] EscapedPath empty           PASS");
         } else {
-            Println!("[ 3] EscapedPath empty           FAIL got={}", u.EscapedPath());
+            fmt::Println!("[ 3] EscapedPath empty           FAIL got={}", u.EscapedPath());
             failed += 1;
         }
     }
@@ -96,10 +97,10 @@ fn main() {
     check("[15] resolve absolute replace ", "http://a/b/c/d;p?q", "http://other/x", "http://other/x", &mut failed);
 
     if failed == 0 {
-        Println!("ok 15/15");
+        fmt::Println!("ok 15/15");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 15", failed);
+        fmt::Println!("FAIL {} of 15", failed);
         syscall::Exit(1);
     }
 }

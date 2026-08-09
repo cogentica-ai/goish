@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::io::{self, Closer, Reader, Writer};
 use goish::types::byte;
-use goish::{errors, syscall, Println};
+use goish::{errors, syscall};
 
 #[goish::main]
 fn main() {
@@ -27,9 +28,9 @@ fn main() {
         // Second read returns 0 + EOF.
         let (n2, err2) = lr.Read(&mut out);
         if n == 5 && n2 == 0 && errors::Is(err2, io::EOF) {
-            Println!("[ 1] LimitReader stops         PASS");
+            fmt::Println!("[ 1] LimitReader stops         PASS");
         } else {
-            Println!("[ 1] LimitReader stops         FAIL n={} n2={}", n, n2);
+            fmt::Println!("[ 1] LimitReader stops         FAIL n={} n2={}", n, n2);
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
         let (n3, e3) = lr.Read(&mut out);
         // 2 + 1 = 3, then EOF.
         if n1 == 2 && n2 == 1 && n3 == 0 && errors::Is(e3, io::EOF) {
-            Println!("[ 2] LimitReader split         PASS");
+            fmt::Println!("[ 2] LimitReader split         PASS");
         } else {
-            Println!("[ 2] LimitReader split         FAIL");
+            fmt::Println!("[ 2] LimitReader split         FAIL");
             failed += 1;
         }
     }
@@ -63,9 +64,9 @@ fn main() {
         let (n, _) = tee.Read(&mut out);
         let mirror = sink.Bytes();
         if n == 11 && mirror.Len() == 11 && mirror[0] == b'h' && mirror[10] == b'd' {
-            Println!("[ 3] TeeReader mirrors         PASS");
+            fmt::Println!("[ 3] TeeReader mirrors         PASS");
         } else {
-            Println!("[ 3] TeeReader mirrors         FAIL n={} m={}", n, mirror.Len());
+            fmt::Println!("[ 3] TeeReader mirrors         FAIL n={} m={}", n, mirror.Len());
             failed += 1;
         }
     }
@@ -76,9 +77,9 @@ fn main() {
         let (n, err) = d.Write(bytes("hello"));
         let (n2, err2) = d.Write(bytes(""));
         if n == 5 && err.IsNil() && n2 == 0 && err2.IsNil() {
-            Println!("[ 4] Discard sinks             PASS");
+            fmt::Println!("[ 4] Discard sinks             PASS");
         } else {
-            Println!("[ 4] Discard sinks             FAIL");
+            fmt::Println!("[ 4] Discard sinks             FAIL");
             failed += 1;
         }
     }
@@ -92,9 +93,9 @@ fn main() {
         let (n, _) = nc.Read(&mut out);
         let cerr = nc.Close();
         if n == 3 && cerr.IsNil() {
-            Println!("[ 5] NopCloser Close noop      PASS");
+            fmt::Println!("[ 5] NopCloser Close noop      PASS");
         } else {
-            Println!("[ 5] NopCloser Close noop      FAIL");
+            fmt::Println!("[ 5] NopCloser Close noop      FAIL");
             failed += 1;
         }
     }
@@ -108,18 +109,18 @@ fn main() {
             goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(alloc::vec::Vec::new()));
         let (n, err) = io::Copy(&mut sink, &mut lr);
         if err.IsNil() && n == 7 && sink.Bytes().Len() == 7 {
-            Println!("[ 6] Copy from LimitReader     PASS");
+            fmt::Println!("[ 6] Copy from LimitReader     PASS");
         } else {
-            Println!("[ 6] Copy from LimitReader     FAIL n={}", n);
+            fmt::Println!("[ 6] Copy from LimitReader     FAIL n={}", n);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 6", failed);
+        fmt::Println!("FAIL {} of 6", failed);
         syscall::Exit(1);
     }
 }

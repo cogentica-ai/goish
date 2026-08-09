@@ -10,10 +10,11 @@ extern crate goish;
 
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::mime::multipart;
 use goish::types::byte;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -26,9 +27,9 @@ fn main() {
         let w = multipart::NewWriter(&mut buf);
         let b = w.Boundary();
         if b.Len() == 60 {
-            Println!("[ 1] random boundary len       PASS");
+            fmt::Println!("[ 1] random boundary len       PASS");
         } else {
-            Println!("[ 1] random boundary len       FAIL got={}", b.Len());
+            fmt::Println!("[ 1] random boundary len       FAIL got={}", b.Len());
             failed += 1;
         }
     }
@@ -41,9 +42,9 @@ fn main() {
         let err = w.SetBoundary(string("X-myBoundary-1"));
         let ct = w.FormDataContentType();
         if err.IsNil() && ct == "multipart/form-data; boundary=X-myBoundary-1" {
-            Println!("[ 2] SetBoundary + Content-T   PASS");
+            fmt::Println!("[ 2] SetBoundary + Content-T   PASS");
         } else {
-            Println!("[ 2] SetBoundary + Content-T   FAIL ct={}", ct);
+            fmt::Println!("[ 2] SetBoundary + Content-T   FAIL ct={}", ct);
             failed += 1;
         }
     }
@@ -58,9 +59,9 @@ fn main() {
         );
         let err = w.SetBoundary(too_long);
         if !err.IsNil() {
-            Println!("[ 3] boundary too long → err   PASS");
+            fmt::Println!("[ 3] boundary too long → err   PASS");
         } else {
-            Println!("[ 3] boundary too long → err   FAIL");
+            fmt::Println!("[ 3] boundary too long → err   FAIL");
             failed += 1;
         }
     }
@@ -91,9 +92,9 @@ fn main() {
         let has_b = goish::strings::Contains(s.clone(), string(want_head_b));
         let has_t = goish::strings::HasSuffix(s.clone(), string(want_tail));
         if has_a && has_b && has_t {
-            Println!("[ 4] WriteField wire           PASS");
+            fmt::Println!("[ 4] WriteField wire           PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 4] WriteField wire           FAIL a={} b={} t={}",
                 has_a, has_b, has_t
             );
@@ -127,9 +128,9 @@ fn main() {
         );
         let has_body = goish::strings::Contains(s.clone(), string("BINBYTES"));
         if has_disp && has_ct && has_body {
-            Println!("[ 5] WriteFile wire            PASS");
+            fmt::Println!("[ 5] WriteFile wire            PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 5] WriteFile wire            FAIL d={} c={} b={}",
                 has_disp, has_ct, has_body
             );
@@ -142,9 +143,9 @@ fn main() {
         let s =
             multipart::FileContentDisposition(string("up\\load"), string("foo\".bin"));
         if s == "form-data; name=\"up\\\\load\"; filename=\"foo\\\".bin\"" {
-            Println!("[ 6] FileContentDisposition    PASS");
+            fmt::Println!("[ 6] FileContentDisposition    PASS");
         } else {
-            Println!("[ 6] FileContentDisposition    FAIL got={}", s);
+            fmt::Println!("[ 6] FileContentDisposition    FAIL got={}", s);
             failed += 1;
         }
     }
@@ -162,18 +163,18 @@ fn main() {
             }
         }
         if err.IsNil() && n == 8 && !all_zero {
-            Println!("[ 7] crypto/rand.Read          PASS");
+            fmt::Println!("[ 7] crypto/rand.Read          PASS");
         } else {
-            Println!("[ 7] crypto/rand.Read          FAIL n={} zero={}", n, all_zero);
+            fmt::Println!("[ 7] crypto/rand.Read          FAIL n={} zero={}", n, all_zero);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 7/7");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 7", failed);
+        fmt::Println!("FAIL {} of 7", failed);
         syscall::Exit(1);
     }
 }

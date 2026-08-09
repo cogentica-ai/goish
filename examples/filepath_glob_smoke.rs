@@ -9,10 +9,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::os;
 use goish::path::filepath;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -31,9 +32,9 @@ fn main() {
     {
         let (m, err) = filepath::Glob(string("/tmp/goish-glob-smoke/a.txt"));
         if err.IsNil() && m.Len() == 1 && m[0i64] == "/tmp/goish-glob-smoke/a.txt" {
-            Println!("[ 1] Glob no-meta exists       PASS");
+            fmt::Println!("[ 1] Glob no-meta exists       PASS");
         } else {
-            Println!("[ 1] Glob no-meta exists       FAIL len=", m.Len() as i64);
+            fmt::Println!("[ 1] Glob no-meta exists       FAIL len=", m.Len() as i64);
             failed += 1;
         }
     }
@@ -42,9 +43,9 @@ fn main() {
     {
         let (m, err) = filepath::Glob(string("/tmp/goish-glob-smoke/missing.txt"));
         if err.IsNil() && m.Len() == 0 {
-            Println!("[ 2] Glob no-meta missing      PASS");
+            fmt::Println!("[ 2] Glob no-meta missing      PASS");
         } else {
-            Println!("[ 2] Glob no-meta missing      FAIL");
+            fmt::Println!("[ 2] Glob no-meta missing      FAIL");
             failed += 1;
         }
     }
@@ -57,9 +58,9 @@ fn main() {
             && m[0i64] == "/tmp/goish-glob-smoke/a.txt"
             && m[1i64] == "/tmp/goish-glob-smoke/b.txt"
         {
-            Println!("[ 3] Glob *.txt sorted         PASS");
+            fmt::Println!("[ 3] Glob *.txt sorted         PASS");
         } else {
-            Println!("[ 3] Glob *.txt sorted         FAIL len=", m.Len() as i64);
+            fmt::Println!("[ 3] Glob *.txt sorted         FAIL len=", m.Len() as i64);
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
     {
         let (m, err) = filepath::Glob(string("/tmp/goish-glob-smoke/*.dat"));
         if err.IsNil() && m.Len() == 1 && m[0i64] == "/tmp/goish-glob-smoke/c.dat" {
-            Println!("[ 4] Glob *.dat single         PASS");
+            fmt::Println!("[ 4] Glob *.dat single         PASS");
         } else {
-            Println!("[ 4] Glob *.dat single         FAIL");
+            fmt::Println!("[ 4] Glob *.dat single         FAIL");
             failed += 1;
         }
     }
@@ -79,9 +80,9 @@ fn main() {
     {
         let (m, err) = filepath::Glob(string("/tmp/goish-glob-smoke/?.txt"));
         if err.IsNil() && m.Len() == 2 {
-            Println!("[ 5] Glob ?.txt                PASS");
+            fmt::Println!("[ 5] Glob ?.txt                PASS");
         } else {
-            Println!("[ 5] Glob ?.txt                FAIL len=", m.Len() as i64);
+            fmt::Println!("[ 5] Glob ?.txt                FAIL len=", m.Len() as i64);
             failed += 1;
         }
     }
@@ -90,9 +91,9 @@ fn main() {
     {
         let (m, err) = filepath::Glob(string("/tmp/goish-glob-smoke/[ab].txt"));
         if err.IsNil() && m.Len() == 2 {
-            Println!("[ 6] Glob [ab].txt             PASS");
+            fmt::Println!("[ 6] Glob [ab].txt             PASS");
         } else {
-            Println!("[ 6] Glob [ab].txt             FAIL");
+            fmt::Println!("[ 6] Glob [ab].txt             FAIL");
             failed += 1;
         }
     }
@@ -101,9 +102,9 @@ fn main() {
     {
         let (m, err) = filepath::Glob(string("/tmp/goish-glob-smoke/sub/*.txt"));
         if err.IsNil() && m.Len() == 1 && m[0i64] == "/tmp/goish-glob-smoke/sub/d.txt" {
-            Println!("[ 7] Glob hierarchical sub     PASS");
+            fmt::Println!("[ 7] Glob hierarchical sub     PASS");
         } else {
-            Println!("[ 7] Glob hierarchical sub     FAIL");
+            fmt::Println!("[ 7] Glob hierarchical sub     FAIL");
             failed += 1;
         }
     }
@@ -112,9 +113,9 @@ fn main() {
     {
         let (m, err) = filepath::Glob(string("/tmp/goish-glob-smoke/*.zzz"));
         if err.IsNil() && m.Len() == 0 {
-            Println!("[ 8] Glob no-matches empty     PASS");
+            fmt::Println!("[ 8] Glob no-matches empty     PASS");
         } else {
-            Println!("[ 8] Glob no-matches empty     FAIL");
+            fmt::Println!("[ 8] Glob no-matches empty     FAIL");
             failed += 1;
         }
     }
@@ -123,9 +124,9 @@ fn main() {
     {
         let (_, err) = filepath::Glob(string("/tmp/[a-"));
         if !err.IsNil() {
-            Println!("[ 9] Glob bad pattern → err    PASS");
+            fmt::Println!("[ 9] Glob bad pattern → err    PASS");
         } else {
-            Println!("[ 9] Glob bad pattern → err    FAIL");
+            fmt::Println!("[ 9] Glob bad pattern → err    FAIL");
             failed += 1;
         }
     }
@@ -134,9 +135,9 @@ fn main() {
     {
         let (m, err) = filepath::Glob(string("/tmp/goish-glob-smoke/*/*.txt"));
         if err.IsNil() && m.Len() == 1 && m[0i64] == "/tmp/goish-glob-smoke/sub/d.txt" {
-            Println!("[10] Glob two-level wildcard   PASS");
+            fmt::Println!("[10] Glob two-level wildcard   PASS");
         } else {
-            Println!("[10] Glob two-level wildcard   FAIL len=", m.Len() as i64);
+            fmt::Println!("[10] Glob two-level wildcard   FAIL len=", m.Len() as i64);
             failed += 1;
         }
     }
@@ -144,10 +145,10 @@ fn main() {
     let _ = os::RemoveAll(dir);
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

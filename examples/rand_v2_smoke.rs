@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::goslice::slice;
 use goish::math::rand::v2::{self as rand, Source};
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -32,13 +33,13 @@ fn main() {
         for i in 0..5 {
             let got = r.Uint64();
             if got != want[i] {
-                Println!("[ 1] Uint64 seq             FAIL i={} got={} want={}", i, got, want[i]);
+                fmt::Println!("[ 1] Uint64 seq             FAIL i={} got={} want={}", i, got, want[i]);
                 ok = false;
                 break;
             }
         }
         if ok {
-            Println!("[ 1] Uint64 sequence         PASS");
+            fmt::Println!("[ 1] Uint64 sequence         PASS");
         } else {
             failed += 1;
         }
@@ -54,13 +55,13 @@ fn main() {
         for i in 0..5 {
             let got = r.Int64N(100);
             if got != want[i] {
-                Println!("[ 2] Int64N seq             FAIL i={} got={} want={}", i, got, want[i]);
+                fmt::Println!("[ 2] Int64N seq             FAIL i={} got={} want={}", i, got, want[i]);
                 ok = false;
                 break;
             }
         }
         if ok {
-            Println!("[ 2] Int64N(100) sequence    PASS");
+            fmt::Println!("[ 2] Int64N(100) sequence    PASS");
         } else {
             failed += 1;
         }
@@ -78,9 +79,9 @@ fn main() {
             }
         }
         if ok {
-            Println!("[ 3] determinism             PASS");
+            fmt::Println!("[ 3] determinism             PASS");
         } else {
-            Println!("[ 3] determinism             FAIL");
+            fmt::Println!("[ 3] determinism             FAIL");
             failed += 1;
         }
     }
@@ -96,9 +97,9 @@ fn main() {
             }
         }
         if diffs == 20 {
-            Println!("[ 4] seed sensitivity        PASS");
+            fmt::Println!("[ 4] seed sensitivity        PASS");
         } else {
-            Println!("[ 4] seed sensitivity        FAIL diffs={}", diffs);
+            fmt::Println!("[ 4] seed sensitivity        FAIL diffs={}", diffs);
             failed += 1;
         }
     }
@@ -115,9 +116,9 @@ fn main() {
             }
         }
         if ok {
-            Println!("[ 5] Int64N range            PASS");
+            fmt::Println!("[ 5] Int64N range            PASS");
         } else {
-            Println!("[ 5] Int64N range            FAIL");
+            fmt::Println!("[ 5] Int64N range            FAIL");
             failed += 1;
         }
     }
@@ -134,9 +135,9 @@ fn main() {
             }
         }
         if ok {
-            Println!("[ 6] IntN(1024) range        PASS");
+            fmt::Println!("[ 6] IntN(1024) range        PASS");
         } else {
-            Println!("[ 6] IntN(1024) range        FAIL");
+            fmt::Println!("[ 6] IntN(1024) range        FAIL");
             failed += 1;
         }
     }
@@ -156,9 +157,9 @@ fn main() {
         }
         let mean = sum / 1000.0;
         if ok && mean > 0.4 && mean < 0.6 {
-            Println!("[ 7] Float64 range + mean    PASS");
+            fmt::Println!("[ 7] Float64 range + mean    PASS");
         } else {
-            Println!("[ 7] Float64 range + mean    FAIL ok={} mean={}", ok, mean);
+            fmt::Println!("[ 7] Float64 range + mean    FAIL ok={} mean={}", ok, mean);
             failed += 1;
         }
     }
@@ -175,9 +176,9 @@ fn main() {
             }
         }
         if ok {
-            Println!("[ 8] Int64 non-negative      PASS");
+            fmt::Println!("[ 8] Int64 non-negative      PASS");
         } else {
-            Println!("[ 8] Int64 non-negative      FAIL");
+            fmt::Println!("[ 8] Int64 non-negative      FAIL");
             failed += 1;
         }
     }
@@ -199,9 +200,9 @@ fn main() {
             }
         }
         if ok {
-            Println!("[ 9] Seed reset              PASS");
+            fmt::Println!("[ 9] Seed reset              PASS");
         } else {
-            Println!("[ 9] Seed reset              FAIL");
+            fmt::Println!("[ 9] Seed reset              FAIL");
             failed += 1;
         }
     }
@@ -213,7 +214,7 @@ fn main() {
         let _ = p.Uint64();
         let (data, e) = p.MarshalBinary();
         if !e.IsNil() || data.len() != 20 {
-            Println!("[10] MarshalBinary           FAIL e={:?} len={}", e.IsNil(), data.len());
+            fmt::Println!("[10] MarshalBinary           FAIL e={:?} len={}", e.IsNil(), data.len());
             failed += 1;
         } else {
             // First 4 bytes should be "pcg:".
@@ -222,20 +223,20 @@ fn main() {
                 let mut p2 = rand::NewPCG(0, 0);
                 let e2 = p2.UnmarshalBinary(&data);
                 if !e2.IsNil() {
-                    Println!("[10] MarshalBinary           FAIL unmarshal err");
+                    fmt::Println!("[10] MarshalBinary           FAIL unmarshal err");
                     failed += 1;
                 } else {
                     let next1 = p.Uint64();
                     let next2 = p2.Uint64();
                     if next1 == next2 {
-                        Println!("[10] MarshalBinary RT        PASS");
+                        fmt::Println!("[10] MarshalBinary RT        PASS");
                     } else {
-                        Println!("[10] MarshalBinary RT        FAIL");
+                        fmt::Println!("[10] MarshalBinary RT        FAIL");
                         failed += 1;
                     }
                 }
             } else {
-                Println!("[10] MarshalBinary           FAIL bad prefix");
+                fmt::Println!("[10] MarshalBinary           FAIL bad prefix");
                 failed += 1;
             }
         }
@@ -247,9 +248,9 @@ fn main() {
         let bad: slice<byte> = slice::__from_vec(alloc::vec![0u8; 10]);
         let e = p.UnmarshalBinary(&bad);
         if !e.IsNil() {
-            Println!("[11] UnmarshalBinary err     PASS");
+            fmt::Println!("[11] UnmarshalBinary err     PASS");
         } else {
-            Println!("[11] UnmarshalBinary err     FAIL");
+            fmt::Println!("[11] UnmarshalBinary err     FAIL");
             failed += 1;
         }
     }
@@ -265,18 +266,18 @@ fn main() {
         sorted.sort();
         let want: alloc::vec::Vec<i64> = (0..20).collect();
         if sorted == want && v != want {
-            Println!("[12] Shuffle                 PASS");
+            fmt::Println!("[12] Shuffle                 PASS");
         } else {
-            Println!("[12] Shuffle                 FAIL");
+            fmt::Println!("[12] Shuffle                 FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

@@ -13,10 +13,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::crypto::cipher::{AEAD, Block, BlockMode, Stream};
 use goish::errors::{error, nil};
 use goish::types::{byte, int};
-use goish::{slice, syscall, Println};
+use goish::{slice, syscall};
 
 // ─── Fake Block — XOR each byte with a fixed key byte. ──────────────────
 struct XorBlock {
@@ -156,7 +157,7 @@ fn main() {
     {
         let b = XorBlock { key: 0x5A, block_size: 4 };
         if block_size_of(&b) != 4 {
-            Println!("[ 1] Block::BlockSize bound      FAIL");
+            fmt::Println!("[ 1] Block::BlockSize bound      FAIL");
             failed += 1;
         } else {
             let src: slice<byte> =
@@ -170,9 +171,9 @@ fn main() {
             let dec_v: alloc::vec::Vec<byte> = dec.__into_vec();
             let src_v: alloc::vec::Vec<byte> = src.__into_vec();
             if dec_v == src_v {
-                Println!("[ 1] Block enc/dec RT           PASS");
+                fmt::Println!("[ 1] Block enc/dec RT           PASS");
             } else {
-                Println!("[ 1] Block enc/dec RT           FAIL");
+                fmt::Println!("[ 1] Block enc/dec RT           FAIL");
                 failed += 1;
             }
         }
@@ -189,7 +190,7 @@ fn main() {
         let dst_v: alloc::vec::Vec<byte> = dst.__into_vec();
         let want: alloc::vec::Vec<byte> = alloc::vec![0, 1, 2, 3];
         if dst_v != want {
-            Println!("[ 2] Stream first call          FAIL");
+            fmt::Println!("[ 2] Stream first call          FAIL");
             failed += 1;
         } else {
             // Second call must continue counter from 4, not reset.
@@ -201,9 +202,9 @@ fn main() {
             let dst2_v: alloc::vec::Vec<byte> = dst2.__into_vec();
             let want2: alloc::vec::Vec<byte> = alloc::vec![4, 5, 6];
             if dst2_v == want2 {
-                Println!("[ 2] Stream maintains state     PASS");
+                fmt::Println!("[ 2] Stream maintains state     PASS");
             } else {
-                Println!("[ 2] Stream maintains state     FAIL");
+                fmt::Println!("[ 2] Stream maintains state     FAIL");
                 failed += 1;
             }
         }
@@ -213,7 +214,7 @@ fn main() {
     {
         let mut m = XorBlockMode { key: 0xA5, block_size: 8 };
         if m.BlockSize() != 8 {
-            Println!("[ 3] BlockMode::BlockSize       FAIL");
+            fmt::Println!("[ 3] BlockMode::BlockSize       FAIL");
             failed += 1;
         } else {
             let src: slice<byte> = slice::__from_vec(
@@ -227,9 +228,9 @@ fn main() {
                 slice::__from_vec(alloc::vec![0u8; 8]);
             m.CryptBlocks(&mut dec, enc);
             if dec.__into_vec() == src.__into_vec() {
-                Println!("[ 3] BlockMode XOR RT           PASS");
+                fmt::Println!("[ 3] BlockMode XOR RT           PASS");
             } else {
-                Println!("[ 3] BlockMode XOR RT           FAIL");
+                fmt::Println!("[ 3] BlockMode XOR RT           FAIL");
                 failed += 1;
             }
         }
@@ -239,7 +240,7 @@ fn main() {
     {
         let a = ToyAEAD { key: 0x42 };
         if nonce_size_of(&a) != 4 || a.Overhead() != 1 {
-            Println!("[ 4] AEAD sizes                 FAIL");
+            fmt::Println!("[ 4] AEAD sizes                 FAIL");
             failed += 1;
         } else {
             let nonce: slice<byte> =
@@ -250,9 +251,9 @@ fn main() {
             let ct = a.Seal(slice::new(), nonce.clone(), plain.clone(), aad.clone());
             let (got, err) = a.Open(slice::new(), nonce, ct, aad);
             if err.IsNil() && got.__into_vec() == plain.__into_vec() {
-                Println!("[ 4] AEAD seal/open RT          PASS");
+                fmt::Println!("[ 4] AEAD seal/open RT          PASS");
             } else {
-                Println!("[ 4] AEAD seal/open RT          FAIL");
+                fmt::Println!("[ 4] AEAD seal/open RT          FAIL");
                 failed += 1;
             }
         }
@@ -271,9 +272,9 @@ fn main() {
         let out_v: alloc::vec::Vec<byte> = out.__into_vec();
         // First two bytes must still be the prefix.
         if out_v.len() == 4 && out_v[0] == b'>' && out_v[1] == b' ' {
-            Println!("[ 5] AEAD::Seal preserves dst   PASS");
+            fmt::Println!("[ 5] AEAD::Seal preserves dst   PASS");
         } else {
-            Println!("[ 5] AEAD::Seal preserves dst   FAIL");
+            fmt::Println!("[ 5] AEAD::Seal preserves dst   FAIL");
             failed += 1;
         }
     }
@@ -288,18 +289,18 @@ fn main() {
         let aad: slice<byte> = slice::new();
         let (_got, err) = a.Open(slice::new(), nonce, bad, aad);
         if !err.IsNil() {
-            Println!("[ 6] AEAD::Open bad tag → err   PASS");
+            fmt::Println!("[ 6] AEAD::Open bad tag → err   PASS");
         } else {
-            Println!("[ 6] AEAD::Open bad tag → err   FAIL");
+            fmt::Println!("[ 6] AEAD::Open bad tag → err   FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 6");
+        fmt::Println!("FAIL", failed, "of 6");
         syscall::Exit(1);
     }
 }

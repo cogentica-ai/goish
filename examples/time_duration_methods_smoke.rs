@@ -8,8 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::time;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -20,9 +21,9 @@ fn main() {
         let d = time::Second * 5 + time::Millisecond * 789;
         let r = d.Truncate(time::Second);
         if r.Nanoseconds() == 5 * 1_000_000_000 {
-            Println!("[ 1] Truncate(Second)          PASS");
+            fmt::Println!("[ 1] Truncate(Second)          PASS");
         } else {
-            Println!("[ 1] Truncate(Second)          FAIL ns={}", r.Nanoseconds());
+            fmt::Println!("[ 1] Truncate(Second)          FAIL ns={}", r.Nanoseconds());
             failed += 1;
         }
     }
@@ -32,9 +33,9 @@ fn main() {
         let d = time::Second * 7;
         let r = d.Truncate(time::Duration(0));
         if r.Nanoseconds() == 7 * 1_000_000_000 {
-            Println!("[ 2] Truncate(0) identity      PASS");
+            fmt::Println!("[ 2] Truncate(0) identity      PASS");
         } else {
-            Println!("[ 2] Truncate(0) identity      FAIL");
+            fmt::Println!("[ 2] Truncate(0) identity      FAIL");
             failed += 1;
         }
     }
@@ -44,9 +45,9 @@ fn main() {
         let d = time::Second * 5 + time::Millisecond * 789;
         let r = d.Round(time::Second);
         if r.Nanoseconds() == 6 * 1_000_000_000 {
-            Println!("[ 3] Round up .789s            PASS");
+            fmt::Println!("[ 3] Round up .789s            PASS");
         } else {
-            Println!("[ 3] Round up .789s            FAIL ns={}", r.Nanoseconds());
+            fmt::Println!("[ 3] Round up .789s            FAIL ns={}", r.Nanoseconds());
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
         let d = time::Second * 5 + time::Millisecond * 200;
         let r = d.Round(time::Second);
         if r.Nanoseconds() == 5 * 1_000_000_000 {
-            Println!("[ 4] Round down .200s          PASS");
+            fmt::Println!("[ 4] Round down .200s          PASS");
         } else {
-            Println!("[ 4] Round down .200s          FAIL ns={}", r.Nanoseconds());
+            fmt::Println!("[ 4] Round down .200s          FAIL ns={}", r.Nanoseconds());
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
         let d = time::Second * 5 + time::Millisecond * 500;
         let r = d.Round(time::Second);
         if r.Nanoseconds() == 6 * 1_000_000_000 {
-            Println!("[ 5] Round halfway up          PASS");
+            fmt::Println!("[ 5] Round halfway up          PASS");
         } else {
-            Println!("[ 5] Round halfway up          FAIL ns={}", r.Nanoseconds());
+            fmt::Println!("[ 5] Round halfway up          FAIL ns={}", r.Nanoseconds());
             failed += 1;
         }
     }
@@ -80,9 +81,9 @@ fn main() {
         let d = time::Second * 5;
         let r = d.Round(time::Duration(-1));
         if r.Nanoseconds() == 5 * 1_000_000_000 {
-            Println!("[ 6] Round(<=0) identity       PASS");
+            fmt::Println!("[ 6] Round(<=0) identity       PASS");
         } else {
-            Println!("[ 6] Round(<=0) identity       FAIL");
+            fmt::Println!("[ 6] Round(<=0) identity       FAIL");
             failed += 1;
         }
     }
@@ -92,9 +93,9 @@ fn main() {
         let d = time::Duration(-3_000_000_000);
         let r = d.Abs();
         if r.Nanoseconds() == 3_000_000_000 {
-            Println!("[ 7] Abs(-3s)=3s               PASS");
+            fmt::Println!("[ 7] Abs(-3s)=3s               PASS");
         } else {
-            Println!("[ 7] Abs(-3s)=3s               FAIL");
+            fmt::Println!("[ 7] Abs(-3s)=3s               FAIL");
             failed += 1;
         }
     }
@@ -104,9 +105,9 @@ fn main() {
         let d = time::Duration(i64::MIN);
         let r = d.Abs();
         if r.Nanoseconds() == i64::MAX {
-            Println!("[ 8] Abs(MinInt64)=MaxInt64    PASS");
+            fmt::Println!("[ 8] Abs(MinInt64)=MaxInt64    PASS");
         } else {
-            Println!("[ 8] Abs(MinInt64)=MaxInt64    FAIL");
+            fmt::Println!("[ 8] Abs(MinInt64)=MaxInt64    FAIL");
             failed += 1;
         }
     }
@@ -118,9 +119,9 @@ fn main() {
         // Compare with tolerance via integer ratio (avoid float == in no_std).
         let n = (s * 1000.0) as i64;
         if n == 1500 {
-            Println!("[ 9] Seconds()=1.5             PASS");
+            fmt::Println!("[ 9] Seconds()=1.5             PASS");
         } else {
-            Println!("[ 9] Seconds()=1.5             FAIL n={}", n);
+            fmt::Println!("[ 9] Seconds()=1.5             FAIL n={}", n);
             failed += 1;
         }
     }
@@ -131,9 +132,9 @@ fn main() {
         let m = d.Minutes();
         let n = (m * 1000.0) as i64;
         if n == 2500 {
-            Println!("[10] Minutes()=2.5             PASS");
+            fmt::Println!("[10] Minutes()=2.5             PASS");
         } else {
-            Println!("[10] Minutes()=2.5             FAIL n={}", n);
+            fmt::Println!("[10] Minutes()=2.5             FAIL n={}", n);
             failed += 1;
         }
     }
@@ -144,9 +145,9 @@ fn main() {
         let h = d.Hours();
         let n = (h * 1000.0) as i64;
         if n == 2500 {
-            Println!("[11] Hours()=2.5               PASS");
+            fmt::Println!("[11] Hours()=2.5               PASS");
         } else {
-            Println!("[11] Hours()=2.5               FAIL n={}", n);
+            fmt::Println!("[11] Hours()=2.5               FAIL n={}", n);
             failed += 1;
         }
     }
@@ -156,18 +157,18 @@ fn main() {
         let d = time::Duration(-5_500_000_000);
         let r = d.Round(time::Second);
         if r.Nanoseconds() == -6_000_000_000 {
-            Println!("[12] Round(-5.5s)=-6s          PASS");
+            fmt::Println!("[12] Round(-5.5s)=-6s          PASS");
         } else {
-            Println!("[12] Round(-5.5s)=-6s          FAIL ns={}", r.Nanoseconds());
+            fmt::Println!("[12] Round(-5.5s)=-6s          FAIL ns={}", r.Nanoseconds());
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 12", failed);
+        fmt::Println!("FAIL {} of 12", failed);
         syscall::Exit(1);
     }
 }

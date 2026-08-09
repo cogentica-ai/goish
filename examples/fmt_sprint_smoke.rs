@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::string;
 use goish::types::int;
-use goish::{syscall, Println, Sprint, Sprintln};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -18,22 +19,22 @@ fn main() {
 
     // 1. Sprint with a single string.
     {
-        let s = Sprint!(string("hello"));
+        let s = fmt::Sprint!(string("hello"));
         if s == string("hello") {
-            Println!("[ 1] Sprint single             PASS");
+            fmt::Println!("[ 1] Sprint single             PASS");
         } else {
-            Println!("[ 1] Sprint single             FAIL: ", s);
+            fmt::Println!("[ 1] Sprint single             FAIL: ", s);
             failed += 1;
         }
     }
 
     // 2. Sprint concatenates without spaces (slim deviation, matches Print).
     {
-        let s = Sprint!(string("foo"), string("bar"));
+        let s = fmt::Sprint!(string("foo"), string("bar"));
         if s == string("foobar") {
-            Println!("[ 2] Sprint concat             PASS");
+            fmt::Println!("[ 2] Sprint concat             PASS");
         } else {
-            Println!("[ 2] Sprint concat             FAIL: ", s);
+            fmt::Println!("[ 2] Sprint concat             FAIL: ", s);
             failed += 1;
         }
     }
@@ -41,33 +42,33 @@ fn main() {
     // 3. Sprint with int.
     {
         let n: int = 42;
-        let s = Sprint!(n);
+        let s = fmt::Sprint!(n);
         if s == string("42") {
-            Println!("[ 3] Sprint int                PASS");
+            fmt::Println!("[ 3] Sprint int                PASS");
         } else {
-            Println!("[ 3] Sprint int                FAIL: ", s);
+            fmt::Println!("[ 3] Sprint int                FAIL: ", s);
             failed += 1;
         }
     }
 
     // 4. Sprintln with single string.
     {
-        let s = Sprintln!(string("hi"));
+        let s = fmt::Sprintln!(string("hi"));
         if s == string("hi\n") {
-            Println!("[ 4] Sprintln single           PASS");
+            fmt::Println!("[ 4] Sprintln single           PASS");
         } else {
-            Println!("[ 4] Sprintln single           FAIL: ", s);
+            fmt::Println!("[ 4] Sprintln single           FAIL: ", s);
             failed += 1;
         }
     }
 
     // 5. Sprintln separates with spaces.
     {
-        let s = Sprintln!(string("a"), string("b"), string("c"));
+        let s = fmt::Sprintln!(string("a"), string("b"), string("c"));
         if s == string("a b c\n") {
-            Println!("[ 5] Sprintln spaces           PASS");
+            fmt::Println!("[ 5] Sprintln spaces           PASS");
         } else {
-            Println!("[ 5] Sprintln spaces           FAIL: ", s);
+            fmt::Println!("[ 5] Sprintln spaces           FAIL: ", s);
             failed += 1;
         }
     }
@@ -75,42 +76,42 @@ fn main() {
     // 6. Sprintln with int + string mix.
     {
         let n: int = 7;
-        let s = Sprintln!(n, string("widgets"));
+        let s = fmt::Sprintln!(n, string("widgets"));
         if s == string("7 widgets\n") {
-            Println!("[ 6] Sprintln mix              PASS");
+            fmt::Println!("[ 6] Sprintln mix              PASS");
         } else {
-            Println!("[ 6] Sprintln mix              FAIL: ", s);
+            fmt::Println!("[ 6] Sprintln mix              FAIL: ", s);
             failed += 1;
         }
     }
 
     // 7. Sprint with empty args produces empty string.
     {
-        let s = Sprint!();
+        let s = fmt::Sprint!();
         if s == string("") {
-            Println!("[ 7] Sprint empty              PASS");
+            fmt::Println!("[ 7] Sprint empty              PASS");
         } else {
-            Println!("[ 7] Sprint empty              FAIL: ", s);
+            fmt::Println!("[ 7] Sprint empty              FAIL: ", s);
             failed += 1;
         }
     }
 
     // 8. Sprintln with no args produces just newline.
     {
-        let s = Sprintln!();
+        let s = fmt::Sprintln!();
         if s == string("\n") {
-            Println!("[ 8] Sprintln empty            PASS");
+            fmt::Println!("[ 8] Sprintln empty            PASS");
         } else {
-            Println!("[ 8] Sprintln empty            FAIL: ", s);
+            fmt::Println!("[ 8] Sprintln empty            FAIL: ", s);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

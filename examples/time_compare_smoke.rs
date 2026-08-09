@@ -9,8 +9,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::time::{Date, Now, Sleep, Microsecond};
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -21,9 +22,9 @@ fn main() {
         let t1 = Date(2026, 5, 1, 0, 0, 0, 0, goish::time::UTC);
         let t2 = Date(2026, 5, 2, 0, 0, 0, 0, goish::time::UTC);
         if t1.Compare(t2) == -1 {
-            Println!("[ 1] earlier sec → -1          PASS");
+            fmt::Println!("[ 1] earlier sec → -1          PASS");
         } else {
-            Println!("[ 1] earlier sec → -1          FAIL got={}", t1.Compare(t2));
+            fmt::Println!("[ 1] earlier sec → -1          FAIL got={}", t1.Compare(t2));
             failed += 1;
         }
     }
@@ -33,9 +34,9 @@ fn main() {
         let t1 = Date(2026, 5, 2, 0, 0, 0, 0, goish::time::UTC);
         let t2 = Date(2026, 5, 1, 0, 0, 0, 0, goish::time::UTC);
         if t1.Compare(t2) == 1 {
-            Println!("[ 2] later sec → +1            PASS");
+            fmt::Println!("[ 2] later sec → +1            PASS");
         } else {
-            Println!("[ 2] later sec → +1            FAIL got={}", t1.Compare(t2));
+            fmt::Println!("[ 2] later sec → +1            FAIL got={}", t1.Compare(t2));
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
         let t1 = Date(2026, 5, 1, 12, 30, 0, 0, goish::time::UTC);
         let t2 = Date(2026, 5, 1, 12, 30, 0, 0, goish::time::UTC);
         if t1.Compare(t2) == 0 {
-            Println!("[ 3] equal → 0                 PASS");
+            fmt::Println!("[ 3] equal → 0                 PASS");
         } else {
-            Println!("[ 3] equal → 0                 FAIL got={}", t1.Compare(t2));
+            fmt::Println!("[ 3] equal → 0                 FAIL got={}", t1.Compare(t2));
             failed += 1;
         }
     }
@@ -57,9 +58,9 @@ fn main() {
         let t1 = Date(2026, 5, 1, 0, 0, 0, 100, goish::time::UTC);
         let t2 = Date(2026, 5, 1, 0, 0, 0, 200, goish::time::UTC);
         if t1.Compare(t2) == -1 {
-            Println!("[ 4] same sec, lower nsec → -1 PASS");
+            fmt::Println!("[ 4] same sec, lower nsec → -1 PASS");
         } else {
-            Println!("[ 4] same sec, lower nsec → -1 FAIL got={}", t1.Compare(t2));
+            fmt::Println!("[ 4] same sec, lower nsec → -1 FAIL got={}", t1.Compare(t2));
             failed += 1;
         }
     }
@@ -69,9 +70,9 @@ fn main() {
         let t1 = Date(2026, 5, 1, 0, 0, 0, 999, goish::time::UTC);
         let t2 = Date(2026, 5, 1, 0, 0, 0, 100, goish::time::UTC);
         if t1.Compare(t2) == 1 {
-            Println!("[ 5] same sec, higher nsec→ +1 PASS");
+            fmt::Println!("[ 5] same sec, higher nsec→ +1 PASS");
         } else {
-            Println!("[ 5] same sec, higher nsec→ +1 FAIL");
+            fmt::Println!("[ 5] same sec, higher nsec→ +1 FAIL");
             failed += 1;
         }
     }
@@ -82,9 +83,9 @@ fn main() {
         Sleep(Microsecond * 100);
         let t2 = Now();
         if t1.Compare(t2) == -1 && t2.Compare(t1) == 1 {
-            Println!("[ 6] monotonic Now→Sleep→Now   PASS");
+            fmt::Println!("[ 6] monotonic Now→Sleep→Now   PASS");
         } else {
-            Println!("[ 6] monotonic Now→Sleep→Now   FAIL");
+            fmt::Println!("[ 6] monotonic Now→Sleep→Now   FAIL");
             failed += 1;
         }
     }
@@ -94,9 +95,9 @@ fn main() {
         let t1 = Date(2026, 5, 1, 12, 0, 0, 0, goish::time::UTC);
         let t2 = Date(2026, 5, 1, 12, 0, 0, 0, goish::time::UTC);
         if t1.Compare(t2) == 0 && t1.Equal(t2) {
-            Println!("[ 7] Compare ↔ Equal           PASS");
+            fmt::Println!("[ 7] Compare ↔ Equal           PASS");
         } else {
-            Println!("[ 7] Compare ↔ Equal           FAIL");
+            fmt::Println!("[ 7] Compare ↔ Equal           FAIL");
             failed += 1;
         }
     }
@@ -106,18 +107,18 @@ fn main() {
         let t1 = Date(2026, 5, 1, 0, 0, 0, 0, goish::time::UTC);
         let t2 = Date(2026, 6, 1, 0, 0, 0, 0, goish::time::UTC);
         if t1.Compare(t2) + t2.Compare(t1) == 0 {
-            Println!("[ 8] anti-symmetric            PASS");
+            fmt::Println!("[ 8] anti-symmetric            PASS");
         } else {
-            Println!("[ 8] anti-symmetric            FAIL");
+            fmt::Println!("[ 8] anti-symmetric            FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 8", failed);
+        fmt::Println!("FAIL {} of 8", failed);
         syscall::Exit(1);
     }
 }

@@ -7,7 +7,8 @@
 #![no_std]
 #![no_main]
 
-use goish::{syscall, time, Sprintf};
+use goish::fmt;
+use goish::{syscall, time};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -85,7 +86,7 @@ fn main() {
     );
 
     // %v via Sprintf — confirms fmt::Format impl works.
-    let s = Sprintf!("took %v", time::Milliseconds(250));
+    let s = fmt::Sprintf!("took %v", time::Milliseconds(250));
     check(s == "took 250ms", b"time: %v on Duration wrong\n");
 
     // ─── Time::Unix round-trip ────────────────────────────────────────

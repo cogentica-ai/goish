@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::gomap::map;
 use goish::goslice::slice;
 use goish::net::http::{ParseURL, ValuesHas};
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -21,17 +22,17 @@ fn main() {
     {
         let (base, e) = ParseURL(string("http://example.com/a/b/index.html"));
         if !e.IsNil() {
-            Println!("[ 1] Parse base                FAIL parse-base");
+            fmt::Println!("[ 1] Parse base                FAIL parse-base");
             failed += 1;
         } else {
             let (resolved, e2) = base.Parse(string("file.html"));
             if !e2.IsNil() {
-                Println!("[ 1] URL.Parse relative        FAIL parse-ref");
+                fmt::Println!("[ 1] URL.Parse relative        FAIL parse-ref");
                 failed += 1;
             } else if resolved.Path == "/a/b/file.html" && resolved.Host == "example.com" {
-                Println!("[ 1] URL.Parse relative        PASS");
+                fmt::Println!("[ 1] URL.Parse relative        PASS");
             } else {
-                Println!("[ 1] URL.Parse relative        FAIL path=", resolved.Path);
+                fmt::Println!("[ 1] URL.Parse relative        FAIL path=", resolved.Path);
                 failed += 1;
             }
         }
@@ -44,9 +45,9 @@ fn main() {
         if e.IsNil() && resolved.Scheme == "https" && resolved.Host == "other.test"
             && resolved.Path == "/x"
         {
-            Println!("[ 2] URL.Parse absolute        PASS");
+            fmt::Println!("[ 2] URL.Parse absolute        PASS");
         } else {
-            Println!("[ 2] URL.Parse absolute        FAIL");
+            fmt::Println!("[ 2] URL.Parse absolute        FAIL");
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
         let (base, _) = ParseURL(string("http://example.com/a/b/"));
         let (r, e) = base.Parse(string("?q=1"));
         if e.IsNil() && r.Host == "example.com" && r.RawQuery == "q=1" {
-            Println!("[ 3] URL.Parse query carried   PASS");
+            fmt::Println!("[ 3] URL.Parse query carried   PASS");
         } else {
-            Println!("[ 3] URL.Parse query carried   FAIL rawq=", r.RawQuery);
+            fmt::Println!("[ 3] URL.Parse query carried   FAIL rawq=", r.RawQuery);
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
         let (base, _) = ParseURL(string("http://example.com/a/b/c"));
         let (r, e) = base.Parse(string("/x"));
         if e.IsNil() && r.Path == "/x" && r.Host == "example.com" {
-            Println!("[ 4] URL.Parse absolute path   PASS");
+            fmt::Println!("[ 4] URL.Parse absolute path   PASS");
         } else {
-            Println!("[ 4] URL.Parse absolute path   FAIL");
+            fmt::Println!("[ 4] URL.Parse absolute path   FAIL");
             failed += 1;
         }
     }
@@ -80,9 +81,9 @@ fn main() {
         let (base, _) = ParseURL(string("http://example.com/a/b/c"));
         let (r, e) = base.Parse(string(""));
         if e.IsNil() && r.Host == "example.com" && r.Path == "/a/b/c" {
-            Println!("[ 5] URL.Parse empty ref       PASS");
+            fmt::Println!("[ 5] URL.Parse empty ref       PASS");
         } else {
-            Println!("[ 5] URL.Parse empty ref       FAIL path=", r.Path);
+            fmt::Println!("[ 5] URL.Parse empty ref       FAIL path=", r.Path);
             failed += 1;
         }
     }
@@ -94,9 +95,9 @@ fn main() {
         s = goish::append!(s, "v1");
         v.Set(string("k"), s);
         if ValuesHas(&v, string("k")) {
-            Println!("[ 6] ValuesHas present         PASS");
+            fmt::Println!("[ 6] ValuesHas present         PASS");
         } else {
-            Println!("[ 6] ValuesHas present         FAIL");
+            fmt::Println!("[ 6] ValuesHas present         FAIL");
             failed += 1;
         }
     }
@@ -105,9 +106,9 @@ fn main() {
     {
         let v: map<string, slice<string>> = map::<string, slice<string>>::new();
         if !ValuesHas(&v, string("missing")) {
-            Println!("[ 7] ValuesHas absent          PASS");
+            fmt::Println!("[ 7] ValuesHas absent          PASS");
         } else {
-            Println!("[ 7] ValuesHas absent          FAIL");
+            fmt::Println!("[ 7] ValuesHas absent          FAIL");
             failed += 1;
         }
     }
@@ -118,18 +119,18 @@ fn main() {
         let s: slice<string> = slice::__from_vec(alloc::vec::Vec::new());
         v.Set(string("empty"), s);
         if ValuesHas(&v, string("empty")) {
-            Println!("[ 8] ValuesHas empty-list      PASS");
+            fmt::Println!("[ 8] ValuesHas empty-list      PASS");
         } else {
-            Println!("[ 8] ValuesHas empty-list      FAIL");
+            fmt::Println!("[ 8] ValuesHas empty-list      FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

@@ -8,9 +8,10 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::boxed::Box;
+use goish::fmt;
 use goish::bytes;
 use goish::io::{self, ReaderAt};
-use goish::{byte, syscall, Println};
+use goish::{byte, syscall};
 
 #[goish::main]
 fn main() {
@@ -24,13 +25,13 @@ fn main() {
             let mut p = goish::make!([]byte, 5);
             let (n, err) = sr.Read(&mut p);
             if err.IsNil() && n == 5 && p[0] == b'2' && p[4] == b'6' {
-                Println!("[ 1] Section Read full         PASS");
+                fmt::Println!("[ 1] Section Read full         PASS");
             } else {
-                Println!("[ 1] Section Read full         FAIL n={}", n);
+                fmt::Println!("[ 1] Section Read full         FAIL n={}", n);
                 failed += 1;
             }
         } else {
-            Println!("[ 1] Section Read full         FAIL size={}", sr.Size());
+            fmt::Println!("[ 1] Section Read full         FAIL size={}", sr.Size());
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
         let (n2, e2) = sr.Read(&mut p);
         let eof = io::EOF;
         if n == 3 && n2 == 0 && e2 == eof {
-            Println!("[ 2] Section EOF after window  PASS");
+            fmt::Println!("[ 2] Section EOF after window  PASS");
         } else {
-            Println!("[ 2] Section EOF after window  FAIL n={} n2={}", n, n2);
+            fmt::Println!("[ 2] Section EOF after window  FAIL n={} n2={}", n, n2);
             failed += 1;
         }
     }
@@ -62,13 +63,13 @@ fn main() {
             let _ = sr.Read(&mut p);
             // base=3, sought to offset 1 → absolute 4 → 'E'.
             if p[0] == b'E' {
-                Println!("[ 3] Section Seek+Read         PASS");
+                fmt::Println!("[ 3] Section Seek+Read         PASS");
             } else {
-                Println!("[ 3] Section Seek+Read         FAIL got={}", p[0]);
+                fmt::Println!("[ 3] Section Seek+Read         FAIL got={}", p[0]);
                 failed += 1;
             }
         } else {
-            Println!("[ 3] Section Seek+Read         FAIL pos={}", pos);
+            fmt::Println!("[ 3] Section Seek+Read         FAIL pos={}", pos);
             failed += 1;
         }
     }
@@ -81,9 +82,9 @@ fn main() {
         let (n, err) = sr.ReadAt(&mut p, 3);
         // base=2 + off=3 → absolute 5 → 'F','G'.
         if err.IsNil() && n == 2 && p[0] == b'F' && p[1] == b'G' {
-            Println!("[ 4] Section ReadAt window     PASS");
+            fmt::Println!("[ 4] Section ReadAt window     PASS");
         } else {
-            Println!("[ 4] Section ReadAt window     FAIL");
+            fmt::Println!("[ 4] Section ReadAt window     FAIL");
             failed += 1;
         }
     }
@@ -96,18 +97,18 @@ fn main() {
         let (n, err) = sr.ReadAt(&mut p, 5);
         let eof = io::EOF;
         if n == 0 && err == eof {
-            Println!("[ 5] ReadAt past Size → EOF    PASS");
+            fmt::Println!("[ 5] ReadAt past Size → EOF    PASS");
         } else {
-            Println!("[ 5] ReadAt past Size → EOF    FAIL");
+            fmt::Println!("[ 5] ReadAt past Size → EOF    FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 5", failed);
+        fmt::Println!("FAIL {} of 5", failed);
         syscall::Exit(1);
     }
 }

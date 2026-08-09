@@ -8,12 +8,13 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::error;
 use goish::errors;
 use goish::io::{self, Reader};
 use goish::net::mail;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 fn read_all_body(r: &mut alloc::boxed::Box<dyn Reader>) -> alloc::vec::Vec<u8> {
     let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
@@ -54,9 +55,9 @@ fn main() {
             && subj == string("Hello")
             && body.as_slice() == b"Message body here."
         {
-            Println!("[ 1] ReadMessage basic       PASS");
+            fmt::Println!("[ 1] ReadMessage basic       PASS");
         } else {
-            Println!("[ 1] ReadMessage basic       FAIL");
+            fmt::Println!("[ 1] ReadMessage basic       FAIL");
             failed += 1;
         }
     }
@@ -71,9 +72,9 @@ fn main() {
         let v2 = m.Header.Get(string("FROM"));
         let v3 = m.Header.Get(string("from"));
         if err.IsNil() && v1 == string("a@b") && v1 == v2 && v2 == v3 {
-            Println!("[ 2] Header.Get canonical    PASS");
+            fmt::Println!("[ 2] Header.Get canonical    PASS");
         } else {
-            Println!("[ 2] Header.Get canonical    FAIL");
+            fmt::Println!("[ 2] Header.Get canonical    FAIL");
             failed += 1;
         }
     }
@@ -86,9 +87,9 @@ fn main() {
         let m = msg.expect("expected message");
         let s = m.Header.Get(string("Subject"));
         if err.IsNil() && s == string("Long continuation more") {
-            Println!("[ 3] Header continuation     PASS");
+            fmt::Println!("[ 3] Header continuation     PASS");
         } else {
-            Println!("[ 3] Header continuation     FAIL got '{}'", s);
+            fmt::Println!("[ 3] Header continuation     FAIL got '{}'", s);
             failed += 1;
         }
     }
@@ -110,9 +111,9 @@ fn main() {
             && vs[0i64] == string("from a")
             && vs[1i64] == string("from b")
         {
-            Println!("[ 4] Header multi-value      PASS");
+            fmt::Println!("[ 4] Header multi-value      PASS");
         } else {
-            Println!("[ 4] Header multi-value      FAIL");
+            fmt::Println!("[ 4] Header multi-value      FAIL");
             failed += 1;
         }
     }
@@ -125,9 +126,9 @@ fn main() {
         let m = msg.expect("expected message");
         let v = m.Header.Get(string("Missing"));
         if v == string("") {
-            Println!("[ 5] Header.Get missing      PASS");
+            fmt::Println!("[ 5] Header.Get missing      PASS");
         } else {
-            Println!("[ 5] Header.Get missing      FAIL");
+            fmt::Println!("[ 5] Header.Get missing      FAIL");
             failed += 1;
         }
     }
@@ -140,9 +141,9 @@ fn main() {
         let m = msg.expect("expected message");
         let s = m.Header.Get(string("Subject"));
         if err.IsNil() && s == string("alone") {
-            Println!("[ 6] Header w/o body         PASS");
+            fmt::Println!("[ 6] Header w/o body         PASS");
         } else {
-            Println!("[ 6] Header w/o body         FAIL");
+            fmt::Println!("[ 6] Header w/o body         FAIL");
             failed += 1;
         }
     }
@@ -153,9 +154,9 @@ fn main() {
         let src = bytes::NewBufferString(raw);
         let (_, err) = mail::ReadMessage(src);
         if !err.IsNil() {
-            Println!("[ 7] Malformed header        PASS");
+            fmt::Println!("[ 7] Malformed header        PASS");
         } else {
-            Println!("[ 7] Malformed header        FAIL");
+            fmt::Println!("[ 7] Malformed header        FAIL");
             failed += 1;
         }
     }
@@ -166,9 +167,9 @@ fn main() {
         let src = bytes::NewBufferString(raw);
         let (_, err) = mail::ReadMessage(src);
         if !err.IsNil() {
-            Println!("[ 8] Leading whitespace      PASS");
+            fmt::Println!("[ 8] Leading whitespace      PASS");
         } else {
-            Println!("[ 8] Leading whitespace      FAIL");
+            fmt::Println!("[ 8] Leading whitespace      FAIL");
             failed += 1;
         }
     }
@@ -180,9 +181,9 @@ fn main() {
         let (msg, _) = mail::ReadMessage(src);
         let m = msg.expect("expected message");
         if m.Header.Has(string("content-type")) && !m.Header.Has(string("X-None")) {
-            Println!("[ 9] Header.Has              PASS");
+            fmt::Println!("[ 9] Header.Has              PASS");
         } else {
-            Println!("[ 9] Header.Has              FAIL");
+            fmt::Println!("[ 9] Header.Has              FAIL");
             failed += 1;
         }
     }
@@ -192,18 +193,18 @@ fn main() {
         let e1: error = mail::ErrHeaderNotPresent.into();
         let e2: error = mail::ErrHeaderNotPresent.into();
         if errors::Is(e1.clone(), e2.clone()) && !errors::Is(e1, io::EOF) {
-            Println!("[10] ErrHeaderNotPresent     PASS");
+            fmt::Println!("[10] ErrHeaderNotPresent     PASS");
         } else {
-            Println!("[10] ErrHeaderNotPresent     FAIL");
+            fmt::Println!("[10] ErrHeaderNotPresent     FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

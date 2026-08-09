@@ -8,12 +8,13 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::encoding::hex::{NewDecoder, NewEncoder};
 use goish::goslice::slice;
 use goish::io::{Reader, Writer};
 use goish::types::byte;
-use goish::{convert, syscall, Println};
+use goish::{convert, syscall};
 
 #[goish::main]
 fn main() {
@@ -26,9 +27,9 @@ fn main() {
         let _ = enc.Write(slice::__from_vec(alloc::vec![0xde, 0xad, 0xbe, 0xef]));
         let s = buf.String();
         if s == "deadbeef" {
-            Println!("[ 1] basic encode            PASS");
+            fmt::Println!("[ 1] basic encode            PASS");
         } else {
-            Println!("[ 1] basic encode            FAIL got {}", s);
+            fmt::Println!("[ 1] basic encode            FAIL got {}", s);
             failed += 1;
         }
     }
@@ -39,9 +40,9 @@ fn main() {
         let mut enc = NewEncoder(&mut buf);
         let (n, e) = enc.Write(slice::__from_vec(alloc::vec![0x00, 0x11, 0x22]));
         if n == 3 && e.IsNil() {
-            Println!("[ 2] encode return n         PASS");
+            fmt::Println!("[ 2] encode return n         PASS");
         } else {
-            Println!("[ 2] encode return n         FAIL n={}", n);
+            fmt::Println!("[ 2] encode return n         FAIL n={}", n);
             failed += 1;
         }
     }
@@ -55,9 +56,9 @@ fn main() {
         let raw: &[byte] = &out;
         let want: &[u8] = &[0xde, 0xad, 0xbe, 0xef];
         if n == 4 && e.IsNil() && raw == want {
-            Println!("[ 3] basic decode            PASS");
+            fmt::Println!("[ 3] basic decode            PASS");
         } else {
-            Println!("[ 3] basic decode            FAIL n={}", n);
+            fmt::Println!("[ 3] basic decode            FAIL n={}", n);
             failed += 1;
         }
     }
@@ -71,9 +72,9 @@ fn main() {
         let raw: &[byte] = &out;
         let want: &[u8] = &[0x01, 0x02, 0x03];
         if n == 3 && e.IsNil() && raw == want {
-            Println!("[ 4] partial decode          PASS");
+            fmt::Println!("[ 4] partial decode          PASS");
         } else {
-            Println!("[ 4] partial decode          FAIL n={}", n);
+            fmt::Println!("[ 4] partial decode          FAIL n={}", n);
             failed += 1;
         }
     }
@@ -88,9 +89,9 @@ fn main() {
         let (_n1, _e1) = dec.Read(&mut out);
         let (_n2, e2) = dec.Read(&mut out);
         if !e2.IsNil() {
-            Println!("[ 5] odd length err          PASS");
+            fmt::Println!("[ 5] odd length err          PASS");
         } else {
-            Println!("[ 5] odd length err          FAIL");
+            fmt::Println!("[ 5] odd length err          FAIL");
             failed += 1;
         }
     }
@@ -102,9 +103,9 @@ fn main() {
         let mut out: slice<byte> = slice::__from_vec(alloc::vec![0u8; 4]);
         let (_n, e) = dec.Read(&mut out);
         if !e.IsNil() {
-            Println!("[ 6] invalid char err        PASS");
+            fmt::Println!("[ 6] invalid char err        PASS");
         } else {
-            Println!("[ 6] invalid char err        FAIL");
+            fmt::Println!("[ 6] invalid char err        FAIL");
             failed += 1;
         }
     }
@@ -126,9 +127,9 @@ fn main() {
         let (n, e) = dec.Read(&mut out);
         let raw: &[byte] = &out;
         if n == original.len() as i64 && e.IsNil() && raw == &original[..] {
-            Println!("[ 7] round-trip              PASS");
+            fmt::Println!("[ 7] round-trip              PASS");
         } else {
-            Println!("[ 7] round-trip              FAIL n={}", n);
+            fmt::Println!("[ 7] round-trip              FAIL n={}", n);
             failed += 1;
         }
     }
@@ -144,18 +145,18 @@ fn main() {
         let (n, e) = enc.Write(slice::__from_vec(data));
         let s = buf.String();
         if n == 2048 && e.IsNil() && s.Len() == 4096 {
-            Println!("[ 8] large encode chunked    PASS");
+            fmt::Println!("[ 8] large encode chunked    PASS");
         } else {
-            Println!("[ 8] large encode chunked    FAIL n={}", n);
+            fmt::Println!("[ 8] large encode chunked    FAIL n={}", n);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

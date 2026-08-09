@@ -14,8 +14,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::sync::atomic;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -26,7 +27,7 @@ fn main() {
         let x = atomic::Int32::new(0);
         x.Store(7);
         if x.Load() != 7 {
-            Println!("[ 1] Int32 Load/Store           FAIL");
+            fmt::Println!("[ 1] Int32 Load/Store           FAIL");
             failed += 1;
         } else {
             // Add returns NEW value.
@@ -54,9 +55,9 @@ fn main() {
                 && or_old == 0x10
                 && or_now == 0x11
             {
-                Println!("[ 1] Int32 ops                  PASS");
+                fmt::Println!("[ 1] Int32 ops                  PASS");
             } else {
-                Println!("[ 1] Int32 ops                  FAIL");
+                fmt::Println!("[ 1] Int32 ops                  FAIL");
                 failed += 1;
             }
         }
@@ -70,9 +71,9 @@ fn main() {
         // 0x7f..f + 1 = 0x80..0 (signed overflow → most-negative).
         // Go's Add wraps; goish uses wrapping_add so should match.
         if x.Load() == new && new == -0x80000000_00000000 {
-            Println!("[ 2] Int64 wrapping Add         PASS");
+            fmt::Println!("[ 2] Int64 wrapping Add         PASS");
         } else {
-            Println!("[ 2] Int64 wrapping Add         FAIL");
+            fmt::Println!("[ 2] Int64 wrapping Add         FAIL");
             failed += 1;
         }
     }
@@ -85,9 +86,9 @@ fn main() {
         // After And mask 0x00FFFFFF: 0x0000_FF00. After Or 0xFF00_0000:
         // 0xFF00_FF00.
         if x.Load() == 0xff00_ff00 {
-            Println!("[ 3] Uint32 And/Or compose      PASS");
+            fmt::Println!("[ 3] Uint32 And/Or compose      PASS");
         } else {
-            Println!("[ 3] Uint32 And/Or compose      FAIL");
+            fmt::Println!("[ 3] Uint32 And/Or compose      FAIL");
             failed += 1;
         }
     }
@@ -97,9 +98,9 @@ fn main() {
         let x = atomic::Uint64::new(42);
         let prev = x.Swap(0xdead_beef_cafe_babe);
         if prev == 42 && x.Load() == 0xdead_beef_cafe_babe {
-            Println!("[ 4] Uint64 Swap                PASS");
+            fmt::Println!("[ 4] Uint64 Swap                PASS");
         } else {
-            Println!("[ 4] Uint64 Swap                FAIL");
+            fmt::Println!("[ 4] Uint64 Swap                FAIL");
             failed += 1;
         }
     }
@@ -110,9 +111,9 @@ fn main() {
         x.Store(0xdead_beef);
         let prev = x.Swap(0xcafe_d00d);
         if x.Load() == 0xcafe_d00d && prev == 0xdead_beef {
-            Println!("[ 5] Uintptr Load/Store/Swap    PASS");
+            fmt::Println!("[ 5] Uintptr Load/Store/Swap    PASS");
         } else {
-            Println!("[ 5] Uintptr Load/Store/Swap    FAIL");
+            fmt::Println!("[ 5] Uintptr Load/Store/Swap    FAIL");
             failed += 1;
         }
     }
@@ -122,9 +123,9 @@ fn main() {
         let x = atomic::Uintptr::new(100);
         let new = x.Add(50);
         if new == 150 && x.Load() == 150 {
-            Println!("[ 6] Uintptr Add returns new    PASS");
+            fmt::Println!("[ 6] Uintptr Add returns new    PASS");
         } else {
-            Println!("[ 6] Uintptr Add returns new    FAIL");
+            fmt::Println!("[ 6] Uintptr Add returns new    FAIL");
             failed += 1;
         }
     }
@@ -135,9 +136,9 @@ fn main() {
         let stale = x.CompareAndSwap(0, 99);
         let fresh = x.CompareAndSwap(7, 21);
         if !stale && fresh && x.Load() == 21 {
-            Println!("[ 7] Uintptr CAS                PASS");
+            fmt::Println!("[ 7] Uintptr CAS                PASS");
         } else {
-            Println!("[ 7] Uintptr CAS                FAIL");
+            fmt::Println!("[ 7] Uintptr CAS                FAIL");
             failed += 1;
         }
     }
@@ -147,9 +148,9 @@ fn main() {
         let x = atomic::Uintptr::new(0xff00);
         let old = x.And(0x0ff0);
         if old == 0xff00 && x.Load() == 0x0f00 {
-            Println!("[ 8] Uintptr And                PASS");
+            fmt::Println!("[ 8] Uintptr And                PASS");
         } else {
-            Println!("[ 8] Uintptr And                FAIL");
+            fmt::Println!("[ 8] Uintptr And                FAIL");
             failed += 1;
         }
     }
@@ -159,9 +160,9 @@ fn main() {
         let x = atomic::Uintptr::new(0x0001);
         let old = x.Or(0x0080);
         if old == 0x0001 && x.Load() == 0x0081 {
-            Println!("[ 9] Uintptr Or                 PASS");
+            fmt::Println!("[ 9] Uintptr Or                 PASS");
         } else {
-            Println!("[ 9] Uintptr Or                 FAIL");
+            fmt::Println!("[ 9] Uintptr Or                 FAIL");
             failed += 1;
         }
     }
@@ -171,16 +172,16 @@ fn main() {
         let b = atomic::Bool::new(false);
         b.Store(true);
         if !b.Load() {
-            Println!("[10] Bool Load/Store            FAIL");
+            fmt::Println!("[10] Bool Load/Store            FAIL");
             failed += 1;
         } else {
             let prev = b.Swap(false);
             let cas_stale = b.CompareAndSwap(true, true);
             let cas_fresh = b.CompareAndSwap(false, true);
             if prev && !cas_stale && cas_fresh && b.Load() {
-                Println!("[10] Bool ops                   PASS");
+                fmt::Println!("[10] Bool ops                   PASS");
             } else {
-                Println!("[10] Bool ops                   FAIL");
+                fmt::Println!("[10] Bool ops                   FAIL");
                 failed += 1;
             }
         }
@@ -191,9 +192,9 @@ fn main() {
         const C32: atomic::Int32 = atomic::Int32::new(42);
         const CU: atomic::Uintptr = atomic::Uintptr::new(0xabc);
         if C32.Load() == 42 && CU.Load() == 0xabc {
-            Println!("[11] const fn new               PASS");
+            fmt::Println!("[11] const fn new               PASS");
         } else {
-            Println!("[11] const fn new               FAIL");
+            fmt::Println!("[11] const fn new               FAIL");
             failed += 1;
         }
     }
@@ -204,18 +205,18 @@ fn main() {
         let b: atomic::Bool = Default::default();
         let u: atomic::Uintptr = Default::default();
         if i.Load() == 0 && !b.Load() && u.Load() == 0 {
-            Println!("[12] Default zero               PASS");
+            fmt::Println!("[12] Default zero               PASS");
         } else {
-            Println!("[12] Default zero               FAIL");
+            fmt::Println!("[12] Default zero               FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

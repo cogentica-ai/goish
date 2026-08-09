@@ -5,8 +5,9 @@
 #![no_std]
 #![no_main]
 
+use goish::fmt;
 use goish::encoding::json;
-use goish::{int, make, reflect, slice, string, syscall, Sprintf};
+use goish::{int, make, reflect, slice, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -57,7 +58,7 @@ fn main() {
     };
 
     // ─── %+v recurses into every nested element ─────────────────────
-    let pv = Sprintf!("%+v", &u);
+    let pv = fmt::Sprintf!("%+v", &u);
     check(
         pv == "{Name:alice \
                Addrs:[{Street:Main Zip:1} {Street:Elm Zip:2}] \

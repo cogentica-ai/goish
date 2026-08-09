@@ -9,9 +9,10 @@ extern crate alloc;
 extern crate goish;
 
 use core::sync::atomic::{AtomicI64, Ordering};
+use goish::fmt;
 use goish::runtime::sched::schedule;
 use goish::sync::{Pool, WaitGroup};
-use goish::{go, syscall, Println};
+use goish::{go, syscall};
 
 #[goish::main]
 fn main() {
@@ -27,9 +28,9 @@ fn run_tests() {
         let p: Pool<i64> = Pool::new(|| 42);
         let v = p.Get();
         if v == 42 {
-            Println!("[ 1] Get on empty calls New  PASS");
+            fmt::Println!("[ 1] Get on empty calls New  PASS");
         } else {
-            Println!("[ 1] Get on empty calls New  FAIL got={}", v);
+            fmt::Println!("[ 1] Get on empty calls New  FAIL got={}", v);
             failed += 1;
         }
     }
@@ -40,9 +41,9 @@ fn run_tests() {
         p.Put(99);
         let v = p.Get();
         if v == 99 {
-            Println!("[ 2] Put → Get round-trip   PASS");
+            fmt::Println!("[ 2] Put → Get round-trip   PASS");
         } else {
-            Println!("[ 2] Put → Get round-trip   FAIL got={}", v);
+            fmt::Println!("[ 2] Put → Get round-trip   FAIL got={}", v);
             failed += 1;
         }
     }
@@ -61,9 +62,9 @@ fn run_tests() {
         let mut sorted = got.clone();
         sorted.sort();
         if sorted == alloc::vec![1, 2, 3] && p.__len() == 0 {
-            Println!("[ 3] Put/Get drains          PASS");
+            fmt::Println!("[ 3] Put/Get drains          PASS");
         } else {
-            Println!("[ 3] Put/Get drains          FAIL");
+            fmt::Println!("[ 3] Put/Get drains          FAIL");
             failed += 1;
         }
     }
@@ -79,9 +80,9 @@ fn run_tests() {
         let v2 = p.Get();
         let v3 = p.Get();
         if v1 == 100 && v2 == 101 && v3 == 102 && counter.load(Ordering::Relaxed) == 3 {
-            Println!("[ 4] New called per Get      PASS");
+            fmt::Println!("[ 4] New called per Get      PASS");
         } else {
-            Println!("[ 4] New called per Get      FAIL");
+            fmt::Println!("[ 4] New called per Get      FAIL");
             failed += 1;
         }
     }
@@ -99,9 +100,9 @@ fn run_tests() {
         let _ = p.Get();
         let _ = p.Get();
         if counter.load(Ordering::Relaxed) == 0 {
-            Println!("[ 5] New unused when stocked PASS");
+            fmt::Println!("[ 5] New unused when stocked PASS");
         } else {
-            Println!("[ 5] New unused when stocked FAIL count={}", counter.load(Ordering::Relaxed));
+            fmt::Println!("[ 5] New unused when stocked FAIL count={}", counter.load(Ordering::Relaxed));
             failed += 1;
         }
     }
@@ -122,9 +123,9 @@ fn run_tests() {
         wg.Wait();
         // After all 4 routines balance Put+Get, pool should be empty.
         if p.__len() == 0 {
-            Println!("[ 6] Concurrent Put/Get      PASS");
+            fmt::Println!("[ 6] Concurrent Put/Get      PASS");
         } else {
-            Println!("[ 6] Concurrent Put/Get      FAIL len={}", p.__len() as i64);
+            fmt::Println!("[ 6] Concurrent Put/Get      FAIL len={}", p.__len() as i64);
             failed += 1;
         }
     }
@@ -141,9 +142,9 @@ fn run_tests() {
         p.Put(buf);
         let buf2 = p.Get();
         if len_before == 2 && buf2.len() == 0 && buf2.capacity() >= 1024 {
-            Println!("[ 7] Buffer reuse            PASS");
+            fmt::Println!("[ 7] Buffer reuse            PASS");
         } else {
-            Println!("[ 7] Buffer reuse            FAIL");
+            fmt::Println!("[ 7] Buffer reuse            FAIL");
             failed += 1;
         }
     }
@@ -152,7 +153,7 @@ fn run_tests() {
     {
         let p: Pool<i64> = Pool::new(|| 0);
         if p.__len() != 0 {
-            Println!("[ 8] __len tracks items      FAIL initial");
+            fmt::Println!("[ 8] __len tracks items      FAIL initial");
             failed += 1;
         } else {
             p.Put(1);
@@ -162,19 +163,19 @@ fn run_tests() {
             let _ = p.Get();
             let after_get = p.__len();
             if after_put == 3 && after_get == 2 {
-                Println!("[ 8] __len tracks items      PASS");
+                fmt::Println!("[ 8] __len tracks items      PASS");
             } else {
-                Println!("[ 8] __len tracks items      FAIL put={} get={}", after_put as i64, after_get as i64);
+                fmt::Println!("[ 8] __len tracks items      FAIL put={} get={}", after_put as i64, after_get as i64);
                 failed += 1;
             }
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

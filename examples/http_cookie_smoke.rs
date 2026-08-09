@@ -13,11 +13,12 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::sync::Arc;
+use goish::fmt;
 use goish::io::{Closer, Reader, Writer};
 use goish::net;
 use goish::net::http::{self, Cookie, SameSite};
 use goish::time;
-use goish::{bytes, go, string, syscall, Println};
+use goish::{bytes, go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -28,9 +29,9 @@ fn main() {
         let c = Cookie::new(string("session"), string("abc123"));
         let s = c.String();
         if s == "session=abc123" {
-            Println!("[ 1] simple Name=Value         PASS");
+            fmt::Println!("[ 1] simple Name=Value         PASS");
         } else {
-            Println!("[ 1] simple Name=Value         FAIL got {}", s);
+            fmt::Println!("[ 1] simple Name=Value         FAIL got {}", s);
             failed += 1;
         }
     }
@@ -46,9 +47,9 @@ fn main() {
         c.MaxAge = 3600;
         let s = c.String();
         if s == "k=v; Path=/; Domain=example.com; Max-Age=3600; HttpOnly; Secure; SameSite=Lax" {
-            Println!("[ 2] full attribute set        PASS");
+            fmt::Println!("[ 2] full attribute set        PASS");
         } else {
-            Println!("[ 2] full attribute set        FAIL got {}", s);
+            fmt::Println!("[ 2] full attribute set        FAIL got {}", s);
             failed += 1;
         }
     }
@@ -59,9 +60,9 @@ fn main() {
         c.MaxAge = -1;
         let s = c.String();
         if s == "d=x; Max-Age=0" {
-            Println!("[ 3] MaxAge<0 → Max-Age=0      PASS");
+            fmt::Println!("[ 3] MaxAge<0 → Max-Age=0      PASS");
         } else {
-            Println!("[ 3] MaxAge<0 → Max-Age=0      FAIL got {}", s);
+            fmt::Println!("[ 3] MaxAge<0 → Max-Age=0      FAIL got {}", s);
             failed += 1;
         }
     }
@@ -71,9 +72,9 @@ fn main() {
         let c = Cookie::new(string("k"), string("hello, world"));
         let s = c.String();
         if s == "k=\"hello, world\"" {
-            Println!("[ 4] value with space/comma    PASS");
+            fmt::Println!("[ 4] value with space/comma    PASS");
         } else {
-            Println!("[ 4] value with space/comma    FAIL got {}", s);
+            fmt::Println!("[ 4] value with space/comma    FAIL got {}", s);
             failed += 1;
         }
     }
@@ -83,9 +84,9 @@ fn main() {
         let c = Cookie::new(string("bad name"), string("v"));
         let s = c.String();
         if s.Len() == 0 {
-            Println!("[ 5] invalid name → empty      PASS");
+            fmt::Println!("[ 5] invalid name → empty      PASS");
         } else {
-            Println!("[ 5] invalid name → empty      FAIL got {}", s);
+            fmt::Println!("[ 5] invalid name → empty      FAIL got {}", s);
             failed += 1;
         }
     }
@@ -107,9 +108,9 @@ fn main() {
             && parsed.SameSite == SameSite::StrictMode
             && parsed.MaxAge == 600;
         if ok {
-            Println!("[ 6] round-trip parse          PASS");
+            fmt::Println!("[ 6] round-trip parse          PASS");
         } else {
-            Println!("[ 6] round-trip parse          FAIL serialized={}", serialized);
+            fmt::Println!("[ 6] round-trip parse          FAIL serialized={}", serialized);
             failed += 1;
         }
     }
@@ -125,9 +126,9 @@ fn main() {
             && cookies[1].Name == "b"
             && cookies[1].Value == "two";
         if ok {
-            Println!("[ 7] ParseCookie 2 values      PASS");
+            fmt::Println!("[ 7] ParseCookie 2 values      PASS");
         } else {
-            Println!("[ 7] ParseCookie 2 values      FAIL");
+            fmt::Println!("[ 7] ParseCookie 2 values      FAIL");
             failed += 1;
         }
     }
@@ -138,9 +139,9 @@ fn main() {
         let (cs, _err) = http::ParseCookie(line);
         let ok = cs.Len() == 1 && cs[0].Value == "with space" && cs[0].Quoted;
         if ok {
-            Println!("[ 8] quoted value parse        PASS");
+            fmt::Println!("[ 8] quoted value parse        PASS");
         } else {
-            Println!("[ 8] quoted value parse        FAIL");
+            fmt::Println!("[ 8] quoted value parse        FAIL");
             failed += 1;
         }
     }
@@ -156,9 +157,9 @@ fn main() {
         let d = parsed.Expires.Day();
         let (hh, mm, ss) = parsed.Expires.Clock();
         if y == 2027 && m == 1 && d == 15 && hh == 10 && mm == 30 && ss == 45 {
-            Println!("[ 9] Expires round-trip        PASS");
+            fmt::Println!("[ 9] Expires round-trip        PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 9] Expires round-trip        FAIL serialized={} y={} m={} d={} {}:{}:{}",
                 s, y, m, d, hh, mm, ss
             );
@@ -181,7 +182,7 @@ fn main() {
         srv.Handler = mux_arc;
         let (ln, err) = net::Listen(string("tcp"), string("127.0.0.1:0"));
         if !err.IsNil() {
-            Println!("[10] Listen FAIL {}", err);
+            fmt::Println!("[10] Listen FAIL {}", err);
             failed += 1;
         } else {
             let addr = ln.Addr().String();
@@ -194,7 +195,7 @@ fn main() {
 
             let (mut conn, derr) = net::Dial(string("tcp"), addr.clone());
             if !derr.IsNil() {
-                Println!("[10] Dial FAIL {}", derr);
+                fmt::Println!("[10] Dial FAIL {}", derr);
                 failed += 1;
             } else {
                 let req = bytes("GET /login HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
@@ -245,14 +246,14 @@ fn main() {
                             && parsed.HttpOnly
                             && parsed.MaxAge == 7200
                         {
-                            Println!("[10] live server SetCookie     PASS");
+                            fmt::Println!("[10] live server SetCookie     PASS");
                         } else {
-                            Println!("[10] live server SetCookie     FAIL");
+                            fmt::Println!("[10] live server SetCookie     FAIL");
                             failed += 1;
                         }
                     }
                     None => {
-                        Println!("[10] live server SetCookie     FAIL no Set-Cookie");
+                        fmt::Println!("[10] live server SetCookie     FAIL no Set-Cookie");
                         failed += 1;
                     }
                 }
@@ -264,10 +265,10 @@ fn main() {
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 10", failed);
+        fmt::Println!("FAIL {} of 10", failed);
         syscall::Exit(1);
     }
 }

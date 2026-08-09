@@ -22,9 +22,10 @@ extern crate goish;
 
 use alloc::sync::Arc;
 
+use goish::fmt;
 use goish::net::http;
 use goish::os;
-use goish::{bytes, string, Sprintf};
+use goish::{bytes, string};
 
 #[goish::main]
 fn main() {
@@ -56,18 +57,18 @@ fn main() {
         } else {
             string("")
         };
-        let _ = w.Write(goish::convert::bytes(Sprintf!("echo: %s\n", msg)));
+        let _ = w.Write(goish::convert::bytes(fmt::Sprintf!("echo: %s\n", msg)));
     });
     mux.HandleFunc("GET /", |w, _r| {
         let _ = w.Write(bytes("hello over TLS 1.3\n"));
     });
 
     let mut srv = http::Server::new(Arc::new(mux));
-    srv.Addr = Sprintf!(":%s", port);
-    goish::Printf!("https_serve listening on :%s (TLS 1.3)\n", port);
+    srv.Addr = fmt::Sprintf!(":%s", port);
+    fmt::Printf!("https_serve listening on :%s (TLS 1.3)\n", port);
     let err = Arc::new(srv).ListenAndServeTLS(cert, key);
     if !err.IsNil() {
-        goish::Printf!("ListenAndServeTLS: %v\n", err);
+        fmt::Printf!("ListenAndServeTLS: %v\n", err);
         os::Exit(1);
     }
 }

@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::net::http;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -27,9 +28,9 @@ fn main() {
             http::NewRequest(string("GET"), string("http://x/exact"), bytes(""));
         let (_h, pat) = mux.Handler(&req);
         if pat == "/exact" {
-            Println!("[ 1] exact pattern             PASS");
+            fmt::Println!("[ 1] exact pattern             PASS");
         } else {
-            Println!("[ 1] exact pattern             FAIL got={}", pat);
+            fmt::Println!("[ 1] exact pattern             FAIL got={}", pat);
             failed += 1;
         }
     }
@@ -40,9 +41,9 @@ fn main() {
             http::NewRequest(string("GET"), string("http://x/prefix/foo/bar"), bytes(""));
         let (_h, pat) = mux.Handler(&req);
         if pat == "/prefix/" {
-            Println!("[ 2] prefix pattern            PASS");
+            fmt::Println!("[ 2] prefix pattern            PASS");
         } else {
-            Println!("[ 2] prefix pattern            FAIL got={}", pat);
+            fmt::Println!("[ 2] prefix pattern            FAIL got={}", pat);
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
         );
         let (_h, pat) = mux.Handler(&req);
         if pat == "/api/users/{id}" {
-            Println!("[ 3] wildcard pattern          PASS");
+            fmt::Println!("[ 3] wildcard pattern          PASS");
         } else {
-            Println!("[ 3] wildcard pattern          FAIL got={}", pat);
+            fmt::Println!("[ 3] wildcard pattern          FAIL got={}", pat);
             failed += 1;
         }
     }
@@ -69,18 +70,18 @@ fn main() {
             http::NewRequest(string("GET"), string("http://x/nope"), bytes(""));
         let (_h, pat) = mux.Handler(&req);
         if pat.Len() == 0 {
-            Println!("[ 4] no match → empty          PASS");
+            fmt::Println!("[ 4] no match → empty          PASS");
         } else {
-            Println!("[ 4] no match → empty          FAIL got={}", pat);
+            fmt::Println!("[ 4] no match → empty          FAIL got={}", pat);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 4/4");
+        fmt::Println!("ok 4/4");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 4", failed);
+        fmt::Println!("FAIL {} of 4", failed);
         syscall::Exit(1);
     }
 }

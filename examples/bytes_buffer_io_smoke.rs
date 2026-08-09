@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::io;
-use goish::{make, string, syscall, Println};
+use goish::{make, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -19,9 +20,9 @@ fn main() {
     // 1. MinRead constant matches Go.
     {
         if bytes::MinRead == 512 {
-            Println!("[ 1] MinRead == 512            PASS");
+            fmt::Println!("[ 1] MinRead == 512            PASS");
         } else {
-            Println!("[ 1] MinRead == 512            FAIL got={}", bytes::MinRead);
+            fmt::Println!("[ 1] MinRead == 512            FAIL got={}", bytes::MinRead);
             failed += 1;
         }
     }
@@ -32,9 +33,9 @@ fn main() {
         let mut buf = bytes::NewBuffer(make!([]goish::byte, 0));
         let (n, err) = buf.ReadFrom(&mut src);
         if err.IsNil() && n == 11 && buf.String() == "hello world" {
-            Println!("[ 2] ReadFrom drains source    PASS");
+            fmt::Println!("[ 2] ReadFrom drains source    PASS");
         } else {
-            Println!("[ 2] ReadFrom drains source    FAIL n={} body={}", n, buf.String());
+            fmt::Println!("[ 2] ReadFrom drains source    FAIL n={} body={}", n, buf.String());
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
         let mut buf = bytes::NewBuffer(make!([]goish::byte, 0));
         let (n, err) = buf.ReadFrom(&mut src);
         if err.IsNil() && n == 0 && buf.Len() == 0 {
-            Println!("[ 3] ReadFrom empty            PASS");
+            fmt::Println!("[ 3] ReadFrom empty            PASS");
         } else {
-            Println!("[ 3] ReadFrom empty            FAIL");
+            fmt::Println!("[ 3] ReadFrom empty            FAIL");
             failed += 1;
         }
     }
@@ -58,9 +59,9 @@ fn main() {
         let mut dst = bytes::NewBuffer(make!([]goish::byte, 0));
         let (n, err) = src.WriteTo(&mut dst);
         if err.IsNil() && n == 13 && dst.String() == "payload bytes" && src.Len() == 0 {
-            Println!("[ 4] WriteTo drains            PASS");
+            fmt::Println!("[ 4] WriteTo drains            PASS");
         } else {
-            Println!("[ 4] WriteTo drains            FAIL n={}", n);
+            fmt::Println!("[ 4] WriteTo drains            FAIL n={}", n);
             failed += 1;
         }
     }
@@ -71,9 +72,9 @@ fn main() {
         let mut dst = bytes::NewBuffer(make!([]goish::byte, 0));
         let (n, err) = src.WriteTo(&mut dst);
         if err.IsNil() && n == 0 && dst.Len() == 0 {
-            Println!("[ 5] WriteTo empty             PASS");
+            fmt::Println!("[ 5] WriteTo empty             PASS");
         } else {
-            Println!("[ 5] WriteTo empty             FAIL");
+            fmt::Println!("[ 5] WriteTo empty             FAIL");
             failed += 1;
         }
     }
@@ -87,9 +88,9 @@ fn main() {
         let mut dst = bytes::NewBuffer(make!([]goish::byte, 0));
         let (_, _) = mid.WriteTo(&mut dst);
         if dst.String() == original {
-            Println!("[ 6] round-trip preserves      PASS");
+            fmt::Println!("[ 6] round-trip preserves      PASS");
         } else {
-            Println!("[ 6] round-trip preserves      FAIL got={}", dst.String());
+            fmt::Println!("[ 6] round-trip preserves      FAIL got={}", dst.String());
             failed += 1;
         }
     }
@@ -100,18 +101,18 @@ fn main() {
         let mut buf = bytes::NewBuffer(make!([]goish::byte, 0));
         let (n, err) = io::ReaderFrom::ReadFrom(&mut buf, &mut src);
         if err.IsNil() && n == 15 && buf.String() == "trait-fast-path" {
-            Println!("[ 7] trait ReaderFrom          PASS");
+            fmt::Println!("[ 7] trait ReaderFrom          PASS");
         } else {
-            Println!("[ 7] trait ReaderFrom          FAIL");
+            fmt::Println!("[ 7] trait ReaderFrom          FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 7/7");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 7", failed);
+        fmt::Println!("FAIL {} of 7", failed);
         syscall::Exit(1);
     }
 }

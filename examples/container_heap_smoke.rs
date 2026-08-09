@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::container::heap::{self, Interface};
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 // IntHeap: a min-heap of i64. Mirrors Go's example_test.go.
 struct IntHeap(alloc::vec::Vec<i64>);
@@ -50,9 +51,9 @@ fn main() {
         }
         let want: alloc::vec::Vec<i64> = alloc::vec![1, 1, 2, 3, 3, 4, 5, 5, 5, 6, 9];
         if got == want {
-            Println!("[ 1] Push/Pop ascending      PASS");
+            fmt::Println!("[ 1] Push/Pop ascending      PASS");
         } else {
-            Println!("[ 1] Push/Pop ascending      FAIL");
+            fmt::Println!("[ 1] Push/Pop ascending      FAIL");
             failed += 1;
         }
     }
@@ -64,9 +65,9 @@ fn main() {
         // The min should be at index 0.
         let min = heap::Pop(&mut h);
         if min == 1 {
-            Println!("[ 2] Init heapifies          PASS");
+            fmt::Println!("[ 2] Init heapifies          PASS");
         } else {
-            Println!("[ 2] Init heapifies          FAIL min={}", min);
+            fmt::Println!("[ 2] Init heapifies          FAIL min={}", min);
             failed += 1;
         }
     }
@@ -76,9 +77,9 @@ fn main() {
         let mut h = IntHeap(alloc::vec::Vec::new());
         heap::Init(&mut h);
         if h.Len() == 0 {
-            Println!("[ 3] Empty heap              PASS");
+            fmt::Println!("[ 3] Empty heap              PASS");
         } else {
-            Println!("[ 3] Empty heap              FAIL");
+            fmt::Println!("[ 3] Empty heap              FAIL");
             failed += 1;
         }
     }
@@ -89,9 +90,9 @@ fn main() {
         heap::Push(&mut h, 42);
         let v = heap::Pop(&mut h);
         if v == 42 && h.Len() == 0 {
-            Println!("[ 4] Single Push/Pop         PASS");
+            fmt::Println!("[ 4] Single Push/Pop         PASS");
         } else {
-            Println!("[ 4] Single Push/Pop         FAIL");
+            fmt::Println!("[ 4] Single Push/Pop         FAIL");
             failed += 1;
         }
     }
@@ -118,9 +119,9 @@ fn main() {
         let mut sorted_got = got.clone();
         sorted_got.sort();
         if all == want && got == sorted_got {
-            Println!("[ 5] Remove at index         PASS");
+            fmt::Println!("[ 5] Remove at index         PASS");
         } else {
-            Println!("[ 5] Remove at index         FAIL");
+            fmt::Println!("[ 5] Remove at index         FAIL");
             failed += 1;
         }
     }
@@ -135,9 +136,9 @@ fn main() {
         // Now the root should be the smallest of the remaining set.
         let min = heap::Pop(&mut h);
         if min == 5 {
-            Println!("[ 6] Fix re-establishes      PASS");
+            fmt::Println!("[ 6] Fix re-establishes      PASS");
         } else {
-            Println!("[ 6] Fix re-establishes      FAIL min={}", min);
+            fmt::Println!("[ 6] Fix re-establishes      FAIL min={}", min);
             failed += 1;
         }
     }
@@ -158,18 +159,18 @@ fn main() {
         let mut want = inputs.clone();
         want.sort();
         if got == want {
-            Println!("[ 7] Stress 15 ints sorted   PASS");
+            fmt::Println!("[ 7] Stress 15 ints sorted   PASS");
         } else {
-            Println!("[ 7] Stress 15 ints sorted   FAIL");
+            fmt::Println!("[ 7] Stress 15 ints sorted   FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 7/7");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 7");
+        fmt::Println!("FAIL", failed, "of 7");
         syscall::Exit(1);
     }
 }

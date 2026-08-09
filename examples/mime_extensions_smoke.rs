@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::mime;
 use goish::types::int;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -25,9 +26,9 @@ fn main() {
             && exts[0i64] == string(".jpeg")
             && exts[1i64] == string(".jpg")
         {
-            Println!("[ 1] ExtByType image/jpeg    PASS");
+            fmt::Println!("[ 1] ExtByType image/jpeg    PASS");
         } else {
-            Println!("[ 1] ExtByType image/jpeg    FAIL n={}", n);
+            fmt::Println!("[ 1] ExtByType image/jpeg    FAIL n={}", n);
             failed += 1;
         }
     }
@@ -41,9 +42,9 @@ fn main() {
             && exts[0i64] == string(".htm")
             && exts[1i64] == string(".html")
         {
-            Println!("[ 2] ExtByType text/html     PASS");
+            fmt::Println!("[ 2] ExtByType text/html     PASS");
         } else {
-            Println!("[ 2] ExtByType text/html     FAIL n={}", n);
+            fmt::Println!("[ 2] ExtByType text/html     FAIL n={}", n);
             failed += 1;
         }
     }
@@ -53,9 +54,9 @@ fn main() {
         let (exts, err) = mime::ExtensionsByType(string("text/html; charset=utf-8"));
         let n = exts.Len() as int;
         if err.IsNil() && n == 2 {
-            Println!("[ 3] ExtByType w/ charset    PASS");
+            fmt::Println!("[ 3] ExtByType w/ charset    PASS");
         } else {
-            Println!("[ 3] ExtByType w/ charset    FAIL n={}", n);
+            fmt::Println!("[ 3] ExtByType w/ charset    FAIL n={}", n);
             failed += 1;
         }
     }
@@ -64,9 +65,9 @@ fn main() {
     {
         let (exts, err) = mime::ExtensionsByType(string("application/x-unknown-foo"));
         if err.IsNil() && exts.Len() == 0 {
-            Println!("[ 4] ExtByType unknown       PASS");
+            fmt::Println!("[ 4] ExtByType unknown       PASS");
         } else {
-            Println!("[ 4] ExtByType unknown       FAIL");
+            fmt::Println!("[ 4] ExtByType unknown       FAIL");
             failed += 1;
         }
     }
@@ -75,9 +76,9 @@ fn main() {
     {
         let (_exts, err) = mime::ExtensionsByType(string("not a media type"));
         if !err.IsNil() {
-            Println!("[ 5] ExtByType invalid       PASS");
+            fmt::Println!("[ 5] ExtByType invalid       PASS");
         } else {
-            Println!("[ 5] ExtByType invalid       FAIL");
+            fmt::Println!("[ 5] ExtByType invalid       FAIL");
             failed += 1;
         }
     }
@@ -86,14 +87,14 @@ fn main() {
     {
         let err = mime::AddExtensionType(string(".myext"), string("application/x-myext"));
         if !err.IsNil() {
-            Println!("[ 6] Add new ext             FAIL err={}", err.Error());
+            fmt::Println!("[ 6] Add new ext             FAIL err={}", err.Error());
             failed += 1;
         } else {
             let got = mime::TypeByExtension(string(".myext"));
             if got == string("application/x-myext") {
-                Println!("[ 6] Add new ext             PASS");
+                fmt::Println!("[ 6] Add new ext             PASS");
             } else {
-                Println!("[ 6] Add new ext             FAIL got {}", got);
+                fmt::Println!("[ 6] Add new ext             FAIL got {}", got);
                 failed += 1;
             }
         }
@@ -103,9 +104,9 @@ fn main() {
     {
         let err = mime::AddExtensionType(string("noLeadingDot"), string("text/plain"));
         if !err.IsNil() {
-            Println!("[ 7] Add no leading dot      PASS");
+            fmt::Println!("[ 7] Add no leading dot      PASS");
         } else {
-            Println!("[ 7] Add no leading dot      FAIL");
+            fmt::Println!("[ 7] Add no leading dot      FAIL");
             failed += 1;
         }
     }
@@ -116,9 +117,9 @@ fn main() {
         let got = mime::TypeByExtension(string(".mytxt"));
         // Should contain "charset=utf-8" because text/*.
         if goish::strings::Contains(got.clone(), string("charset=utf-8")) {
-            Println!("[ 8] Add text/* + charset    PASS");
+            fmt::Println!("[ 8] Add text/* + charset    PASS");
         } else {
-            Println!("[ 8] Add text/* + charset    FAIL got {}", got);
+            fmt::Println!("[ 8] Add text/* + charset    FAIL got {}", got);
             failed += 1;
         }
     }
@@ -129,9 +130,9 @@ fn main() {
         let (exts, err) = mime::ExtensionsByType(string("application/x-myext2"));
         let n = exts.Len() as int;
         if err.IsNil() && n >= 1 && exts[0i64] == string(".myext2") {
-            Println!("[ 9] Add flows to ExtByType  PASS");
+            fmt::Println!("[ 9] Add flows to ExtByType  PASS");
         } else {
-            Println!("[ 9] Add flows to ExtByType  FAIL n={}", n);
+            fmt::Println!("[ 9] Add flows to ExtByType  FAIL n={}", n);
             failed += 1;
         }
     }
@@ -140,18 +141,18 @@ fn main() {
     {
         let got = mime::TypeByExtension(string(".png"));
         if got == string("image/png") {
-            Println!("[10] Builtin .png            PASS");
+            fmt::Println!("[10] Builtin .png            PASS");
         } else {
-            Println!("[10] Builtin .png            FAIL got {}", got);
+            fmt::Println!("[10] Builtin .png            FAIL got {}", got);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

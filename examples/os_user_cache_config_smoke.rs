@@ -12,9 +12,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::os;
 use goish::strings;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -26,9 +27,9 @@ fn main() {
     {
         let (cache, err) = os::UserCacheDir();
         if err.IsNil() && cache.Len() > 0 {
-            Println!("[ 1] UserCacheDir non-empty    PASS");
+            fmt::Println!("[ 1] UserCacheDir non-empty    PASS");
         } else {
-            Println!("[ 1] UserCacheDir non-empty    FAIL");
+            fmt::Println!("[ 1] UserCacheDir non-empty    FAIL");
             failed += 1;
         }
     }
@@ -37,9 +38,9 @@ fn main() {
     {
         let (cfg, err) = os::UserConfigDir();
         if err.IsNil() && cfg.Len() > 0 {
-            Println!("[ 2] UserConfigDir non-empty   PASS");
+            fmt::Println!("[ 2] UserConfigDir non-empty   PASS");
         } else {
-            Println!("[ 2] UserConfigDir non-empty   FAIL");
+            fmt::Println!("[ 2] UserConfigDir non-empty   FAIL");
             failed += 1;
         }
     }
@@ -53,13 +54,13 @@ fn main() {
             if strings::HasPrefix(cache.clone(), home.clone())
                 && strings::HasSuffix(cache.clone(), string("/.cache"))
             {
-                Println!("[ 3] UserCacheDir HOME/.cache  PASS");
+                fmt::Println!("[ 3] UserCacheDir HOME/.cache  PASS");
             } else {
-                Println!("[ 3] UserCacheDir HOME/.cache  FAIL got=", cache);
+                fmt::Println!("[ 3] UserCacheDir HOME/.cache  FAIL got=", cache);
                 failed += 1;
             }
         } else {
-            Println!("[ 3] UserCacheDir HOME/.cache  SKIP (XDG_CACHE_HOME or HOME)");
+            fmt::Println!("[ 3] UserCacheDir HOME/.cache  SKIP (XDG_CACHE_HOME or HOME)");
         }
     }
 
@@ -71,21 +72,21 @@ fn main() {
             if strings::HasPrefix(cfg.clone(), home.clone())
                 && strings::HasSuffix(cfg.clone(), string("/.config"))
             {
-                Println!("[ 4] UserConfigDir HOME/.config PASS");
+                fmt::Println!("[ 4] UserConfigDir HOME/.config PASS");
             } else {
-                Println!("[ 4] UserConfigDir HOME/.config FAIL got=", cfg);
+                fmt::Println!("[ 4] UserConfigDir HOME/.config FAIL got=", cfg);
                 failed += 1;
             }
         } else {
-            Println!("[ 4] UserConfigDir HOME/.config SKIP (XDG_CONFIG_HOME or HOME)");
+            fmt::Println!("[ 4] UserConfigDir HOME/.config SKIP (XDG_CONFIG_HOME or HOME)");
         }
     }
 
     if failed == 0 {
-        Println!("ok 4/4");
+        fmt::Println!("ok 4/4");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 4");
+        fmt::Println!("FAIL", failed, "of 4");
         syscall::Exit(1);
     }
 }

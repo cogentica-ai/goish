@@ -15,9 +15,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::strings;
 use goish::unicode;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -70,7 +71,7 @@ fn main() {
     ];
     for (a, b, want) in vecs {
         if strings::EqualFold(*a, *b) != *want {
-            Println!("EqualFold mismatch:", *a, *b);
+            fmt::Println!("EqualFold mismatch:", *a, *b);
             die(b"t2: EqualFold vector\n");
         }
     }

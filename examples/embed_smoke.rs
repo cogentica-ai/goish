@@ -31,13 +31,14 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::compress::gzip;
 use goish::embed;
 use goish::errors;
 use goish::io::fs;
 use goish::io::fs::ReadDirFile;
 use goish::strings;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 goish::embed! {
     #[embed("embed_fixtures")]
@@ -79,7 +80,7 @@ fn walk_lines(fsys: &embed::FS) -> Vec<String> {
             return err;
         }
         let (info, _) = d.Info();
-        let line = goish::fmt::Sprintf!(
+        let line = fmt::Sprintf!(
             "%s dir=%t size=%d",
             path.clone(),
             d.IsDir(),
@@ -90,7 +91,7 @@ fn walk_lines(fsys: &embed::FS) -> Vec<String> {
         goish::errors::nil
     });
     if err != goish::nil {
-        Println!("walk error:", err.Error());
+        fmt::Println!("walk error:", err.Error());
         die(b"walk: unexpected error\n");
     }
     out.into_inner()
@@ -117,7 +118,7 @@ fn main() {
     check(got.len() == want.len(), b"t1: walk entry count\n");
     for (g, w) in got.iter().zip(want) {
         if g != w {
-            Println!("walk got:", g.as_str(), "want:", *w);
+            fmt::Println!("walk got:", g.as_str(), "want:", *w);
             die(b"t1: walk mismatch\n");
         }
     }

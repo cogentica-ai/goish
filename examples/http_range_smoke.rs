@@ -7,8 +7,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net::http;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -18,9 +19,9 @@ fn main() {
     {
         let (rs, err) = http::ParseRange(string("bytes=0-99"), 1000);
         if err.IsNil() && rs.Len() == 1 && rs[0].Start == 0 && rs[0].Length == 100 {
-            Println!("[ 1] simple range              PASS");
+            fmt::Println!("[ 1] simple range              PASS");
         } else {
-            Println!("[ 1] simple range              FAIL");
+            fmt::Println!("[ 1] simple range              FAIL");
             failed += 1;
         }
     }
@@ -29,9 +30,9 @@ fn main() {
     {
         let (rs, err) = http::ParseRange(string("bytes=200-"), 1000);
         if err.IsNil() && rs.Len() == 1 && rs[0].Start == 200 && rs[0].Length == 800 {
-            Println!("[ 2] open-ended range          PASS");
+            fmt::Println!("[ 2] open-ended range          PASS");
         } else {
-            Println!("[ 2] open-ended range          FAIL");
+            fmt::Println!("[ 2] open-ended range          FAIL");
             failed += 1;
         }
     }
@@ -40,9 +41,9 @@ fn main() {
     {
         let (rs, err) = http::ParseRange(string("bytes=-50"), 1000);
         if err.IsNil() && rs.Len() == 1 && rs[0].Start == 950 && rs[0].Length == 50 {
-            Println!("[ 3] suffix range              PASS");
+            fmt::Println!("[ 3] suffix range              PASS");
         } else {
-            Println!("[ 3] suffix range              FAIL");
+            fmt::Println!("[ 3] suffix range              FAIL");
             failed += 1;
         }
     }
@@ -51,9 +52,9 @@ fn main() {
     {
         let (rs, err) = http::ParseRange(string("bytes=0-99,200-299"), 1000);
         if err.IsNil() && rs.Len() == 2 && rs[0].Length == 100 && rs[1].Start == 200 {
-            Println!("[ 4] multi-range               PASS");
+            fmt::Println!("[ 4] multi-range               PASS");
         } else {
-            Println!("[ 4] multi-range               FAIL n={}", rs.Len());
+            fmt::Println!("[ 4] multi-range               FAIL n={}", rs.Len());
             failed += 1;
         }
     }
@@ -62,9 +63,9 @@ fn main() {
     {
         let (rs, err) = http::ParseRange(string(""), 1000);
         if err.IsNil() && rs.Len() == 0 {
-            Println!("[ 5] empty → no ranges         PASS");
+            fmt::Println!("[ 5] empty → no ranges         PASS");
         } else {
-            Println!("[ 5] empty → no ranges         FAIL");
+            fmt::Println!("[ 5] empty → no ranges         FAIL");
             failed += 1;
         }
     }
@@ -73,9 +74,9 @@ fn main() {
     {
         let (_rs, err) = http::ParseRange(string("not a range"), 1000);
         if !err.IsNil() {
-            Println!("[ 6] malformed → error         PASS");
+            fmt::Println!("[ 6] malformed → error         PASS");
         } else {
-            Println!("[ 6] malformed → error         FAIL");
+            fmt::Println!("[ 6] malformed → error         FAIL");
             failed += 1;
         }
     }
@@ -85,18 +86,18 @@ fn main() {
         let r = http::HttpRange { Start: 0, Length: 100 };
         let s = r.ContentRange(1000);
         if s == "bytes 0-99/1000" {
-            Println!("[ 7] ContentRange format       PASS");
+            fmt::Println!("[ 7] ContentRange format       PASS");
         } else {
-            Println!("[ 7] ContentRange format       FAIL got={}", s);
+            fmt::Println!("[ 7] ContentRange format       FAIL got={}", s);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 7/7");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 7", failed);
+        fmt::Println!("FAIL {} of 7", failed);
         syscall::Exit(1);
     }
 }

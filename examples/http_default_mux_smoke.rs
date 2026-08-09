@@ -11,11 +11,12 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{bytes, go, string, syscall, Println};
+use goish::{bytes, go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -43,18 +44,18 @@ fn main() {
     let (body, _) = io::ReadAll(&mut resp.Body);
     let _ = io::Closer::Close(&mut resp.Body);
     if resp.StatusCode == 200 && body_eq(&body, b"from default mux\n") {
-        Println!("[ 1] DefaultServeMux dispatch  PASS");
+        fmt::Println!("[ 1] DefaultServeMux dispatch  PASS");
     } else {
-        Println!("[ 1] DefaultServeMux dispatch  FAIL status={}", resp.StatusCode);
+        fmt::Println!("[ 1] DefaultServeMux dispatch  FAIL status={}", resp.StatusCode);
         failed += 1;
     }
     let _ = srv_arc.Shutdown(time::Second);
 
     if failed == 0 {
-        Println!("ok 1/1");
+        fmt::Println!("ok 1/1");
         syscall::Exit(0);
     } else {
-        Println!("FAIL");
+        fmt::Println!("FAIL");
         syscall::Exit(1);
     }
 }

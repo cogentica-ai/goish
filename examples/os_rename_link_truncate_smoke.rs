@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::os;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -30,9 +31,9 @@ fn main() {
         let (_, e_dst) = os::Stat(dst.clone());
         let (_, e_src) = os::Stat(src.clone());
         if err.IsNil() && e_dst.IsNil() && !e_src.IsNil() {
-            Println!("[ 1] Rename moves file         PASS");
+            fmt::Println!("[ 1] Rename moves file         PASS");
         } else {
-            Println!("[ 1] Rename moves file         FAIL");
+            fmt::Println!("[ 1] Rename moves file         FAIL");
             failed += 1;
         }
     }
@@ -42,9 +43,9 @@ fn main() {
         let _ = os::Mkdir(string("/tmp/goish-rlt-smoke/adir"), 0o755);
         let err = os::Rename(dst.clone(), string("/tmp/goish-rlt-smoke/adir"));
         if !err.IsNil() {
-            Println!("[ 2] Rename onto dir → err     PASS");
+            fmt::Println!("[ 2] Rename onto dir → err     PASS");
         } else {
-            Println!("[ 2] Rename onto dir → err     FAIL");
+            fmt::Println!("[ 2] Rename onto dir → err     FAIL");
             failed += 1;
         }
     }
@@ -56,9 +57,9 @@ fn main() {
             string("/tmp/goish-rlt-smoke/whatever"),
         );
         if !err.IsNil() {
-            Println!("[ 3] Rename missing → err      PASS");
+            fmt::Println!("[ 3] Rename missing → err      PASS");
         } else {
-            Println!("[ 3] Rename missing → err      FAIL");
+            fmt::Println!("[ 3] Rename missing → err      FAIL");
             failed += 1;
         }
     }
@@ -69,9 +70,9 @@ fn main() {
         let err = os::Link(dst.clone(), link.clone());
         let (data, derr) = os::ReadFile(link.clone());
         if err.IsNil() && derr.IsNil() && data.Len() == 5 {
-            Println!("[ 4] Link hardlink             PASS");
+            fmt::Println!("[ 4] Link hardlink             PASS");
         } else {
-            Println!("[ 4] Link hardlink             FAIL");
+            fmt::Println!("[ 4] Link hardlink             FAIL");
             failed += 1;
         }
     }
@@ -80,9 +81,9 @@ fn main() {
     {
         let err = os::Link(dst.clone(), string("/tmp/goish-rlt-smoke/hardlink"));
         if !err.IsNil() {
-            Println!("[ 5] Link existing → err       PASS");
+            fmt::Println!("[ 5] Link existing → err       PASS");
         } else {
-            Println!("[ 5] Link existing → err       FAIL");
+            fmt::Println!("[ 5] Link existing → err       FAIL");
             failed += 1;
         }
     }
@@ -92,9 +93,9 @@ fn main() {
         let err = os::Truncate(dst.clone(), 3);
         let (fi, ferr) = os::Stat(dst.clone());
         if err.IsNil() && ferr.IsNil() && fi.Size() == 3 {
-            Println!("[ 6] Truncate shrinks          PASS");
+            fmt::Println!("[ 6] Truncate shrinks          PASS");
         } else {
-            Println!("[ 6] Truncate shrinks          FAIL");
+            fmt::Println!("[ 6] Truncate shrinks          FAIL");
             failed += 1;
         }
     }
@@ -104,9 +105,9 @@ fn main() {
         let err = os::Truncate(dst.clone(), 100);
         let (fi, ferr) = os::Stat(dst.clone());
         if err.IsNil() && ferr.IsNil() && fi.Size() == 100 {
-            Println!("[ 7] Truncate grows            PASS");
+            fmt::Println!("[ 7] Truncate grows            PASS");
         } else {
-            Println!("[ 7] Truncate grows            FAIL");
+            fmt::Println!("[ 7] Truncate grows            FAIL");
             failed += 1;
         }
     }
@@ -115,9 +116,9 @@ fn main() {
     {
         let err = os::Truncate(string("/tmp/goish-rlt-smoke/missing.txt"), 10);
         if !err.IsNil() {
-            Println!("[ 8] Truncate missing → err    PASS");
+            fmt::Println!("[ 8] Truncate missing → err    PASS");
         } else {
-            Println!("[ 8] Truncate missing → err    FAIL");
+            fmt::Println!("[ 8] Truncate missing → err    FAIL");
             failed += 1;
         }
     }
@@ -125,10 +126,10 @@ fn main() {
     let _ = os::RemoveAll(dir);
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

@@ -9,10 +9,11 @@ extern crate alloc;
 extern crate goish;
 
 use core::sync::atomic::{AtomicI32, Ordering};
+use goish::fmt;
 use goish::string;
 use goish::sync;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 static CALLS: AtomicI32 = AtomicI32::new(0);
 static EXPENSIVE: AtomicI32 = AtomicI32::new(0);
@@ -31,9 +32,9 @@ fn main() {
         g();
         g();
         if CALLS.load(Ordering::SeqCst) == 1 {
-            Println!("[ 1] OnceFunc once             PASS");
+            fmt::Println!("[ 1] OnceFunc once             PASS");
         } else {
-            Println!("[ 1] OnceFunc once             FAIL: ", CALLS.load(Ordering::SeqCst));
+            fmt::Println!("[ 1] OnceFunc once             FAIL: ", CALLS.load(Ordering::SeqCst));
             failed += 1;
         }
     }
@@ -53,9 +54,9 @@ fn main() {
             && c == 42
             && EXPENSIVE.load(Ordering::SeqCst) == 1
         {
-            Println!("[ 2] OnceValue once            PASS");
+            fmt::Println!("[ 2] OnceValue once            PASS");
         } else {
-            Println!("[ 2] OnceValue once            FAIL");
+            fmt::Println!("[ 2] OnceValue once            FAIL");
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
         let a = v();
         let b = v();
         if a == string("hello") && b == string("hello") {
-            Println!("[ 3] OnceValue string          PASS");
+            fmt::Println!("[ 3] OnceValue string          PASS");
         } else {
-            Println!("[ 3] OnceValue string          FAIL");
+            fmt::Println!("[ 3] OnceValue string          FAIL");
             failed += 1;
         }
     }
@@ -88,9 +89,9 @@ fn main() {
         let a = v();
         let b = v();
         if a == 55 && b == 55 {
-            Println!("[ 4] OnceValue captures        PASS");
+            fmt::Println!("[ 4] OnceValue captures        PASS");
         } else {
-            Println!("[ 4] OnceValue captures        FAIL");
+            fmt::Println!("[ 4] OnceValue captures        FAIL");
             failed += 1;
         }
     }
@@ -103,9 +104,9 @@ fn main() {
         let (a, b) = p();
         let (c, d) = p();
         if a == 7 && c == 7 && b == string("widgets") && d == string("widgets") {
-            Println!("[ 5] OnceValues pair           PASS");
+            fmt::Println!("[ 5] OnceValues pair           PASS");
         } else {
-            Println!("[ 5] OnceValues pair           FAIL");
+            fmt::Println!("[ 5] OnceValues pair           FAIL");
             failed += 1;
         }
     }
@@ -121,18 +122,18 @@ fn main() {
         let _ = p();
         let _ = p();
         if RUNS.load(Ordering::SeqCst) == 1 {
-            Println!("[ 6] OnceValues once           PASS");
+            fmt::Println!("[ 6] OnceValues once           PASS");
         } else {
-            Println!("[ 6] OnceValues once           FAIL");
+            fmt::Println!("[ 6] OnceValues once           FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 6");
+        fmt::Println!("FAIL", failed, "of 6");
         syscall::Exit(1);
     }
 }

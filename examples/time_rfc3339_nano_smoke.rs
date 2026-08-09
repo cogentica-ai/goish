@@ -9,8 +9,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::time::{Date, RFC3339, RFC3339Nano};
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -21,9 +22,9 @@ fn main() {
         let t = Date(2026, 5, 1, 12, 0, 0, 0, goish::time::UTC);
         let got = t.Format(string(RFC3339Nano));
         if got == "2026-05-01T12:00:00Z" {
-            Println!("[ 1] nsec=0 omits '.'           PASS");
+            fmt::Println!("[ 1] nsec=0 omits '.'           PASS");
         } else {
-            Println!("[ 1] nsec=0 omits '.'           FAIL got=", got);
+            fmt::Println!("[ 1] nsec=0 omits '.'           FAIL got=", got);
             failed += 1;
         }
     }
@@ -33,9 +34,9 @@ fn main() {
         let t = Date(2026, 5, 1, 12, 0, 0, 500_000_000, goish::time::UTC);
         let got = t.Format(string(RFC3339Nano));
         if got == "2026-05-01T12:00:00.5Z" {
-            Println!("[ 2] nsec=5e8 → .5             PASS");
+            fmt::Println!("[ 2] nsec=5e8 → .5             PASS");
         } else {
-            Println!("[ 2] nsec=5e8 → .5             FAIL got=", got);
+            fmt::Println!("[ 2] nsec=5e8 → .5             FAIL got=", got);
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
         let t = Date(2026, 5, 1, 12, 0, 0, 123_456_789, goish::time::UTC);
         let got = t.Format(string(RFC3339Nano));
         if got == "2026-05-01T12:00:00.123456789Z" {
-            Println!("[ 3] full 9 digits             PASS");
+            fmt::Println!("[ 3] full 9 digits             PASS");
         } else {
-            Println!("[ 3] full 9 digits             FAIL got=", got);
+            fmt::Println!("[ 3] full 9 digits             FAIL got=", got);
             failed += 1;
         }
     }
@@ -58,9 +59,9 @@ fn main() {
         let t = Date(2026, 5, 1, 12, 0, 0, 1, goish::time::UTC);
         let got = t.Format(string(RFC3339Nano));
         if got == "2026-05-01T12:00:00.000000001Z" {
-            Println!("[ 4] nsec=1 leading zeros      PASS");
+            fmt::Println!("[ 4] nsec=1 leading zeros      PASS");
         } else {
-            Println!("[ 4] nsec=1 leading zeros      FAIL got=", got);
+            fmt::Println!("[ 4] nsec=1 leading zeros      FAIL got=", got);
             failed += 1;
         }
     }
@@ -70,9 +71,9 @@ fn main() {
         let t = Date(2026, 5, 1, 12, 0, 0, 100_000_000, goish::time::UTC);
         let got = t.Format(string(RFC3339Nano));
         if got == "2026-05-01T12:00:00.1Z" {
-            Println!("[ 5] nsec=1e8 → .1             PASS");
+            fmt::Println!("[ 5] nsec=1e8 → .1             PASS");
         } else {
-            Println!("[ 5] nsec=1e8 → .1             FAIL got=", got);
+            fmt::Println!("[ 5] nsec=1e8 → .1             FAIL got=", got);
             failed += 1;
         }
     }
@@ -82,18 +83,18 @@ fn main() {
         let t = Date(2026, 5, 1, 12, 0, 0, 123_456_789, goish::time::UTC);
         let got = t.Format(string(RFC3339));
         if got == "2026-05-01T12:00:00Z" {
-            Println!("[ 6] RFC3339 strips fractional PASS");
+            fmt::Println!("[ 6] RFC3339 strips fractional PASS");
         } else {
-            Println!("[ 6] RFC3339 strips fractional FAIL got=", got);
+            fmt::Println!("[ 6] RFC3339 strips fractional FAIL got=", got);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 6");
+        fmt::Println!("FAIL", failed, "of 6");
         syscall::Exit(1);
     }
 }

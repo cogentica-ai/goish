@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net;
 use goish::string;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -24,9 +25,9 @@ fn main() {
             && ip.String() == string("192.0.2.1")
             && network.IP.String() == string("192.0.2.0")
         {
-            Println!("[ 1] ParseCIDR happy           PASS");
+            fmt::Println!("[ 1] ParseCIDR happy           PASS");
         } else {
-            Println!("[ 1] ParseCIDR happy           FAIL");
+            fmt::Println!("[ 1] ParseCIDR happy           FAIL");
             failed += 1;
         }
     }
@@ -35,9 +36,9 @@ fn main() {
     {
         let (_, network, err) = net::ParseCIDR(string("0.0.0.0/0"));
         if err.IsNil() && network.IP.String() == string("0.0.0.0") {
-            Println!("[ 2] ParseCIDR /0              PASS");
+            fmt::Println!("[ 2] ParseCIDR /0              PASS");
         } else {
-            Println!("[ 2] ParseCIDR /0              FAIL");
+            fmt::Println!("[ 2] ParseCIDR /0              FAIL");
             failed += 1;
         }
     }
@@ -46,9 +47,9 @@ fn main() {
     {
         let (_, network, err) = net::ParseCIDR(string("10.1.2.3/32"));
         if err.IsNil() && network.IP.String() == string("10.1.2.3") {
-            Println!("[ 3] ParseCIDR /32             PASS");
+            fmt::Println!("[ 3] ParseCIDR /32             PASS");
         } else {
-            Println!("[ 3] ParseCIDR /32             FAIL");
+            fmt::Println!("[ 3] ParseCIDR /32             FAIL");
             failed += 1;
         }
     }
@@ -57,9 +58,9 @@ fn main() {
     {
         let (_, _, err) = net::ParseCIDR(string("192.0.2.1"));
         if !err.IsNil() {
-            Println!("[ 4] ParseCIDR no-slash        PASS");
+            fmt::Println!("[ 4] ParseCIDR no-slash        PASS");
         } else {
-            Println!("[ 4] ParseCIDR no-slash        FAIL");
+            fmt::Println!("[ 4] ParseCIDR no-slash        FAIL");
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
     {
         let (_, _, err) = net::ParseCIDR(string("999.0.0.1/24"));
         if !err.IsNil() {
-            Println!("[ 5] ParseCIDR bad IP          PASS");
+            fmt::Println!("[ 5] ParseCIDR bad IP          PASS");
         } else {
-            Println!("[ 5] ParseCIDR bad IP          FAIL");
+            fmt::Println!("[ 5] ParseCIDR bad IP          FAIL");
             failed += 1;
         }
     }
@@ -79,9 +80,9 @@ fn main() {
     {
         let (_, _, err) = net::ParseCIDR(string("10.0.0.0/33"));
         if !err.IsNil() {
-            Println!("[ 6] ParseCIDR bad prefix      PASS");
+            fmt::Println!("[ 6] ParseCIDR bad prefix      PASS");
         } else {
-            Println!("[ 6] ParseCIDR bad prefix      FAIL");
+            fmt::Println!("[ 6] ParseCIDR bad prefix      FAIL");
             failed += 1;
         }
     }
@@ -90,9 +91,9 @@ fn main() {
     {
         let (_, _, err) = net::ParseCIDR(string("10.0.0.0/x"));
         if !err.IsNil() {
-            Println!("[ 7] ParseCIDR non-num         PASS");
+            fmt::Println!("[ 7] ParseCIDR non-num         PASS");
         } else {
-            Println!("[ 7] ParseCIDR non-num         FAIL");
+            fmt::Println!("[ 7] ParseCIDR non-num         FAIL");
             failed += 1;
         }
     }
@@ -104,9 +105,9 @@ fn main() {
             && network.Contains(net::IPv4(192, 168, 1, 0))
             && network.Contains(net::IPv4(192, 168, 1, 255))
         {
-            Println!("[ 8] Contains within           PASS");
+            fmt::Println!("[ 8] Contains within           PASS");
         } else {
-            Println!("[ 8] Contains within           FAIL");
+            fmt::Println!("[ 8] Contains within           FAIL");
             failed += 1;
         }
     }
@@ -117,9 +118,9 @@ fn main() {
         if !network.Contains(net::IPv4(192, 168, 2, 1))
             && !network.Contains(net::IPv4(10, 0, 0, 1))
         {
-            Println!("[ 9] Contains outside          PASS");
+            fmt::Println!("[ 9] Contains outside          PASS");
         } else {
-            Println!("[ 9] Contains outside          FAIL");
+            fmt::Println!("[ 9] Contains outside          FAIL");
             failed += 1;
         }
     }
@@ -131,9 +132,9 @@ fn main() {
             && network.Contains(net::IPv4(255, 255, 255, 255))
             && network.Contains(net::IPv4(0, 0, 0, 0))
         {
-            Println!("[10] Contains /0               PASS");
+            fmt::Println!("[10] Contains /0               PASS");
         } else {
-            Println!("[10] Contains /0               FAIL");
+            fmt::Println!("[10] Contains /0               FAIL");
             failed += 1;
         }
     }
@@ -144,9 +145,9 @@ fn main() {
         if network.Contains(net::IPv4(10, 0, 0, 5))
             && !network.Contains(net::IPv4(10, 0, 0, 6))
         {
-            Println!("[11] Contains /32              PASS");
+            fmt::Println!("[11] Contains /32              PASS");
         } else {
-            Println!("[11] Contains /32              FAIL");
+            fmt::Println!("[11] Contains /32              FAIL");
             failed += 1;
         }
     }
@@ -156,9 +157,9 @@ fn main() {
         let (_, network, _) = net::ParseCIDR(string("192.168.1.0/24"));
         let s = network.String();
         if s == string("192.168.1.0/24") {
-            Println!("[12] IPNet.String              PASS");
+            fmt::Println!("[12] IPNet.String              PASS");
         } else {
-            Println!("[12] IPNet.String              FAIL");
+            fmt::Println!("[12] IPNet.String              FAIL");
             failed += 1;
         }
     }
@@ -174,9 +175,9 @@ fn main() {
         // IP is taken as-is from the IPNet field.
         let s = network.String();
         if s == string("192.168.1.0/ff00ff00") {
-            Println!("[13] IPNet.String non-canon    PASS");
+            fmt::Println!("[13] IPNet.String non-canon    PASS");
         } else {
-            Println!("[13] IPNet.String non-canon    FAIL: got ", s);
+            fmt::Println!("[13] IPNet.String non-canon    FAIL: got ", s);
             failed += 1;
         }
     }
@@ -185,19 +186,19 @@ fn main() {
     {
         let (_, network, _) = net::ParseCIDR(string("10.0.0.0/8"));
         if network.Network() == string("ip+net") {
-            Println!("[14] IPNet.Network             PASS");
+            fmt::Println!("[14] IPNet.Network             PASS");
         } else {
-            Println!("[14] IPNet.Network             FAIL");
+            fmt::Println!("[14] IPNet.Network             FAIL");
             failed += 1;
         }
     }
 
     let total: int = 14;
     if failed == 0 {
-        Println!("ok 14/14");
+        fmt::Println!("ok 14/14");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of", total);
+        fmt::Println!("FAIL", failed, "of", total);
         syscall::Exit(1);
     }
 }

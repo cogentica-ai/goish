@@ -12,13 +12,14 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::crypto::{hmac, md5, sha1, sha256};
 use goish::goslice::slice;
 use goish::hash::Hash;
 use goish::io::Writer as _;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -80,9 +81,9 @@ fn main() {
             "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7",
         );
         if slice_eq(raw, &want) {
-            Println!("[ 1] HMAC-SHA-256 RFC4231 #1   PASS");
+            fmt::Println!("[ 1] HMAC-SHA-256 RFC4231 #1   PASS");
         } else {
-            Println!("[ 1] HMAC-SHA-256 RFC4231 #1   FAIL");
+            fmt::Println!("[ 1] HMAC-SHA-256 RFC4231 #1   FAIL");
             failed += 1;
         }
     }
@@ -102,9 +103,9 @@ fn main() {
             "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843",
         );
         if slice_eq(raw, &want) {
-            Println!("[ 2] HMAC-SHA-256 RFC4231 #2   PASS");
+            fmt::Println!("[ 2] HMAC-SHA-256 RFC4231 #2   PASS");
         } else {
-            Println!("[ 2] HMAC-SHA-256 RFC4231 #2   FAIL");
+            fmt::Println!("[ 2] HMAC-SHA-256 RFC4231 #2   FAIL");
             failed += 1;
         }
     }
@@ -125,9 +126,9 @@ fn main() {
             "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54",
         );
         if slice_eq(raw, &want) {
-            Println!("[ 3] HMAC-SHA-256 long key     PASS");
+            fmt::Println!("[ 3] HMAC-SHA-256 long key     PASS");
         } else {
-            Println!("[ 3] HMAC-SHA-256 long key     FAIL");
+            fmt::Println!("[ 3] HMAC-SHA-256 long key     FAIL");
             failed += 1;
         }
     }
@@ -143,9 +144,9 @@ fn main() {
         let raw: &[byte] = &mac;
         let want = from_hex("b617318655057264e28bc0b6fb378c8ef146be00");
         if slice_eq(raw, &want) {
-            Println!("[ 4] HMAC-SHA-1 RFC2202 #1     PASS");
+            fmt::Println!("[ 4] HMAC-SHA-1 RFC2202 #1     PASS");
         } else {
-            Println!("[ 4] HMAC-SHA-1 RFC2202 #1     FAIL");
+            fmt::Println!("[ 4] HMAC-SHA-1 RFC2202 #1     FAIL");
             failed += 1;
         }
     }
@@ -160,9 +161,9 @@ fn main() {
         let raw: &[byte] = &mac;
         let want = from_hex("effcdf6ae5eb2fa2d27416d5f184df9c259a7c79");
         if slice_eq(raw, &want) {
-            Println!("[ 5] HMAC-SHA-1 RFC2202 #2     PASS");
+            fmt::Println!("[ 5] HMAC-SHA-1 RFC2202 #2     PASS");
         } else {
-            Println!("[ 5] HMAC-SHA-1 RFC2202 #2     FAIL");
+            fmt::Println!("[ 5] HMAC-SHA-1 RFC2202 #2     FAIL");
             failed += 1;
         }
     }
@@ -181,9 +182,9 @@ fn main() {
         let raw: &[byte] = &mac;
         let want = from_hex("aa4ae5e15272d00e95705637ce8a3b55ed402112");
         if slice_eq(raw, &want) {
-            Println!("[ 6] HMAC-SHA-1 long key       PASS");
+            fmt::Println!("[ 6] HMAC-SHA-1 long key       PASS");
         } else {
-            Println!("[ 6] HMAC-SHA-1 long key       FAIL");
+            fmt::Println!("[ 6] HMAC-SHA-1 long key       FAIL");
             failed += 1;
         }
     }
@@ -199,9 +200,9 @@ fn main() {
         let raw: &[byte] = &mac;
         let want = from_hex("9294727a3638bb1c13f48ef8158bfc9d");
         if slice_eq(raw, &want) {
-            Println!("[ 7] HMAC-MD5 RFC2202 #1       PASS");
+            fmt::Println!("[ 7] HMAC-MD5 RFC2202 #1       PASS");
         } else {
-            Println!("[ 7] HMAC-MD5 RFC2202 #1       FAIL");
+            fmt::Println!("[ 7] HMAC-MD5 RFC2202 #1       FAIL");
             failed += 1;
         }
     }
@@ -216,9 +217,9 @@ fn main() {
         let raw: &[byte] = &mac;
         let want = from_hex("750c783e6ab0b503eaa86e310a5db738");
         if slice_eq(raw, &want) {
-            Println!("[ 8] HMAC-MD5 RFC2202 #2       PASS");
+            fmt::Println!("[ 8] HMAC-MD5 RFC2202 #2       PASS");
         } else {
-            Println!("[ 8] HMAC-MD5 RFC2202 #2       FAIL");
+            fmt::Println!("[ 8] HMAC-MD5 RFC2202 #2       FAIL");
             failed += 1;
         }
     }
@@ -241,9 +242,9 @@ fn main() {
         let r1: &[byte] = &want;
         let r2: &[byte] = &got;
         if slice_eq(r1, r2) {
-            Println!("[ 9] streaming write           PASS");
+            fmt::Println!("[ 9] streaming write           PASS");
         } else {
-            Println!("[ 9] streaming write           FAIL");
+            fmt::Println!("[ 9] streaming write           FAIL");
             failed += 1;
         }
     }
@@ -264,9 +265,9 @@ fn main() {
         let r1: &[byte] = &mac1;
         let r2: &[byte] = &mac2;
         if slice_eq(r1, r2) {
-            Println!("[10] Reset                     PASS");
+            fmt::Println!("[10] Reset                     PASS");
         } else {
-            Println!("[10] Reset                     FAIL");
+            fmt::Println!("[10] Reset                     FAIL");
             failed += 1;
         }
     }
@@ -286,9 +287,9 @@ fn main() {
             && &raw[0..4] == b"PRE:"
             && slice_eq(&raw[4..], bare_raw)
         {
-            Println!("[11] Sum prefix                PASS");
+            fmt::Println!("[11] Sum prefix                PASS");
         } else {
-            Println!("[11] Sum prefix                FAIL");
+            fmt::Println!("[11] Sum prefix                FAIL");
             failed += 1;
         }
     }
@@ -305,9 +306,9 @@ fn main() {
             && h_md5.Size() == 16
             && h_md5.BlockSize() == 64
         {
-            Println!("[12] Size/BlockSize            PASS");
+            fmt::Println!("[12] Size/BlockSize            PASS");
         } else {
-            Println!("[12] Size/BlockSize            FAIL");
+            fmt::Println!("[12] Size/BlockSize            FAIL");
             failed += 1;
         }
     }
@@ -322,9 +323,9 @@ fn main() {
             && !hmac::Equal(a.clone(), c)
             && !hmac::Equal(a, d);
         if pass {
-            Println!("[13] Equal                     PASS");
+            fmt::Println!("[13] Equal                     PASS");
         } else {
-            Println!("[13] Equal                     FAIL");
+            fmt::Println!("[13] Equal                     FAIL");
             failed += 1;
         }
     }
@@ -338,18 +339,18 @@ fn main() {
         let r1: &[byte] = &s1;
         let r2: &[byte] = &s2;
         if slice_eq(r1, r2) {
-            Println!("[14] Sum non-mutating          PASS");
+            fmt::Println!("[14] Sum non-mutating          PASS");
         } else {
-            Println!("[14] Sum non-mutating          FAIL");
+            fmt::Println!("[14] Sum non-mutating          FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 14/14");
+        fmt::Println!("ok 14/14");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 14");
+        fmt::Println!("FAIL", failed, "of 14");
         syscall::Exit(1);
     }
 }

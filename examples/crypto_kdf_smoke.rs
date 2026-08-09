@@ -8,11 +8,12 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::crypto::{hkdf, pbkdf2, sha1, sha256};
 use goish::encoding::hex;
 use goish::goslice::slice;
 use goish::types::byte;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 fn from_hex(s: &str) -> slice<byte> {
     let (v, _) = hex::DecodeString(s);
@@ -46,9 +47,9 @@ fn main() {
         let (prk, _) = hkdf::Extract(sha256::NewHash, ikm.clone(), salt.clone());
         let want_prk = "077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5";
         if to_hex(&prk) == string(want_prk) {
-            Println!("[ 1] HKDF-SHA256 Extract A.1  PASS");
+            fmt::Println!("[ 1] HKDF-SHA256 Extract A.1  PASS");
         } else {
-            Println!("[ 1] HKDF-SHA256 Extract A.1  FAIL got {}", to_hex(&prk));
+            fmt::Println!("[ 1] HKDF-SHA256 Extract A.1  FAIL got {}", to_hex(&prk));
             failed += 1;
         }
 
@@ -59,18 +60,18 @@ fn main() {
         let (okm, _) = hkdf::Expand(sha256::NewHash, prk.clone(), info_str.clone(), 42);
         let want_okm = "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865";
         if to_hex(&okm) == string(want_okm) {
-            Println!("[ 2] HKDF-SHA256 Expand A.1   PASS");
+            fmt::Println!("[ 2] HKDF-SHA256 Expand A.1   PASS");
         } else {
-            Println!("[ 2] HKDF-SHA256 Expand A.1   FAIL got {}", to_hex(&okm));
+            fmt::Println!("[ 2] HKDF-SHA256 Expand A.1   FAIL got {}", to_hex(&okm));
             failed += 1;
         }
 
         // Key combines Extract+Expand in one call.
         let (okm_key, _) = hkdf::Key(sha256::NewHash, ikm, salt, info_str, 42);
         if to_hex(&okm_key) == string(want_okm) {
-            Println!("[ 3] HKDF-SHA256 Key A.1      PASS");
+            fmt::Println!("[ 3] HKDF-SHA256 Key A.1      PASS");
         } else {
-            Println!("[ 3] HKDF-SHA256 Key A.1      FAIL got {}", to_hex(&okm_key));
+            fmt::Println!("[ 3] HKDF-SHA256 Key A.1      FAIL got {}", to_hex(&okm_key));
             failed += 1;
         }
         let _ = info;
@@ -93,9 +94,9 @@ fn main() {
 
         let (okm, _) = hkdf::Key(sha256::NewHash, ikm, salt, info_str, 82);
         if to_hex(&okm) == string(want_okm) {
-            Println!("[ 4] HKDF-SHA256 Key A.2      PASS");
+            fmt::Println!("[ 4] HKDF-SHA256 Key A.2      PASS");
         } else {
-            Println!("[ 4] HKDF-SHA256 Key A.2      FAIL got {}", to_hex(&okm));
+            fmt::Println!("[ 4] HKDF-SHA256 Key A.2      FAIL got {}", to_hex(&okm));
             failed += 1;
         }
     }
@@ -116,18 +117,18 @@ fn main() {
         let (prk, _) = hkdf::Extract(sha256::NewHash, ikm.clone(), salt.clone());
         let want_prk = "19ef24a32c717b167f33a91d6f648bdf96596776afdb6377ac434c1c293ccb04";
         if to_hex(&prk) == string(want_prk) {
-            Println!("[ 5] HKDF-SHA256 Extract A.3  PASS");
+            fmt::Println!("[ 5] HKDF-SHA256 Extract A.3  PASS");
         } else {
-            Println!("[ 5] HKDF-SHA256 Extract A.3  FAIL got {}", to_hex(&prk));
+            fmt::Println!("[ 5] HKDF-SHA256 Extract A.3  FAIL got {}", to_hex(&prk));
             failed += 1;
         }
 
         let (okm, _) = hkdf::Key(sha256::NewHash, ikm, salt, info, 42);
         let want_okm = "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8";
         if to_hex(&okm) == string(want_okm) {
-            Println!("[ 6] HKDF-SHA256 Key A.3      PASS");
+            fmt::Println!("[ 6] HKDF-SHA256 Key A.3      PASS");
         } else {
-            Println!("[ 6] HKDF-SHA256 Key A.3      FAIL got {}", to_hex(&okm));
+            fmt::Println!("[ 6] HKDF-SHA256 Key A.3      FAIL got {}", to_hex(&okm));
             failed += 1;
         }
     }
@@ -141,9 +142,9 @@ fn main() {
         let (out, err) = hkdf::Key(sha256::NewHash, secret, salt, info, 8161);
         let raw: &[byte] = &out;
         if !err.IsNil() && raw.is_empty() {
-            Println!("[ 7] HKDF length cap error    PASS");
+            fmt::Println!("[ 7] HKDF length cap error    PASS");
         } else {
-            Println!("[ 7] HKDF length cap error    FAIL");
+            fmt::Println!("[ 7] HKDF length cap error    FAIL");
             failed += 1;
         }
     }
@@ -158,9 +159,9 @@ fn main() {
         let (dk, _) = pbkdf2::Key(sha1::NewHash, pw, salt, 1, 20);
         let want = "0c60c80f961f0e71f3a9b524af6012062fe037a6";
         if to_hex(&dk) == string(want) {
-            Println!("[ 8] PBKDF2-SHA1 c=1 dk=20    PASS");
+            fmt::Println!("[ 8] PBKDF2-SHA1 c=1 dk=20    PASS");
         } else {
-            Println!("[ 8] PBKDF2-SHA1 c=1 dk=20    FAIL got {}", to_hex(&dk));
+            fmt::Println!("[ 8] PBKDF2-SHA1 c=1 dk=20    FAIL got {}", to_hex(&dk));
             failed += 1;
         }
     }
@@ -173,9 +174,9 @@ fn main() {
         let (dk, _) = pbkdf2::Key(sha1::NewHash, pw, salt, 2, 20);
         let want = "ea6c014dc72d6f8ccd1ed92ace1d41f0d8de8957";
         if to_hex(&dk) == string(want) {
-            Println!("[ 9] PBKDF2-SHA1 c=2 dk=20    PASS");
+            fmt::Println!("[ 9] PBKDF2-SHA1 c=2 dk=20    PASS");
         } else {
-            Println!("[ 9] PBKDF2-SHA1 c=2 dk=20    FAIL got {}", to_hex(&dk));
+            fmt::Println!("[ 9] PBKDF2-SHA1 c=2 dk=20    FAIL got {}", to_hex(&dk));
             failed += 1;
         }
     }
@@ -188,9 +189,9 @@ fn main() {
         let (dk, _) = pbkdf2::Key(sha1::NewHash, pw, salt, 4096, 20);
         let want = "4b007901b765489abead49d926f721d065a429c1";
         if to_hex(&dk) == string(want) {
-            Println!("[10] PBKDF2-SHA1 c=4096 dk=20 PASS");
+            fmt::Println!("[10] PBKDF2-SHA1 c=4096 dk=20 PASS");
         } else {
-            Println!("[10] PBKDF2-SHA1 c=4096 dk=20 FAIL got {}", to_hex(&dk));
+            fmt::Println!("[10] PBKDF2-SHA1 c=4096 dk=20 FAIL got {}", to_hex(&dk));
             failed += 1;
         }
     }
@@ -208,9 +209,9 @@ fn main() {
         let (dk, _) = pbkdf2::Key(sha1::NewHash, pw, salt, 4096, 25);
         let want = "3d2eec4fe41c849b80c8d83662c0e44a8b291a964cf2f07038";
         if to_hex(&dk) == string(want) {
-            Println!("[11] PBKDF2-SHA1 long inputs  PASS");
+            fmt::Println!("[11] PBKDF2-SHA1 long inputs  PASS");
         } else {
-            Println!("[11] PBKDF2-SHA1 long inputs  FAIL got {}", to_hex(&dk));
+            fmt::Println!("[11] PBKDF2-SHA1 long inputs  FAIL got {}", to_hex(&dk));
             failed += 1;
         }
     }
@@ -224,9 +225,9 @@ fn main() {
         let (dk, _) = pbkdf2::Key(sha256::NewHash, pw, salt, 1, 64);
         let want = "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783";
         if to_hex(&dk) == string(want) {
-            Println!("[12] PBKDF2-SHA256 c=1        PASS");
+            fmt::Println!("[12] PBKDF2-SHA256 c=1        PASS");
         } else {
-            Println!("[12] PBKDF2-SHA256 c=1        FAIL got {}", to_hex(&dk));
+            fmt::Println!("[12] PBKDF2-SHA256 c=1        FAIL got {}", to_hex(&dk));
             failed += 1;
         }
     }
@@ -238,18 +239,18 @@ fn main() {
         let (out, err) = pbkdf2::Key(sha1::NewHash, pw, salt, 1, 0);
         let raw: &[byte] = &out;
         if !err.IsNil() && raw.is_empty() {
-            Println!("[13] PBKDF2 keyLength<=0 err  PASS");
+            fmt::Println!("[13] PBKDF2 keyLength<=0 err  PASS");
         } else {
-            Println!("[13] PBKDF2 keyLength<=0 err  FAIL");
+            fmt::Println!("[13] PBKDF2 keyLength<=0 err  FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 13/13");
+        fmt::Println!("ok 13/13");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 13");
+        fmt::Println!("FAIL", failed, "of 13");
         syscall::Exit(1);
     }
 }

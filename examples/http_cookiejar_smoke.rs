@@ -12,9 +12,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net::http::cookiejar::{self, New, Options};
 use goish::net::http::{Cookie, ParseURL};
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -25,9 +26,9 @@ fn main() {
         let (jar, err) = New(None);
         if err.IsNil() {
             let _ = jar; // jar is Arc<Jar>
-            Println!("[ 1] New(nil) returns jar      PASS");
+            fmt::Println!("[ 1] New(nil) returns jar      PASS");
         } else {
-            Println!("[ 1] New(nil) returns jar      FAIL");
+            fmt::Println!("[ 1] New(nil) returns jar      FAIL");
             failed += 1;
         }
     }
@@ -42,9 +43,9 @@ fn main() {
         jar.SetCookies(&u, &cookies);
         let got = jar.Cookies(&u);
         if got.len() == 1 && got[0].Name == "k" && got[0].Value == "v" {
-            Println!("[ 2] Set then Cookies          PASS");
+            fmt::Println!("[ 2] Set then Cookies          PASS");
         } else {
-            Println!("[ 2] Set then Cookies          FAIL n={}", got.len());
+            fmt::Println!("[ 2] Set then Cookies          FAIL n={}", got.len());
             failed += 1;
         }
     }
@@ -60,9 +61,9 @@ fn main() {
         let (u2, _) = ParseURL(string("http://example.com/"));
         let got = jar.Cookies(&u2);
         if got.is_empty() {
-            Println!("[ 3] non-http(s) ignored       PASS");
+            fmt::Println!("[ 3] non-http(s) ignored       PASS");
         } else {
-            Println!("[ 3] non-http(s) ignored       FAIL n={}", got.len());
+            fmt::Println!("[ 3] non-http(s) ignored       FAIL n={}", got.len());
             failed += 1;
         }
     }
@@ -78,9 +79,9 @@ fn main() {
         let (u2, _) = ParseURL(string("http://other.com/"));
         let got = jar.Cookies(&u2);
         if got.is_empty() {
-            Println!("[ 4] host-only stays put       PASS");
+            fmt::Println!("[ 4] host-only stays put       PASS");
         } else {
-            Println!("[ 4] host-only stays put       FAIL n={}", got.len());
+            fmt::Println!("[ 4] host-only stays put       FAIL n={}", got.len());
             failed += 1;
         }
     }
@@ -99,9 +100,9 @@ fn main() {
         let (u_get, _) = ParseURL(string("http://www.example.com/"));
         let got = jar.Cookies(&u_get);
         if got.len() == 1 {
-            Println!("[ 5] domain cookie matches     PASS");
+            fmt::Println!("[ 5] domain cookie matches     PASS");
         } else {
-            Println!("[ 5] domain cookie matches     FAIL n={}", got.len());
+            fmt::Println!("[ 5] domain cookie matches     FAIL n={}", got.len());
             failed += 1;
         }
     }
@@ -122,9 +123,9 @@ fn main() {
         let out_got = jar.Cookies(&u_out);
 
         if in_got.len() == 1 && out_got.is_empty() {
-            Println!("[ 6] path match /foo ⊂ /foo/.. PASS");
+            fmt::Println!("[ 6] path match /foo ⊂ /foo/.. PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 6] path match /foo ⊂ /foo/.. FAIL in={} out={}",
                 in_got.len(),
                 out_got.len()
@@ -148,9 +149,9 @@ fn main() {
 
         let got = jar.Cookies(&u);
         if got.is_empty() {
-            Println!("[ 7] MaxAge<0 deletes          PASS");
+            fmt::Println!("[ 7] MaxAge<0 deletes          PASS");
         } else {
-            Println!("[ 7] MaxAge<0 deletes          FAIL n={}", got.len());
+            fmt::Println!("[ 7] MaxAge<0 deletes          FAIL n={}", got.len());
             failed += 1;
         }
     }
@@ -171,9 +172,9 @@ fn main() {
         let https_got = jar.Cookies(&u_https);
 
         if http_got.is_empty() && https_got.len() == 1 {
-            Println!("[ 8] Secure http filter        PASS");
+            fmt::Println!("[ 8] Secure http filter        PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 8] Secure http filter        FAIL http={} https={}",
                 http_got.len(),
                 https_got.len()
@@ -196,9 +197,9 @@ fn main() {
 
         let got = jar.Cookies(&u);
         if got.len() == 3 && got[0].Name == "longest" && got[1].Name == "long" && got[2].Name == "short" {
-            Println!("[ 9] sort by path length       PASS");
+            fmt::Println!("[ 9] sort by path length       PASS");
         } else {
-            Println!("[ 9] sort by path length       FAIL n={}", got.len());
+            fmt::Println!("[ 9] sort by path length       FAIL n={}", got.len());
             failed += 1;
         }
     }
@@ -210,9 +211,9 @@ fn main() {
         jar.SetCookies(&u, &[]);
         let got = jar.Cookies(&u);
         if got.is_empty() {
-            Println!("[10] empty Set noop            PASS");
+            fmt::Println!("[10] empty Set noop            PASS");
         } else {
-            Println!("[10] empty Set noop            FAIL n={}", got.len());
+            fmt::Println!("[10] empty Set noop            FAIL n={}", got.len());
             failed += 1;
         }
     }
@@ -221,9 +222,9 @@ fn main() {
     {
         let (s, err) = cookiejar::punycode::toASCII(string("golang"));
         if err.IsNil() && s == "golang" {
-            Println!("[11] toASCII ASCII             PASS");
+            fmt::Println!("[11] toASCII ASCII             PASS");
         } else {
-            Println!("[11] toASCII ASCII             FAIL");
+            fmt::Println!("[11] toASCII ASCII             FAIL");
             failed += 1;
         }
     }
@@ -232,9 +233,9 @@ fn main() {
     {
         let (s, err) = cookiejar::punycode::toASCII(string("bücher.example.com"));
         if err.IsNil() && s == "xn--bcher-kva.example.com" {
-            Println!("[12] toASCII IDN encode        PASS");
+            fmt::Println!("[12] toASCII IDN encode        PASS");
         } else {
-            Println!("[12] toASCII IDN encode        FAIL got {}", s);
+            fmt::Println!("[12] toASCII IDN encode        FAIL got {}", s);
             failed += 1;
         }
     }
@@ -245,18 +246,18 @@ fn main() {
         let (jar, err) = New(Some(&opts));
         let _ = jar;
         if err.IsNil() {
-            Println!("[13] New(Options::default)     PASS");
+            fmt::Println!("[13] New(Options::default)     PASS");
         } else {
-            Println!("[13] New(Options::default)     FAIL");
+            fmt::Println!("[13] New(Options::default)     FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 13/13");
+        fmt::Println!("ok 13/13");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 13");
+        fmt::Println!("FAIL", failed, "of 13");
         syscall::Exit(1);
     }
 }

@@ -10,12 +10,13 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::bufio;
 use goish::bytes;
 use goish::convert::bytes as to_bytes;
 use goish::goslice::slice;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -27,9 +28,9 @@ fn main() {
         let w = bufio::NewWriterSize(buf, 64);
         let av = w.AvailableBuffer();
         if av.Len() == 0 {
-            Println!("[ 1] AvailableBuffer fresh len PASS");
+            fmt::Println!("[ 1] AvailableBuffer fresh len PASS");
         } else {
-            Println!("[ 1] AvailableBuffer fresh len FAIL");
+            fmt::Println!("[ 1] AvailableBuffer fresh len FAIL");
             failed += 1;
         }
     }
@@ -42,9 +43,9 @@ fn main() {
         let _ = w.WriteString(goish::string("hello"));
         let av = w.AvailableBuffer();
         if av.Len() == 0 {
-            Println!("[ 2] AvailableBuffer post-write PASS");
+            fmt::Println!("[ 2] AvailableBuffer post-write PASS");
         } else {
-            Println!("[ 2] AvailableBuffer post-write FAIL");
+            fmt::Println!("[ 2] AvailableBuffer post-write FAIL");
             failed += 1;
         }
     }
@@ -59,9 +60,9 @@ fn main() {
         let (n, _) = w.Write(tmp);
         let _ = w.Flush();
         if n == 2 {
-            Println!("[ 3] Append+Write 42           PASS");
+            fmt::Println!("[ 3] Append+Write 42           PASS");
         } else {
-            Println!("[ 3] Append+Write 42           FAIL n=", n);
+            fmt::Println!("[ 3] Append+Write 42           FAIL n=", n);
             failed += 1;
         }
     }
@@ -74,9 +75,9 @@ fn main() {
         let a = w.AvailableBuffer();
         let b = w.AvailableBuffer();
         if a.Len() == 0 && b.Len() == 0 {
-            Println!("[ 4] AvailableBuffer indep    PASS");
+            fmt::Println!("[ 4] AvailableBuffer indep    PASS");
         } else {
-            Println!("[ 4] AvailableBuffer indep    FAIL");
+            fmt::Println!("[ 4] AvailableBuffer indep    FAIL");
             failed += 1;
         }
     }
@@ -91,18 +92,18 @@ fn main() {
         // 8 bytes was exactly the buffer size — likely flushed.
         let av = w.AvailableBuffer();
         if av.Len() == 0 {
-            Println!("[ 5] AvailableBuffer flushed   PASS");
+            fmt::Println!("[ 5] AvailableBuffer flushed   PASS");
         } else {
-            Println!("[ 5] AvailableBuffer flushed   FAIL");
+            fmt::Println!("[ 5] AvailableBuffer flushed   FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 5");
+        fmt::Println!("FAIL", failed, "of 5");
         syscall::Exit(1);
     }
 }

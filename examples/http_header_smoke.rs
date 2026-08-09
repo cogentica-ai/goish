@@ -8,11 +8,12 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes::NewBuffer;
 use goish::gomap::map;
 use goish::goslice::slice;
 use goish::net::http::Header;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -27,9 +28,9 @@ fn main() {
         // Mutate h1; h2 should be unchanged.
         h1.Set(string("X-Foo"), string("only"));
         if h2.Values(string("X-Foo")).Len() == 2 && h2.Values(string("X-Foo"))[0] == "v1" {
-            Println!("[ 1] Clone independence        PASS");
+            fmt::Println!("[ 1] Clone independence        PASS");
         } else {
-            Println!("[ 1] Clone independence        FAIL n={}", h2.Values(string("X-Foo")).Len());
+            fmt::Println!("[ 1] Clone independence        FAIL n={}", h2.Values(string("X-Foo")).Len());
             failed += 1;
         }
     }
@@ -49,9 +50,9 @@ fn main() {
             got.push(bytes[i]);
         }
         if got.as_slice() == expected {
-            Println!("[ 2] Write sorted              PASS");
+            fmt::Println!("[ 2] Write sorted              PASS");
         } else {
-            Println!("[ 2] Write sorted              FAIL got len={}", got.len());
+            fmt::Println!("[ 2] Write sorted              FAIL got len={}", got.len());
             failed += 1;
         }
     }
@@ -73,18 +74,18 @@ fn main() {
             got.push(bytes[i]);
         }
         if got.as_slice() == expected {
-            Println!("[ 3] WriteSubset exclude       PASS");
+            fmt::Println!("[ 3] WriteSubset exclude       PASS");
         } else {
-            Println!("[ 3] WriteSubset exclude       FAIL got len={}", got.len());
+            fmt::Println!("[ 3] WriteSubset exclude       FAIL got len={}", got.len());
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 3/3");
+        fmt::Println!("ok 3/3");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 3", failed);
+        fmt::Println!("FAIL {} of 3", failed);
         syscall::Exit(1);
     }
 }

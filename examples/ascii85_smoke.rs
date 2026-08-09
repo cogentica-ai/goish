@@ -12,11 +12,12 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::encoding::ascii85;
 use goish::goslice::slice;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -31,9 +32,9 @@ fn main() {
         let dst = slice::<byte>::__from_vec(Vec::new());
         let (out, n) = ascii85::Encode(dst, empty_buf());
         if n == 0 && out.Len() == 0 {
-            Println!("[ 1] Encode empty              PASS");
+            fmt::Println!("[ 1] Encode empty              PASS");
         } else {
-            Println!("[ 1] Encode empty              FAIL");
+            fmt::Println!("[ 1] Encode empty              FAIL");
             failed += 1;
         }
     }
@@ -47,9 +48,9 @@ fn main() {
         let (out, n) = ascii85::Encode(dst, to_bytes("Man "));
         let raw: &[byte] = &out;
         if n == 5 && &raw[..5] == b"9jqo^" {
-            Println!("[ 2] Encode \"Man \"             PASS");
+            fmt::Println!("[ 2] Encode \"Man \"             PASS");
         } else {
-            Println!("[ 2] Encode \"Man \"             FAIL");
+            fmt::Println!("[ 2] Encode \"Man \"             FAIL");
             failed += 1;
         }
     }
@@ -61,9 +62,9 @@ fn main() {
         let (out, n) = ascii85::Encode(dst, zeros);
         let raw: &[byte] = &out;
         if n == 1 && raw[0] == b'z' {
-            Println!("[ 3] Encode zero -> 'z'        PASS");
+            fmt::Println!("[ 3] Encode zero -> 'z'        PASS");
         } else {
-            Println!("[ 3] Encode zero -> 'z'        FAIL");
+            fmt::Println!("[ 3] Encode zero -> 'z'        FAIL");
             failed += 1;
         }
     }
@@ -79,9 +80,9 @@ fn main() {
         let (out, n) = ascii85::Encode(dst, to_bytes("M"));
         let raw: &[byte] = &out;
         if n == 2 && &raw[..2] == b"9`" {
-            Println!("[ 4] Encode \"M\" short tail     PASS");
+            fmt::Println!("[ 4] Encode \"M\" short tail     PASS");
         } else {
-            Println!("[ 4] Encode \"M\" short tail     FAIL");
+            fmt::Println!("[ 4] Encode \"M\" short tail     FAIL");
             failed += 1;
         }
     }
@@ -92,9 +93,9 @@ fn main() {
         let (out, ndst, _nsrc, err) = ascii85::Decode(dst, to_bytes("9jqo^"), true);
         let raw: &[byte] = &out;
         if err.IsNil() && ndst == 4 && &raw[..4] == b"Man " {
-            Println!("[ 5] Decode \"9jqo^\"            PASS");
+            fmt::Println!("[ 5] Decode \"9jqo^\"            PASS");
         } else {
-            Println!("[ 5] Decode \"9jqo^\"            FAIL");
+            fmt::Println!("[ 5] Decode \"9jqo^\"            FAIL");
             failed += 1;
         }
     }
@@ -105,9 +106,9 @@ fn main() {
         let (out, ndst, _nsrc, err) = ascii85::Decode(dst, to_bytes("z"), true);
         let raw: &[byte] = &out;
         if err.IsNil() && ndst == 4 && raw[..4] == [0u8, 0, 0, 0] {
-            Println!("[ 6] Decode 'z' -> zeros       PASS");
+            fmt::Println!("[ 6] Decode 'z' -> zeros       PASS");
         } else {
-            Println!("[ 6] Decode 'z' -> zeros       FAIL");
+            fmt::Println!("[ 6] Decode 'z' -> zeros       FAIL");
             failed += 1;
         }
     }
@@ -124,9 +125,9 @@ fn main() {
         let (decoded, ndst, _nsrc, err) = ascii85::Decode(dst2, enc_slice, true);
         let dec_raw: &[byte] = &decoded;
         if err.IsNil() && ndst as usize == input.len() && &dec_raw[..input.len()] == input.as_bytes() {
-            Println!("[ 7] Round-trip \"Hello,...\"    PASS");
+            fmt::Println!("[ 7] Round-trip \"Hello,...\"    PASS");
         } else {
-            Println!("[ 7] Round-trip \"Hello,...\"    FAIL");
+            fmt::Println!("[ 7] Round-trip \"Hello,...\"    FAIL");
             failed += 1;
         }
     }
@@ -137,9 +138,9 @@ fn main() {
         let (out, ndst, _nsrc, err) = ascii85::Decode(dst, to_bytes("9jq\no^"), true);
         let raw: &[byte] = &out;
         if err.IsNil() && ndst == 4 && &raw[..4] == b"Man " {
-            Println!("[ 8] Decode skips whitespace   PASS");
+            fmt::Println!("[ 8] Decode skips whitespace   PASS");
         } else {
-            Println!("[ 8] Decode skips whitespace   FAIL");
+            fmt::Println!("[ 8] Decode skips whitespace   FAIL");
             failed += 1;
         }
     }
@@ -149,9 +150,9 @@ fn main() {
         let dst = slice::<byte>::__from_vec(alloc::vec![0; 8]);
         let (_out, _ndst, _nsrc, err) = ascii85::Decode(dst, to_bytes("9jq~^"), true);
         if !err.IsNil() {
-            Println!("[ 9] Decode invalid -> err     PASS");
+            fmt::Println!("[ 9] Decode invalid -> err     PASS");
         } else {
-            Println!("[ 9] Decode invalid -> err     FAIL");
+            fmt::Println!("[ 9] Decode invalid -> err     FAIL");
             failed += 1;
         }
     }
@@ -164,9 +165,9 @@ fn main() {
             && ascii85::MaxEncodedLen(4) == 5
             && ascii85::MaxEncodedLen(5) == 10
         {
-            Println!("[10] MaxEncodedLen formula     PASS");
+            fmt::Println!("[10] MaxEncodedLen formula     PASS");
         } else {
-            Println!("[10] MaxEncodedLen formula     FAIL");
+            fmt::Println!("[10] MaxEncodedLen formula     FAIL");
             failed += 1;
         }
     }
@@ -185,13 +186,13 @@ fn main() {
             let (back, nb, _, err) = ascii85::Decode(dst2, enc_slice, true);
             let br: &[byte] = &back;
             if err.IsNil() && nb == 4 && &br[..4] == b"test" {
-                Println!("[11] Encode/Decode \"test\"      PASS");
+                fmt::Println!("[11] Encode/Decode \"test\"      PASS");
             } else {
-                Println!("[11] Encode/Decode \"test\"      FAIL");
+                fmt::Println!("[11] Encode/Decode \"test\"      FAIL");
                 failed += 1;
             }
         } else {
-            Println!("[11] Encode/Decode \"test\"      FAIL");
+            fmt::Println!("[11] Encode/Decode \"test\"      FAIL");
             failed += 1;
         }
     }
@@ -208,22 +209,22 @@ fn main() {
             let (back, nb, _, err) = ascii85::Decode(dst2, enc_slice, true);
             let br: &[byte] = &back;
             if err.IsNil() && nb == 8 && &br[..8] == b"MMMMMMMM" {
-                Println!("[12] 8-byte aligned            PASS");
+                fmt::Println!("[12] 8-byte aligned            PASS");
             } else {
-                Println!("[12] 8-byte aligned            FAIL");
+                fmt::Println!("[12] 8-byte aligned            FAIL");
                 failed += 1;
             }
         } else {
-            Println!("[12] 8-byte aligned            FAIL");
+            fmt::Println!("[12] 8-byte aligned            FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

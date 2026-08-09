@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::goslice::slice;
 use goish::net::{HardwareAddr, HardwareAddrString, ParseMAC};
 use goish::types::byte;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -23,9 +24,9 @@ fn main() {
         let raw: &[byte] = &hw;
         let want: &[u8] = &[0x00, 0x00, 0x5e, 0x00, 0x53, 0x01];
         if e.IsNil() && raw == want {
-            Println!("[ 1] 6-octet colon            PASS");
+            fmt::Println!("[ 1] 6-octet colon            PASS");
         } else {
-            Println!("[ 1] 6-octet colon            FAIL");
+            fmt::Println!("[ 1] 6-octet colon            FAIL");
             failed += 1;
         }
     }
@@ -34,9 +35,9 @@ fn main() {
     {
         let (hw, e) = ParseMAC(string("02:00:5e:10:00:00:00:01"));
         if e.IsNil() && hw.len() == 8 {
-            Println!("[ 2] 8-octet colon            PASS");
+            fmt::Println!("[ 2] 8-octet colon            PASS");
         } else {
-            Println!("[ 2] 8-octet colon            FAIL");
+            fmt::Println!("[ 2] 8-octet colon            FAIL");
             failed += 1;
         }
     }
@@ -47,9 +48,9 @@ fn main() {
             "00:00:00:00:fe:80:00:00:00:00:00:00:02:00:5e:10:00:00:00:01",
         ));
         if e.IsNil() && hw.len() == 20 {
-            Println!("[ 3] 20-octet IPoIB           PASS");
+            fmt::Println!("[ 3] 20-octet IPoIB           PASS");
         } else {
-            Println!("[ 3] 20-octet IPoIB           FAIL");
+            fmt::Println!("[ 3] 20-octet IPoIB           FAIL");
             failed += 1;
         }
     }
@@ -60,9 +61,9 @@ fn main() {
         let raw: &[byte] = &hw;
         let want: &[u8] = &[0x00, 0x00, 0x5e, 0x00, 0x53, 0x01];
         if e.IsNil() && raw == want {
-            Println!("[ 4] dash sep                 PASS");
+            fmt::Println!("[ 4] dash sep                 PASS");
         } else {
-            Println!("[ 4] dash sep                 FAIL");
+            fmt::Println!("[ 4] dash sep                 FAIL");
             failed += 1;
         }
     }
@@ -73,9 +74,9 @@ fn main() {
         let raw: &[byte] = &hw;
         let want: &[u8] = &[0x00, 0x00, 0x5e, 0x00, 0x53, 0x01];
         if e.IsNil() && raw == want {
-            Println!("[ 5] dotted 6-octet           PASS");
+            fmt::Println!("[ 5] dotted 6-octet           PASS");
         } else {
-            Println!("[ 5] dotted 6-octet           FAIL");
+            fmt::Println!("[ 5] dotted 6-octet           FAIL");
             failed += 1;
         }
     }
@@ -84,9 +85,9 @@ fn main() {
     {
         let (hw, e) = ParseMAC(string("0200.5e10.0000.0001"));
         if e.IsNil() && hw.len() == 8 {
-            Println!("[ 6] dotted 8-octet           PASS");
+            fmt::Println!("[ 6] dotted 8-octet           PASS");
         } else {
-            Println!("[ 6] dotted 8-octet           FAIL");
+            fmt::Println!("[ 6] dotted 8-octet           FAIL");
             failed += 1;
         }
     }
@@ -95,9 +96,9 @@ fn main() {
     {
         let (_hw, e) = ParseMAC(string("00:00:5e:00:53"));
         if !e.IsNil() {
-            Println!("[ 7] too short err            PASS");
+            fmt::Println!("[ 7] too short err            PASS");
         } else {
-            Println!("[ 7] too short err            FAIL");
+            fmt::Println!("[ 7] too short err            FAIL");
             failed += 1;
         }
     }
@@ -106,9 +107,9 @@ fn main() {
     {
         let (_hw, e) = ParseMAC(string("00:00-5e:00-53:01"));
         if !e.IsNil() {
-            Println!("[ 8] mixed delim err          PASS");
+            fmt::Println!("[ 8] mixed delim err          PASS");
         } else {
-            Println!("[ 8] mixed delim err          FAIL");
+            fmt::Println!("[ 8] mixed delim err          FAIL");
             failed += 1;
         }
     }
@@ -117,9 +118,9 @@ fn main() {
     {
         let (_hw, e) = ParseMAC(string("00:00:5z:00:53:01"));
         if !e.IsNil() {
-            Println!("[ 9] non-hex err              PASS");
+            fmt::Println!("[ 9] non-hex err              PASS");
         } else {
-            Println!("[ 9] non-hex err              FAIL");
+            fmt::Println!("[ 9] non-hex err              FAIL");
             failed += 1;
         }
     }
@@ -129,9 +130,9 @@ fn main() {
         let hw: HardwareAddr = slice::__from_vec(alloc::vec![0xab, 0xcd, 0xef, 0x01, 0x23, 0x45]);
         let s = HardwareAddrString(&hw);
         if s == "ab:cd:ef:01:23:45" {
-            Println!("[10] String round-trip        PASS");
+            fmt::Println!("[10] String round-trip        PASS");
         } else {
-            Println!("[10] String round-trip        FAIL got {}", s);
+            fmt::Println!("[10] String round-trip        FAIL got {}", s);
             failed += 1;
         }
     }
@@ -141,9 +142,9 @@ fn main() {
         let hw: HardwareAddr = slice::__from_vec(alloc::vec![]);
         let s = HardwareAddrString(&hw);
         if s == "" {
-            Println!("[11] empty String             PASS");
+            fmt::Println!("[11] empty String             PASS");
         } else {
-            Println!("[11] empty String             FAIL");
+            fmt::Println!("[11] empty String             FAIL");
             failed += 1;
         }
     }
@@ -155,22 +156,22 @@ fn main() {
         if e.IsNil() {
             let back = HardwareAddrString(&hw);
             if back == original {
-                Println!("[12] Parse-String round-trip PASS");
+                fmt::Println!("[12] Parse-String round-trip PASS");
             } else {
-                Println!("[12] Parse-String round-trip FAIL got {}", back);
+                fmt::Println!("[12] Parse-String round-trip FAIL got {}", back);
                 failed += 1;
             }
         } else {
-            Println!("[12] Parse-String round-trip FAIL parse");
+            fmt::Println!("[12] Parse-String round-trip FAIL parse");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

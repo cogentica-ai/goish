@@ -21,11 +21,12 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::fmt;
 use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{bytes, go, string, syscall, Println};
+use goish::{bytes, go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -112,7 +113,7 @@ fn main() {
 
     let (ln, lerr) = net::Listen(string("tcp"), string("127.0.0.1:0"));
     if !lerr.IsNil() {
-        Println!("Listen failed: {}", lerr);
+        fmt::Println!("Listen failed: {}", lerr);
         syscall::Exit(1);
     }
     let addr = ln.Addr().String();
@@ -133,16 +134,16 @@ fn main() {
         let url = url_join(&base_url, "/hello");
         let (mut resp, err) = http::Get(url);
         if !err.IsNil() {
-            Println!("[ 1] Get hello FAIL err={}", err);
+            fmt::Println!("[ 1] Get hello FAIL err={}", err);
             failed += 1;
         } else {
             let (body, _) = io::ReadAll(&mut resp.Body);
             let _ = io::Closer::Close(&mut resp.Body);
             let body_ok = body_eq(&body, b"hello, client\n");
             if resp.StatusCode == 200 && body_ok {
-                Println!("[ 1] Get 200 OK               PASS");
+                fmt::Println!("[ 1] Get 200 OK               PASS");
             } else {
-                Println!(
+                fmt::Println!(
                     "[ 1] Get 200 OK               FAIL status={} body_ok={}",
                     resp.StatusCode, body_ok
                 );
@@ -158,9 +159,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 404 && body_eq(&body, b"missing\n") {
-            Println!("[ 2] Get 404                  PASS");
+            fmt::Println!("[ 2] Get 404                  PASS");
         } else {
-            Println!("[ 2] Get 404                  FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 2] Get 404                  FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -175,16 +176,16 @@ fn main() {
         let (resp_body, _) = io::ReadAll(&mut resp.Body);
         let _ = io::Closer::Close(&mut resp.Body);
         if !err.IsNil() {
-            Println!("[ 3] Post JSON                FAIL err={}", err);
+            fmt::Println!("[ 3] Post JSON                FAIL err={}", err);
             failed += 1;
         } else if resp.StatusCode == 200
             && seen_len == 9
             && seen_ct == "application/json"
             && body_eq(&resp_body, br#"{"k":"v"}"#)
         {
-            Println!("[ 3] Post JSON                PASS");
+            fmt::Println!("[ 3] Post JSON                PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 3] Post JSON                FAIL status={} seen_len={}",
                 resp.StatusCode, seen_len
             );
@@ -203,9 +204,9 @@ fn main() {
         let a = form_seen_a.Lock().clone();
         let b = form_seen_b.Lock().clone();
         if resp.StatusCode == 200 && a == "hello world" && b == "a&b=c" {
-            Println!("[ 4] PostForm                 PASS");
+            fmt::Println!("[ 4] PostForm                 PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 4] PostForm                 FAIL status={}",
                 resp.StatusCode
             );
@@ -220,9 +221,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 200 && body_eq(&body, b"hello, client\n") {
-            Println!("[ 5] Redirect 302→200         PASS");
+            fmt::Println!("[ 5] Redirect 302→200         PASS");
         } else {
-            Println!("[ 5] Redirect 302→200         FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 5] Redirect 302→200         FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -237,9 +238,9 @@ fn main() {
             && body_eq(&body, b"alpha-beta-gamma")
             && resp.ContentLength == -1
         {
-            Println!("[ 6] Chunked response         PASS");
+            fmt::Println!("[ 6] Chunked response         PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 6] Chunked response         FAIL status={} cl={} body_len={}",
                 resp.StatusCode, resp.ContentLength, body.Len()
             );
@@ -257,9 +258,9 @@ fn main() {
             && cookies[0].Value == "xyz"
             && cookies[0].HttpOnly
         {
-            Println!("[ 7] Response.Cookies()       PASS");
+            fmt::Println!("[ 7] Response.Cookies()       PASS");
         } else {
-            Println!("[ 7] Response.Cookies()       FAIL n={}", cookies.Len());
+            fmt::Println!("[ 7] Response.Cookies()       FAIL n={}", cookies.Len());
             failed += 1;
         }
     }
@@ -267,10 +268,10 @@ fn main() {
     let _ = srv_arc.Shutdown(time::Second);
 
     if failed == 0 {
-        Println!("ok 7/7");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 7", failed);
+        fmt::Println!("FAIL {} of 7", failed);
         syscall::Exit(1);
     }
 }

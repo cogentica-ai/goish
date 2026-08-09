@@ -11,13 +11,14 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::io;
 use goish::net;
 use goish::net::http;
 use goish::os;
 use goish::time;
-use goish::{go, string, syscall, Println};
+use goish::{go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -51,9 +52,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 200 && body.Len() == 36 {
-            Println!("[ 1] full body 200             PASS");
+            fmt::Println!("[ 1] full body 200             PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 1] full body 200             FAIL status={} len={}",
                 resp.StatusCode, body.Len()
             );
@@ -71,9 +72,9 @@ fn main() {
         let _ = io::Closer::Close(&mut resp.Body);
         let cr = resp.Header.Get(string("Content-Range"));
         if resp.StatusCode == 206 && body.Len() == 10 && cr == "bytes 0-9/36" {
-            Println!("[ 2] Range 0-9 → 206           PASS");
+            fmt::Println!("[ 2] Range 0-9 → 206           PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 2] Range 0-9 → 206           FAIL status={} len={} cr={}",
                 resp.StatusCode, body.Len(), cr
             );
@@ -93,13 +94,13 @@ fn main() {
             // Last 5 bytes are "VWXYZ".
             let last5 = body_as_bytes(&body);
             if &last5[..] == b"VWXYZ" {
-                Println!("[ 3] suffix Range → 206        PASS");
+                fmt::Println!("[ 3] suffix Range → 206        PASS");
             } else {
-                Println!("[ 3] suffix Range → 206        FAIL bytes");
+                fmt::Println!("[ 3] suffix Range → 206        FAIL bytes");
                 failed += 1;
             }
         } else {
-            Println!("[ 3] suffix Range → 206        FAIL");
+            fmt::Println!("[ 3] suffix Range → 206        FAIL");
             failed += 1;
         }
     }
@@ -111,9 +112,9 @@ fn main() {
         let cli = http::Client::default();
         let (resp, _) = cli.Do(&req);
         if resp.StatusCode == 416 {
-            Println!("[ 4] OOB Range → 416           PASS");
+            fmt::Println!("[ 4] OOB Range → 416           PASS");
         } else {
-            Println!("[ 4] OOB Range → 416           FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 4] OOB Range → 416           FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -127,9 +128,9 @@ fn main() {
         let cli = http::Client::default();
         let (resp, _) = cli.Do(&req);
         if resp.StatusCode == 304 {
-            Println!("[ 5] If-Modified-Since → 304   PASS");
+            fmt::Println!("[ 5] If-Modified-Since → 304   PASS");
         } else {
-            Println!("[ 5] If-Modified-Since → 304   FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 5] If-Modified-Since → 304   FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -140,9 +141,9 @@ fn main() {
         let (resp, _) = http::Get(url);
         let lm = resp.Header.Get(string("Last-Modified"));
         if resp.StatusCode == 200 && lm.Len() > 0 {
-            Println!("[ 6] Last-Modified header      PASS");
+            fmt::Println!("[ 6] Last-Modified header      PASS");
         } else {
-            Println!("[ 6] Last-Modified header      FAIL");
+            fmt::Println!("[ 6] Last-Modified header      FAIL");
             failed += 1;
         }
     }
@@ -150,10 +151,10 @@ fn main() {
     let _ = srv_arc.Shutdown(time::Second);
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 6", failed);
+        fmt::Println!("FAIL {} of 6", failed);
         syscall::Exit(1);
     }
 }

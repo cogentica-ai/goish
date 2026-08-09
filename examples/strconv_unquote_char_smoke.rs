@@ -9,9 +9,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::strconv;
 use goish::types::{byte, rune};
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -21,9 +22,9 @@ fn main() {
     {
         let (v, mb, tail, err) = strconv::UnquoteChar(string("abc"), b'"');
         if err.IsNil() && v == b'a' as rune && !mb && tail == "bc" {
-            Println!("[ 1] UnquoteChar plain         PASS");
+            fmt::Println!("[ 1] UnquoteChar plain         PASS");
         } else {
-            Println!("[ 1] UnquoteChar plain         FAIL");
+            fmt::Println!("[ 1] UnquoteChar plain         FAIL");
             failed += 1;
         }
     }
@@ -32,9 +33,9 @@ fn main() {
     {
         let (v, mb, tail, err) = strconv::UnquoteChar(string("\\nrest"), b'"');
         if err.IsNil() && v == 0x0A && !mb && tail == "rest" {
-            Println!("[ 2] UnquoteChar \\n            PASS");
+            fmt::Println!("[ 2] UnquoteChar \\n            PASS");
         } else {
-            Println!("[ 2] UnquoteChar \\n            FAIL");
+            fmt::Println!("[ 2] UnquoteChar \\n            FAIL");
             failed += 1;
         }
     }
@@ -43,9 +44,9 @@ fn main() {
     {
         let (v, mb, tail, err) = strconv::UnquoteChar(string("\\xFFtail"), b'"');
         if err.IsNil() && v == 0xFF && !mb && tail == "tail" {
-            Println!("[ 3] UnquoteChar \\xHH          PASS");
+            fmt::Println!("[ 3] UnquoteChar \\xHH          PASS");
         } else {
-            Println!("[ 3] UnquoteChar \\xHH          FAIL");
+            fmt::Println!("[ 3] UnquoteChar \\xHH          FAIL");
             failed += 1;
         }
     }
@@ -54,9 +55,9 @@ fn main() {
     {
         let (v, mb, tail, err) = strconv::UnquoteChar(string("\\u00e9z"), b'"');
         if err.IsNil() && v == 0xE9 && mb && tail == "z" {
-            Println!("[ 4] UnquoteChar \\uXXXX         PASS");
+            fmt::Println!("[ 4] UnquoteChar \\uXXXX         PASS");
         } else {
-            Println!("[ 4] UnquoteChar \\uXXXX         FAIL");
+            fmt::Println!("[ 4] UnquoteChar \\uXXXX         FAIL");
             failed += 1;
         }
     }
@@ -65,9 +66,9 @@ fn main() {
     {
         let (v, mb, _tail, err) = strconv::UnquoteChar(string("\\U00010348"), b'"');
         if err.IsNil() && v == 0x10348 && mb {
-            Println!("[ 5] UnquoteChar \\UXXXXXXXX     PASS");
+            fmt::Println!("[ 5] UnquoteChar \\UXXXXXXXX     PASS");
         } else {
-            Println!("[ 5] UnquoteChar \\UXXXXXXXX     FAIL");
+            fmt::Println!("[ 5] UnquoteChar \\UXXXXXXXX     FAIL");
             failed += 1;
         }
     }
@@ -76,9 +77,9 @@ fn main() {
     {
         let (v, mb, tail, err) = strconv::UnquoteChar(string("\\101bc"), b'"');
         if err.IsNil() && v == 0x41 && !mb && tail == "bc" {
-            Println!("[ 6] UnquoteChar octal         PASS");
+            fmt::Println!("[ 6] UnquoteChar octal         PASS");
         } else {
-            Println!("[ 6] UnquoteChar octal         FAIL");
+            fmt::Println!("[ 6] UnquoteChar octal         FAIL");
             failed += 1;
         }
     }
@@ -88,9 +89,9 @@ fn main() {
         let (v1, _, _, e1) = strconv::UnquoteChar(string("\\\\"), b'"');
         let (v2, _, _, e2) = strconv::UnquoteChar(string("\\'"), b'\'');
         if e1.IsNil() && v1 == b'\\' as rune && e2.IsNil() && v2 == b'\'' as rune {
-            Println!("[ 7] UnquoteChar \\\\ + \\'       PASS");
+            fmt::Println!("[ 7] UnquoteChar \\\\ + \\'       PASS");
         } else {
-            Println!("[ 7] UnquoteChar \\\\ + \\'       FAIL");
+            fmt::Println!("[ 7] UnquoteChar \\\\ + \\'       FAIL");
             failed += 1;
         }
     }
@@ -100,9 +101,9 @@ fn main() {
         let (_, _, _, err) = strconv::UnquoteChar(string("\\"), b'"');
         // Error: ErrSyntax (incomplete escape).
         if !err.IsNil() {
-            Println!("[ 8] UnquoteChar trailing\\     PASS");
+            fmt::Println!("[ 8] UnquoteChar trailing\\     PASS");
         } else {
-            Println!("[ 8] UnquoteChar trailing\\     FAIL");
+            fmt::Println!("[ 8] UnquoteChar trailing\\     FAIL");
             failed += 1;
         }
     }
@@ -111,9 +112,9 @@ fn main() {
     {
         let (_, _, _, err) = strconv::UnquoteChar(string("\"abc"), b'"');
         if !err.IsNil() {
-            Println!("[ 9] UnquoteChar bare quote    PASS");
+            fmt::Println!("[ 9] UnquoteChar bare quote    PASS");
         } else {
-            Println!("[ 9] UnquoteChar bare quote    FAIL");
+            fmt::Println!("[ 9] UnquoteChar bare quote    FAIL");
             failed += 1;
         }
     }
@@ -123,9 +124,9 @@ fn main() {
         // 'é' = 0xC3 0xA9 → rune 0xE9
         let (v, mb, _tail, err) = strconv::UnquoteChar(string("\u{00e9}rest"), b'"');
         if err.IsNil() && v == 0xE9 && mb {
-            Println!("[10] UnquoteChar UTF-8         PASS");
+            fmt::Println!("[10] UnquoteChar UTF-8         PASS");
         } else {
-            Println!("[10] UnquoteChar UTF-8         FAIL");
+            fmt::Println!("[10] UnquoteChar UTF-8         FAIL");
             failed += 1;
         }
     }
@@ -134,9 +135,9 @@ fn main() {
     {
         let (s, err) = strconv::Unquote(string("'\\n'"));
         if err.IsNil() && s == "\n" {
-            Println!("[11] Unquote rune literal      PASS");
+            fmt::Println!("[11] Unquote rune literal      PASS");
         } else {
-            Println!("[11] Unquote rune literal      FAIL");
+            fmt::Println!("[11] Unquote rune literal      FAIL");
             failed += 1;
         }
     }
@@ -145,9 +146,9 @@ fn main() {
     {
         let (s, err) = strconv::Unquote(string("`abc`"));
         if err.IsNil() && s == "abc" {
-            Println!("[12] Unquote backquote         PASS");
+            fmt::Println!("[12] Unquote backquote         PASS");
         } else {
-            Println!("[12] Unquote backquote         FAIL");
+            fmt::Println!("[12] Unquote backquote         FAIL");
             failed += 1;
         }
     }
@@ -156,9 +157,9 @@ fn main() {
     {
         let (s, err) = strconv::Unquote(string("`a\rb`"));
         if err.IsNil() && s == "ab" {
-            Println!("[13] Unquote bq strip CR       PASS");
+            fmt::Println!("[13] Unquote bq strip CR       PASS");
         } else {
-            Println!("[13] Unquote bq strip CR       FAIL");
+            fmt::Println!("[13] Unquote bq strip CR       FAIL");
             failed += 1;
         }
     }
@@ -167,9 +168,9 @@ fn main() {
     {
         let (s, err) = strconv::Unquote(string("\"x\\u00e9y\""));
         if err.IsNil() && s == "x\u{00e9}y" {
-            Println!("[14] Unquote \\u inside \"      PASS");
+            fmt::Println!("[14] Unquote \\u inside \"      PASS");
         } else {
-            Println!("[14] Unquote \\u inside \"      FAIL");
+            fmt::Println!("[14] Unquote \\u inside \"      FAIL");
             failed += 1;
         }
     }
@@ -178,9 +179,9 @@ fn main() {
     {
         let (_, err) = strconv::Unquote(string("\"abc"));
         if !err.IsNil() {
-            Println!("[15] Unquote unterminated      PASS");
+            fmt::Println!("[15] Unquote unterminated      PASS");
         } else {
-            Println!("[15] Unquote unterminated      FAIL");
+            fmt::Println!("[15] Unquote unterminated      FAIL");
             failed += 1;
         }
     }
@@ -189,9 +190,9 @@ fn main() {
     {
         let (_, err) = strconv::Unquote(string("\"abc\"x"));
         if !err.IsNil() {
-            Println!("[16] Unquote trailing junk     PASS");
+            fmt::Println!("[16] Unquote trailing junk     PASS");
         } else {
-            Println!("[16] Unquote trailing junk     FAIL");
+            fmt::Println!("[16] Unquote trailing junk     FAIL");
             failed += 1;
         }
     }
@@ -200,9 +201,9 @@ fn main() {
     {
         let (out, err) = strconv::QuotedPrefix(string("\"hi\"rest"));
         if err.IsNil() && out == "\"hi\"" {
-            Println!("[17] QuotedPrefix              PASS");
+            fmt::Println!("[17] QuotedPrefix              PASS");
         } else {
-            Println!("[17] QuotedPrefix              FAIL");
+            fmt::Println!("[17] QuotedPrefix              FAIL");
             failed += 1;
         }
     }
@@ -211,9 +212,9 @@ fn main() {
     {
         let (out, err) = strconv::QuotedPrefix(string("`hello`world"));
         if err.IsNil() && out == "`hello`" {
-            Println!("[18] QuotedPrefix backquote    PASS");
+            fmt::Println!("[18] QuotedPrefix backquote    PASS");
         } else {
-            Println!("[18] QuotedPrefix backquote    FAIL");
+            fmt::Println!("[18] QuotedPrefix backquote    FAIL");
             failed += 1;
         }
     }
@@ -222,9 +223,9 @@ fn main() {
     {
         let (_, err) = strconv::QuotedPrefix(string("nope"));
         if !err.IsNil() {
-            Println!("[19] QuotedPrefix no quote     PASS");
+            fmt::Println!("[19] QuotedPrefix no quote     PASS");
         } else {
-            Println!("[19] QuotedPrefix no quote     FAIL");
+            fmt::Println!("[19] QuotedPrefix no quote     FAIL");
             failed += 1;
         }
     }
@@ -233,9 +234,9 @@ fn main() {
     {
         let q = strconv::QuoteToGraphic(string("hi"));
         if q == "\"hi\"" {
-            Println!("[20] QuoteToGraphic            PASS");
+            fmt::Println!("[20] QuoteToGraphic            PASS");
         } else {
-            Println!("[20] QuoteToGraphic            FAIL");
+            fmt::Println!("[20] QuoteToGraphic            FAIL");
             failed += 1;
         }
     }
@@ -244,9 +245,9 @@ fn main() {
     {
         let q = strconv::QuoteRuneToGraphic(b'A' as rune);
         if q == "'A'" {
-            Println!("[21] QuoteRuneToGraphic        PASS");
+            fmt::Println!("[21] QuoteRuneToGraphic        PASS");
         } else {
-            Println!("[21] QuoteRuneToGraphic        FAIL");
+            fmt::Println!("[21] QuoteRuneToGraphic        FAIL");
             failed += 1;
         }
     }
@@ -259,9 +260,9 @@ fn main() {
         let dst = strconv::AppendQuoteRuneToGraphic(dst, b'!' as rune);
         let s = string::from_bytes(&dst);
         if s == "\"hi\"'!'" {
-            Println!("[22] AppendQuote*ToGraphic     PASS");
+            fmt::Println!("[22] AppendQuote*ToGraphic     PASS");
         } else {
-            Println!("[22] AppendQuote*ToGraphic     FAIL");
+            fmt::Println!("[22] AppendQuote*ToGraphic     FAIL");
             failed += 1;
         }
     }
@@ -272,18 +273,18 @@ fn main() {
         let q = strconv::Quote(original.clone());
         let (uq, err) = strconv::Unquote(q);
         if err.IsNil() && uq == original {
-            Println!("[23] Round-trip multibyte      PASS");
+            fmt::Println!("[23] Round-trip multibyte      PASS");
         } else {
-            Println!("[23] Round-trip multibyte      FAIL");
+            fmt::Println!("[23] Round-trip multibyte      FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 23/23");
+        fmt::Println!("ok 23/23");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 23");
+        fmt::Println!("FAIL", failed, "of 23");
         syscall::Exit(1);
     }
 }

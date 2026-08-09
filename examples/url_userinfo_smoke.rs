@@ -7,8 +7,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net::http::url;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -19,9 +20,9 @@ fn main() {
         let u = url::User(string("alice"));
         let (p, ok) = u.Password();
         if u.Username() == "alice" && !ok && p.Len() == 0 {
-            Println!("[ 1] User() no password         PASS");
+            fmt::Println!("[ 1] User() no password         PASS");
         } else {
-            Println!("[ 1] User() no password         FAIL");
+            fmt::Println!("[ 1] User() no password         FAIL");
             failed += 1;
         }
     }
@@ -31,9 +32,9 @@ fn main() {
         let u = url::UserPassword(string("bob"), string("s3cret"));
         let (p, ok) = u.Password();
         if u.Username() == "bob" && ok && p == "s3cret" {
-            Println!("[ 2] UserPassword              PASS");
+            fmt::Println!("[ 2] UserPassword              PASS");
         } else {
-            Println!("[ 2] UserPassword              FAIL");
+            fmt::Println!("[ 2] UserPassword              FAIL");
             failed += 1;
         }
     }
@@ -43,9 +44,9 @@ fn main() {
         let u = url::User(string("alice"));
         let s = u.String();
         if s == "alice" {
-            Println!("[ 3] String() no password      PASS");
+            fmt::Println!("[ 3] String() no password      PASS");
         } else {
-            Println!("[ 3] String() no password      FAIL got={}", s);
+            fmt::Println!("[ 3] String() no password      FAIL got={}", s);
             failed += 1;
         }
     }
@@ -55,9 +56,9 @@ fn main() {
         let u = url::UserPassword(string("bob"), string("pw"));
         let s = u.String();
         if s == "bob:pw" {
-            Println!("[ 4] String() with password    PASS");
+            fmt::Println!("[ 4] String() with password    PASS");
         } else {
-            Println!("[ 4] String() with password    FAIL got={}", s);
+            fmt::Println!("[ 4] String() with password    FAIL got={}", s);
             failed += 1;
         }
     }
@@ -67,9 +68,9 @@ fn main() {
         let u = url::UserPassword(string("a b"), string("pw"));
         let s = u.String();
         if s == "a%20b:pw" {
-            Println!("[ 5] String() escapes spaces   PASS");
+            fmt::Println!("[ 5] String() escapes spaces   PASS");
         } else {
-            Println!("[ 5] String() escapes spaces   FAIL got={}", s);
+            fmt::Println!("[ 5] String() escapes spaces   FAIL got={}", s);
             failed += 1;
         }
     }
@@ -79,18 +80,18 @@ fn main() {
         let u = url::UserPassword(string("alice"), string(""));
         let (p, ok) = u.Password();
         if ok && p.Len() == 0 {
-            Println!("[ 6] empty pass distinct       PASS");
+            fmt::Println!("[ 6] empty pass distinct       PASS");
         } else {
-            Println!("[ 6] empty pass distinct       FAIL");
+            fmt::Println!("[ 6] empty pass distinct       FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 6", failed);
+        fmt::Println!("FAIL {} of 6", failed);
         syscall::Exit(1);
     }
 }

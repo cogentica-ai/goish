@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::error;
 use goish::errors;
 use goish::io::fs;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -22,9 +23,9 @@ fn main() {
         let m = fs::FileMode(0o644);
         let s = m.String();
         if s == string("-rw-r--r--") {
-            Println!("[ 1] String 0644             PASS");
+            fmt::Println!("[ 1] String 0644             PASS");
         } else {
-            Println!("[ 1] String 0644             FAIL got '{}'", s);
+            fmt::Println!("[ 1] String 0644             FAIL got '{}'", s);
             failed += 1;
         }
     }
@@ -34,9 +35,9 @@ fn main() {
         let m = fs::FileMode(fs::ModeDir.0 | 0o755);
         let s = m.String();
         if s == string("drwxr-xr-x") {
-            Println!("[ 2] String dir              PASS");
+            fmt::Println!("[ 2] String dir              PASS");
         } else {
-            Println!("[ 2] String dir              FAIL got '{}'", s);
+            fmt::Println!("[ 2] String dir              FAIL got '{}'", s);
             failed += 1;
         }
     }
@@ -46,9 +47,9 @@ fn main() {
         let m = fs::FileMode(fs::ModeSymlink.0 | 0o777);
         let s = m.String();
         if s == string("Lrwxrwxrwx") {
-            Println!("[ 3] String symlink          PASS");
+            fmt::Println!("[ 3] String symlink          PASS");
         } else {
-            Println!("[ 3] String symlink          FAIL got '{}'", s);
+            fmt::Println!("[ 3] String symlink          FAIL got '{}'", s);
             failed += 1;
         }
     }
@@ -68,9 +69,9 @@ fn main() {
             && reg.Type() == fs::FileMode(0)
             && dir.Type() == fs::ModeDir;
         if ok {
-            Println!("[ 4] IsDir/IsRegular/Perm    PASS");
+            fmt::Println!("[ 4] IsDir/IsRegular/Perm    PASS");
         } else {
-            Println!("[ 4] IsDir/IsRegular/Perm    FAIL");
+            fmt::Println!("[ 4] IsDir/IsRegular/Perm    FAIL");
             failed += 1;
         }
     }
@@ -82,9 +83,9 @@ fn main() {
             && fs::ValidPath(string("a/b/c"))
             && fs::ValidPath(string("a/b/c.txt"));
         if ok {
-            Println!("[ 5] ValidPath valid         PASS");
+            fmt::Println!("[ 5] ValidPath valid         PASS");
         } else {
-            Println!("[ 5] ValidPath valid         FAIL");
+            fmt::Println!("[ 5] ValidPath valid         FAIL");
             failed += 1;
         }
     }
@@ -99,9 +100,9 @@ fn main() {
             && !fs::ValidPath(string("a/.."))
             && !fs::ValidPath(string("a/./b"));
         if bad {
-            Println!("[ 6] ValidPath invalid       PASS");
+            fmt::Println!("[ 6] ValidPath invalid       PASS");
         } else {
-            Println!("[ 6] ValidPath invalid       FAIL");
+            fmt::Println!("[ 6] ValidPath invalid       FAIL");
             failed += 1;
         }
     }
@@ -116,9 +117,9 @@ fn main() {
         let e = errors::Wrap(pe);
         let msg = e.Error();
         if msg == string("open /foo: file does not exist") {
-            Println!("[ 7] PathError Error fmt     PASS");
+            fmt::Println!("[ 7] PathError Error fmt     PASS");
         } else {
-            Println!("[ 7] PathError Error fmt     FAIL got '{}'", msg);
+            fmt::Println!("[ 7] PathError Error fmt     FAIL got '{}'", msg);
             failed += 1;
         }
     }
@@ -132,9 +133,9 @@ fn main() {
         };
         let e = errors::Wrap(pe);
         if errors::Is(e, fs::ErrPermission) {
-            Println!("[ 8] PathError chains Is     PASS");
+            fmt::Println!("[ 8] PathError chains Is     PASS");
         } else {
-            Println!("[ 8] PathError chains Is     FAIL");
+            fmt::Println!("[ 8] PathError chains Is     FAIL");
             failed += 1;
         }
     }
@@ -145,9 +146,9 @@ fn main() {
         let b: error = fs::ErrNotExist.into();
         let c: error = fs::ErrInvalid.into();
         if a == b && a != c {
-            Println!("[ 9] Sentinel identity       PASS");
+            fmt::Println!("[ 9] Sentinel identity       PASS");
         } else {
-            Println!("[ 9] Sentinel identity       FAIL");
+            fmt::Println!("[ 9] Sentinel identity       FAIL");
             failed += 1;
         }
     }
@@ -163,18 +164,18 @@ fn main() {
             | fs::ModeCharDevice.0
             | fs::ModeIrregular.0;
         if mask == want {
-            Println!("[10] ModeType mask           PASS");
+            fmt::Println!("[10] ModeType mask           PASS");
         } else {
-            Println!("[10] ModeType mask           FAIL");
+            fmt::Println!("[10] ModeType mask           FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

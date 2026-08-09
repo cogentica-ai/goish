@@ -24,13 +24,14 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::fmt;
 use goish::errors::{self, error};
 use goish::io::fs;
 use goish::runtime::spin::SpinLock;
 use goish::slice;
 use goish::string;
 use goish::types::{byte, int};
-use goish::{syscall, Println};
+use goish::{syscall};
 
 const TOTAL: usize = 12;
 
@@ -601,10 +602,10 @@ fn main() {
         let f = FAILED.load(Ordering::Acquire);
         let pass = TOTAL - f;
         if f == 0 {
-            Println!("ok 12/12");
+            fmt::Println!("ok 12/12");
             syscall::Exit(0);
         } else {
-            Println!("FAIL", pass as i64, "of", TOTAL as i64);
+            fmt::Println!("FAIL", pass as i64, "of", TOTAL as i64);
             syscall::Exit(1);
         }
     });

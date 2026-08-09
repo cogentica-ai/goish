@@ -10,12 +10,13 @@ extern crate goish;
 
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::errors;
 use goish::io;
 use goish::mime::multipart;
 use goish::types::byte;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -52,7 +53,7 @@ fn main() {
                 if errors::Is(err.clone(), io::EOF) {
                     break;
                 }
-                Println!("[ 1] reader err {}", err.Error());
+                fmt::Println!("[ 1] reader err {}", err.Error());
                 failed += 1;
                 break;
             }
@@ -70,9 +71,9 @@ fn main() {
             && body_str(&parts[2].Body) == "PNGBYTES";
 
         if names_ok && bodies_ok {
-            Println!("[ 1] round-trip 3 parts        PASS");
+            fmt::Println!("[ 1] round-trip 3 parts        PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 1] round-trip 3 parts        FAIL n={} names_ok={} bodies_ok={}",
                 parts.len(),
                 names_ok,
@@ -96,9 +97,9 @@ fn main() {
             && p2.FormName() == "y" && body_str(&p2.Body) == "world"
             && errors::Is(e3, io::EOF);
         if ok {
-            Println!("[ 2] hand-built body           PASS");
+            fmt::Println!("[ 2] hand-built body           PASS");
         } else {
-            Println!("[ 2] hand-built body           FAIL");
+            fmt::Println!("[ 2] hand-built body           FAIL");
             failed += 1;
         }
     }
@@ -111,18 +112,18 @@ fn main() {
         let mut r = multipart::NewReader(body, string("B"));
         let (p, err) = r.NextPart();
         if err.IsNil() && p.FormName() == "k" && body_str(&p.Body) == "vee" {
-            Println!("[ 3] preamble skipped          PASS");
+            fmt::Println!("[ 3] preamble skipped          PASS");
         } else {
-            Println!("[ 3] preamble skipped          FAIL");
+            fmt::Println!("[ 3] preamble skipped          FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 3/3");
+        fmt::Println!("ok 3/3");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 3", failed);
+        fmt::Println!("FAIL {} of 3", failed);
         syscall::Exit(1);
     }
 }

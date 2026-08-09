@@ -8,11 +8,12 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::convert::bytes as as_bytes;
 use goish::goslice::slice;
 use goish::types::byte;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 fn check_eq(a: slice<byte>, want: &[u8]) -> bool {
     if a.Len() as usize != want.len() {
@@ -36,9 +37,9 @@ fn main() {
     {
         let got = bytes::ToValidUTF8(as_bytes(string("hello")), as_bytes(string("X")));
         if check_eq(got, b"hello") {
-            Println!("[ 1] ASCII unchanged           PASS");
+            fmt::Println!("[ 1] ASCII unchanged           PASS");
         } else {
-            Println!("[ 1] ASCII unchanged           FAIL");
+            fmt::Println!("[ 1] ASCII unchanged           FAIL");
             failed += 1;
         }
     }
@@ -47,9 +48,9 @@ fn main() {
     {
         let got = bytes::ToValidUTF8(as_bytes(string("")), as_bytes(string("X")));
         if got.Len() == 0 {
-            Println!("[ 2] empty input               PASS");
+            fmt::Println!("[ 2] empty input               PASS");
         } else {
-            Println!("[ 2] empty input               FAIL");
+            fmt::Println!("[ 2] empty input               FAIL");
             failed += 1;
         }
     }
@@ -59,9 +60,9 @@ fn main() {
         let s = string::from_bytes(&[b'h', 0xc3, 0xa9, b'l', b'l', b'o']);
         let got = bytes::ToValidUTF8(as_bytes(s), as_bytes(string("?")));
         if check_eq(got, &[b'h', 0xc3, 0xa9, b'l', b'l', b'o']) {
-            Println!("[ 3] valid multi-byte          PASS");
+            fmt::Println!("[ 3] valid multi-byte          PASS");
         } else {
-            Println!("[ 3] valid multi-byte          FAIL");
+            fmt::Println!("[ 3] valid multi-byte          FAIL");
             failed += 1;
         }
     }
@@ -71,9 +72,9 @@ fn main() {
         let s = string::from_bytes(&[b'a', b'b', 0xFF, b'c', b'd']);
         let got = bytes::ToValidUTF8(as_bytes(s), as_bytes(string("?")));
         if check_eq(got, b"ab?cd") {
-            Println!("[ 4] single bad byte           PASS");
+            fmt::Println!("[ 4] single bad byte           PASS");
         } else {
-            Println!("[ 4] single bad byte           FAIL");
+            fmt::Println!("[ 4] single bad byte           FAIL");
             failed += 1;
         }
     }
@@ -83,9 +84,9 @@ fn main() {
         let s = string::from_bytes(&[b'a', 0xFF, 0xFE, 0xFD, b'c', b'd']);
         let got = bytes::ToValidUTF8(as_bytes(s), as_bytes(string("?")));
         if check_eq(got, b"a?cd") {
-            Println!("[ 5] run of bad bytes          PASS");
+            fmt::Println!("[ 5] run of bad bytes          PASS");
         } else {
-            Println!("[ 5] run of bad bytes          FAIL");
+            fmt::Println!("[ 5] run of bad bytes          FAIL");
             failed += 1;
         }
     }
@@ -95,9 +96,9 @@ fn main() {
         let s = string::from_bytes(&[b'a', b'b', 0xFF, b'c', b'd']);
         let got = bytes::ToValidUTF8(as_bytes(s), as_bytes(string("")));
         if check_eq(got, b"abcd") {
-            Println!("[ 6] empty replacement drops   PASS");
+            fmt::Println!("[ 6] empty replacement drops   PASS");
         } else {
-            Println!("[ 6] empty replacement drops   FAIL");
+            fmt::Println!("[ 6] empty replacement drops   FAIL");
             failed += 1;
         }
     }
@@ -107,18 +108,18 @@ fn main() {
         let s = string::from_bytes(&[b'a', 0xFF, b'b']);
         let got = bytes::ToValidUTF8(as_bytes(s), as_bytes(string("REPL")));
         if check_eq(got, b"aREPLb") {
-            Println!("[ 7] multi-byte replacement    PASS");
+            fmt::Println!("[ 7] multi-byte replacement    PASS");
         } else {
-            Println!("[ 7] multi-byte replacement    FAIL");
+            fmt::Println!("[ 7] multi-byte replacement    FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 7/7");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 7");
+        fmt::Println!("FAIL", failed, "of 7");
         syscall::Exit(1);
     }
 }

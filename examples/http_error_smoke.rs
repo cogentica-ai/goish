@@ -10,13 +10,14 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::bytes::NewReader;
 use goish::goslice::slice;
 use goish::io::{self, Reader};
 use goish::net;
 use goish::net::http;
 use goish::time;
-use goish::{bytes, errors, go, string, syscall, Println};
+use goish::{bytes, errors, go, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -55,9 +56,9 @@ fn main() {
             && ct == "text/plain; charset=utf-8"
             && ncto == "nosniff"
         {
-            Println!("[ 1] http::Error               PASS");
+            fmt::Println!("[ 1] http::Error               PASS");
         } else {
-            Println!("[ 1] http::Error               FAIL status={} ct={} ncto={}", resp.StatusCode, ct, ncto);
+            fmt::Println!("[ 1] http::Error               FAIL status={} ct={} ncto={}", resp.StatusCode, ct, ncto);
             failed += 1;
         }
     }
@@ -69,9 +70,9 @@ fn main() {
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = io::Closer::Close(&mut resp.Body);
         if resp.StatusCode == 404 && body_eq(&body, b"404 page not found\n") {
-            Println!("[ 2] http::NotFound            PASS");
+            fmt::Println!("[ 2] http::NotFound            PASS");
         } else {
-            Println!("[ 2] http::NotFound            FAIL status={}", resp.StatusCode);
+            fmt::Println!("[ 2] http::NotFound            FAIL status={}", resp.StatusCode);
             failed += 1;
         }
     }
@@ -89,18 +90,18 @@ fn main() {
         // First Read returns up to 11 bytes (limit + 1 probe). After
         // remaining hits 0, the next Read returns 0 + ErrMaxBytes.
         if (n1 == 10 || n1 == 11) && n2 == 0 && errors::Is(e2, http::ErrMaxBytes) {
-            Println!("[ 3] MaxBytesReader limit      PASS");
+            fmt::Println!("[ 3] MaxBytesReader limit      PASS");
         } else {
-            Println!("[ 3] MaxBytesReader limit      FAIL n1={} n2={}", n1, n2);
+            fmt::Println!("[ 3] MaxBytesReader limit      FAIL n1={} n2={}", n1, n2);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 3/3");
+        fmt::Println!("ok 3/3");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 3", failed);
+        fmt::Println!("FAIL {} of 3", failed);
         syscall::Exit(1);
     }
 }

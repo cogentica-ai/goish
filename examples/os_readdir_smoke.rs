@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::os;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -31,7 +32,7 @@ fn main() {
     {
         let (entries, err) = os::ReadDir(string("/tmp"));
         if !err.IsNil() {
-            Println!("[ 1] ReadDir /tmp              FAIL err");
+            fmt::Println!("[ 1] ReadDir /tmp              FAIL err");
             failed += 1;
         } else {
             let mut found_a = false;
@@ -46,9 +47,9 @@ fn main() {
                 }
             }
             if found_a && found_b {
-                Println!("[ 1] ReadDir /tmp              PASS", entries.Len(), "entries");
+                fmt::Println!("[ 1] ReadDir /tmp              PASS", entries.Len(), "entries");
             } else {
-                Println!(
+                fmt::Println!(
                     "[ 1] ReadDir /tmp              FAIL a={} b={}",
                     found_a, found_b
                 );
@@ -71,9 +72,9 @@ fn main() {
             prev = e.Name();
         }
         if sorted {
-            Println!("[ 2] entries sorted            PASS");
+            fmt::Println!("[ 2] entries sorted            PASS");
         } else {
-            Println!("[ 2] entries sorted            FAIL");
+            fmt::Println!("[ 2] entries sorted            FAIL");
             failed += 1;
         }
     }
@@ -82,9 +83,9 @@ fn main() {
     {
         let (_e, err) = os::ReadDir(string("/tmp/goish-no-such-dir-12345"));
         if !err.IsNil() {
-            Println!("[ 3] missing dir → err         PASS");
+            fmt::Println!("[ 3] missing dir → err         PASS");
         } else {
-            Println!("[ 3] missing dir → err         FAIL");
+            fmt::Println!("[ 3] missing dir → err         FAIL");
             failed += 1;
         }
     }
@@ -104,9 +105,9 @@ fn main() {
             }
         }
         if !has_dot && !has_dotdot {
-            Println!("[ 4] . and .. skipped          PASS");
+            fmt::Println!("[ 4] . and .. skipped          PASS");
         } else {
-            Println!("[ 4] . and .. skipped          FAIL dot={} dotdot={}", has_dot, has_dotdot);
+            fmt::Println!("[ 4] . and .. skipped          FAIL dot={} dotdot={}", has_dot, has_dotdot);
             failed += 1;
         }
     }
@@ -125,9 +126,9 @@ fn main() {
             }
         }
         if reg_ok {
-            Println!("[ 5] regular file !IsDir       PASS");
+            fmt::Println!("[ 5] regular file !IsDir       PASS");
         } else {
-            Println!("[ 5] regular file !IsDir       FAIL");
+            fmt::Println!("[ 5] regular file !IsDir       FAIL");
             failed += 1;
         }
     }
@@ -149,9 +150,9 @@ fn main() {
             }
         }
         if info_ok {
-            Println!("[ 6] DirEntry.Info() lstat      PASS");
+            fmt::Println!("[ 6] DirEntry.Info() lstat      PASS");
         } else {
-            Println!("[ 6] DirEntry.Info() lstat      FAIL");
+            fmt::Println!("[ 6] DirEntry.Info() lstat      FAIL");
             failed += 1;
         }
     }
@@ -159,10 +160,10 @@ fn main() {
     let _ = dir;
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 6", failed);
+        fmt::Println!("FAIL {} of 6", failed);
         syscall::Exit(1);
     }
 }

@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::goslice::slice;
 use goish::net::http::url;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 fn vec_of(items: &'static [&'static str]) -> slice<goish::string> {
     let mut s: slice<goish::string> = slice::__from_vec(alloc::vec::Vec::new());
@@ -31,9 +32,9 @@ fn main() {
             vec_of(&["users", "42"]),
         );
         if err.IsNil() && out == "http://example.com/api/users/42" {
-            Println!("[ 1] absolute base + 2 elems   PASS");
+            fmt::Println!("[ 1] absolute base + 2 elems   PASS");
         } else {
-            Println!("[ 1] absolute base + 2 elems   FAIL got={}", out);
+            fmt::Println!("[ 1] absolute base + 2 elems   FAIL got={}", out);
             failed += 1;
         }
     }
@@ -45,9 +46,9 @@ fn main() {
             vec_of(&["users/"]),
         );
         if err.IsNil() && out == "http://example.com/api/users/" {
-            Println!("[ 2] trailing slash preserved  PASS");
+            fmt::Println!("[ 2] trailing slash preserved  PASS");
         } else {
-            Println!("[ 2] trailing slash preserved  FAIL got={}", out);
+            fmt::Println!("[ 2] trailing slash preserved  FAIL got={}", out);
             failed += 1;
         }
     }
@@ -59,9 +60,9 @@ fn main() {
             vec_of(&["..", "d"]),
         );
         if err.IsNil() && out == "http://example.com/a/b/d" {
-            Println!("[ 3] dot-dot collapsed         PASS");
+            fmt::Println!("[ 3] dot-dot collapsed         PASS");
         } else {
-            Println!("[ 3] dot-dot collapsed         FAIL got={}", out);
+            fmt::Println!("[ 3] dot-dot collapsed         FAIL got={}", out);
             failed += 1;
         }
     }
@@ -70,9 +71,9 @@ fn main() {
     {
         let (out, err) = url::JoinPath(string("foo/bar"), vec_of(&["baz"]));
         if err.IsNil() && out == "foo/bar/baz" {
-            Println!("[ 4] relative base             PASS");
+            fmt::Println!("[ 4] relative base             PASS");
         } else {
-            Println!("[ 4] relative base             FAIL got={}", out);
+            fmt::Println!("[ 4] relative base             FAIL got={}", out);
             failed += 1;
         }
     }
@@ -83,16 +84,16 @@ fn main() {
         if err.IsNil() {
             let joined = u.JoinPath(vec_of(&["v2", "users"]));
             if joined.Path == "/api/v2/users" && joined.RawQuery == "x=1" {
-                Println!("[ 5] URL.JoinPath method       PASS");
+                fmt::Println!("[ 5] URL.JoinPath method       PASS");
             } else {
-                Println!(
+                fmt::Println!(
                     "[ 5] URL.JoinPath method       FAIL path={} q={}",
                     joined.Path, joined.RawQuery
                 );
                 failed += 1;
             }
         } else {
-            Println!("[ 5] URL.JoinPath method       FAIL parse");
+            fmt::Println!("[ 5] URL.JoinPath method       FAIL parse");
             failed += 1;
         }
     }
@@ -101,18 +102,18 @@ fn main() {
     {
         let (out, err) = url::JoinPath(string("http://x/a/./b"), vec_of(&[]));
         if err.IsNil() && out == "http://x/a/b" {
-            Println!("[ 6] empty elems canonicalize  PASS");
+            fmt::Println!("[ 6] empty elems canonicalize  PASS");
         } else {
-            Println!("[ 6] empty elems canonicalize  FAIL got={}", out);
+            fmt::Println!("[ 6] empty elems canonicalize  FAIL got={}", out);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 6", failed);
+        fmt::Println!("FAIL {} of 6", failed);
         syscall::Exit(1);
     }
 }

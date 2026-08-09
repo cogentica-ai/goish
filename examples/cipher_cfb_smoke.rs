@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::crypto::cipher;
 use goish::crypto::cipher::{Block, Stream};
 use goish::types::{byte, int};
-use goish::{slice, syscall, Println};
+use goish::{slice, syscall};
 
 // 8-byte ToyBlock: Encrypt(dst, src) = rotate-left(src ^ key, 3).
 // Reversible Decrypt — but CFB only ever calls Encrypt, on both encryp
@@ -59,9 +60,9 @@ fn main() {
         let mut ct = slice::__from_vec(alloc::vec![0u8; 16]);
         e.XORKeyStream(&mut ct, slice::__from_vec(plain.clone()));
         if ct.__into_vec() != plain {
-            Println!("[ 1] CFB encrypt non-trivial    PASS");
+            fmt::Println!("[ 1] CFB encrypt non-trivial    PASS");
         } else {
-            Println!("[ 1] CFB encrypt non-trivial    FAIL");
+            fmt::Println!("[ 1] CFB encrypt non-trivial    FAIL");
             failed += 1;
         }
     }
@@ -87,9 +88,9 @@ fn main() {
         let mut pt2 = slice::__from_vec(alloc::vec![0u8; n]);
         dec.XORKeyStream(&mut pt2, slice::__from_vec(ct_v));
         if pt2.__into_vec() == plain {
-            Println!("[ 2] CFB enc→dec round-trip     PASS");
+            fmt::Println!("[ 2] CFB enc→dec round-trip     PASS");
         } else {
-            Println!("[ 2] CFB enc→dec round-trip     FAIL");
+            fmt::Println!("[ 2] CFB enc→dec round-trip     FAIL");
             failed += 1;
         }
     }
@@ -119,9 +120,9 @@ fn main() {
             got.extend_from_slice(&chunk.__into_vec());
         }
         if got == want {
-            Println!("[ 3] CFB split calls equivalent PASS");
+            fmt::Println!("[ 3] CFB split calls equivalent PASS");
         } else {
-            Println!("[ 3] CFB split calls equivalent FAIL");
+            fmt::Println!("[ 3] CFB split calls equivalent FAIL");
             failed += 1;
         }
     }
@@ -150,9 +151,9 @@ fn main() {
         let mut pt2 = slice::__from_vec(alloc::vec![0u8; 1024]);
         dec.XORKeyStream(&mut pt2, slice::__from_vec(ct_v));
         if pt2.__into_vec() == plain {
-            Println!("[ 4] CFB 1 KiB round-trip       PASS");
+            fmt::Println!("[ 4] CFB 1 KiB round-trip       PASS");
         } else {
-            Println!("[ 4] CFB 1 KiB round-trip       FAIL");
+            fmt::Println!("[ 4] CFB 1 KiB round-trip       FAIL");
             failed += 1;
         }
     }
@@ -181,9 +182,9 @@ fn main() {
             got.extend_from_slice(&one.__into_vec());
         }
         if got == want {
-            Println!("[ 5] CFB byte-by-byte enc       PASS");
+            fmt::Println!("[ 5] CFB byte-by-byte enc       PASS");
         } else {
-            Println!("[ 5] CFB byte-by-byte enc       FAIL");
+            fmt::Println!("[ 5] CFB byte-by-byte enc       FAIL");
             failed += 1;
         }
     }
@@ -206,9 +207,9 @@ fn main() {
         s2.XORKeyStream(&mut ct2, slice::__from_vec(plain));
 
         if ct1.__into_vec() == ct2.__into_vec() {
-            Println!("[ 6] CFB deterministic stream   PASS");
+            fmt::Println!("[ 6] CFB deterministic stream   PASS");
         } else {
-            Println!("[ 6] CFB deterministic stream   FAIL");
+            fmt::Println!("[ 6] CFB deterministic stream   FAIL");
             failed += 1;
         }
     }
@@ -242,9 +243,9 @@ fn main() {
         let block2_garbled = pt2_v[8..16].iter().any(|&b| b != 0);
         let block3_recovered = &pt2_v[16..32] == &plain[16..32];
         if mismatched_in_first_block && block2_garbled && block3_recovered {
-            Println!("[ 7] CFB ct flip propagation    PASS");
+            fmt::Println!("[ 7] CFB ct flip propagation    PASS");
         } else {
-            Println!("[ 7] CFB ct flip propagation    FAIL");
+            fmt::Println!("[ 7] CFB ct flip propagation    FAIL");
             failed += 1;
         }
     }
@@ -268,18 +269,18 @@ fn main() {
         d.XORKeyStream(&mut dst2, slice::__from_vec(alloc::vec![]));
 
         if dst1.__into_vec() == before1 && dst2.__into_vec() == before2 {
-            Println!("[ 8] CFB empty src no-op        PASS");
+            fmt::Println!("[ 8] CFB empty src no-op        PASS");
         } else {
-            Println!("[ 8] CFB empty src no-op        FAIL");
+            fmt::Println!("[ 8] CFB empty src no-op        FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

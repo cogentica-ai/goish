@@ -8,10 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net;
 use goish::string;
 use goish::types::int;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -21,9 +22,9 @@ fn main() {
     {
         let m = net::IPv4Mask(255, 255, 255, 0);
         if m.bytes.Len() == 4 && m.bytes[0] == 255 && m.bytes[3] == 0 {
-            Println!("[ 1] IPv4Mask                  PASS");
+            fmt::Println!("[ 1] IPv4Mask                  PASS");
         } else {
-            Println!("[ 1] IPv4Mask                  FAIL");
+            fmt::Println!("[ 1] IPv4Mask                  FAIL");
             failed += 1;
         }
     }
@@ -37,9 +38,9 @@ fn main() {
             && m.bytes[2] == 0xff
             && m.bytes[3] == 0
         {
-            Println!("[ 2] CIDRMask /24              PASS");
+            fmt::Println!("[ 2] CIDRMask /24              PASS");
         } else {
-            Println!("[ 2] CIDRMask /24              FAIL");
+            fmt::Println!("[ 2] CIDRMask /24              FAIL");
             failed += 1;
         }
     }
@@ -48,9 +49,9 @@ fn main() {
     {
         let m = net::CIDRMask(1, 32);
         if m.bytes[0] == 0x80 && m.bytes[1] == 0 && m.bytes[2] == 0 && m.bytes[3] == 0 {
-            Println!("[ 3] CIDRMask /1               PASS");
+            fmt::Println!("[ 3] CIDRMask /1               PASS");
         } else {
-            Println!("[ 3] CIDRMask /1               FAIL");
+            fmt::Println!("[ 3] CIDRMask /1               FAIL");
             failed += 1;
         }
     }
@@ -64,9 +65,9 @@ fn main() {
             && m.bytes[2] == 0
             && m.bytes[3] == 0
         {
-            Println!("[ 4] CIDRMask /0               PASS");
+            fmt::Println!("[ 4] CIDRMask /0               PASS");
         } else {
-            Println!("[ 4] CIDRMask /0               FAIL");
+            fmt::Println!("[ 4] CIDRMask /0               FAIL");
             failed += 1;
         }
     }
@@ -75,9 +76,9 @@ fn main() {
     {
         let m = net::CIDRMask(33, 32);
         if m.bytes.Len() == 0 {
-            Println!("[ 5] CIDRMask invalid          PASS");
+            fmt::Println!("[ 5] CIDRMask invalid          PASS");
         } else {
-            Println!("[ 5] CIDRMask invalid          FAIL");
+            fmt::Println!("[ 5] CIDRMask invalid          FAIL");
             failed += 1;
         }
     }
@@ -86,9 +87,9 @@ fn main() {
     {
         let m = net::CIDRMask(8, 64);
         if m.bytes.Len() == 0 {
-            Println!("[ 6] CIDRMask bad bits         PASS");
+            fmt::Println!("[ 6] CIDRMask bad bits         PASS");
         } else {
-            Println!("[ 6] CIDRMask bad bits         FAIL");
+            fmt::Println!("[ 6] CIDRMask bad bits         FAIL");
             failed += 1;
         }
     }
@@ -98,9 +99,9 @@ fn main() {
         let m = net::CIDRMask(24, 32);
         let (ones, bits) = m.Size();
         if ones == 24 && bits == 32 {
-            Println!("[ 7] IPMask.Size /24           PASS");
+            fmt::Println!("[ 7] IPMask.Size /24           PASS");
         } else {
-            Println!("[ 7] IPMask.Size /24           FAIL");
+            fmt::Println!("[ 7] IPMask.Size /24           FAIL");
             failed += 1;
         }
     }
@@ -110,9 +111,9 @@ fn main() {
         let m = net::IPv4Mask(0xff, 0, 0xff, 0); // not 1s-then-0s
         let (ones, bits) = m.Size();
         if ones == 0 && bits == 0 {
-            Println!("[ 8] IPMask.Size non-canon     PASS");
+            fmt::Println!("[ 8] IPMask.Size non-canon     PASS");
         } else {
-            Println!("[ 8] IPMask.Size non-canon     FAIL");
+            fmt::Println!("[ 8] IPMask.Size non-canon     FAIL");
             failed += 1;
         }
     }
@@ -122,9 +123,9 @@ fn main() {
         let m = net::IPv4Mask(0xff, 0xff, 0xff, 0);
         let s = m.String();
         if s == string("ffffff00") {
-            Println!("[ 9] IPMask.String hex         PASS");
+            fmt::Println!("[ 9] IPMask.String hex         PASS");
         } else {
-            Println!("[ 9] IPMask.String hex         FAIL");
+            fmt::Println!("[ 9] IPMask.String hex         FAIL");
             failed += 1;
         }
     }
@@ -134,9 +135,9 @@ fn main() {
         let m: net::IPMask = net::IPMask::default();
         let s = m.String();
         if s == string("<nil>") {
-            Println!("[10] IPMask.String nil         PASS");
+            fmt::Println!("[10] IPMask.String nil         PASS");
         } else {
-            Println!("[10] IPMask.String nil         FAIL");
+            fmt::Println!("[10] IPMask.String nil         FAIL");
             failed += 1;
         }
     }
@@ -146,9 +147,9 @@ fn main() {
         let m = net::IPv4(1, 2, 3, 4).DefaultMask();
         let (ones, _) = m.Size();
         if ones == 8 {
-            Println!("[11] DefaultMask class A       PASS");
+            fmt::Println!("[11] DefaultMask class A       PASS");
         } else {
-            Println!("[11] DefaultMask class A       FAIL");
+            fmt::Println!("[11] DefaultMask class A       FAIL");
             failed += 1;
         }
     }
@@ -158,9 +159,9 @@ fn main() {
         let m = net::IPv4(128, 1, 0, 0).DefaultMask();
         let (ones, _) = m.Size();
         if ones == 16 {
-            Println!("[12] DefaultMask class B       PASS");
+            fmt::Println!("[12] DefaultMask class B       PASS");
         } else {
-            Println!("[12] DefaultMask class B       FAIL");
+            fmt::Println!("[12] DefaultMask class B       FAIL");
             failed += 1;
         }
     }
@@ -170,9 +171,9 @@ fn main() {
         let m = net::IPv4(192, 168, 1, 1).DefaultMask();
         let (ones, _) = m.Size();
         if ones == 24 {
-            Println!("[13] DefaultMask class C       PASS");
+            fmt::Println!("[13] DefaultMask class C       PASS");
         } else {
-            Println!("[13] DefaultMask class C       FAIL");
+            fmt::Println!("[13] DefaultMask class C       FAIL");
             failed += 1;
         }
     }
@@ -181,9 +182,9 @@ fn main() {
     {
         let m = net::IP::default().DefaultMask();
         if m.bytes.Len() == 0 {
-            Println!("[14] DefaultMask nil-IP        PASS");
+            fmt::Println!("[14] DefaultMask nil-IP        PASS");
         } else {
-            Println!("[14] DefaultMask nil-IP        FAIL");
+            fmt::Println!("[14] DefaultMask nil-IP        FAIL");
             failed += 1;
         }
     }
@@ -199,9 +200,9 @@ fn main() {
             && masked.bytes[2] == 1
             && masked.bytes[3] == 0
         {
-            Println!("[15] IP.Mask /24               PASS");
+            fmt::Println!("[15] IP.Mask /24               PASS");
         } else {
-            Println!("[15] IP.Mask /24               FAIL");
+            fmt::Println!("[15] IP.Mask /24               FAIL");
             failed += 1;
         }
     }
@@ -216,9 +217,9 @@ fn main() {
             && masked.bytes[2] == 0
             && masked.bytes[3] == 0
         {
-            Println!("[16] IP.Mask /16               PASS");
+            fmt::Println!("[16] IP.Mask /16               PASS");
         } else {
-            Println!("[16] IP.Mask /16               FAIL");
+            fmt::Println!("[16] IP.Mask /16               FAIL");
             failed += 1;
         }
     }
@@ -229,19 +230,19 @@ fn main() {
         let m = net::CIDRMask(64, 128);
         let masked = ip.Mask(m);
         if masked.bytes.Len() == 0 {
-            Println!("[17] IP.Mask shape mismatch    PASS");
+            fmt::Println!("[17] IP.Mask shape mismatch    PASS");
         } else {
-            Println!("[17] IP.Mask shape mismatch    FAIL");
+            fmt::Println!("[17] IP.Mask shape mismatch    FAIL");
             failed += 1;
         }
     }
 
     let total: int = 17;
     if failed == 0 {
-        Println!("ok 17/17");
+        fmt::Println!("ok 17/17");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of", total);
+        fmt::Println!("FAIL", failed, "of", total);
         syscall::Exit(1);
     }
 }

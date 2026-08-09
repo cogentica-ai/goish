@@ -8,18 +8,19 @@
 #![no_std]
 #![no_main]
 
-use goish::{bufio, nil, os, strings, Fprintln, Println};
+use goish::fmt;
+use goish::{bufio, nil, os, strings};
 
 #[goish::main]
 fn main() {
     let mut sc = bufio::NewScanner(os::Stdin());
     while sc.Scan() {
-        Println!(strings::ToUpper(sc.Text()));
+        fmt::Println!(strings::ToUpper(sc.Text()));
     }
     let err = sc.Err();
     if err != nil {
         let mut e = os::Stderr();
-        Fprintln!(e, "scan:", err);
+        fmt::Fprintln!(e, "scan:", err);
         os::Exit(1);
     }
 }

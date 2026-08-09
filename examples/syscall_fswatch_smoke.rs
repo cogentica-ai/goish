@@ -20,7 +20,8 @@
 
 extern crate alloc;
 
-use goish::{os, syscall, Println};
+use goish::fmt;
+use goish::{os, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -139,10 +140,10 @@ fn main() {
     if err == goish::nil {
         check(fh.Size() > 0, b"t3: empty handle\n");
         check(mount_id > 0, b"t3: mount id\n");
-        Println!("t3: NameToHandleAt ok, handle type/bytes:", fh.Type() as i64, fh.Size());
+        fmt::Println!("t3: NameToHandleAt ok, handle type/bytes:", fh.Type() as i64, fh.Size());
     } else {
         // Overlay/tmpfs variants without export support say EOPNOTSUPP.
-        Println!("t3: NameToHandleAt unsupported here (accepted):", err.Error());
+        fmt::Println!("t3: NameToHandleAt unsupported here (accepted):", err.Error());
     }
 
     // ─── 4. fanotify: privileged path or clean fallback errno ──────
@@ -156,7 +157,7 @@ fn main() {
     if err != goish::nil {
         // Unprivileged: EPERM is the documented signal to fall back
         // to inotify — the exact branch typescript-go's watcher takes.
-        Println!("t4: fanotify unavailable (accepted, inotify fallback):", err.Error());
+        fmt::Println!("t4: fanotify unavailable (accepted, inotify fallback):", err.Error());
     } else {
         let err = syscall::FanotifyMark(
             ffd,
@@ -175,7 +176,7 @@ fn main() {
             unsafe { core::ptr::read_unaligned(fbuf.as_ptr() as *const _) };
         check(meta.Vers == syscall::FANOTIFY_METADATA_VERSION, b"t4: metadata version\n");
         check(meta.Mask & syscall::FAN_CREATE != 0, b"t4: FAN_CREATE mask\n");
-        Println!("t4: fanotify event ok, mask/len:", meta.Mask as i64, meta.Event_len as i64);
+        fmt::Println!("t4: fanotify event ok, mask/len:", meta.Mask as i64, meta.Event_len as i64);
         syscall::Close(ffd as i32);
     }
 

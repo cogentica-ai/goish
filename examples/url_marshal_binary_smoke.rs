@@ -8,9 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert;
 use goish::net::http::url;
-use goish::{make, string, syscall, Println};
+use goish::{make, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -20,15 +21,15 @@ fn main() {
     {
         let (u, err) = url::Parse(string("http://example.com/path?q=1#frag"));
         if !err.IsNil() {
-            Println!("[ 1] MarshalBinary             FAIL parse");
+            fmt::Println!("[ 1] MarshalBinary             FAIL parse");
             failed += 1;
         } else {
             let (data, mErr) = u.MarshalBinary();
             let s = goish::string::from_bytes(&data);
             if mErr.IsNil() && s == u.String() {
-                Println!("[ 1] MarshalBinary             PASS");
+                fmt::Println!("[ 1] MarshalBinary             PASS");
             } else {
-                Println!("[ 1] MarshalBinary             FAIL got={}", s);
+                fmt::Println!("[ 1] MarshalBinary             FAIL got={}", s);
                 failed += 1;
             }
         }
@@ -41,9 +42,9 @@ fn main() {
         let (out, err) = u.AppendBinary(prefix);
         let s = goish::string::from_bytes(&out);
         if err.IsNil() && s == "PRE:https://example.com/x" {
-            Println!("[ 2] AppendBinary preserves    PASS");
+            fmt::Println!("[ 2] AppendBinary preserves    PASS");
         } else {
-            Println!("[ 2] AppendBinary preserves    FAIL got={}", s);
+            fmt::Println!("[ 2] AppendBinary preserves    FAIL got={}", s);
             failed += 1;
         }
     }
@@ -55,9 +56,9 @@ fn main() {
         let mut u2 = url::URL::default();
         let err = u2.UnmarshalBinary(data);
         if err.IsNil() && u2.String() == u1.String() {
-            Println!("[ 3] UnmarshalBinary round     PASS");
+            fmt::Println!("[ 3] UnmarshalBinary round     PASS");
         } else {
-            Println!("[ 3] UnmarshalBinary round     FAIL");
+            fmt::Println!("[ 3] UnmarshalBinary round     FAIL");
             failed += 1;
         }
     }
@@ -71,25 +72,25 @@ fn main() {
         let _ = u.UnmarshalBinary(make!([]goish::byte, 0));
         // Slim Parse accepts empty/relative input; any outcome is OK so
         // long as no panic occurred.
-        Println!("[ 4] UnmarshalBinary empty     PASS");
+        fmt::Println!("[ 4] UnmarshalBinary empty     PASS");
     }
 
     // 5. Redacted equals String() (slim — no User field).
     {
         let (u, _) = url::Parse(string("http://example.com/x"));
         if u.Redacted() == u.String() {
-            Println!("[ 5] Redacted == String        PASS");
+            fmt::Println!("[ 5] Redacted == String        PASS");
         } else {
-            Println!("[ 5] Redacted == String        FAIL");
+            fmt::Println!("[ 5] Redacted == String        FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 5", failed);
+        fmt::Println!("FAIL {} of 5", failed);
         syscall::Exit(1);
     }
 }

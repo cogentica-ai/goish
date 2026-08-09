@@ -24,10 +24,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::crypto::cipher;
 use goish::crypto::cipher::{Block, BlockMode};
 use goish::types::{byte, int};
-use goish::{slice, syscall, Println};
+use goish::{slice, syscall};
 
 // 8-byte ToyBlock: Encrypt(dst, src) = rotate-left(src ^ key, 3).
 // Decrypt is the actual inverse: rotate-right(src, 3) ^ key.
@@ -74,9 +75,9 @@ fn main() {
         let mut ct = slice::__from_vec(alloc::vec![0u8; 16]);
         e.CryptBlocks(&mut ct, slice::__from_vec(plain.clone()));
         if ct.__into_vec() != plain {
-            Println!("[ 1] CBC encrypt non-trivial    PASS");
+            fmt::Println!("[ 1] CBC encrypt non-trivial    PASS");
         } else {
-            Println!("[ 1] CBC encrypt non-trivial    FAIL");
+            fmt::Println!("[ 1] CBC encrypt non-trivial    FAIL");
             failed += 1;
         }
     }
@@ -103,9 +104,9 @@ fn main() {
         let mut pt2 = slice::__from_vec(alloc::vec![0u8; n]);
         dec.CryptBlocks(&mut pt2, slice::__from_vec(ct_v));
         if pt2.__into_vec() == plain {
-            Println!("[ 2] CBC enc→dec round-trip     PASS");
+            fmt::Println!("[ 2] CBC enc→dec round-trip     PASS");
         } else {
-            Println!("[ 2] CBC enc→dec round-trip     FAIL");
+            fmt::Println!("[ 2] CBC enc→dec round-trip     FAIL");
             failed += 1;
         }
     }
@@ -138,9 +139,9 @@ fn main() {
             got.extend_from_slice(&chunk.__into_vec());
         }
         if got == want {
-            Println!("[ 3] CBC split calls equivalent PASS");
+            fmt::Println!("[ 3] CBC split calls equivalent PASS");
         } else {
-            Println!("[ 3] CBC split calls equivalent FAIL");
+            fmt::Println!("[ 3] CBC split calls equivalent FAIL");
             failed += 1;
         }
     }
@@ -167,9 +168,9 @@ fn main() {
         let mut pt2 = slice::__from_vec(alloc::vec![0u8; 1024]);
         dec.CryptBlocks(&mut pt2, slice::__from_vec(ct_v));
         if pt2.__into_vec() == plain {
-            Println!("[ 4] CBC 1 KiB round-trip       PASS");
+            fmt::Println!("[ 4] CBC 1 KiB round-trip       PASS");
         } else {
-            Println!("[ 4] CBC 1 KiB round-trip       FAIL");
+            fmt::Println!("[ 4] CBC 1 KiB round-trip       FAIL");
             failed += 1;
         }
     }
@@ -185,9 +186,9 @@ fn main() {
             slice::__from_vec(iv.clone()),
         );
         if e.BlockSize() == 8 && d.BlockSize() == 8 {
-            Println!("[ 5] CBC BlockSize reports 8    PASS");
+            fmt::Println!("[ 5] CBC BlockSize reports 8    PASS");
         } else {
-            Println!("[ 5] CBC BlockSize reports 8    FAIL");
+            fmt::Println!("[ 5] CBC BlockSize reports 8    FAIL");
             failed += 1;
         }
     }
@@ -210,9 +211,9 @@ fn main() {
         s2.CryptBlocks(&mut ct2, slice::__from_vec(plain));
 
         if ct1.__into_vec() == ct2.__into_vec() {
-            Println!("[ 6] CBC deterministic stream   PASS");
+            fmt::Println!("[ 6] CBC deterministic stream   PASS");
         } else {
-            Println!("[ 6] CBC deterministic stream   FAIL");
+            fmt::Println!("[ 6] CBC deterministic stream   FAIL");
             failed += 1;
         }
     }
@@ -257,9 +258,9 @@ fn main() {
         let a_v = [ct_a1.__into_vec(), ct_a2.__into_vec()].concat();
         let b_v = [ct_b1.__into_vec(), ct_b2.__into_vec()].concat();
         if a_v == b_v {
-            Println!("[ 7] CBC SetIV resets chain     PASS");
+            fmt::Println!("[ 7] CBC SetIV resets chain     PASS");
         } else {
-            Println!("[ 7] CBC SetIV resets chain     FAIL");
+            fmt::Println!("[ 7] CBC SetIV resets chain     FAIL");
             failed += 1;
         }
     }
@@ -274,18 +275,18 @@ fn main() {
         let before = dst.clone().__into_vec();
         d.CryptBlocks(&mut dst, slice::__from_vec(alloc::vec![]));
         if dst.__into_vec() == before {
-            Println!("[ 8] CBC empty src no-op        PASS");
+            fmt::Println!("[ 8] CBC empty src no-op        PASS");
         } else {
-            Println!("[ 8] CBC empty src no-op        FAIL");
+            fmt::Println!("[ 8] CBC empty src no-op        FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

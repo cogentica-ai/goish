@@ -11,10 +11,11 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::boxed::Box;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::io::{self, WriterAt};
 use goish::nil;
-use goish::{byte, syscall, Println};
+use goish::{byte, syscall};
 
 // ─── PageSink: a tiny WriterAt over a fixed-size buffer ──────────────
 
@@ -53,9 +54,9 @@ fn main() {
         let mut ow = io::NewOffsetWriter(sink, 4);
         let (n, err) = ow.Write(goish::convert::bytes("ABC"));
         if err.IsNil() && n == 3 {
-            Println!("[ 1] OffsetWriter Write base   PASS");
+            fmt::Println!("[ 1] OffsetWriter Write base   PASS");
         } else {
-            Println!("[ 1] OffsetWriter Write base   FAIL n={}", n);
+            fmt::Println!("[ 1] OffsetWriter Write base   FAIL n={}", n);
             failed += 1;
         }
     }
@@ -72,9 +73,9 @@ fn main() {
         // Just check Seek works (we lost the boxed sink to ow).
         let (pos, err) = ow.Seek(2, io::SeekStart);
         if err.IsNil() && pos == 2 {
-            Println!("[ 2] OffsetWriter WriteAt+Seek PASS");
+            fmt::Println!("[ 2] OffsetWriter WriteAt+Seek PASS");
         } else {
-            Println!("[ 2] OffsetWriter WriteAt+Seek FAIL pos={}", pos);
+            fmt::Println!("[ 2] OffsetWriter WriteAt+Seek FAIL pos={}", pos);
             failed += 1;
         }
         // sink_ref unused; dummy to keep PageSink::new exercised.
@@ -87,9 +88,9 @@ fn main() {
         let mut ow = io::NewOffsetWriter(sink, 0);
         let (_, err) = ow.WriteAt(goish::convert::bytes("Q"), -1);
         if !err.IsNil() {
-            Println!("[ 3] WriteAt negative off err  PASS");
+            fmt::Println!("[ 3] WriteAt negative off err  PASS");
         } else {
-            Println!("[ 3] WriteAt negative off err  FAIL");
+            fmt::Println!("[ 3] WriteAt negative off err  FAIL");
             failed += 1;
         }
     }
@@ -100,9 +101,9 @@ fn main() {
         let mut ow = io::NewOffsetWriter(sink, 0);
         let (_, err) = ow.Seek(0, io::SeekEnd);
         if !err.IsNil() {
-            Println!("[ 4] Seek SeekEnd rejected     PASS");
+            fmt::Println!("[ 4] Seek SeekEnd rejected     PASS");
         } else {
-            Println!("[ 4] Seek SeekEnd rejected     FAIL");
+            fmt::Println!("[ 4] Seek SeekEnd rejected     FAIL");
             failed += 1;
         }
     }
@@ -113,9 +114,9 @@ fn main() {
         let mut ow = io::NewOffsetWriter(sink, 4);
         let (_, err) = ow.Seek(-10, io::SeekStart);
         if !err.IsNil() {
-            Println!("[ 5] Seek before base err      PASS");
+            fmt::Println!("[ 5] Seek before base err      PASS");
         } else {
-            Println!("[ 5] Seek before base err      FAIL");
+            fmt::Println!("[ 5] Seek before base err      FAIL");
             failed += 1;
         }
     }
@@ -136,18 +137,18 @@ fn main() {
         // After writing 4 bytes from base=2, off should be 6,
         // returned position relative to base = 4.
         if n1 == 4 && cur == 4 {
-            Println!("[ 6] Cursor after Write        PASS");
+            fmt::Println!("[ 6] Cursor after Write        PASS");
         } else {
-            Println!("[ 6] Cursor after Write        FAIL cur={}", cur);
+            fmt::Println!("[ 6] Cursor after Write        FAIL cur={}", cur);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 6", failed);
+        fmt::Println!("FAIL {} of 6", failed);
         syscall::Exit(1);
     }
 }

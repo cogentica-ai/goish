@@ -7,8 +7,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::time;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -23,9 +24,9 @@ fn main() {
             && goish::strings::HasPrefix(s.clone(), string("\""))
             && goish::strings::HasSuffix(s.clone(), string("\""))
         {
-            Println!("[ 1] MarshalJSON quotes        PASS");
+            fmt::Println!("[ 1] MarshalJSON quotes        PASS");
         } else {
-            Println!("[ 1] MarshalJSON quotes        FAIL got={}", s);
+            fmt::Println!("[ 1] MarshalJSON quotes        FAIL got={}", s);
             failed += 1;
         }
     }
@@ -35,15 +36,15 @@ fn main() {
         let t_anchor = time::Unix(1_700_000_000, 0);
         let (data, err) = t_anchor.MarshalJSON();
         if !err.IsNil() {
-            Println!("[ 2] JSON round-trip           FAIL marshal");
+            fmt::Println!("[ 2] JSON round-trip           FAIL marshal");
             failed += 1;
         } else {
             let mut got = time::Unix(0, 0);
             let uerr = got.UnmarshalJSON(data);
             if uerr.IsNil() && got.Unix() == 1_700_000_000 {
-                Println!("[ 2] JSON round-trip           PASS");
+                fmt::Println!("[ 2] JSON round-trip           PASS");
             } else {
-                Println!("[ 2] JSON round-trip           FAIL unix={}", got.Unix());
+                fmt::Println!("[ 2] JSON round-trip           FAIL unix={}", got.Unix());
                 failed += 1;
             }
         }
@@ -55,9 +56,9 @@ fn main() {
         let bad = goish::convert::bytes("2024-01-01T00:00:00Z");
         let err = t.UnmarshalJSON(bad);
         if !err.IsNil() {
-            Println!("[ 3] reject unquoted           PASS");
+            fmt::Println!("[ 3] reject unquoted           PASS");
         } else {
-            Println!("[ 3] reject unquoted           FAIL");
+            fmt::Println!("[ 3] reject unquoted           FAIL");
             failed += 1;
         }
     }
@@ -69,9 +70,9 @@ fn main() {
         let null_bytes = goish::convert::bytes("null");
         let err = t.UnmarshalJSON(null_bytes);
         if err.IsNil() && t.Unix() == 42 {
-            Println!("[ 4] null is no-op             PASS");
+            fmt::Println!("[ 4] null is no-op             PASS");
         } else {
-            Println!("[ 4] null is no-op             FAIL");
+            fmt::Println!("[ 4] null is no-op             FAIL");
             failed += 1;
         }
     }
@@ -82,18 +83,18 @@ fn main() {
         let empty = goish::convert::bytes("");
         let err = t.UnmarshalJSON(empty);
         if !err.IsNil() {
-            Println!("[ 5] empty rejected            PASS");
+            fmt::Println!("[ 5] empty rejected            PASS");
         } else {
-            Println!("[ 5] empty rejected            FAIL");
+            fmt::Println!("[ 5] empty rejected            FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 5", failed);
+        fmt::Println!("FAIL {} of 5", failed);
         syscall::Exit(1);
     }
 }

@@ -8,11 +8,12 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::encoding::pem::{self, Block, Decode, Encode, EncodeToMemory};
 use goish::goslice::slice;
 use goish::types::byte;
-use goish::{convert, string, syscall, Println};
+use goish::{convert, string, syscall};
 
 #[goish::main]
 fn main() {
@@ -31,13 +32,13 @@ fn main() {
             let raw: &[byte] = &p.Bytes;
             let want: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
             if p.Type == "TEST" && raw == want && p.Headers.Len() == 0 {
-                Println!("[ 1] basic Decode             PASS");
+                fmt::Println!("[ 1] basic Decode             PASS");
             } else {
-                Println!("[ 1] basic Decode             FAIL");
+                fmt::Println!("[ 1] basic Decode             FAIL");
                 failed += 1;
             }
         } else {
-            Println!("[ 1] basic Decode             FAIL None");
+            fmt::Println!("[ 1] basic Decode             FAIL None");
             failed += 1;
         }
     }
@@ -49,9 +50,9 @@ fn main() {
         let data = slice::__from_vec(s.into_bytes());
         let (p_opt, _rest) = Decode(data);
         if p_opt.is_some() {
-            Println!("[ 2] skip leading garbage     PASS");
+            fmt::Println!("[ 2] skip leading garbage     PASS");
         } else {
-            Println!("[ 2] skip leading garbage     FAIL");
+            fmt::Println!("[ 2] skip leading garbage     FAIL");
             failed += 1;
         }
     }
@@ -61,9 +62,9 @@ fn main() {
         let data = convert::bytes("just plain text, no PEM here.\n");
         let (p_opt, rest) = Decode(data);
         if p_opt.is_none() && rest.len() > 0 {
-            Println!("[ 3] no PEM None              PASS");
+            fmt::Println!("[ 3] no PEM None              PASS");
         } else {
-            Println!("[ 3] no PEM None              FAIL");
+            fmt::Println!("[ 3] no PEM None              FAIL");
             failed += 1;
         }
     }
@@ -77,13 +78,13 @@ fn main() {
             let pt = p.Headers.Get(string("Proc-Type")).0;
             let di = p.Headers.Get(string("DEK-Info")).0;
             if p.Type == "HEAD" && pt == "4,ENCRYPTED" && di == "AES-256-CBC,DEADBEEF" {
-                Println!("[ 4] headers parsed           PASS");
+                fmt::Println!("[ 4] headers parsed           PASS");
             } else {
-                Println!("[ 4] headers parsed           FAIL");
+                fmt::Println!("[ 4] headers parsed           FAIL");
                 failed += 1;
             }
         } else {
-            Println!("[ 4] headers parsed           FAIL None");
+            fmt::Println!("[ 4] headers parsed           FAIL None");
             failed += 1;
         }
     }
@@ -100,9 +101,9 @@ fn main() {
         let s = core::str::from_utf8(raw).unwrap();
         let want = "-----BEGIN CERTIFICATE-----\nAAECAwQFBgcICQ==\n-----END CERTIFICATE-----\n";
         if s == want {
-            Println!("[ 5] EncodeToMemory           PASS");
+            fmt::Println!("[ 5] EncodeToMemory           PASS");
         } else {
-            Println!("[ 5] EncodeToMemory           FAIL got len={}", out.len());
+            fmt::Println!("[ 5] EncodeToMemory           FAIL got len={}", out.len());
             failed += 1;
         }
     }
@@ -123,13 +124,13 @@ fn main() {
             let a: &[byte] = &decoded.Bytes;
             let b: &[byte] = &original.Bytes;
             if decoded.Type == original.Type && a == b {
-                Println!("[ 6] round-trip               PASS");
+                fmt::Println!("[ 6] round-trip               PASS");
             } else {
-                Println!("[ 6] round-trip               FAIL");
+                fmt::Println!("[ 6] round-trip               FAIL");
                 failed += 1;
             }
         } else {
-            Println!("[ 6] round-trip               FAIL None");
+            fmt::Println!("[ 6] round-trip               FAIL None");
             failed += 1;
         }
     }
@@ -146,9 +147,9 @@ fn main() {
         let mut buf = bytes::NewBuffer(slice::__from_vec(alloc::vec![]));
         let e = Encode(&mut buf, &block);
         if !e.IsNil() {
-            Println!("[ 7] colon-key rejected       PASS");
+            fmt::Println!("[ 7] colon-key rejected       PASS");
         } else {
-            Println!("[ 7] colon-key rejected       FAIL");
+            fmt::Println!("[ 7] colon-key rejected       FAIL");
             failed += 1;
         }
     }
@@ -171,9 +172,9 @@ fn main() {
         // Expect 3 newlines from base64 lines + 1 from BEGIN line + 1 from END line.
         let nl_count = s.matches('\n').count();
         if nl_count == 5 && s.starts_with("-----BEGIN BIG-----\n") && s.ends_with("-----END BIG-----\n") {
-            Println!("[ 8] line wrap 64-col         PASS");
+            fmt::Println!("[ 8] line wrap 64-col         PASS");
         } else {
-            Println!("[ 8] line wrap 64-col         FAIL nl={}", nl_count);
+            fmt::Println!("[ 8] line wrap 64-col         FAIL nl={}", nl_count);
             failed += 1;
         }
     }
@@ -189,13 +190,13 @@ fn main() {
         let (decoded_opt, _rest) = Decode(out);
         if let Some(decoded) = decoded_opt {
             if decoded.Bytes.len() == 0 && decoded.Type == "EMPTY" {
-                Println!("[ 9] empty body               PASS");
+                fmt::Println!("[ 9] empty body               PASS");
             } else {
-                Println!("[ 9] empty body               FAIL");
+                fmt::Println!("[ 9] empty body               FAIL");
                 failed += 1;
             }
         } else {
-            Println!("[ 9] empty body               FAIL None");
+            fmt::Println!("[ 9] empty body               FAIL None");
             failed += 1;
         }
     }
@@ -210,10 +211,10 @@ fn main() {
         let (p2_opt, _) = Decode(rest);
         match (p1_opt, p2_opt) {
             (Some(p1), Some(p2)) if p1.Type == "TEST" && p2.Type == "OTHER" => {
-                Println!("[10] multi-block             PASS");
+                fmt::Println!("[10] multi-block             PASS");
             }
             _ => {
-                Println!("[10] multi-block             FAIL");
+                fmt::Println!("[10] multi-block             FAIL");
                 failed += 1;
             }
         }
@@ -228,13 +229,13 @@ fn main() {
             let raw: &[byte] = &p.Bytes;
             let want: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
             if raw == want {
-                Println!("[11] whitespace stripped     PASS");
+                fmt::Println!("[11] whitespace stripped     PASS");
             } else {
-                Println!("[11] whitespace stripped     FAIL");
+                fmt::Println!("[11] whitespace stripped     FAIL");
                 failed += 1;
             }
         } else {
-            Println!("[11] whitespace stripped     FAIL None");
+            fmt::Println!("[11] whitespace stripped     FAIL None");
             failed += 1;
         }
     }
@@ -248,13 +249,13 @@ fn main() {
             let raw: &[byte] = &p.Bytes;
             let want: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
             if raw == want {
-                Println!("[12] CRLF accepted           PASS");
+                fmt::Println!("[12] CRLF accepted           PASS");
             } else {
-                Println!("[12] CRLF accepted           FAIL");
+                fmt::Println!("[12] CRLF accepted           FAIL");
                 failed += 1;
             }
         } else {
-            Println!("[12] CRLF accepted           FAIL None");
+            fmt::Println!("[12] CRLF accepted           FAIL None");
             failed += 1;
         }
     }
@@ -262,10 +263,10 @@ fn main() {
     let _ = pem::EncodeToMemory; // ensure module re-exports compile
 
     if failed == 0 {
-        Println!("ok 12/12");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

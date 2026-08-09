@@ -13,10 +13,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::bytes;
 use goish::encoding::base64;
 use goish::types::byte;
-use goish::{slice, syscall, Println};
+use goish::{slice, syscall};
 
 #[goish::main]
 fn main() {
@@ -31,9 +32,9 @@ fn main() {
         let want_str = base64::StdEncoding.EncodeToString(b"Hello, World!");
         let got_str = goish::string::from_bytes(&dst);
         if got_str == want_str {
-            Println!("[ 1] Encode in-place            PASS");
+            fmt::Println!("[ 1] Encode in-place            PASS");
         } else {
-            Println!("[ 1] Encode in-place            FAIL got=", got_str);
+            fmt::Println!("[ 1] Encode in-place            FAIL got=", got_str);
             failed += 1;
         }
     }
@@ -47,9 +48,9 @@ fn main() {
         let s = goish::string::from_bytes(&out);
         let want: goish::string = "data:SGk=".into();
         if s == want {
-            Println!("[ 2] AppendEncode               PASS");
+            fmt::Println!("[ 2] AppendEncode               PASS");
         } else {
-            Println!("[ 2] AppendEncode               FAIL got=", s);
+            fmt::Println!("[ 2] AppendEncode               FAIL got=", s);
             failed += 1;
         }
     }
@@ -62,9 +63,9 @@ fn main() {
         let (n, err) = base64::StdEncoding.Decode(&mut dst, enc_slice);
         let want_dec: goish::string = "Hello".into();
         if err.IsNil() && n == 5 && goish::string::from_bytes(&dst) == want_dec {
-            Println!("[ 3] Decode in-place            PASS");
+            fmt::Println!("[ 3] Decode in-place            PASS");
         } else {
-            Println!("[ 3] Decode in-place            FAIL n=", n);
+            fmt::Println!("[ 3] Decode in-place            FAIL n=", n);
             failed += 1;
         }
     }
@@ -77,9 +78,9 @@ fn main() {
         let s = goish::string::from_bytes(&out);
         let want: goish::string = ">> Hi".into();
         if err.IsNil() && s == want {
-            Println!("[ 4] AppendDecode               PASS");
+            fmt::Println!("[ 4] AppendDecode               PASS");
         } else {
-            Println!("[ 4] AppendDecode               FAIL got=", s);
+            fmt::Println!("[ 4] AppendDecode               FAIL got=", s);
             failed += 1;
         }
     }
@@ -94,7 +95,7 @@ fn main() {
             let (_, werr) = e.Write(payload);
             let cerr = e.Close();
             if !werr.IsNil() || !cerr.IsNil() {
-                Println!("[ 5] NewEncoder single Write    FAIL write/close errored");
+                fmt::Println!("[ 5] NewEncoder single Write    FAIL write/close errored");
                 failed += 1;
                 // fall through to next test
             }
@@ -102,9 +103,9 @@ fn main() {
         let got = buf.String();
         let want: goish::string = "SGVsbG8sIFdvcmxkIQ==".into();
         if got == want {
-            Println!("[ 5] NewEncoder single Write    PASS");
+            fmt::Println!("[ 5] NewEncoder single Write    PASS");
         } else {
-            Println!("[ 5] NewEncoder single Write    FAIL got=", got);
+            fmt::Println!("[ 5] NewEncoder single Write    FAIL got=", got);
             failed += 1;
         }
     }
@@ -124,9 +125,9 @@ fn main() {
         let got = buf.String();
         let want: goish::string = "SGVsbG8sIFdvcmxkIQ==".into();
         if got == want {
-            Println!("[ 6] NewEncoder byte-by-byte    PASS");
+            fmt::Println!("[ 6] NewEncoder byte-by-byte    PASS");
         } else {
-            Println!("[ 6] NewEncoder byte-by-byte    FAIL got=", got);
+            fmt::Println!("[ 6] NewEncoder byte-by-byte    FAIL got=", got);
             failed += 1;
         }
     }
@@ -140,9 +141,9 @@ fn main() {
         }
         let got = buf.String();
         if got == "" {
-            Println!("[ 7] NewEncoder empty input     PASS");
+            fmt::Println!("[ 7] NewEncoder empty input     PASS");
         } else {
-            Println!("[ 7] NewEncoder empty input     FAIL got=", got);
+            fmt::Println!("[ 7] NewEncoder empty input     FAIL got=", got);
             failed += 1;
         }
     }
@@ -160,9 +161,9 @@ fn main() {
         let got = buf.String();
         let want: goish::string = "SGk".into();
         if got == want {
-            Println!("[ 8] NewEncoder RawStdEncoding  PASS");
+            fmt::Println!("[ 8] NewEncoder RawStdEncoding  PASS");
         } else {
-            Println!("[ 8] NewEncoder RawStdEncoding  FAIL got=", got);
+            fmt::Println!("[ 8] NewEncoder RawStdEncoding  FAIL got=", got);
             failed += 1;
         }
     }
@@ -188,9 +189,9 @@ fn main() {
         }
         let got = buf.String();
         if got == want {
-            Println!("[ 9] NewEncoder 2049 bytes      PASS");
+            fmt::Println!("[ 9] NewEncoder 2049 bytes      PASS");
         } else {
-            Println!("[ 9] NewEncoder 2049 bytes      FAIL");
+            fmt::Println!("[ 9] NewEncoder 2049 bytes      FAIL");
             failed += 1;
         }
     }
@@ -202,18 +203,18 @@ fn main() {
             goish::slice::__from_vec(b"!!!!".to_vec()); // not in alphabet
         let (_out, err) = base64::StdEncoding.AppendDecode(prefix, enc);
         if !err.IsNil() {
-            Println!("[10] AppendDecode error path    PASS");
+            fmt::Println!("[10] AppendDecode error path    PASS");
         } else {
-            Println!("[10] AppendDecode error path    FAIL no error");
+            fmt::Println!("[10] AppendDecode error path    FAIL no error");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

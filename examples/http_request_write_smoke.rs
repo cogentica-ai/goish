@@ -10,9 +10,10 @@ extern crate goish;
 
 use alloc::vec::Vec;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::net::http;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -31,7 +32,7 @@ fn main() {
             goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
         let err = req.Write(&mut buf);
         if !err.IsNil() {
-            Println!("[ 1] Write returned err        FAIL");
+            fmt::Println!("[ 1] Write returned err        FAIL");
             failed += 1;
         } else {
             let on_wire = buf.Bytes();
@@ -48,9 +49,9 @@ fn main() {
             let len_ok = goish::strings::Contains(s.clone(), string("Content-Length: 5\r\n"));
             let body_ok = goish::strings::HasSuffix(s.clone(), string("hello"));
             if head_ok && host_ok && len_ok && body_ok {
-                Println!("[ 1] Write wire format         PASS");
+                fmt::Println!("[ 1] Write wire format         PASS");
             } else {
-                Println!(
+                fmt::Println!(
                     "[ 1] Write wire format         FAIL head={} host={} len={} body={}",
                     head_ok, host_ok, len_ok, body_ok
                 );
@@ -77,9 +78,9 @@ fn main() {
             && nope.Len() == 0
             && empty_name.Len() == 0
         {
-            Println!("[ 2] CookiesNamed              PASS");
+            fmt::Println!("[ 2] CookiesNamed              PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 2] CookiesNamed              FAIL a={} nope={} empty={}",
                 only_a.Len(),
                 nope.Len(),
@@ -106,18 +107,18 @@ fn main() {
         if goish::strings::HasPrefix(s.clone(), string("GET /p HTTP/1.1\r\n"))
             && !goish::strings::Contains(s.clone(), string("Content-Length:"))
         {
-            Println!("[ 3] GET no body, no CL        PASS");
+            fmt::Println!("[ 3] GET no body, no CL        PASS");
         } else {
-            Println!("[ 3] GET no body, no CL        FAIL");
+            fmt::Println!("[ 3] GET no body, no CL        FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 3/3");
+        fmt::Println!("ok 3/3");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 3", failed);
+        fmt::Println!("FAIL {} of 3", failed);
         syscall::Exit(1);
     }
 }

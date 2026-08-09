@@ -8,8 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::net;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -19,9 +20,9 @@ fn main() {
     {
         let (host, port, err) = net::SplitHostPort(string("example.com:8080"));
         if err.IsNil() && host == "example.com" && port == "8080" {
-            Println!("[ 1] plain host:port           PASS");
+            fmt::Println!("[ 1] plain host:port           PASS");
         } else {
-            Println!("[ 1] plain host:port           FAIL host={} port={}", host, port);
+            fmt::Println!("[ 1] plain host:port           FAIL host={} port={}", host, port);
             failed += 1;
         }
     }
@@ -30,9 +31,9 @@ fn main() {
     {
         let (host, port, err) = net::SplitHostPort(string("127.0.0.1:443"));
         if err.IsNil() && host == "127.0.0.1" && port == "443" {
-            Println!("[ 2] IPv4 literal              PASS");
+            fmt::Println!("[ 2] IPv4 literal              PASS");
         } else {
-            Println!("[ 2] IPv4 literal              FAIL");
+            fmt::Println!("[ 2] IPv4 literal              FAIL");
             failed += 1;
         }
     }
@@ -41,9 +42,9 @@ fn main() {
     {
         let (host, port, err) = net::SplitHostPort(string("[::1]:80"));
         if err.IsNil() && host == "::1" && port == "80" {
-            Println!("[ 3] IPv6 brackets             PASS");
+            fmt::Println!("[ 3] IPv6 brackets             PASS");
         } else {
-            Println!("[ 3] IPv6 brackets             FAIL host={} port={}", host, port);
+            fmt::Println!("[ 3] IPv6 brackets             FAIL host={} port={}", host, port);
             failed += 1;
         }
     }
@@ -52,9 +53,9 @@ fn main() {
     {
         let (_, _, err) = net::SplitHostPort(string("example.com"));
         if !err.IsNil() {
-            Println!("[ 4] missing port → err        PASS");
+            fmt::Println!("[ 4] missing port → err        PASS");
         } else {
-            Println!("[ 4] missing port → err        FAIL");
+            fmt::Println!("[ 4] missing port → err        FAIL");
             failed += 1;
         }
     }
@@ -63,9 +64,9 @@ fn main() {
     {
         let (_, _, err) = net::SplitHostPort(string("::1:80"));
         if !err.IsNil() {
-            Println!("[ 5] too many colons → err     PASS");
+            fmt::Println!("[ 5] too many colons → err     PASS");
         } else {
-            Println!("[ 5] too many colons → err     FAIL");
+            fmt::Println!("[ 5] too many colons → err     FAIL");
             failed += 1;
         }
     }
@@ -74,9 +75,9 @@ fn main() {
     {
         let s = net::JoinHostPort(string("example.com"), string("8080"));
         if s == "example.com:8080" {
-            Println!("[ 6] Join hostname:port        PASS");
+            fmt::Println!("[ 6] Join hostname:port        PASS");
         } else {
-            Println!("[ 6] Join hostname:port        FAIL got={}", s);
+            fmt::Println!("[ 6] Join hostname:port        FAIL got={}", s);
             failed += 1;
         }
     }
@@ -85,9 +86,9 @@ fn main() {
     {
         let s = net::JoinHostPort(string("::1"), string("80"));
         if s == "[::1]:80" {
-            Println!("[ 7] Join IPv6                 PASS");
+            fmt::Println!("[ 7] Join IPv6                 PASS");
         } else {
-            Println!("[ 7] Join IPv6                 FAIL got={}", s);
+            fmt::Println!("[ 7] Join IPv6                 FAIL got={}", s);
             failed += 1;
         }
     }
@@ -97,18 +98,18 @@ fn main() {
         let joined = net::JoinHostPort(string("fe80::1"), string("9000"));
         let (h, p, err) = net::SplitHostPort(joined);
         if err.IsNil() && h == "fe80::1" && p == "9000" {
-            Println!("[ 8] Join → Split round-trip   PASS");
+            fmt::Println!("[ 8] Join → Split round-trip   PASS");
         } else {
-            Println!("[ 8] Join → Split round-trip   FAIL h={} p={}", h, p);
+            fmt::Println!("[ 8] Join → Split round-trip   FAIL h={} p={}", h, p);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 8/8");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 8", failed);
+        fmt::Println!("FAIL {} of 8", failed);
         syscall::Exit(1);
     }
 }

@@ -7,10 +7,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::context;
 use goish::convert::bytes;
 use goish::net::http;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -25,23 +26,23 @@ fn main() {
         bytes(""),
     );
     if !err.IsNil() {
-        Println!("setup FAIL");
+        fmt::Println!("setup FAIL");
         syscall::Exit(1);
     }
 
     // 1. Context() returns a Background analogue (non-nil Arc).
     {
         let _c = req.Context();
-        Println!("[ 1] Context() returns ctx     PASS");
+        fmt::Println!("[ 1] Context() returns ctx     PASS");
     }
 
     // 2. WithContext returns a clone whose Method/URL match the original.
     {
         let r2 = req.WithContext(ctx.clone());
         if r2.Method == "GET" && r2.URL.Host == "example.com" {
-            Println!("[ 2] WithContext copy          PASS");
+            fmt::Println!("[ 2] WithContext copy          PASS");
         } else {
-            Println!("[ 2] WithContext copy          FAIL");
+            fmt::Println!("[ 2] WithContext copy          FAIL");
             failed += 1;
         }
     }
@@ -54,9 +55,9 @@ fn main() {
         let original_v = req.Header.Get(string("X-Test"));
         let cloned_v = r2.Header.Get(string("X-Test"));
         if original_v.Len() == 0 && cloned_v == "v1" {
-            Println!("[ 3] Clone deep-copies Header  PASS");
+            fmt::Println!("[ 3] Clone deep-copies Header  PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 3] Clone deep-copies Header  FAIL orig=[{}] clone=[{}]",
                 original_v, cloned_v
             );
@@ -72,18 +73,18 @@ fn main() {
             && r2.URL.Path == "/path"
             && r2.Proto == "HTTP/1.1"
         {
-            Println!("[ 4] Clone preserves fields    PASS");
+            fmt::Println!("[ 4] Clone preserves fields    PASS");
         } else {
-            Println!("[ 4] Clone preserves fields    FAIL");
+            fmt::Println!("[ 4] Clone preserves fields    FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 4/4");
+        fmt::Println!("ok 4/4");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 4", failed);
+        fmt::Println!("FAIL {} of 4", failed);
         syscall::Exit(1);
     }
 }

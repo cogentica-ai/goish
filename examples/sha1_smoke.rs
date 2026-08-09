@@ -11,13 +11,14 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::crypto::sha1;
 use goish::goslice::slice;
 use goish::hash::Hash;
 use goish::io::Writer as _;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -64,9 +65,9 @@ fn main() {
     {
         let s = sha1::Sum(to_bytes(""));
         if array20_eq(&SHA1_EMPTY, &s) {
-            Println!("[ 1] Sum empty                 PASS");
+            fmt::Println!("[ 1] Sum empty                 PASS");
         } else {
-            Println!("[ 1] Sum empty                 FAIL");
+            fmt::Println!("[ 1] Sum empty                 FAIL");
             failed += 1;
         }
     }
@@ -75,9 +76,9 @@ fn main() {
     {
         let s = sha1::Sum(to_bytes("abc"));
         if array20_eq(&SHA1_ABC, &s) {
-            Println!("[ 2] Sum \"abc\"                 PASS");
+            fmt::Println!("[ 2] Sum \"abc\"                 PASS");
         } else {
-            Println!("[ 2] Sum \"abc\"                 FAIL");
+            fmt::Println!("[ 2] Sum \"abc\"                 FAIL");
             failed += 1;
         }
     }
@@ -88,9 +89,9 @@ fn main() {
             "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
         ));
         if array20_eq(&SHA1_FIPS_LONG, &s) {
-            Println!("[ 3] Sum RFC §A.2              PASS");
+            fmt::Println!("[ 3] Sum RFC §A.2              PASS");
         } else {
-            Println!("[ 3] Sum RFC §A.2              FAIL");
+            fmt::Println!("[ 3] Sum RFC §A.2              FAIL");
             failed += 1;
         }
     }
@@ -103,9 +104,9 @@ fn main() {
         let out = h.Sum(empty_buf());
         let raw: &[byte] = &out;
         if array20_eq(&SHA1_ABC, raw) {
-            Println!("[ 4] streaming                 PASS");
+            fmt::Println!("[ 4] streaming                 PASS");
         } else {
-            Println!("[ 4] streaming                 FAIL");
+            fmt::Println!("[ 4] streaming                 FAIL");
             failed += 1;
         }
     }
@@ -118,9 +119,9 @@ fn main() {
         let out = h.Sum(empty_buf());
         let raw: &[byte] = &out;
         if array20_eq(&SHA1_EMPTY, raw) {
-            Println!("[ 5] Reset                     PASS");
+            fmt::Println!("[ 5] Reset                     PASS");
         } else {
-            Println!("[ 5] Reset                     FAIL");
+            fmt::Println!("[ 5] Reset                     FAIL");
             failed += 1;
         }
     }
@@ -136,9 +137,9 @@ fn main() {
             && &raw[0..4] == b"PRE:"
             && array20_eq(&SHA1_ABC, &raw[4..])
         {
-            Println!("[ 6] Sum prefix                PASS");
+            fmt::Println!("[ 6] Sum prefix                PASS");
         } else {
-            Println!("[ 6] Sum prefix                FAIL");
+            fmt::Println!("[ 6] Sum prefix                FAIL");
             failed += 1;
         }
     }
@@ -159,9 +160,9 @@ fn main() {
         let s_stream = h.Sum(empty_buf());
         let raw: &[byte] = &s_stream;
         if array20_eq(&s_one, raw) {
-            Println!("[ 7] >block boundary           PASS");
+            fmt::Println!("[ 7] >block boundary           PASS");
         } else {
-            Println!("[ 7] >block boundary           FAIL");
+            fmt::Println!("[ 7] >block boundary           FAIL");
             failed += 1;
         }
     }
@@ -170,9 +171,9 @@ fn main() {
     {
         let h = sha1::New();
         if h.Size() == sha1::Size && h.BlockSize() == sha1::BlockSize {
-            Println!("[ 8] Size/BlockSize            PASS");
+            fmt::Println!("[ 8] Size/BlockSize            PASS");
         } else {
-            Println!("[ 8] Size/BlockSize            FAIL");
+            fmt::Println!("[ 8] Size/BlockSize            FAIL");
             failed += 1;
         }
     }
@@ -186,9 +187,9 @@ fn main() {
         let r1: &[byte] = &s1;
         let r2: &[byte] = &s2;
         if r1 == r2 && array20_eq(&SHA1_ABC, r1) {
-            Println!("[ 9] Sum non-mutating          PASS");
+            fmt::Println!("[ 9] Sum non-mutating          PASS");
         } else {
-            Println!("[ 9] Sum non-mutating          FAIL");
+            fmt::Println!("[ 9] Sum non-mutating          FAIL");
             failed += 1;
         }
     }
@@ -207,18 +208,18 @@ fn main() {
             0x59, 0x45, 0xb2, 0xbe, 0xc4, 0xea,
         ];
         if array20_eq(&want, &s) {
-            Println!("[10] WebSocket handshake       PASS");
+            fmt::Println!("[10] WebSocket handshake       PASS");
         } else {
-            Println!("[10] WebSocket handshake       FAIL");
+            fmt::Println!("[10] WebSocket handshake       FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

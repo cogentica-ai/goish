@@ -10,13 +10,14 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::crypto::sha512;
 use goish::goslice::slice;
 use goish::hash::Hash;
 use goish::io::Writer as _;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -73,9 +74,9 @@ fn main() {
              47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e",
         );
         if slice_eq(&s, &want) {
-            Println!("[ 1] Sum512 empty              PASS");
+            fmt::Println!("[ 1] Sum512 empty              PASS");
         } else {
-            Println!("[ 1] Sum512 empty              FAIL");
+            fmt::Println!("[ 1] Sum512 empty              FAIL");
             failed += 1;
         }
     }
@@ -90,9 +91,9 @@ fn main() {
              2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f",
         );
         if slice_eq(&s, &want) {
-            Println!("[ 2] Sum512 \"abc\"              PASS");
+            fmt::Println!("[ 2] Sum512 \"abc\"              PASS");
         } else {
-            Println!("[ 2] Sum512 \"abc\"              FAIL");
+            fmt::Println!("[ 2] Sum512 \"abc\"              FAIL");
             failed += 1;
         }
     }
@@ -112,9 +113,9 @@ fn main() {
              501d289e4900f7e4331b99dec4b5433ac7d329eeb6dd26545e96e55b874be909",
         );
         if slice_eq(&s, &want) {
-            Println!("[ 3] Sum512 FIPS multi-block   PASS");
+            fmt::Println!("[ 3] Sum512 FIPS multi-block   PASS");
         } else {
-            Println!("[ 3] Sum512 FIPS multi-block   FAIL");
+            fmt::Println!("[ 3] Sum512 FIPS multi-block   FAIL");
             failed += 1;
         }
     }
@@ -129,9 +130,9 @@ fn main() {
              274edebfe76f65fbd51ad2f14898b95b",
         );
         if slice_eq(&s, &want) {
-            Println!("[ 4] Sum384 empty              PASS");
+            fmt::Println!("[ 4] Sum384 empty              PASS");
         } else {
-            Println!("[ 4] Sum384 empty              FAIL");
+            fmt::Println!("[ 4] Sum384 empty              FAIL");
             failed += 1;
         }
     }
@@ -146,9 +147,9 @@ fn main() {
              8086072ba1e7cc2358baeca134c825a7",
         );
         if slice_eq(&s, &want) {
-            Println!("[ 5] Sum384 \"abc\"              PASS");
+            fmt::Println!("[ 5] Sum384 \"abc\"              PASS");
         } else {
-            Println!("[ 5] Sum384 \"abc\"              FAIL");
+            fmt::Println!("[ 5] Sum384 \"abc\"              FAIL");
             failed += 1;
         }
     }
@@ -162,9 +163,9 @@ fn main() {
             "6ed0dd02806fa89e25de060c19d3ac86cabb87d6a0ddd05c333b84f4",
         );
         if slice_eq(&s, &want) {
-            Println!("[ 6] Sum512_224 empty          PASS");
+            fmt::Println!("[ 6] Sum512_224 empty          PASS");
         } else {
-            Println!("[ 6] Sum512_224 empty          FAIL");
+            fmt::Println!("[ 6] Sum512_224 empty          FAIL");
             failed += 1;
         }
     }
@@ -176,9 +177,9 @@ fn main() {
             "4634270f707b6a54daae7530460842e20e37ed265ceee9a43e8924aa",
         );
         if slice_eq(&s, &want) {
-            Println!("[ 7] Sum512_224 \"abc\"          PASS");
+            fmt::Println!("[ 7] Sum512_224 \"abc\"          PASS");
         } else {
-            Println!("[ 7] Sum512_224 \"abc\"          FAIL");
+            fmt::Println!("[ 7] Sum512_224 \"abc\"          FAIL");
             failed += 1;
         }
     }
@@ -192,9 +193,9 @@ fn main() {
             "c672b8d1ef56ed28ab87c3622c5114069bdd3ad7b8f9737498d0c01ecef0967a",
         );
         if slice_eq(&s, &want) {
-            Println!("[ 8] Sum512_256 empty          PASS");
+            fmt::Println!("[ 8] Sum512_256 empty          PASS");
         } else {
-            Println!("[ 8] Sum512_256 empty          FAIL");
+            fmt::Println!("[ 8] Sum512_256 empty          FAIL");
             failed += 1;
         }
     }
@@ -206,9 +207,9 @@ fn main() {
             "53048e2681941ef99b2e29b76b4c7dabe4c2d0c634fc6d46e0e2f13107e7af23",
         );
         if slice_eq(&s, &want) {
-            Println!("[ 9] Sum512_256 \"abc\"          PASS");
+            fmt::Println!("[ 9] Sum512_256 \"abc\"          PASS");
         } else {
-            Println!("[ 9] Sum512_256 \"abc\"          FAIL");
+            fmt::Println!("[ 9] Sum512_256 \"abc\"          FAIL");
             failed += 1;
         }
     }
@@ -222,9 +223,9 @@ fn main() {
         let raw: &[byte] = &out;
         let want = sha512::Sum512(to_bytes("abc"));
         if slice_eq(raw, &want) {
-            Println!("[10] streaming                 PASS");
+            fmt::Println!("[10] streaming                 PASS");
         } else {
-            Println!("[10] streaming                 FAIL");
+            fmt::Println!("[10] streaming                 FAIL");
             failed += 1;
         }
     }
@@ -238,9 +239,9 @@ fn main() {
         let raw: &[byte] = &out;
         let want = sha512::Sum512(to_bytes(""));
         if slice_eq(raw, &want) {
-            Println!("[11] Reset                     PASS");
+            fmt::Println!("[11] Reset                     PASS");
         } else {
-            Println!("[11] Reset                     FAIL");
+            fmt::Println!("[11] Reset                     FAIL");
             failed += 1;
         }
     }
@@ -254,9 +255,9 @@ fn main() {
         let raw: &[byte] = &out;
         let want = sha512::Sum512(to_bytes("abc"));
         if raw.len() == 4 + 64 && &raw[0..4] == b"PRE:" && slice_eq(&raw[4..], &want) {
-            Println!("[12] Sum prefix                PASS");
+            fmt::Println!("[12] Sum prefix                PASS");
         } else {
-            Println!("[12] Sum prefix                FAIL");
+            fmt::Println!("[12] Sum prefix                FAIL");
             failed += 1;
         }
     }
@@ -277,9 +278,9 @@ fn main() {
         let s_stream = h.Sum(empty_buf());
         let raw: &[byte] = &s_stream;
         if slice_eq(&s_one, raw) {
-            Println!("[13] >block boundary           PASS");
+            fmt::Println!("[13] >block boundary           PASS");
         } else {
-            Println!("[13] >block boundary           FAIL");
+            fmt::Println!("[13] >block boundary           FAIL");
             failed += 1;
         }
     }
@@ -297,9 +298,9 @@ fn main() {
             && h512.BlockSize() == sha512::BlockSize
             && h384.BlockSize() == sha512::BlockSize
         {
-            Println!("[14] Size/BlockSize            PASS");
+            fmt::Println!("[14] Size/BlockSize            PASS");
         } else {
-            Println!("[14] Size/BlockSize            FAIL");
+            fmt::Println!("[14] Size/BlockSize            FAIL");
             failed += 1;
         }
     }
@@ -314,9 +315,9 @@ fn main() {
         let r2: &[byte] = &s2;
         let want = sha512::Sum512(to_bytes("abc"));
         if slice_eq(r1, r2) && slice_eq(r1, &want) {
-            Println!("[15] Sum non-mutating          PASS");
+            fmt::Println!("[15] Sum non-mutating          PASS");
         } else {
-            Println!("[15] Sum non-mutating          FAIL");
+            fmt::Println!("[15] Sum non-mutating          FAIL");
             failed += 1;
         }
     }
@@ -336,18 +337,18 @@ fn main() {
              daa833b7d6b8a702038b274eaea3f4e4be9d914eeb61f1702e696c203a126854",
         );
         if slice_eq(raw, &want) {
-            Println!("[16] HMAC-SHA-512 RFC4231 #1   PASS");
+            fmt::Println!("[16] HMAC-SHA-512 RFC4231 #1   PASS");
         } else {
-            Println!("[16] HMAC-SHA-512 RFC4231 #1   FAIL");
+            fmt::Println!("[16] HMAC-SHA-512 RFC4231 #1   FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 16/16");
+        fmt::Println!("ok 16/16");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 16");
+        fmt::Println!("FAIL", failed, "of 16");
         syscall::Exit(1);
     }
 }

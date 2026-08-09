@@ -23,13 +23,13 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use goish::fmt;
 use goish::crypto;
 use goish::crypto::ed25519::{
     GenerateKey, NewKeyFromSeed, Options, Sign, Verify, VerifyWithOptions,
 };
 use goish::types::byte;
-use goish::{slice, syscall, Println};
-
+use goish::{slice, syscall};
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 const TOTAL: u8 = 7;
@@ -103,10 +103,10 @@ fn main() {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
-            Println!("ok 7/7");
+            fmt::Println!("ok 7/7");
             syscall::Exit(0);
         } else {
-            Println!("FAIL", f as i64, "of 7");
+            fmt::Println!("FAIL", f as i64, "of 7");
             syscall::Exit(1);
         }
     });

@@ -9,9 +9,10 @@ extern crate alloc;
 extern crate goish;
 
 use core::sync::atomic::{AtomicI64, Ordering};
+use goish::fmt;
 use goish::runtime::sched::schedule;
 use goish::sync::{Locker, Mutex, NewCond, WaitGroup};
-use goish::{go, syscall, Println, KB};
+use goish::{go, syscall, KB};
 
 #[goish::main]
 fn main() {
@@ -43,9 +44,9 @@ fn run_tests() {
         cond.Signal();
         wg.Wait();
         if woke.load(Ordering::Acquire) == 1 {
-            Println!("[ 1] Signal one waiter        PASS");
+            fmt::Println!("[ 1] Signal one waiter        PASS");
         } else {
-            Println!("[ 1] Signal one waiter        FAIL");
+            fmt::Println!("[ 1] Signal one waiter        FAIL");
             failed += 1;
         }
     }
@@ -73,9 +74,9 @@ fn run_tests() {
         cond.Broadcast();
         wg.Wait();
         if woke.load(Ordering::Acquire) == 5 {
-            Println!("[ 2] Broadcast 5 waiters      PASS");
+            fmt::Println!("[ 2] Broadcast 5 waiters      PASS");
         } else {
-            Println!("[ 2] Broadcast 5 waiters      FAIL n={}", woke.load(Ordering::Acquire));
+            fmt::Println!("[ 2] Broadcast 5 waiters      FAIL n={}", woke.load(Ordering::Acquire));
             failed += 1;
         }
     }
@@ -104,15 +105,15 @@ fn run_tests() {
         }
         // Waiter should still be parked.
         if woke.load(Ordering::Acquire) != 0 {
-            Println!("[ 3] Signal no-op when empty  FAIL early wake");
+            fmt::Println!("[ 3] Signal no-op when empty  FAIL early wake");
             failed += 1;
         } else {
             cond.Signal();
             wg.Wait();
             if woke.load(Ordering::Acquire) == 1 {
-                Println!("[ 3] Signal no-op when empty  PASS");
+                fmt::Println!("[ 3] Signal no-op when empty  PASS");
             } else {
-                Println!("[ 3] Signal no-op when empty  FAIL");
+                fmt::Println!("[ 3] Signal no-op when empty  FAIL");
                 failed += 1;
             }
         }
@@ -153,9 +154,9 @@ fn run_tests() {
 
         wg.Wait();
         if phase.load(Ordering::Acquire) == 20 {
-            Println!("[ 4] Ping-pong loop          PASS");
+            fmt::Println!("[ 4] Ping-pong loop          PASS");
         } else {
-            Println!("[ 4] Ping-pong loop          FAIL phase={}", phase.load(Ordering::Acquire));
+            fmt::Println!("[ 4] Ping-pong loop          FAIL phase={}", phase.load(Ordering::Acquire));
             failed += 1;
         }
     }
@@ -165,14 +166,14 @@ fn run_tests() {
         let mu: Mutex = Mutex::new(());
         Locker::Lock(&mu);
         Locker::Unlock(&mu);
-        Println!("[ 5] Locker trait dispatch    PASS");
+        fmt::Println!("[ 5] Locker trait dispatch    PASS");
     }
 
     if failed == 0 {
-        Println!("ok 5/5");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 5");
+        fmt::Println!("FAIL", failed, "of 5");
         syscall::Exit(1);
     }
 }

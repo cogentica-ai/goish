@@ -8,7 +8,8 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use goish::{bufio, byte, int, io, nil, slice, syscall, Println};
+use goish::fmt;
+use goish::{bufio, byte, int, io, nil, slice, syscall};
 
 // In-memory io.Reader.
 struct ByteReader {
@@ -66,9 +67,9 @@ fn main() {
         let mut sink = ByteWriter::new();
         let (n, err) = br.WriteTo(&mut sink);
         if err == nil && n == payload.len() as int && sink.data.as_slice() == payload {
-            Println!("[ 1] Reader.WriteTo drains all PASS");
+            fmt::Println!("[ 1] Reader.WriteTo drains all PASS");
         } else {
-            Println!("[ 1] Reader.WriteTo drains all FAIL n=", n);
+            fmt::Println!("[ 1] Reader.WriteTo drains all FAIL n=", n);
             failed += 1;
         }
     }
@@ -80,9 +81,9 @@ fn main() {
         let mut sink = ByteWriter::new();
         let (n, err) = br.WriteTo(&mut sink);
         if err == nil && n == 0 && sink.data.is_empty() {
-            Println!("[ 2] Reader.WriteTo empty      PASS");
+            fmt::Println!("[ 2] Reader.WriteTo empty      PASS");
         } else {
-            Println!("[ 2] Reader.WriteTo empty      FAIL n=", n);
+            fmt::Println!("[ 2] Reader.WriteTo empty      FAIL n=", n);
             failed += 1;
         }
     }
@@ -98,9 +99,9 @@ fn main() {
         if err == nil && n == (payload.len() - 1) as int && b == b'a'
             && sink.data.as_slice() == &payload[1..]
         {
-            Println!("[ 3] WriteTo after partial     PASS");
+            fmt::Println!("[ 3] WriteTo after partial     PASS");
         } else {
-            Println!("[ 3] WriteTo after partial     FAIL n=", n);
+            fmt::Println!("[ 3] WriteTo after partial     FAIL n=", n);
             failed += 1;
         }
     }
@@ -116,9 +117,9 @@ fn main() {
         // Note: bw is consumed by-value via NewWriter, so we can't easily
         // observe sink directly. Just check n + err.
         if err == nil && n == payload.len() as int {
-            Println!("[ 4] Writer.ReadFrom n correct PASS");
+            fmt::Println!("[ 4] Writer.ReadFrom n correct PASS");
         } else {
-            Println!("[ 4] Writer.ReadFrom n correct FAIL n=", n);
+            fmt::Println!("[ 4] Writer.ReadFrom n correct FAIL n=", n);
             failed += 1;
         }
     }
@@ -131,9 +132,9 @@ fn main() {
         let (n, err) = bw.ReadFrom(&mut r);
         let _ = bw.Flush();
         if err == nil && n == 0 {
-            Println!("[ 5] Writer.ReadFrom empty     PASS");
+            fmt::Println!("[ 5] Writer.ReadFrom empty     PASS");
         } else {
-            Println!("[ 5] Writer.ReadFrom empty     FAIL n=", n);
+            fmt::Println!("[ 5] Writer.ReadFrom empty     FAIL n=", n);
             failed += 1;
         }
     }
@@ -150,18 +151,18 @@ fn main() {
         let (n, err) = bw.ReadFrom(&mut r);
         let _ = bw.Flush();
         if err == nil && n == 8192 {
-            Println!("[ 6] ReadFrom 2x buffer        PASS");
+            fmt::Println!("[ 6] ReadFrom 2x buffer        PASS");
         } else {
-            Println!("[ 6] ReadFrom 2x buffer        FAIL n=", n);
+            fmt::Println!("[ 6] ReadFrom 2x buffer        FAIL n=", n);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 6/6");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 6");
+        fmt::Println!("FAIL", failed, "of 6");
         syscall::Exit(1);
     }
 }

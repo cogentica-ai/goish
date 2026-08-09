@@ -15,11 +15,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::log;
 use goish::os;
 use goish::string;
 use goish::syscall;
-use goish::Println;
 
 #[goish::main]
 fn main() {
@@ -28,20 +28,20 @@ fn main() {
     // 1. log::Print — emits to Stderr and returns; smoke-only check.
     {
         log::Print!("hello", " ", "world");
-        Println!("[ 1] log::Print emit            PASS");
+        fmt::Println!("[ 1] log::Print emit            PASS");
     }
 
     // 2. log::Print — empty arg list still prints prefix + newline.
     {
         log::Print!();
-        Println!("[ 2] log::Print empty           PASS");
+        fmt::Println!("[ 2] log::Print empty           PASS");
     }
 
     // 3. log::Print with int + string args.
     {
         let n: i64 = 42;
         log::Print!("count=", n);
-        Println!("[ 3] log::Print mixed           PASS");
+        fmt::Println!("[ 3] log::Print mixed           PASS");
     }
 
     // 4. Fatalln branch — only exercised when CLI arg "--fatalln" given.
@@ -61,15 +61,15 @@ fn main() {
         } else {
             // Skip path: caller didn't request fatal; Fatalln semantics
             // verified at compile time (the macro must not return).
-            Println!("[ 4] Fatalln skipped           PASS");
+            fmt::Println!("[ 4] Fatalln skipped           PASS");
         }
     }
 
     if failed == 0 {
-        Println!("ok 4/4");
+        fmt::Println!("ok 4/4");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 4");
+        fmt::Println!("FAIL", failed, "of 4");
         syscall::Exit(1);
     }
 }

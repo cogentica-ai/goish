@@ -7,8 +7,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::strconv;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -18,16 +19,16 @@ fn main() {
     {
         let q = strconv::Quote(string("hello"));
         if q == "\"hello\"" {
-            Println!("[ 1] Quote plain               PASS");
+            fmt::Println!("[ 1] Quote plain               PASS");
         } else {
-            Println!("[ 1] Quote plain               FAIL got={}", q);
+            fmt::Println!("[ 1] Quote plain               FAIL got={}", q);
             failed += 1;
         }
         let (uq, err) = strconv::Unquote(q);
         if err.IsNil() && uq == "hello" {
-            Println!("[ 2] Unquote plain             PASS");
+            fmt::Println!("[ 2] Unquote plain             PASS");
         } else {
-            Println!("[ 2] Unquote plain             FAIL");
+            fmt::Println!("[ 2] Unquote plain             FAIL");
             failed += 1;
         }
     }
@@ -36,16 +37,16 @@ fn main() {
     {
         let q = strconv::Quote(string("a\\b\"c"));
         if q == "\"a\\\\b\\\"c\"" {
-            Println!("[ 3] Quote escapes             PASS");
+            fmt::Println!("[ 3] Quote escapes             PASS");
         } else {
-            Println!("[ 3] Quote escapes             FAIL got={}", q);
+            fmt::Println!("[ 3] Quote escapes             FAIL got={}", q);
             failed += 1;
         }
         let (uq, _) = strconv::Unquote(q);
         if uq == "a\\b\"c" {
-            Println!("[ 4] Unquote escapes           PASS");
+            fmt::Println!("[ 4] Unquote escapes           PASS");
         } else {
-            Println!("[ 4] Unquote escapes           FAIL got={}", uq);
+            fmt::Println!("[ 4] Unquote escapes           FAIL got={}", uq);
             failed += 1;
         }
     }
@@ -54,16 +55,16 @@ fn main() {
     {
         let q = strconv::Quote(string("a\nb\rc\td"));
         if q == "\"a\\nb\\rc\\td\"" {
-            Println!("[ 5] Quote control            PASS");
+            fmt::Println!("[ 5] Quote control            PASS");
         } else {
-            Println!("[ 5] Quote control            FAIL got={}", q);
+            fmt::Println!("[ 5] Quote control            FAIL got={}", q);
             failed += 1;
         }
         let (uq, _) = strconv::Unquote(q);
         if uq == "a\nb\rc\td" {
-            Println!("[ 6] Unquote control          PASS");
+            fmt::Println!("[ 6] Unquote control          PASS");
         } else {
-            Println!("[ 6] Unquote control          FAIL");
+            fmt::Println!("[ 6] Unquote control          FAIL");
             failed += 1;
         }
     }
@@ -72,16 +73,16 @@ fn main() {
     {
         let q = strconv::Quote(string("\x01\x7f"));
         if q == "\"\\x01\\x7f\"" {
-            Println!("[ 7] Quote \\xHH                PASS");
+            fmt::Println!("[ 7] Quote \\xHH                PASS");
         } else {
-            Println!("[ 7] Quote \\xHH                FAIL got={}", q);
+            fmt::Println!("[ 7] Quote \\xHH                FAIL got={}", q);
             failed += 1;
         }
         let (uq, _) = strconv::Unquote(q);
         if uq == "\x01\x7f" {
-            Println!("[ 8] Unquote \\xHH              PASS");
+            fmt::Println!("[ 8] Unquote \\xHH              PASS");
         } else {
-            Println!("[ 8] Unquote \\xHH              FAIL");
+            fmt::Println!("[ 8] Unquote \\xHH              FAIL");
             failed += 1;
         }
     }
@@ -90,9 +91,9 @@ fn main() {
     {
         let (_uq, err) = strconv::Unquote(string("not quoted"));
         if !err.IsNil() {
-            Println!("[ 9] Unquote bad → err         PASS");
+            fmt::Println!("[ 9] Unquote bad → err         PASS");
         } else {
-            Println!("[ 9] Unquote bad → err         FAIL");
+            fmt::Println!("[ 9] Unquote bad → err         FAIL");
             failed += 1;
         }
     }
@@ -101,18 +102,18 @@ fn main() {
     {
         let (_uq, err) = strconv::Unquote(string("\"\\q\""));
         if !err.IsNil() {
-            Println!("[10] Unquote bad esc → err     PASS");
+            fmt::Println!("[10] Unquote bad esc → err     PASS");
         } else {
-            Println!("[10] Unquote bad esc → err     FAIL");
+            fmt::Println!("[10] Unquote bad esc → err     FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 10", failed);
+        fmt::Println!("FAIL {} of 10", failed);
         syscall::Exit(1);
     }
 }

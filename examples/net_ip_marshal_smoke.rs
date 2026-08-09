@@ -9,13 +9,14 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::fmt;
 use goish::bytes;
 use goish::convert::bytes as to_bytes;
 use goish::goslice::slice;
 use goish::net;
 use goish::string;
 use goish::types::byte;
-use goish::{syscall, Println};
+use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -26,9 +27,9 @@ fn main() {
         let a = net::IPv4(127, 0, 0, 1);
         let b = net::IPv4(127, 0, 0, 1);
         if a.Equal(&b) {
-            Println!("[ 1] Equal same v4             PASS");
+            fmt::Println!("[ 1] Equal same v4             PASS");
         } else {
-            Println!("[ 1] Equal same v4             FAIL");
+            fmt::Println!("[ 1] Equal same v4             FAIL");
             failed += 1;
         }
     }
@@ -38,9 +39,9 @@ fn main() {
         let a = net::IPv4(127, 0, 0, 1);
         let b = net::IPv4(127, 0, 0, 2);
         if !a.Equal(&b) {
-            Println!("[ 2] Equal differ v4           PASS");
+            fmt::Println!("[ 2] Equal differ v4           PASS");
         } else {
-            Println!("[ 2] Equal differ v4           FAIL");
+            fmt::Println!("[ 2] Equal differ v4           FAIL");
             failed += 1;
         }
     }
@@ -50,9 +51,9 @@ fn main() {
         let a = net::IP::default();
         let b = net::IP::default();
         if a.Equal(&b) {
-            Println!("[ 3] Equal nil-nil             PASS");
+            fmt::Println!("[ 3] Equal nil-nil             PASS");
         } else {
-            Println!("[ 3] Equal nil-nil             FAIL");
+            fmt::Println!("[ 3] Equal nil-nil             FAIL");
             failed += 1;
         }
     }
@@ -62,9 +63,9 @@ fn main() {
         let a = net::IP::default();
         let b = net::IPv4(0, 0, 0, 0);
         if !a.Equal(&b) {
-            Println!("[ 4] Equal nil-vs-v4           PASS");
+            fmt::Println!("[ 4] Equal nil-vs-v4           PASS");
         } else {
-            Println!("[ 4] Equal nil-vs-v4           FAIL");
+            fmt::Println!("[ 4] Equal nil-vs-v4           FAIL");
             failed += 1;
         }
     }
@@ -75,9 +76,9 @@ fn main() {
         let (txt, err) = ip.MarshalText();
         let want = to_bytes("192.0.2.1");
         if err.IsNil() && bytes::Equal(txt, want) {
-            Println!("[ 5] MarshalText v4            PASS");
+            fmt::Println!("[ 5] MarshalText v4            PASS");
         } else {
-            Println!("[ 5] MarshalText v4            FAIL");
+            fmt::Println!("[ 5] MarshalText v4            FAIL");
             failed += 1;
         }
     }
@@ -87,9 +88,9 @@ fn main() {
         let ip = net::IP::default();
         let (txt, err) = ip.MarshalText();
         if err.IsNil() && txt.Len() == 0 {
-            Println!("[ 6] MarshalText nil           PASS");
+            fmt::Println!("[ 6] MarshalText nil           PASS");
         } else {
-            Println!("[ 6] MarshalText nil           FAIL");
+            fmt::Println!("[ 6] MarshalText nil           FAIL");
             failed += 1;
         }
     }
@@ -99,9 +100,9 @@ fn main() {
         let mut ip = net::IP::default();
         let err = ip.UnmarshalText(to_bytes("10.0.0.1"));
         if err.IsNil() && ip.String() == string("10.0.0.1") {
-            Println!("[ 7] UnmarshalText round-trip  PASS");
+            fmt::Println!("[ 7] UnmarshalText round-trip  PASS");
         } else {
-            Println!("[ 7] UnmarshalText round-trip  FAIL");
+            fmt::Println!("[ 7] UnmarshalText round-trip  FAIL");
             failed += 1;
         }
     }
@@ -111,9 +112,9 @@ fn main() {
         let mut ip = net::IPv4(1, 2, 3, 4);
         let err = ip.UnmarshalText(slice::<byte>::__from_vec(Vec::new()));
         if err.IsNil() && ip.IsNil() {
-            Println!("[ 8] UnmarshalText empty→nil   PASS");
+            fmt::Println!("[ 8] UnmarshalText empty→nil   PASS");
         } else {
-            Println!("[ 8] UnmarshalText empty→nil   FAIL");
+            fmt::Println!("[ 8] UnmarshalText empty→nil   FAIL");
             failed += 1;
         }
     }
@@ -123,9 +124,9 @@ fn main() {
         let mut ip = net::IP::default();
         let err = ip.UnmarshalText(to_bytes("not-an-ip"));
         if !err.IsNil() {
-            Println!("[ 9] UnmarshalText invalid     PASS");
+            fmt::Println!("[ 9] UnmarshalText invalid     PASS");
         } else {
-            Println!("[ 9] UnmarshalText invalid     FAIL");
+            fmt::Println!("[ 9] UnmarshalText invalid     FAIL");
             failed += 1;
         }
     }
@@ -137,18 +138,18 @@ fn main() {
         let (out, err) = ip.AppendText(prefix);
         let want = to_bytes("ip=1.2.3.4");
         if err.IsNil() && bytes::Equal(out, want) {
-            Println!("[10] AppendText                PASS");
+            fmt::Println!("[10] AppendText                PASS");
         } else {
-            Println!("[10] AppendText                FAIL");
+            fmt::Println!("[10] AppendText                FAIL");
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 10/10");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

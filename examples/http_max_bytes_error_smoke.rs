@@ -8,11 +8,12 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::io::Reader;
 use goish::net::http;
 use goish::types::byte;
-use goish::{errors, syscall, Println};
+use goish::{errors, syscall};
 
 #[goish::main]
 fn main() {
@@ -23,9 +24,9 @@ fn main() {
     {
         let err = http::NewMaxBytesError(1024);
         if err.Error() == "http: request body too large" {
-            Println!("[ 1] error message            PASS");
+            fmt::Println!("[ 1] error message            PASS");
         } else {
-            Println!("[ 1] error message            FAIL got={}", err.Error());
+            fmt::Println!("[ 1] error message            FAIL got={}", err.Error());
             failed += 1;
         }
     }
@@ -50,9 +51,9 @@ fn main() {
             }
         }
         if total >= 5 && !last_err.IsNil() && last_err.Error() == "http: request body too large" {
-            Println!("[ 2] limit triggers err       PASS");
+            fmt::Println!("[ 2] limit triggers err       PASS");
         } else {
-            Println!(
+            fmt::Println!(
                 "[ 2] limit triggers err       FAIL total={} err={}",
                 total,
                 last_err.Error()
@@ -70,18 +71,18 @@ fn main() {
         let (n, err) = limited.Read(&mut out);
         // Should read 2 bytes, no error.
         if n == 2 && err.IsNil() && out[0] == b'h' && out[1] == b'i' {
-            Println!("[ 3] under-limit Read         PASS");
+            fmt::Println!("[ 3] under-limit Read         PASS");
         } else {
-            Println!("[ 3] under-limit Read         FAIL n={}", n);
+            fmt::Println!("[ 3] under-limit Read         FAIL n={}", n);
             failed += 1;
         }
     }
 
     if failed == 0 {
-        Println!("ok 3/3");
+        fmt::Println!("ok 3/3");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 3", failed);
+        fmt::Println!("FAIL {} of 3", failed);
         syscall::Exit(1);
     }
 }

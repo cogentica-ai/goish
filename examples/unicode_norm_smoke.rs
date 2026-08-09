@@ -17,9 +17,10 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::unicode;
 use goish::unicode::norm;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -77,7 +78,7 @@ fn main() {
     for (input, want) in NFD_VECS {
         let got = norm::NFD.String(*input);
         if got.as_bytes() != want.as_bytes() {
-            Println!("NFD mismatch on input:", *input);
+            fmt::Println!("NFD mismatch on input:", *input);
             die(b"t1: NFD vector mismatch\n");
         }
     }
@@ -93,7 +94,7 @@ fn main() {
     for (input, want) in cases {
         let got = remove_diacritics(*input);
         if got.as_bytes() != want.as_bytes() {
-            Println!("removeDiacritics mismatch:", *input, "got", got);
+            fmt::Println!("removeDiacritics mismatch:", *input, "got", got);
             die(b"t2: removeDiacritics mismatch\n");
         }
     }

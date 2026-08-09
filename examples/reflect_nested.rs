@@ -5,8 +5,9 @@
 #![no_std]
 #![no_main]
 
+use goish::fmt;
 use goish::encoding::json;
-use goish::{int, reflect, string, syscall, Sprintf};
+use goish::{int, reflect, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -48,10 +49,10 @@ fn main() {
     };
 
     // ─── %v / %+v recurse into nested struct ─────────────────────────
-    let v = Sprintf!("%v", &u);
+    let v = fmt::Sprintf!("%v", &u);
     check(v == "{alice {Main 123}}", b"nested: %v body\n");
 
-    let pv = Sprintf!("%+v", &u);
+    let pv = fmt::Sprintf!("%+v", &u);
     check(
         pv == "{Name:alice Home:{Street:Main Zip:123}}",
         b"nested: %+v body\n",

@@ -7,10 +7,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::fmt;
 use goish::convert::bytes;
 use goish::net::http;
 use goish::os;
-use goish::{string, syscall, Println};
+use goish::{string, syscall};
 
 #[goish::main]
 fn main() {
@@ -20,9 +21,9 @@ fn main() {
     {
         let (data, err) = os::ReadFile(string("/etc/passwd"));
         if err.IsNil() && data.Len() > 0 {
-            Println!("[ 1] ReadFile /etc/passwd      PASS {}B", data.Len());
+            fmt::Println!("[ 1] ReadFile /etc/passwd      PASS {}B", data.Len());
         } else {
-            Println!("[ 1] ReadFile /etc/passwd      FAIL");
+            fmt::Println!("[ 1] ReadFile /etc/passwd      FAIL");
             failed += 1;
         }
     }
@@ -33,14 +34,14 @@ fn main() {
         let want = bytes("hello, write+read\n");
         let werr = os::WriteFile(path.clone(), want.clone(), 0o644);
         if !werr.IsNil() {
-            Println!("[ 2] WriteFile                 FAIL");
+            fmt::Println!("[ 2] WriteFile                 FAIL");
             failed += 1;
         } else {
             let (got, rerr) = os::ReadFile(path.clone());
             if rerr.IsNil() && got.Len() == want.Len() {
-                Println!("[ 2] WriteFile + ReadFile      PASS");
+                fmt::Println!("[ 2] WriteFile + ReadFile      PASS");
             } else {
-                Println!("[ 2] WriteFile + ReadFile      FAIL got={}B", got.Len());
+                fmt::Println!("[ 2] WriteFile + ReadFile      FAIL got={}B", got.Len());
                 failed += 1;
             }
         }
@@ -54,17 +55,17 @@ fn main() {
         && http::MethodPatch == "PATCH"
         && http::MethodHead == "HEAD"
     {
-        Println!("[ 3] Method* constants         PASS");
+        fmt::Println!("[ 3] Method* constants         PASS");
     } else {
-        Println!("[ 3] Method* constants         FAIL");
+        fmt::Println!("[ 3] Method* constants         FAIL");
         failed += 1;
     }
 
     if failed == 0 {
-        Println!("ok 3/3");
+        fmt::Println!("ok 3/3");
         syscall::Exit(0);
     } else {
-        Println!("FAIL {} of 3", failed);
+        fmt::Println!("FAIL {} of 3", failed);
         syscall::Exit(1);
     }
 }
