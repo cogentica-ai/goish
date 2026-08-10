@@ -1,31 +1,26 @@
-// goishlint:ignore GOISH018 — MarshalBinary, AppendBinary,
-// UnmarshalBinary, consumeUint32, consumeUint64 and Clone are not ported:
-// goish's hash::Hash exposes no binary-marshaling or Cloner surface for
-// them to implement. They unblock HMAC's FIPS 198-1 §6 state cache, so
-// port them together with that.
-// goishlint:ignore GOISH021 — same reason for the `marshalable` shape.
-// go: file crypto/internal/fips140/sha256/sha256.go decls: Digest.Reset, New, New224, Digest.Size, Digest.BlockSize, Digest.Write, Digest.Sum, Digest.checkSum, NewHash, NewHash224
+// go: file crypto/internal/fips140/sha256/sha256.go decls: Digest.Reset, New, New224, Digest.Size, Digest.BlockSize, Digest.Write, Digest.Sum, Digest.checkSum, Digest.MarshalBinary, Digest.AppendBinary, Digest.UnmarshalBinary, Digest.Clone, consumeUint32, consumeUint64, NewHash, NewHash224, register_sha256_impls, __goish_as_dyn_any, __goish_as_dyn_any_mut
 //
 // crypto/internal/fips140/sha256 — SHA-224 and SHA-256. The public
 // crypto/sha256 package is a thin wrapper over this.
 //
 // Deviations from sha256[go] @ Go 1.25.5:
 //
-//   * MarshalBinary / AppendBinary / UnmarshalBinary / consumeUint32 /
-//     consumeUint64 / Clone are not ported: goish's hash::Hash has no
-//     binary-marshaling or Cloner surface to hang them off. Tracked in
-//     the GOISH018 ignore below.
 //   * New/New224 return `Digest` by value rather than `*Digest`.
+//   * `Clone` returns the boxed `hash::Cloner` trait object. Go returns
+//     the `hash.Cloner` interface; goish's interface objects are boxed.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
+use crate::crypto::internal::fips140deps::byteorder;
+use crate::encoding;
 use crate::errors::{error, nil};
 use crate::goslice::slice;
-use crate::hash::Hash;
+use crate::hash::{Cloner, Hash};
 use crate::io;
-use crate::types::{byte, int};
+use crate::types::{byte, int, uint32, uint64};
 
 extern crate alloc;
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use super::sha256block_noasm::block;
@@ -42,6 +37,15 @@ pub const Size224: int = 28;
 pub const BlockSize: int = 64;
 
 pub(crate) const CHUNK: usize = 64;
+
+// The maximum number of bytes that can be passed to block(). The limit
+// exists because implementations that rely on assembly routines are not
+// preemptible.
+//
+// Go: `const maxAsmIters = 1024`
+const maxAsmIters: usize = 1024;
+/// Go: `const maxAsmSize = blockSize * maxAsmIters // 64KiB`
+const maxAsmSize: usize = (BlockSize as usize) * maxAsmIters;
 
 // SHA-256 IV (FIPS 180-4 §5.3.3).
 const init0: u32 = 0x6A09E667;
@@ -63,6 +67,7 @@ const init5_224: u32 = 0x68581511;
 const init6_224: u32 = 0x64F98FA7;
 const init7_224: u32 = 0xBEFA4FA4;
 
+#[derive(Clone)]
 pub struct Digest {
     pub(crate) h: [u32; 8],
     pub(crate) x: [byte; CHUNK],
@@ -70,6 +75,17 @@ pub struct Digest {
     pub(crate) len: u64,
     pub(crate) is224: bool,
 }
+
+// ─── Marshaling (Go: sha256.go:58-62) ─────────────────────────────────
+
+/// Go: `magic224 = "sha\x02"`
+const magic224: &[byte] = b"sha\x02";
+
+/// Go: `magic256 = "sha\x03"`
+const magic256: &[byte] = b"sha\x03";
+
+/// Go: `marshaledSize = len(magic256) + 8*4 + chunk + 8`
+const marshaledSize: usize = 4 + 8 * 4 + CHUNK + 8;
 
 // go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:149-153 New
 /// `sha256.New()` (sha256[go]:34) — new SHA-256 digest.
@@ -117,6 +133,189 @@ impl Digest {
     pub fn Sum<B: Into<slice<byte>>>(&self, b: B) -> slice<byte> {
         <Self as Hash>::Sum(self, b.into())
     }
+
+    // go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:64-66 MarshalBinary
+    /// `(*Digest).MarshalBinary()` — the digest's internal state, so a
+    /// running hash can be saved and resumed without re-feeding input.
+    pub fn MarshalBinary(&self) -> (slice<byte>, error) {
+        // Go: return d.AppendBinary(make([]byte, 0, marshaledSize))
+        let buf: Vec<byte> = Vec::with_capacity(marshaledSize);
+        return self.AppendBinary(slice::__from_vec(buf));
+    }
+
+    // go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:68-84 AppendBinary
+    /// `(*Digest).AppendBinary(b)` — append the marshaled state to `b`.
+    pub fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
+        // Go: if d.is224 { b = append(b, magic224...) } else { b = append(b, magic256...) }
+        let mut out: Vec<byte> = b.__into_vec();
+        if self.is224 {
+            out.extend_from_slice(magic224);
+        } else {
+            out.extend_from_slice(magic256);
+        }
+        // Go: b = byteorder.BEAppendUint32(b, d.h[i]) for i in 0..7
+        let mut acc = slice::__from_vec(out);
+        let mut i: usize = 0;
+        while i < 8 {
+            acc = byteorder::BEAppendUint32(acc, self.h[i]);
+            i += 1;
+        }
+        // Go: b = append(b, d.x[:d.nx]...); b = append(b, make([]byte, len(d.x)-d.nx)...)
+        let mut out: Vec<byte> = acc.__into_vec();
+        out.extend_from_slice(&self.x[..self.nx]);
+        out.resize(out.len() + (CHUNK - self.nx), 0);
+        // Go: b = byteorder.BEAppendUint64(b, d.len); return b, nil
+        return (byteorder::BEAppendUint64(slice::__from_vec(out), self.len), nil);
+    }
+
+    // go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:86-107 UnmarshalBinary
+    /// `(*Digest).UnmarshalBinary(b)` — restore state produced by
+    /// [`Digest::MarshalBinary`].
+    pub fn UnmarshalBinary(&mut self, b: slice<byte>) -> error {
+        let raw: &[byte] = &b;
+        // Go: if len(b) < len(magic224) || (d.is224 && string(b[:len(magic224)]) != magic224) ||
+        //        (!d.is224 && string(b[:len(magic256)]) != magic256) { … }
+        let want: &[byte] = if self.is224 { magic224 } else { magic256 };
+        if raw.len() < magic224.len() || &raw[..want.len()] != want {
+            return crate::errors::New("crypto/sha256: invalid hash state identifier");
+        }
+        // Go: if len(b) != marshaledSize { … }
+        if raw.len() != marshaledSize {
+            return crate::errors::New("crypto/sha256: invalid hash state size");
+        }
+        // Go: b = b[len(magic224):]
+        let mut rest: &[byte] = &raw[magic224.len()..];
+        // Go: b, d.h[i] = consumeUint32(b) for i in 0..7
+        let mut i: usize = 0;
+        while i < 8 {
+            let (tail, v) = consumeUint32(rest);
+            self.h[i] = v;
+            rest = tail;
+            i += 1;
+        }
+        // Go: b = b[copy(d.x[:], b):]
+        let n = core::cmp::min(CHUNK, rest.len());
+        self.x[..n].copy_from_slice(&rest[..n]);
+        rest = &rest[n..];
+        // Go: b, d.len = consumeUint64(b)
+        let (_, len) = consumeUint64(rest);
+        self.len = len;
+        // Go: d.nx = int(d.len % chunk)
+        self.nx = usize::try_from(self.len % (CHUNK as uint64)).unwrap_or(0);
+        return nil;
+    }
+
+    // go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:118-121 Clone
+    /// `(*Digest).Clone()` — an independent copy of this digest's state.
+    /// Never fails, so the error is always nil (Go says the same).
+    pub fn Clone(&self) -> (Box<dyn Cloner + Send + Sync>, error) {
+        // Go: r := *d; return &r, nil
+        let r = Clone::clone(self);
+        return (Box::new(r), nil);
+    }
+}
+
+// go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:109-111 consumeUint64
+/// Go: `func consumeUint64(b []byte) ([]byte, uint64)`
+///
+/// Takes/returns a borrowed `&[byte]` rather than `slice<byte>`: it is
+/// an unexported cursor helper, never part of the package's Go API
+/// surface, and the borrow avoids a re-wrap per field.
+fn consumeUint64(b: &[byte]) -> (&[byte], uint64) {
+    // Go: return b[8:], byteorder.BEUint64(b)
+    return (&b[8..], byteorder::BEUint64(slice::__from_vec(b[..8].to_vec())));
+}
+
+// go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:113-115 consumeUint32
+/// Go: `func consumeUint32(b []byte) ([]byte, uint32)` — see
+/// [`consumeUint64`] for why this borrows.
+fn consumeUint32(b: &[byte]) -> (&[byte], uint32) {
+    // Go: return b[4:], byteorder.BEUint32(b)
+    return (&b[4..], byteorder::BEUint32(slice::__from_vec(b[..4].to_vec())));
+}
+
+// ─── encoding + hash.Cloner interface impls ───────────────────────────
+//
+// Go's Digest satisfies encoding.BinaryMarshaler, encoding.BinaryAppender,
+// encoding.BinaryUnmarshaler and hash.Cloner structurally. goish's
+// interfaces are nominal, so the impls are spelled out; each forwards to
+// the inherent method above.
+
+impl encoding::BinaryMarshaler for Digest {
+    // go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:64-66 MarshalBinary
+    fn MarshalBinary(&self) -> (slice<byte>, error) {
+        return Digest::MarshalBinary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl encoding::BinaryAppender for Digest {
+    // go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:68-84 AppendBinary
+    fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
+        return Digest::AppendBinary(self, b);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl encoding::BinaryUnmarshaler for Digest {
+    // go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:86-107 UnmarshalBinary
+    fn UnmarshalBinary(&mut self, data: slice<byte>) -> error {
+        return Digest::UnmarshalBinary(self, data);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl Cloner for Digest {
+    // go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:118-121 Clone
+    fn Clone(&self) -> (Box<dyn Cloner + Send + Sync>, error) {
+        return Digest::Clone(self);
+    }
+}
+
+// go: none — goish idiom: `#[goish::interface]` downcast registries are
+// filled at runtime, one entry per `impl Trait for Concrete`; Go's
+// itabs are built by the linker. Idempotent and cheap.
+/// Register `Digest` into the `hash::Cloner` and `encoding::Binary*`
+/// downcast registries so `carrier.As::<…>()` finds it. Called at the
+/// head of every goish API that asserts on a hash interface.
+pub fn register_sha256_impls() {
+    crate::hash::__goish_register_Cloner_impl::<Digest>();
+    encoding::__goish_register_BinaryMarshaler_impl::<Digest>();
+    encoding::__goish_register_BinaryAppender_impl::<Digest>();
+    encoding::__goish_register_BinaryUnmarshaler_impl::<Digest>();
 }
 
 // ─── Hash trait impls for Digest ──────────────────────────────────────
@@ -142,9 +341,20 @@ impl io::Writer for Digest {
             }
             q = &q[copy_n..];
         }
-        // Go: if len(p) >= chunk { ... block(d, p[:n]) ... }
+        // Go: if len(p) >= chunk { n := len(p) &^ (chunk - 1); … }
         if q.len() >= CHUNK {
-            let n = q.len() & !(CHUNK - 1);
+            let mut n = q.len() & !(CHUNK - 1);
+            // Go: for n > maxAsmSize { block(d, p[:maxAsmSize]); … }
+            //
+            // Caps a single block() call at 64 KiB. Once the SHA-NI path
+            // lands this bounds how long the goroutine is unpreemptible;
+            // the generic path is preemptible either way, but the loop is
+            // kept so the asm port is a drop-in.
+            while n > maxAsmSize {
+                block(self, &q[..maxAsmSize]);
+                q = &q[maxAsmSize..];
+                n -= maxAsmSize;
+            }
             block(self, &q[..n]);
             q = &q[n..];
         }
@@ -154,6 +364,21 @@ impl io::Writer for Digest {
             self.nx = q.len();
         }
         (nn as int, nil)
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    // `hash::Hash` and `hash::Cloner` are composite interfaces: they
+    // inherit this hook from `io::Writer`, so overriding it once here
+    // makes `Digest` reachable through every interface in the chain.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
     }
 }
 

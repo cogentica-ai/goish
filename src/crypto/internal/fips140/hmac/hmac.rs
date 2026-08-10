@@ -1,13 +1,9 @@
-// goishlint:ignore GOISH021 — `marshalable` (hmac.go:27) is the
-// BinaryMarshaler+BinaryUnmarshaler pair Go type-asserts the inner/outer
-// hashes against to cache their post-ipad/opad state (FIPS 198-1 §6).
-// goish's hash::Hash exposes no MarshalBinary/UnmarshalBinary, so there is
-// nothing to assert against and Reset re-feeds ipad instead. Port this
-// when hash gains binary marshaling.
-// go: file crypto/internal/fips140/hmac/hmac.go decls: HMAC.Sum, HMAC.Write, HMAC.Size, HMAC.BlockSize, HMAC.Reset, New, MarkAsUsedInKDF, errCloneUnsupported.Error, errCloneUnsupported.Unwrap, HMAC.Clone
+// go: file crypto/internal/fips140/hmac/hmac.go decls: HMAC.Sum, HMAC.Write, HMAC.Size, HMAC.BlockSize, HMAC.Reset, New, MarkAsUsedInKDF, errCloneUnsupported.Error, errCloneUnsupported.Unwrap, HMAC.Clone, register_hmac_impls, MarshalBinary, UnmarshalBinary, __goish_as_dyn_any, __goish_as_dyn_any_mut
 //
 // crypto/internal/fips140/hmac — HMAC per FIPS 198-1. The public
 // crypto/hmac package is a thin wrapper over this.
+//
+//   HMAC = H((K ⊕ opad) ∥ H((K ⊕ ipad) ∥ message))
 //
 // Deviations from hmac.go @ Go 1.25.5:
 //
@@ -16,43 +12,27 @@
 //     the uniqueness check Go performs (`hm.outer == hm.inner`, guarded by
 //     recover) is unnecessary because two calls to a fn pointer always
 //     produce distinct boxes.
-//   * No `marshalable` fast path: Go caches the marshaled inner/outer state
-//     after the first Reset (FIPS 198-1 §6). goish's hash::Hash has no
-//     MarshalBinary/UnmarshalBinary, so Reset re-feeds ipad each time —
-//     correctness-equivalent, slower for repeated Reset+Sum cycles.
-//   * `fips140.RecordNonApproved()` calls in Sum are dropped: goish's
-//     fips140 stub has no service indicator, so they are no-ops.
-// crypto/hmac — Go's `crypto/hmac`, ported (FIPS 198-1).
-//
-// HMAC = H((K ⊕ opad) ∥ H((K ⊕ ipad) ∥ message))
-//
-// Inlines Go's `crypto/internal/fips140/hmac/hmac.go::HMAC` since
-// goish has no fips140 internal layer.
-//
-// Slim deviations:
-//   * Constructor takes `fn() -> Box<dyn Hash + Send + Sync>` (a function pointer
-//     yielding boxed `hash.Hash`) instead of Go's `func() hash.Hash`
-//     interface return. Each hash module exposes a `NewHash` boxed
-//     wrapper for this purpose:
 //
 //         hmac::New(crypto::sha256::NewHash, key)
 //
-//   * No Cloner / MarshalBinary / UnmarshalBinary fast path — Reset
-//     re-feeds ipad each time (the FIPS-198 §6 cached-state optimization
-//     is omitted since goish hashes don't implement BinaryMarshaler).
-//   * Sum is `&self` per goish's Hash trait, so we synthesize a fresh
-//     outer hasher each call instead of reset-and-write on a stored
-//     outer (Go does the latter). Same digest, slightly more work.
-//   * No `MarkAsUsedInKDF` — goish has no FIPS service-indicator.
-//   * `Equal(a, b)` is constant-time via xor-accumulate (matches
-//     `crypto/subtle.ConstantTimeCompare`).
+//   * No stored `outer` field. goish's `Hash::Sum` takes `&self`, so Sum
+//     cannot reset-and-write a shared outer the way Go does; it builds
+//     one from the stashed constructor instead. The FIPS 198-1 §6 state
+//     cache below makes that as cheap as Go's path — restoring the
+//     marshaled opad state costs one UnmarshalBinary either way.
+//   * `fips140.RecordNonApproved()` calls in Sum are dropped: goish's
+//     fips140 stub has no service indicator, so they are no-ops.
+//   * `marshalable` is a nominal `#[goish::interface]` rather than Go's
+//     structural interface, so the hashes that satisfy it are `impl`ed
+//     and registered explicitly (see `register_hmac_impls`). A hash
+//     without those impls takes the slow path, exactly as in Go.
 
 #![allow(non_snake_case)]
-#![allow(non_camel_case_types)] // Go names (errCloneUnsupported)
+#![allow(non_camel_case_types)] // Go names (errCloneUnsupported, marshalable)
 
 use crate::error;
 use crate::goslice::slice;
-use crate::hash::Hash;
+use crate::hash::{Cloner, Hash};
 use crate::io;
 use crate::types::{byte, int};
 
@@ -60,17 +40,79 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
+// go: sdk 1.25.5 crypto/internal/fips140/hmac/hmac.go:27-30 marshalable
+//
+//   type marshalable interface {
+//       MarshalBinary() ([]byte, error)
+//       UnmarshalBinary([]byte) error
+//   }
+/// The combination of `encoding.BinaryMarshaler` and
+/// `encoding.BinaryUnmarshaler`. Their method definitions are repeated
+/// here to avoid a dependency on the encoding package, as in Go.
+#[goish::interface]
+pub trait marshalable {
+    fn MarshalBinary(&self) -> (slice<byte>, error);
+    fn UnmarshalBinary(&mut self, b: slice<byte>) -> error;
+}
+
+// go: none — goish idiom: `marshalable` is nominal, so the hashes that
+// satisfy it structurally in Go are `impl`ed here. Go's own Sum
+// type-switches on `*sha256.Digest` / `*sha512.Digest` / `*sha3.Digest`,
+// so this file already depends on those packages upstream.
+impl marshalable for crate::crypto::internal::fips140::sha256::Digest {
+    // go: none — goish idiom: `marshalable` is nominal, so satisfying it
+    // is an explicit forwarder rather than Go's structural match.
+    fn MarshalBinary(&self) -> (slice<byte>, error) {
+        return crate::crypto::internal::fips140::sha256::Digest::MarshalBinary(self);
+    }
+    // go: none — goish idiom: `marshalable` is nominal, so satisfying it
+    // is an explicit forwarder rather than Go's structural match.
+    fn UnmarshalBinary(&mut self, b: slice<byte>) -> error {
+        return crate::crypto::internal::fips140::sha256::Digest::UnmarshalBinary(self, b);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: none — goish idiom: `#[goish::interface]` downcast registries are
+// filled at runtime, one entry per `impl Trait for Concrete`; Go's itabs
+// are built by the linker. Idempotent and cheap; called from `New`.
+/// Register the hashes that implement [`marshalable`] and
+/// `hash::Cloner`, so `New`'s HMAC can assert on its inner hash.
+fn register_hmac_impls() {
+    __goish_register_marshalable_impl::<crate::crypto::internal::fips140::sha256::Digest>();
+    crate::crypto::internal::fips140::sha256::register_sha256_impls();
+    // HMAC is itself a Cloner, so a `Box<dyn Hash>` holding one must be
+    // able to assert to `hash.Cloner` — Go gets this from the itab.
+    crate::hash::__goish_register_Cloner_impl::<HMAC>();
+}
+
 /// `hmac.HMAC` (fips140/hmac/hmac.go:32) — keyed-hash MAC.
 pub struct HMAC {
     // Go: opad, ipad []byte
+    // "opad and ipad may share underlying storage with HMAC clones."
     opad: Vec<byte>,
     ipad: Vec<byte>,
     // Go: inner hash.Hash (fed key⊕ipad on Reset)
-    inner: Box<dyn Hash>,
+    inner: Box<dyn Hash + Send + Sync>,
     // Goish-only: stashed constructor — we need it inside `Sum(&self)`
     // to build a fresh outer hasher (since Box<dyn Hash> isn't Clone
-    // and Sum's contract is non-mutating).
+    // and Sum's contract is non-mutating). Stands in for Go's `outer`.
     h_ctor: fn() -> Box<dyn Hash + Send + Sync>,
+    // Go: marshaled bool — "If marshaled is true, then opad and ipad do
+    // not contain a padded copy of the key, but rather the marshaled
+    // state of outer/inner after opad/ipad has been fed into it."
+    marshaled: bool,
     // Go: forHKDF, keyLen — stored to inform the service-indicator
     // decision in Sum. goish's fips140 stub records nothing, so they are
     // carried for shape and read by MarkAsUsedInKDF.
@@ -92,38 +134,66 @@ impl crate::errors::ErrorTrait for errCloneUnsupported {
             "crypto/hmac: hash does not support hash.Cloner",
         );
     }
-}
 
-impl errCloneUnsupported {
     // go: sdk 1.25.5 crypto/internal/fips140/hmac/hmac.go:139-141 errCloneUnsupported.Unwrap
     //
     //   func (e errCloneUnsupported) Unwrap() error { return errors.ErrUnsupported }
-    pub fn Unwrap(&self) -> error {
+    //
+    // Lives inside `impl ErrorTrait` rather than an inherent impl: that
+    // is the method `errors::Is` walks, so an inherent `Unwrap` would
+    // leave `errors::Is(err, ErrUnsupported)` false — the one thing this
+    // error exists to make true.
+    fn Unwrap(&self) -> error {
         return crate::errors::ErrUnsupported.into();
     }
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/hmac/hmac.go:145-165 HMAC.Clone
-//
-//   func (h *HMAC) Clone() (hash.Cloner, error)
-/// Clone the HMAC state. goish's `hash::Hash` has no `Cloner`
-/// counterpart, so this rebuilds from the stashed constructor and the
-/// stored pads — equivalent state, and it cannot fail the way Go's can
-/// (Go returns errCloneUnsupported when the inner hash is not a Cloner).
-pub fn Clone(h: &HMAC) -> (HMAC, error) {
-    let mut inner = (h.h_ctor)();
-    let _ = io::Writer::Write(&mut inner, slice::__from_vec(h.ipad.clone()));
-    return (
-        HMAC {
-            opad: h.opad.clone(),
-            ipad: h.ipad.clone(),
-            inner,
-            h_ctor: h.h_ctor,
-            forHKDF: h.forHKDF,
-            keyLen: h.keyLen,
-        },
-        crate::errors::nil,
-    );
+impl HMAC {
+    // go: sdk 1.25.5 crypto/internal/fips140/hmac/hmac.go:145-165 HMAC.Clone
+    //
+    //   func (h *HMAC) Clone() (hash.Cloner, error)
+    /// Implements `hash::Cloner` if the underlying hash does. Otherwise
+    /// it returns an error wrapping `errors::ErrUnsupported`.
+    pub fn Clone(&self) -> (Box<dyn Cloner + Send + Sync>, error) {
+        // Go: r := *h; ic, ok := h.inner.(hash.Cloner); if !ok { … }
+        //
+        // Composite interfaces have no nil sentinel, so the assertion is
+        // spelled `.As::<…>()` rather than `cast!` (goany.rs::AsExt).
+        let ic = match crate::goany::AsExt::As::<dyn Cloner + Send + Sync>(&*self.inner) {
+            Some(c) => c,
+            // Go: return nil, errCloneUnsupported{}
+            None => return (crate::nil.into(), errCloneUnsupported.into()),
+        };
+        // Go: r.inner, err = ic.Clone(); if err != nil { … }
+        //
+        // goish keeps no `outer` field, so Go's second assertion on
+        // h.outer is subsumed: the same constructor produced both, so an
+        // inner that clones implies an outer that clones.
+        let (inner, err) = ic.Clone();
+        if err != crate::errors::nil {
+            return (crate::nil.into(), errCloneUnsupported.into());
+        }
+        // Go: return &r, nil
+        return (
+            Box::new(HMAC {
+                opad: self.opad.clone(),
+                ipad: self.ipad.clone(),
+                inner,
+                h_ctor: self.h_ctor,
+                marshaled: self.marshaled,
+                forHKDF: self.forHKDF,
+                keyLen: self.keyLen,
+            }),
+            crate::errors::nil,
+        );
+    }
+}
+
+impl Cloner for HMAC {
+    // go: sdk 1.25.5 crypto/internal/fips140/hmac/hmac.go:145-165 HMAC.Clone
+    fn Clone(&self) -> (Box<dyn Cloner + Send + Sync>, error) {
+        return HMAC::Clone(self);
+    }
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/hmac/hmac.go:208-210 MarkAsUsedInKDF
@@ -150,6 +220,7 @@ pub fn MarkAsUsedInKDF(h: &mut HMAC) {
 /// hmac::New(crypto::md5::NewHash, key)
 /// ```
 pub fn New(h: fn() -> Box<dyn Hash + Send + Sync>, key: slice<byte>) -> HMAC {
+    register_hmac_impls();
     // Go: hm := &HMAC{keyLen: len(key)}
     let keyLen = key.Len();
     // Go: hm := &HMAC{keyLen: len(key)}
@@ -196,6 +267,7 @@ pub fn New(h: fn() -> Box<dyn Hash + Send + Sync>, key: slice<byte>) -> HMAC {
         ipad,
         inner,
         h_ctor: h,
+        marshaled: false,
         forHKDF: false,
         keyLen,
     };
@@ -208,6 +280,18 @@ impl io::Writer for HMAC {
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
         // Go: return h.inner.Write(p)
         io::Writer::Write(&mut *self.inner, p)
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
     }
 }
 
@@ -229,10 +313,30 @@ impl Hash for HMAC {
             raw[origLen..].to_vec()
         };
 
-        // Go: h.outer.Reset(); h.outer.Write(h.opad); h.outer.Write(in[origLen:])
-        // Build outer = H(opad ∥ inner_digest) using a fresh hasher.
+        // Go: if h.marshaled { h.outer.(marshalable).UnmarshalBinary(h.opad) }
+        //     else { h.outer.Reset(); h.outer.Write(h.opad) }
+        //
+        // goish keeps no `outer` field (Sum takes `&self`), so the outer
+        // hasher is built here. A fresh hasher is already in its reset
+        // state, which makes Go's two branches the same shape: restore
+        // the cached post-opad state, or feed opad.
         let mut outer = (self.h_ctor)();
-        let _ = io::Writer::Write(&mut *outer, slice::__from_vec(self.opad.clone()));
+        if self.marshaled {
+            match goish::cast!(&mut *outer, marshalable) {
+                Some(mo) => {
+                    let err = mo.UnmarshalBinary(slice::__from_vec(self.opad.clone()));
+                    // Go: panic(err) — Reset only sets marshaled after a
+                    // successful round-trip, so this cannot fire.
+                    if err != crate::errors::nil {
+                        panic!("crypto/hmac: outer UnmarshalBinary failed");
+                    }
+                }
+                None => panic!("crypto/hmac: marshaled state on a non-marshalable hash"),
+            }
+        } else {
+            let _ = io::Writer::Write(&mut *outer, slice::__from_vec(self.opad.clone()));
+        }
+        // Go: h.outer.Write(in[origLen:])
         let _ = io::Writer::Write(&mut *outer, slice::__from_vec(inner_digest));
         // Go: return h.outer.Sum(in[:origLen])
         let mut prefix: Vec<byte> = in1.__into_vec();
@@ -243,9 +347,78 @@ impl Hash for HMAC {
     // go: sdk 1.25.5 crypto/internal/fips140/hmac/hmac.go:82-131 HMAC.Reset
     // Go: HMAC.Reset (fips140/hmac/hmac.go:82)
     fn Reset(&mut self) {
+        // Go: if h.marshaled { h.inner.(marshalable).UnmarshalBinary(h.ipad); return }
+        if self.marshaled {
+            let ipad = self.ipad.clone();
+            match goish::cast!(&mut *self.inner, marshalable) {
+                Some(mi) => {
+                    let err = mi.UnmarshalBinary(slice::__from_vec(ipad));
+                    // Go: panic(err)
+                    if err != crate::errors::nil {
+                        panic!("crypto/hmac: inner UnmarshalBinary failed");
+                    }
+                }
+                None => panic!("crypto/hmac: marshaled state on a non-marshalable hash"),
+            }
+            return;
+        }
+
         // Go: h.inner.Reset(); h.inner.Write(h.ipad)
         self.inner.Reset();
         let _ = io::Writer::Write(&mut *self.inner, slice::__from_vec(self.ipad.clone()));
+
+        // If the underlying hash is marshalable, we can save some time by
+        // saving a copy of the hash state now, and restoring it on future
+        // calls to Reset and Sum instead of writing ipad/opad every time.
+        //
+        // We do this on Reset to avoid slowing down the common
+        // single-use case.
+        //
+        // This is allowed by FIPS 198-1, Section 6: "Conceptually, the
+        // intermediate results of the compression function on the B-byte
+        // blocks (K0 ⊕ ipad) and (K0 ⊕ opad) can be precomputed once, at
+        // the time of generation of the key K, or before its first use.
+        // These intermediate results can be stored and then used to
+        // initialize H each time that a message needs to be authenticated
+        // using the same key. [...] These stored intermediate values shall
+        // be treated and protected in the same manner as secret keys."
+
+        // Go: marshalableInner, innerOK := h.inner.(marshalable)
+        //     if !innerOK { return }
+        //     imarshal, err := marshalableInner.MarshalBinary()
+        //     if err != nil { return }
+        let (mi, innerOK) = goish::cast!(&*self.inner, marshalable);
+        if !innerOK {
+            return;
+        }
+        let (imarshal, err) = mi.MarshalBinary();
+        if err != crate::errors::nil {
+            return;
+        }
+
+        // Go: marshalableOuter, outerOK := h.outer.(marshalable)
+        //     if !outerOK { return }
+        //     h.outer.Reset(); h.outer.Write(h.opad)
+        //     omarshal, err := marshalableOuter.MarshalBinary()
+        //     if err != nil { return }
+        //
+        // goish builds the outer hasher on demand; a fresh one is already
+        // reset, so this is Go's `h.outer.Reset(); h.outer.Write(h.opad)`.
+        let mut outer = (self.h_ctor)();
+        let _ = io::Writer::Write(&mut *outer, slice::__from_vec(self.opad.clone()));
+        let (mo, outerOK) = goish::cast!(&*outer, marshalable);
+        if !outerOK {
+            return;
+        }
+        let (omarshal, err) = mo.MarshalBinary();
+        if err != crate::errors::nil {
+            return;
+        }
+
+        // Go: h.ipad = imarshal; h.opad = omarshal; h.marshaled = true
+        self.ipad = imarshal.__into_vec();
+        self.opad = omarshal.__into_vec();
+        self.marshaled = true;
     }
 
     // go: sdk 1.25.5 crypto/internal/fips140/hmac/hmac.go:79 HMAC.Size

@@ -875,3 +875,82 @@ path = "examples/http_stream_body_smoke.rs"
 name = "lookpath_conc_smoke"
 path = "examples/lookpath_conc_smoke.rs"
 
+[[example]]
+name = "aes_smoke"
+path = "examples/aes_smoke.rs"
+
+[[example]]
+name = "cipher_cbc_smoke"
+path = "examples/cipher_cbc_smoke.rs"
+
+[[example]]
+name = "cipher_cfb_smoke"
+path = "examples/cipher_cfb_smoke.rs"
+
+[[example]]
+name = "cipher_ctr_smoke"
+path = "examples/cipher_ctr_smoke.rs"
+
+[[example]]
+name = "cipher_iface_smoke"
+path = "examples/cipher_iface_smoke.rs"
+
+[[example]]
+name = "cipher_io_smoke"
+path = "examples/cipher_io_smoke.rs"
+
+[[example]]
+name = "cipher_ofb_smoke"
+path = "examples/cipher_ofb_smoke.rs"
+
+[[example]]
+name = "crypto_hash_smoke"
+path = "examples/crypto_hash_smoke.rs"
+
+[[example]]
+name = "crypto_kdf_smoke"
+path = "examples/crypto_kdf_smoke.rs"
+
+[[example]]
+name = "des_smoke"
+path = "examples/des_smoke.rs"
+
+[[example]]
+name = "hmac_smoke"
+path = "examples/hmac_smoke.rs"
+
+[[example]]
+name = "maphash_smoke"
+path = "examples/maphash_smoke.rs"
+
+[[example]]
+name = "md5_smoke"
+path = "examples/md5_smoke.rs"
+
+[[example]]
+name = "rc4_smoke"
+path = "examples/rc4_smoke.rs"
+
+[[example]]
+name = "sha1_smoke"
+path = "examples/sha1_smoke.rs"
+
+[[example]]
+name = "sha256_smoke"
+path = "examples/sha256_smoke.rs"
+
+[[example]]
+name = "sha3_smoke"
+path = "examples/sha3_smoke.rs"
+
+[[example]]
+name = "sha512_smoke"
+path = "examples/sha512_smoke.rs"
+
+[[example]]
+name = "subtle_smoke"
+path = "examples/subtle_smoke.rs"
+
+[[example]]
+name = "hash_marshal_smoke"
+path = "examples/hash_marshal_smoke.rs"

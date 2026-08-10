@@ -1240,8 +1240,48 @@ fn supertraits_are_trivial(supertraits: &str) -> bool {
     })
 }
 
+/// The path of the first non-marker supertrait, e.g. `io::Writer` for
+/// `pub trait Hash: io::Writer`. `None` for a trivial clause.
+///
+/// Composite traits do not re-declare the hidden helper methods (that
+/// would be ambiguous — see section 1), so the emitted `HasDynAny`
+/// impls must qualify the call with the supertrait that *does* declare
+/// them rather than with the trait's own name.
+fn first_composite_supertrait(supertraits: &str) -> Option<String> {
+    let s = supertraits.trim_start_matches(':').trim();
+    s.split('+')
+        .map(|x| x.trim())
+        .find(|x| {
+            !x.is_empty()
+                && !matches!(
+                    *x,
+                    "Send"
+                        | "Sync"
+                        | "::core::marker::Send"
+                        | "::core::marker::Sync"
+                        | "core::marker::Send"
+                        | "core::marker::Sync"
+                )
+        })
+        .map(|x| x.to_string())
+}
+
 #[proc_macro_attribute]
-pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn interface(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // `#[goish::interface(embeds)]` — the non-marker supertraits are
+    // themselves `#[goish::interface]` traits, i.e. this models Go's
+    // interface *embedding* (`type Cloner interface { Hash; … }`) rather
+    // than a Rust supertrait bound over a foreign trait.
+    //
+    // The difference is where the hidden helpers live. Embedding
+    // inherits them from the supertrait; re-declaring would make every
+    // `self.__is_nil_iface()` call ambiguous (E0034). A bound over a
+    // plain foreign trait has nothing to inherit, so the helpers are
+    // declared here as usual.
+    let embeds = attr
+        .to_string()
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .any(|t| t == "embeds");
     let parsed = parse_iface(item);
     let name = &parsed.name;
     let nil_name = format!("__Nil{}", name);
@@ -1251,6 +1291,17 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Send/Sync markers) or composite (includes foreign traits like
     // `metav1::Object`). Composite → skip nil sentinel sections.
     let composite = !supertraits_are_trivial(&parsed.supertraits);
+
+    // Which trait declares the hidden `__goish_as_dyn_any` helpers:
+    // this trait, unless it embeds an interface it inherits them from.
+    let helper_owner = if embeds {
+        first_composite_supertrait(&parsed.supertraits).unwrap_or_else(|| name.clone())
+    } else {
+        name.clone()
+    };
+
+    // Helpers are declared here except when embedding supplies them.
+    let declare_helpers = !(composite && embeds);
 
     // Compose the supertrait clause. We always require `Send + Sync`
     // (every Goish iface flows across goroutines); pre-existing
@@ -1296,29 +1347,53 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     for m in &parsed.methods {
         let _ = writeln!(out, "    {}", m.full_text);
     }
-    out.push_str("    #[doc(hidden)]\n");
-    out.push_str("    fn __is_nil_iface(&self) -> bool { false }\n");
-    // `__goish_as_dyn_any` exposes a `&dyn Any` view for trait-borrow
-    // downcast (TRAIT-BORROW-DOWNCAST). Default body returns None —
-    // forwarding impls and the nil sentinel inherit this. Concrete
-    // user impls override to `Some(self)` (the transpiler emits the
-    // override at every `impl Trait for Concrete` site). Object-safe
-    // since the method has no generic params.
-    out.push_str("    #[doc(hidden)]\n");
-    out.push_str(
-        "    fn __goish_as_dyn_any(&self) \
-         -> ::core::option::Option<&(dyn ::core::any::Any \
-         + ::core::marker::Send + ::core::marker::Sync)> { ::core::option::Option::None }\n",
-    );
-    // `__goish_as_dyn_any_mut` — the `&mut` mirror, for `cast!(&mut x, J)`.
-    // Default None; concrete impls override to `Some(self)` alongside the
-    // `__goish_as_dyn_any` override (emitted at every `impl Trait for C` site).
-    out.push_str("    #[doc(hidden)]\n");
-    out.push_str(
-        "    fn __goish_as_dyn_any_mut(&mut self) \
-         -> ::core::option::Option<&mut (dyn ::core::any::Any \
-         + ::core::marker::Send + ::core::marker::Sync)> { ::core::option::Option::None }\n",
-    );
+    // The three hidden helpers below are declared here in every case
+    // EXCEPT `#[goish::interface(embeds)]` on a composite trait, where
+    // the supertrait already carries them. Re-declaring there would
+    // make every `self.__is_nil_iface()` / `self.__goish_as_dyn_any()`
+    // call on `dyn Composite` ambiguous (E0034, "multiple applicable
+    // items in scope").
+    //
+    // Inheriting is what lets Go's embedded interfaces be modelled as
+    // real Rust supertraits — `hash.Cloner` embeds `hash.Hash` embeds
+    // `io.Writer`, and goish spells that `Cloner: Hash: io::Writer`.
+    // A concrete type that overrides `__goish_as_dyn_any` once (in its
+    // `impl io::Writer`) is then castable through every interface in
+    // the chain.
+    //
+    // `embeds` is opt-in because the macro cannot tell an embedded
+    // interface from a bound over a plain foreign trait by looking at
+    // the supertrait text — and the latter (see
+    // `examples/interface_auto_composite.rs`) has nothing to inherit.
+    // Passing `embeds` when the supertrait is not a goish interface
+    // yields a clear "no method named `__is_nil_iface`" error from the
+    // impls emitted below; drop the flag, or re-declare the
+    // supertrait's methods instead (the io/fs.rs pattern).
+    if declare_helpers {
+        out.push_str("    #[doc(hidden)]\n");
+        out.push_str("    fn __is_nil_iface(&self) -> bool { false }\n");
+        // `__goish_as_dyn_any` exposes a `&dyn Any` view for trait-borrow
+        // downcast (TRAIT-BORROW-DOWNCAST). Default body returns None —
+        // forwarding impls and the nil sentinel inherit this. Concrete
+        // user impls override to `Some(self)` (the transpiler emits the
+        // override at every `impl Trait for Concrete` site). Object-safe
+        // since the method has no generic params.
+        out.push_str("    #[doc(hidden)]\n");
+        out.push_str(
+            "    fn __goish_as_dyn_any(&self) \
+             -> ::core::option::Option<&(dyn ::core::any::Any \
+             + ::core::marker::Send + ::core::marker::Sync)> { ::core::option::Option::None }\n",
+        );
+        // `__goish_as_dyn_any_mut` — the `&mut` mirror, for `cast!(&mut x, J)`.
+        // Default None; concrete impls override to `Some(self)` alongside the
+        // `__goish_as_dyn_any` override (emitted at every `impl Trait for C` site).
+        out.push_str("    #[doc(hidden)]\n");
+        out.push_str(
+            "    fn __goish_as_dyn_any_mut(&mut self) \
+             -> ::core::option::Option<&mut (dyn ::core::any::Any \
+             + ::core::marker::Send + ::core::marker::Sync)> { ::core::option::Option::None }\n",
+        );
+    }
     out.push_str("}\n\n");
 
     // Emit __HasNilSentinel impl so cast!() can const-assert on the
@@ -1756,6 +1831,32 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Without this impl, `dyn Trait + Send + Sync: !HasDynAny`,
     // because the blanket on Sized + 'static doesn't reach unsized
     // dyn types. Path: TRAIT-BORROW-DOWNCAST.
+    //
+    // Composite traits don't declare the helper themselves (section 1),
+    // so they upcast to their first non-marker supertrait's object type
+    // and delegate to *its* HasDynAny impl. The chain terminates at the
+    // trivial trait that does declare the method — `Cloner` → `Hash` →
+    // `io::Writer`. Fully-qualified through HasDynAny on a different
+    // Self type, so there is no ambiguity and no self-recursion.
+    let (as_any_body, as_any_mut_body) = if composite && embeds {
+        (
+            format!(
+                "        let __up: &(dyn {helper_owner} + ::core::marker::Send \
+                 + ::core::marker::Sync) = self;\n        \
+                 ::goish::any::HasDynAny::__goish_as_dyn_any(__up)"
+            ),
+            format!(
+                "        let __up: &mut (dyn {helper_owner} + ::core::marker::Send \
+                 + ::core::marker::Sync) = self;\n        \
+                 ::goish::any::HasDynAnyMut::__goish_as_dyn_any_mut(__up)"
+            ),
+        )
+    } else {
+        (
+            format!("        {name}::__goish_as_dyn_any(self)"),
+            format!("        {name}::__goish_as_dyn_any_mut(self)"),
+        )
+    };
     let _ = writeln!(
         out,
         "impl ::goish::any::HasDynAny \
@@ -1766,10 +1867,7 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
          -> ::core::option::Option<&(dyn ::core::any::Any + \
          ::core::marker::Send + ::core::marker::Sync)> {\n",
     );
-    let _ = writeln!(
-        out,
-        "        {name}::__goish_as_dyn_any(self)"
-    );
+    let _ = writeln!(out, "{as_any_body}");
     out.push_str("    }\n}\n\n");
 
     // Mutable mirror — HasDynAnyMut for `dyn Trait + Send + Sync`.
@@ -1785,7 +1883,7 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
     );
     let _ = writeln!(
         out,
-        "        {name}::__goish_as_dyn_any_mut(self)"
+        "{as_any_mut_body}"
     );
     out.push_str("    }\n}\n\n");
 
@@ -1807,6 +1905,13 @@ pub fn interface(_attr: TokenStream, item: TokenStream) -> TokenStream {
         let _ = writeln!(out, "        static __GOISH_NIL: {nil_name} = {nil_name};");
         out.push_str("        &__GOISH_NIL\n");
         out.push_str("    }\n}\n\n");
+    }
+
+    // Debug aid: `GOISH_IFACE_DUMP=<dir>` writes each expansion to
+    // `<dir>/<Trait>.rs` so the generated impls can be read directly
+    // when a compile error points only at the attribute.
+    if let Ok(dir) = ::std::env::var("GOISH_IFACE_DUMP") {
+        let _ = ::std::fs::write(format!("{dir}/{name}.rs"), &out);
     }
 
     out.parse()

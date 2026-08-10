@@ -83,6 +83,7 @@ pub mod gonilable_ref;
 pub mod nilval;
 pub mod hash;
 pub mod html;
+pub mod internal;
 pub mod maps;
 pub mod io;
 pub mod iter;
