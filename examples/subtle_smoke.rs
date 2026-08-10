@@ -11,8 +11,11 @@ extern crate goish;
 use goish::fmt;
 use goish::crypto::subtle::{
     ConstantTimeByteEq, ConstantTimeCompare, ConstantTimeCopy, ConstantTimeEq,
-    ConstantTimeLessOrEq, ConstantTimeLessOrEqBytes, ConstantTimeSelect, XORBytes,
+    ConstantTimeLessOrEq, ConstantTimeSelect, XORBytes,
 };
+// Go keeps ConstantTimeLessOrEqBytes in the FIPS module only; crypto/subtle
+// does not re-export it (crypto/internal/fips140/subtle/constant_time.go:34).
+use goish::crypto::internal::fips140::subtle::ConstantTimeLessOrEqBytes;
 use goish::goslice::slice;
 use goish::types::byte;
 use goish::{convert, syscall};
