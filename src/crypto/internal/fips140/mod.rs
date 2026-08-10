@@ -40,6 +40,7 @@ pub mod rsa;
 pub mod subtle;
 pub mod hmac;
 pub mod sha256;
+pub mod sha3;
 pub mod sha512;
 
 /// `fips140.Enabled` — whether FIPS 140-3 mode is active. Always false

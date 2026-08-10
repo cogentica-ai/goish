@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **513/1507 = 34.0%**, 444 anchors, **21 packages fully verified**
+Current: **552/1507 = 36.6%**, 566 anchors, **23 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -27,11 +27,13 @@ Current: **513/1507 = 34.0%**, 444 anchors, **21 packages fully verified**
 | `crypto/internal/fips140/aes` | 37/45 | 11 → 9 |
 | `crypto/aes` | 2/2 | 1 → 2 |
 | `crypto/internal/fips140/alias` | 2/2 | 1 → 2 |
+| `crypto/internal/fips140/sha3` | 33/33 | 7 → 6 |
+| `crypto/sha3` | 25/27 | 1 → 2 |
 | `crypto/md5` | 15/15 | 4 → 4 |
 | `crypto/sha1` | 17/19 | 5 → 4 |
 | `crypto/internal/fips140deps/byteorder` | 11/11 | 1 → 2 |
 | `internal/byteorder` (outside crypto/) | 18/18 | 1 → 2 |
-| **total** | **240** | |
+| **total** | **298** | |
 
 The only functions missing from that table are assembly entry points:
 `blockAVX2`/`blockSHANI` in fips140/sha256 and in crypto/sha1,
@@ -236,12 +238,12 @@ Two known blockers rather than volume:
 - **`crypto/internal/fips140cache`** needs `weak.Pointer` and
   `runtime.AddCleanup`. goish has neither, and adding a weak-reference
   map is a runtime project of its own.
-- **`crypto/sha3`** cannot gain `MarshalBinary`/`Clone` until it is
-  extracted to `fips140/sha3`: goish keeps Keccak state as `[u64; 25]`
-  lanes, Go keeps `[200]byte` with inline XOR, so a marshaled state built
-  from goish's shape would be a format Go never produces. Porting the
-  marshal surface first would be inventing a wire format — the exact
-  failure the anchors exist to catch. Extraction is the prerequisite.
+- ~~`crypto/sha3` cannot gain `MarshalBinary`/`Clone` until it is
+  extracted~~ — **done**. The premise was also wrong: goish already
+  stored the sponge as `[200]byte`, matching Go; only the *permutation*
+  converts to lanes. `fips140/sha3` is 33/33 and `crypto/sha3` is 25/27
+  (the two remaining are `init`, which needs a crypto.Hash registry, and
+  `fips140hash_sha3Unwrap`, a `//go:linkname` target).
 
 ## Work order
 

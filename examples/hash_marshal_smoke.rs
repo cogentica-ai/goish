@@ -10,7 +10,7 @@
 
 #![no_std]
 #![no_main]
-#![allow(non_snake_case)]
+#![allow(non_snake_case, non_camel_case_types)]
 
 extern crate goish;
 
@@ -30,6 +30,49 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 static mut FAILED: bool = false;
+
+// A hash with no `hash::Cloner` impl, so `HMAC.Clone` must report
+// errCloneUnsupported. Every hash in goish's crypto tree now implements
+// Cloner (that is what this file exists to verify), so the negative case
+// needs a type that will never acquire one rather than whichever stdlib
+// hash happens to lag behind.
+struct uncloneable {
+    n: goish::types::int,
+}
+
+impl io::Writer for uncloneable {
+    fn Write(&mut self, p: slice<byte>) -> (goish::types::int, goish::error) {
+        self.n += p.Len();
+        return (p.Len(), goish::errors::nil);
+    }
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl Hash for uncloneable {
+    fn Sum(&self, b: slice<byte>) -> slice<byte> {
+        let mut v: Vec<byte> = b.__into_vec();
+        v.push((self.n & 0xff) as byte);
+        return slice::__from_vec(v);
+    }
+    fn Reset(&mut self) {
+        self.n = 0;
+    }
+    fn Size(&self) -> goish::types::int {
+        return 1;
+    }
+    fn BlockSize(&self) -> goish::types::int {
+        return 64;
+    }
+}
+
+fn newUncloneable() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
+    return alloc::boxed::Box::new(uncloneable { n: 0 });
+}
 
 fn check(name: &str, got: goish::string, want: goish::string) {
     if got == want {
@@ -169,10 +212,8 @@ fn main() {
     check("hmac clone is independent", hexsum(&src), goish::string::from(rfc4231_tc2));
 
     // Cloning a hash with no Cloner impl must report ErrUnsupported
-    // rather than panicking or silently producing a broken MAC. sha3 is
-    // the remaining hash with no Cloner port — sha1 used to fill this
-    // role and no longer can, which is itself the point of the check.
-    let mut nocloner = hmac::New(goish::crypto::sha3::NewHash256, key.clone());
+    // rather than panicking or silently producing a broken MAC.
+    let mut nocloner = hmac::New(newUncloneable, key.clone());
     let _ = io::Writer::Write(&mut nocloner, msg.clone());
     let (_, err) = Cloner::Clone(&nocloner);
     check(
@@ -190,10 +231,18 @@ fn main() {
     Hash::Reset(&mut nocloner);
     let _ = io::Writer::Write(&mut nocloner, msg.clone());
     check(
-        "sha3-hmac slow path survives Reset",
+        "non-marshalable hash survives Reset (slow path)",
         fmt::Sprintf!("%d", hexsum(&nocloner).Len()),
-        goish::string::from("64"),
+        goish::string::from("2"),
     );
+
+    // HMAC-SHA3 now takes the marshaled path too.
+    let mut sha3mac = hmac::New(goish::crypto::sha3::NewHash256, key.clone());
+    let _ = io::Writer::Write(&mut sha3mac, msg.clone());
+    let first = hexsum(&sha3mac);
+    Hash::Reset(&mut sha3mac);
+    let _ = io::Writer::Write(&mut sha3mac, msg.clone());
+    check("hmac-sha3 after Reset (marshaled path)", hexsum(&sha3mac), first);
 
     // ── md5 / sha1: same marshal surface, now on the fast path ────────
     let mut md5mac = hmac::New(goish::crypto::md5::NewHash, key.clone());
