@@ -871,3 +871,7 @@ path = "examples/term_pty_smoke.rs"
 [[example]]
 name = "http_stream_body_smoke"
 path = "examples/http_stream_body_smoke.rs"
+[[example]]
+name = "lookpath_conc_smoke"
+path = "examples/lookpath_conc_smoke.rs"
+
