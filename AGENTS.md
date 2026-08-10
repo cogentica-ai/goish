@@ -313,3 +313,45 @@ forwarding blankets.
 
 The worked example is `net/http`'s ResponseWriter / Flusher /
 Hijacker / Pusher family in `src/net/http/server.rs`.
+
+### 9a. Embedded interfaces - `#[goish::interface(embeds)]`
+
+Go's `type Cloner interface { Hash; Clone() … }` embeds another
+interface. Spell that as a real Rust supertrait **plus the `embeds`
+flag**:
+
+```rust
+#[goish::interface(embeds)]
+pub trait Cloner: Hash { … }        // Hash is itself an interface
+```
+
+Without `embeds` the macro re-declares its hidden helpers
+(`__is_nil_iface`, `__goish_as_dyn_any`) on both traits, and every call
+on `dyn Cloner` is E0034 "multiple applicable items in scope". With it,
+the helpers are inherited and the downcast impls delegate up the chain
+(`Cloner` -> `Hash` -> `io::Writer`), so a concrete type overriding
+`__goish_as_dyn_any` **once** - in its innermost `impl` - is castable
+through every interface above it.
+
+Do **not** pass `embeds` when the supertrait is a plain Rust trait: there
+is nothing to inherit. That case keeps the old behaviour, pinned by
+`examples/interface_auto_composite.rs`.
+
+Two further constraints:
+
+- A composite trait (any non-marker supertrait, `embeds` or not) has
+  **no nil sentinel**, so `cast!` rejects it at compile time. Use
+  `carrier.As::<dyn Iface + Send + Sync>()` (`goany.rs::AsExt`). If the
+  interface needs a nil value, hand-write the sentinel plus
+  `impl From<Nil> for Box<dyn Iface + Send + Sync>` - see
+  `hash::__NilCloner`.
+- **Two** interface supertraits are still ambiguous (inheritance picks
+  one owner). `hash::XOF: io::Writer + io::Reader` is a plain trait for
+  that reason.
+
+Debugging: a compile error inside generated code points only at the
+attribute. `GOISH_IFACE_DUMP=<dir> cargo check --lib` writes every
+expansion to `<dir>/<Trait>.rs`.
+
+The worked example is `hash::Hash` / `hash::Cloner` in `src/hash/hash.rs`,
+consumed by `crypto/internal/fips140/hmac`.
