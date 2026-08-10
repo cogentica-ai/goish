@@ -154,10 +154,7 @@ pub(crate) const sBoxes: [[[byte; 16]; 4]; 8] = [
 // circular-shift count for the key schedule.
 pub(crate) const ksRotations: [byte; 16] = [1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1];
 
-// ─── block.go: feistelBox + lazy initializer ────────────────────────
 
-// Go: block.go:72 — `var feistelBox [8][64]uint32`.
-// Go: block.go:74 — `var feistelBoxOnce sync.Once`.
 //
 // goish swap: a `SpinLock<Option<Box<[[u32; 64]; 8]>>>` materialised on
 // first call to `generateSubkeys`. Boxed because the table is 2 KiB —

@@ -9,6 +9,7 @@
 
 mod block;
 mod cipher;
+#[path = "const.rs"] // `const` is a Rust keyword; the FILE keeps Go's name
 mod konst;
 
 pub use cipher::{BlockSize, Cipher, KeySizeError, NewCipher, NewTripleDESCipher, TripleDESCipher};

@@ -4,8 +4,10 @@ Goal: every in-scope `crypto/...` package from the Go 1.25 SDK ported
 function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
-Baseline snapshot (2026-08-10): **391/1575 functions = 24.8%**, 0 provenance
-anchors. Regenerate any time:
+Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
+Current: **404/1575 = 25.7%**, 71 anchors, **4 packages fully verified**
+(`rc4`, `subtle`, `des`, `internal/fips140/subtle` — each
+`goishlint --enable-goish017 --enable-goish018` exit 0). Regenerate:
 
 ```bash
 export GOROOT=$(go env GOROOT)          # or point at a Go 1.25 checkout
@@ -13,6 +15,31 @@ python3 scripts/port_coverage.py crypto            # table
 python3 scripts/port_coverage.py crypto --md       # markdown (this doc)
 python3 scripts/port_coverage.py crypto --pkg tls  # per-package missing list
 ```
+
+## Per-package conversion recipe (proven on rc4, subtle, des)
+
+1. `git mv <pkg>/mod.rs <pkg>/<gofile>.rs`, then split along Go's file
+   boundaries — one `.rs` per `.go`, same stem. A Rust keyword filename
+   (`const.go`) keeps the Go name via `#[path = "const.rs"] mod konst;`.
+2. New `mod.rs`: `// go: package crypto/<pkg>` plus `mod`/`pub use` only.
+3. Head each file with `// go: file crypto/<pkg>/<f>.go decls: <funcs>` —
+   **functions only**; naming a type there reads to GOISH017 as a dropped
+   function.
+4. `scripts/anchor_port.py src/crypto/<pkg>/<f>.rs` rewrites legacy
+   `// Go: f.go:77` markers into real anchors with the Go line span.
+   Goish-only helpers get `// go: none — <reason>` and a manifest entry.
+5. Run `goishlint --enable-goish017 --enable-goish018 src/crypto/<pkg>/`
+   until it exits 0, then the package smoke, then
+   `cargo build --examples` (zero diagnostics).
+
+Two traps this surfaced repeatedly:
+
+* **An anchor citing another Go file drags that whole file's contents in.**
+  GOISH018 then demands every func of `block.go` inside `cipher.rs`. Keep
+  each file's anchors pointing at its own `.go`.
+* **A deliberate rename needs `// goishlint:ignore GOISH021 — <reason>`.**
+  `desCipher` → `Cipher` (Go returns it behind `cipher.Block`, which goish
+  cannot express for a value type) is a rename, not a drop.
 
 ## How "100%" is measured
 
