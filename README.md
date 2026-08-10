@@ -148,11 +148,11 @@ fn get(url: string) -> (int, string, string) {
     }
     let (body, _) = io::ReadAll(&mut resp.Body);
     let _ = io::Closer::Close(&mut resp.Body);
-    (
+    return (
         resp.StatusCode,
         string(body),
         resp.Header.Get("Content-Type"),
-    )
+    );
 }
 ```
 
