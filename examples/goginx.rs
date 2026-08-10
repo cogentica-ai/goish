@@ -176,7 +176,7 @@ fn tokenize(src: string) -> slice<string> {
         }
         toks = append!(toks, string(word));
     }
-    toks
+    return toks;
 }
 
 /// Parse directives until end-of-tokens or a closing `}`.
@@ -213,7 +213,7 @@ fn parseBlock(toks: &slice<string>, pos: &mut int) -> slice<Directive> {
             }
         );
     }
-    out
+    return out;
 }
 
 /// Collect `server` and `upstream` blocks, descending into `http {}`.
@@ -247,7 +247,7 @@ fn collectHttp(dirs: &slice<Directive>) -> (slice<ServerConf>, slice<Upstream>) 
             servers = append!(servers, buildServer(&d.Block));
         }
     }
-    (servers, ups)
+    return (servers, ups);
 }
 
 fn buildServer(block: &slice<Directive>) -> ServerConf {
@@ -283,7 +283,7 @@ fn buildServer(block: &slice<Directive>) -> ServerConf {
             sc.Locations = append!(sc.Locations.clone(), buildLocation(&d.Args[0], &d.Block));
         }
     }
-    sc
+    return sc;
 }
 
 fn buildLocation(prefix: &string, block: &slice<Directive>) -> Location {
@@ -305,7 +305,7 @@ fn buildLocation(prefix: &string, block: &slice<Directive>) -> Location {
             loc.Autoindex = d.Args[0] == "on";
         }
     }
-    loc
+    return loc;
 }
 
 fn mimeTable() -> map<string, string> {
@@ -325,7 +325,7 @@ fn mimeTable() -> map<string, string> {
     m.Set("wasm", "application/wasm");
     m.Set("xml", "application/xml");
     m.Set("pdf", "application/pdf");
-    m
+    return m;
 }
 
 fn loadConfig(src: string) -> Config {
@@ -333,12 +333,12 @@ fn loadConfig(src: string) -> Config {
     let mut pos: int = 0;
     let dirs = parseBlock(&toks, &mut pos);
     let (servers, ups) = collectHttp(&dirs);
-    Config {
+    return Config {
         Servers: servers,
         Upstreams: ups,
         Mime: mimeTable(),
         rr: Mutex::new(make!(map[string]int)),
-    }
+    };
 }
 
 // ─── request routing ────────────────────────────────────────────────
@@ -355,7 +355,7 @@ fn pickServer(cfg: &Config, idxs: &slice<int>, host: &string) -> int {
             }
         }
     }
-    idxs[0]
+    return idxs[0];
 }
 
 /// nginx prefix-location matching: the longest matching prefix wins,
@@ -369,7 +369,7 @@ fn matchLocation(sc: &ServerConf, path: &string) -> (int, bool) {
             bestLen = loc.Prefix.Len();
         }
     }
-    (best, best >= 0)
+    return (best, best >= 0);
 }
 
 /// Per-request entry: route, serve, access-log. Returns nothing; the
@@ -444,7 +444,7 @@ fn serveStatic(
         }
         return errorPage(w, 403);
     }
-    sendFile(cfg, w, fpath)
+    return sendFile(cfg, w, fpath);
 }
 
 fn sendFile(
@@ -461,7 +461,7 @@ fn sendFile(
     w.WriteHeader(200);
     let n = len(&data);
     let _ = w.Write(data);
-    (200, n)
+    return (200, n);
 }
 
 fn mimeOf(cfg: &Config, path: &string) -> string {
@@ -476,7 +476,7 @@ fn mimeOf(cfg: &Config, path: &string) -> string {
     if ok {
         return mt;
     }
-    string("application/octet-stream")
+    return string("application/octet-stream");
 }
 
 /// `autoindex on;` — a minimal nginx-style directory listing.
@@ -509,7 +509,7 @@ fn sendListing(
     w.Header().Set("Server", "goginx/0.1");
     w.WriteHeader(200);
     let _ = w.Write(body);
-    (200, n)
+    return (200, n);
 }
 
 /// nginx-style error / redirect page.
@@ -527,13 +527,13 @@ fn errorPage(w: &(dyn ResponseWriter + Send + Sync + 'static), code: int) -> (in
     w.Header().Set("Server", "goginx/0.1");
     w.WriteHeader(code);
     let _ = w.Write(body);
-    (code, n)
+    return (code, n);
 }
 
 // ─── reverse proxy ──────────────────────────────────────────────────
 
 fn isHopHeader(name: &string) -> bool {
-    strings::EqualFold(name.clone(), "Connection")
+    return strings::EqualFold(name.clone(), "Connection")
         || strings::EqualFold(name.clone(), "Proxy-Connection")
         || strings::EqualFold(name.clone(), "Keep-Alive")
         || strings::EqualFold(name.clone(), "Proxy-Authenticate")
@@ -541,7 +541,7 @@ fn isHopHeader(name: &string) -> bool {
         || strings::EqualFold(name.clone(), "Te")
         || strings::EqualFold(name.clone(), "Trailer")
         || strings::EqualFold(name.clone(), "Transfer-Encoding")
-        || strings::EqualFold(name.clone(), "Upgrade")
+        || strings::EqualFold(name.clone(), "Upgrade");
 }
 
 /// `proxy_pass` — forward the request to an upstream pool (round-
@@ -640,7 +640,7 @@ fn proxyTo(
         let _ = w.Write(body);
         return (resp.StatusCode, nb);
     }
-    errorPage(w, 502)
+    return errorPage(w, 502);
 }
 
 // ─── listeners ──────────────────────────────────────────────────────
@@ -692,7 +692,7 @@ fn groupListens(cfg: &Config) -> slice<ListenGroup> {
             );
         }
     }
-    groups
+    return groups;
 }
 
 /// nginx `listen ... reuseport` — bind with SO_REUSEPORT set before
@@ -717,7 +717,7 @@ fn listenReusePort(addr: string) -> (net::Listener, error) {
             },
         )),
     };
-    lc.Listen(context::Background(), "tcp", addr)
+    return lc.Listen(context::Background(), "tcp", addr);
 }
 
 /// Bind every listen group and start its serve loop. Returns the
@@ -805,7 +805,7 @@ fn startServers(cfg: &Arc<Config>) -> (slice<string>, slice<Arc<http::Server>>, 
             fmt::Printf!("goginx: reuseport x%d on %s\n", workers, real_addr);
         }
     }
-    (bounds, servers, nil.into())
+    return (bounds, servers, nil.into());
 }
 
 /// `nginx -s quit` equivalent: park a goroutine on SIGTERM/SIGINT,
@@ -889,11 +889,11 @@ fn get(url: string) -> (int, string, string) {
     }
     let (body, _) = io::ReadAll(&mut resp.Body);
     let _ = io::Closer::Close(&mut resp.Body);
-    (
+    return (
         resp.StatusCode,
         string(body),
         resp.Header.Get("Content-Type"),
-    )
+    );
 }
 
 /// One raw HTTP/1.1 request (Connection: close) over plain TCP —
@@ -920,7 +920,7 @@ fn rawRoundtrip(addr: string, req: string) -> (int, string) {
     }
     let _ = conn.Close();
     let resp = string(out);
-    (parseStatus(&resp), resp)
+    return (parseStatus(&resp), resp);
 }
 
 /// Same, but over TLS with certificate verification disabled (the
@@ -951,7 +951,7 @@ fn tlsRoundtrip(addr: string, req: string) -> (int, string) {
     }
     let _ = conn.Close();
     let resp = string(out);
-    (parseStatus(&resp), resp)
+    return (parseStatus(&resp), resp);
 }
 
 fn parseStatus(resp: &string) -> int {
@@ -965,7 +965,7 @@ fn parseStatus(resp: &string) -> int {
     if err != nil {
         return -1;
     }
-    n
+    return n;
 }
 
 /// An upstream app server that echoes which backend it is plus the
@@ -994,7 +994,7 @@ fn startBackend(name: &'static str) -> string {
     go!(move || {
         let _ = srv.Serve(ln);
     });
-    addr
+    return addr;
 }
 
 /// An address that is guaranteed dead: bind, read the port, close.
@@ -1005,7 +1005,7 @@ fn deadAddr() -> string {
     }
     let addr = fmt::Sprintf!("127.0.0.1:%d", ln.Addr().Port);
     let _ = ln.Close();
-    addr
+    return addr;
 }
 
 // Self-signed RSA-2048 localhost certificate (100y), same pair the

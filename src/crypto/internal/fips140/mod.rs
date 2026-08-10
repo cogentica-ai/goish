@@ -35,6 +35,7 @@ pub mod check;
 pub mod ed25519;
 pub mod edwards25519;
 pub mod rsa;
+pub mod subtle;
 
 /// `fips140.Enabled` — whether FIPS 140-3 mode is active. Always false
 /// in goish (no validated module).

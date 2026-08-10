@@ -471,7 +471,7 @@ pub fn setup_main_g0() {
     use crate::runtime::sched::stack::parse_main_stack_bounds;
 
     let mut buf = [0u8; 16 * 1024];
-    let (base, size) = match parse_main_stack_bounds(&mut buf) {
+    let (base, mut size) = match parse_main_stack_bounds(&mut buf) {
         Some(pair) => pair,
         None => {
             // Heuristic fallback: 8 MiB stack with current rsp inside.
@@ -490,6 +490,26 @@ pub fn setup_main_g0() {
             (base as *mut u8, FALLBACK_STACK)
         }
     };
+
+    // The kernel writes argv/envp/auxv — pointer arrays AND their
+    // strings — into the TOP of the main thread's [stack] mapping; the
+    // process entry rsp sits just below them (argc at [rsp], argv at
+    // rsp+8, per the ELF stack layout). `new_g0` stamps gobuf.rsp =
+    // base+size, so adopting the full mapping would point every mcall
+    // at the environment block and scheduler frames would shred it
+    // downward. That was the exec::LookPath bug: after the main M's
+    // first deep scheduler excursion, a run-dependent tail of the env
+    // strings (PATH included) was destroyed for the rest of the
+    // process. Cap the adopted region at entry rsp (= argv - 8).
+    if let Some(raw) = crate::runtime::args::get() {
+        if !raw.argv.is_null() {
+            let entry_rsp = ((raw.argv as usize).saturating_sub(8)) & !0xf;
+            let b = base as usize;
+            if entry_rsp > b && entry_rsp < b + size {
+                size = entry_rsp - b;
+            }
+        }
+    }
 
     let g0_box = alloc::boxed::Box::new(G::new_g0(base, size));
     let g0_ptr: *mut G = alloc::boxed::Box::leak(g0_box) as *mut _;
