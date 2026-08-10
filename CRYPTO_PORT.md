@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **513/1561 = 32.9%**, 444 anchors, **21 packages fully verified**
+Current: **513/1507 = 34.0%**, 444 anchors, **21 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -80,15 +80,32 @@ Two traps this surfaced repeatedly:
   `desCipher` → `Cipher` (Go returns it behind `cipher.Block`, which goish
   cannot express for a value type) is a rename, not a drop.
 
-### Denominator fix: `//go:build ignore` files
+### Denominator fixes
+
+Two classes of file were being counted that `go build` never compiles
+into a linux/amd64 library. Neither change ported anything; both make the
+percentage mean what it claims.
+
+**`//go:build ignore` files.**
 
 `port_coverage.py` was counting standalone generators — md5's `gen.go`,
 nistec's `generate.go`, tls's `generate_cert.go` and four others. They are
 `package main` programs behind `//go:build ignore`, which `go build` never
 compiles into the package, so their funcs (`dup`, `idx`, `main`,
 `relabel`, `rotate`, `seq` …) inflated the denominator with code that is
-not part of the library. Skipped now, same rationale as `_asm/`. The
-total went 1575 → 1561; nothing "became ported" as a result.
+not part of the library. Skipped now, same rationale as `_asm/`
+(1575 → 1561).
+
+**Foreign-GOOS-only files.** `crypto/x509/internal/macos` is
+`//go:build darwin` in every file — 54 functions of CoreFoundation and
+Security.framework bridging that a linux target can never use. It was
+already listed as out of scope in prose; the script now agrees
+(1561 → 1507). The rule is deliberately narrow: it fires only when
+*every* identifier on the build line is a GOOS. A constraint mentioning
+GOARCH or `purego` — `(!amd64 && !s390x) || purego` — is left alone,
+because which side of that goish implements is a porting decision, not a
+platform fact, and dropping those would shrink the denominator in our
+own favour.
 
 ## How "100%" is measured
 
@@ -197,6 +214,34 @@ not a port of anything. The worst case:
   slice (enough for a TLS 1.3 client/server handshake), with the rest absent.
   Both are honest partial ports, not invented — but the anchors will have to say
   so per function.
+
+## What 100% actually requires (2026-08-10)
+
+1048 functions remain. They are not uniform, and the ordering below is by
+what unblocks what, not by size:
+
+| tranche | fns | notes |
+|---|--:|---|
+| **assembly** | ~44 | `*Asm` in fips140/aes, `blockAVX2`/`blockSHANI` in sha256/sha512/sha1. Every generic path they replace is ported and pinned to NIST/RFC vectors, and each `*_noasm.rs` is the exact slot. This is the performance requirement. |
+| **fips140 extractions** | ~120 | sha3 (33), ecdsa (30), ecdh (13), drbg (8), tls13 (17), hkdf/pbkdf2/tls12 (9). Same template as hmac/sha256/sha512/aes. |
+| **gcm** | 41 | `fips140/aes/gcm` — every TLS record goes through it. Depends on the aes port, which is now done. |
+| **nistec + mlkem** | 205 | `nistec` (75) + `fiat` (61) + `mlkem` (69). Mostly generated field arithmetic; large but mechanical. |
+| **ecdsa/elliptic/ecdh** | 86 | `crypto/ecdsa` needs a *rewrite*, not patching — all 31 existing goish functions are invented (`VerifyP256`, `decode_x509_ec_p256_pubkey`) and correspond to nothing in Go. |
+| **x509** | 150 | |
+| **tls** | 259 | The single largest. goish's 37 are a real port of the TLS 1.3 handshake path; the rest is absent. |
+| **support plumbing** | ~60 | randutil, impl, godebug, fips140only, fips140hash, fips140tls, pkix, dsa, hpke, sysrand … Small, but nothing in goish calls most of it yet. |
+
+Two known blockers rather than volume:
+
+- **`crypto/internal/fips140cache`** needs `weak.Pointer` and
+  `runtime.AddCleanup`. goish has neither, and adding a weak-reference
+  map is a runtime project of its own.
+- **`crypto/sha3`** cannot gain `MarshalBinary`/`Clone` until it is
+  extracted to `fips140/sha3`: goish keeps Keccak state as `[u64; 25]`
+  lanes, Go keeps `[200]byte` with inline XOR, so a marshaled state built
+  from goish's shape would be a format Go never produces. Porting the
+  marshal surface first would be inventing a wire format — the exact
+  failure the anchors exist to catch. Extraction is the prerequisite.
 
 ## Work order
 

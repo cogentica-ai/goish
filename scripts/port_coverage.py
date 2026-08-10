@@ -67,6 +67,39 @@ def norm(s):
 PUREGO = False
 
 
+# GOOS values. A file whose //go:build line mentions ONLY these and does
+# not include `linux` cannot be part of a linux build.
+_GOOS = {"aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos",
+         "ios", "js", "linux", "netbsd", "openbsd", "plan9", "solaris",
+         "wasip1", "windows", "unix"}
+
+
+def is_foreign_goos(path):
+    """True for a file constrained to GOOS values that exclude linux —
+    e.g. crypto/x509/internal/macos, which is `//go:build darwin`.
+
+    Deliberately narrow: it fires only when EVERY identifier on the
+    build line is a GOOS. A constraint mentioning GOARCH or `purego`
+    (`//go:build (!amd64 && !s390x) || purego`) is left alone, because
+    which side of that goish implements is a porting decision, not a
+    platform fact — silently dropping those would shrink the denominator
+    in our favour."""
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                st = line.strip()
+                if st.startswith("//go:build "):
+                    idents = set(re.findall(r"[A-Za-z_][A-Za-z0-9_.]*", st[len("//go:build "):]))
+                    if not idents or not idents <= _GOOS:
+                        return False
+                    return "linux" not in idents and "unix" not in idents
+                if st.startswith("package "):
+                    return False
+    except Exception:
+        pass
+    return False
+
+
 def is_build_ignored(path):
     """True for a `//go:build ignore` file. These are standalone `package
     main` programs (md5's gen.go, nistec's generate.go, tls's
@@ -96,7 +129,8 @@ def scan_go(root):
         gofiles = sorted(f for f in files if f.endswith(".go")
                          and not f.endswith("_test.go") and not SKIP_FILE.search(f)
                          and not (PUREGO and SKIP_ASM.search(f))
-                         and not is_build_ignored(os.path.join(dirpath, f)))
+                         and not is_build_ignored(os.path.join(dirpath, f))
+                         and not is_foreign_goos(os.path.join(dirpath, f)))
         if not gofiles:
             continue
         funcs, loc = set(), 0
