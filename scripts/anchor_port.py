@@ -14,6 +14,11 @@ searched for a `func` matching the Rust fn name and its line span used.
 The Go package path is derived from the .rs path (src/crypto/des/block.rs
 -> crypto/des/block.go), overridable with --gofile.
 
+`--fill-none "<reason>"` anchors every remaining fn that has no Go
+counterpart as `// go: none — <reason>` (goish-idiom scaffolding: nil
+impls, trait shims, local helpers). Their names are printed so they can
+be pasted into the file's `// go: file … decls:` manifest.
+
 Idempotent: a comment block that already starts with `// go:` is left
 alone. Nothing is written unless at least one anchor changes.
 """
@@ -70,6 +75,10 @@ def main():
     gopath = os.path.join(goroot(), "src", gofile)
     if not os.path.exists(gopath):
         sys.exit(f"anchor_port: no Go source at {gopath}")
+    fill_none = None
+    if "--fill-none" in sys.argv:
+        fill_none = sys.argv[sys.argv.index("--fill-none") + 1]
+    filled = []
     funcs = go_funcs(gopath)
     bykey = {norm(k): v for k, v in funcs.items()}
 
@@ -120,6 +129,12 @@ def main():
         if span is None and norm(name) in bykey:
             span = (gofile, bykey[norm(name)], name)
         if span is None:
+            if fill_none:
+                reason = fill_none
+                out.insert(comment_lines[0] if comment_lines else len(out),
+                           f"{indent}// go: none — {reason}")
+                added += 1
+                filled.append(name)
             out.append(lines[i]); i += 1; continue
 
         gf, (a, b), sym = span
@@ -131,7 +146,7 @@ def main():
 
     if added:
         open(rs, "w").write("\n".join(out))
-    print(f"{rs}: {added} anchors added")
+    print(f"{rs}: {added} anchors added" + (f" ({len(filled)} as `go: none`: {', '.join(filled)})" if filled else ""))
 
 
 if __name__ == "__main__":
