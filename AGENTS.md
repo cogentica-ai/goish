@@ -19,6 +19,13 @@ goish-v1/
 
 ### Test commands
 
+**Run the suite on CI, not locally.** `make e2e` is 225 examples, and the
+tiered/full modes run the stress families 50x each. Push the branch (the
+workflow triggers on `main` and `dev`) and watch it with
+`gh run watch <id> --repo cogentica-ai/goish --exit-status`. Locally,
+verify with `cargo check --lib`, `cargo build --examples`, goishlint, and
+the individual example binaries a change actually touches.
+
 | Command | What it does |
 |---|---|
 | `cargo check --lib` | typecheck goish runtime |
