@@ -5,9 +5,23 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **404/1575 = 25.7%**, 71 anchors, **4 packages fully verified**
-(`rc4`, `subtle`, `des`, `internal/fips140/subtle` — each
-`goishlint --enable-goish017 --enable-goish018` exit 0). Regenerate:
+Current: **404/1575 = 25.7%**, 141 anchors, **6 packages fully verified**
+— each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
+
+| verified | fns | .go → .rs |
+|---|--:|---|
+| `crypto/rc4` | 4/4 | 1 → 2 |
+| `crypto/subtle` | 8/8 | 3 → 4 |
+| `crypto/des` | 14/14 | 3 → 4 |
+| `crypto/ed25519` | 11/11 | 1 → 2 |
+| `crypto/internal/fips140/subtle` | 12/12 | 4 → 4 |
+| `crypto/internal/fips140/ed25519` | 28/28 | 2 → 3 |
+
+The percentage moves slowly because most verified packages were already
+name-complete; what changed is that their completeness is now *proven*
+rather than assumed, and three real gaps were closed on the way
+(`WithDataIndependentTiming`, `aligned`/`words`/`xorLoop`, and des's
+three missing permutation tables). Regenerate:
 
 ```bash
 export GOROOT=$(go env GOROOT)          # or point at a Go 1.25 checkout
