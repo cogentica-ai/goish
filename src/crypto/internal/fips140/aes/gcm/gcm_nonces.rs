@@ -18,9 +18,12 @@
 //     `GCM::Seal` rather than Go's `sealAfterIndicator` — with no
 //     indicator to record between the two, they are the same function.
 //   * `SealWithRandomNonce` draws from `crypto::rand::Read` rather than
-//     `crypto/internal/fips140/drbg.Read`; goish has no fips140 DRBG
-//     port yet (drbg is 0/8). Same interface, different entropy source —
-//     this one is NOT the FIPS-approved construction until drbg lands.
+//     `crypto/internal/fips140/drbg.Read`. drbg's CTR_DRBG (`Counter`)
+//     is ported now, but drbg's `rand[go]` — the pooled `Read` that
+//     drives it — is not, because it needs `sync.Pool`,
+//     `internal/sysrand` and `crypto/internal/entropy`. Same interface,
+//     different entropy source: this is NOT the FIPS-approved
+//     construction until `drbg.Read` lands.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 

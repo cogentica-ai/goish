@@ -32,6 +32,7 @@ use crate::gostring::string;
 
 pub mod bigmod;
 pub mod check;
+pub mod drbg;
 pub mod ed25519;
 pub mod aes;
 pub mod alias;
