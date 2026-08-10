@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **576/1507 = 38.2%**, 599 anchors, **23 packages fully verified**
+Current: **587/1507 = 39.0%**, 632 anchors, **23 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -226,7 +226,7 @@ what unblocks what, not by size:
 |---|--:|---|
 | **assembly** | ~44 | `*Asm` in fips140/aes, `blockAVX2`/`blockSHANI` in sha256/sha512/sha1. Every generic path they replace is ported and pinned to NIST/RFC vectors, and each `*_noasm.rs` is the exact slot. This is the performance requirement. |
 | **fips140 extractions** | ~120 | sha3 (33), ecdsa (30), ecdh (13), drbg (8), tls13 (17), hkdf/pbkdf2/tls12 (9). Same template as hmac/sha256/sha512/aes. |
-| **gcm** | 17 left of 41 | Core AEAD done (gcm/ghash/gcm_generic/gcm_noasm, 24/41, NIST SP 800-38D TC3/4/6). Remaining: 5 `gcmAes*` asm symbols, `cmac`+`ctrkdf` (5), `gcm_nonces` (6 — the TLS 1.2/1.3 and SSH constructors), `sealAfterIndicator`. |
+| ~~**gcm**~~ | 6 left of 41 | 35/41. Everything but the five `gcmAes*` assembly symbols and `sealAfterIndicator` (folded into `Seal`; it only exists in Go to separate two FIPS service indicators goish's stub does not have). Pinned to NIST SP 800-38D TC3/4/6 and SP 800-38B CMAC. |
 | **nistec + mlkem** | 205 | `nistec` (75) + `fiat` (61) + `mlkem` (69). Mostly generated field arithmetic; large but mechanical. |
 | **ecdsa/elliptic/ecdh** | 86 | `crypto/ecdsa` needs a *rewrite*, not patching — all 31 existing goish functions are invented (`VerifyP256`, `decode_x509_ec_p256_pubkey`) and correspond to nothing in Go. |
 | **x509** | 150 | |
