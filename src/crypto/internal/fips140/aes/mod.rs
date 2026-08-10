@@ -1,6 +1,7 @@
 // go: package crypto/internal/fips140/aes
 
 mod aes;
+pub mod gcm;
 mod aes_generic;
 mod aes_noasm;
 mod cbc;
