@@ -36,6 +36,13 @@ SKIP_FILE = re.compile(
     r"solaris|aix|plan9|ios|android)(_gen)?\.go$"
 )
 
+# `*_asm.go` / `*_amd64.go` are Go's `//go:build !purego` assembly entry
+# points. goish CAN write assembly (the runtime already does: gogo,
+# mcall, swap_context, the preempt trampoline), so these are in scope and
+# tracked as performance work — see CRYPTO_PORT.md "Assembly".
+# `--purego` reports the subset reachable without any asm, for triage.
+SKIP_ASM = re.compile(r"_(asm|amd64)\.go$")
+
 FUNC = re.compile(r"^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*[\(\[]", re.M)
 RSFN = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s+([A-Za-z_]\w*)", re.M)
 ANCHOR = re.compile(r"^\s*//\s*go:", re.M)
@@ -57,6 +64,9 @@ def norm(s):
     return s.lower().replace("_", "")
 
 
+PUREGO = False
+
+
 def scan_go(root):
     out = {}
     for dirpath, _, files in os.walk(root):
@@ -65,7 +75,8 @@ def scan_go(root):
         if SKIP.search(rel):
             continue
         gofiles = sorted(f for f in files if f.endswith(".go")
-                         and not f.endswith("_test.go") and not SKIP_FILE.search(f))
+                         and not f.endswith("_test.go") and not SKIP_FILE.search(f)
+                         and not (PUREGO and SKIP_ASM.search(f)))
         if not gofiles:
             continue
         funcs, loc = set(), 0
@@ -152,6 +163,8 @@ def main():
     argv = sys.argv[1:]
     if not argv or argv[0].startswith("-"):
         sys.exit(__doc__)
+    global PUREGO
+    PUREGO = "--purego" in argv
     subtree, gr = argv[0], goroot(argv)
     rows = build(subtree, gr)
 
