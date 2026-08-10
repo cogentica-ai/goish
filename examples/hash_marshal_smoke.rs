@@ -1,11 +1,12 @@
 // hash_marshal_smoke — hash.Cloner + encoding.Binary{Marshaler,Appender,
-// Unmarshaler} on crypto/internal/fips140/sha256, and the FIPS 198-1 §6
-// marshaled-state fast path in crypto/internal/fips140/hmac.
+// Unmarshaler} on crypto/internal/fips140/{sha256,sha512}, and the
+// FIPS 198-1 §6 marshaled-state fast path in crypto/internal/fips140/hmac.
 //
 // The HMAC checks matter most: Reset() switches an HMAC over a
 // marshalable hash from "re-feed ipad" to "restore cached state", and a
-// bug there is silent — the MAC simply comes out wrong. Every assertion
-// below compares a post-Reset MAC against a freshly constructed one.
+// bug there is silent — the MAC simply comes out wrong. So every MAC
+// assertion below compares against a vector pinned from RFC 4231 rather
+// than against another goish result.
 
 #![no_std]
 #![no_main]
@@ -15,7 +16,9 @@ extern crate goish;
 
 use goish::crypto::hmac;
 use goish::crypto::internal::fips140::sha256 as fips256;
+use goish::crypto::internal::fips140::sha512 as fips512;
 use goish::crypto::sha256;
+use goish::crypto::sha512;
 use goish::encoding::hex;
 use goish::fmt;
 use goish::goslice::slice;
@@ -188,6 +191,87 @@ fn main() {
         "sha1-hmac slow path survives Reset",
         hexsum(&sha1mac),
         goish::string::from("effcdf6ae5eb2fa2d27416d5f184df9c259a7c79"),
+    );
+
+    // ── sha512: same surface, 128-byte blocks ─────────────────────────
+    //
+    // SHA-512 marshals a 204-byte state (4 magic + 8*8 h + 128 x + 8 len)
+    // and its four variants each carry a distinct magic, so a variant
+    // must reject another's state.
+    let mut d5 = fips512::New();
+    let _ = io::Writer::Write(&mut d5, bytes_of("hello, "));
+    let (state5, err) = d5.MarshalBinary();
+    if err != goish::nil {
+        fmt::Printf!("FAIL: sha512 MarshalBinary returned %v\n", err);
+        unsafe { FAILED = true };
+    }
+    check(
+        "sha512 marshaled state is 204 bytes",
+        fmt::Sprintf!("%d", state5.Len()),
+        goish::string::from("204"),
+    );
+
+    let mut restored5 = fips512::New();
+    let err = restored5.UnmarshalBinary(state5.clone());
+    if err != goish::nil {
+        fmt::Printf!("FAIL: sha512 UnmarshalBinary returned %v\n", err);
+        unsafe { FAILED = true };
+    }
+    let _ = io::Writer::Write(&mut restored5, bytes_of("world"));
+    check(
+        "sha512 marshal round-trip",
+        hexsum(&restored5),
+        goish::string::from(
+            "8710339dcb6814d0d9d2290ef422285c9322b7163951f9a0ca8f883d3305286f\
+             44139aa374848e4174f5aada663027e4548637b6d19894aec4fb6c46a139fbf9",
+        ),
+    );
+
+    // SHA-384 must reject a SHA-512 state - different magic, same length.
+    let mut d384 = fips512::New384();
+    let err = d384.UnmarshalBinary(state5);
+    check(
+        "sha384 rejects sha512 state",
+        fmt::Sprintf!("%v", err != goish::nil),
+        goish::string::from("true"),
+    );
+
+    // HMAC-SHA-512 takes the marshaled path too (registered alongside
+    // sha256), so it needs the same pinned-vector check.
+    let rfc4231_tc2_512 = "164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea250554\
+                           9758bf75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737";
+    let mut mac512 = hmac::New(sha512::NewHash, key.clone());
+    let _ = io::Writer::Write(&mut mac512, msg.clone());
+    check(
+        "hmac-sha512 first pass",
+        hexsum(&mac512),
+        goish::string::from(rfc4231_tc2_512),
+    );
+    let mut i = 0;
+    while i < 3 {
+        Hash::Reset(&mut mac512);
+        let _ = io::Writer::Write(&mut mac512, msg.clone());
+        check(
+            "hmac-sha512 after Reset (marshaled path)",
+            hexsum(&mac512),
+            goish::string::from(rfc4231_tc2_512),
+        );
+        i += 1;
+    }
+
+    // SHA-384 shares Digest with SHA-512 but has a different size field -
+    // the state cache must key off the right variant.
+    let mut mac384 = hmac::New(sha512::NewHash384, key.clone());
+    let _ = io::Writer::Write(&mut mac384, msg.clone());
+    Hash::Reset(&mut mac384);
+    let _ = io::Writer::Write(&mut mac384, msg.clone());
+    check(
+        "hmac-sha384 after Reset",
+        hexsum(&mac384),
+        goish::string::from(
+            "af45d2e376484031617f78d2b58a6b1b9c7ef464f5a01b47e42ec3736322445e\
+             8e2240ca5e69e2c78b3239ecfab21649",
+        ),
     );
 
     if unsafe { FAILED } {

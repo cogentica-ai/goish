@@ -17,7 +17,6 @@ use crate::crypto::internal::fips140::edwards25519::Point;
 use crate::crypto::sha512;
 use crate::errors::{self, error};
 use crate::goslice::slice;
-use crate::hash::Hash;
 use crate::io;
 use crate::strconv;
 use crate::string;
