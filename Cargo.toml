@@ -954,3 +954,7 @@ path = "examples/subtle_smoke.rs"
 [[example]]
 name = "hash_marshal_smoke"
 path = "examples/hash_marshal_smoke.rs"
+
+[[example]]
+name = "fips140_aes_smoke"
+path = "examples/fips140_aes_smoke.rs"

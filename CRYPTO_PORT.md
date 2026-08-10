@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **458/1575 = 29.1%**, 296 anchors, **16 packages fully verified**
+Current: **497/1575 = 31.6%**, 360 anchors, **19 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -24,14 +24,19 @@ Current: **458/1575 = 29.1%**, 296 anchors, **16 packages fully verified**
 | `crypto/internal/fips140/sha256` | 16/18 | 6 → 4 |
 | `crypto/internal/fips140/sha512` | 17/18 | 6 → 4 |
 | `crypto/sha512` | 8/8 | 1 → 2 |
+| `crypto/internal/fips140/aes` | 37/45 | 11 → 9 |
+| `crypto/aes` | 2/2 | 1 → 2 |
+| `crypto/internal/fips140/alias` | 2/2 | 1 → 2 |
 | `crypto/internal/fips140deps/byteorder` | 11/11 | 1 → 2 |
 | `internal/byteorder` (outside crypto/) | 18/18 | 1 → 2 |
-| **total** | **167** | |
+| **total** | **208** | |
 
 The only functions missing from that table are assembly entry points:
-`blockAVX2` and `blockSHANI` in fips140/sha256, `blockAVX2` in
-fips140/sha512. They are tracked under "Assembly" below. Everything else
-is complete.
+`blockAVX2`/`blockSHANI` in fips140/sha256, `blockAVX2` in
+fips140/sha512, and in fips140/aes the seven `*Asm` symbols plus
+`EncryptionKeySchedule` (which exists solely to hand the key schedule to
+the GCM assembly, so it lands with that work). They are tracked under
+"Assembly" below. Everything else in the table is complete.
 
 The percentage moves slowly because most verified packages were already
 name-complete; what changed is that their completeness is now *proven*
@@ -144,6 +149,22 @@ from `crypto/sha512`'s single `mod.rs` into `sha512[go]` / `sha512block[go]`
 / `sha512block_noasm[go]`, gaining the same six marshal/Clone functions
 plus `New512_224`/`New512_256`/`New384`, and registered with hmac so
 HMAC-SHA-512 and HMAC-SHA-384 take the cached path too.
+
+`fips140/aes` came last and was the largest — 45 functions over 11 Go
+files, against a goish `crypto/aes` that inlined the whole cipher in one
+853-line `mod.rs`. Splitting it produced aes[go] / aes_generic[go] /
+aes_noasm[go] / const[go] / cbc[go] / cbc_noasm[go] / ctr[go] /
+ctr_noasm[go], and required porting `crypto/internal/fips140/alias`
+(the buffer-overlap checks every cipher mode is contractually required
+to make, which goish had simply omitted). `crypto/aes` is now Go's
+wrapper: `NewCipher` plus `KeySizeError`.
+
+Worth noting for the assembly work: goish's CBC and CTR were previously
+reachable only through `crypto/cipher`'s own generic implementations.
+The fips140-native `CBCEncrypter`/`CBCDecrypter`/`CTR` are the types the
+`*Asm` entry points plug into, so `examples/fips140_aes_smoke.rs` pins
+them against NIST SP 800-38A §F now, before any assembly exists to
+change their behaviour.
 
 Still open, and the reason `hash` as a whole is not yet verified: the
 legacy `hash/{adler32,crc32,crc64,fnv,maphash}` ports predate the anchor

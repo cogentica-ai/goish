@@ -29,7 +29,6 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::fmt;
 use goish::crypto::aes;
-use goish::crypto::cipher::Block;
 use goish::types::byte;
 use goish::{slice, syscall};
 

@@ -33,6 +33,8 @@ use crate::gostring::string;
 pub mod bigmod;
 pub mod check;
 pub mod ed25519;
+pub mod aes;
+pub mod alias;
 pub mod edwards25519;
 pub mod rsa;
 pub mod subtle;
