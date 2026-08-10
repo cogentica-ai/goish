@@ -111,6 +111,59 @@ impl marshalable for crate::crypto::internal::fips140::sha512::Digest {
     }
 }
 
+// go: none — goish idiom: see the sha256 impl above. Go's hmac has no MD5 branch (MD5 is not a FIPS hash), but
+// goish's crypto/hmac accepts it, so the fast path applies.
+impl marshalable for crate::crypto::md5::Digest {
+    // go: none — goish idiom: `marshalable` is nominal, so satisfying it
+    // is an explicit forwarder rather than Go's structural match.
+    fn MarshalBinary(&self) -> (slice<byte>, error) {
+        return crate::crypto::md5::Digest::MarshalBinary(self);
+    }
+    // go: none — goish idiom: `marshalable` is nominal, so satisfying it
+    // is an explicit forwarder rather than Go's structural match.
+    fn UnmarshalBinary(&mut self, b: slice<byte>) -> error {
+        return crate::crypto::md5::Digest::UnmarshalBinary(self, b);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: none — goish idiom: see the sha256 impl above. Same for SHA-1: outside the FIPS module, still used by TLS 1.2.
+impl marshalable for crate::crypto::sha1::Digest {
+    // go: none — goish idiom: `marshalable` is nominal, so satisfying it
+    // is an explicit forwarder rather than Go's structural match.
+    fn MarshalBinary(&self) -> (slice<byte>, error) {
+        return crate::crypto::sha1::Digest::MarshalBinary(self);
+    }
+    // go: none — goish idiom: `marshalable` is nominal, so satisfying it
+    // is an explicit forwarder rather than Go's structural match.
+    fn UnmarshalBinary(&mut self, b: slice<byte>) -> error {
+        return crate::crypto::sha1::Digest::UnmarshalBinary(self, b);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides so `carrier.As::<…>()`
+    // can reach this type. Go's itabs make it unnecessary.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
 // go: none — goish idiom: `#[goish::interface]` downcast registries are
 // filled at runtime, one entry per `impl Trait for Concrete`; Go's itabs
 // are built by the linker. Idempotent and cheap; called from `New`.
@@ -121,6 +174,10 @@ fn register_hmac_impls() {
     __goish_register_marshalable_impl::<crate::crypto::internal::fips140::sha512::Digest>();
     crate::crypto::internal::fips140::sha256::register_sha256_impls();
     crate::crypto::internal::fips140::sha512::register_sha512_impls();
+    __goish_register_marshalable_impl::<crate::crypto::md5::Digest>();
+    __goish_register_marshalable_impl::<crate::crypto::sha1::Digest>();
+    crate::crypto::md5::register_md5_impls();
+    crate::crypto::sha1::register_sha1_impls();
     // HMAC is itself a Cloner, so a `Box<dyn Hash>` holding one must be
     // able to assert to `hash.Cloner` — Go gets this from the itab.
     crate::hash::__goish_register_Cloner_impl::<HMAC>();

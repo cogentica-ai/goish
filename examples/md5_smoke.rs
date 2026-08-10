@@ -16,7 +16,6 @@ use goish::convert::bytes as to_bytes;
 use goish::crypto::md5;
 use goish::goslice::slice;
 use goish::hash::Hash;
-use goish::io::Writer as _;
 use goish::types::byte;
 use goish::{syscall};
 

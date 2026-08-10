@@ -169,10 +169,12 @@ fn main() {
     check("hmac clone is independent", hexsum(&src), goish::string::from(rfc4231_tc2));
 
     // Cloning a hash with no Cloner impl must report ErrUnsupported
-    // rather than panicking or silently producing a broken MAC.
-    let mut sha1mac = hmac::New(goish::crypto::sha1::NewHash, key.clone());
-    let _ = io::Writer::Write(&mut sha1mac, msg.clone());
-    let (_, err) = Cloner::Clone(&sha1mac);
+    // rather than panicking or silently producing a broken MAC. sha3 is
+    // the remaining hash with no Cloner port — sha1 used to fill this
+    // role and no longer can, which is itself the point of the check.
+    let mut nocloner = hmac::New(goish::crypto::sha3::NewHash256, key.clone());
+    let _ = io::Writer::Write(&mut nocloner, msg.clone());
+    let (_, err) = Cloner::Clone(&nocloner);
     check(
         "clone of non-Cloner hash errors",
         fmt::Sprintf!("%v", err != goish::nil),
@@ -185,13 +187,87 @@ fn main() {
     );
 
     // A non-marshalable inner hash must keep working on the slow path.
+    Hash::Reset(&mut nocloner);
+    let _ = io::Writer::Write(&mut nocloner, msg.clone());
+    check(
+        "sha3-hmac slow path survives Reset",
+        fmt::Sprintf!("%d", hexsum(&nocloner).Len()),
+        goish::string::from("64"),
+    );
+
+    // ── md5 / sha1: same marshal surface, now on the fast path ────────
+    let mut md5mac = hmac::New(goish::crypto::md5::NewHash, key.clone());
+    let _ = io::Writer::Write(&mut md5mac, msg.clone());
+    check(
+        "hmac-md5 first pass",
+        hexsum(&md5mac),
+        goish::string::from("750c783e6ab0b503eaa86e310a5db738"),
+    );
+    Hash::Reset(&mut md5mac);
+    let _ = io::Writer::Write(&mut md5mac, msg.clone());
+    check(
+        "hmac-md5 after Reset (marshaled path)",
+        hexsum(&md5mac),
+        goish::string::from("750c783e6ab0b503eaa86e310a5db738"),
+    );
+
+    let mut sha1mac = hmac::New(goish::crypto::sha1::NewHash, key.clone());
+    let _ = io::Writer::Write(&mut sha1mac, msg.clone());
     Hash::Reset(&mut sha1mac);
     let _ = io::Writer::Write(&mut sha1mac, msg.clone());
     check(
-        "sha1-hmac slow path survives Reset",
+        "hmac-sha1 after Reset (marshaled path)",
         hexsum(&sha1mac),
         goish::string::from("effcdf6ae5eb2fa2d27416d5f184df9c259a7c79"),
     );
+
+    // md5/sha1 marshal round-trips.
+    let mut dm = goish::crypto::md5::New();
+    let _ = io::Writer::Write(&mut dm, bytes_of("hello, "));
+    let (sm, _) = dm.MarshalBinary();
+    let mut rm = goish::crypto::md5::New();
+    let _ = rm.UnmarshalBinary(sm);
+    let _ = io::Writer::Write(&mut rm, bytes_of("world"));
+    check(
+        "md5 marshal round-trip",
+        hexsum(&rm),
+        goish::string::from("e4d7f1b4ed2e42d15898f4b27b019da4"),
+    );
+
+    let mut ds = goish::crypto::sha1::New();
+    let _ = io::Writer::Write(&mut ds, bytes_of("hello, "));
+    let (ss, _) = ds.MarshalBinary();
+    let mut rs = goish::crypto::sha1::New();
+    let _ = rs.UnmarshalBinary(ss);
+    let _ = io::Writer::Write(&mut rs, bytes_of("world"));
+    check(
+        "sha1 marshal round-trip",
+        hexsum(&rs),
+        goish::string::from("b7e23ec29af22b0b4e41da31e868d57226121c84"),
+    );
+
+    // ConstantTimeSum must agree with Sum for every buffered length —
+    // it selects between one- and two-block finalization with a mask
+    // rather than a branch, and the boundary is nx == 56.
+    let mut n: usize = 0;
+    let mut ctsOK = true;
+    while n <= 130 {
+        let mut d = goish::crypto::sha1::New();
+        let filler: Vec<byte> = alloc::vec![b'a'; n];
+        let _ = io::Writer::Write(&mut d, slice::__from_vec(filler));
+        let a = hexsum(&d);
+        let cts = d.ConstantTimeSum(empty());
+        let ctsRaw: &[byte] = &cts;
+        if a != hex::EncodeToString(ctsRaw) {
+            fmt::Printf!("FAIL: ConstantTimeSum mismatch at len %d\n", n as i64);
+            ctsOK = false;
+            unsafe { FAILED = true };
+        }
+        n += 1;
+    }
+    if ctsOK {
+        fmt::Printf!("PASS: sha1 ConstantTimeSum matches Sum for len 0..130\n");
+    }
 
     // ── sha512: same surface, 128-byte blocks ─────────────────────────
     //

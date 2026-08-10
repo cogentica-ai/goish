@@ -67,6 +67,25 @@ def norm(s):
 PUREGO = False
 
 
+def is_build_ignored(path):
+    """True for a `//go:build ignore` file. These are standalone `package
+    main` programs (md5's gen.go, nistec's generate.go, tls's
+    generate_cert.go) that `go build` never compiles into the package.
+    Counting their funcs would inflate the denominator with code that is
+    not part of the library — same reason `_asm/` is skipped."""
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                st = line.strip()
+                if st.startswith("//go:build "):
+                    return "ignore" in st.split()[1:] or st == "//go:build ignore"
+                if st.startswith("package "):
+                    return False
+    except Exception:
+        pass
+    return False
+
+
 def scan_go(root):
     out = {}
     for dirpath, _, files in os.walk(root):
@@ -76,7 +95,8 @@ def scan_go(root):
             continue
         gofiles = sorted(f for f in files if f.endswith(".go")
                          and not f.endswith("_test.go") and not SKIP_FILE.search(f)
-                         and not (PUREGO and SKIP_ASM.search(f)))
+                         and not (PUREGO and SKIP_ASM.search(f))
+                         and not is_build_ignored(os.path.join(dirpath, f)))
         if not gofiles:
             continue
         funcs, loc = set(), 0

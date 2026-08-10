@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **497/1575 = 31.6%**, 360 anchors, **19 packages fully verified**
+Current: **513/1561 = 32.9%**, 444 anchors, **21 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -27,13 +27,16 @@ Current: **497/1575 = 31.6%**, 360 anchors, **19 packages fully verified**
 | `crypto/internal/fips140/aes` | 37/45 | 11 → 9 |
 | `crypto/aes` | 2/2 | 1 → 2 |
 | `crypto/internal/fips140/alias` | 2/2 | 1 → 2 |
+| `crypto/md5` | 15/15 | 4 → 4 |
+| `crypto/sha1` | 17/19 | 5 → 4 |
 | `crypto/internal/fips140deps/byteorder` | 11/11 | 1 → 2 |
 | `internal/byteorder` (outside crypto/) | 18/18 | 1 → 2 |
-| **total** | **208** | |
+| **total** | **240** | |
 
 The only functions missing from that table are assembly entry points:
-`blockAVX2`/`blockSHANI` in fips140/sha256, `blockAVX2` in
-fips140/sha512, and in fips140/aes the seven `*Asm` symbols plus
+`blockAVX2`/`blockSHANI` in fips140/sha256 and in crypto/sha1,
+`blockAVX2` in fips140/sha512, and in fips140/aes the seven `*Asm`
+symbols plus
 `EncryptionKeySchedule` (which exists solely to hand the key schedule to
 the GCM assembly, so it lands with that work). They are tracked under
 "Assembly" below. Everything else in the table is complete.
@@ -76,6 +79,16 @@ Two traps this surfaced repeatedly:
 * **A deliberate rename needs `// goishlint:ignore GOISH021 — <reason>`.**
   `desCipher` → `Cipher` (Go returns it behind `cipher.Block`, which goish
   cannot express for a value type) is a rename, not a drop.
+
+### Denominator fix: `//go:build ignore` files
+
+`port_coverage.py` was counting standalone generators — md5's `gen.go`,
+nistec's `generate.go`, tls's `generate_cert.go` and four others. They are
+`package main` programs behind `//go:build ignore`, which `go build` never
+compiles into the package, so their funcs (`dup`, `idx`, `main`,
+`relabel`, `rotate`, `seq` …) inflated the denominator with code that is
+not part of the library. Skipped now, same rationale as `_asm/`. The
+total went 1575 → 1561; nothing "became ported" as a result.
 
 ## How "100%" is measured
 
