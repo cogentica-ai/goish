@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **404/1575 = 25.7%**, 141 anchors, **6 packages fully verified**
+Current: **404/1575 = 25.7%**, 159 anchors, **9 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -14,8 +14,12 @@ Current: **404/1575 = 25.7%**, 141 anchors, **6 packages fully verified**
 | `crypto/subtle` | 8/8 | 3 → 4 |
 | `crypto/des` | 14/14 | 3 → 4 |
 | `crypto/ed25519` | 11/11 | 1 → 2 |
+| `crypto/hkdf` | 3/4 | 1 → 2 |
+| `crypto/pbkdf2` | 1/1 | 1 → 2 |
+| `crypto/hmac` | 2/2 | 1 → 2 |
 | `crypto/internal/fips140/subtle` | 12/12 | 4 → 4 |
 | `crypto/internal/fips140/ed25519` | 28/28 | 2 → 3 |
+| **total** | **83** | |
 
 The percentage moves slowly because most verified packages were already
 name-complete; what changed is that their completeness is now *proven*
