@@ -169,6 +169,33 @@ that Waves A/B currently reimplement directly. Porting them properly means
 with the real work in `internal/fips140`. Sequence Wave C's fips140 packages
 *before* re-doing the Wave B packages that would sit on them.
 
+## Assembly is in scope (performance requirement)
+
+Go's crypto carries hand-written assembly for the hot primitives — AES-NI
+(`aes_amd64.s`), SHA-NI (`sha256block_amd64.s`), GHASH (`gcm_amd64.s`),
+P-256 (`p256_asm_amd64.s`) — behind `//go:build !purego`, with
+`*_generic.go` / `*_noasm.go` fallbacks for everything else.
+
+**goish can write assembly and should**: the runtime already ships
+hand-written amd64 (`gogo`, `mcall`, `swap_context`, the async-preempt
+trampoline) via `global_asm!` / `asm!`. So the `*_asm.go` declarations and
+their `.s` bodies are part of a 100% port, tracked as performance work
+rather than skipped.
+
+Practical sequencing per package:
+
+1. Port the `*_generic.go` / `*_noasm.go` path first — it is the reference
+   implementation and makes the package correct and testable.
+2. Then port the `.s` body as a `global_asm!` block with the same symbol
+   shape, and dispatch to it the way Go's `*_asm.go` does.
+3. Keep both: Go keeps the generic path for correctness testing, and
+   goish's own `--purego` coverage view exists so the asm-free subset
+   stays visible.
+
+`scripts/port_coverage.py crypto` counts the asm entry points; add
+`--purego` for the asm-free view. The gap between the two numbers is the
+outstanding assembly work.
+
 ## Out of scope
 
 Excluded from the denominator by `scripts/port_coverage.py`, and the reasons:
@@ -176,7 +203,7 @@ Excluded from the denominator by `scripts/port_coverage.py`, and the reasons:
 | excluded | why |
 |---|---|
 | `crypto/internal/boring`, `crypto/boring` | BoringSSL via cgo; cgo is rejected outright (see `FFI_BOUNDARIES`) |
-| `**/_asm/**` | Go's asm *generators* (avo programs), not the crypto itself |
+| `**/_asm/**` | Go's avo *generators* — Go programs that emit the `.s` files. goish ports the emitted assembly (see "Assembly"), not the generator |
 | `crypto/internal/cryptotest`, `**/checktest` | test harness helpers |
 | `crypto/tls/fipsonly` | build-tag-only policy shim |
 | `*_s390x.go`, `*_ppc64x.go`, `*_arm64.go`, `*_darwin.go`, … | other GOARCH/GOOS build constraints; goish is `x86_64-unknown-linux-gnu` only. `_amd64`/`_generic`/`_noasm`/`_asm`/`_linux` files stay in scope (52 funcs excluded this way) |

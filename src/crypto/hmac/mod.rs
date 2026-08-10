@@ -2,4 +2,4 @@
 
 mod hmac;
 
-pub use hmac::*;
+pub use hmac::{Equal, New, HMAC};
