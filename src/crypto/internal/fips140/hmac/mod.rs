@@ -2,4 +2,4 @@
 
 mod hmac;
 
-pub use hmac::{errCloneUnsupported, Clone, MarkAsUsedInKDF, New, HMAC};
+pub use hmac::{errCloneUnsupported, marshalable, MarkAsUsedInKDF, New, HMAC};

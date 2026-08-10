@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **404/1575 = 25.7%**, 159 anchors, **9 packages fully verified**
+Current: **441/1575 = 28.0%**, 234 anchors, **14 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -17,15 +17,25 @@ Current: **404/1575 = 25.7%**, 159 anchors, **9 packages fully verified**
 | `crypto/hkdf` | 3/4 | 1 → 2 |
 | `crypto/pbkdf2` | 1/1 | 1 → 2 |
 | `crypto/hmac` | 2/2 | 1 → 2 |
+| `crypto/sha256` | 4/4 | 1 → 2 |
 | `crypto/internal/fips140/subtle` | 12/12 | 4 → 4 |
 | `crypto/internal/fips140/ed25519` | 28/28 | 2 → 3 |
-| **total** | **83** | |
+| `crypto/internal/fips140/hmac` | 10/10 | 2 → 2 |
+| `crypto/internal/fips140/sha256` | 16/18 | 6 → 4 |
+| `crypto/internal/fips140deps/byteorder` | 11/11 | 1 → 2 |
+| `internal/byteorder` (outside crypto/) | 18/18 | 1 → 2 |
+| **total** | **142** | |
+
+`crypto/internal/fips140/sha256`'s two remaining functions are `blockAVX2`
+and `blockSHANI` — the assembly entry points, tracked under "Assembly"
+below. Everything else in the table is complete.
 
 The percentage moves slowly because most verified packages were already
 name-complete; what changed is that their completeness is now *proven*
-rather than assumed, and three real gaps were closed on the way
-(`WithDataIndependentTiming`, `aligned`/`words`/`xorLoop`, and des's
-three missing permutation tables). Regenerate:
+rather than assumed, and several real gaps were closed on the way
+(`WithDataIndependentTiming`, `aligned`/`words`/`xorLoop`, des's three
+missing permutation tables, and sha256's `maxAsmSize` chunking loop in
+`Write`). Regenerate:
 
 ```bash
 export GOROOT=$(go env GOROOT)          # or point at a Go 1.25 checkout
@@ -89,6 +99,46 @@ src/crypto/x509/mod.rs         ← Go: crypto/x509/*.go  (14 amd64-relevant file
 One `mod.rs` absorbing 20 Go files cannot satisfy GOISH015, and its functions
 cannot carry meaningful per-file anchors. **Splitting to one `.rs` per `.go` is
 a prerequisite for measurement, not a cosmetic cleanup.**
+
+## Closed: the hash-interface blocker
+
+Until 2026-08-10 the sha256 and hmac ports had a shared hole. Go 1.25's
+`hash.Hash` implementations also satisfy `encoding.BinaryMarshaler`,
+`encoding.BinaryAppender`, `encoding.BinaryUnmarshaler` and the (new in
+1.25) `hash.Cloner`; goish's `hash` package declared none of them. That
+cost six functions in `fips140/sha256` (`MarshalBinary`, `AppendBinary`,
+`UnmarshalBinary`, `consumeUint32`, `consumeUint64`, `Clone`) and the
+whole `marshalable` fast path in `fips140/hmac` — the FIPS 198-1 §6
+cached-state optimisation, which is most of what makes a reused HMAC
+cheap.
+
+What it took:
+
+1. **`hash.Cloner` and `hash.XOF`** added to `hash/hash.go`'s port.
+2. **`Hash` and `Cloner` became `#[goish::interface](embeds)`**, so a
+   `Box<dyn Hash + Send + Sync>` is a valid `cast!` carrier — that is the
+   goish spelling of Go's `h.inner.(marshalable)`.
+3. **A macro change** (`goish-macros`): a trait whose supertrait clause
+   models Go's *interface embedding* now inherits the hidden downcast
+   helpers instead of re-declaring them. Re-declaring made every
+   `self.__is_nil_iface()` call on `dyn Cloner` ambiguous (E0034), which
+   is why `io/fs.rs` had to flatten Go's embedded interfaces by hand. The
+   `embeds` flag is opt-in, so a composite trait over a plain foreign
+   trait keeps the old behaviour (`examples/interface_auto_composite.rs`
+   pins both).
+4. **`internal/byteorder` + `crypto/internal/fips140deps/byteorder`**
+   ported, so the `byteorder.BEAppendUint32` calls the Go source makes
+   resolve to a real package instead of a private copy.
+
+Verified by `examples/hash_marshal_smoke.rs`: marshal round-trip, SHA-224
+rejecting a SHA-256 state, clone independence, and the HMAC fast path
+checked against RFC 4231 test case 2 across four Reset cycles. A silent
+regression here produces a wrong MAC, not a crash, so every assertion
+compares against a pinned vector rather than against itself.
+
+Still open, and the reason `hash` as a whole is not yet verified: the
+legacy `hash/{adler32,crc32,crc64,fnv,maphash}` ports predate the anchor
+grammar and are one `mod.rs` each.
 
 ## Invented-code hotspots
 
