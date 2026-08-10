@@ -1,15 +1,29 @@
 name: e2e
 
+# Per-push gate: every declared example, once each (LOOPS=1).
+#
+# This catches everything deterministic — wrong output, panics, build
+# breakage — in a few minutes. It deliberately does NOT run the stress
+# tiers: a race that reproduces ~2% of the time is invisible at one
+# iteration, so chasing it here would only add wall-clock without adding
+# signal. The 50x race sweep runs nightly in e2e-race.yml.
+
 on:
   push:
     branches: [main, dev]
   pull_request:
   workflow_dispatch:
 
+# A newer push supersedes an in-flight run on the same ref. Without this
+# every push stacks another full run and the queue compounds.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -19,12 +33,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # Tiered loop counts (functional=1, memory=10, races/stress=50).
-      # CI runners are slower than the dev box, so widen the
-      # per-iteration timeout; https_real_smoke already tolerates
-      # network flakes via the runner's NETWORK_FLAKY handling.
-      - name: make e2e
-        run: make e2e TIMEOUT=30
+      # LOOPS=1 forces a uniform single run, overriding the per-test
+      # tiers. CI runners are slower than a dev box, so widen the
+      # per-iteration timeout; https_real_smoke already tolerates network
+      # flakes via the runner's NETWORK_FLAKY handling.
+      - name: make e2e LOOPS=1
+        run: make e2e LOOPS=1 TIMEOUT=30
 
       - name: Upload failure logs
         if: failure()

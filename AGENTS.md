@@ -20,11 +20,31 @@ goish-v1/
 ### Test commands
 
 **Run the suite on CI, not locally.** `make e2e` is 225 examples, and the
-tiered/full modes run the stress families 50x each. Push the branch (the
-workflow triggers on `main` and `dev`) and watch it with
-`gh run watch <id> --repo cogentica-ai/goish --exit-status`. Locally,
-verify with `cargo check --lib`, `cargo build --examples`, goishlint, and
-the individual example binaries a change actually touches.
+tiered/full modes run the stress families 50x each. Locally, verify with
+`cargo check --lib`, `cargo build --examples`, goishlint, and the
+individual example binaries a change actually touches. For suite-level
+confidence, push and watch:
+`gh run watch <id> --repo cogentica-ai/goish --exit-status`.
+
+Two workflows split the cost:
+
+| workflow | when | what it runs |
+|---|---|---|
+| `e2e.yml` | every push to `main`/`dev`, every PR | `make e2e LOOPS=1` — every example once |
+| `e2e-race.yml` | nightly (18:00 UTC) + manual | `make e2e` — per-test tiers, races/stress at 50x |
+
+The per-push gate is deliberately race-free: a ~2%-reproduction bug is
+invisible at one iteration, so paying for stress loops there buys
+wall-clock, not signal. **After changing the scheduler, allocator, or
+anything in `runtime/`, don't wait for the nightly** — dispatch
+`e2e-race` manually with `mode: full` (every example x50):
+
+```bash
+gh workflow run e2e-race.yml --repo cogentica-ai/goish -f mode=full --ref <branch>
+```
+
+Both workflows cancel superseded runs on the same ref, so pushing again
+replaces an in-flight run rather than queueing behind it.
 
 | Command | What it does |
 |---|---|
