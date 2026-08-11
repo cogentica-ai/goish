@@ -30,18 +30,33 @@
 //   * Marshal / MarshalWithParams / makeField / makeBody (marshal.go) —
 //     the reflect-driven ENCODE path.
 //
-//     Correction to what this note said before: it IS blocked on setter
-//     dispatch, in exactly one branch. `makeField`'s default-value
-//     handling does
-//         defaultValue := reflect.New(v.Type()).Elem()
-//         defaultValue.SetInt(*params.defaultValue)
-//     to materialise the declared default and DeepEqual it against the
-//     field. goish's reflect has `Zero` and `DeepEqual` but neither
-//     `New` nor `Value::SetInt`, so that branch — reached only for a
-//     field tagged `asn1:"optional,default:N"` — cannot be written.
-//     Everything else in makeField reads, and the sibling zero-value
-//     branch (`optional` with no default) is portable today since Zero
-//     and DeepEqual both exist.
+//     The default-value blocker this note described is CLEARED —
+//     `reflect::New`, `Value::SetInt` and `PartialEq for Value` landed in
+//     6b55670.
+//
+//     What blocks them now is typed re-extraction, and it is a reflect
+//     *design* limit rather than a missing function. makeBody does
+//         value.Interface().(time.Time)
+//         value.Interface().(BitString)
+//         value.Interface().(ObjectIdentifier)
+//         value.Interface().(*big.Int)
+//     and makeField does `v.Interface().(RawValue)` — five recoveries of
+//     a concrete type from a reflected value. goish's
+//     `Value::Interface()` boxes `()` for Slice/Map/Struct/Pointer (see
+//     the comment at its `_` arm), so none of the five can be written.
+//
+//     Two of them are worse than that: `time::Time` and `big::Int` have
+//     identity-only Reflect impls whose `__reflect_value` returns
+//     `Struct { fields: [] }`, discarding the value entirely. That was
+//     correct for getUniversalType, which only needs the identity, and is
+//     wrong for makeBody, which needs the value. BitString,
+//     ObjectIdentifier and RawValue are reconstructible from their
+//     `Value` fields; those two are not.
+//
+//     The fix is to let `Value` carry the original payload — the `_` arm
+//     already suggests `Arc<dyn Any>` alongside each variant — and have
+//     Interface() return it. That is a reflect-design change, not an
+//     addition.
 //
 //     The signature also deviates: Go takes `any`, goish must take
 //     `impl Reflect`, since Rust has no universal runtime reflection.
