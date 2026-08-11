@@ -53,9 +53,28 @@ def binary():
     env = os.environ.get("GOISHLINT")
     if env:
         return env
-    sib = os.path.join(ROOT, "..", "goishlint", "target", "release", "goishlint")
-    if os.path.exists(sib):
-        return os.path.abspath(sib)
+    # The sibling checkout, relative to the MAIN worktree — not to ROOT.
+    # A linked worktree lives under `.claude/worktrees/agent-<id>/`, so
+    # `ROOT/..` is `.claude/worktrees/` and the sibling lookup misses.
+    # Every worktree-isolated agent then hit "goishlint not found" and
+    # had to be told to export $GOISHLINT by hand.
+    #
+    # `git rev-parse --git-common-dir` resolves to the shared `.git` of
+    # the main checkout from inside any worktree, so its parent is the
+    # main tree regardless of where we are.
+    roots = [ROOT]
+    try:
+        common = subprocess.check_output(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=ROOT, text=True, stderr=subprocess.DEVNULL).strip()
+        if common:
+            roots.append(os.path.dirname(common))
+    except Exception:
+        pass
+    for r in roots:
+        sib = os.path.join(r, "..", "goishlint", "target", "release", "goishlint")
+        if os.path.exists(sib):
+            return os.path.abspath(sib)
     sys.exit("port_lint: goishlint not found - set $GOISHLINT or build ../goishlint")
 
 
