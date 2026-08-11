@@ -34,6 +34,11 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Reuse port_coverage's file-scope predicates rather than re-deriving them.
+# They already know which files a linux/amd64 build actually compiles.
+sys.path.insert(0, HERE)
+import port_coverage as _pc
 ROOT = os.path.dirname(HERE)
 SRC = os.path.join(ROOT, "src")
 
@@ -141,14 +146,28 @@ def goroot():
 
 
 def go_files(pkgdir):
+    """The .go files a linux/amd64 build actually compiles.
+
+    Filtering matters here, not just in port_coverage: this list feeds
+    the IMPORT scan, so a file that never builds still contributed its
+    imports to the blocker set. `crypto/internal/sysrand` read NO-GO on
+    `internal/chacha8rand`, which is imported by exactly one file —
+    `rand_plan9.go`. goish is linux-only, so nothing in the package
+    needed chacha8rand at all, and the real dependency was one function
+    (`unix.GetRandom`) out of a 38-function package.
+
+    That was the fifth wrong leverage claim of this shape in this repo,
+    and the first the tooling itself produced rather than merely failed
+    to prevent."""
     out = []
     for name in sorted(os.listdir(pkgdir)):
         if not name.endswith(".go") or name.endswith("_test.go"):
             continue
+        if _pc.SKIP_FILE.search(name):
+            continue                      # _plan9.go, _darwin.go, _s390x.go, …
         path = os.path.join(pkgdir, name)
-        with open(path, errors="replace") as f:
-            head = f.read(400)
-        if "//go:build ignore" in head:
+        if (_pc.is_build_ignored(path) or _pc.is_foreign_goos(path)
+                or _pc.is_boringcrypto(path)):
             continue
         out.append(path)
     return out

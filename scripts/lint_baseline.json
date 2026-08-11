@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 13139,
+ "total": 13131,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -238,12 +238,6 @@
    "GOISH014": 19,
    "GOISH016": 1,
    "GOISH023": 11
-  },
-  "src/crypto/rand/mod.rs": {
-   "GOISH005": 1,
-   "GOISH014": 3,
-   "GOISH016": 1,
-   "GOISH023": 3
   },
   "src/crypto/sha1/sha1.rs": {
    "GOISH005": 29,
