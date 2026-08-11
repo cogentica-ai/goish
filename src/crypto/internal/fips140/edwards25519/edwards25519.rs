@@ -18,6 +18,14 @@
 //     `field::Element` / `scalar::Scalar` convention).
 //   * `Point`'s internal `field::Element` coordinates never appear in a
 //     public signature. `SetBytes` / `Bytes` use `slice<byte>`.
+//   * Go's `incomparable` (`[0]func()`) exists to make `Point` reject
+//     `==`. Rust needs no such marker: `Point` simply does not derive
+//     `PartialEq`, and `Equal` is the only comparison.
+//     goishlint:ignore GOISH021 incomparable — no Rust equivalent needed
+//   * Go's package-level `var feOne` is built once at init. goish has no
+//     lazily-initialised immutable static, so `SetBytes` constructs it
+//     locally — the same value, at the only call site that reads it.
+//     goishlint:ignore GOISH021 feOne — function-local, see above
 //   * Go precomputes the fixed-base `basepointTable` lazily via
 //     `sync.Once`. goish has no process-wide mutable static here, so
 //     `ScalarBaseMult` / `VarTimeDoubleScalarBaseMult` build the table
@@ -103,6 +111,7 @@ struct affineCached {
     T2d: Element,
 }
 
+// go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:41-47 checkInitialized
 /// `checkInitialized` panics if any point has a zero-valued (x, y).
 fn checkInitialized(points: &[&Point]) {
     let zero = Element::new();
@@ -116,6 +125,7 @@ fn checkInitialized(points: &[&Point]) {
 // ─── constructors ─────────────────────────────────────────────────────
 
 impl projP2 {
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:59-64 projP2.Zero
     /// `Zero` sets v to the identity in P2 coordinates.
     fn Zero(&mut self) -> &mut projP2 {
         self.X.Zero();
@@ -165,17 +175,20 @@ fn generator() -> Point {
     p
 }
 
+// go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:72-74 NewIdentityPoint
 /// `NewIdentityPoint` returns a new Point set to the identity.
 pub fn NewIdentityPoint() -> Point {
     identity()
 }
 
+// go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:85-87 NewGeneratorPoint
 /// `NewGeneratorPoint` returns a new Point set to the canonical generator.
 pub fn NewGeneratorPoint() -> Point {
     generator()
 }
 
 impl projCached {
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:89-95 projCached.Zero
     /// `Zero` sets v to the identity in cached coordinates.
     fn Zero(&mut self) -> &mut projCached {
         self.YplusX.One();
@@ -187,6 +200,7 @@ impl projCached {
 }
 
 impl affineCached {
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:97-102 affineCached.Zero
     /// `Zero` sets v to the identity in affine cached coordinates.
     fn Zero(&mut self) -> &mut affineCached {
         self.YplusX.One();
@@ -230,6 +244,7 @@ impl Point {
         Point::default()
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:107-110 Point.Set
     /// `Set` sets v = u, and returns v.
     pub fn Set(&mut self, u: &Point) -> &mut Point {
         *self = *u;
@@ -238,6 +253,7 @@ impl Point {
 
     // ─── encoding ─────────────────────────────────────────────────────
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:116-121 Point.Bytes
     /// `Bytes` returns the canonical 32-byte encoding of v, according to
     /// RFC 8032, Section 5.1.2.
     pub fn Bytes(&self) -> slice<byte> {
@@ -263,6 +279,7 @@ impl Point {
         slice::<byte>::__from_vec(v)
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:145-187 Point.SetBytes
     /// `SetBytes` sets v = x, where x is a 32-byte encoding of v. If x
     /// does not represent a valid point on the curve, SetBytes returns
     /// an error and the receiver is unchanged. Otherwise SetBytes
@@ -325,6 +342,7 @@ impl Point {
 
     // ─── conversions ──────────────────────────────────────────────────
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:210-216 Point.fromP1xP1
     /// `fromP1xP1` sets v from a P1xP1 point.
     fn fromP1xP1(&mut self, p: &projP1xP1) -> &mut Point {
         self.x.Multiply(&p.X, &p.T);
@@ -334,6 +352,7 @@ impl Point {
         self
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:218-224 Point.fromP2
     /// `fromP2` sets v from a P2 point.
     fn fromP2(&mut self, p: &projP2) -> &mut Point {
         self.x.Multiply(&p.X, &p.Z);
@@ -345,6 +364,7 @@ impl Point {
 
     // ─── (re)addition and subtraction ─────────────────────────────────
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:258-263 Point.Add
     /// `Add` sets v = p + q, and returns v.
     pub fn Add(&mut self, p: &Point, q: &Point) -> &mut Point {
         checkInitialized(&[p, q]);
@@ -355,6 +375,7 @@ impl Point {
         self.fromP1xP1(&result)
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:266-271 Point.Subtract
     /// `Subtract` sets v = p - q, and returns v.
     pub fn Subtract(&mut self, p: &Point, q: &Point) -> &mut Point {
         checkInitialized(&[p, q]);
@@ -367,6 +388,7 @@ impl Point {
 
     // ─── negation ─────────────────────────────────────────────────────
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:374-381 Point.Negate
     /// `Negate` sets v = -p, and returns v.
     pub fn Negate(&mut self, p: &Point) -> &mut Point {
         checkInitialized(&[p]);
@@ -379,6 +401,7 @@ impl Point {
         self
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:384-394 Point.Equal
     /// `Equal` returns 1 if v is equivalent to u, and 0 otherwise.
     pub fn Equal(&self, u: &Point) -> int {
         checkInitialized(&[self, u]);
@@ -415,6 +438,7 @@ impl Point {
 // ─── coordinate conversions ───────────────────────────────────────────
 
 impl projP2 {
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:196-201 projP2.FromP1xP1
     /// `FromP1xP1` sets v from a P1xP1 point.
     fn FromP1xP1(&mut self, p: &projP1xP1) -> &mut projP2 {
         self.X.Multiply(&p.X, &p.T);
@@ -423,6 +447,7 @@ impl projP2 {
         self
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:203-208 projP2.FromP3
     /// `FromP3` sets v from an extended-coordinate Point.
     fn FromP3(&mut self, p: &Point) -> &mut projP2 {
         self.X.Set(&p.x);
@@ -433,6 +458,7 @@ impl projP2 {
 }
 
 impl projCached {
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:234-240 projCached.FromP3
     /// `FromP3` sets v from an extended-coordinate Point.
     fn FromP3(&mut self, p: &Point) -> &mut projCached {
         self.YplusX.Add(&p.y, &p.x);
@@ -442,6 +468,7 @@ impl projCached {
         self
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:399-405 projCached.Select
     /// `Select` sets v to a if cond == 1 and to b if cond == 0.
     fn Select(&mut self, a: &projCached, b: &projCached, cond: int) -> &mut projCached {
         self.YplusX.Select(&a.YplusX, &b.YplusX, cond);
@@ -451,6 +478,7 @@ impl projCached {
         self
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:416-420 projCached.CondNeg
     /// `CondNeg` negates v if cond == 1 and leaves it unchanged otherwise.
     fn CondNeg(&mut self, cond: int) -> &mut projCached {
         // Snapshot YminusX before the swap aliases it.
@@ -466,6 +494,7 @@ impl projCached {
 }
 
 impl affineCached {
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:242-253 affineCached.FromP3
     /// `FromP3` sets v from an extended-coordinate Point.
     fn FromP3(&mut self, p: &Point) -> &mut affineCached {
         self.YplusX.Add(&p.y, &p.x);
@@ -483,6 +512,7 @@ impl affineCached {
         self
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:408-413 affineCached.Select
     /// `Select` sets v to a if cond == 1 and to b if cond == 0.
     fn Select(&mut self, a: &affineCached, b: &affineCached, cond: int) -> &mut affineCached {
         self.YplusX.Select(&a.YplusX, &b.YplusX, cond);
@@ -491,6 +521,7 @@ impl affineCached {
         self
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:423-427 affineCached.CondNeg
     /// `CondNeg` negates v if cond == 1 and leaves it unchanged otherwise.
     fn CondNeg(&mut self, cond: int) -> &mut affineCached {
         let mut ymx = self.YminusX;
@@ -507,6 +538,7 @@ impl affineCached {
 // ─── group addition / doubling formulae ───────────────────────────────
 
 impl projP1xP1 {
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:273-291 projP1xP1.Add
     /// `Add` sets v = p + q (q in cached coordinates).
     fn Add(&mut self, p: &Point, q: &projCached) -> &mut projP1xP1 {
         let mut YplusX = Element::new();
@@ -534,6 +566,7 @@ impl projP1xP1 {
         self
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:293-311 projP1xP1.Sub
     /// `Sub` sets v = p - q (q in cached coordinates).
     fn Sub(&mut self, p: &Point, q: &projCached) -> &mut projP1xP1 {
         let mut YplusX = Element::new();
@@ -561,6 +594,7 @@ impl projP1xP1 {
         self
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:313-330 projP1xP1.AddAffine
     /// `AddAffine` sets v = p + q (q in affine cached coordinates).
     fn AddAffine(&mut self, p: &Point, q: &affineCached) -> &mut projP1xP1 {
         let mut YplusX = Element::new();
@@ -586,6 +620,7 @@ impl projP1xP1 {
         self
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:332-349 projP1xP1.SubAffine
     /// `SubAffine` sets v = p - q (q in affine cached coordinates).
     fn SubAffine(&mut self, p: &Point, q: &affineCached) -> &mut projP1xP1 {
         let mut YplusX = Element::new();
@@ -611,6 +646,7 @@ impl projP1xP1 {
         self
     }
 
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/edwards25519.go:353-369 projP1xP1.Double
     /// `Double` sets v = 2 * p (p in P2 coordinates).
     fn Double(&mut self, p: &projP2) -> &mut projP1xP1 {
         let mut XX = Element::new();

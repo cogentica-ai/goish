@@ -1,4 +1,4 @@
-// go: file crypto/ecdsa/ecdsa_legacy.go decls: generateLegacy, hashToInt, Sign, signLegacy, Verify, verifyLegacy, randFieldElement
+// go: file crypto/ecdsa/ecdsa_legacy.go decls: generateLegacy, hashToInt, one, Sign, signLegacy, Verify, verifyLegacy, randFieldElement
 //
 // A math/big implementation of ECDSA that is only used for deprecated
 // custom curves.

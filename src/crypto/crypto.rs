@@ -10,7 +10,10 @@
 //   * `RegisterHash` panics on out-of-range `Hash` like Go; the registry
 //     is a `SpinLock<[Option<Box<dyn Fn>>; maxHash]>` instead of Go's
 //     mutable global slice. Each goish hash module can register itself
-//     in its own init path.
+//     in its own init path. Go's `var hashes` is that slice, so it is
+//     spelled `HASH_REGISTRY` here — a lock is not optional without a
+//     package init phase to write it from.
+//     goishlint:ignore GOISH021 hashes — renamed to HASH_REGISTRY, see above
 
 #![allow(non_snake_case, non_upper_case_globals)]
 

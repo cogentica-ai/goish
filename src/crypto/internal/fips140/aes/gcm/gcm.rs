@@ -64,6 +64,9 @@ pub fn New(cipher: &aes::Block, nonceSize: int, tagSize: int) -> (Option<GCM>, e
 
 // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:29-42 newGCM
 /// Go: `func newGCM(g *GCM, cipher *aes.Block, nonceSize, tagSize int) (*GCM, error)`
+/// — `g` is a caller-allocated buffer that Go fills and hands back;
+/// goish returns the GCM by value.
+/// goishlint:ignore GOISH020 newGCM — Go's out-param `g` is a return value here
 fn newGCM(cipher: &aes::Block, nonceSize: int, tagSize: int) -> (Option<GCM>, error) {
     // Go: if tagSize < gcmMinimumTagSize || tagSize > gcmBlockSize { … }
     if tagSize < gcmMinimumTagSize || tagSize > gcmBlockSize {

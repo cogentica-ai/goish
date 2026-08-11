@@ -35,6 +35,13 @@
 //
 //   * `gcmAble` / `gcmAuth` interface escape hatches dropped — goish
 //     has no runtime type assertion.
+//     goishlint:ignore GOISH021 gcmAble — see above
+//
+//   * Go's `gcmFallback` — the generic non-AES implementation — is
+//     goish's `GCM<B>` (see the note at the struct itself). Static
+//     dispatch makes it the only implementation rather than a fallback,
+//     so the name would be misleading.
+//     goishlint:ignore GOISH021 gcmFallback — renamed to GCM<B>, see above
 //
 //   * `alias.InexactOverlap` / `alias.AnyOverlap` checks dropped —
 //     goish slices have copy semantics on subslicing.

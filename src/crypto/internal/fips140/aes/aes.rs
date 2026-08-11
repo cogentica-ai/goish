@@ -162,7 +162,10 @@ pub fn New(key: slice<byte>) -> (Option<Block>, crate::error) {
 // go: sdk 1.25.5 crypto/internal/fips140/aes/aes.go:71-78 newOutlined
 /// Go: `func newOutlined(b *Block, key []byte) (*Block, error)` — marked
 /// `go:noinline` there so `New` stays inlineable. goish keeps it for the
-/// key-size check; there is no allocation to outline.
+/// key-size check; there is no allocation to outline — and with nothing
+/// to outline, the caller-allocated `b *Block` has nothing to fill, so
+/// the Block is returned instead of written through.
+/// goishlint:ignore GOISH020 newOutlined — Go's out-param `b` is a return value here
 fn newOutlined(key: slice<byte>) -> (Option<Block>, crate::error) {
     // Go: switch len(key) { case aes128KeySize, aes192KeySize, aes256KeySize:
     //     default: return nil, KeySizeError(len(key)) }

@@ -28,7 +28,10 @@ use super::aes_generic::{decryptBlockGeneric, encryptBlockGeneric};
 pub(crate) type block = Block;
 
 // go: sdk 1.25.5 crypto/internal/fips140/aes/aes_noasm.go:13-16 newBlock
-/// Go: `func newBlock(c *Block, key []byte) *Block`
+/// Go: `func newBlock(c *Block, key []byte) *Block` — `c` is a
+/// caller-allocated buffer that Go fills and hands back; goish returns
+/// the Block by value.
+/// goishlint:ignore GOISH020 newBlock — Go's out-param `c` is a return value here
 pub(crate) fn newBlock(key: slice<byte>) -> Block {
     // Go: newBlockExpanded(&c.blockExpanded, key); return c
     let mut c = zeroBlock();

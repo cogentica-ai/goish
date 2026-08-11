@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 13477,
+ "total": 13408,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -124,14 +124,12 @@
   },
   "src/crypto/cipher/ctr.rs": {
    "GOISH005": 1,
-   "GOISH021": 2,
    "GOISH023": 1
   },
   "src/crypto/cipher/gcm.rs": {
    "GOISH005": 29,
    "GOISH014": 13,
    "GOISH015": 1,
-   "GOISH021": 2,
    "GOISH023": 13
   },
   "src/crypto/cipher/io.rs": {
@@ -148,7 +146,6 @@
    "GOISH023": 1
   },
   "src/crypto/crypto.rs": {
-   "GOISH021": 1,
    "GOISH022": 4
   },
   "src/crypto/des/block.rs": {
@@ -163,9 +160,6 @@
    "GOISH014": 2,
    "GOISH022": 1
   },
-  "src/crypto/ecdsa/ecdsa_legacy.rs": {
-   "GOISH017": 1
-  },
   "src/crypto/ed25519/ed25519.rs": {
    "GOISH023": 25
   },
@@ -175,18 +169,11 @@
   "src/crypto/hmac/hmac.rs": {
    "GOISH023": 1
   },
-  "src/crypto/internal/fips140/aes/aes.rs": {
-   "GOISH020": 1
-  },
-  "src/crypto/internal/fips140/aes/aes_noasm.rs": {
-   "GOISH020": 1
-  },
   "src/crypto/internal/fips140/aes/ctr.rs": {
    "GOISH005": 5
   },
   "src/crypto/internal/fips140/aes/gcm/gcm.rs": {
-   "GOISH005": 3,
-   "GOISH020": 1
+   "GOISH005": 3
   },
   "src/crypto/internal/fips140/aes/gcm/gcm_generic.rs": {
    "GOISH005": 3
@@ -215,13 +202,10 @@
   "src/crypto/internal/fips140/ed25519/ed25519.rs": {
    "GOISH005": 12,
    "GOISH008": 1,
-   "GOISH020": 1,
    "GOISH023": 32
   },
   "src/crypto/internal/fips140/edwards25519/edwards25519.rs": {
-   "GOISH014": 49,
-   "GOISH018": 29,
-   "GOISH021": 2,
+   "GOISH014": 21,
    "GOISH023": 40
   },
   "src/crypto/internal/fips140/edwards25519/field/fe.rs": {

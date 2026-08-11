@@ -17,7 +17,10 @@
 //
 //   * The `ctrAble` interface is dropped — goish has no runtime type
 //     assertion. Callers wanting a custom CTR implementation should
-//     write their own `Stream` directly.
+//     write their own `Stream` directly. `aesCtrWrapper` exists only to
+//     hide aes.CTR's extra methods behind that interface, so it goes
+//     with it.
+//     goishlint:ignore GOISH021 ctrAble, aesCtrWrapper — see above
 //
 //   * `fips140only.Enabled` branch is dropped — goish has no FIPS
 //     service-indicator infrastructure.
