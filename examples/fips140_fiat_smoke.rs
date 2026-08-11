@@ -63,7 +63,7 @@ fn seed(n: usize) -> slice<byte> {
 }
 
 macro_rules! curve_checks {
-    ($C:ident, $len:expr, $tag:expr, $a:expr, $mul:expr, $add:expr, $neg1:expr) => {{
+    ($C:ident, $len:expr, $tag:expr, $a:expr, $mul:expr, $add:expr, $neg1:expr, $inv:expr) => {{
         let mut a = fiat::$C::New();
         let err = a.SetBytes(seed($len));
         check(
@@ -102,6 +102,24 @@ macro_rules! curve_checks {
             hx(&back.Bytes()),
             hx(&a.Bytes()).as_ref(),
         );
+
+        // Invert is exponentiation by p-2 via an addition chain; an
+        // off-by-one loop bound there is invisible except here.
+        let mut inv = fiat::$C::New();
+        inv.Invert(&a);
+        check(concat!($tag, " 1/a"), hx(&inv.Bytes()), $inv);
+        let mut prod = fiat::$C::New();
+        prod.Mul(a, inv);
+        check(concat!($tag, " a*(1/a) == 1"), hx(&prod.Bytes()), hx(&one.Bytes()).as_ref());
+
+        // Go documents 1/0 = 0 rather than an error.
+        let mut z = fiat::$C::New();
+        z.Invert(&fiat::$C::New());
+        check(
+            concat!($tag, " 1/0 == 0"),
+            fmt::Sprintf!("%d", z.IsZero()),
+            "1",
+        );
     }};
 }
 
@@ -139,10 +157,10 @@ const P521_NEG1: &str = "01fffffffffffffffffffffffffffffffffffffffffffffffffffff
 
 #[goish::main]
 fn main() {
-    curve_checks!(P224Element, 28, "P-224", P224_A, P224_MUL, P224_ADD, P224_NEG1);
-    curve_checks!(P256Element, 32, "P-256", P256_A, P256_MUL, P256_ADD, P256_NEG1);
-    curve_checks!(P384Element, 48, "P-384", P384_A, P384_MUL, P384_ADD, P384_NEG1);
-    curve_checks!(P521Element, 66, "P-521", P521_A, P521_MUL, P521_ADD, P521_NEG1);
+    curve_checks!(P224Element, 28, "P-224", P224_A, P224_MUL, P224_ADD, P224_NEG1, P224_INV);
+    curve_checks!(P256Element, 32, "P-256", P256_A, P256_MUL, P256_ADD, P256_NEG1, P256_INV);
+    curve_checks!(P384Element, 48, "P-384", P384_A, P384_MUL, P384_ADD, P384_NEG1, P384_INV);
+    curve_checks!(P521Element, 66, "P-521", P521_A, P521_MUL, P521_ADD, P521_NEG1, P521_INV);
 
     // ── Select, Equal, IsZero, and the encoding checks (P-256) ────────
     let mut a = fiat::P256Element::New();
@@ -195,3 +213,11 @@ fn main() {
     }
     fmt::Printf!("fips140_fiat_smoke OK\n");
 }
+
+const P224_INV: &str = "c32e9bcf3b5f5d61e4f1aba868453614ae1c37f9f9352f7dcecc9f06";
+const P256_INV: &str = "8b814b229c44ae16e0dac6e716c99b042f3ee5a7509db59b80d81ff7beb1026e";
+const P384_INV: &str = "3ac6926f4aed0d3d1c06904b87d4d985fdc8db67e6050b9b649a1b346c81f8e7\
+                      3152245ba357466664abfaf417674eb1";
+const P521_INV: &str = "0190e5ce70b16b70a30e24e23e5710b2b6d79b1f54ccd72ab1d8562da34ce0a6\
+                      4ba2d3f1ee68cd92957e612379d527dd7ddcf4ed0a232abbab9b526a349263cc\
+                      e589";

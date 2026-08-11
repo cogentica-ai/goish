@@ -280,10 +280,27 @@ def main():
         with open(os.path.join(OUT, '%s_fiat64.rs' % c), 'w') as f:
             f.write(FIAT64_HDR.format(c=c, n=n, decls=decls))
             f.write(open(tmp).read())
-        mods += ['%s' % c, '%s_fiat64' % c]
+        r = subprocess.run([sys.executable, 'scripts/fiat_invert_to_rust.py',
+                            os.path.join(GOFIAT, '%s_invert.go' % c),
+                            os.path.join(OUT, '%s_invert.rs' % c)],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            sys.stderr.write(r.stderr)
+            raise SystemExit('invert translation failed for %s' % c)
+        mods += ['%s' % c, '%s_fiat64' % c, '%s_invert' % c]
+
+    with open(os.path.join(OUT, 'cast.rs'), 'w') as f:
+        f.write('// go: file crypto/internal/fips140/nistec/fiat/cast.go decls:\n'
+                '//\n'
+                '// Go: `import _ "crypto/internal/fips140/check"` and nothing\n'
+                '// else. The blank import exists to pull the FIPS 140-3\n'
+                '// integrity self-check into any binary that links fiat;\n'
+                '// goish has no such link-time hook, so the file carries no\n'
+                '// declarations here either.\n')
 
     with open(os.path.join(OUT, 'mod.rs'), 'w') as f:
         f.write('// go: package crypto/internal/fips140/nistec/fiat\n\n')
+        f.write('mod cast;\n')
         for mo in sorted(mods):
             f.write('mod %s;\n' % mo)
         f.write('\n')
