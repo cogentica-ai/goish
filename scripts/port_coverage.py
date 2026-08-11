@@ -303,15 +303,27 @@ ANCHOR_GO = re.compile(r"//\s*go:[^\n]*?([A-Za-z0-9_]+\.go):")
 
 
 def _facts(paths):
-    idents, loc, anchors, cited = set(), 0, 0, set()
+    idents, loc, anchors, cited, unanchored = set(), 0, 0, set(), set()
     for p in paths:
         src = open(p, errors="replace").read()
-        idents |= set(RSFN.findall(src))
-        anchors += len(ANCHOR.findall(src))
+        mine = set(RSFN.findall(src))
+        idents |= mine
+        n = len(ANCHOR.findall(src))
+        anchors += n
+        # A goish file with NO provenance anchor at all is where invented
+        # code lives. Its fn names still match Go's by string, so they
+        # count as "ported" — which is exactly how src/crypto/ecdsa/mod.rs
+        # read as done for four sessions while holding 915 lines of
+        # hand-rolled P-256. is_squatter only catches this when the WHOLE
+        # package is invented; one anchorless file inside a partly-ported
+        # package slips through. So the names are tracked and reported.
+        if n == 0:
+            unanchored |= {norm(i) for i in mine}
         cited |= set(ANCHOR_GO.findall(src))
         loc += src.count("\n")
     return {"idents": {norm(i) for i in idents}, "loc": loc,
-            "nfiles": len(paths), "anchors": anchors, "cited": cited}
+            "nfiles": len(paths), "anchors": anchors, "cited": cited,
+            "unanchored": unanchored}
 
 
 def scan_rs(root):
@@ -380,6 +392,8 @@ def build(subtree, gr):
             "missing": missing,
             "missing_asm": missing_asm,
             "gap_portable": len(missing) - len(missing_asm),
+            "unanchored": sorted(f for f in hit
+                                 if r and norm(f) in r["unanchored"]),
         })
     return rows
 
@@ -401,6 +415,14 @@ def main():
                       f"{r['go_files']} .go / {r['rs_files']} .rs, {r['anchors']} anchors")
                 print(f"  gap {len(r['missing'])} = {r['gap_portable']} portable "
                       f"+ {len(r['missing_asm'])} assembly")
+                if r["unanchored"]:
+                    print(f"  UNVERIFIED: {len(r['unanchored'])} of the {r['ported']} "
+                          f"'ported' names come from goish files with NO `// go:` "
+                          f"anchor. They match Go by NAME ONLY — GOISH018 cannot "
+                          f"diff them, so a rename, a dropped arg or an invented "
+                          f"body is invisible. Anchor them with "
+                          f"scripts/anchor_by_name.py:")
+                    print(f"    {' '.join(r['unanchored'])}")
                 asm = set(r["missing_asm"])
                 for m in r["missing"]:
                     print(f"  MISSING {m}" + ("  [asm]" if m in asm else ""))
@@ -414,7 +436,11 @@ def main():
     ta = sum(r["anchors"] for r in rows)
     tasm = sum(len(r["missing_asm"]) for r in rows)
     tport = sum(r["gap_portable"] for r in rows)
+    tun = sum(len(r["unanchored"]) for r in rows)
     split = f"{tf - tp} left = {tport} portable + {tasm} assembly"
+    if tun:
+        split += (f"; {tun} counted name(s) are UNVERIFIED "
+                  f"(anchorless — name match only)")
     if "--md" in argv:
         print("| package | Go .go | Go LOC | Go fns | ported | % | .rs | anchors |")
         print("|---|--:|--:|--:|--:|--:|--:|--:|")
