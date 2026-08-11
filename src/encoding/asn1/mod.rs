@@ -28,15 +28,29 @@
 //     fields. The reflect-driven decode path lands when goish's
 //     `reflect` gains setter dispatch for arbitrary user types.
 //   * Marshal / MarshalWithParams / makeField / makeBody (marshal.go) —
-//     the reflect-driven ENCODE path. This is *not* blocked on setter
-//     dispatch: encoding only reads, and `reflect::Reflect` already
-//     provides `__reflect_value(&self) -> Value` plus a `Value` enum
-//     covering Bool/Int*/Uint*/Float*/String/Slice/Map/Struct/Pointer,
-//     with `Type::Field` and `StructTag::Lookup` for the tag walk. The
-//     deviation it will need is in the signature: Go takes `any`, goish
-//     must take `impl Reflect`, since Rust has no universal runtime
-//     reflection. Everything under it — the encoders and the tag/length
-//     primitives — is ported and checked against Go in marshal.rs.
+//     the reflect-driven ENCODE path.
+//
+//     Correction to what this note said before: it IS blocked on setter
+//     dispatch, in exactly one branch. `makeField`'s default-value
+//     handling does
+//         defaultValue := reflect.New(v.Type()).Elem()
+//         defaultValue.SetInt(*params.defaultValue)
+//     to materialise the declared default and DeepEqual it against the
+//     field. goish's reflect has `Zero` and `DeepEqual` but neither
+//     `New` nor `Value::SetInt`, so that branch — reached only for a
+//     field tagged `asn1:"optional,default:N"` — cannot be written.
+//     Everything else in makeField reads, and the sibling zero-value
+//     branch (`optional` with no default) is portable today since Zero
+//     and DeepEqual both exist.
+//
+//     The signature also deviates: Go takes `any`, goish must take
+//     `impl Reflect`, since Rust has no universal runtime reflection.
+//
+//     Everything *under* these three is now ported and checked against
+//     Go in marshal.rs and common.rs — the tag/length primitives, all
+//     six encoders, the three composite encoders, makeBigInt,
+//     stripTagAndLength, the UTCTime/GeneralizedTime encoders,
+//     parseFieldParameters and getUniversalType.
 //   * parseUTCTime / parseGeneralizedTime — Go uses `time.Parse` with
 //     specific layouts; depends on the format-string interpreter
 //     handling fractional-second + timezone bits.
