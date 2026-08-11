@@ -67,8 +67,10 @@
 //     its banner), so `buildChains`'s `if candidate.constraint != nil`
 //     branch has nothing to test and is absent.
 //   * `Verify`'s `runtime.GOOS == "windows" || "darwin" || "ios"` arm is
-//     dead code on goish, which is linux/amd64 only. It is not ported,
-//     and neither is `Certificate.systemVerify`.
+//     dead code on goish, which is linux/amd64 only, and is not ported.
+//     `Certificate.systemVerify` — the hook that arm calls — *is*
+//     ported, in `root_unix.rs`, where its Go source lives; it is the
+//     Unix no-op stub and nothing reaches it.
 //   * Go's error structs satisfy `error` implicitly through their
 //     `Error() string` method; goish needs an explicit
 //     `impl errors::ErrorTrait`, which is written next to each one.
@@ -78,7 +80,7 @@
 //     field visible. See the comment on the fields.
 //
 // goishlint:ignore GOISH017 matchURIConstraint — netip.ParseAddr has no goish equivalent; see the banner.
-// goishlint:ignore GOISH018 systemVerify, validPolicyNodes — systemVerify is the darwin/windows platform-verifier stub (dead on linux/amd64); validPolicyNodes is ported as a policyGraph method, see below.
+// goishlint:ignore GOISH018 validPolicyNodes — ported as a policyGraph method, see below.
 // goishlint:ignore GOISH020 newPolicyGraphNode — takes the arena-owning graph as a first parameter; see the banner.
 // goishlint:ignore GOISH021 leafCertificate, intermediateCertificate, rootCertificate, maxChainSignatureChecks, errNotParsed, anyPolicyOID — ported, but as `pub(super) const` / a function (goish has no const slice, and `anyPolicyOID` is a heap OID).
 

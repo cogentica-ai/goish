@@ -1087,10 +1087,13 @@ pub(super) fn signaturePublicKeyAlgoMismatchError(
 /// arm does not exist — Go dropped it from `checkSignature` too; a DSA
 /// key falls through to `ErrUnsupportedAlgorithm`, exactly as in Go.
 ///
-/// `hashType.New()` panics in goish when the hash is not registered, so
-/// this relies on Go's own `hashType.Available()` guard one line above
-/// it. A program that never calls `crypto::RegisterStandardHashes()`
-/// sees `ErrUnsupportedAlgorithm` from that guard rather than a panic.
+/// `hashType.New()` panics in goish when the hash is not registered.
+/// Go's own `hashType.Available()` guard, one line above it, is what
+/// makes that unreachable: an unregistered hash returns
+/// `ErrUnsupportedAlgorithm` instead. In practice the registry is always
+/// populated — `#[goish::main]` emits `goish::init()`, which calls
+/// `crypto::RegisterStandardHashes()` — so this is belt-and-braces, not
+/// a caller obligation.
 pub(super) fn checkSignature(
     algo: SignatureAlgorithm,
     signed: slice<byte>,

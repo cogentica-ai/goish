@@ -1,4 +1,4 @@
-// go: file crypto/x509/root_unix.go decls: loadSystemRoots, readUniqueDirectoryEntries, isSameDirSymlink
+// go: file crypto/x509/root_unix.go decls: Certificate.systemVerify, loadSystemRoots, readUniqueDirectoryEntries, isSameDirSymlink
 //
 // The Unix platform trust store: the `SSL_CERT_FILE` / `SSL_CERT_DIR`
 // overrides and the well-known bundle paths.
@@ -18,11 +18,14 @@
 //     `x509.rs` already uses for its OID vars. `root_linux.go`'s `init()`
 //     appends two Android paths when `goos.IsAndroid == 1`; goish is
 //     linux/amd64, so that branch is dead and is not ported.
-//   * `Certificate.systemVerify` is a two-line `return nil, nil` stub on
-//     Unix — the hook the darwin/windows files fill in. `Verify` never
-//     reaches it on linux (its caller is inside the
-//     `runtime.GOOS == "windows" || "darwin" || "ios"` arm), so it is not
-//     ported. See verify.rs's banner.
+//   * `Certificate.systemVerify` is ported verbatim, but it is dead code
+//     here: on Unix it is a two-line `return nil, nil` stub — the hook
+//     the darwin/windows files fill in — and its only caller sits inside
+//     `Verify`'s `runtime.GOOS == "windows" || "darwin" || "ios"` arm,
+//     which goish does not port. It carries `#[allow(dead_code)]` for
+//     that reason. Porting the stub rather than waiving it keeps the
+//     fidelity tier watching this file; a GOISH018 waiver would blind it
+//     to every *future* dropped declaration too.
 //   * `loadSystemRoots` returns `(*CertPool, error)` and hands back a nil
 //     pool with the error. goish returns `(CertPool, error)`; on failure
 //     the pool is the zero value, whose `Len()` is 0. `root.rs`'s
@@ -33,7 +36,6 @@
 //     share one allocation. goish builds a fresh slice; same elements,
 //     same order.
 //
-// goishlint:ignore GOISH018 systemVerify — the Unix `return nil, nil` platform-verifier stub, unreachable on linux/amd64; see the banner.
 // goishlint:ignore GOISH021 certFileEnv, certDirEnv, certFiles, certDirectories — `certFiles`/`certDirectories` are heap-slice `var`s in root_linux.go, spelled as functions; see the banner.
 
 #![allow(non_snake_case, non_upper_case_globals)]
@@ -44,6 +46,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use super::cert_pool::{CertPool, NewCertPool};
+use super::verify::VerifyOptions;
+use super::x509::Certificate;
 use crate::error;
 use crate::errors;
 use crate::goslice::slice;
@@ -94,6 +98,20 @@ fn certDirectories() -> slice<string> {
     // Fedora/RHEL
     v.push(string::from("/etc/pki/tls/certs"));
     return slice::__from_vec(v);
+}
+
+impl Certificate {
+    // go: sdk 1.25.5 crypto/x509/root_unix.go:28-30 Certificate.systemVerify
+    /// The platform-verifier hook. On Unix it does nothing; the darwin
+    /// and windows build-tag variants of this file are where it has a
+    /// body. Dead code in goish — see the banner.
+    #[allow(dead_code)]
+    pub(super) fn systemVerify(
+        &self,
+        _opts: &VerifyOptions,
+    ) -> (slice<slice<Certificate>>, error) {
+        return (slice::new(), errors::nil);
+    }
 }
 
 // go: sdk 1.25.5 crypto/x509/root_unix.go:32-82 loadSystemRoots
