@@ -151,6 +151,49 @@ def is_boringcrypto(path):
     return False
 
 
+def asm_decls(paths):
+    """Names of Go funcs declared with NO body — the assembly stubs.
+
+    Why this is worth computing: the raw gap column has produced a wrong
+    leverage claim three times in this repo. `fips140deps/godebug` looked
+    like a blocker on 45 functions across five packages; 44 of them were
+    `*Asm` / `gcmAes*` / `blockAVX2` / `blockSHANI`, and the real leverage
+    was one function. The gap number was true and the conclusion drawn
+    from it was false.
+
+    A bodyless `func` is the exact signal, and it beats filename
+    heuristics: `_amd64.go` holds both the stubs and the Go dispatch code
+    that chooses between them, and the dispatch code is ordinary portable
+    Go. (A handful of bodyless decls are `//go:linkname` rather than
+    assembly. Both are alike for ranking: neither is a function you port
+    by reading Go and writing goish.)
+    """
+    out = set()
+    for p in paths:
+        lines = open(p, errors="replace").read().split("\n")
+        i = 0
+        while i < len(lines):
+            if not lines[i].startswith("func "):
+                i += 1
+                continue
+            # Join a signature that wraps across lines: balance parens,
+            # then ask whether the declaration ended on an opening brace.
+            text, depth, seen = "", 0, False
+            j = i
+            while j < len(lines):
+                text += lines[j]
+                depth += lines[j].count("(") - lines[j].count(")")
+                seen = seen or "(" in lines[j]
+                if seen and depth <= 0:
+                    break
+                j += 1
+            m = FUNC.match(text)
+            if m and not text.rstrip().endswith("{"):
+                out.add(m.group(1))
+            i = j + 1
+    return out
+
+
 def scan_go(root):
     out = {}
     for dirpath, _, files in os.walk(root):
@@ -171,7 +214,9 @@ def scan_go(root):
             src = open(os.path.join(dirpath, f), errors="replace").read()
             funcs |= set(FUNC.findall(src))
             loc += src.count("\n")
+        paths = [os.path.join(dirpath, f) for f in gofiles]
         out[rel or "."] = {"nfiles": len(gofiles), "loc": loc,
+                           "asm": asm_decls(paths),
                            "funcs": sorted(f for f in funcs if not f.startswith("init"))}
     return out
 
@@ -235,13 +280,20 @@ def build(subtree, gr):
         have = r["idents"] if r else set()
         hit = [f for f in g["funcs"] if norm(f) in have]
         want = g["funcs"]
+        missing = sorted(set(want) - set(hit))
+        # Split the gap: what is left to *write in goish* versus what is
+        # left to write in assembly. Ranking on the raw gap has misled
+        # three times — see asm_decls.
+        missing_asm = sorted(m for m in missing if m in g["asm"])
         rows.append({
             "pkg": pkg, "go_files": g["nfiles"], "go_loc": g["loc"],
             "go_funcs": len(want), "ported": len(hit),
             "pct": round(100.0 * len(hit) / len(want), 1) if want else 100.0,
             "rs_files": r["nfiles"] if r else 0, "rs_loc": r["loc"] if r else 0,
             "anchors": r["anchors"] if r else 0,
-            "missing": sorted(set(want) - set(hit)),
+            "missing": missing,
+            "missing_asm": missing_asm,
+            "gap_portable": len(missing) - len(missing_asm),
         })
     return rows
 
@@ -261,8 +313,11 @@ def main():
             if r["pkg"] == want or r["pkg"].endswith("/" + want):
                 print(f"{r['pkg']}: {r['ported']}/{r['go_funcs']} ported ({r['pct']}%), "
                       f"{r['go_files']} .go / {r['rs_files']} .rs, {r['anchors']} anchors")
+                print(f"  gap {len(r['missing'])} = {r['gap_portable']} portable "
+                      f"+ {len(r['missing_asm'])} assembly")
+                asm = set(r["missing_asm"])
                 for m in r["missing"]:
-                    print(f"  MISSING {m}")
+                    print(f"  MISSING {m}" + ("  [asm]" if m in asm else ""))
         return
     if "--json" in argv:
         print(json.dumps(rows, indent=1))
@@ -271,6 +326,9 @@ def main():
     tf = sum(r["go_funcs"] for r in rows)
     tp = sum(r["ported"] for r in rows)
     ta = sum(r["anchors"] for r in rows)
+    tasm = sum(len(r["missing_asm"]) for r in rows)
+    tport = sum(r["gap_portable"] for r in rows)
+    split = f"{tf - tp} left = {tport} portable + {tasm} assembly"
     if "--md" in argv:
         print("| package | Go .go | Go LOC | Go fns | ported | % | .rs | anchors |")
         print("|---|--:|--:|--:|--:|--:|--:|--:|")
@@ -278,7 +336,7 @@ def main():
             print(f"| `{r['pkg']}` | {r['go_files']} | {r['go_loc']} | {r['go_funcs']} "
                   f"| {r['ported']} | {r['pct']}% | {r['rs_files']} | {r['anchors']} |")
         print(f"\n**TOTAL: {tp}/{tf} = {100.0*tp/tf:.1f}%** across {len(rows)} in-scope "
-              f"packages; {ta} provenance anchors.")
+              f"packages; {ta} provenance anchors. {split}.")
         return
 
     print(f"{'package':44} {'.go':>4} {'goLOC':>6} {'fns':>4} {'port':>4} {'%':>6} {'.rs':>4} {'anch':>4}")
@@ -288,6 +346,7 @@ def main():
     print(f"\nTOTAL {tp}/{tf} funcs = {100.0*tp/tf:.1f}%   "
           f"{len(rows)} packages   {sum(r['go_loc'] for r in rows)} Go LOC vs "
           f"{sum(r['rs_loc'] for r in rows)} goish LOC   {ta} anchors")
+    print(f"      {split}")
 
 
 if __name__ == "__main__":

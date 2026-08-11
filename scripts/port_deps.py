@@ -299,6 +299,11 @@ def coverage(subtree, pkg):
             "pct": float(m.group(3)),
             "anchors": int(m.group(4)),
         }
+        # The gap split, so ranking reflects work that is actually Go to
+        # read and goish to write. See port_coverage.asm_decls.
+        s = re.search(r"gap \d+ = (\d+) portable \+ (\d+) assembly", out)
+        got["portable"] = int(s.group(1)) if s else got["total"] - got["ported"]
+        got["asm"] = int(s.group(2)) if s else 0
     _COV_CACHE[key] = got
     return got
 
@@ -497,11 +502,14 @@ def ready(subtree):
                 gone = missing_symbols(goish_dir(p), imps[p]["syms"])
                 if gone:
                     gaps.append("%s.%s" % (default_local(p), ",".join(gone)))
-        rows.append((total - done, rel, pct, missing, external, squat, self_squat, gaps))
-    rows.sort(key=lambda r: (-r[0], r[1]))
-    print("%-44s %6s  %5s  %s" % ("package", "gap", "done", "blockers"))
+        rows.append((cov["portable"], cov["asm"], rel, pct,
+                     missing, external, squat, self_squat, gaps))
+    # Rank on the PORTABLE gap. Ranking on the raw gap put packages at the
+    # top whose remaining work was almost entirely assembly.
+    rows.sort(key=lambda r: (-r[0], r[2]))
+    print("%-42s %5s %5s  %5s  %s" % ("package", "port", "asm", "done", "blockers"))
     print("-" * 100)
-    for gap, rel, pct, missing, external, squat, self_squat, gaps in rows:
+    for gap, asm, rel, pct, missing, external, squat, self_squat, gaps in rows:
         if self_squat:
             # READY would be a lie: the path is occupied by invented code
             # and has to be evicted before a line of the port can land.
@@ -516,7 +524,7 @@ def ready(subtree):
             note = "external: " + ",".join(external)
         else:
             note = "READY"
-        print("%-44s %6d  %4.0f%%  %s" % (rel, gap, pct, note))
+        print("%-42s %5d %5d  %4.0f%%  %s" % (rel, gap, asm, pct, note))
     return 0
 
 
