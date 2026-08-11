@@ -541,12 +541,11 @@ impl encoder for taggedEncoder {
 
 // ─── makeBigInt / stripTagAndLength ───────────────────────────────────
 
-// Go: marshal.go:19-20
+// go: none — goish idiom: Go declares these at marshal.go:19-20 as
+// package-level `encoder` vars —
 //   byte00Encoder encoder = byteEncoder(0x00)
 //   byteFFEncoder encoder = byteEncoder(0xff)
-//
-// go: none — goish idiom: Go declares these as package-level `encoder`
-// vars; a trait object cannot be a `const`, so they are constructors.
+// — and a trait object cannot be a `const`, so they are constructors.
 fn byte00Encoder() -> alloc::boxed::Box<dyn encoder> {
     return alloc::boxed::Box::new(byteEncoder(0x00));
 }
@@ -598,28 +597,28 @@ pub fn makeBigInt(n: &Int) -> (alloc::boxed::Box<dyn encoder>, error) {
             alloc::boxed::Box::new(bytesEncoder(slice::__from_vec(bytes))),
             nil,
         );
-    } else if n.Sign() == 0 {
+    }
+    if n.Sign() == 0 {
         // Zero is written as a single 0 zero rather than no bytes.
         return (byte00Encoder(), nil);
-    } else {
-        let bytes = n.Bytes().__into_vec();
-        if !bytes.is_empty() && bytes[0] & 0x80 != 0 {
-            // We'll have to pad this with 0x00 in order to stop it looking
-            // like a negative number.
-            return (
-                alloc::boxed::Box::new(multiEncoder::New(slice::__from_vec(alloc::vec![
-                    byte00Encoder(),
-                    alloc::boxed::Box::new(bytesEncoder(slice::__from_vec(bytes)))
-                        as alloc::boxed::Box<dyn encoder>,
-                ]))),
-                nil,
-            );
-        }
+    }
+    let bytes = n.Bytes().__into_vec();
+    if !bytes.is_empty() && bytes[0] & 0x80 != 0 {
+        // We'll have to pad this with 0x00 in order to stop it looking
+        // like a negative number.
         return (
-            alloc::boxed::Box::new(bytesEncoder(slice::__from_vec(bytes))),
+            alloc::boxed::Box::new(multiEncoder::New(slice::__from_vec(alloc::vec![
+                byte00Encoder(),
+                alloc::boxed::Box::new(bytesEncoder(slice::__from_vec(bytes)))
+                    as alloc::boxed::Box<dyn encoder>,
+            ]))),
             nil,
         );
     }
+    return (
+        alloc::boxed::Box::new(bytesEncoder(slice::__from_vec(bytes))),
+        nil,
+    );
 }
 
 // go: sdk 1.25.5 encoding/asn1/marshal.go:659-665 stripTagAndLength
