@@ -950,8 +950,9 @@ fn slice_to_bytes(s: &slice<byte>) -> alloc::vec::Vec<byte> {
 // only has one if it implements `Reflect`. None of these did, so that
 // switch was unrepresentable no matter how it was written.
 //
-// These four impls supply it for asn1's own types. `time::Time` and
-// `big::Int` belong to their own packages and still need theirs.
+// These four impls supply it for asn1's own types. `time::Time` already
+// had one (as "time.Time"); `big::Int` gained one in its own package.
+// All six identities getUniversalType matches on now exist.
 
 impl crate::reflect::Reflect for ObjectIdentifier {
     // go: none — goish-only: the reflect descriptor. See the banner above.
