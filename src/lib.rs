@@ -287,6 +287,7 @@ pub use goish_macros::var_emit_error_marker as __var_emit_error_marker;
 pub fn init() {
     pkg_init_once!("goish", {
         crypto::RegisterStandardHashes();
+        crypto::RegisterStandardSigners();
     });
 }
 

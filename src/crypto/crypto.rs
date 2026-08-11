@@ -235,6 +235,32 @@ pub fn RegisterStandardHashes() {
     RegisterHash(SHA3_512, crate::crypto::sha3::NewHash512);
 }
 
+// go: none — goish idiom: Go's `priv.(crypto.Signer)` is a *structural*
+// assertion — the compiler already knows `*rsa.PrivateKey` has the two
+// methods, so nothing has to be registered anywhere. Rust's traits are
+// nominal, so `#[goish::interface]` closes the gap with a runtime
+// registry (goany.rs:557), and that registry is only populated by an
+// explicit `__goish_register_Signer_impl::<C>()` per `impl Signer for
+// C`. Nothing was calling it, so **every** `cast!(priv, crypto::Signer)`
+// missed and `x509::CreateCertificate` reported "certificate private key
+// does not implement crypto.Signer" for a key that plainly does.
+//
+// This is `RegisterStandardHashes`'s sibling and for the same reason:
+// goish has no per-package `init()` driver, so what Go does at link time
+// is done here, once, from `goish::init()`.
+/// Register every private-key type in goish's `crypto` tree that
+/// implements [`Signer`], so that `goish::cast!(key, crypto::Signer)` on
+/// an `Any`-wrapped key resolves. Idempotent.
+///
+/// `crypto/ecdsa`'s `PrivateKey` is absent because it does not yet
+/// implement [`Signer`] in goish — Go's does. Adding it belongs to
+/// `crypto/ecdsa`, not here; until then an ECDSA key cannot sign an
+/// x509 certificate.
+pub fn RegisterStandardSigners() {
+    __goish_register_Signer_impl::<crate::crypto::rsa::PrivateKey>();
+    __goish_register_Signer_impl::<crate::crypto::ed25519::PrivateKey>();
+}
+
 // ─── Signer / Decrypter trait surface — crypto.go:162-243 ────────────
 
 /// Go: `type PublicKey any` at crypto.go:162 — opaque public key. Concrete types

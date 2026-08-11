@@ -96,9 +96,11 @@ pub struct RDNSequence(pub slice<RelativeDistinguishedNameSET>);
 // []RelativeDistinguishedNameSET` is a Go slice type; the newtype is
 // goish's spelling of it, and this makes `reflect` see through it.
 impl crate::reflect::Reflect for RDNSequence {
+    // go: none — goish idiom (reflect descriptor for a named slice type)
     fn __reflect_type() -> crate::reflect::Type {
         return <slice<RelativeDistinguishedNameSET> as crate::reflect::Reflect>::__reflect_type();
     }
+    // go: none — goish idiom (reflect descriptor for a named slice type)
     fn __reflect_value(&self) -> crate::reflect::Value {
         return <slice<RelativeDistinguishedNameSET> as crate::reflect::Reflect>::__reflect_value(
             &self.0,
@@ -249,6 +251,7 @@ pub struct RelativeDistinguishedNameSET(pub slice<AttributeTypeAndValue>);
 // writes `0x31`, so the value is wrapped in `Value::Named`, the variant
 // that exists to carry exactly this.
 impl crate::reflect::Reflect for RelativeDistinguishedNameSET {
+    // go: none — goish idiom (reflect descriptor for a named slice type)
     fn __reflect_type() -> crate::reflect::Type {
         return crate::reflect::Type::__new(
             crate::reflect::Kind::Slice,
@@ -257,6 +260,7 @@ impl crate::reflect::Reflect for RelativeDistinguishedNameSET {
         )
         .__with_elem(<AttributeTypeAndValue as crate::reflect::Reflect>::__reflect_type);
     }
+    // go: none — goish idiom (reflect descriptor for a named slice type)
     fn __reflect_value(&self) -> crate::reflect::Value {
         return crate::reflect::Value::Named {
             ty: <Self as crate::reflect::Reflect>::__reflect_type(),

@@ -1,4 +1,4 @@
-// go: file crypto/x509/cert_pool.go decls: NewCertPool, len, cert, Clone, AddCert, addCertFunc, AppendCertsFromPEM, Subjects, Equal, AddCertWithConstraint
+// go: file crypto/x509/cert_pool.go decls: NewCertPool, len, cert, Clone, SystemCertPool, findPotentialParents, contains, AddCert, addCertFunc, AppendCertsFromPEM, Subjects, Equal, AddCertWithConstraint
 //
 // A set of certificates.
 //
@@ -22,16 +22,17 @@
 //     implement, so the key is `string::from_bytes(&sum)` — the same 28
 //     bytes, in the only keyable carrier goish has for them. `sum224`
 //     itself keeps Go's shape and is what `sha256::Sum224` returns.
-//   * `findPotentialParents` and `contains` are chain-building helpers
-//     read only by verify.go; they are absent.
-//   * `SystemCertPool` needs `systemRootsPool` / `loadSystemRoots` from
-//     root.go and root_unix.go, which read the filesystem for the
-//     platform trust store. Absent.
+//   * `potentialParent` carries only `cert`. Go's second field is the
+//     `constraint func([]*Certificate) error` that `lazyCert` does not
+//     store here, per the bullet above.
+//   * `SystemCertPool` returns `(*CertPool, error)` in Go and hands back
+//     a nil pool on failure. goish returns `(CertPool, error)`; on
+//     failure the pool is the zero value, whose `len()` is 0. The nilable
+//     spelling that `verify.rs` needs — `Option<CertPool>` — is what
+//     `root.rs::systemRootsPool` returns.
 //
-// goishlint:ignore GOISH018 findPotentialParents, contains, SystemCertPool — chain-building and platform-trust-store helpers; see the banner.
-// goishlint:ignore GOISH019 potentialParent — the row type of findPotentialParents, which is not ported.
-// goishlint:ignore GOISH021 potentialParent — the row type of findPotentialParents, which is not ported.
 // goishlint:ignore GOISH020 addCertFunc, AddCertWithConstraint — Go passes the cert as a `getCert func() (*Certificate, error)` closure and a `constraint func([]*Certificate) error`; goish stores the parsed value and drops the constraint, so each loses one parameter. See the banner.
+// goishlint:ignore GOISH019 lazyCert — the `getCert` / `constraint` closure fields are values here; see the banner.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -42,6 +43,7 @@ use alloc::vec::Vec;
 use super::parser::ParseCertificate;
 use super::x509::Certificate;
 use crate::crypto::sha256;
+use crate::error;
 use crate::encoding::pem;
 use crate::gomap::map;
 use crate::goslice::slice;
@@ -85,6 +87,37 @@ struct lazyCert {
 
     /// The certificate.
     getCert: Certificate,
+}
+
+// Go: cert_pool.go:125-128
+/// A candidate signer found by `findPotentialParents`. Go's second
+/// field, `constraint func([]*Certificate) error`, has no counterpart —
+/// `lazyCert` does not store it. See the banner.
+#[derive(Clone, Default)]
+pub(super) struct potentialParent {
+    pub cert: Certificate,
+}
+
+// go: sdk 1.25.5 crypto/x509/cert_pool.go:106-123 SystemCertPool
+/// Return a copy of the system cert pool.
+///
+/// On Unix systems the environment variables SSL_CERT_FILE and
+/// SSL_CERT_DIR can be used to override the system default locations for
+/// the SSL certificate file and SSL certificate files directory,
+/// respectively. The latter can be a colon-separated list.
+///
+/// Any mutations to the returned pool are not written to disk and do not
+/// affect any other pool returned by SystemCertPool.
+///
+/// Go returns a nil `*CertPool` alongside the error; goish returns the
+/// zero-value pool, whose `Len()` is 0.
+pub fn SystemCertPool() -> (CertPool, error) {
+    let sysRoots = super::root::systemRootsPool();
+    if let Some(p) = sysRoots {
+        return (p.Clone(), crate::errors::nil);
+    }
+
+    return super::root_unix::loadSystemRoots();
 }
 
 // go: sdk 1.25.5 crypto/x509/cert_pool.go:63-69 NewCertPool
@@ -133,6 +166,81 @@ impl CertPool {
             haveSum: self.haveSum.clone(),
             systemPool: self.systemPool,
         };
+    }
+
+    // go: sdk 1.25.5 crypto/x509/cert_pool.go:130-170 CertPool.findPotentialParents
+    /// The certificates in s which might have signed cert. Go's nil
+    /// receiver returns nil; the zero-value pool here has an empty
+    /// `byName` and reaches the same `found == 0` exit.
+    pub(super) fn findPotentialParents(&self, cert: &Certificate) -> slice<potentialParent> {
+        // consider all candidates where cert.Issuer matches cert.Subject.
+        // when picking possible candidates the list is built in the order
+        // of match plausibility as to save cycles in buildChains:
+        //   AKID and SKID match
+        //   AKID present, SKID missing / AKID missing, SKID present
+        //   AKID and SKID don't match
+        let mut matchingKeyID: slice<potentialParent> = slice::new();
+        let mut oneKeyID: slice<potentialParent> = slice::new();
+        let mut mismatchKeyID: slice<potentialParent> = slice::new();
+        let (idxs, _) = self.byName.Get(string::from_bytes(&cert.RawIssuer));
+        for (_, c) in crate::range!(idxs) {
+            // Go's `s.cert(c)` also returns an error from the lazy parse
+            // and a `continue` for it; goish stores the parsed value, so
+            // there is no error to skip on. See the banner.
+            let candidate = self.cert(*c);
+            let kidMatch = crate::bytes::Equal(
+                candidate.SubjectKeyId.clone(),
+                cert.AuthorityKeyId.clone(),
+            );
+            if kidMatch {
+                matchingKeyID =
+                    crate::append!(matchingKeyID, potentialParent { cert: candidate });
+            } else if (candidate.SubjectKeyId.Len() == 0 && cert.AuthorityKeyId.Len() > 0)
+                || (candidate.SubjectKeyId.Len() > 0 && cert.AuthorityKeyId.Len() == 0)
+            {
+                oneKeyID = crate::append!(oneKeyID, potentialParent { cert: candidate });
+            } else {
+                mismatchKeyID =
+                    crate::append!(mismatchKeyID, potentialParent { cert: candidate });
+            }
+        }
+
+        let found = matchingKeyID.Len() + oneKeyID.Len() + mismatchKeyID.Len();
+        if found == 0 {
+            return slice::new();
+        }
+        let mut candidates: Vec<potentialParent> = Vec::with_capacity(found as usize);
+        for (_, p) in crate::range!(matchingKeyID) {
+            candidates.push(p.clone());
+        }
+        for (_, p) in crate::range!(oneKeyID) {
+            candidates.push(p.clone());
+        }
+        for (_, p) in crate::range!(mismatchKeyID) {
+            candidates.push(p.clone());
+        }
+        return slice::__from_vec(candidates);
+    }
+
+    // go: sdk 1.25.5 crypto/x509/cert_pool.go:172-177 CertPool.contains
+    pub(super) fn contains(&self, cert: &Certificate) -> bool {
+        let sum = sha256::Sum224(cert.Raw.clone());
+        let (have, _) = self.haveSum.Get(string::from_bytes(&sum));
+        return have;
+    }
+
+    // go: none — goish idiom: `systemPool` is unexported in Go and set
+    // only by `initSystemRoots`, which lives in root.go — a different
+    // file in the same package. goish's module boundary is per file, so
+    // the write needs a `pub(super)` setter.
+    pub(super) fn __setSystemPool(&mut self, v: bool) {
+        self.systemPool = v;
+    }
+
+    // go: none — goish idiom: the read half of `__setSystemPool`, needed
+    // by `root.rs::SetFallbackRoots`.
+    pub(super) fn __systemPool(&self) -> bool {
+        return self.systemPool;
     }
 
     // go: sdk 1.25.5 crypto/x509/cert_pool.go:179-187 CertPool.AddCert

@@ -1439,7 +1439,7 @@ where
 // need a non-optional one. A descriptor that never recorded its element
 // type reports `Invalid`, which is what `Type::Elem()` already does.
 fn __invalidType() -> Type {
-    Type::__new(Kind::Invalid, "", &[])
+    return Type::__new(Kind::Invalid, "", &[]);
 }
 
 /// `reflect.Zero(t)` (Go 1.25 `src/reflect/value.go`) — the zero
