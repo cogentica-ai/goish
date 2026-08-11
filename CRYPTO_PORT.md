@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **598/1507 = 39.7%**, 648 anchors, **26 packages fully verified**
+Current: **688/1507 = 45.7%**, 780 anchors, **32 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -36,7 +36,11 @@ Current: **598/1507 = 39.7%**, 648 anchors, **26 packages fully verified**
 | `crypto/sha1` | 17/19 | 5 → 4 |
 | `crypto/internal/fips140deps/byteorder` | 11/11 | 1 → 2 |
 | `internal/byteorder` (outside crypto/) | 18/18 | 1 → 2 |
-| **total** | **309** | |
+| `crypto/internal/fips140/tls12` | 3/3 | 2 → 2 |
+| `crypto/internal/fips140/tls13` | 17/17 | 2 → 2 |
+| `crypto/internal/fips140/ssh` | 1/1 | 1 → 2 |
+| `crypto/internal/fips140/mlkem` | 69/69 | 4 → 4 |
+| **total** | **399** | |
 
 The only functions missing from that table are assembly entry points:
 `blockAVX2`/`blockSHANI` in fips140/sha256 and in crypto/sha1,
@@ -59,6 +63,33 @@ python3 scripts/port_coverage.py crypto            # table
 python3 scripts/port_coverage.py crypto --md       # markdown (this doc)
 python3 scripts/port_coverage.py crypto --pkg tls  # per-package missing list
 ```
+
+
+## Verification: ground truth from Go itself
+
+`scripts/goref.sh <import-path> <ref-test-file>` copies GOROOT into a
+writable directory and runs a throwaway `TestGoishRef` *inside* it, so
+the reference file can import `crypto/internal/...` and reach unexported
+symbols. See AGENTS.md §10.
+
+This changed how ports get verified. Hand-transcribed vectors produced a
+plausible-but-wrong expectation twice here — a CMAC literal whose line
+continuation collapsed, and an SSH-KDF tag-F row pasted against a tag-D
+call — each costing a cycle spent hunting a port bug that did not exist.
+More importantly, most of what remains has *no* published intermediate
+vectors: FIPS 203 publishes end-to-end ML-KEM values and nothing for the
+NTT or the Barrett reduction underneath, and the same is true of nistec
+and bigmod. Without goref those packages could only be round-trip tested,
+which passes on a consistently wrong implementation.
+
+`crypto/internal/fips140/mlkem` is the first package taken to 100% this
+way: 1564 Go LOC, 69/69 functions, 102 anchors, 94 assertions across
+three examples, and not one transcribed literal. compress/decompress are
+swept over their entire domain rather than sampled, because the rounding
+boundaries are exactly where they go wrong.
+
+Published vectors still earn a place as a *second* anchor where they
+exist — matching both Go and NIST is stronger than matching either.
 
 ## Per-package conversion recipe (proven on rc4, subtle, des)
 
