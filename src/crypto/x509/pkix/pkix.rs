@@ -77,9 +77,11 @@ use crate::types::{byte, int, rune};
 //       Parameters asn1.RawValue `asn1:"optional"`
 //   }
 /// The ASN.1 structure of the same name. See RFC 5280, section 4.1.1.2.
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default, PartialEq)]
 pub struct AlgorithmIdentifier {
     pub Algorithm: asn1::ObjectIdentifier,
+    #[tag(r#"asn1:"optional""#)]
     pub Parameters: asn1::RawValue,
 }
 
@@ -88,6 +90,23 @@ pub struct AlgorithmIdentifier {
 /// this is a newtype rather than an alias.
 #[derive(Clone, Default, PartialEq)]
 pub struct RDNSequence(pub slice<RelativeDistinguishedNameSET>);
+
+// go: none — goish idiom: same delegation as
+// `RelativeDistinguishedNameSET` below. `type RDNSequence
+// []RelativeDistinguishedNameSET` is a Go slice type; the newtype is
+// goish's spelling of it, and this makes `reflect` see through it.
+impl crate::reflect::Reflect for RDNSequence {
+    // go: none — goish idiom (reflect descriptor for a named slice type)
+    fn __reflect_type() -> crate::reflect::Type {
+        return <slice<RelativeDistinguishedNameSET> as crate::reflect::Reflect>::__reflect_type();
+    }
+    // go: none — goish idiom (reflect descriptor for a named slice type)
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return <slice<RelativeDistinguishedNameSET> as crate::reflect::Reflect>::__reflect_value(
+            &self.0,
+        );
+    }
+}
 
 // go: none — goish idiom: Go's `attributeTypeNames` is a package-level
 // `map[string]string` var (pkix.go:26-36). goish has no const map, so —
@@ -216,9 +235,46 @@ const backslash: rune = 0x5C;
 #[derive(Clone, Default, PartialEq)]
 pub struct RelativeDistinguishedNameSET(pub slice<AttributeTypeAndValue>);
 
+// go: none — goish idiom: Go's `RelativeDistinguishedNameSET` IS a slice
+// type, so `reflect.ValueOf` of one reports `reflect.Slice` and
+// `asn1.Marshal` walks its elements. goish spells the same Go type as a
+// newtype (see the banner), and `#[goish::reflect(reflect_only)]` only
+// parses named-field structs, so the delegation to the inner `slice<T>`
+// is written out.
+//
+// The descriptor's **name** is load-bearing, not cosmetic:
+// `asn1::getUniversalType` picks `TagSet` over `TagSequence` via
+// `strings.HasSuffix(t.Name(), "SET")` (common.rs:204) — which is the
+// very reason the banner gives for these being newtypes and not
+// aliases. A bare `Value::Slice` reports an empty name from `Type()`
+// (reflect/mod.rs:784) and would encode this SET as `0x30` where Go
+// writes `0x31`, so the value is wrapped in `Value::Named`, the variant
+// that exists to carry exactly this.
+impl crate::reflect::Reflect for RelativeDistinguishedNameSET {
+    // go: none — goish idiom (reflect descriptor for a named slice type)
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(
+            crate::reflect::Kind::Slice,
+            "RelativeDistinguishedNameSET",
+            &[],
+        )
+        .__with_elem(<AttributeTypeAndValue as crate::reflect::Reflect>::__reflect_type);
+    }
+    // go: none — goish idiom (reflect descriptor for a named slice type)
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return crate::reflect::Value::Named {
+            ty: <Self as crate::reflect::Reflect>::__reflect_type(),
+            inner: alloc::boxed::Box::new(<slice<AttributeTypeAndValue> as crate::reflect::Reflect>::__reflect_value(
+                &self.0,
+            )),
+        };
+    }
+}
+
 // Go: pkix.go:99-102
 /// Mirrors the ASN.1 structure of the same name in RFC 5280,
 /// Section 4.1.2.4.
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default, PartialEq)]
 pub struct AttributeTypeAndValue {
     pub Type: asn1::ObjectIdentifier,
@@ -228,17 +284,21 @@ pub struct AttributeTypeAndValue {
 // Go: pkix.go:106-109
 /// A set of ASN.1 sequences of [`AttributeTypeAndValue`] sequences from
 /// RFC 2986 (PKCS #10).
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default, PartialEq)]
 pub struct AttributeTypeAndValueSET {
     pub Type: asn1::ObjectIdentifier,
+    #[tag(r#"asn1:"set""#)]
     pub Value: slice<slice<AttributeTypeAndValue>>,
 }
 
 // Go: pkix.go:113-117
 /// The ASN.1 structure of the same name. See RFC 5280, section 4.2.
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default, PartialEq)]
 pub struct Extension {
     pub Id: asn1::ObjectIdentifier,
+    #[tag(r#"asn1:"optional""#)]
     pub Critical: bool,
     pub Value: slice<byte>,
 }
@@ -493,6 +553,7 @@ fn oidInAttributeTypeAndValue(
 /// Deprecated: `x509::RevocationList` should be used instead.
 // No `PartialEq`: `time::Time` has none and `big::Int`'s is against
 // a different RHS. Go compares neither of these structs with `==`.
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default)]
 pub struct CertificateList {
     pub TBSCertList: TBSCertificateList,
@@ -514,15 +575,20 @@ impl CertificateList {
 /// Deprecated: `x509::RevocationList` should be used instead.
 // No `PartialEq`: `time::Time` has none and `big::Int`'s is against
 // a different RHS. Go compares neither of these structs with `==`.
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default)]
 pub struct TBSCertificateList {
     pub Raw: asn1::RawContent,
+    #[tag(r#"asn1:"optional,default:0""#)]
     pub Version: int,
     pub Signature: AlgorithmIdentifier,
     pub Issuer: RDNSequence,
     pub ThisUpdate: time::Time,
+    #[tag(r#"asn1:"optional""#)]
     pub NextUpdate: time::Time,
+    #[tag(r#"asn1:"optional""#)]
     pub RevokedCertificates: slice<RevokedCertificate>,
+    #[tag(r#"asn1:"tag:0,optional,explicit""#)]
     pub Extensions: slice<Extension>,
 }
 
@@ -530,10 +596,12 @@ pub struct TBSCertificateList {
 /// The ASN.1 structure of the same name. See RFC 5280, section 5.1.
 // No `PartialEq`: `time::Time` has none and `big::Int`'s is against
 // a different RHS. Go compares neither of these structs with `==`.
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default)]
 pub struct RevokedCertificate {
     pub SerialNumber: Int,
     pub RevocationTime: time::Time,
+    #[tag(r#"asn1:"optional""#)]
     pub Extensions: slice<Extension>,
 }
 
@@ -547,56 +615,24 @@ pub struct RevokedCertificate {
 // encoding/asn1/marshal.rs and asn1.rs). Every struct handed to either
 // therefore needs a descriptor.
 //
-// These are hand-written rather than `#[goish::reflect]`-generated. The
-// proc-macro also emits `json::FromValue`, `json::MarshalerTo` and
-// `json::UnmarshalerFrom`, which would require JSON codecs on
+// The **read** half is `#[goish::reflect(reflect_only)]`, on each struct
+// above, carrying Go's own `asn1:"…"` tag in a `#[tag(...)]` attribute —
+// which is where `parseFieldParameters` reads it from
+// (`field.Tag.Get("asn1")` in asn1's `parseField` and `makeBody`).
+// `reflect_only` exists precisely for this shape: the attribute's default
+// expansion also emits `json::FromValue`, `json::v2::MarshalerTo` and
+// `json::v2::UnmarshalerFrom`, which would demand JSON codecs on
 // `asn1::ObjectIdentifier` and `asn1::RawValue` — types that exist to
-// carry DER and have no JSON meaning. `encoding/asn1` hand-writes the
-// descriptors for its own named types (`BIT_STRING_FIELDS` and friends at
-// the foot of asn1/mod.rs) for the same reason; this follows that.
+// carry DER and have no JSON meaning.
 //
-// The `asn1:"optional"` tag is carried in the descriptor because that is
-// where `parseFieldParameters` reads it from — `field.Tag.Get("asn1")` in
-// asn1's `parseField` and `makeBody`.
-
-static ALGORITHM_IDENTIFIER_FIELDS: [crate::reflect::StructField; 2] = [
-    crate::reflect::StructField {
-        Name: "Algorithm",
-        Tag: crate::reflect::StructTag::__new(""),
-        Type: <asn1::ObjectIdentifier as crate::reflect::Reflect>::__reflect_type,
-        PkgPath: "",
-        Anonymous: false,
-    },
-    crate::reflect::StructField {
-        Name: "Parameters",
-        Tag: crate::reflect::StructTag::__new("asn1:\"optional\""),
-        Type: <asn1::RawValue as crate::reflect::Reflect>::__reflect_type,
-        PkgPath: "",
-        Anonymous: false,
-    },
-];
-
-impl crate::reflect::Reflect for AlgorithmIdentifier {
-    // go: none — goish-only: the reflect descriptor. See the banner above.
-    fn __reflect_type() -> crate::reflect::Type {
-        return crate::reflect::Type::__new(
-            crate::reflect::Kind::Struct,
-            "AlgorithmIdentifier",
-            &ALGORITHM_IDENTIFIER_FIELDS,
-        );
-    }
-
-    // go: none — goish-only: the reflect descriptor. See the banner above.
-    fn __reflect_value(&self) -> crate::reflect::Value {
-        return crate::reflect::Value::Struct {
-            ty: <AlgorithmIdentifier as crate::reflect::Reflect>::__reflect_type(),
-            fields: alloc::vec![
-                crate::reflect::Reflect::__reflect_value(&self.Algorithm),
-                crate::reflect::Reflect::__reflect_value(&self.Parameters),
-            ],
-        };
-    }
-}
+// The **write** half — `FromReflectValue`, which `reflect_only` does not
+// emit and which only an `Unmarshal` target needs — is hand-written, and
+// only for the one struct that is one.
+//
+// `RDNSequence` and `RelativeDistinguishedNameSET` are the exception in
+// both directions: they are named *slice* types, which the attribute
+// (named-field structs only) cannot parse, so their `Reflect` impls are
+// written out beside their declarations.
 
 impl crate::reflect::FromReflectValue for AlgorithmIdentifier {
     // go: none — goish-only: the write half of the descriptor above.

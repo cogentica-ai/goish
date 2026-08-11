@@ -433,6 +433,14 @@ impl Type {
         return self.elem;
     }
 
+    // go: none — goish idiom: the `key` mirror of `__elem_fn`, for
+    // `Zero(Kind::Map)`, which needs a non-optional `fn() -> Type` for
+    // both halves of `Value::Map`.
+    #[doc(hidden)]
+    pub fn __key_fn(&self) -> Option<fn() -> Type> {
+        return self.key;
+    }
+
     /// `Name()` — declared type name as goish `string`, or empty
     /// string for unnamed types. (Internal: the underlying field is
     /// `&'static str` since the name comes from the
@@ -1450,32 +1458,41 @@ where
 
 /// `reflect.Zero(t)` (Go 1.25 `src/reflect/value.go`) — the zero
 /// `Value` for type `t`. The returned value is neither addressable nor
-/// settable. Goish v1 derives the zero from `t.Kind()`; types whose
-/// `Kind` doesn't yet have a primitive `Value` variant fall back to
-/// `Value::Invalid` (consistent with Go's behaviour for a nil-typed
-/// argument: the spec panics, our v1 shape returns Invalid as a less
-/// disruptive default).
+/// settable.
 ///
-/// Struct and Slice used to fall into that `Invalid` bucket, "until
-/// ports surface a need". Two surfaced it, and the second is a bug the
+/// Struct and Slice used to fall into an `Invalid` bucket, "until ports
+/// surface a need". Three surfaced it, and two of them are bugs the
 /// first hid:
 ///
 ///   * `encoding/asn1`'s `parseSequenceOf` must hand `parseField` an
 ///     element of the right type before there is any data in it —
 ///     literally Go's `reflect.Append(ret, reflect.Zero(elemType))`.
 ///
-///   * `encoding/asn1`'s `makeField` omits an OPTIONAL field by testing
-///     `v == Zero(v.Type())`. With `Invalid` on the right-hand side that
-///     test never fired for a struct- or slice-shaped field, so an empty
-///     `asn1.RawValue` or a nil `asn1.ObjectIdentifier` was *encoded*
-///     where Go omits it — visible as `MarshalPKCS8PrivateKey` emitting
-///     a curve OID Go leaves out, and an `AlgorithmIdentifier` carrying
-///     an empty parameters element.
+///   * `encoding/asn1`'s `makeField` omits an `asn1:"optional"` field by
+///     testing `v == Zero(v.Type())` (marshal.rs:1134). With `Invalid` on
+///     the right-hand side that test never fired for a struct- or
+///     slice-shaped field, so an empty `asn1.RawValue` or a nil
+///     `asn1.ObjectIdentifier` was *encoded* where Go omits it — visible
+///     as `MarshalPKCS8PrivateKey` emitting a curve OID Go leaves out,
+///     and as an empty parameters element inside every
+///     `AlgorithmIdentifier` Go writes bare, which is every Ed25519 and
+///     ECDSA one. That last put `MarshalPKIXPublicKey` and every
+///     certificate built on it two bytes off Go.
 ///
 /// A named non-struct type is re-wrapped in `Value::Named` so its zero
 /// keeps the name — the same reason the variant exists at all, and what
-/// `getUniversalType` matches an `ObjectIdentifier` on. `Struct` already
-/// carries its `ty`, so it needs no wrapper.
+/// `getUniversalType` matches an `ObjectIdentifier` (and a
+/// `RelativeDistinguishedNameSET`) on. `Struct` already carries its
+/// `ty`, so its arm returns early and skips the wrapper; wrapping it
+/// would make a reflected struct unequal to its own zero and re-open
+/// the OPTIONAL bug above.
+///
+/// `time::Time` and `big::Int` remain unmatchable, unavoidably: both
+/// report *no* fields (Go's are unexported) while their
+/// `__reflect_value` carries two synthetic ones, so a descriptor-driven
+/// zero cannot equal their real zero. The error is in the safe
+/// direction — an optional `time::Time` is emitted where Go would omit
+/// it, never omitted where Go emits it.
 pub fn Zero(t: Type) -> Value {
     let inner = match t.Kind() {
         Kind::Bool => Value::Bool(false),
@@ -1494,6 +1511,10 @@ pub fn Zero(t: Type) -> Value {
         Kind::Float64 => Value::Float64(0.0),
         Kind::String => Value::String(string::from_static("")),
         Kind::Struct => {
+            // Early `return`, deliberately: `Value::Struct` already
+            // carries its `ty`, and falling through to the `Named`
+            // wrapper below would make a reflected struct unequal to
+            // its own zero.
             let mut fields: Vec<Value> = Vec::new();
             let nf = t.NumField();
             let mut i: int = 0;
@@ -1503,8 +1524,9 @@ pub fn Zero(t: Type) -> Value {
             }
             return Value::Struct { ty: t, fields };
         }
-        // A slice's zero is the nil slice: no elements, element type
-        // preserved so `Type()` still answers.
+        // A nil slice and an empty one are the same value in goish
+        // (goslice.rs:167), so the zero slice is the empty one — with
+        // the element type preserved so `Type()` still answers.
         Kind::Slice => match t.__elem_fn() {
             Some(elem_type) => Value::Slice {
                 elem_type,
@@ -1512,7 +1534,18 @@ pub fn Zero(t: Type) -> Value {
             },
             None => Value::Invalid,
         },
-        // Map/Array/Pointer/Interface/Func/Chan still fall back.
+        Kind::Map => match (t.__key_fn(), t.__elem_fn()) {
+            (Some(key_type), Some(value_type)) => Value::Map {
+                key_type,
+                value_type,
+                entries: Vec::new(),
+            },
+            _ => Value::Invalid,
+        },
+        // Go's zero pointer is nil; `Value::Pointer(Invalid)` is the
+        // encoding `IsNil` already recognises.
+        Kind::Pointer => Value::Pointer(alloc::boxed::Box::new(Value::Invalid)),
+        // Array/Interface/Func/Chan still fall back.
         _ => Value::Invalid,
     };
     // "Named" here means *declared* — `asn1.Enumerated`, not `int`. Every

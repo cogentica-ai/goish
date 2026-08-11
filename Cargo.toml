@@ -1114,3 +1114,7 @@ path = "examples/fips140_gcm_smoke.rs"
 [[example]]
 name = "fips140_drbg_smoke"
 path = "examples/fips140_drbg_smoke.rs"
+
+[[example]]
+name = "x509_create_smoke"
+path = "examples/x509_create_smoke.rs"

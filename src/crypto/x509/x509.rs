@@ -1,20 +1,24 @@
-// go: file crypto/x509/x509.go decls: ParsePKIXPublicKey, SignatureAlgorithm.isRSAPSS, SignatureAlgorithm.hashFunc, SignatureAlgorithm.String, PublicKeyAlgorithm.String, getSignatureAlgorithmFromAI, getPublicKeyAlgorithmFromOID, namedCurveFromOID, oidFromNamedCurve, oidFromECDHCurve, extKeyUsageFromOID, oidFromExtKeyUsage, InsecureAlgorithmError.Error, ConstraintViolationError.Error, Certificate.Equal, Certificate.hasSANExtension, Certificate.CheckSignatureFrom, Certificate.CheckSignature, Certificate.hasNameConstraints, Certificate.getSANExtension, signaturePublicKeyAlgoMismatchError, checkSignature, Certificate.CheckCRLSignature, UnhandledCriticalExtension.Error, oidInExtensions, isIA5String
+// go: file crypto/x509/x509.go decls: ParsePKIXPublicKey, SignatureAlgorithm.isRSAPSS, SignatureAlgorithm.hashFunc, SignatureAlgorithm.String, PublicKeyAlgorithm.String, getSignatureAlgorithmFromAI, getPublicKeyAlgorithmFromOID, namedCurveFromOID, oidFromNamedCurve, oidFromECDHCurve, extKeyUsageFromOID, oidFromExtKeyUsage, InsecureAlgorithmError.Error, ConstraintViolationError.Error, Certificate.Equal, Certificate.hasSANExtension, Certificate.CheckSignatureFrom, Certificate.CheckSignature, Certificate.hasNameConstraints, Certificate.getSANExtension, signaturePublicKeyAlgoMismatchError, checkSignature, Certificate.CheckCRLSignature, UnhandledCriticalExtension.Error, oidInExtensions, isIA5String, marshalPublicKey, MarshalPKIXPublicKey, reverseBitsInAByte, asn1BitLength, marshalSANs, buildCertExtensions, marshalKeyUsage, marshalExtKeyUsage, marshalBasicConstraints, marshalCertificatePolicies, buildCSRExtensions, subjectBytes, signingParamsForKey, signTBS, CreateCertificate, Certificate.CreateCRL, CreateRevocationList, newRawAttributes, CreateCertificateRequest
 //
 // The X.509 type surface: the algorithm identifiers, the OID tables and
 // the `Certificate` struct every other file in the package hangs on.
 //
-// **Partial port, and deliberately so.** x509.go is 2565 lines. What is
-// here is the *parsing* half of its type surface — everything
-// `parser.go` reads or writes — plus the *signature-checking* half
+// **Partial port, and deliberately so.** x509.go is 2565 lines. Three
+// of its four halves are here: the *parsing* type surface (everything
+// `parser.go` reads or writes), the *signature-checking* half
 // (CheckSignatureFrom, CheckSignature, checkSignature,
-// signaturePublicKeyAlgoMismatchError, CheckCRLSignature), which
-// `verify.go`'s chain builder calls. The *marshaling* half
-// (CreateCertificate, buildCertExtensions, marshalSANs, signTBS,
-// MarshalPKIXPublicKey and their helpers) and the CSR / CRL types
-// (CertificateRequest, RevocationList and friends) are absent, not
-// stubbed; they are blocked on Go building certificates with
-// `asn1.Marshal` of tagged structs and reading the leftovers with
-// `asn1.Unmarshal`, which goish does not have.
+// signaturePublicKeyAlgoMismatchError, CheckCRLSignature) that
+// `verify.go`'s chain builder calls, and — appended at the end of this
+// file, in Go's own source order — the *marshaling / creation* half
+// (CreateCertificate, CreateRevocationList, Certificate.CreateCRL,
+// MarshalPKIXPublicKey and the extension builders behind them).
+//
+// What is still absent: the CSR and CRL *parsing* entry points —
+// `ParseCRL`, `ParseDERCRL`, `ParseRevocationList`,
+// `ParseCertificateRequest`, `parseCertificateRequest`,
+// `parseRawAttributes` and `parseCSRExtensions`. They are the read side
+// of the shapes declared here, and belong with `parser.go`'s half rather
+// than this one. They are absent, not stubbed.
 //
 // Deviations from x509[go] @ Go 1.25.5:
 //
@@ -49,9 +53,9 @@
 //     certificate *signed* with RSA-PSS parses, but reports its
 //     signature algorithm as unknown.
 //
-// goishlint:ignore GOISH018 marshalPublicKey, MarshalPKIXPublicKey, reverseBitsInAByte, asn1BitLength, marshalSANs, buildCertExtensions, marshalKeyUsage, marshalExtKeyUsage, marshalBasicConstraints, marshalCertificatePolicies, buildCSRExtensions, subjectBytes, signingParamsForKey, signTBS, CreateCertificate, ParseCRL, ParseDERCRL, CreateCRL, newRawAttributes, parseRawAttributes, parseCSRExtensions, CreateCertificateRequest, ParseCertificateRequest, parseCertificateRequest, CreateRevocationList — the marshaling, signing and CSR/CRL halves; see the banner.
-// goishlint:ignore GOISH019 pkixPublicKey, certificate, tbsCertificate, dsaAlgorithmParameters, validity, authKeyId, pssParameters, basicConstraints, policyInformation, authorityInfoAccess, distributionPoint, distributionPointName, CertificateRequest, tbsCertificateRequest, certificateRequest, RevocationListEntry, RevocationList, certificateList, tbsCertificateList — ASN.1 shapes that exist only to be handed to asn1.Marshal / asn1.Unmarshal, and types of the unported halves. `publicKeyInfo`, the one parser.go reads, is here.
-// goishlint:ignore GOISH021 pkixPublicKey, certificate, tbsCertificate, dsaAlgorithmParameters, validity, authKeyId, pssParameters, basicConstraints, policyInformation, authorityInfoAccess, distributionPoint, distributionPointName, CertificateRequest, tbsCertificateRequest, certificateRequest, RevocationListEntry, RevocationList, certificateList, tbsCertificateList, emptyRawValue, pssParametersSHA256, pssParametersSHA384, pssParametersSHA512, oidSHA256, oidSHA384, oidSHA512, oidMGF1, x509usepolicies, x509sha256skid, pemCRLPrefix, pemType, emptyASN1Subject, oidExtensionRequest, x509v2Version, oidExtensionSubjectKeyId, oidExtensionKeyUsage, oidExtensionExtendedKeyUsage, oidExtensionBasicConstraints, oidExtensionCertificatePolicies, oidExtensionCRLDistributionPoints, publicKeyAlgoName, signatureAlgorithmDetails, extKeyUsageOIDs — the RSA-PSS parameter blobs and the marshaling-side extension OIDs, which land with the halves they belong to. The extension OIDs parser.go reads by name (SubjectAltName, NameConstraints, AuthorityInfoAccess, AuthorityKeyId, CRLNumber, ReasonCode) are here.
+// goishlint:ignore GOISH018 ParseCRL, ParseDERCRL, parseRawAttributes, parseCSRExtensions, ParseCertificateRequest, parseCertificateRequest — the CSR/CRL parsing entry points; see the banner.
+// goishlint:ignore GOISH019 pssParameters — the RSA-PSS parameter shape, read only by `getSignatureAlgorithmFromAI`'s unported RSA-PSS branch (which needs asn1.Unmarshal) and written by nothing. Every other ASN.1 shape in x509.go is declared, in this file.
+// goishlint:ignore GOISH021 pssParameters, pssParametersSHA256, pssParametersSHA384, pssParametersSHA512, oidSHA256, oidSHA384, oidSHA512, oidMGF1, pemCRLPrefix, pemType — the RSA-PSS parameter blobs, which belong to the unported RSA-PSS branch of getSignatureAlgorithmFromAI, and the three vars read only by ParseCRL / ParseCRL. Every other type, const and var in x509.go is here.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -60,18 +64,26 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use super::oid::OID;
+use super::pkcs1::pkcs1PublicKey;
 use crate::crypto;
+use crate::crypto::cryptobyte;
+use crate::crypto::cryptobyte::asn1 as cbasn1;
 use crate::crypto::ecdh;
 use crate::crypto::ecdsa;
 use crate::crypto::ed25519;
 use crate::crypto::elliptic;
 use crate::crypto::rsa;
+use crate::crypto::sha1;
+use crate::crypto::sha256;
 use crate::crypto::x509::pkix;
 use crate::encoding::asn1;
 use crate::error;
 use crate::errors;
 use crate::goany::Any;
+use crate::io;
+use crate::goany::AsExt;
 use crate::goslice::slice;
+use crate::gomap::map;
 use crate::gostring::string;
 use crate::math::big;
 use crate::net;
@@ -88,6 +100,7 @@ use crate::unicode;
 //       PublicKey asn1.BitString
 //   }
 /// The SubjectPublicKeyInfo ASN.1 structure. `parsePublicKey` takes one.
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default)]
 pub(super) struct publicKeyInfo {
     pub Raw: asn1::RawContent,
@@ -96,59 +109,15 @@ pub(super) struct publicKeyInfo {
 }
 
 // go: none — goish-only, and a prerequisite rather than a port:
-// `asn1.Unmarshal` reaches its recipient through `reflect`, so
-// `publicKeyInfo` needs a descriptor. Hand-written rather than
-// `#[goish::reflect]`-generated for the reason given at the foot of
-// crypto/x509/pkix/pkix.rs. The `Raw asn1.RawContent` first field is
-// load-bearing: `parseField`'s struct arm fills it with the element's
-// full DER, which is what `parsePublicKey` hands to `parseCertificate`.
-static PUBLIC_KEY_INFO_FIELDS: [crate::reflect::StructField; 3] = [
-    crate::reflect::StructField {
-        Name: "Raw",
-        Tag: crate::reflect::StructTag::__new(""),
-        Type: <asn1::RawContent as crate::reflect::Reflect>::__reflect_type,
-        PkgPath: "",
-        Anonymous: false,
-    },
-    crate::reflect::StructField {
-        Name: "Algorithm",
-        Tag: crate::reflect::StructTag::__new(""),
-        Type: <pkix::AlgorithmIdentifier as crate::reflect::Reflect>::__reflect_type,
-        PkgPath: "",
-        Anonymous: false,
-    },
-    crate::reflect::StructField {
-        Name: "PublicKey",
-        Tag: crate::reflect::StructTag::__new(""),
-        Type: <asn1::BitString as crate::reflect::Reflect>::__reflect_type,
-        PkgPath: "",
-        Anonymous: false,
-    },
-];
-
-impl crate::reflect::Reflect for publicKeyInfo {
-    // go: none — goish-only: the reflect descriptor. See the note above.
-    fn __reflect_type() -> crate::reflect::Type {
-        return crate::reflect::Type::__new(
-            crate::reflect::Kind::Struct,
-            "publicKeyInfo",
-            &PUBLIC_KEY_INFO_FIELDS,
-        );
-    }
-
-    // go: none — goish-only: the reflect descriptor. See the note above.
-    fn __reflect_value(&self) -> crate::reflect::Value {
-        return crate::reflect::Value::Struct {
-            ty: <publicKeyInfo as crate::reflect::Reflect>::__reflect_type(),
-            fields: alloc::vec![
-                crate::reflect::Reflect::__reflect_value(&self.Raw),
-                crate::reflect::Reflect::__reflect_value(&self.Algorithm),
-                crate::reflect::Reflect::__reflect_value(&self.PublicKey),
-            ],
-        };
-    }
-}
-
+// `asn1.Marshal`/`Unmarshal` reach their subject through `reflect`, so
+// `publicKeyInfo` needs a descriptor. The **read** half is the
+// `#[goish::reflect(reflect_only)]` attribute above; the **write** half
+// — `FromReflectValue`, which `reflect_only` does not emit and which
+// only an `Unmarshal` target needs — is written out here. The
+// `Raw asn1.RawContent` first field is load-bearing in both directions:
+// `parseField`'s struct arm fills it with the element's full DER (which
+// is what `parsePublicKey` hands to `parseCertificate`), and
+// `makeBody`'s strips it back out.
 impl crate::reflect::FromReflectValue for publicKeyInfo {
     // go: none — goish-only: the write half of the descriptor above.
     fn from_reflect_value(v: crate::reflect::Value) -> (Self, error) {
@@ -1279,4 +1248,2349 @@ pub(super) fn isIA5String(s: &string) -> error {
     }
 
     return errors::nil;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// The marshaling / signing / creation half of x509.go.
+//
+// Everything below this line is appended in Go's own source order, so
+// the file reads top-to-bottom against `crypto/x509/x509.go`. The
+// banner at the top of this file describes the *parsing* half and was
+// written when this half did not exist; the GOISH018/019/021 waivers up
+// there still name the symbols that are genuinely still absent.
+//
+// What is here: `marshalPublicKey` / `MarshalPKIXPublicKey`, the
+// extension builders, `signingParamsForKey`, `signTBS`,
+// `CreateCertificate`, `Certificate::CreateCRL` and
+// `CreateRevocationList`, plus the ASN.1 shapes each of them marshals.
+//
+// What is still absent, and why:
+//
+//   * `newRawAttributes` and `CreateCertificateRequest` need
+//     `asn1::Unmarshal`, which goish does not have yet. Both are
+//     `asn1.Marshal`-then-`asn1.Unmarshal` round trips (x509.go:1962 and
+//     x509.go:2148) whose whole job is to re-read DER that was just
+//     written; there is no honest way to spell them without the decoder.
+//     `CertificateRequest`, `tbsCertificateRequest`, `certificateRequest`
+//     and `oidExtensionRequest` are here, because `buildCSRExtensions`
+//     takes a `*CertificateRequest` and is portable on its own.
+//   * `ParseCRL` / `ParseDERCRL` are the same story on the read side.
+//
+// Deviations from x509[go] @ Go 1.25.5, for this half:
+//
+//   * Go's `internal/godebug` has no goish counterpart, so
+//     `x509usepolicies` and `x509sha256skid` are functions returning the
+//     *unset* value `""` — which is what `godebug.New(name).Value()`
+//     returns when the setting is absent from GODEBUG, and therefore the
+//     branch Go takes by default in 1.25. Both call sites keep Go's
+//     `!= "0"` test verbatim rather than being folded away, so the
+//     non-default branch is still readable next to the default one. The
+//     `IncNonDefault()` counter has nothing to count in goish and is
+//     dropped.
+//   * Go's `pub any` / `priv any` parameters are `&Any`; `pub` is a Rust
+//     keyword, so it is spelled `pub_` (the spelling `parser.rs` already
+//     uses).
+//   * Go passes `key.Public()` — a `crypto.PublicKey`, which *is* `any`
+//     — straight into `marshalPublicKey(pub any)` and into
+//     `checkSignature(… publicKey crypto.PublicKey …)`. goish has two
+//     distinct erasure carriers that do not convert without naming the
+//     concrete type: `crypto::PublicKey` is
+//     `Arc<dyn core::any::Any + Send + Sync>` (downcast only) and
+//     `goany::Any` is the reflective carrier the x509 package passes
+//     around. `anyFromPublicKey` bridges them by naming the four key
+//     types this package supports — the same four `marshalPublicKey`
+//     enumerates.
+//   * `marshalCertificatePolicies`'s `policyIdentifiers` branch calls
+//     `cryptobyte.Builder.AddASN1ObjectIdentifier`, which is part of
+//     cryptobyte's Builder half and is not ported (see that file's
+//     GOISH018 waiver). It is spelled here as
+//     `asn1::Marshal(&oid)` + `AddBytes`, which emits the identical
+//     `06 <len> <content>` element — `AddASN1ObjectIdentifier` is
+//     `AddASN1(OBJECT_IDENTIFIER, …)` around the same base-128 content.
+//     Pinned by `x509_create_smoke`'s POLICYIDS case against Go run with
+//     `GODEBUG=x509usepolicies=0`.
+//
+// goishlint:ignore GOISH019 pssParameters, tbsCertificateRequest, certificateRequest — pssParameters is the RSA-PSS *parameter* shape, read by the unported `getSignatureAlgorithmFromAI` branch and written by nothing here; the two CSR shapes are declared but only reachable from `CreateCertificateRequest`, which is blocked on asn1::Unmarshal.
+
+// Go: x509.go:58-61
+//   type pkixPublicKey struct {
+//       Algo      pkix.AlgorithmIdentifier
+//       BitString asn1.BitString
+//   }
+/// A PKIX public key structure. See SubjectPublicKeyInfo in RFC 3280.
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct pkixPublicKey {
+    pub Algo: pkix::AlgorithmIdentifier,
+    pub BitString: asn1::BitString,
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:84-165 marshalPublicKey
+/// The DER of `pub`'s public-key bit string, plus the algorithm
+/// identifier that names it.
+pub(super) fn marshalPublicKey(
+    pub_: &Any,
+) -> (slice<byte>, pkix::AlgorithmIdentifier, error) {
+    let mut publicKeyBytes: slice<byte>;
+    let mut publicKeyAlgorithm = pkix::AlgorithmIdentifier::default();
+
+    // Go: switch pub := pub.(type) { case *rsa.PublicKey: … }
+    if let Some(pub_) = pub_.As::<rsa::PublicKey>() {
+        let (b, err) = asn1::Marshal(&pkcs1PublicKey {
+            N: pub_.N.clone(),
+            E: pub_.E,
+        });
+        if err != errors::nil {
+            return (slice::new(), pkix::AlgorithmIdentifier::default(), err);
+        }
+        publicKeyBytes = b;
+        publicKeyAlgorithm.Algorithm = oidPublicKeyRSA();
+        // This is a NULL parameters value which is required by
+        // RFC 3279, Section 2.3.1.
+        publicKeyAlgorithm.Parameters = asn1::NullRawValue();
+    } else if let Some(pub_) = pub_.As::<ecdsa::PublicKey>() {
+        let (oid, ok) = oidFromNamedCurve(pub_.Curve);
+        if !ok {
+            return (
+                slice::new(),
+                pkix::AlgorithmIdentifier::default(),
+                errors::New("x509: unsupported elliptic curve"),
+            );
+        }
+        if !pub_.Curve.IsOnCurve(&pub_.X, &pub_.Y) {
+            return (
+                slice::new(),
+                pkix::AlgorithmIdentifier::default(),
+                errors::New("x509: invalid elliptic curve public key"),
+            );
+        }
+        publicKeyBytes = elliptic::Marshal(pub_.Curve, &pub_.X, &pub_.Y);
+        publicKeyAlgorithm.Algorithm = oidPublicKeyECDSA();
+        let (paramBytes, err) = asn1::Marshal(&oid);
+        if err != errors::nil {
+            return (slice::new(), pkix::AlgorithmIdentifier::default(), err);
+        }
+        publicKeyAlgorithm.Parameters.FullBytes = paramBytes;
+    } else if let Some(pub_) = pub_.As::<ed25519::PublicKey>() {
+        publicKeyBytes = pub_.0.clone();
+        publicKeyAlgorithm.Algorithm = oidPublicKeyEd25519();
+    } else if let Some(pub_) = pub_.As::<ecdh::PublicKey>() {
+        publicKeyBytes = pub_.Bytes();
+        if pub_.Curve().String() == ecdh::X25519().String() {
+            publicKeyAlgorithm.Algorithm = oidPublicKeyX25519();
+        } else {
+            let (oid, ok) = oidFromECDHCurve(pub_.Curve());
+            if !ok {
+                return (
+                    slice::new(),
+                    pkix::AlgorithmIdentifier::default(),
+                    errors::New("x509: unsupported elliptic curve"),
+                );
+            }
+            publicKeyAlgorithm.Algorithm = oidPublicKeyECDSA();
+            let (paramBytes, err) = asn1::Marshal(&oid);
+            if err != errors::nil {
+                return (slice::new(), pkix::AlgorithmIdentifier::default(), err);
+            }
+            publicKeyAlgorithm.Parameters.FullBytes = paramBytes;
+        }
+    } else {
+        // Go: fmt.Errorf("x509: unsupported public key type: %T", pub).
+        // goish has no `%T`; the carrier's recorded type name is the
+        // nearest honest thing and is what the rest of this package
+        // prints in the same position.
+        return (
+            slice::new(),
+            pkix::AlgorithmIdentifier::default(),
+            crate::fmt::Errorf!(
+                "x509: unsupported public key type: %s",
+                pub_.TypeName()
+            ),
+        );
+    }
+
+    return (publicKeyBytes, publicKeyAlgorithm, errors::nil);
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:167-190 MarshalPKIXPublicKey
+/// Convert a public key to PKIX, ASN.1 DER form. The encoded public key
+/// is a SubjectPublicKeyInfo structure (see RFC 5280, Section 4.1).
+///
+/// The following key types are currently supported: `rsa::PublicKey`,
+/// `ecdsa::PublicKey`, `ed25519::PublicKey` and `ecdh::PublicKey`.
+/// Unsupported key types result in an error.
+///
+/// This kind of key is commonly encoded in PEM blocks of type
+/// "PUBLIC KEY".
+pub fn MarshalPKIXPublicKey(pub_: &Any) -> (slice<byte>, error) {
+    let publicKeyBytes: slice<byte>;
+    let publicKeyAlgorithm: pkix::AlgorithmIdentifier;
+
+    let (b, ai, err) = marshalPublicKey(pub_);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    publicKeyBytes = b;
+    publicKeyAlgorithm = ai;
+
+    let pkix_ = pkixPublicKey {
+        Algo: publicKeyAlgorithm,
+        BitString: asn1::BitString {
+            Bytes: publicKeyBytes.clone(),
+            BitLength: 8 * publicKeyBytes.Len(),
+        },
+    };
+
+    let (ret, _) = asn1::Marshal(&pkix_);
+    return (ret, errors::nil);
+}
+
+// These structures reflect the ASN.1 structure of X.509 certificates.:
+
+// Go: x509.go:194-198
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct certificate {
+    pub TBSCertificate: tbsCertificate,
+    pub SignatureAlgorithm: pkix::AlgorithmIdentifier,
+    pub SignatureValue: asn1::BitString,
+}
+
+// Go: x509.go:200-212
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct tbsCertificate {
+    pub Raw: asn1::RawContent,
+    #[tag(r#"asn1:"optional,explicit,default:0,tag:0""#)]
+    pub Version: int,
+    pub SerialNumber: big::Int,
+    pub SignatureAlgorithm: pkix::AlgorithmIdentifier,
+    pub Issuer: asn1::RawValue,
+    pub Validity: validity,
+    pub Subject: asn1::RawValue,
+    pub PublicKey: publicKeyInfo,
+    #[tag(r#"asn1:"optional,tag:1""#)]
+    pub UniqueId: asn1::BitString,
+    #[tag(r#"asn1:"optional,tag:2""#)]
+    pub SubjectUniqueId: asn1::BitString,
+    #[tag(r#"asn1:"omitempty,optional,explicit,tag:3""#)]
+    pub Extensions: slice<pkix::Extension>,
+}
+
+// Go: x509.go:214-216
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct dsaAlgorithmParameters {
+    pub P: big::Int,
+    pub Q: big::Int,
+    pub G: big::Int,
+}
+
+// Go: x509.go:218-220
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct validity {
+    pub NotBefore: time::Time,
+    pub NotAfter: time::Time,
+}
+
+// Go: x509.go:209-211
+//   type authKeyId struct { Id []byte `asn1:"optional,tag:0"` }
+/// RFC 5280, 4.2.1.1.
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct authKeyId {
+    #[tag(r#"asn1:"optional,tag:0""#)]
+    pub Id: slice<byte>,
+}
+
+// Go: x509.go:1041-1044
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct basicConstraints {
+    #[tag(r#"asn1:"optional""#)]
+    pub IsCA: bool,
+    #[tag(r#"asn1:"optional,default:-1""#)]
+    pub MaxPathLen: int,
+}
+
+// Go: x509.go:1047-1050
+/// RFC 5280 4.2.1.4. `policyQualifiers` omitted.
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct policyInformation {
+    pub Policy: asn1::ObjectIdentifier,
+}
+
+// Go: x509.go:1060-1063
+/// RFC 5280, 4.2.2.1.
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct authorityInfoAccess {
+    pub Method: asn1::ObjectIdentifier,
+    pub Location: asn1::RawValue,
+}
+
+// Go: x509.go:1066-1070
+/// RFC 5280, 4.2.1.14.
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct distributionPoint {
+    #[tag(r#"asn1:"optional,tag:0""#)]
+    pub DistributionPoint: distributionPointName,
+    #[tag(r#"asn1:"optional,tag:1""#)]
+    pub Reason: asn1::BitString,
+    #[tag(r#"asn1:"optional,tag:2""#)]
+    pub CRLIssuer: asn1::RawValue,
+}
+
+// Go: x509.go:1072-1075
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct distributionPointName {
+    #[tag(r#"asn1:"optional,tag:0""#)]
+    pub FullName: slice<asn1::RawValue>,
+    #[tag(r#"asn1:"optional,tag:1""#)]
+    pub RelativeName: pkix::RDNSequence,
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1077-1082 reverseBitsInAByte
+pub(super) fn reverseBitsInAByte(in_: byte) -> byte {
+    let b1 = in_ >> 4 | in_ << 4;
+    let b2 = b1 >> 2 & 0x33 | b1 << 2 & 0xcc;
+    let b3 = b2 >> 1 & 0x55 | b2 << 1 & 0xaa;
+    return b3;
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1084-1100 asn1BitLength
+/// The bit-length of `bitString`, considering the most-significant bit
+/// in a byte to be the "first" bit. This convention matches ASN.1, but
+/// differs from almost everything else.
+pub(super) fn asn1BitLength(bitString: &slice<byte>) -> int {
+    let mut bitLen = bitString.Len() * 8;
+
+    for (i, _) in crate::range!(bitString.clone()) {
+        let b = bitString[bitString.Len() - i - 1];
+
+        let mut bit: crate::uint = 0;
+        while bit < 8 {
+            if (b >> bit) & 1 == 1 {
+                return bitLen;
+            }
+            bitLen -= 1;
+            bit += 1;
+        }
+    }
+
+    return 0;
+}
+
+// go: none — goish idiom: Go declares this as a package-level `var` of a heap-allocated slice; goish has no const slice, so it is a function. Same name, same value.
+// Go: x509.go:1104-1117 — the marshaling-side half of the extension OID
+// `var` block. The parsing-side names are up in the first half of this
+// file; between them the block is complete.
+pub(super) fn oidExtensionSubjectKeyId() -> asn1::ObjectIdentifier {
+    return oid(&[2, 5, 29, 14]);
+}
+// go: none — goish idiom: Go declares this as a package-level `var` of a heap-allocated slice; goish has no const slice, so it is a function. Same name, same value.
+pub(super) fn oidExtensionKeyUsage() -> asn1::ObjectIdentifier {
+    return oid(&[2, 5, 29, 15]);
+}
+// go: none — goish idiom: Go declares this as a package-level `var` of a heap-allocated slice; goish has no const slice, so it is a function. Same name, same value.
+pub(super) fn oidExtensionExtendedKeyUsage() -> asn1::ObjectIdentifier {
+    return oid(&[2, 5, 29, 37]);
+}
+// go: none — goish idiom: Go declares this as a package-level `var` of a heap-allocated slice; goish has no const slice, so it is a function. Same name, same value.
+pub(super) fn oidExtensionBasicConstraints() -> asn1::ObjectIdentifier {
+    return oid(&[2, 5, 29, 19]);
+}
+// go: none — goish idiom: Go declares this as a package-level `var` of a heap-allocated slice; goish has no const slice, so it is a function. Same name, same value.
+pub(super) fn oidExtensionCertificatePolicies() -> asn1::ObjectIdentifier {
+    return oid(&[2, 5, 29, 32]);
+}
+// go: none — goish idiom: Go declares this as a package-level `var` of a heap-allocated slice; goish has no const slice, so it is a function. Same name, same value.
+pub(super) fn oidExtensionCRLDistributionPoints() -> asn1::ObjectIdentifier {
+    return oid(&[2, 5, 29, 31]);
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1137-1167 marshalSANs
+/// Marshal a list of addresses into the contents of an X.509
+/// SubjectAlternativeName extension.
+pub(super) fn marshalSANs(
+    dnsNames: &slice<string>,
+    emailAddresses: &slice<string>,
+    ipAddresses: &slice<net::IP>,
+    uris: &slice<url::URL>,
+) -> (slice<byte>, error) {
+    let mut rawValues: slice<asn1::RawValue> = slice::new();
+    for (_, name) in crate::range!(dnsNames.clone()) {
+        let err = isIA5String(&name);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        rawValues = crate::append!(
+            rawValues,
+            asn1::RawValue {
+                Tag: nameTypeDNS,
+                Class: 2,
+                Bytes: crate::convert::bytes(name.clone()),
+                ..Default::default()
+            }
+        );
+    }
+    for (_, email) in crate::range!(emailAddresses.clone()) {
+        let err = isIA5String(&email);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        rawValues = crate::append!(
+            rawValues,
+            asn1::RawValue {
+                Tag: nameTypeEmail,
+                Class: 2,
+                Bytes: crate::convert::bytes(email.clone()),
+                ..Default::default()
+            }
+        );
+    }
+    for (_, rawIP) in crate::range!(ipAddresses.clone()) {
+        // If possible, we always want to encode IPv4 addresses in 4 bytes.
+        // Go writes `if ip == nil`; `net::IP` spells its nil test
+        // `IsNil()` (net/mod.rs:653), the runtime's documented
+        // equivalent.
+        let mut ip = rawIP.To4();
+        if ip.IsNil() {
+            ip = rawIP.clone();
+        }
+        rawValues = crate::append!(
+            rawValues,
+            asn1::RawValue {
+                Tag: nameTypeIP,
+                Class: 2,
+                Bytes: ip.bytes.clone(),
+                ..Default::default()
+            }
+        );
+    }
+    for (_, uri) in crate::range!(uris.clone()) {
+        let uriStr = uri.String();
+        let err = isIA5String(&uriStr);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        rawValues = crate::append!(
+            rawValues,
+            asn1::RawValue {
+                Tag: nameTypeURI,
+                Class: 2,
+                Bytes: crate::convert::bytes(uriStr.clone()),
+                ..Default::default()
+            }
+        );
+    }
+    return asn1::Marshal(&rawValues);
+}
+
+// go: none — goish idiom: Go's `var x509usepolicies = godebug.New("x509usepolicies")`
+// reads a GODEBUG setting. goish has no `internal/godebug`, so this
+// returns the value an *unset* setting has — `""` — which is what makes
+// `x509usepolicies.Value() != "0"` true and selects the `Policies`
+// field, Go 1.24+'s default. The call sites keep Go's test verbatim
+// rather than folding it away, so the other branch stays readable.
+// `IncNonDefault()` has no counter to bump here and is dropped.
+fn x509usepolicies() -> string {
+    return string::from_static("");
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1182-1403 buildCertExtensions
+/// Build the extension list a certificate carries, from `template`'s
+/// fields. `template.ExtraExtensions` is appended last and overrides
+/// nothing — Go relies on the `oidInExtensions` guard on each branch to
+/// skip an extension the caller already supplied raw.
+pub(super) fn buildCertExtensions(
+    template: &Certificate,
+    subjectIsEmpty: bool,
+    authorityKeyId: &slice<byte>,
+    subjectKeyId: &slice<byte>,
+) -> (slice<pkix::Extension>, error) {
+    // Go: ret = make([]pkix.Extension, 10 /* maximum number of elements. */)
+    let mut ret: slice<pkix::Extension> = crate::make!([]pkix::Extension, 10);
+    let mut n: int = 0;
+
+    if template.KeyUsage != KeyUsage(0)
+        && !oidInExtensions(&oidExtensionKeyUsage(), &template.ExtraExtensions)
+    {
+        let (e, err) = marshalKeyUsage(template.KeyUsage);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        ret[n] = e;
+        n += 1;
+    }
+
+    if (template.ExtKeyUsage.Len() > 0 || template.UnknownExtKeyUsage.Len() > 0)
+        && !oidInExtensions(&oidExtensionExtendedKeyUsage(), &template.ExtraExtensions)
+    {
+        let (e, err) =
+            marshalExtKeyUsage(&template.ExtKeyUsage, &template.UnknownExtKeyUsage);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        ret[n] = e;
+        n += 1;
+    }
+
+    if template.BasicConstraintsValid
+        && !oidInExtensions(&oidExtensionBasicConstraints(), &template.ExtraExtensions)
+    {
+        let (e, err) = marshalBasicConstraints(
+            template.IsCA,
+            template.MaxPathLen,
+            template.MaxPathLenZero,
+        );
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        ret[n] = e;
+        n += 1;
+    }
+
+    if subjectKeyId.Len() > 0
+        && !oidInExtensions(&oidExtensionSubjectKeyId(), &template.ExtraExtensions)
+    {
+        ret[n].Id = oidExtensionSubjectKeyId();
+        let (v, err) = asn1::Marshal(subjectKeyId);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        ret[n].Value = v;
+        n += 1;
+    }
+
+    if authorityKeyId.Len() > 0
+        && !oidInExtensions(&oidExtensionAuthorityKeyId(), &template.ExtraExtensions)
+    {
+        ret[n].Id = oidExtensionAuthorityKeyId();
+        let (v, err) = asn1::Marshal(&authKeyId {
+            Id: authorityKeyId.clone(),
+        });
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        ret[n].Value = v;
+        n += 1;
+    }
+
+    if (template.OCSPServer.Len() > 0 || template.IssuingCertificateURL.Len() > 0)
+        && !oidInExtensions(&oidExtensionAuthorityInfoAccess(), &template.ExtraExtensions)
+    {
+        ret[n].Id = oidExtensionAuthorityInfoAccess();
+        let mut aiaValues: slice<authorityInfoAccess> = slice::new();
+        for (_, name) in crate::range!(template.OCSPServer.clone()) {
+            aiaValues = crate::append!(
+                aiaValues,
+                authorityInfoAccess {
+                    Method: oidAuthorityInfoAccessOcsp(),
+                    Location: asn1::RawValue {
+                        Tag: 6,
+                        Class: 2,
+                        Bytes: crate::convert::bytes(name.clone()),
+                        ..Default::default()
+                    },
+                }
+            );
+        }
+        for (_, name) in crate::range!(template.IssuingCertificateURL.clone()) {
+            aiaValues = crate::append!(
+                aiaValues,
+                authorityInfoAccess {
+                    Method: oidAuthorityInfoAccessIssuers(),
+                    Location: asn1::RawValue {
+                        Tag: 6,
+                        Class: 2,
+                        Bytes: crate::convert::bytes(name.clone()),
+                        ..Default::default()
+                    },
+                }
+            );
+        }
+        let (v, err) = asn1::Marshal(&aiaValues);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        ret[n].Value = v;
+        n += 1;
+    }
+
+    if (template.DNSNames.Len() > 0
+        || template.EmailAddresses.Len() > 0
+        || template.IPAddresses.Len() > 0
+        || template.URIs.Len() > 0)
+        && !oidInExtensions(&oidExtensionSubjectAltName(), &template.ExtraExtensions)
+    {
+        ret[n].Id = oidExtensionSubjectAltName();
+        // From RFC 5280, Section 4.2.1.6:
+        // "If the subject field contains an empty sequence ... then
+        // subjectAltName extension ... is marked as critical"
+        ret[n].Critical = subjectIsEmpty;
+        let (v, err) = marshalSANs(
+            &template.DNSNames,
+            &template.EmailAddresses,
+            &template.IPAddresses,
+            &template.URIs,
+        );
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        ret[n].Value = v;
+        n += 1;
+    }
+
+    let usePolicies = x509usepolicies() != "0";
+    if ((!usePolicies && template.PolicyIdentifiers.Len() > 0)
+        || (usePolicies && template.Policies.Len() > 0))
+        && !oidInExtensions(&oidExtensionCertificatePolicies(), &template.ExtraExtensions)
+    {
+        let (e, err) =
+            marshalCertificatePolicies(&template.Policies, &template.PolicyIdentifiers);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        ret[n] = e;
+        n += 1;
+    }
+
+    if (template.PermittedDNSDomains.Len() > 0
+        || template.ExcludedDNSDomains.Len() > 0
+        || template.PermittedIPRanges.Len() > 0
+        || template.ExcludedIPRanges.Len() > 0
+        || template.PermittedEmailAddresses.Len() > 0
+        || template.ExcludedEmailAddresses.Len() > 0
+        || template.PermittedURIDomains.Len() > 0
+        || template.ExcludedURIDomains.Len() > 0)
+        && !oidInExtensions(&oidExtensionNameConstraints(), &template.ExtraExtensions)
+    {
+        ret[n].Id = oidExtensionNameConstraints();
+        ret[n].Critical = template.PermittedDNSDomainsCritical;
+
+        let (permitted, err) = serialiseConstraints(
+            &template.PermittedDNSDomains,
+            &template.PermittedIPRanges,
+            &template.PermittedEmailAddresses,
+            &template.PermittedURIDomains,
+        );
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+
+        let (excluded, err) = serialiseConstraints(
+            &template.ExcludedDNSDomains,
+            &template.ExcludedIPRanges,
+            &template.ExcludedEmailAddresses,
+            &template.ExcludedURIDomains,
+        );
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+
+        let mut b = cryptobyte::NewBuilder(slice::new());
+        b.AddASN1(cbasn1::SEQUENCE, |b: &mut cryptobyte::Builder| {
+            if permitted.Len() > 0 {
+                b.AddASN1(
+                    cbasn1::Tag(0).ContextSpecific().Constructed(),
+                    |b: &mut cryptobyte::Builder| {
+                        b.AddBytes(&permitted);
+                    },
+                );
+            }
+
+            if excluded.Len() > 0 {
+                b.AddASN1(
+                    cbasn1::Tag(1).ContextSpecific().Constructed(),
+                    |b: &mut cryptobyte::Builder| {
+                        b.AddBytes(&excluded);
+                    },
+                );
+            }
+        });
+
+        let (v, err) = b.Bytes();
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        ret[n].Value = v;
+        n += 1;
+    }
+
+    if template.CRLDistributionPoints.Len() > 0
+        && !oidInExtensions(
+            &oidExtensionCRLDistributionPoints(),
+            &template.ExtraExtensions,
+        )
+    {
+        ret[n].Id = oidExtensionCRLDistributionPoints();
+
+        let mut crlDp: slice<distributionPoint> = slice::new();
+        for (_, name) in crate::range!(template.CRLDistributionPoints.clone()) {
+            let dp = distributionPoint {
+                DistributionPoint: distributionPointName {
+                    FullName: slice::__from_vec(alloc::vec![asn1::RawValue {
+                        Tag: 6,
+                        Class: 2,
+                        Bytes: crate::convert::bytes(name.clone()),
+                        ..Default::default()
+                    }]),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            crlDp = crate::append!(crlDp, dp);
+        }
+
+        let (v, err) = asn1::Marshal(&crlDp);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        ret[n].Value = v;
+        n += 1;
+    }
+
+    // Adding another extension here? Remember to update the maximum number
+    // of elements in the make() at the top of the function and the list of
+    // template fields used in CreateCertificate documentation.
+
+    return (
+        crate::append!(ret.slice(0, n), template.ExtraExtensions.clone()...),
+        errors::nil,
+    );
+}
+
+// go: none — goish idiom: Go writes `ipAndMask` and `serialiseConstraints`
+// as closures inside `buildCertExtensions` (x509.go:1283-1338). Rust
+// closures cannot recurse into `Builder::AddASN1`'s `FnOnce` while also
+// capturing the enclosing `ret[n]` borrow, so both are lifted to
+// file-private functions with the same names, bodies and order.
+fn ipAndMask(ipNet: &net::IPNet) -> slice<byte> {
+    let maskedIP = ipNet.IP.Mask(ipNet.Mask.clone());
+    let mut ipAndMask: Vec<byte> = Vec::with_capacity(
+        (maskedIP.bytes.Len() + ipNet.Mask.bytes.Len()) as usize,
+    );
+    for (_, b) in crate::range!(maskedIP.bytes.clone()) {
+        ipAndMask.push(*b);
+    }
+    for (_, b) in crate::range!(ipNet.Mask.bytes.clone()) {
+        ipAndMask.push(*b);
+    }
+    return slice::__from_vec(ipAndMask);
+}
+
+// go: none — goish idiom: see `ipAndMask`.
+fn serialiseConstraints(
+    dns: &slice<string>,
+    ips: &slice<net::IPNet>,
+    emails: &slice<string>,
+    uriDomains: &slice<string>,
+) -> (slice<byte>, error) {
+    let mut b = cryptobyte::NewBuilder(slice::new());
+
+    for (_, name) in crate::range!(dns.clone()) {
+        let err = isIA5String(&name);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+
+        b.AddASN1(cbasn1::SEQUENCE, |b: &mut cryptobyte::Builder| {
+            b.AddASN1(
+                cbasn1::Tag(2).ContextSpecific(),
+                |b: &mut cryptobyte::Builder| {
+                    b.AddBytes(&crate::convert::bytes(name.clone()));
+                },
+            );
+        });
+    }
+
+    for (_, ipNet) in crate::range!(ips.clone()) {
+        b.AddASN1(cbasn1::SEQUENCE, |b: &mut cryptobyte::Builder| {
+            b.AddASN1(
+                cbasn1::Tag(7).ContextSpecific(),
+                |b: &mut cryptobyte::Builder| {
+                    b.AddBytes(&ipAndMask(&ipNet));
+                },
+            );
+        });
+    }
+
+    for (_, email) in crate::range!(emails.clone()) {
+        let err = isIA5String(&email);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+
+        b.AddASN1(cbasn1::SEQUENCE, |b: &mut cryptobyte::Builder| {
+            b.AddASN1(
+                cbasn1::Tag(1).ContextSpecific(),
+                |b: &mut cryptobyte::Builder| {
+                    b.AddBytes(&crate::convert::bytes(email.clone()));
+                },
+            );
+        });
+    }
+
+    for (_, uriDomain) in crate::range!(uriDomains.clone()) {
+        let err = isIA5String(&uriDomain);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+
+        b.AddASN1(cbasn1::SEQUENCE, |b: &mut cryptobyte::Builder| {
+            b.AddASN1(
+                cbasn1::Tag(6).ContextSpecific(),
+                |b: &mut cryptobyte::Builder| {
+                    b.AddBytes(&crate::convert::bytes(uriDomain.clone()));
+                },
+            );
+        });
+    }
+
+    return b.Bytes();
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1405-1421 marshalKeyUsage
+pub(super) fn marshalKeyUsage(ku: KeyUsage) -> (pkix::Extension, error) {
+    let mut ext = pkix::Extension {
+        Id: oidExtensionKeyUsage(),
+        Critical: true,
+        ..Default::default()
+    };
+
+    let mut a: [byte; 2] = [0; 2];
+    a[0] = reverseBitsInAByte(crate::byte(ku.0));
+    a[1] = reverseBitsInAByte(crate::byte(ku.0 >> 8));
+
+    let mut l: int = 1;
+    if a[1] != 0 {
+        l = 2;
+    }
+
+    let bitString = slice::__from_vec(a[..(l as usize)].to_vec());
+    let (v, err) = asn1::Marshal(&asn1::BitString {
+        Bytes: bitString.clone(),
+        BitLength: asn1BitLength(&bitString),
+    });
+    ext.Value = v;
+    return (ext, err);
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1423-1440 marshalExtKeyUsage
+pub(super) fn marshalExtKeyUsage(
+    extUsages: &slice<ExtKeyUsage>,
+    unknownUsages: &slice<asn1::ObjectIdentifier>,
+) -> (pkix::Extension, error) {
+    let mut ext = pkix::Extension {
+        Id: oidExtensionExtendedKeyUsage(),
+        ..Default::default()
+    };
+
+    let mut oids: slice<asn1::ObjectIdentifier> = crate::make!(
+        []asn1::ObjectIdentifier,
+        extUsages.Len() + unknownUsages.Len()
+    );
+    for (i, u) in crate::range!(extUsages.clone()) {
+        let (oid, ok) = oidFromExtKeyUsage(*u);
+        if ok {
+            oids[i] = oid;
+        } else {
+            return (ext, errors::New("x509: unknown extended key usage"));
+        }
+    }
+
+    // Go: copy(oids[len(extUsages):], unknownUsages).
+    //
+    // goish's `xs[lo:hi]` returns an independent copy, not a view
+    // (goslice.rs:88), so `copy!` into a subslice expression would
+    // write to a temporary and drop the result on the floor. The
+    // destination indices are written directly instead — same
+    // elements, same order, same overwrite semantics.
+    for (i, u) in crate::range!(unknownUsages.clone()) {
+        oids[extUsages.Len() + i] = u.clone();
+    }
+
+    let (v, err) = asn1::Marshal(&oids);
+    ext.Value = v;
+    return (ext, err);
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1442-1453 marshalBasicConstraints
+pub(super) fn marshalBasicConstraints(
+    isCA: bool,
+    maxPathLen: int,
+    maxPathLenZero: bool,
+) -> (pkix::Extension, error) {
+    let mut ext = pkix::Extension {
+        Id: oidExtensionBasicConstraints(),
+        Critical: true,
+        ..Default::default()
+    };
+    // Leaving MaxPathLen as zero indicates that no maximum path
+    // length is desired, unless MaxPathLenZero is set. A value of
+    // -1 causes encoding/asn1 to omit the value as desired.
+    let mut maxPathLen = maxPathLen;
+    if maxPathLen == 0 && !maxPathLenZero {
+        maxPathLen = -1;
+    }
+    let (v, err) = asn1::Marshal(&basicConstraints {
+        IsCA: isCA,
+        MaxPathLen: maxPathLen,
+    });
+    ext.Value = v;
+    return (ext, err);
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1455-1485 marshalCertificatePolicies
+pub(super) fn marshalCertificatePolicies(
+    policies: &slice<OID>,
+    policyIdentifiers: &slice<asn1::ObjectIdentifier>,
+) -> (pkix::Extension, error) {
+    let mut ext = pkix::Extension {
+        Id: oidExtensionCertificatePolicies(),
+        ..Default::default()
+    };
+
+    let mut b = cryptobyte::NewBuilder(crate::make!([]byte, 0, 128));
+    b.AddASN1(cbasn1::SEQUENCE, |child: &mut cryptobyte::Builder| {
+        if x509usepolicies() != "0" {
+            // Go: x509usepolicies.IncNonDefault() — no goish counter.
+            for (_, v) in crate::range!(policies.clone()) {
+                child.AddASN1(cbasn1::SEQUENCE, |child: &mut cryptobyte::Builder| {
+                    child.AddASN1(
+                        cbasn1::OBJECT_IDENTIFIER,
+                        |child: &mut cryptobyte::Builder| {
+                            if v.der.Len() == 0 {
+                                child.SetError(errors::New(
+                                    "invalid policy object identifier",
+                                ));
+                                return;
+                            }
+                            child.AddBytes(&v.der);
+                        },
+                    );
+                });
+            }
+        } else {
+            for (_, v) in crate::range!(policyIdentifiers.clone()) {
+                child.AddASN1(cbasn1::SEQUENCE, |child: &mut cryptobyte::Builder| {
+                    // Go: child.AddASN1ObjectIdentifier(v). cryptobyte's
+                    // Builder half is not ported (see that file's
+                    // GOISH018 waiver); `asn1::Marshal` of an
+                    // ObjectIdentifier emits the identical
+                    // `06 <len> <base128 content>` element, which is all
+                    // AddASN1ObjectIdentifier writes.
+                    let (der, err) = asn1::Marshal(&v);
+                    if err != errors::nil {
+                        child.SetError(err);
+                        return;
+                    }
+                    child.AddBytes(&der);
+                });
+            }
+        }
+    });
+
+    let (v, err) = b.Bytes();
+    ext.Value = v;
+    return (ext, err);
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1487-1504 buildCSRExtensions
+pub(super) fn buildCSRExtensions(
+    template: &CertificateRequest,
+) -> (slice<pkix::Extension>, error) {
+    let mut ret: slice<pkix::Extension> = slice::new();
+
+    if (template.DNSNames.Len() > 0
+        || template.EmailAddresses.Len() > 0
+        || template.IPAddresses.Len() > 0
+        || template.URIs.Len() > 0)
+        && !oidInExtensions(&oidExtensionSubjectAltName(), &template.ExtraExtensions)
+    {
+        let (sanBytes, err) = marshalSANs(
+            &template.DNSNames,
+            &template.EmailAddresses,
+            &template.IPAddresses,
+            &template.URIs,
+        );
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+
+        ret = crate::append!(
+            ret,
+            pkix::Extension {
+                Id: oidExtensionSubjectAltName(),
+                Value: sanBytes,
+                ..Default::default()
+            }
+        );
+    }
+
+    return (
+        crate::append!(ret, template.ExtraExtensions.clone()...),
+        errors::nil,
+    );
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1506-1512 subjectBytes
+pub(super) fn subjectBytes(cert: &Certificate) -> (slice<byte>, error) {
+    if cert.RawSubject.Len() > 0 {
+        return (cert.RawSubject.clone(), errors::nil);
+    }
+
+    return asn1::Marshal(&cert.Subject.ToRDNSequence());
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1517-1569 signingParamsForKey
+/// The signature algorithm and its Algorithm Identifier to use for
+/// signing, based on the key type. If `sigAlgo` is not zero then it
+/// overrides the default.
+pub(super) fn signingParamsForKey(
+    key: &(dyn crypto::Signer + Send + Sync + 'static),
+    sigAlgo: SignatureAlgorithm,
+) -> (SignatureAlgorithm, pkix::AlgorithmIdentifier, error) {
+    let ai = pkix::AlgorithmIdentifier::default();
+    let pubType: PublicKeyAlgorithm;
+    let defaultAlgo: SignatureAlgorithm;
+
+    // Go: switch pub := key.Public().(type) { … }
+    let pub_ = key.Public();
+    if pub_.downcast_ref::<rsa::PublicKey>().is_some() {
+        pubType = RSA;
+        defaultAlgo = SHA256WithRSA;
+    } else if let Some(p) = pub_.downcast_ref::<ecdsa::PublicKey>() {
+        pubType = ECDSA;
+        // Go: switch pub.Curve { case elliptic.P224(), elliptic.P256(): … }
+        // goish compares `Params().Name`, the same identity test
+        // `oidFromNamedCurve` above already uses.
+        let name = p.Curve.Params().Name.clone();
+        if name == elliptic::P224().Params().Name || name == elliptic::P256().Params().Name {
+            defaultAlgo = ECDSAWithSHA256;
+        } else if name == elliptic::P384().Params().Name {
+            defaultAlgo = ECDSAWithSHA384;
+        } else if name == elliptic::P521().Params().Name {
+            defaultAlgo = ECDSAWithSHA512;
+        } else {
+            return (
+                SignatureAlgorithm(0),
+                ai,
+                errors::New("x509: unsupported elliptic curve"),
+            );
+        }
+    } else if pub_.downcast_ref::<ed25519::PublicKey>().is_some() {
+        pubType = Ed25519;
+        defaultAlgo = PureEd25519;
+    } else {
+        return (
+            SignatureAlgorithm(0),
+            ai,
+            errors::New("x509: only RSA, ECDSA and Ed25519 keys supported"),
+        );
+    }
+
+    let mut sigAlgo = sigAlgo;
+    if sigAlgo == SignatureAlgorithm(0) {
+        sigAlgo = defaultAlgo;
+    }
+
+    for (_, details) in crate::range!(signatureAlgorithmDetails()) {
+        if details.algo == sigAlgo {
+            if details.pubKeyAlgo != pubType {
+                return (
+                    SignatureAlgorithm(0),
+                    ai,
+                    errors::New(
+                        "x509: requested SignatureAlgorithm does not match private key type",
+                    ),
+                );
+            }
+            if details.hash == crypto::MD5 {
+                return (
+                    SignatureAlgorithm(0),
+                    ai,
+                    errors::New("x509: signing with MD5 is not supported"),
+                );
+            }
+
+            return (
+                sigAlgo,
+                pkix::AlgorithmIdentifier {
+                    Algorithm: details.oid.clone(),
+                    Parameters: details.params.clone(),
+                },
+                errors::nil,
+            );
+        }
+    }
+
+    return (
+        SignatureAlgorithm(0),
+        ai,
+        errors::New("x509: unknown SignatureAlgorithm"),
+    );
+}
+
+// go: none — goish idiom: Go's `crypto.PublicKey` *is* `any`, so
+// `key.Public()` drops straight into `marshalPublicKey(pub any)` and
+// into `checkSignature`'s `publicKey crypto.PublicKey`. goish has two
+// distinct erasure carriers that do not convert without naming the
+// concrete type: `crypto::PublicKey` is
+// `Arc<dyn core::any::Any + Send + Sync>` (downcast only), and
+// `goany::Any` is the reflective carrier this package passes around.
+// The four key types x509 supports — the same four `marshalPublicKey`
+// enumerates and `signingParamsForKey` accepts — are named here once.
+//
+// `Any::new_fn` rather than `Any::new`, for the reason the file banner
+// already gives for `Certificate.PublicKey`: none of these key types is
+// `PartialEq` in goish (Go spells their comparison as an `Equal`
+// method), which `Any::new` requires. `As::<T>()` sees through either
+// wrapper, so every downstream downcast is unaffected.
+fn anyFromPublicKey(pub_: &crypto::PublicKey) -> (Any, error) {
+    if let Some(k) = pub_.downcast_ref::<rsa::PublicKey>() {
+        return (Any::new_fn(k.clone()), errors::nil);
+    }
+    if let Some(k) = pub_.downcast_ref::<ecdsa::PublicKey>() {
+        return (Any::new_fn(k.clone()), errors::nil);
+    }
+    if let Some(k) = pub_.downcast_ref::<ed25519::PublicKey>() {
+        return (Any::new_fn(k.clone()), errors::nil);
+    }
+    if let Some(k) = pub_.downcast_ref::<ecdh::PublicKey>() {
+        return (Any::new_fn(k.clone()), errors::nil);
+    }
+    return (
+        Any::from(crate::nil),
+        errors::New("x509: only RSA, ECDSA and Ed25519 keys supported"),
+    );
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1571-1591 signTBS
+pub(super) fn signTBS(
+    tbs: &slice<byte>,
+    key: &(dyn crypto::Signer + Send + Sync + 'static),
+    sigAlg: SignatureAlgorithm,
+    rand: &mut dyn io::Reader,
+) -> (slice<byte>, error) {
+    let hashFunc = sigAlg.hashFunc();
+
+    // Go: var signerOpts crypto.SignerOpts = hashFunc
+    //     if sigAlg.isRSAPSS() { signerOpts = &rsa.PSSOptions{…} }
+    let pssOpts = rsa::PSSOptions {
+        SaltLength: rsa::PSSSaltLengthEqualsHash,
+        Hash: hashFunc,
+    };
+    let signerOpts: &dyn crypto::SignerOpts = if sigAlg.isRSAPSS() {
+        &pssOpts
+    } else {
+        &hashFunc
+    };
+
+    let (signature, err) = crypto::SignMessage(key, rand, tbs.clone(), signerOpts);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    // Check the signature to ensure the crypto.Signer behaved correctly.
+    let (pubAny, err) = anyFromPublicKey(&key.Public());
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    let err = checkSignature(sigAlg, tbs.clone(), signature.clone(), &pubAny, true);
+    if err != errors::nil {
+        return (
+            slice::new(),
+            crate::fmt::Errorf!("x509: signature returned by signer is invalid: %w", err),
+        );
+    }
+
+    return (signature, errors::nil);
+}
+
+// go: none — goish idiom: Go declares this as a package-level `var` of a heap-allocated slice; goish has no const slice, so it is a function. Same name, same value.
+// Go: x509.go:1595 — `var emptyASN1Subject = []byte{0x30, 0}`.
+/// The ASN.1 DER encoding of an empty Subject, which is just an empty
+/// SEQUENCE.
+fn emptyASN1Subject() -> slice<byte> {
+    return slice::__from_vec(alloc::vec![0x30, 0]);
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1662-1811 CreateCertificate
+/// Create a new X.509 v3 certificate based on a template. The following
+/// members of `template` are currently used:
+///
+///   - AuthorityKeyId
+///   - BasicConstraintsValid
+///   - CRLDistributionPoints
+///   - DNSNames
+///   - EmailAddresses
+///   - ExcludedDNSDomains
+///   - ExcludedEmailAddresses
+///   - ExcludedIPRanges
+///   - ExcludedURIDomains
+///   - ExtKeyUsage
+///   - ExtraExtensions
+///   - IPAddresses
+///   - IsCA
+///   - IssuingCertificateURL
+///   - KeyUsage
+///   - MaxPathLen
+///   - MaxPathLenZero
+///   - NotAfter
+///   - NotBefore
+///   - OCSPServer
+///   - PermittedDNSDomains
+///   - PermittedDNSDomainsCritical
+///   - PermittedEmailAddresses
+///   - PermittedIPRanges
+///   - PermittedURIDomains
+///   - Policies
+///   - PolicyIdentifiers
+///   - SerialNumber
+///   - SignatureAlgorithm
+///   - Subject
+///   - SubjectKeyId
+///   - URIs
+///   - UnknownExtKeyUsage
+///
+/// The certificate is signed by `parent`. If `parent` is equal to
+/// `template` then the certificate is self-signed. `pub_` is the public
+/// key of the certificate to be generated and `priv_` is the private key
+/// of the signer.
+///
+/// The returned slice is the certificate in DER encoding.
+///
+/// The AuthorityKeyId will be taken from the SubjectKeyId of `parent`,
+/// if any, unless the resulting certificate is self-signed. Otherwise
+/// the value from `template` will be used.
+///
+/// If SubjectKeyId from `template` is empty and the template is a CA,
+/// SubjectKeyId will be generated from the hash of the public key.
+///
+/// If `template.SerialNumber` is nil, a serial number will be generated
+/// which conforms to RFC 5280, Section 4.1.2.2 using entropy from
+/// `rand`.
+pub fn CreateCertificate(
+    rand: &mut dyn io::Reader,
+    template: &Certificate,
+    parent: &Certificate,
+    pub_: &Any,
+    priv_: &Any,
+) -> (slice<byte>, error) {
+    // Go: key, ok := priv.(crypto.Signer)
+    //
+    // Spelled `Any::As`, not `goish::cast!`. `cast!` resolves its
+    // carrier through the *blanket* `HasDynAny for T` (goany.rs:635),
+    // which hands back the carrier itself — for an `Any` that is `Any`'s
+    // own TypeId, never the payload's, so the registry lookup can only
+    // miss. `Any`'s inherent `As` goes through `as_any()`, which unwraps
+    // to the stored key. Same comma-ok shape, and the same spelling
+    // `crypto::SignMessage` already uses for its `MessageSigner`
+    // upgrade.
+    let key = match priv_.As::<dyn crypto::Signer + Send + Sync>() {
+        Some(k) => k,
+        None => {
+            return (
+                slice::new(),
+                errors::New(
+                    "x509: certificate private key does not implement crypto.Signer",
+                ),
+            )
+        }
+    };
+
+    let mut serialNumber = template.SerialNumber.clone();
+    if serialNumber == crate::nil {
+        // Generate a serial number following RFC 5280, Section 4.1.2.2 if
+        // one is not provided. The serial number must be positive and at
+        // most 20 octets *when encoded*.
+        let mut serialBytes: slice<byte> = crate::make!([]byte, 20);
+        let (_, err) = io::ReadFull(rand, &mut serialBytes);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        // If the top bit is set, the serial will be padded with a leading
+        // zero byte during encoding, so that it's not interpreted as a
+        // negative integer. This padding would make the serial 21 octets
+        // so we clear the top bit to ensure the correct length in all
+        // cases.
+        serialBytes[0] &= 0b0111_1111;
+        serialNumber = big::Int::default();
+        serialNumber.SetBytes(serialBytes);
+    }
+
+    // RFC 5280 Section 4.1.2.2: serial number must be positive
+    //
+    // We _should_ also restrict serials to <= 20 octets, but it turns out
+    // a lot of people get this wrong, in part because the encoding can
+    // itself alter the length of the serial. For now we accept these
+    // non-conformant serials.
+    if serialNumber.Sign() == -1 {
+        return (
+            slice::new(),
+            errors::New("x509: serial number must be positive"),
+        );
+    }
+
+    if template.BasicConstraintsValid && template.MaxPathLen < -1 {
+        return (
+            slice::new(),
+            errors::New("x509: invalid MaxPathLen, must be greater or equal to -1"),
+        );
+    }
+
+    if template.BasicConstraintsValid
+        && !template.IsCA
+        && template.MaxPathLen != -1
+        && (template.MaxPathLen != 0 || template.MaxPathLenZero)
+    {
+        return (
+            slice::new(),
+            errors::New("x509: only CAs are allowed to specify MaxPathLen"),
+        );
+    }
+
+    let (signatureAlgorithm, algorithmIdentifier, err) =
+        signingParamsForKey(key, template.SignatureAlgorithm);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    let (publicKeyBytes, publicKeyAlgorithm, err) = marshalPublicKey(pub_);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    if getPublicKeyAlgorithmFromOID(&publicKeyAlgorithm.Algorithm) == UnknownPublicKeyAlgorithm
+    {
+        // Go: fmt.Errorf("x509: unsupported public key type: %T", pub).
+        return (
+            slice::new(),
+            crate::fmt::Errorf!(
+                "x509: unsupported public key type: %s",
+                pub_.TypeName()
+            ),
+        );
+    }
+
+    let (asn1Issuer, err) = subjectBytes(parent);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    let (asn1Subject, err) = subjectBytes(template);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    let mut authorityKeyId = template.AuthorityKeyId.clone();
+    if !crate::bytes::Equal(asn1Issuer.clone(), asn1Subject.clone())
+        && parent.SubjectKeyId.Len() > 0
+    {
+        authorityKeyId = parent.SubjectKeyId.clone();
+    }
+
+    let mut subjectKeyId = template.SubjectKeyId.clone();
+    if subjectKeyId.Len() == 0 && template.IsCA {
+        if x509sha256skid() == "0" {
+            // Go: x509sha256skid.IncNonDefault() — no goish counter.
+            // SubjectKeyId generated using method 1 in RFC 5280,
+            // Section 4.2.1.2:
+            //   (1) The keyIdentifier is composed of the 160-bit SHA-1
+            //   hash of the value of the BIT STRING subjectPublicKey
+            //   (excluding the tag, length, and number of unused bits).
+            let h = sha1::Sum(publicKeyBytes.clone());
+            subjectKeyId = slice::__from_vec(h.to_vec());
+        } else {
+            // SubjectKeyId generated using method 1 in RFC 7093,
+            // Section 2:
+            //    1) The keyIdentifier is composed of the leftmost
+            //    160-bits of the SHA-256 hash of the value of the BIT
+            //    STRING subjectPublicKey (excluding the tag, length,
+            //    and number of unused bits).
+            let h = sha256::Sum256(publicKeyBytes.clone());
+            subjectKeyId = slice::__from_vec(h[..20].to_vec());
+        }
+    }
+
+    // Check that the signer's public key matches the private key, if
+    // available.
+    //
+    // Go declares a local `privateKey interface{ Equal(crypto.PublicKey)
+    // bool }` and asserts `key.Public().(privateKey)`. goish has no
+    // runtime interface synthesis for a method set declared inline, and
+    // the four supported key types all carry an inherent `Equal`; the
+    // test is spelled over the concrete types instead.
+    // `parent.PublicKey != nil` is `!parent.PublicKey.IsNil()`.
+    let keyPub = key.Public();
+    if !publicKeyEquals(&keyPub, &parent.PublicKey) {
+        return (
+            slice::new(),
+            errors::New("x509: provided PrivateKey doesn't match parent's PublicKey"),
+        );
+    }
+
+    let (extensions, err) = buildCertExtensions(
+        template,
+        crate::bytes::Equal(asn1Subject.clone(), emptyASN1Subject()),
+        &authorityKeyId,
+        &subjectKeyId,
+    );
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    let encodedPublicKey = asn1::BitString {
+        BitLength: publicKeyBytes.Len() * 8,
+        Bytes: publicKeyBytes.clone(),
+    };
+    let mut c = tbsCertificate {
+        Version: 2,
+        SerialNumber: serialNumber.clone(),
+        SignatureAlgorithm: algorithmIdentifier.clone(),
+        Issuer: asn1::RawValue {
+            FullBytes: asn1Issuer.clone(),
+            ..Default::default()
+        },
+        Validity: validity {
+            NotBefore: template.NotBefore.clone().UTC(),
+            NotAfter: template.NotAfter.clone().UTC(),
+        },
+        Subject: asn1::RawValue {
+            FullBytes: asn1Subject.clone(),
+            ..Default::default()
+        },
+        PublicKey: publicKeyInfo {
+            Raw: asn1::RawContent::default(),
+            Algorithm: publicKeyAlgorithm.clone(),
+            PublicKey: encodedPublicKey,
+        },
+        Extensions: extensions,
+        ..Default::default()
+    };
+
+    let (tbsCertContents, err) = asn1::Marshal(&c);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    c.Raw = asn1::RawContent(tbsCertContents.clone());
+
+    let (signature, err) = signTBS(&tbsCertContents, key, signatureAlgorithm, rand);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    return asn1::Marshal(&certificate {
+        TBSCertificate: c,
+        SignatureAlgorithm: algorithmIdentifier,
+        SignatureValue: asn1::BitString {
+            Bytes: signature.clone(),
+            BitLength: signature.Len() * 8,
+        },
+    });
+}
+
+// go: none — goish idiom: the concrete-type spelling of Go's inline
+// `type privateKey interface { Equal(crypto.PublicKey) bool }`
+// assertion at x509.go:1786-1792. Go's two failure modes collapse into
+// one here: every key type goish's x509 accepts *has* an `Equal`, so the
+// "does not implement Equal" branch is unreachable and only the mismatch
+// branch survives. A nil `parent.PublicKey` skips the check, exactly as
+// Go's `parent.PublicKey != nil` guard does.
+fn publicKeyEquals(keyPub: &crypto::PublicKey, parentPub: &Any) -> bool {
+    if *parentPub == crate::nil {
+        return true;
+    }
+    if let Some(a) = keyPub.downcast_ref::<rsa::PublicKey>() {
+        return match parentPub.As::<rsa::PublicKey>() {
+            Some(b) => a.Equal(b),
+            None => false,
+        };
+    }
+    if let Some(a) = keyPub.downcast_ref::<ecdsa::PublicKey>() {
+        return match parentPub.As::<ecdsa::PublicKey>() {
+            Some(b) => a.Equal(b),
+            None => false,
+        };
+    }
+    if let Some(a) = keyPub.downcast_ref::<ed25519::PublicKey>() {
+        return match parentPub.As::<ed25519::PublicKey>() {
+            // `ed25519::PublicKey::Equal` takes the erased
+            // `crypto::PublicKey` (Go's `Equal(x crypto.PublicKey)`),
+            // where rsa's and ecdsa's take the concrete type; the
+            // borrow is re-wrapped rather than the comparison
+            // reimplemented.
+            Some(b) => {
+                let bPub: crypto::PublicKey = alloc::sync::Arc::new(b.clone());
+                a.Equal(&bPub)
+            }
+            None => false,
+        };
+    }
+    return false;
+}
+
+// go: none — goish idiom: Go's `var x509sha256skid = godebug.New("x509sha256skid")`.
+// See `x509usepolicies` for why this is a function returning the unset
+// value `""` — which makes `x509sha256skid.Value() == "0"` false and
+// selects the RFC 7093 SHA-256 derivation, Go 1.22+'s default.
+fn x509sha256skid() -> string {
+    return string::from_static("");
+}
+
+impl Certificate {
+    // go: sdk 1.25.5 crypto/x509/x509.go:1838-1891 Certificate.CreateCRL
+    /// Return a DER encoded CRL, signed by this Certificate, that
+    /// contains the given list of revoked certificates.
+    ///
+    /// Deprecated: this method does not generate an RFC 5280 conformant
+    /// X.509 v2 CRL. To generate a standards compliant CRL, use
+    /// [`CreateRevocationList`] instead.
+    pub fn CreateCRL(
+        &self,
+        rand: &mut dyn io::Reader,
+        priv_: &Any,
+        revokedCerts: &slice<pkix::RevokedCertificate>,
+        now: time::Time,
+        expiry: time::Time,
+    ) -> (slice<byte>, error) {
+        // See `CreateCertificate` for why this is `Any::As` and not
+        // `goish::cast!`.
+        let key = match priv_.As::<dyn crypto::Signer + Send + Sync>() {
+            Some(k) => k,
+            None => {
+                return (
+                    slice::new(),
+                    errors::New(
+                        "x509: certificate private key does not implement crypto.Signer",
+                    ),
+                )
+            }
+        };
+
+        let (signatureAlgorithm, algorithmIdentifier, err) =
+            signingParamsForKey(key, SignatureAlgorithm(0));
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+
+        // Force revocation times to UTC per RFC 5280.
+        let mut revokedCertsUTC: slice<pkix::RevokedCertificate> =
+            crate::make!([]pkix::RevokedCertificate, revokedCerts.Len());
+        for (i, rc) in crate::range!(revokedCerts.clone()) {
+            let mut rc = rc.clone();
+            rc.RevocationTime = rc.RevocationTime.clone().UTC();
+            revokedCertsUTC[i] = rc;
+        }
+
+        let mut tbsCertList = pkix::TBSCertificateList {
+            Version: 1,
+            Signature: algorithmIdentifier.clone(),
+            Issuer: self.Subject.ToRDNSequence(),
+            ThisUpdate: now.UTC(),
+            NextUpdate: expiry.UTC(),
+            RevokedCertificates: revokedCertsUTC,
+            ..Default::default()
+        };
+
+        // Authority Key Id
+        if self.SubjectKeyId.Len() > 0 {
+            let mut aki = pkix::Extension::default();
+            aki.Id = oidExtensionAuthorityKeyId();
+            let (v, err) = asn1::Marshal(&authKeyId {
+                Id: self.SubjectKeyId.clone(),
+            });
+            if err != errors::nil {
+                return (slice::new(), err);
+            }
+            aki.Value = v;
+            tbsCertList.Extensions = crate::append!(tbsCertList.Extensions, aki);
+        }
+
+        let (tbsCertListContents, err) = asn1::Marshal(&tbsCertList);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        tbsCertList.Raw = asn1::RawContent(tbsCertListContents.clone());
+
+        let (signature, err) = signTBS(&tbsCertListContents, key, signatureAlgorithm, rand);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+
+        return asn1::Marshal(&pkix::CertificateList {
+            TBSCertList: tbsCertList,
+            SignatureAlgorithm: algorithmIdentifier,
+            SignatureValue: asn1::BitString {
+                Bytes: signature.clone(),
+                BitLength: signature.Len() * 8,
+            },
+        });
+    }
+}
+
+// Go: x509.go:1893-1934
+/// A PKCS #10, certificate signature request.
+#[derive(Clone, Default)]
+pub struct CertificateRequest {
+    /// Complete ASN.1 DER content (CSR, signature algorithm and signature).
+    pub Raw: slice<byte>,
+    /// Certificate request info part of raw ASN.1 DER content.
+    pub RawTBSCertificateRequest: slice<byte>,
+    /// DER encoded SubjectPublicKeyInfo.
+    pub RawSubjectPublicKeyInfo: slice<byte>,
+    /// DER encoded Subject.
+    pub RawSubject: slice<byte>,
+
+    pub Version: int,
+    pub Signature: slice<byte>,
+    pub SignatureAlgorithm: SignatureAlgorithm,
+
+    pub PublicKeyAlgorithm: PublicKeyAlgorithm,
+    pub PublicKey: Any,
+
+    pub Subject: pkix::Name,
+
+    /// The CSR attributes that can parse as
+    /// `pkix::AttributeTypeAndValueSET`.
+    ///
+    /// Deprecated: Use Extensions and ExtraExtensions instead for
+    /// parsing and generating the requestedExtensions attribute.
+    pub Attributes: slice<pkix::AttributeTypeAndValueSET>,
+
+    /// All requested extensions, in raw form. When parsing CSRs, this
+    /// can be used to extract extensions that are not parsed by this
+    /// package.
+    pub Extensions: slice<pkix::Extension>,
+
+    /// Extensions to be copied, raw, into any CSR marshaled by
+    /// `CreateCertificateRequest`. Values override any extensions that
+    /// would otherwise be produced based on the other fields but are
+    /// overridden by any extensions specified in Attributes.
+    ///
+    /// The ExtraExtensions field is not populated by
+    /// `ParseCertificateRequest`, see Extensions instead.
+    pub ExtraExtensions: slice<pkix::Extension>,
+
+    /// Subject Alternate Name value.
+    pub DNSNames: slice<string>,
+    /// Subject Alternate Name value.
+    pub EmailAddresses: slice<string>,
+    /// Subject Alternate Name value.
+    pub IPAddresses: slice<net::IP>,
+    /// Subject Alternate Name value.
+    pub URIs: slice<url::URL>,
+}
+
+// These structures reflect the ASN.1 structure of X.509 certificate
+// signature requests (see RFC 2986):
+
+// Go: x509.go:1939-1945
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct tbsCertificateRequest {
+    pub Raw: asn1::RawContent,
+    pub Version: int,
+    pub Subject: asn1::RawValue,
+    pub PublicKey: publicKeyInfo,
+    #[tag(r#"asn1:"tag:0""#)]
+    pub RawAttributes: slice<asn1::RawValue>,
+}
+
+// Go: x509.go:1947-1952
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct certificateRequest {
+    pub Raw: asn1::RawContent,
+    pub TBSCSR: tbsCertificateRequest,
+    pub SignatureAlgorithm: pkix::AlgorithmIdentifier,
+    pub SignatureValue: asn1::BitString,
+}
+
+// go: none — goish idiom: Go declares this as a package-level `var` of a heap-allocated slice; goish has no const slice, so it is a function. Same name, same value.
+// Go: x509.go:1956 — `var oidExtensionRequest = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 14}`.
+/// A PKCS #9 OBJECT IDENTIFIER that indicates requested extensions in a
+/// CSR.
+pub(super) fn oidExtensionRequest() -> asn1::ObjectIdentifier {
+    return oid(&[1, 2, 840, 113549, 1, 9, 14]);
+}
+
+// Go: x509.go:2262-2300
+/// An entry in the revokedCertificates sequence of a CRL.
+#[derive(Clone, Default)]
+pub struct RevocationListEntry {
+    /// The raw bytes of the revokedCertificates entry. It is set when
+    /// parsing a CRL; it is ignored when generating a CRL.
+    pub Raw: slice<byte>,
+
+    /// The serial number of a revoked certificate. It is both used when
+    /// creating a CRL and populated when parsing a CRL. It must not be
+    /// nil.
+    pub SerialNumber: big::Int,
+    /// The time at which the certificate was revoked. It is both used
+    /// when creating a CRL and populated when parsing a CRL. It must not
+    /// be the zero time.
+    pub RevocationTime: time::Time,
+    /// The reason for revocation, using the integer enum values
+    /// specified in RFC 5280 Section 5.3.1. When creating a CRL, the
+    /// zero value will result in the reasonCode extension being omitted.
+    /// When parsing a CRL, the zero value may represent either the
+    /// reasonCode extension being absent (which implies the default
+    /// revocation reason of 0/Unspecified), or it may represent the
+    /// reasonCode extension being present and explicitly containing a
+    /// value of 0/Unspecified.
+    pub ReasonCode: int,
+
+    /// Raw X.509 extensions. When parsing CRL entries, this can be used
+    /// to extract non-critical extensions that are not parsed by this
+    /// package. When marshaling CRL entries, the Extensions field is
+    /// ignored, see ExtraExtensions.
+    pub Extensions: slice<pkix::Extension>,
+    /// Extensions to be copied, raw, into any marshaled CRL entries.
+    /// Values override any extensions that would otherwise be produced
+    /// based on the other fields. The ExtraExtensions field is not
+    /// populated when parsing CRL entries, see Extensions.
+    pub ExtraExtensions: slice<pkix::Extension>,
+}
+
+// Go: x509.go:2302-2361
+/// A [`Certificate`] Revocation List (CRL) as specified by RFC 5280.
+#[derive(Clone, Default)]
+pub struct RevocationList {
+    /// The complete ASN.1 DER content of the CRL (tbsCertList,
+    /// signatureAlgorithm, and signatureValue).
+    pub Raw: slice<byte>,
+    /// Just the tbsCertList portion of the ASN.1 DER.
+    pub RawTBSRevocationList: slice<byte>,
+    /// The DER encoded Issuer.
+    pub RawIssuer: slice<byte>,
+
+    /// The DN of the issuing certificate.
+    pub Issuer: pkix::Name,
+    /// Used to identify the public key associated with the issuing
+    /// certificate. It is populated from the authorityKeyIdentifier
+    /// extension when parsing a CRL. It is ignored when creating a CRL;
+    /// the extension is populated from the issuing certificate itself.
+    pub AuthorityKeyId: slice<byte>,
+
+    pub Signature: slice<byte>,
+    /// Used to determine the signature algorithm to be used when signing
+    /// the CRL. If 0 the default algorithm for the signing key will be
+    /// used.
+    pub SignatureAlgorithm: SignatureAlgorithm,
+
+    /// The revokedCertificates sequence in the CRL. It is used when
+    /// creating a CRL and also populated when parsing a CRL. When
+    /// creating a CRL, it may be empty, in which case the
+    /// revokedCertificates ASN.1 sequence will be omitted from the CRL
+    /// entirely.
+    pub RevokedCertificateEntries: slice<RevocationListEntry>,
+
+    /// Used to populate the revokedCertificates sequence in the CRL if
+    /// RevokedCertificateEntries is empty. It may be empty, in which
+    /// case an empty CRL will be created.
+    ///
+    /// Deprecated: Use RevokedCertificateEntries instead.
+    pub RevokedCertificates: slice<pkix::RevokedCertificate>,
+
+    /// Used to populate the X.509 v2 cRLNumber extension in the CRL,
+    /// which should be a monotonically increasing sequence number for a
+    /// given CRL scope and CRL issuer. It is also populated from the
+    /// cRLNumber extension when parsing a CRL.
+    pub Number: big::Int,
+
+    /// Used to populate the thisUpdate field in the CRL, which indicates
+    /// the issuance date of the CRL.
+    pub ThisUpdate: time::Time,
+    /// Used to populate the nextUpdate field in the CRL, which indicates
+    /// the date by which the next CRL will be issued. NextUpdate must be
+    /// greater than ThisUpdate.
+    pub NextUpdate: time::Time,
+
+    /// Raw X.509 extensions. When creating a CRL, the Extensions field
+    /// is ignored, see ExtraExtensions.
+    pub Extensions: slice<pkix::Extension>,
+
+    /// Any additional extensions to add directly to the CRL.
+    pub ExtraExtensions: slice<pkix::Extension>,
+}
+
+// These structures reflect the ASN.1 structure of X.509 CRLs better than
+// the existing crypto/x509/pkix variants do. These mirror the existing
+// certificate structs in this file.
+//
+// Notably, we include issuer as an asn1.RawValue, mirroring the behavior
+// of tbsCertificate and allowing raw (unparsed) subjects to be passed
+// cleanly.
+
+// Go: x509.go:2370-2374
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct certificateList {
+    pub TBSCertList: tbsCertificateList,
+    pub SignatureAlgorithm: pkix::AlgorithmIdentifier,
+    pub SignatureValue: asn1::BitString,
+}
+
+// Go: x509.go:2376-2385
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct tbsCertificateList {
+    pub Raw: asn1::RawContent,
+    #[tag(r#"asn1:"optional,default:0""#)]
+    pub Version: int,
+    pub Signature: pkix::AlgorithmIdentifier,
+    pub Issuer: asn1::RawValue,
+    pub ThisUpdate: time::Time,
+    #[tag(r#"asn1:"optional""#)]
+    pub NextUpdate: time::Time,
+    #[tag(r#"asn1:"optional""#)]
+    pub RevokedCertificates: slice<pkix::RevokedCertificate>,
+    #[tag(r#"asn1:"tag:0,optional,explicit""#)]
+    pub Extensions: slice<pkix::Extension>,
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:2400-2565 CreateRevocationList
+/// Create a new X.509 v2 [`Certificate`] Revocation List, according to
+/// RFC 5280, based on `template`.
+///
+/// The CRL is signed by `priv_`, which should be a `crypto::Signer`
+/// associated with the public key in the issuer certificate.
+///
+/// The crlSign bit must be set in [`KeyUsage`] on `issuer` in order to
+/// use it as a CRL issuer.
+///
+/// The issuer distinguished name CRL field and authority key identifier
+/// extension are populated using the issuer certificate. `issuer` must
+/// have SubjectKeyId set.
+pub fn CreateRevocationList(
+    rand: &mut dyn io::Reader,
+    template: &RevocationList,
+    issuer: &Certificate,
+    priv_: &(dyn crypto::Signer + Send + Sync + 'static),
+) -> (slice<byte>, error) {
+    // Go: if template == nil { … } / if issuer == nil { … }
+    //
+    // goish takes both by reference rather than by nilable pointer, so
+    // the two nil checks are unrepresentable — a caller cannot pass one.
+    // The remaining validation is verbatim.
+    if (issuer.KeyUsage & KeyUsageCRLSign) == KeyUsage(0) {
+        return (
+            slice::new(),
+            errors::New("x509: issuer must have the crlSign key usage bit set"),
+        );
+    }
+    if issuer.SubjectKeyId.Len() == 0 {
+        return (
+            slice::new(),
+            errors::New(
+                "x509: issuer certificate doesn't contain a subject key identifier",
+            ),
+        );
+    }
+    if template
+        .NextUpdate
+        .clone()
+        .Before(template.ThisUpdate.clone())
+    {
+        return (
+            slice::new(),
+            errors::New("x509: template.ThisUpdate is after template.NextUpdate"),
+        );
+    }
+    if template.Number == crate::nil {
+        return (
+            slice::new(),
+            errors::New("x509: template contains nil Number field"),
+        );
+    }
+
+    let (signatureAlgorithm, algorithmIdentifier, err) =
+        signingParamsForKey(priv_, template.SignatureAlgorithm);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    let mut revokedCerts: slice<pkix::RevokedCertificate>;
+    // Only process the deprecated RevokedCertificates field if it is
+    // populated and the new RevokedCertificateEntries field is not
+    // populated.
+    if template.RevokedCertificates.Len() > 0 && template.RevokedCertificateEntries.Len() == 0
+    {
+        // Force revocation times to UTC per RFC 5280.
+        revokedCerts = crate::make!(
+            []pkix::RevokedCertificate,
+            template.RevokedCertificates.Len()
+        );
+        for (i, rc) in crate::range!(template.RevokedCertificates.clone()) {
+            let mut rc = rc.clone();
+            rc.RevocationTime = rc.RevocationTime.clone().UTC();
+            revokedCerts[i] = rc;
+        }
+    } else {
+        // Convert the ReasonCode field to a proper extension, and force
+        // revocation times to UTC per RFC 5280.
+        revokedCerts = crate::make!(
+            []pkix::RevokedCertificate,
+            template.RevokedCertificateEntries.Len()
+        );
+        for (i, rce) in crate::range!(template.RevokedCertificateEntries.clone()) {
+            if rce.SerialNumber == crate::nil {
+                return (
+                    slice::new(),
+                    errors::New("x509: template contains entry with nil SerialNumber field"),
+                );
+            }
+            if rce.RevocationTime.clone().IsZero() {
+                return (
+                    slice::new(),
+                    errors::New(
+                        "x509: template contains entry with zero RevocationTime field",
+                    ),
+                );
+            }
+
+            let mut rc = pkix::RevokedCertificate {
+                SerialNumber: rce.SerialNumber.clone(),
+                RevocationTime: rce.RevocationTime.clone().UTC(),
+                ..Default::default()
+            };
+
+            // Copy over any extra extensions, except for a Reason Code
+            // extension, because we'll synthesize that ourselves to
+            // ensure it is correct.
+            let mut exts: slice<pkix::Extension> =
+                crate::make!([]pkix::Extension, 0, rce.ExtraExtensions.Len());
+            for (_, ext) in crate::range!(rce.ExtraExtensions.clone()) {
+                if ext.Id.Equal(&oidExtensionReasonCode()) {
+                    return (
+                        slice::new(),
+                        errors::New(
+                            "x509: template contains entry with ReasonCode ExtraExtension; use ReasonCode field instead",
+                        ),
+                    );
+                }
+                exts = crate::append!(exts, ext.clone());
+            }
+
+            // Only add a reasonCode extension if the reason is non-zero,
+            // as per RFC 5280 Section 5.3.1.
+            if rce.ReasonCode != 0 {
+                let (reasonBytes, err) = asn1::Marshal(&asn1::Enumerated(rce.ReasonCode));
+                if err != errors::nil {
+                    return (slice::new(), err);
+                }
+
+                exts = crate::append!(
+                    exts,
+                    pkix::Extension {
+                        Id: oidExtensionReasonCode(),
+                        Value: reasonBytes,
+                        ..Default::default()
+                    }
+                );
+            }
+
+            if exts.Len() > 0 {
+                rc.Extensions = exts;
+            }
+            revokedCerts[i] = rc;
+        }
+    }
+
+    let (aki, err) = asn1::Marshal(&authKeyId {
+        Id: issuer.SubjectKeyId.clone(),
+    });
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    let numBytes = template.Number.Bytes();
+    if numBytes.Len() > 20 || (numBytes.Len() == 20 && numBytes[0] & 0x80 != 0) {
+        return (
+            slice::new(),
+            errors::New("x509: CRL number exceeds 20 octets"),
+        );
+    }
+    let (crlNum, err) = asn1::Marshal(&template.Number);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    // Correctly use the issuer's subject sequence if one is specified.
+    let (issuerSubject, err) = subjectBytes(issuer);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    let mut tbsCertList = tbsCertificateList {
+        // v2
+        Version: 1,
+        Signature: algorithmIdentifier.clone(),
+        Issuer: asn1::RawValue {
+            FullBytes: issuerSubject,
+            ..Default::default()
+        },
+        ThisUpdate: template.ThisUpdate.clone().UTC(),
+        NextUpdate: template.NextUpdate.clone().UTC(),
+        Extensions: slice::__from_vec(alloc::vec![
+            pkix::Extension {
+                Id: oidExtensionAuthorityKeyId(),
+                Value: aki,
+                ..Default::default()
+            },
+            pkix::Extension {
+                Id: oidExtensionCRLNumber(),
+                Value: crlNum,
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    };
+    if revokedCerts.Len() > 0 {
+        tbsCertList.RevokedCertificates = revokedCerts;
+    }
+
+    if template.ExtraExtensions.Len() > 0 {
+        tbsCertList.Extensions = crate::append!(
+            tbsCertList.Extensions,
+            template.ExtraExtensions.clone()...
+        );
+    }
+
+    let (tbsCertListContents, err) = asn1::Marshal(&tbsCertList);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    // Optimization to only marshal this struct once, when signing and
+    // then embedding in certificateList below.
+    tbsCertList.Raw = asn1::RawContent(tbsCertListContents.clone());
+
+    let (signature, err) = signTBS(&tbsCertListContents, priv_, signatureAlgorithm, rand);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    return asn1::Marshal(&certificateList {
+        TBSCertList: tbsCertList,
+        SignatureAlgorithm: algorithmIdentifier,
+        SignatureValue: asn1::BitString {
+            Bytes: signature.clone(),
+            BitLength: signature.Len() * 8,
+        },
+    });
+}
+
+// go: none — goish idiom: `KeyUsage` is documented (x509.go:581-583) as
+// "a bitmap of the KeyUsage* constants", and every Go caller writes
+// `KeyUsageCertSign | KeyUsageCRLSign` and `ku & KeyUsageCRLSign != 0`.
+// Go gets both for free because `type KeyUsage int` inherits int's
+// operators; a Rust newtype inherits nothing, so the four the bitmap
+// contract implies are spelled out. Without them the public API cannot
+// express its own documented usage — `CreateRevocationList`'s own
+// crlSign test had to reach through the tuple field.
+impl core::ops::BitOr for KeyUsage {
+    type Output = KeyUsage;
+    // go: none — goish idiom (operator impl; see the note above)
+    fn bitor(self, rhs: KeyUsage) -> KeyUsage {
+        return KeyUsage(self.0 | rhs.0);
+    }
+}
+
+// go: none — goish idiom: see `BitOr` above.
+impl core::ops::BitAnd for KeyUsage {
+    type Output = KeyUsage;
+    // go: none — goish idiom (operator impl; see the note above)
+    fn bitand(self, rhs: KeyUsage) -> KeyUsage {
+        return KeyUsage(self.0 & rhs.0);
+    }
+}
+
+// go: none — goish idiom: see `BitOr` above.
+impl core::ops::BitOrAssign for KeyUsage {
+    // go: none — goish idiom (operator impl; see the note above)
+    fn bitor_assign(&mut self, rhs: KeyUsage) {
+        self.0 |= rhs.0;
+    }
+}
+
+// go: none — goish idiom: see `BitOr` above.
+impl core::ops::BitAndAssign for KeyUsage {
+    // go: none — goish idiom (operator impl; see the note above)
+    fn bitand_assign(&mut self, rhs: KeyUsage) {
+        self.0 &= rhs.0;
+    }
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1960-1975 newRawAttributes
+/// Convert AttributeTypeAndValueSETs from a template
+/// [`CertificateRequest`]'s Attributes into `tbsCertificateRequest`
+/// RawAttributes.
+pub(super) fn newRawAttributes(
+    attributes: &slice<pkix::AttributeTypeAndValueSET>,
+) -> (slice<asn1::RawValue>, error) {
+    let mut rawAttributes: slice<asn1::RawValue> = slice::new();
+    let (b, err) = asn1::Marshal(attributes);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    let (rest, err) = asn1::Unmarshal(b, &mut rawAttributes);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    if rest.Len() != 0 {
+        return (
+            slice::new(),
+            errors::New("x509: failed to unmarshal raw CSR Attributes"),
+        );
+    }
+    return (rawAttributes, errors::nil);
+}
+
+// Go: x509.go:2141-2144 — the *anonymous* struct
+// `struct { Type asn1.ObjectIdentifier; Value [][]pkix.Extension
+// `asn1:"set"` }` that `CreateCertificateRequest` marshals as the
+// extensionRequest attribute.
+//
+// go: none — goish idiom: Rust has no anonymous struct type, so the
+// shape gets a name. Same deviation, and the same reason, as
+// `signatureAlgorithmDetail` earlier in this file.
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct extensionRequestAttribute {
+    pub Type: asn1::ObjectIdentifier,
+    #[tag(r#"asn1:"set""#)]
+    pub Value: slice<slice<pkix::Extension>>,
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:2035-2193 CreateCertificateRequest
+/// Create a new certificate request based on a template. The following
+/// members of `template` are used:
+///
+///   - SignatureAlgorithm
+///   - Subject
+///   - DNSNames
+///   - EmailAddresses
+///   - IPAddresses
+///   - URIs
+///   - ExtraExtensions
+///   - Attributes (deprecated)
+///
+/// `priv_` is the private key to sign the CSR with, and the
+/// corresponding public key will be included in the CSR. It must
+/// implement `crypto::Signer` and its `Public()` method must return an
+/// `rsa::PublicKey`, an `ecdsa::PublicKey` or an `ed25519::PublicKey`.
+///
+/// The returned slice is the certificate request in DER encoding.
+pub fn CreateCertificateRequest(
+    rand: &mut dyn io::Reader,
+    template: &CertificateRequest,
+    priv_: &Any,
+) -> (slice<byte>, error) {
+    // See `CreateCertificate` for why this is `Any::As` and not
+    // `goish::cast!`.
+    let key = match priv_.As::<dyn crypto::Signer + Send + Sync>() {
+        Some(k) => k,
+        None => {
+            return (
+                slice::new(),
+                errors::New(
+                    "x509: certificate private key does not implement crypto.Signer",
+                ),
+            )
+        }
+    };
+
+    let (signatureAlgorithm, algorithmIdentifier, err) =
+        signingParamsForKey(key, template.SignatureAlgorithm);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    let publicKeyBytes: slice<byte>;
+    let publicKeyAlgorithm: pkix::AlgorithmIdentifier;
+    // Go passes `key.Public()` — a `crypto.PublicKey`, which *is* `any` —
+    // straight into `marshalPublicKey(pub any)`. goish's two erasure
+    // carriers do not convert without naming the type; see
+    // `anyFromPublicKey`.
+    let (pubAny, err) = anyFromPublicKey(&key.Public());
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    let (b, ai, err) = marshalPublicKey(&pubAny);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    publicKeyBytes = b;
+    publicKeyAlgorithm = ai;
+
+    let (extensions, err) = buildCSRExtensions(template);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    // Make a copy of template.Attributes because we may alter it below.
+    let mut attributes: slice<pkix::AttributeTypeAndValueSET> =
+        crate::make!([]pkix::AttributeTypeAndValueSET, 0, template.Attributes.Len());
+    for (_, attr) in crate::range!(template.Attributes.clone()) {
+        let mut values: slice<slice<pkix::AttributeTypeAndValue>> =
+            crate::make!([]slice<pkix::AttributeTypeAndValue>, attr.Value.Len());
+        // Go: copy(values, attr.Value)
+        for (i, v) in crate::range!(attr.Value.clone()) {
+            values[i] = v.clone();
+        }
+        attributes = crate::append!(
+            attributes,
+            pkix::AttributeTypeAndValueSET {
+                Type: attr.Type.clone(),
+                Value: values,
+            }
+        );
+    }
+
+    let mut extensionsAppended = false;
+    if extensions.Len() > 0 {
+        // Append the extensions to an existing attribute if possible.
+        //
+        // Go writes `for _, atvSet := range attributes` and then mutates
+        // `atvSet.Value[0]`. That reaches the original because `atvSet`
+        // is a copy of the struct but `Value` is a slice *header* over
+        // shared backing. goish's `slice<T>` clones its backing
+        // (goslice.rs:88 and the `Clone` derive), so the same spelling
+        // would write to a discarded copy. The index the range already
+        // yields is used to write back into `attributes`.
+        for (idx, atvSet) in crate::range!(attributes.clone()) {
+            if !atvSet.Type.Equal(&oidExtensionRequest()) || atvSet.Value.Len() == 0 {
+                continue;
+            }
+
+            // specifiedExtensions contains all the extensions that we
+            // found specified via template.Attributes.
+            let mut specifiedExtensions = crate::make!(map[string]bool);
+
+            for (_, atvs) in crate::range!(atvSet.Value.clone()) {
+                for (_, atv) in crate::range!(atvs.clone()) {
+                    specifiedExtensions.Set(atv.Type.String(), true);
+                }
+            }
+
+            let mut newValue: slice<pkix::AttributeTypeAndValue> = crate::make!(
+                []pkix::AttributeTypeAndValue,
+                0,
+                atvSet.Value[0].Len() + extensions.Len()
+            );
+            newValue = crate::append!(newValue, atvSet.Value[0].clone()...);
+
+            for (_, e) in crate::range!(extensions.clone()) {
+                let (seen, _) = specifiedExtensions.Get(e.Id.String());
+                if seen {
+                    // Attributes already contained a value for
+                    // this extension and it takes priority.
+                    continue;
+                }
+
+                newValue = crate::append!(
+                    newValue,
+                    pkix::AttributeTypeAndValue {
+                        // There is no place for the critical
+                        // flag in an AttributeTypeAndValue.
+                        Type: e.Id.clone(),
+                        Value: Any::new(e.Value.clone()),
+                    }
+                );
+            }
+
+            attributes[idx].Value[0] = newValue;
+            extensionsAppended = true;
+            break;
+        }
+    }
+
+    let (mut rawAttributes, err) = newRawAttributes(&attributes);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    // If not included in attributes, add a new attribute for the
+    // extensions.
+    if extensions.Len() > 0 && !extensionsAppended {
+        let attr = extensionRequestAttribute {
+            Type: oidExtensionRequest(),
+            Value: slice::__from_vec(alloc::vec![extensions.clone()]),
+        };
+
+        let (b, err) = asn1::Marshal(&attr);
+        if err != errors::nil {
+            return (
+                slice::new(),
+                errors::New(
+                    string::from("x509: failed to serialise extensions attribute: ")
+                        + err.Error(),
+                ),
+            );
+        }
+
+        let mut rawValue = asn1::RawValue::default();
+        let (_, err) = asn1::Unmarshal(b, &mut rawValue);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+
+        rawAttributes = crate::append!(rawAttributes, rawValue);
+    }
+
+    let mut asn1Subject = template.RawSubject.clone();
+    if asn1Subject.Len() == 0 {
+        let (b, err) = asn1::Marshal(&template.Subject.ToRDNSequence());
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        asn1Subject = b;
+    }
+
+    let mut tbsCSR = tbsCertificateRequest {
+        // PKCS #10, RFC 2986
+        Version: 0,
+        Subject: asn1::RawValue {
+            FullBytes: asn1Subject,
+            ..Default::default()
+        },
+        PublicKey: publicKeyInfo {
+            Raw: asn1::RawContent::default(),
+            Algorithm: publicKeyAlgorithm,
+            PublicKey: asn1::BitString {
+                Bytes: publicKeyBytes.clone(),
+                BitLength: publicKeyBytes.Len() * 8,
+            },
+        },
+        RawAttributes: rawAttributes,
+        ..Default::default()
+    };
+
+    let (tbsCSRContents, err) = asn1::Marshal(&tbsCSR);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    tbsCSR.Raw = asn1::RawContent(tbsCSRContents.clone());
+
+    let (signature, err) = signTBS(&tbsCSRContents, key, signatureAlgorithm, rand);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    return asn1::Marshal(&certificateRequest {
+        TBSCSR: tbsCSR,
+        SignatureAlgorithm: algorithmIdentifier,
+        SignatureValue: asn1::BitString {
+            Bytes: signature.clone(),
+            BitLength: signature.Len() * 8,
+        },
+        ..Default::default()
+    });
 }
