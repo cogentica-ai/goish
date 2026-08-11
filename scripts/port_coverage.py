@@ -46,6 +46,20 @@ SKIP_ASM = re.compile(r"_(asm|amd64)\.go$")
 FUNC = re.compile(r"^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*[\(\[]", re.M)
 RSFN = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s+([A-Za-z_]\w*)", re.M)
 ANCHOR = re.compile(r"^\s*//\s*go:", re.M)
+# A Go declaration that goish deliberately resolves somewhere else, so it
+# will never have a same-named counterpart here. The motivating case is a
+# `//go:linkname` pair: Go declares the body on one side and a bodyless
+# stub on the other, and goish — which has no linkname — writes the body
+# once, on whichever side can reach the field. crypto/sha3 read 26/27
+# forever because of that, which is the squatter problem inverted: the
+# number lies, only downward.
+#
+# The reason text after the em dash is REQUIRED and is what keeps this
+# from becoming a way to launder a gap into 100%. Waived decls leave the
+# denominator (they are not work) but are printed on their own line, so
+# they can never quietly inflate a percentage.
+WAIVED = re.compile(
+    r"^\s*//\s*go:\s*waived\s+([A-Za-z_][\w.]*)\s*(?:—|--)\s*\S", re.M)
 
 
 def goroot(argv):
@@ -304,8 +318,10 @@ ANCHOR_GO = re.compile(r"//\s*go:[^\n]*?([A-Za-z0-9_]+\.go):")
 
 def _facts(paths):
     idents, loc, anchors, cited, unanchored = set(), 0, 0, set(), set()
+    waived = set()
     for p in paths:
         src = open(p, errors="replace").read()
+        waived |= {norm(w) for w in WAIVED.findall(src)}
         mine = set(RSFN.findall(src))
         idents |= mine
         n = len(ANCHOR.findall(src))
@@ -323,7 +339,7 @@ def _facts(paths):
         loc += src.count("\n")
     return {"idents": {norm(i) for i in idents}, "loc": loc,
             "nfiles": len(paths), "anchors": anchors, "cited": cited,
-            "unanchored": unanchored}
+            "unanchored": unanchored, "waived": waived}
 
 
 def scan_rs(root):
@@ -377,6 +393,12 @@ def build(subtree, gr):
         dropped = other_route(g["gofiles"], g["dir"], r["cited"] if r else set())
         want = sorted({n for f, ns in g["byfile"].items() if f not in dropped
                        for n in ns})
+        # Declarations goish resolves elsewhere by design leave the
+        # denominator — they are not remaining work — but are carried on
+        # the row so they stay visible. See WAIVED.
+        wv = r["waived"] if r else set()
+        waived = sorted(f for f in want if norm(f) in wv)
+        want = [f for f in want if norm(f) not in wv]
         hit = [f for f in want if norm(f) in have]
         missing = sorted(set(want) - set(hit))
         # Split the gap: what is left to *write in goish* versus what is
@@ -391,6 +413,7 @@ def build(subtree, gr):
             "anchors": r["anchors"] if r else 0,
             "missing": missing,
             "missing_asm": missing_asm,
+            "waived": waived,
             "gap_portable": len(missing) - len(missing_asm),
             "unanchored": sorted(f for f in hit
                                  if r and norm(f) in r["unanchored"]),
@@ -415,6 +438,10 @@ def main():
                       f"{r['go_files']} .go / {r['rs_files']} .rs, {r['anchors']} anchors")
                 print(f"  gap {len(r['missing'])} = {r['gap_portable']} portable "
                       f"+ {len(r['missing_asm'])} assembly")
+                if r["waived"]:
+                    print(f"  WAIVED {len(r['waived'])} decl(s) resolved "
+                          f"elsewhere by design, out of the denominator: "
+                          f"{' '.join(r['waived'])}")
                 if r["unanchored"]:
                     print(f"  UNVERIFIED: {len(r['unanchored'])} of the {r['ported']} "
                           f"'ported' names come from goish files with NO `// go:` "
@@ -437,7 +464,11 @@ def main():
     tasm = sum(len(r["missing_asm"]) for r in rows)
     tport = sum(r["gap_portable"] for r in rows)
     tun = sum(len(r["unanchored"]) for r in rows)
+    twv = sum(len(r["waived"]) for r in rows)
     split = f"{tf - tp} left = {tport} portable + {tasm} assembly"
+    if twv:
+        split += (f"; {twv} decl(s) WAIVED out of the denominator "
+                  f"(resolved elsewhere by design)")
     if tun:
         split += (f"; {tun} counted name(s) are UNVERIFIED "
                   f"(anchorless — name match only)")

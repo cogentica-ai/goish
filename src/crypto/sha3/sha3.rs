@@ -1,10 +1,20 @@
-// goishlint:ignore GOISH018 — two functions are not ported. `init` is
-// `crypto.RegisterHash(crypto.SHA3_224, …)`; goish has no crypto.Hash
-// registry. `fips140hash_sha3Unwrap` is the target of a `//go:linkname`
-// from crypto/internal/fips140hash, which reaches into this package to
-// recover the inner fips140 Digest; goish has no linkname and no
-// fips140hash port, and the `d` field is `pub(crate)` here so the same
-// unwrap is a plain field access once that package lands.
+// goishlint:ignore GOISH018 init, fips140hash_sha3Unwrap — two functions
+// are not ported, each for its own reason:
+//
+//   * `init` is `crypto.RegisterHash(crypto.SHA3_224, …)`; goish has no
+//     crypto.Hash registry.
+//
+//   * `fips140hash_sha3Unwrap` is the *body* half of a `//go:linkname`
+//     pair — Go writes it here and declares it bodyless in
+//     crypto/internal/fips140hash. goish has no linkname, so the body
+//     lives once, on the fips140hash side, where `SHA3.s` is reachable
+//     because it is `pub(crate)`. See `sha3Unwrap` in
+//     src/crypto/internal/fips140hash/hash.rs, anchored to
+//     crypto/internal/fips140hash/hash.go:14-15.
+//
+// go: waived fips140hash_sha3Unwrap — linkname body ported once, on the
+//     crypto/internal/fips140hash side; a second copy here would be the
+//     same function twice.
 // go: file crypto/sha3/sha3.go decls: Sum224, Sum256, Sum384, Sum512, SumSHAKE128, sumSHAKE128, SumSHAKE256, sumSHAKE256, New224, New256, New384, New512, SHA3.Write, SHA3.Sum, SHA3.Reset, SHA3.Size, SHA3.BlockSize, SHA3.MarshalBinary, SHA3.AppendBinary, SHA3.UnmarshalBinary, SHA3.Clone, NewSHAKE128, NewSHAKE256, NewCSHAKE128, NewCSHAKE256, SHAKE.Write, SHAKE.Read, SHAKE.Reset, SHAKE.BlockSize, SHAKE.MarshalBinary, SHAKE.AppendBinary, SHAKE.UnmarshalBinary, NewHash224, NewHash256, NewHash384, NewHash512, register_sha3_impls, __goish_as_dyn_any, __goish_as_dyn_any_mut
 //
 // Package sha3 implements the SHA-3 fixed-output-length hash functions
