@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **889/1507 = 59.0%**, 1321 anchors, **45 packages fully verified**
+Current: **922/1507 = 61.2%**, 1408 anchors, **47 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -51,9 +51,11 @@ Current: **889/1507 = 59.0%**, 1321 anchors, **45 packages fully verified**
 | `crypto/internal/fips140/ecdh` | 13/13 | 2 → 3 |
 | `crypto/internal/fips140/ecdsa` | 30/30 | 4 → 5 |
 | `crypto/mlkem` | 10/10 | 1 → 2 |
+| `crypto/elliptic` | 27/27 | 3 → 4 |
+| `crypto/internal/impl` | 6/6 | 1 → 2 |
 | `crypto/internal/fips140/bigmod` | 60/60 | 3 → 3 |
 | `crypto/internal/fips140/edwards25519/field` | 34/34 | 4 → 4 |
-| **total** | **678** | |
+| **total** | **711** | |
 
 The only functions missing from that table are assembly entry points:
 `blockAVX2`/`blockSHANI` in fips140/sha256 and in crypto/sha1,
@@ -255,33 +257,43 @@ decision that repeats across this tranche.
 | `crypto/ecdh` | 16 | replaces the existing X25519-only module |
 | `crypto/internal/hpke` | 19 | ecdh, hkdf (both done) |
 
-**Correction (same day): `math/big` is not a blocker.** An earlier draft of
-this section claimed `crypto/elliptic` and `crypto/x509` were stuck behind
-an unported `math/big`. That was wrong and was published without checking:
-`src/math/big/mod.rs` is 7053 lines with `Int`, `Rat` and `Float`, and
-`Int` already has every method `crypto/elliptic` calls — `Mul`, `Mod`,
-`Sub`, `Add`, `Lsh`, `Sign`, `Cmp`, `Set`, `SetInt64`, `SetBytes`,
-`Bytes`, `FillBytes`, `BitLen`, `ModInverse`, `ModSqrt`, `SetString`.
-One `ls src/math/` would have disproved the claim before it was written.
+**Correction (2026-08-11): `math/big` is not a blocker.** An earlier draft
+of this section claimed `crypto/elliptic` and `crypto/x509` were stuck
+behind an unported `math/big`. That was wrong and was published without
+checking: `src/math/big/mod.rs` is 7053 lines with `Int`, `Rat` and
+`Float`. `crypto/elliptic` has since been ported on top of it, 27/27.
 
-Two real caveats remain, and they are about shape rather than absence:
+Two real caveats came out of that port, and they are about shape rather
+than absence:
 
-* `Int::ModSqrt` returns `&mut Self`, so it cannot signal Go's "no square
-  root exists" nil. `UnmarshalCompressed` has to verify the residue
-  itself.
-* `Int::FillBytes` returns a fresh slice rather than filling the caller's
-  buffer in place, so Go's `x.FillBytes(ret[1:1+byteLen])` becomes a fill
-  plus a copy-back.
+* `Int` implements `PartialEq` only against `nil`, so a struct holding one
+  cannot `#[derive(PartialEq)]`. Compare field by field with `Cmp`.
+* `Int::ModSqrt` returns `&mut Self` and cannot signal Go's "no square root
+  exists" nil, and `Int::FillBytes` returns a fresh slice rather than
+  filling the caller's buffer in place.
 
-So the ranking above is by size, not by blockage. `crypto/elliptic` (27)
-and `crypto/internal/hpke` (19) are both unblocked today — hpke also wants
-`golang.org/x/crypto/chacha20poly1305`, which is outside the SDK, so
-`crypto/elliptic` is the larger genuinely-ready target.
+## Pre-flight: `scripts/port_deps.py`
 
-`crypto/ecdh` needs care rather than effort: `src/crypto/ecdh/mod.rs` is
-today a goish-only X25519 implementation with no Go counterpart, so
-porting the real package means replacing it and fixing its call sites, not
-adding to it.
+Both of those were found the expensive way — 900 lines in — and the
+"math/big is missing" claim was never checked at all. `scripts/port_deps.py`
+now answers both questions before any code is written:
+
+```bash
+scripts/port_deps.py crypto/elliptic -v   # imports, presence, coverage, symbols
+scripts/port_deps.py --ready crypto       # unported packages ranked by readiness
+```
+
+It prints GO / PARTIAL / NO-GO for the package's imports and, with `-v`,
+the exact symbols the port will reach for. **Package presence is necessary,
+not sufficient** — the script says so itself, because the failures that
+cost time were symbol-level, not package-level:
+
+* a goish type existing says nothing about which traits it derives;
+* inherent methods do **not** satisfy a `#[goish::interface]` trait — the
+  `impl Trait for T` block has to be written, including the two
+  `__goish_as_dyn_any` hooks that make `cast!` work;
+* name-level coverage can report 100% for a package that does not compile,
+  so `cargo check --lib` is the gate, not `port_coverage.py`.
 
 ## Per-package conversion recipe (proven on rc4, subtle, des)
 
