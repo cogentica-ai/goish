@@ -849,6 +849,10 @@ name = "crypto_rand_smoke"
 path = "examples/crypto_rand_smoke.rs"
 
 [[example]]
+name = "x509_parse_smoke"
+path = "examples/x509_parse_smoke.rs"
+
+[[example]]
 name = "crypto_ecdsa_smoke"
 path = "examples/crypto_ecdsa_smoke.rs"
 
