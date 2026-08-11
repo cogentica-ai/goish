@@ -1,4 +1,4 @@
-// go: file crypto/x509/pkix/pkix.go decls: FillFromRDNSequence, appendRDNs, ToRDNSequence, oidInAttributeTypeAndValue, HasExpired
+// go: file crypto/x509/pkix/pkix.go decls: String, FillFromRDNSequence, appendRDNs, ToRDNSequence, oidInAttributeTypeAndValue, HasExpired
 //
 // Shared, low-level structures for ASN.1 parsing and serialization of
 // X.509 certificates, CRLs and OCSP.
@@ -6,6 +6,14 @@
 // The whole package hangs on `encoding/asn1`, which is why it sat
 // unported for four sessions; `asn1::Marshal` landed in 568f5fb and
 // `port_deps crypto/x509/pkix` flipped to GO.
+//
+// `RDNSequence.String` and `Name.String` then sat out one more session
+// on top of that, for a second reason: they call
+// `asn1.Marshal(tv.Value)` where `tv.Value` is Go's `any`, and goish's
+// two type-erasure mechanisms did not meet — `goany::Any` gave
+// downcast but no reflection, `asn1::Marshal` wanted `reflect::Reflect`,
+// and nothing turned one into the other. They are here now because
+// `reflect::ValueOfAny` + `asn1::MarshalAny` close that gap.
 //
 // Deviations from pkix[go] @ Go 1.25.5:
 //
@@ -19,30 +27,32 @@
 //   * Go's package-level `oidCountry = []int{2, 5, 4, 6}` and friends
 //     are `var`s holding heap slices. goish has no const slice, so each
 //     is a function returning its ObjectIdentifier. Same values, same
-//     names.
+//     names. `attributeTypeNames`, Go's `map[string]string` var, is a
+//     function for the same reason.
 //   * `AttributeTypeAndValue.Value` is Go's `any`; goish holds
 //     `goany::Any`, the runtime's `interface{}` carrier. The
 //     `atv.Value.(string)` assertion in FillFromRDNSequence becomes
-//     `As::<string>()`, which is the same comma-ok test.
-//
-// NOT ported, and specifically so — `RDNSequence.String` and
-// `Name.String`. Both need `asn1::Marshal(tv.Value)`, and `tv.Value` is
-// a `goany::Any`. goish has two type-erasure mechanisms that do not
-// meet: `goany::AnyVal` gives downcast but no reflection, while
-// `asn1::Marshal` needs `reflect::Reflect`. There is no way today to get
-// a `reflect::Value` out of an `Any`, so the `oid=#<hex>` fallback for
-// an unrecognised attribute OID cannot be written.
-//
-// It is deliberately absent rather than stubbed. Go falls through to
-// `typeName = oidString` when Marshal fails, so a stub that always
-// errors compiles and looks like it works, while printing `oid=value`
-// where Go prints `oid=#hex` for every unrecognised OID — a silent
-// divergence in user-visible output. The prerequisite is unifying
-// `goany::Any` with `reflect::AnyReflect`; everything else in the file
-// is here.
-// goishlint:ignore GOISH018 String — see the note above; needs Any -> reflect::Value
-// goishlint:ignore GOISH021 attributeTypeNames — the OID->short-name map is read
-//   only by RDNSequence.String, which is not ported; it lands with it.
+//     `As::<string>()`, which is the same comma-ok test, and
+//     `asn1.Marshal(tv.Value)` becomes `asn1::MarshalAny(&tv.Value)`.
+//   * `Name.String` branches on `n.ExtraNames == nil`. goish's
+//     `slice<T>` has no nil-versus-empty distinction (goslice.rs:167 —
+//     `s == nil` is `len(s) == 0`), so a Name carrying a non-nil but
+//     EMPTY ExtraNames takes the Names branch here and does not in Go.
+//     Verified against the reference: Go prints `"CN=cn"` for that
+//     shape, goish prints the Names entries too. Every other shape
+//     agrees. Closing it needs a nil-vs-empty slice header runtime
+//     wide, not a change here.
+//   * Go's escaping switch is over rune literals (`case ',', '+', …`).
+//     `rune` is an integer type in goish and AGENTS.md §2a rules out
+//     `',' as rune`, so the RFC 2253 metacharacters are matched at
+//     their code points, each spelled beside its arm.
+//   * `RDNSequence.String`'s Marshal-failed fallback prints
+//     `fmt.Sprint(tv.Value)`. goish's `fmt::Sprint` has no reflective
+//     struct printer and renders a type it does not recognise as
+//     `<unsupported %T>` where Go prints e.g. `{map[]}`. The branch,
+//     the escaping and the `oid=` prefix are identical; only fmt's
+//     rendering of an unprintable value differs, and that belongs to
+//     fmt, not here.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -51,12 +61,15 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::encoding::asn1;
+use crate::encoding::hex;
+use crate::fmt;
 use crate::goany::Any;
+use crate::gomap::map;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::math::big::Int;
 use crate::time;
-use crate::types::{byte, int};
+use crate::types::{byte, int, rune};
 
 // Go: pkix.go:19-22
 //   type AlgorithmIdentifier struct {
@@ -75,6 +88,129 @@ pub struct AlgorithmIdentifier {
 /// this is a newtype rather than an alias.
 #[derive(Clone, Default, PartialEq)]
 pub struct RDNSequence(pub slice<RelativeDistinguishedNameSET>);
+
+// go: none — goish idiom: Go's `attributeTypeNames` is a package-level
+// `map[string]string` var (pkix.go:26-36). goish has no const map, so —
+// exactly as the nine `oid*` vars above — it is a function returning
+// the same nine entries.
+/// Dotted OID -> RFC 2253 short name, for the nine attribute types
+/// [`RDNSequence::String`] knows how to abbreviate. An OID absent from
+/// this table is printed as `oid=#<DER hex>` instead.
+fn attributeTypeNames() -> map<string, string> {
+    let mut m = crate::make!(map[string]string);
+    m.Set("2.5.4.6", "C");
+    m.Set("2.5.4.10", "O");
+    m.Set("2.5.4.11", "OU");
+    m.Set("2.5.4.3", "CN");
+    m.Set("2.5.4.5", "SERIALNUMBER");
+    m.Set("2.5.4.7", "L");
+    m.Set("2.5.4.8", "ST");
+    m.Set("2.5.4.9", "STREET");
+    m.Set("2.5.4.17", "POSTALCODE");
+    return m;
+}
+
+impl RDNSequence {
+    // go: sdk 1.25.5 crypto/x509/pkix/pkix.go:40-93 RDNSequence.String
+    /// A string representation of the sequence, roughly following the
+    /// RFC 2253 Distinguished Names syntax.
+    ///
+    /// RDNs are emitted in reverse order joined by `,`; the entries
+    /// within one RDN keep their order and are joined by `+`. An
+    /// attribute whose OID has no short name in [`attributeTypeNames`]
+    /// is printed as `oid=#<hex of its DER>`; only if that DER cannot
+    /// be produced does it fall back to `oid=<escaped value>`.
+    pub fn String(&self) -> string {
+        let mut s = string::from_static("");
+        let mut i: int = 0;
+        while i < self.0.Len() {
+            let rdn = self.0[self.0.Len() - 1 - i].clone();
+            if i > 0 {
+                s += ",";
+            }
+            for (j, tv) in crate::range!(rdn.0.clone()) {
+                if j > 0 {
+                    s += "+";
+                }
+
+                let oidString = tv.Type.String();
+                let (mut typeName, ok) = attributeTypeNames().Get(oidString.clone());
+                if !ok {
+                    // Go: derBytes, err := asn1.Marshal(tv.Value).
+                    // `tv.Value` is the erased carrier, so this is
+                    // `MarshalAny` — see the note in asn1/marshal.rs
+                    // about why goish needs the second door.
+                    let (derBytes, err) = asn1::MarshalAny(&tv.Value);
+                    if err == crate::errors::nil {
+                        s += oidString.clone();
+                        s += "=#";
+                        s += hex::EncodeToString(&derBytes);
+                        continue; // No value escaping necessary.
+                    }
+
+                    typeName = oidString.clone();
+                }
+
+                // Go: fmt.Sprint(tv.Value). `tv.Value` is already an
+                // `Any`, so it becomes the one-element argument slice
+                // directly — `any_args!` would wrap the carrier in a
+                // second `Any` and print `<any>`.
+                let valueString = fmt::Sprint(slice::__from_vec(alloc::vec![tv.Value.clone()]));
+                let mut escaped: slice<rune> = crate::make!([]rune, 0, valueString.Len());
+
+                for (k, c) in crate::range!(valueString) {
+                    let mut escape = false;
+
+                    match c {
+                        0x2C            // ','
+                        | 0x2B          // '+'
+                        | 0x22          // '"'
+                        | 0x5C          // '\\'
+                        | 0x3C          // '<'
+                        | 0x3E          // '>'
+                        | 0x3B          // ';'
+                        => {
+                            escape = true;
+                        }
+
+                        // ' ' — leading or trailing. `k` is a BYTE
+                        // offset and `Len()` a BYTE length, as in Go,
+                        // so a space after a multi-byte rune is still
+                        // caught by the `len-1` test.
+                        0x20 => {
+                            escape = k == 0 || k == valueString.Len() - 1;
+                        }
+
+                        // '#' — leading only.
+                        0x23 => {
+                            escape = k == 0;
+                        }
+
+                        _ => {}
+                    }
+
+                    if escape {
+                        escaped = crate::append!(escaped, backslash, c);
+                    } else {
+                        escaped = crate::append!(escaped, c);
+                    }
+                }
+
+                s += typeName;
+                s += "=";
+                s += crate::string(escaped);
+            }
+            i += 1;
+        }
+
+        return s;
+    }
+}
+
+// go: none — goish idiom: Go writes the escape as the rune literal
+// `'\\'` inside `append(escaped, '\\', c)`; see the banner for why
+// goish names the code point instead.
+const backslash: rune = 0x5C;
 
 // Go: pkix.go:95 — `type RelativeDistinguishedNameSET []AttributeTypeAndValue`
 #[derive(Clone, Default, PartialEq)]
@@ -248,6 +384,45 @@ impl Name {
         }
 
         return ret;
+    }
+
+    // go: sdk 1.25.5 crypto/x509/pkix/pkix.go:249-270 Name.String
+    /// The string form of `self`, roughly following the RFC 2253
+    /// Distinguished Names syntax.
+    ///
+    /// When there are no `ExtraNames`, the parsed values in `Names` are
+    /// surfaced instead — the ones that did not land in a named field.
+    /// They go at the *front* of the sequence so they come out at the
+    /// end of the string (Go issue 39924).
+    pub fn String(&self) -> string {
+        let mut rdns = RDNSequence::default();
+        // If there are no ExtraNames, surface the parsed value (all
+        // entries in Names) instead.
+        if self.ExtraNames == crate::nil {
+            for (_, atv) in crate::range!(self.Names.clone()) {
+                let t = &atv.Type;
+                if t.Len() == 4 && t[0] == 2 && t[1] == 5 && t[2] == 4 {
+                    match t[3] {
+                        // These attributes were already parsed into
+                        // named fields.
+                        3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 17 => {
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+                // Place non-standard parsed values at the beginning of
+                // the sequence so they will be at the end of the
+                // string. See Issue 39924.
+                let one = slice::__from_vec(alloc::vec![atv.clone()]);
+                rdns = RDNSequence(crate::append!(
+                    rdns.0,
+                    RelativeDistinguishedNameSET(one)
+                ));
+            }
+        }
+        rdns = RDNSequence(crate::append!(rdns.0, self.ToRDNSequence().0...));
+        return rdns.String();
     }
 }
 

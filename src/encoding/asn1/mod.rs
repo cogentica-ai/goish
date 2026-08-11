@@ -73,7 +73,12 @@ pub use common::{fieldParameters, getUniversalType, parseFieldParameters};
 // The two public entry points keep their Go names; everything else in
 // marshal.go is unexported there and is re-exported `__`-prefixed only so
 // examples/asn1_marshal_smoke.rs can reach it.
-pub use marshal::{Marshal, MarshalWithParams};
+//
+// `MarshalAny` / `MarshalAnyWithParams` have no Go counterpart: Go's
+// `Marshal(val any)` is already the type-erased form, and goish's
+// `Marshal` cannot be, because `Reflect` is not object safe. See the
+// note above `MarshalAny` in marshal.rs.
+pub use marshal::{Marshal, MarshalAny, MarshalAnyWithParams, MarshalWithParams};
 pub use marshal::{makeBody as __makeBody, makeField as __makeField};
 pub use marshal::{
     appendBase128Int as __appendBase128Int, appendLength as __appendLength,

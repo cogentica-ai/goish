@@ -1322,6 +1322,66 @@ pub fn ValueOf<T: Reflect + ?Sized>(v: &T) -> Value {
     v.__reflect_value()
 }
 
+// ─── ValueOfAny / TypeOfAny — reflection out of `goish::Any` ─────────
+//
+// Go needs no such pair: `reflect.ValueOf` takes `any`, and an
+// interface header always carries its dynamic type descriptor, so
+// reflecting an erased value is the *only* thing reflect does.
+//
+// Goish has two type-erasure mechanisms with different jobs.
+// `goany::Any` erases into `Arc<dyn AnyVal>` and gives downcast;
+// `Reflect` gives `Value`/`Type` but is not object safe
+// (`__reflect_type()` has no `self`), so a `dyn` cannot carry it.
+// Until now the two did not meet, and `crypto/x509/pkix` sat at 5/6
+// because `asn1.Marshal(tv.Value)` needs exactly this crossing.
+//
+// The crossing is made at the *wrap* site, not the read site:
+// `Any::new` requires `T: Reflect` and stores both answers in the
+// `AnyVal` vtable (see goany.rs). These two functions read them.
+//
+// The comma-ok return is the load-bearing part. `ok == false` means
+// "this carrier has no reflection" — a closure, or a value wrapped
+// with `Any::new_opaque`. It is NOT the same as
+// `(Value::Invalid, true)`, which is the honest reflection of `nil`
+// (Go's `reflect.ValueOf(nil)` is likewise the zero Value). A caller
+// that will go on to marshal must be able to tell those apart: one is
+// Go's "cannot marshal nil value", the other has no Go analogue at all
+// and has to name the offending type. Returning `Value::Invalid` for
+// both would make `asn1.Marshal` quietly emit the wrong diagnosis, and
+// - through pkix's `typeName = oidString` fallback - the wrong string.
+
+// go: none — goish idiom: Go's `reflect.ValueOf` already takes `any`.
+// This is that function for goish's `Any` carrier, with the extra `ok`
+// Go does not need. See the note above for why `ok` is not optional.
+/// `reflect.ValueOf(x)` where `x` is a type-erased `goish::Any`.
+///
+/// Returns `(value, true)` when the wrapped payload was stored through
+/// [`goany::Any::new`](crate::goany::Any::new) (which requires
+/// `Reflect`), and `(Value::Invalid, false)` when it was stored through
+/// `new_fn` / `new_opaque` and genuinely has no reflection.
+pub fn ValueOfAny(v: &crate::goany::Any) -> (Value, bool) {
+    return match v.0.__goish_reflect_value() {
+        Some(val) => (val, true),
+        None => (Value::Invalid, false),
+    };
+}
+
+// go: none — goish idiom: the `Type` half of `ValueOfAny`. Go spells
+// this `reflect.TypeOf(x)`; goish's `TypeOf` needs a static `T`, which
+// an erased value does not have.
+/// `reflect.TypeOf(x)` where `x` is a type-erased `goish::Any` — the
+/// *dynamic* type descriptor, not `interface{}`.
+///
+/// Same `ok` contract as [`ValueOfAny`]. Note that
+/// `<Any as Reflect>::__reflect_type()` cannot answer this: it has no
+/// `self`, so all it can say is `interface{}`.
+pub fn TypeOfAny(v: &crate::goany::Any) -> (Type, bool) {
+    return match v.0.__goish_reflect_type() {
+        Some(t) => (t, true),
+        None => (Type::__new(Kind::Invalid, "", &[]), false),
+    };
+}
+
 // ─── AnyReflect — type-erased reflection ─────────────────────────────
 //
 // Ports that accept arbitrary user values (logr's structured logging
@@ -1790,46 +1850,31 @@ impl Reflect for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
     }
 }
 
-// `goish::Any` (interface{} newtype) — runs the same downcast probe
-// table as the raw-Arc impl above. We can't directly forward to that
-// impl because `Any` now wraps `Arc<dyn AnyVal>` (the dyn_eq-extended
-// trait); the probe set is small, so inlining is cheaper than a shim
-// trait.
+// `goish::Any` (interface{} newtype). This used to be a nine-entry
+// `downcast_ref` probe table over the primitives, with `Value::Invalid`
+// for everything else — a `pkix.Name` inside an `Any` reflected as
+// "nil". It now reads the reflection the wrap site recorded, so every
+// `Any::new`-constructed value reflects, not just the nine.
+//
+// The `Value::Invalid` fallback that remains is for the two payloads
+// that really have none (`new_fn`, `new_opaque`). `Reflect` has no
+// failure channel — `__reflect_value` must return *some* Value — which
+// is exactly why [`ValueOfAny`] exists and why every consumer that will
+// act on the result (marshal it, walk it, encode it) must go through
+// that comma-ok form instead of `ValueOf`. Landing on Invalid here is
+// still safe rather than silent: `asn1::makeField` rejects an invalid
+// Value. It is merely less precise about *why*.
 impl Reflect for crate::goany::Any {
     #[inline]
     fn __reflect_type() -> Type {
+        // Static type only — `Reflect::__reflect_type` has no `self`,
+        // so the dynamic answer is unreachable from here. Callers that
+        // want it use `TypeOfAny`.
         Type::__new(Kind::Interface, "interface{}", &[])
     }
     fn __reflect_value(&self) -> Value {
-        let any = self.as_any();
-        if let Some(v) = any.downcast_ref::<string>() {
-            return Value::String(v.clone());
-        }
-        if let Some(v) = any.downcast_ref::<i64>() {
-            return Value::Int(*v);
-        }
-        if let Some(v) = any.downcast_ref::<i32>() {
-            return Value::Int32(*v);
-        }
-        if let Some(v) = any.downcast_ref::<u64>() {
-            return Value::Uint(*v);
-        }
-        if let Some(v) = any.downcast_ref::<u32>() {
-            return Value::Uint32(*v);
-        }
-        if let Some(v) = any.downcast_ref::<u8>() {
-            return Value::Uint8(*v);
-        }
-        if let Some(v) = any.downcast_ref::<f64>() {
-            return Value::Float64(*v);
-        }
-        if let Some(v) = any.downcast_ref::<f32>() {
-            return Value::Float32(*v);
-        }
-        if let Some(v) = any.downcast_ref::<bool>() {
-            return Value::Bool(*v);
-        }
-        Value::Invalid
+        let (v, _ok) = ValueOfAny(self);
+        return v;
     }
 }
 

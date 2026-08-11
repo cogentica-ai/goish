@@ -26,6 +26,11 @@
 //     scratch buffer inside, converted at the return site (AGENTS.md §3).
 //   * Go's `tagAndLength` is unexported; goish's is `TagAndLength`, public
 //     because ParseTagAndLength already returns it.
+//   * Go's single `Marshal(val any)` is two functions here: `Marshal`
+//     for a statically known `impl Reflect`, and `MarshalAny` for
+//     goish's erased `interface{}` carrier. `Reflect` is not object
+//     safe, so one signature cannot serve both. See the note above
+//     `MarshalAny`.
 
 #![allow(non_snake_case)]
 
@@ -1101,8 +1106,10 @@ pub fn makeField(
     //         return makeField(v.Elem(), params) }
     //
     // goish has no reflected interface kind — a value reaching here is
-    // already concrete, because `Marshal` takes `&impl Reflect` rather
-    // than `any`. The recursion has nothing to unwrap.
+    // always concrete. `Marshal` takes `&impl Reflect`, and `MarshalAny`
+    // resolves the erased carrier to its *dynamic* value up front via
+    // `reflect::ValueOfAny` (which is what this Go branch does, one
+    // frame earlier). The recursion has nothing left to unwrap.
 
     if v.Kind() == Kind::Slice && v.Len() == 0 && params.omitEmpty {
         return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
@@ -1338,7 +1345,81 @@ pub fn MarshalWithParams<T: crate::reflect::Reflect, S: Into<string>>(
     params: S,
 ) -> (slice<byte>, error) {
     let v = crate::reflect::Reflect::__reflect_value(val);
-    let (e, err) = makeField(&v, &super::parseFieldParameters(params));
+    return marshalValue(&v, params);
+}
+
+// ─── the type-erased door: MarshalAny / MarshalAnyWithParams ─────────
+//
+// Go needs no such split. `func Marshal(val any) ([]byte, error)` is
+// already the type-erased entry point, because Go's `any` carries its
+// dynamic type descriptor and `reflect.ValueOf` reads it.
+//
+// goish's `Marshal` is generic over `Reflect`, and `Reflect` cannot be
+// made into a trait object: `__reflect_type()` takes no `self`, so
+// `dyn Reflect` is not a type Rust will build. `goish::Any` — the
+// runtime's actual `interface{}` carrier — therefore cannot be passed
+// to `Marshal` at all. These two functions are the missing half, and
+// they are what `pkix.RDNSequence.String` calls: `tv.Value` is an
+// `Any`, and Go's line is literally `asn1.Marshal(tv.Value)`.
+//
+// The reflection is fetched with `reflect::ValueOfAny`, whose comma-ok
+// distinguishes "has no reflection at all" from "reflects to the
+// invalid value". Both are errors here, but *different* errors, and
+// the difference is not cosmetic: pkix falls back to
+// `typeName = oidString` on any Marshal error and then prints
+// `oid=<value>` instead of `oid=#<hex>`, so an unreflectable value
+// that silently masqueraded as nil would produce plausible, wrong,
+// user-visible output. Naming the type in the message is what makes
+// that failure findable.
+
+// go: none — goish idiom: Go's `Marshal(val any)` is already
+// type-erased; goish's `Marshal` is generic over `Reflect`, which
+// `dyn`/`goish::Any` cannot satisfy (`__reflect_type()` has no `self`,
+// so the trait is not object safe). This is that same entry point for
+// the erased carrier.
+/// Return the ASN.1 encoding of the type-erased `val` — the `Marshal`
+/// to call when the value arrived as Go's `any`.
+///
+/// Accepts the same struct tags as [`Marshal`]. Fails, rather than
+/// encoding anything, when `val` carries a payload with no goish
+/// reflection (`Any::new_fn` / `Any::new_opaque`).
+pub fn MarshalAny(val: &crate::goany::Any) -> (slice<byte>, error) {
+    return MarshalAnyWithParams(val, "");
+}
+
+// go: none — goish idiom: the params-carrying sibling of `MarshalAny`,
+// standing in the same relation to it that `MarshalWithParams` does to
+// `Marshal`.
+/// Allow field parameters to be specified for the top-level element of
+/// a type-erased value. The form of the params is the same as the
+/// field tags.
+pub fn MarshalAnyWithParams<S: Into<string>>(
+    val: &crate::goany::Any,
+    params: S,
+) -> (slice<byte>, error) {
+    let (v, ok) = crate::reflect::ValueOfAny(val);
+    if !ok {
+        // No reflection for this payload. Say so, and say which type —
+        // this is NOT Go's "cannot marshal nil value", and reporting it
+        // as such would send a reader hunting for a nil that is not
+        // there.
+        let mut msg = string::from_static("asn1: cannot marshal value of type ");
+        msg += string::from(val.TypeName());
+        msg += ": no goish reflection for that type";
+        return (slice::default(), crate::errors::New(msg));
+    }
+    return marshalValue(&v, params);
+}
+
+// go: none — goish idiom: the tail Go writes twice, once in `Marshal`
+// and once in `MarshalWithParams`. goish has four entry points into it
+// (the `Any` pair as well), so it is a function.
+/// Encode an already-reflected value under `params`.
+fn marshalValue<S: Into<string>>(
+    v: &crate::reflect::Value,
+    params: S,
+) -> (slice<byte>, error) {
+    let (e, err) = makeField(v, &super::parseFieldParameters(params));
     if err != nil {
         return (slice::default(), err);
     }
