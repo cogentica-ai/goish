@@ -102,6 +102,18 @@ impl PartialEq<PublicKey> for crate::nilval::Nil {
     }
 }
 
+// go: none — the third of AGENTS.md §6's polymorphic-nil impls, which
+// this type was missing. `From<Nil>` is what lets a `*ecdsa.PublicKey`
+// error return be spelled `nil.into()` — Go's `return nil, err` — instead
+// of naming the zero key at every call site. crypto/x509's SEC 1 and
+// PKCS #8 parsers are the first callers.
+impl From<crate::nilval::Nil> for PublicKey {
+    // go: none — polymorphic nil, see the note above.
+    fn from(_: crate::nilval::Nil) -> Self {
+        return zeroPublicKey();
+    }
+}
+
 // go: none — Go's `switch curve { case elliptic.P256(): … }` compares
 // interface values: same dynamic type AND same pointer. Comparing the data
 // half of goish's fat pointer is that same test, and it keeps
@@ -287,6 +299,15 @@ impl PartialEq<PrivateKey> for crate::nilval::Nil {
     // go: none — polymorphic nil, see the note above.
     fn eq(&self, other: &PrivateKey) -> bool {
         return other.D == crate::nilval::nil && other.PublicKey == crate::nilval::nil;
+    }
+}
+
+// go: none — the third of AGENTS.md §6's polymorphic-nil impls. See the
+// note on `From<Nil> for PublicKey` above.
+impl From<crate::nilval::Nil> for PrivateKey {
+    // go: none — polymorphic nil, see the note above.
+    fn from(_: crate::nilval::Nil) -> Self {
+        return zeroPrivateKey();
     }
 }
 

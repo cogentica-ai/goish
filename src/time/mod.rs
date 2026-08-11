@@ -2048,6 +2048,15 @@ pub fn Parse<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>
     if l == "20060102150405Z0700" {
         return parse_asn1_generalized(value);
     }
+    // ASN.1 GeneralizedTime with optional fractional seconds:
+    // "20060102150405.999999999Z0700" — encoding/asn1's own
+    // `parseGeneralizedTime` layout. The `.999999999` chunk is Go's
+    // stdFrac9: the fraction and its separator are both optional, and
+    // trailing zeros are trimmed. `format_layout_scan` already emits
+    // this form; this is the reading half.
+    if l == "20060102150405.999999999Z0700" {
+        return parse_asn1_generalized_frac(value);
+    }
 
     (
         Time::default(),
@@ -2111,6 +2120,67 @@ fn parse_asn1_generalized(s: crate::gostring::string) -> (Time, crate::error) {
     let mm = match parse_int(&bs[10..12]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     let ss = match parse_int(&bs[12..14]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     return (Date(y, m, d, hh, mm, ss, 0, UTC), crate::errors::nil);
+}
+
+// go: none - goish idiom: the fractional-seconds ASN.1 GeneralizedTime
+// arm of the layout switch above.
+/// ASN.1 GeneralizedTime — `YYYYMMDDhhmmss[.f{1,9}]Z`.
+///
+/// Same `Z`-only deviation as [`parse_asn1_utc`]: this file's `Time` has
+/// no `Location` (`Zone()` is hard-wired to `("UTC", 0)`), so a numeric
+/// `±hhmm` offset cannot be retained, and `encoding/asn1`'s
+/// `parseGeneralizedTime` re-`Format`s the result and compares it to the
+/// input — which an offset could never satisfy. KNOWN DIVERGENCE: Go
+/// accepts `20100102030405+0607`; goish rejects it. RFC 5280 §4.1.2.5.2
+/// requires `Z` in certificates, so no conforming certificate reaches it.
+///
+/// The fraction is truncated at nanosecond precision, as Go's stdFrac9
+/// scanner does.
+fn parse_asn1_generalized_frac(s: crate::gostring::string) -> (Time, crate::error) {
+    let bs = s.as_bytes();
+    let bad = || -> (Time, crate::error) {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed ASN.1 GeneralizedTime"),
+        );
+    };
+    // Shortest accepted form is "YYYYMMDDhhmmssZ".
+    if bs.len() < 15 || bs[bs.len() - 1] != b'Z' {
+        return bad();
+    }
+    let y = match parse_int(&bs[0..4]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let m = match parse_int(&bs[4..6]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let d = match parse_int(&bs[6..8]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let hh = match parse_int(&bs[8..10]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mm = match parse_int(&bs[10..12]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let ss = match parse_int(&bs[12..14]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+
+    // Everything between the seconds and the trailing 'Z' is the
+    // optional ".fraction".
+    let tail = &bs[14..bs.len() - 1];
+    let mut nsec: int = 0;
+    if !tail.is_empty() {
+        if tail[0] != b'.' || tail.len() < 2 {
+            return bad();
+        }
+        let digits = &tail[1..];
+        let mut scale: int = 100_000_000;
+        let mut i = 0usize;
+        while i < digits.len() {
+            let c = digits[i];
+            if c < b'0' || c > b'9' {
+                return bad();
+            }
+            // Beyond nanosecond precision the digits are dropped, which
+            // is what Go's scanner does once its 9-digit window fills.
+            if scale > 0 {
+                nsec += crate::int(c - b'0') * scale;
+                scale /= 10;
+            }
+            i += 1;
+        }
+    }
+    return (Date(y, m, d, hh, mm, ss, nsec, UTC), crate::errors::nil);
 }
 
 fn parse_rfc3339(s: crate::gostring::string) -> (Time, crate::error) {

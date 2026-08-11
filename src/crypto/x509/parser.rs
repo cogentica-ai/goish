@@ -348,7 +348,7 @@ fn parseExtension(der: CBString) -> (pkix::Extension, error) {
 /// Decode the SubjectPublicKeyInfo carried by `keyData`. Go's `any`
 /// return is `goany::Any`; see x509.rs's banner for why the key is
 /// wrapped with `Any::new_fn`.
-fn parsePublicKey(keyData: &publicKeyInfo) -> (Any, error) {
+pub(super) fn parsePublicKey(keyData: &publicKeyInfo) -> (Any, error) {
     let oid = keyData.Algorithm.Algorithm.clone();
     let params = keyData.Algorithm.Parameters.clone();
     let mut der = CBString::New(keyData.PublicKey.RightAlign());

@@ -536,3 +536,95 @@ pub struct RevokedCertificate {
     pub RevocationTime: time::Time,
     pub Extensions: slice<Extension>,
 }
+
+// ─── reflect descriptors ──────────────────────────────────────────────
+//
+// go: none — goish-only, and a prerequisite rather than a port.
+//
+// `asn1.Marshal` takes a `&impl reflect::Reflect` and `asn1.Unmarshal` a
+// `&mut impl Reflect + FromReflectValue`, because goish has no universal
+// runtime reflection (the deviation is stated in full at the head of
+// encoding/asn1/marshal.rs and asn1.rs). Every struct handed to either
+// therefore needs a descriptor.
+//
+// These are hand-written rather than `#[goish::reflect]`-generated. The
+// proc-macro also emits `json::FromValue`, `json::MarshalerTo` and
+// `json::UnmarshalerFrom`, which would require JSON codecs on
+// `asn1::ObjectIdentifier` and `asn1::RawValue` — types that exist to
+// carry DER and have no JSON meaning. `encoding/asn1` hand-writes the
+// descriptors for its own named types (`BIT_STRING_FIELDS` and friends at
+// the foot of asn1/mod.rs) for the same reason; this follows that.
+//
+// The `asn1:"optional"` tag is carried in the descriptor because that is
+// where `parseFieldParameters` reads it from — `field.Tag.Get("asn1")` in
+// asn1's `parseField` and `makeBody`.
+
+static ALGORITHM_IDENTIFIER_FIELDS: [crate::reflect::StructField; 2] = [
+    crate::reflect::StructField {
+        Name: "Algorithm",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <asn1::ObjectIdentifier as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+    crate::reflect::StructField {
+        Name: "Parameters",
+        Tag: crate::reflect::StructTag::__new("asn1:\"optional\""),
+        Type: <asn1::RawValue as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+];
+
+impl crate::reflect::Reflect for AlgorithmIdentifier {
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(
+            crate::reflect::Kind::Struct,
+            "AlgorithmIdentifier",
+            &ALGORITHM_IDENTIFIER_FIELDS,
+        );
+    }
+
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return crate::reflect::Value::Struct {
+            ty: <AlgorithmIdentifier as crate::reflect::Reflect>::__reflect_type(),
+            fields: alloc::vec![
+                crate::reflect::Reflect::__reflect_value(&self.Algorithm),
+                crate::reflect::Reflect::__reflect_value(&self.Parameters),
+            ],
+        };
+    }
+}
+
+impl crate::reflect::FromReflectValue for AlgorithmIdentifier {
+    // go: none — goish-only: the write half of the descriptor above.
+    fn from_reflect_value(v: crate::reflect::Value) -> (Self, crate::error) {
+        if v.Kind() != crate::reflect::Kind::Struct {
+            return (
+                AlgorithmIdentifier::default(),
+                crate::errors::New("pkix: expected AlgorithmIdentifier"),
+            );
+        }
+        let (algorithm, err) =
+            <asn1::ObjectIdentifier as crate::reflect::FromReflectValue>::from_reflect_value(
+                v.Field(0),
+            );
+        if err != crate::errors::nil {
+            return (AlgorithmIdentifier::default(), err);
+        }
+        let (parameters, err) =
+            <asn1::RawValue as crate::reflect::FromReflectValue>::from_reflect_value(v.Field(1));
+        if err != crate::errors::nil {
+            return (AlgorithmIdentifier::default(), err);
+        }
+        return (
+            AlgorithmIdentifier {
+                Algorithm: algorithm,
+                Parameters: parameters,
+            },
+            crate::errors::nil,
+        );
+    }
+}
