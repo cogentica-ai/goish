@@ -188,6 +188,7 @@ impl<B: Block> CTR<B> {
 //       }
 //   }
 impl<B: Block> Stream for CTR<B> {
+    // go: sdk 1.25.5 crypto/cipher/ctr.go:96-118 ctr.XORKeyStream
     fn XORKeyStream(&mut self, dst: &mut slice<byte>, src: slice<byte>) {
         // Go: if len(dst) < len(src) { panic(...) }
         if dst.Len() < src.Len() {

@@ -127,10 +127,12 @@ pub fn NewCBCEncrypter<B: Block>(b: B, iv: slice<byte>) -> CBCEncrypter<B> {
 //       copy(x.iv, iv)
 //   }
 impl<B: Block> BlockMode for CBCEncrypter<B> {
+    // go: sdk 1.25.5 crypto/cipher/cbc.go:77-77 cbcEncrypter.BlockSize
     fn BlockSize(&self) -> int {
         self.0.blockSize
     }
 
+    // go: sdk 1.25.5 crypto/cipher/cbc.go:79-108 cbcEncrypter.CryptBlocks
     fn CryptBlocks(&mut self, dst: &mut slice<byte>, src: slice<byte>) {
         let bs = self.0.blockSize as usize;
         let src_v = src.__into_vec();
@@ -183,6 +185,7 @@ impl<B: Block> BlockMode for CBCEncrypter<B> {
 }
 
 impl<B: Block> CBCEncrypter<B> {
+    // go: sdk 1.25.5 crypto/cipher/cbc.go:110-116 cbcEncrypter.SetIV
     // Go: cbc.go:110
     //   func (x *cbcEncrypter) SetIV(iv []byte) {
     //       if len(iv) != len(x.iv) { panic("cipher: incorrect length IV") }
@@ -258,10 +261,12 @@ pub fn NewCBCDecrypter<B: Block>(b: B, iv: slice<byte>) -> CBCDecrypter<B> {
 //       x.iv, x.tmp = x.tmp, x.iv
 //   }
 impl<B: Block> BlockMode for CBCDecrypter<B> {
+    // go: sdk 1.25.5 crypto/cipher/cbc.go:156-156 cbcDecrypter.BlockSize
     fn BlockSize(&self) -> int {
         self.0.blockSize
     }
 
+    // go: sdk 1.25.5 crypto/cipher/cbc.go:158-200 cbcDecrypter.CryptBlocks
     fn CryptBlocks(&mut self, dst: &mut slice<byte>, src: slice<byte>) {
         let bs = self.0.blockSize as usize;
         let src_v = src.__into_vec();
@@ -333,6 +338,7 @@ impl<B: Block> BlockMode for CBCDecrypter<B> {
 }
 
 impl<B: Block> CBCDecrypter<B> {
+    // go: sdk 1.25.5 crypto/cipher/cbc.go:202-208 cbcDecrypter.SetIV
     // Go: cbc.go:202
     //   func (x *cbcDecrypter) SetIV(iv []byte) {
     //       if len(iv) != len(x.iv) { panic("cipher: incorrect length IV") }

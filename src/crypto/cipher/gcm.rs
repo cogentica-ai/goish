@@ -536,18 +536,21 @@ fn newGCM<B: Block>(cipher: B, nonceSize: int, tagSize: int) -> (Option<GCM<B>>,
 
 // Go: gcm.go:240 (gcmFallback.Seal) and gcm.go:275 (gcmFallback.Open)
 impl<B: Block> AEAD for GCM<B> {
+    // go: sdk 1.25.5 crypto/cipher/gcm.go:232-234 gcmFallback.NonceSize
     // Go: gcm.go:232
     //   func (g *gcmFallback) NonceSize() int { return g.nonceSize }
     fn NonceSize(&self) -> int {
         self.nonceSize
     }
 
+    // go: sdk 1.25.5 crypto/cipher/gcm.go:236-238 gcmFallback.Overhead
     // Go: gcm.go:236
     //   func (g *gcmFallback) Overhead() int { return g.tagSize }
     fn Overhead(&self) -> int {
         self.tagSize
     }
 
+    // go: sdk 1.25.5 crypto/cipher/gcm.go:240-273 gcmFallback.Seal
     // Go: gcm.go:240
     //   func (g *gcmFallback) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
     //       ... full sealGeneric inlined ...
@@ -625,6 +628,7 @@ impl<B: Block> AEAD for GCM<B> {
         slice::__from_vec(ret_v)
     }
 
+    // go: sdk 1.25.5 crypto/cipher/gcm.go:275-310 gcmFallback.Open
     // Go: gcm.go:275
     //   func (g *gcmFallback) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error) {
     //       ... full openGeneric inlined ...
