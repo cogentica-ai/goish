@@ -741,6 +741,68 @@ fn main() {
         checkHex(&der, CSR_DUP, "an Attributes-specified extension takes priority == Go DER");
     }
 
+    // -- An OPTIONAL time::Time at its zero value ---------------------
+    //
+    // `tbsCertificateList.NextUpdate` is `asn1:"optional"`, so its zero
+    // is omitted. Which value *is* the zero differs between the two
+    // languages, and the difference belongs to `time`, not to x509:
+    //
+    //   Go     `time.Time{}` is year 1. Go omits NextUpdate at year 1
+    //          and EMITS it at the Unix epoch — goref CRL_EXPIRY_EPOCH
+    //          carries `170d3730303130313030303030305a`, which is
+    //          "700101000000Z".
+    //   goish  `time::Time` has no year-1 value at all.
+    //          `Time::default()` and `time::Unix(0, 0)` are the same
+    //          value: both `IsZero()`, both `Unix() == 0`, both
+    //          `Year() == 1970`. So goish omits at the epoch.
+    //
+    // The assertion is therefore the semantic one — goish's zero time
+    // produces exactly the CRL Go's zero time produces (goref
+    // CRL_EXPIRY_GOZERO, byte-identical because every other field
+    // agrees). The residue is only that goish cannot say "the epoch,
+    // deliberately"; a caller who means 1970 gets the field dropped
+    // where Go would write it. Should `time::Time` ever grow Go's
+    // year-1 zero, this case splits in two and the explicit
+    // `Unix(0, 0)` half expects CRL_EXPIRY_EPOCH instead.
+    //
+    // goref: CRL_EXPIRY_GOZERO
+    {
+        let mut caTmpl = x509Cert();
+        caTmpl.SerialNumber = bigFromI64(0x0123456789);
+        caTmpl.Subject.CommonName = string::from("goish root");
+        caTmpl.Subject.Organization = strs(&["Goish"]);
+        caTmpl.NotBefore = notBefore();
+        caTmpl.NotAfter = notAfter();
+        caTmpl.KeyUsage =
+            goish::crypto::x509::KeyUsageCertSign | goish::crypto::x509::KeyUsageCRLSign;
+        caTmpl.BasicConstraintsValid = true;
+        caTmpl.IsCA = true;
+        caTmpl.SubjectKeyId = bs(&[0xde, 0xad, 0xbe, 0xef, 0x01, 0x02, 0x03, 0x04]);
+        let mut r = fixedReader { n: 0 };
+        let (caDER, _) = CreateCertificate(&mut r, &caTmpl, &caTmpl, &pub_, &privAny);
+        let (ca3, _) = ParseCertificate(caDER);
+
+        let revoked = slice::__from_vec(alloc::vec![pkix::RevokedCertificate {
+            SerialNumber: bigFromI64(0xaa),
+            RevocationTime: notBefore(),
+            ..Default::default()
+        }]);
+        let mut r = fixedReader { n: 0 };
+        let (der, err) = ca3.CreateCRL(
+            &mut r,
+            &privAny,
+            &revoked,
+            notBefore(),
+            time::Time::default(),
+        );
+        checkErr(err, "<nil>", "CreateCRL zero-expiry err");
+        checkHex(
+            &der,
+            CRL_EXPIRY_GOZERO,
+            "a zero NextUpdate is omitted, as Go omits its own zero",
+        );
+    }
+
     let ran = RAN.load(Ordering::Acquire);
     let failed = FAILED.load(Ordering::Acquire);
     fmt::Printf!("x509_create_smoke: %d checks, %d failed\n", int(ran), int(failed));
@@ -804,3 +866,5 @@ const CSR_FULL: &str = "3082011c3081cf0201003026310b3009060355040613025448311730
 const CSR_APPENDED: &str = "3081d3308186020100301a311830160603550403130f676f69736820637372206174747273302a300506032b657003210003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8a039303706092a864886f70d01090e312a302830090603551d1304023000301b0603551d11041430128210617474722e6578616d706c652e636f6d300506032b6570034100f93698823a7fb4c8cb4de4bb7ab407c67b09116e4843975303f656dd39c60e3f63592db581856006b8ccc8fc97ce9ab207ef396c39d7f8d457197aada8d4b703";
 
 const CSR_DUP: &str = "3081b330670201003018311630140603550403130d676f6973682063737220647570302a300506032b657003210003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8a01c301a06092a864886f70d01090e310d300b30090603551d1104023000300506032b65700341009c22b4f17a6cb5e287fa04df9a15f32fe3f5fbaaeac62648243a401745b1229773b2b54ecf8ce875808f471d774503671fe93efc37161dab2d30ceb017f12601";
+
+const CRL_EXPIRY_GOZERO: &str = "3081bc3070020101300506032b65703025310e300c060355040a1305476f697368311330110603550403130a676f69736820726f6f74170d3234303130323033303430355a30153013020200aa170d3234303130323033303430355aa017301530130603551d23040c300a8008deadbeef01020304300506032b65700341007f13aedbb11a5e9ebb7660042180a8c70ed950a3b67fd3d3ccc977686b7a4f7438d269a00c4cb75bd825ec582e52bd5e0714f607a5d92a770cdf379d16057201";
