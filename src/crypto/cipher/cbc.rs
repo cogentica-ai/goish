@@ -1,9 +1,14 @@
+// go: file crypto/cipher/cbc.go decls: newCBC, NewCBCEncrypter, newCBCGenericEncrypter
+// go: file crypto/cipher/cbc.go decls: (*cbcEncrypter).BlockSize, (*cbcEncrypter).CryptBlocks, (*cbcEncrypter).SetIV
+// go: file crypto/cipher/cbc.go decls: NewCBCDecrypter, newCBCGenericDecrypter
+// go: file crypto/cipher/cbc.go decls: (*cbcDecrypter).BlockSize, (*cbcDecrypter).CryptBlocks, (*cbcDecrypter).SetIV
+//
 // crypto/cipher/cbc — Cipher Block Chaining (CBC) Mode.
 //
-// goishlint:ignore GOISH021 — `cbcEncAble` and `cbcDecAble` are the
-// interfaces Go's NewCBCEncrypter/NewCBCDecrypter type-assert against to
-// let a Block supply its own CBC implementation. No goish Block does, and
-// the dispatch arms are dropped (see the notes on each constructor), so
+// goishlint:ignore GOISH021 cbcEncAble, cbcDecAble — the interfaces Go's
+// NewCBCEncrypter/NewCBCDecrypter type-assert against to let a Block
+// supply its own CBC implementation. No goish Block does, and the
+// dispatch arms are dropped (see the notes on each constructor), so
 // declaring the two empty traits would assert a capability nothing has.
 //
 // Reference: /share/go/src/crypto/cipher/cbc.go (208 LOC).
@@ -51,7 +56,7 @@ use crate::goslice::slice;
 use crate::types::byte;
 use crate::int;
 
-// Go: cbc.go:22
+// Go cbc.go:22
 //   type cbc struct {
 //       b         Block
 //       blockSize int
@@ -66,7 +71,7 @@ struct cbc<B: Block> {
 }
 
 // go: sdk 1.25.5 crypto/cipher/cbc.go:29-36 newCBC
-// Go: cbc.go:29
+// Go cbc.go:29
 //   func newCBC(b Block, iv []byte) *cbc {
 //       return &cbc{
 //           b:         b,
@@ -85,7 +90,7 @@ fn newCBC<B: Block>(b: B, iv: slice<byte>) -> cbc<B> {
     return cbc { b, blockSize, iv: iv_v, tmp };
 }
 
-// Go: cbc.go:38
+// Go cbc.go:38
 //   type cbcEncrypter cbc
 /// `cipher.CBCEncrypter` — concrete CBC encrypter returned by
 /// [`NewCBCEncrypter`]. Generic over the block cipher `B`. Implements
@@ -93,7 +98,7 @@ fn newCBC<B: Block>(b: B, iv: slice<byte>) -> cbc<B> {
 pub struct CBCEncrypter<B: Block>(cbc<B>);
 
 // go: sdk 1.25.5 crypto/cipher/cbc.go:50-64 NewCBCEncrypter
-// Go: cbc.go:50
+// Go cbc.go:50
 //   func NewCBCEncrypter(b Block, iv []byte) BlockMode {
 //       if len(iv) != b.BlockSize() {
 //           panic("cipher.NewCBCEncrypter: IV length must equal block size")
@@ -125,10 +130,10 @@ fn newCBCGenericEncrypter<B: Block>(b: B, iv: slice<byte>) -> CBCEncrypter<B> {
     return CBCEncrypter(newCBC(b, iv));
 }
 
-// Go: cbc.go:77
+// Go cbc.go:77
 //   func (x *cbcEncrypter) BlockSize() int { return x.blockSize }
 //
-// Go: cbc.go:79
+// Go cbc.go:79
 //   func (x *cbcEncrypter) CryptBlocks(dst, src []byte) {
 //       if len(src)%x.blockSize != 0 { panic("crypto/cipher: input not full blocks") }
 //       if len(dst) < len(src) { panic("crypto/cipher: output smaller than input") }
@@ -204,7 +209,7 @@ impl<B: Block> BlockMode for CBCEncrypter<B> {
 
 impl<B: Block> CBCEncrypter<B> {
     // go: sdk 1.25.5 crypto/cipher/cbc.go:110-116 cbcEncrypter.SetIV
-    // Go: cbc.go:110
+    // Go cbc.go:110
     //   func (x *cbcEncrypter) SetIV(iv []byte) {
     //       if len(iv) != len(x.iv) { panic("cipher: incorrect length IV") }
     //       copy(x.iv, iv)
@@ -220,7 +225,7 @@ impl<B: Block> CBCEncrypter<B> {
     }
 }
 
-// Go: cbc.go:117
+// Go cbc.go:117
 //   type cbcDecrypter cbc
 /// `cipher.CBCDecrypter` — concrete CBC decrypter returned by
 /// [`NewCBCDecrypter`]. Generic over the block cipher `B`. Implements
@@ -228,7 +233,7 @@ impl<B: Block> CBCEncrypter<B> {
 pub struct CBCDecrypter<B: Block>(cbc<B>);
 
 // go: sdk 1.25.5 crypto/cipher/cbc.go:129-143 NewCBCDecrypter
-// Go: cbc.go:129
+// Go cbc.go:129
 //   func NewCBCDecrypter(b Block, iv []byte) BlockMode {
 //       if len(iv) != b.BlockSize() {
 //           panic("cipher.NewCBCDecrypter: IV length must equal block size")
@@ -259,10 +264,10 @@ fn newCBCGenericDecrypter<B: Block>(b: B, iv: slice<byte>) -> CBCDecrypter<B> {
     return CBCDecrypter(newCBC(b, iv));
 }
 
-// Go: cbc.go:156
+// Go cbc.go:156
 //   func (x *cbcDecrypter) BlockSize() int { return x.blockSize }
 //
-// Go: cbc.go:158
+// Go cbc.go:158
 //   func (x *cbcDecrypter) CryptBlocks(dst, src []byte) {
 //       if len(src)%x.blockSize != 0 { panic("crypto/cipher: input not full blocks") }
 //       if len(dst) < len(src) { panic("crypto/cipher: output smaller than input") }
@@ -366,7 +371,7 @@ impl<B: Block> BlockMode for CBCDecrypter<B> {
 
 impl<B: Block> CBCDecrypter<B> {
     // go: sdk 1.25.5 crypto/cipher/cbc.go:202-208 cbcDecrypter.SetIV
-    // Go: cbc.go:202
+    // Go cbc.go:202
     //   func (x *cbcDecrypter) SetIV(iv []byte) {
     //       if len(iv) != len(x.iv) { panic("cipher: incorrect length IV") }
     //       copy(x.iv, iv)

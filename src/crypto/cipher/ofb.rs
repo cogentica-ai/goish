@@ -1,3 +1,5 @@
+// go: file crypto/cipher/ofb.go decls: NewOFB, (*ofb).refill, (*ofb).XORKeyStream
+//
 // crypto/cipher/ofb — OFB (Output Feedback) Mode.
 //
 // Reference: /share/go/src/crypto/cipher/ofb.go (88 LOC).
@@ -39,11 +41,13 @@ use crate::types::{byte, int};
 // module is otherwise the right home for these primitives — see
 // `src/crypto/subtle/mod.rs`.
 
-// Go: ctr.go:30
-//   const streamBufferSize = 512
-const streamBufferSize: int = 512;
+// `streamBufferSize` is declared in ctr.go, not ofb.go; ofb.go simply
+// uses it. ctr.rs owns the declaration and this file imports it — one
+// `.rs` per `.go`, so redeclaring it here would make ofb.rs look like a
+// port of two Go files.
+use super::ctr::streamBufferSize;
 
-// Go: ofb.go:15
+// Go ofb.go:15
 //   type ofb struct {
 //       b       Block
 //       cipher  []byte
@@ -62,7 +66,7 @@ pub struct OFB<B: Block> {
 }
 
 // go: sdk 1.25.5 crypto/cipher/ofb.go:31-53 NewOFB
-// Go: ofb.go:31
+// Go ofb.go:31
 //   func NewOFB(b Block, iv []byte) Stream {
 //       if fips140only.Enabled { panic(...) }     // dropped
 //       blockSize := b.BlockSize()
@@ -104,12 +108,13 @@ pub fn NewOFB<B: Block>(b: B, iv: slice<byte>) -> OFB<B> {
     let iv_v = iv.__into_vec();
     let n = (iv_v.len()).min(x.cipher.len());
     x.cipher[..n].copy_from_slice(&iv_v[..n]);
-    x
+    // Go: return x
+    return x;
 }
 
 impl<B: Block> OFB<B> {
     // go: sdk 1.25.5 crypto/cipher/ofb.go:55-70 refill
-    // Go: ofb.go:54
+    // Go ofb.go:54
     //   func (x *ofb) refill() {
     //       bs := x.b.BlockSize()
     //       remain := len(x.out) - x.outUsed
@@ -163,7 +168,7 @@ impl<B: Block> OFB<B> {
     }
 }
 
-// Go: ofb.go:71
+// Go ofb.go:71
 //   func (x *ofb) XORKeyStream(dst, src []byte) {
 //       if len(dst) < len(src) { panic("crypto/cipher: output smaller than input") }
 //       if alias.InexactOverlap(dst[:len(src)], src) { panic(...) }   // dropped
@@ -205,7 +210,7 @@ impl<B: Block> Stream for OFB<B> {
             // sub-slicing copies, so the equivalent is open-coded.)
             for i in 0..n {
                 let v = src_v[src_off + i] ^ self.out[self.out_used + i];
-                dst[(dst_off + i) as int] = v;
+                dst[dst_off + i] = v;
             }
             // Go: dst = dst[n:]; src = src[n:]; x.outUsed += n
             dst_off += n;

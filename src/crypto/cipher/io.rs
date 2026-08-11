@@ -1,3 +1,5 @@
+// go: file crypto/cipher/io.go decls: (StreamReader).Read, (StreamWriter).Write, (StreamWriter).Close
+//
 // crypto/cipher/io — wrap a cipher::Stream into io::Reader / io::Writer.
 //
 // Reference: /share/go/src/crypto/cipher/io.go (53 LOC).
@@ -37,11 +39,11 @@ use crate::goslice::slice;
 use crate::io;
 use crate::types::{byte, int};
 
-// Go: io.go:13
+// Go io.go:13
 //   // The Stream* objects are so simple that all their members are public.
 //   // Users can create them themselves.
 //
-// Go: io.go:15
+// Go io.go:15
 //   type StreamReader struct {
 //       S Stream
 //       R io.Reader
@@ -54,7 +56,7 @@ pub struct StreamReader<S: Stream, R: io::Reader> {
     pub R: R,
 }
 
-// Go: io.go:20
+// Go io.go:20
 //   func (r StreamReader) Read(dst []byte) (n int, err error) {
 //       n, err = r.R.Read(dst)
 //       r.S.XORKeyStream(dst[:n], dst[:n])
@@ -73,11 +75,11 @@ impl<S: Stream, R: io::Reader> io::Reader for StreamReader<S, R> {
             self.S.XORKeyStream(dst, src_copy);
         }
         // Go: return
-        (n, err)
+        return (n, err);
     }
 }
 
-// Go: io.go:26
+// Go io.go:26
 //   type StreamWriter struct {
 //       S   Stream
 //       W   io.Writer
@@ -97,7 +99,7 @@ pub struct StreamWriter<S: Stream, W: io::Writer> {
     pub Err: error,
 }
 
-// Go: io.go:38
+// Go io.go:38
 //   func (w StreamWriter) Write(src []byte) (n int, err error) {
 //       c := make([]byte, len(src))
 //       w.S.XORKeyStream(c, src)
@@ -123,11 +125,11 @@ impl<S: Stream, W: io::Writer> io::Writer for StreamWriter<S, W> {
             return (n, io::ErrShortWrite.into());
         }
         // Go: return
-        (n, err)
+        return (n, err);
     }
 }
 
-// Go: io.go:48
+// Go io.go:48
 //   func (w StreamWriter) Close() error {
 //       if c, ok := w.W.(io.Closer); ok {
 //           return c.Close()
@@ -144,6 +146,6 @@ impl<S: Stream, W: io::Writer + io::Closer> io::Closer for StreamWriter<S, W> {
     fn Close(&mut self) -> error {
         // Go: return c.Close()
         let _ = nil; // keep `nil` import live for parity comments
-        self.W.Close()
+        return self.W.Close();
     }
 }

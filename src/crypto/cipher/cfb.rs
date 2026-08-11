@@ -1,3 +1,5 @@
+// go: file crypto/cipher/cfb.go decls: (*cfb).XORKeyStream, NewCFBEncrypter, NewCFBDecrypter, newCFB
+//
 // crypto/cipher/cfb — CFB (Cipher Feedback) Mode.
 //
 // Reference: /share/go/src/crypto/cipher/cfb.go (102 LOC).
@@ -27,7 +29,7 @@ use crate::crypto::cipher::{Block, Stream};
 use crate::goslice::slice;
 use crate::types::{byte, int};
 
-// Go: cfb.go:15
+// Go cfb.go:15
 //   type cfb struct {
 //       b       Block
 //       next    []byte
@@ -48,7 +50,7 @@ pub struct CFB<B: Block> {
     decrypt: bool,
 }
 
-// Go: cfb.go:23
+// Go cfb.go:23
 //   func (x *cfb) XORKeyStream(dst, src []byte) {
 //       if len(dst) < len(src) { panic("crypto/cipher: output smaller than input") }
 //       if alias.InexactOverlap(dst[:len(src)], src) { panic(...) }    // dropped
@@ -104,14 +106,14 @@ impl<B: Block> Stream for CFB<B> {
             // Go: n := subtle.XORBytes(dst, src, x.out[x.outUsed:])
             for i in 0..n {
                 let v = src_v[src_off + i] ^ self.out[self.out_used + i];
-                dst[(dst_off + i) as int] = v;
+                dst[dst_off + i] = v;
             }
 
             // Go: if !x.decrypt { copy(x.next[x.outUsed:], dst) }
             //   On encrypt, freshly-written ciphertext (now in dst[..]) feeds back.
             if !self.decrypt {
                 for i in 0..n {
-                    self.next[self.out_used + i] = dst[(dst_off + i) as int];
+                    self.next[self.out_used + i] = dst[dst_off + i];
                 }
             }
 
@@ -126,7 +128,7 @@ impl<B: Block> Stream for CFB<B> {
 }
 
 // go: sdk 1.25.5 crypto/cipher/cfb.go:63-68 NewCFBEncrypter
-// Go: cfb.go:62
+// Go cfb.go:62
 //   func NewCFBEncrypter(block Block, iv []byte) Stream { ... return newCFB(block, iv, false) }
 /// `cipher.NewCFBEncrypter(b, iv)` — returns a [`Stream`] that encrypts
 /// with CFB mode using the block cipher `b`. `iv` length must equal
@@ -134,11 +136,12 @@ impl<B: Block> Stream for CFB<B> {
 ///
 /// **Deprecated** in Go: CFB is unauthenticated; prefer an AEAD mode.
 pub fn NewCFBEncrypter<B: Block>(block: B, iv: slice<byte>) -> CFB<B> {
-    newCFB(block, iv, false)
+    // Go: return newCFB(block, iv, false)
+    return newCFB(block, iv, false);
 }
 
 // go: sdk 1.25.5 crypto/cipher/cfb.go:79-84 NewCFBDecrypter
-// Go: cfb.go:78
+// Go cfb.go:78
 //   func NewCFBDecrypter(block Block, iv []byte) Stream { ... return newCFB(block, iv, true) }
 /// `cipher.NewCFBDecrypter(b, iv)` — returns a [`Stream`] that decrypts
 /// with CFB mode using the block cipher `b`. `iv` length must equal
@@ -146,11 +149,12 @@ pub fn NewCFBEncrypter<B: Block>(block: B, iv: slice<byte>) -> CFB<B> {
 ///
 /// **Deprecated** in Go: CFB is unauthenticated; prefer an AEAD mode.
 pub fn NewCFBDecrypter<B: Block>(block: B, iv: slice<byte>) -> CFB<B> {
-    newCFB(block, iv, true)
+    // Go: return newCFB(block, iv, true)
+    return newCFB(block, iv, true);
 }
 
 // go: sdk 1.25.5 crypto/cipher/cfb.go:86-102 newCFB
-// Go: cfb.go:88
+// Go cfb.go:88
 //   func newCFB(block Block, iv []byte, decrypt bool) Stream {
 //       blockSize := block.BlockSize()
 //       if len(iv) != blockSize {
@@ -179,12 +183,13 @@ fn newCFB<B: Block>(block: B, iv: slice<byte>, decrypt: bool) -> CFB<B> {
     // Go: copy(x.next, iv)
     let iv_v = iv.__into_vec();
     next[..bs].copy_from_slice(&iv_v[..bs]);
-    CFB {
+    // Go: return x
+    return CFB {
         b: block,
         next,
         out,
         // Go: outUsed: blockSize  — forces Encrypt on first XORKeyStream.
         out_used: bs,
         decrypt,
-    }
+    };
 }
