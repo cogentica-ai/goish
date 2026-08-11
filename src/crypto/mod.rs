@@ -32,6 +32,7 @@ pub mod aes;
 pub mod chacha20;
 pub mod chacha20poly1305;
 pub mod cipher;
+pub mod cryptobyte;
 pub mod des;
 pub mod ecdh;
 pub mod elliptic;

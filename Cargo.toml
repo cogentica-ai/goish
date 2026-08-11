@@ -1008,6 +1008,10 @@ name = "ecdh_x25519_smoke"
 path = "examples/ecdh_x25519_smoke.rs"
 
 [[example]]
+name = "cryptobyte_string_smoke"
+path = "examples/cryptobyte_string_smoke.rs"
+
+[[example]]
 name = "fips140_mlkem1024_smoke"
 path = "examples/fips140_mlkem1024_smoke.rs"
 
