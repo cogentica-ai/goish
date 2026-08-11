@@ -9,8 +9,11 @@ mod goish_rsa_der;
 mod oid;
 mod parser;
 mod pem_decrypt;
+mod pkcs1;
+mod pkcs8;
 mod root;
 mod root_unix;
+mod sec1;
 mod verify;
 mod x509;
 
@@ -25,6 +28,11 @@ pub use verify::{
 pub use goish_rsa_der::{goishParsePKCS1RSAPrivateKey, goishParsePKCS8RSAPrivateKey};
 pub use oid::{OIDFromInts, ParseOID, OID};
 pub use parser::{ParseCertificate, ParseCertificates};
+pub use pkcs1::{
+    MarshalPKCS1PrivateKey, MarshalPKCS1PublicKey, ParsePKCS1PrivateKey, ParsePKCS1PublicKey,
+};
+pub use pkcs8::{MarshalPKCS8PrivateKey, ParsePKCS8PrivateKey};
+pub use sec1::{MarshalECPrivateKey, ParseECPrivateKey};
 pub use pem_decrypt::{
     DecryptPEMBlock, EncryptPEMBlock, IncorrectPasswordError, IsEncryptedPEMBlock, PEMCipher,
     PEMCipher3DES, PEMCipherAES128, PEMCipherAES192, PEMCipherAES256, PEMCipherDES,
@@ -46,5 +54,5 @@ pub use x509::{
     ECDSAWithSHA256, ECDSAWithSHA384, ECDSAWithSHA512, Ed25519, MD2WithRSA, MD5WithRSA,
     PureEd25519, RSA, SHA1WithRSA, SHA256WithRSA, SHA256WithRSAPSS, SHA384WithRSA,
     SHA384WithRSAPSS, SHA512WithRSA, SHA512WithRSAPSS, UnknownPublicKeyAlgorithm,
-    UnknownSignatureAlgorithm,
+    ParsePKIXPublicKey, UnknownSignatureAlgorithm,
 };

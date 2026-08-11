@@ -604,3 +604,63 @@ pub struct RevokedCertificate {
     #[tag(r#"asn1:"optional""#)]
     pub Extensions: slice<Extension>,
 }
+
+// ─── reflect descriptors ──────────────────────────────────────────────
+//
+// go: none — goish-only, and a prerequisite rather than a port.
+//
+// `asn1.Marshal` takes a `&impl reflect::Reflect` and `asn1.Unmarshal` a
+// `&mut impl Reflect + FromReflectValue`, because goish has no universal
+// runtime reflection (the deviation is stated in full at the head of
+// encoding/asn1/marshal.rs and asn1.rs). Every struct handed to either
+// therefore needs a descriptor.
+//
+// The **read** half is `#[goish::reflect(reflect_only)]`, on each struct
+// above, carrying Go's own `asn1:"…"` tag in a `#[tag(...)]` attribute —
+// which is where `parseFieldParameters` reads it from
+// (`field.Tag.Get("asn1")` in asn1's `parseField` and `makeBody`).
+// `reflect_only` exists precisely for this shape: the attribute's default
+// expansion also emits `json::FromValue`, `json::v2::MarshalerTo` and
+// `json::v2::UnmarshalerFrom`, which would demand JSON codecs on
+// `asn1::ObjectIdentifier` and `asn1::RawValue` — types that exist to
+// carry DER and have no JSON meaning.
+//
+// The **write** half — `FromReflectValue`, which `reflect_only` does not
+// emit and which only an `Unmarshal` target needs — is hand-written, and
+// only for the one struct that is one.
+//
+// `RDNSequence` and `RelativeDistinguishedNameSET` are the exception in
+// both directions: they are named *slice* types, which the attribute
+// (named-field structs only) cannot parse, so their `Reflect` impls are
+// written out beside their declarations.
+
+impl crate::reflect::FromReflectValue for AlgorithmIdentifier {
+    // go: none — goish-only: the write half of the descriptor above.
+    fn from_reflect_value(v: crate::reflect::Value) -> (Self, crate::error) {
+        if v.Kind() != crate::reflect::Kind::Struct {
+            return (
+                AlgorithmIdentifier::default(),
+                crate::errors::New("pkix: expected AlgorithmIdentifier"),
+            );
+        }
+        let (algorithm, err) =
+            <asn1::ObjectIdentifier as crate::reflect::FromReflectValue>::from_reflect_value(
+                v.Field(0),
+            );
+        if err != crate::errors::nil {
+            return (AlgorithmIdentifier::default(), err);
+        }
+        let (parameters, err) =
+            <asn1::RawValue as crate::reflect::FromReflectValue>::from_reflect_value(v.Field(1));
+        if err != crate::errors::nil {
+            return (AlgorithmIdentifier::default(), err);
+        }
+        return (
+            AlgorithmIdentifier {
+                Algorithm: algorithm,
+                Parameters: parameters,
+            },
+            crate::errors::nil,
+        );
+    }
+}
