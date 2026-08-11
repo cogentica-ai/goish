@@ -386,6 +386,47 @@ forwarding blankets.
 The worked example is `net/http`'s ResponseWriter / Flusher /
 Hijacker / Pusher family in `src/net/http/server.rs`.
 
+### 9b. Two ways a type assertion silently always misses
+
+Both fail the same way - `ok == false`, no panic, no compile error - so
+a wrong `else` branch is the only symptom. Rule out both before
+concluding a type does not implement an interface.
+
+**`cast!` only takes a `dyn Trait` carrier.** Go's most common shape is
+`v, ok := x.(Iface)` where `x` is `interface{}`; the goish carrier for
+that is a `goany::Any`, and `cast!` **cannot ever succeed on one**. It
+resolves through the blanket `impl<T: Sized> HasDynAny for T`
+(`goany.rs:635`), which hands back the carrier itself - for an `Any`
+that is `Any`'s own `TypeId`, never the payload's. Spell an
+`interface{}` assertion with the **interface** form of the inherent
+method instead, which unwraps the payload via `as_any()`:
+
+```rust
+match priv_.As::<dyn crypto::Signer + Send + Sync>() { … }
+```
+
+Worked example: `x509::CreateCertificate`. It surfaced as
+`x509: certificate private key does not implement crypto.Signer` for an
+Ed25519 key that plainly does - a plausible, on-message error that reads
+like a user mistake.
+
+**The per-trait downcast registry starts empty.** Both `cast!` and
+`.As::<dyn Trait>()` resolve a concrete type through a registry that
+`#[goish::interface]` emits but nothing populates: the concrete type
+must appear in a `__goish_register_<Trait>_impl::<C>()` call, run once
+from `goish::init()`. `crypto::RegisterStandardHashes` /
+`RegisterStandardSigners` are the pattern. **This is not a caller
+obligation** - a comment saying a use site must call one is wrong.
+
+As of 2026-08-12 **25 of the 56 interface traits have concrete
+implementors and zero registrations**, including `io::Writer` (20
+impls), `io::Reader` (17), `io::Closer` (11), `hash::Hash` (11),
+`http::Handler` (11), `fmt::Stringer`, `json::Marshaler` and
+`crypto::Decrypter`. So `if c, ok := w.(io.Closer)` - and every
+assertion like it - misses today regardless of carrier. Registering a
+trait's implementors is the fix; check the trait before relying on an
+assertion, and register what your port needs.
+
 ### 9a. Embedded interfaces - `#[goish::interface(embeds)]`
 
 Go's `type Cloner interface { Hash; Clone() … }` embeds another
