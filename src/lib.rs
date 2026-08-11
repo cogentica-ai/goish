@@ -11,6 +11,11 @@
 #![no_std]
 #![cfg_attr(not(test), no_main)]
 #![allow(non_snake_case, non_upper_case_globals)]
+// goish mirrors Go identifiers verbatim, and Go's crypto packages use the
+// Greek letters of the specs they implement (ML-KEM's ρ/σ/μ from FIPS 203).
+// The confusable-idents lint fires on those against ASCII names elsewhere
+// in the crate; renaming them would break the 1:1 mapping to the Go source.
+#![allow(confusable_idents)]
 
 // Pull in `alloc` so Vec / String / Box are available across all of
 // goish, backed by our mmap allocator (registered as #[global_allocator]

@@ -67,6 +67,202 @@ def norm(s):
 PUREGO = False
 
 
+# GOOS values. A file whose //go:build line mentions ONLY these and does
+# not include `linux` cannot be part of a linux build.
+_GOOS = {"aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos",
+         "ios", "js", "linux", "netbsd", "openbsd", "plan9", "solaris",
+         "wasip1", "windows", "unix"}
+
+
+def is_foreign_goos(path):
+    """True for a file constrained to GOOS values that exclude linux —
+    e.g. crypto/x509/internal/macos, which is `//go:build darwin`.
+
+    Deliberately narrow: it fires only when EVERY identifier on the
+    build line is a GOOS. A constraint mentioning GOARCH or `purego`
+    (`//go:build (!amd64 && !s390x) || purego`) is left alone here,
+    because which side of that goish implements is a porting decision,
+    not a platform fact — silently dropping those would shrink the
+    denominator in our favour.
+
+    `other_route` handles those, and only once the *anchors* say which
+    side goish took. That is evidence rather than assumption, which is
+    what makes it safe to shrink the denominator on."""
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                st = line.strip()
+                if st.startswith("//go:build "):
+                    idents = set(re.findall(r"[A-Za-z_][A-Za-z0-9_.]*", st[len("//go:build "):]))
+                    if not idents or not idents <= _GOOS:
+                        return False
+                    return "linux" not in idents and "unix" not in idents
+                if st.startswith("package "):
+                    return False
+    except Exception:
+        pass
+    return False
+
+
+def is_build_ignored(path):
+    """True for a `//go:build ignore` file. These are standalone `package
+    main` programs (md5's gen.go, nistec's generate.go, tls's
+    generate_cert.go) that `go build` never compiles into the package.
+    Counting their funcs would inflate the denominator with code that is
+    not part of the library — same reason `_asm/` is skipped."""
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                st = line.strip()
+                if st.startswith("//go:build "):
+                    return "ignore" in st.split()[1:] or st == "//go:build ignore"
+                if st.startswith("package "):
+                    return False
+    except Exception:
+        pass
+    return False
+
+
+def is_boringcrypto(path):
+    """True for a file built only under `//go:build boringcrypto`.
+
+    `boringcrypto` is a cgo-only build tag, and goish has no cgo — the
+    BoringSSL bridge is out of scope everywhere else in this script (SKIP
+    matches the `boring` path component) and in port_deps. Every such file
+    comes as a pair: `boring.go` (`//go:build boringcrypto`) and
+    `notboring.go` (`//go:build !boringcrypto`). Go compiles exactly one of
+    the two, so counting both double-counts the package's surface — and it
+    counts the side goish structurally cannot take.
+
+    crypto/ecdsa is the worked example: `notboring.go` is ported, and
+    `boring.go`'s copyPublicKey / copyPrivateKey / publicKeyEqual /
+    privateKeyEqual read as four permanent gaps against a branch that never
+    compiles here.
+
+    Deliberately narrow, like is_foreign_goos: it fires only on a bare,
+    un-negated `boringcrypto` constraint.
+    """
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                st = line.strip()
+                if st.startswith("//go:build "):
+                    return st[len("//go:build "):].strip() == "boringcrypto"
+                if st.startswith("package "):
+                    return False
+    except Exception:
+        pass
+    return False
+
+
+def asm_decls(paths):
+    """Names of Go funcs declared with NO body — the assembly stubs.
+
+    Why this is worth computing: the raw gap column has produced a wrong
+    leverage claim three times in this repo. `fips140deps/godebug` looked
+    like a blocker on 45 functions across five packages; 44 of them were
+    `*Asm` / `gcmAes*` / `blockAVX2` / `blockSHANI`, and the real leverage
+    was one function. The gap number was true and the conclusion drawn
+    from it was false.
+
+    A bodyless `func` is the exact signal, and it beats filename
+    heuristics: `_amd64.go` holds both the stubs and the Go dispatch code
+    that chooses between them, and the dispatch code is ordinary portable
+    Go. (A handful of bodyless decls are `//go:linkname` rather than
+    assembly. Both are alike for ranking: neither is a function you port
+    by reading Go and writing goish.)
+    """
+    out = set()
+    for p in paths:
+        lines = open(p, errors="replace").read().split("\n")
+        i = 0
+        while i < len(lines):
+            if not lines[i].startswith("func "):
+                i += 1
+                continue
+            # Join a signature that wraps across lines: balance parens,
+            # then ask whether the declaration ended on an opening brace.
+            text, depth, seen = "", 0, False
+            j = i
+            while j < len(lines):
+                text += lines[j]
+                depth += lines[j].count("(") - lines[j].count(")")
+                seen = seen or "(" in lines[j]
+                if seen and depth <= 0:
+                    break
+                j += 1
+            m = FUNC.match(text)
+            if m and not text.rstrip().endswith("{"):
+                out.add(m.group(1))
+            i = j + 1
+    return out
+
+
+ROUTE_SUFFIX = re.compile(r"_(asm|amd64|noasm|generic|purego)+$")
+
+
+def build_line(path):
+    """The file's `//go:build` constraint, or '' if it has none."""
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                st = line.strip()
+                if st.startswith("//go:build "):
+                    return st[len("//go:build "):].strip()
+                if st.startswith("package "):
+                    return ""
+    except Exception:
+        pass
+    return ""
+
+
+def route_stem(name):
+    """`p256_asm.go` -> `p256`; `fe_amd64_noasm.go` -> `fe`."""
+    return ROUTE_SUFFIX.sub("", name[:-3])
+
+
+def other_route(gofiles, dirpath, anchored):
+    """Go files implementing an alternative route to the one goish took.
+
+    Go ships some algorithms twice behind mutually exclusive build tags —
+    `p256.go` (`(!amd64 && …) || purego`) and `p256_asm.go`. A build
+    compiles exactly one. goish picks a side by *porting* it, and the
+    anchors say which: nistec carries 33 anchors citing `p256.go`, the
+    pure-Go side.
+
+    The functions unique to the side goish did NOT take are not work. They
+    are scaffolding for the other implementation — `bytesToLimbs`,
+    `p256Add`, `uint64IsZero` exist only to serve the assembly path, and
+    porting them into a tree that took the pure-Go path would be writing
+    code with no caller.
+
+    Counting them was the fourth wrong-leverage claim of the same shape in
+    this repo: nistec read `16 portable + 12 assembly` when its real
+    portable remainder is zero. The bodyless-func test in `asm_decls` does
+    not catch these, because they are ordinary Go with ordinary bodies —
+    just on the road not taken.
+
+    Deliberately conservative: a file is dropped only when it carries a
+    build constraint naming `purego`, an alternative sharing its route
+    stem IS anchored, and the file itself is NOT.
+    """
+    out = set()
+    stems = {}
+    for f in gofiles:
+        if "purego" in build_line(os.path.join(dirpath, f)):
+            stems.setdefault(route_stem(f), []).append(f)
+    for group in stems.values():
+        if len(group) < 2:
+            continue
+        taken = [f for f in group if f in anchored]
+        if not taken:
+            continue
+        for f in group:
+            if f not in anchored:
+                out.add(f)
+    return out
+
+
 def scan_go(root):
     out = {}
     for dirpath, _, files in os.walk(root):
@@ -76,7 +272,10 @@ def scan_go(root):
             continue
         gofiles = sorted(f for f in files if f.endswith(".go")
                          and not f.endswith("_test.go") and not SKIP_FILE.search(f)
-                         and not (PUREGO and SKIP_ASM.search(f)))
+                         and not (PUREGO and SKIP_ASM.search(f))
+                         and not is_build_ignored(os.path.join(dirpath, f))
+                         and not is_boringcrypto(os.path.join(dirpath, f))
+                         and not is_foreign_goos(os.path.join(dirpath, f)))
         if not gofiles:
             continue
         funcs, loc = set(), 0
@@ -84,20 +283,47 @@ def scan_go(root):
             src = open(os.path.join(dirpath, f), errors="replace").read()
             funcs |= set(FUNC.findall(src))
             loc += src.count("\n")
+        paths = [os.path.join(dirpath, f) for f in gofiles]
+        byfile = {}
+        for f in gofiles:
+            src = open(os.path.join(dirpath, f), errors="replace").read()
+            byfile[f] = {n for n in pc_FUNC(src) if not n.startswith("init")}
         out[rel or "."] = {"nfiles": len(gofiles), "loc": loc,
+                           "asm": asm_decls(paths),
+                           "dir": dirpath, "gofiles": gofiles, "byfile": byfile,
                            "funcs": sorted(f for f in funcs if not f.startswith("init"))}
     return out
 
 
+def pc_FUNC(src):
+    return set(FUNC.findall(src))
+
+
+ANCHOR_GO = re.compile(r"//\s*go:[^\n]*?([A-Za-z0-9_]+\.go):")
+
+
 def _facts(paths):
-    idents, loc, anchors = set(), 0, 0
+    idents, loc, anchors, cited, unanchored = set(), 0, 0, set(), set()
     for p in paths:
         src = open(p, errors="replace").read()
-        idents |= set(RSFN.findall(src))
-        anchors += len(ANCHOR.findall(src))
+        mine = set(RSFN.findall(src))
+        idents |= mine
+        n = len(ANCHOR.findall(src))
+        anchors += n
+        # A goish file with NO provenance anchor at all is where invented
+        # code lives. Its fn names still match Go's by string, so they
+        # count as "ported" — which is exactly how src/crypto/ecdsa/mod.rs
+        # read as done for four sessions while holding 915 lines of
+        # hand-rolled P-256. is_squatter only catches this when the WHOLE
+        # package is invented; one anchorless file inside a partly-ported
+        # package slips through. So the names are tracked and reported.
+        if n == 0:
+            unanchored |= {norm(i) for i in mine}
+        cited |= set(ANCHOR_GO.findall(src))
         loc += src.count("\n")
     return {"idents": {norm(i) for i in idents}, "loc": loc,
-            "nfiles": len(paths), "anchors": anchors}
+            "nfiles": len(paths), "anchors": anchors, "cited": cited,
+            "unanchored": unanchored}
 
 
 def scan_rs(root):
@@ -146,15 +372,28 @@ def build(subtree, gr):
     for pkg, g in sorted(gp.items()):
         r = rp.get(pkg)
         have = r["idents"] if r else set()
-        hit = [f for f in g["funcs"] if norm(f) in have]
-        want = g["funcs"]
+        # Functions belonging to a build-tag route goish did not take are
+        # not remaining work — see other_route.
+        dropped = other_route(g["gofiles"], g["dir"], r["cited"] if r else set())
+        want = sorted({n for f, ns in g["byfile"].items() if f not in dropped
+                       for n in ns})
+        hit = [f for f in want if norm(f) in have]
+        missing = sorted(set(want) - set(hit))
+        # Split the gap: what is left to *write in goish* versus what is
+        # left to write in assembly. Ranking on the raw gap has misled
+        # three times — see asm_decls.
+        missing_asm = sorted(m for m in missing if m in g["asm"])
         rows.append({
             "pkg": pkg, "go_files": g["nfiles"], "go_loc": g["loc"],
             "go_funcs": len(want), "ported": len(hit),
             "pct": round(100.0 * len(hit) / len(want), 1) if want else 100.0,
             "rs_files": r["nfiles"] if r else 0, "rs_loc": r["loc"] if r else 0,
             "anchors": r["anchors"] if r else 0,
-            "missing": sorted(set(want) - set(hit)),
+            "missing": missing,
+            "missing_asm": missing_asm,
+            "gap_portable": len(missing) - len(missing_asm),
+            "unanchored": sorted(f for f in hit
+                                 if r and norm(f) in r["unanchored"]),
         })
     return rows
 
@@ -174,8 +413,19 @@ def main():
             if r["pkg"] == want or r["pkg"].endswith("/" + want):
                 print(f"{r['pkg']}: {r['ported']}/{r['go_funcs']} ported ({r['pct']}%), "
                       f"{r['go_files']} .go / {r['rs_files']} .rs, {r['anchors']} anchors")
+                print(f"  gap {len(r['missing'])} = {r['gap_portable']} portable "
+                      f"+ {len(r['missing_asm'])} assembly")
+                if r["unanchored"]:
+                    print(f"  UNVERIFIED: {len(r['unanchored'])} of the {r['ported']} "
+                          f"'ported' names come from goish files with NO `// go:` "
+                          f"anchor. They match Go by NAME ONLY — GOISH018 cannot "
+                          f"diff them, so a rename, a dropped arg or an invented "
+                          f"body is invisible. Anchor them with "
+                          f"scripts/anchor_by_name.py:")
+                    print(f"    {' '.join(r['unanchored'])}")
+                asm = set(r["missing_asm"])
                 for m in r["missing"]:
-                    print(f"  MISSING {m}")
+                    print(f"  MISSING {m}" + ("  [asm]" if m in asm else ""))
         return
     if "--json" in argv:
         print(json.dumps(rows, indent=1))
@@ -184,6 +434,13 @@ def main():
     tf = sum(r["go_funcs"] for r in rows)
     tp = sum(r["ported"] for r in rows)
     ta = sum(r["anchors"] for r in rows)
+    tasm = sum(len(r["missing_asm"]) for r in rows)
+    tport = sum(r["gap_portable"] for r in rows)
+    tun = sum(len(r["unanchored"]) for r in rows)
+    split = f"{tf - tp} left = {tport} portable + {tasm} assembly"
+    if tun:
+        split += (f"; {tun} counted name(s) are UNVERIFIED "
+                  f"(anchorless — name match only)")
     if "--md" in argv:
         print("| package | Go .go | Go LOC | Go fns | ported | % | .rs | anchors |")
         print("|---|--:|--:|--:|--:|--:|--:|--:|")
@@ -191,7 +448,7 @@ def main():
             print(f"| `{r['pkg']}` | {r['go_files']} | {r['go_loc']} | {r['go_funcs']} "
                   f"| {r['ported']} | {r['pct']}% | {r['rs_files']} | {r['anchors']} |")
         print(f"\n**TOTAL: {tp}/{tf} = {100.0*tp/tf:.1f}%** across {len(rows)} in-scope "
-              f"packages; {ta} provenance anchors.")
+              f"packages; {ta} provenance anchors. {split}.")
         return
 
     print(f"{'package':44} {'.go':>4} {'goLOC':>6} {'fns':>4} {'port':>4} {'%':>6} {'.rs':>4} {'anch':>4}")
@@ -201,6 +458,7 @@ def main():
     print(f"\nTOTAL {tp}/{tf} funcs = {100.0*tp/tf:.1f}%   "
           f"{len(rows)} packages   {sum(r['go_loc'] for r in rows)} Go LOC vs "
           f"{sum(r['rs_loc'] for r in rows)} goish LOC   {ta} anchors")
+    print(f"      {split}")
 
 
 if __name__ == "__main__":

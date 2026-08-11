@@ -545,9 +545,19 @@ fn test_x509_parse_certificate(t: &mut testing::T) {
         return;
     }
 
-    // Verify the extracted public key values.
+    // Verify the extracted public key values. Certificate.PublicKey is
+    // Go's `any`; goish holds it in `goany::Any`, so reach the RSA key
+    // with the comma-ok downcast the way Go writes
+    // `cert.PublicKey.(*rsa.PublicKey)`.
+    let pubkey = match cert.PublicKey.As::<goish::crypto::rsa::PublicKey>() {
+        None => {
+            t.Fatal("ParseCertificate: PublicKey is not an rsa::PublicKey");
+            return;
+        }
+        Some(k) => k.clone(),
+    };
     // E must be 65537.
-    let e_val = cert.PublicKey.E;
+    let e_val = pubkey.E;
     if e_val != 65537 {
         t.Fatal(fmt::Sprintf!(
             "ParseCertificate: public key E = %d, want 65537",
@@ -556,7 +566,7 @@ fn test_x509_parse_certificate(t: &mut testing::T) {
         return;
     }
     // N must be 512 bits (64 bytes). Verify by checking bit length.
-    let n_bits = cert.PublicKey.N.BitLen();
+    let n_bits = pubkey.N.BitLen();
     if n_bits < 511 || n_bits > 512 {
         t.Fatal(fmt::Sprintf!(
             "ParseCertificate: public key N bit length = %d, want 512",
@@ -565,7 +575,7 @@ fn test_x509_parse_certificate(t: &mut testing::T) {
         return;
     }
     // Verify the first byte of N is 0xd1 (top byte of our known test key)
-    let n_bytes = cert.PublicKey.N.Bytes();
+    let n_bytes = pubkey.N.Bytes();
     let n_raw: &[u8] = &n_bytes;
     if n_raw.is_empty() || n_raw[0] != 0xd1 {
         t.Fatal(fmt::Sprintf!(
@@ -599,6 +609,13 @@ fn test_handshake_canned_server(t: &mut testing::T) {
     use goish::goslice::slice;
     use goish::types::{byte, int};
     use goish::errors;
+
+    // The canned server's certificate carries a 512-bit RSA key, and the
+    // RSA ClientKeyExchange runs it through crypto/rsa.EncryptPKCS1v15,
+    // which rejects keys below 1024 bits (rsa.go:250 checkKeySize). Go's
+    // own tests re-enable weak keys the same way — t.Setenv("GODEBUG",
+    // "rsa1024min=0"), cf. crypto/rsa/pkcs1v15_test.go:57.
+    let _ = goish::os::Setenv("GODEBUG", "rsa1024min=0");
 
     // ── Build canned server messages ──────────────────────────────
 

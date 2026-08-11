@@ -12,12 +12,11 @@ use alloc::vec::Vec;
 
 use crate::crypto::internal::fips140;
 use super::cast::{fipsPCT, fipsSelfTest};
-use crate::crypto::internal::fips140::edwards25519::scalar::{NewScalar, Scalar};
+use crate::crypto::internal::fips140::edwards25519::{NewScalar, Scalar};
 use crate::crypto::internal::fips140::edwards25519::Point;
 use crate::crypto::sha512;
 use crate::errors::{self, error};
 use crate::goslice::slice;
-use crate::hash::Hash;
 use crate::io;
 use crate::strconv;
 use crate::string;
@@ -345,6 +344,11 @@ fn signCtx(
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:216-256 signWithDom
+/// Go: `func signWithDom(signature []byte, priv *PrivateKey, message
+/// []byte, domPrefix, context string) []byte` — `signature` is a
+/// caller-allocated buffer Go appends into and returns; goish returns
+/// the signature by value.
+/// goishlint:ignore GOISH020 signWithDom — Go's out-param `signature` is a return value here
 pub(crate) fn signWithDom(
     priv_: &PrivateKey,
     message: slice<byte>,

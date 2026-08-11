@@ -1,3 +1,4 @@
+// go: package reflect
 // reflect — Go's `reflect` package, first slice.
 //
 //   Go                                   goish
@@ -33,6 +34,9 @@
 #![allow(non_snake_case, non_upper_case_globals)]
 
 extern crate alloc;
+
+mod value;
+pub use value::New;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -694,7 +698,7 @@ impl Type {
 /// `Default` returns `Value::Invalid` — matches Go's zero-`reflect.Value`,
 /// where `IsValid()` is false. Ports that hold a `reflect::Value` field
 /// (e.g. kylelemons' `formatter.cur`) rely on this to derive `Default`.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub enum Value {
     #[default]
     Invalid,
@@ -727,12 +731,30 @@ pub enum Value {
         fields: Vec<Value>,
     },
     Pointer(Box<Value>),
+    /// A *named* type whose underlying kind is not a struct — Go's
+    /// `type ObjectIdentifier []int`, `type Enumerated int`.
+    ///
+    /// Every other variant reconstructs its `Type` from the variant tag
+    /// alone, which is right for `int` and `[]int` and wrong the moment a
+    /// port declares a name over one: the name is what distinguishes
+    /// `asn1.ObjectIdentifier` from any other `[]int`, and losing it made
+    /// `encoding/asn1`'s makeBody encode an OID as a SEQUENCE OF INTEGER.
+    /// Struct-shaped named types were already fine — `Struct` carries its
+    /// `ty` — so this covers the rest.
+    ///
+    /// Everything but `Type()` delegates to `inner`, so a `Named` behaves
+    /// exactly like the value it wraps.
+    Named {
+        ty: Type,
+        inner: Box<Value>,
+    },
 }
 
 impl Value {
     /// `Kind()` — runtime tag.
     pub fn Kind(&self) -> Kind {
         match self {
+            Value::Named { inner, .. } => inner.Kind(),
             Value::Invalid => Kind::Invalid,
             Value::Bool(_) => Kind::Bool,
             Value::Int(_) => Kind::Int,
@@ -756,6 +778,8 @@ impl Value {
     /// `Type()` — descriptor of this value's type.
     pub fn Type(&self) -> Type {
         match self {
+            // The whole point of the variant: a named type keeps its name.
+            Value::Named { ty, .. } => *ty,
             Value::Struct { ty, .. } => *ty,
             Value::Slice { elem_type, .. } => {
                 Type::__new(Kind::Slice, "", &[]).__with_elem(*elem_type)
@@ -769,6 +793,9 @@ impl Value {
 
     /// `IsValid()` — false for the zero-Value (`Value::Invalid`).
     pub fn IsValid(&self) -> bool {
+        if let Value::Named { inner, .. } = self {
+            return inner.IsValid();
+        }
         !matches!(self, Value::Invalid)
     }
 
@@ -776,6 +803,7 @@ impl Value {
     /// Go's `reflect.Value.IsZero`.
     pub fn IsZero(&self) -> bool {
         match self {
+            Value::Named { inner, .. } => inner.IsZero(),
             Value::Invalid => true,
             Value::Bool(b) => !*b,
             Value::Int(n) => *n == 0,
@@ -798,6 +826,9 @@ impl Value {
 
     /// `Bool()` — panics if Kind != Bool.
     pub fn Bool(&self) -> bool {
+        if let Value::Named { inner, .. } = self {
+            return inner.Bool();
+        }
         match self {
             Value::Bool(b) => *b,
             _ => panic!("reflect.Value.Bool of non-bool"),
@@ -806,6 +837,9 @@ impl Value {
 
     /// `Int()` — typed accessor for any signed-int kind. Panics otherwise.
     pub fn Int(&self) -> int {
+        if let Value::Named { inner, .. } = self {
+            return inner.Int();
+        }
         match self {
             Value::Int(n) => *n,
             Value::Int8(n) => *n as int,
@@ -817,6 +851,9 @@ impl Value {
 
     /// `Uint()` — any unsigned-int kind. Panics otherwise.
     pub fn Uint(&self) -> uint {
+        if let Value::Named { inner, .. } = self {
+            return inner.Uint();
+        }
         match self {
             Value::Uint(n) => *n,
             Value::Uint8(n) => *n as uint,
@@ -828,6 +865,9 @@ impl Value {
 
     /// `Float()` — float32 or float64. Panics otherwise.
     pub fn Float(&self) -> float64 {
+        if let Value::Named { inner, .. } = self {
+            return inner.Float();
+        }
         match self {
             Value::Float32(f) => *f as float64,
             Value::Float64(f) => *f,
@@ -846,6 +886,9 @@ impl Value {
 
     /// `Len()` — element count for slice/string/map. Panics otherwise.
     pub fn Len(&self) -> int {
+        if let Value::Named { inner, .. } = self {
+            return inner.Len();
+        }
         match self {
             Value::Slice { items, .. } => items.len() as int,
             Value::String(s) => s.as_bytes().len() as int,
@@ -858,6 +901,9 @@ impl Value {
     /// don't track capacity separately from length, so `Cap == Len`.
     /// Panics for non-slice (matches Go for non-Array/Chan/Slice).
     pub fn Cap(&self) -> int {
+        if let Value::Named { inner, .. } = self {
+            return inner.Cap();
+        }
         match self {
             Value::Slice { items, .. } => items.len() as int,
             _ => panic!("reflect.Value.Cap of non-slice"),
@@ -870,6 +916,9 @@ impl Value {
     ///     vs empty distinctly; an empty slice is non-nil-empty)
     ///   * Other kinds: panic
     pub fn IsNil(&self) -> bool {
+        if let Value::Named { inner, .. } = self {
+            return inner.IsNil();
+        }
         match self {
             Value::Slice { .. } => false,
             Value::Map { .. } => false,
@@ -890,6 +939,9 @@ impl Value {
     /// through known Value variants; `Invalid` and unsupported variants
     /// box `()` as a placeholder so call sites still get something.
     pub fn Interface(&self) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
+        if let Value::Named { inner, .. } = self {
+            return inner.Interface();
+        }
         match self {
             Value::Bool(b) => alloc::sync::Arc::new(*b),
             Value::Int(n) => alloc::sync::Arc::new(*n),
@@ -914,6 +966,9 @@ impl Value {
     /// `Bytes()` — convert a `Value::Slice` whose element kind is
     /// `Uint8` into a `slice<byte>`. Panics otherwise.
     pub fn Bytes(&self) -> slice<byte> {
+        if let Value::Named { inner, .. } = self {
+            return inner.Bytes();
+        }
         match self {
             Value::Slice { items, elem_type } if elem_type().Kind() == Kind::Uint8 => {
                 let mut out: Vec<byte> = Vec::with_capacity(items.len());
@@ -1035,6 +1090,9 @@ impl Value {
     /// `MapKeys()` — keys in stable (sorted) order, as `slice<Value>`
     /// (Go's `[]Value`). Panics if not Map.
     pub fn MapKeys(&self) -> crate::goslice::slice<Value> {
+        if let Value::Named { inner, .. } = self {
+            return inner.MapKeys();
+        }
         match self {
             Value::Map { entries, .. } => {
                 let v: Vec<Value> = entries.iter().map(|(k, _)| k.clone()).collect();
@@ -1048,6 +1106,9 @@ impl Value {
     /// Linear scan for v1 (entries are sorted; we could binary-search
     /// over comparable keys, but v1 keeps it straightforward).
     pub fn MapIndex(&self, key: &Value) -> Value {
+        if let Value::Named { inner, .. } = self {
+            return inner.MapIndex(key);
+        }
         match self {
             Value::Map { entries, .. } => {
                 for (k, v) in entries {
@@ -1063,6 +1124,9 @@ impl Value {
 
     /// `Index(i)` — i-th element of a slice. Panics if not Slice.
     pub fn Index(&self, i: int) -> Value {
+        if let Value::Named { inner, .. } = self {
+            return inner.Index(i);
+        }
         match self {
             Value::Slice { items, .. } => items[i as usize].clone(),
             _ => panic!("reflect.Value.Index of non-slice"),
@@ -1256,6 +1320,66 @@ pub fn TypeOfDyn<T: Reflect + ?Sized>() -> Type {
 /// `reflect.ValueOf(v)` — read-only `Value` mirror of `v`.
 pub fn ValueOf<T: Reflect + ?Sized>(v: &T) -> Value {
     v.__reflect_value()
+}
+
+// ─── ValueOfAny / TypeOfAny — reflection out of `goish::Any` ─────────
+//
+// Go needs no such pair: `reflect.ValueOf` takes `any`, and an
+// interface header always carries its dynamic type descriptor, so
+// reflecting an erased value is the *only* thing reflect does.
+//
+// Goish has two type-erasure mechanisms with different jobs.
+// `goany::Any` erases into `Arc<dyn AnyVal>` and gives downcast;
+// `Reflect` gives `Value`/`Type` but is not object safe
+// (`__reflect_type()` has no `self`), so a `dyn` cannot carry it.
+// Until now the two did not meet, and `crypto/x509/pkix` sat at 5/6
+// because `asn1.Marshal(tv.Value)` needs exactly this crossing.
+//
+// The crossing is made at the *wrap* site, not the read site:
+// `Any::new` requires `T: Reflect` and stores both answers in the
+// `AnyVal` vtable (see goany.rs). These two functions read them.
+//
+// The comma-ok return is the load-bearing part. `ok == false` means
+// "this carrier has no reflection" — a closure, or a value wrapped
+// with `Any::new_opaque`. It is NOT the same as
+// `(Value::Invalid, true)`, which is the honest reflection of `nil`
+// (Go's `reflect.ValueOf(nil)` is likewise the zero Value). A caller
+// that will go on to marshal must be able to tell those apart: one is
+// Go's "cannot marshal nil value", the other has no Go analogue at all
+// and has to name the offending type. Returning `Value::Invalid` for
+// both would make `asn1.Marshal` quietly emit the wrong diagnosis, and
+// - through pkix's `typeName = oidString` fallback - the wrong string.
+
+// go: none — goish idiom: Go's `reflect.ValueOf` already takes `any`.
+// This is that function for goish's `Any` carrier, with the extra `ok`
+// Go does not need. See the note above for why `ok` is not optional.
+/// `reflect.ValueOf(x)` where `x` is a type-erased `goish::Any`.
+///
+/// Returns `(value, true)` when the wrapped payload was stored through
+/// [`goany::Any::new`](crate::goany::Any::new) (which requires
+/// `Reflect`), and `(Value::Invalid, false)` when it was stored through
+/// `new_fn` / `new_opaque` and genuinely has no reflection.
+pub fn ValueOfAny(v: &crate::goany::Any) -> (Value, bool) {
+    return match v.0.__goish_reflect_value() {
+        Some(val) => (val, true),
+        None => (Value::Invalid, false),
+    };
+}
+
+// go: none — goish idiom: the `Type` half of `ValueOfAny`. Go spells
+// this `reflect.TypeOf(x)`; goish's `TypeOf` needs a static `T`, which
+// an erased value does not have.
+/// `reflect.TypeOf(x)` where `x` is a type-erased `goish::Any` — the
+/// *dynamic* type descriptor, not `interface{}`.
+///
+/// Same `ok` contract as [`ValueOfAny`]. Note that
+/// `<Any as Reflect>::__reflect_type()` cannot answer this: it has no
+/// `self`, so all it can say is `interface{}`.
+pub fn TypeOfAny(v: &crate::goany::Any) -> (Type, bool) {
+    return match v.0.__goish_reflect_type() {
+        Some(t) => (t, true),
+        None => (Type::__new(Kind::Invalid, "", &[]), false),
+    };
 }
 
 // ─── AnyReflect — type-erased reflection ─────────────────────────────
@@ -1726,46 +1850,31 @@ impl Reflect for alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
     }
 }
 
-// `goish::Any` (interface{} newtype) — runs the same downcast probe
-// table as the raw-Arc impl above. We can't directly forward to that
-// impl because `Any` now wraps `Arc<dyn AnyVal>` (the dyn_eq-extended
-// trait); the probe set is small, so inlining is cheaper than a shim
-// trait.
+// `goish::Any` (interface{} newtype). This used to be a nine-entry
+// `downcast_ref` probe table over the primitives, with `Value::Invalid`
+// for everything else — a `pkix.Name` inside an `Any` reflected as
+// "nil". It now reads the reflection the wrap site recorded, so every
+// `Any::new`-constructed value reflects, not just the nine.
+//
+// The `Value::Invalid` fallback that remains is for the two payloads
+// that really have none (`new_fn`, `new_opaque`). `Reflect` has no
+// failure channel — `__reflect_value` must return *some* Value — which
+// is exactly why [`ValueOfAny`] exists and why every consumer that will
+// act on the result (marshal it, walk it, encode it) must go through
+// that comma-ok form instead of `ValueOf`. Landing on Invalid here is
+// still safe rather than silent: `asn1::makeField` rejects an invalid
+// Value. It is merely less precise about *why*.
 impl Reflect for crate::goany::Any {
     #[inline]
     fn __reflect_type() -> Type {
+        // Static type only — `Reflect::__reflect_type` has no `self`,
+        // so the dynamic answer is unreachable from here. Callers that
+        // want it use `TypeOfAny`.
         Type::__new(Kind::Interface, "interface{}", &[])
     }
     fn __reflect_value(&self) -> Value {
-        let any = self.as_any();
-        if let Some(v) = any.downcast_ref::<string>() {
-            return Value::String(v.clone());
-        }
-        if let Some(v) = any.downcast_ref::<i64>() {
-            return Value::Int(*v);
-        }
-        if let Some(v) = any.downcast_ref::<i32>() {
-            return Value::Int32(*v);
-        }
-        if let Some(v) = any.downcast_ref::<u64>() {
-            return Value::Uint(*v);
-        }
-        if let Some(v) = any.downcast_ref::<u32>() {
-            return Value::Uint32(*v);
-        }
-        if let Some(v) = any.downcast_ref::<u8>() {
-            return Value::Uint8(*v);
-        }
-        if let Some(v) = any.downcast_ref::<f64>() {
-            return Value::Float64(*v);
-        }
-        if let Some(v) = any.downcast_ref::<f32>() {
-            return Value::Float32(*v);
-        }
-        if let Some(v) = any.downcast_ref::<bool>() {
-            return Value::Bool(*v);
-        }
-        Value::Invalid
+        let (v, _ok) = ValueOfAny(self);
+        return v;
     }
 }
 

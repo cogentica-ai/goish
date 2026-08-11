@@ -36,6 +36,24 @@
 //! Format and Reflect impls live in their respective modules
 //! (fmt/mod.rs, reflect/mod.rs) and forward through `.0`.
 //!
+//! ## Reflection through the wrap
+//!
+//! Go's `reflect.ValueOf(x)` works on any `interface{}` because the
+//! interface header already carries the dynamic type descriptor. Goish
+//! erases into `Arc<dyn AnyVal>`, whose vtable is whatever `AnyVal`
+//! declares — so reflection has to be *declared* to survive the wrap.
+//! It is, by two `AnyVal` slots (`__goish_reflect_value` /
+//! `__goish_reflect_type`) filled in from `T: Reflect` at the wrap
+//! site. `reflect::ValueOfAny` / `reflect::TypeOfAny` read them.
+//!
+//! That is why `Any::new` requires `Reflect`: a value that is
+//! reflectable at the wrap site can never *become* unreflectable
+//! afterwards, so `asn1::MarshalAny` and friends do not have to guess.
+//! The two payload shapes that genuinely cannot reflect — `new_fn`
+//! (closures) and `new_opaque` (deliberate escape hatch) — report
+//! `None`, never a fabricated `Value::Invalid`; see `__FnSlot` and
+//! `__OpaqueSlot` below.
+//!
 //! ## Migration from `Arc<dyn Any+Send+Sync>`
 //!
 //! The transpiler's `interface{}` lowering used to spell as
@@ -102,9 +120,34 @@ pub trait AnyVal: 'static + Send + Sync {
     /// (e.g. `"alloc::string::String"`), not Go's name (`"string"`) —
     /// diagnostic-grade, like Go's own `%T` string.
     fn __goish_type_name(&self) -> &'static str;
+
+    /// The `reflect::Value` mirror of the wrapped value, or `None` when
+    /// the payload has no `Reflect` impl at all.
+    ///
+    /// **`None` and `Some(Value::Invalid)` are different answers.**
+    /// `None` means "this carrier cannot be reflected — do not marshal
+    /// it, do not walk it, report the type". `Some(Value::Invalid)` is
+    /// a *successful* reflection of a value whose Go kind is invalid,
+    /// which is what `nil` reflects to (`nilval::Nil`) and what Go's
+    /// `reflect.ValueOf(nil)` returns. Collapsing the two is the bug
+    /// this signature exists to prevent: `asn1::MarshalAny` must say
+    /// "no reflection for type X", not the nil-value error, when handed
+    /// a closure.
+    fn __goish_reflect_value(&self) -> Option<crate::reflect::Value>;
+
+    /// The `reflect::Type` descriptor of the wrapped value's *dynamic*
+    /// type. `None` under exactly the conditions
+    /// [`__goish_reflect_value`](Self::__goish_reflect_value) is `None`.
+    ///
+    /// This is the piece `Reflect` alone cannot supply through a `dyn`:
+    /// `Reflect::__reflect_type()` takes no `self`, so it is not object
+    /// safe and cannot be called on an erased value. Capturing it in
+    /// the vtable at the wrap site is what makes the erased form as
+    /// informative as Go's interface header.
+    fn __goish_reflect_type(&self) -> Option<crate::reflect::Type>;
 }
 
-impl<T: 'static + Send + Sync + PartialEq> AnyVal for T {
+impl<T: 'static + Send + Sync + PartialEq + crate::reflect::Reflect> AnyVal for T {
     #[inline]
     fn __any_send_sync(&self) -> &(dyn CoreAny + Send + Sync) {
         self
@@ -127,6 +170,19 @@ impl<T: 'static + Send + Sync + PartialEq> AnyVal for T {
     fn __goish_type_name(&self) -> &'static str {
         core::any::type_name::<T>()
     }
+
+    // go: none — goish idiom: Go's interface header already carries the
+    // dynamic type, so `reflect.ValueOf(any)` needs no vtable slot.
+    #[inline]
+    fn __goish_reflect_value(&self) -> Option<crate::reflect::Value> {
+        return Some(<T as crate::reflect::Reflect>::__reflect_value(self));
+    }
+
+    // go: none — goish idiom: see `__goish_reflect_value`.
+    #[inline]
+    fn __goish_reflect_type(&self) -> Option<crate::reflect::Type> {
+        return Some(<T as crate::reflect::Reflect>::__reflect_type());
+    }
 }
 
 /// `interface{}` / `any`. See module docs.
@@ -142,14 +198,45 @@ impl Clone for Any {
 
 impl Any {
     /// Wrap an owned value of any
-    /// `T: 'static + Send + Sync + PartialEq`. The PartialEq bound
-    /// powers `PartialEq<Any> for Any`; types that lack it cannot
-    /// flow through `Any` — matches Go's "comparing uncomparable" check
-    /// (slices, maps, funcs) but moves the rejection from the `==`
-    /// site to the wrap site.
+    /// `T: 'static + Send + Sync + PartialEq + Reflect`.
+    ///
+    /// The PartialEq bound powers `PartialEq<Any> for Any`; types that
+    /// lack it cannot flow through `Any` — matches Go's "comparing
+    /// uncomparable" check (slices, maps, funcs) but moves the
+    /// rejection from the `==` site to the wrap site.
+    ///
+    /// The `Reflect` bound is what makes `reflect::ValueOfAny` and
+    /// `asn1::MarshalAny` total: every value that goes *in* through
+    /// this door can come back out as a `reflect::Value`. Go gets this
+    /// for free (an interface header always carries its type
+    /// descriptor); goish has to record it, and the wrap site is the
+    /// only place the concrete `T` is still known. Same rejection
+    /// philosophy as PartialEq — a compile error at the wrap, not a
+    /// mystery at the marshal.
+    ///
+    /// If a type genuinely has no reflection, reach for
+    /// [`new_opaque`](Self::new_opaque) (comparable) or
+    /// [`new_fn`](Self::new_fn) (not comparable) and accept that
+    /// reflection-driven consumers will refuse it by name.
     #[inline]
-    pub fn new<T: 'static + Send + Sync + PartialEq>(value: T) -> Self {
+    pub fn new<T: 'static + Send + Sync + PartialEq + crate::reflect::Reflect>(value: T) -> Self {
         Any(Arc::new(value))
+    }
+
+    // go: none — goish idiom: Go has no wrap site to constrain, so it
+    // needs no escape hatch from one.
+    /// Wrap a value that has `PartialEq` but no `Reflect` impl.
+    ///
+    /// The escape hatch for [`new`](Self::new)'s reflection bound.
+    /// Equality still works (Go's `interface{} ==` contract is intact);
+    /// `reflect::ValueOfAny` reports `ok == false` and every
+    /// reflection-driven consumer refuses the value with its type name
+    /// rather than guessing. Prefer adding a `Reflect` impl to `T`;
+    /// this exists so that "no reflection" stays a stated property of
+    /// the value instead of an accident discovered downstream.
+    #[inline]
+    pub fn new_opaque<T: 'static + Send + Sync + PartialEq>(value: T) -> Self {
+        return Any(Arc::new(__OpaqueSlot(value)));
     }
 
     /// Wrap a function-shaped value (typically `Arc<dyn Fn(...) -> R +
@@ -380,6 +467,80 @@ impl<T: 'static + Send + Sync> AnyVal for __FnSlot<T> {
     #[inline]
     fn __goish_type_name(&self) -> &'static str {
         core::any::type_name::<T>()
+    }
+
+    // go: none — goish idiom: see `AnyVal::__goish_reflect_value`.
+    /// No reflection. Go can reflect a func value; goish's `Value` has
+    /// no func variant, and inventing `Value::Invalid` here would make
+    /// a closure indistinguishable from `nil` to every consumer.
+    #[inline]
+    fn __goish_reflect_value(&self) -> Option<crate::reflect::Value> {
+        return None;
+    }
+
+    // go: none — goish idiom: see `AnyVal::__goish_reflect_type`.
+    #[inline]
+    fn __goish_reflect_type(&self) -> Option<crate::reflect::Type> {
+        return None;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// __OpaqueSlot — `Any::new_opaque` payload wrapper
+// ─────────────────────────────────────────────────────────────────────
+//
+// Backing storage for `Any::new_opaque`. Same transparency trick as
+// `__FnSlot` — `__any_send_sync` / `__any_mut` hand out the inner `T`,
+// so `As::<T>()` and `%T` never see the wrapper — but it keeps the real
+// `dyn_eq` (the payload *is* `PartialEq`) and drops only reflection.
+//
+// It exists so that "this type has no goish reflection" is a decision
+// written at the wrap site, in the same file as the value, rather than
+// a `Value::Invalid` surfacing three packages away inside a marshaller.
+#[doc(hidden)]
+pub struct __OpaqueSlot<T: 'static + Send + Sync + PartialEq>(pub T);
+
+impl<T: 'static + Send + Sync + PartialEq> AnyVal for __OpaqueSlot<T> {
+    // go: none — goish idiom: see `__FnSlot`'s matching method.
+    #[inline]
+    fn __any_send_sync(&self) -> &(dyn CoreAny + Send + Sync) {
+        return &self.0;
+    }
+
+    // go: none — goish idiom: see `__FnSlot`'s matching method.
+    #[inline]
+    fn __any_mut(&mut self) -> &mut dyn CoreAny {
+        return &mut self.0;
+    }
+
+    // go: none — goish idiom: Go's `interface{} ==` compares dynamic
+    // type plus dynamic value; this is that, for a comparable payload.
+    /// Full Go equality — unlike `__FnSlot`, the payload is comparable.
+    #[inline]
+    fn dyn_eq(&self, other: &dyn CoreAny) -> bool {
+        return match other.downcast_ref::<T>() {
+            Some(o) => &self.0 == o,
+            None => false,
+        };
+    }
+
+    // go: none — goish idiom: see `__FnSlot`'s matching method.
+    #[inline]
+    fn __goish_type_name(&self) -> &'static str {
+        return core::any::type_name::<T>();
+    }
+
+    // go: none — goish idiom: see `AnyVal::__goish_reflect_value`.
+    /// The whole point of the wrapper: an honest "no".
+    #[inline]
+    fn __goish_reflect_value(&self) -> Option<crate::reflect::Value> {
+        return None;
+    }
+
+    // go: none — goish idiom: see `AnyVal::__goish_reflect_type`.
+    #[inline]
+    fn __goish_reflect_type(&self) -> Option<crate::reflect::Type> {
+        return None;
     }
 }
 

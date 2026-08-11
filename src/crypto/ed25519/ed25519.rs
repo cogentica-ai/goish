@@ -190,11 +190,11 @@ impl PrivateKey {
             // Ed25519ph
             return fips::SignPH(&k, message, str_to_slice(&context));
         }
-        if hash == 0 && context.Len() != 0 {
+        if hash == crypto::Hash(0) && context.Len() != 0 {
             // Ed25519ctx
             return fips::SignCtx(&k, message, str_to_slice(&context));
         }
-        if hash == 0 {
+        if hash == crypto::Hash(0) {
             // Ed25519
             return (fips::Sign(&k, message), errors::nil);
         }
@@ -360,7 +360,7 @@ pub fn Sign(privateKey: &PrivateKey, message: slice<byte>) -> slice<byte> {
 /// `len(publicKey)` is not [`PublicKeySize`].
 pub fn Verify(publicKey: &PublicKey, message: slice<byte>, sig: slice<byte>) -> bool {
     let opts = Options {
-        Hash: 0,
+        Hash: crypto::Hash(0),
         Context: string::default(),
     };
     VerifyWithOptions(publicKey, message, sig, &opts).IsNil()
@@ -396,11 +396,11 @@ pub fn VerifyWithOptions(
         // Ed25519ph
         return fips::VerifyPH(&k, message, sig, str_to_slice(&opts.Context));
     }
-    if opts.Hash == 0 && opts.Context.Len() != 0 {
+    if opts.Hash == crypto::Hash(0) && opts.Context.Len() != 0 {
         // Ed25519ctx
         return fips::VerifyCtx(&k, message, sig, str_to_slice(&opts.Context));
     }
-    if opts.Hash == 0 {
+    if opts.Hash == crypto::Hash(0) {
         // Ed25519
         return fips::Verify(&k, message, sig);
     }

@@ -27,7 +27,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::crypto::ecdh;
-use crate::crypto::ecdsa::{decode_x509_ec_p256_pubkey, P256PublicKey, VerifyP256};
+use crate::crypto::tls::legacy_p256::{decode_x509_ec_p256_pubkey, P256PublicKey, VerifyP256};
 use crate::crypto::rand;
 use crate::crypto::rsa;
 use crate::crypto::sha256;
@@ -437,7 +437,7 @@ pub fn do_client_handshake(
 
         let ch2_key_share_bytes: Vec<byte>;
         if use_group == GROUP_P256 {
-            let (scalar, pub65) = crate::crypto::ecdsa::p256_keypair_generate();
+            let (scalar, pub65) = crate::crypto::tls::legacy_p256::p256_keypair_generate();
             hrr_p256_scalar = scalar;
             ch2_key_share_bytes = pub65.to_vec(); // 65 bytes
         } else {
@@ -587,7 +587,7 @@ pub fn do_client_handshake(
         let hrr_shared_secret: [u8; 32];
         if hrr_server2_group == GROUP_P256 && hrr_server2_key_data.len() == 65 {
             // Server responded with P-256 key share
-            hrr_shared_secret = crate::crypto::ecdsa::p256_ecdh_compute(
+            hrr_shared_secret = crate::crypto::tls::legacy_p256::p256_ecdh_compute(
                 &hrr_p256_scalar,
                 &hrr_server2_key_data,
             );
@@ -2000,7 +2000,7 @@ fn parse_server_key_exchange_ecdsa(
             // Generate P-256 ECDH keypair and compute shared secret.
             // Returns (priv[32], client_pub_65[65], shared[32]).
             let (client_priv_bytes, client_pub_65, shared) =
-                crate::crypto::ecdsa::p256_ecdh_generate_and_compute_full(server_pub_raw);
+                crate::crypto::tls::legacy_p256::p256_ecdh_generate_and_compute_full(server_pub_raw);
             if client_priv_bytes.iter().all(|&b| b == 0) {
                 return (zero32, empty_vec, errors::New("tls: P-256 ECDH failed"));
             }

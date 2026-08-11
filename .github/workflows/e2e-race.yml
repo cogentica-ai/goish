@@ -1,0 +1,67 @@
+name: e2e-race
+
+# Nightly race sweep: the per-test loop tiers, which put the
+# scheduling/racing/stress families at 50 iterations each
+# (chan/select, preempt, sched, sync, timers, stacks, server lifecycle,
+# TLS conns — see loops_for in scripts/e2e_runner.sh).
+#
+# 50 is not a round number picked for comfort: the historical lost-wakeup
+# bug reproduced ~2% of the time, so 10 loops would have hidden it ~80% of
+# the time. This is the run that would catch its successor.
+#
+# The per-push gate (e2e.yml) runs everything once and is the fast signal;
+# this is the slow one, so it runs while nobody is waiting on it.
+
+on:
+  schedule:
+    # 18:00 UTC — early night in UTC+7, so results are waiting by morning.
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "tiered = per-test tiers (1/10/50); full = every example x50"
+        type: choice
+        default: tiered
+        options: [tiered, full]
+        required: false
+
+# Never run two nightlies at once — a manual dispatch during a scheduled
+# run should replace it, not queue behind it.
+concurrency:
+  group: e2e-race
+  cancel-in-progress: true
+
+jobs:
+  e2e-race:
+    runs-on: ubuntu-latest
+    # `full` is 225 examples x 50 = ~11k iterations; give it room but stay
+    # under GitHub's 360-minute per-job ceiling.
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Default (scheduled) runs are tiered. `full` is the AGENTS.md
+      # requirement for scheduler/allocator/runtime-core changes, where
+      # races surface in tests that look unrelated to the change — reach
+      # for it by hand after touching runtime/.
+      - name: make e2e (tiered)
+        if: github.event.inputs.mode != 'full'
+        run: make e2e TIMEOUT=30
+
+      - name: make e2e-full
+        if: github.event.inputs.mode == 'full'
+        run: make e2e-full TIMEOUT=30
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-race-failure-logs
+          path: scripts/.e2e-artifacts
+          if-no-files-found: ignore

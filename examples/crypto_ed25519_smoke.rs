@@ -285,7 +285,7 @@ fn test_7_verify_with_options() {
     let sig = Sign(&priv_, msg.clone());
     // Plain Ed25519: Hash == 0, empty Context.
     let opts = Options {
-        Hash: 0,
+        Hash: goish::crypto::Hash(0),
         Context: goish::string::default(),
     };
     let verr = VerifyWithOptions(&pub_, msg.clone(), sig.clone(), &opts);

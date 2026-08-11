@@ -13,7 +13,13 @@ use goish::goany::Any;
 use goish::gostring::string;
 use goish::{syscall};
 
+// `#[goish::reflect]` because `Any::new` requires `Reflect`: every value
+// that goes into goish's `interface{}` must be able to come back out as
+// a `reflect::Value` (see goany.rs, "Reflection through the wrap"). A
+// type that genuinely has none goes in through `Any::new_opaque`, and
+// `%T` still names it — `TypeName` reads the vtable, not the reflection.
 #[derive(PartialEq)]
+#[goish::reflect]
 struct Widget {
     id: i64,
 }

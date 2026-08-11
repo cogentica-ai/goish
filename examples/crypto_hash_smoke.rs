@@ -4,16 +4,16 @@
 // drawn from /share/go/src/crypto/crypto_test.go and crypto.go directly.
 //
 // Coverage:
-//   1. HashSize(SHA256) == 32, HashSize(SHA3_512) == 64.
-//   2. HashName(SHA256) == "SHA-256"; HashName(SHA3_256) == "SHA3-256".
-//   3. HashName(unknown) prefix "unknown hash value ".
-//   4. HashAvailable before RegisterHash → false.
-//   5. RegisterHash(SHA256, …) then HashAvailable(SHA256) → true.
-//   6. HashNew(SHA256) computes the right digest of "abc".
-//   7. RegisterHash(SHA3_256, …) + HashNew(SHA3_256) of "abc".
-//   8. HashFunc(SHA256) == SHA256 (identity).
-//   9. HashOpts(SHA1).HashFunc() == SHA1 — SignerOpts trait works.
-//  10. HashName covers all 19 distinct identifiers.
+//   1. SHA256.Size() == 32, SHA3_512.Size() == 64.
+//   2. SHA256.String() == "SHA-256"; SHA3_256.String() == "SHA3-256".
+//   3. Hash(99).String() prefix "unknown hash value ".
+//   4. Available() before RegisterHash → false.
+//   5. RegisterHash(SHA256, …) then SHA256.Available() → true.
+//   6. SHA256.New() computes the right digest of "abc".
+//   7. RegisterHash(SHA3_256, …) + SHA3_256.New() of "abc".
+//   8. SHA256.HashFunc() == SHA256 (identity).
+//   9. SHA1 satisfies SignerOpts directly — Go's `func (h Hash) HashFunc()`.
+//  10. String() covers all 19 distinct identifiers.
 
 #![no_std]
 #![no_main]
@@ -25,10 +25,7 @@ extern crate goish;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::fmt;
-use goish::crypto::{
-    self, HashAvailable, HashFunc, HashName, HashNew, HashOpts, HashSize, RegisterHash,
-    SignerOpts,
-};
+use goish::crypto::{self, RegisterHash, SignerOpts};
 use goish::gostring::string;
 use goish::io::Writer;
 use goish::types::byte;
@@ -135,55 +132,55 @@ fn run_tests() {
     test_6_new_sha256_abc();
     test_7_register_and_new_sha3_256_abc();
     test_8_hashfunc_identity();
-    test_9_hashopts_signer();
+    test_9_hash_is_signer_opts();
     test_10_all_known_names();
 }
 
 fn test_1_size() {
-    let s256 = HashSize(crypto::SHA256);
-    let s3_512 = HashSize(crypto::SHA3_512);
+    let s256 = crypto::SHA256.Size();
+    let s3_512 = crypto::SHA3_512.Size();
     if s256 == 32 && s3_512 == 64 {
-        write_result(1, b"HashSize(SHA256, SHA3_512)   ", true);
+        write_result(1, b"Hash.Size(SHA256, SHA3_512)  ", true);
     } else {
-        write_result(1, b"HashSize(SHA256, SHA3_512)   ", false);
+        write_result(1, b"Hash.Size(SHA256, SHA3_512)  ", false);
         fail();
     }
 }
 
 fn test_2_name_known() {
-    let s256 = HashName(crypto::SHA256);
-    let s3_256 = HashName(crypto::SHA3_256);
+    let s256 = crypto::SHA256.String();
+    let s3_256 = crypto::SHA3_256.String();
     if check_str(&s256, "SHA-256") && check_str(&s3_256, "SHA3-256") {
-        write_result(2, b"HashName known               ", true);
+        write_result(2, b"Hash.String known            ", true);
     } else {
-        write_result(2, b"HashName known               ", false);
+        write_result(2, b"Hash.String known            ", false);
         fail();
     }
 }
 
 fn test_3_name_unknown() {
-    let s = HashName(99);
+    let s = crypto::Hash(99).String();
     if starts_with(&s, "unknown hash value ") {
-        write_result(3, b"HashName unknown             ", true);
+        write_result(3, b"Hash.String unknown          ", true);
     } else {
-        write_result(3, b"HashName unknown             ", false);
+        write_result(3, b"Hash.String unknown          ", false);
         fail();
     }
 }
 
 fn test_4_available_pre_register() {
     // BLAKE2b_512 is never registered in this test → must be unavailable.
-    if !HashAvailable(crypto::BLAKE2b_512) {
-        write_result(4, b"HashAvailable pre-register   ", true);
+    if !crypto::BLAKE2b_512.Available() {
+        write_result(4, b"Hash.Available pre-register  ", true);
     } else {
-        write_result(4, b"HashAvailable pre-register   ", false);
+        write_result(4, b"Hash.Available pre-register  ", false);
         fail();
     }
 }
 
 fn test_5_register_sha256_then_available() {
     RegisterHash(crypto::SHA256, || goish::crypto::sha256::NewHash());
-    if HashAvailable(crypto::SHA256) {
+    if crypto::SHA256.Available() {
         write_result(5, b"RegisterHash + Available     ", true);
     } else {
         write_result(5, b"RegisterHash + Available     ", false);
@@ -193,7 +190,7 @@ fn test_5_register_sha256_then_available() {
 
 fn test_6_new_sha256_abc() {
     // SHA-256("abc") = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
-    let mut h = HashNew(crypto::SHA256);
+    let mut h = crypto::SHA256.New();
     let _ = h.Write(from_bytes(b"abc"));
     let empty: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
     let got = h.Sum(slice::__from_vec(empty));
@@ -203,16 +200,16 @@ fn test_6_new_sha256_abc() {
         0x15, 0xad,
     ];
     if check_slice(&got, &want) {
-        write_result(6, b"HashNew(SHA256) abc          ", true);
+        write_result(6, b"Hash.New(SHA256) abc         ", true);
     } else {
-        write_result(6, b"HashNew(SHA256) abc          ", false);
+        write_result(6, b"Hash.New(SHA256) abc         ", false);
         fail();
     }
 }
 
 fn test_7_register_and_new_sha3_256_abc() {
     RegisterHash(crypto::SHA3_256, || goish::crypto::sha3::NewHash256());
-    let mut h = HashNew(crypto::SHA3_256);
+    let mut h = crypto::SHA3_256.New();
     let _ = h.Write(from_bytes(b"abc"));
     let empty: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
     let got = h.Sum(slice::__from_vec(empty));
@@ -223,28 +220,31 @@ fn test_7_register_and_new_sha3_256_abc() {
         0x15, 0x32,
     ];
     if check_slice(&got, &want) {
-        write_result(7, b"HashNew(SHA3_256) abc        ", true);
+        write_result(7, b"Hash.New(SHA3_256) abc       ", true);
     } else {
-        write_result(7, b"HashNew(SHA3_256) abc        ", false);
+        write_result(7, b"Hash.New(SHA3_256) abc       ", false);
         fail();
     }
 }
 
 fn test_8_hashfunc_identity() {
-    if HashFunc(crypto::SHA256) == crypto::SHA256 && HashFunc(crypto::SHA1) == crypto::SHA1 {
-        write_result(8, b"HashFunc identity            ", true);
+    if crypto::SHA256.HashFunc() == crypto::SHA256 && crypto::SHA1.HashFunc() == crypto::SHA1 {
+        write_result(8, b"Hash.HashFunc identity       ", true);
     } else {
-        write_result(8, b"HashFunc identity            ", false);
+        write_result(8, b"Hash.HashFunc identity       ", false);
         fail();
     }
 }
 
-fn test_9_hashopts_signer() {
-    let opts = HashOpts(crypto::SHA1);
+fn test_9_hash_is_signer_opts() {
+    // Go: `func (h Hash) HashFunc() Hash` is what makes a bare Hash usable
+    // wherever a SignerOpts is wanted. Take it through the trait object to
+    // prove the impl is the one being exercised, not the inherent method.
+    let opts: &dyn SignerOpts = &crypto::SHA1;
     if opts.HashFunc() == crypto::SHA1 {
-        write_result(9, b"HashOpts SignerOpts          ", true);
+        write_result(9, b"Hash is SignerOpts           ", true);
     } else {
-        write_result(9, b"HashOpts SignerOpts          ", false);
+        write_result(9, b"Hash is SignerOpts           ", false);
         fail();
     }
 }
@@ -252,7 +252,7 @@ fn test_9_hashopts_signer() {
 fn test_10_all_known_names() {
     // 19 known hash IDs (MD4..BLAKE2b_512). All must produce a non-empty
     // name without the "unknown" prefix.
-    let ids: [goish::uint; 19] = [
+    let ids: [crypto::Hash; 19] = [
         crypto::MD4,
         crypto::MD5,
         crypto::SHA1,
@@ -275,7 +275,7 @@ fn test_10_all_known_names() {
     ];
     let mut ok = true;
     for &id in ids.iter() {
-        let n = HashName(id);
+        let n = id.String();
         if starts_with(&n, "unknown") || n.Len() == 0 {
             ok = false;
             break;

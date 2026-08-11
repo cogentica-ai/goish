@@ -6,7 +6,8 @@
 // be vendored and validated on its own.
 //
 // goish ships the shims that the ported fips140 packages actually use.
-// `cpu`, `godebug` and the `fipsdeps` dependency test land with the
-// packages that need them.
+// `cpu` and the `fipsdeps` dependency test land with the packages that
+// need them.
 
 pub mod byteorder;
+pub mod godebug;

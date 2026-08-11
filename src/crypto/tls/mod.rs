@@ -11,6 +11,8 @@
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
+pub mod internal;
+
 extern crate alloc;
 
 use alloc::boxed::Box;
@@ -23,6 +25,7 @@ use crate::gostring::string;
 use crate::sync::Mutex;
 use crate::types::{byte, int};
 
+pub mod legacy_p256;
 pub mod record;
 pub mod key_schedule;
 pub mod handshake_client_tls13;
@@ -1062,16 +1065,16 @@ where
 /// EC (SEC1/ECDSA) keys are rejected — no ECDSA signer yet.
 fn parsePrivateKey(der: slice<byte>) -> (crate::crypto::PrivateKey, error) {
     // PKCS#1.
-    let (k, err) = crate::crypto::x509::ParsePKCS1PrivateKey(der.clone());
+    let (k, err) = crate::crypto::x509::goishParsePKCS1RSAPrivateKey(der.clone());
     if err.IsNil() {
         return (Arc::new(k), errors::nil);
     }
     // PKCS#8, RSA algorithm OID.
-    let (k, err) = crate::crypto::x509::ParsePKCS8PrivateKey(der.clone());
+    let (k, err) = crate::crypto::x509::goishParsePKCS8RSAPrivateKey(der.clone());
     if err.IsNil() {
         return (Arc::new(k), errors::nil);
     }
-    // PKCS#8, Ed25519 (RFC 8410) — goish's x509.ParsePKCS8PrivateKey
+    // PKCS#8, Ed25519 (RFC 8410) — goish's goishParsePKCS8RSAPrivateKey
     // handles the rsaEncryption OID only, so the Ed25519 shape is
     // parsed here.
     if let Some(k) = parse_pkcs8_ed25519(&der) {

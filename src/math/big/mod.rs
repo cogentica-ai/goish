@@ -7051,3 +7051,34 @@ mod tests {
         assert_eq!(z.Int64(), 5);
     }
 }
+
+// go: none — goish-only: the reflect descriptor for `big.Int`.
+//
+// Go's `encoding/asn1` matches `reflect.TypeOf(new(big.Int))` — the
+// *pointer* type — by identity to give it the INTEGER tag, then hands it
+// to makeBigInt. goish's `Int` is a value type, so the identity to match
+// is the struct itself. Its two fields (neg, abs) are unexported and are
+// never walked, so the field list is empty.
+impl crate::reflect::Reflect for Int {
+    // go: none — goish-only: see above.
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(crate::reflect::Kind::Struct, "Int", &[]);
+    }
+
+    // go: none — goish-only: see above.
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        // Sign and big-endian magnitude — enough to rebuild the Int with
+        // SetBytes + Neg. `__reflect_type` still reports no fields, as
+        // Go's *big.Int has none exported; but a reflected Int that
+        // discarded its value would be useless to a port that reads it
+        // back, which is what encoding/asn1's makeBody does before
+        // calling makeBigInt.
+        return crate::reflect::Value::Struct {
+            ty: <Int as crate::reflect::Reflect>::__reflect_type(),
+            fields: alloc::vec![
+                crate::reflect::Value::Int(self.Sign()),
+                crate::reflect::Reflect::__reflect_value(&self.Bytes()),
+            ],
+        };
+    }
+}

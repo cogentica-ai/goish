@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **441/1575 = 28.0%**, 234 anchors, **14 packages fully verified**
+Current: **922/1507 = 61.2%**, 1408 anchors, **47 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -14,7 +14,10 @@ Current: **441/1575 = 28.0%**, 234 anchors, **14 packages fully verified**
 | `crypto/subtle` | 8/8 | 3 → 4 |
 | `crypto/des` | 14/14 | 3 → 4 |
 | `crypto/ed25519` | 11/11 | 1 → 2 |
-| `crypto/hkdf` | 3/4 | 1 → 2 |
+| `crypto/hkdf` | 4/4 | 1 → 2 |
+| `crypto/internal/fips140/hkdf` | 3/3 | 1 → 2 |
+| `crypto/internal/fips140/pbkdf2` | 3/3 | 1 → 2 |
+| `crypto/internal/fips140/drbg` | 8/8 | 3 → 3 |
 | `crypto/pbkdf2` | 1/1 | 1 → 2 |
 | `crypto/hmac` | 2/2 | 1 → 2 |
 | `crypto/sha256` | 4/4 | 1 → 2 |
@@ -22,13 +25,45 @@ Current: **441/1575 = 28.0%**, 234 anchors, **14 packages fully verified**
 | `crypto/internal/fips140/ed25519` | 28/28 | 2 → 3 |
 | `crypto/internal/fips140/hmac` | 10/10 | 2 → 2 |
 | `crypto/internal/fips140/sha256` | 16/18 | 6 → 4 |
+| `crypto/internal/fips140/sha512` | 17/18 | 6 → 4 |
+| `crypto/sha512` | 8/8 | 1 → 2 |
+| `crypto/internal/fips140/aes` | 37/45 | 11 → 9 |
+| `crypto/aes` | 2/2 | 1 → 2 |
+| `crypto/internal/fips140/alias` | 2/2 | 1 → 2 |
+| `crypto/internal/fips140/sha3` | 33/33 | 7 → 6 |
+| `crypto/sha3` | 25/27 | 1 → 2 |
+| `crypto/md5` | 15/15 | 4 → 4 |
+| `crypto/sha1` | 17/19 | 5 → 4 |
 | `crypto/internal/fips140deps/byteorder` | 11/11 | 1 → 2 |
 | `internal/byteorder` (outside crypto/) | 18/18 | 1 → 2 |
-| **total** | **142** | |
+| `crypto/internal/fips140/tls12` | 3/3 | 2 → 2 |
+| `crypto/internal/fips140/tls13` | 17/17 | 2 → 2 |
+| `crypto/internal/fips140/ssh` | 1/1 | 1 → 2 |
+| `crypto/internal/fips140/mlkem` | 69/69 | 4 → 4 |
+| `crypto/internal/fips140/nistec/fiat` | 61/61 | 13 → 14 |
+| `crypto/internal/randutil` | 1/1 | 1 → 2 |
+| `crypto/internal/entropy` | 1/1 | 1 → 2 |
+| `crypto/internal/fips140only` | 2/2 | 1 → 2 |
+| `crypto/fips140` | 1/1 | 1 → 2 |
+| `crypto/tls/internal/fips140tls` | 3/3 | 1 → 2 |
+| `crypto/internal/fips140` | 12/12 | 7 → 6 |
+| `crypto/internal/fips140/nistec` | 47/75 | 10 → 9 |
+| `crypto/internal/fips140/ecdh` | 13/13 | 2 → 3 |
+| `crypto/internal/fips140/ecdsa` | 30/30 | 4 → 5 |
+| `crypto/mlkem` | 10/10 | 1 → 2 |
+| `crypto/elliptic` | 27/27 | 3 → 4 |
+| `crypto/internal/impl` | 6/6 | 1 → 2 |
+| `crypto/internal/fips140/bigmod` | 60/60 | 3 → 3 |
+| `crypto/internal/fips140/edwards25519/field` | 34/34 | 4 → 4 |
+| **total** | **711** | |
 
-`crypto/internal/fips140/sha256`'s two remaining functions are `blockAVX2`
-and `blockSHANI` — the assembly entry points, tracked under "Assembly"
-below. Everything else in the table is complete.
+The only functions missing from that table are assembly entry points:
+`blockAVX2`/`blockSHANI` in fips140/sha256 and in crypto/sha1,
+`blockAVX2` in fips140/sha512, and in fips140/aes the seven `*Asm`
+symbols plus
+`EncryptionKeySchedule` (which exists solely to hand the key schedule to
+the GCM assembly, so it lands with that work). They are tracked under
+"Assembly" below. Everything else in the table is complete.
 
 The percentage moves slowly because most verified packages were already
 name-complete; what changed is that their completeness is now *proven*
@@ -43,6 +78,328 @@ python3 scripts/port_coverage.py crypto            # table
 python3 scripts/port_coverage.py crypto --md       # markdown (this doc)
 python3 scripts/port_coverage.py crypto --pkg tls  # per-package missing list
 ```
+
+
+## Verification: ground truth from Go itself
+
+`scripts/goref.sh <import-path> <ref-test-file>` copies GOROOT into a
+writable directory and runs a throwaway `TestGoishRef` *inside* it, so
+the reference file can import `crypto/internal/...` and reach unexported
+symbols. See AGENTS.md §10.
+
+This changed how ports get verified. Hand-transcribed vectors produced a
+plausible-but-wrong expectation twice here — a CMAC literal whose line
+continuation collapsed, and an SSH-KDF tag-F row pasted against a tag-D
+call — each costing a cycle spent hunting a port bug that did not exist.
+More importantly, most of what remains has *no* published intermediate
+vectors: FIPS 203 publishes end-to-end ML-KEM values and nothing for the
+NTT or the Barrett reduction underneath, and the same is true of nistec
+and bigmod. Without goref those packages could only be round-trip tested,
+which passes on a consistently wrong implementation.
+
+`crypto/internal/fips140/mlkem` is the first package taken to 100% this
+way: 1564 Go LOC, 69/69 functions, 102 anchors, 94 assertions across
+three examples, and not one transcribed literal. compress/decompress are
+swept over their entire domain rather than sampled, because the rounding
+boundaries are exactly where they go wrong.
+
+Published vectors still earn a place as a *second* anchor where they
+exist — matching both Go and NIST is stronger than matching either.
+
+
+## Generated Go gets a translator, not a typist
+
+Two packages in this tree are machine-generated in Go and large enough
+that hand-porting them would have been the third and biggest instance of
+the transcription failure described above:
+
+| Go source | LOC | translated by |
+|---|--:|---|
+| `nistec/fiat/*_fiat64.go` (Fiat Cryptography) | 11,438 | `scripts/fiat64_to_rust.py` |
+| `nistec/fiat/*_invert.go` (addchain) | 362 | `scripts/fiat_invert_to_rust.py` |
+| `mlkem/mlkem1024.go` (generate1024.go) | 451 | `generate1024.go`'s own map |
+
+Both translators parse only the closed grammar their inputs actually use
+and **raise on anything unrecognised**. They can fail to translate; they
+cannot silently mistranslate. That strictness caught a real bug on the
+first run: `uint64(arg1[i])` on a `[N]uint8` is a *widening* conversion,
+not the value-level no-op it is everywhere else in those files. Treating
+it as identity would have shifted a `u8` by 48 in `FromBytes` — wrong
+only for inputs that reach the high limbs.
+
+`scripts/fiat_gen.py` drives both and also emits the four `Element`
+wrappers, which in Go are themselves generated from one template.
+Regenerate rather than edit:
+
+```bash
+scripts/fiat_gen.py            # nistec/fiat, all 14 files
+```
+
+
+## Anchoring the packages that were counted but never diffed
+
+`scripts/anchor_by_name.py <rust-file> <go-import-path> <go-file>...`
+adds GOISH014 anchors to an already-written port by matching Rust fn
+names against the Go declarations they came from. It is conservative: an
+fn whose name matches no Go decl, or matches ambiguously, is left alone
+and *reported* rather than mis-anchored, and an fn that already has an
+anchor is never touched. It does not write the GOISH017 manifest —
+deciding what belongs there is the point of that check.
+
+This exists because a package with no anchors is counted by
+`port_coverage.py` and proven by nothing. `crypto/internal/fips140` and
+`crypto/internal/fips140/bigmod` were both in that state, and doing the
+work found real divergence in both (see their commits). Still in it:
+
+| package | counted | anchors |
+|---|--:|--:|
+| `crypto/internal/fips140/edwards25519` | 48/49 | 29 | only `copyFieldElement` missing |
+| `crypto/internal/fips140/rsa` | 39/39 | 0 |
+| `crypto/rsa` | 27/40 | 0 |
+| `crypto/cipher` | 28/33 | 0 |
+
+Those are ~154 functions that the percentage already counts. Anchoring
+them does not move the number; it decides whether the number was true.
+
+
+### A subdirectory Go doesn't have makes 20 functions invisible
+
+`port_coverage.py` maps a Go package to a goish *directory*, so a
+subdirectory is scanned as a separate package. goish had put scalar.go's
+contents in `edwards25519/scalar/mod.rs` — a package Go does not have —
+and all 20 of its functions were therefore counted against nothing. The
+package read 28/49 when it was really 48/49.
+
+I misread that as 21 real gaps and wrote it up as such before checking
+whether the code existed. It did. The fix was structural, not a port:
+`scalar/mod.rs` split into `scalar.rs` and `scalar_fiat.rs` at the top
+level, matching Go's own file layout as GOISH015 requires. Only
+`copyFieldElement` (tables.go) is genuinely absent.
+
+The lesson generalises: **a low percentage on an unanchored package may
+be the measurement, not the port.** Check whether the functions exist
+under a different path before concluding anything is missing — the same
+`os.walk`-per-directory rule will hide any other package that grew a
+subdirectory Go lacks.
+
+
+### rsa: five functions are in the wrong package
+
+Probing `crypto/internal/fips140/rsa` with `anchor_by_name.py` (39
+functions matched, 15 unmatched) turned up five that have no counterpart
+in the FIPS package because they belong to the **public** one:
+`EncryptPKCS1v15`, `DecryptPKCS1v15`, `DecryptPKCS1v15SessionKey`,
+`decryptPKCS1v15` and `nonZeroRandomBytes` are all declared in Go's
+`crypto/rsa/pkcs1v15.go`, not `crypto/internal/fips140/rsa/pkcs1v15.go`.
+
+That is why `crypto/rsa` reads 27/40 — `nonZeroRandomBytes` is on its
+MISSING list while the code sits one package down. Moving them is a
+prerequisite for anchoring either package honestly; anchoring them where
+they are would cite the wrong Go file and drag its whole decl list in via
+GOISH018, the same cross-file trap `edwards25519/field` hit.
+
+`crypto/internal/fips140/rsa` also needs the bigmod treatment first: 2410
+lines standing in for five Go files (cast.go, keygen.go, pkcs1v15.go,
+pkcs1v22.go, rsa.go), with the anchor probe showing 1/6/6/12/15
+functions per file — so the split boundaries are already known.
+
+## Done: the elliptic-curve tranche (2026-08-11)
+
+`nistec` was the choke point — 75 functions gating 130 more. It is now
+47/75, with every one of the remaining 28 in `p256_asm.go` /
+`p256_ordinv.go`, i.e. the Assembly tranche. Everything it gated that does
+not also need `math/big` is complete:
+
+| package | before | after |
+|---|--:|--:|
+| `crypto/internal/fips140/nistec` | 0/75 | 47/75 |
+| `crypto/internal/fips140/ecdh` | 0/13 | **13/13** |
+| `crypto/internal/fips140/ecdsa` | 0/30 | **30/30** |
+| `crypto/mlkem` | 0/10 | **10/10** |
+
+Three decisions were made along the way and are worth not re-deriving:
+
+* **goish implements the `purego` side of nistec's build tags.** `p256.go`
+  is `(!amd64 && !arm64 && !ppc64le && !s390x) || purego`; `p256_asm.go`
+  is the other side and wraps assembly primitives goish does not have.
+  Likewise `p256_ordinv_noasm.go` over `p256_ordinv.go`. `p256_table.go`
+  is *not* asm-only, though — the generic `p256.go` reads the same
+  88 KiB basepoint table, so it is ported (by
+  `scripts/p256_table_gen.py`).
+* **`p224.go`, `p384.go` and `p521.go` differ only in the generator
+  coordinates, the curve parameter `b`, the element length, and the
+  square-root addchain.** `scripts/nistec_gen.py` generates the latter two
+  from `p224.rs`, mirroring Go's own `generate.go`. It does not assume the
+  files match — it renames the target `.go` back to p224, diffs it against
+  `p224.go`, and aborts on any difference outside those four spots.
+  `p256.go` is *not* part of that family: it is hand-written in Go too.
+* **`p224_sqrt.go` is the exception** and needed a real port: p224 has
+  p = 1 mod 4, so it cannot use exponentiation by (p+1)/4 like the others
+  and instead runs a constant-time Tonelli–Shanks over a 96-element
+  precomputed table.
+
+Go's constraint interfaces (`type Point[P any] interface { *nistec.P224Point
+| … }`) appear in both ecdh and ecdsa. Rust has no type unions, so each
+becomes a plain trait implemented for the four point types — the one shape
+decision that repeats across this tranche.
+
+## Next: what is left, by leverage
+
+| package | missing | blocked on |
+|---|--:|---|
+| `crypto/tls` | 259 | x509, ecdsa, ecdh, hpke |
+| `crypto/x509` | 150 | asn1, pkix, math/big |
+| `crypto/ecdsa` | 43 | elliptic (math/big), x509 asn1 |
+| `nistec` asm | 28 | the assembly tranche |
+| `crypto/elliptic` | 27 | **math/big** — not ported |
+| `crypto/internal/fips140/rsa` | 0 (39 unanchored) | anchoring + the file split |
+| `crypto/rsa` | 13 | the five misplaced pkcs1v15 fns |
+| `crypto/ecdh` | 16 | replaces the existing X25519-only module |
+| `crypto/internal/hpke` | 19 | ecdh, hkdf (both done) |
+
+**Correction (2026-08-11): `math/big` is not a blocker.** An earlier draft
+of this section claimed `crypto/elliptic` and `crypto/x509` were stuck
+behind an unported `math/big`. That was wrong and was published without
+checking: `src/math/big/mod.rs` is 7053 lines with `Int`, `Rat` and
+`Float`. `crypto/elliptic` has since been ported on top of it, 27/27.
+
+Two real caveats came out of that port, and they are about shape rather
+than absence:
+
+* `Int` implements `PartialEq` only against `nil`, so a struct holding one
+  cannot `#[derive(PartialEq)]`. Compare field by field with `Cmp`.
+* `Int::ModSqrt` returns `&mut Self` and cannot signal Go's "no square root
+  exists" nil, and `Int::FillBytes` returns a fresh slice rather than
+  filling the caller's buffer in place.
+
+## Pre-flight: `scripts/port_deps.py`
+
+Both of those were found the expensive way — 900 lines in — and the
+"math/big is missing" claim was never checked at all. `scripts/port_deps.py`
+now answers both questions before any code is written:
+
+```bash
+scripts/port_deps.py crypto/elliptic -v   # imports, presence, coverage, symbols
+scripts/port_deps.py --ready crypto       # unported packages ranked by readiness
+```
+
+It prints GO / PARTIAL / NO-GO for the package's imports and, with `-v`,
+the exact symbols the port will reach for. **Package presence is necessary,
+not sufficient** — the script says so itself, because the failures that
+cost time were symbol-level, not package-level:
+
+* a goish type existing says nothing about which traits it derives;
+* inherent methods do **not** satisfy a `#[goish::interface]` trait — the
+  `impl Trait for T` block has to be written, including the two
+  `__goish_as_dyn_any` hooks that make `cast!` work;
+* name-level coverage can report 100% for a package that does not compile,
+  so `cargo check --lib` is the gate, not `port_coverage.py`.
+
+## Readiness, as the tool reports it (2026-08-11)
+
+`scripts/port_deps.py --ready crypto` after the elliptic port. Note that
+`--ready` checks *package* presence only; run the per-package form to get
+the symbol check, which is what moved pkix out of this list:
+
+| package | gap | state |
+|---|--:|---|
+| `crypto/tls` | 259 | needs `weak`, `crypto/internal/hpke` |
+| `crypto/x509` | 150 | needs `crypto/dsa`, `crypto/x509/pkix`, `net/netip` |
+| `crypto/ecdsa` | 43 | needs `fips140cache`, `fips140hash` |
+| `nistec` asm | 28 | needs `fips140deps/cpu` |
+| `crypto/internal/hpke` | 19 | external `chacha20poly1305` |
+| `crypto/ecdh` | 16 | **READY** |
+| `crypto/x509/pkix` | 6 | NO-GO: `asn1.Marshal`/`Unmarshal` absent |
+| `crypto/dsa` | 5 | **READY** |
+| `crypto/cipher` | 5 | **READY** |
+| `crypto/internal/fips140hash` | 3 | **READY** |
+| `crypto` (root) | 3 | ready, but see below |
+| `crypto/sha256`, `crypto/sha1` | 2 each | **READY** |
+| `crypto/internal/fips140deps/godebug` | 2 | **READY** |
+
+**Both "leverage" claims in the first draft of this table were wrong**, and
+checking them took one `grep` each:
+
+* `crypto/internal/fips140deps/cpu` does *not* unblock nistec's 28. Those
+  28 are `p256_asm.go` / `p256_ordinv.go` — the assembly tranche, blocked
+  on writing assembly. `cpu` is imported by the generic `p256.go` only for
+  the `cpu.BigEndian` branch, which the goish port already takes
+  unconditionally. Porting it buys fidelity, not coverage: it declares no
+  functions at all.
+* `crypto/internal/fips140hash` does *not* unblock `crypto/ecdsa`'s 43.
+  See below.
+
+## The real blocker for crypto/ecdsa: hash factories are `fn` pointers
+
+`crypto/ecdsa` reaches ML-DSA-style hash injection through:
+
+```go
+h := fips140hash.UnwrapNew(hashFunc.New)   // returns a CLOSURE
+sig, err := ecdsa.SignDeterministic(c, h, k, hash)
+```
+
+`UnwrapNew` returns `func() hash.Hash` capturing `newHash`. Every goish
+signature in the crypto tree that takes a hash constructor takes a bare
+**`fn` pointer**:
+
+```rust
+pub fn New(h: fn() -> Box<dyn Hash + Send + Sync>, key: slice<byte>) -> HMAC
+pub fn SignDeterministic<P: Point>(c: &Curve<P>, h: fn() -> Box<dyn Hash + Send + Sync>, …)
+```
+
+A `fn` pointer cannot hold a capture, so `UnwrapNew` has nothing to return
+that its callers can consume. This is a cross-cutting runtime gap, not a
+missing package: `Unwrap` and `sha3Unwrap` port cleanly (the inner
+`SHA3.s` is `pub(crate)` and `sha3::Digest` is `Clone`, and every Go call
+site either passes a freshly constructed hash or overwrites the variable,
+so returning an owned value changes nothing observable) — only `UnwrapNew`
+is stuck.
+
+**The fix, when someone takes it on:** widen the factory parameter from
+`fn() -> Box<dyn Hash + Send + Sync>` to a generic
+`F: Fn() -> Box<dyn Hash + Send + Sync>` at the ~8 sites that take one
+(`fips140/hmac::New`, `fips140/ecdsa::Sign` / `SignDeterministic` /
+`newDRBG` / `TestingOnlyNewDRBG`, `tls12`, `tls13`, `ssh::Keys`). Mechanical,
+but it touches five packages, so it wants its own session and its own CI
+run — not the tail of another one. Until then `crypto/ecdsa` (43) stays
+blocked, and the readiness table above should be read with that in mind.
+
+**`crypto` (root) is not the 3-function job the number suggests.** Go's
+`type Hash uint` is a defined type with `String`, `Size`, `New` and
+`Available` methods. goish has `pub type Hash = uint`, an *alias*, so those
+became prefixed free functions (`HashName`, `HashSize`, `HashNew`). Closing
+the gap means turning `Hash` into a newtype and fixing every call site
+across the crypto tree. Worth doing, but it is a refactor with wide blast
+radius, not an addition — do not start it late in a session.
+
+## The single highest-leverage target: vendored `cryptobyte`
+
+`scripts/port_deps.py --ready crypto`, after the ecdh port, puts one
+missing package behind **452 functions**:
+
+| blocked package | gap | also needs |
+|---|--:|---|
+| `crypto/tls` | 259 | `weak`, `crypto/internal/hpke` |
+| `crypto/x509` | 150 | `crypto/dsa`, `crypto/x509/pkix`, `net/netip` |
+| `crypto/ecdsa` | 43 | **nothing else** |
+
+`golang.org/x/crypto/cryptobyte` is **vendored inside GOROOT**
+(`$GOROOT/src/vendor/golang.org/x/crypto/cryptobyte`, 1358 LOC across
+`asn1.go` 825, `builder.go` 350, `string.go` 183). It is as portable as any
+stdlib package. An earlier version of port_deps.py called every
+`golang.org/...` path "external — no Go-SDK counterpart to port verbatim",
+which was wrong and hid this entirely.
+
+`crypto/ecdsa` needs only a slice of it: `cryptobyte.Builder`,
+`cryptobyte.String`, and the `asn1.INTEGER` / `asn1.SEQUENCE` tags, used by
+`encodeSignature` and `parseSignature` (ecdsa.go:469-545). Porting
+`builder.go` + `string.go` + the INTEGER/SEQUENCE paths of `asn1.go` takes
+crypto/ecdsa from NO-GO to ready on its own — and x509 and tls both want
+the same package.
+
+The other vendored module, `golang.org/x/crypto/chacha20poly1305`, goish
+already has under `src/crypto/chacha20poly1305`; port_deps aliases the
+path. That is why `crypto/internal/hpke` (19) now reports READY.
 
 ## Per-package conversion recipe (proven on rc4, subtle, des)
 
@@ -68,6 +425,33 @@ Two traps this surfaced repeatedly:
 * **A deliberate rename needs `// goishlint:ignore GOISH021 — <reason>`.**
   `desCipher` → `Cipher` (Go returns it behind `cipher.Block`, which goish
   cannot express for a value type) is a rename, not a drop.
+
+### Denominator fixes
+
+Two classes of file were being counted that `go build` never compiles
+into a linux/amd64 library. Neither change ported anything; both make the
+percentage mean what it claims.
+
+**`//go:build ignore` files.**
+
+`port_coverage.py` was counting standalone generators — md5's `gen.go`,
+nistec's `generate.go`, tls's `generate_cert.go` and four others. They are
+`package main` programs behind `//go:build ignore`, which `go build` never
+compiles into the package, so their funcs (`dup`, `idx`, `main`,
+`relabel`, `rotate`, `seq` …) inflated the denominator with code that is
+not part of the library. Skipped now, same rationale as `_asm/`
+(1575 → 1561).
+
+**Foreign-GOOS-only files.** `crypto/x509/internal/macos` is
+`//go:build darwin` in every file — 54 functions of CoreFoundation and
+Security.framework bridging that a linux target can never use. It was
+already listed as out of scope in prose; the script now agrees
+(1561 → 1507). The rule is deliberately narrow: it fires only when
+*every* identifier on the build line is a GOOS. A constraint mentioning
+GOARCH or `purego` — `(!amd64 && !s390x) || purego` — is left alone,
+because which side of that goish implements is a porting decision, not a
+platform fact, and dropping those would shrink the denominator in our
+own favour.
 
 ## How "100%" is measured
 
@@ -136,6 +520,28 @@ checked against RFC 4231 test case 2 across four Reset cycles. A silent
 regression here produces a wrong MAC, not a crash, so every assertion
 compares against a pinned vector rather than against itself.
 
+`fips140/sha512` followed immediately, on the same template: extracted
+from `crypto/sha512`'s single `mod.rs` into `sha512[go]` / `sha512block[go]`
+/ `sha512block_noasm[go]`, gaining the same six marshal/Clone functions
+plus `New512_224`/`New512_256`/`New384`, and registered with hmac so
+HMAC-SHA-512 and HMAC-SHA-384 take the cached path too.
+
+`fips140/aes` came last and was the largest — 45 functions over 11 Go
+files, against a goish `crypto/aes` that inlined the whole cipher in one
+853-line `mod.rs`. Splitting it produced aes[go] / aes_generic[go] /
+aes_noasm[go] / const[go] / cbc[go] / cbc_noasm[go] / ctr[go] /
+ctr_noasm[go], and required porting `crypto/internal/fips140/alias`
+(the buffer-overlap checks every cipher mode is contractually required
+to make, which goish had simply omitted). `crypto/aes` is now Go's
+wrapper: `NewCipher` plus `KeySizeError`.
+
+Worth noting for the assembly work: goish's CBC and CTR were previously
+reachable only through `crypto/cipher`'s own generic implementations.
+The fips140-native `CBCEncrypter`/`CBCDecrypter`/`CTR` are the types the
+`*Asm` entry points plug into, so `examples/fips140_aes_smoke.rs` pins
+them against NIST SP 800-38A §F now, before any assembly exists to
+change their behaviour.
+
 Still open, and the reason `hash` as a whole is not yet verified: the
 legacy `hash/{adler32,crc32,crc64,fnv,maphash}` ports predate the anchor
 grammar and are one `mod.rs` each.
@@ -154,6 +560,34 @@ not a port of anything. The worst case:
   slice (enough for a TLS 1.3 client/server handshake), with the rest absent.
   Both are honest partial ports, not invented — but the anchors will have to say
   so per function.
+
+## What 100% actually requires (2026-08-10)
+
+1048 functions remain. They are not uniform, and the ordering below is by
+what unblocks what, not by size:
+
+| tranche | fns | notes |
+|---|--:|---|
+| **assembly** | ~44 | `*Asm` in fips140/aes, `blockAVX2`/`blockSHANI` in sha256/sha512/sha1. Every generic path they replace is ported and pinned to NIST/RFC vectors, and each `*_noasm.rs` is the exact slot. This is the performance requirement. |
+| **fips140 extractions** | ~66 | ecdsa (30), ecdh (13), tls13 (17), tls12 (3), drbg's `rand[go]` (3). sha3, hkdf, pbkdf2 and drbg's CTR_DRBG are done. |
+| ~~**gcm**~~ | 6 left of 41 | 35/41. Everything but the five `gcmAes*` assembly symbols and `sealAfterIndicator` (folded into `Seal`; it only exists in Go to separate two FIPS service indicators goish's stub does not have). Pinned to NIST SP 800-38D TC3/4/6 and SP 800-38B CMAC. |
+| **nistec + mlkem** | 205 | `nistec` (75) + `fiat` (61) + `mlkem` (69). Mostly generated field arithmetic; large but mechanical. |
+| **ecdsa/elliptic/ecdh** | 86 | `crypto/ecdsa` needs a *rewrite*, not patching — all 31 existing goish functions are invented (`VerifyP256`, `decode_x509_ec_p256_pubkey`) and correspond to nothing in Go. |
+| **x509** | 150 | |
+| **tls** | 259 | The single largest. goish's 37 are a real port of the TLS 1.3 handshake path; the rest is absent. |
+| **support plumbing** | ~60 | randutil, impl, godebug, fips140only, fips140hash, fips140tls, pkix, dsa, hpke, sysrand … Small, but nothing in goish calls most of it yet. |
+
+Two known blockers rather than volume:
+
+- **`crypto/internal/fips140cache`** needs `weak.Pointer` and
+  `runtime.AddCleanup`. goish has neither, and adding a weak-reference
+  map is a runtime project of its own.
+- ~~`crypto/sha3` cannot gain `MarshalBinary`/`Clone` until it is
+  extracted~~ — **done**. The premise was also wrong: goish already
+  stored the sponge as `[200]byte`, matching Go; only the *permutation*
+  converts to lanes. `fips140/sha3` is 33/33 and `crypto/sha3` is 25/27
+  (the two remaining are `init`, which needs a crypto.Hash registry, and
+  `fips140hash_sha3Unwrap`, a `//go:linkname` target).
 
 ## Work order
 

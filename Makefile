@@ -18,7 +18,10 @@ ARTIFACTS ?= scripts/.e2e-artifacts
 
 EXAMPLES_DIR := target/$(TARGET)/$(PROFILE)/examples
 
-.PHONY: all build e2e e2e-full e2e-build e2e-quick e2e-clean clean help
+SCOPE     ?= src
+
+.PHONY: all build e2e e2e-full e2e-build e2e-quick e2e-clean clean help \
+        lint lint-new lint-update
 
 help:
 	@echo "goish-v1 make targets:"
@@ -31,6 +34,11 @@ help:
 	@echo "  e2e-build     just build all examples (no run)"
 	@echo "  e2e-quick     cargo clean + e2e with LOOPS=5 (smoke check)"
 	@echo "  e2e-clean     remove e2e artifacts"
+	@echo "  lint          goishlint as a ratchet: fails only on NEW findings"
+	@echo "                (SCOPE=src/crypto to narrow; run before every commit)"
+	@echo "  lint-new      findings in files absent from the baseline — a newly"
+	@echo "                ported file is expected to be clean"
+	@echo "  lint-update   re-record the baseline after fixing findings"
 	@echo "  clean         cargo clean"
 	@echo
 	@echo "Knobs (env or make var):"
@@ -70,6 +78,17 @@ e2e-quick: clean
 
 e2e-clean:
 	rm -rf $(ARTIFACTS)
+
+# The lint backlog is grandfathered by scripts/lint_baseline.json; these
+# targets let it shrink and never grow. See scripts/port_lint.py.
+lint:
+	@python3 scripts/port_lint.py --check --scope $(SCOPE)
+
+lint-new:
+	@python3 scripts/port_lint.py --new --scope $(SCOPE)
+
+lint-update:
+	@python3 scripts/port_lint.py --update --scope $(SCOPE)
 
 clean:
 	$(CARGO) clean

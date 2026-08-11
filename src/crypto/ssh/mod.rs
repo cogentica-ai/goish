@@ -171,7 +171,7 @@ fn name_list_bytes(names: &[&str]) -> Vec<byte> {
 // ─── AES-128-CTR stream ───────────────────────────────────────────────────
 
 struct Aes128Ctr {
-    cipher: crate::crypto::aes::Cipher,
+    cipher: crate::crypto::aes::Block,
     ctr: [byte; 16],
     ks_buf: Vec<byte>,
     ks_pos: usize,

@@ -123,7 +123,7 @@ pub(crate) fn tls13_signed_message(transcript_hash: &[u8]) -> Vec<byte> {
 
 #[derive(Clone)]
 enum ServerPubKey {
-    EcdsaP256(crate::crypto::ecdsa::P256PublicKey),
+    EcdsaP256(crate::crypto::tls::legacy_p256::P256PublicKey),
     Rsa(crate::crypto::rsa::PublicKey),
     Ed25519(crate::crypto::ed25519::PublicKey),
     Unknown,
@@ -145,7 +145,7 @@ fn parse_server_pubkey(cert_der: &[u8]) -> ServerPubKey {
     if !err.IsNil() { return ServerPubKey::Unknown; }
 
     // Find SPKI
-    let (spki_bytes, spki_err) = crate::crypto::ecdsa::find_spki_in_tbs(&tbs_rv.Bytes);
+    let (spki_bytes, spki_err) = crate::crypto::tls::legacy_p256::find_spki_in_tbs(&tbs_rv.Bytes);
     if !spki_err.IsNil() { return ServerPubKey::Unknown; }
 
     let (spki_rv, _, err) = asn1::ParseRaw(spki_bytes.clone());
@@ -177,7 +177,7 @@ fn parse_server_pubkey(cert_der: &[u8]) -> ServerPubKey {
 
     if oid_bytes == OID_EC_PUBLIC_KEY {
         // Try ECDSA P256
-        let (pk, err) = crate::crypto::ecdsa::decode_x509_ec_p256_pubkey(cert_der);
+        let (pk, err) = crate::crypto::tls::legacy_p256::decode_x509_ec_p256_pubkey(cert_der);
         if err.IsNil() {
             return ServerPubKey::EcdsaP256(pk);
         }
@@ -273,7 +273,7 @@ fn verify_cert_verify(
                 let empty = slice::__from_vec(Vec::new());
                 crate::hash::Hash::Sum(&h, empty).__into_vec()
             };
-            crate::crypto::ecdsa::VerifyP256(pk, &digest, signature)
+            crate::crypto::tls::legacy_p256::VerifyP256(pk, &digest, signature)
         }
         SIG_RSA_PSS_RSAE_SHA256 => {
             let pk = match pubkey {

@@ -1,3 +1,9 @@
+// go: file crypto/cipher/ctr.go decls: NewCTR, (*ctr).refill, (*ctr).XORKeyStream
+//
+// `aesCtrWrapper.XORKeyStream` is not listed: the wrapper exists only to
+// hide aes.CTR's extra methods behind the dropped `ctrAble` interface
+// (see the GOISH021 waiver below), so its method has no port either.
+//
 // crypto/cipher/ctr — Counter (CTR) Mode.
 //
 // Reference: /share/go/src/crypto/cipher/ctr.go (115 LOC).
@@ -17,7 +23,10 @@
 //
 //   * The `ctrAble` interface is dropped — goish has no runtime type
 //     assertion. Callers wanting a custom CTR implementation should
-//     write their own `Stream` directly.
+//     write their own `Stream` directly. `aesCtrWrapper` exists only to
+//     hide aes.CTR's extra methods behind that interface, so it goes
+//     with it.
+//     goishlint:ignore GOISH021 ctrAble, aesCtrWrapper — see above
 //
 //   * `fips140only.Enabled` branch is dropped — goish has no FIPS
 //     service-indicator infrastructure.
@@ -40,11 +49,14 @@ use crate::crypto::cipher::{Block, Stream};
 use crate::goslice::slice;
 use crate::types::{byte, int};
 
-// Go: ctr.go:30
+// Go ctr.go:30
 //   const streamBufferSize = 512
-const streamBufferSize: int = 512;
+//
+// `pub(super)` because ofb.go uses it too and it is declared here, in
+// ctr.go — ofb.rs imports it rather than redeclaring it.
+pub(super) const streamBufferSize: int = 512;
 
-// Go: ctr.go:23
+// Go ctr.go:23
 //   type ctr struct {
 //       b       Block
 //       ctr     []byte
@@ -62,7 +74,8 @@ pub struct CTR<B: Block> {
     out_used: usize,
 }
 
-// Go: ctr.go:42
+// go: sdk 1.25.5 crypto/cipher/ctr.go:41-64 NewCTR
+// Go ctr.go:42
 //   func NewCTR(block Block, iv []byte) Stream {
 //       if block, ok := block.(*aes.Block); ok {              // dropped
 //           return aesCtrWrapper{aes.NewCTR(block, iv)}
@@ -100,11 +113,12 @@ pub fn NewCTR<B: Block>(b: B, iv: slice<byte>) -> CTR<B> {
     let ctr_v: Vec<byte> = iv.__into_vec();
     // Go: out: make([]byte, 0, bufSize)
     let out: Vec<byte> = Vec::with_capacity(bufSize as usize);
-    CTR { b, ctr: ctr_v, out, out_used: 0 }
+    return CTR { b, ctr: ctr_v, out, out_used: 0 };
 }
 
 impl<B: Block> CTR<B> {
-    // Go: ctr.go:75
+    // go: sdk 1.25.5 crypto/cipher/ctr.go:75-94 refill
+    // Go ctr.go:75
     //   func (x *ctr) refill() {
     //       remain := len(x.out) - x.outUsed
     //       copy(x.out, x.out[x.outUsed:])
@@ -170,7 +184,7 @@ impl<B: Block> CTR<B> {
     }
 }
 
-// Go: ctr.go:96
+// Go ctr.go:96
 //   func (x *ctr) XORKeyStream(dst, src []byte) {
 //       if len(dst) < len(src) { panic("crypto/cipher: output smaller than input") }
 //       if alias.InexactOverlap(dst[:len(src)], src) { panic(...) }    // dropped
@@ -186,6 +200,7 @@ impl<B: Block> CTR<B> {
 //       }
 //   }
 impl<B: Block> Stream for CTR<B> {
+    // go: sdk 1.25.5 crypto/cipher/ctr.go:96-118 ctr.XORKeyStream
     fn XORKeyStream(&mut self, dst: &mut slice<byte>, src: slice<byte>) {
         // Go: if len(dst) < len(src) { panic(...) }
         if dst.Len() < src.Len() {
@@ -198,11 +213,11 @@ impl<B: Block> Stream for CTR<B> {
         // Go: for len(src) > 0
         while src_off < src_v.len() {
             // Go: if x.outUsed >= len(x.out)-x.b.BlockSize()
-            // Cast through isize-equivalent semantics: the Go condition
-            // tolerates `len(x.out) - bs` underflowing when out is empty
-            // (Go uses signed int). We mirror by checking if out has at
-            // least one full block of unused keystream remaining.
-            if self.out_used + bs > self.out.len() {
+            // Rearranged as `outUsed+bs >= len(out)` so the subtraction
+            // cannot underflow: Go's `len(x.out)-bs` is signed and goes
+            // negative when out is empty, which the unsigned form here
+            // cannot express.
+            if self.out_used + bs >= self.out.len() {
                 self.refill();
             }
             // Go: n := subtle.XORBytes(dst, src, x.out[x.outUsed:])
@@ -211,7 +226,7 @@ impl<B: Block> Stream for CTR<B> {
             let n = avail_ks.min(avail_src);
             for i in 0..n {
                 let v = src_v[src_off + i] ^ self.out[self.out_used + i];
-                dst[(dst_off + i) as int] = v;
+                dst[dst_off + i] = v;
             }
             // Go: dst = dst[n:]; src = src[n:]; x.outUsed += n
             dst_off += n;

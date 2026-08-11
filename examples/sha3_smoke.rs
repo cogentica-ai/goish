@@ -226,8 +226,6 @@ fn test_7_sha3_512_abc() {
 
 fn test_8_sha3_256_streaming() {
     // Same hash via streaming Write: "a" + "b" + "c" → same as Sum256("abc").
-    use goish::hash::Hash;
-    use goish::io::Writer;
     let mut h = sha3::New256();
     let _ = h.Write(from_bytes(b"a"));
     let _ = h.Write(from_bytes(b"b"));
