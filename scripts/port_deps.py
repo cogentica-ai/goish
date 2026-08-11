@@ -123,7 +123,13 @@ def missing_symbols(d, syms):
         # `goish::var! { pub EOF: error = "EOF"; }` declares a name without
         # any of those keywords; io::ErrShortWrite was reported absent.
         varpat = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?%s\s*:" % re.escape(sym), re.M)
-        if not pat.search(text) and not varpat.search(text):
+        # Go functions that take a format string are macros in goish —
+        # `fmt::Sprintf!`, `fmt::Errorf!`, `fmt::Printf!` — because Rust
+        # has no variadics. `macro_rules! Sprintf` matched none of the
+        # patterns above, so every pre-flight in the repo reported
+        # fmt.Sprintf and fmt.Errorf ABSENT. They are not.
+        macpat = re.compile(r"macro_rules!\s+%s\b" % re.escape(sym))
+        if not pat.search(text) and not varpat.search(text) and not macpat.search(text):
             gone.append(sym)
     return gone
 
