@@ -92,4 +92,18 @@ impl BlockTrait for Block {
     fn Decrypt(&self, dst: &mut slice<byte>, src: slice<byte>) {
         Block::Decrypt(self, dst, src);
     }
+
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` impl must override for `cast!` to see the
+    // concrete type. Go spells the same thing as the type assertion
+    // `cipher.(*aes.Block)`, which crypto/cipher.NewGCMWithRandomNonce
+    // performs on its argument.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+
+    // go: none — goish idiom: see __goish_as_dyn_any above.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
 }

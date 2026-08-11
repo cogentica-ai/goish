@@ -48,6 +48,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::crypto::cipher::{Block, AEAD};
+use crate::crypto::internal::fips140::aes::gcm as fipsgcm;
 use crate::crypto::subtle;
 use crate::errors::{error, nil, New as ErrNew};
 use crate::goslice::slice;
@@ -484,6 +485,122 @@ pub fn NewGCM<B: Block>(cipher: B) -> (Option<GCM<B>>, error) {
 /// compatibility with non-standard nonce lengths.
 pub fn NewGCMWithNonceSize<B: Block>(cipher: B, size: int) -> (Option<GCM<B>>, error) {
     newGCM(cipher, size, gcmTagSize)
+}
+
+// go: sdk 1.25.5 crypto/cipher/gcm.go:93-103 NewGCMWithRandomNonce
+/// Return the given cipher wrapped in Galois Counter Mode, with randomly
+/// generated nonces. The cipher must have been created by
+/// [`crate::crypto::aes::NewCipher`].
+///
+/// It generates a random 96-bit nonce, which is prepended to the
+/// ciphertext by Seal, and is extracted from the ciphertext by Open. The
+/// NonceSize of the AEAD is zero, while the Overhead is 28 bytes.
+pub fn NewGCMWithRandomNonce(
+    cipher: &(dyn Block + Send + Sync + 'static),
+) -> (Option<gcmWithRandomNonce>, error) {
+    use crate::goany::AsExt;
+
+    // Go: c, ok := cipher.(*aes.Block); if !ok { … }
+    let c = match cipher.As::<crate::crypto::internal::fips140::aes::Block>() {
+        None => {
+            return (
+                None,
+                ErrNew("cipher: NewGCMWithRandomNonce requires aes.Block"),
+            )
+        }
+        Some(c) => c,
+    };
+    let (g, err) = fipsgcm::New(c, gcmStandardNonceSize, gcmTagSize);
+    if err != nil {
+        return (None, err);
+    }
+    return (Some(gcmWithRandomNonce { GCM: g.unwrap() }), nil);
+}
+
+// Go: gcm.go:105-107
+//   type gcmWithRandomNonce struct { *gcm.GCM }
+/// Go embeds `*gcm.GCM`; goish names the field, per AGENTS.md §5.
+pub struct gcmWithRandomNonce {
+    GCM: fipsgcm::GCM,
+}
+
+impl AEAD for gcmWithRandomNonce {
+    // go: sdk 1.25.5 crypto/cipher/gcm.go:109-111 gcmWithRandomNonce.NonceSize
+    fn NonceSize(&self) -> int {
+        return 0;
+    }
+
+    // go: sdk 1.25.5 crypto/cipher/gcm.go:113-115 gcmWithRandomNonce.Overhead
+    fn Overhead(&self) -> int {
+        return gcmStandardNonceSize + gcmTagSize;
+    }
+
+    // go: sdk 1.25.5 crypto/cipher/gcm.go:116-161 gcmWithRandomNonce.Seal
+    //
+    // Go slices `out` into an aliasing `nonce` and `ciphertext` and hands
+    // both to SealWithRandomNonce, then spends ~30 lines on the overlap
+    // cases that creates (`alias.InexactOverlap` / `AnyOverlap`, and the
+    // memmove when dst aliases plaintext). goish slices do not share a
+    // backing store — `sliceForAppend` already returns an offset rather
+    // than a second handle for exactly this reason — so the nonce and
+    // ciphertext are filled separately and concatenated. The overlap
+    // branches are unreachable here and are not ported.
+    fn Seal(
+        &self,
+        dst: slice<byte>,
+        nonce: slice<byte>,
+        plaintext: slice<byte>,
+        additionalData: slice<byte>,
+    ) -> slice<byte> {
+        if nonce.Len() != 0 {
+            panic!("crypto/cipher: non-empty nonce passed to GCMWithRandomNonce");
+        }
+
+        let ptLen = plaintext.Len();
+        let mut n = slice::__from_vec(alloc::vec![0u8; gcmStandardNonceSize as usize]);
+        let mut ct = slice::__from_vec(alloc::vec![0u8; (ptLen + gcmTagSize) as usize]);
+        fipsgcm::SealWithRandomNonce(&self.GCM, &mut n, &mut ct, plaintext, additionalData);
+
+        // Go: ret, out := sliceForAppend(dst, …); nonce = out[:12];
+        //     ciphertext = out[12:]. goish fills the two pieces above and
+        //     appends them to dst's contents here.
+        let (ret, off) = sliceForAppend(&dst, gcmStandardNonceSize + ptLen + gcmTagSize);
+        let head: &[byte] = &ret;
+        let mut v: Vec<byte> = Vec::with_capacity(head.len());
+        v.extend_from_slice(&head[..off as usize]);
+        let nr: &[byte] = &n;
+        let cr: &[byte] = &ct;
+        v.extend_from_slice(nr);
+        v.extend_from_slice(cr);
+        return slice::__from_vec(v);
+    }
+
+    // go: sdk 1.25.5 crypto/cipher/gcm.go:163-197 gcmWithRandomNonce.Open
+    //
+    // Same deviation as Seal: Go's aliasing branches (which exist so that
+    // `dst` may be `ciphertext[:0]`) cannot arise for goish slices, so the
+    // nonce and body are simply split off the front.
+    fn Open(
+        &self,
+        dst: slice<byte>,
+        nonce: slice<byte>,
+        ciphertext: slice<byte>,
+        additionalData: slice<byte>,
+    ) -> (slice<byte>, error) {
+        if nonce.Len() != 0 {
+            panic!("crypto/cipher: non-empty nonce passed to GCMWithRandomNonce");
+        }
+        if ciphertext.Len() < gcmStandardNonceSize + gcmTagSize {
+            return (slice::__from_vec(Vec::new()), errOpen());
+        }
+
+        let raw: &[byte] = &ciphertext;
+        let n = gcmStandardNonceSize as usize;
+        let nonce = slice::__from_vec(raw[..n].to_vec());
+        let body = slice::__from_vec(raw[n..].to_vec());
+
+        return self.GCM.Open(dst, nonce, body, additionalData);
+    }
 }
 
 // go: sdk 1.25.5 crypto/cipher/gcm.go:59-64 NewGCMWithTagSize
