@@ -278,7 +278,7 @@ pub fn ParseInt32(bytes: slice<byte>) -> (i32, error) {
 /// `asn1.BitString` (asn1.go:162) — a bit string padded up to nearest
 /// byte. `Bytes` holds the packed bits; `BitLength` records the number
 /// of valid bits. Padding bits are zero.
-#[derive(Clone)]
+#[derive(Clone, Default, PartialEq)]
 pub struct BitString {
     pub Bytes: slice<byte>,
     pub BitLength: int,
@@ -764,7 +764,7 @@ pub fn ParseBMPString(bytes: slice<byte>) -> (string, error) {
 // ─── RawValue / RawContent (asn1.go:535) ──────────────────────────────
 
 /// `asn1.RawValue` (asn1.go:536) — undecoded ASN.1 object.
-#[derive(Clone)]
+#[derive(Clone, Default, PartialEq)]
 pub struct RawValue {
     pub Class: int,
     pub Tag: int,

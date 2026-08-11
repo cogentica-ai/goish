@@ -817,6 +817,10 @@ name = "asn1_marshal_smoke"
 path = "examples/asn1_marshal_smoke.rs"
 
 [[example]]
+name = "pkix_smoke"
+path = "examples/pkix_smoke.rs"
+
+[[example]]
 name = "crypto_ecdsa_smoke"
 path = "examples/crypto_ecdsa_smoke.rs"
 

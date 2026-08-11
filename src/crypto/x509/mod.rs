@@ -12,6 +12,8 @@
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
+pub mod pkix;
+
 extern crate alloc;
 
 use alloc::sync::Arc;
