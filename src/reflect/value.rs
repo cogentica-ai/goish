@@ -48,6 +48,11 @@ impl Value {
     /// Go reference rather than assumed.
     pub fn SetInt(&mut self, x: int64) {
         match self {
+            // A named integer type is still settable through its name —
+            // `asn1:"default:7"` on an Enumerated field lands here.
+            Value::Named { inner, .. } => {
+                inner.SetInt(x);
+            }
             Value::Int(v) => {
                 *v = x;
             }

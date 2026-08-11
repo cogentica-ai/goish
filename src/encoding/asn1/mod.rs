@@ -21,68 +21,38 @@
 //   * RawValue, RawContent (asn1.go:536-546).
 //   * parseTagAndLength + tagAndLength (asn1.go:551-627).
 //
-// What this v1 SKIPS (deferred):
+// The ENCODE half is complete: Marshal / MarshalWithParams / makeField /
+// makeBody, the tag-length primitives under them, all six encoders, the
+// three composite encoders, makeBigInt, stripTagAndLength, the
+// UTCTime/GeneralizedTime encoders, parseFieldParameters and
+// getUniversalType. Checked against Go 1.25.5 by
+// examples/asn1_marshal_smoke.rs — 207 assertions, every expectation
+// produced by `scripts/goref.sh encoding/asn1` rather than transcribed.
+//
+// Two deviations run through the reflective layer, both stated in full at
+// the head of marshal.rs: `value.Interface().(T)` cannot round-trip in
+// goish, so the five typed re-extractions read their operands off the
+// `Value` itself; and `Marshal(val any)` is `Marshal(val: &impl Reflect)`,
+// because Rust has no universal runtime reflection.
+//
+// Four of asn1's named types — ObjectIdentifier, Enumerated, Flag,
+// RawContent — are newtypes rather than aliases, and reflect as
+// `Value::Named`. A named type whose underlying kind is not a struct
+// would otherwise lose its name, and the name is the whole basis on
+// which makeBody tells an ObjectIdentifier from any other `[]int`.
+//
+// What this v1 still SKIPS (deferred):
 //
 //   * parseField / parseSequenceOf / Unmarshal / UnmarshalWithParams —
-//     all of which dispatch through `reflect.Value` to fill struct
-//     fields. The reflect-driven decode path lands when goish's
-//     `reflect` gains setter dispatch for arbitrary user types.
-//   * Marshal / MarshalWithParams / makeField / makeBody (marshal.go) —
-//     the reflect-driven ENCODE path.
-//
-//     The default-value blocker this note described is CLEARED —
-//     `reflect::New`, `Value::SetInt` and `PartialEq for Value` landed in
-//     6b55670.
-//
-//     What blocks them now is typed re-extraction, and it is a reflect
-//     *design* limit rather than a missing function. makeBody does
-//         value.Interface().(time.Time)
-//         value.Interface().(BitString)
-//         value.Interface().(ObjectIdentifier)
-//         value.Interface().(*big.Int)
-//     and makeField does `v.Interface().(RawValue)` — five recoveries of
-//     a concrete type from a reflected value. goish's
-//     `Value::Interface()` boxes `()` for Slice/Map/Struct/Pointer (see
-//     the comment at its `_` arm), so none of the five can be written.
-//
-//     But the workaround is smaller than redesigning `Value`, and it is
-//     now in place. All five types carry enough in their own
-//     `__reflect_value` to be rebuilt without `Interface()`:
-//     ObjectIdentifier as a Slice of arcs, BitString as {Bytes,
-//     BitLength}, RawValue as its five fields, and — since 78ec1f5's
-//     identity-only impls were fixed — time::Time as {Unix, Nanosecond}
-//     and big::Int as {Sign, magnitude}. reflect_setint_smoke asserts all
-//     five round-trip.
-//
-//     So makeField and makeBody read their operands off the `Value`
-//     rather than through a type assertion. That is the deviation those
-//     two will carry; nothing further is missing.
-//
-//     The signature also deviates: Go takes `any`, goish must take
-//     `impl Reflect`, since Rust has no universal runtime reflection.
-//
-//     Everything *under* these three is now ported and checked against
-//     Go in marshal.rs and common.rs — the tag/length primitives, all
-//     six encoders, the three composite encoders, makeBigInt,
-//     stripTagAndLength, the UTCTime/GeneralizedTime encoders,
-//     parseFieldParameters and getUniversalType.
+//     all of which dispatch through `reflect.Value` to *fill* struct
+//     fields. The encode path needed only readers; the decode path needs
+//     setter dispatch for arbitrary user types, which goish's `reflect`
+//     does not have. `Value::SetInt` (6b55670) is the first piece of it.
 //   * parseUTCTime / parseGeneralizedTime — Go uses `time.Parse` with
 //     specific layouts; depends on the format-string interpreter
 //     handling fractional-second + timezone bits.
 //   * (parseBigInt was listed here as blocked on `math/big`. It is not:
 //     `math/big` is ported and `ParseBigInt` above is the port.)
-//   * getUniversalType (common.go) — blocked, and specifically so. Its
-//     first switch matches six *type identities*: RawValue,
-//     ObjectIdentifier, BitString, time.Time, Enumerated and *big.Int.
-//     None of those six implements `reflect::Reflect` in goish, and
-//     there is no derive for it, so goish cannot produce a
-//     `reflect::Type` for any of them. Porting the function today would
-//     mean six structurally unreachable branches and an `ok=false` for
-//     exactly the types asn1 cares most about — wrong in the quiet way.
-//     The prerequisite is Reflect impls on those types; everything after
-//     that (makeField, makeBody, Marshal) reads them through it.
-//     `parseFieldParameters`, the other half of common.go, needs no
-//     reflect and is ported in common.rs.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -100,6 +70,11 @@ mod marshal;
 // lands, calls them directly as `marshal::…`.
 pub use common::{fieldParameters, getUniversalType, parseFieldParameters};
 
+// The two public entry points keep their Go names; everything else in
+// marshal.go is unexported there and is re-exported `__`-prefixed only so
+// examples/asn1_marshal_smoke.rs can reach it.
+pub use marshal::{Marshal, MarshalWithParams};
+pub use marshal::{makeBody as __makeBody, makeField as __makeField};
 pub use marshal::{
     appendBase128Int as __appendBase128Int, appendLength as __appendLength,
     appendTagAndLength as __appendTagAndLength, base128IntLength as __base128IntLength,
@@ -548,8 +523,32 @@ pub fn ParseObjectIdentifier(bytes: slice<byte>) -> (ObjectIdentifier, error) {
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Enumerated(pub int);
 
-/// `asn1.Flag` (asn1.go:296) — set to true if present.
-pub type Flag = bool;
+// go: sdk 1.25.5 encoding/asn1/asn1.go:294-296 Flag
+/// `asn1.Flag` — set to true if the element is present.
+///
+/// A newtype, not an alias, for the same reason as [`RawContent`]:
+/// `makeBody` has a `case flagType` arm that encodes an *empty* body,
+/// and an alias for `bool` is indistinguishable from an ordinary
+/// boolean — which would silently marshal `01 01 ff` where Go emits
+/// nothing.
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Flag(pub bool);
+
+impl crate::reflect::Reflect for Flag {
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(crate::reflect::Kind::Bool, "Flag", &[]);
+    }
+
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return crate::reflect::Value::Named {
+            ty: <Flag as crate::reflect::Reflect>::__reflect_type(),
+            inner: alloc::boxed::Box::new(crate::reflect::Value::Bool(self.0)),
+        };
+    }
+}
+
 
 // ─── parseBase128Int (asn1.go:300) ────────────────────────────────────
 
@@ -633,6 +632,17 @@ pub fn ParsePrintableString(bytes: slice<byte>) -> (string, error) {
         i += 1;
     }
     (slice_to_string(&bytes), crate::errors::nil)
+}
+
+// go: sdk 1.25.5 encoding/asn1/asn1.go:1038-1045 canHaveDefaultValue
+/// Only the integer kinds can carry an `asn1:"default:N"` tag — the
+/// default is parsed as an int64 and installed with `SetInt`.
+pub(crate) fn canHaveDefaultValue(k: crate::reflect::Kind) -> bool {
+    use crate::reflect::Kind;
+    return match k {
+        Kind::Int | Kind::Int8 | Kind::Int16 | Kind::Int32 | Kind::Int64 => true,
+        _ => false,
+    };
 }
 
 /// `isPrintable` (asn1.go:426). PrintableString allowed-byte set, with
@@ -764,9 +774,40 @@ pub struct RawValue {
     pub FullBytes: slice<byte>,
 }
 
-/// `asn1.RawContent` (asn1.go:546) — opaque DER bytes preserved
-/// verbatim across (un)marshal.
-pub type RawContent = slice<byte>;
+// go: sdk 1.25.5 encoding/asn1/asn1.go:543-546 RawContent
+/// `asn1.RawContent` — opaque DER bytes preserved verbatim across
+/// (un)marshal. It must be a struct's first field; when non-empty,
+/// `makeBody` emits the stored bytes (minus their tag and length)
+/// instead of re-encoding the struct.
+///
+/// A newtype, not an alias. `makeBody` recognises it by reflected type
+/// name, and an alias for `slice<byte>` is indistinguishable from every
+/// other byte slice — the same reason ObjectIdentifier and Enumerated
+/// stopped being aliases.
+#[derive(Clone, Default, PartialEq)]
+pub struct RawContent(pub slice<byte>);
+
+impl RawContent {
+    // go: none — goish-only: `len(rc)` on the wrapped slice.
+    pub fn Len(&self) -> int {
+        return crate::int(self.0.len());
+    }
+}
+
+impl crate::reflect::Reflect for RawContent {
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(crate::reflect::Kind::Slice, "RawContent", &[]);
+    }
+
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return crate::reflect::Value::Named {
+            ty: <RawContent as crate::reflect::Reflect>::__reflect_type(),
+            inner: alloc::boxed::Box::new(crate::reflect::Reflect::__reflect_value(&self.0)),
+        };
+    }
+}
 
 // ─── parseTagAndLength (asn1.go:551) ──────────────────────────────────
 
@@ -1005,9 +1046,12 @@ impl crate::reflect::Reflect for ObjectIdentifier {
             items.push(crate::reflect::Value::Int(self.0[i]));
             i += 1;
         }
-        return crate::reflect::Value::Slice {
+        return crate::reflect::Value::Named {
+            ty: <ObjectIdentifier as crate::reflect::Reflect>::__reflect_type(),
+            inner: alloc::boxed::Box::new(crate::reflect::Value::Slice {
             elem_type: <int as crate::reflect::Reflect>::__reflect_type,
             items,
+            }),
         };
     }
 }
@@ -1020,7 +1064,10 @@ impl crate::reflect::Reflect for Enumerated {
 
     // go: none — goish-only: the reflect descriptor. See the banner above.
     fn __reflect_value(&self) -> crate::reflect::Value {
-        return crate::reflect::Value::Int(self.0);
+        return crate::reflect::Value::Named {
+            ty: <Enumerated as crate::reflect::Reflect>::__reflect_type(),
+            inner: alloc::boxed::Box::new(crate::reflect::Value::Int(self.0)),
+        };
     }
 }
 

@@ -28,7 +28,7 @@ use goish::encoding::asn1::{
     __makeBigInt, __makeGeneralizedTime, __makeUTCTime, __outsideUTCRange, __setEncoder,
     __stringEncoder, __stripTagAndLength, __taggedEncoder,
     getUniversalType, parseFieldParameters,
-    Enumerated, ObjectIdentifier, RawValue,
+    Enumerated, Marshal, MarshalWithParams, ObjectIdentifier, RawValue,
 };
 use goish::fmt;
 use goish::goslice::slice;
@@ -55,6 +55,53 @@ fn unhex(s: &str) -> Vec<byte> {
         i += 2;
     }
     return out;
+}
+
+
+// Go-shape fixtures for the Marshal cases; the `asn1:"…"` tags are what
+// makeField reads back out of the reflect descriptor.
+#[goish::reflect]
+pub struct simple {
+    pub A: i64,
+    pub B: bool,
+}
+
+#[goish::reflect]
+pub struct tagged {
+    #[tag(r#"asn1:"tag:0""#)]
+    pub A: i64,
+    #[tag(r#"asn1:"explicit,tag:1""#)]
+    pub B: i64,
+}
+
+#[goish::reflect]
+pub struct optdefault {
+    #[tag(r#"asn1:"optional,default:7""#)]
+    pub A: i64,
+    pub B: i64,
+}
+
+#[goish::reflect]
+pub struct strs {
+    #[tag(r#"asn1:"printable""#)]
+    pub P: goish::string,
+    #[tag(r#"asn1:"ia5""#)]
+    pub I: goish::string,
+    #[tag(r#"asn1:"utf8""#)]
+    pub U: goish::string,
+}
+
+#[goish::reflect]
+pub struct setish {
+    #[tag(r#"asn1:"set""#)]
+    pub S: goish::slice<i64>,
+}
+
+#[goish::reflect]
+pub struct omit {
+    #[tag(r#"asn1:"omitempty""#)]
+    pub S: goish::slice<i64>,
+    pub A: i64,
 }
 
 fn check(ok: bool, label: &'static str, n: i64) {
@@ -350,7 +397,20 @@ fn main() {
     check(oid.Len() == 3 && oid.String().as_bytes() == b"1.2.840", "OID String", 3);
     let oid2 = ObjectIdentifier::New(slice::__from_vec(alloc::vec![1i64, 2, 840]));
     check(oid.Equal(&oid2), "ObjectIdentifier.Equal is a method now", 0);
-    check(matches!(oid.__reflect_value(), goish::reflect::Value::Slice { .. }), "OID reflect value", 0);
+    // An ObjectIdentifier reflects as a *named* slice: Kind stays Slice
+    // and the elements are still reachable, but Type().Name() survives —
+    // without which makeBody cannot tell an OID from any other []int and
+    // encodes it as a SEQUENCE OF INTEGER.
+    let oidv = oid.__reflect_value();
+    check(
+        matches!(oidv, goish::reflect::Value::Named { .. })
+            && oidv.Kind() == Kind::Slice
+            && oidv.Type().Name().as_bytes() == b"ObjectIdentifier"
+            && oidv.Len() == 3
+            && oidv.Index(2).Int() == 840,
+        "OID reflects as a named slice",
+        0,
+    );
 
 
     // ─── getUniversalType (common.go) ─────────────────────────────────
@@ -462,6 +522,162 @@ fn main() {
             y,
         );
     }
+
+    // ─── Marshal / MarshalWithParams — every expectation from
+    //     `scripts/goref.sh encoding/asn1` on Go 1.25.5 ──────────────────
+
+    fn mh<T: goish::reflect::Reflect>(v: &T, want: &str, n: i64) {
+        let (b, err) = Marshal(v);
+        check(err == goish::nil && b.__into_vec() == unhex(want), "Marshal", n);
+    }
+    fn mp<T: goish::reflect::Reflect>(v: &T, params: &'static str, want: &str, n: i64) {
+        let (b, err) = MarshalWithParams(v, params);
+        check(
+            err == goish::nil && b.__into_vec() == unhex(want),
+            "MarshalWithParams",
+            n,
+        );
+    }
+
+    mh(&true, "0101ff", 1);
+    mh(&false, "010100", 2);
+    mh(&0_i64, "020100", 3);
+    mh(&127_i64, "02017f", 4);
+    mh(&128_i64, "02020080", 5);
+    mh(&(-1_i64), "0201ff", 6);
+    mh(&65535_i64, "020300ffff", 7);
+    mh(&goish::string("hello"), "130568656c6c6f", 8);
+    mh(
+        &goish::string("user@example.com"),
+        "0c1075736572406578616d706c652e636f6d",
+        9,
+    );
+    mh(
+        &slice::__from_vec(alloc::vec![1u8, 2, 3]),
+        "0403010203",
+        10,
+    );
+    mh(
+        &ObjectIdentifier::New(slice::__from_vec(alloc::vec![1_i64, 2, 840, 113549])),
+        "06062a864886f70d",
+        11,
+    );
+    mh(
+        &BitString {
+            Bytes: slice::__from_vec(alloc::vec![0x80u8]),
+            BitLength: 1,
+        },
+        "03020780",
+        12,
+    );
+    mh(&Enumerated(4), "0a0104", 13);
+    mh(&goish::math::big::NewInt(123456789), "0204075bcd15", 14);
+    mh(&goish::math::big::NewInt(-42), "0201d6", 15);
+
+    // time.Date(2026, 8, 11, 12, 0, 0, 0, UTC) and a post-2050 value that
+    // forces GeneralizedTime.
+    let tm = goish::time::Date(
+        2026,
+        goish::time::August,
+        11,
+        12,
+        0,
+        0,
+        0,
+        goish::time::UTC,
+    );
+    mh(&tm, "170d3236303831313132303030305a", 16);
+    mp(&tm, "generalized", "180f32303236303831313132303030305a", 17);
+    let tm2 = goish::time::Date(
+        2051,
+        goish::time::January,
+        2,
+        3,
+        4,
+        5,
+        0,
+        goish::time::UTC,
+    );
+    mh(&tm2, "180f32303531303130323033303430355a", 18);
+
+    mh(&simple { A: 5, B: true }, "30060201050101ff", 19);
+    mh(&tagged { A: 1, B: 2 }, "3008800101a103020102", 20);
+    mh(&optdefault { A: 7, B: 1 }, "3003020101", 21);
+    mh(&optdefault { A: 8, B: 1 }, "3006020108020101", 22);
+    mh(
+        &strs {
+            P: goish::string("abc"),
+            I: goish::string("a@b"),
+            U: goish::string("h\u{e9}"),
+        },
+        "300f130361626316036140620c0368c3a9",
+        23,
+    );
+    mh(
+        &setish {
+            S: slice::__from_vec(alloc::vec![3_i64, 1, 2]),
+        },
+        "300b3109020101020102020103",
+        24,
+    );
+    mh(
+        &omit {
+            S: slice::__from_vec(alloc::vec![]),
+            A: 9,
+        },
+        "3003020109",
+        25,
+    );
+    mh(
+        &omit {
+            S: slice::__from_vec(alloc::vec![1_i64]),
+            A: 9,
+        },
+        "30083003020101020109",
+        26,
+    );
+
+    mh(
+        &slice::__from_vec(alloc::vec![1_i64, 2, 3]),
+        "3009020101020102020103",
+        27,
+    );
+    mh(&slice::__from_vec(alloc::vec![] as alloc::vec::Vec<i64>), "3000", 28);
+    mh(
+        &slice::__from_vec(alloc::vec![goish::string("a"), goish::string("b")]),
+        "3006130161130162",
+        29,
+    );
+
+    mh(
+        &RawValue {
+            Class: 0,
+            Tag: 2,
+            IsCompound: false,
+            Bytes: slice::__from_vec(alloc::vec![0x2au8]),
+            FullBytes: slice::__from_vec(alloc::vec![]),
+        },
+        "02012a",
+        30,
+    );
+    mh(
+        &RawValue {
+            Class: 0,
+            Tag: 0,
+            IsCompound: false,
+            Bytes: slice::__from_vec(alloc::vec![]),
+            FullBytes: slice::__from_vec(alloc::vec![0x02u8, 0x01, 0x2a]),
+        },
+        "02012a",
+        31,
+    );
+
+    mp(&5_i64, "tag:2", "820105", 32);
+    mp(&5_i64, "explicit,tag:2", "a203020105", 33);
+    mp(&5_i64, "application,tag:3", "430105", 34);
+    mp(&5_i64, "private,tag:4", "c40105", 35);
+    mp(&goish::string("abc"), "ia5", "1603616263", 36);
+    mp(&goish::string("123"), "numeric", "1203313233", 37);
 
     let failed = FAILED.load(Ordering::Acquire);
     let ran = RAN.load(Ordering::Acquire);

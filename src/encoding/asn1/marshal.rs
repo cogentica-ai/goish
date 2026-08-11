@@ -1,21 +1,22 @@
-// go: file encoding/asn1/marshal.go decls: base128IntLength, appendBase128Int, appendLength, lengthLength, appendTagAndLength
+// go: file encoding/asn1/marshal.go decls: base128IntLength, appendBase128Int, appendLength, lengthLength, appendTagAndLength, makeObjectIdentifier, makePrintableString, makeIA5String, makeNumericString, makeUTF8String, makeBigInt, stripTagAndLength, appendTwoDigits, appendFourDigits, outsideUTCRange, makeUTCTime, makeGeneralizedTime, appendUTCTime, appendGeneralizedTime, appendTimeCommon, makeBody, makeField, Marshal, MarshalWithParams
 //
-// The DER *encoding* side of encoding/asn1. goish's asn1 has been
-// parse-only; this is the first slice of the other half.
+// The DER *encoding* side of encoding/asn1 — all of marshal.go.
 //
-// Scope, stated plainly: these are the five non-reflective primitives —
-// tag/length and base-128 integer encoding. Everything above them in Go's
-// marshal.go (the `encoder` interface and its dozen implementations,
-// `makeField`, `makeBody`, and `Marshal` itself) is reflection-driven and
-// is NOT here. This file is the foundation those need, not a usable
-// `Marshal`.
+// It was built in two passes, and the seam is still the useful way to
+// read it. Everything down to `appendTimeCommon` is non-reflective: given
+// a value whose type the caller already knows, lay down the bytes. Those
+// landed first and were checked against Go on their own, so that the
+// reflective layer on top of them — `makeBody`, `makeField`, `Marshal`,
+// `MarshalWithParams` — could be built on a foundation already known to
+// be right rather than debugged as one piece.
 //
-// Why it lands separately: `crypto/x509/pkix` — and behind it
+// Why any of it matters: `crypto/x509/pkix` — and behind it
 // `crypto/x509` and `crypto/tls`, ~415 functions — is gated on
-// `asn1.Marshal`. Every byte those emit is laid down by the functions
-// below, so getting them checked against Go first means the reflective
-// layer can be built on something already known to be right rather than
-// debugged as one piece.
+// `asn1.Marshal`, and pkix calls it exactly once, in
+// `RDNSequence.String()`. Stubbing that call to error would still
+// compile and still "work", while silently printing `oid=value` where Go
+// prints `oid=#hex` for every unrecognised OID. That is why this is a
+// real port and not a stub.
 //
 // Deviations from marshal[go] @ Go 1.25.5:
 //
@@ -777,4 +778,572 @@ fn appendTimeCommon(dst: slice<byte>, t: crate::time::Time) -> slice<byte> {
     let dst = appendTwoDigits(dst, offsetMinutes % 60);
 
     return dst;
+}
+
+// ─── makeBody / makeField / Marshal (marshal.go:458) ──────────────────
+//
+// The reflection-driven half. Everything above this line encodes a value
+// whose type the caller already knows; these four walk a `reflect::Value`
+// and decide what the value *is*.
+//
+// Two deviations run through all of them, both forced and both worth
+// stating once rather than at every site.
+//
+//   * **`value.Interface().(T)` is not available.** Go re-extracts the
+//     original typed value out of the reflected one five times — a
+//     `time.Time`, a `BitString`, an `ObjectIdentifier`, a `*big.Int`, a
+//     `RawValue`. goish's `reflect::Value::Interface()` boxes `()` for
+//     every composite variant, so there is nothing to downcast. Each of
+//     those five types instead carries its state in the `Value` itself
+//     (`Struct { fields }` / `Slice { items }`), and the arms below read
+//     the operands straight off it. The reconstruction for each is
+//     pinned by examples/reflect_setint_smoke.rs.
+//
+//   * **`Marshal(val any)` becomes `Marshal(val: &impl Reflect)`.** Rust
+//     has no universal runtime reflection: a value has to opt in by
+//     implementing `reflect::Reflect`. Go's `reflect.ValueOf(val)` is
+//     therefore `val.__reflect_value()`, and a type that has not opted
+//     in fails at compile time rather than with Go's runtime
+//     "unknown Go type".
+//
+// Type identity is matched by reflected *name*, since goish's
+// `reflect::Type` compares on `(kind, name)` — see getUniversalType in
+// common.rs, which does the same and for the same reason.
+
+// go: none — goish idiom: Go compares `value.Type()` against the
+// package-level `reflect.TypeFor[T]()` vars (asn1.go:690-697). goish's
+// Type has no such identity, so the six are matched by name.
+fn typeNameIs(v: &crate::reflect::Value, name: &str) -> bool {
+    return v.Type().Name().as_bytes() == name.as_bytes();
+}
+
+// go: none — goish idiom: pull the i'th field out of a reflected struct
+// without going through `Interface()`. See the banner above.
+fn field(v: &crate::reflect::Value, i: int) -> crate::reflect::Value {
+    return v.Field(i);
+}
+
+// go: none — goish idiom: rebuild a `time::Time` from the reflected
+// form `time::Time::__reflect_value` produces — `[Int(Unix),
+// Int(Nanosecond)]`. See the banner above.
+fn timeFromValue(v: &crate::reflect::Value) -> crate::time::Time {
+    let sec = field(v, 0).Int();
+    let nsec = field(v, 1).Int();
+    return crate::time::Unix(sec, nsec).UTC();
+}
+
+// go: none — goish idiom: rebuild a `BitString` from `[Bytes,
+// Int(BitLength)]`. See the banner above.
+fn bitStringFromValue(v: &crate::reflect::Value) -> BitString {
+    return BitString {
+        Bytes: field(v, 0).Bytes(),
+        BitLength: field(v, 1).Int(),
+    };
+}
+
+// go: none — goish idiom: rebuild an `ObjectIdentifier` from the
+// reflected `Slice { items }`. See the banner above.
+fn oidFromValue(v: &crate::reflect::Value) -> slice<int> {
+    let mut out: Vec<int> = Vec::new();
+    let n = v.Len();
+    let mut i: int = 0;
+    while i < n {
+        out.push(v.Index(i).Int());
+        i += 1;
+    }
+    return slice::__from_vec(out);
+}
+
+// go: none — goish idiom: rebuild a `big::Int` from `[Int(Sign),
+// Bytes]`. See the banner above.
+fn bigIntFromValue(v: &crate::reflect::Value) -> Int {
+    let sign = field(v, 0).Int();
+    let mag = field(v, 1).Bytes();
+    let mut n = Int::default();
+    n.SetBytes(mag);
+    if sign < 0 {
+        let m = n.clone();
+        n.Neg(&m);
+    }
+    return n;
+}
+
+// go: none — goish idiom: rebuild a `RawValue` from its five reflected
+// fields. See the banner above.
+fn rawValueFromValue(v: &crate::reflect::Value) -> super::RawValue {
+    return super::RawValue {
+        Class: field(v, 0).Int(),
+        Tag: field(v, 1).Int(),
+        IsCompound: field(v, 2).Bool(),
+        Bytes: field(v, 3).Bytes(),
+        FullBytes: field(v, 4).Bytes(),
+    };
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:458-574 makeBody
+/// Build the encoder for an element's *contents* — everything inside the
+/// tag and length, which [`makeField`] wraps around it.
+pub fn makeBody(
+    value: &crate::reflect::Value,
+    params: &super::fieldParameters,
+) -> (Option<alloc::boxed::Box<dyn encoder>>, error) {
+    use crate::reflect::Kind;
+
+    // Go: switch value.Type() { case flagType: … case bigIntType: … }
+    if typeNameIs(value, "Flag") {
+        return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+    }
+    if typeNameIs(value, "time.Time") {
+        let t = timeFromValue(value);
+        if params.timeType == super::TagGeneralizedTime || outsideUTCRange(t.clone()) {
+            let (e, err) = makeGeneralizedTime(t);
+            return (Some(e), err);
+        }
+        let (e, err) = makeUTCTime(t);
+        return (Some(e), err);
+    }
+    if typeNameIs(value, "BitString") {
+        return (
+            Some(alloc::boxed::Box::new(bitStringEncoder(bitStringFromValue(value)))),
+            nil,
+        );
+    }
+    if typeNameIs(value, "ObjectIdentifier") {
+        let (e, err) = makeObjectIdentifier(oidFromValue(value));
+        if err != nil {
+            return (None, err);
+        }
+        return (Some(alloc::boxed::Box::new(e)), nil);
+    }
+    if typeNameIs(value, "Int") && value.Kind() == Kind::Struct {
+        let n = bigIntFromValue(value);
+        let (e, err) = makeBigInt(&n);
+        if err != nil {
+            return (None, err);
+        }
+        return (Some(e), nil);
+    }
+
+    // Go: switch v := value; v.Kind() { … }
+    match value.Kind() {
+        Kind::Bool => {
+            if value.Bool() {
+                return (Some(byteFFEncoder()), nil);
+            }
+            return (Some(byte00Encoder()), nil);
+        }
+        Kind::Int | Kind::Int8 | Kind::Int16 | Kind::Int32 | Kind::Int64 => {
+            return (
+                Some(alloc::boxed::Box::new(int64Encoder(int64(value.Int())))),
+                nil,
+            );
+        }
+        Kind::Struct => {
+            let t = value.Type();
+
+            // Go: for i := 0; i < t.NumField(); i++ { if !t.Field(i).IsExported() … }
+            let nf = t.NumField();
+            let mut i: int = 0;
+            while i < nf {
+                if !t.Field(i).PkgPath.is_empty() {
+                    return (
+                        None,
+                        StructuralError {
+                            Msg: string::from_static("struct contains unexported fields"),
+                        }
+                        .into(),
+                    );
+                }
+                i += 1;
+            }
+
+            let mut startingField: int = 0;
+
+            let n = t.NumField();
+            if n == 0 {
+                return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+            }
+
+            // Go: if t.Field(0).Type == rawContentsType { … }
+            //
+            // The RawContent carries the tag and length fields, and we
+            // write those ourselves, so they are stripped back out.
+            if (t.Field(0).Type)().Name().as_bytes() == b"RawContent" {
+                let s = value.Field(0);
+                if s.Len() > 0 {
+                    let bytes = s.Bytes();
+                    return (
+                        Some(alloc::boxed::Box::new(bytesEncoder(stripTagAndLength(bytes)))),
+                        nil,
+                    );
+                }
+                startingField = 1;
+            }
+
+            let n1 = n - startingField;
+            if n1 == 0 {
+                return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+            }
+            if n1 == 1 {
+                let f = t.Field(startingField);
+                return makeField(
+                    &value.Field(startingField),
+                    &super::parseFieldParameters(f.Tag.Get("asn1")),
+                );
+            }
+            let mut m: Vec<alloc::boxed::Box<dyn encoder>> = Vec::new();
+            let mut i: int = 0;
+            while i < n1 {
+                let f = t.Field(i + startingField);
+                let (e, err) = makeField(
+                    &value.Field(i + startingField),
+                    &super::parseFieldParameters(f.Tag.Get("asn1")),
+                );
+                if err != nil {
+                    return (None, err);
+                }
+                m.push(e.unwrap());
+                i += 1;
+            }
+            return (
+                Some(alloc::boxed::Box::new(multiEncoder::New(slice::__from_vec(m)))),
+                nil,
+            );
+        }
+        Kind::Slice => {
+            let sliceType = value.Type();
+            if sliceType.Elem().Kind() == Kind::Uint8 {
+                return (Some(alloc::boxed::Box::new(bytesEncoder(value.Bytes()))), nil);
+            }
+
+            let fp = super::fieldParameters::default();
+
+            let l = value.Len();
+            if l == 0 {
+                return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+            }
+            if l == 1 {
+                return makeField(&value.Index(0), &fp);
+            }
+            let mut m: Vec<alloc::boxed::Box<dyn encoder>> = Vec::new();
+            let mut i: int = 0;
+            while i < l {
+                let (e, err) = makeField(&value.Index(i), &fp);
+                if err != nil {
+                    return (None, err);
+                }
+                m.push(e.unwrap());
+                i += 1;
+            }
+            if params.set {
+                return (
+                    Some(alloc::boxed::Box::new(setEncoder::New(slice::__from_vec(m)))),
+                    nil,
+                );
+            }
+            return (
+                Some(alloc::boxed::Box::new(multiEncoder::New(slice::__from_vec(m)))),
+                nil,
+            );
+        }
+        Kind::String => {
+            if params.stringType == super::TagIA5String {
+                let (e, err) = makeIA5String(value.String());
+                if err != nil {
+                    return (None, err);
+                }
+                return (Some(alloc::boxed::Box::new(e)), nil);
+            }
+            if params.stringType == super::TagPrintableString {
+                let (e, err) = makePrintableString(value.String());
+                if err != nil {
+                    return (None, err);
+                }
+                return (Some(alloc::boxed::Box::new(e)), nil);
+            }
+            if params.stringType == super::TagNumericString {
+                let (e, err) = makeNumericString(value.String());
+                if err != nil {
+                    return (None, err);
+                }
+                return (Some(alloc::boxed::Box::new(e)), nil);
+            }
+            return (
+                Some(alloc::boxed::Box::new(makeUTF8String(value.String()))),
+                nil,
+            );
+        }
+        _ => {}
+    }
+
+    return (
+        None,
+        StructuralError {
+            Msg: string::from_static("unknown Go type"),
+        }
+        .into(),
+    );
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:576-716 makeField
+/// Build the encoder for a complete element — [`makeBody`]'s contents
+/// wrapped in the tag and length its `fieldParameters` call for.
+pub fn makeField(
+    v: &crate::reflect::Value,
+    params: &super::fieldParameters,
+) -> (Option<alloc::boxed::Box<dyn encoder>>, error) {
+    use crate::reflect::Kind;
+
+    if !v.IsValid() {
+        return (None, crate::errors::New("asn1: cannot marshal nil value"));
+    }
+    // Go: if v.Kind() == reflect.Interface && v.Type().NumMethod() == 0 {
+    //         return makeField(v.Elem(), params) }
+    //
+    // goish has no reflected interface kind — a value reaching here is
+    // already concrete, because `Marshal` takes `&impl Reflect` rather
+    // than `any`. The recursion has nothing to unwrap.
+
+    if v.Kind() == Kind::Slice && v.Len() == 0 && params.omitEmpty {
+        return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+    }
+
+    if params.optional && params.defaultValue.is_some() && super::canHaveDefaultValue(v.Kind()) {
+        let mut defaultValue = crate::reflect::New(v.Type()).Elem();
+        defaultValue.SetInt(params.defaultValue.unwrap());
+
+        // Go: reflect.DeepEqual(v.Interface(), defaultValue.Interface()).
+        // `Interface()` cannot round-trip here (see the banner), so the
+        // reflected values are compared directly — which is what
+        // `PartialEq for Value` exists for.
+        if *v == defaultValue {
+            return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+        }
+    }
+
+    // If no default value is given then the zero value for the type is
+    // assumed to be the default value. This isn't obviously the correct
+    // behavior, but it's what Go has traditionally done.
+    if params.optional && params.defaultValue.is_none() {
+        // Go: reflect.DeepEqual(v.Interface(), reflect.Zero(v.Type()).Interface())
+        if *v == crate::reflect::Zero(v.Type()) {
+            return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+        }
+    }
+
+    if typeNameIs(v, "RawValue") {
+        let rv = rawValueFromValue(v);
+        if rv.FullBytes.Len() != 0 {
+            return (Some(alloc::boxed::Box::new(bytesEncoder(rv.FullBytes))), nil);
+        }
+
+        let tag = bytesEncoder(appendTagAndLength(
+            slice::default(),
+            &TagAndLength {
+                class: rv.Class,
+                tag: rv.Tag,
+                length: rv.Bytes.Len(),
+                isCompound: rv.IsCompound,
+            },
+        ));
+        let body = bytesEncoder(rv.Bytes);
+
+        return (
+            Some(alloc::boxed::Box::new(taggedEncoder::New(
+                alloc::boxed::Box::new(tag),
+                alloc::boxed::Box::new(body),
+            ))),
+            nil,
+        );
+    }
+
+    let (matchAny, mut tag, isCompound, ok) = super::getUniversalType(&v.Type());
+    if !ok || matchAny {
+        return (
+            None,
+            StructuralError {
+                Msg: string::from_static("unknown Go type"),
+            }
+            .into(),
+        );
+    }
+
+    if params.timeType != 0 && tag != super::TagUTCTime {
+        return (
+            None,
+            StructuralError {
+                Msg: string::from_static("explicit time type given to non-time member"),
+            }
+            .into(),
+        );
+    }
+
+    if params.stringType != 0 && tag != super::TagPrintableString {
+        return (
+            None,
+            StructuralError {
+                Msg: string::from_static("explicit string type given to non-string member"),
+            }
+            .into(),
+        );
+    }
+
+    if tag == super::TagPrintableString {
+        if params.stringType == 0 {
+            // A string with no explicit string type: PrintableString if
+            // the character set is limited enough, else UTF8String.
+            let s = v.String();
+            for (_, r) in crate::range!(s.clone()) {
+                if crate::uint32(r) >= crate::uint32(crate::unicode::utf8::RuneSelf)
+                    || !isPrintable(tobyte(r), false, false)
+                {
+                    if !crate::unicode::utf8::ValidString(s.clone()) {
+                        return (None, crate::errors::New("asn1: string not valid UTF-8"));
+                    }
+                    tag = super::TagUTF8String;
+                    break;
+                }
+            }
+        } else {
+            tag = params.stringType;
+        }
+    } else if tag == super::TagUTCTime {
+        if params.timeType == super::TagGeneralizedTime || outsideUTCRange(timeFromValue(v)) {
+            tag = super::TagGeneralizedTime;
+        }
+    }
+
+    let mut params = params.clone();
+    if params.set {
+        if tag != super::TagSequence {
+            return (
+                None,
+                StructuralError {
+                    Msg: string::from_static("non sequence tagged as set"),
+                }
+                .into(),
+            );
+        }
+        tag = super::TagSet;
+    }
+
+    // makeField can be called for a slice that should be treated as a
+    // SET but doesn't have params.set set, for instance when using a
+    // slice with the SET type name suffix. In this case getUniversalType
+    // returns TagSet, but makeBody doesn't know about that so will treat
+    // the slice as a sequence. To work around this we set params.set.
+    if tag == super::TagSet && !params.set {
+        params.set = true;
+    }
+
+    let (body, err) = makeBody(v, &params);
+    if err != nil {
+        return (None, err);
+    }
+    let body = body.unwrap();
+
+    let bodyLen = body.Len();
+
+    let mut class = super::ClassUniversal;
+    if params.tag.is_some() {
+        if params.application {
+            class = super::ClassApplication;
+        } else if params.private {
+            class = super::ClassPrivate;
+        } else {
+            class = super::ClassContextSpecific;
+        }
+
+        if params.explicit {
+            let innerTag = bytesEncoder(appendTagAndLength(
+                slice::default(),
+                &TagAndLength {
+                    class: super::ClassUniversal,
+                    tag,
+                    length: bodyLen,
+                    isCompound,
+                },
+            ));
+            let innerTagLen = innerTag.Len();
+            let t = taggedEncoder::New(alloc::boxed::Box::new(innerTag), body);
+
+            let outerTag = bytesEncoder(appendTagAndLength(
+                slice::default(),
+                &TagAndLength {
+                    class,
+                    tag: params.tag.unwrap(),
+                    length: bodyLen + innerTagLen,
+                    isCompound: true,
+                },
+            ));
+
+            return (
+                Some(alloc::boxed::Box::new(taggedEncoder::New(
+                    alloc::boxed::Box::new(outerTag),
+                    alloc::boxed::Box::new(t),
+                ))),
+                nil,
+            );
+        }
+
+        // implicit tag.
+        tag = params.tag.unwrap();
+    }
+
+    let outer = bytesEncoder(appendTagAndLength(
+        slice::default(),
+        &TagAndLength {
+            class,
+            tag,
+            length: bodyLen,
+            isCompound,
+        },
+    ));
+
+    return (
+        Some(alloc::boxed::Box::new(taggedEncoder::New(
+            alloc::boxed::Box::new(outer),
+            body,
+        ))),
+        nil,
+    );
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:718-733 Marshal
+/// Return the ASN.1 encoding of `val`.
+///
+/// In addition to the struct tags recognized by Unmarshal, the following
+/// can be used:
+///
+/// | tag | effect |
+/// |---|---|
+/// | `ia5` | marshal strings as IA5String |
+/// | `omitempty` | skip empty slices |
+/// | `printable` | marshal strings as PrintableString |
+/// | `utf8` | marshal strings as UTF8String |
+/// | `numeric` | marshal strings as NumericString |
+/// | `utc` | marshal `time::Time` as UTCTime |
+/// | `generalized` | marshal `time::Time` as GeneralizedTime |
+///
+/// Go takes `any`; goish takes `&impl Reflect` — see the banner above.
+pub fn Marshal<T: crate::reflect::Reflect>(val: &T) -> (slice<byte>, error) {
+    return MarshalWithParams(val, "");
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:735-745 MarshalWithParams
+/// Allow field parameters to be specified for the top-level element.
+/// The form of the params is the same as the field tags.
+pub fn MarshalWithParams<T: crate::reflect::Reflect, S: Into<string>>(
+    val: &T,
+    params: S,
+) -> (slice<byte>, error) {
+    let v = crate::reflect::Reflect::__reflect_value(val);
+    let (e, err) = makeField(&v, &super::parseFieldParameters(params));
+    if err != nil {
+        return (slice::default(), err);
+    }
+    let e = e.unwrap();
+    let mut b = crate::make!([]byte, e.Len());
+    e.Encode(&mut b);
+    return (b, nil);
 }

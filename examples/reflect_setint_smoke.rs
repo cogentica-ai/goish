@@ -88,12 +88,22 @@ fn main() {
     use goish::encoding::asn1::{BitString, ObjectIdentifier, RawValue};
     use goish::goslice::slice;
 
+    // ObjectIdentifier reflects as Named{Slice} — the name is what tells
+    // makeBody it is an OID and not any other []int — so unwrap one level.
     let oid = ObjectIdentifier::New(slice::__from_vec(alloc::vec![1i64, 2, 840]));
     match oid.__reflect_value() {
-        Value::Slice { items, .. } => {
-            check(items.len() == 3 && items[0] == Value::Int(1) && items[2] == Value::Int(840),
-                  "ObjectIdentifier reflect value round-trips");
-        }
+        Value::Named { ty, inner } => match *inner {
+            Value::Slice { items, .. } => {
+                check(
+                    ty.Name().as_bytes() == b"ObjectIdentifier"
+                        && items.len() == 3
+                        && items[0] == Value::Int(1)
+                        && items[2] == Value::Int(840),
+                    "ObjectIdentifier reflect value round-trips",
+                );
+            }
+            _ => check(false, "ObjectIdentifier reflect value round-trips"),
+        },
         _ => check(false, "ObjectIdentifier reflect value round-trips"),
     }
 

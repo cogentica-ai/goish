@@ -731,12 +731,30 @@ pub enum Value {
         fields: Vec<Value>,
     },
     Pointer(Box<Value>),
+    /// A *named* type whose underlying kind is not a struct — Go's
+    /// `type ObjectIdentifier []int`, `type Enumerated int`.
+    ///
+    /// Every other variant reconstructs its `Type` from the variant tag
+    /// alone, which is right for `int` and `[]int` and wrong the moment a
+    /// port declares a name over one: the name is what distinguishes
+    /// `asn1.ObjectIdentifier` from any other `[]int`, and losing it made
+    /// `encoding/asn1`'s makeBody encode an OID as a SEQUENCE OF INTEGER.
+    /// Struct-shaped named types were already fine — `Struct` carries its
+    /// `ty` — so this covers the rest.
+    ///
+    /// Everything but `Type()` delegates to `inner`, so a `Named` behaves
+    /// exactly like the value it wraps.
+    Named {
+        ty: Type,
+        inner: Box<Value>,
+    },
 }
 
 impl Value {
     /// `Kind()` — runtime tag.
     pub fn Kind(&self) -> Kind {
         match self {
+            Value::Named { inner, .. } => inner.Kind(),
             Value::Invalid => Kind::Invalid,
             Value::Bool(_) => Kind::Bool,
             Value::Int(_) => Kind::Int,
@@ -760,6 +778,8 @@ impl Value {
     /// `Type()` — descriptor of this value's type.
     pub fn Type(&self) -> Type {
         match self {
+            // The whole point of the variant: a named type keeps its name.
+            Value::Named { ty, .. } => *ty,
             Value::Struct { ty, .. } => *ty,
             Value::Slice { elem_type, .. } => {
                 Type::__new(Kind::Slice, "", &[]).__with_elem(*elem_type)
@@ -773,6 +793,9 @@ impl Value {
 
     /// `IsValid()` — false for the zero-Value (`Value::Invalid`).
     pub fn IsValid(&self) -> bool {
+        if let Value::Named { inner, .. } = self {
+            return inner.IsValid();
+        }
         !matches!(self, Value::Invalid)
     }
 
@@ -780,6 +803,7 @@ impl Value {
     /// Go's `reflect.Value.IsZero`.
     pub fn IsZero(&self) -> bool {
         match self {
+            Value::Named { inner, .. } => inner.IsZero(),
             Value::Invalid => true,
             Value::Bool(b) => !*b,
             Value::Int(n) => *n == 0,
@@ -802,6 +826,9 @@ impl Value {
 
     /// `Bool()` — panics if Kind != Bool.
     pub fn Bool(&self) -> bool {
+        if let Value::Named { inner, .. } = self {
+            return inner.Bool();
+        }
         match self {
             Value::Bool(b) => *b,
             _ => panic!("reflect.Value.Bool of non-bool"),
@@ -810,6 +837,9 @@ impl Value {
 
     /// `Int()` — typed accessor for any signed-int kind. Panics otherwise.
     pub fn Int(&self) -> int {
+        if let Value::Named { inner, .. } = self {
+            return inner.Int();
+        }
         match self {
             Value::Int(n) => *n,
             Value::Int8(n) => *n as int,
@@ -821,6 +851,9 @@ impl Value {
 
     /// `Uint()` — any unsigned-int kind. Panics otherwise.
     pub fn Uint(&self) -> uint {
+        if let Value::Named { inner, .. } = self {
+            return inner.Uint();
+        }
         match self {
             Value::Uint(n) => *n,
             Value::Uint8(n) => *n as uint,
@@ -832,6 +865,9 @@ impl Value {
 
     /// `Float()` — float32 or float64. Panics otherwise.
     pub fn Float(&self) -> float64 {
+        if let Value::Named { inner, .. } = self {
+            return inner.Float();
+        }
         match self {
             Value::Float32(f) => *f as float64,
             Value::Float64(f) => *f,
@@ -850,6 +886,9 @@ impl Value {
 
     /// `Len()` — element count for slice/string/map. Panics otherwise.
     pub fn Len(&self) -> int {
+        if let Value::Named { inner, .. } = self {
+            return inner.Len();
+        }
         match self {
             Value::Slice { items, .. } => items.len() as int,
             Value::String(s) => s.as_bytes().len() as int,
@@ -862,6 +901,9 @@ impl Value {
     /// don't track capacity separately from length, so `Cap == Len`.
     /// Panics for non-slice (matches Go for non-Array/Chan/Slice).
     pub fn Cap(&self) -> int {
+        if let Value::Named { inner, .. } = self {
+            return inner.Cap();
+        }
         match self {
             Value::Slice { items, .. } => items.len() as int,
             _ => panic!("reflect.Value.Cap of non-slice"),
@@ -874,6 +916,9 @@ impl Value {
     ///     vs empty distinctly; an empty slice is non-nil-empty)
     ///   * Other kinds: panic
     pub fn IsNil(&self) -> bool {
+        if let Value::Named { inner, .. } = self {
+            return inner.IsNil();
+        }
         match self {
             Value::Slice { .. } => false,
             Value::Map { .. } => false,
@@ -894,6 +939,9 @@ impl Value {
     /// through known Value variants; `Invalid` and unsupported variants
     /// box `()` as a placeholder so call sites still get something.
     pub fn Interface(&self) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
+        if let Value::Named { inner, .. } = self {
+            return inner.Interface();
+        }
         match self {
             Value::Bool(b) => alloc::sync::Arc::new(*b),
             Value::Int(n) => alloc::sync::Arc::new(*n),
@@ -918,6 +966,9 @@ impl Value {
     /// `Bytes()` — convert a `Value::Slice` whose element kind is
     /// `Uint8` into a `slice<byte>`. Panics otherwise.
     pub fn Bytes(&self) -> slice<byte> {
+        if let Value::Named { inner, .. } = self {
+            return inner.Bytes();
+        }
         match self {
             Value::Slice { items, elem_type } if elem_type().Kind() == Kind::Uint8 => {
                 let mut out: Vec<byte> = Vec::with_capacity(items.len());
@@ -1039,6 +1090,9 @@ impl Value {
     /// `MapKeys()` — keys in stable (sorted) order, as `slice<Value>`
     /// (Go's `[]Value`). Panics if not Map.
     pub fn MapKeys(&self) -> crate::goslice::slice<Value> {
+        if let Value::Named { inner, .. } = self {
+            return inner.MapKeys();
+        }
         match self {
             Value::Map { entries, .. } => {
                 let v: Vec<Value> = entries.iter().map(|(k, _)| k.clone()).collect();
@@ -1052,6 +1106,9 @@ impl Value {
     /// Linear scan for v1 (entries are sorted; we could binary-search
     /// over comparable keys, but v1 keeps it straightforward).
     pub fn MapIndex(&self, key: &Value) -> Value {
+        if let Value::Named { inner, .. } = self {
+            return inner.MapIndex(key);
+        }
         match self {
             Value::Map { entries, .. } => {
                 for (k, v) in entries {
@@ -1067,6 +1124,9 @@ impl Value {
 
     /// `Index(i)` — i-th element of a slice. Panics if not Slice.
     pub fn Index(&self, i: int) -> Value {
+        if let Value::Named { inner, .. } = self {
+            return inner.Index(i);
+        }
         match self {
             Value::Slice { items, .. } => items[i as usize].clone(),
             _ => panic!("reflect.Value.Index of non-slice"),
