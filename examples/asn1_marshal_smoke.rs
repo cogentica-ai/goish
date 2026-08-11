@@ -25,7 +25,8 @@ use goish::encoding::asn1::{
     __base128IntLength, __bitStringEncoder, __byteEncoder, __bytesEncoder, __encoder,
     __int64Encoder, __lengthLength, __makeIA5String, __makeNumericString,
     __makeObjectIdentifier, __makePrintableString, __makeUTF8String, __multiEncoder,
-    __makeBigInt, __setEncoder, __stringEncoder, __stripTagAndLength, __taggedEncoder,
+    __makeBigInt, __makeGeneralizedTime, __makeUTCTime, __outsideUTCRange, __setEncoder,
+    __stringEncoder, __stripTagAndLength, __taggedEncoder,
     getUniversalType, parseFieldParameters,
     Enumerated, ObjectIdentifier, RawValue,
 };
@@ -420,6 +421,46 @@ fn main() {
     for &(inHex, wantHex) in strips.iter() {
         let got = __stripTagAndLength(slice::__from_vec(unhex(inHex)));
         check(got.__into_vec() == unhex(wantHex), "stripTagAndLength", 0);
+    }
+
+
+    // ─── UTCTime / GeneralizedTime ────────────────────────────────────
+    //
+    // goish's time is UTC-only, so these are the seven UTC rows of the Go
+    // reference. Its three zoned rows — +0100 "240307090501+0100",
+    // -0500 "240307090501-0500", +0130 "240307090501+0130" — are recorded
+    // here for when goish's time grows zones; appendTimeCommon already
+    // encodes them.
+    let times: [(i64, i64, i64, i64, i64, i64, bool, &str, &str); 7] = [
+        (1949, 12, 31, 23, 59, 59, true, "", "19491231235959Z"),
+        (1950, 1, 1, 0, 0, 0, false, "500101000000Z", "19500101000000Z"),
+        (1999, 12, 31, 23, 59, 59, false, "991231235959Z", "19991231235959Z"),
+        (2000, 1, 1, 0, 0, 0, false, "000101000000Z", "20000101000000Z"),
+        (2024, 3, 7, 9, 5, 1, false, "240307090501Z", "20240307090501Z"),
+        (2049, 12, 31, 23, 59, 59, false, "491231235959Z", "20491231235959Z"),
+        (2050, 1, 1, 0, 0, 0, true, "", "20500101000000Z"),
+    ];
+    for &(y, mo, d, h, mi, sec, outside, wantUTC, wantGen) in times.iter() {
+        let tm = goish::time::Date(y, mo, d, h, mi, sec, 0, goish::time::UTC);
+        check(__outsideUTCRange(tm) == outside, "outsideUTCRange y=", y);
+
+        let (e, err) = __makeUTCTime(tm);
+        if wantUTC.is_empty() {
+            check(err != goish::nil, "makeUTCTime rejects y=", y);
+        } else {
+            check(
+                err == goish::nil && encOf(&*e) == wantUTC.as_bytes().to_vec(),
+                "makeUTCTime y=",
+                y,
+            );
+        }
+
+        let (e, err) = __makeGeneralizedTime(tm);
+        check(
+            err == goish::nil && encOf(&*e) == wantGen.as_bytes().to_vec(),
+            "makeGeneralizedTime y=",
+            y,
+        );
     }
 
     let failed = FAILED.load(Ordering::Acquire);

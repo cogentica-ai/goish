@@ -81,7 +81,9 @@ pub use marshal::{
     makePrintableString as __makePrintableString, makeUTF8String as __makeUTF8String,
     multiEncoder as __multiEncoder, oidEncoder as __oidEncoder,
     setEncoder as __setEncoder, stringEncoder as __stringEncoder,
-    makeBigInt as __makeBigInt, stripTagAndLength as __stripTagAndLength,
+    makeBigInt as __makeBigInt, makeGeneralizedTime as __makeGeneralizedTime,
+    makeUTCTime as __makeUTCTime, outsideUTCRange as __outsideUTCRange,
+    stripTagAndLength as __stripTagAndLength,
     taggedEncoder as __taggedEncoder,
 };
 

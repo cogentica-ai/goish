@@ -632,3 +632,149 @@ pub fn stripTagAndLength(in_: slice<byte>) -> slice<byte> {
     let raw: &[byte] = &in_;
     return slice::__from_vec(raw[offset as usize..].to_vec());
 }
+
+// ─── time encoding — marshal.go:351-437 ───────────────────────────────
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:351-353 appendTwoDigits
+fn appendTwoDigits(dst: slice<byte>, v: int) -> slice<byte> {
+    let mut out: Vec<byte> = dst.__into_vec();
+    out.push(tobyte(int(b'0') + (v / 10) % 10));
+    out.push(tobyte(int(b'0') + v % 10));
+    return slice::__from_vec(out);
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:355-361 appendFourDigits
+fn appendFourDigits(dst: slice<byte>, v: int) -> slice<byte> {
+    let mut out: Vec<byte> = dst.__into_vec();
+    out.push(tobyte(int(b'0') + (v / 1000) % 10));
+    out.push(tobyte(int(b'0') + (v / 100) % 10));
+    out.push(tobyte(int(b'0') + (v / 10) % 10));
+    out.push(tobyte(int(b'0') + v % 10));
+    return slice::__from_vec(out);
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:363-366 outsideUTCRange
+pub fn outsideUTCRange(t: crate::time::Time) -> bool {
+    let year = t.Year();
+    return year < 1950 || year >= 2050;
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:368-376 makeUTCTime
+pub fn makeUTCTime(t: crate::time::Time) -> (alloc::boxed::Box<dyn encoder>, error) {
+    // Go: dst := make([]byte, 0, 18)
+    let dst = slice::__from_vec(Vec::<byte>::with_capacity(18));
+
+    let (dst, err) = appendUTCTime(dst, t);
+    if err != nil {
+        return (
+            alloc::boxed::Box::new(bytesEncoder(slice::__from_vec(Vec::<byte>::new()))),
+            err,
+        );
+    }
+
+    return (alloc::boxed::Box::new(bytesEncoder(dst)), nil);
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:378-386 makeGeneralizedTime
+pub fn makeGeneralizedTime(t: crate::time::Time) -> (alloc::boxed::Box<dyn encoder>, error) {
+    // Go: dst := make([]byte, 0, 20)
+    let dst = slice::__from_vec(Vec::<byte>::with_capacity(20));
+
+    let (dst, err) = appendGeneralizedTime(dst, t);
+    if err != nil {
+        return (
+            alloc::boxed::Box::new(bytesEncoder(slice::__from_vec(Vec::<byte>::new()))),
+            err,
+        );
+    }
+
+    return (alloc::boxed::Box::new(bytesEncoder(dst)), nil);
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:388-401 appendUTCTime
+fn appendUTCTime(dst: slice<byte>, t: crate::time::Time) -> (slice<byte>, error) {
+    let year = t.Year();
+
+    let dst = if 1950 <= year && year < 2000 {
+        appendTwoDigits(dst, year - 1900)
+    } else if 2000 <= year && year < 2050 {
+        appendTwoDigits(dst, year - 2000)
+    } else {
+        return (
+            slice::__from_vec(Vec::<byte>::new()),
+            StructuralError {
+                Msg: string::from_static("cannot represent time as UTCTime"),
+            }
+            .into(),
+        );
+    };
+
+    return (appendTimeCommon(dst, t), nil);
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:403-412 appendGeneralizedTime
+fn appendGeneralizedTime(dst: slice<byte>, t: crate::time::Time) -> (slice<byte>, error) {
+    let year = t.Year();
+    if year < 0 || year > 9999 {
+        return (
+            slice::__from_vec(Vec::<byte>::new()),
+            StructuralError {
+                Msg: string::from_static("cannot represent time as GeneralizedTime"),
+            }
+            .into(),
+        );
+    }
+
+    let dst = appendFourDigits(dst, year);
+
+    return (appendTimeCommon(dst, t), nil);
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:414-437 appendTimeCommon
+//
+// Deviation, in reachability rather than code: goish's `time` is UTC-only
+// — `Time::Zone()` returns ("UTC", 0) unconditionally and `time::Date`
+// ignores its Location argument — so `offset` is always 0 and every
+// encoded time ends in 'Z'. The '+'/'-' branches and the offset digits
+// are ported as written and are correct, but cannot be exercised until
+// goish's time grows zones. The Go reference rows for +0100, -0500 and
+// +0130 are recorded in the smoke test's comment for when it can.
+fn appendTimeCommon(dst: slice<byte>, t: crate::time::Time) -> slice<byte> {
+    let (_, month, day) = t.Date();
+
+    let dst = appendTwoDigits(dst, month);
+    let dst = appendTwoDigits(dst, day);
+
+    let (hour, min, sec) = t.Clock();
+
+    let dst = appendTwoDigits(dst, hour);
+    let dst = appendTwoDigits(dst, min);
+    let mut dst = appendTwoDigits(dst, sec);
+
+    let (_, offset) = t.Zone();
+
+    if offset / 60 == 0 {
+        let mut out: Vec<byte> = dst.__into_vec();
+        out.push(b'Z');
+        return slice::__from_vec(out);
+    }
+    if offset > 0 {
+        let mut out: Vec<byte> = dst.__into_vec();
+        out.push(b'+');
+        dst = slice::__from_vec(out);
+    } else if offset < 0 {
+        let mut out: Vec<byte> = dst.__into_vec();
+        out.push(b'-');
+        dst = slice::__from_vec(out);
+    }
+
+    let mut offsetMinutes = offset / 60;
+    if offsetMinutes < 0 {
+        offsetMinutes = -offsetMinutes;
+    }
+
+    let dst = appendTwoDigits(dst, offsetMinutes / 60);
+    let dst = appendTwoDigits(dst, offsetMinutes % 60);
+
+    return dst;
+}
