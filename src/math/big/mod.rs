@@ -7067,9 +7067,18 @@ impl crate::reflect::Reflect for Int {
 
     // go: none — goish-only: see above.
     fn __reflect_value(&self) -> crate::reflect::Value {
+        // Sign and big-endian magnitude — enough to rebuild the Int with
+        // SetBytes + Neg. `__reflect_type` still reports no fields, as
+        // Go's *big.Int has none exported; but a reflected Int that
+        // discarded its value would be useless to a port that reads it
+        // back, which is what encoding/asn1's makeBody does before
+        // calling makeBigInt.
         return crate::reflect::Value::Struct {
             ty: <Int as crate::reflect::Reflect>::__reflect_type(),
-            fields: alloc::vec::Vec::new(),
+            fields: alloc::vec![
+                crate::reflect::Value::Int(self.Sign()),
+                crate::reflect::Reflect::__reflect_value(&self.Bytes()),
+            ],
         };
     }
 }

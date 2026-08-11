@@ -19,7 +19,7 @@ extern crate goish;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::fmt;
-use goish::reflect::{Kind, New, TypeOfDyn, Value, Zero};
+use goish::reflect::{Kind, New, Reflect, TypeOfDyn, Value, Zero};
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 static RAN: AtomicUsize = AtomicUsize::new(0);
@@ -76,6 +76,72 @@ fn main() {
     check(def == field, "makeField shape: default == field");
     let other = Value::Int(8);
     check(def != other, "makeField shape: default != field");
+
+
+    // ─── typed re-extraction, the makeBody prerequisite ───────────────
+    //
+    // makeBody does value.Interface().(T) for five types. goish's
+    // Interface() boxes () for Struct/Slice, so recovery goes through the
+    // Value's own fields instead. These assert that each of the five
+    // carries enough to rebuild the original — which is what the encode
+    // path needs, and what time::Time and big::Int previously discarded.
+    use goish::encoding::asn1::{BitString, ObjectIdentifier, RawValue};
+    use goish::goslice::slice;
+
+    let oid = ObjectIdentifier::New(slice::__from_vec(alloc::vec![1i64, 2, 840]));
+    match oid.__reflect_value() {
+        Value::Slice { items, .. } => {
+            check(items.len() == 3 && items[0] == Value::Int(1) && items[2] == Value::Int(840),
+                  "ObjectIdentifier reflect value round-trips");
+        }
+        _ => check(false, "ObjectIdentifier reflect value round-trips"),
+    }
+
+    let bs = BitString { Bytes: slice::__from_vec(alloc::vec![0xf0u8]), BitLength: 4 };
+    match bs.__reflect_value() {
+        Value::Struct { fields, .. } => {
+            check(fields.len() == 2 && fields[1] == Value::Int(4),
+                  "BitString reflect value round-trips");
+        }
+        _ => check(false, "BitString reflect value round-trips"),
+    }
+
+    let rv = RawValue {
+        Class: 2, Tag: 7, IsCompound: true,
+        Bytes: slice::__from_vec(alloc::vec![1u8, 2]),
+        FullBytes: slice::__from_vec(alloc::vec![0xa7u8, 2, 1, 2]),
+    };
+    match rv.__reflect_value() {
+        Value::Struct { fields, .. } => {
+            check(fields.len() == 5 && fields[0] == Value::Int(2)
+                      && fields[1] == Value::Int(7) && fields[2] == Value::Bool(true),
+                  "RawValue reflect value round-trips");
+        }
+        _ => check(false, "RawValue reflect value round-trips"),
+    }
+
+    let t = goish::time::Date(2024, 3, 7, 9, 5, 1, 0, goish::time::UTC);
+    match t.__reflect_value() {
+        Value::Struct { fields, .. } => {
+            check(fields.len() == 2 && fields[0] == Value::Int(t.Unix()),
+                  "time::Time reflect value carries its instant");
+        }
+        _ => check(false, "time::Time reflect value carries its instant"),
+    }
+
+    let mut n = goish::math::big::Int::default();
+    n.SetString("-123456789012345678901234567890", 10);
+    match n.__reflect_value() {
+        Value::Struct { fields, .. } => {
+            let signOK = fields.len() == 2 && fields[0] == Value::Int(-1);
+            let magOK = match &fields[1] {
+                Value::Slice { items, .. } => items.len() == n.Bytes().Len() as usize,
+                _ => false,
+            };
+            check(signOK && magOK, "big::Int reflect value carries sign and magnitude");
+        }
+        _ => check(false, "big::Int reflect value carries sign and magnitude"),
+    }
 
     let failed = FAILED.load(Ordering::Acquire);
     let ran = RAN.load(Ordering::Acquire);

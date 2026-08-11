@@ -2514,9 +2514,18 @@ impl crate::reflect::Reflect for Time {
     }
     #[inline]
     fn __reflect_value(&self) -> crate::reflect::Value {
+        // The two fields carry enough to rebuild the Time: seconds since
+        // the Unix epoch and the nanosecond remainder. `__reflect_type`
+        // still reports no fields, matching Go — Time's are unexported —
+        // but a reflected Time that discarded its value would be useless
+        // to any port that has to read it back, which is what
+        // encoding/asn1's makeBody does before encoding a UTCTime.
         crate::reflect::Value::Struct {
             ty: <Self as crate::reflect::Reflect>::__reflect_type(),
-            fields: alloc::vec::Vec::new(),
+            fields: alloc::vec![
+                crate::reflect::Value::Int(self.Unix()),
+                crate::reflect::Value::Int(self.Nanosecond()),
+            ],
         }
     }
 }

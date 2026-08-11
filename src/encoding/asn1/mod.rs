@@ -45,18 +45,18 @@
 //     `Value::Interface()` boxes `()` for Slice/Map/Struct/Pointer (see
 //     the comment at its `_` arm), so none of the five can be written.
 //
-//     Two of them are worse than that: `time::Time` and `big::Int` have
-//     identity-only Reflect impls whose `__reflect_value` returns
-//     `Struct { fields: [] }`, discarding the value entirely. That was
-//     correct for getUniversalType, which only needs the identity, and is
-//     wrong for makeBody, which needs the value. BitString,
-//     ObjectIdentifier and RawValue are reconstructible from their
-//     `Value` fields; those two are not.
+//     But the workaround is smaller than redesigning `Value`, and it is
+//     now in place. All five types carry enough in their own
+//     `__reflect_value` to be rebuilt without `Interface()`:
+//     ObjectIdentifier as a Slice of arcs, BitString as {Bytes,
+//     BitLength}, RawValue as its five fields, and — since 78ec1f5's
+//     identity-only impls were fixed — time::Time as {Unix, Nanosecond}
+//     and big::Int as {Sign, magnitude}. reflect_setint_smoke asserts all
+//     five round-trip.
 //
-//     The fix is to let `Value` carry the original payload — the `_` arm
-//     already suggests `Arc<dyn Any>` alongside each variant — and have
-//     Interface() return it. That is a reflect-design change, not an
-//     addition.
+//     So makeField and makeBody read their operands off the `Value`
+//     rather than through a type assertion. That is the deviation those
+//     two will carry; nothing further is missing.
 //
 //     The signature also deviates: Go takes `any`, goish must take
 //     `impl Reflect`, since Rust has no universal runtime reflection.
