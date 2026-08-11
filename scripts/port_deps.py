@@ -68,6 +68,8 @@ ALIASES = {
     # mirroring GOROOT's src/vendor/ path.
     "golang.org/x/crypto/chacha20poly1305": "crypto/chacha20poly1305",
     "golang.org/x/crypto/chacha20": "crypto/chacha20",
+    "golang.org/x/crypto/cryptobyte": "crypto/cryptobyte",
+    "golang.org/x/crypto/cryptobyte/asn1": "crypto/cryptobyte/asn1",
 }
 
 IMPORT_BLOCK = re.compile(r"^import\s*\((.*?)^\)", re.S | re.M)
