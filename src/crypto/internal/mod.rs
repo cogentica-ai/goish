@@ -11,6 +11,7 @@ pub mod entropy;
 pub mod r#impl;
 pub mod fips140;
 pub mod fips140deps;
+pub mod fips140cache;
 pub mod fips140hash;
 pub mod fips140only;
 pub mod randutil;
