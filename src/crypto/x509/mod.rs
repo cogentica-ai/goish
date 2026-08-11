@@ -14,6 +14,9 @@
 
 pub mod pkix;
 
+mod oid;
+pub use oid::{OIDFromInts, ParseOID, OID};
+
 extern crate alloc;
 
 use alloc::sync::Arc;

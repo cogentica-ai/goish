@@ -821,6 +821,10 @@ name = "pkix_smoke"
 path = "examples/pkix_smoke.rs"
 
 [[example]]
+name = "x509_oid_smoke"
+path = "examples/x509_oid_smoke.rs"
+
+[[example]]
 name = "crypto_ecdsa_smoke"
 path = "examples/crypto_ecdsa_smoke.rs"
 
