@@ -32,6 +32,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 SRC = os.path.join(ROOT, "src")
 
+# Deliberately out of scope, mirroring port_coverage.py's SKIP: the
+# BoringSSL bridge and its caches (goish has no cgo), the darwin-only
+# x509 verifier, and non-linux syscall shims. Reporting these as blockers
+# would hide the packages that are genuinely ready.
+OUT_OF_SCOPE = re.compile(
+    r"(^|/)(boring|bbig|bcache|_asm|cryptotest|checktest|syso|fipsonly)(/|$)"
+    r"|^crypto/x509/internal/macos$"
+    r"|^internal/syscall/windows"
+)
+
 # Go stdlib packages goish maps somewhere other than src/<path>.
 ALIASES = {
     "math/big": "math/big",
@@ -119,7 +129,9 @@ def goish_dir(import_path):
     return os.path.join(SRC, import_path)
 
 
-def present(d):
+def present(d, import_path=None):
+    if import_path and OUT_OF_SCOPE.search(import_path):
+        return "skipped"
     if d is None:
         return "n/a"
     if d == "":
@@ -163,7 +175,7 @@ def check(import_path, verbose):
     print("   %s" % ("-" * 74))
     for path in sorted(imps):
         d = goish_dir(path)
-        state = present(d)
+        state = present(d, path)
         cov = ""
         if state == "present" and path.startswith("crypto"):
             rel = path[len("crypto"):].lstrip("/") or "."
@@ -216,8 +228,8 @@ def ready(subtree):
         if total == 0 or pct >= 100.0:
             continue
         imps = imports_of(go_files(dirpath))
-        missing = [p for p in imps if present(goish_dir(p)) == "MISSING"]
-        external = [p for p in imps if present(goish_dir(p)) == "external"]
+        missing = [p for p in imps if present(goish_dir(p), p) == "MISSING"]
+        external = [p for p in imps if present(goish_dir(p), p) == "external"]
         rows.append((total - done, rel, pct, missing, external))
     rows.sort(reverse=True)
     print("%-44s %6s  %5s  %s" % ("package", "gap", "done", "blockers"))
