@@ -106,6 +106,12 @@ pub struct BuildError {
 }
 
 impl Builder {
+    // go: none — Go's asn1.go reads `b.err` directly, being in the same
+    // package; goish's files are modules, so the check is a method.
+    pub(super) fn hasError(&self) -> bool {
+        return self.err != crate::nil;
+    }
+
     // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:54-58 SetError
     /// Set the value to be returned as the error from Bytes. Writes
     /// performed after calling SetError are ignored.

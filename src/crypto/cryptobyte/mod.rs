@@ -1,5 +1,7 @@
 // go: package vendor/golang.org/x/crypto/cryptobyte
 
+pub mod asn1;
+mod asn1_file;
 mod builder;
 mod string;
 

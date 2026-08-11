@@ -165,7 +165,7 @@ impl String {
     }
 
     // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:106-118 readUnsigned
-    fn readUnsigned(&mut self, out: &mut uint32, length: int) -> bool {
+    pub(super) fn readUnsigned(&mut self, out: &mut uint32, length: int) -> bool {
         let v = match self.read(length) {
             None => return false,
             Some(v) => v,

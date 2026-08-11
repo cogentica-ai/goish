@@ -29,7 +29,7 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
-use goish::crypto::cryptobyte;
+use goish::crypto::cryptobyte::{self, asn1};
 use goish::encoding::hex;
 use goish::fmt;
 use goish::goslice::slice;
@@ -62,6 +62,58 @@ fn tail(from: usize) -> slice<byte> {
     let d = data();
     let r: &[byte] = &d;
     return slice::__from_vec(r[from..].to_vec());
+}
+
+fn unhex(h: &str) -> slice<byte> {
+    let b = h.as_bytes();
+    let mut out: Vec<byte> = Vec::with_capacity(b.len() / 2);
+    let mut i = 0;
+    while i < b.len() {
+        out.push((nib(b[i]) << 4) | nib(b[i + 1]));
+        i += 2;
+    }
+    return slice::__from_vec(out);
+}
+
+fn nib(c: u8) -> u8 {
+    match c {
+        b'0'..=b'9' => c - b'0',
+        b'a'..=b'f' => c - b'a' + 10,
+        _ => panic!("unhex: not a hex digit"),
+    }
+}
+
+/// crypto/ecdsa's encodeSignature + addASN1IntBytes, which is the reason
+/// this package is being ported at all.
+fn encodeSig(r: &slice<byte>, s: &slice<byte>) -> slice<byte> {
+    let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::<byte>::new()));
+    let rc = r.clone();
+    let sc = s.clone();
+    b.AddASN1(asn1::SEQUENCE, move |b| {
+        addInt(b, &rc);
+        addInt(b, &sc);
+    });
+    let (out, err) = b.Bytes();
+    if err != goish::nil {
+        panic!("encodeSig");
+    }
+    return out;
+}
+
+fn addInt(b: &mut cryptobyte::Builder, bytes: &slice<byte>) {
+    let raw: &[byte] = bytes;
+    let mut start: usize = 0;
+    while start < raw.len() && raw[start] == 0 {
+        start += 1;
+    }
+    let v = slice::__from_vec(raw[start..].to_vec());
+    b.AddASN1(asn1::INTEGER, move |c| {
+        let r: &[byte] = &v;
+        if r[0] & 0x80 != 0 {
+            c.AddUint8(0);
+        }
+        c.AddBytes(&v);
+    });
 }
 
 fn hx(s: &slice<byte>) -> goish::string {
@@ -211,6 +263,88 @@ fn main() {
         check("SetError yields no bytes", fmt::Sprintf!("%d", out.Len()), "0");
     }
 
+    // ---- ASN.1: the exact shape crypto/ecdsa's encodeSignature and
+    // parseSignature use. The long-form case matters most — it is what
+    // drives flushChild's expansion of a one-byte length reservation into
+    // a multi-byte one, the most intricate code in builder.rs.
+    {
+        let r = unhex("a795910512841e8fd1f1b8731ca6bd837d5661988ab0aea8d0d6da50c78280e3");
+        let sv = unhex("6b52761927fc4093746587d082c09c53d9b16d8623840b7431dc66bed0e25727");
+        let der = encodeSig(&r, &sv);
+        check("DER signature", hx(&der), DER);
+
+        let mut input = cryptobyte::String::New(der.clone());
+        let mut inner = cryptobyte::String::default();
+        check(
+            "ReadASN1 SEQUENCE",
+            fmt::Sprintf!("%v", input.ReadASN1(&mut inner, asn1::SEQUENCE)),
+            "true",
+        );
+        check("outer consumed", fmt::Sprintf!("%v", input.Empty()), "true");
+        let mut pr = slice::__from_vec(Vec::<byte>::new());
+        let mut ps = slice::__from_vec(Vec::<byte>::new());
+        check("ReadASN1Integer r", fmt::Sprintf!("%v", inner.ReadASN1Integer(&mut pr)), "true");
+        check("ReadASN1Integer s", fmt::Sprintf!("%v", inner.ReadASN1Integer(&mut ps)), "true");
+        check("round-tripped r", hx(&pr), "a795910512841e8fd1f1b8731ca6bd837d5661988ab0aea8d0d6da50c78280e3");
+        check("round-tripped s", hx(&ps), "6b52761927fc4093746587d082c09c53d9b16d8623840b7431dc66bed0e25727");
+        check("inner consumed", fmt::Sprintf!("%v", inner.Empty()), "true");
+
+        // High bit set gets a 0x00 pad, per DER.
+        let pad = encodeSig(
+            &slice::__from_vec(alloc::vec![0x80u8]),
+            &slice::__from_vec(alloc::vec![0x01u8]),
+        );
+        check("high-bit integer padded", hx(&pad), "300702020080020101");
+
+        // A 200-byte integer forces long-form length.
+        let long = slice::__from_vec(alloc::vec![0x11u8; 200]);
+        let longSig = encodeSig(&long, &slice::__from_vec(alloc::vec![1u8]));
+        let head = {
+            let raw: &[byte] = &longSig;
+            slice::__from_vec(raw[..8].to_vec())
+        };
+        check("long-form header", hx(&head), "3081ce0281c81111");
+        check("long-form total length", fmt::Sprintf!("%d", longSig.Len()), "209");
+        let mut ls = cryptobyte::String::New(longSig);
+        let mut li = cryptobyte::String::default();
+        check(
+            "long-form parses back",
+            fmt::Sprintf!("%v", ls.ReadASN1(&mut li, asn1::SEQUENCE)),
+            "true",
+        );
+
+        // Rejections.
+        let mut junk = cryptobyte::String::default();
+        let mut bad = cryptobyte::String::New(slice::__from_vec(alloc::vec![
+            0x30u8, 0x05, 0x02, 0x01, 0x01
+        ]));
+        check(
+            "truncated SEQUENCE rejected",
+            fmt::Sprintf!("%v", bad.ReadASN1(&mut junk, asn1::SEQUENCE)),
+            "false",
+        );
+        let mut wrong = cryptobyte::String::New(der);
+        check(
+            "wrong tag rejected",
+            fmt::Sprintf!("%v", wrong.ReadASN1(&mut junk, asn1::INTEGER)),
+            "false",
+        );
+        let mut nonmin =
+            cryptobyte::String::New(slice::__from_vec(alloc::vec![0x02u8, 0x02, 0x00, 0x01]));
+        let mut nm = slice::__from_vec(Vec::<byte>::new());
+        check(
+            "non-minimal INTEGER rejected",
+            fmt::Sprintf!("%v", nonmin.ReadASN1Integer(&mut nm)),
+            "false",
+        );
+        let mut neg = cryptobyte::String::New(slice::__from_vec(alloc::vec![0x02u8, 0x01, 0x80]));
+        check(
+            "negative INTEGER rejected",
+            fmt::Sprintf!("%v", neg.ReadASN1Integer(&mut nm)),
+            "false",
+        );
+    }
+
     if unsafe { FAILED } {
         goish::syscall::Exit(1);
     }
@@ -218,3 +352,6 @@ fn main() {
 }
 
 const FLAT: &str = "0102030405060708090a0b0c0d0e0f101112131415161718aabb";
+
+const DER: &str = "3045022100a795910512841e8fd1f1b8731ca6bd837d5661988ab0aea8d0d6da50c7828\
+                      0e302206b52761927fc4093746587d082c09c53d9b16d8623840b7431dc66bed0e25727";
