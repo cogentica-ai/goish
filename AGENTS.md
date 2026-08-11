@@ -50,10 +50,55 @@ replaces an in-flight run rather than queueing behind it.
 |---|---|
 | `cargo check --lib` | typecheck goish runtime |
 | `cargo build --examples` | build all e2e examples |
+| `make lint` | **goishlint ratchet - run before every commit** |
 | `make e2e` | **tiered**: each example at its own loop count |
 | `make e2e-full` | everything x50 - required for runtime-core changes |
 | `make e2e LOOPS=1` | force one run each (uniform; overrides tiers) |
 | `make e2e LOOPS=10 FILTER='^chan_'` | stress one family |
+
+#### `make lint` - the backlog may shrink, never grow
+
+`goishlint src` reports ~13.4k findings, so reading its output is not a
+check. `scripts/lint_baseline.json` records the count per
+**(file, rule)**; `make lint` fails only when a pair goes up.
+
+| Command | What it does |
+|---|---|
+| `make lint` | fail on NEW findings (`SCOPE=src/crypto` to narrow) |
+| `make lint-new` | findings in files absent from the baseline |
+| `make lint-update` | re-record after fixing - review the diff |
+
+Two consequences worth knowing before they surprise you:
+
+- **A file not in the baseline must be lint-clean.** New ports start at
+  zero and stay there. `make lint-new` is the pre-commit check for a
+  file you just wrote.
+- **Fixing file A cannot pay for a regression in file B.** Nor can
+  moving code between files launder a violation.
+
+The gate runs goishlint's **fidelity tier** (GOISH017/018/019/020/021),
+which opens the Go file each anchor cites and diffs it against the port
+- a Go func with no ported counterpart, a struct whose fields drifted, a
+wrong arity, a dropped type/const/var. These are opt-in in goishlint and
+were switched off for this repo's first ~1000 ported functions.
+
+**Unanchored code is invisible to all of it.** GOISH018 only sees fns
+that carry a `// go:` anchor, so a package can read 48/49 in
+port_coverage while nothing verifies a single declaration - which is
+exactly what `fips140/edwards25519` did. `scripts/anchor_by_name.py`
+(with `--dry-run`) anchors an already-written port by name, using the
+enclosing `impl` block to pick the right Go receiver.
+
+When a deviation is deliberate, **name the symbol in the waiver**:
+
+```rust
+// goishlint:ignore GOISH021 ctrAble, aesCtrWrapper — no runtime type assertion
+```
+
+The bare `// goishlint:ignore GOISH021 — <reason>` form still works and
+still means file-wide, which blinds the file to every *future* dropped
+declaration. Prefer the narrow form. Put the waiver next to the prose
+that justifies it.
 
 #### e2e loop tiers - the loop count is a property of the TEST
 
@@ -406,3 +451,38 @@ nistec, bigmod) it is the only option.
 
 Published vectors still earn their place as a *second* anchor when they
 exist — matching both Go and NIST is stronger than matching either.
+
+## 11. Pre-flight before porting a package
+
+`scripts/port_deps.py <import-path>` first, every time. It answers the
+three questions that decide whether a port can land at all: is every
+import present in goish, does each one actually export the *symbols*
+this package calls, and is the target path free. Never claim a
+dependency is missing or present without a command proving it.
+
+```bash
+scripts/port_deps.py crypto/x509/pkix       # can this package be ported?
+scripts/port_deps.py --ready crypto         # rank what is portable now
+scripts/port_coverage.py crypto --pkg tls   # what is missing, and why
+```
+
+Three failure modes it exists to catch, each of which has actually
+happened here:
+
+- **A path can be squatted.** `src/crypto/ecdsa/` held 915 lines of
+  hand-rolled P-256 — invented code with no Go counterpart — and read
+  `present` for four sessions. `port_deps` now reports SQUATTER (path
+  exists, zero anchors, zero coverage) and refuses to call it READY.
+- **The gap column is not the work.** `--ready` has separate `port` and
+  `asm` columns and ranks on the portable one, because a Go func with no
+  body is an assembly stub, not something to port by reading Go. Three
+  wrong leverage claims came from reading the combined number:
+  crypto/sha1, sha256 and sha512 all look like 1-2 function ports and
+  are 100% assembly.
+- **A present import is not a usable one.** `crypto/x509/pkix` read
+  READY while `encoding/asn1` was missing `Marshal` — the one symbol it
+  needs. Inherent impls also do not satisfy a `#[goish::interface]`
+  trait; that `impl Trait for T` block has to exist.
+
+crypto/ is 1017/1499 = 67.8%; the 482 left are 437 portable + 45
+assembly.
