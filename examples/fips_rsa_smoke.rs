@@ -29,6 +29,10 @@
 //  16. DecryptOAEP rejects a tampered ciphertext (ErrDecryption).
 //  17. SignPSS -> VerifyPSS round-trip (SHA-256, salt = hLen).
 //  18. VerifyPSS rejects a tampered signature (ErrVerification).
+//  19. SignPKCS1v15/VerifyPKCS1v15 with crypto.MD5SHA1 — the TLS
+//      1.0/1.1 "MD5+SHA1" hashPrefixes entry, whose DigestInfo prefix is
+//      empty; cross-checked against a real-Go reference signature.
+//  20. Same for crypto.RIPEMD160.
 
 #![no_std]
 #![no_main]
@@ -177,10 +181,10 @@ fn main() {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
-            fmt::Println!("ok 18/18");
+            fmt::Println!("ok 20/20");
             syscall::Exit(0);
         } else {
-            fmt::Println!("FAIL", f as i64, "of 18");
+            fmt::Println!("FAIL", f as i64, "of 20");
             syscall::Exit(1);
         }
     });
@@ -206,6 +210,8 @@ fn run_tests() {
     test_16_oaep_tampered();
     test_17_pss_roundtrip();
     test_18_pss_tampered();
+    test_19_pkcs1v15_md5sha1();
+    test_20_pkcs1v15_ripemd160();
 }
 
 // SHA-256 of MSG, computed at runtime.
@@ -266,6 +272,59 @@ fn test_12_pkcs1v15_known_answer() {
     let (sig, e1) = rsa::SignPKCS1v15(&k, goish::crypto::SHA256, digest);
     let ok = e1.IsNil() && slice_eq_exact(&sig, &from_bytes(REF_SIG_V15));
     write_result(12, b"SignPKCS1v15 vs Go reference ", ok);
+    if !ok {
+        fail();
+    }
+}
+
+// The two hashPrefixes entries the crypto.Hash-keyed port originally
+// dropped: "MD5+SHA1" (TLS 1.0/1.1 — an EMPTY DigestInfo prefix) and
+// "RIPEMD-160". Digests are fixed 0x01.. patterns; the signatures come
+// from Go 1.25.5's own signPKCS1v15 over this same 512-bit key
+// (scripts/goref.sh crypto/internal/fips140/rsa).
+const MD5SHA1_DIGEST: &[u8] = &[
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e,
+    0x1f, 0x20, 0x21, 0x22, 0x23, 0x24,
+];
+const REF_SIG_MD5SHA1: &[u8] = &[
+    0x11, 0x7c, 0x9a, 0x22, 0x93, 0xe4, 0x70, 0xdd, 0x27, 0x46, 0x84, 0x87, 0xff, 0xf4, 0x04,
+    0x63, 0x90, 0xd0, 0xe9, 0x27, 0xf6, 0xd7, 0xd7, 0xb0, 0x60, 0x6d, 0x33, 0x02, 0xf6, 0x57,
+    0xe6, 0x2f, 0x67, 0x84, 0x7d, 0xf9, 0x44, 0x18, 0x06, 0xe2, 0xaa, 0xac, 0x40, 0xe7, 0x96,
+    0x95, 0xe4, 0x6f, 0x45, 0xfb, 0x72, 0xdc, 0x9c, 0xb9, 0xce, 0x15, 0x4f, 0x50, 0x87, 0x10,
+    0xbf, 0x7e, 0x33, 0x43,
+];
+const RIPEMD160_DIGEST: &[u8] = &[
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    0x10, 0x11, 0x12, 0x13, 0x14,
+];
+const REF_SIG_RIPEMD160: &[u8] = &[
+    0x5b, 0xdb, 0x74, 0xbb, 0x17, 0xfc, 0xdb, 0x89, 0xcc, 0xb2, 0xb1, 0x8c, 0x36, 0x78, 0xfb,
+    0xb6, 0x2d, 0x73, 0xc3, 0x4e, 0x15, 0xa8, 0xe9, 0x26, 0x55, 0xb0, 0x71, 0x57, 0xe6, 0x13,
+    0x38, 0x42, 0x4e, 0x37, 0x18, 0x93, 0x24, 0x95, 0x6b, 0x54, 0xbd, 0x4f, 0xfc, 0x9e, 0x2a,
+    0x09, 0xb8, 0xde, 0x95, 0x6b, 0xd2, 0xab, 0x58, 0xba, 0x97, 0x57, 0x2e, 0x85, 0x70, 0xdf,
+    0xda, 0x9a, 0x59, 0x5e,
+];
+
+fn test_19_pkcs1v15_md5sha1() {
+    let k = mk_key();
+    let digest = from_bytes(MD5SHA1_DIGEST);
+    let (sig, e1) = rsa::SignPKCS1v15(&k, goish::crypto::MD5SHA1, digest.clone());
+    let ev = rsa::VerifyPKCS1v15(&k.PublicKey(), goish::crypto::MD5SHA1, digest, sig.clone());
+    let ok = e1.IsNil() && ev.IsNil() && slice_eq_exact(&sig, &from_bytes(REF_SIG_MD5SHA1));
+    write_result(19, b"MD5+SHA1 v1.5 vs Go ref      ", ok);
+    if !ok {
+        fail();
+    }
+}
+
+fn test_20_pkcs1v15_ripemd160() {
+    let k = mk_key();
+    let digest = from_bytes(RIPEMD160_DIGEST);
+    let (sig, e1) = rsa::SignPKCS1v15(&k, goish::crypto::RIPEMD160, digest.clone());
+    let ev = rsa::VerifyPKCS1v15(&k.PublicKey(), goish::crypto::RIPEMD160, digest, sig.clone());
+    let ok = e1.IsNil() && ev.IsNil() && slice_eq_exact(&sig, &from_bytes(REF_SIG_RIPEMD160));
+    write_result(20, b"RIPEMD-160 v1.5 vs Go ref    ", ok);
     if !ok {
         fail();
     }
@@ -461,7 +520,7 @@ fn test_1_new_private_key() {
         from_bytes(P),
         from_bytes(Q),
     );
-    let ok = e.IsNil() && k.PublicKey().Size() == 64 && k.pub_.E == E && k.has_crt;
+    let ok = e.IsNil() && k.PublicKey().Size() == 64 && k.pub_.E == E && k.dP != goish::nil;
     write_result(1, b"NewPrivateKey + Size         ", ok);
     if !ok {
         fail();
@@ -479,7 +538,7 @@ fn test_2_new_with_precomputation() {
         from_bytes(DQ),
         from_bytes(QINV),
     );
-    let ok = e.IsNil() && k.PublicKey().Size() == 64 && k.has_crt;
+    let ok = e.IsNil() && k.PublicKey().Size() == 64 && k.dP != goish::nil;
     write_result(2, b"NewPrivateKeyWithPrecomp     ", ok);
     if !ok {
         fail();
@@ -588,7 +647,7 @@ fn test_9_without_crt() {
     let pubk = k.PublicKey();
     let (ct, e1) = rsa::encrypt(&pubk, from_bytes(MSG));
     let (pt, e2) = rsa::decrypt(&k, ct, false);
-    let ok = e1.IsNil() && e2.IsNil() && !k.has_crt
+    let ok = e1.IsNil() && e2.IsNil() && k.dP == goish::nil
         && slice_eq_trim(&pt, &from_bytes(MSG));
     write_result(9, b"NewPrivateKeyWithoutCRT      ", ok);
     if !ok {
@@ -606,7 +665,7 @@ fn test_10_generate_key() {
         fail();
         return;
     }
-    let ok_size = k.PublicKey().Size() == 32 && k.has_crt;
+    let ok_size = k.PublicKey().Size() == 32 && k.dP != goish::nil;
     // The generated key must encrypt/decrypt round-trip.
     let pubk = k.PublicKey();
     // A small plaintext block, comfortably < the 256-bit modulus.
