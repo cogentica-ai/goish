@@ -964,6 +964,14 @@ name = "sha3_shake_smoke"
 path = "examples/sha3_shake_smoke.rs"
 
 [[example]]
+name = "fips140_tls13_smoke"
+path = "examples/fips140_tls13_smoke.rs"
+
+[[example]]
+name = "fips140_tls12_smoke"
+path = "examples/fips140_tls12_smoke.rs"
+
+[[example]]
 name = "fips140_gcm_smoke"
 path = "examples/fips140_gcm_smoke.rs"
 

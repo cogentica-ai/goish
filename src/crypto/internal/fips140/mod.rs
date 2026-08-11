@@ -40,6 +40,8 @@ pub mod edwards25519;
 pub mod pbkdf2;
 pub mod rsa;
 pub mod subtle;
+pub mod tls12;
+pub mod tls13;
 pub mod hkdf;
 pub mod hmac;
 pub mod sha256;
