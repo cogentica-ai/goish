@@ -298,6 +298,7 @@ fn put_be_u32(b: &mut [u8], v: u32) {
 
 // ─── gcm_generic.go / gcm.go (gcmFallback): GCM core ─────────────────
 
+// go: sdk 1.25.5 crypto/cipher/gcm.go:351-354 gcmInc32
 // Go: gcm.go:351
 //   func gcmInc32(counterBlock *[gcmBlockSize]byte) {
 //       ctr := counterBlock[len(counterBlock)-4:]
@@ -320,6 +321,7 @@ fn block_encrypt<B: Block>(b: &B, dst: &mut [u8; 16], src: &[u8; 16]) {
     dst.copy_from_slice(&v[..16]);
 }
 
+// go: sdk 1.25.5 crypto/cipher/gcm.go:322-332 deriveCounter
 // Go: gcm.go:322
 //   func deriveCounter(H, counter *[gcmBlockSize]byte, nonce []byte) {
 //       if len(nonce) == gcmStandardNonceSize {
@@ -356,6 +358,7 @@ fn deriveCounter(h: &[u8; 16], counter: &mut [u8; 16], nonce: &[u8]) {
     }
 }
 
+// go: sdk 1.25.5 crypto/cipher/gcm.go:334-349 gcmCounterCryptGeneric
 // Go: gcm.go:334
 //   func gcmCounterCryptGeneric(b Block, out, src []byte, counter *[gcmBlockSize]byte) {
 //       var mask [gcmBlockSize]byte
@@ -405,6 +408,7 @@ fn gcmCounterCryptGeneric<B: Block>(
     }
 }
 
+// go: sdk 1.25.5 crypto/cipher/gcm.go:356-362 gcmAuth
 // Go: gcm.go:356
 //   func gcmAuth(out []byte, H, tagMask *[gcmBlockSize]byte, ciphertext, additionalData []byte) {
 //       lenBlock := make([]byte, 16)
@@ -454,6 +458,7 @@ pub struct GCM<B: Block> {
     tagSize: int,
 }
 
+// go: sdk 1.25.5 crypto/cipher/gcm.go:30-35 NewGCM
 // Go: gcm.go:30
 //   func NewGCM(cipher Block) (AEAD, error) {
 //       return newGCM(cipher, gcmStandardNonceSize, gcmTagSize)
@@ -468,6 +473,7 @@ pub fn NewGCM<B: Block>(cipher: B) -> (Option<GCM<B>>, error) {
     newGCM(cipher, gcmStandardNonceSize, gcmTagSize)
 }
 
+// go: sdk 1.25.5 crypto/cipher/gcm.go:44-49 NewGCMWithNonceSize
 // Go: gcm.go:44
 //   func NewGCMWithNonceSize(cipher Block, size int) (AEAD, error) {
 //       return newGCM(cipher, size, gcmTagSize)
@@ -479,6 +485,7 @@ pub fn NewGCMWithNonceSize<B: Block>(cipher: B, size: int) -> (Option<GCM<B>>, e
     newGCM(cipher, size, gcmTagSize)
 }
 
+// go: sdk 1.25.5 crypto/cipher/gcm.go:59-64 NewGCMWithTagSize
 // Go: gcm.go:59
 //   func NewGCMWithTagSize(cipher Block, tagSize int) (AEAD, error) {
 //       return newGCM(cipher, gcmStandardNonceSize, tagSize)
@@ -490,6 +497,7 @@ pub fn NewGCMWithTagSize<B: Block>(cipher: B, tagSize: int) -> (Option<GCM<B>>, 
     newGCM(cipher, gcmStandardNonceSize, tagSize)
 }
 
+// go: sdk 1.25.5 crypto/cipher/gcm.go:66-81 newGCM
 // Go: gcm.go:207
 //   func newGCMFallback(cipher Block, nonceSize, tagSize int) (AEAD, error) {
 //       if tagSize < gcmMinimumTagSize || tagSize > gcmBlockSize {

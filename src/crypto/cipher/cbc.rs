@@ -58,6 +58,7 @@ struct cbc<B: Block> {
     tmp: Vec<byte>,
 }
 
+// go: sdk 1.25.5 crypto/cipher/cbc.go:29-36 newCBC
 // Go: cbc.go:29
 //   func newCBC(b Block, iv []byte) *cbc {
 //       return &cbc{
@@ -84,6 +85,7 @@ fn newCBC<B: Block>(b: B, iv: slice<byte>) -> cbc<B> {
 /// [`BlockMode`].
 pub struct CBCEncrypter<B: Block>(cbc<B>);
 
+// go: sdk 1.25.5 crypto/cipher/cbc.go:50-64 NewCBCEncrypter
 // Go: cbc.go:50
 //   func NewCBCEncrypter(b Block, iv []byte) BlockMode {
 //       if len(iv) != b.BlockSize() {
@@ -204,6 +206,7 @@ impl<B: Block> CBCEncrypter<B> {
 /// [`BlockMode`].
 pub struct CBCDecrypter<B: Block>(cbc<B>);
 
+// go: sdk 1.25.5 crypto/cipher/cbc.go:129-143 NewCBCDecrypter
 // Go: cbc.go:129
 //   func NewCBCDecrypter(b Block, iv []byte) BlockMode {
 //       if len(iv) != b.BlockSize() {

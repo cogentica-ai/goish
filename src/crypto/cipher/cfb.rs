@@ -66,6 +66,7 @@ pub struct CFB<B: Block> {
 //       }
 //   }
 impl<B: Block> Stream for CFB<B> {
+    // go: sdk 1.25.5 crypto/cipher/cfb.go:24-52 XORKeyStream
     fn XORKeyStream(&mut self, dst: &mut slice<byte>, src: slice<byte>) {
         // Go: if len(dst) < len(src) { panic(...) }
         if dst.Len() < src.Len() {
@@ -124,6 +125,7 @@ impl<B: Block> Stream for CFB<B> {
     }
 }
 
+// go: sdk 1.25.5 crypto/cipher/cfb.go:63-68 NewCFBEncrypter
 // Go: cfb.go:62
 //   func NewCFBEncrypter(block Block, iv []byte) Stream { ... return newCFB(block, iv, false) }
 /// `cipher.NewCFBEncrypter(b, iv)` — returns a [`Stream`] that encrypts
@@ -135,6 +137,7 @@ pub fn NewCFBEncrypter<B: Block>(block: B, iv: slice<byte>) -> CFB<B> {
     newCFB(block, iv, false)
 }
 
+// go: sdk 1.25.5 crypto/cipher/cfb.go:79-84 NewCFBDecrypter
 // Go: cfb.go:78
 //   func NewCFBDecrypter(block Block, iv []byte) Stream { ... return newCFB(block, iv, true) }
 /// `cipher.NewCFBDecrypter(b, iv)` — returns a [`Stream`] that decrypts
@@ -146,6 +149,7 @@ pub fn NewCFBDecrypter<B: Block>(block: B, iv: slice<byte>) -> CFB<B> {
     newCFB(block, iv, true)
 }
 
+// go: sdk 1.25.5 crypto/cipher/cfb.go:86-102 newCFB
 // Go: cfb.go:88
 //   func newCFB(block Block, iv []byte, decrypt bool) Stream {
 //       blockSize := block.BlockSize()

@@ -62,6 +62,7 @@ pub struct CTR<B: Block> {
     out_used: usize,
 }
 
+// go: sdk 1.25.5 crypto/cipher/ctr.go:41-64 NewCTR
 // Go: ctr.go:42
 //   func NewCTR(block Block, iv []byte) Stream {
 //       if block, ok := block.(*aes.Block); ok {              // dropped
@@ -104,6 +105,7 @@ pub fn NewCTR<B: Block>(b: B, iv: slice<byte>) -> CTR<B> {
 }
 
 impl<B: Block> CTR<B> {
+    // go: sdk 1.25.5 crypto/cipher/ctr.go:75-94 refill
     // Go: ctr.go:75
     //   func (x *ctr) refill() {
     //       remain := len(x.out) - x.outUsed
