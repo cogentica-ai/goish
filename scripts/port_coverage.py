@@ -80,10 +80,14 @@ def is_foreign_goos(path):
 
     Deliberately narrow: it fires only when EVERY identifier on the
     build line is a GOOS. A constraint mentioning GOARCH or `purego`
-    (`//go:build (!amd64 && !s390x) || purego`) is left alone, because
-    which side of that goish implements is a porting decision, not a
-    platform fact — silently dropping those would shrink the denominator
-    in our favour."""
+    (`//go:build (!amd64 && !s390x) || purego`) is left alone here,
+    because which side of that goish implements is a porting decision,
+    not a platform fact — silently dropping those would shrink the
+    denominator in our favour.
+
+    `other_route` handles those, and only once the *anchors* say which
+    side goish took. That is evidence rather than assumption, which is
+    what makes it safe to shrink the denominator on."""
     try:
         with open(path, errors="replace") as f:
             for line in f:
@@ -194,6 +198,71 @@ def asm_decls(paths):
     return out
 
 
+ROUTE_SUFFIX = re.compile(r"_(asm|amd64|noasm|generic|purego)+$")
+
+
+def build_line(path):
+    """The file's `//go:build` constraint, or '' if it has none."""
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                st = line.strip()
+                if st.startswith("//go:build "):
+                    return st[len("//go:build "):].strip()
+                if st.startswith("package "):
+                    return ""
+    except Exception:
+        pass
+    return ""
+
+
+def route_stem(name):
+    """`p256_asm.go` -> `p256`; `fe_amd64_noasm.go` -> `fe`."""
+    return ROUTE_SUFFIX.sub("", name[:-3])
+
+
+def other_route(gofiles, dirpath, anchored):
+    """Go files implementing an alternative route to the one goish took.
+
+    Go ships some algorithms twice behind mutually exclusive build tags —
+    `p256.go` (`(!amd64 && …) || purego`) and `p256_asm.go`. A build
+    compiles exactly one. goish picks a side by *porting* it, and the
+    anchors say which: nistec carries 33 anchors citing `p256.go`, the
+    pure-Go side.
+
+    The functions unique to the side goish did NOT take are not work. They
+    are scaffolding for the other implementation — `bytesToLimbs`,
+    `p256Add`, `uint64IsZero` exist only to serve the assembly path, and
+    porting them into a tree that took the pure-Go path would be writing
+    code with no caller.
+
+    Counting them was the fourth wrong-leverage claim of the same shape in
+    this repo: nistec read `16 portable + 12 assembly` when its real
+    portable remainder is zero. The bodyless-func test in `asm_decls` does
+    not catch these, because they are ordinary Go with ordinary bodies —
+    just on the road not taken.
+
+    Deliberately conservative: a file is dropped only when it carries a
+    build constraint naming `purego`, an alternative sharing its route
+    stem IS anchored, and the file itself is NOT.
+    """
+    out = set()
+    stems = {}
+    for f in gofiles:
+        if "purego" in build_line(os.path.join(dirpath, f)):
+            stems.setdefault(route_stem(f), []).append(f)
+    for group in stems.values():
+        if len(group) < 2:
+            continue
+        taken = [f for f in group if f in anchored]
+        if not taken:
+            continue
+        for f in group:
+            if f not in anchored:
+                out.add(f)
+    return out
+
+
 def scan_go(root):
     out = {}
     for dirpath, _, files in os.walk(root):
@@ -215,21 +284,34 @@ def scan_go(root):
             funcs |= set(FUNC.findall(src))
             loc += src.count("\n")
         paths = [os.path.join(dirpath, f) for f in gofiles]
+        byfile = {}
+        for f in gofiles:
+            src = open(os.path.join(dirpath, f), errors="replace").read()
+            byfile[f] = {n for n in pc_FUNC(src) if not n.startswith("init")}
         out[rel or "."] = {"nfiles": len(gofiles), "loc": loc,
                            "asm": asm_decls(paths),
+                           "dir": dirpath, "gofiles": gofiles, "byfile": byfile,
                            "funcs": sorted(f for f in funcs if not f.startswith("init"))}
     return out
 
 
+def pc_FUNC(src):
+    return set(FUNC.findall(src))
+
+
+ANCHOR_GO = re.compile(r"//\s*go:[^\n]*?([A-Za-z0-9_]+\.go):")
+
+
 def _facts(paths):
-    idents, loc, anchors = set(), 0, 0
+    idents, loc, anchors, cited = set(), 0, 0, set()
     for p in paths:
         src = open(p, errors="replace").read()
         idents |= set(RSFN.findall(src))
         anchors += len(ANCHOR.findall(src))
+        cited |= set(ANCHOR_GO.findall(src))
         loc += src.count("\n")
     return {"idents": {norm(i) for i in idents}, "loc": loc,
-            "nfiles": len(paths), "anchors": anchors}
+            "nfiles": len(paths), "anchors": anchors, "cited": cited}
 
 
 def scan_rs(root):
@@ -278,8 +360,12 @@ def build(subtree, gr):
     for pkg, g in sorted(gp.items()):
         r = rp.get(pkg)
         have = r["idents"] if r else set()
-        hit = [f for f in g["funcs"] if norm(f) in have]
-        want = g["funcs"]
+        # Functions belonging to a build-tag route goish did not take are
+        # not remaining work — see other_route.
+        dropped = other_route(g["gofiles"], g["dir"], r["cited"] if r else set())
+        want = sorted({n for f, ns in g["byfile"].items() if f not in dropped
+                       for n in ns})
+        hit = [f for f in want if norm(f) in have]
         missing = sorted(set(want) - set(hit))
         # Split the gap: what is left to *write in goish* versus what is
         # left to write in assembly. Ranking on the raw gap has misled
