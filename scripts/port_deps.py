@@ -479,11 +479,23 @@ def ready(subtree):
         external = [p for p, s in states.items() if s == "external"]
         squat = [p for p, s in states.items() if s == "SQUATTER"]
         self_squat = present(goish_dir(rel), rel) == "SQUATTER"
-        rows.append((total - done, rel, pct, missing, external, squat, self_squat))
-    rows.sort(reverse=True)
+        # The symbol check, same as `check()` runs. Without it `--ready`
+        # and `check` disagree: crypto/x509/pkix read READY here while
+        # `check` correctly called it NO-GO on encoding/asn1.Marshal, and
+        # the two views are read by the same person for the same decision.
+        gaps = []
+        if not (self_squat or missing or squat):
+            for p in sorted(imps):
+                if states[p] not in ("present", "SQUATTER"):
+                    continue
+                gone = missing_symbols(goish_dir(p), imps[p]["syms"])
+                if gone:
+                    gaps.append("%s.%s" % (default_local(p), ",".join(gone)))
+        rows.append((total - done, rel, pct, missing, external, squat, self_squat, gaps))
+    rows.sort(key=lambda r: (-r[0], r[1]))
     print("%-44s %6s  %5s  %s" % ("package", "gap", "done", "blockers"))
     print("-" * 100)
-    for gap, rel, pct, missing, external, squat, self_squat in rows:
+    for gap, rel, pct, missing, external, squat, self_squat, gaps in rows:
         if self_squat:
             # READY would be a lie: the path is occupied by invented code
             # and has to be evicted before a line of the port can land.
@@ -492,6 +504,8 @@ def ready(subtree):
             note = "MISSING: " + ",".join(missing)
         elif squat:
             note = "SQUATTER dep: " + ",".join(squat)
+        elif gaps:
+            note = "no symbol: " + " ".join(gaps)
         elif external:
             note = "external: " + ",".join(external)
         else:
