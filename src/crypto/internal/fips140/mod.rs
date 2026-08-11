@@ -40,6 +40,7 @@ pub mod edwards25519;
 pub mod pbkdf2;
 pub mod rsa;
 pub mod mlkem;
+pub mod nistec;
 pub mod ssh;
 pub mod subtle;
 pub mod tls12;
