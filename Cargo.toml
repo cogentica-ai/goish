@@ -980,6 +980,10 @@ name = "fips140_fiat_smoke"
 path = "examples/fips140_fiat_smoke.rs"
 
 [[example]]
+name = "fips140_nistec_smoke"
+path = "examples/fips140_nistec_smoke.rs"
+
+[[example]]
 name = "fips140_mlkem1024_smoke"
 path = "examples/fips140_mlkem1024_smoke.rs"
 
