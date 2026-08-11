@@ -174,6 +174,27 @@ under a different path before concluding anything is missing — the same
 `os.walk`-per-directory rule will hide any other package that grew a
 subdirectory Go lacks.
 
+
+### rsa: five functions are in the wrong package
+
+Probing `crypto/internal/fips140/rsa` with `anchor_by_name.py` (39
+functions matched, 15 unmatched) turned up five that have no counterpart
+in the FIPS package because they belong to the **public** one:
+`EncryptPKCS1v15`, `DecryptPKCS1v15`, `DecryptPKCS1v15SessionKey`,
+`decryptPKCS1v15` and `nonZeroRandomBytes` are all declared in Go's
+`crypto/rsa/pkcs1v15.go`, not `crypto/internal/fips140/rsa/pkcs1v15.go`.
+
+That is why `crypto/rsa` reads 27/40 — `nonZeroRandomBytes` is on its
+MISSING list while the code sits one package down. Moving them is a
+prerequisite for anchoring either package honestly; anchoring them where
+they are would cite the wrong Go file and drag its whole decl list in via
+GOISH018, the same cross-file trap `edwards25519/field` hit.
+
+`crypto/internal/fips140/rsa` also needs the bigmod treatment first: 2410
+lines standing in for five Go files (cast.go, keygen.go, pkcs1v15.go,
+pkcs1v22.go, rsa.go), with the anchor probe showing 1/6/6/12/15
+functions per file — so the split boundaries are already known.
+
 ## Next: nistec proper (75 fns)
 
 The point arithmetic on top of `fiat`. It gates `crypto/ecdsa` (43),
