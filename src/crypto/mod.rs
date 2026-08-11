@@ -36,6 +36,7 @@ pub mod des;
 pub mod ecdh;
 pub mod ecdsa;
 pub mod ed25519;
+pub mod fips140;
 pub mod hkdf;
 pub mod hmac;
 pub mod internal;

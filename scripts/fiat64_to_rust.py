@@ -2,7 +2,11 @@
 """fiat64_to_rust — translate Fiat Cryptography's generated Go field
 arithmetic into goish Rust.
 
-    scripts/fiat64_to_rust.py <p256_fiat64.go> <out.rs>
+    scripts/fiat64_to_rust.py <p256_fiat64.go> <out.rs> [prefix]
+
+`prefix` defaults to the curve name in the filename; pass it explicitly
+for files that do not follow that convention (edwards25519's
+scalar_fiat.go uses `fiatScalar`).
 
 crypto/internal/fips140/nistec/fiat's *_fiat64.go files are 11k lines of
 machine-generated, fully-parenthesized straight-line code. Hand-porting
@@ -59,7 +63,7 @@ ADD_OPS = {'+', '-', '|', '^'}
 # `pNUint1` is declared `type pNUint1 uint64`, so converting to it is
 # exactly `uint64(...)`. `pNInt1` is int64 and never appears in a body —
 # if that ever changes, the parser must raise rather than guess.
-UINT64_CONV = re.compile(r'^(uint64|p(?:224|256|384|521)Uint1)$')
+UINT64_CONV = re.compile(r'^(uint64|\w+Uint1)$')
 
 
 class P:
@@ -181,7 +185,7 @@ def expr(s, curve):
 RE_VAR = re.compile(r'^var (x\d+) uint64$')
 RE_ASSIGN = re.compile(r'^(x\d+) := (.+)$')
 RE_TUPLE = re.compile(r'^(x\d+|_), (x\d+|_) = bits\.(Mul64|Add64|Sub64)\((.+)\)$')
-RE_CMOV = re.compile(r'^p(?:224|256|384|521)CmovznzU64\(&(x\d+), (.+)\)$')
+RE_CMOV = re.compile(r'^\w+CmovznzU64\(&(x\d+), (.+)\)$')
 RE_OUTIDX = re.compile(r'^out1\[(\d+)\] = (.+)$')
 RE_OUTSTAR = re.compile(r'^\*out1 = (.+)$')
 
@@ -241,7 +245,7 @@ def stmt(line, curve):
 
 # ─── function signatures ──────────────────────────────────────────────
 
-RE_FUNC = re.compile(r'^func (p(?:224|256|384|521))(\w+)\((.*)\) \{$')
+RE_FUNC = re.compile(r'^func (\w+?)((?:Cmovznz|Mul|Square|Add|Sub|Opp|Nonzero|SetOne|FromMontgomery|ToMontgomery|Selectznz|ToBytes|FromBytes)\w*)\((.*)\) \{$')
 
 
 def rust_params(curve, name, gosig, nlimbs):
@@ -286,8 +290,15 @@ def rust_params(curve, name, gosig, nlimbs):
 def main():
     src, dst = sys.argv[1], sys.argv[2]
     lines = open(src).read().split('\n')
-    curve = re.search(r'(p224|p256|p384|p521)_fiat64', src).group(1)
-    nlimbs = {'p224': 4, 'p256': 4, 'p384': 6, 'p521': 9}[curve]
+    if len(sys.argv) > 3:
+        curve = sys.argv[3]
+    else:
+        curve = re.search(r'(p224|p256|p384|p521)_fiat64', src).group(1)
+    m = re.search(r'type %sMontgomeryDomainFieldElement \[(\d+)\]uint64' % curve,
+                  open(src).read())
+    if not m:
+        raise SystemExit('cannot find %sMontgomeryDomainFieldElement' % curve)
+    nlimbs = int(m.group(1))
 
     out, i = [], 0
     decls = []
