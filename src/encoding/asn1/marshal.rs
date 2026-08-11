@@ -34,7 +34,8 @@ use super::{isNumeric, isPrintable, BitString, StructuralError, TagAndLength};
 use crate::errors::{error, nil};
 use crate::gostring::string;
 use crate::goslice::slice;
-use crate::types::{byte, int};
+use crate::types::byte;
+use crate::int;
 use crate::{byte as tobyte, int64, uint};
 use alloc::vec::Vec;
 
@@ -379,4 +380,160 @@ pub fn makeNumericString<S: Into<string>>(s: S) -> (stringEncoder, error) {
 // go: sdk 1.25.5 encoding/asn1/marshal.go:347-349 makeUTF8String
 pub fn makeUTF8String<S: Into<string>>(s: S) -> stringEncoder {
     return stringEncoder(s.into());
+}
+
+// ─── composite encoders — marshal.go:65-138 ───────────────────────────
+//
+// These three are the only place goish's asn1 marshal needs trait
+// objects: Go's `multiEncoder` and `setEncoder` are `[]encoder`, and
+// `taggedEncoder` holds two `encoder` fields. All three are unexported in
+// Go, so `Box<dyn encoder>` here does not put a Rust trait object in any
+// public Go-API struct (AGENTS.md §5 rule 3 targets the public surface).
+
+// Go: marshal.go:65 — `type multiEncoder []encoder`
+pub struct multiEncoder(Vec<alloc::boxed::Box<dyn encoder>>);
+
+impl multiEncoder {
+    // go: none — goish idiom: Go writes the conversion
+    // `multiEncoder([]encoder{…})`; goish needs a constructor.
+    pub fn New(v: slice<alloc::boxed::Box<dyn encoder>>) -> Self {
+        return multiEncoder(v.__into_vec());
+    }
+}
+
+impl encoder for multiEncoder {
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:67-73 multiEncoder.Len
+    fn Len(&self) -> int {
+        let mut size: int = 0;
+        for e in self.0.iter() {
+            size += e.Len();
+        }
+        return size;
+    }
+
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:75-81 multiEncoder.Encode
+    fn Encode(&self, dst: &mut slice<byte>) {
+        let mut off: int = 0;
+        for e in self.0.iter() {
+            // Go: e.Encode(dst[off:]) — a window onto the caller's array.
+            // goish encodes into a scratch run and copies it into place,
+            // because `slice<T>` handles do not share a backing store.
+            let n = e.Len();
+            let mut win = slice::__from_vec(alloc::vec![0u8; n as usize]);
+            e.Encode(&mut win);
+            let src: &[byte] = &win;
+            let d: &mut [byte] = dst;
+            d[off as usize..(off + n) as usize].copy_from_slice(src);
+            off += n;
+        }
+    }
+}
+
+// Go: marshal.go:83 — `type setEncoder []encoder`
+pub struct setEncoder(Vec<alloc::boxed::Box<dyn encoder>>);
+
+impl setEncoder {
+    // go: none — goish idiom: see multiEncoder::New.
+    pub fn New(v: slice<alloc::boxed::Box<dyn encoder>>) -> Self {
+        return setEncoder(v.__into_vec());
+    }
+}
+
+impl encoder for setEncoder {
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:85-91 setEncoder.Len
+    fn Len(&self) -> int {
+        let mut size: int = 0;
+        for e in self.0.iter() {
+            size += e.Len();
+        }
+        return size;
+    }
+
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:93-121 setEncoder.Encode
+    //
+    // Per X690 Section 11.6: the encodings of the component values of a
+    // set-of value shall appear in ascending order, the encodings being
+    // compared as octet strings with the shorter components being padded
+    // at their trailing end with 0-octets.
+    //
+    // Go's own note applies unchanged: because the comparison is over TLV
+    // encodings, the padding step can be skipped — if one encoding is
+    // shorter its length octet, the first determining byte, is inherently
+    // smaller.
+    //
+    // Deviation: Go sorts with `slices.SortFunc`, which is unstable.
+    // goish sorts with Rust's stable `sort_by`; that is a strictly
+    // stronger guarantee and cannot change the byte output.
+    fn Encode(&self, dst: &mut slice<byte>) {
+        let mut l: Vec<slice<byte>> = Vec::with_capacity(self.0.len());
+        for e in self.0.iter() {
+            let mut b = slice::__from_vec(alloc::vec![0u8; e.Len() as usize]);
+            e.Encode(&mut b);
+            l.push(b);
+        }
+
+        l.sort_by(|a, b| {
+            let c = crate::bytes::Compare(a.clone(), b.clone());
+            return c.cmp(&0);
+        });
+
+        let mut off: int = 0;
+        for b in l.iter() {
+            let src: &[byte] = b;
+            let d: &mut [byte] = dst;
+            d[off as usize..off as usize + src.len()].copy_from_slice(src);
+            off += int(src.len());
+        }
+    }
+}
+
+// Go: marshal.go:123-129
+//   type taggedEncoder struct { scratch [8]byte; tag encoder; body encoder }
+pub struct taggedEncoder {
+    /// Go: temporary space for encoding the tag and length of an element
+    /// in order to avoid extra allocations. Unread until makeField lands,
+    /// but kept so the struct matches Go's layout (AGENTS.md §5).
+    #[allow(dead_code)]
+    scratch: [byte; 8],
+    tag: alloc::boxed::Box<dyn encoder>,
+    body: alloc::boxed::Box<dyn encoder>,
+}
+
+impl taggedEncoder {
+    // go: none — goish idiom: Go builds it as a struct literal from
+    // inside the package; the fields are private here.
+    pub fn New(
+        tag: alloc::boxed::Box<dyn encoder>,
+        body: alloc::boxed::Box<dyn encoder>,
+    ) -> Self {
+        return taggedEncoder {
+            scratch: [0u8; 8],
+            tag,
+            body,
+        };
+    }
+}
+
+impl encoder for taggedEncoder {
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:131-133 taggedEncoder.Len
+    fn Len(&self) -> int {
+        return self.tag.Len() + self.body.Len();
+    }
+
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:135-138 taggedEncoder.Encode
+    fn Encode(&self, dst: &mut slice<byte>) {
+        // Go: t.tag.Encode(dst); t.body.Encode(dst[t.tag.Len():]).
+        let tn = self.tag.Len();
+        let bn = self.body.Len();
+
+        let mut tbuf = slice::__from_vec(alloc::vec![0u8; tn as usize]);
+        self.tag.Encode(&mut tbuf);
+        let mut bbuf = slice::__from_vec(alloc::vec![0u8; bn as usize]);
+        self.body.Encode(&mut bbuf);
+
+        let (ts, bs): (&[byte], &[byte]) = (&tbuf, &bbuf);
+        let d: &mut [byte] = dst;
+        d[..tn as usize].copy_from_slice(ts);
+        d[tn as usize..(tn + bn) as usize].copy_from_slice(bs);
+    }
 }

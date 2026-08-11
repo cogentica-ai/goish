@@ -24,7 +24,8 @@ use goish::encoding::asn1::{
     BitString, TagAndLength, __appendBase128Int, __appendLength, __appendTagAndLength,
     __base128IntLength, __bitStringEncoder, __byteEncoder, __bytesEncoder, __encoder,
     __int64Encoder, __lengthLength, __makeIA5String, __makeNumericString,
-    __makeObjectIdentifier, __makePrintableString, __makeUTF8String, __stringEncoder,
+    __makeObjectIdentifier, __makePrintableString, __makeUTF8String, __multiEncoder,
+    __setEncoder, __stringEncoder, __taggedEncoder,
 };
 use goish::fmt;
 use goish::goslice::slice;
@@ -180,6 +181,61 @@ fn main() {
     }
     let u = __makeUTF8String("caf\u{e9}");
     check(u.Len() == 5 && encOf(&u) == unhex("636166c3a9"), "makeUTF8String", 5);
+
+
+    // ─── composite encoders ───────────────────────────────────────────
+    fn bx(v: &[u8]) -> alloc::boxed::Box<dyn __encoder> {
+        return alloc::boxed::Box::new(__bytesEncoder(slice::__from_vec(v.to_vec())));
+    }
+
+    // multiEncoder concatenates in order.
+    let m = __multiEncoder::New(slice::__from_vec(alloc::vec![
+        bx(&[0x01, 0x02]),
+        bx(&[0x03]),
+        alloc::boxed::Box::new(__byteEncoder(0xff)),
+    ]));
+    check(m.Len() == 4 && encOf(&m) == unhex("010203ff"), "multiEncoder", 4);
+
+    // setEncoder sorts the encoded elements as octet strings (X690 11.6).
+    let s1 = __setEncoder::New(slice::__from_vec(alloc::vec![
+        bx(&[0x30, 0x02]),
+        bx(&[0x02, 0x01, 0x05]),
+        bx(&[0x0c, 0x01, 0x41]),
+    ]));
+    check(s1.Len() == 8 && encOf(&s1) == unhex("0201050c01413002"), "setEncoder sorts", 8);
+
+    // Same first octet, differing lengths — the length octet decides.
+    let s2 = __setEncoder::New(slice::__from_vec(alloc::vec![
+        bx(&[0x04, 0x02, 0xff, 0xff]),
+        bx(&[0x04, 0x01, 0x00]),
+        bx(&[0x04, 0x03, 0x00, 0x00, 0x00]),
+    ]));
+    check(
+        s2.Len() == 12 && encOf(&s2) == unhex("0401000402ffff0403000000"),
+        "setEncoder length ordering",
+        12,
+    );
+
+    // taggedEncoder: tag octets then body.
+    let tagBuf = __appendTagAndLength(
+        empty(),
+        &TagAndLength { class: 0, tag: 2, length: 1, isCompound: false },
+    );
+    let te = __taggedEncoder::New(
+        alloc::boxed::Box::new(__bytesEncoder(tagBuf)),
+        alloc::boxed::Box::new(__int64Encoder(5)),
+    );
+    check(te.Len() == 3 && encOf(&te) == unhex("020105"), "taggedEncoder", 3);
+
+    let tagBuf2 = __appendTagAndLength(
+        empty(),
+        &TagAndLength { class: 0, tag: 4, length: 3, isCompound: false },
+    );
+    let te2 = __taggedEncoder::New(
+        alloc::boxed::Box::new(__bytesEncoder(tagBuf2)),
+        bx(&[0xde, 0xad, 0xbe]),
+    );
+    check(te2.Len() == 5 && encOf(&te2) == unhex("0403deadbe"), "taggedEncoder octets", 5);
 
     let failed = FAILED.load(Ordering::Acquire);
     let ran = RAN.load(Ordering::Acquire);

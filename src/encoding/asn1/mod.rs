@@ -57,7 +57,9 @@ pub use marshal::{
     lengthLength as __lengthLength, makeIA5String as __makeIA5String,
     makeNumericString as __makeNumericString, makeObjectIdentifier as __makeObjectIdentifier,
     makePrintableString as __makePrintableString, makeUTF8String as __makeUTF8String,
-    oidEncoder as __oidEncoder, stringEncoder as __stringEncoder,
+    multiEncoder as __multiEncoder, oidEncoder as __oidEncoder,
+    setEncoder as __setEncoder, stringEncoder as __stringEncoder,
+    taggedEncoder as __taggedEncoder,
 };
 
 use crate::errors::{error, ErrorTrait};
