@@ -255,11 +255,28 @@ decision that repeats across this tranche.
 | `crypto/ecdh` | 16 | replaces the existing X25519-only module |
 | `crypto/internal/hpke` | 19 | ecdh, hkdf (both done) |
 
-The single largest structural blocker is now **`math/big`**, not crypto:
-`crypto/elliptic` is a `big.Int` API, and `crypto/x509` parses ASN.1
-integers into one. Neither can be ported verbatim without it.
-`crypto/internal/hpke` (19) is the largest package whose dependencies are
-all complete.
+**Correction (same day): `math/big` is not a blocker.** An earlier draft of
+this section claimed `crypto/elliptic` and `crypto/x509` were stuck behind
+an unported `math/big`. That was wrong and was published without checking:
+`src/math/big/mod.rs` is 7053 lines with `Int`, `Rat` and `Float`, and
+`Int` already has every method `crypto/elliptic` calls — `Mul`, `Mod`,
+`Sub`, `Add`, `Lsh`, `Sign`, `Cmp`, `Set`, `SetInt64`, `SetBytes`,
+`Bytes`, `FillBytes`, `BitLen`, `ModInverse`, `ModSqrt`, `SetString`.
+One `ls src/math/` would have disproved the claim before it was written.
+
+Two real caveats remain, and they are about shape rather than absence:
+
+* `Int::ModSqrt` returns `&mut Self`, so it cannot signal Go's "no square
+  root exists" nil. `UnmarshalCompressed` has to verify the residue
+  itself.
+* `Int::FillBytes` returns a fresh slice rather than filling the caller's
+  buffer in place, so Go's `x.FillBytes(ret[1:1+byteLen])` becomes a fill
+  plus a copy-back.
+
+So the ranking above is by size, not by blockage. `crypto/elliptic` (27)
+and `crypto/internal/hpke` (19) are both unblocked today — hpke also wants
+`golang.org/x/crypto/chacha20poly1305`, which is outside the SDK, so
+`crypto/elliptic` is the larger genuinely-ready target.
 
 `crypto/ecdh` needs care rather than effort: `src/crypto/ecdh/mod.rs` is
 today a goish-only X25519 implementation with no Go counterpart, so
