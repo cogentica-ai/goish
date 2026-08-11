@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 
 use crate::crypto::internal::fips140;
 use super::cast::{fipsPCT, fipsSelfTest};
-use crate::crypto::internal::fips140::edwards25519::scalar::{NewScalar, Scalar};
+use crate::crypto::internal::fips140::edwards25519::{NewScalar, Scalar};
 use crate::crypto::internal::fips140::edwards25519::Point;
 use crate::crypto::sha512;
 use crate::errors::{self, error};

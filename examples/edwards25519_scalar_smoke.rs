@@ -24,7 +24,7 @@ extern crate goish;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::fmt;
-use goish::crypto::internal::fips140::edwards25519::scalar::{NewScalar, Scalar};
+use goish::crypto::internal::fips140::edwards25519::{NewScalar, Scalar};
 use goish::types::byte;
 use goish::{slice, syscall};
 

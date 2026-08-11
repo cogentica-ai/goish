@@ -33,14 +33,16 @@
 extern crate alloc;
 
 pub mod field;
-pub mod scalar;
+mod scalar;
+mod scalar_fiat;
+
+pub use scalar::*;
 
 use crate::error;
 use crate::errors;
 use crate::goslice::slice;
 use crate::types::{byte, int};
 use field::Element;
-use scalar::Scalar;
 
 // ─── ConstantTimeByteEq (Go: crypto/internal/fips140/subtle) ──────────
 // edwards25519 needs only this one subtle primitive; ported inline.

@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **769/1507 = 51.0%**, 1053 anchors, **40 packages fully verified**
+Current: **789/1507 = 52.4%**, 1082 anchors, **40 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -145,7 +145,7 @@ work found real divergence in both (see their commits). Still in it:
 
 | package | counted | anchors |
 |---|--:|--:|
-| `crypto/internal/fips140/edwards25519` | 28/49 | 0 | ← 21 REAL gaps, see below |
+| `crypto/internal/fips140/edwards25519` | 48/49 | 29 | only `copyFieldElement` missing |
 | `crypto/internal/fips140/rsa` | 39/39 | 0 |
 | `crypto/rsa` | 27/40 | 0 |
 | `crypto/cipher` | 28/33 | 0 |
@@ -154,23 +154,25 @@ Those are ~154 functions that the percentage already counts. Anchoring
 them does not move the number; it decides whether the number was true.
 
 
-### edwards25519's 21 missing functions are real
+### A subdirectory Go doesn't have makes 20 functions invisible
 
-Anchoring the others found mislabelled assembly; this one is different.
-`crypto/internal/fips140/edwards25519` is missing the entire scalar
-half of the package, not just its anchors:
+`port_coverage.py` maps a Go package to a goish *directory*, so a
+subdirectory is scanned as a separate package. goish had put scalar.go's
+contents in `edwards25519/scalar/mod.rs` — a package Go does not have —
+and all 20 of its functions were therefore counted against nothing. The
+package read 28/49 when it was really 48/49.
 
-| Go file | missing | notes |
-|---|--:|---|
-| `scalar_fiat.go` | 10 | Fiat Cryptography output — **mechanically translatable**: `scripts/fiat64_to_rust.py <file> <out> fiatScalar` produces all ten, the script having been generalised to take an explicit symbol prefix |
-| `scalar.go` | 8 | `NewScalar`, `Multiply`, `MultiplyAdd`, `SetBytesWithClamping`, `SetCanonicalBytes`, `SetUniformBytes`, `isReduced`, `setShortBytes` — a real port |
-| `scalarmult.go` | 2 | `nonAdjacentForm`, `signedRadix16` |
-| `tables.go` | 1 | `copyFieldElement` |
+I misread that as 21 real gaps and wrote it up as such before checking
+whether the code existed. It did. The fix was structural, not a port:
+`scalar/mod.rs` split into `scalar.rs` and `scalar_fiat.rs` at the top
+level, matching Go's own file layout as GOISH015 requires. Only
+`copyFieldElement` (tables.go) is genuinely absent.
 
-The translated `scalar_fiat.rs` is deliberately NOT landed yet: with
-`scalar.go` unported nothing would call it, and adding generated code
-with no consumer moves the percentage without moving the behaviour.
-Land the two together.
+The lesson generalises: **a low percentage on an unanchored package may
+be the measurement, not the port.** Check whether the functions exist
+under a different path before concluding anything is missing — the same
+`os.walk`-per-directory rule will hide any other package that grew a
+subdirectory Go lacks.
 
 ## Next: nistec proper (75 fns)
 
