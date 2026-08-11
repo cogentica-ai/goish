@@ -1,4 +1,5 @@
-// ecdh_x25519_smoke — crypto/ecdh's X25519 curve.
+// ecdh_x25519_smoke — crypto/ecdh: the X25519 curve and the three NIST
+// curves.
 //
 // This file's implementation replaced a goish-only X25519 that predated
 // the port: a hand-written 10-limb radix-2^25.5 field with its own
@@ -157,10 +158,65 @@ fn main() {
         &hexOf(&pk.0),
     );
 
+    // ---- the NIST curves, through the same Curve interface. These reach
+    // crypto/internal/fips140/ecdh, so agreement with Go here is agreement
+    // all the way down to nistec.
+    nist("p256", ecdh::P256(), 32, &[P256_NAME, P256_PUBA, P256_AB]);
+    nist("p384", ecdh::P384(), 48, &[P384_NAME, P384_PUBA, P384_AB]);
+    nist("p521", ecdh::P521(), 66, &[P521_NAME, P521_PUBA, P521_AB]);
+
     if unsafe { FAILED } {
         goish::syscall::Exit(1);
     }
     fmt::Printf!("ecdh_x25519_smoke OK\n");
+}
+
+/// The same deterministic keys the Go reference used for each curve.
+fn nistKey(n: usize, seed: byte) -> slice<byte> {
+    let mut v: Vec<byte> = Vec::with_capacity(n);
+    let mut i: usize = 0;
+    while i < n {
+        v.push((((i * 13 + 3) & 0xff) as byte) ^ seed);
+        i += 1;
+    }
+    if n == 66 {
+        v[0] &= 0x01;
+    } else {
+        v[0] &= 0x0f;
+    }
+    return slice::__from_vec(v);
+}
+
+fn nist(name: &str, c: &'static (dyn ecdh::Curve + Send + Sync), n: usize, want: &[&str; 3]) {
+    let mut nm = alloc::string::String::from(name);
+    nm.push(' ');
+
+    check(&(nm.clone() + "name"), c.String(), want[0]);
+
+    let (ka, err) = c.NewPrivateKey(&nistKey(n, 0x00));
+    check(&(nm.clone() + "NewPrivateKey a err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    let (kb, err) = c.NewPrivateKey(&nistKey(n, 0x5a));
+    check(&(nm.clone() + "NewPrivateKey b err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+
+    check(&(nm.clone() + "public key A"), hx(&ka.PublicKey().Bytes()), want[1]);
+
+    let (ab, err) = ka.ECDH(&kb.PublicKey());
+    check(&(nm.clone() + "ECDH err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(&(nm.clone() + "shared secret"), hx(&ab), want[2]);
+    let (ba, _) = kb.ECDH(&ka.PublicKey());
+    check(
+        &(nm.clone() + "both sides agree"),
+        fmt::Sprintf!("%v", hx(&ab) == hx(&ba)),
+        "true",
+    );
+
+    // A compressed / malformed point is rejected before any arithmetic.
+    let (_, err) = c.NewPublicKey(&slice::__from_vec(alloc::vec![2u8, 3u8]));
+    check(
+        &(nm + "malformed public key rejected"),
+        fmt::Sprintf!("%v", err.Error()),
+        "crypto/ecdh: invalid public key",
+    );
 }
 
 /// `check` wants a &str; this renders a fixed 32-byte key to one.
@@ -178,3 +234,24 @@ const RFC7748: &str = "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b407557
 const PUB_A: &str = "bb50ff9e82a574cfbf820e97f60fb9c143ec7415cf514f8cfd98eff59e059614";
 const PUB_B: &str = "14ee0e07f34e3a17030c6eecf66d3705e80d1e153f7a0ca5b345e83ce9d62643";
 const SHARED: &str = "32dfa776c16b37746565aff7031b504c4208d9a0e4b23076a0887249aaf7b50e";
+const P256_NAME: &str = "P-256";
+const P256_PUBA: &str = "049aa0c8cf2c7d1a3aadf3cc1a9ae6ddb166d942d6725546f18a94a312ba297d\
+                      7e0603f5365ac752648d1e8702cbd60ac61171c171b9d9f9686941227ff77083\
+                      a9";
+const P256_AB: &str = "a09b8f3233878edefe75563b706283c411b5519ef4b7fb73738d6b755d784a00";
+const P384_NAME: &str = "P-384";
+const P384_PUBA: &str = "0452c6243481b08a8ac29360ba811ddc312225e67ecd2056971aa615eccafd05\
+                      3e426c11371027d3f05915e1ef9e5e85a5eeeb49c7163a683843758a6c0c42f6\
+                      cd07f2ecb785ddaf555248cde8b14067c8604acb118475ea5cf6be0720b0d3e1\
+                      b3";
+const P384_AB: &str = "73f789e82ea991989292355f96a74272182c26dd6e5ca4fd53dc662aa38b6d39\
+                      e2bc990b8101369fb69142be0672e618";
+const P521_NAME: &str = "P-521";
+const P521_PUBA: &str = "040195f92e7e40ef0e9339c472a34e8acb2da4130311c0f8b2baf85e62267e0f\
+                      5ca382ad17fc6e29df971623d210ba93a3b7d87a3406febc9ac6abe4954c9b90\
+                      411f5800ae76a8ca4d1cd28254dc78d47faa6e053e1be860ce968e004a00c8ae\
+                      52a3391a2ccf94aeba8565c591fa15ee82d98815a9a47ab58a9c1fb8d391637c\
+                      e40473197f";
+const P521_AB: &str = "01f4145cf251e891ec12108ab0cdbf36dc1f082d4381438f1d9b948c1a6b498e\
+                      449dc91cfe5b1da269bccb8e74532a4086c8861e09b7c95e8183c1d2aa88a3c2\
+                      252a";
