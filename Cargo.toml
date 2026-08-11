@@ -837,6 +837,10 @@ name = "gcm_odd_nonce_smoke"
 path = "examples/gcm_odd_nonce_smoke.rs"
 
 [[example]]
+name = "crypto_rsa_iface_smoke"
+path = "examples/crypto_rsa_iface_smoke.rs"
+
+[[example]]
 name = "crypto_ecdsa_smoke"
 path = "examples/crypto_ecdsa_smoke.rs"
 
