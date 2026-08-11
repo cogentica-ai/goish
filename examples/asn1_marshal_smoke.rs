@@ -25,7 +25,8 @@ use goish::encoding::asn1::{
     __base128IntLength, __bitStringEncoder, __byteEncoder, __bytesEncoder, __encoder,
     __int64Encoder, __lengthLength, __makeIA5String, __makeNumericString,
     __makeObjectIdentifier, __makePrintableString, __makeUTF8String, __multiEncoder,
-    __setEncoder, __stringEncoder, __taggedEncoder, getUniversalType, parseFieldParameters,
+    __makeBigInt, __setEncoder, __stringEncoder, __stripTagAndLength, __taggedEncoder,
+    getUniversalType, parseFieldParameters,
     Enumerated, ObjectIdentifier, RawValue,
 };
 use goish::fmt;
@@ -387,6 +388,39 @@ fn main() {
     check(gut(&TypeOfDyn::<goish::string>()) == (false, 19, false, true), "gut string", 19);
     check(gut(&TypeOfDyn::<u64>()) == (false, 0, false, false), "gut uint rejected", 0);
     check(gut(&TypeOfDyn::<f64>()) == (false, 0, false, false), "gut float64 rejected", 0);
+
+
+    // ─── makeBigInt / stripTagAndLength ───────────────────────────────
+    let bi: [(&str, i64, &str); 16] = [
+        ("0", 1, "00"), ("1", 1, "01"), ("127", 1, "7f"), ("128", 2, "0080"),
+        ("255", 2, "00ff"), ("256", 2, "0100"), ("32767", 2, "7fff"), ("32768", 3, "008000"),
+        ("-1", 1, "ff"), ("-128", 1, "80"), ("-129", 2, "ff7f"), ("-255", 2, "ff01"),
+        ("-256", 2, "ff00"), ("-32768", 2, "8000"),
+        ("123456789012345678901234567890", 13, "018ee90ff6c373e0ee4e3f0ad2"),
+        ("-123456789012345678901234567890", 13, "fe7116f0093c8c1f11b1c0f52e"),
+    ];
+    let mut bidx: i64 = 0;
+    for &(dec, wantLen, wantHex) in bi.iter() {
+        bidx += 1;
+        let mut n = goish::math::big::Int::default();
+        let ok = n.SetString(dec, 10);
+        if !ok.1 { check(false, "big::Int::SetString", 0); continue; }
+        let (e, err) = __makeBigInt(&n);
+        check(
+            err == goish::nil && e.Len() == wantLen && encOf(&*e) == unhex(wantHex),
+            "makeBigInt #",
+            bidx,
+        );
+    }
+
+    let strips: [(&str, &str); 5] = [
+        ("020105", "05"), ("0403deadbe", "deadbe"), ("30050203010203", "0203010203"),
+        ("02", "02"), ("0481c8", ""),
+    ];
+    for &(inHex, wantHex) in strips.iter() {
+        let got = __stripTagAndLength(slice::__from_vec(unhex(inHex)));
+        check(got.__into_vec() == unhex(wantHex), "stripTagAndLength", 0);
+    }
 
     let failed = FAILED.load(Ordering::Acquire);
     let ran = RAN.load(Ordering::Acquire);

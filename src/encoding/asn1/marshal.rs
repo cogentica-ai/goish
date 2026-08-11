@@ -31,6 +31,7 @@
 extern crate alloc;
 
 use super::{isNumeric, isPrintable, BitString, StructuralError, TagAndLength};
+use crate::math::big::Int;
 use crate::errors::{error, nil};
 use crate::gostring::string;
 use crate::goslice::slice;
@@ -536,4 +537,99 @@ impl encoder for taggedEncoder {
         d[..tn as usize].copy_from_slice(ts);
         d[tn as usize..(tn + bn) as usize].copy_from_slice(bs);
     }
+}
+
+// ─── makeBigInt / stripTagAndLength ───────────────────────────────────
+
+// Go: marshal.go:19-20
+//   byte00Encoder encoder = byteEncoder(0x00)
+//   byteFFEncoder encoder = byteEncoder(0xff)
+//
+// go: none — goish idiom: Go declares these as package-level `encoder`
+// vars; a trait object cannot be a `const`, so they are constructors.
+fn byte00Encoder() -> alloc::boxed::Box<dyn encoder> {
+    return alloc::boxed::Box::new(byteEncoder(0x00));
+}
+
+// go: none — goish idiom: see byte00Encoder.
+fn byteFFEncoder() -> alloc::boxed::Box<dyn encoder> {
+    return alloc::boxed::Box::new(byteEncoder(0xff));
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:195-227 makeBigInt
+/// Encode a `big::Int` as a DER INTEGER body.
+///
+/// Deviation: Go takes `*big.Int` and opens with
+/// `if n == nil { return StructuralError{"empty integer"} }` — a guard on
+/// a nil *pointer*. goish's `Int` is a value type with no nil, so that
+/// branch is unreachable and is not ported.
+///
+/// It must not be translated as `if *n == nil`: goish's
+/// `PartialEq<Nil> for Int` is true for **zero**, so that spelling
+/// rejects a legitimate `0` — which Go encodes as the single byte 0x00.
+/// The first version of this function did exactly that, and the Go
+/// reference row for "0" is what caught it.
+pub fn makeBigInt(n: &Int) -> (alloc::boxed::Box<dyn encoder>, error) {
+    if n.Sign() < 0 {
+        // A negative number has to be converted to two's-complement form.
+        // So we'll invert and subtract 1. If the most-significant-bit
+        // isn't set then we'll need to pad the beginning with 0xff in
+        // order to keep the number negative.
+        let mut nMinus1 = Int::default();
+        nMinus1.Neg(n);
+        let one = crate::math::big::NewInt(1);
+        let cur = nMinus1.clone();
+        nMinus1.Sub(&cur, &one);
+        let mut bytes = nMinus1.Bytes().__into_vec();
+        for b in bytes.iter_mut() {
+            *b ^= 0xff;
+        }
+        if bytes.is_empty() || bytes[0] & 0x80 == 0 {
+            return (
+                alloc::boxed::Box::new(multiEncoder::New(slice::__from_vec(alloc::vec![
+                    byteFFEncoder(),
+                    alloc::boxed::Box::new(bytesEncoder(slice::__from_vec(bytes)))
+                        as alloc::boxed::Box<dyn encoder>,
+                ]))),
+                nil,
+            );
+        }
+        return (
+            alloc::boxed::Box::new(bytesEncoder(slice::__from_vec(bytes))),
+            nil,
+        );
+    } else if n.Sign() == 0 {
+        // Zero is written as a single 0 zero rather than no bytes.
+        return (byte00Encoder(), nil);
+    } else {
+        let bytes = n.Bytes().__into_vec();
+        if !bytes.is_empty() && bytes[0] & 0x80 != 0 {
+            // We'll have to pad this with 0x00 in order to stop it looking
+            // like a negative number.
+            return (
+                alloc::boxed::Box::new(multiEncoder::New(slice::__from_vec(alloc::vec![
+                    byte00Encoder(),
+                    alloc::boxed::Box::new(bytesEncoder(slice::__from_vec(bytes)))
+                        as alloc::boxed::Box<dyn encoder>,
+                ]))),
+                nil,
+            );
+        }
+        return (
+            alloc::boxed::Box::new(bytesEncoder(slice::__from_vec(bytes))),
+            nil,
+        );
+    }
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:659-665 stripTagAndLength
+/// Drop the leading tag and length octets, returning the body. If the
+/// input does not parse, it is returned unchanged.
+pub fn stripTagAndLength(in_: slice<byte>) -> slice<byte> {
+    let (_, offset, err) = super::ParseTagAndLength(in_.clone(), 0);
+    if err != nil {
+        return in_;
+    }
+    let raw: &[byte] = &in_;
+    return slice::__from_vec(raw[offset as usize..].to_vec());
 }
