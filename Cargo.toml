@@ -1000,6 +1000,10 @@ name = "elliptic_smoke"
 path = "examples/elliptic_smoke.rs"
 
 [[example]]
+name = "fips140hash_smoke"
+path = "examples/fips140hash_smoke.rs"
+
+[[example]]
 name = "fips140_mlkem1024_smoke"
 path = "examples/fips140_mlkem1024_smoke.rs"
 
