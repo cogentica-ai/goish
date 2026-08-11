@@ -13,6 +13,7 @@ pub mod alias;
 pub mod bigmod;
 pub mod check;
 pub mod drbg;
+pub mod ecdh;
 pub mod ed25519;
 pub mod edwards25519;
 pub mod hkdf;
