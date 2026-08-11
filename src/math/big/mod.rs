@@ -7059,20 +7059,52 @@ mod tests {
 // to makeBigInt. goish's `Int` is a value type, so the identity to match
 // is the struct itself. Its two fields (neg, abs) are unexported and are
 // never walked, so the field list is empty.
+// go: none — goish-only: the field list `__reflect_value` below emits.
+//
+// Go's `big.Int` fields (`neg`, `abs`) are unexported, so nothing can
+// read them through reflect. goish reflects the two values a port needs
+// to rebuild an Int. These names describe what is emitted; they are not
+// Go's field names, and nothing matches on them.
+//
+// The list has to exist. `__reflect_type` used to declare `&[]` while
+// `__reflect_value` emitted two fields, and that mismatch is not
+// cosmetic: `reflect::Zero` builds a struct zero by looping
+// `NumField()`, so the zero of an `Int` had no fields and could never
+// equal a reflected one. `encoding/asn1`'s `makeField` omits an OPTIONAL
+// field with exactly that test — `v == Zero(v.Type())` — so an absent
+// OPTIONAL `*big.Int` was *encoded* where Go omits it, which reaches
+// `crypto/x509`'s `pkcs1PrivateKey.Dp/Dq/Qinv`. Pinned by
+// examples/x509_keys_smoke.rs against `scripts/goref.sh encoding/asn1`.
+static INT_FIELDS: [crate::reflect::StructField; 2] = [
+    crate::reflect::StructField {
+        Name: "neg",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <crate::types::int as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+    crate::reflect::StructField {
+        Name: "abs",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <crate::slice<crate::types::byte> as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+];
+
 impl crate::reflect::Reflect for Int {
     // go: none — goish-only: see above.
     fn __reflect_type() -> crate::reflect::Type {
-        return crate::reflect::Type::__new(crate::reflect::Kind::Struct, "Int", &[]);
+        return crate::reflect::Type::__new(crate::reflect::Kind::Struct, "Int", &INT_FIELDS);
     }
 
     // go: none — goish-only: see above.
     fn __reflect_value(&self) -> crate::reflect::Value {
         // Sign and big-endian magnitude — enough to rebuild the Int with
-        // SetBytes + Neg. `__reflect_type` still reports no fields, as
-        // Go's *big.Int has none exported; but a reflected Int that
-        // discarded its value would be useless to a port that reads it
-        // back, which is what encoding/asn1's makeBody does before
-        // calling makeBigInt.
+        // SetBytes + Neg. A reflected Int that discarded its value would
+        // be useless to a port that reads it back, which is what
+        // encoding/asn1's makeBody does before calling makeBigInt. See
+        // INT_FIELDS above for why the declared list must agree.
         return crate::reflect::Value::Struct {
             ty: <Int as crate::reflect::Reflect>::__reflect_type(),
             fields: alloc::vec![
