@@ -74,6 +74,46 @@ IMPORT_LINE = re.compile(r'^\s*(?:(\w+|_|\.)\s+)?"([^"]+)"', re.M)
 USE = re.compile(r"\b([a-z][a-z0-9]*)\.([A-Z]\w*)\b")
 
 
+def rust_sources(d):
+    """Every .rs under a goish package directory (or the single file)."""
+    out = []
+    if d and os.path.isfile(d + ".rs"):
+        out.append(d + ".rs")
+    if d and os.path.isdir(d):
+        for dirpath, _, names in os.walk(d):
+            out.extend(os.path.join(dirpath, n) for n in names if n.endswith(".rs"))
+    return out
+
+
+def missing_symbols(d, syms):
+    """Which of `syms` are not declared anywhere in the goish package.
+
+    This is the check that matters. Package presence is cheap and almost
+    always true; it was `encoding/asn1` having BitString and RawValue but
+    no Marshal/Unmarshal, and `math/big` having Int without PartialEq,
+    that actually cost time.
+    """
+    if not syms:
+        return []
+    text = ""
+    for f in rust_sources(d):
+        try:
+            text += open(f, errors="replace").read()
+        except Exception:
+            pass
+    if not text:
+        return sorted(syms)
+    gone = []
+    for sym in sorted(syms):
+        pat = re.compile(
+            r"\b(?:pub(?:\([^)]*\))?\s+)?"
+            r"(?:unsafe\s+)?(?:const\s+)?"
+            r"(?:fn|struct|enum|trait|type|static|const|mod|union)\s+%s\b" % re.escape(sym))
+        if not pat.search(text):
+            gone.append(sym)
+    return gone
+
+
 def goroot():
     if os.environ.get("GOROOT"):
         return os.environ["GOROOT"]
@@ -170,7 +210,7 @@ def check(import_path, verbose):
     print("   own coverage: %s" % (self_cov or "not measured"))
     print()
 
-    blockers, externals = [], []
+    blockers, externals, symbol_gaps = [], [], []
     print("   %-42s %-9s %s" % ("import", "state", "coverage"))
     print("   %s" % ("-" * 74))
     for path in sorted(imps):
@@ -185,28 +225,42 @@ def check(import_path, verbose):
             blockers.append(path)
         if state == "external":
             externals.append(path)
+        gone = []
+        if state == "present":
+            gone = missing_symbols(d, imps[path]["syms"])
         if verbose and imps[path]["syms"]:
             syms = sorted(imps[path]["syms"])
             print("       uses: %s" % ", ".join(syms))
+        if gone:
+            print("       ABSENT from goish: %s" % ", ".join(gone))
+            symbol_gaps.append((path, gone))
     print()
 
     if blockers:
         print("   NO-GO: %d import(s) absent from goish: %s"
               % (len(blockers), ", ".join(blockers)))
+    elif symbol_gaps:
+        n = sum(len(g) for _, g in symbol_gaps)
+        print("   NO-GO: every import exists, but %d symbol(s) do not:" % n)
+        for path, gone in symbol_gaps:
+            print("     %s: %s" % (path, ", ".join(gone)))
+        print("   The package being present says nothing about this — it is")
+        print("   the check that actually catches the expensive cases.")
     elif externals:
         print("   PARTIAL: needs non-SDK module(s): %s" % ", ".join(externals))
         print("   Those have no Go-SDK counterpart to port verbatim.")
     else:
         print("   GO: every import exists in goish.")
     print()
-    print("   Package presence is necessary, not sufficient. Before writing:")
-    print("     * grep the exact methods listed above (-v) in their goish module;")
+    print("   Symbol presence still is not sufficient. Before writing:")
+    print("     * a type alias has no methods — `type ObjectIdentifier = slice<int>`")
+    print("       and `type Hash = uint` both look present and take a newtype to fix;")
     print("     * confirm Clone/Default/PartialEq/Copy on every goish type that")
     print("       will sit in a struct field — derives fail silently at design")
     print("       time and loudly 900 lines later;")
     print("     * remember inherent impls do NOT satisfy a #[goish::interface]")
     print("       trait; the `impl Trait for T` block has to be written.")
-    return 1 if blockers else 0
+    return 1 if (blockers or symbol_gaps) else 0
 
 
 def ready(subtree):

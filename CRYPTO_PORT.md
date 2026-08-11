@@ -297,7 +297,9 @@ cost time were symbol-level, not package-level:
 
 ## Readiness, as the tool reports it (2026-08-11)
 
-`scripts/port_deps.py --ready crypto` after the elliptic port:
+`scripts/port_deps.py --ready crypto` after the elliptic port. Note that
+`--ready` checks *package* presence only; run the per-package form to get
+the symbol check, which is what moved pkix out of this list:
 
 | package | gap | state |
 |---|--:|---|
@@ -307,7 +309,7 @@ cost time were symbol-level, not package-level:
 | `nistec` asm | 28 | needs `fips140deps/cpu` |
 | `crypto/internal/hpke` | 19 | external `chacha20poly1305` |
 | `crypto/ecdh` | 16 | **READY** |
-| `crypto/x509/pkix` | 6 | **READY** |
+| `crypto/x509/pkix` | 6 | NO-GO: `asn1.Marshal`/`Unmarshal` absent |
 | `crypto/dsa` | 5 | **READY** |
 | `crypto/cipher` | 5 | **READY** |
 | `crypto/internal/fips140hash` | 3 | **READY** |
