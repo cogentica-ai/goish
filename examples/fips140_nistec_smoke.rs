@@ -1,5 +1,5 @@
-// fips140_nistec_smoke — the P-224, P-384 and P-521 curve implementations
-// of crypto/internal/fips140/nistec.
+// fips140_nistec_smoke — the P-224, P-256, P-384 and P-521 curve
+// implementations of crypto/internal/fips140/nistec.
 //
 // p384.rs and p521.rs are generated from p224.rs by scripts/nistec_gen.py,
 // mirroring Go, where generate.go produces all three from one template.
@@ -7,6 +7,12 @@
 // files share their code and differ only in the generator, the curve B,
 // the element length, and the square-root chain — which is exactly the
 // set of things a substitution bug would corrupt silently.
+//
+// P-256 is a separate file with its own code — Booth-encoded windows, an
+// affine mixed-addition path, and the 88 KiB precomputed generator table.
+// It is checked against Go's *assembly* P-256, which is what runs on this
+// host: two independent implementations of the same curve agreeing is a
+// stronger statement than the generic one agreeing with itself.
 //
 // Every expected value below is what Go prints for the same input, via
 // scripts/goref.sh (AGENTS.md §10). No vector here was transcribed.
@@ -261,6 +267,88 @@ fn main() {
         check("p521 off-curve rejected", fmt::Sprintf!("%v", err.Error()), "P521 point not on curve");
     }
 
+    // ---- P-256 (the purego p256.go, not the assembly one)
+    {
+        let mut g = nistec::NewP256Point();
+        g.SetGenerator();
+        check("p256 G", hx(&g.Bytes()), P256_G);
+        check("p256 Gcompressed", hx(&g.BytesCompressed()), P256_GC);
+        let (gx, err) = g.BytesX();
+        check("p256 BytesX err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check("p256 Gx", hx(&gx), P256_GX);
+
+        let s = scalarOf(32);
+        let mut p = nistec::NewP256Point();
+        let err = p.ScalarBaseMult(&s);
+        check("p256 ScalarBaseMult err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check("p256 sG (base)", hx(&p.Bytes()), P256_SGB);
+
+        let mut q = nistec::NewP256Point();
+        let err = q.ScalarMult(g, &s);
+        check("p256 ScalarMult err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check("p256 sG (mult)", hx(&q.Bytes()), P256_SGM);
+
+        let c = p.BytesCompressed();
+        let mut r = nistec::NewP256Point();
+        let err = r.SetBytes(&c);
+        check("p256 SetBytes(compressed) err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check("p256 round trip (compressed)", hx(&r.Bytes()), P256_RTC);
+
+        let ub = p.Bytes();
+        let mut u = nistec::NewP256Point();
+        let err = u.SetBytes(&ub);
+        check("p256 SetBytes(uncompressed) err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check("p256 round trip (uncompressed)", hx(&u.Bytes()), P256_RTU);
+
+        check("p256 infinity", hx(&nistec::NewP256Point().Bytes()), P256_INF);
+
+        let mut d = nistec::NewP256Point();
+        d.Double(g);
+        check("p256 2G", hx(&d.Bytes()), P256_G2);
+        let mut a = nistec::NewP256Point();
+        a.Add(d, g);
+        check("p256 3G", hx(&a.Bytes()), P256_G3);
+
+        // Scalars 1 and 0. P-256 is the only curve here using Booth
+        // encoding, whose virtual zero bit at index -1 and whose
+        // "selector is zero means infinity" case only show up at the
+        // very bottom of the scalar range.
+        let mut small: Vec<byte> = alloc::vec![0u8; 32];
+        small[31] = 1;
+        let one = slice::__from_vec(small.clone());
+        let mut p1 = nistec::NewP256Point();
+        let err = p1.ScalarBaseMult(&one);
+        check("p256 [1]G base err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check("p256 [1]G (base)", hx(&p1.Bytes()), P256_G1B);
+
+        let mut p1m = nistec::NewP256Point();
+        let err = p1m.ScalarMult(g, &one);
+        check("p256 [1]G mult err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check("p256 [1]G (mult)", hx(&p1m.Bytes()), P256_G1M);
+
+        small[31] = 0;
+        let zero = slice::__from_vec(small);
+        let mut p0 = nistec::NewP256Point();
+        let err = p0.ScalarBaseMult(&zero);
+        check("p256 [0]G base err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check("p256 [0]G (base)", hx(&p0.Bytes()), P256_G0B);
+
+        let mut bad = nistec::NewP256Point();
+        let err = bad.ScalarBaseMult(&scalarOf(31));
+        check("p256 short scalar rejected", fmt::Sprintf!("%v", err.Error()), "invalid scalar length");
+
+        let mut off = Vec::<byte>::with_capacity(1 + 2 * 32);
+        off.push(4);
+        let mut i: usize = 0;
+        while i < 2 * 32 {
+            off.push(1);
+            i += 1;
+        }
+        let mut nope = nistec::NewP256Point();
+        let err = nope.SetBytes(&slice::__from_vec(off));
+        check("p256 off-curve rejected", fmt::Sprintf!("%v", err.Error()), "P256 point not on curve");
+    }
+
     if unsafe { FAILED } {
         goish::syscall::Exit(1);
     }
@@ -359,3 +447,36 @@ const P521_G3: &str = "0401a73d352443de29195dd91d6a64b5959479b52a6e5b123d9ab9e5a
                       37ad7d013e9b03b97dfa62ddd9979f86c6cab814f2f1557fa82a9d0317d2f8ab\
                       1fa355ceec2e2dd4cf8dc575b02d5aced1dec3c70cf105c9bc93a590425f588c\
                       a1ee86c0e5";
+
+const P256_G: &str = "046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2\
+                      964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51\
+                      f5";
+const P256_GC: &str = "036b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2\
+                      96";
+const P256_GX: &str = "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296";
+const P256_SGB: &str = "04c90ebd6cc2c4a923d2a264af59bea1d25b19b8ae3fbec9386b841f85061fed\
+                      7c82c9f875913b1a330cfa8e7d790fda544479aa564d50657ea467b352fa3266\
+                      fa";
+const P256_SGM: &str = "04c90ebd6cc2c4a923d2a264af59bea1d25b19b8ae3fbec9386b841f85061fed\
+                      7c82c9f875913b1a330cfa8e7d790fda544479aa564d50657ea467b352fa3266\
+                      fa";
+const P256_RTC: &str = "04c90ebd6cc2c4a923d2a264af59bea1d25b19b8ae3fbec9386b841f85061fed\
+                      7c82c9f875913b1a330cfa8e7d790fda544479aa564d50657ea467b352fa3266\
+                      fa";
+const P256_RTU: &str = "04c90ebd6cc2c4a923d2a264af59bea1d25b19b8ae3fbec9386b841f85061fed\
+                      7c82c9f875913b1a330cfa8e7d790fda544479aa564d50657ea467b352fa3266\
+                      fa";
+const P256_INF: &str = "00";
+const P256_G2: &str = "047cf27b188d034f7e8a52380304b51ac3c08969e277f21b35a60b48fc476699\
+                      7807775510db8ed040293d9ac69f7430dbba7dade63ce982299e04b79d227873\
+                      d1";
+const P256_G3: &str = "045ecbe4d1a6330a44c8f7ef951d4bf165e6c6b721efada985fb41661bc6e7fd\
+                      6c8734640c4998ff7e374b06ce1a64a2ecd82ab036384fb83d9a79b127a27d50\
+                      32";
+const P256_G1B: &str = "046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2\
+                      964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51\
+                      f5";
+const P256_G0B: &str = "00";
+const P256_G1M: &str = "046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2\
+                      964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51\
+                      f5";
