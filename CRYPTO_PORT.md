@@ -315,9 +315,52 @@ cost time were symbol-level, not package-level:
 | `crypto/sha256`, `crypto/sha1` | 2 each | **READY** |
 | `crypto/internal/fips140deps/godebug` | 2 | **READY** |
 
-`crypto/internal/fips140deps/cpu` and `fips140hash` are each small and
-would unblock 28 and 43 functions respectively — the best leverage
-available that does not require a refactor.
+**Both "leverage" claims in the first draft of this table were wrong**, and
+checking them took one `grep` each:
+
+* `crypto/internal/fips140deps/cpu` does *not* unblock nistec's 28. Those
+  28 are `p256_asm.go` / `p256_ordinv.go` — the assembly tranche, blocked
+  on writing assembly. `cpu` is imported by the generic `p256.go` only for
+  the `cpu.BigEndian` branch, which the goish port already takes
+  unconditionally. Porting it buys fidelity, not coverage: it declares no
+  functions at all.
+* `crypto/internal/fips140hash` does *not* unblock `crypto/ecdsa`'s 43.
+  See below.
+
+## The real blocker for crypto/ecdsa: hash factories are `fn` pointers
+
+`crypto/ecdsa` reaches ML-DSA-style hash injection through:
+
+```go
+h := fips140hash.UnwrapNew(hashFunc.New)   // returns a CLOSURE
+sig, err := ecdsa.SignDeterministic(c, h, k, hash)
+```
+
+`UnwrapNew` returns `func() hash.Hash` capturing `newHash`. Every goish
+signature in the crypto tree that takes a hash constructor takes a bare
+**`fn` pointer**:
+
+```rust
+pub fn New(h: fn() -> Box<dyn Hash + Send + Sync>, key: slice<byte>) -> HMAC
+pub fn SignDeterministic<P: Point>(c: &Curve<P>, h: fn() -> Box<dyn Hash + Send + Sync>, …)
+```
+
+A `fn` pointer cannot hold a capture, so `UnwrapNew` has nothing to return
+that its callers can consume. This is a cross-cutting runtime gap, not a
+missing package: `Unwrap` and `sha3Unwrap` port cleanly (the inner
+`SHA3.s` is `pub(crate)` and `sha3::Digest` is `Clone`, and every Go call
+site either passes a freshly constructed hash or overwrites the variable,
+so returning an owned value changes nothing observable) — only `UnwrapNew`
+is stuck.
+
+**The fix, when someone takes it on:** widen the factory parameter from
+`fn() -> Box<dyn Hash + Send + Sync>` to a generic
+`F: Fn() -> Box<dyn Hash + Send + Sync>` at the ~8 sites that take one
+(`fips140/hmac::New`, `fips140/ecdsa::Sign` / `SignDeterministic` /
+`newDRBG` / `TestingOnlyNewDRBG`, `tls12`, `tls13`, `ssh::Keys`). Mechanical,
+but it touches five packages, so it wants its own session and its own CI
+run — not the tail of another one. Until then `crypto/ecdsa` (43) stays
+blocked, and the readiness table above should be read with that in mind.
 
 **`crypto` (root) is not the 3-function job the number suggests.** Go's
 `type Hash uint` is a defined type with `String`, `Size`, `New` and
