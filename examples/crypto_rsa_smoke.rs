@@ -116,6 +116,12 @@ const TOTAL: u8 = 14;
 #[goish::main]
 fn main() {
     goish::go!(|| {
+        // crypto/rsa rejects keys below 1024 bits (rsa.go:250 checkKeySize).
+        // The hardcoded test key here is 512 bits, so re-enable weak keys
+        // the way Go's own crypto/rsa tests do — they all call
+        // t.Setenv("GODEBUG", "rsa1024min=0") (see rsa_test.go:42,
+        // pkcs1v15_test.go:57, pss_test.go:118, equal_test.go:15).
+        let _ = goish::os::Setenv("GODEBUG", "rsa1024min=0");
         // The hash registry must be populated before SignPSS/OAEP, which
         // resolve hash constructors via crypto::HashNew.
         goish::crypto::RegisterStandardHashes();

@@ -600,6 +600,13 @@ fn test_handshake_canned_server(t: &mut testing::T) {
     use goish::types::{byte, int};
     use goish::errors;
 
+    // The canned server's certificate carries a 512-bit RSA key, and the
+    // RSA ClientKeyExchange runs it through crypto/rsa.EncryptPKCS1v15,
+    // which rejects keys below 1024 bits (rsa.go:250 checkKeySize). Go's
+    // own tests re-enable weak keys the same way — t.Setenv("GODEBUG",
+    // "rsa1024min=0"), cf. crypto/rsa/pkcs1v15_test.go:57.
+    let _ = goish::os::Setenv("GODEBUG", "rsa1024min=0");
+
     // ── Build canned server messages ──────────────────────────────
 
     // ServerHello fragment (handshake msg body without record wrapper):
