@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **789/1507 = 52.4%**, 1082 anchors, **40 packages fully verified**
+Current: **889/1507 = 59.0%**, 1321 anchors, **45 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -47,7 +47,13 @@ Current: **789/1507 = 52.4%**, 1082 anchors, **40 packages fully verified**
 | `crypto/fips140` | 1/1 | 1 → 2 |
 | `crypto/tls/internal/fips140tls` | 3/3 | 1 → 2 |
 | `crypto/internal/fips140` | 12/12 | 7 → 6 |
-| **total** | **484** | |
+| `crypto/internal/fips140/nistec` | 47/75 | 10 → 9 |
+| `crypto/internal/fips140/ecdh` | 13/13 | 2 → 3 |
+| `crypto/internal/fips140/ecdsa` | 30/30 | 4 → 5 |
+| `crypto/mlkem` | 10/10 | 1 → 2 |
+| `crypto/internal/fips140/bigmod` | 60/60 | 3 → 3 |
+| `crypto/internal/fips140/edwards25519/field` | 34/34 | 4 → 4 |
+| **total** | **678** | |
 
 The only functions missing from that table are assembly entry points:
 `blockAVX2`/`blockSHANI` in fips140/sha256 and in crypto/sha1,
@@ -195,32 +201,70 @@ lines standing in for five Go files (cast.go, keygen.go, pkcs1v15.go,
 pkcs1v22.go, rsa.go), with the anchor probe showing 1/6/6/12/15
 functions per file — so the split boundaries are already known.
 
-## Next: nistec proper (75 fns)
+## Done: the elliptic-curve tranche (2026-08-11)
 
-The point arithmetic on top of `fiat`. It gates `crypto/ecdsa` (43),
-`crypto/internal/fips140/ecdsa` (30), `crypto/ecdh` (17),
-`crypto/internal/fips140/ecdh` (13) and `crypto/elliptic` (27) — 130
-functions behind 75.
+`nistec` was the choke point — 75 functions gating 130 more. It is now
+47/75, with every one of the remaining 28 in `p256_asm.go` /
+`p256_ordinv.go`, i.e. the Assembly tranche. Everything it gated that does
+not also need `math/big` is complete:
 
-Two decisions already made, recorded so the next session doesn't re-derive
-them:
+| package | before | after |
+|---|--:|--:|
+| `crypto/internal/fips140/nistec` | 0/75 | 47/75 |
+| `crypto/internal/fips140/ecdh` | 0/13 | **13/13** |
+| `crypto/internal/fips140/ecdsa` | 0/30 | **30/30** |
+| `crypto/mlkem` | 0/10 | **10/10** |
+
+Three decisions were made along the way and are worth not re-deriving:
 
 * **goish implements the `purego` side of nistec's build tags.** `p256.go`
   is `(!amd64 && !arm64 && !ppc64le && !s390x) || purego`; `p256_asm.go`
   is the other side and wraps assembly primitives goish does not have.
-  Likewise `p256_ordinv_noasm.go` over `p256_ordinv.go`. So `p256_asm.go`,
-  `p256_ordinv.go` and `p256_table.go` (a basepoint table used only by the
-  assembly path) belong to the Assembly tranche, not this one.
-* **`p224.go`, `p256.go`, `p384.go` and `p521.go` differ only in the
-  generator coordinates, the curve parameter `b`, the element length, and
-  the square-root addchain** — verified by diffing them with the names
-  normalised. They should be emitted from one template with those four
-  constants read out of the Go source, the way `fiat` is, not retyped.
-* **`p224_sqrt.go` is the exception** and needs a real port: p224 has
+  Likewise `p256_ordinv_noasm.go` over `p256_ordinv.go`. `p256_table.go`
+  is *not* asm-only, though — the generic `p256.go` reads the same
+  88 KiB basepoint table, so it is ported (by
+  `scripts/p256_table_gen.py`).
+* **`p224.go`, `p384.go` and `p521.go` differ only in the generator
+  coordinates, the curve parameter `b`, the element length, and the
+  square-root addchain.** `scripts/nistec_gen.py` generates the latter two
+  from `p224.rs`, mirroring Go's own `generate.go`. It does not assume the
+  files match — it renames the target `.go` back to p224, diffs it against
+  `p224.go`, and aborts on any difference outside those four spots.
+  `p256.go` is *not* part of that family: it is hand-written in Go too.
+* **`p224_sqrt.go` is the exception** and needed a real port: p224 has
   p = 1 mod 4, so it cannot use exponentiation by (p+1)/4 like the others
   and instead runs a constant-time Tonelli–Shanks over a 96-element
-  precomputed table. It is not addchain output and the translators do not
-  apply.
+  precomputed table.
+
+Go's constraint interfaces (`type Point[P any] interface { *nistec.P224Point
+| … }`) appear in both ecdh and ecdsa. Rust has no type unions, so each
+becomes a plain trait implemented for the four point types — the one shape
+decision that repeats across this tranche.
+
+## Next: what is left, by leverage
+
+| package | missing | blocked on |
+|---|--:|---|
+| `crypto/tls` | 259 | x509, ecdsa, ecdh, hpke |
+| `crypto/x509` | 150 | asn1, pkix, math/big |
+| `crypto/ecdsa` | 43 | elliptic (math/big), x509 asn1 |
+| `nistec` asm | 28 | the assembly tranche |
+| `crypto/elliptic` | 27 | **math/big** — not ported |
+| `crypto/internal/fips140/rsa` | 0 (39 unanchored) | anchoring + the file split |
+| `crypto/rsa` | 13 | the five misplaced pkcs1v15 fns |
+| `crypto/ecdh` | 16 | replaces the existing X25519-only module |
+| `crypto/internal/hpke` | 19 | ecdh, hkdf (both done) |
+
+The single largest structural blocker is now **`math/big`**, not crypto:
+`crypto/elliptic` is a `big.Int` API, and `crypto/x509` parses ASN.1
+integers into one. Neither can be ported verbatim without it.
+`crypto/internal/hpke` (19) is the largest package whose dependencies are
+all complete.
+
+`crypto/ecdh` needs care rather than effort: `src/crypto/ecdh/mod.rs` is
+today a goish-only X25519 implementation with no Go counterpart, so
+porting the real package means replacing it and fixing its call sites, not
+adding to it.
 
 ## Per-package conversion recipe (proven on rc4, subtle, des)
 

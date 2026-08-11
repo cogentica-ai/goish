@@ -41,6 +41,7 @@ pub mod hkdf;
 pub mod hmac;
 pub mod internal;
 pub mod md5;
+pub mod mlkem;
 pub mod pbkdf2;
 pub mod poly1305;
 pub mod rand;
