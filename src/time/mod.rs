@@ -2666,6 +2666,33 @@ fn month_short(bs: &[u8]) -> Option<int> {
 // with exactly that test — `v == Zero(v.Type())` — so an absent OPTIONAL
 // `time.Time` was *encoded* where Go omits it. Pinned by
 // examples/x509_keys_smoke.rs against `scripts/goref.sh encoding/asn1`.
+//
+// KNOWN DIVERGENCE, recorded here rather than in asn1 because the cause
+// is this struct: **goish's zero Time is the Unix epoch; Go's is year
+// 1.** `Time::default()` and `time::Unix(0, 0)` are literally the same
+// value — `{sec: 0, nsec: 0, mono: 0}` — so `IsZero()` is true for both
+// and `Year()` is 1970 for both. Go's `time.Time{}` is 0001-01-01 and is
+// distinct from `time.Unix(0, 0)`.
+//
+// So the two OPTIONAL-omission *predicates* differ even though both are
+// spelled "the zero". Measured on `tbsCertificateList.NextUpdate`
+// (`asn1:"optional"`), both strings goref output:
+//
+//   Go     omits at time.Time{} (year 1);
+//          EMITS at time.Unix(0,0) — 170d3730303130313030303030305a
+//   goish  omits at both, because it cannot tell them apart
+//
+// A caller who deliberately means 1970 therefore gets the field dropped
+// where Go writes it. Same family as `big::Int`'s divergence — a goish
+// value type collapsing two Go states into one — and the trade is the
+// same: the case that actually occurs is an *unset* OPTIONAL time, and
+// omitting it is right. Emitting a spurious "700101000000Z" for every
+// unset one, which is what this code did before the field list existed,
+// was the worse error.
+//
+// If `Time` ever grows a real year-1 zero, this splits in two and the
+// explicit-`Unix(0, 0)` half must start emitting those bytes again.
+// Found by the crypto/x509 CRL port.
 static TIME_FIELDS: [crate::reflect::StructField; 2] = [
     crate::reflect::StructField {
         Name: "sec",
