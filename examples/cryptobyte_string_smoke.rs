@@ -1,8 +1,16 @@
-// cryptobyte_string_smoke — golang.org/x/crypto/cryptobyte's String parser.
+// cryptobyte_string_smoke — golang.org/x/crypto/cryptobyte: the String
+// parser and the Builder.
 //
 // cryptobyte is vendored inside GOROOT, and it is the single package
 // standing between goish and crypto/ecdsa (43), crypto/x509 (150) and
-// crypto/tls (259). This is the parsing half.
+// crypto/tls (259).
+//
+// The Builder cases matter more than they look. goish's addLengthPrefixed
+// does not allocate a child Builder — the continuation runs against the
+// same builder with the child's fields saved and restored around it — so
+// the nested and 24/32-bit prefix cases are what prove that
+// restore-and-patch produces the same bytes as Go's parent/child
+// reconciliation.
 //
 // Parser code is the wrong place to guess, so every value below is what Go
 // prints for the same input, via scripts/goref.sh (AGENTS.md §10) — run
@@ -130,8 +138,83 @@ fn main() {
         "false",
     );
 
+    // ---- Builder
+    {
+        let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::<byte>::new()));
+        b.AddUint8(0x01);
+        b.AddUint16(0x0203);
+        b.AddUint24(0x040506);
+        b.AddUint32(0x0708090a);
+        b.AddUint48(0x0b0c0d0e0f10);
+        b.AddUint64(0x1112131415161718);
+        b.AddBytes(&slice::__from_vec(alloc::vec![0xaau8, 0xbb]));
+        let (out, err) = b.Bytes();
+        check("Builder fixed-width appends", hx(&out), FLAT);
+        check("Builder no error", fmt::Sprintf!("%v", err != goish::nil), "false");
+    }
+    {
+        let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::<byte>::new()));
+        b.AddUint8LengthPrefixed(|c| {
+            c.AddBytes(&slice::__from_vec(alloc::vec![1u8, 2, 3]));
+        });
+        let (out, _) = b.Bytes();
+        check("8-bit length prefix", hx(&out), "03010203");
+    }
+    {
+        // Nested prefixes — the case the no-child design has to get right.
+        let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::<byte>::new()));
+        b.AddUint16LengthPrefixed(|c| {
+            c.AddUint8(0x99);
+            c.AddUint8LengthPrefixed(|g| {
+                g.AddBytes(&slice::__from_vec(alloc::vec![7u8, 7, 7, 7]));
+            });
+            c.AddUint8(0x88);
+        });
+        let (out, _) = b.Bytes();
+        check("nested length prefixes", hx(&out), "000799040707070788");
+    }
+    {
+        let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::<byte>::new()));
+        b.AddUint24LengthPrefixed(|c| c.AddBytes(&slice::__from_vec(alloc::vec![5u8, 5])));
+        b.AddUint32LengthPrefixed(|c| c.AddBytes(&slice::__from_vec(alloc::vec![6u8])));
+        let (out, _) = b.Bytes();
+        check("24- and 32-bit prefixes", hx(&out), "00000205050000000106");
+    }
+    {
+        let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::<byte>::new()));
+        b.AddBytes(&slice::__from_vec(alloc::vec![1u8, 2, 3, 4, 5]));
+        b.Unwrite(2);
+        let (out, _) = b.Bytes();
+        check("Unwrite rolls back", hx(&out), "010203");
+    }
+    {
+        // A body too long for its prefix is an error, not a panic.
+        let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::<byte>::new()));
+        b.AddUint8LengthPrefixed(|c| {
+            c.AddBytes(&slice::__from_vec(alloc::vec![0u8; 300]));
+        });
+        let (_, err) = b.Bytes();
+        check(
+            "over-long child is an error",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "true",
+        );
+    }
+    {
+        // SetError short-circuits every later write.
+        let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::<byte>::new()));
+        b.AddUint8(1);
+        b.SetError(goish::errors::New("test"));
+        b.AddUint8(2);
+        let (out, err) = b.Bytes();
+        check("SetError reported", fmt::Sprintf!("%v", err != goish::nil), "true");
+        check("SetError yields no bytes", fmt::Sprintf!("%d", out.Len()), "0");
+    }
+
     if unsafe { FAILED } {
         goish::syscall::Exit(1);
     }
     fmt::Printf!("cryptobyte_string_smoke OK\n");
 }
+
+const FLAT: &str = "0102030405060708090a0b0c0d0e0f101112131415161718aabb";
