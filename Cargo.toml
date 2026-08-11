@@ -829,6 +829,14 @@ name = "x509_pem_decrypt_smoke"
 path = "examples/x509_pem_decrypt_smoke.rs"
 
 [[example]]
+name = "gcm_smoke"
+path = "examples/gcm_smoke.rs"
+
+[[example]]
+name = "gcm_odd_nonce_smoke"
+path = "examples/gcm_odd_nonce_smoke.rs"
+
+[[example]]
 name = "crypto_ecdsa_smoke"
 path = "examples/crypto_ecdsa_smoke.rs"
 
