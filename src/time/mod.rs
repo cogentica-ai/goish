@@ -2650,19 +2650,52 @@ fn month_short(bs: &[u8]) -> Option<int> {
 // `fmt.Sprint` under this key. The runtime only needs Type identity;
 // __reflect_value falls back to a name-only struct shape (no field
 // reflection — Time's internals are private).
+// go: none — goish-only: the field list `__reflect_value` below emits.
+//
+// Go's `time.Time` fields (`wall`, `ext`, `loc`) are unexported, so
+// `reflect.TypeOf(time.Time{}).NumField()` is 3 but none is readable.
+// goish reflects the two values a port actually needs to rebuild a Time.
+// These names describe what is emitted; they are not Go's field names,
+// and nothing matches on them.
+//
+// The list has to exist. `__reflect_type` used to declare `&[]` while
+// `__reflect_value` emitted two fields, and that mismatch is not
+// cosmetic: `reflect::Zero` builds a struct zero by looping `NumField()`,
+// so the zero of a `time.Time` had no fields and could never equal a
+// reflected one. `encoding/asn1`'s `makeField` omits an OPTIONAL field
+// with exactly that test — `v == Zero(v.Type())` — so an absent OPTIONAL
+// `time.Time` was *encoded* where Go omits it. Pinned by
+// examples/x509_keys_smoke.rs against `scripts/goref.sh encoding/asn1`.
+static TIME_FIELDS: [crate::reflect::StructField; 2] = [
+    crate::reflect::StructField {
+        Name: "sec",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <int as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+    crate::reflect::StructField {
+        Name: "nsec",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <int as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+];
+
 impl crate::reflect::Reflect for Time {
     #[inline]
     fn __reflect_type() -> crate::reflect::Type {
-        crate::reflect::Type::__new(crate::reflect::Kind::Struct, "time.Time", &[])
+        crate::reflect::Type::__new(crate::reflect::Kind::Struct, "time.Time", &TIME_FIELDS)
     }
     #[inline]
     fn __reflect_value(&self) -> crate::reflect::Value {
         // The two fields carry enough to rebuild the Time: seconds since
-        // the Unix epoch and the nanosecond remainder. `__reflect_type`
-        // still reports no fields, matching Go — Time's are unexported —
-        // but a reflected Time that discarded its value would be useless
-        // to any port that has to read it back, which is what
-        // encoding/asn1's makeBody does before encoding a UTCTime.
+        // the Unix epoch and the nanosecond remainder. A reflected Time
+        // that discarded its value would be useless to any port that has
+        // to read it back, which is what encoding/asn1's makeBody does
+        // before encoding a UTCTime. See TIME_FIELDS above for why the
+        // declared list must agree with this one.
         crate::reflect::Value::Struct {
             ty: <Self as crate::reflect::Reflect>::__reflect_type(),
             fields: alloc::vec![
