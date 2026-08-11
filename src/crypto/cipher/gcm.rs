@@ -51,7 +51,8 @@ use crate::crypto::cipher::{Block, AEAD};
 use crate::crypto::subtle;
 use crate::errors::{error, nil, New as ErrNew};
 use crate::goslice::slice;
-use crate::types::{byte, int};
+use crate::types::byte;
+use crate::int;
 
 // Go: gcm.go:17 — package-level constants.
 const gcmBlockSize: int = 16;
@@ -512,6 +513,18 @@ pub fn NewGCMWithTagSize<B: Block>(cipher: B, tagSize: int) -> (Option<GCM<B>>, 
 //       return &gcmFallback{...}, nil
 //   }
 fn newGCM<B: Block>(cipher: B, nonceSize: int, tagSize: int) -> (Option<GCM<B>>, error) {
+    // Go dispatches here: an *aes.Block goes to the fips140 gcm.New, and
+    // anything else (outside FIPS 140-only mode) falls through. goish has
+    // only the portable implementation, so this is Go's fallthrough.
+    return newGCMFallback(cipher, nonceSize, tagSize);
+}
+
+// go: sdk 1.25.5 crypto/cipher/gcm.go:207-222 newGCMFallback
+//
+// Go's `gcmFallback` is goish's `GCM<B>` — the generic implementation for
+// non-AES ciphers, which is the only one here. The `gcmAble` arm of Go's
+// body is dropped: no goish Block supplies its own GCM.
+fn newGCMFallback<B: Block>(cipher: B, nonceSize: int, tagSize: int) -> (Option<GCM<B>>, error) {
     if tagSize < gcmMinimumTagSize || tagSize > gcmBlockSize {
         return (None, ErrNew("cipher: incorrect tag size given to GCM"));
     }
@@ -524,14 +537,41 @@ fn newGCM<B: Block>(cipher: B, nonceSize: int, tagSize: int) -> (Option<GCM<B>>,
             ErrNew("cipher: NewGCM requires 128-bit block cipher"),
         );
     }
-    (
+    return (
         Some(GCM {
             cipher,
             nonceSize,
             tagSize,
         }),
         nil,
-    )
+    );
+}
+
+// go: sdk 1.25.5 crypto/cipher/gcm.go:365-375 sliceForAppend
+//
+// Take a slice and a requested number of bytes. It returns a slice with the
+// contents of the given slice followed by that many bytes and a second
+// slice that aliases into it and contains only the extra bytes.
+//
+// Go's two results alias one backing array, which is the whole point of the
+// function there — `out` is written and `ret` is returned. goish's `slice`
+// has no way to hand out two aliasing handles safely, so this returns the
+// combined slice and the offset at which the extra bytes begin; every Go
+// call site uses `out` only as `head[offset..]`.
+//
+// Unused inside goish's GCM, which sizes its output buffer directly. It is
+// ported because Go's gcmFallback.Seal and .Open both call it.
+#[allow(dead_code)]
+fn sliceForAppend(inb: &crate::goslice::slice<byte>, n: int) -> (crate::goslice::slice<byte>, int) {
+    let src: &[byte] = inb;
+    let total = src.len() + n as usize;
+    let mut head: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(total);
+    head.extend_from_slice(src);
+    head.resize(total, 0);
+    return (
+        crate::goslice::slice::__from_vec(head),
+        int(src.len()),
+    );
 }
 
 // Go: gcm.go:240 (gcmFallback.Seal) and gcm.go:275 (gcmFallback.Open)
