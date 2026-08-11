@@ -419,6 +419,20 @@ impl Type {
         Self { key: Some(k), ..self }
     }
 
+    // go: none — goish-only: the read side of [`Type::__with_elem`].
+    //
+    // `Elem()` hands back the element *descriptor*; constructing a
+    // `Value::Slice` needs the late-bound `fn() -> Type` itself, because
+    // that is what the variant stores and what `Value::Type()` calls to
+    // rebuild the slice type. Go has no analogue — `reflect.MakeSlice`
+    // takes the slice `Type` and the runtime already knows its element —
+    // so this is the goish shape of that step, used by
+    // `encoding/asn1`'s `parseSequenceOf`.
+    #[doc(hidden)]
+    pub fn __elem_fn(&self) -> Option<fn() -> Type> {
+        return self.elem;
+    }
+
     /// `Name()` — declared type name as goish `string`, or empty
     /// string for unnamed types. (Internal: the underlying field is
     /// `&'static str` since the name comes from the
@@ -1441,8 +1455,29 @@ where
 /// `Value::Invalid` (consistent with Go's behaviour for a nil-typed
 /// argument: the spec panics, our v1 shape returns Invalid as a less
 /// disruptive default).
+///
+/// Struct and Slice used to fall into that `Invalid` bucket, "until
+/// ports surface a need". Two surfaced it, and the second is a bug the
+/// first hid:
+///
+///   * `encoding/asn1`'s `parseSequenceOf` must hand `parseField` an
+///     element of the right type before there is any data in it —
+///     literally Go's `reflect.Append(ret, reflect.Zero(elemType))`.
+///
+///   * `encoding/asn1`'s `makeField` omits an OPTIONAL field by testing
+///     `v == Zero(v.Type())`. With `Invalid` on the right-hand side that
+///     test never fired for a struct- or slice-shaped field, so an empty
+///     `asn1.RawValue` or a nil `asn1.ObjectIdentifier` was *encoded*
+///     where Go omits it — visible as `MarshalPKCS8PrivateKey` emitting
+///     a curve OID Go leaves out, and an `AlgorithmIdentifier` carrying
+///     an empty parameters element.
+///
+/// A named non-struct type is re-wrapped in `Value::Named` so its zero
+/// keeps the name — the same reason the variant exists at all, and what
+/// `getUniversalType` matches an `ObjectIdentifier` on. `Struct` already
+/// carries its `ty`, so it needs no wrapper.
 pub fn Zero(t: Type) -> Value {
-    match t.Kind() {
+    let inner = match t.Kind() {
         Kind::Bool => Value::Bool(false),
         Kind::Int => Value::Int(0),
         Kind::Int8 => Value::Int8(0),
@@ -1458,11 +1493,40 @@ pub fn Zero(t: Type) -> Value {
         Kind::Float32 => Value::Float32(0.0),
         Kind::Float64 => Value::Float64(0.0),
         Kind::String => Value::String(string::from_static("")),
-        // Slice/Map/Struct/Array/Pointer zero is "the empty/nil
-        // collection". Return Invalid until ports surface a need for
-        // typed empty-collection zeroes.
+        Kind::Struct => {
+            let mut fields: Vec<Value> = Vec::new();
+            let nf = t.NumField();
+            let mut i: int = 0;
+            while i < nf {
+                fields.push(Zero((t.Field(i).Type)()));
+                i += 1;
+            }
+            return Value::Struct { ty: t, fields };
+        }
+        // A slice's zero is the nil slice: no elements, element type
+        // preserved so `Type()` still answers.
+        Kind::Slice => match t.__elem_fn() {
+            Some(elem_type) => Value::Slice {
+                elem_type,
+                items: Vec::new(),
+            },
+            None => Value::Invalid,
+        },
+        // Map/Array/Pointer/Interface/Func/Chan still fall back.
         _ => Value::Invalid,
+    };
+    // "Named" here means *declared* — `asn1.Enumerated`, not `int`. Every
+    // primitive `Type` carries its kind's static name ("int", "bool"),
+    // and the matching `Value` variants carry no name at all, so wrapping
+    // those would make `Zero(int)` unequal to a reflected `int` and break
+    // exactly the OPTIONAL-omission test this function feeds.
+    if inner.IsValid() && t.Name().Len() > 0 && t.Name() != t.Kind().__static_name() {
+        return Value::Named {
+            ty: t,
+            inner: Box::new(inner),
+        };
     }
+    return inner;
 }
 
 // ─── FromReflectValue — typed setter dispatch ─────────────────────────

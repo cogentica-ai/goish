@@ -41,26 +41,35 @@
 // would otherwise lose its name, and the name is the whole basis on
 // which makeBody tells an ObjectIdentifier from any other `[]int`.
 //
-// What this v1 still SKIPS (deferred):
+// The DECODE half is complete too, and lives in asn1.rs: parseField,
+// parseSequenceOf, setDefaultValue, invalidLength, parseUTCTime,
+// parseGeneralizedTime, Unmarshal, UnmarshalWithParams. It was blocked
+// on setter dispatch — `reflect::Value` is an owned enum with no
+// addressability — and is unblocked by taking `&mut Value` and filling a
+// Value *tree*, which `Unmarshal` writes back with `FromReflectValue`.
+// The whole deviation is stated at the head of asn1.rs.
 //
-//   * parseField / parseSequenceOf / Unmarshal / UnmarshalWithParams —
-//     all of which dispatch through `reflect.Value` to *fill* struct
-//     fields. The encode path needed only readers; the decode path needs
-//     setter dispatch for arbitrary user types, which goish's `reflect`
-//     does not have. `Value::SetInt` (6b55670) is the first piece of it.
-//   * parseUTCTime / parseGeneralizedTime — Go uses `time.Parse` with
-//     specific layouts; depends on the format-string interpreter
-//     handling fractional-second + timezone bits.
-//   * (parseBigInt was listed here as blocked on `math/big`. It is not:
-//     `math/big` is ported and `ParseBigInt` above is the port.)
+// (parseBigInt was once listed as blocked on `math/big`. It is not:
+// `math/big` is ported and `ParseBigInt` above is the port.)
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
 extern crate alloc;
 
 
+mod asn1;
 mod common;
 mod marshal;
+
+// The decode half. `Unmarshal` / `UnmarshalWithParams` keep their Go
+// names; everything else in asn1.go's decode path is unexported there and
+// is re-exported `__`-prefixed only so examples can reach it — the same
+// convention marshal.rs's internals already follow.
+pub use asn1::{invalidUnmarshalError, ParseGeneralizedTime, ParseUTCTime, Unmarshal, UnmarshalWithParams};
+pub use asn1::{
+    invalidLength as __invalidLength, parseField as __parseField,
+    parseSequenceOf as __parseSequenceOf, setDefaultValue as __setDefaultValue,
+};
 
 // go: none — goish-only: these five are unexported in Go
 // (`appendBase128Int`, not `AppendBase128Int`), so they are re-exported
@@ -181,13 +190,13 @@ impl ErrorTrait for SyntaxError {
     }
 }
 
-fn structural(msg: &'static str) -> error {
+pub(crate) fn structural(msg: &'static str) -> error {
     crate::errors::Wrap(StructuralError {
         Msg: string::from_static(msg),
     })
 }
 
-fn syntax(msg: &'static str) -> error {
+pub(crate) fn syntax(msg: &'static str) -> error {
     crate::errors::Wrap(SyntaxError {
         Msg: string::from_static(msg),
     })
@@ -618,7 +627,7 @@ pub fn ParseNumericString(bytes: slice<byte>) -> (string, error) {
 }
 
 /// `isNumeric` (asn1.go:392). NumericString = digits + space.
-fn isNumeric(b: byte) -> bool {
+pub(crate) fn isNumeric(b: byte) -> bool {
     (b'0' <= b && b <= b'9') || b == b' '
 }
 
@@ -966,31 +975,51 @@ pub fn ParseRaw(data: slice<byte>) -> (RawValue, slice<byte>, error) {
     (rv, slice::__from_vec(rest), crate::errors::nil)
 }
 
-/// `ParseBigInt` — decode a DER INTEGER value-bytes slice into a
-/// `math/big::Int`. Handles two's-complement sign extension.
-/// Input is the *value* bytes only (tag + length already stripped).
+// go: sdk 1.25.5 encoding/asn1/asn1.go:133 bigOne
+/// Go declares `var bigOne = big.NewInt(1)`; goish has no non-const
+/// static of a heap type, so it is a function — the same idiom
+/// `crypto/x509`'s OID vars use.
+fn bigOne() -> big::Int {
+    return big::NewInt(1);
+}
+
+// go: sdk 1.25.5 encoding/asn1/asn1.go:137-155 parseBigInt
+/// Treat the given bytes as a big-endian, signed integer and return the
+/// result. Input is the *value* bytes only (tag + length stripped).
+///
+/// This used to strip a leading `0x00` and `SetBytes` the rest, which is
+/// right for the positive case only: a DER INTEGER whose first byte has
+/// the high bit set is a *negative* two's-complement number, and the old
+/// body returned its magnitude with the wrong sign and the wrong value.
+/// Nothing caught it because the only caller was RSA key material, which
+/// is always positive; `parseField` now routes every `big::Int` field
+/// through here, including the signed ones (`Certificate.SerialNumber`
+/// is explicitly allowed to be negative by RFC 5280 §4.1.2.2).
 pub fn ParseBigInt(data: slice<byte>) -> (big::Int, error) {
     let err = CheckInteger(data.clone());
     if !err.IsNil() {
         return (big::Int::new(), err);
     }
+    let mut ret = big::Int::new();
     let n = data.Len();
-    // Negative if top bit set (two's-complement DER).
-    // For our use case (RSA key components) all values are positive, but
-    // DER integers may have a leading 0x00 to keep the sign bit clear.
-    // Strip the leading 0x00 padding byte if present.
-    // Use 0i64 (int) to index into the goish slice<byte>.
-    let start: int = if n > 0 && data[0i64] == 0x00 { 1 } else { 0 };
-    let stripped_len = n - start;
-    let mut buf: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(stripped_len as usize); // goishlint:ignore GOISH005
-    let mut i: int = start;
-    while i < n {
-        buf.push(data[i]);
-        i += 1;
+    // Go: if len(bytes) > 0 && bytes[0]&0x80 == 0x80 { … }
+    if n > 0 && (data[0i64] & 0x80) == 0x80 {
+        // This is a negative number.
+        let mut notBytes: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(n as usize);
+        let mut i: int = 0;
+        while i < n {
+            notBytes.push(!data[i]);
+            i += 1;
+        }
+        ret.SetBytes(slice::__from_vec(notBytes));
+        let sum = ret.clone();
+        ret.Add(&sum, &bigOne());
+        let mag = ret.clone();
+        ret.Neg(&mag);
+        return (ret, crate::errors::nil);
     }
-    let mut z = big::Int::new();
-    z.SetBytes(slice::__from_vec(buf));
-    (z, crate::errors::nil)
+    ret.SetBytes(data);
+    return (ret, crate::errors::nil);
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────

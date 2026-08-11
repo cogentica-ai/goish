@@ -1,4 +1,4 @@
-// go: file crypto/x509/x509.go decls: SignatureAlgorithm.isRSAPSS, SignatureAlgorithm.hashFunc, SignatureAlgorithm.String, PublicKeyAlgorithm.String, getSignatureAlgorithmFromAI, getPublicKeyAlgorithmFromOID, namedCurveFromOID, oidFromNamedCurve, oidFromECDHCurve, extKeyUsageFromOID, oidFromExtKeyUsage, InsecureAlgorithmError.Error, ConstraintViolationError.Error, Certificate.Equal, Certificate.hasSANExtension, Certificate.CheckSignatureFrom, Certificate.CheckSignature, Certificate.hasNameConstraints, Certificate.getSANExtension, signaturePublicKeyAlgoMismatchError, checkSignature, Certificate.CheckCRLSignature, UnhandledCriticalExtension.Error, oidInExtensions, isIA5String
+// go: file crypto/x509/x509.go decls: ParsePKIXPublicKey, SignatureAlgorithm.isRSAPSS, SignatureAlgorithm.hashFunc, SignatureAlgorithm.String, PublicKeyAlgorithm.String, getSignatureAlgorithmFromAI, getPublicKeyAlgorithmFromOID, namedCurveFromOID, oidFromNamedCurve, oidFromECDHCurve, extKeyUsageFromOID, oidFromExtKeyUsage, InsecureAlgorithmError.Error, ConstraintViolationError.Error, Certificate.Equal, Certificate.hasSANExtension, Certificate.CheckSignatureFrom, Certificate.CheckSignature, Certificate.hasNameConstraints, Certificate.getSANExtension, signaturePublicKeyAlgoMismatchError, checkSignature, Certificate.CheckCRLSignature, UnhandledCriticalExtension.Error, oidInExtensions, isIA5String
 //
 // The X.509 type surface: the algorithm identifiers, the OID tables and
 // the `Certificate` struct every other file in the package hangs on.
@@ -49,7 +49,7 @@
 //     certificate *signed* with RSA-PSS parses, but reports its
 //     signature algorithm as unknown.
 //
-// goishlint:ignore GOISH018 ParsePKIXPublicKey, marshalPublicKey, MarshalPKIXPublicKey, reverseBitsInAByte, asn1BitLength, marshalSANs, buildCertExtensions, marshalKeyUsage, marshalExtKeyUsage, marshalBasicConstraints, marshalCertificatePolicies, buildCSRExtensions, subjectBytes, signingParamsForKey, signTBS, CreateCertificate, ParseCRL, ParseDERCRL, CreateCRL, newRawAttributes, parseRawAttributes, parseCSRExtensions, CreateCertificateRequest, ParseCertificateRequest, parseCertificateRequest, CreateRevocationList — the marshaling, signing and CSR/CRL halves; see the banner.
+// goishlint:ignore GOISH018 marshalPublicKey, MarshalPKIXPublicKey, reverseBitsInAByte, asn1BitLength, marshalSANs, buildCertExtensions, marshalKeyUsage, marshalExtKeyUsage, marshalBasicConstraints, marshalCertificatePolicies, buildCSRExtensions, subjectBytes, signingParamsForKey, signTBS, CreateCertificate, ParseCRL, ParseDERCRL, CreateCRL, newRawAttributes, parseRawAttributes, parseCSRExtensions, CreateCertificateRequest, ParseCertificateRequest, parseCertificateRequest, CreateRevocationList — the marshaling, signing and CSR/CRL halves; see the banner.
 // goishlint:ignore GOISH019 pkixPublicKey, certificate, tbsCertificate, dsaAlgorithmParameters, validity, authKeyId, pssParameters, basicConstraints, policyInformation, authorityInfoAccess, distributionPoint, distributionPointName, CertificateRequest, tbsCertificateRequest, certificateRequest, RevocationListEntry, RevocationList, certificateList, tbsCertificateList — ASN.1 shapes that exist only to be handed to asn1.Marshal / asn1.Unmarshal, and types of the unported halves. `publicKeyInfo`, the one parser.go reads, is here.
 // goishlint:ignore GOISH021 pkixPublicKey, certificate, tbsCertificate, dsaAlgorithmParameters, validity, authKeyId, pssParameters, basicConstraints, policyInformation, authorityInfoAccess, distributionPoint, distributionPointName, CertificateRequest, tbsCertificateRequest, certificateRequest, RevocationListEntry, RevocationList, certificateList, tbsCertificateList, emptyRawValue, pssParametersSHA256, pssParametersSHA384, pssParametersSHA512, oidSHA256, oidSHA384, oidSHA512, oidMGF1, x509usepolicies, x509sha256skid, pemCRLPrefix, pemType, emptyASN1Subject, oidExtensionRequest, x509v2Version, oidExtensionSubjectKeyId, oidExtensionKeyUsage, oidExtensionExtendedKeyUsage, oidExtensionBasicConstraints, oidExtensionCertificatePolicies, oidExtensionCRLDistributionPoints, publicKeyAlgoName, signatureAlgorithmDetails, extKeyUsageOIDs — the RSA-PSS parameter blobs and the marshaling-side extension OIDs, which land with the halves they belong to. The extension OIDs parser.go reads by name (SubjectAltName, NameConstraints, AuthorityInfoAccess, AuthorityKeyId, CRLNumber, ReasonCode) are here.
 
@@ -93,6 +93,128 @@ pub(super) struct publicKeyInfo {
     pub Raw: asn1::RawContent,
     pub Algorithm: pkix::AlgorithmIdentifier,
     pub PublicKey: asn1::BitString,
+}
+
+// go: none — goish-only, and a prerequisite rather than a port:
+// `asn1.Unmarshal` reaches its recipient through `reflect`, so
+// `publicKeyInfo` needs a descriptor. Hand-written rather than
+// `#[goish::reflect]`-generated for the reason given at the foot of
+// crypto/x509/pkix/pkix.rs. The `Raw asn1.RawContent` first field is
+// load-bearing: `parseField`'s struct arm fills it with the element's
+// full DER, which is what `parsePublicKey` hands to `parseCertificate`.
+static PUBLIC_KEY_INFO_FIELDS: [crate::reflect::StructField; 3] = [
+    crate::reflect::StructField {
+        Name: "Raw",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <asn1::RawContent as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+    crate::reflect::StructField {
+        Name: "Algorithm",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <pkix::AlgorithmIdentifier as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+    crate::reflect::StructField {
+        Name: "PublicKey",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <asn1::BitString as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+];
+
+impl crate::reflect::Reflect for publicKeyInfo {
+    // go: none — goish-only: the reflect descriptor. See the note above.
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(
+            crate::reflect::Kind::Struct,
+            "publicKeyInfo",
+            &PUBLIC_KEY_INFO_FIELDS,
+        );
+    }
+
+    // go: none — goish-only: the reflect descriptor. See the note above.
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return crate::reflect::Value::Struct {
+            ty: <publicKeyInfo as crate::reflect::Reflect>::__reflect_type(),
+            fields: alloc::vec![
+                crate::reflect::Reflect::__reflect_value(&self.Raw),
+                crate::reflect::Reflect::__reflect_value(&self.Algorithm),
+                crate::reflect::Reflect::__reflect_value(&self.PublicKey),
+            ],
+        };
+    }
+}
+
+impl crate::reflect::FromReflectValue for publicKeyInfo {
+    // go: none — goish-only: the write half of the descriptor above.
+    fn from_reflect_value(v: crate::reflect::Value) -> (Self, error) {
+        use crate::reflect::FromReflectValue;
+        if v.Kind() != crate::reflect::Kind::Struct {
+            return (
+                publicKeyInfo::default(),
+                errors::New("x509: expected publicKeyInfo"),
+            );
+        }
+        let (raw, err) = <asn1::RawContent as FromReflectValue>::from_reflect_value(v.Field(0));
+        if err != errors::nil {
+            return (publicKeyInfo::default(), err);
+        }
+        let (algo, err) =
+            <pkix::AlgorithmIdentifier as FromReflectValue>::from_reflect_value(v.Field(1));
+        if err != errors::nil {
+            return (publicKeyInfo::default(), err);
+        }
+        let (bs, err) = <asn1::BitString as FromReflectValue>::from_reflect_value(v.Field(2));
+        if err != errors::nil {
+            return (publicKeyInfo::default(), err);
+        }
+        return (
+            publicKeyInfo {
+                Raw: raw,
+                Algorithm: algo,
+                PublicKey: bs,
+            },
+            errors::nil,
+        );
+    }
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:72-82 ParsePKIXPublicKey
+/// Parse a public key in PKIX, ASN.1 DER form. The encoded public key is
+/// a SubjectPublicKeyInfo structure (see RFC 5280, Section 4.1).
+///
+/// It returns an `rsa::PublicKey`, `dsa::PublicKey`, `ecdsa::PublicKey`,
+/// `ed25519::PublicKey`, or `ecdh::PublicKey` (for X25519), wrapped in
+/// `Any` — see the banner for why `Any::new_fn` rather than `Any::new`.
+///
+/// This kind of key is commonly encoded in PEM blocks of type
+/// "PUBLIC KEY".
+pub fn ParsePKIXPublicKey(derBytes: slice<byte>) -> (Any, error) {
+    let mut pki = publicKeyInfo::default();
+    let (rest, err) = asn1::Unmarshal(derBytes.clone(), &mut pki);
+    if err != errors::nil {
+        let mut p1 = super::pkcs1::pkcs1PublicKey::default();
+        let (_, e) = asn1::Unmarshal(derBytes.clone(), &mut p1);
+        if e == errors::nil {
+            return (
+                Any::default(),
+                errors::New(
+                    "x509: failed to parse public key (use ParsePKCS1PublicKey instead for this key format)",
+                ),
+            );
+        }
+        return (Any::default(), err);
+    } else if rest.Len() != 0 {
+        return (
+            Any::default(),
+            errors::New("x509: trailing data after ASN.1 of public-key"),
+        );
+    }
+    return super::parser::parsePublicKey(&pki);
 }
 
 // Go: x509.go:213 — `type SignatureAlgorithm int`
