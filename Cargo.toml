@@ -790,6 +790,10 @@ name = "x509_certpool_smoke"
 path = "examples/x509_certpool_smoke.rs"
 
 [[example]]
+name = "x509_verify_smoke"
+path = "examples/x509_verify_smoke.rs"
+
+[[example]]
 name = "asn1_smoke"
 path = "examples/asn1_smoke.rs"
 

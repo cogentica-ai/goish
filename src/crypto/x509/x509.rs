@@ -1,18 +1,20 @@
-// go: file crypto/x509/x509.go decls: SignatureAlgorithm.isRSAPSS, SignatureAlgorithm.hashFunc, SignatureAlgorithm.String, PublicKeyAlgorithm.String, getSignatureAlgorithmFromAI, getPublicKeyAlgorithmFromOID, namedCurveFromOID, oidFromNamedCurve, oidFromECDHCurve, extKeyUsageFromOID, oidFromExtKeyUsage, InsecureAlgorithmError.Error, ConstraintViolationError.Error, Certificate.Equal, Certificate.hasSANExtension, Certificate.hasNameConstraints, Certificate.getSANExtension, UnhandledCriticalExtension.Error, oidInExtensions, isIA5String
+// go: file crypto/x509/x509.go decls: SignatureAlgorithm.isRSAPSS, SignatureAlgorithm.hashFunc, SignatureAlgorithm.String, PublicKeyAlgorithm.String, getSignatureAlgorithmFromAI, getPublicKeyAlgorithmFromOID, namedCurveFromOID, oidFromNamedCurve, oidFromECDHCurve, extKeyUsageFromOID, oidFromExtKeyUsage, InsecureAlgorithmError.Error, ConstraintViolationError.Error, Certificate.Equal, Certificate.hasSANExtension, Certificate.CheckSignatureFrom, Certificate.CheckSignature, Certificate.hasNameConstraints, Certificate.getSANExtension, signaturePublicKeyAlgoMismatchError, checkSignature, Certificate.CheckCRLSignature, UnhandledCriticalExtension.Error, oidInExtensions, isIA5String
 //
 // The X.509 type surface: the algorithm identifiers, the OID tables and
 // the `Certificate` struct every other file in the package hangs on.
 //
 // **Partial port, and deliberately so.** x509.go is 2565 lines. What is
 // here is the *parsing* half of its type surface — everything
-// `parser.go` reads or writes. The *marshaling* half (CreateCertificate,
-// buildCertExtensions, marshalSANs, signTBS, MarshalPKIXPublicKey and
-// their helpers), the signature-checking half (CheckSignature,
-// CheckSignatureFrom, checkSignature), and the CSR / CRL types
+// `parser.go` reads or writes — plus the *signature-checking* half
+// (CheckSignatureFrom, CheckSignature, checkSignature,
+// signaturePublicKeyAlgoMismatchError, CheckCRLSignature), which
+// `verify.go`'s chain builder calls. The *marshaling* half
+// (CreateCertificate, buildCertExtensions, marshalSANs, signTBS,
+// MarshalPKIXPublicKey and their helpers) and the CSR / CRL types
 // (CertificateRequest, RevocationList and friends) are absent, not
-// stubbed. Both halves are blocked on the same two things: Go builds
-// certificates with `asn1.Marshal` of tagged structs, and reads the
-// leftovers with `asn1.Unmarshal`, which goish does not have.
+// stubbed; they are blocked on Go building certificates with
+// `asn1.Marshal` of tagged structs and reading the leftovers with
+// `asn1.Unmarshal`, which goish does not have.
 //
 // Deviations from x509[go] @ Go 1.25.5:
 //
@@ -47,7 +49,7 @@
 //     certificate *signed* with RSA-PSS parses, but reports its
 //     signature algorithm as unknown.
 //
-// goishlint:ignore GOISH018 ParsePKIXPublicKey, marshalPublicKey, MarshalPKIXPublicKey, checkSignature, signaturePublicKeyAlgoMismatchError, CheckSignature, CheckSignatureFrom, CheckCRLSignature, reverseBitsInAByte, asn1BitLength, marshalSANs, buildCertExtensions, marshalKeyUsage, marshalExtKeyUsage, marshalBasicConstraints, marshalCertificatePolicies, buildCSRExtensions, subjectBytes, signingParamsForKey, signTBS, CreateCertificate, ParseCRL, ParseDERCRL, CreateCRL, newRawAttributes, parseRawAttributes, parseCSRExtensions, CreateCertificateRequest, ParseCertificateRequest, parseCertificateRequest, CreateRevocationList — the marshaling, signing and CSR/CRL halves; see the banner.
+// goishlint:ignore GOISH018 ParsePKIXPublicKey, marshalPublicKey, MarshalPKIXPublicKey, reverseBitsInAByte, asn1BitLength, marshalSANs, buildCertExtensions, marshalKeyUsage, marshalExtKeyUsage, marshalBasicConstraints, marshalCertificatePolicies, buildCSRExtensions, subjectBytes, signingParamsForKey, signTBS, CreateCertificate, ParseCRL, ParseDERCRL, CreateCRL, newRawAttributes, parseRawAttributes, parseCSRExtensions, CreateCertificateRequest, ParseCertificateRequest, parseCertificateRequest, CreateRevocationList — the marshaling, signing and CSR/CRL halves; see the banner.
 // goishlint:ignore GOISH019 pkixPublicKey, certificate, tbsCertificate, dsaAlgorithmParameters, validity, authKeyId, pssParameters, basicConstraints, policyInformation, authorityInfoAccess, distributionPoint, distributionPointName, CertificateRequest, tbsCertificateRequest, certificateRequest, RevocationListEntry, RevocationList, certificateList, tbsCertificateList — ASN.1 shapes that exist only to be handed to asn1.Marshal / asn1.Unmarshal, and types of the unported halves. `publicKeyInfo`, the one parser.go reads, is here.
 // goishlint:ignore GOISH021 pkixPublicKey, certificate, tbsCertificate, dsaAlgorithmParameters, validity, authKeyId, pssParameters, basicConstraints, policyInformation, authorityInfoAccess, distributionPoint, distributionPointName, CertificateRequest, tbsCertificateRequest, certificateRequest, RevocationListEntry, RevocationList, certificateList, tbsCertificateList, emptyRawValue, pssParametersSHA256, pssParametersSHA384, pssParametersSHA512, oidSHA256, oidSHA384, oidSHA512, oidMGF1, x509usepolicies, x509sha256skid, pemCRLPrefix, pemType, emptyASN1Subject, oidExtensionRequest, x509v2Version, oidExtensionSubjectKeyId, oidExtensionKeyUsage, oidExtensionExtendedKeyUsage, oidExtensionBasicConstraints, oidExtensionCertificatePolicies, oidExtensionCRLDistributionPoints, publicKeyAlgoName, signatureAlgorithmDetails, extKeyUsageOIDs — the RSA-PSS parameter blobs and the marshaling-side extension OIDs, which land with the halves they belong to. The extension OIDs parser.go reads by name (SubjectAltName, NameConstraints, AuthorityInfoAccess, AuthorityKeyId, CRLNumber, ReasonCode) are here.
 
@@ -60,7 +62,10 @@ use alloc::vec::Vec;
 use super::oid::OID;
 use crate::crypto;
 use crate::crypto::ecdh;
+use crate::crypto::ecdsa;
+use crate::crypto::ed25519;
 use crate::crypto::elliptic;
+use crate::crypto::rsa;
 use crate::crypto::x509::pkix;
 use crate::encoding::asn1;
 use crate::error;
@@ -851,6 +856,230 @@ impl Certificate {
         // same under `len`.
         return slice::__from_vec(Vec::<byte>::new());
     }
+}
+
+// ─── the signature-checking half — x509.go:907-1030 ─────────────────────
+//
+// Go's three error shapes here are `error`-valued because every Go
+// struct with an `Error() string` method satisfies the interface
+// implicitly. goish needs the `impl ErrorTrait` block written out; the
+// three types themselves are declared above, next to their `Error`
+// methods, so only the trait wiring lives here.
+
+// go: none — goish idiom: Go's `ErrUnsupportedAlgorithm`-adjacent error
+// structs satisfy `error` implicitly through their `Error() string`
+// method. goish requires an explicit `impl ErrorTrait`; the method body
+// is the ported `Error` above, so this forwards to it.
+impl errors::ErrorTrait for InsecureAlgorithmError {
+    // go: none — goish idiom: forwards to the ported inherent `Error`.
+    fn Error(&self) -> string {
+        return InsecureAlgorithmError::Error(self);
+    }
+}
+
+// go: none — goish idiom: see `impl ErrorTrait for InsecureAlgorithmError`.
+impl errors::ErrorTrait for ConstraintViolationError {
+    // go: none — goish idiom: forwards to the ported inherent `Error`.
+    fn Error(&self) -> string {
+        return ConstraintViolationError::Error(self);
+    }
+}
+
+// go: none — goish idiom: see `impl ErrorTrait for InsecureAlgorithmError`.
+impl errors::ErrorTrait for UnhandledCriticalExtension {
+    // go: none — goish idiom: forwards to the ported inherent `Error`.
+    fn Error(&self) -> string {
+        return UnhandledCriticalExtension::Error(self);
+    }
+}
+
+impl Certificate {
+    // go: sdk 1.25.5 crypto/x509/x509.go:907-931 Certificate.CheckSignatureFrom
+    /// Verify that the signature on c is a valid signature from parent.
+    ///
+    /// This is a low-level API that performs very limited checks, and not
+    /// a full path verifier. Most users should use `Certificate::Verify`
+    /// instead.
+    pub fn CheckSignatureFrom(&self, parent: &Certificate) -> error {
+        // RFC 5280, 4.2.1.9:
+        // "If the basic constraints extension is not present in a version 3
+        // certificate, or the extension is present but the cA boolean is not
+        // asserted, then the certified public key MUST NOT be used to verify
+        // certificate signatures."
+        if parent.Version == 3 && !parent.BasicConstraintsValid
+            || parent.BasicConstraintsValid && !parent.IsCA
+        {
+            return ConstraintViolationError {}.into();
+        }
+
+        if parent.KeyUsage != KeyUsage(0) && parent.KeyUsage.0 & KeyUsageCertSign.0 == 0 {
+            return ConstraintViolationError {}.into();
+        }
+
+        if parent.PublicKeyAlgorithm == UnknownPublicKeyAlgorithm {
+            return ErrUnsupportedAlgorithm.into();
+        }
+
+        return checkSignature(
+            self.SignatureAlgorithm,
+            self.RawTBSCertificate.clone(),
+            self.Signature.clone(),
+            &parent.PublicKey,
+            false,
+        );
+    }
+
+    // go: sdk 1.25.5 crypto/x509/x509.go:933-942 Certificate.CheckSignature
+    /// Verify that `signature` is a valid signature over `signed` from c's
+    /// public key.
+    ///
+    /// This is a low-level API that performs no validity checks on the
+    /// certificate.
+    ///
+    /// `MD5WithRSA` signatures are rejected, while `SHA1WithRSA` and
+    /// `ECDSAWithSHA1` signatures are currently accepted.
+    pub fn CheckSignature(
+        &self,
+        algo: SignatureAlgorithm,
+        signed: slice<byte>,
+        signature: slice<byte>,
+    ) -> error {
+        return checkSignature(algo, signed, signature, &self.PublicKey, true);
+    }
+
+    // go: sdk 1.25.5 crypto/x509/x509.go:1021-1030 Certificate.CheckCRLSignature
+    /// Check that the signature in `crl` is from c.
+    ///
+    /// Deprecated: use `RevocationList::CheckSignatureFrom` instead.
+    pub fn CheckCRLSignature(&self, crl: &pkix::CertificateList) -> error {
+        let algo = getSignatureAlgorithmFromAI(&crl.SignatureAlgorithm);
+        return self.CheckSignature(
+            algo,
+            crl.TBSCertList.Raw.0.clone(),
+            crl.SignatureValue.RightAlign(),
+        );
+    }
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:957-959 signaturePublicKeyAlgoMismatchError
+/// Go formats the offending key with `%T`, which prints the dynamic Go
+/// type name. goish's `Any` carries no type name, so the message names
+/// the algorithm the key *is* usable with instead of the Rust type. The
+/// prefix and the first half of the sentence are verbatim.
+// goishlint:ignore GOISH017 signaturePublicKeyAlgoMismatchError — the `%T` half of the message has no goish equivalent; see the doc comment.
+pub(super) fn signaturePublicKeyAlgoMismatchError(
+    expectedPubKeyAlgo: PublicKeyAlgorithm,
+    pubKey: &Any,
+) -> error {
+    let have = if pubKey.As::<rsa::PublicKey>().is_some() {
+        RSA.String()
+    } else if pubKey.As::<ecdsa::PublicKey>().is_some() {
+        ECDSA.String()
+    } else if pubKey.As::<ed25519::PublicKey>().is_some() {
+        Ed25519.String()
+    } else {
+        UnknownPublicKeyAlgorithm.String()
+    };
+    return crate::fmt::Errorf!(
+        "x509: signature algorithm specifies an %s public key, but have public key of type %s",
+        expectedPubKeyAlgo.String(),
+        have
+    );
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:961-1019 checkSignature
+/// Verify that `signature` is a valid signature over `signed` from a
+/// `crypto.PublicKey`.
+///
+/// Go's `switch pub := publicKey.(type)` becomes an `As::<T>()` ladder
+/// over the same three concrete key types, in the same order. Go's DSA
+/// arm does not exist — Go dropped it from `checkSignature` too; a DSA
+/// key falls through to `ErrUnsupportedAlgorithm`, exactly as in Go.
+///
+/// `hashType.New()` panics in goish when the hash is not registered, so
+/// this relies on Go's own `hashType.Available()` guard one line above
+/// it. A program that never calls `crypto::RegisterStandardHashes()`
+/// sees `ErrUnsupportedAlgorithm` from that guard rather than a panic.
+pub(super) fn checkSignature(
+    algo: SignatureAlgorithm,
+    signed: slice<byte>,
+    signature: slice<byte>,
+    publicKey: &Any,
+    allowSHA1: bool,
+) -> error {
+    let mut hashType = crypto::Hash(0);
+    let mut pubKeyAlgo = UnknownPublicKeyAlgorithm;
+
+    for (_, details) in crate::range!(signatureAlgorithmDetails()) {
+        if details.algo == algo {
+            hashType = details.hash;
+            pubKeyAlgo = details.pubKeyAlgo;
+            break;
+        }
+    }
+
+    let mut signed = signed;
+    if hashType == crypto::Hash(0) {
+        if pubKeyAlgo != Ed25519 {
+            return ErrUnsupportedAlgorithm.into();
+        }
+    } else if hashType == crypto::MD5 {
+        return InsecureAlgorithmError(algo).into();
+    } else {
+        // Go's `case crypto.SHA1:` falls through into `default:` once the
+        // allowSHA1 gate passes, so the two arms share one body here.
+        if hashType == crypto::SHA1 {
+            // SHA-1 signatures are only allowed for CRLs and CSRs.
+            if !allowSHA1 {
+                return InsecureAlgorithmError(algo).into();
+            }
+        }
+        if !hashType.Available() {
+            return ErrUnsupportedAlgorithm.into();
+        }
+        let mut h = hashType.New();
+        let _ = crate::io::Writer::Write(&mut h, signed.clone());
+        signed = crate::hash::Hash::Sum(&*h, slice::__from_vec(Vec::<byte>::new()));
+    }
+
+    if let Some(pub_) = publicKey.As::<rsa::PublicKey>() {
+        if pubKeyAlgo != RSA {
+            return signaturePublicKeyAlgoMismatchError(pubKeyAlgo, publicKey);
+        }
+        if algo.isRSAPSS() {
+            return rsa::VerifyPSS(
+                pub_,
+                hashType,
+                signed,
+                signature,
+                Some(&rsa::PSSOptions {
+                    SaltLength: rsa::PSSSaltLengthEqualsHash,
+                    Hash: hashType,
+                }),
+            );
+        } else {
+            return rsa::VerifyPKCS1v15(pub_, hashType, signed, signature);
+        }
+    }
+    if let Some(pub_) = publicKey.As::<ecdsa::PublicKey>() {
+        if pubKeyAlgo != ECDSA {
+            return signaturePublicKeyAlgoMismatchError(pubKeyAlgo, publicKey);
+        }
+        if !ecdsa::VerifyASN1(pub_, &signed, &signature) {
+            return errors::New("x509: ECDSA verification failure");
+        }
+        return errors::nil;
+    }
+    if let Some(pub_) = publicKey.As::<ed25519::PublicKey>() {
+        if pubKeyAlgo != Ed25519 {
+            return signaturePublicKeyAlgoMismatchError(pubKeyAlgo, publicKey);
+        }
+        if !ed25519::Verify(pub_, signed, signature) {
+            return errors::New("x509: Ed25519 verification failure");
+        }
+        return errors::nil;
+    }
+    return ErrUnsupportedAlgorithm.into();
 }
 
 // Go: x509.go:1035 — `type UnhandledCriticalExtension struct{}`

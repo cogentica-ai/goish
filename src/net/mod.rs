@@ -647,6 +647,15 @@ pub struct IP {
     pub bytes: slice<byte>,
 }
 
+// go: none — goish idiom: Go declares these in a single `const` block
+// (`net/ip.go:23-26`); goish spells each as its own `pub const`. Same
+// names, same values.
+/// `net.IPv4len` (ip.go:24) — the byte length of an IPv4 address.
+pub const IPv4len: int = 4;
+// go: none — goish idiom: second half of the same Go `const` block.
+/// `net.IPv6len` (ip.go:25) — the byte length of an IPv6 address.
+pub const IPv6len: int = 16;
+
 impl IP {
     /// `IsNil()` — slim helper, true when the IP is the zero value
     /// (no backing bytes). Mirrors `ip == nil` in Go.

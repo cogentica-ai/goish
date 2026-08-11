@@ -9,10 +9,19 @@ mod goish_rsa_der;
 mod oid;
 mod parser;
 mod pem_decrypt;
+mod root;
+mod root_unix;
 mod verify;
 mod x509;
 
-pub use cert_pool::{CertPool, NewCertPool};
+pub use cert_pool::{CertPool, NewCertPool, SystemCertPool};
+pub use root::SetFallbackRoots;
+pub use verify::{
+    CANotAuthorizedForExtKeyUsage, CANotAuthorizedForThisName, CertificateInvalidError, Expired,
+    HostnameError, IncompatibleUsage, InvalidReason, NameConstraintsWithoutSANs, NameMismatch,
+    NoValidChains, NotAuthorizedToSign, SystemRootsError, TooManyConstraints,
+    TooManyIntermediates, UnconstrainedName, UnknownAuthorityError, VerifyOptions,
+};
 pub use goish_rsa_der::{goishParsePKCS1RSAPrivateKey, goishParsePKCS8RSAPrivateKey};
 pub use oid::{OIDFromInts, ParseOID, OID};
 pub use parser::{ParseCertificate, ParseCertificates};

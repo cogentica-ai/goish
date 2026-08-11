@@ -542,7 +542,7 @@ fn parseBasicConstraintsExtension(der: CBString) -> (bool, int, error) {
 }
 
 // go: sdk 1.25.5 crypto/x509/parser.go:390-406 forEachSAN
-fn forEachSAN<F: FnMut(int, slice<byte>) -> error>(der: CBString, mut callback: F) -> error {
+pub(super) fn forEachSAN<F: FnMut(int, slice<byte>) -> error>(der: CBString, mut callback: F) -> error {
     let mut der = der;
     let mut inner = CBString::default();
     if !der.ReadASN1(&mut inner, cryptobyte_asn1::SEQUENCE) {
@@ -1666,7 +1666,7 @@ pub fn ParseCertificates(der: slice<byte>) -> (slice<Certificate>, error) {
 
 // go: sdk 1.25.5 crypto/x509/parser.go:1298-1355 domainNameValid
 /// An alloc-less version of the checks that `domainToReverseLabels` does.
-fn domainNameValid(s: &string, constraint: bool) -> bool {
+pub(super) fn domainNameValid(s: &string, constraint: bool) -> bool {
     // TODO(#75835): This function omits a number of checks which we
     // really should be doing to enforce that domain names are valid names per
     // RFC 1034. We previously enabled these checks, but this broke a
