@@ -1,3 +1,4 @@
+// go: package encoding/asn1
 // encoding/asn1 — DER-encoded ASN.1 parsing primitives.
 //
 // Reference: /share/go/src/encoding/asn1/asn1.go +
@@ -38,6 +39,21 @@
 #![allow(non_snake_case, non_upper_case_globals)]
 
 extern crate alloc;
+
+
+mod marshal;
+
+// go: none — goish-only: these five are unexported in Go
+// (`appendBase128Int`, not `AppendBase128Int`), so they are re-exported
+// under `__` names rather than their own. That keeps them off the public
+// Go-API surface while letting examples/asn1_marshal_smoke.rs check every
+// branch against the Go reference. The reflective Marshal layer, when it
+// lands, calls them directly as `marshal::…`.
+pub use marshal::{
+    appendBase128Int as __appendBase128Int, appendLength as __appendLength,
+    appendTagAndLength as __appendTagAndLength, base128IntLength as __base128IntLength,
+    lengthLength as __lengthLength,
+};
 
 use crate::errors::{error, ErrorTrait};
 use crate::goslice::slice;

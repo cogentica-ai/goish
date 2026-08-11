@@ -809,6 +809,10 @@ name = "gcm_random_nonce_smoke"
 path = "examples/gcm_random_nonce_smoke.rs"
 
 [[example]]
+name = "asn1_marshal_smoke"
+path = "examples/asn1_marshal_smoke.rs"
+
+[[example]]
 name = "crypto_ecdsa_smoke"
 path = "examples/crypto_ecdsa_smoke.rs"
 
