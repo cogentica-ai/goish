@@ -64,6 +64,10 @@ ALIASES = {
     "encoding/hex": "encoding/hex",
     "encoding/asn1": "encoding/asn1",
     "crypto": "crypto",
+    # Vendored x/crypto modules goish keeps under src/crypto/ rather than
+    # mirroring GOROOT's src/vendor/ path.
+    "golang.org/x/crypto/chacha20poly1305": "crypto/chacha20poly1305",
+    "golang.org/x/crypto/chacha20": "crypto/chacha20",
 }
 
 IMPORT_BLOCK = re.compile(r"^import\s*\((.*?)^\)", re.S | re.M)
@@ -157,6 +161,19 @@ def imports_of(paths):
     return found
 
 
+def is_vendored(import_path):
+    """True if GOROOT vendors this module under src/vendor/.
+
+    `golang.org/x/crypto/cryptobyte` and `.../chacha20poly1305` both live
+    in the Go source tree, so they are as portable as any stdlib package —
+    and crypto/ecdsa and crypto/internal/hpke cannot be ported without
+    them. Calling every `golang.org/...` path external hid both."""
+    try:
+        return os.path.isdir(os.path.join(goroot(), "src/vendor", import_path))
+    except Exception:
+        return False
+
+
 def goish_dir(import_path):
     """Where goish would keep this package, or None if it is not a package."""
     if import_path in ALIASES:
@@ -165,6 +182,9 @@ def goish_dir(import_path):
             return None
         return os.path.join(SRC, mapped)
     if import_path.startswith("golang.org/") or import_path.startswith("github.com/"):
+        if is_vendored(import_path):
+            # goish would keep a vendored module at the same path.
+            return os.path.join(SRC, "vendor", import_path)
         return ""  # outside the SDK entirely
     return os.path.join(SRC, import_path)
 
