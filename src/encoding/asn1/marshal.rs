@@ -30,7 +30,9 @@
 
 extern crate alloc;
 
-use super::TagAndLength;
+use super::{isNumeric, isPrintable, BitString, StructuralError, TagAndLength};
+use crate::errors::{error, nil};
+use crate::gostring::string;
 use crate::goslice::slice;
 use crate::types::{byte, int};
 use crate::{byte as tobyte, int64, uint};
@@ -134,4 +136,247 @@ fn push(dst: slice<byte>, b: byte) -> slice<byte> {
     let mut v: Vec<byte> = dst.__into_vec();
     v.push(b);
     return slice::__from_vec(v);
+}
+
+// ─── encoder — marshal.go:24-29 ───────────────────────────────────────
+
+// go: none — goish idiom: Go's `encoder` is an unexported interface with
+// Len and Encode. goish spells it as a trait; the concrete types below
+// implement it exactly as Go's do.
+/// Go: `type encoder interface { Len() int; Encode(dst []byte) }`.
+pub trait encoder {
+    /// The number of bytes needed to marshal this element.
+    fn Len(&self) -> int;
+    /// Encode this element by writing `Len()` bytes to `dst`.
+    fn Encode(&self, dst: &mut slice<byte>);
+}
+
+// Go: marshal.go:31 — `type byteEncoder byte`
+pub struct byteEncoder(pub byte);
+
+impl encoder for byteEncoder {
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:33-35 byteEncoder.Len
+    fn Len(&self) -> int {
+        return 1;
+    }
+
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:37-39 byteEncoder.Encode
+    fn Encode(&self, dst: &mut slice<byte>) {
+        let d: &mut [byte] = dst;
+        d[0] = self.0;
+    }
+}
+
+// Go: marshal.go:41 — `type bytesEncoder []byte`
+pub struct bytesEncoder(pub slice<byte>);
+
+impl encoder for bytesEncoder {
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:43-45 bytesEncoder.Len
+    fn Len(&self) -> int {
+        return self.0.Len();
+    }
+
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:47-51 bytesEncoder.Encode
+    fn Encode(&self, dst: &mut slice<byte>) {
+        let src: &[byte] = &self.0;
+        let d: &mut [byte] = dst;
+        if d.len() < src.len() {
+            panic!("internal error");
+        }
+        d[..src.len()].copy_from_slice(src);
+    }
+}
+
+// Go: marshal.go:53 — `type stringEncoder string`
+pub struct stringEncoder(pub string);
+
+impl encoder for stringEncoder {
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:55-57 stringEncoder.Len
+    fn Len(&self) -> int {
+        return self.0.Len();
+    }
+
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:59-63 stringEncoder.Encode
+    fn Encode(&self, dst: &mut slice<byte>) {
+        let src = self.0.as_bytes();
+        let d: &mut [byte] = dst;
+        if d.len() < src.len() {
+            panic!("internal error");
+        }
+        d[..src.len()].copy_from_slice(src);
+    }
+}
+
+// Go: marshal.go:140 — `type int64Encoder int64`
+pub struct int64Encoder(pub int64);
+
+impl encoder for int64Encoder {
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:142-156 int64Encoder.Len
+    fn Len(&self) -> int {
+        let mut n: int = 1;
+        let mut i = self.0;
+
+        while i > 127 {
+            n += 1;
+            i >>= 8;
+        }
+
+        while i < -128 {
+            n += 1;
+            i >>= 8;
+        }
+
+        return n;
+    }
+
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:158-164 int64Encoder.Encode
+    fn Encode(&self, dst: &mut slice<byte>) {
+        let n = self.Len();
+        let d: &mut [byte] = dst;
+
+        let mut j: int = 0;
+        while j < n {
+            d[j as usize] = tobyte(self.0 >> uint((n - 1 - j) * 8));
+            j += 1;
+        }
+    }
+}
+
+// Go: marshal.go:273 — `type bitStringEncoder BitString`
+pub struct bitStringEncoder(pub BitString);
+
+impl encoder for bitStringEncoder {
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:275-277 bitStringEncoder.Len
+    fn Len(&self) -> int {
+        return self.0.Bytes.Len() + 1;
+    }
+
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:279-284 bitStringEncoder.Encode
+    fn Encode(&self, dst: &mut slice<byte>) {
+        let src: &[byte] = &self.0.Bytes;
+        let pad = tobyte((8 - self.0.BitLength % 8) % 8);
+        let d: &mut [byte] = dst;
+        d[0] = pad;
+        if d.len() - 1 < src.len() {
+            panic!("internal error");
+        }
+        d[1..1 + src.len()].copy_from_slice(src);
+    }
+}
+
+// Go: marshal.go:286 — `type oidEncoder []int`
+pub struct oidEncoder(pub slice<int>);
+
+impl encoder for oidEncoder {
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:288-294 oidEncoder.Len
+    fn Len(&self) -> int {
+        let oid = &self.0;
+        let mut l = base128IntLength(int64(oid[0] * 40 + oid[1]));
+        let mut i: int = 2;
+        while i < oid.Len() {
+            l += base128IntLength(int64(oid[i]));
+            i += 1;
+        }
+        return l;
+    }
+
+    // go: sdk 1.25.5 encoding/asn1/marshal.go:296-301 oidEncoder.Encode
+    //
+    // Go writes through `dst[:0]`, reusing the caller's backing array.
+    // goish builds the run and copies it in, which is the same bytes.
+    fn Encode(&self, dst: &mut slice<byte>) {
+        let oid = &self.0;
+        let mut out = slice::__from_vec(Vec::<byte>::new());
+        out = appendBase128Int(out, int64(oid[0] * 40 + oid[1]));
+        let mut i: int = 2;
+        while i < oid.Len() {
+            out = appendBase128Int(out, int64(oid[i]));
+            i += 1;
+        }
+        let src: &[byte] = &out;
+        let d: &mut [byte] = dst;
+        d[..src.len()].copy_from_slice(src);
+    }
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:303-309 makeObjectIdentifier
+pub fn makeObjectIdentifier(oid: slice<int>) -> (oidEncoder, error) {
+    if oid.Len() < 2 || oid[0] > 2 || (oid[0] < 2 && oid[1] >= 40) {
+        return (
+            oidEncoder(slice::__from_vec(alloc::vec::Vec::new())),
+            StructuralError {
+                Msg: string::from_static("invalid object identifier"),
+            }
+            .into(),
+        );
+    }
+
+    return (oidEncoder(oid), nil);
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:311-325 makePrintableString
+pub fn makePrintableString<S: Into<string>>(s: S) -> (stringEncoder, error) {
+    let s = s.into();
+    // The asterisk is often used in PrintableString, even though it is
+    // invalid. If a PrintableString was specifically requested then the
+    // asterisk is permitted by this code. Ampersand is allowed in parsing
+    // due a handful of CA certificates, however when making new
+    // certificates it is rejected.
+    for b in s.as_bytes().iter() {
+        // Go: isPrintable(s[i], allowAsterisk, rejectAmpersand). Those
+        // two constants live in asn1.go, which goish's asn1 mod.rs ports
+        // with the literals; spelled the same way here.
+        if !isPrintable(*b, true, false) {
+            return (
+                stringEncoder(string::default()),
+                StructuralError {
+                    Msg: string::from_static("PrintableString contains invalid character"),
+                }
+                .into(),
+            );
+        }
+    }
+
+    return (stringEncoder(s), nil);
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:327-335 makeIA5String
+pub fn makeIA5String<S: Into<string>>(s: S) -> (stringEncoder, error) {
+    let s = s.into();
+    for b in s.as_bytes().iter() {
+        if *b > 127 {
+            return (
+                stringEncoder(string::default()),
+                StructuralError {
+                    Msg: string::from_static("IA5String contains invalid character"),
+                }
+                .into(),
+            );
+        }
+    }
+
+    return (stringEncoder(s), nil);
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:337-345 makeNumericString
+pub fn makeNumericString<S: Into<string>>(s: S) -> (stringEncoder, error) {
+    let s = s.into();
+    for b in s.as_bytes().iter() {
+        if !isNumeric(*b) {
+            return (
+                stringEncoder(string::default()),
+                StructuralError {
+                    Msg: string::from_static("NumericString contains invalid character"),
+                }
+                .into(),
+            );
+        }
+    }
+
+    return (stringEncoder(s), nil);
+}
+
+// go: sdk 1.25.5 encoding/asn1/marshal.go:347-349 makeUTF8String
+pub fn makeUTF8String<S: Into<string>>(s: S) -> stringEncoder {
+    return stringEncoder(s.into());
 }

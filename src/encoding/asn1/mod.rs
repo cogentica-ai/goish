@@ -52,7 +52,12 @@ mod marshal;
 pub use marshal::{
     appendBase128Int as __appendBase128Int, appendLength as __appendLength,
     appendTagAndLength as __appendTagAndLength, base128IntLength as __base128IntLength,
-    lengthLength as __lengthLength,
+    bitStringEncoder as __bitStringEncoder, byteEncoder as __byteEncoder,
+    bytesEncoder as __bytesEncoder, encoder as __encoder, int64Encoder as __int64Encoder,
+    lengthLength as __lengthLength, makeIA5String as __makeIA5String,
+    makeNumericString as __makeNumericString, makeObjectIdentifier as __makeObjectIdentifier,
+    makePrintableString as __makePrintableString, makeUTF8String as __makeUTF8String,
+    oidEncoder as __oidEncoder, stringEncoder as __stringEncoder,
 };
 
 use crate::errors::{error, ErrorTrait};

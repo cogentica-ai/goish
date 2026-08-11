@@ -21,8 +21,10 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::encoding::asn1::{
-    TagAndLength, __appendBase128Int, __appendLength, __appendTagAndLength, __base128IntLength,
-    __lengthLength,
+    BitString, TagAndLength, __appendBase128Int, __appendLength, __appendTagAndLength,
+    __base128IntLength, __bitStringEncoder, __byteEncoder, __bytesEncoder, __encoder,
+    __int64Encoder, __lengthLength, __makeIA5String, __makeNumericString,
+    __makeObjectIdentifier, __makePrintableString, __makeUTF8String, __stringEncoder,
 };
 use goish::fmt;
 use goish::goslice::slice;
@@ -103,6 +105,81 @@ fn main() {
         let dst = __appendTagAndLength(empty(), &t);
         check(dst.__into_vec() == unhex(wantHex), "tagAndLength tag=", tag);
     }
+
+
+    // ─── encoder layer ────────────────────────────────────────────────
+    //
+    // Each case is `enc(e)` from the Go reference: allocate e.Len() bytes,
+    // Encode into them, compare.
+    fn encOf(e: &dyn __encoder) -> Vec<byte> {
+        let mut dst = slice::__from_vec(alloc::vec![0u8; e.Len() as usize]);
+        e.Encode(&mut dst);
+        return dst.__into_vec();
+    }
+
+    check(encOf(&__byteEncoder(0x2a)) == unhex("2a"), "byteEncoder", 0x2a);
+    let be = __bytesEncoder(slice::__from_vec(alloc::vec![1u8, 2, 3]));
+    check(be.Len() == 3 && encOf(&be) == unhex("010203"), "bytesEncoder", 3);
+    let se = __stringEncoder(goish::string("hi!"));
+    check(se.Len() == 3 && encOf(&se) == unhex("686921"), "stringEncoder", 3);
+
+    let ints: [(i64, i64, &str); 12] = [
+        (0, 1, "00"), (1, 1, "01"), (127, 1, "7f"), (128, 2, "0080"),
+        (-1, 1, "ff"), (-128, 1, "80"), (-129, 2, "ff7f"), (255, 2, "00ff"),
+        (256, 2, "0100"), (-32768, 2, "8000"), (2147483647, 4, "7fffffff"),
+        (-2147483648, 4, "80000000"),
+    ];
+    for &(n, wantLen, wantHex) in ints.iter() {
+        let e = __int64Encoder(n);
+        check(e.Len() == wantLen && encOf(&e) == unhex(wantHex), "int64Encoder", n);
+    }
+
+    let bits: [(&[u8], i64, i64, &str); 5] = [
+        (&[0x80], 1, 2, "0780"), (&[0xf0], 4, 2, "04f0"), (&[0xff], 8, 2, "00ff"),
+        (&[0xff, 0xc0], 10, 3, "06ffc0"), (&[], 0, 1, "00"),
+    ];
+    for &(by, bl, wantLen, wantHex) in bits.iter() {
+        let e = __bitStringEncoder(BitString {
+            Bytes: slice::__from_vec(by.to_vec()),
+            BitLength: bl,
+        });
+        check(e.Len() == wantLen && encOf(&e) == unhex(wantHex), "bitStringEncoder bits=", bl);
+    }
+
+    let oids: [(&[i64], i64, &str); 5] = [
+        (&[1, 2, 840, 113549, 1, 1, 11], 9, "2a864886f70d01010b"),
+        (&[2, 5, 4, 3], 3, "550403"),
+        (&[1, 3, 6, 1, 5, 5, 7, 3, 1], 8, "2b06010505070301"),
+        (&[0, 0], 1, "00"),
+        (&[2, 100, 3], 3, "813403"),
+    ];
+    for &(o, wantLen, wantHex) in oids.iter() {
+        let (e, err) = __makeObjectIdentifier(slice::__from_vec(o.to_vec()));
+        check(
+            err == goish::nil && e.Len() == wantLen && encOf(&e) == unhex(wantHex),
+            "makeObjectIdentifier len=",
+            wantLen,
+        );
+    }
+    for bad in [&[1i64][..], &[3, 1][..], &[1, 40][..], &[][..]].iter() {
+        let (_, err) = __makeObjectIdentifier(slice::__from_vec(bad.to_vec()));
+        check(err != goish::nil, "makeObjectIdentifier rejects", bad.len() as i64);
+    }
+
+    for &(s, ok) in [("hello", true), ("a*b", true), ("a&b", false), ("caf\u{e9}", false)].iter() {
+        let (_, err) = __makePrintableString(s);
+        check((err == goish::nil) == ok, "makePrintableString", ok as i64);
+    }
+    for &(s, ok) in [("ok", true), ("caf\u{e9}", false)].iter() {
+        let (_, err) = __makeIA5String(s);
+        check((err == goish::nil) == ok, "makeIA5String", ok as i64);
+    }
+    for &(s, ok) in [("123 456", true), ("12a", false)].iter() {
+        let (_, err) = __makeNumericString(s);
+        check((err == goish::nil) == ok, "makeNumericString", ok as i64);
+    }
+    let u = __makeUTF8String("caf\u{e9}");
+    check(u.Len() == 5 && encOf(&u) == unhex("636166c3a9"), "makeUTF8String", 5);
 
     let failed = FAILED.load(Ordering::Acquire);
     let ran = RAN.load(Ordering::Acquire);
