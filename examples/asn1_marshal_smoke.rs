@@ -25,7 +25,7 @@ use goish::encoding::asn1::{
     __base128IntLength, __bitStringEncoder, __byteEncoder, __bytesEncoder, __encoder,
     __int64Encoder, __lengthLength, __makeIA5String, __makeNumericString,
     __makeObjectIdentifier, __makePrintableString, __makeUTF8String, __multiEncoder,
-    __setEncoder, __stringEncoder, __taggedEncoder,
+    __setEncoder, __stringEncoder, __taggedEncoder, parseFieldParameters,
 };
 use goish::fmt;
 use goish::goslice::slice;
@@ -236,6 +236,63 @@ fn main() {
         bx(&[0xde, 0xad, 0xbe]),
     );
     check(te2.Len() == 5 && encOf(&te2) == unhex("0403deadbe"), "taggedEncoder octets", 5);
+
+
+    // ─── parseFieldParameters (common.go) ─────────────────────────────
+    //
+    // Columns: optional, explicit, application, private, defaultValue,
+    // tag, stringType, timeType, set, omitEmpty — as the Go reference
+    // printed them.
+    let fp: [(&str, bool, bool, bool, bool, Option<i64>, Option<i64>, i64, i64, bool, bool); 32] = [
+        ("", false, false, false, false, None, None, 0, 0, false, false),
+        ("optional", true, false, false, false, None, None, 0, 0, false, false),
+        ("explicit", false, true, false, false, None, Some(0), 0, 0, false, false),
+        ("generalized", false, false, false, false, None, None, 0, 24, false, false),
+        ("utc", false, false, false, false, None, None, 0, 23, false, false),
+        ("ia5", false, false, false, false, None, None, 22, 0, false, false),
+        ("printable", false, false, false, false, None, None, 19, 0, false, false),
+        ("numeric", false, false, false, false, None, None, 18, 0, false, false),
+        ("utf8", false, false, false, false, None, None, 12, 0, false, false),
+        ("set", false, false, false, false, None, None, 0, 0, true, false),
+        ("application", false, false, true, false, None, Some(0), 0, 0, false, false),
+        ("private", false, false, false, true, None, Some(0), 0, 0, false, false),
+        ("omitempty", false, false, false, false, None, None, 0, 0, false, true),
+        ("tag:5", false, false, false, false, None, Some(5), 0, 0, false, false),
+        ("tag:0", false, false, false, false, None, Some(0), 0, 0, false, false),
+        ("tag:-3", false, false, false, false, None, Some(-3), 0, 0, false, false),
+        ("tag:notanumber", false, false, false, false, None, None, 0, 0, false, false),
+        ("tag:", false, false, false, false, None, None, 0, 0, false, false),
+        ("default:42", false, false, false, false, Some(42), None, 0, 0, false, false),
+        ("default:-7", false, false, false, false, Some(-7), None, 0, 0, false, false),
+        ("default:9223372036854775807", false, false, false, false, Some(9223372036854775807), None, 0, 0, false, false),
+        ("default:bad", false, false, false, false, None, None, 0, 0, false, false),
+        ("optional,explicit,tag:2", true, true, false, false, None, Some(2), 0, 0, false, false),
+        ("explicit,tag:7", false, true, false, false, None, Some(7), 0, 0, false, false),
+        ("tag:7,explicit", false, true, false, false, None, Some(7), 0, 0, false, false),
+        ("application,tag:3", false, false, true, false, None, Some(3), 0, 0, false, false),
+        ("private,tag:4", false, false, false, true, None, Some(4), 0, 0, false, false),
+        ("optional,omitempty,set,utf8", true, false, false, false, None, None, 12, 0, true, true),
+        ("unknown,optional", true, false, false, false, None, None, 0, 0, false, false),
+        ("ia5,printable", false, false, false, false, None, None, 19, 0, false, false),
+        ("utc,generalized", false, false, false, false, None, None, 0, 24, false, false),
+        (",,optional,,", true, false, false, false, None, None, 0, 0, false, false),
+    ];
+    let mut idx: i64 = 0;
+    for &(tagstr, opt, exp, app, priv_, dv, tg, st, tt, set, omit) in fp.iter() {
+        let p = parseFieldParameters(tagstr);
+        let ok = p.optional == opt
+            && p.explicit == exp
+            && p.application == app
+            && p.private == priv_
+            && p.defaultValue == dv
+            && p.tag == tg
+            && p.stringType == st
+            && p.timeType == tt
+            && p.set == set
+            && p.omitEmpty == omit;
+        check(ok, "parseFieldParameters #", idx);
+        idx += 1;
+    }
 
     let failed = FAILED.load(Ordering::Acquire);
     let ran = RAN.load(Ordering::Acquire);

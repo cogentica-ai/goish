@@ -52,6 +52,7 @@
 extern crate alloc;
 
 
+mod common;
 mod marshal;
 
 // go: none — goish-only: these five are unexported in Go
@@ -60,6 +61,8 @@ mod marshal;
 // Go-API surface while letting examples/asn1_marshal_smoke.rs check every
 // branch against the Go reference. The reflective Marshal layer, when it
 // lands, calls them directly as `marshal::…`.
+pub use common::{fieldParameters, parseFieldParameters};
+
 pub use marshal::{
     appendBase128Int as __appendBase128Int, appendLength as __appendLength,
     appendTagAndLength as __appendTagAndLength, base128IntLength as __base128IntLength,
