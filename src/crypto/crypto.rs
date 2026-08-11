@@ -249,8 +249,17 @@ pub fn RegisterStandardHashes() {
 // goish has no per-package `init()` driver, so what Go does at link time
 // is done here, once, from `goish::init()`.
 /// Register every private-key type in goish's `crypto` tree that
-/// implements [`Signer`], so that `goish::cast!(key, crypto::Signer)` on
-/// an `Any`-wrapped key resolves. Idempotent.
+/// implements [`Signer`], so that `key.As::<dyn Signer + Send + Sync>()`
+/// on an `Any`-wrapped key resolves. Idempotent, and already called
+/// from [`goish::init`](crate::init), which `#[goish::main]` emits as a
+/// prelude — so a caller does **not** have to invoke it.
+///
+/// Deliberately *not* `goish::cast!(key, crypto::Signer)`, which cannot
+/// work on an `Any` carrier: `cast!` resolves through the blanket
+/// `HasDynAny for T` (goany.rs:635), which hands back the carrier
+/// itself, so the lookup probes this registry with `Any`'s own TypeId
+/// and never the key's. `Any`'s inherent `As` goes through `as_any()`
+/// and sees the payload.
 ///
 /// `crypto/ecdsa`'s `PrivateKey` is absent because it does not yet
 /// implement [`Signer`] in goish — Go's does. Adding it belongs to

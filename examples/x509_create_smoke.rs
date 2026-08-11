@@ -161,12 +161,6 @@ fn cidr(s: &'static str) -> net::IPNet {
 
 #[goish::main]
 fn main() {
-    // `checkSignature` inside `signTBS` calls `hashType.New()`; goish
-    // has no per-package `init()` driver, so the hash registry is wired
-    // up explicitly. (Ed25519 pre-hashes nothing, but CreateCertificate
-    // reaches the registry through the SKID SHA-256 derivation.)
-    goish::init();
-
     let priv_ = refKey();
     let pubKey = priv_.PublicKey();
     let pub_ = Any::new_fn(pubKey.clone());
