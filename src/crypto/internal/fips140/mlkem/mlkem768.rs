@@ -357,8 +357,11 @@ fn generateKey(dk: Box<DecapsulationKey768>) -> (Box<DecapsulationKey768>, error
     // Go: kemKeyGen(dk, &d, &z)
     kemKeyGen(&mut dk, &d, &z);
     // Go: fips140.PCT("ML-KEM PCT", func() error { return kemPCT(dk) })
-    let pct = kemPCT(&dk);
-    fips140::PCT("ML-KEM PCT", || pct.clone());
+    //
+    // The closure must stay lazy: PCT returns without calling it when FIPS
+    // mode is off, and a full encapsulate+decapsulate round trip is not
+    // something to run on every key generation by accident.
+    fips140::PCT("ML-KEM PCT", || kemPCT(&dk));
     // Go: fips140.RecordApproved(); return dk, nil
     fips140::RecordApproved();
     return (dk, crate::nil.into());
