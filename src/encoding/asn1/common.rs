@@ -1,11 +1,11 @@
-// go: file encoding/asn1/common.go decls: parseFieldParameters
+// go: file encoding/asn1/common.go decls: parseFieldParameters, getUniversalType
 //
 // The struct-tag interpreter shared by asn1's encode and decode paths.
 //
-// Scope: `parseFieldParameters` only. `getUniversalType`, the other
-// function in common.go, switches on a `reflect.Type` and belongs with
-// the reflective layer; `fieldParameters` itself is a type, not a decl
-// port_coverage counts.
+// Both of common.go's functions. `parseFieldParameters` is plain string
+// work; `getUniversalType` switches on a `reflect.Type` and became
+// portable once all six types it matches by identity gained a
+// `reflect::Reflect` impl (8bf3e78, 78ec1f5).
 //
 // This lands ahead of that layer deliberately. Go's marshal and unmarshal
 // both start by parsing a field's tag string, and the parse is plain
@@ -28,9 +28,11 @@
 extern crate alloc;
 
 use super::{
-    TagGeneralizedTime, TagIA5String, TagNumericString, TagPrintableString, TagUTCTime,
-    TagUTF8String,
+    TagBitString, TagBoolean, TagEnum, TagGeneralizedTime, TagIA5String, TagInteger,
+    TagNumericString, TagOID, TagOctetString, TagPrintableString, TagSequence, TagSet,
+    TagUTCTime, TagUTF8String,
 };
+use crate::reflect::{Kind, Type};
 use crate::gostring::string;
 use crate::int64;
 use crate::types::int;
@@ -139,4 +141,78 @@ fn tail(s: &string, n: usize) -> string {
         return string::default();
     }
     return string::from_bytes(&b[n..]);
+}
+
+// go: sdk 1.25.5 encoding/asn1/common.go:149-185 getUniversalType
+/// Given a reflected type, return the default tag number and expected
+/// compound flag.
+///
+/// Returns `(matchAny, tagNumber, isCompound, ok)`.
+///
+/// Deviations:
+///
+///   * Go's first switch compares `reflect.Type` values against six
+///     package-level `reflect.TypeOf(...)` vars. goish's `reflect::Type`
+///     compares by `(kind, name)`, so the identities are matched by name —
+///     the same test, since each of the six is a distinct named type.
+///   * Go's `bigIntType` is `reflect.TypeOf(new(big.Int))`, a *pointer*,
+///     because Go's asn1 stores `*big.Int`. goish's `big::Int` is a value
+///     type, so the identity matched here is the struct itself.
+///   * The `strings.HasSuffix(t.Name(), "SET")` branch selects TagSet for
+///     a *named* slice type such as `type RDNSequenceSET []T`. goish has
+///     no named slice types yet — `slice<T>`'s descriptor carries a
+///     generic name — so that branch is reachable only once a port
+///     declares one. It is ported as written rather than dropped.
+pub fn getUniversalType(t: &Type) -> (bool, int, bool, bool) {
+    let name = t.Name();
+    let n = name.as_bytes();
+
+    // Go: switch t { case rawValueType: … case bigIntType: … }
+    if n == b"RawValue" {
+        return (true, -1, false, true);
+    }
+    if n == b"ObjectIdentifier" {
+        return (false, TagOID, false, true);
+    }
+    if n == b"BitString" {
+        return (false, TagBitString, false, true);
+    }
+    if n == b"time.Time" {
+        return (false, TagUTCTime, false, true);
+    }
+    if n == b"Enumerated" {
+        return (false, TagEnum, false, true);
+    }
+    if n == b"Int" && t.Kind() == Kind::Struct {
+        return (false, TagInteger, false, true);
+    }
+
+    // Go: switch t.Kind() { … }
+    match t.Kind() {
+        Kind::Bool => {
+            return (false, TagBoolean, false, true);
+        }
+        Kind::Int | Kind::Int8 | Kind::Int16 | Kind::Int32 => {
+            return (false, TagInteger, false, true);
+        }
+        Kind::Struct => {
+            return (false, TagSequence, true, true);
+        }
+        Kind::Slice => {
+            if t.Elem().Kind() == Kind::Uint8 {
+                return (false, TagOctetString, false, true);
+            }
+            if crate::strings::HasSuffix(name.clone(), "SET") {
+                return (false, TagSet, true, true);
+            }
+            return (false, TagSequence, true, true);
+        }
+        Kind::String => {
+            return (false, TagPrintableString, false, true);
+        }
+        _ => {}
+    }
+
+    // Go: the switch has no default; control falls through to here.
+    return (false, 0, false, false);
 }

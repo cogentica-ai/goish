@@ -25,8 +25,8 @@ use goish::encoding::asn1::{
     __base128IntLength, __bitStringEncoder, __byteEncoder, __bytesEncoder, __encoder,
     __int64Encoder, __lengthLength, __makeIA5String, __makeNumericString,
     __makeObjectIdentifier, __makePrintableString, __makeUTF8String, __multiEncoder,
-    __setEncoder, __stringEncoder, __taggedEncoder, parseFieldParameters, Enumerated,
-    ObjectIdentifier,
+    __setEncoder, __stringEncoder, __taggedEncoder, getUniversalType, parseFieldParameters,
+    Enumerated, ObjectIdentifier, RawValue,
 };
 use goish::fmt;
 use goish::goslice::slice;
@@ -349,6 +349,44 @@ fn main() {
     let oid2 = ObjectIdentifier::New(slice::__from_vec(alloc::vec![1i64, 2, 840]));
     check(oid.Equal(&oid2), "ObjectIdentifier.Equal is a method now", 0);
     check(matches!(oid.__reflect_value(), goish::reflect::Value::Slice { .. }), "OID reflect value", 0);
+
+
+    // ─── getUniversalType (common.go) ─────────────────────────────────
+    //
+    // Columns are the Go reference's (matchAny, tagNumber, isCompound, ok).
+    // The six identity rows are the ones that were unrepresentable until
+    // ObjectIdentifier and Enumerated became defined types and all six
+    // gained a reflect::Type.
+    fn gut(t: &goish::reflect::Type) -> (bool, i64, bool, bool) {
+        return getUniversalType(t);
+    }
+
+    let ident: [(&'static str, goish::reflect::Type, bool, i64, bool, bool); 6] = [
+        ("RawValue", TypeOfDyn::<RawValue>(), true, -1, false, true),
+        ("ObjectIdentifier", TypeOfDyn::<ObjectIdentifier>(), false, 6, false, true),
+        ("BitString", TypeOfDyn::<BitString>(), false, 3, false, true),
+        ("time.Time", TypeOfDyn::<goish::time::Time>(), false, 23, false, true),
+        ("Enumerated", TypeOfDyn::<Enumerated>(), false, 10, false, true),
+        ("big.Int", TypeOfDyn::<goish::math::big::Int>(), false, 2, false, true),
+    ];
+    let mut k: i64 = 0;
+    for (_, t, ma, tn, ic, ok) in ident.iter() {
+        let g = gut(t);
+        check(g == (*ma, *tn, *ic, *ok), "getUniversalType identity #", k);
+        k += 1;
+    }
+
+    // Kind-driven rows.
+    check(gut(&TypeOfDyn::<bool>()) == (false, 1, false, true), "gut bool", 1);
+    check(gut(&TypeOfDyn::<i64>()) == (false, 2, false, true), "gut int", 2);
+    check(gut(&TypeOfDyn::<i8>()) == (false, 2, false, true), "gut int8", 2);
+    check(gut(&TypeOfDyn::<i16>()) == (false, 2, false, true), "gut int16", 2);
+    check(gut(&TypeOfDyn::<i32>()) == (false, 2, false, true), "gut int32", 2);
+    check(gut(&TypeOfDyn::<slice<byte>>()) == (false, 4, false, true), "gut []byte", 4);
+    check(gut(&TypeOfDyn::<slice<i64>>()) == (false, 16, true, true), "gut []int", 16);
+    check(gut(&TypeOfDyn::<goish::string>()) == (false, 19, false, true), "gut string", 19);
+    check(gut(&TypeOfDyn::<u64>()) == (false, 0, false, false), "gut uint rejected", 0);
+    check(gut(&TypeOfDyn::<f64>()) == (false, 0, false, false), "gut float64 rejected", 0);
 
     let failed = FAILED.load(Ordering::Acquire);
     let ran = RAN.load(Ordering::Acquire);

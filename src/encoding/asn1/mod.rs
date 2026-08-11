@@ -69,7 +69,7 @@ mod marshal;
 // Go-API surface while letting examples/asn1_marshal_smoke.rs check every
 // branch against the Go reference. The reflective Marshal layer, when it
 // lands, calls them directly as `marshal::…`.
-pub use common::{fieldParameters, parseFieldParameters};
+pub use common::{fieldParameters, getUniversalType, parseFieldParameters};
 
 pub use marshal::{
     appendBase128Int as __appendBase128Int, appendLength as __appendLength,
