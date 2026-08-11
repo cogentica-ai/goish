@@ -372,6 +372,35 @@ the gap means turning `Hash` into a newtype and fixing every call site
 across the crypto tree. Worth doing, but it is a refactor with wide blast
 radius, not an addition — do not start it late in a session.
 
+## The single highest-leverage target: vendored `cryptobyte`
+
+`scripts/port_deps.py --ready crypto`, after the ecdh port, puts one
+missing package behind **452 functions**:
+
+| blocked package | gap | also needs |
+|---|--:|---|
+| `crypto/tls` | 259 | `weak`, `crypto/internal/hpke` |
+| `crypto/x509` | 150 | `crypto/dsa`, `crypto/x509/pkix`, `net/netip` |
+| `crypto/ecdsa` | 43 | **nothing else** |
+
+`golang.org/x/crypto/cryptobyte` is **vendored inside GOROOT**
+(`$GOROOT/src/vendor/golang.org/x/crypto/cryptobyte`, 1358 LOC across
+`asn1.go` 825, `builder.go` 350, `string.go` 183). It is as portable as any
+stdlib package. An earlier version of port_deps.py called every
+`golang.org/...` path "external — no Go-SDK counterpart to port verbatim",
+which was wrong and hid this entirely.
+
+`crypto/ecdsa` needs only a slice of it: `cryptobyte.Builder`,
+`cryptobyte.String`, and the `asn1.INTEGER` / `asn1.SEQUENCE` tags, used by
+`encodeSignature` and `parseSignature` (ecdsa.go:469-545). Porting
+`builder.go` + `string.go` + the INTEGER/SEQUENCE paths of `asn1.go` takes
+crypto/ecdsa from NO-GO to ready on its own — and x509 and tls both want
+the same package.
+
+The other vendored module, `golang.org/x/crypto/chacha20poly1305`, goish
+already has under `src/crypto/chacha20poly1305`; port_deps aliases the
+path. That is why `crypto/internal/hpke` (19) now reports READY.
+
 ## Per-package conversion recipe (proven on rc4, subtle, des)
 
 1. `git mv <pkg>/mod.rs <pkg>/<gofile>.rs`, then split along Go's file
