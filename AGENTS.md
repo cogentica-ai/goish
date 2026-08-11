@@ -484,5 +484,31 @@ happened here:
   needs. Inherent impls also do not satisfy a `#[goish::interface]`
   trait; that `impl Trait for T` block has to exist.
 
-crypto/ is 1017/1499 = 67.8%; the 482 left are 437 portable + 45
-assembly.
+### Waiving a decl goish resolves elsewhere
+
+Some Go declarations will never have a same-named counterpart here, and
+counting them as missing makes the number lie downward — the squatter
+problem inverted. The motivating case is a `//go:linkname` pair: Go
+writes the body on one side and a bodyless stub on the other, and goish,
+having no linkname, writes it once on whichever side can reach the
+field. `crypto/sha3` read 26/27 forever for exactly that reason.
+
+Declare it in the goish file, with a reason:
+
+```rust
+// go: waived fips140hash_sha3Unwrap — linkname body ported once, on the
+//     crypto/internal/fips140hash side; a second copy here would be the
+//     same function twice.
+```
+
+Waived decls leave the denominator — they are not remaining work — but
+`port_coverage` prints them on their own WAIVED line and in the TOTAL,
+so they can never quietly inflate a percentage. **The reason text after
+the em dash is required**; a bare `// go: waived Foo` is ignored, which
+is what stops this from becoming a way to launder a gap into 100%.
+
+Reach for it only when no counterpart *can* exist. A function that is
+merely hard, unported, or blocked is MISSING, not waived.
+
+crypto/ is 1108/1452 = 76.3%; the 344 left are 330 portable + 14
+assembly, and 37 counted names are still UNVERIFIED.
