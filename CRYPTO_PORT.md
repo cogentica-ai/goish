@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **764/1507 = 50.7%**, 942 anchors, **40 packages fully verified**
+Current: **767/1507 = 50.9%**, 1007 anchors, **40 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -126,6 +126,33 @@ Regenerate rather than edit:
 ```bash
 scripts/fiat_gen.py            # nistec/fiat, all 14 files
 ```
+
+
+## Anchoring the packages that were counted but never diffed
+
+`scripts/anchor_by_name.py <rust-file> <go-import-path> <go-file>...`
+adds GOISH014 anchors to an already-written port by matching Rust fn
+names against the Go declarations they came from. It is conservative: an
+fn whose name matches no Go decl, or matches ambiguously, is left alone
+and *reported* rather than mis-anchored, and an fn that already has an
+anchor is never touched. It does not write the GOISH017 manifest —
+deciding what belongs there is the point of that check.
+
+This exists because a package with no anchors is counted by
+`port_coverage.py` and proven by nothing. `crypto/internal/fips140` and
+`crypto/internal/fips140/bigmod` were both in that state, and doing the
+work found real divergence in both (see their commits). Still in it:
+
+| package | counted | anchors |
+|---|--:|--:|
+| `crypto/internal/fips140/edwards25519` | 28/49 | 0 |
+| `crypto/internal/fips140/edwards25519/field` | 32/34 | 0 |
+| `crypto/internal/fips140/rsa` | 39/39 | 0 |
+| `crypto/rsa` | 27/40 | 0 |
+| `crypto/cipher` | 28/33 | 0 |
+
+Those are ~154 functions that the percentage already counts. Anchoring
+them does not move the number; it decides whether the number was true.
 
 ## Next: nistec proper (75 fns)
 
