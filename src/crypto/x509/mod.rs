@@ -21,6 +21,7 @@ pub use pem_decrypt::{
     PEMCipher3DES, PEMCipherAES128, PEMCipherAES192, PEMCipherAES256, PEMCipherDES,
 };
 pub use x509::{
+    MarshalPKIXPublicKey,
     Certificate, ConstraintViolationError, ErrUnsupportedAlgorithm, ExtKeyUsage,
     ExtKeyUsageAny, ExtKeyUsageClientAuth, ExtKeyUsageCodeSigning, ExtKeyUsageEmailProtection,
     ExtKeyUsageIPSECEndSystem, ExtKeyUsageIPSECTunnel, ExtKeyUsageIPSECUser,

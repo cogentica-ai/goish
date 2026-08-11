@@ -1434,13 +1434,41 @@ where
     }
 }
 
+// go: none — goish idiom: the element/key descriptor of a composite
+// `Type` is an `Option<fn() -> Type>`, and `Value::Slice` / `Value::Map`
+// need a non-optional one. A descriptor that never recorded its element
+// type reports `Invalid`, which is what `Type::Elem()` already does.
+fn __invalidType() -> Type {
+    Type::__new(Kind::Invalid, "", &[])
+}
+
 /// `reflect.Zero(t)` (Go 1.25 `src/reflect/value.go`) — the zero
 /// `Value` for type `t`. The returned value is neither addressable nor
-/// settable. Goish v1 derives the zero from `t.Kind()`; types whose
-/// `Kind` doesn't yet have a primitive `Value` variant fall back to
-/// `Value::Invalid` (consistent with Go's behaviour for a nil-typed
-/// argument: the spec panics, our v1 shape returns Invalid as a less
-/// disruptive default).
+/// settable.
+///
+/// The composite kinds matter more than they look. `encoding/asn1`'s
+/// `makeField` omits an `asn1:"optional"` field by testing
+/// `DeepEqual(v, reflect.Zero(v.Type()))` (marshal.rs:1134), so a
+/// `Kind` that answers `Invalid` here can never compare equal to a real
+/// value and its optional fields are *always* emitted. That is not a
+/// cosmetic difference: it put an empty element inside every
+/// `AlgorithmIdentifier` whose `Parameters` Go omits, which is every
+/// Ed25519 and ECDSA one, and would have made `MarshalPKIXPublicKey`
+/// and every certificate built on it disagree with Go by two bytes.
+///
+/// Struct is derived by recursing over the descriptor's fields, so it
+/// is exact for any type whose `__reflect_type` lists what
+/// `__reflect_value` produces — every `#[goish::reflect]` struct, plus
+/// `asn1::RawValue` and `asn1::BitString`.
+///
+/// **`time::Time` and `big::Int` are the deliberate exception.** Both
+/// report *no* fields (Go's are unexported) while their
+/// `__reflect_value` carries two synthetic ones, so a descriptor-driven
+/// zero cannot match their real zero and would silently be *wrong*
+/// rather than merely absent. A field-less struct descriptor therefore
+/// keeps answering `Invalid` — the conservative direction, in which an
+/// optional `time::Time` is emitted where Go would omit it, rather than
+/// omitted where Go emits it.
 pub fn Zero(t: Type) -> Value {
     match t.Kind() {
         Kind::Bool => Value::Bool(false),
@@ -1458,9 +1486,36 @@ pub fn Zero(t: Type) -> Value {
         Kind::Float32 => Value::Float32(0.0),
         Kind::Float64 => Value::Float64(0.0),
         Kind::String => Value::String(string::from_static("")),
-        // Slice/Map/Struct/Array/Pointer zero is "the empty/nil
-        // collection". Return Invalid until ports surface a need for
-        // typed empty-collection zeroes.
+        // A nil slice and an empty one are the same value in goish
+        // (goslice.rs:167), so the zero slice is the empty one.
+        Kind::Slice => Value::Slice {
+            elem_type: t.elem.unwrap_or(__invalidType as fn() -> Type),
+            items: Vec::new(),
+        },
+        Kind::Map => Value::Map {
+            key_type: t.key.unwrap_or(__invalidType as fn() -> Type),
+            value_type: t.elem.unwrap_or(__invalidType as fn() -> Type),
+            entries: Vec::new(),
+        },
+        // Go's zero pointer is nil; `Value::Pointer(Invalid)` is the
+        // encoding `IsNil` already recognises.
+        Kind::Pointer => Value::Pointer(alloc::boxed::Box::new(Value::Invalid)),
+        Kind::Struct => {
+            // See the doc comment: a field-less descriptor is either a
+            // genuinely empty struct or one hiding its state, and the
+            // two are indistinguishable from here.
+            let n = t.NumField();
+            if n == 0 {
+                return Value::Invalid;
+            }
+            let mut fields: Vec<Value> = Vec::with_capacity(n as usize);
+            let mut i: int = 0;
+            while i < n {
+                fields.push(Zero((t.Field(i).Type)()));
+                i += 1;
+            }
+            Value::Struct { ty: t, fields }
+        }
         _ => Value::Invalid,
     }
 }

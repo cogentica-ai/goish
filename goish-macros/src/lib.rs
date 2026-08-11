@@ -19,7 +19,7 @@
 
 extern crate proc_macro;
 
-use proc_macro::{Delimiter, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Group, TokenStream, TokenTree};
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -357,13 +357,42 @@ pub fn var_emit_error_marker(input: TokenStream) -> TokenStream {
 /// strings into the descriptor. The struct itself is re-emitted verbatim
 /// (minus the `#[tag(...)]` attributes, which the Rust compiler doesn't
 /// recognize on plain fields).
+///
+/// Outer attributes on the struct — doc comments, `#[derive(...)]`,
+/// `#[repr(...)]`, `#[allow(...)]` — are preserved. A Go-shape port
+/// therefore keeps its `#[derive(Clone, Default, PartialEq)]` written
+/// exactly as it was before the attribute was added: `Clone` and
+/// `Default` are dropped from the derive list, because this macro emits
+/// both itself and a second impl would collide. Everything else in the
+/// list survives.
+///
+/// # `#[goish::reflect(reflect_only)]`
+///
+/// The default expansion emits, besides `Reflect`, a whole service
+/// layer: `Default`, `Clone`, `json::FromValue`, `fmt::Format`,
+/// `reflect::FromReflectValue`, `reflect::Settable`, and the two
+/// `json::v2` codecs. Each of those recurses structurally, so **every
+/// field type must implement all of them too**.
+///
+/// That is the right default for a Go struct made of goish primitives.
+/// It is the wrong one for an ASN.1 shape whose fields are
+/// `asn1::ObjectIdentifier`, `asn1::RawValue`, `asn1::BitString` — types
+/// that are `Reflect` (which is all `asn1::Marshal` reads) but are not,
+/// and have no reason to be, JSON-codable. `reflect_only` emits the
+/// `Reflect` impl and nothing else, leaving `Clone` / `Default` /
+/// `PartialEq` to the struct's own `#[derive(...)]`.
 #[proc_macro_attribute]
-pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let parsed = parse_struct(item);
+pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let reflect_only = attr.to_string().trim() == "reflect_only";
+    let parsed = parse_struct(item, reflect_only);
 
     // Re-emit the struct without the #[tag(...)] attributes (those are
     // private to the goish reflect macro; rustc doesn't know them).
     let mut struct_text = String::new();
+    for attr in &parsed.attrs {
+        struct_text.push_str(attr);
+        struct_text.push('\n');
+    }
     if let Some(vis) = &parsed.vis {
         struct_text.push_str(vis);
         struct_text.push(' ');
@@ -439,6 +468,14 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
     );
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
+
+    // `reflect_only` stops here: the `Reflect` impl is the whole
+    // deliverable, and none of the service impls below — each of which
+    // recurses into every field type — is emitted. See the attribute's
+    // doc comment for when that is the right choice.
+    if reflect_only {
+        return emit_reflect(struct_text, impl_text);
+    }
 
     // ── impl Default for the struct ────────────────────────────────
     // Auto-Default mirrors Go's "structs are zero-initializable by
@@ -754,6 +791,11 @@ pub fn reflect(_attr: TokenStream, item: TokenStream) -> TokenStream {
         parsed.name
     );
 
+    emit_reflect(struct_text, impl_text)
+}
+
+/// Parse the re-emitted struct and its impl block back into tokens.
+fn emit_reflect(struct_text: String, impl_text: String) -> TokenStream {
     let mut out: TokenStream = struct_text
         .parse()
         .expect("goish::reflect: failed to re-emit struct");
@@ -818,6 +860,11 @@ fn json_tag_parts(tag_lit: Option<&str>, field_name: &str) -> (String, bool, boo
 // ─── manual struct parser ────────────────────────────────────────────
 
 struct Parsed {
+    /// Outer attributes written above the struct, in source order and
+    /// already rendered back to text. `#[derive(...)]` lists have had
+    /// `Clone` and `Default` removed — the macro emits those itself —
+    /// and a derive list left empty by that removal is dropped.
+    attrs: Vec<String>,
     vis: Option<String>,
     name: String,
     fields: Vec<ParsedField>,
@@ -832,15 +879,28 @@ struct ParsedField {
     tag: Option<String>,
 }
 
-fn parse_struct(item: TokenStream) -> Parsed {
+fn parse_struct(item: TokenStream, reflect_only: bool) -> Parsed {
     let mut iter = item.into_iter().peekable();
 
-    // Skip outer attributes (e.g. doc comments) — `# [ ... ]`.
+    // Collect outer attributes (doc comments, derives, repr, …) — `# [ ... ]`.
+    // They are re-emitted above the struct so that adding
+    // `#[goish::reflect]` to an existing Go-shape port does not silently
+    // strip its documentation or its other derives.
+    let mut attrs: Vec<String> = Vec::new();
     loop {
         match iter.peek() {
             Some(TokenTree::Punct(p)) if p.as_char() == '#' => {
                 iter.next();
-                iter.next(); // bracket group
+                let g = match iter.next() {
+                    Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Bracket => g,
+                    other => panic!(
+                        "#[goish::reflect]: malformed outer attribute, got {:?}",
+                        other
+                    ),
+                };
+                if let Some(rendered) = render_outer_attr(&g, !reflect_only) {
+                    attrs.push(rendered);
+                }
             }
             _ => break,
         }
@@ -871,7 +931,48 @@ fn parse_struct(item: TokenStream) -> Parsed {
     };
 
     let fields = parse_fields(body.stream());
-    Parsed { vis, name, fields }
+    Parsed {
+        attrs,
+        vis,
+        name,
+        fields,
+    }
+}
+
+/// Render one outer attribute's bracket group back to `#[...]` text.
+///
+/// `derive(...)` is special-cased: `Clone` and `Default` are removed,
+/// because `#[goish::reflect]` emits both impls itself and a second one
+/// is a conflicting-implementation error. A derive list that is empty
+/// after the removal yields `None` (nothing to emit).
+fn render_outer_attr(g: &Group, strip_clone_default: bool) -> Option<String> {
+    let mut inner = g.stream().into_iter().peekable();
+
+    let is_derive = strip_clone_default
+        && matches!(inner.peek(), Some(TokenTree::Ident(i)) if i.to_string() == "derive");
+    if !is_derive {
+        return Some(format!("#[{}]", g.stream()));
+    }
+    inner.next(); // `derive`
+
+    let list = match inner.next() {
+        Some(TokenTree::Group(l)) if l.delimiter() == Delimiter::Parenthesis => l,
+        // `#[derive]` with no list — nothing to filter, nothing to emit.
+        _ => return None,
+    };
+
+    let kept: Vec<String> = list
+        .stream()
+        .to_string()
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && s != "Clone" && s != "Default")
+        .collect();
+
+    if kept.is_empty() {
+        return None;
+    }
+    Some(format!("#[derive({})]", kept.join(", ")))
 }
 
 fn consume_visibility<I>(iter: &mut std::iter::Peekable<I>) -> Option<String>

@@ -77,9 +77,11 @@ use crate::types::{byte, int, rune};
 //       Parameters asn1.RawValue `asn1:"optional"`
 //   }
 /// The ASN.1 structure of the same name. See RFC 5280, section 4.1.1.2.
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default, PartialEq)]
 pub struct AlgorithmIdentifier {
     pub Algorithm: asn1::ObjectIdentifier,
+    #[tag(r#"asn1:"optional""#)]
     pub Parameters: asn1::RawValue,
 }
 
@@ -88,6 +90,21 @@ pub struct AlgorithmIdentifier {
 /// this is a newtype rather than an alias.
 #[derive(Clone, Default, PartialEq)]
 pub struct RDNSequence(pub slice<RelativeDistinguishedNameSET>);
+
+// go: none — goish idiom: same delegation as
+// `RelativeDistinguishedNameSET` below. `type RDNSequence
+// []RelativeDistinguishedNameSET` is a Go slice type; the newtype is
+// goish's spelling of it, and this makes `reflect` see through it.
+impl crate::reflect::Reflect for RDNSequence {
+    fn __reflect_type() -> crate::reflect::Type {
+        return <slice<RelativeDistinguishedNameSET> as crate::reflect::Reflect>::__reflect_type();
+    }
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return <slice<RelativeDistinguishedNameSET> as crate::reflect::Reflect>::__reflect_value(
+            &self.0,
+        );
+    }
+}
 
 // go: none — goish idiom: Go's `attributeTypeNames` is a package-level
 // `map[string]string` var (pkix.go:26-36). goish has no const map, so —
@@ -216,9 +233,44 @@ const backslash: rune = 0x5C;
 #[derive(Clone, Default, PartialEq)]
 pub struct RelativeDistinguishedNameSET(pub slice<AttributeTypeAndValue>);
 
+// go: none — goish idiom: Go's `RelativeDistinguishedNameSET` IS a slice
+// type, so `reflect.ValueOf` of one reports `reflect.Slice` and
+// `asn1.Marshal` walks its elements. goish spells the same Go type as a
+// newtype (see the banner), and `#[goish::reflect(reflect_only)]` only
+// parses named-field structs, so the delegation to the inner `slice<T>`
+// is written out.
+//
+// The descriptor's **name** is load-bearing, not cosmetic:
+// `asn1::getUniversalType` picks `TagSet` over `TagSequence` via
+// `strings.HasSuffix(t.Name(), "SET")` (common.rs:204) — which is the
+// very reason the banner gives for these being newtypes and not
+// aliases. A bare `Value::Slice` reports an empty name from `Type()`
+// (reflect/mod.rs:784) and would encode this SET as `0x30` where Go
+// writes `0x31`, so the value is wrapped in `Value::Named`, the variant
+// that exists to carry exactly this.
+impl crate::reflect::Reflect for RelativeDistinguishedNameSET {
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(
+            crate::reflect::Kind::Slice,
+            "RelativeDistinguishedNameSET",
+            &[],
+        )
+        .__with_elem(<AttributeTypeAndValue as crate::reflect::Reflect>::__reflect_type);
+    }
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return crate::reflect::Value::Named {
+            ty: <Self as crate::reflect::Reflect>::__reflect_type(),
+            inner: alloc::boxed::Box::new(<slice<AttributeTypeAndValue> as crate::reflect::Reflect>::__reflect_value(
+                &self.0,
+            )),
+        };
+    }
+}
+
 // Go: pkix.go:99-102
 /// Mirrors the ASN.1 structure of the same name in RFC 5280,
 /// Section 4.1.2.4.
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default, PartialEq)]
 pub struct AttributeTypeAndValue {
     pub Type: asn1::ObjectIdentifier,
@@ -228,17 +280,21 @@ pub struct AttributeTypeAndValue {
 // Go: pkix.go:106-109
 /// A set of ASN.1 sequences of [`AttributeTypeAndValue`] sequences from
 /// RFC 2986 (PKCS #10).
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default, PartialEq)]
 pub struct AttributeTypeAndValueSET {
     pub Type: asn1::ObjectIdentifier,
+    #[tag(r#"asn1:"set""#)]
     pub Value: slice<slice<AttributeTypeAndValue>>,
 }
 
 // Go: pkix.go:113-117
 /// The ASN.1 structure of the same name. See RFC 5280, section 4.2.
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default, PartialEq)]
 pub struct Extension {
     pub Id: asn1::ObjectIdentifier,
+    #[tag(r#"asn1:"optional""#)]
     pub Critical: bool,
     pub Value: slice<byte>,
 }
@@ -493,6 +549,7 @@ fn oidInAttributeTypeAndValue(
 /// Deprecated: `x509::RevocationList` should be used instead.
 // No `PartialEq`: `time::Time` has none and `big::Int`'s is against
 // a different RHS. Go compares neither of these structs with `==`.
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default)]
 pub struct CertificateList {
     pub TBSCertList: TBSCertificateList,
@@ -514,15 +571,20 @@ impl CertificateList {
 /// Deprecated: `x509::RevocationList` should be used instead.
 // No `PartialEq`: `time::Time` has none and `big::Int`'s is against
 // a different RHS. Go compares neither of these structs with `==`.
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default)]
 pub struct TBSCertificateList {
     pub Raw: asn1::RawContent,
+    #[tag(r#"asn1:"optional,default:0""#)]
     pub Version: int,
     pub Signature: AlgorithmIdentifier,
     pub Issuer: RDNSequence,
     pub ThisUpdate: time::Time,
+    #[tag(r#"asn1:"optional""#)]
     pub NextUpdate: time::Time,
+    #[tag(r#"asn1:"optional""#)]
     pub RevokedCertificates: slice<RevokedCertificate>,
+    #[tag(r#"asn1:"tag:0,optional,explicit""#)]
     pub Extensions: slice<Extension>,
 }
 
@@ -530,9 +592,11 @@ pub struct TBSCertificateList {
 /// The ASN.1 structure of the same name. See RFC 5280, section 5.1.
 // No `PartialEq`: `time::Time` has none and `big::Int`'s is against
 // a different RHS. Go compares neither of these structs with `==`.
+#[goish::reflect(reflect_only)]
 #[derive(Clone, Default)]
 pub struct RevokedCertificate {
     pub SerialNumber: Int,
     pub RevocationTime: time::Time,
+    #[tag(r#"asn1:"optional""#)]
     pub Extensions: slice<Extension>,
 }
