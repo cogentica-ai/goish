@@ -16,17 +16,12 @@
 //
 // [earlier version]: https://csrc.nist.gov/CSRC/media/Projects/cryptographic-module-validation-program/documents/IG%209.3.A%20Resolution%202b%5BMarch%2026%202024%5D.pdf
 //
-// Deviation from entropy[go] @ Go 1.25.5: `sysrand.Read` is
-// `crypto/rand.Read`. Both are getrandom(2) on linux;
-// crypto/internal/sysrand is not yet ported (it carries the blocking
-// warning and the /dev/urandom fallback, neither of which goish's
-// crypto/rand has).
 
 #![allow(non_snake_case)]
 
 extern crate alloc;
 
-use crate::crypto::rand;
+use crate::crypto::internal::sysrand;
 use crate::goslice::slice;
 use crate::types::byte;
 
@@ -36,7 +31,7 @@ use crate::types::byte;
 pub fn Depleted<F: FnOnce(&[byte; 48])>(LOAD: F) {
     // Go: var entropy [48]byte; sysrand.Read(entropy[:]); LOAD(&entropy)
     let mut b = slice::__from_vec(alloc::vec![0u8; 48]);
-    let _ = rand::Read(&mut b);
+    sysrand::Read(&mut b);
     let raw: &[byte] = &b;
     let mut entropy = [0u8; 48];
     entropy.copy_from_slice(raw);

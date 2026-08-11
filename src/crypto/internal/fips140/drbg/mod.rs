@@ -10,3 +10,6 @@ mod rand;
 
 pub use ctrdrbg::{Counter, NewCounter, SeedSize};
 pub use rand::{DefaultReader, Read, ReadWithReader, ReadWithReaderDeterministic};
+// goish idiom: the `#[goish::interface]` downcast-registry hook that
+// concrete impls of `DefaultReader` call to become castable.
+pub use rand::__goish_register_DefaultReader_impl;

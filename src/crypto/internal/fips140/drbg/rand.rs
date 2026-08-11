@@ -7,10 +7,6 @@
 //
 // Deviations from rand[go] @ Go 1.25.5:
 //
-//   * `sysrand.Read` is `crypto/rand.Read`. Both are getrandom(2) on
-//     linux. crypto/internal/sysrand is not ported: it carries the
-//     blocking-entropy warning and the /dev/urandom fallback, neither of
-//     which goish's crypto/rand has.
 //   * `fips140.Enabled` is a function in goish, not a package-level bool,
 //     so the guard reads `fips140::Enabled()`. It is always false, which
 //     means the DRBG path below is currently unreachable — but the body
@@ -26,7 +22,7 @@ use alloc::boxed::Box;
 use crate::crypto::internal::entropy;
 use crate::crypto::internal::fips140;
 use crate::crypto::internal::randutil;
-use crate::crypto::rand as sysrand;
+use crate::crypto::internal::sysrand;
 use crate::errors;
 use crate::goslice::slice;
 use crate::io;
@@ -58,7 +54,7 @@ static drbgs: Lazy<sync::Pool<Box<Counter>>> = Lazy::new(|| {
 pub fn Read(b: &mut slice<byte>) {
     // Go: if !fips140.Enabled { sysrand.Read(b); return }
     if !fips140::Enabled() {
-        let _ = sysrand::Read(b);
+        sysrand::Read(b);
         return;
     }
 
@@ -71,7 +67,7 @@ pub fn Read(b: &mut slice<byte>) {
     // Go: additionalInput := new([SeedSize]byte); sysrand.Read(additionalInput[:16])
     let mut additionalInput = [0u8; SeedSize];
     let mut head = slice::__from_vec(alloc::vec![0u8; 16]);
-    let _ = sysrand::Read(&mut head);
+    sysrand::Read(&mut head);
     let hr: &[byte] = &head;
     additionalInput[..16].copy_from_slice(hr);
     let mut additionalInput: Option<[byte; SeedSize]> = Some(additionalInput);

@@ -16,3 +16,4 @@ pub mod fips140cache;
 pub mod fips140hash;
 pub mod fips140only;
 pub mod randutil;
+pub mod sysrand;
