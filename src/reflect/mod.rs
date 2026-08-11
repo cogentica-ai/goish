@@ -1,3 +1,4 @@
+// go: package reflect
 // reflect — Go's `reflect` package, first slice.
 //
 //   Go                                   goish
@@ -33,6 +34,9 @@
 #![allow(non_snake_case, non_upper_case_globals)]
 
 extern crate alloc;
+
+mod value;
+pub use value::New;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -694,7 +698,7 @@ impl Type {
 /// `Default` returns `Value::Invalid` — matches Go's zero-`reflect.Value`,
 /// where `IsValid()` is false. Ports that hold a `reflect::Value` field
 /// (e.g. kylelemons' `formatter.cur`) rely on this to derive `Default`.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub enum Value {
     #[default]
     Invalid,
