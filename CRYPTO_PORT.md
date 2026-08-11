@@ -145,13 +145,32 @@ work found real divergence in both (see their commits). Still in it:
 
 | package | counted | anchors |
 |---|--:|--:|
-| `crypto/internal/fips140/edwards25519` | 28/49 | 0 |
+| `crypto/internal/fips140/edwards25519` | 28/49 | 0 | ← 21 REAL gaps, see below |
 | `crypto/internal/fips140/rsa` | 39/39 | 0 |
 | `crypto/rsa` | 27/40 | 0 |
 | `crypto/cipher` | 28/33 | 0 |
 
 Those are ~154 functions that the percentage already counts. Anchoring
 them does not move the number; it decides whether the number was true.
+
+
+### edwards25519's 21 missing functions are real
+
+Anchoring the others found mislabelled assembly; this one is different.
+`crypto/internal/fips140/edwards25519` is missing the entire scalar
+half of the package, not just its anchors:
+
+| Go file | missing | notes |
+|---|--:|---|
+| `scalar_fiat.go` | 10 | Fiat Cryptography output — **mechanically translatable**: `scripts/fiat64_to_rust.py <file> <out> fiatScalar` produces all ten, the script having been generalised to take an explicit symbol prefix |
+| `scalar.go` | 8 | `NewScalar`, `Multiply`, `MultiplyAdd`, `SetBytesWithClamping`, `SetCanonicalBytes`, `SetUniformBytes`, `isReduced`, `setShortBytes` — a real port |
+| `scalarmult.go` | 2 | `nonAdjacentForm`, `signedRadix16` |
+| `tables.go` | 1 | `copyFieldElement` |
+
+The translated `scalar_fiat.rs` is deliberately NOT landed yet: with
+`scalar.go` unported nothing would call it, and adding generated code
+with no consumer moves the percentage without moving the behaviour.
+Land the two together.
 
 ## Next: nistec proper (75 fns)
 
