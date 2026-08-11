@@ -6,7 +6,7 @@
 #![no_main]
 #![allow(non_snake_case)]
 extern crate alloc;
-use goish::crypto::ecdsa::{p256_keypair_generate, p256_ecdh_compute};
+use goish::crypto::tls::legacy_p256::{p256_keypair_generate, p256_ecdh_compute};
 use goish::syscall;
 use goish::fmt;
 

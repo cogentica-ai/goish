@@ -25,6 +25,7 @@ use crate::gostring::string;
 use crate::sync::Mutex;
 use crate::types::{byte, int};
 
+pub mod legacy_p256;
 pub mod record;
 pub mod key_schedule;
 pub mod handshake_client_tls13;

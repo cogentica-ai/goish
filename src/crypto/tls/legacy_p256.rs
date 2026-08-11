@@ -1,10 +1,49 @@
-// crypto/ecdsa/p256.rs — ECDSA verification for P-256 (secp256r1).
+// go: namespace crypto/tls
 //
-// This implements ECDSA signature verification using the NIST P-256 curve.
-// Only verification is needed for TLS client-side handshake.
+// legacy_p256 — goish-only, hand-rolled P-256. Scheduled for deletion.
 //
-// Reference: FIPS 186-4, SEC 1 v2.0, RFC 6979
-// Go SDK reference: src/crypto/internal/fips140/ecdsa/ecdsa.go
+// NOTHING HERE IS A PORT. Every function predates the real curve packages
+// and has no Go counterpart to cite; the `// go: none` anchors below say
+// so individually.
+//
+// What it is
+// ----------
+// A self-contained secp256r1 implementation — 32-byte big-endian bignums,
+// Jacobian point arithmetic, ECDSA verification, ECDH, and an X.509 SPKI
+// parser — written to get the TLS handshake working before
+// crypto/elliptic, crypto/ecdh and crypto/internal/fips140/{ecdsa,nistec}
+// existed. Those are now ported and verified against Go, so this is a
+// second, unverified P-256 sitting in the live handshake path.
+//
+// Why it lives here
+// -----------------
+// It used to occupy `src/crypto/ecdsa/`, squatting on the name of a
+// package that had never been ported — which is why `port_deps --ready`
+// called crypto/ecdsa READY for four sessions while the path was in fact
+// unavailable. crypto/tls is its only real consumer, so it moved to the
+// package that actually needs it and the `crypto/ecdsa` path was freed
+// for the verbatim port.
+//
+// It moved as one unit rather than being split by concern (ECDH ->
+// crypto/ecdh, SPKI -> tls/record.rs, verify -> crypto/ecdsa) because the
+// three paths share 116 references to the same u256/Jacobian helpers;
+// splitting would have duplicated ~450 lines of arithmetic that is about
+// to be deleted anyway.
+//
+// Replacement
+// -----------
+// Each entry point has a real equivalent already ported and passing:
+//
+//   p256_keypair_generate            -> ecdh::P256().GenerateKey(rand)
+//   p256_ecdh_compute                -> PrivateKey::ECDH(&PublicKey)
+//   p256_ecdh_generate_and_compute*  -> the two above, composed
+//   VerifyP256                       -> ecdsa::VerifyASN1
+//   decode_x509_ec_p256_pubkey       -> SPKI parse + ParseUncompressedPublicKey
+//
+// When crypto/tls is moved onto those, this file goes away entirely.
+//
+// goishlint:ignore GOISH016 — not a package root; see the namespace
+// anchor above. This is a goish-only module inside crypto/tls.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -74,6 +113,7 @@ const P256_GY: [u8; 32] = [
 
 type U256 = [u8; 32];
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 fn u256_from_be(b: &[u8]) -> U256 {
     let mut out = [0u8; 32];
     let n = b.len().min(32);
@@ -81,10 +121,12 @@ fn u256_from_be(b: &[u8]) -> U256 {
     out
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 fn u256_is_zero(a: &U256) -> bool {
     a.iter().all(|&x| x == 0)
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // Compare: returns -1 if a < b, 0 if a == b, 1 if a > b
 fn u256_cmp(a: &U256, b: &U256) -> i32 {
     for i in 0..32 {
@@ -94,6 +136,7 @@ fn u256_cmp(a: &U256, b: &U256) -> i32 {
     0
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // a + b with carry (no modular reduction)
 fn u256_add_raw(a: &U256, b: &U256) -> ([u8; 33], bool) {
     let mut out = [0u8; 33];
@@ -107,6 +150,7 @@ fn u256_add_raw(a: &U256, b: &U256) -> ([u8; 33], bool) {
     (out, carry != 0)
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // a - b (assumes a >= b)
 fn u256_sub(a: &U256, b: &U256) -> U256 {
     let mut out = [0u8; 32];
@@ -124,6 +168,7 @@ fn u256_sub(a: &U256, b: &U256) -> U256 {
     out
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // a mod p (where result is already < 2p)
 fn u256_reduce_once(a: &U256, p: &U256) -> U256 {
     if u256_cmp(a, p) >= 0 {
@@ -133,6 +178,7 @@ fn u256_reduce_once(a: &U256, p: &U256) -> U256 {
     }
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // a + b mod p
 fn u256_add_mod(a: &U256, b: &U256, p: &U256) -> U256 {
     let (extended, overflow) = u256_add_raw(a, b);
@@ -145,6 +191,7 @@ fn u256_add_mod(a: &U256, b: &U256, p: &U256) -> U256 {
     }
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // a - b mod p
 fn u256_sub_mod(a: &U256, b: &U256, p: &U256) -> U256 {
     if u256_cmp(a, b) >= 0 {
@@ -160,6 +207,7 @@ fn u256_sub_mod(a: &U256, b: &U256, p: &U256) -> U256 {
 // 512-bit intermediate for multiplication
 type U512 = [u8; 64];
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // a * b (full 512-bit result)
 //
 // We accumulate products into 64-column intermediates (u64) to avoid
@@ -191,17 +239,20 @@ fn u256_mul_full(a: &U256, b: &U256) -> U512 {
     out
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // a * b mod p using general 512->256 reduction
 fn u512_mod_p256p(product: &U512) -> U256 {
     u512_mod_general(product, &P256_P)
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // a * b mod p
 fn u256_mul_mod(a: &U256, b: &U256, p: &U256) -> U256 {
     let prod = u256_mul_full(a, b);
     u512_mod_general(&prod, p)
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // Modular inverse via Fermat's little theorem: a^(p-2) mod p
 // For P-256 prime p, inv(a) = a^(p-2) mod p.
 fn u256_inv_mod_p(a: &U256) -> U256 {
@@ -215,6 +266,7 @@ fn u256_inv_mod_p(a: &U256) -> U256 {
     u256_pow_mod(a, &p_minus_2, &P256_P)
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // a^e mod m using square-and-multiply
 fn u256_pow_mod(a: &U256, e: &U256, m: &U256) -> U256 {
     let mut result = [0u8; 32];
@@ -234,6 +286,7 @@ fn u256_pow_mod(a: &U256, e: &U256, m: &U256) -> U256 {
     result
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // Modular inverse of a mod n (order)
 fn u256_inv_mod_n(a: &U256) -> U256 {
     // n - 2 for P-256 order n
@@ -257,22 +310,26 @@ struct JacobianPoint {
 }
 
 impl JacobianPoint {
+    // go: none — goish-only P-256; no Go counterpart. See file header.
     fn identity() -> Self {
         // Point at infinity: Z = 0
         let z = [0u8; 32];
         JacobianPoint { x: [0u8; 32], y: [0u8; 32], z }
     }
 
+    // go: none — goish-only P-256; no Go counterpart. See file header.
     fn from_affine(x: &U256, y: &U256) -> Self {
         let mut one = [0u8; 32];
         one[31] = 1;
         JacobianPoint { x: *x, y: *y, z: one }
     }
 
+    // go: none — goish-only P-256; no Go counterpart. See file header.
     fn is_identity(&self) -> bool {
         u256_is_zero(&self.z)
     }
 
+    // go: none — goish-only P-256; no Go counterpart. See file header.
     fn to_affine(&self) -> Option<(U256, U256)> {
         if self.is_identity() {
             return None;
@@ -288,6 +345,7 @@ impl JacobianPoint {
     }
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // Point doubling in Jacobian coordinates (P-256, a = -3)
 fn point_double(p: &JacobianPoint) -> JacobianPoint {
     if p.is_identity() {
@@ -378,6 +436,7 @@ fn point_double(p: &JacobianPoint) -> JacobianPoint {
     JacobianPoint { x: x3, y: y3, z: z3 }
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // Point addition in Jacobian coordinates (P-256)
 // R = P + Q where P is in Jacobian, Q is in affine (Z=1).
 fn point_add_mixed(p: &JacobianPoint, qx: &U256, qy: &U256) -> JacobianPoint {
@@ -432,6 +491,7 @@ fn point_add_mixed(p: &JacobianPoint, qx: &U256, qy: &U256) -> JacobianPoint {
     JacobianPoint { x: x3, y: y3, z: z3 }
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // Scalar multiplication: k * P (P in affine coordinates)
 fn point_scalar_mul_affine(k: &U256, px: &U256, py: &U256) -> JacobianPoint {
     let mut result = JacobianPoint::identity();
@@ -466,6 +526,7 @@ pub struct P256PublicKey {
     pub y: [u8; 32],
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 /// Parse a P-256 public key from a DER-encoded X.509 certificate.
 /// Returns the EC public key or an error.
 pub fn decode_x509_ec_p256_pubkey(cert_der: &[byte]) -> (P256PublicKey, error) {
@@ -530,6 +591,7 @@ pub fn decode_x509_ec_p256_pubkey(cert_der: &[byte]) -> (P256PublicKey, error) {
     (pk, crate::errors::nil)
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 /// find_spki_in_tbs navigates the TBSCertificate SEQUENCE to find the
 /// SubjectPublicKeyInfo field.
 /// Field order: [version] serial sigAlg issuer validity subject SPKI [extensions]
@@ -573,6 +635,7 @@ pub fn find_spki_in_tbs(tbs_bytes: &crate::goslice::slice<byte>) -> (crate::gosl
 
 // ─── ECDSA verification ───────────────────────────────────────────────────────
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 /// Parse a DER-encoded ECDSA signature { r INTEGER, s INTEGER }.
 pub fn parse_ecdsa_sig(sig: &[u8]) -> Option<(U256, U256)> {
     // DER: SEQUENCE { INTEGER r, INTEGER s }
@@ -613,6 +676,7 @@ pub fn parse_ecdsa_sig(sig: &[u8]) -> Option<(U256, U256)> {
     Some((r, s))
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 /// Verify an ECDSA-P256 signature over `digest` using `pubkey`.
 ///
 /// `sig` is DER-encoded ECDSA signature.
@@ -680,6 +744,7 @@ pub fn VerifyP256(pubkey: &P256PublicKey, digest: &[u8], sig: &[u8]) -> error {
     crate::errors::nil
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // u * v mod n (order) — uses general modular multiplication with n as modulus
 fn u256_mul_mod_n(a: &U256, b: &U256) -> U256 {
     // For order n, we use the schoolbook u512 mod n approach.
@@ -690,6 +755,7 @@ fn u256_mul_mod_n(a: &U256, b: &U256) -> U256 {
 
 // ─── P-256 ECDH ──────────────────────────────────────────────────────────────
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 /// Generate a P-256 ephemeral keypair and compute the ECDH shared secret
 /// with the given server public key (65-byte uncompressed: 0x04 || x || y).
 ///
@@ -752,6 +818,7 @@ pub fn p256_ecdh_generate_and_compute(server_pub_65: &[u8]) -> ([u8; 32], [u8; 3
     (scalar, client_pub_x, shared_x)
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 /// p256_ecdh_generate_and_compute_full: Like above but returns the full 65-byte
 /// uncompressed client public key.
 pub fn p256_ecdh_generate_and_compute_full(server_pub_65: &[u8]) -> ([u8; 32], [u8; 65], [u8; 32]) {
@@ -801,6 +868,7 @@ pub fn p256_ecdh_generate_and_compute_full(server_pub_65: &[u8]) -> ([u8; 32], [
     (scalar, client_pub_65, shared_x)
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 // General 512 mod 256 using binary long division.
 // rem is 33 bytes to handle 2*m - 1 < 2^257.
 fn u512_mod_general(a: &U512, m: &U256) -> U256 {
@@ -863,6 +931,7 @@ fn u512_mod_general(a: &U512, m: &U256) -> U256 {
 
 // ─── P-256 ECDH key generation (for TLS 1.3 HRR) ──────────────────────
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 /// Generate a fresh P-256 ECDH keypair.
 /// Returns (private_scalar: [u8; 32], public_key_65: [u8; 65]).
 /// public_key_65 is the uncompressed EC point: 0x04 || x (32 bytes) || y (32 bytes).
@@ -896,6 +965,7 @@ pub fn p256_keypair_generate() -> ([u8; 32], [u8; 65]) {
     (scalar, pub65)
 }
 
+// go: none — goish-only P-256; no Go counterpart. See file header.
 /// Compute the P-256 ECDH shared secret.
 /// scalar: the local private key ([u8; 32])
 /// server_pub_65: the server's uncompressed EC point (65 bytes, starts with 0x04)

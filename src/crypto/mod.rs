@@ -10,7 +10,6 @@ pub mod des;
 pub mod dsa;
 pub mod ecdh;
 pub mod elliptic;
-pub mod ecdsa;
 pub mod ed25519;
 pub mod fips140;
 pub mod hkdf;

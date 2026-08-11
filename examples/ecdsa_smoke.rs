@@ -3,7 +3,7 @@
 #![no_main]
 #![allow(non_snake_case)]
 extern crate alloc;
-use goish::crypto::ecdsa::{P256PublicKey, VerifyP256};
+use goish::crypto::tls::legacy_p256::{P256PublicKey, VerifyP256};
 use goish::syscall;
 use goish::fmt;
 
