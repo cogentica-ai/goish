@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **767/1507 = 50.9%**, 1007 anchors, **40 packages fully verified**
+Current: **769/1507 = 51.0%**, 1053 anchors, **40 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -146,7 +146,6 @@ work found real divergence in both (see their commits). Still in it:
 | package | counted | anchors |
 |---|--:|--:|
 | `crypto/internal/fips140/edwards25519` | 28/49 | 0 |
-| `crypto/internal/fips140/edwards25519/field` | 32/34 | 0 |
 | `crypto/internal/fips140/rsa` | 39/39 | 0 |
 | `crypto/rsa` | 27/40 | 0 |
 | `crypto/cipher` | 28/33 | 0 |
