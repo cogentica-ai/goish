@@ -17,6 +17,12 @@ pub mod pkix;
 mod oid;
 pub use oid::{OIDFromInts, ParseOID, OID};
 
+mod pem_decrypt;
+pub use pem_decrypt::{
+    DecryptPEMBlock, EncryptPEMBlock, IncorrectPasswordError, IsEncryptedPEMBlock, PEMCipher,
+    PEMCipher3DES, PEMCipherAES128, PEMCipherAES192, PEMCipherAES256, PEMCipherDES,
+};
+
 extern crate alloc;
 
 use alloc::sync::Arc;
