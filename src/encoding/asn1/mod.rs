@@ -388,15 +388,58 @@ pub fn NullBytes() -> slice<byte> {
 
 /// `asn1.ObjectIdentifier` (asn1.go:225). A sequence of integers
 /// identifying a node in the ASN.1 OID tree.
-pub type ObjectIdentifier = slice<int>;
+///
+/// Go declares `type ObjectIdentifier []int` — a *defined* type, which is
+/// what lets `getUniversalType` tell an OID from a plain `[]int` and give
+/// it TagOID rather than TagSequence. goish had it as a type alias, so the
+/// two were the same type and that distinction was unrepresentable; the
+/// newtype restores it, exactly as `crypto::Hash` needed in 2723109.
+#[derive(Clone, Default, PartialEq)]
+pub struct ObjectIdentifier(pub slice<int>);
 
-/// `ObjectIdentifier.Equal(other)` (asn1.go:228) — value equality.
-pub fn OIDEqual(oi: &ObjectIdentifier, other: &ObjectIdentifier) -> bool {
-    // Go: return slices.Equal(oi, other)
-    crate::slices::Equal(oi, other)
+impl ObjectIdentifier {
+    // go: none — goish idiom: Go writes the conversion
+    // `ObjectIdentifier(s)`; goish needs a constructor.
+    pub fn New(s: slice<int>) -> Self {
+        return ObjectIdentifier(s);
+    }
+
+    // go: sdk 1.25.5 encoding/asn1/asn1.go:228-230 ObjectIdentifier.Equal
+    /// Report whether `oi` and `other` represent the same identifier.
+    pub fn Equal(&self, other: &ObjectIdentifier) -> bool {
+        // Go: return slices.Equal(oi, other)
+        return crate::slices::Equal(&self.0, &other.0);
+    }
+
+    // go: sdk 1.25.5 encoding/asn1/asn1.go:232-243 ObjectIdentifier.String
+    /// The dotted-decimal form.
+    pub fn String(&self) -> string {
+        return OIDString(self);
+    }
+
+    // go: none — goish idiom: Go writes `len(oi)` on the slice directly.
+    /// The number of arcs.
+    pub fn Len(&self) -> int {
+        return self.0.Len();
+    }
 }
 
-/// `ObjectIdentifier.String()` (asn1.go:232) — dotted-decimal form.
+impl core::ops::Index<int> for ObjectIdentifier {
+    type Output = int;
+    // go: none — goish idiom: Go indexes the defined slice type directly.
+    fn index(&self, i: int) -> &int {
+        return &self.0[i];
+    }
+}
+
+// go: none — retained so existing call sites keep working; `Equal` above
+// is the Go-shaped spelling.
+pub fn OIDEqual(oi: &ObjectIdentifier, other: &ObjectIdentifier) -> bool {
+    return oi.Equal(other);
+}
+
+// go: none — the body of `ObjectIdentifier::String`, kept as a free
+// function because call sites already use this name.
 pub fn OIDString(oi: &ObjectIdentifier) -> string {
     let mut s = strings::Builder::new();
     s.Grow(32);
@@ -419,7 +462,7 @@ pub fn ParseObjectIdentifier(bytes: slice<byte>) -> (ObjectIdentifier, error) {
     // Go: if len(bytes) == 0 { … "zero length OBJECT IDENTIFIER" }
     if bytes.Len() == 0 {
         let empty: alloc::vec::Vec<int> = alloc::vec::Vec::new();
-        return (slice::__from_vec(empty), syntax("zero length OBJECT IDENTIFIER"));
+        return (ObjectIdentifier(slice::__from_vec(empty)), syntax("zero length OBJECT IDENTIFIER"));
     }
     // Go: s = make([]int, len(bytes)+1)
     let mut s: alloc::vec::Vec<int> = alloc::vec::Vec::with_capacity((bytes.Len() + 1) as usize);
@@ -432,7 +475,7 @@ pub fn ParseObjectIdentifier(bytes: slice<byte>) -> (ObjectIdentifier, error) {
     let (v, mut offset, err) = ParseBase128Int(bytes.clone(), 0);
     if !err.IsNil() {
         let empty: alloc::vec::Vec<int> = alloc::vec::Vec::new();
-        return (slice::__from_vec(empty), err);
+        return (ObjectIdentifier(slice::__from_vec(empty)), err);
     }
     // Go: if v < 80 { s[0] = v/40; s[1] = v%40 } else { s[0] = 2; s[1] = v-80 }
     if v < 80 {
@@ -450,7 +493,7 @@ pub fn ParseObjectIdentifier(bytes: slice<byte>) -> (ObjectIdentifier, error) {
         let (vv, new_off, e) = ParseBase128Int(bytes.clone(), offset);
         if !e.IsNil() {
             let empty: alloc::vec::Vec<int> = alloc::vec::Vec::new();
-            return (slice::__from_vec(empty), e);
+            return (ObjectIdentifier(slice::__from_vec(empty)), e);
         }
         s[i as usize] = vv;
         offset = new_off;
@@ -458,13 +501,20 @@ pub fn ParseObjectIdentifier(bytes: slice<byte>) -> (ObjectIdentifier, error) {
     }
     // Go: s = s[0:i]
     s.truncate(i as usize);
-    (slice::__from_vec(s), crate::errors::nil)
+    return (ObjectIdentifier(slice::__from_vec(s)), crate::errors::nil);
 }
 
 // ─── ENUMERATED + FLAG (asn1.go:288) ──────────────────────────────────
 
-/// `asn1.Enumerated` (asn1.go:291) — represented as plain int.
-pub type Enumerated = int;
+/// `asn1.Enumerated` (asn1.go:291).
+///
+/// Go declares `type Enumerated int` — a *defined* type, which is what
+/// lets `getUniversalType` give it TagEnum rather than TagInteger. goish
+/// had it as an alias, making it indistinguishable from `int`; the
+/// newtype restores the distinction. Same fix as ObjectIdentifier above
+/// and `crypto::Hash` in 2723109.
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Enumerated(pub int);
 
 /// `asn1.Flag` (asn1.go:296) — set to true if present.
 pub type Flag = bool;
@@ -887,4 +937,158 @@ fn slice_to_bytes(s: &slice<byte>) -> alloc::vec::Vec<byte> {
         i += 1;
     }
     v
+}
+
+// ─── reflect descriptors ──────────────────────────────────────────────
+//
+// go: none — goish-only, and a prerequisite rather than a port.
+//
+// Go's `getUniversalType` opens with a switch on six *type identities* —
+// RawValue, ObjectIdentifier, BitString, time.Time, Enumerated and
+// *big.Int — to give each its own ASN.1 tag. goish reaches type identity
+// through `reflect::Type`, which compares by `(kind, name)`, and a type
+// only has one if it implements `Reflect`. None of these did, so that
+// switch was unrepresentable no matter how it was written.
+//
+// These four impls supply it for asn1's own types. `time::Time` and
+// `big::Int` belong to their own packages and still need theirs.
+
+impl crate::reflect::Reflect for ObjectIdentifier {
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(
+            crate::reflect::Kind::Slice,
+            "ObjectIdentifier",
+            &[],
+        )
+        .__with_elem(<int as crate::reflect::Reflect>::__reflect_type);
+    }
+
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        let mut items: alloc::vec::Vec<crate::reflect::Value> = alloc::vec::Vec::new();
+        let mut i: int = 0;
+        while i < self.0.Len() {
+            items.push(crate::reflect::Value::Int(self.0[i]));
+            i += 1;
+        }
+        return crate::reflect::Value::Slice {
+            elem_type: <int as crate::reflect::Reflect>::__reflect_type,
+            items,
+        };
+    }
+}
+
+impl crate::reflect::Reflect for Enumerated {
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(crate::reflect::Kind::Int, "Enumerated", &[]);
+    }
+
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return crate::reflect::Value::Int(self.0);
+    }
+}
+
+static BIT_STRING_FIELDS: [crate::reflect::StructField; 2] = [
+    crate::reflect::StructField {
+        Name: "Bytes",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <slice<byte> as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+    crate::reflect::StructField {
+        Name: "BitLength",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <int as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+];
+
+impl crate::reflect::Reflect for BitString {
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(
+            crate::reflect::Kind::Struct,
+            "BitString",
+            &BIT_STRING_FIELDS,
+        );
+    }
+
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return crate::reflect::Value::Struct {
+            ty: <BitString as crate::reflect::Reflect>::__reflect_type(),
+            fields: alloc::vec![
+                crate::reflect::Reflect::__reflect_value(&self.Bytes),
+                crate::reflect::Value::Int(self.BitLength),
+            ],
+        };
+    }
+}
+
+static RAW_VALUE_FIELDS: [crate::reflect::StructField; 5] = [
+    crate::reflect::StructField {
+        Name: "Class",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <int as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+    crate::reflect::StructField {
+        Name: "Tag",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <int as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+    crate::reflect::StructField {
+        Name: "IsCompound",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <bool as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+    crate::reflect::StructField {
+        Name: "Bytes",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <slice<byte> as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+    crate::reflect::StructField {
+        Name: "FullBytes",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <slice<byte> as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+];
+
+impl crate::reflect::Reflect for RawValue {
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(
+            crate::reflect::Kind::Struct,
+            "RawValue",
+            &RAW_VALUE_FIELDS,
+        );
+    }
+
+    // go: none — goish-only: the reflect descriptor. See the banner above.
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return crate::reflect::Value::Struct {
+            ty: <RawValue as crate::reflect::Reflect>::__reflect_type(),
+            fields: alloc::vec![
+                crate::reflect::Value::Int(self.Class),
+                crate::reflect::Value::Int(self.Tag),
+                crate::reflect::Value::Bool(self.IsCompound),
+                crate::reflect::Reflect::__reflect_value(&self.Bytes),
+                crate::reflect::Reflect::__reflect_value(&self.FullBytes),
+            ],
+        };
+    }
 }

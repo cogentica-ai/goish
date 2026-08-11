@@ -25,7 +25,8 @@ use goish::encoding::asn1::{
     __base128IntLength, __bitStringEncoder, __byteEncoder, __bytesEncoder, __encoder,
     __int64Encoder, __lengthLength, __makeIA5String, __makeNumericString,
     __makeObjectIdentifier, __makePrintableString, __makeUTF8String, __multiEncoder,
-    __setEncoder, __stringEncoder, __taggedEncoder, parseFieldParameters,
+    __setEncoder, __stringEncoder, __taggedEncoder, parseFieldParameters, Enumerated,
+    ObjectIdentifier,
 };
 use goish::fmt;
 use goish::goslice::slice;
@@ -293,6 +294,61 @@ fn main() {
         check(ok, "parseFieldParameters #", idx);
         idx += 1;
     }
+
+
+    // ─── type identity for getUniversalType ───────────────────────────
+    //
+    // Go's getUniversalType opens by matching six type identities. That
+    // needs ObjectIdentifier and Enumerated to be defined types, not
+    // aliases, and every one of them to have a reflect::Type. These
+    // assertions are what makes that switch representable at all.
+    use goish::reflect::{Kind, Reflect, TypeOfDyn};
+
+    let oidT = TypeOfDyn::<ObjectIdentifier>();
+    let intsT = TypeOfDyn::<slice<i64>>();
+    check(
+        oidT.Name().as_bytes() == b"ObjectIdentifier" && oidT.Kind() == Kind::Slice,
+        "ObjectIdentifier has its own reflect::Type",
+        0,
+    );
+    check(
+        oidT.Name().as_bytes() != intsT.Name().as_bytes(),
+        "ObjectIdentifier is distinguishable from slice<int>",
+        0,
+    );
+
+    let enumT = TypeOfDyn::<Enumerated>();
+    let intT = TypeOfDyn::<i64>();
+    check(
+        enumT.Name().as_bytes() == b"Enumerated" && enumT.Kind() == Kind::Int,
+        "Enumerated has its own reflect::Type",
+        0,
+    );
+    check(
+        enumT.Name().as_bytes() != intT.Name().as_bytes(),
+        "Enumerated is distinguishable from int",
+        0,
+    );
+
+    let bsT = TypeOfDyn::<BitString>();
+    check(
+        bsT.Name().as_bytes() == b"BitString" && bsT.Kind() == Kind::Struct && bsT.NumField() == 2,
+        "BitString has its own reflect::Type",
+        2,
+    );
+    let rvT = TypeOfDyn::<goish::encoding::asn1::RawValue>();
+    check(
+        rvT.Name().as_bytes() == b"RawValue" && rvT.Kind() == Kind::Struct && rvT.NumField() == 5,
+        "RawValue has its own reflect::Type",
+        5,
+    );
+
+    // The values round-trip through reflect too.
+    let oid = ObjectIdentifier::New(slice::__from_vec(alloc::vec![1i64, 2, 840]));
+    check(oid.Len() == 3 && oid.String().as_bytes() == b"1.2.840", "OID String", 3);
+    let oid2 = ObjectIdentifier::New(slice::__from_vec(alloc::vec![1i64, 2, 840]));
+    check(oid.Equal(&oid2), "ObjectIdentifier.Equal is a method now", 0);
+    check(matches!(oid.__reflect_value(), goish::reflect::Value::Slice { .. }), "OID reflect value", 0);
 
     let failed = FAILED.load(Ordering::Acquire);
     let ran = RAN.load(Ordering::Acquire);
