@@ -1290,7 +1290,7 @@ fn pkcs1v15ConstructEM(
     hashed: slice<byte>,
 ) -> (slice<byte>, error) {
     // Special case: hash id 0 means the data is signed directly.
-    let prefix: &[byte] = if hash != 0 {
+    let prefix: &[byte] = if hash != crate::crypto::Hash(0) {
         match hash_prefix(hash) {
             Some(p) => p,
             None => {

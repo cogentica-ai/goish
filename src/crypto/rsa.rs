@@ -368,9 +368,9 @@ impl PrivateKey {
             Some(o) => o,
         };
         if let Some(o) = opts.downcast_ref::<OAEPOptions>() {
-            let mgf = if o.MGFHash == 0 { o.Hash } else { o.MGFHash };
-            let mut h = crate::crypto::HashNew(o.Hash);
-            let mut m = crate::crypto::HashNew(mgf);
+            let mgf = if o.MGFHash == crate::crypto::Hash(0) { o.Hash } else { o.MGFHash };
+            let mut h = o.Hash.New();
+            let mut m = mgf.New();
             let (fk, err) = fipsPrivateKey(self);
             if err != crate::nilval::nil {
                 return (slice::<byte>::new(), err);
@@ -775,7 +775,7 @@ pub fn SignPKCS1v15(
     hash: crate::crypto::Hash,
     hashed: slice<byte>,
 ) -> (slice<byte>, error) {
-    if hash != 0 && hashed.Len() != crate::crypto::HashSize(hash) {
+    if hash != crate::crypto::Hash(0) && hashed.Len() != hash.Size() {
         return (
             slice::<byte>::new(),
             errors::New("crypto/rsa: input must be hashed message"),
@@ -798,7 +798,7 @@ pub fn VerifyPKCS1v15(
     hashed: slice<byte>,
     sig: slice<byte>,
 ) -> error {
-    if hash != 0 && hashed.Len() != crate::crypto::HashSize(hash) {
+    if hash != crate::crypto::Hash(0) && hashed.Len() != hash.Size() {
         return errors::New("crypto/rsa: input must be hashed message");
     }
     let (fk, err) = fipsPublicKey(pub_);
@@ -878,7 +878,7 @@ pub fn SignPSS(
 ) -> (slice<byte>, error) {
     let mut hash = hash;
     if let Some(o) = opts {
-        if o.Hash != 0 {
+        if o.Hash != crate::crypto::Hash(0) {
             hash = o.Hash;
         }
     }
@@ -888,7 +888,7 @@ pub fn SignPSS(
         return (slice::<byte>::new(), err);
     }
 
-    let mut h = crate::crypto::HashNew(hash);
+    let mut h = hash.New();
     let hSize = h.Size();
 
     // Resolve the salt length, mirroring Go's `switch saltLength`.
@@ -931,7 +931,7 @@ pub fn VerifyPSS(
         return err;
     }
 
-    let mut h = crate::crypto::HashNew(hash);
+    let mut h = hash.New();
     let hSize = h.Size();
     let req = opts.map(|o| o.saltLength()).unwrap_or(PSSSaltLengthAuto);
 

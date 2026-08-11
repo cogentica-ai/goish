@@ -108,10 +108,10 @@ impl hkdfKDF {
 }
 
 // go: none — Go writes `kdf.hash.New`, a method value on crypto.Hash.
-// goish's crypto root exposes the registry as `HashNew(h)`, and the KDFs
-// take a factory, so this is the bridge.
+// Rust has no method values, so the closure that Go builds implicitly is
+// spelled out here; the KDFs take a `HashFunc` factory.
 fn hashNew(h: crypto::Hash) -> crate::hash::HashFunc {
-    return crate::hash::HashFunc::New(move || crypto::HashNew(h));
+    return crate::hash::HashFunc::New(move || h.New());
 }
 
 // Go: hpke.go:48-54
@@ -393,7 +393,7 @@ fn newContext(
         &secret,
         "exp",
         &ksContext,
-        uint16(crypto::HashSize(kdf.hash)),
+        uint16(kdf.hash.Size()),
     );
     if err != crate::nil {
         return (None, err);

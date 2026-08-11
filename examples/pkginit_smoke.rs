@@ -91,14 +91,14 @@ fn main() {
     // with "recursive init".
 
     // 4. crypto registry was populated by goish::init() before main.
-    //    crypto::HashAvailable(SHA256) should be true.
-    check(goish::crypto::HashAvailable(goish::crypto::SHA256),
+    //    crypto::SHA256.Available() should be true.
+    check(goish::crypto::SHA256.Available(),
           b"pkginit: SHA256 not registered after goish::init\n");
-    check(goish::crypto::HashAvailable(goish::crypto::SHA512),
+    check(goish::crypto::SHA512.Available(),
           b"pkginit: SHA512 not registered after goish::init\n");
-    check(goish::crypto::HashAvailable(goish::crypto::SHA1),
+    check(goish::crypto::SHA1.Available(),
           b"pkginit: SHA1 not registered after goish::init\n");
-    check(goish::crypto::HashAvailable(goish::crypto::MD5),
+    check(goish::crypto::MD5.Available(),
           b"pkginit: MD5 not registered after goish::init\n");
 
     const OK: &[u8] = b"pkginit: ok\n";
