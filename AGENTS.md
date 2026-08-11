@@ -382,3 +382,27 @@ expansion to `<dir>/<Trait>.rs`.
 
 The worked example is `hash::Hash` / `hash::Cloner` in `src/hash/hash.rs`,
 consumed by `crypto/internal/fips140/hmac`.
+
+## 10. Ground truth comes from Go, not from transcription
+
+A runnable Go 1.25.5 toolchain is available. **`scripts/goref.sh
+<import-path> <ref-test-file>`** copies GOROOT to a writable directory
+and runs a throwaway `TestGoishRef` *inside* it, so the reference file
+can import `crypto/internal/...` and reach unexported symbols:
+
+```bash
+scripts/goref.sh crypto/internal/fips140/tls13 /tmp/tls13_ref.go
+```
+
+The ref file declares `package <pkg>` (not `<pkg>_test`) and prints the
+values a port needs to match.
+
+Prefer this to transcribing published vectors. Hand-copied expectations
+have twice produced plausible-but-wrong literals in this repo — a CMAC
+vector whose line continuation collapsed, and an SSH-KDF tag-F row
+pasted against a tag-D call. Both cost a debugging cycle chasing a port
+bug that did not exist. For packages with no published vectors (mlkem,
+nistec, bigmod) it is the only option.
+
+Published vectors still earn their place as a *second* anchor when they
+exist — matching both Go and NIST is stronger than matching either.
