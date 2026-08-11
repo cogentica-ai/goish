@@ -4,3 +4,4 @@ Cargo.lock
 /.claude
 /scripts/.e2e-artifacts/
 /doc/
+__pycache__/
