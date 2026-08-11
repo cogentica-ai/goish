@@ -11,24 +11,35 @@
 //                        the mask is learned from the first call
 //   GCMForSSH            RFC 5647 (Scenario 1.d)
 //
-// Deviations from gcm_nonces[go] @ Go 1.25.5:
+// No deviations from gcm_nonces[go] @ Go 1.25.5.
 //
-//   * `fips140.RecordApproved()` calls are dropped: goish's fips140 stub
-//     has no service indicator. That is also why each Seal here calls
-//     `GCM::Seal` rather than Go's `sealAfterIndicator` — with no
-//     indicator to record between the two, they are the same function.
-//   * `SealWithRandomNonce` draws from `crypto::rand::Read` rather than
-//     `crypto/internal/fips140/drbg.Read`. drbg's CTR_DRBG (`Counter`)
-//     is ported now, but drbg's `rand[go]` — the pooled `Read` that
-//     drives it — is not, because it needs `sync.Pool`,
-//     `internal/sysrand` and `crypto/internal/entropy`. Same interface,
-//     different entropy source: this is NOT the FIPS-approved
-//     construction until `drbg.Read` lands.
+// This file carried two, and both had quietly expired — the code was
+// still working around gaps that had since been filled:
+//
+//   * `fips140.RecordApproved()` was dropped as a no-op "because goish's
+//     fips140 stub has no service indicator", and each Seal therefore
+//     called `GCM::Seal` instead of Go's `sealAfterIndicator`, the two
+//     being identical without an indicator. The record functions are now
+//     ported, though still inert — `setIndicator` is a runtime linkname
+//     stub, see fips140/indicator.rs — so this restores Go's shape
+//     rather than fixing a live bug. It matters because the fold was an
+//     inversion waiting to happen: `GCM::Seal` records NON-approved, so
+//     the moment the indicator works, every approved path here would
+//     report the opposite of the truth. RecordApproved, then
+//     sealAfterIndicator, is what Go does and what stays correct.
+//   * `SealWithRandomNonce` drew its nonce from `crypto::rand::Read`
+//     rather than `drbg.Read`, on the grounds that drbg's pooled `Read`
+//     needed `sync.Pool`, `internal/sysrand` and `crypto/internal/entropy`.
+//     All three are ported and drbg is 8/8, so it now calls `drbg::Read`
+//     as Go does. That also makes this the FIPS-approved construction,
+//     which the old note explicitly said it was not.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
+use crate::crypto::internal::fips140;
 use crate::crypto::internal::fips140::aes;
 use crate::crypto::internal::fips140::alias;
+use crate::crypto::internal::fips140::drbg;
 use crate::crypto::internal::fips140deps::byteorder;
 use crate::error;
 use crate::goslice::slice;
@@ -73,8 +84,10 @@ pub fn SealWithRandomNonce(
     if alias::AnyOverlap(out, &additionalData) {
         panic!("crypto/cipher: invalid buffer overlap of output and additional data");
     }
-    // Go: fips140.RecordApproved(); drbg.Read(nonce)
-    let _ = crate::crypto::rand::Read(nonce);
+    // Go: fips140.RecordApproved()
+    fips140::RecordApproved();
+    // Go: drbg.Read(nonce)
+    drbg::Read(nonce);
     // Go: seal(out, g, nonce, plaintext, additionalData)
     let mut buf: Vec<byte> = alloc::vec![0u8; out.Len() as usize];
     seal(&mut buf, g, nonce, &plaintext, &additionalData);
@@ -186,8 +199,10 @@ impl GCMWithCounterNonce {
         // Ensure the counter is monotonically increasing.
         advanceCounter(&mut self.next, counter);
 
+        // Go: fips140.RecordApproved()
+        fips140::RecordApproved();
         // Go: return g.g.sealAfterIndicator(dst, nonce, plaintext, data)
-        return self.g.Seal(dst, nonce, plaintext, data);
+        return self.g.sealAfterIndicator(dst, nonce, plaintext, data);
     }
 
     // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:95-98 Open
@@ -198,6 +213,8 @@ impl GCMWithCounterNonce {
         ciphertext: slice<byte>,
         data: slice<byte>,
     ) -> (slice<byte>, error) {
+        // Go: fips140.RecordApproved()
+        fips140::RecordApproved();
         // Go: return g.g.Open(dst, nonce, ciphertext, data)
         return self.g.Open(dst, nonce, ciphertext, data);
     }
@@ -253,7 +270,10 @@ impl GCMForTLS12 {
         // Go: counter := byteorder.BEUint64(nonce[len(nonce)-8:])
         let counter = nonceCounter(&nonce);
         advanceCounter(&mut self.next, counter);
-        return self.g.Seal(dst, nonce, plaintext, data);
+        // Go: fips140.RecordApproved()
+        fips140::RecordApproved();
+        // Go: return g.g.sealAfterIndicator(dst, nonce, plaintext, data)
+        return self.g.sealAfterIndicator(dst, nonce, plaintext, data);
     }
 
     // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:142-145 Open
@@ -264,6 +284,9 @@ impl GCMForTLS12 {
         ciphertext: slice<byte>,
         data: slice<byte>,
     ) -> (slice<byte>, error) {
+        // Go: fips140.RecordApproved()
+        fips140::RecordApproved();
+        // Go: return g.g.Open(dst, nonce, ciphertext, data)
         return self.g.Open(dst, nonce, ciphertext, data);
     }
 }
@@ -332,7 +355,10 @@ impl GCMForTLS13 {
         // Go: counter ^= g.mask
         counter ^= self.mask;
         advanceCounter(&mut self.next, counter);
-        return self.g.Seal(dst, nonce, plaintext, data);
+        // Go: fips140.RecordApproved()
+        fips140::RecordApproved();
+        // Go: return g.g.sealAfterIndicator(dst, nonce, plaintext, data)
+        return self.g.sealAfterIndicator(dst, nonce, plaintext, data);
     }
 
     // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:193-196 Open
@@ -343,6 +369,9 @@ impl GCMForTLS13 {
         ciphertext: slice<byte>,
         data: slice<byte>,
     ) -> (slice<byte>, error) {
+        // Go: fips140.RecordApproved()
+        fips140::RecordApproved();
+        // Go: return g.g.Open(dst, nonce, ciphertext, data)
         return self.g.Open(dst, nonce, ciphertext, data);
     }
 }
@@ -408,7 +437,10 @@ impl GCMForSSH {
         // Go: counter -= g.start
         counter = counter.wrapping_sub(self.start);
         advanceCounter(&mut self.next, counter);
-        return self.g.Seal(dst, nonce, plaintext, data);
+        // Go: fips140.RecordApproved()
+        fips140::RecordApproved();
+        // Go: return g.g.sealAfterIndicator(dst, nonce, plaintext, data)
+        return self.g.sealAfterIndicator(dst, nonce, plaintext, data);
     }
 
     // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:245-248 Open
@@ -419,6 +451,9 @@ impl GCMForSSH {
         ciphertext: slice<byte>,
         data: slice<byte>,
     ) -> (slice<byte>, error) {
+        // Go: fips140.RecordApproved()
+        fips140::RecordApproved();
+        // Go: return g.g.Open(dst, nonce, ciphertext, data)
         return self.g.Open(dst, nonce, ciphertext, data);
     }
 }

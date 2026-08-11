@@ -89,6 +89,32 @@ IMPORT_LINE = re.compile(r'^\s*(?:(\w+|_|\.)\s+)?"([^"]+)"', re.M)
 # Symbols used from an imported package: `pkg.Symbol`.
 USE = re.compile(r"\b([a-z][a-z0-9]*)\.([A-Z]\w*)\b")
 
+# `pub use super::{Base, Clean, …, Join, …};` — a re-export declares a
+# name in this package without any `fn`/`struct`/… keyword, and the
+# definition it points at usually lives outside the package directory, so
+# scanning `rust_sources(d)` never sees it either. `path/filepath` reported
+# `ABSENT from goish: Join` for exactly this reason while
+# `filepath::Join` compiled fine two lines away.
+#
+# This is the third false ABSENT of the same shape — `fmt::Sprintf` (a
+# macro) and the platform-file scan that invented the `chacha8rand`
+# blocker were the first two. A pre-flight that cries wolf costs a whole
+# session's leverage decision, so the bias here is toward believing the
+# symbol is present.
+PUB_USE = re.compile(r"^[ \t]*pub\s+use\s+[^;]*;", re.M | re.S)
+
+
+def reexported(sym, text):
+    """True if `sym` is re-exported under its own name by a `pub use`.
+
+    `pub use x::Sym as Other` does NOT count — the exported name is
+    `Other`. Glob re-exports (`pub use x::*`) are not resolved and so
+    still report ABSENT; that is the safe direction for a pre-flight."""
+    for stmt in PUB_USE.findall(text):
+        if re.search(r"\b%s\b(?!\s+as\b)" % re.escape(sym), stmt):
+            return True
+    return False
+
 
 def rust_sources(d):
     """Every .rs under a goish package directory (or the single file)."""
@@ -134,7 +160,8 @@ def missing_symbols(d, syms):
         # patterns above, so every pre-flight in the repo reported
         # fmt.Sprintf and fmt.Errorf ABSENT. They are not.
         macpat = re.compile(r"macro_rules!\s+%s\b" % re.escape(sym))
-        if not pat.search(text) and not varpat.search(text) and not macpat.search(text):
+        if (not pat.search(text) and not varpat.search(text)
+                and not macpat.search(text) and not reexported(sym, text)):
             gone.append(sym)
     return gone
 

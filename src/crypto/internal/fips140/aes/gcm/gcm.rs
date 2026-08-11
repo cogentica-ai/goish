@@ -1,9 +1,4 @@
-// goishlint:ignore GOISH018 — `sealAfterIndicator` is folded into `Seal`.
-// In Go it exists so that GCMForTLS13 and friends in gcm_nonces[go] can
-// seal *after* recording a FIPS service indicator that differs from
-// plain GCM's; goish's fips140 stub has no service indicator, so the two
-// bodies would be byte-identical. Port it with gcm_nonces[go].
-// go: file crypto/internal/fips140/aes/gcm/gcm.go decls: New, newGCM, GCM.NonceSize, GCM.Overhead, GCM.Seal, GCM.Open, sliceForAppend
+// go: file crypto/internal/fips140/aes/gcm/gcm.go decls: New, newGCM, GCM.NonceSize, GCM.Overhead, GCM.Seal, GCM.sealAfterIndicator, GCM.Open, sliceForAppend
 //
 // crypto/internal/fips140/aes/gcm — AES-GCM (NIST SP 800-38D).
 //
@@ -13,12 +8,28 @@
 //     goish has no nil pointer for a by-value struct. `newGCM` keeps its
 //     shape (Go outlines it so `New` stays inlineable) because the
 //     argument validation lives there.
-//   * `fips140.Record{Non,}Approved()` calls are dropped: goish's fips140
-//     stub has no service indicator.
 //   * cast[go]'s `init` is not ported: no CAST registry in goish.
+//
+// `Seal` / `sealAfterIndicator` are a pair, and the split is the whole
+// point: `Seal` is the plain-GCM entry point and records a NON-approved
+// service, while the nonce-discipline wrappers in gcm_nonces[go] record
+// an APPROVED one and then call `sealAfterIndicator` so they do not undo
+// it. This file used to fold the two together, on the grounds that goish
+// had no service indicator to distinguish them.
+//
+// It still has no *working* one: `fips140::Record{Non,}Approved` are
+// ported and anchored, but they write through `setIndicator`, which is a
+// `//go:linkname` into the Go runtime's per-g byte and is a discarding
+// stub here (see fips140/indicator.rs). So the calls below are inert
+// today. They are written in Go's shape anyway, because the alternative
+// — keeping the fold — is a latent inversion: the moment the per-g slot
+// lands, every approved path would be routed through the one function
+// that records NON-approved, and the indicator would report the exact
+// opposite of the truth.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
+use crate::crypto::internal::fips140;
 use crate::crypto::internal::fips140::aes;
 use crate::crypto::internal::fips140::alias;
 use crate::error;
@@ -103,19 +114,19 @@ fn newGCM(cipher: &aes::Block, nonceSize: int, tagSize: int) -> (Option<GCM>, er
 }
 
 impl GCM {
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:51-53 NonceSize
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:55-57 NonceSize
     /// Go: `func (g *GCM) NonceSize() int { return g.nonceSize }`
     pub fn NonceSize(&self) -> int {
         return self.nonceSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:55-57 Overhead
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:59-61 Overhead
     /// Go: `func (g *GCM) Overhead() int { return g.tagSize }`
     pub fn Overhead(&self) -> int {
         return self.tagSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:59-62 Seal
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:63-66 Seal
     /// `(*GCM).Seal(dst, nonce, plaintext, data)` — encrypt and
     /// authenticate `plaintext`, authenticate `data`, and append the
     /// result to `dst`.
@@ -126,10 +137,25 @@ impl GCM {
         plaintext: slice<byte>,
         data: slice<byte>,
     ) -> slice<byte> {
-        // Go: fips140.RecordNonApproved(); return g.sealAfterIndicator(…)
-        //
-        // Go's sealAfterIndicator body is inlined here — see the
-        // GOISH018 note at the top of this file.
+        // Go: fips140.RecordNonApproved()
+        fips140::RecordNonApproved();
+        // Go: return g.sealAfterIndicator(dst, nonce, plaintext, data)
+        return self.sealAfterIndicator(dst, nonce, plaintext, data);
+    }
+
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:68-89 GCM.sealAfterIndicator
+    /// The body of [`GCM::Seal`], minus the service-indicator record.
+    ///
+    /// The nonce-discipline wrappers in gcm_nonces call this instead of
+    /// `Seal` so that the `fips140::RecordApproved()` they just made is
+    /// not overwritten by `Seal`'s `RecordNonApproved()`.
+    pub(crate) fn sealAfterIndicator(
+        &self,
+        dst: slice<byte>,
+        nonce: slice<byte>,
+        plaintext: slice<byte>,
+        data: slice<byte>,
+    ) -> slice<byte> {
         // Go: if len(nonce) != g.nonceSize { panic(…) }
         if nonce.Len() != self.nonceSize {
             panic!("crypto/cipher: incorrect nonce length given to GCM");
@@ -170,7 +196,7 @@ impl GCM {
         return ret;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:88-121 Open
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:93-128 Open
     /// `(*GCM).Open(dst, nonce, ciphertext, data)` — authenticate and
     /// decrypt `ciphertext`, appending the plaintext to `dst`.
     pub fn Open(

@@ -386,6 +386,47 @@ forwarding blankets.
 The worked example is `net/http`'s ResponseWriter / Flusher /
 Hijacker / Pusher family in `src/net/http/server.rs`.
 
+### 9b. Two ways a type assertion silently always misses
+
+Both fail the same way - `ok == false`, no panic, no compile error - so
+a wrong `else` branch is the only symptom. Rule out both before
+concluding a type does not implement an interface.
+
+**`cast!` only takes a `dyn Trait` carrier.** Go's most common shape is
+`v, ok := x.(Iface)` where `x` is `interface{}`; the goish carrier for
+that is a `goany::Any`, and `cast!` **cannot ever succeed on one**. It
+resolves through the blanket `impl<T: Sized> HasDynAny for T`
+(`goany.rs:635`), which hands back the carrier itself - for an `Any`
+that is `Any`'s own `TypeId`, never the payload's. Spell an
+`interface{}` assertion with the **interface** form of the inherent
+method instead, which unwraps the payload via `as_any()`:
+
+```rust
+match priv_.As::<dyn crypto::Signer + Send + Sync>() { … }
+```
+
+Worked example: `x509::CreateCertificate`. It surfaced as
+`x509: certificate private key does not implement crypto.Signer` for an
+Ed25519 key that plainly does - a plausible, on-message error that reads
+like a user mistake.
+
+**The per-trait downcast registry starts empty.** Both `cast!` and
+`.As::<dyn Trait>()` resolve a concrete type through a registry that
+`#[goish::interface]` emits but nothing populates: the concrete type
+must appear in a `__goish_register_<Trait>_impl::<C>()` call, run once
+from `goish::init()`. `crypto::RegisterStandardHashes` /
+`RegisterStandardSigners` are the pattern. **This is not a caller
+obligation** - a comment saying a use site must call one is wrong.
+
+As of 2026-08-12 **25 of the 56 interface traits have concrete
+implementors and zero registrations**, including `io::Writer` (20
+impls), `io::Reader` (17), `io::Closer` (11), `hash::Hash` (11),
+`http::Handler` (11), `fmt::Stringer`, `json::Marshaler` and
+`crypto::Decrypter`. So `if c, ok := w.(io.Closer)` - and every
+assertion like it - misses today regardless of carrier. Registering a
+trait's implementors is the fix; check the trait before relying on an
+assertion, and register what your port needs.
+
 ### 9a. Embedded interfaces - `#[goish::interface(embeds)]`
 
 Go's `type Cloner interface { Hash; Clone() … }` embeds another
@@ -484,5 +525,31 @@ happened here:
   needs. Inherent impls also do not satisfy a `#[goish::interface]`
   trait; that `impl Trait for T` block has to exist.
 
-crypto/ is 1017/1499 = 67.8%; the 482 left are 437 portable + 45
-assembly.
+### Waiving a decl goish resolves elsewhere
+
+Some Go declarations will never have a same-named counterpart here, and
+counting them as missing makes the number lie downward — the squatter
+problem inverted. The motivating case is a `//go:linkname` pair: Go
+writes the body on one side and a bodyless stub on the other, and goish,
+having no linkname, writes it once on whichever side can reach the
+field. `crypto/sha3` read 26/27 forever for exactly that reason.
+
+Declare it in the goish file, with a reason:
+
+```rust
+// go: waived fips140hash_sha3Unwrap — linkname body ported once, on the
+//     crypto/internal/fips140hash side; a second copy here would be the
+//     same function twice.
+```
+
+Waived decls leave the denominator — they are not remaining work — but
+`port_coverage` prints them on their own WAIVED line and in the TOTAL,
+so they can never quietly inflate a percentage. **The reason text after
+the em dash is required**; a bare `// go: waived Foo` is ignored, which
+is what stops this from becoming a way to launder a gap into 100%.
+
+Reach for it only when no counterpart *can* exist. A function that is
+merely hard, unported, or blocked is MISSING, not waived.
+
+crypto/ is 1108/1452 = 76.3%; the 344 left are 330 portable + 14
+assembly, and 37 counted names are still UNVERIFIED.
