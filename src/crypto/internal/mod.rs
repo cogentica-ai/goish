@@ -7,6 +7,7 @@
 #![allow(non_snake_case)]
 
 pub mod entropy;
+pub mod hpke;
 #[path = "impl/mod.rs"]
 pub mod r#impl;
 pub mod fips140;

@@ -1016,6 +1016,10 @@ name = "dsa_smoke"
 path = "examples/dsa_smoke.rs"
 
 [[example]]
+name = "hpke_smoke"
+path = "examples/hpke_smoke.rs"
+
+[[example]]
 name = "fips140_mlkem1024_smoke"
 path = "examples/fips140_mlkem1024_smoke.rs"
 
