@@ -14,6 +14,7 @@ pub mod bigmod;
 pub mod check;
 pub mod drbg;
 pub mod ecdh;
+pub mod ecdsa;
 pub mod ed25519;
 pub mod edwards25519;
 pub mod hkdf;
