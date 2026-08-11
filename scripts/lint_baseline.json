@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 13314,
+ "total": 13211,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -199,11 +199,6 @@
   },
   "src/crypto/internal/fips140/pbkdf2/pbkdf2.rs": {
    "GOISH005": 4
-  },
-  "src/crypto/internal/fips140/rsa/mod.rs": {
-   "GOISH014": 54,
-   "GOISH016": 1,
-   "GOISH023": 48
   },
   "src/crypto/internal/fips140/sha256/sha256.rs": {
    "GOISH005": 19,
