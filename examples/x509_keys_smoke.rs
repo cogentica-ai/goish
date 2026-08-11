@@ -60,6 +60,7 @@ use goish::encoding::hex;
 use goish::goany::Any;
 use goish::goslice::slice;
 use goish::math::big;
+use goish::time;
 use goish::types::byte;
 use goish::fmt::Stringer;
 use goish::{bytes, fmt, int, string};
@@ -125,6 +126,9 @@ pub const ED_PKIX_PUB: &str = "302a300506032b657003210044864760e04b5f4a5ae44b1d5
 pub const BIGINT_DER: &str = "020d018ee90ff6c373e0ee4e3f0ad2";
 pub const BIGINT_BACK: &str = "123456789012345678901234567890";
 pub const BIGINT_REST: int = 2;
+pub const TIME_SET_UNIX: int = 1262401445;
+pub const TIME_SET_DER: &str = "170d3130303130323033303430355a";
+pub const BIG_SEVEN_DER: &str = "020107";
 
 // asn1's own parseUTCTime / parseGeneralizedTime. "910506234540+0000"
 // and a zone-less GeneralizedTime are the two Go *rejects*.
@@ -311,6 +315,58 @@ fn testUnmarshalBareBigInt() {
     check(rest.Len() == BIGINT_REST, "Unmarshal(big::Int): rest length");
 }
 
+// The OPTIONAL-omission invariant `asn1::makeField` runs — `v ==
+// Zero(v.Type())` — for the two types whose reflect descriptor is
+// hand-written outside asn1: `time::Time` and `big::Int`. Both declared
+// zero fields in `__reflect_type` while emitting two in
+// `__reflect_value`, which made their zero unmatchable, so an absent
+// OPTIONAL field of either was *encoded* where Go omits it. That is the
+// same silent-wrong-DER class as the `reflect::Zero` composite bug, one
+// level further in, and it reaches `pkcs1PrivateKey`'s three OPTIONAL
+// CRT parameters.
+//
+// goref.sh encoding/asn1, `MarshalWithParams(x, "optional")`:
+//   time.Time{}                        -> "" (omitted)
+//   time.Unix(1262401445,0).UTC()      -> 170d3130303130323033303430355a
+//   0                                  -> "" (omitted)
+//
+// and the struct form, `asn1.Marshal` of the pkcs1PrivateKey shape with
+// all three CRT parameters nil:
+//   CRT_ABSENT -> 30130201000202010102010302010502010702010b
+fn testOptionalZeroOmission() {
+    let (b, err) = asn1::MarshalWithParams(&time::Time::default(), "optional");
+    check(err == goish::nil, "optional zero time::Time: no error");
+    check(b.Len() == 0, "optional zero time::Time is omitted");
+
+    let (b, err) = asn1::MarshalWithParams(&time::Unix(TIME_SET_UNIX, 0).UTC(), "optional");
+    check(err == goish::nil, "optional set time::Time: no error");
+    checkHex(tohex(&b), TIME_SET_DER, "optional set time::Time is emitted");
+
+    // KNOWN DIVERGENCE, recorded rather than hidden: Go's `*big.Int` is a
+    // pointer, so it distinguishes a nil one (omitted) from a present
+    // pointer to zero (emitted as 020100). goish's `big::Int` is a value
+    // with no nil — `== nil` *is* "is zero", the convention crypto/rsa
+    // already relies on — so only one branch is expressible, and this is
+    // the one that occurs: `pkcs1PrivateKey` with no CRT values must omit
+    // Dp/Dq/Qinv, which is Go's CRT_ABSENT above.
+    let (b, err) = asn1::MarshalWithParams(&big::Int::new(), "optional");
+    check(err == goish::nil, "optional zero big::Int: no error");
+    check(
+        b.Len() == 0,
+        "optional zero big::Int is omitted (KNOWN DIVERGENCE: Go emits 020100 for a non-nil *big.Int)",
+    );
+
+    let (b, err) = asn1::MarshalWithParams(&big::NewInt(7), "optional");
+    check(err == goish::nil, "optional set big::Int: no error");
+    checkHex(tohex(&b), BIG_SEVEN_DER, "optional set big::Int is emitted");
+
+    // The plain-int control: this one always worked, and pins that the
+    // fix did not make omission fire too eagerly.
+    let (b, err) = asn1::MarshalWithParams(&int(0), "optional");
+    check(err == goish::nil, "optional zero int: no error");
+    check(b.Len() == 0, "optional zero int is omitted");
+}
+
 fn testTimeParsers() {
     // KNOWN DIVERGENCE, pinned rather than hidden: Go parses a numeric
     // zone offset and returns Unix UTC_910506234540M0700 (673598740);
@@ -386,6 +442,7 @@ fn main() {
     testSEC1();
     testPKIXPublicKey();
     testUnmarshalBareBigInt();
+    testOptionalZeroOmission();
     testTimeParsers();
 
     let ran = RAN.load(Ordering::Acquire);
