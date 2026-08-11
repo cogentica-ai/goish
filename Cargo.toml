@@ -1012,6 +1012,10 @@ name = "cryptobyte_string_smoke"
 path = "examples/cryptobyte_string_smoke.rs"
 
 [[example]]
+name = "dsa_smoke"
+path = "examples/dsa_smoke.rs"
+
+[[example]]
 name = "fips140_mlkem1024_smoke"
 path = "examples/fips140_mlkem1024_smoke.rs"
 

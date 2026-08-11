@@ -34,6 +34,7 @@ pub mod chacha20poly1305;
 pub mod cipher;
 pub mod cryptobyte;
 pub mod des;
+pub mod dsa;
 pub mod ecdh;
 pub mod elliptic;
 pub mod ecdsa;
