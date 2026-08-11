@@ -59,7 +59,7 @@ impl String {
     // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:24-33 read
     /// Advance a String by n bytes and return them. If less than n bytes
     /// remain, it returns None.
-    fn read(&mut self, n: int) -> Option<slice<byte>> {
+    pub(super) fn read(&mut self, n: int) -> Option<slice<byte>> {
         if int(self.raw().len()) < n || n < 0 {
             return None;
         }

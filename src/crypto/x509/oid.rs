@@ -52,7 +52,7 @@ goish::var! {
 /// holds — `String` falls back to `big::Int` when one does.
 #[derive(Clone, Default)]
 pub struct OID {
-    der: slice<byte>,
+    pub(super) der: slice<byte>,
 }
 
 // go: sdk 1.25.5 crypto/x509/oid.go:27-31 ParseOID
@@ -66,7 +66,7 @@ pub fn ParseOID<S: Into<string>>(oid: S) -> (OID, error) {
 // go: sdk 1.25.5 crypto/x509/oid.go:33-53 newOIDFromDER
 /// Wrap already-encoded DER, rejecting a non-minimal or truncated
 /// encoding. Returns `(oid, ok)`.
-fn newOIDFromDER(der: slice<byte>) -> (OID, bool) {
+pub(super) fn newOIDFromDER(der: slice<byte>) -> (OID, bool) {
     let d = der.as_ref();
     if d.is_empty() || d[d.len() - 1] & 0x80 != 0 {
         return (OID::default(), false);

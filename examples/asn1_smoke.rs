@@ -472,9 +472,9 @@ fn test_13_parse_pkcs8_rsa_key() {
     der_vec.extend_from_slice(rsa_body);
 
     let der = from_bytes(&der_vec);
-    let (key, err) = x509::ParsePKCS8PrivateKey(der);
+    let (key, err) = x509::goishParsePKCS8RSAPrivateKey(der);
     if !err.IsNil() {
-        write_result(13, b"ParsePKCS8PrivateKey         ", false);
+        write_result(13, b"goishParsePKCS8RSAPrivateKey ", false);
         fail();
         return;
     }
@@ -488,7 +488,7 @@ fn test_13_parse_pkcs8_rsa_key() {
     pq.Mul(&p, &q);
     let pq_ok = pq.Int64() == 143;
     let ok = n_ok && e_ok && pq_ok;
-    write_result(13, b"ParsePKCS8PrivateKey         ", ok);
+    write_result(13, b"goishParsePKCS8RSAPrivateKey ", ok);
     if !ok {
         fail();
     }

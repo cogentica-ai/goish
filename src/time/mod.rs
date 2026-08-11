@@ -2033,11 +2033,84 @@ pub fn Parse<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>
     if l == "Mon Jan _2 15:04:05 2006" {
         return parse_ansic(value);
     }
+    // ASN.1 UTCTime, second precision: "060102150405Z0700"
+    // (cryptobyte's defaultUTCTimeFormatStr).
+    if l == "060102150405Z0700" {
+        return parse_asn1_utc(value, true);
+    }
+    // ASN.1 UTCTime, minute precision: "0601021504Z0700" — the fallback
+    // cryptobyte's ReadASN1UTCTime tries when second precision fails.
+    if l == "0601021504Z0700" {
+        return parse_asn1_utc(value, false);
+    }
+    // ASN.1 GeneralizedTime: "20060102150405Z0700"
+    // (cryptobyte's generalizedTimeFormatStr).
+    if l == "20060102150405Z0700" {
+        return parse_asn1_generalized(value);
+    }
 
     (
         Time::default(),
         crate::errors::New("time: unsupported layout"),
     )
+}
+
+// go: none - goish idiom: `time.Parse` in this file is a layout switch,
+// not a port of Go's scanner; this is the ASN.1 UTCTime arm.
+/// ASN.1 UTCTime — `YYMMDDhhmm[ss]Z`. Slim deviation, matching the rest
+/// of this file: only the `Z` (UTC) zone form is accepted, never a
+/// numeric `±hhmm` offset. Callers in cryptobyte re-`Format` the result
+/// and compare it to the input, so an offset form would be rejected
+/// there anyway; RFC 5280 §4.1.2.5.1 requires `Z` in certificates.
+///
+/// The two-digit year uses Go's `stdYear` rule verbatim (format.go: `if
+/// year >= 69 { year += 1900 } else { year += 2000 }`). The further
+/// RFC 5280 §4.1.2.5.1 pivot — subtract a century when the result is
+/// >= 2050 — belongs to cryptobyte's `ReadASN1UTCTime`, which applies it
+/// *after* its round-trip `Format` check; doing it here would make that
+/// check compare a 19xx year against a 50-68 input and fail.
+fn parse_asn1_utc(s: crate::gostring::string, seconds: bool) -> (Time, crate::error) {
+    let bs = s.as_bytes();
+    let want = if seconds { 13 } else { 11 };
+    if bs.len() != want || bs[want - 1] != b'Z' {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed ASN.1 UTCTime"),
+        );
+    }
+    let yy = match parse_int(&bs[0..2]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let m = match parse_int(&bs[2..4]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let d = match parse_int(&bs[4..6]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let hh = match parse_int(&bs[6..8]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mm = match parse_int(&bs[8..10]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let ss = if seconds {
+        match parse_int(&bs[10..12]) { Ok(v) => v, Err(e) => return (Time::default(), e) }
+    } else {
+        0
+    };
+    let y = if yy >= 69 { 1900 + yy } else { 2000 + yy };
+    return (Date(y, m, d, hh, mm, ss, 0, UTC), crate::errors::nil);
+}
+
+// go: none - goish idiom: the ASN.1 GeneralizedTime arm of the layout
+// switch above.
+/// ASN.1 GeneralizedTime — `YYYYMMDDhhmmssZ`. Same `Z`-only deviation as
+/// `parse_asn1_utc`.
+fn parse_asn1_generalized(s: crate::gostring::string) -> (Time, crate::error) {
+    let bs = s.as_bytes();
+    if bs.len() != 15 || bs[14] != b'Z' {
+        return (
+            Time::default(),
+            crate::errors::New("time: malformed ASN.1 GeneralizedTime"),
+        );
+    }
+    let y = match parse_int(&bs[0..4]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let m = match parse_int(&bs[4..6]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let d = match parse_int(&bs[6..8]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let hh = match parse_int(&bs[8..10]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mm = match parse_int(&bs[10..12]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let ss = match parse_int(&bs[12..14]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    return (Date(y, m, d, hh, mm, ss, 0, UTC), crate::errors::nil);
 }
 
 fn parse_rfc3339(s: crate::gostring::string) -> (Time, crate::error) {
@@ -2084,7 +2157,7 @@ fn parse_rfc3339(s: crate::gostring::string) -> (Time, crate::error) {
             crate::errors::New("time: only UTC (Z) supported in slim Parse"),
         );
     }
-    (Date(y, m, d, hh, mm, ss, 0, UTC), crate::errors::nil)
+    return (Date(y, m, d, hh, mm, ss, 0, UTC), crate::errors::nil);
 }
 
 fn parse_datetime(s: crate::gostring::string, sep: u8) -> (Time, crate::error) {
@@ -2108,7 +2181,7 @@ fn parse_datetime(s: crate::gostring::string, sep: u8) -> (Time, crate::error) {
     let hh = match parse_int(&bs[11..13]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     let mm = match parse_int(&bs[14..16]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
     let ss = match parse_int(&bs[17..19]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    (Date(y, m, d, hh, mm, ss, 0, UTC), crate::errors::nil)
+    return (Date(y, m, d, hh, mm, ss, 0, UTC), crate::errors::nil);
 }
 
 fn parse_date_only(s: crate::gostring::string) -> (Time, crate::error) {

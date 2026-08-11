@@ -545,9 +545,19 @@ fn test_x509_parse_certificate(t: &mut testing::T) {
         return;
     }
 
-    // Verify the extracted public key values.
+    // Verify the extracted public key values. Certificate.PublicKey is
+    // Go's `any`; goish holds it in `goany::Any`, so reach the RSA key
+    // with the comma-ok downcast the way Go writes
+    // `cert.PublicKey.(*rsa.PublicKey)`.
+    let pubkey = match cert.PublicKey.As::<goish::crypto::rsa::PublicKey>() {
+        None => {
+            t.Fatal("ParseCertificate: PublicKey is not an rsa::PublicKey");
+            return;
+        }
+        Some(k) => k.clone(),
+    };
     // E must be 65537.
-    let e_val = cert.PublicKey.E;
+    let e_val = pubkey.E;
     if e_val != 65537 {
         t.Fatal(fmt::Sprintf!(
             "ParseCertificate: public key E = %d, want 65537",
@@ -556,7 +566,7 @@ fn test_x509_parse_certificate(t: &mut testing::T) {
         return;
     }
     // N must be 512 bits (64 bytes). Verify by checking bit length.
-    let n_bits = cert.PublicKey.N.BitLen();
+    let n_bits = pubkey.N.BitLen();
     if n_bits < 511 || n_bits > 512 {
         t.Fatal(fmt::Sprintf!(
             "ParseCertificate: public key N bit length = %d, want 512",
@@ -565,7 +575,7 @@ fn test_x509_parse_certificate(t: &mut testing::T) {
         return;
     }
     // Verify the first byte of N is 0xd1 (top byte of our known test key)
-    let n_bytes = cert.PublicKey.N.Bytes();
+    let n_bytes = pubkey.N.Bytes();
     let n_raw: &[u8] = &n_bytes;
     if n_raw.is_empty() || n_raw[0] != 0xd1 {
         t.Fatal(fmt::Sprintf!(

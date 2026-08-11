@@ -154,6 +154,23 @@ impl<'a> RangeIter for &'a string {
     }
 }
 
+// `range!(x)` where `x: &string` → `&&string`. Needed when iterating a
+// borrowed string parameter (`fn f(s: &string)`) or a `&string` yielded
+// by ranging over a `slice<string>`. Same shape as the `&&slice<T>` impl
+// above, and the same reason: trait selection doesn't auto-deref.
+impl<'a> RangeIter for &&'a string {
+    type Item = (int, rune);
+    type Iter = StringRangeIter<'a>;
+    // go: none — goish idiom: the `range!` macro's auto-borrow, one level
+    // deeper. Go writes `for i, r := range s` whatever `s`'s indirection.
+    fn range(self) -> Self::Iter {
+        return StringRangeIter {
+            bytes: (*self).as_bytes(),
+            i: 0,
+        };
+    }
+}
+
 // Bonus: byte-string literal `b"..."` is `&[u8; N]`, already covered
 // by the &[T; N] impl above. Plain &'static str maps to a UTF-8 walk
 // like string — reuse the StringRangeIter.
