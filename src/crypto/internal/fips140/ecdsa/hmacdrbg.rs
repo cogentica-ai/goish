@@ -3,17 +3,18 @@
 // Deviations from hmacdrbg[go] @ Go 1.25.5:
 //
 //   * Go's `newHMAC func(key []byte) *hmac.HMAC` field is a closure over
-//     the hash constructor. AGENTS.md §5 rule 3 bans `Box<dyn Fn>` in
-//     struct fields, and the closure captures only `hash`, so the field
-//     holds that hash constructor directly and the one call site builds
-//     the HMAC inline. Same value, no trait object.
+//     the hash constructor. The closure captures only `hash`, so the field
+//     holds that constructor and the one call site builds the HMAC inline.
+//     It is a `hash::HashFunc` — the carrier that keeps `Arc<dyn Fn>`
+//     inside a concrete goish type rather than in a struct field
+//     (AGENTS.md §5 rule 3).
 //   * `personalizationString` is a Go interface with two implementing
 //     types and a nil case, consumed exclusively by a type switch. That
 //     is an enum here; the two named types survive as its payloads so
 //     the call sites still read `plainPersonalizationString(persStr)`.
-//   * Go's `hash func() H` generic parameter collapses to the
-//     `fn() -> Box<dyn Hash + Send + Sync>` factory the rest of the
-//     crypto tree already takes.
+//   * Go's `hash func() H` generic parameter collapses to
+//     `impl IntoHashFunc`, the factory shape the rest of the crypto tree
+//     takes — a plain function or a closure.
 
 #![allow(non_snake_case, non_camel_case_types)]
 
@@ -24,7 +25,7 @@ use alloc::vec::Vec;
 use crate::crypto::internal::fips140;
 use crate::crypto::internal::fips140::hmac::{self, HMAC};
 use crate::goslice::slice;
-use crate::hash::Hash;
+use crate::hash::{Hash, HashFunc, IntoHashFunc};
 use crate::io;
 use crate::types::{byte, int, uint64};
 
@@ -41,7 +42,7 @@ use crate::types::{byte, int, uint64};
 pub struct hmacDRBG {
     /// Go holds `func(key []byte) *hmac.HMAC`; this holds the hash
     /// constructor that closure captured.
-    newHMAC: fn() -> Box<dyn Hash + Send + Sync>,
+    newHMAC: HashFunc,
 
     hK: HMAC,
     V: slice<byte>,
@@ -93,7 +94,7 @@ pub enum personalizationString {
 
 // go: sdk 1.25.5 crypto/internal/fips140/ecdsa/hmacdrbg.go:52-118 newDRBG
 pub(super) fn newDRBG(
-    hash: fn() -> Box<dyn Hash + Send + Sync>,
+    hash: impl IntoHashFunc,
     entropy: &slice<byte>,
     nonce: &slice<byte>,
     s: personalizationString,
@@ -101,7 +102,8 @@ pub(super) fn newDRBG(
     // HMAC_DRBG_Instantiate_algorithm, per Section 10.1.2.3.
     fips140::RecordApproved();
 
-    let size = hash().Size() as usize;
+    let hash = hash.into_hash_func();
+    let size = hash.Call().Size() as usize;
 
     // K = 0x00 0x00 0x00 ... 0x00
     let mut K = slice::__from_vec(alloc::vec![0u8; size]);
@@ -111,7 +113,7 @@ pub(super) fn newDRBG(
 
     // HMAC_DRBG_Update, per Section 10.1.2.2.
     // K = HMAC (K, V || 0x00 || provided_data)
-    let mut h = hmac::New(hash, K.clone());
+    let mut h = hmac::New(hash.clone(), K.clone());
     let _ = io::Writer::Write(&mut h, V.clone());
     let _ = io::Writer::Write(&mut h, slice::__from_vec(alloc::vec![0x00u8]));
     let _ = io::Writer::Write(&mut h, entropy.clone());
@@ -119,7 +121,7 @@ pub(super) fn newDRBG(
     writePersonalization(&mut h, &s, V.Len() + 1 + entropy.Len() + nonce.Len());
     K = Hash::Sum(&h, empty());
     // V = HMAC (K, V)
-    let mut h = hmac::New(hash, K.clone());
+    let mut h = hmac::New(hash.clone(), K.clone());
     let _ = io::Writer::Write(&mut h, V.clone());
     V = Hash::Sum(&h, empty());
     // K = HMAC (K, V || 0x01 || provided_data).
@@ -131,7 +133,7 @@ pub(super) fn newDRBG(
     writePersonalization(&mut h, &s, V.Len() + 1 + entropy.Len() + nonce.Len());
     K = Hash::Sum(&h, empty());
     // V = HMAC (K, V)
-    let mut h = hmac::New(hash, K.clone());
+    let mut h = hmac::New(hash.clone(), K.clone());
     let _ = io::Writer::Write(&mut h, V.clone());
     V = Hash::Sum(&h, empty());
 
@@ -168,7 +170,7 @@ fn writePersonalization(h: &mut HMAC, s: &personalizationString, mut l: int) {
 /// This should only be used for ACVP testing. hmacDRBG is not intended to
 /// be used directly.
 pub fn TestingOnlyNewDRBG(
-    hash: fn() -> Box<dyn Hash + Send + Sync>,
+    hash: impl IntoHashFunc,
     entropy: &slice<byte>,
     nonce: &slice<byte>,
     s: &slice<byte>,
@@ -235,7 +237,7 @@ impl hmacDRBG {
         let _ = io::Writer::Write(&mut self.hK, slice::__from_vec(alloc::vec![0x00u8]));
         let K = Hash::Sum(&self.hK, empty());
         // V = HMAC (K, V)
-        self.hK = hmac::New(self.newHMAC, K);
+        self.hK = hmac::New(self.newHMAC.clone(), K);
         let _ = io::Writer::Write(&mut self.hK, self.V.clone());
         self.V = Hash::Sum(&self.hK, empty());
 

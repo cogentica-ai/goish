@@ -6,7 +6,7 @@
 //
 // Deviations from tls12[go] @ Go 1.25.5:
 //
-//   * The hash factory is `fn() -> Box<dyn Hash + Send + Sync>` rather
+//   * The hash factory is `impl IntoHashFunc` rather
 //     than Go's `func() H` generic, matching `hmac::New`.
 //   * `MasterSecret`'s type switch exists only to drive
 //     `fips140.RecordNonApproved()` for hashes outside {SHA-256, SHA-384,
@@ -22,7 +22,7 @@ use alloc::vec::Vec;
 use crate::crypto::internal::fips140::hmac;
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::hash::Hash;
+use crate::hash::{Hash, IntoHashFunc};
 use crate::io;
 use crate::types::{byte, int};
 
@@ -35,12 +35,13 @@ const extendedMasterSecretLabel: &str = "extended master secret";
 /// `tls12.PRF(hash, secret, label, seed, keyLen)` — the TLS 1.2
 /// pseudo-random function.
 pub fn PRF(
-    hash: fn() -> Box<dyn Hash + Send + Sync>,
+    hash: impl IntoHashFunc,
     secret: slice<byte>,
     label: string,
     seed: slice<byte>,
     keyLen: int,
 ) -> slice<byte> {
+    let hash = hash.into_hash_func();
     // Go: labelAndSeed := make([]byte, len(label)+len(seed))
     //     copy(labelAndSeed, label); copy(labelAndSeed[len(label):], seed)
     let lraw: &[byte] = label.as_bytes();
@@ -59,11 +60,12 @@ pub fn PRF(
 // go: sdk 1.25.5 crypto/internal/fips140/tls12/tls12.go:27-45 pHash
 /// The P_hash function, as defined in RFC 5246 §5.
 fn pHash(
-    hash: fn() -> Box<dyn Hash + Send + Sync>,
+    hash: impl IntoHashFunc,
     result: &mut [byte],
     secret: slice<byte>,
     seed: &[byte],
 ) {
+    let hash = hash.into_hash_func();
     // Go: h := hmac.New(hash, secret); h.Write(seed); a := h.Sum(nil)
     let mut h = hmac::New(hash, secret);
     let _ = io::Writer::Write(&mut h, slice::__from_vec(seed.to_vec()));
@@ -93,10 +95,11 @@ fn pHash(
 /// `tls12.MasterSecret(hash, preMasterSecret, transcript)` — the TLS 1.2
 /// extended master secret derivation (RFC 7627).
 pub fn MasterSecret(
-    hash: fn() -> Box<dyn Hash + Send + Sync>,
+    hash: impl IntoHashFunc,
     preMasterSecret: slice<byte>,
     transcript: slice<byte>,
 ) -> slice<byte> {
+    let hash = hash.into_hash_func();
     // Go: switch any(h).(type) { case *sha256.Digest: …; case *sha512.Digest: …;
     //     default: fips140.RecordNonApproved() }
     //

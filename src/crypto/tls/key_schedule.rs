@@ -8,7 +8,7 @@
 //
 // Reference: RFC 8446, Section 7.
 //
-// The hash factory convention: `fn() -> Box<dyn Hash + Send + Sync>`.
+// The hash factory convention: `impl IntoHashFunc` / `hash::HashFunc`.
 // This matches goish's existing hmac::New / hkdf::Extract / hkdf::Expand APIs.
 
 #![allow(non_snake_case, non_upper_case_globals)]

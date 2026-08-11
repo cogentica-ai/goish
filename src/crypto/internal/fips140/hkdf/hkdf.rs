@@ -6,7 +6,7 @@
 //
 // Deviations from hkdf[go] @ Go 1.25.5:
 //
-//   * The hash factory is `fn() -> Box<dyn Hash + Send + Sync>` rather
+//   * The hash factory is `impl IntoHashFunc` rather
 //     than Go's `func() H` generic, matching `hmac::New`.
 //   * `fips140.RecordNonApproved()` for short secrets is dropped: goish's
 //     fips140 stub has no service indicator.
@@ -22,23 +22,24 @@ use alloc::vec::Vec;
 use crate::crypto::internal::fips140::hmac;
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::hash::Hash;
+use crate::hash::{Hash, IntoHashFunc};
 use crate::io;
 use crate::types::{byte, int};
 
 // go: sdk 1.25.5 crypto/internal/fips140/hkdf/hkdf.go:13-25 Extract
 /// `hkdf.Extract(h, secret, salt)` — the RFC 5869 extract step.
 pub fn Extract(
-    h: fn() -> Box<dyn Hash + Send + Sync>,
+    h: impl IntoHashFunc,
     secret: slice<byte>,
     salt: slice<byte>,
 ) -> slice<byte> {
+    let h = h.into_hash_func();
     // Go: if len(secret) < 112/8 { fips140.RecordNonApproved() } — no-op here.
     // Go: if salt == nil { salt = make([]byte, h().Size()) }
     let salt = {
         let raw: &[byte] = &salt;
         if raw.is_empty() {
-            let size = h().Size() as usize;
+            let size = h.Call().Size() as usize;
             slice::__from_vec(alloc::vec![0u8; size])
         } else {
             salt
@@ -58,11 +59,12 @@ pub fn Extract(
 /// step. The caller is responsible for bounding `keyLen`; Go's public
 /// wrapper does that.
 pub fn Expand(
-    h: fn() -> Box<dyn Hash + Send + Sync>,
+    h: impl IntoHashFunc,
     pseudorandomKey: slice<byte>,
     info: string,
     keyLen: int,
 ) -> slice<byte> {
+    let h = h.into_hash_func();
     // Go: out := make([]byte, 0, keyLen)
     let key_len = keyLen as usize;
     let mut out: Vec<byte> = Vec::with_capacity(key_len);
@@ -114,13 +116,14 @@ pub fn Expand(
 // go: sdk 1.25.5 crypto/internal/fips140/hkdf/hkdf.go:54-57 Key
 /// `hkdf.Key(h, secret, salt, info, keyLen)` — Extract then Expand.
 pub fn Key(
-    h: fn() -> Box<dyn Hash + Send + Sync>,
+    h: impl IntoHashFunc,
     secret: slice<byte>,
     salt: slice<byte>,
     info: string,
     keyLen: int,
 ) -> slice<byte> {
+    let h = h.into_hash_func();
     // Go: prk := Extract(h, secret, salt); return Expand(h, prk, info, keyLen)
-    let prk = Extract(h, secret, salt);
+    let prk = Extract(h.clone(), secret, salt);
     return Expand(h, prk, info, keyLen);
 }

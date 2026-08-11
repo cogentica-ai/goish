@@ -7,7 +7,7 @@
 //
 // Deviations from hmac.go @ Go 1.25.5:
 //
-//   * `New` takes `fn() -> Box<dyn Hash + Send + Sync>` rather than a
+//   * `New` takes `impl IntoHashFunc` (stored as `hash::HashFunc`) rather than a
 //     generic `func() H`; goish has no generic-over-hash constructor, and
 //     the uniqueness check Go performs (`hm.outer == hm.inner`, guarded by
 //     recover) is unnecessary because two calls to a fn pointer always
@@ -32,7 +32,7 @@
 
 use crate::error;
 use crate::goslice::slice;
-use crate::hash::{Cloner, Hash};
+use crate::hash::{Cloner, Hash, HashFunc, IntoHashFunc};
 use crate::io;
 use crate::types::{byte, int};
 
@@ -223,7 +223,7 @@ pub struct HMAC {
     // Goish-only: stashed constructor — we need it inside `Sum(&self)`
     // to build a fresh outer hasher (since Box<dyn Hash> isn't Clone
     // and Sum's contract is non-mutating). Stands in for Go's `outer`.
-    h_ctor: fn() -> Box<dyn Hash + Send + Sync>,
+    h_ctor: HashFunc,
     // Go: marshaled bool — "If marshaled is true, then opad and ipad do
     // not contain a padded copy of the key, but rather the marshaled
     // state of outer/inner after opad/ipad has been fed into it."
@@ -294,7 +294,7 @@ impl HMAC {
                 opad: self.opad.clone(),
                 ipad: self.ipad.clone(),
                 inner,
-                h_ctor: self.h_ctor,
+                h_ctor: self.h_ctor.clone(),
                 marshaled: self.marshaled,
                 forHKDF: self.forHKDF,
                 keyLen: self.keyLen,
@@ -326,21 +326,24 @@ pub fn MarkAsUsedInKDF(h: &mut HMAC) {
 /// `hmac.New(h, key)` (hmac.go:39) — new HMAC using `h()` as the
 /// underlying hash. `h` must produce a fresh `Hash` on each call.
 ///
-/// Goish-specific: `h` is `fn() -> Box<dyn Hash + Send + Sync>` (a function pointer
-/// returning a boxed Hash). Use the per-hash `NewHash` helper:
+/// Goish-specific: `h` is anything `IntoHashFunc` accepts — a plain
+/// function like the per-hash `NewHash` helper, or a closure. It is stored
+/// as a `hash::HashFunc`, which is what lets Go's
+/// `fips140hash.UnwrapNew(h)` closures translate:
 ///
 /// ```ignore
 /// hmac::New(crypto::sha256::NewHash, key)
 /// hmac::New(crypto::sha1::NewHash, key)
 /// hmac::New(crypto::md5::NewHash, key)
 /// ```
-pub fn New(h: fn() -> Box<dyn Hash + Send + Sync>, key: slice<byte>) -> HMAC {
+pub fn New<H: IntoHashFunc>(h: H, key: slice<byte>) -> HMAC {
+    let h = h.into_hash_func();
     register_hmac_impls();
     // Go: hm := &HMAC{keyLen: len(key)}
     let keyLen = key.Len();
     // Go: hm := &HMAC{keyLen: len(key)}
     // Go: hm.outer = h(); hm.inner = h()
-    let mut inner = h();
+    let mut inner = h.Call();
     // Go: blocksize := hm.inner.BlockSize()
     let blocksize = inner.BlockSize() as usize;
     // Go: hm.ipad = make([]byte, blocksize); hm.opad = make([]byte, blocksize)
@@ -350,7 +353,7 @@ pub fn New(h: fn() -> Box<dyn Hash + Send + Sync>, key: slice<byte>) -> HMAC {
     let key_raw: &[byte] = &key;
     let key_bytes: Vec<byte> = if key_raw.len() > blocksize {
         // Go: if len(key) > blocksize { hm.outer.Write(key); key = hm.outer.Sum(nil) }
-        let mut tmp = h();
+        let mut tmp = h.Call();
         let _ = io::Writer::Write(&mut *tmp, key.clone());
         let empty: slice<byte> = slice::__from_vec(Vec::new());
         let s = tmp.Sum(empty);
@@ -435,7 +438,7 @@ impl Hash for HMAC {
         // hasher is built here. A fresh hasher is already in its reset
         // state, which makes Go's two branches the same shape: restore
         // the cached post-opad state, or feed opad.
-        let mut outer = (self.h_ctor)();
+        let mut outer = self.h_ctor.Call();
         if self.marshaled {
             match goish::cast!(&mut *outer, marshalable) {
                 Some(mo) => {
@@ -519,7 +522,7 @@ impl Hash for HMAC {
         //
         // goish builds the outer hasher on demand; a fresh one is already
         // reset, so this is Go's `h.outer.Reset(); h.outer.Write(h.opad)`.
-        let mut outer = (self.h_ctor)();
+        let mut outer = self.h_ctor.Call();
         let _ = io::Writer::Write(&mut *outer, slice::__from_vec(self.opad.clone()));
         let (mo, outerOK) = goish::cast!(&*outer, marshalable);
         if !outerOK {

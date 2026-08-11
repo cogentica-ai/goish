@@ -5,7 +5,7 @@
 //
 // Deviations from pbkdf2[go] @ Go 1.25.5:
 //
-//   * The hash factory is `fn() -> Box<dyn Hash + Send + Sync>` rather
+//   * The hash factory is `impl IntoHashFunc` rather
 //     than Go's `func() Hash` generic, matching `hmac::New`.
 //   * `setServiceIndicator` is ported for shape but its body is inert:
 //     every branch calls `fips140.Record{Non,}Approved()`, and goish's
@@ -23,7 +23,7 @@ use crate::crypto::internal::fips140::hmac;
 use crate::error;
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::hash::Hash;
+use crate::hash::{Hash, IntoHashFunc};
 use crate::io;
 use crate::types::{byte, int};
 
@@ -37,12 +37,13 @@ fn divRoundUp(x: int, y: int) -> int {
 // go: sdk 1.25.5 crypto/internal/fips140/pbkdf2/pbkdf2.go:23-69 Key
 /// `pbkdf2.Key(h, password, salt, iter, keyLength)` — derive a key.
 pub fn Key(
-    h: fn() -> Box<dyn Hash + Send + Sync>,
+    h: impl IntoHashFunc,
     password: string,
     salt: slice<byte>,
     iter: int,
     keyLength: int,
 ) -> (slice<byte>, error) {
+    let h = h.into_hash_func();
     // Go: setServiceIndicator(salt, keyLength)
     setServiceIndicator(&salt, keyLength);
 

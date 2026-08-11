@@ -6,7 +6,7 @@
 // Deviations from kdf[go] @ Go 1.25.5:
 //
 //   * Go's `[Hash hash.Hash](hash func() Hash, …)` generic collapses to
-//     the `fn() -> Box<dyn Hash + Send + Sync>` factory the rest of the
+//     the `impl IntoHashFunc` factory the rest of the
 //     module already takes.
 //   * Go's `var ServerKeys, ClientKeys Direction` are assigned in an
 //     `init()`; their `[]byte` tags are not const-evaluable in Rust, so
@@ -24,7 +24,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::goslice::slice;
-use crate::hash::Hash;
+use crate::hash::{Hash, IntoHashFunc};
 use crate::io;
 use crate::lazy::Lazy;
 use crate::types::{byte, int};
@@ -65,7 +65,7 @@ pub static ClientKeys: Lazy<Direction> = Lazy::new(|| Direction {
 /// `ssh.Keys(hash, d, K, H, sessionID, ivKeyLen, keyLen, macKeyLen)` —
 /// derive the IV, encryption and MAC keys for one direction.
 pub fn Keys(
-    hash: fn() -> Box<dyn Hash + Send + Sync>,
+    hash: impl IntoHashFunc,
     d: &Direction,
     K: slice<byte>,
     H: slice<byte>,
@@ -74,8 +74,9 @@ pub fn Keys(
     keyLen: int,
     macKeyLen: int,
 ) -> (slice<byte>, slice<byte>, slice<byte>) {
+    let hash = hash.into_hash_func();
     // Go: h := hash()
-    let mut h = hash();
+    let mut h = hash.Call();
 
     // go: none — Go's `generateKeyMaterial` is a closure inside Keys, not
     // a package-level decl; it is covered by Keys' own anchor above.

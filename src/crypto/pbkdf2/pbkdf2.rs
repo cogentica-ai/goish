@@ -9,7 +9,7 @@
 // Go 1.25 makes this a thin wrapper over crypto/internal/fips140/pbkdf2;
 // goish follows.
 //
-// Deviation: the hash factory is `fn() -> Box<dyn Hash + Send + Sync>`
+// Deviation: the hash factory is `impl IntoHashFunc` (`hash::HashFunc`)
 // rather than Go's `func() Hash` generic, matching `hmac::New`.
 
 #![allow(non_snake_case)]
@@ -21,19 +21,20 @@ use crate::crypto::internal::fips140::pbkdf2 as fips;
 use crate::errors::error;
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::hash::Hash;
+use crate::hash::{Hash, IntoHashFunc};
 use crate::types::{byte, int};
 
 // go: sdk 1.25.5 crypto/pbkdf2/pbkdf2.go:40-54 Key
 /// `pbkdf2.Key(h, password, salt, iter, keyLength)` — derive a key of
 /// `keyLength` bytes from `password` and `salt` over `iter` iterations.
 pub fn Key(
-    h: fn() -> Box<dyn Hash + Send + Sync>,
+    h: impl IntoHashFunc,
     password: string,
     salt: slice<byte>,
     iter: int,
     keyLength: int,
 ) -> (slice<byte>, error) {
+    let h = h.into_hash_func();
     // Go: if err := checkFIPS140Only(h, password, salt, keyLength); err != nil { … }
     // Go: return pbkdf2.Key(h, password, salt, iter, keyLength)
     return fips::Key(h, password, salt, iter, keyLength);

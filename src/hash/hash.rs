@@ -162,3 +162,64 @@ pub trait XOF: io::Writer + io::Reader {
     /// `BlockSize()` — the XOF's underlying block size.
     fn BlockSize(&self) -> int;
 }
+
+// ─── HashFunc — the carrier for Go's `func() hash.Hash` ───────────────
+
+// go: none — Go's `func() hash.Hash` is a first-class value, and the
+// standard library passes closures for it: `fips140hash.UnwrapNew(h)`
+// returns one that captures `h`, and `crypto/hkdf` and `crypto/ecdsa`
+// hand that straight to `hmac.New` and `SignDeterministic`.
+//
+// goish had typed every such parameter as a bare `fn` pointer, which
+// cannot hold a capture, so those Go call sites had nothing to translate
+// to. `HashFunc` is the runtime gap being filled rather than papered over
+// (AGENTS.md §5 rule 4): the `Arc<dyn Fn>` lives *inside* a concrete goish
+// type, so no signature or struct field ever spells `dyn Fn`.
+//
+// It is `Clone` because the values that hold one — `hmac::HMAC`,
+// `ecdsa::hmacDRBG` — are copied around the way Go copies a func value.
+#[derive(Clone)]
+pub struct HashFunc(alloc::sync::Arc<dyn Fn() -> Box<dyn Hash + Send + Sync> + Send + Sync>);
+
+impl HashFunc {
+    // go: none — goish idiom: build a HashFunc from any callable. Go
+    // writes the closure literal directly.
+    pub fn New<F>(f: F) -> Self
+    where
+        F: Fn() -> Box<dyn Hash + Send + Sync> + Send + Sync + 'static,
+    {
+        return HashFunc(alloc::sync::Arc::new(f));
+    }
+
+    // go: none — goish idiom: Go writes `h()`; a newtype needs a method.
+    pub fn Call(&self) -> Box<dyn Hash + Send + Sync> {
+        return (self.0)();
+    }
+}
+
+// go: none — lets every existing call site keep passing a plain function
+// (`hmac::New(sha512::NewHash, key)`) while the parameter type widens to
+// accept closures. Same shape as AGENTS.md §4's `impl Into<string>` rule.
+pub trait IntoHashFunc {
+    fn into_hash_func(self) -> HashFunc;
+}
+
+impl IntoHashFunc for HashFunc {
+    // go: none — goish idiom: the reflexive arm, so a HashFunc can be
+    // passed anywhere the trait is accepted.
+    fn into_hash_func(self) -> HashFunc {
+        return self;
+    }
+}
+
+impl<F> IntoHashFunc for F
+where
+    F: Fn() -> Box<dyn Hash + Send + Sync> + Send + Sync + 'static,
+{
+    // go: none — goish idiom: wraps a plain function or a closure, which
+    // is what makes `hmac::New(sha512::NewHash, key)` and
+    // `hmac::New(move || inner(), key)` both compile.
+    fn into_hash_func(self) -> HashFunc {
+        return HashFunc::New(self);
+    }
+}

@@ -161,6 +161,44 @@ fn main() {
         run("p521", ecdsa::P521(), 66, &q.Bytes(), &[P521_Q, P521_D, P521_R512, P521_S512, P521_R256, P521_S256, P521_BAD, P521_ZERO]);
     }
 
+    // The hash-factory gap: before hash::HashFunc, every goish signature
+    // that took a hash constructor took a bare `fn` pointer, so Go's
+    //
+    //     h := fips140hash.UnwrapNew(hashFunc.New)   // a CLOSURE
+    //     ecdsa.SignDeterministic(c, h, k, hash)
+    //
+    // had nothing to translate to. This is that shape: a closure that
+    // captures an inner constructor and is handed to SignDeterministic.
+    // It must produce the identical signature to the plain function.
+    {
+        let inner: fn() -> alloc::boxed::Box<dyn goish::hash::Hash + Send + Sync> =
+            sha512::NewHash;
+        let wrapped = goish::hash::HashFunc::New(move || inner());
+
+        let d = scalar(32, 0x00);
+        let mut q = nistec::NewP256Point();
+        let _ = q.ScalarBaseMult(&d);
+        let (k, _) = ecdsa::NewPrivateKey(ecdsa::P256(), &d, &q.Bytes());
+
+        let hash = msg(64);
+        let (viaClosure, err) =
+            ecdsa::SignDeterministic(ecdsa::P256(), wrapped, &k, &hash);
+        check(
+            "closure factory: SignDeterministic err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
+        check("closure factory: r matches", hx(&viaClosure.R), P256_R512);
+        check("closure factory: s matches", hx(&viaClosure.S), P256_S512);
+
+        let err = ecdsa::Verify(ecdsa::P256(), &k.PublicKey(), &hash, &viaClosure);
+        check(
+            "closure factory: verifies",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
+    }
+
     if unsafe { FAILED } {
         goish::syscall::Exit(1);
     }

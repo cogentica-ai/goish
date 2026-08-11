@@ -6,7 +6,7 @@
 // goish follows. The length validation lives here, the algorithm there.
 //
 // Slim deviations:
-//   * Hash factory is `fn() -> Box<dyn Hash + Send + Sync>` instead of Go's
+//   * Hash factory is `impl IntoHashFunc` instead of Go's
 //     `func() H` generic, matching the convention already established
 //     by `crypto::hmac::New`.
 //   * No `crypto/internal/fips140hash.UnwrapNew` — that package is not
@@ -27,23 +27,24 @@ use crate::crypto::internal::fips140only;
 use crate::errors::{self, error, nil};
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::hash::Hash;
+use crate::hash::{Hash, IntoHashFunc};
 use crate::types::{byte, int};
 
 // go: sdk 1.25.5 crypto/hkdf/hkdf.go:27-33 Extract
 /// `hkdf.Extract(h, secret, salt)` — a pseudorandom key from `secret`
 /// and an optional `salt`.
 pub fn Extract(
-    h: fn() -> Box<dyn Hash + Send + Sync>,
+    h: impl IntoHashFunc,
     secret: slice<byte>,
     salt: slice<byte>,
 ) -> (slice<byte>, error) {
+    let h = h.into_hash_func();
     // Go: if err := checkFIPS140Only(h, secret); err != nil { return nil, err }
-    let err = checkFIPS140Only(h, &secret);
+    let err = checkFIPS140Only(h.clone(), &secret);
     if err != crate::nil {
         return (slice::__from_vec(Vec::new()), err);
     }
-    let err = checkFIPS140Only(h, &secret);
+    let err = checkFIPS140Only(h.clone(), &secret);
     if err != crate::nil {
         return (slice::__from_vec(Vec::new()), err);
     }
@@ -55,14 +56,15 @@ pub fn Extract(
 /// `hkdf.Expand(h, pseudorandomKey, info, keyLength)` — expand a
 /// pseudorandom key into `keyLength` bytes of output keying material.
 pub fn Expand(
-    h: fn() -> Box<dyn Hash + Send + Sync>,
+    h: impl IntoHashFunc,
     pseudorandomKey: slice<byte>,
     info: string,
     keyLength: int,
 ) -> (slice<byte>, error) {
+    let h = h.into_hash_func();
     // Go: limit := h().Size() * 255
     //     if keyLength > limit { return nil, errors.New("hkdf: requested key length too large") }
-    let limit = h().Size() * 255;
+    let limit = h.Call().Size() * 255;
     if keyLength > limit {
         return (
             slice::__from_vec(Vec::new()),
@@ -70,7 +72,7 @@ pub fn Expand(
         );
     }
     // Go: if err := checkFIPS140Only(h, pseudorandomKey); err != nil { return nil, err }
-    let err = checkFIPS140Only(h, &pseudorandomKey);
+    let err = checkFIPS140Only(h.clone(), &pseudorandomKey);
     if err != crate::nil {
         return (slice::__from_vec(Vec::new()), err);
     }
@@ -81,15 +83,16 @@ pub fn Expand(
 // go: sdk 1.25.5 crypto/hkdf/hkdf.go:59-71 Key
 /// `hkdf.Key(h, secret, salt, info, keyLength)` — Extract then Expand.
 pub fn Key(
-    h: fn() -> Box<dyn Hash + Send + Sync>,
+    h: impl IntoHashFunc,
     secret: slice<byte>,
     salt: slice<byte>,
     info: string,
     keyLength: int,
 ) -> (slice<byte>, error) {
+    let h = h.into_hash_func();
     // Go: limit := h().Size() * 255
     //     if keyLength > limit { return nil, errors.New("hkdf: requested key length too large") }
-    let limit = h().Size() * 255;
+    let limit = h.Call().Size() * 255;
     if keyLength > limit {
         return (
             slice::__from_vec(Vec::new()),
@@ -108,9 +111,10 @@ pub fn Key(
 /// returns nil today; it is ported in full because the guard is real Go
 /// code and a future FIPS 140-only mode would need it correct.
 fn checkFIPS140Only(
-    h: fn() -> Box<dyn Hash + Send + Sync>,
+    h: impl IntoHashFunc,
     key: &slice<byte>,
 ) -> error {
+    let h = h.into_hash_func();
     // Go: if !fips140only.Enabled { return nil }
     if !fips140only::Enabled {
         return nil;
@@ -122,7 +126,7 @@ fn checkFIPS140Only(
         );
     }
     // Go: if !fips140only.ApprovedHash(h()) { return errors.New(…) }
-    if !fips140only::ApprovedHash(&h()) {
+    if !fips140only::ApprovedHash(&h.Call()) {
         return errors::New(
             "crypto/hkdf: use of hash functions other than SHA-2 or SHA-3 is not allowed in FIPS 140-only mode",
         );

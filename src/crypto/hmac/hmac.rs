@@ -16,7 +16,7 @@ use alloc::boxed::Box;
 
 use crate::crypto::internal::fips140::hmac as fipshmac;
 use crate::goslice::slice;
-use crate::hash::Hash;
+use crate::hash::{Hash, IntoHashFunc};
 use crate::types::byte;
 
 pub use fipshmac::HMAC;
@@ -24,7 +24,7 @@ pub use fipshmac::HMAC;
 // go: sdk 1.25.5 crypto/hmac/hmac.go:52-71 New
 /// `hmac.New(h, key)` — a new HMAC hash using the given hash constructor
 /// and key. `h` must return a fresh hash on every call.
-pub fn New(h: fn() -> Box<dyn Hash + Send + Sync>, key: slice<byte>) -> HMAC {
+pub fn New<H: IntoHashFunc>(h: H, key: slice<byte>) -> HMAC {
     // Go: return hmac.New(h, key)
     return fipshmac::New(h, key);
 }

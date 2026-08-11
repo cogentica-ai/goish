@@ -18,7 +18,9 @@
 //   * `var _P224 = sync.OnceValue(…)` becomes `goish::lazy::Lazy`, and
 //     `P224()` returns `&'static Curve<…>` — Go's memoised pointer.
 //   * Go's `H hash.Hash` type parameter collapses to the
-//     `fn() -> Box<dyn Hash + Send + Sync>` factory used across the tree.
+//     `impl IntoHashFunc` factory used across the tree — a plain
+//     function or a closure, which is what lets fips140hash.UnwrapNew's
+//     captured constructor translate.
 //   * Constructors returning `(*T, error)` return `(T, error)` with the
 //     zero value on the error path.
 //
@@ -38,7 +40,7 @@ use crate::crypto::internal::fips140::drbg;
 use crate::crypto::internal::fips140::nistec;
 use crate::errors;
 use crate::goslice::slice;
-use crate::hash::Hash;
+use crate::hash::{Hash, IntoHashFunc};
 use crate::io;
 use crate::lazy::Lazy;
 use crate::types::{byte, int};
@@ -450,7 +452,7 @@ pub struct Signature {
 /// truncated to that length.
 pub fn Sign<P: Point>(
     c: &Curve<P>,
-    h: fn() -> Box<dyn Hash + Send + Sync>,
+    h: impl IntoHashFunc,
     priv_: &PrivateKey,
     rand: &mut (dyn io::Reader + Send + Sync + 'static),
     hash: &slice<byte>,
@@ -502,7 +504,7 @@ pub fn Sign<P: Point>(
 /// in FIPS 186-5 and RFC 6979.
 pub fn SignDeterministic<P: Point>(
     c: &Curve<P>,
-    h: fn() -> Box<dyn Hash + Send + Sync>,
+    h: impl IntoHashFunc,
     priv_: &PrivateKey,
     hash: &slice<byte>,
 ) -> (Signature, error) {

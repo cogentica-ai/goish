@@ -10,7 +10,7 @@
 // Deviations from tls13[go] @ Go 1.25.5:
 //
 //   * Go's `[H hash.Hash](hash func() H, …)` generic collapses to the
-//     `fn() -> Box<dyn Hash + Send + Sync>` factory that goish's
+//     `hash::HashFunc` factory that goish's
 //     `hkdf`/`hmac` already take, so `NewEarlySecret`'s
 //     `func() hash.Hash { return h() }` re-wrap is the identity here and
 //     the field simply stores `h`.
@@ -31,14 +31,14 @@ use crate::crypto::internal::fips140::hkdf;
 use crate::crypto::internal::fips140deps::byteorder;
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::hash::Hash;
+use crate::hash::{Hash, HashFunc, IntoHashFunc};
 use crate::io;
 use crate::types::{byte, int};
 use crate::append;
 
 /// The hash factory every key-schedule stage carries. Go spells it
 /// `func() hash.Hash`.
-type hashFn = fn() -> Box<dyn Hash + Send + Sync>;
+type hashFn = HashFunc;
 
 // go: none — goish spells Go's untyped `nil` []byte argument as an
 // empty slice; this is the shared constructor for it.
@@ -50,7 +50,7 @@ fn empty() -> slice<byte> {
 /// `tls13.ExpandLabel(hash, secret, label, context, length)` —
 /// HKDF-Expand-Label from RFC 8446 §7.1.
 pub fn ExpandLabel<L: Into<string>>(
-    hash: hashFn,
+    hash: impl IntoHashFunc,
     secret: slice<byte>,
     label: L,
     context: slice<byte>,
@@ -99,7 +99,7 @@ pub fn ExpandLabel<L: Into<string>>(
 fn extract(hash: hashFn, newSecret: slice<byte>, currentSecret: slice<byte>) -> slice<byte> {
     // Go: if newSecret == nil { newSecret = make([]byte, hash().Size()) }
     let newSecret = if newSecret.Len() == 0 {
-        let size = hash().Size();
+        let size = hash.Call().Size();
         slice::__from_vec(alloc::vec![0u8; size as usize])
     } else {
         newSecret
@@ -113,15 +113,16 @@ fn extract(hash: hashFn, newSecret: slice<byte>, currentSecret: slice<byte>) -> 
 /// transcript hash.Hash) []byte`. A nil `transcript` is a fresh, empty
 /// hash — i.e. Transcript-Hash("").
 fn deriveSecret(
-    hash: hashFn,
+    hash: impl IntoHashFunc,
     secret: slice<byte>,
     label: &'static str,
     transcript: Option<&(dyn Hash + Send + Sync + 'static)>,
 ) -> slice<byte> {
+    let hash = hash.into_hash_func();
     // Go: if transcript == nil { transcript = hash() }
     let fresh: Option<Box<dyn Hash + Send + Sync>> = match transcript {
         Some(_) => None,
-        None => Some(hash()),
+        None => Some(hash.Call()),
     };
     let transcript: &(dyn Hash + Send + Sync) = match transcript {
         Some(t) => t,
@@ -184,11 +185,12 @@ pub struct ExporterMasterSecret {
 // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:73-78 NewEarlySecret
 /// `tls13.NewEarlySecret(h, psk)` — enter the key schedule at the Early
 /// Secret with the given pre-shared key. A nil PSK is a zero string.
-pub fn NewEarlySecret(h: hashFn, psk: slice<byte>) -> EarlySecret {
+pub fn NewEarlySecret(h: impl IntoHashFunc, psk: slice<byte>) -> EarlySecret {
+    let h = h.into_hash_func();
     // Go: return &EarlySecret{ secret: extract(h, psk, nil),
     //                          hash: func() hash.Hash { return h() } }
     return EarlySecret {
-        secret: extract(h, psk, empty()),
+        secret: extract(h.clone(), psk, empty()),
         hash: h,
     };
 }
@@ -199,7 +201,7 @@ impl EarlySecret {
     pub fn ResumptionBinderKey(&self) -> slice<byte> {
         // Go: return deriveSecret(s.hash, s.secret, resumptionBinderLabel, nil)
         return deriveSecret(
-            self.hash,
+            self.hash.clone(),
             self.secret.clone(),
             resumptionBinderLabel,
             None,
@@ -215,7 +217,7 @@ impl EarlySecret {
     ) -> slice<byte> {
         // Go: return deriveSecret(s.hash, s.secret, clientEarlyTrafficLabel, transcript)
         return deriveSecret(
-            self.hash,
+            self.hash.clone(),
             self.secret.clone(),
             clientEarlyTrafficLabel,
             Some(transcript),
@@ -226,12 +228,12 @@ impl EarlySecret {
     /// Advance to the Handshake Secret with the (EC)DHE shared secret.
     pub fn HandshakeSecret(&self, sharedSecret: slice<byte>) -> HandshakeSecret {
         // Go: derived := deriveSecret(s.hash, s.secret, "derived", nil)
-        let derived = deriveSecret(self.hash, self.secret.clone(), "derived", None);
+        let derived = deriveSecret(self.hash.clone(), self.secret.clone(), "derived", None);
         // Go: return &HandshakeSecret{ secret: extract(s.hash, sharedSecret, derived),
         //                              hash: s.hash }
         return HandshakeSecret {
-            secret: extract(self.hash, sharedSecret, derived),
-            hash: self.hash,
+            secret: extract(self.hash.clone(), sharedSecret, derived),
+            hash: self.hash.clone(),
         };
     }
 
@@ -247,12 +249,12 @@ impl EarlySecret {
         //         hash: s.hash }
         return ExporterMasterSecret {
             secret: deriveSecret(
-                self.hash,
+                self.hash.clone(),
                 self.secret.clone(),
                 earlyExporterLabel,
                 Some(transcript),
             ),
-            hash: self.hash,
+            hash: self.hash.clone(),
         };
     }
 }
@@ -267,7 +269,7 @@ impl HandshakeSecret {
     ) -> slice<byte> {
         // Go: return deriveSecret(s.hash, s.secret, clientHandshakeTrafficLabel, transcript)
         return deriveSecret(
-            self.hash,
+            self.hash.clone(),
             self.secret.clone(),
             clientHandshakeTrafficLabel,
             Some(transcript),
@@ -283,7 +285,7 @@ impl HandshakeSecret {
     ) -> slice<byte> {
         // Go: return deriveSecret(s.hash, s.secret, serverHandshakeTrafficLabel, transcript)
         return deriveSecret(
-            self.hash,
+            self.hash.clone(),
             self.secret.clone(),
             serverHandshakeTrafficLabel,
             Some(transcript),
@@ -294,11 +296,11 @@ impl HandshakeSecret {
     /// Advance to the Master Secret.
     pub fn MasterSecret(&self) -> MasterSecret {
         // Go: derived := deriveSecret(s.hash, s.secret, "derived", nil)
-        let derived = deriveSecret(self.hash, self.secret.clone(), "derived", None);
+        let derived = deriveSecret(self.hash.clone(), self.secret.clone(), "derived", None);
         // Go: return &MasterSecret{ secret: extract(s.hash, nil, derived), hash: s.hash }
         return MasterSecret {
-            secret: extract(self.hash, empty(), derived),
-            hash: self.hash,
+            secret: extract(self.hash.clone(), empty(), derived),
+            hash: self.hash.clone(),
         };
     }
 }
@@ -313,7 +315,7 @@ impl MasterSecret {
     ) -> slice<byte> {
         // Go: return deriveSecret(s.hash, s.secret, clientApplicationTrafficLabel, transcript)
         return deriveSecret(
-            self.hash,
+            self.hash.clone(),
             self.secret.clone(),
             clientApplicationTrafficLabel,
             Some(transcript),
@@ -329,7 +331,7 @@ impl MasterSecret {
     ) -> slice<byte> {
         // Go: return deriveSecret(s.hash, s.secret, serverApplicationTrafficLabel, transcript)
         return deriveSecret(
-            self.hash,
+            self.hash.clone(),
             self.secret.clone(),
             serverApplicationTrafficLabel,
             Some(transcript),
@@ -345,7 +347,7 @@ impl MasterSecret {
     ) -> slice<byte> {
         // Go: return deriveSecret(s.hash, s.secret, resumptionLabel, transcript)
         return deriveSecret(
-            self.hash,
+            self.hash.clone(),
             self.secret.clone(),
             resumptionLabel,
             Some(transcript),
@@ -364,12 +366,12 @@ impl MasterSecret {
         //         hash: s.hash }
         return ExporterMasterSecret {
             secret: deriveSecret(
-                self.hash,
+                self.hash.clone(),
                 self.secret.clone(),
                 exporterLabel,
                 Some(transcript),
             ),
-            hash: self.hash,
+            hash: self.hash.clone(),
         };
     }
 }
@@ -390,20 +392,20 @@ impl ExporterMasterSecret {
         // so it cannot be a `&'static str`; deriveSecret's body is
         // inlined for that one parameter.
         let label = label.into();
-        let fresh = (self.hash)();
+        let fresh = self.hash.Call();
         let secret = ExpandLabel(
-            self.hash,
+            self.hash.clone(),
             self.secret.clone(),
             label,
             fresh.Sum(empty()),
             fresh.Size(),
         );
         // Go: h := s.hash(); h.Write(context)
-        let mut h = (self.hash)();
+        let mut h = self.hash.Call();
         let _ = io::Writer::Write(&mut h, context);
         // Go: return ExpandLabel(s.hash, secret, "exporter", h.Sum(nil), length)
         return ExpandLabel(
-            self.hash,
+            self.hash.clone(),
             secret,
             string::from_static("exporter"),
             h.Sum(empty()),
