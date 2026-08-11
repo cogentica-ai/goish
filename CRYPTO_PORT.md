@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **749/1507 = 49.7%**, 899 anchors, **33 packages fully verified**
+Current: **751/1507 = 49.8%**, 905 anchors, **35 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -41,7 +41,9 @@ Current: **749/1507 = 49.7%**, 899 anchors, **33 packages fully verified**
 | `crypto/internal/fips140/ssh` | 1/1 | 1 → 2 |
 | `crypto/internal/fips140/mlkem` | 69/69 | 4 → 4 |
 | `crypto/internal/fips140/nistec/fiat` | 61/61 | 13 → 14 |
-| **total** | **460** | |
+| `crypto/internal/randutil` | 1/1 | 1 → 2 |
+| `crypto/internal/entropy` | 1/1 | 1 → 2 |
+| **total** | **462** | |
 
 The only functions missing from that table are assembly entry points:
 `blockAVX2`/`blockSHANI` in fips140/sha256 and in crypto/sha1,

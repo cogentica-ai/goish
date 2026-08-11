@@ -6,5 +6,7 @@
 
 #![allow(non_snake_case)]
 
+pub mod entropy;
 pub mod fips140;
 pub mod fips140deps;
+pub mod randutil;
