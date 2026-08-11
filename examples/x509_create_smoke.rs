@@ -39,8 +39,8 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::crypto::ed25519;
 use goish::crypto::x509::{
-    CreateCertificate, CreateRevocationList, MarshalPKIXPublicKey, OIDFromInts, ParseCertificate,
-    RevocationList, RevocationListEntry, OID,
+    CertificateRequest, CreateCertificate, CreateCertificateRequest, CreateRevocationList,
+    MarshalPKIXPublicKey, OIDFromInts, ParseCertificate, RevocationList, RevocationListEntry, OID,
 };
 use goish::crypto::x509::pkix;
 use goish::encoding::asn1;
@@ -664,6 +664,89 @@ fn main() {
         }
     }
 
+    // ── CreateCertificateRequest ─────────────────────────────────────
+    // goref: CSR_PLAIN / CSR_BARE / CSR_FULL / CSR_APPENDED / CSR_DUP
+    {
+        // Plain: buildCSRExtensions produces a SAN, and since
+        // template.Attributes is empty a fresh extensionRequest
+        // attribute is synthesized for it.
+        let mut t = CertificateRequest::default();
+        t.Subject.CommonName = string::from("goish csr");
+        t.Subject.Organization = strs(&["Goish"]);
+        t.DNSNames = strs(&["csr.example.com"]);
+        let mut r = fixedReader { n: 0 };
+        let (der, err) = CreateCertificateRequest(&mut r, &t, &privAny);
+        checkErr(err, "<nil>", "CreateCertificateRequest err");
+        checkHex(&der, CSR_PLAIN, "CreateCertificateRequest == Go DER");
+
+        // No SANs: no extensionRequest attribute at all.
+        let mut t = CertificateRequest::default();
+        t.Subject.CommonName = string::from("bare");
+        let mut r = fixedReader { n: 0 };
+        let (der, err) = CreateCertificateRequest(&mut r, &t, &privAny);
+        checkErr(err, "<nil>", "CreateCertificateRequest bare err");
+        checkHex(&der, CSR_BARE, "CSR with no extensions == Go DER");
+
+        // Every SAN kind plus ExtraExtensions.
+        let (u, _) = url::Parse("https://csr.example.com/z");
+        let mut t = CertificateRequest::default();
+        t.Subject.CommonName = string::from("goish csr full");
+        t.Subject.Country = strs(&["TH"]);
+        t.DNSNames = strs(&["a.example.com", "b.example.com"]);
+        t.EmailAddresses = strs(&["e@example.com"]);
+        t.IPAddresses = slice::__from_vec(alloc::vec![net::ParseIP(string::from("127.0.0.1"))]);
+        t.URIs = slice::__from_vec(alloc::vec![u]);
+        t.ExtraExtensions = slice::__from_vec(alloc::vec![pkix::Extension {
+            Id: oidOf(&[1, 2, 3, 4, 5]),
+            Critical: false,
+            Value: bs(&[0x05, 0x00]),
+        }]);
+        let mut r = fixedReader { n: 0 };
+        let (der, err) = CreateCertificateRequest(&mut r, &t, &privAny);
+        checkErr(err, "<nil>", "CreateCertificateRequest full err");
+        checkHex(&der, CSR_FULL, "CSR with every SAN kind + ExtraExtensions == Go DER");
+
+        // The extensionsAppended path: Attributes already carries an
+        // extensionRequest, so the SAN is merged into it. This is the
+        // branch where Go mutates through a shared slice header and
+        // goish has to write back by index.
+        let mut t = CertificateRequest::default();
+        t.Subject.CommonName = string::from("goish csr attrs");
+        t.DNSNames = strs(&["attr.example.com"]);
+        t.Attributes = slice::__from_vec(alloc::vec![pkix::AttributeTypeAndValueSET {
+            Type: oidOf(&[1, 2, 840, 113549, 1, 9, 14]),
+            Value: slice::__from_vec(alloc::vec![slice::__from_vec(alloc::vec![
+                pkix::AttributeTypeAndValue {
+                    Type: oidOf(&[2, 5, 29, 19]),
+                    Value: Any::new(bs(&[0x30, 0x00])),
+                }
+            ])]),
+        }]);
+        let mut r = fixedReader { n: 0 };
+        let (der, err) = CreateCertificateRequest(&mut r, &t, &privAny);
+        checkErr(err, "<nil>", "CreateCertificateRequest appended err");
+        checkHex(&der, CSR_APPENDED, "SAN merged into an existing attribute == Go DER");
+
+        // Same, but Attributes already specifies the SAN OID, so the
+        // attribute wins and buildCSRExtensions' value is dropped.
+        let mut t = CertificateRequest::default();
+        t.Subject.CommonName = string::from("goish csr dup");
+        t.DNSNames = strs(&["dup.example.com"]);
+        t.Attributes = slice::__from_vec(alloc::vec![pkix::AttributeTypeAndValueSET {
+            Type: oidOf(&[1, 2, 840, 113549, 1, 9, 14]),
+            Value: slice::__from_vec(alloc::vec![slice::__from_vec(alloc::vec![
+                pkix::AttributeTypeAndValue {
+                    Type: oidOf(&[2, 5, 29, 17]),
+                    Value: Any::new(bs(&[0x30, 0x00])),
+                }
+            ])]),
+        }]);
+        let mut r = fixedReader { n: 0 };
+        let (der, err) = CreateCertificateRequest(&mut r, &t, &privAny);
+        checkErr(err, "<nil>", "CreateCertificateRequest dup-OID err");
+        checkHex(&der, CSR_DUP, "an Attributes-specified extension takes priority == Go DER");
+    }
+
     let ran = RAN.load(Ordering::Acquire);
     let failed = FAILED.load(Ordering::Acquire);
     fmt::Printf!("x509_create_smoke: %d checks, %d failed\n", int(ran), int(failed));
@@ -717,3 +800,13 @@ const CRL_DEPRECATED: &str = "3081d730818a020101300506032b65703025310e300c060355
 const CRL_EXTRAEXT: &str = "3081cd308180020101300506032b65703025310e300c060355040a1305476f697368311330110603550403130a676f69736820726f6f74170d3234303130323033303430355a170d3334303130323033303430355aa02f302d30130603551d23040c300a8008deadbeef01020304300a0603551d140403020103300a06042a03040504020500300506032b65700341004d44d498685696c6f35bd7971c668734116ab652996691b140cc6a8280b6989e56791dde5f99976afaf3ff2878954ee13fd8116441461b160116a41d068e0f0f";
 
 const CREATECRL: &str = "3081cb307f020101300506032b65703025310e300c060355040a1305476f697368311330110603550403130a676f69736820726f6f74170d3234303130323033303430355a170d3334303130323033303430355a30153013020200aa170d3234303130323033303430355aa017301530130603551d23040c300a8008deadbeef01020304300506032b65700341000e40d5391b410eb43423561f4c50fc20bb42bf754b52764f2f640d9edc1fad0c9b2ce7714185232390ad0507814d944554b043e14e72b0f56ce641ff2312af07";
+
+const CSR_PLAIN: &str = "3081d13081840201003024310e300c060355040a1305476f6973683112301006035504031309676f69736820637372302a300506032b657003210003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8a02d302b06092a864886f70d01090e311e301c301a0603551d1104133011820f6373722e6578616d706c652e636f6d300506032b6570034100b59cf507af6fd0e083fbb0b7b07d0b3e830292dd80d7c2406b2dbd8653a23eb87818d0a291c14a7b39cb674c68909ce0c1dc45b826c0054ad7997c05e1d3070f";
+
+const CSR_BARE: &str = "30818e3042020100300f310d300b0603550403130462617265302a300506032b657003210003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8a000300506032b6570034100f3b9eeb3ebb58d8661bf68efa1175f1cfdd4c70f1f09fe1c44e46298d79b381af03118573b0a8404e857420871bbf18aa5e82a4a2ce65dde651997c54118e203";
+
+const CSR_FULL: &str = "3082011c3081cf0201003026310b3009060355040613025448311730150603550403130e676f697368206373722066756c6c302a300506032b657003210003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8a076307406092a864886f70d01090e3167306530570603551d110450304e820d612e6578616d706c652e636f6d820d622e6578616d706c652e636f6d810d65406578616d706c652e636f6d87047f000001861968747470733a2f2f6373722e6578616d706c652e636f6d2f7a300a06042a03040504020500300506032b65700341003aad31de13b5194e6f6c28cfc2fa89ed26def5269e01d6bbe6f7d2563deabdb5fdb3211155b75ef9420cd3a09139f5fa0f8ae30bceb25e7f4dc6765499a18c05";
+
+const CSR_APPENDED: &str = "3081d3308186020100301a311830160603550403130f676f69736820637372206174747273302a300506032b657003210003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8a039303706092a864886f70d01090e312a302830090603551d1304023000301b0603551d11041430128210617474722e6578616d706c652e636f6d300506032b6570034100f93698823a7fb4c8cb4de4bb7ab407c67b09116e4843975303f656dd39c60e3f63592db581856006b8ccc8fc97ce9ab207ef396c39d7f8d457197aada8d4b703";
+
+const CSR_DUP: &str = "3081b330670201003018311630140603550403130d676f6973682063737220647570302a300506032b657003210003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8a01c301a06092a864886f70d01090e310d300b30090603551d1104023000300506032b65700341009c22b4f17a6cb5e287fa04df9a15f32fe3f5fbaaeac62648243a401745b1229773b2b54ecf8ce875808f471d774503671fe93efc37161dab2d30ceb017f12601";

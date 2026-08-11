@@ -38,7 +38,8 @@ pub use pem_decrypt::{
     PEMCipher3DES, PEMCipherAES128, PEMCipherAES192, PEMCipherAES256, PEMCipherDES,
 };
 pub use x509::{
-    CertificateRequest, CreateCertificate, CreateRevocationList, MarshalPKIXPublicKey,
+    CertificateRequest, CreateCertificate, CreateCertificateRequest, CreateRevocationList,
+    MarshalPKIXPublicKey,
     RevocationList, RevocationListEntry,
     Certificate, ConstraintViolationError, ErrUnsupportedAlgorithm, ExtKeyUsage,
     ExtKeyUsageAny, ExtKeyUsageClientAuth, ExtKeyUsageCodeSigning, ExtKeyUsageEmailProtection,

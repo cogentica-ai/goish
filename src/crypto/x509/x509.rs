@@ -1,4 +1,4 @@
-// go: file crypto/x509/x509.go decls: ParsePKIXPublicKey, SignatureAlgorithm.isRSAPSS, SignatureAlgorithm.hashFunc, SignatureAlgorithm.String, PublicKeyAlgorithm.String, getSignatureAlgorithmFromAI, getPublicKeyAlgorithmFromOID, namedCurveFromOID, oidFromNamedCurve, oidFromECDHCurve, extKeyUsageFromOID, oidFromExtKeyUsage, InsecureAlgorithmError.Error, ConstraintViolationError.Error, Certificate.Equal, Certificate.hasSANExtension, Certificate.CheckSignatureFrom, Certificate.CheckSignature, Certificate.hasNameConstraints, Certificate.getSANExtension, signaturePublicKeyAlgoMismatchError, checkSignature, Certificate.CheckCRLSignature, UnhandledCriticalExtension.Error, oidInExtensions, isIA5String, marshalPublicKey, MarshalPKIXPublicKey, reverseBitsInAByte, asn1BitLength, marshalSANs, buildCertExtensions, marshalKeyUsage, marshalExtKeyUsage, marshalBasicConstraints, marshalCertificatePolicies, buildCSRExtensions, subjectBytes, signingParamsForKey, signTBS, CreateCertificate, Certificate.CreateCRL, CreateRevocationList
+// go: file crypto/x509/x509.go decls: ParsePKIXPublicKey, SignatureAlgorithm.isRSAPSS, SignatureAlgorithm.hashFunc, SignatureAlgorithm.String, PublicKeyAlgorithm.String, getSignatureAlgorithmFromAI, getPublicKeyAlgorithmFromOID, namedCurveFromOID, oidFromNamedCurve, oidFromECDHCurve, extKeyUsageFromOID, oidFromExtKeyUsage, InsecureAlgorithmError.Error, ConstraintViolationError.Error, Certificate.Equal, Certificate.hasSANExtension, Certificate.CheckSignatureFrom, Certificate.CheckSignature, Certificate.hasNameConstraints, Certificate.getSANExtension, signaturePublicKeyAlgoMismatchError, checkSignature, Certificate.CheckCRLSignature, UnhandledCriticalExtension.Error, oidInExtensions, isIA5String, marshalPublicKey, MarshalPKIXPublicKey, reverseBitsInAByte, asn1BitLength, marshalSANs, buildCertExtensions, marshalKeyUsage, marshalExtKeyUsage, marshalBasicConstraints, marshalCertificatePolicies, buildCSRExtensions, subjectBytes, signingParamsForKey, signTBS, CreateCertificate, Certificate.CreateCRL, CreateRevocationList, newRawAttributes, CreateCertificateRequest
 //
 // The X.509 type surface: the algorithm identifiers, the OID tables and
 // the `Certificate` struct every other file in the package hangs on.
@@ -13,14 +13,12 @@
 // (CreateCertificate, CreateRevocationList, Certificate.CreateCRL,
 // MarshalPKIXPublicKey and the extension builders behind them).
 //
-// What is still absent, and why: everything that has to *read back* DER
-// it just wrote. `newRawAttributes` (x509.go:1962) and
-// `CreateCertificateRequest` (x509.go:2051) are `asn1.Marshal`-then-
-// `asn1.Unmarshal` round trips; `ParsePKIXPublicKey`, `ParseCRL`,
-// `ParseDERCRL`, `ParseCertificateRequest`, `parseCertificateRequest`,
-// `parseRawAttributes` and `parseCSRExtensions` are pure decode. All of
-// them need `asn1.Unmarshal`, which goish does not have. They are
-// absent, not stubbed.
+// What is still absent: the CSR and CRL *parsing* entry points —
+// `ParseCRL`, `ParseDERCRL`, `ParseRevocationList`,
+// `ParseCertificateRequest`, `parseCertificateRequest`,
+// `parseRawAttributes` and `parseCSRExtensions`. They are the read side
+// of the shapes declared here, and belong with `parser.go`'s half rather
+// than this one. They are absent, not stubbed.
 //
 // Deviations from x509[go] @ Go 1.25.5:
 //
@@ -55,7 +53,7 @@
 //     certificate *signed* with RSA-PSS parses, but reports its
 //     signature algorithm as unknown.
 //
-// goishlint:ignore GOISH018 ParsePKIXPublicKey, ParseCRL, ParseDERCRL, newRawAttributes, parseRawAttributes, parseCSRExtensions, CreateCertificateRequest, ParseCertificateRequest, parseCertificateRequest — every one needs asn1.Unmarshal; see the banner.
+// goishlint:ignore GOISH018 ParseCRL, ParseDERCRL, parseRawAttributes, parseCSRExtensions, ParseCertificateRequest, parseCertificateRequest — the CSR/CRL parsing entry points; see the banner.
 // goishlint:ignore GOISH019 pssParameters — the RSA-PSS parameter shape, read only by `getSignatureAlgorithmFromAI`'s unported RSA-PSS branch (which needs asn1.Unmarshal) and written by nothing. Every other ASN.1 shape in x509.go is declared, in this file.
 // goishlint:ignore GOISH021 pssParameters, pssParametersSHA256, pssParametersSHA384, pssParametersSHA512, oidSHA256, oidSHA384, oidSHA512, oidMGF1, pemCRLPrefix, pemType — the RSA-PSS parameter blobs, which belong to the unported RSA-PSS branch of getSignatureAlgorithmFromAI, and the three vars read only by ParseCRL / ParseCRL. Every other type, const and var in x509.go is here.
 
@@ -85,6 +83,7 @@ use crate::goany::Any;
 use crate::io;
 use crate::goany::AsExt;
 use crate::goslice::slice;
+use crate::gomap::map;
 use crate::gostring::string;
 use crate::math::big;
 use crate::net;
@@ -3327,4 +3326,271 @@ impl core::ops::BitAndAssign for KeyUsage {
     fn bitand_assign(&mut self, rhs: KeyUsage) {
         self.0 &= rhs.0;
     }
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1960-1975 newRawAttributes
+/// Convert AttributeTypeAndValueSETs from a template
+/// [`CertificateRequest`]'s Attributes into `tbsCertificateRequest`
+/// RawAttributes.
+pub(super) fn newRawAttributes(
+    attributes: &slice<pkix::AttributeTypeAndValueSET>,
+) -> (slice<asn1::RawValue>, error) {
+    let mut rawAttributes: slice<asn1::RawValue> = slice::new();
+    let (b, err) = asn1::Marshal(attributes);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    let (rest, err) = asn1::Unmarshal(b, &mut rawAttributes);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    if rest.Len() != 0 {
+        return (
+            slice::new(),
+            errors::New("x509: failed to unmarshal raw CSR Attributes"),
+        );
+    }
+    return (rawAttributes, errors::nil);
+}
+
+// Go: x509.go:2141-2144 — the *anonymous* struct
+// `struct { Type asn1.ObjectIdentifier; Value [][]pkix.Extension
+// `asn1:"set"` }` that `CreateCertificateRequest` marshals as the
+// extensionRequest attribute.
+//
+// go: none — goish idiom: Rust has no anonymous struct type, so the
+// shape gets a name. Same deviation, and the same reason, as
+// `signatureAlgorithmDetail` earlier in this file.
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+pub(super) struct extensionRequestAttribute {
+    pub Type: asn1::ObjectIdentifier,
+    #[tag(r#"asn1:"set""#)]
+    pub Value: slice<slice<pkix::Extension>>,
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:2035-2193 CreateCertificateRequest
+/// Create a new certificate request based on a template. The following
+/// members of `template` are used:
+///
+///   - SignatureAlgorithm
+///   - Subject
+///   - DNSNames
+///   - EmailAddresses
+///   - IPAddresses
+///   - URIs
+///   - ExtraExtensions
+///   - Attributes (deprecated)
+///
+/// `priv_` is the private key to sign the CSR with, and the
+/// corresponding public key will be included in the CSR. It must
+/// implement `crypto::Signer` and its `Public()` method must return an
+/// `rsa::PublicKey`, an `ecdsa::PublicKey` or an `ed25519::PublicKey`.
+///
+/// The returned slice is the certificate request in DER encoding.
+pub fn CreateCertificateRequest(
+    rand: &mut dyn io::Reader,
+    template: &CertificateRequest,
+    priv_: &Any,
+) -> (slice<byte>, error) {
+    // See `CreateCertificate` for why this is `Any::As` and not
+    // `goish::cast!`.
+    let key = match priv_.As::<dyn crypto::Signer + Send + Sync>() {
+        Some(k) => k,
+        None => {
+            return (
+                slice::new(),
+                errors::New(
+                    "x509: certificate private key does not implement crypto.Signer",
+                ),
+            )
+        }
+    };
+
+    let (signatureAlgorithm, algorithmIdentifier, err) =
+        signingParamsForKey(key, template.SignatureAlgorithm);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    let publicKeyBytes: slice<byte>;
+    let publicKeyAlgorithm: pkix::AlgorithmIdentifier;
+    // Go passes `key.Public()` — a `crypto.PublicKey`, which *is* `any` —
+    // straight into `marshalPublicKey(pub any)`. goish's two erasure
+    // carriers do not convert without naming the type; see
+    // `anyFromPublicKey`.
+    let (pubAny, err) = anyFromPublicKey(&key.Public());
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    let (b, ai, err) = marshalPublicKey(&pubAny);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    publicKeyBytes = b;
+    publicKeyAlgorithm = ai;
+
+    let (extensions, err) = buildCSRExtensions(template);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    // Make a copy of template.Attributes because we may alter it below.
+    let mut attributes: slice<pkix::AttributeTypeAndValueSET> =
+        crate::make!([]pkix::AttributeTypeAndValueSET, 0, template.Attributes.Len());
+    for (_, attr) in crate::range!(template.Attributes.clone()) {
+        let mut values: slice<slice<pkix::AttributeTypeAndValue>> =
+            crate::make!([]slice<pkix::AttributeTypeAndValue>, attr.Value.Len());
+        // Go: copy(values, attr.Value)
+        for (i, v) in crate::range!(attr.Value.clone()) {
+            values[i] = v.clone();
+        }
+        attributes = crate::append!(
+            attributes,
+            pkix::AttributeTypeAndValueSET {
+                Type: attr.Type.clone(),
+                Value: values,
+            }
+        );
+    }
+
+    let mut extensionsAppended = false;
+    if extensions.Len() > 0 {
+        // Append the extensions to an existing attribute if possible.
+        //
+        // Go writes `for _, atvSet := range attributes` and then mutates
+        // `atvSet.Value[0]`. That reaches the original because `atvSet`
+        // is a copy of the struct but `Value` is a slice *header* over
+        // shared backing. goish's `slice<T>` clones its backing
+        // (goslice.rs:88 and the `Clone` derive), so the same spelling
+        // would write to a discarded copy. The index the range already
+        // yields is used to write back into `attributes`.
+        for (idx, atvSet) in crate::range!(attributes.clone()) {
+            if !atvSet.Type.Equal(&oidExtensionRequest()) || atvSet.Value.Len() == 0 {
+                continue;
+            }
+
+            // specifiedExtensions contains all the extensions that we
+            // found specified via template.Attributes.
+            let mut specifiedExtensions = crate::make!(map[string]bool);
+
+            for (_, atvs) in crate::range!(atvSet.Value.clone()) {
+                for (_, atv) in crate::range!(atvs.clone()) {
+                    specifiedExtensions.Set(atv.Type.String(), true);
+                }
+            }
+
+            let mut newValue: slice<pkix::AttributeTypeAndValue> = crate::make!(
+                []pkix::AttributeTypeAndValue,
+                0,
+                atvSet.Value[0].Len() + extensions.Len()
+            );
+            newValue = crate::append!(newValue, atvSet.Value[0].clone()...);
+
+            for (_, e) in crate::range!(extensions.clone()) {
+                let (seen, _) = specifiedExtensions.Get(e.Id.String());
+                if seen {
+                    // Attributes already contained a value for
+                    // this extension and it takes priority.
+                    continue;
+                }
+
+                newValue = crate::append!(
+                    newValue,
+                    pkix::AttributeTypeAndValue {
+                        // There is no place for the critical
+                        // flag in an AttributeTypeAndValue.
+                        Type: e.Id.clone(),
+                        Value: Any::new(e.Value.clone()),
+                    }
+                );
+            }
+
+            attributes[idx].Value[0] = newValue;
+            extensionsAppended = true;
+            break;
+        }
+    }
+
+    let (mut rawAttributes, err) = newRawAttributes(&attributes);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    // If not included in attributes, add a new attribute for the
+    // extensions.
+    if extensions.Len() > 0 && !extensionsAppended {
+        let attr = extensionRequestAttribute {
+            Type: oidExtensionRequest(),
+            Value: slice::__from_vec(alloc::vec![extensions.clone()]),
+        };
+
+        let (b, err) = asn1::Marshal(&attr);
+        if err != errors::nil {
+            return (
+                slice::new(),
+                errors::New(
+                    string::from("x509: failed to serialise extensions attribute: ")
+                        + err.Error(),
+                ),
+            );
+        }
+
+        let mut rawValue = asn1::RawValue::default();
+        let (_, err) = asn1::Unmarshal(b, &mut rawValue);
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+
+        rawAttributes = crate::append!(rawAttributes, rawValue);
+    }
+
+    let mut asn1Subject = template.RawSubject.clone();
+    if asn1Subject.Len() == 0 {
+        let (b, err) = asn1::Marshal(&template.Subject.ToRDNSequence());
+        if err != errors::nil {
+            return (slice::new(), err);
+        }
+        asn1Subject = b;
+    }
+
+    let mut tbsCSR = tbsCertificateRequest {
+        // PKCS #10, RFC 2986
+        Version: 0,
+        Subject: asn1::RawValue {
+            FullBytes: asn1Subject,
+            ..Default::default()
+        },
+        PublicKey: publicKeyInfo {
+            Raw: asn1::RawContent::default(),
+            Algorithm: publicKeyAlgorithm,
+            PublicKey: asn1::BitString {
+                Bytes: publicKeyBytes.clone(),
+                BitLength: publicKeyBytes.Len() * 8,
+            },
+        },
+        RawAttributes: rawAttributes,
+        ..Default::default()
+    };
+
+    let (tbsCSRContents, err) = asn1::Marshal(&tbsCSR);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+    tbsCSR.Raw = asn1::RawContent(tbsCSRContents.clone());
+
+    let (signature, err) = signTBS(&tbsCSRContents, key, signatureAlgorithm, rand);
+    if err != errors::nil {
+        return (slice::new(), err);
+    }
+
+    return asn1::Marshal(&certificateRequest {
+        TBSCSR: tbsCSR,
+        SignatureAlgorithm: algorithmIdentifier,
+        SignatureValue: asn1::BitString {
+            Bytes: signature.clone(),
+            BitLength: signature.Len() * 8,
+        },
+        ..Default::default()
+    });
 }
