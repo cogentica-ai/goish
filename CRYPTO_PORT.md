@@ -295,6 +295,38 @@ cost time were symbol-level, not package-level:
 * name-level coverage can report 100% for a package that does not compile,
   so `cargo check --lib` is the gate, not `port_coverage.py`.
 
+## Readiness, as the tool reports it (2026-08-11)
+
+`scripts/port_deps.py --ready crypto` after the elliptic port:
+
+| package | gap | state |
+|---|--:|---|
+| `crypto/tls` | 259 | needs `weak`, `crypto/internal/hpke` |
+| `crypto/x509` | 150 | needs `crypto/dsa`, `crypto/x509/pkix`, `net/netip` |
+| `crypto/ecdsa` | 43 | needs `fips140cache`, `fips140hash` |
+| `nistec` asm | 28 | needs `fips140deps/cpu` |
+| `crypto/internal/hpke` | 19 | external `chacha20poly1305` |
+| `crypto/ecdh` | 16 | **READY** |
+| `crypto/x509/pkix` | 6 | **READY** |
+| `crypto/dsa` | 5 | **READY** |
+| `crypto/cipher` | 5 | **READY** |
+| `crypto/internal/fips140hash` | 3 | **READY** |
+| `crypto` (root) | 3 | ready, but see below |
+| `crypto/sha256`, `crypto/sha1` | 2 each | **READY** |
+| `crypto/internal/fips140deps/godebug` | 2 | **READY** |
+
+`crypto/internal/fips140deps/cpu` and `fips140hash` are each small and
+would unblock 28 and 43 functions respectively — the best leverage
+available that does not require a refactor.
+
+**`crypto` (root) is not the 3-function job the number suggests.** Go's
+`type Hash uint` is a defined type with `String`, `Size`, `New` and
+`Available` methods. goish has `pub type Hash = uint`, an *alias*, so those
+became prefixed free functions (`HashName`, `HashSize`, `HashNew`). Closing
+the gap means turning `Hash` into a newtype and fixing every call site
+across the crypto tree. Worth doing, but it is a refactor with wide blast
+radius, not an addition — do not start it late in a session.
+
 ## Per-package conversion recipe (proven on rc4, subtle, des)
 
 1. `git mv <pkg>/mod.rs <pkg>/<gofile>.rs`, then split along Go's file
