@@ -27,14 +27,25 @@
 //     all of which dispatch through `reflect.Value` to fill struct
 //     fields. The reflect-driven decode path lands when goish's
 //     `reflect` gains setter dispatch for arbitrary user types.
-//   * Marshal (marshal.go) — same reason.
+//   * Marshal / MarshalWithParams / makeField / makeBody (marshal.go) —
+//     the reflect-driven ENCODE path. This is *not* blocked on setter
+//     dispatch: encoding only reads, and `reflect::Reflect` already
+//     provides `__reflect_value(&self) -> Value` plus a `Value` enum
+//     covering Bool/Int*/Uint*/Float*/String/Slice/Map/Struct/Pointer,
+//     with `Type::Field` and `StructTag::Lookup` for the tag walk. The
+//     deviation it will need is in the signature: Go takes `any`, goish
+//     must take `impl Reflect`, since Rust has no universal runtime
+//     reflection. Everything under it — the encoders and the tag/length
+//     primitives — is ported and checked against Go in marshal.rs.
 //   * parseUTCTime / parseGeneralizedTime — Go uses `time.Parse` with
 //     specific layouts; depends on the format-string interpreter
 //     handling fractional-second + timezone bits.
-//   * parseBigInt — needs `math/big`; not yet ported.
-//   * fieldParameters / parseFieldParameters / getUniversalType —
-//     reflection-driven struct-tag interpreter; pairs with the
-//     reflect-driven decoder above.
+//   * (parseBigInt was listed here as blocked on `math/big`. It is not:
+//     `math/big` is ported and `ParseBigInt` above is the port.)
+//   * fieldParameters / parseFieldParameters / getUniversalType
+//     (common.go) — the struct-tag interpreter. Needed by both the
+//     reflect-driven decoder and Marshal; `parseFieldParameters` itself
+//     is plain string parsing and does not need reflect at all.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
