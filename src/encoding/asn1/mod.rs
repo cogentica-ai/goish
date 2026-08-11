@@ -42,10 +42,18 @@
 //     handling fractional-second + timezone bits.
 //   * (parseBigInt was listed here as blocked on `math/big`. It is not:
 //     `math/big` is ported and `ParseBigInt` above is the port.)
-//   * fieldParameters / parseFieldParameters / getUniversalType
-//     (common.go) — the struct-tag interpreter. Needed by both the
-//     reflect-driven decoder and Marshal; `parseFieldParameters` itself
-//     is plain string parsing and does not need reflect at all.
+//   * getUniversalType (common.go) — blocked, and specifically so. Its
+//     first switch matches six *type identities*: RawValue,
+//     ObjectIdentifier, BitString, time.Time, Enumerated and *big.Int.
+//     None of those six implements `reflect::Reflect` in goish, and
+//     there is no derive for it, so goish cannot produce a
+//     `reflect::Type` for any of them. Porting the function today would
+//     mean six structurally unreachable branches and an `ok=false` for
+//     exactly the types asn1 cares most about — wrong in the quiet way.
+//     The prerequisite is Reflect impls on those types; everything after
+//     that (makeField, makeBody, Marshal) reads them through it.
+//     `parseFieldParameters`, the other half of common.go, needs no
+//     reflect and is ported in common.rs.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
