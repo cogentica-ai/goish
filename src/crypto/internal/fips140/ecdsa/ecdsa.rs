@@ -781,6 +781,22 @@ fn zeroPublicKey() -> PublicKey {
     };
 }
 
+// go: none — the zero values above, reachable from outside the package.
+// crypto/ecdsa returns them on its own error paths, mirroring Go's nil
+// `*PublicKey` / `*PrivateKey`.
+impl Default for PublicKey {
+    fn default() -> Self {
+        return zeroPublicKey();
+    }
+}
+
+// go: none — see the PublicKey impl above.
+impl Default for PrivateKey {
+    fn default() -> Self {
+        return zeroPrivateKey();
+    }
+}
+
 // go: none — the same, for *Signature.
 fn zeroSignature() -> Signature {
     return Signature {

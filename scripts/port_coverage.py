@@ -119,6 +119,38 @@ def is_build_ignored(path):
     return False
 
 
+def is_boringcrypto(path):
+    """True for a file built only under `//go:build boringcrypto`.
+
+    `boringcrypto` is a cgo-only build tag, and goish has no cgo — the
+    BoringSSL bridge is out of scope everywhere else in this script (SKIP
+    matches the `boring` path component) and in port_deps. Every such file
+    comes as a pair: `boring.go` (`//go:build boringcrypto`) and
+    `notboring.go` (`//go:build !boringcrypto`). Go compiles exactly one of
+    the two, so counting both double-counts the package's surface — and it
+    counts the side goish structurally cannot take.
+
+    crypto/ecdsa is the worked example: `notboring.go` is ported, and
+    `boring.go`'s copyPublicKey / copyPrivateKey / publicKeyEqual /
+    privateKeyEqual read as four permanent gaps against a branch that never
+    compiles here.
+
+    Deliberately narrow, like is_foreign_goos: it fires only on a bare,
+    un-negated `boringcrypto` constraint.
+    """
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                st = line.strip()
+                if st.startswith("//go:build "):
+                    return st[len("//go:build "):].strip() == "boringcrypto"
+                if st.startswith("package "):
+                    return False
+    except Exception:
+        pass
+    return False
+
+
 def scan_go(root):
     out = {}
     for dirpath, _, files in os.walk(root):
@@ -130,6 +162,7 @@ def scan_go(root):
                          and not f.endswith("_test.go") and not SKIP_FILE.search(f)
                          and not (PUREGO and SKIP_ASM.search(f))
                          and not is_build_ignored(os.path.join(dirpath, f))
+                         and not is_boringcrypto(os.path.join(dirpath, f))
                          and not is_foreign_goos(os.path.join(dirpath, f)))
         if not gofiles:
             continue

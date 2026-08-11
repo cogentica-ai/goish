@@ -172,6 +172,25 @@ def strip_comments(src):
     return "".join(out)
 
 
+VERSION_ELEM = re.compile(r"^v[2-9]\d*$")
+
+
+def default_local(import_path):
+    """The identifier Go binds an unaliased import to.
+
+    It is the *package name*, not the last path element — and for a
+    versioned module those differ: `math/rand/v2` binds to `rand`. Taking
+    the last element made every `pkg.Symbol` use in a /vN package invisible
+    to the symbol check, which is how `rand.NewChaCha8` — genuinely absent
+    from goish, and needed by crypto/ecdsa's legacy signing path — got
+    reported as no gap at all.
+    """
+    parts = import_path.rstrip("/").split("/")
+    if len(parts) >= 2 and VERSION_ELEM.match(parts[-1]):
+        return parts[-2]
+    return parts[-1]
+
+
 def imports_of(paths):
     """import path -> {local name, files that use it}"""
     found = {}
@@ -189,7 +208,7 @@ def imports_of(paths):
         for m in IMPORT_ONE.finditer(src):
             entries.append((None, m.group(1)))
         for alias, path in entries:
-            local = alias or path.rsplit("/", 1)[-1]
+            local = alias or default_local(path)
             e = found.setdefault(path, {"local": local, "files": [], "syms": set()})
             e["files"].append(os.path.basename(p))
             if alias not in ("_", "."):

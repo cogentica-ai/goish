@@ -118,6 +118,30 @@ pub struct PrivateKey {
     pub(super) publicKey: PublicKey,
 }
 
+// go: none — Go's error paths return a nil `*PublicKey` / `*PrivateKey`.
+// goish pairs a zero value with the error, so every such site needs one;
+// P-256 stands in for the curve, which is never read because callers check
+// the error first. `crypto/ecdsa`'s ECDH bridge is the first consumer.
+impl Default for PublicKey {
+    fn default() -> Self {
+        return PublicKey {
+            curve: super::nist::P256(),
+            publicKey: slice::__from_vec(alloc::vec::Vec::new()),
+        };
+    }
+}
+
+// go: none — see the PublicKey impl above.
+impl Default for PrivateKey {
+    fn default() -> Self {
+        return PrivateKey {
+            curve: super::nist::P256(),
+            privateKey: slice::__from_vec(alloc::vec::Vec::new()),
+            publicKey: PublicKey::default(),
+        };
+    }
+}
+
 impl PrivateKey {
     // go: sdk 1.25.5 crypto/ecdh/ecdh.go:108-124 ECDH
     /// Perform an ECDH exchange and return the shared secret. The

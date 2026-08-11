@@ -801,6 +801,10 @@ name = "tls12_smoke"
 path = "examples/tls12_smoke.rs"
 
 [[example]]
+name = "crypto_ecdsa_smoke"
+path = "examples/crypto_ecdsa_smoke.rs"
+
+[[example]]
 name = "ecdsa_smoke"
 path = "examples/ecdsa_smoke.rs"
 
