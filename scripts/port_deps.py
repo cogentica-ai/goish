@@ -115,7 +115,10 @@ def missing_symbols(d, syms):
             r"\b(?:pub(?:\([^)]*\))?\s+)?"
             r"(?:unsafe\s+)?(?:const\s+)?"
             r"(?:fn|struct|enum|trait|type|static|const|mod|union)\s+%s\b" % re.escape(sym))
-        if not pat.search(text):
+        # `goish::var! { pub EOF: error = "EOF"; }` declares a name without
+        # any of those keywords; io::ErrShortWrite was reported absent.
+        varpat = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?%s\s*:" % re.escape(sym), re.M)
+        if not pat.search(text) and not varpat.search(text):
             gone.append(sym)
     return gone
 
@@ -140,12 +143,40 @@ def go_files(pkgdir):
     return out
 
 
+def strip_comments(src):
+    """Blank out // and /* */ comments, preserving offsets loosely."""
+    out, i, n = [], 0, len(src)
+    while i < n:
+        if src.startswith("//", i):
+            j = src.find("\n", i)
+            if j < 0:
+                break
+            out.append("\n")
+            i = j + 1
+        elif src.startswith("/*", i):
+            j = src.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+        elif src[i] == '"':
+            j = i + 1
+            while j < n and src[j] != '"':
+                j += 2 if src[j] == "\\" else 1
+            i = j + 1
+        else:
+            out.append(src[i])
+            i += 1
+    return "".join(out)
+
+
 def imports_of(paths):
     """import path -> {local name, files that use it}"""
     found = {}
     for p in paths:
         src = open(p, errors="replace").read()
         block = IMPORT_BLOCK.search(src)
+        # Symbol harvesting must not see comments: a doc reference like
+        # `[crypto/aes.NewCipher]` is not a use, and reporting it absent
+        # sends the reader off to port something nothing needs.
+        code = strip_comments(src)
         entries = []
         if block:
             for m in IMPORT_LINE.finditer(block.group(1)):
@@ -157,7 +188,7 @@ def imports_of(paths):
             e = found.setdefault(path, {"local": local, "files": [], "syms": set()})
             e["files"].append(os.path.basename(p))
             if alias not in ("_", "."):
-                for u in USE.finditer(src):
+                for u in USE.finditer(code):
                     if u.group(1) == local:
                         e["syms"].add(u.group(2))
     return found
