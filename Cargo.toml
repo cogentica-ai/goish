@@ -841,6 +841,10 @@ name = "crypto_rsa_iface_smoke"
 path = "examples/crypto_rsa_iface_smoke.rs"
 
 [[example]]
+name = "type_name_smoke"
+path = "examples/type_name_smoke.rs"
+
+[[example]]
 name = "crypto_ecdsa_smoke"
 path = "examples/crypto_ecdsa_smoke.rs"
 
