@@ -5,7 +5,7 @@ function-for-function, with machine-checkable provenance, so "100%" is a
 number the toolchain reports rather than a claim we make.
 
 Baseline (2026-08-10): 391/1575 = 24.8%, 0 anchors.
-Current: **688/1507 = 45.7%**, 780 anchors, **32 packages fully verified**
+Current: **749/1507 = 49.7%**, 899 anchors, **33 packages fully verified**
 — each exits 0 under `goishlint --enable-goish017 --enable-goish018`:
 
 | verified | fns | .go → .rs |
@@ -40,7 +40,8 @@ Current: **688/1507 = 45.7%**, 780 anchors, **32 packages fully verified**
 | `crypto/internal/fips140/tls13` | 17/17 | 2 → 2 |
 | `crypto/internal/fips140/ssh` | 1/1 | 1 → 2 |
 | `crypto/internal/fips140/mlkem` | 69/69 | 4 → 4 |
-| **total** | **399** | |
+| `crypto/internal/fips140/nistec/fiat` | 61/61 | 13 → 14 |
+| **total** | **460** | |
 
 The only functions missing from that table are assembly entry points:
 `blockAVX2`/`blockSHANI` in fips140/sha256 and in crypto/sha1,
@@ -90,6 +91,62 @@ boundaries are exactly where they go wrong.
 
 Published vectors still earn a place as a *second* anchor where they
 exist — matching both Go and NIST is stronger than matching either.
+
+
+## Generated Go gets a translator, not a typist
+
+Two packages in this tree are machine-generated in Go and large enough
+that hand-porting them would have been the third and biggest instance of
+the transcription failure described above:
+
+| Go source | LOC | translated by |
+|---|--:|---|
+| `nistec/fiat/*_fiat64.go` (Fiat Cryptography) | 11,438 | `scripts/fiat64_to_rust.py` |
+| `nistec/fiat/*_invert.go` (addchain) | 362 | `scripts/fiat_invert_to_rust.py` |
+| `mlkem/mlkem1024.go` (generate1024.go) | 451 | `generate1024.go`'s own map |
+
+Both translators parse only the closed grammar their inputs actually use
+and **raise on anything unrecognised**. They can fail to translate; they
+cannot silently mistranslate. That strictness caught a real bug on the
+first run: `uint64(arg1[i])` on a `[N]uint8` is a *widening* conversion,
+not the value-level no-op it is everywhere else in those files. Treating
+it as identity would have shifted a `u8` by 48 in `FromBytes` — wrong
+only for inputs that reach the high limbs.
+
+`scripts/fiat_gen.py` drives both and also emits the four `Element`
+wrappers, which in Go are themselves generated from one template.
+Regenerate rather than edit:
+
+```bash
+scripts/fiat_gen.py            # nistec/fiat, all 14 files
+```
+
+## Next: nistec proper (75 fns)
+
+The point arithmetic on top of `fiat`. It gates `crypto/ecdsa` (43),
+`crypto/internal/fips140/ecdsa` (30), `crypto/ecdh` (17),
+`crypto/internal/fips140/ecdh` (13) and `crypto/elliptic` (27) — 130
+functions behind 75.
+
+Two decisions already made, recorded so the next session doesn't re-derive
+them:
+
+* **goish implements the `purego` side of nistec's build tags.** `p256.go`
+  is `(!amd64 && !arm64 && !ppc64le && !s390x) || purego`; `p256_asm.go`
+  is the other side and wraps assembly primitives goish does not have.
+  Likewise `p256_ordinv_noasm.go` over `p256_ordinv.go`. So `p256_asm.go`,
+  `p256_ordinv.go` and `p256_table.go` (a basepoint table used only by the
+  assembly path) belong to the Assembly tranche, not this one.
+* **`p224.go`, `p256.go`, `p384.go` and `p521.go` differ only in the
+  generator coordinates, the curve parameter `b`, the element length, and
+  the square-root addchain** — verified by diffing them with the names
+  normalised. They should be emitted from one template with those four
+  constants read out of the Go source, the way `fiat` is, not retyped.
+* **`p224_sqrt.go` is the exception** and needs a real port: p224 has
+  p = 1 mod 4, so it cannot use exponentiation by (p+1)/4 like the others
+  and instead runs a constant-time Tonelli–Shanks over a 96-element
+  precomputed table. It is not addchain output and the translators do not
+  apply.
 
 ## Per-package conversion recipe (proven on rc4, subtle, des)
 
