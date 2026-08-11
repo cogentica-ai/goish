@@ -6,5 +6,7 @@
 // number generator.
 
 mod ctrdrbg;
+mod rand;
 
 pub use ctrdrbg::{Counter, NewCounter, SeedSize};
+pub use rand::{DefaultReader, Read, ReadWithReader, ReadWithReaderDeterministic};

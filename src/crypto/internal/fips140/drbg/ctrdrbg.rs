@@ -38,7 +38,7 @@ pub const SeedSize: usize = keySize + 16;
 /// Go: `reseedInterval = 1 << 48`
 const reseedInterval: uint64 = 1 << 48;
 /// Go: `maxRequestSize = (1 << 19) / 8`
-pub(crate) const maxRequestSize: usize = (1 << 19) / 8;
+pub const maxRequestSize: usize = (1 << 19) / 8;
 
 // Go: ctrdrbg.go:32
 //   type Counter struct { c aes.CTR; reseedCounter uint64 }

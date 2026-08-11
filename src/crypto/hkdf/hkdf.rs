@@ -1,9 +1,4 @@
-// goishlint:ignore GOISH018 — `checkFIPS140Only` (hkdf.go) is not ported:
-// it rejects short keys and non-approved hashes when `fips140only.Enabled`
-// is set. goish has no FIPS 140-only mode (the flag is statically false),
-// so every call site would take the nil path. Port it if goish ever grows
-// crypto/internal/fips140only. Same deviation as crypto/rc4 and crypto/des.
-// go: file crypto/hkdf/hkdf.go decls: Extract, Expand, Key
+// go: file crypto/hkdf/hkdf.go decls: Extract, Expand, Key, checkFIPS140Only
 //
 // crypto/hkdf — HKDF Extract / Expand / Key (RFC 5869).
 //
@@ -14,9 +9,10 @@
 //   * Hash factory is `fn() -> Box<dyn Hash + Send + Sync>` instead of Go's
 //     `func() H` generic, matching the convention already established
 //     by `crypto::hmac::New`.
-//   * No `crypto/internal/fips140hash.UnwrapNew` and no
-//     `fips140only.Enabled` checks — goish has no FIPS service
-//     indicator.
+//   * No `crypto/internal/fips140hash.UnwrapNew` — that package is not
+//     ported (it needs Go's `//go:linkname` to reach sha3's inner
+//     Digest). `checkFIPS140Only` IS ported, and its `fips140only.Enabled`
+//     guard is statically false in goish, so it always returns nil.
 //   * `MarkAsUsedInKDF` is applied in the fips140 implementation, as in
 //     Go — it is inert in goish, but the call site is the Go one.
 
@@ -27,6 +23,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::crypto::internal::fips140::hkdf as fips;
+use crate::crypto::internal::fips140only;
 use crate::errors::{self, error, nil};
 use crate::goslice::slice;
 use crate::gostring::string;
@@ -42,6 +39,14 @@ pub fn Extract(
     salt: slice<byte>,
 ) -> (slice<byte>, error) {
     // Go: if err := checkFIPS140Only(h, secret); err != nil { return nil, err }
+    let err = checkFIPS140Only(h, &secret);
+    if err != crate::nil {
+        return (slice::__from_vec(Vec::new()), err);
+    }
+    let err = checkFIPS140Only(h, &secret);
+    if err != crate::nil {
+        return (slice::__from_vec(Vec::new()), err);
+    }
     // Go: return hkdf.Extract(h, secret, salt), nil
     return (fips::Extract(h, secret, salt), nil);
 }
@@ -65,6 +70,10 @@ pub fn Expand(
         );
     }
     // Go: if err := checkFIPS140Only(h, pseudorandomKey); err != nil { return nil, err }
+    let err = checkFIPS140Only(h, &pseudorandomKey);
+    if err != crate::nil {
+        return (slice::__from_vec(Vec::new()), err);
+    }
     // Go: return hkdf.Expand(h, pseudorandomKey, info, keyLength), nil
     return (fips::Expand(h, pseudorandomKey, info, keyLength), nil);
 }
@@ -90,4 +99,34 @@ pub fn Key(
     // Go: if err := checkFIPS140Only(h, secret); err != nil { return nil, err }
     // Go: return hkdf.Key(h, secret, salt, info, keyLength), nil
     return (fips::Key(h, secret, salt, info, keyLength), nil);
+}
+
+// go: sdk 1.25.5 crypto/hkdf/hkdf.go:79-90 checkFIPS140Only
+/// Reject short keys and non-approved hashes in FIPS 140-only mode.
+///
+/// `fips140only::Enabled` is a `const false` in goish, so this always
+/// returns nil today; it is ported in full because the guard is real Go
+/// code and a future FIPS 140-only mode would need it correct.
+fn checkFIPS140Only(
+    h: fn() -> Box<dyn Hash + Send + Sync>,
+    key: &slice<byte>,
+) -> error {
+    // Go: if !fips140only.Enabled { return nil }
+    if !fips140only::Enabled {
+        return nil;
+    }
+    // Go: if len(key) < 112/8 { return errors.New(…) }
+    if key.Len() < 112 / 8 {
+        return errors::New(
+            "crypto/hkdf: use of keys shorter than 112 bits is not allowed in FIPS 140-only mode",
+        );
+    }
+    // Go: if !fips140only.ApprovedHash(h()) { return errors.New(…) }
+    if !fips140only::ApprovedHash(&h()) {
+        return errors::New(
+            "crypto/hkdf: use of hash functions other than SHA-2 or SHA-3 is not allowed in FIPS 140-only mode",
+        );
+    }
+    // Go: return nil
+    return nil;
 }

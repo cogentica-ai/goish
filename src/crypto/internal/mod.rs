@@ -9,4 +9,5 @@
 pub mod entropy;
 pub mod fips140;
 pub mod fips140deps;
+pub mod fips140only;
 pub mod randutil;
