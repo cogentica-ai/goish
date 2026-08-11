@@ -24,7 +24,9 @@
 //  11. SignPKCS1v15 -> VerifyPKCS1v15 round-trip (SHA-256).
 //  12. SignPKCS1v15 cross-checked against a real-Go reference signature.
 //  13. VerifyPKCS1v15 rejects a tampered signature (ErrVerification).
-//  14. EncryptPKCS1v15 -> DecryptPKCS1v15 round-trip.
+//  14. (retired: RSAES-PKCS1-v1_5 ENCRYPTION is Go's public crypto/rsa,
+//      not this FIPS package — covered by crypto_rsa_smoke test 8 and
+//      crypto_rsa_iface_smoke tests 2/10/13.)
 //  15. EncryptOAEP -> DecryptOAEP round-trip (SHA-256).
 //  16. DecryptOAEP rejects a tampered ciphertext (ErrDecryption).
 //  17. SignPSS -> VerifyPSS round-trip (SHA-256, salt = hLen).
@@ -52,6 +54,10 @@ use goish::types::byte;
 use goish::{slice, syscall};
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
+/// Tests actually executed. The summary used to be the string literal
+/// "ok 20/20", which reported success for a run of ANY size — removing a
+/// test left it claiming 20 while 19 ran. Count what happened instead.
+static RAN: AtomicUsize = AtomicUsize::new(0);
 
 fn fail() {
     FAILED.fetch_add(1, Ordering::AcqRel);
@@ -149,6 +155,7 @@ fn trim_leading(s: &goish::slice<byte>) -> alloc::vec::Vec<u8> {
 }
 
 fn write_result(idx: u8, label: &[u8], pass: bool) {
+    RAN.fetch_add(1, Ordering::AcqRel);
     syscall::Write(syscall::STDOUT, b"[".as_ptr(), 1);
     let d2 = b'0' + (idx % 10);
     if idx >= 10 {
@@ -180,11 +187,12 @@ fn main() {
     goish::go!(|| {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
+        let n = RAN.load(Ordering::Acquire);
         if f == 0 {
-            fmt::Println!("ok 20/20");
+            fmt::Printf!("ok %d/%d\n", n as i64, n as i64);
             syscall::Exit(0);
         } else {
-            fmt::Println!("FAIL", f as i64, "of 20");
+            fmt::Printf!("FAILED %d of %d\n", f as i64, n as i64);
             syscall::Exit(1);
         }
     });
@@ -205,7 +213,6 @@ fn run_tests() {
     test_11_pkcs1v15_sign_verify();
     test_12_pkcs1v15_known_answer();
     test_13_pkcs1v15_tampered();
-    test_14_pkcs1v15_encrypt_decrypt();
     test_15_oaep_roundtrip();
     test_16_oaep_tampered();
     test_17_pss_roundtrip();
@@ -341,20 +348,6 @@ fn test_13_pkcs1v15_tampered() {
     let ev = rsa::VerifyPKCS1v15(&k.PublicKey(), goish::crypto::SHA256, digest, bad);
     let ok = !ev.IsNil() && goish::errors::Is(ev, rsa::ErrVerification);
     write_result(13, b"VerifyPKCS1v15 rejects tamper", ok);
-    if !ok {
-        fail();
-    }
-}
-
-fn test_14_pkcs1v15_encrypt_decrypt() {
-    let k = mk_key();
-    let pubk = k.PublicKey();
-    let mut rng = RandReader;
-    let plain: &[u8] = &[0xde, 0xad, 0xbe, 0xef, 0x13, 0x37, 0x42, 0x00];
-    let (ct, e1) = rsa::EncryptPKCS1v15(&mut rng, &pubk, from_bytes(plain));
-    let (pt, e2) = rsa::DecryptPKCS1v15(&k, ct);
-    let ok = e1.IsNil() && e2.IsNil() && slice_eq_exact(&pt, &from_bytes(plain));
-    write_result(14, b"EncryptPKCS1v15 -> Decrypt   ", ok);
     if !ok {
         fail();
     }
