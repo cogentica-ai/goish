@@ -1,6 +1,6 @@
 // goishlint:ignore GOISH018 addBytesWithLength, addUint64, clone, marshalCertificate, marshalMsg, marshalWithoutBinders, originalBytes, readUint16LengthPrefixed, readUint24LengthPrefixed, readUint64, readUint8LengthPrefixed, transcriptMsg, unmarshalCertificate, updateBinders — handshake_messages.go is 1963 lines and 52 functions; this file is a deliberate SUBSET covering only the messages goish's own TLS 1.3 client and server exchange. The six it does port are anchored above and diffed against Go; everything listed here is genuinely absent, not renamed. See ROADMAP.md.
 // goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, marshalingFunction, newSessionTicketMsg, newSessionTicketMsgTLS13, serverHelloDoneMsg, serverKeyExchangeMsg, transcriptHash — same: the message types the subset does not handle.
-// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal, finishedMsg.unmarshal, certificateVerifyMsg.unmarshal
+// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal, finishedMsg.unmarshal, certificateVerifyMsg.unmarshal, encryptedExtensionsMsg.unmarshal
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -790,6 +790,12 @@ impl serverHelloMsg {
 #[derive(Clone, Default)]
 pub(crate) struct encryptedExtensionsMsg {
     pub alpnProtocol: String,
+    /// Go has three further fields the hand-written `marshal` above
+    /// never emitted. They are declared so that the ported `unmarshal`
+    /// can fill them, and so the struct matches Go's shape (GOISH019).
+    pub quicTransportParameters: Vec<byte>,
+    pub earlyData: bool,
+    pub echRetryConfigs: Vec<byte>,
     pub serverNameAck: bool,
 }
 
@@ -1886,6 +1892,92 @@ impl certificateVerifyMsg {
             return false;
         }
         self.signature = sig.__into_vec();
+        return true;
+    }
+}
+
+
+impl encryptedExtensionsMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1054-1114 encryptedExtensionsMsg.unmarshal
+    /// Parse. A DUPLICATE extension is rejected outright — Go tracks
+    /// what it has seen and fails on a repeat, which no other message
+    /// in this file does. Unknown extensions are still skipped.
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        use super::common::{
+            extensionALPN, extensionEarlyData, extensionEncryptedClientHello,
+            extensionQUICTransportParameters, extensionServerName,
+        };
+        // Go: *m = encryptedExtensionsMsg{}
+        *self = encryptedExtensionsMsg::default();
+        let mut s = CBString::New(data);
+
+        // Go: if !s.Skip(4) || !s.ReadUint16LengthPrefixed(&extensions) ||
+        //        !s.Empty() { return false }
+        let mut extensions = CBString::New(slice::__from_vec(Vec::new()));
+        if !s.Skip(4) || !s.ReadUint16LengthPrefixed(&mut extensions) || !s.Empty() {
+            return false;
+        }
+
+        // Go: seenExts := make(map[uint16]bool)
+        let mut seenExts: Vec<crate::types::uint16> = Vec::new();
+        while !extensions.Empty() {
+            let mut extension: crate::types::uint16 = 0;
+            let mut extData = CBString::New(slice::__from_vec(Vec::new()));
+            if !extensions.ReadUint16(&mut extension)
+                || !extensions.ReadUint16LengthPrefixed(&mut extData)
+            {
+                return false;
+            }
+
+            // Go: if seenExts[extension] { return false }; seenExts[extension] = true
+            if seenExts.contains(&extension) {
+                return false;
+            }
+            seenExts.push(extension);
+
+            if extension == extensionALPN {
+                // Go: exactly ONE protocol, non-empty, nothing after it.
+                let mut protoList = CBString::New(slice::__from_vec(Vec::new()));
+                if !extData.ReadUint16LengthPrefixed(&mut protoList) || protoList.Empty() {
+                    return false;
+                }
+                let mut proto = CBString::New(slice::__from_vec(Vec::new()));
+                if !protoList.ReadUint8LengthPrefixed(&mut proto)
+                    || proto.Empty()
+                    || !protoList.Empty()
+                {
+                    return false;
+                }
+                // `from_utf8_lossy(..).into_owned()` drags in an unwinding
+                // path that will not link under panic=abort; the fallible
+                // form with a default is equivalent for valid UTF-8 and
+                // cannot unwind.
+                self.alpnProtocol =
+                    String::from_utf8(proto.0.clone().__into_vec()).unwrap_or_default();
+            } else if extension == extensionQUICTransportParameters {
+                self.quicTransportParameters = extData.0.clone().__into_vec();
+                extData = CBString::New(slice::__from_vec(Vec::new()));
+            } else if extension == extensionEarlyData {
+                // Go: RFC 8446, Section 4.2.10
+                self.earlyData = true;
+            } else if extension == extensionEncryptedClientHello {
+                self.echRetryConfigs = extData.0.clone().__into_vec();
+                extData = CBString::New(slice::__from_vec(Vec::new()));
+            } else if extension == extensionServerName {
+                // Go: if len(extData) != 0 { return false }
+                if extData.0.Len() != 0 {
+                    return false;
+                }
+                self.serverNameAck = true;
+            } else {
+                // Go: Ignore unknown extensions.
+                continue;
+            }
+
+            if !extData.Empty() {
+                return false;
+            }
+        }
         return true;
     }
 }

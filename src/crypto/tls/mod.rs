@@ -1739,3 +1739,21 @@ pub fn msg_certVerify_unmarshal_as(
     m.hasSignatureAlgorithm = hasSignatureAlgorithm;
     return m.unmarshal(data);
 }
+
+// go: none — goish-only: encryptedExtensionsMsg is unexported in Go.
+// Parses a caller-supplied buffer so Go's own wire bytes can be fed in
+// directly — stronger than a self round-trip, since the hand-written
+// `marshal` above does not emit every field Go's does.
+#[doc(hidden)]
+pub fn msg_ee_unmarshal(
+    data: crate::goslice::slice<crate::types::byte>,
+) -> (bool, crate::gostring::string, bool, bool) {
+    let mut m = handshake_messages::encryptedExtensionsMsg::default();
+    let ok = m.unmarshal(data);
+    return (
+        ok,
+        crate::gostring::string::from_bytes(m.alpnProtocol.as_bytes()),
+        m.earlyData,
+        m.serverNameAck,
+    );
+}

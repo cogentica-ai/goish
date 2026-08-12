@@ -22,6 +22,24 @@ use goish::gostring::string;
 use goish::goslice::slice;
 use goish::types::{byte, int};
 
+fn unhexOf(h: &str) -> slice<byte> {
+    let b = h.as_bytes();
+    let mut out: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
+    let mut i = 0usize;
+    while i + 1 < b.len() {
+        out.push((nib(b[i]) << 4) | nib(b[i + 1]));
+        i += 2;
+    }
+    return slice::__from_vec(out);
+}
+
+fn nib(c: u8) -> u8 {
+    if c >= b'0' && c <= b'9' {
+        return c - b'0';
+    }
+    return c - b'a' + 10;
+}
+
 fn hexOf(b: slice<byte>) -> string {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let raw: &[byte] = &b;
@@ -672,6 +690,24 @@ fn main() {
         "certificateVerifyMsg rejected when parsed without sigalg",
         !tls::msg_certVerify_unmarshal_as(false, cb),
     );
+
+    // ─── encryptedExtensionsMsg.unmarshal, fed GO'S OWN wire bytes.
+    //     Stronger than a round-trip here: the hand-written marshal in
+    //     the subset does not emit early_data, so only Go's encoding
+    //     exercises that arm.
+    let eeBytes = unhexOf("080000130011001000050003026832002a000000000000");
+    let (ok, alpn, early, sniAck) = tls::msg_ee_unmarshal(eeBytes);
+    check("encryptedExtensionsMsg parses Go's bytes", ok);
+    eq("ee alpnProtocol", alpn, "h2");
+    check("ee earlyData", early);
+    check("ee serverNameAck", sniAck);
+
+    // A DUPLICATE extension is rejected — unique to this message.
+    let dup = slice::__from_vec(alloc::vec![
+        8u8, 0, 0, 12, 0, 10, 0, 42, 0, 0, 0, 42, 0, 0
+    ]);
+    let (dok, _, _, _) = tls::msg_ee_unmarshal(dup);
+    check("ee rejects a duplicate extension", !dok);
 
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
