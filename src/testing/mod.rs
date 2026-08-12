@@ -61,7 +61,7 @@ pub use newcover::Coverage;
 pub use testing::{
     callerName, chattyFlag, chattyPrinter, fmtDuration, marker, newChattyPrinter, parseCpuList,
     pcToName, prefix, testBinary, CoverMode, Init, Short, Testing, Verbose,
-    indenter, newTestState, outputWriter, testState, testStateCounts, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_call_site, __shim_cleanup_handle, __shim_mark_done, __shim_output_buf, CleanupHandle, __shim_ran_done, __shim_match_string_only, __DepsProbe,
+    indenter, newTestState, outputWriter, shouldFailFast, testState, testStateCounts, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_call_site, __shim_cleanup_handle, __shim_mark_done, __shim_output_buf, CleanupHandle, __shim_ran_done, __shim_match_string_only, __DepsProbe,
 };
 
 extern crate alloc;
@@ -380,6 +380,13 @@ pub fn Main(tests: &[(&'static str, TestFn)]) -> int {
             syscall::Write(syscall::STDOUT, out.as_ptr(), out.len());
         }
         total += 1;
+
+        // Go: runTests stops starting new tests once -failfast is set
+        // and something has failed. goish's Main stands in for that
+        // driver, so it applies the same rule.
+        if testing::shouldFailFast() {
+            break;
+        }
     }
 
     let passed = total - failed - skipped;

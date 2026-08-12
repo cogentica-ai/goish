@@ -25,7 +25,7 @@ extern crate goish;
 
 use goish::gostring::string;
 use goish::testing::benchmark::durationOrCountFlag;
-use goish::testing::{self, chattyFlag};
+use goish::testing::{self, chattyFlag, shouldFailFast};
 use goish::time;
 use goish::{errors, fmt, syscall};
 
@@ -243,11 +243,26 @@ fn main() {
         }
     }
 
+    // 11. shouldFailFast needs BOTH halves: the flag AND a failure.
+    //     Either alone must be false, or -failfast would stop a green
+    //     run, or a single failure would stop a run nobody asked to
+    //     stop. Init has not run here, so no flag is registered and the
+    //     answer is false regardless of how many tests failed above —
+    //     and several deliberately did.
+    {
+        if !shouldFailFast() {
+            fmt::Println!("[11] failfast needs both       PASS");
+        } else {
+            fmt::Println!("[11] failfast needs both       FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 10/10");
+        fmt::Println!("ok 11/11");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 11");
         syscall::Exit(1);
     }
 }
