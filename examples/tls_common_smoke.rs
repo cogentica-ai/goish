@@ -617,6 +617,41 @@ fn main() {
     check_n("crt13 recovered 1 sigalg-cert", nsc, 1);
     check_n("crt13 recovered 2 CAs", nca, 2);
 
+    // ─── certificateRequestMsg (TLS 1.0-1.2, RFC 4346 §7.4.4).
+    //     hasSignatureAlgorithm is NOT on the wire — the caller supplies
+    //     it from the negotiated version, and it steers both directions.
+    let (b, ok, nct, ns, nca) = tls::msg_crm_roundtrip(
+        true,
+        slice::__from_vec(alloc::vec![1u8, 64]),
+        slice::__from_vec(alloc::vec![tls::PSSWithSHA256, tls::Ed25519]),
+        slice::__from_vec(alloc::vec![slice::__from_vec(alloc::vec![0x30u8, 0x02])]),
+    );
+    eq(
+        "certificateRequestMsg TLS1.2",
+        hexOf(b.clone()),
+        "0d00000f020140000408040807000400023002",
+    );
+    check("crm TLS1.2 round-trips", ok);
+    check_n("crm 2 cert types", nct, 2);
+    check_n("crm 2 sigalgs", ns, 2);
+    check_n("crm 1 CA", nca, 1);
+
+    // The SAME bytes parsed as TLS 1.0 (no sigalgs field) must FAIL —
+    // the flag is load-bearing, not cosmetic. Verified against Go.
+    check(
+        "crm TLS1.2 bytes rejected when parsed as TLS1.0",
+        !tls::msg_crm_unmarshal_as(false, b),
+    );
+
+    let (b2, ok2, _, _, _) = tls::msg_crm_roundtrip(
+        false,
+        slice::__from_vec(alloc::vec![1u8]),
+        slice::__from_vec(alloc::vec![]),
+        slice::__from_vec(alloc::vec![]),
+    );
+    eq("certificateRequestMsg TLS1.0", hexOf(b2), "0d00000401010000");
+    check("crm TLS1.0 round-trips", ok2);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

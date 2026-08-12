@@ -1,6 +1,6 @@
 // goishlint:ignore GOISH018 addBytesWithLength, addUint64, clone, marshalCertificate, marshalMsg, marshalWithoutBinders, originalBytes, readUint16LengthPrefixed, readUint24LengthPrefixed, readUint64, readUint8LengthPrefixed, transcriptMsg, unmarshalCertificate, updateBinders — handshake_messages.go is 1963 lines and 52 functions; this file is a deliberate SUBSET covering only the messages goish's own TLS 1.3 client and server exchange. The six it does port are anchored above and diffed against Go; everything listed here is genuinely absent, not renamed. See ROADMAP.md.
 // goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, marshalingFunction, newSessionTicketMsg, newSessionTicketMsgTLS13, serverHelloDoneMsg, serverKeyExchangeMsg, transcriptHash — same: the message types the subset does not handle.
-// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal
+// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -1677,5 +1677,162 @@ impl certificateRequestMsgTLS13 {
             }
         }
         return true;
+    }
+}
+
+
+/// Go: `type certificateRequestMsg struct { … }` — the TLS 1.0-1.2
+/// CertificateRequest of RFC 4346 §7.4.4.
+///
+/// `hasSignatureAlgorithm` is not on the wire: it is set by the caller
+/// from the negotiated version (TLS 1.2 added the field) and steers
+/// BOTH marshal and unmarshal. Parsing with it wrong misreads the rest
+/// of the message.
+#[derive(Clone, Default, PartialEq)]
+pub(crate) struct certificateRequestMsg {
+    pub hasSignatureAlgorithm: bool,
+    pub certificateTypes: slice<byte>,
+    pub supportedSignatureAlgorithms: slice<super::common::SignatureScheme>,
+    pub certificateAuthorities: slice<slice<byte>>,
+}
+
+impl certificateRequestMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1509-1564 certificateRequestMsg.marshal
+    /// Serialize. See RFC 4346, Section 7.4.4.
+    pub(crate) fn marshal(&self) -> (slice<byte>, error) {
+        // Go: length := 1 + len(m.certificateTypes) + 2
+        let mut length = 1 + self.certificateTypes.Len() + 2;
+        // Go: casLength := 0; for _, ca := range … { casLength += 2 + len(ca) }
+        let mut casLength: crate::types::int = 0;
+        for (_, ca) in crate::range!(self.certificateAuthorities.clone()) {
+            casLength += 2 + ca.Len();
+        }
+        length += casLength;
+        // Go: if m.hasSignatureAlgorithm { length += 2 + 2*len(…) }
+        if self.hasSignatureAlgorithm {
+            length += 2 + 2 * self.supportedSignatureAlgorithms.Len();
+        }
+
+        let mut x: Vec<byte> = alloc::vec![0u8; (4 + length) as usize];
+        x[0] = typeCertificateRequest;
+        x[1] = crate::uint8(length >> 16);
+        x[2] = crate::uint8(length >> 8);
+        x[3] = crate::uint8(length);
+        // Go: x[4] = uint8(len(m.certificateTypes)); copy(x[5:], …)
+        x[4] = crate::uint8(self.certificateTypes.Len());
+        let ct: &[byte] = &self.certificateTypes;
+        x[5..5 + ct.len()].copy_from_slice(ct);
+
+        // Go: y := x[5+len(m.certificateTypes):]
+        let mut off = 5 + ct.len();
+        if self.hasSignatureAlgorithm {
+            // Go: n := len(m.supportedSignatureAlgorithms) * 2
+            let n = self.supportedSignatureAlgorithms.Len() * 2;
+            x[off] = crate::uint8(n >> 8);
+            x[off + 1] = crate::uint8(n);
+            off += 2;
+            for (_, a) in crate::range!(self.supportedSignatureAlgorithms.clone()) {
+                x[off] = crate::uint8(crate::int(a.0 >> 8));
+                x[off + 1] = crate::uint8(crate::int(a.0));
+                off += 2;
+            }
+        }
+        // Go: y[0..2] = uint16(casLength); then each CA, uint16-prefixed.
+        x[off] = crate::uint8(casLength >> 8);
+        x[off + 1] = crate::uint8(casLength);
+        off += 2;
+        for (_, ca) in crate::range!(self.certificateAuthorities.clone()) {
+            let raw: &[byte] = &ca;
+            x[off] = crate::uint8(ca.Len() >> 8);
+            x[off + 1] = crate::uint8(ca.Len());
+            off += 2;
+            x[off..off + raw.len()].copy_from_slice(raw);
+            off += raw.len();
+        }
+        return (slice::__from_vec(x), crate::errors::nil);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1566-1637 certificateRequestMsg.unmarshal
+    /// Parse. Rejects an empty certificateTypes list, an odd or zero
+    /// sigalgs length, and any trailing data.
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        // Go: if len(data) < 5 { return false }
+        if data.Len() < 5 {
+            return false;
+        }
+        let raw: &[byte] = &data;
+        // Go: length := uint24(data[1..4]); if uint32(len(data))-4 != length { false }
+        let length = (crate::uint32(data[1]) << 16)
+            | (crate::uint32(data[2]) << 8)
+            | crate::uint32(data[3]);
+        if crate::uint32(data.Len()) - 4 != length {
+            return false;
+        }
+
+        // Go: numCertTypes := int(data[4]); data = data[5:]
+        //     if numCertTypes == 0 || len(data) <= numCertTypes { return false }
+        let numCertTypes = crate::int(data[4]) as usize;
+        let mut d = &raw[5..];
+        if numCertTypes == 0 || d.len() <= numCertTypes {
+            return false;
+        }
+        self.certificateTypes = slice::__from_vec(d[..numCertTypes].to_vec());
+        d = &d[numCertTypes..];
+
+        // Go: if m.hasSignatureAlgorithm { … }
+        if self.hasSignatureAlgorithm {
+            if d.len() < 2 {
+                return false;
+            }
+            let sigAndHashLen = ((d[0] as usize) << 8) | (d[1] as usize);
+            d = &d[2..];
+            // Go: if sigAndHashLen&1 != 0 || sigAndHashLen == 0 { return false }
+            if sigAndHashLen & 1 != 0 || sigAndHashLen == 0 {
+                return false;
+            }
+            if d.len() < sigAndHashLen {
+                return false;
+            }
+            let numSigAlgos = sigAndHashLen / 2;
+            let mut out: Vec<super::common::SignatureScheme> = Vec::with_capacity(numSigAlgos);
+            for _ in 0..numSigAlgos {
+                out.push(super::common::SignatureScheme(
+                    ((d[0] as crate::types::uint16) << 8) | (d[1] as crate::types::uint16),
+                ));
+                d = &d[2..];
+            }
+            self.supportedSignatureAlgorithms = slice::__from_vec(out);
+        }
+
+        // Go: casLength := uint16(data[0])<<8 | uint16(data[1])
+        if d.len() < 2 {
+            return false;
+        }
+        let casLength = ((d[0] as usize) << 8) | (d[1] as usize);
+        d = &d[2..];
+        if d.len() < casLength {
+            return false;
+        }
+        let mut cas = &d[..casLength];
+        d = &d[casLength..];
+
+        // Go: m.certificateAuthorities = nil; for len(cas) > 0 { … }
+        let mut out: Vec<slice<byte>> = Vec::new();
+        while !cas.is_empty() {
+            if cas.len() < 2 {
+                return false;
+            }
+            let caLen = ((cas[0] as usize) << 8) | (cas[1] as usize);
+            cas = &cas[2..];
+            if cas.len() < caLen {
+                return false;
+            }
+            out.push(slice::__from_vec(cas[..caLen].to_vec()));
+            cas = &cas[caLen..];
+        }
+        self.certificateAuthorities = slice::__from_vec(out);
+
+        // Go: return len(data) == 0
+        return d.is_empty();
     }
 }

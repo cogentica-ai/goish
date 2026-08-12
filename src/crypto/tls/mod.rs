@@ -1640,3 +1640,49 @@ pub fn msg_crt13_roundtrip(
         back.certificateAuthorities.Len(),
     );
 }
+
+// go: none — goish-only: certificateRequestMsg is unexported in Go,
+// where the tests are in-package. See the `defaults_*` shims above.
+#[doc(hidden)]
+pub fn msg_crm_roundtrip(
+    hasSignatureAlgorithm: bool,
+    certificateTypes: crate::goslice::slice<crate::types::byte>,
+    sigAlgs: crate::goslice::slice<common::SignatureScheme>,
+    cas: crate::goslice::slice<crate::goslice::slice<crate::types::byte>>,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+) {
+    let m = handshake_messages::certificateRequestMsg {
+        hasSignatureAlgorithm,
+        certificateTypes,
+        supportedSignatureAlgorithms: sigAlgs,
+        certificateAuthorities: cas,
+    };
+    let (b, _) = m.marshal();
+    let mut back = handshake_messages::certificateRequestMsg::default();
+    back.hasSignatureAlgorithm = hasSignatureAlgorithm;
+    let ok = back.unmarshal(b.clone());
+    return (
+        b,
+        ok,
+        back.certificateTypes.Len(),
+        back.supportedSignatureAlgorithms.Len(),
+        back.certificateAuthorities.Len(),
+    );
+}
+
+// go: none — goish-only: parse with an explicit hasSignatureAlgorithm,
+// so the version-flag mismatch can be exercised.
+#[doc(hidden)]
+pub fn msg_crm_unmarshal_as(
+    hasSignatureAlgorithm: bool,
+    data: crate::goslice::slice<crate::types::byte>,
+) -> bool {
+    let mut m = handshake_messages::certificateRequestMsg::default();
+    m.hasSignatureAlgorithm = hasSignatureAlgorithm;
+    return m.unmarshal(data);
+}
