@@ -1,8 +1,29 @@
 # goish
 
-**A Go-style standard library and runtime, implemented in `no_std` Rust on top of raw Linux syscalls.**
+**Go's standard library and runtime, rebuilt in `no_std` Rust — with a receipt for every line.**
 
-No `glibc`, no `std`, no Tokio. Goish ships its own `_start`, page allocator, size-class heap, M:N scheduler, channels, `select!`, `sync` primitives, async preemption, and 151 partial-to-complete ports of Go standard-library and `golang.org/x` packages - all in one statically-linked binary. **`crypto/` is now a complete, function-by-function port: 100% of Go 1.25.5's `crypto/*` declarations, including the full `crypto/tls` client and server handshake.**
+Write Go-shaped code — goroutines, channels, `select`, `net/http`, `crypto/tls` — and get a
+single statically-linked binary with no `glibc`, no `ld.so`, no garbage collector, and no
+language runtime to initialize. Goish ships its own `_start`, page allocator, M:N scheduler,
+epoll netpoller and HTTP stack.
+
+What makes it different from every other "Go-like" runtime:
+
+- **The crypto is provably Go's, not a lookalike.** All 1709 declarations in `crypto/` are
+  ported, and each one carries a provenance anchor naming the exact Go source file and line
+  range it came from. `make lint` re-opens the Go 1.25.5 tree and diffs signature, arity and
+  struct fields against the port, against a ratchet baseline so it cannot silently regress —
+  3,041 anchors in `crypto/` alone, 3,263 across the tree. Provenance is machine-checked, not
+  asserted in a doc.
+- **That includes Go's FIPS module.** All 35 `crypto/internal/fips140*` packages are at 100%
+  — the same code path Go's own FIPS 140-3 validation covers. [FIPS 140-2 certificates retire
+  in September 2026](https://www.chainguard.dev/supply-chain-security-101/fips-140-3-everything-you-need-to-know),
+  and 140-3 asks for reproducible builds, SBOMs and verifiable provenance.
+- **No GC, no pauses, no libc.** Go's allocator design (mheap / mcentral / per-P mcache, 67
+  size classes) driven by Rust ownership instead of a collector. `ldd` reports *not a dynamic
+  executable*.
+- **Real concurrency, not futures.** Stackful goroutines with async preemption (SIGURG), work
+  stealing, and a 1M-goroutine demo that parks a million of them on 13 OS threads.
 
 ```rust
 use goish::{go, KB};
@@ -28,6 +49,39 @@ fn main() {
 ```
 
 That's a million real goroutines on 13 OS threads, ~2 GiB virtual / ~2.4 GiB peak RSS. ([demo](#1-million-goroutines-demo))
+
+---
+
+## Who this is for
+
+**Regulated workloads facing the FIPS 140-3 transition.** 140-2 certificates retire in
+September 2026, and 140-3 asks for reproducible builds, SBOMs and verifiable provenance —
+for every dependency, including ones you didn't pick. Goish ports Go's FIPS module and can
+emit, per function, the Go file and line range it was translated from, re-verified on every
+commit. That is an auditor-facing artifact, not a promise.
+
+**Minimal-attack-surface deployments.** `scratch`/distroless containers, confidential VMs and
+Nitro-style enclaves, appliance images. No libc, no dynamic linker, no interpreter, no JIT —
+the binary is the whole userspace. Fewer moving parts to inventory, patch and attest.
+
+**Edge and embedded Linux.** One static binary, no runtime to install, no GC to tune, and
+memory that tracks what you actually touch (a shallow goroutine costs about one page).
+
+**High-density concurrent services.** A million parked goroutines, an epoll netpoller sharded
+per-P, and an HTTP server with an allocation-free hot path — without a `.await` in sight.
+
+### Not for you (yet)
+
+Being straight about this saves everyone time:
+
+- **Linux `x86_64` only.** Other targets are deliberately out of scope right now.
+- **Not security-audited.** The TLS stack is a faithful, machine-checked port, but it has had
+  no external review and no side-channel analysis. See [SECURITY.md](SECURITY.md).
+- **Not all of Go.** `crypto/` is complete; `net`, `encoding` and `os` are partial, and
+  outside `crypto/` most ports are name-level rather than anchor-verified. The
+  [table below](#coverage-measured) is honest about which is which.
+- **Not the Go compiler.** You write Rust that reads like Go, with goish's `string`,
+  `slice<T>`, `map<K,V>` and macros — you do not compile `.go` files.
 
 ---
 
@@ -79,13 +133,36 @@ and TLS 1.2.
 | `compress` | 122/151 (80.8%) | 0 |
 | `os` | 112/366 (30.6%) | 2 |
 
-Aggregate: **151 packages with a port, 77 at 100%, 3249 anchors.** Note
+Aggregate: **151 packages with a port, 77 at 100%, 3,263 anchors.** Note
 the default counter tallies **unique names, not declarations**, so Go
 methods sharing a name across types collapse — pass `--by-decl` for the
-receiver-qualified count. Outside `crypto/`, which carries 94% of all
+receiver-qualified count. Outside `crypto/`, which carries 93% of all
 anchors, coverage is name-level: `net` has 9 anchors across 308 ported
 functions; `sync`, `compress`, `archive` and `text` have none. Treat
 non-crypto ports as working code, not as verified ports.
+
+#### Verify the provenance claim yourself
+
+Don't take the numbers on faith — they are reproducible from a clean checkout:
+
+```bash
+# Per-declaration coverage, receiver-qualified (crypto/ reports 1709/1709).
+python3 scripts/port_coverage.py crypto --by-decl
+
+# Every anchor's line range still matches the Go source it cites.
+python3 scripts/anchor_check.py src
+
+# Re-diff each anchored port against the Go 1.25.5 tree: signature,
+# arity, struct fields. Fails the build on drift.
+make lint
+
+# Generate ground truth by running the real Go code, then compare.
+scripts/goref.sh crypto/tls /path/to/ref.go
+```
+
+An anchor looks like `// go: sdk 1.25.5 crypto/tls/conn.go:1203-1257 Conn.Write`, sitting
+directly above the port. That is the unit of evidence: it names the upstream source, and the
+tooling holds it honest.
 
 📊 **[PROGRESS.md](PROGRESS.md)** — the full picture, and what the three
 verification tiers mean.
@@ -298,8 +375,34 @@ The book in `doc/` walks through the implementation chapter by chapter - bootstr
 | 1M goroutines          | ✅ (2 GiB virtual, `stack(2*KB)`) | ✅ (2 KiB-grow each) | requires runtime tuning |
 | Standalone binary      | ✅ no glibc, no ld.so     | ✅ static linkable       | needs `std`           |
 | GC                     | none (manual mheap)       | concurrent mark+sweep    | none                  |
+| Memory safety          | Rust ownership            | GC + runtime checks      | Rust ownership        |
+| Per-function provenance to upstream source | ✅ machine-checked, 3,263 anchors | n/a (is upstream) | ✗ |
+| Freestanding (`no_std`) | ✅                       | ✗ (needs the Go runtime) | ✅ with `no_std` crates |
 
 Goish is **not** a clone of Go - it ports the runtime *idioms* into a Rust ownership model. Go's `morestack` (grow by copying the stack) is impossible here - relocating a Rust stack would require fixing up raw pointers the runtime cannot see - so goish grows the other way: bare `go!()` reserves 1 MiB of virtual address space per goroutine and lets the kernel commit physical pages on touch. Depth is transparent up to the reservation; physical cost tracks actual use; overflow faults into a guard page with a spawn-site diagnostic. `go!(stack(N), …)` remains the opt-in for sub-page density (the 1M-goroutine demo) or for goroutines needing more than 1 MiB. No GC either way.
+
+## Commercial use & support
+
+goish is permissively licensed (see [License](#license)) — you can ship it in a proprietary
+product with no reciprocal obligation and no fee.
+
+Where a commercial relationship helps:
+
+- **Compliance evidence.** Provenance reports mapping shipped binaries to upstream Go source,
+  SBOM generation, and engineering support for a FIPS 140-3 or supply-chain audit. The
+  anchor data behind this is already in the tree; packaging it for an auditor is the work.
+- **Prioritised porting.** `net`, `encoding` and `os` are partial and anchor-light. Sponsor
+  the package your product depends on and it gets built to the same verified standard as
+  `crypto/`.
+- **Support & SLA.** Guaranteed response, upgrade assistance, and backports.
+- **Integration.** Getting goish onto your target — confidential VM, appliance image, edge
+  device — and keeping it there.
+
+<!-- TODO(maintainer): replace with a monitored address / form before publishing.
+     A commercial-inquiry line with no working contact costs leads. -->
+📮 Commercial enquiries: **&lt;add a contact address&gt;**
+
+---
 
 ## License
 
@@ -309,7 +412,7 @@ system — is **MIT** ([LICENSE](LICENSE)).
 Substantial parts of `src/` are ports of the Go standard library and of
 `golang.org/x/crypto` / `x/text`, translated function by function from
 the Go 1.25 source. Those remain **BSD-3-Clause, © The Go Authors**
-([LICENSE-GO](LICENSE-GO)) — 3249 provenance anchors across 226 files
+([LICENSE-GO](LICENSE-GO)) — 3,263 provenance anchors across 296 files
 identify exactly which code this is. Both licenses must travel with any
 redistribution, source or binary.
 
