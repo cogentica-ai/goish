@@ -1,4 +1,4 @@
-// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert, Conn.readFromUntil, Conn.retryReadRecord, Conn.readRecord, Conn.readChangeCipherSpec, Conn.readRecordOrCCS, Conn.closeNotify, Conn.CloseWrite, Conn.readHandshakeBytes, Conn.readHandshake, Conn.unmarshalHandshakeMessage, Conn.writeHandshakeRecord, Conn.handleKeyUpdate
+// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert, Conn.readFromUntil, Conn.retryReadRecord, Conn.readRecord, Conn.readChangeCipherSpec, Conn.readRecordOrCCS, Conn.closeNotify, Conn.CloseWrite, Conn.readHandshakeBytes, Conn.readHandshake, Conn.unmarshalHandshakeMessage, Conn.writeHandshakeRecord, Conn.handleKeyUpdate, Conn.Handshake, Conn.HandshakeContext, Conn.handshakeContext, Conn.handleRenegotiation
 //
 // crypto/tls — the record layer's cipher state.
 //
@@ -2575,4 +2575,169 @@ pub(crate) fn halfConnCipherOf(c: super::cipher_suites::anyCipher) -> halfConnCi
         super::cipher_suites::anyCipher::Stream(s) => return halfConnCipher::Stream(s),
         super::cipher_suites::anyCipher::BlockMode(m) => return halfConnCipher::CBC(m),
     };
+}
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/conn.go:1498-1500 Conn.Handshake
+    /// Go: run the client or server handshake if it has not yet run.
+    /// Reference: the RSA-key-size cap note is enforced downstream in
+    /// processCertsFromClient / verifyServerCertificate.
+    pub fn Handshake(&mut self) -> error {
+        // Go: return c.HandshakeContext(context.Background())
+        return self.HandshakeContext();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1512-1516 Conn.HandshakeContext
+    /// Go: run the handshake if it has not yet run. goish drops the
+    /// `ctx context.Context` — there is no cancellation plumbing — so
+    /// this simply delegates.
+    pub fn HandshakeContext(&mut self) -> error {
+        // Go: return c.handshakeContext(ctx)
+        return self.handshakeContext();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1518-1616 Conn.handshakeContext
+    /// Go: the handshake body — fast-path if already complete, run the
+    /// client or server handshake, bump the handshake count on success
+    /// or flush a pending alert on failure, and enforce the
+    /// result/complete invariants.
+    ///
+    /// Deviations: Go's `ctx` interrupter goroutine (which closes the
+    /// conn on context cancellation) is absent — goish has no context
+    /// cancellation; `handshakeMutex` and `c.in.Lock()` are gone —
+    /// `&mut self` gives the same exclusion; the whole `c.quic != nil`
+    /// tail is absent — goish ships no QUIC transport; and `handshakeFn`
+    /// is not a field, so the client/server split is dispatched on
+    /// `c.isClient`.
+    pub(crate) fn handshakeContext(&mut self) -> error {
+        // Go: "Fast sync/atomic-based exit […]"
+        //     if c.isHandshakeComplete.Load() { return nil }
+        if self.isHandshakeComplete {
+            return errors::nil;
+        }
+
+        // Go: if err := c.handshakeErr; err != nil { return err }
+        if self.handshakeErr != errors::nil {
+            return self.handshakeErr.clone();
+        }
+        // Go: if c.isHandshakeComplete.Load() { return nil }
+        if self.isHandshakeComplete {
+            return errors::nil;
+        }
+
+        // Go: c.handshakeErr = c.handshakeFn(handshakeCtx)
+        let e = if self.isClient {
+            self.clientHandshake()
+        } else {
+            self.serverHandshake()
+        };
+        self.handshakeErr = e;
+        // Go: if c.handshakeErr == nil { c.handshakes++ } else { c.flush() }
+        if self.handshakeErr == errors::nil {
+            self.handshakes += 1;
+        } else {
+            // Go: "If an error occurred during the handshake try to
+            // flush the alert that might be left in the buffer."
+            self.flush();
+        }
+
+        // Go: if c.handshakeErr == nil && !c.isHandshakeComplete.Load() {
+        //         c.handshakeErr = errors.New("tls: internal error: handshake should have had a result") }
+        if self.handshakeErr == errors::nil && !self.isHandshakeComplete {
+            self.handshakeErr = errors::New(
+                "tls: internal error: handshake should have had a result",
+            );
+        }
+        // Go: if c.handshakeErr != nil && c.isHandshakeComplete.Load() {
+        //         panic("tls: internal error: handshake returned an error but is marked successful") }
+        if self.handshakeErr != errors::nil && self.isHandshakeComplete {
+            panic!(
+                "tls: internal error: handshake returned an error but is marked successful"
+            );
+        }
+
+        // Go: the `c.quic != nil` tail is absent — goish ships no QUIC
+        // transport.
+
+        // Go: return c.handshakeErr
+        return self.handshakeErr.clone();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1260-1302 Conn.handleRenegotiation
+    /// Go: process a HelloRequest — only a client may renegotiate, and
+    /// only within the policy `Config.Renegotiation` allows; TLS 1.3
+    /// forbids it entirely.
+    ///
+    /// Deviation: `handshakeMutex` is absent (`&mut self` gives the
+    /// exclusion), and `clientHandshake` takes no context.
+    pub(crate) fn handleRenegotiation(&mut self) -> error {
+        // Go: if c.vers == VersionTLS13 {
+        //         return errors.New("tls: internal error: unexpected renegotiation") }
+        if self.vers == super::common::VersionTLS13 {
+            return errors::New("tls: internal error: unexpected renegotiation");
+        }
+
+        // Go: msg, err := c.readHandshake(nil)
+        //     if err != nil { return err }
+        let (msg, err) = self.readHandshake(None);
+        if err != errors::nil {
+            return err;
+        }
+        // Go: helloReq, ok := msg.(*helloRequestMsg)
+        //     if !ok { c.sendAlert(alertUnexpectedMessage)
+        //         return unexpectedMessageError(helloReq, msg) }
+        let msg = match msg {
+            Some(m) => m,
+            None => return errors::New("tls: internal error: no handshake message"),
+        };
+        if msg
+            .asAny()
+            .downcast_ref::<super::handshake_messages::helloRequestMsg>()
+            .is_none()
+        {
+            self.sendAlert(super::alert::alertUnexpectedMessage);
+            return super::common::unexpectedMessageError(
+                crate::gostring::string::from_static("*tls.helloRequestMsg"),
+                super::handshake_messages::handshakeMessageTypeName(&*msg),
+            );
+        }
+
+        // Go: if !c.isClient { return c.sendAlert(alertNoRenegotiation) }
+        if !self.isClient {
+            return self.sendAlert(super::alert::alertNoRenegotiation);
+        }
+
+        // Go: switch c.config.Renegotiation {
+        //     case RenegotiateNever: return c.sendAlert(alertNoRenegotiation)
+        //     case RenegotiateOnceAsClient: if c.handshakes > 1 { return c.sendAlert(alertNoRenegotiation) }
+        //     case RenegotiateFreelyAsClient: // Ok.
+        //     default: c.sendAlert(alertInternalError)
+        //         return errors.New("tls: unknown Renegotiation value") }
+        let reneg = self.config.Renegotiation;
+        if reneg == super::common::RenegotiateNever {
+            return self.sendAlert(super::alert::alertNoRenegotiation);
+        } else if reneg == super::common::RenegotiateOnceAsClient {
+            if self.handshakes > 1 {
+                return self.sendAlert(super::alert::alertNoRenegotiation);
+            }
+        } else if reneg == super::common::RenegotiateFreelyAsClient {
+            // Ok.
+        } else {
+            self.sendAlert(super::alert::alertInternalError);
+            return errors::New("tls: unknown Renegotiation value");
+        }
+
+        // Go: (handshakeMutex omitted)
+        //     c.isHandshakeComplete.Store(false)
+        //     if c.handshakeErr = c.clientHandshake(context.Background()); c.handshakeErr == nil {
+        //         c.handshakes++ }
+        //     return c.handshakeErr
+        self.isHandshakeComplete = false;
+        let e = self.clientHandshake();
+        self.handshakeErr = e;
+        if self.handshakeErr == errors::nil {
+            self.handshakes += 1;
+        }
+        return self.handshakeErr.clone();
+    }
 }

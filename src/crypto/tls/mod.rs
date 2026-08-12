@@ -9592,7 +9592,10 @@ pub fn handshake_loopback(
     let cliIn2 = cliIn.clone();
     let cliOut2 = cliOut.clone();
     crate::go!(4 * crate::MB, move || {
-        let e = cli.clientHandshake();
+        // Drive the public Handshake() entry so the whole verbatim
+        // stack — Handshake -> HandshakeContext -> handshakeContext ->
+        // clientHandshake — is exercised end to end.
+        let e = cli.Handshake();
         if e != crate::errors::nil {
             *cliErr2.Lock() = e.Error();
         }
@@ -9611,7 +9614,7 @@ pub fn handshake_loopback(
     let srvIn2 = srvIn.clone();
     let srvOut2 = srvOut.clone();
     crate::go!(4 * crate::MB, move || {
-        let e = srv.serverHandshake();
+        let e = srv.Handshake();
         if e != crate::errors::nil {
             *srvErr2.Lock() = e.Error();
         }
