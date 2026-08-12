@@ -1133,3 +1133,23 @@ path = "examples/x509_crl_csr_smoke.rs"
 [[example]]
 name = "tls_common_smoke"
 path = "examples/tls_common_smoke.rs"
+
+[[example]]
+name = "fmt_sscanf_smoke"
+path = "examples/fmt_sscanf_smoke.rs"
+
+[[example]]
+name = "math_modf_copysign_smoke"
+path = "examples/math_modf_copysign_smoke.rs"
+
+[[example]]
+name = "time_duration_div_smoke"
+path = "examples/time_duration_div_smoke.rs"
+
+[[example]]
+name = "runtime_palloc_units_smoke"
+path = "examples/runtime_palloc_units_smoke.rs"
+
+[[example]]
+name = "runtime_mcentral_units_smoke"
+path = "examples/runtime_mcentral_units_smoke.rs"

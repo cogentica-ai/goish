@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 13081,
+ "total": 12926,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -270,14 +270,6 @@
    "GOISH014": 22,
    "GOISH023": 15
   },
-  "src/crypto/tls/handshake_server_tls13.rs": {
-   "GOISH007": 1,
-   "GOISH008": 1,
-   "GOISH009": 4,
-   "GOISH010": 4,
-   "GOISH014": 8,
-   "GOISH023": 7
-  },
   "src/crypto/tls/key_schedule.rs": {
    "GOISH005": 6,
    "GOISH008": 10,
@@ -285,11 +277,9 @@
    "GOISH023": 16
   },
   "src/crypto/tls/mod.rs": {
-   "GOISH005": 12,
-   "GOISH010": 2,
-   "GOISH014": 44,
+   "GOISH014": 32,
    "GOISH016": 1,
-   "GOISH023": 43
+   "GOISH023": 24
   },
   "src/crypto/tls/record.rs": {
    "GOISH014": 16,
@@ -432,7 +422,7 @@
   },
   "src/fmt/mod.rs": {
    "GOISH005": 18,
-   "GOISH014": 76,
+   "GOISH014": 72,
    "GOISH016": 1,
    "GOISH022": 4,
    "GOISH023": 41
@@ -600,7 +590,7 @@
   },
   "src/math/big/mod.rs": {
    "GOISH005": 210,
-   "GOISH014": 303,
+   "GOISH014": 289,
    "GOISH016": 1,
    "GOISH023": 267
   },
@@ -612,18 +602,17 @@
   },
   "src/math/mod.rs": {
    "GOISH005": 4,
-   "GOISH014": 49,
+   "GOISH014": 47,
    "GOISH015": 1,
    "GOISH016": 1,
    "GOISH023": 47
   },
   "src/math/rand/mod.rs": {
-   "GOISH002": 2,
-   "GOISH005": 78,
-   "GOISH014": 62,
+   "GOISH005": 71,
+   "GOISH014": 42,
    "GOISH016": 1,
    "GOISH022": 1,
-   "GOISH023": 41
+   "GOISH023": 37
   },
   "src/math/rand/v2/mod.rs": {
    "GOISH005": 18,
@@ -946,13 +935,13 @@
    "GOISH023": 13
   },
   "src/runtime/mcentral/sizeclasses.rs": {
-   "GOISH014": 2,
+   "GOISH014": 1,
    "GOISH023": 1
   },
   "src/runtime/mcentral/span.rs": {
-   "GOISH005": 12,
-   "GOISH014": 18,
-   "GOISH023": 10
+   "GOISH005": 11,
+   "GOISH014": 14,
+   "GOISH023": 9
   },
   "src/runtime/mem.rs": {
    "GOISH005": 2,
@@ -968,17 +957,17 @@
    "GOISH023": 1
   },
   "src/runtime/mheap/page_alloc.rs": {
-   "GOISH014": 24,
-   "GOISH023": 15
+   "GOISH014": 19,
+   "GOISH023": 14
   },
   "src/runtime/mheap/palloc_bits.rs": {
    "GOISH005": 7,
-   "GOISH014": 33,
+   "GOISH014": 23,
    "GOISH023": 13
   },
   "src/runtime/mheap/palloc_sum.rs": {
    "GOISH005": 3,
-   "GOISH014": 16,
+   "GOISH014": 10,
    "GOISH023": 10
   },
   "src/runtime/mod.rs": {
@@ -1274,7 +1263,7 @@
   },
   "src/time/mod.rs": {
    "GOISH005": 77,
-   "GOISH014": 126,
+   "GOISH014": 123,
    "GOISH015": 1,
    "GOISH016": 1,
    "GOISH023": 116

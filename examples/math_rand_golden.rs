@@ -379,6 +379,29 @@ fn check_expfloat64() -> bool {
     ok
 }
 
+/// The package-level `Seed`/`Int63` must drive the same stream as an
+/// explicitly constructed `New(NewSource(seed))`.
+///
+/// Salvaged from src/math/rand/mod.rs's deleted `#[cfg(test)]` module —
+/// `cargo test` cannot link in this crate (the test harness pulls in
+/// std, whose `panic_impl` lang item collides with goish's), so that
+/// module was unreachable. It is the one case the golden file does not
+/// cover, because the golden vectors are all taken through an explicit
+/// Rand.
+fn check_global_seed() -> bool {
+    let mut ok = true;
+    for &seed in [1i64, 42, 99, 1024, 0, -1, 7].iter() {
+        rand::Seed(seed);
+        let mut r = rand::New(rand::NewSource(seed));
+        for _ in 0..8 {
+            if rand::Int63() != r.Int63() {
+                ok = false;
+            }
+        }
+    }
+    ok
+}
+
 #[goish::main]
 fn main() {
     let mut failed = 0;
@@ -397,6 +420,7 @@ fn main() {
         ("Read",        check_read),
         ("NormFloat64", check_normfloat64),
         ("ExpFloat64",  check_expfloat64),
+        ("global Seed", check_global_seed),
     ];
     for (name, f) in cases.iter() {
         if f() {
@@ -407,7 +431,7 @@ fn main() {
         }
     }
     if failed == 0 {
-        fmt::Println!("math_rand_golden: ALL PASS (14 methods)");
+        fmt::Println!("math_rand_golden: ALL PASS (15 methods)");
     } else {
         fmt::Println!("math_rand_golden: ", failed as i64, " FAILED");
         syscall::Exit(1);

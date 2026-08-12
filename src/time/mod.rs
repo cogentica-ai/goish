@@ -2751,31 +2751,3 @@ impl crate::reflect::Reflect for Duration {
         crate::reflect::Value::Int(self.0)
     }
 }
-
-#[cfg(test)]
-mod duration_div_tests {
-    use super::*;
-
-    #[test]
-    fn duration_div_duration() {
-        // 10s / 1s = 10 (as Duration).
-        let a = Duration(10_000_000_000);
-        let b = Duration(1_000_000_000);
-        let q = a / b;
-        assert_eq!(q.0, 10);
-    }
-
-    #[test]
-    fn duration_div_int() {
-        // 1s / 4 = 250ms.
-        let a = Second;
-        let q = a / 4;
-        assert_eq!(q.0, 250_000_000);
-    }
-
-    #[test]
-    #[should_panic(expected = "divide by zero")]
-    fn duration_div_zero_panics() {
-        let _ = Second / Duration(0);
-    }
-}

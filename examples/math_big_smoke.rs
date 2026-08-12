@@ -2809,6 +2809,111 @@ fn main() {
         check(err != goish::nil, b"Float.Scan bad verb");
     }
 
+    // ── Salvaged from src/math/big/mod.rs's deleted #[cfg(test)] ───
+    //
+    // `cargo test` cannot link in this crate (the test harness pulls
+    // in std, whose `panic_impl` lang item collides with goish's), so
+    // that module was unreachable. Everything it covered that this
+    // example did not already reach is below.
+    {
+        // Euclidean Div/DivMod at explicit small values. The
+        // multi-precision cases above check the q*d+r==n identity,
+        // which several conventions satisfy; these pin Go's.
+        let mut q = big::Int::new();
+        q.Div(&big::NewInt(17), &big::NewInt(5));
+        check(q.Int64() == 3, b"div 17/5");
+
+        let mut q2 = big::Int::new();
+        let mut m2 = big::Int::new();
+        q2.DivMod(&big::NewInt(17), &big::NewInt(5), &mut m2);
+        check(q2.Int64() == 3 && m2.Int64() == 2, b"divmod 17/5");
+
+        // -17 = (-4)*5 + 3, with 0 <= 3 < 5.
+        let mut q3 = big::Int::new();
+        let mut m3 = big::Int::new();
+        q3.DivMod(&big::NewInt(-17), &big::NewInt(5), &mut m3);
+        check(q3.Int64() == -4 && m3.Int64() == 3, b"divmod -17/5 euclid");
+
+        // The remainder stays non-negative when the divisor is
+        // negative too: -17 = 4*(-5) + 3.
+        let mut q4 = big::Int::new();
+        let mut m4 = big::Int::new();
+        q4.DivMod(&big::NewInt(-17), &big::NewInt(-5), &mut m4);
+        check(q4.Int64() == 4 && m4.Int64() == 3, b"divmod -17/-5 euclid");
+
+        // Abs, including the self-aliasing z.Abs(z) path.
+        let mut ab = big::Int::new();
+        ab.Abs(&big::NewInt(-42));
+        check(ab.Int64() == 42, b"abs -42");
+        ab.Abs(&big::NewInt(42));
+        check(ab.Int64() == 42, b"abs 42");
+        let mut al = big::NewInt(-9);
+        let al_src = al.clone();
+        al.Abs(&al_src);
+        check(al.Int64() == 9, b"abs self-aliased");
+
+        // BorrowMut yields a non-nil nilable_refmut; dropping it
+        // releases the borrow and leaves the Int untouched.
+        let mut bm = big::NewInt(99);
+        let nrm = bm.BorrowMut();
+        let was_nil = nrm.IsNil();
+        drop(nrm);
+        check(!was_nil && bm.Int64() == 99, b"borrowmut not nil");
+
+        // Rat.SetInt gives denominator 1.
+        let mut ri = big::Rat::new();
+        ri.SetInt(&big::NewInt(42));
+        check(ri.Num().Int64() == 42 && ri.Denom().Int64() == 1, b"rat setint 42");
+
+        // SetFrac normalizes too, so (2/3)*(3/4) reads back as 1/2 and
+        // not 6/12 -- Go's Rat has no unreduced state at all: every
+        // constructor and operator ends in norm().
+        //
+        //   scripts/goref.sh math/big:
+        //     SetFrac mul: num=1 denom=2
+        let mut ua = big::Rat::new();
+        ua.SetFrac(&big::NewInt(2), &big::NewInt(3));
+        let mut ub = big::Rat::new();
+        ub.SetFrac(&big::NewInt(3), &big::NewInt(4));
+        let mut uc = big::Rat::new();
+        uc.Mul(&ua, &ub);
+        check(uc.Num().Int64() == 1 && uc.Denom().Int64() == 2, b"rat setfrac mul reduces");
+
+        // val.Mul(val, mv) -- the self-aliasing shape fmt's Sscanf
+        // driver uses when accumulating a scanned decimal.
+        let mut val = big::Rat::new();
+        val.SetFrac(&big::NewInt(7), &big::NewInt(2));
+        let mut mv = big::Rat::new();
+        mv.SetInt(&big::NewInt(3)); // 3/1
+        let val_src = val.clone();
+        val.Mul(&val_src, &mv);
+        check(val.Num().Int64() == 21 && val.Denom().Int64() == 2, b"rat mul self-aliased");
+
+        // parse_decimal_into_rat -- reached indirectly through
+        // fmt.Sscanf("%f") (see examples/fmt_sscanf_smoke.rs); these
+        // pin it directly. Values are Go's Rat.SetString, which is what
+        // it mirrors:
+        //
+        //   scripts/goref.sh math/big:
+        //     SetString("3.14") num=157 denom=50
+        //     SetString("100")  num=100 denom=1
+        //     SetString("-0.5") num=-1  denom=2
+        let mut p1 = big::Rat::new();
+        let ok1 = big::parse_decimal_into_rat("3.14", &mut p1);
+        check(ok1 && p1.Num().Int64() == 157 && p1.Denom().Int64() == 50, b"parse rat 3.14");
+
+        let mut p2 = big::Rat::new();
+        let ok2 = big::parse_decimal_into_rat("100", &mut p2);
+        check(ok2 && p2.Num().Int64() == 100 && p2.Denom().Int64() == 1, b"parse rat 100");
+
+        let mut p3 = big::Rat::new();
+        let ok3 = big::parse_decimal_into_rat("-0.5", &mut p3);
+        check(ok3 && p3.Num().Int64() == -1 && p3.Denom().Int64() == 2, b"parse rat -0.5");
+
+        let mut p4 = big::Rat::new();
+        check(!big::parse_decimal_into_rat("not-a-number", &mut p4), b"parse rat rejects junk");
+    }
+
     let _ = &int::from(0);
     let _ = string::from("");
     report();

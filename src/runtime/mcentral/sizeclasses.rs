@@ -93,24 +93,3 @@ pub fn class_for(size: usize, align: usize) -> Option<u8> {
     };
     Some(class)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lookup_basics() {
-        assert_eq!(class_for(1, 1).unwrap(), 1); // 8 bytes
-        assert_eq!(class_for(8, 8).unwrap(), 1); // 8 bytes
-        assert_eq!(class_for(9, 8).unwrap(), 2); // 16 bytes
-        assert_eq!(class_for(16, 16).unwrap(), 2); // class 2 has min align 16
-        assert_eq!(class_for(20, 16).unwrap(), 4); // 32 bytes (class 3 has only 8-align)
-        assert_eq!(class_for(32, 32).unwrap(), 4); // 32 bytes
-        assert_eq!(class_for(1024, 8).unwrap(), 32); // 1024 bytes
-        assert_eq!(class_for(1025, 8).unwrap(), 33); // first large-bucket size
-        assert_eq!(class_for(1152, 8).unwrap(), 33); // exactly class 33
-        assert_eq!(class_for(1153, 8).unwrap(), 34); // first byte over class 33
-        assert_eq!(class_for(32768, 8).unwrap(), 67); // exactly the boundary
-        assert!(class_for(32769, 8).is_none()); // past boundary
-    }
-}

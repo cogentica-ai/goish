@@ -535,31 +535,3 @@ pub fn Float64bits(f: f64) -> u64 {
 pub fn Float64frombits(b: u64) -> f64 {
     f64::from_bits(b)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn modf_basic() {
-        let (i, frac) = Modf(3.75);
-        assert_eq!(i, 3.0);
-        assert!((frac - 0.75).abs() < 1e-12);
-        let (i, frac) = Modf(-2.25);
-        assert_eq!(i, -2.0);
-        assert!((frac - -0.25).abs() < 1e-12);
-        let (i, frac) = Modf(0.0);
-        assert_eq!(i, 0.0);
-        assert_eq!(frac, 0.0);
-    }
-
-    #[test]
-    fn copysign_basic() {
-        assert_eq!(Copysign(3.0, -1.0), -3.0);
-        assert_eq!(Copysign(-3.0, 1.0), 3.0);
-        assert_eq!(Copysign(0.0, -1.0), -0.0);
-        // Result sign always follows `sign` even if magnitude is NaN.
-        assert!(Copysign(f64::NAN, -1.0).is_nan());
-        assert!(Copysign(f64::NAN, -1.0).is_sign_negative());
-    }
-}
