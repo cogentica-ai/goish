@@ -1,16 +1,16 @@
-// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error
+// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt
 //
 // crypto/tls — the record layer's cipher state.
 //
 // **Partial port.** conn.go is 1700 lines and most of it is `Conn`,
 // which owns a `net.Conn` and drives the handshake; that lands with the
-// state machines. What is here is `halfConn` — the per-direction cipher
-// state — and the free functions the record codec needs, none of which
-// touch a `Conn`.
+// state machines. What is here is the whole record codec — `halfConn`,
+// its `decrypt`/`encrypt`, `atLeastReader` and the free functions they
+// need — none of which touches a `Conn`.
 //
-// goishlint:ignore GOISH018 Read, SetReadDeadline, SetWriteDeadline, NetConn, decrypt, encrypt, newRecordHeaderError, readRecord, readChangeCipherSpec, readRecordOrCCS, retryReadRecord, readFromUntil, sendAlertLocked, sendAlert, maxPayloadSizeForWrite, flush, writeRecordLocked, writeHandshakeRecord, writeChangeCipherRecord, readHandshakeBytes, readHandshake, unmarshalHandshakeMessage, handleRenegotiation, handlePostHandshakeMessage, handleKeyUpdate, CloseWrite, closeNotify, HandshakeContext, handshakeContext, ConnectionState, connectionStateLocked, OCSPResponse, VerifyHostname, LocalAddr, RemoteAddr, SetDeadline, write, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. halfConn.decrypt and halfConn.encrypt are with them: both rewrite the record buffer in place, aliasing the payload they are decrypting, which needs the Conn-owned scratch buffers to port faithfully. See ROADMAP.md.
-// goishlint:ignore GOISH019 Conn, atLeastReader — same.
-// goishlint:ignore GOISH021 Conn, atLeastReader, outBufPool, errShutdown, errEarlyCloseWrite, maxUselessBytes, tcpMSSEstimate, recordSizeBoostThreshold, tlsunsafeekm — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write.
+// goishlint:ignore GOISH018 SetReadDeadline, SetWriteDeadline, NetConn, newRecordHeaderError, readRecord, readChangeCipherSpec, readRecordOrCCS, retryReadRecord, readFromUntil, sendAlertLocked, sendAlert, maxPayloadSizeForWrite, flush, writeRecordLocked, writeHandshakeRecord, writeChangeCipherRecord, readHandshakeBytes, readHandshake, unmarshalHandshakeMessage, handleRenegotiation, handlePostHandshakeMessage, handleKeyUpdate, CloseWrite, closeNotify, HandshakeContext, handshakeContext, ConnectionState, connectionStateLocked, OCSPResponse, VerifyHostname, LocalAddr, RemoteAddr, SetDeadline, write, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
+// goishlint:ignore GOISH019 Conn — same.
+// goishlint:ignore GOISH021 Conn, outBufPool, errShutdown, errEarlyCloseWrite, maxUselessBytes, tcpMSSEstimate, recordSizeBoostThreshold, tlsunsafeekm — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write.
 //
 // One deviation: `setErrorLocked` asserts `err.(net.Error)` in Go, to
 // wrap a transient network error as permanent. goish's `net` exposes no
@@ -25,11 +25,12 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use super::alert::{alert, alertInternalError};
+use super::alert::{alert, alertBadRecordMAC, alertInternalError, alertRecordOverflow, alertUnexpectedMessage};
 use super::cipher_suites::{aead, cipherSuiteTLS13, mutAEAD};
-use super::common::{recordType, VersionTLS11, VersionTLS13};
+use super::common::{recordHeaderLen, recordType, VersionTLS11, VersionTLS13};
 use super::quic::QUICEncryptionLevel;
 use crate::crypto::cipher;
+use crate::crypto::cipher::Stream as _;
 use crate::crypto::rc4;
 use crate::error;
 use crate::errors;
@@ -410,5 +411,463 @@ impl errors::ErrorTrait for RecordHeaderError {
     // go: none — goish idiom: forwards to the ported inherent `Error`.
     fn Error(&self) -> string {
         return RecordHeaderError::Error(self);
+    }
+}
+
+// ─── The record codec ─────────────────────────────────────────────────
+//
+// Go works in place: `payload = payload[explicitNonceLen:]`,
+// `c.CryptBlocks(payload, payload)`, `plaintext = payload[:n]` all alias
+// one backing array, and `record[3]`/`record[4]` are rewritten through
+// it. goish slices do not share backing across handles, so the two
+// functions below carry an explicit offset into a single `Vec` instead
+// of re-slicing. Same reads, same writes, same order.
+
+// Go: conn.go — `type atLeastReader struct { R io.Reader; N int64 }`
+/// Go: "atLeastReader reads from R, stopping with EOF once at least N
+/// bytes have been read. It is different from an io.LimitedReader in
+/// that it doesn't cut short the last call to Read, and in that it
+/// considers an early EOF an error."
+pub(crate) struct atLeastReader<'a> {
+    pub R: &'a mut (dyn crate::io::Reader + Send + Sync + 'static),
+    pub N: crate::types::int64,
+}
+
+impl<'a> crate::io::Reader for atLeastReader<'a> {
+    // go: sdk 1.25.5 crypto/tls/conn.go:756-770 atLeastReader.Read
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        // Go: if r.N <= 0 { return 0, io.EOF }
+        if self.N <= 0 {
+            return (0, crate::io::EOF.into());
+        }
+        // Go: n, err := r.R.Read(p)
+        let (n, err) = self.R.Read(p);
+        // Go: r.N -= int64(n) // won't underflow unless len(p) >= n > 9223372036854775809
+        self.N -= crate::int64(n);
+        // Go: if r.N > 0 && err == io.EOF { return n, io.ErrUnexpectedEOF }
+        if self.N > 0 && err == crate::io::EOF {
+            return (n, crate::io::ErrUnexpectedEOF.into());
+        }
+        // Go: if r.N <= 0 && err == nil { return n, io.EOF }
+        if self.N <= 0 && err == errors::nil {
+            return (n, crate::io::EOF.into());
+        }
+        // Go: return n, err
+        return (n, err);
+    }
+}
+
+impl halfConn {
+    // go: sdk 1.25.5 crypto/tls/conn.go:301-406 halfConn.decrypt
+    /// Go: "decrypt authenticates and decrypts the record if protection
+    /// is active at this stage. The returned plaintext might overlap
+    /// with the input."
+    ///
+    /// Deviation: Go rewrites `record[3]`/`record[4]` in place through
+    /// the shared backing array, so the caller sees the corrected
+    /// length. goish takes `record` by `&mut` for the same effect.
+    pub(crate) fn decrypt(
+        &mut self,
+        record: &mut slice<byte>,
+    ) -> (slice<byte>, recordType, Option<alert>) {
+        // Go: var plaintext []byte
+        //     typ := recordType(record[0])
+        //     payload := record[recordHeaderLen:]
+        let mut plaintext: slice<byte> = slice::new();
+        let mut typ = recordType(record[0]);
+        let mut payload = record.slice(recordHeaderLen, record.Len());
+
+        // Go: In TLS 1.3, change_cipher_spec messages are to be ignored
+        // without being decrypted. See RFC 8446, Appendix D.4.
+        if self.version == VersionTLS13 && typ == super::common::recordTypeChangeCipherSpec {
+            return (payload, typ, None);
+        }
+
+        // Go: paddingGood := byte(255); paddingLen := 0
+        //     explicitNonceLen := hc.explicitNonceLen()
+        let mut paddingGood: byte = 255;
+        let mut paddingLen: int = 0;
+        let explicitNonceLen = self.explicitNonceLen();
+
+        // Go: if hc.cipher != nil { switch c := hc.cipher.(type) { … } }
+        //     else { plaintext = payload }
+        if !matches!(self.cipher, halfConnCipher::None) {
+            match &mut self.cipher {
+                halfConnCipher::Stream(c) => {
+                    // Go: c.XORKeyStream(payload, payload)
+                    let mut buf = payload.clone();
+                    c.XORKeyStream(&mut buf, payload.clone());
+                    payload = buf;
+                }
+                halfConnCipher::AEAD(c) => {
+                    // Go: if len(payload) < explicitNonceLen { return nil, 0, alertBadRecordMAC }
+                    if payload.Len() < explicitNonceLen {
+                        return (slice::new(), recordType(0), Some(alertBadRecordMAC));
+                    }
+                    // Go: nonce := payload[:explicitNonceLen]
+                    //     if len(nonce) == 0 { nonce = hc.seq[:] }
+                    //     payload = payload[explicitNonceLen:]
+                    let mut nonce = payload.slice(0, explicitNonceLen);
+                    if nonce.Len() == 0 {
+                        nonce = slice::__from_vec(self.seq.to_vec());
+                    }
+                    payload = payload.slice(explicitNonceLen, payload.Len());
+
+                    // Go: var additionalData []byte
+                    //     if hc.version == VersionTLS13 {
+                    //         additionalData = record[:recordHeaderLen]
+                    //     } else {
+                    //         additionalData = append(hc.scratchBuf[:0], hc.seq[:]...)
+                    //         additionalData = append(additionalData, record[:3]...)
+                    //         n := len(payload) - c.Overhead()
+                    //         additionalData = append(additionalData, byte(n>>8), byte(n))
+                    //     }
+                    let additionalData: slice<byte>;
+                    if self.version == VersionTLS13 {
+                        additionalData = record.slice(0, recordHeaderLen);
+                    } else {
+                        let mut ad: Vec<byte> = Vec::new();
+                        ad.extend_from_slice(&self.seq);
+                        let rec3 = record.slice(0, 3);
+                        let raw: &[byte] = &rec3;
+                        ad.extend_from_slice(raw);
+                        let n = payload.Len() - c.Overhead();
+                        ad.push(crate::byte(n >> 8));
+                        ad.push(crate::byte(n));
+                        additionalData = slice::__from_vec(ad);
+                    }
+
+                    // Go: plaintext, err = c.Open(payload[:0], nonce, payload, additionalData)
+                    //     if err != nil { return nil, 0, alertBadRecordMAC }
+                    let (out, err) =
+                        c.Open(slice::new(), nonce, payload.clone(), additionalData);
+                    if err != errors::nil {
+                        return (slice::new(), recordType(0), Some(alertBadRecordMAC));
+                    }
+                    plaintext = out;
+                }
+                halfConnCipher::CBC(c) => {
+                    // Go: blockSize := c.BlockSize()
+                    //     minPayload := explicitNonceLen + roundUp(hc.mac.Size()+1, blockSize)
+                    //     if len(payload)%blockSize != 0 || len(payload) < minPayload {
+                    //         return nil, 0, alertBadRecordMAC }
+                    let blockSize = c.BlockSize();
+                    let macSize = match &self.mac {
+                        Some(m) => m.Size(),
+                        None => 0,
+                    };
+                    let minPayload = explicitNonceLen + roundUp(macSize + 1, blockSize);
+                    if payload.Len() % blockSize != 0 || payload.Len() < minPayload {
+                        return (slice::new(), recordType(0), Some(alertBadRecordMAC));
+                    }
+
+                    // Go: if explicitNonceLen > 0 {
+                    //         c.SetIV(payload[:explicitNonceLen])
+                    //         payload = payload[explicitNonceLen:] }
+                    //     c.CryptBlocks(payload, payload)
+                    if explicitNonceLen > 0 {
+                        c.SetIV(payload.slice(0, explicitNonceLen));
+                        payload = payload.slice(explicitNonceLen, payload.Len());
+                    }
+                    let mut buf = payload.clone();
+                    c.CryptBlocks(&mut buf, payload.clone());
+                    payload = buf;
+
+                    // Go: In a limited attempt to protect against CBC padding
+                    // oracles like Lucky13, the data past paddingLen (which is
+                    // secret) is passed to the MAC function as extra data, to be
+                    // fed into the HMAC after computing the digest. This makes
+                    // the MAC roughly constant time as long as the digest
+                    // computation is constant time and does not affect the
+                    // subsequent write, modulo cache effects.
+                    // Go: paddingLen, paddingGood = extractPadding(payload)
+                    let (pl, pg) = extractPadding(payload.clone());
+                    paddingLen = pl;
+                    paddingGood = pg;
+                }
+                halfConnCipher::None => {}
+            }
+
+            // Go: if hc.version == VersionTLS13 {
+            //         if typ != recordTypeApplicationData { return nil, 0, alertUnexpectedMessage }
+            //         if len(plaintext) > maxPlaintext+1 { return nil, 0, alertRecordOverflow }
+            //         // Remove padding and find the ContentType scanning from the end.
+            //         for i := len(plaintext) - 1; i >= 0; i-- {
+            //             if plaintext[i] != 0 { typ = recordType(plaintext[i]);
+            //                                    plaintext = plaintext[:i]; break }
+            //             if i == 0 { return nil, 0, alertUnexpectedMessage } } }
+            if self.version == VersionTLS13 {
+                if typ != super::common::recordTypeApplicationData {
+                    return (slice::new(), recordType(0), Some(alertUnexpectedMessage));
+                }
+                if plaintext.Len() > super::common::maxPlaintext + 1 {
+                    return (slice::new(), recordType(0), Some(alertRecordOverflow));
+                }
+                let mut i: int = plaintext.Len() - 1;
+                loop {
+                    if i < 0 {
+                        return (slice::new(), recordType(0), Some(alertUnexpectedMessage));
+                    }
+                    if plaintext[i as usize] != 0 {
+                        typ = recordType(plaintext[i as usize]);
+                        plaintext = plaintext.slice(0, i);
+                        break;
+                    }
+                    if i == 0 {
+                        return (slice::new(), recordType(0), Some(alertUnexpectedMessage));
+                    }
+                    i -= 1;
+                }
+            }
+        } else {
+            plaintext = payload.clone();
+        }
+
+        // Go: if hc.mac != nil { … }
+        if self.mac.is_some() {
+            // Go: macSize := hc.mac.Size()
+            //     if len(payload) < macSize { return nil, 0, alertBadRecordMAC }
+            let macSize = self.mac.as_ref().unwrap().Size();
+            if payload.Len() < macSize {
+                return (slice::new(), recordType(0), Some(alertBadRecordMAC));
+            }
+
+            // Go: n := len(payload) - macSize - paddingLen
+            //     n = subtle.ConstantTimeSelect(int(uint32(n)>>31), 0, n) // if n < 0 { n = 0 }
+            //     record[3] = byte(n >> 8); record[4] = byte(n)
+            let mut n = payload.Len() - macSize - paddingLen;
+            n = crate::crypto::subtle::ConstantTimeSelect(
+                crate::int(crate::uint32(n) >> 31),
+                0,
+                n,
+            );
+            record[3] = crate::byte(n >> 8);
+            record[4] = crate::byte(n);
+            // Go: remoteMAC := payload[n : n+macSize]
+            //     localMAC := tls10MAC(hc.mac, hc.scratchBuf[:0], hc.seq[:],
+            //         record[:recordHeaderLen], payload[:n], payload[n+macSize:])
+            let remoteMAC = payload.slice(n, n + macSize);
+            let localMAC = super::cipher_suites::tls10MAC(
+                &mut **self.mac.as_mut().unwrap(),
+                slice::new(),
+                slice::__from_vec(self.seq.to_vec()),
+                record.slice(0, recordHeaderLen),
+                payload.slice(0, n),
+                payload.slice(n + macSize, payload.Len()),
+            );
+
+            // Go: This is equivalent to checking the MACs and paddingGood
+            // separately, but in constant-time to prevent distinguishing
+            // padding failures from MAC failures. Depending on what value of
+            // paddingLen was returned on bad padding, distinguishing bad MAC
+            // from bad padding can lead to an attack.
+            //
+            // See also the logic at the end of extractPadding.
+            // Go: macAndPaddingGood := subtle.ConstantTimeCompare(localMAC, remoteMAC) & int(paddingGood)
+            //     if macAndPaddingGood != 1 { return nil, 0, alertBadRecordMAC }
+            let macAndPaddingGood =
+                crate::crypto::subtle::ConstantTimeCompare(&localMAC, &remoteMAC)
+                    & crate::int(paddingGood);
+            if macAndPaddingGood != 1 {
+                return (slice::new(), recordType(0), Some(alertBadRecordMAC));
+            }
+
+            // Go: plaintext = payload[:n]
+            plaintext = payload.slice(0, n);
+        }
+
+        // Go: hc.incSeq(); return plaintext, typ, nil
+        self.incSeq();
+        return (plaintext, typ, None);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:940-1017 halfConn.encrypt
+    /// Go: "encrypt encrypts payload, adding the appropriate nonce
+    /// and/or MAC, and appends it to record, which must already contain
+    /// the record header."
+    pub(crate) fn encrypt(
+        &mut self,
+        record: slice<byte>,
+        payload: slice<byte>,
+        rand: &mut (dyn crate::io::Reader + Send + Sync + 'static),
+    ) -> (slice<byte>, error) {
+        // Go: if hc.cipher == nil { return append(record, payload...), nil }
+        if matches!(self.cipher, halfConnCipher::None) {
+            let mut out: Vec<byte> = Vec::new();
+            let r: &[byte] = &record;
+            let p: &[byte] = &payload;
+            out.extend_from_slice(r);
+            out.extend_from_slice(p);
+            return (slice::__from_vec(out), errors::nil);
+        }
+
+        // Go: var explicitNonce []byte
+        //     if explicitNonceLen := hc.explicitNonceLen(); explicitNonceLen > 0 {
+        //         record, explicitNonce = sliceForAppend(record, explicitNonceLen)
+        //         if _, isCBC := hc.cipher.(cbcMode); !isCBC && explicitNonceLen < 16 {
+        //             copy(explicitNonce, hc.seq[:])
+        //         } else {
+        //             if _, err := io.ReadFull(rand, explicitNonce); err != nil { return nil, err } } }
+        let mut rec: Vec<byte> = {
+            let r: &[byte] = &record;
+            r.to_vec()
+        };
+        let mut explicitNonce: Vec<byte> = Vec::new();
+        let enl = self.explicitNonceLen();
+        if enl > 0 {
+            let isCBC = matches!(self.cipher, halfConnCipher::CBC(_));
+            if !isCBC && enl < 16 {
+                // Go: The AES-GCM construction in TLS has an explicit nonce so
+                // that the nonce can be random. However, the nonce is only 8
+                // bytes which is too small for a secure, random nonce.
+                // Therefore we use the sequence number as the nonce. The
+                // 3DES-CBC construction also has an 8 bytes nonce but its
+                // nonces must be unpredictable (see RFC 5246, Appendix F.3),
+                // forcing us to use randomness. That's not 3DES' biggest
+                // problem anyway because the birthday bound on block collision
+                // is reached first due to its similarly small block size (see
+                // the Sweet32 attack).
+                explicitNonce = self.seq[..enl as usize].to_vec();
+            } else {
+                let mut buf: slice<byte> = slice::__from_vec(alloc::vec![0u8; enl as usize]);
+                let (_, err) = crate::io::ReadFull(rand, &mut buf);
+                if err != errors::nil {
+                    return (slice::new(), err);
+                }
+                let raw: &[byte] = &buf;
+                explicitNonce = raw.to_vec();
+            }
+            rec.extend_from_slice(&explicitNonce);
+        }
+
+        // Go: var dst []byte
+        //     switch c := hc.cipher.(type) { … }
+        let seq = slice::__from_vec(self.seq.to_vec());
+        let version = self.version;
+        match &mut self.cipher {
+            halfConnCipher::Stream(c) => {
+                // Go: mac := tls10MAC(hc.mac, hc.scratchBuf[:0], hc.seq[:],
+                //         record[:recordHeaderLen], payload, nil)
+                //     record, dst = sliceForAppend(record, len(payload)+len(mac))
+                //     c.XORKeyStream(dst[:len(payload)], payload)
+                //     c.XORKeyStream(dst[len(payload):], mac)
+                let mac = super::cipher_suites::tls10MAC(
+                    &mut **self.mac.as_mut().unwrap(),
+                    slice::new(),
+                    seq,
+                    slice::__from_vec(rec[..recordHeaderLen as usize].to_vec()),
+                    payload.clone(),
+                    slice::new(),
+                );
+                let mut head = payload.clone();
+                c.XORKeyStream(&mut head, payload.clone());
+                let mut tail = mac.clone();
+                c.XORKeyStream(&mut tail, mac);
+                let h: &[byte] = &head;
+                let t: &[byte] = &tail;
+                rec.extend_from_slice(h);
+                rec.extend_from_slice(t);
+            }
+            halfConnCipher::AEAD(c) => {
+                // Go: nonce := explicitNonce; if len(nonce) == 0 { nonce = hc.seq[:] }
+                let nonce = if explicitNonce.is_empty() {
+                    seq.clone()
+                } else {
+                    slice::__from_vec(explicitNonce.clone())
+                };
+
+                if version == VersionTLS13 {
+                    // Go: record = append(record, payload...)
+                    //     // Encrypt the actual ContentType and replace the plaintext one.
+                    //     record = append(record, record[0])
+                    //     record[0] = byte(recordTypeApplicationData)
+                    //     n := len(payload) + 1 + c.Overhead()
+                    //     record[3] = byte(n >> 8); record[4] = byte(n)
+                    //     record = c.Seal(record[:recordHeaderLen], nonce,
+                    //         record[recordHeaderLen:], record[:recordHeaderLen])
+                    let p: &[byte] = &payload;
+                    rec.extend_from_slice(p);
+                    let first = rec[0];
+                    rec.push(first);
+                    rec[0] = super::common::recordTypeApplicationData.0;
+                    let n = payload.Len() + 1 + c.Overhead();
+                    rec[3] = crate::byte(n >> 8);
+                    rec[4] = crate::byte(n);
+                    let header = slice::__from_vec(rec[..recordHeaderLen as usize].to_vec());
+                    let body = slice::__from_vec(rec[recordHeaderLen as usize..].to_vec());
+                    let sealed = c.Seal(header.clone(), nonce, body, header);
+                    let s: &[byte] = &sealed;
+                    rec = s.to_vec();
+                } else {
+                    // Go: additionalData := append(hc.scratchBuf[:0], hc.seq[:]...)
+                    //     additionalData = append(additionalData, record[:recordHeaderLen]...)
+                    //     record = c.Seal(record, nonce, payload, additionalData)
+                    let mut ad: Vec<byte> = Vec::new();
+                    let sq: &[byte] = &seq;
+                    ad.extend_from_slice(sq);
+                    ad.extend_from_slice(&rec[..recordHeaderLen as usize]);
+                    let sealed = c.Seal(
+                        slice::__from_vec(rec.clone()),
+                        nonce,
+                        payload.clone(),
+                        slice::__from_vec(ad),
+                    );
+                    let s: &[byte] = &sealed;
+                    rec = s.to_vec();
+                }
+            }
+            halfConnCipher::CBC(c) => {
+                // Go: mac := tls10MAC(hc.mac, hc.scratchBuf[:0], hc.seq[:],
+                //         record[:recordHeaderLen], payload, nil)
+                //     blockSize := c.BlockSize()
+                //     plaintextLen := len(payload) + len(mac)
+                //     paddingLen := blockSize - plaintextLen%blockSize
+                //     record, dst = sliceForAppend(record, plaintextLen+paddingLen)
+                //     copy(dst, payload); copy(dst[len(payload):], mac)
+                //     for i := plaintextLen; i < len(dst); i++ { dst[i] = byte(paddingLen - 1) }
+                //     if len(explicitNonce) > 0 { c.SetIV(explicitNonce) }
+                //     c.CryptBlocks(dst, dst)
+                let mac = super::cipher_suites::tls10MAC(
+                    &mut **self.mac.as_mut().unwrap(),
+                    slice::new(),
+                    seq,
+                    slice::__from_vec(rec[..recordHeaderLen as usize].to_vec()),
+                    payload.clone(),
+                    slice::new(),
+                );
+                let blockSize = c.BlockSize();
+                let plaintextLen = payload.Len() + mac.Len();
+                let paddingLen = blockSize - plaintextLen % blockSize;
+                let mut dst: Vec<byte> = Vec::with_capacity((plaintextLen + paddingLen) as usize);
+                let p: &[byte] = &payload;
+                let m: &[byte] = &mac;
+                dst.extend_from_slice(p);
+                dst.extend_from_slice(m);
+                while crate::int(dst.len()) < plaintextLen + paddingLen {
+                    dst.push(crate::byte(paddingLen - 1));
+                }
+                if !explicitNonce.is_empty() {
+                    c.SetIV(slice::__from_vec(explicitNonce.clone()));
+                }
+                let src = slice::__from_vec(dst.clone());
+                let mut out = src.clone();
+                c.CryptBlocks(&mut out, src);
+                let o: &[byte] = &out;
+                rec.extend_from_slice(o);
+            }
+            halfConnCipher::None => {}
+        }
+
+        // Go: Update length to include nonce, MAC and any block padding needed.
+        // Go: n := len(record) - recordHeaderLen
+        //     record[3] = byte(n >> 8); record[4] = byte(n)
+        //     hc.incSeq()
+        let n = crate::int(rec.len()) - recordHeaderLen;
+        rec[3] = crate::byte(n >> 8);
+        rec[4] = crate::byte(n);
+        self.incSeq();
+
+        // Go: return record, nil
+        return (slice::__from_vec(rec), errors::nil);
     }
 }

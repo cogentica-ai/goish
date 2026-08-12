@@ -3868,3 +3868,112 @@ pub fn common_writeKeyLogIsNil() -> bool {
         crate::goslice::slice::new(),
     ) == crate::errors::nil;
 }
+
+// go: none — goish-only: halfConn's record codec is unexported in Go,
+// where the tests are in-package. Seals one record, seals a second to
+// advance the sequence number, opens both, opens a tampered copy, and
+// opens a TLS 1.3 change_cipher_spec — the five paths Go's own record
+// tests cover. Reports
+// `(record 1, plaintext 1, record 2, plaintext 2, tampered alert,
+//   CCS type, CCS payload)`.
+#[doc(hidden)]
+pub fn conn_recordRoundTrip() -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+    crate::gostring::string,
+    crate::types::int,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let suite =
+        cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256).unwrap();
+    let secret = crate::goslice::slice::__from_vec(
+        (0..32u16).map(|i| (0x10 + i) as crate::types::byte).collect::<alloc::vec::Vec<_>>(),
+    );
+    let mk = || {
+        let mut hc = conn::halfConn::default();
+        hc.version = common::VersionTLS13;
+        hc.setTrafficSecret(suite, quic::QUICEncryptionLevelInitial, secret.clone());
+        return hc;
+    };
+    let mut out = mk();
+    let mut in_ = mk();
+    let payload = crate::goslice::slice::__from_vec(b"hello record layer".to_vec());
+    let header = crate::goslice::slice::__from_vec(alloc::vec![
+        common::recordTypeHandshake.0,
+        3,
+        3,
+        0,
+        0
+    ]);
+    let mut rand = crate::crypto::rand::Reader;
+    let (rec1, _) = out.encrypt(header.clone(), payload.clone(), &mut rand);
+    let mut r1 = rec1.clone();
+    let (pt1, _, _) = in_.decrypt(&mut r1);
+    let (rec2, _) = out.encrypt(header, payload, &mut rand);
+    let mut r2 = rec2.clone();
+    let (pt2, _, _) = in_.decrypt(&mut r2);
+
+    let mut bad = rec1.clone();
+    let n = bad.Len();
+    bad[(n - 1) as usize] ^= 0xff;
+    let mut in2 = mk();
+    let (_, _, alertErr) = in2.decrypt(&mut bad);
+    let alertText = match alertErr {
+        Some(a) => a.Error(),
+        None => crate::gostring::string::from_static(""),
+    };
+
+    let mut ccs = crate::goslice::slice::__from_vec(alloc::vec![
+        common::recordTypeChangeCipherSpec.0,
+        3,
+        3,
+        0,
+        1,
+        0x01
+    ]);
+    let mut in3 = mk();
+    let (ccsPayload, ccsType, _) = in3.decrypt(&mut ccs);
+
+    return (
+        rec1,
+        crate::gostring::string::from_bytes(&pt1),
+        rec2,
+        crate::gostring::string::from_bytes(&pt2),
+        alertText,
+        ccsType.0 as crate::types::int,
+        ccsPayload,
+    );
+}
+
+// go: none — goish-only: see `conn_recordRoundTrip`. With no cipher
+// configured, encrypt appends and decrypt passes through.
+#[doc(hidden)]
+pub fn conn_recordPlaintext() -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+    crate::types::int,
+) {
+    let payload = crate::goslice::slice::__from_vec(b"hello record layer".to_vec());
+    let header = crate::goslice::slice::__from_vec(alloc::vec![
+        common::recordTypeHandshake.0,
+        3,
+        3,
+        0,
+        0
+    ]);
+    let mut out = conn::halfConn::default();
+    out.version = common::VersionTLS12;
+    let mut rand = crate::crypto::rand::Reader;
+    let (rec, _) = out.encrypt(header, payload, &mut rand);
+    let mut in_ = conn::halfConn::default();
+    in_.version = common::VersionTLS12;
+    let mut r = rec.clone();
+    let (pt, typ, _) = in_.decrypt(&mut r);
+    return (
+        rec,
+        crate::gostring::string::from_bytes(&pt),
+        typ.0 as crate::types::int,
+    );
+}

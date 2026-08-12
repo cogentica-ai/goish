@@ -1921,6 +1921,32 @@ fn main() {
     eq("keyLogLine format", tls::common_keyLogLine(), "CLIENT_RANDOM 0102 0304\n");
     check("writeKeyLog with no writer returns nil", tls::common_writeKeyLogIsNil());
 
+    // ─── conn.go: the record codec. This is the whole TLS 1.3 record
+    //     protection path — seal, advance the sequence number, open,
+    //     reject a tampered record, and pass a change_cipher_spec
+    //     through undecrypted. Ciphertexts from goref.sh.
+    let (rec1, pt1, rec2, pt2, tampered, ccsType, ccsPayload) =
+        tls::conn_recordRoundTrip();
+    eq("halfConn.encrypt TLS 1.3 record 1", hexOf(rec1),
+       "17030300233fac4db4987147c7d7da22f39a92720e7cd5cd6627abd8dc74ea0ebc828f8e67722620");
+    eq("halfConn.decrypt TLS 1.3 record 1", pt1, "hello record layer");
+    // The second record differs only because the sequence number moved:
+    // the nonce is the XOR of the write IV with the record counter.
+    eq("halfConn.encrypt TLS 1.3 record 2", hexOf(rec2),
+       "1703030023df2eeae304afa5d126fb24d5992db74d0b204947c12504dc92d11445c723e092d21715");
+    eq("halfConn.decrypt TLS 1.3 record 2", pt2, "hello record layer");
+    eq("halfConn.decrypt rejects a tampered record", tampered, "tls: bad record MAC");
+    // RFC 8446 Appendix D.4: at TLS 1.3 a change_cipher_spec is ignored
+    // without being decrypted, so it survives an active read key.
+    check_n("halfConn.decrypt passes change_cipher_spec through", ccsType, 20);
+    eq("change_cipher_spec payload", hexOf(ccsPayload), "01");
+
+    let (plainRec, plainPT, plainType) = tls::conn_recordPlaintext();
+    eq("halfConn.encrypt with no cipher appends", hexOf(plainRec),
+       "160303000068656c6c6f207265636f7264206c61796572");
+    eq("halfConn.decrypt with no cipher passes through", plainPT, "hello record layer");
+    check_n("halfConn.decrypt with no cipher keeps the type", plainType, 22);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
