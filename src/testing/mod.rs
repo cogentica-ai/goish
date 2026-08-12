@@ -52,6 +52,7 @@ pub mod iotest;
 pub mod r#match;
 mod testing;
 use testing::tRunner;
+pub use testing::{chattyFlag, fmtDuration, marker, prefix};
 
 extern crate alloc;
 

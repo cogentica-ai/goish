@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -10,8 +10,8 @@
 // forbids.
 //
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
-// goishlint:ignore GOISH018 after, Attr, before, callerName, callSite, Chdir, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, Context, CoordinateFuzzing, CoverMode, Deadline, destination, flushPartial, flushToParent, fmtDuration, frameSkip, Get, ImportPath, Init, InitRuntimeCoverage, IsBoolFlag, listTests, log, Main, MainStart, MatchString, newChattyPrinter, newTestState, Output, Parallel, parseCpuList, pcToName, prefix, Printf, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, Set, Setenv, setOutputWriter, SetPanicOnExit0, setRan, Short, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, String, TempDir, Testing, testingSynctestTest, toOutputDir, Updatef, Verbose, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
-// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, chattyFlag, chattyPrinter, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errMain, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, marker, match, matchList, matchStringOnly, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelConflict, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testBinary, testDeps, testingTesting, testlog, testlogFile, testState, timeout, traceFile — same: the driver's types and package state come with the driver.
+// goishlint:ignore GOISH018 after, Attr, before, callerName, callSite, Chdir, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, Context, CoordinateFuzzing, CoverMode, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, Init, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newChattyPrinter, newTestState, Output, Parallel, parseCpuList, pcToName, Printf, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, Setenv, setOutputWriter, SetPanicOnExit0, setRan, Short, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, Testing, testingSynctestTest, toOutputDir, Updatef, Verbose, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
+// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, chattyPrinter, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errMain, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, matchStringOnly, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelConflict, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testBinary, testDeps, testingTesting, testlog, testlogFile, testState, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
 #![allow(non_snake_case)]
@@ -345,4 +345,106 @@ pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
     // Go: `<-t.signal`. Exactly one send happens per test, from
     // whichever path finished it.
     let _ = state.signal.Recv();
+}
+
+// ─── chatty flag / printer ───────────────────────────────────────────
+//
+// The `-test.v` flag's value type and the framing marker the chatty
+// printer emits. Ported ahead of the flag plumbing itself: these are
+// pure value logic, and the flag registration they hang off needs
+// `flag` globals (`flag.Var`, `flag.Parsed`) that goish does not have.
+
+// go: sdk 1.25.5 testing/testing.go:524-527 chattyFlag
+/// Go: the value behind `-test.v`. It is tri-state, not a bool:
+/// unset, `-v` (`on`), and `-v=test2json` (`on` and `json`).
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub struct chattyFlag {
+    /// Go: "-v is set in some form"
+    pub on: bool,
+    /// Go: "-v=test2json is set, to make output better for test2json"
+    pub json: bool,
+}
+
+impl chattyFlag {
+    // go: sdk 1.25.5 testing/testing.go:530-530 chattyFlag.IsBoolFlag
+    /// Go: `func (*chattyFlag) IsBoolFlag() bool { return true }` —
+    /// tells `flag` that a bare `-test.v` is legal, with no `=value`.
+    pub fn IsBoolFlag(&self) -> bool {
+        return true;
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:532-544 chattyFlag.Set
+    /// Go: parse the flag's argument. Anything other than the three
+    /// recognised spellings is an error, so `-test.v=yes` is rejected
+    /// rather than quietly treated as true.
+    pub fn Set(&mut self, arg: string) -> crate::error {
+        let a: &str = arg.as_ref();
+        match a {
+            // Go: case "true", "test2json":
+            //         f.on = true; f.json = arg == "test2json"
+            "true" | "test2json" => {
+                self.on = true;
+                self.json = a == "test2json";
+            }
+            // Go: case "false": f.on = false; f.json = false
+            "false" => {
+                self.on = false;
+                self.json = false;
+            }
+            // Go: default: return fmt.Errorf("invalid flag -test.v=%s", arg)
+            _ => {
+                return crate::errors::New(crate::fmt::Sprintf!(
+                    "invalid flag -test.v=%s",
+                    arg.clone()
+                ));
+            }
+        }
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:546-554 chattyFlag.String
+    /// Go: render the flag back to its spelling, so `flag`'s usage
+    /// output shows what is set.
+    pub fn String(&self) -> string {
+        if self.json {
+            return string::from_static("test2json");
+        }
+        if self.on {
+            return string::from_static("true");
+        }
+        return string::from_static("false");
+    }
+}
+
+// go: sdk 1.25.5 testing/testing.go:563-563 marker
+/// Go: `const marker = byte(0x16) // ^V for framing`
+pub const marker: crate::types::byte = 0x16;
+
+// go: sdk 1.25.5 testing/testing.go:587-592 chattyPrinter.prefix
+/// Go: the framing prefix a chatty line carries in test2json mode, and
+/// the empty string otherwise.
+///
+/// Deviation: Go's receiver is `*chattyPrinter` and it tests
+/// `p != nil`, because the field is nil whenever `-v` is unset. A nil
+/// receiver is not expressible in Rust, so this is a free function over
+/// the one field the method reads — both of Go's false cases (nil
+/// receiver, json off) collapse into `json == false`.
+pub fn prefix(json: bool) -> string {
+    // Go: if p != nil && p.json { return string(marker) }
+    //     return ""
+    if json {
+        return string::from_bytes(&[marker]);
+    }
+    return string::from_static("");
+}
+
+// go: sdk 1.25.5 testing/testing.go:876-878 fmtDuration
+/// Go: `fmt.Sprintf("%.2fs", d.Seconds())` — the elapsed time on a
+/// `--- PASS:` line.
+///
+/// This could not be ported until fmt learned precision: on the old
+/// verb scanner `%.2f` rendered as the default float followed by a
+/// stray `f`.
+pub fn fmtDuration(d: crate::time::Duration) -> string {
+    return crate::fmt::Sprintf!("%.2fs", d.Seconds());
 }
