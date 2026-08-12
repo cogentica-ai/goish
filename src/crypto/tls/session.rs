@@ -1,5 +1,13 @@
 // crypto/tls/session.rs — TLS 1.3 client-side session cache.
 //
+// go: none — goish-only legacy: a hand-written global session cache
+// predating the verbatim port. Go's equivalent surface is
+// ClientSessionCache + lruSessionCache (common.go) with
+// Conn.loadSession / saveSessionTicket, which are being ported; once
+// the remaining client-handshake declarations land and the dial path
+// moves onto them, this file is slated for deletion. Nothing in here
+// corresponds to a Go declaration — names are goish-invented.
+//
 // Holds NewSessionTicket-derived resumption state keyed by server_name so
 // that a subsequent Dial to the same host can resume via pre_shared_key.
 //

@@ -1,8 +1,8 @@
 // go: file crypto/cipher/ctr.go decls: NewCTR, (*ctr).refill, (*ctr).XORKeyStream
-//
-// `aesCtrWrapper.XORKeyStream` is not listed: the wrapper exists only to
-// hide aes.CTR's extra methods behind the dropped `ctrAble` interface
-// (see the GOISH021 waiver below), so its method has no port either.
+// go: waived aesCtrWrapper.XORKeyStream — services only the
+// `block.(*aes.Block)` fast-path arm, which a static-dispatch
+// `NewCTR<B: Block>` cannot express (see the deviations below); the
+// wrapper is structurally unreachable, not remaining work.
 //
 // crypto/cipher/ctr — Counter (CTR) Mode.
 //
@@ -19,13 +19,17 @@
 //     Block type. Mirrors the OFB sibling.
 //
 //   * The AES fast-path branch (`if block, ok := block.(*aes.Block)`)
-//     is dropped — goish doesn't ship `crypto/internal/fips140/aes`.
+//     is dropped — a generic `B: Block` cannot be runtime-asserted on
+//     (same constraint gcm.rs documents at newGCM). fips140/aes IS
+//     ported; callers holding an `aes.Block` reach its CTR through
+//     `crypto/aes` directly, and the generic arm below is Go's own
+//     non-AES fallback, so output is identical either way.
 //
-//   * The `ctrAble` interface is dropped — goish has no runtime type
-//     assertion. Callers wanting a custom CTR implementation should
+//   * The `ctrAble` interface is dropped for the same static-dispatch
+//     reason. Callers wanting a custom CTR implementation should
 //     write their own `Stream` directly. `aesCtrWrapper` exists only to
-//     hide aes.CTR's extra methods behind that interface, so it goes
-//     with it.
+//     hide aes.CTR's extra methods behind these dropped arms — see the
+//     `go: waived` line above.
 //     goishlint:ignore GOISH021 ctrAble, aesCtrWrapper — see above
 //
 //   * `fips140only.Enabled` branch is dropped — goish has no FIPS

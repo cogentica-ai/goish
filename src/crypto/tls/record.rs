@@ -19,6 +19,15 @@
 //             is the next multiple of block_size after (plaintext + mac_size).
 //
 // Reference: RFC 5246 §6.2.3.2 (CBC block cipher).
+//
+// go: none — goish-only legacy: a hand-written record layer + PRF +
+// SPKI parser predating the verbatim port. Go's equivalents live in
+// conn.go (halfConn), prf.go, and crypto/x509 — prf.go is fully
+// ported in prf.rs, so names here (prf12, p_sha256, read_record, …)
+// are goish-invented shapes, NOT ports of the same-named Go
+// declarations. The remaining client/server handshake declarations
+// replace this file's call sites; it is slated for deletion when the
+// dial path moves onto Conn's real read/write machinery.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 

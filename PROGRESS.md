@@ -40,19 +40,20 @@ subtrees as working code, not as verified ports.
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support
 with slices wherever it is needed.
 
-## crypto/ — 1403 / 1452 functions (96.6%)
+## crypto/ — 1404 / 1452 functions (96.7%)
 
 **65 of the 66 crypto packages are at 100%.** The single exception is
-`crypto/tls`, which holds 49 of the 49 remaining functions.
+`crypto/tls`, which holds all 48 remaining functions — and by
+declaration those split **35 real + 24 QUIC** (see below).
 
 | | |
 |---|--:|
-| ported | 1403 |
-| remaining, portable | 49 |
+| ported | 1404 |
+| remaining, portable | 48 |
 | remaining, assembly stubs | 0 |
-| waived (resolved elsewhere by design) | 1 |
-| provenance anchors | 2913 |
-| unverified names (see below) | 2 |
+| waived (resolved elsewhere by design) | 2 |
+| provenance anchors | 2919 |
+| unverified names (see below) | 0 |
 
 Complete and byte-checked against Go: `x509` (158/158), `ecdsa`,
 `ecdh`, `rsa`, `elliptic`, `cipher`, `aes`, `sha1/256/512/3`, `hmac`,
@@ -62,8 +63,10 @@ Complete and byte-checked against Go: `x509` (158/158), `ecdsa`,
 `fips140` tree.
 
 Assembly stubs are counted separately on purpose: a Go func with no body
-is not something you port by reading Go. `crypto/sha1`, `sha256` and
-`sha512` look like small gaps and are 100% assembly.
+is not something you port by reading Go. That column is now **zero** —
+`crypto/sha1`, `sha256` and `sha512` read as small gaps for a while and
+turned out to be measurement, not assembly (see the `--by-decl` note
+below).
 
 ## The percentages are optimistic, and by how much
 
@@ -90,8 +93,19 @@ landed with byte-exact vectors and the percentage did not move.
 
 | | by name | by declaration |
 |---|--:|--:|
-| crypto/ | 1403/1452 (96.6%) | **1658/1734 (95.6%)** |
-| crypto/tls | 250/299 (83.6%) | 317/377 (84.1%) |
+| crypto/ | 1404/1452 (96.7%) | **1674/1733 (96.6%)** |
+| crypto/tls | 248/296 (83.8%) | 315/374 (84.2%) |
+
+`--by-decl` had an understating defect of its own, found the same way:
+15 ported, anchored declarations read MISSING because goish ports a Go
+method whose receiver is a `&mut` value type as a *free fn* (sha1's
+`digest.checkSum`, des's `desCipher.generateSubkeys`, …), and the
+matcher only synthesized `Recv.Method` keys from Rust `impl` blocks.
+The fix credits an anchored `Recv.Method` when the fn exists in the
+same file — sound now that `anchor_check.py` verifies every range
+names exactly that declaration and `make lint` gates on it. With that,
+the residual gap is exactly the remaining tls work: 35 handshake/dial
+declarations plus 24 QUIC declarations awaiting a scope decision.
 
 The first thing it found was concrete: `crypto/x509` read 100% by name
 while missing `CertificateRequest.CheckSignature` and
@@ -129,7 +143,13 @@ strong one.
    generated, never transcribed.
 
 `port_coverage.py` reports tier-1 counts and flags anything still at
-tier 1 as **UNVERIFIED**. That number went 121 → 3 this cycle.
+tier 1 as **UNVERIFIED**. That number went 121 → 3 this cycle, and is
+now **0**: the last flag (`prf12`) turned out to be shadowing from
+`tls/record.rs` — the hand-written pre-verbatim record layer, which
+defines an *invented* `prf12` while the real port sits anchored in
+`prf.rs`. record.rs and session.rs now carry explicit goish-only
+legacy banners and are slated for deletion once the remaining
+handshake declarations replace their call sites.
 
 ### Why byte-exactness, specifically
 

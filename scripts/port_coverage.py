@@ -352,6 +352,30 @@ def pc_FUNC(src):
 
 ANCHOR_GO = re.compile(r"//\s*go:[^\n]*?([A-Za-z0-9_]+\.go):")
 
+# The receiver-qualified symbol an anchor names, in both anchor shapes:
+#   // go: sdk 1.25.5 crypto/des/block.go:217-239 desCipher.generateSubkeys
+#   // go: file crypto/cipher/gcm.go decls: (*gcmFallback).Seal, newGCMFallback
+# goish deliberately ports some Go methods as free fns (a `&mut` receiver
+# on a value type has no impl block to live in), so `rust_decl_idents`
+# can never synthesize their `Recv.Method` key — 15 ported, anchored
+# declarations read MISSING under --by-decl because of it. The anchors
+# are the authoritative link: anchor_check.py verifies each range names
+# exactly that declaration and `make lint` gates on it, so an anchored
+# symbol whose fn actually exists in the same file is a port.
+ANCHOR_SDK_SYM = re.compile(
+    r"//\s*go:\s*sdk\s+\S+\s+\S+\.go:\d+(?:-\d+)?\s+"
+    r"((?:\(\*?\w+\)|\w+)(?:\.\w+)?)")
+ANCHOR_FILE_DECLS = re.compile(r"//\s*go:\s*file\s+\S+\.go\s+decls:\s*([^\n]+)")
+
+
+def anchored_decl_keys(src):
+    """Every `Recv.Method` (or bare name) an anchor in `src` claims,
+    with Go's `(*Type).Method` pointer spelling folded to `Type.Method`."""
+    syms = set(ANCHOR_SDK_SYM.findall(src))
+    for lst in ANCHOR_FILE_DECLS.findall(src):
+        syms |= {s.strip() for s in lst.split(",") if s.strip()}
+    return {re.sub(r"^\(\*?(\w+)\)", r"\1", s) for s in syms}
+
 
 def _facts(paths):
     idents, loc, anchors, cited, unanchored = set(), 0, 0, set(), set()
@@ -360,6 +384,14 @@ def _facts(paths):
         src = open(p, errors="replace").read()
         waived |= {norm(w) for w in WAIVED.findall(src)}
         mine = rust_decl_idents(src) if BY_DECL else set(RSFN.findall(src))
+        if BY_DECL:
+            # Credit anchored Recv.Method keys whose method exists in this
+            # file as a fn under any receiver shape — see anchored_decl_keys.
+            # The fn-exists check keeps a stray anchor from crediting a
+            # declaration nobody wrote.
+            fns = set(RSFN.findall(src))
+            mine |= {k for k in anchored_decl_keys(src)
+                     if "." in k and k.split(".", 1)[1] in fns}
         idents |= mine
         n = len(ANCHOR.findall(src))
         anchors += n

@@ -27,10 +27,14 @@
 //     `type cbcEncrypter cbc` / `type cbcDecrypter cbc` pattern.
 //
 //   * AES fast-path branches (`if block, ok := b.(*aes.Block); ok`) are
-//     dropped — goish doesn't ship `crypto/internal/fips140/aes`.
+//     dropped — a generic `B: Block` cannot be runtime-asserted on
+//     (same constraint gcm.rs documents at newGCM). fips140/aes IS
+//     ported; callers holding an `aes.Block` reach its CBC through
+//     `crypto/aes` directly, and the generic arms below are Go's own
+//     non-AES fallback, so output is identical either way.
 //
-//   * `cbcEncAble` / `cbcDecAble` interfaces are dropped — goish has no
-//     runtime type assertion. Callers wanting a custom CBC mode should
+//   * `cbcEncAble` / `cbcDecAble` interfaces are dropped for the same
+//     static-dispatch reason. Callers wanting a custom CBC mode should
 //     implement `BlockMode` directly.
 //
 //   * `fips140only.Enabled` branches are dropped — goish has no FIPS
