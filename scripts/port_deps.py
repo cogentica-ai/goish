@@ -15,7 +15,7 @@ BEFORE writing any code:
 
 This exists because these were answered from memory instead:
 
-  * CRYPTO_PORT.md claimed crypto/elliptic was blocked on an unported
+  * an earlier tracking doc claimed crypto/elliptic was blocked on an unported
     math/big. math/big is 7053 lines of goish. `ls src/math/` disproves it.
   * ~900 lines of crypto/elliptic were written before discovering that
     big::Int has no PartialEq, so a struct holding one cannot derive it.

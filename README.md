@@ -37,11 +37,13 @@ Active development. The e2e suite runs 271 declared examples at tiered loop coun
 
 Goish is **single-target**: `x86_64-unknown-linux-gnu`. Other targets are deliberately out of scope.
 
-📊 **[PROGRESS.md](PROGRESS.md)** — what is ported, and how much of it is *proven* against Go rather than merely name-matched. `crypto/` is at 1186/1452 functions (81.7%), with 65 of its 66 packages complete.
+📊 **[PROGRESS.md](PROGRESS.md)** — what is ported, and how much of it is *proven* against Go rather than merely name-matched. `crypto/` is at 1188/1452 functions (81.8%), with 65 of its 66 packages complete.
 
 🗺️ **[ROADMAP.md](ROADMAP.md)** — what is left and in what order. `crypto/tls` is the whole remaining crypto gap.
 
-📐 **[AGENTS.md](AGENTS.md)** — the conventions a port must follow, and the pre-flight checks to run before starting one.
+📐 **[CONTRIBUTING.md](CONTRIBUTING.md)** — the conventions a port must follow, and the pre-flight checks to run before starting one.
+
+🔒 **[SECURITY.md](SECURITY.md)** — not audited. `crypto/tls` is hand-written rather than ported, and is the weakest surface; read this before trusting goish with anything.
 
 ## What's implemented
 
@@ -246,9 +248,17 @@ Goish is **not** a clone of Go - it ports the runtime *idioms* into a Rust owner
 
 ## License
 
-Dual-licensed under either of:
+goish's own code — the runtime, scheduler, allocator, macros and type
+system — is **MIT** ([LICENSE](LICENSE)).
 
-- Apache License, Version 2.0
-- MIT License
+Substantial parts of `src/` are ports of the Go standard library and of
+`golang.org/x/crypto` / `x/text`, translated function by function from
+the Go 1.25 source. Those remain **BSD-3-Clause, © The Go Authors**
+([LICENSE-GO](LICENSE-GO)) — 876 provenance anchors across 176 files
+identify exactly which code this is. Both licenses must travel with any
+redistribution, source or binary.
 
-at your option.
+See [NOTICE.md](NOTICE.md) for the details.
+
+goish is not affiliated with, endorsed by, or supported by Google or the
+Go project. "Go" is a trademark of Google LLC.

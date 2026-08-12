@@ -2,7 +2,7 @@
 name = "goish-macros"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "Proc-macros for goish v1 (#[goish::main] entry point)."
 
 [lib]

@@ -2,7 +2,7 @@
 
 What is left, in the order it makes sense to do it. Current state lives
 in [PROGRESS.md](PROGRESS.md); conventions and the rules a port must
-follow live in [AGENTS.md](AGENTS.md).
+follow live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## 1. `crypto/tls` — the whole remaining crypto gap
 
@@ -79,7 +79,7 @@ All three are reproduced and recorded (see PROGRESS.md). Each is a
    at compile time with a `const` assert pointing at `.As::<>()`
    (cheapest, converts a silent miss into an error), narrow the blanket
    `HasDynAny` impl (needs a marker trait threaded through every
-   implementor), or wait for specialization. Documented as AGENTS.md
+   implementor), or wait for specialization. Documented as CONTRIBUTING.md
    §9b in the meantime.
 3. **`ecdsa::PrivateKey` must implement `crypto::Signer`** so an ECDSA
    key can sign a certificate. Small and self-contained.

@@ -39,7 +39,7 @@ SKIP_FILE = re.compile(
 # `*_asm.go` / `*_amd64.go` are Go's `//go:build !purego` assembly entry
 # points. goish CAN write assembly (the runtime already does: gogo,
 # mcall, swap_context, the preempt trampoline), so these are in scope and
-# tracked as performance work — see CRYPTO_PORT.md "Assembly".
+# tracked as performance work — see PROGRESS.md.
 # `--purego` reports the subset reachable without any asm, for triage.
 SKIP_ASM = re.compile(r"_(asm|amd64)\.go$")
 
@@ -77,7 +77,7 @@ def goroot(argv):
 def norm(s):
     """Fold case, but NOT underscores.
 
-    goish keeps Go's spelling (AGENTS.md §5: `fileLogger` stays
+    goish keeps Go's spelling (CONTRIBUTING.md §5: `fileLogger` stays
     `fileLogger`), so the only legitimate drift is case. Folding `_`
     away as well made every invented snake_case helper collide with a
     real Go name: `crypto/tls`'s hand-written `read_record`,

@@ -4,18 +4,18 @@ Where the port actually stands, and how much of it is *proven* rather
 than merely counted. Numbers are regenerated with
 `scripts/port_coverage.py`; the last refresh was 2026-08-12.
 
-## crypto/ — 1186 / 1452 functions (81.7%)
+## crypto/ — 1188 / 1452 functions (81.8%)
 
 **65 of the 66 crypto packages are at 100%.** The single exception is
-`crypto/tls`, which holds 266 of the 266 remaining functions.
+`crypto/tls`, which holds 264 of the 264 remaining functions.
 
 | | |
 |---|--:|
-| ported | 1186 |
-| remaining, portable | 255 |
-| remaining, assembly stubs | 11 |
+| ported | 1188 |
+| remaining, portable | 254 |
+| remaining, assembly stubs | 10 |
 | waived (resolved elsewhere by design) | 1 |
-| provenance anchors | 2166 |
+| provenance anchors | 2172 |
 | unverified names (see below) | 10 |
 
 Complete and byte-checked against Go: `x509` (158/158), `ecdsa`,
@@ -104,7 +104,7 @@ need `make e2e-full` to validate, so none is bundled into a port.
   resolves through the blanket `HasDynAny for T`, probing the wrapper's
   `TypeId` and never the payload's. Silent — a comma-ok assertion
   reports `false`. Use `.As::<dyn Trait + Send + Sync>()`. See
-  AGENTS.md §9b.
+  CONTRIBUTING.md §9b.
 - **`crypto/ecdsa::PrivateKey` does not implement `crypto::Signer`**
   (Go's does), so an ECDSA key cannot yet sign an X.509 certificate.
 

@@ -1,7 +1,6 @@
-# goish agent reminders
+# Contributing to goish
 
-This file captures the project conventions so that any coding agent
-can discover them. **Scope: the goish runtime itself** (this repo).
+This file captures the project conventions. **Scope: the goish runtime itself** (this repo).
 
 ## Repo layout (read first)
 
@@ -13,8 +12,9 @@ goish-v1/
 │                                  goish::interface, goish::var!, …)
 ├── doc/                          chapter drafts (untracked, in progress)
 ├── DISCUSSION_VAR.md             ← Doctrine 2 design record
-├── AGENTS.md                     ← this file
-└── CLAUDE.md                     `@AGENTS.md` redirect
+├── CONTRIBUTING.md               ← this file
+├── PROGRESS.md                   what is ported, and how it is verified
+└── ROADMAP.md                    what is left, in order
 ```
 
 ### Test commands

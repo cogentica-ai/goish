@@ -9,7 +9,10 @@ edition = "2021"
 rust-version = "1.86"
 authors = ["Chanwit Kaewkasi <chanwit@gmail.com>"]
 description = "Goish v1 — Go-style stdlib for Rust, no_std and no glibc, built on raw Linux syscalls."
-license = "MIT OR Apache-2.0"
+# goish's own code is MIT. Substantial parts of src/ are ports of the Go
+# standard library and remain BSD-3-Clause (c) The Go Authors — see
+# LICENSE-GO and NOTICE.md. SPDX expression covers both.
+license = "MIT AND BSD-3-Clause"
 
 [lib]
 path = "src/lib.rs"
