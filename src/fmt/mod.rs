@@ -15,7 +15,7 @@
 // (%U) are deferred — they need helpers that don't exist yet (float
 // printing, type ids).
 //
-// Flags: width, '-' (left align), '0' (zero pad). Precision deferred.
+// Flags: width, precision (`%.3f`), '-' (left align), '0' (zero pad).
 //
 // Argument dispatch uses the autoref-spec trick (see __fmt_arg) so a
 // single macro call site can pick the right `FmtArg` variant per arg
@@ -104,6 +104,18 @@ pub trait Formatter {
 /// file. User types satisfy it via the blanket on `Stringer` below.
 pub trait Format {
     fn fmt(&self, verb: byte, f: &mut FmtBuf);
+
+    /// Render with an explicit precision from the verb (`%.3f` → 3).
+    ///
+    /// `prec < 0` means the format string gave none, which is the
+    /// shortest-round-trip default for floats and "no truncation" for
+    /// strings. Defaulting to `fmt` keeps every existing impl correct
+    /// without change: precision only means something for a handful of
+    /// types, and the rest are entitled to ignore it — which is also
+    /// what Go does, since `%.2d` is not a thing.
+    fn fmt_prec(&self, verb: byte, _prec: i64, f: &mut FmtBuf) {
+        self.fmt(verb, f);
+    }
 }
 
 // Blanket so any user type that impls Stringer is automatically
@@ -154,8 +166,12 @@ pub enum FmtArg<'a> {
 
 impl<'a> FmtArg<'a> {
     fn write(&self, verb: byte, f: &mut FmtBuf) {
+        self.write_prec(verb, -1, f);
+    }
+
+    fn write_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
         match self {
-            FmtArg::Val(v) => v.fmt(verb, f),
+            FmtArg::Val(v) => v.fmt_prec(verb, prec, f),
             FmtArg::Err(e) => {
                 // %s / %v / default for an error → Error() text.
                 // Go: nil error formats as "<nil>".
@@ -443,21 +459,30 @@ macro_rules! impl_format_for_unsigned {
 impl_format_for_signed!(i8, i16, i32, i64, isize);
 impl_format_for_unsigned!(u16, u32, u64, usize);
 
-// Floats — route through strconv::FormatFloat. %v defaults to 'g' with
-// shortest round-trip (prec=-1). Width/precision flags from the verb
-// scanner aren't yet honored for floats; FormatFloat takes its own prec.
+// Floats — route through strconv::FormatFloat.
+//
+// Go: "For floating-point values, width sets the minimum width of the
+// field and precision sets the number of places after the decimal
+// point, if appropriate. For example %6.2f prints 123.45. The default
+// precision is the smallest number of digits necessary to represent the
+// value uniquely" — i.e. FormatFloat's prec = -1. A verb that gives a
+// precision passes it straight through.
 impl Format for f64 {
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
-        let (fmt, prec) = match verb {
-            b'f' | b'F' => (b'f', -1i64),
-            b'e' => (b'e', -1i64),
-            b'E' => (b'E', -1i64),
-            b'g' | b'v' => (b'g', -1i64),
-            b'G' => (b'G', -1i64),
-            b'x' => (b'x', -1i64),
-            b'X' => (b'X', -1i64),
-            b'b' => (b'b', -1i64),
-            _ => (b'g', -1i64),
+        self.fmt_prec(verb, -1, f);
+    }
+
+    fn fmt_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
+        let fmt = match verb {
+            b'f' | b'F' => b'f',
+            b'e' => b'e',
+            b'E' => b'E',
+            b'g' | b'v' => b'g',
+            b'G' => b'G',
+            b'x' => b'x',
+            b'X' => b'X',
+            b'b' => b'b',
+            _ => b'g',
         };
         let s = crate::strconv::FormatFloat(*self, fmt, prec, 64);
         f.extend(s.as_bytes());
@@ -466,16 +491,20 @@ impl Format for f64 {
 
 impl Format for f32 {
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
-        let (fmt, prec) = match verb {
-            b'f' | b'F' => (b'f', -1i64),
-            b'e' => (b'e', -1i64),
-            b'E' => (b'E', -1i64),
-            b'g' | b'v' => (b'g', -1i64),
-            b'G' => (b'G', -1i64),
-            b'x' => (b'x', -1i64),
-            b'X' => (b'X', -1i64),
-            b'b' => (b'b', -1i64),
-            _ => (b'g', -1i64),
+        self.fmt_prec(verb, -1, f);
+    }
+
+    fn fmt_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
+        let fmt = match verb {
+            b'f' | b'F' => b'f',
+            b'e' => b'e',
+            b'E' => b'E',
+            b'g' | b'v' => b'g',
+            b'G' => b'G',
+            b'x' => b'x',
+            b'X' => b'X',
+            b'b' => b'b',
+            _ => b'g',
         };
         let s = crate::strconv::FormatFloat(*self as f64, fmt, prec, 32);
         f.extend(s.as_bytes());
@@ -717,8 +746,29 @@ fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> 
             has_width = true;
             i += 1;
         }
+        // Parse optional `.precision`. Go: "For floating-point values,
+        // width sets the minimum width of the field and precision sets
+        // the number of places after the decimal point, if appropriate.
+        // For example %6.2f prints 123.45." A bare '.' means precision
+        // zero, as in Go (`%.f` == `%.0f`).
+        //
+        // Before this existed the '.' and its digits were left in the
+        // format string, so `%.2f` consumed the argument as `%` + junk
+        // and emitted `3.141592f` — the default rendering with a
+        // stray verb letter glued on. Anything using `%.2f` was
+        // silently wrong, not just unformatted.
+        let mut precision: usize = 0;
+        let mut has_precision = false;
+        if i < format.len() && format[i] == b'.' {
+            i += 1;
+            has_precision = true;
+            while i < format.len() && format[i] >= b'0' && format[i] <= b'9' {
+                precision = precision * 10 + (format[i] - b'0') as usize;
+                i += 1;
+            }
+        }
         if i >= format.len() {
-            // Trailing width without verb — emit raw.
+            // Trailing width/precision without verb — emit raw.
             f.push(b'%');
             break;
         }
@@ -761,11 +811,12 @@ fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> 
             continue;
         }
         // Regular verb.
+        let prec_arg: i64 = if has_precision { precision as i64 } else { -1 };
         if arg_idx < args.len() {
             if has_width {
                 // Format into a temp buffer, then pad.
                 let mut tmp = FmtBuf::new();
-                args[arg_idx].write(verb, &mut tmp);
+                args[arg_idx].write_prec(verb, prec_arg, &mut tmp);
                 let bytes = tmp.into_bytes();
                 let pad_count = width.saturating_sub(bytes.len());
                 let pad_byte = if zero_pad && !left_align {
@@ -787,7 +838,7 @@ fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> 
                     }
                 }
             } else {
-                args[arg_idx].write(verb, f);
+                args[arg_idx].write_prec(verb, prec_arg, f);
             }
             arg_idx += 1;
         } else {
