@@ -4778,7 +4778,9 @@ pub fn handshake_server_cipherSuiteOk(
     let hs = handshake_server::serverHandshakeState {
         c,
         clientHello: handshake_messages::clientHelloMsg::default(),
+        hello: handshake_messages::serverHelloMsg::default(),
         suite: None,
+        masterSecret: crate::goslice::slice::new(),
         ecdheOk: which != 1,
         ecSignOk: which != 2,
         rsaDecryptOk: which != 4,
@@ -4925,7 +4927,9 @@ pub fn handshake_server_pickCipherSuite(
     let mut hs = handshake_server::serverHandshakeState {
         c,
         clientHello,
+        hello: handshake_messages::serverHelloMsg::default(),
         suite: None,
+        masterSecret: crate::goslice::slice::new(),
         ecdheOk: !noECDHE,
         ecSignOk: true,
         rsaDecryptOk: true,
@@ -4939,4 +4943,72 @@ pub fn handshake_server_pickCipherSuite(
         crate::gostring::string::from_static(""),
         hs.suite.unwrap().id as crate::types::int,
     );
+}
+
+// go: none — goish-only: serverHandshakeState.establishKeys is
+// unexported in Go, where the tests are in-package. Derives the keys for
+// one suite and reports `(errText, explicitNonceLen before the
+// ChangeCipherSpec, after it, whether a MAC was staged, clientKey,
+// serverKey, clientIV, serverIV)`.
+#[doc(hidden)]
+pub fn handshake_server_establishKeys(
+    suiteID: crate::types::uint16,
+) -> (
+    crate::gostring::string,
+    crate::types::int,
+    crate::types::int,
+    bool,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let mut c = conn::Conn::default();
+    c.__setMemConn(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    )));
+    c.__setVers(common::VersionTLS12);
+    let suite = cipher_suites::cipherSuiteByID(suiteID).unwrap();
+    let ms = crate::goslice::slice::__from_vec(
+        (0..48u16).map(|i| (0x10 + i) as crate::types::byte).collect::<alloc::vec::Vec<_>>(),
+    );
+    let cr: alloc::vec::Vec<crate::types::byte> =
+        (0..32u16).map(|i| (0x40 + i) as crate::types::byte).collect();
+    let sr: alloc::vec::Vec<crate::types::byte> =
+        (0..32u16).map(|i| (0x80 + i) as crate::types::byte).collect();
+    let mut clientHello = handshake_messages::clientHelloMsg::default();
+    clientHello.random = cr.clone();
+    let mut hello = handshake_messages::serverHelloMsg::default();
+    hello.random = sr.clone();
+    let mut hs = handshake_server::serverHandshakeState {
+        c,
+        clientHello,
+        hello,
+        suite: Some(suite),
+        masterSecret: ms.clone(),
+        ecdheOk: true,
+        ecSignOk: true,
+        rsaDecryptOk: true,
+        rsaSignOk: true,
+    };
+    let err = hs.establishKeys();
+    let before = hs.c.__inExplicitNonceLen();
+    let staged = hs.c.__changeCipherSpecs();
+    let after = hs.c.__inExplicitNonceLen();
+    let (_, _, ck, sk, civ, siv) = prf::keysFromMasterSecret(
+        common::VersionTLS12,
+        suite,
+        ms,
+        crate::goslice::slice::__from_vec(cr),
+        crate::goslice::slice::__from_vec(sr),
+        suite.macLen,
+        suite.keyLen,
+        suite.ivLen,
+    );
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (text, before, after, staged, ck, sk, civ, siv);
 }

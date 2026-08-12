@@ -2419,6 +2419,32 @@ fn main() {
     eq("server pickCipherSuite with ECDHE unavailable", sp2e,
        "tls: no cipher suite supported by both client and server; client offered: [c02f]");
 
+    // ─── handshake_server.go: establishKeys. Derives the six connection
+    //     keys and STAGES them — they only go live at the
+    //     ChangeCipherSpec, which is what the two nonce lengths show.
+    //     From goref.sh.
+    let (ekErr, ekBefore, ekAfter, ekStaged, ekCK, ekSK, ekCIV, ekSIV) =
+        tls::handshake_server_establishKeys(tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256);
+    eq("establishKeys AEAD err", ekErr, "");
+    check_n("establishKeys leaves the read half unprotected", ekBefore, 0);
+    check("establishKeys staged a cipher spec", ekStaged);
+    // AES-GCM at TLS 1.2 carries an 8-byte explicit nonce per record.
+    check_n("establishKeys AEAD explicit nonce after CCS", ekAfter, 8);
+    eq("establishKeys AEAD clientKey", hexOf(ekCK), "c2d0c1b8d0565b9bc1f091845a22a0cc");
+    eq("establishKeys AEAD serverKey", hexOf(ekSK), "c7fb39fefc7c819b17b1a03df8664f27");
+    eq("establishKeys AEAD clientIV", hexOf(ekCIV), "7dc4f575");
+    eq("establishKeys AEAD serverIV", hexOf(ekSIV), "22fe1ae8");
+
+    let (cbErr, _, cbAfter, _, cbCK, _, cbCIV, _) =
+        tls::handshake_server_establishKeys(tls::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA);
+    eq("establishKeys CBC err", cbErr, "");
+    // CBC at TLS 1.1+ carries a per-record explicit IV one block long,
+    // which is the BEAST countermeasure — and the same master secret
+    // yields entirely different keys, because macLen/keyLen/ivLen differ.
+    check_n("establishKeys CBC explicit IV after CCS", cbAfter, 16);
+    eq("establishKeys CBC clientKey", hexOf(cbCK), "3ee24aef9a586bcdcb64a4e16bebafba");
+    eq("establishKeys CBC clientIV", hexOf(cbCIV), "c80c4de292da0d7ea050ddc3c2d521aa");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

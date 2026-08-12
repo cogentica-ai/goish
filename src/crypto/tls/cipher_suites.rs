@@ -969,7 +969,7 @@ pub(crate) const suiteSHA384: int = 1 << 3;
 // cases, same constructors.
 pub(crate) enum anyCipher {
     Stream(rc4::Cipher),
-    BlockMode(Box<dyn cipher::BlockMode + Send + Sync>),
+    BlockMode(Box<dyn super::conn::cbcMode + Send + Sync>),
 }
 
 // go: sdk 1.25.5 crypto/tls/cipher_suites.go:408-411 cipherRC4

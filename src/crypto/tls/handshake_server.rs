@@ -1,4 +1,4 @@
-// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo, serverHandshakeState.pickCipherSuite
+// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo, serverHandshakeState.pickCipherSuite, serverHandshakeState.establishKeys
 //
 // crypto/tls — the server handshake state machine.
 //
@@ -7,7 +7,7 @@
 // handshake. What is here is the one function that does not: the ECDHE
 // support check, which `ClientHelloInfo.SupportsCertificate` also calls.
 //
-// goishlint:ignore GOISH018 serverHandshake, handshake, readClientHello, processClientHello, checkForResumption, doResumeHandshake, doFullHandshake, establishKeys, readFinished, sendSessionTicket, sendFinished, processCertsFromClient — serverHandshakeState and Conn; see the banner. ROADMAP.md.
+// goishlint:ignore GOISH018 serverHandshake, handshake, readClientHello, processClientHello, checkForResumption, doResumeHandshake, doFullHandshake, readFinished, sendSessionTicket, sendFinished, processCertsFromClient — serverHandshakeState and Conn; see the banner. ROADMAP.md.
 
 #![allow(non_snake_case, dead_code)]
 
@@ -157,7 +157,9 @@ pub(crate) fn negotiateALPN(
 pub(crate) struct serverHandshakeState {
     pub c: super::conn::Conn,
     pub clientHello: super::handshake_messages::clientHelloMsg,
+    pub hello: super::handshake_messages::serverHelloMsg,
     pub suite: Option<&'static super::cipher_suites::cipherSuite>,
+    pub masterSecret: slice<crate::types::byte>,
     pub ecdheOk: bool,
     pub ecSignOk: bool,
     pub rsaDecryptOk: bool,
@@ -369,4 +371,64 @@ fn hexList(v: &slice<uint16>) -> crate::gostring::string {
     }
     out.push(b']');
     return crate::gostring::string::from_bytes(&out);
+}
+
+
+impl serverHandshakeState {
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:770-791 serverHandshakeState.establishKeys
+    /// Derive the six connection keys and stage them on both half
+    /// connections, ready for the ChangeCipherSpec that activates them.
+    pub(crate) fn establishKeys(&mut self) -> error {
+        let suite = self.suite.unwrap();
+        // Go: clientMAC, serverMAC, clientKey, serverKey, clientIV, serverIV :=
+        //         keysFromMasterSecret(c.vers, hs.suite, hs.masterSecret,
+        //             hs.clientHello.random, hs.hello.random,
+        //             hs.suite.macLen, hs.suite.keyLen, hs.suite.ivLen)
+        let (clientMAC, serverMAC, clientKey, serverKey, clientIV, serverIV) =
+            super::prf::keysFromMasterSecret(
+                self.c.__vers(),
+                suite,
+                self.masterSecret.clone(),
+                slice::__from_vec(self.clientHello.random.clone()),
+                slice::__from_vec(self.hello.random.clone()),
+                suite.macLen,
+                suite.keyLen,
+                suite.ivLen,
+            );
+
+        // Go: var clientCipher, serverCipher any
+        //     var clientHash, serverHash hash.Hash
+        //     if hs.suite.aead == nil {
+        //         clientCipher = hs.suite.cipher(clientKey, clientIV, true /* for reading */)
+        //         clientHash = hs.suite.mac(clientMAC)
+        //         serverCipher = hs.suite.cipher(serverKey, serverIV, false /* not for reading */)
+        //         serverHash = hs.suite.mac(serverMAC)
+        //     } else {
+        //         clientCipher = hs.suite.aead(clientKey, clientIV)
+        //         serverCipher = hs.suite.aead(serverKey, serverIV)
+        //     }
+        let clientCipher: super::conn::halfConnCipher;
+        let serverCipher: super::conn::halfConnCipher;
+        let mut clientHash: Option<alloc::boxed::Box<dyn crate::hash::Hash + Send + Sync>> = None;
+        let mut serverHash: Option<alloc::boxed::Box<dyn crate::hash::Hash + Send + Sync>> = None;
+        if suite.aead.is_none() {
+            let cipherFn = suite.cipher.unwrap();
+            let macFn = suite.mac.unwrap();
+            clientCipher = super::conn::halfConnCipherOf(cipherFn(clientKey, clientIV, true));
+            clientHash = Some(macFn(clientMAC));
+            serverCipher = super::conn::halfConnCipherOf(cipherFn(serverKey, serverIV, false));
+            serverHash = Some(macFn(serverMAC));
+        } else {
+            let aeadFn = suite.aead.unwrap();
+            clientCipher = super::conn::halfConnCipher::AEAD(aeadFn(clientKey, clientIV));
+            serverCipher = super::conn::halfConnCipher::AEAD(aeadFn(serverKey, serverIV));
+        }
+
+        // Go: c.in.prepareCipherSpec(c.vers, clientCipher, clientHash)
+        //     c.out.prepareCipherSpec(c.vers, serverCipher, serverHash)
+        //     return nil
+        let vers = self.c.__vers();
+        self.c.__prepareCipherSpecs(vers, clientCipher, clientHash, serverCipher, serverHash);
+        return errors::nil;
+    }
 }

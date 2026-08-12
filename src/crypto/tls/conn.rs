@@ -1174,6 +1174,32 @@ impl Conn {
     #[doc(hidden)]
     pub fn __cipherSuite(&self) -> uint16 { return self.cipherSuite; }
 
+
+    // go: none — goish-only: Go calls `c.in.prepareCipherSpec` and
+    // `c.out.prepareCipherSpec` directly, because both halves are
+    // unexported fields. goish's callers are in sibling modules, so the
+    // pair is named once here.
+    #[doc(hidden)]
+    pub fn __prepareCipherSpecs(
+        &mut self,
+        vers: uint16,
+        inCipher: halfConnCipher,
+        inMac: Option<alloc::boxed::Box<dyn Hash + Send + Sync>>,
+        outCipher: halfConnCipher,
+        outMac: Option<alloc::boxed::Box<dyn Hash + Send + Sync>>,
+    ) {
+        self.in_.prepareCipherSpec(vers, inCipher, inMac);
+        self.out.prepareCipherSpec(vers, outCipher, outMac);
+    }
+    // go: none — goish-only: see `__prepareCipherSpecs`.
+    #[doc(hidden)]
+    pub fn __inExplicitNonceLen(&self) -> int { return self.in_.explicitNonceLen(); }
+    // go: none — goish-only: see `__prepareCipherSpecs`.
+    #[doc(hidden)]
+    pub fn __changeCipherSpecs(&mut self) -> bool {
+        return self.in_.changeCipherSpec().is_none() && self.out.changeCipherSpec().is_none();
+    }
+
     // go: sdk 1.25.5 crypto/tls/conn.go:99-101 Conn.LocalAddr
     /// Go: "LocalAddr returns the local network address."
     pub fn LocalAddr(&self) -> crate::net::TCPAddr {
@@ -2138,4 +2164,18 @@ impl Conn {
         }
         return errors::nil;
     }
+}
+
+
+// go: none — goish-only: Go's `cipherSuite.cipher` returns `any`, and
+// `halfConn.cipher` is the same `any` — the record layer asserts it back
+// to `cipher.Stream` or `cbcMode`. goish spells the producer's set as
+// `anyCipher` and the consumer's as `halfConnCipher`, so the two need
+// bridging. Same two cases, and `anyCipher` carries `cbcMode` rather
+// than `cipher::BlockMode` precisely so `SetIV` survives the trip.
+pub(crate) fn halfConnCipherOf(c: super::cipher_suites::anyCipher) -> halfConnCipher {
+    match c {
+        super::cipher_suites::anyCipher::Stream(s) => return halfConnCipher::Stream(s),
+        super::cipher_suites::anyCipher::BlockMode(m) => return halfConnCipher::CBC(m),
+    };
 }
