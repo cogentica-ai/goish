@@ -105,6 +105,10 @@ pub trait Formatter {
 pub trait Format {
     fn fmt(&self, verb: byte, f: &mut FmtBuf);
 
+    // go: none — goish idiom: Go's fmt carries width/precision/flags in
+    // its `pp` printer state; goish's Format trait takes the verb byte
+    // only, so precision arrives as an explicit parameter with a
+    // default body that ignores it.
     /// Render with an explicit precision from the verb (`%.3f` → 3).
     ///
     /// `prec < 0` means the format string gave none, which is the
@@ -165,10 +169,14 @@ pub enum FmtArg<'a> {
 }
 
 impl<'a> FmtArg<'a> {
+    // go: none — goish idiom: dispatch envelope for the autoref-spec
+    // trick; no Go counterpart.
     fn write(&self, verb: byte, f: &mut FmtBuf) {
         self.write_prec(verb, -1, f);
     }
 
+    // go: none — goish idiom: as `write`, threading the verb's
+    // precision to the value.
     fn write_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
         match self {
             FmtArg::Val(v) => v.fmt_prec(verb, prec, f),
@@ -279,7 +287,7 @@ impl Format for &slice<byte> {
 impl Format for char {
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         // %c / %v default to the character. %d would be the codepoint.
-        let r = *self as rune;
+        let r = crate::rune(*self);
         format_rune_or_int(r, verb, f);
     }
 }
@@ -468,6 +476,7 @@ impl_format_for_unsigned!(u16, u32, u64, usize);
 // value uniquely" — i.e. FormatFloat's prec = -1. A verb that gives a
 // precision passes it straight through.
 impl Format for f64 {
+    // go: none — goish idiom: no-precision form defers to fmt_prec.
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         self.fmt_prec(verb, -1, f);
     }
@@ -490,6 +499,7 @@ impl Format for f64 {
 }
 
 impl Format for f32 {
+    // go: none — goish idiom: no-precision form defers to fmt_prec.
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         self.fmt_prec(verb, -1, f);
     }

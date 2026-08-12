@@ -1,4 +1,4 @@
-// go: file testing/benchmark.go decls: BenchmarkResult, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
+// go: file testing/benchmark.go decls: BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
 //
 // testing/benchmark.go — the result type a benchmark reports, its
 // derived per-operation metrics, and the column formatting `go test
@@ -19,6 +19,9 @@
 //
 // Everything in this file is reachable without either: pure arithmetic
 // over a BenchmarkResult a caller filled in, plus the formatting.
+//
+// goishlint:ignore GOISH018 Benchmark, Elapsed, Loop, Next, ReportAllocs, ReportMetric, ResetTimer, RunParallel, SetBytes, SetParallelism, StartTimer, StopTimer, RunBenchmarks, benchmarkName, doBench, launch, loopSlowPath, runN, run, run1, add, stopOrScaleBLoop, processBench, checkParallel, StopTimer, Set, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
+// goishlint:ignore GOISH021 B, PB, InternalBenchmark, benchState, durationOrCountFlag, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchTime, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
 
 #![allow(non_snake_case)]
 
@@ -28,6 +31,7 @@ use alloc::vec::Vec;
 
 use crate::gostring::string;
 use crate::types::{float64, int, int64, uint64};
+use crate::{float64 as to_float64, int as to_int, int64 as to_int64};
 
 // go: sdk 1.25.5 testing/benchmark.go:531-540 BenchmarkResult
 /// Go: "The results of a benchmark run."
@@ -56,14 +60,14 @@ impl BenchmarkResult {
         // Go: if v, ok := r.Extra["ns/op"]; ok { return int64(v) }
         let (v, ok) = self.Extra.Get(string::from_static("ns/op"));
         if ok {
-            return v as int64;
+            return to_int64(v);
         }
         // Go: if r.N <= 0 { return 0 }
         //     return r.T.Nanoseconds() / int64(r.N)
         if self.N <= 0 {
             return 0;
         }
-        return self.T.Nanoseconds() / (self.N as int64);
+        return self.T.Nanoseconds() / to_int64(self.N);
     }
 
     // go: sdk 1.25.5 testing/benchmark.go:554-562 BenchmarkResult.mbPerSec
@@ -80,7 +84,7 @@ impl BenchmarkResult {
             return 0.0;
         }
         // Go: return (float64(r.Bytes) * float64(r.N) / 1e6) / r.T.Seconds()
-        return ((self.Bytes as float64) * (self.N as float64) / 1e6) / self.T.Seconds();
+        return (to_float64(self.Bytes) * to_float64(self.N) / 1e6) / self.T.Seconds();
     }
 
     // go: sdk 1.25.5 testing/benchmark.go:566-574 BenchmarkResult.AllocsPerOp
@@ -88,12 +92,12 @@ impl BenchmarkResult {
     pub fn AllocsPerOp(&self) -> int64 {
         let (v, ok) = self.Extra.Get(string::from_static("allocs/op"));
         if ok {
-            return v as int64;
+            return to_int64(v);
         }
         if self.N <= 0 {
             return 0;
         }
-        return (self.MemAllocs as int64) / (self.N as int64);
+        return to_int64(self.MemAllocs) / to_int64(self.N);
     }
 
     // go: sdk 1.25.5 testing/benchmark.go:578-586 BenchmarkResult.AllocedBytesPerOp
@@ -101,12 +105,12 @@ impl BenchmarkResult {
     pub fn AllocedBytesPerOp(&self) -> int64 {
         let (v, ok) = self.Extra.Get(string::from_static("B/op"));
         if ok {
-            return v as int64;
+            return to_int64(v);
         }
         if self.N <= 0 {
             return 0;
         }
-        return (self.MemBytes as int64) / (self.N as int64);
+        return to_int64(self.MemBytes) / to_int64(self.N);
     }
 
     // go: sdk 1.25.5 testing/benchmark.go:595-630 BenchmarkResult.String
@@ -117,7 +121,10 @@ impl BenchmarkResult {
     /// the same name. String does not include allocs/op or B/op, since
     /// those are reported by MemString."
     pub fn String(&self) -> string {
-        let mut buf: Vec<u8> = Vec::new();
+        // Go builds into a `strings.Builder`, which is an io.Writer;
+        // goish's equivalent is bytes::Buffer, so prettyPrint keeps
+        // Go's `w io.Writer` parameter instead of taking a raw Vec.
+        let mut buf = crate::bytes::Buffer::new();
         // Go: fmt.Fprintf(buf, "%8d", r.N)
         push(&mut buf, crate::fmt::Sprintf!("%8d", self.N));
 
@@ -126,10 +133,10 @@ impl BenchmarkResult {
         let ns: float64 = if ok {
             ns_extra
         } else {
-            (self.T.Nanoseconds() as float64) / (self.N as float64)
+            to_float64(self.T.Nanoseconds()) / to_float64(self.N)
         };
         if ns != 0.0 {
-            buf.push(b'\t');
+            push(&mut buf, string::from_static("\t"));
             prettyPrint(&mut buf, ns, &string::from_static("ns/op"));
         }
 
@@ -159,11 +166,11 @@ impl BenchmarkResult {
             return x.cmp(y);
         });
         for k in extraKeys.iter() {
-            buf.push(b'\t');
+            push(&mut buf, string::from_static("\t"));
             let (v, _) = self.Extra.Get(k.clone());
             prettyPrint(&mut buf, v, k);
         }
-        return string::from_bytes(&buf);
+        return buf.String();
     }
 
     // go: sdk 1.25.5 testing/benchmark.go:660-663 BenchmarkResult.MemString
@@ -184,8 +191,8 @@ impl BenchmarkResult {
 // (`fmt.Fprintf(buf, ...)` on a `strings.Builder`). goish's callers
 // here all build one byte vector, so the helper appends instead of
 // going through the writer indirection.
-fn push(buf: &mut Vec<u8>, s: string) {
-    buf.extend_from_slice(s.as_bytes());
+fn push(buf: &mut crate::bytes::Buffer, s: string) {
+    let _ = crate::io::Writer::Write(buf, crate::slice::__from_vec(s.as_bytes().to_vec()));
 }
 
 // go: sdk 1.25.5 testing/benchmark.go:632-657 prettyPrint
@@ -194,9 +201,7 @@ fn push(buf: &mut Vec<u8>, s: string) {
 /// whole part in 10 places while aligning the decimal point of all
 /// fractional formats."
 ///
-/// Deviation: Go takes an `io.Writer`; goish appends to the caller's
-/// buffer, which is what both call sites want.
-pub fn prettyPrint(w: &mut Vec<u8>, x: float64, unit: &string) {
+pub fn prettyPrint(w: &mut dyn crate::io::Writer, x: float64, unit: &string) {
     // Go: switch y := math.Abs(x); {
     let y = crate::math::Abs(x);
     let s: string = if y == 0.0 || y >= 999.95 {
@@ -216,7 +221,7 @@ pub fn prettyPrint(w: &mut Vec<u8>, x: float64, unit: &string) {
     } else {
         crate::fmt::Sprintf!("%18.7f %s", x, unit.clone())
     };
-    w.extend_from_slice(s.as_bytes());
+    let _ = w.Write(crate::slice::__from_vec(s.as_bytes().to_vec()));
 }
 
 // go: sdk 1.25.5 testing/benchmark.go:666-671 benchmarkName
@@ -253,5 +258,5 @@ pub fn predictN(goalns: int64, prevIters: int64, prevns: int64, last: int64) -> 
     n = n.max(last + 1);
     // Go: "Don't run more than 1e9 times."
     n = n.min(1_000_000_000);
-    return n as int;
+    return to_int(n);
 }

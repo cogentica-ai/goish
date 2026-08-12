@@ -38,7 +38,6 @@
 extern crate alloc;
 extern crate goish;
 
-use alloc::vec::Vec;
 use goish::gostring::string;
 use goish::testing::benchmark::{benchmarkName, predictN, prettyPrint, BenchmarkResult};
 use goish::time;
@@ -78,9 +77,9 @@ fn main() {
         ];
         let mut ok = true;
         for (x, want) in cases.iter() {
-            let mut buf: Vec<u8> = Vec::new();
+            let mut buf = goish::bytes::Buffer::new();
             prettyPrint(&mut buf, *x, &s("ns/op"));
-            let got = string::from_bytes(&buf);
+            let got = buf.String();
             if got != s(want) {
                 fmt::Println!("    prettyPrint mismatch got [", got, "] want [", *want, "]");
                 ok = false;

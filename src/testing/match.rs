@@ -1,4 +1,4 @@
-// go: file testing/match.go decls: matcher, filterMatch, simpleMatch, alternationMatch, allMatcher, newMatcher, matcher.fullName, matcher.clearSubNames, simpleMatch.matches, simpleMatch.verify, alternationMatch.matches, alternationMatch.verify, splitRegexp, matcher.unique, parseSubtestNumber, rewrite, isSpace
+// go: file testing/match.go decls: allMatcher, newMatcher, matcher.fullName, matcher.clearSubNames, simpleMatch.matches, simpleMatch.verify, alternationMatch.matches, alternationMatch.verify, splitRegexp, matcher.unique, parseSubtestNumber, rewrite, isSpace
 //
 // testing/match.go — name sanitizing, uniquing and -run/-skip filtering
 // for tests and subtests.
@@ -9,6 +9,10 @@
 // main (`testDeps.MatchString`), so `testing` stays decoupled from it
 // and callers choose the engine. goish keeps that shape exactly, which
 // is why this file ports cleanly even though goish's `regexp` is at 7%.
+//
+// goishlint:ignore GOISH021 simpleMatch, alternationMatch — Go declares these as named slice types implementing filterMatch; goish lowers the closed two-case interface to an enum, so they exist as `filterMatch::simpleMatch` / `filterMatch::alternationMatch` variants rather than standalone types. See the note on `filterMatch`.
+// goishlint:ignore GOISH021 matchMutex — Go's second mutex guards the filters while `verify` rewrites them at construction. goish's filters are owned by the matcher and never shared, so the single `subNames` Mutex covers everything; there is nothing left for a second lock to protect.
+// goishlint:ignore GOISH020 fullName — Go takes `c *common`; goish passes the two fields it reads (parent level, parent name) so match.rs does not depend on testing.go's `common` while that file is still being ported.
 
 #![allow(non_snake_case)]
 
@@ -19,6 +23,7 @@ use alloc::vec::Vec;
 use crate::gostring::string;
 use crate::sync::Mutex;
 use crate::types::{int32, rune};
+use crate::{int, int32 as to_int32, uint32};
 
 /// The match function `testing` is parameterised over.
 ///
@@ -28,6 +33,7 @@ use crate::types::{int32, rune};
 /// every call site.
 pub type MatchStringFn = fn(pat: &string, str: &string) -> (bool, crate::error);
 
+// goishlint:ignore GOISH019 matcher — Go's `mu sync.Mutex` guards only `subNames`, so goish folds it into `Mutex<map<...>>` rather than carrying a bare lock field. Same protection, one field fewer.
 // go: sdk 1.25.5 testing/match.go:16-27 matcher
 /// Go: "matcher sanitizes, uniques, and filters names of subtests and
 /// subbenchmarks."
@@ -72,7 +78,7 @@ impl filterMatch {
     /// Go: "matches checks the name against the receiver's pattern
     /// strings using the given match function."
     pub fn matches(&self, name: &[string], matchString: Option<MatchStringFn>) -> (bool, bool) {
-        match self {
+        return match self {
             filterMatch::simpleMatch(m) => {
                 // Go: for i, s := range name { if i >= len(m) { break }
                 //       if ok, _ := matchString(m[i], s); !ok {
@@ -87,7 +93,7 @@ impl filterMatch {
                         return (false, false);
                     }
                 }
-                return (true, name.len() < m.len());
+                (true, name.len() < m.len())
             }
             filterMatch::alternationMatch(ms) => {
                 // Go: for _, m := range m {
@@ -100,9 +106,9 @@ impl filterMatch {
                         return (ok, partial);
                     }
                 }
-                return (false, false);
+                (false, false)
             }
-        }
+        };
     }
 
     // go: sdk 1.25.5 testing/match.go:137-148 simpleMatch.verify
@@ -114,7 +120,7 @@ impl filterMatch {
     /// (`m[i] = rewrite(s)`) before verifying, so it mutates as well as
     /// checks; goish takes `&mut self` to keep that.
     pub fn verify(&mut self, name: &string, matchString: Option<MatchStringFn>) -> crate::error {
-        match self {
+        return match self {
             filterMatch::simpleMatch(m) => {
                 // Go: for i, s := range m { m[i] = rewrite(s) }
                 for i in 0..m.len() {
@@ -129,14 +135,14 @@ impl filterMatch {
                         //         i, name, s, err)
                         return crate::errors::New(crate::fmt::Sprintf!(
                             "element %d of %s (%q): %s",
-                            i as int32 as crate::types::int,
+                            int(to_int32(i)),
                             name.clone(),
                             s.clone(),
                             err.Error()
                         ));
                     }
                 }
-                return crate::errors::nil;
+                crate::errors::nil
             }
             filterMatch::alternationMatch(ms) => {
                 // Go: for i, m := range m {
@@ -148,14 +154,14 @@ impl filterMatch {
                     if err != crate::errors::nil {
                         return crate::errors::New(crate::fmt::Sprintf!(
                             "alternation %d of %s",
-                            i as crate::types::int,
+                            int(i),
                             err.Error()
                         ));
                     }
                 }
-                return crate::errors::nil;
+                crate::errors::nil
             }
-        }
+        };
     }
 }
 
@@ -301,7 +307,7 @@ impl matcher {
             subname.clone()
         );
 
-        loop {
+        return 'retry: loop {
             let mut sub = self.subNames.Lock();
             // Go: n := m.subNames[base]
             //     if n < 0 { panic("subtest count overflow") }
@@ -321,13 +327,13 @@ impl matcher {
                     // the NNth occurrence of 'parent/subname'. Loop to
                     // add a disambiguating suffix."
                     drop(sub);
-                    continue;
+                    continue 'retry;
                 }
-                return base;
+                break 'retry base;
             }
 
             // Go: name := fmt.Sprintf("%s#%02d", base, n)
-            let name: string = crate::fmt::Sprintf!("%s#%02d", base.clone(), n as crate::types::int);
+            let name: string = crate::fmt::Sprintf!("%s#%02d", base.clone(), int(n));
             let (name_count, _): (int32, bool) = sub.Get(name.clone());
             if name_count != 0 {
                 // Go: "This is the nth occurrence of base, but the name
@@ -335,11 +341,11 @@ impl matcher {
                 // occurrence of a subtest *explicitly* named
                 // 'parent/subname#NN'. Try the next number."
                 drop(sub);
-                continue;
+                continue 'retry;
             }
 
-            return name;
-        }
+            break 'retry name;
+        };
     }
 }
 
@@ -461,7 +467,7 @@ pub fn parseSubtestNumber(s: &string) -> (string, int32) {
     if err != crate::errors::nil || n < 0 {
         return (s.clone(), 0);
     }
-    return (prefix, n as int32);
+    return (prefix, to_int32(n));
 }
 
 // go: sdk 1.25.5 testing/match.go:284-298 rewrite
@@ -471,7 +477,7 @@ pub fn rewrite(s: &string) -> string {
     let mut b: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
     let sref: &str = s.as_ref();
     for r in sref.chars() {
-        let r = r as rune;
+        let r = crate::rune(r);
         if isSpace(r) {
             b.push(b'_');
         } else if !crate::strconv::IsPrint(r) {
@@ -484,7 +490,7 @@ pub fn rewrite(s: &string) -> string {
             }
         } else {
             let mut buf = [0u8; 4];
-            let enc = char::from_u32(r as u32).unwrap_or('\u{FFFD}').encode_utf8(&mut buf);
+            let enc = char::from_u32(uint32(r)).unwrap_or('\u{FFFD}').encode_utf8(&mut buf);
             b.extend_from_slice(enc.as_bytes());
         }
     }

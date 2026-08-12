@@ -50,6 +50,8 @@ pub mod benchmark;
 pub mod fstest;
 pub mod iotest;
 pub mod r#match;
+mod testing;
+use testing::tRunner;
 
 extern crate alloc;
 
@@ -65,7 +67,7 @@ use crate::types::int;
 
 // ─── T ────────────────────────────────────────────────────────────
 
-struct TState {
+pub(crate) struct TState {
     failed: AtomicBool,
     skipped: AtomicBool,
     /// Go: `common.finished` — "Test function has completed." Set by
@@ -184,53 +186,6 @@ impl T {
         self.state.failed.store(true, Ordering::Release);
     }
 
-    // go: sdk 1.25.5 testing/testing.go:987-1014 common.FailNow
-    /// Go: "FailNow marks the function as having failed and stops its
-    /// execution by calling runtime.Goexit (which then runs all
-    /// deferred calls in the current goroutine). Execution will
-    /// continue at the next test or benchmark."
-    ///
-    /// Each test body runs on its own goroutine (see `tRunner`), so the
-    /// Goexit ends this test and leaves the rest of the suite running.
-    ///
-    /// **Deviation — when cleanups run.** Go relies on Goexit unwinding
-    /// through `tRunner`'s deferred call to run the cleanup stack and
-    /// signal the parent. goish is `panic = "abort"` and
-    /// `runtime::Goexit` does not run Drop-based deferred work (see its
-    /// definition), so this runs the cleanup stack and signals the
-    /// parent *before* the Goexit, on a live stack. The observable
-    /// ordering is the same — cleanups run, the parent is released,
-    /// the goroutine dies — but it happens on the way in rather than on
-    /// the way out.
-    pub fn FailNow(&self) -> ! {
-        self.state.failed.store(true, Ordering::Release);
-        // Go: c.mu.Lock(); c.finished = true; c.mu.Unlock()
-        self.state.finished.store(true, Ordering::Release);
-        self.finish_before_goexit();
-        crate::runtime::Goexit();
-    }
-
-    // go: none — goish-only: the cleanup-and-signal step Go performs in
-    // `tRunner`'s deferred call during the Goexit unwind. goish has no
-    // unwind, so both the normal return path and the Goexit path call
-    // this explicitly. Idempotent: the `reported` flag makes a second
-    // call a no-op, so a `Cleanup` callback that itself calls `FailNow`
-    // cannot re-enter it.
-    fn finish_before_goexit(&self) {
-        if self
-            .state
-            .reported
-            .swap(true, Ordering::AcqRel)
-        {
-            return;
-        }
-        self.drain_cleanups();
-        // Wake whoever is waiting on this test. Buffered with capacity
-        // 1 and sent exactly once, so this never blocks — which matters,
-        // because parking here would strand a test that is on its way
-        // out.
-        self.state.signal.Send(true);
-    }
 
     /// `t.Fatalf(format, args)` — log + mark test as failed, then
     /// abort the current test. Mirrors Go: `func (c *common) Fatalf(
@@ -255,18 +210,6 @@ impl T {
         self.Fatalf(msg, crate::goslice::slice::new());
     }
 
-    // go: sdk 1.25.5 testing/testing.go:1223-1227 common.Skip
-    /// Go: "Skip is equivalent to Log followed by SkipNow."
-    ///
-    /// Before `runtime::Goexit` existed this called `syscall::Exit(0)`
-    /// and took the whole suite down with it, which made Skip unusable
-    /// anywhere but the last test. It now ends only this test's
-    /// goroutine.
-    pub fn Skip<M: Into<string>>(&self, msg: M) -> ! {
-        let msg: string = msg.into();
-        self.write_line(b"skp", &msg);
-        self.SkipNow();
-    }
 
     /// `t.Skipf(msg)` — alias for Skip.
     pub fn Skipf<M: Into<string>>(&self, msg: M) -> ! {
@@ -274,22 +217,6 @@ impl T {
         self.Skip(msg);
     }
 
-    // go: sdk 1.25.5 testing/testing.go:1244-1251 common.SkipNow
-    /// Go: "SkipNow marks the test as having been skipped and stops its
-    /// execution by calling runtime.Goexit. If a test fails (see Error,
-    /// Errorf, Fail) and is then skipped, it is still considered to
-    /// have failed. Execution will continue at the next test or
-    /// benchmark."
-    ///
-    /// Same cleanup-ordering deviation as `FailNow`.
-    pub fn SkipNow(&self) -> ! {
-        // Go: c.mu.Lock(); c.skipped = true; c.finished = true;
-        //     c.mu.Unlock(); runtime.Goexit()
-        self.state.skipped.store(true, Ordering::Release);
-        self.state.finished.store(true, Ordering::Release);
-        self.finish_before_goexit();
-        crate::runtime::Goexit();
-    }
 
     /// `t.Failed()` — has Errorf/Fatalf/Fail been called?
     pub fn Failed(&self) -> bool {
@@ -377,54 +304,6 @@ impl T {
         dir
     }
 
-    // go: sdk 1.25.5 testing/testing.go:1948-2015 T.Run
-    /// Go: "Run runs f as a subtest of t called name. It runs f in a
-    /// separate goroutine and blocks until f returns or calls
-    /// t.Parallel to become a parallel test. Run may be called
-    /// simultaneously from multiple goroutines, but all such calls must
-    /// return before the outer test function for t returns."
-    ///
-    /// Running `f` on its own goroutine is what makes `t.Fatal` inside
-    /// a subtest end that subtest rather than everything above it.
-    ///
-    /// **Deviation — the `Send + 'static` bound.** Go's closure can
-    /// capture freely because its escape analysis and GC keep the
-    /// captures alive across the goroutine boundary. goish spawns
-    /// through `go!()`, which requires an owned `'static` body, so a
-    /// subtest closure must own what it uses. Non-capturing closures
-    /// and `move` closures over owned data are unaffected.
-    pub fn Run<F: FnOnce(&mut T) + Send + 'static>(&mut self, name: string, f: F) -> bool {
-        // Compose the qualified name "Parent/Child" for logging.
-        let mut qualified_bytes: Vec<u8> = Vec::new();
-        qualified_bytes.extend_from_slice(self.name.clone().__as_bytes_internal());
-        qualified_bytes.push(b'/');
-        qualified_bytes.extend_from_slice(name.__as_bytes_internal());
-        let qualified = string::from_bytes(&qualified_bytes);
-
-        let sub = T {
-            name: qualified.clone(),
-            state: Arc::new(TState::new()),
-            depth: self.depth + 1,
-        };
-
-        let header_indent = indent_for(sub.depth);
-        write_status(b"=== RUN  ", &header_indent, &qualified);
-
-        let state = sub.state.clone();
-        tRunner(sub, f);
-
-        let passed = !state.failed.load(Ordering::Acquire);
-        if state.skipped.load(Ordering::Acquire) {
-            write_status(b"--- SKIP: ", &header_indent, &qualified);
-        } else if passed {
-            write_status(b"--- PASS: ", &header_indent, &qualified);
-        } else {
-            write_status(b"--- FAIL: ", &header_indent, &qualified);
-            // Go: a failing subtest fails its parent.
-            self.state.failed.store(true, Ordering::Release);
-        }
-        return passed;
-    }
 
     fn drain_cleanups(&self) {
         // Drain in LIFO order (Go semantics).
@@ -440,7 +319,7 @@ impl T {
     fn write_line(&self, tag: &[u8], msg: &string) {
         let indent = indent_for(self.depth + 1);
         let mut buf: Vec<u8> = Vec::new();
-        buf.extend_from_slice(&indent);
+        buf.extend_from_slice(indent.as_bytes());
         buf.extend_from_slice(tag);
         buf.push(b' ');
         buf.extend_from_slice(self.name.clone().__as_bytes_internal());
@@ -452,15 +331,19 @@ impl T {
     }
 }
 
-fn indent_for(depth: usize) -> Vec<u8> {
+// go: none — goish-only: the output indent for a subtest at `depth`.
+// Go indents through its `indenter` io.Writer wrapper, which goish does
+// not have; this returns the prefix as a `string` so nothing in the
+// signature is a Rust container.
+pub(crate) fn indent_for(depth: usize) -> string {
     let mut v = Vec::with_capacity(depth * 4);
     for _ in 0..depth {
         v.extend_from_slice(b"    ");
     }
-    v
+    return string::from_bytes(&v);
 }
 
-fn write_status(tag: &[u8], indent: &[u8], name: &string) {
+pub(crate) fn write_status(tag: &[u8], indent: &[u8], name: &string) {
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(indent);
     buf.extend_from_slice(tag);
@@ -475,42 +358,6 @@ fn write_status(tag: &[u8], indent: &[u8], name: &string) {
 /// any of the assertion / logging methods.
 pub type TestFn = fn(&mut T);
 
-// go: sdk 1.25.5 testing/testing.go:1774-1940 tRunner
-/// Go: run `fn(t)` on its own goroutine and block until it finishes,
-/// whether it returned normally or ended through `runtime.Goexit`.
-///
-/// The goroutine is the whole point. `t.Fatal` and `t.Skip` terminate
-/// the calling goroutine, so a test that fails hard must not be sharing
-/// one with the runner or with its siblings — otherwise a single
-/// `Fatal` takes down everything after it. That was goish's behaviour
-/// until `runtime::Goexit` landed: `Skip` called `syscall::Exit(0)`.
-///
-/// **Deviations.** Go's `tRunner` carries the parallel-subtest barrier,
-/// race-error accounting, and a deferred recover that re-panics after
-/// flushing output to the root. None of those exist here yet:
-/// `t.Parallel` is not ported, goish has no race detector, and a panic
-/// in a test is already isolated per-goroutine by the runtime's own
-/// recovery path. What remains is the part that matters for
-/// correctness — spawn, wait for exactly one signal, and let the caller
-/// read the outcome out of the shared state.
-fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
-    let state = t.state.clone();
-
-    // Go: `go tRunner(t, fn)`. The explicit stack is goish's: a test
-    // body is arbitrary user code and the 2 KiB default is nowhere near
-    // enough. Reserved, not committed.
-    crate::go!(stack(TEST_STACK), move || {
-        let mut t = t;
-        fn_(&mut t);
-        // Reached only when the test returned normally — a FailNow or
-        // SkipNow has already run this and Goexited.
-        t.finish_before_goexit();
-    });
-
-    // Go: `<-t.signal`. Exactly one send happens per test, from
-    // whichever path finished it.
-    let _ = state.signal.Recv();
-}
 
 /// `testing.Main(tests)` — run the given list of (name, fn) pairs
 /// in registration order, print PASS/FAIL/SKIP per test, and
@@ -605,7 +452,7 @@ fn write_int(buf: &mut Vec<u8>, mut n: int) {
 // extra extension trait. The `__as_bytes_internal` calls above
 // resolve to crate-internal byte access.
 
-trait StringBytesAccess {
+pub(crate) trait StringBytesAccess {
     fn __as_bytes_internal(&self) -> &[u8];
 }
 
