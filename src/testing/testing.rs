@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -2260,4 +2260,155 @@ impl TState {
 #[doc(hidden)]
 pub fn __shim_call_site(t: &T, skip: crate::types::int) -> string {
     return t.state.callSite(skip);
+}
+
+// ─── TempDir ─────────────────────────────────────────────────────────
+
+// go: sdk 1.25.5 testing/testing.go:1400-1421 removeAll
+/// Go: "removeAll is like os.RemoveAll, but retries Windows 'Access is
+/// denied' errors up to an arbitrary timeout."
+///
+/// Go's body is a retry loop around os.RemoveAll, gated on
+/// `isWindowsRetryable(err)`. goish targets Linux only, where that
+/// predicate is false for every error, so the loop provably runs once
+/// and the timeout and backoff are dead code. Written as the single
+/// call it reduces to rather than as a loop that always returns on its
+/// first iteration.
+#[allow(non_snake_case)]
+pub(crate) fn removeAll(path: string) -> crate::errors::error {
+    return crate::os::RemoveAll(path);
+}
+
+#[allow(non_snake_case)]
+impl T {
+    // go: sdk 1.25.5 testing/testing.go:1321-1390 common.TempDir
+    /// Go: "TempDir returns a temporary directory for the test to use.
+    /// The directory is automatically removed when the test and all its
+    /// subtests complete."
+    ///
+    /// The automatic removal is the part goish's previous hand-rolled
+    /// version lacked entirely — it created directories under /tmp and
+    /// never deleted them. It also numbered them from ONE process-wide
+    /// counter, so two tests could not tell their directories apart;
+    /// Go gives each test its own parent and numbers within it.
+    pub fn TempDir(&self) -> string {
+        self.checkFuzzFn(string::from_static("TempDir"));
+
+        let seq;
+        {
+            let mut st = self.state.tempDirState.Lock();
+
+            // Go: "Usually the case with js/wasm" — an empty dir means
+            // none has been made yet.
+            let nonExistent;
+            if st.dir.Len() == 0 {
+                nonExistent = true;
+            } else {
+                let (_, err) = crate::os::Stat(st.dir.clone());
+                nonExistent = crate::os::IsNotExist(err.clone());
+                if err != crate::errors::nil && !nonExistent {
+                    drop(st);
+                    self.Fatalf(
+                        "TempDir: %v",
+                        crate::goslice::slice::__from_vec(alloc::vec![
+                            crate::goany::Any::new(err.Error())
+                        ]),
+                    );
+                }
+            }
+
+            if nonExistent {
+                let mut pattern = self.Name();
+                // Go: "Limit length of file names on disk."
+                if pattern.Len() > 64 {
+                    pattern = pattern.slice(0, 64);
+                }
+                // Go: "Drop unusual characters (such as path separators
+                // or characters interacting with globs) from the
+                // directory name to avoid surprising os.MkdirTemp
+                // behavior."
+                pattern = crate::strings::Map(
+                    |r: crate::types::rune| -> crate::types::rune {
+                        if r < 0x80 {
+                            const allowed: &str = "!#$%&()+,-.=@^_{}~ ";
+                            if (0x30..=0x39).contains(&r)
+                                || (0x61..=0x7a).contains(&r)
+                                || (0x41..=0x5a).contains(&r)
+                            {
+                                return r;
+                            }
+                            if allowed.chars().any(|c| return c as crate::types::rune == r) {
+                                return r;
+                            }
+                        } else if crate::unicode::IsLetter(r) || crate::unicode::IsDigit(r) {
+                            // Go tests unicode.IsNumber, which covers
+                            // category N (Nd, Nl, No); goish has only
+                            // IsDigit, i.e. Nd. So a non-ASCII numeral
+                            // like a Roman numeral is dropped from the
+                            // directory name where Go would keep it.
+                            // Harmless here — MkdirTemp appends a random
+                            // suffix, so two names that sanitise alike
+                            // still get distinct directories.
+                            return r;
+                        }
+                        return -1;
+                    },
+                    pattern,
+                );
+
+                let (dir, err) = crate::os::MkdirTemp("", pattern);
+                st.dir = dir.clone();
+                st.err = err.clone();
+                if err == crate::errors::nil {
+                    // Go registers the removal as a Cleanup, which is
+                    // what ties the directory's lifetime to the test's.
+                    let toRemove = dir;
+                    self.Cleanup(move || {
+                        let e = removeAll(toRemove);
+                        if e != crate::errors::nil {
+                            // Go: c.Errorf("TempDir RemoveAll cleanup: %v", err)
+                            let msg = crate::fmt::Sprintf!(
+                                "TempDir RemoveAll cleanup: %v",
+                                e.Error()
+                            );
+                            let bytes = msg.clone().__as_bytes_internal().to_vec();
+                            crate::syscall::Write(
+                                crate::syscall::STDOUT,
+                                bytes.as_ptr(),
+                                bytes.len(),
+                            );
+                        }
+                    });
+                }
+            }
+
+            if st.err == crate::errors::nil {
+                st.seq += 1;
+            }
+            seq = st.seq;
+            if st.err != crate::errors::nil {
+                let e = st.err.clone();
+                drop(st);
+                self.Fatalf(
+                    "TempDir: %v",
+                    crate::goslice::slice::__from_vec(alloc::vec![
+                        crate::goany::Any::new(e.Error())
+                    ]),
+                );
+            }
+        }
+
+        let parent = self.state.tempDirState.Lock().dir.clone();
+        let dir = crate::fmt::Sprintf!("%s%c%03d", parent, '/' as crate::types::rune, seq);
+        let err = crate::os::Mkdir(dir.clone(), 0o777);
+        if err != crate::errors::nil {
+            self.Fatalf(
+                "TempDir: %v",
+                crate::goslice::slice::__from_vec(alloc::vec![
+                    crate::goany::Any::new(err.Error())
+                ]),
+            );
+        }
+        return dir;
+    }
 }

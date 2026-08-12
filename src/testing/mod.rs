@@ -196,6 +196,21 @@ pub(crate) struct TState {
     /// Go: `common.runner string` — "Function name of tRunner running
     /// the test." frameSkip stops when it reaches this frame.
     pub(crate) runner: Mutex<string>,
+    /// Go: `common.tempDirMu sync.Mutex` guarding the three fields
+    /// below. They are read and written together, so they share one.
+    pub(crate) tempDirState: Mutex<TempDirState>,
+}
+
+/// Go: `common.tempDir`, `tempDirErr` and `tempDirSeq`.
+#[derive(Default)]
+pub(crate) struct TempDirState {
+    /// The per-test parent directory, created once.
+    pub dir: string,
+    /// The error from creating it, remembered so every later TempDir
+    /// call fails the same way instead of retrying.
+    pub err: crate::errors::error,
+    /// Sequence number for the numbered subdirectory.
+    pub seq: crate::types::int32,
 }
 
 impl TState {
@@ -231,6 +246,7 @@ impl TState {
             cleanupPc: Mutex::new(crate::goslice::slice::new()),
             creator: Mutex::new(crate::goslice::slice::new()),
             runner: Mutex::new(string::from_static("")),
+            tempDirState: Mutex::new(TempDirState::default()),
         };
     }
 }
@@ -263,72 +279,6 @@ impl T {
             depth: 0,
         }
     }
-
-    /// `t.TempDir()` (testing/testing.go:1241) — return a unique
-    /// directory for use during this test, automatically removed
-    /// when the test (or its subtest) finishes. On failure to create
-    /// the directory, calls Fatalf.
-    ///
-    /// The directory name is `<os.TempDir()>/<sanitised name><N>`
-    /// where N is a process-local sequence number and path
-    /// separators in the test name are replaced with '_'.
-    pub fn TempDir(&mut self) -> string {
-        static SEQ: core::sync::atomic::AtomicU64 =
-            core::sync::atomic::AtomicU64::new(0);
-
-        let base = crate::os::TempDir();
-
-        let name_bytes_owned = self.name.clone();
-        let nb = name_bytes_owned.__as_bytes_internal();
-        let mut path: Vec<u8> = Vec::new();
-        let base_bytes = base.__as_bytes_internal();
-        path.extend_from_slice(base_bytes);
-        if !path.ends_with(b"/") {
-            path.push(b'/');
-        }
-        for &c in nb {
-            if c == b'/' || c == 0 {
-                path.push(b'_');
-            } else {
-                path.push(c);
-            }
-        }
-
-        let n = SEQ.fetch_add(1, Ordering::Relaxed);
-        let mut tmp = [0u8; 20];
-        let mut idx = tmp.len();
-        let mut m = n;
-        if m == 0 {
-            idx -= 1;
-            tmp[idx] = b'0';
-        } else {
-            while m > 0 {
-                idx -= 1;
-                tmp[idx] = b'0' + (m % 10) as u8;
-                m /= 10;
-            }
-        }
-        path.extend_from_slice(&tmp[idx..]);
-
-        let dir = string::from_bytes(&path);
-        let err = crate::os::Mkdir(dir.clone(), 0o700);
-        if !err.IsNil() {
-            self.Fatalf(
-                string::from_static(
-                    "testing.T.TempDir: failed to create temp directory",
-                ),
-                crate::goslice::slice::new(),
-            );
-        }
-
-        let cleanup_path = dir.clone();
-        self.Cleanup(move || {
-            let _ = crate::os::RemoveAll(cleanup_path);
-        });
-
-        dir
-    }
-
 
     pub(crate) fn drain_cleanups(&self) {
         self.state.runCleanup();
