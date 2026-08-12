@@ -630,3 +630,15 @@ pub(crate) fn ekmFromMasterSecret(
         );
     });
 }
+
+
+// go: none — goish-only: in Go `finishedHash` satisfies `io.Writer`
+// (and so `transcriptHash`) structurally, because it has a `Write`
+// method with that signature. Rust needs the impl spelled out; it
+// forwards to the inherent `Write`.
+impl crate::io::Writer for finishedHash {
+    // go: none — goish-only: forwards to the inherent `finishedHash::Write`.
+    fn Write(&mut self, msg: slice<byte>) -> (int, error) {
+        return finishedHash::Write(self, msg);
+    }
+}

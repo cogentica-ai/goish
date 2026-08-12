@@ -2715,6 +2715,68 @@ fn main() {
     check_n("sessionState carries the curve", ssCurve, 29);
     check("sessionState stamps createdAt from config.time()", ssCreated);
 
+
+    // ── the TLS 1.2 Finished exchange ───────────────────────────────
+    //
+    // Ground truth: scripts/goref.sh crypto/tls, driving the same four
+    // methods against each other with a fixed AES-GCM key. The wire is
+    // deterministic because the GCM nonce is the sequence number.
+    let (fsErr, fsOut, fsWire, fcrErr, fcrOut, fcErr, fcOut, fsrErr, fsrOut, fBadErr) =
+        tls::handshake_finishedExchange();
+    eq("server sendFinished succeeds", fsErr, "");
+    eq(
+        "server sendFinished computes serverSum(masterSecret)",
+        hexOf(fsOut),
+        "42fa0fb5e7f9b79338de4407",
+    );
+    eq(
+        "server sendFinished writes a CCS then an encrypted Finished",
+        hexOf(fsWire),
+        "140303000101160303002800000000000000001788dac2224cac2714d1752a496cba7f06ad3b5700596f56cc1dc2e86eeb321d",
+    );
+    eq("client readFinished succeeds over those bytes", fcrErr, "");
+    eq(
+        "client readFinished recovers the same verify_data",
+        hexOf(fcrOut),
+        "42fa0fb5e7f9b79338de4407",
+    );
+    eq("client sendFinished succeeds", fcErr, "");
+    eq(
+        "client sendFinished computes clientSum(masterSecret)",
+        hexOf(fcOut),
+        "e041784a6b2ab77f7e46d66f",
+    );
+    eq("server readFinished succeeds over those bytes", fsrErr, "");
+    eq(
+        "server readFinished recovers the same verify_data",
+        hexOf(fsrOut),
+        "e041784a6b2ab77f7e46d66f",
+    );
+    // One flipped bit in the record is caught by the AEAD, before the
+    // constant-time verify_data compare is ever reached. Go reads
+    // "local error: tls: bad record MAC" — the prefix is the
+    // net.OpError wrapper that goish's net has no equivalent for; see
+    // the deviation note on Conn.sendAlertLocked.
+    eq(
+        "server readFinished refuses a corrupted record",
+        fBadErr,
+        "tls: bad record MAC",
+    );
+
+    // ── clientHandshakeState.readSessionTicket ──────────────────────
+    let (rst0e, rst0t) = tls::handshake_client_readSessionTicket(0);
+    eq("readSessionTicket accepts a ticket we asked for", rst0e, "");
+    eq("readSessionTicket keeps the ticket", hexOf(rst0t), "aabbcc");
+    let (rst1e, _) = tls::handshake_client_readSessionTicket(1);
+    eq(
+        "readSessionTicket refuses an unrequested ticket",
+        rst1e,
+        "tls: server sent unrequested session ticket",
+    );
+    let (rst2e, rst2t) = tls::handshake_client_readSessionTicket(2);
+    eq("readSessionTicket is a no-op when none was offered", rst2e, "");
+    check_n("readSessionTicket leaves the ticket empty", rst2t.Len(), 0);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

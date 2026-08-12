@@ -3304,3 +3304,51 @@ pub(crate) fn transcriptMsg(
     h.Write(data);
     return crate::errors::nil;
 }
+
+// go: none — goish-only: stands in for Go's `%T` on a
+// `handshakeMessage`, which `unexpectedMessageError` formats. Rust
+// trait objects carry no printable type name, so the concrete type is
+// recovered through `asAny` and named explicitly.
+pub(crate) fn handshakeMessageTypeName(
+    m: &dyn super::common::handshakeMessage,
+) -> crate::gostring::string {
+    let a = m.asAny();
+    if a.is::<helloRequestMsg>() {
+        return crate::gostring::string::from_static("*tls.helloRequestMsg");
+    } else if a.is::<clientHelloMsg>() {
+        return crate::gostring::string::from_static("*tls.clientHelloMsg");
+    } else if a.is::<serverHelloMsg>() {
+        return crate::gostring::string::from_static("*tls.serverHelloMsg");
+    } else if a.is::<newSessionTicketMsg>() {
+        return crate::gostring::string::from_static("*tls.newSessionTicketMsg");
+    } else if a.is::<newSessionTicketMsgTLS13>() {
+        return crate::gostring::string::from_static("*tls.newSessionTicketMsgTLS13");
+    } else if a.is::<certificateMsg>() {
+        return crate::gostring::string::from_static("*tls.certificateMsg");
+    } else if a.is::<certificateMsgTLS13>() {
+        return crate::gostring::string::from_static("*tls.certificateMsgTLS13");
+    } else if a.is::<certificateRequestMsg>() {
+        return crate::gostring::string::from_static("*tls.certificateRequestMsg");
+    } else if a.is::<certificateRequestMsgTLS13>() {
+        return crate::gostring::string::from_static("*tls.certificateRequestMsgTLS13");
+    } else if a.is::<certificateStatusMsg>() {
+        return crate::gostring::string::from_static("*tls.certificateStatusMsg");
+    } else if a.is::<serverKeyExchangeMsg>() {
+        return crate::gostring::string::from_static("*tls.serverKeyExchangeMsg");
+    } else if a.is::<serverHelloDoneMsg>() {
+        return crate::gostring::string::from_static("*tls.serverHelloDoneMsg");
+    } else if a.is::<clientKeyExchangeMsg>() {
+        return crate::gostring::string::from_static("*tls.clientKeyExchangeMsg");
+    } else if a.is::<certificateVerifyMsg>() {
+        return crate::gostring::string::from_static("*tls.certificateVerifyMsg");
+    } else if a.is::<finishedMsg>() {
+        return crate::gostring::string::from_static("*tls.finishedMsg");
+    } else if a.is::<encryptedExtensionsMsg>() {
+        return crate::gostring::string::from_static("*tls.encryptedExtensionsMsg");
+    } else if a.is::<endOfEarlyDataMsg>() {
+        return crate::gostring::string::from_static("*tls.endOfEarlyDataMsg");
+    } else if a.is::<keyUpdateMsg>() {
+        return crate::gostring::string::from_static("*tls.keyUpdateMsg");
+    }
+    return crate::gostring::string::from_static("<nil>");
+}

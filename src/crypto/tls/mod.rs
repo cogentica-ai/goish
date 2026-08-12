@@ -4780,6 +4780,7 @@ pub fn handshake_server_cipherSuiteOk(
         clientHello: handshake_messages::clientHelloMsg::default(),
         hello: handshake_messages::serverHelloMsg::default(),
         suite: None,
+        finishedHash: __neutralFinishedHash(),
         masterSecret: crate::goslice::slice::new(),
         sessionState: None,
         ecdheOk: which != 1,
@@ -4898,8 +4899,10 @@ pub fn handshake_client_pickCipherSuite(
         serverHello,
         hello,
         suite: None,
+        finishedHash: __neutralFinishedHash(),
         masterSecret: crate::goslice::slice::new(),
         session: None,
+        ticket: crate::goslice::slice::new(),
     };
     let err = hs.pickCipherSuite();
     if err != crate::errors::nil {
@@ -4932,6 +4935,7 @@ pub fn handshake_server_pickCipherSuite(
         clientHello,
         hello: handshake_messages::serverHelloMsg::default(),
         suite: None,
+        finishedHash: __neutralFinishedHash(),
         masterSecret: crate::goslice::slice::new(),
         sessionState: None,
         ecdheOk: !noECDHE,
@@ -4989,6 +4993,7 @@ pub fn handshake_server_establishKeys(
         clientHello,
         hello,
         suite: Some(suite),
+        finishedHash: __neutralFinishedHash(),
         masterSecret: ms.clone(),
         sessionState: None,
         ecdheOk: true,
@@ -5084,6 +5089,7 @@ pub fn handshake_server_checkForResumption(
         clientHello: ch,
         hello: handshake_messages::serverHelloMsg::default(),
         suite: None,
+        finishedHash: __neutralFinishedHash(),
         masterSecret: crate::goslice::slice::new(),
         sessionState: None,
         ecdheOk: true,
@@ -5129,8 +5135,10 @@ pub fn handshake_client_establishKeys() -> (
         serverHello,
         hello,
         suite: Some(suite),
+        finishedHash: __neutralFinishedHash(),
         masterSecret: ms,
         session: None,
+        ticket: crate::goslice::slice::new(),
     };
     let err = hs.establishKeys();
     let staged = hs.c.__changeCipherSpecs();
@@ -5162,12 +5170,14 @@ pub fn handshake_client_serverResumedSession(which: crate::types::int) -> bool {
         serverHello,
         hello,
         suite: None,
+        finishedHash: __neutralFinishedHash(),
         masterSecret: crate::goslice::slice::new(),
         session: if which == 2 {
             None
         } else {
             Some(ticket::SessionState::default())
         },
+        ticket: crate::goslice::slice::new(),
     };
     return hs.serverResumedSession();
 }
@@ -5240,8 +5250,10 @@ pub fn handshake_client_processServerHello(
         serverHello: sh,
         hello: ch,
         suite: None,
+        finishedHash: __neutralFinishedHash(),
         masterSecret: crate::goslice::slice::new(),
         session: sess,
+        ticket: crate::goslice::slice::new(),
     };
     let (resumed, err) = hs.processServerHello();
     let text = if err == crate::errors::nil {
@@ -5589,4 +5601,246 @@ pub fn conn_sessionState() -> (
         crate::int(ss.__curveID().0),
         ss.__createdAt() + 2 >= now && ss.__createdAt() <= now + 2,
     );
+}
+
+// go: none — goish-only: the shims below build a `clientHandshakeState`
+// field by field, the way Go's composite literals do, but goish's
+// `finishedHash` holds `Box<dyn Hash>` and so has no zero value. This
+// is the neutral stand-in for shims that never touch the transcript.
+#[doc(hidden)]
+fn __neutralFinishedHash() -> prf::finishedHash {
+    return prf::newFinishedHash(
+        common::VersionTLS12,
+        cipher_suites::cipherSuiteByID(cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
+            .unwrap(),
+    );
+}
+
+// go: none — goish-only: the TLS 1.2 Finished exchange is unexported in
+// Go, where the tests are in-package. Drives the four ported methods
+// against each other over an in-memory net::Conn with a fixed AES-GCM
+// key: the server's `sendFinished` writes the record the client's
+// `readFinished` then reads, and vice versa. Reports
+// `(server sendFinished errText, its verify_data, its wire,
+//   client readFinished errText, its verify_data,
+//   client sendFinished errText, its verify_data,
+//   server readFinished errText, its verify_data,
+//   server readFinished over a corrupted record errText)`.
+#[doc(hidden)]
+pub fn handshake_finishedExchange() -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+) {
+    use crate::goslice::slice;
+    let master: slice<crate::types::byte> = {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: crate::types::int = 0;
+        while i < 48 {
+            v.push(crate::byte(i + 1));
+            i += 1;
+        }
+        slice::__from_vec(v)
+    };
+    let suite = cipher_suites::cipherSuiteByID(cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
+        .unwrap();
+    let key = || slice::__from_vec(alloc::vec![0u8; 16]);
+    let iv = || slice::__from_vec(alloc::vec![0u8; 4]);
+    let errText = |e: crate::error| {
+        if e == crate::errors::nil {
+            crate::gostring::string::from_static("")
+        } else {
+            e.Error()
+        }
+    };
+    // A Conn whose write half is ready, feeding `feed` on the read side.
+    let mkConn = |feed: slice<crate::types::byte>,
+                  sink: alloc::sync::Arc<crate::sync::Mutex<slice<crate::types::byte>>>,
+                  read: bool| {
+        let mut c = conn::Conn::default();
+        c.__setMemConn(sink);
+        if feed.Len() > 0 {
+            c.__setFeedConn(feed);
+        }
+        c.__setHaveVers(true);
+        c.__setVers(common::VersionTLS12);
+        c.__setCipherSuite(cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256);
+        let ci = if read {
+            conn::halfConnCipher::AEAD((suite.aead.unwrap())(key(), iv()))
+        } else {
+            conn::halfConnCipher::None
+        };
+        let co = if read {
+            conn::halfConnCipher::None
+        } else {
+            conn::halfConnCipher::AEAD((suite.aead.unwrap())(key(), iv()))
+        };
+        c.__prepareCipherSpecs(common::VersionTLS12, ci, None, co, None);
+        return c;
+    };
+    let mkFH = || {
+        let mut fh = prf::newFinishedHash(common::VersionTLS12, suite);
+        fh.Write(slice::__from_vec(alloc::vec![0x01u8, 0x00, 0x00, 0x00]));
+        return fh;
+    };
+    let newSink = || {
+        alloc::sync::Arc::new(crate::sync::Mutex::new(
+            slice::<crate::types::byte>::new(),
+        ))
+    };
+
+    // Server sendFinished.
+    let sSink = newSink();
+    let mut shs = handshake_server::serverHandshakeState {
+        c: mkConn(slice::new(), sSink.clone(), false),
+        clientHello: handshake_messages::clientHelloMsg::default(),
+        hello: handshake_messages::serverHelloMsg::default(),
+        suite: Some(suite),
+        finishedHash: mkFH(),
+        masterSecret: master.clone(),
+        sessionState: None,
+        ecdheOk: false,
+        ecSignOk: false,
+        rsaDecryptOk: false,
+        rsaSignOk: false,
+    };
+    let mut sOut: slice<crate::types::byte> = slice::__from_vec(alloc::vec![0u8; 12]);
+    let sErr = errText(shs.sendFinished(&mut sOut));
+    let sWire = sSink.Lock().clone();
+
+    // Client readFinished, over exactly those bytes.
+    let mut chs = handshake_client::clientHandshakeState {
+        c: mkConn(sWire.clone(), newSink(), true),
+        serverHello: handshake_messages::serverHelloMsg::default(),
+        hello: handshake_messages::clientHelloMsg::default(),
+        suite: Some(suite),
+        finishedHash: mkFH(),
+        masterSecret: master.clone(),
+        session: None,
+        ticket: slice::new(),
+    };
+    let mut cRead: slice<crate::types::byte> = slice::__from_vec(alloc::vec![0u8; 12]);
+    let cReadErr = errText(chs.readFinished(&mut cRead));
+
+    // Client sendFinished.
+    let cSink = newSink();
+    let mut chs2 = handshake_client::clientHandshakeState {
+        c: mkConn(slice::new(), cSink.clone(), false),
+        serverHello: handshake_messages::serverHelloMsg::default(),
+        hello: handshake_messages::clientHelloMsg::default(),
+        suite: Some(suite),
+        finishedHash: mkFH(),
+        masterSecret: master.clone(),
+        session: None,
+        ticket: slice::new(),
+    };
+    let mut cOut: slice<crate::types::byte> = slice::__from_vec(alloc::vec![0u8; 12]);
+    let cErr = errText(chs2.sendFinished(&mut cOut));
+    let cWire = cSink.Lock().clone();
+
+    // Server readFinished, over exactly those bytes.
+    let mut shs2 = handshake_server::serverHandshakeState {
+        c: mkConn(cWire.clone(), newSink(), true),
+        clientHello: handshake_messages::clientHelloMsg::default(),
+        hello: handshake_messages::serverHelloMsg::default(),
+        suite: Some(suite),
+        finishedHash: mkFH(),
+        masterSecret: master.clone(),
+        sessionState: None,
+        ecdheOk: false,
+        ecSignOk: false,
+        rsaDecryptOk: false,
+        rsaSignOk: false,
+    };
+    let mut sRead: slice<crate::types::byte> = slice::__from_vec(alloc::vec![0u8; 12]);
+    let sReadErr = errText(shs2.readFinished(&mut sRead));
+
+    // The same record with its last byte flipped must be refused.
+    let mut corrupt = cWire.__into_vec();
+    let last = corrupt.len() - 1;
+    corrupt[last] ^= 0xff;
+    let mut shs3 = handshake_server::serverHandshakeState {
+        c: mkConn(slice::__from_vec(corrupt), newSink(), true),
+        clientHello: handshake_messages::clientHelloMsg::default(),
+        hello: handshake_messages::serverHelloMsg::default(),
+        suite: Some(suite),
+        finishedHash: mkFH(),
+        masterSecret: master.clone(),
+        sessionState: None,
+        ecdheOk: false,
+        ecSignOk: false,
+        rsaDecryptOk: false,
+        rsaSignOk: false,
+    };
+    let mut junk: slice<crate::types::byte> = slice::__from_vec(alloc::vec![0u8; 12]);
+    let corruptErr = errText(shs3.readFinished(&mut junk));
+
+    return (
+        sErr, sOut, sWire, cReadErr, cRead, cErr, cOut, sReadErr, sRead, corruptErr,
+    );
+}
+
+// go: none — goish-only: `clientHandshakeState.readSessionTicket` is
+// unexported in Go, where the tests are in-package. `which`: 0 = a
+// ticket we asked for, 1 = one we did not, 2 = none offered. Reports
+// `(errText, hs.ticket)`.
+#[doc(hidden)]
+pub fn handshake_client_readSessionTicket(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    use crate::goslice::slice;
+    let suite = cipher_suites::cipherSuiteByID(cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
+        .unwrap();
+    let mut nst = handshake_messages::newSessionTicketMsg::default();
+    nst.ticket = slice::__from_vec(alloc::vec![0xaau8, 0xbb, 0xcc]);
+    let (body, _) = nst.marshal();
+    let mut feed: alloc::vec::Vec<crate::types::byte> = alloc::vec![
+        0x16u8,
+        0x03,
+        0x03,
+        crate::byte(body.Len() >> 8),
+        crate::byte(body.Len() & 0xff)
+    ];
+    feed.extend_from_slice(&body);
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink);
+    c.__setFeedConn(slice::__from_vec(feed));
+    c.__setHaveVers(true);
+    c.__setVers(common::VersionTLS12);
+
+    let mut serverHello = handshake_messages::serverHelloMsg::default();
+    serverHello.ticketSupported = which != 2;
+    let mut hello = handshake_messages::clientHelloMsg::default();
+    hello.ticketSupported = which == 0;
+    let mut hs = handshake_client::clientHandshakeState {
+        c,
+        serverHello,
+        hello,
+        suite: Some(suite),
+        finishedHash: prf::newFinishedHash(common::VersionTLS12, suite),
+        masterSecret: slice::new(),
+        session: None,
+        ticket: slice::new(),
+    };
+    let err = hs.readSessionTicket();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (text, hs.ticket.clone());
 }

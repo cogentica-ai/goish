@@ -1,4 +1,4 @@
-// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo, serverHandshakeState.pickCipherSuite, serverHandshakeState.establishKeys, serverHandshakeState.checkForResumption
+// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo, serverHandshakeState.pickCipherSuite, serverHandshakeState.establishKeys, serverHandshakeState.checkForResumption, serverHandshakeState.readFinished, serverHandshakeState.sendFinished
 //
 // crypto/tls — the server handshake state machine.
 //
@@ -7,7 +7,7 @@
 // handshake. What is here is the one function that does not: the ECDHE
 // support check, which `ClientHelloInfo.SupportsCertificate` also calls.
 //
-// goishlint:ignore GOISH018 serverHandshake, handshake, readClientHello, processClientHello, doResumeHandshake, doFullHandshake, readFinished, sendSessionTicket, sendFinished, processCertsFromClient — serverHandshakeState and Conn; see the banner. ROADMAP.md.
+// goishlint:ignore GOISH018 serverHandshake, handshake, readClientHello, processClientHello, doResumeHandshake, doFullHandshake, sendSessionTicket, processCertsFromClient — serverHandshakeState and Conn; see the banner. ROADMAP.md.
 
 #![allow(non_snake_case, dead_code)]
 
@@ -159,6 +159,7 @@ pub(crate) struct serverHandshakeState {
     pub clientHello: super::handshake_messages::clientHelloMsg,
     pub hello: super::handshake_messages::serverHelloMsg,
     pub suite: Option<&'static super::cipher_suites::cipherSuite>,
+    pub finishedHash: super::prf::finishedHash,
     pub masterSecret: slice<crate::types::byte>,
     pub sessionState: Option<super::ticket::SessionState>,
     pub ecdheOk: bool,
@@ -590,5 +591,105 @@ impl serverHandshakeState {
         self.sessionState = Some(sessionState);
         self.suite = suite;
         return errors::nil;
+    }
+}
+
+impl serverHandshakeState {
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:833-864 serverHandshakeState.readFinished
+    /// Go: read the client's ChangeCipherSpec and Finished, check the
+    /// verify_data in constant time, and only then add the message to
+    /// the transcript.
+    ///
+    /// Deviation: `out` is `&mut slice<byte>` — goish slices do not share
+    /// a backing array across handles, so Go's `copy(out, …)` would be
+    /// invisible to the caller through a by-value parameter.
+    pub(crate) fn readFinished(&mut self, out: &mut slice<crate::types::byte>) -> crate::error {
+        // Go: if err := c.readChangeCipherSpec(); err != nil { return err }
+        let err = self.c.readChangeCipherSpec();
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: "finishedMsg is included in the transcript, but not until
+        // after we check the client version, since the state before this
+        // message was sent is used during verification."
+        let (msg, err) = self.c.readHandshake(None);
+        if err != crate::errors::nil {
+            return err;
+        }
+        // Go: clientFinished, ok := msg.(*finishedMsg); if !ok { … }
+        let msg = match msg {
+            Some(m) => m,
+            None => return crate::errors::New("tls: internal error: no handshake message"),
+        };
+        let clientFinished = match msg
+            .asAny()
+            .downcast_ref::<super::handshake_messages::finishedMsg>()
+        {
+            Some(f) => f.clone(),
+            None => {
+                self.c.sendAlert(super::alert::alertUnexpectedMessage);
+                return super::common::unexpectedMessageError(
+                    crate::gostring::string::from_static("*tls.finishedMsg"),
+                    super::handshake_messages::handshakeMessageTypeName(&*msg),
+                );
+            }
+        };
+
+        // Go: verify := hs.finishedHash.clientSum(hs.masterSecret)
+        //     if len(verify) != len(clientFinished.verifyData) ||
+        //         subtle.ConstantTimeCompare(verify, clientFinished.verifyData) != 1 {
+        //         c.sendAlert(alertHandshakeFailure)
+        //         return errors.New("tls: client's Finished message is incorrect") }
+        let verify = self.finishedHash.clientSum(self.masterSecret.clone());
+        let got = slice::__from_vec(clientFinished.verifyData.clone());
+        if verify.Len() != got.Len()
+            || crate::crypto::subtle::ConstantTimeCompare(&verify, &got) != 1
+        {
+            self.c.sendAlert(super::alert::alertHandshakeFailure);
+            return crate::errors::New("tls: client's Finished message is incorrect");
+        }
+
+        // Go: if err := transcriptMsg(clientFinished, &hs.finishedHash); err != nil { return err }
+        let err = super::handshake_messages::transcriptMsg(&clientFinished, &mut self.finishedHash);
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: copy(out, verify)
+        super::handshake_client::copyInto(out, &verify.__into_vec());
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:907-921 serverHandshakeState.sendFinished
+    /// Go: flush the pending records under a ChangeCipherSpec, then send
+    /// the server's Finished and copy its verify_data into `out`.
+    ///
+    /// Deviation: `out` is `&mut slice<byte>`; see `readFinished`.
+    pub(crate) fn sendFinished(&mut self, out: &mut slice<crate::types::byte>) -> crate::error {
+        // Go: if err := c.writeChangeCipherRecord(); err != nil { return err }
+        let err = self.c.writeChangeCipherRecord();
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: finished := new(finishedMsg)
+        //     finished.verifyData = hs.finishedHash.serverSum(hs.masterSecret)
+        let mut finished = super::handshake_messages::finishedMsg::default();
+        finished.verifyData = self
+            .finishedHash
+            .serverSum(self.masterSecret.clone())
+            .__into_vec();
+        // Go: if _, err := hs.c.writeHandshakeRecord(finished, &hs.finishedHash); err != nil { return err }
+        let (_, err) = self
+            .c
+            .writeHandshakeRecord(&finished, Some(&mut self.finishedHash));
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: copy(out, finished.verifyData)
+        super::handshake_client::copyInto(out, &finished.verifyData);
+        return crate::errors::nil;
     }
 }
