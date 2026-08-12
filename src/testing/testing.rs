@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: runTests, RunTests, runningList, T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: toOutputDir, runTests, RunTests, runningList, T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -833,6 +833,16 @@ pub fn __run_skip_patterns() -> (string, string) {
     return match g.as_ref() {
         None => (string::from_static(""), string::from_static("")),
         Some(f) => (f.run.Get(), f.skip.Get()),
+    };
+}
+
+// go: none — goish-only: reads the -v flag without Verbose's
+// flag.Parsed() check, so example output can consult it before Init.
+pub(crate) fn __chatty_on() -> bool {
+    let g = FLAGS.Lock();
+    return match g.as_ref() {
+        None => false,
+        Some(f) => f.chatty.Get(),
     };
 }
 
@@ -2830,4 +2840,35 @@ fn __join_name(parent: &string, sub: &string) -> string {
         return sub.clone();
     }
     return crate::fmt::Sprintf!("%s/%s", parent.clone(), sub.clone());
+}
+
+// go: sdk 1.25.5 testing/testing.go:2637-2659 toOutputDir
+/// Go: "toOutputDir returns the file name relocated, if required, to
+/// outputDir."
+///
+/// An ABSOLUTE path is returned unchanged — -outputdir relocates
+/// relative profile names, it does not re-root paths the user spelled
+/// out in full. Go's Windows drive-letter branch is dropped: goish
+/// targets Linux, where a leading separator is the whole test.
+#[allow(non_snake_case)]
+pub fn toOutputDir(path: string) -> string {
+    let dir = {
+        let g = FLAGS.Lock();
+        match g.as_ref() {
+            None => string::from_static(""),
+            Some(f) => f.outputDir.Get(),
+        }
+    };
+    if dir.Len() == 0 || path.Len() == 0 {
+        return path;
+    }
+    if crate::os::IsPathSeparator(path.as_bytes()[0]) {
+        return path;
+    }
+    return crate::fmt::Sprintf!(
+        "%s%c%s",
+        dir,
+        '/' as crate::types::rune,
+        path
+    );
 }
