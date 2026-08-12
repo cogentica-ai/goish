@@ -199,6 +199,14 @@ pub(crate) struct TState {
     /// Go: `common.tempDirMu sync.Mutex` guarding the three fields
     /// below. They are read and written together, so they share one.
     pub(crate) tempDirState: Mutex<TempDirState>,
+    /// Go: `common.start highPrecisionTime` — "Time test or benchmark
+    /// started."
+    pub(crate) start: Mutex<crate::time::Time>,
+    /// Go: `common.duration time.Duration`. Accumulated rather than
+    /// computed at the end, because T.Parallel banks the elapsed time
+    /// so far and restarts the clock — the wait for serial tests is not
+    /// this test's duration.
+    pub(crate) duration: Mutex<crate::time::Duration>,
 }
 
 /// Go: `common.tempDir`, `tempDirErr` and `tempDirSeq`.
@@ -247,6 +255,8 @@ impl TState {
             creator: Mutex::new(crate::goslice::slice::new()),
             runner: Mutex::new(string::from_static("")),
             tempDirState: Mutex::new(TempDirState::default()),
+            start: Mutex::new(crate::time::Now()),
+            duration: Mutex::new(crate::time::Duration(0)),
         };
     }
 }
@@ -290,6 +300,11 @@ impl T {
         // back as a partial; a Log arriving next must not be spliced
         // onto the end of it.
         self.state.flushPartial();
+        // …and push it out before this line. flushPartial writes through
+        // the chattyPrinter, which buffers; this line goes straight to
+        // stdout. Without the drain the two arrive in the wrong order —
+        // Go prints the pending partial first, then the log.
+        testing::drain_chatty();
 
         let indent = indent_for(self.depth + 1);
         let mut buf: Vec<u8> = Vec::new();
@@ -326,6 +341,21 @@ pub(crate) fn write_status(tag: &[u8], indent: &[u8], name: &string) {
     syscall::Write(syscall::STDOUT, buf.as_ptr(), buf.len());
 }
 
+// go: none — goish-only: the top-level status line, with the duration
+// Go's `--- %s: %s (%s)` format carries. Subtests get theirs from
+// T.report; a top-level test has no parent to flush to, so its line is
+// written here, exactly as Go's driver writes it.
+pub(crate) fn write_status_dur(tag: &[u8], indent: &[u8], name: &string, dur: &string) {
+    let mut buf: Vec<u8> = Vec::new();
+    buf.extend_from_slice(indent);
+    buf.extend_from_slice(tag);
+    buf.extend_from_slice(name.clone().__as_bytes_internal());
+    buf.extend_from_slice(b" (");
+    buf.extend_from_slice(dur.clone().__as_bytes_internal());
+    buf.extend_from_slice(b")\n");
+    syscall::Write(syscall::STDOUT, buf.as_ptr(), buf.len());
+}
+
 // ─── Runner ──────────────────────────────────────────────────────
 
 /// Test entry. Each test function takes a `&mut T` and may call
@@ -356,18 +386,28 @@ pub fn Main(tests: &[(&'static str, TestFn)]) -> int {
         let t = T::new(string::from_static(name));
         *t.state.tstate.Lock() = Some(tstate.clone());
         let name_s = t.name.clone();
-        write_status(b"=== RUN  ", b"", &name_s);
+        // Go's runTests sets up the chattyPrinter and emits === RUN for
+        // each top-level test; goish's Main stands in for that driver.
+        testing::attach_chatty(&t.state);
+        *t.state.start.Lock() = crate::time::Now();
+        write_status(b"=== RUN   ", b"", &name_s);
         let state = t.state.clone();
         tRunner(t, *f);
-        if state.skipped.load(Ordering::Acquire) {
-            write_status(b"--- SKIP: ", b"", &name_s);
+
+        // A top-level test has no parent, so T.report returns without
+        // emitting anything — Go's driver writes the root's line
+        // itself. The duration comes from the same field report reads.
+        let dstr = testing::fmtDuration(*state.duration.Lock());
+        let tag: &[u8] = if state.skipped.load(Ordering::Acquire) {
             skipped += 1;
+            b"--- SKIP: "
         } else if state.failed.load(Ordering::Acquire) {
-            write_status(b"--- FAIL: ", b"", &name_s);
             failed += 1;
+            b"--- FAIL: "
         } else {
-            write_status(b"--- PASS: ", b"", &name_s);
-        }
+            b"--- PASS: "
+        };
+        write_status_dur(tag, b"", &name_s, &dstr);
 
         // Go's runTests flushes the root's partial line and prints its
         // buffered output after the status line. goish's Main stands in
@@ -375,7 +415,8 @@ pub fn Main(tests: &[(&'static str, TestFn)]) -> int {
         // anything written through t.Output() accumulates in the root's
         // buffer and is never seen.
         state.flushPartial();
-        let out = state.output.Lock().clone();
+        testing::drain_chatty();
+        let out = core::mem::take(&mut *state.output.Lock());
         if !out.is_empty() {
             syscall::Write(syscall::STDOUT, out.as_ptr(), out.len());
         }

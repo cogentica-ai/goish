@@ -18,7 +18,13 @@
 //     nothing, because io.Writer's contract is bytes accepted — not
 //     bytes flushed. A short count here makes io.Copy loop forever.
 //   * t.Log flushes a pending partial first, so a Log never gets
-//     spliced onto the end of someone's half-written line. Check 5.
+//     spliced onto the end of someone's half-written line.
+//
+// Checks 5 and 6 pin where the bytes GO. goish's runner always attaches
+// a chattyPrinter, so it behaves like `go test -v`: completed lines
+// print immediately rather than being buffered, and only the test's
+// report travels up to the parent. Both were verified against Go
+// 1.25.5 rather than assumed.
 
 #![no_std]
 #![no_main]
@@ -167,33 +173,38 @@ fn main() {
         }
     }
 
-    // 5. The buffer holds exactly the four lines, each indented once,
-    //    and nothing else. This is what the byte counts alone cannot
-    //    show: that "half" and " line\n" became ONE line rather than
-    //    two, and that the trailing "tail" was flushed by t.Log rather
-    //    than being dropped or spliced onto the log message.
+    // 5. With a chatty printer attached — goish's runner always
+    //    attaches one, which is what makes it behave like `go test -v`
+    //    — writeLine prints each completed line immediately instead of
+    //    buffering it, so the test's own output buffer ends up EMPTY.
+    //    Verified against Go 1.25.5: `go test -v` prints
+    //
+    //        === RUN   TestOut/buffered
+    //            half line
+    //            a
+    //            b
+    //            tail
+    //
+    //    before the PASS lines, which is the transcript printed above.
     {
-        let want = s("    half line\n    a\n    b\n    tail\n");
-        if get("buf") == want {
-            fmt::Println!("[ 5] buffer content exact      PASS");
+        if get("buf") == s("") {
+            fmt::Println!("[ 5] chatty routes immediately PASS");
         } else {
-            fmt::Println!("[ 5] buffer content exact      FAIL");
-            fmt::Println!("     got  [", get("buf"), "]");
-            fmt::Println!("     want [", want, "]");
+            fmt::Println!("[ 5] chatty routes immediately FAIL [", get("buf"), "]");
             failed += 1;
         }
     }
 
-    // 6. flushToParent moved the child's buffer into the parent's,
-    //    adding one more indent level, and emptied the child's. The
-    //    child's own buffer is asserted empty by check 5 running
-    //    BEFORE the flush and this one running after.
+    // 6. …and the subtest's REPORT still travels up through
+    //    flushToParent into the parent's buffer, indented one level,
+    //    carrying Go's "--- %s: %s (%s)" format. That is what puts the
+    //    subtest's line under its parent's rather than above it.
     {
-        let want = s("        half line\n        a\n        b\n        tail\n");
+        let want = s("    --- PASS: Output/buffered (0.00s)\n");
         if get("parent.buf") == want {
-            fmt::Println!("[ 6] flushToParent re-indents  PASS");
+            fmt::Println!("[ 6] report flushes to parent  PASS");
         } else {
-            fmt::Println!("[ 6] flushToParent re-indents  FAIL");
+            fmt::Println!("[ 6] report flushes to parent  FAIL");
             fmt::Println!("     got  [", get("parent.buf"), "]");
             failed += 1;
         }

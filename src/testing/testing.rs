@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -32,7 +32,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
 
-use super::{indent_for, write_status, StringBytesAccess, TState, T, TEST_STACK};
+use super::{StringBytesAccess, TState, T, TEST_STACK};
 use crate::gostring::string;
 use crate::types::int;
 use crate::types::uintptr;
@@ -382,8 +382,18 @@ impl T {
         // Go: every test in one run shares the run-wide state.
         *sub.state.tstate.Lock() = self.state.tstate.Lock().clone();
 
-        let header_indent = indent_for(sub.depth);
-        write_status(b"=== RUN  ", header_indent.as_bytes(), &qualified);
+        // Go: the run's chattyPrinter is copied onto every test.
+        attach_chatty(&sub.state);
+        *sub.state.start.Lock() = crate::time::Now();
+
+        // Go: `t.chatty.Updatef(t.name, "=== RUN   %s\n", t.name)`.
+        if let Some(c) = sub.state.chatty.Lock().as_ref() {
+            c.Updatef(
+                qualified.clone(),
+                crate::fmt::Sprintf!("=== RUN   %s\n", qualified.clone()),
+            );
+        }
+        drain_chatty();
 
         let state = sub.state.clone();
         tRunner(sub, f);
@@ -398,28 +408,10 @@ impl T {
         }
 
         let passed = !state.failed.load(Ordering::Acquire);
-        let tag: &[u8] = if state.skipped.load(Ordering::Acquire) {
-            b"--- SKIP: "
-        } else if passed {
-            b"--- PASS: "
-        } else {
-            b"--- FAIL: "
-        };
-        write_status(tag, header_indent.as_bytes(), &qualified);
         if !passed && !state.skipped.load(Ordering::Acquire) {
             // Go: a failing subtest fails its parent.
             self.state.failed.store(true, Ordering::Release);
         }
-
-        // Go: `t.flushToParent(t.name, "%s", …)` — anything the subtest
-        // buffered through Output() now appears UNDER its status line,
-        // indented into the parent's buffer. Without this the bytes
-        // stay in the subtest's buffer and are never seen.
-        state.flushToParent(
-            qualified.clone(),
-            string::from_static(""),
-            crate::goslice::slice::new(),
-        );
         return passed;
     }
 }
@@ -449,9 +441,13 @@ pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
     // calls t.Run still reports ran.
     *state.name.Lock() = t.name.clone();
     state.setRan();
-    // Go: `t.w = indenter{&t.common}` — a test's own writer indents
-    // into its OWN buffer. flushToParent then writes to the PARENT's
-    // w, which is what carries a subtest's output up one level.
+    // Go: `t.w = indenter{&t.common}` — EVERY test's writer indents
+    // into its own buffer, top-level ones included. Go's runTests wraps
+    // the whole run in a hidden root T whose w IS stdout, so a
+    // top-level test's parent writes straight out while a subtest's
+    // parent buffers. goish has no hidden root: a top-level test has no
+    // parent, flushToParent returns early for it, and Main writes its
+    // line directly — same output, one less indirection.
     *state.w.Lock() = Some(indenter {
         c: Arc::downgrade(&state),
     });
@@ -512,6 +508,23 @@ pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
         if let Some(ts) = ts {
             ts.release();
         }
+    }
+
+    // Go: `t.duration += highPrecisionTimeSince(t.start)` in tRunner's
+    // deferred func, before the report — so the reported time is the
+    // test's own, not including any wait for serial tests.
+    {
+        let start = *state.start.Lock();
+        let mut d = state.duration.Lock();
+        *d = crate::time::Duration(d.0 + crate::time::Since(start).0);
+    }
+
+    // Go: `t.report()` — "Report after all subtests have finished."
+    // A parallel subtest is reported by its parent instead, once the
+    // barrier has released it, so it is skipped here.
+    if !state.isParallel.load(Ordering::Acquire) {
+        state.report();
+        drain_chatty();
     }
 
     // Go: tRunner's deferred func, `if t.Failed() { numFailed.Add(1) }`.
@@ -1835,13 +1848,38 @@ impl TState {
             }
         }
 
-        // Go's chatty branch is unreachable in goish — `chatty` is
-        // never set — so this is the `fmt.Fprintf(p.w, …)` path.
+        let args = crate::goslice::slice::__from_vec(args);
+        let chatty = self.chatty.Lock().clone();
+
+        // Go: `if c.chatty != nil && (p.w == c.chatty.w || c.chatty.json)`
+        // — i.e. the parent's writer IS the real output stream, so this
+        // write goes straight out rather than into a buffer. goish
+        // spells "the parent writes to the real output" as "the parent
+        // has no indenter", which is true exactly for the root.
+        //
+        // Go's comment explains why it matters: the write must be
+        // atomic with respect to other tests, "so that we don't end up
+        // with confusing '=== NAME' lines in the middle of our
+        // '--- PASS' block."
+        let parent_is_root = p.w.Lock().is_none();
+        if let Some(c) = chatty {
+            if parent_is_root {
+                c.Updatef(testName, crate::fmt::Sprintv(format, args));
+                return;
+            }
+        }
+
+        // Otherwise: "We're flushing to the output buffer of the parent
+        // test, which will itself follow a test-name header when it is
+        // finally flushed to stdout."
+        let prefix = match self.chatty.Lock().as_ref() {
+            Some(c) => c.prefix(),
+            None => string::from_static(""),
+        };
         let msg = crate::fmt::Sprintv(
-            format,
-            crate::goslice::slice::__from_vec(args),
+            crate::fmt::Sprintf!("%s%s", prefix, format),
+            args,
         );
-        let _ = testName;
 
         let w = p.w.Lock().clone();
         match w {
@@ -2055,8 +2093,26 @@ impl T {
 
         self.state.isParallel.store(true, Ordering::Release);
 
+        // Go: "We don't want to include the time we spend waiting for
+        // serial tests in the test duration. Record the elapsed time
+        // thus far and reset the timer afterwards."
+        {
+            let start = *self.state.start.Lock();
+            let mut d = self.state.duration.Lock();
+            *d = crate::time::Duration(d.0 + crate::time::Since(start).0);
+        }
+
         // Go: "Add to the list of tests to be released by the parent."
         parent.sub.Lock().push(self.state.clone());
+
+        // Go: `t.chatty.Updatef(t.name, "=== PAUSE %s\n", t.name)`.
+        if let Some(c) = self.state.chatty.Lock().as_ref() {
+            c.Updatef(
+                self.name.clone(),
+                crate::fmt::Sprintf!("=== PAUSE %s\n", self.name.clone()),
+            );
+        }
+        drain_chatty();
 
         // Go: `t.signal <- true` — "Release calling test." The parent
         // is blocked in tRunner waiting on exactly this.
@@ -2074,6 +2130,18 @@ impl T {
         if let Some(ts) = ts {
             ts.waitParallel();
         }
+
+        // Go: `t.chatty.Updatef(t.name, "=== CONT  %s\n", t.name)`, then
+        // `t.start = highPrecisionTimeNow()` — the clock restarts so the
+        // wait for serial tests is not counted as this test's duration.
+        if let Some(c) = self.state.chatty.Lock().as_ref() {
+            c.Updatef(
+                self.name.clone(),
+                crate::fmt::Sprintf!("=== CONT  %s\n", self.name.clone()),
+            );
+        }
+        drain_chatty();
+        *self.state.start.Lock() = crate::time::Now();
     }
 }
 
@@ -2084,26 +2152,11 @@ impl T {
 // to write the line once the barrier has released it and it has really
 // finished. Same text, same place in the output; different caller.
 fn report_parallel_sub(parent: &Arc<TState>, sub: &Arc<TState>) {
-    let name = sub.name.Lock().clone();
-    let header_indent = indent_for(*sub.level.Lock());
-    let skipped = sub.skipped.load(Ordering::Acquire);
-    let passed = !sub.failed.load(Ordering::Acquire);
-    let tag: &[u8] = if skipped {
-        b"--- SKIP: "
-    } else if passed {
-        b"--- PASS: "
-    } else {
-        b"--- FAIL: "
-    };
-    write_status(tag, header_indent.as_bytes(), &name);
-    if !passed && !skipped {
+    if sub.failed.load(Ordering::Acquire) && !sub.skipped.load(Ordering::Acquire) {
         parent.failed.store(true, Ordering::Release);
     }
-    sub.flushToParent(
-        name,
-        string::from_static(""),
-        crate::goslice::slice::new(),
-    );
+    sub.report();
+    drain_chatty();
 }
 
 #[allow(non_snake_case)]
@@ -2443,4 +2496,89 @@ pub fn shouldFailFast() -> bool {
         Some(f) => f,
     };
     return f.failFast.Get() && numFailed.load(Ordering::Acquire) > 0;
+}
+
+// ─── report ──────────────────────────────────────────────────────────
+
+/// The buffer the run's chattyPrinter writes into.
+///
+/// Go's chattyPrinter holds an `io.Writer` and writes straight to
+/// stdout; goish's `newChattyPrinter` takes a shared byte buffer
+/// instead (a deviation that predates this work). `drain_chatty` empties
+/// it to stdout, and tRunner calls that immediately after every report,
+/// so the ordering a reader sees is the same as Go's.
+static CHATTY_BUF: crate::sync::Mutex<Option<Arc<crate::sync::Mutex<Vec<crate::types::byte>>>>> =
+    crate::sync::Mutex::new(None);
+
+// go: none — goish-only: empties the chattyPrinter's buffer to stdout.
+pub(crate) fn drain_chatty() {
+    let buf = match CHATTY_BUF.Lock().as_ref() {
+        Some(b) => b.clone(),
+        None => return,
+    };
+    let bytes = core::mem::take(&mut *buf.Lock());
+    if !bytes.is_empty() {
+        crate::syscall::Write(crate::syscall::STDOUT, bytes.as_ptr(), bytes.len());
+    }
+}
+
+// go: none — goish-only: installs the run's chattyPrinter on a test.
+// Go's driver does this in runTests when -v is set; goish's runner is
+// always chatty, which is what makes it behave like `go test -v`.
+pub(crate) fn attach_chatty(state: &Arc<TState>) {
+    let buf = {
+        let mut g = CHATTY_BUF.Lock();
+        if g.is_none() {
+            *g = Some(Arc::new(crate::sync::Mutex::new(Vec::new())));
+        }
+        g.as_ref().unwrap().clone()
+    };
+    *state.chatty.Lock() = Some(Arc::new(newChattyPrinter(buf, false)));
+}
+
+#[allow(non_snake_case)]
+impl TState {
+    // go: sdk 1.25.5 testing/testing.go:2383-2401 T.report
+    /// Go: emit this test's status line, and with it whatever the test
+    /// buffered, up to the parent.
+    ///
+    /// Two things are easy to miss. A top-level test reports NOTHING
+    /// here — it has no parent to flush to, and its line is the
+    /// driver's job. And without a chatty printer only FAILURES are
+    /// reported: a passing subtest is silent unless -v, which is why
+    /// goish's runner attaches a printer to every test.
+    pub(crate) fn report(&self) {
+        if self.parent.is_none() {
+            return;
+        }
+        if self.isSynctest.load(Ordering::Acquire) {
+            // Go: "t.parent will handle reporting".
+            return;
+        }
+        let dstr = fmtDuration(*self.duration.Lock());
+        let name = self.name.Lock().clone();
+        let format = string::from_static("--- %s: %s (%s)\n");
+        let failed = self.failed.load(Ordering::Acquire);
+        let chatty = self.chatty.Lock().is_some();
+
+        let verb = if failed {
+            string::from_static("FAIL")
+        } else if !chatty {
+            return;
+        } else if self.skipped.load(Ordering::Acquire) {
+            string::from_static("SKIP")
+        } else {
+            string::from_static("PASS")
+        };
+
+        self.flushToParent(
+            name.clone(),
+            format,
+            crate::goslice::slice::__from_vec(alloc::vec![
+                crate::goany::Any::new(verb),
+                crate::goany::Any::new(name),
+                crate::goany::Any::new(dstr),
+            ]),
+        );
+    }
 }
