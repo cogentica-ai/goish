@@ -2777,6 +2777,68 @@ fn main() {
     eq("readSessionTicket is a no-op when none was offered", rst2e, "");
     check_n("readSessionTicket leaves the ticket empty", rst2t.Len(), 0);
 
+
+    // ── Conn.verifyServerCertificate ────────────────────────────────
+    //
+    // Ground truth: scripts/goref.sh crypto/tls over the same
+    // self-signed RSA-2048 leaf x509_parse_smoke uses. Go pins its
+    // clock with Config.Time; goish's Config.time() is always
+    // time.Now(), and the certificate is valid 2024-03-01 to
+    // 2033-04-02, so both land inside the window.
+    let vscWant: [(&'static str, int, int); 7] = [
+        ("", 1, 0),
+        (
+            "tls: failed to parse certificate from server: x509: malformed certificate",
+            0,
+            0,
+        ),
+        (
+            "tls: failed to verify certificate: x509: certificate signed by unknown authority",
+            0,
+            0,
+        ),
+        ("", 1, 1),
+        (
+            "tls: failed to verify certificate: x509: certificate is valid for goish.example, www.goish.example, not nope.example",
+            0,
+            0,
+        ),
+        ("tls: refused by VerifyPeerCertificate", 1, 0),
+        ("tls: refused by VerifyConnection, version 0303", 1, 0),
+    ];
+    let mut vscI: int = 0;
+    while vscI < 7 {
+        let (wantErr, wantPeers, wantChains) = vscWant[vscI as usize];
+        let (e, peers, chains) = tls::handshake_client_verifyServerCertificate(vscI);
+        eq("verifyServerCertificate error", e, wantErr);
+        check_n("verifyServerCertificate peerCertificates", peers, wantPeers);
+        check_n("verifyServerCertificate verifiedChains", chains, wantChains);
+        vscI += 1;
+    }
+
+
+    // ── clientHandshakeState.saveSessionTicket ──────────────────────
+    //
+    // Ground truth: scripts/goref.sh crypto/tls with a recording
+    // ClientSessionCache.
+    let (sst0e, sst0n, sst0k, sst0s, sst0t, sst0v) = tls::handshake_client_saveSessionTicket(0);
+    eq("saveSessionTicket succeeds", sst0e, "");
+    check_n("saveSessionTicket puts once", sst0n, 1);
+    eq("saveSessionTicket keys on the server name", sst0k, "goish.example");
+    eq(
+        "saveSessionTicket caches the master secret",
+        hexOf(sst0s),
+        "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f30",
+    );
+    eq("saveSessionTicket caches the ticket", hexOf(sst0t), "aabbcc");
+    check_n("saveSessionTicket stamps the version", sst0v, 0x0303);
+    let (sst1e, sst1n, _, _, _, _) = tls::handshake_client_saveSessionTicket(1);
+    eq("saveSessionTicket with no ticket is not an error", sst1e, "");
+    check_n("saveSessionTicket with no ticket caches nothing", sst1n, 0);
+    let (sst2e, sst2n, _, _, _, _) = tls::handshake_client_saveSessionTicket(2);
+    eq("saveSessionTicket with no cache key is not an error", sst2e, "");
+    check_n("saveSessionTicket with no cache key caches nothing", sst2n, 0);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

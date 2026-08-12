@@ -1,6 +1,6 @@
 // crypto/tls/handshake_client.rs — TLS 1.2 client handshake.
 //
-// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, handshake, doFullHandshake, saveSessionTicket, verifyServerCertificate, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, handshake, doFullHandshake, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
 // goishlint:ignore GOISH019 echClientContext — same.
 // goishlint:ignore GOISH021 echClientContext, tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
 //
@@ -3261,4 +3261,262 @@ pub(crate) fn copyInto(
         dst[i] = src[i];
         i += 1;
     }
+}
+
+impl clientHandshakeState {
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:1055-1074 clientHandshakeState.saveSessionTicket
+    /// Go: put the ticket the server sent, together with the master
+    /// secret it resumes, into the client session cache.
+    ///
+    /// Deviation: Go calls `c.config.ClientSessionCache.Put` without a
+    /// nil check, because `doFullHandshake` only reaches this when the
+    /// cache is set. goish's field is an `Option`, so a `None` cache is
+    /// a no-op rather than a panic.
+    pub(crate) fn saveSessionTicket(&mut self) -> crate::error {
+        // Go: if hs.ticket == nil { return nil }
+        if self.ticket.Len() == 0 {
+            return crate::errors::nil;
+        }
+
+        // Go: cacheKey := c.clientSessionCacheKey()
+        //     if cacheKey == "" { return nil }
+        let cacheKey = self.c.clientSessionCacheKey();
+        if cacheKey.Len() == 0 {
+            return crate::errors::nil;
+        }
+
+        // Go: session := c.sessionState()
+        //     session.secret = hs.masterSecret
+        //     session.ticket = hs.ticket
+        let mut session = self.c.sessionState();
+        session.__setSecret(self.masterSecret.clone());
+        session.__setTicket(self.ticket.clone());
+
+        // Go: cs := &ClientSessionState{session: session}
+        //     c.config.ClientSessionCache.Put(cacheKey, cs)
+        //     return nil
+        let cs = super::ticket::ClientSessionState::__of(session);
+        if let Some(cache) = self.c.__configClientSessionCache() {
+            cache.Lock().Put(cacheKey, Some(cs));
+        }
+        return crate::errors::nil;
+    }
+}
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:1112-1201 Conn.verifyServerCertificate
+    /// Go: parse the server's chain, verify it against the configured
+    /// roots unless verification was waived, and run the two config
+    /// callbacks.
+    pub(crate) fn verifyServerCertificate(
+        &mut self,
+        certificates: crate::goslice::slice<crate::goslice::slice<crate::types::byte>>,
+    ) -> crate::error {
+        use crate::crypto::x509;
+        // Go: certs := make([]*x509.Certificate, len(certificates))
+        //     for i, asn1Data := range certificates { … }
+        let mut certs: alloc::vec::Vec<x509::Certificate> = alloc::vec::Vec::new();
+        for (_, asn1Data) in crate::range!(certificates) {
+            // Go: cert, err := globalCertCache.newCert(asn1Data)
+            //     if err != nil { c.sendAlert(alertDecodeError)
+            //         return errors.New("tls: failed to parse certificate from server: " + err.Error()) }
+            let (cert, err) = super::cache::globalCertCache.newCert(asn1Data.clone());
+            if err != crate::errors::nil {
+                self.sendAlert(super::alert::alertDecodeError);
+                return crate::fmt::Errorf!(
+                    "tls: failed to parse certificate from server: %s",
+                    err.Error()
+                );
+            }
+            let cert = cert.unwrap();
+            // Go: if cert.PublicKeyAlgorithm == x509.RSA {
+            //         n := cert.PublicKey.(*rsa.PublicKey).N.BitLen()
+            //         if max, ok := checkKeySize(n); !ok {
+            //             c.sendAlert(alertBadCertificate)
+            //             return fmt.Errorf("tls: server sent certificate containing RSA key larger than %d bits", max) } }
+            if cert.PublicKeyAlgorithm == x509::RSA {
+                let n = rsaPublicKeyBitLen(&cert);
+                let (max, ok) = checkKeySize(n);
+                if !ok {
+                    self.sendAlert(super::alert::alertBadCertificate);
+                    return crate::fmt::Errorf!(
+                        "tls: server sent certificate containing RSA key larger than %d bits",
+                        max
+                    );
+                }
+            }
+            certs.push(cert);
+        }
+        let certs: crate::goslice::slice<x509::Certificate> =
+            crate::goslice::slice::__from_vec(certs);
+
+        // Go: echRejected := c.config.EncryptedClientHelloConfigList != nil && !c.echAccepted
+        let echRejected =
+            self.config.EncryptedClientHelloConfigList.Len() > 0 && !self.echAccepted;
+
+        // Go: if echRejected { … } else if !c.config.InsecureSkipVerify { … }
+        //
+        // The two arms differ only in the DNSName they verify against
+        // (c.serverName vs c.config.ServerName) and in the ECH arm's
+        // chance to hand the whole job to the rejection callback.
+        if echRejected {
+            // Go: if c.config.EncryptedClientHelloRejectionVerify != nil { … }
+            if let Some(f) = self.config.EncryptedClientHelloRejectionVerify.clone() {
+                let st = self.connectionStateLocked();
+                let err = f(st);
+                if err != crate::errors::nil {
+                    self.sendAlert(super::alert::alertBadCertificate);
+                    return err;
+                }
+            } else {
+                let err = self.verifyChainAgainstRoots(&certs, self.serverName.clone());
+                if err != crate::errors::nil {
+                    return err;
+                }
+            }
+        } else if !self.config.InsecureSkipVerify {
+            let err = self.verifyChainAgainstRoots(&certs, self.config.ServerName.clone());
+            if err != crate::errors::nil {
+                return err;
+            }
+        }
+
+        // Go: switch certs[0].PublicKey.(type) {
+        //     case *rsa.PublicKey, *ecdsa.PublicKey, ed25519.PublicKey: break
+        //     default: c.sendAlert(alertUnsupportedCertificate)
+        //         return fmt.Errorf("tls: server's certificate contains an unsupported type of public key: %T", …) }
+        if !supportedPublicKey(&certs[0]) {
+            self.sendAlert(super::alert::alertUnsupportedCertificate);
+            return crate::fmt::Errorf!(
+                "tls: server's certificate contains an unsupported type of public key: %s",
+                publicKeyTypeName(&certs[0])
+            );
+        }
+
+        // Go: c.peerCertificates = certs
+        self.peerCertificates = certs;
+
+        // Go: if c.config.VerifyPeerCertificate != nil && !echRejected {
+        //         if err := c.config.VerifyPeerCertificate(certificates, c.verifiedChains); err != nil {
+        //             c.sendAlert(alertBadCertificate); return err } }
+        if !echRejected {
+            if let Some(f) = self.config.VerifyPeerCertificate.clone() {
+                let err = f(certificates.clone(), self.verifiedChains.clone());
+                if err != crate::errors::nil {
+                    self.sendAlert(super::alert::alertBadCertificate);
+                    return err;
+                }
+            }
+        }
+
+        // Go: if c.config.VerifyConnection != nil && !echRejected {
+        //         if err := c.config.VerifyConnection(c.connectionStateLocked()); err != nil {
+        //             c.sendAlert(alertBadCertificate); return err } }
+        if !echRejected {
+            if let Some(f) = self.config.VerifyConnection.clone() {
+                let st = self.connectionStateLocked();
+                let err = f(st);
+                if err != crate::errors::nil {
+                    self.sendAlert(super::alert::alertBadCertificate);
+                    return err;
+                }
+            }
+        }
+
+        // Go: return nil
+        return crate::errors::nil;
+    }
+
+    // go: none — goish-only: Go spells this block out twice inside
+    // `verifyServerCertificate`, once per arm of the ECH test, differing
+    // only in the DNSName. Naming it once keeps both arms verbatim.
+    fn verifyChainAgainstRoots(
+        &mut self,
+        certs: &crate::goslice::slice<crate::crypto::x509::Certificate>,
+        dnsName: crate::gostring::string,
+    ) -> crate::error {
+        use crate::crypto::x509;
+        // Go: opts := x509.VerifyOptions{Roots: c.config.RootCAs,
+        //         CurrentTime: c.config.time(), DNSName: …,
+        //         Intermediates: x509.NewCertPool()}
+        //     for _, cert := range certs[1:] { opts.Intermediates.AddCert(cert) }
+        let mut intermediates = x509::NewCertPool();
+        let mut i: crate::types::int = 1;
+        while i < certs.Len() {
+            intermediates.AddCert(certs[i as usize].clone());
+            i += 1;
+        }
+        let opts = x509::VerifyOptions {
+            Roots: self.config.RootCAs.clone(),
+            CurrentTime: self.config.time(),
+            DNSName: dnsName,
+            Intermediates: Some(intermediates),
+            ..x509::VerifyOptions::default()
+        };
+
+        // Go: chains, err := certs[0].Verify(opts)
+        //     if err != nil { c.sendAlert(alertBadCertificate)
+        //         return &CertificateVerificationError{UnverifiedCertificates: certs, Err: err} }
+        let (chains, err) = certs[0].Verify(opts);
+        if err != crate::errors::nil {
+            self.sendAlert(super::alert::alertBadCertificate);
+            return super::common::CertificateVerificationError {
+                UnverifiedCertificates: certs.clone(),
+                Err: err,
+            }
+            .into();
+        }
+
+        // Go: c.verifiedChains, err = fipsAllowedChains(chains)
+        //     if err != nil { c.sendAlert(alertBadCertificate)
+        //         return &CertificateVerificationError{UnverifiedCertificates: certs, Err: err} }
+        let (allowed, err) = super::common::fipsAllowedChains(chains);
+        if err != crate::errors::nil {
+            self.sendAlert(super::alert::alertBadCertificate);
+            return super::common::CertificateVerificationError {
+                UnverifiedCertificates: certs.clone(),
+                Err: err,
+            }
+            .into();
+        }
+        self.verifiedChains = allowed;
+        return crate::errors::nil;
+    }
+}
+
+// go: none — goish-only: Go writes `cert.PublicKey.(*rsa.PublicKey).N.BitLen()`,
+// a type assertion guarded by `PublicKeyAlgorithm == x509.RSA`.
+fn rsaPublicKeyBitLen(cert: &crate::crypto::x509::Certificate) -> crate::types::int {
+    match cert.PublicKey.As::<crate::crypto::rsa::PublicKey>() {
+        Some(k) => return k.N.BitLen(),
+        None => return 0,
+    };
+}
+
+// go: none — goish-only: stands in for Go's type switch over
+// `*rsa.PublicKey`, `*ecdsa.PublicKey` and `ed25519.PublicKey`.
+fn supportedPublicKey(cert: &crate::crypto::x509::Certificate) -> bool {
+    return cert.PublicKey.As::<crate::crypto::rsa::PublicKey>().is_some()
+        || cert
+            .PublicKey
+            .As::<crate::crypto::ecdsa::PublicKey>()
+            .is_some()
+        || cert
+            .PublicKey
+            .As::<crate::crypto::ed25519::PublicKey>()
+            .is_some();
+}
+
+// go: none — goish-only: stands in for Go's `%T` on the public key.
+fn publicKeyTypeName(cert: &crate::crypto::x509::Certificate) -> crate::gostring::string {
+    match cert.PublicKeyAlgorithm {
+        crate::crypto::x509::RSA => return crate::gostring::string::from_static("*rsa.PublicKey"),
+        crate::crypto::x509::ECDSA => {
+            return crate::gostring::string::from_static("*ecdsa.PublicKey")
+        }
+        crate::crypto::x509::Ed25519 => {
+            return crate::gostring::string::from_static("ed25519.PublicKey")
+        }
+        _ => return crate::gostring::string::from_static("<unknown>"),
+    };
 }

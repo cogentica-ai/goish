@@ -15,6 +15,7 @@ pub mod alert;
 pub mod auth;
 mod defaults_fips140;
 pub mod conn;
+pub(crate) mod cache;
 pub mod ticket;
 pub mod handshake_server;
 
@@ -410,6 +411,41 @@ pub struct Config {
     /// RootCAs defines the set of root certificate authorities that clients
     /// use when verifying server certificates.
     pub RootCAs: Option<crate::crypto::x509::CertPool>,
+    /// Go: "ClientSessionCache is a cache of ClientSessionState entries
+    /// for TLS session resumption. It is only used by clients."
+    /// Reference: common.go:684.
+    pub ClientSessionCache:
+        Option<alloc::sync::Arc<crate::sync::Mutex<alloc::boxed::Box<dyn common::ClientSessionCache>>>>,
+    /// Go: "VerifyPeerCertificate, if not nil, is called after normal
+    /// certificate verification by either a TLS client or server. It
+    /// receives the raw ASN.1 certificates provided by the peer and also
+    /// any verified chains that normal processing found. If it returns a
+    /// non-nil error, the handshake is aborted and that error results."
+    /// Reference: common.go:762.
+    pub VerifyPeerCertificate: Option<
+        alloc::sync::Arc<
+            dyn Fn(
+                    crate::goslice::slice<crate::goslice::slice<crate::types::byte>>,
+                    crate::goslice::slice<crate::goslice::slice<crate::crypto::x509::Certificate>>,
+                ) -> crate::error
+                + Send
+                + Sync,
+        >,
+    >,
+    /// Go: "VerifyConnection, if not nil, is called after normal
+    /// certificate verification and after VerifyPeerCertificate by
+    /// either a TLS client or server. If it returns a non-nil error, the
+    /// handshake is aborted and that error results." Reference:
+    /// common.go:776.
+    pub VerifyConnection:
+        Option<alloc::sync::Arc<dyn Fn(common::ConnectionState) -> crate::error + Send + Sync>>,
+    /// Go: "EncryptedClientHelloRejectionVerify, if not nil, is called
+    /// when ECH is rejected, in order to verify the ECH provider
+    /// certificate in the outer ClientHello. If it returns a non-nil
+    /// error, the handshake is aborted and that error results."
+    /// Reference: common.go:855.
+    pub EncryptedClientHelloRejectionVerify:
+        Option<alloc::sync::Arc<dyn Fn(common::ConnectionState) -> crate::error + Send + Sync>>,
     /// Certificates contains one or more certificate chains to present
     /// to the other side of the connection (server side). The first
     /// entry is used; SNI-based selection (`GetCertificate`) is not
@@ -5843,4 +5879,201 @@ pub fn handshake_client_readSessionTicket(
         err.Error()
     };
     return (text, hs.ticket.clone());
+}
+
+// go: none — goish-only: `Conn.verifyServerCertificate` is unexported
+// in Go, where the tests are in-package. `which` selects the case; see
+// the assertions. Reports `(errText, len(peerCertificates),
+// len(verifiedChains))`. The certificate is the self-signed RSA-2048
+// leaf `x509_parse_smoke` uses.
+#[doc(hidden)]
+pub fn handshake_client_verifyServerCertificate(
+    which: crate::types::int,
+) -> (crate::gostring::string, crate::types::int, crate::types::int) {
+    use crate::goslice::slice;
+    let der = crate::encoding::base64::StdEncoding.DecodeString(
+        "MIIE4DCCA8igAwIBAgIFAQIDBAUwDQYJKoZIhvcNAQELBQAwbDELMAkGA1UEBhMCVEgxEDAOBgNVBAcTB0Jhbmdrb2sxFzAVBgNVBAoTDkdvaXNoIFRlc3QgT3JnMQ4wDAYDVQQLEwVQb3J0czETMBEGA1UEAxMKZ29pc2ggbGVhZjENMAsGA1UEBRMEU04tNzAeFw0yNDAzMDExMjAwMDBaFw0zMzA0MDIxMzE0MTVaMGwxCzAJBgNVBAYTAlRIMRAwDgYDVQQHEwdCYW5na29rMRcwFQYDVQQKEw5Hb2lzaCBUZXN0IE9yZzEOMAwGA1UECxMFUG9ydHMxEzARBgNVBAMTCmdvaXNoIGxlYWYxDTALBgNVBAUTBFNOLTcwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDEE3zZMggLiQDVMKhbusFFqr5rE7BxpUMyaL9fCRhQHqKRaqwBHzo7fry6P9/SQmGQehkiS4ciMyhFI8YtYjHqdCT/K0o5Y0kk2gFBzmEWNKRN3J+dxZWYrA5gExmMpQCTdsYUSHG1683Z7a+S1rcLc+rHxhYDswT6HIioJfiF+Mko+27mtCirEJzHe/wA0NzHv6Wk+rQmjA8spQ4azr88duWqrxmh5l6Xcy6l1pnHaOvsIk78JtP7KTTeTvtLKCqdzrRrBKj+ISBj2gXopXJWROUBenJhcyNYROah0woJNrNw0Eq1ILBLBree7hx6rGog90dUn8lGkW7FWVnRgH8tAgMBAAGjggGHMIIBgzAOBgNVHQ8BAf8EBAMCAqQwHQYDVR0lBBYwFAYIKwYBBQUHAwEGCCsGAQUFBwMCMBIGA1UdEwEB/wQIMAYBAf8CAQIwDgYDVR0OBAcEBQECAwQFMGEGCCsGAQUFBwEBBFUwUzAlBggrBgEFBQcwAYYZaHR0cDovL29jc3AuZ29pc2guZXhhbXBsZTAqBggrBgEFBQcwAoYeaHR0cDovL2NhLmdvaXNoLmV4YW1wbGUvY2EuY3J0MF8GA1UdEQRYMFaCDWdvaXNoLmV4YW1wbGWCEXd3dy5nb2lzaC5leGFtcGxlgRJwb3J0QGdvaXNoLmV4YW1wbGWHBMAAAgqGGGh0dHBzOi8vZ29pc2guZXhhbXBsZS9jYTA5BgNVHR4EMjAwoB0wD4INZ29pc2guZXhhbXBsZTAKhwgKAAAA/wAAAKEPMA2CC2JhZC5leGFtcGxlMC8GA1UdHwQoMCYwJKAioCCGHmh0dHA6Ly9jcmwuZ29pc2guZXhhbXBsZS94LmNybDANBgkqhkiG9w0BAQsFAAOCAQEAdIYb7TNaVRqsSMoVfCf+IcCmKjZaKJfIkxrOpupQZK205mzX+/w3szqUl/EUFhFrmqWCBAgntuZ7VZDNXF9KBrNjNwbCkV8EkP/uyNDzr0PYuutfhEY7V7GbJX4aUU+i+unHbTEcPbQjoVTWg6DVUUihnejtkee3b88GaRQFWhWy1GgwUPLe3xx2UEsok7bcBfFOzsOwyU8jcdl6YXQca37j974lL9Ej/C6lnO+ilk45+T08TVx3YQCmQGJWXYmmUQOL7WYZOPXEhreogZrVDGi8Uw80/fjU2zWB58JCMly/pK9s3yGcYqYSmDZfZZ3PR4appnTEXHCBV6AYRr1Nlw==",
+    );
+    let der = der.0;
+    let (leaf, _) = crate::crypto::x509::ParseCertificate(der.clone());
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(slice::<crate::types::byte>::new()));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink);
+    c.__setHaveVers(true);
+    c.__setVers(common::VersionTLS12);
+    c.__setIsClient(true);
+
+    let mut cfg = Config::default();
+    let mut pool = crate::crypto::x509::NewCertPool();
+    pool.AddCert(leaf);
+    match which {
+        // Verification waived: the chain is adopted unverified.
+        0 => cfg.InsecureSkipVerify = true,
+        // Bytes that are not a certificate at all.
+        1 => cfg.InsecureSkipVerify = true,
+        // Verified against the empty default root set.
+        2 => cfg.ServerName = crate::gostring::string::from_static("goish.example"),
+        // Verified against the leaf itself, which is self-signed.
+        3 => {
+            cfg.ServerName = crate::gostring::string::from_static("goish.example");
+            cfg.RootCAs = Some(pool);
+        }
+        // A name the certificate does not cover.
+        4 => {
+            cfg.ServerName = crate::gostring::string::from_static("nope.example");
+            cfg.RootCAs = Some(pool);
+        }
+        // The two config callbacks, each refusing.
+        5 => {
+            cfg.InsecureSkipVerify = true;
+            cfg.VerifyPeerCertificate = Some(alloc::sync::Arc::new(|_raw, _chains| {
+                return crate::errors::New("tls: refused by VerifyPeerCertificate");
+            }));
+        }
+        _ => {
+            cfg.InsecureSkipVerify = true;
+            cfg.VerifyConnection = Some(alloc::sync::Arc::new(|cs: common::ConnectionState| {
+                return crate::fmt::Errorf!(
+                    "tls: refused by VerifyConnection, version %04x",
+                    cs.Version
+                );
+            }));
+        }
+    }
+    c.__setConfig(cfg);
+
+    let chain: slice<slice<crate::types::byte>> = if which == 1 {
+        slice::__from_vec(alloc::vec![slice::__from_vec(alloc::vec![1u8, 2, 3])])
+    } else {
+        slice::__from_vec(alloc::vec![der])
+    };
+    let err = c.verifyServerCertificate(chain);
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (text, c.__peerCertificateCount(), c.__verifiedChainCount());
+}
+
+// go: none — goish-only: a ClientSessionCache that records what was
+// last Put into a handle the caller also holds, so the shim below can
+// report it. Go's reference test uses an in-package struct for the same
+// purpose; goish needs the shared handle because Config stores the
+// cache behind `Box<dyn ClientSessionCache>`, which cannot be
+// downcast back to a concrete type.
+#[doc(hidden)]
+#[derive(Default, Clone)]
+pub struct __sessionCacheRecord {
+    pub key: crate::gostring::string,
+    pub cs: Option<ticket::ClientSessionState>,
+    pub n: crate::types::int,
+}
+
+#[doc(hidden)]
+pub struct __capturingSessionCache(
+    pub alloc::sync::Arc<crate::sync::Mutex<__sessionCacheRecord>>,
+);
+
+impl common::ClientSessionCache for __capturingSessionCache {
+    // go: none — goish-only: the recording cache never serves a hit.
+    fn Get(
+        &mut self,
+        _sessionKey: crate::gostring::string,
+    ) -> (Option<ticket::ClientSessionState>, bool) {
+        return (None, false);
+    }
+    // go: none — goish-only: records what was Put for the shim to read.
+    fn Put(
+        &mut self,
+        sessionKey: crate::gostring::string,
+        cs: Option<ticket::ClientSessionState>,
+    ) {
+        let mut r = self.0.Lock();
+        r.key = sessionKey;
+        r.cs = cs;
+        r.n += 1;
+    }
+}
+
+// go: none — goish-only: `clientHandshakeState.saveSessionTicket` is
+// unexported in Go, where the tests are in-package. `which`: 0 = a
+// ticket and a cache key, 1 = no ticket, 2 = no cache key. Reports
+// `(errText, Put count, key, cached secret, cached ticket, cached
+// version)`.
+#[doc(hidden)]
+pub fn handshake_client_saveSessionTicket(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::types::int,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::int,
+) {
+    use crate::goslice::slice;
+    let master: slice<crate::types::byte> = {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: crate::types::int = 0;
+        while i < 48 {
+            v.push(crate::byte(i + 1));
+            i += 1;
+        }
+        slice::__from_vec(v)
+    };
+    let record = alloc::sync::Arc::new(crate::sync::Mutex::new(__sessionCacheRecord::default()));
+    let cache: alloc::sync::Arc<
+        crate::sync::Mutex<alloc::boxed::Box<dyn common::ClientSessionCache>>,
+    > = alloc::sync::Arc::new(crate::sync::Mutex::new(alloc::boxed::Box::new(
+        __capturingSessionCache(record.clone()),
+    )));
+
+    let mut cfg = Config::default();
+    cfg.ServerName = if which == 2 {
+        crate::gostring::string::from_static("")
+    } else {
+        crate::gostring::string::from_static("goish.example")
+    };
+    cfg.ClientSessionCache = Some(cache);
+
+    let mut c = conn::Conn::default();
+    c.__setConfig(cfg);
+    c.__setVers(common::VersionTLS12);
+    c.__setCipherSuite(cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256);
+    c.__setIsClient(true);
+
+    let suite = cipher_suites::cipherSuiteByID(cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
+        .unwrap();
+    let mut hs = handshake_client::clientHandshakeState {
+        c,
+        serverHello: handshake_messages::serverHelloMsg::default(),
+        hello: handshake_messages::clientHelloMsg::default(),
+        suite: Some(suite),
+        finishedHash: prf::newFinishedHash(common::VersionTLS12, suite),
+        masterSecret: master,
+        session: None,
+        ticket: if which == 1 {
+            slice::new()
+        } else if which == 2 {
+            slice::__from_vec(alloc::vec![0xaau8])
+        } else {
+            slice::__from_vec(alloc::vec![0xaau8, 0xbb, 0xcc])
+        },
+    };
+    let err = hs.saveSessionTicket();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+
+    let r = record.Lock().clone();
+    let empty = slice::<crate::types::byte>::new();
+    let (secret, tkt, vers) = match r.cs.as_ref().and_then(|s| s.__session()) {
+        Some(s) => (s.__secret(), s.__ticket(), crate::int(s.__version())),
+        None => (empty.clone(), empty, 0),
+    };
+    return (text, r.n, r.key.clone(), secret, tkt, vers);
 }

@@ -425,6 +425,10 @@ impl SessionState {
     // go: none — goish-only: see above.
     #[doc(hidden)]
     pub fn __setSecret(&mut self, v: slice<byte>) { self.secret = v; }
+    // go: none — goish-only: `SessionState.ticket` is unexported in Go,
+    // where the tests are in-package.
+    #[doc(hidden)]
+    pub fn __setTicket(&mut self, v: slice<byte>) { self.ticket = v; }
     // go: none — goish-only: see above.
     #[doc(hidden)]
     pub fn __setExtMasterSecret(&mut self, v: bool) { self.extMasterSecret = v; }
@@ -464,6 +468,9 @@ impl SessionState {
     // go: none — goish-only: see above.
     #[doc(hidden)]
     pub fn __secret(&self) -> slice<byte> { return self.secret.clone(); }
+    // go: none — goish-only: `SessionState.ticket` is unexported in Go.
+    #[doc(hidden)]
+    pub fn __ticket(&self) -> slice<byte> { return self.ticket.clone(); }
     // go: none — goish-only: see above.
     #[doc(hidden)]
     pub fn __extMasterSecret(&self) -> bool { return self.extMasterSecret; }
@@ -492,6 +499,20 @@ pub struct ClientSessionState {
 }
 
 impl ClientSessionState {
+    // go: none — goish-only: Go writes the composite literal
+    // `&ClientSessionState{session: session}` in-package; `session` is
+    // unexported, so sibling modules need a constructor.
+    #[doc(hidden)]
+    pub fn __of(session: SessionState) -> ClientSessionState {
+        return ClientSessionState { session: Some(session) };
+    }
+
+    // go: none — goish-only: see `__of`.
+    #[doc(hidden)]
+    pub fn __session(&self) -> Option<SessionState> {
+        return self.session.clone();
+    }
+
     // go: sdk 1.25.5 crypto/tls/ticket.go:355-360 ClientSessionState.ResumptionState
     /// Go: "ResumptionState returns the session ticket sent by the
     /// server (also known as the session's identity) and the state

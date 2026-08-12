@@ -1142,6 +1142,21 @@ impl Conn {
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
     pub fn __setConfig(&mut self, cfg: super::Config) { self.config = cfg; }
+    // go: none — goish-only: see `__setConfig`.
+    #[doc(hidden)]
+    pub fn __configClientSessionCache(
+        &self,
+    ) -> Option<
+        alloc::sync::Arc<crate::sync::Mutex<Box<dyn super::common::ClientSessionCache>>>,
+    > {
+        return self.config.ClientSessionCache.clone();
+    }
+    // go: none — goish-only: see `__setConfig`.
+    #[doc(hidden)]
+    pub fn __peerCertificateCount(&self) -> int { return self.peerCertificates.Len(); }
+    // go: none — goish-only: see `__setConfig`.
+    #[doc(hidden)]
+    pub fn __verifiedChainCount(&self) -> int { return self.verifiedChains.Len(); }
 
 
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
