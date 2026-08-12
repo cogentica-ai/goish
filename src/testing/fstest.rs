@@ -2,8 +2,8 @@
 // testing/fstest/mapfs.go (MapFS only; testfs.go's TestFS conformance
 // harness is not ported).
 //
-// goishlint:ignore GOISH018 checkBadPath, checkDir, checkDirList, checkFile, checkFileRead, checkGlob, checkOpen, checkStat, Close, errorf, formatEntry, formatInfo, formatInfoEntry, Glob, Info, IsDir, lstat, Lstat, Mode, ModTime, Name, Open, openDir, Read, ReadDir, ReadFile, ReadLink, resolveSymlinks, Size, Stat, String, Sub, Sys, testFS, TestFS, Type — MapFS's readers/Stat/ReadDir and the whole TestFS conformance suite are hand-written or not yet ported; only openMapFile.Seek and .ReadAt carry anchors so far.
-// goishlint:ignore GOISH021 _, fsOnly, fsTester, mapDir, MapFile, mapFileInfo, MapFS, noSub, openMapFile — same.
+// goishlint:ignore GOISH018 errorf, formatEntry, formatInfoEntry, formatInfo, checkBadPath, checkDir, checkDirList, checkFile, checkFileRead, checkGlob, checkOpen, checkStat, Close, Glob, Info, IsDir, lstat, Lstat, Mode, ModTime, Name, Open, openDir, Read, ReadDir, ReadFile, ReadLink, resolveSymlinks, Size, Stat, String, Sub, Sys, testFS, TestFS, Type — MapFS's readers/Stat/ReadDir and the whole TestFS conformance suite are hand-written or not yet ported; only openMapFile.Seek and .ReadAt carry anchors so far.
+// goishlint:ignore GOISH021 fsTester, _, fsOnly, fsTester, mapDir, MapFile, mapFileInfo, MapFS, noSub, openMapFile — same.
 //
 // Deviations:
 //  - `MapFS` is a newtype over `map<string, Arc<MapFile>>` rather than
@@ -694,4 +694,115 @@ pub fn __shim_open_read_at(
         Some(o) => o.ReadAt(b, offset),
         None => (0, errors::New(string::from_static("not an openMapFile"))),
     };
+}
+
+// ─── testfs.go — the TestFS conformance harness ──────────────────────
+//
+// Partially ported: the error accumulator and the three formatters that
+// render a mismatch. The checks themselves (checkDir, checkFile,
+// checkGlob, checkStat, checkOpen, checkBadPath) and TestFS/testFS that
+// drive them still need `fs.Glob`, `fs.Sub`, `fs.WalkDir` and
+// `fs.ReadDirFile` reached through interface downcasts, which goish's
+// io/fs does not fully provide yet.
+
+// goishlint:ignore GOISH019 fsTester — Go's `fsys fs.FS` field is held
+// by the driver (`testFS`), which is not ported; carrying a filesystem
+// this struct never reads would imply a walk that does not exist here.
+// goishlint:ignore GOISH020 errorf — Go's signature is
+// `(format string, args ...any)`; goish takes the already-formatted
+// string, matching how Logf/Skipf are handled in src/testing/testing.rs.
+// go: sdk 1.25.5 testing/fstest/testfs.go:96-101 fsTester
+/// Go: "An fsTester holds state for running the test."
+///
+/// Deviation: Go's `fsys fs.FS` field is carried by the driver
+/// (`testFS`), which is not ported; this holds only the accumulated
+/// state the formatters and `errorf` touch.
+#[derive(Default)]
+pub struct fsTester {
+    errors: alloc::vec::Vec<error>,
+    dirs: alloc::vec::Vec<string>,
+    files: alloc::vec::Vec<string>,
+}
+
+impl fsTester {
+    // go: sdk 1.25.5 testing/fstest/testfs.go:104-106 fsTester.errorf
+    /// Go: "errorf adds an error to the list of errors."
+    ///
+    /// Deviation: Go is variadic over `...any`; goish takes the already
+    /// formatted string, as elsewhere in this port.
+    pub fn errorf(&mut self, msg: string) {
+        self.errors.push(errors::New(msg));
+    }
+
+    // go: none — goish-only: read back what `errorf` accumulated. Go's
+    // driver reaches the slice directly because it is in-package; the
+    // field stays private here so the invariant "errors only grow via
+    // errorf" holds.
+    pub fn Errors(&self) -> slice<error> {
+        return slice::__from_vec(self.errors.clone());
+    }
+
+    // go: none — goish-only: record a directory the walk found.
+    pub fn __push_dir(&mut self, p: string) {
+        self.dirs.push(p);
+    }
+
+    // go: none — goish-only: record a file the walk found.
+    pub fn __push_file(&mut self, p: string) {
+        self.files.push(p);
+    }
+
+    // go: none — goish-only: the walk's results, for a driver to check.
+    pub fn Found(&self) -> (slice<string>, slice<string>) {
+        return (
+            slice::__from_vec(self.dirs.clone()),
+            slice::__from_vec(self.files.clone()),
+        );
+    }
+}
+
+// go: sdk 1.25.5 testing/fstest/testfs.go:276-278 formatEntry
+/// Go: `fmt.Sprintf("%s IsDir=%v Type=%v", entry.Name(), entry.IsDir(),
+/// entry.Type())` — the rendering both sides of a DirEntry comparison
+/// go through, so a mismatch prints as two directly comparable lines.
+pub fn formatEntry(entry: &dyn DirEntry) -> string {
+    return crate::fmt::Sprintf!(
+        "%s IsDir=%v Type=%v",
+        entry.Name(),
+        entry.IsDir(),
+        entry.Type().String()
+    );
+}
+
+// go: sdk 1.25.5 testing/fstest/testfs.go:281-283 formatInfoEntry
+/// Go: the same rendering as `formatEntry`, but taken from a FileInfo —
+/// which is the point: a DirEntry and the FileInfo its `Info()` returns
+/// must format identically, and that is what the conformance check
+/// compares.
+pub fn formatInfoEntry(info: &dyn FileInfo) -> string {
+    return crate::fmt::Sprintf!(
+        "%s IsDir=%v Type=%v",
+        info.Name(),
+        info.IsDir(),
+        info.Mode().Type().String()
+    );
+}
+
+// go: sdk 1.25.5 testing/fstest/testfs.go:286-288 formatInfo
+/// Go: `fmt.Sprintf("%s IsDir=%v Mode=%v Size=%d ModTime=%v", ...)` —
+/// the fuller rendering, used where the check compares a Stat against
+/// an Open().Stat().
+pub fn formatInfo(info: &dyn FileInfo) -> string {
+    return crate::fmt::Sprintf!(
+        "%s IsDir=%v Mode=%v Size=%d ModTime=%v",
+        info.Name(),
+        info.IsDir(),
+        info.Mode().String(),
+        info.Size(),
+        // Go renders the Time through %v, i.e. Time.String(), which
+        // goish's time does not provide. RFC3339Nano is the closest
+        // stable rendering and is what matters here: the string is only
+        // ever compared against another produced the same way.
+        info.ModTime().Format(crate::gostring::string::from_static(crate::time::RFC3339Nano))
+    );
 }

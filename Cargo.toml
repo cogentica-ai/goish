@@ -1203,3 +1203,7 @@ path = "examples/runtime_memstats_smoke.rs"
 [[example]]
 name = "testing_b_timer_smoke"
 path = "examples/testing_b_timer_smoke.rs"
+
+[[example]]
+name = "testing_fstest_format_smoke"
+path = "examples/testing_fstest_format_smoke.rs"
