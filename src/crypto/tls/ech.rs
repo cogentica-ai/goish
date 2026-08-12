@@ -1,4 +1,4 @@
-// go: file crypto/tls/ech.go decls: echConfigErr.Error, parseECHConfig, parseECHConfigList, skipUint8LengthPrefixed, skipUint16LengthPrefixed, validDNSName, ECHRejectionError.Error, parseECHExt, marshalEncryptedClientHelloConfigList, generateOuterECHExt, pickECHCipherSuite, pickECHConfig, extractRawExtensions, encodeInnerClientHello, decodeInnerClientHello, decryptECHPayload, buildRetryConfigList
+// go: file crypto/tls/ech.go decls: echConfigErr.Error, parseECHConfig, parseECHConfigList, skipUint8LengthPrefixed, skipUint16LengthPrefixed, validDNSName, ECHRejectionError.Error, parseECHExt, marshalEncryptedClientHelloConfigList, generateOuterECHExt, pickECHCipherSuite, pickECHConfig, extractRawExtensions, encodeInnerClientHello, decodeInnerClientHello, decryptECHPayload, buildRetryConfigList, Conn.processECHClientHello
 //
 // crypto/tls — Encrypted Client Hello (draft-ietf-tls-esni), config
 // parsing.
@@ -10,7 +10,7 @@
 // state machine. goish ships no ECH support, so nothing here is wired
 // into a handshake; it is the parser Go's own tests drive directly.
 //
-// goishlint:ignore GOISH018 computeAndUpdateOuterECHExtension, decryptECHExtension, encodeOuterExtensions, init, processECHClientHello, sendECHRetryConfigs — the ClientHello-dependent half; see the banner. ROADMAP.md.
+// goishlint:ignore GOISH018 computeAndUpdateOuterECHExtension, decryptECHExtension, encodeOuterExtensions, init, sendECHRetryConfigs — the ClientHello-dependent half; see the banner. ROADMAP.md.
 // goishlint:ignore GOISH019 echExtension, echConfig, echCipher, echConfigErr, echContext, echServerContext, echClientContext — the parser's shapes are here; the handshake-side ones are not.
 // goishlint:ignore GOISH021 echAcceptConfirmationLabel, echClientContext, echContext, echHRRAcceptConfirmationLabel, echServerContext, errIllegalECHExt, errMalformedECHConfigList, sortedSupportedAEADs — same.
 
@@ -1000,4 +1000,151 @@ pub(crate) fn buildRetryConfigList(
     }
     // Go: return retryBuilder.Bytes()
     return retryBuilder.Bytes();
+}
+
+use super::conn::Conn;
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/ech.go:581-650 Conn.processECHClientHello
+    /// Go: classify the outer hello's ECH extension, and for the outer
+    /// type trial-decrypt it against each configured key, adopting the
+    /// first that opens. "NOTE: we do not enforce that the sent
+    /// server_name matches the ECH configs PublicName ... This is only a
+    /// MAY in the spec."
+    pub(crate) fn processECHClientHello(
+        &mut self,
+        outer: &clientHelloMsg,
+        echKeys: slice<super::common::EncryptedClientHelloKey>,
+    ) -> (
+        Option<clientHelloMsg>,
+        Option<super::handshake_server_tls13::echServerContext>,
+        crate::error,
+    ) {
+        // Go: echType, echCiphersuite, configID, encap, payload, err :=
+        //         parseECHExt(outer.encryptedClientHello)
+        //     if err != nil {
+        //         if errors.Is(err, errInvalidECHExt) { c.sendAlert(alertIllegalParameter) }
+        //         else { c.sendAlert(alertDecodeError) }
+        //         return nil, nil, errInvalidECHExt }
+        let (echType, echCiphersuite, configID, encap, payload, err) =
+            parseECHExt(slice::__from_vec(outer.encryptedClientHello.clone()));
+        if err != crate::errors::nil {
+            if crate::errors::Is(err.clone(), errInvalidECHExt.clone()) {
+                self.sendAlert(super::alert::alertIllegalParameter);
+            } else {
+                self.sendAlert(super::alert::alertDecodeError);
+            }
+            return (None, None, errInvalidECHExt.into());
+        }
+
+        // Go: if echType == innerECHExt {
+        //         return outer, &echServerContext{inner: true}, nil }
+        if echType == innerECHExt {
+            let mut ctx = super::handshake_server_tls13::echServerContext::default();
+            ctx.inner = true;
+            return (Some(outer.clone()), Some(ctx), crate::errors::nil);
+        }
+
+        // Go: if len(echKeys) == 0 { return outer, nil, nil }
+        if echKeys.Len() == 0 {
+            return (Some(outer.clone()), None, crate::errors::nil);
+        }
+
+        // Go: for _, echKey := range echKeys {
+        for (_, echKey) in crate::range!(echKeys) {
+            // Go: skip, config, err := parseECHConfig(echKey.Config)
+            //     if err != nil || skip {
+            //         c.sendAlert(alertInternalError)
+            //         return nil, nil, fmt.Errorf("tls: invalid EncryptedClientHelloKeys Config: %s", err) }
+            //     if skip { continue }   // unreachable in Go too — kept verbatim
+            let (skip, config, err) = parseECHConfig(echKey.Config.clone());
+            if err != crate::errors::nil || skip {
+                self.sendAlert(super::alert::alertInternalError);
+                return (
+                    None,
+                    None,
+                    crate::fmt::Errorf!(
+                        "tls: invalid EncryptedClientHelloKeys Config: %s",
+                        err.Error()
+                    ),
+                );
+            }
+            if skip {
+                continue;
+            }
+            // Go: echPriv, err := hpke.ParseHPKEPrivateKey(config.KemID, echKey.PrivateKey)
+            //     if err != nil { c.sendAlert(alertInternalError)
+            //         return nil, nil, fmt.Errorf("tls: invalid EncryptedClientHelloKeys PrivateKey: %s", err) }
+            let (echPriv, err) = crate::crypto::internal::hpke::ParseHPKEPrivateKey(
+                config.KemID,
+                &echKey.PrivateKey,
+            );
+            if err != crate::errors::nil {
+                self.sendAlert(super::alert::alertInternalError);
+                return (
+                    None,
+                    None,
+                    crate::fmt::Errorf!(
+                        "tls: invalid EncryptedClientHelloKeys PrivateKey: %s",
+                        err.Error()
+                    ),
+                );
+            }
+            // Go: info := append([]byte("tls ech\x00"), echKey.Config...)
+            let info = {
+                let mut v: Vec<byte> = b"tls ech\x00".to_vec();
+                let raw: &[byte] = &echKey.Config;
+                v.extend_from_slice(raw);
+                slice::__from_vec(v)
+            };
+            // Go: hpkeContext, err := hpke.SetupRecipient(hpke.DHKEM_X25519_HKDF_SHA256,
+            //         echCiphersuite.KDFID, echCiphersuite.AEADID, echPriv, info, encap)
+            //     if err != nil { continue }  // "attempt next trial decryption"
+            let (hpkeContext, err) = crate::crypto::internal::hpke::SetupRecipient(
+                crate::crypto::internal::hpke::DHKEM_X25519_HKDF_SHA256,
+                echCiphersuite.KDFID,
+                echCiphersuite.AEADID,
+                &echPriv,
+                &info,
+                &encap,
+            );
+            if err != crate::errors::nil {
+                continue;
+            }
+            let mut hpkeContext = hpkeContext.unwrap();
+
+            // Go: encodedInner, err := decryptECHPayload(hpkeContext, outer.original, payload)
+            //     if err != nil { continue }  // "attempt next trial decryption"
+            let (encodedInner, err) = decryptECHPayload(
+                &mut hpkeContext,
+                slice::__from_vec(outer.original.clone()),
+                payload.clone(),
+            );
+            if err != crate::errors::nil {
+                continue;
+            }
+
+            // Go: echInner, err := decodeInnerClientHello(outer, encodedInner)
+            //     if err != nil { c.sendAlert(alertIllegalParameter)
+            //         return nil, nil, errInvalidECHExt }
+            let (echInner, err) = decodeInnerClientHello(outer, encodedInner);
+            if err != crate::errors::nil {
+                self.sendAlert(super::alert::alertIllegalParameter);
+                return (None, None, errInvalidECHExt.into());
+            }
+
+            // Go: c.echAccepted = true
+            //     return echInner, &echServerContext{ hpkeContext: hpkeContext,
+            //         configID: configID, ciphersuite: echCiphersuite }, nil
+            self.echAccepted = true;
+            let mut ctx = super::handshake_server_tls13::echServerContext::default();
+            ctx.hpkeContext = Some(hpkeContext);
+            ctx.configID = configID;
+            ctx.ciphersuite = echCiphersuite;
+            return (echInner, Some(ctx), crate::errors::nil);
+        }
+
+        // Go: return outer, nil, nil
+        return (Some(outer.clone()), None, crate::errors::nil);
+    }
 }

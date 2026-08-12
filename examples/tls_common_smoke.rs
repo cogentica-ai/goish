@@ -3554,6 +3554,35 @@ fn main() {
         "tls: client illegally modified second ClientHello",
     );
 
+    // ── Conn.processECHClientHello (deterministic branches) ─────────
+    //
+    // Ground truth: goref. The outer-decrypt trial path needs the
+    // client-side ECH sealer (not yet ported), so this pins the three
+    // branches that do not decrypt: the inner-ECH short-circuit, the
+    // no-keys passthrough, and the malformed-extension rejection.
+    let pech = |which: int| -> (string, string, bool, bool, bool) {
+        return tls::handshake_server_tls13_processECHClientHello(which);
+    };
+
+    let (pe0e, pe0sni, pe0inner, _, pe0acc) = pech(0);
+    eq("an inner ECH ext returns nil error", pe0e, "");
+    eq("the outer hello is returned unchanged", pe0sni, "inner.example");
+    check("the context is marked inner", pe0inner);
+    check("echAccepted stays false for an inner hello", !pe0acc);
+
+    let (pe1e, pe1sni, _, pe1nil, pe1acc) = pech(1);
+    eq("an outer ECH ext with no keys returns nil error", pe1e, "");
+    eq("the outer hello passes through", pe1sni, "public.example");
+    check("no context is produced without keys", pe1nil);
+    check("echAccepted stays false without keys", !pe1acc);
+
+    let (pe2e, _, _, _, _) = pech(2);
+    eq(
+        "a malformed ECH ext is rejected",
+        pe2e,
+        "tls: client sent invalid encrypted_client_hello extension",
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

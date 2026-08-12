@@ -769,6 +769,7 @@ pub(crate) struct serverHandshakeStateTLS13 {
 /// contained an encrypted_client_hello extension that indicated it was
 /// an 'inner' hello. We don't do any additional processing of the hello
 /// in this case, so all fields above are unset."
+#[derive(Default)]
 pub(crate) struct echServerContext {
     pub hpkeContext: Option<crate::crypto::internal::hpke::Recipient>,
     pub configID: crate::types::uint8,

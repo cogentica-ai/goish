@@ -7654,6 +7654,65 @@ pub fn handshake_server_tls13_doHelloRetryRequest(
     );
 }
 
+// go: none — goish-only: drives Conn.processECHClientHello's three
+// deterministic branches — the inner-ECH short-circuit, the
+// no-configured-keys passthrough, and the malformed-extension
+// rejection — against a memConn so the alert path is live. The
+// outer-decrypt trial path needs a validly outer-extension-compressed
+// inner hello, which only the client-side ECH sealer
+// (computeAndUpdateOuterECHExtension, not yet ported) produces; it is
+// covered by the round trip once that lands.
+// which: 0 inner, 1 no keys, 2 malformed.
+#[doc(hidden)]
+pub fn handshake_server_tls13_processECHClientHello(
+    which: crate::types::int,
+) -> (crate::gostring::string, crate::gostring::string, bool, bool, bool) {
+    use crate::goslice::slice;
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink);
+    c.__setConfig(Config::default());
+
+    let mut outer = handshake_messages::clientHelloMsg::default();
+    match which {
+        0 => {
+            outer.serverName = "inner.example".into();
+            outer.encryptedClientHello = alloc::vec![0x01u8];
+        }
+        1 => {
+            outer.serverName = "public.example".into();
+            // type=0 outer, KDF_HKDF_SHA256, AEAD_AES_128_GCM, configID,
+            // uint16-prefixed 32-byte enc, uint16-prefixed 8-byte payload.
+            let mut ext: alloc::vec::Vec<crate::types::byte> = alloc::vec![0x00];
+            ext.extend_from_slice(&[0x00, 0x01, 0x00, 0x01, 123, 0x00, 0x20]);
+            ext.extend_from_slice(&[0u8; 32]);
+            ext.extend_from_slice(&[0x00, 0x08]);
+            ext.extend_from_slice(&[0u8; 8]);
+            outer.encryptedClientHello = ext;
+        }
+        _ => {
+            outer.serverName = "public.example".into();
+            outer.encryptedClientHello = alloc::vec![0x00u8, 0x00];
+        }
+    }
+
+    let (got, ctx, err) = c.processECHClientHello(&outer, slice::new());
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let sni = match got.as_ref() {
+        Some(g) => crate::gostring::string::from_bytes(g.serverName.as_bytes()),
+        None => crate::gostring::string::from_static(""),
+    };
+    let ctxInner = ctx.as_ref().map(|x| x.inner).unwrap_or(false);
+    let ctxNil = ctx.is_none();
+    return (text, sni, ctxInner, ctxNil, c.__echAccepted());
+}
+
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below
 // sign and verify against, the same fixture x509_parse_smoke uses.
 // Held once: it was pasted by hand into a second shim and silently

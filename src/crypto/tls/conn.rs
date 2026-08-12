@@ -1092,6 +1092,9 @@ impl Conn {
     }
     // go: none — goish-only: see `__setMemConn`.
     #[doc(hidden)]
+    pub fn __echAccepted(&self) -> bool { return self.echAccepted; }
+    // go: none — goish-only: see `__setMemConn`.
+    #[doc(hidden)]
     pub fn __setBuffering(&mut self, v: bool) { self.buffering = v; }
     // go: none — goish-only: see `__setMemConn`.
     #[doc(hidden)]
