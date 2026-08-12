@@ -462,26 +462,146 @@ pub fn Callers(
 }
 
 /// `runtime.Func` (Go 1.25 symtab.go) — opaque handle returned by
-/// `FuncForPC`. Goish stub is a unit struct; `.Name()` always returns
-/// `""` (matches Go's behaviour for an unknown PC).
-#[derive(Clone, Copy)]
+/// `FuncForPC`. Backed by the DWARF symboliser: `.Name()` returns the
+/// resolved function name, or `""` for a PC the symboliser could not
+/// place — which is what Go reports for an unknown PC too.
+#[derive(Clone)]
 pub struct Func {
-    _priv: (),
+    name: crate::gostring::string,
+    entry: crate::types::uintptr,
 }
 
 impl Func {
-    /// `(*Func).Name()` (symtab.go) — qualified function name. Goish
-    /// stub returns the empty string until real symbolization lands.
+    // go: sdk 1.25.5 runtime/symtab.go:802-812 Func.Name
+    /// Go: "Name returns the name of the function."
     pub fn Name(&self) -> crate::gostring::string {
-        crate::gostring::string::from_static("")
+        return self.name.clone();
+    }
+
+    // go: none — goish-only: the entry PC the symboliser resolved.
+    // Go's `Func.Entry()` reads it out of the funcdata; here it is the
+    // PC minus the offset within the function.
+    pub fn Entry(&self) -> crate::types::uintptr {
+        return self.entry;
+    }
+}
+
+// go: sdk 1.25.5 runtime/symtab.go:30-75 Frame
+/// Go: "Frame is the information returned by [Frames] for each call
+/// frame."
+///
+/// **Partial port.** `Func`, `startLine` and `Entry` are populated;
+/// Go's `funcInfo` is not, because goish resolves through DWARF rather
+/// than Go's pclntab. Inlined frames are not expanded either: Go's
+/// `Next` walks an inline tree so one PC can yield several frames, and
+/// goish's symboliser reports the innermost only. A `Frame` here is
+/// therefore always one-to-one with a PC.
+#[derive(Clone, Default)]
+pub struct Frame {
+    /// Go: "PC is the program counter for the location in this frame."
+    pub PC: crate::types::uintptr,
+    /// Go: "Function is the package path-qualified function name of
+    /// this call frame. If non-empty, this string uniquely identifies a
+    /// single function in the program. This may be the empty string if
+    /// not known."
+    pub Function: crate::gostring::string,
+    /// Go: "File and Line are the file name and line number of the
+    /// location in this frame. For non-leaf frames, this will be the
+    /// location of a call. These may be the empty string and zero,
+    /// respectively, if not known."
+    pub File: crate::gostring::string,
+    pub Line: crate::types::int,
+    /// Go: "Entry point program counter for the function; may be zero
+    /// if not known."
+    pub Entry: crate::types::uintptr,
+}
+
+// go: sdk 1.25.5 runtime/symtab.go:17-27 Frames
+/// Go: "Frames may be used to get function/file/line information for a
+/// slice of PC values returned by [Callers]."
+pub struct Frames {
+    callers: crate::goslice::slice<crate::types::uintptr>,
+    idx: crate::types::int,
+}
+
+// go: sdk 1.25.5 runtime/symtab.go:80-84 CallersFrames
+/// Go: "CallersFrames takes a slice of PC values returned by [Callers]
+/// and prepares to return function/file/line information. Do not change
+/// the slice until you are done with the [Frames]."
+pub fn CallersFrames(callers: crate::goslice::slice<crate::types::uintptr>) -> Frames {
+    return Frames { callers: callers, idx: 0 };
+}
+
+impl Frames {
+    // go: sdk 1.25.5 runtime/symtab.go:95-201 Frames.Next
+    /// Go: "Next returns a [Frame] representing the next call frame in
+    /// the slice of PC values. If it has already returned all call
+    /// frames, Next returns a zero [Frame].
+    ///
+    /// The more result indicates whether the next call to Next will
+    /// return a valid [Frame]. It does not necessarily indicate whether
+    /// this call returned one."
+    ///
+    /// Note the contract on `more`: it describes the *next* call, not
+    /// this one. A caller written as `for more := true; more;` therefore
+    /// still has to tolerate a zero Frame, which is why Go's own loops
+    /// check the Function field rather than trusting `more`.
+    pub fn Next(&mut self) -> (Frame, bool) {
+        if self.idx >= self.callers.Len() {
+            return (Frame::default(), false);
+        }
+        let pc = self.callers[self.idx];
+        self.idx += 1;
+        let more = self.idx < self.callers.Len();
+
+        let mut info = crate::runtime::symbolize::SymInfo::default();
+        // Go subtracts 1 from a return address before lookup so the PC
+        // lands inside the calling instruction rather than after it.
+        let lookup = if pc > 0 { pc - 1 } else { pc };
+        if !crate::runtime::symbolize::symbolize(crate::uint64(lookup), &mut info) {
+            let mut f = Frame::default();
+            f.PC = pc;
+            return (f, more);
+        }
+        let name = crate::gostring::string::from_bytes(&info.fn_name[..info.fn_name_len]);
+        let file = crate::gostring::string::from_bytes(&info.file[..info.file_len]);
+        return (
+            Frame {
+                PC: pc,
+                Function: name,
+                File: file,
+                Line: info.line as crate::types::int,
+                Entry: pc.saturating_sub(info.fn_offset as crate::types::uintptr),
+            },
+            more,
+        );
     }
 }
 
 /// `runtime.FuncForPC(pc)` (Go 1.25 symtab.go) — slim stub returning
 /// `None` for any PC since goish has no symbol table. Callers that
 /// guard `if fp != nil { name = fp.Name() }` get the empty-name path.
-pub fn FuncForPC(_pc: crate::types::uintptr) -> Option<Func> {
-    None
+// go: sdk 1.25.5 runtime/symtab.go:775-799 FuncForPC
+/// Go: "FuncForPC returns a *[Func] describing the function that
+/// contains the given program counter address, or else nil. If pc
+/// represents multiple functions because of inlining, it returns the
+/// *Func describing the innermost function, but with an entry of the
+/// outermost function."
+///
+/// Deviation: goish resolves through the DWARF symboliser rather than
+/// Go's pclntab, and does not expand inline frames — so the "innermost
+/// function with the outermost entry" case does not arise; the entry is
+/// simply the resolved function's own.
+pub fn FuncForPC(pc: crate::types::uintptr) -> Option<Func> {
+    let mut info = crate::runtime::symbolize::SymInfo::default();
+    let lookup = if pc > 0 { pc - 1 } else { pc };
+    if !crate::runtime::symbolize::symbolize(crate::uint64(lookup), &mut info) {
+        return None;
+    }
+    return Some(Func {
+        name: crate::gostring::string::from_bytes(&info.fn_name[..info.fn_name_len]),
+        entry: pc.saturating_sub(info.fn_offset as crate::types::uintptr),
+    });
 }
 
 /// First Rust code to run after the kernel hands control to `_start`.

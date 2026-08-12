@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 12898,
+ "total": 12895,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -972,10 +972,10 @@
   },
   "src/runtime/mod.rs": {
    "GOISH005": 1,
-   "GOISH014": 19,
+   "GOISH014": 18,
    "GOISH015": 1,
    "GOISH016": 1,
-   "GOISH023": 12
+   "GOISH023": 10
   },
   "src/runtime/netpoll/mod.rs": {
    "GOISH005": 9,
