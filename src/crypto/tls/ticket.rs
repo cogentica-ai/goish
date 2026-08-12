@@ -1,4 +1,4 @@
-// go: file crypto/tls/ticket.go decls: SessionState.Bytes, certificatesToBytesSlice, ParseSessionState, ClientSessionState.ResumptionState, NewResumptionState
+// go: file crypto/tls/ticket.go decls: SessionState.Bytes, certificatesToBytesSlice, ParseSessionState, ClientSessionState.ResumptionState, NewResumptionState, Config.EncryptTicket, Config.encryptTicket, Config.DecryptTicket, Config.decryptTicket
 //
 // crypto/tls — the session-resumption state and its wire encoding.
 //
@@ -9,7 +9,7 @@
 // need `Config.ticketKeys`, which is part of the Config record still in
 // mod[rs]; and `Conn.sessionState` needs a Conn.
 //
-// goishlint:ignore GOISH018 sessionState, EncryptTicket, encryptTicket, DecryptTicket, decryptTicket — see the banner.
+// goishlint:ignore GOISH018 sessionState — see the banner.
 //
 // One deviation: Go resolves each peer certificate through
 // `globalCertCache.newCert`, a `sync.Map` of weak pointers that memoises
@@ -511,4 +511,217 @@ pub fn NewResumptionState(
         },
         crate::errors::nil,
     );
+}
+
+
+// ─── Session ticket sealing ───────────────────────────────────────────
+
+use super::common::ticketKey;
+use super::Config;
+use crate::crypto::aes;
+use crate::crypto::cipher;
+use crate::crypto::hmac;
+use crate::crypto::sha256;
+use crate::crypto::subtle;
+use crate::types::int;
+
+impl Config {
+    // go: sdk 1.25.5 crypto/tls/ticket.go:185-192 Config.EncryptTicket
+    /// Go: "EncryptTicket encrypts a ticket with the [Config]'s
+    /// configured (or default) session ticket keys. It can be used as a
+    /// [Config.WrapSession] implementation."
+    ///
+    /// Deviation: `&mut self`, because `ticketKeys` may rotate the
+    /// auto-managed key set. Go hides that behind a mutex.
+    pub fn EncryptTicket(
+        &mut self,
+        _cs: super::common::ConnectionState,
+        ss: &SessionState,
+    ) -> (slice<byte>, error) {
+        // Go: ticketKeys := c.ticketKeys(nil)
+        //     stateBytes, err := ss.Bytes()
+        //     if err != nil { return nil, err }
+        //     return c.encryptTicket(stateBytes, ticketKeys)
+        let ticketKeys = self.ticketKeys(None);
+        let (stateBytes, err) = ss.Bytes();
+        if err != crate::errors::nil {
+            return (slice::new(), err);
+        }
+        return self.encryptTicket(stateBytes, ticketKeys);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/ticket.go:194-221 Config.encryptTicket
+    pub(crate) fn encryptTicket(
+        &self,
+        state: slice<byte>,
+        ticketKeys: slice<ticketKey>,
+    ) -> (slice<byte>, error) {
+        // Go: if len(ticketKeys) == 0 {
+        //         return nil, errors.New("tls: internal error: session ticket keys unavailable") }
+        if ticketKeys.Len() == 0 {
+            return (
+                slice::new(),
+                crate::errors::New("tls: internal error: session ticket keys unavailable"),
+            );
+        }
+
+        // Go: encrypted := make([]byte, aes.BlockSize+len(state)+sha256.Size)
+        //     iv := encrypted[:aes.BlockSize]
+        //     ciphertext := encrypted[aes.BlockSize : len(encrypted)-sha256.Size]
+        //     authenticated := encrypted[:len(encrypted)-sha256.Size]
+        //     macBytes := encrypted[len(encrypted)-sha256.Size:]
+        //
+        // Go carves four aliasing views of one array; goish slices do
+        // not share backing, so the pieces are built and concatenated in
+        // the same order instead.
+        let blockSize = aes::BlockSize;
+        let macSize = sha256::Size;
+
+        // Go: if _, err := io.ReadFull(c.rand(), iv); err != nil { return nil, err }
+        let mut iv: slice<byte> = slice::__from_vec(alloc::vec![0u8; blockSize as usize]);
+        let mut r = self.rand();
+        let (_, err) = crate::io::ReadFull(&mut *r, &mut iv);
+        if err != crate::errors::nil {
+            return (slice::new(), err);
+        }
+        // Go: key := ticketKeys[0]
+        //     block, err := aes.NewCipher(key.aesKey[:])
+        //     if err != nil { return nil, errors.New(
+        //         "tls: failed to create cipher while encrypting ticket: " + err.Error()) }
+        let key = ticketKeys[0].clone();
+        let (block, err) = aes::NewCipher(slice::__from_vec(key.aesKey.to_vec()));
+        if err != crate::errors::nil {
+            return (
+                slice::new(),
+                crate::errors::New(
+                    string::from("tls: failed to create cipher while encrypting ticket: ")
+                        + err.Error(),
+                ),
+            );
+        }
+        // Go: cipher.NewCTR(block, iv).XORKeyStream(ciphertext, state)
+        let mut ctr = cipher::NewCTR(block.unwrap(), iv.clone());
+        let mut ciphertext: slice<byte> =
+            slice::__from_vec(alloc::vec![0u8; state.Len() as usize]);
+        crate::crypto::cipher::Stream::XORKeyStream(&mut ctr, &mut ciphertext, state);
+
+        // Go: mac := hmac.New(sha256.New, key.hmacKey[:])
+        //     mac.Write(authenticated)
+        //     mac.Sum(macBytes[:0])
+        let mut authenticated: Vec<byte> = Vec::new();
+        let ivRaw: &[byte] = &iv;
+        let ctRaw: &[byte] = &ciphertext;
+        authenticated.extend_from_slice(ivRaw);
+        authenticated.extend_from_slice(ctRaw);
+        let mut mac = hmac::New(
+            sha256::NewHash as fn() -> alloc::boxed::Box<dyn crate::hash::Hash + Send + Sync>,
+            slice::__from_vec(key.hmacKey.to_vec()),
+        );
+        let _ = crate::io::Writer::Write(&mut mac, slice::__from_vec(authenticated.clone()));
+        let macBytes = crate::hash::Hash::Sum(&mac, slice::new());
+
+        // Go: return encrypted, nil
+        let mut encrypted = authenticated;
+        let mRaw: &[byte] = &macBytes;
+        encrypted.extend_from_slice(mRaw);
+        let _ = macSize;
+        return (slice::__from_vec(encrypted), crate::errors::nil);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/ticket.go:223-236 Config.DecryptTicket
+    /// Go: "DecryptTicket decrypts a ticket encrypted by
+    /// [Config.EncryptTicket]. It can be used as a
+    /// [Config.UnwrapSession] implementation. If the ticket can't be
+    /// decrypted or parsed, DecryptTicket returns (nil, nil)."
+    pub fn DecryptTicket(
+        &mut self,
+        identity: slice<byte>,
+        _cs: super::common::ConnectionState,
+    ) -> (Option<SessionState>, error) {
+        // Go: ticketKeys := c.ticketKeys(nil)
+        //     stateBytes := c.decryptTicket(identity, ticketKeys)
+        //     if stateBytes == nil { return nil, nil }
+        let ticketKeys = self.ticketKeys(None);
+        let stateBytes = self.decryptTicket(identity, ticketKeys);
+        if stateBytes.is_none() {
+            return (None, crate::errors::nil);
+        }
+        // Go: s, err := ParseSessionState(stateBytes)
+        //     if err != nil { return nil, nil } // drop unparsable tickets on the floor
+        //     return s, nil
+        let (s, err) = ParseSessionState(stateBytes.unwrap());
+        if err != crate::errors::nil {
+            return (None, crate::errors::nil);
+        }
+        return (Some(s), crate::errors::nil);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/ticket.go:238-267 Config.decryptTicket
+    ///
+    /// Deviation: Go returns a nil `[]byte` both for "too short" and for
+    /// "no key matched"; goish returns `None`, which is the same signal
+    /// its one caller tests for.
+    pub(crate) fn decryptTicket(
+        &self,
+        encrypted: slice<byte>,
+        ticketKeys: slice<ticketKey>,
+    ) -> Option<slice<byte>> {
+        // Go: if len(encrypted) < aes.BlockSize+sha256.Size { return nil }
+        let blockSize = aes::BlockSize;
+        let macSize = sha256::Size;
+        if encrypted.Len() < blockSize + macSize {
+            return None;
+        }
+
+        // Go: iv := encrypted[:aes.BlockSize]
+        //     ciphertext := encrypted[aes.BlockSize : len(encrypted)-sha256.Size]
+        //     authenticated := encrypted[:len(encrypted)-sha256.Size]
+        //     macBytes := encrypted[len(encrypted)-sha256.Size:]
+        let n = encrypted.Len();
+        let iv = encrypted.slice(0, blockSize);
+        let ciphertext = encrypted.slice(blockSize, n - macSize);
+        let authenticated = encrypted.slice(0, n - macSize);
+        let macBytes = encrypted.slice(n - macSize, n);
+
+        // Go: for _, key := range ticketKeys {
+        //         mac := hmac.New(sha256.New, key.hmacKey[:])
+        //         mac.Write(authenticated)
+        //         expected := mac.Sum(nil)
+        //         if subtle.ConstantTimeCompare(macBytes, expected) != 1 { continue }
+        //         block, err := aes.NewCipher(key.aesKey[:])
+        //         if err != nil { return nil }
+        //         plaintext := make([]byte, len(ciphertext))
+        //         cipher.NewCTR(block, iv).XORKeyStream(plaintext, ciphertext)
+        //         return plaintext }
+        for (_, key) in crate::range!(ticketKeys) {
+            let mut mac = hmac::New(
+                sha256::NewHash as fn() -> alloc::boxed::Box<dyn crate::hash::Hash + Send + Sync>,
+                slice::__from_vec(key.hmacKey.to_vec()),
+            );
+            let _ = crate::io::Writer::Write(&mut mac, authenticated.clone());
+            let expected = crate::hash::Hash::Sum(&mac, slice::new());
+
+            if subtle::ConstantTimeCompare(&macBytes, &expected) != 1 {
+                continue;
+            }
+
+            let (block, err) = aes::NewCipher(slice::__from_vec(key.aesKey.to_vec()));
+            if err != crate::errors::nil {
+                return None;
+            }
+            let mut plaintext: slice<byte> =
+                slice::__from_vec(alloc::vec![0u8; ciphertext.Len() as usize]);
+            let mut ctr = cipher::NewCTR(block.unwrap(), iv.clone());
+            crate::crypto::cipher::Stream::XORKeyStream(
+                &mut ctr,
+                &mut plaintext,
+                ciphertext.clone(),
+            );
+
+            return Some(plaintext);
+        }
+
+        // Go: return nil
+        return None;
+    }
 }

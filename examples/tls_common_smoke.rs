@@ -1947,6 +1947,28 @@ fn main() {
     eq("halfConn.decrypt with no cipher passes through", plainPT, "hello record layer");
     check_n("halfConn.decrypt with no cipher keeps the type", plainType, 22);
 
+    // ─── ticket.go: session ticket sealing. AES-CTR under the first
+    //     ticket key with an HMAC-SHA256 tag over IV||ciphertext, and a
+    //     scan over every key on the way back. From goref.sh.
+    let (tkLen, tkV, tkSuite, tkCreated, tkSecret, tkTampered, tkShort, tkWrongKey,
+         tkRotated, tkNoKeys) = tls::ticket_sealRoundTrip();
+    // 16-byte IV + 30-byte state + 32-byte MAC.
+    check_n("EncryptTicket length", tkLen, 77);
+    check_n("DecryptTicket round-trips the version", tkV, 0x0304);
+    check_n("DecryptTicket round-trips the cipher suite", tkSuite, 0x1301);
+    check("DecryptTicket round-trips createdAt", tkCreated == 7u64);
+    eq("DecryptTicket round-trips the secret", hexOf(tkSecret), "01020304");
+    // Every rejection is silent — Go returns (nil, nil), never an error,
+    // so a bad ticket falls back to a full handshake instead of failing.
+    check("DecryptTicket drops a tampered ticket", tkTampered);
+    check("DecryptTicket drops a short ticket", tkShort);
+    check("DecryptTicket drops a ticket sealed under another key", tkWrongKey);
+    // A rotated key set still opens tickets sealed under an older key,
+    // because decryptTicket scans all of them.
+    check("DecryptTicket accepts a rotated key set", tkRotated);
+    eq("encryptTicket with no keys", tkNoKeys,
+       "tls: internal error: session ticket keys unavailable");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

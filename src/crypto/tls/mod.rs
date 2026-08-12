@@ -3977,3 +3977,79 @@ pub fn conn_recordPlaintext() -> (
         typ.0 as crate::types::int,
     );
 }
+
+// go: none — goish-only: the ticket sealing path reads Config's
+// unexported key set. Seals a session, opens it, then tries a tampered
+// ticket, a short one, a wrong key set, and a rotated set that still
+// contains the original key. Reports `(len, round-trip fields, and the
+// four rejection outcomes)`.
+#[doc(hidden)]
+pub fn ticket_sealRoundTrip() -> (
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+    crate::types::uint64,
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    bool,
+    bool,
+    bool,
+    crate::gostring::string,
+) {
+    let mut k1 = [0u8; 32];
+    let mut k2 = [0u8; 32];
+    let mut i = 0usize;
+    while i < 32 {
+        k1[i] = i as crate::types::byte;
+        k2[i] = (0x80 + i) as crate::types::byte;
+        i += 1;
+    }
+    let mut c = Config::default();
+    c.SetSessionTicketKeys(crate::goslice::slice::__from_vec(alloc::vec![k1]));
+
+    let mut ss = ticket::SessionState::default();
+    ss.__setVersion(common::VersionTLS13);
+    ss.__setCipherSuite(cipher_suites::TLS_AES_128_GCM_SHA256);
+    ss.__setCreatedAt(7);
+    ss.__setSecret(crate::goslice::slice::__from_vec(alloc::vec![1u8, 2, 3, 4]));
+
+    let (tk, _) = c.EncryptTicket(common::ConnectionState::default(), &ss);
+    let (got, _) = c.DecryptTicket(tk.clone(), common::ConnectionState::default());
+    let g = got.unwrap();
+
+    let mut bad = tk.clone();
+    let n = bad.Len();
+    bad[(n - 1) as usize] ^= 0xff;
+    let (tampered, _) = c.DecryptTicket(bad, common::ConnectionState::default());
+    let (short, _) = c.DecryptTicket(
+        crate::goslice::slice::__from_vec(alloc::vec![1u8, 2, 3]),
+        common::ConnectionState::default(),
+    );
+
+    let mut d = Config::default();
+    d.SetSessionTicketKeys(crate::goslice::slice::__from_vec(alloc::vec![k2]));
+    let (wrongKey, _) = d.DecryptTicket(tk.clone(), common::ConnectionState::default());
+
+    let mut e = Config::default();
+    e.SetSessionTicketKeys(crate::goslice::slice::__from_vec(alloc::vec![k2, k1]));
+    let (rotated, _) = e.DecryptTicket(tk.clone(), common::ConnectionState::default());
+
+    let f = Config::default();
+    let (_, noKeysErr) = f.encryptTicket(
+        crate::goslice::slice::new(),
+        crate::goslice::slice::new(),
+    );
+
+    return (
+        tk.Len(),
+        g.__version() as crate::types::int,
+        g.__cipherSuite() as crate::types::int,
+        g.__createdAt(),
+        g.__secret(),
+        tampered.is_none(),
+        short.is_none(),
+        wrongKey.is_none(),
+        rotated.is_some(),
+        noKeysErr.Error(),
+    );
+}
