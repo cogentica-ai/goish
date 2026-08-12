@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: runningList, T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: runTests, RunTests, runningList, T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -21,7 +21,7 @@
 // registration having happened and can be tested on its own.
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
 // goishlint:ignore GOISH018 after, Attr, before, callSite, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newTestState, Output, Parallel, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
-// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
+// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, M, match, matchList, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
 #![allow(non_snake_case)]
@@ -348,12 +348,35 @@ impl T {
     /// subtest closure must own what it uses. Non-capturing closures
     /// and `move` closures over owned data are unaffected.
     pub fn Run<F: FnOnce(&mut T) + Send + 'static>(&mut self, name: string, f: F) -> bool {
-        // Compose the qualified name "Parent/Child" for logging.
-        let mut qualified_bytes: Vec<u8> = Vec::new();
-        qualified_bytes.extend_from_slice(self.name.clone().__as_bytes_internal());
-        qualified_bytes.push(b'/');
-        qualified_bytes.extend_from_slice(name.__as_bytes_internal());
-        let qualified = string::from_bytes(&qualified_bytes);
+        // Go: `testName, ok, _ := t.tstate.match.fullName(&t.common, name)`
+        // — the matcher both FILTERS on -run/-skip and deduplicates
+        // sibling names, so it has to be consulted before anything else
+        // and its answer used as the test's name. Two subtests called
+        // "x" become "x" and "x#01" here, not at print time.
+        let ts = self.state.tstate.Lock().clone();
+        let qualified = match ts.as_ref() {
+            Some(ts) => {
+                let mut g = ts.matcher.Lock();
+                match g.as_mut() {
+                    Some(m) => {
+                        let (full, ok, _partial) = m.fullName(
+                            crate::int32(crate::int64(*self.state.level.Lock())),
+                            &self.name,
+                            &name,
+                        );
+                        if !ok {
+                            // Filtered out by -run or -skip. Go returns
+                            // true: the SUBTEST did not fail, it simply
+                            // never ran.
+                            return true;
+                        }
+                        full
+                    }
+                    None => __join_name(&self.name, &name),
+                }
+            }
+            None => __join_name(&self.name, &name),
+        };
 
         let mut sub_state = TState::new();
         // Go: `t.common.parent = &t.common` on the subtest, which is
@@ -442,16 +465,18 @@ pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
     // calls t.Run still reports ran.
     *state.name.Lock() = t.name.clone();
     state.setRan();
-    // Go: `t.w = indenter{&t.common}` — EVERY test's writer indents
-    // into its own buffer, top-level ones included. Go's runTests wraps
-    // the whole run in a hidden root T whose w IS stdout, so a
-    // top-level test's parent writes straight out while a subtest's
-    // parent buffers. goish has no hidden root: a top-level test has no
-    // parent, flushToParent returns early for it, and Main writes its
-    // line directly — same output, one less indirection.
-    *state.w.Lock() = Some(indenter {
-        c: Arc::downgrade(&state),
-    });
+    // Go: `t.w = indenter{&t.common}` for every test EXCEPT the hidden
+    // root, whose w is os.Stdout. That difference is load-bearing:
+    // flushToParent compares the parent's writer against the chatty
+    // printer's to decide "write straight out" versus "buffer into my
+    // parent", so a top-level test prints immediately while a subtest
+    // is buffered under it. goish spells "w is the real output" as
+    // None, and the root is exactly the test with no parent.
+    if state.parent.is_some() {
+        *state.w.Lock() = Some(indenter {
+            c: Arc::downgrade(&state),
+        });
+    }
     // Go: `t.runner = callerName(0)` — frameSkip stops when the walk
     // reaches this frame, i.e. the runner calling the test function.
     *state.runner.Lock() = callerName(0);
@@ -809,6 +834,43 @@ pub fn __run_skip_patterns() -> (string, string) {
         None => (string::from_static(""), string::from_static("")),
         Some(f) => (f.run.Get(), f.skip.Get()),
     };
+}
+
+// go: none — goish idiom: Go reads `*count`, `*parallel`, `*timeout`
+// and `cpuList` as package-level pointers; goish keeps them behind
+// FLAGS, so each gets a reader. Defaults match Go's when Init has not
+// run: one iteration, GOMAXPROCS-many parallel slots, no timeout.
+pub(crate) fn countFlag() -> crate::types::uint {
+    let g = FLAGS.Lock();
+    return match g.as_ref() {
+        None => 1,
+        Some(f) => f.count.Get(),
+    };
+}
+
+// go: none — goish idiom: see countFlag.
+pub(crate) fn parallelFlag() -> int {
+    let g = FLAGS.Lock();
+    return match g.as_ref() {
+        None => crate::runtime::GOMAXPROCS(0),
+        Some(f) => f.parallel.Get(),
+    };
+}
+
+// go: none — goish idiom: see countFlag.
+pub(crate) fn timeoutFlag() -> crate::time::Duration {
+    let g = FLAGS.Lock();
+    return match g.as_ref() {
+        None => crate::time::Duration(0),
+        Some(f) => f.timeout.Get(),
+    };
+}
+
+// go: none — goish idiom: Go's `cpuList` is a package var filled by
+// parseCpuList; goish keeps the parsed list here. Empty means "just
+// the current GOMAXPROCS", which is what Go's default -cpu produces.
+pub(crate) fn cpuList() -> alloc::vec::Vec<int> {
+    return alloc::vec![crate::runtime::GOMAXPROCS(0)];
 }
 
 // go: sdk 1.25.5 testing/testing.go:710-712 CoverMode
@@ -1943,6 +2005,9 @@ pub struct testState {
     /// Guards `running` and `numWaiting` together — they are read and
     /// written as a pair, so separate atomics would not be enough.
     pub(crate) counts: crate::sync::Mutex<testStateCounts>,
+    /// Go: `testState.match *matcher` — the -run/-skip filter, shared by
+    /// every test in the run so subtest name deduplication is global.
+    pub(crate) matcher: crate::sync::Mutex<Option<crate::testing::r#match::matcher>>,
 }
 
 // go: none — goish idiom: Go guards `running` and `numWaiting` with the
@@ -1971,6 +2036,7 @@ pub fn newTestState(maxParallel: crate::types::int) -> Arc<testState> {
         deadline: crate::sync::Mutex::new(crate::time::Time::default()),
         isFuzzing: core::sync::atomic::AtomicBool::new(false),
         startParallel: crate::gochan::chan::new_unbuffered(),
+        matcher: crate::sync::Mutex::new(None),
         counts: crate::sync::Mutex::new(testStateCounts {
             // Go: "Set the count to 1 for the main (sequential) test."
             running: 1,
@@ -2650,4 +2716,118 @@ pub fn runningList() -> crate::goslice::slice<string> {
     }
     list.sort();
     return crate::goslice::slice::__from_vec(list);
+}
+
+// ─── the test runner ─────────────────────────────────────────────────
+
+// go: sdk 1.25.5 testing/testing.go:1765-1770 InternalTest
+/// Go: "InternalTest is an internal type but exported because it is
+/// cross-package; it is part of the implementation of the 'go test'
+/// command."
+#[allow(non_snake_case)]
+pub struct InternalTest {
+    pub Name: string,
+    pub F: crate::testing::TestFn,
+}
+
+// go: sdk 1.25.5 testing/testing.go:2445-2490 runTests
+// goishlint:ignore GOISH020 runTests — Go's first parameter is the
+// matchString func, which it forwards into newMatcher; goish's caller
+// (Main) has no generated main package to get one from and passes None,
+// so the parameter would have exactly one legal argument. The deadline
+// parameter is kept.
+/// Go: run every test, once per -count, once per -cpu entry.
+///
+/// The structure that matters is the hidden ROOT test: Go wraps the
+/// whole run in a `T` whose writer is stdout and whose body is a loop
+/// of `t.Run(test.Name, test.F)`. Every "top-level" test is really a
+/// subtest of it. That is what gives -run filtering, name
+/// deduplication and parallel gating to top-level tests for free,
+/// rather than needing a second implementation beside T.Run.
+#[allow(non_snake_case)]
+pub fn runTests(
+    tests: &[InternalTest],
+    deadline: crate::time::Time,
+) -> (bool, bool) {
+    let mut ran = false;
+    let mut ok = true;
+
+    let (patterns, skips) = __run_skip_patterns();
+    let cpus = cpuList();
+    let count = countFlag();
+
+    for procs in cpus.iter() {
+        crate::runtime::GOMAXPROCS(*procs);
+        for i in 0..count {
+            if shouldFailFast() {
+                break;
+            }
+            if i > 0 && !ran {
+                // Go: "There were no tests to run on the first
+                // iteration. This won't change, so no reason to keep
+                // trying."
+                break;
+            }
+            let tstate = newTestState(parallelFlag());
+            *tstate.deadline.Lock() = deadline;
+            *tstate.matcher.Lock() = Some(crate::testing::r#match::newMatcher(
+                None,
+                &patterns,
+                &string::from_static("-test.run"),
+                &skips,
+            ));
+
+            // The hidden root. Its `w` stays None — that is what tells
+            // flushToParent "my parent writes to the real output".
+            let root = T::__new_root(string::from_static(""));
+            *root.state.tstate.Lock() = Some(tstate);
+            attach_chatty(&root.state);
+
+            let items: alloc::vec::Vec<(string, crate::testing::TestFn)> =
+                tests.iter().map(|t| return (t.Name.clone(), t.F)).collect();
+            let rstate = root.state.clone();
+            tRunner(root, move |t| {
+                for (name, f) in items.into_iter() {
+                    t.Run(name, f);
+                }
+            });
+
+            ok = ok && !rstate.failed.load(Ordering::Acquire);
+            ran = ran || rstate.ran.load(Ordering::Acquire);
+        }
+    }
+    return (ran, ok);
+}
+
+// go: sdk 1.25.5 testing/testing.go:2433-2443 RunTests
+// goishlint:ignore GOISH020 RunTests — same dropped matchString
+// parameter as runTests; see the note there.
+/// Go: "An internal function but exported because it is cross-package;
+/// part of the implementation of the 'go test' command."
+#[allow(non_snake_case)]
+pub fn RunTests(tests: &[InternalTest]) -> bool {
+    let mut deadline = crate::time::Time::default();
+    let t = timeoutFlag();
+    if t > crate::time::Duration(0) {
+        deadline = crate::time::Now().Add(t);
+    }
+    let (ran, ok) = runTests(tests, deadline);
+    if !ran {
+        // Go also checks `!haveExamples`; goish has no examples runner,
+        // so the warning fires whenever nothing matched.
+        let msg = b"testing: warning: no tests to run\n";
+        crate::syscall::Write(crate::syscall::STDERR, msg.as_ptr(), msg.len());
+    }
+    return ok;
+}
+
+// go: none — goish idiom: Go composes a subtest's name inside
+// matcher.fullName. This is the fallback for a T with no run-wide
+// state — a bare T built outside runTests — which has no matcher to
+// ask. The root's empty name yields "Child", not "/Child".
+fn __join_name(parent: &string, sub: &string) -> string {
+    if parent.Len() == 0 {
+        return sub.clone();
+    }
+    return crate::fmt::Sprintf!("%s/%s", parent.clone(), sub.clone());
 }

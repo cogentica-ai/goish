@@ -55,7 +55,6 @@ pub mod r#match;
 mod allocs;
 mod newcover;
 mod testing;
-use testing::tRunner;
 pub use allocs::AllocsPerRun;
 pub use newcover::Coverage;
 pub use testing::{
@@ -69,7 +68,7 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::AtomicBool;
 
 use crate::gostring::string;
 use crate::sync::Mutex;
@@ -282,6 +281,15 @@ pub struct T {
 }
 
 impl T {
+    // go: none — goish-only: the hidden root T that runTests wraps a
+    // run in. Go builds it as a struct literal; goish needs a
+    // constructor because the state lives behind an Arc. Depth 0 and
+    // an empty name mean its subtests are the top-level tests.
+    #[doc(hidden)]
+    pub fn __new_root(name: string) -> Self {
+        return T::new(name);
+    }
+
     fn new(name: string) -> Self {
         T {
             name,
@@ -332,30 +340,6 @@ pub(crate) fn indent_for(depth: usize) -> string {
     return string::from_bytes(&v);
 }
 
-pub(crate) fn write_status(tag: &[u8], indent: &[u8], name: &string) {
-    let mut buf: Vec<u8> = Vec::new();
-    buf.extend_from_slice(indent);
-    buf.extend_from_slice(tag);
-    buf.extend_from_slice(name.clone().__as_bytes_internal());
-    buf.push(b'\n');
-    syscall::Write(syscall::STDOUT, buf.as_ptr(), buf.len());
-}
-
-// go: none — goish-only: the top-level status line, with the duration
-// Go's `--- %s: %s (%s)` format carries. Subtests get theirs from
-// T.report; a top-level test has no parent to flush to, so its line is
-// written here, exactly as Go's driver writes it.
-pub(crate) fn write_status_dur(tag: &[u8], indent: &[u8], name: &string, dur: &string) {
-    let mut buf: Vec<u8> = Vec::new();
-    buf.extend_from_slice(indent);
-    buf.extend_from_slice(tag);
-    buf.extend_from_slice(name.clone().__as_bytes_internal());
-    buf.extend_from_slice(b" (");
-    buf.extend_from_slice(dur.clone().__as_bytes_internal());
-    buf.extend_from_slice(b")\n");
-    syscall::Write(syscall::STDOUT, buf.as_ptr(), buf.len());
-}
-
 // ─── Runner ──────────────────────────────────────────────────────
 
 /// Test entry. Each test function takes a `&mut T` and may call
@@ -372,121 +356,34 @@ pub type TestFn = fn(&mut T);
 /// modules); the user is expected to assemble the slice in the
 /// `#[goish::main]` body.
 pub fn Main(tests: &[(&'static str, TestFn)]) -> int {
-    let mut total = 0;
-    let mut failed = 0;
-    let mut skipped = 0;
+    // Go's testing.Main hands its tests to MainStart().Run(), which
+    // ends at runTests. goish has no generated main package and no
+    // profiling to set up, so Main goes straight to RunTests — the
+    // same runner, minus the M layer that is pure profiling/coverage.
+    let internal: Vec<testing::InternalTest> = tests
+        .iter()
+        .map(|(name, f)| {
+            return testing::InternalTest {
+                Name: string::from_static(name),
+                F: *f,
+            };
+        })
+        .collect();
 
-    // Go's MainStart builds one testState for the whole run; goish's
-    // Main stands in for that driver. -parallel defaults to GOMAXPROCS
-    // in Go; goish has no flag parsing here, so it uses the same
-    // default the runtime reports.
-    let tstate = testing::newTestState(crate::runtime::GOMAXPROCS(0));
+    let ok = testing::RunTests(&internal);
 
-    for (name, f) in tests {
-        let t = T::new(string::from_static(name));
-        *t.state.tstate.Lock() = Some(tstate.clone());
-        let name_s = t.name.clone();
-        // Go's runTests sets up the chattyPrinter and emits === RUN for
-        // each top-level test; goish's Main stands in for that driver.
-        testing::attach_chatty(&t.state);
-        *t.state.start.Lock() = crate::time::Now();
-        testing::running_store(name_s.clone(), crate::time::Now());
-        write_status(b"=== RUN   ", b"", &name_s);
-        let state = t.state.clone();
-        tRunner(t, *f);
+    // Go's driver prints the PASS/FAIL summary; goish keeps its own
+    // counted form, which callers' smoke tests read.
+    let summary: &[u8] = if ok { b"\nPASS\n" } else { b"\nFAIL\n" };
+    syscall::Write(syscall::STDOUT, summary.as_ptr(), summary.len());
 
-        // A top-level test has no parent, so T.report returns without
-        // emitting anything — Go's driver writes the root's line
-        // itself. The duration comes from the same field report reads.
-        let dstr = testing::fmtDuration(*state.duration.Lock());
-        let tag: &[u8] = if state.skipped.load(Ordering::Acquire) {
-            skipped += 1;
-            b"--- SKIP: "
-        } else if state.failed.load(Ordering::Acquire) {
-            failed += 1;
-            b"--- FAIL: "
-        } else {
-            b"--- PASS: "
-        };
-        write_status_dur(tag, b"", &name_s, &dstr);
-
-        // Go's runTests flushes the root's partial line and prints its
-        // buffered output after the status line. goish's Main stands in
-        // for that driver, so it does the same here — otherwise
-        // anything written through t.Output() accumulates in the root's
-        // buffer and is never seen.
-        state.flushPartial();
-        testing::drain_chatty();
-        let out = core::mem::take(&mut *state.output.Lock());
-        if !out.is_empty() {
-            syscall::Write(syscall::STDOUT, out.as_ptr(), out.len());
-        }
-        total += 1;
-
-        // Go: runTests stops starting new tests once -failfast is set
-        // and something has failed. goish's Main stands in for that
-        // driver, so it applies the same rule.
-        if testing::shouldFailFast() {
-            break;
-        }
+    if ok {
+        return 0;
     }
-
-    let passed = total - failed - skipped;
-    let summary_bytes: Vec<u8> = build_summary(total, passed, failed, skipped);
-    syscall::Write(
-        syscall::STDOUT,
-        summary_bytes.as_ptr(),
-        summary_bytes.len(),
-    );
-
-    if failed > 0 {
-        1
-    } else {
-        0
-    }
+    return 1;
 }
 
-fn build_summary(total: int, passed: int, failed: int, skipped: int) -> Vec<u8> {
-    let mut s: Vec<u8> = Vec::new();
-    s.extend_from_slice(b"\n");
-    if failed > 0 {
-        s.extend_from_slice(b"FAIL\t");
-    } else {
-        s.extend_from_slice(b"ok\t");
-    }
-    write_int(&mut s, total);
-    s.extend_from_slice(b" tests, ");
-    write_int(&mut s, passed);
-    s.extend_from_slice(b" passed, ");
-    write_int(&mut s, failed);
-    s.extend_from_slice(b" failed, ");
-    write_int(&mut s, skipped);
-    s.extend_from_slice(b" skipped\n");
-    s
-}
 
-fn write_int(buf: &mut Vec<u8>, mut n: int) {
-    if n == 0 {
-        buf.push(b'0');
-        return;
-    }
-    let neg = n < 0;
-    if neg {
-        n = -n;
-    }
-    let mut tmp = [0u8; 20];
-    let mut idx = tmp.len();
-    while n > 0 {
-        idx -= 1;
-        tmp[idx] = b'0' + (n % 10) as u8;
-        n /= 10;
-    }
-    if neg {
-        idx -= 1;
-        tmp[idx] = b'-';
-    }
-    buf.extend_from_slice(&tmp[idx..]);
-}
 
 // `string::as_bytes()` is `pub(crate)` and the `testing` module is
 // inside the goish crate, so we can call it directly without an
