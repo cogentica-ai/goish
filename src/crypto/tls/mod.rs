@@ -470,6 +470,25 @@ pub struct Config {
     /// non-empty, the client will attempt Encrypted Client Hello, which
     /// requires TLS 1.3. Reference: common.go:781.
     pub EncryptedClientHelloConfigList: slice<byte>,
+    /// Go: "GetEncryptedClientHelloKeys, if not nil, is called when by a
+    /// server when a client attempts ECH. If GetEncryptedClientHelloKeys
+    /// is not nil, [EncryptedClientHelloKeys] is ignored." Reference:
+    /// common.go:856.
+    pub GetEncryptedClientHelloKeys: Option<
+        alloc::sync::Arc<
+            dyn Fn(
+                    common::ClientHelloInfo,
+                ) -> (slice<common::EncryptedClientHelloKey>, crate::error)
+                + Send
+                + Sync,
+        >,
+    >,
+    /// Go: "EncryptedClientHelloKeys are the ECH keys to use when a
+    /// client attempts ECH. If a client attempts ECH, but it is rejected
+    /// by the server, the server will send a list of configs to retry
+    /// based on the set of EncryptedClientHelloKeys which have the
+    /// SendAsRetry field set." Reference: common.go:875.
+    pub EncryptedClientHelloKeys: slice<common::EncryptedClientHelloKey>,
     /// NameToCertificate maps from a certificate name to an element of
     /// Certificates. Deprecated in Go — see Config.GetCertificate — but
     /// still the field BuildNameToCertificate fills. Reference:
@@ -4698,6 +4717,7 @@ pub fn handshake_server_tls13_stateFlags() -> (bool, bool, bool, bool, bool, boo
             usingPSK: psk,
             sigAlg: common::SignatureScheme(0),
             cert: None,
+            ..Default::default()
         };
     };
     let mut disabled = Config::default();
@@ -5356,6 +5376,7 @@ pub fn handshake_server_tls13_pickCertificate(
         usingPSK: which == 3,
         sigAlg: common::SignatureScheme(0),
         cert: None,
+        ..Default::default()
     };
     let err = hs.pickCertificate();
     let text = if err == crate::errors::nil {
@@ -6944,6 +6965,7 @@ pub fn handshake_server_tls13_readClientFinished(
         usingPSK: false,
         sigAlg: common::SignatureScheme(0),
         cert: None,
+        ..Default::default()
     };
     let err = hs.readClientFinished();
     let text = if err == crate::errors::nil {
@@ -7030,6 +7052,7 @@ pub fn handshake_server_tls13_sendServerCertificate(
         clientFinished: slice::new(),
         trafficSecret: slice::new(),
         transcript: Some(transcript),
+        ..Default::default()
     };
     let err = hs.sendServerCertificate();
     let text = if err == crate::errors::nil {
@@ -7038,6 +7061,120 @@ pub fn handshake_server_tls13_sendServerCertificate(
         err.Error()
     };
     return (text, sink.Lock().clone());
+}
+
+// go: none — goish-only: drives serverHandshakeStateTLS13.sendServerParameters
+// with fixed randoms, shared key, and hello so the whole flight —
+// ServerHello, dummy CCS, encrypted EncryptedExtensions — plus both
+// handshake traffic secrets, the transcript, and the (possibly ECH-
+// rewritten) hello.random are byte-comparable against Go.
+// which: 0 = plain, 1 = ECH retry configs, 2 = ECH accepted.
+#[doc(hidden)]
+pub fn handshake_server_tls13_sendServerParameters(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    use crate::goslice::slice;
+    let fill = |base: crate::types::byte| {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: crate::types::byte = 0;
+        while i < 32 {
+            v.push(base.wrapping_add(i));
+            i += 1;
+        }
+        return v;
+    };
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink.clone());
+    c.__setHaveVers(true);
+    c.__setVers(common::VersionTLS13);
+    c.__setStateFields(
+        cipher_suites::TLS_AES_128_GCM_SHA256,
+        crate::gostring::string::from_static(""),
+        crate::gostring::string::from_static("h2"),
+        common::CurveID(0),
+    );
+
+    let mut cfg = Config::default();
+    if which == 1 {
+        let mut retry = common::EncryptedClientHelloKey::default();
+        retry.Config = slice::__from_vec(alloc::vec![0xE0u8, 0xE1, 0xE2]);
+        retry.SendAsRetry = true;
+        let mut noRetry = common::EncryptedClientHelloKey::default();
+        noRetry.Config = slice::__from_vec(alloc::vec![0xF0u8]);
+        cfg.EncryptedClientHelloKeys = slice::__from_vec(alloc::vec![retry, noRetry]);
+    }
+    c.__setConfig(cfg);
+
+    let mut clientHello = handshake_messages::clientHelloMsg::default();
+    clientHello.original = alloc::vec![0x01u8, 0x00, 0x00, 0x04, 0xde, 0xad, 0xbe, 0xef];
+    clientHello.random = fill(0x01);
+    clientHello.serverName = "goish.example".into();
+    if which == 1 {
+        clientHello.encryptedClientHello = alloc::vec![0xECu8];
+    }
+
+    let mut hello = handshake_messages::serverHelloMsg::default();
+    hello.vers = common::VersionTLS12;
+    hello.random = fill(0xA0);
+    hello.sessionId = alloc::vec![9u8, 9, 9, 9];
+    hello.cipherSuite = cipher_suites::TLS_AES_128_GCM_SHA256;
+    hello.compressionMethod = 0;
+    hello.supportedVersion = common::VersionTLS13;
+    hello.serverShare = handshake_messages::keyShare {
+        group: 0x001d,
+        data: fill(0xB0),
+    };
+
+    let mut hs = handshake_server_tls13::serverHandshakeStateTLS13 {
+        c,
+        clientHello,
+        hello,
+        suite: cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256),
+        transcript: Some(handshake_messages::transcriptHasher(alloc::boxed::Box::new(
+            crate::crypto::sha256::New(),
+        ))),
+        sharedKey: slice::__from_vec(fill(0xC0)),
+        echContext: if which == 2 {
+            Some(handshake_server_tls13::echServerContext {
+                hpkeContext: None,
+                configID: 0,
+                ciphersuite: ech::echCipher { KDFID: 0, AEADID: 0 },
+                transcript: None,
+                inner: false,
+            })
+        } else {
+            None
+        },
+        ..Default::default()
+    };
+    let err = hs.sendServerParameters();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let (inSecret, outSecret) = hs.c.__trafficSecrets();
+    let transcriptSum =
+        crate::hash::Hash::Sum(&*hs.transcript.as_ref().unwrap().0, slice::new());
+    return (
+        text,
+        sink.Lock().clone(),
+        inSecret,
+        outSecret,
+        transcriptSum,
+        slice::__from_vec(hs.hello.random.clone()),
+    );
 }
 
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below

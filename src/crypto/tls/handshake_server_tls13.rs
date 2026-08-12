@@ -1,7 +1,7 @@
 // crypto/tls/handshake_server_tls13.rs — TLS 1.3 server handshake.
 //
-// goishlint:ignore GOISH018 handshake, processClientHello, checkForResumption, doHelloRetryRequest, sendServerParameters, sendServerFinished, sendSessionTickets, sendSessionTicket, readClientCertificate, readClientFinished — serverHandshakeStateTLS13's Conn-driven half; the live server below the divider implements the same protocol by hand. See ROADMAP.md.
-// goishlint:ignore GOISH021 echServerContext, maxClientPSKIdentities — same.
+// goishlint:ignore GOISH018 handshake, processClientHello, checkForResumption, doHelloRetryRequest, sendServerFinished, sendSessionTickets, sendSessionTicket, readClientCertificate — serverHandshakeStateTLS13's Conn-driven half; the live server below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH021 maxClientPSKIdentities — same.
 //
 // Port of Go 1.25.5 crypto/tls:
 //   handshake_server.go       readClientHello (:134), negotiateALPN (:334)
@@ -738,22 +738,43 @@ fn sign_handshake(
 /// Go: the TLS 1.3 server handshake state.
 ///
 /// **Partial record.** Only the fields the ported methods read are
-/// present; the key-schedule and transcript fields land with
-/// `handshake`, which drives the whole exchange.
+/// present; `ctx` and `masterSecret` land with `handshake`, which
+/// drives the whole exchange. `Default` is goish-only, standing in for
+/// Go's zero value so test shims spell only the fields they set.
+#[derive(Default)]
 pub(crate) struct serverHandshakeStateTLS13 {
     pub c: super::conn::Conn,
     pub clientHello: super::handshake_messages::clientHelloMsg,
+    pub hello: super::handshake_messages::serverHelloMsg,
     pub sentDummyCCS: bool,
     pub usingPSK: bool,
+    pub earlyData: bool,
     pub sigAlg: super::common::SignatureScheme,
     pub cert: Option<super::common::Certificate>,
     pub suite: Option<&'static super::cipher_suites::cipherSuiteTLS13>,
+    pub earlySecret: Option<crate::crypto::internal::fips140::tls13::EarlySecret>,
+    pub sharedKey: crate::goslice::slice<crate::types::byte>,
+    pub handshakeSecret: Option<crate::crypto::internal::fips140::tls13::HandshakeSecret>,
     /// Go: the verify_data the server expects from the client, computed
     /// before the client's Finished is read.
     pub clientFinished: crate::goslice::slice<crate::types::byte>,
     /// Go: `client_application_traffic_secret_0`.
     pub trafficSecret: crate::goslice::slice<crate::types::byte>,
     pub transcript: Option<super::handshake_messages::transcriptHasher>,
+    pub echContext: Option<echServerContext>,
+}
+
+// go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:33-43 echServerContext
+/// Go: "inner indicates that the initial client_hello we recieved
+/// contained an encrypted_client_hello extension that indicated it was
+/// an 'inner' hello. We don't do any additional processing of the hello
+/// in this case, so all fields above are unset."
+pub(crate) struct echServerContext {
+    pub hpkeContext: Option<crate::crypto::internal::hpke::Recipient>,
+    pub configID: crate::types::uint8,
+    pub ciphersuite: super::ech::echCipher,
+    pub transcript: Option<super::handshake_messages::transcriptHasher>,
+    pub inner: bool,
 }
 
 impl serverHandshakeStateTLS13 {
@@ -1145,6 +1166,216 @@ impl serverHandshakeStateTLS13 {
         let (_, err) = {
             let transcript = self.transcript.as_mut().unwrap();
             self.c.writeHandshakeRecord(&certVerifyMsg, Some(transcript))
+        };
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: return nil
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:730-833 serverHandshakeStateTLS13.sendServerParameters
+    /// Go: write the ServerHello (computing the ECH acceptance
+    /// confirmation into its random if ECH was accepted), switch both
+    /// halves to the handshake traffic secrets, and send
+    /// EncryptedExtensions.
+    ///
+    /// Deviations: the two `c.quic != nil` arms are absent — goish ships
+    /// no QUIC transport — and `clientHelloInfo` takes no
+    /// `context.Context`, per its own note.
+    pub(crate) fn sendServerParameters(&mut self) -> crate::error {
+        use crate::goslice::slice;
+        let suite = self.suite.unwrap();
+
+        // Go: if hs.echContext != nil {
+        if self.echContext.is_some() {
+            // Go: copy(hs.hello.random[32-8:], make([]byte, 8))
+            let mut i: usize = 24;
+            while i < 32 {
+                self.hello.random[i] = 0;
+                i += 1;
+            }
+            // Go: echTranscript := cloneHash(hs.transcript, hs.suite.hash)
+            //     echTranscript.Write(hs.clientHello.original)
+            //     if err := transcriptMsg(hs.hello, echTranscript); err != nil { return err }
+            let mut echTranscript = super::handshake_messages::transcriptHasher(
+                cloneHash(&*self.transcript.as_ref().unwrap().0, suite.hash).unwrap(),
+            );
+            crate::io::Writer::Write(
+                &mut echTranscript,
+                slice::__from_vec(self.clientHello.original.clone()),
+            );
+            let err =
+                super::handshake_messages::transcriptMsg(&self.hello, &mut echTranscript);
+            if err != crate::errors::nil {
+                return err;
+            }
+            // Go: "compute the acceptance message"
+            //     h := hs.suite.hash.New
+            //     prk, err := hkdf.Extract(h, hs.clientHello.random, nil)
+            let hash = suite.hash;
+            let h = crate::hash::HashFunc::New(move || hash.New());
+            let (prk, err) = crate::crypto::hkdf::Extract(
+                h.clone(),
+                slice::__from_vec(self.clientHello.random.clone()),
+                slice::new(),
+            );
+            if err != crate::errors::nil {
+                self.c.sendAlert(super::alert::alertInternalError);
+                return err;
+            }
+            // Go: acceptConfirmation := tls13.ExpandLabel(h, prk,
+            //         "ech accept confirmation", echTranscript.Sum(nil), 8)
+            //     copy(hs.hello.random[32-8:], acceptConfirmation)
+            let acceptConfirmation = crate::crypto::internal::fips140::tls13::ExpandLabel(
+                h,
+                prk,
+                "ech accept confirmation",
+                crate::hash::Hash::Sum(&*echTranscript.0, slice::new()),
+                8,
+            );
+            let mut i: usize = 0;
+            while i < 8 {
+                self.hello.random[24 + i] = acceptConfirmation[i];
+                i += 1;
+            }
+        }
+
+        // Go: if err := transcriptMsg(hs.clientHello, hs.transcript); err != nil { return err }
+        let err = {
+            let transcript = self.transcript.as_mut().unwrap();
+            super::handshake_messages::transcriptMsg(&self.clientHello, transcript)
+        };
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: if _, err := hs.c.writeHandshakeRecord(hs.hello, hs.transcript); err != nil { return err }
+        let (_, err) = {
+            let transcript = self.transcript.as_mut().unwrap();
+            self.c.writeHandshakeRecord(&self.hello, Some(transcript))
+        };
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: if err := hs.sendDummyChangeCipherSpec(); err != nil { return err }
+        let err = self.sendDummyChangeCipherSpec();
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: earlySecret := hs.earlySecret
+        //     if earlySecret == nil { earlySecret = tls13.NewEarlySecret(hs.suite.hash.New, nil) }
+        //     hs.handshakeSecret = earlySecret.HandshakeSecret(hs.sharedKey)
+        let hash = suite.hash;
+        self.handshakeSecret = Some(match self.earlySecret.as_ref() {
+            Some(earlySecret) => earlySecret.HandshakeSecret(self.sharedKey.clone()),
+            None => crate::crypto::internal::fips140::tls13::NewEarlySecret(
+                crate::hash::HashFunc::New(move || hash.New()),
+                slice::new(),
+            )
+            .HandshakeSecret(self.sharedKey.clone()),
+        });
+
+        // Go: clientSecret := hs.handshakeSecret.ClientHandshakeTrafficSecret(hs.transcript)
+        //     c.in.setTrafficSecret(hs.suite, QUICEncryptionLevelHandshake, clientSecret)
+        //     serverSecret := hs.handshakeSecret.ServerHandshakeTrafficSecret(hs.transcript)
+        //     c.out.setTrafficSecret(hs.suite, QUICEncryptionLevelHandshake, serverSecret)
+        let (clientSecret, serverSecret) = {
+            let transcript = self.transcript.as_ref().unwrap();
+            let hsSecret = self.handshakeSecret.as_ref().unwrap();
+            (
+                hsSecret.ClientHandshakeTrafficSecret(&*transcript.0),
+                hsSecret.ServerHandshakeTrafficSecret(&*transcript.0),
+            )
+        };
+        self.c.in_.setTrafficSecret(
+            suite,
+            super::quic::QUICEncryptionLevelHandshake,
+            clientSecret.clone(),
+        );
+        self.c.out.setTrafficSecret(
+            suite,
+            super::quic::QUICEncryptionLevelHandshake,
+            serverSecret.clone(),
+        );
+
+        // Go: err := c.config.writeKeyLog(keyLogLabelClientHandshake, hs.clientHello.random, clientSecret)
+        //     if err != nil { c.sendAlert(alertInternalError); return err }
+        let clientHelloRandom = slice::__from_vec(self.clientHello.random.clone());
+        let err = self.c.config.writeKeyLog(
+            crate::gostring::string::from_static(super::common::keyLogLabelClientHandshake),
+            clientHelloRandom.clone(),
+            clientSecret,
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertInternalError);
+            return err;
+        }
+        // Go: err = c.config.writeKeyLog(keyLogLabelServerHandshake, hs.clientHello.random, serverSecret)
+        //     if err != nil { c.sendAlert(alertInternalError); return err }
+        let err = self.c.config.writeKeyLog(
+            crate::gostring::string::from_static(super::common::keyLogLabelServerHandshake),
+            clientHelloRandom,
+            serverSecret,
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertInternalError);
+            return err;
+        }
+
+        // Go: encryptedExtensions := new(encryptedExtensionsMsg)
+        //     encryptedExtensions.alpnProtocol = c.clientProtocol
+        let mut encryptedExtensions =
+            super::handshake_messages::encryptedExtensionsMsg::default();
+        encryptedExtensions.alpnProtocol = match core::str::from_utf8(self.c.clientProtocol.as_bytes()) {
+            Ok(p) => p.into(),
+            Err(_) => Default::default(),
+        };
+
+        // Go: if !hs.c.didResume && hs.clientHello.serverName != "" {
+        //         encryptedExtensions.serverNameAck = true }
+        if !self.c.didResume && !self.clientHello.serverName.is_empty() {
+            encryptedExtensions.serverNameAck = true;
+        }
+
+        // Go: "If client sent ECH extension, but we didn't accept it,
+        //      send retry configs, if available."
+        //     echKeys := hs.c.config.EncryptedClientHelloKeys
+        //     if hs.c.config.GetEncryptedClientHelloKeys != nil {
+        //         echKeys, err = hs.c.config.GetEncryptedClientHelloKeys(clientHelloInfo(hs.ctx, c, hs.clientHello)) }
+        let mut echKeys = self.c.config.EncryptedClientHelloKeys.clone();
+        if let Some(get) = self.c.config.GetEncryptedClientHelloKeys.clone() {
+            let (keys, err) = get(super::handshake_server::clientHelloInfo(
+                &self.c,
+                &self.clientHello,
+            ));
+            if err != crate::errors::nil {
+                self.c.sendAlert(super::alert::alertInternalError);
+                return err;
+            }
+            echKeys = keys;
+        }
+        // Go: if len(echKeys) > 0 && len(hs.clientHello.encryptedClientHello) > 0 && hs.echContext == nil {
+        //         encryptedExtensions.echRetryConfigs, err = buildRetryConfigList(echKeys) }
+        if echKeys.Len() > 0
+            && self.clientHello.encryptedClientHello.len() > 0
+            && self.echContext.is_none()
+        {
+            let (retryConfigs, err) = super::ech::buildRetryConfigList(echKeys);
+            if err != crate::errors::nil {
+                self.c.sendAlert(super::alert::alertInternalError);
+                return err;
+            }
+            encryptedExtensions.echRetryConfigs = retryConfigs.__into_vec();
+        }
+
+        // Go: if _, err := hs.c.writeHandshakeRecord(encryptedExtensions, hs.transcript); err != nil { return err }
+        let (_, err) = {
+            let transcript = self.transcript.as_mut().unwrap();
+            self.c.writeHandshakeRecord(&encryptedExtensions, Some(transcript))
         };
         if err != crate::errors::nil {
             return err;

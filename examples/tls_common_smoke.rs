@@ -3253,7 +3253,98 @@ fn main() {
         "0f000044080700400f9a7a839247751a36ec2f0ab03aeb326813ba507dcbf6d5451d9af92f11c4010397cad512ad5137578377d8e3234f4960097a426225a7d305cf2320c5b93509",
     );
 
+    // ── serverHandshakeStateTLS13.sendServerParameters ──────────────
+    //
+    // Ground truth: scripts/goref.sh crypto/tls with fixed clientHello
+    // random/original, hello, X25519 share, and shared key, so the whole
+    // flight — plaintext ServerHello, dummy CCS, AES-GCM-encrypted
+    // EncryptedExtensions — plus both handshake traffic secrets, the
+    // transcript, and the (possibly ECH-rewritten) hello.random are
+    // byte-for-byte Go's.
+    let ssp = |which: int| -> (string, string, string, string, string, string) {
+        let (e, w, inS, outS, tr, hr) = tls::handshake_server_tls13_sendServerParameters(which);
+        return (e, hexOf(w), hexOf(inS), hexOf(outS), hexOf(tr), hexOf(hr));
+    };
 
+    // Plain: no ECH; serverNameAck fires and alpn echoes clientProtocol.
+    let (ssp0e, ssp0w, ssp0in, ssp0out, ssp0tr, ssp0hr) = ssp(0);
+    eq("sendServerParameters succeeds", ssp0e, "");
+    eq(
+        "the plain flight is byte-identical to Go",
+        ssp0w,
+        "160303005e0200005a0303a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf0409090909130100002e002b0002030400330024001d0020b0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecf1403030001011603030023759091b321b8b62837469b18ab5e02300ff3aa64b73c7ec5fa4db6bf48ae491ccddeca",
+    );
+    eq(
+        "the client handshake traffic secret matches Go",
+        ssp0in,
+        "1a41ff58301d848f9dde93c6b70823df9a9ad98d609254ef47a4b59f97d3977b",
+    );
+    eq(
+        "the server handshake traffic secret matches Go",
+        ssp0out,
+        "13acd30aeecc9b081a92978e0d4c8d50261b9a55f27a7f861d639f7ede950506",
+    );
+    eq(
+        "the transcript after the flight matches Go",
+        ssp0tr,
+        "44e11add6263173a2d9cd496dd5ff3ab06cc0f6e5008422f37d36addb382f1c6",
+    );
+    eq(
+        "hello.random is untouched without ECH",
+        ssp0hr,
+        "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+    );
+
+    // ECH offered but not accepted: EncryptedExtensions carries the
+    // retry configs built from the SendAsRetry keys only.
+    let (ssp1e, ssp1w, ssp1in, _, ssp1tr, _) = ssp(1);
+    eq("sendServerParameters with retry configs succeeds", ssp1e, "");
+    eq(
+        "the retry-config flight is byte-identical to Go",
+        ssp1w,
+        "160303005e0200005a0303a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf0409090909130100002e002b0002030400330024001d0020b0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecf140303000101160303002c759091a421a3b62837469b18ab5e02ce02f3af446dce13bac5701b7d336653df43f30e02abf7fff8a76c79e8",
+    );
+    eq(
+        "the handshake secrets do not depend on the EE payload",
+        ssp1in,
+        "1a41ff58301d848f9dde93c6b70823df9a9ad98d609254ef47a4b59f97d3977b",
+    );
+    eq(
+        "the transcript includes the longer EncryptedExtensions",
+        ssp1tr,
+        "244b851b6285350c0a505b388ee05f35a3b960f6e2962544adff8a20d66bbdaa",
+    );
+
+    // ECH accepted: the last 8 bytes of hello.random become the
+    // acceptance confirmation derived over the ECH transcript, which
+    // changes the ServerHello, both secrets, and the whole flight.
+    let (ssp2e, ssp2w, ssp2in, ssp2out, ssp2tr, ssp2hr) = ssp(2);
+    eq("sendServerParameters under ECH succeeds", ssp2e, "");
+    eq(
+        "the ECH-accepted flight is byte-identical to Go",
+        ssp2w,
+        "160303005e0200005a0303a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7061e2c997d418be90409090909130100002e002b0002030400330024001d0020b0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecf1403030001011603030023bf96123633268d5a7409942ad6e8a2de1e87c2b09a69e8bc89404849f7bd4f6a6bd5ba",
+    );
+    eq(
+        "the ECH acceptance rewrites the hello.random tail",
+        ssp2hr,
+        "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7061e2c997d418be9",
+    );
+    eq(
+        "the client secret binds the rewritten ServerHello",
+        ssp2in,
+        "f16a6b598242969918eb7284cb52576c5454380613a1366137f4817b64e9ed51",
+    );
+    eq(
+        "the server secret binds the rewritten ServerHello",
+        ssp2out,
+        "e35729cdf8079a28c27a6895ed7300ae50ccbd811720f3050d625c9255a6d1f7",
+    );
+    eq(
+        "the ECH transcript sum matches Go",
+        ssp2tr,
+        "5b9495440d33266fc4ad008f0f91d1c38e00687055004e36940d1bbc83658737",
+    );
 
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
