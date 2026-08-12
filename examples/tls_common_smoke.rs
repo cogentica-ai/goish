@@ -783,6 +783,28 @@ fn main() {
         !tls::ech_validDNSName(string::from_static("")),
     );
 
+    // ─── QUICEncryptionLevel.String. The fallback prints in DECIMAL
+    //     (%v on an int), unlike VersionName's %04X — and negatives are
+    //     reachable because the type is a signed int.
+    eq("QUIC level Initial", tls::QUICEncryptionLevelInitial.String(), "Initial");
+    eq("QUIC level Early", tls::QUICEncryptionLevelEarly.String(), "Early");
+    eq("QUIC level Handshake", tls::QUICEncryptionLevelHandshake.String(), "Handshake");
+    eq(
+        "QUIC level Application",
+        tls::QUICEncryptionLevelApplication.String(),
+        "Application",
+    );
+    eq(
+        "QUIC level fallback",
+        tls::QUICEncryptionLevel(9).String(),
+        "QUICEncryptionLevel(9)",
+    );
+    eq(
+        "QUIC level negative fallback",
+        tls::QUICEncryptionLevel(-1).String(),
+        "QUICEncryptionLevel(-1)",
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

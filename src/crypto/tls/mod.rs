@@ -46,6 +46,8 @@ pub mod common_string;
 pub mod defaults;
 pub mod ech;
 pub mod prf;
+pub mod quic;
+pub use quic::{QUICEncryptionLevel, QUICEncryptionLevelApplication, QUICEncryptionLevelEarly, QUICEncryptionLevelHandshake, QUICEncryptionLevelInitial};
 pub mod tls;
 pub use tls::timeoutError;
 
