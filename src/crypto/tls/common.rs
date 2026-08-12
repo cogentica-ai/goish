@@ -1,4 +1,4 @@
-// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError, Certificate.leaf, Config.supportedVersions, Config.maxSupportedVersion, Config.mutualVersion, Config.curvePreferences, Config.supportsCurve, Config.cipherSuites, Config.supportedCipherSuites, Config.rand, Config.time, Config.ticketKeyFromBytes, Config.BuildNameToCertificate, defaultConfig, fipsAllowedChains, fipsAllowChain, emptyConfig, Config.initLegacySessionTicketKeyRLocked, Config.SetSessionTicketKeys, Config.ticketKeys, Config.Clone, ClientHelloInfo.Context, ClientHelloInfo.SupportsCertificate, CertificateRequestInfo.Context, CertificateRequestInfo.SupportsCertificate, NewLRUClientSessionCache, lruSessionCache.Put, lruSessionCache.Get
+// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError, Certificate.leaf, Config.supportedVersions, Config.maxSupportedVersion, Config.mutualVersion, Config.curvePreferences, Config.supportsCurve, Config.cipherSuites, Config.supportedCipherSuites, Config.rand, Config.time, Config.ticketKeyFromBytes, Config.BuildNameToCertificate, defaultConfig, fipsAllowedChains, fipsAllowChain, emptyConfig, Config.initLegacySessionTicketKeyRLocked, Config.SetSessionTicketKeys, Config.ticketKeys, Config.Clone, ClientHelloInfo.Context, ClientHelloInfo.SupportsCertificate, CertificateRequestInfo.Context, CertificateRequestInfo.SupportsCertificate, NewLRUClientSessionCache, lruSessionCache.Put, lruSessionCache.Get, ConnectionState.ExportKeyingMaterial, Config.getCertificate, Config.writeKeyLog
 //
 // crypto/tls — the protocol-level type surface: versions, curve IDs,
 // signature schemes and client-auth policy.
@@ -10,9 +10,9 @@
 // `Config` and `Certificate` currently live in mod[rs] and are not yet
 // ports — see ROADMAP.md.
 //
-// goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, ExportKeyingMaterial, InsecureCipherSuites, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
-// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, RenegotiationSupport, Config, dsaSignature, ecdsaSignature — same.
-// goishlint:ignore GOISH021 Config, ConnectionState, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, maxSessionTicketLifetime, maxUselessBytes, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
+// goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, InsecureCipherSuites, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
+// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, RenegotiationSupport, Config, dsaSignature, ecdsaSignature — same.
+// goishlint:ignore GOISH021 Config, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, maxSessionTicketLifetime, maxUselessBytes, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -1703,4 +1703,226 @@ impl ClientSessionCache for lruSessionCache {
         }
         return (None, false);
     }
+}
+
+
+// ─── ConnectionState and the remaining Config accessors ───────────────
+
+// Go: common.go:236-320
+//   type ConnectionState struct { Version uint16; HandshakeComplete bool
+//                                 DidResume bool; CipherSuite uint16; CurveID CurveID
+//                                 NegotiatedProtocol string
+//                                 NegotiatedProtocolIsMutual bool; ServerName string
+//                                 PeerCertificates []*x509.Certificate
+//                                 VerifiedChains [][]*x509.Certificate
+//                                 SignedCertificateTimestamps [][]byte
+//                                 OCSPResponse []byte; TLSUnique []byte
+//                                 ECHAccepted bool
+//                                 ekm func(string, []byte, int) ([]byte, error)
+//                                 testingOnlyDidHRR bool
+//                                 testingOnlyPeerSignatureAlgorithm SignatureScheme }
+/// Go: "ConnectionState records basic TLS details about the connection."
+///
+/// Go's two `testingOnly*` fields are absent: they exist for in-package
+/// tests, which goish cannot be.
+#[derive(Clone, Default)]
+pub struct ConnectionState {
+    /// Go: "the TLS version used by the connection (e.g. VersionTLS12)."
+    pub Version: uint16,
+    /// Go: "true if the handshake has concluded."
+    pub HandshakeComplete: bool,
+    /// Go: "true if this connection was successfully resumed from a
+    /// previous session with a session ticket or similar mechanism."
+    pub DidResume: bool,
+    /// Go: "the cipher suite negotiated for the connection."
+    pub CipherSuite: uint16,
+    /// Go: "the key exchange mechanism used."
+    pub CurveID: CurveID,
+    /// Go: "the application protocol negotiated with ALPN."
+    pub NegotiatedProtocol: crate::gostring::string,
+    /// Go: "Deprecated: this value is always true."
+    pub NegotiatedProtocolIsMutual: bool,
+    /// Go: "the value of the Server Name Indication extension sent by
+    /// the client."
+    pub ServerName: crate::gostring::string,
+    /// Go: "the parsed certificates sent by the peer, in the order in
+    /// which they were sent."
+    pub PeerCertificates: slice<crate::crypto::x509::Certificate>,
+    /// Go: "the certificate chains for the certificate presented by the
+    /// peer."
+    pub VerifiedChains: slice<slice<crate::crypto::x509::Certificate>>,
+    /// Go: "a list of SCTs provided by the peer through the TLS
+    /// handshake for the leaf certificate, if any."
+    pub SignedCertificateTimestamps: slice<slice<byte>>,
+    /// Go: "a stapled Online Certificate Status Protocol (OCSP) response
+    /// provided by the peer for the leaf certificate, if any."
+    pub OCSPResponse: slice<byte>,
+    /// Go: "contains the 'tls-unique' channel binding value (see RFC
+    /// 5929, Section 3)."
+    pub TLSUnique: slice<byte>,
+    /// Go: "indicates if Encrypted Client Hello was offered and
+    /// successfully accepted by the server."
+    pub ECHAccepted: bool,
+    pub(crate) ekm:
+        Option<alloc::sync::Arc<dyn Fn(crate::gostring::string, slice<byte>, int) -> (slice<byte>, error) + Send + Sync>>,
+}
+
+impl ConnectionState {
+
+    // go: none — goish-only: `ekm` is unexported in Go, where the tests
+    // are in-package. Selects one of prf[rs]'s two refusal hooks.
+    #[doc(hidden)]
+    pub fn __setEKM(&mut self, renegotiation: bool) {
+        if renegotiation {
+            self.ekm = Some(alloc::sync::Arc::new(|l, c, n| {
+                super::prf::noEKMBecauseRenegotiation(l, c, n)
+            }));
+        } else {
+            self.ekm = Some(alloc::sync::Arc::new(|l, c, n| {
+                super::prf::noEKMBecauseNoEMS(l, c, n)
+            }));
+        }
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:326-328 ConnectionState.ExportKeyingMaterial
+    /// Go: "ExportKeyingMaterial returns length bytes of exported key
+    /// material in a new slice as defined in RFC 5705. If context is nil,
+    /// it is not used as part of the seed. If the connection was set to
+    /// allow renegotiation via Config.Renegotiation, or if the
+    /// connections supports neither TLS 1.3 nor Extended Master Secret,
+    /// this function will return an error."
+    ///
+    /// Deviation: Go calls `cs.ekm` unconditionally, so a zero
+    /// ConnectionState panics on a nil func value. goish panics with a
+    /// message instead of a nil dereference; both are a panic, and
+    /// neither is reachable from a completed handshake, which always
+    /// sets `ekm` to one of the three functions prf[rs] declares.
+    pub fn ExportKeyingMaterial(
+        &self,
+        label: crate::gostring::string,
+        context: slice<byte>,
+        length: int,
+    ) -> (slice<byte>, error) {
+        // Go: return cs.ekm(label, context, length)
+        if self.ekm.is_none() {
+            panic!("tls: ExportKeyingMaterial on a ConnectionState with no handshake");
+        }
+        return (self.ekm.clone().unwrap())(label, context, length);
+    }
+}
+
+crate::var! {
+    /// Go: `var errNoCertificates = errors.New("tls: no certificates configured")`
+    pub(crate) errNoCertificates: error = "tls: no certificates configured";
+}
+
+impl Config {
+    // go: sdk 1.25.5 crypto/tls/common.go:1440-1481 Config.getCertificate
+    /// Go: "getCertificate returns the best certificate for the given
+    /// ClientHelloInfo, defaulting to the first element of
+    /// c.Certificates. If there are no certificates configured, it
+    /// returns errNoCertificates."
+    ///
+    /// Deviation: Go consults the `GetCertificate` callback first; goish's
+    /// Config has no such field, so that branch is unreachable and the
+    /// selection starts at `c.Certificates`.
+    pub(crate) fn getCertificate(
+        &self,
+        clientHello: &ClientHelloInfo,
+    ) -> (Certificate, error) {
+        // Go: if c.GetCertificate != nil && (len(c.Certificates) == 0 ||
+        //         len(clientHello.ServerName) > 0) {
+        //         cert, err := c.GetCertificate(clientHello)
+        //         if cert != nil || err != nil { return cert, err } }
+
+        // Go: if len(c.Certificates) == 0 { return nil, errNoCertificates }
+        if self.Certificates.Len() == 0 {
+            return (Certificate::default(), errNoCertificates.into());
+        }
+
+        // Go: if len(c.Certificates) == 1 {
+        //         // There's only one choice, so no point doing any work.
+        //         return &c.Certificates[0], nil }
+        if self.Certificates.Len() == 1 {
+            return (self.Certificates[0].clone(), errors::nil);
+        }
+
+        // Go: if c.NameToCertificate != nil {
+        //         name := strings.ToLower(clientHello.ServerName)
+        //         if cert, ok := c.NameToCertificate[name]; ok { return cert, nil }
+        //         if len(name) > 0 {
+        //             labels := strings.Split(name, ".")
+        //             labels[0] = "*"
+        //             wildcardName := strings.Join(labels, ".")
+        //             if cert, ok := c.NameToCertificate[wildcardName]; ok { return cert, nil } } }
+        if self.NameToCertificate.Len() > 0 {
+            let name = crate::strings::ToLower(clientHello.ServerName.clone());
+            let (cert, ok) = self.NameToCertificate.Get(name.clone());
+            if ok {
+                return (cert, errors::nil);
+            }
+            if name.Len() > 0 {
+                let mut labels = crate::strings::Split(name, ".");
+                labels[0] = crate::gostring::string::from_static("*");
+                let wildcardName = crate::strings::Join(labels, ".");
+                let (cert, ok) = self.NameToCertificate.Get(wildcardName);
+                if ok {
+                    return (cert, errors::nil);
+                }
+            }
+        }
+
+        // Go: for _, cert := range c.Certificates {
+        //         if err := clientHello.SupportsCertificate(&cert); err == nil {
+        //             return &cert, nil } }
+        for (_, cert) in crate::range!(self.Certificates.clone()) {
+            if clientHello.SupportsCertificate(cert) == errors::nil {
+                return (cert.clone(), errors::nil);
+            }
+        }
+
+        // Go: If nothing matches, return the first certificate.
+        return (self.Certificates[0].clone(), errors::nil);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1545-1557 Config.writeKeyLog
+    /// Write a NSS key-log line, if `KeyLogWriter` is set.
+    ///
+    /// Deviation: goish's Config has no `KeyLogWriter` field — it holds
+    /// an `io.Writer` interface value, which goish cannot store in a
+    /// `Clone`-able record without a shareable wrapper — so this always
+    /// takes Go's nil branch and returns nil. The line format is ported
+    /// anyway, because it is the part a future field has to match.
+    pub(crate) fn writeKeyLog(
+        &self,
+        _label: crate::gostring::string,
+        _clientRandom: slice<byte>,
+        _secret: slice<byte>,
+    ) -> error {
+        // Go: if c.KeyLogWriter == nil { return nil }
+        //     logLine := fmt.Appendf(nil, "%s %x %x\n", label, clientRandom, secret)
+        //     writerMutex.Lock()
+        //     _, err := c.KeyLogWriter.Write(logLine)
+        //     writerMutex.Unlock()
+        //     return err
+        return errors::nil;
+    }
+}
+
+// go: none — goish-only: the NSS key-log line Go builds with
+// `fmt.Appendf(nil, "%s %x %x\n", …)`. Named so that wiring a
+// `KeyLogWriter` field up later is one call, and so the format is
+// diffable against Go today.
+pub(crate) fn keyLogLine(
+    label: crate::gostring::string,
+    clientRandom: slice<byte>,
+    secret: slice<byte>,
+) -> slice<byte> {
+    let line = fmt::Sprintf!(
+        "%s %s %s\n",
+        label,
+        crate::encoding::hex::EncodeToString(&clientRandom),
+        crate::encoding::hex::EncodeToString(&secret)
+    );
+    return slice::__from_vec(line.as_bytes().to_vec());
 }

@@ -3775,3 +3775,96 @@ pub fn ticket_resumptionState() -> (
     let (tk3, st3, _) = cs.ResumptionState();
     return (tk.Len() == 0, st.is_none(), tk3, st3.unwrap().__secret());
 }
+
+// go: none — goish-only: ConnectionState's ekm field and Config's
+// getCertificate are unexported in Go, where the tests are in-package.
+// `which` picks the ekm hook: 0 = noEKMBecauseNoEMS,
+// 1 = noEKMBecauseRenegotiation.
+#[doc(hidden)]
+pub fn common_exportKeyingMaterial(which: crate::types::int) -> crate::gostring::string {
+    let mut cs = common::ConnectionState::default();
+    cs.__setEKM(which == 1);
+    let (_, err) = cs.ExportKeyingMaterial(
+        crate::gostring::string::from_static("label"),
+        crate::goslice::slice::new(),
+        32,
+    );
+    if err == crate::errors::nil {
+        return crate::gostring::string::from_static("");
+    }
+    return err.Error();
+}
+
+// go: none — goish-only: see `common_exportKeyingMaterial`. `which`:
+// 0 = no certificates, 1 = one certificate, 2 = two with no name map,
+// 3 = an exact NameToCertificate hit under a mixed-case SNI, 4 = a
+// wildcard hit. Reports `(errText, the chosen leaf DER)`.
+#[doc(hidden)]
+pub fn common_getCertificate(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let seed = crate::goslice::slice::__from_vec(alloc::vec![7u8; 32]);
+    let key = crate::crypto::ed25519::NewKeyFromSeed(seed);
+    let mk = |der: crate::types::byte| {
+        let mut c = common::Certificate::default();
+        c.PrivateKey = alloc::sync::Arc::new(key.clone());
+        c.Certificate = crate::goslice::slice::__from_vec(alloc::vec![
+            crate::goslice::slice::__from_vec(alloc::vec![der])
+        ]);
+        return c;
+    };
+    let one = mk(1);
+    let two = mk(2);
+    let mut cfg = Config::default();
+    let mut chi = common::ClientHelloInfo::default();
+    if which >= 1 {
+        cfg.Certificates = crate::goslice::slice::__from_vec(alloc::vec![one.clone()]);
+    }
+    if which >= 2 {
+        cfg.Certificates =
+            crate::goslice::slice::__from_vec(alloc::vec![one.clone(), two.clone()]);
+        chi.ServerName = crate::gostring::string::from_static("x.example.com");
+    }
+    if which == 3 {
+        cfg.NameToCertificate
+            .Set(crate::gostring::string::from_static("a.example.com"), two.clone());
+        chi.ServerName = crate::gostring::string::from_static("A.Example.com");
+    }
+    if which == 4 {
+        cfg.NameToCertificate
+            .Set(crate::gostring::string::from_static("*.example.com"), two.clone());
+        chi.ServerName = crate::gostring::string::from_static("b.example.com");
+    }
+    let (got, err) = cfg.getCertificate(&chi);
+    if err != crate::errors::nil {
+        return (err.Error(), crate::goslice::slice::new());
+    }
+    return (
+        crate::gostring::string::from_static(""),
+        got.Certificate[0].clone(),
+    );
+}
+
+// go: none — goish-only: see `common_exportKeyingMaterial`.
+#[doc(hidden)]
+pub fn common_keyLogLine() -> crate::gostring::string {
+    let line = common::keyLogLine(
+        crate::gostring::string::from_static("CLIENT_RANDOM"),
+        crate::goslice::slice::__from_vec(alloc::vec![1u8, 2]),
+        crate::goslice::slice::__from_vec(alloc::vec![3u8, 4]),
+    );
+    return crate::gostring::string::from_bytes(&line);
+}
+
+// go: none — goish-only: see `common_exportKeyingMaterial`.
+#[doc(hidden)]
+pub fn common_writeKeyLogIsNil() -> bool {
+    return Config::default().writeKeyLog(
+        crate::gostring::string::from_static("CLIENT_RANDOM"),
+        crate::goslice::slice::new(),
+        crate::goslice::slice::new(),
+    ) == crate::errors::nil;
+}

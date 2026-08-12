@@ -1895,6 +1895,32 @@ fn main() {
     eq("NewResumptionState round-trips the ticket", hexOf(rsTicket), "aabb");
     eq("NewResumptionState round-trips the state", hexOf(rsSecret), "07");
 
+    // ─── common.go: ConnectionState.ExportKeyingMaterial and the last
+    //     two Config accessors. From goref.sh.
+    eq("ExportKeyingMaterial without EMS", tls::common_exportKeyingMaterial(0),
+       "crypto/tls: ExportKeyingMaterial is unavailable when neither TLS 1.3 nor Extended Master Secret are negotiated; override with GODEBUG=tlsunsafeekm=1");
+    eq("ExportKeyingMaterial with renegotiation", tls::common_exportKeyingMaterial(1),
+       "crypto/tls: ExportKeyingMaterial is unavailable when renegotiation is enabled");
+
+    let (gcErr0, _) = tls::common_getCertificate(0);
+    eq("getCertificate with no certificates", gcErr0, "tls: no certificates configured");
+    let (gcErr1, gc1) = tls::common_getCertificate(1);
+    eq("getCertificate with one certificate err", gcErr1, "");
+    eq("getCertificate with one certificate", hexOf(gc1), "01");
+    // Two certificates, an SNI that matches neither, and no name map:
+    // Go falls back to the FIRST certificate, not an error.
+    let (_, gc2) = tls::common_getCertificate(2);
+    eq("getCertificate falls back to the first", hexOf(gc2), "01");
+    // NameToCertificate is keyed on the lower-cased SNI.
+    let (_, gc3) = tls::common_getCertificate(3);
+    eq("getCertificate matches NameToCertificate case-insensitively", hexOf(gc3), "02");
+    // A miss on the exact name retries with the first label replaced by "*".
+    let (_, gc4) = tls::common_getCertificate(4);
+    eq("getCertificate matches a wildcard entry", hexOf(gc4), "02");
+
+    eq("keyLogLine format", tls::common_keyLogLine(), "CLIENT_RANDOM 0102 0304\n");
+    check("writeKeyLog with no writer returns nil", tls::common_writeKeyLogIsNil());
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
