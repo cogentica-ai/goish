@@ -397,7 +397,7 @@ impl Hash for Digest {
             len: self.len,
             is224: self.is224,
         };
-        let digest = check_sum(&mut d0);
+        let digest = checkSum(&mut d0);
         // Go: if d0.is224 { return append(in, hash[:size224]...) }
         //     return append(in, hash[:]...)
         let mut out: Vec<byte> = b.__into_vec();
@@ -440,9 +440,9 @@ impl Hash for Digest {
     }
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:211-247 check_sum
+// go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:211-247 checkSum
 // Go: checkSum (sha256[go]:211) — finalize and return digest array.
-fn check_sum(d: &mut Digest) -> [byte; 32] {
+fn checkSum(d: &mut Digest) -> [byte; 32] {
     // Go: len := d.len
     let mut len = d.len;
     // Go: var tmp [64+8]byte; tmp[0] = 0x80

@@ -75,7 +75,20 @@ def goroot(argv):
 
 
 def norm(s):
-    return s.lower().replace("_", "")
+    """Fold case, but NOT underscores.
+
+    goish keeps Go's spelling (AGENTS.md §5: `fileLogger` stays
+    `fileLogger`), so the only legitimate drift is case. Folding `_`
+    away as well made every invented snake_case helper collide with a
+    real Go name: `crypto/tls`'s hand-written `read_record`,
+    `negotiate_alpn`, `send_alert` and `select_signature_scheme` each
+    counted as a port of Go's `readRecord`, `negotiateALPN`, `sendAlert`
+    and `selectSignatureScheme` while sharing no code with them. That
+    is the squatter problem measured from the other end — 15 of tls's
+    37 "ported" names were this, and `anchor_by_name.py` confirms none
+    of those files contain a single function Go declares.
+    """
+    return s.lower()
 
 
 PUREGO = False
