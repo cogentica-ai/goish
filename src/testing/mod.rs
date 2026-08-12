@@ -104,6 +104,16 @@ pub(crate) struct TState {
     /// Go: `common.helperPCs map[uintptr]struct{}` — "functions to be
     /// skipped when writing file/line info". Populated by `Helper`.
     pub(crate) helperPCs: Mutex<crate::map<crate::types::uintptr, bool>>,
+    /// Go: `common.inFuzzFn bool` — "Whether the fuzz target, if this
+    /// is one, is running." Never set in goish (F is not ported), but
+    /// `checkFuzzFn` guards Output/TempDir/Setenv/Chdir on it, so the
+    /// field has to exist for those to port verbatim.
+    pub(crate) inFuzzFn: AtomicBool,
+    /// Go: `common.chatty *chattyPrinter` — "A copy of chattyPrinter,
+    /// if the chatty flag is set." goish's runner writes through
+    /// `write_status` rather than a printer, so this stays None until
+    /// the M.Run driver lands; `Attr` reads it exactly as Go does.
+    pub(crate) chatty: Mutex<Option<Arc<testing::chattyPrinter>>>,
 }
 
 impl TState {
@@ -117,6 +127,8 @@ impl TState {
             cleanups: Mutex::new(Vec::new()),
             parent: None,
             helperPCs: Mutex::new(crate::map::new()),
+            inFuzzFn: AtomicBool::new(false),
+            chatty: Mutex::new(None),
         };
     }
 }

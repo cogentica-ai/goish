@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -56,6 +56,7 @@ impl T {
     /// site; `Errorf` below keeps the runtime-variadic shape for ports
     /// that spread a slice.
     pub fn Logf<M: Into<string>>(&self, msg: M) {
+        self.checkFuzzFn(string::from_static("Logf"));
         let msg: string = msg.into();
         self.write_line(b"   ", &msg);
     }
@@ -64,6 +65,7 @@ impl T {
     /// Go: "Log formats its arguments using default formatting,
     /// analogous to Println, and records the text in the error log."
     pub fn Log<M: Into<string>>(&self, msg: M) {
+        self.checkFuzzFn(string::from_static("Log"));
         let msg: string = msg.into();
         self.Logf(msg);
     }
@@ -80,6 +82,7 @@ impl T {
         format: M,
         args: crate::goslice::slice<crate::goany::Any>,
     ) {
+        self.checkFuzzFn(string::from_static("Errorf"));
         let format: string = format.into();
         let msg: string = if args.Len() == 0 {
             format
@@ -94,6 +97,7 @@ impl T {
     // go: sdk 1.25.5 testing/testing.go:1195-1199 common.Error
     /// Go: "Error is equivalent to Log followed by Fail."
     pub fn Error<M: Into<string>>(&self, msg: M) {
+        self.checkFuzzFn(string::from_static("Error"));
         let msg: string = msg.into();
         self.Errorf(msg, crate::goslice::slice::new());
     }
@@ -130,6 +134,7 @@ impl T {
         format: M,
         args: crate::goslice::slice<crate::goany::Any>,
     ) -> ! {
+        self.checkFuzzFn(string::from_static("Fatalf"));
         let format: string = format.into();
         self.Errorf(format, args);
         self.FailNow();
@@ -138,6 +143,7 @@ impl T {
     // go: sdk 1.25.5 testing/testing.go:1209-1213 common.Fatal
     /// Go: "Fatal is equivalent to Log followed by FailNow."
     pub fn Fatal<M: Into<string>>(&self, msg: M) -> ! {
+        self.checkFuzzFn(string::from_static("Fatal"));
         let msg: string = msg.into();
         self.Fatalf(msg, crate::goslice::slice::new());
     }
@@ -145,6 +151,7 @@ impl T {
     // go: sdk 1.25.5 testing/testing.go:1230-1234 common.Skipf
     /// Go: "Skipf is equivalent to Logf followed by SkipNow."
     pub fn Skipf<M: Into<string>>(&self, msg: M) -> ! {
+        self.checkFuzzFn(string::from_static("Skipf"));
         let msg: string = msg.into();
         self.Skip(msg);
     }
@@ -238,6 +245,7 @@ impl T {
     /// the goroutine dies — but it happens on the way in rather than on
     /// the way out.
     pub fn FailNow(&self) -> ! {
+        self.checkFuzzFn(string::from_static("FailNow"));
         self.state.failed.store(true, Ordering::Release);
         // Go: c.mu.Lock(); c.finished = true; c.mu.Unlock()
         self.state.finished.store(true, Ordering::Release);
@@ -275,6 +283,7 @@ impl T {
     /// anywhere but the last test. It now ends only this test's
     /// goroutine.
     pub fn Skip<M: Into<string>>(&self, msg: M) -> ! {
+        self.checkFuzzFn(string::from_static("Skip"));
         let msg: string = msg.into();
         self.write_line(b"skp", &msg);
         self.SkipNow();
@@ -289,6 +298,7 @@ impl T {
     ///
     /// Same cleanup-ordering deviation as `FailNow`.
     pub fn SkipNow(&self) -> ! {
+        self.checkFuzzFn(string::from_static("SkipNow"));
         // Go: c.mu.Lock(); c.skipped = true; c.finished = true;
         //     c.mu.Unlock(); runtime.Goexit()
         self.state.skipped.store(true, Ordering::Release);
@@ -688,6 +698,7 @@ impl T {
     /// global. goish has no `t.Parallel`, so there is no such state to
     /// check — when Parallel lands, that guard has to land with it.
     pub fn Setenv(&self, key: string, value: string) {
+        self.checkFuzzFn(string::from_static("Setenv"));
         // Go: prevValue, ok := os.LookupEnv(key)
         let (prevValue, ok) = crate::os::LookupEnv(key.clone());
 
@@ -730,6 +741,7 @@ impl T {
     /// the restore. Go's switch on `runtime.GOOS` collapses: goish is
     /// linux-only, so only the POSIX arm exists.
     pub fn Chdir(&self, dir: string) {
+        self.checkFuzzFn(string::from_static("Chdir"));
         let (oldwd, werr) = crate::os::Getwd();
         if werr != crate::errors::nil {
             self.Fatal(werr.Error());
@@ -1224,4 +1236,92 @@ where
 #[doc(hidden)]
 pub fn __shim_err_main() -> crate::errors::error {
     return errMain.into();
+}
+
+// ─── flag and common odds and ends ───────────────────────────────────
+
+#[allow(non_snake_case)]
+impl chattyFlag {
+    // go: sdk 1.25.5 testing/testing.go:556-561 chattyFlag.Get
+    /// Go returns `any`: the string "test2json" under -v=test2json, and
+    /// the bool `on` otherwise. flag.Getter callers type-switch on it,
+    /// so the two shapes must stay distinguishable.
+    pub fn Get(&self) -> crate::goany::Any {
+        if self.json {
+            return crate::goany::Any::new(string::from_static("test2json"));
+        }
+        return crate::goany::Any::new(self.on);
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:565-570 chattyFlag.prefix
+    /// Go: the framing marker under -v=test2json, otherwise "".
+    pub fn prefix(&self) -> string {
+        if self.json {
+            return string::from_bytes(&[marker]);
+        }
+        return string::from_static("");
+    }
+}
+
+#[allow(non_snake_case)]
+impl T {
+    // go: sdk 1.25.5 testing/testing.go:723-727 common.checkFuzzFn
+    /// Go: "panics if the method is called from inside a fuzz target."
+    /// goish never sets `inFuzzFn` — F is not ported — so this never
+    /// fires today. It is carried across because Output, TempDir,
+    /// Setenv and Chdir all begin with a call to it, and porting those
+    /// verbatim means the call has to resolve.
+    pub(crate) fn checkFuzzFn(&self, name: string) {
+        if self.state.inFuzzFn.load(Ordering::Acquire) {
+            panic!("testing: f.{} was called inside the fuzz target, use t.{} instead",
+                   name.as_ref() as &str, name.as_ref() as &str);
+        }
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:931-931 common.private
+    /// Go: an empty method whose only job is to make TB unimplementable
+    /// outside the testing package.
+    #[allow(dead_code)]
+    pub(crate) fn private(&self) {}
+
+    // go: sdk 1.25.5 testing/testing.go:1509-1522 common.Attr
+    /// Go: "Attr emits a test attribute associated with this test."
+    ///
+    /// Both rejections report through Errorf and RETURN rather than
+    /// panicking, so a malformed attribute fails its own test instead
+    /// of taking down the run.
+    pub fn Attr(&self, key: string, value: string) {
+        if crate::strings::ContainsFunc(key.clone(), crate::unicode::IsSpace) {
+            self.Errorf(
+                "disallowed whitespace in attribute key %q",
+                crate::goslice::slice::__from_vec(alloc::vec![crate::goany::Any::new(key)]),
+            );
+            return;
+        }
+        if crate::strings::ContainsAny(value.clone(), "\r\n") {
+            self.Errorf(
+                "disallowed newline in attribute value %q",
+                crate::goslice::slice::__from_vec(alloc::vec![crate::goany::Any::new(value)]),
+            );
+            return;
+        }
+        // Go: `if c.chatty == nil { return }` — no chatty printer, no
+        // attribute stream to emit onto.
+        let guard = self.state.chatty.Lock();
+        let chatty = match guard.as_ref() {
+            Some(c) => c,
+            None => return,
+        };
+        // goish's Updatef takes the message pre-formatted; Go's is
+        // variadic. Same text either way.
+        chatty.Updatef(
+            self.name.clone(),
+            crate::fmt::Sprintf!(
+                "=== ATTR  %s %v %v\n",
+                self.name.clone(),
+                key,
+                value
+            ),
+        );
+    }
 }

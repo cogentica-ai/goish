@@ -1,4 +1,4 @@
-// go: file testing/benchmark.go decls: B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
+// go: file testing/benchmark.go decls: durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
 //
 // testing/benchmark.go — the result type a benchmark reports, its
 // derived per-operation metrics, and the column formatting `go test
@@ -20,8 +20,8 @@
 // Everything in this file is reachable without either: pure arithmetic
 // over a BenchmarkResult a caller filled in, plus the formatting.
 //
-// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, benchmarkName, doBench, launch, loopSlowPath, runN, run, run1, add, stopOrScaleBLoop, processBench, checkParallel, Set, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
-// goishlint:ignore GOISH021 PB, InternalBenchmark, benchState, durationOrCountFlag, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchTime, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
+// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, benchmarkName, doBench, launch, loopSlowPath, runN, run, run1, add, stopOrScaleBLoop, processBench, checkParallel, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
+// goishlint:ignore GOISH021 PB, InternalBenchmark, benchState, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchTime, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
 
 #![allow(non_snake_case)]
 
@@ -433,5 +433,67 @@ impl B {
         r.MemBytes = self.netBytes;
         r.Extra = self.extra.clone();
         return r;
+    }
+}
+
+// ─── the -benchtime flag's value type ────────────────────────────────
+
+// go: sdk 1.25.5 testing/benchmark.go:38-42 durationOrCountFlag
+/// Go: the value behind `-test.benchtime`, which accepts EITHER a
+/// duration ("2s") or an iteration count ("100x"). The two are stored
+/// in separate fields rather than a tagged union, and `n > 0` is what
+/// distinguishes them.
+#[derive(Clone, Copy, Default, PartialEq)]
+#[allow(non_camel_case_types)]
+pub struct durationOrCountFlag {
+    pub d: crate::time::Duration,
+    pub n: crate::types::int,
+    pub allowZero: bool,
+}
+
+#[allow(non_snake_case)]
+impl durationOrCountFlag {
+    // go: sdk 1.25.5 testing/benchmark.go:44-49 durationOrCountFlag.String
+    pub fn String(&self) -> crate::gostring::string {
+        if self.n > 0 {
+            return crate::fmt::Sprintf!("%dx", self.n);
+        }
+        return self.d.String();
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:51-65 durationOrCountFlag.Set
+    /// Note that a successful Set REPLACES the whole value, dropping
+    /// `allowZero` — Go writes `*f = durationOrCountFlag{n: int(n)}`.
+    /// That is deliberate on Go's part but easy to "fix" into a field
+    /// assignment, which would let a later Set("0") through.
+    pub fn Set(&mut self, s: crate::gostring::string) -> crate::errors::error {
+        if crate::strings::HasSuffix(s.clone(), "x") {
+            let body = s.slice(0, crate::types::int64::from(s.Len()) - 1);
+            let (n, err) = crate::strconv::ParseInt(body, 10, 0);
+            if err != crate::errors::nil || n < 0 || (!self.allowZero && n == 0) {
+                return crate::errors::New(crate::gostring::string::from_static(
+                    "invalid count",
+                ));
+            }
+            *self = durationOrCountFlag {
+                n: crate::int(n),
+                ..Default::default()
+            };
+            return crate::errors::nil;
+        }
+        let (d, err) = crate::time::ParseDuration(s);
+        if err != crate::errors::nil
+            || d < crate::time::Duration(0)
+            || (!self.allowZero && d == crate::time::Duration(0))
+        {
+            return crate::errors::New(crate::gostring::string::from_static(
+                "invalid duration",
+            ));
+        }
+        *self = durationOrCountFlag {
+            d,
+            ..Default::default()
+        };
+        return crate::errors::nil;
     }
 }
