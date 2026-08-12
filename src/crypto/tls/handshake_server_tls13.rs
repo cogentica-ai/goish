@@ -264,7 +264,7 @@ pub(crate) fn do_server_handshake_tls13(
         return (KeyMaterial::default(), dummy_info, err);
     }
     let mut client_hello = clientHelloMsg::default();
-    if !client_hello.unmarshal(&ch_bytes) {
+    if !client_hello.unmarshal(crate::goslice::slice::__from_vec(ch_bytes.clone())) {
         fail!(conn, alertDecodeError, "tls: could not decode ClientHello");
     }
 
@@ -432,7 +432,8 @@ pub(crate) fn do_server_handshake_tls13(
     // ── sendServerParameters (handshake_server_tls13.go:735) ─────────
     // transcript = ClientHello || ServerHello (both full handshake
     // messages including the 4-byte header).
-    let hello_bytes = hello.marshal();
+    let (hello_bytes_s, _) = hello.marshal();
+    let hello_bytes: Vec<byte> = hello_bytes_s.__into_vec();
     let mut transcript: Vec<byte> = Vec::new();
     transcript.extend_from_slice(&ch_bytes);
     transcript.extend_from_slice(&hello_bytes);
@@ -466,7 +467,8 @@ pub(crate) fn do_server_handshake_tls13(
     if !client_hello.serverName.is_empty() {
         ee.serverNameAck = true;
     }
-    let ee_bytes = ee.marshal();
+    let (ee_bytes_s, _) = ee.marshal();
+    let ee_bytes: alloc::vec::Vec<crate::types::byte> = ee_bytes_s.__into_vec();
     let (wire, eerr) = tls13_encrypt_record_suite(
         &server_hs_keys,
         server_hs_seq,
@@ -526,7 +528,8 @@ pub(crate) fn do_server_handshake_tls13(
     cv.hasSignatureAlgorithm = true;
     cv.signatureAlgorithm = sig_alg;
     cv.signature = signature;
-    let cv_bytes = cv.marshal();
+    let (cv_bytes_s, _) = cv.marshal();
+    let cv_bytes: alloc::vec::Vec<crate::types::byte> = cv_bytes_s.__into_vec();
     let (wire, eerr) = tls13_encrypt_record_suite(
         &server_hs_keys,
         server_hs_seq,
@@ -548,7 +551,8 @@ pub(crate) fn do_server_handshake_tls13(
     let fin_th = key_schedule::transcript_hash_fn(hash_fn, &transcript);
     let mut fin = finishedMsg::default();
     fin.verifyData = finished_hash(hash_fn, &server_hs_secret, &fin_th);
-    let fin_bytes = fin.marshal();
+    let (fin_bytes_s, _) = fin.marshal();
+    let fin_bytes: alloc::vec::Vec<crate::types::byte> = fin_bytes_s.__into_vec();
     let (wire, eerr) = tls13_encrypt_record_suite(
         &server_hs_keys,
         server_hs_seq,

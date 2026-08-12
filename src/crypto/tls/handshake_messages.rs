@@ -1,6 +1,6 @@
-// goishlint:ignore GOISH018 transcriptMsg — marshalCertificate takes common.go's Certificate, which is not ported yet (mod[rs] declares a hand-written one), and transcriptMsg dispatches over the handshakeMessage interface, which arrives with conn[go]. Everything else in handshake_messages.go is here. See ROADMAP.md.
+// goishlint:ignore GOISH018 marshalCertificate — marshalCertificate takes common.go's Certificate, which is not ported yet (mod[rs] declares a hand-written one). Everything else in handshake_messages.go is here. See ROADMAP.md.
 // goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, newSessionTicketMsg, newSessionTicketMsgTLS13, serverKeyExchangeMsg, transcriptHash — the message types the subset does not handle.
-// go: file crypto/tls/handshake_messages.go decls: marshalingFunction.Marshal, addBytesWithLength, clientHelloMsg.marshalMsg, clientHelloMsg.marshal, clientHelloMsg.marshalWithoutBinders, clientHelloMsg.updateBinders, clientHelloMsg.originalBytes, clientHelloMsg.clone, serverHelloDoneMsg.marshal, serverHelloDoneMsg.unmarshal, clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal, finishedMsg.unmarshal, certificateVerifyMsg.unmarshal, encryptedExtensionsMsg.unmarshal, unmarshalCertificate, marshalCertificate, certificateMsgTLS13.unmarshal, serverHelloMsg.unmarshal, serverHelloMsg.originalBytes
+// go: file crypto/tls/handshake_messages.go decls: marshalingFunction.Marshal, addBytesWithLength, clientHelloMsg.marshalMsg, clientHelloMsg.marshal, clientHelloMsg.marshalWithoutBinders, clientHelloMsg.updateBinders, clientHelloMsg.originalBytes, clientHelloMsg.clone, serverHelloDoneMsg.marshal, serverHelloDoneMsg.unmarshal, clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal, finishedMsg.unmarshal, certificateVerifyMsg.unmarshal, encryptedExtensionsMsg.unmarshal, unmarshalCertificate, marshalCertificate, certificateMsgTLS13.unmarshal, serverHelloMsg.unmarshal, serverHelloMsg.originalBytes, transcriptMsg
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -324,10 +324,11 @@ impl clientHelloMsg {
     /// `(*clientHelloMsg).unmarshal(data)` — handshake_messages.go:418.
     /// `data` is the full handshake message including the 4-byte
     /// type+uint24-length header. Returns false on malformed input.
-    pub(crate) fn unmarshal(&mut self, data: &[byte]) -> bool {
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
         *self = clientHelloMsg::default();
-        self.original = data.to_vec();
-        let mut s = cbs::new(data);
+        let raw: &[byte] = &data;
+        self.original = raw.to_vec();
+        let mut s = cbs::new(raw);
 
         // Go: !s.Skip(4) || !s.ReadUint16(&m.vers) || !s.ReadBytes(&m.random, 32) ||
         //     !readUint8LengthPrefixed(&s, &m.sessionId)
@@ -735,7 +736,7 @@ impl serverHelloMsg {
     // go: sdk 1.25.5 crypto/tls/handshake_messages.go:746-869 serverHelloMsg.marshal
     /// `(*serverHelloMsg).marshal()` — handshake_messages.go:746.
     /// Emits extensions in the same order as Go.
-    pub(crate) fn marshal(&self) -> Vec<byte> {
+    pub(crate) fn marshal(&self) -> (slice<byte>, crate::error) {
         let mut exts = builder::new();
         if !self.alpnProtocol.is_empty() {
             exts.AddUint16(extensionALPN);
@@ -817,7 +818,7 @@ impl serverHelloMsg {
                 });
             }
         });
-        b.Bytes()
+        return (slice::__from_vec(b.Bytes()), crate::errors::nil);
     }
 }
 
@@ -838,7 +839,7 @@ pub(crate) struct encryptedExtensionsMsg {
 impl encryptedExtensionsMsg {
     // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1011-1052 encryptedExtensionsMsg.marshal
     /// `(*encryptedExtensionsMsg).marshal()` — handshake_messages.go:1011.
-    pub(crate) fn marshal(&self) -> Vec<byte> {
+    pub(crate) fn marshal(&self) -> (slice<byte>, crate::error) {
         let mut b = builder::new();
         b.AddUint8(typeEncryptedExtensions);
         b.AddUint24LengthPrefixed(|b| {
@@ -860,7 +861,7 @@ impl encryptedExtensionsMsg {
                 }
             });
         });
-        b.Bytes()
+        return (slice::__from_vec(b.Bytes()), crate::errors::nil);
     }
 }
 
@@ -1010,7 +1011,7 @@ pub(crate) struct certificateVerifyMsg {
 impl certificateVerifyMsg {
     // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1854-1867 certificateVerifyMsg.marshal
     /// `(*certificateVerifyMsg).marshal()` — handshake_messages.go:1854.
-    pub(crate) fn marshal(&self) -> Vec<byte> {
+    pub(crate) fn marshal(&self) -> (slice<byte>, crate::error) {
         let mut b = builder::new();
         b.AddUint8(typeCertificateVerify);
         b.AddUint24LengthPrefixed(|b| {
@@ -1021,7 +1022,7 @@ impl certificateVerifyMsg {
                 b.AddBytes(&self.signature);
             });
         });
-        b.Bytes()
+        return (slice::__from_vec(b.Bytes()), crate::errors::nil);
     }
 }
 
@@ -1035,13 +1036,13 @@ pub(crate) struct finishedMsg {
 impl finishedMsg {
     // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1697-1705 finishedMsg.marshal
     /// `(*finishedMsg).marshal()` — handshake_messages.go:1697.
-    pub(crate) fn marshal(&self) -> Vec<byte> {
+    pub(crate) fn marshal(&self) -> (slice<byte>, crate::error) {
         let mut b = builder::new();
         b.AddUint8(typeFinished);
         b.AddUint24LengthPrefixed(|b| {
             b.AddBytes(&self.verifyData);
         });
-        b.Bytes()
+        return (slice::__from_vec(b.Bytes()), crate::errors::nil);
     }
 }
 
@@ -2710,9 +2711,9 @@ impl serverHelloDoneMsg {
     }
 
     // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1661-1663 serverHelloDoneMsg.unmarshal
-    pub(crate) fn unmarshal(&mut self, data: &[byte]) -> bool {
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
         // Go: return len(data) == 4
-        return data.len() == 4;
+        return data.Len() == 4;
     }
 }
 
@@ -2906,4 +2907,400 @@ impl serverHelloMsg {
         // Go: return m.original
         return slice::__from_vec(self.original.clone());
     }
+}
+
+// ── handshakeMessage, for every message type ────────────────────────
+//
+// Go gets this for free: each message already has `marshal`/`unmarshal`
+// with the right shape, so it satisfies `handshakeMessage` implicitly.
+// Rust needs the impl spelled out, and every member forwards to the
+// inherent method of the same name. `asAny` and `asWithOriginalBytes`
+// are the two goish-only members documented on the trait in common.rs.
+
+
+impl super::common::handshakeMessage for helloRequestMsg {
+    // go: none — goish-only: forwards to `helloRequestMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return helloRequestMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `helloRequestMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return helloRequestMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for clientHelloMsg {
+    // go: none — goish-only: forwards to `clientHelloMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return clientHelloMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `clientHelloMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return clientHelloMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+    // go: none — goish-only: stands in for Go's
+    // `msg.(handshakeMessageWithOriginalBytes)` assertion, which Rust
+    // cannot express as a trait-object downcast.
+    fn asWithOriginalBytes(&self) -> Option<&dyn super::common::handshakeMessageWithOriginalBytes> {
+        return Some(self);
+    }
+}
+
+impl super::common::handshakeMessageWithOriginalBytes for clientHelloMsg {
+    // go: none — goish-only: forwards to `clientHelloMsg::originalBytes`.
+    fn originalBytes(&self) -> slice<byte> {
+        return clientHelloMsg::originalBytes(self);
+    }
+}
+
+impl super::common::handshakeMessage for serverHelloMsg {
+    // go: none — goish-only: forwards to `serverHelloMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return serverHelloMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `serverHelloMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return serverHelloMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+    // go: none — goish-only: stands in for Go's
+    // `msg.(handshakeMessageWithOriginalBytes)` assertion, which Rust
+    // cannot express as a trait-object downcast.
+    fn asWithOriginalBytes(&self) -> Option<&dyn super::common::handshakeMessageWithOriginalBytes> {
+        return Some(self);
+    }
+}
+
+impl super::common::handshakeMessageWithOriginalBytes for serverHelloMsg {
+    // go: none — goish-only: forwards to `serverHelloMsg::originalBytes`.
+    fn originalBytes(&self) -> slice<byte> {
+        return serverHelloMsg::originalBytes(self);
+    }
+}
+
+impl super::common::handshakeMessage for newSessionTicketMsg {
+    // go: none — goish-only: forwards to `newSessionTicketMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return newSessionTicketMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `newSessionTicketMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return newSessionTicketMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for newSessionTicketMsgTLS13 {
+    // go: none — goish-only: forwards to `newSessionTicketMsgTLS13::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return newSessionTicketMsgTLS13::marshal(self);
+    }
+    // go: none — goish-only: forwards to `newSessionTicketMsgTLS13::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return newSessionTicketMsgTLS13::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for certificateMsg {
+    // go: none — goish-only: forwards to `certificateMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return certificateMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `certificateMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return certificateMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for certificateMsgTLS13 {
+    // go: none — goish-only: forwards to `certificateMsgTLS13::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return certificateMsgTLS13::marshal(self);
+    }
+    // go: none — goish-only: forwards to `certificateMsgTLS13::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return certificateMsgTLS13::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for certificateRequestMsg {
+    // go: none — goish-only: forwards to `certificateRequestMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return certificateRequestMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `certificateRequestMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return certificateRequestMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for certificateRequestMsgTLS13 {
+    // go: none — goish-only: forwards to `certificateRequestMsgTLS13::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return certificateRequestMsgTLS13::marshal(self);
+    }
+    // go: none — goish-only: forwards to `certificateRequestMsgTLS13::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return certificateRequestMsgTLS13::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for certificateStatusMsg {
+    // go: none — goish-only: forwards to `certificateStatusMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return certificateStatusMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `certificateStatusMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return certificateStatusMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for serverKeyExchangeMsg {
+    // go: none — goish-only: forwards to `serverKeyExchangeMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return serverKeyExchangeMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `serverKeyExchangeMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return serverKeyExchangeMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for serverHelloDoneMsg {
+    // go: none — goish-only: forwards to `serverHelloDoneMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return serverHelloDoneMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `serverHelloDoneMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return serverHelloDoneMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for clientKeyExchangeMsg {
+    // go: none — goish-only: forwards to `clientKeyExchangeMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return clientKeyExchangeMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `clientKeyExchangeMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return clientKeyExchangeMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for certificateVerifyMsg {
+    // go: none — goish-only: forwards to `certificateVerifyMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return certificateVerifyMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `certificateVerifyMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return certificateVerifyMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for finishedMsg {
+    // go: none — goish-only: forwards to `finishedMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return finishedMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `finishedMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return finishedMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for encryptedExtensionsMsg {
+    // go: none — goish-only: forwards to `encryptedExtensionsMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return encryptedExtensionsMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `encryptedExtensionsMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return encryptedExtensionsMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for endOfEarlyDataMsg {
+    // go: none — goish-only: forwards to `endOfEarlyDataMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return endOfEarlyDataMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `endOfEarlyDataMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return endOfEarlyDataMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+impl super::common::handshakeMessage for keyUpdateMsg {
+    // go: none — goish-only: forwards to `keyUpdateMsg::marshal`, which Go's
+    // implicit interface satisfaction reaches directly.
+    fn marshal(&self) -> (slice<byte>, crate::error) {
+        return keyUpdateMsg::marshal(self);
+    }
+    // go: none — goish-only: forwards to `keyUpdateMsg::unmarshal`, same reason.
+    fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return keyUpdateMsg::unmarshal(self, data);
+    }
+    // go: none — goish-only: stands in for the type assertion Go's
+    // callers write on the `any` that `readHandshake` returns.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+}
+
+// Go: handshake_messages.go:1934-1936
+//   type transcriptHash interface { Write([]byte) (int, error) }
+/// Go's `transcriptHash` — the write half of a running handshake hash.
+/// Any `io::Writer` satisfies it, which is how Go's `hash.Hash` does.
+pub(crate) trait transcriptHash {
+    /// Go: `Write([]byte) (int, error)`
+    fn Write(&mut self, p: slice<byte>) -> (crate::types::int, error);
+}
+
+impl<T: crate::io::Writer + ?Sized> transcriptHash for T {
+    // go: none — goish-only: in Go a `hash.Hash` satisfies
+    // `transcriptHash` structurally, because it embeds `io.Writer`.
+    fn Write(&mut self, p: slice<byte>) -> (crate::types::int, error) {
+        return crate::io::Writer::Write(self, p);
+    }
+}
+
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:1949-1962 transcriptMsg
+/// Go: "transcriptMsg is a helper used to hash messages which are not
+/// hashed when they are read from, or written to, the wire. This is
+/// typically the case for messages which are either not sent, or need
+/// to be hashed out of order from when they are read/written.
+///
+/// For most messages, the message is marshalled using their marshal
+/// method, since their wire representation is idempotent. For
+/// clientHelloMsg and serverHelloMsg, we store the original wire
+/// representation of the message and use that for hashing, since
+/// unmarshal/marshal are not idempotent due to extension ordering and
+/// other malleable fields, which may cause differences between what was
+/// received and what we marshal."
+pub(crate) fn transcriptMsg(
+    msg: &dyn super::common::handshakeMessage,
+    h: &mut dyn transcriptHash,
+) -> crate::error {
+    // Go: if msgWithOrig, ok := msg.(handshakeMessageWithOriginalBytes); ok {
+    //         if orig := msgWithOrig.originalBytes(); orig != nil {
+    //             h.Write(msgWithOrig.originalBytes()); return nil } }
+    if let Some(msgWithOrig) = msg.asWithOriginalBytes() {
+        let orig = msgWithOrig.originalBytes();
+        if orig.Len() != 0 {
+            h.Write(msgWithOrig.originalBytes());
+            return crate::errors::nil;
+        }
+    }
+
+    // Go: data, err := msg.marshal(); if err != nil { return err }
+    let (data, err) = msg.marshal();
+    if err != crate::errors::nil {
+        return err;
+    }
+    // Go: h.Write(data); return nil
+    h.Write(data);
+    return crate::errors::nil;
 }

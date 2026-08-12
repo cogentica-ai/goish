@@ -40,18 +40,18 @@ subtrees as working code, not as verified ports.
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support
 with slices wherever it is needed.
 
-## crypto/ — 1383 / 1452 functions (95.2%)
+## crypto/ — 1386 / 1452 functions (95.5%)
 
 **65 of the 66 crypto packages are at 100%.** The single exception is
-`crypto/tls`, which holds 69 of the 69 remaining functions.
+`crypto/tls`, which holds 66 of the 66 remaining functions.
 
 | | |
 |---|--:|
-| ported | 1383 |
-| remaining, portable | 69 |
+| ported | 1386 |
+| remaining, portable | 66 |
 | remaining, assembly stubs | 0 |
 | waived (resolved elsewhere by design) | 1 |
-| provenance anchors | 2777 |
+| provenance anchors | 2842 |
 | unverified names (see below) | 3 |
 
 Complete and byte-checked against Go: `x509` (158/158), `ecdsa`,
@@ -90,8 +90,8 @@ landed with byte-exact vectors and the percentage did not move.
 
 | | by name | by declaration |
 |---|--:|--:|
-| crypto/ | 1383/1452 (95.2%) | **1634/1734 (94.2%)** |
-| crypto/tls | 230/299 (76.9%) | 293/377 (77.7%) |
+| crypto/ | 1386/1452 (95.5%) | **1637/1734 (94.4%)** |
+| crypto/tls | 233/299 (77.9%) | 296/377 (78.5%) |
 
 The first thing it found was concrete: `crypto/x509` read 100% by name
 while missing `CertificateRequest.CheckSignature` and
@@ -163,7 +163,7 @@ belongs on CI.
 **(file, rule)**; `make lint` fails only when a pair increases. Two
 consequences: a file absent from the baseline must be lint-clean, and
 fixing file A cannot pay for a regression in file B. Current total:
-13098.
+13081.
 
 ## Known defects, open
 

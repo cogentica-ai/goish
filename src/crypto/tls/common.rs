@@ -10,9 +10,9 @@
 // `Config` and `Certificate` currently live in mod[rs] and are not yet
 // ports — see ROADMAP.md.
 //
-// goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, InsecureCipherSuites, aeadModes, aesgcmCiphers, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
+// goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, InsecureCipherSuites, aeadModes, aesgcmCiphers, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, handshakeMessage, hasAESGCMHardwareSupport, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
 // goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, Config, dsaSignature, ecdsaSignature — same.
-// goishlint:ignore GOISH021 Config, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, maxUselessBytes, pskIdentity, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
+// goishlint:ignore GOISH021 Config, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errShutdown, extensionEncryptedClientHelloOuterExtensions, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, maxUselessBytes, pskIdentity, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -1984,3 +1984,53 @@ pub const RenegotiateOnceAsClient: RenegotiationSupport = RenegotiationSupport(1
 /// Go: "RenegotiateFreelyAsClient allows a remote server to repeatedly
 /// request renegotiation."
 pub const RenegotiateFreelyAsClient: RenegotiationSupport = RenegotiationSupport(2);
+
+// ── the handshake-message interfaces ────────────────────────────────
+
+// Go: common.go:1590-1593
+//   type handshakeMessage interface {
+//       marshal() ([]byte, error)
+//       unmarshal([]byte) bool
+//   }
+/// Go's `handshakeMessage` — the shape every wire message shares, so
+/// that `Conn.unmarshalHandshakeMessage` can pick a concrete type from
+/// the message byte and hand it back behind one pointer.
+///
+/// Deviations, both forced by Rust having no interface-to-interface
+/// type assertion:
+///
+///  - `asAny` is added so a caller can recover the concrete message,
+///    the way Go writes `msg.(*serverHelloMsg)` on the `any` that
+///    `readHandshake` returns.
+///  - `asWithOriginalBytes` is added so `transcriptMsg` can perform
+///    Go's `msg.(handshakeMessageWithOriginalBytes)` assertion. It
+///    defaults to `None`; the two types that keep their original wire
+///    bytes override it.
+pub(crate) trait handshakeMessage {
+    /// Go: `marshal() ([]byte, error)`
+    fn marshal(&self) -> (crate::goslice::slice<crate::types::byte>, crate::error);
+    /// Go: `unmarshal([]byte) bool`
+    fn unmarshal(&mut self, data: crate::goslice::slice<crate::types::byte>) -> bool;
+    /// goish-only: stands in for Go's type assertion on the returned `any`.
+    fn asAny(&self) -> &dyn core::any::Any;
+    // go: none — goish-only: stands in for Go's
+    // `msg.(handshakeMessageWithOriginalBytes)` assertion. Defaults to
+    // `None`; the two types that keep their wire bytes override it.
+    fn asWithOriginalBytes(&self) -> Option<&dyn handshakeMessageWithOriginalBytes> {
+        return None;
+    }
+}
+
+// Go: common.go:1595-1602
+//   type handshakeMessageWithOriginalBytes interface {
+//       handshakeMessage
+//       originalBytes() []byte
+//   }
+/// Go's `handshakeMessageWithOriginalBytes`. Go: "originalBytes should
+/// return the original bytes that were passed to unmarshal to create
+/// the message. If the message was not produced by unmarshal, it should
+/// return nil."
+pub(crate) trait handshakeMessageWithOriginalBytes: handshakeMessage {
+    /// Go: `originalBytes() []byte`
+    fn originalBytes(&self) -> crate::goslice::slice<crate::types::byte>;
+}

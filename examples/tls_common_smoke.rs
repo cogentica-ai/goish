@@ -2579,6 +2579,76 @@ fn main() {
     eq("getClientCertificate with no certificates is not an error", gc2e, "");
     check_n("getClientCertificate returns nothing to send", gc2d.Len(), 0);
 
+
+    // ── Conn.readHandshake / Conn.unmarshalHandshakeMessage ─────────
+    //
+    // Ground truth: scripts/goref.sh crypto/tls, calling
+    // `(&Conn{vers:V, haveVers:true}).unmarshalHandshakeMessage(body, sha256.New())`
+    // for each body and printing `%T`, `marshal()` and the digest the
+    // transcript hash was fed.
+    let rhWant: [(&'static str, &'static str, &'static str); 6] = [
+        ("serverHelloDoneMsg", "0e000000",
+         "01b4f6bd5d6a06a7b74a8565ceb4f845afe0ae96a0ac05cf5e86066bf7b538ec"),
+        ("helloRequestMsg", "00000000",
+         "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"),
+        ("finishedMsg", "1400000c0102030405060708090a0b0c",
+         "e090a1048ae699f503bd6e47a4b7a8fd5ac7660bd108e960d3688a2260f5ef5f"),
+        ("keyUpdateMsg", "1800000100",
+         "fb5fd87163806a21c517ae4e9bd4ccefa6ad64afff3cf74db69f2650555b55d7"),
+        ("newSessionTicketMsg", "04000006000000000000",
+         "736f122cc68af1f81449aafefa61f6ad792662f576e0bee5c31b16c0db2343c6"),
+        ("newSessionTicketMsgTLS13", "0400000d00000000000000000000000000",
+         "a2cc6fd538ed7c0832290b223df17ce231ecbafe1fc1dea40eeca7293369ae5d"),
+    ];
+    let mut rhI: int = 0;
+    while rhI < 6 {
+        let (want_name, want_marshal, want_digest) = rhWant[rhI as usize];
+        let (e, name, b, d) = tls::conn_readHandshake(rhI);
+        eq("readHandshake succeeds", e, "");
+        eq("readHandshake picks the concrete message type", name, want_name);
+        eq("readHandshake round-trips the message", hexOf(b), want_marshal);
+        eq("readHandshake feeds the transcript the raw bytes", hexOf(d), want_digest);
+        rhI += 1;
+    }
+
+    // Cases 4 and 5 are the same message byte (typeNewSessionTicket)
+    // resolved two ways: Go picks by c.vers, and so must goish.
+    let (_, n12, _, _) = tls::conn_readHandshake(4);
+    let (_, n13, _, _) = tls::conn_readHandshake(5);
+    check("typeNewSessionTicket resolves by version", n12 != n13);
+
+    // An unrecognised handshake type is alertUnexpectedMessage.
+    let (e6, name6, _, _) = tls::conn_readHandshake(6);
+    check("an unknown handshake type is an error", e6 != string::from_static(""));
+    eq("an unknown handshake type yields no message", name6, "");
+    // A declared length one over maxHandshake is refused before the
+    // body is read at all.
+    let (e7, _, _, _) = tls::conn_readHandshake(7);
+    eq(
+        "a handshake message over maxHandshake is refused",
+        e7,
+        "tls: handshake message of length 65537 bytes exceeds maximum of 65536 bytes",
+    );
+    // Well-formed header, body that does not parse: alertDecodeError.
+    let (e8, name8, _, _) = tls::conn_readHandshake(8);
+    check("a body that does not parse is an error", e8 != string::from_static(""));
+    eq("a body that does not parse yields no message", name8, "");
+
+    // ── transcriptMsg ───────────────────────────────────────────────
+    //
+    // Go hashes originalBytes() when the message came off the wire, and
+    // marshal() when it did not. goref confirms both digests equal the
+    // wire's for a hello whose marshal is idempotent.
+    let (tm1, tm2, tm3) = tls::handshake_messages_transcriptMsg();
+    check(
+        "transcriptMsg hashes a parsed hello's original bytes",
+        hexOf(tm1) == hexOf(tm3.clone()),
+    );
+    check(
+        "transcriptMsg hashes an in-memory hello's marshalled bytes",
+        hexOf(tm2) == hexOf(tm3),
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

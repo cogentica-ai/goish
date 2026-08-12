@@ -889,8 +889,7 @@ pub(crate) fn decodeInnerClientHello(
     //     if !inner.unmarshal(reconBytes) {
     //         return nil, errors.New("tls: invalid reconstructed inner client hello") }
     let mut inner = clientHelloMsg::default();
-    let raw: &[byte] = &reconBytes;
-    if !inner.unmarshal(raw) {
+    if !inner.unmarshal(reconBytes.clone()) {
         return (
             None,
             crate::errors::New("tls: invalid reconstructed inner client hello"),

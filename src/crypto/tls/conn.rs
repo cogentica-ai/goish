@@ -1,4 +1,4 @@
-// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert, Conn.readFromUntil, Conn.retryReadRecord, Conn.readRecord, Conn.readChangeCipherSpec, Conn.readRecordOrCCS, Conn.closeNotify, Conn.CloseWrite, Conn.readHandshakeBytes
+// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert, Conn.readFromUntil, Conn.retryReadRecord, Conn.readRecord, Conn.readChangeCipherSpec, Conn.readRecordOrCCS, Conn.closeNotify, Conn.CloseWrite, Conn.readHandshakeBytes, Conn.readHandshake, Conn.unmarshalHandshakeMessage
 //
 // crypto/tls — the record layer's cipher state.
 //
@@ -8,7 +8,7 @@
 // its `decrypt`/`encrypt`, `atLeastReader` and the free functions they
 // need — none of which touches a `Conn`.
 //
-// goishlint:ignore GOISH018 writeHandshakeRecord, readHandshake, unmarshalHandshakeMessage, handleRenegotiation, handlePostHandshakeMessage, handleKeyUpdate, HandshakeContext, handshakeContext, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
+// goishlint:ignore GOISH018 writeHandshakeRecord, handleRenegotiation, handlePostHandshakeMessage, handleKeyUpdate, HandshakeContext, handshakeContext, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
 // goishlint:ignore GOISH019  — same.
 // goishlint:ignore GOISH021 maxUselessBytes, tlsunsafeekm, outBufPool — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write; outBufPool is a sync.Pool whose only purpose is to avoid one allocation per record, which goish does not model.
 //
@@ -27,7 +27,7 @@ use alloc::vec::Vec;
 
 use super::alert::{alert, alertBadRecordMAC, alertInternalError, alertRecordOverflow, alertUnexpectedMessage};
 use super::cipher_suites::{aead, cipherSuiteTLS13, mutAEAD};
-use super::common::{recordHeaderLen, recordType, VersionTLS11, VersionTLS13};
+use super::common::{recordHeaderLen, recordType, VersionTLS11, VersionTLS12, VersionTLS13};
 use super::quic::QUICEncryptionLevel;
 use crate::crypto::cipher;
 use crate::crypto::cipher::Stream as _;
@@ -2240,6 +2240,151 @@ impl Conn {
         }
         return errors::nil;
     }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1070-1096 Conn.readHandshake
+    /// Go: read one complete handshake message off `c.hand`, refilling
+    /// it from the record layer as needed, and unmarshal it.
+    ///
+    /// Deviations: Go returns `any` so the caller can type-assert to a
+    /// concrete message; goish returns `Box<dyn handshakeMessage>`,
+    /// whose `asAny` recovers the same thing. `c.hand` is a `Vec<byte>`
+    /// rather than a `bytes.Buffer`, so `Bytes()`/`Next(n)` become a
+    /// borrow and a `drain`.
+    pub(crate) fn readHandshake(
+        &mut self,
+        transcript: Option<&mut dyn super::handshake_messages::transcriptHash>,
+    ) -> (Option<Box<dyn super::common::handshakeMessage>>, error) {
+        // Go: if err := c.readHandshakeBytes(4); err != nil { return nil, err }
+        let err = self.readHandshakeBytes(4);
+        if err != errors::nil {
+            return (None, err);
+        }
+        // Go: data := c.hand.Bytes()
+        let data: &[byte] = &self.hand;
+
+        // Go: maxHandshakeSize := maxHandshake
+        let mut maxHandshakeSize = super::common::maxHandshake;
+        // Go: "hasVers indicates we're past the first message, forcing
+        // someone trying to make us just allocate a large buffer to at
+        // least do the initial part of the handshake first."
+        if self.haveVers && data[0] == super::handshake_messages::typeCertificate {
+            // Go: "Since certificate messages are likely to be the only
+            // messages that can be larger than maxHandshake, we use a
+            // special limit for just those messages."
+            maxHandshakeSize = super::common::maxHandshakeCertificateMsg;
+        }
+
+        // Go: n := int(data[1])<<16 | int(data[2])<<8 | int(data[3])
+        let n = crate::int(data[1]) << 16 | crate::int(data[2]) << 8 | crate::int(data[3]);
+        if n > maxHandshakeSize {
+            self.sendAlertLocked(alertInternalError);
+            // Go: return nil, c.in.setErrorLocked(fmt.Errorf("tls: handshake
+            //     message of length %d bytes exceeds maximum of %d bytes", …))
+            let e = crate::fmt::Errorf!(
+                "tls: handshake message of length %d bytes exceeds maximum of %d bytes",
+                n,
+                maxHandshakeSize
+            );
+            let e = self.in_.setErrorLocked(e);
+            return (None, e);
+        }
+        // Go: if err := c.readHandshakeBytes(4 + n); err != nil { return nil, err }
+        let err = self.readHandshakeBytes(4 + n);
+        if err != errors::nil {
+            return (None, err);
+        }
+        // Go: data = c.hand.Next(4 + n)
+        let taken: Vec<byte> = self.hand.drain(..usize::try_from(4 + n).unwrap_or(0)).collect();
+        // Go: return c.unmarshalHandshakeMessage(data, transcript)
+        return self.unmarshalHandshakeMessage(slice::__from_vec(taken), transcript);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1098-1163 Conn.unmarshalHandshakeMessage
+    /// Go: pick the concrete message type from the first byte — the
+    /// choice depends on `c.vers` for the four types whose shape
+    /// changed in TLS 1.3 — then unmarshal into it and, if a transcript
+    /// hash was passed, feed it the raw bytes.
+    pub(crate) fn unmarshalHandshakeMessage(
+        &mut self,
+        data: slice<byte>,
+        transcript: Option<&mut dyn super::handshake_messages::transcriptHash>,
+    ) -> (Option<Box<dyn super::common::handshakeMessage>>, error) {
+        use super::handshake_messages as hm;
+        // Go: var m handshakeMessage; switch data[0] { … }
+        let mut m: Box<dyn super::common::handshakeMessage> = match data[0] {
+            hm::typeHelloRequest => Box::new(hm::helloRequestMsg::default()),
+            hm::typeClientHello => Box::new(hm::clientHelloMsg::default()),
+            hm::typeServerHello => Box::new(hm::serverHelloMsg::default()),
+            hm::typeNewSessionTicket => {
+                if self.vers == VersionTLS13 {
+                    Box::new(hm::newSessionTicketMsgTLS13::default())
+                } else {
+                    Box::new(hm::newSessionTicketMsg::default())
+                }
+            }
+            hm::typeCertificate => {
+                if self.vers == VersionTLS13 {
+                    Box::new(hm::certificateMsgTLS13::default())
+                } else {
+                    Box::new(hm::certificateMsg::default())
+                }
+            }
+            hm::typeCertificateRequest => {
+                if self.vers == VersionTLS13 {
+                    Box::new(hm::certificateRequestMsgTLS13::default())
+                } else {
+                    // Go: &certificateRequestMsg{hasSignatureAlgorithm: c.vers >= VersionTLS12}
+                    Box::new(hm::certificateRequestMsg {
+                        hasSignatureAlgorithm: self.vers >= VersionTLS12,
+                        ..Default::default()
+                    })
+                }
+            }
+            hm::typeCertificateStatus => Box::new(hm::certificateStatusMsg::default()),
+            hm::typeServerKeyExchange => Box::new(hm::serverKeyExchangeMsg::default()),
+            hm::typeServerHelloDone => Box::new(hm::serverHelloDoneMsg::default()),
+            hm::typeClientKeyExchange => Box::new(hm::clientKeyExchangeMsg::default()),
+            hm::typeCertificateVerify => {
+                // Go: &certificateVerifyMsg{hasSignatureAlgorithm: c.vers >= VersionTLS12}
+                Box::new(hm::certificateVerifyMsg {
+                    hasSignatureAlgorithm: self.vers >= VersionTLS12,
+                    ..Default::default()
+                })
+            }
+            hm::typeFinished => Box::new(hm::finishedMsg::default()),
+            hm::typeEncryptedExtensions => Box::new(hm::encryptedExtensionsMsg::default()),
+            hm::typeEndOfEarlyData => Box::new(hm::endOfEarlyDataMsg::default()),
+            hm::typeKeyUpdate => Box::new(hm::keyUpdateMsg::default()),
+            // Go: default: return nil, c.in.setErrorLocked(c.sendAlert(alertUnexpectedMessage))
+            _ => {
+                let a = self.sendAlert(alertUnexpectedMessage);
+                let e = self.in_.setErrorLocked(a);
+                return (None, e);
+            }
+        };
+
+        // Go: "The handshake message unmarshalers expect to be able to
+        // keep references to data, so pass in a fresh copy that won't be
+        // overwritten."  Go: data = append([]byte(nil), data...)
+        let data: slice<byte> = slice::__from_vec(data.to_vec());
+
+        // Go: if !m.unmarshal(data) {
+        //         return nil, c.in.setErrorLocked(c.sendAlert(alertDecodeError)) }
+        if !m.unmarshal(data.clone()) {
+            let a = self.sendAlert(super::alert::alertDecodeError);
+            let e = self.in_.setErrorLocked(a);
+            return (None, e);
+        }
+
+        // Go: if transcript != nil { transcript.Write(data) }
+        if let Some(t) = transcript {
+            t.Write(data);
+        }
+
+        // Go: return m, nil
+        return (Some(m), errors::nil);
+    }
+
 }
 
 

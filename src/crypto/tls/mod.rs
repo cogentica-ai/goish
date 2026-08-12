@@ -1749,7 +1749,7 @@ pub fn msg_finished_roundtrip(
     let m = handshake_messages::finishedMsg {
         verifyData: verifyData.__into_vec(),
     };
-    let b = crate::goslice::slice::__from_vec(m.marshal());
+    let (b, _) = m.marshal();
     let mut back = handshake_messages::finishedMsg::default();
     let ok = back.unmarshal(b.clone());
     return (b, ok, crate::goslice::slice::__from_vec(back.verifyData));
@@ -1771,7 +1771,7 @@ pub fn msg_certVerify_roundtrip(
         signatureAlgorithm: alg,
         signature: sig.__into_vec(),
     };
-    let b = crate::goslice::slice::__from_vec(m.marshal());
+    let (b, _) = m.marshal();
     let mut back = handshake_messages::certificateVerifyMsg::default();
     back.hasSignatureAlgorithm = hasSignatureAlgorithm;
     let ok = back.unmarshal(b.clone());
@@ -2201,9 +2201,8 @@ pub fn handshake_messages_clientHelloRoundTrip() -> (
 ) {
     let m = handshake_messages_fullClientHello();
     let (outer, _) = m.marshal();
-    let raw: &[crate::types::byte] = &outer;
     let mut r = handshake_messages::clientHelloMsg::default();
-    let ok = r.unmarshal(raw);
+    let ok = r.unmarshal(outer.clone());
     let (re, _) = r.marshal();
     let orig = r.originalBytes();
     return (
@@ -2291,9 +2290,8 @@ pub fn handshake_messages_serverHelloDone() -> (
 ) {
     let mut m = handshake_messages::serverHelloDoneMsg::default();
     let (out, _) = m.marshal();
-    let raw: &[crate::types::byte] = &out;
-    let ok4 = m.unmarshal(raw);
-    let ok3 = m.unmarshal(&raw[..3]);
+    let ok4 = m.unmarshal(out.clone());
+    let ok3 = m.unmarshal(out.slice(0, 3));
     return (out, ok4, ok3);
 }
 
@@ -4744,7 +4742,7 @@ pub fn handshake_messages_serverHelloRoundTrip() -> (
         group: common::X25519.0,
         data: alloc::vec![9u8, 9, 9, 9],
     };
-    let enc = crate::goslice::slice::__from_vec(sh.marshal());
+    let (enc, _) = sh.marshal();
     let mut r = handshake_messages::serverHelloMsg::default();
     let ok = r.unmarshal(enc.clone());
     let mut tr = handshake_messages::serverHelloMsg::default();
@@ -5351,4 +5349,142 @@ pub fn handshake_client_getClientCertificate(
         crate::goslice::slice::new()
     };
     return (text, der);
+}
+
+// go: none — goish-only: `Conn.readHandshake` and
+// `Conn.unmarshalHandshakeMessage` are unexported in Go, where the
+// tests are in-package. Feeds one handshake record from an in-memory
+// net::Conn and reports `(errText, the concrete message's name, the
+// message re-marshalled, the SHA-256 of what the transcript hash was
+// fed)`. `which` selects the record; see the assertions.
+#[doc(hidden)]
+pub fn conn_readHandshake(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    use crate::crypto::tls::handshake_messages as hm;
+    // A TLS 1.2 handshake record wrapping `body`.
+    fn rec(body: &[crate::types::byte]) -> alloc::vec::Vec<crate::types::byte> {
+        let n = body.len();
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec![
+            0x16u8,
+            0x03,
+            0x03,
+            crate::byte(crate::int(n) >> 8),
+            crate::byte(crate::int(n) & 0xff)
+        ];
+        v.extend_from_slice(body);
+        return v;
+    }
+    let (feed, vers) = match which {
+        // serverHelloDoneMsg — four bytes, no body.
+        0 => (rec(&[0x0eu8, 0x00, 0x00, 0x00]), common::VersionTLS12),
+        // helloRequestMsg.
+        1 => (rec(&[0x00u8, 0x00, 0x00, 0x00]), common::VersionTLS12),
+        // finishedMsg with a 12-byte verify_data.
+        2 => (
+            rec(&[
+                0x14u8, 0x00, 0x00, 0x0c, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+            ]),
+            common::VersionTLS12,
+        ),
+        // keyUpdateMsg, update_not_requested.
+        3 => (rec(&[0x18u8, 0x00, 0x00, 0x01, 0x00]), common::VersionTLS13),
+        // typeNewSessionTicket picks by version: TLS 1.2 shape.
+        4 => (
+            rec(&[0x04u8, 0x00, 0x00, 0x06, 0, 0, 0, 0, 0x00, 0x00]),
+            common::VersionTLS12,
+        ),
+        // Same byte, TLS 1.3 shape.
+        5 => (
+            rec(&[
+                0x04u8, 0x00, 0x00, 0x0d, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ]),
+            common::VersionTLS13,
+        ),
+        // An unrecognised handshake type.
+        6 => (rec(&[0x63u8, 0x00, 0x00, 0x00]), common::VersionTLS12),
+        // A declared length of 65537, one over maxHandshake.
+        7 => (rec(&[0x0eu8, 0x01, 0x00, 0x01]), common::VersionTLS12),
+        // Well-formed header, body that does not parse: keyUpdate
+        // requires a one-byte request_update, and this has none.
+        8 => (rec(&[0x18u8, 0x00, 0x00, 0x00]), common::VersionTLS13),
+        _ => (alloc::vec![], common::VersionTLS12),
+    };
+
+    let mut c = conn::Conn::default();
+    c.__setFeedConn(crate::goslice::slice::__from_vec(feed));
+    c.__setHaveVers(true);
+    c.__setVers(vers);
+
+    let mut h = crate::crypto::sha256::New();
+    let (m, err) = c.readHandshake(Some(&mut h));
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let mut name = crate::gostring::string::from_static("");
+    let mut remarshalled: crate::goslice::slice<crate::types::byte> =
+        crate::goslice::slice::__from_vec(alloc::vec![]);
+    if let Some(msg) = m.as_ref() {
+        let a = msg.asAny();
+        name = if a.is::<hm::serverHelloDoneMsg>() {
+            crate::gostring::string::from_static("serverHelloDoneMsg")
+        } else if a.is::<hm::helloRequestMsg>() {
+            crate::gostring::string::from_static("helloRequestMsg")
+        } else if a.is::<hm::finishedMsg>() {
+            crate::gostring::string::from_static("finishedMsg")
+        } else if a.is::<hm::keyUpdateMsg>() {
+            crate::gostring::string::from_static("keyUpdateMsg")
+        } else if a.is::<hm::newSessionTicketMsg>() {
+            crate::gostring::string::from_static("newSessionTicketMsg")
+        } else if a.is::<hm::newSessionTicketMsgTLS13>() {
+            crate::gostring::string::from_static("newSessionTicketMsgTLS13")
+        } else {
+            crate::gostring::string::from_static("?")
+        };
+        let (b, _) = msg.marshal();
+        remarshalled = b;
+    }
+    let digest = h.Sum(crate::goslice::slice::__from_vec(alloc::vec![]));
+    return (text, name, remarshalled, digest);
+}
+
+// go: none — goish-only: `transcriptMsg` is unexported in Go, where the
+// tests are in-package. Reports `(SHA-256 fed by a clientHelloMsg that
+// came off the wire, SHA-256 fed by one that did not)`. The first must
+// hash the ORIGINAL bytes, the second the re-marshalled ones.
+#[doc(hidden)]
+pub fn handshake_messages_transcriptMsg() -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let m = handshake_messages_fullClientHello();
+    let (wire, _) = m.marshal();
+
+    // Parsed from the wire: originalBytes() is non-nil, so that is what
+    // transcriptMsg hashes.
+    let mut parsed = handshake_messages::clientHelloMsg::default();
+    parsed.unmarshal(wire.clone());
+    let mut h1 = crate::crypto::sha256::New();
+    handshake_messages::transcriptMsg(&parsed, &mut h1);
+    let d1 = h1.Sum(crate::goslice::slice::__from_vec(alloc::vec![]));
+
+    // Built in memory: originalBytes() is nil, so marshal() is hashed.
+    let mut h2 = crate::crypto::sha256::New();
+    handshake_messages::transcriptMsg(&m, &mut h2);
+    let d2 = h2.Sum(crate::goslice::slice::__from_vec(alloc::vec![]));
+
+    // The reference: SHA-256 over the wire bytes themselves.
+    let mut h3 = crate::crypto::sha256::New();
+    crate::io::Writer::Write(&mut h3, wire.clone());
+    let d3 = h3.Sum(crate::goslice::slice::__from_vec(alloc::vec![]));
+
+    return (d1, d2, d3);
 }
