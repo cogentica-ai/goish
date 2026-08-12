@@ -2,7 +2,7 @@
 // testing/fstest/mapfs.go (MapFS only; testfs.go's TestFS conformance
 // harness is not ported).
 //
-// goishlint:ignore GOISH018 errorf, formatEntry, formatInfoEntry, formatInfo, checkBadPath, checkDir, checkDirList, checkFile, checkFileRead, checkGlob, checkOpen, checkStat, Close, Info, IsDir, lstat, Lstat, Mode, ModTime, Name, Open, openDir, Read, ReadDir, ReadFile, ReadLink, resolveSymlinks, Size, Stat, String, Sub, Sys, testFS, TestFS, Type — MapFS's readers/Stat/ReadDir and the whole TestFS conformance suite are hand-written or not yet ported; only openMapFile.Seek and .ReadAt carry anchors so far.
+// goishlint:ignore GOISH018 errorf, formatEntry, formatInfoEntry, formatInfo, checkDir, checkDirList, checkFile, checkGlob, checkStat, Close, Info, IsDir, lstat, Lstat, Mode, ModTime, Name, Open, openDir, Read, ReadDir, ReadFile, ReadLink, resolveSymlinks, Size, Stat, String, Sub, Sys, testFS, TestFS, Type — MapFS's readers/Stat/ReadDir and the whole TestFS conformance suite are hand-written or not yet ported; only openMapFile.Seek and .ReadAt carry anchors so far.
 // goishlint:ignore GOISH021 fsTester, _, fsOnly, fsTester, mapDir, MapFile, mapFileInfo, MapFS, noSub, openMapFile — same.
 //
 // Deviations:
@@ -714,7 +714,7 @@ impl MapFS {
 //
 // Partially ported: the error accumulator and the three formatters that
 // render a mismatch. The checks themselves (checkDir, checkFile,
-// checkGlob, checkStat, checkOpen, checkBadPath) and TestFS/testFS that
+// checkGlob, checkStat, checkBadPath) and TestFS/testFS that
 // drive them still need `fs.Glob`, `fs.Sub`, `fs.WalkDir` and
 // `fs.ReadDirFile` reached through interface downcasts, which goish's
 // io/fs does not fully provide yet.
@@ -722,6 +722,11 @@ impl MapFS {
 // goishlint:ignore GOISH019 fsTester — Go's `fsys fs.FS` field is held
 // by the driver (`testFS`), which is not ported; carrying a filesystem
 // this struct never reads would imply a walk that does not exist here.
+// goishlint:ignore GOISH020 checkOpen, checkBadPath, checkFileRead — Go
+// reads `t.fsys` off the receiver; goish's fsTester does not carry a
+// filesystem (see GOISH019 above), so these take it, or the opener
+// built from it, as a parameter instead. Same inputs, one hop
+// explicit.
 // goishlint:ignore GOISH020 errorf — Go's signature is
 // `(format string, args ...any)`; goish takes the already-formatted
 // string, matching how Logf/Skipf are handled in src/testing/testing.rs.
@@ -819,4 +824,105 @@ pub fn formatInfo(info: &dyn FileInfo) -> string {
         // ever compared against another produced the same way.
         info.ModTime().Format(crate::gostring::string::from_static(crate::time::RFC3339Nano))
     );
+}
+
+impl fsTester {
+    // go: sdk 1.25.5 testing/fstest/testfs.go:610-640 fsTester.checkBadPath
+    /// Go: "checkBadPath checks that various invalid forms of file's name
+    /// cannot be opened using t.fsys.Open."
+    ///
+    /// This is the check that catches an `FS` doing its own path
+    /// cleaning. Every spelling below denotes the same file on a Unix
+    /// filesystem, and `fs.FS` requires all of them to be *rejected* —
+    /// only the canonical unrooted slash-separated form is valid. An
+    /// implementation that helpfully normalised `a//b` to `a/b` would
+    /// pass every functional test and fail here, which is the point.
+    ///
+    /// Deviation: Go reaches `t.fsys` through the receiver; goish's
+    /// `fsTester` does not carry it (see the struct), so the caller
+    /// supplies the opener directly.
+    pub fn checkBadPath<F: Fn(string) -> error>(&mut self, file: string, desc: &str, open: F) {
+        let f: &str = file.as_ref();
+        let mut bad: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+        // Go: bad := []string{"/" + file, file + "/."}
+        bad.push(crate::fmt::Sprintf!("/%s", file.clone()));
+        bad.push(crate::fmt::Sprintf!("%s/.", file.clone()));
+        // Go: if file == "." { bad = append(bad, "/") }
+        if f == "." {
+            bad.push(string::from_static("/"));
+        }
+        // Go: if i := strings.Index(file, "/"); i >= 0 { ...four forms... }
+        if let Some(i) = f.find('/') {
+            let (head, tail) = (&f[..i], &f[i + 1..]);
+            bad.push(crate::fmt::Sprintf!("%s//%s", s_of(head), s_of(tail)));
+            bad.push(crate::fmt::Sprintf!("%s/./%s", s_of(head), s_of(tail)));
+            bad.push(crate::fmt::Sprintf!("%s\\%s", s_of(head), s_of(tail)));
+            bad.push(crate::fmt::Sprintf!("%s/../%s", s_of(head), file.clone()));
+        }
+        // Go: if i := strings.LastIndex(file, "/"); i >= 0 { ...four more... }
+        if let Some(i) = f.rfind('/') {
+            let (head, tail) = (&f[..i], &f[i + 1..]);
+            bad.push(crate::fmt::Sprintf!("%s//%s", s_of(head), s_of(tail)));
+            bad.push(crate::fmt::Sprintf!("%s/./%s", s_of(head), s_of(tail)));
+            bad.push(crate::fmt::Sprintf!("%s\\%s", s_of(head), s_of(tail)));
+            bad.push(crate::fmt::Sprintf!("%s/../%s", file.clone(), s_of(tail)));
+        }
+
+        for b in bad.iter() {
+            // Go: if err := open(b); err == nil {
+            //         t.errorf("%s: %s(%s) succeeded, want error", ...) }
+            if open(b.clone()) == errors::nil {
+                self.errorf(crate::fmt::Sprintf!(
+                    "%s: %s(%s) succeeded, want error",
+                    file.clone(),
+                    s_of(desc),
+                    b.clone()
+                ));
+            }
+        }
+    }
+
+    // go: sdk 1.25.5 testing/fstest/testfs.go:591-596 fsTester.checkFileRead
+    /// Go: report when two reads of the same file returned different
+    /// bytes — e.g. `ReadFile` disagreeing with `Open`+`ReadAll`.
+    pub fn checkFileRead(
+        &mut self,
+        file: string,
+        desc: &str,
+        data1: slice<byte>,
+        data2: slice<byte>,
+    ) {
+        if string::from_bytes(data1.as_ref()) != string::from_bytes(data2.as_ref()) {
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: %s: different data returned\n\t%q\n\t%q",
+                file.clone(),
+                s_of(desc),
+                string::from_bytes(data1.as_ref()),
+                string::from_bytes(data2.as_ref())
+            ));
+        }
+    }
+
+    // go: sdk 1.25.5 testing/fstest/testfs.go:599-607 fsTester.checkOpen
+    /// Go: "checkOpen validates file opening behavior by attempting to
+    /// open and then close the given file path."
+    ///
+    /// Deviation: as `checkBadPath` — the filesystem arrives as a
+    /// parameter rather than through the receiver.
+    pub fn checkOpen(&mut self, fsys: &(dyn fs::FS + Send + Sync + 'static), file: string) {
+        self.checkBadPath(file, "Open", |name| {
+            let (f, err) = fs::FS::Open(fsys, name);
+            // Go: if err == nil { f.Close() }
+            if err == errors::nil {
+                f.Close();
+            }
+            return err;
+        });
+    }
+}
+
+// go: none — goish idiom: `&str` to `string` for the Sprintf! call
+// sites above, which take owned goish strings.
+fn s_of(x: &str) -> string {
+    return string::from_bytes(x.as_bytes());
 }
