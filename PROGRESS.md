@@ -90,8 +90,8 @@ landed with byte-exact vectors and the percentage did not move.
 
 | | by name | by declaration |
 |---|--:|--:|
-| crypto/ | 1218/1452 (83.9%) | **1431/1734 (82.5%)** |
-| crypto/tls | 62/296 (20.9%) | 92/374 (24.6%) |
+| crypto/ | 1220/1452 (84.0%) | **1434/1734 (82.7%)** |
+| crypto/tls | 64/296 (21.6%) | 95/374 (25.4%) |
 
 The first thing it found was concrete: `crypto/x509` read 100% by name
 while missing `CertificateRequest.CheckSignature` and

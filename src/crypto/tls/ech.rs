@@ -1,4 +1,4 @@
-// go: file crypto/tls/ech.go decls: echConfigErr.Error, parseECHConfig, parseECHConfigList
+// go: file crypto/tls/ech.go decls: echConfigErr.Error, parseECHConfig, parseECHConfigList, skipUint8LengthPrefixed, skipUint16LengthPrefixed, validDNSName
 //
 // crypto/tls — Encrypted Client Hello (draft-ietf-tls-esni), config
 // parsing.
@@ -10,7 +10,7 @@
 // state machine. goish ships no ECH support, so nothing here is wired
 // into a handshake; it is the parser Go's own tests drive directly.
 //
-// goishlint:ignore GOISH018 Error, buildRetryConfigList, computeAndUpdateOuterECHExtension, decodeInnerClientHello, decryptECHExtension, decryptECHPayload, encodeInnerClientHello, encodeOuterExtensions, extractRawExtensions, generateOuterECHExt, init, marshalEncryptedClientHelloConfigList, parseECHExt, pickECHCipherSuite, pickECHConfig, processECHClientHello, sendECHRetryConfigs, skipUint16LengthPrefixed, skipUint8LengthPrefixed, validDNSName — the ClientHello-dependent half; see the banner. ROADMAP.md.
+// goishlint:ignore GOISH018 Error, buildRetryConfigList, computeAndUpdateOuterECHExtension, decodeInnerClientHello, decryptECHExtension, decryptECHPayload, encodeInnerClientHello, encodeOuterExtensions, extractRawExtensions, generateOuterECHExt, init, marshalEncryptedClientHelloConfigList, parseECHExt, pickECHCipherSuite, pickECHConfig, processECHClientHello, sendECHRetryConfigs — the ClientHello-dependent half; see the banner. ROADMAP.md.
 // goishlint:ignore GOISH019 echExtension, echConfig, echCipher, echConfigErr, echContext, echServerContext, echClientContext — the parser's shapes are here; the handshake-side ones are not.
 // goishlint:ignore GOISH021 ECHRejectionError, echAcceptConfirmationLabel, echClientContext, echContext, echExtType, echHRRAcceptConfirmationLabel, echServerContext, errIllegalECHExt, errInvalidECHExt, errMalformedECHConfigList, errMalformedECHExt, innerECHExt, outerECHExt, rawExtension, sortedSupportedAEADs — same.
 
@@ -254,4 +254,74 @@ pub(crate) fn parseECHConfigList(data: slice<byte>) -> (slice<echConfig>, error)
     }
     // Go: return configs, nil
     return (slice::__from_vec(configs), crate::errors::nil);
+}
+
+
+// go: sdk 1.25.5 crypto/tls/ech.go:262-268 skipUint8LengthPrefixed
+/// Consume a uint8-prefixed field without keeping it.
+pub(crate) fn skipUint8LengthPrefixed(s: &mut CBString) -> bool {
+    // Go: var skip uint8; if !s.ReadUint8(&skip) { return false }
+    //     return s.Skip(int(skip))
+    let mut skip: uint8 = 0;
+    if !s.ReadUint8(&mut skip) {
+        return false;
+    }
+    return s.Skip(crate::int(skip));
+}
+
+// go: sdk 1.25.5 crypto/tls/ech.go:270-276 skipUint16LengthPrefixed
+/// The uint16 mirror of [`skipUint8LengthPrefixed`].
+pub(crate) fn skipUint16LengthPrefixed(s: &mut CBString) -> bool {
+    // Go: var skip uint16; if !s.ReadUint16(&skip) { return false }
+    //     return s.Skip(int(skip))
+    let mut skip: uint16 = 0;
+    if !s.ReadUint16(&mut skip) {
+        return false;
+    }
+    return s.Skip(crate::int(skip));
+}
+
+// go: sdk 1.25.5 crypto/tls/ech.go:640-666 validDNSName
+/// Report whether `name` is a syntactically valid DNS name for the ECH
+/// public_name field.
+///
+/// Stricter than a general hostname check, and deliberately so: at least
+/// two labels, no empty label, a leading or trailing `-` in ANY label is
+/// invalid, and only ASCII alphanumerics and `-` are permitted — no
+/// underscore, no trailing dot, no IDN.
+pub(crate) fn validDNSName(name: string) -> bool {
+    // Go: if len(name) > 253 { return false }
+    let raw: &[byte] = name.as_bytes();
+    if raw.len() > 253 {
+        return false;
+    }
+    // Go: labels := strings.Split(name, "."); if len(labels) <= 1 { return false }
+    let labels: Vec<&[byte]> = raw.split(|c| *c == b'.').collect();
+    if labels.len() <= 1 {
+        return false;
+    }
+    // Go: for _, l := range labels { … }
+    for l in labels {
+        let labelLen = l.len();
+        // Go: if labelLen == 0 { return false }
+        if labelLen == 0 {
+            return false;
+        }
+        for (i, r) in l.iter().enumerate() {
+            let r = *r;
+            // Go: if r == '-' && (i == 0 || i == labelLen-1) { return false }
+            if r == b'-' && (i == 0 || i == labelLen - 1) {
+                return false;
+            }
+            // Go: only 0-9, a-z, A-Z and '-'.
+            if (r < b'0' || r > b'9')
+                && (r < b'a' || r > b'z')
+                && (r < b'A' || r > b'Z')
+                && r != b'-'
+            {
+                return false;
+            }
+        }
+    }
+    return true;
 }

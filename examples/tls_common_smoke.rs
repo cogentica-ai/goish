@@ -752,6 +752,37 @@ fn main() {
         "tls: malformed ECHConfig, invalid version field",
     );
 
+    // ─── validDNSName — stricter than a general hostname check.
+    //     Every verdict below is Go's.
+    let dnsOk: [&'static str; 6] = [
+        "example.com",
+        "a.b",
+        "x-y.example.com",
+        "EXAMPLE.COM",
+        "1.2",
+        // Punycode is just ASCII with hyphens, so it passes.
+        "xn--e1afmkfd.xn--p1ai",
+    ];
+    for n in dnsOk {
+        check(n, tls::ech_validDNSName(string::from_static(n)));
+    }
+    let dnsBad: [&'static str; 7] = [
+        "nodot",        // needs at least two labels
+        ".com",         // empty first label
+        "a..b",         // empty middle label
+        "-lead.com",    // leading hyphen in a label
+        "trail-.com",   // trailing hyphen in a label
+        "a_b.com",      // underscore is not permitted
+        "example.com.", // trailing dot makes an empty last label
+    ];
+    for n in dnsBad {
+        check(n, !tls::ech_validDNSName(string::from_static(n)));
+    }
+    check(
+        "empty name is invalid",
+        !tls::ech_validDNSName(string::from_static("")),
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

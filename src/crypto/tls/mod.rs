@@ -1839,3 +1839,10 @@ pub fn ech_parseConfigErr(
     }
     return err.Error();
 }
+
+// go: none — goish-only: validDNSName is unexported in Go, where the
+// tests are in-package.
+#[doc(hidden)]
+pub fn ech_validDNSName(name: crate::gostring::string) -> bool {
+    return ech::validDNSName(name);
+}
