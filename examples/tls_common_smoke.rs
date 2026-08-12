@@ -549,6 +549,13 @@ fn main() {
         !tls::msg_certificate_unmarshal(slice::__from_vec(bad)),
     );
 
+    // ─── tls.go's timeoutError. Both predicates are true in Go —
+    //     a timed-out dial is reported as temporary as well.
+    let te = tls::timeoutError {};
+    eq("timeoutError.Error", te.Error(), "tls: DialWithDialer timed out");
+    check("timeoutError.Timeout", te.Timeout());
+    check("timeoutError.Temporary", te.Temporary());
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

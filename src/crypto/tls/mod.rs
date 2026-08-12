@@ -45,6 +45,8 @@ pub mod common;
 pub mod common_string;
 pub mod defaults;
 pub mod prf;
+pub mod tls;
+pub use tls::timeoutError;
 
 // go: none — goish-only: prf.go's functions are all unexported in Go,
 // where the tests are in-package. See the `defaults_*` shims above.
