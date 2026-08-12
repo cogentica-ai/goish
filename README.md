@@ -33,9 +33,15 @@ That's a million real goroutines on 13 OS threads, ~2 GiB virtual / ~2.4 GiB pea
 
 ## Status
 
-Active development. The e2e suite spans 406 examples, run at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
+Active development. The e2e suite runs 271 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
 
 Goish is **single-target**: `x86_64-unknown-linux-gnu`. Other targets are deliberately out of scope.
+
+📊 **[PROGRESS.md](PROGRESS.md)** — what is ported, and how much of it is *proven* against Go rather than merely name-matched. `crypto/` is at 1186/1452 functions (81.7%), with 65 of its 66 packages complete.
+
+🗺️ **[ROADMAP.md](ROADMAP.md)** — what is left and in what order. `crypto/tls` is the whole remaining crypto gap.
+
+📐 **[AGENTS.md](AGENTS.md)** — the conventions a port must follow, and the pre-flight checks to run before starting one.
 
 ## What's implemented
 
