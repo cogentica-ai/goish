@@ -2,6 +2,8 @@
 
 **Go's standard library and runtime, rebuilt in `no_std` Rust — with a receipt for every line.**
 
+[goish.cogentica.ai](https://goish.cogentica.ai)
+
 Write Go-shaped code — goroutines, channels, `select`, `net/http`, `crypto/tls` — and get a
 single statically-linked binary with no `glibc`, no `ld.so`, no garbage collector, and no
 language runtime to initialize. Goish ships its own `_start`, page allocator, M:N scheduler,
@@ -445,11 +447,11 @@ Paid work that goes beyond that:
 - **Integration.** Getting goish onto a specific target (confidential VM, appliance image,
   edge device) and keeping it there.
 
-<!-- TODO(maintainer): replace with a monitored address or form. GitHub issues work as an
-     interim (they are public and monitored) but a private commercial line converts better,
-     and anything compliance-adjacent is a conversation buyers won't start in public. -->
-Commercial enquiries: open a [GitHub issue](https://github.com/cogentica-ai/goish/issues)
-for now. A private contact address is being set up.
+Commercial enquiries: **[hello@cogentica.ai](mailto:hello@cogentica.ai)** —
+[goish.cogentica.ai](https://goish.cogentica.ai)
+
+If you are inside one of the September 2026 windows, it helps to say which packages your
+crypto path touches and which auditor or programme you are answering to.
 
 ---
 

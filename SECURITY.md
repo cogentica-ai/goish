@@ -57,12 +57,8 @@ divergences.
 
 Please report privately rather than opening a public issue.
 
-<!-- TODO(maintainer): replace with a monitored address or a GitHub
-     private vulnerability reporting link before publishing. A security
-     policy with no working contact is worse than none, because it
-     implies a channel that does not exist. -->
-
-- **Contact:** _to be filled in before release_
+- **Contact:** [hello@cogentica.ai](mailto:hello@cogentica.ai), with
+  `security` in the subject line.
 - Please include a description, affected version or commit, and a
   reproduction if you have one.
 - There is no bug bounty, and no formal response-time commitment while
