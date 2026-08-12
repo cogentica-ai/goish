@@ -1207,3 +1207,7 @@ path = "examples/testing_b_timer_smoke.rs"
 [[example]]
 name = "testing_fstest_format_smoke"
 path = "examples/testing_fstest_format_smoke.rs"
+
+[[example]]
+name = "io_fs_glob_smoke"
+path = "examples/io_fs_glob_smoke.rs"

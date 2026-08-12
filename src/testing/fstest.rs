@@ -2,7 +2,7 @@
 // testing/fstest/mapfs.go (MapFS only; testfs.go's TestFS conformance
 // harness is not ported).
 //
-// goishlint:ignore GOISH018 errorf, formatEntry, formatInfoEntry, formatInfo, checkBadPath, checkDir, checkDirList, checkFile, checkFileRead, checkGlob, checkOpen, checkStat, Close, Glob, Info, IsDir, lstat, Lstat, Mode, ModTime, Name, Open, openDir, Read, ReadDir, ReadFile, ReadLink, resolveSymlinks, Size, Stat, String, Sub, Sys, testFS, TestFS, Type — MapFS's readers/Stat/ReadDir and the whole TestFS conformance suite are hand-written or not yet ported; only openMapFile.Seek and .ReadAt carry anchors so far.
+// goishlint:ignore GOISH018 errorf, formatEntry, formatInfoEntry, formatInfo, checkBadPath, checkDir, checkDirList, checkFile, checkFileRead, checkGlob, checkOpen, checkStat, Close, Info, IsDir, lstat, Lstat, Mode, ModTime, Name, Open, openDir, Read, ReadDir, ReadFile, ReadLink, resolveSymlinks, Size, Stat, String, Sub, Sys, testFS, TestFS, Type — MapFS's readers/Stat/ReadDir and the whole TestFS conformance suite are hand-written or not yet ported; only openMapFile.Seek and .ReadAt carry anchors so far.
 // goishlint:ignore GOISH021 fsTester, _, fsOnly, fsTester, mapDir, MapFile, mapFileInfo, MapFS, noSub, openMapFile — same.
 //
 // Deviations:
@@ -694,6 +694,20 @@ pub fn __shim_open_read_at(
         Some(o) => o.ReadAt(b, offset),
         None => (0, errors::New(string::from_static("not an openMapFile"))),
     };
+}
+
+impl MapFS {
+    // go: sdk 1.25.5 testing/fstest/mapfs.go:230-232 MapFS.Glob
+    /// Go: `return fs.Glob(fsOnly{fsys}, pattern)`.
+    ///
+    /// Deviation: Go wraps the receiver in `fsOnly` so that `fs.Glob`
+    /// sees only the `Open` method and cannot recurse back into this
+    /// one through the `GlobFS` check. goish's `fs::Glob` has no
+    /// `GlobFS` fast path at all, so there is nothing to recurse into
+    /// and the wrapper has no work to do.
+    pub fn Glob<S: Into<string>>(&self, pattern: S) -> (slice<string>, error) {
+        return crate::io::fs::Glob(self, pattern.into());
+    }
 }
 
 // ─── testfs.go — the TestFS conformance harness ──────────────────────
