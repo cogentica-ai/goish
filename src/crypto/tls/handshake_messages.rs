@@ -1,6 +1,6 @@
 // goishlint:ignore GOISH018 addBytesWithLength, addUint64, clone, marshalCertificate, marshalMsg, marshalWithoutBinders, originalBytes, readUint16LengthPrefixed, readUint24LengthPrefixed, readUint64, readUint8LengthPrefixed, transcriptMsg, unmarshalCertificate, updateBinders — handshake_messages.go is 1963 lines and 52 functions; this file is a deliberate SUBSET covering only the messages goish's own TLS 1.3 client and server exchange. The six it does port are anchored above and diffed against Go; everything listed here is genuinely absent, not renamed. See ROADMAP.md.
 // goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, marshalingFunction, newSessionTicketMsg, newSessionTicketMsgTLS13, serverHelloDoneMsg, serverKeyExchangeMsg, transcriptHash — same: the message types the subset does not handle.
-// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal
+// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -1507,6 +1507,175 @@ impl newSessionTicketMsgTLS13 {
             }
         }
         // Go: return true
+        return true;
+    }
+}
+
+
+/// Go: `type certificateRequestMsgTLS13 struct { … }` — RFC 8446 §4.3.2
+/// CertificateRequest.
+#[derive(Clone, Default, PartialEq)]
+pub(crate) struct certificateRequestMsgTLS13 {
+    pub ocspStapling: bool,
+    pub scts: bool,
+    pub supportedSignatureAlgorithms: slice<super::common::SignatureScheme>,
+    pub supportedSignatureAlgorithmsCert: slice<super::common::SignatureScheme>,
+    pub certificateAuthorities: slice<slice<byte>>,
+}
+
+impl certificateRequestMsgTLS13 {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1116-1173 certificateRequestMsgTLS13.marshal
+    /// Serialize. Every extension is conditional, so an all-default
+    /// message is a bare header, an empty context and an empty
+    /// extensions list.
+    pub(crate) fn marshal(&self) -> (slice<byte>, error) {
+        use super::common::{
+            extensionCertificateAuthorities, extensionSCT, extensionSignatureAlgorithms,
+            extensionSignatureAlgorithmsCert, extensionStatusRequest,
+        };
+        let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::new()));
+        b.AddUint8(typeCertificateRequest);
+        let (ocspStapling, scts) = (self.ocspStapling, self.scts);
+        let sigAlgs = self.supportedSignatureAlgorithms.clone();
+        let sigAlgsCert = self.supportedSignatureAlgorithmsCert.clone();
+        let cas = self.certificateAuthorities.clone();
+        b.AddUint24LengthPrefixed(|b: &mut cryptobyte::Builder| {
+            // Go: certificate_request_context (SHALL be zero length
+            // unless used for post-handshake authentication)
+            b.AddUint8(0);
+
+            b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                if ocspStapling {
+                    b.AddUint16(extensionStatusRequest);
+                    b.AddUint16(0); // empty extension_data
+                }
+                if scts {
+                    // Go: RFC 8446 §4.4.2.1 makes no mention of
+                    // signed_certificate_timestamp in CertificateRequest,
+                    // but extensions in the client's Certificate MUST
+                    // correspond to ones here, and it is in the §4.2 table.
+                    b.AddUint16(extensionSCT);
+                    b.AddUint16(0); // empty extension_data
+                }
+                if sigAlgs.Len() > 0 {
+                    b.AddUint16(extensionSignatureAlgorithms);
+                    b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                        b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                            for (_, a) in crate::range!(sigAlgs.clone()) {
+                                b.AddUint16(a.0);
+                            }
+                        });
+                    });
+                }
+                if sigAlgsCert.Len() > 0 {
+                    b.AddUint16(extensionSignatureAlgorithmsCert);
+                    b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                        b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                            for (_, a) in crate::range!(sigAlgsCert.clone()) {
+                                b.AddUint16(a.0);
+                            }
+                        });
+                    });
+                }
+                if cas.Len() > 0 {
+                    b.AddUint16(extensionCertificateAuthorities);
+                    b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                        b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                            for (_, ca) in crate::range!(cas.clone()) {
+                                b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                                    b.AddBytes(&ca);
+                                });
+                            }
+                        });
+                    });
+                }
+            });
+        });
+        return b.Bytes();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1175-1247 certificateRequestMsgTLS13.unmarshal
+    /// Parse. An EMPTY sigalgs or CA list is rejected, and a zero-length
+    /// CA entry is rejected — presence of the extension implies content.
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        use super::common::{
+            extensionCertificateAuthorities, extensionSCT, extensionSignatureAlgorithms,
+            extensionSignatureAlgorithmsCert, extensionStatusRequest, SignatureScheme,
+        };
+        *self = certificateRequestMsgTLS13::default();
+        let mut s = CBString::New(data);
+
+        // Go: if !s.Skip(4) || !s.ReadUint8LengthPrefixed(&context) ||
+        //        !context.Empty() || !s.ReadUint16LengthPrefixed(&extensions) ||
+        //        !s.Empty() { return false }
+        let mut context = CBString::New(slice::__from_vec(Vec::new()));
+        let mut extensions = CBString::New(slice::__from_vec(Vec::new()));
+        if !s.Skip(4)
+            || !s.ReadUint8LengthPrefixed(&mut context)
+            || !context.Empty()
+            || !s.ReadUint16LengthPrefixed(&mut extensions)
+            || !s.Empty()
+        {
+            return false;
+        }
+
+        while !extensions.Empty() {
+            let mut extension: crate::types::uint16 = 0;
+            let mut extData = CBString::New(slice::__from_vec(Vec::new()));
+            if !extensions.ReadUint16(&mut extension)
+                || !extensions.ReadUint16LengthPrefixed(&mut extData)
+            {
+                return false;
+            }
+
+            if extension == extensionStatusRequest {
+                self.ocspStapling = true;
+            } else if extension == extensionSCT {
+                self.scts = true;
+            } else if extension == extensionSignatureAlgorithms
+                || extension == extensionSignatureAlgorithmsCert
+            {
+                // Go: two identical arms differing only in the target field.
+                let mut sigAndAlgs = CBString::New(slice::__from_vec(Vec::new()));
+                if !extData.ReadUint16LengthPrefixed(&mut sigAndAlgs) || sigAndAlgs.Empty() {
+                    return false;
+                }
+                let mut out: Vec<SignatureScheme> = Vec::new();
+                while !sigAndAlgs.Empty() {
+                    let mut sigAndAlg: crate::types::uint16 = 0;
+                    if !sigAndAlgs.ReadUint16(&mut sigAndAlg) {
+                        return false;
+                    }
+                    out.push(SignatureScheme(sigAndAlg));
+                }
+                if extension == extensionSignatureAlgorithms {
+                    self.supportedSignatureAlgorithms = slice::__from_vec(out);
+                } else {
+                    self.supportedSignatureAlgorithmsCert = slice::__from_vec(out);
+                }
+            } else if extension == extensionCertificateAuthorities {
+                let mut auths = CBString::New(slice::__from_vec(Vec::new()));
+                if !extData.ReadUint16LengthPrefixed(&mut auths) || auths.Empty() {
+                    return false;
+                }
+                let mut out: Vec<slice<byte>> = Vec::new();
+                while !auths.Empty() {
+                    let mut ca: slice<byte> = slice::__from_vec(Vec::new());
+                    if !readUint16LengthPrefixed(&mut auths, &mut ca) || ca.Len() == 0 {
+                        return false;
+                    }
+                    out.push(ca);
+                }
+                self.certificateAuthorities = slice::__from_vec(out);
+            } else {
+                // Go: Ignore unknown extensions.
+                continue;
+            }
+
+            if !extData.Empty() {
+                return false;
+            }
+        }
         return true;
     }
 }

@@ -1605,3 +1605,38 @@ pub fn msg_nst13_roundtrip(
 pub fn msg_nst13_unmarshal(data: crate::goslice::slice<crate::types::byte>) -> bool {
     return handshake_messages::newSessionTicketMsgTLS13::default().unmarshal(data);
 }
+
+// go: none — goish-only: certificateRequestMsgTLS13 is unexported in Go,
+// where the tests are in-package. See the `defaults_*` shims above.
+#[doc(hidden)]
+pub fn msg_crt13_roundtrip(
+    ocspStapling: bool,
+    scts: bool,
+    sigAlgs: crate::goslice::slice<common::SignatureScheme>,
+    sigAlgsCert: crate::goslice::slice<common::SignatureScheme>,
+    cas: crate::goslice::slice<crate::goslice::slice<crate::types::byte>>,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+) {
+    let m = handshake_messages::certificateRequestMsgTLS13 {
+        ocspStapling,
+        scts,
+        supportedSignatureAlgorithms: sigAlgs,
+        supportedSignatureAlgorithmsCert: sigAlgsCert,
+        certificateAuthorities: cas,
+    };
+    let (b, _) = m.marshal();
+    let mut back = handshake_messages::certificateRequestMsgTLS13::default();
+    let ok = back.unmarshal(b.clone());
+    return (
+        b,
+        ok && back.ocspStapling == ocspStapling && back.scts == scts,
+        back.supportedSignatureAlgorithms.Len(),
+        back.supportedSignatureAlgorithmsCert.Len(),
+        back.certificateAuthorities.Len(),
+    );
+}

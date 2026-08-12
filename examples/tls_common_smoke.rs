@@ -589,6 +589,34 @@ fn main() {
         !tls::msg_nst13_unmarshal(slice::__from_vec(trail)),
     );
 
+    // ─── certificateRequestMsgTLS13 (RFC 8446 §4.3.2). Every extension
+    //     is conditional, so the all-default form is a bare header.
+    let none = slice::__from_vec(alloc::vec![]);
+    let (b, ok, _, _, _) =
+        tls::msg_crt13_roundtrip(false, false, none.clone(), none.clone(), slice::__from_vec(alloc::vec![]));
+    eq("certificateRequestMsgTLS13 empty", hexOf(b), "0d000003000000");
+    check("crt13 empty round-trips", ok);
+
+    let (fb, fok, ns, nsc, nca) = tls::msg_crt13_roundtrip(
+        true,
+        true,
+        slice::__from_vec(alloc::vec![tls::PSSWithSHA256, tls::Ed25519]),
+        slice::__from_vec(alloc::vec![tls::PKCS1WithSHA256]),
+        slice::__from_vec(alloc::vec![
+            slice::__from_vec(alloc::vec![0x30u8, 0x02]),
+            slice::__from_vec(alloc::vec![0x31u8]),
+        ]),
+    );
+    eq(
+        "certificateRequestMsgTLS13 full",
+        hexOf(fb),
+        "0d00002a0000270005000000120000000d00060004080408070032000400020401002f0009000700023002000131",
+    );
+    check("crt13 full round-trips with both flags", fok);
+    check_n("crt13 recovered 2 sigalgs", ns, 2);
+    check_n("crt13 recovered 1 sigalg-cert", nsc, 1);
+    check_n("crt13 recovered 2 CAs", nca, 2);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
