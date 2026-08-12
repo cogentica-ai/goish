@@ -4535,3 +4535,48 @@ pub fn handshake_server_negotiateALPN(
     }
     return (p, e.Error());
 }
+
+// go: none — goish-only: certificateRequestInfoFromMsg is unexported in
+// Go, where the tests are in-package. `which`: 0 = no signature
+// algorithms and no certificate types, 1 = RSA only, 2 = ECDSA only,
+// 3 = both, 4..6 = the same three with hasSignatureAlgorithm set and a
+// mixed scheme list (including one unknown scheme). Reports
+// `(Version, len(AcceptableCAs), the selected schemes)`.
+#[doc(hidden)]
+pub fn handshake_client_certificateRequestInfo(
+    which: crate::types::int,
+) -> (
+    crate::types::int,
+    crate::types::int,
+    crate::goslice::slice<common::SignatureScheme>,
+) {
+    let mut m = handshake_messages::certificateRequestMsg::default();
+    let types: alloc::vec::Vec<crate::types::byte> = match which % 4 {
+        0 => alloc::vec![],
+        1 => alloc::vec![1u8],
+        2 => alloc::vec![64u8],
+        _ => alloc::vec![1u8, 64],
+    };
+    m.certificateTypes = crate::goslice::slice::__from_vec(types);
+    if which >= 4 {
+        m.hasSignatureAlgorithm = true;
+        m.supportedSignatureAlgorithms = crate::goslice::slice::__from_vec(alloc::vec![
+            common::PSSWithSHA256,
+            common::ECDSAWithP256AndSHA256,
+            common::Ed25519,
+            common::PKCS1WithSHA1,
+            common::SignatureScheme(0x9999),
+        ]);
+    }
+    if which == 7 {
+        m.certificateAuthorities = crate::goslice::slice::__from_vec(alloc::vec![
+            crate::goslice::slice::__from_vec(alloc::vec![1u8, 2])
+        ]);
+    }
+    let cri = handshake_client::certificateRequestInfoFromMsg(common::VersionTLS12, &m);
+    return (
+        cri.Version as crate::types::int,
+        cri.AcceptableCAs.Len(),
+        cri.SignatureSchemes.clone(),
+    );
+}

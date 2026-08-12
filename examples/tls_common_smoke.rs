@@ -2227,6 +2227,49 @@ fn main() {
     eq("negotiateALPN with no overlap", ne4,
        "tls: client requested unsupported application protocols ([\"spdy\"])");
 
+    // ─── handshake_client.go: certificateRequestInfoFromMsg. From
+    //     goref.sh.
+    let schemes = |v: slice<tls::SignatureScheme>| -> string {
+        let mut out = alloc::string::String::new();
+        for (i, s2) in goish::range!(v) {
+            if i > 0 { out.push(' '); }
+            out.push_str(core::str::from_utf8(s2.String().as_bytes()).unwrap_or("?"));
+        }
+        return string::from_bytes(out.as_bytes());
+    };
+    let cri = |w: int| tls::handshake_client_certificateRequestInfo(w);
+    let (v0, ca0, s0) = cri(0);
+    check_n("certificateRequestInfoFromMsg Version", v0, 0x0303);
+    check_n("certificateRequestInfoFromMsg AcceptableCAs", ca0, 0);
+    eq("no certificate types yields no schemes", schemes(s0), "");
+    // Below TLS 1.2 there are no signature schemes on the wire, so Go
+    // invents a list from the certificate types — and says outright that
+    // the hash half of each name is a lie, since 1.0/1.1 always use
+    // MD5+SHA1 for RSA and SHA1 for ECDSA.
+    let (_, _, s1) = cri(1);
+    eq("RSA certificate type invents the PKCS#1 list", schemes(s1),
+       "PKCS1WithSHA256 PKCS1WithSHA384 PKCS1WithSHA512 PKCS1WithSHA1");
+    let (_, _, s2) = cri(2);
+    eq("ECDSA certificate type invents the ECDSA list", schemes(s2),
+       "ECDSAWithP256AndSHA256 ECDSAWithP384AndSHA384 ECDSAWithP521AndSHA512");
+    let (_, _, s3) = cri(3);
+    eq("both certificate types put ECDSA first", schemes(s3),
+       "ECDSAWithP256AndSHA256 ECDSAWithP384AndSHA384 ECDSAWithP521AndSHA512 PKCS1WithSHA256 PKCS1WithSHA384 PKCS1WithSHA512 PKCS1WithSHA1");
+    // With signature_algorithms present the list is filtered by
+    // certificate type instead — RFC 5246 §7.4.4, which Go's own comment
+    // calls "somewhat complicated". Ed25519 counts as an EC type.
+    let (_, _, s5) = cri(5);
+    eq("RSA-only filters to the RSA schemes", schemes(s5),
+       "PSSWithSHA256 PKCS1WithSHA1");
+    let (_, _, s6) = cri(6);
+    eq("ECDSA-only filters to the EC schemes, Ed25519 included", schemes(s6),
+       "ECDSAWithP256AndSHA256 Ed25519");
+    let (_, ca7, s7) = cri(7);
+    check_n("certificateRequestInfoFromMsg carries AcceptableCAs", ca7, 1);
+    // The unknown scheme 0x9999 is dropped, not passed through.
+    eq("both types keep everything typeAndHash recognises", schemes(s7),
+       "PSSWithSHA256 ECDSAWithP256AndSHA256 Ed25519 PKCS1WithSHA1");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

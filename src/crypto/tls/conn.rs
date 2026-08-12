@@ -1119,6 +1119,12 @@ impl Conn {
     #[doc(hidden)]
     pub fn __retryCount(&self) -> int { return self.retryCount; }
 
+
+    // go: none — goish-only: `config` is unexported in Go, where the
+    // tests and handshake_client.go are in the same package.
+    #[doc(hidden)]
+    pub fn __configServerName(&self) -> string { return self.config.ServerName.clone(); }
+
     // go: sdk 1.25.5 crypto/tls/conn.go:99-101 Conn.LocalAddr
     /// Go: "LocalAddr returns the local network address."
     pub fn LocalAddr(&self) -> crate::net::TCPAddr {

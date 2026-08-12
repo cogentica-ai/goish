@@ -1,6 +1,6 @@
 // crypto/tls/handshake_client.rs — TLS 1.2 client handshake.
 //
-// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, pickTLSVersion, handshake, pickCipherSuite, doFullHandshake, establishKeys, serverResumedSession, processServerHello, readFinished, readSessionTicket, saveSessionTicket, sendFinished, verifyServerCertificate, certificateRequestInfoFromMsg, getClientCertificate, clientSessionCacheKey, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, pickTLSVersion, handshake, pickCipherSuite, doFullHandshake, establishKeys, serverResumedSession, processServerHello, readFinished, readSessionTicket, saveSessionTicket, sendFinished, verifyServerCertificate, getClientCertificate, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
 // goishlint:ignore GOISH019 clientHandshakeState, echClientContext — same.
 // goishlint:ignore GOISH021 clientHandshakeState, echClientContext, tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
 //
@@ -2522,6 +2522,8 @@ pub fn do_client_handshake_chacha20_only(
 }
 
 
+use super::conn::Conn;
+
 // ─── crypto/tls/handshake_client.go, ported verbatim ──────────────────
 //
 // The three free functions of handshake_client.go. Everything above this
@@ -2614,4 +2616,120 @@ pub(crate) fn checkALPN(
         }
     }
     return crate::errors::New("tls: server selected unadvertised ALPN protocol");
+}
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:1176-1183 Conn.clientSessionCacheKey
+    /// The key a client session is cached under: the configured server
+    /// name if there is one, otherwise the peer's address.
+    pub(crate) fn clientSessionCacheKey(&self) -> crate::gostring::string {
+        // Go: if len(c.config.ServerName) > 0 { return c.config.ServerName }
+        if self.__configServerName().Len() > 0 {
+            return self.__configServerName();
+        }
+        // Go: if c.conn != nil { return c.conn.RemoteAddr().String() }
+        //     return ""
+        if self.NetConn().is_some() {
+            return self.RemoteAddr().String();
+        }
+        return crate::gostring::string::from_static("");
+    }
+}
+
+// go: sdk 1.25.5 crypto/tls/handshake_client.go:1106-1153 certificateRequestInfoFromMsg
+///
+/// Deviation: Go's leading `ctx context.Context` parameter has nowhere
+/// to go — `CertificateRequestInfo.ctx` is set by the handshake, which
+/// is not ported.
+/// goishlint:ignore GOISH020 certificateRequestInfoFromMsg — Go's context.Context parameter has no field to land in yet
+pub(crate) fn certificateRequestInfoFromMsg(
+    vers: crate::types::uint16,
+    certReq: &super::handshake_messages::certificateRequestMsg,
+) -> super::common::CertificateRequestInfo {
+    // Go: cri := &CertificateRequestInfo{AcceptableCAs: certReq.certificateAuthorities,
+    //         Version: vers, ctx: ctx}
+    let mut cri = super::common::CertificateRequestInfo::default();
+    cri.AcceptableCAs = certReq.certificateAuthorities.clone();
+    cri.Version = vers;
+
+    // Go: var rsaAvail, ecAvail bool
+    //     for _, certType := range certReq.certificateTypes {
+    //         switch certType {
+    //         case certTypeRSASign: rsaAvail = true
+    //         case certTypeECDSASign: ecAvail = true } }
+    let mut rsaAvail = false;
+    let mut ecAvail = false;
+    for (_, certType) in crate::range!(certReq.certificateTypes.clone()) {
+        if *certType == super::common::certTypeRSASign {
+            rsaAvail = true;
+        } else if *certType == super::common::certTypeECDSASign {
+            ecAvail = true;
+        }
+    }
+
+    // Go: if !certReq.hasSignatureAlgorithm {
+    //         // Prior to TLS 1.2, signature schemes did not exist. In this case
+    //         // we make up a list based on the acceptable certificate types, to
+    //         // help GetClientCertificate and SupportsCertificate select the
+    //         // right certificate. The hash part of the SignatureScheme is a lie
+    //         // here, because TLS 1.0 and 1.1 always use MD5+SHA1 for RSA and
+    //         // SHA1 for ECDSA.
+    //         switch { case rsaAvail && ecAvail: … ; case rsaAvail: … ; case ecAvail: … }
+    //         return cri }
+    if !certReq.hasSignatureAlgorithm {
+        if rsaAvail && ecAvail {
+            cri.SignatureSchemes = crate::goslice::slice::__from_vec(alloc::vec![
+                super::common::ECDSAWithP256AndSHA256,
+                super::common::ECDSAWithP384AndSHA384,
+                super::common::ECDSAWithP521AndSHA512,
+                super::common::PKCS1WithSHA256,
+                super::common::PKCS1WithSHA384,
+                super::common::PKCS1WithSHA512,
+                super::common::PKCS1WithSHA1,
+            ]);
+        } else if rsaAvail {
+            cri.SignatureSchemes = crate::goslice::slice::__from_vec(alloc::vec![
+                super::common::PKCS1WithSHA256,
+                super::common::PKCS1WithSHA384,
+                super::common::PKCS1WithSHA512,
+                super::common::PKCS1WithSHA1,
+            ]);
+        } else if ecAvail {
+            cri.SignatureSchemes = crate::goslice::slice::__from_vec(alloc::vec![
+                super::common::ECDSAWithP256AndSHA256,
+                super::common::ECDSAWithP384AndSHA384,
+                super::common::ECDSAWithP521AndSHA512,
+            ]);
+        }
+        return cri;
+    }
+
+    // Go: Filter the signature schemes based on the certificate types.
+    // See RFC 5246, Section 7.4.4 (where it calls this "somewhat
+    // complicated").
+    let mut out: alloc::vec::Vec<super::common::SignatureScheme> =
+        alloc::vec::Vec::with_capacity(certReq.supportedSignatureAlgorithms.Len() as usize);
+    for (_, sigScheme) in crate::range!(certReq.supportedSignatureAlgorithms.clone()) {
+        let (sigType, _, err) = super::auth::typeAndHashFromSignatureScheme(*sigScheme);
+        if err != crate::errors::nil {
+            continue;
+        }
+        if sigType == super::common::signatureECDSA
+            || sigType == super::common::signatureEd25519
+        {
+            if ecAvail {
+                out.push(*sigScheme);
+            }
+        } else if sigType == super::common::signatureRSAPSS
+            || sigType == super::common::signaturePKCS1v15
+        {
+            if rsaAvail {
+                out.push(*sigScheme);
+            }
+        }
+    }
+    cri.SignatureSchemes = crate::goslice::slice::__from_vec(out);
+
+    // Go: return cri
+    return cri;
 }
