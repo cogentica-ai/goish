@@ -1200,6 +1200,34 @@ impl Conn {
         return self.in_.changeCipherSpec().is_none() && self.out.changeCipherSpec().is_none();
     }
 
+
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __ticketKeys(&self) -> slice<super::common::ticketKey> {
+        return self.ticketKeys.clone();
+    }
+    // go: none — goish-only: Go assigns the seven resumed fields inline
+    // in `checkForResumption`; they are unexported, so goish names the
+    // block once here.
+    #[doc(hidden)]
+    pub fn __adoptSession(&mut self, ss: &super::ticket::SessionState) {
+        self.peerCertificates = ss.__peerCertificates();
+        self.ocspResponse = ss.__ocspResponse();
+        self.scts = ss.__scts();
+        self.verifiedChains = ss.__verifiedChains();
+        self.extMasterSecret = ss.__extMasterSecret();
+        self.curveID = ss.__curveID();
+        self.didResume = true;
+    }
+    // go: none — goish-only: see `__adoptSession`.
+    #[doc(hidden)]
+    pub fn __didResume(&self) -> bool { return self.didResume; }
+    // go: none — goish-only: see `__adoptSession`.
+    #[doc(hidden)]
+    pub fn __setTicketKeys(&mut self, k: slice<super::common::ticketKey>) {
+        self.ticketKeys = k;
+    }
+
     // go: sdk 1.25.5 crypto/tls/conn.go:99-101 Conn.LocalAddr
     /// Go: "LocalAddr returns the local network address."
     pub fn LocalAddr(&self) -> crate::net::TCPAddr {

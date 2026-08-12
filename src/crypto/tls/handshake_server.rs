@@ -1,4 +1,4 @@
-// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo, serverHandshakeState.pickCipherSuite, serverHandshakeState.establishKeys
+// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo, serverHandshakeState.pickCipherSuite, serverHandshakeState.establishKeys, serverHandshakeState.checkForResumption
 //
 // crypto/tls — the server handshake state machine.
 //
@@ -7,7 +7,7 @@
 // handshake. What is here is the one function that does not: the ECDHE
 // support check, which `ClientHelloInfo.SupportsCertificate` also calls.
 //
-// goishlint:ignore GOISH018 serverHandshake, handshake, readClientHello, processClientHello, checkForResumption, doResumeHandshake, doFullHandshake, readFinished, sendSessionTicket, sendFinished, processCertsFromClient — serverHandshakeState and Conn; see the banner. ROADMAP.md.
+// goishlint:ignore GOISH018 serverHandshake, handshake, readClientHello, processClientHello, doResumeHandshake, doFullHandshake, readFinished, sendSessionTicket, sendFinished, processCertsFromClient — serverHandshakeState and Conn; see the banner. ROADMAP.md.
 
 #![allow(non_snake_case, dead_code)]
 
@@ -160,6 +160,7 @@ pub(crate) struct serverHandshakeState {
     pub hello: super::handshake_messages::serverHelloMsg,
     pub suite: Option<&'static super::cipher_suites::cipherSuite>,
     pub masterSecret: slice<crate::types::byte>,
+    pub sessionState: Option<super::ticket::SessionState>,
     pub ecdheOk: bool,
     pub ecSignOk: bool,
     pub rsaDecryptOk: bool,
@@ -429,6 +430,165 @@ impl serverHandshakeState {
         //     return nil
         let vers = self.c.__vers();
         self.c.__prepareCipherSpecs(vers, clientCipher, clientHash, serverCipher, serverHash);
+        return errors::nil;
+    }
+}
+
+
+impl serverHandshakeState {
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:566-664 serverHandshakeState.checkForResumption
+    /// Whether the ClientHello's session ticket may be resumed, and if
+    /// so, adopt the session it carries.
+    ///
+    /// Deviation: Go tries `c.config.UnwrapSession` first; goish's
+    /// `Config` has no such callback field, so that arm is unreachable
+    /// and the ticket is always opened with `decryptTicket`.
+    pub(crate) fn checkForResumption(&mut self) -> error {
+        // Go: if c.config.SessionTicketsDisabled { return nil }
+        if self.c.__configSessionTicketsDisabled() {
+            return errors::nil;
+        }
+
+        // Go: plaintext := c.config.decryptTicket(hs.clientHello.sessionTicket, c.ticketKeys)
+        //     if plaintext == nil { return nil }
+        //     ss, err := ParseSessionState(plaintext)
+        //     if err != nil { return nil }
+        //     sessionState = ss
+        let ticket = slice::__from_vec(self.clientHello.sessionTicket.clone());
+        let plaintext = self.c.__config().decryptTicket(ticket, self.c.__ticketKeys());
+        if plaintext.is_none() {
+            return errors::nil;
+        }
+        let (sessionState, err) = super::ticket::ParseSessionState(plaintext.unwrap());
+        if err != errors::nil {
+            return errors::nil;
+        }
+
+        // Go: TLS 1.2 tickets don't natively have a lifetime, but we want
+        // to avoid re-wrapping the same master secret in different tickets
+        // over and over for too long, weakening forward secrecy.
+        // Go: createdAt := time.Unix(int64(sessionState.createdAt), 0)
+        //     if c.config.time().Sub(createdAt) > maxSessionTicketLifetime { return nil }
+        let createdAt = crate::time::Unix(sessionState.__createdAt() as crate::types::int64, 0);
+        if self.c.__config().time().Sub(createdAt) > super::common::maxSessionTicketLifetime {
+            return errors::nil;
+        }
+
+        // Go: Never resume a session for a different TLS version.
+        if self.c.__vers() != sessionState.__version() {
+            return errors::nil;
+        }
+
+        // Go: cipherSuiteOk := false
+        //     // Check that the client is still offering the ciphersuite in the session.
+        //     for _, id := range hs.clientHello.cipherSuites {
+        //         if id == sessionState.cipherSuite { cipherSuiteOk = true; break } }
+        //     if !cipherSuiteOk { return nil }
+        let mut cipherSuiteOk = false;
+        for id in self.clientHello.cipherSuites.iter() {
+            if *id == sessionState.__cipherSuite() {
+                cipherSuiteOk = true;
+                break;
+            }
+        }
+        if !cipherSuiteOk {
+            return errors::nil;
+        }
+
+        // Go: Check that we also support the ciphersuite from the session.
+        // Go: suite := selectCipherSuite([]uint16{sessionState.cipherSuite},
+        //         c.config.supportedCipherSuites(), hs.cipherSuiteOk)
+        //     if suite == nil { return nil }
+        let (ecdheOk, ecSignOk, rsaDecryptOk, rsaSignOk) =
+            (self.ecdheOk, self.ecSignOk, self.rsaDecryptOk, self.rsaSignOk);
+        let vers = self.c.__vers();
+        let suite = super::cipher_suites::selectCipherSuite(
+            slice::__from_vec(alloc::vec![sessionState.__cipherSuite()]),
+            self.c.__config().supportedCipherSuites(),
+            &|c: &'static super::cipher_suites::cipherSuite| {
+                if c.flags & super::cipher_suites::suiteECDHE != 0 {
+                    if !ecdheOk {
+                        return false;
+                    }
+                    if c.flags & super::cipher_suites::suiteECSign != 0 {
+                        if !ecSignOk {
+                            return false;
+                        }
+                    } else if !rsaSignOk {
+                        return false;
+                    }
+                } else if !rsaDecryptOk {
+                    return false;
+                }
+                if vers < super::common::VersionTLS12
+                    && c.flags & super::cipher_suites::suiteTLS12 != 0
+                {
+                    return false;
+                }
+                return true;
+            },
+        );
+        if suite.is_none() {
+            return errors::nil;
+        }
+
+        // Go: sessionHasClientCerts := len(sessionState.peerCertificates) != 0
+        //     needClientCerts := requiresClientCert(c.config.ClientAuth)
+        //     if needClientCerts && !sessionHasClientCerts { return nil }
+        //     if sessionHasClientCerts && c.config.ClientAuth == NoClientCert { return nil }
+        //     if sessionHasClientCerts && c.config.time().After(
+        //         sessionState.peerCertificates[0].NotAfter) { return nil }
+        //     if sessionHasClientCerts && c.config.ClientAuth >= VerifyClientCertIfGiven &&
+        //         len(sessionState.verifiedChains) == 0 { return nil }
+        let peers = sessionState.__peerCertificates();
+        let sessionHasClientCerts = peers.Len() != 0;
+        let clientAuth = self.c.__configClientAuth();
+        let needClientCerts = super::common::requiresClientCert(clientAuth);
+        if needClientCerts && !sessionHasClientCerts {
+            return errors::nil;
+        }
+        if sessionHasClientCerts && clientAuth == super::common::NoClientCert {
+            return errors::nil;
+        }
+        if sessionHasClientCerts && self.c.__config().time().After(peers[0].NotAfter) {
+            return errors::nil;
+        }
+        if sessionHasClientCerts
+            && clientAuth.0 >= super::common::VerifyClientCertIfGiven.0
+            && sessionState.__verifiedChains().Len() == 0
+        {
+            return errors::nil;
+        }
+
+        // Go: RFC 7627, Section 5.3
+        // Go: if !sessionState.extMasterSecret && hs.clientHello.extendedMasterSecret {
+        //         return nil }
+        //     if sessionState.extMasterSecret && !hs.clientHello.extendedMasterSecret {
+        //         // Aborting is somewhat harsh, but it's a MUST and it would
+        //         // indicate a weird downgrade in client capabilities.
+        //         return errors.New("tls: session supported extended_master_secret
+        //             but client does not") }
+        if !sessionState.__extMasterSecret() && self.clientHello.extendedMasterSecret {
+            return errors::nil;
+        }
+        if sessionState.__extMasterSecret() && !self.clientHello.extendedMasterSecret {
+            return errors::New(
+                "tls: session supported extended_master_secret but client does not",
+            );
+        }
+        // Go: if !sessionState.extMasterSecret && fips140tls.Required() {
+        //         // FIPS 140-3 requires the use of Extended Master Secret.
+        //         return nil }
+        if !sessionState.__extMasterSecret()
+            && super::internal::fips140tls::Required()
+        {
+            return errors::nil;
+        }
+
+        // Go: c.peerCertificates = sessionState.peerCertificates … c.didResume = true
+        self.c.__adoptSession(&sessionState);
+        self.sessionState = Some(sessionState);
+        self.suite = suite;
         return errors::nil;
     }
 }

@@ -4781,6 +4781,7 @@ pub fn handshake_server_cipherSuiteOk(
         hello: handshake_messages::serverHelloMsg::default(),
         suite: None,
         masterSecret: crate::goslice::slice::new(),
+        sessionState: None,
         ecdheOk: which != 1,
         ecSignOk: which != 2,
         rsaDecryptOk: which != 4,
@@ -4930,6 +4931,7 @@ pub fn handshake_server_pickCipherSuite(
         hello: handshake_messages::serverHelloMsg::default(),
         suite: None,
         masterSecret: crate::goslice::slice::new(),
+        sessionState: None,
         ecdheOk: !noECDHE,
         ecSignOk: true,
         rsaDecryptOk: true,
@@ -4986,6 +4988,7 @@ pub fn handshake_server_establishKeys(
         hello,
         suite: Some(suite),
         masterSecret: ms.clone(),
+        sessionState: None,
         ecdheOk: true,
         ecSignOk: true,
         rsaDecryptOk: true,
@@ -5011,4 +5014,86 @@ pub fn handshake_server_establishKeys(
         err.Error()
     };
     return (text, before, after, staged, ck, sk, civ, siv);
+}
+
+// go: none — goish-only: checkForResumption reads Config's unexported
+// ticket keys and SessionState's unexported fields. `which` mutates the
+// scenario: 0 = a resumable session, 1 = tickets disabled, 2 = a session
+// from a different TLS version, 3 = a suite the client no longer offers,
+// 4 = a ticket older than maxSessionTicketLifetime, 5 = the session used
+// extended_master_secret and the client does not, 6 = the reverse.
+// Reports `(errText, didResume, a suite was selected)`.
+#[doc(hidden)]
+pub fn handshake_server_checkForResumption(
+    which: crate::types::int,
+) -> (crate::gostring::string, bool, bool) {
+    let mut k = [0u8; 32];
+    let mut i = 0usize;
+    while i < 32 {
+        k[i] = i as crate::types::byte;
+        i += 1;
+    }
+    let mut cfg = Config::default();
+    cfg.SetSessionTicketKeys(crate::goslice::slice::__from_vec(alloc::vec![k]));
+    if which == 1 {
+        cfg.SessionTicketsDisabled = true;
+    }
+
+    let mut ss = ticket::SessionState::default();
+    ss.__setVersion(if which == 2 {
+        common::VersionTLS13
+    } else {
+        common::VersionTLS12
+    });
+    ss.__setCipherSuite(cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256);
+    let nowSec = crate::time::Now().Unix();
+    ss.__setCreatedAt(if which == 4 {
+        (nowSec - 8 * 24 * 3600) as crate::types::uint64
+    } else {
+        nowSec as crate::types::uint64
+    });
+    ss.__setSecret(crate::goslice::slice::__from_vec(alloc::vec![1u8, 2, 3, 4]));
+    if which == 5 {
+        ss.__setExtMasterSecret(true);
+    }
+
+    let mut ch = handshake_messages::clientHelloMsg::default();
+    ch.cipherSuites = if which == 3 {
+        alloc::vec![cipher_suites::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384]
+    } else {
+        alloc::vec![cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]
+    };
+    if which == 6 {
+        ch.extendedMasterSecret = true;
+    }
+
+    let (tk, _) = cfg.EncryptTicket(common::ConnectionState::default(), &ss);
+    ch.sessionTicket = tk.__into_vec();
+
+    let mut c = conn::Conn::default();
+    c.__setMemConn(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    )));
+    c.__setVers(common::VersionTLS12);
+    c.__setTicketKeys(cfg.ticketKeys(None));
+    c.__setConfig(cfg);
+    let mut hs = handshake_server::serverHandshakeState {
+        c,
+        clientHello: ch,
+        hello: handshake_messages::serverHelloMsg::default(),
+        suite: None,
+        masterSecret: crate::goslice::slice::new(),
+        sessionState: None,
+        ecdheOk: true,
+        ecSignOk: true,
+        rsaDecryptOk: true,
+        rsaSignOk: true,
+    };
+    let err = hs.checkForResumption();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (text, hs.c.__didResume(), hs.suite.is_some());
 }

@@ -2445,6 +2445,41 @@ fn main() {
     eq("establishKeys CBC clientKey", hexOf(cbCK), "3ee24aef9a586bcdcb64a4e16bebafba");
     eq("establishKeys CBC clientIV", hexOf(cbCIV), "c80c4de292da0d7ea050ddc3c2d521aa");
 
+    // ─── handshake_server.go: checkForResumption. Every rejection is
+    //     silent — the handshake falls back to a full exchange rather
+    //     than failing — with exactly one exception. From goref.sh.
+    let cfr = |w: int| tls::handshake_server_checkForResumption(w);
+    let (r0e, r0d, r0s) = cfr(0);
+    eq("checkForResumption accepts a valid ticket err", r0e, "");
+    check("checkForResumption resumes", r0d);
+    check("checkForResumption selects the session's suite", r0s);
+    let (r1e, r1d, _) = cfr(1);
+    eq("checkForResumption with tickets disabled err", r1e, "");
+    check("checkForResumption declines when tickets are disabled", !r1d);
+    let (r2e, r2d, _) = cfr(2);
+    eq("checkForResumption across versions err", r2e, "");
+    // Never resume across a version change, even with a valid ticket.
+    check("checkForResumption declines a different TLS version", !r2d);
+    let (r3e, r3d, _) = cfr(3);
+    eq("checkForResumption with the suite withdrawn err", r3e, "");
+    check("checkForResumption declines an unoffered suite", !r3d);
+    let (r4e, r4d, _) = cfr(4);
+    eq("checkForResumption with an expired ticket err", r4e, "");
+    // TLS 1.2 tickets have no native lifetime; Go caps them at 7 days so
+    // the same master secret is not re-wrapped indefinitely.
+    check("checkForResumption declines a ticket past its lifetime", !r4d);
+    // The one hard failure: RFC 7627 §5.3 makes dropping EMS a MUST-not,
+    // so a client that used to support it and now does not aborts.
+    let (r5e, r5d, _) = cfr(5);
+    eq("checkForResumption aborts on an EMS downgrade", r5e,
+       "tls: session supported extended_master_secret but client does not");
+    check("checkForResumption does not resume on an EMS downgrade", !r5d);
+    // The reverse — client offers EMS, session lacks it — is a silent
+    // decline, not an abort.
+    let (r6e, r6d, _) = cfr(6);
+    eq("checkForResumption declines silently when only the client has EMS", r6e, "");
+    check("checkForResumption does not resume without session EMS", !r6d);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

@@ -438,6 +438,23 @@ impl SessionState {
     // go: none — goish-only: see above.
     #[doc(hidden)]
     pub fn __version(&self) -> uint16 { return self.version; }
+    // go: none — goish-only: see `__setVersion`.
+    #[doc(hidden)]
+    pub fn __peerCertificates(&self) -> slice<x509::Certificate> {
+        return self.peerCertificates.clone();
+    }
+    // go: none — goish-only: see `__setVersion`.
+    #[doc(hidden)]
+    pub fn __verifiedChains(&self) -> slice<slice<x509::Certificate>> {
+        return self.verifiedChains.clone();
+    }
+    // go: none — goish-only: see `__setVersion`.
+    #[doc(hidden)]
+    pub fn __ocspResponse(&self) -> slice<byte> { return self.ocspResponse.clone(); }
+    // go: none — goish-only: see `__setVersion`.
+    #[doc(hidden)]
+    pub fn __scts(&self) -> slice<slice<byte>> { return self.scts.clone(); }
+
     // go: none — goish-only: see above.
     #[doc(hidden)]
     pub fn __cipherSuite(&self) -> uint16 { return self.cipherSuite; }

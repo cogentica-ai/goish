@@ -12,7 +12,7 @@
 //
 // goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, InsecureCipherSuites, aeadModes, aesgcmCiphers, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
 // goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, Config, dsaSignature, ecdsaSignature — same.
-// goishlint:ignore GOISH021 Config, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, maxSessionTicketLifetime, maxUselessBytes, pskIdentity, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
+// goishlint:ignore GOISH021 Config, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, maxUselessBytes, pskIdentity, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -1159,6 +1159,13 @@ pub(crate) const certTypeECDSASign: byte = 64;
 pub(crate) const pskModePlain: uint8 = 0;
 /// PSK with (EC)DHE key establishment — the only mode this library uses.
 pub(crate) const pskModeDHE: uint8 = 1;
+
+// Go: common.go — `const maxSessionTicketLifetime = 7 * 24 * time.Hour`
+/// Go: "maxSessionTicketLifetime is the maximum allowed lifetime of a
+/// TLS 1.3 session ticket, and the lifetime we set for all tickets we
+/// send."
+pub(crate) const maxSessionTicketLifetime: crate::time::Duration =
+    crate::time::Duration(7 * 24 * 60 * 60 * 1_000_000_000);
 
 // ─── ClientHelloInfo and CertificateRequestInfo ───────────────────────
 
