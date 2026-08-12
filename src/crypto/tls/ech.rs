@@ -1,4 +1,4 @@
-// go: file crypto/tls/ech.go decls: echConfigErr.Error, parseECHConfig, parseECHConfigList, skipUint8LengthPrefixed, skipUint16LengthPrefixed, validDNSName
+// go: file crypto/tls/ech.go decls: echConfigErr.Error, parseECHConfig, parseECHConfigList, skipUint8LengthPrefixed, skipUint16LengthPrefixed, validDNSName, ECHRejectionError.Error, parseECHExt, marshalEncryptedClientHelloConfigList, generateOuterECHExt, pickECHCipherSuite, pickECHConfig, extractRawExtensions, encodeInnerClientHello
 //
 // crypto/tls — Encrypted Client Hello (draft-ietf-tls-esni), config
 // parsing.
@@ -10,9 +10,9 @@
 // state machine. goish ships no ECH support, so nothing here is wired
 // into a handshake; it is the parser Go's own tests drive directly.
 //
-// goishlint:ignore GOISH018 Error, buildRetryConfigList, computeAndUpdateOuterECHExtension, decodeInnerClientHello, decryptECHExtension, decryptECHPayload, encodeInnerClientHello, encodeOuterExtensions, extractRawExtensions, generateOuterECHExt, init, marshalEncryptedClientHelloConfigList, parseECHExt, pickECHCipherSuite, pickECHConfig, processECHClientHello, sendECHRetryConfigs — the ClientHello-dependent half; see the banner. ROADMAP.md.
+// goishlint:ignore GOISH018 buildRetryConfigList, computeAndUpdateOuterECHExtension, decodeInnerClientHello, decryptECHExtension, decryptECHPayload, encodeOuterExtensions, init, processECHClientHello, sendECHRetryConfigs — the ClientHello-dependent half; see the banner. ROADMAP.md.
 // goishlint:ignore GOISH019 echExtension, echConfig, echCipher, echConfigErr, echContext, echServerContext, echClientContext — the parser's shapes are here; the handshake-side ones are not.
-// goishlint:ignore GOISH021 ECHRejectionError, echAcceptConfirmationLabel, echClientContext, echContext, echExtType, echHRRAcceptConfirmationLabel, echServerContext, errIllegalECHExt, errInvalidECHExt, errMalformedECHConfigList, errMalformedECHExt, innerECHExt, outerECHExt, rawExtension, sortedSupportedAEADs — same.
+// goishlint:ignore GOISH021 echAcceptConfirmationLabel, echClientContext, echContext, echHRRAcceptConfirmationLabel, echServerContext, errIllegalECHExt, errMalformedECHConfigList, sortedSupportedAEADs — same.
 
 #![allow(non_snake_case, dead_code)]
 
@@ -324,4 +324,403 @@ pub(crate) fn validDNSName(name: string) -> bool {
         }
     }
     return true;
+}
+
+
+// ─── Config selection and the encrypted_client_hello extension ────────
+
+use super::common::EncryptedClientHelloKey;
+use super::handshake_messages::{
+    clientHelloMsg, readUint16LengthPrefixed,
+};
+use crate::crypto::cryptobyte;
+use crate::crypto::internal::hpke;
+use crate::types::int;
+
+// Go: ech.go:506-508
+//   type ECHRejectionError struct { RetryConfigList []byte }
+/// Go: "ECHRejectionError is the error type returned when ECH is
+/// rejected by a remote server. If the server offered a ECHConfigList to
+/// use for retries, the RetryConfigList field will contain this list."
+#[derive(Clone, Default)]
+pub struct ECHRejectionError {
+    pub RetryConfigList: slice<byte>,
+}
+
+impl ECHRejectionError {
+    // go: sdk 1.25.5 crypto/tls/ech.go:510-512 ECHRejectionError.Error
+    pub fn Error(&self) -> string {
+        // Go: return "tls: server rejected ECH"
+        return string::from_static("tls: server rejected ECH");
+    }
+}
+
+// go: none — goish idiom: Go satisfies `error` implicitly through
+// `Error() string`; goish requires the trait wiring.
+impl crate::errors::ErrorTrait for ECHRejectionError {
+    // go: none — goish idiom: forwards to the ported inherent `Error`.
+    fn Error(&self) -> string {
+        return ECHRejectionError::Error(self);
+    }
+}
+
+// Go: ech.go:517-522
+//   type echExtType uint8
+//   const ( innerECHExt echExtType = 1; outerECHExt echExtType = 0 )
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub(crate) struct echExtType(pub uint8);
+pub(crate) const innerECHExt: echExtType = echExtType(1);
+pub(crate) const outerECHExt: echExtType = echExtType(0);
+
+crate::var! {
+    /// Go: `var errMalformedECHExt = errors.New(…)`
+    pub(crate) errMalformedECHExt: error = "tls: malformed encrypted_client_hello extension";
+    /// Go: `var errInvalidECHExt = errors.New(…)`
+    pub(crate) errInvalidECHExt: error = "tls: client sent invalid encrypted_client_hello extension";
+}
+
+// go: sdk 1.25.5 crypto/tls/ech.go:524-569 parseECHExt
+/// Parse the `encrypted_client_hello` extension body.
+///
+/// goishlint:ignore GOISH020 parseECHExt — Go's six named results become one tuple
+pub(crate) fn parseECHExt(
+    ext: slice<byte>,
+) -> (
+    echExtType,
+    echCipher,
+    uint8,
+    slice<byte>,
+    slice<byte>,
+    crate::error,
+) {
+    // Go: data := make([]byte, len(ext)); copy(data, ext)
+    //     s := cryptobyte.String(data)
+    let raw: &[byte] = &ext;
+    let data = slice::__from_vec(raw.to_vec());
+    let mut s = CBString::New(data);
+    let mut cs = echCipher::default();
+    let mut configID: uint8 = 0;
+    let mut encap: slice<byte> = slice::new();
+    let mut payload: slice<byte> = slice::new();
+
+    // Go: var echInt uint8
+    //     if !s.ReadUint8(&echInt) { err = errMalformedECHExt; return }
+    //     echType = echExtType(echInt)
+    let mut echInt: uint8 = 0;
+    if !s.ReadUint8(&mut echInt) {
+        return (
+            echExtType(0),
+            cs,
+            0,
+            slice::new(),
+            slice::new(),
+            errMalformedECHExt.into(),
+        );
+    }
+    let echType = echExtType(echInt);
+    // Go: if echType == innerECHExt {
+    //         if !s.Empty() { err = errMalformedECHExt; return }
+    //         return echType, cs, 0, nil, nil, nil }
+    if echType == innerECHExt {
+        if !s.Empty() {
+            return (
+                echType,
+                cs,
+                0,
+                slice::new(),
+                slice::new(),
+                errMalformedECHExt.into(),
+            );
+        }
+        return (
+            echType,
+            cs,
+            0,
+            slice::new(),
+            slice::new(),
+            crate::errors::nil,
+        );
+    }
+    // Go: if echType != outerECHExt { err = errInvalidECHExt; return }
+    if echType != outerECHExt {
+        return (
+            echType,
+            cs,
+            0,
+            slice::new(),
+            slice::new(),
+            errInvalidECHExt.into(),
+        );
+    }
+    // Go: if !s.ReadUint16(&cs.KDFID) { err = errMalformedECHExt; return }
+    //     if !s.ReadUint16(&cs.AEADID) { … }
+    //     if !s.ReadUint8(&configID) { … }
+    //     if !readUint16LengthPrefixed(&s, &encap) { … }
+    //     if !readUint16LengthPrefixed(&s, &payload) { … }
+    if !s.ReadUint16(&mut cs.KDFID)
+        || !s.ReadUint16(&mut cs.AEADID)
+        || !s.ReadUint8(&mut configID)
+        || !readUint16LengthPrefixed(&mut s, &mut encap)
+        || !readUint16LengthPrefixed(&mut s, &mut payload)
+    {
+        return (
+            echType,
+            cs,
+            0,
+            slice::new(),
+            slice::new(),
+            errMalformedECHExt.into(),
+        );
+    }
+
+    // Go: NOTE: clone encap and payload so that mutating them does not
+    // mutate the raw extension bytes.
+    let encapRaw: &[byte] = &encap;
+    let payloadRaw: &[byte] = &payload;
+    return (
+        echType,
+        cs,
+        configID,
+        slice::__from_vec(encapRaw.to_vec()),
+        slice::__from_vec(payloadRaw.to_vec()),
+        crate::errors::nil,
+    );
+}
+
+// go: sdk 1.25.5 crypto/tls/ech.go:571-579 marshalEncryptedClientHelloConfigList
+pub(crate) fn marshalEncryptedClientHelloConfigList(
+    configs: slice<EncryptedClientHelloKey>,
+) -> (slice<byte>, crate::error) {
+    // Go: builder := cryptobyte.NewBuilder(nil)
+    //     builder.AddUint16LengthPrefixed(func(builder …) {
+    //         for _, c := range configs { builder.AddBytes(c.Config) } })
+    //     return builder.Bytes()
+    let mut builder = cryptobyte::NewBuilder(slice::new());
+    builder.AddUint16LengthPrefixed(|builder: &mut cryptobyte::Builder| {
+        for (_, c) in crate::range!(configs.clone()) {
+            builder.AddBytes(&c.Config);
+        }
+    });
+    return builder.Bytes();
+}
+
+// go: sdk 1.25.5 crypto/tls/ech.go:427-436 generateOuterECHExt
+pub(crate) fn generateOuterECHExt(
+    id: uint8,
+    kdfID: uint16,
+    aeadID: uint16,
+    encodedKey: slice<byte>,
+    payload: slice<byte>,
+) -> (slice<byte>, crate::error) {
+    // Go: var b cryptobyte.Builder
+    //     b.AddUint8(0) // outer
+    //     b.AddUint16(kdfID); b.AddUint16(aeadID); b.AddUint8(id)
+    //     b.AddUint16LengthPrefixed(func(b …) { b.AddBytes(encodedKey) })
+    //     b.AddUint16LengthPrefixed(func(b …) { b.AddBytes(payload) })
+    //     return b.Bytes()
+    let mut b = cryptobyte::NewBuilder(slice::new());
+    b.AddUint8(0); // outer
+    b.AddUint16(kdfID);
+    b.AddUint16(aeadID);
+    b.AddUint8(id);
+    b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+        b.AddBytes(&encodedKey);
+    });
+    b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+        b.AddBytes(&payload);
+    });
+    return b.Bytes();
+}
+
+// go: sdk 1.25.5 crypto/tls/ech.go:204-218 pickECHCipherSuite
+/// Go: "NOTE: all of the supported AEADs and KDFs are fine, rather than
+/// imposing some sort of preference here, we just pick the first valid
+/// suite."
+pub(crate) fn pickECHCipherSuite(suites: slice<echCipher>) -> (echCipher, crate::error) {
+    // Go: for _, s := range suites {
+    //         if _, ok := hpke.SupportedAEADs[s.AEADID]; !ok { continue }
+    //         if _, ok := hpke.SupportedKDFs[s.KDFID]; !ok { continue }
+    //         return s, nil }
+    for (_, s) in crate::range!(suites) {
+        if hpke::SupportedAEADs(s.AEADID).is_none() {
+            continue;
+        }
+        if hpke::SupportedKDFs(s.KDFID).is_none() {
+            continue;
+        }
+        return (*s, crate::errors::nil);
+    }
+    // Go: return echCipher{}, errors.New("tls: no supported symmetric
+    //     ciphersuites for ECH")
+    return (
+        echCipher::default(),
+        crate::errors::New("tls: no supported symmetric ciphersuites for ECH"),
+    );
+}
+
+// go: sdk 1.25.5 crypto/tls/ech.go:165-202 pickECHConfig
+/// The first config in the list this library can actually use.
+pub(crate) fn pickECHConfig(list: slice<echConfig>) -> Option<echConfig> {
+    // Go: for _, ec := range list {
+    for (_, ec) in crate::range!(list) {
+        // Go: if _, ok := hpke.SupportedKEMs[ec.KemID]; !ok { continue }
+        if hpke::SupportedKEMs(ec.KemID).is_none() {
+            continue;
+        }
+        // Go: var validSCS bool
+        //     for _, cs := range ec.SymmetricCipherSuite {
+        //         if _, ok := hpke.SupportedAEADs[cs.AEADID]; !ok { continue }
+        //         if _, ok := hpke.SupportedKDFs[cs.KDFID]; !ok { continue }
+        //         validSCS = true; break }
+        //     if !validSCS { continue }
+        let mut validSCS = false;
+        for (_, cs) in crate::range!(ec.SymmetricCipherSuite.clone()) {
+            if hpke::SupportedAEADs(cs.AEADID).is_none() {
+                continue;
+            }
+            if hpke::SupportedKDFs(cs.KDFID).is_none() {
+                continue;
+            }
+            validSCS = true;
+            break;
+        }
+        if !validSCS {
+            continue;
+        }
+        // Go: if !validDNSName(string(ec.PublicName)) { continue }
+        if !validDNSName(string::from_bytes(&ec.PublicName)) {
+            continue;
+        }
+        // Go: var unsupportedExt bool
+        //     for _, ext := range ec.Extensions {
+        //         // If high order bit is set to 1 the extension is mandatory.
+        //         // Since we don't support any extensions, if we see a
+        //         // mandatory bit, we skip the config.
+        //         if ext.Type&uint16(1<<15) != 0 { unsupportedExt = true } }
+        //     if unsupportedExt { continue }
+        let mut unsupportedExt = false;
+        for (_, ext) in crate::range!(ec.Extensions.clone()) {
+            if ext.Type & (1u16 << 15) != 0 {
+                unsupportedExt = true;
+            }
+        }
+        if unsupportedExt {
+            continue;
+        }
+        // Go: return &ec
+        return Some(ec.clone());
+    }
+    // Go: return nil
+    return None;
+}
+
+// Go: ech.go:254-257
+//   type rawExtension struct { extType uint16; data []byte }
+#[derive(Clone, Default)]
+pub(crate) struct rawExtension {
+    pub extType: uint16,
+    pub data: slice<byte>,
+}
+
+// go: sdk 1.25.5 crypto/tls/ech.go:259-283 extractRawExtensions
+/// Reparse the outer ClientHello's extensions in wire order, which is
+/// what ECH's outer-extension decompression needs.
+pub(crate) fn extractRawExtensions(
+    hello: &clientHelloMsg,
+) -> (slice<rawExtension>, crate::error) {
+    // Go: s := cryptobyte.String(hello.original)
+    //     if !s.Skip(4+2+32) || // header, version, random
+    //        !skipUint8LengthPrefixed(&s) || // session ID
+    //        !skipUint16LengthPrefixed(&s) || // cipher suites
+    //        !skipUint8LengthPrefixed(&s) { // compression methods
+    //         return nil, errors.New("tls: malformed outer client hello") }
+    let mut s = CBString::New(slice::__from_vec(hello.original.clone()));
+    if !s.Skip(4 + 2 + 32)
+        || !skipUint8LengthPrefixed(&mut s)
+        || !skipUint16LengthPrefixed(&mut s)
+        || !skipUint8LengthPrefixed(&mut s)
+    {
+        return (
+            slice::new(),
+            crate::errors::New("tls: malformed outer client hello"),
+        );
+    }
+    // Go: var rawExtensions []rawExtension
+    //     var extensions cryptobyte.String
+    //     if !s.ReadUint16LengthPrefixed(&extensions) {
+    //         return nil, errors.New("tls: malformed outer client hello") }
+    let mut rawExtensions: Vec<rawExtension> = Vec::new();
+    let mut extensions = CBString::New(slice::new());
+    if !s.ReadUint16LengthPrefixed(&mut extensions) {
+        return (
+            slice::new(),
+            crate::errors::New("tls: malformed outer client hello"),
+        );
+    }
+
+    // Go: for !extensions.Empty() {
+    //         var extension uint16
+    //         var extData cryptobyte.String
+    //         if !extensions.ReadUint16(&extension) ||
+    //            !extensions.ReadUint16LengthPrefixed(&extData) {
+    //             return nil, errors.New("tls: invalid inner client hello") }
+    //         rawExtensions = append(rawExtensions, rawExtension{extension, extData}) }
+    while !extensions.Empty() {
+        let mut extension: uint16 = 0;
+        let mut extData = CBString::New(slice::new());
+        if !extensions.ReadUint16(&mut extension)
+            || !extensions.ReadUint16LengthPrefixed(&mut extData)
+        {
+            return (
+                slice::new(),
+                crate::errors::New("tls: invalid inner client hello"),
+            );
+        }
+        rawExtensions.push(rawExtension {
+            extType: extension,
+            data: extData.0.clone(),
+        });
+    }
+    // Go: return rawExtensions, nil
+    return (slice::__from_vec(rawExtensions), crate::errors::nil);
+}
+
+// go: sdk 1.25.5 crypto/tls/ech.go:220-236 encodeInnerClientHello
+/// The ECH inner ClientHello, padded per draft-ietf-tls-esni §6.1.3.
+pub(crate) fn encodeInnerClientHello(
+    inner: &clientHelloMsg,
+    maxNameLength: int,
+) -> (slice<byte>, crate::error) {
+    // Go: h, err := inner.marshalMsg(true)
+    //     if err != nil { return nil, err }
+    //     h = h[4:] // strip four byte prefix
+    let (h, err) = inner.marshalMsg(true);
+    if err != crate::errors::nil {
+        return (slice::new(), err);
+    }
+    let h = h.slice(4, h.Len());
+
+    // Go: var paddingLen int
+    //     if inner.serverName != "" {
+    //         paddingLen = max(0, maxNameLength-len(inner.serverName))
+    //     } else {
+    //         paddingLen = maxNameLength + 9
+    //     }
+    //     paddingLen = 31 - ((len(h) + paddingLen - 1) % 32)
+    let mut paddingLen: int;
+    if inner.serverName.len() != 0 {
+        paddingLen = maxNameLength - crate::int(inner.serverName.len());
+        if paddingLen < 0 {
+            paddingLen = 0;
+        }
+    } else {
+        paddingLen = maxNameLength + 9;
+    }
+    paddingLen = 31 - ((h.Len() + paddingLen - 1) % 32);
+
+    // Go: return append(h, make([]byte, paddingLen)...), nil
+    let raw: &[byte] = &h;
+    let mut out: Vec<byte> = raw.to_vec();
+    out.resize(out.len() + paddingLen as usize, 0);
+    return (slice::__from_vec(out), crate::errors::nil);
 }

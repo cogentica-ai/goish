@@ -3129,3 +3129,220 @@ pub fn ticket_parseError(which: crate::types::int) -> crate::gostring::string {
     }
     return err.Error();
 }
+
+// go: none — goish-only: ech.go's extension codec and config selection
+// are unexported in Go, where the tests are in-package. Reports
+// `(type, KDFID, AEADID, configID, encap, payload, err)`.
+#[doc(hidden)]
+pub fn ech_parseExt(
+    ext: crate::goslice::slice<crate::types::byte>,
+) -> (
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+) {
+    let (typ, cs, id, encap, payload, err) = ech::parseECHExt(ext);
+    return (
+        typ.0 as crate::types::int,
+        cs.KDFID as crate::types::int,
+        cs.AEADID as crate::types::int,
+        id as crate::types::int,
+        encap,
+        payload,
+        if err == crate::errors::nil {
+            crate::gostring::string::from_static("")
+        } else {
+            err.Error()
+        },
+    );
+}
+
+// go: none — goish-only: see `ech_parseExt`.
+#[doc(hidden)]
+pub fn ech_generateOuterExt(
+    id: crate::types::uint8,
+    kdfID: crate::types::uint16,
+    aeadID: crate::types::uint16,
+    encodedKey: crate::goslice::slice<crate::types::byte>,
+    payload: crate::goslice::slice<crate::types::byte>,
+) -> crate::goslice::slice<crate::types::byte> {
+    let (b, _) = ech::generateOuterECHExt(id, kdfID, aeadID, encodedKey, payload);
+    return b;
+}
+
+// go: none — goish-only: see `ech_parseExt`. `which`: 0 = two configs,
+// 1 = none.
+#[doc(hidden)]
+pub fn ech_marshalConfigList(
+    which: crate::types::int,
+) -> crate::goslice::slice<crate::types::byte> {
+    let configs = if which == 0 {
+        let mut a = common::EncryptedClientHelloKey::default();
+        a.Config = crate::goslice::slice::__from_vec(alloc::vec![1u8, 2, 3]);
+        let mut b = common::EncryptedClientHelloKey::default();
+        b.Config = crate::goslice::slice::__from_vec(alloc::vec![4u8, 5]);
+        crate::goslice::slice::__from_vec(alloc::vec![a, b])
+    } else {
+        crate::goslice::slice::new()
+    };
+    let (out, _) = ech::marshalEncryptedClientHelloConfigList(configs);
+    return out;
+}
+
+// go: none — goish-only: see `ech_parseExt`. Reports
+// `(KDFID, AEADID, errText)`.
+#[doc(hidden)]
+pub fn ech_pickCipherSuite(
+    pairs: crate::goslice::slice<crate::types::uint16>,
+) -> (
+    crate::types::int,
+    crate::types::int,
+    crate::gostring::string,
+) {
+    let mut suites: alloc::vec::Vec<ech::echCipher> = alloc::vec::Vec::new();
+    let mut i: crate::types::int = 0;
+    while i + 1 < pairs.Len() {
+        suites.push(ech::echCipher {
+            KDFID: pairs[i as usize],
+            AEADID: pairs[(i + 1) as usize],
+        });
+        i += 2;
+    }
+    let (cs, err) = ech::pickECHCipherSuite(crate::goslice::slice::__from_vec(suites));
+    return (
+        cs.KDFID as crate::types::int,
+        cs.AEADID as crate::types::int,
+        if err == crate::errors::nil {
+            crate::gostring::string::from_static("")
+        } else {
+            err.Error()
+        },
+    );
+}
+
+// go: none — goish-only: see `ech_parseExt`. `which` picks the config
+// list: 0 = empty, 1 = usable, 2 = unknown KEM, 3 = empty public name,
+// 4 = no usable cipher suite, 5 = a mandatory extension, 6 = an optional
+// extension, 7 = an unusable config followed by a usable one.
+#[doc(hidden)]
+pub fn ech_pickConfig(which: crate::types::int) -> bool {
+    let good = || {
+        let mut c = ech::echConfig::default();
+        c.KemID = 0x0020;
+        c.PublicName = crate::goslice::slice::__from_vec(b"example.com".to_vec());
+        c.SymmetricCipherSuite = crate::goslice::slice::__from_vec(alloc::vec![ech::echCipher {
+            KDFID: 0x0001,
+            AEADID: 0x0001
+        }]);
+        return c;
+    };
+    let list = match which {
+        0 => crate::goslice::slice::new(),
+        1 => crate::goslice::slice::__from_vec(alloc::vec![good()]),
+        2 => {
+            let mut c = good();
+            c.KemID = 0x9999;
+            crate::goslice::slice::__from_vec(alloc::vec![c])
+        }
+        3 => {
+            let mut c = good();
+            c.PublicName = crate::goslice::slice::new();
+            crate::goslice::slice::__from_vec(alloc::vec![c])
+        }
+        4 => {
+            let mut c = good();
+            c.SymmetricCipherSuite =
+                crate::goslice::slice::__from_vec(alloc::vec![ech::echCipher {
+                    KDFID: 0x9999,
+                    AEADID: 0x9999
+                }]);
+            crate::goslice::slice::__from_vec(alloc::vec![c])
+        }
+        5 => {
+            let mut c = good();
+            c.Extensions = crate::goslice::slice::__from_vec(alloc::vec![ech::echExtension {
+                Type: 0x8001,
+                Data: crate::goslice::slice::new()
+            }]);
+            crate::goslice::slice::__from_vec(alloc::vec![c])
+        }
+        6 => {
+            let mut c = good();
+            c.Extensions = crate::goslice::slice::__from_vec(alloc::vec![ech::echExtension {
+                Type: 0x0001,
+                Data: crate::goslice::slice::new()
+            }]);
+            crate::goslice::slice::__from_vec(alloc::vec![c])
+        }
+        _ => {
+            let mut c = good();
+            c.KemID = 0x9999;
+            crate::goslice::slice::__from_vec(alloc::vec![c, good()])
+        }
+    };
+    return ech::pickECHConfig(list).is_some();
+}
+
+// go: none — goish-only: see `ech_parseExt`. Reports the encoded inner
+// ClientHello's length; the padding rule makes it a fixed value.
+#[doc(hidden)]
+pub fn ech_encodeInner(serverName: crate::gostring::string) -> crate::types::int {
+    let mut inner = handshake_messages::clientHelloMsg::default();
+    inner.vers = common::VersionTLS12;
+    inner.random = alloc::vec![0u8; 32];
+    inner.cipherSuites = alloc::vec![cipher_suites::TLS_AES_128_GCM_SHA256];
+    inner.compressionMethods = alloc::vec![0u8];
+    if serverName.Len() != 0 {
+        inner.serverName = alloc::string::String::from_utf8(serverName.as_bytes().to_vec())
+            .unwrap_or_default();
+    }
+    let (e, _) = ech::encodeInnerClientHello(&inner, 32);
+    return e.Len();
+}
+
+// go: none — goish-only: see `ech_parseExt`. Reports
+// `(extension types in wire order, errText)`.
+#[doc(hidden)]
+pub fn ech_extractRawExtensions(
+    valid: bool,
+) -> (
+    crate::goslice::slice<crate::types::uint16>,
+    crate::gostring::string,
+) {
+    let mut hello = handshake_messages::clientHelloMsg::default();
+    if valid {
+        hello.vers = common::VersionTLS12;
+        hello.random = alloc::vec![0u8; 32];
+        hello.cipherSuites = alloc::vec![cipher_suites::TLS_AES_128_GCM_SHA256];
+        hello.compressionMethods = alloc::vec![0u8];
+        hello.serverName = "example.com".into();
+        hello.scts = true;
+        hello.earlyData = true;
+        let (enc, _) = hello.marshal();
+        hello.original = enc.__into_vec();
+    } else {
+        hello.original = alloc::vec![1u8, 2, 3];
+    }
+    let (exts, err) = ech::extractRawExtensions(&hello);
+    if err != crate::errors::nil {
+        return (crate::goslice::slice::new(), err.Error());
+    }
+    let mut types: alloc::vec::Vec<crate::types::uint16> = alloc::vec::Vec::new();
+    for (_, e) in crate::range!(exts) {
+        types.push(e.extType);
+    }
+    return (
+        crate::goslice::slice::__from_vec(types),
+        crate::gostring::string::from_static(""),
+    );
+}
+
+// go: none — goish-only: see `ech_parseExt`.
+#[doc(hidden)]
+pub fn ech_rejectionError() -> crate::gostring::string {
+    return ech::ECHRejectionError::default().Error();
+}

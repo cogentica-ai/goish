@@ -51,7 +51,7 @@ const testingOnlyGenerateKey: Option<fn() -> (ecdh::PrivateKey, error)> = None;
 
 // Go: hpke.go:25-27
 //   type hkdfKDF struct { hash crypto.Hash }
-struct hkdfKDF {
+pub(crate) struct hkdfKDF {
     hash: crypto::Hash,
 }
 
@@ -133,7 +133,7 @@ pub const DHKEM_X25519_HKDF_SHA256: uint16 = 0x0020;
 
 // go: none — Go's `var SupportedKEMs = map[uint16]struct{…}{…}`; see the
 // file header for why this is a lookup rather than a map.
-fn SupportedKEMs(
+pub(crate) fn SupportedKEMs(
     kemID: uint16,
 ) -> Option<(&'static (dyn ecdh::Curve + Send + Sync), crypto::Hash, uint16)> {
     if kemID == DHKEM_X25519_HKDF_SHA256 {
@@ -300,7 +300,7 @@ pub const AEAD_AES_256_GCM: uint16 = 0x0002;
 pub const AEAD_ChaCha20Poly1305: uint16 = 0x0003;
 
 // go: none — Go's `var SupportedAEADs = map[uint16]struct{…}{…}`.
-fn SupportedAEADs(
+pub(crate) fn SupportedAEADs(
     aeadID: uint16,
 ) -> Option<(
     int,
@@ -330,7 +330,7 @@ pub type KDFID = uint16;
 pub const KDF_HKDF_SHA256: uint16 = 0x0001;
 
 // go: none — Go's `var SupportedKDFs = map[uint16]func() *hkdfKDF{…}`.
-fn SupportedKDFs(kdfID: uint16) -> Option<hkdfKDF> {
+pub(crate) fn SupportedKDFs(kdfID: uint16) -> Option<hkdfKDF> {
     if kdfID == KDF_HKDF_SHA256 {
         return Some(hkdfKDF {
             hash: crypto::SHA256,

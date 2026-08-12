@@ -11,8 +11,8 @@
 // ports — see ROADMAP.md.
 //
 // goishlint:ignore GOISH018 BuildNameToCertificate, CipherSuiteName, CipherSuites, Clone, Context, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, SetSessionTicketKeys, SupportsCertificate, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, defaultConfig, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, fipsAllowChain, fipsAllowedChains, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, initLegacySessionTicketKeyRLocked, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyFromBytes, ticketKeyLifetime, ticketKeyRotation, ticketKeys, time, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
-// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, ClientSessionCache, ClientHelloInfo, CertificateRequestInfo, RenegotiationSupport, Config, EncryptedClientHelloKey, ticketKey, dsaSignature, ecdsaSignature — same.
-// goishlint:ignore GOISH021 CertificateRequestInfo, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, EncryptedClientHelloKey, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultConfig, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, deprecatedSessionTicketKey, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, emptyConfig, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, fipsAllowChain, fipsAllowedChains, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKey, ticketKeyLifetime, ticketKeyRotation, time, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
+// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, ClientSessionCache, ClientHelloInfo, CertificateRequestInfo, RenegotiationSupport, Config, ticketKey, dsaSignature, ecdsaSignature — same.
+// goishlint:ignore GOISH021 CertificateRequestInfo, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultConfig, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, deprecatedSessionTicketKey, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, emptyConfig, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, fipsAllowChain, fipsAllowedChains, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKey, ticketKeyLifetime, ticketKeyRotation, time, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -752,3 +752,26 @@ fn containsCurve(set: &slice<CurveID>, want: CurveID) -> bool {
     }
     return false;
 }
+
+// Go: common.go:890-905
+//   type EncryptedClientHelloKey struct { Config []byte
+//                                         PrivateKey []byte
+//                                         SendAsRetry bool }
+/// Go: "EncryptedClientHelloKey holds a private key that is associated
+/// with a specific ECH config known to a client."
+///
+#[derive(Clone, Default)]
+pub struct EncryptedClientHelloKey {
+    /// Go: "Config should be a marshalled ECHConfig associated with
+    /// PrivateKey. This must match the config provided to clients
+    /// byte-for-byte."
+    pub Config: slice<byte>,
+    /// Go: "PrivateKey should be a marshalled private key. Currently, we
+    /// expect this to be the output of [ecdh.PrivateKey.Bytes]."
+    pub PrivateKey: slice<byte>,
+    /// Go: "SendAsRetry indicates if Config should be sent as part of
+    /// the list of retry configs when ECH is requested by the client but
+    /// rejected by the server."
+    pub SendAsRetry: bool,
+}
+

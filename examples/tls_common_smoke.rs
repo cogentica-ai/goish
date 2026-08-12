@@ -1661,6 +1661,99 @@ fn main() {
     eq("ParseSessionState empty secret", tls::ticket_parseError(3),
        "tls: invalid session encoding");
 
+    // ─── ech.go: the encrypted_client_hello extension codec and config
+    //     selection (draft-ietf-tls-esni). From goref.sh.
+    let pe = |v: alloc::vec::Vec<u8>| tls::ech_parseExt(slice::__from_vec(v));
+    let (_, _, _, _, _, _, e0) = pe(alloc::vec![]);
+    eq("parseECHExt empty", e0, "tls: malformed encrypted_client_hello extension");
+    let (t1, _, _, _, _, _, e1) = pe(alloc::vec![0x01u8]);
+    check_n("parseECHExt inner type", t1, 1);
+    eq("parseECHExt inner err", e1, "");
+    let (_, _, _, _, _, _, e2) = pe(alloc::vec![0x01u8, 0x00]);
+    eq("parseECHExt inner with trailing data", e2,
+       "tls: malformed encrypted_client_hello extension");
+    // An unknown type is *invalid*, not malformed — the server answers
+    // with illegal_parameter rather than decode_error on that one.
+    let (_, _, _, _, _, _, e3) = pe(alloc::vec![0x02u8]);
+    eq("parseECHExt unknown type", e3,
+       "tls: client sent invalid encrypted_client_hello extension");
+    let (t4, kdf4, aead4, id4, encap4, pay4, e4) = pe(alloc::vec![
+        0x00u8, 0x00, 0x01, 0x00, 0x01, 0x2a, 0x00, 0x02, 0xaa, 0xbb, 0x00, 0x03, 1, 2, 3
+    ]);
+    eq("parseECHExt outer err", e4, "");
+    check_n("parseECHExt outer type", t4, 0);
+    check_n("parseECHExt KDFID", kdf4, 1);
+    check_n("parseECHExt AEADID", aead4, 1);
+    check_n("parseECHExt configID", id4, 42);
+    eq("parseECHExt encap", hexOf(encap4), "aabb");
+    eq("parseECHExt payload", hexOf(pay4), "010203");
+    let (_, _, _, _, _, _, e5) = pe(alloc::vec![0x00u8, 0x00, 0x01]);
+    eq("parseECHExt truncated outer", e5,
+       "tls: malformed encrypted_client_hello extension");
+
+    let outer = tls::ech_generateOuterExt(
+        0x2a, 0x0001, 0x0002,
+        slice::__from_vec(alloc::vec![0xaau8, 0xbb]),
+        slice::__from_vec(alloc::vec![1u8, 2, 3]),
+    );
+    eq("generateOuterECHExt", hexOf(outer.clone()), "00000100022a0002aabb0003010203");
+    let (rt, rtKdf, rtAead, rtId, _, _, rtErr) = tls::ech_parseExt(outer);
+    eq("generateOuterECHExt round-trips err", rtErr, "");
+    check_n("generateOuterECHExt round-trips type", rt, 0);
+    check_n("generateOuterECHExt round-trips KDFID", rtKdf, 1);
+    check_n("generateOuterECHExt round-trips AEADID", rtAead, 2);
+    check_n("generateOuterECHExt round-trips configID", rtId, 42);
+
+    eq("marshalEncryptedClientHelloConfigList",
+       hexOf(tls::ech_marshalConfigList(0)), "00050102030405");
+    eq("marshalEncryptedClientHelloConfigList empty",
+       hexOf(tls::ech_marshalConfigList(1)), "0000");
+
+    let pcs = |v: alloc::vec::Vec<u16>| tls::ech_pickCipherSuite(slice::__from_vec(v));
+    let (_, _, pe0) = pcs(alloc::vec![]);
+    eq("pickECHCipherSuite empty", pe0,
+       "tls: no supported symmetric ciphersuites for ECH");
+    let (_, _, pe1) = pcs(alloc::vec![0x9999u16, 0x0001]);
+    eq("pickECHCipherSuite unknown KDF", pe1,
+       "tls: no supported symmetric ciphersuites for ECH");
+    let (_, _, pe2) = pcs(alloc::vec![0x0001u16, 0x9999]);
+    eq("pickECHCipherSuite unknown AEAD", pe2,
+       "tls: no supported symmetric ciphersuites for ECH");
+    // The first *valid* suite wins, not the first suite.
+    let (k3, a3, pe3) = pcs(alloc::vec![0x9999u16, 0x9999, 0x0001, 0x0003]);
+    eq("pickECHCipherSuite skips to the first valid err", pe3, "");
+    check_n("pickECHCipherSuite skips to the first valid KDF", k3, 1);
+    check_n("pickECHCipherSuite skips to the first valid AEAD", a3, 3);
+
+    check("pickECHConfig empty list", !tls::ech_pickConfig(0));
+    check("pickECHConfig usable", tls::ech_pickConfig(1));
+    check("pickECHConfig rejects an unknown KEM", !tls::ech_pickConfig(2));
+    check("pickECHConfig rejects an empty public name", !tls::ech_pickConfig(3));
+    check("pickECHConfig rejects an unusable cipher suite", !tls::ech_pickConfig(4));
+    // The high bit of the extension type means mandatory; goish supports
+    // no ECH extensions, so a mandatory one disqualifies the config.
+    check("pickECHConfig rejects a mandatory extension", !tls::ech_pickConfig(5));
+    check("pickECHConfig accepts an optional extension", tls::ech_pickConfig(6));
+    check("pickECHConfig skips to the first usable", tls::ech_pickConfig(7));
+
+    // The padding rule targets a length ≡ 31 (mod 32) before the four
+    // stripped header bytes, so both cases land on a fixed size.
+    check_n("encodeInnerClientHello without SNI", tls::ech_encodeInner(string::from_static("")), 55);
+    check_n("encodeInnerClientHello with SNI",
+            tls::ech_encodeInner(string::from_static("example.com")), 75);
+
+    let (extTypes, exErr) = tls::ech_extractRawExtensions(true);
+    eq("extractRawExtensions err", exErr, "");
+    check_n("extractRawExtensions count", extTypes.Len(), 3);
+    check_n("extractRawExtensions first is server_name", extTypes[0] as int, 0);
+    check_n("extractRawExtensions second is SCT", extTypes[1] as int, 18);
+    check_n("extractRawExtensions third is early_data", extTypes[2] as int, 42);
+    let (_, exErr2) = tls::ech_extractRawExtensions(false);
+    eq("extractRawExtensions on a truncated hello", exErr2,
+       "tls: malformed outer client hello");
+
+    eq("ECHRejectionError.Error", tls::ech_rejectionError(), "tls: server rejected ECH");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
