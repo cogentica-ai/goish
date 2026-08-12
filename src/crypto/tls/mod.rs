@@ -8698,6 +8698,217 @@ pub fn handshake_client_tls13_processHelloRetryRequest(
     );
 }
 
+// go: none — goish-only: drives the clientHandshakeStateTLS13.handshake
+// driver with a scripted conn: the renegotiation and key-share
+// consistency rejections, the ServerHello vetting, the plain / HRR /
+// ECH-accept / ECH-reject paths run up to the encrypted server flight
+// (EOF), byte-comparing the derived handshake traffic secrets against
+// Go for each transcript shape.
+// which: 0 renegotiation, 1 missing ecdhe, 2 legacy version,
+// 3 plain-to-EOF, 4 HRR-to-EOF, 5 ech_accept, 6 ech_reject.
+#[doc(hidden)]
+pub fn handshake_client_tls13_handshake(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,                   // err
+    crate::goslice::slice<crate::types::byte>, // sink
+    crate::goslice::slice<crate::types::byte>, // client handshake secret
+    crate::goslice::slice<crate::types::byte>, // server handshake secret
+    bool,                                      // echAccepted
+    bool,                                      // echRejected
+    crate::gostring::string,                   // serverName
+    bool,                                      // didHRR
+) {
+    use crate::goslice::slice;
+    let fill = |base: crate::types::byte, n: usize| {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: usize = 0;
+        while i < n {
+            v.push(base.wrapping_add(crate::byte(i)));
+            i += 1;
+        }
+        return v;
+    };
+
+    let (clientEcdhe, _) =
+        crate::crypto::ecdh::X25519().NewPrivateKey(&slice::__from_vec(fill(0x40, 32)));
+    let (serverPriv, _) =
+        crate::crypto::ecdh::X25519().NewPrivateKey(&slice::__from_vec(fill(0x90, 32)));
+    let serverShare = serverPriv.PublicKey().Bytes();
+
+    let clientPub = clientEcdhe.PublicKey().Bytes();
+    let mkHello = || {
+        let mut ch = handshake_messages::clientHelloMsg::default();
+        ch.vers = common::VersionTLS12;
+        ch.random = fill(0x01, 32);
+        ch.sessionId = fill(0x51, 32);
+        ch.cipherSuites = alloc::vec![cipher_suites::TLS_AES_128_GCM_SHA256];
+        ch.compressionMethods = alloc::vec![0u8];
+        ch.supportedVersions = alloc::vec![common::VersionTLS13];
+        ch.supportedCurves = alloc::vec![common::X25519.0, common::CurveP256.0];
+        ch.keyShares = alloc::vec![handshake_messages::keyShare {
+            group: common::X25519.0,
+            data: clientPub.clone().__into_vec(),
+        }];
+        return ch;
+    };
+
+    let mkSH = || {
+        let mut sh = handshake_messages::serverHelloMsg::default();
+        sh.vers = common::VersionTLS12;
+        sh.random = fill(0xB0, 32);
+        sh.sessionId = fill(0x51, 32);
+        sh.cipherSuite = cipher_suites::TLS_AES_128_GCM_SHA256;
+        sh.compressionMethod = 0;
+        sh.supportedVersion = common::VersionTLS13;
+        sh.serverShare = handshake_messages::keyShare {
+            group: common::X25519.0,
+            data: serverShare.clone().__into_vec(),
+        };
+        return sh;
+    };
+
+    let suite =
+        cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256).unwrap();
+    let hash = suite.hash;
+
+    let mut hello = mkHello();
+    let mut sh = mkSH();
+    let mut cfg = Config::default();
+    cfg.ServerName = "secret.example".into();
+    let mut echCtx: Option<handshake_client::echClientContext> = None;
+    let mut feed: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+    let mut handshakes: crate::types::int = 0;
+    let mut ksk = key_schedule::keySharePrivateKeys {
+        curveID: common::X25519,
+        ecdhe: Some(clientEcdhe),
+        mlkem: None,
+    };
+
+    match which {
+        0 => handshakes = 1,
+        1 => ksk.ecdhe = None,
+        2 => sh.supportedVersion = 0,
+        3 => {}
+        4 => {
+            let mut hrr = mkSH();
+            hrr.random = common::helloRetryRequestRandom.to_vec();
+            hrr.serverShare = handshake_messages::keyShare::default();
+            hrr.cookie = alloc::vec![0xC0, 0xC1, 0xC2];
+            sh = hrr;
+            let sh2 = mkSH();
+            let (sh2Bytes, _) = sh2.marshal();
+            feed = alloc::vec![
+                22,
+                3,
+                3,
+                crate::byte(sh2Bytes.Len() >> 8),
+                crate::byte(sh2Bytes.Len())
+            ];
+            let raw: &[crate::types::byte] = &sh2Bytes;
+            feed.extend_from_slice(raw);
+        }
+        _ => {
+            // 5, 6 — ECH accept / reject.
+            let mut innerHello = mkHello();
+            innerHello.serverName = "secret.example".into();
+            innerHello.encryptedClientHello = alloc::vec![1u8];
+            hello.serverName = "public.example".into();
+            let mut ctx = handshake_client::echClientContext::default();
+            if which == 5 {
+                // Compute the matching accept confirmation over the
+                // inner transcript and the zeroed ServerHello random
+                // tail.
+                let (shBytes, _) = sh.marshal();
+                let shRaw: &[crate::types::byte] = &shBytes;
+                let mut ct = handshake_messages::transcriptHasher(hash.New());
+                handshake_messages::transcriptMsg(&innerHello, &mut ct);
+                crate::io::Writer::Write(
+                    &mut ct,
+                    slice::__from_vec(shRaw[..30].to_vec()),
+                );
+                crate::io::Writer::Write(&mut ct, slice::__from_vec(alloc::vec![0u8; 8]));
+                crate::io::Writer::Write(
+                    &mut ct,
+                    slice::__from_vec(shRaw[38..].to_vec()),
+                );
+                let h = crate::hash::HashFunc::New(move || hash.New());
+                let (prk, _) = crate::crypto::hkdf::Extract(
+                    h.clone(),
+                    slice::__from_vec(innerHello.random.clone()),
+                    slice::new(),
+                );
+                let acc = crate::crypto::internal::fips140::tls13::ExpandLabel(
+                    h,
+                    prk,
+                    "ech accept confirmation",
+                    crate::hash::Hash::Sum(&*ct.0, slice::new()),
+                    8,
+                );
+                let raw: &[crate::types::byte] = &acc;
+                sh.random[24..].copy_from_slice(raw);
+            } else {
+                sh.random[24..].copy_from_slice(&fill(0xEE, 8));
+            }
+            ctx.innerHello = Some(innerHello);
+            echCtx = Some(ctx);
+        }
+    }
+
+    let (shBytes, _) = sh.marshal();
+    let mut parsedSH = handshake_messages::serverHelloMsg::default();
+    parsedSH.unmarshal(shBytes);
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setDuplexConn(slice::__from_vec(feed), sink.clone());
+    c.__setHaveVers(true);
+    c.__setVers(common::VersionTLS13);
+    c.__setConfig(cfg);
+    c.handshakes = handshakes;
+
+    let mut hs = handshake_client_tls13::clientHandshakeStateTLS13 {
+        c,
+        serverHello: parsedSH,
+        hello,
+        keyShareKeys: Some(ksk),
+        session: None,
+        earlySecret: None,
+        binderKey: slice::new(),
+        usingPSK: false,
+        sentDummyCCS: false,
+        suite: Some(suite),
+        transcript: None,
+        masterSecret: None,
+        trafficSecret: slice::new(),
+        echContext: echCtx,
+        certReq: None,
+    };
+    let err = hs.handshake();
+    let errText = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let echRejected = match hs.echContext.as_ref() {
+        Some(ech) => ech.echRejected,
+        None => false,
+    };
+    let (inS, outS) = hs.c.__trafficSecrets();
+    return (
+        errText,
+        sink.Lock().clone(),
+        outS,
+        inS,
+        hs.c.__echAccepted(),
+        echRejected,
+        hs.c.__serverName(),
+        hs.c.didHRR,
+    );
+}
+
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below
 // sign and verify against, the same fixture x509_parse_smoke uses.
 // Held once: it was pasted by hand into a second shim and silently

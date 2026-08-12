@@ -1270,6 +1270,274 @@ pub(crate) struct clientHandshakeStateTLS13 {
 }
 
 impl clientHandshakeStateTLS13 {
+    // go: sdk 1.25.5 crypto/tls/handshake_client_tls13.go:47-161 clientHandshakeStateTLS13.handshake
+    /// Go: the TLS 1.3 client handshake driver — vet the ServerHello,
+    /// restart on a HelloRetryRequest, check the ECH accept
+    /// confirmation hidden in the ServerHello random, then sequence the
+    /// key schedule and the server and client flights.
+    pub(crate) fn handshake(&mut self) -> crate::error {
+        use crate::goslice::slice;
+        let suite = self.suite.unwrap();
+
+        // Go: "The server must not select TLS 1.3 in a renegotiation.
+        // See RFC 8446, sections 4.1.2 and 4.1.3."
+        //     if c.handshakes > 0 {
+        //         c.sendAlert(alertProtocolVersion)
+        //         return errors.New("tls: server selected TLS 1.3 in a renegotiation") }
+        if self.c.handshakes > 0 {
+            self.c.sendAlert(super::alert::alertProtocolVersion);
+            return crate::errors::New("tls: server selected TLS 1.3 in a renegotiation");
+        }
+
+        // Go: "Consistency check on the presence of a keyShare and its
+        // parameters."
+        //     if hs.keyShareKeys == nil || hs.keyShareKeys.ecdhe == nil || len(hs.hello.keyShares) == 0 {
+        //         return c.sendAlert(alertInternalError) }
+        if self.keyShareKeys.is_none()
+            || self.keyShareKeys.as_ref().unwrap().ecdhe.is_none()
+            || self.hello.keyShares.len() == 0
+        {
+            return self.c.sendAlert(super::alert::alertInternalError);
+        }
+
+        // Go: if err := hs.checkServerHelloOrHRR(); err != nil { return err }
+        let err = self.checkServerHelloOrHRR();
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: hs.transcript = hs.suite.hash.New()
+        //     if err := transcriptMsg(hs.hello, hs.transcript); err != nil { return err }
+        self.transcript = Some(super::handshake_messages::transcriptHasher(
+            suite.hash.New(),
+        ));
+        {
+            let transcript = self.transcript.as_mut().unwrap();
+            let err = super::handshake_messages::transcriptMsg(&self.hello, transcript);
+            if err != crate::errors::nil {
+                return err;
+            }
+        }
+
+        // Go: if hs.echContext != nil {
+        //         hs.echContext.innerTranscript = hs.suite.hash.New()
+        //         if err := transcriptMsg(hs.echContext.innerHello, hs.echContext.innerTranscript); err != nil {
+        //             return err } }
+        if self.echContext.is_some() {
+            let mut innerTranscript =
+                super::handshake_messages::transcriptHasher(suite.hash.New());
+            let ech = self.echContext.as_mut().unwrap();
+            let err = super::handshake_messages::transcriptMsg(
+                ech.innerHello.as_ref().unwrap(),
+                &mut innerTranscript,
+            );
+            ech.innerTranscript = Some(innerTranscript.0);
+            if err != crate::errors::nil {
+                return err;
+            }
+        }
+
+        // Go: if bytes.Equal(hs.serverHello.random, helloRetryRequestRandom) {
+        //         if err := hs.sendDummyChangeCipherSpec(); err != nil { return err }
+        //         if err := hs.processHelloRetryRequest(); err != nil { return err } }
+        if crate::bytes::Equal(
+            slice::__from_vec(self.serverHello.random.clone()),
+            slice::__from_vec(super::common::helloRetryRequestRandom.to_vec()),
+        ) {
+            let err = self.sendDummyChangeCipherSpec();
+            if err != crate::errors::nil {
+                return err;
+            }
+            let err = self.processHelloRetryRequest();
+            if err != crate::errors::nil {
+                return err;
+            }
+        }
+
+        // Go: if hs.echContext != nil {
+        if self.echContext.is_some() {
+            // Go: confTranscript := cloneHash(hs.echContext.innerTranscript, hs.suite.hash)
+            //     confTranscript.Write(hs.serverHello.original[:30])
+            //     confTranscript.Write(make([]byte, 8))
+            //     confTranscript.Write(hs.serverHello.original[38:])
+            let mut confTranscript = super::handshake_messages::transcriptHasher(
+                super::handshake_server_tls13::cloneHash(
+                    &**self
+                        .echContext
+                        .as_ref()
+                        .unwrap()
+                        .innerTranscript
+                        .as_ref()
+                        .unwrap(),
+                    suite.hash,
+                )
+                .unwrap(),
+            );
+            crate::io::Writer::Write(
+                &mut confTranscript,
+                slice::__from_vec(self.serverHello.original[..30].to_vec()),
+            );
+            crate::io::Writer::Write(
+                &mut confTranscript,
+                slice::__from_vec(alloc::vec![0u8; 8]),
+            );
+            crate::io::Writer::Write(
+                &mut confTranscript,
+                slice::__from_vec(self.serverHello.original[38..].to_vec()),
+            );
+            // Go: h := hs.suite.hash.New
+            //     prk, err := hkdf.Extract(h, hs.echContext.innerHello.random, nil)
+            //     if err != nil { c.sendAlert(alertInternalError); return err }
+            let hash = suite.hash;
+            let h = crate::hash::HashFunc::New(move || hash.New());
+            let (prk, err) = crate::crypto::hkdf::Extract(
+                h.clone(),
+                slice::__from_vec(
+                    self.echContext
+                        .as_ref()
+                        .unwrap()
+                        .innerHello
+                        .as_ref()
+                        .unwrap()
+                        .random
+                        .clone(),
+                ),
+                slice::new(),
+            );
+            if err != crate::errors::nil {
+                self.c.sendAlert(super::alert::alertInternalError);
+                return err;
+            }
+            // Go: acceptConfirmation := tls13.ExpandLabel(h, prk,
+            //         "ech accept confirmation", confTranscript.Sum(nil), 8)
+            let acceptConfirmation = crate::crypto::internal::fips140::tls13::ExpandLabel(
+                h,
+                prk,
+                "ech accept confirmation",
+                crate::hash::Hash::Sum(&*confTranscript.0, slice::new()),
+                8,
+            );
+            // Go: if subtle.ConstantTimeCompare(acceptConfirmation,
+            //         hs.serverHello.random[len(hs.serverHello.random)-8:]) == 1 {
+            let randomTail = slice::__from_vec(
+                self.serverHello.random[self.serverHello.random.len() - 8..].to_vec(),
+            );
+            if crate::crypto::subtle::ConstantTimeCompare(&acceptConfirmation, &randomTail)
+                == 1
+            {
+                // Go: hs.hello = hs.echContext.innerHello
+                //     c.serverName = c.config.ServerName
+                //     hs.transcript = hs.echContext.innerTranscript
+                //     c.echAccepted = true
+                let ech = self.echContext.as_mut().unwrap();
+                self.hello = ech.innerHello.clone().unwrap();
+                self.transcript = Some(super::handshake_messages::transcriptHasher(
+                    ech.innerTranscript.take().unwrap(),
+                ));
+                self.c.serverName = self.c.config.ServerName.clone();
+                self.c.echAccepted = true;
+
+                // Go: if hs.serverHello.encryptedClientHello != nil {
+                //         c.sendAlert(alertUnsupportedExtension)
+                //         return errors.New("tls: unexpected encrypted client hello extension in server hello despite ECH being accepted") }
+                if self.serverHello.encryptedClientHello.len() != 0 {
+                    self.c.sendAlert(super::alert::alertUnsupportedExtension);
+                    return crate::errors::New(
+                        "tls: unexpected encrypted client hello extension in server hello despite ECH being accepted",
+                    );
+                }
+
+                // Go: if hs.hello.serverName == "" && hs.serverHello.serverNameAck {
+                //         c.sendAlert(alertUnsupportedExtension)
+                //         return errors.New("tls: unexpected server_name extension in server hello") }
+                if self.hello.serverName == "" && self.serverHello.serverNameAck
+                {
+                    self.c.sendAlert(super::alert::alertUnsupportedExtension);
+                    return crate::errors::New(
+                        "tls: unexpected server_name extension in server hello",
+                    );
+                }
+            } else {
+                // Go: hs.echContext.echRejected = true
+                self.echContext.as_mut().unwrap().echRejected = true;
+            }
+        }
+
+        // Go: if err := transcriptMsg(hs.serverHello, hs.transcript); err != nil { return err }
+        {
+            let transcript = self.transcript.as_mut().unwrap();
+            let err =
+                super::handshake_messages::transcriptMsg(&self.serverHello, transcript);
+            if err != crate::errors::nil {
+                return err;
+            }
+        }
+
+        // Go: c.buffering = true
+        //     if err := hs.processServerHello(); err != nil { return err }
+        //     if err := hs.sendDummyChangeCipherSpec(); err != nil { return err }
+        //     if err := hs.establishHandshakeKeys(); err != nil { return err }
+        //     if err := hs.readServerParameters(); err != nil { return err }
+        //     if err := hs.readServerCertificate(); err != nil { return err }
+        //     if err := hs.readServerFinished(); err != nil { return err }
+        //     if err := hs.sendClientCertificate(); err != nil { return err }
+        //     if err := hs.sendClientFinished(); err != nil { return err }
+        //     if _, err := c.flush(); err != nil { return err }
+        self.c.buffering = true;
+        let err = self.processServerHello();
+        if err != crate::errors::nil {
+            return err;
+        }
+        let err = self.sendDummyChangeCipherSpec();
+        if err != crate::errors::nil {
+            return err;
+        }
+        let err = self.establishHandshakeKeys();
+        if err != crate::errors::nil {
+            return err;
+        }
+        let err = self.readServerParameters();
+        if err != crate::errors::nil {
+            return err;
+        }
+        let err = self.readServerCertificate();
+        if err != crate::errors::nil {
+            return err;
+        }
+        let err = self.readServerFinished();
+        if err != crate::errors::nil {
+            return err;
+        }
+        let err = self.sendClientCertificate();
+        if err != crate::errors::nil {
+            return err;
+        }
+        let err = self.sendClientFinished();
+        if err != crate::errors::nil {
+            return err;
+        }
+        let (_, err) = self.c.flush();
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: if hs.echContext != nil && hs.echContext.echRejected {
+        //         c.sendAlert(alertECHRequired)
+        //         return &ECHRejectionError{hs.echContext.retryConfigs} }
+        if self.echContext.is_some() && self.echContext.as_ref().unwrap().echRejected {
+            self.c.sendAlert(super::alert::alertECHRequired);
+            return super::ech::ECHRejectionError {
+                RetryConfigList: self.echContext.as_ref().unwrap().retryConfigs.clone(),
+            }
+            .into();
+        }
+
+        // Go: c.isHandshakeComplete.Store(true)
+        //     return nil
+        self.c.isHandshakeComplete = true;
+        return crate::errors::nil;
+    }
+
     // go: sdk 1.25.5 crypto/tls/handshake_client_tls13.go:165-217 clientHandshakeStateTLS13.checkServerHelloOrHRR
     /// Go: the checks a ServerHello and a HelloRetryRequest share —
     /// version, forbidden extensions, the echoed session ID, and the

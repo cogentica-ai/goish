@@ -4170,6 +4170,110 @@ fn main() {
     );
     check_n("the outer hello carries a fresh ECH extension", echLen, 136);
 
+    // ── clientHandshakeStateTLS13.handshake ─────────────────────────
+    //
+    // Ground truth: goref driving the driver with a scripted conn. The
+    // rejection branches are byte-compared; the plain / HRR / ECH paths
+    // run up to the encrypted server flight (EOF) with fixed ephemerals,
+    // so the derived handshake traffic secrets pin each transcript
+    // shape the driver is responsible for sequencing.
+    let phd = |which: int| -> (string, string, string, string, bool, bool, string, bool) {
+        let (e, sink, cs, ss, echAcc, echRej, sni, didHRR) =
+            tls::handshake_client_tls13_handshake(which);
+        return (e, hexOf(sink), hexOf(cs), hexOf(ss), echAcc, echRej, sni, didHRR);
+    };
+
+    let (e, sink, _, _, _, _, _, _) = phd(0);
+    eq(
+        "TLS 1.3 in a renegotiation is rejected",
+        e,
+        "tls: server selected TLS 1.3 in a renegotiation",
+    );
+    eq("the protocol_version alert matches Go", sink, "15030300020246");
+
+    // Go says "local error: tls: internal error" — the "local error: "
+    // prefix is net.OpError's, which goish's sendAlertLocked documents
+    // as a deviation (goish net has no OpError).
+    let (e, sink, _, _, _, _, _, _) = phd(1);
+    eq(
+        "a missing ECDHE key fails the consistency check",
+        e,
+        "tls: internal error",
+    );
+    eq("the internal_error alert matches Go", sink, "15030300020250");
+
+    let (e, sink, _, _, _, _, _, _) = phd(2);
+    eq(
+        "the ServerHello vetting runs inside the driver",
+        e,
+        "tls: server selected TLS 1.3 using the legacy version field",
+    );
+    eq("the legacy-version alert matches Go", sink, "1503030002026d");
+
+    let (e, _, cs, ss, _, _, _, didHRR) = phd(3);
+    eq("the plain driver runs to the encrypted flight", e, "EOF");
+    eq(
+        "the plain-path client handshake secret matches Go",
+        cs,
+        "a64f7e33c2b0e9181b1de3e5c777bde847c052f018b0e6e6edfc6fc07fa496f7",
+    );
+    eq(
+        "the plain-path server handshake secret matches Go",
+        ss,
+        "16c05564fd61c2b74905eae0eb7bbb7d50f982f8fa679e3dc80eac7cbd8c291e",
+    );
+    check("no HRR is recorded on the plain path", !didHRR);
+
+    let (e, sink, cs, ss, _, _, _, didHRR) = phd(4);
+    eq("the HRR path runs to the encrypted flight", e, "EOF");
+    eq(
+        "the CCS and retried hello match Go on the wire",
+        sink,
+        "14030300010116030300930100008f03030102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20205152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f700002130101000044000a00060004001d0017002b0003020304002c00050003c0c1c2003300260024001d002079a631eede1bf9c98f12032cdeadd0e7a079398fc786b88cc846ec89af85a51a",
+    );
+    eq(
+        "the HRR-path client handshake secret matches Go",
+        cs,
+        "0f8396a4873e0e85a415ea2c883bf3744867010349b2c313c89d17d76bdab054",
+    );
+    eq(
+        "the HRR-path server handshake secret matches Go",
+        ss,
+        "a72d59e169eb28c70fa533e9643eb57e81e9f036b9e7aa28418e83b1d04a1d25",
+    );
+    check("didHRR is recorded through the driver", didHRR);
+
+    let (e, _, cs, ss, echAcc, echRej, sni, _) = phd(5);
+    eq("the ECH-accept path runs to the encrypted flight", e, "EOF");
+    check("the ServerHello random confirmation accepts the ECH", echAcc);
+    check("the ECH is not rejected", !echRej);
+    eq("the true server name is restored by the driver", sni, "secret.example");
+    eq(
+        "the inner-transcript client handshake secret matches Go",
+        cs,
+        "15e2878c7e23f121754740479f6a42be8994eb3f774170750bc392d376439d9f",
+    );
+    eq(
+        "the inner-transcript server handshake secret matches Go",
+        ss,
+        "020ea9bcff6f729443facb3cbdf28ca3ed53208d376b7aeee801fb8da9d484cd",
+    );
+
+    let (e, _, cs, ss, echAcc, echRej, _, _) = phd(6);
+    eq("the ECH-reject path runs to the encrypted flight", e, "EOF");
+    check("a mismatched confirmation is not accepted", !echAcc);
+    check("the rejection is recorded for the retry-config error", echRej);
+    eq(
+        "the outer-transcript client handshake secret matches Go",
+        cs,
+        "0ed42e814e10a2ea674302c4758f7503b5c598e18dabc2d53a7d8c1f277b7d42",
+    );
+    eq(
+        "the outer-transcript server handshake secret matches Go",
+        ss,
+        "6860b7131b36636dca4865b1f068abecee324122a9b36315aa653b9d2fd37f3f",
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
