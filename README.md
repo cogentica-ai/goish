@@ -149,7 +149,7 @@ per-P, and an HTTP server with an allocation-free hot path.
 
 ## Status
 
-Active development. The e2e suite runs 278 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
+Active development. The e2e suite runs 281 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
 
 Goish is single-target: `x86_64-unknown-linux-gnu`.
 
@@ -216,13 +216,19 @@ the e2e suite so it cannot drift from the API. `testing.T` carries `Error`/`Erro
 `Skipped`, `Helper`, `Cleanup`, `TempDir`, `Name` and `Run`. `testing/fstest` (47%) and
 `testing/iotest` (55%) are partially ported alongside it.
 
-Four things to know before relying on it. The port is name-level: the `testing` root package
-sits at 22/149 declarations with **no provenance anchors**, so unlike `crypto/` it is not
-diffed against Go — treat it as working code, not a verified port. There is no `testing.B`,
-`testing.M`, `testing.F` or `t.Parallel()`, so benchmarks, fuzzing and parallel tests are
-out. Tests are registered by hand in a slice rather than discovered, because goish has no
-compile-time reflection over modules. And `t.Skip()` currently exits the process instead of
-skipping only the current test, which makes it unusable mid-suite.
+Each test body runs on its own goroutine, so `t.Fatal` and `t.Skip` end that test and leave
+the rest of the suite running — they are `runtime.Goexit` underneath, as in Go. A `Fatal` in
+a subtest spares its siblings.
+
+Three things to know before relying on it. Coverage is partial: the `testing` root package
+sits at 33/149 declarations, and only the parts carrying `// go:` anchors (`match.go` in
+full, plus the `FailNow`/`Skip`/`Run`/`tRunner` core) are diffed against Go — treat the rest
+as working code, not a verified port. There is no `testing.B`, `testing.M`, `testing.F` or
+`t.Parallel()`, so benchmarks, fuzzing and parallel tests are out, and `-run`/`-v` are not
+wired up even though the filter behind them is ported. Tests are registered by hand in a
+slice rather than discovered, because goish has no compile-time reflection over modules. One
+API difference from Go: a subtest closure needs `Send + 'static`, since goish spawns through
+`go!()` and the body must own what it uses.
 
 `cargo test` itself does not work and is not the harness: its test binary links `std`, whose
 `panic_impl` lang item collides with goish's own. Tests build as examples and run through
