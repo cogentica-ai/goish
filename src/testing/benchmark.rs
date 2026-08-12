@@ -1,4 +1,4 @@
-// go: file testing/benchmark.go decls: BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
+// go: file testing/benchmark.go decls: B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
 //
 // testing/benchmark.go — the result type a benchmark reports, its
 // derived per-operation metrics, and the column formatting `go test
@@ -20,8 +20,8 @@
 // Everything in this file is reachable without either: pure arithmetic
 // over a BenchmarkResult a caller filled in, plus the formatting.
 //
-// goishlint:ignore GOISH018 Benchmark, Elapsed, Loop, Next, ReportAllocs, ReportMetric, ResetTimer, RunParallel, SetBytes, SetParallelism, StartTimer, StopTimer, RunBenchmarks, benchmarkName, doBench, launch, loopSlowPath, runN, run, run1, add, stopOrScaleBLoop, processBench, checkParallel, StopTimer, Set, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
-// goishlint:ignore GOISH021 B, PB, InternalBenchmark, benchState, durationOrCountFlag, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchTime, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
+// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, benchmarkName, doBench, launch, loopSlowPath, runN, run, run1, add, stopOrScaleBLoop, processBench, checkParallel, Set, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
+// goishlint:ignore GOISH021 PB, InternalBenchmark, benchState, durationOrCountFlag, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchTime, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
 
 #![allow(non_snake_case)]
 
@@ -259,4 +259,179 @@ pub fn predictN(goalns: int64, prevIters: int64, prevns: int64, last: int64) -> 
     // Go: "Don't run more than 1e9 times."
     n = n.min(1_000_000_000);
     return to_int(n);
+}
+
+// ─── B — the benchmark handle ────────────────────────────────────────
+
+// goishlint:ignore GOISH019 B — a partial port by design: the fields
+// belonging to the benchmark runner (loop/loopPoison, parallelism,
+// context, importPath, previousN, previousDuration, benchFunc,
+// missingBytes, result) and the embedded `common` are absent because
+// the runner is. Enumerated with reasons in the doc below; carrying
+// them as dead fields would imply machinery that is not there.
+// go: sdk 1.25.5 testing/benchmark.go:94-133 B
+/// Go: "B is a type passed to Benchmark functions to manage benchmark
+/// timing and control the number of iterations."
+///
+/// **Partial port.** The fields carried here are the ones the timer and
+/// reporting methods below need. Absent, with reasons:
+///
+///   * `loop` / `loopPoison*` — `B.Loop`'s fast path is recognised by
+///     cmd/compile, which keeps the loop body from being optimised
+///     away. A library cannot arrange that, so `Loop` is not ported and
+///     neither is the poison state that guards it.
+///   * `parallelism`, `context`, `importPath` — belong to the runner
+///     (`run`/`doBench`/`launch`), which is not ported.
+///   * `common` — goish's `T` owns the shared state; a benchmark here
+///     is a value the caller drives, not a subtest of a driver.
+///   * `previousN`, `previousDuration`, `benchFunc`, `missingBytes`,
+///     `result` — read only by `run1`/`launch`/`doBench`. Carried as
+///     dead fields they would imply a runner that is not there, so
+///     they arrive with it.
+#[derive(Default)]
+pub struct B {
+    /// Go: "The number of iterations."
+    pub N: int,
+    bytes: int64,
+    timerOn: bool,
+    showAllocResult: bool,
+    /// Go: "The initial states of memStats.Mallocs and
+    /// memStats.TotalAlloc."
+    startAllocs: uint64,
+    startBytes: uint64,
+    /// Go: "The net total of this test after being run."
+    netAllocs: uint64,
+    netBytes: uint64,
+    /// Go: "Extra metrics collected by ReportMetric."
+    extra: crate::map<string, float64>,
+    start: crate::time::Time,
+    duration: crate::time::Duration,
+}
+
+impl B {
+    // go: sdk 1.25.5 testing/benchmark.go:138-147 B.StartTimer
+    /// Go: "StartTimer starts timing a test. This function is called
+    /// automatically before a benchmark starts, but it can also be used
+    /// to resume timing after a call to StopTimer."
+    ///
+    /// The memory sample is taken here, not just the clock, so that
+    /// allocations made while the timer is stopped are excluded from
+    /// the reported allocs/op.
+    pub fn StartTimer(&mut self) {
+        if !self.timerOn {
+            let mut memStats = crate::runtime::MemStats::default();
+            crate::runtime::ReadMemStats(&mut memStats);
+            self.startAllocs = memStats.Mallocs;
+            self.startBytes = memStats.TotalAlloc;
+            self.start = crate::time::Now();
+            self.timerOn = true;
+        }
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:151-161 B.StopTimer
+    /// Go: "StopTimer stops timing a test. This can be used to pause
+    /// the timer while performing complex initialization that you don't
+    /// want to measure."
+    pub fn StopTimer(&mut self) {
+        if self.timerOn {
+            self.duration = crate::time::Duration(
+                self.duration.0 + crate::time::Since(self.start).0,
+            );
+            let mut memStats = crate::runtime::MemStats::default();
+            crate::runtime::ReadMemStats(&mut memStats);
+            self.netAllocs += memStats.Mallocs - self.startAllocs;
+            self.netBytes += memStats.TotalAlloc - self.startBytes;
+            self.timerOn = false;
+        }
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:166-183 B.ResetTimer
+    /// Go: "ResetTimer zeroes the elapsed benchmark time and memory
+    /// allocation counters and deletes user-reported metrics. It does
+    /// not affect whether the timer is running."
+    pub fn ResetTimer(&mut self) {
+        // Go: allocate or clear the extra map BEFORE reading memory
+        // stats, so the map's own allocation is not charged to the
+        // benchmark.
+        self.extra = crate::map::new();
+        if self.timerOn {
+            let mut memStats = crate::runtime::MemStats::default();
+            crate::runtime::ReadMemStats(&mut memStats);
+            self.startAllocs = memStats.Mallocs;
+            self.startBytes = memStats.TotalAlloc;
+            self.start = crate::time::Now();
+        }
+        self.duration = crate::time::Duration(0);
+        self.netAllocs = 0;
+        self.netBytes = 0;
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:187-187 B.SetBytes
+    /// Go: "SetBytes records the number of bytes processed in a single
+    /// operation. If this is called, the benchmark will report ns/op
+    /// and MB/s."
+    pub fn SetBytes(&mut self, n: int64) {
+        self.bytes = n;
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:192-194 B.ReportAllocs
+    /// Go: "ReportAllocs enables malloc statistics for this benchmark.
+    /// It is equivalent to setting -test.benchmem, but it only affects
+    /// the benchmark function that calls ReportAllocs."
+    pub fn ReportAllocs(&mut self) {
+        self.showAllocResult = true;
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:364-370 B.Elapsed
+    /// Go: "Elapsed returns the measured elapsed time of the benchmark.
+    /// The duration reported by Elapsed matches the one measured by
+    /// StartTimer, and ResetTimer."
+    pub fn Elapsed(&self) -> crate::time::Duration {
+        let mut d = self.duration;
+        if self.timerOn {
+            d = crate::time::Duration(d.0 + crate::time::Since(self.start).0);
+        }
+        return d;
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:381-389 B.ReportMetric
+    /// Go: "ReportMetric adds "n unit" to the reported benchmark
+    /// results. If the metric is per-iteration, the caller should divide
+    /// by b.N, and by convention units should end in "/op". ReportMetric
+    /// overrides any previously reported value for the same unit."
+    ///
+    /// Both panics are Go's. A unit with a space in it would break the
+    /// benchmark output format, which is whitespace-delimited, so a
+    /// silent accept would corrupt every downstream parser.
+    pub fn ReportMetric(&mut self, n: float64, unit: &string) {
+        // Go: if unit == "" { panic("metric unit must not be empty") }
+        if unit.Len() == 0 {
+            panic!("metric unit must not be empty");
+        }
+        // Go: if strings.IndexFunc(unit, unicode.IsSpace) >= 0 {
+        //         panic("metric unit must not contain whitespace") }
+        let u: &str = unit.as_ref();
+        for c in u.chars() {
+            let r: crate::types::rune = crate::rune(u32::from(c));
+            if crate::unicode::IsSpace(r) {
+                panic!("metric unit must not contain whitespace");
+            }
+        }
+        self.extra.Set(unit.clone(), n);
+    }
+
+    // go: none — goish-only: assemble the BenchmarkResult a caller
+    // reports. Go builds this inside `run1`/`doBench`, which belong to
+    // the runner; exposing it lets a caller drive a benchmark by hand
+    // (`StartTimer` / work / `StopTimer` / `Result`) without one.
+    pub fn Result(&self) -> BenchmarkResult {
+        let mut r = BenchmarkResult::default();
+        r.N = self.N;
+        r.T = self.Elapsed();
+        r.Bytes = self.bytes;
+        r.MemAllocs = self.netAllocs;
+        r.MemBytes = self.netBytes;
+        r.Extra = self.extra.clone();
+        return r;
+    }
 }

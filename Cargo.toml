@@ -1199,3 +1199,7 @@ path = "examples/testing_init_flags_smoke.rs"
 [[example]]
 name = "runtime_memstats_smoke"
 path = "examples/runtime_memstats_smoke.rs"
+
+[[example]]
+name = "testing_b_timer_smoke"
+path = "examples/testing_b_timer_smoke.rs"
