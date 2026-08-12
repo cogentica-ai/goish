@@ -13,6 +13,7 @@
 
 pub mod alert;
 pub mod auth;
+mod defaults_fips140;
 
 // go: none — goish-only: auth.go's functions are unexported in Go,
 // where tests are in-package. See the `defaults_*` shims below.
@@ -2273,4 +2274,123 @@ pub fn handshake_messages_serverHelloDone() -> (
     let ok4 = m.unmarshal(raw);
     let ok3 = m.unmarshal(&raw[..3]);
     return (out, ok4, ok3);
+}
+
+// go: none — goish-only: common.go's version and signature-algorithm
+// helpers are unexported in Go, where the tests are in-package.
+#[doc(hidden)]
+pub fn common_supportedVersionsFromMax(
+    maxVersion: crate::types::uint16,
+) -> crate::goslice::slice<crate::types::uint16> {
+    return common::supportedVersionsFromMax(maxVersion);
+}
+
+// go: none — goish-only: see `common_supportedVersionsFromMax`.
+#[doc(hidden)]
+pub fn common_supportedSignatureAlgorithms(
+    minVers: crate::types::uint16,
+) -> crate::goslice::slice<common::SignatureScheme> {
+    return common::supportedSignatureAlgorithms(minVers);
+}
+
+// go: none — goish-only: see `common_supportedVersionsFromMax`.
+#[doc(hidden)]
+pub fn common_supportedSignatureAlgorithmsCert(
+) -> crate::goslice::slice<common::SignatureScheme> {
+    return common::supportedSignatureAlgorithmsCert();
+}
+
+// go: none — goish-only: see `common_supportedVersionsFromMax`.
+#[doc(hidden)]
+pub fn common_isDisabledSignatureAlgorithm(
+    version: crate::types::uint16,
+    s: common::SignatureScheme,
+    isCert: bool,
+) -> bool {
+    return common::isDisabledSignatureAlgorithm(version, s, isCert);
+}
+
+// go: none — goish-only: see `common_supportedVersionsFromMax`.
+#[doc(hidden)]
+pub fn common_isSupportedSignatureAlgorithm(
+    sigAlg: common::SignatureScheme,
+    supported: crate::goslice::slice<common::SignatureScheme>,
+) -> bool {
+    return common::isSupportedSignatureAlgorithm(sigAlg, supported);
+}
+
+// go: none — goish-only: see `common_supportedVersionsFromMax`. Reports
+// `(Error(), Unwrap().Error(), errors::Is against the wrapped error)`.
+#[doc(hidden)]
+pub fn common_certificateVerificationError() -> (
+    crate::gostring::string,
+    crate::gostring::string,
+    bool,
+) {
+    let inner = crate::errors::New("boom");
+    let e = common::CertificateVerificationError {
+        UnverifiedCertificates: crate::goslice::slice::new(),
+        Err: inner.clone(),
+    };
+    let boxed: crate::error = crate::errors::Wrap(e.clone());
+    return (
+        e.Error(),
+        e.Unwrap().Error(),
+        crate::errors::Is(boxed, inner),
+    );
+}
+
+// go: none — goish-only: see `common_supportedVersionsFromMax`.
+#[doc(hidden)]
+pub fn common_unexpectedMessageError(
+    wanted: crate::gostring::string,
+    got: crate::gostring::string,
+) -> crate::gostring::string {
+    return common::unexpectedMessageError(wanted, got).Error();
+}
+
+// go: none — goish-only: defaults_fips140.go's decls are unexported in
+// Go. `which` picks the key: 0 = RSA-2048, 1 = RSA-1024, 2 = P-256,
+// 3 = P-224, 4 = no public key at all.
+#[doc(hidden)]
+pub fn defaults_fips140_isCertificateAllowedFIPS(which: crate::types::int) -> bool {
+    let mut c = crate::crypto::x509::Certificate::default();
+    if which == 0 || which == 1 {
+        // A modulus of exactly 2048 or 1024 bits: top bit set, rest zero.
+        let nbytes: usize = if which == 0 { 256 } else { 128 };
+        let mut raw = alloc::vec![0u8; nbytes];
+        raw[0] = 0x80;
+        let mut n = crate::math::big::NewInt(0);
+        n.SetBytes(crate::goslice::slice::__from_vec(raw));
+        c.PublicKey = crate::goany::Any::new_fn(crate::crypto::rsa::PublicKey { N: n, E: 65537 });
+    } else if which == 2 || which == 3 {
+        let curve: &'static (dyn crate::crypto::elliptic::Curve + Send + Sync) = if which == 2 {
+            crate::crypto::elliptic::P256()
+        } else {
+            crate::crypto::elliptic::P224()
+        };
+        c.PublicKey = crate::goany::Any::new_fn(crate::crypto::ecdsa::PublicKey {
+            Curve: curve,
+            X: crate::math::big::NewInt(1),
+            Y: crate::math::big::NewInt(2),
+        });
+    }
+    return defaults_fips140::isCertificateAllowedFIPS(&c);
+}
+
+// go: none — goish-only: see `defaults_fips140_isCertificateAllowedFIPS`.
+// Reports the four FIPS filter tables' lengths and first entries.
+#[doc(hidden)]
+pub fn defaults_fips140_tableSizes() -> (
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+) {
+    return (
+        defaults_fips140::allowedSupportedVersionsFIPS.len() as crate::types::int,
+        defaults_fips140::allowedCurvePreferencesFIPS.len() as crate::types::int,
+        defaults_fips140::allowedSignatureAlgorithmsFIPS.len() as crate::types::int,
+        defaults_fips140::allowedCipherSuitesFIPS.len() as crate::types::int,
+    );
 }

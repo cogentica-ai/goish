@@ -1144,6 +1144,88 @@ fn main() {
     check("serverHelloDone unmarshal 4 bytes", shdOK4);
     check("serverHelloDone rejects 3 bytes", !shdOK3);
 
+    // ─── common.go: the version and signature-algorithm policy, and
+    //     defaults_fips140.go's filters. From goref.sh.
+    let sv = |m: u16| -> string {
+        let mut out = alloc::string::String::new();
+        for (i, v) in goish::range!(tls::common_supportedVersionsFromMax(m)) {
+            if i > 0 { out.push(' '); }
+            out.push_str(match *v {
+                0x0304 => "1.3", 0x0303 => "1.2", 0x0302 => "1.1", 0x0301 => "1.0", _ => "?",
+            });
+        }
+        return string::from_bytes(out.as_bytes());
+    };
+    eq("supportedVersionsFromMax 1.3", sv(0x0304), "1.3 1.2 1.1 1.0");
+    eq("supportedVersionsFromMax 1.2", sv(0x0303), "1.2 1.1 1.0");
+    eq("supportedVersionsFromMax 1.1", sv(0x0302), "1.1 1.0");
+    eq("supportedVersionsFromMax 1.0", sv(0x0301), "1.0");
+    eq("supportedVersionsFromMax SSL3 is empty", sv(0x0300), "");
+    eq("supportedVersionsFromMax 0xffff", sv(0xffff), "1.3 1.2 1.1 1.0");
+
+    // TLS 1.3 drops PKCS#1 v1.5 (10 -> 7); the _cert list keeps SHA-1
+    // and PKCS#1 v1.5 on purpose, so it is the widest at 12.
+    check_n("supportedSignatureAlgorithms(1.0)",
+            tls::common_supportedSignatureAlgorithms(0x0301).Len(), 10);
+    check_n("supportedSignatureAlgorithms(1.2)",
+            tls::common_supportedSignatureAlgorithms(0x0303).Len(), 10);
+    check_n("supportedSignatureAlgorithms(1.3)",
+            tls::common_supportedSignatureAlgorithms(0x0304).Len(), 7);
+    check_n("supportedSignatureAlgorithmsCert",
+            tls::common_supportedSignatureAlgorithmsCert().Len(), 12);
+
+    // SHA-1 is off in TLS 1.2 as of Go 1.25, and PKCS#1 v1.5 is off in
+    // TLS 1.3 — but both stay allowed on a certificate.
+    check("isDisabled PKCS1WithSHA1 at 1.2",
+          tls::common_isDisabledSignatureAlgorithm(0x0303, tls::PKCS1WithSHA1, false));
+    check("isDisabled ECDSAWithSHA1 at 1.2",
+          tls::common_isDisabledSignatureAlgorithm(0x0303, tls::ECDSAWithSHA1, false));
+    check("isDisabled PKCS1WithSHA1 on a cert is allowed",
+          !tls::common_isDisabledSignatureAlgorithm(0, tls::PKCS1WithSHA1, true));
+    check("PKCS1WithSHA256 allowed at 1.2",
+          !tls::common_isDisabledSignatureAlgorithm(0x0303, tls::PKCS1WithSHA256, false));
+    check("PKCS1WithSHA256 disabled at 1.3",
+          tls::common_isDisabledSignatureAlgorithm(0x0304, tls::PKCS1WithSHA256, false));
+    check("PSSWithSHA256 allowed at 1.3",
+          !tls::common_isDisabledSignatureAlgorithm(0x0304, tls::PSSWithSHA256, false));
+    check("Ed25519 allowed at 1.3",
+          !tls::common_isDisabledSignatureAlgorithm(0x0304, tls::Ed25519, false));
+    check("ECDSAWithP256AndSHA256 allowed at 1.3",
+          !tls::common_isDisabledSignatureAlgorithm(0x0304, tls::ECDSAWithP256AndSHA256, false));
+
+    let supported = slice::__from_vec(alloc::vec![tls::Ed25519, tls::PSSWithSHA256]);
+    check("isSupportedSignatureAlgorithm hit",
+          tls::common_isSupportedSignatureAlgorithm(tls::PSSWithSHA256, supported.clone()));
+    check("isSupportedSignatureAlgorithm miss",
+          !tls::common_isSupportedSignatureAlgorithm(tls::PKCS1WithSHA1, supported));
+
+    let (cveMsg, cveUnwrap, cveIs) = tls::common_certificateVerificationError();
+    eq("CertificateVerificationError.Error", cveMsg,
+       "tls: failed to verify certificate: boom");
+    eq("CertificateVerificationError.Unwrap", cveUnwrap, "boom");
+    check("CertificateVerificationError unwraps for errors::Is", cveIs);
+
+    eq("unexpectedMessageError",
+       tls::common_unexpectedMessageError(string::from_static("*tls.clientHelloMsg"),
+                                          string::from_static("*tls.serverHelloMsg")),
+       "tls: received unexpected handshake message of type *tls.serverHelloMsg when waiting for *tls.clientHelloMsg");
+
+    check("isCertificateAllowedFIPS RSA-2048",
+          tls::defaults_fips140_isCertificateAllowedFIPS(0));
+    check("isCertificateAllowedFIPS rejects RSA-1024",
+          !tls::defaults_fips140_isCertificateAllowedFIPS(1));
+    check("isCertificateAllowedFIPS P-256",
+          tls::defaults_fips140_isCertificateAllowedFIPS(2));
+    check("isCertificateAllowedFIPS rejects P-224",
+          !tls::defaults_fips140_isCertificateAllowedFIPS(3));
+    check("isCertificateAllowedFIPS rejects a keyless certificate",
+          !tls::defaults_fips140_isCertificateAllowedFIPS(4));
+    let (nv, nc, ns_, nsuite) = tls::defaults_fips140_tableSizes();
+    check_n("allowedSupportedVersionsFIPS", nv, 2);
+    check_n("allowedCurvePreferencesFIPS", nc, 4);
+    check_n("allowedSignatureAlgorithmsFIPS", ns_, 10);
+    check_n("allowedCipherSuitesFIPS", nsuite, 6);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

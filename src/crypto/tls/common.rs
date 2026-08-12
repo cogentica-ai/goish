@@ -1,4 +1,4 @@
-// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert
+// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError
 //
 // crypto/tls — the protocol-level type surface: versions, curve IDs,
 // signature schemes and client-auth policy.
@@ -10,9 +10,9 @@
 // `Config` and `Certificate` currently live in mod[rs] and are not yet
 // ports — see ROADMAP.md.
 //
-// goishlint:ignore GOISH018 BuildNameToCertificate, CertificateVerificationError, CipherSuiteName, CipherSuites, Clone, Context, Error, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, SetSessionTicketKeys, SupportsCertificate, Unwrap, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, curvePreferences, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, defaultConfig, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, fipsAllowChain, fipsAllowedChains, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, initLegacySessionTicketKeyRLocked, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, leaf, lruSessionCache, lruSessionCacheEntry, maxSupportedVersion, mutualVersion, needFIPS, rand, roleClient, roleServer, rsaKexCiphers, supportedCipherSuites, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, supportedVersions, supportedVersionsFromMax, supportsCurve, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyFromBytes, ticketKeyLifetime, ticketKeyRotation, ticketKeys, time, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, unexpectedMessageError, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
+// goishlint:ignore GOISH018 supportedVersions, BuildNameToCertificate, CipherSuiteName, CipherSuites, Clone, Context, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, SetSessionTicketKeys, SupportsCertificate, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, curvePreferences, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, defaultConfig, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, fipsAllowChain, fipsAllowedChains, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, initLegacySessionTicketKeyRLocked, leaf, lruSessionCache, lruSessionCacheEntry, maxSupportedVersion, mutualVersion, needFIPS, rand, roleClient, roleServer, rsaKexCiphers, supportedCipherSuites, supportsCurve, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyFromBytes, ticketKeyLifetime, ticketKeyRotation, ticketKeys, time, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
 // goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, ClientSessionCache, ClientHelloInfo, CertificateRequestInfo, RenegotiationSupport, Config, EncryptedClientHelloKey, ticketKey, Certificate, dsaSignature, ecdsaSignature — same.
-// goishlint:ignore GOISH021 Certificate, CertificateRequestInfo, CertificateVerificationError, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, EncryptedClientHelloKey, Error, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, Unwrap, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultConfig, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, deprecatedSessionTicketKey, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, emptyConfig, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, fipsAllowChain, fipsAllowedChains, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, isDisabledSignatureAlgorithm, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, leaf, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, rand, roleClient, roleServer, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, supportedCipherSuites, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, supportedVersions, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKey, ticketKeyLifetime, ticketKeyRotation, time, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
+// goishlint:ignore GOISH021 Certificate, CertificateRequestInfo, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, EncryptedClientHelloKey, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultConfig, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, deprecatedSessionTicketKey, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, emptyConfig, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, fipsAllowChain, fipsAllowedChains, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, leaf, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, rand, roleClient, roleServer, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, supportedCipherSuites, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKey, ticketKeyLifetime, ticketKeyRotation, time, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -226,3 +226,219 @@ pub const Ed25519: SignatureScheme = SignatureScheme(0x0807);
 pub const PKCS1WithSHA1: SignatureScheme = SignatureScheme(0x0201);
 /// Legacy: ECDSA with SHA-1 (TLS 1.2 only).
 pub const ECDSAWithSHA1: SignatureScheme = SignatureScheme(0x0203);
+
+
+// ─── Version, signature-algorithm and error helpers ───────────────────
+//
+// The free functions of common.go — the ones that do not reach into
+// `Config`. Everything here is pure policy over the enumerations above.
+
+extern crate alloc;
+use alloc::vec::Vec;
+
+use super::auth::typeAndHashFromSignatureScheme;
+use super::defaults::defaultSupportedSignatureAlgorithms;
+use super::internal::fips140tls;
+use crate::crypto;
+use crate::error;
+use crate::errors;
+use crate::goslice::slice;
+
+// Go: common.go:1156-1161
+//   var supportedVersions = []uint16{ VersionTLS13, VersionTLS12, VersionTLS11, VersionTLS10 }
+pub(crate) const supportedVersions: &[uint16] = &[
+    VersionTLS13,
+    VersionTLS12,
+    VersionTLS11,
+    VersionTLS10,
+];
+
+// go: sdk 1.25.5 crypto/tls/common.go:1208-1217 supportedVersionsFromMax
+/// The supported versions derived from a legacy maximum version value.
+/// Only versions this library supports are returned — any newer peer
+/// will use `supportedVersions` anyway.
+pub(crate) fn supportedVersionsFromMax(maxVersion: uint16) -> slice<uint16> {
+    // Go: versions := make([]uint16, 0, len(supportedVersions))
+    let mut versions: Vec<uint16> = Vec::with_capacity(supportedVersions.len());
+    // Go: for _, v := range supportedVersions {
+    //         if v > maxVersion { continue }
+    //         versions = append(versions, v)
+    //     }
+    for v in supportedVersions {
+        if *v > maxVersion {
+            continue;
+        }
+        versions.push(*v);
+    }
+    // Go: return versions
+    return slice::__from_vec(versions);
+}
+
+// go: none — goish idiom: `internal/godebug` is not ported. See
+// defaults[rs]'s `godebugValue` for the same one-line hook; Go's
+// `tlssha1` is unset by default, and every branch here compares against
+// a specific string.
+fn tlssha1Value() -> crate::gostring::string {
+    return crate::gostring::string::from_static("");
+}
+
+// go: sdk 1.25.5 crypto/tls/common.go:1696-1704 supportedSignatureAlgorithms
+/// The signature schemes we will accept from a peer negotiating at
+/// `minVers` or above.
+///
+/// Deviation: Go consults `testingOnlySupportedSignatureAlgorithms`, a
+/// test hook goish has no way to set from outside the package.
+pub(crate) fn supportedSignatureAlgorithms(minVers: uint16) -> slice<SignatureScheme> {
+    // Go: sigAlgs := defaultSupportedSignatureAlgorithms()
+    //     if testingOnlySupportedSignatureAlgorithms != nil { sigAlgs = slices.Clone(…) }
+    let sigAlgs = defaultSupportedSignatureAlgorithms();
+    // Go: return slices.DeleteFunc(sigAlgs, func(s SignatureScheme) bool {
+    //         return isDisabledSignatureAlgorithm(minVers, s, false) })
+    let mut out: Vec<SignatureScheme> = Vec::new();
+    for (_, s) in crate::range!(sigAlgs) {
+        if !isDisabledSignatureAlgorithm(minVers, *s, false) {
+            out.push(*s);
+        }
+    }
+    return slice::__from_vec(out);
+}
+
+// go: sdk 1.25.5 crypto/tls/common.go:1742-1747 supportedSignatureAlgorithmsCert
+/// The signature schemes we will accept on a *certificate*. Wider than
+/// [`supportedSignatureAlgorithms`] on purpose — see the comment in
+/// `isDisabledSignatureAlgorithm`.
+pub(crate) fn supportedSignatureAlgorithmsCert() -> slice<SignatureScheme> {
+    // Go: sigAlgs := defaultSupportedSignatureAlgorithms()
+    let sigAlgs = defaultSupportedSignatureAlgorithms();
+    // Go: return slices.DeleteFunc(sigAlgs, func(s SignatureScheme) bool {
+    //         return isDisabledSignatureAlgorithm(0, s, true) })
+    let mut out: Vec<SignatureScheme> = Vec::new();
+    for (_, s) in crate::range!(sigAlgs) {
+        if !isDisabledSignatureAlgorithm(0, *s, true) {
+            out.push(*s);
+        }
+    }
+    return slice::__from_vec(out);
+}
+
+// go: sdk 1.25.5 crypto/tls/common.go:1708-1740 isDisabledSignatureAlgorithm
+/// Whether `s` is off for a peer negotiating `version`. `isCert` widens
+/// the answer for the `signature_algorithms_cert` extension.
+pub(crate) fn isDisabledSignatureAlgorithm(
+    version: uint16,
+    s: SignatureScheme,
+    isCert: bool,
+) -> bool {
+    // Go: if fips140tls.Required() && !slices.Contains(allowedSignatureAlgorithmsFIPS, s) { return true }
+    if fips140tls::Required()
+        && !super::defaults_fips140::allowedSignatureAlgorithmsFIPS.contains(&s)
+    {
+        return true;
+    }
+
+    // Go: For the _cert extension we include all algorithms, including
+    // SHA-1 and PKCS#1 v1.5, because it's more likely that something on
+    // our side will be willing to accept a *-with-SHA1 certificate (e.g.
+    // with a custom VerifyConnection or by a direct match with the
+    // CertPool), than that the peer would have a better certificate but
+    // is just choosing not to send it. crypto/x509 will refuse to verify
+    // important SHA-1 signatures anyway.
+    if isCert {
+        return false;
+    }
+
+    // Go: TLS 1.3 removed support for PKCS#1 v1.5 and SHA-1 signatures,
+    // and Go 1.25 removed support for SHA-1 signatures in TLS 1.2.
+    if version > VersionTLS12 {
+        let (sigType, sigHash, _) = typeAndHashFromSignatureScheme(s);
+        if sigType == signaturePKCS1v15 || sigHash == crypto::SHA1 {
+            return true;
+        }
+    } else if tlssha1Value() != crate::gostring::string::from_static("1") {
+        let (_, sigHash, _) = typeAndHashFromSignatureScheme(s);
+        if sigHash == crypto::SHA1 {
+            return true;
+        }
+    }
+
+    // Go: return false
+    return false;
+}
+
+// go: sdk 1.25.5 crypto/tls/common.go:1749-1751 isSupportedSignatureAlgorithm
+pub(crate) fn isSupportedSignatureAlgorithm(
+    sigAlg: SignatureScheme,
+    supportedSignatureAlgorithms: slice<SignatureScheme>,
+) -> bool {
+    // Go: return slices.Contains(supportedSignatureAlgorithms, sigAlg)
+    for (_, s) in crate::range!(supportedSignatureAlgorithms) {
+        if *s == sigAlg {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Go: common.go:1754-1758
+//   type CertificateVerificationError struct {
+//       UnverifiedCertificates []*x509.Certificate
+//       Err                    error
+//   }
+/// Returned when certificate verification fails during the handshake.
+#[derive(Clone, Default)]
+pub struct CertificateVerificationError {
+    /// Go: "UnverifiedCertificates and its contents should not be
+    /// modified."
+    pub UnverifiedCertificates: slice<crate::crypto::x509::Certificate>,
+    pub Err: error,
+}
+
+impl CertificateVerificationError {
+    // go: sdk 1.25.5 crypto/tls/common.go:1760-1762 CertificateVerificationError.Error
+    pub fn Error(&self) -> crate::gostring::string {
+        // Go: return fmt.Sprintf("tls: failed to verify certificate: %s", e.Err)
+        return fmt::Sprintf!("tls: failed to verify certificate: %s", self.Err.Error());
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1764-1766 CertificateVerificationError.Unwrap
+    pub fn Unwrap(&self) -> error {
+        // Go: return e.Err
+        return self.Err.clone();
+    }
+}
+
+// go: none — goish idiom: Go satisfies `error` implicitly through the
+// `Error() string` method, and `errors.Is` reaches `Err` through an
+// `interface { Unwrap() error }` assertion. goish's `ErrorTrait` carries
+// both, so the wiring forwards to the two ported methods.
+impl errors::ErrorTrait for CertificateVerificationError {
+    // go: none — goish idiom: forwards to the ported inherent `Error`.
+    fn Error(&self) -> crate::gostring::string {
+        return CertificateVerificationError::Error(self);
+    }
+    // go: none — goish idiom: forwards to the ported inherent `Unwrap`.
+    fn Unwrap(&self) -> error {
+        return CertificateVerificationError::Unwrap(self);
+    }
+}
+
+// go: sdk 1.25.5 crypto/tls/common.go:1687-1689 unexpectedMessageError
+/// Deviation: Go's message renders `%T` — the dynamic type of each
+/// message — which goish's `Any` cannot produce (the downcast registry
+/// answers "is it a T", not "what is it"). The caller passes the two
+/// names instead, and the rest of the message is verbatim. The same
+/// deviation is documented in auth[rs].
+///
+/// goishlint:ignore GOISH020 unexpectedMessageError — Go's two `any` arguments become their two type names
+pub(crate) fn unexpectedMessageError(
+    wanted: crate::gostring::string,
+    got: crate::gostring::string,
+) -> error {
+    // Go: return fmt.Errorf("tls: received unexpected handshake message
+    //         of type %T when waiting for %T", got, wanted)
+    return fmt::Errorf!(
+        "tls: received unexpected handshake message of type %s when waiting for %s",
+        got,
+        wanted
+    );
+}
