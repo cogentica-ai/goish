@@ -295,6 +295,51 @@ fn main() {
     let (_, _, err) = tls::auth_typeAndHashFromSignatureScheme(tls::SignatureScheme(0x9999));
     check("unknown scheme errors", err != goish::nil);
 
+    // ─── handshake_messages.go — wire bytes, exact against Go.
+    eq(
+        "keyUpdateMsg(false)",
+        hexOf(tls::msg_keyUpdate_marshal(false)),
+        "1800000100",
+    );
+    eq(
+        "keyUpdateMsg(true)",
+        hexOf(tls::msg_keyUpdate_marshal(true)),
+        "1800000101",
+    );
+    eq(
+        "endOfEarlyDataMsg",
+        hexOf(tls::msg_endOfEarlyData_marshal()),
+        "05000000",
+    );
+    eq(
+        "certificateStatusMsg",
+        hexOf(tls::msg_certificateStatus_marshal(slice::__from_vec(alloc::vec![
+            0x30u8, 0x03, 0x0a, 0x01, 0x00
+        ]))),
+        "160000090100000530030a0100",
+    );
+
+    // Round-trip through the parser.
+    let (ok, req) = tls::msg_keyUpdate_unmarshal(tls::msg_keyUpdate_marshal(true));
+    check("keyUpdate round-trip ok", ok);
+    check("keyUpdate round-trip value", req);
+    let (ok, resp) = tls::msg_certificateStatus_unmarshal(tls::msg_certificateStatus_marshal(
+        slice::__from_vec(alloc::vec![0x30u8, 0x03, 0x0a, 0x01, 0x00]),
+    ));
+    check("certStatus round-trip ok", ok);
+    eq("certStatus round-trip response", hexOf(resp), "30030a0100");
+
+    // Rejections Go makes — each verified against Go, not assumed.
+    let (ok, _) = tls::msg_keyUpdate_unmarshal(slice::__from_vec(alloc::vec![24u8, 0, 0, 1, 2]));
+    check("keyUpdate rejects updateRequested=2", !ok);
+    let (ok, _) =
+        tls::msg_keyUpdate_unmarshal(slice::__from_vec(alloc::vec![24u8, 0, 0, 1, 1, 0xff]));
+    check("keyUpdate rejects trailing data", !ok);
+    let (ok, _) = tls::msg_certificateStatus_unmarshal(slice::__from_vec(alloc::vec![
+        22u8, 0, 0, 4, 1, 0, 0, 0
+    ]));
+    check("certStatus rejects empty OCSP response", !ok);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

@@ -149,6 +149,53 @@ pub mod handshake_client_tls13;
 pub mod session;
 mod handshake_client;
 mod handshake_messages;
+
+// go: none — goish-only: the handshake message types are unexported in
+// Go, where the tests are in-package. See the `defaults_*` shims below.
+#[doc(hidden)]
+pub fn msg_keyUpdate_marshal(updateRequested: bool) -> crate::goslice::slice<crate::types::byte> {
+    let m = handshake_messages::keyUpdateMsg { updateRequested };
+    let (b, _) = m.marshal();
+    return b;
+}
+
+// go: none — goish-only: see `msg_keyUpdate_marshal`.
+#[doc(hidden)]
+pub fn msg_keyUpdate_unmarshal(
+    data: crate::goslice::slice<crate::types::byte>,
+) -> (bool, bool) {
+    let mut m = handshake_messages::keyUpdateMsg::default();
+    let ok = m.unmarshal(data);
+    return (ok, m.updateRequested);
+}
+
+// go: none — goish-only: see `msg_keyUpdate_marshal`.
+#[doc(hidden)]
+pub fn msg_endOfEarlyData_marshal() -> crate::goslice::slice<crate::types::byte> {
+    let m = handshake_messages::endOfEarlyDataMsg {};
+    let (b, _) = m.marshal();
+    return b;
+}
+
+// go: none — goish-only: see `msg_keyUpdate_marshal`.
+#[doc(hidden)]
+pub fn msg_certificateStatus_marshal(
+    response: crate::goslice::slice<crate::types::byte>,
+) -> crate::goslice::slice<crate::types::byte> {
+    let m = handshake_messages::certificateStatusMsg { response };
+    let (b, _) = m.marshal();
+    return b;
+}
+
+// go: none — goish-only: see `msg_keyUpdate_marshal`.
+#[doc(hidden)]
+pub fn msg_certificateStatus_unmarshal(
+    data: crate::goslice::slice<crate::types::byte>,
+) -> (bool, crate::goslice::slice<crate::types::byte>) {
+    let mut m = handshake_messages::certificateStatusMsg::default();
+    let ok = m.unmarshal(data);
+    return (ok, m.response);
+}
 mod handshake_server_tls13;
 
 /// Gate for the per-record debug prints in `Conn::Read`/`Conn::Write`.

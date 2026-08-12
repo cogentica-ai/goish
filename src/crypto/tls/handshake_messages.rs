@@ -1,5 +1,6 @@
 // goishlint:ignore GOISH018 addBytesWithLength, addUint64, clone, marshalCertificate, marshalMsg, marshalWithoutBinders, originalBytes, readUint16LengthPrefixed, readUint24LengthPrefixed, readUint64, readUint8LengthPrefixed, transcriptMsg, unmarshalCertificate, updateBinders — handshake_messages.go is 1963 lines and 52 functions; this file is a deliberate SUBSET covering only the messages goish's own TLS 1.3 client and server exchange. The six it does port are anchored above and diffed against Go; everything listed here is genuinely absent, not renamed. See ROADMAP.md.
 // goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, marshalingFunction, newSessionTicketMsg, newSessionTicketMsgTLS13, serverHelloDoneMsg, serverKeyExchangeMsg, transcriptHash — same: the message types the subset does not handle.
+// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -895,5 +896,215 @@ impl finishedMsg {
             b.AddBytes(&self.verifyData);
         });
         b.Bytes()
+    }
+}
+
+
+// ─── Verbatim ports on the real cryptobyte ────────────────────────────
+//
+// Everything above is the pre-existing hand-written subset, built on the
+// private `builder` / `cbs` mini-cryptobyte. Everything below is a
+// verbatim port of handshake_messages[go] on the ported
+// `crypto/cryptobyte`. Nothing below is wired into the live handshake:
+// the two coexist until conn[go] lands and the file can be replaced in
+// one piece. See ROADMAP.md.
+
+use crate::crypto::cryptobyte;
+// `CBString` rather than `cryptobyte::String`: the bare name reads as
+// Rust's `String` to GOISH009, and this is Go's cryptobyte.String — a
+// TLS byte-string cursor. Same spelling crypto/x509/parser[rs] uses.
+use crate::crypto::cryptobyte::String as CBString;
+use crate::error;
+use crate::goslice::slice;
+use crate::types::uint8;
+
+// The handshake message type bytes this file needs. Go declares the
+// full set in common[go] lines 84-102, which lands with the record
+// layer; these three are inlined here so this file anchors to exactly
+// one Go file (GOISH015).
+const typeEndOfEarlyData: uint8 = 5;
+const typeCertificateStatus: uint8 = 22;
+const typeKeyUpdate: uint8 = 24;
+
+/// `statusTypeOCSP uint8 = 1` in common[go]; see the note above.
+const statusTypeOCSP: uint8 = 1;
+
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:22-24 readUint8LengthPrefixed
+/// Go: "readUint8LengthPrefixed acts like s.ReadUint8LengthPrefixed, but
+/// targets a []byte instead of a cryptobyte.String."
+pub(crate) fn readUint8LengthPrefixed(
+    s: &mut CBString,
+    out: &mut slice<byte>,
+) -> bool {
+    // Go: return s.ReadUint8LengthPrefixed((*cryptobyte.String)(out))
+    let mut tmp = CBString::New(slice::__from_vec(Vec::new()));
+    if !s.ReadUint8LengthPrefixed(&mut tmp) {
+        return false;
+    }
+    *out = tmp.0;
+    return true;
+}
+
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:26-28 readUint16LengthPrefixed
+/// Go: the uint16 mirror of [`readUint8LengthPrefixed`].
+pub(crate) fn readUint16LengthPrefixed(
+    s: &mut CBString,
+    out: &mut slice<byte>,
+) -> bool {
+    // Go: return s.ReadUint16LengthPrefixed((*cryptobyte.String)(out))
+    let mut tmp = CBString::New(slice::__from_vec(Vec::new()));
+    if !s.ReadUint16LengthPrefixed(&mut tmp) {
+        return false;
+    }
+    *out = tmp.0;
+    return true;
+}
+
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:30-32 readUint24LengthPrefixed
+/// Go: the uint24 mirror of [`readUint8LengthPrefixed`].
+pub(crate) fn readUint24LengthPrefixed(
+    s: &mut CBString,
+    out: &mut slice<byte>,
+) -> bool {
+    // Go: return s.ReadUint24LengthPrefixed((*cryptobyte.String)(out))
+    let mut tmp = CBString::New(slice::__from_vec(Vec::new()));
+    if !s.ReadUint24LengthPrefixed(&mut tmp) {
+        return false;
+    }
+    *out = tmp.0;
+    return true;
+}
+
+// Go: handshake_messages.go — `type keyUpdateMsg struct { updateRequested bool }`
+/// RFC 8446 §4.6.3 KeyUpdate.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub(crate) struct keyUpdateMsg {
+    pub updateRequested: bool,
+}
+
+impl keyUpdateMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1799-1811 keyUpdateMsg.marshal
+    /// Serialize the KeyUpdate message.
+    pub(crate) fn marshal(&self) -> (slice<byte>, error) {
+        // Go: var b cryptobyte.Builder; b.AddUint8(typeKeyUpdate)
+        let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::new()));
+        b.AddUint8(typeKeyUpdate);
+        // Go: b.AddUint24LengthPrefixed(func(b *cryptobyte.Builder) {
+        //         if m.updateRequested { b.AddUint8(1) } else { b.AddUint8(0) }
+        //     })
+        let updateRequested = self.updateRequested;
+        b.AddUint24LengthPrefixed(|b: &mut cryptobyte::Builder| {
+            if updateRequested {
+                b.AddUint8(1);
+            } else {
+                b.AddUint8(0);
+            }
+        });
+        // Go: return b.Bytes()
+        return b.Bytes();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1813-1831 keyUpdateMsg.unmarshal
+    /// Parse a KeyUpdate message. Reports whether it was well-formed.
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        // Go: s := cryptobyte.String(data)
+        let mut s = CBString::New(data);
+
+        // Go: var updateRequested uint8
+        //     if !s.Skip(4) || // message type and uint24 length field
+        //        !s.ReadUint8(&updateRequested) || !s.Empty() { return false }
+        let mut updateRequested: uint8 = 0;
+        if !s.Skip(4) || !s.ReadUint8(&mut updateRequested) || !s.Empty() {
+            return false;
+        }
+        // Go: switch updateRequested { case 0: … case 1: … default: return false }
+        if updateRequested == 0 {
+            self.updateRequested = false;
+        } else if updateRequested == 1 {
+            self.updateRequested = true;
+        } else {
+            return false;
+        }
+        // Go: return true
+        return true;
+    }
+}
+
+// Go: handshake_messages.go — `type endOfEarlyDataMsg struct{}`
+/// RFC 8446 §4.5 EndOfEarlyData — an empty message.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub(crate) struct endOfEarlyDataMsg {}
+
+impl endOfEarlyDataMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1768-1772 endOfEarlyDataMsg.marshal
+    /// Serialize: a bare header with a zero-length body.
+    pub(crate) fn marshal(&self) -> (slice<byte>, error) {
+        // Go: x := make([]byte, 4); x[0] = typeEndOfEarlyData; return x, nil
+        let mut x: Vec<byte> = alloc::vec![0u8; 4];
+        x[0] = typeEndOfEarlyData;
+        return (slice::__from_vec(x), crate::errors::nil);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1774-1776 endOfEarlyDataMsg.unmarshal
+    /// Parse: well-formed exactly when the message is the 4-byte header.
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        // Go: return len(data) == 4
+        return data.Len() == 4;
+    }
+}
+
+// Go: handshake_messages.go — `type certificateStatusMsg struct { response []byte }`
+/// RFC 6066 §8 CertificateStatus, carrying a stapled OCSP response.
+#[derive(Clone, Default, PartialEq)]
+pub(crate) struct certificateStatusMsg {
+    pub response: slice<byte>,
+}
+
+impl certificateStatusMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1735-1747 certificateStatusMsg.marshal
+    /// Serialize the CertificateStatus message.
+    pub(crate) fn marshal(&self) -> (slice<byte>, error) {
+        // Go: var b cryptobyte.Builder; b.AddUint8(typeCertificateStatus)
+        let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::new()));
+        b.AddUint8(typeCertificateStatus);
+        // Go: b.AddUint24LengthPrefixed(func(b) {
+        //         b.AddUint8(statusTypeOCSP)
+        //         b.AddUint24LengthPrefixed(func(b) { b.AddBytes(m.response) })
+        //     })
+        let response = self.response.clone();
+        b.AddUint24LengthPrefixed(|b: &mut cryptobyte::Builder| {
+            b.AddUint8(statusTypeOCSP);
+            b.AddUint24LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                b.AddBytes(&response);
+            });
+        });
+        // Go: return b.Bytes()
+        return b.Bytes();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1749-1761 certificateStatusMsg.unmarshal
+    /// Parse a CertificateStatus message. Reports whether it was
+    /// well-formed; an empty OCSP response is rejected, as Go does.
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        // Go: s := cryptobyte.String(data)
+        let mut s = CBString::New(data);
+
+        // Go: var statusType uint8
+        //     if !s.Skip(4) || !s.ReadUint8(&statusType) ||
+        //        statusType != statusTypeOCSP ||
+        //        !readUint24LengthPrefixed(&s, &m.response) ||
+        //        len(m.response) == 0 || !s.Empty() { return false }
+        let mut statusType: uint8 = 0;
+        if !s.Skip(4)
+            || !s.ReadUint8(&mut statusType)
+            || statusType != statusTypeOCSP
+            || !readUint24LengthPrefixed(&mut s, &mut self.response)
+            || self.response.Len() == 0
+            || !s.Empty()
+        {
+            return false;
+        }
+        // Go: return true
+        return true;
     }
 }
