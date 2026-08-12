@@ -1754,6 +1754,32 @@ fn main() {
 
     eq("ECHRejectionError.Error", tls::ech_rejectionError(), "tls: server rejected ECH");
 
+    // ─── common.go: ticket-key derivation and the FIPS chain filter.
+    //     ticketKeyFromBytes expands 32 external bytes through SHA-512
+    //     and deliberately discards the first 16 — they used to ride on
+    //     the wire as a ticket prefix and MUST NOT be a secret. From
+    //     goref.sh.
+    let seq32 = seqBytes(32, 0);
+    let (tkAes, tkHmac) = tls::common_ticketKeyFromBytes(seq32);
+    eq("ticketKeyFromBytes aesKey", hexOf(tkAes), "9d6d1440dede12e6a125f1841fff8e6f");
+    eq("ticketKeyFromBytes hmacKey", hexOf(tkHmac), "a9d71862a3e5746b571be3d187b00410");
+    let (tzAes, tzHmac) = tls::common_ticketKeyFromBytes(slice::__from_vec(alloc::vec![0u8; 32]));
+    eq("ticketKeyFromBytes zero aesKey", hexOf(tzAes), "58b57970b5267a90f57960924a87f196");
+    eq("ticketKeyFromBytes zero hmacKey", hexOf(tzHmac), "0a6a85eaa642dac835424b5d7c8d637c");
+
+    // fips140tls is not required by default, so chains pass through
+    // untouched — including an empty list, which does NOT error.
+    let (fc1, fe1) = tls::common_fipsAllowedChains(1);
+    check_n("fipsAllowedChains passes one chain through", fc1, 1);
+    eq("fipsAllowedChains passthrough err", fe1, "");
+    let (fc0, fe0) = tls::common_fipsAllowedChains(0);
+    check_n("fipsAllowedChains passes an empty list through", fc0, 0);
+    eq("fipsAllowedChains empty err", fe0, "");
+    check("fipsAllowChain rejects an empty chain", !tls::common_fipsAllowChain(0));
+    check("fipsAllowChain rejects a keyless certificate", !tls::common_fipsAllowChain(1));
+
+    check("defaultConfig is the zero Config", tls::common_defaultConfigIsZero());
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

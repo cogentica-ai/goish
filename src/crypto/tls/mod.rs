@@ -429,6 +429,11 @@ pub struct Config {
     /// non-empty, the client will attempt Encrypted Client Hello, which
     /// requires TLS 1.3. Reference: common.go:781.
     pub EncryptedClientHelloConfigList: slice<byte>,
+    /// NameToCertificate maps from a certificate name to an element of
+    /// Certificates. Deprecated in Go — see Config.GetCertificate — but
+    /// still the field BuildNameToCertificate fills. Reference:
+    /// common.go:576.
+    pub NameToCertificate: crate::gomap::map<string, Certificate>,
 }
 
 // The TLS protocol-version constants live in common[rs] now, ported
@@ -3345,4 +3350,69 @@ pub fn ech_extractRawExtensions(
 #[doc(hidden)]
 pub fn ech_rejectionError() -> crate::gostring::string {
     return ech::ECHRejectionError::default().Error();
+}
+
+// go: none — goish-only: common.go's ticket-key derivation and FIPS
+// chain filter are unexported in Go, where the tests are in-package.
+// Reports `(aesKey, hmacKey)` for a 32-byte external key.
+#[doc(hidden)]
+pub fn common_ticketKeyFromBytes(
+    b: crate::goslice::slice<crate::types::byte>,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let mut raw = [0u8; 32];
+    let src: &[crate::types::byte] = &b;
+    raw[..src.len().min(32)].copy_from_slice(&src[..src.len().min(32)]);
+    let k = Config::default().ticketKeyFromBytes(raw);
+    return (
+        crate::goslice::slice::__from_vec(k.aesKey.to_vec()),
+        crate::goslice::slice::__from_vec(k.hmacKey.to_vec()),
+    );
+}
+
+// go: none — goish-only: see `common_ticketKeyFromBytes`. Reports
+// `(len(out), errText)` for a chain list of `n` single-certificate
+// chains.
+#[doc(hidden)]
+pub fn common_fipsAllowedChains(n: crate::types::int) -> (crate::types::int, crate::gostring::string) {
+    let mut chains: alloc::vec::Vec<crate::goslice::slice<crate::crypto::x509::Certificate>> =
+        alloc::vec::Vec::new();
+    let mut i: crate::types::int = 0;
+    while i < n {
+        chains.push(crate::goslice::slice::__from_vec(alloc::vec![
+            crate::crypto::x509::Certificate::default()
+        ]));
+        i += 1;
+    }
+    let (out, err) = common::fipsAllowedChains(crate::goslice::slice::__from_vec(chains));
+    if err != crate::errors::nil {
+        return (0, err.Error());
+    }
+    return (out.Len(), crate::gostring::string::from_static(""));
+}
+
+// go: none — goish-only: see `common_ticketKeyFromBytes`.
+#[doc(hidden)]
+pub fn common_fipsAllowChain(n: crate::types::int) -> bool {
+    let mut chain: alloc::vec::Vec<crate::crypto::x509::Certificate> = alloc::vec::Vec::new();
+    let mut i: crate::types::int = 0;
+    while i < n {
+        chain.push(crate::crypto::x509::Certificate::default());
+        i += 1;
+    }
+    return common::fipsAllowChain(crate::goslice::slice::__from_vec(chain));
+}
+
+// go: none — goish-only: see `common_ticketKeyFromBytes`. A default
+// Config, as Go's defaultConfig returns.
+#[doc(hidden)]
+pub fn common_defaultConfigIsZero() -> bool {
+    let c = common::defaultConfig();
+    return c.MinVersion == 0
+        && c.MaxVersion == 0
+        && c.CipherSuites.Len() == 0
+        && c.CurvePreferences.Len() == 0
+        && !c.InsecureSkipVerify;
 }

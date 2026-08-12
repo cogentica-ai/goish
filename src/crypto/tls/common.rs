@@ -1,4 +1,4 @@
-// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError, Certificate.leaf, Config.supportedVersions, Config.maxSupportedVersion, Config.mutualVersion, Config.curvePreferences, Config.supportsCurve, Config.cipherSuites, Config.supportedCipherSuites, Config.rand
+// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError, Certificate.leaf, Config.supportedVersions, Config.maxSupportedVersion, Config.mutualVersion, Config.curvePreferences, Config.supportsCurve, Config.cipherSuites, Config.supportedCipherSuites, Config.rand, Config.time, Config.ticketKeyFromBytes, Config.BuildNameToCertificate, defaultConfig, fipsAllowedChains, fipsAllowChain, emptyConfig
 //
 // crypto/tls — the protocol-level type surface: versions, curve IDs,
 // signature schemes and client-auth policy.
@@ -10,9 +10,9 @@
 // `Config` and `Certificate` currently live in mod[rs] and are not yet
 // ports — see ROADMAP.md.
 //
-// goishlint:ignore GOISH018 BuildNameToCertificate, CipherSuiteName, CipherSuites, Clone, Context, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, SetSessionTicketKeys, SupportsCertificate, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, defaultConfig, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, fipsAllowChain, fipsAllowedChains, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, initLegacySessionTicketKeyRLocked, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyFromBytes, ticketKeyLifetime, ticketKeyRotation, ticketKeys, time, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
-// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, ClientSessionCache, ClientHelloInfo, CertificateRequestInfo, RenegotiationSupport, Config, ticketKey, dsaSignature, ecdsaSignature — same.
-// goishlint:ignore GOISH021 CertificateRequestInfo, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultConfig, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, deprecatedSessionTicketKey, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, emptyConfig, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, fipsAllowChain, fipsAllowedChains, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKey, ticketKeyLifetime, ticketKeyRotation, time, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
+// goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, Clone, Context, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, SetSessionTicketKeys, SupportsCertificate, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, initLegacySessionTicketKeyRLocked, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, ticketKeys, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
+// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, ClientSessionCache, ClientHelloInfo, CertificateRequestInfo, RenegotiationSupport, Config, dsaSignature, ecdsaSignature — same.
+// goishlint:ignore GOISH021 CertificateRequestInfo, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, deprecatedSessionTicketKey, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -538,6 +538,83 @@ fn tls10serverValue() -> crate::gostring::string {
 
 impl Config {
 
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1127-1133 Config.time
+    /// The current time, as the handshake sees it.
+    ///
+    /// Deviation: Go's `Config.Time` field holds a `func() time.Time`;
+    /// goish's Config has no such field, so `c.Time` is always nil and
+    /// this always takes Go's nil branch — `time.Now`. Verbatim
+    /// behaviour for every Config goish can express.
+    pub(crate) fn time(&self) -> crate::time::Time {
+        // Go: t := c.Time; if t == nil { t = time.Now }; return t()
+        return crate::time::Now();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:927-937 Config.ticketKeyFromBytes
+    /// Go: "ticketKeyFromBytes converts from the external representation
+    /// of a session ticket key to a ticketKey. Externally, session ticket
+    /// keys are 32 random bytes and this function expands that into
+    /// sufficient name and key material."
+    pub(crate) fn ticketKeyFromBytes(&self, b: [byte; 32]) -> ticketKey {
+        // Go: hashed := sha512.Sum512(b[:])
+        let hashed = crate::crypto::sha512::Sum512(slice::__from_vec(b.to_vec()));
+        // Go: The first 16 bytes of the hash used to be exposed on the
+        // wire as a ticket prefix. They MUST NOT be used as a secret. In
+        // the future, it would make sense to use a proper KDF here, like
+        // HKDF with a fixed salt.
+        // Go: const legacyTicketKeyNameLen = 16
+        //     copy(key.aesKey[:], hashed[legacyTicketKeyNameLen:])
+        //     copy(key.hmacKey[:], hashed[legacyTicketKeyNameLen+len(key.aesKey):])
+        //     key.created = c.time()
+        const legacyTicketKeyNameLen: usize = 16;
+        let mut key = ticketKey::default();
+        key.aesKey
+            .copy_from_slice(&hashed[legacyTicketKeyNameLen..legacyTicketKeyNameLen + 16]);
+        key.hmacKey.copy_from_slice(
+            &hashed[legacyTicketKeyNameLen + 16..legacyTicketKeyNameLen + 32],
+        );
+        key.created = self.time();
+        // Go: return key
+        return key;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1513-1530 Config.BuildNameToCertificate
+    /// Go: "BuildNameToCertificate parses c.Certificates and builds
+    /// c.NameToCertificate from the CommonName and SubjectAlternateName
+    /// fields of each of the leaf certificates."
+    ///
+    /// Deprecated in Go: "NameToCertificate only allows associating a
+    /// single certificate with a given name. Leave that field nil to let
+    /// the library select the first compatible chain from Certificates."
+    pub fn BuildNameToCertificate(&mut self) {
+        // Go: c.NameToCertificate = make(map[string]*Certificate)
+        self.NameToCertificate = crate::gomap::map::new();
+        // Go: for i := range c.Certificates { cert := &c.Certificates[i]
+        //         x509Cert, err := cert.leaf(); if err != nil { continue }
+        for (_, cert) in crate::range!(self.Certificates.clone()) {
+            let (x509Cert, err) = cert.leaf();
+            if err != errors::nil {
+                continue;
+            }
+            // Go: If SANs are *not* present, some clients will consider
+            // the certificate valid for the name in the Common Name.
+            // Go: if x509Cert.Subject.CommonName != "" && len(x509Cert.DNSNames) == 0 {
+            //         c.NameToCertificate[x509Cert.Subject.CommonName] = cert }
+            if x509Cert.Subject.CommonName != crate::gostring::string::from_static("")
+                && x509Cert.DNSNames.Len() == 0
+            {
+                self.NameToCertificate
+                    .Set(x509Cert.Subject.CommonName.clone(), cert.clone());
+            }
+            // Go: for _, san := range x509Cert.DNSNames {
+            //         c.NameToCertificate[san] = cert }
+            for (_, san) in crate::range!(x509Cert.DNSNames.clone()) {
+                self.NameToCertificate.Set(san.clone(), cert.clone());
+            }
+        }
+    }
+
     // go: sdk 1.25.5 crypto/tls/common.go:1119-1125 Config.rand
     /// The entropy source for the handshake.
     ///
@@ -775,3 +852,87 @@ pub struct EncryptedClientHelloKey {
     pub SendAsRetry: bool,
 }
 
+
+
+// Go: common.go:917-922
+//   type ticketKey struct { aesKey [16]byte; hmacKey [16]byte; created time.Time }
+#[derive(Clone, Default)]
+pub(crate) struct ticketKey {
+    pub aesKey: [byte; 16],
+    pub hmacKey: [byte; 16],
+    /// Go: "created is the time at which this ticket key was created.
+    /// See Config.ticketKeys."
+    pub created: crate::time::Time,
+}
+
+// go: none — goish idiom: Go's package-level `var emptyConfig Config`.
+// goish builds the zero value on demand, because a `static` of a type
+// holding a `map` cannot be const-initialised. Named a function so that
+// `defaultConfig` reads as Go's does.
+fn emptyConfig() -> Config {
+    return Config::default();
+}
+
+// go: sdk 1.25.5 crypto/tls/common.go:1683-1685 defaultConfig
+pub(crate) fn defaultConfig() -> Config {
+    // Go: return &emptyConfig
+    return emptyConfig();
+}
+
+// go: sdk 1.25.5 crypto/tls/common.go:1774-1790 fipsAllowedChains
+/// Go: "fipsAllowedChains returns chains that are allowed to be used in
+/// a TLS connection based on the current fips140tls enforcement setting.
+/// If fips140tls is not required, the chains are returned as-is with no
+/// processing. Otherwise, the returned chains are filtered to only those
+/// allowed by FIPS 140-3. If this results in no chains it returns an
+/// error."
+pub(crate) fn fipsAllowedChains(
+    chains: slice<slice<crate::crypto::x509::Certificate>>,
+) -> (slice<slice<crate::crypto::x509::Certificate>>, error) {
+    // Go: if !fips140tls.Required() { return chains, nil }
+    if !fips140tls::Required() {
+        return (chains, errors::nil);
+    }
+
+    // Go: permittedChains := make([][]*x509.Certificate, 0, len(chains))
+    //     for _, chain := range chains {
+    //         if fipsAllowChain(chain) { permittedChains = append(permittedChains, chain) } }
+    let mut permittedChains: Vec<slice<crate::crypto::x509::Certificate>> =
+        Vec::with_capacity(chains.Len() as usize);
+    for (_, chain) in crate::range!(chains.clone()) {
+        if fipsAllowChain(chain.clone()) {
+            permittedChains.push(chain.clone());
+        }
+    }
+
+    // Go: if len(permittedChains) == 0 {
+    //         return nil, errors.New("tls: no FIPS compatible certificate chains found") }
+    if permittedChains.len() == 0 {
+        return (
+            slice::new(),
+            errors::New("tls: no FIPS compatible certificate chains found"),
+        );
+    }
+
+    // Go: return permittedChains, nil
+    return (slice::__from_vec(permittedChains), errors::nil);
+}
+
+// go: sdk 1.25.5 crypto/tls/common.go:1792-1804 fipsAllowChain
+pub(crate) fn fipsAllowChain(chain: slice<crate::crypto::x509::Certificate>) -> bool {
+    // Go: if len(chain) == 0 { return false }
+    if chain.Len() == 0 {
+        return false;
+    }
+
+    // Go: for _, cert := range chain {
+    //         if !isCertificateAllowedFIPS(cert) { return false } }
+    for (_, cert) in crate::range!(chain) {
+        if !super::defaults_fips140::isCertificateAllowedFIPS(cert) {
+            return false;
+        }
+    }
+
+    // Go: return true
+    return true;
+}
