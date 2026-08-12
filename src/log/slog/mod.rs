@@ -30,6 +30,7 @@
 
 mod attr;
 mod handler;
+mod logger;
 mod value;
 pub use attr::Group;
 pub use handler::{LevelKey, MessageKey, SourceKey, TimeKey};

@@ -1271,3 +1271,7 @@ path = "examples/testing_helper_smoke.rs"
 [[example]]
 name = "slog_group_smoke"
 path = "examples/slog_group_smoke.rs"
+
+[[example]]
+name = "slog_logger_smoke"
+path = "examples/slog_logger_smoke.rs"
