@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -10,7 +10,7 @@
 // forbids.
 //
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
-// goishlint:ignore GOISH018 after, Attr, before, callerName, callSite, Chdir, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, Context, CoordinateFuzzing, CoverMode, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newChattyPrinter, newTestState, Output, Parallel, parseCpuList, pcToName, Printf, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, Setenv, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, Updatef, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
+// goishlint:ignore GOISH018 after, Attr, before, callerName, callSite, Chdir, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, Context, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newChattyPrinter, newTestState, Output, Parallel, parseCpuList, pcToName, Printf, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, Setenv, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, Updatef, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
 // goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, chattyPrinter, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errMain, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, matchStringOnly, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelConflict, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testDeps, testingTesting, testlog, testlogFile, testState, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
@@ -616,3 +616,18 @@ pub fn __run_skip_patterns() -> (string, string) {
         Some(f) => (f.run.Get(), f.skip.Get()),
     };
 }
+
+// go: sdk 1.25.5 testing/testing.go:710-712 CoverMode
+/// Go: "CoverMode reports what the test coverage mode is set to. The
+/// values are "set", "count", or "atomic". The return value will be
+/// empty if test coverage is not enabled."
+///
+/// Always empty here, and permanently so: coverage counters are emitted
+/// by cmd/compile under `-cover`, which a library cannot arrange. The
+/// empty string is the honest answer Go itself gives for an
+/// uninstrumented binary, so callers branching on it take the correct
+/// path rather than a special-cased one.
+pub fn CoverMode() -> string {
+    return string::from_static("");
+}
+
