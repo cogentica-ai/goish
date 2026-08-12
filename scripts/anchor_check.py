@@ -103,6 +103,16 @@ def decl_hits(gofile, sym, free_only=False):
     else:
         pats = [re.compile(r"^func\s+" + re.escape(sym) + r"\b"),
                 re.compile(r"^(type|var|const)\s+" + re.escape(sym) + r"\b"),
+                # A member of a grouped `const (` / `var (` block. Go
+                # writes most related constants that way (slog's
+                # TimeKey/LevelKey/MessageKey/SourceKey, io/fs's mode
+                # bits, crypto's cipher suite IDs), and without this an
+                # anchor to one can never resolve — the block itself has
+                # no name and the member is not a top-level decl. The
+                # indent requirement keeps this from matching an
+                # assignment inside a function body.
+                re.compile(r"^\s+" + re.escape(sym) +
+                           r"\s*(=|\s+[\w.\[\]*]+\s*=|\s+[\w.\[\]*]+$)"),
                 ] + ([] if free_only else
                      [re.compile(r"^func\s*\([^)]*\)\s*" + re.escape(sym) + r"\b")])
         bare = True

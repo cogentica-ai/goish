@@ -28,6 +28,13 @@
 
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
+mod attr;
+mod handler;
+mod value;
+pub use attr::Group;
+pub use handler::{LevelKey, MessageKey, SourceKey, TimeKey};
+pub use value::{countEmptyGroups, isEmptyGroup, GroupValue};
+
 extern crate alloc;
 use alloc::sync::Arc;
 
@@ -51,6 +58,8 @@ use crate::types::int;
 pub struct Level(pub int);
 
 impl From<int> for Level {
+    // go: none — goish idiom: Go writes `slog.Level(n)`; Rust needs the
+    // conversion spelled as a trait impl.
     fn from(v: int) -> Self {
         Level(v)
     }
@@ -89,13 +98,16 @@ pub const KindLogValuer: Kind = Kind(9);
 // values is forward them to a downstream handler that owns the
 // rendering.
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq)]
 pub struct Value {
     pub kind: Kind,
     pub any: GoishAny,
 }
 
 impl Value {
+    // go: none — goish idiom: accessor over the struct's own field. Go's
+    // `Value.Kind()` decodes a packed representation; goish stores the
+    // kind directly, so there is nothing to decode.
     pub fn Kind(&self) -> Kind {
         self.kind
     }
@@ -106,7 +118,7 @@ impl Value {
 
 // ─── Attr ───────────────────────────────────────────────────────────
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq)]
 pub struct Attr {
     pub Key: string,
     pub Value: Value,
@@ -303,4 +315,21 @@ impl Logger {
 /// `slog.New(h)` — bind a Logger to a Handler.
 pub fn New(handler: Arc<dyn Handler + Send + Sync>) -> Logger {
     Logger { handler }
+}
+
+// go: none — goish idiom: `goany::Any` requires `PartialEq + Reflect`
+// on its payload so a stored value can be compared and walked. Go's
+// `slog.Value` holds its group through an unsafe pointer and needs
+// neither. These are the minimum to let a `slice<Attr>` live in the
+// `any` field.
+impl crate::reflect::Reflect for Attr {
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(crate::reflect::Kind::Struct, "Attr", &[]);
+    }
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return crate::reflect::Value::Struct {
+            ty: <Attr as crate::reflect::Reflect>::__reflect_type(),
+            fields: alloc::vec![],
+        };
+    }
 }
