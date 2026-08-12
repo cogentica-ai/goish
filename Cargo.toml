@@ -1155,3 +1155,7 @@ path = "examples/runtime_palloc_units_smoke.rs"
 [[example]]
 name = "runtime_mcentral_units_smoke"
 path = "examples/runtime_mcentral_units_smoke.rs"
+
+[[example]]
+name = "testing_readme"
+path = "examples/testing_readme.rs"

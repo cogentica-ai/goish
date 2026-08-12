@@ -149,11 +149,84 @@ per-P, and an HTTP server with an allocation-free hot path.
 
 ## Status
 
-Active development. The e2e suite runs 277 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
-
-There is no `cargo test` suite. The test harness links `std`, whose `panic_impl` lang item collides with goish's own, so tests are written as examples and run under e2e instead.
+Active development. The e2e suite runs 278 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
 
 Goish is single-target: `x86_64-unknown-linux-gnu`.
+
+### Testing
+
+Go's `testing` package is ported, so tests are written the Go way: `Test*` functions taking a
+`*testing.T`, with subtests, cleanups and `go test`-shaped output.
+
+```rust
+use goish::{fmt, strings, syscall, testing};
+use goish::gostring::string;
+use goish::types::int;
+
+fn TestAddition(t: &mut testing::T) {
+    let got: int = 2 + 3;
+    if got != 5 {
+        t.Error(fmt::Sprintf!("2+3 = %d, want 5", got));
+    }
+}
+
+fn TestSubtests(t: &mut testing::T) {
+    t.Run(string::from_static("upper"), |t| {
+        let got = strings::ToUpper(string::from_static("go"));
+        if got != string::from_static("GO") {
+            t.Error(fmt::Sprintf!("ToUpper(go) = %s, want GO", got));
+        }
+    });
+
+    t.Run(string::from_static("cleanup"), |t| {
+        // Cleanups run LIFO when the test function returns, as in Go.
+        t.Cleanup(|| { fmt::Println!("second"); });
+        t.Cleanup(|| { fmt::Println!("first"); });
+    });
+}
+
+#[goish::main]
+fn main() {
+    let tests: &[(&str, testing::TestFn)] = &[
+        ("TestAddition", TestAddition),
+        ("TestSubtests", TestSubtests),
+    ];
+    syscall::Exit(testing::Main(tests) as i32);
+}
+```
+
+```
+=== RUN  TestAddition
+--- PASS: TestAddition
+=== RUN  TestSubtests
+    === RUN  TestSubtests/upper
+    --- PASS: TestSubtests/upper
+    === RUN  TestSubtests/cleanup
+first
+second
+    --- PASS: TestSubtests/cleanup
+--- PASS: TestSubtests
+
+ok	2 tests, 2 passed, 0 failed, 0 skipped
+```
+
+That snippet is [`examples/testing_readme.rs`](examples/testing_readme.rs), built and run by
+the e2e suite so it cannot drift from the API. `testing.T` carries `Error`/`Errorf`,
+`Fatal`/`Fatalf`, `Log`/`Logf`, `Fail`/`FailNow`, `Skip`/`Skipf`/`SkipNow`, `Failed`,
+`Skipped`, `Helper`, `Cleanup`, `TempDir`, `Name` and `Run`. `testing/fstest` (47%) and
+`testing/iotest` (55%) are partially ported alongside it.
+
+Four things to know before relying on it. The port is name-level: the `testing` root package
+sits at 22/149 declarations with **no provenance anchors**, so unlike `crypto/` it is not
+diffed against Go — treat it as working code, not a verified port. There is no `testing.B`,
+`testing.M`, `testing.F` or `t.Parallel()`, so benchmarks, fuzzing and parallel tests are
+out. Tests are registered by hand in a slice rather than discovered, because goish has no
+compile-time reflection over modules. And `t.Skip()` currently exits the process instead of
+skipping only the current test, which makes it unusable mid-suite.
+
+`cargo test` itself does not work and is not the harness: its test binary links `std`, whose
+`panic_impl` lang item collides with goish's own. Tests build as examples and run through
+`make e2e`.
 
 ### Coverage, measured
 
