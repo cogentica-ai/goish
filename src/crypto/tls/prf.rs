@@ -1,18 +1,18 @@
-// go: file crypto/tls/prf.go decls: splitPreMasterSecret, pHash, prf10, prf12, noEKMBecauseRenegotiation, noEKMBecauseNoEMS
+// go: file crypto/tls/prf.go decls: splitPreMasterSecret, pHash, prf10, prf12, prfAndHashForVersion, prfForVersion, masterFromPreMasterSecret, extMasterFromPreMasterSecret, keysFromMasterSecret, newFinishedHash, finishedHash.Write, finishedHash.Sum, finishedHash.clientSum, finishedHash.serverSum, finishedHash.hashForClientCertificate, finishedHash.discardHandshakeBuffer, ekmFromMasterSecret, noEKMBecauseRenegotiation, noEKMBecauseNoEMS
 //
-// crypto/tls — the TLS 1.0-1.2 pseudo-random function.
+// crypto/tls — the TLS 1.0-1.2 pseudo-random function and key schedule.
 //
-// **Partial port.** Everything in prf.go that does not need the
-// `cipherSuite` record is here: the PRF itself (RFC 2246 §5, RFC 5246
-// §5), the pre-master-secret split, and the two EKM refusal stubs. The
-// remainder — `prfAndHashForVersion`, `masterFromPreMasterSecret`,
-// `keysFromMasterSecret`, the `finishedHash` methods and
-// `ekmFromMasterSecret` — all take a `*cipherSuite`, which lives in the
-// unported half of cipher_suites.go. See ROADMAP.md.
+// Complete. Deviations:
 //
-// goishlint:ignore GOISH018 prfAndHashForVersion, prfForVersion, masterFromPreMasterSecret, extMasterFromPreMasterSecret, keysFromMasterSecret, newFinishedHash, Write, Sum, clientSum, serverSum, hashForClientCertificate, discardHandshakeBuffer, ekmFromMasterSecret — every one takes a *cipherSuite; see the banner.
-// goishlint:ignore GOISH019 finishedHash — same.
-// goishlint:ignore GOISH021 prfFunc, finishedHash, masterSecretLength, finishedVerifyLength, masterSecretLabel, extendedMasterSecretLabel, keyExpansionLabel, clientFinishedLabel, serverFinishedLabel — same.
+//   * `prfFunc` is Go's `func(secret []byte, label string, seed []byte,
+//     keyLen int) []byte`; goish carries it as an `Arc<dyn Fn…>` so it
+//     can be a struct field, as Go's is.
+//   * `finishedHash.buffer` is `Option<Vec<byte>>`. Go distinguishes nil
+//     from empty on that field — `discardHandshakeBuffer` sets it to nil
+//     and `hashForClientCertificate` panics on nil — so the distinction
+//     is load-bearing and cannot collapse to length.
+//   * `prf12` is spelled with its four closure arguments inlined; see
+//     its own note.
 
 #![allow(non_snake_case, dead_code)]
 
@@ -172,4 +172,461 @@ pub(crate) fn noEKMBecauseNoEMS(
             "crypto/tls: ExportKeyingMaterial is unavailable when neither TLS 1.3 nor Extended Master Secret are negotiated; override with GODEBUG=tlsunsafeekm=1",
         ),
     );
+}
+
+
+// ─── The TLS 1.0-1.2 key schedule ─────────────────────────────────────
+
+use super::cipher_suites::{cipherSuite, suiteSHA384};
+use super::common::{signatureECDSA as sigECDSA, signatureEd25519 as sigEd25519, VersionTLS10, VersionTLS11, VersionTLS12};
+use crate::crypto;
+use crate::crypto::sha256;
+use crate::crypto::sha512;
+use crate::hash::HashFunc;
+use crate::types::{uint16, uint8};
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+
+// Go: prf.go:19
+//   type prfFunc func(secret []byte, label string, seed []byte, keyLen int) []byte
+/// The pseudo-random function a version+suite pair selects.
+pub(crate) type prfFunc =
+    Arc<dyn Fn(slice<byte>, string, slice<byte>, int) -> slice<byte> + Send + Sync>;
+
+// Go: prf.go:79-80
+//   const ( masterSecretLength = 48; finishedVerifyLength = 12 )
+/// Length of a master secret in TLS 1.1.
+pub(crate) const masterSecretLength: int = 48;
+/// Length of `verify_data` in a Finished message.
+pub(crate) const finishedVerifyLength: int = 12;
+
+// Go: prf.go:82-86
+pub(crate) const masterSecretLabel: &str = "master secret";
+pub(crate) const extendedMasterSecretLabel: &str = "extended master secret";
+pub(crate) const keyExpansionLabel: &str = "key expansion";
+pub(crate) const clientFinishedLabel: &str = "client finished";
+pub(crate) const serverFinishedLabel: &str = "server finished";
+
+// go: sdk 1.25.5 crypto/tls/prf.go:88-99 prfAndHashForVersion
+/// The PRF and handshake hash for a version and suite. Panics on an
+/// unknown version, as Go does.
+pub(crate) fn prfAndHashForVersion(
+    version: uint16,
+    suite: &'static cipherSuite,
+) -> (prfFunc, crypto::Hash) {
+    // Go: switch version {
+    //     case VersionTLS10, VersionTLS11: return prf10, crypto.Hash(0)
+    if version == VersionTLS10 || version == VersionTLS11 {
+        return (
+            Arc::new(|secret, label, seed, keyLen| prf10(secret, label, seed, keyLen)),
+            crypto::Hash(0),
+        );
+    }
+    // Go: case VersionTLS12:
+    //         if suite.flags&suiteSHA384 != 0 { return prf12(sha512.New384), crypto.SHA384 }
+    //         return prf12(sha256.New), crypto.SHA256
+    if version == VersionTLS12 {
+        if suite.flags & suiteSHA384 != 0 {
+            return (
+                Arc::new(|secret, label, seed, keyLen| {
+                    prf12(
+                        sha512::NewHash384 as fn() -> Box<dyn Hash + Send + Sync>,
+                        secret,
+                        label,
+                        seed,
+                        keyLen,
+                    )
+                }),
+                crypto::SHA384,
+            );
+        }
+        return (
+            Arc::new(|secret, label, seed, keyLen| {
+                prf12(
+                    sha256::NewHash as fn() -> Box<dyn Hash + Send + Sync>,
+                    secret,
+                    label,
+                    seed,
+                    keyLen,
+                )
+            }),
+            crypto::SHA256,
+        );
+    }
+    // Go: default: panic("unknown version")
+    panic!("unknown version");
+}
+
+// go: sdk 1.25.5 crypto/tls/prf.go:101-104 prfForVersion
+pub(crate) fn prfForVersion(version: uint16, suite: &'static cipherSuite) -> prfFunc {
+    // Go: prf, _ := prfAndHashForVersion(version, suite); return prf
+    let (prf, _) = prfAndHashForVersion(version, suite);
+    return prf;
+}
+
+// go: sdk 1.25.5 crypto/tls/prf.go:108-114 masterFromPreMasterSecret
+/// The master secret, from the pre-master secret. RFC 5246 §8.1.
+pub(crate) fn masterFromPreMasterSecret(
+    version: uint16,
+    suite: &'static cipherSuite,
+    preMasterSecret: slice<byte>,
+    clientRandom: slice<byte>,
+    serverRandom: slice<byte>,
+) -> slice<byte> {
+    // Go: seed := make([]byte, 0, len(clientRandom)+len(serverRandom))
+    //     seed = append(seed, clientRandom...); seed = append(seed, serverRandom...)
+    let mut seed: Vec<byte> = Vec::with_capacity((clientRandom.Len() + serverRandom.Len()) as usize);
+    let cr: &[byte] = &clientRandom;
+    let sr: &[byte] = &serverRandom;
+    seed.extend_from_slice(cr);
+    seed.extend_from_slice(sr);
+    // Go: return prfForVersion(version, suite)(preMasterSecret, masterSecretLabel,
+    //         seed, masterSecretLength)
+    return prfForVersion(version, suite)(
+        preMasterSecret,
+        string::from_static(masterSecretLabel),
+        slice::__from_vec(seed),
+        masterSecretLength,
+    );
+}
+
+// go: sdk 1.25.5 crypto/tls/prf.go:118-126 extMasterFromPreMasterSecret
+/// The extended master secret. RFC 7627.
+pub(crate) fn extMasterFromPreMasterSecret(
+    version: uint16,
+    suite: &'static cipherSuite,
+    preMasterSecret: slice<byte>,
+    transcript: slice<byte>,
+) -> slice<byte> {
+    // Go: prf, hash := prfAndHashForVersion(version, suite)
+    let (prf, hash) = prfAndHashForVersion(version, suite);
+    // Go: if version == VersionTLS12 {
+    //         // Use the FIPS 140-3 module only for TLS 1.2 with EMS, which is
+    //         // the only TLS 1.0-1.2 approved mode per IG D.Q.
+    //         return tls12.MasterSecret(hash.New, preMasterSecret, transcript)
+    //     }
+    if version == VersionTLS12 {
+        return tls12::MasterSecret(
+            HashFunc::New(move || hash.New()),
+            preMasterSecret,
+            transcript,
+        );
+    }
+    // Go: return prf(preMasterSecret, extendedMasterSecretLabel, transcript, masterSecretLength)
+    return prf(
+        preMasterSecret,
+        string::from_static(extendedMasterSecretLabel),
+        transcript,
+        masterSecretLength,
+    );
+}
+
+// go: sdk 1.25.5 crypto/tls/prf.go:131-150 keysFromMasterSecret
+/// The connection keys, given the MAC key, cipher key and IV lengths.
+/// RFC 2246 §6.3.
+///
+/// goishlint:ignore GOISH020 keysFromMasterSecret — Go's six named results become one tuple
+pub(crate) fn keysFromMasterSecret(
+    version: uint16,
+    suite: &'static cipherSuite,
+    masterSecret: slice<byte>,
+    clientRandom: slice<byte>,
+    serverRandom: slice<byte>,
+    macLen: int,
+    keyLen: int,
+    ivLen: int,
+) -> (
+    slice<byte>,
+    slice<byte>,
+    slice<byte>,
+    slice<byte>,
+    slice<byte>,
+    slice<byte>,
+) {
+    // Go: seed := make([]byte, 0, len(serverRandom)+len(clientRandom))
+    //     seed = append(seed, serverRandom...); seed = append(seed, clientRandom...)
+    //
+    // Note the order: server random FIRST here, client random first in
+    // masterFromPreMasterSecret. RFC 2246 §6.3 versus §8.1.
+    let mut seed: Vec<byte> = Vec::with_capacity((serverRandom.Len() + clientRandom.Len()) as usize);
+    let sr: &[byte] = &serverRandom;
+    let cr: &[byte] = &clientRandom;
+    seed.extend_from_slice(sr);
+    seed.extend_from_slice(cr);
+
+    // Go: n := 2*macLen + 2*keyLen + 2*ivLen
+    //     keyMaterial := prfForVersion(version, suite)(masterSecret, keyExpansionLabel, seed, n)
+    let n = 2 * macLen + 2 * keyLen + 2 * ivLen;
+    let keyMaterial = prfForVersion(version, suite)(
+        masterSecret,
+        string::from_static(keyExpansionLabel),
+        slice::__from_vec(seed),
+        n,
+    );
+    // Go: clientMAC = keyMaterial[:macLen]; keyMaterial = keyMaterial[macLen:]
+    //     serverMAC = keyMaterial[:macLen]; keyMaterial = keyMaterial[macLen:]
+    //     clientKey = keyMaterial[:keyLen]; keyMaterial = keyMaterial[keyLen:]
+    //     serverKey = keyMaterial[:keyLen]; keyMaterial = keyMaterial[keyLen:]
+    //     clientIV  = keyMaterial[:ivLen];  keyMaterial = keyMaterial[ivLen:]
+    //     serverIV  = keyMaterial[:ivLen]
+    let mut at: int = 0;
+    let clientMAC = keyMaterial.slice(at, at + macLen);
+    at += macLen;
+    let serverMAC = keyMaterial.slice(at, at + macLen);
+    at += macLen;
+    let clientKey = keyMaterial.slice(at, at + keyLen);
+    at += keyLen;
+    let serverKey = keyMaterial.slice(at, at + keyLen);
+    at += keyLen;
+    let clientIV = keyMaterial.slice(at, at + ivLen);
+    at += ivLen;
+    let serverIV = keyMaterial.slice(at, at + ivLen);
+    // Go: return
+    return (clientMAC, serverMAC, clientKey, serverKey, clientIV, serverIV);
+}
+
+// Go: prf.go:167-181
+//   type finishedHash struct { client, server hash.Hash
+//                              clientMD5, serverMD5 hash.Hash
+//                              buffer []byte; version uint16; prf prfFunc }
+/// Go: "A finishedHash calculates the hash of a set of handshake
+/// messages suitable for including in a Finished message."
+pub(crate) struct finishedHash {
+    pub client: Box<dyn Hash + Send + Sync>,
+    pub server: Box<dyn Hash + Send + Sync>,
+    /// Go: "Prior to TLS 1.2, an additional MD5 hash is required."
+    pub clientMD5: Option<Box<dyn Hash + Send + Sync>>,
+    pub serverMD5: Option<Box<dyn Hash + Send + Sync>>,
+    /// Go: "In TLS 1.2, a full buffer is sadly required." Nil below 1.2,
+    /// and set to nil by `discardHandshakeBuffer`.
+    pub buffer: Option<Vec<byte>>,
+    pub version: uint16,
+    pub prf: prfFunc,
+}
+
+// go: sdk 1.25.5 crypto/tls/prf.go:152-164 newFinishedHash
+pub(crate) fn newFinishedHash(version: uint16, cipherSuite: &'static cipherSuite) -> finishedHash {
+    // Go: var buffer []byte
+    //     if version >= VersionTLS12 { buffer = []byte{} }
+    let mut buffer: Option<Vec<byte>> = None;
+    if version >= VersionTLS12 {
+        buffer = Some(Vec::new());
+    }
+
+    // Go: prf, hash := prfAndHashForVersion(version, cipherSuite)
+    //     if hash != 0 {
+    //         return finishedHash{hash.New(), hash.New(), nil, nil, buffer, version, prf}
+    //     }
+    let (prf, hash) = prfAndHashForVersion(version, cipherSuite);
+    if hash != crypto::Hash(0) {
+        return finishedHash {
+            client: hash.New(),
+            server: hash.New(),
+            clientMD5: None,
+            serverMD5: None,
+            buffer,
+            version,
+            prf,
+        };
+    }
+
+    // Go: return finishedHash{sha1.New(), sha1.New(), md5.New(), md5.New(),
+    //         buffer, version, prf}
+    return finishedHash {
+        client: Box::new(sha1::New()),
+        server: Box::new(sha1::New()),
+        clientMD5: Some(Box::new(md5::New())),
+        serverMD5: Some(Box::new(md5::New())),
+        buffer,
+        version,
+        prf,
+    };
+}
+
+impl finishedHash {
+    // go: sdk 1.25.5 crypto/tls/prf.go:183-195 finishedHash.Write
+    pub(crate) fn Write(&mut self, msg: slice<byte>) -> (int, error) {
+        // Go: h.client.Write(msg); h.server.Write(msg)
+        let _ = crate::io::Writer::Write(&mut *self.client, msg.clone());
+        let _ = crate::io::Writer::Write(&mut *self.server, msg.clone());
+
+        // Go: if h.version < VersionTLS12 { h.clientMD5.Write(msg); h.serverMD5.Write(msg) }
+        if self.version < VersionTLS12 {
+            let _ = crate::io::Writer::Write(&mut **self.clientMD5.as_mut().unwrap(), msg.clone());
+            let _ = crate::io::Writer::Write(&mut **self.serverMD5.as_mut().unwrap(), msg.clone());
+        }
+
+        // Go: if h.buffer != nil { h.buffer = append(h.buffer, msg...) }
+        if self.buffer.is_some() {
+            let raw: &[byte] = &msg;
+            self.buffer.as_mut().unwrap().extend_from_slice(raw);
+        }
+
+        // Go: return len(msg), nil
+        return (msg.Len(), crate::errors::nil);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/prf.go:197-205 finishedHash.Sum
+    pub(crate) fn Sum(&self) -> slice<byte> {
+        // Go: if h.version >= VersionTLS12 { return h.client.Sum(nil) }
+        if self.version >= VersionTLS12 {
+            return self.client.Sum(slice::__from_vec(Vec::new()));
+        }
+        // Go: out := make([]byte, 0, md5.Size+sha1.Size)
+        //     out = h.clientMD5.Sum(out)
+        //     return h.client.Sum(out)
+        let out = slice::__from_vec(Vec::with_capacity((md5::Size + sha1::Size) as usize));
+        let out = self.clientMD5.as_ref().unwrap().Sum(out);
+        return self.client.Sum(out);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/prf.go:209-211 finishedHash.clientSum
+    /// The `verify_data` of a client's Finished message.
+    pub(crate) fn clientSum(&self, masterSecret: slice<byte>) -> slice<byte> {
+        // Go: return h.prf(masterSecret, clientFinishedLabel, h.Sum(), finishedVerifyLength)
+        return (self.prf)(
+            masterSecret,
+            string::from_static(clientFinishedLabel),
+            self.Sum(),
+            finishedVerifyLength,
+        );
+    }
+
+    // go: sdk 1.25.5 crypto/tls/prf.go:215-217 finishedHash.serverSum
+    /// The `verify_data` of a server's Finished message.
+    pub(crate) fn serverSum(&self, masterSecret: slice<byte>) -> slice<byte> {
+        // Go: return h.prf(masterSecret, serverFinishedLabel, h.Sum(), finishedVerifyLength)
+        return (self.prf)(
+            masterSecret,
+            string::from_static(serverFinishedLabel),
+            self.Sum(),
+            finishedVerifyLength,
+        );
+    }
+
+    // go: sdk 1.25.5 crypto/tls/prf.go:221-243 finishedHash.hashForClientCertificate
+    /// The handshake messages so far, pre-hashed if necessary, suitable
+    /// for signing by a TLS client certificate.
+    pub(crate) fn hashForClientCertificate(
+        &self,
+        sigType: uint8,
+        hashAlg: crypto::Hash,
+    ) -> slice<byte> {
+        // Go: if (h.version >= VersionTLS12 || sigType == sigEd25519) && h.buffer == nil {
+        //         panic("tls: handshake hash for a client certificate requested
+        //             after discarding the handshake buffer") }
+        if (self.version >= VersionTLS12 || sigType == sigEd25519) && self.buffer.is_none() {
+            panic!(
+                "tls: handshake hash for a client certificate requested after discarding the handshake buffer"
+            );
+        }
+
+        // Go: if sigType == sigEd25519 { return h.buffer }
+        if sigType == sigEd25519 {
+            return slice::__from_vec(self.buffer.clone().unwrap());
+        }
+
+        // Go: if h.version >= VersionTLS12 {
+        //         hash := hashAlg.New(); hash.Write(h.buffer); return hash.Sum(nil) }
+        if self.version >= VersionTLS12 {
+            let mut hash = hashAlg.New();
+            let _ = crate::io::Writer::Write(
+                &mut *hash,
+                slice::__from_vec(self.buffer.clone().unwrap()),
+            );
+            return hash.Sum(slice::__from_vec(Vec::new()));
+        }
+
+        // Go: if sigType == signatureECDSA { return h.server.Sum(nil) }
+        if sigType == sigECDSA {
+            return self.server.Sum(slice::__from_vec(Vec::new()));
+        }
+
+        // Go: return h.Sum()
+        return self.Sum();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/prf.go:247-249 finishedHash.discardHandshakeBuffer
+    /// Go: "called when there is no more need to buffer the entirety of
+    /// the handshake messages."
+    pub(crate) fn discardHandshakeBuffer(&mut self) {
+        // Go: h.buffer = nil
+        self.buffer = None;
+    }
+}
+
+// go: sdk 1.25.5 crypto/tls/prf.go:269-295 ekmFromMasterSecret
+/// Exported keying material, as defined in RFC 5705.
+pub(crate) fn ekmFromMasterSecret(
+    version: uint16,
+    suite: &'static cipherSuite,
+    masterSecret: slice<byte>,
+    clientRandom: slice<byte>,
+    serverRandom: slice<byte>,
+) -> Arc<dyn Fn(string, slice<byte>, int) -> (slice<byte>, error) + Send + Sync> {
+    let prf = prfForVersion(version, suite);
+    return Arc::new(move |label: string, context: slice<byte>, length: int| {
+        // Go: switch label {
+        //     case "client finished", "server finished", "master secret", "key expansion":
+        //         // These values are reserved and may not be used.
+        //         return nil, fmt.Errorf("crypto/tls: reserved ExportKeyingMaterial label: %s", label)
+        //     }
+        if label == string::from_static(clientFinishedLabel)
+            || label == string::from_static(serverFinishedLabel)
+            || label == string::from_static(masterSecretLabel)
+            || label == string::from_static(keyExpansionLabel)
+        {
+            return (
+                slice::__from_vec(Vec::new()),
+                crate::fmt::Errorf!(
+                    "crypto/tls: reserved ExportKeyingMaterial label: %s",
+                    label
+                ),
+            );
+        }
+
+        // Go: seedLen := len(serverRandom) + len(clientRandom)
+        //     if context != nil { seedLen += 2 + len(context) }
+        //     seed := make([]byte, 0, seedLen)
+        //     seed = append(seed, clientRandom...); seed = append(seed, serverRandom...)
+        let mut seedLen = (serverRandom.Len() + clientRandom.Len()) as usize;
+        if context.Len() != 0 {
+            seedLen += 2 + context.Len() as usize;
+        }
+        let mut seed: Vec<byte> = Vec::with_capacity(seedLen);
+        let cr: &[byte] = &clientRandom;
+        let sr: &[byte] = &serverRandom;
+        seed.extend_from_slice(cr);
+        seed.extend_from_slice(sr);
+
+        // Go: if context != nil {
+        //         if len(context) >= 1<<16 { return nil, fmt.Errorf(
+        //             "crypto/tls: ExportKeyingMaterial context too long") }
+        //         seed = append(seed, byte(len(context)>>8), byte(len(context)))
+        //         seed = append(seed, context...)
+        //     }
+        //
+        // goish slices carry no nil/empty distinction; a zero-length
+        // context therefore takes Go's nil branch, which is the same
+        // seed either way only when the caller meant nil. RFC 5705 has
+        // no use for a present-but-empty context.
+        if context.Len() != 0 {
+            if context.Len() >= 1 << 16 {
+                return (
+                    slice::__from_vec(Vec::new()),
+                    crate::errors::New("crypto/tls: ExportKeyingMaterial context too long"),
+                );
+            }
+            seed.push(crate::byte(context.Len() >> 8));
+            seed.push(crate::byte(context.Len()));
+            let cx: &[byte] = &context;
+            seed.extend_from_slice(cx);
+        }
+
+        // Go: return prfForVersion(version, suite)(masterSecret, label, seed, length), nil
+        return (
+            prf(masterSecret.clone(), label, slice::__from_vec(seed), length),
+            crate::errors::nil,
+        );
+    });
 }

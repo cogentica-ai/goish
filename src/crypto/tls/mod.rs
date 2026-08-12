@@ -2737,3 +2737,173 @@ pub fn key_agreement_errorPath(which: crate::types::int) -> crate::gostring::str
     }
     return e.Error();
 }
+
+// go: none — goish-only: prf.go's key schedule is unexported in Go,
+// where the tests are in-package. Runs the whole TLS 1.0-1.2 schedule
+// for one (suite, version) pair and hands back what Go's prf_test would
+// compare: master secret, extended master secret, the six connection
+// keys, the Finished transcript hash and both verify_data values.
+#[doc(hidden)]
+pub fn prf_schedule(
+    suiteID: crate::types::uint16,
+    version: crate::types::uint16,
+) -> (
+    crate::types::int,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::goslice::slice<crate::types::byte>>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let suite = cipher_suites::cipherSuiteByID(suiteID).unwrap();
+    let pms = crate::goslice::slice::__from_vec(
+        (0..48u16).map(|i| i as crate::types::byte).collect::<alloc::vec::Vec<_>>(),
+    );
+    let cr = crate::goslice::slice::__from_vec(
+        (0..32u16).map(|i| (0x40 + i) as crate::types::byte).collect::<alloc::vec::Vec<_>>(),
+    );
+    let sr = crate::goslice::slice::__from_vec(
+        (0..32u16).map(|i| (0x80 + i) as crate::types::byte).collect::<alloc::vec::Vec<_>>(),
+    );
+
+    let (_, hash) = prf::prfAndHashForVersion(version, suite);
+    let ms = prf::masterFromPreMasterSecret(version, suite, pms.clone(), cr.clone(), sr.clone());
+    let ems = prf::extMasterFromPreMasterSecret(version, suite, pms, cr.clone());
+    let (cm, sm, ck, sk, civ, siv) = prf::keysFromMasterSecret(
+        version, suite, ms.clone(), cr.clone(), sr.clone(), 20, 16, 16,
+    );
+    let mut fh = prf::newFinishedHash(version, suite);
+    let _ = fh.Write(crate::goslice::slice::__from_vec(
+        b"handshake transcript".to_vec(),
+    ));
+    return (
+        hash.0 as crate::types::int,
+        ms.clone(),
+        ems,
+        crate::goslice::slice::__from_vec(alloc::vec![cm, sm, ck, sk, civ, siv]),
+        fh.Sum(),
+        fh.clientSum(ms.clone()),
+        fh.serverSum(ms),
+    );
+}
+
+// go: none — goish-only: see `prf_schedule`. Reports
+// `(hashForClientCertificate over ECDSA, over Ed25519 when the buffer is
+// live, ekm, ekm with a nil context, the reserved-label error)`.
+#[doc(hidden)]
+pub fn prf_certHashAndEKM(
+    suiteID: crate::types::uint16,
+    version: crate::types::uint16,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+) {
+    let suite = cipher_suites::cipherSuiteByID(suiteID).unwrap();
+    let pms = crate::goslice::slice::__from_vec(
+        (0..48u16).map(|i| i as crate::types::byte).collect::<alloc::vec::Vec<_>>(),
+    );
+    let cr = crate::goslice::slice::__from_vec(
+        (0..32u16).map(|i| (0x40 + i) as crate::types::byte).collect::<alloc::vec::Vec<_>>(),
+    );
+    let sr = crate::goslice::slice::__from_vec(
+        (0..32u16).map(|i| (0x80 + i) as crate::types::byte).collect::<alloc::vec::Vec<_>>(),
+    );
+    let ms = prf::masterFromPreMasterSecret(version, suite, pms, cr.clone(), sr.clone());
+    let mut fh = prf::newFinishedHash(version, suite);
+    let _ = fh.Write(crate::goslice::slice::__from_vec(
+        b"handshake transcript".to_vec(),
+    ));
+    let ecdsaHash = fh.hashForClientCertificate(common::signatureECDSA, crate::crypto::SHA256);
+    let edHash = if version >= common::VersionTLS12 {
+        fh.hashForClientCertificate(common::signatureEd25519, crate::crypto::Hash(0))
+    } else {
+        crate::goslice::slice::new()
+    };
+    let ekm = prf::ekmFromMasterSecret(version, suite, ms, cr, sr);
+    let (out, _) = ekm(
+        crate::gostring::string::from_static("EXPERIMENTAL label"),
+        crate::goslice::slice::__from_vec(alloc::vec![1u8, 2, 3]),
+        32,
+    );
+    let (out2, _) = ekm(
+        crate::gostring::string::from_static("EXPERIMENTAL label"),
+        crate::goslice::slice::new(),
+        16,
+    );
+    let (_, errR) = ekm(
+        crate::gostring::string::from_static("master secret"),
+        crate::goslice::slice::new(),
+        16,
+    );
+    return (ecdsaHash, edHash, out, out2, errR.Error());
+}
+
+// go: none — goish-only: see `prf_schedule`. `discardHandshakeBuffer`
+// makes hashForClientCertificate panic, which an example cannot catch,
+// so the shim reports the flag instead.
+#[doc(hidden)]
+pub fn prf_discardHandshakeBuffer() -> bool {
+    let suite =
+        cipher_suites::cipherSuiteByID(cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
+            .unwrap();
+    let mut fh = prf::newFinishedHash(common::VersionTLS12, suite);
+    fh.discardHandshakeBuffer();
+    return fh.buffer.is_none();
+}
+
+// go: none — goish-only: cipher_suites.go's TLS 1.0-1.2 record is
+// unexported in Go. Reports `(found, keyLen, macLen, ivLen, flags)`.
+#[doc(hidden)]
+pub fn cipher_suites_byID(
+    id: crate::types::uint16,
+) -> (
+    bool,
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+) {
+    let s = cipher_suites::cipherSuiteByID(id);
+    if s.is_none() {
+        return (false, 0, 0, 0, 0);
+    }
+    let s = s.unwrap();
+    return (true, s.keyLen, s.macLen, s.ivLen, s.flags);
+}
+
+// go: none — goish-only: see `cipher_suites_byID`.
+#[doc(hidden)]
+pub fn cipher_suites_mutual(
+    have: crate::goslice::slice<crate::types::uint16>,
+    want: crate::types::uint16,
+) -> bool {
+    return cipher_suites::mutualCipherSuite(have, want).is_some();
+}
+
+// go: none — goish-only: see `cipher_suites_byID`.
+#[doc(hidden)]
+pub fn cipher_suites_isAESGCMPreferred(
+    ciphers: crate::goslice::slice<crate::types::uint16>,
+) -> bool {
+    return cipher_suites::isAESGCMPreferred(ciphers);
+}
+
+// go: none — goish-only: see `cipher_suites_byID`. Filters on suiteECDHE,
+// the predicate Go's own callers pass.
+#[doc(hidden)]
+pub fn cipher_suites_selectECDHE(
+    ids: crate::goslice::slice<crate::types::uint16>,
+    supportedIDs: crate::goslice::slice<crate::types::uint16>,
+) -> crate::types::uint16 {
+    let sel = cipher_suites::selectCipherSuite(ids, supportedIDs, &|c| {
+        c.flags & cipher_suites::suiteECDHE != 0
+    });
+    if sel.is_none() {
+        return 0;
+    }
+    return sel.unwrap().id;
+}

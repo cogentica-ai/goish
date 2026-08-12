@@ -1,4 +1,4 @@
-// go: file crypto/tls/cipher_suites.go decls: CipherSuites, InsecureCipherSuites, CipherSuiteName, prefixNonceAEAD.NonceSize, prefixNonceAEAD.Overhead, prefixNonceAEAD.explicitNonceLen, prefixNonceAEAD.Seal, prefixNonceAEAD.Open, xorNonceAEAD.NonceSize, xorNonceAEAD.Overhead, xorNonceAEAD.explicitNonceLen, xorNonceAEAD.Seal, xorNonceAEAD.Open, aeadAESGCM, aeadAESGCMTLS13, aeadChaCha20Poly1305, cthWrapper.Size, cthWrapper.BlockSize, cthWrapper.Reset, cthWrapper.Write, cthWrapper.Sum, newConstantTimeHash, macSHA1, macSHA256, tls10MAC, mutualCipherSuiteTLS13, cipherSuiteTLS13ByID
+// go: file crypto/tls/cipher_suites.go decls: CipherSuites, InsecureCipherSuites, CipherSuiteName, prefixNonceAEAD.NonceSize, prefixNonceAEAD.Overhead, prefixNonceAEAD.explicitNonceLen, prefixNonceAEAD.Seal, prefixNonceAEAD.Open, xorNonceAEAD.NonceSize, xorNonceAEAD.Overhead, xorNonceAEAD.explicitNonceLen, xorNonceAEAD.Seal, xorNonceAEAD.Open, aeadAESGCM, aeadAESGCMTLS13, aeadChaCha20Poly1305, cthWrapper.Size, cthWrapper.BlockSize, cthWrapper.Reset, cthWrapper.Write, cthWrapper.Sum, newConstantTimeHash, macSHA1, macSHA256, tls10MAC, mutualCipherSuiteTLS13, cipherSuiteTLS13ByID, cipherRC4, cipher3DES, cipherAES, rsaKA, ecdheECDSAKA, ecdheRSAKA, selectCipherSuite, isAESGCMPreferred, mutualCipherSuite, cipherSuiteByID
 //
 // crypto/tls — cipher suite IDs, the preference ordering, and the
 // record-layer primitives the suites name.
@@ -14,8 +14,6 @@
 // constructors, which return Go's `any` for the record layer to assert
 // back to a `cipher.Stream` or `cipher.BlockMode`.
 //
-// goishlint:ignore GOISH018 cipher3DES, cipherAES, cipherRC4, cipherSuiteByID, ecdheECDSAKA, ecdheRSAKA, isAESGCMPreferred, mutualCipherSuite, rsaKA, selectCipherSuite — the TLS 1.0-1.2 `cipherSuite` record and the constructors that build it; every one needs `keyAgreement` or Go's `any`. See ROADMAP.md.
-// goishlint:ignore GOISH021 aesgcmCiphers, suiteECDHE, suiteECSign, suiteSHA384, suiteTLS12 — same.
 //
 // The preference order is a security-relevant table: it decides which
 // suite a handshake picks. It is transcribed in Go's exact order,
@@ -927,6 +925,282 @@ pub(crate) fn cipherSuiteTLS13ByID(id: uint16) -> Option<&'static cipherSuiteTLS
     //         if cipherSuite.id == id { return cipherSuite }
     //     }
     for cipherSuite in cipherSuitesTLS13 {
+        if cipherSuite.id == id {
+            return Some(cipherSuite);
+        }
+    }
+    // Go: return nil
+    return None;
+}
+
+
+// ─── The TLS 1.0-1.2 cipherSuite record ───────────────────────────────
+
+use super::key_agreement::{ecdheKeyAgreement, keyAgreement, rsaKeyAgreement};
+use crate::crypto::cipher;
+use crate::crypto::des;
+use crate::crypto::rc4;
+use crate::types::uint8;
+
+// Go: cipher_suites.go:116-134
+//   const ( suiteECDHE = 1 << iota; suiteECSign; suiteTLS12; suiteSHA384 )
+/// Go: "suiteECDHE indicates that the cipher suite involves elliptic
+/// curve Diffie-Hellman. This means that it should only be selected when
+/// the client indicates that it supports ECC with a curve and point
+/// format that we're happy with."
+pub(crate) const suiteECDHE: int = 1 << 0;
+/// Go: "suiteECSign indicates that the cipher suite involves an ECDSA or
+/// EdDSA signature and therefore may only be selected when the server's
+/// certificate is ECDSA or EdDSA. If this is not set then the cipher
+/// suite is RSA based."
+pub(crate) const suiteECSign: int = 1 << 1;
+/// Go: "suiteTLS12 indicates that the cipher suite should only be
+/// advertised and accepted when using TLS 1.2."
+pub(crate) const suiteTLS12: int = 1 << 2;
+/// Go: "suiteSHA384 indicates that the cipher suite uses SHA384 as the
+/// handshake hash."
+pub(crate) const suiteSHA384: int = 1 << 3;
+
+// go: none — goish-only: Go's three block-cipher constructors return
+// `any`, which the record layer type-asserts back to a `cipher.Stream`
+// (RC4) or a `cipher.BlockMode` (CBC). goish's `Any` is an
+// `Arc<dyn AnyVal>` and cannot hand out the `&mut` either of those
+// needs, so the closed set of two is spelled as a sum type. Same two
+// cases, same constructors.
+pub(crate) enum anyCipher {
+    Stream(rc4::Cipher),
+    BlockMode(Box<dyn cipher::BlockMode + Send + Sync>),
+}
+
+// go: sdk 1.25.5 crypto/tls/cipher_suites.go:408-411 cipherRC4
+pub(crate) fn cipherRC4(key: slice<byte>, _iv: slice<byte>, _isRead: bool) -> anyCipher {
+    // Go: cipher, _ := rc4.NewCipher(key); return cipher
+    let (c, _) = rc4::NewCipher(key);
+    return anyCipher::Stream(c.unwrap());
+}
+
+// go: sdk 1.25.5 crypto/tls/cipher_suites.go:413-419 cipher3DES
+pub(crate) fn cipher3DES(key: slice<byte>, iv: slice<byte>, isRead: bool) -> anyCipher {
+    // Go: block, _ := des.NewTripleDESCipher(key)
+    //     if isRead { return cipher.NewCBCDecrypter(block, iv) }
+    //     return cipher.NewCBCEncrypter(block, iv)
+    let (block, _) = des::NewTripleDESCipher(key);
+    let block = block.unwrap();
+    if isRead {
+        return anyCipher::BlockMode(Box::new(cipher::NewCBCDecrypter(block, iv)));
+    }
+    return anyCipher::BlockMode(Box::new(cipher::NewCBCEncrypter(block, iv)));
+}
+
+// go: sdk 1.25.5 crypto/tls/cipher_suites.go:421-427 cipherAES
+pub(crate) fn cipherAES(key: slice<byte>, iv: slice<byte>, isRead: bool) -> anyCipher {
+    // Go: block, _ := aes.NewCipher(key)
+    //     if isRead { return cipher.NewCBCDecrypter(block, iv) }
+    //     return cipher.NewCBCEncrypter(block, iv)
+    let (block, _) = aes::NewCipher(key);
+    let block = block.unwrap();
+    if isRead {
+        return anyCipher::BlockMode(Box::new(cipher::NewCBCDecrypter(block, iv)));
+    }
+    return anyCipher::BlockMode(Box::new(cipher::NewCBCEncrypter(block, iv)));
+}
+
+// go: sdk 1.25.5 crypto/tls/cipher_suites.go:626-628 rsaKA
+pub(crate) fn rsaKA(_version: uint16) -> Box<dyn keyAgreement + Send + Sync> {
+    // Go: return rsaKeyAgreement{}
+    return Box::new(rsaKeyAgreement::default());
+}
+
+// go: sdk 1.25.5 crypto/tls/cipher_suites.go:630-635 ecdheECDSAKA
+pub(crate) fn ecdheECDSAKA(version: uint16) -> Box<dyn keyAgreement + Send + Sync> {
+    // Go: return &ecdheKeyAgreement{isRSA: false, version: version}
+    let mut ka = ecdheKeyAgreement::default();
+    ka.isRSA = false;
+    ka.version = version;
+    return Box::new(ka);
+}
+
+// go: sdk 1.25.5 crypto/tls/cipher_suites.go:637-642 ecdheRSAKA
+pub(crate) fn ecdheRSAKA(version: uint16) -> Box<dyn keyAgreement + Send + Sync> {
+    // Go: return &ecdheKeyAgreement{isRSA: true, version: version}
+    let mut ka = ecdheKeyAgreement::default();
+    ka.isRSA = true;
+    ka.version = version;
+    return Box::new(ka);
+}
+
+// Go: cipher_suites.go:136-149
+//   type cipherSuite struct { id uint16; keyLen, macLen, ivLen int
+//                             ka func(version uint16) keyAgreement
+//                             flags int
+//                             cipher func(key, iv []byte, isRead bool) any
+//                             mac func(key []byte) hash.Hash
+//                             aead func(key, fixedNonce []byte) aead }
+/// Go: "A cipherSuite is a TLS 1.0–1.2 cipher suite, and defines the key
+/// exchange mechanism, as well as the cipher+MAC pair or the AEAD."
+///
+/// Go leaves `cipher`/`mac` nil on an AEAD suite and `aead` nil on a
+/// CBC one; `Option` carries that.
+pub(crate) struct cipherSuite {
+    pub id: uint16,
+    /// Go: "the lengths, in bytes, of the key material needed for each
+    /// component."
+    pub keyLen: int,
+    pub macLen: int,
+    pub ivLen: int,
+    pub ka: fn(uint16) -> Box<dyn keyAgreement + Send + Sync>,
+    /// Go: "flags is a bitmask of the suite* values, above."
+    pub flags: int,
+    pub cipher: Option<fn(slice<byte>, slice<byte>, bool) -> anyCipher>,
+    pub mac: Option<fn(slice<byte>) -> Box<dyn Hash + Send + Sync>>,
+    pub aead: Option<fn(slice<byte>, slice<byte>) -> Box<dyn aead + Send + Sync>>,
+}
+
+// go: none — goish-only: Go writes each row of `cipherSuites` as a
+// composite literal with positional fields. Naming the constructor keeps
+// every row on one line, as Go's are.
+const fn cs12(
+    id: uint16,
+    keyLen: int,
+    macLen: int,
+    ivLen: int,
+    ka: fn(uint16) -> Box<dyn keyAgreement + Send + Sync>,
+    flags: int,
+    cipher: Option<fn(slice<byte>, slice<byte>, bool) -> anyCipher>,
+    mac: Option<fn(slice<byte>) -> Box<dyn Hash + Send + Sync>>,
+    aead: Option<fn(slice<byte>, slice<byte>) -> Box<dyn aead + Send + Sync>>,
+) -> cipherSuite {
+    return cipherSuite { id, keyLen, macLen, ivLen, ka, flags, cipher, mac, aead };
+}
+
+// Go: cipher_suites.go:151-174
+//   var cipherSuites = []*cipherSuite{ … }
+pub(crate) static cipherSuites: &[cipherSuite] = &[
+    cs12(TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305, 32, 0, 12, ecdheRSAKA, suiteECDHE | suiteTLS12, None, None, Some(aeadChaCha20Poly1305)),
+    cs12(TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305, 32, 0, 12, ecdheECDSAKA, suiteECDHE | suiteECSign | suiteTLS12, None, None, Some(aeadChaCha20Poly1305)),
+    cs12(TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, 16, 0, 4, ecdheRSAKA, suiteECDHE | suiteTLS12, None, None, Some(aeadAESGCM)),
+    cs12(TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, 16, 0, 4, ecdheECDSAKA, suiteECDHE | suiteECSign | suiteTLS12, None, None, Some(aeadAESGCM)),
+    cs12(TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, 32, 0, 4, ecdheRSAKA, suiteECDHE | suiteTLS12 | suiteSHA384, None, None, Some(aeadAESGCM)),
+    cs12(TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, 32, 0, 4, ecdheECDSAKA, suiteECDHE | suiteECSign | suiteTLS12 | suiteSHA384, None, None, Some(aeadAESGCM)),
+    cs12(TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, 16, 32, 16, ecdheRSAKA, suiteECDHE | suiteTLS12, Some(cipherAES), Some(macSHA256), None),
+    cs12(TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, 16, 20, 16, ecdheRSAKA, suiteECDHE, Some(cipherAES), Some(macSHA1), None),
+    cs12(TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, 16, 32, 16, ecdheECDSAKA, suiteECDHE | suiteECSign | suiteTLS12, Some(cipherAES), Some(macSHA256), None),
+    cs12(TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, 16, 20, 16, ecdheECDSAKA, suiteECDHE | suiteECSign, Some(cipherAES), Some(macSHA1), None),
+    cs12(TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA, 32, 20, 16, ecdheRSAKA, suiteECDHE, Some(cipherAES), Some(macSHA1), None),
+    cs12(TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, 32, 20, 16, ecdheECDSAKA, suiteECDHE | suiteECSign, Some(cipherAES), Some(macSHA1), None),
+    cs12(TLS_RSA_WITH_AES_128_GCM_SHA256, 16, 0, 4, rsaKA, suiteTLS12, None, None, Some(aeadAESGCM)),
+    cs12(TLS_RSA_WITH_AES_256_GCM_SHA384, 32, 0, 4, rsaKA, suiteTLS12 | suiteSHA384, None, None, Some(aeadAESGCM)),
+    cs12(TLS_RSA_WITH_AES_128_CBC_SHA256, 16, 32, 16, rsaKA, suiteTLS12, Some(cipherAES), Some(macSHA256), None),
+    cs12(TLS_RSA_WITH_AES_128_CBC_SHA, 16, 20, 16, rsaKA, 0, Some(cipherAES), Some(macSHA1), None),
+    cs12(TLS_RSA_WITH_AES_256_CBC_SHA, 32, 20, 16, rsaKA, 0, Some(cipherAES), Some(macSHA1), None),
+    cs12(TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA, 24, 20, 8, ecdheRSAKA, suiteECDHE, Some(cipher3DES), Some(macSHA1), None),
+    cs12(TLS_RSA_WITH_3DES_EDE_CBC_SHA, 24, 20, 8, rsaKA, 0, Some(cipher3DES), Some(macSHA1), None),
+    cs12(TLS_RSA_WITH_RC4_128_SHA, 16, 20, 0, rsaKA, 0, Some(cipherRC4), Some(macSHA1), None),
+    cs12(TLS_ECDHE_RSA_WITH_RC4_128_SHA, 16, 20, 0, ecdheRSAKA, suiteECDHE, Some(cipherRC4), Some(macSHA1), None),
+    cs12(TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, 16, 20, 0, ecdheECDSAKA, suiteECDHE | suiteECSign, Some(cipherRC4), Some(macSHA1), None),
+];
+
+// go: sdk 1.25.5 crypto/tls/cipher_suites.go:178-192 selectCipherSuite
+/// Go: "selectCipherSuite returns the first TLS 1.0–1.2 cipher suite
+/// from ids which is also in supportedIDs and passes the ok filter."
+///
+/// goishlint:ignore GOISH008 selectCipherSuite — Go's `ok func(*cipherSuite) bool` is a predicate over an unexported type; `&dyn Fn` is the goish spelling
+pub(crate) fn selectCipherSuite(
+    ids: slice<uint16>,
+    supportedIDs: slice<uint16>,
+    ok: &dyn Fn(&'static cipherSuite) -> bool,
+) -> Option<&'static cipherSuite> {
+    // Go: for _, id := range ids {
+    //         candidate := cipherSuiteByID(id)
+    //         if candidate == nil || !ok(candidate) { continue }
+    //         for _, suppID := range supportedIDs { if id == suppID { return candidate } }
+    //     }
+    for (_, id) in crate::range!(ids) {
+        let candidate = cipherSuiteByID(*id);
+        if candidate.is_none() || !ok(candidate.unwrap()) {
+            continue;
+        }
+        for (_, suppID) in crate::range!(supportedIDs.clone()) {
+            if *id == *suppID {
+                return candidate;
+            }
+        }
+    }
+    // Go: return nil
+    return None;
+}
+
+// go: sdk 1.25.5 crypto/tls/cipher_suites.go:393-406 isAESGCMPreferred
+/// Go: "isAESGCMPreferred returns whether we have hardware support for
+/// AES-GCM, and the first known cipher in the peer's preference list is
+/// an AES-GCM cipher, implying the peer also has hardware support for
+/// it."
+///
+/// Deviation: `hasAESGCMHardwareSupport` is Go's `internal/cpu` feature
+/// probe, which goish does not port. goish's single target is
+/// x86_64-unknown-linux-gnu, and AES-NI + PCLMULQDQ have been present on
+/// every x86-64 part since Westmere, so the constant is `true` — the
+/// same value Go computes on this target.
+pub(crate) fn isAESGCMPreferred(ciphers: slice<uint16>) -> bool {
+    // Go: if !hasAESGCMHardwareSupport { return false }
+    if !hasAESGCMHardwareSupport {
+        return false;
+    }
+    // Go: for _, cID := range ciphers {
+    //         if c := cipherSuiteByID(cID); c != nil { return aesgcmCiphers[cID] }
+    //         if c := cipherSuiteTLS13ByID(cID); c != nil { return aesgcmCiphers[cID] }
+    //     }
+    for (_, cID) in crate::range!(ciphers) {
+        if cipherSuiteByID(*cID).is_some() {
+            return contains(aesgcmCiphers, *cID);
+        }
+        if cipherSuiteTLS13ByID(*cID).is_some() {
+            return contains(aesgcmCiphers, *cID);
+        }
+    }
+    // Go: return false
+    return false;
+}
+
+/// Go: `var hasAESGCMHardwareSupport = …` — see [`isAESGCMPreferred`].
+pub(crate) const hasAESGCMHardwareSupport: bool = true;
+
+// Go: cipher_suites.go:379-388
+//   var aesgcmCiphers = map[uint16]bool{ … }
+pub(crate) const aesgcmCiphers: &[uint16] = &[
+    // TLS 1.2
+    TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+    TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+    TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+    // TLS 1.3
+    TLS_AES_128_GCM_SHA256,
+    TLS_AES_256_GCM_SHA384,
+];
+
+// go: sdk 1.25.5 crypto/tls/cipher_suites.go:646-653 mutualCipherSuite
+/// Go: "mutualCipherSuite returns a cipherSuite given a list of
+/// supported ciphersuites and the id requested by the peer."
+pub(crate) fn mutualCipherSuite(
+    have: slice<uint16>,
+    want: uint16,
+) -> Option<&'static cipherSuite> {
+    // Go: for _, id := range have { if id == want { return cipherSuiteByID(id) } }
+    for (_, id) in crate::range!(have) {
+        if *id == want {
+            return cipherSuiteByID(*id);
+        }
+    }
+    // Go: return nil
+    return None;
+}
+
+// go: sdk 1.25.5 crypto/tls/cipher_suites.go:655-662 cipherSuiteByID
+pub(crate) fn cipherSuiteByID(id: uint16) -> Option<&'static cipherSuite> {
+    // Go: for _, cipherSuite := range cipherSuites {
+    //         if cipherSuite.id == id { return cipherSuite }
+    //     }
+    for cipherSuite in cipherSuites {
         if cipherSuite.id == id {
             return Some(cipherSuite);
         }

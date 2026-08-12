@@ -1426,6 +1426,127 @@ fn main() {
     eq("ecdhe SKX with an unoffered curve", tls::key_agreement_errorPath(10),
        "tls: server selected unoffered curve");
 
+    // ─── cipher_suites.go's TLS 1.0-1.2 record and prf.go's key
+    //     schedule. Every hex string is from goref.sh.
+    let (csOK, csKey, csMac, csIV, csFlags) =
+        tls::cipher_suites_byID(tls::TLS_RSA_WITH_RC4_128_SHA);
+    check("cipherSuiteByID RC4 found", csOK);
+    check_n("cipherSuiteByID RC4 keyLen", csKey, 16);
+    check_n("cipherSuiteByID RC4 macLen", csMac, 20);
+    check_n("cipherSuiteByID RC4 ivLen", csIV, 0);
+    check_n("cipherSuiteByID RC4 flags", csFlags, 0);
+    let (unknownOK, _, _, _, _) = tls::cipher_suites_byID(0x9999);
+    check("cipherSuiteByID rejects an unknown id", !unknownOK);
+    let (_, _, _, _, sha384Flags) =
+        tls::cipher_suites_byID(tls::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384);
+    check("AES-256-GCM carries suiteSHA384", sha384Flags & 8 != 0);
+
+    let two = slice::__from_vec(alloc::vec![
+        tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+        tls::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+    ]);
+    check("mutualCipherSuite hit",
+          tls::cipher_suites_mutual(two.clone(), tls::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384));
+    check("mutualCipherSuite miss",
+          !tls::cipher_suites_mutual(two, tls::TLS_RSA_WITH_RC4_128_SHA));
+
+    // isAESGCMPreferred answers on the FIRST known suite in the peer's
+    // list and stops there — an unknown id is skipped, a known non-GCM
+    // one ends the scan.
+    let pref = |v: alloc::vec::Vec<u16>| tls::cipher_suites_isAESGCMPreferred(slice::__from_vec(v));
+    check("isAESGCMPreferred ECDHE-RSA-AES128-GCM",
+          pref(alloc::vec![tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]));
+    check("isAESGCMPreferred rejects ChaCha20",
+          !pref(alloc::vec![tls::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305]));
+    check("isAESGCMPreferred TLS 1.3 AES-128-GCM",
+          pref(alloc::vec![tls::TLS_AES_128_GCM_SHA256]));
+    check("isAESGCMPreferred rejects TLS 1.3 ChaCha20",
+          !pref(alloc::vec![tls::TLS_CHACHA20_POLY1305_SHA256]));
+    check("isAESGCMPreferred on an empty list", !pref(alloc::vec![]));
+    check("isAESGCMPreferred skips an unknown id",
+          pref(alloc::vec![0x9999u16, tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]));
+    check("isAESGCMPreferred with only an unknown id", !pref(alloc::vec![0x9999u16]));
+
+    check_n("selectCipherSuite picks the first ECDHE suite",
+            tls::cipher_suites_selectECDHE(
+                slice::__from_vec(alloc::vec![
+                    tls::TLS_RSA_WITH_RC4_128_SHA,
+                    tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]),
+                slice::__from_vec(alloc::vec![tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]),
+            ) as int, 0xc02f);
+    check_n("selectCipherSuite honours the filter",
+            tls::cipher_suites_selectECDHE(
+                slice::__from_vec(alloc::vec![tls::TLS_RSA_WITH_RC4_128_SHA]),
+                slice::__from_vec(alloc::vec![tls::TLS_RSA_WITH_RC4_128_SHA]),
+            ) as int, 0);
+
+    // The schedule itself, at TLS 1.0 (MD5+SHA-1 PRF) and TLS 1.2
+    // (SHA-256), and for the SHA-384 suite.
+    let sched = |id: u16, v: u16| tls::prf_schedule(id, v);
+    let (h10, ms10, ems10, keys10, sum10, cs10, ss10) =
+        sched(tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, 0x0301);
+    check_n("prfAndHashForVersion 1.0 has no handshake hash", h10, 0);
+    eq("masterFromPreMasterSecret 1.0", hexOf(ms10),
+       "3b72140af74bdf7907992fc157473c645448f17cdefeb4bef081ba0f98ef826724af941cae89bb4da1fc7168c150455e");
+    eq("extMasterFromPreMasterSecret 1.0", hexOf(ems10),
+       "845c9c8be52957295cc3df719f20cc36b909029d6503c4fd7b7357c95c810f384d642bb04ed796da6ec0f52089bec0e2");
+    eq("keysFromMasterSecret 1.0 clientMAC", hexOf(keys10[0].clone()),
+       "880a1b65ae7cc1516f5c5cb2bacec5b6539bebab");
+    eq("keysFromMasterSecret 1.0 serverKey", hexOf(keys10[3].clone()),
+       "77f291ed9f07163d9e1611facdbbfc19");
+    eq("keysFromMasterSecret 1.0 serverIV", hexOf(keys10[5].clone()),
+       "301dcc016f3a613aa7e45e6f3fdebfb2");
+    eq("finishedHash.Sum 1.0 is MD5+SHA-1", hexOf(sum10),
+       "806c77077c44f23699469230a02b0caf44e3489a4299bf057e9f0ab0d17c3e7acf833588");
+    eq("clientSum 1.0", hexOf(cs10), "c7ea94a23f4aee04632c218c");
+    eq("serverSum 1.0", hexOf(ss10), "ac57e50a2e8f5ef9b8ffe344");
+
+    let (h12, ms12, ems12, keys12, sum12, cs12, ss12) =
+        sched(tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, 0x0303);
+    check_n("prfAndHashForVersion 1.2 is SHA-256", h12, 5);
+    eq("masterFromPreMasterSecret 1.2", hexOf(ms12),
+       "a1b3c58fbcafdd223ec0a71efbb1f6be268642b5ce2ae0a70f69273cd5e3af02ec675cd902da4b307993a7a6e3f3c441");
+    eq("extMasterFromPreMasterSecret 1.2 goes through fips140/tls12", hexOf(ems12),
+       "d8932ce1860ee4f1874a7535032cceccf17730a5a26fb0172619bf6438949f9d9a51a1c1f7d8c9ef19119217fef56b27");
+    eq("keysFromMasterSecret 1.2 clientKey", hexOf(keys12[2].clone()),
+       "c26d16bd6c9325ad256addbf8978c596");
+    eq("finishedHash.Sum 1.2", hexOf(sum12),
+       "864b05f143787661708f0a162c52170368def8fa53f942601f933b2db8ee99c0");
+    eq("clientSum 1.2", hexOf(cs12), "6ece4efc6c40b46dc6620f9d");
+    eq("serverSum 1.2", hexOf(ss12), "183b4eb7d97e6fcfb98318ce");
+
+    let (h384, ms384, _, _, sum384, cs384, _) =
+        sched(tls::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, 0x0303);
+    check_n("prfAndHashForVersion picks SHA-384 on a suiteSHA384 suite", h384, 6);
+    eq("masterFromPreMasterSecret 1.2/SHA-384", hexOf(ms384),
+       "89f5a0912340fc16083ccf6048e820e04431bcd8ea2f6945c8573077c17c8045f538747e67106bd634b1c52c9359bc1c");
+    eq("finishedHash.Sum 1.2/SHA-384", hexOf(sum384),
+       "96b73bf47ebf9822d1047033b527dd2102a14af20e02a9ae3d8d157315a4a8f22e87453a7e8affe593f69a959f7df81c");
+    eq("clientSum 1.2/SHA-384", hexOf(cs384), "c0ec016a5fa874b4ad0153c4");
+
+    // Ed25519 signs the transcript whole; everything else pre-hashes.
+    let (ecdsaH, edH, ekm, ekmNil, ekmErr) =
+        tls::prf_certHashAndEKM(tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, 0x0303);
+    eq("hashForClientCertificate ECDSA at 1.2", hexOf(ecdsaH),
+       "864b05f143787661708f0a162c52170368def8fa53f942601f933b2db8ee99c0");
+    eq("hashForClientCertificate Ed25519 is the raw buffer", hexOf(edH),
+       "68616e647368616b65207472616e736372697074");
+    eq("ekmFromMasterSecret 1.2", hexOf(ekm),
+       "98160b3d7d7ced8229f7c8af129fa81f560ce8f6b3123addf3b0ba0d15c10cb6");
+    eq("ekmFromMasterSecret 1.2 nil context", hexOf(ekmNil),
+       "35a35e1d84eea3c887a017d67129c257");
+    eq("ekmFromMasterSecret rejects a reserved label", ekmErr,
+       "crypto/tls: reserved ExportKeyingMaterial label: master secret");
+    // At TLS 1.0 the server hash is the SHA-1 half only.
+    let (ecdsaH10, _, ekm10, _, _) =
+        tls::prf_certHashAndEKM(tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, 0x0301);
+    eq("hashForClientCertificate ECDSA at 1.0 is SHA-1 only", hexOf(ecdsaH10),
+       "44e3489a4299bf057e9f0ab0d17c3e7acf833588");
+    eq("ekmFromMasterSecret 1.0", hexOf(ekm10),
+       "df27b3357e0ac1be167ce83a4a3e018ca3a5b5fb38394b584f5016c16deb80b1");
+    check("discardHandshakeBuffer clears the buffer",
+          tls::prf_discardHandshakeBuffer());
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
