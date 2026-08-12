@@ -1,6 +1,6 @@
 // crypto/tls/handshake_client.rs — TLS 1.2 client handshake.
 //
-// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, handshake, doFullHandshake, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, handshake, doFullHandshake — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
 // goishlint:ignore GOISH019 echClientContext — same.
 // goishlint:ignore GOISH021 echClientContext, tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
 //
@@ -3536,4 +3536,39 @@ fn publicKeyTypeName(cert: &crate::crypto::x509::Certificate) -> crate::gostring
 pub(crate) struct echClientContext {
     pub echRejected: bool,
     pub retryConfigs: crate::goslice::slice<crate::types::byte>,
+}
+
+// go: sdk 1.25.5 crypto/tls/handshake_client.go:1325-1333 computeAndUpdatePSK
+/// Go: hash the hello up to (but not including) the PSK binders, derive
+/// the binder from `binderKey` over that transcript, and write it back
+/// into the message.
+///
+/// Deviation: Go's `finishedHash func([]byte, hash.Hash) []byte` is a
+/// method value (`hs.suite.finishedHash`); goish passes the same thing
+/// as a borrowed closure, since `cipherSuiteTLS13::finishedHash` takes
+/// `&self` and cannot be detached from its suite.
+pub(crate) fn computeAndUpdatePSK(
+    m: &mut super::handshake_messages::clientHelloMsg,
+    binderKey: crate::goslice::slice<crate::types::byte>,
+    transcript: &mut super::handshake_messages::transcriptHasher,
+    finishedHash: &dyn Fn(
+        crate::goslice::slice<crate::types::byte>,
+        &(dyn crate::hash::Hash + Send + Sync + 'static),
+    ) -> crate::goslice::slice<crate::types::byte>,
+) -> crate::error {
+    // Go: helloBytes, err := m.marshalWithoutBinders()
+    //     if err != nil { return err }
+    let (helloBytes, err) = m.marshalWithoutBinders();
+    if err != crate::errors::nil {
+        return err;
+    }
+    // Go: transcript.Write(helloBytes)
+    crate::io::Writer::Write(transcript, helloBytes);
+    // Go: pskBinders := [][]byte{finishedHash(binderKey, transcript)}
+    let pskBinders = crate::goslice::slice::__from_vec(alloc::vec![finishedHash(
+        binderKey,
+        &*transcript.0
+    )]);
+    // Go: return m.updateBinders(pskBinders)
+    return m.updateBinders(pskBinders);
 }

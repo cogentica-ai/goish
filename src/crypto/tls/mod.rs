@@ -4684,6 +4684,9 @@ pub fn handshake_server_tls13_stateFlags() -> (bool, bool, bool, bool, bool, boo
         let mut c = conn::Conn::default();
         c.__setConfig(cfg);
         return handshake_server_tls13::serverHandshakeStateTLS13 {
+            suite: None,
+            clientFinished: crate::goslice::slice::new(),
+            trafficSecret: crate::goslice::slice::new(),
             c,
             clientHello: hello,
             sentDummyCCS: false,
@@ -5338,6 +5341,9 @@ pub fn handshake_server_tls13_pickCertificate(
         _ => alloc::vec![common::Ed25519.0, common::PSSWithSHA256.0],
     };
     let mut hs = handshake_server_tls13::serverHandshakeStateTLS13 {
+            suite: None,
+            clientFinished: crate::goslice::slice::new(),
+            trafficSecret: crate::goslice::slice::new(),
         c,
         clientHello: ch,
         sentDummyCCS: false,
@@ -6806,4 +6812,138 @@ pub fn handshake_client_tls13_certificate(
         hs.certReq.as_ref().map(|r| r.ocspStapling).unwrap_or(false),
         sink.Lock().clone(),
     );
+}
+
+// go: none — goish-only: `computeAndUpdatePSK` is unexported in Go,
+// where the tests are in-package. Builds the hello Go's reference test
+// uses, runs it, and reports `(errText, marshalWithoutBinders, the
+// derived binder, the full hello, the transcript digest)`.
+#[doc(hidden)]
+pub fn handshake_client_computeAndUpdatePSK() -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    use crate::goslice::slice;
+    let suite = cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256).unwrap();
+    let binderKey: slice<crate::types::byte> = {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: crate::types::int = 0;
+        while i < 32 {
+            v.push(crate::byte(i + 1));
+            i += 1;
+        }
+        slice::__from_vec(v)
+    };
+    let mut m = handshake_messages::clientHelloMsg::default();
+    m.vers = common::VersionTLS12;
+    m.random = alloc::vec![0u8; 32];
+    m.sessionId = alloc::vec![1u8, 2, 3];
+    m.cipherSuites = alloc::vec![cipher_suites::TLS_AES_128_GCM_SHA256];
+    m.compressionMethods = alloc::vec![0u8];
+    m.supportedVersions = alloc::vec![common::VersionTLS13];
+    m.pskModes = alloc::vec![common::pskModeDHE];
+    m.pskIdentities = alloc::vec![handshake_messages::pskIdentity {
+        label: alloc::vec![9u8, 9],
+        obfuscatedTicketAge: 7,
+    }];
+    m.pskBinders = alloc::vec![alloc::vec![0u8; 32]];
+
+    let mut transcript = handshake_messages::transcriptHasher(alloc::boxed::Box::new(
+        crate::crypto::sha256::New(),
+    ));
+    crate::io::Writer::Write(
+        &mut transcript,
+        slice::__from_vec(alloc::vec![0x01u8, 0x00, 0x00, 0x00]),
+    );
+
+    let (wob, _) = m.marshalWithoutBinders();
+    let err = handshake_client::computeAndUpdatePSK(&mut m, binderKey, &mut transcript, &|k, t| {
+        suite.finishedHash(k, t)
+    });
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let (full, _) = m.marshal();
+    let binder = slice::__from_vec(m.pskBinders[0].clone());
+    let digest = transcript.0.Sum(slice::__from_vec(alloc::vec![]));
+    return (text, wob, binder, full, digest);
+}
+
+// go: none — goish-only: `serverHandshakeStateTLS13.readClientFinished`
+// is unexported in Go, where the tests are in-package. `which`: 0 = the
+// expected Finished, 1 = a wrong one, 2 = a message that is not a
+// Finished. Reports `(errText, c.in.trafficSecret, the wire)`.
+#[doc(hidden)]
+pub fn handshake_server_tls13_readClientFinished(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    use crate::goslice::slice;
+    let expected: slice<crate::types::byte> =
+        slice::__from_vec(alloc::vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    let body = if which == 2 {
+        let mut nst = handshake_messages::newSessionTicketMsgTLS13::default();
+        nst.lifetime = 1;
+        let (b, _) = nst.marshal();
+        b
+    } else {
+        let fin = handshake_messages::finishedMsg {
+            verifyData: if which == 0 {
+                expected.clone().__into_vec()
+            } else {
+                alloc::vec![9u8; 12]
+            },
+        };
+        let (b, _) = fin.marshal();
+        b
+    };
+    let mut feed: alloc::vec::Vec<crate::types::byte> = alloc::vec![
+        0x16u8,
+        0x03,
+        0x03,
+        crate::byte(body.Len() >> 8),
+        crate::byte(body.Len() & 0xff)
+    ];
+    feed.extend_from_slice(&body);
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setDuplexConn(slice::__from_vec(feed), sink.clone());
+    c.__setHaveVers(true);
+    c.__setVers(common::VersionTLS13);
+    c.__setCipherSuite(cipher_suites::TLS_AES_128_GCM_SHA256);
+    c.__setTrafficSecrets(
+        slice::__from_vec(alloc::vec![9u8, 9, 9, 9]),
+        slice::new(),
+    );
+
+    let mut hs = handshake_server_tls13::serverHandshakeStateTLS13 {
+        suite: cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256),
+        clientFinished: expected,
+        trafficSecret: slice::__from_vec(alloc::vec![0xaau8, 0xbb, 0xcc, 0xdd]),
+        c,
+        clientHello: handshake_messages::clientHelloMsg::default(),
+        sentDummyCCS: false,
+        usingPSK: false,
+        sigAlg: common::SignatureScheme(0),
+        cert: None,
+    };
+    let err = hs.readClientFinished();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let (inSec, _) = hs.c.__trafficSecrets();
+    return (text, inSec, sink.Lock().clone());
 }

@@ -747,6 +747,12 @@ pub(crate) struct serverHandshakeStateTLS13 {
     pub usingPSK: bool,
     pub sigAlg: super::common::SignatureScheme,
     pub cert: Option<super::common::Certificate>,
+    pub suite: Option<&'static super::cipher_suites::cipherSuiteTLS13>,
+    /// Go: the verify_data the server expects from the client, computed
+    /// before the client's Finished is read.
+    pub clientFinished: crate::goslice::slice<crate::types::byte>,
+    /// Go: `client_application_traffic_secret_0`.
+    pub trafficSecret: crate::goslice::slice<crate::types::byte>,
 }
 
 impl serverHandshakeStateTLS13 {
@@ -952,6 +958,58 @@ impl serverHandshakeStateTLS13 {
         // Go: hs.cert = certificate
         //     return nil
         self.cert = Some(certificate);
+        return crate::errors::nil;
+    }
+}
+
+impl serverHandshakeStateTLS13 {
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:1139-1161 serverHandshakeStateTLS13.readClientFinished
+    /// Go: read the client's Finished, check it against the verify_data
+    /// computed earlier, and switch the read half to the client's
+    /// application traffic secret.
+    pub(crate) fn readClientFinished(&mut self) -> crate::error {
+        // Go: "finishedMsg is not included in the transcript."
+        let (msg, err) = self.c.readHandshake(None);
+        if err != crate::errors::nil {
+            return err;
+        }
+        // Go: finished, ok := msg.(*finishedMsg); if !ok { … }
+        let msg = match msg {
+            Some(m) => m,
+            None => return crate::errors::New("tls: internal error: no handshake message"),
+        };
+        let finished = match msg
+            .asAny()
+            .downcast_ref::<super::handshake_messages::finishedMsg>()
+        {
+            Some(f) => f.clone(),
+            None => {
+                self.c.sendAlert(super::alert::alertUnexpectedMessage);
+                return super::common::unexpectedMessageError(
+                    crate::gostring::string::from_static("*tls.finishedMsg"),
+                    super::handshake_messages::handshakeMessageTypeName(&*msg),
+                );
+            }
+        };
+
+        // Go: if !hmac.Equal(hs.clientFinished, finished.verifyData) {
+        //         c.sendAlert(alertDecryptError)
+        //         return errors.New("tls: invalid client finished hash") }
+        if !crate::crypto::hmac::Equal(
+            self.clientFinished.clone(),
+            crate::goslice::slice::__from_vec(finished.verifyData.clone()),
+        ) {
+            self.c.sendAlert(super::alert::alertDecryptError);
+            return crate::errors::New("tls: invalid client finished hash");
+        }
+
+        // Go: c.in.setTrafficSecret(hs.suite, QUICEncryptionLevelApplication, hs.trafficSecret)
+        //     return nil
+        self.c.in_.setTrafficSecret(
+            self.suite.unwrap(),
+            super::quic::QUICEncryptionLevelApplication,
+            self.trafficSecret.clone(),
+        );
         return crate::errors::nil;
     }
 }

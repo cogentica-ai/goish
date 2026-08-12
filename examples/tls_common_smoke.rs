@@ -3118,6 +3118,63 @@ fn main() {
         certI += 1;
     }
 
+
+    // ── computeAndUpdatePSK ─────────────────────────────────────────
+    //
+    // Ground truth: scripts/goref.sh crypto/tls. The binder is a MAC
+    // over the hello up to but NOT including the binder list, so the
+    // marshalWithoutBinders bytes are asserted too - if that prefix
+    // were wrong the binder would still look like a plausible hash.
+    let (pskErr, pskWob, pskBinder, pskFull, pskDigest) =
+        tls::handshake_client_computeAndUpdatePSK();
+    eq("computeAndUpdatePSK succeeds", pskErr, "");
+    eq(
+        "computeAndUpdatePSK hashes the hello without its binders",
+        hexOf(pskWob),
+        "0100006c0303000000000000000000000000000000000000000000000000000000000000000003010203000213010100003e002b0003020304002d000201010029002d00080002090900000007",
+    );
+    eq(
+        "computeAndUpdatePSK derives Go's binder",
+        hexOf(pskBinder),
+        "c01165deaf43e51d7ea15a392c8a1f56b050e4d1eb00acb8da3d75fedf80162c",
+    );
+    eq(
+        "computeAndUpdatePSK writes the binder back into the hello",
+        hexOf(pskFull),
+        "0100006c0303000000000000000000000000000000000000000000000000000000000000000003010203000213010100003e002b0003020304002d000201010029002d00080002090900000007002120c01165deaf43e51d7ea15a392c8a1f56b050e4d1eb00acb8da3d75fedf80162c",
+    );
+    eq(
+        "computeAndUpdatePSK leaves the transcript at Go's state",
+        hexOf(pskDigest),
+        "6f3e162e5a1c3f48842b5501c1cda5b10043bee48d7226ddb2153070a4b93950",
+    );
+
+
+    // ── serverHandshakeStateTLS13.readClientFinished ────────────────
+    //
+    // Ground truth: scripts/goref.sh crypto/tls. The read half must
+    // switch to the application secret ONLY on success - a server that
+    // rotated first would accept the next record under the new key
+    // after rejecting the Finished.
+    let rcfWant: [(&'static str, &'static str, &'static str); 3] = [
+        ("", "aabbccdd", ""),
+        ("tls: invalid client finished hash", "09090909", "15030300020233"),
+        (
+            "tls: received unexpected handshake message of type *tls.newSessionTicketMsgTLS13 when waiting for *tls.finishedMsg",
+            "09090909",
+            "1503030002020a",
+        ),
+    ];
+    let mut rcfI: int = 0;
+    while rcfI < 3 {
+        let (wantErr, wantIn, wantWire) = rcfWant[rcfI as usize];
+        let (e, inSec, wire) = tls::handshake_server_tls13_readClientFinished(rcfI);
+        eq("readClientFinished error", e, wantErr);
+        eq("readClientFinished c.in.trafficSecret", hexOf(inSec), wantIn);
+        eq("readClientFinished alert on the wire", hexOf(wire), wantWire);
+        rcfI += 1;
+    }
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
