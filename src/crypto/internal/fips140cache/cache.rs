@@ -51,7 +51,7 @@ impl<K, V> Cache<K, V> {
         return Cache { _m: PhantomData };
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140cache/cache.go:25-48 Get
+    // go: sdk 1.25.5 crypto/internal/fips140cache/cache.go:25-48 Cache.Get
     /// Return the result of `new`, for an associated key k.
     ///
     /// If Get was called with k before and didn't return an error, Get may
@@ -77,7 +77,7 @@ impl<K, V> Cache<K, V> {
         return new();
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140cache/cache.go:50-52 evict
+    // go: sdk 1.25.5 crypto/internal/fips140cache/cache.go:50-52 Cache.evict
     ///
     /// Go registers this with `runtime.AddCleanup` to delete the entry once
     /// the key is unreachable. With nothing stored there is nothing to

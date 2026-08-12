@@ -19,7 +19,7 @@ use super::gcm::{errOpen, gcmBlockSize, gcmStandardNonceSize, gcmTagSize, GCM};
 use super::gcm_noasm::checkGenericIsExpected;
 use super::ghash::ghash;
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_generic.go:11-21 sealGeneric
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_generic.go:13-24 sealGeneric
 /// Go: `func sealGeneric(out []byte, g *GCM, nonce, plaintext, additionalData []byte)`
 pub(crate) fn sealGeneric(
     out: &mut [byte],
@@ -56,7 +56,7 @@ pub(crate) fn sealGeneric(
     out[ptLen..ptLen + n].copy_from_slice(&tag[..n]);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_generic.go:23-40 openGeneric
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_generic.go:26-44 openGeneric
 /// Go: `func openGeneric(out []byte, g *GCM, nonce, ciphertext, additionalData []byte) error`
 pub(crate) fn openGeneric(
     out: &mut [byte],
@@ -147,7 +147,7 @@ fn putBEUint64(dst: &mut [byte], v: uint64) {
     dst[..8].copy_from_slice(r);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_generic.go:66-84 gcmCounterCryptGeneric
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_generic.go:69-86 gcmCounterCryptGeneric
 /// Encrypt `src` with AES in counter mode with 32-bit wrapping (which is
 /// different from AES-CTR) and place the result in `out`. `counter` is
 /// the initial value and is updated with the next.
@@ -190,7 +190,7 @@ pub(crate) fn gcmCounterCryptGeneric(
     }
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_generic.go:88-91 gcmInc32
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_generic.go:90-93 gcmInc32
 /// Treat the final four bytes of `counterBlock` as a big-endian value and
 /// increment it.
 pub(crate) fn gcmInc32(counterBlock: &mut [byte; 16]) {

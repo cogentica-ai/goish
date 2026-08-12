@@ -69,7 +69,7 @@ pub struct fieldParameters {
     pub omitEmpty: bool,
 }
 
-// go: sdk 1.25.5 encoding/asn1/common.go:92-142 parseFieldParameters
+// go: sdk 1.25.5 encoding/asn1/common.go:94-147 parseFieldParameters
 /// Given a tag string with the format specified in the package comment,
 /// parse it into a [`fieldParameters`], ignoring unknown parts of the
 /// string.

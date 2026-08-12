@@ -74,7 +74,7 @@ pub struct Dialer {
 }
 
 impl Dialer {
-    // go: sdk 1.25.5 crypto/tls/tls.go:154-159 Dialer.netDialer
+    // go: sdk 1.25.5 crypto/tls/tls.go:214-219 Dialer.netDialer
     pub(crate) fn netDialer(&self) -> crate::net::Dialer {
         // Go: if d.NetDialer != nil { return d.NetDialer }
         //     return new(net.Dialer)

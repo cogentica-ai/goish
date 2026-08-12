@@ -21,7 +21,7 @@ use crate::types::byte;
 
 pub use fipshmac::HMAC;
 
-// go: sdk 1.25.5 crypto/hmac/hmac.go:52-71 New
+// go: sdk 1.25.5 crypto/hmac/hmac.go:39-57 New
 /// `hmac.New(h, key)` — a new HMAC hash using the given hash constructor
 /// and key. `h` must return a fresh hash on every call.
 pub fn New<H: IntoHashFunc>(h: H, key: slice<byte>) -> HMAC {

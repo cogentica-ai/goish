@@ -74,7 +74,7 @@ pub struct SessionState {
     pub(crate) curveID: CurveID,
 }
 
-// go: sdk 1.25.5 crypto/tls/ticket.go:85-93 certificatesToBytesSlice
+// go: sdk 1.25.5 crypto/tls/ticket.go:178-184 certificatesToBytesSlice
 pub(crate) fn certificatesToBytesSlice(certs: slice<x509::Certificate>) -> slice<slice<byte>> {
     // Go: s := make([][]byte, 0, len(certs))
     //     for _, c := range certs { s = append(s, c.Raw) }
@@ -204,7 +204,7 @@ impl SessionState {
     }
 }
 
-// go: sdk 1.25.5 crypto/tls/ticket.go:238-347 ParseSessionState
+// go: sdk 1.25.5 crypto/tls/ticket.go:187-294 ParseSessionState
 /// Go: "ParseSessionState parses a [SessionState] encoded by
 /// [SessionState.Bytes]."
 pub fn ParseSessionState(data: slice<byte>) -> (SessionState, error) {
@@ -516,7 +516,7 @@ impl ClientSessionState {
         return self.session.clone();
     }
 
-    // go: sdk 1.25.5 crypto/tls/ticket.go:355-360 ClientSessionState.ResumptionState
+    // go: sdk 1.25.5 crypto/tls/ticket.go:413-418 ClientSessionState.ResumptionState
     /// Go: "ResumptionState returns the session ticket sent by the
     /// server (also known as the session's identity) and the state
     /// necessary to resume this session. It can be called by
@@ -537,7 +537,7 @@ impl ClientSessionState {
     }
 }
 
-// go: sdk 1.25.5 crypto/tls/ticket.go:364-371 NewResumptionState
+// go: sdk 1.25.5 crypto/tls/ticket.go:425-430 NewResumptionState
 /// Go: "NewResumptionState returns a state value that can be returned by
 /// [Config.UnwrapSession] to resume a previous session. state needs to
 /// be returned by [ParseSessionState], and the ticket and session state
@@ -571,7 +571,7 @@ use crate::crypto::subtle;
 use crate::types::int;
 
 impl Config {
-    // go: sdk 1.25.5 crypto/tls/ticket.go:185-192 Config.EncryptTicket
+    // go: sdk 1.25.5 crypto/tls/ticket.go:316-323 Config.EncryptTicket
     /// Go: "EncryptTicket encrypts a ticket with the [Config]'s
     /// configured (or default) session ticket keys. It can be used as a
     /// [Config.WrapSession] implementation."
@@ -595,7 +595,7 @@ impl Config {
         return self.encryptTicket(stateBytes, ticketKeys);
     }
 
-    // go: sdk 1.25.5 crypto/tls/ticket.go:194-221 Config.encryptTicket
+    // go: sdk 1.25.5 crypto/tls/ticket.go:325-351 Config.encryptTicket
     pub(crate) fn encryptTicket(
         &self,
         state: slice<byte>,
@@ -673,7 +673,7 @@ impl Config {
         return (slice::__from_vec(encrypted), crate::errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/ticket.go:223-236 Config.DecryptTicket
+    // go: sdk 1.25.5 crypto/tls/ticket.go:357-368 Config.DecryptTicket
     /// Go: "DecryptTicket decrypts a ticket encrypted by
     /// [Config.EncryptTicket]. It can be used as a
     /// [Config.UnwrapSession] implementation. If the ticket can't be
@@ -701,7 +701,7 @@ impl Config {
         return (Some(s), crate::errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/ticket.go:238-267 Config.decryptTicket
+    // go: sdk 1.25.5 crypto/tls/ticket.go:370-400 Config.decryptTicket
     ///
     /// Deviation: Go returns a nil `[]byte` both for "too short" and for
     /// "no key matched"; goish returns `None`, which is the same signal

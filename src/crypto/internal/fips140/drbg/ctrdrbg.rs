@@ -83,7 +83,7 @@ pub fn NewCounter(entropy: &[byte; SeedSize]) -> Counter {
 }
 
 impl Counter {
-    // go: sdk 1.25.5 crypto/internal/fips140/drbg/ctrdrbg.go:69-85 update
+    // go: sdk 1.25.5 crypto/internal/fips140/drbg/ctrdrbg.go:69-85 Counter.update
     /// CTR_DRBG_Update, per SP 800-90A §10.2.1.2.
     fn update(&mut self, seed: &[byte; SeedSize]) {
         // Go: temp := make([]byte, SeedSize); c.c.XORKeyStream(temp, seed[:])
@@ -112,7 +112,7 @@ impl Counter {
         self.c = aes::NewCTR(&cipher, &slice::__from_vec(V.to_vec()));
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/drbg/ctrdrbg.go:96-104 Reseed
+    // go: sdk 1.25.5 crypto/internal/fips140/drbg/ctrdrbg.go:96-104 Counter.Reseed
     /// CTR_DRBG_Reseed_algorithm, per SP 800-90A §10.2.1.4.1.
     pub fn Reseed(&mut self, entropy: &[byte; SeedSize], additionalInput: &[byte; SeedSize]) {
         // Go: var seed [SeedSize]byte
@@ -128,7 +128,7 @@ impl Counter {
         self.reseedCounter = 1;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/drbg/ctrdrbg.go:107-143 Generate
+    // go: sdk 1.25.5 crypto/internal/fips140/drbg/ctrdrbg.go:107-143 Counter.Generate
     /// CTR_DRBG_Generate_algorithm, per SP 800-90A §10.2.1.5.1. Produces
     /// at most `maxRequestSize` bytes into `out`, and reports whether a
     /// reseed is required before the next call.

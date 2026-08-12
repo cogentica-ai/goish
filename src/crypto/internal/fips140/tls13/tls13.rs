@@ -196,7 +196,7 @@ pub fn NewEarlySecret(h: impl IntoHashFunc, psk: slice<byte>) -> EarlySecret {
 }
 
 impl EarlySecret {
-    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:80-82 ResumptionBinderKey
+    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:80-82 EarlySecret.ResumptionBinderKey
     /// Derive the binder_key.
     pub fn ResumptionBinderKey(&self) -> slice<byte> {
         // Go: return deriveSecret(s.hash, s.secret, resumptionBinderLabel, nil)
@@ -208,7 +208,7 @@ impl EarlySecret {
         );
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:84-88 ClientEarlyTrafficSecret
+    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:84-88 EarlySecret.ClientEarlyTrafficSecret
     /// Derive the client_early_traffic_secret from the early secret and
     /// the transcript up to the ClientHello.
     pub fn ClientEarlyTrafficSecret(
@@ -224,7 +224,7 @@ impl EarlySecret {
         );
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:95-101 HandshakeSecret
+    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:95-101 EarlySecret.HandshakeSecret
     /// Advance to the Handshake Secret with the (EC)DHE shared secret.
     pub fn HandshakeSecret(&self, sharedSecret: slice<byte>) -> HandshakeSecret {
         // Go: derived := deriveSecret(s.hash, s.secret, "derived", nil)
@@ -237,7 +237,7 @@ impl EarlySecret {
         };
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:160-167 EarlyExporterMasterSecret
+    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:160-167 EarlySecret.EarlyExporterMasterSecret
     /// Derive the early exporter_master_secret from the early secret and
     /// the transcript up to the ClientHello.
     pub fn EarlyExporterMasterSecret(
@@ -260,7 +260,7 @@ impl EarlySecret {
 }
 
 impl HandshakeSecret {
-    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:103-107 ClientHandshakeTrafficSecret
+    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:103-107 HandshakeSecret.ClientHandshakeTrafficSecret
     /// Derive the client_handshake_traffic_secret from the handshake
     /// secret and the transcript up to the ServerHello.
     pub fn ClientHandshakeTrafficSecret(
@@ -276,7 +276,7 @@ impl HandshakeSecret {
         );
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:109-113 ServerHandshakeTrafficSecret
+    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:109-113 HandshakeSecret.ServerHandshakeTrafficSecret
     /// Derive the server_handshake_traffic_secret from the handshake
     /// secret and the transcript up to the ServerHello.
     pub fn ServerHandshakeTrafficSecret(
@@ -292,7 +292,7 @@ impl HandshakeSecret {
         );
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:120-126 MasterSecret
+    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:120-126 HandshakeSecret.MasterSecret
     /// Advance to the Master Secret.
     pub fn MasterSecret(&self) -> MasterSecret {
         // Go: derived := deriveSecret(s.hash, s.secret, "derived", nil)
@@ -306,7 +306,7 @@ impl HandshakeSecret {
 }
 
 impl MasterSecret {
-    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:128-132 ClientApplicationTrafficSecret
+    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:128-132 MasterSecret.ClientApplicationTrafficSecret
     /// Derive the client_application_traffic_secret_0 from the master
     /// secret and the transcript up to the server Finished.
     pub fn ClientApplicationTrafficSecret(
@@ -322,7 +322,7 @@ impl MasterSecret {
         );
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:134-138 ServerApplicationTrafficSecret
+    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:134-138 MasterSecret.ServerApplicationTrafficSecret
     /// Derive the server_application_traffic_secret_0 from the master
     /// secret and the transcript up to the server Finished.
     pub fn ServerApplicationTrafficSecret(
@@ -338,7 +338,7 @@ impl MasterSecret {
         );
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:140-144 ResumptionMasterSecret
+    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:140-144 MasterSecret.ResumptionMasterSecret
     /// Derive the resumption_master_secret from the master secret and the
     /// transcript up to the client Finished.
     pub fn ResumptionMasterSecret(
@@ -354,7 +354,7 @@ impl MasterSecret {
         );
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:151-158 ExporterMasterSecret
+    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:151-158 MasterSecret.ExporterMasterSecret
     /// Derive the exporter_master_secret from the master secret and the
     /// transcript up to the server Finished.
     pub fn ExporterMasterSecret(
@@ -377,7 +377,7 @@ impl MasterSecret {
 }
 
 impl ExporterMasterSecret {
-    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:169-174 Exporter
+    // go: sdk 1.25.5 crypto/internal/fips140/tls13/tls13.go:169-174 ExporterMasterSecret.Exporter
     /// `ems.Exporter(label, context, length)` — RFC 8446 §7.5 keying
     /// material exporter.
     pub fn Exporter<L: Into<string>>(

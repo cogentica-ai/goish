@@ -56,7 +56,7 @@ impl String {
         return &self.0;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:24-33 read
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:24-33 String.read
     /// Advance a String by n bytes and return them. If less than n bytes
     /// remain, it returns None.
     pub(super) fn read(&mut self, n: int) -> Option<slice<byte>> {
@@ -70,13 +70,13 @@ impl String {
         return Some(v);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:35-38 Skip
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:35-38 String.Skip
     /// Advance the String by n bytes and report whether it was successful.
     pub fn Skip(&mut self, n: int) -> bool {
         return self.read(n).is_some();
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:40-49 ReadUint8
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:40-49 String.ReadUint8
     /// Decode an 8-bit value into out and advance over it. It reports
     /// whether the read was successful.
     pub fn ReadUint8(&mut self, out: &mut crate::types::uint8) -> bool {
@@ -89,7 +89,7 @@ impl String {
         return true;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:51-60 ReadUint16
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:51-60 String.ReadUint16
     /// Decode a big-endian, 16-bit value into out and advance over it.
     pub fn ReadUint16(&mut self, out: &mut uint16) -> bool {
         let v = match self.read(2) {
@@ -101,7 +101,7 @@ impl String {
         return true;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:62-71 ReadUint24
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:62-71 String.ReadUint24
     /// Decode a big-endian, 24-bit value into out and advance over it.
     pub fn ReadUint24(&mut self, out: &mut uint32) -> bool {
         let v = match self.read(3) {
@@ -113,7 +113,7 @@ impl String {
         return true;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:73-82 ReadUint32
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:73-82 String.ReadUint32
     /// Decode a big-endian, 32-bit value into out and advance over it.
     pub fn ReadUint32(&mut self, out: &mut uint32) -> bool {
         let v = match self.read(4) {
@@ -128,7 +128,7 @@ impl String {
         return true;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:84-93 ReadUint48
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:84-93 String.ReadUint48
     /// Decode a big-endian, 48-bit value into out and advance over it.
     pub fn ReadUint48(&mut self, out: &mut uint64) -> bool {
         let v = match self.read(6) {
@@ -145,7 +145,7 @@ impl String {
         return true;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:95-104 ReadUint64
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:95-104 String.ReadUint64
     /// Decode a big-endian, 64-bit value into out and advance over it.
     pub fn ReadUint64(&mut self, out: &mut uint64) -> bool {
         let v = match self.read(8) {
@@ -164,7 +164,7 @@ impl String {
         return true;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:106-118 readUnsigned
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:106-118 String.readUnsigned
     pub(super) fn readUnsigned(&mut self, out: &mut uint32, length: int) -> bool {
         let v = match self.read(length) {
             None => return false,
@@ -182,7 +182,7 @@ impl String {
         return true;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:120-136 readLengthPrefixed
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:120-136 String.readLengthPrefixed
     fn readLengthPrefixed(&mut self, lenLen: int, outChild: &mut String) -> bool {
         let lenBytes = match self.read(lenLen) {
             None => return false,
@@ -201,28 +201,28 @@ impl String {
         return true;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:138-142 ReadUint8LengthPrefixed
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:138-142 String.ReadUint8LengthPrefixed
     /// Read the content of an 8-bit length-prefixed value into out and
     /// advance over it.
     pub fn ReadUint8LengthPrefixed(&mut self, out: &mut Self) -> bool {
         return self.readLengthPrefixed(1, out);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:144-149 ReadUint16LengthPrefixed
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:144-149 String.ReadUint16LengthPrefixed
     /// Read the content of a big-endian, 16-bit length-prefixed value into
     /// out and advance over it.
     pub fn ReadUint16LengthPrefixed(&mut self, out: &mut Self) -> bool {
         return self.readLengthPrefixed(2, out);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:151-156 ReadUint24LengthPrefixed
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:151-156 String.ReadUint24LengthPrefixed
     /// Read the content of a big-endian, 24-bit length-prefixed value into
     /// out and advance over it.
     pub fn ReadUint24LengthPrefixed(&mut self, out: &mut Self) -> bool {
         return self.readLengthPrefixed(3, out);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:158-167 ReadBytes
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:158-167 String.ReadBytes
     /// Read n bytes into out and advance over them.
     pub fn ReadBytes(&mut self, out: &mut slice<byte>, n: int) -> bool {
         let v = match self.read(n) {
@@ -233,7 +233,7 @@ impl String {
         return true;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:169-178 CopyBytes
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:169-178 String.CopyBytes
     /// Copy len(out) bytes into out and advance over them.
     pub fn CopyBytes(&mut self, out: &mut slice<byte>) -> bool {
         let n = out.Len();
@@ -247,7 +247,7 @@ impl String {
         return true;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:180-183 Empty
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/string.go:180-183 String.Empty
     /// Report whether the string does not contain any bytes.
     pub fn Empty(&self) -> bool {
         return self.raw().is_empty();

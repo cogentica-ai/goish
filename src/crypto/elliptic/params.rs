@@ -66,12 +66,12 @@ pub struct CurveParams {
 // coordinates.
 
 impl CurveParams {
-    // go: sdk 1.25.5 crypto/elliptic/params.go:19-21 Params
+    // go: sdk 1.25.5 crypto/elliptic/params.go:24-26 CurveParams.Params
     pub fn Params(&self) -> CurveParams {
         return self.clone();
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/params.go:31-43 polynomial
+    // go: sdk 1.25.5 crypto/elliptic/params.go:36-48 CurveParams.polynomial
     /// Return x³ - 3x + b.
     pub(super) fn polynomial(&self, x: &Int) -> Int {
         let mut x3 = mul(x, x);
@@ -87,7 +87,7 @@ impl CurveParams {
         return x3;
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/params.go:45-68 IsOnCurve
+    // go: sdk 1.25.5 crypto/elliptic/params.go:56-73 CurveParams.IsOnCurve
     /// Implements [Curve::IsOnCurve].
     ///
     /// Deprecated: the [CurveParams] methods are deprecated and are not
@@ -111,7 +111,7 @@ impl CurveParams {
         return self.polynomial(x).Cmp(&y2) == 0;
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/params.go:80-90 affineFromJacobian
+    // go: sdk 1.25.5 crypto/elliptic/params.go:88-102 CurveParams.affineFromJacobian
     /// Reverse the Jacobian transform. If the point is ∞ it returns 0, 0.
     fn affineFromJacobian(&self, x: &Int, y: &Int, z: &Int) -> (Int, Int) {
         if z.Sign() == 0 {
@@ -130,7 +130,7 @@ impl CurveParams {
         return (xOut, yOut);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/params.go:92-110 Add
+    // go: sdk 1.25.5 crypto/elliptic/params.go:110-122 CurveParams.Add
     /// Implements [Curve::Add].
     ///
     /// Deprecated: the [CurveParams] methods are deprecated and are not
@@ -151,7 +151,7 @@ impl CurveParams {
         return self.affineFromJacobian(&x3, &y3, &z3);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/params.go:112-175 addJacobian
+    // go: sdk 1.25.5 crypto/elliptic/params.go:126-200 CurveParams.addJacobian
     /// Take two points in Jacobian coordinates, (x1, y1, z1) and
     /// (x2, y2, z2), and return their sum, also in Jacobian form.
     fn addJacobian(
@@ -240,7 +240,7 @@ impl CurveParams {
         return (x3, y3, z3);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/params.go:177-193 Double
+    // go: sdk 1.25.5 crypto/elliptic/params.go:208-218 CurveParams.Double
     /// Implements [Curve::Double].
     ///
     /// Deprecated: the [CurveParams] methods are deprecated and are not
@@ -259,7 +259,7 @@ impl CurveParams {
         return self.affineFromJacobian(&x3, &y3, &z3);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/params.go:195-253 doubleJacobian
+    // go: sdk 1.25.5 crypto/elliptic/params.go:222-279 CurveParams.doubleJacobian
     /// Take a point in Jacobian coordinates, (x, y, z), and return its
     /// double, also in Jacobian form.
     fn doubleJacobian(&self, x: &Int, y: &Int, z: &Int) -> (Int, Int, Int) {
@@ -324,7 +324,7 @@ impl CurveParams {
         return (x3, y3, z3);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/params.go:255-284 ScalarMult
+    // go: sdk 1.25.5 crypto/elliptic/params.go:287-309 CurveParams.ScalarMult
     /// Implements [Curve::ScalarMult].
     ///
     /// Deprecated: the [CurveParams] methods are deprecated and are not
@@ -366,7 +366,7 @@ impl CurveParams {
         return self.affineFromJacobian(&x, &y, &z);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/params.go:286-300 ScalarBaseMult
+    // go: sdk 1.25.5 crypto/elliptic/params.go:317-325 CurveParams.ScalarBaseMult
     /// Implements [Curve::ScalarBaseMult].
     ///
     /// Deprecated: the [CurveParams] methods are deprecated and are not
@@ -385,7 +385,7 @@ impl CurveParams {
     }
 }
 
-// go: sdk 1.25.5 crypto/elliptic/params.go:70-78 zForAffine
+// go: sdk 1.25.5 crypto/elliptic/params.go:78-84 zForAffine
 /// Return a Jacobian Z value for the affine point (x, y). If x and y are
 /// zero, it assumes that they represent the point at infinity because
 /// (0, 0) is not on any of the curves handled here.
@@ -397,7 +397,7 @@ fn zForAffine(x: &Int, y: &Int) -> Int {
     return z;
 }
 
-// go: sdk 1.25.5 crypto/elliptic/params.go:302-309 matchesSpecificCurve
+// go: sdk 1.25.5 crypto/elliptic/params.go:327-334 matchesSpecificCurve
 pub(super) fn matchesSpecificCurve(
     params: &CurveParams,
 ) -> (Option<&'static (dyn Curve + Send + Sync)>, bool) {

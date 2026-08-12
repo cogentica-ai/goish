@@ -82,7 +82,7 @@ const magic: &[byte] = b"md5\x01";
 /// Go: `marshaledSize = len(magic) + 4*4 + BlockSize + 8`
 const marshaledSize: usize = 4 + 4 * 4 + CHUNK + 8;
 
-// go: sdk 1.25.5 crypto/md5/md5.go:113-117 New
+// go: sdk 1.25.5 crypto/md5/md5.go:116-120 New
 /// `md5.New()` — a new MD5 digest. The Hash also implements
 /// `encoding::BinaryMarshaler`, `encoding::BinaryAppender`,
 /// `encoding::BinaryUnmarshaler` and `hash::Cloner`.
@@ -99,7 +99,7 @@ pub fn New() -> Digest {
 }
 
 impl Digest {
-    // go: sdk 1.25.5 crypto/md5/md5.go:64-66 MarshalBinary
+    // go: sdk 1.25.5 crypto/md5/md5.go:64-66 digest.MarshalBinary
     /// `(*digest).MarshalBinary()` — the digest's internal state.
     pub fn MarshalBinary(&self) -> (slice<byte>, error) {
         // Go: return d.AppendBinary(make([]byte, 0, marshaledSize))
@@ -107,7 +107,7 @@ impl Digest {
         return self.AppendBinary(slice::__from_vec(buf));
     }
 
-    // go: sdk 1.25.5 crypto/md5/md5.go:68-78 AppendBinary
+    // go: sdk 1.25.5 crypto/md5/md5.go:68-78 digest.AppendBinary
     /// `(*digest).AppendBinary(b)` — append the marshaled state to `b`.
     pub fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
         // Go: b = append(b, magic...)
@@ -128,7 +128,7 @@ impl Digest {
         return (byteorder::BEAppendUint64(slice::__from_vec(out), self.len), nil);
     }
 
-    // go: sdk 1.25.5 crypto/md5/md5.go:80-95 UnmarshalBinary
+    // go: sdk 1.25.5 crypto/md5/md5.go:81-97 digest.UnmarshalBinary
     /// `(*digest).UnmarshalBinary(b)` — restore state produced by
     /// [`Digest::MarshalBinary`].
     pub fn UnmarshalBinary(&mut self, b: slice<byte>) -> error {
@@ -163,7 +163,7 @@ impl Digest {
         return nil;
     }
 
-    // go: sdk 1.25.5 crypto/md5/md5.go:105-108 Clone
+    // go: sdk 1.25.5 crypto/md5/md5.go:107-110 digest.Clone
     /// `(*digest).Clone()` — an independent copy of this digest's state.
     pub fn Clone(&self) -> (Box<dyn Cloner + Send + Sync>, error) {
         // Go: r := *d; return &r, nil
@@ -171,20 +171,20 @@ impl Digest {
         return (Box::new(r), nil);
     }
 
-    // go: sdk 1.25.5 crypto/md5/md5.go:130-168 Write
+    // go: sdk 1.25.5 crypto/md5/md5.go:126-166 digest.Write
     /// `(*digest).Write(p)` — inherent forwarder to `io::Writer::Write`.
     pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
         return <Self as io::Writer>::Write(self, p);
     }
 
-    // go: sdk 1.25.5 crypto/md5/md5.go:170-175 Sum
+    // go: sdk 1.25.5 crypto/md5/md5.go:168-173 digest.Sum
     /// `(*digest).Sum(b)` — inherent forwarder to `Hash::Sum`.
     pub fn Sum<B: Into<slice<byte>>>(&self, b: B) -> slice<byte> {
         return <Self as Hash>::Sum(self, b.into());
     }
 }
 
-// go: sdk 1.25.5 crypto/md5/md5.go:97-99 consumeUint64
+// go: sdk 1.25.5 crypto/md5/md5.go:99-101 consumeUint64
 /// Go: `func consumeUint64(b []byte) ([]byte, uint64)` — borrows rather
 /// than wrapping, as an unexported cursor helper.
 fn consumeUint64(b: &[byte]) -> (&[byte], uint64) {
@@ -192,7 +192,7 @@ fn consumeUint64(b: &[byte]) -> (&[byte], uint64) {
     return (&b[8..], byteorder::BEUint64(slice::__from_vec(b[..8].to_vec())));
 }
 
-// go: sdk 1.25.5 crypto/md5/md5.go:101-103 consumeUint32
+// go: sdk 1.25.5 crypto/md5/md5.go:103-105 consumeUint32
 /// Go: `func consumeUint32(b []byte) ([]byte, uint32)` — see
 /// [`consumeUint64`].
 fn consumeUint32(b: &[byte]) -> (&[byte], uint32) {
@@ -203,7 +203,7 @@ fn consumeUint32(b: &[byte]) -> (&[byte], uint32) {
 // ─── Hash trait impls for Digest ──────────────────────────────────────
 
 impl io::Writer for Digest {
-    // go: sdk 1.25.5 crypto/md5/md5.go:130-168 Write
+    // go: sdk 1.25.5 crypto/md5/md5.go:126-166 digest.Write
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
         // Go: nn = len(p); d.len += uint64(nn)
         let raw: &[byte] = &p;
@@ -257,7 +257,7 @@ impl io::Writer for Digest {
 }
 
 impl Hash for Digest {
-    // go: sdk 1.25.5 crypto/md5/md5.go:170-175 Sum
+    // go: sdk 1.25.5 crypto/md5/md5.go:168-173 digest.Sum
     fn Sum(&self, b: slice<byte>) -> slice<byte> {
         // Go: d0 := *d; hash := d0.checkSum(); return append(in, hash[:]...)
         let mut d0 = Digest {
@@ -271,7 +271,7 @@ impl Hash for Digest {
         out.extend_from_slice(&digest);
         slice::__from_vec(out)
     }
-    // go: sdk 1.25.5 crypto/md5/md5.go:50-57 Reset
+    // go: sdk 1.25.5 crypto/md5/md5.go:50-57 digest.Reset
     fn Reset(&mut self) {
         // Go: md5.go:51
         self.s[0] = init0;
@@ -281,17 +281,17 @@ impl Hash for Digest {
         self.nx = 0;
         self.len = 0;
     }
-    // go: sdk 1.25.5 crypto/md5/md5.go:119-119 Size
+    // go: sdk 1.25.5 crypto/md5/md5.go:122-122 digest.Size
     fn Size(&self) -> int {
         Size
     }
-    // go: sdk 1.25.5 crypto/md5/md5.go:121-121 BlockSize
+    // go: sdk 1.25.5 crypto/md5/md5.go:124-124 digest.BlockSize
     fn BlockSize(&self) -> int {
         BlockSize
     }
 }
 
-// go: sdk 1.25.5 crypto/md5/md5.go:177-203 checkSum
+// go: sdk 1.25.5 crypto/md5/md5.go:175-202 digest.checkSum
 /// Go: `func (d *digest) checkSum() [Size]byte`
 fn checkSum(d: &mut Digest) -> [byte; 16] {
     // Go: tmp := [1+63+8]byte{0x80}
@@ -360,7 +360,7 @@ pub fn NewHash() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
 // nominal, so each impl forwards to the inherent method above.
 
 impl encoding::BinaryMarshaler for Digest {
-    // go: sdk 1.25.5 crypto/md5/md5.go:64-66 MarshalBinary
+    // go: sdk 1.25.5 crypto/md5/md5.go:64-66 digest.MarshalBinary
     fn MarshalBinary(&self) -> (slice<byte>, error) {
         return Digest::MarshalBinary(self);
     }
@@ -375,7 +375,7 @@ impl encoding::BinaryMarshaler for Digest {
 }
 
 impl encoding::BinaryAppender for Digest {
-    // go: sdk 1.25.5 crypto/md5/md5.go:68-78 AppendBinary
+    // go: sdk 1.25.5 crypto/md5/md5.go:68-78 digest.AppendBinary
     fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
         return Digest::AppendBinary(self, b);
     }
@@ -390,7 +390,7 @@ impl encoding::BinaryAppender for Digest {
 }
 
 impl encoding::BinaryUnmarshaler for Digest {
-    // go: sdk 1.25.5 crypto/md5/md5.go:80-95 UnmarshalBinary
+    // go: sdk 1.25.5 crypto/md5/md5.go:81-97 digest.UnmarshalBinary
     fn UnmarshalBinary(&mut self, data: slice<byte>) -> error {
         return Digest::UnmarshalBinary(self, data);
     }
@@ -405,7 +405,7 @@ impl encoding::BinaryUnmarshaler for Digest {
 }
 
 impl Cloner for Digest {
-    // go: sdk 1.25.5 crypto/md5/md5.go:105-108 Clone
+    // go: sdk 1.25.5 crypto/md5/md5.go:107-110 digest.Clone
     fn Clone(&self) -> (Box<dyn Cloner + Send + Sync>, error) {
         return Digest::Clone(self);
     }

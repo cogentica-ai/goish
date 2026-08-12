@@ -68,7 +68,7 @@ pub struct CFB<B: Block> {
 //       }
 //   }
 impl<B: Block> Stream for CFB<B> {
-    // go: sdk 1.25.5 crypto/cipher/cfb.go:24-52 XORKeyStream
+    // go: sdk 1.25.5 crypto/cipher/cfb.go:24-52 cfb.XORKeyStream
     fn XORKeyStream(&mut self, dst: &mut slice<byte>, src: slice<byte>) {
         // Go: if len(dst) < len(src) { panic(...) }
         if dst.Len() < src.Len() {

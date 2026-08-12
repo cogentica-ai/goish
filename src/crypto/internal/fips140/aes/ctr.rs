@@ -67,7 +67,7 @@ fn newCTR(b: &Block, iv: &slice<byte>) -> CTR {
 }
 
 impl CTR {
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/ctr.go:40-48 XORKeyStream
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/ctr.go:40-48 CTR.XORKeyStream
     /// `(*CTR).XORKeyStream(dst, src)` — XOR `src` with the keystream and
     /// advance the stream position.
     pub fn XORKeyStream(&mut self, dst: &mut slice<byte>, src: &slice<byte>) {
@@ -84,7 +84,7 @@ impl CTR {
         }
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/ctr.go:64-124 XORKeyStreamAt
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/ctr.go:64-124 CTR.XORKeyStreamAt
     /// `(*CTR).XORKeyStreamAt(dst, src, offset)` — like `XORKeyStream` but
     /// keeps no state; instead it seeks into the keystream by `offset`
     /// bytes from the start, ignoring any `XORKeyStream` calls. Allows

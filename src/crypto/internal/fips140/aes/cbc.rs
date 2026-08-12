@@ -42,13 +42,13 @@ pub fn NewCBCEncrypter(b: &Block, iv: [byte; 16]) -> CBCEncrypter {
 }
 
 impl CBCEncrypter {
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:24-24 BlockSize
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:24-24 CBCEncrypter.BlockSize
     /// Go: `func (c *CBCEncrypter) BlockSize() int { return BlockSize }`
     pub fn BlockSize(&self) -> int {
         return BlockSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:26-40 CryptBlocks
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:26-40 CBCEncrypter.CryptBlocks
     /// `(*CBCEncrypter).CryptBlocks(dst, src)` — encrypt `src` into `dst`.
     pub fn CryptBlocks(&mut self, dst: &mut slice<byte>, src: &slice<byte>) {
         // Go: if len(src)%BlockSize != 0 { panic("crypto/cipher: input not full blocks") }
@@ -73,7 +73,7 @@ impl CBCEncrypter {
         cryptBlocksEnc(&b, &mut self.iv, dst, src);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:42-47 SetIV
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:42-47 CBCEncrypter.SetIV
     /// `(*CBCEncrypter).SetIV(iv)` — replace the chaining IV.
     pub fn SetIV(&mut self, iv: &slice<byte>) {
         // Go: if len(iv) != len(x.iv) { panic("cipher: incorrect length IV") }
@@ -86,7 +86,7 @@ impl CBCEncrypter {
     }
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:49-63 cryptBlocksEncGeneric
+// go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:50-65 cryptBlocksEncGeneric
 /// Go: `func cryptBlocksEncGeneric(b *Block, civ *[BlockSize]byte, dst, src []byte)`
 pub(crate) fn cryptBlocksEncGeneric(
     b: &Block,
@@ -145,7 +145,7 @@ pub struct CBCDecrypter {
     iv: [byte; 16],
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:72-74 NewCBCDecrypter
+// go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:74-76 NewCBCDecrypter
 /// `aes.NewCBCDecrypter(b, iv)` — a `cipher.BlockMode` which decrypts in
 /// cipher block chaining mode, using the given Block.
 pub fn NewCBCDecrypter(b: &Block, iv: [byte; 16]) -> CBCDecrypter {
@@ -154,13 +154,13 @@ pub fn NewCBCDecrypter(b: &Block, iv: [byte; 16]) -> CBCDecrypter {
 }
 
 impl CBCDecrypter {
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:76-76 BlockSize
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:78-78 CBCDecrypter.BlockSize
     /// Go: `func (c *CBCDecrypter) BlockSize() int { return BlockSize }`
     pub fn BlockSize(&self) -> int {
         return BlockSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:78-92 CryptBlocks
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:80-95 CBCDecrypter.CryptBlocks
     /// `(*CBCDecrypter).CryptBlocks(dst, src)` — decrypt `src` into `dst`.
     pub fn CryptBlocks(&mut self, dst: &mut slice<byte>, src: &slice<byte>) {
         // Go: if len(src)%BlockSize != 0 { panic("crypto/cipher: input not full blocks") }
@@ -185,7 +185,7 @@ impl CBCDecrypter {
         cryptBlocksDec(&b, &mut self.iv, dst, src);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:94-99 SetIV
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:97-102 CBCDecrypter.SetIV
     /// `(*CBCDecrypter).SetIV(iv)` — replace the chaining IV.
     pub fn SetIV(&mut self, iv: &slice<byte>) {
         // Go: if len(iv) != len(x.iv) { panic("cipher: incorrect length IV") }

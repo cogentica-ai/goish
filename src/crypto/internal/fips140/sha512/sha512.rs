@@ -167,21 +167,21 @@ fn new_digest(sz: int) -> Digest {
 }
 
 impl Digest {
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:237-258 Write
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:237-258 Digest.Write
     /// `(*Digest).Write(p)` — feed bytes into the running digest.
     /// Inherent forwarder to the `io::Writer` trait method.
     pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
         return <Self as io::Writer>::Write(self, p);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:260-267 Sum
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:260-267 Digest.Sum
     /// `(*Digest).Sum(b)` — append the digest to `b` and return it.
     /// Accepts `impl Into<slice<byte>>` so callers can pass `nil`.
     pub fn Sum<B: Into<slice<byte>>>(&self, b: B) -> slice<byte> {
         return <Self as Hash>::Sum(self, b.into());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:133-135 MarshalBinary
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:133-135 Digest.MarshalBinary
     /// `(*Digest).MarshalBinary()` — the digest's internal state, so a
     /// running hash can be saved and resumed without re-feeding input.
     pub fn MarshalBinary(&self) -> (slice<byte>, error) {
@@ -190,7 +190,7 @@ impl Digest {
         return self.AppendBinary(slice::__from_vec(buf));
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:137-162 AppendBinary
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:137-162 Digest.AppendBinary
     /// `(*Digest).AppendBinary(b)` — append the marshaled state to `b`.
     pub fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
         // Go: switch d.size { case size384: b = append(b, magic384...); … }
@@ -218,7 +218,7 @@ impl Digest {
         return (byteorder::BEAppendUint64(slice::__from_vec(out), self.len), nil);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:164-192 UnmarshalBinary
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:164-192 Digest.UnmarshalBinary
     /// `(*Digest).UnmarshalBinary(b)` — restore state produced by
     /// [`Digest::MarshalBinary`].
     pub fn UnmarshalBinary(&mut self, b: slice<byte>) -> error {
@@ -265,7 +265,7 @@ impl Digest {
         return nil;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:198-201 Clone
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:198-201 Digest.Clone
     /// `(*Digest).Clone()` — an independent copy of this digest's state.
     /// Never fails, so the error is always nil (Go says the same).
     pub fn Clone(&self) -> (Box<dyn Cloner + Send + Sync>, error) {
@@ -289,7 +289,7 @@ fn consumeUint64(b: &[byte]) -> (&[byte], uint64) {
 // ─── Hash trait impls for Digest ──────────────────────────────────────
 
 impl io::Writer for Digest {
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:237-258 Write
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:237-258 Digest.Write
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
         // Go: nn = len(p); d.len += uint64(nn)
         let raw: &[byte] = &p;
@@ -341,7 +341,7 @@ impl io::Writer for Digest {
 }
 
 impl Hash for Digest {
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:260-267 Sum
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:260-267 Digest.Sum
     fn Sum(&self, b: slice<byte>) -> slice<byte> {
         // Go: d0 := *d; hash := d0.checkSum(); return append(in, hash[:d.size]...)
         let mut d0 = Clone::clone(self);
@@ -351,7 +351,7 @@ impl Hash for Digest {
         return slice::__from_vec(out);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:80-123 Reset
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:80-123 Digest.Reset
     fn Reset(&mut self) {
         // Go: switch d.size { case size384: d.h[0] = init0_384; … }
         match self.size {
@@ -402,20 +402,20 @@ impl Hash for Digest {
         self.len = 0;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:231-233 Size
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:231-233 Digest.Size
     fn Size(&self) -> int {
         // Go: return d.size
         return self.size;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:235-235 BlockSize
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:235-235 Digest.BlockSize
     fn BlockSize(&self) -> int {
         // Go: func (d *Digest) BlockSize() int { return blockSize }
         return BlockSize;
     }
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:269-307 checkSum
+// go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:269-307 Digest.checkSum
 /// Go: `checkSum` — finalize and return the full 64-byte digest buffer;
 /// `Sum` truncates it to `d.size`.
 fn checkSum(d: &mut Digest) -> [byte; 64] {
@@ -483,7 +483,7 @@ fn checkSum(d: &mut Digest) -> [byte; 64] {
 // the inherent method above.
 
 impl encoding::BinaryMarshaler for Digest {
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:133-135 MarshalBinary
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:133-135 Digest.MarshalBinary
     fn MarshalBinary(&self) -> (slice<byte>, error) {
         return Digest::MarshalBinary(self);
     }
@@ -502,7 +502,7 @@ impl encoding::BinaryMarshaler for Digest {
 }
 
 impl encoding::BinaryAppender for Digest {
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:137-162 AppendBinary
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:137-162 Digest.AppendBinary
     fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
         return Digest::AppendBinary(self, b);
     }
@@ -521,7 +521,7 @@ impl encoding::BinaryAppender for Digest {
 }
 
 impl encoding::BinaryUnmarshaler for Digest {
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:164-192 UnmarshalBinary
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:164-192 Digest.UnmarshalBinary
     fn UnmarshalBinary(&mut self, data: slice<byte>) -> error {
         return Digest::UnmarshalBinary(self, data);
     }
@@ -540,7 +540,7 @@ impl encoding::BinaryUnmarshaler for Digest {
 }
 
 impl Cloner for Digest {
-    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:198-201 Clone
+    // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:198-201 Digest.Clone
     fn Clone(&self) -> (Box<dyn Cloner + Send + Sync>, error) {
         return Digest::Clone(self);
     }

@@ -110,7 +110,7 @@ pub fn fieldMulSub(a: fieldElement, b: fieldElement, c: fieldElement) -> fieldEl
     return fieldReduce(x);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:65-70 fieldAddMul
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:68-72 fieldAddMul
 /// Returns `a * b + c * d`. This operation is fused to save a
 /// fieldReduceOnce and a fieldReduce.
 pub fn fieldAddMul(
@@ -166,7 +166,7 @@ pub fn compress(x: fieldElement, d: uint8) -> uint16 {
     return uint16(quotient & mask & 0xffff);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:105-120 decompress
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:108-122 decompress
 /// Map a number `y` between 0 and 2ᵈ-1 uniformly to the full range of
 /// field elements, according to FIPS 203, Definition 4.8.
 pub fn decompress(y: uint16, d: uint8) -> fieldElement {
@@ -423,7 +423,7 @@ pub fn ringCompressAndEncode4(s: slice<byte>, f: ringElement) -> slice<byte> {
     return s;
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:242-253 ringDecodeAndDecompress4
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:248-255 ringDecodeAndDecompress4
 /// Decode a 128-byte encoding of a ring element where each four bits are
 /// mapped to an equidistant distribution.
 pub fn ringDecodeAndDecompress4(b: &[byte; encodingSize4]) -> ringElement {
@@ -438,7 +438,7 @@ pub fn ringDecodeAndDecompress4(b: &[byte; encodingSize4]) -> ringElement {
     return f;
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:255-276 ringCompressAndEncode10
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:262-278 ringCompressAndEncode10
 /// Append a 320-byte encoding of a ring element to `s`, compressing four
 /// coefficients per five bytes.
 pub fn ringCompressAndEncode10(s: slice<byte>, f: ringElement) -> slice<byte> {
@@ -465,7 +465,7 @@ pub fn ringCompressAndEncode10(s: slice<byte>, f: ringElement) -> slice<byte> {
     return s;
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:278-295 ringDecodeAndDecompress10
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:285-297 ringDecodeAndDecompress10
 /// Decode a 320-byte encoding of a ring element where each ten bits are
 /// mapped to an equidistant distribution.
 pub fn ringDecodeAndDecompress10(bb: &[byte; encodingSize10]) -> ringElement {
@@ -491,7 +491,7 @@ pub fn ringDecodeAndDecompress10(bb: &[byte; encodingSize10]) -> ringElement {
     return f;
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:297-322 ringCompressAndEncode
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:304-326 ringCompressAndEncode
 /// Append an encoding of a ring element to `s`, compressing each
 /// coefficient to `d` bits.
 pub fn ringCompressAndEncode(s: slice<byte>, f: ringElement, d: uint8) -> slice<byte> {
@@ -527,7 +527,7 @@ pub fn ringCompressAndEncode(s: slice<byte>, f: ringElement, d: uint8) -> slice<
     return s;
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:324-350 ringDecodeAndDecompress
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:333-356 ringDecodeAndDecompress
 /// Decode an encoding of a ring element where each `d` bits are mapped
 /// to an equidistant distribution.
 pub fn ringDecodeAndDecompress(b: &[byte], d: uint8) -> ringElement {
@@ -563,7 +563,7 @@ pub fn ringDecodeAndDecompress(b: &[byte], d: uint8) -> ringElement {
     return f;
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:352-361 ringCompressAndEncode5
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:363-365 ringCompressAndEncode5
 /// Append a 160-byte encoding of a ring element to `s`, compressing
 /// eight coefficients per five bytes.
 pub fn ringCompressAndEncode5(s: slice<byte>, f: ringElement) -> slice<byte> {
@@ -571,7 +571,7 @@ pub fn ringCompressAndEncode5(s: slice<byte>, f: ringElement) -> slice<byte> {
     return ringCompressAndEncode(s, f, 5);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:363-372 ringDecodeAndDecompress5
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:372-374 ringDecodeAndDecompress5
 /// Decode a 160-byte encoding of a ring element where each five bits are
 /// mapped to an equidistant distribution.
 pub fn ringDecodeAndDecompress5(bb: &[byte; encodingSize5]) -> ringElement {
@@ -579,7 +579,7 @@ pub fn ringDecodeAndDecompress5(bb: &[byte; encodingSize5]) -> ringElement {
     return ringDecodeAndDecompress(bb, 5);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:374-381 ringCompressAndEncode11
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:381-383 ringCompressAndEncode11
 /// Append a 352-byte encoding of a ring element to `s`, compressing
 /// eight coefficients per eleven bytes.
 pub fn ringCompressAndEncode11(s: slice<byte>, f: ringElement) -> slice<byte> {
@@ -587,7 +587,7 @@ pub fn ringCompressAndEncode11(s: slice<byte>, f: ringElement) -> slice<byte> {
     return ringCompressAndEncode(s, f, 11);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:383-390 ringDecodeAndDecompress11
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:390-392 ringDecodeAndDecompress11
 /// Decode a 352-byte encoding of a ring element where each eleven bits
 /// are mapped to an equidistant distribution.
 pub fn ringDecodeAndDecompress11(bb: &[byte; encodingSize11]) -> ringElement {
@@ -638,7 +638,7 @@ const gammas: [fieldElement; 128] = [
     1874, 1455, 1029, 2300, 2110, 1219, 2935, 394, 885, 2444, 2154, 1175,
 ];
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:424-439 nttMul
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/field.go:429-439 nttMul
 /// Multiply two nttElements. Implements MultiplyNTTs, according to
 /// FIPS 203, Algorithm 11.
 pub fn nttMul(f: nttElement, g: nttElement) -> nttElement {

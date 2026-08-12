@@ -52,7 +52,7 @@ pub const BlockSize: int = 8;
 pub struct KeySizeError(pub int);
 
 impl ErrorTrait for KeySizeError {
-    // go: sdk 1.25.5 crypto/des/cipher.go:21-23 Error
+    // go: sdk 1.25.5 crypto/des/cipher.go:21-23 KeySizeError.Error
     //   func (k KeySizeError) Error() string {
     //       return "crypto/des: invalid key size " + strconv.Itoa(int(k))
     //   }

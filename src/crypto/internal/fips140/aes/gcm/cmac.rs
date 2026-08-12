@@ -27,7 +27,7 @@ pub struct CMAC {
     k2: [byte; 16],
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/cmac.go:22-26 NewCMAC
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/cmac.go:24-28 NewCMAC
 /// `gcm.NewCMAC(b)` — a new CMAC keyed by `b`.
 pub fn NewCMAC(b: &aes::Block) -> CMAC {
     // Go: c := &CMAC{b: *b}; c.deriveSubkeys(); return c
@@ -41,7 +41,7 @@ pub fn NewCMAC(b: &aes::Block) -> CMAC {
 }
 
 impl CMAC {
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/cmac.go:28-36 deriveSubkeys
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/cmac.go:30-38 CMAC.deriveSubkeys
     /// Derive the two CMAC subkeys from the block cipher.
     fn deriveSubkeys(&mut self) {
         // Go: aes.EncryptBlockInternal(&c.b, c.k1[:], c.k1[:])
@@ -56,7 +56,7 @@ impl CMAC {
         self.k2[15] ^= msb.wrapping_mul(0b10000111);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/cmac.go:38-65 MAC
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/cmac.go:40-68 CMAC.MAC
     /// `(*CMAC).MAC(m)` — the CMAC tag over `m`.
     pub fn MAC(&self, m: slice<byte>) -> [byte; 16] {
         // Go: fips140.RecordApproved() — no-op in goish.
@@ -130,7 +130,7 @@ fn encryptInPlace(b: &aes::Block, x: &mut [byte; 16]) {
     x.copy_from_slice(r);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/cmac.go:68-74 shiftLeft
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/cmac.go:71-77 shiftLeft
 /// Set `x` to `x << 1` and return MSB₁(x).
 fn shiftLeft(x: &mut [byte; 16]) -> byte {
     // Go: var msb byte; for i := len(x) - 1; i >= 0; i-- { msb, x[i] = x[i]>>7, x[i]<<1|msb }

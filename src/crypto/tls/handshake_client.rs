@@ -2529,7 +2529,7 @@ use super::conn::Conn;
 // The three free functions of handshake_client.go. Everything above this
 // divider is goish-only code that drives the live TLS 1.2 client.
 
-// go: sdk 1.25.5 crypto/tls/handshake_client.go:1097-1104 checkKeySize
+// go: sdk 1.25.5 crypto/tls/handshake_client.go:1098-1108 checkKeySize
 ///
 /// Deviation: Go consults the `tlsmaxrsasize` GODEBUG first;
 /// `internal/godebug` is not ported, so an unset variable takes the
@@ -2546,7 +2546,7 @@ pub(crate) fn checkKeySize(n: crate::types::int) -> (crate::types::int, bool) {
 /// are willing to verify the signatures of during a TLS handshake."
 pub(crate) const defaultMaxRSAKeySize: crate::types::int = 8192;
 
-// go: sdk 1.25.5 crypto/tls/handshake_client.go:1155-1174 hostnameInSNI
+// go: sdk 1.25.5 crypto/tls/handshake_client.go:1308-1323 hostnameInSNI
 /// Go: "hostnameInSNI converts name into an appropriate hostname for SNI.
 /// Literal IP addresses and absolute FQDNs are not permitted as SNI
 /// values. See RFC 6066, Section 3."
@@ -2585,7 +2585,7 @@ pub(crate) fn hostnameInSNI(name: crate::gostring::string) -> crate::gostring::s
     return name;
 }
 
-// go: sdk 1.25.5 crypto/tls/handshake_client.go:1069-1086 checkALPN
+// go: sdk 1.25.5 crypto/tls/handshake_client.go:977-994 checkALPN
 /// Validate the server's ALPN choice against what the client offered.
 pub(crate) fn checkALPN(
     clientProtos: crate::goslice::slice<crate::gostring::string>,
@@ -2619,7 +2619,7 @@ pub(crate) fn checkALPN(
 }
 
 impl Conn {
-    // go: sdk 1.25.5 crypto/tls/handshake_client.go:1176-1183 Conn.clientSessionCacheKey
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:1295-1303 Conn.clientSessionCacheKey
     /// The key a client session is cached under: the configured server
     /// name if there is one, otherwise the peer's address.
     pub(crate) fn clientSessionCacheKey(&self) -> crate::gostring::string {
@@ -2636,7 +2636,7 @@ impl Conn {
     }
 }
 
-// go: sdk 1.25.5 crypto/tls/handshake_client.go:1106-1153 certificateRequestInfoFromMsg
+// go: sdk 1.25.5 crypto/tls/handshake_client.go:1213-1275 certificateRequestInfoFromMsg
 ///
 /// Deviation: Go's leading `ctx context.Context` parameter has nowhere
 /// to go — `CertificateRequestInfo.ctx` is set by the handshake, which
@@ -2756,7 +2756,7 @@ pub(crate) struct clientHandshakeState {
 }
 
 impl clientHandshakeState {
-    // go: sdk 1.25.5 crypto/tls/handshake_client.go:757-773 clientHandshakeState.pickCipherSuite
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:642-659 clientHandshakeState.pickCipherSuite
     ///
     /// Deviation: the two GODEBUG counter bumps (`tlsrsakex`, `tls3des`)
     /// are absent — `internal/godebug` is not ported, and the branches
@@ -2783,7 +2783,7 @@ impl clientHandshakeState {
 }
 
 impl Conn {
-    // go: sdk 1.25.5 crypto/tls/handshake_client.go:1042-1060 Conn.pickTLSVersion
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:523-541 Conn.pickTLSVersion
     /// Adopt the version the server selected, or refuse it.
     pub(crate) fn pickTLSVersion(
         &mut self,
@@ -2822,7 +2822,7 @@ impl Conn {
 
 
 impl clientHandshakeState {
-    // go: sdk 1.25.5 crypto/tls/handshake_client.go:889-909 clientHandshakeState.establishKeys
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:859-879 clientHandshakeState.establishKeys
     /// The client's mirror of the server's `establishKeys`: the same six
     /// keys, but the halves are crossed — the client writes with the
     /// client key and reads with the server's.
@@ -2879,7 +2879,7 @@ impl clientHandshakeState {
         return crate::errors::nil;
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_client.go:911-916 clientHandshakeState.serverResumedSession
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:881-886 clientHandshakeState.serverResumedSession
     pub(crate) fn serverResumedSession(&self) -> bool {
         // Go: If the server responded with the same sessionId then it
         // means the sessionTicket is being used to resume a TLS session.
@@ -2897,7 +2897,7 @@ impl clientHandshakeState {
 
 
 impl clientHandshakeState {
-    // go: sdk 1.25.5 crypto/tls/handshake_client.go:918-1000 clientHandshakeState.processServerHello
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:888-973 clientHandshakeState.processServerHello
     /// Validate the ServerHello and, if the server chose to resume,
     /// restore the session's secrets and peer state.
     ///
@@ -3075,7 +3075,7 @@ impl clientHandshakeState {
 
 
 impl Conn {
-    // go: sdk 1.25.5 crypto/tls/handshake_client.go:1186-1200 Conn.getClientCertificate
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:1277-1291 Conn.getClientCertificate
     /// The certificate to answer a CertificateRequest with, or an empty
     /// one meaning "none".
     ///
@@ -3304,7 +3304,7 @@ impl clientHandshakeState {
 }
 
 impl Conn {
-    // go: sdk 1.25.5 crypto/tls/handshake_client.go:1112-1201 Conn.verifyServerCertificate
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:1112-1209 Conn.verifyServerCertificate
     /// Go: parse the server's chain, verify it against the configured
     /// roots unless verification was waived, and run the two config
     /// callbacks.

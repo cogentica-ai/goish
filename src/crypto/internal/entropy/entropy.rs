@@ -25,7 +25,7 @@ use crate::crypto::internal::sysrand;
 use crate::goslice::slice;
 use crate::types::byte;
 
-// go: sdk 1.25.5 crypto/internal/entropy/entropy.go:21-26 Depleted
+// go: sdk 1.25.5 crypto/internal/entropy/entropy.go:24-28 Depleted
 /// Notify the entropy source that the entropy in the module is
 /// "depleted" and provide the callback for the LOAD command.
 pub fn Depleted<F: FnOnce(&[byte; 48])>(LOAD: F) {

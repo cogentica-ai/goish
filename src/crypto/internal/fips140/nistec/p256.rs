@@ -82,7 +82,7 @@ pub fn NewP256Point() -> P256Point {
 }
 
 impl P256Point {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:38-44 SetGenerator
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:38-44 P256Point.SetGenerator
     /// Set p to the canonical generator and return p.
     pub fn SetGenerator(&mut self) -> &mut Self {
         let _ = self.x.SetBytes(slice::__from_vec(alloc::vec![
@@ -99,7 +99,7 @@ impl P256Point {
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:46-52 Set
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:46-52 P256Point.Set
     /// Set p = q and return p.
     pub fn Set(&mut self, q: P256Point) -> &mut Self {
         self.x.Set(q.x);
@@ -108,7 +108,7 @@ impl P256Point {
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:58-114 SetBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:58-114 P256Point.SetBytes
     /// Set p to the compressed, uncompressed, or infinity value encoded in
     /// b, as specified in SEC 1, Version 2.0, Section 2.3.4. If the point
     /// is not on the curve, it returns an error and the receiver is
@@ -224,7 +224,7 @@ fn p256CheckOnCurve(x: P256Element, y: P256Element) -> error {
 }
 
 impl P256Point {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:148-156 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:148-156 P256Point.Bytes
     /// Return the uncompressed or infinity encoding of p, as specified in
     /// SEC 1, Version 2.0, Section 2.3.3. Note that the encoding of the
     /// point at infinity is shorter than all other encodings.
@@ -235,7 +235,7 @@ impl P256Point {
         return self.bytes(&mut out);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:158-172 bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:158-172 P256Point.bytes
     fn bytes(&self, out: &mut [byte; p256UncompressedLength]) -> slice<byte> {
         // The SEC 1 representation of the point at infinity is a single
         // zero byte, and only infinity has z = 0.
@@ -260,7 +260,7 @@ impl P256Point {
         return slice::__from_vec(out.to_vec());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:174-181 BytesX
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:174-181 P256Point.BytesX
     /// Return the encoding of the x-coordinate of p, as specified in SEC 1,
     /// Version 2.0, Section 2.3.5, or an error if p is the point at
     /// infinity.
@@ -271,7 +271,7 @@ impl P256Point {
         return self.bytesX(&mut out);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:183-192 bytesX
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:183-192 P256Point.bytesX
     fn bytesX(&self, out: &mut [byte; p256ElementLength]) -> (slice<byte>, error) {
         if self.z.IsZero() == 1 {
             return (
@@ -291,7 +291,7 @@ impl P256Point {
         return (slice::__from_vec(out.to_vec()), crate::nil.into());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:194-202 BytesCompressed
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:194-202 P256Point.BytesCompressed
     /// Return the compressed or infinity encoding of p, as specified in
     /// SEC 1, Version 2.0, Section 2.3.3. Note that the encoding of the
     /// point at infinity is shorter than all other encodings.
@@ -302,7 +302,7 @@ impl P256Point {
         return self.bytesCompressed(&mut out);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:204-219 bytesCompressed
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:204-219 P256Point.bytesCompressed
     fn bytesCompressed(&self, out: &mut [byte; p256CompressedLength]) -> slice<byte> {
         if self.z.IsZero() == 1 {
             return slice::__from_vec(alloc::vec![0u8]);
@@ -327,7 +327,7 @@ impl P256Point {
         return slice::__from_vec(out.to_vec());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:221-274 Add
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:221-274 P256Point.Add
     /// Set q = p1 + p2, and return q. The points may overlap.
     pub fn Add(&mut self, p1: P256Point, p2: P256Point) -> &mut Self {
         // Complete addition formula for a = -3 from "Complete addition
@@ -392,7 +392,7 @@ impl P256Point {
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:276-320 Double
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:276-320 P256Point.Double
     /// Set q = p + p, and return q. The points may overlap.
     pub fn Double(&mut self, p: P256Point) -> &mut Self {
         // Complete addition formula for a = -3 from "Complete addition
@@ -467,7 +467,7 @@ impl p256AffinePoint {
         };
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:328-332 Projective
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:328-332 p256AffinePoint.Projective
     fn Projective(&self) -> P256Point {
         let mut pp = P256Point {
             x: self.x,
@@ -480,7 +480,7 @@ impl p256AffinePoint {
 }
 
 impl P256Point {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:334-386 AddAffine
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:334-386 P256Point.AddAffine
     /// Set q = p1 + p2, if infinity == 0, and to p1 if infinity == 1.
     /// p2 can't be the point at infinity as it can't be represented in
     /// affine coordinates; instead callers can set p2 to an arbitrary point
@@ -541,7 +541,7 @@ impl P256Point {
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:388-394 Select
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:388-394 P256Point.Select
     /// Set q to p1 if cond == 1, and to p2 if cond == 0.
     pub fn Select(&mut self, p1: P256Point, p2: P256Point, cond: int) -> &mut Self {
         self.x.Select(p1.x, p2.x, cond);
@@ -564,7 +564,7 @@ impl p256OrdElement {
         return p256OrdElement([0; 4]);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:400-424 SetBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:400-424 p256OrdElement.SetBytes
     /// Set s to the big-endian value of x, reducing it as necessary.
     fn SetBytes(&mut self, x: &slice<byte>) -> error {
         let raw: &[byte] = x;
@@ -593,7 +593,7 @@ impl p256OrdElement {
         return crate::nil.into();
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:426-433 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:426-433 p256OrdElement.Bytes
     // Unused inside the package: Go's callers are p256_ordinv.go (the
     // assembly side, not ported) and crypto/ecdsa.
     #[allow(dead_code)]
@@ -613,7 +613,7 @@ impl p256OrdElement {
         return out;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:435-446 Rsh
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:435-446 p256OrdElement.Rsh
     /// Return the 64 least significant bits of x >> n. n must be lower than
     /// 256. The value of n leaks through timing side-channels.
     fn Rsh(&self, n: int) -> uint64 {
@@ -654,7 +654,7 @@ impl p256Table {
         return p256Table([NewP256Point(); 16]);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:453-464 Select
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:453-464 p256Table.Select
     /// Select the n-th multiple of the table base point into p. It works in
     /// constant time. n must be in [0, 16]. If n is 0, p is set to the
     /// identity point.
@@ -672,7 +672,7 @@ impl p256Table {
         }
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:466-476 Compute
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:466-476 p256Table.Compute
     /// Populate the table to the first 16 multiples of q.
     fn Compute(&mut self, q: P256Point) -> &mut Self {
         self.0[0].Set(q);
@@ -700,7 +700,7 @@ fn boothW5(inv: uint64) -> (byte, int) {
 }
 
 impl P256Point {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:486-528 ScalarMult
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:489-534 P256Point.ScalarMult
     /// Set r = scalar * q, where scalar is a 32-byte big endian value, and
     /// return r. If scalar is not 32 bytes long, ScalarMult returns an
     /// error and the receiver is unchanged.
@@ -763,7 +763,7 @@ impl P256Point {
         return crate::nil.into();
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:530-536 Negate
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:537-542 P256Point.Negate
     /// Set p to -p, if cond == 1, and to p if cond == 0.
     pub fn Negate(&mut self, cond: int) -> &mut Self {
         let mut negY = P256Element::New();
@@ -781,7 +781,7 @@ impl P256Point {
 struct p256AffineTable([p256AffinePoint; 32]);
 
 impl p256AffineTable {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:542-553 Select
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:551-560 p256AffineTable.Select
     /// Select the n-th multiple of the table base point into p. It works in
     /// constant time. n can be in [0, 32], but (unlike p256Table.Select) if
     /// n is 0, p is set to an undefined value.
@@ -846,7 +846,7 @@ static p256GeneratorTables: Lazy<Vec<p256AffineTable>> = Lazy::new(|| {
     return tables;
 });
 
-// go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:577-583 boothW6
+// go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:583-589 boothW6
 fn boothW6(inv: uint64) -> (byte, int) {
     let s = !((inv >> 6).wrapping_sub(1));
     let mut d = (1u64 << 7).wrapping_sub(inv).wrapping_sub(1);
@@ -856,7 +856,7 @@ fn boothW6(inv: uint64) -> (byte, int) {
 }
 
 impl P256Point {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:585-631 ScalarBaseMult
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:594-644 P256Point.ScalarBaseMult
     /// Set p = scalar * generator, where scalar is a 32-byte big endian
     /// value, and return r. If scalar is not 32 bytes long, ScalarBaseMult
     /// returns an error and the receiver is unchanged.
@@ -920,7 +920,7 @@ impl P256Point {
 }
 
 impl p256AffinePoint {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:633-639 Negate
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:647-652 p256AffinePoint.Negate
     /// Set p to -p, if cond == 1, and to p if cond == 0.
     fn Negate(&mut self, cond: int) -> &mut Self {
         let mut negY = P256Element::New();
@@ -930,7 +930,7 @@ impl p256AffinePoint {
     }
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:641-687 p256Sqrt
+// go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:656-697 p256Sqrt
 /// Set e to a square root of x. If x is not a square, p256Sqrt returns
 /// false and e is unchanged. e and x can overlap.
 fn p256Sqrt(e: &mut P256Element, x: P256Element) -> bool {
@@ -982,7 +982,7 @@ fn p256Sqrt(e: &mut P256Element, x: P256Element) -> bool {
     return true;
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:689-695 p256Square
+// go: sdk 1.25.5 crypto/internal/fips140/nistec/p256.go:700-705 p256Square
 /// Set e to the square of x, repeated n times > 1.
 fn p256Square(e: &mut P256Element, x: P256Element, n: int) {
     e.Square(x);

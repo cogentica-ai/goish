@@ -83,13 +83,13 @@ impl Block {
         return (self.rounds + 1) * (128 / 32);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/aes.go:88-88 BlockSize
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/aes.go:94-94 Block.BlockSize
     /// Go: `func (c *Block) BlockSize() int { return BlockSize }`
     pub fn BlockSize(&self) -> int {
         return BlockSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/aes.go:90-104 Encrypt
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/aes.go:96-109 Block.Encrypt
     /// `(*Block).Encrypt(dst, src)` — encrypt one block from `src` into
     /// `dst`.
     pub fn Encrypt(&self, dst: &mut slice<byte>, src: slice<byte>) {
@@ -111,7 +111,7 @@ impl Block {
         encryptBlock(self, dst, &src);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/aes.go:106-120 Decrypt
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/aes.go:111-124 Block.Decrypt
     /// `(*Block).Decrypt(dst, src)` — decrypt one block from `src` into
     /// `dst`.
     pub fn Decrypt(&self, dst: &mut slice<byte>, src: slice<byte>) {
@@ -159,7 +159,7 @@ pub fn New(key: slice<byte>) -> (Option<Block>, crate::error) {
     return newOutlined(key);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/aes.go:71-78 newOutlined
+// go: sdk 1.25.5 crypto/internal/fips140/aes/aes.go:73-80 newOutlined
 /// Go: `func newOutlined(b *Block, key []byte) (*Block, error)` — marked
 /// `go:noinline` there so `New` stays inlineable. goish keeps it for the
 /// key-size check; there is no allocation to outline — and with nothing
@@ -177,7 +177,7 @@ fn newOutlined(key: slice<byte>) -> (Option<Block>, crate::error) {
     return (Some(newBlock(key)), crate::errors::nil);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/aes.go:80-86 newBlockExpanded
+// go: sdk 1.25.5 crypto/internal/fips140/aes/aes.go:82-92 newBlockExpanded
 /// Go: `func newBlockExpanded(c *blockExpanded, key []byte)` — set the
 /// round count from the key length and run the generic key schedule.
 pub(crate) fn newBlockExpanded(c: &mut blockExpanded, key: &slice<byte>) {
@@ -192,7 +192,7 @@ pub(crate) fn newBlockExpanded(c: &mut blockExpanded, key: &slice<byte>) {
     super::aes_generic::expandKeyGeneric(c, key);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/aes.go:125-127 EncryptBlockInternal
+// go: sdk 1.25.5 crypto/internal/fips140/aes/aes.go:129-131 EncryptBlockInternal
 /// `aes.EncryptBlockInternal(c, dst, src)` — apply the AES encryption
 /// function to one block. Internal, meant only for the gcm package.
 pub fn EncryptBlockInternal(c: &Block, dst: &mut slice<byte>, src: slice<byte>) {

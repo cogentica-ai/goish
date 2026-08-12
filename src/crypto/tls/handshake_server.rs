@@ -20,7 +20,7 @@ use crate::errors;
 use crate::goslice::slice;
 use crate::types::{int, uint16, uint8};
 
-// go: sdk 1.25.5 crypto/tls/handshake_server.go:243-269 supportsECDHE
+// go: sdk 1.25.5 crypto/tls/handshake_server.go:365-394 supportsECDHE
 /// Go: "supportsECDHE returns whether ECDHE key exchanges can be used
 /// with this pre-TLS 1.3 client."
 pub(crate) fn supportsECDHE(
@@ -169,7 +169,7 @@ pub(crate) struct serverHandshakeState {
 }
 
 impl serverHandshakeState {
-    // go: sdk 1.25.5 crypto/tls/handshake_server.go:441-460 serverHandshakeState.cipherSuiteOk
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:432-451 serverHandshakeState.cipherSuiteOk
     /// Whether a candidate suite is usable given what the certificate
     /// and the client's extensions allow. `pickCipherSuite` passes this
     /// to `selectCipherSuite` as its filter.
@@ -205,7 +205,7 @@ impl serverHandshakeState {
     }
 }
 
-// go: sdk 1.25.5 crypto/tls/handshake_server.go:1002-1021 clientHelloInfo
+// go: sdk 1.25.5 crypto/tls/handshake_server.go:1009-1028 clientHelloInfo
 ///
 /// Deviations: Go's leading `ctx context.Context` has nowhere to go, and
 /// `ClientHelloInfo.Conn` is absent from goish's record — both arrive
@@ -259,7 +259,7 @@ pub(crate) fn clientHelloInfo(
 
 
 impl serverHandshakeState {
-    // go: sdk 1.25.5 crypto/tls/handshake_server.go:406-439 serverHandshakeState.pickCipherSuite
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:396-430 serverHandshakeState.pickCipherSuite
     ///
     /// Deviation: the two GODEBUG counter bumps (`tlsrsakex`, `tls3des`)
     /// are absent — `internal/godebug` is not ported.
@@ -377,7 +377,7 @@ fn hexList(v: &slice<uint16>) -> crate::gostring::string {
 
 
 impl serverHandshakeState {
-    // go: sdk 1.25.5 crypto/tls/handshake_server.go:770-791 serverHandshakeState.establishKeys
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:808-831 serverHandshakeState.establishKeys
     /// Derive the six connection keys and stage them on both half
     /// connections, ready for the ChangeCipherSpec that activates them.
     pub(crate) fn establishKeys(&mut self) -> error {
@@ -437,7 +437,7 @@ impl serverHandshakeState {
 
 
 impl serverHandshakeState {
-    // go: sdk 1.25.5 crypto/tls/handshake_server.go:566-664 serverHandshakeState.checkForResumption
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:454-555 serverHandshakeState.checkForResumption
     /// Whether the ClientHello's session ticket may be resumed, and if
     /// so, adopt the session it carries.
     ///
@@ -595,7 +595,7 @@ impl serverHandshakeState {
 }
 
 impl serverHandshakeState {
-    // go: sdk 1.25.5 crypto/tls/handshake_server.go:833-864 serverHandshakeState.readFinished
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:833-866 serverHandshakeState.readFinished
     /// Go: read the client's ChangeCipherSpec and Finished, check the
     /// verify_data in constant time, and only then add the message to
     /// the transcript.
@@ -661,7 +661,7 @@ impl serverHandshakeState {
         return crate::errors::nil;
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_server.go:907-921 serverHandshakeState.sendFinished
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:907-923 serverHandshakeState.sendFinished
     /// Go: flush the pending records under a ChangeCipherSpec, then send
     /// the server's Finished and copy its verify_data into `out`.
     ///

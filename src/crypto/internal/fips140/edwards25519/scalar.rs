@@ -110,7 +110,7 @@ impl Scalar {
         Scalar::default()
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:64-68 MultiplyAdd
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:64-68 Scalar.MultiplyAdd
     /// `MultiplyAdd` sets s = x * y + z mod l, and returns s. It is
     /// equivalent to using Multiply and then Add.
     pub fn MultiplyAdd(&mut self, x: &Scalar, y: &Scalar, z: &Scalar) -> &mut Scalar {
@@ -121,7 +121,7 @@ impl Scalar {
         self.Add(&sCopy, &zCopy)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:71-75 Add
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:71-75 Scalar.Add
     /// `Add` sets s = x + y mod l, and returns s.
     pub fn Add(&mut self, x: &Scalar, y: &Scalar) -> &mut Scalar {
         // s = 1 * x + y mod l
@@ -130,7 +130,7 @@ impl Scalar {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:78-82 Subtract
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:78-82 Scalar.Subtract
     /// `Subtract` sets s = x - y mod l, and returns s.
     pub fn Subtract(&mut self, x: &Scalar, y: &Scalar) -> &mut Scalar {
         // s = -1 * y + x mod l
@@ -139,7 +139,7 @@ impl Scalar {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:85-89 Negate
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:85-89 Scalar.Negate
     /// `Negate` sets s = -x mod l, and returns s.
     pub fn Negate(&mut self, x: &Scalar) -> &mut Scalar {
         // s = -1 * x + 0 mod l
@@ -148,7 +148,7 @@ impl Scalar {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:92-96 Multiply
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:92-96 Scalar.Multiply
     /// `Multiply` sets s = x * y mod l, and returns s.
     pub fn Multiply(&mut self, x: &Scalar, y: &Scalar) -> &mut Scalar {
         // s = x * y + 0 mod l
@@ -157,14 +157,14 @@ impl Scalar {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:99-102 Set
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:99-102 Scalar.Set
     /// `Set` sets s = x, and returns s.
     pub fn Set(&mut self, x: &Scalar) -> &mut Scalar {
         *self = *x;
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:110-133 SetUniformBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:110-133 Scalar.SetUniformBytes
     /// `SetUniformBytes` sets s = x mod l, where x is a 64-byte
     /// little-endian integer. If x is not of the right length,
     /// SetUniformBytes returns an error and the receiver is unchanged.
@@ -203,7 +203,7 @@ impl Scalar {
         errors::nil
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:145-154 setShortBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:145-154 Scalar.setShortBytes
     /// `setShortBytes` sets s = x mod l, where x is a little-endian
     /// integer shorter than 32 bytes.
     fn setShortBytes(&mut self, x: &[byte]) -> &mut Scalar {
@@ -218,7 +218,7 @@ impl Scalar {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:159-171 SetCanonicalBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:159-171 Scalar.SetCanonicalBytes
     /// `SetCanonicalBytes` sets s = x, where x is a 32-byte
     /// little-endian encoding of s, and returns s via the receiver. If
     /// x is not a canonical encoding of s, SetCanonicalBytes returns an
@@ -244,7 +244,7 @@ impl Scalar {
         errors::nil
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:213-230 SetBytesWithClamping
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:213-230 Scalar.SetBytesWithClamping
     /// `SetBytesWithClamping` applies the buffer pruning described in
     /// RFC 8032, Section 5.1.5 (also known as clamping) and sets s to
     /// the result. The input must be 32 bytes, and it is not modified.
@@ -281,7 +281,7 @@ impl Scalar {
         self.SetUniformBytes(slice::<byte>::__from_vec(v))
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:233-238 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:233-238 Scalar.Bytes
     /// `Bytes` returns the canonical 32-byte little-endian encoding of s.
     pub fn Bytes(&self) -> slice<byte> {
         let mut encoded = [0u8; 32];
@@ -293,7 +293,7 @@ impl Scalar {
         slice::<byte>::__from_vec(v)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:240-245 bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:240-245 Scalar.bytes
     /// `bytes` packs the canonical encoding of s into `out`.
     fn bytes(&self, out: &mut [byte; 32]) {
         let mut ss: fiatScalarNonMontgomeryDomainFieldElement = [0, 0, 0, 0];
@@ -301,7 +301,7 @@ impl Scalar {
         fiatScalarToBytes(out, &ss);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:248-260 Equal
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:248-260 Scalar.Equal
     /// `Equal` returns 1 if s and t are equal, and 0 otherwise.
     pub fn Equal(&self, t: &Scalar) -> int {
         let mut diff: fiatScalarMontgomeryDomainFieldElement = [0, 0, 0, 0];
@@ -318,7 +318,7 @@ impl Scalar {
         int::try_from(r).unwrap()
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:265-328 nonAdjacentForm
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:265-328 Scalar.nonAdjacentForm
     /// `nonAdjacentForm` computes a width-w non-adjacent form for this
     /// scalar.
     ///
@@ -390,7 +390,7 @@ impl Scalar {
         naf
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:330-352 signedRadix16
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/scalar.go:330-352 Scalar.signedRadix16
     /// `signedRadix16` — recentered radix-16 digits of the scalar.
     ///
     /// Used by edwards25519.Point scalar multiplication.

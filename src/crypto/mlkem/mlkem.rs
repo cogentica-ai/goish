@@ -74,7 +74,7 @@ pub fn NewDecapsulationKey768(seed: &slice<byte>) -> (DecapsulationKey768, error
 }
 
 impl DecapsulationKey768 {
-    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:64-69 Bytes
+    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:64-69 DecapsulationKey768.Bytes
     /// Return the decapsulation key as a 64-byte seed in the "d || z" form.
     ///
     /// The decapsulation key must be kept secret.
@@ -82,7 +82,7 @@ impl DecapsulationKey768 {
         return self.key.Bytes();
     }
 
-    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:71-77 Decapsulate
+    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:71-77 DecapsulationKey768.Decapsulate
     /// Generate a shared key from a ciphertext and a decapsulation key. If
     /// the ciphertext is not valid, Decapsulate returns an error.
     ///
@@ -91,7 +91,7 @@ impl DecapsulationKey768 {
         return self.key.Decapsulate(ciphertext.clone());
     }
 
-    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:79-83 EncapsulationKey
+    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:79-83 DecapsulationKey768.EncapsulationKey
     /// Return the public encapsulation key necessary to produce ciphertexts.
     pub fn EncapsulationKey(&self) -> EncapsulationKey768 {
         return EncapsulationKey768 {
@@ -121,13 +121,13 @@ pub fn NewEncapsulationKey768(encapsulationKey: &slice<byte>) -> (EncapsulationK
 }
 
 impl EncapsulationKey768 {
-    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:102-105 Bytes
+    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:102-105 EncapsulationKey768.Bytes
     /// Return the encapsulation key as a byte slice.
     pub fn Bytes(&self) -> slice<byte> {
         return self.key.Bytes();
     }
 
-    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:107-113 Encapsulate
+    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:107-113 EncapsulationKey768.Encapsulate
     /// Generate a shared key and an associated ciphertext from an
     /// encapsulation key, drawing random bytes from the default crypto/rand
     /// source.
@@ -171,7 +171,7 @@ pub fn NewDecapsulationKey1024(seed: &slice<byte>) -> (DecapsulationKey1024, err
 }
 
 impl DecapsulationKey1024 {
-    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:143-148 Bytes
+    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:143-148 DecapsulationKey1024.Bytes
     /// Return the decapsulation key as a 64-byte seed in the "d || z" form.
     ///
     /// The decapsulation key must be kept secret.
@@ -179,7 +179,7 @@ impl DecapsulationKey1024 {
         return self.key.Bytes();
     }
 
-    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:150-156 Decapsulate
+    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:150-156 DecapsulationKey1024.Decapsulate
     /// Generate a shared key from a ciphertext and a decapsulation key. If
     /// the ciphertext is not valid, Decapsulate returns an error.
     ///
@@ -188,7 +188,7 @@ impl DecapsulationKey1024 {
         return self.key.Decapsulate(ciphertext.clone());
     }
 
-    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:158-162 EncapsulationKey
+    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:158-162 DecapsulationKey1024.EncapsulationKey
     /// Return the public encapsulation key necessary to produce ciphertexts.
     pub fn EncapsulationKey(&self) -> EncapsulationKey1024 {
         return EncapsulationKey1024 {
@@ -218,13 +218,13 @@ pub fn NewEncapsulationKey1024(encapsulationKey: &slice<byte>) -> (Encapsulation
 }
 
 impl EncapsulationKey1024 {
-    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:181-184 Bytes
+    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:181-184 EncapsulationKey1024.Bytes
     /// Return the encapsulation key as a byte slice.
     pub fn Bytes(&self) -> slice<byte> {
         return self.key.Bytes();
     }
 
-    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:186-192 Encapsulate
+    // go: sdk 1.25.5 crypto/mlkem/mlkem.go:186-192 EncapsulationKey1024.Encapsulate
     /// Generate a shared key and an associated ciphertext from an
     /// encapsulation key, drawing random bytes from the default crypto/rand
     /// source.

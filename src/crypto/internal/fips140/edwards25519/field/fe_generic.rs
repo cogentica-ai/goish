@@ -197,7 +197,7 @@ pub(super) fn feSquareGeneric(v: &mut Element, a: &Element) {
 }
 
 impl Element {
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe_generic.go:261-272 carryPropagate
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe_generic.go:261-272 Element.carryPropagate
     /// `carryPropagate` brings the limbs below 52 bits by applying the
     /// reduction identity (a * 2^255 + b = a * 19 + b) to the l4 carry.
     pub(super) fn carryPropagate(&mut self) -> &mut Element {

@@ -193,7 +193,7 @@ fn putWords(dst: &mut slice<byte>, s0: uint32, s1: uint32, s2: uint32, s3: uint3
     out[..16].copy_from_slice(&src[..16]);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/aes_generic.go:137-142 subw
+// go: sdk 1.25.5 crypto/internal/fips140/aes/aes_generic.go:136-141 subw
 /// Apply `sbox0` to each byte in `w`.
 fn subw(w: uint32) -> uint32 {
     // Go: return uint32(sbox0[w>>24])<<24 | uint32(sbox0[w>>16&0xff])<<16 |
@@ -204,14 +204,14 @@ fn subw(w: uint32) -> uint32 {
         | uint32::from(sbox0[b(w, 0)]);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/aes_generic.go:145-145 rotw
+// go: sdk 1.25.5 crypto/internal/fips140/aes/aes_generic.go:144-144 rotw
 /// Rotate.
 fn rotw(w: uint32) -> uint32 {
     // Go: func rotw(w uint32) uint32 { return w<<8 | w>>24 }
     return (w << 8) | (w >> 24);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/aes_generic.go:150-186 expandKeyGeneric
+// go: sdk 1.25.5 crypto/internal/fips140/aes/aes_generic.go:148-181 expandKeyGeneric
 /// Key expansion algorithm. See FIPS 197, Figure 11. Their `rcon[i]` is
 /// our `powx[i-1] << 24`.
 pub(crate) fn expandKeyGeneric(c: &mut blockExpanded, key: &slice<byte>) {

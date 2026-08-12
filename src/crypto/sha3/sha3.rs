@@ -87,63 +87,63 @@ pub fn New512() -> SHA3 {
 }
 
 impl SHA3 {
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:130-132 Write
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:130-132 SHA3.Write
     /// `(*SHA3).Write(p)` — absorb more data.
     pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
         // Go: return h.s.Write(p)
         return self.s.Write(p);
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:135-137 Sum
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:135-137 SHA3.Sum
     /// `(*SHA3).Sum(b)` — append the current hash to `b`.
     pub fn Sum<B: Into<slice<byte>>>(&self, b: B) -> slice<byte> {
         // Go: return h.s.Sum(b)
         return self.s.Sum(b.into());
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:140-142 Reset
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:140-142 SHA3.Reset
     /// `(*SHA3).Reset()` — reset to the initial state.
     pub fn Reset(&mut self) {
         // Go: h.s.Reset()
         self.s.Reset();
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:145-147 Size
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:145-147 SHA3.Size
     /// `(*SHA3).Size()` — output size in bytes.
     pub fn Size(&self) -> int {
         // Go: return h.s.Size()
         return self.s.Size();
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:150-152 BlockSize
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:150-152 SHA3.BlockSize
     /// `(*SHA3).BlockSize()` — the sponge rate in bytes.
     pub fn BlockSize(&self) -> int {
         // Go: return h.s.BlockSize()
         return self.s.BlockSize();
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:155-157 MarshalBinary
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:155-157 SHA3.MarshalBinary
     /// `(*SHA3).MarshalBinary()` — the sponge's internal state.
     pub fn MarshalBinary(&self) -> (slice<byte>, error) {
         // Go: return h.s.MarshalBinary()
         return self.s.MarshalBinary();
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:160-162 AppendBinary
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:160-162 SHA3.AppendBinary
     /// `(*SHA3).AppendBinary(b)` — append the marshaled state to `b`.
     pub fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
         // Go: return h.s.AppendBinary(b)
         return self.s.AppendBinary(b);
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:165-167 UnmarshalBinary
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:165-167 SHA3.UnmarshalBinary
     /// `(*SHA3).UnmarshalBinary(b)` — restore a marshaled state.
     pub fn UnmarshalBinary(&mut self, b: slice<byte>) -> error {
         // Go: return h.s.UnmarshalBinary(b)
         return self.s.UnmarshalBinary(b);
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:170-173 Clone
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:170-173 SHA3.Clone
     /// `(*SHA3).Clone()` — an independent copy of this hash's state.
     pub fn Clone(&self) -> SHA3 {
         // Go: r := *h; return &r, nil
@@ -249,7 +249,7 @@ pub fn NewCSHAKE256(N: slice<byte>, S: slice<byte>) -> SHAKE {
 }
 
 impl SHAKE {
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:211-213 Write
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:211-213 SHAKE.Write
     /// `(*SHAKE).Write(p)` — absorb more data. Panics if any output has
     /// already been read.
     pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
@@ -257,28 +257,28 @@ impl SHAKE {
         return self.s.Write(p);
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:218-220 Read
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:218-220 SHAKE.Read
     /// `(*SHAKE).Read(out)` — squeeze output. Never returns an error.
     pub fn Read(&mut self, out: &mut [byte]) -> usize {
         // Go: return s.s.Read(p)
         return self.s.Read(out);
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:223-225 Reset
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:223-225 SHAKE.Reset
     /// `(*SHAKE).Reset()` — reset to the initial state.
     pub fn Reset(&mut self) {
         // Go: s.s.Reset()
         self.s.Reset();
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:228-230 BlockSize
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:228-230 SHAKE.BlockSize
     /// `(*SHAKE).BlockSize()` — the sponge rate in bytes.
     pub fn BlockSize(&self) -> int {
         // Go: return s.s.BlockSize()
         return self.s.BlockSize();
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:233-235 MarshalBinary
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:233-235 SHAKE.MarshalBinary
     /// `(*SHAKE).MarshalBinary()` — the sponge state plus cSHAKE init
     /// block.
     pub fn MarshalBinary(&self) -> (slice<byte>, error) {
@@ -286,14 +286,14 @@ impl SHAKE {
         return self.s.MarshalBinary();
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:238-240 AppendBinary
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:238-240 SHAKE.AppendBinary
     /// `(*SHAKE).AppendBinary(b)` — append the marshaled state to `b`.
     pub fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
         // Go: return s.s.AppendBinary(b)
         return self.s.AppendBinary(b);
     }
 
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:243-245 UnmarshalBinary
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:243-245 SHAKE.UnmarshalBinary
     /// `(*SHAKE).UnmarshalBinary(b)` — restore a marshaled state.
     pub fn UnmarshalBinary(&mut self, b: slice<byte>) -> error {
         // Go: return s.s.UnmarshalBinary(b)
@@ -341,7 +341,7 @@ fn sumSHAKE256(data: slice<byte>, length: int) -> slice<byte> {
 // ─── hash.Hash trait impls ────────────────────────────────────────────
 
 impl io::Writer for SHA3 {
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:130-132 Write
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:130-132 SHA3.Write
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
         return SHA3::Write(self, p);
     }
@@ -358,19 +358,19 @@ impl io::Writer for SHA3 {
 }
 
 impl Hash for SHA3 {
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:135-137 Sum
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:135-137 SHA3.Sum
     fn Sum(&self, b: slice<byte>) -> slice<byte> {
         return SHA3::Sum(self, b);
     }
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:140-142 Reset
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:140-142 SHA3.Reset
     fn Reset(&mut self) {
         SHA3::Reset(self);
     }
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:145-147 Size
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:145-147 SHA3.Size
     fn Size(&self) -> int {
         return SHA3::Size(self);
     }
-    // go: sdk 1.25.5 crypto/sha3/sha3.go:150-152 BlockSize
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:150-152 SHA3.BlockSize
     fn BlockSize(&self) -> int {
         return SHA3::BlockSize(self);
     }

@@ -556,7 +556,7 @@ fn tls10serverValue() -> crate::gostring::string {
 impl Config {
 
 
-    // go: sdk 1.25.5 crypto/tls/common.go:1127-1133 Config.time
+    // go: sdk 1.25.5 crypto/tls/common.go:1124-1130 Config.time
     /// The current time, as the handshake sees it.
     ///
     /// Deviation: Go's `Config.Time` field holds a `func() time.Time`;
@@ -633,7 +633,7 @@ impl Config {
     }
 
 
-    // go: sdk 1.25.5 crypto/tls/common.go:1006-1032 Config.initLegacySessionTicketKeyRLocked
+    // go: sdk 1.25.5 crypto/tls/common.go:995-1021 Config.initLegacySessionTicketKeyRLocked
     /// Seed `sessionTicketKeys` from the deprecated `SessionTicketKey`
     /// field, or randomise that field so an application that reuses it
     /// does not get a fixed value.
@@ -687,7 +687,7 @@ impl Config {
         }
     }
 
-    // go: sdk 1.25.5 crypto/tls/common.go:1043-1056 Config.SetSessionTicketKeys
+    // go: sdk 1.25.5 crypto/tls/common.go:1101-1114 Config.SetSessionTicketKeys
     /// Go: "SetSessionTicketKeys updates the session ticket keys for a
     /// server. The first key will be used when creating new tickets,
     /// while all keys can be used for decrypting tickets. It is safe to
@@ -714,7 +714,7 @@ impl Config {
         self.sessionTicketKeys = slice::__from_vec(newKeys);
     }
 
-    // go: sdk 1.25.5 crypto/tls/common.go:940-987 Config.ticketKeys
+    // go: sdk 1.25.5 crypto/tls/common.go:1032-1086 Config.ticketKeys
     /// The ticket keys to use, newest first, rotating the auto-managed
     /// set when the newest is older than `ticketKeyRotation`.
     ///
@@ -793,7 +793,7 @@ impl Config {
         return self.autoSessionTicketKeys.clone();
     }
 
-    // go: sdk 1.25.5 crypto/tls/common.go:826-878 Config.Clone
+    // go: sdk 1.25.5 crypto/tls/common.go:945-987 Config.Clone
     /// Go: "Clone returns a shallow clone of c or nil if c is nil. It is
     /// safe to clone a [Config] that is being used concurrently by a TLS
     /// client or server."
@@ -809,7 +809,7 @@ impl Config {
         return self.clone();
     }
 
-    // go: sdk 1.25.5 crypto/tls/common.go:1119-1125 Config.rand
+    // go: sdk 1.25.5 crypto/tls/common.go:1116-1122 Config.rand
     /// The entropy source for the handshake.
     ///
     /// Deviation: Go's `Config.Rand` field holds an `io.Reader`
@@ -861,7 +861,7 @@ impl Config {
         return slice::__from_vec(versions);
     }
 
-    // go: sdk 1.25.5 crypto/tls/common.go:1198-1204 Config.maxSupportedVersion
+    // go: sdk 1.25.5 crypto/tls/common.go:1197-1203 Config.maxSupportedVersion
     /// The highest supported version, or zero if there is none.
     pub(crate) fn maxSupportedVersion(&self, isClient: bool) -> uint16 {
         // Go: supportedVersions := c.supportedVersions(isClient)
@@ -979,7 +979,7 @@ impl Config {
         return self.cipherSuites(false);
     }
 
-    // go: sdk 1.25.5 crypto/tls/common.go:1241-1249 Config.mutualVersion
+    // go: sdk 1.25.5 crypto/tls/common.go:1243-1251 Config.mutualVersion
     /// The highest version both sides support, and whether there is one.
     pub(crate) fn mutualVersion(
         &self,
@@ -1236,7 +1236,7 @@ impl ClientHelloInfo {
         self.config = Some(alloc::boxed::Box::new(cfg));
     }
 
-    // go: sdk 1.25.5 crypto/tls/common.go:516-518 ClientHelloInfo.Context
+    // go: sdk 1.25.5 crypto/tls/common.go:483-485 ClientHelloInfo.Context
     /// Go: "Context returns the context of the connection that is
     /// currently being handshaked."
     pub fn Context(&self) -> Option<alloc::sync::Arc<dyn crate::context::Context>> {
@@ -1244,7 +1244,7 @@ impl ClientHelloInfo {
         return self.ctx.clone();
     }
 
-    // go: sdk 1.25.5 crypto/tls/common.go:1266-1400 ClientHelloInfo.SupportsCertificate
+    // go: sdk 1.25.5 crypto/tls/common.go:1320-1472 ClientHelloInfo.SupportsCertificate
     /// Go: "SupportsCertificate returns nil if the provided certificate
     /// is supported by the client that sent the ClientHello. Otherwise,
     /// it returns an error describing the reason for the incompatibility."
@@ -1524,7 +1524,7 @@ pub struct CertificateRequestInfo {
 }
 
 impl CertificateRequestInfo {
-    // go: sdk 1.25.5 crypto/tls/common.go:550-552 CertificateRequestInfo.Context
+    // go: sdk 1.25.5 crypto/tls/common.go:511-513 CertificateRequestInfo.Context
     /// Go: "Context returns the context of the connection that is
     /// currently being handshaked."
     pub fn Context(&self) -> Option<alloc::sync::Arc<dyn crate::context::Context>> {
@@ -1532,7 +1532,7 @@ impl CertificateRequestInfo {
         return self.ctx.clone();
     }
 
-    // go: sdk 1.25.5 crypto/tls/common.go:1405-1435 CertificateRequestInfo.SupportsCertificate
+    // go: sdk 1.25.5 crypto/tls/common.go:1477-1504 CertificateRequestInfo.SupportsCertificate
     /// Go: "SupportsCertificate returns nil if the provided certificate
     /// is supported by the server that sent the CertificateRequest.
     /// Otherwise, it returns an error describing the reason for the
@@ -1840,7 +1840,7 @@ impl ConnectionState {
         self.ekm = f;
     }
 
-    // go: sdk 1.25.5 crypto/tls/common.go:326-328 ConnectionState.ExportKeyingMaterial
+    // go: sdk 1.25.5 crypto/tls/common.go:328-330 ConnectionState.ExportKeyingMaterial
     /// Go: "ExportKeyingMaterial returns length bytes of exported key
     /// material in a new slice as defined in RFC 5705. If context is nil,
     /// it is not used as part of the seed. If the connection was set to
@@ -1873,7 +1873,7 @@ crate::var! {
 }
 
 impl Config {
-    // go: sdk 1.25.5 crypto/tls/common.go:1440-1481 Config.getCertificate
+    // go: sdk 1.25.5 crypto/tls/common.go:1266-1307 Config.getCertificate
     /// Go: "getCertificate returns the best certificate for the given
     /// ClientHelloInfo, defaulting to the first element of
     /// c.Certificates. If there are no certificates configured, it
@@ -1941,7 +1941,7 @@ impl Config {
         return (self.Certificates[0].clone(), errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/common.go:1545-1557 Config.writeKeyLog
+    // go: sdk 1.25.5 crypto/tls/common.go:1540-1552 Config.writeKeyLog
     /// Write a NSS key-log line, if `KeyLogWriter` is set.
     ///
     /// Deviation: goish's Config has no `KeyLogWriter` field — it holds

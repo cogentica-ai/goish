@@ -30,7 +30,7 @@ pub struct CounterKDF {
     mac: CMAC,
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ctrkdf.go:24-26 NewCounterKDF
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ctrkdf.go:27-29 NewCounterKDF
 /// `gcm.NewCounterKDF(b)` — a new CounterKDF with the given key.
 pub fn NewCounterKDF(b: &aes::Block) -> CounterKDF {
     // Go: return &CounterKDF{mac: *NewCMAC(b)}
@@ -38,7 +38,7 @@ pub fn NewCounterKDF(b: &aes::Block) -> CounterKDF {
 }
 
 impl CounterKDF {
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ctrkdf.go:29-45 DeriveKey
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ctrkdf.go:32-49 CounterKDF.DeriveKey
     /// `(*CounterKDF).DeriveKey(label, context)` — derive a 256-bit key.
     pub fn DeriveKey(&self, label: byte, context: [byte; 12]) -> [byte; 32] {
         // Go: fips140.RecordApproved() — no-op in goish.

@@ -33,7 +33,7 @@ use super::konst::{
     ksRotations, permutationFunction, permutedChoice1, permutedChoice2, sBoxes,
 };
 
-// go: sdk 1.25.5 crypto/des/block.go:72-74 feistelBox
+// go: sdk 1.25.5 crypto/des/block.go:72-72 feistelBox
 //
 //   var feistelBox [8][64]uint32
 //   var feistelBoxOnce sync.Once

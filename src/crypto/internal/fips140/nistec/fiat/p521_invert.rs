@@ -13,7 +13,7 @@ use super::p521::P521Element;
 use crate::types::int;
 
 impl P521Element {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p521_invert.go:12-89 Invert
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p521_invert.go:12-89 P521Element.Invert
     /// Set e = 1/x, and return e.
     ///
     /// If x == 0, Invert returns e = 0.

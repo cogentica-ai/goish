@@ -46,14 +46,14 @@ impl P384Element {
         return P384Element { x: [0; 6] };
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:27-31 One
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:27-31 P384Element.One
     /// Set e = 1, and return e.
     pub fn One(&mut self) -> &mut Self {
         p384SetOne(&mut self.x);
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:33-38 Equal
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:33-38 P384Element.Equal
     /// Return 1 if e == t, and zero otherwise.
     pub fn Equal(&self, t: P384Element) -> int {
         let eBytes = self.Bytes();
@@ -61,7 +61,7 @@ impl P384Element {
         return subtle::ConstantTimeCompare(&eBytes, &tBytes);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:40-45 IsZero
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:40-45 P384Element.IsZero
     /// Return 1 if e == 0, and zero otherwise.
     pub fn IsZero(&self) -> int {
         let zero = slice::__from_vec(alloc::vec![0u8; p384ElementLen]);
@@ -69,14 +69,14 @@ impl P384Element {
         return subtle::ConstantTimeCompare(&eBytes, &zero);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:47-51 Set
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:47-51 P384Element.Set
     /// Set e = t, and return e.
     pub fn Set(&mut self, t: P384Element) -> &mut Self {
         self.x = t.x;
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:53-59 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:53-59 P384Element.Bytes
     /// Return the 48-byte big-endian encoding of e.
     pub fn Bytes(&self) -> slice<byte> {
         // This function is outlined to make the allocations inline in the
@@ -85,7 +85,7 @@ impl P384Element {
         return self.bytes(&mut out);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:61-67 bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:61-67 P384Element.bytes
     fn bytes(&self, out: &mut [byte; p384ElementLen]) -> slice<byte> {
         let mut tmp: [u64; 6] = [0; 6];
         p384FromMontgomery(&mut tmp, &self.x);
@@ -94,7 +94,7 @@ impl P384Element {
         return slice::__from_vec(out.to_vec());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:69-92 SetBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:69-92 P384Element.SetBytes
     /// Set e = v, where v is a big-endian 48-byte encoding, and return e.
     /// If v is not 48 bytes or it encodes a value higher than
     /// 2^384 - 2^128 - 2^96 + 2^32 - 1, SetBytes returns an error and e is unchanged.
@@ -127,35 +127,35 @@ impl P384Element {
         return crate::nil.into();
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:94-98 Add
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:94-98 P384Element.Add
     /// Set e = t1 + t2, and return e.
     pub fn Add(&mut self, t1: P384Element, t2: P384Element) -> &mut Self {
         p384Add(&mut self.x, &t1.x, &t2.x);
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:100-104 Sub
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:100-104 P384Element.Sub
     /// Set e = t1 - t2, and return e.
     pub fn Sub(&mut self, t1: P384Element, t2: P384Element) -> &mut Self {
         p384Sub(&mut self.x, &t1.x, &t2.x);
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:106-110 Mul
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:106-110 P384Element.Mul
     /// Set e = t1 * t2, and return e.
     pub fn Mul(&mut self, t1: P384Element, t2: P384Element) -> &mut Self {
         p384Mul(&mut self.x, &t1.x, &t2.x);
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:112-116 Square
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:112-116 P384Element.Square
     /// Set e = t * t, and return e.
     pub fn Square(&mut self, t: P384Element) -> &mut Self {
         p384Square(&mut self.x, &t.x);
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:118-123 Select
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384.go:118-123 P384Element.Select
     /// Set v to a if cond == 1, and to b if cond == 0.
     pub fn Select(&mut self, a: P384Element, b: P384Element, cond: int) -> &mut Self {
         p384Selectznz(&mut self.x, uint64(cond), &b.x, &a.x);

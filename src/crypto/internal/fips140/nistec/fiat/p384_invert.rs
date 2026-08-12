@@ -13,7 +13,7 @@ use super::p384::P384Element;
 use crate::types::int;
 
 impl P384Element {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384_invert.go:12-102 Invert
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p384_invert.go:12-102 P384Element.Invert
     /// Set e = 1/x, and return e.
     ///
     /// If x == 0, Invert returns e = 0.

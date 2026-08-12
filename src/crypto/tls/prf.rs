@@ -207,7 +207,7 @@ pub(crate) const keyExpansionLabel: &str = "key expansion";
 pub(crate) const clientFinishedLabel: &str = "client finished";
 pub(crate) const serverFinishedLabel: &str = "server finished";
 
-// go: sdk 1.25.5 crypto/tls/prf.go:88-99 prfAndHashForVersion
+// go: sdk 1.25.5 crypto/tls/prf.go:90-102 prfAndHashForVersion
 /// The PRF and handshake hash for a version and suite. Panics on an
 /// unknown version, as Go does.
 pub(crate) fn prfAndHashForVersion(
@@ -257,14 +257,14 @@ pub(crate) fn prfAndHashForVersion(
     panic!("unknown version");
 }
 
-// go: sdk 1.25.5 crypto/tls/prf.go:101-104 prfForVersion
+// go: sdk 1.25.5 crypto/tls/prf.go:104-107 prfForVersion
 pub(crate) fn prfForVersion(version: uint16, suite: &'static cipherSuite) -> prfFunc {
     // Go: prf, _ := prfAndHashForVersion(version, suite); return prf
     let (prf, _) = prfAndHashForVersion(version, suite);
     return prf;
 }
 
-// go: sdk 1.25.5 crypto/tls/prf.go:108-114 masterFromPreMasterSecret
+// go: sdk 1.25.5 crypto/tls/prf.go:111-117 masterFromPreMasterSecret
 /// The master secret, from the pre-master secret. RFC 5246 §8.1.
 pub(crate) fn masterFromPreMasterSecret(
     version: uint16,
@@ -290,7 +290,7 @@ pub(crate) fn masterFromPreMasterSecret(
     );
 }
 
-// go: sdk 1.25.5 crypto/tls/prf.go:118-126 extMasterFromPreMasterSecret
+// go: sdk 1.25.5 crypto/tls/prf.go:121-129 extMasterFromPreMasterSecret
 /// The extended master secret. RFC 7627.
 pub(crate) fn extMasterFromPreMasterSecret(
     version: uint16,
@@ -321,7 +321,7 @@ pub(crate) fn extMasterFromPreMasterSecret(
     );
 }
 
-// go: sdk 1.25.5 crypto/tls/prf.go:131-150 keysFromMasterSecret
+// go: sdk 1.25.5 crypto/tls/prf.go:134-153 keysFromMasterSecret
 /// The connection keys, given the MAC key, cipher key and IV lengths.
 /// RFC 2246 §6.3.
 ///
@@ -404,7 +404,7 @@ pub(crate) struct finishedHash {
     pub prf: prfFunc,
 }
 
-// go: sdk 1.25.5 crypto/tls/prf.go:152-164 newFinishedHash
+// go: sdk 1.25.5 crypto/tls/prf.go:155-167 newFinishedHash
 pub(crate) fn newFinishedHash(version: uint16, cipherSuite: &'static cipherSuite) -> finishedHash {
     // Go: var buffer []byte
     //     if version >= VersionTLS12 { buffer = []byte{} }
@@ -444,7 +444,7 @@ pub(crate) fn newFinishedHash(version: uint16, cipherSuite: &'static cipherSuite
 }
 
 impl finishedHash {
-    // go: sdk 1.25.5 crypto/tls/prf.go:183-195 finishedHash.Write
+    // go: sdk 1.25.5 crypto/tls/prf.go:186-200 finishedHash.Write
     pub(crate) fn Write(&mut self, msg: slice<byte>) -> (int, error) {
         // Go: h.client.Write(msg); h.server.Write(msg)
         let _ = crate::io::Writer::Write(&mut *self.client, msg.clone());
@@ -466,7 +466,7 @@ impl finishedHash {
         return (msg.Len(), crate::errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/prf.go:197-205 finishedHash.Sum
+    // go: sdk 1.25.5 crypto/tls/prf.go:202-210 finishedHash.Sum
     pub(crate) fn Sum(&self) -> slice<byte> {
         // Go: if h.version >= VersionTLS12 { return h.client.Sum(nil) }
         if self.version >= VersionTLS12 {
@@ -480,7 +480,7 @@ impl finishedHash {
         return self.client.Sum(out);
     }
 
-    // go: sdk 1.25.5 crypto/tls/prf.go:209-211 finishedHash.clientSum
+    // go: sdk 1.25.5 crypto/tls/prf.go:214-216 finishedHash.clientSum
     /// The `verify_data` of a client's Finished message.
     pub(crate) fn clientSum(&self, masterSecret: slice<byte>) -> slice<byte> {
         // Go: return h.prf(masterSecret, clientFinishedLabel, h.Sum(), finishedVerifyLength)
@@ -492,7 +492,7 @@ impl finishedHash {
         );
     }
 
-    // go: sdk 1.25.5 crypto/tls/prf.go:215-217 finishedHash.serverSum
+    // go: sdk 1.25.5 crypto/tls/prf.go:220-222 finishedHash.serverSum
     /// The `verify_data` of a server's Finished message.
     pub(crate) fn serverSum(&self, masterSecret: slice<byte>) -> slice<byte> {
         // Go: return h.prf(masterSecret, serverFinishedLabel, h.Sum(), finishedVerifyLength)
@@ -504,7 +504,7 @@ impl finishedHash {
         );
     }
 
-    // go: sdk 1.25.5 crypto/tls/prf.go:221-243 finishedHash.hashForClientCertificate
+    // go: sdk 1.25.5 crypto/tls/prf.go:226-246 finishedHash.hashForClientCertificate
     /// The handshake messages so far, pre-hashed if necessary, suitable
     /// for signing by a TLS client certificate.
     pub(crate) fn hashForClientCertificate(
@@ -546,7 +546,7 @@ impl finishedHash {
         return self.Sum();
     }
 
-    // go: sdk 1.25.5 crypto/tls/prf.go:247-249 finishedHash.discardHandshakeBuffer
+    // go: sdk 1.25.5 crypto/tls/prf.go:250-252 finishedHash.discardHandshakeBuffer
     /// Go: "called when there is no more need to buffer the entirety of
     /// the handshake messages."
     pub(crate) fn discardHandshakeBuffer(&mut self) {

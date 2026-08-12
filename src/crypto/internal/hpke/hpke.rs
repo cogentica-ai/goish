@@ -56,7 +56,7 @@ pub(crate) struct hkdfKDF {
 }
 
 impl hkdfKDF {
-    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:29-36 LabeledExtract
+    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:29-36 hkdfKDF.LabeledExtract
     fn LabeledExtract(
         &self,
         sid: &slice<byte>,
@@ -78,7 +78,7 @@ impl hkdfKDF {
         );
     }
 
-    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:38-46 LabeledExpand
+    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:38-46 hkdfKDF.LabeledExpand
     fn LabeledExpand(
         &self,
         suiteID: &slice<byte>,
@@ -160,7 +160,7 @@ fn newDHKem(kemID: uint16) -> (Option<dhKEM>, error) {
 }
 
 impl dhKEM {
-    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:82-88 ExtractAndExpand
+    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:82-88 dhKEM.ExtractAndExpand
     fn ExtractAndExpand(
         &self,
         dhKey: &slice<byte>,
@@ -181,7 +181,7 @@ impl dhKEM {
         );
     }
 
-    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:90-112 Encap
+    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:91-114 dhKEM.Encap
     fn Encap(&self, pubRecipient: &ecdh::PublicKey) -> (slice<byte>, slice<byte>, error) {
         let privEph;
         if let Some(gen) = testingOnlyGenerateKey {
@@ -213,7 +213,7 @@ impl dhKEM {
         return (sharedSecret, encPubEph, crate::nil.into());
     }
 
-    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:114-125 Decap
+    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:116-127 dhKEM.Decap
     fn Decap(
         &self,
         encPubEph: &slice<byte>,
@@ -262,7 +262,7 @@ pub struct Recipient {
     context: context,
 }
 
-// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:149-155 aesGCMNew
+// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:151-157 aesGCMNew
 fn aesGCMNew(key: &slice<byte>) -> (Option<Box<dyn AEAD + Send + Sync>>, error) {
     let (block, err) = aes::NewCipher(key.clone());
     if err != crate::nil {
@@ -339,7 +339,7 @@ pub(crate) fn SupportedKDFs(kdfID: uint16) -> Option<hkdfKDF> {
     return None;
 }
 
-// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:182-231 newContext
+// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:187-242 newContext
 fn newContext(
     sharedSecret: &slice<byte>,
     kemID: uint16,
@@ -418,7 +418,7 @@ fn newContext(
     );
 }
 
-// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:233-248 SetupSender
+// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:244-260 SetupSender
 pub fn SetupSender(
     kemID: uint16,
     kdfID: uint16,
@@ -450,7 +450,7 @@ pub fn SetupSender(
     );
 }
 
-// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:250-265 SetupRecipient
+// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:262-278 SetupRecipient
 pub fn SetupRecipient(
     kemID: uint16,
     kdfID: uint16,
@@ -483,7 +483,7 @@ pub fn SetupRecipient(
 }
 
 impl context {
-    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:267-273 nextNonce
+    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:280-286 context.nextNonce
     fn nextNonce(&self) -> slice<byte> {
         let all = self.seqNum.bytes();
         let raw: &[byte] = &all;
@@ -498,7 +498,7 @@ impl context {
         return slice::__from_vec(nonce);
     }
 
-    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:275-280 incrementNonce
+    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:288-295 context.incrementNonce
     fn incrementNonce(&mut self) {
         if self.seqNum.bitLen() >= (self.aead.NonceSize() * 8) - 1 {
             panic!("message limit reached");
@@ -508,7 +508,7 @@ impl context {
 }
 
 impl Sender {
-    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:282-286 Seal
+    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:297-301 Sender.Seal
     pub fn Seal(&mut self, aad: &slice<byte>, plaintext: &slice<byte>) -> (slice<byte>, error) {
         let ciphertext = self.context.aead.Seal(
             empty(),
@@ -522,7 +522,7 @@ impl Sender {
 }
 
 impl Recipient {
-    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:288-295 Open
+    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:303-310 Recipient.Open
     pub fn Open(&mut self, aad: &slice<byte>, ciphertext: &slice<byte>) -> (slice<byte>, error) {
         let (plaintext, err) = self.context.aead.Open(
             empty(),
@@ -538,7 +538,7 @@ impl Recipient {
     }
 }
 
-// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:297-304 suiteID
+// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:312-319 suiteID
 fn suiteID(kemID: uint16, kdfID: uint16, aeadID: uint16) -> slice<byte> {
     let mut sid: Vec<byte> = Vec::with_capacity(4 + 2 + 2 + 2);
     sid.extend_from_slice(b"HPKE");
@@ -548,7 +548,7 @@ fn suiteID(kemID: uint16, kdfID: uint16, aeadID: uint16) -> slice<byte> {
     return sid;
 }
 
-// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:306-313 ParseHPKEPublicKey
+// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:321-327 ParseHPKEPublicKey
 pub fn ParseHPKEPublicKey(kemID: uint16, bytes: &slice<byte>) -> (ecdh::PublicKey, error) {
     let kemInfo = match SupportedKEMs(kemID) {
         None => {
@@ -560,7 +560,7 @@ pub fn ParseHPKEPublicKey(kemID: uint16, bytes: &slice<byte>) -> (ecdh::PublicKe
     return kemInfo.0.NewPublicKey(bytes);
 }
 
-// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:315-322 ParseHPKEPrivateKey
+// go: sdk 1.25.5 crypto/internal/hpke/hpke.go:329-335 ParseHPKEPrivateKey
 pub fn ParseHPKEPrivateKey(kemID: uint16, bytes: &slice<byte>) -> (ecdh::PrivateKey, error) {
     let kemInfo = match SupportedKEMs(kemID) {
         None => {
@@ -580,7 +580,7 @@ struct uint128 {
 }
 
 impl uint128 {
-    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:328-331 addOne
+    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:341-344 uint128.addOne
     fn addOne(&self) -> uint128 {
         let (lo, carry) = bits::Add64(self.lo, 1, 0);
         return uint128 {
@@ -589,12 +589,12 @@ impl uint128 {
         };
     }
 
-    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:333-335 bitLen
+    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:346-348 uint128.bitLen
     fn bitLen(&self) -> int {
         return bits::Len64(self.hi) + bits::Len64(self.lo);
     }
 
-    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:337-342 bytes
+    // go: sdk 1.25.5 crypto/internal/hpke/hpke.go:350-355 uint128.bytes
     fn bytes(&self) -> slice<byte> {
         let mut b = slice::__from_vec(alloc::vec![0u8; 16]);
         let mut hi = slice::__from_vec(alloc::vec![0u8; 8]);

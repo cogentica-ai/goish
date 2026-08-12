@@ -94,7 +94,7 @@ pub fn MarshalECPrivateKey(key: &ecdsa::PrivateKey) -> (slice<byte>, error) {
     return marshalECPrivateKeyWithOID(key, Some(&oid));
 }
 
-// go: sdk 1.25.5 crypto/x509/sec1.go:56-66 marshalECPrivateKeyWithOID
+// go: sdk 1.25.5 crypto/x509/sec1.go:57-68 marshalECPrivateKeyWithOID
 /// Marshal an EC private key into ASN.1, DER format and set the curve ID
 /// to the given OID, or omit it if the OID is `None`.
 pub fn marshalECPrivateKeyWithOID(
@@ -130,7 +130,7 @@ pub fn marshalECPrivateKeyWithOID(
     });
 }
 
-// go: sdk 1.25.5 crypto/x509/sec1.go:70-76 marshalECDHPrivateKey
+// go: sdk 1.25.5 crypto/x509/sec1.go:72-78 marshalECDHPrivateKey
 /// Marshal an EC private key into ASN.1, DER format suitable for NIST
 /// curves.
 pub fn marshalECDHPrivateKey(key: &ecdh::PrivateKey) -> (slice<byte>, error) {

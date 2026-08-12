@@ -24,21 +24,21 @@ pub(crate) fn keccakF1600(a: &mut [byte; STATE_BYTES]) {
     keccakF1600Generic(a);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/sha3/sha3_noasm.go:13-15 write
+// go: sdk 1.25.5 crypto/internal/fips140/sha3/sha3_noasm.go:13-15 Digest.write
 /// Go: `func (d *Digest) write(p []byte) (n int, err error)`
 pub(crate) fn write(d: &mut Digest, p: slice<byte>) -> (int, error) {
     // Go: return d.writeGeneric(p)
     return d.writeGeneric(p);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/sha3/sha3_noasm.go:16-18 read
+// go: sdk 1.25.5 crypto/internal/fips140/sha3/sha3_noasm.go:16-18 Digest.read
 /// Go: `func (d *Digest) read(out []byte) (n int, err error)`
 pub(crate) fn read(d: &mut Digest, out: &mut [byte]) -> usize {
     // Go: return d.readGeneric(out)
     return d.readGeneric(out);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/sha3/sha3_noasm.go:19-21 sum
+// go: sdk 1.25.5 crypto/internal/fips140/sha3/sha3_noasm.go:19-21 Digest.sum
 /// Go: `func (d *Digest) sum(b []byte) []byte`
 pub(crate) fn sum(d: &Digest, b: slice<byte>) -> slice<byte> {
     // Go: return d.sumGeneric(b)

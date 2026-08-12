@@ -112,14 +112,14 @@ impl Builder {
         return self.err != crate::nil;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:54-58 SetError
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:54-58 Builder.SetError
     /// Set the value to be returned as the error from Bytes. Writes
     /// performed after calling SetError are ignored.
     pub fn SetError(&mut self, err: error) {
         self.err = err;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:60-67 Bytes
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:60-67 Builder.Bytes
     /// Return the bytes written by the builder, or an error if one has
     /// occurred during building.
     pub fn Bytes(&self) -> (slice<byte>, error) {
@@ -135,7 +135,7 @@ impl Builder {
         );
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:69-76 BytesOrPanic
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:69-76 Builder.BytesOrPanic
     /// Return the bytes written by the builder, or panic if an error has
     /// occurred during building.
     pub fn BytesOrPanic(&self) -> slice<byte> {
@@ -145,32 +145,32 @@ impl Builder {
         return slice::__from_vec(self.result[self.offset..].to_vec());
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:78-81 AddUint8
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:78-81 Builder.AddUint8
     /// Append an 8-bit value to the byte string.
     pub fn AddUint8(&mut self, v: uint8) {
         self.add(&[v]);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:83-86 AddUint16
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:83-86 Builder.AddUint16
     /// Append a big-endian, 16-bit value to the byte string.
     pub fn AddUint16(&mut self, v: uint16) {
         self.add(&[uint8(v >> 8), uint8(v)]);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:88-92 AddUint24
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:88-92 Builder.AddUint24
     /// Append a big-endian, 24-bit value to the byte string. The highest
     /// byte of the 32-bit input value is silently truncated.
     pub fn AddUint24(&mut self, v: uint32) {
         self.add(&[uint8(v >> 16), uint8(v >> 8), uint8(v)]);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:94-97 AddUint32
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:94-97 Builder.AddUint32
     /// Append a big-endian, 32-bit value to the byte string.
     pub fn AddUint32(&mut self, v: uint32) {
         self.add(&[uint8(v >> 24), uint8(v >> 16), uint8(v >> 8), uint8(v)]);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:99-102 AddUint48
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:99-102 Builder.AddUint48
     /// Append a big-endian, 48-bit value to the byte string.
     pub fn AddUint48(&mut self, v: uint64) {
         self.add(&[
@@ -183,7 +183,7 @@ impl Builder {
         ]);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:104-107 AddUint64
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:104-107 Builder.AddUint64
     /// Append a big-endian, 64-bit value to the byte string.
     pub fn AddUint64(&mut self, v: uint64) {
         self.add(&[
@@ -198,38 +198,38 @@ impl Builder {
         ]);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:109-112 AddBytes
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:109-112 Builder.AddBytes
     /// Append a sequence of bytes to the byte string.
     pub fn AddBytes(&mut self, v: &slice<byte>) {
         let r: &[byte] = v;
         self.add(r);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:144-148 AddUint8LengthPrefixed
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:144-148 Builder.AddUint8LengthPrefixed
     /// Add an 8-bit length-prefixed byte sequence.
     pub fn AddUint8LengthPrefixed<F: FnOnce(&mut Builder)>(&mut self, f: F) {
         self.addLengthPrefixed(1, false, f);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:150-153 AddUint16LengthPrefixed
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:150-153 Builder.AddUint16LengthPrefixed
     /// Add a big-endian, 16-bit length-prefixed byte sequence.
     pub fn AddUint16LengthPrefixed<F: FnOnce(&mut Builder)>(&mut self, f: F) {
         self.addLengthPrefixed(2, false, f);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:155-158 AddUint24LengthPrefixed
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:155-158 Builder.AddUint24LengthPrefixed
     /// Add a big-endian, 24-bit length-prefixed byte sequence.
     pub fn AddUint24LengthPrefixed<F: FnOnce(&mut Builder)>(&mut self, f: F) {
         self.addLengthPrefixed(3, false, f);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:160-162 AddUint32LengthPrefixed
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:160-162 Builder.AddUint32LengthPrefixed
     /// Add a big-endian, 32-bit length-prefixed byte sequence.
     pub fn AddUint32LengthPrefixed<F: FnOnce(&mut Builder)>(&mut self, f: F) {
         self.addLengthPrefixed(4, false, f);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:164-185 callContinuation
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:164-185 Builder.callContinuation
     //
     // Go wraps the call in a `defer` that recovers a `BuildError` panic;
     // see the file header for why goish calls the continuation directly.
@@ -239,7 +239,7 @@ impl Builder {
         f(self);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:187-214 addLengthPrefixed
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:187-214 Builder.addLengthPrefixed
     pub(super) fn addLengthPrefixed<F: FnOnce(&mut Builder)>(
         &mut self,
         lenLen: int,
@@ -273,7 +273,7 @@ impl Builder {
         self.pendingIsASN1 = savedIsASN1;
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:216-292 flushChild
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:216-292 Builder.flushChild
     //
     // Go reads `child.*`; here the pending state is on self, set by
     // addLengthPrefixed. The arithmetic is unchanged.
@@ -350,7 +350,7 @@ impl Builder {
         }
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:294-312 add
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:294-312 Builder.add
     fn add(&mut self, bytes: &[byte]) {
         if self.err != crate::nil {
             return;
@@ -368,7 +368,7 @@ impl Builder {
         self.result.extend_from_slice(bytes);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:314-333 Unwrite
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:314-333 Builder.Unwrite
     /// Roll back non-negative n bytes written directly to the Builder.
     pub fn Unwrite(&mut self, n: int) {
         if self.err != crate::nil {
@@ -391,7 +391,7 @@ impl Builder {
         self.result.truncate(keep);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:342-348 AddValue
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:345-350 Builder.AddValue
     /// Call Marshal on v, passing a pointer to the builder to append to.
     /// If Marshal returns an error, it is set on the Builder so that
     /// subsequent appends don't have an effect.

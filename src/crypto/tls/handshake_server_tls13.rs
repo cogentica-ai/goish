@@ -767,7 +767,7 @@ impl serverHandshakeStateTLS13 {
         return self.c.writeChangeCipherRecord();
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:1042-1054 serverHandshakeStateTLS13.shouldSendSessionTickets
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:958-970 serverHandshakeStateTLS13.shouldSendSessionTickets
     ///
     /// Deviation: the QUIC check is absent — Go skips automatic tickets
     /// for QUIC because QUICConn.SendSessionTicket sends them instead,
@@ -786,7 +786,7 @@ impl serverHandshakeStateTLS13 {
             .contains(&super::common::pskModeDHE);
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:1152-1154 serverHandshakeStateTLS13.requestClientCert
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:834-836 serverHandshakeStateTLS13.requestClientCert
     pub(crate) fn requestClientCert(&self) -> bool {
         // Go: return hs.c.config.ClientAuth >= RequestClientCert && !hs.usingPSK
         return self.c.__configClientAuth().0 >= super::common::RequestClientCert.0
@@ -794,7 +794,7 @@ impl serverHandshakeStateTLS13 {
     }
 }
 
-// go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:449-500 illegalClientHelloChange
+// go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:675-728 illegalClientHelloChange
 /// Go: "illegalClientHelloChange reports whether the second ClientHello
 /// of a HelloRetryRequest exchange differs from the first in any way
 /// other than the fields RFC 8446 Section 4.1.2 permits."
@@ -845,7 +845,7 @@ pub(crate) fn illegalClientHelloChange(
 }
 
 
-// go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:428-447 cloneHash
+// go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:474-497 cloneHash
 /// Go: "cloneHash clones the hash, or returns nil if the hash cannot be
 /// cloned." Used to fork the handshake transcript for the
 /// HelloRetryRequest synthetic message hash.
@@ -894,7 +894,7 @@ pub(crate) fn cloneHash(
 
 
 impl serverHandshakeStateTLS13 {
-    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:502-533 serverHandshakeStateTLS13.pickCertificate
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:499-531 serverHandshakeStateTLS13.pickCertificate
     /// Choose the server certificate and the scheme it will sign with.
     pub(crate) fn pickCertificate(&mut self) -> crate::error {
         // Go: Only one of PSK and certificates are used at a time.

@@ -92,7 +92,7 @@ pub const L3072N256: ParameterSizes = ParameterSizes(3);
 /// largest recommended number from table C.1 of FIPS 186-3.
 const numMRTests: int = 64;
 
-// go: sdk 1.25.5 crypto/dsa/dsa.go:56-152 GenerateParameters
+// go: sdk 1.25.5 crypto/dsa/dsa.go:66-160 GenerateParameters
 // goishlint:ignore GOISH023 — Go's body is a labelled `for`/`break
 // GeneratePrimes`; Rust spells the unconditional loops as `loop { … }`,
 // which parses as the tail expression.
@@ -216,7 +216,7 @@ pub fn GenerateParameters(
     }
 }
 
-// go: sdk 1.25.5 crypto/dsa/dsa.go:154-183 GenerateKey
+// go: sdk 1.25.5 crypto/dsa/dsa.go:164-191 GenerateKey
 /// Generate a public&private key pair. The Parameters of the [PrivateKey]
 /// must already be valid (see [GenerateParameters]).
 pub fn GenerateKey(
@@ -252,7 +252,7 @@ pub fn GenerateKey(
     return crate::nil.into();
 }
 
-// go: sdk 1.25.5 crypto/dsa/dsa.go:185-192 fermatInverse
+// go: sdk 1.25.5 crypto/dsa/dsa.go:197-201 fermatInverse
 /// Calculate the inverse of k in GF(P) using Fermat's method (exponentiation
 /// modulo P - 2, per Euler's theorem). This has better constant-time
 /// properties than Euclid's method (implemented in math/big.Int.ModInverse
@@ -267,7 +267,7 @@ fn fermatInverse(k: &Int, P: &Int) -> Int {
     return out;
 }
 
-// go: sdk 1.25.5 crypto/dsa/dsa.go:194-268 Sign
+// go: sdk 1.25.5 crypto/dsa/dsa.go:214-278 Sign
 /// Sign a hash (which should be the result of hashing a larger message)
 /// using the private key, priv. If the hash is longer than the bit-length
 /// of the private key's curve order, the hash will be truncated to that
@@ -357,7 +357,7 @@ pub fn Sign(
     return (Int::default(), Int::default(), ErrInvalidPublicKey.into());
 }
 
-// go: sdk 1.25.5 crypto/dsa/dsa.go:270-322 Verify
+// go: sdk 1.25.5 crypto/dsa/dsa.go:286-326 Verify
 /// Verify the signature in r, s of hash using the public key, pub. It
 /// reports whether the signature is valid.
 ///

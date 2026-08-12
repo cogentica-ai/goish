@@ -46,14 +46,14 @@ impl P256Element {
         return P256Element { x: [0; 4] };
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:27-31 One
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:27-31 P256Element.One
     /// Set e = 1, and return e.
     pub fn One(&mut self) -> &mut Self {
         p256SetOne(&mut self.x);
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:33-38 Equal
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:33-38 P256Element.Equal
     /// Return 1 if e == t, and zero otherwise.
     pub fn Equal(&self, t: P256Element) -> int {
         let eBytes = self.Bytes();
@@ -61,7 +61,7 @@ impl P256Element {
         return subtle::ConstantTimeCompare(&eBytes, &tBytes);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:40-45 IsZero
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:40-45 P256Element.IsZero
     /// Return 1 if e == 0, and zero otherwise.
     pub fn IsZero(&self) -> int {
         let zero = slice::__from_vec(alloc::vec![0u8; p256ElementLen]);
@@ -69,14 +69,14 @@ impl P256Element {
         return subtle::ConstantTimeCompare(&eBytes, &zero);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:47-51 Set
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:47-51 P256Element.Set
     /// Set e = t, and return e.
     pub fn Set(&mut self, t: P256Element) -> &mut Self {
         self.x = t.x;
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:53-59 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:53-59 P256Element.Bytes
     /// Return the 32-byte big-endian encoding of e.
     pub fn Bytes(&self) -> slice<byte> {
         // This function is outlined to make the allocations inline in the
@@ -85,7 +85,7 @@ impl P256Element {
         return self.bytes(&mut out);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:61-67 bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:61-67 P256Element.bytes
     fn bytes(&self, out: &mut [byte; p256ElementLen]) -> slice<byte> {
         let mut tmp: [u64; 4] = [0; 4];
         p256FromMontgomery(&mut tmp, &self.x);
@@ -94,7 +94,7 @@ impl P256Element {
         return slice::__from_vec(out.to_vec());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:69-92 SetBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:69-92 P256Element.SetBytes
     /// Set e = v, where v is a big-endian 32-byte encoding, and return e.
     /// If v is not 32 bytes or it encodes a value higher than
     /// 2^256 - 2^224 + 2^192 + 2^96 - 1, SetBytes returns an error and e is unchanged.
@@ -127,35 +127,35 @@ impl P256Element {
         return crate::nil.into();
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:94-98 Add
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:94-98 P256Element.Add
     /// Set e = t1 + t2, and return e.
     pub fn Add(&mut self, t1: P256Element, t2: P256Element) -> &mut Self {
         p256Add(&mut self.x, &t1.x, &t2.x);
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:100-104 Sub
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:100-104 P256Element.Sub
     /// Set e = t1 - t2, and return e.
     pub fn Sub(&mut self, t1: P256Element, t2: P256Element) -> &mut Self {
         p256Sub(&mut self.x, &t1.x, &t2.x);
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:106-110 Mul
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:106-110 P256Element.Mul
     /// Set e = t1 * t2, and return e.
     pub fn Mul(&mut self, t1: P256Element, t2: P256Element) -> &mut Self {
         p256Mul(&mut self.x, &t1.x, &t2.x);
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:112-116 Square
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:112-116 P256Element.Square
     /// Set e = t * t, and return e.
     pub fn Square(&mut self, t: P256Element) -> &mut Self {
         p256Square(&mut self.x, &t.x);
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:118-123 Select
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p256.go:118-123 P256Element.Select
     /// Set v to a if cond == 1, and to b if cond == 0.
     pub fn Select(&mut self, a: P256Element, b: P256Element, cond: int) -> &mut Self {
         p256Selectznz(&mut self.x, uint64(cond), &b.x, &a.x);

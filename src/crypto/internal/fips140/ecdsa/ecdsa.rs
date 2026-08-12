@@ -66,12 +66,12 @@ pub struct PrivateKey {
 }
 
 impl PrivateKey {
-    // go: sdk 1.25.5 crypto/internal/fips140/ecdsa/ecdsa.go:28-30 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/ecdsa/ecdsa.go:28-30 PrivateKey.Bytes
     pub fn Bytes(&self) -> slice<byte> {
         return self.d.clone();
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/ecdsa/ecdsa.go:32-34 PublicKey
+    // go: sdk 1.25.5 crypto/internal/fips140/ecdsa/ecdsa.go:32-34 PrivateKey.PublicKey
     pub fn PublicKey(&self) -> PublicKey {
         return self.r#pub.clone();
     }
@@ -87,7 +87,7 @@ pub struct PublicKey {
 }
 
 impl PublicKey {
-    // go: sdk 1.25.5 crypto/internal/fips140/ecdsa/ecdsa.go:41-43 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/ecdsa/ecdsa.go:41-43 PublicKey.Bytes
     pub fn Bytes(&self) -> slice<byte> {
         return self.q.clone();
     }

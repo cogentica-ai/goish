@@ -80,7 +80,7 @@ pub(super) fn systemRootsErr() -> error {
     };
 }
 
-// go: sdk 1.25.5 crypto/x509/root.go:46-85 SetFallbackRoots
+// go: sdk 1.25.5 crypto/x509/root.go:61-85 SetFallbackRoots
 /// Set the roots to use during certificate verification, if no custom
 /// roots are specified and a system certificate pool is not available
 /// (for instance in a container which does not have a root certificate

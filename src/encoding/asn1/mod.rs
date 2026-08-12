@@ -432,7 +432,7 @@ impl ObjectIdentifier {
         return crate::slices::Equal(&self.0, &other.0);
     }
 
-    // go: sdk 1.25.5 encoding/asn1/asn1.go:232-243 ObjectIdentifier.String
+    // go: sdk 1.25.5 encoding/asn1/asn1.go:232-245 ObjectIdentifier.String
     /// The dotted-decimal form.
     pub fn String(&self) -> string {
         return OIDString(self);

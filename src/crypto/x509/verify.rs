@@ -450,7 +450,7 @@ pub(super) struct rfc2821Mailbox {
     pub domain: string,
 }
 
-// go: sdk 1.25.5 crypto/x509/verify.go:257-386 parseRFC2821Mailbox
+// go: sdk 1.25.5 crypto/x509/verify.go:262-396 parseRFC2821Mailbox
 /// Parse an email address into local and domain parts, based on the ABNF
 /// for a "Mailbox" from RFC 2821. According to RFC 5280, Section 4.2.1.6
 /// that's correct for an rfc822Name from a certificate.

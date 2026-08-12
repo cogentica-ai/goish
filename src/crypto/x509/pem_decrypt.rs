@@ -213,7 +213,7 @@ goish::var! {
     pub IncorrectPasswordError: error = "x509: decryption password incorrect";
 }
 
-// go: sdk 1.25.5 crypto/x509/pem_decrypt.go:124-184 DecryptPEMBlock
+// go: sdk 1.25.5 crypto/x509/pem_decrypt.go:124-186 DecryptPEMBlock
 /// Decrypt a PEM block encrypted according to RFC 1423, returning the
 /// DER bytes. The `DEK-Info` header selects the algorithm.
 ///

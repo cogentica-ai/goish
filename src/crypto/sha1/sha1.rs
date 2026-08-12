@@ -89,7 +89,7 @@ const magic: &[byte] = b"sha\x01";
 const marshaledSize: usize = 4 + 5 * 4 + CHUNK + 8;
 
 impl Digest {
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:52-54 MarshalBinary
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:52-54 digest.MarshalBinary
     /// `(*digest).MarshalBinary()` — the digest's internal state.
     pub fn MarshalBinary(&self) -> (slice<byte>, error) {
         // Go: return d.AppendBinary(make([]byte, 0, marshaledSize))
@@ -97,7 +97,7 @@ impl Digest {
         return self.AppendBinary(slice::__from_vec(buf));
     }
 
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:56-67 AppendBinary
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:56-67 digest.AppendBinary
     /// `(*digest).AppendBinary(b)` — append the marshaled state to `b`.
     pub fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
         // Go: b = append(b, magic...)
@@ -118,7 +118,7 @@ impl Digest {
         return (byteorder::BEAppendUint64(slice::__from_vec(out), self.len), nil);
     }
 
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:69-86 UnmarshalBinary
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:69-86 digest.UnmarshalBinary
     /// `(*digest).UnmarshalBinary(b)` — restore state produced by
     /// [`Digest::MarshalBinary`].
     pub fn UnmarshalBinary(&mut self, b: slice<byte>) -> error {
@@ -153,7 +153,7 @@ impl Digest {
         return nil;
     }
 
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:96-99 Clone
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:96-99 digest.Clone
     /// `(*digest).Clone()` — an independent copy of this digest's state.
     pub fn Clone(&self) -> (Box<dyn Cloner + Send + Sync>, error) {
         // Go: r := *d; return &r, nil
@@ -161,19 +161,19 @@ impl Digest {
         return (Box::new(r), nil);
     }
 
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:128-153 Write
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:128-153 digest.Write
     /// `(*digest).Write(p)` — inherent forwarder to `io::Writer::Write`.
     pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
         return <Self as io::Writer>::Write(self, p);
     }
 
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:155-161 Sum
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:155-161 digest.Sum
     /// `(*digest).Sum(b)` — inherent forwarder to `Hash::Sum`.
     pub fn Sum<B: Into<slice<byte>>>(&self, b: B) -> slice<byte> {
         return <Self as Hash>::Sum(self, b.into());
     }
 
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:201-205 ConstantTimeSum
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:201-205 digest.ConstantTimeSum
     /// `(*digest).ConstantTimeSum(b)` — like `Sum`, but the padding and
     /// finalization run in time independent of the amount buffered.
     /// Used by crypto/tls's CBC MAC path, where the branch on how much
@@ -207,7 +207,7 @@ fn consumeUint32(b: &[byte]) -> (&[byte], uint32) {
 // ─── Hash trait impls for Digest ──────────────────────────────────────
 
 impl io::Writer for Digest {
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:128-153 Write
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:128-153 digest.Write
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
         let raw: &[byte] = &p;
         let nn = raw.len();
@@ -248,7 +248,7 @@ impl io::Writer for Digest {
 }
 
 impl Hash for Digest {
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:155-161 Sum
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:155-161 digest.Sum
     fn Sum(&self, b: slice<byte>) -> slice<byte> {
         // Go: d0 := *d; hash := d0.checkSum(); return append(in, hash[:]...)
         let mut d0 = Digest {
@@ -262,7 +262,7 @@ impl Hash for Digest {
         out.extend_from_slice(&digest);
         slice::__from_vec(out)
     }
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:101-109 Reset
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:101-109 digest.Reset
     fn Reset(&mut self) {
         self.h[0] = init0;
         self.h[1] = init1;
@@ -272,17 +272,17 @@ impl Hash for Digest {
         self.nx = 0;
         self.len = 0;
     }
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:124-124 Size
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:124-124 digest.Size
     fn Size(&self) -> int {
         Size
     }
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:126-126 BlockSize
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:126-126 digest.BlockSize
     fn BlockSize(&self) -> int {
         BlockSize
     }
 }
 
-// go: sdk 1.25.5 crypto/sha1/sha1.go:163-198 checkSum
+// go: sdk 1.25.5 crypto/sha1/sha1.go:163-198 digest.checkSum
 /// Go: `func (d *digest) checkSum() [Size]byte`
 fn checkSum(d: &mut Digest) -> [byte; 20] {
     let mut len = d.len;
@@ -342,7 +342,7 @@ pub fn NewHash() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
     alloc::boxed::Box::new(New())
 }
 
-// go: sdk 1.25.5 crypto/sha1/sha1.go:207-270 constSum
+// go: sdk 1.25.5 crypto/sha1/sha1.go:207-270 digest.constSum
 /// Go: `func (d *digest) constSum() [Size]byte`
 ///
 /// Constant-time finalization: instead of branching on how much data is
@@ -438,7 +438,7 @@ fn constSum(d: &mut Digest) -> [byte; 20] {
 // nominal, so each impl forwards to the inherent method above.
 
 impl encoding::BinaryMarshaler for Digest {
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:52-54 MarshalBinary
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:52-54 digest.MarshalBinary
     fn MarshalBinary(&self) -> (slice<byte>, error) {
         return Digest::MarshalBinary(self);
     }
@@ -453,7 +453,7 @@ impl encoding::BinaryMarshaler for Digest {
 }
 
 impl encoding::BinaryAppender for Digest {
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:56-67 AppendBinary
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:56-67 digest.AppendBinary
     fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
         return Digest::AppendBinary(self, b);
     }
@@ -468,7 +468,7 @@ impl encoding::BinaryAppender for Digest {
 }
 
 impl encoding::BinaryUnmarshaler for Digest {
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:69-86 UnmarshalBinary
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:69-86 digest.UnmarshalBinary
     fn UnmarshalBinary(&mut self, data: slice<byte>) -> error {
         return Digest::UnmarshalBinary(self, data);
     }
@@ -483,7 +483,7 @@ impl encoding::BinaryUnmarshaler for Digest {
 }
 
 impl Cloner for Digest {
-    // go: sdk 1.25.5 crypto/sha1/sha1.go:96-99 Clone
+    // go: sdk 1.25.5 crypto/sha1/sha1.go:96-99 digest.Clone
     fn Clone(&self) -> (Box<dyn Cloner + Send + Sync>, error) {
         return Digest::Clone(self);
     }

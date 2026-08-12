@@ -62,7 +62,7 @@ pub const maxRequestSize: usize = (1 << 19) / 8;
 pub struct plainPersonalizationString(pub slice<byte>);
 
 impl plainPersonalizationString {
-    // go: sdk 1.25.5 crypto/internal/fips140/ecdsa/hmacdrbg.go:39-39 isPersonalizationString
+    // go: sdk 1.25.5 crypto/internal/fips140/ecdsa/hmacdrbg.go:39-39 plainPersonalizationString.isPersonalizationString
     //
     // Go's marker method. Nothing calls it; membership in the interface
     // is the entire point, and here that is the enum below.
@@ -77,7 +77,7 @@ impl plainPersonalizationString {
 pub struct blockAlignedPersonalizationString(pub slice<slice<byte>>);
 
 impl blockAlignedPersonalizationString {
-    // go: sdk 1.25.5 crypto/internal/fips140/ecdsa/hmacdrbg.go:46-46 isPersonalizationString
+    // go: sdk 1.25.5 crypto/internal/fips140/ecdsa/hmacdrbg.go:46-46 blockAlignedPersonalizationString.isPersonalizationString
     #[allow(dead_code)]
     fn isPersonalizationString(&self) {}
 }
@@ -196,7 +196,7 @@ fn pad000(h: &mut HMAC, writtenSoFar: int) {
 }
 
 impl hmacDRBG {
-    // go: sdk 1.25.5 crypto/internal/fips140/ecdsa/hmacdrbg.go:136-175 Generate
+    // go: sdk 1.25.5 crypto/internal/fips140/ecdsa/hmacdrbg.go:136-175 hmacDRBG.Generate
     /// Produce at most maxRequestSize bytes of random data in out.
     pub(super) fn Generate(&mut self, out: &mut slice<byte>) {
         // HMAC_DRBG_Generate_algorithm, per Section 10.1.2.5.

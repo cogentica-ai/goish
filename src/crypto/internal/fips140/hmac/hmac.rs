@@ -237,7 +237,7 @@ pub struct HMAC {
     keyLen: int,
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/hmac/hmac.go:133-141 errCloneUnsupported
+// go: sdk 1.25.5 crypto/internal/fips140/hmac/hmac.go:133-133 errCloneUnsupported
 //
 //   type errCloneUnsupported struct{}
 /// Returned by `Clone` when the underlying hash cannot be cloned.
@@ -313,7 +313,7 @@ impl Cloner for HMAC {
     }
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/hmac/hmac.go:208-210 MarkAsUsedInKDF
+// go: sdk 1.25.5 crypto/internal/fips140/hmac/hmac.go:207-209 MarkAsUsedInKDF
 //
 //   func MarkAsUsedInKDF(h *HMAC) { h.forHKDF = true }
 /// Record that this HMAC instance is used as part of a KDF. Go consults

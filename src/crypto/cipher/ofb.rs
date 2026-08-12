@@ -113,7 +113,7 @@ pub fn NewOFB<B: Block>(b: B, iv: slice<byte>) -> OFB<B> {
 }
 
 impl<B: Block> OFB<B> {
-    // go: sdk 1.25.5 crypto/cipher/ofb.go:55-70 refill
+    // go: sdk 1.25.5 crypto/cipher/ofb.go:55-70 ofb.refill
     // Go ofb.go:54
     //   func (x *ofb) refill() {
     //       bs := x.b.BlockSize()
@@ -183,7 +183,7 @@ impl<B: Block> OFB<B> {
 //       }
 //   }
 impl<B: Block> Stream for OFB<B> {
-    // go: sdk 1.25.5 crypto/cipher/ofb.go:72-88 XORKeyStream
+    // go: sdk 1.25.5 crypto/cipher/ofb.go:72-88 ofb.XORKeyStream
     fn XORKeyStream(&mut self, dst: &mut slice<byte>, src: slice<byte>) {
         // Go: if len(dst) < len(src) { panic(...) }
         if dst.Len() < src.Len() {

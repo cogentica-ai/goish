@@ -239,12 +239,12 @@ pub(super) fn initAllCurves() {
 }
 
 impl<Point: nistPoint> nistCurve<Point> {
-    // go: sdk 1.25.5 crypto/elliptic/nistec.go:121-123 Params
+    // go: sdk 1.25.5 crypto/elliptic/nistec.go:121-123 nistCurve.Params
     pub fn Params(&self) -> CurveParams {
         return self.params.clone();
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/nistec.go:125-133 IsOnCurve
+    // go: sdk 1.25.5 crypto/elliptic/nistec.go:125-133 nistCurve.IsOnCurve
     pub fn IsOnCurve(&self, x: &Int, y: &Int) -> bool {
         // IsOnCurve is documented to reject (0, 0), the conventional point
         // at infinity, which however is accepted by pointFromAffine.
@@ -255,7 +255,7 @@ impl<Point: nistPoint> nistCurve<Point> {
         return err == crate::nil;
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/nistec.go:135-155 pointFromAffine
+    // go: sdk 1.25.5 crypto/elliptic/nistec.go:135-155 nistCurve.pointFromAffine
     fn pointFromAffine(&self, x: &Int, y: &Int) -> (Point, error) {
         // (0, 0) is by convention the point at infinity, which can't be
         // represented in affine coordinates.
@@ -280,7 +280,7 @@ impl<Point: nistPoint> nistCurve<Point> {
         return (p, err);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/nistec.go:157-168 pointToAffine
+    // go: sdk 1.25.5 crypto/elliptic/nistec.go:157-168 nistCurve.pointToAffine
     fn pointToAffine(&self, p: Point) -> (Int, Int) {
         let out = p.Bytes();
         let raw: &[byte] = &out;
@@ -297,7 +297,7 @@ impl<Point: nistPoint> nistCurve<Point> {
         return (x, y);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/nistec.go:170-180 Add
+    // go: sdk 1.25.5 crypto/elliptic/nistec.go:170-180 nistCurve.Add
     pub fn Add(&self, x1: &Int, y1: &Int, x2: &Int, y2: &Int) -> (Int, Int) {
         let (mut p1, err) = self.pointFromAffine(x1, y1);
         if err != crate::nil {
@@ -312,7 +312,7 @@ impl<Point: nistPoint> nistCurve<Point> {
         return self.pointToAffine(sum);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/nistec.go:182-188 Double
+    // go: sdk 1.25.5 crypto/elliptic/nistec.go:182-188 nistCurve.Double
     pub fn Double(&self, x1: &Int, y1: &Int) -> (Int, Int) {
         let (mut p, err) = self.pointFromAffine(x1, y1);
         if err != crate::nil {
@@ -323,7 +323,7 @@ impl<Point: nistPoint> nistCurve<Point> {
         return self.pointToAffine(d);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/nistec.go:190-203 normalizeScalar
+    // go: sdk 1.25.5 crypto/elliptic/nistec.go:190-203 nistCurve.normalizeScalar
     /// Bring the scalar within the byte size of the order of the curve, as
     /// expected by the nistec scalar multiplication functions.
     fn normalizeScalar(&self, scalar: &slice<byte>) -> slice<byte> {
@@ -343,7 +343,7 @@ impl<Point: nistPoint> nistCurve<Point> {
         return slice::__from_vec(out);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/nistec.go:205-216 ScalarMult
+    // go: sdk 1.25.5 crypto/elliptic/nistec.go:205-216 nistCurve.ScalarMult
     pub fn ScalarMult(&self, Bx: &Int, By: &Int, scalar: &slice<byte>) -> (Int, Int) {
         let (mut p, err) = self.pointFromAffine(Bx, By);
         if err != crate::nil {
@@ -358,7 +358,7 @@ impl<Point: nistPoint> nistCurve<Point> {
         return self.pointToAffine(p);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/nistec.go:218-225 ScalarBaseMult
+    // go: sdk 1.25.5 crypto/elliptic/nistec.go:218-225 nistCurve.ScalarBaseMult
     pub fn ScalarBaseMult(&self, scalar: &slice<byte>) -> (Int, Int) {
         let scalar = self.normalizeScalar(scalar);
         let mut p = (self.newPoint)();
@@ -369,7 +369,7 @@ impl<Point: nistPoint> nistCurve<Point> {
         return self.pointToAffine(p);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/nistec.go:227-243 Unmarshal
+    // go: sdk 1.25.5 crypto/elliptic/nistec.go:227-243 nistCurve.Unmarshal
     pub fn Unmarshal(&self, data: &slice<byte>) -> (Int, Int, bool) {
         let raw: &[byte] = data;
         if raw.is_empty() || raw[0] != 4 {
@@ -392,7 +392,7 @@ impl<Point: nistPoint> nistCurve<Point> {
         return (x, y, true);
     }
 
-    // go: sdk 1.25.5 crypto/elliptic/nistec.go:245-254 UnmarshalCompressed
+    // go: sdk 1.25.5 crypto/elliptic/nistec.go:245-254 nistCurve.UnmarshalCompressed
     pub fn UnmarshalCompressed(&self, data: &slice<byte>) -> (Int, Int, bool) {
         let raw: &[byte] = data;
         if raw.is_empty() || (raw[0] != 2 && raw[0] != 3) {

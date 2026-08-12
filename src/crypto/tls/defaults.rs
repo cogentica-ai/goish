@@ -63,7 +63,7 @@ pub(crate) fn defaultCurvePreferences() -> slice<CurveID> {
     ]);
 }
 
-// go: sdk 1.25.5 crypto/tls/defaults.go:27-42 defaultSupportedSignatureAlgorithms
+// go: sdk 1.25.5 crypto/tls/defaults.go:31-46 defaultSupportedSignatureAlgorithms
 /// The default signature-scheme preference order, most preferred first.
 pub(crate) fn defaultSupportedSignatureAlgorithms() -> slice<SignatureScheme> {
     // Go: return []SignatureScheme{PSSWithSHA256, …}
@@ -83,7 +83,7 @@ pub(crate) fn defaultSupportedSignatureAlgorithms() -> slice<SignatureScheme> {
     ]);
 }
 
-// go: sdk 1.25.5 crypto/tls/defaults.go:47-53 supportedCipherSuites
+// go: sdk 1.25.5 crypto/tls/defaults.go:51-57 supportedCipherSuites
 /// Every TLS 1.0-1.2 suite this package implements, in preference order.
 pub(crate) fn supportedCipherSuites(aesGCMPreferred: bool) -> slice<uint16> {
     // Go: if aesGCMPreferred { return slices.Clone(cipherSuitesPreferenceOrder) }
@@ -94,7 +94,7 @@ pub(crate) fn supportedCipherSuites(aesGCMPreferred: bool) -> slice<uint16> {
     return slice::__from_vec(cipherSuitesPreferenceOrderNoAES.to_vec());
 }
 
-// go: sdk 1.25.5 crypto/tls/defaults.go:55-62 defaultCipherSuites
+// go: sdk 1.25.5 crypto/tls/defaults.go:59-66 defaultCipherSuites
 /// `supportedCipherSuites` minus the suites disabled by default.
 pub(crate) fn defaultCipherSuites(aesGCMPreferred: bool) -> slice<uint16> {
     // Go: cipherSuites := supportedCipherSuites(aesGCMPreferred)

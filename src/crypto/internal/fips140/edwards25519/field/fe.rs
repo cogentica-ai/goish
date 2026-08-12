@@ -111,14 +111,14 @@ impl Element {
         feZero
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:41-44 Zero
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:41-44 Element.Zero
     /// `Zero` sets v = 0, and returns v.
     pub fn Zero(&mut self) -> &mut Element {
         *self = feZero;
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:49-52 One
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:49-52 Element.One
     /// `One` sets v = 1, and returns v.
     pub fn One(&mut self) -> &mut Element {
         *self = feOne;
@@ -141,7 +141,7 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
             && self.l4 == u.l4
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:55-85 reduce
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:55-85 Element.reduce
     /// `reduce` reduces v modulo 2^255 - 19 and returns it.
     fn reduce(&mut self) -> &mut Element {
         self.carryPropagate();
@@ -176,7 +176,7 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:88-95 Add
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:88-95 Element.Add
     /// `Add` sets v = a + b, and returns v.
     pub fn Add(&mut self, a: &Element, b: &Element) -> &mut Element {
         self.l0 = a.l0.wrapping_add(b.l0);
@@ -187,7 +187,7 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         self.carryPropagate()
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:98-107 Subtract
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:98-107 Element.Subtract
     /// `Subtract` sets v = a - b, and returns v.
     pub fn Subtract(&mut self, a: &Element, b: &Element) -> &mut Element {
         // We first add 2 * p, to guarantee the subtraction won't
@@ -201,13 +201,13 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         self.carryPropagate()
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:110-112 Negate
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:110-112 Element.Negate
     /// `Negate` sets v = -a, and returns v.
     pub fn Negate(&mut self, a: &Element) -> &mut Element {
         self.Subtract(&feZero, a)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:117-179 Invert
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:117-179 Element.Invert
     /// `Invert` sets v = 1/z mod p, and returns v.
     ///
     /// If z == 0, Invert returns v = 0.
@@ -302,14 +302,14 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         self.Multiply(&t, &z11) // 2^255 - 21
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:182-185 Set
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:182-185 Element.Set
     /// `Set` sets v = a, and returns v.
     pub fn Set(&mut self, a: &Element) -> &mut Element {
         *self = *a;
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:195-218 SetBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:195-218 Element.SetBytes
     /// `SetBytes` sets v to x, where x is a 32-byte little-endian
     /// encoding. If x is not of the right length, SetBytes returns an
     /// error and the receiver is unchanged.
@@ -348,7 +348,7 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         errors::nil
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:221-226 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:221-226 Element.Bytes
     /// `Bytes` returns the canonical 32-byte little-endian encoding of v.
     pub fn Bytes(&self) -> slice<byte> {
         let mut out = [0u8; 32];
@@ -360,7 +360,7 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         slice::<byte>::__from_vec(v)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:228-250 bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:228-250 Element.bytes
     /// `bytes` packs the canonical encoding of v into `out`.
     fn bytes(&self, out: &mut [byte; 32]) {
         let mut t = *self;
@@ -383,7 +383,7 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         LEPutUint64(&mut out[24..32], u3);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:253-256 Equal
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:253-256 Element.Equal
     /// `Equal` returns 1 if v and u are equal, and 0 otherwise.
     pub fn Equal(&self, u: &Element) -> int {
         let sa = u.Bytes();
@@ -391,7 +391,7 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         subtle::ConstantTimeCompare(&sa, &sv)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:262-270 Select
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:262-270 Element.Select
     /// `Select` sets v to a if cond == 1, and to b if cond == 0.
     pub fn Select(&mut self, a: &Element, b: &Element, cond: int) -> &mut Element {
         let m = mask64Bits(cond);
@@ -403,7 +403,7 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:273-290 Swap
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:273-290 Element.Swap
     /// `Swap` swaps v and u if cond == 1 or leaves them unchanged if
     /// cond == 0.
     pub fn Swap(&mut self, u: &mut Element, cond: int) {
@@ -425,13 +425,13 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         u.l4 ^= t;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:293-295 IsNegative
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:293-295 Element.IsNegative
     /// `IsNegative` returns 1 if v is negative, and 0 otherwise.
     pub fn IsNegative(&self) -> int {
         int::from(self.Bytes()[0] & 1)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:298-300 Absolute
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:298-300 Element.Absolute
     /// `Absolute` sets v to |u|, and returns v.
     pub fn Absolute(&mut self, u: &Element) -> &mut Element {
         let mut neg = Element::new();
@@ -440,7 +440,7 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         self.Select(&neg, u, cond)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:303-306 Multiply
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:303-306 Element.Multiply
     /// `Multiply` sets v = x * y, and returns v.
     pub fn Multiply(&mut self, x: &Element, y: &Element) -> &mut Element {
         // x and/or y may alias self; snapshot before writing.
@@ -450,7 +450,7 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:309-312 Square
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:309-312 Element.Square
     /// `Square` sets v = x * x, and returns v.
     pub fn Square(&mut self, x: &Element) -> &mut Element {
         // x may alias self; snapshot before writing.
@@ -459,7 +459,7 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:315-329 Mult32
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:315-329 Element.Mult32
     /// `Mult32` sets v = x * y, and returns v.
     pub fn Mult32(&mut self, x: &Element, y: u32) -> &mut Element {
         let (x0lo, x0hi) = mul51(x.l0, y);
@@ -478,7 +478,7 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:340-388 Pow22523
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:340-388 Element.Pow22523
     /// `Pow22523` set v = x^((p-5)/8), and returns v. (p-5)/8 is
     /// 2^252-3.
     ///
@@ -545,7 +545,7 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
         self.Multiply(&t0, x) // 2^252 - 3 -> x^(2^252-3)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:399-421 SqrtRatio
+    // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:399-421 Element.SqrtRatio
     /// `SqrtRatio` sets r to the non-negative square root of the ratio
     /// of u and v.
     ///

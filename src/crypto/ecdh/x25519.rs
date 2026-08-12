@@ -57,12 +57,12 @@ pub fn X25519() -> &'static (dyn Curve + Send + Sync) {
 }
 
 impl Curve for x25519Curve {
-    // go: sdk 1.25.5 crypto/ecdh/x25519.go:33-35 String
+    // go: sdk 1.25.5 crypto/ecdh/x25519.go:33-35 x25519Curve.String
     fn String(&self) -> string {
         return string::from_static("X25519");
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/x25519.go:37-47 GenerateKey
+    // go: sdk 1.25.5 crypto/ecdh/x25519.go:37-47 x25519Curve.GenerateKey
     fn GenerateKey(
         &self,
         rand: &mut (dyn io::Reader + Send + Sync + 'static),
@@ -82,7 +82,7 @@ impl Curve for x25519Curve {
         return self.NewPrivateKey(&key);
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/x25519.go:49-67 NewPrivateKey
+    // go: sdk 1.25.5 crypto/ecdh/x25519.go:49-67 x25519Curve.NewPrivateKey
     fn NewPrivateKey(&self, key: &slice<byte>) -> (PrivateKey, error) {
         if fips140only::Enabled {
             return (
@@ -121,7 +121,7 @@ impl Curve for x25519Curve {
         );
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/x25519.go:69-80 NewPublicKey
+    // go: sdk 1.25.5 crypto/ecdh/x25519.go:69-80 x25519Curve.NewPublicKey
     fn NewPublicKey(&self, key: &slice<byte>) -> (PublicKey, error) {
         if fips140only::Enabled {
             return (
@@ -142,7 +142,7 @@ impl Curve for x25519Curve {
         );
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/x25519.go:82-89 ecdh
+    // go: sdk 1.25.5 crypto/ecdh/x25519.go:82-89 x25519Curve.ecdh
     fn ecdh(&self, local: &PrivateKey, remote: &PublicKey) -> (slice<byte>, error) {
         let mut out = slice::__from_vec(alloc::vec![0u8; x25519SharedSecretSize]);
         x25519ScalarMult(&mut out, &local.privateKey, &remote.publicKey);

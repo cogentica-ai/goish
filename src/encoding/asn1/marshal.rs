@@ -627,7 +627,7 @@ pub fn makeBigInt(n: &Int) -> (alloc::boxed::Box<dyn encoder>, error) {
     );
 }
 
-// go: sdk 1.25.5 encoding/asn1/marshal.go:659-665 stripTagAndLength
+// go: sdk 1.25.5 encoding/asn1/marshal.go:450-456 stripTagAndLength
 /// Drop the leading tag and length octets, returning the body. If the
 /// input does not parse, it is returned unchanged.
 pub fn stripTagAndLength(in_: slice<byte>) -> slice<byte> {
@@ -681,7 +681,7 @@ pub fn makeUTCTime(t: crate::time::Time) -> (alloc::boxed::Box<dyn encoder>, err
     return (alloc::boxed::Box::new(bytesEncoder(dst)), nil);
 }
 
-// go: sdk 1.25.5 encoding/asn1/marshal.go:378-386 makeGeneralizedTime
+// go: sdk 1.25.5 encoding/asn1/marshal.go:379-388 makeGeneralizedTime
 pub fn makeGeneralizedTime(t: crate::time::Time) -> (alloc::boxed::Box<dyn encoder>, error) {
     // Go: dst := make([]byte, 0, 20)
     let dst = slice::__from_vec(Vec::<byte>::with_capacity(20));
@@ -697,7 +697,7 @@ pub fn makeGeneralizedTime(t: crate::time::Time) -> (alloc::boxed::Box<dyn encod
     return (alloc::boxed::Box::new(bytesEncoder(dst)), nil);
 }
 
-// go: sdk 1.25.5 encoding/asn1/marshal.go:388-401 appendUTCTime
+// go: sdk 1.25.5 encoding/asn1/marshal.go:390-403 appendUTCTime
 fn appendUTCTime(dst: slice<byte>, t: crate::time::Time) -> (slice<byte>, error) {
     let year = t.Year();
 
@@ -718,7 +718,7 @@ fn appendUTCTime(dst: slice<byte>, t: crate::time::Time) -> (slice<byte>, error)
     return (appendTimeCommon(dst, t), nil);
 }
 
-// go: sdk 1.25.5 encoding/asn1/marshal.go:403-412 appendGeneralizedTime
+// go: sdk 1.25.5 encoding/asn1/marshal.go:405-414 appendGeneralizedTime
 fn appendGeneralizedTime(dst: slice<byte>, t: crate::time::Time) -> (slice<byte>, error) {
     let year = t.Year();
     if year < 0 || year > 9999 {
@@ -736,7 +736,7 @@ fn appendGeneralizedTime(dst: slice<byte>, t: crate::time::Time) -> (slice<byte>
     return (appendTimeCommon(dst, t), nil);
 }
 
-// go: sdk 1.25.5 encoding/asn1/marshal.go:414-437 appendTimeCommon
+// go: sdk 1.25.5 encoding/asn1/marshal.go:416-448 appendTimeCommon
 //
 // Deviation, in reachability rather than code: goish's `time` is UTC-only
 // — `Time::Zone()` returns ("UTC", 0) unconditionally and `time::Date`

@@ -199,7 +199,7 @@ fn empty() -> slice<byte> {
 }
 
 impl DecapsulationKey768 {
-    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:85-95 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:85-95 DecapsulationKey768.Bytes
     /// Return the decapsulation key as a 64-byte seed in the "d || z" form.
     ///
     /// The decapsulation key must be kept secret.
@@ -212,7 +212,7 @@ impl DecapsulationKey768 {
         return slice::__from_vec(b.to_vec());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:120-130 EncapsulationKey
+    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:120-130 DecapsulationKey768.EncapsulationKey
     /// Return the public encapsulation key necessary to produce
     /// ciphertexts.
     pub fn EncapsulationKey(&self) -> EncapsulationKey768 {
@@ -225,7 +225,7 @@ impl DecapsulationKey768 {
         };
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:450-466 Decapsulate
+    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:450-466 DecapsulationKey768.Decapsulate
     /// Generate a shared key from a ciphertext and a decapsulation key.
     /// If the ciphertext is not valid, Decapsulate returns an error.
     ///
@@ -247,7 +247,7 @@ impl DecapsulationKey768 {
     }
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:97-118 TestingOnlyExpandedBytes768
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:101-120 TestingOnlyExpandedBytes768
 /// Return the decapsulation key as a byte slice using the full expanded
 /// NIST encoding.
 ///
@@ -280,7 +280,7 @@ pub fn TestingOnlyExpandedBytes768(dk: &DecapsulationKey768) -> slice<byte> {
 }
 
 impl EncapsulationKey768 {
-    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:140-145 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:140-145 EncapsulationKey768.Bytes
     /// Return the encapsulation key as a byte slice.
     pub fn Bytes(&self) -> slice<byte> {
         // The actual logic is in a separate function to outline this allocation.
@@ -288,7 +288,7 @@ impl EncapsulationKey768 {
         return self.bytes(empty());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:147-154 bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:147-154 EncapsulationKey768.bytes
     fn bytes(&self, b: slice<byte>) -> slice<byte> {
         // Go: for i := range ek.t { b = polyByteEncode(b, ek.t[i]) }
         let mut b = b;
@@ -302,7 +302,7 @@ impl EncapsulationKey768 {
         return b;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:329-337 Encapsulate
+    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:329-337 EncapsulationKey768.Encapsulate
     /// Generate a shared key and an associated ciphertext from an
     /// encapsulation key, drawing random bytes from a DRBG.
     ///
@@ -314,7 +314,7 @@ impl EncapsulationKey768 {
         return self.encapsulate(&mut cc);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:339-347 encapsulate
+    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:339-347 EncapsulationKey768.encapsulate
     fn encapsulate(&self, cc: &mut [byte; CiphertextSize768]) -> (slice<byte>, slice<byte>) {
         // Go: var m [messageSize]byte; drbg.Read(m[:])
         let mut m = [0u8; messageSize];
@@ -329,7 +329,7 @@ impl EncapsulationKey768 {
         return kemEncaps(cc, self, &m);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:349-355 EncapsulateInternal
+    // go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:349-355 EncapsulationKey768.EncapsulateInternal
     /// A derandomized version of Encapsulate, exclusively for use in tests.
     pub fn EncapsulateInternal(&self, m: &[byte; 32]) -> (slice<byte>, slice<byte>) {
         // Go: cc := &[CiphertextSize768]byte{}; return kemEncaps(cc, ek, m)
@@ -492,7 +492,7 @@ pub fn TestingOnlyNewDecapsulationKey768(b: slice<byte>) -> (Box<DecapsulationKe
     return (dk, crate::nil.into());
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:264-304 kemKeyGen
+// go: sdk 1.25.5 crypto/internal/fips140/mlkem/mlkem768.go:264-306 kemKeyGen
 /// Generate a decapsulation key.
 ///
 /// It implements ML-KEM.KeyGen_internal according to FIPS 203,

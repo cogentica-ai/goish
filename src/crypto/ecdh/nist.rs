@@ -47,12 +47,12 @@ pub struct nistCurve {
 }
 
 impl Curve for nistCurve {
-    // go: sdk 1.25.5 crypto/ecdh/nist.go:20-22 String
+    // go: sdk 1.25.5 crypto/ecdh/nist.go:24-26 nistCurve.String
     fn String(&self) -> string {
         return string::from_static(self.name);
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/nist.go:24-73 GenerateKey
+    // go: sdk 1.25.5 crypto/ecdh/nist.go:28-79 nistCurve.GenerateKey
     fn GenerateKey(
         &self,
         rand: &mut (dyn io::Reader + Send + Sync + 'static),
@@ -83,7 +83,7 @@ impl Curve for nistCurve {
         );
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/nist.go:75-112 NewPrivateKey
+    // go: sdk 1.25.5 crypto/ecdh/nist.go:81-115 nistCurve.NewPrivateKey
     fn NewPrivateKey(&self, key: &slice<byte>) -> (PrivateKey, error) {
         let (fk, err) = (self.newPrivateKey)(key);
         if err != crate::nil {
@@ -103,7 +103,7 @@ impl Curve for nistCurve {
         );
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/nist.go:114-136 NewPublicKey
+    // go: sdk 1.25.5 crypto/ecdh/nist.go:117-141 nistCurve.NewPublicKey
     fn NewPublicKey(&self, key: &slice<byte>) -> (PublicKey, error) {
         let raw: &[byte] = key;
         if raw.is_empty() || raw[0] != 4 {
@@ -125,7 +125,7 @@ impl Curve for nistCurve {
         );
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/nist.go:138-144 ecdh
+    // go: sdk 1.25.5 crypto/ecdh/nist.go:143-155 nistCurve.ecdh
     fn ecdh(&self, local: &PrivateKey, remote: &PublicKey) -> (slice<byte>, error) {
         // Go reads the cached `local.fips` / `remote.fips`; goish re-parses
         // (see the file header).
@@ -181,17 +181,17 @@ __nist_curve!(p256, "P-256", P256, P256Point);
 __nist_curve!(p384, "P-384", P384, P384Point);
 __nist_curve!(p521, "P-521", P521, P521Point);
 
-// go: sdk 1.25.5 crypto/ecdh/nist.go:146-146 P256
+// go: sdk 1.25.5 crypto/ecdh/nist.go:162-162 P256
 pub fn P256() -> &'static (dyn Curve + Send + Sync) {
     return &p256;
 }
 
-// go: sdk 1.25.5 crypto/ecdh/nist.go:163-163 P384
+// go: sdk 1.25.5 crypto/ecdh/nist.go:185-185 P384
 pub fn P384() -> &'static (dyn Curve + Send + Sync) {
     return &p384;
 }
 
-// go: sdk 1.25.5 crypto/ecdh/nist.go:180-180 P521
+// go: sdk 1.25.5 crypto/ecdh/nist.go:208-208 P521
 pub fn P521() -> &'static (dyn Curve + Send + Sync) {
     return &p521;
 }

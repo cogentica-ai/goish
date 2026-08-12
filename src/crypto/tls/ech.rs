@@ -69,7 +69,7 @@ pub(crate) struct echConfigErr {
 }
 
 impl echConfigErr {
-    // go: sdk 1.25.5 crypto/tls/ech.go:66-71 echConfigErr.Error
+    // go: sdk 1.25.5 crypto/tls/ech.go:62-67 echConfigErr.Error
     /// Go: `"tls: malformed ECHConfig"`, or `"…, invalid %s field"`.
     pub(crate) fn Error(&self) -> string {
         // Go: if e.field == "" { return "tls: malformed ECHConfig" }
@@ -100,7 +100,7 @@ fn ecErr(field: &'static str) -> error {
     });
 }
 
-// go: sdk 1.25.5 crypto/tls/ech.go:73-135 parseECHConfig
+// go: sdk 1.25.5 crypto/tls/ech.go:69-133 parseECHConfig
 /// Parse one ECHConfig from `enc`.
 ///
 /// Returns `(skip, config, err)`. `skip` is true for a config whose
@@ -201,7 +201,7 @@ pub(crate) fn parseECHConfig(enc: slice<byte>) -> (bool, echConfig, error) {
     return (false, ec, crate::errors::nil);
 }
 
-// go: sdk 1.25.5 crypto/tls/ech.go:137-160 parseECHConfigList
+// go: sdk 1.25.5 crypto/tls/ech.go:138-163 parseECHConfigList
 /// Parse an ECHConfigList: a uint16 length followed by back-to-back
 /// ECHConfigs. Configs whose version is unrecognised are dropped.
 pub(crate) fn parseECHConfigList(data: slice<byte>) -> (slice<echConfig>, error) {
@@ -257,7 +257,7 @@ pub(crate) fn parseECHConfigList(data: slice<byte>) -> (slice<echConfig>, error)
 }
 
 
-// go: sdk 1.25.5 crypto/tls/ech.go:262-268 skipUint8LengthPrefixed
+// go: sdk 1.25.5 crypto/tls/ech.go:238-244 skipUint8LengthPrefixed
 /// Consume a uint8-prefixed field without keeping it.
 pub(crate) fn skipUint8LengthPrefixed(s: &mut CBString) -> bool {
     // Go: var skip uint8; if !s.ReadUint8(&skip) { return false }
@@ -269,7 +269,7 @@ pub(crate) fn skipUint8LengthPrefixed(s: &mut CBString) -> bool {
     return s.Skip(crate::int(skip));
 }
 
-// go: sdk 1.25.5 crypto/tls/ech.go:270-276 skipUint16LengthPrefixed
+// go: sdk 1.25.5 crypto/tls/ech.go:246-252 skipUint16LengthPrefixed
 /// The uint16 mirror of [`skipUint8LengthPrefixed`].
 pub(crate) fn skipUint16LengthPrefixed(s: &mut CBString) -> bool {
     // Go: var skip uint16; if !s.ReadUint16(&skip) { return false }
@@ -281,7 +281,7 @@ pub(crate) fn skipUint16LengthPrefixed(s: &mut CBString) -> bool {
     return s.Skip(crate::int(skip));
 }
 
-// go: sdk 1.25.5 crypto/tls/ech.go:640-666 validDNSName
+// go: sdk 1.25.5 crypto/tls/ech.go:475-498 validDNSName
 /// Report whether `name` is a syntactically valid DNS name for the ECH
 /// public_name field.
 ///
@@ -730,7 +730,7 @@ pub(crate) fn encodeInnerClientHello(
 
 use super::handshake_messages::{readUint8LengthPrefixed, typeClientHello};
 
-// go: sdk 1.25.5 crypto/tls/ech.go:285-416 decodeInnerClientHello
+// go: sdk 1.25.5 crypto/tls/ech.go:285-420 decodeInnerClientHello
 /// Go: "Reconstructing the inner client hello from its encoded form is
 /// somewhat complicated. It is missing its header (message type and
 /// length), session ID, and the extensions may be compressed. Since we
@@ -966,7 +966,7 @@ pub(crate) fn decryptECHPayload(
     return context.Open(&outerAAD, &payload);
 }
 
-// go: sdk 1.25.5 crypto/tls/ech.go:600-616 buildRetryConfigList
+// go: sdk 1.25.5 crypto/tls/ech.go:652-668 buildRetryConfigList
 /// The ECHConfigList to send back when ECH was offered and rejected —
 /// only the keys flagged `SendAsRetry`. Returns nil if none are.
 pub(crate) fn buildRetryConfigList(

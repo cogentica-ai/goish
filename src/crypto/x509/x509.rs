@@ -1038,7 +1038,7 @@ impl Certificate {
         return checkSignature(algo, signed, signature, &self.PublicKey, true);
     }
 
-    // go: sdk 1.25.5 crypto/x509/x509.go:1021-1030 Certificate.CheckCRLSignature
+    // go: sdk 1.25.5 crypto/x509/x509.go:1030-1033 Certificate.CheckCRLSignature
     /// Check that the signature in `crl` is from c.
     ///
     /// Deprecated: use `RevocationList::CheckSignatureFrom` instead.
@@ -1078,7 +1078,7 @@ pub(super) fn signaturePublicKeyAlgoMismatchError(
     );
 }
 
-// go: sdk 1.25.5 crypto/x509/x509.go:961-1019 checkSignature
+// go: sdk 1.25.5 crypto/x509/x509.go:963-1025 checkSignature
 /// Verify that `signature` is a valid signature over `signed` from a
 /// `crypto.PublicKey`.
 ///
@@ -1328,7 +1328,7 @@ pub(super) struct pkixPublicKey {
     pub BitString: asn1::BitString,
 }
 
-// go: sdk 1.25.5 crypto/x509/x509.go:84-165 marshalPublicKey
+// go: sdk 1.25.5 crypto/x509/x509.go:85-140 marshalPublicKey
 /// The DER of `pub`'s public-key bit string, plus the algorithm
 /// identifier that names it.
 pub(super) fn marshalPublicKey(
@@ -1415,7 +1415,7 @@ pub(super) fn marshalPublicKey(
     return (publicKeyBytes, publicKeyAlgorithm, errors::nil);
 }
 
-// go: sdk 1.25.5 crypto/x509/x509.go:167-190 MarshalPKIXPublicKey
+// go: sdk 1.25.5 crypto/x509/x509.go:151-170 MarshalPKIXPublicKey
 /// Convert a public key to PKIX, ASN.1 DER form. The encoded public key
 /// is a SubjectPublicKeyInfo structure (see RFC 5280, Section 4.1).
 ///
@@ -1565,7 +1565,7 @@ pub(super) fn reverseBitsInAByte(in_: byte) -> byte {
     return b3;
 }
 
-// go: sdk 1.25.5 crypto/x509/x509.go:1084-1100 asn1BitLength
+// go: sdk 1.25.5 crypto/x509/x509.go:1087-1102 asn1BitLength
 /// The bit-length of `bitString`, considering the most-significant bit
 /// in a byte to be the "first" bit. This convention matches ASN.1, but
 /// differs from almost everything else.
@@ -2374,7 +2374,7 @@ fn anyFromPublicKey(pub_: &crypto::PublicKey) -> (Any, error) {
     );
 }
 
-// go: sdk 1.25.5 crypto/x509/x509.go:1571-1591 signTBS
+// go: sdk 1.25.5 crypto/x509/x509.go:1571-1593 signTBS
 pub(super) fn signTBS(
     tbs: &slice<byte>,
     key: &(dyn crypto::Signer + Send + Sync + 'static),
@@ -2424,7 +2424,7 @@ fn emptyASN1Subject() -> slice<byte> {
     return slice::__from_vec(alloc::vec![0x30, 0]);
 }
 
-// go: sdk 1.25.5 crypto/x509/x509.go:1662-1811 CreateCertificate
+// go: sdk 1.25.5 crypto/x509/x509.go:1662-1793 CreateCertificate
 /// Create a new X.509 v3 certificate based on a template. The following
 /// members of `template` are currently used:
 ///
@@ -3058,7 +3058,7 @@ pub(super) struct tbsCertificateList {
     pub Extensions: slice<pkix::Extension>,
 }
 
-// go: sdk 1.25.5 crypto/x509/x509.go:2400-2565 CreateRevocationList
+// go: sdk 1.25.5 crypto/x509/x509.go:2400-2546 CreateRevocationList
 /// Create a new X.509 v2 [`Certificate`] Revocation List, according to
 /// RFC 5280, based on `template`.
 ///

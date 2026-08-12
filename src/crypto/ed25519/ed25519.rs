@@ -73,7 +73,7 @@ pub const SeedSize: int = 32;
 pub struct PublicKey(pub slice<byte>);
 
 impl PublicKey {
-    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:48-54 Equal
+    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:48-54 PublicKey.Equal
     /// `(PublicKey).Equal(x)` (Go: ed25519.go:48) — reports whether
     /// `self` and `x` have the same value. `x` is a `crypto.PublicKey`;
     /// a non-`PublicKey` value compares unequal (Go's `x.(PublicKey)`
@@ -116,7 +116,7 @@ impl PartialEq<PublicKey> for crate::nilval::Nil {
 pub struct PrivateKey(pub slice<byte>);
 
 impl PrivateKey {
-    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:60-64 Public
+    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:60-64 PrivateKey.Public
     /// `(PrivateKey).Public()` (Go: ed25519.go:60) — returns the
     /// [`PublicKey`] corresponding to `priv` (the trailing 32 bytes of
     /// the encoding), boxed as a `crypto.PublicKey`.
@@ -139,7 +139,7 @@ impl PrivateKey {
         PublicKey(slice::__from_vec(publicKey))
     }
 
-    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:48-54 Equal
+    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:67-73 PrivateKey.Equal
     /// `(PrivateKey).Equal(x)` (Go: ed25519.go:67) — reports whether
     /// `self` and `x` have the same value. A non-`PrivateKey` value
     /// compares unequal.
@@ -150,7 +150,7 @@ impl PrivateKey {
         }
     }
 
-    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:78-80 Seed
+    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:78-80 PrivateKey.Seed
     /// `(PrivateKey).Seed()` (Go: ed25519.go:78) — the private key seed
     /// (the leading [`SeedSize`] bytes). Provided for interoperability
     /// with RFC 8032.
@@ -164,7 +164,7 @@ impl PrivateKey {
         slice::__from_vec(seed)
     }
 
-    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:188-199 Sign
+    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:95-122 PrivateKey.Sign
     /// `(PrivateKey).Sign(rand, message, opts)` (Go: ed25519.go:95) —
     /// signs `message`, implementing [`crypto::Signer`]. `rand` is
     /// ignored and may be a nil reader.
@@ -210,11 +210,11 @@ impl PrivateKey {
 
 // `crypto.Signer` impl — Go's `PrivateKey` implements `crypto.Signer`.
 impl crypto::Signer for PrivateKey {
-    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:60-64 Public
+    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:60-64 PrivateKey.Public
     fn Public(&self) -> crypto::PublicKey {
         PrivateKey::Public(self)
     }
-    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:188-199 Sign
+    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:95-122 PrivateKey.Sign
     fn Sign(
         &self,
         rand: &mut dyn io::Reader,
@@ -260,7 +260,7 @@ pub struct Options {
 }
 
 impl Options {
-    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:136-136 HashFunc
+    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:136-136 Options.HashFunc
     /// `(*Options).HashFunc()` (Go: ed25519.go:136) — returns `o.Hash`,
     /// satisfying `crypto.SignerOpts`.
     pub fn HashFunc(&self) -> crypto::Hash {
@@ -269,7 +269,7 @@ impl Options {
 }
 
 impl crypto::SignerOpts for Options {
-    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:136-136 HashFunc
+    // go: sdk 1.25.5 crypto/ed25519/ed25519.go:136-136 Options.HashFunc
     fn HashFunc(&self) -> crypto::Hash {
         self.Hash
     }
@@ -321,7 +321,7 @@ pub fn GenerateKey(rand: Option<&mut dyn io::Reader>) -> (PublicKey, PrivateKey,
 
 // ─── NewKeyFromSeed (Go: ed25519.go:162) ──────────────────────────────
 
-// go: sdk 1.25.5 crypto/ed25519/ed25519.go:169-176 NewKeyFromSeed
+// go: sdk 1.25.5 crypto/ed25519/ed25519.go:162-167 NewKeyFromSeed
 /// `NewKeyFromSeed(seed)` — calculates a private key from a seed. It
 /// panics if `len(seed)` is not [`SeedSize`]. Provided for
 /// interoperability with RFC 8032.
@@ -338,7 +338,7 @@ pub fn NewKeyFromSeed(seed: slice<byte>) -> PrivateKey {
 
 // ─── Sign (Go: ed25519.go:180) ────────────────────────────────────────
 
-// go: sdk 1.25.5 crypto/ed25519/ed25519.go:188-199 Sign
+// go: sdk 1.25.5 crypto/ed25519/ed25519.go:180-186 Sign
 /// `Sign(privateKey, message)` — signs the message with `privateKey`
 /// and returns a 64-byte signature. It panics if `len(privateKey)` is
 /// not [`PrivateKeySize`].

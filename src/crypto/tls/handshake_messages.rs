@@ -1000,7 +1000,7 @@ impl certificateMsgTLS13 {
         return b.Bytes();
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1520-1533 certificateMsgTLS13.unmarshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1521-1537 certificateMsgTLS13.unmarshal
     pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
         // Go: *m = certificateMsgTLS13{}
         //     s := cryptobyte.String(data)
@@ -1170,7 +1170,7 @@ use crate::types::uint8;
 /// `statusTypeOCSP uint8 = 1` in common[go]; see the note above.
 const statusTypeOCSP: uint8 = 1;
 
-// go: sdk 1.25.5 crypto/tls/handshake_messages.go:22-24 readUint8LengthPrefixed
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:55-57 readUint8LengthPrefixed
 /// Go: "readUint8LengthPrefixed acts like s.ReadUint8LengthPrefixed, but
 /// targets a []byte instead of a cryptobyte.String."
 pub(crate) fn readUint8LengthPrefixed(
@@ -1186,7 +1186,7 @@ pub(crate) fn readUint8LengthPrefixed(
     return true;
 }
 
-// go: sdk 1.25.5 crypto/tls/handshake_messages.go:26-28 readUint16LengthPrefixed
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:61-63 readUint16LengthPrefixed
 /// Go: the uint16 mirror of [`readUint8LengthPrefixed`].
 pub(crate) fn readUint16LengthPrefixed(
     s: &mut CBString,
@@ -1201,7 +1201,7 @@ pub(crate) fn readUint16LengthPrefixed(
     return true;
 }
 
-// go: sdk 1.25.5 crypto/tls/handshake_messages.go:30-32 readUint24LengthPrefixed
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:67-69 readUint24LengthPrefixed
 /// Go: the uint24 mirror of [`readUint8LengthPrefixed`].
 pub(crate) fn readUint24LengthPrefixed(
     s: &mut CBString,
@@ -1224,7 +1224,7 @@ pub(crate) struct keyUpdateMsg {
 }
 
 impl keyUpdateMsg {
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1799-1811 keyUpdateMsg.marshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1137-1149 keyUpdateMsg.marshal
     /// Serialize the KeyUpdate message.
     pub(crate) fn marshal(&self) -> (slice<byte>, error) {
         // Go: var b cryptobyte.Builder; b.AddUint8(typeKeyUpdate)
@@ -1245,7 +1245,7 @@ impl keyUpdateMsg {
         return b.Bytes();
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1813-1831 keyUpdateMsg.unmarshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1151-1168 keyUpdateMsg.unmarshal
     /// Parse a KeyUpdate message. Reports whether it was well-formed.
     pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
         // Go: s := cryptobyte.String(data)
@@ -1277,7 +1277,7 @@ impl keyUpdateMsg {
 pub(crate) struct endOfEarlyDataMsg {}
 
 impl endOfEarlyDataMsg {
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1768-1772 endOfEarlyDataMsg.marshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1123-1127 endOfEarlyDataMsg.marshal
     /// Serialize: a bare header with a zero-length body.
     pub(crate) fn marshal(&self) -> (slice<byte>, error) {
         // Go: x := make([]byte, 4); x[0] = typeEndOfEarlyData; return x, nil
@@ -1286,7 +1286,7 @@ impl endOfEarlyDataMsg {
         return (slice::__from_vec(x), crate::errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1774-1776 endOfEarlyDataMsg.unmarshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1129-1131 endOfEarlyDataMsg.unmarshal
     /// Parse: well-formed exactly when the message is the 4-byte header.
     pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
         // Go: return len(data) == 4
@@ -1302,7 +1302,7 @@ pub(crate) struct certificateStatusMsg {
 }
 
 impl certificateStatusMsg {
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1735-1747 certificateStatusMsg.marshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1627-1638 certificateStatusMsg.marshal
     /// Serialize the CertificateStatus message.
     pub(crate) fn marshal(&self) -> (slice<byte>, error) {
         // Go: var b cryptobyte.Builder; b.AddUint8(typeCertificateStatus)
@@ -1323,7 +1323,7 @@ impl certificateStatusMsg {
         return b.Bytes();
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1749-1761 certificateStatusMsg.unmarshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1640-1651 certificateStatusMsg.unmarshal
     /// Parse a CertificateStatus message. Reports whether it was
     /// well-formed; an empty OCSP response is rejected, as Go does.
     pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
@@ -1354,7 +1354,7 @@ impl certificateStatusMsg {
 // The uint64 helpers Go writes because cryptobyte has no AddUint64 /
 // ReadUint64 of its own — it splits into two uint32 halves.
 
-// go: sdk 1.25.5 crypto/tls/handshake_messages.go:44-47 addUint64
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:37-40 addUint64
 /// Append `v` as two big-endian uint32 halves.
 pub(crate) fn addUint64(b: &mut cryptobyte::Builder, v: crate::types::uint64) {
     // Go: b.AddUint32(uint32(v >> 32)); b.AddUint32(uint32(v))
@@ -1362,7 +1362,7 @@ pub(crate) fn addUint64(b: &mut cryptobyte::Builder, v: crate::types::uint64) {
     b.AddUint32(crate::uint32(v));
 }
 
-// go: sdk 1.25.5 crypto/tls/handshake_messages.go:49-56 readUint64
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:44-51 readUint64
 /// Read two big-endian uint32 halves into `out`.
 pub(crate) fn readUint64(s: &mut CBString, out: &mut crate::types::uint64) -> bool {
     // Go: var hi, lo uint32
@@ -1409,7 +1409,7 @@ pub(crate) struct serverKeyExchangeMsg {
 }
 
 impl serverKeyExchangeMsg {
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1608-1617 serverKeyExchangeMsg.marshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1603-1613 serverKeyExchangeMsg.marshal
     /// Serialize: a 4-byte header with a uint24 length, then the body.
     pub(crate) fn marshal(&self) -> (slice<byte>, error) {
         // Go: length := len(m.key); x := make([]byte, length+4)
@@ -1426,7 +1426,7 @@ impl serverKeyExchangeMsg {
         return (slice::__from_vec(x), crate::errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1619-1625 serverKeyExchangeMsg.unmarshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1615-1621 serverKeyExchangeMsg.unmarshal
     /// Parse. Note Go does NOT check the declared length here — the body
     /// is whatever follows the header — unlike clientKeyExchangeMsg.
     pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
@@ -1448,7 +1448,7 @@ pub(crate) struct clientKeyExchangeMsg {
 }
 
 impl clientKeyExchangeMsg {
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1663-1672 clientKeyExchangeMsg.marshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1669-1679 clientKeyExchangeMsg.marshal
     /// Serialize: header with uint24 length, then the ciphertext.
     pub(crate) fn marshal(&self) -> (slice<byte>, error) {
         // Go: length := len(m.ciphertext); x := make([]byte, length+4)
@@ -1464,7 +1464,7 @@ impl clientKeyExchangeMsg {
         return (slice::__from_vec(x), crate::errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1674-1684 clientKeyExchangeMsg.unmarshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1681-1691 clientKeyExchangeMsg.unmarshal
     /// Parse. Unlike `serverKeyExchangeMsg`, this one DOES validate the
     /// declared uint24 length against the data that follows.
     pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
@@ -1492,7 +1492,7 @@ pub(crate) struct newSessionTicketMsg {
 }
 
 impl newSessionTicketMsg {
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1888-1903 newSessionTicketMsg.marshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1887-1901 newSessionTicketMsg.marshal
     /// Serialize. The four bytes at x[4..8] are the lifetime hint, left
     /// zero by Go, and x[8..10] is the uint16 ticket length.
     pub(crate) fn marshal(&self) -> (slice<byte>, error) {
@@ -1514,7 +1514,7 @@ impl newSessionTicketMsg {
         return (slice::__from_vec(x), crate::errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1905-1921 newSessionTicketMsg.unmarshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1903-1921 newSessionTicketMsg.unmarshal
     /// Parse, validating both the uint24 message length and the uint16
     /// ticket length.
     pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
@@ -1552,7 +1552,7 @@ pub(crate) struct certificateMsg {
 }
 
 impl certificateMsg {
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1441-1470 certificateMsg.marshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1393-1421 certificateMsg.marshal
     /// Serialize the chain.
     pub(crate) fn marshal(&self) -> (slice<byte>, error) {
         // Go: var i int; for _, slice := range m.certificates { i += len(slice) }
@@ -1593,7 +1593,7 @@ impl certificateMsg {
         return (slice::__from_vec(x), crate::errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1472-1505 certificateMsg.unmarshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1423-1457 certificateMsg.unmarshal
     /// Parse the chain. Go walks the list TWICE — once to count and
     /// validate every length, once to slice the entries out — so a
     /// truncated entry is rejected before any is stored.
@@ -1660,7 +1660,7 @@ pub(crate) struct newSessionTicketMsgTLS13 {
 }
 
 impl newSessionTicketMsgTLS13 {
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1310-1336 newSessionTicketMsgTLS13.marshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1178-1202 newSessionTicketMsgTLS13.marshal
     /// Serialize. The extensions block is always emitted, even when
     /// empty — Go writes the uint16 length unconditionally and only the
     /// early_data body is conditional.
@@ -1697,7 +1697,7 @@ impl newSessionTicketMsgTLS13 {
         return b.Bytes();
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1338-1375 newSessionTicketMsgTLS13.unmarshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1204-1243 newSessionTicketMsgTLS13.unmarshal
     /// Parse. Unknown extensions are skipped, as Go does; a known one
     /// with trailing bytes is rejected.
     pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
@@ -1762,7 +1762,7 @@ pub(crate) struct certificateRequestMsgTLS13 {
 }
 
 impl certificateRequestMsgTLS13 {
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1116-1173 certificateRequestMsgTLS13.marshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1253-1311 certificateRequestMsgTLS13.marshal
     /// Serialize. Every extension is conditional, so an all-default
     /// message is a bare header, an empty context and an empty
     /// extensions list.
@@ -1832,7 +1832,7 @@ impl certificateRequestMsgTLS13 {
         return b.Bytes();
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1175-1247 certificateRequestMsgTLS13.unmarshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1313-1387 certificateRequestMsgTLS13.unmarshal
     /// Parse. An EMPTY sigalgs or CA list is rejected, and a zero-length
     /// CA entry is rejected — presence of the extension implies content.
     pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
@@ -1935,7 +1935,7 @@ pub(crate) struct certificateRequestMsg {
 }
 
 impl certificateRequestMsg {
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1509-1564 certificateRequestMsg.marshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1724-1772 certificateRequestMsg.marshal
     /// Serialize. See RFC 4346, Section 7.4.4.
     pub(crate) fn marshal(&self) -> (slice<byte>, error) {
         // Go: length := 1 + len(m.certificateTypes) + 2
@@ -1990,7 +1990,7 @@ impl certificateRequestMsg {
         return (slice::__from_vec(x), crate::errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1566-1637 certificateRequestMsg.unmarshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1774-1846 certificateRequestMsg.unmarshal
     /// Parse. Rejects an empty certificateTypes list, an odd or zero
     /// sigalgs length, and any trailing data.
     pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
@@ -2130,7 +2130,7 @@ impl certificateVerifyMsg {
 
 
 impl encryptedExtensionsMsg {
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1054-1114 encryptedExtensionsMsg.unmarshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1054-1119 encryptedExtensionsMsg.unmarshal
     /// Parse. A DUPLICATE extension is rejected outright — Go tracks
     /// what it has seen and fails on a repeat, which no other message
     /// in this file does. Unknown extensions are still skipped.
@@ -2215,7 +2215,7 @@ impl encryptedExtensionsMsg {
 }
 
 
-// go: sdk 1.25.5 crypto/tls/handshake_messages.go:1507-1560 unmarshalCertificate
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:1539-1597 unmarshalCertificate
 /// Read a TLS 1.3 CertificateEntry list into `certificate`.
 ///
 /// Two rules that are easy to lose: OCSP and SCT extensions are only
@@ -2359,7 +2359,7 @@ fn bs(v: &[byte]) -> slice<byte> {
 }
 
 impl clientHelloMsg {
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:105-372 clientHelloMsg.marshalMsg
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:104-373 clientHelloMsg.marshalMsg
     /// Encode the ClientHello. With `echInner` set, the extensions that
     /// can be compressed by ECH are replaced by an `ech_outer_extensions`
     /// list and the legacy_session_id is emitted empty — RFC 9180 and
@@ -2678,7 +2678,7 @@ impl clientHelloMsg {
         return self.marshalMsg(false);
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:381-398 clientHelloMsg.marshalWithoutBinders
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:382-400 clientHelloMsg.marshalWithoutBinders
     /// The ClientHello through the `PreSharedKeyExtension.identities`
     /// field, per RFC 8446 §4.2.11.2. `m.pskBinders` must already be set
     /// to slices of the correct length.
@@ -2712,7 +2712,7 @@ impl clientHelloMsg {
         );
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:402-414 clientHelloMsg.updateBinders
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:404-416 clientHelloMsg.updateBinders
     /// Update `m.pskBinders`. The supplied binders must have the same
     /// length as the current ones.
     ///
@@ -2816,7 +2816,7 @@ impl serverHelloDoneMsg {
 
 
 impl serverHelloMsg {
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:846-971 serverHelloMsg.unmarshal
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:871-997 serverHelloMsg.unmarshal
     pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
         // Go: *m = serverHelloMsg{original: data}
         //     s := cryptobyte.String(data)
@@ -2999,7 +2999,7 @@ impl serverHelloMsg {
         return true;
     }
 
-    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:973-975 serverHelloMsg.originalBytes
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:999-1001 serverHelloMsg.originalBytes
     pub(crate) fn originalBytes(&self) -> slice<byte> {
         // Go: return m.original
         return slice::__from_vec(self.original.clone());

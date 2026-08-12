@@ -82,7 +82,7 @@ pub const alertNoApplicationProtocol: alert = alert(120);
 pub const alertECHRequired: alert = alert(121);
 
 impl alert {
-    // go: sdk 1.25.5 crypto/tls/alert.go:102-108 alert.String
+    // go: sdk 1.25.5 crypto/tls/alert.go:101-107 alert.String
     /// Go: `s, ok := alertText[e]; if ok { return "tls: " + s }` and
     /// otherwise `"tls: alert(" + strconv.Itoa(int(e)) + ")"`.
     pub fn String(&self) -> string {
@@ -134,7 +134,7 @@ impl alert {
             + string::from_static(")");
     }
 
-    // go: sdk 1.25.5 crypto/tls/alert.go:110-112 alert.Error
+    // go: sdk 1.25.5 crypto/tls/alert.go:109-111 alert.Error
     /// Go: `func (e alert) Error() string { return e.String() }`
     pub fn Error(&self) -> string {
         return self.String();

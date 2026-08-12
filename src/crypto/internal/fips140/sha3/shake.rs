@@ -71,7 +71,7 @@ fn leftEncode(x: uint64) -> Vec<byte> {
     return out;
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:49-57 newCShake
+// go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:50-59 newCShake
 /// Go: `func newCShake(N, S []byte, rate, outputLen int, dsbyte byte) *SHAKE`
 fn newCShake(N: &[byte], S: &[byte], rate: usize, outputLen: usize, dsbyte: byte) -> SHAKE {
     // Go: c := &SHAKE{d: Digest{rate: rate, outputLen: outputLen, dsbyte: dsbyte}}
@@ -96,19 +96,19 @@ fn newCShake(N: &[byte], S: &[byte], rate: usize, outputLen: usize, dsbyte: byte
 }
 
 impl SHAKE {
-    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:59-59 BlockSize
+    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:61-61 SHAKE.BlockSize
     /// Go: `func (s *SHAKE) BlockSize() int { return s.d.BlockSize() }`
     pub fn BlockSize(&self) -> int {
         return self.d.BlockSize();
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:60-60 Size
+    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:62-62 SHAKE.Size
     /// Go: `func (s *SHAKE) Size() int { return s.d.Size() }`
     pub fn Size(&self) -> int {
         return self.d.Size();
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:66-66 Sum
+    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:68-68 SHAKE.Sum
     /// `(*SHAKE).Sum(b)` — append a portion of output to `b`. The output
     /// length gives full-strength generic security: 32 bytes for
     /// SHAKE128, 64 for SHAKE256. Does not change the underlying state.
@@ -118,7 +118,7 @@ impl SHAKE {
         return self.d.Sum(b.into());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:70-70 Write
+    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:72-72 SHAKE.Write
     /// `(*SHAKE).Write(p)` — absorb more data into the state. Panics if
     /// any output has already been read.
     pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
@@ -126,7 +126,7 @@ impl SHAKE {
         return self.d.Write(p);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:72-77 Read
+    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:74-79 SHAKE.Read
     /// `(*SHAKE).Read(out)` — squeeze output. Note that `read` is not
     /// exposed on `Digest`, since SHA-3 offers no variable output length;
     /// it is used there only by `Sum`.
@@ -135,7 +135,7 @@ impl SHAKE {
         return read(&mut self.d, out);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:80-85 Reset
+    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:82-87 SHAKE.Reset
     /// `(*SHAKE).Reset()` — reset the hash to its initial state.
     pub fn Reset(&mut self) {
         // Go: s.d.Reset()
@@ -147,14 +147,14 @@ impl SHAKE {
         }
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:88-91 Clone
+    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:90-93 SHAKE.Clone
     /// `(*SHAKE).Clone()` — a copy of the SHAKE context in its current
     /// state.
     pub fn Clone(&self) -> SHAKE {
         return Clone::clone(self);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:93-95 MarshalBinary
+    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:95-97 SHAKE.MarshalBinary
     /// `(*SHAKE).MarshalBinary()` — the sponge state plus the cSHAKE
     /// init block.
     pub fn MarshalBinary(&self) -> (slice<byte>, error) {
@@ -163,7 +163,7 @@ impl SHAKE {
         return self.AppendBinary(slice::__from_vec(buf));
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:97-104 AppendBinary
+    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:99-106 SHAKE.AppendBinary
     /// `(*SHAKE).AppendBinary(b)` — append the marshaled state to `b`.
     pub fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
         // Go: b, err := s.d.AppendBinary(b); if err != nil { return nil, err }
@@ -177,7 +177,7 @@ impl SHAKE {
         return (slice::__from_vec(out), nil);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:106-115 UnmarshalBinary
+    // go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:108-117 SHAKE.UnmarshalBinary
     /// `(*SHAKE).UnmarshalBinary(b)` — restore state produced by
     /// [`SHAKE::MarshalBinary`].
     pub fn UnmarshalBinary(&mut self, b: slice<byte>) -> error {
@@ -199,7 +199,7 @@ impl SHAKE {
     }
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:118-120 NewShake128
+// go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:120-122 NewShake128
 /// `sha3.NewShake128()` — a new SHAKE128 XOF.
 pub fn NewShake128() -> SHAKE {
     // Go: return &SHAKE{d: Digest{rate: rateK256, outputLen: 32, dsbyte: dsbyteShake}}
@@ -209,7 +209,7 @@ pub fn NewShake128() -> SHAKE {
     };
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:123-125 NewShake256
+// go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:125-127 NewShake256
 /// `sha3.NewShake256()` — a new SHAKE256 XOF.
 pub fn NewShake256() -> SHAKE {
     return SHAKE {
@@ -218,7 +218,7 @@ pub fn NewShake256() -> SHAKE {
     };
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:132-137 NewCShake128
+// go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:134-139 NewCShake128
 /// `sha3.NewCShake128(N, S)` — a new cSHAKE128 XOF.
 ///
 /// `N` names a function built on cSHAKE and may be empty when plain
@@ -236,7 +236,7 @@ pub fn NewCShake128(N: slice<byte>, S: slice<byte>) -> SHAKE {
     return newCShake(nr, sr, rateK256, 32, dsbyteCShake);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:144-149 NewCShake256
+// go: sdk 1.25.5 crypto/internal/fips140/sha3/shake.go:146-151 NewCShake256
 /// `sha3.NewCShake256(N, S)` — a new cSHAKE256 XOF. See
 /// [`NewCShake128`].
 pub fn NewCShake256(N: slice<byte>, S: slice<byte>) -> SHAKE {

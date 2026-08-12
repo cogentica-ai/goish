@@ -52,7 +52,7 @@ impl PrivateKey {
         }
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:35-40 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:35-40 PrivateKey.Bytes
     /// `(*PrivateKey).Bytes()` — the 64-byte `seed || publicKey`.
     pub fn Bytes(&self) -> slice<byte> {
         let mut k: Vec<byte> = Vec::with_capacity(privateKeySize);
@@ -61,13 +61,13 @@ impl PrivateKey {
         slice::__from_vec(k)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:42-45 Seed
+    // go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:42-45 PrivateKey.Seed
     /// `(*PrivateKey).Seed()` — the 32-byte seed.
     pub fn Seed(&self) -> slice<byte> {
         slice::__from_vec(self.seed.to_vec())
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:47-50 PublicKey
+    // go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:47-50 PrivateKey.PublicKey
     /// `(*PrivateKey).PublicKey()` — the 32-byte public key.
     pub fn PublicKey(&self) -> slice<byte> {
         slice::__from_vec(self.pub_.to_vec())
@@ -92,7 +92,7 @@ impl PublicKey {
         }
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:35-40 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:57-60 PublicKey.Bytes
     /// `(*PublicKey).Bytes()` — the 32-byte public key encoding.
     pub fn Bytes(&self) -> slice<byte> {
         slice::__from_vec(self.aBytes.to_vec())
@@ -101,7 +101,7 @@ impl PublicKey {
 
 // ─── Key generation (Go: ed25519.go:62-104) ───────────────────────────
 
-// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:68-74 GenerateKey
+// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:63-66 GenerateKey
 /// `GenerateKey()` — generate a new Ed25519 private key pair. The seed
 /// is drawn from the kernel CSPRNG (Go uses `drbg.Read`).
 pub fn GenerateKey() -> (PrivateKey, error) {
@@ -127,7 +127,7 @@ fn generateKey(mut priv_: PrivateKey) -> (PrivateKey, error) {
     (priv_, errors::nil)
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:81-89 NewPrivateKeyFromSeed
+// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:76-79 NewPrivateKeyFromSeed
 /// `NewPrivateKeyFromSeed(seed)` — derive a private key from a 32-byte
 /// seed.
 pub fn NewPrivateKeyFromSeed(seed: slice<byte>) -> (PrivateKey, error) {
@@ -176,7 +176,7 @@ pub(crate) fn precomputePrivateKey(priv_: &mut PrivateKey) {
     }
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:111-134 NewPrivateKey
+// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:106-109 NewPrivateKey
 /// `NewPrivateKey(priv)` — parse a 64-byte `seed || publicKey` private
 /// key encoding.
 pub fn NewPrivateKey(priv_: slice<byte>) -> (PrivateKey, error) {
@@ -219,7 +219,7 @@ fn newPrivateKey(mut priv_: PrivateKey, privBytes: slice<byte>) -> (PrivateKey, 
     (priv_, errors::nil)
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:141-151 NewPublicKey
+// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:136-139 NewPublicKey
 /// `NewPublicKey(pub)` — parse a 32-byte public key encoding; verifies
 /// the point is on the curve.
 pub fn NewPublicKey(pub_: slice<byte>) -> (PublicKey, error) {
@@ -260,7 +260,7 @@ const domPrefixCtx: &[u8] = b"SigEd25519 no Ed25519 collisions\x00";
 
 // ─── Signing (Go: ed25519.go:166-256) ─────────────────────────────────
 
-// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:173-177 Sign
+// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:166-171 Sign
 /// `Sign(priv, message)` — pure Ed25519 signature over `message`.
 /// 64-byte `R || S`.
 pub fn Sign(priv_: &PrivateKey, message: slice<byte>) -> slice<byte> {
@@ -274,7 +274,7 @@ fn sign(priv_: &PrivateKey, message: slice<byte>) -> slice<byte> {
     signWithDom(priv_, message, domPrefixPure, b"")
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:186-196 SignPH
+// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:179-184 SignPH
 /// `SignPH(priv, message, context)` — Ed25519ph: `message` must be the
 /// 64-byte SHA-512 prehash; `context` at most 255 bytes.
 pub fn SignPH(
@@ -311,7 +311,7 @@ fn signPH(
     )
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:205-214 SignCtx
+// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:198-203 SignCtx
 /// `SignCtx(priv, message, context)` — Ed25519ctx (not FIPS-approved):
 /// `context` at most 255 bytes and SHOULD NOT be empty (RFC 8032 §5.1).
 pub fn SignCtx(
@@ -409,7 +409,7 @@ pub(crate) fn signWithDom(
 
 // ─── Verification (Go: ed25519.go:258-328) ────────────────────────────
 
-// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:262-266 Verify
+// go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:258-260 Verify
 /// `Verify(pub, message, sig)` — pure Ed25519 verification. Returns
 /// `nil` if the signature is valid, an error otherwise.
 pub fn Verify(pub_: &PublicKey, message: slice<byte>, sig: slice<byte>) -> error {

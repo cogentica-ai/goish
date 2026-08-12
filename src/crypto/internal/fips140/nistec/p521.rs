@@ -74,7 +74,7 @@ pub fn NewP521Point() -> P521Point {
 }
 
 impl P521Point {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:36-42 SetGenerator
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:36-42 P521Point.SetGenerator
     /// Set p to the canonical generator and return p.
     pub fn SetGenerator(&mut self) -> &mut Self {
         let _ = self.x.SetBytes(slice::__from_vec(alloc::vec![
@@ -97,7 +97,7 @@ impl P521Point {
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:44-50 Set
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:44-50 P521Point.Set
     /// Set p = q and return p.
     pub fn Set(&mut self, q: P521Point) -> &mut Self {
         self.x.Set(q.x);
@@ -106,7 +106,7 @@ impl P521Point {
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:52-108 SetBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:52-108 P521Point.SetBytes
     /// Set p to the compressed, uncompressed, or infinity value encoded in
     /// b, as specified in SEC 1, Version 2.0, Section 2.3.4. If the point
     /// is not on the curve, it returns an error and the receiver is
@@ -225,7 +225,7 @@ fn p521CheckOnCurve(x: P521Element, y: P521Element) -> error {
 }
 
 impl P521Point {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:142-150 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:142-150 P521Point.Bytes
     /// Return the uncompressed or infinity encoding of p, as specified in
     /// SEC 1, Version 2.0, Section 2.3.3. Note that the encoding of the
     /// point at infinity is shorter than all other encodings.
@@ -236,7 +236,7 @@ impl P521Point {
         return self.bytes(&mut out);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:152-165 bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:152-165 P521Point.bytes
     fn bytes(&self, out: &mut [byte; 1 + 2 * p521ElementLength]) -> slice<byte> {
         if self.z.IsZero() == 1 {
             return slice::__from_vec(alloc::vec![0u8]);
@@ -259,7 +259,7 @@ impl P521Point {
         return slice::__from_vec(out.to_vec());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:167-174 BytesX
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:167-174 P521Point.BytesX
     /// Return the encoding of the x-coordinate of p, as specified in SEC 1,
     /// Version 2.0, Section 2.3.5, or an error if p is the point at
     /// infinity.
@@ -270,7 +270,7 @@ impl P521Point {
         return self.bytesX(&mut out);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:176-185 bytesX
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:176-185 P521Point.bytesX
     fn bytesX(&self, out: &mut [byte; p521ElementLength]) -> (slice<byte>, error) {
         if self.z.IsZero() == 1 {
             return (
@@ -290,7 +290,7 @@ impl P521Point {
         return (slice::__from_vec(out.to_vec()), crate::nil.into());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:187-195 BytesCompressed
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:187-195 P521Point.BytesCompressed
     /// Return the compressed or infinity encoding of p, as specified in
     /// SEC 1, Version 2.0, Section 2.3.3. Note that the encoding of the
     /// point at infinity is shorter than all other encodings.
@@ -301,7 +301,7 @@ impl P521Point {
         return self.bytesCompressed(&mut out);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:197-212 bytesCompressed
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:197-212 P521Point.bytesCompressed
     fn bytesCompressed(&self, out: &mut [byte; 1 + p521ElementLength]) -> slice<byte> {
         if self.z.IsZero() == 1 {
             return slice::__from_vec(alloc::vec![0u8]);
@@ -326,7 +326,7 @@ impl P521Point {
         return slice::__from_vec(out.to_vec());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:214-267 Add
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:214-267 P521Point.Add
     /// Set q = p1 + p2, and return q. The points may overlap.
     pub fn Add(&mut self, p1: P521Point, p2: P521Point) -> &mut Self {
         // Complete addition formula for a = -3 from "Complete addition
@@ -391,7 +391,7 @@ impl P521Point {
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:269-313 Double
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:269-313 P521Point.Double
     /// Set q = p + p, and return q. The points may overlap.
     pub fn Double(&mut self, p: P521Point) -> &mut Self {
         // Complete addition formula for a = -3 from "Complete addition
@@ -446,7 +446,7 @@ impl P521Point {
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:328-339 Select
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:316-321 P521Point.Select
     /// Set q to p1 if cond == 1, and to p2 if cond == 0.
     pub fn Select(&mut self, p1: P521Point, p2: P521Point, cond: int) -> &mut Self {
         self.x.Select(p1.x, p2.x, cond);
@@ -465,7 +465,7 @@ impl P521Point {
 struct p521Table([P521Point; 15]);
 
 impl p521Table {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:328-339 Select
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:328-339 p521Table.Select
     /// Select the n-th multiple of the table base point into p. It works
     /// in constant time by iterating over every entry of the table. n must
     /// be in [0, 15].
@@ -485,7 +485,7 @@ impl p521Table {
 }
 
 impl P521Point {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:341-384 ScalarMult
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:341-384 P521Point.ScalarMult
     /// Set p = scalar * q, and return p.
     pub fn ScalarMult(&mut self, q: P521Point, scalar: &slice<byte>) -> error {
         // Compute a p521Table for the base point q.
@@ -541,7 +541,7 @@ impl P521Point {
         return crate::nil.into();
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:389-408 generatorTable
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:389-408 P521Point.generatorTable
     /// Return a sequence of p521Tables. The first table contains multiples
     /// of G. Each successive table is the previous table doubled four
     /// times.
@@ -549,7 +549,7 @@ impl P521Point {
         return &p521GeneratorTable;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:410-440 ScalarBaseMult
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p521.go:410-440 P521Point.ScalarBaseMult
     /// Set p = scalar * B, where B is the canonical generator, and return p.
     pub fn ScalarBaseMult(&mut self, scalar: &slice<byte>) -> error {
         if scalar.Len() != int(p521ElementLength) {

@@ -90,7 +90,7 @@ pub struct pkcs1PublicKey {
     pub E: int,
 }
 
-// go: sdk 1.25.5 crypto/x509/pkcs1.go:52-118 ParsePKCS1PrivateKey
+// go: sdk 1.25.5 crypto/x509/pkcs1.go:54-122 ParsePKCS1PrivateKey
 /// Parse an RSA private key in PKCS #1, ASN.1 DER form.
 ///
 /// This kind of key is commonly encoded in PEM blocks of type
@@ -193,7 +193,7 @@ pub fn ParsePKCS1PrivateKey(der: slice<byte>) -> (rsa::PrivateKey, error) {
     return (key, errors::nil);
 }
 
-// go: sdk 1.25.5 crypto/x509/pkcs1.go:129-159 MarshalPKCS1PrivateKey
+// go: sdk 1.25.5 crypto/x509/pkcs1.go:133-162 MarshalPKCS1PrivateKey
 /// Convert an RSA private key to PKCS #1, ASN.1 DER form.
 ///
 /// This kind of key is commonly encoded in PEM blocks of type
@@ -241,7 +241,7 @@ pub fn MarshalPKCS1PrivateKey(key: &mut rsa::PrivateKey) -> slice<byte> {
     return b;
 }
 
-// go: sdk 1.25.5 crypto/x509/pkcs1.go:164-185 ParsePKCS1PublicKey
+// go: sdk 1.25.5 crypto/x509/pkcs1.go:167-191 ParsePKCS1PublicKey
 /// Parse an RSA public key in PKCS #1, ASN.1 DER form.
 ///
 /// This kind of key is commonly encoded in PEM blocks of type
@@ -294,7 +294,7 @@ pub fn ParsePKCS1PublicKey(der: slice<byte>) -> (rsa::PublicKey, error) {
     );
 }
 
-// go: sdk 1.25.5 crypto/x509/pkcs1.go:190-196 MarshalPKCS1PublicKey
+// go: sdk 1.25.5 crypto/x509/pkcs1.go:196-202 MarshalPKCS1PublicKey
 /// Convert an RSA public key to PKCS #1, ASN.1 DER form.
 ///
 /// This kind of key is commonly encoded in PEM blocks of type

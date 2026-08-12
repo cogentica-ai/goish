@@ -19,13 +19,13 @@ const classConstructed: uint8 = 0x20;
 const classContextSpecific: uint8 = 0x80;
 
 impl Tag {
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/asn1/asn1.go:20-22 Constructed
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/asn1/asn1.go:23-23 Tag.Constructed
     /// Return t with the constructed class bit set.
     pub fn Constructed(&self) -> Tag {
         return Tag(self.0 | classConstructed);
     }
 
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/asn1/asn1.go:25-27 ContextSpecific
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/asn1/asn1.go:25-27 Tag.ContextSpecific
     /// Return t with the context-specific class bit set.
     pub fn ContextSpecific(&self) -> Tag {
         return Tag(self.0 | classContextSpecific);

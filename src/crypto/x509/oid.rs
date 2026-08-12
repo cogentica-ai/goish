@@ -192,7 +192,7 @@ impl OID {
         return self.unmarshalOIDText(string::from_bytes(text.as_ref()));
     }
 
-    // go: sdk 1.25.5 crypto/x509/oid.go:131-186 OID.unmarshalOIDText
+    // go: sdk 1.25.5 crypto/x509/oid.go:130-186 OID.unmarshalOIDText
     fn unmarshalOIDText(&mut self, oid: string) -> error {
         // `(*big.Int).SetString` allows +/- signs, but the string form of
         // an Object Identifier must not, so reject those encodings.

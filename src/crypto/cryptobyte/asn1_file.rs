@@ -56,7 +56,7 @@ use crate::types::byte;
 use crate::{int, int64, uint64, uint32, uint8};
 
 impl Builder {
-    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/asn1.go:21-33 AddASN1
+    // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/asn1.go:230-242 Builder.AddASN1
     /// Append an ASN.1 object. The object is prefixed with the given tag.
     /// Tags greater than 30 are not supported and result in an error (i.e.
     /// low-tag-number form only). The child builder passed to the

@@ -19,7 +19,7 @@ const _K1: u32 = 0x6ED9EBA1;
 const _K2: u32 = 0x8F1BBCDC;
 const _K3: u32 = 0xCA62C1D6;
 
-// go: sdk 1.25.5 crypto/sha1/sha1block.go:16-79 blockGeneric
+// go: sdk 1.25.5 crypto/sha1/sha1block.go:20-83 blockGeneric
 /// Go: `func blockGeneric(dig *digest, p []byte)` — the pure-Go SHA-1
 /// compression function.
 ///

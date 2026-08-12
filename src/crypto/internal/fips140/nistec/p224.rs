@@ -72,7 +72,7 @@ pub fn NewP224Point() -> P224Point {
 }
 
 impl P224Point {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:36-42 SetGenerator
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:36-42 P224Point.SetGenerator
     /// Set p to the canonical generator and return p.
     pub fn SetGenerator(&mut self) -> &mut Self {
         let _ = self.x.SetBytes(slice::__from_vec(alloc::vec![
@@ -87,7 +87,7 @@ impl P224Point {
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:44-50 Set
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:44-50 P224Point.Set
     /// Set p = q and return p.
     pub fn Set(&mut self, q: P224Point) -> &mut Self {
         self.x.Set(q.x);
@@ -96,7 +96,7 @@ impl P224Point {
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:52-108 SetBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:52-108 P224Point.SetBytes
     /// Set p to the compressed, uncompressed, or infinity value encoded in
     /// b, as specified in SEC 1, Version 2.0, Section 2.3.4. If the point
     /// is not on the curve, it returns an error and the receiver is
@@ -211,7 +211,7 @@ fn p224CheckOnCurve(x: P224Element, y: P224Element) -> error {
 }
 
 impl P224Point {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:142-150 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:142-150 P224Point.Bytes
     /// Return the uncompressed or infinity encoding of p, as specified in
     /// SEC 1, Version 2.0, Section 2.3.3. Note that the encoding of the
     /// point at infinity is shorter than all other encodings.
@@ -222,7 +222,7 @@ impl P224Point {
         return self.bytes(&mut out);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:152-165 bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:152-165 P224Point.bytes
     fn bytes(&self, out: &mut [byte; 1 + 2 * p224ElementLength]) -> slice<byte> {
         if self.z.IsZero() == 1 {
             return slice::__from_vec(alloc::vec![0u8]);
@@ -245,7 +245,7 @@ impl P224Point {
         return slice::__from_vec(out.to_vec());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:167-174 BytesX
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:167-174 P224Point.BytesX
     /// Return the encoding of the x-coordinate of p, as specified in SEC 1,
     /// Version 2.0, Section 2.3.5, or an error if p is the point at
     /// infinity.
@@ -256,7 +256,7 @@ impl P224Point {
         return self.bytesX(&mut out);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:176-185 bytesX
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:176-185 P224Point.bytesX
     fn bytesX(&self, out: &mut [byte; p224ElementLength]) -> (slice<byte>, error) {
         if self.z.IsZero() == 1 {
             return (
@@ -276,7 +276,7 @@ impl P224Point {
         return (slice::__from_vec(out.to_vec()), crate::nil.into());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:187-195 BytesCompressed
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:187-195 P224Point.BytesCompressed
     /// Return the compressed or infinity encoding of p, as specified in
     /// SEC 1, Version 2.0, Section 2.3.3. Note that the encoding of the
     /// point at infinity is shorter than all other encodings.
@@ -287,7 +287,7 @@ impl P224Point {
         return self.bytesCompressed(&mut out);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:197-212 bytesCompressed
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:197-212 P224Point.bytesCompressed
     fn bytesCompressed(&self, out: &mut [byte; 1 + p224ElementLength]) -> slice<byte> {
         if self.z.IsZero() == 1 {
             return slice::__from_vec(alloc::vec![0u8]);
@@ -312,7 +312,7 @@ impl P224Point {
         return slice::__from_vec(out.to_vec());
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:214-267 Add
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:214-267 P224Point.Add
     /// Set q = p1 + p2, and return q. The points may overlap.
     pub fn Add(&mut self, p1: P224Point, p2: P224Point) -> &mut Self {
         // Complete addition formula for a = -3 from "Complete addition
@@ -377,7 +377,7 @@ impl P224Point {
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:269-313 Double
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:269-313 P224Point.Double
     /// Set q = p + p, and return q. The points may overlap.
     pub fn Double(&mut self, p: P224Point) -> &mut Self {
         // Complete addition formula for a = -3 from "Complete addition
@@ -432,7 +432,7 @@ impl P224Point {
         return self;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:315-321 Select
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:315-321 P224Point.Select
     /// Set q to p1 if cond == 1, and to p2 if cond == 0.
     pub fn Select(&mut self, p1: P224Point, p2: P224Point, cond: int) -> &mut Self {
         self.x.Select(p1.x, p2.x, cond);
@@ -451,7 +451,7 @@ impl P224Point {
 struct p224Table([P224Point; 15]);
 
 impl p224Table {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:328-339 Select
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:328-339 p224Table.Select
     /// Select the n-th multiple of the table base point into p. It works
     /// in constant time by iterating over every entry of the table. n must
     /// be in [0, 15].
@@ -471,7 +471,7 @@ impl p224Table {
 }
 
 impl P224Point {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:341-384 ScalarMult
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:341-384 P224Point.ScalarMult
     /// Set p = scalar * q, and return p.
     pub fn ScalarMult(&mut self, q: P224Point, scalar: &slice<byte>) -> error {
         // Compute a p224Table for the base point q.
@@ -527,7 +527,7 @@ impl P224Point {
         return crate::nil.into();
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:386-408 generatorTable
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:392-408 P224Point.generatorTable
     /// Return a sequence of p224Tables. The first table contains multiples
     /// of G. Each successive table is the previous table doubled four
     /// times.
@@ -535,7 +535,7 @@ impl P224Point {
         return &p224GeneratorTable;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:410-440 ScalarBaseMult
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/p224.go:410-440 P224Point.ScalarBaseMult
     /// Set p = scalar * B, where B is the canonical generator, and return p.
     pub fn ScalarBaseMult(&mut self, scalar: &slice<byte>) -> error {
         if scalar.Len() != int(p224ElementLength) {

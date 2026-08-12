@@ -81,14 +81,14 @@ pub struct PublicKey {
 }
 
 impl PublicKey {
-    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:67-73 Bytes
+    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:67-73 PublicKey.Bytes
     /// Return a copy of the encoding of the public key.
     pub fn Bytes(&self) -> slice<byte> {
         let r: &[byte] = &self.publicKey;
         return slice::__from_vec(r.to_vec());
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:75-89 Equal
+    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:75-89 PublicKey.Equal
     /// Report whether x represents the same public key as k.
     ///
     /// Note that there can be equivalent public keys with different
@@ -102,7 +102,7 @@ impl PublicKey {
             && subtle::ConstantTimeCompare(&self.publicKey, &x.publicKey) == 1;
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:91-93 Curve
+    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:91-93 PublicKey.Curve
     pub fn Curve(&self) -> &'static (dyn Curve + Send + Sync) {
         return self.curve;
     }
@@ -143,7 +143,7 @@ impl Default for PrivateKey {
 }
 
 impl PrivateKey {
-    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:108-124 ECDH
+    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:108-124 PrivateKey.ECDH
     /// Perform an ECDH exchange and return the shared secret. The
     /// [PrivateKey] and [PublicKey] must use the same curve.
     ///
@@ -164,14 +164,14 @@ impl PrivateKey {
         return self.curve.ecdh(self, remote);
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:126-132 Bytes
+    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:126-132 PrivateKey.Bytes
     /// Return a copy of the encoding of the private key.
     pub fn Bytes(&self) -> slice<byte> {
         let r: &[byte] = &self.privateKey;
         return slice::__from_vec(r.to_vec());
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:134-148 Equal
+    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:134-148 PrivateKey.Equal
     /// Report whether x represents the same private key as k.
     ///
     /// This check is performed in constant time as long as the key types
@@ -181,17 +181,17 @@ impl PrivateKey {
             && subtle::ConstantTimeCompare(&self.privateKey, &x.privateKey) == 1;
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:150-152 Curve
+    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:150-152 PrivateKey.Curve
     pub fn Curve(&self) -> &'static (dyn Curve + Send + Sync) {
         return self.curve;
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:154-156 PublicKey
+    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:154-156 PrivateKey.PublicKey
     pub fn PublicKey(&self) -> PublicKey {
         return self.publicKey.clone();
     }
 
-    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:158-162 Public
+    // go: sdk 1.25.5 crypto/ecdh/ecdh.go:158-162 PrivateKey.Public
     /// Implement the implicit interface of all standard library private
     /// keys. See the docs of [crypto.PrivateKey].
     pub fn Public(&self) -> PublicKey {

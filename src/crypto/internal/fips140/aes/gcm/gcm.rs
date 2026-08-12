@@ -63,7 +63,7 @@ pub struct GCM {
     pub(crate) platform: gcmPlatformData,
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:20-23 New
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:22-25 New
 /// `gcm.New(cipher, nonceSize, tagSize)` — a new GCM over `cipher`.
 pub fn New(cipher: &aes::Block, nonceSize: int, tagSize: int) -> (Option<GCM>, error) {
     // Go: return newGCM(&GCM{}, cipher, nonceSize, tagSize)
@@ -73,7 +73,7 @@ pub fn New(cipher: &aes::Block, nonceSize: int, tagSize: int) -> (Option<GCM>, e
     return newGCM(cipher, nonceSize, tagSize);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:29-42 newGCM
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:31-46 newGCM
 /// Go: `func newGCM(g *GCM, cipher *aes.Block, nonceSize, tagSize int) (*GCM, error)`
 /// — `g` is a caller-allocated buffer that Go fills and hands back;
 /// goish returns the GCM by value.
@@ -114,19 +114,19 @@ fn newGCM(cipher: &aes::Block, nonceSize: int, tagSize: int) -> (Option<GCM>, er
 }
 
 impl GCM {
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:55-57 NonceSize
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:55-57 GCM.NonceSize
     /// Go: `func (g *GCM) NonceSize() int { return g.nonceSize }`
     pub fn NonceSize(&self) -> int {
         return self.nonceSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:59-61 Overhead
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:59-61 GCM.Overhead
     /// Go: `func (g *GCM) Overhead() int { return g.tagSize }`
     pub fn Overhead(&self) -> int {
         return self.tagSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:63-66 Seal
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:63-66 GCM.Seal
     /// `(*GCM).Seal(dst, nonce, plaintext, data)` — encrypt and
     /// authenticate `plaintext`, authenticate `data`, and append the
     /// result to `dst`.
@@ -196,7 +196,7 @@ impl GCM {
         return ret;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:93-128 Open
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:93-128 GCM.Open
     /// `(*GCM).Open(dst, nonce, ciphertext, data)` — authenticate and
     /// decrypt `ciphertext`, appending the plaintext to `dst`.
     pub fn Open(
@@ -276,7 +276,7 @@ pub(crate) fn errOpen() -> error {
     return crate::errors::New("cipher: message authentication failed");
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:126-135 sliceForAppend
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:134-143 sliceForAppend
 /// Take a slice and a requested number of bytes. Returns a slice with the
 /// contents of `in` followed by that many bytes, and the offset at which
 /// the extra bytes begin.

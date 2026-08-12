@@ -48,19 +48,19 @@ pub(crate) struct permanentError {
 }
 
 impl permanentError {
-    // go: sdk 1.25.5 crypto/tls/conn.go:130-130 permanentError.Error
+    // go: sdk 1.25.5 crypto/tls/conn.go:191-191 permanentError.Error
     pub(crate) fn Error(&self) -> string {
         // Go: return e.err.Error()
         return self.err.Error();
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:131-131 permanentError.Unwrap
+    // go: sdk 1.25.5 crypto/tls/conn.go:192-192 permanentError.Unwrap
     pub(crate) fn Unwrap(&self) -> error {
         // Go: return e.err
         return self.err.clone();
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:132-132 permanentError.Timeout
+    // go: sdk 1.25.5 crypto/tls/conn.go:193-193 permanentError.Timeout
     ///
     /// Deviation: Go forwards to `e.err.Timeout()` on the wrapped
     /// `net.Error`. goish has no `net.Error` interface to forward
@@ -70,7 +70,7 @@ impl permanentError {
         return false;
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:133-133 permanentError.Temporary
+    // go: sdk 1.25.5 crypto/tls/conn.go:194-194 permanentError.Temporary
     pub(crate) fn Temporary(&self) -> bool {
         // Go: return false
         return false;
@@ -174,7 +174,7 @@ impl Default for halfConn {
 }
 
 impl halfConn {
-    // go: sdk 1.25.5 crypto/tls/conn.go:157-164 halfConn.setErrorLocked
+    // go: sdk 1.25.5 crypto/tls/conn.go:196-203 halfConn.setErrorLocked
     ///
     /// Deviation: Go's `if e, ok := err.(net.Error); ok` arm is
     /// unreachable here — see the file banner.
@@ -186,7 +186,7 @@ impl halfConn {
         return self.err.clone();
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:168-172 halfConn.prepareCipherSpec
+    // go: sdk 1.25.5 crypto/tls/conn.go:207-211 halfConn.prepareCipherSpec
     /// Go: "sets the encryption and MAC states that a subsequent
     /// changeCipherSpec will use."
     pub(crate) fn prepareCipherSpec(
@@ -201,7 +201,7 @@ impl halfConn {
         self.nextMac = mac;
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:176-188 halfConn.changeCipherSpec
+    // go: sdk 1.25.5 crypto/tls/conn.go:215-227 halfConn.changeCipherSpec
     /// Go: "changes the encryption and MAC states to the ones previously
     /// passed to prepareCipherSpec."
     pub(crate) fn changeCipherSpec(&mut self) -> Option<alert> {
@@ -224,7 +224,7 @@ impl halfConn {
         return None;
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:190-198 halfConn.setTrafficSecret
+    // go: sdk 1.25.5 crypto/tls/conn.go:229-237 halfConn.setTrafficSecret
     pub(crate) fn setTrafficSecret(
         &mut self,
         suite: &'static cipherSuiteTLS13,
@@ -246,7 +246,7 @@ impl halfConn {
         }
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:201-212 halfConn.incSeq
+    // go: sdk 1.25.5 crypto/tls/conn.go:240-252 halfConn.incSeq
     /// Increment the sequence number.
     pub(crate) fn incSeq(&mut self) {
         // Go: for i := 7; i >= 0; i-- { hc.seq[i]++; if hc.seq[i] != 0 { return } }
@@ -264,7 +264,7 @@ impl halfConn {
         panic!("TLS: sequence number wraparound");
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:217-236 halfConn.explicitNonceLen
+    // go: sdk 1.25.5 crypto/tls/conn.go:257-276 halfConn.explicitNonceLen
     /// Go: "returns the number of bytes of explicit nonce or IV included
     /// in each record. Explicit nonces are present only in CBC modes
     /// after TLS 1.0 and in certain AEAD modes in TLS 1.2."
@@ -292,7 +292,7 @@ impl halfConn {
     }
 }
 
-// go: sdk 1.25.5 crypto/tls/conn.go:241-286 extractPadding
+// go: sdk 1.25.5 crypto/tls/conn.go:281-326 extractPadding
 /// Go: "extractPadding returns, in constant time, the length of the
 /// padding to remove from the end of payload. It also returns a byte
 /// which is equal to 255 if the padding was valid and 0 otherwise. See
@@ -358,13 +358,13 @@ pub(crate) fn extractPadding(payload: slice<byte>) -> (int, byte) {
     return (crate::int(paddingLen) + 1, good);
 }
 
-// go: sdk 1.25.5 crypto/tls/conn.go:288-290 roundUp
+// go: sdk 1.25.5 crypto/tls/conn.go:328-330 roundUp
 pub(crate) fn roundUp(a: int, b: int) -> int {
     // Go: return a + (b-a%b)%b
     return a + (b - a % b) % b;
 }
 
-// go: sdk 1.25.5 crypto/tls/conn.go:928-937 sliceForAppend
+// go: sdk 1.25.5 crypto/tls/conn.go:467-476 sliceForAppend
 /// Go: "sliceForAppend extends the input slice by n bytes. head is the
 /// full extended slice, while tail is the appended part. If the original
 /// slice has sufficient capacity no allocation is performed."
@@ -399,7 +399,7 @@ pub struct RecordHeaderError {
 }
 
 impl RecordHeaderError {
-    // go: sdk 1.25.5 crypto/tls/conn.go:719-719 RecordHeaderError.Error
+    // go: sdk 1.25.5 crypto/tls/conn.go:579-579 RecordHeaderError.Error
     pub fn Error(&self) -> string {
         // Go: return "tls: " + e.Msg
         return string::from("tls: ") + self.Msg.clone();
@@ -434,7 +434,7 @@ pub(crate) struct atLeastReader<'a> {
 }
 
 impl<'a> crate::io::Reader for atLeastReader<'a> {
-    // go: sdk 1.25.5 crypto/tls/conn.go:756-770 atLeastReader.Read
+    // go: sdk 1.25.5 crypto/tls/conn.go:812-825 atLeastReader.Read
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         // Go: if r.N <= 0 { return 0, io.EOF }
         if self.N <= 0 {
@@ -458,7 +458,7 @@ impl<'a> crate::io::Reader for atLeastReader<'a> {
 }
 
 impl halfConn {
-    // go: sdk 1.25.5 crypto/tls/conn.go:301-406 halfConn.decrypt
+    // go: sdk 1.25.5 crypto/tls/conn.go:340-462 halfConn.decrypt
     /// Go: "decrypt authenticates and decrypts the record if protection
     /// is active at this stage. The returned plaintext might overlap
     /// with the input."
@@ -681,7 +681,7 @@ impl halfConn {
         return (plaintext, typ, None);
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:940-1017 halfConn.encrypt
+    // go: sdk 1.25.5 crypto/tls/conn.go:480-563 halfConn.encrypt
     /// Go: "encrypt encrypts payload, adding the appropriate nonce
     /// and/or MAC, and appends it to record, which must already contain
     /// the record header."
@@ -1351,21 +1351,21 @@ impl Conn {
         self.curveID = ss.__curveID();
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:99-101 Conn.LocalAddr
+    // go: sdk 1.25.5 crypto/tls/conn.go:131-133 Conn.LocalAddr
     /// Go: "LocalAddr returns the local network address."
     pub fn LocalAddr(&self) -> crate::net::TCPAddr {
         // Go: return c.conn.LocalAddr()
         return self.conn.as_ref().unwrap().LocalAddr();
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:103-105 Conn.RemoteAddr
+    // go: sdk 1.25.5 crypto/tls/conn.go:136-138 Conn.RemoteAddr
     /// Go: "RemoteAddr returns the remote network address."
     pub fn RemoteAddr(&self) -> crate::net::TCPAddr {
         // Go: return c.conn.RemoteAddr()
         return self.conn.as_ref().unwrap().RemoteAddr();
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:107-112 Conn.SetDeadline
+    // go: sdk 1.25.5 crypto/tls/conn.go:143-145 Conn.SetDeadline
     /// Go: "SetDeadline sets the read and write deadlines associated
     /// with the connection. A zero value for t means Read and Write will
     /// not time out. After a Write has timed out, the TLS state is
@@ -1375,7 +1375,7 @@ impl Conn {
         return self.conn.as_ref().unwrap().SetDeadline(t);
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:114-118 Conn.SetReadDeadline
+    // go: sdk 1.25.5 crypto/tls/conn.go:149-151 Conn.SetReadDeadline
     /// Go: "SetReadDeadline sets the read deadline on the underlying
     /// connection. A zero value for t means Read will not time out."
     pub fn SetReadDeadline(&self, t: crate::time::Time) -> error {
@@ -1383,7 +1383,7 @@ impl Conn {
         return self.conn.as_ref().unwrap().SetReadDeadline(t);
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:120-126 Conn.SetWriteDeadline
+    // go: sdk 1.25.5 crypto/tls/conn.go:156-158 Conn.SetWriteDeadline
     /// Go: "SetWriteDeadline sets the write deadline on the underlying
     /// connection. A zero value for t means Write will not time out.
     /// After a Write has timed out, the TLS state is corrupt and all
@@ -1393,7 +1393,7 @@ impl Conn {
         return self.conn.as_ref().unwrap().SetWriteDeadline(t);
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:128-134 Conn.NetConn
+    // go: sdk 1.25.5 crypto/tls/conn.go:163-165 Conn.NetConn
     /// Go: "NetConn returns the underlying connection that is wrapped by
     /// c. Note that writing to or reading from this connection directly
     /// will corrupt the TLS session."
@@ -1402,7 +1402,7 @@ impl Conn {
         return self.conn.as_deref();
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:722-727 Conn.newRecordHeaderError
+    // go: sdk 1.25.5 crypto/tls/conn.go:581-586 Conn.newRecordHeaderError
     ///
     /// Deviation: Go's `RecordHeaderError.Conn` field holds the
     /// `net.Conn`; goish's record does not carry it, so the parameter is
@@ -1419,7 +1419,7 @@ impl Conn {
         return err;
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:890-926 Conn.maxPayloadSizeForWrite
+    // go: sdk 1.25.5 crypto/tls/conn.go:902-947 Conn.maxPayloadSizeForWrite
     /// Go: "maxPayloadSizeForWrite returns the maximum TLS payload size
     /// to use for the write of the given record type. It defaults to
     /// [maxPlaintext] but is reduced for the first few records to
@@ -1492,7 +1492,7 @@ impl Conn {
         return n;
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:1610-1615 Conn.OCSPResponse
+    // go: sdk 1.25.5 crypto/tls/conn.go:1669-1674 Conn.OCSPResponse
     /// Go: "OCSPResponse returns the stapled OCSP response from the TLS
     /// server, if any. (Only valid for client connections.)"
     pub fn OCSPResponse(&self) -> slice<byte> {
@@ -1501,7 +1501,7 @@ impl Conn {
         return self.ocspResponse.clone();
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:1617-1634 Conn.VerifyHostname
+    // go: sdk 1.25.5 crypto/tls/conn.go:1679-1692 Conn.VerifyHostname
     /// Go: "VerifyHostname checks that the peer certificate chain is
     /// valid for connecting to host. If so, it returns nil; if not, it
     /// returns an error describing the problem."
@@ -1525,7 +1525,7 @@ impl Conn {
         return self.peerCertificates[0].VerifyHostname(host);
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:1541-1546 Conn.ConnectionState
+    // go: sdk 1.25.5 crypto/tls/conn.go:1619-1623 Conn.ConnectionState
     /// Go: "ConnectionState returns basic TLS details about the
     /// connection."
     pub fn ConnectionState(&self) -> super::common::ConnectionState {
@@ -1534,7 +1534,7 @@ impl Conn {
         return self.connectionStateLocked();
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:1548-1591 Conn.connectionStateLocked
+    // go: sdk 1.25.5 crypto/tls/conn.go:1627-1665 Conn.connectionStateLocked
     ///
     /// Deviations: Go's two `testingOnly*` fields are absent from
     /// `ConnectionState`, and the `tlsunsafeekm` GODEBUG escape hatch is
@@ -1598,7 +1598,7 @@ pub(crate) const recordSizeBoostThreshold: crate::types::int64 = 128 * 1024;
 pub(crate) const tcpMSSEstimate: int = 1208;
 
 impl Conn {
-    // go: sdk 1.25.5 crypto/tls/conn.go:1039-1049 Conn.flush
+    // go: sdk 1.25.5 crypto/tls/conn.go:960-970 Conn.flush
     /// Go: "flush sends any pending records currently buffered."
     pub(crate) fn flush(&mut self) -> (int, error) {
         // Go: if len(c.sendBuf) == 0 { return 0, nil }
@@ -1618,7 +1618,7 @@ impl Conn {
         return (n, err);
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:1027-1037 Conn.write
+    // go: sdk 1.25.5 crypto/tls/conn.go:949-958 Conn.write
     /// Go: "write buffers data for the record layer, or writes it out
     /// directly if buffering is off."
     pub(crate) fn write(&mut self, data: slice<byte>) -> (int, error) {
@@ -1635,7 +1635,7 @@ impl Conn {
         return (n, err);
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:1053-1126 Conn.writeRecordLocked
+    // go: sdk 1.25.5 crypto/tls/conn.go:981-1050 Conn.writeRecordLocked
     ///
     /// Deviations: the `c.quic != nil` branch is absent — goish ships no
     /// QUIC transport, so `c.quic` is always nil and Go's non-QUIC path
@@ -1722,7 +1722,7 @@ impl Conn {
         return (n, errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:1128-1133 Conn.writeChangeCipherRecord
+    // go: sdk 1.25.5 crypto/tls/conn.go:1072-1077 Conn.writeChangeCipherRecord
     pub(crate) fn writeChangeCipherRecord(&mut self) -> error {
         // Go: c.out.Lock(); defer c.out.Unlock()
         //     _, err := c.writeRecordLocked(recordTypeChangeCipherSpec, []byte{1})
@@ -1734,7 +1734,7 @@ impl Conn {
         return err;
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:1002-1021 Conn.sendAlertLocked
+    // go: sdk 1.25.5 crypto/tls/conn.go:843-863 Conn.sendAlertLocked
     ///
     /// Deviation: Go wraps the alert in a `*net.OpError{Op: "local
     /// error"}` before storing it as the half-connection's permanent
@@ -1768,7 +1768,7 @@ impl Conn {
         return self.out.setErrorLocked(crate::errors::Wrap(err));
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:1023-1027 Conn.sendAlert
+    // go: sdk 1.25.5 crypto/tls/conn.go:866-870 Conn.sendAlert
     pub(crate) fn sendAlert(&mut self, err: alert) -> error {
         // Go: c.out.Lock(); defer c.out.Unlock()
         //     return c.sendAlertLocked(err)
@@ -1825,7 +1825,7 @@ impl crate::net::Conn for memConn {
 }
 
 impl Conn {
-    // go: sdk 1.25.5 crypto/tls/conn.go:772-784 Conn.readFromUntil
+    // go: sdk 1.25.5 crypto/tls/conn.go:829-840 Conn.readFromUntil
     /// Go: "readFromUntil reads from r into c.rawInput until c.rawInput
     /// contains at least n bytes or else returns an error."
     ///
@@ -1858,7 +1858,7 @@ impl Conn {
         return err;
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:642-649 Conn.retryReadRecord
+    // go: sdk 1.25.5 crypto/tls/conn.go:795-802 Conn.retryReadRecord
     /// Go: "retryReadRecord recurses into readRecordOrCCS to drop a
     /// non-advancing record, like a warning alert, empty application_data,
     /// or a change_cipher_spec in TLS 1.3."
@@ -1878,7 +1878,7 @@ impl Conn {
         return self.readRecordOrCCS(expectChangeCipherSpec);
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:614-616 Conn.readRecord
+    // go: sdk 1.25.5 crypto/tls/conn.go:588-590 Conn.readRecord
     /// Go: "readRecord reads the next TLS record from the connection and
     /// updates the record layer state."
     pub(crate) fn readRecord(&mut self) -> error {
@@ -1886,13 +1886,13 @@ impl Conn {
         return self.readRecordOrCCS(false);
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:618-620 Conn.readChangeCipherSpec
+    // go: sdk 1.25.5 crypto/tls/conn.go:592-594 Conn.readChangeCipherSpec
     pub(crate) fn readChangeCipherSpec(&mut self) -> error {
         // Go: return c.readRecordOrCCS(true)
         return self.readRecordOrCCS(true);
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:651-820 Conn.readRecordOrCCS
+    // go: sdk 1.25.5 crypto/tls/conn.go:610-791 Conn.readRecordOrCCS
     /// Go: "readRecordOrCCS reads one or more TLS records from the
     /// connection and updates the record layer state. Some invariants:
     ///   * c.in must be locked
@@ -2274,7 +2274,7 @@ crate::var! {
 }
 
 impl Conn {
-    // go: sdk 1.25.5 crypto/tls/conn.go:1439-1455 Conn.closeNotify
+    // go: sdk 1.25.5 crypto/tls/conn.go:1470-1483 Conn.closeNotify
     /// Go: "closeNotify closes the Write side of the connection by
     /// sending a close notify record."
     pub(crate) fn closeNotify(&mut self) -> error {
@@ -2295,7 +2295,7 @@ impl Conn {
         return self.closeNotifyErr.clone();
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:1459-1465 Conn.CloseWrite
+    // go: sdk 1.25.5 crypto/tls/conn.go:1462-1468 Conn.CloseWrite
     /// Go: "CloseWrite shuts down the writing side of the connection. It
     /// should only be called once the handshake has completed and does
     /// not call CloseWrite on the underlying connection. Most callers
@@ -2309,7 +2309,7 @@ impl Conn {
         return self.closeNotify();
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:1058-1068 Conn.readHandshakeBytes
+    // go: sdk 1.25.5 crypto/tls/conn.go:1080-1090 Conn.readHandshakeBytes
     ///
     /// Deviation: the `c.quic != nil` branch is absent — goish ships no
     /// QUIC transport.

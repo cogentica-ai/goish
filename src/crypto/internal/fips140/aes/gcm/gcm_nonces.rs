@@ -51,7 +51,7 @@ use alloc::vec::Vec;
 use super::gcm::{gcmStandardNonceSize, gcmTagSize, New, GCM};
 use super::gcm_noasm::seal;
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:20-40 SealWithRandomNonce
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:24-43 SealWithRandomNonce
 /// `gcm.SealWithRandomNonce(g, nonce, out, plaintext, additionalData)` —
 /// encrypt `plaintext` into `out` and write a random nonce to `nonce`.
 ///
@@ -133,7 +133,7 @@ pub struct GCMWithCounterNonce {
     next: uint64,
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:48-54 NewGCMWithCounterNonce
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:51-57 NewGCMWithCounterNonce
 /// `gcm.NewGCMWithCounterNonce(cipher)` — a GCM that enforces the
 /// counter-nonce construction.
 pub fn NewGCMWithCounterNonce(cipher: &aes::Block) -> (Option<GCMWithCounterNonce>, error) {
@@ -156,17 +156,17 @@ pub fn NewGCMWithCounterNonce(cipher: &aes::Block) -> (Option<GCMWithCounterNonc
 }
 
 impl GCMWithCounterNonce {
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:64-64 NonceSize
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:67-67 GCMWithCounterNonce.NonceSize
     pub fn NonceSize(&self) -> int {
         return gcmStandardNonceSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:66-66 Overhead
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:69-69 GCMWithCounterNonce.Overhead
     pub fn Overhead(&self) -> int {
         return gcmTagSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:68-93 Seal
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:71-99 GCMWithCounterNonce.Seal
     pub fn Seal(
         &mut self,
         dst: slice<byte>,
@@ -205,7 +205,7 @@ impl GCMWithCounterNonce {
         return self.g.sealAfterIndicator(dst, nonce, plaintext, data);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:95-98 Open
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:101-104 GCMWithCounterNonce.Open
     pub fn Open(
         &self,
         dst: slice<byte>,
@@ -229,7 +229,7 @@ pub struct GCMForTLS12 {
     next: uint64,
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:106-112 NewGCMForTLS12
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:111-117 NewGCMForTLS12
 /// `gcm.NewGCMForTLS12(cipher)` — a GCM that enforces RFC 5288 nonces.
 pub fn NewGCMForTLS12(cipher: &aes::Block) -> (Option<GCMForTLS12>, error) {
     let (g, err) = New(cipher, gcmStandardNonceSize, gcmTagSize);
@@ -246,17 +246,17 @@ pub fn NewGCMForTLS12(cipher: &aes::Block) -> (Option<GCMForTLS12>, error) {
 }
 
 impl GCMForTLS12 {
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:119-119 NonceSize
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:124-124 GCMForTLS12.NonceSize
     pub fn NonceSize(&self) -> int {
         return gcmStandardNonceSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:121-121 Overhead
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:126-126 GCMForTLS12.Overhead
     pub fn Overhead(&self) -> int {
         return gcmTagSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:123-140 Seal
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:128-146 GCMForTLS12.Seal
     pub fn Seal(
         &mut self,
         dst: slice<byte>,
@@ -276,7 +276,7 @@ impl GCMForTLS12 {
         return self.g.sealAfterIndicator(dst, nonce, plaintext, data);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:142-145 Open
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:148-151 GCMForTLS12.Open
     pub fn Open(
         &self,
         dst: slice<byte>,
@@ -304,7 +304,7 @@ pub struct GCMForTLS13 {
     next: uint64,
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:150-156 NewGCMForTLS13
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:155-161 NewGCMForTLS13
 /// `gcm.NewGCMForTLS13(cipher)` — a GCM that enforces RFC 8446 nonces.
 pub fn NewGCMForTLS13(cipher: &aes::Block) -> (Option<GCMForTLS13>, error) {
     let (g, err) = New(cipher, gcmStandardNonceSize, gcmTagSize);
@@ -323,17 +323,17 @@ pub fn NewGCMForTLS13(cipher: &aes::Block) -> (Option<GCMForTLS13>, error) {
 }
 
 impl GCMForTLS13 {
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:165-165 NonceSize
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:170-170 GCMForTLS13.NonceSize
     pub fn NonceSize(&self) -> int {
         return gcmStandardNonceSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:167-167 Overhead
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:172-172 GCMForTLS13.Overhead
     pub fn Overhead(&self) -> int {
         return gcmTagSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:169-191 Seal
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:174-198 GCMForTLS13.Seal
     pub fn Seal(
         &mut self,
         dst: slice<byte>,
@@ -361,7 +361,7 @@ impl GCMForTLS13 {
         return self.g.sealAfterIndicator(dst, nonce, plaintext, data);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:193-196 Open
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:200-203 GCMForTLS13.Open
     pub fn Open(
         &self,
         dst: slice<byte>,
@@ -387,7 +387,7 @@ pub struct GCMForSSH {
     next: uint64,
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:202-208 NewGCMForSSH
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:209-215 NewGCMForSSH
 /// `gcm.NewGCMForSSH(cipher)` — a GCM that enforces RFC 5647 nonces.
 pub fn NewGCMForSSH(cipher: &aes::Block) -> (Option<GCMForSSH>, error) {
     let (g, err) = New(cipher, gcmStandardNonceSize, gcmTagSize);
@@ -406,17 +406,17 @@ pub fn NewGCMForSSH(cipher: &aes::Block) -> (Option<GCMForSSH>, error) {
 }
 
 impl GCMForSSH {
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:217-217 NonceSize
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:224-224 GCMForSSH.NonceSize
     pub fn NonceSize(&self) -> int {
         return gcmStandardNonceSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:219-219 Overhead
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:226-226 GCMForSSH.Overhead
     pub fn Overhead(&self) -> int {
         return gcmTagSize;
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:221-243 Seal
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:228-252 GCMForSSH.Seal
     pub fn Seal(
         &mut self,
         dst: slice<byte>,
@@ -443,7 +443,7 @@ impl GCMForSSH {
         return self.g.sealAfterIndicator(dst, nonce, plaintext, data);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:245-248 Open
+    // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_nonces.go:254-257 GCMForSSH.Open
     pub fn Open(
         &self,
         dst: slice<byte>,

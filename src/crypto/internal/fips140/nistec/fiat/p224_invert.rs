@@ -13,7 +13,7 @@ use super::p224::P224Element;
 use crate::types::int;
 
 impl P224Element {
-    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p224_invert.go:12-87 Invert
+    // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p224_invert.go:12-87 P224Element.Invert
     /// Set e = 1/x, and return e.
     ///
     /// If x == 0, Invert returns e = 0.

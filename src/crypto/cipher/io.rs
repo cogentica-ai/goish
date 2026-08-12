@@ -63,7 +63,7 @@ pub struct StreamReader<S: Stream, R: io::Reader> {
 //       return
 //   }
 impl<S: Stream, R: io::Reader> io::Reader for StreamReader<S, R> {
-    // go: sdk 1.25.5 crypto/cipher/io.go:19-23 Read
+    // go: sdk 1.25.5 crypto/cipher/io.go:19-23 StreamReader.Read
     fn Read(&mut self, dst: &mut slice<byte>) -> (int, error) {
         // Go: n, err = r.R.Read(dst)
         let (n, err) = self.R.Read(dst);
@@ -110,7 +110,7 @@ pub struct StreamWriter<S: Stream, W: io::Writer> {
 //       return
 //   }
 impl<S: Stream, W: io::Writer> io::Writer for StreamWriter<S, W> {
-    // go: sdk 1.25.5 crypto/cipher/io.go:36-44 Write
+    // go: sdk 1.25.5 crypto/cipher/io.go:36-44 StreamWriter.Write
     fn Write(&mut self, src: slice<byte>) -> (int, error) {
         let n_src = src.Len();
         // Go: c := make([]byte, len(src))
@@ -142,7 +142,7 @@ impl<S: Stream, W: io::Writer> io::Writer for StreamWriter<S, W> {
 // non-Closer W see no `Close` method (matching Go's "returns nil"
 // short-circuit — the call would have been a no-op anyway).
 impl<S: Stream, W: io::Writer + io::Closer> io::Closer for StreamWriter<S, W> {
-    // go: sdk 1.25.5 crypto/cipher/io.go:48-53 Close
+    // go: sdk 1.25.5 crypto/cipher/io.go:48-53 StreamWriter.Close
     fn Close(&mut self) -> error {
         // Go: return c.Close()
         let _ = nil; // keep `nil` import live for parity comments

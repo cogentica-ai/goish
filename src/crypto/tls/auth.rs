@@ -200,7 +200,7 @@ pub(crate) fn typeAndHashFromSignatureScheme(
     return (sigType, hash, crate::errors::nil);
 }
 
-// go: sdk 1.25.5 crypto/tls/auth.go:132-149 legacyTypeAndHashFromPublicKey
+// go: sdk 1.25.5 crypto/tls/auth.go:132-147 legacyTypeAndHashFromPublicKey
 /// The fixed signature type and `crypto.Hash` for a given public key
 /// used with TLS 1.0 and 1.1, before signature-algorithm negotiation.
 pub(crate) fn legacyTypeAndHashFromPublicKey(pub_: &Any) -> (uint8, crypto::Hash, error) {

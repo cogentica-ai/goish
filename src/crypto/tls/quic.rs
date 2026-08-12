@@ -31,7 +31,7 @@ pub const QUICEncryptionLevelHandshake: QUICEncryptionLevel = QUICEncryptionLeve
 pub const QUICEncryptionLevelApplication: QUICEncryptionLevel = QUICEncryptionLevel(3);
 
 impl QUICEncryptionLevel {
-    // go: sdk 1.25.5 crypto/tls/quic.go:28-41 QUICEncryptionLevel.String
+    // go: sdk 1.25.5 crypto/tls/quic.go:24-37 QUICEncryptionLevel.String
     /// Go: the level's name, or `QUICEncryptionLevel(N)` for an
     /// unrecognised value. Note the fallback uses `%v` on an `int`, so
     /// it prints in DECIMAL — unlike `VersionName`, whose fallback is

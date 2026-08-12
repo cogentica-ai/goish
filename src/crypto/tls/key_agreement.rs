@@ -31,7 +31,7 @@ use crate::hash::Hash as HashTrait;
 use crate::io::Writer as _;
 use crate::types::{byte, int, uint16, uint8};
 
-// go: sdk 1.25.5 crypto/tls/key_agreement.go:246-252 sha1Hash
+// go: sdk 1.25.5 crypto/tls/key_agreement.go:108-114 sha1Hash
 /// SHA-1 over the concatenation of `slices`.
 pub(crate) fn sha1Hash(slices: &[slice<byte>]) -> slice<byte> {
     // Go: hsha1 := sha1.New()
@@ -44,7 +44,7 @@ pub(crate) fn sha1Hash(slices: &[slice<byte>]) -> slice<byte> {
     return hsha1.Sum(slice::__from_vec(Vec::new()));
 }
 
-// go: sdk 1.25.5 crypto/tls/key_agreement.go:254-264 md5SHA1Hash
+// go: sdk 1.25.5 crypto/tls/key_agreement.go:118-127 md5SHA1Hash
 /// MD5 concatenated with SHA-1, the TLS 1.0/1.1 signature digest.
 pub(crate) fn md5SHA1Hash(slices: &[slice<byte>]) -> slice<byte> {
     // Go: md5sha1 := make([]byte, md5.Size+sha1.Size)
@@ -66,7 +66,7 @@ pub(crate) fn md5SHA1Hash(slices: &[slice<byte>]) -> slice<byte> {
     return slice::__from_vec(md5sha1);
 }
 
-// go: sdk 1.25.5 crypto/tls/key_agreement.go:268-291 hashForServerKeyExchange
+// go: sdk 1.25.5 crypto/tls/key_agreement.go:133-153 hashForServerKeyExchange
 /// The digest the ServerKeyExchange signature is computed over.
 ///
 /// Deviation: Go's `slices ...[]byte` is variadic; goish has no
@@ -202,7 +202,7 @@ crate::var! {
 pub(crate) struct rsaKeyAgreement {}
 
 impl keyAgreement for rsaKeyAgreement {
-    // go: sdk 1.25.5 crypto/tls/key_agreement.go:44-46 rsaKeyAgreement.generateServerKeyExchange
+    // go: sdk 1.25.5 crypto/tls/key_agreement.go:46-48 rsaKeyAgreement.generateServerKeyExchange
     fn generateServerKeyExchange(
         &mut self,
         _config: &Config,
@@ -214,7 +214,7 @@ impl keyAgreement for rsaKeyAgreement {
         return (None, crate::errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/key_agreement.go:48-73 rsaKeyAgreement.processClientKeyExchange
+    // go: sdk 1.25.5 crypto/tls/key_agreement.go:50-76 rsaKeyAgreement.processClientKeyExchange
     fn processClientKeyExchange(
         &mut self,
         config: &Config,
@@ -266,7 +266,7 @@ impl keyAgreement for rsaKeyAgreement {
         return (preMasterSecret, crate::errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/key_agreement.go:75-77 rsaKeyAgreement.processServerKeyExchange
+    // go: sdk 1.25.5 crypto/tls/key_agreement.go:78-80 rsaKeyAgreement.processServerKeyExchange
     fn processServerKeyExchange(
         &mut self,
         _config: &Config,
@@ -279,7 +279,7 @@ impl keyAgreement for rsaKeyAgreement {
         return crate::errors::New("tls: unexpected ServerKeyExchange");
     }
 
-    // go: sdk 1.25.5 crypto/tls/key_agreement.go:79-102 rsaKeyAgreement.generateClientKeyExchange
+    // go: sdk 1.25.5 crypto/tls/key_agreement.go:82-105 rsaKeyAgreement.generateClientKeyExchange
     fn generateClientKeyExchange(
         &mut self,
         config: &Config,
@@ -380,7 +380,7 @@ pub(crate) struct ecdheKeyAgreement {
 }
 
 impl keyAgreement for ecdheKeyAgreement {
-    // go: sdk 1.25.5 crypto/tls/key_agreement.go:175-262 ecdheKeyAgreement.generateServerKeyExchange
+    // go: sdk 1.25.5 crypto/tls/key_agreement.go:175-264 ecdheKeyAgreement.generateServerKeyExchange
     fn generateServerKeyExchange(
         &mut self,
         config: &Config,
@@ -591,7 +591,7 @@ impl keyAgreement for ecdheKeyAgreement {
         return (Some(skx), crate::errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/key_agreement.go:264-278 ecdheKeyAgreement.processClientKeyExchange
+    // go: sdk 1.25.5 crypto/tls/key_agreement.go:266-281 ecdheKeyAgreement.processClientKeyExchange
     fn processClientKeyExchange(
         &mut self,
         _config: &Config,

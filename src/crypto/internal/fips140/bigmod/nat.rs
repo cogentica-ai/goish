@@ -107,7 +107,7 @@ impl Nat {
         }
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:77-91 expand
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:77-91 Nat.expand
     /// `expand` (nat.go:77) — expand x to n limbs, value unchanged.
     fn expand(&mut self, n: usize) -> &mut Nat {
         if self.limbs.len() > n {
@@ -118,7 +118,7 @@ impl Nat {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:94-103 reset
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:94-103 Nat.reset
     /// `reset` (nat.go:94) — a zero `Nat` of n limbs, reusing storage.
     fn reset(&mut self, n: usize) -> &mut Nat {
         // Clear all current limbs, then resize to n (new limbs are 0).
@@ -129,7 +129,7 @@ impl Nat {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:110-116 resetToBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:110-116 Nat.resetToBytes
     /// `resetToBytes` (nat.go:110) — assign x = b (big-endian bytes),
     /// resizing to fit, with the announced length set from the actual
     /// bit size (leading zeroes ignored).
@@ -141,7 +141,7 @@ impl Nat {
         self.trim()
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:119-129 trim
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:119-129 Nat.trim
     /// `trim` (nat.go:119) — reduce the size of x to match its value.
     fn trim(&mut self) -> &mut Nat {
         // Trim most-significant (trailing in little-endian) zero limbs.
@@ -158,7 +158,7 @@ impl Nat {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:132-136 set
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:132-136 Nat.set
     /// `set` (nat.go:132) — assign x = y, resizing as needed.
     fn set(&mut self, y: &Nat) -> &mut Nat {
         self.reset(y.limbs.len());
@@ -166,14 +166,14 @@ impl Nat {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:141-143 Bits
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:141-143 Nat.Bits
     /// `Bits()` (nat.go:141) — x as a little-endian slice of `uint`. The
     /// length matches the announced length of x.
     pub fn Bits(&self) -> slice<uint> {
         slice::<uint>::__from_vec(self.limbs.clone())
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:149-166 Bytes
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:149-166 Nat.Bytes
     /// `Bytes(m)` (nat.go:149) — x as a zero-extended big-endian byte
     /// slice sized to m. x must have m's size and be `<= m`.
     pub fn Bytes(&self, m: &Modulus) -> slice<byte> {
@@ -196,7 +196,7 @@ impl Nat {
         slice::<byte>::__from_vec(bytes)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:174-183 SetBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:174-183 Nat.SetBytes
     /// `SetBytes(b, m)` (nat.go:174) — assign x = b (big-endian).
     /// Returns an error if `b >= m`. Output is resized to m's size.
     pub fn SetBytes(&mut self, b: slice<byte>, m: &Modulus) -> (Nat, error) {
@@ -212,7 +212,7 @@ impl Nat {
         (self.clone(), errors::nil)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:190-203 SetOverflowingBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:190-203 Nat.SetOverflowingBytes
     /// `SetOverflowingBytes(b, m)` (nat.go:190) — assign x = b, reducing
     /// values up to `2^⌈log2(m)⌉ - 1`. Errors if b has a longer bit
     /// length than m.
@@ -237,7 +237,7 @@ impl Nat {
         (self.clone(), errors::nil)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:214-229 setBytes
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:214-229 Nat.setBytes
     /// `setBytes` (nat.go:214) — internal big-endian byte loader.
     fn setBytes(&mut self, b: &[byte]) -> error {
         let mut i = b.len();
@@ -259,7 +259,7 @@ impl Nat {
         errors::nil
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:234-238 SetUint
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:234-238 Nat.SetUint
     /// `SetUint(y)` (nat.go:234) — assign x = y; resized to one limb.
     pub fn SetUint(&mut self, y: uint) -> &mut Nat {
         self.reset(1);
@@ -267,7 +267,7 @@ impl Nat {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:245-256 Equal
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:245-256 Nat.Equal
     /// `Equal(y)` (nat.go:245) — 1 if x == y, else 0. Operands must
     /// share the same announced length.
     pub fn Equal(&self, y: &Nat) -> uint {
@@ -279,7 +279,7 @@ impl Nat {
         equal
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:261-271 IsZero
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:261-271 Nat.IsZero
     /// `IsZero()` (nat.go:261) — 1 if x == 0, else 0.
     pub fn IsZero(&self) -> uint {
         let size = self.limbs.len();
@@ -290,7 +290,7 @@ impl Nat {
         zero
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:276-290 IsOne
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:276-290 Nat.IsOne
     /// `IsOne()` (nat.go:276) — 1 if x == 1, else 0.
     pub fn IsOne(&self) -> uint {
         let size = self.limbs.len();
@@ -304,7 +304,7 @@ impl Nat {
         one
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:298-302 IsMinusOne
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:298-302 Nat.IsMinusOne
     /// `IsMinusOne(m)` (nat.go:298) — 1 if x == -1 mod m, else 0. x must
     /// match m's size and be reduced modulo m.
     pub fn IsMinusOne(&self, m: &Modulus) -> uint {
@@ -313,7 +313,7 @@ impl Nat {
         self.Equal(&minusOne)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:305-310 IsOdd
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:305-310 Nat.IsOdd
     /// `IsOdd()` (nat.go:305) — 1 if x is odd, else 0.
     pub fn IsOdd(&self) -> uint {
         if self.limbs.is_empty() {
@@ -322,7 +322,7 @@ impl Nat {
         self.limbs[0] & 1
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:313-325 TrailingZeroBitsVarTime
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:313-325 Nat.TrailingZeroBitsVarTime
     /// `TrailingZeroBitsVarTime()` (nat.go:313) — number of trailing zero
     /// bits in x. Leaks the value through timing.
     pub fn TrailingZeroBitsVarTime(&self) -> uint {
@@ -338,7 +338,7 @@ impl Nat {
         t
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:332-345 cmpGeq
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:332-345 Nat.cmpGeq
     /// `cmpGeq(y)` (nat.go:332) — 1 if x >= y, else 0; constant time.
     fn cmpGeq(&self, y: &Nat) -> choice {
         let size = self.limbs.len();
@@ -351,7 +351,7 @@ impl Nat {
         not(c)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:352-363 assign
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:352-363 Nat.assign
     /// `assign(on, y)` (nat.go:352) — x <- y if `on == 1`, else nothing.
     fn assign(&mut self, on: choice, y: &Nat) -> &mut Nat {
         let size = self.limbs.len();
@@ -362,7 +362,7 @@ impl Nat {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:370-380 add
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:370-380 Nat.add
     /// `add(y)` (nat.go:370) — x += y, returns the carry.
     fn add(&mut self, y: &Nat) -> uint {
         let size = self.limbs.len();
@@ -375,7 +375,7 @@ impl Nat {
         c
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:387-397 sub
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:387-397 Nat.sub
     /// `sub(y)` (nat.go:387) — x -= y, returns the borrow.
     fn sub(&mut self, y: &Nat) -> uint {
         let size = self.limbs.len();
@@ -388,7 +388,7 @@ impl Nat {
         c
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:404-430 ShiftRightVarTime
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:404-430 Nat.ShiftRightVarTime
     /// `ShiftRightVarTime(n)` (nat.go:404) — x = x >> n; announced
     /// length unchanged.
     pub fn ShiftRightVarTime(&mut self, n: uint) -> &mut Nat {
@@ -422,7 +422,7 @@ impl Nat {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:436-447 BitLenVarTime
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:436-447 Nat.BitLenVarTime
     /// `BitLenVarTime()` (nat.go:436) — actual size of x in bits. The
     /// value (not just the announced size) leaks through timing.
     pub fn BitLenVarTime(&self) -> int {
@@ -438,20 +438,20 @@ impl Nat {
         0
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:684-686 resetFor
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:684-686 Nat.resetFor
     /// `resetFor(m)` (nat.go:684) — ensure out has m's size; zeroed.
     fn resetFor(&mut self, m: &Modulus) -> &mut Nat {
         self.reset(m.nat.limbs.len())
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:677-679 ExpandFor
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:677-679 Nat.ExpandFor
     /// `ExpandFor(m)` (nat.go:677) — ensure x has m's size. The announced
     /// size of x must be `<=` m's.
     pub fn ExpandFor(&mut self, m: &Modulus) -> &mut Nat {
         self.expand(m.nat.limbs.len())
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:607-639 shiftIn
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:607-639 Nat.shiftIn
     /// `shiftIn(y, m)` (nat.go:607) — x = x << _W + y mod m. Assumes x is
     /// already reduced mod m.
     fn shiftIn(&mut self, y: uint, m: &Modulus) -> &mut Nat {
@@ -484,7 +484,7 @@ impl Nat {
         self.assign(needSubtraction, &dn)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:648-672 Mod
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:648-672 Nat.Mod
     /// `Mod(x, m)` (nat.go:648) — out = x mod m, for x of any size.
     /// Output resized to m's size.
     pub fn Mod(&mut self, x: &Nat, m: &Modulus) -> &mut Nat {
@@ -510,7 +510,7 @@ impl Nat {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:699-706 maybeSubtractModulus
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:699-706 Nat.maybeSubtractModulus
     /// `maybeSubtractModulus(always, m)` (nat.go:699) — x -= m iff x >= m
     /// or `always` is yes. Reduces a value up to `2m - 1`.
     fn maybeSubtractModulus(&mut self, always: choice, m: &Modulus) {
@@ -522,7 +522,7 @@ impl Nat {
         self.assign(keep, &t);
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:714-721 Sub
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:714-721 Nat.Sub
     /// `Sub(y, m)` (nat.go:714) — x = x - y mod m. Operands must match
     /// m's size and be reduced modulo m.
     pub fn Sub(&mut self, y: &Nat, m: &Modulus) -> &mut Nat {
@@ -535,7 +535,7 @@ impl Nat {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:726-732 SubOne
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:726-732 Nat.SubOne
     /// `SubOne(m)` (nat.go:726) — x = x - 1 mod m. x must match m's size.
     pub fn SubOne(&mut self, m: &Modulus) -> &mut Nat {
         let mut one = Nat::NewNat();
@@ -544,7 +544,7 @@ impl Nat {
         self.Sub(&one, m)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:740-744 Add
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:740-744 Nat.Add
     /// `Add(y, m)` (nat.go:740) — x = x + y mod m. Operands must match
     /// m's size and be reduced modulo m.
     pub fn Add(&mut self, y: &Nat, m: &Modulus) -> &mut Nat {
@@ -553,7 +553,7 @@ impl Nat {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:753-757 montgomeryRepresentation
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:753-757 Nat.montgomeryRepresentation
     /// `montgomeryRepresentation(m)` (nat.go:753) — x = x * R mod m,
     /// `R = 2^(_W*n)`. Assumes x reduced mod m.
     fn montgomeryRepresentation(&mut self, m: &Modulus) -> &mut Nat {
@@ -563,7 +563,7 @@ impl Nat {
         self.montgomeryMul(&xc, &rr, m)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:763-770 montgomeryReduction
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:763-770 Nat.montgomeryReduction
     /// `montgomeryReduction(m)` (nat.go:763) — x = x / R mod m. Assumes
     /// x reduced mod m.
     fn montgomeryReduction(&mut self, m: &Modulus) -> &mut Nat {
@@ -576,7 +576,7 @@ impl Nat {
         self.montgomeryMul(&xc, &one, m)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:779-895 montgomeryMul
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:779-895 Nat.montgomeryMul
     /// `montgomeryMul(a, b, m)` (nat.go:779) — x = a * b / R mod m, a
     /// Montgomery multiplication. All inputs must share m's size and be
     /// reduced modulo m. x is resized to m's size.
@@ -638,7 +638,7 @@ impl Nat {
         self
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:924-977 Mul
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:924-977 Nat.Mul
     /// `Mul(y, m)` (nat.go:924) — x = x * y mod m. Operands must match
     /// m's size and be reduced modulo m.
     pub fn Mul(&mut self, y: &Nat, m: &Modulus) -> &mut Nat {
@@ -666,7 +666,7 @@ impl Nat {
         self.Mod(&tn, m)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:987-1034 Exp
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:987-1034 Nat.Exp
     /// `Exp(x, e, m)` (nat.go:987) — out = x^e mod m, e big-endian.
     /// Output resized to m's size; x must be reduced mod m. Panics if m
     /// is even. Constant-time in e.
@@ -725,7 +725,7 @@ impl Nat {
         self.montgomeryReduction(m)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:1042-1058 ExpShortVarTime
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:1042-1058 Nat.ExpShortVarTime
     /// `ExpShortVarTime(x, e, m)` (nat.go:1042) — out = x^e mod m. Output
     /// resized to m's size; x must be reduced mod m. Leaks e through
     /// timing. Panics if m is even.
@@ -754,7 +754,7 @@ impl Nat {
         self.montgomeryReduction(m)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:1068-1077 InverseVarTime
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:1068-1077 Nat.InverseVarTime
     /// `InverseVarTime(a, m)` (nat.go:1068) — x = a⁻¹ mod m; returns
     /// `(x, true)` if a is invertible, else `(x, false)` with x
     /// unchanged. a must be reduced mod m. Output resized to m's size.
@@ -771,7 +771,7 @@ impl Nat {
         }
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:1083-1089 GCDVarTime
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:1083-1089 Nat.GCDVarTime
     /// `GCDVarTime(a, b)` (nat.go:1083) — x = GCD(a, b); at least one of
     /// a/b must be odd and both non-zero. On error x is unchanged.
     /// Output resized to the size of the larger operand.
@@ -785,7 +785,7 @@ impl Nat {
         }
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:1219-1229 DivShortVarTime
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:1219-1229 Nat.DivShortVarTime
     /// `DivShortVarTime(y)` (nat.go:1219) — x = x / y, returns the
     /// remainder. Panics if y is zero.
     pub fn DivShortVarTime(&mut self, y: uint) -> uint {
@@ -872,19 +872,19 @@ impl Modulus {
         newModulus(nn)
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:584-586 Size
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:584-586 Modulus.Size
     /// `Size()` (nat.go:584) — size of m in bytes.
     pub fn Size(&self) -> int {
         (self.BitLen() + 7) / 8
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:589-591 BitLen
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:589-591 Modulus.BitLen
     /// `BitLen()` (nat.go:589) — size of m in bits.
     pub fn BitLen(&self) -> int {
         self.nat.BitLenVarTime()
     }
 
-    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:594-600 Nat
+    // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat.go:594-600 Modulus.Nat
     /// `Nat()` (nat.go:594) — m as a `Nat` (a fresh copy).
     pub fn Nat(&self) -> Nat {
         let mut n = Nat::NewNat();

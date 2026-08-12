@@ -104,7 +104,7 @@ pub fn Key(
     return (fips::Key(h, secret, salt, info, keyLength), nil);
 }
 
-// go: sdk 1.25.5 crypto/hkdf/hkdf.go:79-90 checkFIPS140Only
+// go: sdk 1.25.5 crypto/hkdf/hkdf.go:73-84 checkFIPS140Only
 /// Reject short keys and non-approved hashes in FIPS 140-only mode.
 ///
 /// `fips140only::Enabled` is a `const false` in goish, so this always

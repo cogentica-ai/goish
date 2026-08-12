@@ -47,7 +47,7 @@ pub fn GHASH(key: &[byte; 16], inputs: &[slice<byte>]) -> slice<byte> {
     return slice::__from_vec(out.to_vec());
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:37-64 ghash
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:38-66 ghash
 /// A variable-time generic implementation of GHASH. Each input is
 /// zero-padded to 128 bits before being absorbed.
 pub(crate) fn ghash(out: &mut [byte; 16], H: &[byte; 16], inputs: &[&[byte]]) {
@@ -93,7 +93,7 @@ pub(crate) fn ghash(out: &mut [byte; 16], H: &[byte; 16], inputs: &[&[byte]]) {
     out[8..].copy_from_slice(hir);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:67-71 reverseBits
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:69-73 reverseBits
 /// Reverse the order of the bits of the 4-bit number in `i`.
 fn reverseBits(i: int) -> int {
     // Go: i = ((i << 2) & 0xc) | ((i >> 2) & 0x3)
@@ -103,7 +103,7 @@ fn reverseBits(i: int) -> int {
     return i;
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:74-77 ghashAdd
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:76-79 ghashAdd
 /// Add two elements of GF(2¹²⁸). In a characteristic-2 field this is XOR.
 fn ghashAdd(x: &gcmFieldElement, y: &gcmFieldElement) -> gcmFieldElement {
     // Go: return gcmFieldElement{x.low ^ y.low, x.high ^ y.high}
@@ -113,7 +113,7 @@ fn ghashAdd(x: &gcmFieldElement, y: &gcmFieldElement) -> gcmFieldElement {
     };
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:80-100 ghashDouble
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:82-102 ghashDouble
 /// Double an element of GF(2¹²⁸).
 fn ghashDouble(x: &gcmFieldElement) -> gcmFieldElement {
     // Go: msbSet := x.high&1 == 1
@@ -144,7 +144,7 @@ const ghashReductionTable: [u16; 16] = [
     0x9180, 0x8da0, 0xa9c0, 0xb5e0,
 ];
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:108-136 ghashMul
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:110-139 ghashMul
 /// Set `y` to `y*H`, where H is the GCM key fixed during New.
 fn ghashMul(productTable: &[gcmFieldElement; 16], y: &mut gcmFieldElement) {
     // Go: var z gcmFieldElement
@@ -181,7 +181,7 @@ fn ghashMul(productTable: &[gcmFieldElement; 16], y: &mut gcmFieldElement) {
     *y = z;
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:140-147 updateBlocks
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:143-150 updateBlocks
 /// Extend `y` with more polynomial terms from `blocks`, by Horner's rule.
 /// `blocks` must be a multiple of `gcmBlockSize` bytes.
 fn updateBlocks(productTable: &[gcmFieldElement; 16], y: &mut gcmFieldElement, blocks: &[byte]) {
@@ -198,7 +198,7 @@ fn updateBlocks(productTable: &[gcmFieldElement; 16], y: &mut gcmFieldElement, b
     }
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:151-159 ghashUpdate
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/ghash.go:154-163 ghashUpdate
 /// Extend `y` with more polynomial terms from `data`. If `data` is not a
 /// multiple of `gcmBlockSize` bytes long, the remainder is zero padded.
 fn ghashUpdate(productTable: &[gcmFieldElement; 16], y: &mut gcmFieldElement, data: &[byte]) {
