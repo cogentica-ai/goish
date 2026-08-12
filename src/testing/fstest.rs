@@ -2,6 +2,9 @@
 // testing/fstest/mapfs.go (MapFS only; testfs.go's TestFS conformance
 // harness is not ported).
 //
+// goishlint:ignore GOISH018 checkBadPath, checkDir, checkDirList, checkFile, checkFileRead, checkGlob, checkOpen, checkStat, Close, errorf, formatEntry, formatInfo, formatInfoEntry, Glob, Info, IsDir, lstat, Lstat, Mode, ModTime, Name, Open, openDir, Read, ReadDir, ReadFile, ReadLink, resolveSymlinks, Size, Stat, String, Sub, Sys, testFS, TestFS, Type — MapFS's readers/Stat/ReadDir and the whole TestFS conformance suite are hand-written or not yet ported; only openMapFile.Seek and .ReadAt carry anchors so far.
+// goishlint:ignore GOISH021 _, fsOnly, fsTester, mapDir, MapFile, mapFileInfo, MapFS, noSub, openMapFile — same.
+//
 // Deviations:
 //  - `MapFS` is a newtype over `map<string, Arc<MapFile>>` rather than
 //    a bare map type (Rust cannot attach methods to a type alias).
@@ -476,6 +479,73 @@ impl File for openMapFile {
     }
 }
 
+impl openMapFile {
+    // go: sdk 1.25.5 testing/fstest/mapfs.go:286-300 openMapFile.Seek
+    /// Go: `io.Seeker` over the in-memory file. `whence` is 0 (start),
+    /// 1 (current) or 2 (end), and an offset outside the data is an
+    /// `fs.ErrInvalid` PathError rather than a clamp.
+    ///
+    /// Deviation: Go mutates `f.offset` on `*openMapFile`; goish holds
+    /// it in an `AtomicI64` because `File` hands out `&self`, so the
+    /// store replaces Go's assignment.
+    pub fn Seek(&self, offset: crate::types::int64, whence: int) -> (crate::types::int64, error) {
+        let data = self.info.f.Data.as_ref();
+        let mut offset = offset;
+        // Go: switch whence { case 0: /* offset += 0 */
+        //     case 1: offset += f.offset
+        //     case 2: offset += int64(len(f.f.Data)) }
+        match whence {
+            0 => {}
+            1 => {
+                offset += self.offset.load(Ordering::Acquire);
+            }
+            2 => {
+                offset += crate::int64(data.len());
+            }
+            _ => {}
+        }
+        // Go: if offset < 0 || offset > int64(len(f.f.Data)) {
+        //         return 0, &fs.PathError{Op: "seek", ...ErrInvalid} }
+        if offset < 0 || offset > crate::int64(data.len()) {
+            return (
+                0,
+                path_err("seek", &self.path, fs::ErrInvalid.clone().into()),
+            );
+        }
+        self.offset.store(offset, Ordering::Release);
+        return (offset, errors::nil);
+    }
+
+    // go: sdk 1.25.5 testing/fstest/mapfs.go:302-311 openMapFile.ReadAt
+    /// Go: `io.ReaderAt` — read at an absolute offset without moving
+    /// the file position, and report `io.EOF` on a short read.
+    ///
+    /// Note this does *not* touch `f.offset`, which is what separates
+    /// ReadAt from Read; a ReaderAt is required to be safe for
+    /// concurrent use for exactly that reason.
+    pub fn ReadAt(&self, b: &mut slice<byte>, offset: crate::types::int64) -> (int, error) {
+        let data = self.info.f.Data.as_ref();
+        // Go: if offset < 0 || offset > int64(len(f.f.Data)) {
+        //         return 0, &fs.PathError{Op: "read", ...ErrInvalid} }
+        if offset < 0 || offset > crate::int64(data.len()) {
+            return (
+                0,
+                path_err("read", &self.path, fs::ErrInvalid.clone().into()),
+            );
+        }
+        // Go: n := copy(b, f.f.Data[offset:])
+        let src = &data[offset as usize..];
+        let dst = b.as_mut();
+        let n = core::cmp::min(dst.len(), src.len());
+        dst[..n].copy_from_slice(&src[..n]);
+        // Go: if n < len(b) { return n, io.EOF }
+        if n < dst.len() {
+            return (crate::int(n), crate::io::EOF.into());
+        }
+        return (crate::int(n), errors::nil);
+    }
+}
+
 // Go: mapfs.go:316 — type mapDir struct
 /// A mapDir is a directory fs.File (so also an fs.ReadDirFile) open
 /// for reading.
@@ -539,4 +609,89 @@ impl ReadDirFile for mapDir {
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
         Some(self)
     }
+}
+
+// ─── test shims ──────────────────────────────────────────────────────────────
+//
+// `openMapFile` is unexported in Go and stays unexported here, so its
+// `Seek`/`ReadAt` cannot be reached from an example (a separate crate).
+// These shims give the smoke test a way in without widening the real
+// API, following the pattern used elsewhere in the tree for testing
+// unexported Go declarations.
+
+// go: none — goish-only: test shim for the unexported openMapFile.Seek.
+#[doc(hidden)]
+pub fn __shim_open_seek(
+    fsys: &MapFS,
+    path: impl Into<string>,
+    offset: crate::types::int64,
+    whence: int,
+) -> (crate::types::int64, error) {
+    let (f, err) = fs::FS::Open(fsys, path.into());
+    if err != errors::nil {
+        return (0, err);
+    }
+    let any = match f.__goish_as_dyn_any() {
+        Some(a) => a,
+        None => return (0, errors::New(string::from_static("not an openMapFile"))),
+    };
+    return match any.downcast_ref::<openMapFile>() {
+        Some(o) => o.Seek(offset, whence),
+        None => (0, errors::New(string::from_static("not an openMapFile"))),
+    };
+}
+
+// go: none — goish-only: two seeks on ONE handle, so `whence == 1`
+// (seek relative to the current position) can actually be observed.
+// A shim that reopens per call always starts at offset 0 and would
+// make the relative case indistinguishable from an absolute one.
+#[doc(hidden)]
+pub fn __shim_open_seek2(
+    fsys: &MapFS,
+    path: impl Into<string>,
+    off1: crate::types::int64,
+    whence1: int,
+    off2: crate::types::int64,
+    whence2: int,
+) -> (crate::types::int64, crate::types::int64, error) {
+    let (f, err) = fs::FS::Open(fsys, path.into());
+    if err != errors::nil {
+        return (0, 0, err);
+    }
+    let any = match f.__goish_as_dyn_any() {
+        Some(a) => a,
+        None => return (0, 0, errors::New(string::from_static("not an openMapFile"))),
+    };
+    let o = match any.downcast_ref::<openMapFile>() {
+        Some(o) => o,
+        None => return (0, 0, errors::New(string::from_static("not an openMapFile"))),
+    };
+    let (a, e1) = o.Seek(off1, whence1);
+    if e1 != errors::nil {
+        return (a, 0, e1);
+    }
+    let (b, e2) = o.Seek(off2, whence2);
+    return (a, b, e2);
+}
+
+// go: none — goish-only: test shim for the unexported openMapFile.ReadAt.
+#[doc(hidden)]
+pub fn __shim_open_read_at(
+    fsys: &MapFS,
+    path: impl Into<string>,
+    b: &mut slice<byte>,
+    offset: crate::types::int64,
+) -> (int, error) {
+    let (f, err) = fs::FS::Open(fsys, path.into());
+    if err != errors::nil {
+        return (0, err);
+    }
+    let any = match f.__goish_as_dyn_any() {
+        Some(a) => a,
+        None => return (0, errors::New(string::from_static("not an openMapFile"))),
+    };
+    return match any.downcast_ref::<openMapFile>() {
+        Some(o) => o.ReadAt(b, offset),
+        None => (0, errors::New(string::from_static("not an openMapFile"))),
+    };
 }
