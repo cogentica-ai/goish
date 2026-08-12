@@ -1,4 +1,4 @@
-// go: file crypto/x509/x509.go decls: ParsePKIXPublicKey, SignatureAlgorithm.isRSAPSS, SignatureAlgorithm.hashFunc, SignatureAlgorithm.String, PublicKeyAlgorithm.String, getSignatureAlgorithmFromAI, getPublicKeyAlgorithmFromOID, namedCurveFromOID, oidFromNamedCurve, oidFromECDHCurve, extKeyUsageFromOID, oidFromExtKeyUsage, InsecureAlgorithmError.Error, ConstraintViolationError.Error, Certificate.Equal, Certificate.hasSANExtension, Certificate.CheckSignatureFrom, Certificate.CheckSignature, Certificate.hasNameConstraints, Certificate.getSANExtension, signaturePublicKeyAlgoMismatchError, checkSignature, Certificate.CheckCRLSignature, UnhandledCriticalExtension.Error, oidInExtensions, isIA5String, marshalPublicKey, MarshalPKIXPublicKey, reverseBitsInAByte, asn1BitLength, marshalSANs, buildCertExtensions, marshalKeyUsage, marshalExtKeyUsage, marshalBasicConstraints, marshalCertificatePolicies, buildCSRExtensions, subjectBytes, signingParamsForKey, signTBS, CreateCertificate, Certificate.CreateCRL, CreateRevocationList, newRawAttributes, CreateCertificateRequest
+// go: file crypto/x509/x509.go decls: ParsePKIXPublicKey, SignatureAlgorithm.isRSAPSS, SignatureAlgorithm.hashFunc, SignatureAlgorithm.String, PublicKeyAlgorithm.String, getSignatureAlgorithmFromAI, getPublicKeyAlgorithmFromOID, namedCurveFromOID, oidFromNamedCurve, oidFromECDHCurve, extKeyUsageFromOID, oidFromExtKeyUsage, InsecureAlgorithmError.Error, ConstraintViolationError.Error, Certificate.Equal, Certificate.hasSANExtension, Certificate.CheckSignatureFrom, Certificate.CheckSignature, Certificate.hasNameConstraints, Certificate.getSANExtension, signaturePublicKeyAlgoMismatchError, checkSignature, Certificate.CheckCRLSignature, UnhandledCriticalExtension.Error, oidInExtensions, isIA5String, marshalPublicKey, MarshalPKIXPublicKey, reverseBitsInAByte, asn1BitLength, marshalSANs, buildCertExtensions, marshalKeyUsage, marshalExtKeyUsage, marshalBasicConstraints, marshalCertificatePolicies, buildCSRExtensions, subjectBytes, signingParamsForKey, signTBS, CreateCertificate, Certificate.CreateCRL, CreateRevocationList, newRawAttributes, CreateCertificateRequest, ParseCRL, ParseDERCRL, parseRawAttributes, parseCSRExtensions, ParseCertificateRequest, parseCertificateRequest
 //
 // The X.509 type surface: the algorithm identifiers, the OID tables and
 // the `Certificate` struct every other file in the package hangs on.
@@ -3596,4 +3596,373 @@ pub fn CreateCertificateRequest(
         },
         ..Default::default()
     });
+}
+
+// Go x509.go:1804-1805
+//   var pemCRLPrefix = []byte("-----BEGIN X509 CRL")
+//   var pemType = "X509 CRL"
+/// The PEM armour [`ParseCRL`] sniffs for before falling back to DER.
+const pemCRLPrefix: &[byte] = b"-----BEGIN X509 CRL";
+/// The PEM block type [`ParseCRL`] accepts.
+const pemType: &str = "X509 CRL";
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1810-1818 ParseCRL
+/// Parse a CRL from the given bytes, handling PEM transparently as long
+/// as there is no leading garbage.
+///
+/// Deprecated: use [`ParseRevocationList`] instead.
+pub fn ParseCRL(crlBytes: slice<byte>) -> (Option<pkix::CertificateList>, error) {
+    // Go: if bytes.HasPrefix(crlBytes, pemCRLPrefix) {
+    //         block, _ := pem.Decode(crlBytes)
+    //         if block != nil && block.Type == pemType { crlBytes = block.Bytes }
+    //     }
+    let mut der = crlBytes.clone();
+    if crate::bytes::HasPrefix(crlBytes.clone(), slice::__from_vec(pemCRLPrefix.to_vec())) {
+        let (block, _) = crate::encoding::pem::Decode(crlBytes);
+        if let Some(b) = block {
+            if b.Type == pemType {
+                der = b.Bytes;
+            }
+        }
+    }
+    // Go: return ParseDERCRL(crlBytes)
+    return ParseDERCRL(der);
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1823-1831 ParseDERCRL
+/// Parse a DER encoded CRL from the given bytes.
+///
+/// Deprecated: use [`ParseRevocationList`] instead.
+pub fn ParseDERCRL(derBytes: slice<byte>) -> (Option<pkix::CertificateList>, error) {
+    // Go: certList := new(pkix.CertificateList)
+    let mut certList = pkix::CertificateList::default();
+    // Go: if rest, err := asn1.Unmarshal(derBytes, certList); err != nil { … }
+    let (rest, err) = asn1::Unmarshal(derBytes, &mut certList);
+    if err != errors::nil {
+        return (None, err);
+    }
+    // Go: } else if len(rest) != 0 { return nil, errors.New(…) }
+    if rest.Len() != 0 {
+        return (None, errors::New("x509: trailing data after CRL"));
+    }
+    // Go: return certList, nil
+    return (Some(certList), errors::nil);
+}
+
+// go: none — goish-only: the write halves for the two CSR shapes.
+// `reflect_only` emits only the read half; `asn1::Unmarshal` needs this
+// direction. Same split as `pkix::AlgorithmIdentifier`.
+impl crate::reflect::FromReflectValue for tbsCertificateRequest {
+    // go: none — goish-only: see the banner above.
+    fn from_reflect_value(v: crate::reflect::Value) -> (Self, error) {
+        if v.Kind() != crate::reflect::Kind::Struct {
+            return (
+                tbsCertificateRequest::default(),
+                errors::New("x509: expected tbsCertificateRequest"),
+            );
+        }
+        let mut out = tbsCertificateRequest::default();
+        let (raw, err) =
+            <asn1::RawContent as crate::reflect::FromReflectValue>::from_reflect_value(v.Field(0));
+        if err != errors::nil {
+            return (tbsCertificateRequest::default(), err);
+        }
+        out.Raw = raw;
+        let (ver, err) = <int as crate::reflect::FromReflectValue>::from_reflect_value(v.Field(1));
+        if err != errors::nil {
+            return (tbsCertificateRequest::default(), err);
+        }
+        out.Version = ver;
+        let (subj, err) =
+            <asn1::RawValue as crate::reflect::FromReflectValue>::from_reflect_value(v.Field(2));
+        if err != errors::nil {
+            return (tbsCertificateRequest::default(), err);
+        }
+        out.Subject = subj;
+        let (pk, err) =
+            <publicKeyInfo as crate::reflect::FromReflectValue>::from_reflect_value(v.Field(3));
+        if err != errors::nil {
+            return (tbsCertificateRequest::default(), err);
+        }
+        out.PublicKey = pk;
+        let (attrs, err) =
+            <slice<asn1::RawValue> as crate::reflect::FromReflectValue>::from_reflect_value(
+                v.Field(4),
+            );
+        if err != errors::nil {
+            return (tbsCertificateRequest::default(), err);
+        }
+        out.RawAttributes = attrs;
+        return (out, errors::nil);
+    }
+}
+
+// go: none — goish-only: see `tbsCertificateRequest`'s write half above.
+impl crate::reflect::FromReflectValue for certificateRequest {
+    // go: none — goish-only: see `tbsCertificateRequest`'s write half.
+    fn from_reflect_value(v: crate::reflect::Value) -> (Self, error) {
+        if v.Kind() != crate::reflect::Kind::Struct {
+            return (
+                certificateRequest::default(),
+                errors::New("x509: expected certificateRequest"),
+            );
+        }
+        let mut out = certificateRequest::default();
+        let (raw, err) =
+            <asn1::RawContent as crate::reflect::FromReflectValue>::from_reflect_value(v.Field(0));
+        if err != errors::nil {
+            return (certificateRequest::default(), err);
+        }
+        out.Raw = raw;
+        let (tbs, err) =
+            <tbsCertificateRequest as crate::reflect::FromReflectValue>::from_reflect_value(
+                v.Field(1),
+            );
+        if err != errors::nil {
+            return (certificateRequest::default(), err);
+        }
+        out.TBSCSR = tbs;
+        let (sa, err) =
+            <pkix::AlgorithmIdentifier as crate::reflect::FromReflectValue>::from_reflect_value(
+                v.Field(2),
+            );
+        if err != errors::nil {
+            return (certificateRequest::default(), err);
+        }
+        out.SignatureAlgorithm = sa;
+        let (sv, err) =
+            <asn1::BitString as crate::reflect::FromReflectValue>::from_reflect_value(v.Field(3));
+        if err != errors::nil {
+            return (certificateRequest::default(), err);
+        }
+        out.SignatureValue = sv;
+        return (out, errors::nil);
+    }
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1979-1991 parseRawAttributes
+/// Parse `RawAttributes` into `AttributeTypeAndValueSET`s, silently
+/// dropping any attribute that does not fit that shape (Go's comment:
+/// "i.e.: challengePassword or unstructuredName").
+fn parseRawAttributes(rawAttributes: slice<asn1::RawValue>) -> slice<pkix::AttributeTypeAndValueSET> {
+    // Go: var attributes []pkix.AttributeTypeAndValueSET
+    let mut attributes: Vec<pkix::AttributeTypeAndValueSET> = Vec::new();
+    // Go: for _, rawAttr := range rawAttributes {
+    for (_, rawAttr) in crate::range!(rawAttributes) {
+        // Go: var attr pkix.AttributeTypeAndValueSET
+        //     rest, err := asn1.Unmarshal(rawAttr.FullBytes, &attr)
+        let mut attr = pkix::AttributeTypeAndValueSET::default();
+        let (rest, err) = asn1::Unmarshal(rawAttr.FullBytes.clone(), &mut attr);
+        // Go: if err == nil && len(rest) == 0 { attributes = append(…) }
+        if err == errors::nil && rest.Len() == 0 {
+            attributes.push(attr);
+        }
+    }
+    // Go: return attributes
+    return slice::__from_vec(attributes);
+}
+
+// Go x509.go:1996-1999 — the local type `parseCSRExtensions` declares:
+//   type pkcs10Attribute struct {
+//       Id     asn1.ObjectIdentifier
+//       Values []asn1.RawValue `asn1:"set"`
+//   }
+//
+// go: none — goish-only: Rust cannot declare a type with a derive
+// attribute inside a function body and use it generically, so Go's
+// function-local struct is hoisted to module scope under its own name.
+#[goish::reflect(reflect_only)]
+#[derive(Clone, Default)]
+struct pkcs10Attribute {
+    pub Id: asn1::ObjectIdentifier,
+    #[tag(r#"asn1:"set""#)]
+    pub Values: slice<asn1::RawValue>,
+}
+
+// go: none — goish-only: the write half of `pkcs10Attribute`.
+impl crate::reflect::FromReflectValue for pkcs10Attribute {
+    // go: none — goish-only: the write half of `pkcs10Attribute`.
+    fn from_reflect_value(v: crate::reflect::Value) -> (Self, error) {
+        if v.Kind() != crate::reflect::Kind::Struct {
+            return (
+                pkcs10Attribute::default(),
+                errors::New("x509: expected pkcs10Attribute"),
+            );
+        }
+        let (id, err) =
+            <asn1::ObjectIdentifier as crate::reflect::FromReflectValue>::from_reflect_value(
+                v.Field(0),
+            );
+        if err != errors::nil {
+            return (pkcs10Attribute::default(), err);
+        }
+        let (values, err) =
+            <slice<asn1::RawValue> as crate::reflect::FromReflectValue>::from_reflect_value(
+                v.Field(1),
+            );
+        if err != errors::nil {
+            return (pkcs10Attribute::default(), err);
+        }
+        return (
+            pkcs10Attribute {
+                Id: id,
+                Values: values,
+            },
+            errors::nil,
+        );
+    }
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:1995-2035 parseCSRExtensions
+/// Parse the attributes from a CSR and extract any requested extensions.
+fn parseCSRExtensions(
+    rawAttributes: slice<asn1::RawValue>,
+) -> (slice<pkix::Extension>, error) {
+    // Go: var ret []pkix.Extension
+    //     requestedExts := make(map[string]bool)
+    let mut ret: Vec<pkix::Extension> = Vec::new();
+    let mut requestedExts: crate::gomap::map<crate::gostring::string, bool> = crate::make!(map[crate::gostring::string]bool);
+    // Go: for _, rawAttr := range rawAttributes {
+    for (_, rawAttr) in crate::range!(rawAttributes) {
+        // Go: var attr pkcs10Attribute
+        //     if rest, err := asn1.Unmarshal(rawAttr.FullBytes, &attr);
+        //        err != nil || len(rest) != 0 || len(attr.Values) == 0 { continue }
+        let mut attr = pkcs10Attribute::default();
+        let (rest, err) = asn1::Unmarshal(rawAttr.FullBytes.clone(), &mut attr);
+        if err != errors::nil || rest.Len() != 0 || attr.Values.Len() == 0 {
+            continue;
+        }
+        // Go: if !attr.Id.Equal(oidExtensionRequest) { continue }
+        if !attr.Id.Equal(&oidExtensionRequest()) {
+            continue;
+        }
+        // Go: var extensions []pkix.Extension
+        //     if _, err := asn1.Unmarshal(attr.Values[0].FullBytes, &extensions); err != nil { … }
+        let mut extensions: slice<pkix::Extension> = slice::__from_vec(Vec::new());
+        let (_, err) = asn1::Unmarshal(attr.Values[0].FullBytes.clone(), &mut extensions);
+        if err != errors::nil {
+            return (slice::__from_vec(Vec::new()), err);
+        }
+        // Go: for _, ext := range extensions { … duplicate check … }
+        for (_, ext) in crate::range!(extensions) {
+            let oidStr = ext.Id.String();
+            // Go: `requestedExts[oidStr]` — absent reads as false.
+            let (seen, _) = requestedExts.Get(&oidStr);
+            if seen {
+                return (
+                    slice::__from_vec(Vec::new()),
+                    errors::New("x509: certificate request contains duplicate requested extensions"),
+                );
+            }
+            requestedExts.Set(oidStr, true);
+        }
+        // Go: ret = append(ret, extensions...)
+        for (_, ext) in crate::range!(extensions) {
+            ret.push(ext.clone());
+        }
+    }
+    // Go: return ret, nil
+    return (slice::__from_vec(ret), errors::nil);
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:2197-2207 ParseCertificateRequest
+/// Parse a single certificate request from the given ASN.1 DER data.
+pub fn ParseCertificateRequest(asn1Data: slice<byte>) -> (Option<CertificateRequest>, error) {
+    // Go: var csr certificateRequest
+    //     rest, err := asn1.Unmarshal(asn1Data, &csr)
+    let mut csr = certificateRequest::default();
+    let (rest, err) = asn1::Unmarshal(asn1Data, &mut csr);
+    if err != errors::nil {
+        return (None, err);
+    }
+    // Go: } else if len(rest) != 0 { return nil, asn1.SyntaxError{Msg: "trailing data"} }
+    if rest.Len() != 0 {
+        return (
+            None,
+            errors::Wrap(asn1::SyntaxError {
+                Msg: string::from_static("trailing data"),
+            }),
+        );
+    }
+    // Go: return parseCertificateRequest(&csr)
+    return parseCertificateRequest(&csr);
+}
+
+// go: sdk 1.25.5 crypto/x509/x509.go:2210-2258 parseCertificateRequest
+/// Build the public [`CertificateRequest`] from the parsed ASN.1 shape.
+fn parseCertificateRequest(in_: &certificateRequest) -> (Option<CertificateRequest>, error) {
+    // Go: out := &CertificateRequest{ … }
+    let mut out = CertificateRequest {
+        Raw: in_.Raw.0.clone(),
+        RawTBSCertificateRequest: in_.TBSCSR.Raw.0.clone(),
+        RawSubjectPublicKeyInfo: in_.TBSCSR.PublicKey.Raw.0.clone(),
+        RawSubject: in_.TBSCSR.Subject.FullBytes.clone(),
+
+        Signature: in_.SignatureValue.RightAlign(),
+        SignatureAlgorithm: getSignatureAlgorithmFromAI(&in_.SignatureAlgorithm),
+
+        PublicKeyAlgorithm: getPublicKeyAlgorithmFromOID(
+            &in_.TBSCSR.PublicKey.Algorithm.Algorithm,
+        ),
+
+        Version: in_.TBSCSR.Version,
+        Attributes: parseRawAttributes(in_.TBSCSR.RawAttributes.clone()),
+        ..Default::default()
+    };
+
+    // Go: if out.PublicKeyAlgorithm != UnknownPublicKeyAlgorithm {
+    //         out.PublicKey, err = parsePublicKey(&in.TBSCSR.PublicKey)
+    //     }
+    if out.PublicKeyAlgorithm != UnknownPublicKeyAlgorithm {
+        let (pk, err) = super::parser::parsePublicKey(&in_.TBSCSR.PublicKey);
+        if err != errors::nil {
+            return (None, err);
+        }
+        out.PublicKey = pk;
+    }
+
+    // Go: var subject pkix.RDNSequence
+    //     if rest, err := asn1.Unmarshal(in.TBSCSR.Subject.FullBytes, &subject); err != nil { … }
+    let mut subject = pkix::RDNSequence::default();
+    let (rest, err) = asn1::Unmarshal(in_.TBSCSR.Subject.FullBytes.clone(), &mut subject);
+    if err != errors::nil {
+        return (None, err);
+    }
+    if rest.Len() != 0 {
+        return (
+            None,
+            errors::New("x509: trailing data after X.509 Subject"),
+        );
+    }
+
+    // Go: out.Subject.FillFromRDNSequence(&subject)
+    out.Subject.FillFromRDNSequence(&subject);
+
+    // Go: if out.Extensions, err = parseCSRExtensions(in.TBSCSR.RawAttributes); err != nil { … }
+    let (exts, err) = parseCSRExtensions(in_.TBSCSR.RawAttributes.clone());
+    if err != errors::nil {
+        return (None, err);
+    }
+    out.Extensions = exts;
+
+    // Go: for _, extension := range out.Extensions {
+    //         switch { case extension.Id.Equal(oidExtensionSubjectAltName): … }
+    //     }
+    for (_, extension) in crate::range!(out.Extensions.clone()) {
+        if extension.Id.Equal(&oidExtensionSubjectAltName()) {
+            let (dns, emails, ips, uris, err) = super::parser::parseSANExtension(
+                crate::crypto::cryptobyte::String::New(extension.Value.clone()),
+            );
+            if err != errors::nil {
+                return (None, err);
+            }
+            out.DNSNames = dns;
+            out.EmailAddresses = emails;
+            out.IPAddresses = ips;
+            out.URIs = uris;
+        }
+    }
+
+    // Go: return out, nil
+    return (Some(out), errors::nil);
 }

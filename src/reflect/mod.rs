@@ -1545,6 +1545,24 @@ pub fn Zero(t: Type) -> Value {
         // Go's zero pointer is nil; `Value::Pointer(Invalid)` is the
         // encoding `IsNil` already recognises.
         Kind::Pointer => Value::Pointer(alloc::boxed::Box::new(Value::Invalid)),
+        // The zero interface is nil *with a type*. Early `return`, like
+        // Struct: the value must carry `t` itself, and the `Named`
+        // wrapper below would re-wrap it.
+        //
+        // Go's `reflect.Zero(interfaceType)` yields a Value whose
+        // `Type()` is that interface, which is what `encoding/asn1`'s
+        // `parseField` dispatches an ASN.1 ANY on. Falling through to
+        // `Invalid` here lost the type, so `parseSequenceOf` handed
+        // `parseField` a typeless destination and every `asn1.Unmarshal`
+        // into a SEQUENCE OF reaching a `pkix.AttributeTypeAndValue`
+        // — every X.509 Name, so every CRL — died with "unknown Go
+        // type: invalid".
+        Kind::Interface => {
+            return Value::Named {
+                ty: t,
+                inner: alloc::boxed::Box::new(Value::Invalid),
+            }
+        }
         // Array/Interface/Func/Chan still fall back.
         _ => Value::Invalid,
     };
@@ -1970,8 +1988,31 @@ impl Reflect for crate::goany::Any {
         Type::__new(Kind::Interface, "interface{}", &[])
     }
     fn __reflect_value(&self) -> Value {
-        let (v, _ok) = ValueOfAny(self);
-        return v;
+        let (v, ok) = ValueOfAny(self);
+        if ok {
+            return v;
+        }
+        // A nil (or non-reflectable) `Any` still has a *static* type,
+        // and losing it breaks any consumer that dispatches on the
+        // destination's type rather than its contents.
+        //
+        // `encoding/asn1`'s `parseField` is exactly that consumer: it
+        // reads `fieldType := v.Type()` and recognises an ASN.1 ANY by
+        // `fieldType.Kind() == Interface`. Go's `reflect.Value` carries
+        // the field's static type even when the interface it holds is
+        // nil, so Go's ANY arm fires on an empty destination; returning
+        // a bare `Value::Invalid` here meant goish's never did, and
+        // `asn1.Unmarshal` into any struct reaching a `pkix.AttributeTypeAndValue`
+        // — i.e. every X.509 Name, so every CRL — failed with
+        // "unknown Go type: invalid".
+        //
+        // `Named` is how goish spells "this value has a declared type";
+        // wrapping `Invalid` keeps the contents empty while restoring
+        // the type, which is precisely Go's nil-interface Value.
+        return Value::Named {
+            ty: <crate::goany::Any as Reflect>::__reflect_type(),
+            inner: alloc::boxed::Box::new(Value::Invalid),
+        };
     }
 }
 

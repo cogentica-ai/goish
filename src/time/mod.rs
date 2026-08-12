@@ -427,7 +427,13 @@ pub fn Seconds(n: int) -> Duration {
 /// `mono == 0` means "no monotonic component" (e.g., constructed via
 /// `time::Unix(...)`); `Now()` always sets it. `Sub` prefers monotonic
 /// when both sides have it.
-#[derive(Clone, Copy, Default)]
+// `PartialEq` mirrors Go: `time.Time` is a comparable struct, so `==`
+// is legal and compares wall+ext+mono field-wise. Go's docs steer
+// callers to `Equal` because `==` also distinguishes the monotonic
+// reading and the location; that caveat is Go's, not a goish deviation.
+// Needed because `goany::Any` requires `PartialEq` at the wrap site,
+// and an ASN.1 ANY field can hold a UTCTime.
+#[derive(Clone, Copy, Default, PartialEq)]
 pub struct Time {
     sec: int,
     nsec: i32,

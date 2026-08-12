@@ -27,7 +27,7 @@ pub use verify::{
 };
 pub use goish_rsa_der::{goishParsePKCS1RSAPrivateKey, goishParsePKCS8RSAPrivateKey};
 pub use oid::{OIDFromInts, ParseOID, OID};
-pub use parser::{ParseCertificate, ParseCertificates};
+pub use parser::{ParseCertificate, ParseCertificates, ParseRevocationList};
 pub use pkcs1::{
     MarshalPKCS1PrivateKey, MarshalPKCS1PublicKey, ParsePKCS1PrivateKey, ParsePKCS1PublicKey,
 };
@@ -39,7 +39,7 @@ pub use pem_decrypt::{
 };
 pub use x509::{
     CertificateRequest, CreateCertificate, CreateCertificateRequest, CreateRevocationList,
-    MarshalPKIXPublicKey,
+    MarshalPKIXPublicKey, ParseCRL, ParseCertificateRequest, ParseDERCRL,
     RevocationList, RevocationListEntry,
     Certificate, ConstraintViolationError, ErrUnsupportedAlgorithm, ExtKeyUsage,
     ExtKeyUsageAny, ExtKeyUsageClientAuth, ExtKeyUsageCodeSigning, ExtKeyUsageEmailProtection,

@@ -1,4 +1,4 @@
-// go: file crypto/x509/parser.go decls: isPrintable, parseASN1String, parseName, parseAI, parseTime, parseValidity, parseExtension, parsePublicKey, parseKeyUsageExtension, parseBasicConstraintsExtension, forEachSAN, parseSANExtension, parseAuthorityKeyIdentifier, parseExtKeyUsageExtension, parseCertificatePoliciesExtension, isValidIPMask, parseNameConstraintsExtension, processExtensions, parseCertificate, ParseCertificate, ParseCertificates, domainNameValid
+// go: file crypto/x509/parser.go decls: isPrintable, parseASN1String, parseName, parseAI, parseTime, parseValidity, parseExtension, parsePublicKey, parseKeyUsageExtension, parseBasicConstraintsExtension, forEachSAN, parseSANExtension, parseAuthorityKeyIdentifier, parseExtKeyUsageExtension, parseCertificatePoliciesExtension, isValidIPMask, parseNameConstraintsExtension, processExtensions, parseCertificate, ParseCertificate, ParseCertificates, domainNameValid, ParseRevocationList
 //
 // The cryptobyte-based DER parser for X.509 certificates.
 //
@@ -56,7 +56,9 @@ use super::x509::{
     namedCurveFromOID, nameTypeDNS, nameTypeEmail, nameTypeIP, nameTypeURI,
     oidAuthorityInfoAccessIssuers, oidAuthorityInfoAccessOcsp, oidExtensionAuthorityInfoAccess,
     oidPublicKeyDSA, oidPublicKeyECDSA, oidPublicKeyEd25519, oidPublicKeyRSA, oidPublicKeyX25519,
-    publicKeyInfo, Certificate, ExtKeyUsage, KeyUsage, PolicyMapping, UnknownPublicKeyAlgorithm,
+    oidExtensionAuthorityKeyId, oidExtensionCRLNumber, oidExtensionReasonCode, publicKeyInfo,
+    Certificate, ExtKeyUsage, KeyUsage, PolicyMapping, RevocationList, RevocationListEntry,
+    UnknownPublicKeyAlgorithm,
 };
 use crate::crypto::cryptobyte::asn1 as cryptobyte_asn1;
 use crate::crypto::cryptobyte::String as CBString;
@@ -575,7 +577,9 @@ struct sanResult {
 }
 
 // go: sdk 1.25.5 crypto/x509/parser.go:408-449 parseSANExtension
-fn parseSANExtension(
+// `pub(super)` rather than file-private: `parseCertificateRequest` in
+// x509.rs calls it, exactly as Go's does across the same two files.
+pub(super) fn parseSANExtension(
     der: CBString,
 ) -> (
     slice<string>,
@@ -1722,3 +1726,277 @@ pub(super) fn domainNameValid(s: &string, constraint: bool) -> bool {
     return true;
 }
 
+
+// Go parser.go:1112
+//   const x509v2Version = 1
+/// The only CRL version this parser accepts (RFC 5280 §5.1.2.1 numbers
+/// v2 as 1).
+const x509v2Version: int = 1;
+
+// go: sdk 1.25.5 crypto/x509/parser.go:1116-1295 ParseRevocationList
+/// Parse the given ASN.1 DER data as a Certificate Revocation List.
+pub fn ParseRevocationList(der: slice<byte>) -> (Option<RevocationList>, error) {
+    // Go: rl := &RevocationList{}
+    let mut rl = RevocationList::default();
+
+    // Go: input := cryptobyte.String(der)
+    //     we read the SEQUENCE including length and tag bytes so that we
+    //     can populate RevocationList.Raw, before unwrapping it.
+    let mut input = CBString::New(der);
+    let mut tmp = CBString::default();
+    if !input.ReadASN1Element(&mut tmp, cryptobyte_asn1::SEQUENCE) {
+        return (None, errors::New("x509: malformed crl"));
+    }
+    input = tmp;
+    // Go: rl.Raw = input
+    rl.Raw = input.0.clone();
+    let mut tmp = CBString::default();
+    if !input.ReadASN1(&mut tmp, cryptobyte_asn1::SEQUENCE) {
+        return (None, errors::New("x509: malformed crl"));
+    }
+    input = tmp;
+
+    // Go: var tbs cryptobyte.String — same trick, for RawTBSRevocationList.
+    let mut tbs = CBString::default();
+    if !input.ReadASN1Element(&mut tbs, cryptobyte_asn1::SEQUENCE) {
+        return (None, errors::New("x509: malformed tbs crl"));
+    }
+    // Go: rl.RawTBSRevocationList = tbs
+    rl.RawTBSRevocationList = tbs.0.clone();
+    let mut tmp = CBString::default();
+    if !tbs.ReadASN1(&mut tmp, cryptobyte_asn1::SEQUENCE) {
+        return (None, errors::New("x509: malformed tbs crl"));
+    }
+    tbs = tmp;
+
+    // Go: var version int
+    //     if !tbs.PeekASN1Tag(INTEGER) { … } ; if !tbs.ReadASN1Integer(&version) { … }
+    let mut version: int = 0;
+    if !tbs.PeekASN1Tag(cryptobyte_asn1::INTEGER) {
+        return (None, errors::New("x509: unsupported crl version"));
+    }
+    if !tbs.ReadASN1Integer(&mut version) {
+        return (None, errors::New("x509: malformed crl"));
+    }
+    // Go: if version != x509v2Version { return nil, fmt.Errorf(…) }
+    if version != x509v2Version {
+        return (
+            None,
+            crate::fmt::Errorf!("x509: unsupported crl version: %d", version),
+        );
+    }
+
+    // Go: var sigAISeq cryptobyte.String — inner algorithm identifier.
+    let mut sigAISeq = CBString::default();
+    if !tbs.ReadASN1(&mut sigAISeq, cryptobyte_asn1::SEQUENCE) {
+        return (
+            None,
+            errors::New("x509: malformed signature algorithm identifier"),
+        );
+    }
+    // Go: Before parsing the inner algorithm identifier, extract the
+    // outer one and make sure they match.
+    let mut outerSigAISeq = CBString::default();
+    if !input.ReadASN1(&mut outerSigAISeq, cryptobyte_asn1::SEQUENCE) {
+        return (None, errors::New("x509: malformed algorithm identifier"));
+    }
+    // Go: if !bytes.Equal(outerSigAISeq, sigAISeq) { … }
+    if !crate::bytes::Equal(outerSigAISeq.0.clone(), sigAISeq.0.clone()) {
+        return (
+            None,
+            errors::New("x509: inner and outer signature algorithm identifiers don't match"),
+        );
+    }
+    // Go: sigAI, err := parseAI(sigAISeq)
+    let (sigAI, err) = parseAI(sigAISeq);
+    if err != errors::nil {
+        return (None, err);
+    }
+    // Go: rl.SignatureAlgorithm = getSignatureAlgorithmFromAI(sigAI)
+    rl.SignatureAlgorithm = getSignatureAlgorithmFromAI(&sigAI);
+
+    // Go: var signature asn1.BitString; if !input.ReadASN1BitString(&signature) { … }
+    let mut signature = asn1::BitString::default();
+    if !input.ReadASN1BitString(&mut signature) {
+        return (None, errors::New("x509: malformed signature"));
+    }
+    // Go: rl.Signature = signature.RightAlign()
+    rl.Signature = signature.RightAlign();
+
+    // Go: var issuerSeq cryptobyte.String
+    let mut issuerSeq = CBString::default();
+    if !tbs.ReadASN1Element(&mut issuerSeq, cryptobyte_asn1::SEQUENCE) {
+        return (None, errors::New("x509: malformed issuer"));
+    }
+    // Go: rl.RawIssuer = issuerSeq
+    rl.RawIssuer = issuerSeq.0.clone();
+    // Go: issuerRDNs, err := parseName(issuerSeq)
+    let (issuerRDNs, err) = parseName(issuerSeq);
+    if err != errors::nil {
+        return (None, err);
+    }
+    // Go: rl.Issuer.FillFromRDNSequence(issuerRDNs)
+    rl.Issuer.FillFromRDNSequence(&issuerRDNs);
+
+    // Go: rl.ThisUpdate, err = parseTime(&tbs)
+    let (thisUpdate, err) = parseTime(&mut tbs);
+    if err != errors::nil {
+        return (None, err);
+    }
+    rl.ThisUpdate = thisUpdate;
+    // Go: if tbs.PeekASN1Tag(GeneralizedTime) || tbs.PeekASN1Tag(UTCTime) { … }
+    if tbs.PeekASN1Tag(cryptobyte_asn1::GeneralizedTime)
+        || tbs.PeekASN1Tag(cryptobyte_asn1::UTCTime)
+    {
+        let (nextUpdate, err) = parseTime(&mut tbs);
+        if err != errors::nil {
+            return (None, err);
+        }
+        rl.NextUpdate = nextUpdate;
+    }
+
+    // Go: if tbs.PeekASN1Tag(SEQUENCE) { … revokedCertificates … }
+    if tbs.PeekASN1Tag(cryptobyte_asn1::SEQUENCE) {
+        let mut revokedSeq = CBString::default();
+        if !tbs.ReadASN1(&mut revokedSeq, cryptobyte_asn1::SEQUENCE) {
+            return (None, errors::New("x509: malformed crl"));
+        }
+        let mut entries: Vec<RevocationListEntry> = Vec::new();
+        let mut deprecated: Vec<pkix::RevokedCertificate> = Vec::new();
+        // Go: for !revokedSeq.Empty() {
+        while !revokedSeq.Empty() {
+            // Go: rce := RevocationListEntry{}
+            let mut rce = RevocationListEntry::default();
+
+            let mut certSeq = CBString::default();
+            if !revokedSeq.ReadASN1Element(&mut certSeq, cryptobyte_asn1::SEQUENCE) {
+                return (None, errors::New("x509: malformed crl"));
+            }
+            // Go: rce.Raw = certSeq
+            rce.Raw = certSeq.0.clone();
+            let mut tmp = CBString::default();
+            if !certSeq.ReadASN1(&mut tmp, cryptobyte_asn1::SEQUENCE) {
+                return (None, errors::New("x509: malformed crl"));
+            }
+            certSeq = tmp;
+
+            // Go: rce.SerialNumber = new(big.Int)
+            //     if !certSeq.ReadASN1Integer(rce.SerialNumber) { … }
+            let mut serial = big::Int::default();
+            if !certSeq.ReadASN1Integer(&mut serial) {
+                return (None, errors::New("x509: malformed serial number"));
+            }
+            rce.SerialNumber = serial;
+            // Go: rce.RevocationTime, err = parseTime(&certSeq)
+            let (revTime, err) = parseTime(&mut certSeq);
+            if err != errors::nil {
+                return (None, err);
+            }
+            rce.RevocationTime = revTime;
+
+            // Go: var extensions cryptobyte.String; var present bool
+            //     if !certSeq.ReadOptionalASN1(&extensions, &present, SEQUENCE) { … }
+            let mut extensions = CBString::default();
+            let mut present = false;
+            if !certSeq.ReadOptionalASN1(
+                &mut extensions,
+                Some(&mut present),
+                cryptobyte_asn1::SEQUENCE,
+            ) {
+                return (None, errors::New("x509: malformed extensions"));
+            }
+            if present {
+                let mut exts: Vec<pkix::Extension> = Vec::new();
+                while !extensions.Empty() {
+                    let mut extension = CBString::default();
+                    if !extensions.ReadASN1(&mut extension, cryptobyte_asn1::SEQUENCE) {
+                        return (None, errors::New("x509: malformed extension"));
+                    }
+                    let (ext, err) = parseExtension(extension);
+                    if err != errors::nil {
+                        return (None, err);
+                    }
+                    // Go: if ext.Id.Equal(oidExtensionReasonCode) { … ReadASN1Enum … }
+                    if ext.Id.Equal(&oidExtensionReasonCode()) {
+                        let mut val = CBString::New(ext.Value.clone());
+                        if !val.ReadASN1Enum(&mut rce.ReasonCode) {
+                            return (
+                                None,
+                                crate::fmt::Errorf!("x509: malformed reasonCode extension"),
+                            );
+                        }
+                    }
+                    // Go: rce.Extensions = append(rce.Extensions, ext)
+                    exts.push(ext);
+                }
+                rce.Extensions = slice::__from_vec(exts);
+            }
+
+            // Go: rl.RevokedCertificateEntries = append(…, rce)
+            //     rcDeprecated := pkix.RevokedCertificate{…}
+            //     rl.RevokedCertificates = append(…, rcDeprecated)
+            deprecated.push(pkix::RevokedCertificate {
+                SerialNumber: rce.SerialNumber.clone(),
+                RevocationTime: rce.RevocationTime.clone(),
+                Extensions: rce.Extensions.clone(),
+            });
+            entries.push(rce);
+        }
+        rl.RevokedCertificateEntries = slice::__from_vec(entries);
+        rl.RevokedCertificates = slice::__from_vec(deprecated);
+    }
+
+    // Go: var extensions cryptobyte.String; var present bool
+    //     if !tbs.ReadOptionalASN1(&extensions, &present, Tag(0).Constructed().ContextSpecific())
+    let mut extensions = CBString::default();
+    let mut present = false;
+    if !tbs.ReadOptionalASN1(
+        &mut extensions,
+        Some(&mut present),
+        cryptobyte_asn1::Tag(0).Constructed().ContextSpecific(),
+    ) {
+        return (None, errors::New("x509: malformed extensions"));
+    }
+    if present {
+        let mut tmp = CBString::default();
+        if !extensions.ReadASN1(&mut tmp, cryptobyte_asn1::SEQUENCE) {
+            return (None, errors::New("x509: malformed extensions"));
+        }
+        extensions = tmp;
+        let mut exts: Vec<pkix::Extension> = Vec::new();
+        while !extensions.Empty() {
+            let mut extension = CBString::default();
+            if !extensions.ReadASN1(&mut extension, cryptobyte_asn1::SEQUENCE) {
+                return (None, errors::New("x509: malformed extension"));
+            }
+            let (ext, err) = parseExtension(extension);
+            if err != errors::nil {
+                return (None, err);
+            }
+            // Go: if ext.Id.Equal(oidExtensionAuthorityKeyId) { … }
+            if ext.Id.Equal(&oidExtensionAuthorityKeyId()) {
+                let (akid, err) = parseAuthorityKeyIdentifier(&ext);
+                if err != errors::nil {
+                    return (None, err);
+                }
+                rl.AuthorityKeyId = akid;
+            } else if ext.Id.Equal(&oidExtensionCRLNumber()) {
+                // Go: value := cryptobyte.String(ext.Value)
+                //     rl.Number = new(big.Int)
+                //     if !value.ReadASN1Integer(rl.Number) { … }
+                let mut value = CBString::New(ext.Value.clone());
+                let mut number = big::Int::default();
+                if !value.ReadASN1Integer(&mut number) {
+                    return (None, errors::New("x509: malformed crl number"));
+                }
+                rl.Number = number;
+            }
+            // Go: rl.Extensions = append(rl.Extensions, ext)
+            exts.push(ext);
+        }
+        rl.Extensions = slice::__from_vec(exts);
+    }
+
+    // Go: return rl, nil
+    return (Some(rl), errors::nil);
+}

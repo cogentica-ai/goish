@@ -664,3 +664,110 @@ impl crate::reflect::FromReflectValue for AlgorithmIdentifier {
         );
     }
 }
+
+// go: none — goish-only: the remaining write halves. `reflect_only` emits
+// the read half; `asn1::Unmarshal` needs this direction too, and it is
+// pure field-by-field plumbing, so one macro carries all of it rather
+// than seven hand-copied bodies that could each drift a field.
+macro_rules! __pkix_from_reflect {
+    ($ty:ident { $($idx:literal => $field:ident : $fty:ty),+ $(,)? }) => {
+        impl crate::reflect::FromReflectValue for $ty {
+            fn from_reflect_value(v: crate::reflect::Value) -> (Self, crate::error) {
+                if v.Kind() != crate::reflect::Kind::Struct {
+                    return (
+                        <$ty>::default(),
+                        crate::errors::New(concat!("pkix: expected ", stringify!($ty))),
+                    );
+                }
+                let mut out = <$ty>::default();
+                $(
+                    let (f, err) =
+                        <$fty as crate::reflect::FromReflectValue>::from_reflect_value(v.Field($idx));
+                    if err != crate::errors::nil {
+                        return (<$ty>::default(), err);
+                    }
+                    out.$field = f;
+                )+
+                return (out, crate::errors::nil);
+            }
+        }
+    };
+}
+
+__pkix_from_reflect!(AttributeTypeAndValue {
+    0 => Type: asn1::ObjectIdentifier,
+    1 => Value: Any,
+});
+
+__pkix_from_reflect!(AttributeTypeAndValueSET {
+    0 => Type: asn1::ObjectIdentifier,
+    1 => Value: slice<slice<AttributeTypeAndValue>>,
+});
+
+__pkix_from_reflect!(Extension {
+    0 => Id: asn1::ObjectIdentifier,
+    1 => Critical: bool,
+    2 => Value: slice<byte>,
+});
+
+__pkix_from_reflect!(CertificateList {
+    0 => TBSCertList: TBSCertificateList,
+    1 => SignatureAlgorithm: AlgorithmIdentifier,
+    2 => SignatureValue: asn1::BitString,
+});
+
+__pkix_from_reflect!(TBSCertificateList {
+    0 => Raw: asn1::RawContent,
+    1 => Version: int,
+    2 => Signature: AlgorithmIdentifier,
+    3 => Issuer: RDNSequence,
+    4 => ThisUpdate: time::Time,
+    5 => NextUpdate: time::Time,
+    6 => RevokedCertificates: slice<RevokedCertificate>,
+    7 => Extensions: slice<Extension>,
+});
+
+__pkix_from_reflect!(RevokedCertificate {
+    0 => SerialNumber: Int,
+    1 => RevocationTime: time::Time,
+    2 => Extensions: slice<Extension>,
+});
+
+// The two named-slice types: `reflect_only` cannot parse them (it takes
+// named-field structs), so their read halves are written out beside
+// their declarations and their write halves are here.
+// A named slice round-trips as `Value::Named { ty, inner: Slice }` — the
+// wrapper is what keeps `getUniversalType` able to see the name (it
+// picks SET vs SEQUENCE off `HasSuffix(name, "SET")`). The generic
+// `slice<T>` write half only knows `Value::Slice`, so unwrap first.
+
+// go: none — goish-only: Go's reflect keeps the named type on the same
+// Value; goish spells it as a wrapper, so it needs unwrapping.
+fn __unwrap_named(v: crate::reflect::Value) -> crate::reflect::Value {
+    return match v {
+        crate::reflect::Value::Named { inner, .. } => *inner,
+        other => other,
+    };
+}
+
+impl crate::reflect::FromReflectValue for RelativeDistinguishedNameSET {
+    // go: none — goish-only: see the banner above.
+    fn from_reflect_value(v: crate::reflect::Value) -> (Self, crate::error) {
+        let (inner, err) =
+            <slice<AttributeTypeAndValue> as crate::reflect::FromReflectValue>::from_reflect_value(
+                __unwrap_named(v),
+            );
+        return (RelativeDistinguishedNameSET(inner), err);
+    }
+}
+
+impl crate::reflect::FromReflectValue for RDNSequence {
+    // go: none — goish-only: see the banner above.
+    fn from_reflect_value(v: crate::reflect::Value) -> (Self, crate::error) {
+        let (inner, err) =
+            <slice<RelativeDistinguishedNameSET> as crate::reflect::FromReflectValue>::from_reflect_value(
+                __unwrap_named(v),
+            );
+        return (RDNSequence(inner), err);
+    }
+}

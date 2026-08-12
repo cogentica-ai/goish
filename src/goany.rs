@@ -979,3 +979,70 @@ pub fn lookup_with_mut<'a, Trait: ?Sized + 'static>(
         unsafe { &mut *raw }
     })
 }
+
+// ─── Any <- reflect::Value ────────────────────────────────────────────
+
+// go: none — goish-only: the write half that lets `asn1::Unmarshal`
+// fill an ASN.1 ANY field.
+//
+// Go's `parseField` assigns straight into an `interface{}` field with
+// `v.Set(reflect.ValueOf(result))`; goish's `Value` is not addressable,
+// so the assignment is spelled as a `FromReflectValue` conversion like
+// every other field type. The variants handled are exactly the ones
+// `encoding/asn1`'s ANY arm produces — see the `Kind::Interface` branch
+// in asn1.rs — so this is a total function over that arm's output, not
+// a general `Value` -> `Any` conversion.
+impl crate::reflect::FromReflectValue for Any {
+    // go: none — goish-only: see the banner above.
+    fn from_reflect_value(v: crate::reflect::Value) -> (Self, crate::error) {
+        use crate::reflect::Value as V;
+        return match v {
+            // asn1 TagBoolean / TagInteger / the string tags.
+            V::Bool(b) => (Any::new(b), crate::errors::nil),
+            V::Int(i) => (Any::new(i), crate::errors::nil),
+            V::String(s) => (Any::new(s), crate::errors::nil),
+            // TagOctetString.
+            V::Slice { .. } => {
+                let (b, err) =
+                    <crate::goslice::slice<crate::types::byte> as crate::reflect::FromReflectValue>
+                        ::from_reflect_value(v.clone());
+                if err != crate::errors::nil {
+                    return (Any::default(), err);
+                }
+                (Any::new(b), crate::errors::nil)
+            }
+            // TagOID: a *named* slice, so it arrives wrapped.
+            V::Named { ref ty, .. } if ty.Name() == crate::gostring::string::from_static("ObjectIdentifier") => {
+                let (oid, err) =
+                    <crate::encoding::asn1::ObjectIdentifier as crate::reflect::FromReflectValue>
+                        ::from_reflect_value(v.clone());
+                if err != crate::errors::nil {
+                    return (Any::default(), err);
+                }
+                (Any::new(oid), crate::errors::nil)
+            }
+            // TagBitString / TagUTCTime / TagGeneralizedTime are structs,
+            // told apart by the descriptor name their `Reflect` carries.
+            V::Struct { ref ty, .. } if ty.Name() == crate::gostring::string::from_static("BitString") => {
+                let (bs, err) =
+                    <crate::encoding::asn1::BitString as crate::reflect::FromReflectValue>
+                        ::from_reflect_value(v.clone());
+                if err != crate::errors::nil {
+                    return (Any::default(), err);
+                }
+                (Any::new(bs), crate::errors::nil)
+            }
+            V::Struct { ref ty, .. } if ty.Name() == crate::gostring::string::from_static("Time") => {
+                let (t, err) = <crate::time::Time as crate::reflect::FromReflectValue>
+                    ::from_reflect_value(v.clone());
+                if err != crate::errors::nil {
+                    return (Any::default(), err);
+                }
+                (Any::new(t), crate::errors::nil)
+            }
+            // Go leaves the field zero for a tag it does not decode
+            // (the `default:` arm assigns nothing); a nil `Any` is that.
+            _ => (Any::default(), crate::errors::nil),
+        };
+    }
+}
