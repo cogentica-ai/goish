@@ -7,14 +7,13 @@ single statically-linked binary with no `glibc`, no `ld.so`, no garbage collecto
 language runtime to initialize. Goish ships its own `_start`, page allocator, M:N scheduler,
 epoll netpoller and HTTP stack.
 
-- **The crypto is provably Go's, not a lookalike.** Every one of the 1709 declarations in
-  `crypto/` names the Go source file and line range it was translated from, and CI re-opens
-  the Go 1.25.5 tree on every push to check it. [Why that matters ↓](#the-blind-spot-in-your-sbom)
-- **No GC, no pauses, no libc.** Go's allocator design (mheap / mcentral / per-P mcache, 67
-  size classes) driven by Rust ownership instead of a collector. `ldd` reports *not a dynamic
-  executable*.
-- **Real concurrency, not futures.** Stackful goroutines with async preemption (SIGURG), work
-  stealing, and a 1M-goroutine demo that parks a million of them on 13 OS threads.
+- **Traceable crypto.** Every one of the 1709 declarations in `crypto/` names the Go source
+  file and line range it was translated from. CI re-opens the Go 1.25.5 tree on every push and
+  checks that the citation still resolves. See [Provenance](#provenance).
+- **No GC, no libc.** Go's allocator design (mheap / mcentral / per-P mcache, 67 size classes)
+  driven by Rust ownership instead of a collector. `ldd` reports *not a dynamic executable*.
+- **Stackful goroutines.** Async preemption via SIGURG, work stealing, and a demo that parks a
+  million goroutines on 13 OS threads.
 
 ```rust
 use goish::{go, KB};
@@ -43,57 +42,57 @@ That's a million real goroutines on 13 OS threads, ~2 GiB virtual / ~2.4 GiB pea
 
 ---
 
-## The blind spot in your SBOM
+## Provenance
 
-Supply-chain tooling answers *where an artifact came from*: which builder, which commit, which
-dependency versions. [SLSA provenance is a signed statement about the build](https://slsa.dev/spec/v1.0/provenance)
-— builder identity, source repo, commit hash, output digest.
+Supply-chain tooling answers where an artifact came from. [SLSA provenance](https://slsa.dev/spec/v1.0/provenance)
+is a signed statement about the build: builder identity, source repository, commit hash,
+output digest.
 
-None of that can see inside a **reimplementation**.
+That does not describe a reimplementation. When a component is a port, an SBOM records
+`goish 0.1.0` and stops. It cannot show whether the AES-GCM in the binary is Go's reviewed
+implementation or an approximation of it. Artifact-level provenance is silent about
+source-level fidelity, which is the question a rewrite raises.
 
-When a component is a port — Go's crypto rewritten in Rust, a C library rewritten in Go, any
-rewrite of validated code — your SBOM records `goish 0.1.0` and stops. It cannot tell an
-auditor whether the AES-GCM in that binary is Go's reviewed implementation or someone's
-plausible-looking approximation. Provenance at the artifact level is silent about fidelity at
-the source level, and that is exactly the question a rewrite raises.
-
-Goish closes that gap at the only place it can be closed — the function:
+Goish records the answer per function:
 
 ```rust
 // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:31-46 newGCM
 ```
 
-That comment sits directly above the port. It is not documentation; it is a machine-checked
-assertion, and `scripts/anchor_check.py` re-opens the Go 1.25.5 tree and verifies that the
-cited file and line range still resolve to the symbol named. **1,956** of these anchors point
-into Go's source. A further **1,118** `// go: none — <reason>` markers declare code that is
-deliberately *not* a port, and **26** `// go: waived` entries name what was left out and why.
+The comment sits directly above the port. `scripts/anchor_check.py` opens the Go 1.25.5 tree
+and checks that the cited file and line range still resolve to the symbol named.
 
-The point isn't the count. It's that **there is no third category** — no line of ported code
-is unaccounted for, and the accounting is a script, not a spreadsheet.
+| marker | count | meaning |
+|---|--:|---|
+| `// go: sdk 1.25.5 <file>:<lines> <Symbol>` | 1,956 | translated from Go, citation checked |
+| `// go: none — <reason>` | 1,118 | goish-only code, deliberately not a port |
+| `// go: waived <decl> — <reason>` | 26 | in Go, left out here, with a reason |
 
-### Why now
+Every ported function falls into one of those three categories, and goishlint fails on one
+that carries no marker at all.
 
-The 2026 shift is from [compliance as a document to compliance as a system](https://cloudsmith.com/blog/the-2026-guide-to-software-supply-chain-security-from-static-sboms-to-agentic-governance)
-— evidence that is machine-queryable and continuously verified, not assembled the week before
-an audit. Three dates are driving it:
+### Why this matters in 2026
+
+Regulators are moving toward evidence that is machine-queryable and continuously verified
+rather than [assembled for an audit](https://cloudsmith.com/blog/the-2026-guide-to-software-supply-chain-security-from-static-sboms-to-agentic-governance).
+Four dates:
 
 | date | what changes |
 |---|---|
-| **11 Sep 2026** | [EU CRA reporting obligations bind](https://digital-strategy.ec.europa.eu/en/policies/cra-reporting): 24 h early warning, 72 h full notification on actively exploited vulnerabilities. Nobody assembles component-level inventory inside 24 hours — you either already have it or you miss the window. Applies to non-EU manufacturers whose products reach the EU market. |
-| **21 Sep 2026** | [All FIPS 140-2 certificates move to the Historical List](https://www.safelogic.com/blog/what-happens-on-september-21-2026). Existing deployments keep running; a Historical certificate no longer justifies a *new* federal procurement. |
-| **1 Jan 2027** | [CNSA 2.0 becomes the default for new NSS acquisitions](https://www.qusecure.com/cnsa-2-0-pqc-requirements-timelines-federal-impact/), with software and firmware signing on an exclusive-use requirement. |
+| **11 Sep 2026** | [EU CRA reporting obligations bind](https://digital-strategy.ec.europa.eu/en/policies/cra-reporting): 24 h early warning and 72 h full notification on actively exploited vulnerabilities. Component-level inventory has to exist beforehand to meet a 24-hour window. Applies to non-EU manufacturers whose products reach the EU market. |
+| **21 Sep 2026** | [FIPS 140-2 certificates move to the Historical List](https://www.safelogic.com/blog/what-happens-on-september-21-2026). Existing deployments keep running; a Historical certificate no longer justifies a new federal procurement. |
+| **1 Jan 2027** | [CNSA 2.0 becomes the default for new NSS acquisitions](https://www.qusecure.com/cnsa-2-0-pqc-requirements-timelines-federal-impact/), with an exclusive-use requirement for software and firmware signing. |
 | **11 Dec 2027** | CRA essential requirements, including the machine-readable SBOM mandate. |
 
-Goish ports all 35 `crypto/internal/fips140*` packages at 100% — the same code path Go's own
-FIPS 140-3 validation covers — and can emit, per function, the upstream file and line it came
-from. To be exact about what that is and isn't: **goish is not itself FIPS-validated, and a
-port of validated code is not validated code.** What it gives an auditor is the traceability
-argument, in a form they can re-run.
+All 35 `crypto/internal/fips140*` packages are ported at 100%, which is the code path Go's own
+FIPS 140-3 validation covers, and each function carries the upstream file and line it came
+from. Two limits on what that means: goish is not FIPS-validated, and a port of validated code
+is not itself validated. It supplies the traceability argument, in a form an auditor can
+re-run.
 
-### Verify it yourself
+### Verifying the claims
 
-The claims above are reproducible from a clean checkout — don't take them on faith:
+Reproducible from a clean checkout:
 
 ```bash
 # Every anchor's cited file and line range still resolves in the Go tree.
@@ -106,53 +105,53 @@ python3 scripts/port_coverage.py crypto --by-decl
 scripts/goref.sh crypto/tls /path/to/ref.go
 ```
 
-The first two run in CI on every push ([`provenance.yml`](.github/workflows/provenance.yml)),
-so the badge is the claim. One caveat, stated plainly: goishlint's `GOISH018` — the
-signature, arity and struct-field diff behind `make lint` — is a **separate binary that is
-not in this repo**, so that tier is a local pre-commit ratchet, not a CI gate. It is the
-strictest check goish has and it is the one you currently have to take our word for.
+The first two run in CI on every push ([`provenance.yml`](.github/workflows/provenance.yml)).
+
+One gap: goishlint's `GOISH018` check, which diffs signature, arity and struct fields against
+the Go source, lives in a separate binary that is not in this repository. It runs locally
+through `make lint` as a ratchet against a per-file baseline, but it is not a CI gate, so that
+tier is currently unverifiable from outside.
 
 ---
 
 ## Who this is for
 
 **Regulated workloads facing the September 2026 deadlines.** FIPS 140-2 certificates go
-Historical on the 21st; CRA reporting binds on the 11th. Both push the same requirement
-downward — verifiable provenance for every dependency, including the ones you didn't pick.
-Goish ports Go's FIPS module and emits, per function, the Go file and line range it was
-translated from, re-checked in CI on every push. That is an auditor-facing artifact, not a
-promise. (It is *not* a FIPS validation — see [above](#why-now).)
+Historical on the 21st; CRA reporting binds on the 11th. Both push verifiable provenance down
+to every dependency, including the ones you did not choose. Goish ports Go's FIPS module and
+emits, per function, the Go file and line range it was translated from, re-checked in CI on
+every push. See [Provenance](#provenance) for what this does and does not amount to.
 
-**Minimal-attack-surface deployments.** `scratch`/distroless containers, confidential VMs and
-Nitro-style enclaves, appliance images. No libc, no dynamic linker, no interpreter, no JIT —
-the binary is the whole userspace. Fewer moving parts to inventory, patch and attest.
+**Minimal-attack-surface deployments.** `scratch`/distroless containers, confidential VMs,
+Nitro-style enclaves, appliance images. No libc, dynamic linker, interpreter or JIT: the
+binary is the whole userspace, so there is less to inventory, patch and attest.
 
 **Edge and embedded Linux.** One static binary, no runtime to install, no GC to tune, and
 memory that tracks what you actually touch (a shallow goroutine costs about one page).
 
 **High-density concurrent services.** A million parked goroutines, an epoll netpoller sharded
-per-P, and an HTTP server with an allocation-free hot path — without a `.await` in sight.
+per-P, and an HTTP server with an allocation-free hot path.
 
 ### Not for you (yet)
 
-Being straight about this saves everyone time:
-
-- **Linux `x86_64` only.** Other targets are deliberately out of scope right now.
-- **Not security-audited.** The TLS stack is a faithful, machine-checked port, but it has had
-  no external review and no side-channel analysis. See [SECURITY.md](SECURITY.md).
-- **Not all of Go.** `crypto/` is complete; `net`, `encoding` and `os` are partial, and
-  outside `crypto/` most ports are name-level rather than anchor-verified. The
-  [table below](#coverage-measured) is honest about which is which.
-- **Not the Go compiler.** You write Rust that reads like Go, with goish's `string`,
-  `slice<T>`, `map<K,V>` and macros — you do not compile `.go` files.
+- **Linux `x86_64` only.** Other targets are out of scope for now.
+- **Not security-audited.** The TLS stack is a machine-checked port, but it has had no
+  external review and no side-channel analysis. See [SECURITY.md](SECURITY.md).
+- **Not all of Go.** `crypto/` is complete. `net`, `encoding` and `os` are partial, and
+  outside `crypto/` most ports are name-level rather than anchor-verified; the
+  [coverage table](#coverage-measured) marks which is which.
+- **Not the Go compiler.** You write Rust that reads like Go, using goish's `string`,
+  `slice<T>`, `map<K,V>` and macros. It does not compile `.go` files.
 
 ---
 
 ## Status
 
-Active development. The e2e suite runs 277 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines. Note that goish has **no `cargo test` suite** — the test harness links `std`, whose `panic_impl` collides with goish's own, so tests are written as examples and run under e2e.
+Active development. The e2e suite runs 277 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
 
-Goish is **single-target**: `x86_64-unknown-linux-gnu`. Other targets are deliberately out of scope.
+There is no `cargo test` suite. The test harness links `std`, whose `panic_impl` lang item collides with goish's own, so tests are written as examples and run under e2e instead.
+
+Goish is single-target: `x86_64-unknown-linux-gnu`.
 
 ### Coverage, measured
 
@@ -165,27 +164,26 @@ name matches.
 
 #### `crypto/` — complete, and on the live path
 
-**`crypto/` is done: 1709/1709 declarations (100%) across all 66
-packages**, counted by receiver-qualified declaration (not collapsed
-names), every one carrying a provenance anchor and checked against Go
-1.25.5 function by function. 26 declarations are explicitly waived out
-of the denominator with in-tree justifications — 24 of them the QUIC
-transport surface (`QUICConn` and the `c.quic` hooks), which is dead
-code without a QUIC stack; each `c.quic != nil` arm in the ported
-handshake code is a documented deviation at its site.
+`crypto/` is at **1709/1709 declarations (100%) across all 66 packages**,
+counted by receiver-qualified declaration rather than collapsed names,
+each carrying a provenance anchor checked against Go 1.25.5. 26
+declarations are waived out of the denominator with in-tree
+justifications. 24 of those are the QUIC transport surface (`QUICConn`
+and the `c.quic` hooks), which is dead code without a QUIC stack; each
+`c.quic != nil` arm in the ported handshake code is a documented
+deviation at its site.
 
-That includes the piece this README used to disclaim: **`crypto/tls` is
-ported verbatim, and it is what runs.** `makeClientHello` through both
-`clientHandshakeState{,TLS13}.handshake` drivers, the full TLS 1.2/1.3
-server (`processClientHello` → `sendSessionTicket`), Encrypted Client
-Hello on both ends, session resumption, renegotiation policy, the
-post-handshake message dispatcher, and the `Dialer` surface. `tls.Conn`
-is a thin owner of that ported connection — `Handshake`, `Read`,
-`Write` and `Close` are the ported record loops, not a parallel
-implementation. Methods are pinned against ground truth generated by
-running the real Go code (`scripts/goref.sh`), and an in-memory loopback
-runs the ported client and server against each other over both TLS 1.3
-and TLS 1.2.
+`crypto/tls` is ported verbatim and is what runs at runtime:
+`makeClientHello` through both `clientHandshakeState{,TLS13}.handshake`
+drivers, the TLS 1.2/1.3 server (`processClientHello` →
+`sendSessionTicket`), Encrypted Client Hello on both ends, session
+resumption, renegotiation policy, the post-handshake message
+dispatcher, and the `Dialer` surface. `tls.Conn` owns that ported
+connection; its `Handshake`, `Read`, `Write` and `Close` are the ported
+record loops rather than a second implementation. Methods are pinned
+against ground truth generated by running the real Go code
+(`scripts/goref.sh`), and an in-memory loopback runs the ported client
+and server against each other over TLS 1.3 and TLS 1.2.
 
 | subtree | ported (by name) | `// go:` lines |
 |---|--:|--:|
@@ -196,38 +194,35 @@ and TLS 1.2.
 | `compress` | 122/151 (80.8%) | 0 |
 | `os` | 112/366 (30.6%) | 2 |
 
-The right-hand column is what `port_coverage.py` reports: *all* `// go:`
-lines, which mixes the 1,956 `sdk` anchors pointing into Go's source with
-the 1,118 `none` markers declaring goish-only code and the 195 file-level
-manifests. When someone quotes a single headline anchor number, this is
-usually the one — it is the larger and the less meaningful of the two.
+The right-hand column counts *all* `// go:` lines, which is what
+`port_coverage.py` reports. It mixes the 1,956 `sdk` anchors with the
+1,118 `none` markers and 195 file-level manifests, so it runs larger than
+the number of functions actually traced to Go.
 
 Aggregate: **151 packages with a port, 77 at 100%, 1,956 source anchors.**
-Note the default counter tallies **unique names, not declarations**, so
-Go methods sharing a name across types collapse — pass `--by-decl` for
-the receiver-qualified count.
+The default counter tallies unique names rather than declarations, so Go
+methods sharing a name across types collapse; pass `--by-decl` for the
+receiver-qualified count.
 
-Two caveats worth reading before you rely on a number here. First,
-outside `crypto/` — which carries 95% of all anchors — coverage is
-name-level: `net` has 9 anchors across 308 ported functions, and `sync`,
-`compress`, `archive` and `text` have none. Treat non-crypto ports as
-working code, not as verified ports. Second, **998 anchors name a method
-without its receiver**, so `anchor_check.py` can confirm the file and
-line range but cannot uniquely bind the symbol; `--strict` fails on
-them, and tightening those is open work.
+Two limits on those numbers. Outside `crypto/`, which holds 95% of all
+anchors, coverage is name-level: `net` has 9 anchors across 308 ported
+functions, and `sync`, `compress`, `archive` and `text` have none, so
+treat non-crypto ports as working code rather than verified ports. And
+998 anchors name a method without its receiver, so `anchor_check.py` can
+confirm the file and line range but cannot bind the symbol uniquely.
+`--strict` fails on those; tightening them is open work.
 
-📊 **[PROGRESS.md](PROGRESS.md)** — the full picture, and what the three
+**[PROGRESS.md](PROGRESS.md)** — full coverage detail and what the three
 verification tiers mean.
 
-🗺️ **[ROADMAP.md](ROADMAP.md)** — what is left and in what order. With
+**[ROADMAP.md](ROADMAP.md)** — what is left and in what order. With
 `crypto/` complete, the frontier moves to `net`, `encoding` and `os`.
 
-📐 **[CONTRIBUTING.md](CONTRIBUTING.md)** — the conventions a port must follow, and the pre-flight checks to run before starting one.
+**[CONTRIBUTING.md](CONTRIBUTING.md)** — the conventions a port must follow, and the pre-flight checks to run before starting one.
 
-🔒 **[SECURITY.md](SECURITY.md)** — not audited. The TLS stack is a
-faithful port and is machine-checked against Go, but it has had no
-security review and no side-channel analysis; read this before trusting
-goish with anything.
+**[SECURITY.md](SECURITY.md)** — goish is not audited. The TLS stack is
+machine-checked against Go but has had no security review and no
+side-channel analysis. Read this before trusting goish with anything.
 
 ## What's implemented
 
@@ -435,45 +430,41 @@ Goish is **not** a clone of Go - it ports the runtime *idioms* into a Rust owner
 
 ## Commercial use & support
 
-goish is permissively licensed (see [License](#license)) — you can ship it in a proprietary
+goish is permissively licensed (see [License](#license)), so you can ship it in a proprietary
 product with no reciprocal obligation and no fee.
 
-Where a commercial relationship helps:
+Paid work that goes beyond that:
 
 - **Compliance evidence.** Provenance reports mapping a shipped binary back to upstream Go
-  source, per function — the [SBOM blind spot](#the-blind-spot-in-your-sbom) turned into an
-  artifact an auditor can re-run. The anchor data is already in the tree; packaging,
-  attesting and signing it for a specific audit is the work.
-- **Prioritised porting.** `net`, `encoding` and `os` are partial and anchor-light. Sponsor
-  the package your product depends on and it gets built to the same verified standard as
-  `crypto/` — anchors, goref-generated ground truth, e2e coverage.
-- **Support & SLA.** Guaranteed response, upgrade assistance, and backports.
-- **Integration.** Getting goish onto your target — confidential VM, appliance image, edge
-  device — and keeping it there.
-
-If you are inside either September 2026 window and want to know whether this helps, the
-fastest useful conversation starts with which package your crypto path actually touches.
+  source, per function. The anchor data is already in the tree; packaging, attesting and
+  signing it for a specific audit is the work.
+- **Prioritised porting.** `net`, `encoding` and `os` are partial and anchor-light. Sponsoring
+  a package gets it built to the same standard as `crypto/`: anchors, goref-generated ground
+  truth, e2e coverage.
+- **Support and SLA.** Guaranteed response, upgrade assistance, backports.
+- **Integration.** Getting goish onto a specific target (confidential VM, appliance image,
+  edge device) and keeping it there.
 
 <!-- TODO(maintainer): replace with a monitored address or form. GitHub issues work as an
      interim (they are public and monitored) but a private commercial line converts better,
      and anything compliance-adjacent is a conversation buyers won't start in public. -->
-📮 Commercial enquiries: open a [GitHub issue](https://github.com/cogentica-ai/goish/issues)
-for now — a private contact address is being set up.
+Commercial enquiries: open a [GitHub issue](https://github.com/cogentica-ai/goish/issues)
+for now. A private contact address is being set up.
 
 ---
 
 ## License
 
-goish's own code — the runtime, scheduler, allocator, macros and type
-system — is **MIT** ([LICENSE](LICENSE)).
+goish's own code (runtime, scheduler, allocator, macros, type system) is
+**MIT** ([LICENSE](LICENSE)).
 
 Substantial parts of `src/` are ports of the Go standard library and of
 `golang.org/x/crypto` / `x/text`, translated function by function from
 the Go 1.25 source. Those remain **BSD-3-Clause, © The Go Authors**
-([LICENSE-GO](LICENSE-GO)) — 1,956 provenance anchors across 190 files
-identify exactly which code this is, which is also the practical answer
-to "which files carry the Go license?". Both licenses must travel with
-any redistribution, source or binary.
+([LICENSE-GO](LICENSE-GO)). The 1,956 provenance anchors across 190 files
+identify which code that is, so they also answer which files carry the Go
+license. Both licenses must travel with any redistribution, source or
+binary.
 
 See [NOTICE.md](NOTICE.md) for the details.
 
