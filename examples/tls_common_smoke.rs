@@ -24,6 +24,25 @@ use goish::types::int;
 static mut PASS: int = 0;
 static mut FAIL: int = 0;
 
+fn check(what: &'static str, ok: bool) {
+    unsafe {
+        if ok {
+            PASS += 1;
+        } else {
+            FAIL += 1;
+            fmt::Printf!("FAIL %s\n", what);
+        }
+    }
+}
+
+fn check_n(what: &'static str, got: int, want: int) {
+    let ok = got == want;
+    if !ok {
+        fmt::Printf!("FAIL %s: got %v want %v\n", what, got, want);
+    }
+    check(what, ok);
+}
+
 fn eq(what: &'static str, got: string, want: &'static str) {
     let ok = got == string::from_static(want);
     unsafe {
@@ -133,6 +152,60 @@ fn main() {
         tls::alert::AlertError(48).Error(),
         "tls: unknown certificate authority",
     );
+
+    // ─── defaults.go — the preference ORDER, which decides what a
+    //     handshake negotiates. Every value from goref.sh.
+    let cp = tls::defaults_defaultCurvePreferences();
+    check_n("curve prefs length", cp.Len(), 5);
+    if cp.Len() == 5 {
+        check_n("curve[0] X25519MLKEM768", goish::int(cp[0].0), 4588);
+        check_n("curve[1] X25519", goish::int(cp[1].0), 29);
+        check_n("curve[2] CurveP256", goish::int(cp[2].0), 23);
+        check_n("curve[3] CurveP384", goish::int(cp[3].0), 24);
+        check_n("curve[4] CurveP521", goish::int(cp[4].0), 25);
+    }
+
+    let sa = tls::defaults_defaultSupportedSignatureAlgorithms();
+    check_n("sigalg length", sa.Len(), 12);
+    if sa.Len() == 12 {
+        // PSS-SHA256 first, SHA-1 last — the security-relevant ends.
+        check_n("sigalg[0] PSSWithSHA256", goish::int(sa[0].0), 0x0804);
+        check_n("sigalg[1] ECDSAWithP256AndSHA256", goish::int(sa[1].0), 0x0403);
+        check_n("sigalg[2] Ed25519", goish::int(sa[2].0), 0x0807);
+        check_n("sigalg[10] PKCS1WithSHA1", goish::int(sa[10].0), 0x0201);
+        check_n("sigalg[11] ECDSAWithSHA1", goish::int(sa[11].0), 0x0203);
+    }
+
+    check_n("supportedCipherSuites(true) len", tls::defaults_supportedCipherSuites(true).Len(), 22);
+    check_n("supportedCipherSuites(false) len", tls::defaults_supportedCipherSuites(false).Len(), 22);
+    let sc = tls::defaults_supportedCipherSuites(true);
+    if sc.Len() == 22 {
+        check_n("aesGCM-preferred head", goish::int(sc[0]), 0xc02b);
+    }
+    let scn = tls::defaults_supportedCipherSuites(false);
+    if scn.Len() == 22 {
+        // ChaCha20 first when AES has no hardware support.
+        check_n("no-AES head is ChaCha20", goish::int(scn[0]), 0xcca9);
+    }
+
+    // defaultCipherSuites drops the disabled/RSA-kex/3DES suites: 22 -> 10.
+    let dc = tls::defaults_defaultCipherSuites(true);
+    check_n("defaultCipherSuites(true) len", dc.Len(), 10);
+    if dc.Len() == 10 {
+        let want: [int; 10] = [
+            0xc02b, 0xc02f, 0xc02c, 0xc030, 0xcca9, 0xcca8, 0xc009, 0xc013, 0xc00a, 0xc014,
+        ];
+        let mut i = 0usize;
+        let mut ok = true;
+        while i < 10 {
+            if goish::int(dc[i]) != want[i] {
+                ok = false;
+            }
+            i += 1;
+        }
+        check("defaultCipherSuites(true) exact order", ok);
+    }
+    check_n("defaultCipherSuites(false) len", tls::defaults_defaultCipherSuites(false).Len(), 10);
 
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);

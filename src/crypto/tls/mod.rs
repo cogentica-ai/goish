@@ -12,8 +12,41 @@
 #![allow(non_snake_case, non_upper_case_globals)]
 
 pub mod alert;
+pub mod cipher_suites;
 pub mod common;
 pub mod common_string;
+pub mod defaults;
+
+// go: none — goish-only: Go's tests live inside package tls and call its
+// unexported functions directly. A goish example is an external crate,
+// so the four `defaults.go` functions — all unexported in Go, and kept
+// that way — need a visible shim to be testable. Named `defaults_<fn>`
+// so it is obvious these are not Go's spelling.
+// go: none — goish-only: see the banner above.
+#[doc(hidden)]
+pub fn defaults_defaultCurvePreferences() -> crate::goslice::slice<common::CurveID> {
+    return defaults::defaultCurvePreferences();
+}
+// go: none — goish-only: see the banner above.
+#[doc(hidden)]
+pub fn defaults_defaultSupportedSignatureAlgorithms(
+) -> crate::goslice::slice<common::SignatureScheme> {
+    return defaults::defaultSupportedSignatureAlgorithms();
+}
+// go: none — goish-only: see the banner above.
+#[doc(hidden)]
+pub fn defaults_supportedCipherSuites(
+    aesGCMPreferred: bool,
+) -> crate::goslice::slice<crate::types::uint16> {
+    return defaults::supportedCipherSuites(aesGCMPreferred);
+}
+// go: none — goish-only: see the banner above.
+#[doc(hidden)]
+pub fn defaults_defaultCipherSuites(
+    aesGCMPreferred: bool,
+) -> crate::goslice::slice<crate::types::uint16> {
+    return defaults::defaultCipherSuites(aesGCMPreferred);
+}
 
 // Re-export common.go's protocol enumerations at the package root, the
 // way Go has them in package tls.

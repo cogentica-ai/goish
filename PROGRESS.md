@@ -40,18 +40,18 @@ subtrees as working code, not as verified ports.
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support
 with slices wherever it is needed.
 
-## crypto/ — 1192 / 1452 functions (82.1%)
+## crypto/ — 1196 / 1452 functions (82.4%)
 
 **65 of the 66 crypto packages are at 100%.** The single exception is
-`crypto/tls`, which holds 260 of the 260 remaining functions.
+`crypto/tls`, which holds 256 of the 256 remaining functions.
 
 | | |
 |---|--:|
-| ported | 1192 |
-| remaining, portable | 250 |
+| ported | 1196 |
+| remaining, portable | 246 |
 | remaining, assembly stubs | 10 |
 | waived (resolved elsewhere by design) | 1 |
-| provenance anchors | 2181 |
+| provenance anchors | 2197 |
 | unverified names (see below) | 10 |
 
 Complete and byte-checked against Go: `x509` (158/158), `ecdsa`,
