@@ -2270,6 +2270,34 @@ fn main() {
     eq("both types keep everything typeAndHash recognises", schemes(s7),
        "PSSWithSHA256 ECDSAWithP256AndSHA256 Ed25519 PKCS1WithSHA1");
 
+    // ─── handshake_server_tls13.go: the HelloRetryRequest change check
+    //     and the two state predicates. From goref.sh.
+    let ic = |w: int| tls::handshake_server_tls13_illegalChange(w);
+    check("illegalClientHelloChange accepts an identical hello", !ic(0));
+    // RFC 8446 §4.1.2 lets the second ClientHello change exactly these:
+    // the key shares, early data, and the PSK identities. Everything
+    // else must be byte-identical.
+    check("illegalClientHelloChange permits new key shares", !ic(1));
+    check("illegalClientHelloChange permits early_data", !ic(2));
+    check("illegalClientHelloChange permits new PSK identities", !ic(3));
+    check("illegalClientHelloChange rejects a changed server name", ic(4));
+    check("illegalClientHelloChange rejects changed cipher suites", ic(5));
+    check("illegalClientHelloChange rejects an added cipher suite", ic(6));
+    check("illegalClientHelloChange rejects a changed random", ic(7));
+    check("illegalClientHelloChange rejects a changed cookie", ic(8));
+    check("illegalClientHelloChange rejects changed ALPN", ic(9));
+
+    let (st0, st1, st2, rc0, rc1, rc2) = tls::handshake_server_tls13_stateFlags();
+    check("shouldSendSessionTickets by default", st0);
+    check("shouldSendSessionTickets honours SessionTicketsDisabled", !st1);
+    // RFC 8446 §4.2.9: don't send a ticket the client could not use.
+    check("shouldSendSessionTickets needs psk_dhe_ke", !st2);
+    check("requestClientCert is off by default", !rc0);
+    check("requestClientCert follows ClientAuth", rc1);
+    // A resumed connection already authenticated, so no cert is asked
+    // for even when ClientAuth would request one.
+    check("requestClientCert is skipped when using a PSK", !rc2);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

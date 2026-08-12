@@ -1,5 +1,8 @@
 // crypto/tls/handshake_server_tls13.rs — TLS 1.3 server handshake.
 //
+// goishlint:ignore GOISH018 handshake, processClientHello, checkForResumption, cloneHash, pickCertificate, doHelloRetryRequest, sendServerParameters, sendServerCertificate, sendServerFinished, sendSessionTickets, sendSessionTicket, readClientCertificate, readClientFinished — serverHandshakeStateTLS13's Conn-driven half; the live server below the divider implements the same protocol by hand. cloneHash additionally needs encoding::BinaryMarshaler to be a #[goish::interface] before Go's `in.(binaryMarshaler)` assertion can be spelled. See ROADMAP.md.
+// goishlint:ignore GOISH021 echServerContext, maxClientPSKIdentities — same.
+//
 // Port of Go 1.25.5 crypto/tls:
 //   handshake_server.go       readClientHello (:134), negotiateALPN (:334)
 //   handshake_server_tls13.go serverHandshakeStateTLS13.handshake (:66),
@@ -709,4 +712,128 @@ fn sign_handshake(
             Ok(sig.__into_vec())
         }
     }
+}
+
+
+// ─── crypto/tls/handshake_server_tls13.go, ported verbatim ────────────
+//
+// Everything above this divider is goish-only code that drives the live
+// TLS 1.3 server. Below it is the state record Go declares and the
+// methods that read it without driving the handshake.
+
+// Go: handshake_server_tls13.go:40-64
+//   type serverHandshakeStateTLS13 struct { c *Conn; ctx context.Context
+//       clientHello *clientHelloMsg; hello *serverHelloMsg
+//       sentDummyCCS bool; usingPSK bool; earlyData bool
+//       suite *cipherSuiteTLS13; cert *Certificate
+//       sigAlg SignatureScheme; earlySecret *tls13.EarlySecret
+//       sharedKey []byte; handshakeSecret *tls13.HandshakeSecret
+//       masterSecret *tls13.MasterSecret; trafficSecret []byte
+//       transcript hash.Hash; clientFinished []byte
+//       echContext *echServerContext }
+/// Go: the TLS 1.3 server handshake state.
+///
+/// **Partial record.** Only the fields the ported methods read are
+/// present; the key-schedule and transcript fields land with
+/// `handshake`, which drives the whole exchange.
+pub(crate) struct serverHandshakeStateTLS13 {
+    pub c: super::conn::Conn,
+    pub clientHello: super::handshake_messages::clientHelloMsg,
+    pub sentDummyCCS: bool,
+    pub usingPSK: bool,
+}
+
+impl serverHandshakeStateTLS13 {
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:535-545 serverHandshakeStateTLS13.sendDummyChangeCipherSpec
+    /// Go: "sendDummyChangeCipherSpec sends a ChangeCipherSpec record for
+    /// compatibility reasons. See RFC 8446, Appendix D.4."
+    ///
+    /// Deviation: the `c.quic != nil` branch is absent — goish ships no
+    /// QUIC transport.
+    pub(crate) fn sendDummyChangeCipherSpec(&mut self) -> crate::error {
+        // Go: if hs.sentDummyCCS { return nil }
+        //     hs.sentDummyCCS = true
+        //     return hs.c.writeChangeCipherRecord()
+        if self.sentDummyCCS {
+            return crate::errors::nil;
+        }
+        self.sentDummyCCS = true;
+        return self.c.writeChangeCipherRecord();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:1042-1054 serverHandshakeStateTLS13.shouldSendSessionTickets
+    ///
+    /// Deviation: the QUIC check is absent — Go skips automatic tickets
+    /// for QUIC because QUICConn.SendSessionTicket sends them instead,
+    /// and goish ships no QUIC transport.
+    pub(crate) fn shouldSendSessionTickets(&self) -> bool {
+        // Go: if hs.c.config.SessionTicketsDisabled { return false }
+        if self.c.__configSessionTicketsDisabled() {
+            return false;
+        }
+        // Go: Don't send tickets the client wouldn't use. See RFC 8446,
+        // Section 4.2.9.
+        // Go: return slices.Contains(hs.clientHello.pskModes, pskModeDHE)
+        return self
+            .clientHello
+            .pskModes
+            .contains(&super::common::pskModeDHE);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:1152-1154 serverHandshakeStateTLS13.requestClientCert
+    pub(crate) fn requestClientCert(&self) -> bool {
+        // Go: return hs.c.config.ClientAuth >= RequestClientCert && !hs.usingPSK
+        return self.c.__configClientAuth().0 >= super::common::RequestClientCert.0
+            && !self.usingPSK;
+    }
+}
+
+// go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:449-500 illegalClientHelloChange
+/// Go: "illegalClientHelloChange reports whether the second ClientHello
+/// of a HelloRetryRequest exchange differs from the first in any way
+/// other than the fields RFC 8446 Section 4.1.2 permits."
+pub(crate) fn illegalClientHelloChange(
+    ch: &super::handshake_messages::clientHelloMsg,
+    ch1: &super::handshake_messages::clientHelloMsg,
+) -> bool {
+    // Go: if len(ch.supportedVersions) != len(ch1.supportedVersions) || … { return true }
+    if ch.supportedVersions.len() != ch1.supportedVersions.len()
+        || ch.cipherSuites.len() != ch1.cipherSuites.len()
+        || ch.supportedCurves.len() != ch1.supportedCurves.len()
+        || ch.supportedSignatureAlgorithms.len() != ch1.supportedSignatureAlgorithms.len()
+        || ch.supportedSignatureAlgorithmsCert.len()
+            != ch1.supportedSignatureAlgorithmsCert.len()
+        || ch.alpnProtocols.len() != ch1.alpnProtocols.len()
+    {
+        return true;
+    }
+    // Go: for i := range ch.supportedVersions { … } — one loop per list.
+    if ch.supportedVersions != ch1.supportedVersions
+        || ch.cipherSuites != ch1.cipherSuites
+        || ch.supportedCurves != ch1.supportedCurves
+        || ch.supportedSignatureAlgorithms != ch1.supportedSignatureAlgorithms
+        || ch.supportedSignatureAlgorithmsCert != ch1.supportedSignatureAlgorithmsCert
+        || ch.alpnProtocols != ch1.alpnProtocols
+    {
+        return true;
+    }
+    // Go: return ch.vers != ch1.vers || !bytes.Equal(ch.random, ch1.random) || …
+    //
+    // Note what is NOT compared: keyShares, pskIdentities, pskBinders,
+    // earlyData, cookie's presence — those are exactly the fields RFC
+    // 8446 §4.1.2 lets the second ClientHello change.
+    return ch.vers != ch1.vers
+        || ch.random != ch1.random
+        || ch.sessionId != ch1.sessionId
+        || ch.compressionMethods != ch1.compressionMethods
+        || ch.serverName != ch1.serverName
+        || ch.ocspStapling != ch1.ocspStapling
+        || ch.supportedPoints != ch1.supportedPoints
+        || ch.ticketSupported != ch1.ticketSupported
+        || ch.sessionTicket != ch1.sessionTicket
+        || ch.secureRenegotiationSupported != ch1.secureRenegotiationSupported
+        || ch.secureRenegotiation != ch1.secureRenegotiation
+        || ch.scts != ch1.scts
+        || ch.cookie != ch1.cookie
+        || ch.pskModes != ch1.pskModes;
 }

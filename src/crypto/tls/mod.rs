@@ -443,6 +443,10 @@ pub struct Config {
     /// still the field initLegacySessionTicketKeyRLocked reads.
     /// Reference: common.go:694.
     pub SessionTicketKey: [byte; 32],
+    /// ClientAuth determines the server's policy for TLS Client
+    /// Authentication. The default is NoClientCert. Reference:
+    /// common.go:625.
+    pub ClientAuth: common::ClientAuthType,
     /// Renegotiation controls what types of renegotiation are
     /// supported. The default, none, is correct for the vast majority
     /// of applications. Reference: common.go:752.
@@ -4578,5 +4582,91 @@ pub fn handshake_client_certificateRequestInfo(
         cri.Version as crate::types::int,
         cri.AcceptableCAs.Len(),
         cri.SignatureSchemes.clone(),
+    );
+}
+
+// go: none — goish-only: illegalClientHelloChange and the TLS 1.3
+// server state are unexported in Go, where the tests are in-package.
+// `which` picks what the second ClientHello changed: 0 = nothing,
+// 1 = keyShares, 2 = earlyData, 3 = pskIdentities, 4 = serverName,
+// 5 = cipherSuites (replaced), 6 = cipherSuites (grew), 7 = random,
+// 8 = cookie, 9 = alpnProtocols.
+#[doc(hidden)]
+pub fn handshake_server_tls13_illegalChange(which: crate::types::int) -> bool {
+    let base = || {
+        let mut m = handshake_messages::clientHelloMsg::default();
+        m.vers = common::VersionTLS12;
+        m.random = alloc::vec![0u8; 32];
+        m.sessionId = alloc::vec![1u8];
+        m.cipherSuites = alloc::vec![0x1301u16];
+        m.compressionMethods = alloc::vec![0u8];
+        m.supportedCurves = alloc::vec![common::X25519.0];
+        m.supportedVersions = alloc::vec![common::VersionTLS13];
+        m.supportedSignatureAlgorithms = alloc::vec![common::Ed25519.0];
+        m.alpnProtocols = alloc::vec!["h2".into()];
+        m.serverName = "a.example".into();
+        m.pskModes = alloc::vec![1u8];
+        return m;
+    };
+    let a = base();
+    let mut b = base();
+    match which {
+        1 => {
+            b.keyShares = alloc::vec![handshake_messages::keyShare {
+                group: common::X25519.0,
+                data: alloc::vec![1u8],
+            }]
+        }
+        2 => b.earlyData = true,
+        3 => {
+            b.pskIdentities = alloc::vec![handshake_messages::pskIdentity {
+                label: alloc::vec![1u8],
+                obfuscatedTicketAge: 0,
+            }]
+        }
+        4 => b.serverName = "b.example".into(),
+        5 => b.cipherSuites = alloc::vec![0x1302u16],
+        6 => b.cipherSuites = alloc::vec![0x1301u16, 0x1302],
+        7 => b.random[0] = 9,
+        8 => b.cookie = alloc::vec![1u8],
+        9 => b.alpnProtocols = alloc::vec!["http/1.1".into()],
+        _ => {}
+    }
+    return handshake_server_tls13::illegalClientHelloChange(&a, &b);
+}
+
+// go: none — goish-only: see `handshake_server_tls13_illegalChange`.
+// Reports `(shouldSendSessionTickets by default, with tickets disabled,
+// with no pskModes, requestClientCert by default, with
+// RequestClientCert, with RequestClientCert and a PSK)`.
+#[doc(hidden)]
+pub fn handshake_server_tls13_stateFlags() -> (bool, bool, bool, bool, bool, bool) {
+    let ch = || {
+        let mut m = handshake_messages::clientHelloMsg::default();
+        m.pskModes = alloc::vec![1u8];
+        return m;
+    };
+    let mk = |cfg: Config, hello: handshake_messages::clientHelloMsg, psk: bool| {
+        let mut c = conn::Conn::default();
+        c.__setConfig(cfg);
+        return handshake_server_tls13::serverHandshakeStateTLS13 {
+            c,
+            clientHello: hello,
+            sentDummyCCS: false,
+            usingPSK: psk,
+        };
+    };
+    let mut disabled = Config::default();
+    disabled.SessionTicketsDisabled = true;
+    let mut requested = Config::default();
+    requested.ClientAuth = common::RequestClientCert;
+    let noPSK = handshake_messages::clientHelloMsg::default();
+    return (
+        mk(Config::default(), ch(), false).shouldSendSessionTickets(),
+        mk(disabled, ch(), false).shouldSendSessionTickets(),
+        mk(Config::default(), noPSK, false).shouldSendSessionTickets(),
+        mk(Config::default(), ch(), false).requestClientCert(),
+        mk(requested.clone(), ch(), false).requestClientCert(),
+        mk(requested, ch(), true).requestClientCert(),
     );
 }

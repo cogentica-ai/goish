@@ -1125,6 +1125,24 @@ impl Conn {
     #[doc(hidden)]
     pub fn __configServerName(&self) -> string { return self.config.ServerName.clone(); }
 
+
+    // go: none — goish-only: `config` is unexported in Go, where the
+    // handshake state machines are in the same package.
+    #[doc(hidden)]
+    pub fn __configSessionTicketsDisabled(&self) -> bool {
+        return self.config.SessionTicketsDisabled;
+    }
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __configClientAuth(&self) -> super::common::ClientAuthType {
+        return self.config.ClientAuth;
+    }
+
+
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __setConfig(&mut self, cfg: super::Config) { self.config = cfg; }
+
     // go: sdk 1.25.5 crypto/tls/conn.go:99-101 Conn.LocalAddr
     /// Go: "LocalAddr returns the local network address."
     pub fn LocalAddr(&self) -> crate::net::TCPAddr {
