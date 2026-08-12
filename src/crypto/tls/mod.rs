@@ -1572,3 +1572,36 @@ pub fn msg_certificate_roundtrip(
 pub fn msg_certificate_unmarshal(data: crate::goslice::slice<crate::types::byte>) -> bool {
     return handshake_messages::certificateMsg::default().unmarshal(data);
 }
+
+// go: none — goish-only: newSessionTicketMsgTLS13 is unexported in Go,
+// where the tests are in-package. See the `defaults_*` shims above.
+#[doc(hidden)]
+pub fn msg_nst13_roundtrip(
+    lifetime: crate::types::uint32,
+    ageAdd: crate::types::uint32,
+    nonce: crate::goslice::slice<crate::types::byte>,
+    label: crate::goslice::slice<crate::types::byte>,
+    maxEarlyData: crate::types::uint32,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    crate::types::uint32,
+) {
+    let m = handshake_messages::newSessionTicketMsgTLS13 {
+        lifetime,
+        ageAdd,
+        nonce,
+        label,
+        maxEarlyData,
+    };
+    let (b, _) = m.marshal();
+    let mut back = handshake_messages::newSessionTicketMsgTLS13::default();
+    let ok = back.unmarshal(b.clone());
+    return (b, ok, back.maxEarlyData);
+}
+
+// go: none — goish-only: see `msg_nst13_roundtrip`.
+#[doc(hidden)]
+pub fn msg_nst13_unmarshal(data: crate::goslice::slice<crate::types::byte>) -> bool {
+    return handshake_messages::newSessionTicketMsgTLS13::default().unmarshal(data);
+}

@@ -1,6 +1,6 @@
 // goishlint:ignore GOISH018 addBytesWithLength, addUint64, clone, marshalCertificate, marshalMsg, marshalWithoutBinders, originalBytes, readUint16LengthPrefixed, readUint24LengthPrefixed, readUint64, readUint8LengthPrefixed, transcriptMsg, unmarshalCertificate, updateBinders — handshake_messages.go is 1963 lines and 52 functions; this file is a deliberate SUBSET covering only the messages goish's own TLS 1.3 client and server exchange. The six it does port are anchored above and diffed against Go; everything listed here is genuinely absent, not renamed. See ROADMAP.md.
 // goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, marshalingFunction, newSessionTicketMsg, newSessionTicketMsgTLS13, serverHelloDoneMsg, serverKeyExchangeMsg, transcriptHash — same: the message types the subset does not handle.
-// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal
+// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -1405,6 +1405,108 @@ impl certificateMsg {
             d = &d[3 + certLen..];
         }
         self.certificates = slice::__from_vec(out);
+        return true;
+    }
+}
+
+
+/// Go: `type newSessionTicketMsgTLS13 struct { … }` — RFC 8446 §4.6.1
+/// NewSessionTicket, with the optional early_data extension.
+#[derive(Clone, Default, PartialEq)]
+pub(crate) struct newSessionTicketMsgTLS13 {
+    pub lifetime: crate::types::uint32,
+    pub ageAdd: crate::types::uint32,
+    pub nonce: slice<byte>,
+    pub label: slice<byte>,
+    pub maxEarlyData: crate::types::uint32,
+}
+
+impl newSessionTicketMsgTLS13 {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1310-1336 newSessionTicketMsgTLS13.marshal
+    /// Serialize. The extensions block is always emitted, even when
+    /// empty — Go writes the uint16 length unconditionally and only the
+    /// early_data body is conditional.
+    pub(crate) fn marshal(&self) -> (slice<byte>, error) {
+        // Go: var b cryptobyte.Builder; b.AddUint8(typeNewSessionTicket)
+        let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::new()));
+        b.AddUint8(typeNewSessionTicket);
+        let (lifetime, ageAdd) = (self.lifetime, self.ageAdd);
+        let (nonce, label) = (self.nonce.clone(), self.label.clone());
+        let maxEarlyData = self.maxEarlyData;
+        // Go: b.AddUint24LengthPrefixed(func(b) { … })
+        b.AddUint24LengthPrefixed(|b: &mut cryptobyte::Builder| {
+            b.AddUint32(lifetime);
+            b.AddUint32(ageAdd);
+            // Go: b.AddUint8LengthPrefixed(func(b) { b.AddBytes(m.nonce) })
+            b.AddUint8LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                b.AddBytes(&nonce);
+            });
+            // Go: b.AddUint16LengthPrefixed(func(b) { b.AddBytes(m.label) })
+            b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                b.AddBytes(&label);
+            });
+            // Go: the extensions block — present but possibly empty.
+            b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                if maxEarlyData > 0 {
+                    b.AddUint16(super::common::extensionEarlyData);
+                    b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                        b.AddUint32(maxEarlyData);
+                    });
+                }
+            });
+        });
+        // Go: return b.Bytes()
+        return b.Bytes();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1338-1375 newSessionTicketMsgTLS13.unmarshal
+    /// Parse. Unknown extensions are skipped, as Go does; a known one
+    /// with trailing bytes is rejected.
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        // Go: *m = newSessionTicketMsgTLS13{}
+        *self = newSessionTicketMsgTLS13::default();
+        // Go: s := cryptobyte.String(data)
+        let mut s = CBString::New(data);
+
+        // Go: if !s.Skip(4) || !s.ReadUint32(&m.lifetime) || … { return false }
+        let mut extensions = CBString::New(slice::__from_vec(Vec::new()));
+        if !s.Skip(4)
+            || !s.ReadUint32(&mut self.lifetime)
+            || !s.ReadUint32(&mut self.ageAdd)
+            || !readUint8LengthPrefixed(&mut s, &mut self.nonce)
+            || !readUint16LengthPrefixed(&mut s, &mut self.label)
+            || !s.ReadUint16LengthPrefixed(&mut extensions)
+            || !s.Empty()
+        {
+            return false;
+        }
+
+        // Go: for !extensions.Empty() { … }
+        while !extensions.Empty() {
+            let mut extension: crate::types::uint16 = 0;
+            let mut extData = CBString::New(slice::__from_vec(Vec::new()));
+            if !extensions.ReadUint16(&mut extension)
+                || !extensions.ReadUint16LengthPrefixed(&mut extData)
+            {
+                return false;
+            }
+
+            // Go: switch extension { case extensionEarlyData: … default: continue }
+            if extension == super::common::extensionEarlyData {
+                if !extData.ReadUint32(&mut self.maxEarlyData) {
+                    return false;
+                }
+            } else {
+                // Go: Ignore unknown extensions.
+                continue;
+            }
+
+            // Go: if !extData.Empty() { return false }
+            if !extData.Empty() {
+                return false;
+            }
+        }
+        // Go: return true
         return true;
     }
 }

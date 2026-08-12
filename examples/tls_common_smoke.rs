@@ -556,6 +556,39 @@ fn main() {
     check("timeoutError.Timeout", te.Timeout());
     check("timeoutError.Temporary", te.Temporary());
 
+    // ─── newSessionTicketMsgTLS13 (RFC 8446 §4.6.1).
+    let nonce = slice::__from_vec(alloc::vec![0x01u8, 0x02]);
+    let label = slice::__from_vec(alloc::vec![0xaau8, 0xbb, 0xcc]);
+
+    // Without early_data the extensions block is still emitted — the
+    // trailing 0000 is an empty uint16-prefixed list, not absence.
+    let (b, ok, me) = tls::msg_nst13_roundtrip(7200, 0xdeadbeef, nonce.clone(), label.clone(), 0);
+    eq(
+        "newSessionTicketMsgTLS13 without early_data",
+        hexOf(b.clone()),
+        "0400001200001c20deadbeef0201020003aabbcc0000",
+    );
+    check("nst13 round-trip", ok);
+    check_n("nst13 maxEarlyData stays 0", goish::int(me), 0);
+
+    // With early_data: extension 0x002a carrying a uint32.
+    let (b2, ok2, me2) = tls::msg_nst13_roundtrip(7200, 0xdeadbeef, nonce, label, 16384);
+    eq(
+        "newSessionTicketMsgTLS13 with early_data",
+        hexOf(b2),
+        "0400001a00001c20deadbeef0201020003aabbcc0008002a000400004000",
+    );
+    check("nst13 round-trip with early_data", ok2);
+    check_n("nst13 maxEarlyData recovered", goish::int(me2), 16384);
+
+    // A trailing byte past the declared length is rejected.
+    let mut trail: alloc::vec::Vec<byte> = b.__into_vec();
+    trail.push(0x00);
+    check(
+        "nst13 rejects trailing data",
+        !tls::msg_nst13_unmarshal(slice::__from_vec(trail)),
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
