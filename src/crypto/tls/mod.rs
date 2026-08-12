@@ -434,6 +434,26 @@ pub struct Config {
     /// still the field BuildNameToCertificate fills. Reference:
     /// common.go:576.
     pub NameToCertificate: crate::gomap::map<string, Certificate>,
+    /// SessionTicketsDisabled may be set to true to disable session
+    /// ticket and PSK (resumption) support. Reference: common.go:686.
+    pub SessionTicketsDisabled: bool,
+    /// SessionTicketKey is used by TLS servers to provide session
+    /// resumption. Deprecated in Go — see SetSessionTicketKeys — but
+    /// still the field initLegacySessionTicketKeyRLocked reads.
+    /// Reference: common.go:694.
+    pub SessionTicketKey: [byte; 32],
+    /// Explicitly configured ticket keys, newest first.
+    ///
+    /// Unexported in Go. Rust's struct-update syntax
+    /// (`Config { .., ..Default::default() }`) needs every field
+    /// visible to the caller, so this is `pub` but `#[doc(hidden)]` —
+    /// nothing outside the package should name it.
+    #[doc(hidden)]
+    pub sessionTicketKeys: slice<common::ticketKey>,
+    /// Auto-rotated ticket keys, newest first. Unexported in Go; see
+    /// `sessionTicketKeys`.
+    #[doc(hidden)]
+    pub autoSessionTicketKeys: slice<common::ticketKey>,
 }
 
 // The TLS protocol-version constants live in common[rs] now, ported
@@ -3415,4 +3435,115 @@ pub fn common_defaultConfigIsZero() -> bool {
         && c.CipherSuites.Len() == 0
         && c.CurvePreferences.Len() == 0
         && !c.InsecureSkipVerify;
+}
+
+// go: none — goish-only: Config's ticket-key machinery is unexported in
+// Go, where the tests are in-package. Reports
+// `(len, first aesKey, second aesKey)` after SetSessionTicketKeys.
+#[doc(hidden)]
+pub fn common_setSessionTicketKeys() -> (
+    crate::types::int,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let mut c = Config::default();
+    let mut k1 = [0u8; 32];
+    let mut k2 = [0u8; 32];
+    let mut i = 0usize;
+    while i < 32 {
+        k1[i] = i as crate::types::byte;
+        k2[i] = (0x80 + i) as crate::types::byte;
+        i += 1;
+    }
+    c.SetSessionTicketKeys(crate::goslice::slice::__from_vec(alloc::vec![k1, k2]));
+    let ks = c.ticketKeys(None);
+    return (
+        ks.Len(),
+        crate::goslice::slice::__from_vec(ks[0].aesKey.to_vec()),
+        crate::goslice::slice::__from_vec(ks[1].aesKey.to_vec()),
+    );
+}
+
+// go: none — goish-only: see `common_setSessionTicketKeys`. `which`:
+// 0 = SessionTicketsDisabled, 1 = a fresh Config (auto-rotation),
+// 2 = a user-set SessionTicketKey, 3 = a configForClient with explicit
+// keys, 4 = a configForClient with tickets disabled.
+#[doc(hidden)]
+pub fn common_ticketKeys(
+    which: crate::types::int,
+) -> (
+    crate::types::int,
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    bool,
+) {
+    let mut k1 = [0u8; 32];
+    let mut k2 = [0u8; 32];
+    let mut i = 0usize;
+    while i < 32 {
+        k1[i] = i as crate::types::byte;
+        k2[i] = (0x80 + i) as crate::types::byte;
+        i += 1;
+    }
+    if which == 0 {
+        let mut d = Config::default();
+        d.SessionTicketsDisabled = true;
+        let ks = d.ticketKeys(None);
+        return (ks.Len(), crate::goslice::slice::new(), false, false);
+    }
+    if which == 1 {
+        let mut a = Config::default();
+        let first = a.ticketKeys(None);
+        let second = a.ticketKeys(None);
+        let stable = first.Len() == second.Len()
+            && first.Len() > 0
+            && first[0].aesKey == second[0].aesKey;
+        let deprecated = &a.SessionTicketKey[..10] == b"DEPRECATED";
+        return (
+            first.Len(),
+            crate::goslice::slice::new(),
+            stable,
+            deprecated,
+        );
+    }
+    if which == 2 {
+        let mut u = Config::default();
+        u.SessionTicketKey = k1;
+        let ks = u.ticketKeys(None);
+        return (
+            ks.Len(),
+            crate::goslice::slice::__from_vec(ks[0].aesKey.to_vec()),
+            false,
+            false,
+        );
+    }
+    let mut a = Config::default();
+    let mut cfc = Config::default();
+    if which == 3 {
+        cfc.SetSessionTicketKeys(crate::goslice::slice::__from_vec(alloc::vec![k2]));
+    } else {
+        cfc.SessionTicketsDisabled = true;
+    }
+    let ks = a.ticketKeys(Some(&mut cfc));
+    let first = if ks.Len() > 0 {
+        crate::goslice::slice::__from_vec(ks[0].aesKey.to_vec())
+    } else {
+        crate::goslice::slice::new()
+    };
+    return (ks.Len(), first, false, false);
+}
+
+// go: none — goish-only: see `common_setSessionTicketKeys`.
+#[doc(hidden)]
+pub fn common_configClone() -> (crate::gostring::string, crate::types::int, bool) {
+    let mut orig = Config::default();
+    orig.ServerName = crate::gostring::string::from_static("example.com");
+    orig.MinVersion = common::VersionTLS12;
+    orig.SessionTicketsDisabled = true;
+    let cl = orig.Clone();
+    return (
+        cl.ServerName.clone(),
+        cl.MinVersion as crate::types::int,
+        cl.SessionTicketsDisabled,
+    );
 }

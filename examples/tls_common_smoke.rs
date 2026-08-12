@@ -1780,6 +1780,40 @@ fn main() {
 
     check("defaultConfig is the zero Config", tls::common_defaultConfigIsZero());
 
+    // ─── common.go: the session-ticket key machinery. From goref.sh.
+    let (nKeys, aes0, aes1) = tls::common_setSessionTicketKeys();
+    check_n("SetSessionTicketKeys count", nKeys, 2);
+    eq("SetSessionTicketKeys first key", hexOf(aes0), "9d6d1440dede12e6a125f1841fff8e6f");
+    eq("SetSessionTicketKeys second key", hexOf(aes1), "d7af5146e44e427c6692245783e5f27a");
+
+    let (nDis, _, _, _) = tls::common_ticketKeys(0);
+    check_n("ticketKeys with tickets disabled is empty", nDis, 0);
+    // A fresh Config auto-rotates exactly one key in, and returns the
+    // same one on the next call — the rotation window is 24h.
+    let (nAuto, _, autoStable, autoDeprecated) = tls::common_ticketKeys(1);
+    check_n("ticketKeys auto-rotates one key in", nAuto, 1);
+    check("ticketKeys auto key is stable across calls", autoStable);
+    // The randomised SessionTicketKey gets the DEPRECATED prefix written
+    // over it, so it is never usable as an actual ticket key.
+    check("auto SessionTicketKey carries the DEPRECATED prefix", autoDeprecated);
+    // A user-set SessionTicketKey seeds sessionTicketKeys instead.
+    let (nUser, userAes, _, _) = tls::common_ticketKeys(2);
+    check_n("ticketKeys from a user SessionTicketKey", nUser, 1);
+    eq("ticketKeys user key matches ticketKeyFromBytes", hexOf(userAes),
+       "9d6d1440dede12e6a125f1841fff8e6f");
+    // A configForClient with explicit keys wins over the server Config.
+    let (nCfc, cfcAes, _, _) = tls::common_ticketKeys(3);
+    check_n("ticketKeys configForClient wins", nCfc, 1);
+    eq("ticketKeys configForClient key", hexOf(cfcAes),
+       "d7af5146e44e427c6692245783e5f27a");
+    let (nCfcDis, _, _, _) = tls::common_ticketKeys(4);
+    check_n("ticketKeys configForClient disabled short-circuits", nCfcDis, 0);
+
+    let (clName, clMin, clDisabled) = tls::common_configClone();
+    eq("Config.Clone ServerName", clName, "example.com");
+    check_n("Config.Clone MinVersion", clMin, 0x0303);
+    check("Config.Clone SessionTicketsDisabled", clDisabled);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

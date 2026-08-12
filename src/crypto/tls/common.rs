@@ -1,4 +1,4 @@
-// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError, Certificate.leaf, Config.supportedVersions, Config.maxSupportedVersion, Config.mutualVersion, Config.curvePreferences, Config.supportsCurve, Config.cipherSuites, Config.supportedCipherSuites, Config.rand, Config.time, Config.ticketKeyFromBytes, Config.BuildNameToCertificate, defaultConfig, fipsAllowedChains, fipsAllowChain, emptyConfig
+// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError, Certificate.leaf, Config.supportedVersions, Config.maxSupportedVersion, Config.mutualVersion, Config.curvePreferences, Config.supportsCurve, Config.cipherSuites, Config.supportedCipherSuites, Config.rand, Config.time, Config.ticketKeyFromBytes, Config.BuildNameToCertificate, defaultConfig, fipsAllowedChains, fipsAllowChain, emptyConfig, Config.initLegacySessionTicketKeyRLocked, Config.SetSessionTicketKeys, Config.ticketKeys, Config.Clone
 //
 // crypto/tls — the protocol-level type surface: versions, curve IDs,
 // signature schemes and client-auth policy.
@@ -10,9 +10,9 @@
 // `Config` and `Certificate` currently live in mod[rs] and are not yet
 // ports — see ROADMAP.md.
 //
-// goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, Clone, Context, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, SetSessionTicketKeys, SupportsCertificate, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, initLegacySessionTicketKeyRLocked, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, ticketKeys, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
+// goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, Context, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, SupportsCertificate, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
 // goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, ClientSessionCache, ClientHelloInfo, CertificateRequestInfo, RenegotiationSupport, Config, dsaSignature, ecdsaSignature — same.
-// goishlint:ignore GOISH021 CertificateRequestInfo, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, deprecatedSessionTicketKey, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
+// goishlint:ignore GOISH021 CertificateRequestInfo, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -615,6 +615,183 @@ impl Config {
         }
     }
 
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1006-1032 Config.initLegacySessionTicketKeyRLocked
+    /// Seed `sessionTicketKeys` from the deprecated `SessionTicketKey`
+    /// field, or randomise that field so an application that reuses it
+    /// does not get a fixed value.
+    ///
+    /// Deviation: Go's name ends in `RLocked` because it is called under
+    /// a read lock and upgrades to a write lock inside. goish takes
+    /// `&mut self` instead — Rust's borrow checker gives the same
+    /// exclusion statically, so there is no lock to juggle. The name is
+    /// kept because it is Go's.
+    pub(crate) fn initLegacySessionTicketKeyRLocked(&mut self) {
+        // Go: Don't write if SessionTicketKey is already defined as our
+        // deprecated string, or if it is defined by the user but
+        // sessionTicketKeys is already set.
+        // Go: if c.SessionTicketKey != [32]byte{} &&
+        //        (bytes.HasPrefix(c.SessionTicketKey[:], deprecatedSessionTicketKey) ||
+        //         len(c.sessionTicketKeys) > 0) { return }
+        if self.SessionTicketKey != [0u8; 32]
+            && (hasDeprecatedPrefix(&self.SessionTicketKey) || self.sessionTicketKeys.Len() > 0)
+        {
+            return;
+        }
+
+        // Go: if c.SessionTicketKey == [32]byte{} {
+        //         if _, err := io.ReadFull(c.rand(), c.SessionTicketKey[:]); err != nil {
+        //             panic(…) }
+        //         // Write the deprecated prefix at the beginning so we know we
+        //         // created it. This key with the DEPRECATED prefix isn't used
+        //         // as an actual session ticket key, and is only randomized in
+        //         // case the application reuses it for some reason.
+        //         copy(c.SessionTicketKey[:], deprecatedSessionTicketKey)
+        //     } else if !bytes.HasPrefix(c.SessionTicketKey[:], deprecatedSessionTicketKey) &&
+        //               len(c.sessionTicketKeys) == 0 {
+        //         c.sessionTicketKeys = []ticketKey{c.ticketKeyFromBytes(c.SessionTicketKey)}
+        //     }
+        if self.SessionTicketKey == [0u8; 32] {
+            let mut buf: slice<byte> = slice::__from_vec(alloc::vec![0u8; 32]);
+            let mut r = self.rand();
+            let (_, err) = crate::io::ReadFull(&mut *r, &mut buf);
+            if err != errors::nil {
+                panic!("tls: unable to generate random session ticket key");
+            }
+            let raw: &[byte] = &buf;
+            self.SessionTicketKey.copy_from_slice(raw);
+            let dep = deprecatedSessionTicketKey;
+            self.SessionTicketKey[..dep.len()].copy_from_slice(dep);
+        } else if !hasDeprecatedPrefix(&self.SessionTicketKey)
+            && self.sessionTicketKeys.Len() == 0
+        {
+            let k = self.ticketKeyFromBytes(self.SessionTicketKey);
+            self.sessionTicketKeys = slice::__from_vec(alloc::vec![k]);
+        }
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1043-1056 Config.SetSessionTicketKeys
+    /// Go: "SetSessionTicketKeys updates the session ticket keys for a
+    /// server. The first key will be used when creating new tickets,
+    /// while all keys can be used for decrypting tickets. It is safe to
+    /// call this function while the server is running in order to rotate
+    /// the session ticket keys. The function will panic if keys is
+    /// empty."
+    ///
+    /// Deviation: `&mut self` rather than Go's mutex; see
+    /// `initLegacySessionTicketKeyRLocked`.
+    pub fn SetSessionTicketKeys(&mut self, keys: slice<[byte; 32]>) {
+        // Go: if len(keys) == 0 { panic("tls: keys must have at least one key") }
+        if keys.Len() == 0 {
+            panic!("tls: keys must have at least one key");
+        }
+
+        // Go: newKeys := make([]ticketKey, len(keys))
+        //     for i, bytes := range keys { newKeys[i] = c.ticketKeyFromBytes(bytes) }
+        let mut newKeys: Vec<ticketKey> = Vec::with_capacity(keys.Len() as usize);
+        for (_, b) in crate::range!(keys) {
+            newKeys.push(self.ticketKeyFromBytes(*b));
+        }
+
+        // Go: c.mutex.Lock(); c.sessionTicketKeys = newKeys; c.mutex.Unlock()
+        self.sessionTicketKeys = slice::__from_vec(newKeys);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:940-987 Config.ticketKeys
+    /// The ticket keys to use, newest first, rotating the auto-managed
+    /// set when the newest is older than `ticketKeyRotation`.
+    ///
+    /// Deviation: `&mut self` rather than Go's read-lock/write-lock
+    /// dance; see `initLegacySessionTicketKeyRLocked`.
+    pub(crate) fn ticketKeys(&mut self, configForClient: Option<&mut Config>) -> slice<ticketKey> {
+        // Go: If the ConfigForClient callback returned a Config with
+        // explicitly set keys, use those, otherwise just use the
+        // original Config.
+        if configForClient.is_some() {
+            let cfc = configForClient.unwrap();
+            if cfc.SessionTicketsDisabled {
+                return slice::new();
+            }
+            cfc.initLegacySessionTicketKeyRLocked();
+            if cfc.sessionTicketKeys.Len() != 0 {
+                return cfc.sessionTicketKeys.clone();
+            }
+        }
+
+        // Go: if c.SessionTicketsDisabled { return nil }
+        if self.SessionTicketsDisabled {
+            return slice::new();
+        }
+        // Go: c.initLegacySessionTicketKeyRLocked()
+        //     if len(c.sessionTicketKeys) != 0 { return c.sessionTicketKeys }
+        self.initLegacySessionTicketKeyRLocked();
+        if self.sessionTicketKeys.Len() != 0 {
+            return self.sessionTicketKeys.clone();
+        }
+        // Go: Fast path for the common case where the key is fresh enough.
+        // Go: if len(c.autoSessionTicketKeys) > 0 &&
+        //        c.time().Sub(c.autoSessionTicketKeys[0].created) < ticketKeyRotation {
+        //         return c.autoSessionTicketKeys }
+        if self.autoSessionTicketKeys.Len() > 0
+            && self.time().Sub(self.autoSessionTicketKeys[0].created) < ticketKeyRotation
+        {
+            return self.autoSessionTicketKeys.clone();
+        }
+
+        // Go: autoSessionTicketKeys are managed by auto-rotation.
+        // Go: Re-check the condition in case it changed since obtaining
+        // the new lock.
+        if self.autoSessionTicketKeys.Len() == 0
+            || self.time().Sub(self.autoSessionTicketKeys[0].created) >= ticketKeyRotation
+        {
+            // Go: var newKey [32]byte
+            //     if _, err := io.ReadFull(c.rand(), newKey[:]); err != nil {
+            //         panic(fmt.Sprintf("unable to generate random session ticket key: %v", err)) }
+            let mut buf: slice<byte> = slice::__from_vec(alloc::vec![0u8; 32]);
+            let mut r = self.rand();
+            let (_, err) = crate::io::ReadFull(&mut *r, &mut buf);
+            if err != errors::nil {
+                panic!("unable to generate random session ticket key");
+            }
+            let mut newKey = [0u8; 32];
+            let raw: &[byte] = &buf;
+            newKey.copy_from_slice(raw);
+            // Go: valid := make([]ticketKey, 0, len(c.autoSessionTicketKeys)+1)
+            //     valid = append(valid, c.ticketKeyFromBytes(newKey))
+            //     for _, k := range c.autoSessionTicketKeys {
+            //         // While rotating the current key, also remove any expired ones.
+            //         if c.time().Sub(k.created) < ticketKeyLifetime { valid = append(valid, k) } }
+            //     c.autoSessionTicketKeys = valid
+            let mut valid: Vec<ticketKey> =
+                Vec::with_capacity((self.autoSessionTicketKeys.Len() + 1) as usize);
+            valid.push(self.ticketKeyFromBytes(newKey));
+            for (_, k) in crate::range!(self.autoSessionTicketKeys.clone()) {
+                if self.time().Sub(k.created) < ticketKeyLifetime {
+                    valid.push(k.clone());
+                }
+            }
+            self.autoSessionTicketKeys = slice::__from_vec(valid);
+        }
+        // Go: return c.autoSessionTicketKeys
+        return self.autoSessionTicketKeys.clone();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:826-878 Config.Clone
+    /// Go: "Clone returns a shallow clone of c or nil if c is nil. It is
+    /// safe to clone a [Config] that is being used concurrently by a TLS
+    /// client or server."
+    ///
+    /// Deviation: Go returns nil for a nil receiver; goish has no nil
+    /// struct pointer, so a zero Config clones to a zero Config. Go
+    /// enumerates every field under a read lock; goish derives the same
+    /// shallow copy, and Rust's `&self` gives the exclusion the lock
+    /// bought.
+    pub fn Clone(&self) -> Config {
+        // Go: return &Config{Rand: c.Rand, Time: c.Time, …} — a
+        // field-by-field shallow copy.
+        return self.clone();
+    }
+
     // go: sdk 1.25.5 crypto/tls/common.go:1119-1125 Config.rand
     /// The entropy source for the handshake.
     ///
@@ -935,4 +1112,32 @@ pub(crate) fn fipsAllowChain(chain: slice<crate::crypto::x509::Certificate>) -> 
 
     // Go: return true
     return true;
+}
+
+
+// Go: common.go:907-913
+//   const ( ticketKeyLifetime = 7 * 24 * time.Hour
+//           ticketKeyRotation = 24 * time.Hour )
+/// Go: "ticketKeyLifetime is how long a ticket key remains valid and can
+/// be used to decrypt tickets."
+pub(crate) const ticketKeyLifetime: crate::time::Duration =
+    crate::time::Duration(7 * 24 * 60 * 60 * 1_000_000_000);
+/// Go: "ticketKeyRotation is how often the server should rotate the
+/// session ticket key that is used to create new tickets."
+pub(crate) const ticketKeyRotation: crate::time::Duration =
+    crate::time::Duration(24 * 60 * 60 * 1_000_000_000);
+
+// Go: common.go:991
+//   var deprecatedSessionTicketKey = []byte("DEPRECATED")
+/// Go: "deprecatedSessionTicketKey is set as the prefix of
+/// SessionTicketKey if it was randomized by the library."
+pub(crate) const deprecatedSessionTicketKey: &[byte] = b"DEPRECATED";
+
+// go: none — goish idiom: Go writes
+// `bytes.HasPrefix(c.SessionTicketKey[:], deprecatedSessionTicketKey)`;
+// naming it keeps the two call sites in `initLegacySessionTicketKeyRLocked`
+// on one line, as Go's are.
+fn hasDeprecatedPrefix(key: &[byte; 32]) -> bool {
+    let dep = deprecatedSessionTicketKey;
+    return key.len() >= dep.len() && &key[..dep.len()] == dep;
 }
