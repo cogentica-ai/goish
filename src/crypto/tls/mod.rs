@@ -4760,3 +4760,70 @@ pub fn handshake_messages_serverHelloRoundTrip() -> (
         bad,
     );
 }
+
+// go: none — goish-only: serverHandshakeState is unexported in Go,
+// where the tests are in-package. `which` picks the state's four
+// capability flags and the version; the suite is named by `suiteID`.
+#[doc(hidden)]
+pub fn handshake_server_cipherSuiteOk(
+    which: crate::types::int,
+    suiteID: crate::types::uint16,
+) -> bool {
+    let mut c = conn::Conn::default();
+    c.__setVers(if which == 5 {
+        common::VersionTLS10
+    } else {
+        common::VersionTLS12
+    });
+    let hs = handshake_server::serverHandshakeState {
+        c,
+        ecdheOk: which != 1,
+        ecSignOk: which != 2,
+        rsaDecryptOk: which != 4,
+        rsaSignOk: which != 3,
+    };
+    let suite = cipher_suites::cipherSuiteByID(suiteID).unwrap();
+    return hs.cipherSuiteOk(suite);
+}
+
+// go: none — goish-only: see `handshake_server_cipherSuiteOk`. `full`
+// selects a populated ClientHello or one carrying only a version.
+// Reports `(ServerName, cipher suites, curves, points, schemes, protos,
+// extensions, supported versions)`.
+#[doc(hidden)]
+pub fn handshake_server_clientHelloInfo(
+    full: bool,
+) -> (
+    crate::gostring::string,
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+    crate::goslice::slice<crate::types::uint16>,
+) {
+    let mut ch = handshake_messages::clientHelloMsg::default();
+    ch.vers = common::VersionTLS12;
+    if full {
+        ch.cipherSuites = alloc::vec![cipher_suites::TLS_AES_128_GCM_SHA256];
+        ch.serverName = "a.example".into();
+        ch.supportedCurves = alloc::vec![common::X25519.0];
+        ch.supportedPoints = alloc::vec![0u8];
+        ch.supportedSignatureAlgorithms = alloc::vec![common::Ed25519.0];
+        ch.alpnProtocols = alloc::vec!["h2".into()];
+        ch.extensions = alloc::vec![0u16, 43];
+    }
+    let c = conn::Conn::default();
+    let chi = handshake_server::clientHelloInfo(&c, &ch);
+    return (
+        chi.ServerName.clone(),
+        chi.CipherSuites.Len(),
+        chi.SupportedCurves.Len(),
+        chi.SupportedPoints.Len(),
+        chi.SignatureSchemes.Len(),
+        chi.SupportedProtos.Len(),
+        chi.Extensions.Len(),
+        chi.SupportedVersions.clone(),
+    );
+}

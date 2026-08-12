@@ -1143,6 +1143,14 @@ impl Conn {
     #[doc(hidden)]
     pub fn __setConfig(&mut self, cfg: super::Config) { self.config = cfg; }
 
+
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __config(&self) -> super::Config { return self.config.clone(); }
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __vers(&self) -> uint16 { return self.vers; }
+
     // go: sdk 1.25.5 crypto/tls/conn.go:99-101 Conn.LocalAddr
     /// Go: "LocalAddr returns the local network address."
     pub fn LocalAddr(&self) -> crate::net::TCPAddr {

@@ -1204,6 +1204,14 @@ pub struct ClientHelloInfo {
 }
 
 impl ClientHelloInfo {
+
+    // go: none — goish-only: `config` is unexported in Go, where
+    // handshake_server.go is in the same package.
+    #[doc(hidden)]
+    pub fn __setConfig(&mut self, cfg: Config) {
+        self.config = Some(alloc::boxed::Box::new(cfg));
+    }
+
     // go: sdk 1.25.5 crypto/tls/common.go:516-518 ClientHelloInfo.Context
     /// Go: "Context returns the context of the connection that is
     /// currently being handshaked."

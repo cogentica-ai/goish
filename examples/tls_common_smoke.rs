@@ -2331,6 +2331,46 @@ fn main() {
     check("serverHelloMsg.originalBytes is the input", shOrig);
     check("serverHelloMsg.unmarshal rejects a truncated input", shTruncated);
 
+    // ─── handshake_server.go: cipherSuiteOk and clientHelloInfo. From
+    //     goref.sh. cipherSuiteOk is the filter pickCipherSuite hands to
+    //     selectCipherSuite, so it decides which suites the certificate
+    //     and extensions actually allow.
+    let cso = |w: int, id: u16| tls::handshake_server_cipherSuiteOk(w, id);
+    let ecdheRSA = tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256;
+    let ecdheECDSA = tls::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+    let rsaKex = tls::TLS_RSA_WITH_AES_128_CBC_SHA;
+    let cbcSHA = tls::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA;
+    check("cipherSuiteOk accepts ECDHE-RSA when everything is available", cso(0, ecdheRSA));
+    check("cipherSuiteOk accepts ECDHE-ECDSA", cso(0, ecdheECDSA));
+    check("cipherSuiteOk accepts static RSA", cso(0, rsaKex));
+    // Each capability gates exactly one branch.
+    check("no ECDHE rejects an ECDHE suite", !cso(1, ecdheRSA));
+    check("no ECDHE still allows static RSA", cso(1, rsaKex));
+    check("no EC signing rejects ECDHE-ECDSA", !cso(2, ecdheECDSA));
+    check("no EC signing still allows ECDHE-RSA", cso(2, ecdheRSA));
+    check("no RSA signing rejects ECDHE-RSA", !cso(3, ecdheRSA));
+    check("no RSA decryption rejects static RSA", !cso(4, rsaKex));
+    // A suiteTLS12 suite is off below TLS 1.2 even with every capability.
+    check("TLS 1.0 rejects a TLS-1.2-only suite", !cso(5, ecdheRSA));
+    check("TLS 1.0 accepts a pre-1.2 suite", cso(5, cbcSHA));
+
+    let (chiSNI, chiSuites, chiCurves, chiPoints, chiSchemes, chiProtos, chiExts, chiVers) =
+        tls::handshake_server_clientHelloInfo(true);
+    eq("clientHelloInfo ServerName", chiSNI, "a.example");
+    check_n("clientHelloInfo CipherSuites", chiSuites, 1);
+    check_n("clientHelloInfo SupportedCurves", chiCurves, 1);
+    check_n("clientHelloInfo SupportedPoints", chiPoints, 1);
+    check_n("clientHelloInfo SignatureSchemes", chiSchemes, 1);
+    check_n("clientHelloInfo SupportedProtos", chiProtos, 1);
+    check_n("clientHelloInfo Extensions", chiExts, 2);
+    // With no supported_versions extension the list is derived from the
+    // legacy version, which is how a pre-1.3 ClientHello is understood.
+    check_n("clientHelloInfo derives versions from legacy_version", chiVers.Len(), 3);
+    check_n("clientHelloInfo highest derived version", chiVers[0] as int, 0x0303);
+    let (_, _, _, _, _, _, _, chiVers2) = tls::handshake_server_clientHelloInfo(false);
+    check_n("clientHelloInfo derives versions for an empty hello too",
+            chiVers2.Len(), 3);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

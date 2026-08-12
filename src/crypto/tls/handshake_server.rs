@@ -1,4 +1,4 @@
-// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN
+// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo
 //
 // crypto/tls — the server handshake state machine.
 //
@@ -7,9 +7,7 @@
 // handshake. What is here is the one function that does not: the ECDHE
 // support check, which `ClientHelloInfo.SupportsCertificate` also calls.
 //
-// goishlint:ignore GOISH018 serverHandshake, handshake, readClientHello, processClientHello, pickCipherSuite, cipherSuiteOk, checkForResumption, doResumeHandshake, doFullHandshake, establishKeys, readFinished, sendSessionTicket, sendFinished, processCertsFromClient, clientHelloInfo — serverHandshakeState and Conn; see the banner. ROADMAP.md.
-// goishlint:ignore GOISH019 serverHandshakeState — same.
-// goishlint:ignore GOISH021 serverHandshakeState — same.
+// goishlint:ignore GOISH018 serverHandshake, handshake, readClientHello, processClientHello, pickCipherSuite, checkForResumption, doResumeHandshake, doFullHandshake, establishKeys, readFinished, sendSessionTicket, sendFinished, processCertsFromClient — serverHandshakeState and Conn; see the banner. ROADMAP.md.
 
 #![allow(non_snake_case, dead_code)]
 
@@ -142,4 +140,113 @@ pub(crate) fn negotiateALPN(
             list
         ),
     );
+}
+
+
+// Go: handshake_server.go:24-40
+//   type serverHandshakeState struct { c *Conn; ctx context.Context
+//       clientHello *clientHelloMsg; hello *serverHelloMsg
+//       suite *cipherSuite; ecdheOk, ecSignOk, rsaDecryptOk, rsaSignOk bool
+//       sessionState *SessionState; finishedHash finishedHash
+//       masterSecret []byte; cert *Certificate }
+/// The TLS 1.0-1.2 server handshake state.
+///
+/// **Partial record.** Only the fields the ported methods read are
+/// present; the key schedule and transcript land with `handshake`,
+/// which drives the whole exchange.
+pub(crate) struct serverHandshakeState {
+    pub c: super::conn::Conn,
+    pub ecdheOk: bool,
+    pub ecSignOk: bool,
+    pub rsaDecryptOk: bool,
+    pub rsaSignOk: bool,
+}
+
+impl serverHandshakeState {
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:441-460 serverHandshakeState.cipherSuiteOk
+    /// Whether a candidate suite is usable given what the certificate
+    /// and the client's extensions allow. `pickCipherSuite` passes this
+    /// to `selectCipherSuite` as its filter.
+    pub(crate) fn cipherSuiteOk(&self, c: &super::cipher_suites::cipherSuite) -> bool {
+        // Go: if c.flags&suiteECDHE != 0 {
+        //         if !hs.ecdheOk { return false }
+        //         if c.flags&suiteECSign != 0 {
+        //             if !hs.ecSignOk { return false }
+        //         } else if !hs.rsaSignOk { return false }
+        //     } else if !hs.rsaDecryptOk { return false }
+        if c.flags & super::cipher_suites::suiteECDHE != 0 {
+            if !self.ecdheOk {
+                return false;
+            }
+            if c.flags & super::cipher_suites::suiteECSign != 0 {
+                if !self.ecSignOk {
+                    return false;
+                }
+            } else if !self.rsaSignOk {
+                return false;
+            }
+        } else if !self.rsaDecryptOk {
+            return false;
+        }
+        // Go: if hs.c.vers < VersionTLS12 && c.flags&suiteTLS12 != 0 { return false }
+        //     return true
+        if self.c.__vers() < super::common::VersionTLS12
+            && c.flags & super::cipher_suites::suiteTLS12 != 0
+        {
+            return false;
+        }
+        return true;
+    }
+}
+
+// go: sdk 1.25.5 crypto/tls/handshake_server.go:1002-1021 clientHelloInfo
+///
+/// Deviations: Go's leading `ctx context.Context` has nowhere to go, and
+/// `ClientHelloInfo.Conn` is absent from goish's record — both arrive
+/// with the handshake driver.
+/// goishlint:ignore GOISH020 clientHelloInfo — Go's context.Context parameter has no field to land in yet
+pub(crate) fn clientHelloInfo(
+    c: &super::conn::Conn,
+    clientHello: &super::handshake_messages::clientHelloMsg,
+) -> super::common::ClientHelloInfo {
+    // Go: supportedVersions := clientHello.supportedVersions
+    //     if len(clientHello.supportedVersions) == 0 {
+    //         supportedVersions = supportedVersionsFromMax(clientHello.vers) }
+    let supportedVersions = if clientHello.supportedVersions.len() == 0 {
+        super::common::supportedVersionsFromMax(clientHello.vers)
+    } else {
+        slice::__from_vec(clientHello.supportedVersions.clone())
+    };
+
+    // Go: return &ClientHelloInfo{ CipherSuites: …, ServerName: …, … }
+    let mut chi = super::common::ClientHelloInfo::default();
+    chi.CipherSuites = slice::__from_vec(clientHello.cipherSuites.clone());
+    chi.ServerName =
+        crate::gostring::string::from_bytes(clientHello.serverName.as_bytes());
+    chi.SupportedCurves = slice::__from_vec(
+        clientHello
+            .supportedCurves
+            .iter()
+            .map(|v| CurveID(*v))
+            .collect(),
+    );
+    chi.SupportedPoints = slice::__from_vec(clientHello.supportedPoints.clone());
+    chi.SignatureSchemes = slice::__from_vec(
+        clientHello
+            .supportedSignatureAlgorithms
+            .iter()
+            .map(|v| super::common::SignatureScheme(*v))
+            .collect(),
+    );
+    chi.SupportedProtos = slice::__from_vec(
+        clientHello
+            .alpnProtocols
+            .iter()
+            .map(|p| crate::gostring::string::from_bytes(p.as_bytes()))
+            .collect(),
+    );
+    chi.SupportedVersions = supportedVersions;
+    chi.Extensions = slice::__from_vec(clientHello.extensions.clone());
+    chi.__setConfig(c.__config());
+    return chi;
 }
