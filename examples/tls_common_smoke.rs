@@ -1615,6 +1615,52 @@ fn main() {
     check("permanentError.Timeout", !peTimeout);
     check("permanentError.Temporary is always false", !peTemp);
 
+    // ─── ticket.go: the resumable session and its opaque encoding.
+    //     Both encodings and every error string are from goref.sh.
+    let (tk13, tk13Err) = tls::ticket_sessionStateBytes(0);
+    eq("SessionState.Bytes 1.3 err", tk13Err, "");
+    eq("SessionState.Bytes TLS 1.3 server", hexOf(tk13),
+       "03040113011122334455667788080102030405060708000009000001aa000002bbcc0000000000000000");
+    let (tk12, _) = tls::ticket_sessionStateBytes(1);
+    // Below TLS 1.3 the encoding ends with the curveID instead of the
+    // client's useBy/ageAdd, and EarlyData adds the ALPN protocol.
+    eq("SessionState.Bytes TLS 1.2 server", hexOf(tk12),
+       "030301c02f00000000000000070209090000000101000000000000026832001d");
+
+    let (rtErr, rtV, rtSuite, rtCreated, rtSecret, rtExtra, rtEMS, rtEarly, rtAlpn, rtCurve, rtSame) =
+        tls::ticket_roundTrip(0);
+    eq("ParseSessionState 1.3 err", rtErr, "");
+    check_n("ParseSessionState version", rtV, 0x0304);
+    check_n("ParseSessionState cipherSuite", rtSuite, 0x1301);
+    check("ParseSessionState createdAt", rtCreated == 0x1122334455667788u64);
+    eq("ParseSessionState secret", hexOf(rtSecret), "0102030405060708");
+    check_n("ParseSessionState Extra count", rtExtra, 2);
+    check("ParseSessionState extMasterSecret", !rtEMS);
+    check("ParseSessionState EarlyData", !rtEarly);
+    eq("ParseSessionState alpn", rtAlpn, "");
+    check_n("ParseSessionState curveID", rtCurve, 0);
+    check("ParseSessionState 1.3 re-encodes identically", rtSame);
+
+    let (_, rtV2, rtSuite2, rtCreated2, _, _, rtEMS2, rtEarly2, rtAlpn2, rtCurve2, rtSame2) =
+        tls::ticket_roundTrip(1);
+    check_n("ParseSessionState 1.2 version", rtV2, 0x0303);
+    check_n("ParseSessionState 1.2 cipherSuite", rtSuite2, 0xc02f);
+    check("ParseSessionState 1.2 createdAt", rtCreated2 == 7u64);
+    check("ParseSessionState 1.2 extMasterSecret", rtEMS2);
+    check("ParseSessionState 1.2 EarlyData", rtEarly2);
+    eq("ParseSessionState 1.2 alpn", rtAlpn2, "h2");
+    check_n("ParseSessionState 1.2 curveID is X25519", rtCurve2, 29);
+    check("ParseSessionState 1.2 re-encodes identically", rtSame2);
+
+    eq("ParseSessionState empty", tls::ticket_parseError(0),
+       "tls: invalid session encoding");
+    eq("ParseSessionState truncated", tls::ticket_parseError(1),
+       "tls: invalid session encoding");
+    eq("ParseSessionState unknown role byte", tls::ticket_parseError(2),
+       "tls: unknown session encoding");
+    eq("ParseSessionState empty secret", tls::ticket_parseError(3),
+       "tls: invalid session encoding");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

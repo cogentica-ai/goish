@@ -15,6 +15,7 @@ pub mod alert;
 pub mod auth;
 mod defaults_fips140;
 pub mod conn;
+pub mod ticket;
 
 // go: none — goish-only: auth.go's functions are unexported in Go,
 // where tests are in-package. See the `defaults_*` shims below.
@@ -3007,4 +3008,124 @@ pub fn conn_permanentError() -> (
         err: crate::errors::New("boom"),
     };
     return (e.Error(), e.Unwrap().Error(), e.Timeout(), e.Temporary());
+}
+
+// go: none — goish-only: SessionState's private fields are unexported in
+// Go, where the tests are in-package. `which` picks the session:
+// 0 = a server TLS 1.3 session with two Extra blocks, 1 = a server TLS
+// 1.2 session with extMasterSecret, EarlyData, an ALPN protocol and a
+// curveID tail, 2 = the same as 0 but with an empty secret.
+#[doc(hidden)]
+pub fn ticket_sessionStateBytes(
+    which: crate::types::int,
+) -> (crate::goslice::slice<crate::types::byte>, crate::gostring::string) {
+    let s = ticket_sampleSession(which);
+    let (b, err) = s.Bytes();
+    if err != crate::errors::nil {
+        return (crate::goslice::slice::new(), err.Error());
+    }
+    return (b, crate::gostring::string::from_static(""));
+}
+
+// go: none — goish-only: see `ticket_sessionStateBytes`.
+fn ticket_sampleSession(which: crate::types::int) -> ticket::SessionState {
+    let mut s = ticket::SessionState::default();
+    if which == 1 {
+        s.__setVersion(common::VersionTLS12);
+        s.__setCipherSuite(cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256);
+        s.__setCreatedAt(7);
+        s.__setSecret(crate::goslice::slice::__from_vec(alloc::vec![9u8, 9]));
+        s.__setExtMasterSecret(true);
+        s.EarlyData = true;
+        s.__setAlpnProtocol(crate::gostring::string::from_static("h2"));
+        s.__setCurveID(common::X25519);
+        return s;
+    }
+    s.__setVersion(common::VersionTLS13);
+    s.__setCipherSuite(cipher_suites::TLS_AES_128_GCM_SHA256);
+    s.__setCreatedAt(0x1122334455667788);
+    if which != 2 {
+        s.__setSecret(crate::goslice::slice::__from_vec(alloc::vec![
+            1u8, 2, 3, 4, 5, 6, 7, 8
+        ]));
+        s.Extra = crate::goslice::slice::__from_vec(alloc::vec![
+            crate::goslice::slice::__from_vec(alloc::vec![0xaau8]),
+            crate::goslice::slice::__from_vec(alloc::vec![0xbbu8, 0xcc]),
+        ]);
+    }
+    return s;
+}
+
+// go: none — goish-only: see `ticket_sessionStateBytes`. Round-trips a
+// sample session and reports `(err, version, suite, createdAt, secret,
+// len(Extra), extMasterSecret, EarlyData, alpn, curveID, re-encoding is
+// identical)`.
+#[doc(hidden)]
+pub fn ticket_roundTrip(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::types::int,
+    crate::types::int,
+    crate::types::uint64,
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::int,
+    bool,
+    bool,
+    crate::gostring::string,
+    crate::types::int,
+    bool,
+) {
+    let (enc, err) = ticket_sessionStateBytes(which);
+    if err != crate::gostring::string::from_static("") {
+        return (
+            err, 0, 0, 0, crate::goslice::slice::new(), 0, false, false,
+            crate::gostring::string::from_static(""), 0, false,
+        );
+    }
+    let (p, perr) = ticket::ParseSessionState(enc.clone());
+    if perr != crate::errors::nil {
+        return (
+            perr.Error(), 0, 0, 0, crate::goslice::slice::new(), 0, false, false,
+            crate::gostring::string::from_static(""), 0, false,
+        );
+    }
+    let (re, _) = p.Bytes();
+    return (
+        crate::gostring::string::from_static(""),
+        p.__version() as crate::types::int,
+        p.__cipherSuite() as crate::types::int,
+        p.__createdAt(),
+        p.__secret(),
+        p.Extra.Len(),
+        p.__extMasterSecret(),
+        p.EarlyData,
+        p.__alpnProtocol(),
+        p.__curveID().0 as crate::types::int,
+        re == enc,
+    );
+}
+
+// go: none — goish-only: see `ticket_sessionStateBytes`. `which` picks a
+// malformed encoding: 0 = empty, 1 = a two-byte version only, 2 = a
+// valid encoding with the type byte set to 9, 3 = an empty secret.
+#[doc(hidden)]
+pub fn ticket_parseError(which: crate::types::int) -> crate::gostring::string {
+    let data = if which == 0 {
+        crate::goslice::slice::new()
+    } else if which == 1 {
+        crate::goslice::slice::__from_vec(alloc::vec![0x03u8, 0x04])
+    } else if which == 2 {
+        let (mut b, _) = ticket_sessionStateBytes(0);
+        b[2] = 9;
+        b
+    } else {
+        let (b, _) = ticket_sessionStateBytes(2);
+        b
+    };
+    let (_, err) = ticket::ParseSessionState(data);
+    if err == crate::errors::nil {
+        return crate::gostring::string::from_static("");
+    }
+    return err.Error();
 }
