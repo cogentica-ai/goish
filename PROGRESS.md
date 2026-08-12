@@ -40,18 +40,18 @@ subtrees as working code, not as verified ports.
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support
 with slices wherever it is needed.
 
-## crypto/ — 1386 / 1452 functions (95.5%)
+## crypto/ — 1389 / 1452 functions (95.7%)
 
 **65 of the 66 crypto packages are at 100%.** The single exception is
-`crypto/tls`, which holds 66 of the 66 remaining functions.
+`crypto/tls`, which holds 63 of the 63 remaining functions.
 
 | | |
 |---|--:|
-| ported | 1386 |
-| remaining, portable | 66 |
+| ported | 1389 |
+| remaining, portable | 63 |
 | remaining, assembly stubs | 0 |
 | waived (resolved elsewhere by design) | 1 |
-| provenance anchors | 2842 |
+| provenance anchors | 2851 |
 | unverified names (see below) | 3 |
 
 Complete and byte-checked against Go: `x509` (158/158), `ecdsa`,
@@ -90,8 +90,8 @@ landed with byte-exact vectors and the percentage did not move.
 
 | | by name | by declaration |
 |---|--:|--:|
-| crypto/ | 1386/1452 (95.5%) | **1637/1734 (94.4%)** |
-| crypto/tls | 233/299 (77.9%) | 296/377 (78.5%) |
+| crypto/ | 1389/1452 (95.7%) | **1640/1734 (94.6%)** |
+| crypto/tls | 236/299 (78.9%) | 299/377 (79.3%) |
 
 The first thing it found was concrete: `crypto/x509` read 100% by name
 while missing `CertificateRequest.CheckSignature` and

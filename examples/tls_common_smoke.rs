@@ -2649,6 +2649,72 @@ fn main() {
         hexOf(tm2) == hexOf(tm3),
     );
 
+
+    // ── Conn.writeHandshakeRecord / handleKeyUpdate / sessionState ──
+    //
+    // Ground truth: scripts/goref.sh crypto/tls, driving each through a
+    // Conn over an in-memory net.Conn.
+    let (whrN, whrWire, whrDigest, kuErr0, kuIn0, kuOut0, kuWire0) =
+        tls::conn_handshakeRecordAndKeyUpdate(false);
+    check_n("writeHandshakeRecord returns the record length", whrN, 16);
+    eq(
+        "writeHandshakeRecord writes a handshake record",
+        hexOf(whrWire),
+        "16030300101400000c0102030405060708090a0b0c",
+    );
+    eq(
+        "writeHandshakeRecord feeds the transcript the message, not the record",
+        hexOf(whrDigest),
+        "e090a1048ae699f503bd6e47a4b7a8fd5ac7660bd108e960d3688a2260f5ef5f",
+    );
+
+    // updateRequested = false: only the read secret rotates.
+    eq("handleKeyUpdate succeeds", kuErr0, "");
+    eq(
+        "handleKeyUpdate rotates the read traffic secret",
+        hexOf(kuIn0),
+        "c4e8e6048bd6e7c23f30cb20f13c281c01251dc4fe4282b376440484b015ef1d",
+    );
+    eq(
+        "handleKeyUpdate leaves the write secret alone when none was requested",
+        hexOf(kuOut0),
+        "05060708",
+    );
+    check_n("handleKeyUpdate writes nothing when none was requested", kuWire0.Len(), 0);
+
+    // updateRequested = true: our own KeyUpdate goes out and the write
+    // secret rotates too.
+    let (_, _, _, kuErr1, kuIn1, kuOut1, kuWire1) = tls::conn_handshakeRecordAndKeyUpdate(true);
+    eq("handleKeyUpdate with a requested update succeeds", kuErr1, "");
+    eq(
+        "handleKeyUpdate rotates the read secret the same way either way",
+        hexOf(kuIn1),
+        "c4e8e6048bd6e7c23f30cb20f13c281c01251dc4fe4282b376440484b015ef1d",
+    );
+    eq(
+        "handleKeyUpdate rotates the write secret when one was requested",
+        hexOf(kuOut1),
+        "9ab977a42c8efe97d27bd50b12a6de5a12b2c94fb6c93662e2ad8ead973ee855",
+    );
+    eq(
+        "handleKeyUpdate answers with its own KeyUpdate",
+        hexOf(kuWire1),
+        "16030300051800000100",
+    );
+
+    // ── Conn.sessionState ───────────────────────────────────────────
+    let (ssV, ssCS, ssAlpn, ssOcsp, ssScts, ssClient, ssEms, ssCurve, ssCreated) =
+        tls::conn_sessionState();
+    check_n("sessionState carries the version", ssV, 0x0304);
+    check_n("sessionState carries the cipher suite", ssCS, 0x1301);
+    eq("sessionState carries the ALPN protocol", ssAlpn, "h2");
+    eq("sessionState carries the OCSP response", hexOf(ssOcsp), "0909");
+    check_n("sessionState carries the SCTs", ssScts, 2);
+    check("sessionState carries isClient", ssClient);
+    check("sessionState carries extMasterSecret", ssEms);
+    check_n("sessionState carries the curve", ssCurve, 29);
+    check("sessionState stamps createdAt from config.time()", ssCreated);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

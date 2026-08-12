@@ -1,4 +1,4 @@
-// go: file crypto/tls/ticket.go decls: SessionState.Bytes, certificatesToBytesSlice, ParseSessionState, ClientSessionState.ResumptionState, NewResumptionState, Config.EncryptTicket, Config.encryptTicket, Config.DecryptTicket, Config.decryptTicket
+// go: file crypto/tls/ticket.go decls: SessionState.Bytes, certificatesToBytesSlice, ParseSessionState, ClientSessionState.ResumptionState, NewResumptionState, Config.EncryptTicket, Config.encryptTicket, Config.DecryptTicket, Config.decryptTicket, Conn.sessionState
 //
 // crypto/tls — the session-resumption state and its wire encoding.
 //
@@ -9,7 +9,6 @@
 // need `Config.ticketKeys`, which is part of the Config record still in
 // mod[rs]; and `Conn.sessionState` needs a Conn.
 //
-// goishlint:ignore GOISH018 sessionState — see the banner.
 //
 // One deviation: Go resolves each peer certificate through
 // `globalCertCache.newCert`, a `sync.Map` of weak pointers that memoises
@@ -474,6 +473,10 @@ impl SessionState {
     // go: none — goish-only: see above.
     #[doc(hidden)]
     pub fn __curveID(&self) -> CurveID { return self.curveID; }
+    // go: none — goish-only: `SessionState.isClient` is unexported in
+    // Go, where the tests are in-package.
+    #[doc(hidden)]
+    pub fn __isClientFlag(&self) -> bool { return self.isClient; }
 }
 
 
@@ -741,5 +744,35 @@ impl Config {
 
         // Go: return nil
         return None;
+    }
+}
+
+use super::conn::Conn;
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/ticket.go:298-312 Conn.sessionState
+    /// Go: snapshot the connection's resumable state into a
+    /// `SessionState`. The fields a ticket also needs — `secret`,
+    /// `useBy`, `ageAdd`, `ticket` — are filled in by the caller.
+    pub(crate) fn sessionState(&self) -> SessionState {
+        // Go: return &SessionState{version: c.vers, cipherSuite: c.cipherSuite,
+        //     createdAt: uint64(c.config.time().Unix()), alpnProtocol: c.clientProtocol,
+        //     peerCertificates: c.peerCertificates, ocspResponse: c.ocspResponse,
+        //     scts: c.scts, isClient: c.isClient, extMasterSecret: c.extMasterSecret,
+        //     verifiedChains: c.verifiedChains, curveID: c.curveID}
+        return SessionState {
+            version: self.vers,
+            cipherSuite: self.cipherSuite,
+            createdAt: crate::uint64(self.config.time().Unix()),
+            alpnProtocol: self.clientProtocol.clone(),
+            peerCertificates: self.peerCertificates.clone(),
+            ocspResponse: self.ocspResponse.clone(),
+            scts: self.scts.clone(),
+            isClient: self.isClient,
+            extMasterSecret: self.extMasterSecret,
+            verifiedChains: self.verifiedChains.clone(),
+            curveID: self.curveID,
+            ..SessionState::default()
+        };
     }
 }

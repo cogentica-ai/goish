@@ -1,4 +1,4 @@
-// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert, Conn.readFromUntil, Conn.retryReadRecord, Conn.readRecord, Conn.readChangeCipherSpec, Conn.readRecordOrCCS, Conn.closeNotify, Conn.CloseWrite, Conn.readHandshakeBytes, Conn.readHandshake, Conn.unmarshalHandshakeMessage
+// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert, Conn.readFromUntil, Conn.retryReadRecord, Conn.readRecord, Conn.readChangeCipherSpec, Conn.readRecordOrCCS, Conn.closeNotify, Conn.CloseWrite, Conn.readHandshakeBytes, Conn.readHandshake, Conn.unmarshalHandshakeMessage, Conn.writeHandshakeRecord, Conn.handleKeyUpdate
 //
 // crypto/tls — the record layer's cipher state.
 //
@@ -8,7 +8,7 @@
 // its `decrypt`/`encrypt`, `atLeastReader` and the free functions they
 // need — none of which touches a `Conn`.
 //
-// goishlint:ignore GOISH018 writeHandshakeRecord, handleRenegotiation, handlePostHandshakeMessage, handleKeyUpdate, HandshakeContext, handshakeContext, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
+// goishlint:ignore GOISH018 handleRenegotiation, handlePostHandshakeMessage, HandshakeContext, handshakeContext, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
 // goishlint:ignore GOISH019  — same.
 // goishlint:ignore GOISH021 maxUselessBytes, tlsunsafeekm, outBufPool — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write; outBufPool is a sync.Pool whose only purpose is to avoid one allocation per record, which goish does not model.
 //
@@ -1155,6 +1155,35 @@ impl Conn {
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
     pub fn __setCipherSuite(&mut self, id: uint16) { self.cipherSuite = id; }
+    // go: none — goish-only: `halfConn.trafficSecret` and the identity
+    // fields a SessionState snapshot reads are unexported in Go, where
+    // the tests are in-package.
+    #[doc(hidden)]
+    pub fn __setTrafficSecrets(&mut self, in_: slice<byte>, out: slice<byte>) {
+        self.in_.trafficSecret = in_;
+        self.out.trafficSecret = out;
+    }
+    // go: none — goish-only: see `__setTrafficSecrets`.
+    #[doc(hidden)]
+    pub fn __trafficSecrets(&self) -> (slice<byte>, slice<byte>) {
+        return (self.in_.trafficSecret.clone(), self.out.trafficSecret.clone());
+    }
+    // go: none — goish-only: see `__setTrafficSecrets`.
+    #[doc(hidden)]
+    pub fn __setSessionIdentity(
+        &mut self,
+        proto: string,
+        ocsp: slice<byte>,
+        scts: slice<slice<byte>>,
+        extMasterSecret: bool,
+        curveID: super::common::CurveID,
+    ) {
+        self.clientProtocol = proto;
+        self.ocspResponse = ocsp;
+        self.scts = scts;
+        self.extMasterSecret = extMasterSecret;
+        self.curveID = curveID;
+    }
     // go: none — goish-only: Go writes the four assignments inline in
     // `pickTLSVersion`; the fields are unexported, so goish names them
     // once here.
@@ -2238,6 +2267,88 @@ impl Conn {
                 return err;
             }
         }
+        return errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1055-1068 Conn.writeHandshakeRecord
+    /// Go: marshal one handshake message, feed the transcript hash if
+    /// one was passed, and write it out as a handshake record.
+    ///
+    /// Deviation: `c.out.Lock()`/`Unlock` are absent — `&mut self` is
+    /// the lock, as everywhere else on the write path.
+    pub(crate) fn writeHandshakeRecord(
+        &mut self,
+        msg: &dyn super::common::handshakeMessage,
+        transcript: Option<&mut dyn super::handshake_messages::transcriptHash>,
+    ) -> (int, error) {
+        // Go: data, err := msg.marshal(); if err != nil { return 0, err }
+        let (data, err) = msg.marshal();
+        if err != errors::nil {
+            return (0, err);
+        }
+        // Go: if transcript != nil { transcript.Write(data) }
+        if let Some(t) = transcript {
+            t.Write(data.clone());
+        }
+        // Go: return c.writeRecordLocked(recordTypeHandshake, data)
+        return self.writeRecordLocked(super::common::recordTypeHandshake, data);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1335-1370 Conn.handleKeyUpdate
+    /// Go: rotate the read traffic secret, and if the peer asked for it,
+    /// send our own KeyUpdate and rotate the write secret too.
+    ///
+    /// Deviations: the `c.quic != nil` arm is absent — goish ships no
+    /// QUIC transport — and `c.out.Lock()`/`Unlock` are elided as above.
+    pub(crate) fn handleKeyUpdate(
+        &mut self,
+        keyUpdate: &super::handshake_messages::keyUpdateMsg,
+    ) -> error {
+        // Go: cipherSuite := cipherSuiteTLS13ByID(c.cipherSuite)
+        //     if cipherSuite == nil {
+        //         return c.in.setErrorLocked(c.sendAlert(alertInternalError)) }
+        let cipherSuite = match super::cipher_suites::cipherSuiteTLS13ByID(self.cipherSuite) {
+            Some(cs) => cs,
+            None => {
+                let a = self.sendAlert(alertInternalError);
+                return self.in_.setErrorLocked(a);
+            }
+        };
+
+        // Go: newSecret := cipherSuite.nextTrafficSecret(c.in.trafficSecret)
+        //     c.in.setTrafficSecret(cipherSuite, QUICEncryptionLevelInitial, newSecret)
+        let newSecret = cipherSuite.nextTrafficSecret(self.in_.trafficSecret.clone());
+        self.in_
+            .setTrafficSecret(cipherSuite, super::quic::QUICEncryptionLevelInitial, newSecret);
+
+        // Go: if keyUpdate.updateRequested { … }
+        if keyUpdate.updateRequested {
+            // Go: msg := &keyUpdateMsg{}
+            //     msgBytes, err := msg.marshal(); if err != nil { return err }
+            let msg = super::handshake_messages::keyUpdateMsg::default();
+            let (msgBytes, err) = msg.marshal();
+            if err != errors::nil {
+                return err;
+            }
+            // Go: _, err = c.writeRecordLocked(recordTypeHandshake, msgBytes)
+            let (_, err) = self.writeRecordLocked(super::common::recordTypeHandshake, msgBytes);
+            if err != errors::nil {
+                // Go: "Surface the error at the next write."
+                self.out.setErrorLocked(err);
+                return errors::nil;
+            }
+
+            // Go: newSecret := cipherSuite.nextTrafficSecret(c.out.trafficSecret)
+            //     c.out.setTrafficSecret(cipherSuite, QUICEncryptionLevelInitial, newSecret)
+            let newSecret = cipherSuite.nextTrafficSecret(self.out.trafficSecret.clone());
+            self.out.setTrafficSecret(
+                cipherSuite,
+                super::quic::QUICEncryptionLevelInitial,
+                newSecret,
+            );
+        }
+
+        // Go: return nil
         return errors::nil;
     }
 

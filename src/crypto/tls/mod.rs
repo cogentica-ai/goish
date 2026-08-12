@@ -5488,3 +5488,105 @@ pub fn handshake_messages_transcriptMsg() -> (
 
     return (d1, d2, d3);
 }
+
+// go: none — goish-only: `Conn.writeHandshakeRecord`,
+// `Conn.handleKeyUpdate` and `Conn.sessionState` are unexported in Go,
+// where the tests are in-package. Reports
+// `(writeHandshakeRecord's n, its wire, the transcript digest it fed,
+// handleKeyUpdate's errText, the rotated read secret, the rotated write
+// secret, the KeyUpdate it wrote)`. `req` is `keyUpdate.updateRequested`.
+#[doc(hidden)]
+pub fn conn_handshakeRecordAndKeyUpdate(
+    req: bool,
+) -> (
+    crate::types::int,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink.clone());
+    c.__setHaveVers(true);
+    c.__setVers(common::VersionTLS12);
+    let fin = handshake_messages::finishedMsg {
+        verifyData: alloc::vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    };
+    let mut h = crate::crypto::sha256::New();
+    let (n, _) = c.writeHandshakeRecord(&fin, Some(&mut h));
+    let whrWire = sink.Lock().clone();
+    let digest = h.Sum(crate::goslice::slice::__from_vec(alloc::vec![]));
+
+    let sink2 = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    ));
+    let mut c2 = conn::Conn::default();
+    c2.__setMemConn(sink2.clone());
+    c2.__setHaveVers(true);
+    c2.__setVers(common::VersionTLS13);
+    c2.__setCipherSuite(cipher_suites::TLS_AES_128_GCM_SHA256);
+    c2.__setTrafficSecrets(
+        crate::goslice::slice::__from_vec(alloc::vec![1u8, 2, 3, 4]),
+        crate::goslice::slice::__from_vec(alloc::vec![5u8, 6, 7, 8]),
+    );
+    let ku = handshake_messages::keyUpdateMsg {
+        updateRequested: req,
+    };
+    let err = c2.handleKeyUpdate(&ku);
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let (inSec, outSec) = c2.__trafficSecrets();
+    return (n, whrWire, digest, text, inSec, outSec, sink2.Lock().clone());
+}
+
+// go: none — goish-only: `Conn.sessionState` is unexported in Go, where
+// the tests are in-package. Reports the snapshot's fields.
+#[doc(hidden)]
+pub fn conn_sessionState() -> (
+    crate::types::int,
+    crate::types::int,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::int,
+    bool,
+    bool,
+    crate::types::int,
+    bool,
+) {
+    let mut c = conn::Conn::default();
+    c.__setVers(common::VersionTLS13);
+    c.__setCipherSuite(cipher_suites::TLS_AES_128_GCM_SHA256);
+    c.__setIsClient(true);
+    c.__setClientProtocol(crate::gostring::string::from_static("h2"));
+    c.__setSessionIdentity(
+        crate::gostring::string::from_static("h2"),
+        crate::goslice::slice::__from_vec(alloc::vec![9u8, 9]),
+        crate::goslice::slice::__from_vec(alloc::vec![
+            crate::goslice::slice::__from_vec(alloc::vec![7u8]),
+            crate::goslice::slice::__from_vec(alloc::vec![8u8, 8]),
+        ]),
+        true,
+        common::X25519,
+    );
+    let ss = c.sessionState();
+    let now = crate::uint64(crate::time::Now().Unix());
+    return (
+        crate::int(ss.__version()),
+        crate::int(ss.__cipherSuite()),
+        ss.__alpnProtocol(),
+        ss.__ocspResponse(),
+        ss.__scts().Len(),
+        ss.__isClientFlag(),
+        ss.__extMasterSecret(),
+        crate::int(ss.__curveID().0),
+        ss.__createdAt() + 2 >= now && ss.__createdAt() <= now + 2,
+    );
+}
