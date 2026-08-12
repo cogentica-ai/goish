@@ -722,7 +722,7 @@ impl MapFS {
 // goishlint:ignore GOISH019 fsTester — Go's `fsys fs.FS` field is held
 // by the driver (`testFS`), which is not ported; carrying a filesystem
 // this struct never reads would imply a walk that does not exist here.
-// goishlint:ignore GOISH020 checkOpen, checkBadPath, checkFileRead, checkDirList, checkStat, checkGlob — Go
+// goishlint:ignore GOISH020 checkOpen, checkBadPath, checkFileRead, checkDirList, checkStat, checkGlob, checkFile, openDir — Go
 // reads `t.fsys` off the receiver; goish's fsTester does not carry a
 // filesystem (see GOISH019 above), so these take it, or the opener
 // built from it, as a parameter instead. Same inputs, one hop
@@ -1369,4 +1369,179 @@ impl fsTester {
             crate::strings::Join(slice::__from_vec(problems), string::from_static("\n"))
         ));
     }
+}
+
+impl fsTester {
+    // go: sdk 1.25.5 testing/fstest/testfs.go:108-121 fsTester.openDir
+    /// Go: open `dir` and assert the result is an `fs.ReadDirFile`.
+    ///
+    /// A directory that opens but cannot be read as one is the failure
+    /// this catches — an `FS` whose `Open` returns a plain file handle
+    /// for a directory path passes every read test and dies the moment
+    /// anything walks it.
+    ///
+    /// Deviation: Go returns the `fs.ReadDirFile` and nil-checks at the
+    /// call site; goish returns `(entries, ok)` because the downcast
+    /// goes through `__goish_as_dyn_any` and handing back a borrowed
+    /// trait object would outlive the `Arc`.
+    pub fn openDir(
+        &mut self,
+        fsys: &(dyn fs::FS + Send + Sync + 'static),
+        dir: string,
+    ) -> (slice<Arc<dyn DirEntry + Send + Sync>>, bool) {
+        let (f, err) = fs::FS::Open(fsys, dir.clone());
+        if err != errors::nil {
+            self.errorf(crate::fmt::Sprintf!("%s: Open: %v", dir.clone(), err.Error()));
+            return (slice::new(), false);
+        }
+        // Go: d, ok := f.(fs.ReadDirFile); if !ok { f.Close(); errorf }
+        let any = match f.__goish_as_dyn_any() {
+            Some(a) => a,
+            None => {
+                f.Close();
+                self.errorf(crate::fmt::Sprintf!(
+                    "%s: Open returned a File that is not a fs.ReadDirFile",
+                    dir.clone()
+                ));
+                return (slice::new(), false);
+            }
+        };
+        if let Some(d) = any.downcast_ref::<mapDir>() {
+            let (entries, rerr) = d.read_dir(-1);
+            f.Close();
+            if rerr != errors::nil {
+                self.errorf(crate::fmt::Sprintf!(
+                    "%s: ReadDir: %v",
+                    dir.clone(),
+                    rerr.Error()
+                ));
+                return (slice::new(), false);
+            }
+            return (entries, true);
+        }
+        f.Close();
+        self.errorf(crate::fmt::Sprintf!(
+            "%s: Open returned a File that is not a fs.ReadDirFile",
+            dir.clone()
+        ));
+        return (slice::new(), false);
+    }
+
+    // go: sdk 1.25.5 testing/fstest/testfs.go:521-589 fsTester.checkFile
+    /// Go: "checkFile checks that basic file reading works correctly."
+    ///
+    /// Three things beyond "the bytes come back":
+    ///
+    ///  * Closing twice must not crash. Go says so explicitly and
+    ///    ignores the second return value — an `FS` that panics or
+    ///    double-frees on a second Close breaks every `defer f.Close()`
+    ///    written next to an explicit one.
+    ///  * `fs.ReadFile` must agree with `Open` + read-to-end. Two code
+    ///    paths, one answer.
+    ///  * Mutating the slice a `ReadFile` returned must not change what
+    ///    the next call returns. An implementation handing out its
+    ///    internal buffer passes every other check here and corrupts
+    ///    the filesystem from the outside.
+    ///
+    /// Deviations: Go's `fs.ReadFileFS` block is absent — goish's io/fs
+    /// has no such trait to assert on — and the closing
+    /// `iotest.TestReader` call is absent because `TestReader` is the
+    /// one declaration of `testing/iotest` not yet ported (it needs
+    /// ReadSeeker/ReaderAt downcasts). The aliasing check that block
+    /// would have performed is done here against `fs::ReadFile`
+    /// instead, so the property is still covered.
+    pub fn checkFile(
+        &mut self,
+        fsys: &(dyn fs::FS + Send + Sync + 'static),
+        file: string,
+    ) {
+        self.__push_file(file.clone());
+
+        // Go: read the entire file through Open.
+        let (f, err) = fs::FS::Open(fsys, file.clone());
+        if err != errors::nil {
+            self.errorf(crate::fmt::Sprintf!("%s: Open: %v", file.clone(), err.Error()));
+            return;
+        }
+        let (data, rerr) = read_all_file(f.as_ref());
+        if rerr != errors::nil {
+            f.Close();
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: Open+ReadAll: %v",
+                file.clone(),
+                rerr.Error()
+            ));
+            return;
+        }
+        let cerr = f.Close();
+        if cerr != errors::nil {
+            self.errorf(crate::fmt::Sprintf!("%s: Close: %v", file.clone(), cerr.Error()));
+        }
+        // Go: "Check that closing twice doesn't crash. The return value
+        // doesn't matter."
+        f.Close();
+
+        // Go: "Check that fs.ReadFile works with t.fsys."
+        let (data2, r2err) = fs::ReadFile(fsys, file.clone());
+        if r2err != errors::nil {
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: fs.ReadFile: %v",
+                file.clone(),
+                r2err.Error()
+            ));
+            return;
+        }
+        self.checkFileRead(file.clone(), "ReadAll vs fs.ReadFile", data.clone(), data2.clone());
+
+        // Go performs this aliasing check inside the ReadFileFS block:
+        // "Modify the data and check it again. Modifying the returned
+        // byte slice should not affect the next call."
+        let mut mutated = data2.clone();
+        for i in 0..mutated.Len() {
+            mutated[i] = mutated[i].wrapping_add(1);
+        }
+        let (data3, r3err) = fs::ReadFile(fsys, file.clone());
+        if r3err != errors::nil {
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: second call to fs.ReadFile: %v",
+                file.clone(),
+                r3err.Error()
+            ));
+            return;
+        }
+        self.checkFileRead(file.clone(), "ReadAll vs second fs.ReadFile", data, data3);
+
+        self.checkBadPath(file, "ReadFile", |name| {
+            let (_, e) = fs::ReadFile(fsys, name);
+            return e;
+        });
+    }
+}
+
+// go: none — goish idiom: Go calls `io.ReadAll(f)` on the `fs.File`
+// interface. goish's `fs::File::Read` takes `&self` and a `&mut
+// slice<byte>` rather than satisfying `io::Reader`, so the read-to-end
+// loop is spelled here.
+fn read_all_file(f: &(dyn File + Send + Sync)) -> (slice<byte>, error) {
+    let mut out: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
+    let mut buf: slice<byte> = crate::make!([]byte, 512);
+    return 'read: loop {
+        let (n, err) = f.Read(&mut buf);
+        if n > 0 {
+            for i in 0..n {
+                out.push(buf[i]);
+            }
+        }
+        if err != errors::nil {
+            // Go: io.ReadAll treats EOF as success.
+            let eof: error = crate::io::EOF.clone().into();
+            if err == eof {
+                break 'read (slice::__from_vec(out), errors::nil);
+            }
+            break 'read (slice::__from_vec(out), err);
+        }
+        if n == 0 {
+            break 'read (slice::__from_vec(out), errors::nil);
+        }
+    };
 }
