@@ -51,6 +51,16 @@ fn hexOf(b: slice<byte>) -> string {
     return string::from_bytes(&out);
 }
 
+fn seqBytes(n: usize, base: u8) -> slice<byte> {
+    let mut v: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(n);
+    let mut i = 0usize;
+    while i < n {
+        v.push(base.wrapping_add(i as u8));
+        i += 1;
+    }
+    return slice::__from_vec(v);
+}
+
 static mut PASS: int = 0;
 static mut FAIL: int = 0;
 
@@ -803,6 +813,177 @@ fn main() {
         "QUIC level negative fallback",
         tls::QUICEncryptionLevel(-1).String(),
         "QUICEncryptionLevel(-1)",
+    );
+
+    // ─── cipher_suites.go: the record-layer AEADs, MACs and the TLS 1.3
+    //     suite table. Every ciphertext below came out of
+    //     `scripts/goref.sh crypto/tls`, which can reach the unexported
+    //     constructors because Go's tests are in-package.
+    let key16 = seqBytes(16, 0);
+    let key32 = seqBytes(32, 0x40);
+    let prefix4 = slice::__from_vec(alloc::vec![1u8, 2, 3, 4]);
+    let mask12 = slice::__from_vec(alloc::vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    let pt = slice::__from_vec(b"hello tls".to_vec());
+    let ad = slice::__from_vec(alloc::vec![0x17u8, 0x03, 0x03, 0x00, 0x09]);
+    let seq0 = slice::__from_vec(alloc::vec![0u8; 8]);
+    let seq1 = slice::__from_vec(alloc::vec![0u8, 0, 0, 0, 0, 0, 0, 1]);
+    let seq2 = slice::__from_vec(alloc::vec![0u8, 0, 0, 0, 0, 0, 0, 2]);
+
+    // aeadAESGCM — TLS 1.2, eight explicit nonce bytes per record.
+    let (ct12, ns12, oh12, ex12) = tls::cipher_suites_aeadSeal(
+        string::from_static("aesgcm12"), key16.clone(), prefix4.clone(),
+        seq1.clone(), pt.clone(), ad.clone(),
+    );
+    check_n("aesgcm12 NonceSize", ns12, 8);
+    check_n("aesgcm12 Overhead", oh12, 16);
+    check_n("aesgcm12 explicitNonceLen", ex12, 8);
+    eq("aesgcm12 Seal", hexOf(ct12.clone()),
+       "c2933f2b5e6be6bc68b27ec505948f77a9015e821e655298a5");
+    let (op12, err12) = tls::cipher_suites_aeadOpen(
+        string::from_static("aesgcm12"), key16.clone(), prefix4.clone(),
+        seq1.clone(), ct12, ad.clone(),
+    );
+    check("aesgcm12 Open ok", err12 == goish::errors::nil);
+    eq("aesgcm12 Open plaintext", string::from_bytes(&op12), "hello tls");
+    // A second record under the same key: the prefix is untouched and
+    // only the explicit half of the nonce moves.
+    let (ct12b, _, _, _) = tls::cipher_suites_aeadSeal(
+        string::from_static("aesgcm12"), key16.clone(), prefix4,
+        seq2, pt.clone(), ad.clone(),
+    );
+    eq("aesgcm12 Seal seq=2", hexOf(ct12b),
+       "59490d99705e7293656871352e58321e6d2f19aa53777c7840");
+
+    // aeadAESGCMTLS13 — XOR-masked nonce, nothing explicit on the wire.
+    let (ct13, ns13, oh13, ex13) = tls::cipher_suites_aeadSeal(
+        string::from_static("aesgcm13"), key32.clone(), mask12.clone(),
+        seq0.clone(), pt.clone(), ad.clone(),
+    );
+    check_n("aesgcm13 NonceSize", ns13, 8);
+    check_n("aesgcm13 Overhead", oh13, 16);
+    check_n("aesgcm13 explicitNonceLen", ex13, 0);
+    eq("aesgcm13 Seal", hexOf(ct13.clone()),
+       "ce4f395c4504c3193d11306ac3cac0aa93ebff6b0594638548");
+    let (op13, err13) = tls::cipher_suites_aeadOpen(
+        string::from_static("aesgcm13"), key32.clone(), mask12.clone(),
+        seq0.clone(), ct13, ad.clone(),
+    );
+    check("aesgcm13 Open ok", err13 == goish::errors::nil);
+    eq("aesgcm13 Open plaintext", string::from_bytes(&op13), "hello tls");
+    let (ct13b, _, _, _) = tls::cipher_suites_aeadSeal(
+        string::from_static("aesgcm13"), key32.clone(), mask12.clone(),
+        seq1.clone(), pt.clone(), ad.clone(),
+    );
+    eq("aesgcm13 Seal seq=1", hexOf(ct13b),
+       "8ab61cf658c86aaccfc4b8f95c5111d292099e2d6ff3a20726");
+
+    // aeadChaCha20Poly1305 — same xorNonceAEAD wrapper, different AEAD.
+    let (ctc, nsc, ohc, exc) = tls::cipher_suites_aeadSeal(
+        string::from_static("chacha"), key32.clone(), mask12.clone(),
+        seq0.clone(), pt.clone(), ad.clone(),
+    );
+    check_n("chacha NonceSize", nsc, 8);
+    check_n("chacha Overhead", ohc, 16);
+    check_n("chacha explicitNonceLen", exc, 0);
+    eq("chacha Seal", hexOf(ctc.clone()),
+       "07e9fbacea89d6f6941461e9e1db04b96ed84390b0975cc7ba");
+    let (opc, errc) = tls::cipher_suites_aeadOpen(
+        string::from_static("chacha"), key32.clone(), mask12.clone(),
+        seq0.clone(), ctc, ad.clone(),
+    );
+    check("chacha Open ok", errc == goish::errors::nil);
+    eq("chacha Open plaintext", string::from_bytes(&opc), "hello tls");
+    let (ctc1, _, _, _) = tls::cipher_suites_aeadSeal(
+        string::from_static("chacha"), key32.clone(), mask12.clone(),
+        seq1.clone(), pt.clone(), ad.clone(),
+    );
+    eq("chacha Seal seq=1", hexOf(ctc1.clone()),
+       "13951be5fb1928d16c1bdc2004d96e655e67233a268c4902d9");
+    // Opening a record under the wrong sequence number must fail: this
+    // is the check that the nonce mask is actually XORed back out.
+    let (_, errBad) = tls::cipher_suites_aeadOpen(
+        string::from_static("chacha"), key32, mask12,
+        seq0, ctc1, ad,
+    );
+    eq("chacha Open wrong seq", errBad.Error(),
+       "chacha20poly1305: message authentication failed");
+
+    // macSHA1 / macSHA256 and tls10MAC.
+    let mkey = slice::__from_vec(alloc::vec![9u8, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
+    let seq3 = slice::__from_vec(alloc::vec![0u8, 0, 0, 0, 0, 0, 0, 3]);
+    let hdr = slice::__from_vec(alloc::vec![0x17u8, 0x03, 0x03, 0x00, 0x09]);
+    let empty: slice<byte> = slice::new();
+    let (mac1, size1, block1) = tls::cipher_suites_tls10MAC(
+        string::from_static("sha1"), mkey.clone(), empty.clone(),
+        seq3.clone(), hdr.clone(), pt.clone(), empty.clone(),
+    );
+    check_n("macSHA1 Size", size1, 20);
+    check_n("macSHA1 BlockSize", block1, 64);
+    eq("tls10MAC sha1", hexOf(mac1), "36ce0951d217cbfaaad9a8824538696b80cc028d");
+    let (mac2, size2, block2) = tls::cipher_suites_tls10MAC(
+        string::from_static("sha256"), mkey.clone(), empty.clone(),
+        seq3.clone(), hdr.clone(), pt.clone(), empty.clone(),
+    );
+    check_n("macSHA256 Size", size2, 32);
+    check_n("macSHA256 BlockSize", block2, 64);
+    eq("tls10MAC sha256", hexOf(mac2),
+       "74e1e7b495dbeffc9687e6119e613228c29b4199bfea1c2f5759f46732684228");
+    // tls10MAC appends to out, as Go's Sum(out) does.
+    let (mac3, _, _) = tls::cipher_suites_tls10MAC(
+        string::from_static("sha1"), mkey.clone(),
+        slice::__from_vec(alloc::vec![0xAAu8, 0xBB]),
+        seq3.clone(), hdr.clone(), pt.clone(), empty.clone(),
+    );
+    eq("tls10MAC appends to out", hexOf(mac3),
+       "aabb36ce0951d217cbfaaad9a8824538696b80cc028d");
+    // The Lucky13 extra write must not change the returned MAC.
+    let (mac4, _, _) = tls::cipher_suites_tls10MAC(
+        string::from_static("sha1"), mkey, empty,
+        seq3, hdr, pt.clone(),
+        slice::__from_vec(alloc::vec![1u8, 2, 3]),
+    );
+    eq("tls10MAC extra does not change res", hexOf(mac4),
+       "36ce0951d217cbfaaad9a8824538696b80cc028d");
+
+    // cthWrapper — the constant-time SHA-1 that macSHA1 hashes through.
+    let (cth, cthSize, cthBlock) = tls::cipher_suites_constantTimeSHA1(pt);
+    check_n("cthWrapper Size", cthSize, 20);
+    check_n("cthWrapper BlockSize", cthBlock, 64);
+    eq("cthWrapper Sum", hexOf(cth), "af0cf397878763fbce6ceaf416de1bf10da1c527");
+
+    // cipherSuiteTLS13ByID / mutualCipherSuiteTLS13.
+    let (ok1, kl1, h1) = tls::cipher_suites_tls13ByID(tls::TLS_AES_128_GCM_SHA256);
+    check("suite13 TLS_AES_128_GCM_SHA256 found", ok1);
+    check_n("suite13 TLS_AES_128_GCM_SHA256 keyLen", kl1, 16);
+    check_n("suite13 TLS_AES_128_GCM_SHA256 hash", h1.0 as int, 5);
+    check_n("suite13 TLS_AES_128_GCM_SHA256 hash size", h1.Size(), 32);
+    let (ok2, kl2, h2) = tls::cipher_suites_tls13ByID(tls::TLS_AES_256_GCM_SHA384);
+    check("suite13 TLS_AES_256_GCM_SHA384 found", ok2);
+    check_n("suite13 TLS_AES_256_GCM_SHA384 keyLen", kl2, 32);
+    check_n("suite13 TLS_AES_256_GCM_SHA384 hash", h2.0 as int, 6);
+    check_n("suite13 TLS_AES_256_GCM_SHA384 hash size", h2.Size(), 48);
+    let (ok3, kl3, h3) = tls::cipher_suites_tls13ByID(tls::TLS_CHACHA20_POLY1305_SHA256);
+    check("suite13 TLS_CHACHA20_POLY1305_SHA256 found", ok3);
+    check_n("suite13 TLS_CHACHA20_POLY1305_SHA256 keyLen", kl3, 32);
+    check_n("suite13 TLS_CHACHA20_POLY1305_SHA256 hash", h3.0 as int, 5);
+    let (ok4, _, _) = tls::cipher_suites_tls13ByID(tls::TLS_RSA_WITH_RC4_128_SHA);
+    check("suite13 non-1.3 id is nil", !ok4);
+    check(
+        "mutual13 have=[1301,1302] want=1302",
+        tls::cipher_suites_mutualTLS13(
+            slice::__from_vec(alloc::vec![
+                tls::TLS_AES_128_GCM_SHA256,
+                tls::TLS_AES_256_GCM_SHA384
+            ]),
+            tls::TLS_AES_256_GCM_SHA384,
+        ),
+    );
+    check(
+        "mutual13 have=[1301] want=1302",
+        !tls::cipher_suites_mutualTLS13(
+            slice::__from_vec(alloc::vec![tls::TLS_AES_128_GCM_SHA256]),
+            tls::TLS_AES_256_GCM_SHA384,
+        ),
     );
 
     unsafe {

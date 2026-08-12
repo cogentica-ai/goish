@@ -41,6 +41,21 @@ pub fn auth_legacyTypeAndHashFromPublicKey(
 }
 pub mod cipher_suites;
 pub use cipher_suites::{CipherSuite, CipherSuiteName, CipherSuites, InsecureCipherSuites};
+pub use cipher_suites::{
+    TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
+    TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
+    TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+    TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+    TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, TLS_ECDHE_ECDSA_WITH_RC4_128_SHA,
+    TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA, TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+    TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA, TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+    TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305, TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+    TLS_ECDHE_RSA_WITH_RC4_128_SHA, TLS_FALLBACK_SCSV, TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+    TLS_RSA_WITH_AES_128_CBC_SHA, TLS_RSA_WITH_AES_128_CBC_SHA256,
+    TLS_RSA_WITH_AES_128_GCM_SHA256, TLS_RSA_WITH_AES_256_CBC_SHA,
+    TLS_RSA_WITH_AES_256_GCM_SHA384, TLS_RSA_WITH_RC4_128_SHA,
+};
 pub mod common;
 pub mod common_string;
 pub mod defaults;
@@ -1847,4 +1862,146 @@ pub fn ech_parseConfigErr(
 #[doc(hidden)]
 pub fn ech_validDNSName(name: crate::gostring::string) -> bool {
     return ech::validDNSName(name);
+}
+
+// go: none — goish-only: cipher_suites.go's AEAD, MAC and TLS 1.3 suite
+// records are all unexported in Go, where the tests are in-package.
+// Each shim seals or MACs once and hands back the bytes, so the example
+// can pin them against a running Go.
+#[doc(hidden)]
+pub fn cipher_suites_aeadSeal(
+    which: crate::gostring::string,
+    key: crate::goslice::slice<crate::types::byte>,
+    fixedNonce: crate::goslice::slice<crate::types::byte>,
+    nonce: crate::goslice::slice<crate::types::byte>,
+    plaintext: crate::goslice::slice<crate::types::byte>,
+    additionalData: crate::goslice::slice<crate::types::byte>,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+) {
+    let mut a = cipher_suites_aeadByName(which, key, fixedNonce);
+    let ct = cipher_suites::mutAEAD::Seal(
+        &mut *a,
+        crate::goslice::slice::new(),
+        nonce,
+        plaintext,
+        additionalData,
+    );
+    let ns = cipher_suites::mutAEAD::NonceSize(&*a);
+    let oh = cipher_suites::mutAEAD::Overhead(&*a);
+    let ex = a.explicitNonceLen();
+    return (ct, ns, oh, ex);
+}
+
+// go: none — goish-only: see `cipher_suites_aeadSeal`.
+#[doc(hidden)]
+pub fn cipher_suites_aeadOpen(
+    which: crate::gostring::string,
+    key: crate::goslice::slice<crate::types::byte>,
+    fixedNonce: crate::goslice::slice<crate::types::byte>,
+    nonce: crate::goslice::slice<crate::types::byte>,
+    ciphertext: crate::goslice::slice<crate::types::byte>,
+    additionalData: crate::goslice::slice<crate::types::byte>,
+) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
+    let mut a = cipher_suites_aeadByName(which, key, fixedNonce);
+    return cipher_suites::mutAEAD::Open(
+        &mut *a,
+        crate::goslice::slice::new(),
+        nonce,
+        ciphertext,
+        additionalData,
+    );
+}
+
+// go: none — goish-only: names the three constructors so an example can
+// pick one without reaching the unexported types.
+fn cipher_suites_aeadByName(
+    which: crate::gostring::string,
+    key: crate::goslice::slice<crate::types::byte>,
+    fixedNonce: crate::goslice::slice<crate::types::byte>,
+) -> alloc::boxed::Box<dyn cipher_suites::aead + Send + Sync> {
+    if which == crate::gostring::string::from_static("aesgcm12") {
+        return cipher_suites::aeadAESGCM(key, fixedNonce);
+    }
+    if which == crate::gostring::string::from_static("aesgcm13") {
+        return cipher_suites::aeadAESGCMTLS13(key, fixedNonce);
+    }
+    return cipher_suites::aeadChaCha20Poly1305(key, fixedNonce);
+}
+
+// go: none — goish-only: see `cipher_suites_aeadSeal`.
+#[doc(hidden)]
+pub fn cipher_suites_tls10MAC(
+    which: crate::gostring::string,
+    key: crate::goslice::slice<crate::types::byte>,
+    out: crate::goslice::slice<crate::types::byte>,
+    seq: crate::goslice::slice<crate::types::byte>,
+    header: crate::goslice::slice<crate::types::byte>,
+    data: crate::goslice::slice<crate::types::byte>,
+    extra: crate::goslice::slice<crate::types::byte>,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::int,
+    crate::types::int,
+) {
+    let mut h = if which == crate::gostring::string::from_static("sha1") {
+        cipher_suites::macSHA1(key)
+    } else {
+        cipher_suites::macSHA256(key)
+    };
+    let size = h.Size();
+    let block = h.BlockSize();
+    let mac = cipher_suites::tls10MAC(&mut *h, out, seq, header, data, extra);
+    return (mac, size, block);
+}
+
+// go: none — goish-only: see `cipher_suites_aeadSeal`.
+#[doc(hidden)]
+pub fn cipher_suites_constantTimeSHA1(
+    data: crate::goslice::slice<crate::types::byte>,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::int,
+    crate::types::int,
+) {
+    let f = cipher_suites::newConstantTimeHash(cipher_suites_newSHA1CTH);
+    let mut h = f.Call();
+    let _ = crate::io::Writer::Write(&mut *h, data);
+    return (
+        h.Sum(crate::goslice::slice::new()),
+        h.Size(),
+        h.BlockSize(),
+    );
+}
+
+// go: none — goish-only: see `cipher_suites_aeadSeal`.
+fn cipher_suites_newSHA1CTH(
+) -> alloc::boxed::Box<dyn cipher_suites::constantTimeHash + Send + Sync> {
+    return alloc::boxed::Box::new(crate::crypto::sha1::New());
+}
+
+// go: none — goish-only: see `cipher_suites_aeadSeal`. Reports
+// `(found, keyLen, hash)` for a TLS 1.3 suite ID.
+#[doc(hidden)]
+pub fn cipher_suites_tls13ByID(
+    id: crate::types::uint16,
+) -> (bool, crate::types::int, crate::crypto::Hash) {
+    let found = cipher_suites::cipherSuiteTLS13ByID(id);
+    if found.is_none() {
+        return (false, 0, crate::crypto::Hash(0));
+    }
+    let s = found.unwrap();
+    return (true, s.keyLen, s.hash);
+}
+
+// go: none — goish-only: see `cipher_suites_aeadSeal`.
+#[doc(hidden)]
+pub fn cipher_suites_mutualTLS13(
+    have: crate::goslice::slice<crate::types::uint16>,
+    want: crate::types::uint16,
+) -> bool {
+    return cipher_suites::mutualCipherSuiteTLS13(have, want).is_some();
 }
