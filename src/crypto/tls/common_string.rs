@@ -1,4 +1,5 @@
 // go: file crypto/tls/common_string.go decls: SignatureScheme.String, CurveID.String, ClientAuthType.String
+// go: waived _ — the `func _()` blocks stringer emits are compile-time value-drift assertions; goish keeps the constants explicit and needs no such probe.
 //
 // crypto/tls — `String()` for SignatureScheme, CurveID and
 // ClientAuthType.

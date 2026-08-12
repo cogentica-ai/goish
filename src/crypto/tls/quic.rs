@@ -47,3 +47,47 @@ impl QUICEncryptionLevel {
         };
     }
 }
+
+// ── Waived: the QUICConn event loop and the Conn.quic hooks ──────────
+//
+// goish ships no QUIC transport: there is no `Conn.quic` field and no
+// external QUIC stack to drive a `QUICConn`. Upstream, every one of the
+// declarations below is reached ONLY through a `c.quic != nil` arm,
+// which is dead on every TLS-over-TCP connection — the only kind goish
+// makes. Each such arm in the ported handshake code is already carried
+// as an explicit, documented deviation at its site (grep the tree for
+// "goish ships no QUIC transport").
+//
+// These are WAIVED, not remaining work: porting them verbatim would add
+// a `Conn.quic` field plus the `QUICConn` machinery (`quicWaitForSignal`
+// blocks the handshake goroutine on a condition variable so an external
+// QUIC caller can pump it) and would require re-editing ~15 verified
+// functions to reinstate their dead arms — untestable code that could
+// never execute without a QUIC transport this library does not provide.
+// If goish grows a QUIC/HTTP-3 stack, quic.go ports as a unit alongside
+// it and these waivers come out. `QUICEncryptionLevel.String` above is
+// the one piece with no `c.quic` dependency, so it is ported, not waived.
+//
+// go: waived QUICClient — goish ships no QUIC transport; see the waiver banner.
+// go: waived QUICServer — goish ships no QUIC transport; see the waiver banner.
+// go: waived newQUICConn — goish ships no QUIC transport; see the waiver banner.
+// go: waived quicError — goish ships no QUIC transport; see the waiver banner.
+// go: waived QUICConn.Start — goish ships no QUIC transport; see the waiver banner.
+// go: waived QUICConn.NextEvent — goish ships no QUIC transport; see the waiver banner.
+// go: waived QUICConn.Close — goish ships no QUIC transport; see the waiver banner.
+// go: waived QUICConn.HandleData — goish ships no QUIC transport; see the waiver banner.
+// go: waived QUICConn.SendSessionTicket — goish ships no QUIC transport; see the waiver banner.
+// go: waived QUICConn.StoreSession — goish ships no QUIC transport; see the waiver banner.
+// go: waived QUICConn.ConnectionState — goish ships no QUIC transport; see the waiver banner.
+// go: waived QUICConn.SetTransportParameters — goish ships no QUIC transport; see the waiver banner.
+// go: waived Conn.quicReadHandshakeBytes — goish ships no QUIC transport; see the waiver banner.
+// go: waived Conn.quicSetReadSecret — goish ships no QUIC transport; see the waiver banner.
+// go: waived Conn.quicSetWriteSecret — goish ships no QUIC transport; see the waiver banner.
+// go: waived Conn.quicWriteCryptoData — goish ships no QUIC transport; see the waiver banner.
+// go: waived Conn.quicResumeSession — goish ships no QUIC transport; see the waiver banner.
+// go: waived Conn.quicStoreSession — goish ships no QUIC transport; see the waiver banner.
+// go: waived Conn.quicSetTransportParameters — goish ships no QUIC transport; see the waiver banner.
+// go: waived Conn.quicGetTransportParameters — goish ships no QUIC transport; see the waiver banner.
+// go: waived Conn.quicHandshakeComplete — goish ships no QUIC transport; see the waiver banner.
+// go: waived Conn.quicRejectedEarlyData — goish ships no QUIC transport; see the waiver banner.
+// go: waived Conn.quicWaitForSignal — goish ships no QUIC transport; see the waiver banner.
