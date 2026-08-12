@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: toOutputDir, runTests, RunTests, runningList, T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: listTests, toOutputDir, runTests, RunTests, runningList, T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -21,7 +21,7 @@
 // registration having happened and can be tested on its own.
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
 // goishlint:ignore GOISH018 after, Attr, before, callSite, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newTestState, Output, Parallel, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
-// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, M, match, matchList, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
+// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, M, match, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
 #![allow(non_snake_case)]
@@ -2871,4 +2871,70 @@ pub fn toOutputDir(path: string) -> string {
         '/' as crate::types::rune,
         path
     );
+}
+
+// go: sdk 1.25.5 testing/testing.go:2403-2429 listTests
+// goishlint:ignore GOISH020 listTests — Go's first parameter is the
+// matchString func, supplied by the generated main package; goish has
+// none and uses regexp::MatchString directly, the same function Go's
+// generated main passes.
+/// Go: print the names matching -test.list and run nothing.
+///
+/// It lists all four kinds — tests, benchmarks, fuzz targets and
+/// examples — from one pattern, which is why it needs the four
+/// Internal* types even though goish can only RUN the first.
+#[allow(non_snake_case)]
+pub fn listTests(
+    tests: &[InternalTest],
+    benchmarks: &[crate::testing::benchmark::InternalBenchmark],
+    fuzzTargets: &[crate::testing::fuzz::InternalFuzzTarget],
+    examples: &[crate::testing::example::InternalExample],
+) {
+    let pattern = {
+        let g = FLAGS.Lock();
+        match g.as_ref() {
+            None => string::from_static(""),
+            Some(f) => f.list.Get(),
+        }
+    };
+
+    // Go: a bad -test.list regexp is fatal, and it is diagnosed BEFORE
+    // any name is printed — otherwise a partial listing would look
+    // like a complete one.
+    let (_, err) = crate::regexp::MatchString(pattern.clone(), "non-empty");
+    if err != crate::errors::nil {
+        let msg = crate::fmt::Sprintf!(
+            "testing: invalid regexp in -test.list (%q): %s\n",
+            pattern.clone(),
+            err.Error()
+        );
+        let b = msg.clone().__as_bytes_internal().to_vec();
+        crate::syscall::Write(crate::syscall::STDERR, b.as_ptr(), b.len());
+        crate::syscall::Exit(1);
+    }
+
+    for t in tests.iter() {
+        let (ok, _) = crate::regexp::MatchString(pattern.clone(), t.Name.clone());
+        if ok {
+            crate::fmt::Println!(t.Name.clone());
+        }
+    }
+    for b in benchmarks.iter() {
+        let (ok, _) = crate::regexp::MatchString(pattern.clone(), b.Name.clone());
+        if ok {
+            crate::fmt::Println!(b.Name.clone());
+        }
+    }
+    for ft in fuzzTargets.iter() {
+        let (ok, _) = crate::regexp::MatchString(pattern.clone(), ft.Name.clone());
+        if ok {
+            crate::fmt::Println!(ft.Name.clone());
+        }
+    }
+    for e in examples.iter() {
+        let (ok, _) = crate::regexp::MatchString(pattern.clone(), e.Name.clone());
+        if ok {
+            crate::fmt::Println!(e.Name.clone());
+        }
+    }
 }

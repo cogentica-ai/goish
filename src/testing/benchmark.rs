@@ -21,7 +21,7 @@
 // over a BenchmarkResult a caller filled in, plus the formatting.
 //
 // goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, benchmarkName, doBench, launch, loopSlowPath, runN, run, run1, add, stopOrScaleBLoop, processBench, checkParallel, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
-// goishlint:ignore GOISH021 PB, InternalBenchmark, benchState, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchTime, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
+// goishlint:ignore GOISH021 PB, benchState, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchTime, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
 
 #![allow(non_snake_case)]
 
@@ -496,4 +496,16 @@ impl durationOrCountFlag {
         };
         return crate::errors::nil;
     }
+}
+
+// go: sdk 1.25.5 testing/benchmark.go:76-79 InternalBenchmark
+/// Go: "An internal type but exported because it is cross-package; part
+/// of the implementation of the 'go test' command."
+///
+/// Carried across ahead of the benchmark runner because `listTests`
+/// names it, and listing benchmarks does not require running them.
+#[allow(non_snake_case)]
+pub struct InternalBenchmark {
+    pub Name: crate::gostring::string,
+    pub F: fn(&mut B),
 }

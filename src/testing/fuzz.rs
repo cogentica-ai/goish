@@ -8,7 +8,7 @@
 // cannot be ported without it.
 //
 // go: file testing/fuzz.go decls:
-// goishlint:ignore GOISH021 F, InternalFuzzTarget, fuzzResult, fuzzCrashError, fuzzContext, fuzzState, fuzzMode, fuzzCoordinator, fuzzWorker, seedCorpusOnly, fuzzWorkerExitCode, supportedTypes — the fuzzing engine needs internal/fuzz, which goish does not have; only corpusEntry is carried across, for testDeps' signatures.
+// goishlint:ignore GOISH021 F, fuzzResult, fuzzCrashError, fuzzContext, fuzzState, fuzzMode, fuzzCoordinator, fuzzWorker, seedCorpusOnly, fuzzWorkerExitCode, supportedTypes — the fuzzing engine needs internal/fuzz, which goish does not have; only corpusEntry is carried across, for testDeps' signatures.
 // goishlint:ignore GOISH018 Add, Fail, Fuzz, Helper, Skipped, Skip, Skipf, SkipNow, Error, Errorf, Fatal, Fatalf, Log, Logf, Setenv, TempDir, Name, Cleanup, report, fRunner, runFuzzTests, runFuzzing, initFuzzFlags, String — same: F and the fuzzing engine are not ported.
 
 use crate::gostring::string;
@@ -31,4 +31,17 @@ pub(crate) struct corpusEntry {
     pub Values: crate::goslice::slice<crate::goany::Any>,
     pub Generation: crate::types::int,
     pub IsSeed: bool,
+}
+
+// goishlint:ignore GOISH019 InternalFuzzTarget — Go's `Fn` is
+// `func(f *F)`; goish has no `F`, so the field is a bare `fn()`
+// placeholder. Nothing calls it: `listTests`, the only consumer that
+// can exist without the fuzzing engine, reads `Name` and never `Fn`.
+// go: sdk 1.25.5 testing/fuzz.go:49-52 InternalFuzzTarget
+/// Go: "An internal type but exported because it is cross-package; part
+/// of the implementation of the 'go test' command."
+#[allow(non_snake_case)]
+pub struct InternalFuzzTarget {
+    pub Name: string,
+    pub Fn: fn(),
 }

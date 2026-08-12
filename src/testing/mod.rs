@@ -49,7 +49,8 @@
 pub mod benchmark;
 pub mod fstest;
 pub mod example;
-pub(crate) mod fuzz;
+pub mod run_example;
+pub mod fuzz;
 pub mod slogtest;
 pub mod iotest;
 pub mod r#match;
@@ -61,7 +62,7 @@ pub use newcover::Coverage;
 pub use testing::{
     callerName, chattyFlag, chattyPrinter, fmtDuration, marker, newChattyPrinter, parseCpuList,
     pcToName, prefix, testBinary, CoverMode, Init, Short, Testing, Verbose,
-    indenter, newTestState, outputWriter, runningList, shouldFailFast, toOutputDir, testState, testStateCounts, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_call_site, __shim_cleanup_handle, __shim_mark_done, __shim_output_buf, CleanupHandle, __shim_ran_done, __shim_match_string_only, __DepsProbe,
+    indenter, newTestState, outputWriter, runningList, listTests, shouldFailFast, toOutputDir, testState, testStateCounts, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_call_site, __shim_cleanup_handle, __shim_mark_done, __shim_output_buf, CleanupHandle, __shim_ran_done, __shim_match_string_only, __DepsProbe,
 };
 
 extern crate alloc;

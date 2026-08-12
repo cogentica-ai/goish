@@ -1,5 +1,5 @@
-// testing_example_smoke — InternalExample.processRunResult and
-// toOutputDir.
+// testing_example_smoke — the Example runner: runExample,
+// runExamples, processRunResult, and toOutputDir.
 //
 // processRunResult is what decides whether an Example function passed:
 // it compares what the example printed against its `// Output:`
@@ -10,12 +10,19 @@
 //     otherwise-correct example. This is why examples are pleasant to
 //     write; a strict comparison would make every one of them fragile.
 //   * An Unordered example compares SORTED LINES, for output whose
-//     order is genuinely unspecified — ranging a map, say. Checks 3
-//     and 4 are the pair: unordered accepts a permutation, ordered
+//     order is genuinely unspecified — ranging a map, say. Checks 4
+//     and 5 are the pair: unordered accepts a permutation, ordered
 //     rejects the same one.
 //   * `finished` is separate from the comparison. An example that
 //     matched its output but exited early via Goexit still fails,
 //     because it never got to the part that would have printed more.
+//
+// Checks 8-10 cover the capture itself. Go swaps the os.Stdout VALUE
+// for a pipe; goish has no such value, so it does what os.Pipe ends up
+// doing anyway — dup fd 1 aside, point it at a pipe with dup3, restore
+// after. Check 9 is the one that matters: without it, a runExample that
+// captured nothing at all would still pass check 8 by comparing "" to
+// "" on an example whose Output happened to be empty.
 //
 // toOutputDir relocates a relative profile name under -outputdir and
 // leaves an ABSOLUTE path alone — the flag redirects names the test
@@ -29,7 +36,8 @@ extern crate alloc;
 extern crate goish;
 
 use goish::gostring::string;
-use goish::testing::example::InternalExample;
+use goish::testing::example::{InternalExample, RunExamples};
+use goish::testing::run_example::runExample;
 use goish::testing::toOutputDir;
 use goish::time;
 use goish::{fmt, syscall};
@@ -143,11 +151,76 @@ fn main() {
         }
     }
 
+    // 8. runExample CAPTURES what the example printed. Go swaps the
+    //    os.Stdout value; goish has none, so it dup3s fd 1 at a pipe.
+    //    The capture is the whole mechanism: without it every example
+    //    would compare an empty string against its Output comment and
+    //    only empty-output examples would pass.
+    {
+        let e = InternalExample {
+            Name: s("ExampleCaptured"),
+            F: || {
+                fmt::Println!("captured line");
+            },
+            Output: s("captured line\n"),
+            Unordered: false,
+        };
+        if runExample(&e) {
+            fmt::Println!("[ 8] stdout is captured        PASS");
+        } else {
+            fmt::Println!("[ 8] stdout is captured        FAIL");
+            failed += 1;
+        }
+    }
+
+    // 9. …and the capture is real, not a no-op that passes everything:
+    //    an example whose printed output does NOT match its comment
+    //    fails. Check 8 alone would pass for a runExample that never
+    //    captured anything and compared "" to "".
+    {
+        fmt::Println!("    (one more expected FAIL line)");
+        let e = InternalExample {
+            Name: s("ExampleMismatch"),
+            F: || {
+                fmt::Println!("actually printed this");
+            },
+            Output: s("expected something else\n"),
+            Unordered: false,
+        };
+        if !runExample(&e) {
+            fmt::Println!("[ 9] capture is not vacuous   PASS");
+        } else {
+            fmt::Println!("[ 9] capture is not vacuous   FAIL");
+            failed += 1;
+        }
+    }
+
+    // 10. …and stdout is RESTORED afterwards. If fd 1 were left
+    //     pointing at the pipe, nothing below would be visible — so
+    //     seeing this line at all is most of the assertion.
+    {
+        let e = InternalExample {
+            Name: s("ExampleOne"),
+            F: || {
+                fmt::Println!("one");
+            },
+            Output: s("one\n"),
+            Unordered: false,
+        };
+        let ok = RunExamples(&[e]);
+        if ok {
+            fmt::Println!("[10] RunExamples, stdout back  PASS");
+        } else {
+            fmt::Println!("[10] RunExamples, stdout back  FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 7/7");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 7");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

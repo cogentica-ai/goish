@@ -1,14 +1,56 @@
 // go: package testing
 //
-// go: file testing/example.go decls: InternalExample.processRunResult
+// go: file testing/example.go decls: RunExamples, runExamples, InternalExample.processRunResult
 // goishlint:ignore GOISH021 InternalExample — the type is ported; the
 // three funcs beside processRunResult are not.
-// goishlint:ignore GOISH018 RunExamples, runExamples — both call
-// runExample (run_example.go), which redirects os.Stdout through a pipe
-// to capture what the example printed. goish has no os.Stdout value to
-// swap, so the capture has no implementation to sit on.
+// runExample lives in src/testing/run_example.rs, mirroring Go's own
+// split of run_example.go from this file.
 
 use crate::gostring::string;
+
+// go: sdk 1.25.5 testing/example.go:29-51 runExamples
+// goishlint:ignore GOISH020 runExamples — Go's first parameter is the
+// matchString func from the generated main package; goish's matcher
+// takes None and falls back to the same regexp match Go's generated
+// main supplies.
+#[allow(non_snake_case)]
+pub fn runExamples(examples: &[InternalExample]) -> (bool, bool) {
+    let mut ran = false;
+    let mut ok = true;
+
+    let (patterns, skips) = crate::testing::testing::__run_skip_patterns();
+    let m = crate::testing::r#match::newMatcher(
+        None,
+        &patterns,
+        &string::from_static("-test.run"),
+        &skips,
+    );
+
+    for eg in examples.iter() {
+        // Go: `m.fullName(nil, eg.Name)` — a nil parent, i.e. level 0,
+        // so the name is used as-is and only the filter applies.
+        let (_, matched, _) = m.fullName(0, &string::from_static(""), &eg.Name);
+        if !matched {
+            continue;
+        }
+        ran = true;
+        if !crate::testing::run_example::runExample(eg) {
+            ok = false;
+        }
+    }
+    return (ran, ok);
+}
+
+// go: sdk 1.25.5 testing/example.go:24-27 RunExamples
+// goishlint:ignore GOISH020 RunExamples — same dropped matchString
+// parameter as runExamples.
+/// Go: "An internal function but exported because it is cross-package;
+/// part of the implementation of the 'go test' command."
+#[allow(non_snake_case)]
+pub fn RunExamples(examples: &[InternalExample]) -> bool {
+    let (_, ok) = runExamples(examples);
+    return ok;
+}
 
 // go: sdk 1.25.5 testing/example.go:15-20 InternalExample
 /// Go: "InternalExample is an internal type but exported because it is
