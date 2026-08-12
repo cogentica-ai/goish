@@ -57,8 +57,8 @@ use testing::tRunner;
 pub use allocs::AllocsPerRun;
 pub use newcover::Coverage;
 pub use testing::{
-    chattyFlag, fmtDuration, marker, prefix, testBinary, CoverMode, Init, Short, Testing,
-    Verbose, __run_skip_patterns,
+    chattyFlag, fmtDuration, marker, parseCpuList, prefix, testBinary, CoverMode, Init, Short,
+    Testing, Verbose, __run_skip_patterns,
 };
 
 extern crate alloc;

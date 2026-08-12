@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -9,8 +9,12 @@
 // anchored declarations are not in the module root, which GOISH015
 // forbids.
 //
+// goishlint:ignore GOISH020 parseCpuList — Go reads the package-level
+// `*cpuListStr` and writes the package-level `cpuList`; goish takes the
+// string and returns the list, so the helper does not depend on flag
+// registration having happened and can be tested on its own.
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
-// goishlint:ignore GOISH018 after, Attr, before, callerName, callSite, Chdir, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, Context, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newChattyPrinter, newTestState, Output, Parallel, parseCpuList, pcToName, Printf, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, Setenv, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, Updatef, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
+// goishlint:ignore GOISH018 after, Attr, before, callerName, callSite, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newChattyPrinter, newTestState, Output, Parallel, pcToName, Printf, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, Updatef, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
 // goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, chattyPrinter, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errMain, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, matchStringOnly, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelConflict, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testDeps, testingTesting, testlog, testlogFile, testState, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
@@ -631,3 +635,150 @@ pub fn CoverMode() -> string {
     return string::from_static("");
 }
 
+impl T {
+    // go: sdk 1.25.5 testing/testing.go:1428-1445 common.Setenv
+    /// Go: "Setenv calls os.Setenv(key, value) and uses Cleanup to
+    /// restore the environment variable to its original value after the
+    /// test."
+    ///
+    /// The restore is asymmetric and that asymmetry is the whole point:
+    /// if the variable existed it is put back to its previous value; if
+    /// it did not, it is *unset* rather than left as an empty string. A
+    /// test that set `HOME=""` and a test that unset `HOME` are
+    /// different states, and `LookupEnv` can tell them apart.
+    ///
+    /// Deviation: Go also refuses to run in a parallel test ("cannot
+    /// use Setenv in parallel tests"), since the environment is process
+    /// global. goish has no `t.Parallel`, so there is no such state to
+    /// check — when Parallel lands, that guard has to land with it.
+    pub fn Setenv(&self, key: string, value: string) {
+        // Go: prevValue, ok := os.LookupEnv(key)
+        let (prevValue, ok) = crate::os::LookupEnv(key.clone());
+
+        let err = crate::os::Setenv(key.clone(), value);
+        if err != crate::errors::nil {
+            self.Fatalf(
+                crate::fmt::Sprintf!("cannot set environment variable: %v", err.Error()),
+                crate::goslice::slice::new(),
+            );
+        }
+
+        if ok {
+            let k = key.clone();
+            let v = prevValue;
+            self.Cleanup(move || {
+                let _ = crate::os::Setenv(k.clone(), v.clone());
+            });
+        } else {
+            let k = key;
+            self.Cleanup(move || {
+                let _ = crate::os::Unsetenv(k.clone());
+            });
+        }
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1453-1487 common.Chdir
+    /// Go: "Chdir calls os.Chdir(dir) and uses Cleanup to restore the
+    /// current working directory to its original value after the test."
+    ///
+    /// Go: "On POSIX platforms, PWD represents 'an absolute pathname of
+    /// the current working directory.' Since we are changing the
+    /// working directory, we should also set or update PWD to reflect
+    /// that." — so a relative `dir` is resolved through `os.Getwd`
+    /// first, because PWD must be absolute.
+    ///
+    /// Deviations: Go holds the old directory open as a *file
+    /// descriptor* and restores with `oldwd.Chdir()`, which survives
+    /// the directory being renamed underneath it. goish records the
+    /// path from `os.Getwd` instead, so a rename during the test defeats
+    /// the restore. Go's switch on `runtime.GOOS` collapses: goish is
+    /// linux-only, so only the POSIX arm exists.
+    pub fn Chdir(&self, dir: string) {
+        let (oldwd, werr) = crate::os::Getwd();
+        if werr != crate::errors::nil {
+            self.Fatal(werr.Error());
+        }
+        let err = crate::os::Chdir(dir.clone());
+        if err != crate::errors::nil {
+            self.Fatal(err.Error());
+        }
+
+        // Go: if !filepath.IsAbs(dir) { dir, err = os.Getwd() }
+        let ds: &str = dir.as_ref();
+        let abs = if ds.starts_with('/') {
+            dir
+        } else {
+            let (cwd, cerr) = crate::os::Getwd();
+            if cerr != crate::errors::nil {
+                self.Fatal(cerr.Error());
+            }
+            cwd
+        };
+        self.Setenv(string::from_static("PWD"), abs);
+
+        self.Cleanup(move || {
+            // Go panics if the restore fails: "It's not safe to
+            // continue with tests if we can't get back to the original
+            // working directory."
+            let e = crate::os::Chdir(oldwd.clone());
+            if e != crate::errors::nil {
+                panic!("testing.Chdir: cannot restore working directory");
+            }
+        });
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1494-1497 common.Context
+    /// Go: "Context returns a context that is canceled just before
+    /// Cleanup-registered functions are called.
+    ///
+    /// Cleanup functions can wait for any resources that shut down on
+    /// Context.Done before the test or benchmark completes."
+    ///
+    /// Deviation: Go's context is created per test in `tRunner` and
+    /// cancelled just before the cleanup stack runs. goish's `T` does
+    /// not own one yet, so this returns `context.Background()` — never
+    /// cancelled. Anything waiting on `Done()` therefore waits forever
+    /// rather than being released at cleanup time, which is why this is
+    /// called out rather than left to be discovered.
+    pub fn Context(&self) -> alloc::sync::Arc<dyn crate::context::Context> {
+        return crate::context::Background();
+    }
+}
+
+// go: sdk 1.25.5 testing/testing.go:2705-2721 parseCpuList
+/// Go: parse the `-test.cpu` list into the GOMAXPROCS values each test
+/// is run at, defaulting to the current GOMAXPROCS when empty.
+///
+/// Deviation: Go writes the package-level `cpuList` and calls
+/// `os.Exit(1)` on a malformed entry. goish returns the list and lets
+/// the caller decide — exiting the process from a parsing helper is the
+/// kind of thing that makes a library untestable, and `Main` is the
+/// right place for that decision.
+pub fn parseCpuList(cpuListStr: string) -> (crate::goslice::slice<int>, crate::error) {
+    let mut cpuList: alloc::vec::Vec<int> = alloc::vec::Vec::new();
+    let parts = crate::strings::Split(cpuListStr, string::from_static(","));
+    for i in 0..parts.Len() {
+        let val = crate::strings::TrimSpace(parts[i].clone());
+        if val.Len() == 0 {
+            continue;
+        }
+        let (cpu, err) = crate::strconv::Atoi(val.clone());
+        if err != crate::errors::nil || cpu <= 0 {
+            // Go: fmt.Fprintf(os.Stderr, "testing: invalid value %q for
+            //         -test.cpu\n", val); os.Exit(1)
+            return (
+                crate::goslice::slice::new(),
+                crate::errors::New(crate::fmt::Sprintf!(
+                    "testing: invalid value %q for -test.cpu",
+                    val
+                )),
+            );
+        }
+        cpuList.push(cpu);
+    }
+    // Go: if cpuList == nil { cpuList = append(cpuList, runtime.GOMAXPROCS(-1)) }
+    if cpuList.len() == 0 {
+        cpuList.push(crate::runtime::GOMAXPROCS(-1));
+    }
+    return (crate::goslice::slice::__from_vec(cpuList), crate::errors::nil);
+}
