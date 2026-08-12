@@ -181,6 +181,80 @@ pub fn Goexit() -> ! {
     panic!("runtime::Goexit called outside a goroutine");
 }
 
+
+// go: sdk 1.25.5 runtime/mstats.go:55-335 MemStats
+/// Go: "A MemStats records statistics about the memory allocator."
+///
+/// **Partial port.** Go declares 27 fields plus a 61-element size-class
+/// histogram. goish populates the four it can answer honestly and
+/// leaves the rest at zero:
+///
+///   `Mallocs`, `TotalAlloc` — cumulative counters on the allocator's
+///     single funnel (`heap::alloc_masked`). These are the two fields
+///     `testing.B` reads for its allocs/op and B/op columns, which is
+///     what motivated the port.
+///   `Alloc` / `HeapAlloc` — live bytes, from mcentral's live-slot
+///     accounting.
+///   `Sys` — pages the page allocator has handed out.
+///
+/// The GC fields (`NumGC`, `PauseNs`, `GCCPUFraction`, `NextGC`, …)
+/// stay zero and always will: goish has no collector, so there is
+/// nothing to report rather than a number waiting to be filled in.
+/// `Frees` stays zero because goish frees through Drop at scattered
+/// sites rather than one funnel — so `Mallocs - Frees` is NOT the live
+/// object count here, unlike Go. Read `Alloc` for that.
+#[derive(Clone, Copy, Default, Debug)]
+pub struct MemStats {
+    /// Go: "Alloc is bytes of allocated heap objects. This is the same
+    /// as HeapAlloc (see below)."
+    pub Alloc: crate::types::uint64,
+    /// Go: "TotalAlloc is cumulative bytes allocated for heap objects.
+    /// TotalAlloc increases as heap objects are allocated, but unlike
+    /// Alloc and HeapAlloc, it does not decrease when objects are
+    /// freed."
+    pub TotalAlloc: crate::types::uint64,
+    /// Go: "Sys is the total bytes of memory obtained from the OS."
+    pub Sys: crate::types::uint64,
+    /// Go: "Lookups is the number of pointer lookups performed by the
+    /// runtime." Zero: goish does not perform them.
+    pub Lookups: crate::types::uint64,
+    /// Go: "Mallocs is the cumulative count of heap objects allocated."
+    pub Mallocs: crate::types::uint64,
+    /// Go: "Frees is the cumulative count of heap objects freed."
+    /// Always zero here — see the type-level note.
+    pub Frees: crate::types::uint64,
+    /// Go: "HeapAlloc is bytes of allocated heap objects." Same as
+    /// `Alloc`, as in Go.
+    pub HeapAlloc: crate::types::uint64,
+    /// Go: "HeapSys is bytes of heap memory obtained from the OS."
+    pub HeapSys: crate::types::uint64,
+}
+
+// go: sdk 1.25.5 runtime/mstats.go:356-365 ReadMemStats
+/// Go: "ReadMemStats populates m with memory allocator statistics."
+///
+/// Deviation: Go stops the world to get a coherent snapshot. goish
+/// reads relaxed atomics, so a concurrent allocation on another M can
+/// land between two field reads. That is fine for the intended use —
+/// `testing.B` samples before and after a run and subtracts — and a
+/// stop-the-world would need a collector goish does not have.
+pub fn ReadMemStats(m: &mut MemStats) {
+    use core::sync::atomic::Ordering;
+    let mallocs = crate::runtime::heap::MALLOCS.load(Ordering::Relaxed);
+    let total = crate::runtime::heap::TOTAL_ALLOC.load(Ordering::Relaxed);
+    let live = crate::runtime::mcentral::live_bytes() as crate::types::uint64;
+    let sys = crate::runtime::heap::sys_bytes() as crate::types::uint64;
+
+    m.Mallocs = mallocs;
+    m.TotalAlloc = total;
+    m.Alloc = live;
+    m.HeapAlloc = live;
+    m.Sys = sys;
+    m.HeapSys = sys;
+    m.Frees = 0;
+    m.Lookups = 0;
+}
+
 /// `runtime.GOROOT()` (extern.go:285) — directory containing the
 /// Go installation. Goish doesn't ship as a tree (single-binary
 /// rlib), so this returns `""` to mirror Go's "not set" sentinel.

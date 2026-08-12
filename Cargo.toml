@@ -1195,3 +1195,7 @@ path = "examples/testing_chatty_smoke.rs"
 [[example]]
 name = "testing_init_flags_smoke"
 path = "examples/testing_init_flags_smoke.rs"
+
+[[example]]
+name = "runtime_memstats_smoke"
+path = "examples/runtime_memstats_smoke.rs"

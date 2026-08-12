@@ -227,8 +227,38 @@ pub unsafe fn alloc(size: usize, align: usize) -> *mut u8 {
     p
 }
 
+// go: none — goish-only: bytes the page allocator has handed out, for
+// `runtime::MemStats.Sys` / `.HeapSys`. Go's Sys is virtual address
+// space reserved from the OS; goish reports the allocated-page total,
+// which is the part it actually tracks.
+pub fn sys_bytes() -> usize {
+    let g = MHEAP.lock();
+    return match g.as_ref() {
+        Some(p) => p.allocated_pages() * crate::runtime::mheap::consts::PAGE_SIZE,
+        None => 0,
+    };
+}
+
+/// Cumulative allocation counters, feeding `runtime::MemStats`.
+///
+/// Go's `Mallocs` and `TotalAlloc` are monotonic totals over the life of
+/// the process, not live-heap gauges — `testing.B` samples them before
+/// and after a run and subtracts, so only the delta matters and they
+/// must never decrease. Incremented on the one funnel every allocation
+/// passes through, below.
+///
+/// Relaxed ordering: these are statistics. A benchmark reading them
+/// across a park may miss a concurrent allocation from another M by a
+/// few counts, which is the same accuracy Go's own sampling gives.
+pub(crate) static MALLOCS: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(0);
+pub(crate) static TOTAL_ALLOC: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(0);
+
 #[inline]
 unsafe fn alloc_masked(size: usize, align: usize) -> *mut u8 {
+    MALLOCS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    TOTAL_ALLOC.fetch_add(crate::uint64(size), core::sync::atomic::Ordering::Relaxed);
     let layout = Layout::from_size_align_unchecked(size, align);
     if route_to_mheap(layout) {
         return mheap_alloc(layout);

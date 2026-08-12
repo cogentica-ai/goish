@@ -641,6 +641,21 @@ pub fn live_slots() -> usize {
     n
 }
 
+// go: none — goish-only: live heap bytes, for `runtime::MemStats.Alloc`.
+//
+// Sums each span's in-use slot count times its element size, which is
+// the closest thing goish has to Go's `HeapAlloc`. Note this is
+// cached-but-unused slots included: a P holding a partially-consumed
+// span reads as live, matching how `live_slots` already behaves.
+pub fn live_bytes() -> usize {
+    let g = MCENTRAL.lock();
+    let mut n = 0usize;
+    for s in &g.spans[1..=(g.spans_bump as usize)] {
+        n += s.alloc_count.load(Ordering::Acquire) as usize * s.elemsize as usize;
+    }
+    return n;
+}
+
 // `MCentral` lives in `static MCENTRAL` via `SpinLock`. The pool has
 // internal mutability through that lock. Mark it `Send` because the
 // whole struct moves through the lock.
