@@ -42,6 +42,7 @@
 
 pub mod fstest;
 pub mod iotest;
+pub mod r#match;
 
 extern crate alloc;
 
