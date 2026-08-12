@@ -262,15 +262,28 @@ fn serve_tls_conn(srv: Arc<Server>, tls_conn: tls::Conn, handler: Arc<dyn Handle
     let conn = Arc::new(crate::sync::Mutex::new(tls_conn));
     // Drive the handshake up front so a failure closes the conn
     // without reaching the handler.
-    {
+    //
+    // Go stamps `c.remoteAddr` ONCE at conn.serve entry
+    // (server.go:2076) and readRequest copies it onto every request
+    // (:1120). Formatting it per request cost an alloc *and* a lock
+    // acquisition each; hoist both out of the loop, matching the
+    // plaintext serve loop.
+    let remote_addr = {
         let mut c = conn.Lock();
         if !c.Handshake().IsNil() {
             let _ = c.Close();
             return;
         }
-    }
+        c.RemoteAddr().String()
+    };
 
     let max_header_bytes = srv.MaxHeaderBytes;
+    // Recycled bufio backing buffer — the per-conn analogue of Go's
+    // pooled `c.bufr` (newBufioReader, server.go:840), and the same
+    // pattern the plaintext loop uses. The reader borrows the conn so
+    // it is rebuilt per request, but the 4 KiB buffer survives instead
+    // of being allocated and dropped on every keep-alive request.
+    let mut rbuf: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
     loop {
         if srv
             .__state_in_shutdown()
@@ -281,11 +294,15 @@ fn serve_tls_conn(srv: Arc<Server>, tls_conn: tls::Conn, handler: Arc<dyn Handle
         }
 
         // Read one request. The bufio reader borrows the tls::Conn
-        // through the mutex guard for the duration of the parse.
+        // through the mutex guard for the duration of the parse, then
+        // hands its buffer back for the next request to reuse.
         let (mut req, err): (Request, error) = {
             let mut c = conn.Lock();
-            let mut br = bufio::NewReader(&mut *c);
-            ReadRequestWithLimit(&mut br, max_header_bytes)
+            let mut br =
+                bufio::__new_reader_with_buf(&mut *c, core::mem::take(&mut rbuf));
+            let out = ReadRequestWithLimit(&mut br, max_header_bytes);
+            rbuf = br.__into_buf();
+            out
         };
         if !err.IsNil() {
             let mut c = conn.Lock();
@@ -294,10 +311,7 @@ fn serve_tls_conn(srv: Arc<Server>, tls_conn: tls::Conn, handler: Arc<dyn Handle
         }
         // Go conn.serve stamps `c.remoteAddr` at entry and readRequest
         // copies it onto every request (server.go:2076 / :1120).
-        req.RemoteAddr = {
-            let c = conn.Lock();
-            c.RemoteAddr().String()
-        };
+        req.RemoteAddr = remote_addr.clone();
 
         let keep_alive = request_keep_alive_pub(&req) && !srv.__state_in_shutdown();
         let w = tlsResponse::new(conn.clone());

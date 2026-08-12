@@ -2,7 +2,7 @@
 
 **A Go-style standard library and runtime, implemented in `no_std` Rust on top of raw Linux syscalls.**
 
-No `glibc`, no `std`, no Tokio. Goish ships its own `_start`, page allocator, size-class heap, M:N scheduler, channels, `select!`, `sync` primitives, async preemption, and 134 partial-to-complete ports of Go standard-library and `golang.org/x` packages - all in one statically-linked binary.
+No `glibc`, no `std`, no Tokio. Goish ships its own `_start`, page allocator, size-class heap, M:N scheduler, channels, `select!`, `sync` primitives, async preemption, and 151 partial-to-complete ports of Go standard-library and `golang.org/x` packages - all in one statically-linked binary. **`crypto/` is now a complete, function-by-function port: 100% of Go 1.25.5's `crypto/*` declarations, including the full `crypto/tls` client and server handshake.**
 
 ```rust
 use goish::{go, KB};
@@ -39,54 +39,31 @@ Goish is **single-target**: `x86_64-unknown-linux-gnu`. Other targets are delibe
 
 ### Coverage, measured
 
-`scripts/port_coverage.py` counts, for each in-scope Go package, how many
-of its declarations have a same-named counterpart here. Across 179
-packages of the Go 1.25.5 standard library:
+`scripts/port_coverage.py` counts, for each Go package, how many of its
+declarations have a same-named counterpart here. Coverage is not
+verification: an anchor (`// go: sdk 1.25.5 <file>:<lines> <Symbol>`)
+lets goishlint open the Go file and diff signature, arity and struct
+fields against the port; without one, a name match proves only that a
+name matches.
 
-| | |
-|---|--:|
-| functions ported | **3156 / 7938 (39.8%)** |
-| packages with a port | 134 |
-| packages at 100% | 86 |
-| provenance anchors | 2358 |
+#### `crypto/` — complete, at declaration level
 
-Two caveats before reading those numbers. The counter tallies **unique
-names, not declarations**, so Go methods sharing a name across types
-collapse — 16% of crypto/'s real declaration surface is invisible to it,
-and a name counts as ported when any one type implements it. And
-coverage is not verification.
+**`crypto/` is done: 1709/1709 declarations (100%) across all 66
+packages**, counted by receiver-qualified declaration (not collapsed
+names), every one carrying a provenance anchor and checked against Go
+1.25.5 function by function. 26 declarations are explicitly waived out
+of the denominator with in-tree justifications — 24 of them the QUIC
+transport surface (`QUICConn` and the `c.quic` hooks), which is dead
+code without a QUIC stack; each `c.quic != nil` arm in the ported
+handshake code is a documented deviation at its site.
 
-**The gap between the two is lopsided.** An anchor (`// go: sdk 1.25.5 <file>:<lines> <Symbol>`) lets
-goishlint open the Go file and diff signature, arity and struct fields
-against the port; without one, a name match proves only that a name
-matches.
-
-`crypto/` carries **92% of all anchors in the tree** — it is at 82.1%
-(1192/1452) with 65 of its 66 packages complete and machine-checked
-function by function. Everything else is name-level: `net` has 9 anchors
-across 308 ported functions; `sync`, `compress`, `archive` and `text`
-have none. Treat non-crypto ports as working code, not as verified
-ports.
-
-| subtree | ported | anchors |
-|---|--:|--:|
-| `crypto` | 1192/1452 (82.1%) | 2181 |
-| `net` | 308/1794 (17.2%) | 9 |
-| `math` | 307/661 (46.4%) | 5 |
-| `encoding` | 210/1018 (20.6%) | 125 |
-| `compress` | 122/151 (80.8%) | 0 |
-| `os` | 112/366 (30.6%) | 2 |
-
-📊 **[PROGRESS.md](PROGRESS.md)** — the full picture, and what the three
-verification tiers mean.
-
-🗺️ **[ROADMAP.md](ROADMAP.md)** — what is left and in what order.
-`crypto/tls` is the whole remaining crypto gap, and it needs a
-demolition before it needs a port.
-
-📐 **[CONTRIBUTING.md](CONTRIBUTING.md)** — the conventions a port must follow, and the pre-flight checks to run before starting one.
-
-🔒 **[SECURITY.md](SECURITY.md)** — not audited. `crypto/tls` is hand-written rather than ported, and is the weakest surface; read this before trusting goish with anything.
+That includes the piece this README used to disclaim: **`crypto/tls` is
+now ported verbatim** — `makeClientHello` through both
+`clientHandshakeState{,TLS13}.handshake` drivers, the full TLS 1.2/1.3
+server (`processClientHello` → `sendSessionTickets`), Encrypted Client
+Hello on both ends, session resumption, renegotiation policy, and the
+`Dialer` surface. Every method is pinned against ground truth generated
+by running the real
 
 ## What's implemented
 

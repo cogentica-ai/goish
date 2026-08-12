@@ -1,4 +1,4 @@
-// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert, Conn.readFromUntil, Conn.retryReadRecord, Conn.readRecord, Conn.readChangeCipherSpec, Conn.readRecordOrCCS, Conn.closeNotify, Conn.CloseWrite, Conn.readHandshakeBytes, Conn.readHandshake, Conn.unmarshalHandshakeMessage, Conn.writeHandshakeRecord, Conn.handleKeyUpdate, Conn.Handshake, Conn.HandshakeContext, Conn.handshakeContext, Conn.handleRenegotiation, Conn.handlePostHandshakeMessage
+// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert, Conn.readFromUntil, Conn.retryReadRecord, Conn.readRecord, Conn.readChangeCipherSpec, Conn.readRecordOrCCS, Conn.closeNotify, Conn.CloseWrite, Conn.readHandshakeBytes, Conn.readHandshake, Conn.unmarshalHandshakeMessage, Conn.writeHandshakeRecord, Conn.handleKeyUpdate, Conn.Handshake, Conn.HandshakeContext, Conn.handshakeContext, Conn.handleRenegotiation, Conn.handlePostHandshakeMessage, Conn.Write, Conn.Read, Conn.Close
 //
 // crypto/tls — the record layer's cipher state.
 //
@@ -8,7 +8,7 @@
 // its `decrypt`/`encrypt`, `atLeastReader` and the free functions they
 // need — none of which touches a `Conn`.
 //
-// goishlint:ignore GOISH018 handleRenegotiation, HandshakeContext, handshakeContext, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
+// goishlint:ignore GOISH018 handleRenegotiation, HandshakeContext, handshakeContext, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
 // goishlint:ignore GOISH019  — same.
 // goishlint:ignore GOISH021 maxUselessBytes, tlsunsafeekm, outBufPool — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write; outBufPool is a sync.Pool whose only purpose is to avoid one allocation per record, which goish does not model.
 //
@@ -2805,5 +2805,176 @@ impl Conn {
             "tls: received unexpected handshake message of type %s",
             super::handshake_messages::handshakeMessageTypeName(&*msg)
         );
+    }
+}
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/conn.go:1203-1257 Conn.Write
+    /// Go: write application data, driving the handshake first if it
+    /// has not run.
+    ///
+    /// Deviations: Go's `activeCall` atomic interlock (which makes a
+    /// concurrent `Close` break an in-flight `Write`) and `c.out.Lock()`
+    /// are absent — goish methods take `&mut self`, so the borrow
+    /// checker provides the same exclusion.
+    pub fn Write(&mut self, b: slice<byte>) -> (int, error) {
+        // Go: if err := c.Handshake(); err != nil { return 0, err }
+        let err = self.Handshake();
+        if err != errors::nil {
+            return (0, err);
+        }
+
+        // Go: if err := c.out.err; err != nil { return 0, err }
+        if self.out.err != errors::nil {
+            return (0, self.out.err.clone());
+        }
+        // Go: if !c.isHandshakeComplete.Load() { return 0, alertInternalError }
+        if !self.isHandshakeComplete {
+            return (0, super::alert::alertInternalError.into());
+        }
+        // Go: if c.closeNotifySent { return 0, errShutdown }
+        if self.closeNotifySent {
+            return (0, errShutdown.into());
+        }
+
+        // Go: "TLS 1.0 is susceptible to a chosen-plaintext attack when
+        // using block mode ciphers due to predictable IVs. This can be
+        // prevented by splitting each Application Data record into two
+        // records, effectively randomizing the IV."
+        //     var m int
+        //     if len(b) > 1 && c.vers == VersionTLS10 {
+        //         if _, ok := c.out.cipher.(cipher.BlockMode); ok {
+        //             n, err := c.writeRecordLocked(recordTypeApplicationData, b[:1])
+        //             if err != nil { return n, c.out.setErrorLocked(err) }
+        //             m, b = 1, b[1:] } }
+        let mut m: int = 0;
+        let mut b = b;
+        if b.Len() > 1 && self.vers == super::common::VersionTLS10 {
+            if matches!(self.out.cipher, halfConnCipher::CBC(_)) {
+                let raw: &[byte] = &b;
+                let head = slice::__from_vec(raw[..1].to_vec());
+                let (n, err) =
+                    self.writeRecordLocked(super::common::recordTypeApplicationData, head);
+                if err != errors::nil {
+                    let e = self.out.setErrorLocked(err);
+                    return (n, e);
+                }
+                m = 1;
+                let raw: &[byte] = &b;
+                b = slice::__from_vec(raw[1..].to_vec());
+            }
+        }
+
+        // Go: n, err := c.writeRecordLocked(recordTypeApplicationData, b)
+        //     return n + m, c.out.setErrorLocked(err)
+        let (n, err) = self.writeRecordLocked(super::common::recordTypeApplicationData, b);
+        let e = self.out.setErrorLocked(err);
+        return (n + m, e);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1378-1419 Conn.Read
+    /// Go: read application data, driving the handshake first if it has
+    /// not run, and servicing any post-handshake messages that arrive
+    /// interleaved with it.
+    ///
+    /// Deviation: Go's `c.in.Lock()` is absent — `&mut self` gives the
+    /// same exclusion.
+    pub fn Read(&mut self, b: &mut slice<byte>) -> (int, error) {
+        // Go: if err := c.Handshake(); err != nil { return 0, err }
+        let err = self.Handshake();
+        if err != errors::nil {
+            return (0, err);
+        }
+        // Go: "Put this after Handshake, in case people were calling
+        // Read(nil) for the side effect of the Handshake."
+        //     if len(b) == 0 { return 0, nil }
+        if b.Len() == 0 {
+            return (0, errors::nil);
+        }
+
+        // Go: for c.input.Len() == 0 {
+        //         if err := c.readRecord(); err != nil { return 0, err }
+        //         for c.hand.Len() > 0 {
+        //             if err := c.handlePostHandshakeMessage(); err != nil { return 0, err } } }
+        while crate::int(self.input.len()) - self.inputOff == 0 {
+            let err = self.readRecord();
+            if err != errors::nil {
+                return (0, err);
+            }
+            while self.hand.len() > 0 {
+                let err = self.handlePostHandshakeMessage();
+                if err != errors::nil {
+                    return (0, err);
+                }
+            }
+        }
+
+        // Go: n, _ := c.input.Read(b)
+        let off = self.inputOff as usize;
+        let avail = self.input.len() - off;
+        let n = core::cmp::min(b.Len() as usize, avail);
+        {
+            let dst: &mut [byte] = &mut *b;
+            dst[..n].copy_from_slice(&self.input[off..off + n]);
+        }
+        self.inputOff += crate::int(n);
+
+        // Go: "If a close-notify alert is waiting, read it so that we
+        // can return (n, EOF) instead of (n, nil), to signal to the HTTP
+        // response reading goroutine that the connection is now closed.
+        // […] See https://golang.org/cl/76400046 and
+        // https://golang.org/issue/3514"
+        //     if n != 0 && c.input.Len() == 0 && c.rawInput.Len() > 0 &&
+        //         recordType(c.rawInput.Bytes()[0]) == recordTypeAlert {
+        //         if err := c.readRecord(); err != nil { return n, err } }
+        if n != 0
+            && crate::int(self.input.len()) - self.inputOff == 0
+            && self.rawInput.len() > 0
+            && super::common::recordType(self.rawInput[0]) == super::common::recordTypeAlert
+        {
+            let err = self.readRecord();
+            if err != errors::nil {
+                // Go: will be io.EOF on closeNotify
+                return (crate::int(n), err);
+            }
+        }
+
+        // Go: return n, nil
+        return (crate::int(n), errors::nil);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1422-1455 Conn.Close
+    /// Go: send a close_notify alert if the handshake completed, then
+    /// close the underlying connection.
+    ///
+    /// Deviation: Go's `activeCall` interlock — which detects a
+    /// concurrent in-flight `Write` and skips the alert to avoid
+    /// blocking on it — is absent; `&mut self` makes that race
+    /// unrepresentable, so the alert is always attempted.
+    pub fn Close(&mut self) -> error {
+        // Go: var alertErr error
+        //     if c.isHandshakeComplete.Load() {
+        //         if err := c.closeNotify(); err != nil {
+        //             alertErr = fmt.Errorf("tls: failed to send closeNotify alert (but connection was closed anyway): %w", err) } }
+        let mut alertErr = errors::nil;
+        if self.isHandshakeComplete {
+            let err = self.closeNotify();
+            if err != errors::nil {
+                alertErr = crate::fmt::Errorf!(
+                    "tls: failed to send closeNotify alert (but connection was closed anyway): %s",
+                    err.Error()
+                );
+            }
+        }
+
+        // Go: if err := c.conn.Close(); err != nil { return err }
+        //     return alertErr
+        if let Some(conn) = self.conn.as_mut() {
+            let err = conn.Close();
+            if err != errors::nil {
+                return err;
+            }
+        }
+        return alertErr;
     }
 }

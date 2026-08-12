@@ -642,518 +642,130 @@ impl Default for ConnInner {
 
 /// `tls.Conn` — a TLS connection. Wraps an underlying `net::Conn` and
 /// provides record-layer encryption/decryption once the handshake is done.
+/// `tls.Conn` — a TLS connection.
+///
+/// This is a thin owner of the verbatim `conn::Conn` (the
+/// function-by-function port of Go's `crypto/tls`). Every method
+/// delegates; the handshake drivers, record layer, and buffers are the
+/// ported ones.
+///
+/// **No interior locking.** Go guards `Conn` with `handshakeMutex`,
+/// `in`/`out` mutexes and an `activeCall` atomic; goish takes `&mut
+/// self`, so the borrow checker provides that exclusion statically. A
+/// caller that shares one conn across goroutines (as `net/http` does
+/// between the request reader and the `ResponseWriter`) wraps it once,
+/// at that layer — the previous hand-written `Conn` locked internally
+/// as well, so every HTTPS write paid three lock round-trips where one
+/// suffices.
 pub struct Conn {
-    /// Underlying TCP connection, protected by a mutex so Read/Write
-    /// can share it without data races.
-    inner_conn: Arc<Mutex<Box<dyn crate::net::Conn>>>,
-    state: Arc<Mutex<ConnInner>>,
-    config: Config,
-    /// Handshake role — mirrors Go's `Conn.isClient` (conn.go:44).
-    /// Selects which handshake driver runs and which traffic-key
-    /// direction Read/Write use.
-    is_client: bool,
+    /// Boxed: the verbatim `Conn` is ~5.4 KB (record buffers, both
+    /// half-connections, the `Config`). `tls::Conn` is moved by value
+    /// all over the place — out of `Accept`, into `serve_tls_conn`, and
+    /// embedded in `http::Response`'s streaming body — so keeping it
+    /// inline turned every move into a 5.4 KB memcpy and made
+    /// `Response::default()` a 5.4 KB stack frame. One pointer instead;
+    /// a single allocation per connection, against the two `Arc`s the
+    /// previous design made.
+    inner: alloc::boxed::Box<conn::Conn>,
 }
 
-// Send + Sync are sound because every mutable field is behind Arc<Mutex<>>.
+// Send + Sync: the verbatim Conn owns a `Box<dyn net::Conn>` (itself
+// Send + Sync) and plain buffers; exclusion is by `&mut self`.
 unsafe impl Send for Conn {}
 unsafe impl Sync for Conn {}
 
 impl Conn {
-    /// `(*tls.Conn).Handshake()` — drive the TLS handshake.
+    // go: none — goish-only: delegates to the verbatim Conn.Handshake.
+    /// `(*tls.Conn).Handshake()` — run the handshake if it has not run.
     pub fn Handshake(&mut self) -> error {
-        {
-            let st = self.state.Lock();
-            if st.handshake_complete {
-                return errors::nil;
-            }
-        }
-
-        if !self.is_client {
-            return self.server_handshake();
-        }
-
-        // We need to pass the conn to the handshake driver.
-        // Because ConnInner's mutex is separate we can hold a lock on
-        // the conn while running the handshake.
-        let skip_verify = self.config.InsecureSkipVerify;
-        let server_name: &str = self.config.ServerName.as_ref();
-
-        // Build a temporary adapter that can call Read/Write on the inner conn.
-        let (km, err) = {
-            let mut conn_guard = self.inner_conn.Lock();
-            handshake_client::do_client_handshake(
-                conn_guard.as_mut(),
-                server_name,
-                skip_verify,
-            )
-        };
-
-        if !err.IsNil() {
-            return err;
-        }
-
-        let mut st = self.state.Lock();
-        st.handshake_complete = true;
-        st.keys = km;
-        if st.keys.is_tls13 {
-            // TLS 1.3: application data uses separate key material from handshake.
-            // Application sequence numbers start at 0.
-            st.client_seq = 0;
-            st.server_seq = 0;
-        } else {
-            // TLS 1.2: the handshake used seq=0 for both client Finished and
-            // server Finished. The first post-handshake application data records use seq=1.
-            st.client_seq = 1;
-            st.server_seq = 1;
-        }
-        errors::nil
+        return self.inner.Handshake();
     }
 
-    /// `(*tls.Conn).Read(b)` — decrypt and return application data.
+    // go: none — goish-only: delegates to the verbatim Conn.Read.
+    /// `(*tls.Conn).Read(b)` — read application data, driving the
+    /// handshake on first use.
     pub fn Read(&mut self, b: &mut slice<byte>) -> (int, error) {
-        {
-            let st = self.state.Lock();
-            if !st.handshake_complete {
-                drop(st);
-                let err = self.Handshake();
-                if !err.IsNil() {
-                    return (0, err);
-                }
-            }
-        }
-
-        // Drain pending buffer first
-        {
-            let mut st = self.state.Lock();
-            if !st.pending.is_empty() {
-                let buf: &mut [byte] = &mut *b;
-                let n = core::cmp::min(buf.len(), st.pending.len());
-                buf[..n].copy_from_slice(&st.pending[..n]);
-                st.pending.drain(..n);
-                return (n as int, errors::nil); // goishlint:ignore GOISH005
-            }
-        }
-
-        // Read a new record
-        let (rtype, frag_s, err) = {
-            let mut conn_guard = self.inner_conn.Lock();
-            let mut adapter = ConnReaderAdapter(&mut conn_guard);
-            record::read_record(&mut adapter)
-        };
-        let frag = frag_s.__into_vec();
-        if !err.IsNil() {
-            return (0, err);
-        }
-
-        // Handle TLS 1.3: record type 23 (application) wraps encrypted inner content
-        if rtype == record::RECORD_CHANGE_CIPHER_SPEC {
-            // TLS 1.3 compatibility CCS — ignore and retry
-            drop(frag);
-            return Conn::Read(self, b);
-        }
-
-        // Handle unencrypted (plaintext) TLS alerts. In TLS 1.3 alerts are
-        // supposed to be encrypted (RECORD_APPLICATION with inner_type=21),
-        // but some servers send a plaintext close_notify or other alert when
-        // terminating the connection or reporting errors. If we tried to
-        // AEAD-decrypt a 2-byte alert we'd get "fragment too short for AEAD tag".
-        // Treat close_notify (desc=0) as EOF and other alerts as errors.
-        if rtype == record::RECORD_ALERT {
-            let desc = if frag.len() >= 2 { frag[1] } else { 0 };
-            tls_debug!("[tls-debug] plaintext TLS Alert: level=%d desc=%d\n",
-                if frag.is_empty() { 0i64 } else { frag[0] as i64 }, desc as i64);
-            if desc == 0 {
-                return (0, crate::io::EOF.into());
-            }
-            return (0, crate::errors::New("tls: received alert from server"));
-        }
-
-        let is_client = self.is_client;
-        let plaintext = {
-            let mut st = self.state.Lock();
-            // Inbound direction: a client decrypts server-write records,
-            // a server decrypts client-write records. The seq counters
-            // follow the *sender* role (client_seq counts records sealed
-            // with the client-write keys), so both role and counter flip
-            // together.
-            let seq = if is_client {
-                let s = st.server_seq;
-                st.server_seq += 1;
-                s
-            } else {
-                let s = st.client_seq;
-                st.client_seq += 1;
-                s
-            };
-            tls_debug!("[tls-debug] conn.Read: suite=0x%04x is_tls13=%v rtype=%d seq=%d frag_len=%d\n",
-                st.keys.suite as u64, st.keys.is_tls13, rtype as i64, seq, frag.len() as i64);
-            if st.keys.is_tls13 {
-                // TLS 1.3: decrypt inner content
-                use handshake_client_tls13::tls13_decrypt_record_suite;
-                let tks = if is_client {
-                    key_schedule::TrafficKeys {
-                        key: st.keys.tls13_server_key[..tls13_key_len(&st.keys)].to_vec(),
-                        iv: st.keys.tls13_server_iv.to_vec(),
-                    }
-                } else {
-                    key_schedule::TrafficKeys {
-                        key: st.keys.tls13_client_key[..tls13_key_len(&st.keys)].to_vec(),
-                        iv: st.keys.tls13_client_iv.to_vec(),
-                    }
-                };
-                let (inner, inner_type, derr) = tls13_decrypt_record_suite(&tks, seq, &frag, st.keys.suite);
-                if !derr.IsNil() { return (0, derr); }
-                // inner_type is the real content type:
-                // 22 = RECORD_HANDSHAKE (post-handshake, e.g. NewSessionTicket) → skip
-                // 21 = RECORD_ALERT (encrypted alert, e.g. close_notify) → return EOF
-                // 23 = RECORD_APPLICATION → return data
-                tls_debug!("[tls-debug] conn.Read: inner_type=%d inner_len=%d\n",
-                    inner_type as i64, inner.len() as i64);
-                if inner_type == record::RECORD_HANDSHAKE {
-                    let msg_type = if inner.is_empty() { 0u8 } else { inner[0] };
-                    tls_debug!("[tls-debug] conn.Read: post-handshake msg type=%d\n",
-                        msg_type as i64);
-                    if msg_type == 24 {
-                        // KeyUpdate (RFC 8446 §4.6.3): update server application traffic keys.
-                        // KeyUpdate body: type(1) + len(3) + request_update(1) = 5 bytes.
-                        // Derive new server_app_secret via HKDF-Expand-Label(..., "traffic upd", ...).
-                        let suite_id = st.keys.suite;
-                        if let Some(cs) = key_schedule::cipher_suite_tls13(suite_id) {
-                            // Rotate the *inbound* (peer-write) secret:
-                            // server-write keys on a client Conn,
-                            // client-write keys on a server Conn.
-                            let old_secret = if is_client {
-                                st.keys.tls13_server_app_secret.clone()
-                            } else {
-                                st.keys.tls13_client_app_secret.clone()
-                            };
-                            if !old_secret.is_empty() {
-                                let new_secret = key_schedule::next_traffic_secret(cs.hash_fn, &old_secret);
-                                let new_keys = key_schedule::traffic_keys(cs.hash_fn, &new_secret, cs.key_len);
-                                let key_len = new_keys.key.len().min(32);
-                                let iv_len = new_keys.iv.len().min(12);
-                                if is_client {
-                                    st.keys.tls13_server_key = [0u8; 32];
-                                    st.keys.tls13_server_key[..key_len].copy_from_slice(&new_keys.key[..key_len]);
-                                    st.keys.tls13_server_iv = [0u8; 12];
-                                    st.keys.tls13_server_iv[..iv_len].copy_from_slice(&new_keys.iv[..iv_len]);
-                                    st.keys.tls13_server_app_secret = new_secret;
-                                    st.server_seq = 0;
-                                } else {
-                                    st.keys.tls13_client_key = [0u8; 32];
-                                    st.keys.tls13_client_key[..key_len].copy_from_slice(&new_keys.key[..key_len]);
-                                    st.keys.tls13_client_iv = [0u8; 12];
-                                    st.keys.tls13_client_iv[..iv_len].copy_from_slice(&new_keys.iv[..iv_len]);
-                                    st.keys.tls13_client_app_secret = new_secret;
-                                    st.client_seq = 0;
-                                }
-                                tls_debug!("[tls-debug] KeyUpdate: rotated inbound app keys, seq reset to 0\n");
-                            } else {
-                                tls_debug!("[tls-debug] KeyUpdate: inbound app secret is empty, cannot rotate\n");
-                            }
-                        } else {
-                            tls_debug!("[tls-debug] KeyUpdate: unknown suite 0x%04x, skipping key rotation\n",
-                                suite_id as u64);
-                        }
-                        drop(st);
-                        return Conn::Read(self, b);
-                    }
-                    if msg_type == 4 {
-                        // NewSessionTicket (RFC 8446 §4.6.1):
-                        //   struct {
-                        //     uint32 ticket_lifetime;
-                        //     uint32 ticket_age_add;
-                        //     opaque ticket_nonce<0..255>;
-                        //     opaque ticket<1..2^16-1>;
-                        //     Extension extensions<0..2^16-2>;
-                        //   } NewSessionTicket;
-                        // Body starts at inner[4] (after handshake header type+len).
-                        let parsed = parse_new_session_ticket(&inner);
-                        match parsed {
-                            Some(nst) => {
-                                let rms = st.keys.tls13_resumption_master_secret.clone();
-                                let suite_id = st.keys.suite;
-                                let hash_size = st.keys.tls13_hash_size;
-                                drop(st);
-                                if !rms.is_empty() && hash_size > 0 {
-                                    if let Some(cs) = key_schedule::cipher_suite_tls13(suite_id) {
-                                        let psk = key_schedule::ExpandLabel(
-                                            cs.hash_fn, &rms, "resumption",
-                                            &nst.ticket_nonce, hash_size as usize,
-                                        );
-                                        let server_name = self.config.ServerName.clone();
-                                        let state = session::cachedSession {
-                                            ticket: nst.ticket,
-                                            ticket_age_add: nst.ticket_age_add,
-                                            ticket_lifetime: nst.ticket_lifetime,
-                                            received_at_ms: session::now_ms(),
-                                            resumption_psk: psk,
-                                            suite_id,
-                                            hash_size,
-                                        };
-                                        let sn_str: &str = server_name.as_ref();
-                                        tls_debug!("[tls-debug] NewSessionTicket: stored for %s (lifetime=%ds, ticket_len=%d)\n",
-                                            sn_str,
-                                            nst.ticket_lifetime as i64,
-                                            state.ticket.len() as i64);
-                                        session::put(server_name, state);
-                                    } else {
-                                        tls_debug!("[tls-debug] NewSessionTicket: unknown suite 0x%04x, dropping\n",
-                                            suite_id as u64);
-                                    }
-                                } else {
-                                    tls_debug!("[tls-debug] NewSessionTicket: no resumption_master_secret, dropping\n");
-                                }
-                                return Conn::Read(self, b);
-                            }
-                            None => {
-                                tls_debug!("[tls-debug] NewSessionTicket: parse failed (len=%d)\n",
-                                    inner.len() as i64);
-                                drop(st);
-                                return Conn::Read(self, b);
-                            }
-                        }
-                    }
-                    // Other post-handshake messages — skip
-                    drop(st);
-                    return Conn::Read(self, b);
-                }
-                if inner_type == record::RECORD_ALERT {
-                    let level = if inner.len() >= 1 { inner[0] } else { 0 };
-                    let desc = if inner.len() >= 2 { inner[1] } else { 0 };
-                    tls_debug!("[tls-debug] encrypted alert level=%d desc=%d\n",
-                        level as i64, desc as i64);
-                    if desc == 0 {
-                        // close_notify
-                        return (0, crate::io::EOF.into());
-                    }
-                    // Other alert: return error with desc number for diagnosis
-                    return (0, crate::errors::New(
-                        crate::fmt::Sprintf!("tls: received alert level=%d desc=%d", level as i64, desc as i64)
-                    ));
-                }
-                inner
-            } else if st.keys.suite == 0xC02Fu16 || st.keys.suite == 0xC02Bu16 {
-                let (s, derr) = record::decrypt_record_aead(rtype, seq, &st.keys.aead_server, &frag);
-                if !derr.IsNil() { return (0, derr); }
-                s.__into_vec()
-            } else {
-                let (s, derr) = record::decrypt_record(rtype, seq, &st.keys.server, &frag);
-                if !derr.IsNil() { return (0, derr); }
-                s.__into_vec()
-            }
-        };
-
-        let buf: &mut [byte] = &mut *b;
-        let n = core::cmp::min(buf.len(), plaintext.len());
-        buf[..n].copy_from_slice(&plaintext[..n]);
-
-        if plaintext.len() > n {
-            // Save the remainder
-            let mut st = self.state.Lock();
-            st.pending.extend_from_slice(&plaintext[n..]);
-        }
-
-        (n as int, errors::nil) // goishlint:ignore GOISH005
+        return self.inner.Read(b);
     }
 
-    /// `(*tls.Conn).Write(b)` — encrypt and send application data.
-    /// Writes larger than `maxPlaintext` (16384, RFC 8446 §5.1 /
-    /// Go conn.go:64) are fragmented into multiple records — receivers
-    /// MUST reject records with an oversized plaintext.
-    /// Accepts `impl AsRef<[byte]>` so callers can pass `slice<byte>`,
-    /// `&[u8]`, or byte-string literals without conversion ceremony.
+    // go: none — goish-only: delegates to the verbatim Conn.Write.
+    /// `(*tls.Conn).Write(b)` — write application data, driving the
+    /// handshake on first use.
+    ///
+    /// Accepts anything byte-shaped so call sites can pass `&[u8]`,
+    /// `Vec<u8>` or `slice<byte>` unchanged.
     pub fn Write<B: AsRef<[byte]>>(&mut self, b: B) -> (int, error) {
-        let b = b.as_ref();
-        const maxPlaintext: usize = 16384;
-        if b.len() > maxPlaintext {
-            let mut written: int = 0;
-            let mut off = 0usize;
-            while off < b.len() {
-                let end = core::cmp::min(off + maxPlaintext, b.len());
-                let (n, err) = self.Write(&b[off..end]);
-                written += n;
-                if !err.IsNil() {
-                    return (written, err);
-                }
-                off = end;
-            }
-            return (written, errors::nil);
-        }
-        {
-            let st = self.state.Lock();
-            if !st.handshake_complete {
-                drop(st);
-                let err = self.Handshake();
-                if !err.IsNil() {
-                    return (0, err);
-                }
-            }
-        }
-
-        let is_client = self.is_client;
-        let wire = {
-            let mut st = self.state.Lock();
-            // Outbound direction: a client seals with the client-write
-            // keys, a server with the server-write keys.
-            let seq = if is_client {
-                let s = st.client_seq;
-                st.client_seq += 1;
-                s
-            } else {
-                let s = st.server_seq;
-                st.server_seq += 1;
-                s
-            };
-            let wire_s = if st.keys.is_tls13 {
-                use handshake_client_tls13::tls13_encrypt_record_suite;
-                let tks = if is_client {
-                    key_schedule::TrafficKeys {
-                        key: st.keys.tls13_client_key[..tls13_key_len(&st.keys)].to_vec(),
-                        iv: st.keys.tls13_client_iv.to_vec(),
-                    }
-                } else {
-                    key_schedule::TrafficKeys {
-                        key: st.keys.tls13_server_key[..tls13_key_len(&st.keys)].to_vec(),
-                        iv: st.keys.tls13_server_iv.to_vec(),
-                    }
-                };
-                let suite_id = st.keys.suite;
-                let (s, enc_err) = tls13_encrypt_record_suite(&tks, seq, record::RECORD_APPLICATION, b, suite_id);
-                if !enc_err.IsNil() { return (0, enc_err); }
-                s
-            } else if st.keys.suite == 0xC02Fu16 || st.keys.suite == 0xC02Bu16 {
-                let (s, enc_err) = record::encrypt_record_aead(
-                    record::RECORD_APPLICATION, seq, &st.keys.aead_client, b);
-                if !enc_err.IsNil() { return (0, enc_err); }
-                s
-            } else {
-                let (s, enc_err) = record::encrypt_record(
-                    record::RECORD_APPLICATION, seq, &st.keys.client, b);
-                if !enc_err.IsNil() { return (0, enc_err); }
-                s
-            };
-            wire_s
-        };
-
-        let mut conn_guard = self.inner_conn.Lock();
-        conn_guard.as_mut().Write(wire)
+        return self.inner.Write(slice::__from_vec(b.as_ref().to_vec()));
     }
 
-    /// `(*tls.Conn).Close()` — close the underlying connection.
+    // go: none — goish-only: delegates to the verbatim Conn.Close.
+    /// `(*tls.Conn).Close()` — send close_notify (if the handshake
+    /// completed) and close the underlying connection.
     pub fn Close(&mut self) -> error {
-        let mut conn_guard = self.inner_conn.Lock();
-        conn_guard.Close()
+        return self.inner.Close();
     }
 
-    /// `(*tls.Conn).LocalAddr()` (conn.go:130) — local address of the
-    /// underlying connection.
-    pub fn LocalAddr(&self) -> crate::net::TCPAddr {
-        let conn_guard = self.inner_conn.Lock();
-        (**conn_guard).LocalAddr()
-    }
-
-    /// `(*tls.Conn).RemoteAddr()` (conn.go:136) — remote address of
+    // go: none — goish-only: delegates to the verbatim Conn.CloseWrite.
+    /// `(*tls.Conn).CloseWrite()` — send close_notify without closing
     /// the underlying connection.
+    pub fn CloseWrite(&mut self) -> error {
+        return self.inner.CloseWrite();
+    }
+
+    // go: none — goish-only: delegates to the verbatim Conn.ConnectionState.
+    /// `(*tls.Conn).ConnectionState()` — details about the connection.
+    pub fn ConnectionState(&self) -> common::ConnectionState {
+        return self.inner.ConnectionState();
+    }
+
+    // go: none — goish-only: delegates to the verbatim Conn.LocalAddr.
+    /// `(*tls.Conn).LocalAddr()` (conn.go:130).
+    pub fn LocalAddr(&self) -> crate::net::TCPAddr {
+        return self.inner.LocalAddr();
+    }
+
+    // go: none — goish-only: delegates to the verbatim Conn.RemoteAddr.
+    /// `(*tls.Conn).RemoteAddr()` (conn.go:136).
     pub fn RemoteAddr(&self) -> crate::net::TCPAddr {
-        let conn_guard = self.inner_conn.Lock();
-        (**conn_guard).RemoteAddr()
+        return self.inner.RemoteAddr();
     }
 
-    /// `(*tls.Conn).SetDeadline(t)` — forward deadline to the underlying TCP conn.
-    /// This is NOT part of Go's tls.Conn public API (Go uses context cancellation
-    /// instead) but we expose it as a Goish extension so the HTTP Transport can
-    /// apply per-request timeouts to HTTPS connections.
+    // go: none — goish-only: delegates to the verbatim Conn.SetDeadline.
+    /// `(*tls.Conn).SetDeadline(t)` (conn.go:142).
     pub fn SetDeadline(&self, t: crate::time::Time) -> error {
-        let conn_guard = self.inner_conn.Lock();
-        (**conn_guard).SetDeadline(t)
+        return self.inner.SetDeadline(t);
     }
 
-    /// `Conn.serverHandshake` (handshake_server.go:39) — accept-side
-    /// TLS 1.3 handshake. Extracts the certificate chain + private key
-    /// from `Config.Certificates[0]` and drives
-    /// `do_server_handshake_tls13`.
-    fn server_handshake(&mut self) -> error {
-        use handshake_server_tls13::ServerPrivateKey;
+    // go: none — goish-only: delegates to the verbatim Conn.SetReadDeadline.
+    /// `(*tls.Conn).SetReadDeadline(t)` (conn.go:150).
+    pub fn SetReadDeadline(&self, t: crate::time::Time) -> error {
+        return self.inner.SetReadDeadline(t);
+    }
 
-        if self.config.Certificates.Len() == 0 {
-            return errors::New(
-                "tls: no certificates configured (set Config.Certificates via X509KeyPair)",
-            );
-        }
-        let cert = &self.config.Certificates[0 as crate::types::int];
-        let mut chain: Vec<Vec<byte>> = Vec::new();
-        {
-            let mut i: crate::types::int = 0;
-            while i < cert.Certificate.Len() {
-                chain.push(cert.Certificate[i].clone().__into_vec());
-                i += 1;
-            }
-        }
-        let private_key = if let Some(k) = cert
-            .PrivateKey
-            .downcast_ref::<crate::crypto::rsa::PrivateKey>()
-        {
-            ServerPrivateKey::Rsa(k.clone())
-        } else if let Some(k) = cert
-            .PrivateKey
-            .downcast_ref::<crate::crypto::ed25519::PrivateKey>()
-        {
-            ServerPrivateKey::Ed25519(k.clone())
-        } else {
-            return errors::New(
-                "tls: unsupported certificate private key type (RSA and Ed25519 supported)",
-            );
-        };
-        let mut next_protos: Vec<alloc::string::String> = Vec::new();
-        {
-            let mut i: crate::types::int = 0;
-            while i < self.config.NextProtos.Len() {
-                let p: &str = self.config.NextProtos[i].as_ref();
-                next_protos.push(alloc::string::String::from(p));
-                i += 1;
-            }
-        }
-
-        let (km, _info, err) = {
-            let mut conn_guard = self.inner_conn.Lock();
-            handshake_server_tls13::do_server_handshake_tls13(
-                conn_guard.as_mut(),
-                &chain,
-                &private_key,
-                &next_protos,
-            )
-        };
-        if !err.IsNil() {
-            return err;
-        }
-
-        let mut st = self.state.Lock();
-        st.handshake_complete = true;
-        st.keys = km;
-        // TLS 1.3 application records restart both sequence counters.
-        st.client_seq = 0;
-        st.server_seq = 0;
-        errors::nil
+    // go: none — goish-only: delegates to the verbatim Conn.SetWriteDeadline.
+    /// `(*tls.Conn).SetWriteDeadline(t)` (conn.go:158).
+    pub fn SetWriteDeadline(&self, t: crate::time::Time) -> error {
+        return self.inner.SetWriteDeadline(t);
     }
 }
 
 impl crate::io::Reader for Conn {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
-        Conn::Read(self, p)
+        return Conn::Read(self, p);
     }
 }
 
 impl crate::io::Writer for Conn {
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
-        let raw: &[byte] = &p;
-        Conn::Write(self, raw)
+        // Already an owned slice — hand it straight to the record
+        // layer, no boundary copy.
+        return self.inner.Write(p);
     }
 }
 
 impl crate::io::Closer for Conn {
     fn Close(&mut self) -> error {
-        Conn::Close(self)
+        return Conn::Close(self);
     }
 }
 
@@ -1162,12 +774,11 @@ impl crate::io::Closer for Conn {
 /// `tls.Client(conn, cfg)` — wrap `conn` in a TLS client connection.
 /// The handshake is NOT driven yet; call `.Handshake()` or `Read`/`Write`.
 pub fn Client(conn: Box<dyn crate::net::Conn>, cfg: &Config) -> Conn {
-    Conn {
-        inner_conn: Arc::new(Mutex::new(conn)),
-        state: Arc::new(Mutex::new(ConnInner::default())),
-        config: cfg.clone(),
-        is_client: true,
-    }
+    let mut c = conn::Conn::default();
+    c.conn = Some(conn);
+    c.isClient = true;
+    c.config = cfg.clone();
+    return Conn { inner: alloc::boxed::Box::new(c) };
 }
 
 /// `tls.Server(conn, cfg)` (tls.go:47) — returns a new TLS server side
@@ -1176,12 +787,11 @@ pub fn Client(conn: Box<dyn crate::net::Conn>, cfg: &Config) -> Conn {
 /// `Config.Certificates`. The handshake is NOT driven yet; call
 /// `.Handshake()` or the first `Read`/`Write` drives it.
 pub fn Server(conn: Box<dyn crate::net::Conn>, cfg: &Config) -> Conn {
-    Conn {
-        inner_conn: Arc::new(Mutex::new(conn)),
-        state: Arc::new(Mutex::new(ConnInner::default())),
-        config: cfg.clone(),
-        is_client: false,
-    }
+    let mut c = conn::Conn::default();
+    c.conn = Some(conn);
+    c.isClient = false;
+    c.config = cfg.clone();
+    return Conn { inner: alloc::boxed::Box::new(c) };
 }
 
 /// `tls.Dial(network, addr, cfg)` — dial + handshake.
@@ -1233,70 +843,22 @@ where
     (tls_conn, errors::nil)
 }
 
-/// `tls.DialChaCha20Only(network, addr, cfg)` — dial + TLS 1.3 ChaCha20-Poly1305-only handshake.
+/// `tls.DialChaCha20Only(network, addr, cfg)` — dial + handshake.
 ///
-/// Like `Dial` but sends a ClientHello advertising only TLS_CHACHA20_POLY1305_SHA256 (0x1303).
-/// Useful for testing ChaCha20-Poly1305 negotiation.
+/// **Deprecated / historical.** This dialed with a ChaCha20-Poly1305-only
+/// cipher list against goish's earlier hand-written TLS stack. The
+/// ported stack follows Go: TLS 1.3 cipher suites are chosen from
+/// `defaultCipherSuitesTLS13` and are deliberately *not* configurable
+/// through `Config.CipherSuites` (Go documents that field as ignored for
+/// TLS 1.3), so a "ChaCha-only" client is not expressible. It is kept as
+/// an alias for [`Dial`] so existing call sites keep building; prefer
+/// `Dial`.
 pub fn DialChaCha20Only<N, A>(network: N, addr: A, cfg: &Config) -> (Conn, error)
 where
     N: Into<string>,
     A: Into<string>,
 {
-    let network = network.into();
-    let addr = addr.into();
-
-    let (raw_conn, err) = crate::net::Dial(network, addr.clone());
-    if !err.IsNil() {
-        let dead = make_dead_conn(cfg);
-        return (dead, err);
-    }
-
-    let server_name = if cfg.ServerName.Len() > 0 {
-        cfg.ServerName.clone()
-    } else {
-        let addr_str: &str = addr.as_ref();
-        let host = if let Some(pos) = addr_str.rfind(':') {
-            string::from_bytes(addr_str[..pos].as_bytes())
-        } else {
-            addr.clone()
-        };
-        host
-    };
-
-    let mut effective_cfg = cfg.clone();
-    if effective_cfg.ServerName.Len() == 0 {
-        effective_cfg.ServerName = server_name.clone();
-    }
-
-    let skip_verify = effective_cfg.InsecureSkipVerify;
-    let sn: &str = effective_cfg.ServerName.as_ref();
-    let sn_owned = alloc::string::String::from(sn);
-
-    let mut box_conn: alloc::boxed::Box<dyn crate::net::Conn> = alloc::boxed::Box::new(raw_conn);
-    let (km, herr) = handshake_client::do_client_handshake_chacha20_only(
-        box_conn.as_mut(),
-        &sn_owned,
-        skip_verify,
-    );
-    if !herr.IsNil() {
-        let dead = make_dead_conn(&effective_cfg);
-        return (dead, herr);
-    }
-
-    // Manually set the key material on a new Conn
-    let tls_conn = Conn {
-        inner_conn: Arc::new(Mutex::new(box_conn)),
-        state: Arc::new(Mutex::new(ConnInner {
-            handshake_complete: true,
-            client_seq: 0,
-            server_seq: 0,
-            keys: km,
-            pending: alloc::vec::Vec::new(),
-        })),
-        config: effective_cfg,
-        is_client: true,
-    };
-    (tls_conn, errors::nil)
+    return Dial(network, addr, cfg);
 }
 
 // ─── internal helpers ─────────────────────────────────────────────────
@@ -1305,12 +867,11 @@ where
 /// `Dial` failed before connecting. The returned Conn MUST NOT be used
 /// for I/O; callers must check the accompanying error first.
 pub(crate) fn make_dead_conn(cfg: &Config) -> Conn {
-    Conn {
-        inner_conn: Arc::new(Mutex::new(alloc::boxed::Box::new(DeadConn))),
-        state: Arc::new(Mutex::new(ConnInner::default())),
-        config: cfg.clone(),
-        is_client: true,
-    }
+    let mut c = conn::Conn::default();
+    c.conn = Some(alloc::boxed::Box::new(DeadConn));
+    c.isClient = true;
+    c.config = cfg.clone();
+    return Conn { inner: alloc::boxed::Box::new(c) };
 }
 
 /// A no-op connection that returns errors for every operation.

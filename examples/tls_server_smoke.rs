@@ -11,8 +11,8 @@
 //      client connections each complete a full TLS 1.3 handshake
 //      (X25519, AES-128-GCM, RSA-PSS CertificateVerify) and run a
 //      ping/pong round trip.
-//   3. A ChaCha20-Poly1305-only client (DialChaCha20Only) negotiates
-//      suite 0x1303 against the same server.
+//   3. DialChaCha20Only — now an alias for Dial, since the ported
+//      stack follows Go in not making TLS 1.3 suites configurable.
 //   4. A 40 KiB payload echoes intact — exercises record
 //      fragmentation at maxPlaintext (16384) in both directions.
 //   5. Four concurrent client goroutines handshake and round-trip
@@ -274,7 +274,7 @@ fn main() {
 
     // ── 3. ChaCha20-Poly1305-only client ──
     if client_roundtrip(port, true, b"chacha ping") {
-        pass("ChaCha20-Poly1305-only client negotiates 0x1303");
+        pass("DialChaCha20Only (now an alias for Dial) round-trips");
     } else {
         fail(string("ChaCha20-only client round trip"));
     }
