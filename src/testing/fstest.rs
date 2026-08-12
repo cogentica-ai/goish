@@ -1974,3 +1974,47 @@ pub fn TestFS(
     }
     return errors::nil;
 }
+
+impl mapFileInfo {
+    // go: sdk 1.25.5 testing/fstest/mapfs.go:259-261 mapFileInfo.String
+    /// Go: `return fs.FormatFileInfo(i)` — the human-readable rendering
+    /// `%v` on a FileInfo produces.
+    pub fn String(&self) -> string {
+        return crate::io::fs::FormatFileInfo(self);
+    }
+}
+
+impl MapFS {
+    // go: sdk 1.25.5 testing/fstest/mapfs.go:240-242 MapFS.Sub
+    /// Go: `return fs.Sub(noSub{fsys}, dir)`.
+    ///
+    /// Deviation, and the same shape as `Glob` above: Go wraps the
+    /// receiver in `noSub` — a struct embedding MapFS whose own `Sub()`
+    /// has a deliberately wrong signature — purely so `fs.Sub` cannot
+    /// see a `SubFS` and recurse straight back here. goish's `fs::Sub`
+    /// has no `SubFS` fast path, so there is nothing to hide from and
+    /// the wrapper has no work to do.
+    pub fn Sub<S: Into<string>>(
+        self: &Arc<Self>,
+        dir: S,
+    ) -> (Arc<dyn fs::FS + Send + Sync>, error) {
+        let me: Arc<dyn fs::FS + Send + Sync> = self.clone();
+        return crate::io::fs::Sub(me, dir.into());
+    }
+}
+
+// go: none — goish-only: test shim for the unexported
+// `mapFileInfo.String`. Go's is reachable through `%v` on the
+// fs.FileInfo interface; goish's FileInfo trait has no Stringer bridge,
+// so an example cannot get at it any other way. Builds the info the
+// same way `MapFS.Stat` does.
+#[doc(hidden)]
+pub fn __shim_map_file_info_string(fsys: &MapFS, name: impl Into<string>) -> (string, bool) {
+    let name: string = name.into();
+    let (f, ok) = fsys.0.Get(name.clone());
+    if !ok {
+        return (string::from_static(""), false);
+    }
+    let info = mapFileInfo { name: name, f: f };
+    return (info.String(), true);
+}
