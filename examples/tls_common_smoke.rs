@@ -3665,6 +3665,64 @@ fn main() {
         "tls: client sent an unexpected quic_transport_parameters extension",
     );
 
+    // ── Conn.processCertsFromClient ─────────────────────────────────
+    //
+    // Ground truth: goref, feeding Certificate structs directly. Covers
+    // the parse, the RSA key-size cap, VerifyClientCertIfGiven chain
+    // verification (self-signed leaf trusted vs. no pool), and the
+    // required-but-absent and garbage-DER rejections.
+    let pcc = |which: int| -> (string, int, int) {
+        return tls::handshake_server_processCertsFromClient(which);
+    };
+
+    let (pcc0e, pcc0pc, pcc0vc) = pcc(0);
+    eq("a valid cert with no requirement is accepted", pcc0e, "");
+    check_n("the peer certificate is recorded", pcc0pc, 1);
+    check_n("no chain is built without VerifyClientCertIfGiven", pcc0vc, 0);
+
+    let (pcc1e, _, _) = pcc(1);
+    eq(
+        "a required-but-absent client cert is rejected",
+        pcc1e,
+        "tls: client didn't provide a certificate",
+    );
+
+    let (pcc2e, pcc2pc, _) = pcc(2);
+    eq("an absent cert with no requirement is accepted", pcc2e, "");
+    check_n("no peer certificate is recorded when none sent", pcc2pc, 0);
+
+    let (pcc3e, pcc3pc, pcc3vc) = pcc(3);
+    eq("a self-signed leaf trusted via ClientCAs verifies", pcc3e, "");
+    check_n("the verified peer cert is recorded", pcc3pc, 1);
+    check_n("a verified chain is built", pcc3vc, 1);
+
+    let (pcc4e, _, _) = pcc(4);
+    eq(
+        "VerifyClientCertIfGiven with no pool rejects the leaf",
+        pcc4e,
+        "tls: failed to verify certificate: x509: certificate signed by unknown authority",
+    );
+
+    let (pcc5e, _, _) = pcc(5);
+    eq(
+        "garbage DER is rejected at parse",
+        pcc5e,
+        "tls: failed to parse client certificate: x509: malformed tbs certificate",
+    );
+
+    // ── serverHandshakeStateTLS13.readClientCertificate (entry gate) ─
+    //
+    // Ground truth: goref. The not-requested branch runs VerifyConnection
+    // whether or not a cert was requested; the requested read path is
+    // exercised transitively via processCertsFromClient above and the
+    // signature helpers.
+    let rcc = |which: int| -> string {
+        return tls::handshake_server_tls13_readClientCertificate(which);
+    };
+    eq("no client cert requested, no hook, succeeds", rcc(0), "");
+    eq("VerifyConnection returning nil succeeds", rcc(1), "");
+    eq("VerifyConnection returning an error propagates", rcc(2), "vc rejected");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

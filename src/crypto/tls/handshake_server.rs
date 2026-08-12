@@ -1,4 +1,4 @@
-// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo, serverHandshakeState.pickCipherSuite, serverHandshakeState.establishKeys, serverHandshakeState.checkForResumption, serverHandshakeState.readFinished, serverHandshakeState.sendFinished
+// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo, serverHandshakeState.pickCipherSuite, serverHandshakeState.establishKeys, serverHandshakeState.checkForResumption, serverHandshakeState.readFinished, serverHandshakeState.sendFinished, Conn.processCertsFromClient
 //
 // crypto/tls — the server handshake state machine.
 //
@@ -7,7 +7,7 @@
 // handshake. What is here is the one function that does not: the ECDHE
 // support check, which `ClientHelloInfo.SupportsCertificate` also calls.
 //
-// goishlint:ignore GOISH018 serverHandshake, handshake, readClientHello, processClientHello, doResumeHandshake, doFullHandshake, sendSessionTicket, processCertsFromClient — serverHandshakeState and Conn; see the banner. ROADMAP.md.
+// goishlint:ignore GOISH018 serverHandshake, handshake, readClientHello, processClientHello, doResumeHandshake, doFullHandshake, sendSessionTicket — serverHandshakeState and Conn; see the banner. ROADMAP.md.
 
 #![allow(non_snake_case, dead_code)]
 
@@ -690,6 +690,188 @@ impl serverHandshakeState {
 
         // Go: copy(out, finished.verifyData)
         super::handshake_client::copyInto(out, &finished.verifyData);
+        return crate::errors::nil;
+    }
+}
+
+use super::conn::Conn;
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:927-1007 Conn.processCertsFromClient
+    /// Go: parse the client's certificate chain, enforce the RSA key-size
+    /// cap, verify it against ClientCAs when the policy requires it, record
+    /// the peer material, check the leaf key type, and run any
+    /// VerifyPeerCertificate hook.
+    pub(crate) fn processCertsFromClient(
+        &mut self,
+        certificate: super::common::Certificate,
+    ) -> crate::error {
+        use crate::goslice::slice;
+        // Go: certificates := certificate.Certificate
+        //     certs := make([]*x509.Certificate, len(certificates))
+        let certificates = certificate.Certificate.clone();
+        let mut certs: alloc::vec::Vec<crate::crypto::x509::Certificate> =
+            alloc::vec::Vec::new();
+        // Go: for i, asn1Data := range certificates {
+        //         if certs[i], err = x509.ParseCertificate(asn1Data); err != nil {
+        //             c.sendAlert(alertDecodeError)
+        //             return errors.New("tls: failed to parse client certificate: " + err.Error()) }
+        //         if certs[i].PublicKeyAlgorithm == x509.RSA {
+        //             n := certs[i].PublicKey.(*rsa.PublicKey).N.BitLen()
+        //             if max, ok := checkKeySize(n); !ok {
+        //                 c.sendAlert(alertBadCertificate)
+        //                 return fmt.Errorf("tls: client sent certificate containing RSA key larger than %d bits", max) } } }
+        for (_, asn1Data) in crate::range!(certificates.clone()) {
+            let (cert, err) = crate::crypto::x509::ParseCertificate(asn1Data.clone());
+            if err != crate::errors::nil {
+                self.sendAlert(super::alert::alertDecodeError);
+                return crate::fmt::Errorf!(
+                    "tls: failed to parse client certificate: %s",
+                    err.Error()
+                );
+            }
+            if cert.PublicKeyAlgorithm == crate::crypto::x509::RSA {
+                let n = match cert.PublicKey.As::<crate::crypto::rsa::PublicKey>() {
+                    Some(k) => k.N.BitLen(),
+                    None => 0,
+                };
+                let (max, ok) = super::handshake_client::checkKeySize(n);
+                if !ok {
+                    self.sendAlert(super::alert::alertBadCertificate);
+                    return crate::fmt::Errorf!(
+                        "tls: client sent certificate containing RSA key larger than %d bits",
+                        max
+                    );
+                }
+            }
+            certs.push(cert);
+        }
+
+        // Go: if len(certs) == 0 && requiresClientCert(c.config.ClientAuth) {
+        //         if c.vers == VersionTLS13 { c.sendAlert(alertCertificateRequired) }
+        //         else { c.sendAlert(alertHandshakeFailure) }
+        //         return errors.New("tls: client didn't provide a certificate") }
+        if certs.is_empty()
+            && super::common::requiresClientCert(self.config.ClientAuth)
+        {
+            if self.vers == super::common::VersionTLS13 {
+                self.sendAlert(super::alert::alertCertificateRequired);
+            } else {
+                self.sendAlert(super::alert::alertHandshakeFailure);
+            }
+            return crate::errors::New("tls: client didn't provide a certificate");
+        }
+
+        // Go: if c.config.ClientAuth >= VerifyClientCertIfGiven && len(certs) > 0 {
+        if self.config.ClientAuth >= super::common::VerifyClientCertIfGiven
+            && !certs.is_empty()
+        {
+            // Go: opts := x509.VerifyOptions{ Roots: c.config.ClientCAs,
+            //         CurrentTime: c.config.time(), Intermediates: x509.NewCertPool(),
+            //         KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth} }
+            let mut opts = crate::crypto::x509::VerifyOptions::default();
+            opts.Roots = self.config.ClientCAs.clone();
+            opts.CurrentTime = self.config.time();
+            let mut inter = crate::crypto::x509::NewCertPool();
+            // Go: for _, cert := range certs[1:] { opts.Intermediates.AddCert(cert) }
+            for cert in certs[1..].iter() {
+                inter.AddCert(cert.clone());
+            }
+            opts.Intermediates = Some(inter);
+            opts.KeyUsages =
+                slice::__from_vec(alloc::vec![crate::crypto::x509::ExtKeyUsageClientAuth]);
+
+            // Go: chains, err := certs[0].Verify(opts)
+            //     if err != nil { … alert by error type …
+            //         return &CertificateVerificationError{UnverifiedCertificates: certs, Err: err} }
+            let (chains, err) = certs[0].Verify(opts);
+            if err != crate::errors::nil {
+                if crate::errors::As::<crate::crypto::x509::UnknownAuthorityError>(err.clone())
+                    .is_some()
+                {
+                    self.sendAlert(super::alert::alertUnknownCA);
+                } else if let Some(ci) = crate::errors::As::<
+                    crate::crypto::x509::CertificateInvalidError,
+                >(err.clone())
+                {
+                    if ci.Reason == crate::crypto::x509::Expired {
+                        self.sendAlert(super::alert::alertCertificateExpired);
+                    } else {
+                        self.sendAlert(super::alert::alertBadCertificate);
+                    }
+                } else {
+                    self.sendAlert(super::alert::alertBadCertificate);
+                }
+                return super::common::CertificateVerificationError {
+                    UnverifiedCertificates: slice::__from_vec(certs.clone()),
+                    Err: err,
+                }
+                .into();
+            }
+
+            // Go: c.verifiedChains, err = fipsAllowedChains(chains)
+            //     if err != nil { c.sendAlert(alertBadCertificate)
+            //         return &CertificateVerificationError{UnverifiedCertificates: certs, Err: err} }
+            let (allowed, err) = super::common::fipsAllowedChains(chains);
+            if err != crate::errors::nil {
+                self.sendAlert(super::alert::alertBadCertificate);
+                return super::common::CertificateVerificationError {
+                    UnverifiedCertificates: slice::__from_vec(certs.clone()),
+                    Err: err,
+                }
+                .into();
+            }
+            self.verifiedChains = allowed;
+        }
+
+        // Go: c.peerCertificates = certs
+        //     c.ocspResponse = certificate.OCSPStaple
+        //     c.scts = certificate.SignedCertificateTimestamps
+        self.peerCertificates = slice::__from_vec(certs.clone());
+        self.ocspResponse = certificate.OCSPStaple.clone();
+        self.scts = certificate.SignedCertificateTimestamps.clone();
+
+        // Go: if len(certs) > 0 { switch certs[0].PublicKey.(type) {
+        //         case *ecdsa.PublicKey, *rsa.PublicKey, ed25519.PublicKey:
+        //         default: c.sendAlert(alertUnsupportedCertificate)
+        //             return fmt.Errorf("tls: client certificate contains an unsupported public key of type %T", certs[0].PublicKey) } }
+        if !certs.is_empty() {
+            let supported = certs[0]
+                .PublicKey
+                .As::<crate::crypto::ecdsa::PublicKey>()
+                .is_some()
+                || certs[0]
+                    .PublicKey
+                    .As::<crate::crypto::rsa::PublicKey>()
+                    .is_some()
+                || certs[0]
+                    .PublicKey
+                    .As::<crate::crypto::ed25519::PublicKey>()
+                    .is_some();
+            if !supported {
+                self.sendAlert(super::alert::alertUnsupportedCertificate);
+                return crate::fmt::Errorf!(
+                    "tls: client certificate contains an unsupported public key of type %s",
+                    super::handshake_client::publicKeyTypeName(&certs[0])
+                );
+            }
+        }
+
+        // Go: if c.config.VerifyPeerCertificate != nil {
+        //         if err := c.config.VerifyPeerCertificate(certificates, c.verifiedChains); err != nil {
+        //             c.sendAlert(alertBadCertificate); return err } }
+        if let Some(verify) = self.config.VerifyPeerCertificate.clone() {
+            let err = verify(
+                slice::__from_vec(certificates.iter().cloned().collect()),
+                self.verifiedChains.clone(),
+            );
+            if err != crate::errors::nil {
+                self.sendAlert(super::alert::alertBadCertificate);
+                return err;
+            }
+        }
+
+        // Go: return nil
         return crate::errors::nil;
     }
 }

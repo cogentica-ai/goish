@@ -7832,6 +7832,106 @@ pub fn handshake_server_tls13_processClientHello(
     );
 }
 
+// go: none — goish-only: drives Conn.processCertsFromClient with a
+// Certificate struct built directly (no record layer), so the parse,
+// RSA key-size cap, VerifyClientCertIfGiven chain check, and key-type
+// gate are exercised against the same cases as Go.
+// which: 0 valid+norequire, 1 empty+require, 2 empty+norequire,
+// 3 valid+verifyifgiven+pool, 4 valid+verifyifgiven+nopool, 5 garbage.
+#[doc(hidden)]
+pub fn handshake_server_processCertsFromClient(
+    which: crate::types::int,
+) -> (crate::gostring::string, crate::types::int, crate::types::int) {
+    use crate::goslice::slice;
+    let der = crate::encoding::base64::StdEncoding
+        .DecodeString(__testLeafB64)
+        .0;
+    let clientAuth = match which {
+        1 | 5 => common::RequireAnyClientCert,
+        3 | 4 => common::VerifyClientCertIfGiven,
+        _ => common::NoClientCert,
+    };
+    let certDER: slice<slice<crate::types::byte>> = match which {
+        1 | 2 => slice::new(),
+        5 => slice::__from_vec(alloc::vec![slice::__from_vec(alloc::vec![
+            0x30u8, 0x03, 0x02, 0x01, 0x00
+        ])]),
+        _ => slice::__from_vec(alloc::vec![der.clone()]),
+    };
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink);
+    c.__setVers(common::VersionTLS13);
+    let mut cfg = Config::default();
+    cfg.ClientAuth = clientAuth;
+    cfg.Time = Some(alloc::sync::Arc::new(|| crate::time::Unix(1710000000, 0)));
+    if which == 3 {
+        let (leaf, _) = crate::crypto::x509::ParseCertificate(der.clone());
+        let mut pool = crate::crypto::x509::NewCertPool();
+        pool.AddCert(leaf);
+        cfg.ClientCAs = Some(pool);
+    }
+    c.__setConfig(cfg);
+
+    let mut cert = common::Certificate::default();
+    cert.Certificate = certDER;
+    let err = c.processCertsFromClient(cert);
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let (inS, _) = c.__trafficSecrets();
+    let _ = inS;
+    return (text, c.__peerCertificateCount(), c.__verifiedChainCount());
+}
+
+// go: none — goish-only: drives the not-requested branches of
+// serverHandshakeStateTLS13.readClientCertificate — the entry gate and
+// the VerifyConnection hook — which need no record layer.
+// which: 0 no hook, 1 hook returns nil, 2 hook returns an error.
+#[doc(hidden)]
+pub fn handshake_server_tls13_readClientCertificate(
+    which: crate::types::int,
+) -> crate::gostring::string {
+    use crate::goslice::slice;
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink);
+    c.__setVers(common::VersionTLS13);
+    let mut cfg = Config::default();
+    cfg.ClientAuth = common::NoClientCert;
+    match which {
+        1 => {
+            cfg.VerifyConnection =
+                Some(alloc::sync::Arc::new(|_cs| crate::errors::nil));
+        }
+        2 => {
+            cfg.VerifyConnection = Some(alloc::sync::Arc::new(|_cs| {
+                crate::errors::New("vc rejected")
+            }));
+        }
+        _ => {}
+    }
+    c.__setConfig(cfg);
+
+    let mut hs = handshake_server_tls13::serverHandshakeStateTLS13 {
+        c,
+        clientHello: handshake_messages::clientHelloMsg::default(),
+        ..Default::default()
+    };
+    let err = hs.readClientCertificate();
+    if err == crate::errors::nil {
+        return crate::gostring::string::from_static("");
+    }
+    return err.Error();
+}
+
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below
 // sign and verify against, the same fixture x509_parse_smoke uses.
 // Held once: it was pasted by hand into a second shim and silently

@@ -3508,7 +3508,7 @@ fn supportedPublicKey(cert: &crate::crypto::x509::Certificate) -> bool {
 }
 
 // go: none — goish-only: stands in for Go's `%T` on the public key.
-fn publicKeyTypeName(cert: &crate::crypto::x509::Certificate) -> crate::gostring::string {
+pub(crate) fn publicKeyTypeName(cert: &crate::crypto::x509::Certificate) -> crate::gostring::string {
     match cert.PublicKeyAlgorithm {
         crate::crypto::x509::RSA => return crate::gostring::string::from_static("*rsa.PublicKey"),
         crate::crypto::x509::ECDSA => {
