@@ -124,11 +124,53 @@ fn main() {
         }
     }
 
+    // 7. AnyValue widens every input width onto the nine Kinds a
+    //    handler actually sees: signed widths to Int64, unsigned to
+    //    Uint64, both floats to Float64. That widening is the point of
+    //    the function — a handler never sees i8 or f32.
+    {
+        let cases: &[(goish::Any, slog::Kind)] = &[
+            (goish::Any::new(s("x")), slog::KindString),
+            (goish::Any::new(true), slog::KindBool),
+            (goish::Any::new(7i64), slog::KindInt64),
+            (goish::Any::new(3i32), slog::KindInt64),
+            (goish::Any::new(9u8), slog::KindUint64),
+            (goish::Any::new(11u64), slog::KindUint64),
+            (goish::Any::new(1.5f64), slog::KindFloat64),
+            (goish::Any::new(goish::time::Duration(5)), slog::KindDuration),
+        ];
+        let mut ok = true;
+        for (v, want) in cases.iter() {
+            if slog::AnyValue(v.clone()).Kind() != *want {
+                ok = false;
+            }
+        }
+        if ok {
+            fmt::Println!("[ 7] AnyValue widens kinds     PASS");
+        } else {
+            fmt::Println!("[ 7] AnyValue widens kinds     FAIL");
+            failed += 1;
+        }
+    }
+
+    // 8. An already-built Value passes through unwrapped, rather than
+    //    being nested inside another Value.
+    {
+        let inner = slog::GroupValue(attrs(alloc::vec![slog::Int(s("n"), 1)]));
+        let out = slog::AnyValue(goish::Any::new(inner.clone()));
+        if out.Kind() == slog::KindGroup {
+            fmt::Println!("[ 8] Value passes through      PASS");
+        } else {
+            fmt::Println!("[ 8] Value passes through      FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 6/6");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 6");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

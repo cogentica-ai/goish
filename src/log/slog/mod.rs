@@ -33,7 +33,7 @@ mod handler;
 mod value;
 pub use attr::Group;
 pub use handler::{LevelKey, MessageKey, SourceKey, TimeKey};
-pub use value::{countEmptyGroups, isEmptyGroup, GroupValue};
+pub use value::{countEmptyGroups, isEmptyGroup, AnyValue, GroupValue};
 
 extern crate alloc;
 use alloc::sync::Arc;
@@ -111,6 +111,10 @@ impl Value {
     pub fn Kind(&self) -> Kind {
         self.kind
     }
+    // go: none — goish idiom: hands back the `any` payload. Go's
+    // equivalent accessors (`v.str()`, `v.group()`, …) unpack a
+    // pointer-tagged representation per Kind; goish stores the payload
+    // whole, so one accessor covers them all.
     pub fn Any(&self) -> GoishAny {
         self.any.clone()
     }
@@ -127,6 +131,10 @@ pub struct Attr {
 // Typed constructors. The trailing `Value` field carries the
 // payload; `Kind` is set per-constructor to match Go's slog.
 
+// go: none — goish idiom: Go's `slog.String(key, val)` builds the Attr
+// through StringValue; goish sets the Kind inline. Not anchored to
+// attr.go because the shape differs — see src/log/slog/attr.rs for the
+// declarations that are ports.
 pub fn String<S1: Into<string>, S2: Into<string>>(key: S1, val: S2) -> Attr {
     let v = val.into();
     Attr {
@@ -322,6 +330,18 @@ pub fn New(handler: Arc<dyn Handler + Send + Sync>) -> Logger {
 // `slog.Value` holds its group through an unsafe pointer and needs
 // neither. These are the minimum to let a `slice<Attr>` live in the
 // `any` field.
+impl crate::reflect::Reflect for Value {
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(crate::reflect::Kind::Struct, "Value", &[]);
+    }
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return crate::reflect::Value::Struct {
+            ty: <Value as crate::reflect::Reflect>::__reflect_type(),
+            fields: alloc::vec![],
+        };
+    }
+}
+
 impl crate::reflect::Reflect for Attr {
     fn __reflect_type() -> crate::reflect::Type {
         return crate::reflect::Type::__new(crate::reflect::Kind::Struct, "Attr", &[]);
