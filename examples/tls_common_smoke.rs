@@ -4328,6 +4328,59 @@ fn main() {
     check_n("the deferred drop calls Put once", puts, 1);
     check_n("the deferred drop passes nil, discarding the ticket", putNils, 1);
 
+    // ── Conn.handleNewSessionTicket ─────────────────────────────────
+    //
+    // Ground truth: goref with a fixed resumption secret and a
+    // recording session cache — the rejections and the derived
+    // resumption PSK, useBy, ageAdd, and ticket that land in the cache.
+    let hnst = |which: int| -> (string, int, string, u64, u32, string) {
+        let (e, puts, secret, useBy, ageAdd, ticket) =
+            tls::handshake_client_tls13_handleNewSessionTicket(which);
+        return (e, puts, hexOf(secret), useBy, ageAdd, hexOf(ticket));
+    };
+
+    let (e, puts, _, _, _, _) = hnst(0);
+    eq(
+        "a server receiving a ticket rejects it",
+        e,
+        "tls: received new session ticket from a client",
+    );
+    check_n("nothing is cached for a non-client", puts, 0);
+
+    let (e, puts, _, _, _, _) = hnst(1);
+    eq("disabled session tickets are ignored without error", e, "");
+    check_n("nothing is cached when tickets are disabled", puts, 0);
+
+    let (e, puts, _, _, _, _) = hnst(2);
+    eq("a zero-lifetime ticket is ignored without error", e, "");
+    check_n("nothing is cached for a zero lifetime", puts, 0);
+
+    let (e, _, _, _, _, _) = hnst(3);
+    eq(
+        "a lifetime beyond seven days is rejected",
+        e,
+        "tls: received a session ticket with invalid lifetime",
+    );
+
+    let (e, _, _, _, _, _) = hnst(4);
+    eq(
+        "an empty ticket label is rejected",
+        e,
+        "tls: received a session ticket with empty opaque ticket label",
+    );
+
+    let (e, puts, secret, useBy, ageAdd, ticket) = hnst(5);
+    eq("a valid ticket is stored", e, "");
+    check_n("the session is cached once", puts, 1);
+    eq(
+        "the resumption PSK matches Go",
+        secret,
+        "ff5c13a70e4a0597aa6d2bf039d348f6e5faf74b7ef34028a97ad12f1c192f6d",
+    );
+    check("the useBy stamp matches Go", useBy == 1700003600);
+    check("the ageAdd is copied from the ticket", ageAdd == 42);
+    eq("the opaque label is the stored ticket", ticket, "aaabacadaeafb0b1b2b3b4b5b6b7b8b9");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

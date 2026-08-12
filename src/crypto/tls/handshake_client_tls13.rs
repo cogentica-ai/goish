@@ -3043,3 +3043,104 @@ impl clientHandshakeStateTLS13 {
         return crate::errors::nil;
     }
 }
+
+impl super::conn::Conn {
+    // go: sdk 1.25.5 crypto/tls/handshake_client_tls13.go:857-912 Conn.handleNewSessionTicket
+    /// Go: a post-handshake NewSessionTicket from the server — validate
+    /// the lifetime and label, derive the PSK from the resumption
+    /// secret, and store the session in the client session cache.
+    ///
+    /// Deviations: the two `c.quic != nil` arms are absent — goish
+    /// ships no QUIC transport — so `session.EarlyData` is always
+    /// false and the session always goes to the cache.
+    pub(crate) fn handleNewSessionTicket(
+        &mut self,
+        msg: &super::handshake_messages::newSessionTicketMsgTLS13,
+    ) -> crate::error {
+        // Go: if !c.isClient {
+        //         c.sendAlert(alertUnexpectedMessage)
+        //         return errors.New("tls: received new session ticket from a client") }
+        if !self.isClient {
+            self.sendAlert(super::alert::alertUnexpectedMessage);
+            return crate::errors::New("tls: received new session ticket from a client");
+        }
+
+        // Go: if c.config.SessionTicketsDisabled || c.config.ClientSessionCache == nil {
+        //         return nil }
+        if self.config.SessionTicketsDisabled || self.config.ClientSessionCache.is_none() {
+            return crate::errors::nil;
+        }
+
+        // Go: "See RFC 8446, Section 4.6.1."
+        //     if msg.lifetime == 0 { return nil }
+        //     lifetime := time.Duration(msg.lifetime) * time.Second
+        //     if lifetime > maxSessionTicketLifetime {
+        //         c.sendAlert(alertIllegalParameter)
+        //         return errors.New("tls: received a session ticket with invalid lifetime") }
+        if msg.lifetime == 0 {
+            return crate::errors::nil;
+        }
+        let lifetime = crate::time::Second * crate::int64(msg.lifetime);
+        if lifetime > super::common::maxSessionTicketLifetime {
+            self.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New("tls: received a session ticket with invalid lifetime");
+        }
+
+        // Go: if len(msg.label) == 0 {
+        //         c.sendAlert(alertDecodeError)
+        //         return errors.New("tls: received a session ticket with empty opaque ticket label") }
+        if msg.label.Len() == 0 {
+            self.sendAlert(super::alert::alertDecodeError);
+            return crate::errors::New(
+                "tls: received a session ticket with empty opaque ticket label",
+            );
+        }
+
+        // Go: cipherSuite := cipherSuiteTLS13ByID(c.cipherSuite)
+        //     if cipherSuite == nil || c.resumptionSecret == nil {
+        //         return c.sendAlert(alertInternalError) }
+        let cipherSuite = super::cipher_suites::cipherSuiteTLS13ByID(self.cipherSuite);
+        if cipherSuite.is_none() || self.resumptionSecret.Len() == 0 {
+            return self.sendAlert(super::alert::alertInternalError);
+        }
+        let cipherSuite = cipherSuite.unwrap();
+
+        // Go: psk := tls13.ExpandLabel(cipherSuite.hash.New, c.resumptionSecret,
+        //         "resumption", msg.nonce, cipherSuite.hash.Size())
+        let hash = cipherSuite.hash;
+        let psk = crate::crypto::internal::fips140::tls13::ExpandLabel(
+            crate::hash::HashFunc::New(move || hash.New()),
+            self.resumptionSecret.clone(),
+            "resumption",
+            msg.nonce.clone(),
+            cipherSuite.hash.Size(),
+        );
+
+        // Go: session := c.sessionState()
+        //     session.secret = psk
+        //     session.useBy = uint64(c.config.time().Add(lifetime).Unix())
+        //     session.ageAdd = msg.ageAdd
+        //     session.EarlyData = c.quic != nil && … — always false, no QUIC
+        //     session.ticket = msg.label
+        let mut session = self.sessionState();
+        session.secret = psk;
+        session.useBy = crate::uint64(self.config.time().Add(lifetime).Unix());
+        session.ageAdd = msg.ageAdd;
+        session.EarlyData = false;
+        session.ticket = msg.label.clone();
+
+        // Go: cs := &ClientSessionState{session: session}
+        //     if cacheKey := c.clientSessionCacheKey(); cacheKey != "" {
+        //         c.config.ClientSessionCache.Put(cacheKey, cs) }
+        //     return nil
+        let cs = super::ticket::ClientSessionState::__of(session);
+        let cacheKey = self.clientSessionCacheKey();
+        if cacheKey != crate::gostring::string::from_static("") {
+            if let Some(cache) = self.config.ClientSessionCache.as_ref() {
+                cache.Lock().Put(cacheKey, Some(cs));
+            }
+        }
+
+        return crate::errors::nil;
+    }
+}

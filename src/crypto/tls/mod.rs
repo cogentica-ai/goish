@@ -9106,6 +9106,116 @@ pub fn handshake_client_clientHandshake(
     );
 }
 
+// go: none — goish-only: drives Conn.handleNewSessionTicket through the
+// non-client / disabled / zero-lifetime / oversized-lifetime /
+// empty-label rejections and the happy path, recording what lands in
+// the session cache so the derived resumption PSK, useBy, ageAdd, and
+// ticket are byte-comparable against Go.
+// which: 0 not client, 1 disabled, 2 zero lifetime, 3 lifetime too
+// long, 4 empty label, 5 stored.
+#[doc(hidden)]
+pub fn handshake_client_tls13_handleNewSessionTicket(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,                   // err
+    crate::types::int,                         // cache puts
+    crate::goslice::slice<crate::types::byte>, // stored secret (PSK)
+    crate::types::uint64,                      // stored useBy
+    crate::types::uint32,                      // stored ageAdd
+    crate::goslice::slice<crate::types::byte>, // stored ticket
+) {
+    use crate::goslice::slice;
+    let fill = |base: crate::types::byte, n: usize| {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: usize = 0;
+        while i < n {
+            v.push(base.wrapping_add(crate::byte(i)));
+            i += 1;
+        }
+        return slice::__from_vec(v);
+    };
+
+    struct recCache {
+        last: alloc::sync::Arc<
+            crate::sync::Mutex<(Option<ticket::ClientSessionState>, crate::types::int)>,
+        >,
+    }
+    impl common::ClientSessionCache for recCache {
+        // go: none — goish-only: never hands a session back.
+        fn Get(
+            &mut self,
+            _sessionKey: crate::gostring::string,
+        ) -> (Option<ticket::ClientSessionState>, bool) {
+            return (None, false);
+        }
+        // go: none — goish-only: records what the ticket handler stores.
+        fn Put(
+            &mut self,
+            _sessionKey: crate::gostring::string,
+            cs: Option<ticket::ClientSessionState>,
+        ) {
+            let mut last = self.last.Lock();
+            last.1 += 1;
+            last.0 = cs;
+        }
+    }
+
+    let last = alloc::sync::Arc::new(crate::sync::Mutex::new((None, 0)));
+    let mut cfg = Config::default();
+    cfg.ServerName = "example.com".into();
+    cfg.ClientSessionCache = Some(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        alloc::boxed::Box::new(recCache { last: last.clone() }),
+    )));
+    cfg.Time = Some(alloc::sync::Arc::new(|| crate::time::Unix(1700000000, 0)));
+    if which == 1 {
+        cfg.SessionTicketsDisabled = true;
+    }
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink);
+    c.__setIsClient(which != 0);
+    c.__setVers(common::VersionTLS13);
+    c.__setStateFields(
+        cipher_suites::TLS_AES_128_GCM_SHA256,
+        crate::gostring::string::from_static(""),
+        crate::gostring::string::from_static(""),
+        common::CurveID(0),
+    );
+    c.resumptionSecret = fill(0xE0, 32);
+    c.__setConfig(cfg);
+
+    let mut msg = handshake_messages::newSessionTicketMsgTLS13::default();
+    msg.lifetime = 3600;
+    msg.ageAdd = 42;
+    msg.nonce = fill(0x11, 8);
+    msg.label = fill(0xAA, 16);
+    match which {
+        2 => msg.lifetime = 0,
+        3 => msg.lifetime = 7 * 24 * 3600 + 1,
+        4 => msg.label = slice::new(),
+        _ => {}
+    }
+
+    let err = c.handleNewSessionTicket(&msg);
+    let errText = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let guard = last.Lock();
+    let (secret, useBy, ageAdd, ticket) = match guard.0.as_ref() {
+        Some(cs) => {
+            let s = cs.__session().clone().unwrap();
+            (s.secret.clone(), s.useBy, s.ageAdd, s.ticket.clone())
+        }
+        None => (slice::new(), 0, 0, slice::new()),
+    };
+    return (errText, guard.1, secret, useBy, ageAdd, ticket);
+}
+
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below
 // sign and verify against, the same fixture x509_parse_smoke uses.
 // Held once: it was pasted by hand into a second shim and silently
