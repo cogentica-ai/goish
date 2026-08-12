@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: common.FailNow, common.Skip, common.SkipNow, T.Run, tRunner
+// go: file testing/testing.go decls: common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -9,7 +9,8 @@
 // anchored declarations are not in the module root, which GOISH015
 // forbids.
 //
-// goishlint:ignore GOISH018 after, Attr, before, callerName, callSite, Chdir, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, Cleanup, Context, CoordinateFuzzing, CoverMode, Deadline, destination, Error, Errorf, Fail, Failed, Fatal, Fatalf, flushPartial, flushToParent, fmtDuration, frameSkip, Get, Helper, ImportPath, Init, InitRuntimeCoverage, IsBoolFlag, listTests, log, Log, Logf, Main, MainStart, MatchString, Name, newChattyPrinter, newTestState, Output, Parallel, parseCpuList, pcToName, prefix, Printf, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, Set, Setenv, setOutputWriter, SetPanicOnExit0, setRan, Short, shouldFailFast, Skipf, Skipped, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, String, TempDir, Testing, testingSynctestTest, toOutputDir, Updatef, Verbose, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
+// goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
+// goishlint:ignore GOISH018 after, Attr, before, callerName, callSite, Chdir, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, Context, CoordinateFuzzing, CoverMode, Deadline, destination, flushPartial, flushToParent, fmtDuration, frameSkip, Get, ImportPath, Init, InitRuntimeCoverage, IsBoolFlag, listTests, log, Main, MainStart, MatchString, newChattyPrinter, newTestState, Output, Parallel, parseCpuList, pcToName, prefix, Printf, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, Set, Setenv, setOutputWriter, SetPanicOnExit0, setRan, Short, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, String, TempDir, Testing, testingSynctestTest, toOutputDir, Updatef, Verbose, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
 // goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, chattyFlag, chattyPrinter, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errMain, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, marker, match, matchList, matchStringOnly, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelConflict, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testBinary, testDeps, testingTesting, testlog, testlogFile, testState, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
@@ -25,6 +26,158 @@ use super::{indent_for, write_status, StringBytesAccess, TState, T, TEST_STACK};
 use crate::gostring::string;
 
 impl T {
+    // go: sdk 1.25.5 testing/testing.go:938-940 common.Name
+    /// Go: "Name returns the name of the running (sub-) test or
+    /// benchmark. The name will include the name of the test along with
+    /// the names of any nested sub-tests."
+    pub fn Name(&self) -> string {
+        return self.name.clone();
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1189-1192 common.Logf
+    /// Go: "Logf formats its arguments according to the format,
+    /// analogous to Printf, and records the text in the error log. A
+    /// final newline is added if not provided."
+    ///
+    /// Deviation: Go is variadic over `...any`. goish takes the already
+    /// formatted string, which is what `Sprintf!` produces at the call
+    /// site; `Errorf` below keeps the runtime-variadic shape for ports
+    /// that spread a slice.
+    pub fn Logf<M: Into<string>>(&self, msg: M) {
+        let msg: string = msg.into();
+        self.write_line(b"   ", &msg);
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1178-1181 common.Log
+    /// Go: "Log formats its arguments using default formatting,
+    /// analogous to Println, and records the text in the error log."
+    pub fn Log<M: Into<string>>(&self, msg: M) {
+        let msg: string = msg.into();
+        self.Logf(msg);
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1202-1206 common.Errorf
+    /// Go: "Errorf is equivalent to Logf followed by Fail."
+    ///
+    /// `args` is the runtime variadic slice `fmt.Sprintf` would spread.
+    /// Two call shapes work without ceremony:
+    ///   - `t.Errorf("simple msg")` — empty args slice via `Default`
+    ///   - `t.Errorf("got %v want %v", goish::slice!([]Any{a, b}))`
+    pub fn Errorf<M: Into<string>>(
+        &self,
+        format: M,
+        args: crate::goslice::slice<crate::goany::Any>,
+    ) {
+        let format: string = format.into();
+        let msg: string = if args.Len() == 0 {
+            format
+        } else {
+            crate::fmt::Sprintv(format, args)
+        };
+        // Go: c.log(...); c.Fail()
+        self.write_line(b"err", &msg);
+        self.Fail();
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1195-1199 common.Error
+    /// Go: "Error is equivalent to Log followed by Fail."
+    pub fn Error<M: Into<string>>(&self, msg: M) {
+        let msg: string = msg.into();
+        self.Errorf(msg, crate::goslice::slice::new());
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:952-963 common.Fail
+    /// Go: "Fail marks the function as having failed but continues
+    /// execution."
+    ///
+    /// Go's first act is `if c.parent != nil { c.parent.Fail() }`, so a
+    /// failure is visible on every ancestor the moment it happens
+    /// rather than when the subtest returns. goish walks the same chain
+    /// through the parent link on `TState`.
+    ///
+    /// Go also panics on "Fail in goroutine after <name> has
+    /// completed", guarding against a stray goroutine writing to a
+    /// finished test. goish records `done` but does not panic on it:
+    /// the panic would land on whatever goroutine happened to be
+    /// running, and goish's per-G isolation would turn a diagnostic
+    /// into a killed goroutine somewhere unrelated.
+    pub fn Fail(&self) {
+        // Go: if c.parent != nil { c.parent.Fail() }
+        let mut p = self.state.parent.clone();
+        while let Some(state) = p {
+            state.failed.store(true, Ordering::Release);
+            p = state.parent.clone();
+        }
+        self.state.failed.store(true, Ordering::Release);
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1216-1220 common.Fatalf
+    /// Go: "Fatalf is equivalent to Logf followed by FailNow."
+    pub fn Fatalf<M: Into<string>>(
+        &self,
+        format: M,
+        args: crate::goslice::slice<crate::goany::Any>,
+    ) -> ! {
+        let format: string = format.into();
+        self.Errorf(format, args);
+        self.FailNow();
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1209-1213 common.Fatal
+    /// Go: "Fatal is equivalent to Log followed by FailNow."
+    pub fn Fatal<M: Into<string>>(&self, msg: M) -> ! {
+        let msg: string = msg.into();
+        self.Fatalf(msg, crate::goslice::slice::new());
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1230-1234 common.Skipf
+    /// Go: "Skipf is equivalent to Logf followed by SkipNow."
+    pub fn Skipf<M: Into<string>>(&self, msg: M) -> ! {
+        let msg: string = msg.into();
+        self.Skip(msg);
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:966-977 common.Failed
+    /// Go: "Failed reports whether the function has failed."
+    ///
+    /// Go re-checks the race detector's error count here before
+    /// answering; goish has no race detector, so the read is just the
+    /// flag.
+    pub fn Failed(&self) -> bool {
+        return self.state.failed.load(Ordering::Acquire);
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1254-1258 common.Skipped
+    /// Go: "Skipped reports whether the test was skipped."
+    pub fn Skipped(&self) -> bool {
+        return self.state.skipped.load(Ordering::Acquire);
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1263-1282 common.Helper
+    /// Go: "Helper marks the calling function as a test helper
+    /// function. When printing file and line information, that function
+    /// will be skipped."
+    ///
+    /// No-op here. Go records the caller's PC in `helperPCs` and
+    /// consults it from `callSite` when attributing a failure to a
+    /// file:line. goish does not print file:line on failures at all
+    /// (that needs `runtime.CallersFrames`, which is not ported), so
+    /// there is nothing yet for the marker to suppress.
+    pub fn Helper(&self) {}
+
+    // go: sdk 1.25.5 testing/testing.go:1287-1314 common.Cleanup
+    /// Go: "Cleanup registers a function to be called when the test (or
+    /// subtest) and all its subtests complete. Cleanup functions will
+    /// be called in last added, first called order."
+    ///
+    /// Deviation: Go wraps the callback to record the cleanup's name and
+    /// stack for the "cleanup panicked" diagnostic. goish stores the
+    /// callback directly — the diagnostic needs `runtime.Callers`
+    /// frame resolution, which is not ported.
+    pub fn Cleanup<F: FnOnce() + Send + 'static>(&self, f: F) {
+        self.state.cleanups.Lock().push(alloc::boxed::Box::new(f));
+    }
+
     // go: sdk 1.25.5 testing/testing.go:987-1014 common.FailNow
     /// Go: "FailNow marks the function as having failed and stops its
     /// execution by calling runtime.Goexit (which then runs all
@@ -127,9 +280,13 @@ impl T {
         qualified_bytes.extend_from_slice(name.__as_bytes_internal());
         let qualified = string::from_bytes(&qualified_bytes);
 
+        let mut sub_state = TState::new();
+        // Go: `t.common.parent = &t.common` on the subtest, which is
+        // what makes a failing subtest fail its ancestors immediately.
+        sub_state.parent = Some(self.state.clone());
         let sub = T {
             name: qualified.clone(),
-            state: Arc::new(TState::new()),
+            state: Arc::new(sub_state),
             depth: self.depth + 1,
         };
 

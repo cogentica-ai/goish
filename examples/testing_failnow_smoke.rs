@@ -88,6 +88,22 @@ fn TestFatalInSubtestSpares(t: &mut testing::T) {
 }
 
 static SUBTEST_AFTER: AtomicUsize = AtomicUsize::new(0);
+static PARENT_SAW_FAILURE: AtomicUsize = AtomicUsize::new(0);
+
+/// Go's `common.Fail` walks the parent chain, so a subtest's failure is
+/// visible on the parent the instant it happens — not only once Run
+/// returns and propagates it. Assert the parent sees it from inside the
+/// subtest's own lifetime.
+fn TestFailPropagatesUpImmediately(t: &mut testing::T) {
+    RAN.fetch_add(1, Ordering::SeqCst);
+    t.Run(string::from_static("child"), |t| {
+        t.Error(string::from_static("child fails"));
+    });
+    // Back in the parent, still inside the parent's body.
+    if t.Failed() {
+        PARENT_SAW_FAILURE.fetch_add(1, Ordering::SeqCst);
+    }
+}
 
 #[goish::main]
 fn main() {
@@ -99,6 +115,7 @@ fn main() {
         ("TestFatalMidway", TestFatalMidway),
         ("TestRunsAfterFatal", TestRunsAfterFatal),
         ("TestFatalInSubtestSpares", TestFatalInSubtestSpares),
+        ("TestFailPropagatesUpImmediately", TestFailPropagatesUpImmediately),
     ];
     let code = testing::Main(tests);
 
@@ -107,10 +124,10 @@ fn main() {
 
     // 1. Every one of the five tests started. Under the old behaviour
     //    the process died inside the first one.
-    if RAN.load(Ordering::SeqCst) == 5 {
-        fmt::Println!("[ 1] all 5 tests ran            PASS");
+    if RAN.load(Ordering::SeqCst) == 6 {
+        fmt::Println!("[ 1] all 6 tests ran            PASS");
     } else {
-        fmt::Println!("[ 1] all 5 tests ran            FAIL");
+        fmt::Println!("[ 1] all 6 tests ran            FAIL");
         failed += 1;
     }
 
@@ -156,11 +173,19 @@ fn main() {
         failed += 1;
     }
 
+    // 7. A subtest failure reaches the parent immediately.
+    if PARENT_SAW_FAILURE.load(Ordering::SeqCst) == 1 {
+        fmt::Println!("[ 7] Fail propagates to parent  PASS");
+    } else {
+        fmt::Println!("[ 7] Fail propagates to parent  FAIL");
+        failed += 1;
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 6/6");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 6");
+        fmt::Println!("FAIL", failed, "of 7");
         syscall::Exit(1);
     }
 }

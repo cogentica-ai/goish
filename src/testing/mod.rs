@@ -68,28 +68,32 @@ use crate::types::int;
 // ─── T ────────────────────────────────────────────────────────────
 
 pub(crate) struct TState {
-    failed: AtomicBool,
-    skipped: AtomicBool,
+    pub(crate) failed: AtomicBool,
+    pub(crate) skipped: AtomicBool,
     /// Go: `common.finished` — "Test function has completed." Set by
     /// FailNow/SkipNow before the Goexit so the runner can tell a
     /// deliberate exit from a goroutine that died some other way.
-    finished: AtomicBool,
+    pub(crate) finished: AtomicBool,
     /// goish-only: guards `finish_before_goexit` against running twice
     /// (normal return after an explicit FailNow, or a Cleanup callback
     /// that itself calls FailNow).
-    reported: AtomicBool,
+    pub(crate) reported: AtomicBool,
     /// Go: `common.signal chan bool` — "To signal a test is done."
     /// Buffered with capacity 1 and sent exactly once, so the sender
     /// never parks; a test on its way out through Goexit must not be
     /// able to block here.
-    signal: crate::gochan::chan<bool>,
+    pub(crate) signal: crate::gochan::chan<bool>,
     /// Cleanup callbacks, run in LIFO order on test return.
     /// Boxed because the closure types differ across calls.
-    cleanups: Mutex<Vec<Box<dyn FnOnce() + Send + 'static>>>,
+    pub(crate) cleanups: Mutex<Vec<Box<dyn FnOnce() + Send + 'static>>>,
+    /// Go: `common.parent *common`. Go's `Fail` walks up this chain so
+    /// a failure is visible on every ancestor immediately, not only
+    /// once the subtest returns.
+    pub(crate) parent: Option<Arc<TState>>,
 }
 
 impl TState {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         return TState {
             failed: AtomicBool::new(false),
             skipped: AtomicBool::new(false),
@@ -97,6 +101,7 @@ impl TState {
             reported: AtomicBool::new(false),
             signal: crate::gochan::chan::new_buffered(1),
             cleanups: Mutex::new(Vec::new()),
+            parent: None,
         };
     }
 }
@@ -114,11 +119,11 @@ const TEST_STACK: usize = 1024 * 1024;
 /// `Arc<TState>`; the public `T` is a value type that holds the
 /// Arc, mirroring Go's `*testing.T` reference semantics.
 pub struct T {
-    name: string,
-    state: Arc<TState>,
+    pub(crate) name: string,
+    pub(crate) state: Arc<TState>,
     /// Indent depth for sub-test logging output. Top-level = 0,
     /// each `Run` increments by 1.
-    depth: usize,
+    pub(crate) depth: usize,
 }
 
 impl T {
@@ -128,115 +133,6 @@ impl T {
             state: Arc::new(TState::new()),
             depth: 0,
         }
-    }
-
-    /// Test name. Mirrors `t.Name()`.
-    pub fn Name(&self) -> string {
-        self.name.clone()
-    }
-
-    /// `t.Logf(msg)` — print a log message tagged with the test
-    /// name. Mirrors `t.Log` / `t.Logf`. (Goish takes a pre-formatted
-    /// string; users build it via `Sprintf!`.)
-    pub fn Logf<M: Into<string>>(&self, msg: M){
-        let msg: string = msg.into();
-        self.write_line(b"   ", &msg);
-    }
-
-    /// `t.Log(msg)` — alias for Logf since goish doesn't carry the
-    /// printf-vs-print distinction in the API.
-    pub fn Log<M: Into<string>>(&self, msg: M){
-        let msg: string = msg.into();
-        self.Logf(msg);
-    }
-
-    /// `t.Errorf(format, args)` — log + mark test as failed. Test
-    /// continues. Mirrors Go: `func (c *common) Errorf(format string,
-    /// args ...any)` (testing.go) — `args` is the runtime variadic
-    /// slice that `fmt.Sprintf` would normally spread. We accept it
-    /// directly and route through `fmt::Sprintv` (the runtime spread
-    /// helper) for formatting.
-    ///
-    /// Two call shapes work without ceremony:
-    ///   - `t.Errorf("simple msg")` — empty args slice via `Default`
-    ///   - `t.Errorf("got %v want %v", goish::slice!([]Any{a, b}))`
-    pub fn Errorf<M: Into<string>>(
-        &self,
-        format: M,
-        args: crate::goslice::slice<crate::goany::Any>,
-    ) {
-        let format: string = format.into();
-        let msg: string = if args.Len() == 0 {
-            format
-        } else {
-            crate::fmt::Sprintv(format, args)
-        };
-        self.state.failed.store(true, Ordering::Release);
-        self.write_line(b"err", &msg);
-    }
-
-    /// `t.Error(msg)` — alias for Errorf with no format args.
-    pub fn Error<M: Into<string>>(&self, msg: M){
-        let msg: string = msg.into();
-        self.Errorf(msg, crate::goslice::slice::new());
-    }
-
-    /// `t.Fail()` — mark failed without logging.
-    pub fn Fail(&self) {
-        self.state.failed.store(true, Ordering::Release);
-    }
-
-
-    /// `t.Fatalf(format, args)` — log + mark test as failed, then
-    /// abort the current test. Mirrors Go: `func (c *common) Fatalf(
-    /// format string, args ...any)` (testing.go) — `args` is the
-    /// runtime variadic slice that `fmt.Sprintf` would normally
-    /// spread. Same call-shape contract as `Errorf`:
-    ///   - `t.Fatalf("simple msg", goish::slice::new())` — no args
-    ///   - `t.Fatalf("got %v want %v", goish::slice!([]Any{a, b}))`
-    pub fn Fatalf<M: Into<string>>(
-        &self,
-        format: M,
-        args: crate::goslice::slice<crate::goany::Any>,
-    ) -> ! {
-        let format: string = format.into();
-        self.Errorf(format, args);
-        self.FailNow();
-    }
-
-    /// `t.Fatal(msg)` — alias for Fatalf with no format args.
-    pub fn Fatal<M: Into<string>>(&self, msg: M) -> ! {
-        let msg: string = msg.into();
-        self.Fatalf(msg, crate::goslice::slice::new());
-    }
-
-
-    /// `t.Skipf(msg)` — alias for Skip.
-    pub fn Skipf<M: Into<string>>(&self, msg: M) -> ! {
-        let msg: string = msg.into();
-        self.Skip(msg);
-    }
-
-
-    /// `t.Failed()` — has Errorf/Fatalf/Fail been called?
-    pub fn Failed(&self) -> bool {
-        self.state.failed.load(Ordering::Acquire)
-    }
-
-    /// `t.Skipped()` — has Skip*/SkipNow been called?
-    pub fn Skipped(&self) -> bool {
-        self.state.skipped.load(Ordering::Acquire)
-    }
-
-    /// `t.Helper()` — no-op in v1. Go uses this to skip helper
-    /// functions in failure stack traces; goish doesn't track
-    /// file:line in messages yet.
-    pub fn Helper(&self) {}
-
-    /// `t.Cleanup(f)` — register a function to run when the test
-    /// completes. Called in LIFO order. Mirrors `t.Cleanup`.
-    pub fn Cleanup<F: FnOnce() + Send + 'static>(&self, f: F) {
-        self.state.cleanups.Lock().push(Box::new(f));
     }
 
     /// `t.TempDir()` (testing/testing.go:1241) — return a unique
@@ -305,7 +201,7 @@ impl T {
     }
 
 
-    fn drain_cleanups(&self) {
+    pub(crate) fn drain_cleanups(&self) {
         // Drain in LIFO order (Go semantics).
         let mut funcs: Vec<Box<dyn FnOnce() + Send + 'static>> = {
             let mut g = self.state.cleanups.Lock();
@@ -316,7 +212,7 @@ impl T {
         }
     }
 
-    fn write_line(&self, tag: &[u8], msg: &string) {
+    pub(crate) fn write_line(&self, tag: &[u8], msg: &string) {
         let indent = indent_for(self.depth + 1);
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(indent.as_bytes());
