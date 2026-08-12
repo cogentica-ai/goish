@@ -19,7 +19,19 @@ extern crate goish;
 use goish::crypto::tls;
 use goish::fmt;
 use goish::gostring::string;
-use goish::types::int;
+use goish::goslice::slice;
+use goish::types::{byte, int};
+
+fn hexOf(b: slice<byte>) -> string {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let raw: &[byte] = &b;
+    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(raw.len() * 2);
+    for c in raw {
+        out.push(HEX[(c >> 4) as usize]);
+        out.push(HEX[(c & 0x0f) as usize]);
+    }
+    return string::from_bytes(&out);
+}
 
 static mut PASS: int = 0;
 static mut FAIL: int = 0;
@@ -206,6 +218,59 @@ fn main() {
         check("defaultCipherSuites(true) exact order", ok);
     }
     check_n("defaultCipherSuites(false) len", tls::defaults_defaultCipherSuites(false).Len(), 10);
+
+    // ─── prf.go — the TLS 1.0/1.2 PRF. Every vector from goref.sh.
+    //     A PRF that is subtly wrong still produces plausible-looking
+    //     key material, so these are byte-exact or they prove nothing.
+    let secret = slice::__from_vec(alloc::vec![
+        0x01u8, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d
+    ]);
+    let seed = slice::__from_vec(alloc::vec![0xaau8, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
+
+    let (s1, s2) = tls::prf_splitPreMasterSecret(secret.clone());
+    eq("split s1", hexOf(s1), "01020304050607");
+    eq("split s2", hexOf(s2), "0708090a0b0c0d");
+
+    eq(
+        "prf10 keyLen=32",
+        hexOf(tls::prf_prf10(
+            secret.clone(),
+            string::from_static("master secret"),
+            seed.clone(),
+            32,
+        )),
+        "76a4061f1611dc509b3589e81b22d1749d193fde71bb427e8836d3f6f33b004f",
+    );
+    eq(
+        "prf10 keyLen=20",
+        hexOf(tls::prf_prf10(
+            secret.clone(),
+            string::from_static("key expansion"),
+            seed.clone(),
+            20,
+        )),
+        "c98bb12bae75d0beca4949d1b6ab2d399298a2e7",
+    );
+    eq(
+        "prf12-sha256 keyLen=32",
+        hexOf(tls::prf_prf12_sha256(
+            secret.clone(),
+            string::from_static("master secret"),
+            seed.clone(),
+            32,
+        )),
+        "a8ffb9e48646362087796fce9c1fa0d6a0fcb8676b5ac0ae06db2b6fe0d56660",
+    );
+    eq(
+        "prf12-sha256 keyLen=48",
+        hexOf(tls::prf_prf12_sha256(
+            secret,
+            string::from_static("extended master secret"),
+            seed,
+            48,
+        )),
+        "0ba3481482f3efeb8749fcb5212782c73fe538b631b8e560493faba22ee8ee3d0b44762c5937462f421c1630136863b2",
+    );
 
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);

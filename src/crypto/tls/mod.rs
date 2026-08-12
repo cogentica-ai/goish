@@ -16,6 +16,48 @@ pub mod cipher_suites;
 pub mod common;
 pub mod common_string;
 pub mod defaults;
+pub mod prf;
+
+// go: none — goish-only: prf.go's functions are all unexported in Go,
+// where the tests are in-package. See the `defaults_*` shims above.
+#[doc(hidden)]
+pub fn prf_prf10(
+    secret: crate::goslice::slice<crate::types::byte>,
+    label: crate::gostring::string,
+    seed: crate::goslice::slice<crate::types::byte>,
+    keyLen: crate::types::int,
+) -> crate::goslice::slice<crate::types::byte> {
+    return prf::prf10(secret, label, seed, keyLen);
+}
+
+// go: none — goish-only: see `prf_prf10`.
+#[doc(hidden)]
+pub fn prf_prf12_sha256(
+    secret: crate::goslice::slice<crate::types::byte>,
+    label: crate::gostring::string,
+    seed: crate::goslice::slice<crate::types::byte>,
+    keyLen: crate::types::int,
+) -> crate::goslice::slice<crate::types::byte> {
+    return prf::prf12(
+        crate::crypto::sha256::NewHash
+            as fn() -> alloc::boxed::Box<dyn crate::hash::Hash + Send + Sync>,
+        secret,
+        label,
+        seed,
+        keyLen,
+    );
+}
+
+// go: none — goish-only: see `prf_prf10`.
+#[doc(hidden)]
+pub fn prf_splitPreMasterSecret(
+    secret: crate::goslice::slice<crate::types::byte>,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    return prf::splitPreMasterSecret(secret);
+}
 
 // go: none — goish-only: Go's tests live inside package tls and call its
 // unexported functions directly. A goish example is an external crate,
