@@ -8162,6 +8162,131 @@ pub fn handshake_client_loadSession(
     );
 }
 
+// go: none — goish-only: exercises computeAndUpdateOuterECHExtension in
+// its real role — the client-side ECH seal — and closes the round trip
+// with the server-side processECHClientHello: build an ECH config on a
+// fixed X25519 key, have makeClientHello produce the inner+outer+ech
+// state, split and seal the inner under the public name, then have the
+// server open it and recover the inner ServerName. The sealed bytes are
+// nondeterministic (SetupSender's ephemeral), so the recovered SNI and
+// acceptance flag are what is asserted — the Go round trip recovers
+// "secret.example" behind the public "public.example".
+#[doc(hidden)]
+pub fn handshake_client_echRoundTrip() -> (
+    crate::gostring::string, // inner SNI (before split)
+    crate::gostring::string, // outer SNI (after split)
+    crate::gostring::string, // seal error
+    crate::gostring::string, // open error
+    bool,                    // echAccepted
+    crate::gostring::string, // recovered inner SNI
+) {
+    use crate::goslice::slice;
+    use crate::crypto::cryptobyte;
+    let seed: slice<crate::types::byte> = {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: crate::types::byte = 0x20;
+        while i < 0x40 {
+            v.push(i);
+            i += 1;
+        }
+        slice::__from_vec(v)
+    };
+    let (echPriv, _) = crate::crypto::ecdh::X25519().NewPrivateKey(&seed);
+    let pubKey = echPriv.PublicKey().Bytes();
+
+    // marshalECHConfig(123, pubKey, "public.example", 32) with one
+    // KDF_HKDF_SHA256 / AEAD_AES_128_GCM suite.
+    let mut b = cryptobyte::NewBuilder(slice::new());
+    b.AddUint16(common::extensionEncryptedClientHello);
+    let pubKey2 = pubKey.clone();
+    b.AddUint16LengthPrefixed(move |b: &mut cryptobyte::Builder| {
+        b.AddUint8(123);
+        b.AddUint16(crate::crypto::internal::hpke::DHKEM_X25519_HKDF_SHA256);
+        let pk = pubKey2.clone();
+        b.AddUint16LengthPrefixed(move |b: &mut cryptobyte::Builder| {
+            b.AddBytes(&pk);
+        });
+        b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+            b.AddUint16(crate::crypto::internal::hpke::KDF_HKDF_SHA256);
+            b.AddUint16(crate::crypto::internal::hpke::AEAD_AES_128_GCM);
+        });
+        b.AddUint8(32);
+        b.AddUint8LengthPrefixed(|b: &mut cryptobyte::Builder| {
+            b.AddBytes(&slice::__from_vec(b"public.example".to_vec()));
+        });
+        b.AddUint16(0);
+    });
+    let (echConfig, _) = b.Bytes();
+    let mut listB = cryptobyte::NewBuilder(slice::new());
+    let echConfig2 = echConfig.clone();
+    listB.AddUint16LengthPrefixed(move |b: &mut cryptobyte::Builder| {
+        b.AddBytes(&echConfig2);
+    });
+    let (echConfigList, _) = listB.Bytes();
+
+    let mut cfg = Config::default();
+    cfg.ServerName = "secret.example".into();
+    cfg.EncryptedClientHelloConfigList = echConfigList;
+    cfg.MinVersion = common::VersionTLS13;
+    let mut c = conn::Conn::default();
+    c.__setConfig(cfg);
+    let (hello, _ks, ech, err) = c.makeClientHello();
+    if err != crate::errors::nil {
+        return (
+            err.Error(), crate::gostring::string::from_static(""),
+            crate::gostring::string::from_static(""),
+            crate::gostring::string::from_static(""), false,
+            crate::gostring::string::from_static(""),
+        );
+    }
+    let mut hello = hello.unwrap();
+    let mut ech = ech.unwrap();
+    let innerSNI = crate::gostring::string::from_bytes(hello.serverName.as_bytes());
+
+    // Replicate clientHandshake's ECH split.
+    ech.innerHello = Some(hello.clone());
+    hello.serverName = core::str::from_utf8(&ech.config.as_ref().unwrap().PublicName)
+        .map(|s| s.into())
+        .unwrap_or_default();
+    let outerSNI = crate::gostring::string::from_bytes(hello.serverName.as_bytes());
+    let innerHello = ech.innerHello.clone().unwrap();
+    let sealErr = crate::crypto::tls::ech::computeAndUpdateOuterECHExtension(
+        &mut hello, &innerHello, &mut ech, true,
+    );
+    let sealErrText = if sealErr == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        sealErr.Error()
+    };
+
+    // Server opens it. Re-parse so `original` is set for the AAD.
+    let (outerBytes, _) = hello.marshal();
+    let mut parsed = handshake_messages::clientHelloMsg::default();
+    parsed.unmarshal(outerBytes);
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut sc = conn::Conn::default();
+    sc.__setMemConn(sink);
+    sc.__setConfig(Config::default());
+    let mut echKey = common::EncryptedClientHelloKey::default();
+    echKey.Config = echConfig;
+    echKey.PrivateKey = seed;
+    let (echInner, ctx, openErr) =
+        sc.processECHClientHello(&parsed, slice::__from_vec(alloc::vec![echKey]));
+    let _ = ctx;
+    let openErrText = if openErr == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        openErr.Error()
+    };
+    let recoveredSNI = match echInner {
+        Some(h) => crate::gostring::string::from_bytes(h.serverName.as_bytes()),
+        None => crate::gostring::string::from_static(""),
+    };
+    return (innerSNI, outerSNI, sealErrText, openErrText, sc.__echAccepted(), recoveredSNI);
+}
+
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below
 // sign and verify against, the same fixture x509_parse_smoke uses.
 // Held once: it was pasted by hand into a second shim and silently

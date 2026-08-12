@@ -3875,6 +3875,24 @@ fn main() {
     check_n("no PSK identity in TLS 1.2 resumption", ls2ni, 0);
     eq("the TLS 1.2 session ticket is installed", ls2st, "aabbccdd");
 
+    // ── computeAndUpdateOuterECHExtension (client seal → server open) ─
+    //
+    // Ground truth: goref. This drives the full Encrypted Client Hello
+    // round trip — makeClientHello builds the inner+outer+ech state, the
+    // inner is sealed under the public name, and the server's
+    // processECHClientHello opens it. The sealed bytes are
+    // nondeterministic (HPKE ephemeral), so the recovered inner ServerName
+    // is the invariant: "secret.example" travels behind "public.example".
+    // This also closes the decrypt path deferred when processECHClientHello
+    // was ported.
+    let (rtInner, rtOuter, rtSeal, rtOpen, rtAcc, rtRec) = tls::handshake_client_echRoundTrip();
+    eq("the inner hello carries the real server name", rtInner, "secret.example");
+    eq("the outer hello is rewritten to the public name", rtOuter, "public.example");
+    eq("the client seals the inner without error", rtSeal, "");
+    eq("the server opens the ECH extension without error", rtOpen, "");
+    check("the server accepts the ECH", rtAcc);
+    eq("the server recovers the real inner server name", rtRec, "secret.example");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

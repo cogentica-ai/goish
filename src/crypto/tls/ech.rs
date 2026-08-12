@@ -1,4 +1,4 @@
-// go: file crypto/tls/ech.go decls: echConfigErr.Error, parseECHConfig, parseECHConfigList, skipUint8LengthPrefixed, skipUint16LengthPrefixed, validDNSName, ECHRejectionError.Error, parseECHExt, marshalEncryptedClientHelloConfigList, generateOuterECHExt, pickECHCipherSuite, pickECHConfig, extractRawExtensions, encodeInnerClientHello, decodeInnerClientHello, decryptECHPayload, buildRetryConfigList, Conn.processECHClientHello
+// go: file crypto/tls/ech.go decls: echConfigErr.Error, parseECHConfig, parseECHConfigList, skipUint8LengthPrefixed, skipUint16LengthPrefixed, validDNSName, ECHRejectionError.Error, parseECHExt, marshalEncryptedClientHelloConfigList, generateOuterECHExt, pickECHCipherSuite, pickECHConfig, extractRawExtensions, encodeInnerClientHello, decodeInnerClientHello, decryptECHPayload, buildRetryConfigList, computeAndUpdateOuterECHExtension, Conn.processECHClientHello
 //
 // crypto/tls — Encrypted Client Hello (draft-ietf-tls-esni), config
 // parsing.
@@ -10,7 +10,7 @@
 // state machine. goish ships no ECH support, so nothing here is wired
 // into a handshake; it is the parser Go's own tests drive directly.
 //
-// goishlint:ignore GOISH018 computeAndUpdateOuterECHExtension, decryptECHExtension, encodeOuterExtensions, init, sendECHRetryConfigs — the ClientHello-dependent half; see the banner. ROADMAP.md.
+// goishlint:ignore GOISH018 decryptECHExtension, encodeOuterExtensions, init, sendECHRetryConfigs — the ClientHello-dependent half; see the banner. ROADMAP.md.
 // goishlint:ignore GOISH019 echExtension, echConfig, echCipher, echConfigErr, echContext, echServerContext, echClientContext — the parser's shapes are here; the handshake-side ones are not.
 // goishlint:ignore GOISH021 echAcceptConfirmationLabel, echClientContext, echContext, echHRRAcceptConfirmationLabel, echServerContext, errIllegalECHExt, errMalformedECHConfigList, sortedSupportedAEADs — same.
 
@@ -530,6 +530,85 @@ pub(crate) fn generateOuterECHExt(
         b.AddBytes(&payload);
     });
     return b.Bytes();
+}
+
+// go: sdk 1.25.5 crypto/tls/ech.go:438-469 computeAndUpdateOuterECHExtension
+/// Go: encode the inner ClientHello, place a zero-filled ECH extension of
+/// the right length on the outer hello so its marshalled form is a stable
+/// AAD, HPKE-seal the inner against that AAD, and write the real
+/// ciphertext back into the outer's ECH extension.
+pub(crate) fn computeAndUpdateOuterECHExtension(
+    outer: &mut clientHelloMsg,
+    inner: &clientHelloMsg,
+    ech: &mut super::handshake_client::echClientContext,
+    useKey: bool,
+) -> crate::error {
+    // Go: var encapKey []byte
+    //     if useKey { encapKey = ech.encapsulatedKey }
+    let encapKey = if useKey {
+        ech.encapsulatedKey.clone()
+    } else {
+        slice::new()
+    };
+    // Go: encodedInner, err := encodeInnerClientHello(inner, int(ech.config.MaxNameLength))
+    //     if err != nil { return err }
+    let (encodedInner, err) = encodeInnerClientHello(
+        inner,
+        crate::int(ech.config.as_ref().unwrap().MaxNameLength),
+    );
+    if err != crate::errors::nil {
+        return err;
+    }
+    // Go: "NOTE: the tag lengths for all of the supported AEADs are the
+    //      same (16 bytes), so we have hardcoded it here."
+    //     encryptedLen := len(encodedInner) + 16
+    //     outer.encryptedClientHello, err = generateOuterECHExt(ech.config.ConfigID, ech.kdfID, ech.aeadID, encapKey, make([]byte, encryptedLen))
+    //     if err != nil { return err }
+    let encryptedLen = encodedInner.Len() + 16;
+    let (ext, err) = generateOuterECHExt(
+        ech.config.as_ref().unwrap().ConfigID,
+        ech.kdfID,
+        ech.aeadID,
+        encapKey.clone(),
+        slice::__from_vec(alloc::vec![0u8; encryptedLen as usize]),
+    );
+    if err != crate::errors::nil {
+        return err;
+    }
+    outer.encryptedClientHello = ext.__into_vec();
+    // Go: serializedOuter, err := outer.marshal()
+    //     if err != nil { return err }
+    //     serializedOuter = serializedOuter[4:] // strip the four byte prefix
+    let (serializedOuter, err) = outer.marshal();
+    if err != crate::errors::nil {
+        return err;
+    }
+    let serializedOuter = serializedOuter.slice(4, serializedOuter.Len());
+    // Go: encryptedInner, err := ech.hpkeContext.Seal(serializedOuter, encodedInner)
+    //     if err != nil { return err }
+    let (encryptedInner, err) = ech
+        .hpkeContext
+        .as_mut()
+        .unwrap()
+        .Seal(&serializedOuter, &encodedInner);
+    if err != crate::errors::nil {
+        return err;
+    }
+    // Go: outer.encryptedClientHello, err = generateOuterECHExt(ech.config.ConfigID, ech.kdfID, ech.aeadID, encapKey, encryptedInner)
+    //     if err != nil { return err }
+    //     return nil
+    let (ext, err) = generateOuterECHExt(
+        ech.config.as_ref().unwrap().ConfigID,
+        ech.kdfID,
+        ech.aeadID,
+        encapKey,
+        encryptedInner,
+    );
+    if err != crate::errors::nil {
+        return err;
+    }
+    outer.encryptedClientHello = ext.__into_vec();
+    return crate::errors::nil;
 }
 
 // go: sdk 1.25.5 crypto/tls/ech.go:204-218 pickECHCipherSuite
