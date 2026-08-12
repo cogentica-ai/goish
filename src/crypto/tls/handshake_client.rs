@@ -1,5 +1,9 @@
 // crypto/tls/handshake_client.rs — TLS 1.2 client handshake.
 //
+// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, pickTLSVersion, handshake, pickCipherSuite, doFullHandshake, establishKeys, serverResumedSession, processServerHello, readFinished, readSessionTicket, saveSessionTicket, sendFinished, verifyServerCertificate, certificateRequestInfoFromMsg, getClientCertificate, clientSessionCacheKey, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH019 clientHandshakeState, echClientContext — same.
+// goishlint:ignore GOISH021 clientHandshakeState, echClientContext, tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
+//
 // Implements the CLIENT side of a TLS 1.2 handshake for:
 //   * TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 (0xC02F)  ← preferred
 //   * TLS_RSA_WITH_AES_128_CBC_SHA (0x002F)             ← fallback
@@ -2515,4 +2519,99 @@ pub fn do_client_handshake_chacha20_only(
     km.tls13_resumption_master_secret = tls13_keys.resumption_master_secret.clone();
     km.tls13_hash_size = tls13_keys.hash_size;
     (km, errors::nil)
+}
+
+
+// ─── crypto/tls/handshake_client.go, ported verbatim ──────────────────
+//
+// The three free functions of handshake_client.go. Everything above this
+// divider is goish-only code that drives the live TLS 1.2 client.
+
+// go: sdk 1.25.5 crypto/tls/handshake_client.go:1097-1104 checkKeySize
+///
+/// Deviation: Go consults the `tlsmaxrsasize` GODEBUG first;
+/// `internal/godebug` is not ported, so an unset variable takes the
+/// default branch — which is exactly what Go does when it is unset.
+pub(crate) fn checkKeySize(n: crate::types::int) -> (crate::types::int, bool) {
+    // Go: if v := tlsmaxrsasize.Value(); v != "" { … }
+    //     return defaultMaxRSAKeySize, n <= defaultMaxRSAKeySize
+    return (defaultMaxRSAKeySize, n <= defaultMaxRSAKeySize);
+}
+
+// Go: handshake_client.go:1092-1094
+//   const defaultMaxRSAKeySize = 8192
+/// Go: "defaultMaxRSAKeySize is the maximum RSA key size in bits that we
+/// are willing to verify the signatures of during a TLS handshake."
+pub(crate) const defaultMaxRSAKeySize: crate::types::int = 8192;
+
+// go: sdk 1.25.5 crypto/tls/handshake_client.go:1155-1174 hostnameInSNI
+/// Go: "hostnameInSNI converts name into an appropriate hostname for SNI.
+/// Literal IP addresses and absolute FQDNs are not permitted as SNI
+/// values. See RFC 6066, Section 3."
+///
+/// **Known gap, not a port deviation:** goish's `net::IP` is four bytes
+/// and `net::ParseIP` only parses IPv4, so an IPv6 literal — bracketed,
+/// zoned, or bare — is not recognised as an address and is returned as
+/// a hostname. Go returns "" for all three. The bracket-stripping and
+/// zone-stripping above are ported and do run; it is the final
+/// `ParseIP` test that cannot see the result. This closes when
+/// `net::ParseIP` grows IPv6.
+pub(crate) fn hostnameInSNI(name: crate::gostring::string) -> crate::gostring::string {
+    // Go: host := name
+    //     if len(host) > 0 && host[0] == '[' && host[len(host)-1] == ']' {
+    //         host = host[1 : len(host)-1] }
+    let mut name = name;
+    let mut host = name.clone();
+    let hb = host.as_bytes();
+    if hb.len() > 0 && hb[0] == b'[' && hb[hb.len() - 1] == b']' {
+        host = host.slice(1, host.Len() - 1);
+    }
+    // Go: if i := strings.LastIndex(host, "%"); i > 0 { host = host[:i] }
+    let i = crate::strings::LastIndex(host.clone(), "%");
+    if i > 0 {
+        host = host.slice(0, i);
+    }
+    // Go: if net.ParseIP(host) != nil { return "" }
+    if !crate::net::ParseIP(host).IsNil() {
+        return crate::gostring::string::from_static("");
+    }
+    // Go: for len(name) > 0 && name[len(name)-1] == '.' { name = name[:len(name)-1] }
+    //     return name
+    while name.Len() > 0 && name.as_bytes()[name.Len() as usize - 1] == b'.' {
+        name = name.slice(0, name.Len() - 1);
+    }
+    return name;
+}
+
+// go: sdk 1.25.5 crypto/tls/handshake_client.go:1069-1086 checkALPN
+/// Validate the server's ALPN choice against what the client offered.
+pub(crate) fn checkALPN(
+    clientProtos: crate::goslice::slice<crate::gostring::string>,
+    serverProto: crate::gostring::string,
+    quic: bool,
+) -> crate::error {
+    // Go: if serverProto == "" {
+    //         if quic && len(clientProtos) > 0 {
+    //             // RFC 9001, Section 8.1
+    //             return errors.New("tls: server did not select an ALPN protocol") }
+    //         return nil }
+    if serverProto == crate::gostring::string::from_static("") {
+        if quic && clientProtos.Len() > 0 {
+            return crate::errors::New("tls: server did not select an ALPN protocol");
+        }
+        return crate::errors::nil;
+    }
+    // Go: if len(clientProtos) == 0 {
+    //         return errors.New("tls: server advertised unrequested ALPN extension") }
+    if clientProtos.Len() == 0 {
+        return crate::errors::New("tls: server advertised unrequested ALPN extension");
+    }
+    // Go: for _, proto := range clientProtos { if proto == serverProto { return nil } }
+    //     return errors.New("tls: server selected unadvertised ALPN protocol")
+    for (_, proto) in crate::range!(clientProtos) {
+        if *proto == serverProto {
+            return crate::errors::nil;
+        }
+    }
+    return crate::errors::New("tls: server selected unadvertised ALPN protocol");
 }

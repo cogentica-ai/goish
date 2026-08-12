@@ -4490,3 +4490,48 @@ pub fn tls_dialerNetDialer() -> (crate::types::int64, crate::types::int64) {
     d2.NetDialer = Some(nd);
     return (d.netDialer().Timeout.0, d2.netDialer().Timeout.0);
 }
+
+// go: none — goish-only: handshake_client.go's and handshake_server.go's
+// free functions are unexported in Go, where the tests are in-package.
+#[doc(hidden)]
+pub fn handshake_client_hostnameInSNI(
+    name: crate::gostring::string,
+) -> crate::gostring::string {
+    return handshake_client::hostnameInSNI(name);
+}
+
+// go: none — goish-only: see `handshake_client_hostnameInSNI`.
+#[doc(hidden)]
+pub fn handshake_client_checkKeySize(
+    n: crate::types::int,
+) -> (crate::types::int, bool) {
+    return handshake_client::checkKeySize(n);
+}
+
+// go: none — goish-only: see `handshake_client_hostnameInSNI`.
+#[doc(hidden)]
+pub fn handshake_client_checkALPN(
+    clientProtos: crate::goslice::slice<crate::gostring::string>,
+    serverProto: crate::gostring::string,
+    quic: bool,
+) -> crate::gostring::string {
+    let e = handshake_client::checkALPN(clientProtos, serverProto, quic);
+    if e == crate::errors::nil {
+        return crate::gostring::string::from_static("");
+    }
+    return e.Error();
+}
+
+// go: none — goish-only: see `handshake_client_hostnameInSNI`.
+#[doc(hidden)]
+pub fn handshake_server_negotiateALPN(
+    serverProtos: crate::goslice::slice<crate::gostring::string>,
+    clientProtos: crate::goslice::slice<crate::gostring::string>,
+    quic: bool,
+) -> (crate::gostring::string, crate::gostring::string) {
+    let (p, e) = handshake_server::negotiateALPN(serverProtos, clientProtos, quic);
+    if e == crate::errors::nil {
+        return (p, crate::gostring::string::from_static(""));
+    }
+    return (p, e.Error());
+}

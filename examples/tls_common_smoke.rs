@@ -2159,6 +2159,74 @@ fn main() {
     check("Dialer.netDialer returns the configured one",
           ndExplicit == 5_000_000_000i64);
 
+    // ─── handshake_client.go / handshake_server.go: SNI and ALPN. From
+    //     goref.sh.
+    let sni = |h: &'static str| tls::handshake_client_hostnameInSNI(string::from_static(h));
+    eq("hostnameInSNI passes a hostname through", sni("example.com"), "example.com");
+    // RFC 6066 §3: an absolute FQDN is not a valid SNI value, so the
+    // trailing dots are stripped — all of them.
+    eq("hostnameInSNI strips a trailing dot", sni("example.com."), "example.com");
+    eq("hostnameInSNI strips repeated trailing dots", sni("example.com.."), "example.com");
+    // Literal IP addresses are not permitted either.
+    eq("hostnameInSNI rejects an IPv4 literal", sni("127.0.0.1"), "");
+    // KNOWN GAP, asserted so it cannot drift silently: goish's
+    // net::ParseIP is IPv4-only, so IPv6 literals are not recognised as
+    // addresses and come back as hostnames. Go returns "" for all three.
+    // See the note on hostnameInSNI in handshake_client.rs.
+    eq("hostnameInSNI IPv6 literal — goish gap", sni("[::1]"), "[::1]");
+    eq("hostnameInSNI zoned IPv6 literal — goish gap", sni("[fe80::1%eth0]"),
+       "[fe80::1%eth0]");
+    eq("hostnameInSNI bare IPv6 literal — goish gap", sni("::1"), "::1");
+    // Something that merely looks numeric is not an IP and survives.
+    eq("hostnameInSNI keeps a non-IP dotted name", sni("1.2.3.4.5"), "1.2.3.4.5");
+
+    let (ks1, ok1) = tls::handshake_client_checkKeySize(4096);
+    check_n("checkKeySize limit", ks1, 8192);
+    check("checkKeySize accepts 4096 bits", ok1);
+    let (_, ok2) = tls::handshake_client_checkKeySize(9000);
+    check("checkKeySize rejects 9000 bits", !ok2);
+
+    let ca = |c: alloc::vec::Vec<&'static str>, sp: &'static str, q: bool| {
+        let v: alloc::vec::Vec<string> = c.into_iter().map(string::from_static).collect();
+        return tls::handshake_client_checkALPN(
+            slice::__from_vec(v), string::from_static(sp), q);
+    };
+    eq("checkALPN with no protocols either side", ca(alloc::vec![], "", false), "");
+    // RFC 9001 §8.1: over QUIC the server must select a protocol.
+    eq("checkALPN QUIC without a selection", ca(alloc::vec!["h2"], "", true),
+       "tls: server did not select an ALPN protocol");
+    eq("checkALPN unrequested extension", ca(alloc::vec![], "h2", false),
+       "tls: server advertised unrequested ALPN extension");
+    eq("checkALPN accepts an offered protocol",
+       ca(alloc::vec!["h2", "http/1.1"], "h2", false), "");
+    eq("checkALPN rejects an unadvertised protocol",
+       ca(alloc::vec!["http/1.1"], "h2", false),
+       "tls: server selected unadvertised ALPN protocol");
+
+    let na = |sp: alloc::vec::Vec<&'static str>, c: alloc::vec::Vec<&'static str>, q: bool| {
+        let sv: alloc::vec::Vec<string> = sp.into_iter().map(string::from_static).collect();
+        let cv: alloc::vec::Vec<string> = c.into_iter().map(string::from_static).collect();
+        return tls::handshake_server_negotiateALPN(
+            slice::__from_vec(sv), slice::__from_vec(cv), q);
+    };
+    let (np0, ne0) = na(alloc::vec![], alloc::vec![], false);
+    eq("negotiateALPN with neither side offering", np0, "");
+    eq("negotiateALPN with neither side offering err", ne0, "");
+    let (_, ne1) = na(alloc::vec!["h2"], alloc::vec![], true);
+    eq("negotiateALPN QUIC with no client protocols", ne1,
+       "tls: client did not request an application protocol");
+    let (np2, _) = na(alloc::vec!["h2", "http/1.1"], alloc::vec!["http/1.1"], false);
+    // Server preference order wins, not the client's.
+    eq("negotiateALPN picks in server order", np2, "http/1.1");
+    // Go issue 46310: an http/1.1 client against an h2-only server is
+    // treated as if it had not offered ALPN at all, rather than failing.
+    let (np3, ne3) = na(alloc::vec!["h2"], alloc::vec!["http/1.1"], false);
+    eq("negotiateALPN http/1.1 fallback selects nothing", np3, "");
+    eq("negotiateALPN http/1.1 fallback is not an error", ne3, "");
+    let (_, ne4) = na(alloc::vec!["h2"], alloc::vec!["spdy"], false);
+    eq("negotiateALPN with no overlap", ne4,
+       "tls: client requested unsupported application protocols ([\"spdy\"])");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
