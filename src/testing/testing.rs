@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -1476,6 +1476,34 @@ pub fn __shim_ran_done(t: &T) -> (bool, bool) {
     );
 }
 
+// go: none — goish-only: registers a cleanup on the test that is
+// currently tearing down. Go's cleanup closures capture `t` and call
+// `t.Cleanup` directly; goish's `T` is not `Send + 'static`, so a test
+// needs a handle it can move into the closure. Returns that handle.
+#[doc(hidden)]
+pub fn __shim_cleanup_handle(t: &T) -> CleanupHandle {
+    return CleanupHandle {
+        state: t.state.clone(),
+    };
+}
+
+/// A `Send + 'static` handle for registering cleanups from inside a
+/// cleanup.
+#[doc(hidden)]
+pub struct CleanupHandle {
+    state: Arc<TState>,
+}
+
+#[allow(non_snake_case)]
+impl CleanupHandle {
+    // go: none — goish-only: same push common.Cleanup performs, from a
+    // handle that can be moved into a cleanup closure.
+    #[doc(hidden)]
+    pub fn Cleanup<F: FnOnce() + Send + 'static>(&self, f: F) {
+        self.state.cleanups.Lock().push(alloc::boxed::Box::new(f));
+    }
+}
+
 // go: none — goish-only: reads the `output` buffer outputWriter appends
 // to. Nothing flushes it to stdout yet — that is flushToParent, which is
 // not ported — so this is the only way to see what was written.
@@ -2035,4 +2063,39 @@ fn report_parallel_sub(parent: &Arc<TState>, sub: &Arc<TState>) {
         string::from_static(""),
         crate::goslice::slice::new(),
     );
+}
+
+#[allow(non_snake_case)]
+impl TState {
+    // go: sdk 1.25.5 testing/testing.go:1535-1574 common.runCleanup
+    // goishlint:ignore GOISH020 runCleanup — Go's `ph panicHandling`
+    // parameter selects whether to recover a panicking cleanup and
+    // return its value. goish runs under panic=abort with per-G
+    // recovery, so there is no panic value to hand back and no second
+    // behaviour to select between; the parameter would have exactly one
+    // legal argument. Restore it if unwinding ever lands.
+    /// Go: "runCleanup is called at the end of the test."
+    ///
+    /// The loop re-takes the lock on every iteration rather than
+    /// draining the slice once, which is what lets a cleanup register
+    /// ANOTHER cleanup and still have it run. Taking the whole list up
+    /// front — the obvious Rust rewrite — pushes the new callback onto
+    /// a slice nobody reads again, and it is silently never called.
+    pub(crate) fn runCleanup(&self) {
+        self.cleanupStarted.store(true, Ordering::Release);
+
+        loop {
+            let cleanup = {
+                let mut g = self.cleanups.Lock();
+                // Go: LIFO — the last registered cleanup runs first.
+                g.pop()
+            };
+            match cleanup {
+                Some(f) => f(),
+                None => break,
+            }
+        }
+
+        self.cleanupStarted.store(false, Ordering::Release);
+    }
 }

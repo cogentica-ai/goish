@@ -61,7 +61,7 @@ pub use newcover::Coverage;
 pub use testing::{
     callerName, chattyFlag, chattyPrinter, fmtDuration, marker, newChattyPrinter, parseCpuList,
     pcToName, prefix, testBinary, CoverMode, Init, Short, Testing, Verbose,
-    indenter, newTestState, outputWriter, testState, testStateCounts, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_mark_done, __shim_output_buf, __shim_ran_done, __shim_match_string_only, __DepsProbe,
+    indenter, newTestState, outputWriter, testState, testStateCounts, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_cleanup_handle, __shim_mark_done, __shim_output_buf, CleanupHandle, __shim_ran_done, __shim_match_string_only, __DepsProbe,
 };
 
 extern crate alloc;
@@ -172,6 +172,11 @@ pub(crate) struct TState {
     /// The parent needs it to indent a parallel subtest's status line,
     /// which it prints only after the barrier releases.
     pub(crate) level: Mutex<usize>,
+    /// Go: `common.cleanupStarted atomic.Bool` — "Registered cleanup
+    /// callbacks have started to execute." Cleanup itself reads it, so
+    /// a cleanup registering another cleanup is handled rather than
+    /// silently dropped.
+    pub(crate) cleanupStarted: AtomicBool,
 }
 
 impl TState {
@@ -201,6 +206,7 @@ impl TState {
             barrier: crate::gochan::chan::new_unbuffered(),
             sub: Mutex::new(Vec::new()),
             level: Mutex::new(0),
+            cleanupStarted: AtomicBool::new(false),
         };
     }
 }
@@ -301,14 +307,7 @@ impl T {
 
 
     pub(crate) fn drain_cleanups(&self) {
-        // Drain in LIFO order (Go semantics).
-        let mut funcs: Vec<Box<dyn FnOnce() + Send + 'static>> = {
-            let mut g = self.state.cleanups.Lock();
-            core::mem::take(&mut *g)
-        };
-        while let Some(f) = funcs.pop() {
-            f();
-        }
+        self.state.runCleanup();
     }
 
     pub(crate) fn write_line(&self, tag: &[u8], msg: &string) {
