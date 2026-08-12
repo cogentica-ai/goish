@@ -187,6 +187,33 @@ fn client_roundtrip(port: i64, chacha_only: bool, payload: &[u8]) -> bool {
     true
 }
 
+// Write `payload\n` to an already-connected tls::Conn and confirm the
+// server's `pong:`-prefixed echo comes back.
+fn dial_roundtrip(conn: &mut tls::Conn, payload: &[u8]) -> bool {
+    let mut req: Vec<u8> = payload.to_vec();
+    req.push(b'\n');
+    let (_, werr) = conn.Write(&req);
+    if !werr.IsNil() {
+        return false;
+    }
+    let mut got: Vec<u8> = Vec::new();
+    let want_len = 5 + req.len();
+    loop {
+        let mut buf = goish::slice::<goish::byte>::__from_vec(alloc::vec![0u8; 8192]);
+        let (n, rerr) = conn.Read(&mut buf);
+        if n > 0 {
+            for i in 0..n {
+                got.push(buf[i]);
+            }
+        }
+        if got.len() >= want_len || !rerr.IsNil() {
+            break;
+        }
+    }
+    let _ = conn.Close();
+    return got.len() == want_len && &got[..5] == b"pong:" && &got[5..] == &req[..];
+}
+
 #[goish::main]
 fn main() {
     // ── 1. X509KeyPair parsing ──
@@ -283,6 +310,39 @@ fn main() {
             "concurrent handshakes: %d/4",
             CONC_OK.load(Ordering::Relaxed) as i64
         ));
+    }
+
+    // ── 6. the dial surface: tls::Dialer and tls::DialWithDialer ──
+    {
+        let addr = fmt::Sprintf!("127.0.0.1:%d", port);
+        let cfg = tls::Config {
+            InsecureSkipVerify: true,
+            ServerName: string("localhost"),
+            ..Default::default()
+        };
+        // tls::DialWithDialer with an explicit net.Dialer.
+        let nd = goish::net::Dialer::default();
+        let (mut c1, e1) =
+            tls::DialWithDialer(&nd, string("tcp"), addr.clone(), &cfg);
+        let ok1 = e1.IsNil() && dial_roundtrip(&mut c1, b"dialer ping");
+        if ok1 {
+            pass("tls::DialWithDialer handshakes and round-trips");
+        } else {
+            fail(fmt::Sprintf!("DialWithDialer: %v", e1));
+        }
+        // tls::Dialer{Config}.Dial infers nothing extra; Config carries
+        // the ServerName + InsecureSkipVerify.
+        let d = tls::Dialer {
+            Config: Some(cfg.clone()),
+            ..Default::default()
+        };
+        let (mut c2, e2) = d.Dial(string("tcp"), addr);
+        let ok2 = e2.IsNil() && dial_roundtrip(&mut c2, b"dialer.Dial ping");
+        if ok2 {
+            pass("tls::Dialer{Config}.Dial handshakes and round-trips");
+        } else {
+            fail(fmt::Sprintf!("Dialer.Dial: %v", e2));
+        }
     }
 
     let p = PASSED.load(Ordering::Relaxed);

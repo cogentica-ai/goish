@@ -70,6 +70,7 @@ pub mod quic;
 pub use quic::{QUICEncryptionLevel, QUICEncryptionLevelApplication, QUICEncryptionLevelEarly, QUICEncryptionLevelHandshake, QUICEncryptionLevelInitial};
 pub mod tls;
 pub use tls::timeoutError;
+pub use tls::{DialWithDialer, Dialer};
 
 // go: none — goish-only: prf.go's functions are all unexported in Go,
 // where the tests are in-package. See the `defaults_*` shims above.
@@ -1303,7 +1304,7 @@ where
 /// Create a Conn that wraps a dead stub — for error return paths where
 /// `Dial` failed before connecting. The returned Conn MUST NOT be used
 /// for I/O; callers must check the accompanying error first.
-fn make_dead_conn(cfg: &Config) -> Conn {
+pub(crate) fn make_dead_conn(cfg: &Config) -> Conn {
     Conn {
         inner_conn: Arc::new(Mutex::new(alloc::boxed::Box::new(DeadConn))),
         state: Arc::new(Mutex::new(ConnInner::default())),
