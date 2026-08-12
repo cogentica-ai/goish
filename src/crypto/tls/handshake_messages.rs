@@ -1,3 +1,5 @@
+// goishlint:ignore GOISH018 addBytesWithLength, addUint64, clone, marshalCertificate, marshalMsg, marshalWithoutBinders, originalBytes, readUint16LengthPrefixed, readUint24LengthPrefixed, readUint64, readUint8LengthPrefixed, transcriptMsg, unmarshalCertificate, updateBinders — handshake_messages.go is 1963 lines and 52 functions; this file is a deliberate SUBSET covering only the messages goish's own TLS 1.3 client and server exchange. The six it does port are anchored above and diffed against Go; everything listed here is genuinely absent, not renamed. See ROADMAP.md.
+// goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, marshalingFunction, newSessionTicketMsg, newSessionTicketMsgTLS13, serverHelloDoneMsg, serverKeyExchangeMsg, transcriptHash — same: the message types the subset does not handle.
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -301,6 +303,7 @@ pub(crate) struct clientHelloMsg {
 }
 
 impl clientHelloMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:418-680 clientHelloMsg.unmarshal
     /// `(*clientHelloMsg).unmarshal(data)` — handshake_messages.go:418.
     /// `data` is the full handshake message including the 4-byte
     /// type+uint24-length header. Returns false on malformed input.
@@ -686,6 +689,7 @@ pub(crate) struct serverHelloMsg {
 }
 
 impl serverHelloMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:746-869 serverHelloMsg.marshal
     /// `(*serverHelloMsg).marshal()` — handshake_messages.go:746.
     /// Emits extensions in the same order as Go.
     pub(crate) fn marshal(&self) -> Vec<byte> {
@@ -783,6 +787,7 @@ pub(crate) struct encryptedExtensionsMsg {
 }
 
 impl encryptedExtensionsMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1011-1052 encryptedExtensionsMsg.marshal
     /// `(*encryptedExtensionsMsg).marshal()` — handshake_messages.go:1011.
     pub(crate) fn marshal(&self) -> Vec<byte> {
         let mut b = builder::new();
@@ -822,6 +827,7 @@ pub(crate) struct certificateMsgTLS13 {
 }
 
 impl certificateMsgTLS13 {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1465-1482 certificateMsgTLS13.marshal
     /// `(*certificateMsgTLS13).marshal()` — handshake_messages.go:1465,
     /// with `marshalCertificate` (:1484) inlined (no OCSP/SCT
     /// extensions, so every per-cert extensions block is empty).
@@ -855,6 +861,7 @@ pub(crate) struct certificateVerifyMsg {
 }
 
 impl certificateVerifyMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1854-1867 certificateVerifyMsg.marshal
     /// `(*certificateVerifyMsg).marshal()` — handshake_messages.go:1854.
     pub(crate) fn marshal(&self) -> Vec<byte> {
         let mut b = builder::new();
@@ -879,6 +886,7 @@ pub(crate) struct finishedMsg {
 }
 
 impl finishedMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1697-1705 finishedMsg.marshal
     /// `(*finishedMsg).marshal()` — handshake_messages.go:1697.
     pub(crate) fn marshal(&self) -> Vec<byte> {
         let mut b = builder::new();

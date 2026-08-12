@@ -52,7 +52,7 @@ with slices wherever it is needed.
 | remaining, assembly stubs | 10 |
 | waived (resolved elsewhere by design) | 1 |
 | provenance anchors | 2216 |
-| unverified names (see below) | 10 |
+| unverified names (see below) | 3 |
 
 Complete and byte-checked against Go: `x509` (158/158), `ecdsa`,
 `ecdh`, `rsa`, `elliptic`, `cipher`, `aes`, `sha1/256/512/3`, `hmac`,
@@ -85,7 +85,7 @@ strong one.
    generated, never transcribed.
 
 `port_coverage.py` reports tier-1 counts and flags anything still at
-tier 1 as **UNVERIFIED**. That number went 121 → 10 this cycle.
+tier 1 as **UNVERIFIED**. That number went 121 → 3 this cycle.
 
 ### Why byte-exactness, specifically
 
