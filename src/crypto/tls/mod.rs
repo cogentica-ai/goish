@@ -1546,3 +1546,27 @@ pub fn register_tls_impls() {
     __goish_register_Closer_impl::<DeadConn>();
     crate::net::__goish_register_Conn_impl::<DeadConn>();
 }
+
+// go: none — goish-only: certificateMsg is unexported in Go, where the
+// tests are in-package. See the `defaults_*` shims above.
+#[doc(hidden)]
+pub fn msg_certificate_roundtrip(
+    certs: crate::goslice::slice<crate::goslice::slice<crate::types::byte>>,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    crate::types::int,
+) {
+    let m = handshake_messages::certificateMsg { certificates: certs };
+    let (b, _) = m.marshal();
+    let mut back = handshake_messages::certificateMsg::default();
+    let ok = back.unmarshal(b.clone());
+    let n = back.certificates.Len();
+    return (b, ok, n);
+}
+
+// go: none — goish-only: see `msg_certificate_roundtrip`.
+#[doc(hidden)]
+pub fn msg_certificate_unmarshal(data: crate::goslice::slice<crate::types::byte>) -> bool {
+    return handshake_messages::certificateMsg::default().unmarshal(data);
+}

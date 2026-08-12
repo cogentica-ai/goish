@@ -1,6 +1,6 @@
 // goishlint:ignore GOISH018 addBytesWithLength, addUint64, clone, marshalCertificate, marshalMsg, marshalWithoutBinders, originalBytes, readUint16LengthPrefixed, readUint24LengthPrefixed, readUint64, readUint8LengthPrefixed, transcriptMsg, unmarshalCertificate, updateBinders — handshake_messages.go is 1963 lines and 52 functions; this file is a deliberate SUBSET covering only the messages goish's own TLS 1.3 client and server exchange. The six it does port are anchored above and diffed against Go; everything listed here is genuinely absent, not renamed. See ROADMAP.md.
 // goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, marshalingFunction, newSessionTicketMsg, newSessionTicketMsgTLS13, serverHelloDoneMsg, serverKeyExchangeMsg, transcriptHash — same: the message types the subset does not handle.
-// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal
+// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -1300,6 +1300,111 @@ impl newSessionTicketMsg {
         }
         // Go: m.ticket = data[10:]
         self.ticket = data.slice(10, data.Len());
+        return true;
+    }
+}
+
+
+/// Go: `type certificateMsg struct { certificates [][]byte }` — the
+/// TLS 1.2 Certificate message, a uint24-prefixed list of uint24-
+/// prefixed DER certificates.
+#[derive(Clone, Default, PartialEq)]
+pub(crate) struct certificateMsg {
+    pub certificates: slice<slice<byte>>,
+}
+
+impl certificateMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1441-1470 certificateMsg.marshal
+    /// Serialize the chain.
+    pub(crate) fn marshal(&self) -> (slice<byte>, error) {
+        // Go: var i int; for _, slice := range m.certificates { i += len(slice) }
+        let mut i: crate::types::int = 0;
+        for (_, c) in crate::range!(self.certificates.clone()) {
+            i += c.Len();
+        }
+        // Go: length := 3 + 3*len(m.certificates) + i
+        let length = 3 + 3 * self.certificates.Len() + i;
+        // Go: x := make([]byte, 4+length)
+        let mut x: Vec<byte> = alloc::vec![0u8; (4 + length) as usize];
+        x[0] = typeCertificate;
+        x[1] = crate::uint8(length >> 16);
+        x[2] = crate::uint8(length >> 8);
+        x[3] = crate::uint8(length);
+
+        // Go: certificateOctets := length - 3; x[4..7] = uint24(that)
+        let certificateOctets = length - 3;
+        x[4] = crate::uint8(certificateOctets >> 16);
+        x[5] = crate::uint8(certificateOctets >> 8);
+        x[6] = crate::uint8(certificateOctets);
+
+        // Go: y := x[7:]
+        //     for _, slice := range m.certificates {
+        //         y[0..3] = uint24(len(slice)); copy(y[3:], slice)
+        //         y = y[3+len(slice):]
+        //     }
+        let mut off = 7usize;
+        for (_, c) in crate::range!(self.certificates.clone()) {
+            let n = c.Len();
+            x[off] = crate::uint8(n >> 16);
+            x[off + 1] = crate::uint8(n >> 8);
+            x[off + 2] = crate::uint8(n);
+            let raw: &[byte] = &c;
+            x[off + 3..off + 3 + raw.len()].copy_from_slice(raw);
+            off += 3 + raw.len();
+        }
+        return (slice::__from_vec(x), crate::errors::nil);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1472-1505 certificateMsg.unmarshal
+    /// Parse the chain. Go walks the list TWICE — once to count and
+    /// validate every length, once to slice the entries out — so a
+    /// truncated entry is rejected before any is stored.
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        // Go: if len(data) < 7 { return false }
+        if data.Len() < 7 {
+            return false;
+        }
+        // Go: certsLen := uint32(data[4])<<16 | uint32(data[5])<<8 | uint32(data[6])
+        //     if uint32(len(data)) != certsLen+7 { return false }
+        let mut certsLen = (crate::uint32(data[4]) << 16)
+            | (crate::uint32(data[5]) << 8)
+            | crate::uint32(data[6]);
+        if crate::uint32(data.Len()) != certsLen + 7 {
+            return false;
+        }
+
+        // Go: first pass — count and validate.
+        let mut numCerts = 0usize;
+        let raw: &[byte] = &data;
+        let mut d = &raw[7..];
+        while certsLen > 0 {
+            // Go: if len(d) < 4 { return false }
+            if d.len() < 4 {
+                return false;
+            }
+            let certLen = (crate::uint32(d[0]) << 16)
+                | (crate::uint32(d[1]) << 8)
+                | crate::uint32(d[2]);
+            // Go: if uint32(len(d)) < 3+certLen { return false }
+            if crate::uint32(d.len() as crate::types::int) < 3 + certLen {
+                return false;
+            }
+            d = &d[(3 + certLen) as usize..];
+            certsLen -= 3 + certLen;
+            numCerts += 1;
+        }
+
+        // Go: second pass — slice them out.
+        let mut out: Vec<slice<byte>> = Vec::with_capacity(numCerts);
+        let mut d = &raw[7..];
+        for _ in 0..numCerts {
+            let certLen = ((crate::uint32(d[0]) << 16)
+                | (crate::uint32(d[1]) << 8)
+                | crate::uint32(d[2])) as usize;
+            out.push(slice::__from_vec(d[3..3 + certLen].to_vec()));
+            d = &d[3 + certLen..];
+        }
+        self.certificates = slice::__from_vec(out);
         return true;
     }
 }

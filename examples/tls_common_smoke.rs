@@ -504,6 +504,51 @@ fn main() {
         "6ac1e56bc78f031059be7be854522c4c5d211bad8f4ee70e16c7d343a838fc344a1ed961",
     );
 
+    // ─── certificateMsg — a uint24 list of uint24-prefixed DER certs.
+    let certs = slice::__from_vec(alloc::vec![
+        slice::__from_vec(alloc::vec![0xaau8, 0xbb]),
+        slice::__from_vec(alloc::vec![0xccu8]),
+    ]);
+    let (b, ok, n) = tls::msg_certificate_roundtrip(certs);
+    eq("certificateMsg", hexOf(b.clone()), "0b00000c000009000002aabb000001cc");
+    check("certificateMsg round-trip", ok);
+    check_n("certificateMsg recovered 2 certs", n, 2);
+
+    // An empty chain is legal and round-trips.
+    let (eb, eok, en) = tls::msg_certificate_roundtrip(slice::__from_vec(alloc::vec![]));
+    eq("empty certificateMsg", hexOf(eb), "0b000003000000");
+    check("empty certificateMsg round-trips", eok);
+    check_n("empty certificateMsg has 0 certs", en, 0);
+
+    // A ZERO-LENGTH certificate marshals but does NOT parse back: the
+    // `len(d) < 4` guard trips on the trailing 3-byte entry. Go's own
+    // output is not round-trippable here, and the port reproduces that
+    // rather than "fixing" it. Verified against Go.
+    let (zb, zok, _) = tls::msg_certificate_roundtrip(slice::__from_vec(alloc::vec![
+        slice::__from_vec(alloc::vec![0xaau8, 0xbb]),
+        slice::__from_vec(alloc::vec![0xccu8]),
+        slice::__from_vec(alloc::vec![]),
+    ]));
+    eq(
+        "certificateMsg with an empty entry marshals",
+        hexOf(zb),
+        "0b00000f00000c000002aabb000001cc000000",
+    );
+    check("…but Go rejects it on the way back, and so do we", !zok);
+
+    // Rejections.
+    let raw: &[byte] = &b;
+    check(
+        "certificateMsg rejects <7 bytes",
+        !tls::msg_certificate_unmarshal(slice::__from_vec(raw[..6].to_vec())),
+    );
+    let mut bad: alloc::vec::Vec<byte> = b.__into_vec();
+    bad[6] = 0xff;
+    check(
+        "certificateMsg rejects a wrong certsLen",
+        !tls::msg_certificate_unmarshal(slice::__from_vec(bad)),
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
