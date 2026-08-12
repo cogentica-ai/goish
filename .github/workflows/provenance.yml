@@ -1,0 +1,62 @@
+name: provenance
+
+# Per-push gate on the provenance claim itself.
+#
+# The README tells buyers that every ported function names the Go source
+# file and line range it came from, and that the claim is machine-checked
+# rather than asserted. This is the job that makes that true in public:
+# it fetches the real Go 1.25.5 tree and re-opens every anchor against it.
+#
+# What this gate covers:
+#
+#   anchor_check.py   every `// go: sdk 1.25.5 <file>:<lines> <Symbol>`
+#                     anchor cites a file that exists in the Go tree and a
+#                     line range that still resolves to the symbol named.
+#                     Ranges rot silently when upstream moves code — 229 of
+#                     1802 were wrong the first time this was measured.
+#
+#   port_coverage.py  crypto/ is still 1709/1709 declarations. A regression
+#                     here means a decl was dropped or renamed out of the
+#                     port, which no test would notice.
+#
+# What it does NOT cover: goishlint's GOISH018 signature/arity/struct-field
+# diff (`make lint`). That linter is a separate binary and is not in this
+# repo, so it remains a local, pre-commit ratchet. The README says so
+# explicitly — do not let this workflow's green badge be described as
+# covering the full fidelity tier, because it does not.
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: provenance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  provenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Both scripts resolve anchors against $GOROOT. The version is pinned
+      # to the one the anchors name: checking 1.25.5 anchors against a
+      # different Go tree would produce noise, not signal.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.5'
+
+      - name: Export GOROOT
+        run: echo "GOROOT=$(go env GOROOT)" >> "$GITHUB_ENV"
+
+      - name: Anchors resolve against the Go 1.25.5 tree
+        run: python3 scripts/anchor_check.py src
+
+      - name: crypto/ is still 100% by declaration
+        run: |
+          set -o pipefail
+          python3 scripts/port_coverage.py crypto --by-decl | tee /tmp/cov.txt
+          grep -q '1709/1709 funcs = 100.0%' /tmp/cov.txt

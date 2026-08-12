@@ -35,8 +35,26 @@ Usage:
 """
 import os, re, sys, collections
 
-GOROOT = os.environ.get("GOROOT") or \
-    "/nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src"
+def _goroot():
+    """The directory anchors resolve against, i.e. the one holding `crypto/`.
+
+    Anchors cite package-relative paths (`crypto/tls/conn.go`), so this
+    must be Go's `src` directory - NOT what `go env GOROOT` prints, which
+    is its parent. port_coverage.py takes the other convention and appends
+    "src" itself, so `GOROOT=$(go env GOROOT)` silently made every anchor
+    here report MISSING_FILE while port_coverage stayed green.
+
+    Accept either spelling: if `$GOROOT/src` exists, that is the real Go
+    root and `src` is what we want.
+    """
+    r = os.environ.get("GOROOT")
+    if not r:
+        return "/nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src"
+    nested = os.path.join(r, "src")
+    return nested if os.path.isdir(os.path.join(nested, "crypto")) else r
+
+
+GOROOT = _goroot()
 ANCHOR = re.compile(r"(//\s*go:\s*sdk\s+\S+\s+)(\S+):(\d+)-(\d+)(\s+)(\S+)")
 
 _src_cache = {}
