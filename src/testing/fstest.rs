@@ -722,7 +722,7 @@ impl MapFS {
 // goishlint:ignore GOISH019 fsTester — Go's `fsys fs.FS` field is held
 // by the driver (`testFS`), which is not ported; carrying a filesystem
 // this struct never reads would imply a walk that does not exist here.
-// goishlint:ignore GOISH020 checkOpen, checkBadPath, checkFileRead — Go
+// goishlint:ignore GOISH020 checkOpen, checkBadPath, checkFileRead, checkDirList — Go
 // reads `t.fsys` off the receiver; goish's fsTester does not carry a
 // filesystem (see GOISH019 above), so these take it, or the opener
 // built from it, as a parameter instead. Same inputs, one hop
@@ -925,4 +925,132 @@ impl fsTester {
 // sites above, which take owned goish strings.
 fn s_of(x: &str) -> string {
     return string::from_bytes(x.as_bytes());
+}
+
+impl fsTester {
+    // go: sdk 1.25.5 testing/fstest/testfs.go:472-518 fsTester.checkDirList
+    /// Go: "checkDirList checks that two directory lists contain the
+    /// same files and file info."
+    ///
+    /// Two independent things happen here, and both matter:
+    ///
+    /// 1. `checkMode` asserts `entry.IsDir()` agrees with
+    ///    `entry.Type() & ModeDir`. A DirEntry that says it is a
+    ///    directory through one accessor and not the other is
+    ///    internally inconsistent, and every caller picks one — so half
+    ///    of them would be wrong with no way to tell which.
+    /// 2. The two listings are diffed by name, and every surviving
+    ///    difference is rendered as a +/- line. The diff is sorted by
+    ///    name and then with `+` before `-`, so a rename reads as an
+    ///    adjacent pair rather than two entries scattered apart.
+    ///
+    /// Deviation: Go compares `entry1 == nil` against a map lookup;
+    /// goish's map returns `(value, ok)` so the presence flag is
+    /// explicit rather than a nil interface.
+    pub fn checkDirList(
+        &mut self,
+        dir: string,
+        desc: &str,
+        list1: &slice<Arc<dyn DirEntry + Send + Sync>>,
+        list2: &slice<Arc<dyn DirEntry + Send + Sync>>,
+    ) {
+        // Go's `checkMode` closure, hoisted: it borrows `t` mutably and
+        // the loops below also need `self`, which a closure capturing
+        // `&mut self` would forbid.
+        let mut mode_errs: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+        let mut check_mode = |entry: &(dyn DirEntry + Send + Sync)| {
+            // Go: if entry.IsDir() != (entry.Type()&fs.ModeDir != 0)
+            if entry.IsDir() != ((entry.Type().0 & fs::ModeDir.0) != 0) {
+                if entry.IsDir() {
+                    mode_errs.push(crate::fmt::Sprintf!(
+                        "%s: ReadDir returned %s with IsDir() = true, Type() & ModeDir = 0",
+                        dir.clone(),
+                        entry.Name()
+                    ));
+                } else {
+                    mode_errs.push(crate::fmt::Sprintf!(
+                        "%s: ReadDir returned %s with IsDir() = false, Type() & ModeDir = ModeDir",
+                        dir.clone(),
+                        entry.Name()
+                    ));
+                }
+            }
+        };
+
+        // Go keys this map by name to the DirEntry itself. goish's
+        // `map` needs `Default` on the value to return a zero, which a
+        // `dyn` trait object cannot supply — so it holds the entry's
+        // index in `list1` instead. Same lookups, same deletions.
+        let mut old: crate::map<string, int> = crate::map::new();
+        for i in 0..list1.Len() {
+            let e = list1[i].clone();
+            old.Set(e.Name(), i);
+            check_mode(e.as_ref());
+        }
+
+        let mut diffs: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+        for i in 0..list2.Len() {
+            let e2 = list2[i].clone();
+            let (i1, ok) = old.Get(e2.Name());
+            if !ok {
+                check_mode(e2.as_ref());
+                diffs.push(crate::fmt::Sprintf!("+ %s", formatEntry(e2.as_ref())));
+                continue;
+            }
+            let e1 = list1[i1].clone();
+            if formatEntry(e1.as_ref()) != formatEntry(e2.as_ref()) {
+                diffs.push(crate::fmt::Sprintf!("- %s", formatEntry(e1.as_ref())));
+                diffs.push(crate::fmt::Sprintf!("+ %s", formatEntry(e2.as_ref())));
+            }
+            old.Delete(e2.Name());
+        }
+        // Go: for _, entry1 := range old { diffs = append(diffs, "- "+...) }
+        // Go's map iteration order is randomised, but the sort below
+        // makes the result deterministic either way.
+        let leftover = old.Keys();
+        for i in 0..leftover.Len() {
+            let (i1, ok) = old.Get(leftover[i].clone());
+            if ok {
+                let e1 = list1[i1].clone();
+                diffs.push(crate::fmt::Sprintf!("- %s", formatEntry(e1.as_ref())));
+            }
+        }
+
+        drop(check_mode);
+        for m in mode_errs.into_iter() {
+            self.errorf(m);
+        }
+
+        if diffs.len() == 0 {
+            return;
+        }
+
+        // Go: sort by name (i < j) and then +/- (j < i, because + < -).
+        // The comparison key is deliberately asymmetric — it splices
+        // the *other* line's sign in — so that for a given name the
+        // '+' line sorts first.
+        diffs.sort_by(|a, b| {
+            let fa = crate::strings::Fields(a.clone());
+            let fb = crate::strings::Fields(b.clone());
+            if fa.Len() < 2 || fb.Len() < 2 {
+                let x: &str = a.as_ref();
+                let y: &str = b.as_ref();
+                return x.cmp(y);
+            }
+            let left = crate::fmt::Sprintf!("%s %s", fa[1].clone(), fb[0].clone());
+            let right = crate::fmt::Sprintf!("%s %s", fb[1].clone(), fa[0].clone());
+            let c = crate::strings::Compare(left, right);
+            return c.cmp(&0);
+        });
+
+        self.errorf(crate::fmt::Sprintf!(
+            "%s: diff %s:\n\t%s",
+            dir.clone(),
+            s_of(desc),
+            crate::strings::Join(
+                slice::__from_vec(diffs),
+                string::from_static("\n\t")
+            )
+        ));
+    }
 }
