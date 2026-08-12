@@ -61,7 +61,7 @@ pub use newcover::Coverage;
 pub use testing::{
     callerName, chattyFlag, chattyPrinter, fmtDuration, marker, newChattyPrinter, parseCpuList,
     pcToName, prefix, testBinary, CoverMode, Init, Short, Testing, Verbose,
-    __run_skip_patterns, __shim_err_main, __shim_match_string_only, __DepsProbe,
+    __run_skip_patterns, __shim_destination, __shim_err_main, __shim_mark_done, __shim_ran_done, __shim_match_string_only, __DepsProbe,
 };
 
 extern crate alloc;
@@ -114,6 +114,22 @@ pub(crate) struct TState {
     /// `write_status` rather than a printer, so this stays None until
     /// the M.Run driver lands; `Attr` reads it exactly as Go does.
     pub(crate) chatty: Mutex<Option<Arc<testing::chattyPrinter>>>,
+    /// Go: `common.ran bool` — "Test or benchmark (or one of its
+    /// subtests) was executed."
+    pub(crate) ran: AtomicBool,
+    /// Go: `common.done bool` — "Test is finished and all subtests have
+    /// completed." `destination` reads it to decide whether late output
+    /// belongs to this test or has to be re-homed on an ancestor.
+    pub(crate) done: AtomicBool,
+    /// Go: `common.isSynctest bool`. goish has no synctest bubbles, so
+    /// this is always false — but `destination` branches on it, and a
+    /// port that dropped the term would silently change which test
+    /// late output lands on.
+    pub(crate) isSynctest: AtomicBool,
+    /// Go: `common.name string`. goish also keeps the name on `T` for
+    /// the existing logging path; `destination`'s callers need it on
+    /// the shared state, since they walk the parent chain.
+    pub(crate) name: Mutex<string>,
 }
 
 impl TState {
@@ -129,6 +145,10 @@ impl TState {
             helperPCs: Mutex::new(crate::map::new()),
             inFuzzFn: AtomicBool::new(false),
             chatty: Mutex::new(None),
+            ran: AtomicBool::new(false),
+            done: AtomicBool::new(false),
+            isSynctest: AtomicBool::new(false),
+            name: Mutex::new(string::from_static("")),
         };
     }
 }

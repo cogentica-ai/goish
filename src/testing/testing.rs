@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: common.setRan, common.destination, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -381,6 +381,11 @@ impl T {
 /// read the outcome out of the shared state.
 pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
     let state = t.state.clone();
+    // Go: tRunner records the name on the common and marks the test —
+    // and every ancestor — as having run, so a parent whose body only
+    // calls t.Run still reports ran.
+    *state.name.Lock() = t.name.clone();
+    state.setRan();
 
     // Go: `go tRunner(t, fn)`. The explicit stack is goish's: a test
     // body is arbitrary user code and the 2 KiB default is nowhere near
@@ -396,6 +401,11 @@ pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
     // Go: `<-t.signal`. Exactly one send happens per test, from
     // whichever path finished it.
     let _ = state.signal.Recv();
+
+    // Go: `t.done = true` in tRunner's deferred func, once the test and
+    // all its subtests have completed. `destination` reads this to
+    // re-home late output onto the nearest still-running ancestor.
+    state.done.store(true, Ordering::Release);
 }
 
 // ─── chatty flag / printer ───────────────────────────────────────────
@@ -1324,4 +1334,67 @@ impl T {
             ),
         );
     }
+}
+
+#[allow(non_snake_case)]
+impl TState {
+    // go: sdk 1.25.5 testing/testing.go:942-948 common.setRan
+    /// Go: marks this test and EVERY ancestor as having run. The
+    /// recursion is what lets a parent whose body only calls t.Run
+    /// still report as ran.
+    pub(crate) fn setRan(&self) {
+        if let Some(p) = self.parent.as_ref() {
+            p.setRan();
+        }
+        self.ran.store(true, Ordering::Release);
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1045-1061 common.destination
+    /// Go: "destination selects the test to which output should be
+    /// appended. It returns the test if it is incomplete. Otherwise, it
+    /// finds its closest incomplete parent."
+    ///
+    /// Returning None is meaningful, not an error path: it says every
+    /// test up the chain has completed, and the callers turn that into
+    /// a panic naming the test that was written to too late.
+    pub(crate) fn destination(self: &Arc<Self>) -> Option<Arc<TState>> {
+        if !self.done.load(Ordering::Acquire) && !self.isSynctest.load(Ordering::Acquire) {
+            return Some(self.clone());
+        }
+        let mut cur = self.parent.clone();
+        while let Some(p) = cur {
+            if !p.done.load(Ordering::Acquire) {
+                return Some(p);
+            }
+            cur = p.parent.clone();
+        }
+        return None;
+    }
+}
+
+// go: none — goish-only: `destination` is unexported, as in Go. This
+// exposes the parent-walk it performs so a test can drive it.
+#[doc(hidden)]
+pub fn __shim_destination(t: &T) -> Option<string> {
+    return t
+        .state
+        .destination()
+        .map(|d| return d.name.Lock().clone());
+}
+
+// go: none — goish-only: lets a test observe `ran` and `done`, which
+// tRunner maintains and which nothing else can read from outside.
+#[doc(hidden)]
+pub fn __shim_ran_done(t: &T) -> (bool, bool) {
+    return (
+        t.state.ran.load(Ordering::Acquire),
+        t.state.done.load(Ordering::Acquire),
+    );
+}
+
+// go: none — goish-only: marks a test done so a test can drive
+// destination's re-homing branch without racing a real runner.
+#[doc(hidden)]
+pub fn __shim_mark_done(t: &T) {
+    t.state.done.store(true, Ordering::Release);
 }
