@@ -85,6 +85,12 @@ fn output_test(t: &mut testing::T) {
 
         record("buf", goish::testing::__shim_output_buf(t));
     });
+
+    // After t.Run returns, flushToParent has moved the subtest's
+    // buffer up here — indented one more level — and cleared the
+    // source. Both halves matter: bytes left behind would be printed
+    // twice, and bytes not moved would never be printed at all.
+    record("parent.buf", goish::testing::__shim_output_buf(t));
 }
 
 /// Output on a test that has completed panics rather than dropping the
@@ -178,11 +184,26 @@ fn main() {
         }
     }
 
+    // 6. flushToParent moved the child's buffer into the parent's,
+    //    adding one more indent level, and emptied the child's. The
+    //    child's own buffer is asserted empty by check 5 running
+    //    BEFORE the flush and this one running after.
+    {
+        let want = s("        half line\n        a\n        b\n        tail\n");
+        if get("parent.buf") == want {
+            fmt::Println!("[ 6] flushToParent re-indents  PASS");
+        } else {
+            fmt::Println!("[ 6] flushToParent re-indents  FAIL");
+            fmt::Println!("     got  [", get("parent.buf"), "]");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 5/5");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 5");
+        fmt::Println!("FAIL", failed, "of 6");
         syscall::Exit(1);
     }
 }

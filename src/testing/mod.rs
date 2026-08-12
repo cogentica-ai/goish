@@ -61,7 +61,7 @@ pub use newcover::Coverage;
 pub use testing::{
     callerName, chattyFlag, chattyPrinter, fmtDuration, marker, newChattyPrinter, parseCpuList,
     pcToName, prefix, testBinary, CoverMode, Init, Short, Testing, Verbose,
-    outputWriter, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_mark_done, __shim_output_buf, __shim_ran_done, __shim_match_string_only, __DepsProbe,
+    indenter, outputWriter, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_mark_done, __shim_output_buf, __shim_ran_done, __shim_match_string_only, __DepsProbe,
 };
 
 extern crate alloc;
@@ -144,6 +144,14 @@ pub(crate) struct TState {
     /// mind. goish holds a Weak instead, so the pair does not leak; the
     /// field is set after the Arc exists, which is why it is an Option.
     pub(crate) o: Mutex<Option<testing::outputWriter>>,
+    /// Go: `common.w io.Writer` — "For flushToParent."
+    ///
+    /// Go sets it to `indenter{&t.common}` for every test, so a
+    /// subtest's flush lands indented in its parent's buffer. A
+    /// top-level test's parent is nil and it never flushes, so None
+    /// here means "the root output stream" — goish writes that
+    /// straight to stdout, where Go's driver holds an os.Stdout.
+    pub(crate) w: Mutex<Option<testing::indenter>>,
 }
 
 impl TState {
@@ -166,6 +174,7 @@ impl TState {
             output: Mutex::new(Vec::new()),
             bench: AtomicBool::new(false),
             o: Mutex::new(None),
+            w: Mutex::new(None),
         };
     }
 }
@@ -352,6 +361,17 @@ pub fn Main(tests: &[(&'static str, TestFn)]) -> int {
             failed += 1;
         } else {
             write_status(b"--- PASS: ", b"", &name_s);
+        }
+
+        // Go's runTests flushes the root's partial line and prints its
+        // buffered output after the status line. goish's Main stands in
+        // for that driver, so it does the same here — otherwise
+        // anything written through t.Output() accumulates in the root's
+        // buffer and is never seen.
+        state.flushPartial();
+        let out = state.output.Lock().clone();
+        if !out.is_empty() {
+            syscall::Write(syscall::STDOUT, out.as_ptr(), out.len());
         }
         total += 1;
     }

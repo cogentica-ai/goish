@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: common.setRan, common.destination, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -353,15 +353,28 @@ impl T {
         tRunner(sub, f);
 
         let passed = !state.failed.load(Ordering::Acquire);
-        if state.skipped.load(Ordering::Acquire) {
-            write_status(b"--- SKIP: ", header_indent.as_bytes(), &qualified);
+        let tag: &[u8] = if state.skipped.load(Ordering::Acquire) {
+            b"--- SKIP: "
         } else if passed {
-            write_status(b"--- PASS: ", header_indent.as_bytes(), &qualified);
+            b"--- PASS: "
         } else {
-            write_status(b"--- FAIL: ", header_indent.as_bytes(), &qualified);
+            b"--- FAIL: "
+        };
+        write_status(tag, header_indent.as_bytes(), &qualified);
+        if !passed && !state.skipped.load(Ordering::Acquire) {
             // Go: a failing subtest fails its parent.
             self.state.failed.store(true, Ordering::Release);
         }
+
+        // Go: `t.flushToParent(t.name, "%s", …)` — anything the subtest
+        // buffered through Output() now appears UNDER its status line,
+        // indented into the parent's buffer. Without this the bytes
+        // stay in the subtest's buffer and are never seen.
+        state.flushToParent(
+            qualified.clone(),
+            string::from_static(""),
+            crate::goslice::slice::new(),
+        );
         return passed;
     }
 }
@@ -391,6 +404,12 @@ pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
     // calls t.Run still reports ran.
     *state.name.Lock() = t.name.clone();
     state.setRan();
+    // Go: `t.w = indenter{&t.common}` — a test's own writer indents
+    // into its OWN buffer. flushToParent then writes to the PARENT's
+    // w, which is what carries a subtest's output up one level.
+    *state.w.Lock() = Some(indenter {
+        c: Arc::downgrade(&state),
+    });
 
     // Go: `go tRunner(t, fn)`. The explicit stack is goish's: a test
     // body is arbitrary user code and the 2 KiB default is nowhere near
@@ -1597,5 +1616,121 @@ impl T {
     pub fn Output(&self) -> outputWriter {
         self.checkFuzzFn(string::from_static("Output"));
         return self.state.Output();
+    }
+}
+
+// ─── indenter and flushToParent ──────────────────────────────────────
+
+// go: sdk 1.25.5 testing/testing.go:846-848 indenter
+/// Go: `type indenter struct { c *common }` — the io.Writer a subtest
+/// flushes through, so its output lands indented inside its parent's
+/// buffer. Weak for the same reason outputWriter is.
+#[derive(Clone)]
+#[allow(non_camel_case_types)]
+pub struct indenter {
+    pub(crate) c: alloc::sync::Weak<TState>,
+}
+
+#[allow(non_snake_case)]
+impl crate::io::Writer for indenter {
+    // go: sdk 1.25.5 testing/testing.go:852-873 indenter.Write
+    /// Indents each line by four spaces. The marker byte, if a line
+    /// starts with one, is copied out FIRST and the indent goes after
+    /// it — test2json frames on that byte, so indenting ahead of it
+    /// would put whitespace where the framing has to be.
+    fn Write(
+        &mut self,
+        b: crate::goslice::slice<crate::types::byte>,
+    ) -> (crate::types::int, crate::errors::error) {
+        let n = b.Len();
+        let c = match self.c.upgrade() {
+            Some(c) => c,
+            None => return (n, crate::errors::nil),
+        };
+        let buf = b.__into_vec();
+        let mut out = c.output.Lock();
+        let mut rest: &[crate::types::byte] = &buf;
+        while !rest.is_empty() {
+            // Go: `end := bytes.IndexByte(b, '\n')`; a line with no
+            // newline runs to the end of the input.
+            let end = match rest.iter().position(|x| return *x == b'\n') {
+                Some(i) => i + 1,
+                None => rest.len(),
+            };
+            let mut line = &rest[..end];
+            if line[0] == marker {
+                out.push(marker);
+                line = &line[1..];
+            }
+            out.extend_from_slice(indent);
+            out.extend_from_slice(line);
+            rest = &rest[end..];
+        }
+        return (n, crate::errors::nil);
+    }
+}
+
+#[allow(non_snake_case)]
+impl TState {
+    // go: sdk 1.25.5 testing/testing.go:807-844 common.flushToParent
+    /// Go: moves this test's buffered output up to its parent, behind
+    /// the status line the caller passes as `format`.
+    ///
+    /// The output is appended to the FORMAT, not printed before it, so
+    /// the logged lines appear after the `--- FAIL` line rather than
+    /// above it. Getting that backwards reads fine until a test fails.
+    pub(crate) fn flushToParent(
+        &self,
+        testName: string,
+        format: string,
+        args: crate::goslice::slice<crate::goany::Any>,
+    ) {
+        let p = match self.parent.as_ref() {
+            Some(p) => p.clone(),
+            // Go dereferences c.parent unconditionally; a top-level
+            // test never reaches here because nothing flushes the root
+            // to a parent it does not have.
+            None => return,
+        };
+
+        let mut format = format;
+        let mut args = args.clone().__into_vec();
+        {
+            let mut out = self.output.Lock();
+            if out.len() > 0 {
+                // Go: `format += "%s"` and the buffer becomes the last
+                // argument, then the buffer is cleared.
+                format = crate::fmt::Sprintf!("%s%s", format, string::from_static("%s"));
+                args.push(crate::goany::Any::new(string::from_bytes(&out)));
+                out.clear();
+            }
+        }
+
+        // Go's chatty branch is unreachable in goish — `chatty` is
+        // never set — so this is the `fmt.Fprintf(p.w, …)` path.
+        let msg = crate::fmt::Sprintv(
+            format,
+            crate::goslice::slice::__from_vec(args),
+        );
+        let _ = testName;
+
+        let w = p.w.Lock().clone();
+        match w {
+            Some(mut ind) => {
+                use crate::io::Writer;
+                let _ = ind.Write(crate::goslice::slice::__from_vec(
+                    msg.clone().__as_bytes_internal().to_vec(),
+                ));
+            }
+            None => {
+                // The root: Go's driver holds an os.Stdout here.
+                let bytes = msg.clone().__as_bytes_internal().to_vec();
+                crate::syscall::Write(
+                    crate::syscall::STDOUT,
+                    bytes.as_ptr(),
+                    bytes.len(),
+                );
+            }
+        }
     }
 }
