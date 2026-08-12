@@ -476,14 +476,33 @@ unsafe fn g_entry_clear_recovery() {
 /// by the abandoned frames, then chains to `goexit` so the scheduler
 /// reclaims this G normally.
 extern "C" fn on_g_panic_aborted() -> ! {
-    // Cleanups already ran in the `#[panic_handler]` (where the
-    // panicked stack frames were still valid). Here we're on a fresh
-    // top-of-stack frame; just print, clear panicking flag, and exit.
-    const MSG: &[u8] = b"goish: goroutine recovered from panic, scheduler continuing\n";
-    crate::syscall::Write(crate::syscall::STDERR, MSG.as_ptr(), MSG.len());
+    // Two callers land here through the same gobuf: the
+    // `#[panic_handler]`, and `runtime::Goexit`. The jump is
+    // identical; only the reason differs, and `goexiting` is how we
+    // tell them apart. A Goexit is an ordinary, expected way for a
+    // goroutine to end (it is what `testing.T::FailNow` uses), so it
+    // must not print a panic diagnostic or count as a panicked G.
+    let goexiting = current_m()
+        .lock()
+        .curg
+        .map(|g_ptr| unsafe {
+            (*g_ptr.as_ptr())
+                .goexiting
+                .swap(false, core::sync::atomic::Ordering::AcqRel)
+        })
+        .unwrap_or(false);
 
-    // Increment the per-process panicked-G counter for diagnostics.
-    G_PANIC_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    if !goexiting {
+        // Cleanups already ran in the `#[panic_handler]` (where the
+        // panicked stack frames were still valid). Here we're on a
+        // fresh top-of-stack frame; just print, clear the panicking
+        // flag, and exit.
+        const MSG: &[u8] = b"goish: goroutine recovered from panic, scheduler continuing\n";
+        crate::syscall::Write(crate::syscall::STDERR, MSG.as_ptr(), MSG.len());
+
+        // Increment the per-process panicked-G counter for diagnostics.
+        G_PANIC_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    }
 
     // Clear the panicking flag so any final code on this G observes
     // the normal-execution state. The G is about to die anyway, but

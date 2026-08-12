@@ -1159,3 +1159,7 @@ path = "examples/runtime_mcentral_units_smoke.rs"
 [[example]]
 name = "testing_readme"
 path = "examples/testing_readme.rs"
+
+[[example]]
+name = "runtime_goexit_smoke"
+path = "examples/runtime_goexit_smoke.rs"

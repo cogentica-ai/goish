@@ -156,6 +156,16 @@ pub struct G {
     /// want typed-panic recovery should still use `errors::As` after
     /// recover; the underlying payload is the rendered message.
     pub panic_value: SpinLock<Option<crate::error>>,
+    /// True while this G is terminating via `runtime::Goexit` rather
+    /// than via a panic.
+    ///
+    /// Both paths land on `on_g_panic_aborted` through the same
+    /// `panic_recover` gobuf — the jump is identical, only the reason
+    /// differs. This flag lets the landing pad tell them apart so a
+    /// Goexit does not print the panic diagnostic or bump the
+    /// panicked-G counter. Set by `runtime::Goexit` immediately before
+    /// the `gogo`; cleared by the landing pad.
+    pub goexiting: AtomicBool,
 }
 
 impl G {
@@ -198,6 +208,7 @@ impl G {
             panic_recover: super::gobuf::Gobuf::new(),
             cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             panicking: AtomicBool::new(false),
+            goexiting: AtomicBool::new(false),
             panic_value: SpinLock::new(None),
         }
     }
@@ -261,6 +272,7 @@ impl G {
             panic_recover: super::gobuf::Gobuf::new(),
             cleanups: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             panicking: AtomicBool::new(false),
+            goexiting: AtomicBool::new(false),
             panic_value: SpinLock::new(None),
         }
     }

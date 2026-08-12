@@ -120,6 +120,67 @@ pub fn SetFinalizer<T, F>(_obj: T, _finalizer: F) {
     // Slim: no-op. Drop handles cleanup.
 }
 
+// go: sdk 1.25.5 runtime/panic.go:603-622 Goexit
+/// Go: "Goexit terminates the goroutine that calls it. No other
+/// goroutine is affected. Goexit runs all deferred calls before
+/// terminating the goroutine. Because Goexit is not a panic, any
+/// recover calls in those deferred functions will return nil.
+///
+/// Calling Goexit from the main goroutine terminates that goroutine
+/// without func main returning. Since func main has not returned,
+/// the program continues execution of other goroutines. If all other
+/// goroutines exit, the program crashes.
+///
+/// It crashes if called from a thread not created by the Go runtime."
+///
+/// This is what `testing.T`'s `FailNow`, `Fatal`, `Fatalf` and `Skip`
+/// are built on: end this test's goroutine, leave the suite running.
+///
+/// **Deviation — which deferred work runs.** Go unwinds frame by
+/// frame and runs every deferred call. goish builds with
+/// `panic = "abort"` and has no frame-level unwind tables, so the
+/// termination is a `gogo` to the G's recovery point, which abandons
+/// the intervening frames without running their `Drop` impls. What
+/// does run is the per-G `cleanups` registry (`SpinLock` guards,
+/// fd-owning resources — the same set the panic path releases), and
+/// it runs here, before the jump, while those frames are still
+/// intact. Callers needing more than that must run it themselves
+/// before calling Goexit, which is what `testing`'s `T` does with its
+/// own cleanup stack.
+///
+/// **Deviation — no main goroutine.** goish's `#[goish::main]` body is
+/// not a goroutine (it is the bootstrap thread), so there is no
+/// "terminates main without returning" case. Called from there — or
+/// from any thread with no current G — this panics rather than
+/// crashing silently, matching Go's "crashes if called from a thread
+/// not created by the Go runtime".
+pub fn Goexit() -> ! {
+    // Go: the _panic object with p.goexit = true exists so a recover()
+    // in a deferred call can be recognized and refused. goish's
+    // `recover!()` reads `g.panicking`, which we deliberately leave
+    // false — a Goexit is not a panic, so recover sees nil, as Go
+    // documents.
+    if sched::is_tls_ready() {
+        if let Some(g_ptr) = sched::current_g() {
+            let g = unsafe { &*g_ptr.as_ptr() };
+            if g.panic_recover.rsp != 0 {
+                g.goexiting
+                    .store(true, core::sync::atomic::Ordering::Release);
+                // Release registered resources while the frames that
+                // registered them are still valid. Same ordering the
+                // `#[panic_handler]` uses, and for the same reason:
+                // the nodes live in those frames.
+                unsafe { sched::cleanup::run_all(g) };
+                // Re-enter this G at the top of its own stack and
+                // chain to `goexit`, so the scheduler reclaims it
+                // normally and every other goroutine keeps running.
+                unsafe { sched::gogo(&g.panic_recover) };
+            }
+        }
+    }
+    panic!("runtime::Goexit called outside a goroutine");
+}
+
 /// `runtime.GOROOT()` (extern.go:285) — directory containing the
 /// Go installation. Goish doesn't ship as a tree (single-binary
 /// rlib), so this returns `""` to mirror Go's "not set" sentinel.
