@@ -414,6 +414,10 @@ pub struct Config {
     /// Go: "ClientSessionCache is a cache of ClientSessionState entries
     /// for TLS session resumption. It is only used by clients."
     /// Reference: common.go:684.
+    /// Go: "ClientCAs defines the set of root certificate authorities
+    /// that servers use if required to verify a client certificate by
+    /// the policy in ClientAuth." Reference: common.go:723.
+    pub ClientCAs: Option<crate::crypto::x509::CertPool>,
     pub ClientSessionCache:
         Option<alloc::sync::Arc<crate::sync::Mutex<alloc::boxed::Box<dyn common::ClientSessionCache>>>>,
     /// Go: "VerifyPeerCertificate, if not nil, is called after normal
@@ -4685,6 +4689,7 @@ pub fn handshake_server_tls13_stateFlags() -> (bool, bool, bool, bool, bool, boo
         c.__setConfig(cfg);
         return handshake_server_tls13::serverHandshakeStateTLS13 {
             suite: None,
+            transcript: None,
             clientFinished: crate::goslice::slice::new(),
             trafficSecret: crate::goslice::slice::new(),
             c,
@@ -5342,6 +5347,7 @@ pub fn handshake_server_tls13_pickCertificate(
     };
     let mut hs = handshake_server_tls13::serverHandshakeStateTLS13 {
             suite: None,
+            transcript: None,
             clientFinished: crate::goslice::slice::new(),
             trafficSecret: crate::goslice::slice::new(),
         c,
@@ -5898,7 +5904,7 @@ pub fn handshake_client_verifyServerCertificate(
 ) -> (crate::gostring::string, crate::types::int, crate::types::int) {
     use crate::goslice::slice;
     let der = crate::encoding::base64::StdEncoding.DecodeString(
-        "MIIE4DCCA8igAwIBAgIFAQIDBAUwDQYJKoZIhvcNAQELBQAwbDELMAkGA1UEBhMCVEgxEDAOBgNVBAcTB0Jhbmdrb2sxFzAVBgNVBAoTDkdvaXNoIFRlc3QgT3JnMQ4wDAYDVQQLEwVQb3J0czETMBEGA1UEAxMKZ29pc2ggbGVhZjENMAsGA1UEBRMEU04tNzAeFw0yNDAzMDExMjAwMDBaFw0zMzA0MDIxMzE0MTVaMGwxCzAJBgNVBAYTAlRIMRAwDgYDVQQHEwdCYW5na29rMRcwFQYDVQQKEw5Hb2lzaCBUZXN0IE9yZzEOMAwGA1UECxMFUG9ydHMxEzARBgNVBAMTCmdvaXNoIGxlYWYxDTALBgNVBAUTBFNOLTcwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDEE3zZMggLiQDVMKhbusFFqr5rE7BxpUMyaL9fCRhQHqKRaqwBHzo7fry6P9/SQmGQehkiS4ciMyhFI8YtYjHqdCT/K0o5Y0kk2gFBzmEWNKRN3J+dxZWYrA5gExmMpQCTdsYUSHG1683Z7a+S1rcLc+rHxhYDswT6HIioJfiF+Mko+27mtCirEJzHe/wA0NzHv6Wk+rQmjA8spQ4azr88duWqrxmh5l6Xcy6l1pnHaOvsIk78JtP7KTTeTvtLKCqdzrRrBKj+ISBj2gXopXJWROUBenJhcyNYROah0woJNrNw0Eq1ILBLBree7hx6rGog90dUn8lGkW7FWVnRgH8tAgMBAAGjggGHMIIBgzAOBgNVHQ8BAf8EBAMCAqQwHQYDVR0lBBYwFAYIKwYBBQUHAwEGCCsGAQUFBwMCMBIGA1UdEwEB/wQIMAYBAf8CAQIwDgYDVR0OBAcEBQECAwQFMGEGCCsGAQUFBwEBBFUwUzAlBggrBgEFBQcwAYYZaHR0cDovL29jc3AuZ29pc2guZXhhbXBsZTAqBggrBgEFBQcwAoYeaHR0cDovL2NhLmdvaXNoLmV4YW1wbGUvY2EuY3J0MF8GA1UdEQRYMFaCDWdvaXNoLmV4YW1wbGWCEXd3dy5nb2lzaC5leGFtcGxlgRJwb3J0QGdvaXNoLmV4YW1wbGWHBMAAAgqGGGh0dHBzOi8vZ29pc2guZXhhbXBsZS9jYTA5BgNVHR4EMjAwoB0wD4INZ29pc2guZXhhbXBsZTAKhwgKAAAA/wAAAKEPMA2CC2JhZC5leGFtcGxlMC8GA1UdHwQoMCYwJKAioCCGHmh0dHA6Ly9jcmwuZ29pc2guZXhhbXBsZS94LmNybDANBgkqhkiG9w0BAQsFAAOCAQEAdIYb7TNaVRqsSMoVfCf+IcCmKjZaKJfIkxrOpupQZK205mzX+/w3szqUl/EUFhFrmqWCBAgntuZ7VZDNXF9KBrNjNwbCkV8EkP/uyNDzr0PYuutfhEY7V7GbJX4aUU+i+unHbTEcPbQjoVTWg6DVUUihnejtkee3b88GaRQFWhWy1GgwUPLe3xx2UEsok7bcBfFOzsOwyU8jcdl6YXQca37j974lL9Ej/C6lnO+ilk45+T08TVx3YQCmQGJWXYmmUQOL7WYZOPXEhreogZrVDGi8Uw80/fjU2zWB58JCMly/pK9s3yGcYqYSmDZfZZ3PR4appnTEXHCBV6AYRr1Nlw==",
+        __testLeafB64,
     );
     let der = der.0;
     let (leaf, _) = crate::crypto::x509::ParseCertificate(der.clone());
@@ -6931,6 +6937,7 @@ pub fn handshake_server_tls13_readClientFinished(
         suite: cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256),
         clientFinished: expected,
         trafficSecret: slice::__from_vec(alloc::vec![0xaau8, 0xbb, 0xcc, 0xdd]),
+        transcript: None,
         c,
         clientHello: handshake_messages::clientHelloMsg::default(),
         sentDummyCCS: false,
@@ -6947,3 +6954,96 @@ pub fn handshake_server_tls13_readClientFinished(
     let (inSec, _) = hs.c.__trafficSecrets();
     return (text, inSec, sink.Lock().clone());
 }
+
+// go: none — goish-only: `serverHandshakeStateTLS13.sendServerCertificate`
+// is unexported in Go, where the tests are in-package. Signs with a
+// fixed Ed25519 seed, which is deterministic, so the CertificateVerify
+// is byte-comparable rather than only structurally checkable.
+// `which`: 0 = PSK (nothing sent), 1 = client cert requested with a
+// ClientCAs pool, 2 = requested without one, 3 = not requested.
+// Reports `(errText, the wire)`.
+#[doc(hidden)]
+pub fn handshake_server_tls13_sendServerCertificate(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    use crate::goslice::slice;
+    let der = crate::encoding::base64::StdEncoding.DecodeString(
+        __testLeafB64,
+    ).0;
+    let seed: slice<crate::types::byte> = {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: crate::types::int = 0;
+        while i < 32 {
+            v.push(crate::byte(i + 1));
+            i += 1;
+        }
+        slice::__from_vec(v)
+    };
+    let key = crate::crypto::ed25519::NewKeyFromSeed(seed);
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink.clone());
+    c.__setHaveVers(true);
+    c.__setVers(common::VersionTLS13);
+    c.__setCipherSuite(cipher_suites::TLS_AES_128_GCM_SHA256);
+
+    let mut cfg = Config::default();
+    cfg.ClientAuth = if which == 1 || which == 2 {
+        common::RequireAnyClientCert
+    } else {
+        common::NoClientCert
+    };
+    if which == 1 {
+        let (leaf, _) = crate::crypto::x509::ParseCertificate(der.clone());
+        let mut pool = crate::crypto::x509::NewCertPool();
+        pool.AddCert(leaf);
+        cfg.ClientCAs = Some(pool);
+    }
+    c.__setConfig(cfg);
+
+    let mut cert = common::Certificate::default();
+    cert.Certificate = slice::__from_vec(alloc::vec![der]);
+    cert.PrivateKey = alloc::sync::Arc::new(key);
+
+    let mut transcript = handshake_messages::transcriptHasher(alloc::boxed::Box::new(
+        crate::crypto::sha256::New(),
+    ));
+    crate::io::Writer::Write(
+        &mut transcript,
+        slice::__from_vec(alloc::vec![0x01u8, 0x00, 0x00, 0x00]),
+    );
+
+    let mut hs = handshake_server_tls13::serverHandshakeStateTLS13 {
+        c,
+        clientHello: handshake_messages::clientHelloMsg::default(),
+        sentDummyCCS: false,
+        usingPSK: which == 0,
+        sigAlg: common::Ed25519,
+        cert: Some(cert),
+        suite: cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256),
+        clientFinished: slice::new(),
+        trafficSecret: slice::new(),
+        transcript: Some(transcript),
+    };
+    let err = hs.sendServerCertificate();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (text, sink.Lock().clone());
+}
+
+// go: none — goish-only: the self-signed RSA-2048 leaf the shims below
+// sign and verify against, the same fixture x509_parse_smoke uses.
+// Held once: it was pasted by hand into a second shim and silently
+// corrupted from offset 1503, which showed up only as a wrong
+// Ed25519 signature three layers away.
+#[doc(hidden)]
+pub const __testLeafB64: &str = "MIIE4DCCA8igAwIBAgIFAQIDBAUwDQYJKoZIhvcNAQELBQAwbDELMAkGA1UEBhMCVEgxEDAOBgNVBAcTB0Jhbmdrb2sxFzAVBgNVBAoTDkdvaXNoIFRlc3QgT3JnMQ4wDAYDVQQLEwVQb3J0czETMBEGA1UEAxMKZ29pc2ggbGVhZjENMAsGA1UEBRMEU04tNzAeFw0yNDAzMDExMjAwMDBaFw0zMzA0MDIxMzE0MTVaMGwxCzAJBgNVBAYTAlRIMRAwDgYDVQQHEwdCYW5na29rMRcwFQYDVQQKEw5Hb2lzaCBUZXN0IE9yZzEOMAwGA1UECxMFUG9ydHMxEzARBgNVBAMTCmdvaXNoIGxlYWYxDTALBgNVBAUTBFNOLTcwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDEE3zZMggLiQDVMKhbusFFqr5rE7BxpUMyaL9fCRhQHqKRaqwBHzo7fry6P9/SQmGQehkiS4ciMyhFI8YtYjHqdCT/K0o5Y0kk2gFBzmEWNKRN3J+dxZWYrA5gExmMpQCTdsYUSHG1683Z7a+S1rcLc+rHxhYDswT6HIioJfiF+Mko+27mtCirEJzHe/wA0NzHv6Wk+rQmjA8spQ4azr88duWqrxmh5l6Xcy6l1pnHaOvsIk78JtP7KTTeTvtLKCqdzrRrBKj+ISBj2gXopXJWROUBenJhcyNYROah0woJNrNw0Eq1ILBLBree7hx6rGog90dUn8lGkW7FWVnRgH8tAgMBAAGjggGHMIIBgzAOBgNVHQ8BAf8EBAMCAqQwHQYDVR0lBBYwFAYIKwYBBQUHAwEGCCsGAQUFBwMCMBIGA1UdEwEB/wQIMAYBAf8CAQIwDgYDVR0OBAcEBQECAwQFMGEGCCsGAQUFBwEBBFUwUzAlBggrBgEFBQcwAYYZaHR0cDovL29jc3AuZ29pc2guZXhhbXBsZTAqBggrBgEFBQcwAoYeaHR0cDovL2NhLmdvaXNoLmV4YW1wbGUvY2EuY3J0MF8GA1UdEQRYMFaCDWdvaXNoLmV4YW1wbGWCEXd3dy5nb2lzaC5leGFtcGxlgRJwb3J0QGdvaXNoLmV4YW1wbGWHBMAAAgqGGGh0dHBzOi8vZ29pc2guZXhhbXBsZS9jYTA5BgNVHR4EMjAwoB0wD4INZ29pc2guZXhhbXBsZTAKhwgKAAAA/wAAAKEPMA2CC2JhZC5leGFtcGxlMC8GA1UdHwQoMCYwJKAioCCGHmh0dHA6Ly9jcmwuZ29pc2guZXhhbXBsZS94LmNybDANBgkqhkiG9w0BAQsFAAOCAQEAdIYb7TNaVRqsSMoVfCf+IcCmKjZaKJfIkxrOpupQZK205mzX+/w3szqUl/EUFhFrmqWCBAgntuZ7VZDNXF9KBrNjNwbCkV8EkP/uyNDzr0PYuutfhEY7V7GbJX4aUU+i+unHbTEcPbQjoVTWg6DVUUihnejtkee3b88GaRQFWhWy1GgwUPLe3xx2UEsok7bcBfFOzsOwyU8jcdl6YXQca37j974lL9Ej/C6lnO+ilk45+T08TVx3YQCmQGJWXYmmUQOL7WYZOPXEhreogZrVDGi8Uw80/fjU2zWB58JCMly/pK9s3yGcYqYSmDZfZZ3PR4appnTEXHCBV6AYRr1Nlw==";

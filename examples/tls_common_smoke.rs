@@ -3175,6 +3175,86 @@ fn main() {
         rcfI += 1;
     }
 
+
+    // ── serverHandshakeStateTLS13.sendServerCertificate ─────────────
+    //
+    // Ground truth: scripts/goref.sh crypto/tls, signing with a fixed
+    // Ed25519 seed so the CertificateVerify is deterministic and the
+    // whole wire is byte-comparable rather than only structural.
+    //
+    // Each case is checked by splitting the wire into records: the
+    // CertificateRequest and CertificateVerify are asserted in full,
+    // the 1265-byte Certificate by length, since its DER is the fixture.
+    let sscRec = |which: int| -> (string, slice<int>, string, string) {
+        let (e, w) = tls::handshake_server_tls13_sendServerCertificate(which);
+        let mut lens: alloc::vec::Vec<int> = alloc::vec::Vec::new();
+        let mut first = string::from_static("");
+        let mut last = string::from_static("");
+        let mut i: int = 0;
+        while i + 5 <= w.Len() {
+            let n = (goish::int(w[(i + 3) as usize]) << 8) | goish::int(w[(i + 4) as usize]);
+            let body = w.slice(i + 5, i + 5 + n);
+            if lens.is_empty() {
+                first = hexOf(body.clone());
+            }
+            last = hexOf(body);
+            lens.push(n);
+            i += 5 + n;
+        }
+        return (e, slice::__from_vec(lens), first, last);
+    };
+
+    // PSK: only one of PSK and certificates is used, so nothing goes out.
+    let (ssc0e, ssc0len, _, _) = sscRec(0);
+    eq("sendServerCertificate under PSK succeeds", ssc0e, "");
+    check_n("sendServerCertificate under PSK writes nothing", ssc0len.Len(), 0);
+
+    // Client cert requested, with a ClientCAs pool: the
+    // CertificateRequest carries the pool's subjects.
+    let (ssc1e, ssc1len, ssc1first, ssc1last) = sscRec(1);
+    eq("sendServerCertificate with a CA pool succeeds", ssc1e, "");
+    check_n("sendServerCertificate sends three records", ssc1len.Len(), 3);
+    eq(
+        "the CertificateRequest carries the ClientCAs subjects",
+        ssc1first,
+        "0d0000b30000b00005000000120000000d0010000e08040403080708050806050306030032001a0018080404030807080508060401050106010503060302010203002f00720070006e306c310b30090603550406130254483110300e0603550407130742616e676b6f6b31173015060355040a130e476f6973682054657374204f7267310e300c060355040b1305506f727473311330110603550403130a676f697368206c656166310d300b06035504051304534e2d37",
+    );
+    eq(
+        "the CertificateVerify is Go's Ed25519 signature",
+        ssc1last,
+        "0f000044080700405b688b6b36cf01c26029f17c8a1049e658ade5568a5cca55aa3279cd404f4f82e517452ffc2c08542c1b1f5fd1973e4b567a2c47b7ed08141ca170403d123a02",
+    );
+
+    // Requested without a pool: the same request minus the authorities.
+    let (ssc2e, ssc2len, ssc2first, ssc2last) = sscRec(2);
+    eq("sendServerCertificate without a CA pool succeeds", ssc2e, "");
+    check_n("sendServerCertificate still sends three records", ssc2len.Len(), 3);
+    eq(
+        "the CertificateRequest omits the authorities",
+        ssc2first,
+        "0d00003d00003a0005000000120000000d0010000e08040403080708050806050306030032001a0018080404030807080508060401050106010503060302010203",
+    );
+    // The signature differs from case 1: the transcript it covers
+    // includes the CertificateRequest, which differed.
+    eq(
+        "the CertificateVerify signs the shorter transcript",
+        ssc2last,
+        "0f00004408070040fb9f8f2f5c49db261962d79a650b0dcebeb9d1dcae73f296988ed6fa7688e72e3f39f78341b96184f049495eae7a9ed9920437be30072b5c6c9b8f2224908707",
+    );
+
+    // No client cert requested: Certificate then CertificateVerify only.
+    let (ssc3e, ssc3len, _, ssc3last) = sscRec(3);
+    eq("sendServerCertificate without a request succeeds", ssc3e, "");
+    check_n("sendServerCertificate sends two records", ssc3len.Len(), 2);
+    check_n("the Certificate record is the fixture", ssc3len[0], 1265);
+    eq(
+        "the CertificateVerify signs the transcript with no request",
+        ssc3last,
+        "0f000044080700400f9a7a839247751a36ec2f0ab03aeb326813ba507dcbf6d5451d9af92f11c4010397cad512ad5137578377d8e3234f4960097a426225a7d305cf2320c5b93509",
+    );
+
+
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

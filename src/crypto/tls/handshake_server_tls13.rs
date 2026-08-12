@@ -1,6 +1,6 @@
 // crypto/tls/handshake_server_tls13.rs — TLS 1.3 server handshake.
 //
-// goishlint:ignore GOISH018 handshake, processClientHello, checkForResumption, doHelloRetryRequest, sendServerParameters, sendServerCertificate, sendServerFinished, sendSessionTickets, sendSessionTicket, readClientCertificate, readClientFinished — serverHandshakeStateTLS13's Conn-driven half; the live server below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH018 handshake, processClientHello, checkForResumption, doHelloRetryRequest, sendServerParameters, sendServerFinished, sendSessionTickets, sendSessionTicket, readClientCertificate, readClientFinished — serverHandshakeStateTLS13's Conn-driven half; the live server below the divider implements the same protocol by hand. See ROADMAP.md.
 // goishlint:ignore GOISH021 echServerContext, maxClientPSKIdentities — same.
 //
 // Port of Go 1.25.5 crypto/tls:
@@ -753,6 +753,7 @@ pub(crate) struct serverHandshakeStateTLS13 {
     pub clientFinished: crate::goslice::slice<crate::types::byte>,
     /// Go: `client_application_traffic_secret_0`.
     pub trafficSecret: crate::goslice::slice<crate::types::byte>,
+    pub transcript: Option<super::handshake_messages::transcriptHasher>,
 }
 
 impl serverHandshakeStateTLS13 {
@@ -1010,6 +1011,146 @@ impl serverHandshakeStateTLS13 {
             super::quic::QUICEncryptionLevelApplication,
             self.trafficSecret.clone(),
         );
+        return crate::errors::nil;
+    }
+}
+
+impl serverHandshakeStateTLS13 {
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:838-904 serverHandshakeStateTLS13.sendServerCertificate
+    /// Go: send the optional CertificateRequest, the server's
+    /// Certificate, and the CertificateVerify that signs the transcript
+    /// with the leaf's key.
+    pub(crate) fn sendServerCertificate(&mut self) -> crate::error {
+        // Go: "Only one of PSK and certificates are used at a time."
+        if self.usingPSK {
+            return crate::errors::nil;
+        }
+
+        // Go: if hs.requestClientCert() { … }
+        if self.requestClientCert() {
+            // Go: "Request a client certificate"
+            let mut certReq = super::handshake_messages::certificateRequestMsgTLS13::default();
+            certReq.ocspStapling = true;
+            certReq.scts = true;
+            certReq.supportedSignatureAlgorithms =
+                super::common::supportedSignatureAlgorithms(self.c.__vers());
+            certReq.supportedSignatureAlgorithmsCert =
+                super::common::supportedSignatureAlgorithmsCert();
+            // Go: if c.config.ClientCAs != nil {
+            //         certReq.certificateAuthorities = c.config.ClientCAs.Subjects() }
+            if let Some(pool) = self.c.config.ClientCAs.as_ref() {
+                certReq.certificateAuthorities = pool.Subjects();
+            }
+
+            let (_, err) = {
+                let transcript = self.transcript.as_mut().unwrap();
+                self.c.writeHandshakeRecord(&certReq, Some(transcript))
+            };
+            if err != crate::errors::nil {
+                return err;
+            }
+        }
+
+        // Go: certMsg := new(certificateMsgTLS13)
+        //     certMsg.certificate = *hs.cert
+        //     certMsg.scts = hs.clientHello.scts && len(hs.cert.SignedCertificateTimestamps) > 0
+        //     certMsg.ocspStapling = hs.clientHello.ocspStapling && len(hs.cert.OCSPStaple) > 0
+        let cert = self.cert.clone().unwrap_or_default();
+        let mut certMsg = super::handshake_messages::certificateMsgTLS13::default();
+        certMsg.certificate = cert.clone();
+        certMsg.scts =
+            self.clientHello.scts && cert.SignedCertificateTimestamps.Len() > 0;
+        certMsg.ocspStapling = self.clientHello.ocspStapling && cert.OCSPStaple.Len() > 0;
+
+        let (_, err) = {
+            let transcript = self.transcript.as_mut().unwrap();
+            self.c.writeHandshakeRecord(&certMsg, Some(transcript))
+        };
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: certVerifyMsg := new(certificateVerifyMsg)
+        //     certVerifyMsg.hasSignatureAlgorithm = true
+        //     certVerifyMsg.signatureAlgorithm = hs.sigAlg
+        let mut certVerifyMsg = super::handshake_messages::certificateVerifyMsg::default();
+        certVerifyMsg.hasSignatureAlgorithm = true;
+        certVerifyMsg.signatureAlgorithm = self.sigAlg.0;
+
+        // Go: sigType, sigHash, err := typeAndHashFromSignatureScheme(hs.sigAlg)
+        //     if err != nil { return c.sendAlert(alertInternalError) }
+        let (sigType, sigHash, err) = super::auth::typeAndHashFromSignatureScheme(self.sigAlg);
+        if err != crate::errors::nil {
+            return self.c.sendAlert(super::alert::alertInternalError);
+        }
+
+        // Go: signed := signedMessage(sigHash, serverSignatureContext, hs.transcript)
+        let signed = {
+            let transcript = self.transcript.as_mut().unwrap();
+            super::auth::signedMessage(
+                sigHash,
+                super::auth::serverSignatureContext,
+                &mut *transcript.0,
+            )
+        };
+        // Go: signOpts := crypto.SignerOpts(sigHash)
+        //     if sigType == signatureRSAPSS {
+        //         signOpts = &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash, Hash: sigHash} }
+        let opts: alloc::boxed::Box<dyn crate::crypto::SignerOpts + Send + Sync> =
+            if sigType == super::common::signatureRSAPSS {
+                alloc::boxed::Box::new(crate::crypto::rsa::PSSOptions {
+                    SaltLength: crate::crypto::rsa::PSSSaltLengthEqualsHash,
+                    Hash: sigHash,
+                })
+            } else {
+                alloc::boxed::Box::new(sigHash)
+            };
+        // Go: sig, err := hs.cert.PrivateKey.(crypto.Signer).Sign(c.config.rand(), signed, signOpts)
+        let signer = match super::auth::signerOf(&cert.PrivateKey) {
+            Some(s) => s,
+            None => {
+                self.c.sendAlert(super::alert::alertInternalError);
+                return crate::errors::New(
+                    "tls: failed to sign handshake: certificate private key does not implement crypto.Signer",
+                );
+            }
+        };
+        let mut rng = self.c.config.rand();
+        let (sig, err) = signer.Sign(&mut *rng, signed, &*opts);
+        if err != crate::errors::nil {
+            // Go: public := hs.cert.PrivateKey.(crypto.Signer).Public()
+            //     if rsaKey, ok := public.(*rsa.PublicKey); ok && sigType == signatureRSAPSS &&
+            //         rsaKey.N.BitLen()/8 < sigHash.Size()*2+2 { // key too small for RSA-PSS
+            //         c.sendAlert(alertHandshakeFailure)
+            //     } else { c.sendAlert(alertInternalError) }
+            let pub_ = signer.Public();
+            let tooSmallForPSS = match pub_.downcast_ref::<crate::crypto::rsa::PublicKey>() {
+                Some(k) => {
+                    sigType == super::common::signatureRSAPSS
+                        && k.N.BitLen() / 8 < sigHash.Size() * 2 + 2
+                }
+                None => false,
+            };
+            if tooSmallForPSS {
+                self.c.sendAlert(super::alert::alertHandshakeFailure);
+            } else {
+                self.c.sendAlert(super::alert::alertInternalError);
+            }
+            return crate::fmt::Errorf!("tls: failed to sign handshake: %s", err.Error());
+        }
+        // Go: certVerifyMsg.signature = sig
+        certVerifyMsg.signature = sig.__into_vec();
+
+        // Go: if _, err := hs.c.writeHandshakeRecord(certVerifyMsg, hs.transcript); err != nil { return err }
+        let (_, err) = {
+            let transcript = self.transcript.as_mut().unwrap();
+            self.c.writeHandshakeRecord(&certVerifyMsg, Some(transcript))
+        };
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: return nil
         return crate::errors::nil;
     }
 }
