@@ -4415,3 +4415,78 @@ pub fn conn_readRecord(
     };
     return (text, c.__hand(), c.__retryCount());
 }
+
+// go: none — goish-only: Conn's close and handshake-read helpers are
+// unexported in Go, where the tests are in-package. Reports
+// `(CloseWrite before the handshake, CloseWrite after it, the wire, the
+// second CloseWrite grew the wire, readHandshakeBytes(3) error, the
+// handshake buffer, the short-feed error, its buffer)`.
+#[doc(hidden)]
+pub fn conn_closeAndHandshakeBytes() -> (
+    crate::gostring::string,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let mut early = conn::Conn::default();
+    early.__setMemConn(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    )));
+    let earlyErr = early.CloseWrite().Error();
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink.clone());
+    c.__setVers(common::VersionTLS12);
+    c.__setHandshakeComplete(true);
+    let err1 = c.CloseWrite();
+    let wire = sink.Lock().clone();
+    let before = wire.Len();
+    let _ = c.CloseWrite();
+    let grew = sink.Lock().Len() != before;
+
+    let feed = alloc::vec![
+        0x16u8, 0x03, 0x01, 0x00, 0x02, 1, 2, 0x16, 0x03, 0x01, 0x00, 0x02, 3, 4
+    ];
+    let mut c3 = conn::Conn::default();
+    c3.__setFeedConn(crate::goslice::slice::__from_vec(feed.clone()));
+    let e3 = c3.readHandshakeBytes(3);
+    let mut c4 = conn::Conn::default();
+    c4.__setFeedConn(crate::goslice::slice::__from_vec(feed[..7].to_vec()));
+    let e4 = c4.readHandshakeBytes(3);
+
+    let txt = |e: crate::error| {
+        if e == crate::errors::nil {
+            return crate::gostring::string::from_static("");
+        }
+        return e.Error();
+    };
+    return (
+        earlyErr,
+        txt(err1),
+        wire,
+        grew,
+        txt(e3),
+        c3.__hand(),
+        txt(e4),
+        c4.__hand(),
+    );
+}
+
+// go: none — goish-only: see `conn_closeAndHandshakeBytes`. Reports
+// `(the default dialer's timeout, an explicit dialer's timeout)`.
+#[doc(hidden)]
+pub fn tls_dialerNetDialer() -> (crate::types::int64, crate::types::int64) {
+    let d = tls::Dialer::default();
+    let mut nd = crate::net::Dialer::default();
+    nd.Timeout = crate::time::Second * 5;
+    let mut d2 = tls::Dialer::default();
+    d2.NetDialer = Some(nd);
+    return (d.netDialer().Timeout.0, d2.netDialer().Timeout.0);
+}

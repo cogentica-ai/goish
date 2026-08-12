@@ -1,4 +1,4 @@
-// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert, Conn.readFromUntil, Conn.retryReadRecord, Conn.readRecord, Conn.readChangeCipherSpec, Conn.readRecordOrCCS
+// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert, Conn.readFromUntil, Conn.retryReadRecord, Conn.readRecord, Conn.readChangeCipherSpec, Conn.readRecordOrCCS, Conn.closeNotify, Conn.CloseWrite, Conn.readHandshakeBytes
 //
 // crypto/tls — the record layer's cipher state.
 //
@@ -8,9 +8,9 @@
 // its `decrypt`/`encrypt`, `atLeastReader` and the free functions they
 // need — none of which touches a `Conn`.
 //
-// goishlint:ignore GOISH018 writeHandshakeRecord, readHandshakeBytes, readHandshake, unmarshalHandshakeMessage, handleRenegotiation, handlePostHandshakeMessage, handleKeyUpdate, CloseWrite, closeNotify, HandshakeContext, handshakeContext, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
+// goishlint:ignore GOISH018 writeHandshakeRecord, readHandshake, unmarshalHandshakeMessage, handleRenegotiation, handlePostHandshakeMessage, handleKeyUpdate, HandshakeContext, handshakeContext, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
 // goishlint:ignore GOISH019  — same.
-// goishlint:ignore GOISH021 errShutdown, errEarlyCloseWrite, maxUselessBytes, tlsunsafeekm, outBufPool — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write; outBufPool is a sync.Pool whose only purpose is to avoid one allocation per record, which goish does not model.
+// goishlint:ignore GOISH021 maxUselessBytes, tlsunsafeekm, outBufPool — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write; outBufPool is a sync.Pool whose only purpose is to avoid one allocation per record, which goish does not model.
 //
 // One deviation: `setErrorLocked` asserts `err.(net.Error)` in Go, to
 // wrap a transient network error as permanent. goish's `net` exposes no
@@ -2022,4 +2022,65 @@ impl crate::net::Conn for feedConn {
     fn SetReadDeadline(&self, _t: crate::time::Time) -> error { return errors::nil; }
     // go: none — goish-only: see `feedConn`.
     fn SetWriteDeadline(&self, _t: crate::time::Time) -> error { return errors::nil; }
+}
+
+crate::var! {
+    /// Go: `var errEarlyCloseWrite = errors.New(…)`
+    pub(crate) errEarlyCloseWrite: error = "tls: CloseWrite called before handshake complete";
+    /// Go: `var errShutdown = errors.New(…)`
+    pub(crate) errShutdown: error = "tls: protocol is shutdown";
+}
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/conn.go:1439-1455 Conn.closeNotify
+    /// Go: "closeNotify closes the Write side of the connection by
+    /// sending a close notify record."
+    pub(crate) fn closeNotify(&mut self) -> error {
+        // Go: if !c.closeNotifySent {
+        //         // Set a Write Deadline to prevent possibly blocking forever.
+        //         c.SetWriteDeadline(time.Now().Add(time.Second * 5))
+        //         c.closeNotifyErr = c.sendAlertLocked(alertCloseNotify)
+        //         c.closeNotifySent = true
+        //         // Any subsequent writes will fail.
+        //         c.SetWriteDeadline(time.Now()) }
+        //     return c.closeNotifyErr
+        if !self.closeNotifySent {
+            self.SetWriteDeadline(crate::time::Now().Add(crate::time::Second * 5));
+            self.closeNotifyErr = self.sendAlertLocked(super::alert::alertCloseNotify);
+            self.closeNotifySent = true;
+            self.SetWriteDeadline(crate::time::Now());
+        }
+        return self.closeNotifyErr.clone();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1459-1465 Conn.CloseWrite
+    /// Go: "CloseWrite shuts down the writing side of the connection. It
+    /// should only be called once the handshake has completed and does
+    /// not call CloseWrite on the underlying connection. Most callers
+    /// should just use Close."
+    pub fn CloseWrite(&mut self) -> error {
+        // Go: if !c.isHandshakeComplete.Load() { return errEarlyCloseWrite }
+        //     return c.closeNotify()
+        if !self.isHandshakeComplete {
+            return errEarlyCloseWrite.into();
+        }
+        return self.closeNotify();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1058-1068 Conn.readHandshakeBytes
+    ///
+    /// Deviation: the `c.quic != nil` branch is absent — goish ships no
+    /// QUIC transport.
+    pub(crate) fn readHandshakeBytes(&mut self, n: int) -> error {
+        // Go: for c.hand.Len() < n {
+        //         if err := c.readRecord(); err != nil { return err } }
+        //     return nil
+        while crate::int(self.hand.len()) < n {
+            let err = self.readRecord();
+            if err != errors::nil {
+                return err;
+            }
+        }
+        return errors::nil;
+    }
 }

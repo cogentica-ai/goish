@@ -2134,6 +2134,31 @@ fn main() {
     let (rd12, _, _) = rr(12);
     eq("readRecord on an empty stream", rd12, "EOF");
 
+    // ─── conn.go: close_notify and the handshake-byte reader; tls.go:
+    //     Dialer.netDialer. From goref.sh.
+    let (cwEarly, cwErr, cwWire, cwGrew, hb3Err, hb3, hbShortErr, hbShort) =
+        tls::conn_closeAndHandshakeBytes();
+    eq("CloseWrite before the handshake", cwEarly,
+       "tls: CloseWrite called before handshake complete");
+    eq("CloseWrite after the handshake err", cwErr, "");
+    eq("CloseWrite sends close_notify", hexOf(cwWire), "15030300020100");
+    // closeNotifySent makes the second call a no-op — a second alert on
+    // the wire would be a protocol error.
+    check("CloseWrite is idempotent", !cwGrew);
+    // readHandshakeBytes keeps pulling records until it has enough, so
+    // one handshake message can span two records.
+    eq("readHandshakeBytes across two records err", hb3Err, "");
+    eq("readHandshakeBytes across two records", hexOf(hb3), "01020304");
+    // Short of the requested count it surfaces the read error, keeping
+    // whatever it managed to buffer.
+    eq("readHandshakeBytes on a truncated stream", hbShortErr, "EOF");
+    eq("readHandshakeBytes keeps the partial buffer", hexOf(hbShort), "0102");
+
+    let (ndDefault, ndExplicit) = tls::tls_dialerNetDialer();
+    check("Dialer.netDialer defaults to a zero net::Dialer", ndDefault == 0i64);
+    check("Dialer.netDialer returns the configured one",
+          ndExplicit == 5_000_000_000i64);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
