@@ -4898,6 +4898,8 @@ pub fn handshake_client_pickCipherSuite(
         serverHello,
         hello,
         suite: None,
+        masterSecret: crate::goslice::slice::new(),
+        session: None,
     };
     let err = hs.pickCipherSuite();
     if err != crate::errors::nil {
@@ -5096,4 +5098,76 @@ pub fn handshake_server_checkForResumption(
         err.Error()
     };
     return (text, hs.c.__didResume(), hs.suite.is_some());
+}
+
+// go: none — goish-only: clientHandshakeState is unexported in Go,
+// where the tests are in-package. Runs the client's establishKeys and
+// reports `(errText, staged ok, read-half explicit nonce after the CCS)`.
+#[doc(hidden)]
+pub fn handshake_client_establishKeys() -> (
+    crate::gostring::string,
+    bool,
+    crate::types::int,
+) {
+    let mut c = conn::Conn::default();
+    c.__setMemConn(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    )));
+    c.__setVers(common::VersionTLS12);
+    let suite =
+        cipher_suites::cipherSuiteByID(cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
+            .unwrap();
+    let ms = crate::goslice::slice::__from_vec(
+        (0..48u16).map(|i| (0x10 + i) as crate::types::byte).collect::<alloc::vec::Vec<_>>(),
+    );
+    let mut hello = handshake_messages::clientHelloMsg::default();
+    hello.random = (0..32u16).map(|i| (0x40 + i) as crate::types::byte).collect();
+    let mut serverHello = handshake_messages::serverHelloMsg::default();
+    serverHello.random = (0..32u16).map(|i| (0x80 + i) as crate::types::byte).collect();
+    let mut hs = handshake_client::clientHandshakeState {
+        c,
+        serverHello,
+        hello,
+        suite: Some(suite),
+        masterSecret: ms,
+        session: None,
+    };
+    let err = hs.establishKeys();
+    let staged = hs.c.__changeCipherSpecs();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (text, staged, hs.c.__inExplicitNonceLen());
+}
+
+// go: none — goish-only: see `handshake_client_establishKeys`.
+// `which`: 0 = a session and matching ids, 1 = ids differ, 2 = no
+// session, 3 = the client sent no session id.
+#[doc(hidden)]
+pub fn handshake_client_serverResumedSession(which: crate::types::int) -> bool {
+    let mut hello = handshake_messages::clientHelloMsg::default();
+    let mut serverHello = handshake_messages::serverHelloMsg::default();
+    if which != 3 {
+        hello.sessionId = alloc::vec![1u8, 2];
+        serverHello.sessionId = if which == 1 {
+            alloc::vec![3u8]
+        } else {
+            alloc::vec![1u8, 2]
+        };
+    }
+    let hs = handshake_client::clientHandshakeState {
+        c: conn::Conn::default(),
+        serverHello,
+        hello,
+        suite: None,
+        masterSecret: crate::goslice::slice::new(),
+        session: if which == 2 {
+            None
+        } else {
+            Some(ticket::SessionState::default())
+        },
+    };
+    return hs.serverResumedSession();
 }

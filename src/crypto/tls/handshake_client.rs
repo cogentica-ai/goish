@@ -1,6 +1,6 @@
 // crypto/tls/handshake_client.rs — TLS 1.2 client handshake.
 //
-// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, handshake, doFullHandshake, establishKeys, serverResumedSession, processServerHello, readFinished, readSessionTicket, saveSessionTicket, sendFinished, verifyServerCertificate, getClientCertificate, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, handshake, doFullHandshake, processServerHello, readFinished, readSessionTicket, saveSessionTicket, sendFinished, verifyServerCertificate, getClientCertificate, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
 // goishlint:ignore GOISH019 echClientContext — same.
 // goishlint:ignore GOISH021 echClientContext, tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
 //
@@ -2749,6 +2749,8 @@ pub(crate) struct clientHandshakeState {
     pub serverHello: super::handshake_messages::serverHelloMsg,
     pub hello: super::handshake_messages::clientHelloMsg,
     pub suite: Option<&'static super::cipher_suites::cipherSuite>,
+    pub masterSecret: crate::goslice::slice<crate::types::byte>,
+    pub session: Option<super::ticket::SessionState>,
 }
 
 impl clientHandshakeState {
@@ -2813,5 +2815,80 @@ impl Conn {
         //     return nil
         self.__adoptVersion(vers);
         return crate::errors::nil;
+    }
+}
+
+
+impl clientHandshakeState {
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:889-909 clientHandshakeState.establishKeys
+    /// The client's mirror of the server's `establishKeys`: the same six
+    /// keys, but the halves are crossed — the client writes with the
+    /// client key and reads with the server's.
+    pub(crate) fn establishKeys(&mut self) -> crate::error {
+        let suite = self.suite.unwrap();
+        // Go: clientMAC, serverMAC, clientKey, serverKey, clientIV, serverIV :=
+        //         keysFromMasterSecret(c.vers, hs.suite, hs.masterSecret,
+        //             hs.hello.random, hs.serverHello.random,
+        //             hs.suite.macLen, hs.suite.keyLen, hs.suite.ivLen)
+        let (clientMAC, serverMAC, clientKey, serverKey, clientIV, serverIV) =
+            super::prf::keysFromMasterSecret(
+                self.c.__vers(),
+                suite,
+                self.masterSecret.clone(),
+                crate::goslice::slice::__from_vec(self.hello.random.clone()),
+                crate::goslice::slice::__from_vec(self.serverHello.random.clone()),
+                suite.macLen,
+                suite.keyLen,
+                suite.ivLen,
+            );
+        // Go: if hs.suite.cipher != nil {
+        //         clientCipher = hs.suite.cipher(clientKey, clientIV, false /* not for reading */)
+        //         clientHash = hs.suite.mac(clientMAC)
+        //         serverCipher = hs.suite.cipher(serverKey, serverIV, true /* for reading */)
+        //         serverHash = hs.suite.mac(serverMAC)
+        //     } else {
+        //         clientCipher = hs.suite.aead(clientKey, clientIV)
+        //         serverCipher = hs.suite.aead(serverKey, serverIV) }
+        let clientCipher: super::conn::halfConnCipher;
+        let serverCipher: super::conn::halfConnCipher;
+        let mut clientHash: Option<alloc::boxed::Box<dyn crate::hash::Hash + Send + Sync>> = None;
+        let mut serverHash: Option<alloc::boxed::Box<dyn crate::hash::Hash + Send + Sync>> = None;
+        if suite.cipher.is_some() {
+            let cipherFn = suite.cipher.unwrap();
+            let macFn = suite.mac.unwrap();
+            clientCipher = super::conn::halfConnCipherOf(cipherFn(clientKey, clientIV, false));
+            clientHash = Some(macFn(clientMAC));
+            serverCipher = super::conn::halfConnCipherOf(cipherFn(serverKey, serverIV, true));
+            serverHash = Some(macFn(serverMAC));
+        } else {
+            let aeadFn = suite.aead.unwrap();
+            clientCipher = super::conn::halfConnCipher::AEAD(aeadFn(clientKey, clientIV));
+            serverCipher = super::conn::halfConnCipher::AEAD(aeadFn(serverKey, serverIV));
+        }
+
+        // Go: c.in.prepareCipherSpec(c.vers, serverCipher, serverHash)
+        //     c.out.prepareCipherSpec(c.vers, clientCipher, clientHash)
+        //     return nil
+        //
+        // Note the crossing: the client READS what the server wrote.
+        let vers = self.c.__vers();
+        self.c
+            .__prepareCipherSpecs(vers, serverCipher, serverHash, clientCipher, clientHash);
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:911-916 clientHandshakeState.serverResumedSession
+    pub(crate) fn serverResumedSession(&self) -> bool {
+        // Go: If the server responded with the same sessionId then it
+        // means the sessionTicket is being used to resume a TLS session.
+        // Go: return hs.session != nil && hs.hello.sessionId != nil &&
+        //         bytes.Equal(hs.serverHello.sessionId, hs.hello.sessionId)
+        //
+        // goish slices carry no nil/empty distinction, so `sessionId !=
+        // nil` reads as a non-empty id — a client that sent none cannot
+        // have its echo match anyway.
+        return self.session.is_some()
+            && self.hello.sessionId.len() != 0
+            && self.serverHello.sessionId == self.hello.sessionId;
     }
 }

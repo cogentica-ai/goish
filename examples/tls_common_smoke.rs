@@ -2480,6 +2480,27 @@ fn main() {
     eq("checkForResumption declines silently when only the client has EMS", r6e, "");
     check("checkForResumption does not resume without session EMS", !r6d);
 
+    // ─── handshake_client.go: establishKeys and serverResumedSession.
+    //     From goref.sh.
+    let (cekErr, cekStaged, cekNonce) = tls::handshake_client_establishKeys();
+    eq("client establishKeys err", cekErr, "");
+    check("client establishKeys staged a cipher spec", cekStaged);
+    // The client's halves are CROSSED relative to the server's: it reads
+    // with the server's key and writes with its own. Both sides derive
+    // the same six keys from the same master secret, so getting the
+    // crossing wrong yields a connection that encrypts fine and cannot
+    // decrypt anything.
+    check_n("client establishKeys read half is AEAD", cekNonce, 8);
+
+    check("serverResumedSession with matching session ids",
+          tls::handshake_client_serverResumedSession(0));
+    check("serverResumedSession with different session ids",
+          !tls::handshake_client_serverResumedSession(1));
+    check("serverResumedSession without a session",
+          !tls::handshake_client_serverResumedSession(2));
+    check("serverResumedSession when the client sent no session id",
+          !tls::handshake_client_serverResumedSession(3));
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
