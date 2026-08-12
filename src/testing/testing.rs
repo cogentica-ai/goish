@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: common.setRan, common.destination, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: common.setRan, common.destination, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -340,6 +340,11 @@ impl T {
             state: Arc::new(sub_state),
             depth: self.depth + 1,
         };
+
+        // Go: `t.setOutputWriter()` in T.Run, right after the subtest's
+        // common is built. It must happen after the Arc exists, because
+        // the writer holds a Weak back to it.
+        sub.state.setOutputWriter();
 
         let header_indent = indent_for(sub.depth);
         write_status(b"=== RUN  ", header_indent.as_bytes(), &qualified);
@@ -1392,9 +1397,205 @@ pub fn __shim_ran_done(t: &T) -> (bool, bool) {
     );
 }
 
+// go: none — goish-only: reads the `output` buffer outputWriter appends
+// to. Nothing flushes it to stdout yet — that is flushToParent, which is
+// not ported — so this is the only way to see what was written.
+#[doc(hidden)]
+pub fn __shim_output_buf(t: &T) -> string {
+    return string::from_bytes(&t.state.output.Lock());
+}
+
 // go: none — goish-only: marks a test done so a test can drive
 // destination's re-homing branch without racing a real runner.
 #[doc(hidden)]
 pub fn __shim_mark_done(t: &T) {
     t.state.done.store(true, Ordering::Release);
+}
+
+// ─── outputWriter ────────────────────────────────────────────────────
+
+// go: sdk 1.25.5 testing/testing.go:850 indent
+/// Go: `const indent = "    "` — "An indent of 4 spaces will neatly
+/// align the dashes with the status indicator of the parent."
+pub(crate) const indent: &[crate::types::byte] = b"    ";
+
+// go: sdk 1.25.5 testing/testing.go:1120-1123 outputWriter
+/// Go: "outputWriter buffers, formats and writes log messages."
+///
+/// Go's field is `c *common`, a cycle the GC does not mind. goish holds
+/// a Weak, so `common` and its writer do not keep each other alive.
+/// A dead Weak stands in for Go's nil `c`, which Write already handles.
+#[derive(Clone)]
+#[allow(non_camel_case_types)]
+pub struct outputWriter {
+    pub(crate) c: alloc::sync::Weak<TState>,
+    /// Go: "incomplete ('\n'-free) suffix of last Write".
+    pub(crate) partial: Arc<crate::sync::Mutex<Vec<crate::types::byte>>>,
+}
+
+#[allow(non_snake_case)]
+impl TState {
+    // go: sdk 1.25.5 testing/testing.go:1115-1117 common.setOutputWriter
+    /// Go: `c.o = &outputWriter{c: c}`. goish takes the Arc explicitly
+    /// because the writer holds a Weak back to it, and `self` alone
+    /// cannot produce one.
+    pub(crate) fn setOutputWriter(self: &Arc<Self>) {
+        *self.o.Lock() = Some(outputWriter {
+            c: Arc::downgrade(self),
+            partial: Arc::new(crate::sync::Mutex::new(Vec::new())),
+        });
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1087-1097 common.flushPartial
+    /// Go: "flushPartial checks the buffer for partial logs and outputs
+    /// them." The newline is written through Write, not appended to the
+    /// buffer, so it goes through the same indent and chatty routing as
+    /// any other line.
+    pub(crate) fn flushPartial(self: &Arc<Self>) {
+        let partial = {
+            let g = self.o.Lock();
+            match g.as_ref() {
+                Some(o) => o.partial.Lock().len() > 0,
+                None => false,
+            }
+        };
+        if partial {
+            let w = self.o.Lock().clone();
+            if let Some(mut o) = w {
+                use crate::io::Writer;
+                let _ = o.Write(crate::goslice::slice::__from_vec(alloc::vec![b'\n']));
+            }
+        }
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1105-1111 common.Output
+    /// Go: "Output returns a Writer that writes to the same test output
+    /// stream as TB.Log. […] After a test function and all its parents
+    /// return, neither Output nor the Write method may be called."
+    ///
+    /// The panic is the documented behaviour, not a goish shortcut: a
+    /// nil destination means every test up the chain has finished, so
+    /// there is nowhere for the bytes to go.
+    pub(crate) fn Output(self: &Arc<Self>) -> outputWriter {
+        let n = match self.destination() {
+            Some(n) => n,
+            None => panic!(
+                "Output called after {} has completed",
+                self.name.Lock().as_ref() as &str
+            ),
+        };
+        // Go returns n.o directly; a test that never had one set gets
+        // Go's nil *outputWriter, whose Write is a documented no-op.
+        let g = n.o.Lock();
+        return match g.as_ref() {
+            Some(o) => o.clone(),
+            None => outputWriter {
+                c: alloc::sync::Weak::new(),
+                partial: Arc::new(crate::sync::Mutex::new(Vec::new())),
+            },
+        };
+    }
+}
+
+#[allow(non_snake_case)]
+impl outputWriter {
+    // go: sdk 1.25.5 testing/testing.go:1158-1171 outputWriter.writeLine
+    fn writeLine(&self, b: &[crate::types::byte]) {
+        let c = match self.c.upgrade() {
+            Some(c) => c,
+            None => return,
+        };
+        if !c.done.load(Ordering::Acquire) && c.chatty.Lock().is_some() {
+            let line = crate::fmt::Sprintf!(
+                "%s%s",
+                string::from_bytes(indent),
+                string::from_bytes(b)
+            );
+            if c.bench.load(Ordering::Acquire) {
+                // Go: "Benchmarks don't print === CONT, so we should
+                // skip the test printer and just print straight to
+                // stdout."
+                crate::fmt::Print!(line);
+            } else {
+                let g = c.chatty.Lock();
+                if let Some(p) = g.as_ref() {
+                    p.Printf(c.name.Lock().clone(), line);
+                }
+            }
+            return;
+        }
+        let mut out = c.output.Lock();
+        out.extend_from_slice(indent);
+        out.extend_from_slice(b);
+    }
+}
+
+#[allow(non_snake_case)]
+impl crate::io::Writer for outputWriter {
+    // go: sdk 1.25.5 testing/testing.go:1127-1155 outputWriter.Write
+    /// Go: "It may not be called after a test function and all its
+    /// parents return."
+    ///
+    /// The nil-receiver branch is load-bearing: Go's comment says "o can
+    /// be nil if this is called from a top-level *TB that is no longer
+    /// active. Just ignore the message in that case." goish spells that
+    /// as a dead Weak.
+    fn Write(
+        &mut self,
+        p: crate::goslice::slice<crate::types::byte>,
+    ) -> (crate::types::int, crate::errors::error) {
+        let c = match self.c.upgrade() {
+            Some(c) => c,
+            None => return (0, crate::errors::nil),
+        };
+        if c.destination().is_none() {
+            panic!(
+                "Write called after {} has completed",
+                c.name.Lock().as_ref() as &str
+            );
+        }
+
+        let bytes = p.clone().__into_vec();
+        // Go: `bytes.SplitAfter(p, []byte("\n"))` — the last element is
+        // always the partial (newline-free) tail, possibly empty.
+        let mut lines: Vec<Vec<crate::types::byte>> = Vec::new();
+        let mut cur: Vec<crate::types::byte> = Vec::new();
+        for b in bytes.iter() {
+            cur.push(*b);
+            if *b == b'\n' {
+                lines.push(core::mem::take(&mut cur));
+            }
+        }
+        lines.push(cur);
+
+        let last = lines.len() - 1;
+        for (i, line) in lines[..last].iter().enumerate() {
+            // Go: emit the partial line held over from the last Write.
+            if i == 0 && self.partial.Lock().len() > 0 {
+                let mut joined = core::mem::take(&mut *self.partial.Lock());
+                joined.extend_from_slice(line);
+                self.writeLine(&joined);
+            } else {
+                self.writeLine(line);
+            }
+        }
+        // Go: save the partial line for the next call.
+        self.partial.Lock().extend_from_slice(&lines[last]);
+
+        return (p.Len(), crate::errors::nil);
+    }
+}
+
+#[allow(non_snake_case)]
+impl T {
+    // go: none — goish idiom: Go's Output is a method on the embedded
+    // `common`, so `t.Output()` resolves through embedding. goish's T
+    // holds the state in a field, so the forward is written out.
+    /// Go: "Output returns a Writer that writes to the same test output
+    /// stream as TB.Log. The output is indented like TB.Log lines, but
+    /// Output does not add source locations or newlines."
+    pub fn Output(&self) -> outputWriter {
+        self.checkFuzzFn(string::from_static("Output"));
+        return self.state.Output();
+    }
 }

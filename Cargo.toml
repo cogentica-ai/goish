@@ -1297,5 +1297,9 @@ name = "testing_destination_smoke"
 path = "examples/testing_destination_smoke.rs"
 
 [[example]]
+name = "testing_output_smoke"
+path = "examples/testing_output_smoke.rs"
+
+[[example]]
 name = "slog_resolve_smoke"
 path = "examples/slog_resolve_smoke.rs"
