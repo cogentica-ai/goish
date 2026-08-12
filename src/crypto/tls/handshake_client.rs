@@ -1,6 +1,6 @@
 // crypto/tls/handshake_client.rs — TLS 1.2 client handshake.
 //
-// goishlint:ignore GOISH018 clientHandshake, loadSession, handshake, doFullHandshake — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH018 clientHandshake, handshake, doFullHandshake — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
 // goishlint:ignore GOISH019 echClientContext — same.
 // goishlint:ignore GOISH021 echClientContext, tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
 //
@@ -3993,5 +3993,214 @@ impl Conn {
 
         // Go: return hello, keyShareKeys, ech, nil
         return (Some(hello), keyShareKeys, ech, crate::errors::nil);
+    }
+}
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:380-521 Conn.loadSession
+    /// Go: if a client session cache is configured, look up a resumable
+    /// session for this connection, validate it against the offered
+    /// versions, the cached certificate, and the cipher/KDF, and — for
+    /// TLS 1.3 — install the pre_shared_key identity and compute its
+    /// binder over the ClientHello, returning the early secret and binder
+    /// key for the handshake to finish.
+    ///
+    /// Deviation: the `c.quic != nil` arm (session events and 0-RTT
+    /// early data) is absent — goish ships no QUIC transport.
+    pub(crate) fn loadSession(
+        &mut self,
+        hello: &mut super::handshake_messages::clientHelloMsg,
+    ) -> (
+        Option<super::ticket::SessionState>,
+        Option<crate::crypto::internal::fips140::tls13::EarlySecret>,
+        crate::goslice::slice<crate::types::byte>,
+        crate::error,
+    ) {
+        use crate::goslice::slice;
+        // Go: if c.config.SessionTicketsDisabled || c.config.ClientSessionCache == nil {
+        //         return nil, nil, nil, nil }
+        if self.config.SessionTicketsDisabled || self.config.ClientSessionCache.is_none() {
+            return (None, None, slice::new(), crate::errors::nil);
+        }
+
+        // Go: echInner := bytes.Equal(hello.encryptedClientHello, []byte{1})
+        //     hello.ticketSupported = true && !echInner
+        let echInner = {
+            let ech: &[byte] = &hello.encryptedClientHello;
+            ech == [1u8]
+        };
+        hello.ticketSupported = true && !echInner;
+
+        // Go: if hello.supportedVersions[0] == VersionTLS13 {
+        //         hello.pskModes = []uint8{pskModeDHE} }
+        if hello.supportedVersions[0] == super::common::VersionTLS13 {
+            hello.pskModes = alloc::vec![super::common::pskModeDHE];
+        }
+
+        // Go: if c.handshakes != 0 { return nil, nil, nil, nil }
+        if self.handshakes != 0 {
+            return (None, None, slice::new(), crate::errors::nil);
+        }
+
+        // Go: cacheKey := c.clientSessionCacheKey()
+        //     if cacheKey == "" { return nil, nil, nil, nil }
+        let cacheKey = self.clientSessionCacheKey();
+        if cacheKey.Len() == 0 {
+            return (None, None, slice::new(), crate::errors::nil);
+        }
+        // Go: cs, ok := c.config.ClientSessionCache.Get(cacheKey)
+        //     if !ok || cs == nil { return nil, nil, nil, nil }
+        //     session = cs.session
+        let cache = self.config.ClientSessionCache.clone().unwrap();
+        let (cs, ok) = cache.Lock().Get(cacheKey.clone());
+        let cs = match cs {
+            Some(cs) if ok => cs,
+            _ => return (None, None, slice::new(), crate::errors::nil),
+        };
+        let session = match cs.session {
+            Some(s) => s,
+            None => return (None, None, slice::new(), crate::errors::nil),
+        };
+
+        // Go: versOk := false
+        //     for _, v := range hello.supportedVersions { if v == session.version { versOk = true; break } }
+        //     if !versOk { return nil, nil, nil, nil }
+        let mut versOk = false;
+        for v in hello.supportedVersions.iter() {
+            if *v == session.version {
+                versOk = true;
+                break;
+            }
+        }
+        if !versOk {
+            return (None, None, slice::new(), crate::errors::nil);
+        }
+
+        // Go: if c.config.time().After(session.peerCertificates[0].NotAfter) {
+        //         c.config.ClientSessionCache.Put(cacheKey, nil); return nil, nil, nil, nil }
+        if self
+            .config
+            .time()
+            .After(session.peerCertificates[0].NotAfter)
+        {
+            cache.Lock().Put(cacheKey.clone(), None);
+            return (None, None, slice::new(), crate::errors::nil);
+        }
+        // Go: if !c.config.InsecureSkipVerify {
+        //         if len(session.verifiedChains) == 0 { return nil, nil, nil, nil }
+        //         if err := session.peerCertificates[0].VerifyHostname(c.config.ServerName); err != nil {
+        //             return nil, nil, nil, nil } }
+        if !self.config.InsecureSkipVerify {
+            if session.verifiedChains.Len() == 0 {
+                return (None, None, slice::new(), crate::errors::nil);
+            }
+            let err = session.peerCertificates[0]
+                .VerifyHostname(self.config.ServerName.clone());
+            if err != crate::errors::nil {
+                return (None, None, slice::new(), crate::errors::nil);
+            }
+        }
+
+        // Go: if session.version != VersionTLS13 {
+        //         if mutualCipherSuite(hello.cipherSuites, session.cipherSuite) == nil { return nil, nil, nil, nil }
+        //         if !session.extMasterSecret && fips140tls.Required() { return nil, nil, nil, nil }
+        //         hello.sessionTicket = session.ticket
+        //         return }
+        if session.version != super::common::VersionTLS13 {
+            if super::cipher_suites::mutualCipherSuite(
+                slice::__from_vec(hello.cipherSuites.clone()),
+                session.cipherSuite,
+            )
+            .is_none()
+            {
+                return (None, None, slice::new(), crate::errors::nil);
+            }
+            if !session.extMasterSecret && super::internal::fips140tls::Required() {
+                return (None, None, slice::new(), crate::errors::nil);
+            }
+            hello.sessionTicket = session.ticket.clone().__into_vec();
+            return (Some(session), None, slice::new(), crate::errors::nil);
+        }
+
+        // Go: if c.config.time().After(time.Unix(int64(session.useBy), 0)) {
+        //         c.config.ClientSessionCache.Put(cacheKey, nil); return nil, nil, nil, nil }
+        if self
+            .config
+            .time()
+            .After(crate::time::Unix(crate::int64(session.useBy), 0))
+        {
+            cache.Lock().Put(cacheKey.clone(), None);
+            return (None, None, slice::new(), crate::errors::nil);
+        }
+
+        // Go: cipherSuite := cipherSuiteTLS13ByID(session.cipherSuite)
+        //     if cipherSuite == nil { return nil, nil, nil, nil }
+        let cipherSuite =
+            super::cipher_suites::cipherSuiteTLS13ByID(session.cipherSuite);
+        let cipherSuite = match cipherSuite {
+            Some(cs) => cs,
+            None => return (None, None, slice::new(), crate::errors::nil),
+        };
+        // Go: cipherSuiteOk := false
+        //     for _, offeredID := range hello.cipherSuites {
+        //         offeredSuite := cipherSuiteTLS13ByID(offeredID)
+        //         if offeredSuite != nil && offeredSuite.hash == cipherSuite.hash { cipherSuiteOk = true; break } }
+        //     if !cipherSuiteOk { return nil, nil, nil, nil }
+        let mut cipherSuiteOk = false;
+        for offeredID in hello.cipherSuites.iter() {
+            if let Some(offeredSuite) =
+                super::cipher_suites::cipherSuiteTLS13ByID(*offeredID)
+            {
+                if offeredSuite.hash == cipherSuite.hash {
+                    cipherSuiteOk = true;
+                    break;
+                }
+            }
+        }
+        if !cipherSuiteOk {
+            return (None, None, slice::new(), crate::errors::nil);
+        }
+
+        // Go: ticketAge := c.config.time().Sub(time.Unix(int64(session.createdAt), 0))
+        //     identity := pskIdentity{ label: session.ticket,
+        //         obfuscatedTicketAge: uint32(ticketAge/time.Millisecond) + session.ageAdd }
+        //     hello.pskIdentities = []pskIdentity{identity}
+        //     hello.pskBinders = [][]byte{make([]byte, cipherSuite.hash.Size())}
+        let ticketAge = self
+            .config
+            .time()
+            .Sub(crate::time::Unix(crate::int64(session.createdAt), 0));
+        let identity = super::handshake_messages::pskIdentity {
+            label: session.ticket.clone().__into_vec(),
+            obfuscatedTicketAge: crate::uint32((ticketAge / crate::time::Millisecond).0)
+                .wrapping_add(session.ageAdd),
+        };
+        hello.pskIdentities = alloc::vec![identity];
+        hello.pskBinders =
+            alloc::vec![alloc::vec![0u8; cipherSuite.hash.Size() as usize]];
+
+        // Go: earlySecret = tls13.NewEarlySecret(cipherSuite.hash.New, session.secret)
+        //     binderKey = earlySecret.ResumptionBinderKey()
+        //     transcript := cipherSuite.hash.New()
+        //     if err := computeAndUpdatePSK(hello, binderKey, transcript, cipherSuite.finishedHash); err != nil {
+        //         return nil, nil, nil, err }
+        //     return
+        let hash = cipherSuite.hash;
+        let earlySecret = crate::crypto::internal::fips140::tls13::NewEarlySecret(
+            crate::hash::HashFunc::New(move || hash.New()),
+            session.secret.clone(),
+        );
+        let binderKey = earlySecret.ResumptionBinderKey();
+        let mut transcript = super::handshake_messages::transcriptHasher(hash.New());
+        let err = super::handshake_client::computeAndUpdatePSK(
+            hello,
+            binderKey.clone(),
+            &mut transcript,
+            &|k, t| cipherSuite.finishedHash(k, t),
+        );
+        if err != crate::errors::nil {
+            return (None, None, slice::new(), err);
+        }
+        return (Some(session), Some(earlySecret), binderKey, crate::errors::nil);
     }
 }

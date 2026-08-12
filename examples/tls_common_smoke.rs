@@ -3822,6 +3822,59 @@ fn main() {
     let (mc6e, _, _, _, _, _, _, _, _, _, _, _) = mch(6);
     eq("an empty NextProtos value is rejected", mc6e, "tls: invalid NextProtos value");
 
+    // ── Conn.loadSession ────────────────────────────────────────────
+    //
+    // Ground truth: goref with an LRU client session cache pre-loaded
+    // with a SessionState on the leaf fixture. The PSK identity (label +
+    // obfuscated ticket age), the resumption binder key, and the binder
+    // over the ClientHello are all deterministic and byte-compared; the
+    // TLS 1.2 sessionTicket path and the no-cache short-circuit too.
+    let ls = |which: int| -> (string, bool, bool, string, bool, int, string, int, string, string) {
+        let (e, s, es, bk, ts, ni, lbl, age, bnd, st) =
+            tls::handshake_client_loadSession(which);
+        return (e, s, es, hexOf(bk), ts, ni, hexOf(lbl), goish::int(age), hexOf(bnd), hexOf(st));
+    };
+
+    // TLS 1.3 resume: full PSK setup.
+    let (ls0e, ls0s, ls0es, ls0bk, ls0ts, ls0ni, ls0lbl, ls0age, ls0bnd, _) = ls(0);
+    eq("loadSession succeeds for a TLS 1.3 resume", ls0e, "");
+    check("the cached session is returned", ls0s);
+    check("the early secret is produced", ls0es);
+    check("ticketSupported is set", ls0ts);
+    check_n("one PSK identity is offered", ls0ni, 1);
+    eq("the PSK identity label is the ticket", ls0lbl, "aabbccdd");
+    check_n(
+        "the obfuscated ticket age matches Go",
+        ls0age,
+        0x652e1744,
+    );
+    eq(
+        "the resumption binder key matches Go",
+        ls0bk,
+        "c3453f1317002574d1ff1b680056c58cf03e583b75e0043d698f35cd2439a3a0",
+    );
+    eq(
+        "the PSK binder over the ClientHello matches Go",
+        ls0bnd,
+        "7ddc8945c22b1d05c965bf9b8352e4bc3f570ca0a236ce1da8f00ee25b12605c",
+    );
+
+    // No cache: short-circuit with everything nil (but gating still runs).
+    let (ls1e, ls1s, ls1es, _, ls1ts, ls1ni, _, _, _, _) = ls(1);
+    eq("loadSession with no cache succeeds", ls1e, "");
+    check("no session is returned without a cache", !ls1s);
+    check("no early secret without a cache", !ls1es);
+    check("ticketSupported is still set without a cache", ls1ts);
+    check_n("no PSK identity without a cache", ls1ni, 0);
+
+    // TLS 1.2 resume: sessionTicket path, no PSK.
+    let (ls2e, ls2s, ls2es, _, _, ls2ni, _, _, _, ls2st) = ls(2);
+    eq("loadSession succeeds for a TLS 1.2 resume", ls2e, "");
+    check("the TLS 1.2 session is returned", ls2s);
+    check("no early secret in TLS 1.2 resumption", !ls2es);
+    check_n("no PSK identity in TLS 1.2 resumption", ls2ni, 0);
+    eq("the TLS 1.2 session ticket is installed", ls2st, "aabbccdd");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

@@ -8045,6 +8045,123 @@ pub fn handshake_client_makeClientHello(
     );
 }
 
+// go: none — goish-only: drives Conn.loadSession with an LRU client
+// session cache pre-loaded with a TLS 1.3 (or TLS 1.2) SessionState
+// built on the leaf fixture, so the ticketSupported/pskModes gating, the
+// PSK identity (label + obfuscated ticket age), and the deterministic
+// binder key and binder are all comparable against Go, as is the TLS 1.2
+// sessionTicket path and the no-cache short-circuit.
+// which: 0 tls13 resume, 1 no cache, 2 tls12 resume.
+#[doc(hidden)]
+pub fn handshake_client_loadSession(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string, // err
+    bool,                    // session non-nil
+    bool,                    // earlySecret non-nil
+    crate::goslice::slice<crate::types::byte>, // binderKey
+    bool,                    // ticketSupported
+    crate::types::int,       // nIdentities
+    crate::goslice::slice<crate::types::byte>, // identity label
+    crate::types::uint32,    // obfuscatedTicketAge
+    crate::goslice::slice<crate::types::byte>, // binder
+    crate::goslice::slice<crate::types::byte>, // sessionTicket
+) {
+    use crate::goslice::slice;
+    let der = crate::encoding::base64::StdEncoding
+        .DecodeString(__testLeafB64)
+        .0;
+    let (leaf, _) = crate::crypto::x509::ParseCertificate(der);
+    let fillN = |base: crate::types::byte, n: usize| {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: usize = 0;
+        while i < n {
+            v.push(base.wrapping_add(i as crate::types::byte));
+            i += 1;
+        }
+        return slice::__from_vec(v);
+    };
+
+    let vers = if which == 2 {
+        common::VersionTLS12
+    } else {
+        common::VersionTLS13
+    };
+    let cs = if which == 2 {
+        cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+    } else {
+        cipher_suites::TLS_AES_128_GCM_SHA256
+    };
+
+    let mut cache: alloc::boxed::Box<dyn common::ClientSessionCache> =
+        alloc::boxed::Box::new(common::NewLRUClientSessionCache(4));
+    if which != 1 {
+        let mut ss = ticket::SessionState::default();
+        ss.version = vers;
+        ss.cipherSuite = cs;
+        ss.createdAt = 1700000000;
+        ss.secret = fillN(0xD0, 32);
+        ss.peerCertificates = slice::__from_vec(alloc::vec![leaf.clone()]);
+        ss.verifiedChains =
+            slice::__from_vec(alloc::vec![slice::__from_vec(alloc::vec![leaf.clone()])]);
+        ss.useBy = 1800000000;
+        ss.ageAdd = 0x11223344;
+        ss.ticket = slice::__from_vec(alloc::vec![0xAAu8, 0xBB, 0xCC, 0xDD]);
+        cache.Put(
+            "goish.example".into(),
+            Some(ticket::ClientSessionState::__of(ss)),
+        );
+    }
+
+    let mut cfg = Config::default();
+    cfg.ServerName = "goish.example".into();
+    cfg.ClientSessionCache = Some(alloc::sync::Arc::new(crate::sync::Mutex::new(cache)));
+    cfg.Time = Some(alloc::sync::Arc::new(|| crate::time::Unix(1710000000, 0)));
+    let mut c = conn::Conn::default();
+    c.__setConfig(cfg);
+
+    let mut hello = handshake_messages::clientHelloMsg::default();
+    hello.vers = common::VersionTLS12;
+    hello.random = fillN(0x01, 32).__into_vec();
+    hello.sessionId = fillN(0x50, 32).__into_vec();
+    hello.compressionMethods = alloc::vec![0u8];
+    hello.serverName = "goish.example".into();
+    hello.supportedVersions = alloc::vec![common::VersionTLS13, common::VersionTLS12];
+    hello.cipherSuites = alloc::vec![
+        cipher_suites::TLS_AES_128_GCM_SHA256,
+        cipher_suites::TLS_AES_256_GCM_SHA384,
+        cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    ];
+
+    let (session, es, binderKey, err) = c.loadSession(&mut hello);
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let (label, age, binder) = if !hello.pskIdentities.is_empty() {
+        (
+            slice::__from_vec(hello.pskIdentities[0].label.clone()),
+            hello.pskIdentities[0].obfuscatedTicketAge,
+            slice::__from_vec(hello.pskBinders[0].clone()),
+        )
+    } else {
+        (slice::new(), 0, slice::new())
+    };
+    return (
+        text,
+        session.is_some(),
+        es.is_some(),
+        binderKey,
+        hello.ticketSupported,
+        crate::int(hello.pskIdentities.len()),
+        label,
+        age,
+        binder,
+        slice::__from_vec(hello.sessionTicket.clone()),
+    );
+}
+
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below
 // sign and verify against, the same fixture x509_parse_smoke uses.
 // Held once: it was pasted by hand into a second shim and silently
