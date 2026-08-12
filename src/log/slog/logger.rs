@@ -1,4 +1,4 @@
-// go: file log/slog/logger.go decls: Logger.Enabled, Logger.log, Logger.Log, Logger.LogAttrs, Logger.Debug, Logger.Info, Logger.Warn, Logger.Error, Logger.logAttrs
+// go: file log/slog/logger.go decls: Logger.With, Logger.WithGroup, Logger.Enabled, Logger.log, Logger.Log, Logger.LogAttrs, Logger.Debug, Logger.Info, Logger.Warn, Logger.Error, Logger.logAttrs
 //
 // log/slog/logger.go — the Logger's emitting surface.
 //
@@ -14,7 +14,7 @@
 // pairing loose key/value arguments needs Go's `any` type switch, and
 // `LogAttrs` covers the same ground with Attrs the caller built.
 //
-// goishlint:ignore GOISH018 New, With, WithGroup, Handler, Default, SetDefault, Debug, Info, Warn, Error, LogAttrs, DebugContext, InfoContext, WarnContext, ErrorContext, log, argsToAttrSlice, SetLogLoggerLevel, NewLogLogger, Value, LogValue, Handle, Enabled, WithAttrs, Write, clone, init — the package-level wrappers and the `...any` form are not ported; see the note above.
+// goishlint:ignore GOISH018 New, Handler, Default, SetDefault, Debug, Info, Warn, Error, LogAttrs, DebugContext, InfoContext, WarnContext, ErrorContext, log, argsToAttrSlice, SetLogLoggerLevel, NewLogLogger, Value, LogValue, Handle, Enabled, WithAttrs, Write, clone, init — the package-level wrappers and the `...any` form are not ported; see the note above.
 // goishlint:ignore GOISH021 Logger, LogValuer, defaultLogger, logLoggerLevel, handlerWriter — same. handlerWriter bridges log.Logger's io.Writer onto a slog Handler, which needs the package-level default this file does not carry.
 
 #![allow(non_snake_case)]
@@ -29,6 +29,39 @@ use crate::gostring::string;
 use crate::types::uintptr;
 
 impl Logger {
+    // go: sdk 1.25.5 log/slog/logger.go:126-133 Logger.With
+    /// Go: "With returns a Logger that includes the given attributes in
+    /// each output operation. Arguments are converted to attributes as
+    /// if by [Logger.Log]."
+    ///
+    /// The empty-args early return is Go's and matters: `With()` with
+    /// nothing to add returns the SAME logger rather than cloning, so a
+    /// conditional `l = l.With(extra...)` in a loop does not allocate a
+    /// handler chain one link deep per iteration.
+    pub fn With(&self, args: slice<crate::goany::Any>) -> Logger {
+        // Go: if len(args) == 0 { return l }
+        if args.Len() == 0 {
+            return self.clone();
+        }
+        return super::New(self.Handler().WithAttrs(super::argsToAttrSlice(args)));
+    }
+
+    // go: sdk 1.25.5 log/slog/logger.go:141-148 Logger.WithGroup
+    /// Go: "WithGroup returns a Logger that starts a group, if name is
+    /// non-empty. The keys of all attributes added to the Logger will
+    /// be qualified by the given name. […] If name is empty, WithGroup
+    /// returns the receiver."
+    ///
+    /// Same early return, same reason.
+    pub fn WithGroup(&self, name: impl Into<string>) -> Logger {
+        let name: string = name.into();
+        // Go: if name == "" { return l }
+        if name.Len() == 0 {
+            return self.clone();
+        }
+        return super::New(self.Handler().WithGroup(name));
+    }
+
     // go: sdk 1.25.5 log/slog/logger.go:164-169 Logger.Enabled
     /// Go: "Enabled reports whether l emits log records at the given
     /// context and level."

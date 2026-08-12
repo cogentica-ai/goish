@@ -247,11 +247,50 @@ fn main() {
         }
     }
 
+    // 9. With() on an empty argument list returns an equivalent
+    //     logger rather than building a handler chain. Go returns the
+    //     receiver outright; the point is that a conditional
+    //     `l = l.With(extra)` in a loop does not grow a chain one link
+    //     per iteration when there is nothing to add.
+    {
+        HANDLED.store(0, Ordering::SeqCst);
+        let same = l.With(slice::__from_vec(alloc::vec![]));
+        same.InfoAttrs(s("still works"), attrs(alloc::vec![]));
+        if HANDLED.load(Ordering::SeqCst) == 1 {
+            fmt::Println!("[ 9] With() empty is a no-op   PASS");
+        } else {
+            fmt::Println!("[ 9] With() empty is a no-op   FAIL");
+            failed += 1;
+        }
+    }
+
+    // 10. With(args) and WithGroup(name) both produce a working logger
+    //     that still reaches the handler.
+    {
+        HANDLED.store(0, Ordering::SeqCst);
+        let wa = l.With(slice::__from_vec(alloc::vec![
+            goish::Any::new(s("svc")),
+            goish::Any::new(s("api")),
+        ]));
+        wa.InfoAttrs(s("with attrs"), attrs(alloc::vec![]));
+        let wg = l.WithGroup(s("req"));
+        wg.InfoAttrs(s("with group"), attrs(alloc::vec![]));
+        // WithGroup("") returns the receiver, so it must still log.
+        let wempty = l.WithGroup(s(""));
+        wempty.InfoAttrs(s("empty group"), attrs(alloc::vec![]));
+        if HANDLED.load(Ordering::SeqCst) == 3 {
+            fmt::Println!("[10] With / WithGroup          PASS");
+        } else {
+            fmt::Println!("[10] With / WithGroup          FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 8/8");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }
