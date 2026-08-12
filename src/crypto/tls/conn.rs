@@ -1337,6 +1337,12 @@ impl Conn {
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
     pub fn __clientProtocol(&self) -> string { return self.clientProtocol.clone(); }
+    // go: none — goish-only: see `__setMemConn`.
+    #[doc(hidden)]
+    pub fn __curveID(&self) -> super::common::CurveID { return self.curveID; }
+    // go: none — goish-only: see `__setMemConn`.
+    #[doc(hidden)]
+    pub fn __serverName(&self) -> string { return self.serverName.clone(); }
 
 
     // go: none — goish-only: `processServerHello` restores the same

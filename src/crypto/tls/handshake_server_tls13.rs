@@ -1176,6 +1176,382 @@ impl serverHandshakeStateTLS13 {
         return crate::errors::nil;
     }
 
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:107-329 serverHandshakeStateTLS13.processClientHello
+    /// Go: vet the ClientHello, negotiate version/cipher/curve, run a
+    /// HelloRetryRequest if no usable key share was offered, complete the
+    /// (hybrid) ECDH, negotiate ALPN, and record the server name.
+    ///
+    /// Deviations: every `c.quic != nil` arm is absent — goish ships no
+    /// QUIC transport — so the QUIC version floor, transport-parameters
+    /// handling, and the early_data-with-QUIC branch collapse to Go's
+    /// non-QUIC path.
+    pub(crate) fn processClientHello(&mut self) -> crate::error {
+        use crate::goslice::slice;
+
+        // Go: hs.hello = new(serverHelloMsg)
+        self.hello = super::handshake_messages::serverHelloMsg::default();
+
+        // Go: "TLS 1.3 froze the ServerHello.legacy_version field ..."
+        //     hs.hello.vers = VersionTLS12
+        //     hs.hello.supportedVersion = c.vers
+        self.hello.vers = super::common::VersionTLS12;
+        self.hello.supportedVersion = self.c.__vers();
+
+        // Go: if len(hs.clientHello.supportedVersions) == 0 {
+        //         c.sendAlert(alertIllegalParameter)
+        //         return errors.New("tls: client used the legacy version field to negotiate TLS 1.3") }
+        if self.clientHello.supportedVersions.len() == 0 {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New(
+                "tls: client used the legacy version field to negotiate TLS 1.3",
+            );
+        }
+
+        // Go: for _, id := range hs.clientHello.cipherSuites {
+        //         if id == TLS_FALLBACK_SCSV {
+        //             if c.vers < c.config.maxSupportedVersion(roleServer) {
+        //                 c.sendAlert(alertInappropriateFallback)
+        //                 return errors.New("tls: client using inappropriate protocol fallback") }
+        //             break } }
+        for id in self.clientHello.cipherSuites.iter() {
+            if *id == super::cipher_suites::TLS_FALLBACK_SCSV {
+                if self.c.__vers()
+                    < self.c.config.maxSupportedVersion(super::common::roleServer)
+                {
+                    self.c.sendAlert(super::alert::alertInappropriateFallback);
+                    return crate::errors::New(
+                        "tls: client using inappropriate protocol fallback",
+                    );
+                }
+                break;
+            }
+        }
+
+        // Go: if len(hs.clientHello.compressionMethods) != 1 ||
+        //        hs.clientHello.compressionMethods[0] != compressionNone {
+        //         c.sendAlert(alertIllegalParameter)
+        //         return errors.New("tls: TLS 1.3 client supports illegal compression methods") }
+        if self.clientHello.compressionMethods.len() != 1
+            || self.clientHello.compressionMethods[0] != super::common::compressionNone
+        {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New(
+                "tls: TLS 1.3 client supports illegal compression methods",
+            );
+        }
+
+        // Go: hs.hello.random = make([]byte, 32)
+        //     if _, err := io.ReadFull(c.config.rand(), hs.hello.random); err != nil {
+        //         c.sendAlert(alertInternalError); return err }
+        self.hello.random = alloc::vec![0u8; 32];
+        {
+            let mut buf: slice<byte> = slice::__from_vec(self.hello.random.clone());
+            let mut r = self.c.config.rand();
+            let (_, err) = crate::io::ReadFull(&mut *r, &mut buf);
+            if err != crate::errors::nil {
+                self.c.sendAlert(super::alert::alertInternalError);
+                return err;
+            }
+            self.hello.random = buf.__into_vec();
+        }
+
+        // Go: if len(hs.clientHello.secureRenegotiation) != 0 {
+        //         c.sendAlert(alertHandshakeFailure)
+        //         return errors.New("tls: initial handshake had non-empty renegotiation extension") }
+        if self.clientHello.secureRenegotiation.len() != 0 {
+            self.c.sendAlert(super::alert::alertHandshakeFailure);
+            return crate::errors::New(
+                "tls: initial handshake had non-empty renegotiation extension",
+            );
+        }
+
+        // Go: (the `earlyData && c.quic != nil` arm cannot occur without
+        //      QUIC) } else if hs.clientHello.earlyData {
+        //         c.sendAlert(alertUnsupportedExtension)
+        //         return errors.New("tls: client sent unexpected early data") }
+        if self.clientHello.earlyData {
+            self.c.sendAlert(super::alert::alertUnsupportedExtension);
+            return crate::errors::New("tls: client sent unexpected early data");
+        }
+
+        // Go: hs.hello.sessionId = hs.clientHello.sessionId
+        //     hs.hello.compressionMethod = compressionNone
+        self.hello.sessionId = self.clientHello.sessionId.clone();
+        self.hello.compressionMethod = super::common::compressionNone;
+
+        // Go: preferenceList := defaultCipherSuitesTLS13
+        //     if !hasAESGCMHardwareSupport || !isAESGCMPreferred(hs.clientHello.cipherSuites) {
+        //         preferenceList = defaultCipherSuitesTLS13NoAES }
+        //     if fips140tls.Required() { preferenceList = allowedCipherSuitesTLS13FIPS }
+        let mut preferenceList: &[crate::types::uint16] = super::defaults::defaultCipherSuitesTLS13;
+        if !super::cipher_suites::hasAESGCMHardwareSupport
+            || !super::cipher_suites::isAESGCMPreferred(slice::__from_vec(
+                self.clientHello.cipherSuites.clone(),
+            ))
+        {
+            preferenceList = super::defaults::defaultCipherSuitesTLS13NoAES;
+        }
+        if super::internal::fips140tls::Required() {
+            preferenceList = super::defaults_fips140::allowedCipherSuitesTLS13FIPS;
+        }
+        // Go: for _, suiteID := range preferenceList {
+        //         hs.suite = mutualCipherSuiteTLS13(hs.clientHello.cipherSuites, suiteID)
+        //         if hs.suite != nil { break } }
+        for suiteID in preferenceList {
+            self.suite = super::cipher_suites::mutualCipherSuiteTLS13(
+                slice::__from_vec(self.clientHello.cipherSuites.clone()),
+                *suiteID,
+            );
+            if self.suite.is_some() {
+                break;
+            }
+        }
+        // Go: if hs.suite == nil {
+        //         c.sendAlert(alertHandshakeFailure)
+        //         return fmt.Errorf("tls: no cipher suite supported by both client and server; client offered: %x", …) }
+        if self.suite.is_none() {
+            self.c.sendAlert(super::alert::alertHandshakeFailure);
+            // Go formats `%x` on a []uint16 as "[13a1 1302 …]".
+            // Go formats `%x` on a []uint16 as "[13a1 1302 …]".
+            let mut offered: alloc::vec::Vec<byte> = alloc::vec![b'['];
+            for (idx, id) in self.clientHello.cipherSuites.iter().enumerate() {
+                if idx != 0 {
+                    offered.push(b' ');
+                }
+                let h = crate::fmt::Sprintf!("%x", *id);
+                offered.extend_from_slice(h.as_bytes());
+            }
+            offered.push(b']');
+            return crate::fmt::Errorf!(
+                "tls: no cipher suite supported by both client and server; client offered: %s",
+                crate::gostring::string::from_bytes(&offered)
+            );
+        }
+        let suite = self.suite.unwrap();
+        // Go: c.cipherSuite = hs.suite.id
+        //     hs.hello.cipherSuite = hs.suite.id
+        //     hs.transcript = hs.suite.hash.New()
+        self.c.__setCipherSuite(suite.id);
+        self.hello.cipherSuite = suite.id;
+        self.transcript = Some(super::handshake_messages::transcriptHasher(suite.hash.New()));
+
+        // Go: preferredGroups := c.config.curvePreferences(c.vers)
+        //     preferredGroups = slices.DeleteFunc(preferredGroups, func(group CurveID) bool {
+        //         return !slices.Contains(hs.clientHello.supportedCurves, group) })
+        let clientCurves: slice<super::common::CurveID> = slice::__from_vec(
+            self.clientHello
+                .supportedCurves
+                .iter()
+                .map(|v| super::common::CurveID(*v))
+                .collect(),
+        );
+        let mut preferredGroups = crate::slices::DeleteFunc(
+            self.c.config.curvePreferences(self.c.__vers()),
+            |group: &super::common::CurveID| !crate::slices::Contains(&clientCurves, group),
+        );
+        // Go: if len(preferredGroups) == 0 {
+        //         c.sendAlert(alertHandshakeFailure)
+        //         return errors.New("tls: no key exchanges supported by both client and server") }
+        if preferredGroups.Len() == 0 {
+            self.c.sendAlert(super::alert::alertHandshakeFailure);
+            return crate::errors::New(
+                "tls: no key exchanges supported by both client and server",
+            );
+        }
+        // Go: hasKeyShare := func(group CurveID) bool { … }
+        let keyShares = self.clientHello.keyShares.clone();
+        let hasKeyShare = move |group: super::common::CurveID| -> bool {
+            for ks in keyShares.iter() {
+                if ks.group == group.0 {
+                    return true;
+                }
+            }
+            return false;
+        };
+        // Go: sort.SliceStable(preferredGroups, func(i, j int) bool {
+        //         return hasKeyShare(preferredGroups[i]) && !hasKeyShare(preferredGroups[j]) })
+        {
+            let pg = preferredGroups.clone();
+            let hks = hasKeyShare.clone();
+            crate::sort::SliceStable(&mut preferredGroups, |i: crate::types::int, j: crate::types::int| {
+                hks(pg[i as usize]) && !hks(pg[j as usize])
+            });
+        }
+        // Go: sort.SliceStable(preferredGroups, func(i, j int) bool {
+        //         return isPQKeyExchange(preferredGroups[i]) && !isPQKeyExchange(preferredGroups[j]) })
+        {
+            let pg = preferredGroups.clone();
+            crate::sort::SliceStable(&mut preferredGroups, |i: crate::types::int, j: crate::types::int| {
+                super::common::isPQKeyExchange(pg[i as usize])
+                    && !super::common::isPQKeyExchange(pg[j as usize])
+            });
+        }
+        // Go: selectedGroup := preferredGroups[0]
+        let selectedGroup = preferredGroups[0];
+
+        // Go: var clientKeyShare *keyShare
+        //     for _, ks := range hs.clientHello.keyShares {
+        //         if ks.group == selectedGroup { clientKeyShare = &ks; break } }
+        //     if clientKeyShare == nil {
+        //         ks, err := hs.doHelloRetryRequest(selectedGroup)
+        //         if err != nil { return err }
+        //         clientKeyShare = ks }
+        let mut clientKeyShare: Option<super::handshake_messages::keyShare> = None;
+        for ks in self.clientHello.keyShares.iter() {
+            if ks.group == selectedGroup.0 {
+                clientKeyShare = Some(ks.clone());
+                break;
+            }
+        }
+        let clientKeyShare = match clientKeyShare {
+            Some(ks) => ks,
+            None => {
+                let (ks, err) = self.doHelloRetryRequest(selectedGroup);
+                if err != crate::errors::nil {
+                    return err;
+                }
+                ks.unwrap()
+            }
+        };
+        // Go: c.curveID = selectedGroup
+        self.c.curveID = selectedGroup;
+
+        // Go: ecdhGroup := selectedGroup; ecdhData := clientKeyShare.data
+        //     if selectedGroup == X25519MLKEM768 {
+        //         ecdhGroup = X25519
+        //         if len(ecdhData) != mlkem.EncapsulationKeySize768+x25519PublicKeySize {
+        //             c.sendAlert(alertIllegalParameter)
+        //             return errors.New("tls: invalid X25519MLKEM768 client key share") }
+        //         ecdhData = ecdhData[mlkem.EncapsulationKeySize768:] }
+        let mut ecdhGroup = selectedGroup;
+        let mut ecdhData = slice::__from_vec(clientKeyShare.data.clone());
+        if selectedGroup == super::common::X25519MLKEM768 {
+            ecdhGroup = super::common::X25519;
+            if ecdhData.Len()
+                != crate::crypto::internal::fips140::mlkem::EncapsulationKeySize768 as crate::types::int
+                    + super::key_schedule::x25519PublicKeySize
+            {
+                self.c.sendAlert(super::alert::alertIllegalParameter);
+                return crate::errors::New("tls: invalid X25519MLKEM768 client key share");
+            }
+            ecdhData = ecdhData.slice(
+                crate::crypto::internal::fips140::mlkem::EncapsulationKeySize768 as crate::types::int,
+                ecdhData.Len(),
+            );
+        }
+        // Go: if _, ok := curveForCurveID(ecdhGroup); !ok {
+        //         c.sendAlert(alertInternalError)
+        //         return errors.New("tls: CurvePreferences includes unsupported curve") }
+        let (_, ok) = super::key_schedule::curveForCurveID(ecdhGroup);
+        if !ok {
+            self.c.sendAlert(super::alert::alertInternalError);
+            return crate::errors::New(
+                "tls: CurvePreferences includes unsupported curve",
+            );
+        }
+        // Go: key, err := generateECDHEKey(c.config.rand(), ecdhGroup)
+        //     if err != nil { c.sendAlert(alertInternalError); return err }
+        let (key, err) = {
+            let mut r = self.c.config.rand();
+            super::key_schedule::generateECDHEKey(&mut *r, ecdhGroup)
+        };
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertInternalError);
+            return err;
+        }
+        let key = key.unwrap();
+        // Go: hs.hello.serverShare = keyShare{group: selectedGroup, data: key.PublicKey().Bytes()}
+        self.hello.serverShare = super::handshake_messages::keyShare {
+            group: selectedGroup.0,
+            data: key.PublicKey().Bytes().__into_vec(),
+        };
+        // Go: peerKey, err := key.Curve().NewPublicKey(ecdhData)
+        //     if err != nil { c.sendAlert(alertIllegalParameter)
+        //         return errors.New("tls: invalid client key share") }
+        let (peerKey, err) = key.Curve().NewPublicKey(&ecdhData);
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New("tls: invalid client key share");
+        }
+        // Go: hs.sharedKey, err = key.ECDH(peerKey)
+        //     if err != nil { c.sendAlert(alertIllegalParameter)
+        //         return errors.New("tls: invalid client key share") }
+        let (sharedKey, err) = key.ECDH(&peerKey);
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New("tls: invalid client key share");
+        }
+        self.sharedKey = sharedKey;
+        // Go: if selectedGroup == X25519MLKEM768 {
+        //         k, err := mlkem.NewEncapsulationKey768(clientKeyShare.data[:mlkem.EncapsulationKeySize768])
+        //         if err != nil { c.sendAlert(alertIllegalParameter)
+        //             return errors.New("tls: invalid X25519MLKEM768 client key share") }
+        //         mlkemSharedSecret, ciphertext := k.Encapsulate()
+        //         hs.sharedKey = append(mlkemSharedSecret, hs.sharedKey...)
+        //         hs.hello.serverShare.data = append(ciphertext, hs.hello.serverShare.data...) }
+        if selectedGroup == super::common::X25519MLKEM768 {
+            let ekBytes = slice::__from_vec(
+                clientKeyShare.data
+                    [..crate::crypto::internal::fips140::mlkem::EncapsulationKeySize768]
+                    .to_vec(),
+            );
+            let (k, err) =
+                crate::crypto::internal::fips140::mlkem::NewEncapsulationKey768(ekBytes);
+            if err != crate::errors::nil {
+                self.c.sendAlert(super::alert::alertIllegalParameter);
+                return crate::errors::New("tls: invalid X25519MLKEM768 client key share");
+            }
+            let (mlkemSharedSecret, ciphertext) = k.Encapsulate();
+            let mut newShared = mlkemSharedSecret.__into_vec();
+            newShared.extend_from_slice({
+                let raw: &[byte] = &self.sharedKey;
+                raw
+            });
+            self.sharedKey = slice::__from_vec(newShared);
+            let mut newData = ciphertext.__into_vec();
+            newData.extend_from_slice(&self.hello.serverShare.data);
+            self.hello.serverShare.data = newData;
+        }
+
+        // Go: selectedProto, err := negotiateALPN(c.config.NextProtos, hs.clientHello.alpnProtocols, c.quic != nil)
+        //     if err != nil { c.sendAlert(alertNoApplicationProtocol); return err }
+        //     c.clientProtocol = selectedProto
+        let clientAlpn: slice<crate::gostring::string> = slice::__from_vec(
+            self.clientHello
+                .alpnProtocols
+                .iter()
+                .map(|p| crate::gostring::string::from_bytes(p.as_bytes()))
+                .collect(),
+        );
+        let (selectedProto, err) = super::handshake_server::negotiateALPN(
+            self.c.config.NextProtos.clone(),
+            clientAlpn,
+            false,
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertNoApplicationProtocol);
+            return err;
+        }
+        self.c.__setClientProtocol(selectedProto);
+
+        // Go: (the `c.quic != nil` arm cannot occur) else {
+        //         if hs.clientHello.quicTransportParameters != nil {
+        //             c.sendAlert(alertUnsupportedExtension)
+        //             return errors.New("tls: client sent an unexpected quic_transport_parameters extension") } }
+        if self.clientHello.quicTransportParameters.is_some() {
+            self.c.sendAlert(super::alert::alertUnsupportedExtension);
+            return crate::errors::New(
+                "tls: client sent an unexpected quic_transport_parameters extension",
+            );
+        }
+
+        // Go: c.serverName = hs.clientHello.serverName
+        //     return nil
+        self.c.serverName =
+            crate::gostring::string::from_bytes(self.clientHello.serverName.as_bytes());
+        return crate::errors::nil;
+    }
+
     // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:730-833 serverHandshakeStateTLS13.sendServerParameters
     /// Go: write the ServerHello (computing the ECH acceptance
     /// confirmation into its random if ECH was accepted), switch both

@@ -3583,6 +3583,88 @@ fn main() {
         "tls: client sent invalid encrypted_client_hello extension",
     );
 
+    // ── serverHandshakeStateTLS13.processClientHello ────────────────
+    //
+    // Ground truth: goref with a constant-0x42 Config.Rand. The success
+    // case pins the ServerHello random, the X25519 server share, and the
+    // negotiated ECDH shared key byte-for-byte; the rest pin each
+    // validation-branch error.
+    let pchOK = || -> (string, string, int, string, string, int, int, string, string) {
+        let (e, r, g, d, sk, su, cv, pr, sni) =
+            tls::handshake_server_tls13_processClientHello(0);
+        return (e, hexOf(r), goish::int(g), hexOf(d), hexOf(sk),
+                goish::int(su), goish::int(cv), pr, sni);
+    };
+    let pchErr = |which: int| -> string {
+        let (e, _, _, _, _, _, _, _, _) =
+            tls::handshake_server_tls13_processClientHello(which);
+        return e;
+    };
+
+    let (pc0e, pc0r, pc0g, pc0d, pc0sk, pc0su, pc0cv, pc0pr, pc0sni) = pchOK();
+    eq("processClientHello succeeds", pc0e, "");
+    eq(
+        "the ServerHello random is drawn from Config.Rand",
+        pc0r,
+        "4242424242424242424242424242424242424242424242424242424242424242",
+    );
+    check_n("the server share is X25519", pc0g, 29);
+    eq(
+        "the server share is the derived X25519 public key",
+        pc0d,
+        "132c442be010fbd57e72603328aa76e71fccc1503aae219327d14d9c9993f472",
+    );
+    eq(
+        "the negotiated ECDH shared key matches Go",
+        pc0sk,
+        "6507535577682400296442117aa2a18748d244f837402318f9a0805dba4d103b",
+    );
+    check_n("the negotiated suite is TLS_AES_128_GCM_SHA256", pc0su, 0x1301);
+    check_n("the curve ID is recorded", pc0cv, 29);
+    eq("ALPN negotiates h2", pc0pr, "h2");
+    eq("the server name is recorded", pc0sni, "server.example");
+
+    eq(
+        "a legacy-version client is rejected",
+        pchErr(1),
+        "tls: client used the legacy version field to negotiate TLS 1.3",
+    );
+    eq(
+        "illegal compression methods are rejected",
+        pchErr(2),
+        "tls: TLS 1.3 client supports illegal compression methods",
+    );
+    eq(
+        "a non-empty renegotiation extension is rejected",
+        pchErr(3),
+        "tls: initial handshake had non-empty renegotiation extension",
+    );
+    eq(
+        "unexpected early data is rejected",
+        pchErr(4),
+        "tls: client sent unexpected early data",
+    );
+    eq(
+        "no mutual cipher suite is rejected",
+        pchErr(5),
+        "tls: no cipher suite supported by both client and server; client offered: [0]",
+    );
+    eq(
+        "no mutual curve is rejected",
+        pchErr(6),
+        "tls: no key exchanges supported by both client and server",
+    );
+    eq(
+        "no mutual ALPN is rejected",
+        pchErr(7),
+        "tls: client requested unsupported application protocols ([\"spdy\"])",
+    );
+    eq(
+        "an unexpected quic_transport_parameters extension is rejected",
+        pchErr(8),
+        "tls: client sent an unexpected quic_transport_parameters extension",
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

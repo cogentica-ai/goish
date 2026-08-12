@@ -7713,6 +7713,125 @@ pub fn handshake_server_tls13_processECHClientHello(
     return (text, sni, ctxInner, ctxNil, c.__echAccepted());
 }
 
+// go: none — goish-only: drives serverHandshakeStateTLS13.processClientHello
+// with a fixed clientHello and a constant-0x42 Config.Rand, so the
+// ServerHello random, the X25519 server share, the ECDH shared key, and
+// every validation-branch error are byte-comparable against Go.
+// which: 0 ok, 1 legacy version, 2 bad compression, 3 renegotiation,
+// 4 early data, 5 no cipher, 6 no curve, 7 no ALPN, 8 quic params.
+#[doc(hidden)]
+pub fn handshake_server_tls13_processClientHello(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::uint16,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::uint16,
+    crate::types::uint16,
+    crate::gostring::string,
+    crate::gostring::string,
+) {
+    use crate::goslice::slice;
+    struct constReader;
+    impl crate::io::Reader for constReader {
+        // go: none — goish-only: constant 0x42 stream.
+        fn Read(&mut self, p: &mut slice<crate::types::byte>) -> (crate::types::int, crate::error) {
+            let n = p.Len();
+            let mut i: usize = 0;
+            while i < p.len() {
+                p[i] = 0x42;
+                i += 1;
+            }
+            return (n, crate::errors::nil);
+        }
+    }
+    let fill = |base: crate::types::byte| {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: crate::types::byte = 0;
+        while i < 32 {
+            v.push(base.wrapping_add(i));
+            i += 1;
+        }
+        return v;
+    };
+
+    let mut ch = handshake_messages::clientHelloMsg::default();
+    ch.vers = common::VersionTLS12;
+    ch.random = fill(0x01);
+    ch.sessionId = fill(0x50);
+    ch.cipherSuites = alloc::vec![cipher_suites::TLS_AES_128_GCM_SHA256];
+    ch.compressionMethods = alloc::vec![0u8];
+    ch.serverName = "server.example".into();
+    ch.supportedVersions = alloc::vec![common::VersionTLS13];
+    ch.supportedCurves = alloc::vec![common::X25519.0];
+    ch.keyShares = alloc::vec![handshake_messages::keyShare {
+        group: common::X25519.0,
+        data: fill(0x60),
+    }];
+    ch.alpnProtocols = alloc::vec!["h2".into(), "http/1.1".into()];
+
+    let mut nextProtos: slice<crate::gostring::string> =
+        slice::__from_vec(alloc::vec!["h2".into()]);
+    match which {
+        1 => ch.supportedVersions = alloc::vec::Vec::new(),
+        2 => ch.compressionMethods = alloc::vec![0u8, 1],
+        3 => ch.secureRenegotiation = alloc::vec![1u8],
+        4 => ch.earlyData = true,
+        5 => ch.cipherSuites = alloc::vec![0x0000u16],
+        6 => ch.supportedCurves = alloc::vec![999u16],
+        7 => {
+            ch.alpnProtocols = alloc::vec!["spdy".into()];
+        }
+        8 => ch.quicTransportParameters = Some(alloc::vec![1u8, 2]),
+        _ => {}
+    }
+    if which != 0 && which != 7 {
+        nextProtos = slice::new();
+    }
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink);
+    c.__setHaveVers(true);
+    c.__setVers(common::VersionTLS13);
+    let mut cfg = Config::default();
+    cfg.Rand = Some(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        alloc::boxed::Box::new(constReader),
+    )));
+    cfg.NextProtos = nextProtos;
+    c.__setConfig(cfg);
+
+    let mut hs = handshake_server_tls13::serverHandshakeStateTLS13 {
+        c,
+        clientHello: ch,
+        ..Default::default()
+    };
+    let err = hs.processClientHello();
+    if err != crate::errors::nil {
+        return (
+            err.Error(), slice::new(), 0, slice::new(), slice::new(), 0, 0,
+            crate::gostring::string::from_static(""),
+            crate::gostring::string::from_static(""),
+        );
+    }
+    let (_, curveIDv) = (0u16, hs.c.__curveID().0);
+    return (
+        crate::gostring::string::from_static(""),
+        slice::__from_vec(hs.hello.random.clone()),
+        hs.hello.serverShare.group,
+        slice::__from_vec(hs.hello.serverShare.data.clone()),
+        hs.sharedKey.clone(),
+        hs.suite.unwrap().id,
+        curveIDv,
+        crate::gostring::string::from_bytes(hs.c.__clientProtocol().as_bytes()),
+        hs.c.__serverName(),
+    );
+}
+
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below
 // sign and verify against, the same fixture x509_parse_smoke uses.
 // Held once: it was pasted by hand into a second shim and silently
