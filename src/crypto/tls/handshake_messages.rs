@@ -1,6 +1,6 @@
 // goishlint:ignore GOISH018 transcriptMsg — marshalCertificate takes common.go's Certificate, which is not ported yet (mod[rs] declares a hand-written one), and transcriptMsg dispatches over the handshakeMessage interface, which arrives with conn[go]. Everything else in handshake_messages.go is here. See ROADMAP.md.
 // goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, newSessionTicketMsg, newSessionTicketMsgTLS13, serverKeyExchangeMsg, transcriptHash — the message types the subset does not handle.
-// go: file crypto/tls/handshake_messages.go decls: marshalingFunction.Marshal, addBytesWithLength, clientHelloMsg.marshalMsg, clientHelloMsg.marshal, clientHelloMsg.marshalWithoutBinders, clientHelloMsg.updateBinders, clientHelloMsg.originalBytes, clientHelloMsg.clone, serverHelloDoneMsg.marshal, serverHelloDoneMsg.unmarshal, clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal, finishedMsg.unmarshal, certificateVerifyMsg.unmarshal, encryptedExtensionsMsg.unmarshal, unmarshalCertificate, marshalCertificate, certificateMsgTLS13.unmarshal
+// go: file crypto/tls/handshake_messages.go decls: marshalingFunction.Marshal, addBytesWithLength, clientHelloMsg.marshalMsg, clientHelloMsg.marshal, clientHelloMsg.marshalWithoutBinders, clientHelloMsg.updateBinders, clientHelloMsg.originalBytes, clientHelloMsg.clone, serverHelloDoneMsg.marshal, serverHelloDoneMsg.unmarshal, clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal, finishedMsg.unmarshal, certificateVerifyMsg.unmarshal, encryptedExtensionsMsg.unmarshal, unmarshalCertificate, marshalCertificate, certificateMsgTLS13.unmarshal, serverHelloMsg.unmarshal, serverHelloMsg.originalBytes
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -718,6 +718,17 @@ pub(crate) struct serverHelloMsg {
     // HelloRetryRequest extensions
     pub cookie: Vec<byte>,
     pub selectedGroup: u16,
+
+    // Fields `unmarshal` fills that the ported `marshal` does not emit.
+    pub original: Vec<byte>,
+    pub ocspStapling: bool,
+    pub ticketSupported: bool,
+    pub secureRenegotiation: Vec<byte>,
+    pub secureRenegotiationSupported: bool,
+    pub extendedMasterSecret: bool,
+    pub scts: Vec<Vec<byte>>,
+    pub encryptedClientHello: Vec<byte>,
+    pub serverNameAck: bool,
 }
 
 impl serverHelloMsg {
@@ -2702,5 +2713,197 @@ impl serverHelloDoneMsg {
     pub(crate) fn unmarshal(&mut self, data: &[byte]) -> bool {
         // Go: return len(data) == 4
         return data.len() == 4;
+    }
+}
+
+
+impl serverHelloMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:846-971 serverHelloMsg.unmarshal
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        // Go: *m = serverHelloMsg{original: data}
+        //     s := cryptobyte.String(data)
+        *self = serverHelloMsg::default();
+        let raw: &[byte] = &data;
+        self.original = raw.to_vec();
+        let mut s = CBString::New(data);
+
+        // Go: if !s.Skip(4) || // message type and uint24 length field
+        //        !s.ReadUint16(&m.vers) || !s.ReadBytes(&m.random, 32) ||
+        //        !readUint8LengthPrefixed(&s, &m.sessionId) ||
+        //        !s.ReadUint16(&m.cipherSuite) ||
+        //        !s.ReadUint8(&m.compressionMethod) { return false }
+        let mut random: slice<byte> = slice::new();
+        let mut sessionId: slice<byte> = slice::new();
+        if !s.Skip(4)
+            || !s.ReadUint16(&mut self.vers)
+            || !s.ReadBytes(&mut random, 32)
+            || !readUint8LengthPrefixed(&mut s, &mut sessionId)
+            || !s.ReadUint16(&mut self.cipherSuite)
+            || !s.ReadUint8(&mut self.compressionMethod)
+        {
+            return false;
+        }
+        self.random = random.__into_vec();
+        self.sessionId = sessionId.__into_vec();
+
+        // Go: if s.Empty() {
+        //         // ServerHello is optionally followed by extension data
+        //         return true }
+        if s.Empty() {
+            return true;
+        }
+
+        // Go: var extensions cryptobyte.String
+        //     if !s.ReadUint16LengthPrefixed(&extensions) || !s.Empty() { return false }
+        let mut extensions = CBString::New(slice::new());
+        if !s.ReadUint16LengthPrefixed(&mut extensions) || !s.Empty() {
+            return false;
+        }
+
+        // Go: seenExts := make(map[uint16]bool)
+        //     for !extensions.Empty() { … }
+        let mut seenExts: Vec<u16> = Vec::new();
+        while !extensions.Empty() {
+            let mut extension: u16 = 0;
+            let mut extData = CBString::New(slice::new());
+            if !extensions.ReadUint16(&mut extension)
+                || !extensions.ReadUint16LengthPrefixed(&mut extData)
+            {
+                return false;
+            }
+
+            // Go: if seenExts[extension] { return false }
+            //     seenExts[extension] = true
+            if seenExts.contains(&extension) {
+                return false;
+            }
+            seenExts.push(extension);
+
+            // Go: switch extension { … }
+            if extension == extensionStatusRequest {
+                self.ocspStapling = true;
+            } else if extension == extensionSessionTicket {
+                self.ticketSupported = true;
+            } else if extension == extensionRenegotiationInfo {
+                let mut sr: slice<byte> = slice::new();
+                if !readUint8LengthPrefixed(&mut extData, &mut sr) {
+                    return false;
+                }
+                self.secureRenegotiation = sr.__into_vec();
+                self.secureRenegotiationSupported = true;
+            } else if extension == extensionExtendedMasterSecret {
+                self.extendedMasterSecret = true;
+            } else if extension == extensionALPN {
+                // Go: var protoList cryptobyte.String
+                //     if !extData.ReadUint16LengthPrefixed(&protoList) || protoList.Empty() {
+                //         return false }
+                //     var proto cryptobyte.String
+                //     if !protoList.ReadUint8LengthPrefixed(&proto) ||
+                //        proto.Empty() || !protoList.Empty() { return false }
+                //     m.alpnProtocol = string(proto)
+                let mut protoList = CBString::New(slice::new());
+                if !extData.ReadUint16LengthPrefixed(&mut protoList) || protoList.Empty() {
+                    return false;
+                }
+                let mut proto = CBString::New(slice::new());
+                if !protoList.ReadUint8LengthPrefixed(&mut proto)
+                    || proto.Empty()
+                    || !protoList.Empty()
+                {
+                    return false;
+                }
+                let pb: &[byte] = &proto.0;
+                self.alpnProtocol =
+                    String::from_utf8(pb.to_vec()).unwrap_or_default();
+            } else if extension == extensionSCT {
+                // Go: var sctList cryptobyte.String
+                //     if !extData.ReadUint16LengthPrefixed(&sctList) || sctList.Empty() {
+                //         return false }
+                //     for !sctList.Empty() {
+                //         var sct []byte
+                //         if !readUint16LengthPrefixed(&sctList, &sct) || len(sct) == 0 {
+                //             return false }
+                //         m.scts = append(m.scts, sct) }
+                let mut sctList = CBString::New(slice::new());
+                if !extData.ReadUint16LengthPrefixed(&mut sctList) || sctList.Empty() {
+                    return false;
+                }
+                while !sctList.Empty() {
+                    let mut sct: slice<byte> = slice::new();
+                    if !readUint16LengthPrefixed(&mut sctList, &mut sct) || sct.Len() == 0 {
+                        return false;
+                    }
+                    self.scts.push(sct.__into_vec());
+                }
+            } else if extension == extensionSupportedVersions {
+                if !extData.ReadUint16(&mut self.supportedVersion) {
+                    return false;
+                }
+            } else if extension == extensionCookie {
+                let mut cookie: slice<byte> = slice::new();
+                if !readUint16LengthPrefixed(&mut extData, &mut cookie) || cookie.Len() == 0 {
+                    return false;
+                }
+                self.cookie = cookie.__into_vec();
+            } else if extension == extensionKeyShare {
+                // Go: This extension has different formats in SH and HRR,
+                // accept either and let the handshake logic decide. See RFC
+                // 8446, Section 4.2.8.
+                if extData.0.Len() == 2 {
+                    if !extData.ReadUint16(&mut self.selectedGroup) {
+                        return false;
+                    }
+                } else {
+                    let mut d: slice<byte> = slice::new();
+                    if !extData.ReadUint16(&mut self.serverShare.group)
+                        || !readUint16LengthPrefixed(&mut extData, &mut d)
+                    {
+                        return false;
+                    }
+                    self.serverShare.data = d.__into_vec();
+                }
+            } else if extension == extensionPreSharedKey {
+                self.selectedIdentityPresent = true;
+                if !extData.ReadUint16(&mut self.selectedIdentity) {
+                    return false;
+                }
+            } else if extension == extensionSupportedPoints {
+                // Go: RFC 4492, Section 5.1.2
+                let mut pts: slice<byte> = slice::new();
+                if !readUint8LengthPrefixed(&mut extData, &mut pts) || pts.Len() == 0 {
+                    return false;
+                }
+                self.supportedPoints = pts.__into_vec();
+            } else if extension == extensionEncryptedClientHello {
+                let n = extData.0.Len();
+                let mut ech: slice<byte> = slice::new();
+                if !extData.ReadBytes(&mut ech, n) {
+                    return false;
+                }
+                self.encryptedClientHello = ech.__into_vec();
+            } else if extension == extensionServerName {
+                if extData.0.Len() != 0 {
+                    return false;
+                }
+                self.serverNameAck = true;
+            } else {
+                // Go: default: // Ignore unknown extensions.
+                continue;
+            }
+
+            // Go: if !extData.Empty() { return false }
+            if !extData.Empty() {
+                return false;
+            }
+        }
+
+        // Go: return true
+        return true;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:973-975 serverHelloMsg.originalBytes
+    pub(crate) fn originalBytes(&self) -> slice<byte> {
+        // Go: return m.original
+        return slice::__from_vec(self.original.clone());
     }
 }

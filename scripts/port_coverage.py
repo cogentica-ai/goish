@@ -395,6 +395,7 @@ def rust_decl_idents(src):
     port turned into an inherent method is still legitimately matched by
     name."""
     out, impl_ty, impl_depth, depth = set(), None, 0, 0
+    impl_open = False
     for line in src.split("\n"):
         # A comment-only line is not code. Ported bodies quote Go verbatim,
         # and Go composite literals carry braces — counting those would
@@ -405,7 +406,7 @@ def rust_decl_idents(src):
             continue
         m = RE_IMPL.match(line)
         if m and impl_ty is None:
-            impl_ty, impl_depth = m.group("ty"), depth
+            impl_ty, impl_depth, impl_open = m.group("ty"), depth, False
         fn = RSFN.match(line)
         if fn:
             name = fn.group(1)
@@ -413,8 +414,15 @@ def rust_decl_idents(src):
             if impl_ty:
                 out.add("%s.%s" % (impl_ty, name))
         depth += line.count("{") - line.count("}")
-        if impl_ty is not None and depth <= impl_depth:
-            impl_ty = None
+        # Only close the impl block once its brace has actually opened.
+        # A multi-line `impl<F> Trait for Ty<F>` + `where` header leaves
+        # depth unchanged on the `impl` line, and closing eagerly there
+        # dropped every method in the block. Caught on
+        # crypto/tls/handshake_messages.rs's marshalingFunction.
+        if impl_ty is not None and depth > impl_depth:
+            impl_open = True
+        if impl_ty is not None and impl_open and depth <= impl_depth:
+            impl_ty, impl_open = None, False
     return out
 
 

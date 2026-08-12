@@ -51,7 +51,7 @@ with slices wherever it is needed.
 | remaining, portable | 79 |
 | remaining, assembly stubs | 0 |
 | waived (resolved elsewhere by design) | 1 |
-| provenance anchors | 2721 |
+| provenance anchors | 2724 |
 | unverified names (see below) | 3 |
 
 Complete and byte-checked against Go: `x509` (158/158), `ecdsa`,
@@ -90,8 +90,8 @@ landed with byte-exact vectors and the percentage did not move.
 
 | | by name | by declaration |
 |---|--:|--:|
-| crypto/ | 1373/1452 (94.6%) | **1619/1734 (93.4%)** |
-| crypto/tls | 220/299 (73.6%) | 278/377 (73.7%) |
+| crypto/ | 1373/1452 (94.6%) | **1622/1734 (93.5%)** |
+| crypto/tls | 220/299 (73.6%) | 281/377 (74.5%) |
 
 The first thing it found was concrete: `crypto/x509` read 100% by name
 while missing `CertificateRequest.CheckSignature` and

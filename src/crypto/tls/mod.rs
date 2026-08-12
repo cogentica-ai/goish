@@ -4713,3 +4713,50 @@ pub fn handshake_server_tls13_cloneHash() -> (
     );
     return (true, orig, clone, cross.is_none());
 }
+
+// go: none — goish-only: serverHelloMsg is unexported in Go, where the
+// tests are in-package. Marshals a TLS 1.3 ServerHello, parses it back,
+// and reports `(encoding, unmarshal ok, vers, suite, sessionId,
+// supportedVersion, key-share group, key-share data, originalBytes
+// matches, a truncated input is rejected)`.
+#[doc(hidden)]
+pub fn handshake_messages_serverHelloRoundTrip() -> (
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    crate::types::int,
+    crate::types::int,
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::int,
+    crate::types::int,
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    bool,
+) {
+    let mut sh = handshake_messages::serverHelloMsg::default();
+    sh.vers = common::VersionTLS12;
+    sh.random = alloc::vec![0u8; 32];
+    sh.sessionId = alloc::vec![1u8, 2];
+    sh.cipherSuite = cipher_suites::TLS_AES_128_GCM_SHA256;
+    sh.supportedVersion = common::VersionTLS13;
+    sh.serverShare = handshake_messages::keyShare {
+        group: common::X25519.0,
+        data: alloc::vec![9u8, 9, 9, 9],
+    };
+    let enc = crate::goslice::slice::__from_vec(sh.marshal());
+    let mut r = handshake_messages::serverHelloMsg::default();
+    let ok = r.unmarshal(enc.clone());
+    let mut tr = handshake_messages::serverHelloMsg::default();
+    let bad = !tr.unmarshal(enc.slice(0, 10));
+    return (
+        enc.clone(),
+        ok,
+        r.vers as crate::types::int,
+        r.cipherSuite as crate::types::int,
+        crate::goslice::slice::__from_vec(r.sessionId.clone()),
+        r.supportedVersion as crate::types::int,
+        r.serverShare.group as crate::types::int,
+        crate::goslice::slice::__from_vec(r.serverShare.data.clone()),
+        r.originalBytes() == enc,
+        bad,
+    );
+}

@@ -2312,6 +2312,25 @@ fn main() {
     // unmarshaller, so cloneHash returns nil rather than a wrong hash.
     check("cloneHash refuses a cross-algorithm clone", chCross);
 
+    // ─── handshake_messages.go: serverHelloMsg.unmarshal. The counterpart
+    //     of the already-ported marshal, so the pair round-trips. From
+    //     goref.sh.
+    let (shEnc, shOK, shVers, shSuite, shSID, shSupported, shGroup, shShare,
+         shOrig, shTruncated) = tls::handshake_messages_serverHelloRoundTrip();
+    eq("serverHelloMsg.marshal", hexOf(shEnc),
+       "0200003c030300000000000000000000000000000000000000000000000000000000000000000201021301000012002b0002030400330008001d000409090909");
+    check("serverHelloMsg.unmarshal ok", shOK);
+    // The record version stays 1.2; the real version rides in
+    // supported_versions, which is how TLS 1.3 hides from middleboxes.
+    check_n("serverHelloMsg legacy_version", shVers, 0x0303);
+    check_n("serverHelloMsg supported_versions", shSupported, 0x0304);
+    check_n("serverHelloMsg cipher suite", shSuite, 0x1301);
+    eq("serverHelloMsg session id", hexOf(shSID), "0102");
+    check_n("serverHelloMsg key share group", shGroup, 29);
+    eq("serverHelloMsg key share data", hexOf(shShare), "09090909");
+    check("serverHelloMsg.originalBytes is the input", shOrig);
+    check("serverHelloMsg.unmarshal rejects a truncated input", shTruncated);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
