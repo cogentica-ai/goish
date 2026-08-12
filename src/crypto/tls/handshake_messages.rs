@@ -738,6 +738,39 @@ impl serverHelloMsg {
     /// Emits extensions in the same order as Go.
     pub(crate) fn marshal(&self) -> (slice<byte>, crate::error) {
         let mut exts = builder::new();
+        // Go: if m.ocspStapling { exts.AddUint16(extensionStatusRequest)
+        //         exts.AddUint16(0) }
+        if self.ocspStapling {
+            exts.AddUint16(extensionStatusRequest);
+            exts.AddUint16(0); // empty extension_data
+        }
+        // Go: if m.ticketSupported { exts.AddUint16(extensionSessionTicket)
+        //         exts.AddUint16(0) }
+        if self.ticketSupported {
+            exts.AddUint16(extensionSessionTicket);
+            exts.AddUint16(0); // empty extension_data
+        }
+        // Go: if m.secureRenegotiationSupported {
+        //         exts.AddUint16(extensionRenegotiationInfo)
+        //         exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+        //             exts.AddUint8LengthPrefixed(func(exts *cryptobyte.Builder) {
+        //                 exts.AddBytes(m.secureRenegotiation) }) }) }
+        if self.secureRenegotiationSupported {
+            exts.AddUint16(extensionRenegotiationInfo);
+            let sr = &self.secureRenegotiation;
+            exts.AddUint16LengthPrefixed(|exts| {
+                exts.AddUint8LengthPrefixed(|exts| {
+                    exts.AddBytes(sr);
+                });
+            });
+        }
+        // Go: if m.extendedMasterSecret {
+        //         exts.AddUint16(extensionExtendedMasterSecret)
+        //         exts.AddUint16(0) }
+        if self.extendedMasterSecret {
+            exts.AddUint16(extensionExtendedMasterSecret);
+            exts.AddUint16(0); // empty extension_data
+        }
         if !self.alpnProtocol.is_empty() {
             exts.AddUint16(extensionALPN);
             let alpn = self.alpnProtocol.as_bytes();
@@ -746,6 +779,25 @@ impl serverHelloMsg {
                     exts.AddUint8LengthPrefixed(|exts| {
                         exts.AddBytes(alpn);
                     });
+                });
+            });
+        }
+        // Go: if len(m.scts) > 0 { exts.AddUint16(extensionSCT)
+        //         exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+        //             exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+        //                 for _, sct := range m.scts {
+        //                     exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+        //                         exts.AddBytes(sct) }) } }) }) }
+        if !self.scts.is_empty() {
+            exts.AddUint16(extensionSCT);
+            let scts = &self.scts;
+            exts.AddUint16LengthPrefixed(|exts| {
+                exts.AddUint16LengthPrefixed(|exts| {
+                    for sct in scts.iter() {
+                        exts.AddUint16LengthPrefixed(|exts| {
+                            exts.AddBytes(sct);
+                        });
+                    }
                 });
             });
         }
@@ -799,6 +851,24 @@ impl serverHelloMsg {
                 });
             });
         }
+        // Go: if len(m.encryptedClientHello) > 0 {
+        //         exts.AddUint16(extensionEncryptedClientHello)
+        //         exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+        //             exts.AddBytes(m.encryptedClientHello) }) }
+        if !self.encryptedClientHello.is_empty() {
+            exts.AddUint16(extensionEncryptedClientHello);
+            let ech = &self.encryptedClientHello;
+            exts.AddUint16LengthPrefixed(|exts| {
+                exts.AddBytes(ech);
+            });
+        }
+        // Go: if m.serverNameAck { exts.AddUint16(extensionServerName)
+        //         exts.AddUint16(0) }
+        if self.serverNameAck {
+            exts.AddUint16(extensionServerName);
+            exts.AddUint16(0);
+        }
+
         let extBytes = exts.Bytes();
 
         let mut b = builder::new();

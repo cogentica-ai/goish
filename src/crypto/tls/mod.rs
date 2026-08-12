@@ -6546,3 +6546,143 @@ pub fn handshake_messages_encryptedExtensionsRoundTrip() -> (
         r.serverNameAck,
     );
 }
+
+// go: none — goish-only: the handshake message types are unexported in
+// Go, where the tests are in-package. Marshals one of each with every
+// field populated, so the wire bytes can be diffed against Go's. This
+// is the check that GOISH018 structurally cannot make: it compares
+// signatures and struct fields, not the statements inside `marshal`,
+// so an extension a port forgot to emit is invisible to the lint tier
+// and visible only here.
+#[doc(hidden)]
+pub fn handshake_messages_marshalAll(
+    which: crate::types::int,
+) -> crate::goslice::slice<crate::types::byte> {
+    use crate::goslice::slice;
+    use handshake_messages as hm;
+    let (b, _) = match which {
+        0 => hm::helloRequestMsg::default().marshal(),
+        1 => hm::serverHelloDoneMsg::default().marshal(),
+        2 => {
+            let m = hm::finishedMsg {
+                verifyData: alloc::vec![1u8, 2, 3, 4],
+            };
+            m.marshal()
+        }
+        3 => {
+            let m = hm::keyUpdateMsg {
+                updateRequested: true,
+            };
+            m.marshal()
+        }
+        4 => hm::endOfEarlyDataMsg::default().marshal(),
+        5 => {
+            let mut m = hm::certificateStatusMsg::default();
+            m.response = slice::__from_vec(alloc::vec![5u8, 6, 7]);
+            m.marshal()
+        }
+        6 => {
+            let mut m = hm::serverKeyExchangeMsg::default();
+            m.key = slice::__from_vec(alloc::vec![9u8, 9]);
+            m.marshal()
+        }
+        7 => {
+            let mut m = hm::clientKeyExchangeMsg::default();
+            m.ciphertext = slice::__from_vec(alloc::vec![8u8, 8]);
+            m.marshal()
+        }
+        8 => {
+            let mut m = hm::newSessionTicketMsg::default();
+            m.ticket = slice::__from_vec(alloc::vec![1u8, 2, 3]);
+            m.marshal()
+        }
+        9 => {
+            let mut m = hm::certificateMsg::default();
+            m.certificates = slice::__from_vec(alloc::vec![
+                slice::__from_vec(alloc::vec![1u8, 2]),
+                slice::__from_vec(alloc::vec![3u8])
+            ]);
+            m.marshal()
+        }
+        10 => {
+            let mut m = hm::certificateVerifyMsg::default();
+            m.hasSignatureAlgorithm = true;
+            m.signatureAlgorithm = common::PSSWithSHA256.0;
+            m.signature = alloc::vec![4u8, 4];
+            m.marshal()
+        }
+        11 => {
+            let mut m = hm::certificateVerifyMsg::default();
+            m.signature = alloc::vec![4u8, 4];
+            m.marshal()
+        }
+        12 => {
+            let mut m = hm::newSessionTicketMsgTLS13::default();
+            m.lifetime = 7;
+            m.ageAdd = 9;
+            m.nonce = slice::__from_vec(alloc::vec![1u8]);
+            m.label = slice::__from_vec(alloc::vec![2u8, 2]);
+            m.maxEarlyData = 11;
+            m.marshal()
+        }
+        13 => {
+            let mut m = hm::certificateRequestMsg::default();
+            m.hasSignatureAlgorithm = true;
+            m.certificateTypes = slice::__from_vec(alloc::vec![1u8]);
+            m.supportedSignatureAlgorithms =
+                slice::__from_vec(alloc::vec![common::PSSWithSHA256]);
+            m.certificateAuthorities =
+                slice::__from_vec(alloc::vec![slice::__from_vec(alloc::vec![9u8, 9])]);
+            m.marshal()
+        }
+        14 => {
+            let mut m = hm::certificateRequestMsgTLS13::default();
+            m.ocspStapling = true;
+            m.scts = true;
+            m.supportedSignatureAlgorithms =
+                slice::__from_vec(alloc::vec![common::PSSWithSHA256]);
+            m.supportedSignatureAlgorithmsCert =
+                slice::__from_vec(alloc::vec![common::ECDSAWithP256AndSHA256]);
+            m.certificateAuthorities =
+                slice::__from_vec(alloc::vec![slice::__from_vec(alloc::vec![7u8])]);
+            m.marshal()
+        }
+        15 => {
+            let mut m = hm::certificateMsgTLS13::default();
+            m.certificate.Certificate =
+                slice::__from_vec(alloc::vec![slice::__from_vec(alloc::vec![1u8, 2, 3])]);
+            m.certificate.OCSPStaple = slice::__from_vec(alloc::vec![4u8]);
+            m.certificate.SignedCertificateTimestamps =
+                slice::__from_vec(alloc::vec![slice::__from_vec(alloc::vec![5u8])]);
+            m.ocspStapling = true;
+            m.scts = true;
+            m.marshal()
+        }
+        _ => {
+            let mut m = hm::serverHelloMsg::default();
+            m.vers = common::VersionTLS12;
+            m.random = alloc::vec![0u8; 32];
+            m.sessionId = alloc::vec![1u8];
+            m.cipherSuite = cipher_suites::TLS_AES_128_GCM_SHA256;
+            m.compressionMethod = 0;
+            m.ocspStapling = true;
+            m.ticketSupported = true;
+            m.secureRenegotiationSupported = true;
+            m.secureRenegotiation = alloc::vec![6u8];
+            m.extendedMasterSecret = true;
+            m.alpnProtocol = "h2".into();
+            m.scts = alloc::vec![alloc::vec![7u8]];
+            m.supportedVersion = common::VersionTLS13;
+            m.serverShare = hm::keyShare {
+                group: common::X25519.0,
+                data: alloc::vec![8u8],
+            };
+            m.selectedIdentityPresent = true;
+            m.selectedIdentity = 1;
+            m.supportedPoints = alloc::vec![0u8];
+            m.encryptedClientHello = alloc::vec![3u8, 3];
+            m.marshal()
+        }
+    };
+    return b;
+}

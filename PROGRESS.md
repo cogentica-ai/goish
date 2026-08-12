@@ -145,6 +145,24 @@ every one:
 - `crypto/rsa`'s `PrivateKey.Sign` dropped Go's PSS arm, so a caller
   asking for PSS silently received a PKCS#1 v1.5 signature.
 
+Two more of the same shape turned up in `crypto/tls`, and they matter
+for what they say about the *lint* tier rather than the port:
+
+- `encryptedExtensionsMsg.marshal` emitted only `alpnProtocol` and
+  `serverNameAck`, dropping `quicTransportParameters`, `earlyData` and
+  `echRetryConfigs`.
+- `serverHelloMsg.marshal` dropped `ocspStapling`, `ticketSupported`,
+  `secureRenegotiationSupported`, `extendedMasterSecret`, `scts` and
+  `encryptedClientHello` — six extensions.
+
+Both carried a `// go: sdk` anchor naming the exact Go line range.
+**GOISH018 compares signatures, arity and struct fields — not the
+statements inside a function.** An extension a port forgot to emit is
+therefore invisible to tier 2 and visible only at tier 3. There is now a
+sweep in `tls_common_smoke` that marshals all seventeen message types
+with every field populated and diffs the wire against `goref.sh`; it is
+the only thing standing between this class of defect and a release.
+
 ## Test suite
 
 271 examples are declared in `Cargo.toml` and run by `make e2e` at

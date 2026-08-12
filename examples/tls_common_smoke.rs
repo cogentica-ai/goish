@@ -3032,6 +3032,43 @@ fn main() {
     eq("encryptedExtensionsMsg keeps echRetryConfigs", hexOf(eeEch), "070707");
     check("encryptedExtensionsMsg keeps serverNameAck", eeSni);
 
+
+    // ── every marshal, fully populated, against Go's bytes ──────────
+    //
+    // GOISH018 compares signatures, arity and struct fields — not the
+    // statements inside a `marshal`. An extension a port forgot to emit
+    // is therefore invisible to the lint tier, which is exactly how
+    // encryptedExtensionsMsg shipped three dropped extensions under an
+    // anchor claiming a full port. This sweep is the check that closes
+    // that gap: every message type, every field set, diffed against
+    // scripts/goref.sh crypto/tls.
+    let maWant: [(&'static str, &'static str); 17] = [
+        ("helloRequestMsg", "00000000"),
+        ("serverHelloDoneMsg", "0e000000"),
+        ("finishedMsg", "1400000401020304"),
+        ("keyUpdateMsg", "1800000101"),
+        ("endOfEarlyDataMsg", "05000000"),
+        ("certificateStatusMsg", "1600000701000003050607"),
+        ("serverKeyExchangeMsg", "0c0000020909"),
+        ("clientKeyExchangeMsg", "100000020808"),
+        ("newSessionTicketMsg", "04000009000000000003010203"),
+        ("certificateMsg", "0b00000c000009000002010200000103"),
+        ("certificateVerifyMsg (TLS 1.2)", "0f000006080400020404"),
+        ("certificateVerifyMsg (TLS 1.0)", "0f00000400020404"),
+        ("newSessionTicketMsgTLS13", "0400001800000007000000090101000202020008002a00040000000b"),
+        ("certificateRequestMsg", "0d00000c010100020804000400020909"),
+        ("certificateRequestMsgTLS13", "0d0000240000210005000000120000000d0004000208040032000400020403002f00050003000107"),
+        ("certificateMsgTLS13", "0b00001e0000001a0000030102030012000500050100000104001200050003000105"),
+        ("serverHelloMsg", "0200006e03030000000000000000000000000000000000000000000000000000000000000000010113010000450005000000230000ff010002010600170000001000050003026832001200050003000107002b0002030400330005001d000108002900020001000b00020100fe0d00020303"),
+    ];
+    let mut maI: int = 0;
+    while maI < 17 {
+        let (what, wantHex) = maWant[maI as usize];
+        let got = tls::handshake_messages_marshalAll(maI);
+        eq(what, hexOf(got), wantHex);
+        maI += 1;
+    }
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
