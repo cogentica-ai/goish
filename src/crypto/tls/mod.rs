@@ -145,6 +145,41 @@ use crate::types::{byte, int};
 
 pub mod legacy_p256;
 pub mod record;
+pub mod key_agreement;
+
+// go: none — goish-only: key_agreement.go's hash helpers are unexported
+// in Go, where the tests are in-package. See the `defaults_*` shims.
+#[doc(hidden)]
+pub fn ka_hashForServerKeyExchange(
+    sigType: crate::types::uint8,
+    hashFunc: crate::crypto::Hash,
+    version: crate::types::uint16,
+    slices: crate::goslice::slice<crate::goslice::slice<crate::types::byte>>,
+) -> crate::goslice::slice<crate::types::byte> {
+    let v: alloc::vec::Vec<crate::goslice::slice<crate::types::byte>> =
+        slices.clone().__into_vec();
+    return key_agreement::hashForServerKeyExchange(sigType, hashFunc, version, &v);
+}
+
+// go: none — goish-only: see `ka_hashForServerKeyExchange`.
+#[doc(hidden)]
+pub fn ka_sha1Hash(
+    slices: crate::goslice::slice<crate::goslice::slice<crate::types::byte>>,
+) -> crate::goslice::slice<crate::types::byte> {
+    let v: alloc::vec::Vec<crate::goslice::slice<crate::types::byte>> =
+        slices.clone().__into_vec();
+    return key_agreement::sha1Hash(&v);
+}
+
+// go: none — goish-only: see `ka_hashForServerKeyExchange`.
+#[doc(hidden)]
+pub fn ka_md5SHA1Hash(
+    slices: crate::goslice::slice<crate::goslice::slice<crate::types::byte>>,
+) -> crate::goslice::slice<crate::types::byte> {
+    let v: alloc::vec::Vec<crate::goslice::slice<crate::types::byte>> =
+        slices.clone().__into_vec();
+    return key_agreement::md5SHA1Hash(&v);
+}
 pub mod key_schedule;
 pub mod handshake_client_tls13;
 pub mod session;

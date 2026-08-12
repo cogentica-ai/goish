@@ -441,6 +441,69 @@ fn main() {
         check_n("InsecureCipherSuites[0] spans TLS1.0-1.2", ins[0].SupportedVersions.Len(), 3);
     }
 
+    // ─── key_agreement.go — the ServerKeyExchange transcript digest.
+    //     Four branches, each a different algorithm; all from goref.sh.
+    let sl = slice::__from_vec(alloc::vec![
+        slice::__from_vec(alloc::vec![0x01u8, 0x02]),
+        slice::__from_vec(alloc::vec![0x03u8]),
+        slice::__from_vec(alloc::vec![0x04u8, 0x05, 0x06]),
+    ]);
+    eq(
+        "sha1Hash over 3 slices",
+        hexOf(tls::ka_sha1Hash(sl.clone())),
+        "5d211bad8f4ee70e16c7d343a838fc344a1ed961",
+    );
+    // MD5 || SHA-1, in that order — 16 bytes then 20.
+    eq(
+        "md5SHA1Hash",
+        hexOf(tls::ka_md5SHA1Hash(sl.clone())),
+        "6ac1e56bc78f031059be7be854522c4c5d211bad8f4ee70e16c7d343a838fc344a1ed961",
+    );
+    eq(
+        "hashForServerKeyExchange TLS1.2/SHA256",
+        hexOf(tls::ka_hashForServerKeyExchange(
+            226,
+            goish::crypto::SHA256,
+            tls::VersionTLS12,
+            sl.clone(),
+        )),
+        "7192385c3c0605de55bb9476ce1d90748190ecb32a8eed7f5207b30cf6a1fe89",
+    );
+    // Ed25519 signs the message whole: the "digest" is the concatenation.
+    eq(
+        "hashForServerKeyExchange Ed25519 is not hashed",
+        hexOf(tls::ka_hashForServerKeyExchange(
+            228,
+            goish::crypto::Hash(0),
+            tls::VersionTLS12,
+            sl.clone(),
+        )),
+        "010203040506",
+    );
+    // Before TLS 1.2 the hash is fixed by signature type, NOT by hashFunc:
+    // ECDSA takes SHA-1, RSA takes MD5+SHA1, and the hashFunc argument is
+    // ignored in both.
+    eq(
+        "hashForServerKeyExchange TLS1.1/ECDSA ignores hashFunc",
+        hexOf(tls::ka_hashForServerKeyExchange(
+            227,
+            goish::crypto::SHA256,
+            tls::VersionTLS11,
+            sl.clone(),
+        )),
+        "5d211bad8f4ee70e16c7d343a838fc344a1ed961",
+    );
+    eq(
+        "hashForServerKeyExchange TLS1.1/RSA ignores hashFunc",
+        hexOf(tls::ka_hashForServerKeyExchange(
+            225,
+            goish::crypto::SHA256,
+            tls::VersionTLS11,
+            sl,
+        )),
+        "6ac1e56bc78f031059be7be854522c4c5d211bad8f4ee70e16c7d343a838fc344a1ed961",
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
