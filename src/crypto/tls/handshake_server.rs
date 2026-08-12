@@ -1,4 +1,4 @@
-// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo, serverHandshakeState.pickCipherSuite, serverHandshakeState.establishKeys, serverHandshakeState.checkForResumption, serverHandshakeState.readFinished, serverHandshakeState.sendFinished, Conn.processCertsFromClient
+// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo, serverHandshakeState.pickCipherSuite, serverHandshakeState.establishKeys, serverHandshakeState.checkForResumption, serverHandshakeState.readFinished, serverHandshakeState.sendFinished, Conn.processCertsFromClient, serverHandshakeState.handshake, serverHandshakeState.processClientHello, serverHandshakeState.doResumeHandshake, serverHandshakeState.doFullHandshake, serverHandshakeState.sendSessionTicket
 //
 // crypto/tls — the server handshake state machine.
 //
@@ -166,6 +166,908 @@ pub(crate) struct serverHandshakeState {
     pub ecSignOk: bool,
     pub rsaDecryptOk: bool,
     pub rsaSignOk: bool,
+    pub cert: Option<super::common::Certificate>,
+}
+
+impl serverHandshakeState {
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:66-131 serverHandshakeState.handshake
+    /// Go: the TLS 1.0–1.2 server handshake driver — process the
+    /// ClientHello, split on resumption, and sequence the flights and
+    /// session ticket in the order the resumption decision dictates.
+    pub(crate) fn handshake(&mut self) -> crate::error {
+        // Go: if err := hs.processClientHello(); err != nil { return err }
+        let err = self.processClientHello();
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: "For an overview of TLS handshaking, see RFC 5246, Section 7.3."
+        //     c.buffering = true
+        //     if err := hs.checkForResumption(); err != nil { return err }
+        self.c.buffering = true;
+        let err = self.checkForResumption();
+        if err != crate::errors::nil {
+            return err;
+        }
+        // Go: if hs.sessionState != nil {
+        if self.sessionState.is_some() {
+            // Go: "The client has included a session ticket and so we
+            // do an abbreviated handshake."
+            //     if err := hs.doResumeHandshake(); err != nil { return err }
+            //     if err := hs.establishKeys(); err != nil { return err }
+            //     if err := hs.sendSessionTicket(); err != nil { return err }
+            //     if err := hs.sendFinished(c.serverFinished[:]); err != nil { return err }
+            //     if _, err := c.flush(); err != nil { return err }
+            //     c.clientFinishedIsFirst = false
+            //     if err := hs.readFinished(nil); err != nil { return err }
+            let err = self.doResumeHandshake();
+            if err != crate::errors::nil {
+                return err;
+            }
+            let err = self.establishKeys();
+            if err != crate::errors::nil {
+                return err;
+            }
+            let err = self.sendSessionTicket();
+            if err != crate::errors::nil {
+                return err;
+            }
+            let mut out = slice::__from_vec(self.c.serverFinished.to_vec());
+            let err = self.sendFinished(&mut out);
+            if err != crate::errors::nil {
+                return err;
+            }
+            {
+                let raw: &[crate::types::byte] = &out;
+                self.c.serverFinished.copy_from_slice(raw);
+            }
+            let (_, err) = self.c.flush();
+            if err != crate::errors::nil {
+                return err;
+            }
+            self.c.clientFinishedIsFirst = false;
+            // Go passes nil; a zero-length slice makes the copy a no-op.
+            let mut out = slice::new();
+            let err = self.readFinished(&mut out);
+            if err != crate::errors::nil {
+                return err;
+            }
+        } else {
+            // Go: "The client didn't include a session ticket, or it
+            // wasn't valid so we do a full handshake."
+            //     if err := hs.pickCipherSuite(); err != nil { return err }
+            //     if err := hs.doFullHandshake(); err != nil { return err }
+            //     if err := hs.establishKeys(); err != nil { return err }
+            //     if err := hs.readFinished(c.clientFinished[:]); err != nil { return err }
+            //     c.clientFinishedIsFirst = true
+            //     c.buffering = true
+            //     if err := hs.sendSessionTicket(); err != nil { return err }
+            //     if err := hs.sendFinished(nil); err != nil { return err }
+            //     if _, err := c.flush(); err != nil { return err }
+            let err = self.pickCipherSuite();
+            if err != crate::errors::nil {
+                return err;
+            }
+            let err = self.doFullHandshake();
+            if err != crate::errors::nil {
+                return err;
+            }
+            let err = self.establishKeys();
+            if err != crate::errors::nil {
+                return err;
+            }
+            let mut out = slice::__from_vec(self.c.clientFinished.to_vec());
+            let err = self.readFinished(&mut out);
+            if err != crate::errors::nil {
+                return err;
+            }
+            {
+                let raw: &[crate::types::byte] = &out;
+                self.c.clientFinished.copy_from_slice(raw);
+            }
+            self.c.clientFinishedIsFirst = true;
+            self.c.buffering = true;
+            let err = self.sendSessionTicket();
+            if err != crate::errors::nil {
+                return err;
+            }
+            // Go passes nil; a zero-length slice makes the copy a no-op.
+            let mut out = slice::new();
+            let err = self.sendFinished(&mut out);
+            if err != crate::errors::nil {
+                return err;
+            }
+            let (_, err) = self.c.flush();
+            if err != crate::errors::nil {
+                return err;
+            }
+        }
+
+        // Go: c.ekm = ekmFromMasterSecret(c.vers, hs.suite, hs.masterSecret,
+        //         hs.clientHello.random, hs.hello.random)
+        //     c.isHandshakeComplete.Store(true)
+        //     return nil
+        self.c.ekm = Some(super::prf::ekmFromMasterSecret(
+            self.c.vers,
+            self.suite.unwrap(),
+            self.masterSecret.clone(),
+            slice::__from_vec(self.clientHello.random.clone()),
+            slice::__from_vec(self.hello.random.clone()),
+        ));
+        self.c.isHandshakeComplete = true;
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:219-329 serverHandshakeState.processClientHello
+    /// Go: vet the ClientHello and build the ServerHello scaffold —
+    /// compression, the downgrade canaries in the server random,
+    /// renegotiation, ALPN, certificate selection, and the key-type
+    /// capability flags the cipher suite choice depends on.
+    ///
+    /// Deviation: the `testingOnlyForceDowngradeCanary` test hook is
+    /// absent.
+    pub(crate) fn processClientHello(&mut self) -> crate::error {
+        // Go: hs.hello = new(serverHelloMsg)
+        //     hs.hello.vers = c.vers
+        self.hello = super::handshake_messages::serverHelloMsg::default();
+        self.hello.vers = self.c.vers;
+
+        // Go: foundCompression := false
+        //     for _, compression := range hs.clientHello.compressionMethods {
+        //         if compression == compressionNone { foundCompression = true; break } }
+        //     if !foundCompression {
+        //         c.sendAlert(alertIllegalParameter)
+        //         return errors.New("tls: client does not support uncompressed connections") }
+        let mut foundCompression = false;
+        for compression in self.clientHello.compressionMethods.iter() {
+            if *compression == super::common::compressionNone {
+                foundCompression = true;
+                break;
+            }
+        }
+        if !foundCompression {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New(
+                "tls: client does not support uncompressed connections",
+            );
+        }
+
+        // Go: hs.hello.random = make([]byte, 32)
+        //     serverRandom := hs.hello.random
+        //     "Downgrade protection canaries. See RFC 8446, Section 4.1.3."
+        //     maxVers := c.config.maxSupportedVersion(roleServer)
+        //     if maxVers >= VersionTLS12 && c.vers < maxVers || testingOnlyForceDowngradeCanary {
+        //         if c.vers == VersionTLS12 { copy(serverRandom[24:], downgradeCanaryTLS12) }
+        //         else { copy(serverRandom[24:], downgradeCanaryTLS11) }
+        //         serverRandom = serverRandom[:24] }
+        //     _, err := io.ReadFull(c.config.rand(), serverRandom)
+        //     if err != nil { c.sendAlert(alertInternalError); return err }
+        self.hello.random = alloc::vec![0u8; 32];
+        let maxVers = self.c.config.maxSupportedVersion(super::common::roleServer);
+        let mut randomLen = 32;
+        if maxVers >= super::common::VersionTLS12 && self.c.vers < maxVers {
+            if self.c.vers == super::common::VersionTLS12 {
+                self.hello.random[24..]
+                    .copy_from_slice(super::common::downgradeCanaryTLS12);
+            } else {
+                self.hello.random[24..]
+                    .copy_from_slice(super::common::downgradeCanaryTLS11);
+            }
+            randomLen = 24;
+        }
+        let err = {
+            let mut r = self.c.config.rand();
+            let mut buf =
+                slice::__from_vec(self.hello.random[..randomLen].to_vec());
+            let (_, err) = crate::io::ReadFull(&mut *r, &mut buf);
+            let raw: &[crate::types::byte] = &buf;
+            self.hello.random[..randomLen].copy_from_slice(raw);
+            err
+        };
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertInternalError);
+            return err;
+        }
+
+        // Go: if len(hs.clientHello.secureRenegotiation) != 0 {
+        //         c.sendAlert(alertHandshakeFailure)
+        //         return errors.New("tls: initial handshake had non-empty renegotiation extension") }
+        if self.clientHello.secureRenegotiation.len() != 0 {
+            self.c.sendAlert(super::alert::alertHandshakeFailure);
+            return crate::errors::New(
+                "tls: initial handshake had non-empty renegotiation extension",
+            );
+        }
+
+        // Go: hs.hello.extendedMasterSecret = hs.clientHello.extendedMasterSecret
+        //     hs.hello.secureRenegotiationSupported = hs.clientHello.secureRenegotiationSupported
+        //     hs.hello.compressionMethod = compressionNone
+        //     if len(hs.clientHello.serverName) > 0 { c.serverName = hs.clientHello.serverName }
+        self.hello.extendedMasterSecret = self.clientHello.extendedMasterSecret;
+        self.hello.secureRenegotiationSupported =
+            self.clientHello.secureRenegotiationSupported;
+        self.hello.compressionMethod = super::common::compressionNone;
+        if self.clientHello.serverName.len() > 0 {
+            self.c.serverName = crate::gostring::string::from_bytes(
+                self.clientHello.serverName.as_bytes(),
+            );
+        }
+
+        // Go: selectedProto, err := negotiateALPN(c.config.NextProtos,
+        //         hs.clientHello.alpnProtocols, false)
+        //     if err != nil { c.sendAlert(alertNoApplicationProtocol); return err }
+        //     hs.hello.alpnProtocol = selectedProto
+        //     c.clientProtocol = selectedProto
+        let (selectedProto, err) = negotiateALPN(
+            self.c.config.NextProtos.clone(),
+            slice::__from_vec(
+                self.clientHello
+                    .alpnProtocols
+                    .iter()
+                    .map(|p| crate::gostring::string::from_bytes(p.as_bytes()))
+                    .collect::<alloc::vec::Vec<_>>(),
+            ),
+            false,
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertNoApplicationProtocol);
+            return err;
+        }
+        self.hello.alpnProtocol = core::str::from_utf8(selectedProto.as_bytes())
+            .map(|s| s.into())
+            .unwrap_or_default();
+        self.c.clientProtocol = selectedProto;
+
+        // Go: hs.cert, err = c.config.getCertificate(clientHelloInfo(hs.ctx, c, hs.clientHello))
+        //     if err != nil {
+        //         if err == errNoCertificates { c.sendAlert(alertUnrecognizedName) }
+        //         else { c.sendAlert(alertInternalError) }
+        //         return err }
+        let (cert, err) = self
+            .c
+            .config
+            .getCertificate(&clientHelloInfo(&self.c, &self.clientHello));
+        if err != crate::errors::nil {
+            if crate::errors::Is(err.clone(), super::common::errNoCertificates.clone()) {
+                self.c.sendAlert(super::alert::alertUnrecognizedName);
+            } else {
+                self.c.sendAlert(super::alert::alertInternalError);
+            }
+            return err;
+        }
+        self.cert = Some(cert);
+        // Go: if hs.clientHello.scts { hs.hello.scts = hs.cert.SignedCertificateTimestamps }
+        if self.clientHello.scts {
+            self.hello.scts = self
+                .cert
+                .as_ref()
+                .unwrap()
+                .SignedCertificateTimestamps
+                .iter()
+                .map(|s| s.to_vec())
+                .collect::<alloc::vec::Vec<_>>();
+        }
+
+        // Go: hs.ecdheOk, err = supportsECDHE(c.config, c.vers,
+        //         hs.clientHello.supportedCurves, hs.clientHello.supportedPoints)
+        //     if err != nil { c.sendAlert(alertMissingExtension); return err }
+        let (ecdheOk, err) = supportsECDHE(
+            &self.c.config,
+            self.c.vers,
+            slice::__from_vec(
+                self.clientHello
+                    .supportedCurves
+                    .iter()
+                    .map(|c| CurveID(*c))
+                    .collect::<alloc::vec::Vec<_>>(),
+            ),
+            slice::__from_vec(self.clientHello.supportedPoints.clone()),
+        );
+        self.ecdheOk = ecdheOk;
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertMissingExtension);
+            return err;
+        }
+
+        // Go: if hs.ecdheOk && len(hs.clientHello.supportedPoints) > 0 {
+        //         "Although omitting the ec_point_formats extension is
+        //         permitted, some old OpenSSL version will refuse to
+        //         handshake if not present. […] See golang.org/issue/31943."
+        //         hs.hello.supportedPoints = []uint8{pointFormatUncompressed} }
+        if self.ecdheOk && self.clientHello.supportedPoints.len() > 0 {
+            self.hello.supportedPoints = alloc::vec![pointFormatUncompressed];
+        }
+
+        // Go: if priv, ok := hs.cert.PrivateKey.(crypto.Signer); ok {
+        //         switch priv.Public().(type) {
+        //         case *ecdsa.PublicKey: hs.ecSignOk = true
+        //         case ed25519.PublicKey: hs.ecSignOk = true
+        //         case *rsa.PublicKey: hs.rsaSignOk = true
+        //         default: c.sendAlert(alertInternalError)
+        //             return fmt.Errorf("tls: unsupported signing key type (%T)", priv.Public()) } }
+        if let Some(priv_) =
+            super::auth::signerOf(&self.cert.as_ref().unwrap().PrivateKey)
+        {
+            let pub_ = priv_.Public();
+            if pub_.downcast_ref::<crate::crypto::ecdsa::PublicKey>().is_some() {
+                self.ecSignOk = true;
+            } else if pub_
+                .downcast_ref::<crate::crypto::ed25519::PublicKey>()
+                .is_some()
+            {
+                self.ecSignOk = true;
+            } else if pub_.downcast_ref::<crate::crypto::rsa::PublicKey>().is_some() {
+                self.rsaSignOk = true;
+            } else {
+                self.c.sendAlert(super::alert::alertInternalError);
+                return crate::errors::New("tls: unsupported signing key type");
+            }
+        }
+        // Go: if priv, ok := hs.cert.PrivateKey.(crypto.Decrypter); ok {
+        //         switch priv.Public().(type) {
+        //         case *rsa.PublicKey: hs.rsaDecryptOk = true
+        //         default: c.sendAlert(alertInternalError)
+        //             return fmt.Errorf("tls: unsupported decryption key type (%T)", priv.Public()) } }
+        if let Some(priv_) =
+            super::key_agreement::decrypterOf(&self.cert.as_ref().unwrap().PrivateKey)
+        {
+            let pub_ = priv_.Public();
+            if pub_.downcast_ref::<crate::crypto::rsa::PublicKey>().is_some() {
+                self.rsaDecryptOk = true;
+            } else {
+                self.c.sendAlert(super::alert::alertInternalError);
+                return crate::errors::New("tls: unsupported decryption key type");
+            }
+        }
+
+        // Go: return nil
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:557-588 serverHandshakeState.doResumeHandshake
+    /// Go: the abbreviated handshake — echo the session ID so the
+    /// client knows it's a resumption, always offer a fresh ticket, and
+    /// take the master secret straight from the resumed session.
+    pub(crate) fn doResumeHandshake(&mut self) -> crate::error {
+        // Go: hs.hello.cipherSuite = hs.suite.id
+        //     c.cipherSuite = hs.suite.id
+        //     hs.hello.sessionId = hs.clientHello.sessionId
+        //     hs.hello.ticketSupported = true
+        self.hello.cipherSuite = self.suite.unwrap().id;
+        self.c.cipherSuite = self.suite.unwrap().id;
+        self.hello.sessionId = self.clientHello.sessionId.clone();
+        self.hello.ticketSupported = true;
+        // Go: hs.finishedHash = newFinishedHash(c.vers, hs.suite)
+        //     hs.finishedHash.discardHandshakeBuffer()
+        //     if err := transcriptMsg(hs.clientHello, &hs.finishedHash); err != nil { return err }
+        //     if _, err := hs.c.writeHandshakeRecord(hs.hello, &hs.finishedHash); err != nil { return err }
+        self.finishedHash = super::prf::newFinishedHash(self.c.vers, self.suite.unwrap());
+        self.finishedHash.discardHandshakeBuffer();
+        let err = super::handshake_messages::transcriptMsg(
+            &self.clientHello,
+            &mut self.finishedHash,
+        );
+        if err != crate::errors::nil {
+            return err;
+        }
+        let (_, err) = self
+            .c
+            .writeHandshakeRecord(&self.hello, Some(&mut self.finishedHash));
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: if c.config.VerifyConnection != nil {
+        //         if err := c.config.VerifyConnection(c.connectionStateLocked()); err != nil {
+        //             c.sendAlert(alertBadCertificate); return err } }
+        if let Some(verify) = self.c.config.VerifyConnection.clone() {
+            let err = verify(self.c.connectionStateLocked());
+            if err != crate::errors::nil {
+                self.c.sendAlert(super::alert::alertBadCertificate);
+                return err;
+            }
+        }
+
+        // Go: hs.masterSecret = hs.sessionState.secret
+        //     return nil
+        self.masterSecret = self.sessionState.as_ref().unwrap().secret.clone();
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:590-806 serverHandshakeState.doFullHandshake
+    /// Go: the full (non-resumed) TLS 1.0–1.2 server handshake — send
+    /// the ServerHello, Certificate, optional CertificateStatus,
+    /// ServerKeyExchange, optional CertificateRequest, and
+    /// ServerHelloDone, then read the client's Certificate,
+    /// ClientKeyExchange, and CertificateVerify, and derive the master
+    /// secret.
+    ///
+    /// Deviation: the `tlssha1` GODEBUG counter bump when a SHA-1
+    /// signature is used is absent — goish ships no godebug.
+    pub(crate) fn doFullHandshake(&mut self) -> crate::error {
+        // Go: if hs.clientHello.ocspStapling && len(hs.cert.OCSPStaple) > 0 {
+        //         hs.hello.ocspStapling = true }
+        if self.clientHello.ocspStapling
+            && self.cert.as_ref().unwrap().OCSPStaple.Len() > 0
+        {
+            self.hello.ocspStapling = true;
+        }
+
+        // Go: if hs.clientHello.serverName != "" { hs.hello.serverNameAck = true }
+        if self.clientHello.serverName.len() != 0 {
+            self.hello.serverNameAck = true;
+        }
+
+        // Go: hs.hello.ticketSupported = hs.clientHello.ticketSupported && !c.config.SessionTicketsDisabled
+        //     hs.hello.cipherSuite = hs.suite.id
+        self.hello.ticketSupported =
+            self.clientHello.ticketSupported && !self.c.config.SessionTicketsDisabled;
+        self.hello.cipherSuite = self.suite.unwrap().id;
+
+        // Go: hs.finishedHash = newFinishedHash(hs.c.vers, hs.suite)
+        //     if c.config.ClientAuth == NoClientCert { hs.finishedHash.discardHandshakeBuffer() }
+        self.finishedHash = super::prf::newFinishedHash(self.c.vers, self.suite.unwrap());
+        if self.c.config.ClientAuth == super::common::NoClientCert {
+            self.finishedHash.discardHandshakeBuffer();
+        }
+        // Go: if err := transcriptMsg(hs.clientHello, &hs.finishedHash); err != nil { return err }
+        //     if _, err := hs.c.writeHandshakeRecord(hs.hello, &hs.finishedHash); err != nil { return err }
+        let err = super::handshake_messages::transcriptMsg(
+            &self.clientHello,
+            &mut self.finishedHash,
+        );
+        if err != crate::errors::nil {
+            return err;
+        }
+        let (_, err) = self
+            .c
+            .writeHandshakeRecord(&self.hello, Some(&mut self.finishedHash));
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: certMsg := new(certificateMsg)
+        //     certMsg.certificates = hs.cert.Certificate
+        //     if _, err := hs.c.writeHandshakeRecord(certMsg, &hs.finishedHash); err != nil { return err }
+        let mut certMsg = super::handshake_messages::certificateMsg::default();
+        certMsg.certificates = self.cert.as_ref().unwrap().Certificate.clone();
+        let (_, err) = self
+            .c
+            .writeHandshakeRecord(&certMsg, Some(&mut self.finishedHash));
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: if hs.hello.ocspStapling {
+        //         certStatus := new(certificateStatusMsg)
+        //         certStatus.response = hs.cert.OCSPStaple
+        //         if _, err := hs.c.writeHandshakeRecord(certStatus, &hs.finishedHash); err != nil { return err } }
+        if self.hello.ocspStapling {
+            let mut certStatus = super::handshake_messages::certificateStatusMsg::default();
+            certStatus.response = self.cert.as_ref().unwrap().OCSPStaple.clone();
+            let (_, err) = self
+                .c
+                .writeHandshakeRecord(&certStatus, Some(&mut self.finishedHash));
+            if err != crate::errors::nil {
+                return err;
+            }
+        }
+
+        // Go: keyAgreement := hs.suite.ka(c.vers)
+        //     skx, err := keyAgreement.generateServerKeyExchange(c.config, hs.cert, hs.clientHello, hs.hello)
+        //     if err != nil { c.sendAlert(alertHandshakeFailure); return err }
+        let mut keyAgreement = (self.suite.unwrap().ka)(self.c.vers);
+        let (skx, err) = keyAgreement.generateServerKeyExchange(
+            &self.c.config,
+            self.cert.as_ref().unwrap(),
+            &self.clientHello,
+            &self.hello,
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertHandshakeFailure);
+            return err;
+        }
+        // Go: if skx != nil {
+        //         if keyAgreement, ok := keyAgreement.(*ecdheKeyAgreement); ok {
+        //             c.curveID = keyAgreement.curveID
+        //             c.peerSigAlg = keyAgreement.signatureAlgorithm }
+        //         if _, err := hs.c.writeHandshakeRecord(skx, &hs.finishedHash); err != nil { return err } }
+        if let Some(skx) = skx.as_ref() {
+            if let Some(ecdhe) = keyAgreement
+                .asAny()
+                .downcast_ref::<super::key_agreement::ecdheKeyAgreement>()
+            {
+                self.c.curveID = ecdhe.curveID;
+                self.c.peerSigAlg = ecdhe.signatureAlgorithm;
+            }
+            let (_, err) = self
+                .c
+                .writeHandshakeRecord(skx, Some(&mut self.finishedHash));
+            if err != crate::errors::nil {
+                return err;
+            }
+        }
+
+        // Go: var certReq *certificateRequestMsg
+        //     if c.config.ClientAuth >= RequestClientCert {
+        let mut certReq: Option<super::handshake_messages::certificateRequestMsg> = None;
+        if self.c.config.ClientAuth >= super::common::RequestClientCert {
+            // Go: certReq = new(certificateRequestMsg)
+            //     certReq.certificateTypes = []byte{byte(certTypeRSASign), byte(certTypeECDSASign)}
+            //     if c.vers >= VersionTLS12 {
+            //         certReq.hasSignatureAlgorithm = true
+            //         certReq.supportedSignatureAlgorithms = supportedSignatureAlgorithms(c.vers) }
+            let mut cr = super::handshake_messages::certificateRequestMsg::default();
+            cr.certificateTypes = slice::__from_vec(alloc::vec![
+                super::common::certTypeRSASign,
+                super::common::certTypeECDSASign,
+            ]);
+            if self.c.vers >= super::common::VersionTLS12 {
+                cr.hasSignatureAlgorithm = true;
+                cr.supportedSignatureAlgorithms =
+                    super::common::supportedSignatureAlgorithms(self.c.vers);
+            }
+
+            // Go: "An empty list of certificateAuthorities signals to
+            // the client that it may send any certificate […]"
+            //     if c.config.ClientCAs != nil {
+            //         certReq.certificateAuthorities = c.config.ClientCAs.Subjects() }
+            //     if _, err := hs.c.writeHandshakeRecord(certReq, &hs.finishedHash); err != nil { return err }
+            if let Some(cas) = self.c.config.ClientCAs.as_ref() {
+                cr.certificateAuthorities = cas.Subjects();
+            }
+            let (_, err) = self
+                .c
+                .writeHandshakeRecord(&cr, Some(&mut self.finishedHash));
+            if err != crate::errors::nil {
+                return err;
+            }
+            certReq = Some(cr);
+        }
+
+        // Go: helloDone := new(serverHelloDoneMsg)
+        //     if _, err := hs.c.writeHandshakeRecord(helloDone, &hs.finishedHash); err != nil { return err }
+        //     if _, err := c.flush(); err != nil { return err }
+        let helloDone = super::handshake_messages::serverHelloDoneMsg::default();
+        let (_, err) = self
+            .c
+            .writeHandshakeRecord(&helloDone, Some(&mut self.finishedHash));
+        if err != crate::errors::nil {
+            return err;
+        }
+        let (_, err) = self.c.flush();
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: var pub crypto.PublicKey // public key for client auth, if any
+        //     msg, err := c.readHandshake(&hs.finishedHash)
+        //     if err != nil { return err }
+        let mut pub_: Option<crate::goany::Any> = None;
+        let (msg, err) = self.c.readHandshake(Some(&mut self.finishedHash));
+        if err != crate::errors::nil {
+            return err;
+        }
+        let mut msg = match msg {
+            Some(m) => m,
+            None => return crate::errors::New("tls: internal error: no handshake message"),
+        };
+
+        // Go: "If we requested a client certificate, then the client
+        // must send a certificate message, even if it's empty."
+        //     if c.config.ClientAuth >= RequestClientCert {
+        if self.c.config.ClientAuth >= super::common::RequestClientCert {
+            // Go: certMsg, ok := msg.(*certificateMsg)
+            //     if !ok { c.sendAlert(alertUnexpectedMessage)
+            //         return unexpectedMessageError(certMsg, msg) }
+            let certMsg = match msg
+                .asAny()
+                .downcast_ref::<super::handshake_messages::certificateMsg>()
+            {
+                Some(cm) => cm.clone(),
+                None => {
+                    self.c.sendAlert(super::alert::alertUnexpectedMessage);
+                    return super::common::unexpectedMessageError(
+                        crate::gostring::string::from_static("*tls.certificateMsg"),
+                        super::handshake_messages::handshakeMessageTypeName(&*msg),
+                    );
+                }
+            };
+
+            // Go: if err := c.processCertsFromClient(Certificate{
+            //         Certificate: certMsg.certificates }); err != nil { return err }
+            let mut chain = super::common::Certificate::default();
+            chain.Certificate = certMsg.certificates.clone();
+            let err = self.c.processCertsFromClient(chain);
+            if err != crate::errors::nil {
+                return err;
+            }
+            // Go: if len(certMsg.certificates) != 0 {
+            //         pub = c.peerCertificates[0].PublicKey }
+            if certMsg.certificates.Len() != 0 {
+                pub_ = Some(self.c.peerCertificates[0].PublicKey.clone());
+            }
+
+            // Go: msg, err = c.readHandshake(&hs.finishedHash)
+            //     if err != nil { return err }
+            let (nextMsg, err) = self.c.readHandshake(Some(&mut self.finishedHash));
+            if err != crate::errors::nil {
+                return err;
+            }
+            msg = match nextMsg {
+                Some(m) => m,
+                None => {
+                    return crate::errors::New("tls: internal error: no handshake message")
+                }
+            };
+        }
+        // Go: if c.config.VerifyConnection != nil {
+        //         if err := c.config.VerifyConnection(c.connectionStateLocked()); err != nil {
+        //             c.sendAlert(alertBadCertificate); return err } }
+        if let Some(verify) = self.c.config.VerifyConnection.clone() {
+            let err = verify(self.c.connectionStateLocked());
+            if err != crate::errors::nil {
+                self.c.sendAlert(super::alert::alertBadCertificate);
+                return err;
+            }
+        }
+
+        // Go: "Get client key exchange"
+        //     ckx, ok := msg.(*clientKeyExchangeMsg)
+        //     if !ok { c.sendAlert(alertUnexpectedMessage)
+        //         return unexpectedMessageError(ckx, msg) }
+        let ckx = match msg
+            .asAny()
+            .downcast_ref::<super::handshake_messages::clientKeyExchangeMsg>()
+        {
+            Some(k) => k.clone(),
+            None => {
+                self.c.sendAlert(super::alert::alertUnexpectedMessage);
+                return super::common::unexpectedMessageError(
+                    crate::gostring::string::from_static("*tls.clientKeyExchangeMsg"),
+                    super::handshake_messages::handshakeMessageTypeName(&*msg),
+                );
+            }
+        };
+
+        // Go: preMasterSecret, err := keyAgreement.processClientKeyExchange(
+        //         c.config, hs.cert, ckx, c.vers)
+        //     if err != nil { c.sendAlert(alertIllegalParameter); return err }
+        let (preMasterSecret, err) = keyAgreement.processClientKeyExchange(
+            &self.c.config,
+            self.cert.as_ref().unwrap(),
+            &ckx,
+            self.c.vers,
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return err;
+        }
+        // Go: if hs.hello.extendedMasterSecret {
+        //         c.extMasterSecret = true
+        //         hs.masterSecret = extMasterFromPreMasterSecret(c.vers, hs.suite,
+        //             preMasterSecret, hs.finishedHash.Sum())
+        //     } else {
+        //         if fips140tls.Required() { c.sendAlert(alertHandshakeFailure)
+        //             return errors.New("tls: FIPS 140-3 requires the use of Extended Master Secret") }
+        //         hs.masterSecret = masterFromPreMasterSecret(c.vers, hs.suite,
+        //             preMasterSecret, hs.clientHello.random, hs.hello.random) }
+        if self.hello.extendedMasterSecret {
+            self.c.extMasterSecret = true;
+            let sum = self.finishedHash.Sum();
+            self.masterSecret = super::prf::extMasterFromPreMasterSecret(
+                self.c.vers,
+                self.suite.unwrap(),
+                preMasterSecret,
+                sum,
+            );
+        } else {
+            if super::internal::fips140tls::Required() {
+                self.c.sendAlert(super::alert::alertHandshakeFailure);
+                return crate::errors::New(
+                    "tls: FIPS 140-3 requires the use of Extended Master Secret",
+                );
+            }
+            self.masterSecret = super::prf::masterFromPreMasterSecret(
+                self.c.vers,
+                self.suite.unwrap(),
+                preMasterSecret,
+                slice::__from_vec(self.clientHello.random.clone()),
+                slice::__from_vec(self.hello.random.clone()),
+            );
+        }
+        // Go: if err := c.config.writeKeyLog(keyLogLabelTLS12, hs.clientHello.random, hs.masterSecret); err != nil {
+        //         c.sendAlert(alertInternalError); return err }
+        let err = self.c.config.writeKeyLog(
+            crate::gostring::string::from_static(super::common::keyLogLabelTLS12),
+            slice::__from_vec(self.clientHello.random.clone()),
+            self.masterSecret.clone(),
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertInternalError);
+            return err;
+        }
+
+        // Go: "If we received a client cert in response to our
+        // certificate request message, the client will send us a
+        // certificateVerifyMsg immediately after the
+        // clientKeyExchangeMsg. […]"
+        //     if len(c.peerCertificates) > 0 {
+        if self.c.peerCertificates.Len() > 0 {
+            // Go: "certificateVerifyMsg is included in the transcript,
+            // but not until after we verify the handshake signature,
+            // since the state before this message was sent is used."
+            //     msg, err = c.readHandshake(nil)
+            //     if err != nil { return err }
+            //     certVerify, ok := msg.(*certificateVerifyMsg)
+            //     if !ok { c.sendAlert(alertUnexpectedMessage)
+            //         return unexpectedMessageError(certVerify, msg) }
+            let (msg, err) = self.c.readHandshake(None);
+            if err != crate::errors::nil {
+                return err;
+            }
+            let msg = match msg {
+                Some(m) => m,
+                None => {
+                    return crate::errors::New("tls: internal error: no handshake message")
+                }
+            };
+            let certVerify = match msg
+                .asAny()
+                .downcast_ref::<super::handshake_messages::certificateVerifyMsg>()
+            {
+                Some(cv) => cv.clone(),
+                None => {
+                    self.c.sendAlert(super::alert::alertUnexpectedMessage);
+                    return super::common::unexpectedMessageError(
+                        crate::gostring::string::from_static("*tls.certificateVerifyMsg"),
+                        super::handshake_messages::handshakeMessageTypeName(&*msg),
+                    );
+                }
+            };
+
+            // Go: var sigType uint8
+            //     var sigHash crypto.Hash
+            //     if c.vers >= VersionTLS12 {
+            //         if !isSupportedSignatureAlgorithm(certVerify.signatureAlgorithm,
+            //             certReq.supportedSignatureAlgorithms) {
+            //             c.sendAlert(alertIllegalParameter)
+            //             return errors.New("tls: client certificate used with invalid signature algorithm") }
+            //         sigType, sigHash, err = typeAndHashFromSignatureScheme(certVerify.signatureAlgorithm)
+            //         if err != nil { return c.sendAlert(alertInternalError) }
+            //         if sigHash == crypto.SHA1 { tlssha1.Value(); tlssha1.IncNonDefault() }
+            //     } else {
+            //         sigType, sigHash, err = legacyTypeAndHashFromPublicKey(pub)
+            //         if err != nil { c.sendAlert(alertIllegalParameter); return err } }
+            let sigType: crate::types::uint8;
+            let sigHash: crate::crypto::Hash;
+            let sigAlg = super::common::SignatureScheme(certVerify.signatureAlgorithm);
+            if self.c.vers >= super::common::VersionTLS12 {
+                if !super::common::isSupportedSignatureAlgorithm(
+                    sigAlg,
+                    certReq.as_ref().unwrap().supportedSignatureAlgorithms.clone(),
+                ) {
+                    self.c.sendAlert(super::alert::alertIllegalParameter);
+                    return crate::errors::New(
+                        "tls: client certificate used with invalid signature algorithm",
+                    );
+                }
+                let (st, sh, err) = super::auth::typeAndHashFromSignatureScheme(sigAlg);
+                if err != crate::errors::nil {
+                    return self.c.sendAlert(super::alert::alertInternalError);
+                }
+                sigType = st;
+                sigHash = sh;
+            } else {
+                let (st, sh, err) = super::auth::legacyTypeAndHashFromPublicKey(
+                    pub_.as_ref().unwrap(),
+                );
+                if err != crate::errors::nil {
+                    self.c.sendAlert(super::alert::alertIllegalParameter);
+                    return err;
+                }
+                sigType = st;
+                sigHash = sh;
+            }
+
+            // Go: signed := hs.finishedHash.hashForClientCertificate(sigType, sigHash)
+            //     if err := verifyHandshakeSignature(sigType, pub, sigHash, signed,
+            //         certVerify.signature); err != nil {
+            //         c.sendAlert(alertDecryptError)
+            //         return errors.New("tls: invalid signature by the client certificate: " + err.Error()) }
+            //     c.peerSigAlg = certVerify.signatureAlgorithm
+            let signed = self.finishedHash.hashForClientCertificate(sigType, sigHash);
+            let err = super::auth::verifyHandshakeSignature(
+                sigType,
+                pub_.as_ref().unwrap(),
+                sigHash,
+                signed,
+                slice::__from_vec(certVerify.signature.clone()),
+            );
+            if err != crate::errors::nil {
+                self.c.sendAlert(super::alert::alertDecryptError);
+                return crate::fmt::Errorf!(
+                    "tls: invalid signature by the client certificate: %s",
+                    err.Error()
+                );
+            }
+            self.c.peerSigAlg = sigAlg;
+
+            // Go: if err := transcriptMsg(certVerify, &hs.finishedHash); err != nil { return err }
+            let err = super::handshake_messages::transcriptMsg(
+                &certVerify,
+                &mut self.finishedHash,
+            );
+            if err != crate::errors::nil {
+                return err;
+            }
+        }
+
+        // Go: hs.finishedHash.discardHandshakeBuffer()
+        //     return nil
+        self.finishedHash.discardHandshakeBuffer();
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:868-905 serverHandshakeState.sendSessionTicket
+    /// Go: wrap the session (via `Config.WrapSession` or the ticket
+    /// keys) and send the NewSessionTicket message. Re-wrapping an old
+    /// ticket keeps the original creation time.
+    pub(crate) fn sendSessionTicket(&mut self) -> crate::error {
+        // Go: if !hs.hello.ticketSupported { return nil }
+        if !self.hello.ticketSupported {
+            return crate::errors::nil;
+        }
+
+        // Go: m := new(newSessionTicketMsg)
+        //     state := c.sessionState()
+        //     state.secret = hs.masterSecret
+        //     if hs.sessionState != nil { state.createdAt = hs.sessionState.createdAt }
+        let mut m = super::handshake_messages::newSessionTicketMsg::default();
+        let mut state = self.c.sessionState();
+        state.secret = self.masterSecret.clone();
+        if let Some(prev) = self.sessionState.as_ref() {
+            state.createdAt = prev.createdAt;
+        }
+        // Go: if c.config.WrapSession != nil {
+        //         m.ticket, err = c.config.WrapSession(c.connectionStateLocked(), state)
+        //         if err != nil { return err }
+        //     } else {
+        //         stateBytes, err := state.Bytes()
+        //         if err != nil { return err }
+        //         m.ticket, err = c.config.encryptTicket(stateBytes, c.ticketKeys)
+        //         if err != nil { return err } }
+        if let Some(wrap) = self.c.config.WrapSession.clone() {
+            let (ticket, err) = wrap(self.c.connectionStateLocked(), state);
+            if err != crate::errors::nil {
+                return err;
+            }
+            m.ticket = ticket;
+        } else {
+            let (stateBytes, err) = state.Bytes();
+            if err != crate::errors::nil {
+                return err;
+            }
+            let (ticket, err) = self
+                .c
+                .config
+                .encryptTicket(stateBytes, self.c.ticketKeys.clone());
+            if err != crate::errors::nil {
+                return err;
+            }
+            m.ticket = ticket;
+        }
+
+        // Go: if _, err := hs.c.writeHandshakeRecord(m, &hs.finishedHash); err != nil { return err }
+        //     return nil
+        let (_, err) = self
+            .c
+            .writeHandshakeRecord(&m, Some(&mut self.finishedHash));
+        if err != crate::errors::nil {
+            return err;
+        }
+        return crate::errors::nil;
+    }
 }
 
 impl serverHandshakeState {

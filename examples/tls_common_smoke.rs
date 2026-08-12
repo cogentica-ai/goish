@@ -4381,6 +4381,48 @@ fn main() {
     check("the ageAdd is copied from the ticket", ageAdd == 42);
     eq("the opaque label is the stored ticket", ticket, "aaabacadaeafb0b1b2b3b4b5b6b7b8b9");
 
+    // ── serverHandshakeState: the deterministic TLS 1.2 methods ─────
+    //
+    // Ground truth: goref driving each method with scripted state and a
+    // deterministic Rand. processClientHello's server random, ALPN, and
+    // key-type flags; the abbreviated ServerHello wire + master secret;
+    // and the NewSessionTicket wire (fixed WrapSession) all byte-compared.
+    // (The driver and full handshake are covered by tls_server_smoke's
+    // client<->server loopback.)
+    let (e, random, alpn, ecdheOk, ecSignOk, rsaSignOk, _) =
+        tls::handshake_server_tls12_method(1);
+    eq("processClientHello builds the ServerHello scaffold", e, "");
+    eq(
+        "the server random carries the TLS 1.2 downgrade canary, matching Go",
+        hexOf(random),
+        "909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7444f574e47524401",
+    );
+    eq("ALPN negotiates the mutually-supported protocol", alpn, "http/1.1");
+    check("ECDHE is offered", ecdheOk);
+    check("the Ed25519 certificate enables EC signing", ecSignOk);
+    check("RSA signing stays off for an EC certificate", !rsaSignOk);
+
+    let (e, wire, _, _, _, _, master) = tls::handshake_server_tls12_method(2);
+    eq("doResumeHandshake completes the abbreviated flight", e, "");
+    eq(
+        "the abbreviated ServerHello wire matches Go",
+        hexOf(wire),
+        "16030300500200004c0303b0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecf205152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f70c02b00000400230000",
+    );
+    eq(
+        "the master secret is taken from the resumed session",
+        hexOf(master),
+        "d0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+    );
+
+    let (e, wire, _, _, _, _, _) = tls::handshake_server_tls12_method(3);
+    eq("sendSessionTicket wraps and sends the ticket", e, "");
+    eq(
+        "the NewSessionTicket wire matches Go",
+        hexOf(wire),
+        "16030300220400001e000000000018eeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405",
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

@@ -4897,6 +4897,7 @@ pub fn handshake_server_cipherSuiteOk(
         common::VersionTLS12
     });
     let hs = handshake_server::serverHandshakeState {
+        cert: None,
         c,
         clientHello: handshake_messages::clientHelloMsg::default(),
         hello: handshake_messages::serverHelloMsg::default(),
@@ -5052,6 +5053,7 @@ pub fn handshake_server_pickCipherSuite(
     clientHello.vers = common::VersionTLS12;
     clientHello.cipherSuites = offered.__into_vec();
     let mut hs = handshake_server::serverHandshakeState {
+        cert: None,
         c,
         clientHello,
         hello: handshake_messages::serverHelloMsg::default(),
@@ -5110,6 +5112,7 @@ pub fn handshake_server_establishKeys(
     let mut hello = handshake_messages::serverHelloMsg::default();
     hello.random = sr.clone();
     let mut hs = handshake_server::serverHandshakeState {
+        cert: None,
         c,
         clientHello,
         hello,
@@ -5206,6 +5209,7 @@ pub fn handshake_server_checkForResumption(
     c.__setTicketKeys(cfg.ticketKeys(None));
     c.__setConfig(cfg);
     let mut hs = handshake_server::serverHandshakeState {
+        cert: None,
         c,
         clientHello: ch,
         hello: handshake_messages::serverHelloMsg::default(),
@@ -5825,6 +5829,7 @@ pub fn handshake_finishedExchange() -> (
     // Server sendFinished.
     let sSink = newSink();
     let mut shs = handshake_server::serverHandshakeState {
+        cert: None,
         c: mkConn(slice::new(), sSink.clone(), false),
         clientHello: handshake_messages::clientHelloMsg::default(),
         hello: handshake_messages::serverHelloMsg::default(),
@@ -5873,6 +5878,7 @@ pub fn handshake_finishedExchange() -> (
 
     // Server readFinished, over exactly those bytes.
     let mut shs2 = handshake_server::serverHandshakeState {
+        cert: None,
         c: mkConn(cWire.clone(), newSink(), true),
         clientHello: handshake_messages::clientHelloMsg::default(),
         hello: handshake_messages::serverHelloMsg::default(),
@@ -5893,6 +5899,7 @@ pub fn handshake_finishedExchange() -> (
     let last = corrupt.len() - 1;
     corrupt[last] ^= 0xff;
     let mut shs3 = handshake_server::serverHandshakeState {
+        cert: None,
         c: mkConn(slice::__from_vec(corrupt), newSink(), true),
         clientHello: handshake_messages::clientHelloMsg::default(),
         hello: handshake_messages::serverHelloMsg::default(),
@@ -9214,6 +9221,222 @@ pub fn handshake_client_tls13_handleNewSessionTicket(
         None => (slice::new(), 0, 0, slice::new()),
     };
     return (errText, guard.1, secret, useBy, ageAdd, ticket);
+}
+
+// go: none — goish-only: drives the three deterministic methods of the
+// TLS 1.2 server handshake — processClientHello (the ServerHello
+// scaffold: downgrade canary, ALPN, key-type flags), doResumeHandshake
+// (the abbreviated ServerHello wire bytes + master secret), and
+// sendSessionTicket (the NewSessionTicket wire bytes, via a fixed
+// WrapSession). The driver and full handshake are covered by the
+// client<->server loopback smoke.
+// which: 1 processClientHello, 2 doResumeHandshake, 3 sendSessionTicket.
+// goishlint:ignore GOISH023 - the trailing dispatch match; every arm returns explicitly
+#[doc(hidden)]
+pub fn handshake_server_tls12_method(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,                   // err
+    crate::goslice::slice<crate::types::byte>, // random (1) / wire (2,3)
+    crate::gostring::string,                   // alpn (1)
+    bool,                                      // ecdheOk (1)
+    bool,                                      // ecSignOk (1)
+    bool,                                      // rsaSignOk (1)
+    crate::goslice::slice<crate::types::byte>, // master (2)
+) {
+    use crate::goslice::slice;
+    let fill = |base: crate::types::byte, n: usize| {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: usize = 0;
+        while i < n {
+            v.push(base.wrapping_add(crate::byte(i)));
+            i += 1;
+        }
+        return v;
+    };
+
+    struct constReader(crate::types::byte);
+    impl crate::io::Reader for constReader {
+        // go: none — goish-only: the deterministic Rand for this shim.
+        fn Read(
+            &mut self,
+            p: &mut slice<crate::types::byte>,
+        ) -> (crate::types::int, crate::error) {
+            let n = p.Len();
+            let mut i: crate::types::int = 0;
+            while i < n {
+                p[i as usize] = self.0.wrapping_add(crate::byte(i));
+                i += 1;
+            }
+            return (n, crate::errors::nil);
+        }
+    }
+
+    let seed = slice::__from_vec(fill(0x07, 32));
+    let priv_ = crate::crypto::ed25519::NewKeyFromSeed(seed);
+    let leaf = fill(0xCE, 20);
+
+    let mkCH = || {
+        let mut ch = handshake_messages::clientHelloMsg::default();
+        ch.vers = common::VersionTLS12;
+        ch.random = fill(0x01, 32);
+        ch.sessionId = fill(0x51, 32);
+        ch.cipherSuites =
+            alloc::vec![cipher_suites::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256];
+        ch.compressionMethods = alloc::vec![0u8];
+        ch.serverName = "example.com".into();
+        ch.supportedCurves = alloc::vec![common::X25519.0];
+        ch.supportedPoints = alloc::vec![0u8];
+        ch.alpnProtocols = alloc::vec!["h2".into(), "http/1.1".into()];
+        ch.extendedMasterSecret = true;
+        return ch;
+    };
+
+    let newConn = || {
+        let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+            slice::<crate::types::byte>::new(),
+        ));
+        let mut c = conn::Conn::default();
+        c.__setMemConn(sink.clone());
+        c.__setVers(common::VersionTLS12);
+        return (c, sink);
+    };
+
+    let suite =
+        cipher_suites::cipherSuiteByID(cipher_suites::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256)
+            .unwrap();
+
+    match which {
+        1 => {
+            let (mut c, _sink) = newConn();
+            let mut cfg = Config::default();
+            cfg.Rand = Some(alloc::sync::Arc::new(crate::sync::Mutex::new(
+                alloc::boxed::Box::new(constReader(0x90)),
+            )));
+            cfg.NextProtos = slice::__from_vec(alloc::vec!["http/1.1".into()]);
+            let mut cert = common::Certificate::default();
+            cert.Certificate = slice::__from_vec(alloc::vec![slice::__from_vec(leaf)]);
+            cert.PrivateKey = alloc::sync::Arc::new(priv_);
+            cfg.Certificates = slice::__from_vec(alloc::vec![cert]);
+            cfg.Time = Some(alloc::sync::Arc::new(|| crate::time::Unix(1700000000, 0)));
+            c.__setConfig(cfg);
+            let mut hs = handshake_server::serverHandshakeState {
+                cert: None,
+                c,
+                clientHello: mkCH(),
+                hello: handshake_messages::serverHelloMsg::default(),
+                suite: None,
+                finishedHash: __neutralFinishedHash(),
+                masterSecret: slice::new(),
+                sessionState: None,
+                ecdheOk: false,
+                ecSignOk: false,
+                rsaDecryptOk: false,
+                rsaSignOk: false,
+            };
+            let err = hs.processClientHello();
+            let errText = if err == crate::errors::nil {
+                crate::gostring::string::from_static("")
+            } else {
+                err.Error()
+            };
+            return (
+                errText,
+                slice::__from_vec(hs.hello.random.clone()),
+                crate::gostring::string::from_bytes(hs.hello.alpnProtocol.as_bytes()),
+                hs.ecdheOk,
+                hs.ecSignOk,
+                hs.rsaSignOk,
+                slice::new(),
+            );
+        }
+        2 => {
+            let (mut c, sink) = newConn();
+            let mut cfg = Config::default();
+            cfg.Time = Some(alloc::sync::Arc::new(|| crate::time::Unix(1700000000, 0)));
+            c.__setConfig(cfg);
+            let mut hello = handshake_messages::serverHelloMsg::default();
+            hello.vers = common::VersionTLS12;
+            hello.random = fill(0xB0, 32);
+            let mut ss = ticket::SessionState::default();
+            ss.version = common::VersionTLS12;
+            ss.cipherSuite = cipher_suites::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+            ss.secret = slice::__from_vec(fill(0xD0, 48));
+            let mut hs = handshake_server::serverHandshakeState {
+                cert: None,
+                c,
+                clientHello: mkCH(),
+                hello,
+                suite: Some(suite),
+                finishedHash: __neutralFinishedHash(),
+                masterSecret: slice::new(),
+                sessionState: Some(ss),
+                ecdheOk: false,
+                ecSignOk: false,
+                rsaDecryptOk: false,
+                rsaSignOk: false,
+            };
+            let err = hs.doResumeHandshake();
+            let errText = if err == crate::errors::nil {
+                crate::gostring::string::from_static("")
+            } else {
+                err.Error()
+            };
+            return (
+                errText,
+                sink.Lock().clone(),
+                crate::gostring::string::from_static(""),
+                false,
+                false,
+                false,
+                hs.masterSecret.clone(),
+            );
+        }
+        _ => {
+            let (mut c, sink) = newConn();
+            let wrapped = fill(0xEE, 24);
+            let mut cfg = Config::default();
+            cfg.Time = Some(alloc::sync::Arc::new(|| crate::time::Unix(1700000000, 0)));
+            cfg.WrapSession = Some(alloc::sync::Arc::new(
+                move |_cs: common::ConnectionState, _ss: ticket::SessionState| {
+                    (slice::__from_vec(wrapped.clone()), crate::errors::nil)
+                },
+            ));
+            c.__setConfig(cfg);
+            let mut hello = handshake_messages::serverHelloMsg::default();
+            hello.vers = common::VersionTLS12;
+            hello.ticketSupported = true;
+            let mut hs = handshake_server::serverHandshakeState {
+                cert: None,
+                c,
+                clientHello: mkCH(),
+                hello,
+                suite: Some(suite),
+                finishedHash: prf::newFinishedHash(common::VersionTLS12, suite),
+                masterSecret: slice::__from_vec(fill(0xD0, 48)),
+                sessionState: None,
+                ecdheOk: false,
+                ecSignOk: false,
+                rsaDecryptOk: false,
+                rsaSignOk: false,
+            };
+            let err = hs.sendSessionTicket();
+            let errText = if err == crate::errors::nil {
+                crate::gostring::string::from_static("")
+            } else {
+                err.Error()
+            };
+            return (
+                errText,
+                sink.Lock().clone(),
+                crate::gostring::string::from_static(""),
+                false,
+                false,
+                false,
+                slice::new(),
+            );
+        }
+    }
 }
 
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below
