@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -10,8 +10,8 @@
 // forbids.
 //
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
-// goishlint:ignore GOISH018 after, Attr, before, callerName, callSite, Chdir, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, Context, CoordinateFuzzing, CoverMode, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, Init, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newChattyPrinter, newTestState, Output, Parallel, parseCpuList, pcToName, Printf, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, Setenv, setOutputWriter, SetPanicOnExit0, setRan, Short, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, Testing, testingSynctestTest, toOutputDir, Updatef, Verbose, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
-// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, chattyPrinter, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errMain, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, matchStringOnly, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelConflict, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testBinary, testDeps, testingTesting, testlog, testlogFile, testState, timeout, traceFile — same: the driver's types and package state come with the driver.
+// goishlint:ignore GOISH018 after, Attr, before, callerName, callSite, Chdir, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, Context, CoordinateFuzzing, CoverMode, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newChattyPrinter, newTestState, Output, Parallel, parseCpuList, pcToName, Printf, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, Setenv, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, Updatef, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
+// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, chattyPrinter, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errMain, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, matchStringOnly, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelConflict, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testDeps, testingTesting, testlog, testlogFile, testState, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
 #![allow(non_snake_case)]
@@ -24,6 +24,7 @@ use core::sync::atomic::Ordering;
 
 use super::{indent_for, write_status, StringBytesAccess, TState, T, TEST_STACK};
 use crate::gostring::string;
+use crate::types::int;
 
 impl T {
     // go: sdk 1.25.5 testing/testing.go:938-940 common.Name
@@ -447,4 +448,171 @@ pub fn prefix(json: bool) -> string {
 /// stray `f`.
 pub fn fmtDuration(d: crate::time::Duration) -> string {
     return crate::fmt::Sprintf!("%.2fs", d.Seconds());
+}
+
+// ─── package state and Init ──────────────────────────────────────────
+
+// go: sdk 1.25.5 testing/testing.go:698-698 testBinary
+/// Go: `var testBinary = "0"` — "testBinary is set by cmd/go to "1" if
+/// this is a test binary."
+///
+/// Deviation: Go's is a `var` that the linker overwrites at build time
+/// (`-X testing.testBinary=1`). goish has no cmd/go and no linker
+/// rewrite, so nothing can ever set it; a `const` says that plainly
+/// rather than implying a mutability that does not exist.
+pub const testBinary: &str = "0";
+
+/// Go's package-level flag values, as `flag.Flag` handles.
+///
+/// Go stores these in package vars typed `*bool` / `*string`; goish's
+/// flag hands back a `Flag<T>` whose `Get()` reads the parsed value, so
+/// the shape is the same indirection with a different spelling.
+/// Registered but not yet consumed by the runner: `Main` does not act
+/// on count/timeout/parallel/failfast/shuffle/list yet. They are
+/// registered anyway so a command line written for `go test` parses
+/// rather than erroring out on an unknown flag — the values are simply
+/// read by nothing so far. Consuming them is runner work, not flag
+/// work.
+#[allow(dead_code)]
+struct testFlags {
+    short: crate::flag::Flag<bool>,
+    chatty: crate::flag::Flag<bool>,
+    run: crate::flag::Flag<string>,
+    skip: crate::flag::Flag<string>,
+    count: crate::flag::Flag<crate::types::uint>,
+    timeout: crate::flag::Flag<crate::time::Duration>,
+    parallel: crate::flag::Flag<int>,
+    fullPath: crate::flag::Flag<bool>,
+    failFast: crate::flag::Flag<bool>,
+    shuffle: crate::flag::Flag<string>,
+    outputDir: crate::flag::Flag<string>,
+    list: crate::flag::Flag<string>,
+}
+
+static INIT_RAN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+static FLAGS: crate::sync::Mutex<Option<testFlags>> = crate::sync::Mutex::new(None);
+
+// go: sdk 1.25.5 testing/testing.go:439-485 Init
+/// Go: "Init registers testing flags. These flags are automatically
+/// registered by the "go test" command before running test functions,
+/// so Init is only needed when calling functions such as Benchmark
+/// without using "go test". Init is not safe to call concurrently. It
+/// has no effect if it was called before."
+///
+/// **Deviation — which flags.** Go registers 25. goish registers the 12
+/// whose behaviour it can honour, and leaves out the ones that would be
+/// accepted and then silently ignored: the profiling flags
+/// (`-test.cpuprofile`, `-test.memprofile`, `-test.blockprofile`,
+/// `-test.mutexprofile`, `-test.trace`) need `runtime/pprof`, and
+/// `-test.gocoverdir`/`-test.coverprofile` need coverage
+/// instrumentation from the compiler. Accepting a flag and doing
+/// nothing is worse than rejecting it, because a CI script would look
+/// like it was collecting profiles.
+///
+/// `-test.v` is registered as a plain bool rather than through
+/// `flag.Var(&chatty)`: goish's flag has no `Value` interface yet, so
+/// the `test2json` spelling is not reachable from the command line even
+/// though `chattyFlag` itself parses it (see its port above).
+pub fn Init() {
+    // Go: if initRan { return }; initRan = true
+    if INIT_RAN.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let f = testFlags {
+        // Go: "The short flag requests that tests run more quickly, but
+        // its functionality is provided by test writers themselves."
+        short: crate::flag::Bool("test.short", false, "run smaller test suite to save time"),
+        chatty: crate::flag::Bool("test.v", false, "verbose: print additional output"),
+        run: crate::flag::String("test.run", "", "run only tests and examples matching `regexp`"),
+        skip: crate::flag::String("test.skip", "", "do not list or run tests matching `regexp`"),
+        count: crate::flag::Uint("test.count", 1, "run tests and benchmarks `n` times"),
+        timeout: crate::flag::Duration(
+            "test.timeout",
+            crate::time::Duration(0),
+            "panic test binary after duration `d` (default 0, timeout disabled)",
+        ),
+        parallel: crate::flag::Int(
+            "test.parallel",
+            crate::runtime::NumCPU(),
+            "run at most `n` tests in parallel",
+        ),
+        fullPath: crate::flag::Bool("test.fullpath", false, "show full file names in error messages"),
+        failFast: crate::flag::Bool(
+            "test.failfast",
+            false,
+            "do not start new tests after the first test failure",
+        ),
+        shuffle: crate::flag::String(
+            "test.shuffle",
+            "off",
+            "randomize the execution order of tests and benchmarks",
+        ),
+        outputDir: crate::flag::String("test.outputdir", "", "write profiles to `dir`"),
+        list: crate::flag::String(
+            "test.list",
+            "",
+            "list tests, examples, and benchmarks matching `regexp` then exit",
+        ),
+    };
+    *FLAGS.Lock() = Some(f);
+}
+
+// go: sdk 1.25.5 testing/testing.go:679-689 Short
+/// Go: "Short reports whether the -test.short flag is set."
+///
+/// Go panics both when Init has not run and when flag.Parse has not
+/// been called, because a `Short()` that silently answers false would
+/// make a `-short` CI run quietly do the long thing. goish keeps both
+/// panics.
+pub fn Short() -> bool {
+    let g = FLAGS.Lock();
+    let f = match g.as_ref() {
+        // Go: if short == nil { panic("testing: Short called before Init") }
+        None => panic!("testing: Short called before Init"),
+        Some(f) => f,
+    };
+    // Go: "Catch code that calls this from TestMain without first
+    //      calling flag.Parse."
+    if !crate::flag::Parsed() {
+        panic!("testing: Short called before Parse");
+    }
+    return f.short.Get();
+}
+
+// go: sdk 1.25.5 testing/testing.go:715-721 Verbose
+/// Go: "Verbose reports whether the -test.v flag is set."
+pub fn Verbose() -> bool {
+    let g = FLAGS.Lock();
+    // Go: same Parse check as Short.
+    if !crate::flag::Parsed() {
+        panic!("testing: Verbose called before Parse");
+    }
+    return match g.as_ref() {
+        None => false,
+        Some(f) => f.chatty.Get(),
+    };
+}
+
+// go: sdk 1.25.5 testing/testing.go:703-705 Testing
+/// Go: "Testing reports whether the current code is being run as part
+/// of a test. This will report true in programs created by "go test",
+/// false in programs created by "go build"."
+///
+/// Always false here: nothing sets `testBinary`, because goish has no
+/// cmd/go to set it. See the var above.
+pub fn Testing() -> bool {
+    // Go: return testBinary == "1"
+    return testBinary == "1";
+}
+
+// go: none — goish-only: read the parsed `-test.run` / `-test.skip`
+// patterns so a runner can build the matcher that match.rs provides.
+// Go reaches its package vars directly; goish's live behind the Mutex.
+#[doc(hidden)]
+pub fn __run_skip_patterns() -> (string, string) {
+    let g = FLAGS.Lock();
+    return match g.as_ref() {
+        None => (string::from_static(""), string::from_static("")),
+        Some(f) => (f.run.Get(), f.skip.Get()),
+    };
 }

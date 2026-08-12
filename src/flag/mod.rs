@@ -22,7 +22,7 @@
 //   }
 //
 // Each `String/Int/Bool/Float64` returns a typed `Flag<T>` whose `Get()`
-// reads the parsed value. Internally backed by `Rc<SpinLock<T>>` so the
+// reads the parsed value. Internally backed by `Arc<SpinLock<T>>` so the
 // caller can hold the handle while the `FlagSet` mutates state.
 //
 // Recognized syntax: `--name`, `--name=value`, `--name value`, `-name`,
@@ -41,8 +41,11 @@
 
 #![allow(non_snake_case)]
 
+mod flag;
+pub use flag::{Bool, CommandLine, Duration, Int, Int64, Parse, Parsed, String, Uint};
+
 extern crate alloc;
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::errors::{self, error, nil};
@@ -55,7 +58,7 @@ use crate::types::{byte, float64, int};
 // ─── Flag<T> handle ────────────────────────────────────────────────────
 
 pub struct Flag<T: Clone> {
-    cell: Rc<SpinLock<T>>,
+    cell: Arc<SpinLock<T>>,
 }
 
 impl<T: Clone> Flag<T> {
@@ -74,14 +77,17 @@ impl<T: Clone> Clone for Flag<T> {
 
 // ─── Internal flag entry ───────────────────────────────────────────────
 
-enum FlagKind {
-    Bool(Rc<SpinLock<bool>>),
-    Int(Rc<SpinLock<int>>),
-    Float64(Rc<SpinLock<float64>>),
-    String(Rc<SpinLock<string>>),
+pub(crate) enum FlagKind {
+    Bool(Arc<SpinLock<bool>>),
+    Int(Arc<SpinLock<int>>),
+    Int64(Arc<SpinLock<crate::types::int64>>),
+    Uint(Arc<SpinLock<crate::types::uint>>),
+    Duration(Arc<SpinLock<crate::time::Duration>>),
+    Float64(Arc<SpinLock<float64>>),
+    String(Arc<SpinLock<string>>),
 }
 
-struct FlagDef {
+pub(crate) struct FlagDef {
     name: string,
     usage: string,
     kind: FlagKind,
@@ -95,7 +101,7 @@ pub struct FlagSet {
     parsed: bool,
 }
 
-pub fn NewFlagSet() -> FlagSet {
+pub const fn NewFlagSet() -> FlagSet {
     FlagSet {
         defs: Vec::new(),
         args: Vec::new(),
@@ -116,7 +122,7 @@ impl FlagSet {
         default: D,
         usage: U,
     ) -> Flag<string> {
-        let cell = Rc::new(SpinLock::new(default.into()));
+        let cell = Arc::new(SpinLock::new(default.into()));
         self.defs.push(FlagDef {
             name: name.into(),
             usage: usage.into(),
@@ -131,7 +137,7 @@ impl FlagSet {
         default: int,
         usage: U,
     ) -> Flag<int> {
-        let cell = Rc::new(SpinLock::new(default));
+        let cell = Arc::new(SpinLock::new(default));
         self.defs.push(FlagDef {
             name: name.into(),
             usage: usage.into(),
@@ -146,7 +152,7 @@ impl FlagSet {
         default: bool,
         usage: U,
     ) -> Flag<bool> {
-        let cell = Rc::new(SpinLock::new(default));
+        let cell = Arc::new(SpinLock::new(default));
         self.defs.push(FlagDef {
             name: name.into(),
             usage: usage.into(),
@@ -161,7 +167,7 @@ impl FlagSet {
         default: float64,
         usage: U,
     ) -> Flag<float64> {
-        let cell = Rc::new(SpinLock::new(default));
+        let cell = Arc::new(SpinLock::new(default));
         self.defs.push(FlagDef {
             name: name.into(),
             usage: usage.into(),
@@ -169,6 +175,7 @@ impl FlagSet {
         });
         Flag { cell }
     }
+
 
     pub fn Args(&self) -> slice<string> {
         slice::__from_vec(self.args.clone())
@@ -314,6 +321,39 @@ impl FlagSet {
                     return err;
                 }
                 *cell.lock() = f;
+                nil
+            }
+            FlagKind::Int64(cell) => {
+                let s = string::from_bytes(val);
+                // Go: strconv.ParseInt(value, 0, 64) — base 0, so
+                // "0x10" and "0b1010" parse as Go's flag package
+                // accepts them, not just decimal.
+                let (n, err) = strconv::ParseInt(s, 0, 64);
+                if err != nil {
+                    return err;
+                }
+                *cell.lock() = n;
+                nil
+            }
+            FlagKind::Uint(cell) => {
+                let s = string::from_bytes(val);
+                // Go: strconv.ParseUint(value, 0, strconv.IntSize)
+                let (n, err) = strconv::ParseUint(s, 0, 64);
+                if err != nil {
+                    return err;
+                }
+                *cell.lock() = n as crate::types::uint;
+                nil
+            }
+            FlagKind::Duration(cell) => {
+                let s = string::from_bytes(val);
+                // Go: time.ParseDuration(value) — so "-test.timeout=30s"
+                // takes a unit suffix, not a bare number.
+                let (d, err) = crate::time::ParseDuration(s);
+                if err != nil {
+                    return err;
+                }
+                *cell.lock() = d;
                 nil
             }
         }

@@ -1191,3 +1191,7 @@ path = "examples/testing_fstest_smoke.rs"
 [[example]]
 name = "testing_chatty_smoke"
 path = "examples/testing_chatty_smoke.rs"
+
+[[example]]
+name = "testing_init_flags_smoke"
+path = "examples/testing_init_flags_smoke.rs"
