@@ -358,10 +358,14 @@ pub type TestFn = fn(&mut T);
 /// modules); the user is expected to assemble the slice in the
 /// `#[goish::main]` body.
 pub fn Main(tests: &[(&'static str, TestFn)]) -> int {
-    // Go's testing.Main hands its tests to MainStart().Run(), which
-    // ends at runTests. goish has no generated main package and no
-    // profiling to set up, so Main goes straight to RunTests — the
-    // same runner, minus the M layer that is pure profiling/coverage.
+    // Go's testing.Main is
+    //     os.Exit(MainStart(matchStringOnly(matchString), tests,
+    //                       benchmarks, nil, examples).Run())
+    // goish follows the same path as far as it goes: MainStart wires
+    // the deps and coverage seam, the alarm brackets the run, and
+    // RunTests does the work. M.Run itself is not ported — its body is
+    // M.before/M.after, which are entirely profiling, tracing and
+    // coverage setup goish has no backing for.
     let internal: Vec<testing::InternalTest> = tests
         .iter()
         .map(|(name, f)| {
@@ -372,10 +376,19 @@ pub fn Main(tests: &[(&'static str, TestFn)]) -> int {
         })
         .collect();
 
-    let ok = testing::RunTests(&internal);
+    // Go passes matchStringOnly(matchString) — the same regexp match
+    // its generated main package supplies.
+    let deps = alloc::boxed::Box::new(testing::matchStringOnly::new(
+        |pat: string, str_: string| {
+            return crate::regexp::MatchString(pat, str_);
+        },
+    ));
+    let m = testing::MainStart(deps, internal, Vec::new());
 
-    // Go's driver prints the PASS/FAIL summary; goish keeps its own
-    // counted form, which callers' smoke tests read.
+    let _deadline = m.startAlarm();
+    let ok = testing::RunTests(&m.tests);
+    m.stopAlarm();
+
     let summary: &[u8] = if ok { b"\nPASS\n" } else { b"\nFAIL\n" };
     syscall::Write(syscall::STDOUT, summary.as_ptr(), summary.len());
 

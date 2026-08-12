@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: listTests, toOutputDir, runTests, RunTests, runningList, T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: MainStart, M.startAlarm, M.stopAlarm, listTests, toOutputDir, runTests, RunTests, runningList, T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -21,7 +21,7 @@
 // registration having happened and can be tested on its own.
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
 // goishlint:ignore GOISH018 after, Attr, before, callSite, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newTestState, Output, Parallel, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
-// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, M, match, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
+// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, match, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
 #![allow(non_snake_case)]
@@ -2935,6 +2935,107 @@ pub fn listTests(
         let (ok, _) = crate::regexp::MatchString(pattern.clone(), e.Name.clone());
         if ok {
             crate::fmt::Println!(e.Name.clone());
+        }
+    }
+}
+
+// ─── M ───────────────────────────────────────────────────────────────
+
+// goishlint:ignore GOISH019 M — Go's M holds `benchmarks`,
+// `fuzzTargets`, `afterOnce` and `exitCode` for machinery goish does
+// not have (the benchmark and fuzz runners, and an M.Run that would set
+// an exit code). The four fields present are the ones MainStart fills
+// and startAlarm/stopAlarm read.
+// go: sdk 1.25.5 testing/testing.go:2171-2186 M
+/// Go: "M is a type passed to a TestMain function to run the actual
+/// tests."
+/// `deps` and `examples` are filled by MainStart and read by `M.Run`,
+/// which is not ported — its body is M.before/M.after. They are held
+/// rather than dropped so the struct still says what an M is.
+#[allow(non_snake_case, dead_code)]
+pub struct M {
+    pub(crate) deps: alloc::boxed::Box<dyn testDeps + Send + Sync>,
+    pub(crate) tests: alloc::vec::Vec<InternalTest>,
+    pub(crate) examples: alloc::vec::Vec<crate::testing::example::InternalExample>,
+    pub(crate) timer: crate::sync::Mutex<Option<crate::time::Timer>>,
+}
+
+// go: sdk 1.25.5 testing/testing.go:2213-2223 MainStart
+// goishlint:ignore GOISH020 MainStart — Go takes `benchmarks` and
+// `fuzzTargets` slices too; neither runner is ported, so there is
+// nothing that could consume them and no field to hold them.
+/// Go: "MainStart is meant for use by tests generated by 'go test'. It
+/// is not meant to be called directly."
+///
+/// The registerCover call is not ceremony: it is where a coverage-built
+/// binary hands testing its mode and teardown. goish's deps return the
+/// empty mode, so registerCover records nothing — but the seam is real
+/// and calling it keeps that visible.
+#[allow(non_snake_case)]
+pub fn MainStart(
+    deps: alloc::boxed::Box<dyn testDeps + Send + Sync>,
+    tests: alloc::vec::Vec<InternalTest>,
+    examples: alloc::vec::Vec<crate::testing::example::InternalExample>,
+) -> M {
+    let (mode, tearDown, snapcov) = deps.InitRuntimeCoverage();
+    crate::testing::newcover::registerCover(mode, tearDown, snapcov);
+    Init();
+    return M {
+        deps,
+        tests,
+        examples,
+        timer: crate::sync::Mutex::new(None),
+    };
+}
+
+#[allow(non_snake_case)]
+impl M {
+    // go: sdk 1.25.5 testing/testing.go:2662-2685 M.startAlarm
+    /// Go: arm the -timeout watchdog and return the deadline it
+    /// implies. A zero or negative timeout means no watchdog, and the
+    /// zero Time it returns is what T.Deadline reports as "no
+    /// deadline".
+    ///
+    /// goish's -timeout defaults to 0, so the timer is normally never
+    /// created. That matters beyond efficiency: goish waits for every
+    /// goroutine at exit and Timer::Stop does not cancel the sleeper,
+    /// so an armed watchdog would pin process exit for its full
+    /// duration even after stopAlarm.
+    pub fn startAlarm(&self) -> crate::time::Time {
+        let timeout = timeoutFlag();
+        if timeout <= crate::time::Duration(0) {
+            return crate::time::Time::default();
+        }
+        let deadline = crate::time::Now().Add(timeout);
+        *self.timer.Lock() = Some(crate::time::AfterFunc(timeout, move || {
+            // Go also calls m.after() and sets a full traceback first;
+            // both are profiling teardown goish has no backing for.
+            let list = runningList();
+            let mut extra = string::from_static("");
+            if list.Len() > 0 {
+                let mut b: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+                b.extend_from_slice(b"\nrunning tests:");
+                for i in 0..list.Len() {
+                    b.extend_from_slice(b"\n\t");
+                    b.extend_from_slice(list[i].clone().__as_bytes_internal());
+                }
+                extra = string::from_bytes(&b);
+            }
+            panic!(
+                "test timed out after {}{}",
+                timeout.String().as_ref() as &str,
+                extra.as_ref() as &str
+            );
+        }));
+        return deadline;
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:2699-2703 M.stopAlarm
+    pub fn stopAlarm(&self) {
+        if timeoutFlag() > crate::time::Duration(0) {
+            if let Some(t) = self.timer.Lock().as_ref() {
+                t.Stop();
+            }
         }
     }
 }
