@@ -1277,7 +1277,6 @@ impl clientHandshakeStateTLS13 {
     /// key schedule and the server and client flights.
     pub(crate) fn handshake(&mut self) -> crate::error {
         use crate::goslice::slice;
-        let suite = self.suite.unwrap();
 
         // Go: "The server must not select TLS 1.3 in a renegotiation.
         // See RFC 8446, sections 4.1.2 and 4.1.3."
@@ -1301,10 +1300,12 @@ impl clientHandshakeStateTLS13 {
         }
 
         // Go: if err := hs.checkServerHelloOrHRR(); err != nil { return err }
+        // (checkServerHelloOrHRR selects and stores hs.suite.)
         let err = self.checkServerHelloOrHRR();
         if err != crate::errors::nil {
             return err;
         }
+        let suite = self.suite.unwrap();
 
         // Go: hs.transcript = hs.suite.hash.New()
         //     if err := transcriptMsg(hs.hello, hs.transcript); err != nil { return err }

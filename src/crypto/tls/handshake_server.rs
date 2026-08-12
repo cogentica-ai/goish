@@ -1,4 +1,4 @@
-// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo, serverHandshakeState.pickCipherSuite, serverHandshakeState.establishKeys, serverHandshakeState.checkForResumption, serverHandshakeState.readFinished, serverHandshakeState.sendFinished, Conn.processCertsFromClient, serverHandshakeState.handshake, serverHandshakeState.processClientHello, serverHandshakeState.doResumeHandshake, serverHandshakeState.doFullHandshake, serverHandshakeState.sendSessionTicket
+// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo, serverHandshakeState.pickCipherSuite, serverHandshakeState.establishKeys, serverHandshakeState.checkForResumption, serverHandshakeState.readFinished, serverHandshakeState.sendFinished, Conn.processCertsFromClient, serverHandshakeState.handshake, serverHandshakeState.processClientHello, serverHandshakeState.doResumeHandshake, serverHandshakeState.doFullHandshake, serverHandshakeState.sendSessionTicket, Conn.serverHandshake, Conn.readClientHello
 //
 // crypto/tls — the server handshake state machine.
 //
@@ -1775,5 +1775,230 @@ impl Conn {
 
         // Go: return nil
         return crate::errors::nil;
+    }
+}
+
+impl super::conn::Conn {
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:42-64 Conn.serverHandshake
+    /// Go: the server handshake entry point — read the ClientHello,
+    /// then dispatch to the TLS 1.3 or TLS 1.0–1.2 server driver.
+    ///
+    /// Deviation: Go's `ctx context.Context` parameter has no field to
+    /// land in on either handshake state.
+    /// goishlint:ignore GOISH020 serverHandshake — Go's context.Context parameter has no field to land in
+    pub(crate) fn serverHandshake(&mut self) -> crate::error {
+        // Go: clientHello, ech, err := c.readClientHello(ctx)
+        //     if err != nil { return err }
+        let (clientHello, ech, err) = self.readClientHello();
+        if err != crate::errors::nil {
+            return err;
+        }
+        let clientHello = clientHello.unwrap();
+
+        // Go: if c.vers == VersionTLS13 {
+        //         hs := serverHandshakeStateTLS13{ c: c, ctx: ctx,
+        //             clientHello: clientHello, echContext: ech }
+        //         return hs.handshake() }
+        if self.vers == super::common::VersionTLS13 {
+            let mut hs = super::handshake_server_tls13::serverHandshakeStateTLS13 {
+                c: core::mem::take(self),
+                clientHello,
+                echContext: ech,
+                ..Default::default()
+            };
+            let err = hs.handshake();
+            *self = hs.c;
+            return err;
+        }
+
+        // Go: hs := serverHandshakeState{ c: c, ctx: ctx, clientHello: clientHello }
+        //     return hs.handshake()
+        let mut hs = serverHandshakeState {
+            c: core::mem::take(self),
+            clientHello,
+            hello: super::handshake_messages::serverHelloMsg::default(),
+            suite: None,
+            finishedHash: super::prf::newFinishedHash(
+                super::common::VersionTLS12,
+                super::cipher_suites::cipherSuiteByID(
+                    super::cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                )
+                .unwrap(),
+            ),
+            masterSecret: slice::new(),
+            sessionState: None,
+            ecdheOk: false,
+            ecSignOk: false,
+            rsaDecryptOk: false,
+            rsaSignOk: false,
+            cert: None,
+        };
+        let err = hs.handshake();
+        *self = hs.c;
+        return err;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:134-217 Conn.readClientHello
+    /// Go: read and pre-process the ClientHello — decrypt an ECH
+    /// extension if present (it may swap the hello out entirely), then
+    /// negotiate the protocol version.
+    ///
+    /// Deviations: Go's `ctx context.Context` has nowhere to go; the
+    /// `GetConfigForClient` per-connection config override is absent
+    /// (goish's Config has no such field); the `tls10server` GODEBUG
+    /// bump is absent.
+    /// goishlint:ignore GOISH020 readClientHello — Go's context.Context parameter has no field to land in
+    pub(crate) fn readClientHello(
+        &mut self,
+    ) -> (
+        Option<super::handshake_messages::clientHelloMsg>,
+        Option<super::handshake_server_tls13::echServerContext>,
+        crate::error,
+    ) {
+        // Go: "clientHelloMsg is included in the transcript, but we
+        // haven't initialized it yet. […]"
+        //     msg, err := c.readHandshake(nil)
+        //     if err != nil { return nil, nil, err }
+        let (msg, err) = self.readHandshake(None);
+        if err != crate::errors::nil {
+            return (None, None, err);
+        }
+        // Go: clientHello, ok := msg.(*clientHelloMsg)
+        //     if !ok { c.sendAlert(alertUnexpectedMessage)
+        //         return nil, nil, unexpectedMessageError(clientHello, msg) }
+        let msg = match msg {
+            Some(m) => m,
+            None => {
+                return (
+                    None,
+                    None,
+                    crate::errors::New("tls: internal error: no handshake message"),
+                )
+            }
+        };
+        let mut clientHello = match msg
+            .asAny()
+            .downcast_ref::<super::handshake_messages::clientHelloMsg>()
+        {
+            Some(ch) => ch.clone(),
+            None => {
+                self.sendAlert(super::alert::alertUnexpectedMessage);
+                return (
+                    None,
+                    None,
+                    super::common::unexpectedMessageError(
+                        crate::gostring::string::from_static("*tls.clientHelloMsg"),
+                        super::handshake_messages::handshakeMessageTypeName(&*msg),
+                    ),
+                );
+            }
+        };
+
+        // Go: "ECH processing has to be done before we do any other
+        // negotiation based on the contents of the client hello […]"
+        //     var ech *echServerContext
+        //     if len(clientHello.encryptedClientHello) != 0 {
+        //         echKeys := c.config.EncryptedClientHelloKeys
+        //         if c.config.GetEncryptedClientHelloKeys != nil {
+        //             echKeys, err = c.config.GetEncryptedClientHelloKeys(clientHelloInfo(ctx, c, clientHello))
+        //             if err != nil { c.sendAlert(alertInternalError); return nil, nil, err } }
+        //         clientHello, ech, err = c.processECHClientHello(clientHello, echKeys)
+        //         if err != nil { return nil, nil, err } }
+        let mut ech: Option<super::handshake_server_tls13::echServerContext> = None;
+        if clientHello.encryptedClientHello.len() != 0 {
+            let mut echKeys = self.config.EncryptedClientHelloKeys.clone();
+            if let Some(get) = self.config.GetEncryptedClientHelloKeys.clone() {
+                let (keys, err) = get(clientHelloInfo(self, &clientHello));
+                if err != crate::errors::nil {
+                    self.sendAlert(super::alert::alertInternalError);
+                    return (None, None, err);
+                }
+                echKeys = keys;
+            }
+            let (newHello, newEch, err) =
+                self.processECHClientHello(&clientHello, echKeys);
+            if err != crate::errors::nil {
+                return (None, None, err);
+            }
+            clientHello = newHello.unwrap();
+            ech = newEch;
+        }
+
+        // Go: c.ticketKeys = originalConfig.ticketKeys(configForClient)
+        //
+        // goish: the GetConfigForClient override is not ported, so
+        // `configForClient` is always nil and the original config's keys
+        // apply.
+        self.ticketKeys = self.config.ticketKeys(None);
+
+        // Go: clientVersions := clientHello.supportedVersions
+        //     if clientHello.vers >= VersionTLS13 && len(clientVersions) == 0 {
+        //         clientVersions = supportedVersionsFromMax(VersionTLS12)
+        //     } else if len(clientVersions) == 0 {
+        //         clientVersions = supportedVersionsFromMax(clientHello.vers) }
+        let mut clientVersions = slice::__from_vec(clientHello.supportedVersions.clone());
+        if clientHello.vers >= super::common::VersionTLS13
+            && clientVersions.len() == 0
+        {
+            clientVersions =
+                super::common::supportedVersionsFromMax(super::common::VersionTLS12);
+        } else if clientVersions.len() == 0 {
+            clientVersions = super::common::supportedVersionsFromMax(clientHello.vers);
+        }
+        // Go: c.vers, ok = c.config.mutualVersion(roleServer, clientVersions)
+        //     if !ok { c.sendAlert(alertProtocolVersion)
+        //         return nil, nil, fmt.Errorf("tls: client offered only unsupported versions: %x", clientVersions) }
+        let (vers, ok) = self
+            .config
+            .mutualVersion(super::common::roleServer, clientVersions.clone());
+        if !ok {
+            self.sendAlert(super::alert::alertProtocolVersion);
+            let mut hexVers: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+            for v in clientVersions.iter() {
+                hexVers.push(crate::byte(v >> 8));
+                hexVers.push(crate::byte(*v));
+            }
+            return (
+                None,
+                None,
+                crate::fmt::Errorf!(
+                    "tls: client offered only unsupported versions: %x",
+                    slice::__from_vec(hexVers)
+                ),
+            );
+        }
+        self.vers = vers;
+        // Go: c.haveVers = true
+        //     c.in.version = c.vers
+        //     c.out.version = c.vers
+        self.haveVers = true;
+        self.in_.version = self.vers;
+        self.out.version = self.vers;
+
+        // Go: "This check reflects some odd specification implied
+        // behavior. […]"
+        //     if c.vers != VersionTLS13 && (ech != nil && !ech.inner) {
+        //         c.sendAlert(alertIllegalParameter)
+        //         return nil, nil, errors.New("tls: Encrypted Client Hello cannot be used pre-TLS 1.3") }
+        if self.vers != super::common::VersionTLS13
+            && ech.as_ref().map(|e| !e.inner).unwrap_or(false)
+        {
+            self.sendAlert(super::alert::alertIllegalParameter);
+            return (
+                None,
+                None,
+                crate::errors::New(
+                    "tls: Encrypted Client Hello cannot be used pre-TLS 1.3",
+                ),
+            );
+        }
+
+        // Go: if c.config.MinVersion == 0 && c.vers < VersionTLS12 {
+        //         tls10server.Value(); tls10server.IncNonDefault() }
+        //
+        // goish: godebug counters are not ported.
+
+        // Go: return clientHello, ech, nil
+        return (Some(clientHello), ech, crate::errors::nil);
     }
 }

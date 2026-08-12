@@ -9439,6 +9439,215 @@ pub fn handshake_server_tls12_method(
     }
 }
 
+// go: none — goish-only: drives the verbatim client and server
+// handshake drivers end-to-end over an in-memory bidirectional pipe,
+// each on its own goroutine. This is the definitive test for
+// Conn.clientHandshake, Conn.serverHandshake, and both
+// {client,server}HandshakeState.handshake drivers: the random
+// ephemerals and signatures cancel out, so a completed handshake with
+// matching client/server traffic secrets on both halves proves the
+// whole path. `cert` is a real matching cert+key (X509KeyPair from the
+// example's embedded PEM); `vers13` forces TLS 1.3 vs TLS 1.2.
+// Reports (clientErr, serverErr, secretsMatch, clientVers, serverVers).
+#[doc(hidden)]
+pub fn handshake_loopback(
+    cert: common::Certificate,
+    vers13: bool,
+) -> (
+    crate::gostring::string,
+    crate::gostring::string,
+    bool,
+    crate::types::uint16,
+    crate::types::uint16,
+) {
+    use crate::goslice::slice;
+    use alloc::sync::Arc;
+    use alloc::vec::Vec;
+
+    // An in-memory full-duplex pipe end backed by a channel per
+    // direction, so a blocked Read parks the goroutine (and wakes on the
+    // peer's Write) through the scheduler, exactly like a socket parking
+    // on the netpoller — no busy-waiting.
+    struct pipeEnd {
+        rx: crate::gochan::chan<Vec<crate::types::byte>>,
+        tx: crate::gochan::chan<Vec<crate::types::byte>>,
+        leftover: Vec<crate::types::byte>,
+    }
+    impl crate::net::Conn for pipeEnd {
+        // go: none — goish-only: channel-backed blocking pipe read.
+        fn Read(
+            &mut self,
+            p: &mut slice<crate::types::byte>,
+        ) -> (crate::types::int, crate::error) {
+            if self.leftover.is_empty() {
+                let (chunk, ok) = self.rx.Recv();
+                if !ok {
+                    return (0, crate::io::EOF.into());
+                }
+                self.leftover = chunk;
+            }
+            let n = core::cmp::min(p.Len() as usize, self.leftover.len());
+            for i in 0..n {
+                p[i] = self.leftover[i];
+            }
+            self.leftover.drain(0..n);
+            return (n as crate::types::int, crate::errors::nil);
+        }
+        // go: none — goish-only: channel-backed pipe write.
+        fn Write(
+            &mut self,
+            p: slice<crate::types::byte>,
+        ) -> (crate::types::int, crate::error) {
+            let raw: &[crate::types::byte] = &p;
+            self.tx.Send(raw.to_vec());
+            return (p.Len(), crate::errors::nil);
+        }
+        // go: none — goish-only.
+        fn Close(&mut self) -> crate::error {
+            self.tx.Close();
+            return crate::errors::nil;
+        }
+        // go: none — goish-only: inert address for an in-memory pipe.
+        fn LocalAddr(&self) -> crate::net::TCPAddr {
+            return crate::net::TCPAddr::zero();
+        }
+        // go: none — goish-only: inert address for an in-memory pipe.
+        fn RemoteAddr(&self) -> crate::net::TCPAddr {
+            return crate::net::TCPAddr::zero();
+        }
+        // go: none — goish-only: in-memory pipe ignores deadlines.
+        fn SetDeadline(&self, _t: crate::time::Time) -> crate::error {
+            return crate::errors::nil;
+        }
+        // go: none — goish-only: in-memory pipe ignores deadlines.
+        fn SetReadDeadline(&self, _t: crate::time::Time) -> crate::error {
+            return crate::errors::nil;
+        }
+        // go: none — goish-only: in-memory pipe ignores deadlines.
+        fn SetWriteDeadline(&self, _t: crate::time::Time) -> crate::error {
+            return crate::errors::nil;
+        }
+    }
+
+    // Buffered generously so a Write never blocks on a full channel
+    // (each direction sends a handful of records).
+    let a2b = crate::gochan::chan::<Vec<crate::types::byte>>::new_buffered(64);
+    let b2a = crate::gochan::chan::<Vec<crate::types::byte>>::new_buffered(64);
+
+    let cliEnd = pipeEnd {
+        rx: b2a.clone(),
+        tx: a2b.clone(),
+        leftover: Vec::new(),
+    };
+    let srvEnd = pipeEnd {
+        rx: a2b.clone(),
+        tx: b2a.clone(),
+        leftover: Vec::new(),
+    };
+
+    let maxV = if vers13 {
+        common::VersionTLS13
+    } else {
+        common::VersionTLS12
+    };
+
+    let mut cliCfg = Config::default();
+    cliCfg.InsecureSkipVerify = true;
+    cliCfg.ServerName = "localhost".into();
+    cliCfg.MaxVersion = maxV;
+    cliCfg.MinVersion = common::VersionTLS12;
+
+    let mut srvCfg = Config::default();
+    srvCfg.Certificates = slice::__from_vec(alloc::vec![cert]);
+    srvCfg.MaxVersion = maxV;
+    srvCfg.MinVersion = common::VersionTLS12;
+
+    let mut cli = conn::Conn::default();
+    cli.conn = Some(alloc::boxed::Box::new(cliEnd));
+    cli.__setIsClient(true);
+    cli.__setConfig(cliCfg);
+
+    let mut srv = conn::Conn::default();
+    srv.conn = Some(alloc::boxed::Box::new(srvEnd));
+    srv.__setIsClient(false);
+    srv.__setConfig(srvCfg);
+
+    // Both sides run as goroutines; join with a WaitGroup, mirroring
+    // tls_server_smoke's structure.
+    let cliErr = Arc::new(crate::sync::Mutex::new(crate::gostring::string::from_static("")));
+    let srvErr = Arc::new(crate::sync::Mutex::new(crate::gostring::string::from_static("")));
+    let cliVers = Arc::new(crate::sync::Mutex::new(0u16));
+    let srvVers = Arc::new(crate::sync::Mutex::new(0u16));
+    let cliIn = Arc::new(crate::sync::Mutex::new(slice::<crate::types::byte>::new()));
+    let cliOut = Arc::new(crate::sync::Mutex::new(slice::<crate::types::byte>::new()));
+    let srvIn = Arc::new(crate::sync::Mutex::new(slice::<crate::types::byte>::new()));
+    let srvOut = Arc::new(crate::sync::Mutex::new(slice::<crate::types::byte>::new()));
+
+    let wg = Arc::new(crate::sync::WaitGroup::new());
+    wg.Add(2);
+
+    let wgC = wg.clone();
+    let cliErr2 = cliErr.clone();
+    let cliVers2 = cliVers.clone();
+    let cliIn2 = cliIn.clone();
+    let cliOut2 = cliOut.clone();
+    crate::go!(4 * crate::MB, move || {
+        let e = cli.clientHandshake();
+        if e != crate::errors::nil {
+            *cliErr2.Lock() = e.Error();
+        }
+        *cliVers2.Lock() = cli.__vers();
+        let (inS, outS) = cli.__trafficSecrets();
+        *cliIn2.Lock() = inS;
+        *cliOut2.Lock() = outS;
+        // Close the write half so the peer's final Read unblocks.
+        let _ = crate::net::Conn::Close(&mut **cli.conn.as_mut().unwrap());
+        wgC.Done();
+    });
+
+    let wgS = wg.clone();
+    let srvErr2 = srvErr.clone();
+    let srvVers2 = srvVers.clone();
+    let srvIn2 = srvIn.clone();
+    let srvOut2 = srvOut.clone();
+    crate::go!(4 * crate::MB, move || {
+        let e = srv.serverHandshake();
+        if e != crate::errors::nil {
+            *srvErr2.Lock() = e.Error();
+        }
+        *srvVers2.Lock() = srv.__vers();
+        let (inS, outS) = srv.__trafficSecrets();
+        *srvIn2.Lock() = inS;
+        *srvOut2.Lock() = outS;
+        let _ = crate::net::Conn::Close(&mut **srv.conn.as_mut().unwrap());
+        wgS.Done();
+    });
+
+    wg.Wait();
+
+    let cIn = cliIn.Lock().clone();
+    let cOut = cliOut.Lock().clone();
+    let sIn = srvIn.Lock().clone();
+    let sOut = srvOut.Lock().clone();
+    // The client's write secret is the server's read secret, and vice
+    // versa; a completed handshake makes both pairs equal and non-empty.
+    let eq = |x: &slice<crate::types::byte>, y: &slice<crate::types::byte>| -> bool {
+        let xr: &[crate::types::byte] = x;
+        let yr: &[crate::types::byte] = y;
+        return xr == yr;
+    };
+    let secretsMatch =
+        cOut.Len() > 0 && cIn.Len() > 0 && eq(&cOut, &sIn) && eq(&cIn, &sOut);
+
+    return (
+        cliErr.Lock().clone(),
+        srvErr.Lock().clone(),
+        secretsMatch,
+        *cliVers.Lock(),
+        *srvVers.Lock(),
+    );
+}
+
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below
 // sign and verify against, the same fixture x509_parse_smoke uses.
 // Held once: it was pasted by hand into a second shim and silently
