@@ -170,12 +170,41 @@ impl T {
     /// function. When printing file and line information, that function
     /// will be skipped."
     ///
-    /// No-op here. Go records the caller's PC in `helperPCs` and
-    /// consults it from `callSite` when attributing a failure to a
-    /// file:line. goish does not print file:line on failures at all
-    /// (that needs `runtime.CallersFrames`, which is not ported), so
-    /// there is nothing yet for the marker to suppress.
-    pub fn Helper(&self) {}
+    /// Records the caller's PC, as Go does. Go's comment on the
+    /// hand-inlined Callers call is worth keeping — "repeating code
+    /// from callerName here to save walking a stack frame" — because it
+    /// explains why this does not simply call `callerName`: an extra
+    /// frame would shift the skip count.
+    ///
+    /// Deviation: the set is recorded but not yet *consumed*. Go reads
+    /// it from `callSite`, which needs `frameSkip`, which walks the
+    /// parent chain using `common`'s `runner`, `creator`, `level`,
+    /// `cleanupName` and `cleanupPc` — fields goish's `T` does not
+    /// carry yet. So marking a helper is faithful and currently has no
+    /// observable effect; it stops being a no-op when callSite lands.
+    pub fn Helper(&self) {
+        // Go: repeating code from callerName here to save walking a
+        // stack frame.
+        let mut pc: crate::goslice::slice<uintptr> = crate::make!([]uintptr, 1);
+        // Go: skip runtime.Callers + Helper
+        let n = crate::runtime::Callers(2, &mut pc);
+        if n == 0 {
+            panic!("testing: zero callers found");
+        }
+        let mut set = self.state.helperPCs.Lock();
+        if !set.Has(pc[0]) {
+            set.Set(pc[0], true);
+        }
+    }
+
+    // go: none — goish-only: read back what `Helper` recorded. Go's
+    // `callSite`/`frameSkip` reach `c.helperPCs` directly because they
+    // are in-package; the field stays private here, and this is how a
+    // future callSite — and the smoke test — observe it.
+    #[doc(hidden)]
+    pub fn __helper_pcs(&self) -> crate::goslice::slice<uintptr> {
+        return self.state.helperPCs.Lock().Keys();
+    }
 
     // go: sdk 1.25.5 testing/testing.go:1287-1314 common.Cleanup
     /// Go: "Cleanup registers a function to be called when the test (or

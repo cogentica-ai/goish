@@ -99,6 +99,9 @@ pub(crate) struct TState {
     /// a failure is visible on every ancestor immediately, not only
     /// once the subtest returns.
     pub(crate) parent: Option<Arc<TState>>,
+    /// Go: `common.helperPCs map[uintptr]struct{}` — "functions to be
+    /// skipped when writing file/line info". Populated by `Helper`.
+    pub(crate) helperPCs: Mutex<crate::map<crate::types::uintptr, bool>>,
 }
 
 impl TState {
@@ -111,6 +114,7 @@ impl TState {
             signal: crate::gochan::chan::new_buffered(1),
             cleanups: Mutex::new(Vec::new()),
             parent: None,
+            helperPCs: Mutex::new(crate::map::new()),
         };
     }
 }
