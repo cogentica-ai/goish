@@ -3,11 +3,11 @@
 // Reference: /share/go/src/testing/iotest/reader.go
 //
 // Slim deviations:
-//   * `TestReader` not ported. It does runtime downcasts to ReadSeeker
-//     and ReaderAt to exercise those interfaces; goish models those
-//     traits as concrete impl bounds rather than dyn-Trait so a
-//     downcast-style test helper is awkward without trait objects.
-//     Easy to add per-trait test helpers later if needed.
+//   * `TestReader` is ported except for its ReadSeeker and ReaderAt
+//     blocks, which begin with runtime downcasts goish cannot express
+//     on a `&mut dyn Reader`. Those behaviours are pinned directly
+//     instead — see examples/testing_fstest_smoke.rs for MapFS's Seek
+//     and ReadAt against goref output.
 //   * `OneByteReader` / `HalfReader` / `DataErrReader` / `TimeoutReader`
 //     / `ErrReader` are returned as concrete generic structs rather
 //     than `io.Reader`. Callers chain them positionally.
@@ -40,6 +40,7 @@ crate::var! {
 
 // ─── OneByteReader (reader.go:17) ────────────────────────────────────────────
 
+// go: sdk 1.25.5 testing/iotest/reader.go:17-17 OneByteReader
 /// `iotest.OneByteReader(r)` — Reader that reads at most one byte per Read.
 pub fn OneByteReader<R: io::Reader>(r: R) -> OneByteReaderImpl<R> {
     OneByteReaderImpl { r }
@@ -67,6 +68,7 @@ impl<R: io::Reader> io::Reader for OneByteReaderImpl<R> {
 
 // ─── HalfReader (reader.go:32) ───────────────────────────────────────────────
 
+// go: sdk 1.25.5 testing/iotest/reader.go:32-32 HalfReader
 /// `iotest.HalfReader(r)` — reads half the requested bytes per Read.
 pub fn HalfReader<R: io::Reader>(r: R) -> HalfReaderImpl<R> {
     HalfReaderImpl { r }
@@ -91,6 +93,7 @@ impl<R: io::Reader> io::Reader for HalfReaderImpl<R> {
 
 // ─── DataErrReader (reader.go:47) ────────────────────────────────────────────
 
+// go: sdk 1.25.5 testing/iotest/reader.go:47-47 DataErrReader
 /// `iotest.DataErrReader(r)` — wrap `r` so the final error is returned
 /// alongside the final data, instead of in the next call.
 pub fn DataErrReader<R: io::Reader>(r: R) -> DataErrReaderImpl<R> {
@@ -137,6 +140,7 @@ impl<R: io::Reader> io::Reader for DataErrReaderImpl<R> {
 
 // ─── TimeoutReader (reader.go:78) ────────────────────────────────────────────
 
+// go: sdk 1.25.5 testing/iotest/reader.go:78-78 TimeoutReader
 /// `iotest.TimeoutReader(r)` — return ErrTimeout on the second read with
 /// no data; subsequent reads succeed.
 pub fn TimeoutReader<R: io::Reader>(r: R) -> TimeoutReaderImpl<R> {
@@ -161,6 +165,7 @@ impl<R: io::Reader> io::Reader for TimeoutReaderImpl<R> {
 
 // ─── ErrReader (reader.go:94) ────────────────────────────────────────────────
 
+// go: sdk 1.25.5 testing/iotest/reader.go:94-96 ErrReader
 /// `iotest.ErrReader(err)` — Reader that returns `(0, err)` on every Read.
 pub fn ErrReader(err: error) -> ErrReaderImpl {
     ErrReaderImpl { err }
@@ -298,4 +303,150 @@ impl<W: io::Writer> io::Writer for truncateWriter<W> {
 /// silently after n bytes."
 pub fn TruncateWriter<W: io::Writer>(w: W, n: crate::types::int64) -> truncateWriter<W> {
     return truncateWriter { w: w, n: n };
+}
+
+// ─── TestReader ──────────────────────────────────────────────────────
+
+// go: sdk 1.25.5 testing/iotest/reader.go:106-110 smallByteReader
+/// Go: a Reader that forwards reads in deliberately awkward 1-, 2- and
+/// 3-byte chunks, cycling.
+///
+/// The point is that a caller must not assume `Read` fills the buffer
+/// it was given. Anything that treats a short read as EOF, or that
+/// indexes past `n`, breaks here and passes against a well-behaved
+/// reader.
+pub struct smallByteReader<R: io::Reader> {
+    r: R,
+    off: int,
+    n: int,
+}
+
+impl<R: io::Reader> io::Reader for smallByteReader<R> {
+    // go: sdk 1.25.5 testing/iotest/reader.go:112-127 smallByteReader.Read
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        // Go: if len(p) == 0 { return 0, nil }
+        if p.Len() == 0 {
+            return (0, errors::nil);
+        }
+        // Go: r.n = r.n%3 + 1 — cycles 1, 2, 3, 1, 2, 3, …
+        self.n = self.n % 3 + 1;
+        let mut n = self.n;
+        if n > p.Len() {
+            n = p.Len();
+        }
+        let mut sub = p.slice(0, n);
+        let (got, err) = self.r.Read(&mut sub);
+        // Copy back: goish's re-slice is a fresh handle rather than a
+        // view sharing backing storage, so the bytes have to be moved
+        // into the caller's buffer explicitly. Go's `p[0:n]` aliases.
+        for i in 0..got {
+            p[i] = sub[i];
+        }
+        let eof: error = crate::io::EOF.clone().into();
+        let err = if err != errors::nil && err != eof {
+            errors::New(crate::fmt::Sprintf!(
+                "Read(%d bytes at offset %d): %v",
+                got,
+                self.off,
+                err.Error()
+            ))
+        } else {
+            err
+        };
+        self.off += got;
+        return (got, err);
+    }
+}
+
+// go: sdk 1.25.5 testing/iotest/reader.go:136-268 TestReader
+/// Go: "TestReader tests that reading from r returns the expected file
+/// content. It does reads of different sizes, until EOF. If r implements
+/// io.ReaderAt or io.Seeker, TestReader also checks that those work.
+/// It checks that if TestReader reads the same content twice, it gets
+/// the same bytes both times."
+///
+/// **Partial port.** The `io.ReadSeeker` and `io.ReaderAt` blocks —
+/// roughly two thirds of Go's body — are absent. They begin
+/// `if r, ok := r.(io.ReadSeeker); ok`, and goish models Seeker and
+/// ReaderAt as concrete impl bounds rather than dyn-dispatched
+/// interfaces, so there is no runtime assertion to make on a
+/// `&mut dyn Reader`. Those behaviours are not untested: MapFS's Seek
+/// and ReadAt are pinned directly in
+/// examples/testing_fstest_smoke.rs, against goref output.
+///
+/// What remains is the part that applies to every Reader, and it is the
+/// part most implementations get wrong:
+///
+///   * `Read` with a zero-length buffer must return `(0, nil)` — NOT
+///     EOF. A reader that reports EOF for an empty buffer breaks every
+///     caller that probes before allocating.
+///   * Reading through `smallByteReader`'s 1/2/3-byte chunks must
+///     reassemble to exactly `content`, so a short read cannot be
+///     treated as the end.
+///   * At EOF, a further read returns `(0, io.EOF)`.
+pub fn TestReader<R: io::Reader>(mut r: R, content: slice<byte>) -> error {
+    // Go: if len(content) > 0 { n, err := r.Read(nil); ... }
+    if content.Len() > 0 {
+        let mut empty: slice<byte> = slice::new();
+        let (n, err) = r.Read(&mut empty);
+        if n != 0 || err != errors::nil {
+            return errors::New(crate::fmt::Sprintf!(
+                "Read(0) = %d, %v, want 0, nil",
+                n,
+                err.Error()
+            ));
+        }
+    }
+
+    let mut small = smallByteReader { r: r, off: 0, n: 0 };
+    let (data, err) = read_to_end(&mut small);
+    if err != errors::nil {
+        return err;
+    }
+    if string::from_bytes(data.as_ref()) != string::from_bytes(content.as_ref()) {
+        return errors::New(crate::fmt::Sprintf!(
+            "ReadAll(small amounts) = %q\n\twant %q",
+            string::from_bytes(data.as_ref()),
+            string::from_bytes(content.as_ref())
+        ));
+    }
+
+    // Go: n, err := r.Read(make([]byte, 10)); want 0, EOF
+    let mut buf: slice<byte> = crate::make!([]byte, 10);
+    let (n, err) = small.r.Read(&mut buf);
+    let eof: error = crate::io::EOF.clone().into();
+    if n != 0 || err != eof {
+        return errors::New(crate::fmt::Sprintf!(
+            "Read(10) at EOF = %v, %v, want 0, EOF",
+            n,
+            err.Error()
+        ));
+    }
+
+    return errors::nil;
+}
+
+// go: none — goish idiom: Go calls `io.ReadAll(&smallByteReader{r: r})`.
+// goish's io::ReadAll takes `&mut dyn Reader`, and threading the
+// generic reader through a trait object here would force an allocation
+// per call, so the loop is spelled out.
+fn read_to_end<R: io::Reader>(r: &mut R) -> (slice<byte>, error) {
+    let mut out: Vec<byte> = Vec::new();
+    let eof: error = crate::io::EOF.clone().into();
+    return 'read: loop {
+        let mut buf: slice<byte> = crate::make!([]byte, 64);
+        let (n, err) = r.Read(&mut buf);
+        for i in 0..n {
+            out.push(buf[i]);
+        }
+        if err == eof {
+            break 'read (slice::__from_vec(out), errors::nil);
+        }
+        if err != errors::nil {
+            break 'read (slice::__from_vec(out), err);
+        }
+        if n == 0 {
+            break 'read (slice::__from_vec(out), errors::nil);
+        }
+    };
 }
