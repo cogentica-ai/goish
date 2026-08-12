@@ -1,8 +1,8 @@
 // crypto/tls/handshake_client.rs — TLS 1.2 client handshake.
 //
-// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, pickTLSVersion, handshake, pickCipherSuite, doFullHandshake, establishKeys, serverResumedSession, processServerHello, readFinished, readSessionTicket, saveSessionTicket, sendFinished, verifyServerCertificate, getClientCertificate, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
-// goishlint:ignore GOISH019 clientHandshakeState, echClientContext — same.
-// goishlint:ignore GOISH021 clientHandshakeState, echClientContext, tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
+// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, handshake, doFullHandshake, establishKeys, serverResumedSession, processServerHello, readFinished, readSessionTicket, saveSessionTicket, sendFinished, verifyServerCertificate, getClientCertificate, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH019 echClientContext — same.
+// goishlint:ignore GOISH021 echClientContext, tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
 //
 // Implements the CLIENT side of a TLS 1.2 handshake for:
 //   * TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 (0xC02F)  ← preferred
@@ -2732,4 +2732,86 @@ pub(crate) fn certificateRequestInfoFromMsg(
 
     // Go: return cri
     return cri;
+}
+
+
+// Go: handshake_client.go:39-49
+//   type clientHandshakeState struct { c *Conn; ctx context.Context
+//       serverHello *serverHelloMsg; hello *clientHelloMsg
+//       suite *cipherSuite; finishedHash finishedHash
+//       masterSecret []byte; session *SessionState; ticket []byte }
+/// The TLS 1.0-1.2 client handshake state.
+///
+/// **Partial record.** Only the fields the ported methods read are
+/// present; the key schedule and session fields land with `handshake`.
+pub(crate) struct clientHandshakeState {
+    pub c: Conn,
+    pub serverHello: super::handshake_messages::serverHelloMsg,
+    pub hello: super::handshake_messages::clientHelloMsg,
+    pub suite: Option<&'static super::cipher_suites::cipherSuite>,
+}
+
+impl clientHandshakeState {
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:757-773 clientHandshakeState.pickCipherSuite
+    ///
+    /// Deviation: the two GODEBUG counter bumps (`tlsrsakex`, `tls3des`)
+    /// are absent — `internal/godebug` is not ported, and the branches
+    /// have no other effect.
+    pub(crate) fn pickCipherSuite(&mut self) -> crate::error {
+        // Go: if hs.suite = mutualCipherSuite(hs.hello.cipherSuites,
+        //         hs.serverHello.cipherSuite); hs.suite == nil {
+        //         hs.c.sendAlert(alertHandshakeFailure)
+        //         return errors.New("tls: server chose an unconfigured cipher suite") }
+        self.suite = super::cipher_suites::mutualCipherSuite(
+            crate::goslice::slice::__from_vec(self.hello.cipherSuites.clone()),
+            self.serverHello.cipherSuite,
+        );
+        if self.suite.is_none() {
+            self.c.sendAlert(super::alert::alertHandshakeFailure);
+            return crate::errors::New("tls: server chose an unconfigured cipher suite");
+        }
+
+        // Go: hs.c.cipherSuite = hs.suite.id
+        //     return nil
+        self.c.__setCipherSuite(self.suite.unwrap().id);
+        return crate::errors::nil;
+    }
+}
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:1042-1060 Conn.pickTLSVersion
+    /// Adopt the version the server selected, or refuse it.
+    pub(crate) fn pickTLSVersion(
+        &mut self,
+        serverHello: &super::handshake_messages::serverHelloMsg,
+    ) -> crate::error {
+        // Go: peerVersion := serverHello.vers
+        //     if serverHello.supportedVersion != 0 { peerVersion = serverHello.supportedVersion }
+        let mut peerVersion = serverHello.vers;
+        if serverHello.supportedVersion != 0 {
+            peerVersion = serverHello.supportedVersion;
+        }
+
+        // Go: vers, ok := c.config.mutualVersion(roleClient, []uint16{peerVersion})
+        //     if !ok {
+        //         c.sendAlert(alertProtocolVersion)
+        //         return fmt.Errorf("tls: server selected unsupported protocol version %x", peerVersion) }
+        let (vers, ok) = self.__config().mutualVersion(
+            super::common::roleClient,
+            crate::goslice::slice::__from_vec(alloc::vec![peerVersion]),
+        );
+        if !ok {
+            self.sendAlert(super::alert::alertProtocolVersion);
+            return crate::fmt::Errorf!(
+                "tls: server selected unsupported protocol version %x",
+                peerVersion
+            );
+        }
+
+        // Go: c.vers = vers; c.haveVers = true
+        //     c.in.version = vers; c.out.version = vers
+        //     return nil
+        self.__adoptVersion(vers);
+        return crate::errors::nil;
+    }
 }

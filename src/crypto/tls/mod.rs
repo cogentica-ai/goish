@@ -4777,6 +4777,8 @@ pub fn handshake_server_cipherSuiteOk(
     });
     let hs = handshake_server::serverHandshakeState {
         c,
+        clientHello: handshake_messages::clientHelloMsg::default(),
+        suite: None,
         ecdheOk: which != 1,
         ecSignOk: which != 2,
         rsaDecryptOk: which != 4,
@@ -4825,5 +4827,116 @@ pub fn handshake_server_clientHelloInfo(
         chi.SupportedProtos.Len(),
         chi.Extensions.Len(),
         chi.SupportedVersions.clone(),
+    );
+}
+
+// go: none — goish-only: pickTLSVersion and both pickCipherSuite
+// methods are unexported in Go, where the tests are in-package.
+// `which`: 0 = legacy 1.2 only, 1 = 1.2 with supported_versions 1.3,
+// 2 = legacy 1.0, 3 = supported_versions 0x0305. Reports
+// `(errText, c.vers, c.in.version)`.
+#[doc(hidden)]
+pub fn handshake_client_pickTLSVersion(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::types::int,
+    crate::types::int,
+) {
+    let mut sh = handshake_messages::serverHelloMsg::default();
+    sh.vers = match which {
+        2 => common::VersionTLS10,
+        _ => common::VersionTLS12,
+    };
+    if which == 1 {
+        sh.supportedVersion = common::VersionTLS13;
+    } else if which == 3 {
+        sh.supportedVersion = 0x0305;
+    }
+    let mut c = conn::Conn::default();
+    c.__setMemConn(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    )));
+    let err = c.pickTLSVersion(&sh);
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (
+        text,
+        c.__vers() as crate::types::int,
+        c.__inVersion() as crate::types::int,
+    );
+}
+
+// go: none — goish-only: see `handshake_client_pickTLSVersion`.
+// Reports `(errText, selected suite, the Conn's recorded suite)`.
+#[doc(hidden)]
+pub fn handshake_client_pickCipherSuite(
+    offered: crate::goslice::slice<crate::types::uint16>,
+    chosen: crate::types::uint16,
+) -> (
+    crate::gostring::string,
+    crate::types::int,
+    crate::types::int,
+) {
+    let mut c = conn::Conn::default();
+    c.__setMemConn(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    )));
+    c.__setVers(common::VersionTLS12);
+    let mut hello = handshake_messages::clientHelloMsg::default();
+    hello.cipherSuites = offered.__into_vec();
+    let mut serverHello = handshake_messages::serverHelloMsg::default();
+    serverHello.cipherSuite = chosen;
+    let mut hs = handshake_client::clientHandshakeState {
+        c,
+        serverHello,
+        hello,
+        suite: None,
+    };
+    let err = hs.pickCipherSuite();
+    if err != crate::errors::nil {
+        return (err.Error(), 0, 0);
+    }
+    return (
+        crate::gostring::string::from_static(""),
+        hs.suite.unwrap().id as crate::types::int,
+        hs.c.__cipherSuite() as crate::types::int,
+    );
+}
+
+// go: none — goish-only: see `handshake_client_pickTLSVersion`.
+// `noECDHE` clears the ECDHE capability. Reports `(errText, suite)`.
+#[doc(hidden)]
+pub fn handshake_server_pickCipherSuite(
+    offered: crate::goslice::slice<crate::types::uint16>,
+    noECDHE: bool,
+) -> (crate::gostring::string, crate::types::int) {
+    let mut c = conn::Conn::default();
+    c.__setMemConn(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    )));
+    c.__setVers(common::VersionTLS12);
+    let mut clientHello = handshake_messages::clientHelloMsg::default();
+    clientHello.vers = common::VersionTLS12;
+    clientHello.cipherSuites = offered.__into_vec();
+    let mut hs = handshake_server::serverHandshakeState {
+        c,
+        clientHello,
+        suite: None,
+        ecdheOk: !noECDHE,
+        ecSignOk: true,
+        rsaDecryptOk: true,
+        rsaSignOk: true,
+    };
+    let err = hs.pickCipherSuite();
+    if err != crate::errors::nil {
+        return (err.Error(), 0);
+    }
+    return (
+        crate::gostring::string::from_static(""),
+        hs.suite.unwrap().id as crate::types::int,
     );
 }

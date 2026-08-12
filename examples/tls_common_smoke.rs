@@ -2371,6 +2371,54 @@ fn main() {
     check_n("clientHelloInfo derives versions for an empty hello too",
             chiVers2.Len(), 3);
 
+    // ─── handshake_client.go / handshake_server.go: version and cipher
+    //     suite selection. From goref.sh.
+    let pv = |w: int| tls::handshake_client_pickTLSVersion(w);
+    let (pv0e, pv0v, pv0in) = pv(0);
+    eq("pickTLSVersion legacy 1.2 err", pv0e, "");
+    check_n("pickTLSVersion adopts 1.2", pv0v, 0x0303);
+    // Both half-connections take the version, not just the Conn.
+    check_n("pickTLSVersion sets the read half's version", pv0in, 0x0303);
+    let (pv1e, pv1v, _) = pv(1);
+    eq("pickTLSVersion supported_versions err", pv1e, "");
+    // supported_versions wins over legacy_version when present.
+    check_n("pickTLSVersion prefers supported_versions", pv1v, 0x0304);
+    let (pv2e, pv2v, _) = pv(2);
+    eq("pickTLSVersion rejects TLS 1.0", pv2e,
+       "tls: server selected unsupported protocol version 301");
+    check_n("pickTLSVersion leaves the version unset on refusal", pv2v, 0);
+    let (pv3e, _, _) = pv(3);
+    eq("pickTLSVersion rejects an unknown version", pv3e,
+       "tls: server selected unsupported protocol version 305");
+
+    let (cp0e, cp0s, cp0c) = tls::handshake_client_pickCipherSuite(
+        slice::__from_vec(alloc::vec![0xc02fu16, 0xc030]), 0xc030);
+    eq("client pickCipherSuite err", cp0e, "");
+    check_n("client pickCipherSuite selects the server's choice", cp0s, 0xc030);
+    check_n("client pickCipherSuite records it on the Conn", cp0c, 0xc030);
+    let (cp1e, _, _) = tls::handshake_client_pickCipherSuite(
+        slice::__from_vec(alloc::vec![0xc02fu16]), 0xc030);
+    // A server that picks a suite the client did not offer is refused.
+    eq("client pickCipherSuite rejects an unoffered suite", cp1e,
+       "tls: server chose an unconfigured cipher suite");
+
+    let (sp0e, sp0s) = tls::handshake_server_pickCipherSuite(
+        slice::__from_vec(alloc::vec![0xc02fu16, 0xc030]), false);
+    eq("server pickCipherSuite err", sp0e, "");
+    // Server preference order decides, so 0xc02f wins over 0xc030 even
+    // though the client listed both.
+    check_n("server pickCipherSuite follows server preference", sp0s, 0xc02f);
+    let (sp1e, _) = tls::handshake_server_pickCipherSuite(
+        slice::__from_vec(alloc::vec![0x0005u16]), false);
+    // RC4 is not in the default list, so there is no overlap. Go renders
+    // the offered list as a bracketed hex list, not a flat byte string.
+    eq("server pickCipherSuite with no overlap", sp1e,
+       "tls: no cipher suite supported by both client and server; client offered: [5]");
+    let (sp2e, _) = tls::handshake_server_pickCipherSuite(
+        slice::__from_vec(alloc::vec![0xc02fu16]), true);
+    eq("server pickCipherSuite with ECDHE unavailable", sp2e,
+       "tls: no cipher suite supported by both client and server; client offered: [c02f]");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

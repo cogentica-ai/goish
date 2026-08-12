@@ -1151,6 +1151,29 @@ impl Conn {
     #[doc(hidden)]
     pub fn __vers(&self) -> uint16 { return self.vers; }
 
+
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __setCipherSuite(&mut self, id: uint16) { self.cipherSuite = id; }
+    // go: none — goish-only: Go writes the four assignments inline in
+    // `pickTLSVersion`; the fields are unexported, so goish names them
+    // once here.
+    #[doc(hidden)]
+    pub fn __adoptVersion(&mut self, vers: uint16) {
+        self.vers = vers;
+        self.haveVers = true;
+        self.in_.version = vers;
+        self.out.version = vers;
+    }
+
+
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __inVersion(&self) -> uint16 { return self.in_.version; }
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __cipherSuite(&self) -> uint16 { return self.cipherSuite; }
+
     // go: sdk 1.25.5 crypto/tls/conn.go:99-101 Conn.LocalAddr
     /// Go: "LocalAddr returns the local network address."
     pub fn LocalAddr(&self) -> crate::net::TCPAddr {

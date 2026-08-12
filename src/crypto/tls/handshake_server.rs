@@ -1,4 +1,4 @@
-// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo
+// go: file crypto/tls/handshake_server.go decls: supportsECDHE, negotiateALPN, serverHandshakeState.cipherSuiteOk, clientHelloInfo, serverHandshakeState.pickCipherSuite
 //
 // crypto/tls — the server handshake state machine.
 //
@@ -7,7 +7,7 @@
 // handshake. What is here is the one function that does not: the ECDHE
 // support check, which `ClientHelloInfo.SupportsCertificate` also calls.
 //
-// goishlint:ignore GOISH018 serverHandshake, handshake, readClientHello, processClientHello, pickCipherSuite, checkForResumption, doResumeHandshake, doFullHandshake, establishKeys, readFinished, sendSessionTicket, sendFinished, processCertsFromClient — serverHandshakeState and Conn; see the banner. ROADMAP.md.
+// goishlint:ignore GOISH018 serverHandshake, handshake, readClientHello, processClientHello, checkForResumption, doResumeHandshake, doFullHandshake, establishKeys, readFinished, sendSessionTicket, sendFinished, processCertsFromClient — serverHandshakeState and Conn; see the banner. ROADMAP.md.
 
 #![allow(non_snake_case, dead_code)]
 
@@ -18,7 +18,7 @@ use super::Config;
 use crate::error;
 use crate::errors;
 use crate::goslice::slice;
-use crate::types::{uint16, uint8};
+use crate::types::{int, uint16, uint8};
 
 // go: sdk 1.25.5 crypto/tls/handshake_server.go:243-269 supportsECDHE
 /// Go: "supportsECDHE returns whether ECDHE key exchanges can be used
@@ -156,6 +156,8 @@ pub(crate) fn negotiateALPN(
 /// which drives the whole exchange.
 pub(crate) struct serverHandshakeState {
     pub c: super::conn::Conn,
+    pub clientHello: super::handshake_messages::clientHelloMsg,
+    pub suite: Option<&'static super::cipher_suites::cipherSuite>,
     pub ecdheOk: bool,
     pub ecSignOk: bool,
     pub rsaDecryptOk: bool,
@@ -249,4 +251,122 @@ pub(crate) fn clientHelloInfo(
     chi.Extensions = slice::__from_vec(clientHello.extensions.clone());
     chi.__setConfig(c.__config());
     return chi;
+}
+
+
+impl serverHandshakeState {
+    // go: sdk 1.25.5 crypto/tls/handshake_server.go:406-439 serverHandshakeState.pickCipherSuite
+    ///
+    /// Deviation: the two GODEBUG counter bumps (`tlsrsakex`, `tls3des`)
+    /// are absent — `internal/godebug` is not ported.
+    pub(crate) fn pickCipherSuite(&mut self) -> error {
+        // Go: preferenceList := c.config.cipherSuites(
+        //         isAESGCMPreferred(hs.clientHello.cipherSuites))
+        let offered = slice::__from_vec(self.clientHello.cipherSuites.clone());
+        let preferenceList = self
+            .c
+            .__config()
+            .cipherSuites(super::cipher_suites::isAESGCMPreferred(offered.clone()));
+
+        // Go: hs.suite = selectCipherSuite(preferenceList,
+        //         hs.clientHello.cipherSuites, hs.cipherSuiteOk)
+        //     if hs.suite == nil {
+        //         c.sendAlert(alertHandshakeFailure)
+        //         return fmt.Errorf("tls: no cipher suite supported by both client and
+        //             server; client offered: %x", hs.clientHello.cipherSuites) }
+        //
+        // Go passes the method value `hs.cipherSuiteOk`; Rust cannot
+        // borrow `self` into a closure that `self` also calls, so the
+        // four flags it reads are copied out first. Same predicate.
+        let (ecdheOk, ecSignOk, rsaDecryptOk, rsaSignOk) =
+            (self.ecdheOk, self.ecSignOk, self.rsaDecryptOk, self.rsaSignOk);
+        let vers = self.c.__vers();
+        self.suite = super::cipher_suites::selectCipherSuite(
+            preferenceList,
+            offered.clone(),
+            &|c: &'static super::cipher_suites::cipherSuite| {
+                if c.flags & super::cipher_suites::suiteECDHE != 0 {
+                    if !ecdheOk {
+                        return false;
+                    }
+                    if c.flags & super::cipher_suites::suiteECSign != 0 {
+                        if !ecSignOk {
+                            return false;
+                        }
+                    } else if !rsaSignOk {
+                        return false;
+                    }
+                } else if !rsaDecryptOk {
+                    return false;
+                }
+                if vers < super::common::VersionTLS12
+                    && c.flags & super::cipher_suites::suiteTLS12 != 0
+                {
+                    return false;
+                }
+                return true;
+            },
+        );
+        if self.suite.is_none() {
+            self.c.sendAlert(super::alert::alertHandshakeFailure);
+            return crate::fmt::Errorf!(
+                "tls: no cipher suite supported by both client and server; client offered: %s",
+                hexList(&offered)
+            );
+        }
+        // Go: c.cipherSuite = hs.suite.id
+        self.c.__setCipherSuite(self.suite.unwrap().id);
+
+        // Go: for _, id := range hs.clientHello.cipherSuites {
+        //         if id == TLS_FALLBACK_SCSV {
+        //             // The client is doing a fallback connection. See RFC 7507.
+        //             if hs.clientHello.vers < c.config.maxSupportedVersion(roleServer) {
+        //                 c.sendAlert(alertInappropriateFallback)
+        //                 return errors.New("tls: client using inappropriate protocol fallback") }
+        //             break } }
+        for (_, id) in crate::range!(offered) {
+            if *id == super::cipher_suites::TLS_FALLBACK_SCSV {
+                if self.clientHello.vers
+                    < self
+                        .c
+                        .__config()
+                        .maxSupportedVersion(super::common::roleServer)
+                {
+                    self.c.sendAlert(super::alert::alertInappropriateFallback);
+                    return errors::New("tls: client using inappropriate protocol fallback");
+                }
+                break;
+            }
+        }
+
+        // Go: return nil
+        return errors::nil;
+    }
+}
+
+// go: none — goish-only: Go's `%x` on a `[]uint16` renders a bracketed,
+// space-separated list of minimal-width hex values — `[c02f 5600]`, not
+// a flat byte string. goish's Sprintf has no verb for that shape, so the
+// list is built here.
+fn hexList(v: &slice<uint16>) -> crate::gostring::string {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    out.push(b'[');
+    for (i, x) in crate::range!(v.clone()) {
+        if i > 0 {
+            out.push(b' ');
+        }
+        let mut started = false;
+        let mut sh: int = 12;
+        while sh >= 0 {
+            let nib = ((*x >> sh) & 0xf) as usize;
+            if nib != 0 || started || sh == 0 {
+                out.push(HEX[nib]);
+                started = true;
+            }
+            sh -= 4;
+        }
+    }
+    out.push(b']');
+    return crate::gostring::string::from_bytes(&out);
 }
