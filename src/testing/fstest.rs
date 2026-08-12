@@ -722,7 +722,7 @@ impl MapFS {
 // goishlint:ignore GOISH019 fsTester — Go's `fsys fs.FS` field is held
 // by the driver (`testFS`), which is not ported; carrying a filesystem
 // this struct never reads would imply a walk that does not exist here.
-// goishlint:ignore GOISH020 checkOpen, checkBadPath, checkFileRead, checkDirList — Go
+// goishlint:ignore GOISH020 checkOpen, checkBadPath, checkFileRead, checkDirList, checkStat — Go
 // reads `t.fsys` off the receiver; goish's fsTester does not carry a
 // filesystem (see GOISH019 above), so these take it, or the opener
 // built from it, as a parameter instead. Same inputs, one hop
@@ -1052,5 +1052,116 @@ impl fsTester {
                 string::from_static("\n\t")
             )
         ));
+    }
+}
+
+impl fsTester {
+    // go: sdk 1.25.5 testing/fstest/testfs.go:390-468 fsTester.checkStat
+    /// Go: "checkStat checks that the file's stat matches the directory
+    /// entry."
+    ///
+    /// Four renderings of the same file have to agree, and the check
+    /// exists because they are produced by four different code paths:
+    /// the DirEntry from ReadDir, `entry.Info()`, `Open().Stat()`, and
+    /// the free `fs.Stat`. A filesystem that assembles any one of them
+    /// separately — a common shortcut — drifts here first.
+    ///
+    /// Symlinks are the exception threaded through the whole function:
+    /// `Open` dereferences a symlink, so `file.Stat()` legitimately
+    /// describes the *target* while the entry describes the link. Go
+    /// therefore compares only the entry-shaped fields in that case,
+    /// and this port keeps the same branch even though goish's MapFS
+    /// has no symlink support yet — the logic is what is being ported.
+    ///
+    /// Deviation: Go's two optional-interface blocks (`fs.StatFS` and
+    /// `fs.ReadLinkFS`) are absent. goish's io/fs declares neither
+    /// trait, so there is nothing to type-assert to; when they arrive,
+    /// so do those blocks.
+    pub fn checkStat(
+        &mut self,
+        fsys: &(dyn fs::FS + Send + Sync + 'static),
+        path: string,
+        entry: &(dyn DirEntry + Send + Sync),
+    ) {
+        let (file, err) = fs::FS::Open(fsys, path.clone());
+        if err != errors::nil {
+            self.errorf(crate::fmt::Sprintf!("%s: Open: %v", path.clone(), err.Error()));
+            return;
+        }
+        let (info, serr) = file.Stat();
+        file.Close();
+        if serr != errors::nil {
+            self.errorf(crate::fmt::Sprintf!("%s: Stat: %v", path.clone(), serr.Error()));
+            return;
+        }
+
+        let fentry = formatEntry(entry);
+        let fientry = formatInfoEntry(info.as_ref());
+        // Go: "Note: mismatch here is OK for symlink, because Open
+        // dereferences symlink."
+        let is_symlink = (entry.Type().0 & fs::ModeSymlink.0) != 0;
+        if fentry != fientry && !is_symlink {
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: mismatch:\n\tentry = %s\n\tfile.Stat() = %s",
+                path.clone(),
+                fentry.clone(),
+                fientry.clone()
+            ));
+        }
+
+        let (einfo, ierr) = entry.Info();
+        if ierr != errors::nil {
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: entry.Info: %v",
+                path.clone(),
+                ierr.Error()
+            ));
+            return;
+        }
+        let finfo = formatInfo(info.as_ref());
+        if is_symlink {
+            // Go: "For symlink, just check that entry.Info matches
+            // entry on common fields. Open dereferences symlink, so
+            // info itself may differ."
+            let feentry = formatInfoEntry(einfo.as_ref());
+            if fentry != feentry {
+                self.errorf(crate::fmt::Sprintf!(
+                    "%s: mismatch\n\tentry = %s\n\tentry.Info() = %s\n",
+                    path.clone(),
+                    fentry.clone(),
+                    feentry
+                ));
+            }
+        } else {
+            let feinfo = formatInfo(einfo.as_ref());
+            if feinfo != finfo {
+                self.errorf(crate::fmt::Sprintf!(
+                    "%s: mismatch:\n\tentry.Info() = %s\n\tfile.Stat() = %s\n",
+                    path.clone(),
+                    feinfo,
+                    finfo.clone()
+                ));
+            }
+        }
+
+        // Go: "Stat should be the same as Open+Stat, even for symlinks."
+        let (info2, s2err) = fs::Stat(fsys, path.clone());
+        if s2err != errors::nil {
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: fs.Stat: %v",
+                path.clone(),
+                s2err.Error()
+            ));
+            return;
+        }
+        let finfo2 = formatInfo(info2.as_ref());
+        if finfo2 != finfo {
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: fs.Stat(...) = %s\n\twant %s",
+                path.clone(),
+                finfo2,
+                finfo
+            ));
+        }
     }
 }
