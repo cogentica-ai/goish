@@ -1,6 +1,6 @@
 // crypto/tls/handshake_server_tls13.rs — TLS 1.3 server handshake.
 //
-// goishlint:ignore GOISH018 handshake, processClientHello, checkForResumption, pickCertificate, doHelloRetryRequest, sendServerParameters, sendServerCertificate, sendServerFinished, sendSessionTickets, sendSessionTicket, readClientCertificate, readClientFinished — serverHandshakeStateTLS13's Conn-driven half; the live server below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH018 handshake, processClientHello, checkForResumption, doHelloRetryRequest, sendServerParameters, sendServerCertificate, sendServerFinished, sendSessionTickets, sendSessionTicket, readClientCertificate, readClientFinished — serverHandshakeStateTLS13's Conn-driven half; the live server below the divider implements the same protocol by hand. See ROADMAP.md.
 // goishlint:ignore GOISH021 echServerContext, maxClientPSKIdentities — same.
 //
 // Port of Go 1.25.5 crypto/tls:
@@ -741,6 +741,8 @@ pub(crate) struct serverHandshakeStateTLS13 {
     pub clientHello: super::handshake_messages::clientHelloMsg,
     pub sentDummyCCS: bool,
     pub usingPSK: bool,
+    pub sigAlg: super::common::SignatureScheme,
+    pub cert: Option<super::common::Certificate>,
 }
 
 impl serverHandshakeStateTLS13 {
@@ -884,4 +886,68 @@ pub(crate) fn cloneHash(
         }
     }
     return Some(out);
+}
+
+
+impl serverHandshakeStateTLS13 {
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:502-533 serverHandshakeStateTLS13.pickCertificate
+    /// Choose the server certificate and the scheme it will sign with.
+    pub(crate) fn pickCertificate(&mut self) -> crate::error {
+        // Go: Only one of PSK and certificates are used at a time.
+        if self.usingPSK {
+            return crate::errors::nil;
+        }
+
+        // Go: signature_algorithms is required in TLS 1.3. See RFC 8446,
+        // Section 4.2.3.
+        // Go: if len(hs.clientHello.supportedSignatureAlgorithms) == 0 {
+        //         return c.sendAlert(alertMissingExtension) }
+        if self.clientHello.supportedSignatureAlgorithms.len() == 0 {
+            return self.c.sendAlert(super::alert::alertMissingExtension);
+        }
+
+        // Go: certificate, err := c.config.getCertificate(
+        //         clientHelloInfo(hs.ctx, c, hs.clientHello))
+        //     if err != nil {
+        //         if err == errNoCertificates { c.sendAlert(alertUnrecognizedName) }
+        //         else { c.sendAlert(alertInternalError) }
+        //         return err }
+        let chi = super::handshake_server::clientHelloInfo(&self.c, &self.clientHello);
+        let (certificate, err) = self.c.__config().getCertificate(&chi);
+        if err != crate::errors::nil {
+            if crate::errors::Is(err.clone(), super::common::errNoCertificates) {
+                self.c.sendAlert(super::alert::alertUnrecognizedName);
+            } else {
+                self.c.sendAlert(super::alert::alertInternalError);
+            }
+            return err;
+        }
+        // Go: hs.sigAlg, err = selectSignatureScheme(c.vers, certificate,
+        //         hs.clientHello.supportedSignatureAlgorithms)
+        //     if err != nil {
+        //         // getCertificate returned a certificate that is unsupported or
+        //         // incompatible with the client's signature algorithms.
+        //         c.sendAlert(alertHandshakeFailure)
+        //         return err }
+        let peerAlgs: alloc::vec::Vec<super::common::SignatureScheme> = self
+            .clientHello
+            .supportedSignatureAlgorithms
+            .iter()
+            .map(|v| super::common::SignatureScheme(*v))
+            .collect();
+        let (sigAlg, err) = super::auth::selectSignatureScheme(
+            self.c.__vers(),
+            &certificate,
+            crate::goslice::slice::__from_vec(peerAlgs),
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertHandshakeFailure);
+            return err;
+        }
+        self.sigAlg = sigAlg;
+        // Go: hs.cert = certificate
+        //     return nil
+        self.cert = Some(certificate);
+        return crate::errors::nil;
+    }
 }

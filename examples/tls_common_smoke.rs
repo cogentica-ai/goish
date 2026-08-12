@@ -2542,6 +2542,43 @@ fn main() {
     eq("processServerHello rejects an EMS mismatch on resumption", p9e,
        "tls: server resumed a session with a different EMS extension");
 
+    // ─── handshake_server_tls13.go: pickCertificate;
+    //     handshake_client.go: getClientCertificate. From goref.sh.
+    let pc = |w: int| tls::handshake_server_tls13_pickCertificate(w);
+    let (pc0e, pc0a, pc0c) = pc(0);
+    eq("pickCertificate err", pc0e, "");
+    eq("pickCertificate selects Ed25519", pc0a, "Ed25519");
+    check("pickCertificate stores the certificate", pc0c);
+    // RFC 8446 §4.2.3 makes signature_algorithms mandatory in TLS 1.3,
+    // so its absence is a missing_extension alert rather than a plain
+    // error — note the "local error: " prefix Go's OpError adds.
+    let (pc1e, _, _) = pc(1);
+    eq("pickCertificate requires signature_algorithms", pc1e, "tls: missing extension");
+    let (pc2e, _, pc2c) = pc(2);
+    eq("pickCertificate with no certificates configured", pc2e,
+       "tls: no certificates configured");
+    check("pickCertificate stores nothing on failure", !pc2c);
+    // PSK and certificates are mutually exclusive: resuming skips the
+    // certificate entirely rather than picking one and ignoring it.
+    let (pc3e, _, pc3c) = pc(3);
+    eq("pickCertificate is a no-op when using a PSK", pc3e, "");
+    check("pickCertificate stores nothing when using a PSK", !pc3c);
+    let (pc4e, _, _) = pc(4);
+    eq("pickCertificate rejects an unusable signature algorithm", pc4e,
+       "tls: peer doesn't support any of the certificate's signature algorithms");
+
+    let (gc0e, gc0d) = tls::handshake_client_getClientCertificate(0);
+    eq("getClientCertificate err", gc0e, "");
+    eq("getClientCertificate returns the matching chain", hexOf(gc0d), "01");
+    // No acceptable certificate is NOT an error — the client sends an
+    // empty Certificate message and lets the server decide.
+    let (gc1e, gc1d) = tls::handshake_client_getClientCertificate(1);
+    eq("getClientCertificate with no acceptable chain is not an error", gc1e, "");
+    check_n("getClientCertificate returns an empty chain", gc1d.Len(), 0);
+    let (gc2e, gc2d) = tls::handshake_client_getClientCertificate(2);
+    eq("getClientCertificate with no certificates is not an error", gc2e, "");
+    check_n("getClientCertificate returns nothing to send", gc2d.Len(), 0);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

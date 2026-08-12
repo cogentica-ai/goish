@@ -1,6 +1,6 @@
 // crypto/tls/handshake_client.rs — TLS 1.2 client handshake.
 //
-// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, handshake, doFullHandshake, readFinished, readSessionTicket, saveSessionTicket, sendFinished, verifyServerCertificate, getClientCertificate, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, handshake, doFullHandshake, readFinished, readSessionTicket, saveSessionTicket, sendFinished, verifyServerCertificate, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
 // goishlint:ignore GOISH019 echClientContext — same.
 // goishlint:ignore GOISH021 echClientContext, tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
 //
@@ -3068,5 +3068,34 @@ impl clientHandshakeState {
 
         // Go: return true, nil
         return (true, crate::errors::nil);
+    }
+}
+
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:1186-1200 Conn.getClientCertificate
+    /// The certificate to answer a CertificateRequest with, or an empty
+    /// one meaning "none".
+    ///
+    /// Deviation: Go consults `Config.GetClientCertificate` first;
+    /// goish's Config has no such callback field, so that arm is
+    /// unreachable and the search starts at `c.config.Certificates`.
+    pub(crate) fn getClientCertificate(
+        &self,
+        cri: &super::common::CertificateRequestInfo,
+    ) -> (super::common::Certificate, crate::error) {
+        // Go: for _, chain := range c.config.Certificates {
+        //         if err := cri.SupportsCertificate(&chain); err != nil { continue }
+        //         return &chain, nil }
+        for (_, chain) in crate::range!(self.__config().Certificates) {
+            if cri.SupportsCertificate(chain) != crate::errors::nil {
+                continue;
+            }
+            return (chain.clone(), crate::errors::nil);
+        }
+
+        // Go: No acceptable certificate found. Don't send a certificate.
+        // Go: return new(Certificate), nil
+        return (super::common::Certificate::default(), crate::errors::nil);
     }
 }

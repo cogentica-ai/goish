@@ -4654,6 +4654,8 @@ pub fn handshake_server_tls13_stateFlags() -> (bool, bool, bool, bool, bool, boo
             clientHello: hello,
             sentDummyCCS: false,
             usingPSK: psk,
+            sigAlg: common::SignatureScheme(0),
+            cert: None,
         };
     };
     let mut disabled = Config::default();
@@ -5256,4 +5258,97 @@ pub fn handshake_client_processServerHello(
         hs.c.__clientProtocol(),
         hs.c.__didResume(),
     );
+}
+
+// go: none — goish-only: pickCertificate and getClientCertificate read
+// unexported state. `which`: 0 = a usable Ed25519 certificate,
+// 1 = no signature_algorithms, 2 = no certificates configured,
+// 3 = usingPSK, 4 = a signature algorithm the certificate cannot use.
+// Reports `(errText, sigAlg, a certificate was chosen)`.
+#[doc(hidden)]
+pub fn handshake_server_tls13_pickCertificate(
+    which: crate::types::int,
+) -> (crate::gostring::string, crate::gostring::string, bool) {
+    let seed = crate::goslice::slice::__from_vec(alloc::vec![7u8; 32]);
+    let mut cert = common::Certificate::default();
+    cert.PrivateKey = alloc::sync::Arc::new(crate::crypto::ed25519::NewKeyFromSeed(seed));
+    cert.Certificate = crate::goslice::slice::__from_vec(alloc::vec![
+        crate::goslice::slice::__from_vec(alloc::vec![1u8])
+    ]);
+    let mut cfg = Config::default();
+    if which != 2 && which != 3 {
+        cfg.Certificates = crate::goslice::slice::__from_vec(alloc::vec![cert]);
+    }
+    let mut c = conn::Conn::default();
+    c.__setMemConn(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    )));
+    c.__setVers(common::VersionTLS13);
+    c.__setConfig(cfg);
+    let mut ch = handshake_messages::clientHelloMsg::default();
+    ch.supportedSignatureAlgorithms = match which {
+        1 => alloc::vec![],
+        4 => alloc::vec![common::PSSWithSHA256.0],
+        _ => alloc::vec![common::Ed25519.0, common::PSSWithSHA256.0],
+    };
+    let mut hs = handshake_server_tls13::serverHandshakeStateTLS13 {
+        c,
+        clientHello: ch,
+        sentDummyCCS: false,
+        usingPSK: which == 3,
+        sigAlg: common::SignatureScheme(0),
+        cert: None,
+    };
+    let err = hs.pickCertificate();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (text, hs.sigAlg.String(), hs.cert.is_some());
+}
+
+// go: none — goish-only: see `handshake_server_tls13_pickCertificate`.
+// `which`: 0 = a certificate the CertificateRequestInfo accepts,
+// 1 = one it does not, 2 = no certificates configured. Reports
+// `(errText, the chosen leaf DER)`.
+#[doc(hidden)]
+pub fn handshake_client_getClientCertificate(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let seed = crate::goslice::slice::__from_vec(alloc::vec![7u8; 32]);
+    let mut cert = common::Certificate::default();
+    cert.PrivateKey = alloc::sync::Arc::new(crate::crypto::ed25519::NewKeyFromSeed(seed));
+    cert.Certificate = crate::goslice::slice::__from_vec(alloc::vec![
+        crate::goslice::slice::__from_vec(alloc::vec![1u8])
+    ]);
+    let mut cfg = Config::default();
+    if which != 2 {
+        cfg.Certificates = crate::goslice::slice::__from_vec(alloc::vec![cert]);
+    }
+    let mut c = conn::Conn::default();
+    c.__setConfig(cfg);
+    c.__setVers(common::VersionTLS13);
+    let mut cri = common::CertificateRequestInfo::default();
+    cri.Version = common::VersionTLS13;
+    cri.SignatureSchemes = crate::goslice::slice::__from_vec(if which == 1 {
+        alloc::vec![common::PSSWithSHA256]
+    } else {
+        alloc::vec![common::Ed25519, common::PSSWithSHA256]
+    });
+    let (got, err) = c.getClientCertificate(&cri);
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let der = if got.Certificate.Len() > 0 {
+        got.Certificate[0].clone()
+    } else {
+        crate::goslice::slice::new()
+    };
+    return (text, der);
 }
