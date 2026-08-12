@@ -272,6 +272,29 @@ fn main() {
         "0ba3481482f3efeb8749fcb5212782c73fe538b631b8e560493faba22ee8ee3d0b44762c5937462f421c1630136863b2",
     );
 
+    // ─── auth.go — signature type/hash mapping and scheme selection.
+    //     All values from goref.sh.
+    let (st, h, err) = tls::auth_typeAndHashFromSignatureScheme(tls::PKCS1WithSHA256);
+    check_n("PKCS1WithSHA256 sigType", goish::int(st), 225);
+    check_n("PKCS1WithSHA256 hash", goish::int(h.0), 5);
+    check("PKCS1WithSHA256 no err", err == goish::nil);
+
+    let (st, h, _) = tls::auth_typeAndHashFromSignatureScheme(tls::PSSWithSHA384);
+    check_n("PSSWithSHA384 sigType", goish::int(st), 226);
+    check_n("PSSWithSHA384 hash", goish::int(h.0), 6);
+
+    let (st, h, _) = tls::auth_typeAndHashFromSignatureScheme(tls::ECDSAWithP521AndSHA512);
+    check_n("ECDSAWithP521 sigType", goish::int(st), 227);
+    check_n("ECDSAWithP521 hash", goish::int(h.0), 7);
+
+    // Ed25519 signs the message whole: hash == directSigning == 0.
+    let (st, h, _) = tls::auth_typeAndHashFromSignatureScheme(tls::Ed25519);
+    check_n("Ed25519 sigType", goish::int(st), 228);
+    check_n("Ed25519 hash is directSigning", goish::int(h.0), 0);
+
+    let (_, _, err) = tls::auth_typeAndHashFromSignatureScheme(tls::SignatureScheme(0x9999));
+    check("unknown scheme errors", err != goish::nil);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

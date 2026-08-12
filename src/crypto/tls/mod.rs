@@ -12,6 +12,33 @@
 #![allow(non_snake_case, non_upper_case_globals)]
 
 pub mod alert;
+pub mod auth;
+
+// go: none — goish-only: auth.go's functions are unexported in Go,
+// where tests are in-package. See the `defaults_*` shims below.
+#[doc(hidden)]
+pub fn auth_typeAndHashFromSignatureScheme(
+    s: common::SignatureScheme,
+) -> (crate::types::uint8, crate::crypto::Hash, crate::error) {
+    return auth::typeAndHashFromSignatureScheme(s);
+}
+
+// go: none — goish-only: see `auth_typeAndHashFromSignatureScheme`.
+#[doc(hidden)]
+pub fn auth_signatureSchemesForPublicKey(
+    version: crate::types::uint16,
+    pub_: &crate::goany::Any,
+) -> crate::goslice::slice<common::SignatureScheme> {
+    return auth::signatureSchemesForPublicKey(version, pub_);
+}
+
+// go: none — goish-only: see `auth_typeAndHashFromSignatureScheme`.
+#[doc(hidden)]
+pub fn auth_legacyTypeAndHashFromPublicKey(
+    pub_: &crate::goany::Any,
+) -> (crate::types::uint8, crate::crypto::Hash, crate::error) {
+    return auth::legacyTypeAndHashFromPublicKey(pub_);
+}
 pub mod cipher_suites;
 pub mod common;
 pub mod common_string;

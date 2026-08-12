@@ -18,7 +18,7 @@
 
 use crate::fmt;
 use crate::gostring::string;
-use crate::types::{int, uint16};
+use crate::types::{int, uint16, uint8};
 
 // Go: common.go:32-41
 //   const ( VersionTLS10 = 0x0301; … VersionSSL30 = 0x0300 )
@@ -110,6 +110,26 @@ pub(crate) fn requiresClientCert(c: ClientAuthType) -> bool {
         _ => false,
     };
 }
+
+// Go: common.go:200-211
+//   const ( signaturePKCS1v15 uint8 = iota + 225; signatureRSAPSS;
+//           signatureECDSA; signatureEd25519 )
+//   var directSigning crypto.Hash = 0
+//
+// "signatureAlgorithm values, ONLY for internal use. Nothing on the wire."
+/// RSASSA-PKCS1-v1_5.
+pub(crate) const signaturePKCS1v15: uint8 = 225;
+/// RSASSA-PSS.
+pub(crate) const signatureRSAPSS: uint8 = 226;
+/// ECDSA.
+pub(crate) const signatureECDSA: uint8 = 227;
+/// EdDSA (Ed25519).
+pub(crate) const signatureEd25519: uint8 = 228;
+
+/// `directSigning` is a standard `crypto.Hash` value that signals no
+/// pre-hashing: the message is signed whole. Go declares it as
+/// `var directSigning crypto.Hash = 0`.
+pub(crate) const directSigning: crate::crypto::Hash = crate::crypto::Hash(0);
 
 // Go: common.go:393
 //   type SignatureScheme uint16
