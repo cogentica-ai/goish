@@ -2379,7 +2379,7 @@ impl Conn {
         return errors::nil;
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:1070-1096 Conn.readHandshake
+    // go: sdk 1.25.5 crypto/tls/conn.go:1095-1122 Conn.readHandshake
     /// Go: read one complete handshake message off `c.hand`, refilling
     /// it from the record layer as needed, and unmarshal it.
     ///
@@ -2437,7 +2437,7 @@ impl Conn {
         return self.unmarshalHandshakeMessage(slice::__from_vec(taken), transcript);
     }
 
-    // go: sdk 1.25.5 crypto/tls/conn.go:1098-1163 Conn.unmarshalHandshakeMessage
+    // go: sdk 1.25.5 crypto/tls/conn.go:1124-1191 Conn.unmarshalHandshakeMessage
     /// Go: pick the concrete message type from the first byte — the
     /// choice depends on `c.vers` for the four types whose shape
     /// changed in TLS 1.3 — then unmarshal into it and, if a transcript

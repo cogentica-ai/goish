@@ -3069,6 +3069,55 @@ fn main() {
         maI += 1;
     }
 
+
+    // ── readServerCertificate / sendClientCertificate ───────────────
+    //
+    // Ground truth: scripts/goref.sh crypto/tls.
+    let certWant: [(&'static str, bool, bool, &'static str); 8] = [
+        // A PSK resumption reads no Certificate at all.
+        ("", false, false, ""),
+        // Each refusal also puts its alert on the wire: bad_certificate
+        // (42), decode_error (50), unexpected_message (10).
+        ("tls: refused by VerifyConnection", false, false, "1503030002022a"),
+        (
+            "tls: received empty certificates message",
+            false,
+            false,
+            "15030300020232",
+        ),
+        (
+            "tls: received unexpected handshake message of type *tls.finishedMsg when waiting for *tls.certificateMsgTLS13",
+            false,
+            false,
+            "1503030002020a",
+        ),
+        // A CertificateRequest is absorbed and kept, then the next
+        // message is read — which here is the empty Certificate.
+        (
+            "tls: received empty certificates message",
+            true,
+            true,
+            "15030300020232",
+        ),
+        // sendClientCertificate with no CertificateRequest is a no-op.
+        ("", false, false, ""),
+        // ECH rejected: an empty Certificate, no CertificateVerify.
+        ("", true, true, "16030300080b00000400000000"),
+        // No certificate configured: the same empty Certificate, and
+        // the CertificateVerify is skipped.
+        ("", true, true, "16030300080b00000400000000"),
+    ];
+    let mut certI: int = 0;
+    while certI < 8 {
+        let (wantErr, wantReq, wantOcsp, wantWire) = certWant[certI as usize];
+        let (e, req, ocsp, wire) = tls::handshake_client_tls13_certificate(certI);
+        eq("tls13 certificate error", e, wantErr);
+        check("tls13 certificate certReq captured", req == wantReq);
+        check("tls13 certificate certReq.ocspStapling", ocsp == wantOcsp);
+        eq("tls13 certificate wire", hexOf(wire), wantWire);
+        certI += 1;
+    }
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

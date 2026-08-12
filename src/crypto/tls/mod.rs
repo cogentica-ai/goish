@@ -6237,6 +6237,7 @@ fn __chs13(_unused: bool) -> handshake_client_tls13::clientHandshakeStateTLS13 {
         masterSecret: None,
         trafficSecret: crate::goslice::slice::new(),
         echContext: None,
+        certReq: None,
     };
 }
 
@@ -6316,6 +6317,7 @@ pub fn handshake_client_tls13_finished(
             masterSecret: Some(master),
             trafficSecret: slice::new(),
             echContext: None,
+            certReq: None,
         };
     };
     let newSink = || {
@@ -6499,6 +6501,7 @@ pub fn handshake_client_tls13_readServerParameters(
         masterSecret: None,
         trafficSecret: slice::new(),
         echContext,
+        certReq: None,
     };
     let err = hs.readServerParameters();
     let text = if err == crate::errors::nil {
@@ -6685,4 +6688,121 @@ pub fn handshake_messages_marshalAll(
         }
     };
     return b;
+}
+
+// go: none — goish-only: `clientHandshakeStateTLS13.readServerCertificate`
+// and `.sendClientCertificate` are unexported in Go, where the tests are
+// in-package. `which` selects the case; see the assertions. Reports
+// `(errText, hs.certReq was captured, its ocspStapling, the wire)`.
+#[doc(hidden)]
+pub fn handshake_client_tls13_certificate(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    bool,
+    bool,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    use crate::goslice::slice;
+    let rec = |b: slice<crate::types::byte>| {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec![
+            0x16u8,
+            0x03,
+            0x03,
+            crate::byte(b.Len() >> 8),
+            crate::byte(b.Len() & 0xff)
+        ];
+        v.extend_from_slice(&b);
+        return v;
+    };
+    let (emptyCert, _) = handshake_messages::certificateMsgTLS13::default().marshal();
+    let mut cr = handshake_messages::certificateRequestMsgTLS13::default();
+    cr.ocspStapling = true;
+    cr.supportedSignatureAlgorithms = slice::__from_vec(alloc::vec![common::PSSWithSHA256]);
+    let (crBytes, _) = cr.marshal();
+
+    let feed: alloc::vec::Vec<crate::types::byte> = match which {
+        2 => rec(emptyCert.clone()),
+        3 => {
+            let mut fin = handshake_messages::finishedMsg::default();
+            fin.verifyData = alloc::vec![1u8];
+            let (b, _) = fin.marshal();
+            rec(b)
+        }
+        4 => {
+            let mut v = rec(crBytes);
+            v.extend_from_slice(&rec(emptyCert.clone()));
+            v
+        }
+        _ => alloc::vec![],
+    };
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink.clone());
+    if !feed.is_empty() {
+        c.__setFeedConn(slice::__from_vec(feed));
+    }
+    c.__setHaveVers(true);
+    c.__setVers(common::VersionTLS13);
+    c.__setIsClient(true);
+    c.__setCipherSuite(cipher_suites::TLS_AES_128_GCM_SHA256);
+    if which == 1 {
+        let mut cfg = Config::default();
+        cfg.VerifyConnection = Some(alloc::sync::Arc::new(|_cs| {
+            return crate::errors::New("tls: refused by VerifyConnection");
+        }));
+        c.__setConfig(cfg);
+    }
+
+    let mut hs = handshake_client_tls13::clientHandshakeStateTLS13 {
+        c,
+        serverHello: handshake_messages::serverHelloMsg::default(),
+        hello: handshake_messages::clientHelloMsg::default(),
+        session: None,
+        usingPSK: which <= 1,
+        sentDummyCCS: false,
+        suite: cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256),
+        transcript: Some(handshake_messages::transcriptHasher(alloc::boxed::Box::new(
+            crate::crypto::sha256::New(),
+        ))),
+        masterSecret: None,
+        trafficSecret: slice::new(),
+        echContext: if which == 6 {
+            Some(handshake_client::echClientContext {
+                echRejected: true,
+                retryConfigs: slice::new(),
+            })
+        } else {
+            None
+        },
+        certReq: if which >= 6 {
+            let mut r = handshake_messages::certificateRequestMsgTLS13::default();
+            r.ocspStapling = true;
+            r.supportedSignatureAlgorithms =
+                slice::__from_vec(alloc::vec![common::PSSWithSHA256]);
+            Some(r)
+        } else {
+            None
+        },
+    };
+
+    let err = if which <= 4 {
+        hs.readServerCertificate()
+    } else {
+        hs.sendClientCertificate()
+    };
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (
+        text,
+        hs.certReq.is_some(),
+        hs.certReq.as_ref().map(|r| r.ocspStapling).unwrap_or(false),
+        sink.Lock().clone(),
+    );
 }
