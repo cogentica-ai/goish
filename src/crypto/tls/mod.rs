@@ -6560,7 +6560,7 @@ pub fn handshake_client_tls13_readServerParameters(
     let echContext = match which {
         9 => Some(handshake_client::echClientContext {
             echRejected: true,
-            retryConfigs: slice::new(),
+            ..Default::default()
         }),
         10 => Some(handshake_client::echClientContext::default()),
         _ => None,
@@ -6853,7 +6853,7 @@ pub fn handshake_client_tls13_certificate(
         echContext: if which == 6 {
             Some(handshake_client::echClientContext {
                 echRejected: true,
-                retryConfigs: slice::new(),
+                ..Default::default()
             })
         } else {
             None
@@ -7930,6 +7930,119 @@ pub fn handshake_server_tls13_readClientCertificate(
         return crate::gostring::string::from_static("");
     }
     return err.Error();
+}
+
+// go: none — goish-only: drives Conn.makeClientHello with a counting
+// Config.Rand (byte i = i). The ClientHello random and session ID are
+// deterministic; the key shares are NOT, because ecdh GenerateKey calls
+// randutil.MaybeReadByte, which consumes 0 or 1 byte nondeterministically
+// (verbatim with Go — the bytes are unreproducible even across Go runs).
+// So the X25519MLKEM768 share is reported by length and its last 32 bytes,
+// which the caller asserts equal the X25519 fallback share — the reuse
+// invariant Go documents (draft-ietf-tls-hybrid-design §3.2).
+// which: 0 skipverify, 1 basic, 2 alpn, 3 tls12only, 4 tls13only, 5 noname, 6 badalpn.
+#[doc(hidden)]
+pub fn handshake_client_makeClientHello(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string, // err
+    crate::types::uint16,    // vers
+    crate::goslice::slice<crate::types::byte>, // random
+    crate::goslice::slice<crate::types::byte>, // sessionId
+    crate::goslice::slice<crate::types::uint16>, // cipherSuites
+    crate::goslice::slice<crate::types::uint16>, // curves
+    crate::gostring::string, // sni
+    crate::types::int,       // ks0 len
+    crate::types::uint16,    // ks0 group
+    crate::goslice::slice<crate::types::byte>, // ks0 last 32 bytes
+    crate::goslice::slice<crate::types::byte>, // ks1 data (X25519 fallback)
+    crate::types::uint16,    // ksk curveID
+) {
+    use crate::goslice::slice;
+    struct countReader(crate::types::byte);
+    impl crate::io::Reader for countReader {
+        // go: none — goish-only: byte i = running counter.
+        fn Read(&mut self, p: &mut slice<crate::types::byte>) -> (crate::types::int, crate::error) {
+            let n = p.Len();
+            let mut i: usize = 0;
+            while i < p.len() {
+                p[i] = self.0;
+                self.0 = self.0.wrapping_add(1);
+                i += 1;
+            }
+            return (n, crate::errors::nil);
+        }
+    }
+    let mut cfg = Config::default();
+    match which {
+        0 => cfg.InsecureSkipVerify = true,
+        1 => cfg.ServerName = "example.com".into(),
+        2 => {
+            cfg.ServerName = "a.example".into();
+            cfg.NextProtos = slice::__from_vec(alloc::vec!["h2".into(), "http/1.1".into()]);
+        }
+        3 => {
+            cfg.ServerName = "b.example".into();
+            cfg.MaxVersion = common::VersionTLS12;
+        }
+        4 => {
+            cfg.ServerName = "c.example".into();
+            cfg.MinVersion = common::VersionTLS13;
+        }
+        6 => {
+            cfg.ServerName = "d.example".into();
+            cfg.NextProtos = slice::__from_vec(alloc::vec!["".into()]);
+        }
+        _ => {}
+    }
+    cfg.Rand = Some(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        alloc::boxed::Box::new(countReader(0)),
+    )));
+    let mut c = conn::Conn::default();
+    c.__setConfig(cfg);
+    let (hello, ks, _ech, err) = c.makeClientHello();
+    if err != crate::errors::nil {
+        return (
+            err.Error(), 0, slice::new(), slice::new(), slice::new(), slice::new(),
+            crate::gostring::string::from_static(""), 0, 0, slice::new(), slice::new(), 0,
+        );
+    }
+    let hello = hello.unwrap();
+    let curves: slice<crate::types::uint16> =
+        slice::__from_vec(hello.supportedCurves.clone());
+    let cs: slice<crate::types::uint16> =
+        slice::__from_vec(hello.cipherSuites.clone());
+    let (ks0len, ks0group, ks0tail) = if !hello.keyShares.is_empty() {
+        let d = &hello.keyShares[0].data;
+        let tail = if d.len() >= 32 {
+            slice::__from_vec(d[d.len() - 32..].to_vec())
+        } else {
+            slice::new()
+        };
+        (crate::int(d.len()), hello.keyShares[0].group, tail)
+    } else {
+        (0, 0, slice::new())
+    };
+    let ks1data = if hello.keyShares.len() > 1 {
+        slice::__from_vec(hello.keyShares[1].data.clone())
+    } else {
+        slice::new()
+    };
+    let kskCurve = ks.map(|k| k.curveID.0).unwrap_or(0);
+    return (
+        crate::gostring::string::from_static(""),
+        hello.vers,
+        slice::__from_vec(hello.random.clone()),
+        slice::__from_vec(hello.sessionId.clone()),
+        cs,
+        curves,
+        crate::gostring::string::from_bytes(hello.serverName.as_bytes()),
+        ks0len,
+        ks0group,
+        ks0tail,
+        ks1data,
+        kskCurve,
+    );
 }
 
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below

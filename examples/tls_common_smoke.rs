@@ -51,6 +51,18 @@ fn hexOf(b: slice<byte>) -> string {
     return string::from_bytes(&out);
 }
 
+fn u16sOf(v: slice<u16>) -> string {
+    let raw: &[u16] = &v;
+    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    for (i, x) in raw.iter().enumerate() {
+        if i != 0 {
+            out.push(b' ');
+        }
+        out.extend_from_slice(fmt::Sprintf!("%x", *x).as_bytes());
+    }
+    return string::from_bytes(&out);
+}
+
 fn seqBytes(n: usize, base: u8) -> slice<byte> {
     let mut v: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(n);
     let mut i = 0usize;
@@ -3722,6 +3734,93 @@ fn main() {
     eq("no client cert requested, no hook, succeeds", rcc(0), "");
     eq("VerifyConnection returning nil succeeds", rcc(1), "");
     eq("VerifyConnection returning an error propagates", rcc(2), "vc rejected");
+
+    // ── Conn.makeClientHello ────────────────────────────────────────
+    //
+    // Ground truth: goref with a counting Config.Rand (byte i = i). The
+    // random and session ID are byte-compared, the cipher-suite and curve
+    // lists per version, the X25519MLKEM768 share by length (1216 =
+    // 1184-byte ML-KEM encapsulation key + 32-byte X25519), and the
+    // reused X25519 fallback share byte-for-byte.
+    // NOTE on cipher-suite ORDER: goref's crypto/tls test harness forces
+    // hasAESGCMHardwareSupport = false (a documented goref gotcha), so Go's
+    // ref emits ChaCha-first ordering while goish's constant is true
+    // (AES-first). Order is therefore asserted as goish's own, and the
+    // Go-faithful invariants tested here are the version gating (which
+    // suites appear) and counts, which the constant does not affect.
+    let mch = |which: int| -> (string, int, string, string, string, string, string, int, int, string, string, int) {
+        let (e, v, r, sid, cs, cv, sni, k0l, k0g, k0tail, k1d, kc) =
+            tls::handshake_client_makeClientHello(which);
+        return (e, goish::int(v), hexOf(r), hexOf(sid), u16sOf(cs), u16sOf(cv),
+                sni, k0l, goish::int(k0g), hexOf(k0tail), hexOf(k1d), goish::int(kc));
+    };
+
+    // basic: full TLS 1.3-capable ClientHello.
+    let (mc1e, mc1v, mc1r, mc1sid, mc1cs, mc1cv, mc1sni, mc1k0l, mc1k0g, mc1k0t, mc1k1d, mc1kc) = mch(1);
+    eq("makeClientHello succeeds", mc1e, "");
+    check_n("the legacy version is capped at TLS 1.2", mc1v, 0x303);
+    eq(
+        "the ClientHello random is drawn from Rand",
+        mc1r,
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    );
+    eq(
+        "the session ID follows the random",
+        mc1sid,
+        "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    );
+    check_n(
+        "a TLS 1.3-capable hello offers 13 cipher suites",
+        goish::int(goish::strings::Fields(mc1cs.clone()).Len()),
+        13,
+    );
+    check(
+        "the suite list contains TLS_AES_128_GCM_SHA256",
+        goish::strings::Contains(mc1cs, string::from_static("1301")),
+    );
+    eq("the curves match Go (order fixed, not hardware-dependent)", mc1cv, "11ec 1d 17 18 19");
+    eq("the SNI is the server name", mc1sni, "example.com");
+    check_n("the X25519MLKEM768 share is 1216 bytes", mc1k0l, 1216);
+    check_n("the first key share is X25519MLKEM768", mc1k0g, 4588);
+    check(
+        "the X25519 ephemeral is reused as the fallback share (RFC hybrid §3.2)",
+        mc1k1d == mc1k0t && mc1k1d.Len() == 64,
+    );
+    check_n("keyShareKeys records the X25519MLKEM768 curve", mc1kc, 4588);
+
+    // tls12only: version cap removes TLS 1.3 suites, curves, and shares.
+    let (_, _, _, _, mc3cs, mc3cv, _, mc3k0l, _, _, _, mc3kc) = mch(3);
+    check_n(
+        "TLS 1.2-max drops the three TLS 1.3 cipher suites (13 -> 10)",
+        goish::int(goish::strings::Fields(mc3cs.clone()).Len()),
+        10,
+    );
+    check(
+        "TLS 1.2-max no longer offers a TLS 1.3 suite",
+        !goish::strings::Contains(mc3cs, string::from_static("1301")),
+    );
+    eq("TLS 1.2-max drops X25519MLKEM768 from curves", mc3cv, "1d 17 18 19");
+    check_n("TLS 1.2-max sends no key share", mc3k0l, 0);
+    check_n("TLS 1.2-max builds no keyShareKeys", mc3kc, 0);
+
+    // tls13only: cipher list reset to the three TLS 1.3 suites.
+    let (_, _, _, _, mc4cs, _, _, mc4k0l, _, _, _, _) = mch(4);
+    check_n(
+        "TLS 1.3-min keeps exactly the three TLS 1.3 suites",
+        goish::int(goish::strings::Fields(mc4cs).Len()),
+        3,
+    );
+    check_n("TLS 1.3-min still sends the hybrid share", mc4k0l, 1216);
+
+    // Error branches.
+    let (mc5e, _, _, _, _, _, _, _, _, _, _, _) = mch(5);
+    eq(
+        "no ServerName without InsecureSkipVerify is rejected",
+        mc5e,
+        "tls: either ServerName or InsecureSkipVerify must be specified in the tls.Config",
+    );
+    let (mc6e, _, _, _, _, _, _, _, _, _, _, _) = mch(6);
+    eq("an empty NextProtos value is rejected", mc6e, "tls: invalid NextProtos value");
 
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);

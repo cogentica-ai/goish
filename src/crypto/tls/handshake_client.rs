@@ -1,6 +1,6 @@
 // crypto/tls/handshake_client.rs — TLS 1.2 client handshake.
 //
-// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, handshake, doFullHandshake — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH018 clientHandshake, loadSession, handshake, doFullHandshake — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
 // goishlint:ignore GOISH019 echClientContext — same.
 // goishlint:ignore GOISH021 echClientContext, tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
 //
@@ -3529,11 +3529,19 @@ pub(crate) fn publicKeyTypeName(cert: &crate::crypto::x509::Certificate) -> crat
 //       echRejected bool; retryConfigs []byte }
 /// The client's Encrypted Client Hello state.
 ///
-/// **Partial record.** Only the two fields the ported methods read are
-/// present; the HPKE sender, the inner hello and its transcript land
-/// with `clientHandshake`, which is what builds them.
-#[derive(Clone, Default)]
+/// Deviation: `hpkeContext` and `innerTranscript` are not `Clone`
+/// (an HPKE sender and a live hash are single-use), so this record is
+/// not `Clone`; the methods that need it thread `&mut`.
+#[derive(Default)]
 pub(crate) struct echClientContext {
+    pub config: Option<super::ech::echConfig>,
+    pub hpkeContext: Option<crate::crypto::internal::hpke::Sender>,
+    pub encapsulatedKey: crate::goslice::slice<crate::types::byte>,
+    pub innerHello: Option<super::handshake_messages::clientHelloMsg>,
+    pub innerTranscript:
+        Option<alloc::boxed::Box<dyn crate::hash::Hash + Send + Sync>>,
+    pub kdfID: crate::types::uint16,
+    pub aeadID: crate::types::uint16,
     pub echRejected: bool,
     pub retryConfigs: crate::goslice::slice<crate::types::byte>,
 }
@@ -3571,4 +3579,419 @@ pub(crate) fn computeAndUpdatePSK(
     )]);
     // Go: return m.updateBinders(pskBinders)
     return m.updateBinders(pskBinders);
+}
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:44-238 Conn.makeClientHello
+    /// Go: build the initial ClientHello from the config — versions,
+    /// cipher suites, curves, signature algorithms, the TLS 1.3 key
+    /// shares (including the hybrid X25519MLKEM768), and, when a config
+    /// list is set, the Encrypted Client Hello outer state.
+    ///
+    /// Deviation: the `c.quic != nil` arm is absent — goish ships no
+    /// QUIC transport — so the session ID is always set and no transport
+    /// parameters are attached.
+    pub(crate) fn makeClientHello(
+        &mut self,
+    ) -> (
+        Option<super::handshake_messages::clientHelloMsg>,
+        Option<super::key_schedule::keySharePrivateKeys>,
+        Option<super::handshake_client::echClientContext>,
+        crate::error,
+    ) {
+        use crate::goslice::slice;
+        let config = self.config.clone();
+        // Go: if len(config.ServerName) == 0 && !config.InsecureSkipVerify {
+        //         return nil, nil, nil, errors.New("tls: either ServerName or InsecureSkipVerify must be specified in the tls.Config") }
+        if config.ServerName.Len() == 0 && !config.InsecureSkipVerify {
+            return (
+                None,
+                None,
+                None,
+                crate::errors::New(
+                    "tls: either ServerName or InsecureSkipVerify must be specified in the tls.Config",
+                ),
+            );
+        }
+
+        // Go: nextProtosLength := 0
+        //     for _, proto := range config.NextProtos {
+        //         if l := len(proto); l == 0 || l > 255 { return … "tls: invalid NextProtos value" }
+        //         else { nextProtosLength += 1 + l } }
+        //     if nextProtosLength > 0xffff { return … "tls: NextProtos values too large" }
+        let mut nextProtosLength: crate::types::int = 0;
+        for proto in config.NextProtos.iter() {
+            let l = proto.Len();
+            if l == 0 || l > 255 {
+                return (None, None, None, crate::errors::New("tls: invalid NextProtos value"));
+            }
+            nextProtosLength += 1 + l;
+        }
+        if nextProtosLength > 0xffff {
+            return (None, None, None, crate::errors::New("tls: NextProtos values too large"));
+        }
+
+        // Go: supportedVersions := config.supportedVersions(roleClient)
+        //     if len(supportedVersions) == 0 { return … "tls: no supported versions satisfy MinVersion and MaxVersion" }
+        let supportedVersions = config.supportedVersions(super::common::roleClient);
+        if supportedVersions.Len() == 0 {
+            return (
+                None,
+                None,
+                None,
+                crate::errors::New(
+                    "tls: no supported versions satisfy MinVersion and MaxVersion",
+                ),
+            );
+        }
+        // Go: maxVersion := supportedVersions[0]
+        //     minVersion := supportedVersions[len(supportedVersions)-1]
+        let maxVersion = supportedVersions[0];
+        let minVersion = supportedVersions[supportedVersions.Len() - 1];
+
+        // Go: hello := &clientHelloMsg{ … }
+        let mut hello = super::handshake_messages::clientHelloMsg::default();
+        hello.vers = maxVersion;
+        hello.compressionMethods = alloc::vec![super::common::compressionNone];
+        hello.random = alloc::vec![0u8; 32];
+        hello.extendedMasterSecret = true;
+        hello.ocspStapling = true;
+        hello.scts = true;
+        hello.serverName = core::str::from_utf8(
+            super::handshake_client::hostnameInSNI(config.ServerName.clone()).as_bytes(),
+        )
+        .map(|s| s.into())
+        .unwrap_or_default();
+        hello.supportedCurves = config
+            .curvePreferences(maxVersion)
+            .iter()
+            .map(|c| c.0)
+            .collect();
+        hello.supportedPoints = alloc::vec![super::common::pointFormatUncompressed];
+        hello.secureRenegotiationSupported = true;
+        hello.alpnProtocols = config
+            .NextProtos
+            .iter()
+            .map(|p| {
+                core::str::from_utf8(p.as_bytes())
+                    .map(|s| s.into())
+                    .unwrap_or_default()
+            })
+            .collect();
+        hello.supportedVersions = supportedVersions.iter().cloned().collect();
+
+        // Go: if hello.vers > VersionTLS12 { hello.vers = VersionTLS12 }
+        if hello.vers > super::common::VersionTLS12 {
+            hello.vers = super::common::VersionTLS12;
+        }
+
+        // Go: if c.handshakes > 0 { hello.secureRenegotiation = c.clientFinished[:] }
+        if self.handshakes > 0 {
+            hello.secureRenegotiation = self.clientFinished.to_vec();
+        }
+
+        // Go: hello.cipherSuites = config.cipherSuites(hasAESGCMHardwareSupport)
+        //     if maxVersion < VersionTLS12 {
+        //         hello.cipherSuites = slices.DeleteFunc(hello.cipherSuites, func(id uint16) bool {
+        //             return cipherSuiteByID(id).flags&suiteTLS12 != 0 }) }
+        let mut cipherSuites =
+            config.cipherSuites(super::cipher_suites::hasAESGCMHardwareSupport);
+        if maxVersion < super::common::VersionTLS12 {
+            cipherSuites = crate::slices::DeleteFunc(cipherSuites, |id: &crate::types::uint16| {
+                match super::cipher_suites::cipherSuiteByID(*id) {
+                    Some(cs) => cs.flags & super::cipher_suites::suiteTLS12 != 0,
+                    None => false,
+                }
+            });
+        }
+        hello.cipherSuites = cipherSuites.iter().cloned().collect();
+
+        // Go: _, err := io.ReadFull(config.rand(), hello.random)
+        //     if err != nil { return … "tls: short read from Rand: " + err.Error() }
+        {
+            let mut buf: slice<byte> = slice::__from_vec(hello.random.clone());
+            let mut r = config.rand();
+            let (_, err) = crate::io::ReadFull(&mut *r, &mut buf);
+            if err != crate::errors::nil {
+                return (
+                    None,
+                    None,
+                    None,
+                    crate::fmt::Errorf!("tls: short read from Rand: %s", err.Error()),
+                );
+            }
+            hello.random = buf.__into_vec();
+        }
+
+        // Go: (no QUIC) if c.quic == nil {
+        //         hello.sessionId = make([]byte, 32)
+        //         if _, err := io.ReadFull(config.rand(), hello.sessionId); err != nil {
+        //             return … "tls: short read from Rand: " + err.Error() } }
+        {
+            let mut buf: slice<byte> = slice::__from_vec(alloc::vec![0u8; 32]);
+            let mut r = config.rand();
+            let (_, err) = crate::io::ReadFull(&mut *r, &mut buf);
+            if err != crate::errors::nil {
+                return (
+                    None,
+                    None,
+                    None,
+                    crate::fmt::Errorf!("tls: short read from Rand: %s", err.Error()),
+                );
+            }
+            hello.sessionId = buf.__into_vec();
+        }
+
+        // Go: if maxVersion >= VersionTLS12 {
+        //         hello.supportedSignatureAlgorithms = supportedSignatureAlgorithms(minVersion)
+        //         hello.supportedSignatureAlgorithmsCert = supportedSignatureAlgorithmsCert() }
+        if maxVersion >= super::common::VersionTLS12 {
+            hello.supportedSignatureAlgorithms =
+                super::common::supportedSignatureAlgorithms(minVersion)
+                    .iter()
+                    .map(|s| s.0)
+                    .collect();
+            hello.supportedSignatureAlgorithmsCert =
+                super::common::supportedSignatureAlgorithmsCert()
+                    .iter()
+                    .map(|s| s.0)
+                    .collect();
+        }
+
+        // Go: var keyShareKeys *keySharePrivateKeys
+        //     if maxVersion >= VersionTLS13 { … }
+        let mut keyShareKeys: Option<super::key_schedule::keySharePrivateKeys> = None;
+        if maxVersion >= super::common::VersionTLS13 {
+            // Go: if minVersion >= VersionTLS13 { hello.cipherSuites = nil }
+            if minVersion >= super::common::VersionTLS13 {
+                hello.cipherSuites = alloc::vec::Vec::new();
+            }
+            // Go: if fips140tls.Required() { …FIPS… }
+            //     else if hasAESGCMHardwareSupport { …defaultCipherSuitesTLS13… }
+            //     else { …NoAES… }
+            if super::internal::fips140tls::Required() {
+                hello
+                    .cipherSuites
+                    .extend_from_slice(super::defaults_fips140::allowedCipherSuitesTLS13FIPS);
+            } else if super::cipher_suites::hasAESGCMHardwareSupport {
+                hello
+                    .cipherSuites
+                    .extend_from_slice(super::defaults::defaultCipherSuitesTLS13);
+            } else {
+                hello
+                    .cipherSuites
+                    .extend_from_slice(super::defaults::defaultCipherSuitesTLS13NoAES);
+            }
+
+            // Go: if len(hello.supportedCurves) == 0 { return … "tls: no supported elliptic curves for ECDHE" }
+            if hello.supportedCurves.is_empty() {
+                return (
+                    None,
+                    None,
+                    None,
+                    crate::errors::New("tls: no supported elliptic curves for ECDHE"),
+                );
+            }
+            // Go: curveID := hello.supportedCurves[0]
+            //     keyShareKeys = &keySharePrivateKeys{curveID: curveID}
+            let curveID = super::common::CurveID(hello.supportedCurves[0]);
+            let mut ksk = super::key_schedule::keySharePrivateKeys {
+                curveID,
+                ecdhe: None,
+                mlkem: None,
+            };
+            // Go: if curveID == X25519MLKEM768 { … } else { … }
+            if curveID == super::common::X25519MLKEM768 {
+                // Go: keyShareKeys.ecdhe, err = generateECDHEKey(config.rand(), X25519)
+                let (ecdhe, err) = {
+                    let mut r = config.rand();
+                    super::key_schedule::generateECDHEKey(&mut *r, super::common::X25519)
+                };
+                if err != crate::errors::nil {
+                    return (None, None, None, err);
+                }
+                ksk.ecdhe = ecdhe;
+                // Go: seed := make([]byte, mlkem.SeedSize)
+                //     if _, err := io.ReadFull(config.rand(), seed); err != nil { return … }
+                let mut seed: slice<byte> = slice::__from_vec(alloc::vec![
+                    0u8;
+                    crate::crypto::internal::fips140::mlkem::SeedSize
+                ]);
+                {
+                    let mut r = config.rand();
+                    let (_, err) = crate::io::ReadFull(&mut *r, &mut seed);
+                    if err != crate::errors::nil {
+                        return (None, None, None, err);
+                    }
+                }
+                // Go: keyShareKeys.mlkem, err = mlkem.NewDecapsulationKey768(seed)
+                let (mlkemKey, err) =
+                    crate::crypto::internal::fips140::mlkem::NewDecapsulationKey768(seed);
+                if err != crate::errors::nil {
+                    return (None, None, None, err);
+                }
+                let mlkemKey = *mlkemKey;
+                // Go: mlkemEncapsulationKey := keyShareKeys.mlkem.EncapsulationKey().Bytes()
+                //     x25519EphemeralKey := keyShareKeys.ecdhe.PublicKey().Bytes()
+                let mlkemEncapsulationKey = mlkemKey.EncapsulationKey().Bytes();
+                let x25519EphemeralKey =
+                    ksk.ecdhe.as_ref().unwrap().PublicKey().Bytes();
+                ksk.mlkem = Some(mlkemKey);
+                // Go: hello.keyShares = []keyShare{{group: X25519MLKEM768, data: append(mlkemEncapsulationKey, x25519EphemeralKey...)}}
+                let mut combined = mlkemEncapsulationKey.__into_vec();
+                {
+                    let raw: &[byte] = &x25519EphemeralKey;
+                    combined.extend_from_slice(raw);
+                }
+                hello.keyShares = alloc::vec![super::handshake_messages::keyShare {
+                    group: super::common::X25519MLKEM768.0,
+                    data: combined,
+                }];
+                // Go: if slices.Contains(hello.supportedCurves, X25519) {
+                //         hello.keyShares = append(hello.keyShares, keyShare{group: X25519, data: x25519EphemeralKey}) }
+                if hello.supportedCurves.contains(&super::common::X25519.0) {
+                    hello.keyShares.push(super::handshake_messages::keyShare {
+                        group: super::common::X25519.0,
+                        data: x25519EphemeralKey.__into_vec(),
+                    });
+                }
+            } else {
+                // Go: if _, ok := curveForCurveID(curveID); !ok { return … "tls: CurvePreferences includes unsupported curve" }
+                let (_, ok) = super::key_schedule::curveForCurveID(curveID);
+                if !ok {
+                    return (
+                        None,
+                        None,
+                        None,
+                        crate::errors::New(
+                            "tls: CurvePreferences includes unsupported curve",
+                        ),
+                    );
+                }
+                // Go: keyShareKeys.ecdhe, err = generateECDHEKey(config.rand(), curveID)
+                let (ecdhe, err) = {
+                    let mut r = config.rand();
+                    super::key_schedule::generateECDHEKey(&mut *r, curveID)
+                };
+                if err != crate::errors::nil {
+                    return (None, None, None, err);
+                }
+                ksk.ecdhe = ecdhe;
+                // Go: hello.keyShares = []keyShare{{group: curveID, data: keyShareKeys.ecdhe.PublicKey().Bytes()}}
+                hello.keyShares = alloc::vec![super::handshake_messages::keyShare {
+                    group: curveID.0,
+                    data: ksk.ecdhe.as_ref().unwrap().PublicKey().Bytes().__into_vec(),
+                }];
+            }
+            keyShareKeys = Some(ksk);
+        }
+
+        // Go: var ech *echClientContext
+        //     if c.config.EncryptedClientHelloConfigList != nil { … }
+        let mut ech: Option<super::handshake_client::echClientContext> = None;
+        if self.config.EncryptedClientHelloConfigList.Len() != 0 {
+            // Go: if c.config.MinVersion != 0 && c.config.MinVersion < VersionTLS13 { return … }
+            if self.config.MinVersion != 0
+                && self.config.MinVersion < super::common::VersionTLS13
+            {
+                return (
+                    None,
+                    None,
+                    None,
+                    crate::errors::New(
+                        "tls: MinVersion must be >= VersionTLS13 if EncryptedClientHelloConfigList is populated",
+                    ),
+                );
+            }
+            // Go: if c.config.MaxVersion != 0 && c.config.MaxVersion <= VersionTLS12 { return … }
+            if self.config.MaxVersion != 0
+                && self.config.MaxVersion <= super::common::VersionTLS12
+            {
+                return (
+                    None,
+                    None,
+                    None,
+                    crate::errors::New(
+                        "tls: MaxVersion must be >= VersionTLS13 if EncryptedClientHelloConfigList is populated",
+                    ),
+                );
+            }
+            // Go: echConfigs, err := parseECHConfigList(c.config.EncryptedClientHelloConfigList)
+            //     if err != nil { return … }
+            let (echConfigs, err) = super::ech::parseECHConfigList(
+                self.config.EncryptedClientHelloConfigList.clone(),
+            );
+            if err != crate::errors::nil {
+                return (None, None, None, err);
+            }
+            // Go: echConfig := pickECHConfig(echConfigs)
+            //     if echConfig == nil { return … "tls: EncryptedClientHelloConfigList contains no valid configs" }
+            let echConfig = super::ech::pickECHConfig(echConfigs);
+            let echConfig = match echConfig {
+                None => {
+                    return (
+                        None,
+                        None,
+                        None,
+                        crate::errors::New(
+                            "tls: EncryptedClientHelloConfigList contains no valid configs",
+                        ),
+                    )
+                }
+                Some(cfg) => cfg,
+            };
+            // Go: ech = &echClientContext{config: echConfig}
+            //     hello.encryptedClientHello = []byte{1}
+            //     hello.supportedPoints = nil; hello.ticketSupported = false
+            //     hello.secureRenegotiationSupported = false; hello.extendedMasterSecret = false
+            let mut echCtx = super::handshake_client::echClientContext::default();
+            hello.encryptedClientHello = alloc::vec![1u8];
+            hello.supportedPoints = alloc::vec::Vec::new();
+            hello.ticketSupported = false;
+            hello.secureRenegotiationSupported = false;
+            hello.extendedMasterSecret = false;
+            // Go: echPK, err := hpke.ParseHPKEPublicKey(ech.config.KemID, ech.config.PublicKey)
+            let (echPK, err) = crate::crypto::internal::hpke::ParseHPKEPublicKey(
+                echConfig.KemID,
+                &echConfig.PublicKey,
+            );
+            if err != crate::errors::nil {
+                return (None, None, None, err);
+            }
+            // Go: suite, err := pickECHCipherSuite(ech.config.SymmetricCipherSuite)
+            let (suite, err) =
+                super::ech::pickECHCipherSuite(echConfig.SymmetricCipherSuite.clone());
+            if err != crate::errors::nil {
+                return (None, None, None, err);
+            }
+            // Go: ech.kdfID, ech.aeadID = suite.KDFID, suite.AEADID
+            echCtx.kdfID = suite.KDFID;
+            echCtx.aeadID = suite.AEADID;
+            // Go: info := append([]byte("tls ech\x00"), ech.config.raw...)
+            let info = {
+                let mut v: alloc::vec::Vec<byte> = b"tls ech\x00".to_vec();
+                let raw: &[byte] = &echConfig.raw;
+                v.extend_from_slice(raw);
+                slice::__from_vec(v)
+            };
+            // Go: ech.encapsulatedKey, ech.hpkeContext, err = hpke.SetupSender(ech.config.KemID, suite.KDFID, suite.AEADID, echPK, info)
+            let (encapKey, hpkeCtx, err) = crate::crypto::internal::hpke::SetupSender(
+                echConfig.KemID,
+                suite.KDFID,
+                suite.AEADID,
+                &echPK,
+                &info,
+            );
+            if err != crate::errors::nil {
+                return (None, None, None, err);
+            }
+            echCtx.encapsulatedKey = encapKey;
+            echCtx.hpkeContext = hpkeCtx;
+            echCtx.config = Some(echConfig);
+            ech = Some(echCtx);
+        }
+
+        // Go: return hello, keyShareKeys, ech, nil
+        return (Some(hello), keyShareKeys, ech, crate::errors::nil);
+    }
 }
