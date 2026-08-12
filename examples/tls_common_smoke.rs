@@ -2089,6 +2089,51 @@ fn main() {
     eq("writeChangeCipherRecord wire", hexOf(aw3),
        "14030300010115030300020250");
 
+    // ─── conn.go: the record read path. Every message from goref.sh.
+    let rr = |w: int| tls::conn_readRecord(w);
+    let (rd0, hand0, _) = rr(0);
+    eq("readRecord handshake err", rd0, "");
+    eq("readRecord buffers the handshake body", hexOf(hand0), "010203");
+    // A first byte of 0x80 is an SSLv2 ClientHello, not a TLS record.
+    let (rd1, _, _) = rr(1);
+    eq("readRecord detects an SSLv2 handshake", rd1,
+       "tls: unsupported SSLv2 handshake received");
+    // Before a version is negotiated, only alert and handshake records
+    // are plausible, and a version >= 16.0 is not real.
+    let (rd2, _, _) = rr(2);
+    eq("readRecord rejects a non-handshake first record", rd2,
+       "tls: first record does not look like a TLS handshake");
+    let (rd3, _, _) = rr(3);
+    eq("readRecord rejects an absurd first version", rd3,
+       "tls: first record does not look like a TLS handshake");
+    let (rd4, _, _) = rr(4);
+    eq("readRecord rejects a version mismatch once negotiated", rd4,
+       "tls: received record with version 301 when expecting version 303");
+    let (rd5, _, _) = rr(5);
+    eq("readRecord rejects an oversized record", rd5,
+       "tls: oversized record received with length 65535");
+    // close_notify is reported as EOF, not as an alert.
+    let (rd6, _, _) = rr(6);
+    eq("readRecord maps close_notify to EOF", rd6, "EOF");
+    // Go wraps a remote alert in a net.OpError that prints
+    // "remote error: " first; goish has no OpError and stores the alert
+    // itself, so the prefix is absent and the alert text is identical.
+    let (rd7, _, _) = rr(7);
+    eq("readRecord surfaces a fatal alert", rd7, "tls: handshake failure");
+    // A warning alert is dropped and the read retried — here nothing
+    // follows, so the retry hits EOF with the counter at 1.
+    let (rd8, _, retry8) = rr(8);
+    eq("readRecord drops a warning alert and retries", rd8, "EOF");
+    check_n("readRecord counted the ignored record", retry8, 1);
+    let (rd9, _, _) = rr(9);
+    eq("readRecord rejects an unexpected change_cipher_spec", rd9,
+       "tls: received record with version 301 when expecting version 303");
+    let (rd11, _, _) = rr(11);
+    eq("readRecord rejects application data before the handshake", rd11,
+       "tls: received record with version 301 when expecting version 303");
+    let (rd12, _, _) = rr(12);
+    eq("readRecord on an empty stream", rd12, "EOF");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

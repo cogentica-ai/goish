@@ -1,4 +1,4 @@
-// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert
+// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert, Conn.readFromUntil, Conn.retryReadRecord, Conn.readRecord, Conn.readChangeCipherSpec, Conn.readRecordOrCCS
 //
 // crypto/tls — the record layer's cipher state.
 //
@@ -8,7 +8,7 @@
 // its `decrypt`/`encrypt`, `atLeastReader` and the free functions they
 // need — none of which touches a `Conn`.
 //
-// goishlint:ignore GOISH018 readRecord, readChangeCipherSpec, readRecordOrCCS, retryReadRecord, readFromUntil, writeHandshakeRecord, readHandshakeBytes, readHandshake, unmarshalHandshakeMessage, handleRenegotiation, handlePostHandshakeMessage, handleKeyUpdate, CloseWrite, closeNotify, HandshakeContext, handshakeContext, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
+// goishlint:ignore GOISH018 writeHandshakeRecord, readHandshakeBytes, readHandshake, unmarshalHandshakeMessage, handleRenegotiation, handlePostHandshakeMessage, handleKeyUpdate, CloseWrite, closeNotify, HandshakeContext, handshakeContext, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
 // goishlint:ignore GOISH019  — same.
 // goishlint:ignore GOISH021 errShutdown, errEarlyCloseWrite, maxUselessBytes, tlsunsafeekm, outBufPool — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write; outBufPool is a sync.Pool whose only purpose is to avoid one allocation per record, which goish does not model.
 //
@@ -429,7 +429,7 @@ impl errors::ErrorTrait for RecordHeaderError {
 /// that it doesn't cut short the last call to Read, and in that it
 /// considers an early EOF an error."
 pub(crate) struct atLeastReader<'a> {
-    pub R: &'a mut (dyn crate::io::Reader + Send + Sync + 'static),
+    pub R: &'a mut (dyn crate::io::Reader + 'a),
     pub N: crate::types::int64,
 }
 
@@ -1097,6 +1097,28 @@ impl Conn {
     #[doc(hidden)]
     pub fn __buffering(&self) -> bool { return self.buffering; }
 
+
+    // go: none — goish-only: an in-memory net::Conn that yields a fixed
+    // byte string, so the reference tests can drive the read path. Go's
+    // tests are in-package and build one inline.
+    #[doc(hidden)]
+    pub fn __setFeedConn(&mut self, data: slice<byte>) {
+        let raw: &[byte] = &data;
+        self.conn = Some(alloc::boxed::Box::new(feedConn {
+            r: raw.to_vec(),
+            at: 0,
+        }));
+    }
+    // go: none — goish-only: see `__setFeedConn`.
+    #[doc(hidden)]
+    pub fn __setHaveVers(&mut self, v: bool) { self.haveVers = v; }
+    // go: none — goish-only: see `__setFeedConn`.
+    #[doc(hidden)]
+    pub fn __hand(&self) -> slice<byte> { return slice::__from_vec(self.hand.clone()); }
+    // go: none — goish-only: see `__setFeedConn`.
+    #[doc(hidden)]
+    pub fn __retryCount(&self) -> int { return self.retryCount; }
+
     // go: sdk 1.25.5 crypto/tls/conn.go:99-101 Conn.LocalAddr
     /// Go: "LocalAddr returns the local network address."
     pub fn LocalAddr(&self) -> crate::net::TCPAddr {
@@ -1568,4 +1590,436 @@ impl crate::net::Conn for memConn {
     fn SetWriteDeadline(&self, _t: crate::time::Time) -> error {
         return errors::nil;
     }
+}
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/conn.go:772-784 Conn.readFromUntil
+    /// Go: "readFromUntil reads from r into c.rawInput until c.rawInput
+    /// contains at least n bytes or else returns an error."
+    ///
+    /// Deviation: Go grows `rawInput` by `needs + bytes.MinRead` and
+    /// lets `ReadFrom` make a best-effort over-read, so that
+    /// `(*Conn).Read` can "predict" closeNotify alerts. goish reads
+    /// exactly `needs` bytes through the same `atLeastReader`; the
+    /// prediction is an optimisation, not a protocol behaviour.
+    ///
+    /// goishlint:ignore GOISH020 readFromUntil — Go's `r io.Reader` parameter is always `c.conn`; goish reads it from the receiver, because `net::Conn` is not an `io::Reader` and the borrow cannot be split
+    pub(crate) fn readFromUntil(&mut self, n: int) -> error {
+        // Go: if c.rawInput.Len() >= n { return nil }
+        if crate::int(self.rawInput.len()) >= n {
+            return errors::nil;
+        }
+        // Go: needs := n - c.rawInput.Len()
+        let needs = n - crate::int(self.rawInput.len());
+        // Go: _, err := c.rawInput.ReadFrom(&atLeastReader{r, int64(needs)})
+        //     return err
+        let mut buf: slice<byte> = slice::__from_vec(alloc::vec![0u8; needs as usize]);
+        let conn = self.conn.as_mut().unwrap();
+        let mut adapter = connReader { c: &mut **conn };
+        let mut r = atLeastReader {
+            R: &mut adapter,
+            N: crate::int64(needs),
+        };
+        let (got, err) = crate::io::ReadFull(&mut r, &mut buf);
+        let raw: &[byte] = &buf;
+        self.rawInput.extend_from_slice(&raw[..got as usize]);
+        return err;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:642-649 Conn.retryReadRecord
+    /// Go: "retryReadRecord recurses into readRecordOrCCS to drop a
+    /// non-advancing record, like a warning alert, empty application_data,
+    /// or a change_cipher_spec in TLS 1.3."
+    pub(crate) fn retryReadRecord(&mut self, expectChangeCipherSpec: bool) -> error {
+        // Go: c.retryCount++
+        //     if c.retryCount > maxUselessRecords {
+        //         c.sendAlert(alertUnexpectedMessage)
+        //         return c.in.setErrorLocked(errors.New("tls: too many ignored records")) }
+        self.retryCount += 1;
+        if self.retryCount > super::common::maxUselessRecords {
+            self.sendAlert(alertUnexpectedMessage);
+            return self
+                .in_
+                .setErrorLocked(errors::New("tls: too many ignored records"));
+        }
+        // Go: return c.readRecordOrCCS(expectChangeCipherSpec)
+        return self.readRecordOrCCS(expectChangeCipherSpec);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:614-616 Conn.readRecord
+    /// Go: "readRecord reads the next TLS record from the connection and
+    /// updates the record layer state."
+    pub(crate) fn readRecord(&mut self) -> error {
+        // Go: return c.readRecordOrCCS(false)
+        return self.readRecordOrCCS(false);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:618-620 Conn.readChangeCipherSpec
+    pub(crate) fn readChangeCipherSpec(&mut self) -> error {
+        // Go: return c.readRecordOrCCS(true)
+        return self.readRecordOrCCS(true);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:651-820 Conn.readRecordOrCCS
+    /// Go: "readRecordOrCCS reads one or more TLS records from the
+    /// connection and updates the record layer state. Some invariants:
+    ///   * c.in must be locked
+    ///   * c.input must be empty
+    /// During the handshake one and only one of the following will happen:
+    ///   - c.hand grows
+    ///   - c.in.changeCipherSpec is called
+    ///   - an error is returned
+    /// After the handshake one and only one of the following will happen:
+    ///   - c.hand grows
+    ///   - c.input is set
+    ///   - an error is returned"
+    ///
+    /// Deviations: the two `c.quic != nil` branches are absent (goish
+    /// ships no QUIC transport); Go's `net.Error` temporary-error test
+    /// around `readFromUntil` is absent, because goish's `net` exposes no
+    /// `Error` interface — the error is always recorded, which is Go's
+    /// behaviour for every non-temporary error; and the remote alert is
+    /// stored directly rather than wrapped in a `*net.OpError{Op:
+    /// "remote error"}`.
+    pub(crate) fn readRecordOrCCS(&mut self, expectChangeCipherSpec: bool) -> error {
+        // Go: if c.in.err != nil { return c.in.err }
+        if self.in_.err != errors::nil {
+            return self.in_.err.clone();
+        }
+        // Go: handshakeComplete := c.isHandshakeComplete.Load()
+        let handshakeComplete = self.isHandshakeComplete;
+
+        // Go: This function modifies c.rawInput, which owns the c.input memory.
+        // Go: if c.input.Len() != 0 { return c.in.setErrorLocked(errors.New(
+        //         "tls: internal error: attempted to read record with pending application data")) }
+        //     c.input.Reset(nil)
+        if crate::int(self.input.len()) - self.inputOff != 0 {
+            return self.in_.setErrorLocked(errors::New(
+                "tls: internal error: attempted to read record with pending application data",
+            ));
+        }
+        self.input = Vec::new();
+        self.inputOff = 0;
+
+        // Go: Read header, payload.
+        // Go: if err := c.readFromUntil(c.conn, recordHeaderLen); err != nil { … }
+        let err = self.readFromUntil(recordHeaderLen);
+        if err != errors::nil {
+            // Go: RFC 8446, Section 6.1 suggests that EOF without an
+            // alertCloseNotify is an error, but popular web sites seem to
+            // do this, so we accept it if and only if at the record
+            // boundary.
+            let mut err = err;
+            if err == crate::io::ErrUnexpectedEOF && self.rawInput.len() == 0 {
+                err = crate::io::EOF.into();
+            }
+            self.in_.setErrorLocked(err.clone());
+            return err;
+        }
+        // Go: hdr := c.rawInput.Bytes()[:recordHeaderLen]
+        //     typ := recordType(hdr[0])
+        let hdr = self.rawInput[..recordHeaderLen as usize].to_vec();
+        let typ0 = recordType(hdr[0]);
+
+        // Go: No valid TLS record has a type of 0x80, however SSLv2
+        // handshakes start with a uint16 length where the MSB is set and
+        // the first record is always < 256 bytes long. Therefore typ ==
+        // 0x80 strongly suggests an SSLv2 client.
+        if !handshakeComplete && typ0 == recordType(0x80) {
+            self.sendAlert(super::alert::alertProtocolVersion);
+            let e = self.newRecordHeaderError(string::from_static(
+                "unsupported SSLv2 handshake received",
+            ));
+            return self.in_.setErrorLocked(crate::errors::Wrap(e));
+        }
+
+        // Go: vers := uint16(hdr[1])<<8 | uint16(hdr[2])
+        //     expectedVers := c.vers
+        //     if expectedVers == VersionTLS13 {
+        //         // All TLS 1.3 records are expected to have 0x0303 (1.2) after
+        //         // the initial hello (RFC 8446 Section 5.1).
+        //         expectedVers = VersionTLS12 }
+        //     n := int(hdr[3])<<8 | int(hdr[4])
+        let vers = (crate::uint16(hdr[1]) << 8) | crate::uint16(hdr[2]);
+        let mut expectedVers = self.vers;
+        if expectedVers == VersionTLS13 {
+            expectedVers = super::common::VersionTLS12;
+        }
+        let n = (crate::int(hdr[3]) << 8) | crate::int(hdr[4]);
+        // Go: if c.haveVers && vers != expectedVers {
+        //         c.sendAlert(alertProtocolVersion)
+        //         msg := fmt.Sprintf("received record with version %x when expecting version %x", …)
+        //         return c.in.setErrorLocked(c.newRecordHeaderError(nil, msg)) }
+        if self.haveVers && vers != expectedVers {
+            self.sendAlert(super::alert::alertProtocolVersion);
+            let msg = crate::fmt::Sprintf!(
+                "received record with version %x when expecting version %x",
+                vers,
+                expectedVers
+            );
+            let e = self.newRecordHeaderError(msg);
+            return self.in_.setErrorLocked(crate::errors::Wrap(e));
+        }
+        // Go: if !c.haveVers {
+        //         // First message, be extra suspicious: this might not be a TLS
+        //         // client. Bail out before reading a full 'body', if possible.
+        //         // The current max version is 3.3 so if the version is >= 16.0,
+        //         // it's probably not real.
+        //         if (typ != recordTypeAlert && typ != recordTypeHandshake) || vers >= 0x1000 {
+        //             return c.in.setErrorLocked(c.newRecordHeaderError(c.conn,
+        //                 "first record does not look like a TLS handshake")) } }
+        if !self.haveVers {
+            if (typ0 != super::common::recordTypeAlert
+                && typ0 != super::common::recordTypeHandshake)
+                || vers >= 0x1000
+            {
+                let e = self.newRecordHeaderError(string::from_static(
+                    "first record does not look like a TLS handshake",
+                ));
+                return self.in_.setErrorLocked(crate::errors::Wrap(e));
+            }
+        }
+        // Go: if c.vers == VersionTLS13 && n > maxCiphertextTLS13 || n > maxCiphertext {
+        //         c.sendAlert(alertRecordOverflow)
+        //         msg := fmt.Sprintf("oversized record received with length %d", n)
+        //         return c.in.setErrorLocked(c.newRecordHeaderError(nil, msg)) }
+        if (self.vers == VersionTLS13 && n > super::common::maxCiphertextTLS13)
+            || n > super::common::maxCiphertext
+        {
+            self.sendAlert(alertRecordOverflow);
+            let msg = crate::fmt::Sprintf!("oversized record received with length %d", n);
+            let e = self.newRecordHeaderError(msg);
+            return self.in_.setErrorLocked(crate::errors::Wrap(e));
+        }
+        // Go: if err := c.readFromUntil(c.conn, recordHeaderLen+n); err != nil { … }
+        let err = self.readFromUntil(recordHeaderLen + n);
+        if err != errors::nil {
+            self.in_.setErrorLocked(err.clone());
+            return err;
+        }
+
+        // Go: Process message.
+        // Go: record := c.rawInput.Next(recordHeaderLen + n)
+        //     data, typ, err := c.in.decrypt(record)
+        //     if err != nil { return c.in.setErrorLocked(c.sendAlert(err.(alert))) }
+        let take = (recordHeaderLen + n) as usize;
+        let mut record = slice::__from_vec(self.rawInput[..take].to_vec());
+        self.rawInput.drain(..take);
+        let (data, typ, alertErr) = self.in_.decrypt(&mut record);
+        if alertErr.is_some() {
+            let e = self.sendAlert(alertErr.unwrap());
+            return self.in_.setErrorLocked(e);
+        }
+        // Go: if len(data) > maxPlaintext {
+        //         return c.in.setErrorLocked(c.sendAlert(alertRecordOverflow)) }
+        if data.Len() > super::common::maxPlaintext {
+            let e = self.sendAlert(alertRecordOverflow);
+            return self.in_.setErrorLocked(e);
+        }
+
+        // Go: Application Data messages are always protected.
+        if matches!(self.in_.cipher, halfConnCipher::None)
+            && typ == super::common::recordTypeApplicationData
+        {
+            let e = self.sendAlert(alertUnexpectedMessage);
+            return self.in_.setErrorLocked(e);
+        }
+
+        // Go: if typ != recordTypeAlert && typ != recordTypeChangeCipherSpec && len(data) > 0 {
+        //         // This is a state-advancing message: reset the retry count.
+        //         c.retryCount = 0 }
+        if typ != super::common::recordTypeAlert
+            && typ != super::common::recordTypeChangeCipherSpec
+            && data.Len() > 0
+        {
+            self.retryCount = 0;
+        }
+
+        // Go: Handshake messages MUST NOT be interleaved with other record
+        // types in TLS 1.3.
+        if self.vers == VersionTLS13
+            && typ != super::common::recordTypeHandshake
+            && self.hand.len() > 0
+        {
+            let e = self.sendAlert(alertUnexpectedMessage);
+            return self.in_.setErrorLocked(e);
+        }
+
+        // Go: switch typ { … }
+        if typ == super::common::recordTypeAlert {
+            // Go: if len(data) != 2 { return c.in.setErrorLocked(c.sendAlert(alertUnexpectedMessage)) }
+            if data.Len() != 2 {
+                let e = self.sendAlert(alertUnexpectedMessage);
+                return self.in_.setErrorLocked(e);
+            }
+            // Go: if alert(data[1]) == alertCloseNotify {
+            //         return c.in.setErrorLocked(io.EOF) }
+            if alert(data[1]) == super::alert::alertCloseNotify {
+                return self.in_.setErrorLocked(crate::io::EOF.into());
+            }
+            if self.vers == VersionTLS13 {
+                // Go: TLS 1.3 removed warning-level alerts except for
+                // alertUserCanceled (RFC 8446, § 6.1). Since at least one
+                // major implementation misuses this alert, many TLS stacks
+                // now ignore it outright when seen in a TLS 1.3 handshake
+                // (e.g. BoringSSL, NSS, Rustls).
+                if alert(data[1]) == super::alert::alertUserCanceled {
+                    // Go: Like TLS 1.2 alertLevelWarning alerts, we drop the
+                    // record and retry.
+                    return self.retryReadRecord(expectChangeCipherSpec);
+                }
+                return self
+                    .in_
+                    .setErrorLocked(crate::errors::Wrap(alert(data[1])));
+            }
+            // Go: switch data[0] {
+            //     case alertLevelWarning: // Drop the record on the floor and retry.
+            //         return c.retryReadRecord(expectChangeCipherSpec)
+            //     case alertLevelError:
+            //         return c.in.setErrorLocked(&net.OpError{Op: "remote error", Err: alert(data[1])})
+            //     default: return c.in.setErrorLocked(c.sendAlert(alertUnexpectedMessage)) }
+            if crate::int(data[0]) == super::alert::alertLevelWarning {
+                return self.retryReadRecord(expectChangeCipherSpec);
+            }
+            if crate::int(data[0]) == super::alert::alertLevelError {
+                return self
+                    .in_
+                    .setErrorLocked(crate::errors::Wrap(alert(data[1])));
+            }
+            let e = self.sendAlert(alertUnexpectedMessage);
+            return self.in_.setErrorLocked(e);
+        }
+
+        if typ == super::common::recordTypeChangeCipherSpec {
+            // Go: if len(data) != 1 || data[0] != 1 {
+            //         return c.in.setErrorLocked(c.sendAlert(alertDecodeError)) }
+            if data.Len() != 1 || data[0] != 1 {
+                let e = self.sendAlert(super::alert::alertDecodeError);
+                return self.in_.setErrorLocked(e);
+            }
+            // Go: Handshake messages are not allowed to fragment across the CCS.
+            if self.hand.len() > 0 {
+                let e = self.sendAlert(alertUnexpectedMessage);
+                return self.in_.setErrorLocked(e);
+            }
+            // Go: In TLS 1.3, change_cipher_spec records are ignored until
+            // the Finished. See RFC 8446, Appendix D.4. Note that according
+            // to Section 5, a server can send a ChangeCipherSpec before its
+            // ServerHello, when c.vers is still unset. That's not useful
+            // though and suspicious if the server then selects a lower
+            // protocol version, so don't allow that.
+            if self.vers == VersionTLS13 {
+                return self.retryReadRecord(expectChangeCipherSpec);
+            }
+            if !expectChangeCipherSpec {
+                let e = self.sendAlert(alertUnexpectedMessage);
+                return self.in_.setErrorLocked(e);
+            }
+            let a = self.in_.changeCipherSpec();
+            if a.is_some() {
+                let e = self.sendAlert(a.unwrap());
+                return self.in_.setErrorLocked(e);
+            }
+            return errors::nil;
+        }
+
+        if typ == super::common::recordTypeApplicationData {
+            // Go: if !handshakeComplete || expectChangeCipherSpec {
+            //         return c.in.setErrorLocked(c.sendAlert(alertUnexpectedMessage)) }
+            if !handshakeComplete || expectChangeCipherSpec {
+                let e = self.sendAlert(alertUnexpectedMessage);
+                return self.in_.setErrorLocked(e);
+            }
+            // Go: Some OpenSSL servers send empty records in order to
+            // randomize the CBC IV. Ignore a limited number of empty records.
+            if data.Len() == 0 {
+                return self.retryReadRecord(expectChangeCipherSpec);
+            }
+            // Go: c.input.Reset(data)
+            let raw: &[byte] = &data;
+            self.input = raw.to_vec();
+            self.inputOff = 0;
+            return errors::nil;
+        }
+
+        if typ == super::common::recordTypeHandshake {
+            // Go: if len(data) == 0 || expectChangeCipherSpec {
+            //         return c.in.setErrorLocked(c.sendAlert(alertUnexpectedMessage)) }
+            //     c.hand.Write(data)
+            if data.Len() == 0 || expectChangeCipherSpec {
+                let e = self.sendAlert(alertUnexpectedMessage);
+                return self.in_.setErrorLocked(e);
+            }
+            let raw: &[byte] = &data;
+            self.hand.extend_from_slice(raw);
+            return errors::nil;
+        }
+
+        // Go: default: return c.in.setErrorLocked(c.sendAlert(alertUnexpectedMessage))
+        let e = self.sendAlert(alertUnexpectedMessage);
+        return self.in_.setErrorLocked(e);
+    }
+}
+
+
+// go: none — goish-only: Go's `readFromUntil` takes an `io.Reader` and
+// is handed `c.conn`, because `net.Conn` embeds `io.Reader`. goish's
+// `net::Conn` declares `Read` itself rather than inheriting it, so the
+// two traits are unrelated and the connection needs a one-method
+// adapter.
+struct connReader<'a> {
+    c: &'a mut (dyn crate::net::Conn + 'a),
+}
+
+impl<'a> crate::io::Reader for connReader<'a> {
+    // go: none — goish-only: see `connReader`.
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        return self.c.Read(p);
+    }
+}
+
+
+// go: none — goish-only: the in-memory net::Conn `__setFeedConn`
+// installs. Returns EOF once drained, as a socket at end of stream does.
+struct feedConn {
+    r: Vec<byte>,
+    at: usize,
+}
+
+impl crate::net::Conn for feedConn {
+    // go: none — goish-only: see `feedConn`.
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        if self.at >= self.r.len() {
+            return (0, crate::io::EOF.into());
+        }
+        let want = p.Len() as usize;
+        let n = core::cmp::min(want, self.r.len() - self.at);
+        let mut i = 0usize;
+        while i < n {
+            p[i] = self.r[self.at + i];
+            i += 1;
+        }
+        self.at += n;
+        return (crate::int(n), errors::nil);
+    }
+    // go: none — goish-only: see `feedConn`.
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        return (p.Len(), errors::nil);
+    }
+    // go: none — goish-only: see `feedConn`.
+    fn Close(&mut self) -> error { return errors::nil; }
+    // go: none — goish-only: see `feedConn`.
+    fn LocalAddr(&self) -> crate::net::TCPAddr {
+        return crate::net::TCPAddr { IP: [0, 0, 0, 0], Port: 0 };
+    }
+    // go: none — goish-only: see `feedConn`.
+    fn RemoteAddr(&self) -> crate::net::TCPAddr {
+        return crate::net::TCPAddr { IP: [0, 0, 0, 0], Port: 0 };
+    }
+    // go: none — goish-only: see `feedConn`.
+    fn SetDeadline(&self, _t: crate::time::Time) -> error { return errors::nil; }
+    // go: none — goish-only: see `feedConn`.
+    fn SetReadDeadline(&self, _t: crate::time::Time) -> error { return errors::nil; }
+    // go: none — goish-only: see `feedConn`.
+    fn SetWriteDeadline(&self, _t: crate::time::Time) -> error { return errors::nil; }
 }

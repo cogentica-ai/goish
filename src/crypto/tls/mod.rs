@@ -4366,3 +4366,52 @@ pub fn conn_sendAlert(
     };
     return (text, sink.Lock().clone());
 }
+
+// go: none — goish-only: Conn's read path is unexported in Go, where
+// the tests are in-package. Feeds one record from an in-memory
+// net::Conn and reports `(errText, c.hand)`. `which` selects the record;
+// see the assertions for what each is.
+#[doc(hidden)]
+pub fn conn_readRecord(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::int,
+) {
+    let feed: alloc::vec::Vec<crate::types::byte> = match which {
+        0 => alloc::vec![0x16u8, 0x03, 0x01, 0x00, 0x03, 1, 2, 3],
+        1 => alloc::vec![0x80u8, 0x03, 0x01, 0x00, 0x03, 1, 2, 3],
+        2 => alloc::vec![0x17u8, 0x03, 0x01, 0x00, 0x01, 1],
+        3 => alloc::vec![0x16u8, 0x10, 0x00, 0x00, 0x01, 1],
+        4 => alloc::vec![0x16u8, 0x03, 0x01, 0x00, 0x01, 1],
+        5 => alloc::vec![0x16u8, 0x03, 0x01, 0xff, 0xff],
+        6 => alloc::vec![0x15u8, 0x03, 0x01, 0x00, 0x02, 0x01, 0x00],
+        7 => alloc::vec![0x15u8, 0x03, 0x01, 0x00, 0x02, 0x02, 0x28],
+        8 => alloc::vec![0x15u8, 0x03, 0x01, 0x00, 0x02, 0x01, 0x2e],
+        9 | 10 => alloc::vec![0x14u8, 0x03, 0x01, 0x00, 0x01, 0x01],
+        11 => alloc::vec![0x17u8, 0x03, 0x01, 0x00, 0x01, 1],
+        _ => alloc::vec![],
+    };
+    let mut c = conn::Conn::default();
+    c.__setFeedConn(crate::goslice::slice::__from_vec(feed));
+    if which == 4 || (which >= 9 && which <= 11) {
+        c.__setHaveVers(true);
+        c.__setVers(common::VersionTLS12);
+    }
+    if which == 5 {
+        c.__setHaveVers(true);
+        c.__setVers(common::VersionTLS10);
+    }
+    let err = if which == 10 {
+        c.readChangeCipherSpec()
+    } else {
+        c.readRecord()
+    };
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (text, c.__hand(), c.__retryCount());
+}
