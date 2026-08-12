@@ -44,6 +44,7 @@ pub use cipher_suites::{CipherSuite, CipherSuiteName, CipherSuites, InsecureCiph
 pub mod common;
 pub mod common_string;
 pub mod defaults;
+pub mod ech;
 pub mod prf;
 pub mod tls;
 pub use tls::timeoutError;
@@ -1788,4 +1789,53 @@ pub fn msg_unmarshalCertificate(
         cert.OCSPStaple,
         cert.SignedCertificateTimestamps.Len(),
     );
+}
+
+// go: none — goish-only: ech.go's parser is unexported in Go, where the
+// tests are in-package.
+#[doc(hidden)]
+pub fn ech_parseConfig(
+    data: crate::goslice::slice<crate::types::byte>,
+) -> (
+    bool,
+    bool,
+    crate::types::int,
+    crate::types::uint16,
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::int,
+    crate::gostring::string,
+    crate::types::int,
+) {
+    let (skip, ec, err) = ech::parseECHConfig(data);
+    return (
+        skip,
+        err == crate::errors::nil,
+        crate::int(ec.ConfigID),
+        ec.KemID,
+        ec.PublicKey.clone(),
+        crate::int(ec.MaxNameLength),
+        crate::gostring::string::from_bytes(&ec.PublicName),
+        ec.SymmetricCipherSuite.Len(),
+    );
+}
+
+// go: none — goish-only: see `ech_parseConfig`.
+#[doc(hidden)]
+pub fn ech_parseConfigList(
+    data: crate::goslice::slice<crate::types::byte>,
+) -> (crate::types::int, bool) {
+    let (cfgs, err) = ech::parseECHConfigList(data);
+    return (cfgs.Len(), err == crate::errors::nil);
+}
+
+// go: none — goish-only: the error message for a truncated config.
+#[doc(hidden)]
+pub fn ech_parseConfigErr(
+    data: crate::goslice::slice<crate::types::byte>,
+) -> crate::gostring::string {
+    let (_, _, err) = ech::parseECHConfig(data);
+    if err == crate::errors::nil {
+        return crate::gostring::string::from_static("");
+    }
+    return err.Error();
 }

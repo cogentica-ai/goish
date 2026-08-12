@@ -719,6 +719,39 @@ fn main() {
     eq("leaf OCSP staple", hexOf(ocsp), "0102");
     check_n("no SCTs", nscts, 0);
 
+    // ─── ech.go — ECHConfig parsing. Bytes built by Go.
+    let echCfg = unhexOf("fe0d00172a00200002aabb000400010001400665782e636f6d0000");
+    let (skip, ok, id, kem, pk, maxname, name, nsuites) = tls::ech_parseConfig(echCfg.clone());
+    check("ECHConfig parses", ok);
+    check("ECHConfig not skipped", !skip);
+    check_n("ECHConfig config_id", id, 42);
+    check_n("ECHConfig kem_id", goish::int(kem), 0x0020);
+    eq("ECHConfig public_key", hexOf(pk), "aabb");
+    check_n("ECHConfig max_name_length", maxname, 64);
+    eq("ECHConfig public_name", name, "ex.com");
+    check_n("ECHConfig 1 cipher suite", nsuites, 1);
+
+    // An UNRECOGNISED version is skipped, not an error — this is what
+    // makes an ECHConfigList forward-compatible.
+    let unknown = unhexOf("123400172a00200002aabb000400010001400665782e636f6d0000");
+    let (skip2, ok2, _, _, _, _, _, _) = tls::ech_parseConfig(unknown);
+    check("unknown ECHConfig version is skipped", skip2);
+    check("unknown ECHConfig version is not an error", ok2);
+
+    // A list containing both keeps only the recognised one.
+    let (n, lok) = tls::ech_parseConfigList(unhexOf(
+        "0036fe0d00172a00200002aabb000400010001400665782e636f6d0000123400172a00200002aabb000400010001400665782e636f6d0000",
+    ));
+    check("ECHConfigList parses", lok);
+    check_n("ECHConfigList drops the unknown version", n, 1);
+
+    // The error names the field that failed.
+    eq(
+        "truncated ECHConfig names the field",
+        tls::ech_parseConfigErr(slice::__from_vec(alloc::vec![0x00u8])),
+        "tls: malformed ECHConfig, invalid version field",
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
