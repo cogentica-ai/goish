@@ -3934,6 +3934,242 @@ fn main() {
     let (ehk2e, _, _, _) = ehk(2);
     eq("an invalid server key share is rejected", ehk2e, "tls: invalid server key share");
 
+    // ── clientHandshakeStateTLS13.processHelloRetryRequest ──────────
+    //
+    // Ground truth: goref driving every branch with a scripted duplex
+    // conn feeding the second ServerHello. The retried hello's wire
+    // bytes, the double-hashed transcript, the cookie echo, the PSK
+    // binder refresh, and the ECH accept confirmation are all
+    // byte-compared. new_group and ech_accept draw fresh randomness
+    // (key generation / HPKE reseal), so those compare structure.
+    let phrr = |which: int| -> (
+        string, // err
+        string, // sink hex
+        int,    // sink len
+        string, // transcript sum hex
+        string, // cookie hex
+        bool,   // didHRR
+        string, // key shares
+        int,    // psk identities
+        u32,    // obfuscatedTicketAge
+        bool,   // echAccepted
+        string, // serverName
+        string, // inner transcript sum hex
+        int,    // outer ech extension len
+    ) {
+        let (e, sink, tsum, cookie, didHRR, ks, psks, age, ech, sni, isum, echLen) =
+            tls::handshake_client_tls13_processHelloRetryRequest(which);
+        let sinkLen = sink.Len();
+        return (
+            e,
+            hexOf(sink),
+            sinkLen,
+            hexOf(tsum),
+            hexOf(cookie),
+            didHRR,
+            ks,
+            psks,
+            age,
+            ech,
+            sni,
+            hexOf(isum),
+            echLen,
+        );
+    };
+
+    // v0 cookie_only: the full retry round trip.
+    let (e, sink, _, tsum, cookie, didHRR, ks, psks, _, ech, _, _, _) = phrr(0);
+    eq("HRR with a cookie completes the retry", e, "");
+    eq(
+        "the retried hello echoes the cookie on the wire, matching Go",
+        sink,
+        "16030300930100008f03030102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20205152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f700002130101000044000a00060004001d0017002b0003020304002c00050003c0c1c2003300260024001d0020303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f",
+    );
+    eq(
+        "the double-hashed transcript matches Go",
+        tsum,
+        "21fc3e475d1f107d28ccf3e460094671275ac689e46c27e2b532c5ae8b9afbd2",
+    );
+    eq("the cookie is stored on the hello", cookie, "c0c1c2");
+    check("didHRR is recorded", didHRR);
+    eq("the key share is left alone", ks, "g29:l32;");
+    check_n("no PSK identities appear", psks, 0);
+    check("ECH is not accepted", !ech);
+
+    // v1 unsolicited_ech.
+    let (e, sink, _, tsum, _, didHRR, _, _, _, _, _, _, _) = phrr(1);
+    eq(
+        "an unsolicited HRR ech extension is rejected",
+        e,
+        "tls: unexpected encrypted client hello extension in serverHello",
+    );
+    eq("the unsupported_extension alert matches Go", sink, "1503030002026e");
+    eq(
+        "the transcript still absorbed the HRR",
+        tsum,
+        "5f6cda23c6ab665234f213e6c92adb1d7927e7884129cf11f0dbf05d7faeb51a",
+    );
+    check("didHRR stays false on rejection", !didHRR);
+
+    // v2 unnecessary_hrr.
+    let (e, sink, _, tsum, _, _, _, _, _, _, _, _, _) = phrr(2);
+    eq(
+        "an HRR with no cookie and no group is rejected",
+        e,
+        "tls: server sent an unnecessary HelloRetryRequest message",
+    );
+    eq("the illegal_parameter alert matches Go", sink, "1503030002022f");
+    eq(
+        "the no-op HRR transcript matches Go",
+        tsum,
+        "431e8abd95b4766ec9d2218f02f52b5c18657b398ac2db7013efb7f8179989cf",
+    );
+
+    // v3 malformed_keyshare.
+    let (e, sink, _, tsum, cookie, _, _, _, _, _, _, _, _) = phrr(3);
+    eq(
+        "an HRR carrying key share data is rejected",
+        e,
+        "tls: received malformed key_share extension",
+    );
+    eq("the decode_error alert matches Go", sink, "15030300020232");
+    eq(
+        "the malformed-share transcript matches Go",
+        tsum,
+        "a8ce16edd32b0526ef0fb7632534abb5149a3265c5e20c9702f9c709fb4c1ad7",
+    );
+    eq(
+        "the cookie mutation is visible even on the error path, as in Go",
+        cookie,
+        "c0c1c2",
+    );
+
+    // v4 unsupported_group.
+    let (e, sink, _, tsum, _, _, _, _, _, _, _, _, _) = phrr(4);
+    eq(
+        "a group the client never offered is rejected",
+        e,
+        "tls: server selected unsupported group",
+    );
+    eq("the unsupported-group alert matches Go", sink, "1503030002022f");
+    eq(
+        "the unsupported-group transcript matches Go",
+        tsum,
+        "40d127f91d5003304fd134b87226880f83d35d1cbe15d829c51f913c8a61577e",
+    );
+
+    // v5 unnecessary_keyshare.
+    let (e, sink, _, tsum, _, _, _, _, _, _, _, _, _) = phrr(5);
+    eq(
+        "a group the client already sent a share for is rejected",
+        e,
+        "tls: server sent an unnecessary HelloRetryRequest key_share",
+    );
+    eq("the unnecessary-keyshare alert matches Go", sink, "1503030002022f");
+    eq(
+        "the unnecessary-keyshare transcript matches Go",
+        tsum,
+        "b4bfb1058916ef4d54c38d27f674b376c19c102d509f206d0c192ed8fdacd3d1",
+    );
+
+    // v6 new_group: fresh randomness in the P-256 share, so structure only.
+    let (e, _, sinkLen, _, _, didHRR, ks, _, _, _, _, _, _) = phrr(6);
+    eq("selecting a fresh group completes the retry", e, "");
+    check_n("the retried hello's record length matches Go", sinkLen, 176);
+    check("didHRR is recorded after a group change", didHRR);
+    eq("a fresh P-256 key share replaces the X25519 one", ks, "g23:l65;");
+
+    // v7 psk_mismatch: the session hash disagrees, binders are dropped.
+    let (e, sink, _, tsum, _, didHRR, _, psks, _, _, _, _, _) = phrr(7);
+    eq("a hash-incompatible PSK does not abort the retry", e, "");
+    eq(
+        "the retried hello drops the PSK identities on the wire, matching Go",
+        sink,
+        "16030300930100008f03030102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20205152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f700002130101000044000a00060004001d0017002b0003020304002c00050003c0c1c2003300260024001d0020303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f",
+    );
+    eq(
+        "the dropped-PSK transcript matches Go",
+        tsum,
+        "287df87f88b94b1ea8672a87019790788ad76d0d3e0d5f44f23312a98344163a",
+    );
+    check_n("the PSK identities are cleared", psks, 0);
+    check("didHRR is recorded after dropping the PSK", didHRR);
+
+    // v8 psk_match: the binder and obfuscated age are refreshed.
+    let (e, sink, _, tsum, _, _, _, psks, age, _, _, _, _) = phrr(8);
+    eq("a hash-compatible PSK is re-bound", e, "");
+    eq(
+        "the refreshed binder and ticket age match Go on the wire",
+        sink,
+        "16030300d2010000ce03030102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20205152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f700002130101000083000a00060004001d0017002b0003020304002c00050003c0c1c2003300260024001d0020303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f0029003b00160010aaabacadaeafb0b1b2b3b4b5b6b7b8b9000f42470021201a966601a304f97f15373147277f184a5e9847a7d6a153ad9494ca626b6d0a57",
+    );
+    eq(
+        "the re-bound PSK transcript matches Go",
+        tsum,
+        "8d28a74debd38991617f4620c53676b3aee0b4247000244b820222aa4e135305",
+    );
+    check_n("the PSK identity survives", psks, 1);
+    check("the obfuscated ticket age is recomputed", age == 1000007);
+
+    // v9 ech_mismatch: the confirmation fails, the outer hello proceeds.
+    let (e, sink, _, tsum, cookie, didHRR, _, _, _, ech, _, isum, _) = phrr(9);
+    eq("a failed ECH confirmation falls back to the outer hello", e, "");
+    eq(
+        "the outer hello is resent unchanged, matching Go",
+        sink,
+        "16030300aa010000a603030102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20205152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f70000213010100005b00000013001100000e7075626c69632e6578616d706c65000a00060004001d0017002b0003020304002c00050003c0c1c2003300260024001d0020303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f",
+    );
+    eq(
+        "the outer transcript matches Go",
+        tsum,
+        "06a3b0852722a878e6c6773f00ec325fa469b94ddebf7638902e0d51ffdfec49",
+    );
+    eq("the outer hello keeps the cookie", cookie, "c0c1c2");
+    check("ECH is not accepted on a mismatch", !ech);
+    check("didHRR is recorded after an ECH mismatch", didHRR);
+    eq(
+        "the inner transcript still tracks the HRR, matching Go",
+        isum,
+        "6f38980e5e173fba3e49ad43b313aff4b54723f2ace53a4d83c1298935112c68",
+    );
+
+    // v10 ech_malformed.
+    let (e, sink, _, tsum, _, _, _, _, _, _, _, isum, _) = phrr(10);
+    eq(
+        "a non-8-byte HRR ech extension is rejected",
+        e,
+        "tls: malformed encrypted client hello extension",
+    );
+    eq("the malformed-ech alert matches Go", sink, "15030300020232");
+    eq(
+        "the malformed-ech transcript matches Go",
+        tsum,
+        "01eb17185f1d0bb0497d3132e28056ca44fc390272124a992967a14f26cb3e6c",
+    );
+    eq(
+        "the inner transcript state at the error matches Go",
+        isum,
+        "2411c083ccce21b281e00ae053aeb8a01335eda89682a7eaac352bacb079987a",
+    );
+
+    // v11 ech_accept: the confirmation matches, the inner hello takes
+    // over; the reseal draws fresh HPKE randomness, so structure only
+    // for the outer bytes.
+    let (e, _, sinkLen, _, cookie, didHRR, ks, _, _, ech, sni, isum, echLen) = phrr(11);
+    eq("a matching ECH confirmation is accepted", e, "");
+    check_n("the resealed outer record length matches Go", sinkLen, 306);
+    eq("the cookie goes to the inner hello, not the outer", cookie, "");
+    check("didHRR is recorded after an ECH accept", didHRR);
+    eq("the outer key shares are synced from the inner", ks, "g29:l32;");
+    check("ECH is accepted", ech);
+    eq("the true server name is restored", sni, "secret.example");
+    eq(
+        "the inner transcript absorbs the retried inner hello, matching Go",
+        isum,
+        "9e93596dfbb71b10ca2f26e20a5dce8838eeb8acf394b54bf0dde82876961114",
+    );
+    check_n("the outer hello carries a fresh ECH extension", echLen, 136);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

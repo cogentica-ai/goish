@@ -44,10 +44,6 @@ pub fn Extract(
     if err != crate::nil {
         return (slice::__from_vec(Vec::new()), err);
     }
-    let err = checkFIPS140Only(h.clone(), &secret);
-    if err != crate::nil {
-        return (slice::__from_vec(Vec::new()), err);
-    }
     // Go: return hkdf.Extract(h, secret, salt), nil
     return (fips::Extract(h, secret, salt), nil);
 }

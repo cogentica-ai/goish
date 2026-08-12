@@ -8400,6 +8400,304 @@ pub fn handshake_client_tls13_establishHandshakeKeys(
     );
 }
 
+// go: none — goish-only: drives clientHandshakeStateTLS13.processHelloRetryRequest
+// through every branch with a scripted duplex conn feeding the second
+// ServerHello: the five rejection paths, the cookie echo, the new-group
+// key-share regeneration, the PSK binder refresh (matching and
+// mismatching hash), and the three ECH paths including a hand-built
+// matching "hrr ech accept confirmation".
+// which: 0 cookie_only, 1 unsolicited_ech, 2 unnecessary_hrr,
+// 3 malformed_keyshare, 4 unsupported_group, 5 unnecessary_keyshare,
+// 6 new_group, 7 psk_mismatch, 8 psk_match, 9 ech_mismatch,
+// 10 ech_malformed, 11 ech_accept.
+#[doc(hidden)]
+pub fn handshake_client_tls13_processHelloRetryRequest(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,                   // err
+    crate::goslice::slice<crate::types::byte>, // sink (client writes)
+    crate::goslice::slice<crate::types::byte>, // transcript sum
+    crate::goslice::slice<crate::types::byte>, // hs.hello.cookie
+    bool,                                      // c.didHRR
+    crate::gostring::string,                   // key shares "g<id>:l<len>;"
+    crate::types::int,                         // len(hs.hello.pskIdentities)
+    crate::types::uint32,                      // obfuscatedTicketAge
+    bool,                                      // c.echAccepted
+    crate::gostring::string,                   // c.serverName
+    crate::goslice::slice<crate::types::byte>, // inner transcript sum
+    crate::types::int,                         // len(hs.hello.encryptedClientHello)
+) {
+    use crate::goslice::slice;
+    let fill = |base: crate::types::byte, n: usize| {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: usize = 0;
+        while i < n {
+            v.push(base.wrapping_add(crate::byte(i)));
+            i += 1;
+        }
+        return v;
+    };
+
+    let mkHello = || {
+        let mut ch = handshake_messages::clientHelloMsg::default();
+        ch.vers = common::VersionTLS12;
+        ch.random = fill(0x01, 32);
+        ch.sessionId = fill(0x51, 32);
+        ch.cipherSuites = alloc::vec![cipher_suites::TLS_AES_128_GCM_SHA256];
+        ch.compressionMethods = alloc::vec![0u8];
+        ch.supportedVersions = alloc::vec![common::VersionTLS13];
+        ch.supportedCurves = alloc::vec![common::X25519.0, common::CurveP256.0];
+        ch.keyShares = alloc::vec![handshake_messages::keyShare {
+            group: common::X25519.0,
+            data: fill(0x30, 32),
+        }];
+        return ch;
+    };
+
+    let mkHRR = || {
+        let mut sh = handshake_messages::serverHelloMsg::default();
+        sh.vers = common::VersionTLS12;
+        sh.random = common::helloRetryRequestRandom.to_vec();
+        sh.sessionId = fill(0x51, 32);
+        sh.cipherSuite = cipher_suites::TLS_AES_128_GCM_SHA256;
+        sh.compressionMethod = 0;
+        sh.supportedVersion = common::VersionTLS13;
+        return sh;
+    };
+
+    // The second ServerHello the client reads after retrying.
+    let mut sh2 = mkHRR();
+    sh2.random = fill(0xB0, 32);
+    sh2.serverShare = handshake_messages::keyShare {
+        group: common::X25519.0,
+        data: fill(0x70, 32),
+    };
+    let (sh2Bytes, _) = sh2.marshal();
+    let mut rec: alloc::vec::Vec<crate::types::byte> =
+        alloc::vec![22, 3, 3, crate::byte(sh2Bytes.Len() >> 8), crate::byte(sh2Bytes.Len())];
+    {
+        let raw: &[crate::types::byte] = &sh2Bytes;
+        rec.extend_from_slice(raw);
+    }
+
+    let (echPriv, _) =
+        crate::crypto::ecdh::X25519().NewPrivateKey(&slice::__from_vec(fill(0x20, 32)));
+    let echPub = echPriv.PublicKey();
+
+    let cookie: alloc::vec::Vec<crate::types::byte> = alloc::vec![0xC0, 0xC1, 0xC2];
+    let mut hrr = mkHRR();
+    let mut hello = mkHello();
+
+    let mut cfg = Config::default();
+    cfg.ServerName = "secret.example".into();
+    let mut echCtx: Option<handshake_client::echClientContext> = None;
+
+    let suite =
+        cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256).unwrap();
+    let hash = suite.hash;
+
+    match which {
+        0 => hrr.cookie = cookie.clone(),
+        1 => {
+            hrr.cookie = cookie.clone();
+            hrr.encryptedClientHello = fill(0xEE, 8);
+        }
+        2 => {}
+        3 => {
+            hrr.cookie = cookie.clone();
+            hrr.serverShare = handshake_messages::keyShare {
+                group: common::X25519.0,
+                data: fill(0x30, 32),
+            };
+        }
+        4 => hrr.selectedGroup = common::CurveP384.0,
+        5 => hrr.selectedGroup = common::X25519.0,
+        6 => hrr.selectedGroup = common::CurveP256.0,
+        7 | 8 => {
+            hrr.cookie = cookie.clone();
+            hello.pskIdentities = alloc::vec![handshake_messages::pskIdentity {
+                label: fill(0xAA, 16),
+                obfuscatedTicketAge: 123,
+            }];
+            hello.pskBinders = alloc::vec![alloc::vec![0u8; 32]];
+            cfg.Time = Some(alloc::sync::Arc::new(|| crate::time::Unix(2000, 0)));
+        }
+        _ => {
+            // 9, 10, 11 — the ECH paths.
+            hrr.cookie = cookie.clone();
+            let mut innerHello = mkHello();
+            innerHello.serverName = "secret.example".into();
+            innerHello.encryptedClientHello = alloc::vec![1u8];
+            hello.serverName = "public.example".into();
+            let mut ctx = handshake_client::echClientContext::default();
+            ctx.config = Some(ech::echConfig {
+                ConfigID: 123,
+                KemID: crate::crypto::internal::hpke::DHKEM_X25519_HKDF_SHA256,
+                PublicKey: echPub.Bytes(),
+                MaxNameLength: 32,
+                PublicName: slice::__from_vec(b"public.example".to_vec()),
+                ..Default::default()
+            });
+            ctx.kdfID = crate::crypto::internal::hpke::KDF_HKDF_SHA256;
+            ctx.aeadID = crate::crypto::internal::hpke::AEAD_AES_128_GCM;
+            let mut innerTranscript = handshake_messages::transcriptHasher(hash.New());
+            handshake_messages::transcriptMsg(&innerHello, &mut innerTranscript);
+            match which {
+                9 => hrr.encryptedClientHello = fill(0xEE, 8),
+                10 => hrr.encryptedClientHello = fill(0xEE, 5),
+                _ => {
+                    // Compute the matching accept confirmation the way
+                    // the client will check it: double-hash the inner
+                    // transcript, append the HRR with a zeroed ech
+                    // extension, expand.
+                    let innerSum =
+                        crate::hash::Hash::Sum(&*innerTranscript.0, slice::new());
+                    let mut hrrZero = mkHRR();
+                    hrrZero.cookie = cookie.clone();
+                    hrrZero.encryptedClientHello = alloc::vec![0u8; 8];
+                    let (zb, _) = hrrZero.marshal();
+                    let mut conf = handshake_messages::transcriptHasher(hash.New());
+                    crate::io::Writer::Write(
+                        &mut conf,
+                        slice::__from_vec(alloc::vec![
+                            handshake_messages::typeMessageHash,
+                            0,
+                            0,
+                            crate::byte(innerSum.Len()),
+                        ]),
+                    );
+                    crate::io::Writer::Write(&mut conf, innerSum);
+                    crate::io::Writer::Write(&mut conf, zb);
+                    let h = crate::hash::HashFunc::New(move || hash.New());
+                    let (prk, _) = crate::crypto::hkdf::Extract(
+                        h.clone(),
+                        slice::__from_vec(innerHello.random.clone()),
+                        slice::new(),
+                    );
+                    hrr.encryptedClientHello =
+                        crate::crypto::internal::fips140::tls13::ExpandLabel(
+                            h,
+                            prk,
+                            "hrr ech accept confirmation",
+                            crate::hash::Hash::Sum(&*conf.0, slice::new()),
+                            8,
+                        )
+                        .__into_vec();
+                    let info = slice::__from_vec(b"tls ech\x00".to_vec());
+                    let (encap, sender, _) = crate::crypto::internal::hpke::SetupSender(
+                        crate::crypto::internal::hpke::DHKEM_X25519_HKDF_SHA256,
+                        crate::crypto::internal::hpke::KDF_HKDF_SHA256,
+                        crate::crypto::internal::hpke::AEAD_AES_128_GCM,
+                        &echPub,
+                        &info,
+                    );
+                    ctx.encapsulatedKey = encap;
+                    ctx.hpkeContext = sender;
+                }
+            }
+            ctx.innerHello = Some(innerHello);
+            ctx.innerTranscript = Some(innerTranscript.0);
+            echCtx = Some(ctx);
+        }
+    }
+
+    let (hrrBytes, _) = hrr.marshal();
+    let mut parsedHRR = handshake_messages::serverHelloMsg::default();
+    parsedHRR.unmarshal(hrrBytes);
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setDuplexConn(slice::__from_vec(rec), sink.clone());
+    c.__setHaveVers(true);
+    c.__setVers(common::VersionTLS13);
+    c.__setConfig(cfg);
+
+    let mut transcript = handshake_messages::transcriptHasher(hash.New());
+    handshake_messages::transcriptMsg(&hello, &mut transcript);
+
+    let mut hs = handshake_client_tls13::clientHandshakeStateTLS13 {
+        c,
+        serverHello: parsedHRR,
+        hello,
+        keyShareKeys: Some(key_schedule::keySharePrivateKeys {
+            curveID: common::X25519,
+            ecdhe: None,
+            mlkem: None,
+        }),
+        session: None,
+        earlySecret: None,
+        binderKey: slice::__from_vec(fill(0xBB, 32)),
+        usingPSK: false,
+        sentDummyCCS: false,
+        suite: Some(suite),
+        transcript: Some(transcript),
+        masterSecret: None,
+        trafficSecret: slice::new(),
+        echContext: echCtx,
+        certReq: None,
+    };
+    if which == 7 {
+        let mut session = ticket::SessionState::default();
+        session.cipherSuite = cipher_suites::TLS_AES_256_GCM_SHA384;
+        session.createdAt = 1000;
+        session.ageAdd = 7;
+        hs.session = Some(session);
+    }
+    if which == 8 {
+        let mut session = ticket::SessionState::default();
+        session.cipherSuite = cipher_suites::TLS_AES_128_GCM_SHA256;
+        session.createdAt = 1000;
+        session.ageAdd = 7;
+        hs.session = Some(session);
+    }
+
+    let err = hs.processHelloRetryRequest();
+    let errText = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let mut ks = crate::gostring::string::from_static("");
+    for k in hs.hello.keyShares.iter() {
+        ks = ks
+            + crate::fmt::Sprintf!(
+                "g%d:l%d;",
+                crate::int(k.group),
+                crate::int(k.data.len())
+            );
+    }
+    let psks = crate::int(hs.hello.pskIdentities.len());
+    let age = if hs.hello.pskIdentities.len() > 0 {
+        hs.hello.pskIdentities[0].obfuscatedTicketAge
+    } else {
+        0
+    };
+    let isum = match hs.echContext.as_ref() {
+        Some(ech) => crate::hash::Hash::Sum(
+            &**ech.innerTranscript.as_ref().unwrap(),
+            slice::new(),
+        ),
+        None => slice::new(),
+    };
+    let tsum = crate::hash::Hash::Sum(&*hs.transcript.as_ref().unwrap().0, slice::new());
+    return (
+        errText,
+        sink.Lock().clone(),
+        tsum,
+        slice::__from_vec(hs.hello.cookie.clone()),
+        hs.c.didHRR,
+        ks,
+        psks,
+        age,
+        hs.c.__echAccepted(),
+        hs.c.__serverName(),
+        isum,
+        crate::int(hs.hello.encryptedClientHello.len()),
+    );
+}
+
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below
 // sign and verify against, the same fixture x509_parse_smoke uses.
 // Held once: it was pasted by hand into a second shim and silently
