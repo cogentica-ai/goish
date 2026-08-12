@@ -14,6 +14,7 @@
 pub mod alert;
 pub mod auth;
 mod defaults_fips140;
+pub mod conn;
 
 // go: none — goish-only: auth.go's functions are unexported in Go,
 // where tests are in-package. See the `defaults_*` shims below.
@@ -2906,4 +2907,104 @@ pub fn cipher_suites_selectECDHE(
         return 0;
     }
     return sel.unwrap().id;
+}
+
+// go: none — goish-only: conn.go's halfConn and the record codec's free
+// functions are unexported in Go, where the tests are in-package.
+#[doc(hidden)]
+pub fn conn_extractPadding(
+    payload: crate::goslice::slice<crate::types::byte>,
+) -> (crate::types::int, crate::types::byte) {
+    return conn::extractPadding(payload);
+}
+
+// go: none — goish-only: see `conn_extractPadding`.
+#[doc(hidden)]
+pub fn conn_roundUp(a: crate::types::int, b: crate::types::int) -> crate::types::int {
+    return conn::roundUp(a, b);
+}
+
+// go: none — goish-only: see `conn_extractPadding`. Reports
+// `(head, len(tail))`.
+#[doc(hidden)]
+pub fn conn_sliceForAppend(
+    in_: crate::goslice::slice<crate::types::byte>,
+    n: crate::types::int,
+) -> (crate::goslice::slice<crate::types::byte>, crate::types::int) {
+    let (head, tail) = conn::sliceForAppend(in_, n);
+    return (head, tail.Len());
+}
+
+// go: none — goish-only: see `conn_extractPadding`. Reports
+// `(explicitNonceLen with no cipher, changeCipherSpec's alert with no
+// next cipher, explicitNonceLen after setTrafficSecret, seq is zeroed,
+// level)`.
+#[doc(hidden)]
+pub fn conn_halfConnTrafficSecret() -> (
+    crate::types::int,
+    crate::gostring::string,
+    crate::types::int,
+    bool,
+    crate::gostring::string,
+) {
+    let mut hc = conn::halfConn::default();
+    hc.version = common::VersionTLS12;
+    let nonceNil = hc.explicitNonceLen();
+    let ccsAlert = match hc.changeCipherSpec() {
+        Some(a) => a.Error(),
+        None => crate::gostring::string::from_static(""),
+    };
+
+    let mut hc13 = conn::halfConn::default();
+    hc13.version = common::VersionTLS13;
+    let suite =
+        cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256).unwrap();
+    let secret = crate::goslice::slice::__from_vec(
+        (0..32u16).map(|i| (0x10 + i) as crate::types::byte).collect::<alloc::vec::Vec<_>>(),
+    );
+    hc13.setTrafficSecret(suite, quic::QUICEncryptionLevelInitial, secret);
+    return (
+        nonceNil,
+        ccsAlert,
+        hc13.explicitNonceLen(),
+        hc13.seq == [0u8; 8],
+        hc13.level.String(),
+    );
+}
+
+// go: none — goish-only: see `conn_extractPadding`. `which` picks the
+// starting sequence number: 0 = zero, 1 = ..00ff, 2 = ..ffff.
+#[doc(hidden)]
+pub fn conn_incSeq(which: crate::types::int) -> crate::goslice::slice<crate::types::byte> {
+    let mut hc = conn::halfConn::default();
+    if which == 1 {
+        hc.seq = [0, 0, 0, 0, 0, 0, 0, 0xff];
+    } else if which == 2 {
+        hc.seq = [0, 0, 0, 0, 0, 0, 0xff, 0xff];
+    }
+    hc.incSeq();
+    return crate::goslice::slice::__from_vec(hc.seq.to_vec());
+}
+
+// go: none — goish-only: see `conn_extractPadding`.
+#[doc(hidden)]
+pub fn conn_recordHeaderError(msg: crate::gostring::string) -> crate::gostring::string {
+    let mut e = conn::RecordHeaderError::default();
+    e.Msg = msg;
+    return e.Error();
+}
+
+// go: none — goish-only: see `conn_extractPadding`. Reports
+// `(Error(), Unwrap().Error(), Timeout(), Temporary())`.
+#[doc(hidden)]
+pub fn conn_permanentError() -> (
+    crate::gostring::string,
+    crate::gostring::string,
+    bool,
+    bool,
+) {
+    let e = conn::permanentError {
+        err: crate::errors::New("boom"),
+    };
+    return (e.Error(), e.Unwrap().Error(), e.Timeout(), e.Temporary());
 }

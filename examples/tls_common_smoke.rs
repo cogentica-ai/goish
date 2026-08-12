@@ -1547,6 +1547,74 @@ fn main() {
     check("discardHandshakeBuffer clears the buffer",
           tls::prf_discardHandshakeBuffer());
 
+    // ─── conn.go: the record layer's cipher state. extractPadding is
+    //     the Lucky13/POODLE-relevant one — it must be constant time and
+    //     must zero the padding length on failure so the unchecked bytes
+    //     still reach the MAC. All from goref.sh.
+    let pad = |v: alloc::vec::Vec<u8>| tls::conn_extractPadding(slice::__from_vec(v));
+    let (p0, g0) = pad(alloc::vec![]);
+    check_n("extractPadding empty toRemove", p0, 0);
+    check_n("extractPadding empty good", g0 as int, 0);
+    let (p1, g1) = pad(alloc::vec![0x00u8]);
+    check_n("extractPadding zero-length padding toRemove", p1, 1);
+    check_n("extractPadding zero-length padding good", g1 as int, 255);
+    let (p2, g2) = pad(alloc::vec![1u8, 2, 3, 0x03, 0x03, 0x03, 0x03]);
+    check_n("extractPadding valid toRemove", p2, 4);
+    check_n("extractPadding valid good", g2 as int, 255);
+    // One padding byte wrong: good goes to 0 AND toRemove is forced to 1,
+    // so the unchecked bytes are still MACed.
+    let (p3, g3) = pad(alloc::vec![1u8, 2, 3, 0x02, 0x03, 0x03]);
+    check_n("extractPadding mismatched toRemove is forced to 1", p3, 1);
+    check_n("extractPadding mismatched good", g3 as int, 0);
+    let (p4, g4) = pad(alloc::vec![0u8, 0, 0, 0]);
+    check_n("extractPadding all-zero toRemove", p4, 1);
+    check_n("extractPadding all-zero good", g4 as int, 255);
+    let (p5, g5) = pad(alloc::vec![0xffu8]);
+    check_n("extractPadding overlong toRemove", p5, 1);
+    check_n("extractPadding overlong good", g5 as int, 0);
+    let (p6, g6) = pad(alloc::vec![1u8, 2, 3, 4, 5]);
+    check_n("extractPadding garbage toRemove", p6, 1);
+    check_n("extractPadding garbage good", g6 as int, 0);
+
+    check_n("roundUp(0,16)", tls::conn_roundUp(0, 16), 0);
+    check_n("roundUp(1,16)", tls::conn_roundUp(1, 16), 16);
+    check_n("roundUp(16,16)", tls::conn_roundUp(16, 16), 16);
+    check_n("roundUp(17,16)", tls::conn_roundUp(17, 16), 32);
+    check_n("roundUp(20,8)", tls::conn_roundUp(20, 8), 24);
+    check_n("roundUp(33,8)", tls::conn_roundUp(33, 8), 40);
+
+    let base = slice::__from_vec(alloc::vec![9u8, 9]);
+    let (h0, t0) = tls::conn_sliceForAppend(base.clone(), 0);
+    eq("sliceForAppend n=0 head", hexOf(h0), "0909");
+    check_n("sliceForAppend n=0 tail", t0, 0);
+    let (h1, t1) = tls::conn_sliceForAppend(base.clone(), 1);
+    eq("sliceForAppend n=1 head", hexOf(h1), "090900");
+    check_n("sliceForAppend n=1 tail", t1, 1);
+    let (h5, t5) = tls::conn_sliceForAppend(base, 5);
+    eq("sliceForAppend n=5 head", hexOf(h5), "09090000000000");
+    check_n("sliceForAppend n=5 tail", t5, 5);
+
+    let (nonceNil, ccsAlert, nonce13, seqZero, level) = tls::conn_halfConnTrafficSecret();
+    check_n("halfConn.explicitNonceLen with no cipher", nonceNil, 0);
+    eq("changeCipherSpec without a next cipher", ccsAlert, "tls: internal error");
+    check_n("halfConn.explicitNonceLen after setTrafficSecret", nonce13, 0);
+    check("setTrafficSecret zeroes the sequence number", seqZero);
+    eq("setTrafficSecret records the QUIC level", level, "Initial");
+
+    eq("incSeq once", hexOf(tls::conn_incSeq(0)), "0000000000000001");
+    eq("incSeq carries", hexOf(tls::conn_incSeq(1)), "0000000000000100");
+    eq("incSeq carries twice", hexOf(tls::conn_incSeq(2)), "0000000000010000");
+
+    eq("RecordHeaderError.Error",
+       tls::conn_recordHeaderError(
+           string::from_static("first record does not look like a TLS handshake")),
+       "tls: first record does not look like a TLS handshake");
+    let (peMsg, peUnwrap, peTimeout, peTemp) = tls::conn_permanentError();
+    eq("permanentError.Error", peMsg, "boom");
+    eq("permanentError.Unwrap", peUnwrap, "boom");
+    check("permanentError.Timeout", !peTimeout);
+    check("permanentError.Temporary is always false", !peTemp);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
