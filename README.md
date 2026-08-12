@@ -2,7 +2,7 @@
 
 **A Go-style standard library and runtime, implemented in `no_std` Rust on top of raw Linux syscalls.**
 
-No `glibc`, no `std`, no Tokio. Goish ships its own `_start`, page allocator, size-class heap, M:N scheduler, channels, `select!`, `sync` primitives, async preemption, and ~80 ports of Go standard-library and `golang.org/x` packages - all in one statically-linked binary.
+No `glibc`, no `std`, no Tokio. Goish ships its own `_start`, page allocator, size-class heap, M:N scheduler, channels, `select!`, `sync` primitives, async preemption, and 134 partial-to-complete ports of Go standard-library and `golang.org/x` packages - all in one statically-linked binary.
 
 ```rust
 use goish::{go, KB};
@@ -33,13 +33,51 @@ That's a million real goroutines on 13 OS threads, ~2 GiB virtual / ~2.4 GiB pea
 
 ## Status
 
-Active development. The e2e suite runs 271 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
+Active development. The e2e suite runs 272 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
 
 Goish is **single-target**: `x86_64-unknown-linux-gnu`. Other targets are deliberately out of scope.
 
-📊 **[PROGRESS.md](PROGRESS.md)** — what is ported, and how much of it is *proven* against Go rather than merely name-matched. `crypto/` is at 1188/1452 functions (81.8%), with 65 of its 66 packages complete.
+### Coverage, measured
 
-🗺️ **[ROADMAP.md](ROADMAP.md)** — what is left and in what order. `crypto/tls` is the whole remaining crypto gap.
+`scripts/port_coverage.py` counts, for each in-scope Go package, how many
+of its declarations have a same-named counterpart here. Across 179
+packages of the Go 1.25.5 standard library:
+
+| | |
+|---|--:|
+| functions ported | **3156 / 7938 (39.8%)** |
+| packages with a port | 134 |
+| packages at 100% | 86 |
+| provenance anchors | 2358 |
+
+**Coverage and *verification* are different things, and the gap is
+lopsided.** An anchor (`// go: sdk 1.25.5 <file>:<lines> <Symbol>`) lets
+goishlint open the Go file and diff signature, arity and struct fields
+against the port; without one, a name match proves only that a name
+matches.
+
+`crypto/` carries **92% of all anchors in the tree** — it is at 82.1%
+(1192/1452) with 65 of its 66 packages complete and machine-checked
+function by function. Everything else is name-level: `net` has 9 anchors
+across 308 ported functions; `sync`, `compress`, `archive` and `text`
+have none. Treat non-crypto ports as working code, not as verified
+ports.
+
+| subtree | ported | anchors |
+|---|--:|--:|
+| `crypto` | 1192/1452 (82.1%) | 2181 |
+| `net` | 308/1794 (17.2%) | 9 |
+| `math` | 307/661 (46.4%) | 5 |
+| `encoding` | 210/1018 (20.6%) | 125 |
+| `compress` | 122/151 (80.8%) | 0 |
+| `os` | 112/366 (30.6%) | 2 |
+
+📊 **[PROGRESS.md](PROGRESS.md)** — the full picture, and what the three
+verification tiers mean.
+
+🗺️ **[ROADMAP.md](ROADMAP.md)** — what is left and in what order.
+`crypto/tls` is the whole remaining crypto gap, and it needs a
+demolition before it needs a port.
 
 📐 **[CONTRIBUTING.md](CONTRIBUTING.md)** — the conventions a port must follow, and the pre-flight checks to run before starting one.
 
@@ -74,14 +112,14 @@ Goish is **single-target**: `x86_64-unknown-linux-gnu`. Other targets are delibe
 ### Networking & web
 - **`net`** (M17): TCP/UDP over raw sockets, integrated with an **epoll netpoller** - a blocking `Read`/`Write` parks the goroutine instead of the thread. The poller is sharded **per-P epoll** (nginx-model), with a dedicated blocking-poller M woken via `netpollBreak`, and `SetDeadline` handled by a slab scan - no global heap on the request path. `ListenConfig.Control` + `syscall.RawConn` expose pre-bind socket options (`SO_REUSEPORT` per-CPU listeners work out of the box).
 - **DNS resolver**: `LookupHost` / `LookupIP` / `LookupCNAME` / `LookupAddr` / `LookupTXT` / `LookupNS` / `LookupMX` / `LookupSRV` over a port of Go's `dnsclient_unix.go` - `/etc/resolv.conf` config, `dnsmessage` wire format, UDP round-trips through the netpoller.
-- **`crypto/tls`**: client-side TLS 1.2 + 1.3 and server-side TLS 1.3 handshakes (M32), backed by goish's own `crypto/{aes, sha256, ecdh, ed25519, x509, …}` ports.
+- **`crypto/tls`**: client-side TLS 1.2 + 1.3 and server-side TLS 1.3 handshakes (M32), backed by goish's own `crypto/{aes, sha256, ecdh, ed25519, x509, …}` ports. **Unlike the rest of `crypto/`, this one is hand-written rather than ported** — it completes real handshakes and is stress-tested at ×50, but the provenance tooling cannot check it against Go. See [SECURITY.md](SECURITY.md).
 - **`net/http` server** (M18, production-hardened in M31): HTTP/1.1 with keep-alive, Go 1.22 `ServeMux` patterns (`"GET /users/{id}"` wildcards, GET-matches-HEAD, 405 + `Allow` on method mismatch), composable `Handler` middleware, `Flusher` chunked streaming, `TimeoutHandler`, `FileServer` + range requests, `httputil` reverse proxy, and an **allocation-free hot request path** through `bufio`. `ListenAndServeTLS` / `ServeTLS` serve HTTPS over the TLS 1.3 stack. Deployment-grade operations: `Shutdown(ctx)` draining every tracked listener and idle conn, `Close`, `RegisterOnShutdown`, live `IdleTimeout`, `BaseContext`/`ConnContext`, `ErrorLog`, `Expect: 100-continue`, HEAD body suppression, accept-failure backoff, `TCP_NODELAY` + keep-alive socket defaults, and `signal::NotifyContext` for SIGTERM-triggered graceful drain - see `examples/deploy_rest_api.rs` for the blessed pattern.
 - **Live request contexts**: every inbound request carries a cancellable `r.Context()` - canceled when the response finishes, or the moment the client disconnects mid-handler. Disconnect detection is wired at the netpoller `PollDesc` level (probing with `recv(MSG_PEEK | MSG_DONTWAIT)` so a pipelined request is never eaten) - no per-request watcher goroutine.
 - **`net/http` client**: `Get` / `Post` / `Do` with redirects, cookies, and a **streaming `Response.Body`** (`io.ReadCloser` shape). `Client.Timeout` re-parents the request under `context.WithTimeout` - one deadline covers every redirect hop - and a mid-flight `ctx` cancel interrupts blocked I/O through the netpoller, surfacing `context.Canceled` / `DeadlineExceeded` like Go's `url.Error` unwrapping.
 - **`goginx`** (`examples/goginx.rs`): an nginx clone in Goish - `nginx.conf`-style config, virtual hosts, longest-prefix `location` matching, autoindex, upstream round-robin proxying with next-upstream retry, TLS termination, `listen … reuseport` per-CPU accept loops, access logs, graceful SIGTERM drain.
 
 ### Standard library ports (Go 1.25-faithful)
-- **Core**: `bufio`, `bytes`, `cmp`, `context`, `errors`, `flag`, `fmt`, `io` + `io/fs`, `iter` (Go 1.23 function iterators), `log` + `log/slog`, `maps`, `os` + `os/{exec, signal, user}`, `path` + `path/filepath`, `reflect` (3 tiers), `slices`, `sort`, `strconv`, `strings`, `sync` + `sync/atomic`, `syscall`, `testing` (+ `testing/fstest`), `time`, `unicode` (full case mapping) + `unicode/{utf8, utf16}`, `expvar`, `html`, `embed` (`//go:embed` as the `embed!` macro).
+- **Core**: `bufio`, `bytes`, `cmp`, `context`, `errors`, `flag`, `fmt`, `io` + `io/fs`, `log` + `log/slog`, `maps`, `os` + `os/{exec, signal, user}`, `path` + `path/filepath`, `reflect` (3 tiers), `slices`, `sort`, `strconv`, `strings`, `sync` + `sync/atomic`, `syscall`, `testing` (+ `testing/fstest`), `time`, `unicode` (full case mapping) + `unicode/{utf8, utf16}`, `expvar`, `html`, `embed` (`//go:embed` as the `embed!` macro).
 - **Encoding**: `encoding/{ascii85, asn1, base32, base64, binary, csv, hex, json, pem}` - including the `encoding/json/v2` + `jsontext` port with compile-time struct codecs.
 - **Compression & archives**: `compress/{flate, gzip, lzw, zlib}`, `archive/tar`.
 - **Crypto**: `crypto/{aes, cipher, chacha20, chacha20poly1305, des, ecdh, ecdsa, ed25519, hkdf, hmac, md5, pbkdf2, poly1305, rand, rc4, rsa, sha1, sha256, sha3, sha512, subtle, x509}`, plus `crypto/tls` (above) and a minimum-viable `crypto/ssh` SSH-2.0 client.

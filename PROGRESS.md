@@ -4,18 +4,54 @@ Where the port actually stands, and how much of it is *proven* rather
 than merely counted. Numbers are regenerated with
 `scripts/port_coverage.py`; the last refresh was 2026-08-12.
 
-## crypto/ — 1188 / 1452 functions (81.8%)
+## The whole tree — 3156 / 7938 functions (39.8%)
+
+Across 179 in-scope packages of the Go 1.25.5 standard library: **134
+have a port, 86 are at 100%**, and there are **2358 provenance
+anchors**.
+
+The anchors are not spread evenly, and that is the single most important
+thing on this page. **`crypto/` holds 92% of them.** Coverage says a
+name exists; an anchor is what lets goishlint diff the port against the
+Go file it came from.
+
+| subtree | ported | % | anchors |
+|---|--:|--:|--:|
+| `crypto` | 1192/1452 | 82.1% | **2181** |
+| `net` | 308/1794 | 17.2% | 9 |
+| `math` | 307/661 | 46.4% | 5 |
+| `encoding` | 210/1018 | 20.6% | 125 |
+| `compress` | 122/151 | 80.8% | 0 |
+| `os` | 112/366 | 30.6% | 2 |
+| `bytes` | 84/107 | 78.5% | 1 |
+| `strings` | 76/101 | 75.2% | 1 |
+| `archive` | 71/182 | 39.0% | 0 |
+| `time` | 71/184 | 38.6% | 4 |
+| `sync` | 66/126 | 52.4% | 0 |
+| `hash` | 65/114 | 57.0% | 26 |
+
+So: `compress` at 80.8% and `crypto/x509` at 100% are not comparable
+claims. The first means 122 functions share a name with Go's; the second
+means 158 functions were each diffed against the Go source and their
+outputs checked byte-for-byte against a running Go. Treat unanchored
+subtrees as working code, not as verified ports.
+
+`iter` (0/4) and `database` (0/137) have directories but no ported
+functions. `iter` is a squatter — goish fakes Go 1.23 iterator support
+with slices wherever it is needed.
+
+## crypto/ — 1192 / 1452 functions (82.1%)
 
 **65 of the 66 crypto packages are at 100%.** The single exception is
-`crypto/tls`, which holds 264 of the 264 remaining functions.
+`crypto/tls`, which holds 260 of the 260 remaining functions.
 
 | | |
 |---|--:|
-| ported | 1188 |
-| remaining, portable | 254 |
+| ported | 1192 |
+| remaining, portable | 250 |
 | remaining, assembly stubs | 10 |
 | waived (resolved elsewhere by design) | 1 |
-| provenance anchors | 2172 |
+| provenance anchors | 2181 |
 | unverified names (see below) | 10 |
 
 Complete and byte-checked against Go: `x509` (158/158), `ecdsa`,
