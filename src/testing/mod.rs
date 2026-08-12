@@ -48,6 +48,7 @@
 
 pub mod benchmark;
 pub mod fstest;
+pub(crate) mod fuzz;
 pub mod slogtest;
 pub mod iotest;
 pub mod r#match;
@@ -60,7 +61,7 @@ pub use newcover::Coverage;
 pub use testing::{
     callerName, chattyFlag, chattyPrinter, fmtDuration, marker, newChattyPrinter, parseCpuList,
     pcToName, prefix, testBinary, CoverMode, Init, Short, Testing, Verbose,
-    __run_skip_patterns,
+    __run_skip_patterns, __shim_err_main, __shim_match_string_only, __DepsProbe,
 };
 
 extern crate alloc;

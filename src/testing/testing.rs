@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -21,7 +21,7 @@
 // registration having happened and can be tested on its own.
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
 // goishlint:ignore GOISH018 after, Attr, before, callSite, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newTestState, Output, Parallel, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
-// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errMain, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, matchStringOnly, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelConflict, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testDeps, testingTesting, testlog, testlogFile, testState, timeout, traceFile — same: the driver's types and package state come with the driver.
+// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelConflict, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, testState, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
 #![allow(non_snake_case)]
@@ -936,4 +936,292 @@ pub fn pcToName(pc: crate::types::uintptr) -> string {
     let mut frames = crate::runtime::CallersFrames(pcs);
     let (frame, _) = frames.Next();
     return frame.Function;
+}
+
+// ─── testDeps: the seam to the generated test main ──────────────────
+
+crate::var! {
+    // go: sdk 1.25.5 testing/testing.go:2133 errMain
+    /// Go: `var errMain = errors.New("testing: unexpected use of func
+    /// Main")`. A package-level var, so every stub returns the SAME
+    /// error value and a caller's `err == errMain` holds. Built through
+    /// `var!` rather than a plain fn, which would mint a fresh
+    /// (pointer-unequal) error per call and silently break that.
+    pub(crate) errMain: error = "testing: unexpected use of func Main";
+}
+
+// go: sdk 1.25.5 testing/testing.go:2192-2209 testDeps
+/// Go: "testDeps is an internal interface of functionality that is
+/// passed into this package by a test's generated main package. The
+/// canonical implementation of this interface is
+/// testing/internal/testdeps's TestDeps."
+///
+/// goish has no `go test` code generator, so the only implementation in
+/// the tree is [`matchStringOnly`] — which is exactly the fallback Go
+/// itself uses from the deprecated `testing.Main`. The
+/// fuzzing/profiling members are kept in the trait rather than dropped,
+/// because `M.Run` calls them and a shortened interface would change
+/// how the driver reads against Go.
+#[allow(non_snake_case, dead_code)]
+pub(crate) trait testDeps {
+    fn ImportPath(&self) -> string;
+    fn MatchString(&self, pat: string, str_: string) -> (bool, crate::errors::error);
+    fn SetPanicOnExit0(&self, v: bool);
+    fn StartCPUProfile(&self, w: &mut dyn crate::io::Writer) -> crate::errors::error;
+    fn StopCPUProfile(&self);
+    fn StartTestLog(&self, w: &mut dyn crate::io::Writer);
+    fn StopTestLog(&self) -> crate::errors::error;
+    fn WriteProfileTo(
+        &self,
+        name: string,
+        w: &mut dyn crate::io::Writer,
+        debug: crate::types::int,
+    ) -> crate::errors::error;
+    #[allow(clippy::too_many_arguments)]
+    fn CoordinateFuzzing(
+        &self,
+        timeout: crate::time::Duration,
+        limit: crate::types::int64,
+        minimizeTimeout: crate::time::Duration,
+        minimizeLimit: crate::types::int64,
+        parallel: crate::types::int,
+        seed: crate::goslice::slice<crate::testing::fuzz::corpusEntry>,
+        types: crate::goslice::slice<crate::reflect::Type>,
+        corpusDir: string,
+        cacheDir: string,
+    ) -> crate::errors::error;
+    fn RunFuzzWorker(
+        &self,
+        f: &mut dyn FnMut(crate::testing::fuzz::corpusEntry) -> crate::errors::error,
+    ) -> crate::errors::error;
+    fn ReadCorpus(
+        &self,
+        dir: string,
+        types: crate::goslice::slice<crate::reflect::Type>,
+    ) -> (crate::goslice::slice<crate::testing::fuzz::corpusEntry>, crate::errors::error);
+    fn CheckCorpus(
+        &self,
+        vals: crate::goslice::slice<crate::goany::Any>,
+        types: crate::goslice::slice<crate::reflect::Type>,
+    ) -> crate::errors::error;
+    fn ResetCoverage(&self);
+    fn SnapshotCoverage(&self);
+    fn InitRuntimeCoverage(&self) -> (string, Option<TearDownFunc>, Option<SnapCovFunc>);
+}
+
+// go: none — goish idiom: names for the two funcs Go returns inline
+// from InitRuntimeCoverage, which Rust cannot spell anonymously.
+pub(crate) type TearDownFunc =
+    alloc::boxed::Box<dyn Fn(string, string) -> (string, crate::errors::error) + Send + Sync>;
+// go: none — goish idiom: see TearDownFunc.
+pub(crate) type SnapCovFunc = alloc::boxed::Box<dyn Fn() -> crate::types::float64 + Send + Sync>;
+
+// go: sdk 1.25.5 testing/testing.go:2135 matchStringOnly
+/// Go: `type matchStringOnly func(pat, str string) (bool, error)` — a
+/// func type carrying the whole testDeps interface, where every member
+/// except MatchString is a stub. It is what `testing.Main` passes when
+/// no generated main package supplied real deps.
+///
+/// goish wraps the func in a struct because Rust cannot hang an impl
+/// block off a bare function type.
+#[allow(non_camel_case_types)]
+pub(crate) struct matchStringOnly {
+    f: alloc::boxed::Box<
+        dyn Fn(string, string) -> (bool, crate::errors::error) + Send + Sync,
+    >,
+}
+
+#[allow(dead_code)]
+impl matchStringOnly {
+    // go: none — goish idiom: Go converts with `matchStringOnly(fn)`;
+    // Rust needs a named constructor for the wrapper struct.
+    pub(crate) fn new<F>(f: F) -> Self
+    where
+        F: Fn(string, string) -> (bool, crate::errors::error) + Send + Sync + 'static,
+    {
+        return matchStringOnly {
+            f: alloc::boxed::Box::new(f),
+        };
+    }
+}
+
+#[allow(non_snake_case, unused_variables)]
+impl testDeps for matchStringOnly {
+    // go: sdk 1.25.5 testing/testing.go:2137 matchStringOnly.MatchString
+    fn MatchString(&self, pat: string, str_: string) -> (bool, crate::errors::error) {
+        return (self.f)(pat, str_);
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:2138 matchStringOnly.StartCPUProfile
+    fn StartCPUProfile(&self, w: &mut dyn crate::io::Writer) -> crate::errors::error {
+        return errMain.into();
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:2139 matchStringOnly.StopCPUProfile
+    fn StopCPUProfile(&self) {}
+
+    // go: sdk 1.25.5 testing/testing.go:2140 matchStringOnly.WriteProfileTo
+    fn WriteProfileTo(
+        &self,
+        name: string,
+        w: &mut dyn crate::io::Writer,
+        debug: crate::types::int,
+    ) -> crate::errors::error {
+        return errMain.into();
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:2141 matchStringOnly.ImportPath
+    fn ImportPath(&self) -> string {
+        return string::from_static("");
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:2142 matchStringOnly.StartTestLog
+    fn StartTestLog(&self, w: &mut dyn crate::io::Writer) {}
+
+    // go: sdk 1.25.5 testing/testing.go:2143 matchStringOnly.StopTestLog
+    fn StopTestLog(&self) -> crate::errors::error {
+        return errMain.into();
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:2144 matchStringOnly.SetPanicOnExit0
+    fn SetPanicOnExit0(&self, v: bool) {}
+
+    // go: sdk 1.25.5 testing/testing.go:2145-2147 matchStringOnly.CoordinateFuzzing
+    fn CoordinateFuzzing(
+        &self,
+        timeout: crate::time::Duration,
+        limit: crate::types::int64,
+        minimizeTimeout: crate::time::Duration,
+        minimizeLimit: crate::types::int64,
+        parallel: crate::types::int,
+        seed: crate::goslice::slice<crate::testing::fuzz::corpusEntry>,
+        types: crate::goslice::slice<crate::reflect::Type>,
+        corpusDir: string,
+        cacheDir: string,
+    ) -> crate::errors::error {
+        return errMain.into();
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:2148 matchStringOnly.RunFuzzWorker
+    fn RunFuzzWorker(
+        &self,
+        f: &mut dyn FnMut(crate::testing::fuzz::corpusEntry) -> crate::errors::error,
+    ) -> crate::errors::error {
+        return errMain.into();
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:2149-2151 matchStringOnly.ReadCorpus
+    fn ReadCorpus(
+        &self,
+        dir: string,
+        types: crate::goslice::slice<crate::reflect::Type>,
+    ) -> (crate::goslice::slice<crate::testing::fuzz::corpusEntry>, crate::errors::error) {
+        return (crate::goslice::slice::new(), errMain.into());
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:2152 matchStringOnly.CheckCorpus
+    fn CheckCorpus(
+        &self,
+        vals: crate::goslice::slice<crate::goany::Any>,
+        types: crate::goslice::slice<crate::reflect::Type>,
+    ) -> crate::errors::error {
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:2153 matchStringOnly.ResetCoverage
+    fn ResetCoverage(&self) {}
+
+    // go: sdk 1.25.5 testing/testing.go:2154 matchStringOnly.SnapshotCoverage
+    fn SnapshotCoverage(&self) {}
+
+    // go: sdk 1.25.5 testing/testing.go:2156-2158 matchStringOnly.InitRuntimeCoverage
+    /// Go's body is a naked `return`, i.e. all three zero values: no
+    /// coverage mode, and no teardown or snapshot func.
+    fn InitRuntimeCoverage(&self) -> (string, Option<TearDownFunc>, Option<SnapCovFunc>) {
+        return (string::from_static(""), None, None);
+    }
+}
+
+// ─── test shims ──────────────────────────────────────────────────────
+//
+// `matchStringOnly` and `testDeps` are unexported, exactly as in Go, so
+// an example cannot name them. These shims give the smoke test a way in
+// without widening the real API — the same pattern fstest.rs uses.
+
+/// What driving every `testDeps` member on a `matchStringOnly` yields.
+#[doc(hidden)]
+#[allow(non_snake_case)]
+pub struct __DepsProbe {
+    pub matched: bool,
+    pub matchErr: crate::errors::error,
+    pub importPath: string,
+    pub startCPUProfile: crate::errors::error,
+    pub stopTestLog: crate::errors::error,
+    pub writeProfileTo: crate::errors::error,
+    pub coordinateFuzzing: crate::errors::error,
+    pub runFuzzWorker: crate::errors::error,
+    /// Go returns nil here, NOT errMain — the one stub that succeeds.
+    pub checkCorpus: crate::errors::error,
+    pub readCorpusLen: crate::types::int,
+    pub readCorpusErr: crate::errors::error,
+    pub coverMode: string,
+    pub hasTearDown: bool,
+    pub hasSnapcov: bool,
+}
+
+// go: none — goish-only: test shim for the unexported matchStringOnly.
+#[doc(hidden)]
+pub fn __shim_match_string_only<F>(f: F, pat: string, str_: string) -> __DepsProbe
+where
+    F: Fn(string, string) -> (bool, crate::errors::error) + Send + Sync + 'static,
+{
+    let d = matchStringOnly::new(f);
+    let mut w = crate::io::DiscardWriter();
+    let (matched, matchErr) = d.MatchString(pat, str_);
+    let (corpus, readCorpusErr) =
+        d.ReadCorpus(string::from_static("dir"), crate::goslice::slice::new());
+    let (coverMode, tearDown, snapcov) = d.InitRuntimeCoverage();
+    // The four no-op members are called for their absence of effect;
+    // a panic or a hang here is the failure they can produce.
+    d.StopCPUProfile();
+    d.StartTestLog(&mut w);
+    d.SetPanicOnExit0(true);
+    d.ResetCoverage();
+    d.SnapshotCoverage();
+    return __DepsProbe {
+        matched,
+        matchErr,
+        importPath: d.ImportPath(),
+        startCPUProfile: d.StartCPUProfile(&mut w),
+        stopTestLog: d.StopTestLog(),
+        writeProfileTo: d.WriteProfileTo(string::from_static("p"), &mut w, 0),
+        coordinateFuzzing: d.CoordinateFuzzing(
+            crate::time::Duration(0),
+            0,
+            crate::time::Duration(0),
+            0,
+            0,
+            crate::goslice::slice::new(),
+            crate::goslice::slice::new(),
+            string::from_static(""),
+            string::from_static(""),
+        ),
+        runFuzzWorker: d.RunFuzzWorker(&mut |_e| crate::errors::nil),
+        checkCorpus: d.CheckCorpus(
+            crate::goslice::slice::new(),
+            crate::goslice::slice::new(),
+        ),
+        readCorpusLen: corpus.Len(),
+        readCorpusErr,
+        coverMode,
+        hasTearDown: tearDown.is_some(),
+        hasSnapcov: snapcov.is_some(),
+    };
+}
+
+// go: none — goish-only: exposes the unexported errMain so a test can
+// assert the stubs return that exact error rather than merely non-nil.
+#[doc(hidden)]
+pub fn __shim_err_main() -> crate::errors::error {
+    return errMain.into();
 }
