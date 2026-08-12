@@ -3346,6 +3346,98 @@ fn main() {
         "5b9495440d33266fc4ad008f0f91d1c38e00687055004e36940d1bbc83658737",
     );
 
+    // ── serverHandshakeStateTLS13.sendServerFinished / sendSessionTickets
+    //    / Conn.sendSessionTicket ───────────────────────────────────────
+    //
+    // Ground truth: goref with a constant-byte Config.Rand, a frozen
+    // Config.Time, and a fixed SessionTicketKey, so the encrypted
+    // Finished record AND the encrypted NewSessionTicket — IV, ticket
+    // AES-CBC body, HMAC, age_add — are byte-for-byte Go's.
+    let ssf = |which: int| -> (string, string, string, string, string, string, string) {
+        let (e, w, ca, sa, cf, rs, tr) = tls::handshake_server_tls13_sendServerFinished(which);
+        return (e, hexOf(w), hexOf(ca), hexOf(sa), hexOf(cf), hexOf(rs), hexOf(tr));
+    };
+
+    // psk_dhe_ke offered, no client cert: Finished + NewSessionTicket.
+    let (ssf0e, ssf0w, ssf0ca, ssf0sa, ssf0cf, ssf0rs, ssf0tr) = ssf(0);
+    eq("sendServerFinished succeeds", ssf0e, "");
+    eq(
+        "Finished plus the encrypted NewSessionTicket match Go",
+        ssf0w,
+        "1603030034d249d9caefeb83cbcf005f25bd6eb02323c50288aa8545d87babed820d6305c62054ab481cc26494c8d55c191b93ab4c3863500b160303008a63b921193964691d7365c79192dd069f21fb7ab9bed9ed4e20d691ec201717f283858a383c19b67649316bdd9c92cd1dcd9c70529d9b0fa2394e5fbf5554c83f35a1a76b1454f6dfc496fa5e93b31fd59941de24d87ac8d26cbaa40af6ca713349f98bdd94f3b7b59cb3975ef1c3aaa4c4e310a789fafd271a544a458eced0dfd30928128fc381105193",
+    );
+    eq(
+        "the client application traffic secret matches Go",
+        ssf0ca,
+        "e16f76bb746d3dc5e5e2443ef632899b5eac499161de58d4c1104ee448e20302",
+    );
+    eq(
+        "the server application traffic secret matches Go",
+        ssf0sa,
+        "3c07c35842abcee73b68d7514ffc3407e38ef8f66e6edbbb6375beb59986f02d",
+    );
+    eq(
+        "the precomputed client Finished matches Go",
+        ssf0cf,
+        "87906389b34909bde3d92cf0d038f6bc85a44f962efe04b2dadd2fd6d6c06be0",
+    );
+    eq(
+        "the resumption secret matches Go",
+        ssf0rs,
+        "a3c5da6c5432a5e2aeebc309ca203e7823549defbeaf323ed571cf4c0450eeca",
+    );
+    eq(
+        "the transcript includes the rolled-forward client Finished",
+        ssf0tr,
+        "5e919edebf21a77849acfda2daddef03835ab615adb1c6f26c77ffa206b66a29",
+    );
+
+    // No pskModes: same Finished and secrets, but no ticket record.
+    let (ssf1e, ssf1w, _, _, ssf1cf, ssf1rs, ssf1tr) = ssf(1);
+    eq("sendServerFinished without pskModes succeeds", ssf1e, "");
+    eq(
+        "only the Finished record goes out",
+        ssf1w,
+        "1603030034d249d9caefeb83cbcf005f25bd6eb02323c50288aa8545d87babed820d6305c62054ab481cc26494c8d55c191b93ab4c3863500b",
+    );
+    eq(
+        "the client Finished is still precomputed",
+        ssf1cf,
+        "87906389b34909bde3d92cf0d038f6bc85a44f962efe04b2dadd2fd6d6c06be0",
+    );
+    eq(
+        "the resumption secret is still derived",
+        ssf1rs,
+        "a3c5da6c5432a5e2aeebc309ca203e7823549defbeaf323ed571cf4c0450eeca",
+    );
+    eq(
+        "the transcript still rolls the client Finished forward",
+        ssf1tr,
+        "5e919edebf21a77849acfda2daddef03835ab615adb1c6f26c77ffa206b66a29",
+    );
+
+    // Client cert requested: stop before tickets; clientFinished and the
+    // resumption secret stay unset, the transcript holds at Finished.
+    let (ssf2e, ssf2w, ssf2ca, _, ssf2cf, ssf2rs, ssf2tr) = ssf(2);
+    eq("sendServerFinished with a cert pending succeeds", ssf2e, "");
+    eq(
+        "the wire stops at Finished",
+        ssf2w,
+        "1603030034d249d9caefeb83cbcf005f25bd6eb02323c50288aa8545d87babed820d6305c62054ab481cc26494c8d55c191b93ab4c3863500b",
+    );
+    eq(
+        "application secrets are already derived",
+        ssf2ca,
+        "e16f76bb746d3dc5e5e2443ef632899b5eac499161de58d4c1104ee448e20302",
+    );
+    eq("the client Finished is not precomputed", ssf2cf, "");
+    eq("the resumption secret is not derived", ssf2rs, "");
+    eq(
+        "the transcript holds at the server Finished",
+        ssf2tr,
+        "106d7d737a42371f12b665defb2e48662aaba23ffc1ddf5e4f7d54e054d06e60",
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

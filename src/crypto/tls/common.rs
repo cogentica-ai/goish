@@ -553,6 +553,20 @@ fn tls10serverValue() -> crate::gostring::string {
     return crate::gostring::string::from_static("");
 }
 
+// go: none — goish-only: `Config.rand()` returns the `Rand` interface
+// value in Go; goish's field is shared behind a lock so Config can stay
+// Clone, and this forwards each Read through that lock.
+pub(crate) struct sharedRandReader(
+    pub alloc::sync::Arc<crate::sync::Mutex<alloc::boxed::Box<dyn crate::io::Reader + Send + Sync>>>,
+);
+
+impl crate::io::Reader for sharedRandReader {
+    // go: none — goish-only: forwards each Read through the shared lock.
+    fn Read(&mut self, p: &mut slice<byte>) -> (crate::types::int, error) {
+        return self.0.Lock().Read(p);
+    }
+}
+
 impl Config {
 
 
@@ -565,6 +579,9 @@ impl Config {
     /// behaviour for every Config goish can express.
     pub(crate) fn time(&self) -> crate::time::Time {
         // Go: t := c.Time; if t == nil { t = time.Now }; return t()
+        if let Some(t) = self.Time.as_ref() {
+            return t();
+        }
         return crate::time::Now();
     }
 
@@ -812,12 +829,14 @@ impl Config {
     // go: sdk 1.25.5 crypto/tls/common.go:1116-1122 Config.rand
     /// The entropy source for the handshake.
     ///
-    /// Deviation: Go's `Config.Rand` field holds an `io.Reader`
-    /// interface value; goish's Config has no such field, so `c.Rand` is
-    /// always nil and this always takes Go's nil branch. That is
-    /// verbatim behaviour for every Config goish can express.
+    /// Go returns the `Rand` interface value itself; goish's `Rand` is
+    /// shared behind a lock (Config is Clone), so the non-nil arm hands
+    /// back a forwarding reader over that shared handle.
     pub(crate) fn rand(&self) -> alloc::boxed::Box<dyn crate::io::Reader + Send + Sync> {
         // Go: r := c.Rand; if r == nil { return rand.Reader }; return r
+        if let Some(r) = self.Rand.as_ref() {
+            return alloc::boxed::Box::new(sharedRandReader(r.clone()));
+        }
         return alloc::boxed::Box::new(crate::crypto::rand::Reader);
     }
 

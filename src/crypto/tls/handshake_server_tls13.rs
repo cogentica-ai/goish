@@ -1,6 +1,6 @@
 // crypto/tls/handshake_server_tls13.rs — TLS 1.3 server handshake.
 //
-// goishlint:ignore GOISH018 handshake, processClientHello, checkForResumption, doHelloRetryRequest, sendServerFinished, sendSessionTickets, sendSessionTicket, readClientCertificate — serverHandshakeStateTLS13's Conn-driven half; the live server below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH018 handshake, processClientHello, checkForResumption, doHelloRetryRequest, readClientCertificate — serverHandshakeStateTLS13's Conn-driven half; the live server below the divider implements the same protocol by hand. See ROADMAP.md.
 // goishlint:ignore GOISH021 maxClientPSKIdentities — same.
 //
 // Port of Go 1.25.5 crypto/tls:
@@ -738,9 +738,9 @@ fn sign_handshake(
 /// Go: the TLS 1.3 server handshake state.
 ///
 /// **Partial record.** Only the fields the ported methods read are
-/// present; `ctx` and `masterSecret` land with `handshake`, which
-/// drives the whole exchange. `Default` is goish-only, standing in for
-/// Go's zero value so test shims spell only the fields they set.
+/// present; `ctx` lands with `handshake`, which drives the whole
+/// exchange. `Default` is goish-only, standing in for Go's zero value
+/// so test shims spell only the fields they set.
 #[derive(Default)]
 pub(crate) struct serverHandshakeStateTLS13 {
     pub c: super::conn::Conn,
@@ -755,6 +755,7 @@ pub(crate) struct serverHandshakeStateTLS13 {
     pub earlySecret: Option<crate::crypto::internal::fips140::tls13::EarlySecret>,
     pub sharedKey: crate::goslice::slice<crate::types::byte>,
     pub handshakeSecret: Option<crate::crypto::internal::fips140::tls13::HandshakeSecret>,
+    pub masterSecret: Option<crate::crypto::internal::fips140::tls13::MasterSecret>,
     /// Go: the verify_data the server expects from the client, computed
     /// before the client's Finished is read.
     pub clientFinished: crate::goslice::slice<crate::types::byte>,
@@ -1377,6 +1378,258 @@ impl serverHandshakeStateTLS13 {
             let transcript = self.transcript.as_mut().unwrap();
             self.c.writeHandshakeRecord(&encryptedExtensions, Some(transcript))
         };
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: return nil
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:906-956 serverHandshakeStateTLS13.sendServerFinished
+    /// Go: send Finished, advance the key schedule to the master secret,
+    /// switch the write half to the application traffic secret, and — if
+    /// no client certificate was requested — roll the transcript forward
+    /// and send session tickets in the same first flight.
+    ///
+    /// Deviation: the `c.quic != nil` arm is absent — goish ships no
+    /// QUIC transport.
+    pub(crate) fn sendServerFinished(&mut self) -> crate::error {
+        let suite = self.suite.unwrap();
+
+        // Go: finished := &finishedMsg{
+        //         verifyData: hs.suite.finishedHash(c.out.trafficSecret, hs.transcript) }
+        let mut finished = super::handshake_messages::finishedMsg::default();
+        finished.verifyData = suite
+            .finishedHash(
+                self.c.out.trafficSecret.clone(),
+                &*self.transcript.as_ref().unwrap().0,
+            )
+            .__into_vec();
+
+        // Go: if _, err := hs.c.writeHandshakeRecord(finished, hs.transcript); err != nil { return err }
+        let (_, err) = {
+            let transcript = self.transcript.as_mut().unwrap();
+            self.c.writeHandshakeRecord(&finished, Some(transcript))
+        };
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: "Derive secrets that take context through the server Finished."
+        //     hs.masterSecret = hs.handshakeSecret.MasterSecret()
+        self.masterSecret = Some(self.handshakeSecret.as_ref().unwrap().MasterSecret());
+
+        // Go: hs.trafficSecret = hs.masterSecret.ClientApplicationTrafficSecret(hs.transcript)
+        //     serverSecret := hs.masterSecret.ServerApplicationTrafficSecret(hs.transcript)
+        //     c.out.setTrafficSecret(hs.suite, QUICEncryptionLevelApplication, serverSecret)
+        let serverSecret = {
+            let transcript = self.transcript.as_ref().unwrap();
+            let masterSecret = self.masterSecret.as_ref().unwrap();
+            self.trafficSecret =
+                masterSecret.ClientApplicationTrafficSecret(&*transcript.0);
+            masterSecret.ServerApplicationTrafficSecret(&*transcript.0)
+        };
+        self.c.out.setTrafficSecret(
+            suite,
+            super::quic::QUICEncryptionLevelApplication,
+            serverSecret.clone(),
+        );
+
+        // Go: err := c.config.writeKeyLog(keyLogLabelClientTraffic, hs.clientHello.random, hs.trafficSecret)
+        //     if err != nil { c.sendAlert(alertInternalError); return err }
+        let clientHelloRandom =
+            crate::goslice::slice::__from_vec(self.clientHello.random.clone());
+        let err = self.c.config.writeKeyLog(
+            crate::gostring::string::from_static(super::common::keyLogLabelClientTraffic),
+            clientHelloRandom.clone(),
+            self.trafficSecret.clone(),
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertInternalError);
+            return err;
+        }
+        // Go: err = c.config.writeKeyLog(keyLogLabelServerTraffic, hs.clientHello.random, serverSecret)
+        //     if err != nil { c.sendAlert(alertInternalError); return err }
+        let err = self.c.config.writeKeyLog(
+            crate::gostring::string::from_static(super::common::keyLogLabelServerTraffic),
+            clientHelloRandom,
+            serverSecret,
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertInternalError);
+            return err;
+        }
+
+        // Go: c.ekm = hs.suite.exportKeyingMaterial(hs.masterSecret, hs.transcript)
+        self.c.ekm = Some(suite.exportKeyingMaterial(
+            self.masterSecret.as_ref().unwrap(),
+            &*self.transcript.as_ref().unwrap().0,
+        ));
+
+        // Go: "If we did not request client certificates, at this point we
+        //      can precompute the client finished and roll the transcript
+        //      forward to send session tickets in our first flight."
+        //     if !hs.requestClientCert() {
+        //         if err := hs.sendSessionTickets(); err != nil { return err } }
+        if !self.requestClientCert() {
+            let err = self.sendSessionTickets();
+            if err != crate::errors::nil {
+                return err;
+            }
+        }
+
+        // Go: return nil
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:972-990 serverHandshakeStateTLS13.sendSessionTickets
+    /// Go: precompute the client Finished, roll it into the transcript,
+    /// derive the resumption secret, and send a ticket if the client
+    /// would use one.
+    pub(crate) fn sendSessionTickets(&mut self) -> crate::error {
+        let suite = self.suite.unwrap();
+
+        // Go: hs.clientFinished = hs.suite.finishedHash(c.in.trafficSecret, hs.transcript)
+        //     finishedMsg := &finishedMsg{ verifyData: hs.clientFinished }
+        self.clientFinished = suite.finishedHash(
+            self.c.in_.trafficSecret.clone(),
+            &*self.transcript.as_ref().unwrap().0,
+        );
+        let mut finishedMsg = super::handshake_messages::finishedMsg::default();
+        finishedMsg.verifyData = self.clientFinished.clone().__into_vec();
+
+        // Go: if err := transcriptMsg(finishedMsg, hs.transcript); err != nil { return err }
+        let err = {
+            let transcript = self.transcript.as_mut().unwrap();
+            super::handshake_messages::transcriptMsg(&finishedMsg, transcript)
+        };
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: c.resumptionSecret = hs.masterSecret.ResumptionMasterSecret(hs.transcript)
+        self.c.resumptionSecret = self
+            .masterSecret
+            .as_ref()
+            .unwrap()
+            .ResumptionMasterSecret(&*self.transcript.as_ref().unwrap().0);
+
+        // Go: if !hs.shouldSendSessionTickets() { return nil }
+        if !self.shouldSendSessionTickets() {
+            return crate::errors::nil;
+        }
+        // Go: return c.sendSessionTicket(false, nil)
+        return self
+            .c
+            .sendSessionTicket(false, crate::goslice::slice::new());
+    }
+}
+
+use super::conn::Conn;
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:991-1045 Conn.sendSessionTicket
+    /// Go: "ticket_nonce, which must be unique per connection, is always
+    /// left at zero because we only ever send one ticket per connection."
+    ///
+    /// Go passes `extra [][]byte` with nil meaning none; goish spells
+    /// that as an empty slice.
+    pub(crate) fn sendSessionTicket(
+        &mut self,
+        earlyData: bool,
+        extra: crate::goslice::slice<crate::goslice::slice<crate::types::byte>>,
+    ) -> crate::error {
+        use crate::goslice::slice;
+        // Go: suite := cipherSuiteTLS13ByID(c.cipherSuite)
+        //     if suite == nil { return errors.New("tls: internal error: unknown cipher suite") }
+        let suite = match super::cipher_suites::cipherSuiteTLS13ByID(self.cipherSuite) {
+            Some(s) => s,
+            None => {
+                return crate::errors::New("tls: internal error: unknown cipher suite")
+            }
+        };
+        // Go: psk := tls13.ExpandLabel(suite.hash.New, c.resumptionSecret,
+        //         "resumption", nil, suite.hash.Size())
+        let hash = suite.hash;
+        let psk = crate::crypto::internal::fips140::tls13::ExpandLabel(
+            crate::hash::HashFunc::New(move || hash.New()),
+            self.resumptionSecret.clone(),
+            "resumption",
+            slice::new(),
+            suite.hash.Size(),
+        );
+
+        // Go: m := new(newSessionTicketMsgTLS13)
+        let mut m = super::handshake_messages::newSessionTicketMsgTLS13::default();
+
+        // Go: state := c.sessionState()
+        //     state.secret = psk
+        //     state.EarlyData = earlyData
+        //     state.Extra = extra
+        let mut state = self.sessionState();
+        state.secret = psk;
+        state.EarlyData = earlyData;
+        state.Extra = extra;
+        // Go: if c.config.WrapSession != nil {
+        //         m.label, err = c.config.WrapSession(c.connectionStateLocked(), state)
+        //         if err != nil { return err }
+        //     } else {
+        //         stateBytes, err := state.Bytes()
+        //         if err != nil { c.sendAlert(alertInternalError); return err }
+        //         m.label, err = c.config.encryptTicket(stateBytes, c.ticketKeys)
+        //         if err != nil { return err }
+        //     }
+        if let Some(wrap) = self.config.WrapSession.clone() {
+            let (label, err) = wrap(self.connectionStateLocked(), state);
+            if err != crate::errors::nil {
+                return err;
+            }
+            m.label = label;
+        } else {
+            let (stateBytes, err) = state.Bytes();
+            if err != crate::errors::nil {
+                self.sendAlert(super::alert::alertInternalError);
+                return err;
+            }
+            let (label, err) = self
+                .config
+                .encryptTicket(stateBytes, self.ticketKeys.clone());
+            if err != crate::errors::nil {
+                return err;
+            }
+            m.label = label;
+        }
+        // Go: m.lifetime = uint32(maxSessionTicketLifetime / time.Second)
+        m.lifetime = crate::uint32(
+            (super::common::maxSessionTicketLifetime / crate::time::Second).0,
+        );
+
+        // Go: "ticket_age_add is a random 32-bit value. See RFC 8446,
+        //      section 4.6.1. The value is not stored anywhere; we never
+        //      need to check the ticket age because 0-RTT is not
+        //      supported."
+        //     ageAdd := make([]byte, 4)
+        //     if _, err := c.config.rand().Read(ageAdd); err != nil { return err }
+        //     m.ageAdd = byteorder.LEUint32(ageAdd)
+        let mut ageAdd: slice<crate::types::byte> =
+            slice::__from_vec(alloc::vec![0u8; 4]);
+        let mut r = self.config.rand();
+        let (_, err) = r.Read(&mut ageAdd);
+        if err != crate::errors::nil {
+            return err;
+        }
+        m.ageAdd = crate::internal::byteorder::LEUint32(ageAdd);
+
+        // Go: if earlyData {
+        //         // RFC 9001, Section 4.6.1
+        //         m.maxEarlyData = 0xffffffff }
+        if earlyData {
+            m.maxEarlyData = 0xffffffff;
+        }
+
+        // Go: if _, err := c.writeHandshakeRecord(m, nil); err != nil { return err }
+        let (_, err) = self.writeHandshakeRecord(&m, None);
         if err != crate::errors::nil {
             return err;
         }
