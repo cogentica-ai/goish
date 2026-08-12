@@ -1,6 +1,6 @@
-// goishlint:ignore GOISH018 addBytesWithLength, addUint64, clone, marshalCertificate, marshalMsg, marshalWithoutBinders, originalBytes, readUint16LengthPrefixed, readUint24LengthPrefixed, readUint64, readUint8LengthPrefixed, transcriptMsg, unmarshalCertificate, updateBinders — handshake_messages.go is 1963 lines and 52 functions; this file is a deliberate SUBSET covering only the messages goish's own TLS 1.3 client and server exchange. The six it does port are anchored above and diffed against Go; everything listed here is genuinely absent, not renamed. See ROADMAP.md.
-// goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, marshalingFunction, newSessionTicketMsg, newSessionTicketMsgTLS13, serverHelloDoneMsg, serverKeyExchangeMsg, transcriptHash — same: the message types the subset does not handle.
-// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal, finishedMsg.unmarshal, certificateVerifyMsg.unmarshal, encryptedExtensionsMsg.unmarshal, unmarshalCertificate
+// goishlint:ignore GOISH018 marshalCertificate, transcriptMsg — marshalCertificate takes common.go's Certificate, which is not ported yet (mod[rs] declares a hand-written one), and transcriptMsg dispatches over the handshakeMessage interface, which arrives with conn[go]. Everything else in handshake_messages.go is here. See ROADMAP.md.
+// goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, newSessionTicketMsg, newSessionTicketMsgTLS13, serverKeyExchangeMsg, transcriptHash — the message types the subset does not handle.
+// go: file crypto/tls/handshake_messages.go decls: marshalingFunction.Marshal, addBytesWithLength, clientHelloMsg.marshalMsg, clientHelloMsg.marshal, clientHelloMsg.marshalWithoutBinders, clientHelloMsg.updateBinders, clientHelloMsg.originalBytes, clientHelloMsg.clone, serverHelloDoneMsg.marshal, serverHelloDoneMsg.unmarshal, clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal, finishedMsg.unmarshal, certificateVerifyMsg.unmarshal, encryptedExtensionsMsg.unmarshal, unmarshalCertificate
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -37,6 +37,7 @@ use crate::types::byte;
 
 pub(crate) const typeClientHello: byte = 1;
 pub(crate) const typeServerHello: byte = 2;
+pub(crate) const typeServerHelloDone: byte = 14;
 pub(crate) const typeNewSessionTicket: byte = 4;
 pub(crate) const typeServerKeyExchange: byte = 12;
 pub(crate) const typeClientKeyExchange: byte = 16;
@@ -307,6 +308,15 @@ pub(crate) struct clientHelloMsg {
     pub pskModes: Vec<byte>,
     pub pskIdentities: Vec<pskIdentity>,
     pub pskBinders: Vec<Vec<byte>>,
+    /// Go: `quicTransportParameters []byte`. Go marshals a zero-length
+    /// extension when the field is non-nil but empty, so the nil/empty
+    /// distinction is load-bearing and `Option` carries it.
+    pub quicTransportParameters: Option<Vec<byte>>,
+    pub encryptedClientHello: Vec<byte>,
+    /// Go: "extensions are only populated on the server-side of a
+    /// handshake" — the IDs in the order the peer sent them, which ECH's
+    /// outer-extension compression reads back.
+    pub extensions: Vec<u16>,
 }
 
 impl clientHelloMsg {
@@ -387,6 +397,8 @@ impl clientHelloMsg {
                 return false;
             }
             seenExts.push(extension);
+            // Go: m.extensions = append(m.extensions, extension)
+            self.extensions.push(extension);
 
             match extension {
                 extensionServerName => {
@@ -648,12 +660,25 @@ impl clientHelloMsg {
                         self.pskBinders.push(binder);
                     }
                 }
-                extensionQUICTransportParameters | extensionEncryptedClientHello => {
-                    // Recognized but unsupported by the Goish server;
-                    // consume the payload so the trailing extData.Empty()
-                    // check passes (Go stores these; we drop them).
+                extensionQUICTransportParameters => {
+                    // Go: RFC 9001, Section 8.2
+                    //     m.quicTransportParameters = make([]byte, len(extData))
+                    //     if !extData.CopyBytes(m.quicTransportParameters) { return false }
                     let n = extData.rest().len();
-                    let _ = extData.Skip(n);
+                    match extData.ReadBytes(n) {
+                        Some(v) => self.quicTransportParameters = Some(v.to_vec()),
+                        None => return false,
+                    }
+                }
+                extensionEncryptedClientHello => {
+                    // Go: echBytes := make([]byte, len(extData))
+                    //     if !extData.CopyBytes(echBytes) { return false }
+                    //     m.encryptedClientHello = echBytes
+                    let n = extData.rest().len();
+                    match extData.ReadBytes(n) {
+                        Some(v) => self.encryptedClientHello = v.to_vec(),
+                        None => return false,
+                    }
                 }
                 _ => {
                     // Ignore unknown extensions.
@@ -2066,4 +2091,518 @@ pub(crate) fn unmarshalCertificate(
     certificate.Certificate = slice::__from_vec(chain);
     certificate.SignedCertificateTimestamps = slice::__from_vec(scts);
     return true;
+}
+
+
+// ─── clientHelloMsg encoding ──────────────────────────────────────────
+//
+// Ported against the real `crypto/cryptobyte` Builder, as Go is: the
+// `builder` mini-port above predates that package landing in goish and
+// has no `AddValue`, which `addBytesWithLength` needs in order to fail
+// the build the way Go does on a wrong-length random.
+
+// Go: handshake_messages.go:16-18
+//   type marshalingFunction func(b *cryptobyte.Builder) error
+/// An adapter to allow the use of ordinary functions as
+/// `cryptobyte.MarshalingValue`.
+pub(crate) struct marshalingFunction<F>(pub F)
+where
+    F: Fn(&mut cryptobyte::Builder) -> crate::error;
+
+impl<F> cryptobyte::MarshalingValue for marshalingFunction<F>
+where
+    F: Fn(&mut cryptobyte::Builder) -> crate::error,
+{
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:20-22 marshalingFunction.Marshal
+    fn Marshal(&self, b: &mut cryptobyte::Builder) -> crate::error {
+        // Go: return f(b)
+        return (self.0)(b);
+    }
+}
+
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:26-34 addBytesWithLength
+/// Appends a sequence of bytes to the builder. If the length of the
+/// sequence is not the value specified, it sets an error on the builder.
+pub(crate) fn addBytesWithLength(b: &mut cryptobyte::Builder, v: &[byte], n: crate::types::int) {
+    // Go: b.AddValue(marshalingFunction(func(b *cryptobyte.Builder) error {
+    //         if len(v) != n { return fmt.Errorf("invalid value length: expected %d, got %d", n, len(v)) }
+    //         b.AddBytes(v)
+    //         return nil
+    //     }))
+    b.AddValue(&marshalingFunction(
+        |b: &mut cryptobyte::Builder| -> crate::error {
+            if v.len() as crate::types::int != n {
+                return crate::fmt::Errorf!(
+                    "invalid value length: expected %d, got %d",
+                    n,
+                    v.len() as crate::types::int
+                );
+            }
+            b.AddBytes(&slice::__from_vec(v.to_vec()));
+            return crate::errors::nil;
+        },
+    ));
+}
+
+// go: none — goish-only: Go writes `b.AddBytes(v)` on a `[]byte` field
+// directly; goish's builder takes `&slice<byte>`, so each call site
+// would otherwise repeat the wrap.
+fn bs(v: &[byte]) -> slice<byte> {
+    return slice::__from_vec(v.to_vec());
+}
+
+impl clientHelloMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:105-372 clientHelloMsg.marshalMsg
+    /// Encode the ClientHello. With `echInner` set, the extensions that
+    /// can be compressed by ECH are replaced by an `ech_outer_extensions`
+    /// list and the legacy_session_id is emitted empty — RFC 9180 and
+    /// draft-ietf-tls-esni.
+    pub(crate) fn marshalMsg(&self, echInner: bool) -> (slice<byte>, crate::error) {
+        // Go: var exts cryptobyte.Builder
+        let mut exts = cryptobyte::NewBuilder(slice::__from_vec(Vec::new()));
+        // Go: if len(m.serverName) > 0 { … } — RFC 6066, Section 3
+        if self.serverName.len() > 0 {
+            exts.AddUint16(extensionServerName);
+            let name = self.serverName.clone();
+            exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    exts.AddUint8(0); // name_type = host_name
+                    exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                        exts.AddBytes(&bs(name.as_bytes()));
+                    });
+                });
+            });
+        }
+        // Go: if len(m.supportedPoints) > 0 && !echInner { … } — RFC 4492, Section 5.1.2
+        if self.supportedPoints.len() > 0 && !echInner {
+            exts.AddUint16(extensionSupportedPoints);
+            let pts = self.supportedPoints.clone();
+            exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                exts.AddUint8LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    exts.AddBytes(&bs(&pts));
+                });
+            });
+        }
+        // Go: if m.ticketSupported && !echInner { … } — RFC 5077, Section 3.2
+        if self.ticketSupported && !echInner {
+            exts.AddUint16(extensionSessionTicket);
+            let t = self.sessionTicket.clone();
+            exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                exts.AddBytes(&bs(&t));
+            });
+        }
+        // Go: if m.secureRenegotiationSupported && !echInner { … } — RFC 5746, Section 3.2
+        if self.secureRenegotiationSupported && !echInner {
+            exts.AddUint16(extensionRenegotiationInfo);
+            let r = self.secureRenegotiation.clone();
+            exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                exts.AddUint8LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    exts.AddBytes(&bs(&r));
+                });
+            });
+        }
+        // Go: if m.extendedMasterSecret && !echInner { … } — RFC 7627
+        if self.extendedMasterSecret && !echInner {
+            exts.AddUint16(extensionExtendedMasterSecret);
+            exts.AddUint16(0); // empty extension_data
+        }
+        // Go: if m.scts { … } — RFC 6962, Section 3.3.1
+        if self.scts {
+            exts.AddUint16(extensionSCT);
+            exts.AddUint16(0); // empty extension_data
+        }
+        // Go: if m.earlyData { … } — RFC 8446, Section 4.2.10
+        if self.earlyData {
+            exts.AddUint16(extensionEarlyData);
+            exts.AddUint16(0); // empty extension_data
+        }
+        // Go: if m.quicTransportParameters != nil { … } — RFC 9001, Section 8.2
+        //
+        // "marshal zero-length parameters when present": the test is on
+        // nil, not on length, which is why the field is an Option.
+        if self.quicTransportParameters.is_some() {
+            exts.AddUint16(extensionQUICTransportParameters);
+            let q = self.quicTransportParameters.clone().unwrap();
+            exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                exts.AddBytes(&bs(&q));
+            });
+        }
+        // Go: if len(m.encryptedClientHello) > 0 { … }
+        if self.encryptedClientHello.len() > 0 {
+            exts.AddUint16(extensionEncryptedClientHello);
+            let e = self.encryptedClientHello.clone();
+            exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                exts.AddBytes(&bs(&e));
+            });
+        }
+        // Go: Note that any extension that can be compressed during ECH
+        // must be contiguous. If any additional extensions are to be
+        // compressed they must be added to the following block, so that
+        // they can be properly decompressed on the other side.
+        // Go: var echOuterExts []uint16
+        let mut echOuterExts: Vec<u16> = Vec::new();
+        // Go: if m.ocspStapling { … } — RFC 4366, Section 3.6
+        if self.ocspStapling {
+            if echInner {
+                echOuterExts.push(extensionStatusRequest);
+            } else {
+                exts.AddUint16(extensionStatusRequest);
+                exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    exts.AddUint8(1); // status_type = ocsp
+                    exts.AddUint16(0); // empty responder_id_list
+                    exts.AddUint16(0); // empty request_extensions
+                });
+            }
+        }
+        // Go: if len(m.supportedCurves) > 0 { … } — RFC 4492 §5.1.1, RFC 8446 §4.2.7
+        if self.supportedCurves.len() > 0 {
+            if echInner {
+                echOuterExts.push(extensionSupportedCurves);
+            } else {
+                exts.AddUint16(extensionSupportedCurves);
+                let cs = self.supportedCurves.clone();
+                exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                        for curve in cs.iter() {
+                            exts.AddUint16(*curve);
+                        }
+                    });
+                });
+            }
+        }
+        // Go: if len(m.supportedSignatureAlgorithms) > 0 { … } — RFC 5246 §7.4.1.4.1
+        if self.supportedSignatureAlgorithms.len() > 0 {
+            if echInner {
+                echOuterExts.push(extensionSignatureAlgorithms);
+            } else {
+                exts.AddUint16(extensionSignatureAlgorithms);
+                let algs = self.supportedSignatureAlgorithms.clone();
+                exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                        for sigAlgo in algs.iter() {
+                            exts.AddUint16(*sigAlgo);
+                        }
+                    });
+                });
+            }
+        }
+        // Go: if len(m.supportedSignatureAlgorithmsCert) > 0 { … } — RFC 8446 §4.2.3
+        if self.supportedSignatureAlgorithmsCert.len() > 0 {
+            if echInner {
+                echOuterExts.push(extensionSignatureAlgorithmsCert);
+            } else {
+                exts.AddUint16(extensionSignatureAlgorithmsCert);
+                let algs = self.supportedSignatureAlgorithmsCert.clone();
+                exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                        for sigAlgo in algs.iter() {
+                            exts.AddUint16(*sigAlgo);
+                        }
+                    });
+                });
+            }
+        }
+        // Go: if len(m.alpnProtocols) > 0 { … } — RFC 7301, Section 3.1
+        if self.alpnProtocols.len() > 0 {
+            if echInner {
+                echOuterExts.push(extensionALPN);
+            } else {
+                exts.AddUint16(extensionALPN);
+                let protos = self.alpnProtocols.clone();
+                exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                        for proto in protos.iter() {
+                            exts.AddUint8LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                                exts.AddBytes(&bs(proto.as_bytes()));
+                            });
+                        }
+                    });
+                });
+            }
+        }
+        // Go: if len(m.supportedVersions) > 0 { … } — RFC 8446, Section 4.2.1
+        if self.supportedVersions.len() > 0 {
+            if echInner {
+                echOuterExts.push(extensionSupportedVersions);
+            } else {
+                exts.AddUint16(extensionSupportedVersions);
+                let vs = self.supportedVersions.clone();
+                exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    exts.AddUint8LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                        for vers in vs.iter() {
+                            exts.AddUint16(*vers);
+                        }
+                    });
+                });
+            }
+        }
+        // Go: if len(m.cookie) > 0 { … } — RFC 8446, Section 4.2.2
+        if self.cookie.len() > 0 {
+            if echInner {
+                echOuterExts.push(extensionCookie);
+            } else {
+                exts.AddUint16(extensionCookie);
+                let c = self.cookie.clone();
+                exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                        exts.AddBytes(&bs(&c));
+                    });
+                });
+            }
+        }
+        // Go: if len(m.keyShares) > 0 { … } — RFC 8446, Section 4.2.8
+        if self.keyShares.len() > 0 {
+            if echInner {
+                echOuterExts.push(extensionKeyShare);
+            } else {
+                exts.AddUint16(extensionKeyShare);
+                let kss = self.keyShares.clone();
+                exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                        for ks in kss.iter() {
+                            exts.AddUint16(ks.group);
+                            let d = ks.data.clone();
+                            exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                                exts.AddBytes(&bs(&d));
+                            });
+                        }
+                    });
+                });
+            }
+        }
+        // Go: if len(m.pskModes) > 0 { … } — RFC 8446, Section 4.2.9
+        if self.pskModes.len() > 0 {
+            if echInner {
+                echOuterExts.push(extensionPSKModes);
+            } else {
+                exts.AddUint16(extensionPSKModes);
+                let pm = self.pskModes.clone();
+                exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    exts.AddUint8LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                        exts.AddBytes(&bs(&pm));
+                    });
+                });
+            }
+        }
+        // Go: if len(echOuterExts) > 0 && echInner { … }
+        if echOuterExts.len() > 0 && echInner {
+            exts.AddUint16(super::common::extensionECHOuterExtensions);
+            let oe = echOuterExts.clone();
+            exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                exts.AddUint8LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    for e in oe.iter() {
+                        exts.AddUint16(*e);
+                    }
+                });
+            });
+        }
+        // Go: if len(m.pskIdentities) > 0 { // pre_shared_key must be the
+        //     last extension } — RFC 8446, Section 4.2.11
+        if self.pskIdentities.len() > 0 {
+            exts.AddUint16(extensionPreSharedKey);
+            let ids = self.pskIdentities.clone();
+            let binders = self.pskBinders.clone();
+            exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    for psk in ids.iter() {
+                        let lab = psk.label.clone();
+                        exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                            exts.AddBytes(&bs(&lab));
+                        });
+                        exts.AddUint32(psk.obfuscatedTicketAge);
+                    }
+                });
+                exts.AddUint16LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                    for binder in binders.iter() {
+                        let b2 = binder.clone();
+                        exts.AddUint8LengthPrefixed(|exts: &mut cryptobyte::Builder| {
+                            exts.AddBytes(&bs(&b2));
+                        });
+                    }
+                });
+            });
+        }
+        // Go: extBytes, err := exts.Bytes(); if err != nil { return nil, err }
+        let (extBytes, err) = exts.Bytes();
+        if err != crate::errors::nil {
+            return (slice::__from_vec(Vec::new()), err);
+        }
+
+        // Go: var b cryptobyte.Builder
+        //     b.AddUint8(typeClientHello)
+        let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::new()));
+        b.AddUint8(typeClientHello);
+        let vers = self.vers;
+        let random = self.random.clone();
+        let sessionId = self.sessionId.clone();
+        let cipherSuites = self.cipherSuites.clone();
+        let compressionMethods = self.compressionMethods.clone();
+        b.AddUint24LengthPrefixed(|b: &mut cryptobyte::Builder| {
+            b.AddUint16(vers);
+            addBytesWithLength(b, &random, 32);
+            b.AddUint8LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                if !echInner {
+                    b.AddBytes(&bs(&sessionId));
+                }
+            });
+            b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                for suite in cipherSuites.iter() {
+                    b.AddUint16(*suite);
+                }
+            });
+            b.AddUint8LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                b.AddBytes(&bs(&compressionMethods));
+            });
+
+            if extBytes.Len() > 0 {
+                b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                    b.AddBytes(&extBytes);
+                });
+            }
+        });
+
+        // Go: return b.Bytes()
+        return b.Bytes();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:374-376 clientHelloMsg.marshal
+    pub(crate) fn marshal(&self) -> (slice<byte>, crate::error) {
+        // Go: return m.marshalMsg(false)
+        return self.marshalMsg(false);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:381-398 clientHelloMsg.marshalWithoutBinders
+    /// The ClientHello through the `PreSharedKeyExtension.identities`
+    /// field, per RFC 8446 §4.2.11.2. `m.pskBinders` must already be set
+    /// to slices of the correct length.
+    pub(crate) fn marshalWithoutBinders(&self) -> (slice<byte>, crate::error) {
+        // Go: bindersLen := 2 // uint16 length prefix
+        //     for _, binder := range m.pskBinders { bindersLen += 1; bindersLen += len(binder) }
+        let mut bindersLen: usize = 2;
+        for binder in self.pskBinders.iter() {
+            bindersLen += 1; // uint8 length prefix
+            bindersLen += binder.len();
+        }
+
+        // Go: var fullMessage []byte
+        //     if m.original != nil { fullMessage = m.original }
+        //     else { fullMessage, err = m.marshal(); if err != nil { return nil, err } }
+        let fullMessage: slice<byte>;
+        if !self.original.is_empty() {
+            fullMessage = slice::__from_vec(self.original.clone());
+        } else {
+            let (fm, err) = self.marshal();
+            if err != crate::errors::nil {
+                return (slice::__from_vec(Vec::new()), err);
+            }
+            fullMessage = fm;
+        }
+        // Go: return fullMessage[:len(fullMessage)-bindersLen], nil
+        let n = fullMessage.Len();
+        return (
+            fullMessage.slice(0, n - bindersLen as crate::types::int),
+            crate::errors::nil,
+        );
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:402-414 clientHelloMsg.updateBinders
+    /// Update `m.pskBinders`. The supplied binders must have the same
+    /// length as the current ones.
+    ///
+    ///
+    /// Go's `[][]byte` is spelled `slice<slice<byte>>` here rather than
+    /// the `Vec<Vec<byte>>` the private field uses, because this one
+    /// crosses a package boundary.
+    pub(crate) fn updateBinders(&mut self, pskBinders: slice<slice<byte>>) -> crate::error {
+        // Go: if len(pskBinders) != len(m.pskBinders) { return errors.New(…) }
+        if pskBinders.Len() as usize != self.pskBinders.len() {
+            return crate::errors::New("tls: internal error: pskBinders length mismatch");
+        }
+        // Go: for i := range m.pskBinders {
+        //         if len(pskBinders[i]) != len(m.pskBinders[i]) { return errors.New(…) }
+        //     }
+        let mut i: usize = 0;
+        while i < self.pskBinders.len() {
+            if pskBinders[i].Len() as usize != self.pskBinders[i].len() {
+                return crate::errors::New("tls: internal error: pskBinders length mismatch");
+            }
+            i += 1;
+        }
+        // Go: m.pskBinders = pskBinders
+        let mut next: Vec<Vec<byte>> = Vec::new();
+        for (_, b) in crate::range!(pskBinders) {
+            let raw: &[byte] = b;
+            next.push(raw.to_vec());
+        }
+        self.pskBinders = next;
+
+        // Go: return nil
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:682-684 clientHelloMsg.originalBytes
+    pub(crate) fn originalBytes(&self) -> slice<byte> {
+        // Go: return m.original
+        return slice::__from_vec(self.original.clone());
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:686-717 clientHelloMsg.clone
+    /// A deep copy. Go clones every slice field; the two ECH-related
+    /// fields are cloned too, but `extensions` deliberately is not — it
+    /// is server-side scratch and Go leaves it nil in the copy.
+    pub(crate) fn clone(&self) -> clientHelloMsg {
+        return clientHelloMsg {
+            original: self.original.clone(),
+            vers: self.vers,
+            random: self.random.clone(),
+            sessionId: self.sessionId.clone(),
+            cipherSuites: self.cipherSuites.clone(),
+            compressionMethods: self.compressionMethods.clone(),
+            serverName: self.serverName.clone(),
+            ocspStapling: self.ocspStapling,
+            supportedCurves: self.supportedCurves.clone(),
+            supportedPoints: self.supportedPoints.clone(),
+            ticketSupported: self.ticketSupported,
+            sessionTicket: self.sessionTicket.clone(),
+            supportedSignatureAlgorithms: self.supportedSignatureAlgorithms.clone(),
+            supportedSignatureAlgorithmsCert: self.supportedSignatureAlgorithmsCert.clone(),
+            secureRenegotiationSupported: self.secureRenegotiationSupported,
+            secureRenegotiation: self.secureRenegotiation.clone(),
+            extendedMasterSecret: self.extendedMasterSecret,
+            alpnProtocols: self.alpnProtocols.clone(),
+            scts: self.scts,
+            supportedVersions: self.supportedVersions.clone(),
+            cookie: self.cookie.clone(),
+            keyShares: self.keyShares.clone(),
+            earlyData: self.earlyData,
+            pskModes: self.pskModes.clone(),
+            pskIdentities: self.pskIdentities.clone(),
+            pskBinders: self.pskBinders.clone(),
+            quicTransportParameters: self.quicTransportParameters.clone(),
+            encryptedClientHello: self.encryptedClientHello.clone(),
+            extensions: Vec::new(),
+        };
+    }
+}
+
+// Go: handshake_messages.go:1653
+//   type serverHelloDoneMsg struct{}
+/// The TLS 1.0-1.2 ServerHelloDone: a bare four-byte header.
+#[derive(Clone, Default)]
+pub(crate) struct serverHelloDoneMsg {}
+
+impl serverHelloDoneMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1655-1659 serverHelloDoneMsg.marshal
+    pub(crate) fn marshal(&self) -> (slice<byte>, crate::error) {
+        // Go: x := make([]byte, 4); x[0] = typeServerHelloDone; return x, nil
+        let mut x: Vec<byte> = alloc::vec![0u8; 4];
+        x[0] = typeServerHelloDone;
+        return (slice::__from_vec(x), crate::errors::nil);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1661-1663 serverHelloDoneMsg.unmarshal
+    pub(crate) fn unmarshal(&mut self, data: &[byte]) -> bool {
+        // Go: return len(data) == 4
+        return data.len() == 4;
+    }
 }

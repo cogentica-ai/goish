@@ -2102,3 +2102,175 @@ pub fn key_schedule_generateECDHEKey(
         crate::gostring::string::from_static(""),
     );
 }
+
+// go: none — goish-only: handshake_messages.go's message types are all
+// unexported in Go, where the tests are in-package. This builds the same
+// fully-populated ClientHello the goref test does, so the example can
+// pin its encoding byte-for-byte.
+fn handshake_messages_fullClientHello() -> handshake_messages::clientHelloMsg {
+    let mut m = handshake_messages::clientHelloMsg::default();
+    m.vers = common::VersionTLS12;
+    m.random = (0..32u16).map(|i| i as crate::types::byte).collect();
+    m.sessionId = alloc::vec![1u8, 2, 3, 4];
+    m.cipherSuites = alloc::vec![
+        cipher_suites::TLS_AES_128_GCM_SHA256,
+        cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+    ];
+    m.compressionMethods = alloc::vec![0u8];
+    m.serverName = "example.com".into();
+    m.ocspStapling = true;
+    m.supportedCurves = alloc::vec![common::X25519.0, common::CurveP256.0];
+    m.supportedPoints = alloc::vec![0u8];
+    m.ticketSupported = true;
+    m.sessionTicket = alloc::vec![9u8, 9];
+    m.supportedSignatureAlgorithms =
+        alloc::vec![common::PSSWithSHA256.0, common::ECDSAWithP256AndSHA256.0];
+    m.supportedSignatureAlgorithmsCert = alloc::vec![common::PKCS1WithSHA256.0];
+    m.secureRenegotiationSupported = true;
+    m.secureRenegotiation = alloc::vec![];
+    m.extendedMasterSecret = true;
+    m.alpnProtocols = alloc::vec!["h2".into(), "http/1.1".into()];
+    m.scts = true;
+    m.supportedVersions = alloc::vec![common::VersionTLS13, common::VersionTLS12];
+    m.cookie = alloc::vec![7u8, 7, 7];
+    m.keyShares = alloc::vec![handshake_messages::keyShare {
+        group: common::X25519.0,
+        data: alloc::vec![5u8, 5, 5, 5],
+    }];
+    m.earlyData = true;
+    m.pskModes = alloc::vec![1u8];
+    m.pskIdentities = alloc::vec![handshake_messages::pskIdentity {
+        label: alloc::vec![0xabu8, 0xcd],
+        obfuscatedTicketAge: 0x11223344,
+    }];
+    m.pskBinders = alloc::vec![alloc::vec![1u8, 2, 3, 4]];
+    m.quicTransportParameters = Some(alloc::vec![]);
+    m.encryptedClientHello = alloc::vec![0xdeu8, 0xad];
+    return m;
+}
+
+// go: none — goish-only: see `handshake_messages_fullClientHello`.
+// Returns `(marshal, marshalMsg(echInner), marshalWithoutBinders)`.
+#[doc(hidden)]
+pub fn handshake_messages_clientHelloEncodings() -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let m = handshake_messages_fullClientHello();
+    let (outer, _) = m.marshal();
+    let (inner, _) = m.marshalMsg(true);
+    let (wb, _) = m.marshalWithoutBinders();
+    return (outer, inner, wb);
+}
+
+// go: none — goish-only: see `handshake_messages_fullClientHello`.
+// Round-trips the encoding and reports what survived: `(unmarshal ok,
+// re-marshal identical, originalBytes identical, extension count,
+// quicTransportParameters present, encryptedClientHello)`.
+#[doc(hidden)]
+pub fn handshake_messages_clientHelloRoundTrip() -> (
+    bool,
+    bool,
+    bool,
+    crate::types::int,
+    bool,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let m = handshake_messages_fullClientHello();
+    let (outer, _) = m.marshal();
+    let raw: &[crate::types::byte] = &outer;
+    let mut r = handshake_messages::clientHelloMsg::default();
+    let ok = r.unmarshal(raw);
+    let (re, _) = r.marshal();
+    let orig = r.originalBytes();
+    return (
+        ok,
+        re == outer,
+        orig == outer,
+        r.extensions.len() as crate::types::int,
+        r.quicTransportParameters.is_some(),
+        crate::goslice::slice::__from_vec(r.encryptedClientHello.clone()),
+    );
+}
+
+// go: none — goish-only: see `handshake_messages_fullClientHello`.
+#[doc(hidden)]
+pub fn handshake_messages_clientHelloCloneEqual() -> bool {
+    let m = handshake_messages_fullClientHello();
+    let (a, _) = m.marshal();
+    let (b, _) = m.clone().marshal();
+    return a == b;
+}
+
+// go: none — goish-only: see `handshake_messages_fullClientHello`.
+// `which` picks the case: 0 = matching binders, 1 = wrong count,
+// 2 = right count but wrong length. Returns `(errText, tail)`.
+#[doc(hidden)]
+pub fn handshake_messages_clientHelloUpdateBinders(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let mut m = handshake_messages_fullClientHello();
+    let binders: crate::goslice::slice<crate::goslice::slice<crate::types::byte>> = if which == 0 {
+        crate::goslice::slice::__from_vec(alloc::vec![crate::goslice::slice::__from_vec(
+            alloc::vec![9u8, 9, 9, 9]
+        )])
+    } else if which == 1 {
+        crate::goslice::slice::new()
+    } else {
+        crate::goslice::slice::__from_vec(alloc::vec![crate::goslice::slice::__from_vec(
+            alloc::vec![1u8]
+        )])
+    };
+    let err = m.updateBinders(binders);
+    let (out, _) = m.marshal();
+    let n = out.Len();
+    return (
+        if err == crate::errors::nil {
+            crate::gostring::string::from_static("")
+        } else {
+            err.Error()
+        },
+        out.slice(n - 8, n),
+    );
+}
+
+// go: none — goish-only: see `handshake_messages_fullClientHello`. A
+// ClientHello with no extensions at all, and one whose random is the
+// wrong length — the case addBytesWithLength exists to catch.
+#[doc(hidden)]
+pub fn handshake_messages_clientHelloMinimal(
+    randomLen: crate::types::int,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+) {
+    let mut m = handshake_messages::clientHelloMsg::default();
+    m.vers = common::VersionTLS12;
+    m.random = alloc::vec![0u8; randomLen as usize];
+    m.cipherSuites = alloc::vec![cipher_suites::TLS_AES_128_GCM_SHA256];
+    m.compressionMethods = alloc::vec![0u8];
+    let (out, err) = m.marshal();
+    if err != crate::errors::nil {
+        return (crate::goslice::slice::new(), err.Error());
+    }
+    return (out, crate::gostring::string::from_static(""));
+}
+
+// go: none — goish-only: see `handshake_messages_fullClientHello`.
+#[doc(hidden)]
+pub fn handshake_messages_serverHelloDone() -> (
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    bool,
+) {
+    let mut m = handshake_messages::serverHelloDoneMsg::default();
+    let (out, _) = m.marshal();
+    let raw: &[crate::types::byte] = &out;
+    let ok4 = m.unmarshal(raw);
+    let ok3 = m.unmarshal(&raw[..3]);
+    return (out, ok4, ok3);
+}

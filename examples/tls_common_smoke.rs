@@ -1088,6 +1088,62 @@ fn main() {
     let (_, _, e5) = tls::key_schedule_generateECDHEKey(&mut constReader(7), tls::X25519MLKEM768);
     eq("generateECDHEKey hybrid is rejected", e5, "tls: internal error: unsupported curve");
 
+    // ─── handshake_messages.go: the ClientHello encoder. The three hex
+    //     strings are the full 226-byte message, the ECH-inner variant
+    //     (which replaces nine extensions with an ech_outer_extensions
+    //     list and blanks the legacy_session_id), and the truncation
+    //     that RFC 8446 §4.2.11.2 signs over. All from goref.sh.
+    let (chOuter, chInner, chNoBinders) = tls::handshake_messages_clientHelloEncodings();
+    check_n("clientHello marshal len", chOuter.Len(), 226);
+    eq("clientHello marshal", hexOf(chOuter),
+       "010000de0303000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f040102030400041301c02f010000ad00000010000e00000b6578616d706c652e636f6d000b00020100002300020909ff010001000017000000120000002a000000390000fe0d0002dead000500050100000000000a00060004001d0017000d000600040804040300320004000204010010000e000c02683208687474702f312e31002b00050403040303002c000500030707070033000a0008001d000405050505002d000201010029001100080002abcd1122334400050401020304");
+    eq("clientHello marshalMsg(echInner)", hexOf(chInner),
+       "0100007f0303000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0000041301c02f0100005200000010000e00000b6578616d706c652e636f6d00120000002a000000390000fe0d0002deadfd000013120005000a000d00320010002b002c0033002d0029001100080002abcd1122334400050401020304");
+    check_n("clientHello marshalWithoutBinders len", chNoBinders.Len(), 219);
+    eq("clientHello marshalWithoutBinders", hexOf(chNoBinders),
+       "010000de0303000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f040102030400041301c02f010000ad00000010000e00000b6578616d706c652e636f6d000b00020100002300020909ff010001000017000000120000002a000000390000fe0d0002dead000500050100000000000a00060004001d0017000d000600040804040300320004000204010010000e000c02683208687474702f312e31002b00050403040303002c000500030707070033000a0008001d000405050505002d000201010029001100080002abcd11223344");
+
+    // The round trip is the real check on the two extensions the port
+    // used to drop: quic_transport_parameters (present but zero-length,
+    // which is why the field carries a nil/empty distinction) and
+    // encrypted_client_hello. Go records 19 extension IDs here.
+    let (rtOK, rtSame, rtOrig, rtExts, rtQuic, rtECH) =
+        tls::handshake_messages_clientHelloRoundTrip();
+    check("clientHello unmarshal ok", rtOK);
+    check("clientHello re-marshal is identical", rtSame);
+    check("clientHello originalBytes is the input", rtOrig);
+    check_n("clientHello extensions recorded", rtExts, 19);
+    check("clientHello quicTransportParameters present but empty", rtQuic);
+    eq("clientHello encryptedClientHello", hexOf(rtECH), "dead");
+
+    check("clientHello clone re-marshals identically",
+          tls::handshake_messages_clientHelloCloneEqual());
+
+    let (ubErr0, ubTail) = tls::handshake_messages_clientHelloUpdateBinders(0);
+    eq("updateBinders matching err", ubErr0, "");
+    eq("updateBinders rewrote the binder", hexOf(ubTail), "4400050409090909");
+    let (ubErr1, _) = tls::handshake_messages_clientHelloUpdateBinders(1);
+    eq("updateBinders count mismatch", ubErr1,
+       "tls: internal error: pskBinders length mismatch");
+    let (ubErr2, _) = tls::handshake_messages_clientHelloUpdateBinders(2);
+    eq("updateBinders length mismatch", ubErr2,
+       "tls: internal error: pskBinders length mismatch");
+
+    let (chMin, chMinErr) = tls::handshake_messages_clientHelloMinimal(32);
+    eq("clientHello minimal err", chMinErr, "");
+    eq("clientHello minimal", hexOf(chMin),
+       "010000290303000000000000000000000000000000000000000000000000000000000000000000000213010100");
+    // addBytesWithLength exists to make this a build error, not a
+    // silently short message.
+    let (_, chBadErr) = tls::handshake_messages_clientHelloMinimal(31);
+    eq("clientHello wrong random length", chBadErr,
+       "invalid value length: expected 32, got 31");
+
+    let (shd, shdOK4, shdOK3) = tls::handshake_messages_serverHelloDone();
+    eq("serverHelloDone marshal", hexOf(shd), "0e000000");
+    check("serverHelloDone unmarshal 4 bytes", shdOK4);
+    check("serverHelloDone rejects 3 bytes", !shdOK3);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
