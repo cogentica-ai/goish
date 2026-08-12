@@ -2053,6 +2053,42 @@ fn main() {
     eq("newRecordHeaderError message", rheMsg, "tls: boom");
     eq("newRecordHeaderError captures the record header", hexOf(rheHeader), "1603010005");
 
+    // ─── conn.go: the record write path. Wire bytes from goref.sh.
+    let (wr0, _, _, _) = tls::conn_writeRecord(0);
+    // With no negotiated version yet the record header says TLS 1.0 —
+    // some servers reject a higher version on the initial ClientHello.
+    eq("writeRecordLocked with no version yet", hexOf(wr0), "1603010003010203");
+    let (wr1, _, _, _) = tls::conn_writeRecord(1);
+    // RFC 8446 §5.1 freezes the record-layer version at 1.2 for TLS 1.3.
+    eq("writeRecordLocked freezes TLS 1.3 records at 0x0303", hexOf(wr1),
+       "16030300020405");
+    let (wr2, _, _, _) = tls::conn_writeRecord(2);
+    eq("writeRecordLocked at TLS 1.2", hexOf(wr2), "160303000106");
+    let (wr3, beforeFlush, flushed, stillBuffering) = tls::conn_writeRecord(3);
+    check_n("writeRecordLocked while buffering writes nothing", beforeFlush, 0);
+    check_n("flush writes the buffered record", flushed, 6);
+    eq("flush emits the buffered record", hexOf(wr3), "160301000107");
+    check("flush clears the buffering flag", !stillBuffering);
+
+    // close_notify is level warning (0x01) and is NOT an error;
+    // everything else is level fatal (0x02) and poisons the half-conn.
+    let (al0, aw0) = tls::conn_sendAlert(0);
+    eq("sendAlert close_notify err", al0, "");
+    eq("sendAlert close_notify wire", hexOf(aw0), "15030300020100");
+    let (al1, aw1) = tls::conn_sendAlert(1);
+    eq("sendAlert bad_record_mac err", al1, "tls: bad record MAC");
+    eq("sendAlert bad_record_mac wire", hexOf(aw1), "15030300020214");
+    let (al2, aw2) = tls::conn_sendAlert(2);
+    eq("sendAlert no_renegotiation err", al2, "tls: no renegotiation");
+    // no_renegotiation is a warning on the wire but still an error to
+    // the caller — the level byte and the return value disagree.
+    eq("sendAlert no_renegotiation wire", hexOf(aw2), "15030300020164");
+    let (al3, aw3) = tls::conn_sendAlert(3);
+    eq("writeChangeCipherRecord without a next cipher", al3, "tls: internal error");
+    // The CCS record still goes out; the internal-error alert follows it.
+    eq("writeChangeCipherRecord wire", hexOf(aw3),
+       "14030300010115030300020250");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

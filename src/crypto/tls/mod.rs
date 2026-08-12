@@ -4286,3 +4286,83 @@ pub fn conn_newRecordHeaderError() -> (
         crate::goslice::slice::__from_vec(e.RecordHeader.to_vec()),
     );
 }
+
+// go: none — goish-only: Conn's write path is unexported in Go, where
+// the tests are in-package. Writes one record to an in-memory net::Conn
+// and hands back what went on the wire. `which`: 0 = version unset,
+// 1 = TLS 1.3, 2 = TLS 1.2, 3 = buffered then flushed.
+#[doc(hidden)]
+pub fn conn_writeRecord(
+    which: crate::types::int,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::int,
+    crate::types::int,
+    bool,
+) {
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink.clone());
+    let data = match which {
+        0 => alloc::vec![1u8, 2, 3],
+        1 => alloc::vec![4u8, 5],
+        2 => alloc::vec![6u8],
+        _ => alloc::vec![7u8],
+    };
+    if which == 1 {
+        c.__setVers(common::VersionTLS13);
+    } else if which == 2 {
+        c.__setVers(common::VersionTLS12);
+    } else if which == 3 {
+        c.__setBuffering(true);
+    }
+    let (n, _) = c.writeRecordLocked(
+        common::recordTypeHandshake,
+        crate::goslice::slice::__from_vec(data),
+    );
+    let mut flushed: crate::types::int = 0;
+    let mut beforeFlush: crate::types::int = 0;
+    if which == 3 {
+        beforeFlush = sink.Lock().Len();
+        let (fnum, _) = c.flush();
+        flushed = fnum;
+    }
+    let out = sink.Lock().clone();
+    let _ = n;
+    return (out, beforeFlush, flushed, c.__buffering());
+}
+
+// go: none — goish-only: see `conn_writeRecord`. `which`: 0 = close
+// notify, 1 = bad record MAC, 2 = no renegotiation, 3 = a
+// change_cipher_spec with no next cipher. Reports `(errText, wire)`.
+#[doc(hidden)]
+pub fn conn_sendAlert(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink.clone());
+    c.__setVers(common::VersionTLS12);
+    let err = if which == 0 {
+        c.sendAlert(alert::alertCloseNotify)
+    } else if which == 1 {
+        c.sendAlert(alert::alertBadRecordMAC)
+    } else if which == 2 {
+        c.sendAlert(alert::alertNoRenegotiation)
+    } else {
+        c.writeChangeCipherRecord()
+    };
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (text, sink.Lock().clone());
+}

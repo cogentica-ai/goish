@@ -1,4 +1,4 @@
-// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked
+// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert
 //
 // crypto/tls — the record layer's cipher state.
 //
@@ -8,9 +8,9 @@
 // its `decrypt`/`encrypt`, `atLeastReader` and the free functions they
 // need — none of which touches a `Conn`.
 //
-// goishlint:ignore GOISH018 readRecord, readChangeCipherSpec, readRecordOrCCS, retryReadRecord, readFromUntil, sendAlertLocked, sendAlert, flush, writeRecordLocked, writeHandshakeRecord, writeChangeCipherRecord, readHandshakeBytes, readHandshake, unmarshalHandshakeMessage, handleRenegotiation, handlePostHandshakeMessage, handleKeyUpdate, CloseWrite, closeNotify, HandshakeContext, handshakeContext, write, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
+// goishlint:ignore GOISH018 readRecord, readChangeCipherSpec, readRecordOrCCS, retryReadRecord, readFromUntil, writeHandshakeRecord, readHandshakeBytes, readHandshake, unmarshalHandshakeMessage, handleRenegotiation, handlePostHandshakeMessage, handleKeyUpdate, CloseWrite, closeNotify, HandshakeContext, handshakeContext, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
 // goishlint:ignore GOISH019  — same.
-// goishlint:ignore GOISH021 outBufPool, errShutdown, errEarlyCloseWrite, maxUselessBytes, tlsunsafeekm — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write.
+// goishlint:ignore GOISH021 errShutdown, errEarlyCloseWrite, maxUselessBytes, tlsunsafeekm, outBufPool — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write; outBufPool is a sync.Pool whose only purpose is to avoid one allocation per record, which goish does not model.
 //
 // One deviation: `setErrorLocked` asserts `err.(net.Error)` in Go, to
 // wrap a transient network error as permanent. goish's `net` exposes no
@@ -1079,6 +1079,24 @@ impl Conn {
         self.clientFinished = [1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     }
 
+
+    // go: none — goish-only: an in-memory net::Conn so the reference
+    // tests can see what the write path put on the wire. Go's tests are
+    // in-package and build one inline.
+    #[doc(hidden)]
+    pub fn __setMemConn(
+        &mut self,
+        sink: alloc::sync::Arc<crate::sync::Mutex<slice<byte>>>,
+    ) {
+        self.conn = Some(alloc::boxed::Box::new(memConn { sink }));
+    }
+    // go: none — goish-only: see `__setMemConn`.
+    #[doc(hidden)]
+    pub fn __setBuffering(&mut self, v: bool) { self.buffering = v; }
+    // go: none — goish-only: see `__setMemConn`.
+    #[doc(hidden)]
+    pub fn __buffering(&self) -> bool { return self.buffering; }
+
     // go: sdk 1.25.5 crypto/tls/conn.go:99-101 Conn.LocalAddr
     /// Go: "LocalAddr returns the local network address."
     pub fn LocalAddr(&self) -> crate::net::TCPAddr {
@@ -1324,3 +1342,230 @@ pub(crate) const recordSizeBoostThreshold: crate::types::int64 = 128 * 1024;
 /// segment size (MSS). A constant is used, rather than querying the
 /// kernel for the actual value, to avoid complexity."
 pub(crate) const tcpMSSEstimate: int = 1208;
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/conn.go:1039-1049 Conn.flush
+    /// Go: "flush sends any pending records currently buffered."
+    pub(crate) fn flush(&mut self) -> (int, error) {
+        // Go: if len(c.sendBuf) == 0 { return 0, nil }
+        if self.sendBuf.len() == 0 {
+            return (0, errors::nil);
+        }
+
+        // Go: n, err := c.conn.Write(c.sendBuf)
+        //     c.bytesSent += int64(n)
+        //     c.sendBuf = nil; c.buffering = false
+        //     return n, err
+        let buf = slice::__from_vec(core::mem::take(&mut self.sendBuf));
+        let (n, err) = self.conn.as_mut().unwrap().Write(buf);
+        self.bytesSent += crate::int64(n);
+        self.sendBuf = Vec::new();
+        self.buffering = false;
+        return (n, err);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1027-1037 Conn.write
+    /// Go: "write buffers data for the record layer, or writes it out
+    /// directly if buffering is off."
+    pub(crate) fn write(&mut self, data: slice<byte>) -> (int, error) {
+        // Go: if c.buffering { c.sendBuf = append(c.sendBuf, data...); return len(data), nil }
+        if self.buffering {
+            let raw: &[byte] = &data;
+            self.sendBuf.extend_from_slice(raw);
+            return (data.Len(), errors::nil);
+        }
+
+        // Go: n, err := c.conn.Write(data); c.bytesSent += int64(n); return n, err
+        let (n, err) = self.conn.as_mut().unwrap().Write(data);
+        self.bytesSent += crate::int64(n);
+        return (n, err);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1053-1126 Conn.writeRecordLocked
+    ///
+    /// Deviations: the `c.quic != nil` branch is absent — goish ships no
+    /// QUIC transport, so `c.quic` is always nil and Go's non-QUIC path
+    /// is the only reachable one. And `outBufPool` is a `sync.Pool`
+    /// whose only purpose is to avoid an allocation per record; goish
+    /// allocates, which is observably identical.
+    pub(crate) fn writeRecordLocked(
+        &mut self,
+        typ: recordType,
+        data: slice<byte>,
+    ) -> (int, error) {
+        // Go: var n int
+        //     for len(data) > 0 { … }
+        let mut n: int = 0;
+        let mut data = data;
+        while data.Len() > 0 {
+            // Go: m := len(data)
+            //     if maxPayload := c.maxPayloadSizeForWrite(typ); m > maxPayload { m = maxPayload }
+            let mut m = data.Len();
+            let maxPayload = self.maxPayloadSizeForWrite(typ);
+            if m > maxPayload {
+                m = maxPayload;
+            }
+
+            // Go: _, outBuf = sliceForAppend(outBuf[:0], recordHeaderLen)
+            //     outBuf[0] = byte(typ)
+            //     vers := c.vers
+            //     if vers == 0 {
+            //         // Some TLS servers fail if the record version is
+            //         // greater than TLS 1.0 for the initial ClientHello.
+            //         vers = VersionTLS10
+            //     } else if vers == VersionTLS13 {
+            //         // TLS 1.3 froze the record layer version to 1.2.
+            //         // See RFC 8446, Section 5.1.
+            //         vers = VersionTLS12
+            //     }
+            //     outBuf[1] = byte(vers >> 8); outBuf[2] = byte(vers)
+            //     outBuf[3] = byte(m >> 8); outBuf[4] = byte(m)
+            let mut outBuf: Vec<byte> = alloc::vec![0u8; recordHeaderLen as usize];
+            outBuf[0] = typ.0;
+            let mut vers = self.vers;
+            if vers == 0 {
+                vers = super::common::VersionTLS10;
+            } else if vers == VersionTLS13 {
+                vers = super::common::VersionTLS12;
+            }
+            outBuf[1] = crate::byte(vers >> 8);
+            outBuf[2] = crate::byte(vers);
+            outBuf[3] = crate::byte(m >> 8);
+            outBuf[4] = crate::byte(m);
+
+            // Go: outBuf, err = c.out.encrypt(outBuf, data[:m], c.config.rand())
+            //     if err != nil { return n, err }
+            let mut rand = self.config.rand();
+            let (sealed, err) = self.out.encrypt(
+                slice::__from_vec(outBuf),
+                data.slice(0, m),
+                &mut *rand,
+            );
+            if err != errors::nil {
+                return (n, err);
+            }
+            // Go: if _, err := c.write(outBuf); err != nil { return n, err }
+            let (_, err) = self.write(sealed);
+            if err != errors::nil {
+                return (n, err);
+            }
+            // Go: n += m; data = data[m:]
+            n += m;
+            data = data.slice(m, data.Len());
+        }
+
+        // Go: if typ == recordTypeChangeCipherSpec && c.vers != VersionTLS13 {
+        //         if err := c.out.changeCipherSpec(); err != nil {
+        //             return n, c.sendAlertLocked(err.(alert)) } }
+        if typ == super::common::recordTypeChangeCipherSpec && self.vers != VersionTLS13 {
+            let a = self.out.changeCipherSpec();
+            if a.is_some() {
+                return (n, self.sendAlertLocked(a.unwrap()));
+            }
+        }
+
+        // Go: return n, nil
+        return (n, errors::nil);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1128-1133 Conn.writeChangeCipherRecord
+    pub(crate) fn writeChangeCipherRecord(&mut self) -> error {
+        // Go: c.out.Lock(); defer c.out.Unlock()
+        //     _, err := c.writeRecordLocked(recordTypeChangeCipherSpec, []byte{1})
+        //     return err
+        let (_, err) = self.writeRecordLocked(
+            super::common::recordTypeChangeCipherSpec,
+            slice::__from_vec(alloc::vec![1u8]),
+        );
+        return err;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1002-1021 Conn.sendAlertLocked
+    ///
+    /// Deviation: Go wraps the alert in a `*net.OpError{Op: "local
+    /// error"}` before storing it as the half-connection's permanent
+    /// error. goish's `net` has no `OpError`, so the alert is stored
+    /// directly — `halfConn.err` is only ever surfaced through
+    /// `Error()`, and the alert's own message is what Go's OpError
+    /// prints after the "local error: tls: " prefix.
+    pub(crate) fn sendAlertLocked(&mut self, err: alert) -> error {
+        // Go: switch err {
+        //     case alertNoRenegotiation, alertCloseNotify: c.tmp[0] = alertLevelWarning
+        //     default: c.tmp[0] = alertLevelError }
+        //     c.tmp[1] = byte(err)
+        if err == super::alert::alertNoRenegotiation || err == super::alert::alertCloseNotify {
+            self.tmp[0] = crate::byte(super::alert::alertLevelWarning);
+        } else {
+            self.tmp[0] = crate::byte(super::alert::alertLevelError);
+        }
+        self.tmp[1] = crate::byte(err.0);
+
+        // Go: _, writeErr := c.writeRecordLocked(recordTypeAlert, c.tmp[0:2])
+        let two = slice::__from_vec(self.tmp[0..2].to_vec());
+        let (_, writeErr) = self.writeRecordLocked(super::common::recordTypeAlert, two);
+        // Go: if err == alertCloseNotify {
+        //         // closeNotify is a special case in that it isn't an error.
+        //         return writeErr }
+        if err == super::alert::alertCloseNotify {
+            return writeErr;
+        }
+
+        // Go: return c.out.setErrorLocked(&net.OpError{Op: "local error", Err: err})
+        return self.out.setErrorLocked(crate::errors::Wrap(err));
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1023-1027 Conn.sendAlert
+    pub(crate) fn sendAlert(&mut self, err: alert) -> error {
+        // Go: c.out.Lock(); defer c.out.Unlock()
+        //     return c.sendAlertLocked(err)
+        return self.sendAlertLocked(err);
+    }
+}
+
+
+// go: none — goish-only: the in-memory net::Conn `__setMemConn`
+// installs. Go's tests build one inline; goish examples are external
+// crates, so it lives here.
+struct memConn {
+    sink: alloc::sync::Arc<crate::sync::Mutex<slice<byte>>>,
+}
+
+impl crate::net::Conn for memConn {
+    // go: none — goish-only: see `memConn`.
+    fn Read(&mut self, _p: &mut slice<byte>) -> (int, error) {
+        return (0, errors::nil);
+    }
+    // go: none — goish-only: see `memConn`.
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        let raw: &[byte] = &p;
+        let mut g = self.sink.Lock();
+        let mut v = core::mem::replace(&mut *g, slice::new()).__into_vec();
+        v.extend_from_slice(raw);
+        *g = slice::__from_vec(v);
+        return (p.Len(), errors::nil);
+    }
+    // go: none — goish-only: see `memConn`.
+    fn Close(&mut self) -> error {
+        return errors::nil;
+    }
+    // go: none — goish-only: see `memConn`.
+    fn LocalAddr(&self) -> crate::net::TCPAddr {
+        return crate::net::TCPAddr { IP: [0, 0, 0, 0], Port: 0 };
+    }
+    // go: none — goish-only: see `memConn`.
+    fn RemoteAddr(&self) -> crate::net::TCPAddr {
+        return crate::net::TCPAddr { IP: [0, 0, 0, 0], Port: 0 };
+    }
+    // go: none — goish-only: see `memConn`.
+    fn SetDeadline(&self, _t: crate::time::Time) -> error {
+        return errors::nil;
+    }
+    // go: none — goish-only: see `memConn`.
+    fn SetReadDeadline(&self, _t: crate::time::Time) -> error {
+        return errors::nil;
+    }
+    // go: none — goish-only: see `memConn`.
+    fn SetWriteDeadline(&self, _t: crate::time::Time) -> error {
+        return errors::nil;
+    }
+}
