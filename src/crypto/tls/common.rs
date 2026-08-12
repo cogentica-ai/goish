@@ -12,7 +12,7 @@
 //
 // goishlint:ignore GOISH018 BuildNameToCertificate, CertificateVerificationError, CipherSuiteName, CipherSuites, Clone, Context, Error, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, SetSessionTicketKeys, SupportsCertificate, Unwrap, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, curvePreferences, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, defaultConfig, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, fipsAllowChain, fipsAllowedChains, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, initLegacySessionTicketKeyRLocked, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, leaf, lruSessionCache, lruSessionCacheEntry, maxSupportedVersion, mutualVersion, needFIPS, rand, roleClient, roleServer, rsaKexCiphers, supportedCipherSuites, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, supportedVersions, supportedVersionsFromMax, supportsCurve, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyFromBytes, ticketKeyLifetime, ticketKeyRotation, ticketKeys, time, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, unexpectedMessageError, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
 // goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, ClientSessionCache, ClientHelloInfo, CertificateRequestInfo, RenegotiationSupport, Config, EncryptedClientHelloKey, ticketKey, Certificate, dsaSignature, ecdsaSignature — same.
-// goishlint:ignore GOISH021 Certificate, CertificateRequestInfo, CertificateVerificationError, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, EncryptedClientHelloKey, Error, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, Unwrap, certTypeECDSASign, certTypeRSASign, compressionNone, defaultCipherSuitesFIPS, defaultConfig, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, deprecatedSessionTicketKey, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, emptyConfig, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionALPN, extensionCertificateAuthorities, extensionCookie, extensionECHOuterExtensions, extensionEarlyData, extensionEncryptedClientHello, extensionEncryptedClientHelloOuterExtensions, extensionExtendedMasterSecret, extensionKeyShare, extensionPSKModes, extensionPreSharedKey, extensionQUICTransportParameters, extensionRenegotiationInfo, extensionSCT, extensionServerName, extensionSessionTicket, extensionSignatureAlgorithms, extensionSignatureAlgorithmsCert, extensionStatusRequest, extensionSupportedCurves, extensionSupportedPoints, extensionSupportedVersions, fipsAllowChain, fipsAllowedChains, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, isDisabledSignatureAlgorithm, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, leaf, lruSessionCache, lruSessionCacheEntry, maxCiphertext, maxCiphertextTLS13, maxHandshake, maxHandshakeCertificateMsg, maxPlaintext, maxSessionTicketLifetime, maxUselessBytes, maxUselessRecords, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, rand, recordHeaderLen, recordType, recordTypeAlert, recordTypeApplicationData, recordTypeChangeCipherSpec, recordTypeHandshake, roleClient, roleServer, scsvRenegotiation, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, supportedCipherSuites, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, supportedVersions, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKey, ticketKeyLifetime, ticketKeyRotation, time, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
+// goishlint:ignore GOISH021 Certificate, CertificateRequestInfo, CertificateVerificationError, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, EncryptedClientHelloKey, Error, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, Unwrap, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultConfig, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, deprecatedSessionTicketKey, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, emptyConfig, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, fipsAllowChain, fipsAllowedChains, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, isDisabledSignatureAlgorithm, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, leaf, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, rand, roleClient, roleServer, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, supportedCipherSuites, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, supportedVersions, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKey, ticketKeyLifetime, ticketKeyRotation, time, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -50,6 +50,64 @@ pub fn VersionName(version: uint16) -> string {
         _ => fmt::Sprintf!("0x%04X", version),
     };
 }
+
+// Go: common.go:63-71 — record and handshake size limits.
+/// Maximum plaintext payload length.
+pub(crate) const maxPlaintext: int = 16384;
+/// Maximum ciphertext payload length.
+pub(crate) const maxCiphertext: int = 16384 + 2048;
+/// Maximum ciphertext length in TLS 1.3.
+pub(crate) const maxCiphertextTLS13: int = 16384 + 256;
+/// Record header length.
+pub(crate) const recordHeaderLen: int = 5;
+/// Maximum handshake we support (the protocol max is 16 MB).
+pub(crate) const maxHandshake: int = 65536;
+/// Maximum certificate message size (256 KiB).
+pub(crate) const maxHandshakeCertificateMsg: int = 262144;
+/// Maximum number of consecutive non-advancing records.
+pub(crate) const maxUselessRecords: int = 16;
+
+// Go: common.go:74
+//   type recordType uint8
+/// A TLS record type.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub(crate) struct recordType(pub uint8);
+
+// Go: common.go:76-81
+pub(crate) const recordTypeChangeCipherSpec: recordType = recordType(20);
+pub(crate) const recordTypeAlert: recordType = recordType(21);
+pub(crate) const recordTypeHandshake: recordType = recordType(22);
+pub(crate) const recordTypeApplicationData: recordType = recordType(23);
+
+// Go: common.go:104-106 — TLS compression types.
+pub(crate) const compressionNone: uint8 = 0;
+
+// Go: common.go:108-131 — TLS extension numbers.
+pub(crate) const extensionServerName: uint16 = 0;
+pub(crate) const extensionStatusRequest: uint16 = 5;
+/// `supported_groups` in TLS 1.3; see RFC 8446 §4.2.7.
+pub(crate) const extensionSupportedCurves: uint16 = 10;
+pub(crate) const extensionSupportedPoints: uint16 = 11;
+pub(crate) const extensionSignatureAlgorithms: uint16 = 13;
+pub(crate) const extensionALPN: uint16 = 16;
+pub(crate) const extensionSCT: uint16 = 18;
+pub(crate) const extensionExtendedMasterSecret: uint16 = 23;
+pub(crate) const extensionSessionTicket: uint16 = 35;
+pub(crate) const extensionPreSharedKey: uint16 = 41;
+pub(crate) const extensionEarlyData: uint16 = 42;
+pub(crate) const extensionSupportedVersions: uint16 = 43;
+pub(crate) const extensionCookie: uint16 = 44;
+pub(crate) const extensionPSKModes: uint16 = 45;
+pub(crate) const extensionCertificateAuthorities: uint16 = 47;
+pub(crate) const extensionSignatureAlgorithmsCert: uint16 = 50;
+pub(crate) const extensionKeyShare: uint16 = 51;
+pub(crate) const extensionQUICTransportParameters: uint16 = 57;
+pub(crate) const extensionRenegotiationInfo: uint16 = 0xff01;
+pub(crate) const extensionECHOuterExtensions: uint16 = 0xfd00;
+pub(crate) const extensionEncryptedClientHello: uint16 = 0xfe0d;
+
+// Go: common.go:133-136 — TLS signaling cipher suite values.
+pub(crate) const scsvRenegotiation: uint16 = 0x00ff;
 
 // Go: common.go:145
 //   type CurveID uint16
