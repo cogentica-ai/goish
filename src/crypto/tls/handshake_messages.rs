@@ -50,6 +50,7 @@ pub(crate) const typeCertificate: byte = 11;
 pub(crate) const typeCertificateRequest: byte = 13;
 pub(crate) const typeCertificateVerify: byte = 15;
 pub(crate) const typeFinished: byte = 20;
+pub(crate) const typeMessageHash: byte = 254; // synthetic message
 
 // ─── TLS extension numbers (common.go:110) ──────────────────────────
 

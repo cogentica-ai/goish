@@ -3438,6 +3438,122 @@ fn main() {
         "106d7d737a42371f12b665defb2e48662aaba23ffc1ddf5e4f7d54e054d06e60",
     );
 
+    // ── serverHandshakeStateTLS13.checkForResumption ────────────────
+    //
+    // Ground truth: goref. The ticket label and the PSK binder are both
+    // pinned to the exact bytes Go computes from the same fixed inputs,
+    // so decryptTicket, ParseSessionState, marshalWithoutBinders,
+    // ResumptionBinderKey, and finishedHash are cross-validated — a
+    // self-consistent-but-wrong pair on either side fails here.
+    let cfr = |which: int| -> (string, string, string, bool, bool, bool, int) {
+        let (l, b, e, psk, res, pres, sel) = tls::handshake_server_tls13_checkForResumption(which);
+        return (hexOf(l), hexOf(b), e, psk, res, pres, goish::int(sel));
+    };
+
+    let (cfr0l, cfr0b, cfr0e, cfr0psk, cfr0res, cfr0pres, cfr0sel) = cfr(0);
+    eq(
+        "the ticket label is byte-identical to Go's",
+        cfr0l,
+        "42424242424242424242424242424242c4452fbeaf91b1c268c47ac2a57732831abda44a410e3b77bba92af5e85a4137ef7c366472587bdf41313980579a482dd6ae5971cd69234b2c6c0d81562d36b3cf42d5d7afeeea899887aed6870e13674cf7d9f6b84e06e5fa",
+    );
+    eq(
+        "the PSK binder is byte-identical to Go's",
+        cfr0b,
+        "b808d432868f2f679cbb20049b55ee7691993c91f91777778e06ca19deecf564",
+    );
+    eq("a valid ticket resumes", cfr0e, "");
+    check("a valid ticket sets usingPSK", cfr0psk);
+    check("a valid ticket sets didResume", cfr0res);
+    check("a valid ticket selects the identity", cfr0pres);
+    check_n("the selected identity is 0", cfr0sel, 0);
+
+    let (_, _, cfr1e, cfr1psk, _, _, _) = cfr(1);
+    eq("a corrupted binder is rejected", cfr1e, "tls: invalid PSK binder");
+    check("a corrupted binder does not resume", !cfr1psk);
+
+    let (_, _, cfr2e, cfr2psk, _, _, _) = cfr(2);
+    eq("disabled tickets return nil", cfr2e, "");
+    check("disabled tickets do not resume", !cfr2psk);
+
+    let (_, _, cfr3e, _, _, _, _) = cfr(3);
+    eq(
+        "an identity/binder count mismatch is fatal",
+        cfr3e,
+        "tls: invalid or missing PSK binders",
+    );
+
+    let (_, _, cfr4e, cfr4psk, _, _, _) = cfr(4);
+    eq("an expired ticket is skipped without error", cfr4e, "");
+    check("an expired ticket does not resume", !cfr4psk);
+
+    let (_, _, cfr5e, cfr5psk, _, _, _) = cfr(5);
+    eq("an undecryptable label is skipped without error", cfr5e, "");
+    check("an undecryptable label does not resume", !cfr5psk);
+
+    // ── serverHandshakeStateTLS13.doHelloRetryRequest ───────────────
+    //
+    // Ground truth: goref with a fed second ClientHello. The HRR wire
+    // carries RFC 8446's fixed HelloRetryRequest random, and the
+    // transcript is reset to the synthetic message_hash of the first
+    // hello — both byte-pinned. Rejections append an alert record.
+    let hrr = |which: int| -> (string, string, int, string, string, bool) {
+        let (e, w, g, d, tr, didHRR) = tls::handshake_server_tls13_doHelloRetryRequest(which);
+        return (e, hexOf(w), goish::int(g), hexOf(d), hexOf(tr), didHRR);
+    };
+
+    let (hrr0e, hrr0w, hrr0g, hrr0d, hrr0tr, hrr0did) = hrr(0);
+    eq("doHelloRetryRequest succeeds", hrr0e, "");
+    eq(
+        "the HRR flight is byte-identical to Go",
+        hrr0w,
+        "160303003c020000380303cf21ad74e59a6111be1d8c021e65b891c2a211167abb8c5e079e09e2c8a8339c0409090909130100000c002b0002030400330002001d140303000101",
+    );
+    check_n("the returned key share is X25519", hrr0g, 29);
+    eq(
+        "the returned key share data is the client's",
+        hrr0d,
+        "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+    );
+    eq(
+        "the transcript is the synthetic message_hash chain",
+        hrr0tr,
+        "6b0e074dada8a4900cd2b519536a7a61032ff692a74fc6acf6bd723cd9db3eda",
+    );
+    check("didHRR is set", hrr0did);
+
+    let alertWire = "160303003c020000380303cf21ad74e59a6111be1d8c021e65b891c2a211167abb8c5e079e09e2c8a8339c0409090909130100000c002b0002030400330002001d1403030001011503030002022f";
+    let (hrr1e, hrr1w, _, _, _, hrr1did) = hrr(1);
+    eq(
+        "a wrong-group second hello is rejected",
+        hrr1e,
+        "tls: client sent unexpected key share in second ClientHello",
+    );
+    eq("the rejection appends an illegal_parameter alert", hrr1w, alertWire);
+    check("didHRR stays unset on rejection", !hrr1did);
+
+    let (hrr2e, hrr2w, _, _, _, _) = hrr(2);
+    eq(
+        "two key shares are rejected",
+        hrr2e,
+        "tls: client didn't send one key share in second ClientHello",
+    );
+    eq("the two-share rejection wire matches Go", hrr2w, alertWire);
+
+    let (hrr3e, _, _, _, _, _) = hrr(3);
+    eq(
+        "early data in the second hello is rejected",
+        hrr3e,
+        "tls: client indicated early data in second ClientHello",
+    );
+
+    let (hrr4e, hrr4tr, _, _, _, _) = hrr(4);
+    let _ = hrr4tr;
+    eq(
+        "an illegal change is rejected",
+        hrr4e,
+        "tls: client illegally modified second ClientHello",
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

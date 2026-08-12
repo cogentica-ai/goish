@@ -410,6 +410,25 @@ pub struct Config {
     /// the epoch. If Time is nil, TLS uses time.Now." Reference:
     /// common.go:566.
     pub Time: Option<alloc::sync::Arc<dyn Fn() -> crate::time::Time + Send + Sync>>,
+    /// Go: "UnwrapSession is called on the server to turn a ticket/identity
+    /// previously produced by [WrapSession] into a usable session.
+    /// UnwrapSession will usually either decrypt a session state in the
+    /// ticket (for example with [Config.EncryptTicket]), or use the ticket
+    /// as a handle to recover a previously stored state. It must use
+    /// [ParseSessionState] to deserialize the session state. If
+    /// UnwrapSession returns an error, the connection is terminated. If it
+    /// returns (nil, nil), the session is ignored." Reference:
+    /// common.go:688.
+    pub UnwrapSession: Option<
+        alloc::sync::Arc<
+            dyn Fn(
+                    crate::goslice::slice<crate::types::byte>,
+                    common::ConnectionState,
+                ) -> (Option<ticket::SessionState>, crate::error)
+                + Send
+                + Sync,
+        >,
+    >,
     /// Go: "WrapSession is called on the server to produce a session
     /// ticket. If WrapSession is nil, a ticket is produced by encrypting
     /// the SessionState with a key derived from SessionTicketKey."
@@ -7342,6 +7361,296 @@ pub fn handshake_server_tls13_sendServerFinished(
         hs.clientFinished.clone(),
         hs.c.resumptionSecret.clone(),
         transcriptSum,
+    );
+}
+
+// go: none — goish-only: drives checkForResumption against a ticket
+// produced by goish's own sessionState/Bytes/encryptTicket under the
+// fixed Rand/Time/SessionTicketKey, with the binder computed the way a
+// client would; the example pins BOTH the ticket label and the binder
+// to the bytes Go computes, so the whole resumption path is
+// cross-validated rather than merely self-consistent.
+// which: 0 valid, 1 bad binder, 2 tickets disabled, 3 binder-count
+// mismatch, 4 expired ticket, 5 undecryptable label.
+#[doc(hidden)]
+pub fn handshake_server_tls13_checkForResumption(
+    which: crate::types::int,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+    bool,
+    bool,
+    bool,
+    crate::types::uint16,
+) {
+    use crate::goslice::slice;
+    struct constReader;
+    impl crate::io::Reader for constReader {
+        // go: none — goish-only: constant 0x42 stream, as in the
+        // sendServerFinished shim.
+        fn Read(&mut self, p: &mut slice<crate::types::byte>) -> (crate::types::int, crate::error) {
+            let mut i: usize = 0;
+            let n = p.Len();
+            while i < p.len() {
+                p[i] = 0x42;
+                i += 1;
+            }
+            return (n, crate::errors::nil);
+        }
+    }
+    let fill = |base: crate::types::byte| {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: crate::types::byte = 0;
+        while i < 32 {
+            v.push(base.wrapping_add(i));
+            i += 1;
+        }
+        return v;
+    };
+    let mkConn = |now: crate::types::int64, disabled: bool| {
+        let mut cfg = Config::default();
+        cfg.Rand = Some(alloc::sync::Arc::new(crate::sync::Mutex::new(
+            alloc::boxed::Box::new(constReader),
+        )));
+        cfg.Time = Some(alloc::sync::Arc::new(move || crate::time::Unix(now, 0)));
+        {
+            let key = fill(0x70);
+            let mut i: usize = 0;
+            while i < 32 {
+                cfg.SessionTicketKey[i] = key[i];
+                i += 1;
+            }
+        }
+        cfg.SessionTicketsDisabled = disabled;
+        let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+            slice::<crate::types::byte>::new(),
+        ));
+        let mut c = conn::Conn::default();
+        c.__setMemConn(sink);
+        c.__setHaveVers(true);
+        c.__setVers(common::VersionTLS13);
+        c.__setStateFields(
+            cipher_suites::TLS_AES_128_GCM_SHA256,
+            crate::gostring::string::from_static(""),
+            crate::gostring::string::from_static("h2"),
+            common::CurveID(0),
+        );
+        let keys = cfg.ticketKeys(None);
+        c.__setTicketKeys(keys);
+        c.__setConfig(cfg);
+        return c;
+    };
+
+    // The ticket, produced the way sendSessionTicket produces one.
+    let c = mkConn(1700000000, false);
+    let mut state = c.sessionState();
+    state.secret = slice::__from_vec(fill(0xD0));
+    let (stateBytes, _) = state.Bytes();
+    let (label, _) = c
+        .__config()
+        .encryptTicket(stateBytes, c.__ticketKeys());
+
+    let suite = cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256)
+        .unwrap();
+
+    let mkHello = |label: slice<crate::types::byte>| {
+        let mut ch = handshake_messages::clientHelloMsg::default();
+        ch.vers = common::VersionTLS12;
+        ch.random = fill(0x01);
+        ch.cipherSuites = alloc::vec![cipher_suites::TLS_AES_128_GCM_SHA256];
+        ch.compressionMethods = alloc::vec![0u8];
+        ch.supportedVersions = alloc::vec![common::VersionTLS13];
+        ch.pskModes = alloc::vec![1u8];
+        ch.pskIdentities = alloc::vec![handshake_messages::pskIdentity {
+            label: label.__into_vec(),
+            obfuscatedTicketAge: 0,
+        }];
+        ch.pskBinders = alloc::vec![alloc::vec![0u8; 32]];
+        return ch;
+    };
+
+    // The binder, computed the way a client computes one.
+    let mut ch = mkHello(label.clone());
+    let hash = suite.hash;
+    let earlySecret = crate::crypto::internal::fips140::tls13::NewEarlySecret(
+        crate::hash::HashFunc::New(move || hash.New()),
+        slice::__from_vec(fill(0xD0)),
+    );
+    let binderKey = earlySecret.ResumptionBinderKey();
+    let mut transcript = handshake_messages::transcriptHasher(alloc::boxed::Box::new(
+        crate::crypto::sha256::New(),
+    ));
+    let (chBytes, _) = ch.marshalWithoutBinders();
+    crate::io::Writer::Write(&mut transcript, chBytes);
+    let binder = suite.finishedHash(binderKey, &*transcript.0);
+    ch.pskBinders[0] = binder.clone().__into_vec();
+
+    let (now, disabled) = match which {
+        4 => (1700000000i64 + 7 * 24 * 3600 + 1, false),
+        2 => (1700000000i64, true),
+        _ => (1700000000i64, false),
+    };
+    match which {
+        1 => ch.pskBinders[0][0] ^= 0xFF,
+        3 => ch.pskBinders = alloc::vec::Vec::new(),
+        5 => ch.pskIdentities[0].label[0] = 0xFF,
+        _ => {}
+    }
+
+    let mut hs = handshake_server_tls13::serverHandshakeStateTLS13 {
+        c: mkConn(now, disabled),
+        clientHello: ch,
+        suite: Some(suite),
+        transcript: Some(handshake_messages::transcriptHasher(alloc::boxed::Box::new(
+            crate::crypto::sha256::New(),
+        ))),
+        ..Default::default()
+    };
+    let err = hs.checkForResumption();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (
+        label,
+        binder,
+        text,
+        hs.usingPSK,
+        hs.c.didResume,
+        hs.hello.selectedIdentityPresent,
+        hs.hello.selectedIdentity,
+    );
+}
+
+// go: none — goish-only: drives doHelloRetryRequest with a fed second
+// ClientHello, so the HRR wire (with RFC 8446's fixed random), the
+// synthetic message_hash transcript reset, and every second-hello
+// rejection are byte-comparable against Go.
+// which: 0 ok, 1 wrong group, 2 two key shares, 3 early data,
+// 4 illegal change.
+#[doc(hidden)]
+pub fn handshake_server_tls13_doHelloRetryRequest(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::uint16,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+) {
+    use crate::goslice::slice;
+    let fill = |base: crate::types::byte| {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: crate::types::byte = 0;
+        while i < 32 {
+            v.push(base.wrapping_add(i));
+            i += 1;
+        }
+        return v;
+    };
+    let mkCH = || {
+        let mut ch = handshake_messages::clientHelloMsg::default();
+        ch.vers = common::VersionTLS12;
+        ch.random = fill(0x01);
+        ch.cipherSuites = alloc::vec![cipher_suites::TLS_AES_128_GCM_SHA256];
+        ch.compressionMethods = alloc::vec![0u8];
+        ch.supportedVersions = alloc::vec![common::VersionTLS13];
+        ch.supportedCurves = alloc::vec![common::X25519.0, common::CurveP256.0];
+        ch.keyShares = alloc::vec![handshake_messages::keyShare {
+            group: common::CurveP256.0,
+            data: fill(0x30),
+        }];
+        return ch;
+    };
+
+    let ch1 = mkCH();
+    let mut ch2 = mkCH();
+    ch2.keyShares = alloc::vec![handshake_messages::keyShare {
+        group: common::X25519.0,
+        data: fill(0x60),
+    }];
+    match which {
+        1 => {
+            ch2.keyShares = alloc::vec![handshake_messages::keyShare {
+                group: common::CurveP256.0,
+                data: fill(0x30),
+            }]
+        }
+        2 => ch2.keyShares.push(handshake_messages::keyShare {
+            group: common::CurveP256.0,
+            data: fill(0x30),
+        }),
+        3 => ch2.earlyData = true,
+        4 => ch2.cipherSuites = alloc::vec![cipher_suites::TLS_AES_256_GCM_SHA384],
+        _ => {}
+    }
+    let (ch2Bytes, _) = ch2.marshal();
+    let mut rec: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+    rec.push(22);
+    rec.push(3);
+    rec.push(3);
+    rec.push(crate::byte(ch2Bytes.Len() >> 8));
+    rec.push(crate::byte(ch2Bytes.Len()));
+    {
+        let raw: &[crate::types::byte] = &ch2Bytes;
+        rec.extend_from_slice(raw);
+    }
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setDuplexConn(slice::__from_vec(rec), sink.clone());
+    c.__setHaveVers(true);
+    c.__setVers(common::VersionTLS13);
+    c.__setStateFields(
+        cipher_suites::TLS_AES_128_GCM_SHA256,
+        crate::gostring::string::from_static(""),
+        crate::gostring::string::from_static(""),
+        common::CurveID(0),
+    );
+    c.__setConfig(Config::default());
+
+    let mut hello = handshake_messages::serverHelloMsg::default();
+    hello.vers = common::VersionTLS12;
+    hello.random = fill(0xA0);
+    hello.sessionId = alloc::vec![9u8, 9, 9, 9];
+    hello.cipherSuite = cipher_suites::TLS_AES_128_GCM_SHA256;
+    hello.compressionMethod = 0;
+    hello.supportedVersion = common::VersionTLS13;
+
+    let mut hs = handshake_server_tls13::serverHandshakeStateTLS13 {
+        c,
+        clientHello: ch1,
+        hello,
+        suite: cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256),
+        transcript: Some(handshake_messages::transcriptHasher(alloc::boxed::Box::new(
+            crate::crypto::sha256::New(),
+        ))),
+        ..Default::default()
+    };
+    let (ks, err) = hs.doHelloRetryRequest(common::X25519);
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let (ksGroup, ksData) = match ks {
+        Some(ks) => (ks.group, slice::__from_vec(ks.data)),
+        None => (0, slice::new()),
+    };
+    let transcriptSum =
+        crate::hash::Hash::Sum(&*hs.transcript.as_ref().unwrap().0, slice::new());
+    return (
+        text,
+        sink.Lock().clone(),
+        ksGroup,
+        ksData,
+        transcriptSum,
+        hs.c.didHRR,
     );
 }
 

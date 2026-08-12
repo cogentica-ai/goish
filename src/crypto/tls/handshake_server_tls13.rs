@@ -1,7 +1,6 @@
 // crypto/tls/handshake_server_tls13.rs — TLS 1.3 server handshake.
 //
-// goishlint:ignore GOISH018 handshake, processClientHello, checkForResumption, doHelloRetryRequest, readClientCertificate — serverHandshakeStateTLS13's Conn-driven half; the live server below the divider implements the same protocol by hand. See ROADMAP.md.
-// goishlint:ignore GOISH021 maxClientPSKIdentities — same.
+// goishlint:ignore GOISH018 handshake, processClientHello, readClientCertificate — serverHandshakeStateTLS13's Conn-driven half; the live server below the divider implements the same protocol by hand. See ROADMAP.md.
 //
 // Port of Go 1.25.5 crypto/tls:
 //   handshake_server.go       readClientHello (:134), negotiateALPN (:334)
@@ -1636,5 +1635,566 @@ impl Conn {
 
         // Go: return nil
         return crate::errors::nil;
+    }
+}
+
+// go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:28-31 maxClientPSKIdentities
+/// Go: "maxClientPSKIdentities is the number of client PSK identities
+/// the server will attempt to validate. It will ignore the rest not to
+/// let cheap ClientHello messages cause too much work in session ticket
+/// decryption attempts."
+pub(crate) const maxClientPSKIdentities: crate::types::int = 5;
+
+impl serverHandshakeStateTLS13 {
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:331-471 serverHandshakeStateTLS13.checkForResumption
+    /// Go: walk the client's PSK identities, decrypt or unwrap each
+    /// ticket, vet the recovered session against the config, verify the
+    /// PSK binder over the binder-less ClientHello, and adopt the first
+    /// identity that survives.
+    ///
+    /// Deviation: the two `c.quic != nil` arms — session events and the
+    /// 0-RTT early traffic secret — are absent; goish ships no QUIC
+    /// transport.
+    pub(crate) fn checkForResumption(&mut self) -> crate::error {
+        use crate::goslice::slice;
+        let suite = self.suite.unwrap();
+
+        // Go: if c.config.SessionTicketsDisabled { return nil }
+        if self.c.config.SessionTicketsDisabled {
+            return crate::errors::nil;
+        }
+
+        // Go: modeOK := false
+        //     for _, mode := range hs.clientHello.pskModes {
+        //         if mode == pskModeDHE { modeOK = true; break } }
+        //     if !modeOK { return nil }
+        let mut modeOK = false;
+        for mode in self.clientHello.pskModes.iter() {
+            if *mode == super::common::pskModeDHE {
+                modeOK = true;
+                break;
+            }
+        }
+        if !modeOK {
+            return crate::errors::nil;
+        }
+
+        // Go: if len(hs.clientHello.pskIdentities) != len(hs.clientHello.pskBinders) {
+        //         c.sendAlert(alertIllegalParameter)
+        //         return errors.New("tls: invalid or missing PSK binders") }
+        if self.clientHello.pskIdentities.len() != self.clientHello.pskBinders.len() {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New("tls: invalid or missing PSK binders");
+        }
+        // Go: if len(hs.clientHello.pskIdentities) == 0 { return nil }
+        if self.clientHello.pskIdentities.len() == 0 {
+            return crate::errors::nil;
+        }
+
+        // Go: for i, identity := range hs.clientHello.pskIdentities {
+        let mut i: usize = 0;
+        while i < self.clientHello.pskIdentities.len() {
+            // Go: if i >= maxClientPSKIdentities { break }
+            if crate::int(i) >= maxClientPSKIdentities {
+                break;
+            }
+            let identityLabel =
+                slice::__from_vec(self.clientHello.pskIdentities[i].label.clone());
+
+            // Go: var sessionState *SessionState
+            //     if c.config.UnwrapSession != nil {
+            //         sessionState, err = c.config.UnwrapSession(identity.label, c.connectionStateLocked())
+            //         if err != nil { return err }
+            //         if sessionState == nil { continue }
+            //     } else {
+            //         plaintext := c.config.decryptTicket(identity.label, c.ticketKeys)
+            //         if plaintext == nil { continue }
+            //         sessionState, err = ParseSessionState(plaintext)
+            //         if err != nil { continue }
+            //     }
+            let sessionState;
+            if let Some(unwrap) = self.c.config.UnwrapSession.clone() {
+                let (ss, err) = unwrap(identityLabel, self.c.connectionStateLocked());
+                if err != crate::errors::nil {
+                    return err;
+                }
+                match ss {
+                    None => {
+                        i += 1;
+                        continue;
+                    }
+                    Some(ss) => sessionState = ss,
+                }
+            } else {
+                let plaintext = self
+                    .c
+                    .config
+                    .decryptTicket(identityLabel, self.c.ticketKeys.clone());
+                let plaintext = match plaintext {
+                    None => {
+                        i += 1;
+                        continue;
+                    }
+                    Some(p) => p,
+                };
+                let (ss, err) = super::ticket::ParseSessionState(plaintext);
+                if err != crate::errors::nil {
+                    i += 1;
+                    continue;
+                }
+                sessionState = ss;
+            }
+
+            // Go: if sessionState.version != VersionTLS13 { continue }
+            if sessionState.version != super::common::VersionTLS13 {
+                i += 1;
+                continue;
+            }
+
+            // Go: createdAt := time.Unix(int64(sessionState.createdAt), 0)
+            //     if c.config.time().Sub(createdAt) > maxSessionTicketLifetime { continue }
+            let createdAt = crate::time::Unix(crate::int64(sessionState.createdAt), 0);
+            if self.c.config.time().Sub(createdAt) > super::common::maxSessionTicketLifetime {
+                i += 1;
+                continue;
+            }
+
+            // Go: pskSuite := cipherSuiteTLS13ByID(sessionState.cipherSuite)
+            //     if pskSuite == nil || pskSuite.hash != hs.suite.hash { continue }
+            let pskSuite =
+                super::cipher_suites::cipherSuiteTLS13ByID(sessionState.cipherSuite);
+            match pskSuite {
+                None => {
+                    i += 1;
+                    continue;
+                }
+                Some(ps) => {
+                    if ps.hash != suite.hash {
+                        i += 1;
+                        continue;
+                    }
+                }
+            }
+
+            // Go: "PSK connections don't re-establish client certificates, but
+            //      carry them over in the session ticket. Ensure the presence
+            //      of client certs in the ticket is consistent with the
+            //      configured requirements."
+            let sessionHasClientCerts = sessionState.peerCertificates.Len() != 0;
+            let needClientCerts =
+                super::common::requiresClientCert(self.c.config.ClientAuth);
+            if needClientCerts && !sessionHasClientCerts {
+                i += 1;
+                continue;
+            }
+            if sessionHasClientCerts
+                && self.c.config.ClientAuth == super::common::NoClientCert
+            {
+                i += 1;
+                continue;
+            }
+            if sessionHasClientCerts
+                && self
+                    .c
+                    .config
+                    .time()
+                    .After(sessionState.peerCertificates[0].NotAfter)
+            {
+                i += 1;
+                continue;
+            }
+            if sessionHasClientCerts
+                && self.c.config.ClientAuth >= super::common::VerifyClientCertIfGiven
+                && sessionState.verifiedChains.Len() == 0
+            {
+                i += 1;
+                continue;
+            }
+
+            // Go: hs.earlySecret = tls13.NewEarlySecret(hs.suite.hash.New, sessionState.secret)
+            //     binderKey := hs.earlySecret.ResumptionBinderKey()
+            let hash = suite.hash;
+            self.earlySecret = Some(crate::crypto::internal::fips140::tls13::NewEarlySecret(
+                crate::hash::HashFunc::New(move || hash.New()),
+                sessionState.secret.clone(),
+            ));
+            let binderKey = self.earlySecret.as_ref().unwrap().ResumptionBinderKey();
+            // Go: "Clone the transcript in case a HelloRetryRequest was recorded."
+            //     transcript := cloneHash(hs.transcript, hs.suite.hash)
+            //     if transcript == nil { c.sendAlert(alertInternalError)
+            //         return errors.New("tls: internal error: failed to clone hash") }
+            let transcript =
+                cloneHash(&*self.transcript.as_ref().unwrap().0, suite.hash);
+            let mut transcript = match transcript {
+                None => {
+                    self.c.sendAlert(super::alert::alertInternalError);
+                    return crate::errors::New(
+                        "tls: internal error: failed to clone hash",
+                    );
+                }
+                Some(t) => super::handshake_messages::transcriptHasher(t),
+            };
+            // Go: clientHelloBytes, err := hs.clientHello.marshalWithoutBinders()
+            //     if err != nil { c.sendAlert(alertInternalError); return err }
+            let (clientHelloBytes, err) = self.clientHello.marshalWithoutBinders();
+            if err != crate::errors::nil {
+                self.c.sendAlert(super::alert::alertInternalError);
+                return err;
+            }
+            // Go: transcript.Write(clientHelloBytes)
+            //     pskBinder := hs.suite.finishedHash(binderKey, transcript)
+            //     if !hmac.Equal(hs.clientHello.pskBinders[i], pskBinder) {
+            //         c.sendAlert(alertDecryptError)
+            //         return errors.New("tls: invalid PSK binder") }
+            crate::io::Writer::Write(&mut transcript, clientHelloBytes);
+            let pskBinder = suite.finishedHash(binderKey, &*transcript.0);
+            if !crate::crypto::hmac::Equal(
+                slice::__from_vec(self.clientHello.pskBinders[i].clone()),
+                pskBinder,
+            ) {
+                self.c.sendAlert(super::alert::alertDecryptError);
+                return crate::errors::New("tls: invalid PSK binder");
+            }
+
+            // Go: c.didResume = true
+            //     c.peerCertificates = sessionState.peerCertificates
+            //     c.ocspResponse = sessionState.ocspResponse
+            //     c.scts = sessionState.scts
+            //     c.verifiedChains = sessionState.verifiedChains
+            self.c.didResume = true;
+            self.c.peerCertificates = sessionState.peerCertificates.clone();
+            self.c.ocspResponse = sessionState.ocspResponse.clone();
+            self.c.scts = sessionState.scts.clone();
+            self.c.verifiedChains = sessionState.verifiedChains.clone();
+
+            // Go: hs.hello.selectedIdentityPresent = true
+            //     hs.hello.selectedIdentity = uint16(i)
+            //     hs.usingPSK = true
+            //     return nil
+            self.hello.selectedIdentityPresent = true;
+            self.hello.selectedIdentity = crate::uint16(crate::int(i));
+            self.usingPSK = true;
+            return crate::errors::nil;
+        }
+
+        // Go: return nil
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:547-673 serverHandshakeStateTLS13.doHelloRetryRequest
+    /// Go: "The first ClientHello gets double-hashed into the transcript
+    /// upon a HelloRetryRequest. See RFC 8446, Section 4.4.1." Sends the
+    /// HRR, reads the second ClientHello, unwraps its ECH if one is in
+    /// flight, and vets it against the first.
+    pub(crate) fn doHelloRetryRequest(
+        &mut self,
+        selectedGroup: super::common::CurveID,
+    ) -> (Option<super::handshake_messages::keyShare>, crate::error) {
+        use crate::goslice::slice;
+        let suite = self.suite.unwrap();
+
+        // Go: if err := transcriptMsg(hs.clientHello, hs.transcript); err != nil { return nil, err }
+        //     chHash := hs.transcript.Sum(nil)
+        //     hs.transcript.Reset()
+        //     hs.transcript.Write([]byte{typeMessageHash, 0, 0, uint8(len(chHash))})
+        //     hs.transcript.Write(chHash)
+        let err = {
+            let transcript = self.transcript.as_mut().unwrap();
+            super::handshake_messages::transcriptMsg(&self.clientHello, transcript)
+        };
+        if err != crate::errors::nil {
+            return (None, err);
+        }
+        {
+            let transcript = self.transcript.as_mut().unwrap();
+            let chHash = crate::hash::Hash::Sum(&*transcript.0, slice::new());
+            crate::hash::Hash::Reset(&mut *transcript.0);
+            crate::io::Writer::Write(
+                transcript,
+                slice::__from_vec(alloc::vec![
+                    super::handshake_messages::typeMessageHash,
+                    0,
+                    0,
+                    crate::byte(chHash.Len()),
+                ]),
+            );
+            crate::io::Writer::Write(transcript, chHash);
+        }
+
+        // Go: helloRetryRequest := &serverHelloMsg{ vers: hs.hello.vers,
+        //         random: helloRetryRequestRandom, sessionId: hs.hello.sessionId,
+        //         cipherSuite: hs.hello.cipherSuite,
+        //         compressionMethod: hs.hello.compressionMethod,
+        //         supportedVersion: hs.hello.supportedVersion,
+        //         selectedGroup: selectedGroup }
+        let mut helloRetryRequest = super::handshake_messages::serverHelloMsg::default();
+        helloRetryRequest.vers = self.hello.vers;
+        helloRetryRequest.random = super::common::helloRetryRequestRandom.to_vec();
+        helloRetryRequest.sessionId = self.hello.sessionId.clone();
+        helloRetryRequest.cipherSuite = self.hello.cipherSuite;
+        helloRetryRequest.compressionMethod = self.hello.compressionMethod;
+        helloRetryRequest.supportedVersion = self.hello.supportedVersion;
+        helloRetryRequest.selectedGroup = selectedGroup.0;
+
+        // Go: if hs.echContext != nil {
+        if self.echContext.is_some() {
+            // Go: "Compute the acceptance message."
+            //     helloRetryRequest.encryptedClientHello = make([]byte, 8)
+            //     confTranscript := cloneHash(hs.transcript, hs.suite.hash)
+            //     if err := transcriptMsg(helloRetryRequest, confTranscript); err != nil { return nil, err }
+            helloRetryRequest.encryptedClientHello = alloc::vec![0u8; 8];
+            let mut confTranscript = super::handshake_messages::transcriptHasher(
+                cloneHash(&*self.transcript.as_ref().unwrap().0, suite.hash).unwrap(),
+            );
+            let err = super::handshake_messages::transcriptMsg(
+                &helloRetryRequest,
+                &mut confTranscript,
+            );
+            if err != crate::errors::nil {
+                return (None, err);
+            }
+            // Go: h := hs.suite.hash.New
+            //     prf, err := hkdf.Extract(h, hs.clientHello.random, nil)
+            //     if err != nil { c.sendAlert(alertInternalError); return nil, err }
+            let hash = suite.hash;
+            let h = crate::hash::HashFunc::New(move || hash.New());
+            let (prf, err) = crate::crypto::hkdf::Extract(
+                h.clone(),
+                slice::__from_vec(self.clientHello.random.clone()),
+                slice::new(),
+            );
+            if err != crate::errors::nil {
+                self.c.sendAlert(super::alert::alertInternalError);
+                return (None, err);
+            }
+            // Go: acceptConfirmation := tls13.ExpandLabel(h, prf,
+            //         "hrr ech accept confirmation", confTranscript.Sum(nil), 8)
+            //     helloRetryRequest.encryptedClientHello = acceptConfirmation
+            let acceptConfirmation = crate::crypto::internal::fips140::tls13::ExpandLabel(
+                h,
+                prf,
+                "hrr ech accept confirmation",
+                crate::hash::Hash::Sum(&*confTranscript.0, slice::new()),
+                8,
+            );
+            helloRetryRequest.encryptedClientHello = acceptConfirmation.__into_vec();
+        }
+
+        // Go: if _, err := hs.c.writeHandshakeRecord(helloRetryRequest, hs.transcript); err != nil { return nil, err }
+        let (_, err) = {
+            let transcript = self.transcript.as_mut().unwrap();
+            self.c.writeHandshakeRecord(&helloRetryRequest, Some(transcript))
+        };
+        if err != crate::errors::nil {
+            return (None, err);
+        }
+
+        // Go: if err := hs.sendDummyChangeCipherSpec(); err != nil { return nil, err }
+        let err = self.sendDummyChangeCipherSpec();
+        if err != crate::errors::nil {
+            return (None, err);
+        }
+
+        // Go: "clientHelloMsg is not included in the transcript."
+        //     msg, err := c.readHandshake(nil)
+        //     if err != nil { return nil, err }
+        let (msg, err) = self.c.readHandshake(None);
+        if err != crate::errors::nil {
+            return (None, err);
+        }
+        // Go: clientHello, ok := msg.(*clientHelloMsg)
+        //     if !ok { c.sendAlert(alertUnexpectedMessage)
+        //         return nil, unexpectedMessageError(clientHello, msg) }
+        let msg = match msg {
+            Some(m) => m,
+            None => {
+                return (
+                    None,
+                    crate::errors::New("tls: internal error: no handshake message"),
+                )
+            }
+        };
+        let mut clientHello = match msg
+            .asAny()
+            .downcast_ref::<super::handshake_messages::clientHelloMsg>()
+        {
+            Some(ch) => ch.clone(),
+            None => {
+                self.c.sendAlert(super::alert::alertUnexpectedMessage);
+                return (
+                    None,
+                    super::common::unexpectedMessageError(
+                        crate::gostring::string::from_static("*tls.clientHelloMsg"),
+                        super::handshake_messages::handshakeMessageTypeName(&*msg),
+                    ),
+                );
+            }
+        };
+
+        // Go: if hs.echContext != nil {
+        if let Some(echContext) = self.echContext.as_mut() {
+            // Go: if len(clientHello.encryptedClientHello) == 0 {
+            //         c.sendAlert(alertMissingExtension)
+            //         return nil, errors.New("tls: second client hello missing encrypted client hello extension") }
+            if clientHello.encryptedClientHello.len() == 0 {
+                self.c.sendAlert(super::alert::alertMissingExtension);
+                return (
+                    None,
+                    crate::errors::New(
+                        "tls: second client hello missing encrypted client hello extension",
+                    ),
+                );
+            }
+
+            // Go: echType, echCiphersuite, configID, encap, payload, err :=
+            //         parseECHExt(clientHello.encryptedClientHello)
+            //     if err != nil { c.sendAlert(alertDecodeError)
+            //         return nil, errors.New("tls: client sent invalid encrypted client hello extension") }
+            let (echType, echCiphersuite, configID, encap, payload, err) =
+                super::ech::parseECHExt(slice::__from_vec(
+                    clientHello.encryptedClientHello.clone(),
+                ));
+            if err != crate::errors::nil {
+                self.c.sendAlert(super::alert::alertDecodeError);
+                return (
+                    None,
+                    crate::errors::New(
+                        "tls: client sent invalid encrypted client hello extension",
+                    ),
+                );
+            }
+
+            // Go: if echType == outerECHExt && hs.echContext.inner ||
+            //        echType == innerECHExt && !hs.echContext.inner {
+            //         c.sendAlert(alertDecodeError)
+            //         return nil, errors.New("tls: unexpected switch in encrypted client hello extension type") }
+            if echType == super::ech::outerECHExt && echContext.inner
+                || echType == super::ech::innerECHExt && !echContext.inner
+            {
+                self.c.sendAlert(super::alert::alertDecodeError);
+                return (
+                    None,
+                    crate::errors::New(
+                        "tls: unexpected switch in encrypted client hello extension type",
+                    ),
+                );
+            }
+
+            // Go: if echType == outerECHExt {
+            if echType == super::ech::outerECHExt {
+                // Go: if echCiphersuite != hs.echContext.ciphersuite ||
+                //        configID != hs.echContext.configID || len(encap) != 0 {
+                //         c.sendAlert(alertIllegalParameter)
+                //         return nil, errors.New("tls: second client hello encrypted client hello extension does not match") }
+                if echCiphersuite != echContext.ciphersuite
+                    || configID != echContext.configID
+                    || encap.Len() != 0
+                {
+                    self.c.sendAlert(super::alert::alertIllegalParameter);
+                    return (
+                        None,
+                        crate::errors::New(
+                            "tls: second client hello encrypted client hello extension does not match",
+                        ),
+                    );
+                }
+
+                // Go: encodedInner, err := decryptECHPayload(hs.echContext.hpkeContext,
+                //         clientHello.original, payload)
+                //     if err != nil { c.sendAlert(alertDecryptError)
+                //         return nil, errors.New("tls: failed to decrypt second client hello encrypted client hello extension payload") }
+                let (encodedInner, err) = super::ech::decryptECHPayload(
+                    echContext.hpkeContext.as_mut().unwrap(),
+                    slice::__from_vec(clientHello.original.clone()),
+                    payload,
+                );
+                if err != crate::errors::nil {
+                    self.c.sendAlert(super::alert::alertDecryptError);
+                    return (
+                        None,
+                        crate::errors::New(
+                            "tls: failed to decrypt second client hello encrypted client hello extension payload",
+                        ),
+                    );
+                }
+
+                // Go: echInner, err := decodeInnerClientHello(clientHello, encodedInner)
+                //     if err != nil { c.sendAlert(alertIllegalParameter)
+                //         return nil, errors.New("tls: client sent invalid encrypted client hello extension") }
+                let (echInner, err) =
+                    super::ech::decodeInnerClientHello(&clientHello, encodedInner);
+                if err != crate::errors::nil {
+                    self.c.sendAlert(super::alert::alertIllegalParameter);
+                    return (
+                        None,
+                        crate::errors::New(
+                            "tls: client sent invalid encrypted client hello extension",
+                        ),
+                    );
+                }
+
+                // Go: clientHello = echInner
+                clientHello = echInner.unwrap();
+            }
+        }
+
+        // Go: if len(clientHello.keyShares) != 1 {
+        //         c.sendAlert(alertIllegalParameter)
+        //         return nil, errors.New("tls: client didn't send one key share in second ClientHello") }
+        if clientHello.keyShares.len() != 1 {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return (
+                None,
+                crate::errors::New(
+                    "tls: client didn't send one key share in second ClientHello",
+                ),
+            );
+        }
+        // Go: ks := &clientHello.keyShares[0]
+        let ks = clientHello.keyShares[0].clone();
+
+        // Go: if ks.group != selectedGroup {
+        //         c.sendAlert(alertIllegalParameter)
+        //         return nil, errors.New("tls: client sent unexpected key share in second ClientHello") }
+        if ks.group != selectedGroup.0 {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return (
+                None,
+                crate::errors::New(
+                    "tls: client sent unexpected key share in second ClientHello",
+                ),
+            );
+        }
+
+        // Go: if clientHello.earlyData {
+        //         c.sendAlert(alertIllegalParameter)
+        //         return nil, errors.New("tls: client indicated early data in second ClientHello") }
+        if clientHello.earlyData {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return (
+                None,
+                crate::errors::New(
+                    "tls: client indicated early data in second ClientHello",
+                ),
+            );
+        }
+
+        // Go: if illegalClientHelloChange(clientHello, hs.clientHello) {
+        //         c.sendAlert(alertIllegalParameter)
+        //         return nil, errors.New("tls: client illegally modified second ClientHello") }
+        if illegalClientHelloChange(&clientHello, &self.clientHello) {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return (
+                None,
+                crate::errors::New("tls: client illegally modified second ClientHello"),
+            );
+        }
+
+        // Go: c.didHRR = true
+        //     hs.clientHello = clientHello
+        //     return ks, nil
+        self.c.didHRR = true;
+        self.clientHello = clientHello;
+        return (Some(ks), crate::errors::nil);
     }
 }
