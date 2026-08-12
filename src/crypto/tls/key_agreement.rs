@@ -184,6 +184,10 @@ pub(crate) trait keyAgreement {
         clientHello: &clientHelloMsg,
         cert: &x509::Certificate,
     ) -> (slice<byte>, Option<clientKeyExchangeMsg>, error);
+
+    // go: none — goish-only: Go type-asserts `keyAgreement.(*ecdheKeyAgreement)`;
+    // goish needs an Any hook on the trait object for the downcast.
+    fn asAny(&self) -> &dyn core::any::Any;
 }
 
 crate::var! {
@@ -202,6 +206,11 @@ crate::var! {
 pub(crate) struct rsaKeyAgreement {}
 
 impl keyAgreement for rsaKeyAgreement {
+    // go: none — goish-only: the Any hook for Go's type assertions.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+
     // go: sdk 1.25.5 crypto/tls/key_agreement.go:46-48 rsaKeyAgreement.generateServerKeyExchange
     fn generateServerKeyExchange(
         &mut self,
@@ -380,6 +389,11 @@ pub(crate) struct ecdheKeyAgreement {
 }
 
 impl keyAgreement for ecdheKeyAgreement {
+    // go: none — goish-only: the Any hook for Go's type assertions.
+    fn asAny(&self) -> &dyn core::any::Any {
+        return self;
+    }
+
     // go: sdk 1.25.5 crypto/tls/key_agreement.go:175-264 ecdheKeyAgreement.generateServerKeyExchange
     fn generateServerKeyExchange(
         &mut self,

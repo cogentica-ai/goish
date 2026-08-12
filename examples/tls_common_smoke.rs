@@ -4274,6 +4274,60 @@ fn main() {
         "6860b7131b36636dca4865b1f068abecee324122a9b36315aa653b9d2fd37f3f",
     );
 
+    // ── Conn.clientHandshake ────────────────────────────────────────
+    //
+    // Ground truth: goref driving the entry point with a scripted conn
+    // and a deterministic Rand — version pick, downgrade canaries, the
+    // TLS 1.2 dispatch (via the predictable compatibility session ID),
+    // and the deferred drop-ticket-on-failure semantics.
+    let cch = |which: int| -> (string, int, bool, string, int, int) {
+        let (e, vers, didResume, sni, puts, putNils) =
+            tls::handshake_client_clientHandshake(which);
+        return (e, goish::int(vers), didResume, sni, puts, putNils);
+    };
+
+    let (e, vers, _, sni, _, _) = cch(0);
+    eq("the hello goes out and the read hits EOF", e, "EOF");
+    check_n("no version is negotiated at EOF", vers, 0);
+    eq("the server name is recorded before sending", sni, "example.com");
+
+    let (e, _, _, _, _, _) = cch(1);
+    eq(
+        "an unsupported ServerHello version is rejected",
+        e,
+        "tls: server selected unsupported protocol version 300",
+    );
+
+    let (e, vers, _, _, _, _) = cch(2);
+    eq(
+        "the TLS 1.2 downgrade canary is detected",
+        e,
+        "tls: downgrade attempt detected, possibly due to a MitM attack or a broken middlebox",
+    );
+    check_n("the canary check happens after the version pick", vers, 0x0303);
+
+    let (e, vers, _, _, _, _) = cch(3);
+    eq(
+        "the TLS 1.2 driver rejects an echoed compatibility session ID",
+        e,
+        "tls: server echoed TLS 1.3 compatibility session ID in TLS 1.2",
+    );
+    check_n("the connection is TLS 1.2 at that point", vers, 0x0303);
+
+    let (e, vers, didResume, _, _, _) = cch(4);
+    eq("the TLS 1.2 full handshake runs to the server flight", e, "EOF");
+    check_n("the TLS 1.2 dispatch picked the version", vers, 0x0303);
+    check("no resumption happened", !didResume);
+
+    let (e, _, _, _, puts, putNils) = cch(5);
+    eq(
+        "a failed resumption surfaces the handshake error",
+        e,
+        "tls: server selected unsupported protocol version 300",
+    );
+    check_n("the deferred drop calls Put once", puts, 1);
+    check_n("the deferred drop passes nil, discarding the ticket", putNils, 1);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

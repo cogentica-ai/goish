@@ -482,6 +482,17 @@ pub struct Config {
                 + Sync,
         >,
     >,
+    /// Go: "GetClientCertificate, if not nil, is called when a server
+    /// requests a certificate from a client. If set, the contents of
+    /// Certificates will be ignored. […] GetClientCertificate must
+    /// return non-nil." Reference: common.go:664.
+    pub GetClientCertificate: Option<
+        alloc::sync::Arc<
+            dyn Fn(&common::CertificateRequestInfo) -> (Certificate, crate::error)
+                + Send
+                + Sync,
+        >,
+    >,
     /// Go: "VerifyConnection, if not nil, is called after normal
     /// certificate verification and after VerifyPeerCertificate by
     /// either a TLS client or server. If it returns a non-nil error, the
@@ -8906,6 +8917,192 @@ pub fn handshake_client_tls13_handshake(
         echRejected,
         hs.c.__serverName(),
         hs.c.didHRR,
+    );
+}
+
+// go: none — goish-only: drives Conn.clientHandshake with a scripted
+// conn and a deterministic Rand: the EOF path, the unsupported-version
+// and downgrade-canary rejections, the TLS 1.2 dispatch (session-ID
+// echo, run-to-EOF in doFullHandshake), and the deferred
+// drop-ticket-on-failure semantics via a counting session cache.
+// which: 0 eof, 1 bad version, 2 downgrade canary, 3 tls12 session-ID
+// echo, 4 tls12 to EOF, 5 failed resumption drops the ticket.
+#[doc(hidden)]
+pub fn handshake_client_clientHandshake(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string, // err
+    crate::types::uint16,    // c.vers
+    bool,                    // c.didResume
+    crate::gostring::string, // c.serverName
+    crate::types::int,       // cache puts
+    crate::types::int,       // cache Put(nil)s
+) {
+    use crate::goslice::slice;
+    let fill = |base: crate::types::byte, n: usize| {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: usize = 0;
+        while i < n {
+            v.push(base.wrapping_add(crate::byte(i)));
+            i += 1;
+        }
+        return v;
+    };
+
+    // Go's harness constReader: byte i of every read is base+i.
+    struct constReader(crate::types::byte);
+    impl crate::io::Reader for constReader {
+        // go: none — goish-only: the deterministic Rand for this shim.
+        fn Read(
+            &mut self,
+            p: &mut slice<crate::types::byte>,
+        ) -> (crate::types::int, crate::error) {
+            let n = p.Len();
+            let mut i: crate::types::int = 0;
+            while i < n {
+                p[i as usize] = self.0.wrapping_add(crate::byte(i));
+                i += 1;
+            }
+            return (n, crate::errors::nil);
+        }
+    }
+
+    // A session cache that records Put(nil) calls.
+    struct countingCache {
+        s: Option<ticket::ClientSessionState>,
+        counts: alloc::sync::Arc<crate::sync::Mutex<(crate::types::int, crate::types::int)>>,
+    }
+    impl common::ClientSessionCache for countingCache {
+        // go: none — goish-only: hands back the seeded session.
+        fn Get(
+            &mut self,
+            _sessionKey: crate::gostring::string,
+        ) -> (Option<ticket::ClientSessionState>, bool) {
+            return (self.s.clone(), self.s.is_some());
+        }
+        // go: none — goish-only: counts drops for the assertion.
+        fn Put(
+            &mut self,
+            _sessionKey: crate::gostring::string,
+            cs: Option<ticket::ClientSessionState>,
+        ) {
+            let mut counts = self.counts.Lock();
+            counts.0 += 1;
+            if cs.is_none() {
+                counts.1 += 1;
+                self.s = None;
+            } else {
+                self.s = cs;
+            }
+        }
+    }
+
+    let mut cfg = Config::default();
+    cfg.ServerName = "example.com".into();
+    cfg.Rand = Some(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        alloc::boxed::Box::new(constReader(0x30)),
+    )));
+    cfg.Time = Some(alloc::sync::Arc::new(|| crate::time::Unix(1700000000, 0)));
+
+    let counts = alloc::sync::Arc::new(crate::sync::Mutex::new((0, 0)));
+    let sessionID = fill(0x30, 32);
+
+    let frame = |sh: &handshake_messages::serverHelloMsg| {
+        let (b, _) = sh.marshal();
+        let mut rec: alloc::vec::Vec<crate::types::byte> =
+            alloc::vec![22, 3, 3, crate::byte(b.Len() >> 8), crate::byte(b.Len())];
+        let raw: &[crate::types::byte] = &b;
+        rec.extend_from_slice(raw);
+        return rec;
+    };
+
+    let mut feed: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+    match which {
+        0 => {}
+        1 => {
+            let mut sh = handshake_messages::serverHelloMsg::default();
+            sh.vers = 0x0300;
+            sh.random = fill(0xB0, 32);
+            feed = frame(&sh);
+        }
+        2 => {
+            let mut sh = handshake_messages::serverHelloMsg::default();
+            sh.vers = common::VersionTLS12;
+            sh.random = fill(0xB0, 32);
+            sh.random[24..].copy_from_slice(common::downgradeCanaryTLS12);
+            sh.cipherSuite = cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256;
+            sh.compressionMethod = 0;
+            feed = frame(&sh);
+        }
+        3 => {
+            let mut sh = handshake_messages::serverHelloMsg::default();
+            sh.vers = common::VersionTLS12;
+            sh.random = fill(0xB0, 32);
+            sh.sessionId = sessionID.clone();
+            sh.cipherSuite = cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256;
+            sh.compressionMethod = 0;
+            feed = frame(&sh);
+        }
+        4 => {
+            let mut sh = handshake_messages::serverHelloMsg::default();
+            sh.vers = common::VersionTLS12;
+            sh.random = fill(0xB0, 32);
+            sh.sessionId = fill(0x77, 32);
+            sh.cipherSuite = cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256;
+            sh.compressionMethod = 0;
+            feed = frame(&sh);
+        }
+        _ => {
+            // 5 — a cached TLS 1.3 session, then a handshake failure.
+            cfg.InsecureSkipVerify = true;
+            let der = crate::encoding::base64::StdEncoding.DecodeString(__testLeafB64);
+            let der = der.0;
+            let (leaf, _) = crate::crypto::x509::ParseCertificate(der);
+            let mut session = ticket::SessionState::default();
+            session.version = common::VersionTLS13;
+            session.cipherSuite = cipher_suites::TLS_AES_128_GCM_SHA256;
+            session.createdAt = 1700000000 - 60;
+            session.secret = slice::__from_vec(fill(0xD0, 32));
+            session.ageAdd = 7;
+            session.useBy = 1700000000 + 3600;
+            session.ticket = slice::__from_vec(fill(0xAA, 16));
+            session.peerCertificates = slice::__from_vec(alloc::vec![leaf]);
+            let cache = countingCache {
+                s: Some(ticket::ClientSessionState::__of(session)),
+                counts: counts.clone(),
+            };
+            cfg.ClientSessionCache = Some(alloc::sync::Arc::new(crate::sync::Mutex::new(
+                alloc::boxed::Box::new(cache),
+            )));
+            let mut sh = handshake_messages::serverHelloMsg::default();
+            sh.vers = 0x0300;
+            sh.random = fill(0xB0, 32);
+            feed = frame(&sh);
+        }
+    }
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setDuplexConn(slice::__from_vec(feed), sink);
+    c.__setIsClient(true);
+    c.__setConfig(cfg);
+
+    let err = c.clientHandshake();
+    let errText = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let (puts, putNils) = *counts.Lock();
+    return (
+        errText,
+        c.__vers(),
+        c.didResume,
+        c.__serverName(),
+        puts,
+        putNils,
     );
 }
 

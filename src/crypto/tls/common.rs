@@ -540,6 +540,15 @@ impl Certificate {
 // field (`c == nil || c.MinVersion == 0`), so testing the field alone is
 // the same predicate.
 
+// Go: common.go:222-228
+//   const ( downgradeCanaryTLS12 = "DOWNGRD\x01"; downgradeCanaryTLS11 = "DOWNGRD\x00" )
+/// Go: "downgradeCanaryTLS12 or downgradeCanaryTLS11 is embedded in the
+/// server random as a downgrade protection if the server would be
+/// capable of negotiating a higher version. See RFC 8446, Section
+/// 4.1.3."
+pub(crate) const downgradeCanaryTLS12: &[u8] = b"DOWNGRD\x01";
+pub(crate) const downgradeCanaryTLS11: &[u8] = b"DOWNGRD\x00";
+
 // Go: common.go:1165-1166
 //   const roleClient = true; const roleServer = false
 /// Go: "roleClient and roleServer are meant to call supportedVersions
