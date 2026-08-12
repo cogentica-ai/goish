@@ -6233,5 +6233,168 @@ fn __chs13(_unused: bool) -> handshake_client_tls13::clientHandshakeStateTLS13 {
         usingPSK: false,
         sentDummyCCS: false,
         suite: None,
+        transcript: None,
+        masterSecret: None,
+        trafficSecret: crate::goslice::slice::new(),
     };
+}
+
+// go: none — goish-only: `clientHandshakeStateTLS13.readServerFinished`
+// and `.sendClientFinished` are unexported in Go, where the tests are
+// in-package. Both are driven off the same fixed key schedule the
+// reference test uses: an all-zero PSK, a 1..32 shared secret, and a
+// transcript seeded with one four-byte message. `which`: 0 = the
+// server's real Finished, 1 = a wrong one, 2 = sendClientFinished with
+// no session cache, 3 = with one. Reports `(errText, the expected
+// server MAC, hs.trafficSecret, c.in.trafficSecret, the wire,
+// c.out.trafficSecret, c.resumptionSecret, c.ekm was set)`.
+#[doc(hidden)]
+pub fn handshake_client_tls13_finished(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+) {
+    use crate::crypto::internal::fips140::tls13;
+    use crate::goslice::slice;
+    let suite = cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256).unwrap();
+    let mkState = |feed: slice<crate::types::byte>,
+                   sink: alloc::sync::Arc<crate::sync::Mutex<slice<crate::types::byte>>>| {
+        let shared: slice<crate::types::byte> = {
+            let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+            let mut i: crate::types::int = 0;
+            while i < 32 {
+                v.push(crate::byte(i + 1));
+                i += 1;
+            }
+            slice::__from_vec(v)
+        };
+        let hf = crate::hash::HashFunc::New(move || crate::crypto::SHA256.New());
+        let es = tls13::NewEarlySecret(hf, slice::new());
+        let master = es.HandshakeSecret(shared).MasterSecret();
+
+        let mut transcript = crate::crypto::sha256::New();
+        crate::io::Writer::Write(
+            &mut transcript,
+            slice::__from_vec(alloc::vec![0x01u8, 0x00, 0x00, 0x00]),
+        );
+
+        let mut c = conn::Conn::default();
+        c.__setMemConn(sink);
+        if feed.Len() > 0 {
+            c.__setFeedConn(feed);
+        }
+        c.__setHaveVers(true);
+        c.__setVers(common::VersionTLS13);
+        c.__setIsClient(true);
+        c.__setCipherSuite(cipher_suites::TLS_AES_128_GCM_SHA256);
+        c.__setTrafficSecrets(
+            slice::__from_vec(alloc::vec![1u8, 2, 3, 4]),
+            slice::__from_vec(alloc::vec![5u8, 6, 7, 8]),
+        );
+
+        let mut ch = handshake_messages::clientHelloMsg::default();
+        ch.random = alloc::vec![0u8; 32];
+        return handshake_client_tls13::clientHandshakeStateTLS13 {
+            c,
+            serverHello: handshake_messages::serverHelloMsg::default(),
+            hello: ch,
+            session: None,
+            usingPSK: false,
+            sentDummyCCS: false,
+            suite: Some(suite),
+            transcript: Some(handshake_messages::transcriptHasher(alloc::boxed::Box::new(
+                transcript,
+            ))),
+            masterSecret: Some(master),
+            trafficSecret: slice::new(),
+        };
+    };
+    let newSink = || {
+        alloc::sync::Arc::new(crate::sync::Mutex::new(
+            slice::<crate::types::byte>::new(),
+        ))
+    };
+
+    // The verify_data the client expects from the server.
+    let probe = mkState(slice::new(), newSink());
+    let expected = suite.finishedHash(
+        probe.c.__inTrafficSecretOf(),
+        &*probe.transcript.as_ref().unwrap().0,
+    );
+
+    let rec = |body: slice<crate::types::byte>| {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec![
+            0x16u8,
+            0x03,
+            0x03,
+            crate::byte(body.Len() >> 8),
+            crate::byte(body.Len() & 0xff)
+        ];
+        v.extend_from_slice(&body);
+        return slice::__from_vec(v);
+    };
+
+    let empty = slice::<crate::types::byte>::new();
+    if which <= 1 {
+        let verifyData = if which == 0 {
+            expected.clone().__into_vec()
+        } else {
+            alloc::vec![9u8; 32]
+        };
+        let fin = handshake_messages::finishedMsg { verifyData };
+        let (body, _) = fin.marshal();
+        let mut hs = mkState(rec(body), newSink());
+        let err = hs.readServerFinished();
+        let text = if err == crate::errors::nil {
+            crate::gostring::string::from_static("")
+        } else {
+            err.Error()
+        };
+        let (inSec, _) = hs.c.__trafficSecrets();
+        return (
+            text,
+            expected,
+            hs.trafficSecret.clone(),
+            inSec,
+            empty.clone(),
+            empty.clone(),
+            empty,
+            hs.c.__hasEkm(),
+        );
+    }
+
+    let sink = newSink();
+    let mut hs = mkState(slice::new(), sink.clone());
+    hs.trafficSecret = slice::__from_vec(alloc::vec![0xaau8, 0xbb, 0xcc, 0xdd]);
+    if which == 3 {
+        let mut cfg = hs.c.__config();
+        cfg.ClientSessionCache = Some(alloc::sync::Arc::new(crate::sync::Mutex::new(
+            alloc::boxed::Box::new(common::NewLRUClientSessionCache(4)),
+        )));
+        hs.c.__setConfig(cfg);
+    }
+    let err = hs.sendClientFinished();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let (_, outSec) = hs.c.__trafficSecrets();
+    return (
+        text,
+        expected,
+        empty.clone(),
+        empty,
+        sink.Lock().clone(),
+        outSec,
+        hs.c.__resumptionSecret(),
+        hs.c.__hasEkm(),
+    );
 }

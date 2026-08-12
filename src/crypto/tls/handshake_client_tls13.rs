@@ -1,4 +1,4 @@
-// goishlint:ignore GOISH018 handshake, processHelloRetryRequest, establishHandshakeKeys, readServerParameters, readServerCertificate, readServerFinished, sendClientCertificate, sendClientFinished, handleNewSessionTicket — the rest of clientHandshakeStateTLS13, which drives the whole exchange through the key schedule and the transcript; the live TLS 1.3 client below is a self-contained function, not a port of these. See ROADMAP.md.
+// goishlint:ignore GOISH018 handshake, processHelloRetryRequest, establishHandshakeKeys, readServerParameters, readServerCertificate, sendClientCertificate, handleNewSessionTicket — the rest of clientHandshakeStateTLS13, which drives the whole exchange through the key schedule and the transcript; the live TLS 1.3 client below is a self-contained function, not a port of these. See ROADMAP.md.
 // crypto/tls/handshake_client_tls13.rs — TLS 1.3 client handshake.
 //
 // Port of:
@@ -1258,6 +1258,10 @@ pub(crate) struct clientHandshakeStateTLS13 {
     pub usingPSK: bool,
     pub sentDummyCCS: bool,
     pub suite: Option<&'static super::cipher_suites::cipherSuiteTLS13>,
+    pub transcript: Option<super::handshake_messages::transcriptHasher>,
+    pub masterSecret: Option<crate::crypto::internal::fips140::tls13::MasterSecret>,
+    /// Go: `client_application_traffic_secret_0`.
+    pub trafficSecret: crate::goslice::slice<crate::types::byte>,
 }
 
 impl clientHandshakeStateTLS13 {
@@ -1459,4 +1463,162 @@ fn suiteEq(
         (None, None) => true,
         _ => false,
     };
+}
+
+impl clientHandshakeStateTLS13 {
+    // go: sdk 1.25.5 crypto/tls/handshake_client_tls13.go:707-754 clientHandshakeStateTLS13.readServerFinished
+    /// Go: read and check the server's Finished, then derive the
+    /// application traffic secrets, which take context through it.
+    ///
+    /// Deviation: `c.ekm` is set from `exportKeyingMaterial`, which
+    /// goish returns behind an `Arc` rather than as a bare closure.
+    pub(crate) fn readServerFinished(&mut self) -> crate::error {
+        // Go: "finishedMsg is included in the transcript, but not until
+        // after we check the client version, since the state before this
+        // message was sent is used during verification."
+        let (msg, err) = self.c.readHandshake(None);
+        if err != crate::errors::nil {
+            return err;
+        }
+        // Go: finished, ok := msg.(*finishedMsg); if !ok { … }
+        let msg = match msg {
+            Some(m) => m,
+            None => return crate::errors::New("tls: internal error: no handshake message"),
+        };
+        let finished = match msg
+            .asAny()
+            .downcast_ref::<super::handshake_messages::finishedMsg>()
+        {
+            Some(f) => f.clone(),
+            None => {
+                self.c.sendAlert(super::alert::alertUnexpectedMessage);
+                return super::common::unexpectedMessageError(
+                    crate::gostring::string::from_static("*tls.finishedMsg"),
+                    super::handshake_messages::handshakeMessageTypeName(&*msg),
+                );
+            }
+        };
+
+        // Go: expectedMAC := hs.suite.finishedHash(c.in.trafficSecret, hs.transcript)
+        //     if !hmac.Equal(expectedMAC, finished.verifyData) {
+        //         c.sendAlert(alertDecryptError)
+        //         return errors.New("tls: invalid server finished hash") }
+        let suite = self.suite.unwrap();
+        let expectedMAC = {
+            let transcript = self.transcript.as_ref().unwrap();
+            suite.finishedHash(self.c.in_.trafficSecret.clone(), &*transcript.0)
+        };
+        if !crate::crypto::hmac::Equal(
+            expectedMAC,
+            crate::goslice::slice::__from_vec(finished.verifyData.clone()),
+        ) {
+            self.c.sendAlert(super::alert::alertDecryptError);
+            return crate::errors::New("tls: invalid server finished hash");
+        }
+
+        // Go: if err := transcriptMsg(finished, hs.transcript); err != nil { return err }
+        let err = {
+            let transcript = self.transcript.as_mut().unwrap();
+            super::handshake_messages::transcriptMsg(&finished, transcript)
+        };
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: "Derive secrets that take context through the server Finished."
+        // Go: hs.trafficSecret = hs.masterSecret.ClientApplicationTrafficSecret(hs.transcript)
+        //     serverSecret := hs.masterSecret.ServerApplicationTrafficSecret(hs.transcript)
+        //     c.in.setTrafficSecret(hs.suite, QUICEncryptionLevelApplication, serverSecret)
+        let master = self.masterSecret.as_ref().unwrap();
+        let transcript = self.transcript.as_ref().unwrap();
+        self.trafficSecret = master.ClientApplicationTrafficSecret(&*transcript.0);
+        let serverSecret = master.ServerApplicationTrafficSecret(&*transcript.0);
+        let ekm = suite.exportKeyingMaterial(master, &*transcript.0);
+        let clientSecret = self.trafficSecret.clone();
+        let helloRandom = crate::goslice::slice::__from_vec(self.hello.random.clone());
+        self.c.in_.setTrafficSecret(
+            suite,
+            super::quic::QUICEncryptionLevelApplication,
+            serverSecret.clone(),
+        );
+
+        // Go: err = c.config.writeKeyLog(keyLogLabelClientTraffic, hs.hello.random, hs.trafficSecret)
+        //     if err != nil { c.sendAlert(alertInternalError); return err }
+        let err = self.c.config.writeKeyLog(
+            crate::gostring::string::from_static(super::common::keyLogLabelClientTraffic),
+            helloRandom.clone(),
+            clientSecret,
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertInternalError);
+            return err;
+        }
+        // Go: err = c.config.writeKeyLog(keyLogLabelServerTraffic, hs.hello.random, serverSecret)
+        //     if err != nil { c.sendAlert(alertInternalError); return err }
+        let err = self.c.config.writeKeyLog(
+            crate::gostring::string::from_static(super::common::keyLogLabelServerTraffic),
+            helloRandom,
+            serverSecret,
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertInternalError);
+            return err;
+        }
+
+        // Go: c.ekm = hs.suite.exportKeyingMaterial(hs.masterSecret, hs.transcript)
+        //     return nil
+        self.c.ekm = Some(ekm);
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_client_tls13.go:830-855 clientHandshakeStateTLS13.sendClientFinished
+    /// Go: send the client's Finished, switch the write half to the
+    /// application traffic secret, and stash the resumption secret if a
+    /// session cache is configured.
+    ///
+    /// Deviation: the `c.quic != nil` tail is absent — goish ships no
+    /// QUIC transport.
+    pub(crate) fn sendClientFinished(&mut self) -> crate::error {
+        // Go: finished := &finishedMsg{
+        //         verifyData: hs.suite.finishedHash(c.out.trafficSecret, hs.transcript)}
+        let suite = self.suite.unwrap();
+        let verifyData = {
+            let transcript = self.transcript.as_ref().unwrap();
+            suite.finishedHash(self.c.out.trafficSecret.clone(), &*transcript.0)
+        };
+        let finished = super::handshake_messages::finishedMsg {
+            verifyData: verifyData.__into_vec(),
+        };
+
+        // Go: if _, err := hs.c.writeHandshakeRecord(finished, hs.transcript); err != nil { return err }
+        let (_, err) = {
+            let transcript = self.transcript.as_mut().unwrap();
+            self.c
+                .writeHandshakeRecord(&finished, Some(transcript))
+        };
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: c.out.setTrafficSecret(hs.suite, QUICEncryptionLevelApplication, hs.trafficSecret)
+        self.c.out.setTrafficSecret(
+            suite,
+            super::quic::QUICEncryptionLevelApplication,
+            self.trafficSecret.clone(),
+        );
+
+        // Go: if !c.config.SessionTicketsDisabled && c.config.ClientSessionCache != nil {
+        //         c.resumptionSecret = hs.masterSecret.ResumptionMasterSecret(hs.transcript) }
+        if !self.c.__configSessionTicketsDisabled()
+            && self.c.__configClientSessionCache().is_some()
+        {
+            let master = self.masterSecret.as_ref().unwrap();
+            let transcript = self.transcript.as_ref().unwrap();
+            let rs = master.ResumptionMasterSecret(&*transcript.0);
+            self.c.resumptionSecret = rs;
+        }
+
+        // Go: return nil
+        return crate::errors::nil;
+    }
 }

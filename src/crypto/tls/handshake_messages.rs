@@ -3259,11 +3259,25 @@ pub(crate) trait transcriptHash {
     fn Write(&mut self, p: slice<byte>) -> (crate::types::int, error);
 }
 
-impl<T: crate::io::Writer + ?Sized> transcriptHash for T {
+impl<T: crate::io::Writer> transcriptHash for T {
     // go: none — goish-only: in Go a `hash.Hash` satisfies
     // `transcriptHash` structurally, because it embeds `io.Writer`.
     fn Write(&mut self, p: slice<byte>) -> (crate::types::int, error) {
         return crate::io::Writer::Write(self, p);
+    }
+}
+
+// go: none — goish-only: Go's `hs.transcript` is a `hash.Hash`, an
+// interface value that satisfies `transcriptHash` by shape. goish holds
+// `Box<dyn hash::Hash>`, and Rust cannot re-coerce one trait object
+// into another, so the box is wrapped in this sized carrier. It is the
+// same value; only the plumbing differs.
+pub(crate) struct transcriptHasher(pub alloc::boxed::Box<dyn crate::hash::Hash + Send + Sync>);
+
+impl crate::io::Writer for transcriptHasher {
+    // go: none — goish-only: forwards to the boxed hash.
+    fn Write(&mut self, p: slice<byte>) -> (crate::types::int, error) {
+        return crate::io::Writer::Write(&mut *self.0, p);
     }
 }
 

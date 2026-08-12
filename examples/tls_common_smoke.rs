@@ -2911,6 +2911,62 @@ fn main() {
         pshI += 1;
     }
 
+
+    // ── clientHandshakeStateTLS13 readServerFinished/sendClientFinished
+    //
+    // Ground truth: scripts/goref.sh crypto/tls off the same fixed key
+    // schedule — an empty PSK, a 1..32 shared secret, and a transcript
+    // seeded with one four-byte message.
+    let (rf0e, rf0mac, rf0traffic, rf0in, _, _, _, rf0ekm) = tls::handshake_client_tls13_finished(0);
+    eq(
+        "readServerFinished expects Go's server MAC",
+        hexOf(rf0mac),
+        "d3fb0cdec57dd292ecf2e4e206eea7b348ba31d3725252e48fe6cbc3e2f5b454",
+    );
+    eq("readServerFinished accepts it", rf0e, "");
+    eq(
+        "readServerFinished derives client_application_traffic_secret_0",
+        hexOf(rf0traffic),
+        "fe18d337858c3a0e07b15324fcf12352f21f93db412fcbcbc328b50a8105d5d1",
+    );
+    eq(
+        "readServerFinished switches the read half to the server application secret",
+        hexOf(rf0in),
+        "9a2c1b6c9d9f2b744d19c2f7e98137beaa5a310538435a877fad78555cedb812",
+    );
+    check("readServerFinished installs the exporter", rf0ekm);
+    let (rf1e, _, _, _, _, _, _, _) = tls::handshake_client_tls13_finished(1);
+    eq(
+        "readServerFinished refuses a wrong verify_data",
+        rf1e,
+        "tls: invalid server finished hash",
+    );
+
+    let (sf2e, _, _, _, sf2wire, sf2out, sf2rs, _) = tls::handshake_client_tls13_finished(2);
+    eq("sendClientFinished succeeds", sf2e, "");
+    eq(
+        "sendClientFinished writes the client Finished",
+        hexOf(sf2wire),
+        "16030300241400002063996a0d6a1514cd76aef5666e3496a54e71612d55ee4c821b9fc25b3d9bbd19",
+    );
+    eq(
+        "sendClientFinished switches the write half to the application secret",
+        hexOf(sf2out),
+        "aabbccdd",
+    );
+    check_n(
+        "sendClientFinished stashes no resumption secret without a cache",
+        sf2rs.Len(),
+        0,
+    );
+    let (sf3e, _, _, _, _, _, sf3rs, _) = tls::handshake_client_tls13_finished(3);
+    eq("sendClientFinished with a cache succeeds", sf3e, "");
+    eq(
+        "sendClientFinished stashes the resumption secret when a cache is set",
+        hexOf(sf3rs),
+        "b4ac5ab995a64d62675a4379d70ba8cc0014d3236590e0fc49f8d497d4509818",
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

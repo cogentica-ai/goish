@@ -1269,6 +1269,15 @@ impl Conn {
     // go: none — goish-only: see `__didResume`.
     #[doc(hidden)]
     pub fn __ocspResponseLen(&self) -> int { return self.ocspResponse.Len(); }
+    // go: none — goish-only: see `__didResume`.
+    #[doc(hidden)]
+    pub fn __inTrafficSecretOf(&self) -> slice<byte> { return self.in_.trafficSecret.clone(); }
+    // go: none — goish-only: see `__didResume`.
+    #[doc(hidden)]
+    pub fn __resumptionSecret(&self) -> slice<byte> { return self.resumptionSecret.clone(); }
+    // go: none — goish-only: see `__didResume`.
+    #[doc(hidden)]
+    pub fn __hasEkm(&self) -> bool { return self.ekm.is_some(); }
     // go: none — goish-only: see `__adoptSession`.
     #[doc(hidden)]
     pub fn __setTicketKeys(&mut self, k: slice<super::common::ticketKey>) {
