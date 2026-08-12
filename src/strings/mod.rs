@@ -1555,3 +1555,20 @@ pub fn Lines<S: Into<string>>(s: S) -> impl crate::iter::Seq<string> {
         }
     }
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b.
+/// Register `strings`'s concrete types into the `io` interface
+/// registries. Idempotent; called from `goish::init()`.
+pub fn register_strings_impls() {
+    use crate::io::{
+        __goish_register_ReaderAt_impl, __goish_register_Reader_impl,
+        __goish_register_Seeker_impl, __goish_register_WriterTo_impl,
+        __goish_register_Writer_impl,
+    };
+    __goish_register_Writer_impl::<Builder>();
+    __goish_register_Reader_impl::<Reader>();
+    __goish_register_ReaderAt_impl::<Reader>();
+    __goish_register_Seeker_impl::<Reader>();
+    __goish_register_WriterTo_impl::<Reader>();
+}

@@ -391,3 +391,13 @@ where
         val: Arc::new(value),
     })
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b.
+/// Register `context`'s concrete contexts into the `Context` registry.
+/// Idempotent; called from `goish::init()`.
+pub fn register_context_impls() {
+    __goish_register_Context_impl::<CancelCtx>();
+    __goish_register_Context_impl::<EmptyCtx>();
+    __goish_register_Context_impl::<ValueCtx>();
+}

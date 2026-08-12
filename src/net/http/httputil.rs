@@ -396,3 +396,9 @@ impl super::server::Handler for reverseProxyHandler {
         let _ = crate::io::Closer::Close(&mut resp.Body);
     }
 }
+
+// go: none — goish idiom: `reverseProxyHandler` is unexported, so only
+// this module can register it. See AGENTS.md §9b.
+pub(super) fn register_httputil_impls() {
+    super::server::__goish_register_Handler_impl::<reverseProxyHandler>();
+}

@@ -1796,3 +1796,25 @@ fn ascii_eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
     }
     true
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b.
+/// Register `net/http`'s concrete `Handler`s and body/conn types into
+/// the `http` and `io` registries. Idempotent; called from
+/// `goish::init()`.
+pub fn register_http_impls() {
+    __goish_register_Handler_impl::<ServeMux>();
+    __goish_register_Handler_impl::<allowQuerySemicolonsHandler>();
+    __goish_register_Handler_impl::<methodNotAllowedHandler>();
+    __goish_register_Handler_impl::<notFoundHandler>();
+    __goish_register_Handler_impl::<redirectHandler>();
+    __goish_register_Handler_impl::<stripPrefixHandler>();
+    __goish_register_Handler_impl::<timeoutHandler>();
+
+    // The remaining Handlers are unexported in their own modules, so
+    // each registers what only it can name.
+    super::fs::register_fs_impls();
+    super::csrf::register_csrf_impls();
+    super::httputil::register_httputil_impls();
+    super::client::register_client_impls();
+}

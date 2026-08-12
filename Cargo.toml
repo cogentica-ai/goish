@@ -1118,3 +1118,7 @@ path = "examples/fips140_drbg_smoke.rs"
 [[example]]
 name = "x509_create_smoke"
 path = "examples/x509_create_smoke.rs"
+
+[[example]]
+name = "iface_registry_smoke"
+path = "examples/iface_registry_smoke.rs"

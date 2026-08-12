@@ -7114,3 +7114,24 @@ impl crate::reflect::Reflect for Int {
         };
     }
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b.
+/// Register `math/big`'s types into the `fmt` interface registries.
+/// Idempotent; called from `goish::init()`.
+pub fn register_big_impls() {
+    use crate::fmt::{
+        __goish_register_Formatter_impl, __goish_register_Scanner_impl,
+        __goish_register_Stringer_impl,
+    };
+    __goish_register_Stringer_impl::<Int>();
+    __goish_register_Stringer_impl::<Float>();
+    __goish_register_Stringer_impl::<Rat>();
+    __goish_register_Stringer_impl::<Accuracy>();
+    __goish_register_Stringer_impl::<RoundingMode>();
+    __goish_register_Formatter_impl::<Int>();
+    __goish_register_Formatter_impl::<Float>();
+    __goish_register_Scanner_impl::<Int>();
+    __goish_register_Scanner_impl::<Float>();
+    __goish_register_Scanner_impl::<Rat>();
+}

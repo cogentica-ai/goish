@@ -281,3 +281,9 @@ fn string_eq(a: &string, b: &string) -> bool {
     }
     true
 }
+
+// go: none — goish idiom: `NoopHandler` is unexported, so only this
+// module can register it. See AGENTS.md §9b.
+pub(super) fn register_csrf_impls() {
+    super::server::__goish_register_Handler_impl::<NoopHandler>();
+}

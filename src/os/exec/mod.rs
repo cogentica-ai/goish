@@ -734,3 +734,18 @@ fn drain_into(
         drop(g);
     }
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b.
+/// Register `os/exec`'s pipe endpoints into the `io` registries.
+/// Idempotent; called from `goish::init()`.
+pub fn register_exec_impls() {
+    use crate::io::{
+        __goish_register_Closer_impl, __goish_register_Reader_impl,
+        __goish_register_Writer_impl,
+    };
+    __goish_register_Reader_impl::<FdReader>();
+    __goish_register_Closer_impl::<FdReader>();
+    __goish_register_Writer_impl::<FdWriter>();
+    __goish_register_Closer_impl::<FdWriter>();
+}

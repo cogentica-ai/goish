@@ -595,3 +595,14 @@ pub fn appendJSONQuote<S: Into<string>>(b: slice<byte>, s: S) -> slice<byte> {
     v.push(b'"');
     slice::__from_vec(v)
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b.
+/// Register `expvar`'s published types into the `Var` registry.
+/// Idempotent; called from `goish::init()`.
+pub fn register_expvar_impls() {
+    __goish_register_Var_impl::<Int>();
+    __goish_register_Var_impl::<Float>();
+    __goish_register_Var_impl::<Map>();
+    __goish_register_Var_impl::<String>();
+}

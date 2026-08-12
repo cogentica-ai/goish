@@ -210,6 +210,8 @@ fn register_hmac_impls() {
     // HMAC is itself a Cloner, so a `Box<dyn Hash>` holding one must be
     // able to assert to `hash.Cloner` — Go gets this from the itab.
     crate::hash::__goish_register_Cloner_impl::<HMAC>();
+    crate::hash::__goish_register_Hash_impl::<HMAC>();
+    crate::io::__goish_register_Writer_impl::<HMAC>();
 }
 
 /// `hmac.HMAC` (fips140/hmac/hmac.go:32) — keyed-hash MAC.

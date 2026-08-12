@@ -242,3 +242,18 @@ fn BEAppendUint64(dst: slice<byte>, v: u64) -> slice<byte> {
     out.push(v as byte);
     slice::__from_vec(out)
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b.
+/// Register the four FNV sums into the `hash::Hash` / `io::Writer`
+/// registries. Idempotent; called from `goish::init()`.
+pub fn register_fnv_impls() {
+    crate::hash::__goish_register_Hash_impl::<sum32>();
+    crate::hash::__goish_register_Hash_impl::<sum32a>();
+    crate::hash::__goish_register_Hash_impl::<sum64>();
+    crate::hash::__goish_register_Hash_impl::<sum64a>();
+    crate::io::__goish_register_Writer_impl::<sum32>();
+    crate::io::__goish_register_Writer_impl::<sum32a>();
+    crate::io::__goish_register_Writer_impl::<sum64>();
+    crate::io::__goish_register_Writer_impl::<sum64a>();
+}

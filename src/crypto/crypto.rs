@@ -266,6 +266,10 @@ pub fn RegisterStandardHashes() {
 /// `crypto/ecdsa`, not here; until then an ECDSA key cannot sign an
 /// x509 certificate.
 pub fn RegisterStandardSigners() {
+    __goish_register_SignerOpts_impl::<Hash>();
+    __goish_register_SignerOpts_impl::<crate::crypto::ed25519::Options>();
+    __goish_register_SignerOpts_impl::<crate::crypto::rsa::PSSOptions>();
+    __goish_register_Decrypter_impl::<crate::crypto::rsa::PrivateKey>();
     __goish_register_Signer_impl::<crate::crypto::rsa::PrivateKey>();
     __goish_register_Signer_impl::<crate::crypto::ed25519::PrivateKey>();
 }

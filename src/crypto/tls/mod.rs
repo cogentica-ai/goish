@@ -1250,3 +1250,21 @@ fn parse_new_session_ticket(inner: &[byte]) -> Option<ParsedNewSessionTicket> {
         ticket,
     })
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b.
+/// Register `tls::Conn` / `DeadConn` into the `io` and `net` interface
+/// registries. Idempotent; called from `goish::init()`.
+pub fn register_tls_impls() {
+    use crate::io::{
+        __goish_register_Closer_impl, __goish_register_Reader_impl,
+        __goish_register_Writer_impl,
+    };
+    __goish_register_Reader_impl::<Conn>();
+    __goish_register_Writer_impl::<Conn>();
+    __goish_register_Closer_impl::<Conn>();
+    __goish_register_Reader_impl::<DeadConn>();
+    __goish_register_Writer_impl::<DeadConn>();
+    __goish_register_Closer_impl::<DeadConn>();
+    crate::net::__goish_register_Conn_impl::<DeadConn>();
+}

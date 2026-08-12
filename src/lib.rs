@@ -288,6 +288,45 @@ pub fn init() {
     pkg_init_once!("goish", {
         crypto::RegisterStandardHashes();
         crypto::RegisterStandardSigners();
+
+        // Downcast registries for `#[goish::interface]` traits. Go's
+        // linker builds the equivalent itabs; here every
+        // `impl Trait for Concrete` needs an explicit entry or a type
+        // assertion to that interface misses despite the impl existing
+        // — silently, since a comma-ok assertion reports `false` rather
+        // than failing. Swept 2026-08-12: 25 traits had implementors
+        // and no entries at all, `io::Writer`, `io::Reader`,
+        // `io::Closer`, `hash::Hash` and `http::Handler` among them, so
+        // `if c, ok := w.(io.Closer)` could not succeed. See
+        // AGENTS.md §9b.
+        //
+        // Each package registers what it declares, because unexported
+        // types are only nameable there.
+        io::register_io_impls();
+        bytes::register_bytes_impls();
+        strings::register_strings_impls();
+        os::register_os_impls();
+        os::exec::register_exec_impls();
+        net::register_net_impls();
+        net::http::server::register_http_impls();
+        crypto::tls::register_tls_impls();
+        context::register_context_impls();
+        expvar::register_expvar_impls();
+        math::big::register_big_impls();
+        encoding::json::register_json_impls();
+        crypto::elliptic::register_elliptic_impls();
+
+        // hash.Hash / io.Writer for every digest in the tree.
+        hash::adler32::register_adler32_impls();
+        hash::crc32::register_crc32_impls();
+        hash::crc64::register_crc64_impls();
+        hash::fnv::register_fnv_impls();
+        hash::maphash::register_maphash_impls();
+        crypto::md5::register_md5_impls();
+        crypto::sha1::register_sha1_impls();
+        crypto::sha3::register_sha3_impls();
+        crypto::internal::fips140::sha256::register_sha256_impls();
+        crypto::internal::fips140::sha512::register_sha512_impls();
     });
 }
 

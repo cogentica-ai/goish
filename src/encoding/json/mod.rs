@@ -1856,3 +1856,11 @@ impl Decoder {
         }
     }
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b.
+/// Register `json::Value` into the `Marshaler` registry. Idempotent;
+/// called from `goish::init()`.
+pub fn register_json_impls() {
+    __goish_register_Marshaler_impl::<Value>();
+}

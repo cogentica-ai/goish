@@ -410,4 +410,6 @@ pub fn NewHash512() -> Box<dyn Hash + Send + Sync> {
 /// `encoding::Binary*` registries.
 pub fn register_sha3_impls() {
     fips::register_sha3_impls();
+    crate::hash::__goish_register_Hash_impl::<SHA3>();
+    crate::io::__goish_register_Writer_impl::<SHA3>();
 }

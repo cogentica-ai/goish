@@ -191,3 +191,12 @@ impl Hash32 for Digest {
         self.crc
     }
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b.
+/// Register `Digest` into the `hash::Hash` / `io::Writer` registries.
+/// Idempotent; called from `goish::init()`.
+pub fn register_crc32_impls() {
+    crate::hash::__goish_register_Hash_impl::<Digest>();
+    crate::io::__goish_register_Writer_impl::<Digest>();
+}

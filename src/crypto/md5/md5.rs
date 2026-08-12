@@ -417,6 +417,8 @@ impl Cloner for Digest {
 /// Register `Digest` into the `hash::Cloner` and `encoding::Binary*`
 /// downcast registries so `carrier.As::<…>()` finds it.
 pub fn register_md5_impls() {
+    crate::hash::__goish_register_Hash_impl::<Digest>();
+    crate::io::__goish_register_Writer_impl::<Digest>();
     crate::hash::__goish_register_Cloner_impl::<Digest>();
     encoding::__goish_register_BinaryMarshaler_impl::<Digest>();
     encoding::__goish_register_BinaryAppender_impl::<Digest>();

@@ -2039,3 +2039,17 @@ pub fn DirFS<S: Into<string>>(
     register_dirfs_impls();
     alloc::sync::Arc::new(dirFS { dir: dir.into() })
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b.
+/// Register `os::File` into the `io` interface registries. Idempotent;
+/// called from `goish::init()`.
+pub fn register_os_impls() {
+    use crate::io::{
+        __goish_register_Closer_impl, __goish_register_Reader_impl,
+        __goish_register_Writer_impl,
+    };
+    __goish_register_Reader_impl::<File>();
+    __goish_register_Writer_impl::<File>();
+    __goish_register_Closer_impl::<File>();
+}

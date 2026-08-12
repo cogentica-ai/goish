@@ -969,3 +969,39 @@ pub mod ioutil {
         buf.extend_from_slice(&digits[i..]);
     }
 }
+
+// ─── Downcast-registry population ─────────────────────────────────────
+//
+// go: none — goish idiom. `#[goish::interface]` emits a per-trait
+// downcast registry but nothing fills it; Go builds the equivalent
+// itabs at link time. Every `impl Trait for Concrete` needs one entry,
+// or a type assertion to that interface — `cast!` on a `dyn Trait`
+// carrier, `.As::<dyn Trait>()` on an `Any` — misses even though the
+// impl exists. See AGENTS.md §9b.
+//
+// Each package registers the types it declares, because unexported
+// ones (`Empty`, `MultiReaderImpl`, …) are only nameable here.
+
+// go: none — goish idiom: Go's linker builds the equivalent itabs.
+/// Register `io`'s own concrete types into the `io` interface
+/// registries. Idempotent; called from `goish::init()`.
+pub fn register_io_impls() {
+    __goish_register_Reader_impl::<Empty>();
+    __goish_register_Reader_impl::<MultiReaderImpl>();
+    __goish_register_Reader_impl::<SectionReader>();
+    __goish_register_ReaderAt_impl::<SectionReader>();
+    __goish_register_Seeker_impl::<SectionReader>();
+
+    __goish_register_Writer_impl::<Discard>();
+    __goish_register_Writer_impl::<MultiWriterImpl>();
+    __goish_register_Writer_impl::<OffsetWriter>();
+    __goish_register_WriterAt_impl::<OffsetWriter>();
+    __goish_register_Seeker_impl::<OffsetWriter>();
+
+    __goish_register_Closer_impl::<NullCloser>();
+
+    __goish_register_Reader_impl::<pipe::PipeReader>();
+    __goish_register_Closer_impl::<pipe::PipeReader>();
+    __goish_register_Writer_impl::<pipe::PipeWriter>();
+    __goish_register_Closer_impl::<pipe::PipeWriter>();
+}

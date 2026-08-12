@@ -312,6 +312,8 @@ impl Cloner for Digest {
 /// downcast registries so `carrier.As::<…>()` finds it. Called at the
 /// head of every goish API that asserts on a hash interface.
 pub fn register_sha256_impls() {
+    crate::hash::__goish_register_Hash_impl::<Digest>();
+    crate::io::__goish_register_Writer_impl::<Digest>();
     crate::hash::__goish_register_Cloner_impl::<Digest>();
     encoding::__goish_register_BinaryMarshaler_impl::<Digest>();
     encoding::__goish_register_BinaryAppender_impl::<Digest>();

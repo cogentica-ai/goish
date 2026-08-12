@@ -474,3 +474,9 @@ fn ext_of(path: &string) -> string {
     }
     string::new()
 }
+
+// go: none — goish idiom: `FileHandler` is unexported, so only this
+// module can register it. See AGENTS.md §9b.
+pub(super) fn register_fs_impls() {
+    super::server::__goish_register_Handler_impl::<FileHandler>();
+}

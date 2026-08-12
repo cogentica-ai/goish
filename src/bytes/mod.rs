@@ -1701,3 +1701,31 @@ fn bytes_index(haystack: &[byte], needle: &[byte]) -> int {
     }
     -1
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b and
+// the banner on `io::register_io_impls`.
+/// Register `bytes`'s concrete types into the `io` interface
+/// registries. Idempotent; called from `goish::init()`.
+pub fn register_bytes_impls() {
+    use crate::io::{
+        __goish_register_ByteReader_impl, __goish_register_ByteWriter_impl,
+        __goish_register_ReaderAt_impl, __goish_register_ReaderFrom_impl,
+        __goish_register_Reader_impl, __goish_register_Seeker_impl,
+        __goish_register_StringWriter_impl, __goish_register_WriterTo_impl,
+        __goish_register_Writer_impl,
+    };
+    __goish_register_Reader_impl::<Buffer>();
+    __goish_register_Writer_impl::<Buffer>();
+    __goish_register_ByteReader_impl::<Buffer>();
+    __goish_register_ByteWriter_impl::<Buffer>();
+    __goish_register_StringWriter_impl::<Buffer>();
+    __goish_register_ReaderFrom_impl::<Buffer>();
+    __goish_register_WriterTo_impl::<Buffer>();
+
+    __goish_register_Reader_impl::<Reader>();
+    __goish_register_ReaderAt_impl::<Reader>();
+    __goish_register_ByteReader_impl::<Reader>();
+    __goish_register_Seeker_impl::<Reader>();
+    __goish_register_WriterTo_impl::<Reader>();
+}

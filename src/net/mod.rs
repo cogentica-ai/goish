@@ -1930,3 +1930,18 @@ impl crate::reflect::Reflect for IP {
         }
     }
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b.
+/// Register `net::TCPConn` into the `io` and `net` interface
+/// registries. Idempotent; called from `goish::init()`.
+pub fn register_net_impls() {
+    use crate::io::{
+        __goish_register_Closer_impl, __goish_register_Reader_impl,
+        __goish_register_Writer_impl,
+    };
+    __goish_register_Reader_impl::<TCPConn>();
+    __goish_register_Writer_impl::<TCPConn>();
+    __goish_register_Closer_impl::<TCPConn>();
+    __goish_register_Conn_impl::<TCPConn>();
+}

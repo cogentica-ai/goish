@@ -1675,3 +1675,12 @@ fn query_escape(s: string) -> string {
     b.String()
 }
 
+
+// go: none — goish idiom: `ConnSrc` is unexported, so only this module
+// can register it. See AGENTS.md §9b.
+pub(super) fn register_client_impls() {
+    crate::io::__goish_register_Reader_impl::<Body>();
+    crate::io::__goish_register_Closer_impl::<Body>();
+    crate::io::__goish_register_Reader_impl::<ConnSrc>();
+    __goish_register_RoundTripper_impl::<Transport>();
+}

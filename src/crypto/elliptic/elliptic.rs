@@ -337,3 +337,11 @@ pub fn P521() -> &'static (dyn Curve + Send + Sync) {
 
 // Keep the `int` import honest: BitSize and BitLen are both one.
 const _: int = 0;
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries for the types this package declares. See AGENTS.md §9b.
+/// Register the concrete `Curve` implementations. Idempotent; called
+/// from `goish::init()`.
+pub fn register_elliptic_impls() {
+    __goish_register_Curve_impl::<crate::crypto::elliptic::params::CurveParams>();
+}
