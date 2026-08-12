@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -21,7 +21,7 @@
 // registration having happened and can be tested on its own.
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
 // goishlint:ignore GOISH018 after, Attr, before, callSite, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newTestState, Output, Parallel, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
-// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelConflict, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, testState, timeout, traceFile — same: the driver's types and package state come with the driver.
+// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
 #![allow(non_snake_case)]
@@ -345,12 +345,24 @@ impl T {
         // common is built. It must happen after the Arc exists, because
         // the writer holds a Weak back to it.
         sub.state.setOutputWriter();
+        *sub.state.level.Lock() = sub.depth;
+        // Go: every test in one run shares the run-wide state.
+        *sub.state.tstate.Lock() = self.state.tstate.Lock().clone();
 
         let header_indent = indent_for(sub.depth);
         write_status(b"=== RUN  ", header_indent.as_bytes(), &qualified);
 
         let state = sub.state.clone();
         tRunner(sub, f);
+
+        // A subtest that called Parallel has NOT finished — tRunner
+        // returned because Parallel signalled, not because the body
+        // did. Its status line is printed by this test's own tRunner,
+        // once the barrier has released it and it has really finished.
+        // Printing here would report PASS for a test that fails later.
+        if state.isParallel.load(Ordering::Acquire) {
+            return true;
+        }
 
         let passed = !state.failed.load(Ordering::Acquire);
         let tag: &[u8] = if state.skipped.load(Ordering::Acquire) {
@@ -423,8 +435,48 @@ pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
     });
 
     // Go: `<-t.signal`. Exactly one send happens per test, from
-    // whichever path finished it.
+    // whichever path finished it — a normal finish, or T.Parallel
+    // handing control back before it parks.
     let _ = state.signal.Recv();
+
+    // Go: tRunner's deferred func, `if len(t.sub) > 0`. Any subtest
+    // that called Parallel is now parked on this test's barrier.
+    let subs: Vec<Arc<TState>> = state.sub.Lock().clone();
+    if !subs.is_empty() {
+        // Go: "Decrease the running count for this test and mark it as
+        // no longer running" — the parent gives up its slot so a
+        // parallel child can take it.
+        let ts = state.tstate.Lock().clone();
+        if let Some(ts) = ts.as_ref() {
+            ts.release();
+        }
+
+        // Go: `close(t.barrier)` — "Release the parallel subtests."
+        // Closing rather than sending is what releases ALL of them;
+        // a send would wake exactly one and hang the rest.
+        state.barrier.Close();
+
+        // Go: "Wait for subtests to complete." Each one's status line
+        // is written here, now that its final pass/fail state is known.
+        for sub in subs.iter() {
+            let _ = sub.signal.Recv();
+            report_parallel_sub(&state, sub);
+        }
+
+        // Go: "Reacquire the count for sequential tests."
+        if !state.isParallel.load(Ordering::Acquire) {
+            if let Some(ts) = ts.as_ref() {
+                ts.waitParallel();
+            }
+        }
+    } else if state.isParallel.load(Ordering::Acquire) {
+        // Go: "Only release the count for this test if it was run as a
+        // parallel test."
+        let ts = state.tstate.Lock().clone();
+        if let Some(ts) = ts {
+            ts.release();
+        }
+    }
 
     // Go: `t.done = true` in tRunner's deferred func, once the test and
     // all its subtests have completed. `destination` reads this to
@@ -733,6 +785,10 @@ impl T {
     /// check — when Parallel lands, that guard has to land with it.
     pub fn Setenv(&self, key: string, value: string) {
         self.checkFuzzFn(string::from_static("Setenv"));
+        // Go: T.Setenv calls checkParallel before delegating to
+        // common.Setenv — the whole process shares one environment and
+        // one working directory, so neither is safe under Parallel.
+        self.checkParallel();
         // Go: prevValue, ok := os.LookupEnv(key)
         let (prevValue, ok) = crate::os::LookupEnv(key.clone());
 
@@ -776,6 +832,10 @@ impl T {
     /// linux-only, so only the POSIX arm exists.
     pub fn Chdir(&self, dir: string) {
         self.checkFuzzFn(string::from_static("Chdir"));
+        // Go: T.Chdir calls checkParallel before delegating to
+        // common.Chdir — the whole process shares one environment and
+        // one working directory, so neither is safe under Parallel.
+        self.checkParallel();
         let (oldwd, werr) = crate::os::Getwd();
         if werr != crate::errors::nil {
             self.Fatal(werr.Error());
@@ -1733,4 +1793,246 @@ impl TState {
             }
         }
     }
+}
+
+// ─── parallel gating ─────────────────────────────────────────────────
+
+// go: sdk 1.25.5 testing/testing.go:1657 parallelConflict
+/// Go: the panic message when a test that called Setenv or Chdir also
+/// calls Parallel. Both change process-wide state, so they cannot be
+/// safe while siblings run concurrently.
+pub(crate) const parallelConflict: &str =
+    "testing: test using t.Setenv or t.Chdir can not use t.Parallel";
+
+// goishlint:ignore GOISH019 testState — `mu`, `running` and
+// `numWaiting` become one Mutex<testStateCounts>: Rust wants the
+// guarded group named, and the two counters are only ever read and
+// written as a pair. `match *matcher` is absent because the matcher is
+// threaded through runTests, which is not ported yet.
+// go: sdk 1.25.5 testing/testing.go:2072-2096 testState
+/// Go: the state shared by every test in one run — the name matcher,
+/// the deadline, and the counters that gate how many tests run in
+/// parallel at once.
+#[allow(non_camel_case_types)]
+pub struct testState {
+    pub(crate) deadline: crate::sync::Mutex<crate::time::Time>,
+    /// Go: "isFuzzing is true in the state used when generating random
+    /// inputs for fuzz targets. isFuzzing is false when running normal
+    /// tests and when running fuzz tests as unit tests."
+    ///
+    /// Always false in goish — F is not ported — but runFuzzTests and
+    /// tRunner both branch on it, so the field is carried across rather
+    /// than dropped and re-added later.
+    #[allow(dead_code)]
+    pub(crate) isFuzzing: core::sync::atomic::AtomicBool,
+    /// Go: "Channel used to signal tests that are ready to be run in
+    /// parallel." Unbuffered, so `release` hands off to exactly one
+    /// waiter and blocks until that waiter takes it.
+    pub(crate) startParallel: crate::gochan::chan<bool>,
+    /// Guards `running` and `numWaiting` together — they are read and
+    /// written as a pair, so separate atomics would not be enough.
+    pub(crate) counts: crate::sync::Mutex<testStateCounts>,
+}
+
+// go: none — goish idiom: Go guards `running` and `numWaiting` with the
+// struct's own `mu`. Rust wants the guarded group named, so the pair
+// lives in one Mutex rather than two.
+#[allow(non_camel_case_types)]
+#[derive(Default)]
+pub struct testStateCounts {
+    /// Go: "the number of tests currently running in parallel. This
+    /// does not include tests that are waiting for subtests."
+    pub running: crate::types::int,
+    /// Go: "the number tests waiting to be run in parallel."
+    pub numWaiting: crate::types::int,
+    /// Go: "a copy of the parallel flag."
+    pub maxParallel: crate::types::int,
+}
+
+// go: sdk 1.25.5 testing/testing.go:2098-2105 newTestState
+// goishlint:ignore GOISH020 newTestState — Go's second parameter is
+// the *matcher, which runTests supplies; goish has no runTests yet, so
+// there is nothing to pass and no field to store it in. Restore the
+// parameter when runTests lands.
+#[allow(non_snake_case)]
+pub fn newTestState(maxParallel: crate::types::int) -> Arc<testState> {
+    return Arc::new(testState {
+        deadline: crate::sync::Mutex::new(crate::time::Time::default()),
+        isFuzzing: core::sync::atomic::AtomicBool::new(false),
+        startParallel: crate::gochan::chan::new_unbuffered(),
+        counts: crate::sync::Mutex::new(testStateCounts {
+            // Go: "Set the count to 1 for the main (sequential) test."
+            running: 1,
+            numWaiting: 0,
+            maxParallel,
+        }),
+    });
+}
+
+#[allow(non_snake_case)]
+impl testState {
+    // go: sdk 1.25.5 testing/testing.go:2107-2117 testState.waitParallel
+    /// Go: admit this test to the parallel pool, or park until a slot
+    /// frees. The unlock BEFORE the receive is the whole point — holding
+    /// the lock across the park would deadlock every releaser.
+    pub fn waitParallel(&self) {
+        {
+            let mut c = self.counts.Lock();
+            if c.running < c.maxParallel {
+                c.running += 1;
+                return;
+            }
+            c.numWaiting += 1;
+        }
+        let _ = self.startParallel.Recv();
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:2119-2129 testState.release
+    /// Go: give up a parallel slot. If someone is waiting, hand the slot
+    /// straight to them rather than decrementing — so `running` stays
+    /// accurate and no slot is ever lost between the two.
+    pub fn release(&self) {
+        {
+            let mut c = self.counts.Lock();
+            if c.numWaiting == 0 {
+                c.running -= 1;
+                return;
+            }
+            c.numWaiting -= 1;
+        }
+        // Go: `s.startParallel <- true` — "Pick a waiting test to be
+        // run." Sent with the lock released, as above.
+        self.startParallel.Send(true);
+    }
+}
+
+#[allow(non_snake_case)]
+impl T {
+    // go: sdk 1.25.5 testing/testing.go:1728-1741 T.checkParallel
+    /// Go: "Non-parallel subtests that have parallel ancestors may still
+    /// run in parallel with other tests: they are only non-parallel with
+    /// respect to the other subtests of the same parent. Since calls
+    /// like SetEnv or Chdir affects the whole process, we need to deny
+    /// those if the current test or any parent is parallel."
+    pub(crate) fn checkParallel(&self) {
+        let mut cur = Some(self.state.clone());
+        while let Some(c) = cur {
+            if c.isParallel.load(Ordering::Acquire) {
+                panic!("{}", parallelConflict);
+            }
+            cur = c.parent.clone();
+        }
+        self.state.denyParallel.store(true, Ordering::Release);
+    }
+}
+
+#[allow(non_snake_case)]
+impl T {
+    // go: sdk 1.25.5 testing/testing.go:2053-2068 T.Deadline
+    /// Go: "Deadline reports the time at which the test binary will have
+    /// exceeded the timeout specified by the -timeout flag. The ok
+    /// result is false if the -timeout flag indicates no timeout (0)."
+    ///
+    /// The zero Time doubles as "no deadline", which is why ok is
+    /// derived from IsZero rather than tracked separately.
+    pub fn Deadline(&self) -> (crate::time::Time, bool) {
+        if self.state.isSynctest.load(Ordering::Acquire) {
+            // Go: "There's no point in returning a real-clock deadline
+            // to a test using a fake clock."
+            panic!("testing: t.Deadline called inside synctest bubble");
+        }
+        let deadline = match self.state.tstate.Lock().as_ref() {
+            Some(ts) => ts.deadline.Lock().clone(),
+            // Go dereferences t.tstate unconditionally; a test built
+            // outside a run has no run-wide state, which reads as no
+            // deadline.
+            None => crate::time::Time::default(),
+        };
+        let ok = !deadline.IsZero();
+        return (deadline, ok);
+    }
+}
+
+#[allow(non_snake_case)]
+impl T {
+    // go: sdk 1.25.5 testing/testing.go:1663-1726 T.Parallel
+    /// Go: "Parallel signals that this test is to be run in parallel
+    /// with (and only with) other parallel tests."
+    ///
+    /// The sequence is the load-bearing part. The test signals its
+    /// PARENT that it is done for now, parks on the parent's barrier
+    /// until the parent's own body returns, and only then asks the
+    /// run-wide state for a parallel slot. Reordering any of the three
+    /// either deadlocks the parent or lets more tests run at once than
+    /// -parallel allows.
+    pub fn Parallel(&mut self) {
+        if self.state.isParallel.load(Ordering::Acquire) {
+            panic!("testing: t.Parallel called multiple times");
+        }
+        if self.state.isSynctest.load(Ordering::Acquire) {
+            panic!("testing: t.Parallel called inside synctest bubble");
+        }
+        if self.state.denyParallel.load(Ordering::Acquire) {
+            panic!("{}", parallelConflict);
+        }
+        let parent = match self.state.parent.as_ref() {
+            Some(p) => p.clone(),
+            // Go: `if t.parent.barrier == nil { return }` — "T.Parallel
+            // has no effect when fuzzing." A top-level test has no
+            // parent to be released by, so the same early return
+            // applies.
+            None => return,
+        };
+
+        self.state.isParallel.store(true, Ordering::Release);
+
+        // Go: "Add to the list of tests to be released by the parent."
+        parent.sub.Lock().push(self.state.clone());
+
+        // Go: `t.signal <- true` — "Release calling test." The parent
+        // is blocked in tRunner waiting on exactly this.
+        self.state.signal.Send(true);
+
+        // Go: `<-t.parent.barrier` — "Wait for the parent test to
+        // complete." The parent closes the barrier, which wakes every
+        // parked subtest at once.
+        let _ = parent.barrier.Recv();
+
+        // Go: `t.tstate.waitParallel()` — only NOW compete for one of
+        // the -parallel slots. Asking before the barrier would let a
+        // subtest hold a slot while it was still blocked.
+        let ts = self.state.tstate.Lock().clone();
+        if let Some(ts) = ts {
+            ts.waitParallel();
+        }
+    }
+}
+
+// go: none — goish idiom: Go emits a subtest's status through
+// `t.report()` -> `flushToParent`, driven by the subtest's OWN tRunner.
+// goish's T.Run writes status directly, so a parallel subtest — which
+// returns from tRunner early, at the Parallel call — needs its parent
+// to write the line once the barrier has released it and it has really
+// finished. Same text, same place in the output; different caller.
+fn report_parallel_sub(parent: &Arc<TState>, sub: &Arc<TState>) {
+    let name = sub.name.Lock().clone();
+    let header_indent = indent_for(*sub.level.Lock());
+    let skipped = sub.skipped.load(Ordering::Acquire);
+    let passed = !sub.failed.load(Ordering::Acquire);
+    let tag: &[u8] = if skipped {
+        b"--- SKIP: "
+    } else if passed {
+        b"--- PASS: "
+    } else {
+        b"--- FAIL: "
+    };
+    write_status(tag, header_indent.as_bytes(), &name);
+    if !passed && !skipped {
+        parent.failed.store(true, Ordering::Release);
+    }
+    sub.flushToParent(
+        name,
+        string::from_static(""),
+        crate::goslice::slice::new(),
+    );
 }

@@ -61,7 +61,7 @@ pub use newcover::Coverage;
 pub use testing::{
     callerName, chattyFlag, chattyPrinter, fmtDuration, marker, newChattyPrinter, parseCpuList,
     pcToName, prefix, testBinary, CoverMode, Init, Short, Testing, Verbose,
-    indenter, outputWriter, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_mark_done, __shim_output_buf, __shim_ran_done, __shim_match_string_only, __DepsProbe,
+    indenter, newTestState, outputWriter, testState, testStateCounts, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_mark_done, __shim_output_buf, __shim_ran_done, __shim_match_string_only, __DepsProbe,
 };
 
 extern crate alloc;
@@ -152,6 +152,26 @@ pub(crate) struct TState {
     /// here means "the root output stream" — goish writes that
     /// straight to stdout, where Go's driver holds an os.Stdout.
     pub(crate) w: Mutex<Option<testing::indenter>>,
+    /// Go: `common.isParallel bool` — "Whether the test is parallel."
+    pub(crate) isParallel: AtomicBool,
+    /// Go: `T.denyParallel bool` — set by Setenv/Chdir, which change
+    /// process-wide state and so cannot coexist with Parallel.
+    pub(crate) denyParallel: AtomicBool,
+    /// Go: `T.tstate *testState` — the run-wide state (matcher,
+    /// deadline, parallel counters) every test in one run shares.
+    pub(crate) tstate: Mutex<Option<Arc<testing::testState>>>,
+    /// Go: `common.barrier chan bool` — "To signal parallel subtests
+    /// they may start." A parent closes it once its own body returns,
+    /// which releases every parallel subtest at once.
+    pub(crate) barrier: crate::gochan::chan<bool>,
+    /// Go: `common.sub []*T` — "Queue of subtests to be run in
+    /// parallel." goish keeps the shared state rather than the T, since
+    /// waiting on a subtest only needs its signal channel.
+    pub(crate) sub: Mutex<Vec<Arc<TState>>>,
+    /// Go: `common.level int` — "Nesting depth of test or benchmark."
+    /// The parent needs it to indent a parallel subtest's status line,
+    /// which it prints only after the barrier releases.
+    pub(crate) level: Mutex<usize>,
 }
 
 impl TState {
@@ -175,6 +195,12 @@ impl TState {
             bench: AtomicBool::new(false),
             o: Mutex::new(None),
             w: Mutex::new(None),
+            isParallel: AtomicBool::new(false),
+            denyParallel: AtomicBool::new(false),
+            tstate: Mutex::new(None),
+            barrier: crate::gochan::chan::new_unbuffered(),
+            sub: Mutex::new(Vec::new()),
+            level: Mutex::new(0),
         };
     }
 }
@@ -347,8 +373,15 @@ pub fn Main(tests: &[(&'static str, TestFn)]) -> int {
     let mut failed = 0;
     let mut skipped = 0;
 
+    // Go's MainStart builds one testState for the whole run; goish's
+    // Main stands in for that driver. -parallel defaults to GOMAXPROCS
+    // in Go; goish has no flag parsing here, so it uses the same
+    // default the runtime reports.
+    let tstate = testing::newTestState(crate::runtime::GOMAXPROCS(0));
+
     for (name, f) in tests {
         let t = T::new(string::from_static(name));
+        *t.state.tstate.Lock() = Some(tstate.clone());
         let name_s = t.name.clone();
         write_status(b"=== RUN  ", b"", &name_s);
         let state = t.state.clone();
