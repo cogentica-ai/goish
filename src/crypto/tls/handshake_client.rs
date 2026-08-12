@@ -3520,3 +3520,20 @@ fn publicKeyTypeName(cert: &crate::crypto::x509::Certificate) -> crate::gostring
         _ => return crate::gostring::string::from_static("<unknown>"),
     };
 }
+
+// Go: handshake_client.go:241-251
+//   type echClientContext struct {
+//       config *echConfig; hpkeContext *hpke.Sender
+//       encapsulatedKey []byte; innerHello *clientHelloMsg
+//       innerTranscript hash.Hash; kdfID, aeadID uint16
+//       echRejected bool; retryConfigs []byte }
+/// The client's Encrypted Client Hello state.
+///
+/// **Partial record.** Only the two fields the ported methods read are
+/// present; the HPKE sender, the inner hello and its transcript land
+/// with `clientHandshake`, which is what builds them.
+#[derive(Clone, Default)]
+pub(crate) struct echClientContext {
+    pub echRejected: bool,
+    pub retryConfigs: crate::goslice::slice<crate::types::byte>,
+}

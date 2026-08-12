@@ -827,9 +827,6 @@ impl serverHelloMsg {
 #[derive(Clone, Default)]
 pub(crate) struct encryptedExtensionsMsg {
     pub alpnProtocol: String,
-    /// Go has three further fields the hand-written `marshal` above
-    /// never emitted. They are declared so that the ported `unmarshal`
-    /// can fill them, and so the struct matches Go's shape (GOISH019).
     pub quicTransportParameters: Vec<byte>,
     pub earlyData: bool,
     pub echRetryConfigs: Vec<byte>,
@@ -853,6 +850,36 @@ impl encryptedExtensionsMsg {
                                 b.AddBytes(alpn);
                             });
                         });
+                    });
+                }
+                // Go: if m.quicTransportParameters != nil {
+                //         // marshal zero-length parameters when present
+                //         // draft-ietf-quic-tls-32, Section 8.2
+                //         b.AddUint16(extensionQUICTransportParameters)
+                //         b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
+                //             b.AddBytes(m.quicTransportParameters) }) }
+                if !self.quicTransportParameters.is_empty() {
+                    b.AddUint16(extensionQUICTransportParameters);
+                    let qtp = self.quicTransportParameters.as_slice();
+                    b.AddUint16LengthPrefixed(|b| {
+                        b.AddBytes(qtp);
+                    });
+                }
+                // Go: if m.earlyData { // RFC 8446, Section 4.2.10
+                //         b.AddUint16(extensionEarlyData); b.AddUint16(0) }
+                if self.earlyData {
+                    b.AddUint16(extensionEarlyData);
+                    b.AddUint16(0); // empty extension_data
+                }
+                // Go: if len(m.echRetryConfigs) > 0 {
+                //         b.AddUint16(extensionEncryptedClientHello)
+                //         b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
+                //             b.AddBytes(m.echRetryConfigs) }) }
+                if !self.echRetryConfigs.is_empty() {
+                    b.AddUint16(extensionEncryptedClientHello);
+                    let rc = self.echRetryConfigs.as_slice();
+                    b.AddUint16LengthPrefixed(|b| {
+                        b.AddBytes(rc);
                     });
                 }
                 if self.serverNameAck {

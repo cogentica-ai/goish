@@ -1,4 +1,4 @@
-// goishlint:ignore GOISH018 handshake, processHelloRetryRequest, establishHandshakeKeys, readServerParameters, readServerCertificate, sendClientCertificate, handleNewSessionTicket — the rest of clientHandshakeStateTLS13, which drives the whole exchange through the key schedule and the transcript; the live TLS 1.3 client below is a self-contained function, not a port of these. See ROADMAP.md.
+// goishlint:ignore GOISH018 handshake, processHelloRetryRequest, establishHandshakeKeys, readServerCertificate, sendClientCertificate, handleNewSessionTicket — the rest of clientHandshakeStateTLS13, which drives the whole exchange through the key schedule and the transcript; the live TLS 1.3 client below is a self-contained function, not a port of these. See ROADMAP.md.
 // crypto/tls/handshake_client_tls13.rs — TLS 1.3 client handshake.
 //
 // Port of:
@@ -1262,6 +1262,7 @@ pub(crate) struct clientHandshakeStateTLS13 {
     pub masterSecret: Option<crate::crypto::internal::fips140::tls13::MasterSecret>,
     /// Go: `client_application_traffic_secret_0`.
     pub trafficSecret: crate::goslice::slice<crate::types::byte>,
+    pub echContext: Option<super::handshake_client::echClientContext>,
 }
 
 impl clientHandshakeStateTLS13 {
@@ -1616,6 +1617,130 @@ impl clientHandshakeStateTLS13 {
             let transcript = self.transcript.as_ref().unwrap();
             let rs = master.ResumptionMasterSecret(&*transcript.0);
             self.c.resumptionSecret = rs;
+        }
+
+        // Go: return nil
+        return crate::errors::nil;
+    }
+}
+
+impl clientHandshakeStateTLS13 {
+    // go: sdk 1.25.5 crypto/tls/handshake_client_tls13.go:546-611 clientHandshakeStateTLS13.readServerParameters
+    /// Go: read the server's EncryptedExtensions and check what it
+    /// negotiated there — ALPN, early data, and the ECH retry configs.
+    ///
+    /// Deviations: the two `c.quic != nil` arms are absent — goish
+    /// ships no QUIC transport — which also removes the
+    /// `quicRejectedEarlyData` call. The check that the server did NOT
+    /// send `quic_transport_parameters` is kept, since that is the arm
+    /// a non-QUIC connection takes.
+    pub(crate) fn readServerParameters(&mut self) -> crate::error {
+        // Go: msg, err := c.readHandshake(hs.transcript)
+        let (msg, err) = {
+            let transcript = self.transcript.as_mut().unwrap();
+            self.c.readHandshake(Some(transcript))
+        };
+        if err != crate::errors::nil {
+            return err;
+        }
+
+        // Go: encryptedExtensions, ok := msg.(*encryptedExtensionsMsg); if !ok { … }
+        let msg = match msg {
+            Some(m) => m,
+            None => return crate::errors::New("tls: internal error: no handshake message"),
+        };
+        let encryptedExtensions = match msg
+            .asAny()
+            .downcast_ref::<super::handshake_messages::encryptedExtensionsMsg>()
+        {
+            Some(e) => e.clone(),
+            None => {
+                self.c.sendAlert(super::alert::alertUnexpectedMessage);
+                return super::common::unexpectedMessageError(
+                    crate::gostring::string::from_static("*tls.encryptedExtensionsMsg"),
+                    super::handshake_messages::handshakeMessageTypeName(&*msg),
+                );
+            }
+        };
+
+        // Go: if err := checkALPN(hs.hello.alpnProtocols, encryptedExtensions.alpnProtocol,
+        //         c.quic != nil); err != nil {
+        //         c.sendAlert(alertNoApplicationProtocol); return err }
+        let alpn = crate::gostring::string::from_bytes(encryptedExtensions.alpnProtocol.as_bytes());
+        let err = super::handshake_client::checkALPN(
+            crate::goslice::slice::__from_vec(
+                self.hello
+                    .alpnProtocols
+                    .iter()
+                    .map(|p| crate::gostring::string::from_bytes(p.as_bytes()))
+                    .collect::<alloc::vec::Vec<_>>(),
+            ),
+            alpn.clone(),
+            false,
+        );
+        if err != crate::errors::nil {
+            // Go: "RFC 8446 specifies that no_application_protocol is sent
+            // by servers, but does not specify how clients handle the
+            // selection of an incompatible protocol. RFC 9001 Section 8.1
+            // specifies that QUIC clients send no_application_protocol in
+            // this case. Always sending no_application_protocol seems
+            // reasonable."
+            self.c.sendAlert(super::alert::alertNoApplicationProtocol);
+            return err;
+        }
+        // Go: c.clientProtocol = encryptedExtensions.alpnProtocol
+        self.c.__setClientProtocol(alpn);
+
+        // Go: the `c.quic != nil` arm is gone; this is its `else`.
+        //     if encryptedExtensions.quicTransportParameters != nil {
+        //         c.sendAlert(alertUnsupportedExtension)
+        //         return errors.New("tls: server sent an unexpected quic_transport_parameters extension") }
+        if encryptedExtensions.quicTransportParameters.len() != 0 {
+            self.c.sendAlert(super::alert::alertUnsupportedExtension);
+            return crate::errors::New(
+                "tls: server sent an unexpected quic_transport_parameters extension",
+            );
+        }
+
+        // Go: if !hs.hello.earlyData && encryptedExtensions.earlyData { … }
+        if !self.hello.earlyData && encryptedExtensions.earlyData {
+            self.c.sendAlert(super::alert::alertUnsupportedExtension);
+            return crate::errors::New("tls: server sent an unexpected early_data extension");
+        }
+        // Go: if hs.hello.earlyData && !encryptedExtensions.earlyData {
+        //         c.quicRejectedEarlyData() }   — QUIC-only, absent.
+
+        // Go: if encryptedExtensions.earlyData {
+        //         if hs.session.cipherSuite != c.cipherSuite { … }
+        //         if hs.session.alpnProtocol != c.clientProtocol { … } }
+        if encryptedExtensions.earlyData {
+            let session = self.session.clone().unwrap_or_default();
+            if session.__cipherSuite() != self.c.__cipherSuite() {
+                self.c.sendAlert(super::alert::alertHandshakeFailure);
+                return crate::errors::New(
+                    "tls: server accepted 0-RTT with the wrong cipher suite",
+                );
+            }
+            if session.__alpnProtocol() != self.c.__clientProtocol() {
+                self.c.sendAlert(super::alert::alertHandshakeFailure);
+                return crate::errors::New("tls: server accepted 0-RTT with the wrong ALPN");
+            }
+        }
+
+        // Go: if hs.echContext != nil {
+        //         if hs.echContext.echRejected {
+        //             hs.echContext.retryConfigs = encryptedExtensions.echRetryConfigs
+        //         } else if encryptedExtensions.echRetryConfigs != nil { … } }
+        if let Some(ech) = self.echContext.as_mut() {
+            if ech.echRejected {
+                ech.retryConfigs =
+                    crate::goslice::slice::__from_vec(encryptedExtensions.echRetryConfigs.clone());
+            } else if encryptedExtensions.echRetryConfigs.len() != 0 {
+                self.c.sendAlert(super::alert::alertUnsupportedExtension);
+                return crate::errors::New(
+                    "tls: server sent encrypted client hello retry configs after accepting encrypted client hello",
+                );
+            }
         }
 
         // Go: return nil

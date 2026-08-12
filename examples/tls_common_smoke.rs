@@ -2967,6 +2967,71 @@ fn main() {
         "b4ac5ab995a64d62675a4379d70ba8cc0014d3236590e0fc49f8d497d4509818",
     );
 
+
+    // ── clientHandshakeStateTLS13.readServerParameters ──────────────
+    //
+    // Ground truth: scripts/goref.sh crypto/tls, one EncryptedExtensions
+    // shape per case.
+    let rspWant: [(&'static str, &'static str, &'static str); 11] = [
+        ("", "", ""),
+        ("", "h2", ""),
+        ("tls: server selected unadvertised ALPN protocol", "", ""),
+        ("tls: server advertised unrequested ALPN extension", "", ""),
+        (
+            "tls: server sent an unexpected quic_transport_parameters extension",
+            "",
+            "",
+        ),
+        ("tls: server sent an unexpected early_data extension", "", ""),
+        ("", "", ""),
+        ("tls: server accepted 0-RTT with the wrong cipher suite", "", ""),
+        // The ALPN is adopted before the 0-RTT checks run, so it is set
+        // even though this arm fails.
+        ("tls: server accepted 0-RTT with the wrong ALPN", "h2", ""),
+        ("", "", "070707"),
+        (
+            "tls: server sent encrypted client hello retry configs after accepting encrypted client hello",
+            "",
+            "",
+        ),
+    ];
+    let mut rspI: int = 0;
+    while rspI < 11 {
+        let (wantErr, wantProto, wantRetry) = rspWant[rspI as usize];
+        let (e, proto, retry) = tls::handshake_client_tls13_readServerParameters(rspI);
+        eq("readServerParameters error", e, wantErr);
+        eq("readServerParameters c.clientProtocol", proto, wantProto);
+        eq("readServerParameters echContext.retryConfigs", hexOf(retry), wantRetry);
+        rspI += 1;
+    }
+
+
+    // ── encryptedExtensionsMsg.marshal, all extensions ──────────────
+    //
+    // Ground truth: scripts/goref.sh crypto/tls. Before this round
+    // goish's marshal emitted only alpnProtocol and serverNameAck and
+    // silently dropped quicTransportParameters, earlyData and
+    // echRetryConfigs, while carrying an anchor claiming to be a port
+    // of handshake_messages.go:1011-1052. GOISH018 diffs signatures,
+    // not statements, so nothing caught it; readServerParameters did.
+    let (eeWire, eeOk, eeAlpn, eeQtp, eeEarly, eeEch, eeSni) =
+        tls::handshake_messages_encryptedExtensionsRoundTrip();
+    eq(
+        "encryptedExtensionsMsg.marshal emits every extension",
+        hexOf(eeWire),
+        "08000021001f00100005000302683200390003010203002a0000fe0d000307070700000000",
+    );
+    check("encryptedExtensionsMsg round-trips", eeOk);
+    eq("encryptedExtensionsMsg keeps alpnProtocol", eeAlpn, "h2");
+    eq(
+        "encryptedExtensionsMsg keeps quicTransportParameters",
+        hexOf(eeQtp),
+        "010203",
+    );
+    check("encryptedExtensionsMsg keeps earlyData", eeEarly);
+    eq("encryptedExtensionsMsg keeps echRetryConfigs", hexOf(eeEch), "070707");
+    check("encryptedExtensionsMsg keeps serverNameAck", eeSni);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

@@ -6236,6 +6236,7 @@ fn __chs13(_unused: bool) -> handshake_client_tls13::clientHandshakeStateTLS13 {
         transcript: None,
         masterSecret: None,
         trafficSecret: crate::goslice::slice::new(),
+        echContext: None,
     };
 }
 
@@ -6314,6 +6315,7 @@ pub fn handshake_client_tls13_finished(
             ))),
             masterSecret: Some(master),
             trafficSecret: slice::new(),
+            echContext: None,
         };
     };
     let newSink = || {
@@ -6396,5 +6398,151 @@ pub fn handshake_client_tls13_finished(
         outSec,
         hs.c.__resumptionSecret(),
         hs.c.__hasEkm(),
+    );
+}
+
+// go: none — goish-only: `clientHandshakeStateTLS13.readServerParameters`
+// is unexported in Go, where the tests are in-package. Feeds one
+// EncryptedExtensions record and reports `(errText, c.clientProtocol,
+// hs.echContext.retryConfigs)`. `which` selects the case; see the
+// assertions.
+#[doc(hidden)]
+pub fn handshake_client_tls13_readServerParameters(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    use crate::goslice::slice;
+    let mut ee = handshake_messages::encryptedExtensionsMsg::default();
+    match which {
+        1 | 3 | 8 => ee.alpnProtocol = "h2".into(),
+        2 => ee.alpnProtocol = "spdy".into(),
+        4 => ee.quicTransportParameters = alloc::vec![1u8, 2],
+        9 => ee.echRetryConfigs = alloc::vec![7u8, 7, 7],
+        10 => ee.echRetryConfigs = alloc::vec![7u8],
+        _ => {}
+    }
+    if which == 5 || which == 6 || which == 7 || which == 8 {
+        ee.earlyData = true;
+    }
+    let (body, _) = ee.marshal();
+    let mut feed: alloc::vec::Vec<crate::types::byte> = alloc::vec![
+        0x16u8,
+        0x03,
+        0x03,
+        crate::byte(body.Len() >> 8),
+        crate::byte(body.Len() & 0xff)
+    ];
+    feed.extend_from_slice(&body);
+
+    let mut c = conn::Conn::default();
+    c.__setMemConn(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    )));
+    c.__setFeedConn(slice::__from_vec(feed));
+    c.__setHaveVers(true);
+    c.__setVers(common::VersionTLS13);
+    c.__setIsClient(true);
+    c.__setCipherSuite(cipher_suites::TLS_AES_128_GCM_SHA256);
+
+    let mut hello = handshake_messages::clientHelloMsg::default();
+    match which {
+        1 => {
+            hello.alpnProtocols = alloc::vec![
+                "h2".into(),
+                "http/1.1".into()
+            ]
+        }
+        2 => hello.alpnProtocols = alloc::vec!["h2".into()],
+        8 => hello.alpnProtocols = alloc::vec!["h2".into()],
+        _ => {}
+    }
+    if which == 6 || which == 7 || which == 8 {
+        hello.earlyData = true;
+    }
+
+    let mut session: Option<ticket::SessionState> = None;
+    if which == 6 || which == 7 || which == 8 {
+        let mut ss = ticket::SessionState::default();
+        ss.__setCipherSuite(if which == 7 {
+            cipher_suites::TLS_AES_256_GCM_SHA384
+        } else {
+            cipher_suites::TLS_AES_128_GCM_SHA256
+        });
+        if which == 8 {
+            ss.__setAlpnProtocol(crate::gostring::string::from_static("nope"));
+        }
+        session = Some(ss);
+    }
+    let echContext = match which {
+        9 => Some(handshake_client::echClientContext {
+            echRejected: true,
+            retryConfigs: slice::new(),
+        }),
+        10 => Some(handshake_client::echClientContext::default()),
+        _ => None,
+    };
+
+    let mut hs = handshake_client_tls13::clientHandshakeStateTLS13 {
+        c,
+        serverHello: handshake_messages::serverHelloMsg::default(),
+        hello,
+        session,
+        usingPSK: false,
+        sentDummyCCS: false,
+        suite: cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256),
+        transcript: Some(handshake_messages::transcriptHasher(alloc::boxed::Box::new(
+            crate::crypto::sha256::New(),
+        ))),
+        masterSecret: None,
+        trafficSecret: slice::new(),
+        echContext,
+    };
+    let err = hs.readServerParameters();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let retry = match hs.echContext.as_ref() {
+        Some(e) => e.retryConfigs.clone(),
+        None => slice::new(),
+    };
+    return (text, hs.c.__clientProtocol(), retry);
+}
+
+// go: none — goish-only: `encryptedExtensionsMsg` is unexported in Go,
+// where the tests are in-package. Marshals one with every field set and
+// unmarshals it back. Reports `(wire, round-trip ok, alpn, quic
+// transport parameters, earlyData, ech retry configs, serverNameAck)`.
+#[doc(hidden)]
+pub fn handshake_messages_encryptedExtensionsRoundTrip() -> (
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+) {
+    let mut ee = handshake_messages::encryptedExtensionsMsg::default();
+    ee.alpnProtocol = "h2".into();
+    ee.quicTransportParameters = alloc::vec![1u8, 2, 3];
+    ee.earlyData = true;
+    ee.echRetryConfigs = alloc::vec![7u8, 7, 7];
+    ee.serverNameAck = true;
+    let (wire, _) = ee.marshal();
+    let mut r = handshake_messages::encryptedExtensionsMsg::default();
+    let ok = r.unmarshal(wire.clone());
+    return (
+        wire,
+        ok,
+        crate::gostring::string::from_bytes(r.alpnProtocol.as_bytes()),
+        crate::goslice::slice::__from_vec(r.quicTransportParameters.clone()),
+        r.earlyData,
+        crate::goslice::slice::__from_vec(r.echRetryConfigs.clone()),
+        r.serverNameAck,
     );
 }
