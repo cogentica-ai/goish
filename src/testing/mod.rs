@@ -61,7 +61,7 @@ pub use newcover::Coverage;
 pub use testing::{
     callerName, chattyFlag, chattyPrinter, fmtDuration, marker, newChattyPrinter, parseCpuList,
     pcToName, prefix, testBinary, CoverMode, Init, Short, Testing, Verbose,
-    indenter, newTestState, outputWriter, testState, testStateCounts, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_cleanup_handle, __shim_mark_done, __shim_output_buf, CleanupHandle, __shim_ran_done, __shim_match_string_only, __DepsProbe,
+    indenter, newTestState, outputWriter, testState, testStateCounts, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_call_site, __shim_cleanup_handle, __shim_mark_done, __shim_output_buf, CleanupHandle, __shim_ran_done, __shim_match_string_only, __DepsProbe,
 };
 
 extern crate alloc;
@@ -177,6 +177,25 @@ pub(crate) struct TState {
     /// a cleanup registering another cleanup is handled rather than
     /// silently dropped.
     pub(crate) cleanupStarted: AtomicBool,
+    /// Go: `common.helperNames map[string]struct{}` — "helperPCs
+    /// converted to function names". Built lazily by frameSkip, since
+    /// symbolising every helper PC up front costs more than most tests
+    /// ever need.
+    pub(crate) helperNames: Mutex<Option<crate::map<string, bool>>>,
+    /// Go: `common.cleanupName string` — "Name of the cleanup
+    /// function."
+    pub(crate) cleanupName: Mutex<string>,
+    /// Go: `common.cleanupPc []uintptr` — "The stack trace at the point
+    /// where Cleanup was called." frameSkip switches to it so a failure
+    /// inside a cleanup is attributed to where the cleanup was
+    /// REGISTERED, not to the teardown loop.
+    pub(crate) cleanupPc: Mutex<crate::goslice::slice<crate::types::uintptr>>,
+    /// Go: `common.creator []uintptr` — "If level > 0, the stack trace
+    /// at the point where the parent called t.Run."
+    pub(crate) creator: Mutex<crate::goslice::slice<crate::types::uintptr>>,
+    /// Go: `common.runner string` — "Function name of tRunner running
+    /// the test." frameSkip stops when it reaches this frame.
+    pub(crate) runner: Mutex<string>,
 }
 
 impl TState {
@@ -207,6 +226,11 @@ impl TState {
             sub: Mutex::new(Vec::new()),
             level: Mutex::new(0),
             cleanupStarted: AtomicBool::new(false),
+            helperNames: Mutex::new(None),
+            cleanupName: Mutex::new(string::from_static("")),
+            cleanupPc: Mutex::new(crate::goslice::slice::new()),
+            creator: Mutex::new(crate::goslice::slice::new()),
+            runner: Mutex::new(string::from_static("")),
         };
     }
 }

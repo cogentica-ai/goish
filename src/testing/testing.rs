@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -21,7 +21,7 @@
 // registration having happened and can be tested on its own.
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
 // goishlint:ignore GOISH018 after, Attr, before, callSite, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newTestState, Output, Parallel, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
-// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
+// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
 #![allow(non_snake_case)]
@@ -223,7 +223,31 @@ impl T {
     /// callback directly — the diagnostic needs `runtime.Callers`
     /// frame resolution, which is not ported.
     pub fn Cleanup<F: FnOnce() + Send + 'static>(&self, f: F) {
-        self.state.cleanups.Lock().push(alloc::boxed::Box::new(f));
+        self.checkFuzzFn(string::from_static("Cleanup"));
+        let mut pc: crate::goslice::slice<crate::types::uintptr> =
+            crate::goslice::slice::__from_vec(alloc::vec![0; maxStackLen]);
+        // Go: "Skip two extra frames to account for this function and
+        // runtime.Callers itself."
+        let n = crate::runtime::Callers(2, &mut pc);
+        let cleanupPc = pc.slice(0, n);
+
+        // Go wraps the callback so that WHILE it runs, the test's
+        // cleanupName/cleanupPc point at this registration site — which
+        // is how a failure during teardown is blamed on the line that
+        // registered the cleanup rather than on the teardown loop. The
+        // pair is cleared again on the way out.
+        let st = self.state.clone();
+        let fnw = move || {
+            let name = callerName(0);
+            {
+                *st.cleanupName.Lock() = name;
+                *st.cleanupPc.Lock() = cleanupPc;
+            }
+            f();
+            *st.cleanupName.Lock() = string::from_static("");
+            *st.cleanupPc.Lock() = crate::goslice::slice::new();
+        };
+        self.state.cleanups.Lock().push(alloc::boxed::Box::new(fnw));
     }
 
     // go: sdk 1.25.5 testing/testing.go:987-1014 common.FailNow
@@ -346,6 +370,15 @@ impl T {
         // the writer holds a Weak back to it.
         sub.state.setOutputWriter();
         *sub.state.level.Lock() = sub.depth;
+        // Go: `creator: pc[:n]` — "the stack trace at the point where
+        // the parent called t.Run", so frameSkip can resume the search
+        // in the parent from this call site.
+        {
+            let mut pc: crate::goslice::slice<crate::types::uintptr> =
+                crate::goslice::slice::__from_vec(alloc::vec![0; maxStackLen]);
+            let n = crate::runtime::Callers(2, &mut pc);
+            *sub.state.creator.Lock() = pc.slice(0, n);
+        }
         // Go: every test in one run shares the run-wide state.
         *sub.state.tstate.Lock() = self.state.tstate.Lock().clone();
 
@@ -422,6 +455,9 @@ pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
     *state.w.Lock() = Some(indenter {
         c: Arc::downgrade(&state),
     });
+    // Go: `t.runner = callerName(0)` — frameSkip stops when the walk
+    // reaches this frame, i.e. the runner calling the test function.
+    *state.runner.Lock() = callerName(0);
 
     // Go: `go tRunner(t, fn)`. The explicit stack is goish's: a test
     // body is arbitrary user code and the 2 KiB default is nowhere near
@@ -2098,4 +2134,130 @@ impl TState {
 
         self.cleanupStarted.store(false, Ordering::Release);
     }
+}
+
+// ─── source attribution ──────────────────────────────────────────────
+
+// go: sdk 1.25.5 testing/testing.go:627 maxStackLen
+pub(crate) const maxStackLen: usize = 50;
+
+#[allow(non_snake_case)]
+impl TState {
+    // go: sdk 1.25.5 testing/testing.go:734-802 common.frameSkip
+    /// Go: "frameSkip searches, starting after skip frames, for the
+    /// first caller in a function not marked as a helper and returns
+    /// that frame."
+    ///
+    /// Three redirections make this more than a stack walk, and each
+    /// one changes which line a failure is blamed on:
+    ///   * `runtime.gopanic` frames are skipped outright.
+    ///   * On reaching the cleanup function, the walk RESTARTS from the
+    ///     stack captured when Cleanup was registered — so a failure in
+    ///     teardown points at the registration site.
+    ///   * On reaching tRunner in a subtest, it restarts from the
+    ///     parent's t.Run call site and keeps searching up.
+    pub(crate) fn frameSkip(self: &Arc<Self>, skip: crate::types::int) -> crate::runtime::Frame {
+        let mut pcs: crate::goslice::slice<crate::types::uintptr> =
+            crate::goslice::slice::__from_vec(alloc::vec![0; maxStackLen]);
+        // Go: "Skip two extra frames to account for this function and
+        // runtime.Callers itself."
+        let n = crate::runtime::Callers(skip + 2, &mut pcs);
+        if n == 0 {
+            panic!("testing: zero callers found");
+        }
+        let mut frames = crate::runtime::CallersFrames(pcs.slice(0, n));
+
+        let mut c = self.clone();
+        let mut firstFrame = crate::runtime::Frame::default();
+        let mut prevFrame = crate::runtime::Frame::default();
+        loop {
+            let (frame, more) = frames.Next();
+
+            if frame.Function == string::from_static("runtime.gopanic") {
+                if !more {
+                    break;
+                }
+                continue;
+            }
+            if frame.Function == *c.cleanupName.Lock() {
+                // Restart from where Cleanup was called.
+                frames = crate::runtime::CallersFrames(c.cleanupPc.Lock().clone());
+                continue;
+            }
+            if firstFrame.PC == 0 {
+                firstFrame = frame.clone();
+            }
+            if frame.Function == *c.runner.Lock() {
+                // Go: "We've gone up all the way to the tRunner calling
+                // the test function."
+                if *c.level.Lock() > 1 {
+                    // A subtest: continue in the parent, from the point
+                    // of the t.Run call that created this subtest.
+                    frames = crate::runtime::CallersFrames(c.creator.Lock().clone());
+                    let parent = match c.parent.as_ref() {
+                        Some(p) => p.clone(),
+                        None => return prevFrame,
+                    };
+                    c = parent;
+                    continue;
+                }
+                return prevFrame;
+            }
+            // Go: convert any newly-added helper PCs to names, lazily.
+            {
+                let mut names = c.helperNames.Lock();
+                if names.is_none() {
+                    let mut m: crate::map<string, bool> = crate::map::new();
+                    for pc in c.helperPCs.Lock().Keys().iter() {
+                        m.Set(pcToName(*pc), true);
+                    }
+                    *names = Some(m);
+                }
+                let (_, ok) = names.as_ref().unwrap().Get(frame.Function.clone());
+                if !ok {
+                    // "Found a frame that wasn't inside a helper."
+                    return frame;
+                }
+            }
+
+            prevFrame = frame;
+            if !more {
+                break;
+            }
+        }
+        return firstFrame;
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1063-1085 common.callSite
+    /// Go: "callSite retrieves and formats the file and line of the
+    /// call site."
+    ///
+    /// The two fallbacks are Go's, not defensive padding: an
+    /// unsymbolisable frame prints "???" rather than an empty name, and
+    /// line 0 becomes 1 so the result is always a location an editor
+    /// can open.
+    pub(crate) fn callSite(self: &Arc<Self>, skip: crate::types::int) -> string {
+        let frame = self.frameSkip(skip);
+        let mut file = frame.File.clone();
+        let mut line = frame.Line;
+        if file.Len() != 0 {
+            // Go consults the -fullpath flag here; goish has no flag
+            // parsing in this path yet, so it takes the default: base
+            // name only.
+            file = crate::path::Base(file);
+        } else {
+            file = string::from_static("???");
+        }
+        if line == 0 {
+            line = 1;
+        }
+        return crate::fmt::Sprintf!("%s:%d: ", file, line);
+    }
+}
+
+// go: none — goish-only: `callSite` is unexported, as in Go. This gives
+// a test a way to see what it attributes a failure to.
+#[doc(hidden)]
+pub fn __shim_call_site(t: &T, skip: crate::types::int) -> string {
+    return t.state.callSite(skip);
 }
