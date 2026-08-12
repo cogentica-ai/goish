@@ -1686,3 +1686,56 @@ pub fn msg_crm_unmarshal_as(
     m.hasSignatureAlgorithm = hasSignatureAlgorithm;
     return m.unmarshal(data);
 }
+
+// go: none — goish-only: finishedMsg / certificateVerifyMsg are
+// unexported in Go, where the tests are in-package.
+#[doc(hidden)]
+pub fn msg_finished_roundtrip(
+    verifyData: crate::goslice::slice<crate::types::byte>,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let m = handshake_messages::finishedMsg {
+        verifyData: verifyData.__into_vec(),
+    };
+    let b = crate::goslice::slice::__from_vec(m.marshal());
+    let mut back = handshake_messages::finishedMsg::default();
+    let ok = back.unmarshal(b.clone());
+    return (b, ok, crate::goslice::slice::__from_vec(back.verifyData));
+}
+
+// go: none — goish-only: see `msg_finished_roundtrip`.
+#[doc(hidden)]
+pub fn msg_certVerify_roundtrip(
+    hasSignatureAlgorithm: bool,
+    alg: crate::types::uint16,
+    sig: crate::goslice::slice<crate::types::byte>,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    crate::types::uint16,
+) {
+    let m = handshake_messages::certificateVerifyMsg {
+        hasSignatureAlgorithm,
+        signatureAlgorithm: alg,
+        signature: sig.__into_vec(),
+    };
+    let b = crate::goslice::slice::__from_vec(m.marshal());
+    let mut back = handshake_messages::certificateVerifyMsg::default();
+    back.hasSignatureAlgorithm = hasSignatureAlgorithm;
+    let ok = back.unmarshal(b.clone());
+    return (b, ok, back.signatureAlgorithm);
+}
+
+// go: none — goish-only: parse with an explicit flag, for the mismatch.
+#[doc(hidden)]
+pub fn msg_certVerify_unmarshal_as(
+    hasSignatureAlgorithm: bool,
+    data: crate::goslice::slice<crate::types::byte>,
+) -> bool {
+    let mut m = handshake_messages::certificateVerifyMsg::default();
+    m.hasSignatureAlgorithm = hasSignatureAlgorithm;
+    return m.unmarshal(data);
+}

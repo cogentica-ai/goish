@@ -652,6 +652,27 @@ fn main() {
     eq("certificateRequestMsg TLS1.0", hexOf(b2), "0d00000401010000");
     check("crm TLS1.0 round-trips", ok2);
 
+    // ─── the unmarshal halves the subset never had.
+    let (fb, fok, fv) =
+        tls::msg_finished_roundtrip(slice::__from_vec(alloc::vec![0x11u8, 0x22, 0x33]));
+    eq("finishedMsg", hexOf(fb), "14000003112233");
+    check("finishedMsg round-trips", fok);
+    eq("finishedMsg verifyData", hexOf(fv), "112233");
+
+    let (cb, cok, alg) = tls::msg_certVerify_roundtrip(
+        true,
+        0x0804,
+        slice::__from_vec(alloc::vec![0xaau8, 0xbb]),
+    );
+    eq("certificateVerifyMsg", hexOf(cb.clone()), "0f00000608040002aabb");
+    check("certificateVerifyMsg round-trips", cok);
+    check_n("certificateVerifyMsg algorithm", goish::int(alg), 0x0804);
+    // Same flag-is-load-bearing property as certificateRequestMsg.
+    check(
+        "certificateVerifyMsg rejected when parsed without sigalg",
+        !tls::msg_certVerify_unmarshal_as(false, cb),
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

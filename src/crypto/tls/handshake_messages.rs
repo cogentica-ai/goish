@@ -1,6 +1,6 @@
 // goishlint:ignore GOISH018 addBytesWithLength, addUint64, clone, marshalCertificate, marshalMsg, marshalWithoutBinders, originalBytes, readUint16LengthPrefixed, readUint24LengthPrefixed, readUint64, readUint8LengthPrefixed, transcriptMsg, unmarshalCertificate, updateBinders — handshake_messages.go is 1963 lines and 52 functions; this file is a deliberate SUBSET covering only the messages goish's own TLS 1.3 client and server exchange. The six it does port are anchored above and diffed against Go; everything listed here is genuinely absent, not renamed. See ROADMAP.md.
 // goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, marshalingFunction, newSessionTicketMsg, newSessionTicketMsgTLS13, serverHelloDoneMsg, serverKeyExchangeMsg, transcriptHash — same: the message types the subset does not handle.
-// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal
+// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal, finishedMsg.unmarshal, certificateVerifyMsg.unmarshal
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -1834,5 +1834,58 @@ impl certificateRequestMsg {
 
         // Go: return len(data) == 0
         return d.is_empty();
+    }
+}
+
+
+// The `unmarshal` halves the hand-written subset above never needed:
+// it only ever WROTE these two messages. Ported verbatim on the real
+// cryptobyte, against the subset's existing structs, so a future
+// replacement of the file has both directions already in place.
+
+impl finishedMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1707-1713 finishedMsg.unmarshal
+    /// Go: `s.Skip(1) && readUint24LengthPrefixed(&s, &m.verifyData) && s.Empty()`
+    ///
+    /// Note Go skips only ONE byte here, not four: the uint24 length is
+    /// then consumed by `readUint24LengthPrefixed` as the field's own
+    /// prefix. Skipping four would silently drop three bytes of body.
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        let mut s = CBString::New(data);
+        let mut verifyData: slice<byte> = slice::__from_vec(Vec::new());
+        if !s.Skip(1) || !readUint24LengthPrefixed(&mut s, &mut verifyData) || !s.Empty() {
+            return false;
+        }
+        self.verifyData = verifyData.__into_vec();
+        return true;
+    }
+}
+
+impl certificateVerifyMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1869-1881 certificateVerifyMsg.unmarshal
+    /// Parse. `hasSignatureAlgorithm` is set by the caller from the
+    /// negotiated version, exactly as in `certificateRequestMsg`, and
+    /// decides whether a uint16 algorithm precedes the signature.
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        let mut s = CBString::New(data);
+        // Go: if !s.Skip(4) { return false }  — type + uint24 length
+        if !s.Skip(4) {
+            return false;
+        }
+        // Go: if m.hasSignatureAlgorithm { if !s.ReadUint16(…) { return false } }
+        if self.hasSignatureAlgorithm {
+            let mut alg: crate::types::uint16 = 0;
+            if !s.ReadUint16(&mut alg) {
+                return false;
+            }
+            self.signatureAlgorithm = alg;
+        }
+        // Go: return readUint16LengthPrefixed(&s, &m.signature) && s.Empty()
+        let mut sig: slice<byte> = slice::__from_vec(Vec::new());
+        if !readUint16LengthPrefixed(&mut s, &mut sig) || !s.Empty() {
+            return false;
+        }
+        self.signature = sig.__into_vec();
+        return true;
     }
 }
