@@ -12,6 +12,20 @@
 #![allow(non_snake_case, non_upper_case_globals)]
 
 pub mod alert;
+pub mod common;
+pub mod common_string;
+
+// Re-export common.go's protocol enumerations at the package root, the
+// way Go has them in package tls.
+pub use common::{
+    ClientAuthType, CurveID,
+    SignatureScheme, VersionName, CurveP256, CurveP384, CurveP521, ECDSAWithP256AndSHA256,
+    ECDSAWithP384AndSHA384, ECDSAWithP521AndSHA512, ECDSAWithSHA1, Ed25519, NoClientCert,
+    PKCS1WithSHA1, PKCS1WithSHA256, PKCS1WithSHA384, PKCS1WithSHA512, PSSWithSHA256, PSSWithSHA384,
+    PSSWithSHA512, RequireAndVerifyClientCert, RequireAnyClientCert, RequestClientCert,
+    VerifyClientCertIfGiven, VersionSSL30, VersionTLS10, VersionTLS11, VersionTLS12, VersionTLS13,
+    X25519, X25519MLKEM768,
+};
 pub mod internal;
 
 extern crate alloc;
@@ -118,11 +132,10 @@ pub struct Config {
     pub NextProtos: slice<string>,
 }
 
-// Common TLS protocol-version constants.
-pub const VersionTLS10: u16 = 0x0301;
-pub const VersionTLS11: u16 = 0x0302;
-pub const VersionTLS12: u16 = 0x0303;
-pub const VersionTLS13: u16 = 0x0304;
+// The TLS protocol-version constants live in common[rs] now, ported
+// from common.go together with VersionName and the rest of the
+// enumerations, and are re-exported at the top of this file. They used
+// to be hand-declared here as raw `u16`.
 
 // Polymorphic-nil triple per priority #5.
 impl From<crate::nilval::Nil> for Config {

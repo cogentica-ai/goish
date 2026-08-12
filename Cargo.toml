@@ -1129,3 +1129,7 @@ path = "examples/iface_registry_smoke.rs"
 [[example]]
 name = "x509_crl_csr_smoke"
 path = "examples/x509_crl_csr_smoke.rs"
+
+[[example]]
+name = "tls_common_smoke"
+path = "examples/tls_common_smoke.rs"
