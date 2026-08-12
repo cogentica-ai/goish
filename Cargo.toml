@@ -1259,3 +1259,7 @@ path = "examples/testing_chattyprinter_smoke.rs"
 [[example]]
 name = "runtime_frames_smoke"
 path = "examples/runtime_frames_smoke.rs"
+
+[[example]]
+name = "testing_callername_smoke"
+path = "examples/testing_callername_smoke.rs"

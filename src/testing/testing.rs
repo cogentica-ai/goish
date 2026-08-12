@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -20,7 +20,7 @@
 // string and returns the list, so the helper does not depend on flag
 // registration having happened and can be tested on its own.
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
-// goishlint:ignore GOISH018 after, Attr, before, callerName, callSite, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newTestState, Output, Parallel, pcToName, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
+// goishlint:ignore GOISH018 after, Attr, before, callSite, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newTestState, Output, Parallel, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
 // goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errMain, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, matchStringOnly, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelConflict, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testDeps, testingTesting, testlog, testlogFile, testState, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
@@ -35,6 +35,7 @@ use core::sync::atomic::Ordering;
 use super::{indent_for, write_status, StringBytesAccess, TState, T, TEST_STACK};
 use crate::gostring::string;
 use crate::types::int;
+use crate::types::uintptr;
 
 impl T {
     // go: sdk 1.25.5 testing/testing.go:938-940 common.Name
@@ -875,4 +876,35 @@ impl chattyPrinter {
     fn prefix(&self) -> string {
         return prefix(self.json);
     }
+}
+
+// ─── caller attribution ──────────────────────────────────────────────
+
+// go: sdk 1.25.5 testing/testing.go:1641-1648 callerName
+/// Go: "callerName gives the function name (qualified with a package
+/// path) for the caller after skip frames (where 0 means the current
+/// function)."
+///
+/// Portable only since runtime::CallersFrames landed — before that
+/// `pcToName` could only ever have returned "", which would have made
+/// every `Helper`/`Cleanup` attribution silently blank.
+pub fn callerName(skip: int) -> string {
+    let mut pc: crate::goslice::slice<crate::types::uintptr> =
+        crate::make!([]uintptr, 1);
+    // Go: skip + runtime.Callers + callerName
+    let n = crate::runtime::Callers(skip + 2, &mut pc);
+    if n == 0 {
+        panic!("testing: zero callers found");
+    }
+    return pcToName(pc[0]);
+}
+
+// go: sdk 1.25.5 testing/testing.go:1650-1655 pcToName
+/// Go: resolve one PC to its qualified function name.
+pub fn pcToName(pc: crate::types::uintptr) -> string {
+    let pcs: crate::goslice::slice<crate::types::uintptr> =
+        crate::goslice::slice::__from_vec(alloc::vec![pc]);
+    let mut frames = crate::runtime::CallersFrames(pcs);
+    let (frame, _) = frames.Next();
+    return frame.Function;
 }
