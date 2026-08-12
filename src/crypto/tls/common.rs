@@ -1,4 +1,4 @@
-// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError, Certificate.leaf, Config.supportedVersions, Config.maxSupportedVersion, Config.mutualVersion, Config.curvePreferences, Config.supportsCurve, Config.cipherSuites, Config.supportedCipherSuites, Config.rand, Config.time, Config.ticketKeyFromBytes, Config.BuildNameToCertificate, defaultConfig, fipsAllowedChains, fipsAllowChain, emptyConfig, Config.initLegacySessionTicketKeyRLocked, Config.SetSessionTicketKeys, Config.ticketKeys, Config.Clone
+// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError, Certificate.leaf, Config.supportedVersions, Config.maxSupportedVersion, Config.mutualVersion, Config.curvePreferences, Config.supportsCurve, Config.cipherSuites, Config.supportedCipherSuites, Config.rand, Config.time, Config.ticketKeyFromBytes, Config.BuildNameToCertificate, defaultConfig, fipsAllowedChains, fipsAllowChain, emptyConfig, Config.initLegacySessionTicketKeyRLocked, Config.SetSessionTicketKeys, Config.ticketKeys, Config.Clone, ClientHelloInfo.Context, ClientHelloInfo.SupportsCertificate, CertificateRequestInfo.Context, CertificateRequestInfo.SupportsCertificate
 //
 // crypto/tls — the protocol-level type surface: versions, curve IDs,
 // signature schemes and client-auth policy.
@@ -10,9 +10,9 @@
 // `Config` and `Certificate` currently live in mod[rs] and are not yet
 // ports — see ROADMAP.md.
 //
-// goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, Context, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, SupportsCertificate, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
-// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, ClientSessionCache, ClientHelloInfo, CertificateRequestInfo, RenegotiationSupport, Config, dsaSignature, ecdsaSignature — same.
-// goishlint:ignore GOISH021 CertificateRequestInfo, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
+// goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
+// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, ClientSessionCache, RenegotiationSupport, Config, dsaSignature, ecdsaSignature — same.
+// goishlint:ignore GOISH021 ClientSessionCache, Config, ConnectionState, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -1140,4 +1140,403 @@ pub(crate) const deprecatedSessionTicketKey: &[byte] = b"DEPRECATED";
 fn hasDeprecatedPrefix(key: &[byte; 32]) -> bool {
     let dep = deprecatedSessionTicketKey;
     return key.len() >= dep.len() && &key[..dep.len()] == dep;
+}
+
+
+// Go: common.go — `const pointFormatUncompressed uint8 = 0`
+/// The only ECPointFormat this library supports (RFC 8422 §5.1.2).
+pub(crate) const pointFormatUncompressed: uint8 = 0;
+
+// ─── ClientHelloInfo and CertificateRequestInfo ───────────────────────
+
+// Go: common.go:452-514
+//   type ClientHelloInfo struct { CipherSuites []uint16; ServerName string
+//                                 SupportedCurves []CurveID; SupportedPoints []uint8
+//                                 SignatureSchemes []SignatureScheme
+//                                 SupportedProtos []string; SupportedVersions []uint16
+//                                 Extensions []uint16; Conn net.Conn
+//                                 config *Config; ctx context.Context }
+/// Go: "ClientHelloInfo contains information from a ClientHello message
+/// in order to guide application logic in the GetCertificate and
+/// GetConfigForClient callbacks."
+///
+/// Two fields of Go's are absent: `Conn net.Conn`, which arrives with
+/// the Conn record, and `ctx context.Context`, which `Context()` returns
+/// — goish's `context::Context` is a trait with no nil sentinel, so the
+/// field is an `Option` and `Context` hands back what is there.
+#[derive(Clone, Default)]
+pub struct ClientHelloInfo {
+    /// Go: "the bitmap of the cipher suites listed by the client."
+    pub CipherSuites: slice<uint16>,
+    /// Go: "the name of the server requested by the client in order to
+    /// support virtual hosting. ServerName is only set if the client is
+    /// using SNI."
+    pub ServerName: crate::gostring::string,
+    /// Go: "the elliptic curves supported by the client."
+    pub SupportedCurves: slice<CurveID>,
+    /// Go: "the point formats supported by the client."
+    pub SupportedPoints: slice<uint8>,
+    /// Go: "the signature and hash schemes that the client is willing to
+    /// verify."
+    pub SignatureSchemes: slice<SignatureScheme>,
+    /// Go: "the application protocols supported by the client."
+    pub SupportedProtos: slice<crate::gostring::string>,
+    /// Go: "the TLS versions supported by the client."
+    pub SupportedVersions: slice<uint16>,
+    /// Go: "lists the IDs of the extensions presented by the client in
+    /// the ClientHello."
+    pub Extensions: slice<uint16>,
+    pub(crate) config: Option<alloc::boxed::Box<Config>>,
+    pub(crate) ctx: Option<alloc::sync::Arc<dyn crate::context::Context>>,
+}
+
+impl ClientHelloInfo {
+    // go: sdk 1.25.5 crypto/tls/common.go:516-518 ClientHelloInfo.Context
+    /// Go: "Context returns the context of the connection that is
+    /// currently being handshaked."
+    pub fn Context(&self) -> Option<alloc::sync::Arc<dyn crate::context::Context>> {
+        // Go: return c.ctx
+        return self.ctx.clone();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1266-1400 ClientHelloInfo.SupportsCertificate
+    /// Go: "SupportsCertificate returns nil if the provided certificate
+    /// is supported by the client that sent the ClientHello. Otherwise,
+    /// it returns an error describing the reason for the incompatibility."
+    pub fn SupportsCertificate(&self, c: &Certificate) -> error {
+        // Go: Note we don't currently support certificate_authorities
+        // nor signature_algorithms_cert, and don't check the algorithms
+        // of the signatures on the chain (which anyway are a SHOULD, see
+        // RFC 8446, Section 4.4.2.2).
+
+        // Go: config := chi.config; if config == nil { config = &Config{} }
+        let config = match &self.config {
+            Some(cfg) => (**cfg).clone(),
+            None => Config::default(),
+        };
+        // Go: vers, ok := config.mutualVersion(roleServer, chi.SupportedVersions)
+        //     if !ok { return errors.New("no mutually supported protocol versions") }
+        let (vers, ok) = config.mutualVersion(roleServer, self.SupportedVersions.clone());
+        if !ok {
+            return errors::New("no mutually supported protocol versions");
+        }
+
+        // Go: If the client specified the name they are trying to
+        // connect to, the certificate needs to be valid for it.
+        if self.ServerName != crate::gostring::string::from_static("") {
+            let (x509Cert, err) = c.leaf();
+            if err != errors::nil {
+                return fmt::Errorf!("failed to parse certificate: %s", err.Error());
+            }
+            let err = x509Cert.VerifyHostname(self.ServerName.clone());
+            if err != errors::nil {
+                return fmt::Errorf!(
+                    "certificate is not valid for requested server name: %s",
+                    err.Error()
+                );
+            }
+        }
+
+        // Go: If the client sent the signature_algorithms extension,
+        // ensure it supports schemes we can use with this certificate
+        // and TLS version.
+        if self.SignatureSchemes.Len() > 0 {
+            let (_, err) =
+                super::auth::selectSignatureScheme(vers, c, self.SignatureSchemes.clone());
+            if err != errors::nil {
+                return supportsRSAFallback(self, c, &config, vers, err);
+            }
+        }
+
+        // Go: In TLS 1.3 we are done because supported_groups is only
+        // relevant to the ECDHE computation, point format negotiation is
+        // removed, cipher suites are only relevant to the AEAD choice,
+        // and static RSA does not exist.
+        if vers == VersionTLS13 {
+            return errors::nil;
+        }
+
+        // Go: The only signed key exchange we support is ECDHE.
+        // Go: ecdheSupported, err := supportsECDHE(config, vers,
+        //         chi.SupportedCurves, chi.SupportedPoints)
+        //     if err != nil { return err }
+        let (ecdheSupported, err) = super::handshake_server::supportsECDHE(
+            &config,
+            vers,
+            self.SupportedCurves.clone(),
+            self.SupportedPoints.clone(),
+        );
+        if err != errors::nil {
+            return err;
+        }
+        // Go: if !ecdheSupported { return supportsRSAFallback(errors.New(
+        //         "client doesn't support ECDHE, can only use legacy RSA key exchange")) }
+        if !ecdheSupported {
+            return supportsRSAFallback(
+                self,
+                c,
+                &config,
+                vers,
+                errors::New("client doesn't support ECDHE, can only use legacy RSA key exchange"),
+            );
+        }
+
+        // Go: var ecdsaCipherSuite bool
+        //     if priv, ok := c.PrivateKey.(crypto.Signer); ok {
+        //         switch pub := priv.Public().(type) { … }
+        //     } else { return supportsRSAFallback(unsupportedCertificateError(c)) }
+        let mut ecdsaCipherSuite = false;
+        let signer = super::auth::signerOf(&c.PrivateKey);
+        if signer.is_none() {
+            return supportsRSAFallback(
+                self,
+                c,
+                &config,
+                vers,
+                super::auth::unsupportedCertificateError(c),
+            );
+        }
+        let pub_ = signer.unwrap().Public();
+        if let Some(p) = pub_.downcast_ref::<crate::crypto::ecdsa::PublicKey>() {
+            // Go: case *ecdsa.PublicKey:
+            //         switch pub.Curve { case elliptic.P256(): curve = CurveP256; … }
+            let name = p.Curve.Params().Name.clone();
+            let curve: CurveID;
+            if name == crate::gostring::string::from_static("P-256") {
+                curve = CurveP256;
+            } else if name == crate::gostring::string::from_static("P-384") {
+                curve = CurveP384;
+            } else if name == crate::gostring::string::from_static("P-521") {
+                curve = CurveP521;
+            } else {
+                return supportsRSAFallback(
+                    self,
+                    c,
+                    &config,
+                    vers,
+                    super::auth::unsupportedCertificateError(c),
+                );
+            }
+            // Go: var curveOk bool
+            //     for _, c := range chi.SupportedCurves {
+            //         if c == curve && config.supportsCurve(vers, c) { curveOk = true; break } }
+            //     if !curveOk { return errors.New("client doesn't support certificate curve") }
+            let mut curveOk = false;
+            for (_, cc) in crate::range!(self.SupportedCurves.clone()) {
+                if *cc == curve && config.supportsCurve(vers, *cc) {
+                    curveOk = true;
+                    break;
+                }
+            }
+            if !curveOk {
+                return errors::New("client doesn't support certificate curve");
+            }
+            ecdsaCipherSuite = true;
+        } else if pub_
+            .downcast_ref::<crate::crypto::ed25519::PublicKey>()
+            .is_some()
+        {
+            // Go: case ed25519.PublicKey:
+            //         if vers < VersionTLS12 || len(chi.SignatureSchemes) == 0 {
+            //             return errors.New("connection doesn't support Ed25519") }
+            //         ecdsaCipherSuite = true
+            if vers < VersionTLS12 || self.SignatureSchemes.Len() == 0 {
+                return errors::New("connection doesn't support Ed25519");
+            }
+            ecdsaCipherSuite = true;
+        } else if pub_
+            .downcast_ref::<crate::crypto::rsa::PublicKey>()
+            .is_some()
+        {
+            // Go: case *rsa.PublicKey:
+        } else {
+            // Go: default: return supportsRSAFallback(unsupportedCertificateError(c))
+            return supportsRSAFallback(
+                self,
+                c,
+                &config,
+                vers,
+                super::auth::unsupportedCertificateError(c),
+            );
+        }
+
+        // Go: Make sure that there is a mutually supported cipher suite
+        // that works with this certificate. Cipher suite selection will
+        // then apply the logic in reverse to pick it. See also
+        // serverHandshakeState.cipherSuiteOk.
+        let cipherSuite = super::cipher_suites::selectCipherSuite(
+            self.CipherSuites.clone(),
+            config.supportedCipherSuites(),
+            &|c: &'static super::cipher_suites::cipherSuite| {
+                if c.flags & super::cipher_suites::suiteECDHE == 0 {
+                    return false;
+                }
+                if c.flags & super::cipher_suites::suiteECSign != 0 {
+                    if !ecdsaCipherSuite {
+                        return false;
+                    }
+                } else if ecdsaCipherSuite {
+                    return false;
+                }
+                if vers < VersionTLS12 && c.flags & super::cipher_suites::suiteTLS12 != 0 {
+                    return false;
+                }
+                return true;
+            },
+        );
+        // Go: if cipherSuite == nil { return supportsRSAFallback(errors.New(
+        //         "client doesn't support any cipher suites compatible with the certificate")) }
+        if cipherSuite.is_none() {
+            return supportsRSAFallback(
+                self,
+                c,
+                &config,
+                vers,
+                errors::New(
+                    "client doesn't support any cipher suites compatible with the certificate",
+                ),
+            );
+        }
+
+        // Go: return nil
+        return errors::nil;
+    }
+}
+
+// go: none — goish-only: Go declares `supportsRSAFallback` as a closure
+// inside `SupportsCertificate`, capturing `c`, `config`, `vers` and
+// `chi`. Rust cannot call a closure that borrows `self` from the same
+// body that also borrows it mutably elsewhere, so the closure is a named
+// function over the same four captures. Body is verbatim.
+fn supportsRSAFallback(
+    chi: &ClientHelloInfo,
+    c: &Certificate,
+    config: &Config,
+    vers: uint16,
+    unsupported: error,
+) -> error {
+    // Go: TLS 1.3 dropped support for the static RSA key exchange.
+    if vers == VersionTLS13 {
+        return unsupported;
+    }
+    // Go: The static RSA key exchange works by decrypting a challenge
+    // with the RSA private key, not by signing, so check the PrivateKey
+    // implements crypto.Decrypter, like *rsa.PrivateKey does.
+    let priv_ = super::key_agreement::decrypterOf(&c.PrivateKey);
+    if priv_.is_none() {
+        return unsupported;
+    }
+    if priv_
+        .unwrap()
+        .Public()
+        .downcast_ref::<crate::crypto::rsa::PublicKey>()
+        .is_none()
+    {
+        return unsupported;
+    }
+    // Go: Finally, there needs to be a mutual cipher suite that uses the
+    // static RSA key exchange instead of ECDHE.
+    let rsaCipherSuite = super::cipher_suites::selectCipherSuite(
+        chi.CipherSuites.clone(),
+        config.supportedCipherSuites(),
+        &|c: &'static super::cipher_suites::cipherSuite| {
+            if c.flags & super::cipher_suites::suiteECDHE != 0 {
+                return false;
+            }
+            if vers < VersionTLS12 && c.flags & super::cipher_suites::suiteTLS12 != 0 {
+                return false;
+            }
+            return true;
+        },
+    );
+    if rsaCipherSuite.is_none() {
+        return unsupported;
+    }
+    return errors::nil;
+}
+
+// Go: common.go:527-548
+//   type CertificateRequestInfo struct { AcceptableCAs [][]byte
+//                                        SignatureSchemes []SignatureScheme
+//                                        Version uint16; ctx context.Context }
+/// Go: "CertificateRequestInfo contains information from a server's
+/// CertificateRequest message, which is used to demand a certificate and
+/// proof of control from a client."
+#[derive(Clone, Default)]
+pub struct CertificateRequestInfo {
+    /// Go: "AcceptableCAs contains zero or more, DER-encoded, X.501
+    /// Distinguished Names. These are the names of root and intermediate
+    /// CAs that the server wishes the returned certificate to be signed
+    /// by. An empty slice indicates that the server has no preference."
+    pub AcceptableCAs: slice<slice<byte>>,
+    /// Go: "SignatureSchemes lists the signature schemes that the server
+    /// is willing to verify."
+    pub SignatureSchemes: slice<SignatureScheme>,
+    /// Go: "Version is the TLS version that was negotiated for this
+    /// connection."
+    pub Version: uint16,
+    pub(crate) ctx: Option<alloc::sync::Arc<dyn crate::context::Context>>,
+}
+
+impl CertificateRequestInfo {
+    // go: sdk 1.25.5 crypto/tls/common.go:550-552 CertificateRequestInfo.Context
+    /// Go: "Context returns the context of the connection that is
+    /// currently being handshaked."
+    pub fn Context(&self) -> Option<alloc::sync::Arc<dyn crate::context::Context>> {
+        // Go: return c.ctx
+        return self.ctx.clone();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1405-1435 CertificateRequestInfo.SupportsCertificate
+    /// Go: "SupportsCertificate returns nil if the provided certificate
+    /// is supported by the server that sent the CertificateRequest.
+    /// Otherwise, it returns an error describing the reason for the
+    /// incompatibility."
+    pub fn SupportsCertificate(&self, c: &Certificate) -> error {
+        // Go: if _, err := selectSignatureScheme(cri.Version, c,
+        //         cri.SignatureSchemes); err != nil { return err }
+        let (_, err) =
+            super::auth::selectSignatureScheme(self.Version, c, self.SignatureSchemes.clone());
+        if err != errors::nil {
+            return err;
+        }
+
+        // Go: if len(cri.AcceptableCAs) == 0 { return nil }
+        if self.AcceptableCAs.Len() == 0 {
+            return errors::nil;
+        }
+
+        // Go: for j, cert := range c.Certificate {
+        //         x509Cert := c.Leaf
+        //         // Parse the certificate if this isn't the leaf node, or if
+        //         // chain.Leaf was nil.
+        //         if j != 0 || x509Cert == nil {
+        //             if x509Cert, err = x509.ParseCertificate(cert); err != nil {
+        //                 return fmt.Errorf("failed to parse certificate #%d in the chain: %w", j, err) } }
+        //         for _, ca := range cri.AcceptableCAs {
+        //             if bytes.Equal(x509Cert.RawIssuer, ca) { return nil } } }
+        for (j, cert) in crate::range!(c.Certificate.clone()) {
+            let x509Cert: crate::crypto::x509::Certificate;
+            if j != 0 || c.Leaf.is_none() {
+                let (parsed, err) = crate::crypto::x509::ParseCertificate(cert.clone());
+                if err != errors::nil {
+                    return fmt::Errorf!(
+                        "failed to parse certificate #%d in the chain: %s",
+                        j,
+                        err.Error()
+                    );
+                }
+                x509Cert = parsed;
+            } else {
+                x509Cert = c.Leaf.clone().unwrap();
+            }
+            for (_, ca) in crate::range!(self.AcceptableCAs.clone()) {
+                if x509Cert.RawIssuer == *ca {
+                    return errors::nil;
+                }
+            }
+        }
+        // Go: return errors.New("chain is not signed by an acceptable CA")
+        return errors::New("chain is not signed by an acceptable CA");
+    }
 }

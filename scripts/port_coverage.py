@@ -396,6 +396,13 @@ def rust_decl_idents(src):
     name."""
     out, impl_ty, impl_depth, depth = set(), None, 0, 0
     for line in src.split("\n"):
+        # A comment-only line is not code. Ported bodies quote Go verbatim,
+        # and Go composite literals carry braces — counting those would
+        # leave `impl_ty` stuck on whichever block came first, silently
+        # scoring every later method as unported. Caught on
+        # crypto/tls/common.rs, where five methods vanished this way.
+        if line.lstrip().startswith("//"):
+            continue
         m = RE_IMPL.match(line)
         if m and impl_ty is None:
             impl_ty, impl_depth = m.group("ty"), depth

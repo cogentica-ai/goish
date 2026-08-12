@@ -1814,6 +1814,58 @@ fn main() {
     check_n("Config.Clone MinVersion", clMin, 0x0303);
     check("Config.Clone SessionTicketsDisabled", clDisabled);
 
+    // ─── common.go: ClientHelloInfo/CertificateRequestInfo certificate
+    //     compatibility, and handshake_server.go's supportsECDHE. Every
+    //     message is from goref.sh.
+    let sc = |w: int, k: bool| tls::common_supportsCertificate(w, k);
+    eq("SupportsCertificate TLS 1.3 Ed25519", sc(0, true), "");
+    eq("SupportsCertificate with no mutual version", sc(1, true),
+       "no mutually supported protocol versions");
+    eq("SupportsCertificate TLS 1.3 with no usable scheme", sc(2, true),
+       "tls: peer doesn't support any of the certificate's signature algorithms");
+    eq("SupportsCertificate with no private key", sc(0, false),
+       "tls: certificate private key does not implement crypto.Signer");
+    // Below TLS 1.3 the only signed key exchange is ECDHE, so a client
+    // that offers no curves falls through to the static-RSA check.
+    eq("SupportsCertificate TLS 1.2 with no curves", sc(3, true),
+       "client doesn't support ECDHE, can only use legacy RSA key exchange");
+    eq("SupportsCertificate TLS 1.2 ECDHE-ECDSA", sc(4, true), "");
+    // An Ed25519 certificate needs a suiteECSign suite; offering only
+    // ECDHE-RSA ones is a mismatch even though ECDHE is available.
+    eq("SupportsCertificate TLS 1.2 with only RSA suites", sc(5, true),
+       "client doesn't support any cipher suites compatible with the certificate");
+    eq("SupportsCertificate TLS 1.2 with an incompatible point format", sc(6, true),
+       "tls: client offered only incompatible point formats");
+    // Ed25519 below TLS 1.3 requires signature_algorithms to be present.
+    eq("SupportsCertificate TLS 1.2 Ed25519 without signature_algorithms", sc(7, true),
+       "connection doesn't support Ed25519");
+
+    eq("CertificateRequestInfo.SupportsCertificate", tls::common_criSupportsCertificate(0), "");
+    eq("CertificateRequestInfo without a private key", tls::common_criSupportsCertificate(1),
+       "tls: certificate private key does not implement crypto.Signer");
+    eq("CertificateRequestInfo with unmatched AcceptableCAs",
+       tls::common_criSupportsCertificate(2), "chain is not signed by an acceptable CA");
+    check("ClientHelloInfo/CertificateRequestInfo contexts start nil",
+          tls::common_infoContextsAreNil());
+
+    let se = |c: alloc::vec::Vec<tls::CurveID>, p: alloc::vec::Vec<u8>| {
+        return tls::handshake_server_supportsECDHE(slice::__from_vec(c), slice::__from_vec(p));
+    };
+    let (e1, _) = se(alloc::vec![], alloc::vec![]);
+    check("supportsECDHE with no curves", !e1);
+    let (e2, _) = se(alloc::vec![tls::X25519], alloc::vec![]);
+    // RFC 8422 §5.1.2: a missing Supported Point Formats extension means
+    // uncompressed is supported, so an empty list is a yes, not a no.
+    check("supportsECDHE with X25519 and no point formats", e2);
+    let (e3, _) = se(alloc::vec![tls::X25519], alloc::vec![0u8]);
+    check("supportsECDHE with uncompressed", e3);
+    let (e4, err4) = se(alloc::vec![tls::X25519], alloc::vec![1u8]);
+    check("supportsECDHE with only a compressed format", !e4);
+    eq("supportsECDHE compressed-only error", err4,
+       "tls: client offered only incompatible point formats");
+    let (e5, _) = se(alloc::vec![tls::X25519], alloc::vec![0u8, 1]);
+    check("supportsECDHE with both formats", e5);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

@@ -348,7 +348,7 @@ impl keyAgreement for rsaKeyAgreement {
 // `HasDynAny for T: Sized` and probes the Arc's own TypeId. The payload
 // has to be dereferenced first — the same trap auth[rs]'s `signerOf`
 // documents.
-fn decrypterOf(
+pub(crate) fn decrypterOf(
     key: &crate::crypto::PrivateKey,
 ) -> Option<&(dyn crate::crypto::Decrypter + Send + Sync)> {
     return <dyn crate::crypto::Decrypter + Send + Sync as crate::goany::DowncastableFromAny>::from_any(&**key);

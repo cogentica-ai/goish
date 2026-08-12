@@ -16,6 +16,7 @@ pub mod auth;
 mod defaults_fips140;
 pub mod conn;
 pub mod ticket;
+pub mod handshake_server;
 
 // go: none — goish-only: auth.go's functions are unexported in Go,
 // where tests are in-package. See the `defaults_*` shims below.
@@ -3546,4 +3547,125 @@ pub fn common_configClone() -> (crate::gostring::string, crate::types::int, bool
         cl.MinVersion as crate::types::int,
         cl.SessionTicketsDisabled,
     );
+}
+
+// go: none — goish-only: ClientHelloInfo.SupportsCertificate's private
+// `config` field is unexported in Go, where the tests are in-package.
+// `which` picks the ClientHello: 0 = TLS 1.3, 1 = an unsupported
+// version, 2 = TLS 1.3 with no scheme the certificate can use, 3 = TLS
+// 1.2 with no curves offered, 4 = TLS 1.2 with X25519 and an ECDSA
+// suite, 5 = TLS 1.2 with X25519 but only RSA suites, 6 = TLS 1.2 with
+// an incompatible point format, 7 = TLS 1.2 with no signature schemes.
+// `withKey` selects an Ed25519 certificate or one with no private key.
+#[doc(hidden)]
+pub fn common_supportsCertificate(
+    which: crate::types::int,
+    withKey: bool,
+) -> crate::gostring::string {
+    let mut cert = common::Certificate::default();
+    if withKey {
+        let seed = crate::goslice::slice::__from_vec(alloc::vec![7u8; 32]);
+        cert.PrivateKey = alloc::sync::Arc::new(crate::crypto::ed25519::NewKeyFromSeed(seed));
+    }
+    let all = crate::goslice::slice::__from_vec(alloc::vec![
+        common::Ed25519,
+        common::PSSWithSHA256,
+        common::ECDSAWithP256AndSHA256
+    ]);
+    let mut chi = common::ClientHelloInfo::default();
+    chi.SignatureSchemes = all.clone();
+    match which {
+        0 | 2 | 3 => {
+            chi.SupportedVersions =
+                crate::goslice::slice::__from_vec(alloc::vec![common::VersionTLS13]);
+            if which == 2 {
+                chi.SignatureSchemes =
+                    crate::goslice::slice::__from_vec(alloc::vec![common::PSSWithSHA256]);
+            }
+            if which == 3 {
+                chi.SupportedVersions =
+                    crate::goslice::slice::__from_vec(alloc::vec![common::VersionTLS12]);
+            }
+        }
+        1 => {
+            chi.SupportedVersions = crate::goslice::slice::__from_vec(alloc::vec![0x0300u16]);
+        }
+        _ => {
+            chi.SupportedVersions =
+                crate::goslice::slice::__from_vec(alloc::vec![common::VersionTLS12]);
+            chi.SupportedCurves = crate::goslice::slice::__from_vec(alloc::vec![common::X25519]);
+            if which == 4 {
+                chi.CipherSuites = crate::goslice::slice::__from_vec(alloc::vec![
+                    cipher_suites::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+                ]);
+            } else if which == 5 {
+                chi.CipherSuites = crate::goslice::slice::__from_vec(alloc::vec![
+                    cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+                ]);
+            } else if which == 6 {
+                chi.SupportedPoints = crate::goslice::slice::__from_vec(alloc::vec![1u8]);
+            } else {
+                chi.SignatureSchemes = crate::goslice::slice::new();
+                chi.CipherSuites = crate::goslice::slice::__from_vec(alloc::vec![
+                    cipher_suites::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+                ]);
+            }
+        }
+    }
+    let err = chi.SupportsCertificate(&cert);
+    if err == crate::errors::nil {
+        return crate::gostring::string::from_static("");
+    }
+    return err.Error();
+}
+
+// go: none — goish-only: see `common_supportsCertificate`. `which`:
+// 0 = a usable certificate, 1 = no private key, 2 = AcceptableCAs set
+// against an empty chain.
+#[doc(hidden)]
+pub fn common_criSupportsCertificate(which: crate::types::int) -> crate::gostring::string {
+    let mut cert = common::Certificate::default();
+    if which != 1 {
+        let seed = crate::goslice::slice::__from_vec(alloc::vec![7u8; 32]);
+        cert.PrivateKey = alloc::sync::Arc::new(crate::crypto::ed25519::NewKeyFromSeed(seed));
+    }
+    let mut cri = common::CertificateRequestInfo::default();
+    cri.Version = common::VersionTLS13;
+    cri.SignatureSchemes = crate::goslice::slice::__from_vec(alloc::vec![
+        common::Ed25519,
+        common::PSSWithSHA256,
+        common::ECDSAWithP256AndSHA256
+    ]);
+    if which == 2 {
+        cri.AcceptableCAs = crate::goslice::slice::__from_vec(alloc::vec![
+            crate::goslice::slice::__from_vec(alloc::vec![1u8, 2, 3])
+        ]);
+    }
+    let err = cri.SupportsCertificate(&cert);
+    if err == crate::errors::nil {
+        return crate::gostring::string::from_static("");
+    }
+    return err.Error();
+}
+
+// go: none — goish-only: see `common_supportsCertificate`. Reports
+// `(supported, errText)`.
+#[doc(hidden)]
+pub fn handshake_server_supportsECDHE(
+    curves: crate::goslice::slice<common::CurveID>,
+    points: crate::goslice::slice<crate::types::uint8>,
+) -> (bool, crate::gostring::string) {
+    let c = Config::default();
+    let (ok, err) = handshake_server::supportsECDHE(&c, common::VersionTLS12, curves, points);
+    if err != crate::errors::nil {
+        return (ok, err.Error());
+    }
+    return (ok, crate::gostring::string::from_static(""));
+}
+
+// go: none — goish-only: see `common_supportsCertificate`.
+#[doc(hidden)]
+pub fn common_infoContextsAreNil() -> bool {
+    return common::ClientHelloInfo::default().Context().is_none()
+        && common::CertificateRequestInfo::default().Context().is_none();
 }
