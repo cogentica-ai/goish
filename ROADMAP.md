@@ -69,12 +69,12 @@ All three are reproduced and recorded (see PROGRESS.md). Each is a
 `runtime/`-adjacent change, so each needs `make e2e-full` — all examples
 ×50 — and none belongs in a porting commit.
 
-1. **Process exit waits for every goroutine.** goish exits when
-   `LIVE_G_COUNT == 0`; Go exits when `main` returns and kills what is
-   still running. Combined with a `Timer::Stop()` that does not cancel
-   its sleeper, this holds ten declared examples for 60 s each and turns
-   `make e2e` red at its 15 s timeout. Fixing exit semantics is the
-   larger and more correct half.
+1. ~~**Process exit waits for every goroutine.**~~ **Fixed** — the main
+   goroutine now ends with `exit(0)`, as Go's `runtime.main` does, so a
+   leaked goroutine can no longer hold the process. What remains is the
+   narrower half: `Timer::Stop()` still does not cancel the `Sleep`
+   beneath it, so a stopped timer occupies a goroutine for its full
+   duration.
 2. **`cast!` on an `Any` carrier.** Three options were scoped: reject it
    at compile time with a `const` assert pointing at `.As::<>()`
    (cheapest, converts a silent miss into an error), narrow the blanket

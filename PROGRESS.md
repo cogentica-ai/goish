@@ -94,12 +94,12 @@ fixing file A cannot pay for a regression in file B. Current total:
 Each is reproduced and recorded rather than worked around. All three
 need `make e2e-full` to validate, so none is bundled into a port.
 
-- **Ten examples exceed CI's 15 s timeout.** `sysrand::Read` arms Go's
-  60-second first-use warning timer; `Timer::Stop()` doesn't cancel the
-  sleeping goroutine, and goish exits only when `LIVE_G_COUNT == 0`
-  where Go exits when `main` returns. Each affected binary prints its
-  final OK line, then exits 0 at ~61 s. The ports are faithful; the
-  runtime deviates.
+- **`Timer::Stop()` does not cancel the sleeping goroutine.** The
+  watcher exits; the `Sleep` under it runs to completion. Harmless to
+  program exit since main's return now terminates the process (Go's
+  rule), but a stopped timer still occupies a goroutine for its full
+  duration. Was previously fatal: it held ten examples for 60 s each
+  and turned CI red at `timeout: 10, fail: 0`.
 - **`goish::cast!` cannot succeed on a `goany::Any` carrier.** It
   resolves through the blanket `HasDynAny for T`, probing the wrapper's
   `TypeId` and never the payload's. Silent — a comma-ok assertion

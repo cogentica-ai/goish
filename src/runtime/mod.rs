@@ -465,11 +465,35 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     extern "C" {
         fn __goish_main();
     }
+    // Go's `runtime.main` ends `main_main(); … exit(0)` — the program
+    // terminates when `main` RETURNS, and whatever goroutines are still
+    // running are killed where they stand. goish previously let the
+    // main goroutine exit like any other and left the process alive
+    // until `LIVE_G_COUNT == 0`, which is not Go's rule and is not
+    // reachable in general: one leaked goroutine hangs the process
+    // forever.
+    //
+    // It bit exactly that way. `sysrand.Read` arms Go's 60-second
+    // first-use "blocked on entropy" warning and stops it on the way
+    // out; goish's `Timer::Stop` cancels the watcher but not the
+    // sleeper underneath it (see the note in time/mod.rs), so every
+    // binary that drew randomness and returned from `main` sat for a
+    // further 60 s before exiting 0. Ten declared examples did, which
+    // is the whole of what CI reports as `timeout: 10, fail: 0`.
+    //
+    // Killing live goroutines at main's return is the Go-faithful half
+    // of the fix and the half that generalises — a leaked goroutine
+    // stops being able to hold the process at all. The sleeper leak
+    // itself is still worth closing, and is tracked separately.
     sched::newproc_with_stack_at(
         8 * 1024 * 1024,
         file!(),
         line!(),
-        alloc::boxed::Box::new(|| unsafe { __goish_main() }),
+        alloc::boxed::Box::new(|| {
+            unsafe { __goish_main() };
+            // Go: `exit(0)` at the foot of runtime.main.
+            crate::syscall::Exit(0);
+        }),
     );
 
     // M17b-ε: enter the dispatch loop on g0 — never returns. It
