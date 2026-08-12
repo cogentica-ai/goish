@@ -1286,6 +1286,108 @@ fn main() {
     eq("selectSignatureScheme without a private key", seNoKey,
        "tls: certificate private key does not implement crypto.Signer");
 
+    // ─── common.go: Config's version, curve and cipher-suite
+    //     negotiation. From goref.sh.
+    let hexU16 = |v: slice<u16>| -> string {
+        let mut out = alloc::string::String::new();
+        for (i, x) in goish::range!(v) {
+            if i > 0 { out.push(' '); }
+            const HEX: &[u8; 16] = b"0123456789abcdef";
+            for sh in [12u32, 8, 4, 0] {
+                out.push(HEX[((*x >> sh) & 0xf) as usize] as char);
+            }
+        }
+        return string::from_bytes(out.as_bytes());
+    };
+    let decCurves = |v: slice<tls::CurveID>| -> string {
+        let mut out = alloc::string::String::new();
+        for (i, x) in goish::range!(v) {
+            if i > 0 { out.push(' '); }
+            let mut n = x.0 as u32;
+            let mut d = alloc::vec::Vec::new();
+            if n == 0 { d.push(b'0'); }
+            while n > 0 { d.push(b'0' + (n % 10) as u8); n /= 10; }
+            d.reverse();
+            out.push_str(core::str::from_utf8(&d).unwrap());
+        }
+        return string::from_bytes(out.as_bytes());
+    };
+
+    // A zero Config offers 1.3 and 1.2 only: TLS 1.0/1.1 are off unless
+    // MinVersion asks for them, and for a server also GODEBUG=tls10server=1.
+    eq("Config.supportedVersions zero client",
+       hexU16(tls::common_configSupportedVersions(0, true)), "0304 0303");
+    eq("Config.supportedVersions zero server",
+       hexU16(tls::common_configSupportedVersions(0, false)), "0304 0303");
+    eq("Config.supportedVersions MinVersion=1.0 client",
+       hexU16(tls::common_configSupportedVersions(1, true)), "0304 0303 0302 0301");
+    eq("Config.supportedVersions MaxVersion=1.2 client",
+       hexU16(tls::common_configSupportedVersions(2, true)), "0303");
+    eq("Config.supportedVersions band 1.1-1.2",
+       hexU16(tls::common_configSupportedVersions(3, true)), "0303 0302");
+    // ECH requires TLS 1.3 — but only on the client side.
+    eq("Config.supportedVersions ECH client",
+       hexU16(tls::common_configSupportedVersions(4, true)), "0304");
+    eq("Config.supportedVersions ECH server is unaffected",
+       hexU16(tls::common_configSupportedVersions(5 - 1, false)), "0304 0303 0302 0301");
+    eq("Config.supportedVersions Min>Max is empty",
+       hexU16(tls::common_configSupportedVersions(5, true)), "");
+    check_n("Config.maxSupportedVersion zero",
+            tls::common_configMaxSupportedVersion(0, true) as int, 0x0304);
+    check_n("Config.maxSupportedVersion MaxVersion=1.2",
+            tls::common_configMaxSupportedVersion(2, true) as int, 0x0303);
+    check_n("Config.maxSupportedVersion Min>Max",
+            tls::common_configMaxSupportedVersion(5, true) as int, 0);
+
+    let mv = |which: int, peer: alloc::vec::Vec<u16>| -> (u16, bool) {
+        return tls::common_configMutualVersion(which, true, slice::__from_vec(peer));
+    };
+    let (m1, ok1) = mv(0, alloc::vec![0x0304u16, 0x0303]);
+    check("mutualVersion 1.3+1.2 ok", ok1);
+    check_n("mutualVersion picks 1.3", m1 as int, 0x0304);
+    let (m2, ok2) = mv(0, alloc::vec![0x0303u16]);
+    check("mutualVersion 1.2 ok", ok2);
+    check_n("mutualVersion picks 1.2", m2 as int, 0x0303);
+    let (_, ok3) = mv(0, alloc::vec![0x0301u16]);
+    check("mutualVersion rejects 1.0 against a zero Config", !ok3);
+    let (_, ok4) = mv(0, alloc::vec![]);
+    check("mutualVersion rejects an empty peer list", !ok4);
+    let (m5, ok5) = tls::common_configMutualVersion(
+        1, false, slice::__from_vec(alloc::vec![0x0301u16]));
+    check("mutualVersion server MinVersion=1.0 accepts 1.0", ok5);
+    check_n("mutualVersion server picks 1.0", m5 as int, 0x0301);
+
+    // X25519MLKEM768 (4588) is TLS 1.3 only, so it drops out at 1.2.
+    eq("Config.curvePreferences 1.3",
+       decCurves(tls::common_configCurvePreferences(0, 0x0304)), "4588 29 23 24 25");
+    eq("Config.curvePreferences 1.2 drops the hybrid",
+       decCurves(tls::common_configCurvePreferences(0, 0x0303)), "29 23 24 25");
+    // A pinned list filters the default order but does not reorder it.
+    eq("Config.curvePreferences pinned",
+       decCurves(tls::common_configCurvePreferences(6, 0x0304)), "29 24");
+    check("Config.supportsCurve 1.3 X25519",
+          tls::common_configSupportsCurve(0, 0x0304, tls::X25519));
+    check("Config.supportsCurve 1.2 rejects the hybrid",
+          !tls::common_configSupportsCurve(0, 0x0303, tls::X25519MLKEM768));
+    check("Config.supportsCurve pinned rejects P-256",
+          !tls::common_configSupportsCurve(6, 0x0304, tls::CurveP256));
+
+    eq("Config.cipherSuites default, AES preferred",
+       hexU16(tls::common_configCipherSuites(0, true)),
+       "c02b c02f c02c c030 cca9 cca8 c009 c013 c00a c014");
+    eq("Config.cipherSuites default, no AES hardware",
+       hexU16(tls::common_configCipherSuites(0, false)),
+       "cca9 cca8 c02b c02f c02c c030 c009 c013 c00a c014");
+    // A pinned list is a filter over the supported set, so a legacy
+    // suite the default list omits comes back.
+    eq("Config.cipherSuites pinned",
+       hexU16(tls::common_configCipherSuites(7, true)), "c02f 002f");
+    eq("Config.supportedCipherSuites zero",
+       hexU16(tls::common_configSupportedCipherSuites(0)),
+       "cca9 cca8 c02b c02f c02c c030 c009 c013 c00a c014");
+    eq("Config.supportedCipherSuites pinned",
+       hexU16(tls::common_configSupportedCipherSuites(7)), "c02f 002f");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

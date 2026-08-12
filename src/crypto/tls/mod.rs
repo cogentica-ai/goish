@@ -415,6 +415,18 @@ pub struct Config {
     /// NextProtos is a list of supported application level protocols,
     /// in order of preference (ALPN). Reference: common.go:604.
     pub NextProtos: slice<string>,
+    /// CipherSuites is a list of enabled TLS 1.0-1.2 cipher suites. If
+    /// empty (Go: nil), a safe default list is used. Reference:
+    /// common.go:644.
+    pub CipherSuites: slice<crate::types::uint16>,
+    /// CurvePreferences contains the elliptic curves that will be used
+    /// in an ECDHE handshake, in preference order. If empty (Go: nil),
+    /// the default is used. Reference: common.go:735.
+    pub CurvePreferences: slice<common::CurveID>,
+    /// EncryptedClientHelloConfigList is a serialized ECHConfigList. If
+    /// non-empty, the client will attempt Encrypted Client Hello, which
+    /// requires TLS 1.3. Reference: common.go:781.
+    pub EncryptedClientHelloConfigList: slice<byte>,
 }
 
 // The TLS protocol-version constants live in common[rs] now, ported
@@ -2475,4 +2487,101 @@ pub fn auth_selectSignatureScheme(
         return (s, err.Error());
     }
     return (s, crate::gostring::string::from_static(""));
+}
+
+// go: none — goish-only: common.go's Config negotiation methods are
+// unexported in Go, where the tests are in-package. `which` picks the
+// Config: 0 = zero, 1 = MinVersion TLS 1.0, 2 = MaxVersion TLS 1.2,
+// 3 = the 1.1-1.2 band, 4 = ECH offered with MinVersion TLS 1.0,
+// 5 = MinVersion above MaxVersion, 6 = CurvePreferences pinned to
+// P-384 and X25519, 7 = CipherSuites pinned to two suites.
+fn common_sampleConfig(which: crate::types::int) -> Config {
+    let mut c = Config::default();
+    if which == 1 {
+        c.MinVersion = common::VersionTLS10;
+    } else if which == 2 {
+        c.MaxVersion = common::VersionTLS12;
+    } else if which == 3 {
+        c.MinVersion = common::VersionTLS11;
+        c.MaxVersion = common::VersionTLS12;
+    } else if which == 4 {
+        c.MinVersion = common::VersionTLS10;
+        c.EncryptedClientHelloConfigList = crate::goslice::slice::__from_vec(alloc::vec![1u8]);
+    } else if which == 5 {
+        c.MinVersion = common::VersionTLS13;
+        c.MaxVersion = common::VersionTLS12;
+    } else if which == 6 {
+        c.CurvePreferences =
+            crate::goslice::slice::__from_vec(alloc::vec![common::CurveP384, common::X25519]);
+    } else if which == 7 {
+        c.CipherSuites = crate::goslice::slice::__from_vec(alloc::vec![
+            cipher_suites::TLS_RSA_WITH_AES_128_CBC_SHA,
+            cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        ]);
+    }
+    return c;
+}
+
+// go: none — goish-only: see `common_sampleConfig`.
+#[doc(hidden)]
+pub fn common_configSupportedVersions(
+    which: crate::types::int,
+    isClient: bool,
+) -> crate::goslice::slice<crate::types::uint16> {
+    return common_sampleConfig(which).supportedVersions(isClient);
+}
+
+// go: none — goish-only: see `common_sampleConfig`.
+#[doc(hidden)]
+pub fn common_configMaxSupportedVersion(
+    which: crate::types::int,
+    isClient: bool,
+) -> crate::types::uint16 {
+    return common_sampleConfig(which).maxSupportedVersion(isClient);
+}
+
+// go: none — goish-only: see `common_sampleConfig`.
+#[doc(hidden)]
+pub fn common_configMutualVersion(
+    which: crate::types::int,
+    isClient: bool,
+    peerVersions: crate::goslice::slice<crate::types::uint16>,
+) -> (crate::types::uint16, bool) {
+    return common_sampleConfig(which).mutualVersion(isClient, peerVersions);
+}
+
+// go: none — goish-only: see `common_sampleConfig`.
+#[doc(hidden)]
+pub fn common_configCurvePreferences(
+    which: crate::types::int,
+    version: crate::types::uint16,
+) -> crate::goslice::slice<common::CurveID> {
+    return common_sampleConfig(which).curvePreferences(version);
+}
+
+// go: none — goish-only: see `common_sampleConfig`.
+#[doc(hidden)]
+pub fn common_configSupportsCurve(
+    which: crate::types::int,
+    version: crate::types::uint16,
+    curve: common::CurveID,
+) -> bool {
+    return common_sampleConfig(which).supportsCurve(version, curve);
+}
+
+// go: none — goish-only: see `common_sampleConfig`.
+#[doc(hidden)]
+pub fn common_configCipherSuites(
+    which: crate::types::int,
+    aesGCMPreferred: bool,
+) -> crate::goslice::slice<crate::types::uint16> {
+    return common_sampleConfig(which).cipherSuites(aesGCMPreferred);
+}
+
+// go: none — goish-only: see `common_sampleConfig`.
+#[doc(hidden)]
+pub fn common_configSupportedCipherSuites(
+    which: crate::types::int,
+) -> crate::goslice::slice<crate::types::uint16> {
+    return common_sampleConfig(which).supportedCipherSuites();
 }

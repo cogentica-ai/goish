@@ -1,4 +1,4 @@
-// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError, Certificate.leaf
+// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError, Certificate.leaf, Config.supportedVersions, Config.maxSupportedVersion, Config.mutualVersion, Config.curvePreferences, Config.supportsCurve, Config.cipherSuites, Config.supportedCipherSuites
 //
 // crypto/tls — the protocol-level type surface: versions, curve IDs,
 // signature schemes and client-auth policy.
@@ -10,9 +10,9 @@
 // `Config` and `Certificate` currently live in mod[rs] and are not yet
 // ports — see ROADMAP.md.
 //
-// goishlint:ignore GOISH018 supportedVersions, BuildNameToCertificate, CipherSuiteName, CipherSuites, Clone, Context, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, SetSessionTicketKeys, SupportsCertificate, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, curvePreferences, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, defaultConfig, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, fipsAllowChain, fipsAllowedChains, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, initLegacySessionTicketKeyRLocked, lruSessionCache, lruSessionCacheEntry, maxSupportedVersion, mutualVersion, needFIPS, rand, roleClient, roleServer, rsaKexCiphers, supportedCipherSuites, supportsCurve, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyFromBytes, ticketKeyLifetime, ticketKeyRotation, ticketKeys, time, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
+// goishlint:ignore GOISH018 BuildNameToCertificate, CipherSuiteName, CipherSuites, Clone, Context, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, SetSessionTicketKeys, SupportsCertificate, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, defaultConfig, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, fipsAllowChain, fipsAllowedChains, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, initLegacySessionTicketKeyRLocked, lruSessionCache, lruSessionCacheEntry, needFIPS, rand, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyFromBytes, ticketKeyLifetime, ticketKeyRotation, ticketKeys, time, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
 // goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, ClientSessionCache, ClientHelloInfo, CertificateRequestInfo, RenegotiationSupport, Config, EncryptedClientHelloKey, ticketKey, dsaSignature, ecdsaSignature — same.
-// goishlint:ignore GOISH021 CertificateRequestInfo, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, EncryptedClientHelloKey, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultConfig, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, deprecatedSessionTicketKey, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, emptyConfig, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, fipsAllowChain, fipsAllowedChains, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, rand, roleClient, roleServer, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, supportedCipherSuites, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKey, ticketKeyLifetime, ticketKeyRotation, time, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
+// goishlint:ignore GOISH021 CertificateRequestInfo, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, EncryptedClientHelloKey, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultConfig, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, deprecatedSessionTicketKey, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, emptyConfig, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, fipsAllowChain, fipsAllowedChains, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, rand, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKey, ticketKeyLifetime, ticketKeyRotation, time, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -239,6 +239,7 @@ use alloc::vec::Vec;
 use super::auth::typeAndHashFromSignatureScheme;
 use super::defaults::defaultSupportedSignatureAlgorithms;
 use super::internal::fips140tls;
+use super::Config;
 use crate::crypto;
 use crate::error;
 use crate::errors;
@@ -506,4 +507,235 @@ impl Certificate {
         // Go: return x509.ParseCertificate(c.Certificate[0])
         return crate::crypto::x509::ParseCertificate(self.Certificate[0].clone());
     }
+}
+
+
+// ─── Config: version, curve and cipher-suite negotiation ──────────────
+//
+// The `Config` record itself still lives in mod[rs] — it is the type the
+// live handshake holds — but these methods are ported here, against
+// common.go, because that is the file that defines them.
+//
+// One deviation runs through all of them: Go's receiver is a `*Config`
+// and every method starts by testing `c == nil`. goish has no nil
+// struct pointer; `impl From<Nil> for Config` yields the zero value, and
+// every one of Go's nil tests is paired with a zero test on the same
+// field (`c == nil || c.MinVersion == 0`), so testing the field alone is
+// the same predicate.
+
+// Go: common.go:1165-1166
+//   const roleClient = true; const roleServer = false
+/// Go: "roleClient and roleServer are meant to call supportedVersions
+/// and parents with more readability at the callsite."
+pub(crate) const roleClient: bool = true;
+pub(crate) const roleServer: bool = false;
+
+// go: none — goish idiom: `internal/godebug` is not ported; see
+// `tlssha1Value` above and defaults[rs]'s `godebugValue`.
+fn tls10serverValue() -> crate::gostring::string {
+    return crate::gostring::string::from_static("");
+}
+
+impl Config {
+    // go: sdk 1.25.5 crypto/tls/common.go:1172-1196 Config.supportedVersions
+    /// The supported TLS versions, sorted from highest to lowest.
+    pub(crate) fn supportedVersions(&self, isClient: bool) -> slice<uint16> {
+        // Go: versions := make([]uint16, 0, len(supportedVersions))
+        let mut versions: Vec<uint16> = Vec::with_capacity(supportedVersions.len());
+        // Go: for _, v := range supportedVersions {
+        for v in supportedVersions {
+            // Go: if fips140tls.Required() && !slices.Contains(allowedSupportedVersionsFIPS, v) { continue }
+            if fips140tls::Required()
+                && !super::defaults_fips140::allowedSupportedVersionsFIPS.contains(v)
+            {
+                continue;
+            }
+            // Go: if (c == nil || c.MinVersion == 0) && v < VersionTLS12 {
+            //         if isClient || tls10server.Value() != "1" { continue }
+            //     }
+            if self.MinVersion == 0 && *v < VersionTLS12 {
+                if isClient || tls10serverValue() != crate::gostring::string::from_static("1") {
+                    continue;
+                }
+            }
+            // Go: if isClient && c.EncryptedClientHelloConfigList != nil && v < VersionTLS13 { continue }
+            if isClient && self.EncryptedClientHelloConfigList.Len() != 0 && *v < VersionTLS13 {
+                continue;
+            }
+            // Go: if c != nil && c.MinVersion != 0 && v < c.MinVersion { continue }
+            if self.MinVersion != 0 && *v < self.MinVersion {
+                continue;
+            }
+            // Go: if c != nil && c.MaxVersion != 0 && v > c.MaxVersion { continue }
+            if self.MaxVersion != 0 && *v > self.MaxVersion {
+                continue;
+            }
+            // Go: versions = append(versions, v)
+            versions.push(*v);
+        }
+        // Go: return versions
+        return slice::__from_vec(versions);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1198-1204 Config.maxSupportedVersion
+    /// The highest supported version, or zero if there is none.
+    pub(crate) fn maxSupportedVersion(&self, isClient: bool) -> uint16 {
+        // Go: supportedVersions := c.supportedVersions(isClient)
+        //     if len(supportedVersions) == 0 { return 0 }
+        //     return supportedVersions[0]
+        //
+        // Go shadows the package-level `supportedVersions` var here;
+        // Rust reads a `let` of that name as the const's pattern, so the
+        // local is spelled apart.
+        let supported = self.supportedVersions(isClient);
+        if supported.Len() == 0 {
+            return 0;
+        }
+        return supported[0];
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1219-1235 Config.curvePreferences
+    /// The key-exchange groups to offer, in preference order.
+    pub(crate) fn curvePreferences(&self, version: uint16) -> slice<CurveID> {
+        // Go: curvePreferences := defaultCurvePreferences()
+        let mut curvePreferences = super::defaults::defaultCurvePreferences();
+        // Go: if fips140tls.Required() {
+        //         curvePreferences = slices.DeleteFunc(curvePreferences, func(x CurveID) bool {
+        //             return !slices.Contains(allowedCurvePreferencesFIPS, x) })
+        //     }
+        if fips140tls::Required() {
+            let mut kept: Vec<CurveID> = Vec::new();
+            for (_, x) in crate::range!(curvePreferences.clone()) {
+                if super::defaults_fips140::allowedCurvePreferencesFIPS.contains(x) {
+                    kept.push(*x);
+                }
+            }
+            curvePreferences = slice::__from_vec(kept);
+        }
+        // Go: if c != nil && len(c.CurvePreferences) != 0 {
+        //         curvePreferences = slices.DeleteFunc(curvePreferences, func(x CurveID) bool {
+        //             return !slices.Contains(c.CurvePreferences, x) })
+        //     }
+        if self.CurvePreferences.Len() != 0 {
+            let mut kept: Vec<CurveID> = Vec::new();
+            for (_, x) in crate::range!(curvePreferences.clone()) {
+                if containsCurve(&self.CurvePreferences, *x) {
+                    kept.push(*x);
+                }
+            }
+            curvePreferences = slice::__from_vec(kept);
+        }
+        // Go: if version < VersionTLS13 {
+        //         curvePreferences = slices.DeleteFunc(curvePreferences, isTLS13OnlyKeyExchange)
+        //     }
+        if version < VersionTLS13 {
+            let mut kept: Vec<CurveID> = Vec::new();
+            for (_, x) in crate::range!(curvePreferences.clone()) {
+                if !isTLS13OnlyKeyExchange(*x) {
+                    kept.push(*x);
+                }
+            }
+            curvePreferences = slice::__from_vec(kept);
+        }
+        // Go: return curvePreferences
+        return curvePreferences;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1237-1239 Config.supportsCurve
+    pub(crate) fn supportsCurve(&self, version: uint16, curve: CurveID) -> bool {
+        // Go: return slices.Contains(c.curvePreferences(version), curve)
+        return containsCurve(&self.curvePreferences(version), curve);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1132-1148 Config.cipherSuites
+    /// The TLS 1.0-1.2 cipher suites to offer, in preference order.
+    pub(crate) fn cipherSuites(&self, aesGCMPreferred: bool) -> slice<uint16> {
+        // Go: var cipherSuites []uint16
+        //     if c.CipherSuites == nil { cipherSuites = defaultCipherSuites(aesGCMPreferred) }
+        //     else {
+        //         cipherSuites = supportedCipherSuites(aesGCMPreferred)
+        //         cipherSuites = slices.DeleteFunc(cipherSuites, func(id uint16) bool {
+        //             return !slices.Contains(c.CipherSuites, id) })
+        //     }
+        let mut cipherSuites: slice<uint16>;
+        if self.CipherSuites.Len() == 0 {
+            cipherSuites = super::defaults::defaultCipherSuites(aesGCMPreferred);
+        } else {
+            cipherSuites = super::defaults::supportedCipherSuites(aesGCMPreferred);
+            let mut kept: Vec<uint16> = Vec::new();
+            for (_, id) in crate::range!(cipherSuites.clone()) {
+                if containsU16(&self.CipherSuites, *id) {
+                    kept.push(*id);
+                }
+            }
+            cipherSuites = slice::__from_vec(kept);
+        }
+        // Go: if fips140tls.Required() {
+        //         cipherSuites = slices.DeleteFunc(cipherSuites, func(id uint16) bool {
+        //             return !slices.Contains(allowedCipherSuitesFIPS, id) })
+        //     }
+        if fips140tls::Required() {
+            let mut kept: Vec<uint16> = Vec::new();
+            for (_, id) in crate::range!(cipherSuites.clone()) {
+                if super::defaults_fips140::allowedCipherSuitesFIPS.contains(id) {
+                    kept.push(*id);
+                }
+            }
+            cipherSuites = slice::__from_vec(kept);
+        }
+        // Go: return cipherSuites
+        return cipherSuites;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1152-1154 Config.supportedCipherSuites
+    /// Go: "the supported TLS 1.0–1.2 cipher suites in an undefined
+    /// order. For preference ordering, use [Config.cipherSuites]."
+    pub(crate) fn supportedCipherSuites(&self) -> slice<uint16> {
+        // Go: return c.cipherSuites(false)
+        return self.cipherSuites(false);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1241-1249 Config.mutualVersion
+    /// The highest version both sides support, and whether there is one.
+    pub(crate) fn mutualVersion(
+        &self,
+        isClient: bool,
+        peerVersions: slice<uint16>,
+    ) -> (uint16, bool) {
+        // Go: supportedVersions := c.supportedVersions(isClient)
+        //     for _, v := range supportedVersions {
+        //         if slices.Contains(peerVersions, v) { return v, true }
+        //     }
+        //
+        // The local is spelled apart from the package var — see
+        // `maxSupportedVersion`.
+        let supported = self.supportedVersions(isClient);
+        for (_, v) in crate::range!(supported) {
+            if containsU16(&peerVersions, *v) {
+                return (*v, true);
+            }
+        }
+        // Go: return 0, false
+        return (0, false);
+    }
+}
+
+// go: none — goish idiom: `slices.Contains` over a `slice<uint16>`.
+fn containsU16(set: &slice<uint16>, want: uint16) -> bool {
+    for (_, v) in crate::range!(set.clone()) {
+        if *v == want {
+            return true;
+        }
+    }
+    return false;
+}
+
+// go: none — goish idiom: `slices.Contains` over a `slice<CurveID>`.
+fn containsCurve(set: &slice<CurveID>, want: CurveID) -> bool {
+    for (_, v) in crate::range!(set.clone()) {
+        if *v == want {
+            return true;
+        }
+    }
+    return false;
 }
