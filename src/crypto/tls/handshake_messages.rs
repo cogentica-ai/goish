@@ -1,6 +1,6 @@
 // goishlint:ignore GOISH018 addBytesWithLength, addUint64, clone, marshalCertificate, marshalMsg, marshalWithoutBinders, originalBytes, readUint16LengthPrefixed, readUint24LengthPrefixed, readUint64, readUint8LengthPrefixed, transcriptMsg, unmarshalCertificate, updateBinders — handshake_messages.go is 1963 lines and 52 functions; this file is a deliberate SUBSET covering only the messages goish's own TLS 1.3 client and server exchange. The six it does port are anchored above and diffed against Go; everything listed here is genuinely absent, not renamed. See ROADMAP.md.
 // goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, marshalingFunction, newSessionTicketMsg, newSessionTicketMsgTLS13, serverHelloDoneMsg, serverKeyExchangeMsg, transcriptHash — same: the message types the subset does not handle.
-// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal, finishedMsg.unmarshal, certificateVerifyMsg.unmarshal, encryptedExtensionsMsg.unmarshal
+// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal, finishedMsg.unmarshal, certificateVerifyMsg.unmarshal, encryptedExtensionsMsg.unmarshal, unmarshalCertificate
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -1980,4 +1980,90 @@ impl encryptedExtensionsMsg {
         }
         return true;
     }
+}
+
+
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:1507-1560 unmarshalCertificate
+/// Read a TLS 1.3 CertificateEntry list into `certificate`.
+///
+/// Two rules that are easy to lose: OCSP and SCT extensions are only
+/// honoured on the LEAF (Go skips them once more than one certificate
+/// has been read), and an empty OCSP staple or SCT entry is rejected.
+pub(crate) fn unmarshalCertificate(
+    s: &mut CBString,
+    certificate: &mut super::Certificate,
+) -> bool {
+    use super::common::{extensionSCT, extensionStatusRequest};
+    // Go: var certList cryptobyte.String
+    //     if !s.ReadUint24LengthPrefixed(&certList) { return false }
+    let mut certList = CBString::New(slice::__from_vec(Vec::new()));
+    if !s.ReadUint24LengthPrefixed(&mut certList) {
+        return false;
+    }
+    let mut chain: Vec<slice<byte>> = certificate.Certificate.clone().__into_vec();
+    let mut scts: Vec<slice<byte>> =
+        certificate.SignedCertificateTimestamps.clone().__into_vec();
+    // Go: for !certList.Empty() { … }
+    while !certList.Empty() {
+        let mut cert: slice<byte> = slice::__from_vec(Vec::new());
+        let mut extensions = CBString::New(slice::__from_vec(Vec::new()));
+        if !readUint24LengthPrefixed(&mut certList, &mut cert)
+            || !certList.ReadUint16LengthPrefixed(&mut extensions)
+        {
+            return false;
+        }
+        // Go: certificate.Certificate = append(certificate.Certificate, cert)
+        chain.push(cert);
+
+        while !extensions.Empty() {
+            let mut extension: crate::types::uint16 = 0;
+            let mut extData = CBString::New(slice::__from_vec(Vec::new()));
+            if !extensions.ReadUint16(&mut extension)
+                || !extensions.ReadUint16LengthPrefixed(&mut extData)
+            {
+                return false;
+            }
+            // Go: if len(certificate.Certificate) > 1 { continue }
+            //     "This library only supports OCSP and SCT for leaf
+            //      certificates."
+            if chain.len() > 1 {
+                continue;
+            }
+
+            if extension == extensionStatusRequest {
+                let mut statusType: uint8 = 0;
+                let mut staple: slice<byte> = slice::__from_vec(Vec::new());
+                if !extData.ReadUint8(&mut statusType)
+                    || statusType != statusTypeOCSP
+                    || !readUint24LengthPrefixed(&mut extData, &mut staple)
+                    || staple.Len() == 0
+                {
+                    return false;
+                }
+                certificate.OCSPStaple = staple;
+            } else if extension == extensionSCT {
+                let mut sctList = CBString::New(slice::__from_vec(Vec::new()));
+                if !extData.ReadUint16LengthPrefixed(&mut sctList) || sctList.Empty() {
+                    return false;
+                }
+                while !sctList.Empty() {
+                    let mut sct: slice<byte> = slice::__from_vec(Vec::new());
+                    if !readUint16LengthPrefixed(&mut sctList, &mut sct) || sct.Len() == 0 {
+                        return false;
+                    }
+                    scts.push(sct);
+                }
+            } else {
+                // Go: Ignore unknown extensions.
+                continue;
+            }
+
+            if !extData.Empty() {
+                return false;
+            }
+        }
+    }
+    certificate.Certificate = slice::__from_vec(chain);
+    certificate.SignedCertificateTimestamps = slice::__from_vec(scts);
+    return true;
 }

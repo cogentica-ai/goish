@@ -1187,11 +1187,19 @@ pub struct Certificate {
     /// `crypto.PrivateKey` — the leaf certificate's private key.
     /// Supported concrete types: `rsa::PrivateKey`, `ed25519::PrivateKey`.
     pub PrivateKey: crate::crypto::PrivateKey,
+    /// A DER-encoded OCSP response for the leaf, stapled by the server.
+    /// Go declares this on `tls.Certificate`; goish added it so that
+    /// `unmarshalCertificate` has somewhere to put what it reads.
+    pub OCSPStaple: crate::goslice::slice<crate::types::byte>,
+    /// SignedCertificateTimestamps for the leaf, per RFC 6962.
+    pub SignedCertificateTimestamps: crate::goslice::slice<crate::goslice::slice<crate::types::byte>>,
 }
 
 impl Default for Certificate {
     fn default() -> Self {
         Certificate {
+            OCSPStaple: slice::<byte>::new(),
+            SignedCertificateTimestamps: slice::<slice<byte>>::new(),
             Certificate: slice::<slice<byte>>::new(),
             // Unit sentinel — downcasts to no key type, so a
             // default-constructed Certificate fails the handshake with
@@ -1314,6 +1322,7 @@ pub fn X509KeyPair(
         Certificate {
             Certificate: slice::<slice<byte>>::__from_vec(chain),
             PrivateKey: private_key,
+            ..Default::default()
         },
         errors::nil,
     )
@@ -1755,5 +1764,28 @@ pub fn msg_ee_unmarshal(
         crate::gostring::string::from_bytes(m.alpnProtocol.as_bytes()),
         m.earlyData,
         m.serverNameAck,
+    );
+}
+
+// go: none — goish-only: unmarshalCertificate is unexported in Go,
+// where the tests are in-package. Returns the chain length, the OCSP
+// staple and the SCT count so one shim covers what Go's test reads.
+#[doc(hidden)]
+pub fn msg_unmarshalCertificate(
+    data: crate::goslice::slice<crate::types::byte>,
+) -> (
+    bool,
+    crate::types::int,
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::int,
+) {
+    let mut s = crate::crypto::cryptobyte::String::New(data);
+    let mut cert = Certificate::default();
+    let ok = handshake_messages::unmarshalCertificate(&mut s, &mut cert);
+    return (
+        ok && s.Empty(),
+        cert.Certificate.Len(),
+        cert.OCSPStaple,
+        cert.SignedCertificateTimestamps.Len(),
     );
 }

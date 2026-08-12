@@ -709,6 +709,16 @@ fn main() {
     let (dok, _, _, _) = tls::msg_ee_unmarshal(dup);
     check("ee rejects a duplicate extension", !dok);
 
+    // ─── unmarshalCertificate — a TLS 1.3 CertificateEntry list.
+    //     Leaf carries an OCSP staple; a second cert follows with no
+    //     extensions. Bytes built by Go.
+    let (ok, nchain, ocsp, nscts) =
+        tls::msg_unmarshalCertificate(unhexOf("000017000002aabb000a00050006010000020102000001cc0000"));
+    check("unmarshalCertificate parses Go's entry list", ok);
+    check_n("chain has 2 certificates", nchain, 2);
+    eq("leaf OCSP staple", hexOf(ocsp), "0102");
+    check_n("no SCTs", nscts, 0);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
