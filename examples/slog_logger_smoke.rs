@@ -83,7 +83,7 @@ fn main() {
     // 1. Info reaches the handler, with the right level and attrs.
     {
         HANDLED.store(0, Ordering::SeqCst);
-        l.Info(s("hello"), attrs(alloc::vec![
+        l.InfoAttrs(s("hello"), attrs(alloc::vec![
             slog::String(s("k"), s("v")),
             slog::Int(s("n"), 3),
         ]));
@@ -111,10 +111,10 @@ fn main() {
         .iter()
         {
             match f {
-                0 => l.Debug(s("m"), attrs(alloc::vec![])),
-                1 => l.Info(s("m"), attrs(alloc::vec![])),
-                2 => l.Warn(s("m"), attrs(alloc::vec![])),
-                _ => l.Error(s("m"), attrs(alloc::vec![])),
+                0 => l.DebugAttrs(s("m"), attrs(alloc::vec![])),
+                1 => l.InfoAttrs(s("m"), attrs(alloc::vec![])),
+                2 => l.WarnAttrs(s("m"), attrs(alloc::vec![])),
+                _ => l.ErrorAttrs(s("m"), attrs(alloc::vec![])),
             }
             if (LAST_LEVEL.load(Ordering::SeqCst) as i64 - 100) != *want {
                 ok = false;
@@ -134,11 +134,11 @@ fn main() {
         MIN_LEVEL.store(slog::LevelWarn.0, Ordering::SeqCst);
         HANDLED.store(0, Ordering::SeqCst);
         ENABLED_CALLS.store(0, Ordering::SeqCst);
-        l.Debug(s("suppressed"), attrs(alloc::vec![]));
+        l.DebugAttrs(s("suppressed"), attrs(alloc::vec![]));
         let asked = ENABLED_CALLS.load(Ordering::SeqCst) >= 1;
         let handled = HANDLED.load(Ordering::SeqCst);
         // …and a permitted level still gets through.
-        l.Error(s("kept"), attrs(alloc::vec![]));
+        l.ErrorAttrs(s("kept"), attrs(alloc::vec![]));
         let after = HANDLED.load(Ordering::SeqCst);
         MIN_LEVEL.store(-999, Ordering::SeqCst);
 
@@ -153,7 +153,7 @@ fn main() {
     // 4. The recorded PC resolves to THIS file, not to slog's guts.
     //    Go skips exactly [runtime.Callers, logAttrs, its caller].
     {
-        l.Info(s("pc check"), attrs(alloc::vec![]));
+        l.InfoAttrs(s("pc check"), attrs(alloc::vec![]));
         let pc = LAST_PC.load(Ordering::SeqCst) as goish::types::uintptr;
         let name = match goish::runtime::FuncForPC(pc) {
             Some(f) => f.Name(),
@@ -173,7 +173,7 @@ fn main() {
         HANDLED.store(0, Ordering::SeqCst);
         let bg = context::Background();
         l.LogAttrs(bg.as_ref(), slog::LevelWarn, s("la"), attrs(alloc::vec![]));
-        l.Log(bg.as_ref(), slog::LevelError, s("lg"), attrs(alloc::vec![]));
+        l.LogAttrsAt(bg.as_ref(), slog::LevelError, s("lg"), attrs(alloc::vec![]));
         let lvl = LAST_LEVEL.load(Ordering::SeqCst) as i64 - 100;
         if HANDLED.load(Ordering::SeqCst) == 2 && lvl == slog::LevelError.0 {
             fmt::Println!("[ 5] LogAttrs and Log          PASS");
@@ -183,11 +183,75 @@ fn main() {
         }
     }
 
+    // 6. The `...any` form pairs loose key/value arguments. Two pairs
+    //    become two Attrs.
+    {
+        HANDLED.store(0, Ordering::SeqCst);
+        l.Info(
+            s("paired"),
+            slice::__from_vec(alloc::vec![
+                goish::Any::new(s("k1")),
+                goish::Any::new(s("v1")),
+                goish::Any::new(s("k2")),
+                goish::Any::new(7i64),
+            ]),
+        );
+        if HANDLED.load(Ordering::SeqCst) == 1 && LAST_ATTRS.load(Ordering::SeqCst) == 2 {
+            fmt::Println!("[ 6] ...any pairs arguments    PASS");
+        } else {
+            fmt::Println!("[ 6] ...any pairs arguments    FAIL");
+            failed += 1;
+        }
+    }
+
+    // 7. A dangling key still produces an Attr, filed under !BADKEY.
+    //    Go records the mistake rather than dropping it or panicking —
+    //    a logging call is the wrong place to fail, and the stray value
+    //    is visible in the output instead of vanishing.
+    {
+        HANDLED.store(0, Ordering::SeqCst);
+        l.Info(
+            s("dangling"),
+            slice::__from_vec(alloc::vec![
+                goish::Any::new(s("k1")),
+                goish::Any::new(s("v1")),
+                goish::Any::new(s("orphan")),
+            ]),
+        );
+        // One complete pair plus the orphan = two Attrs, not one.
+        if LAST_ATTRS.load(Ordering::SeqCst) == 2 {
+            fmt::Println!("[ 7] dangling key kept         PASS");
+        } else {
+            fmt::Println!("[ 7] dangling key kept         FAIL");
+            failed += 1;
+        }
+    }
+
+    // 8. An Attr passed directly in the ...any list is used as-is,
+    //    consuming one slot rather than being treated as a key.
+    {
+        HANDLED.store(0, Ordering::SeqCst);
+        l.Info(
+            s("mixed"),
+            slice::__from_vec(alloc::vec![
+                goish::Any::new(slog::String(s("pre"), s("built"))),
+                goish::Any::new(s("k")),
+                goish::Any::new(s("v")),
+            ]),
+        );
+        if LAST_ATTRS.load(Ordering::SeqCst) == 2 {
+            fmt::Println!("[ 8] inline Attr consumes one  PASS");
+        } else {
+            fmt::Println!("[ 8] inline Attr consumes one  FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 5/5");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 5");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

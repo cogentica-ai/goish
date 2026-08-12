@@ -31,9 +31,11 @@
 mod attr;
 mod handler;
 mod logger;
+mod record;
 mod value;
-pub use attr::Group;
+pub use attr::{argsToAttrSlice, Any, Group};
 pub use handler::{LevelKey, MessageKey, SourceKey, TimeKey};
+pub use record::{argsToAttr, badKey};
 pub use value::{countEmptyGroups, isEmptyGroup, AnyValue, GroupValue};
 
 extern crate alloc;
@@ -167,18 +169,6 @@ pub fn Bool<S: Into<string>>(key: S, val: bool) -> Attr {
     }
 }
 
-pub fn Any<S: Into<string>>(key: S, val: error) -> Attr {
-    // Go's slog.Any takes `any`; logr only uses it with errors via
-    // `slog.Any("error", err)`. Specialising to `error` here matches
-    // the call sites we've seen; widen if needed.
-    Attr {
-        Key: key.into(),
-        Value: Value {
-            kind: KindAny,
-            any: GoishAny::new(val),
-        },
-    }
-}
 
 // ─── Record ─────────────────────────────────────────────────────────
 
