@@ -2005,3 +2005,100 @@ pub fn cipher_suites_mutualTLS13(
 ) -> bool {
     return cipher_suites::mutualCipherSuiteTLS13(have, want).is_some();
 }
+
+// go: none — goish-only: key_schedule.go's decls are all unexported in
+// Go, where the tests are in-package. Each shim looks the suite up by
+// ID so the example never names the unexported record.
+#[doc(hidden)]
+pub fn key_schedule_nextTrafficSecret(
+    id: crate::types::uint16,
+    trafficSecret: crate::goslice::slice<crate::types::byte>,
+) -> crate::goslice::slice<crate::types::byte> {
+    let c = cipher_suites::cipherSuiteTLS13ByID(id).unwrap();
+    return c.nextTrafficSecret(trafficSecret);
+}
+
+// go: none — goish-only: see `key_schedule_nextTrafficSecret`.
+#[doc(hidden)]
+pub fn key_schedule_trafficKey(
+    id: crate::types::uint16,
+    trafficSecret: crate::goslice::slice<crate::types::byte>,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let c = cipher_suites::cipherSuiteTLS13ByID(id).unwrap();
+    return c.trafficKey(trafficSecret);
+}
+
+// go: none — goish-only: see `key_schedule_nextTrafficSecret`. The
+// transcript is built here so the example need not name `hash::Hash`.
+#[doc(hidden)]
+pub fn key_schedule_finishedHash(
+    id: crate::types::uint16,
+    baseKey: crate::goslice::slice<crate::types::byte>,
+    transcript: crate::goslice::slice<crate::types::byte>,
+) -> crate::goslice::slice<crate::types::byte> {
+    let c = cipher_suites::cipherSuiteTLS13ByID(id).unwrap();
+    let mut h = c.hash.New();
+    let _ = crate::io::Writer::Write(&mut *h, transcript);
+    return c.finishedHash(baseKey, &*h);
+}
+
+// go: none — goish-only: see `key_schedule_nextTrafficSecret`. Runs the
+// full early → handshake → master schedule so the exporter has a real
+// MasterSecret to derive from.
+#[doc(hidden)]
+pub fn key_schedule_exportKeyingMaterial(
+    id: crate::types::uint16,
+    transcript: crate::goslice::slice<crate::types::byte>,
+    label: crate::gostring::string,
+    context: crate::goslice::slice<crate::types::byte>,
+    length: crate::types::int,
+) -> (crate::goslice::slice<crate::types::byte>, bool) {
+    use crate::crypto::internal::fips140::tls13;
+    let c = cipher_suites::cipherSuiteTLS13ByID(id).unwrap();
+    let hf = crate::hash::HashFunc::New(move || crate::crypto::SHA256.New());
+    let es = tls13::NewEarlySecret(hf, crate::goslice::slice::new());
+    let hs = es.HandshakeSecret(crate::goslice::slice::__from_vec(alloc::vec![0u8; 32]));
+    let ms = hs.MasterSecret();
+    let mut h = c.hash.New();
+    let _ = crate::io::Writer::Write(&mut *h, transcript);
+    let ekm = c.exportKeyingMaterial(&ms, &*h);
+    let (out, err) = ekm(label, context, length);
+    return (out, err == crate::errors::nil);
+}
+
+// go: none — goish-only: see `key_schedule_nextTrafficSecret`.
+#[doc(hidden)]
+pub fn key_schedule_curveForCurveID(id: common::CurveID) -> bool {
+    let (_, ok) = key_schedule::curveForCurveID(id);
+    return ok;
+}
+
+// go: none — goish-only: see `key_schedule_nextTrafficSecret`. Reports
+// `(private, public, errText)` so the example can pin the bytes.
+#[doc(hidden)]
+pub fn key_schedule_generateECDHEKey(
+    rand: &mut (dyn crate::io::Reader + Send + Sync + 'static),
+    curveID: common::CurveID,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+) {
+    let (key, err) = key_schedule::generateECDHEKey(rand, curveID);
+    if err != crate::errors::nil {
+        return (
+            crate::goslice::slice::new(),
+            crate::goslice::slice::new(),
+            err.Error(),
+        );
+    }
+    let k = key.unwrap();
+    return (
+        k.Bytes(),
+        k.PublicKey().Bytes(),
+        crate::gostring::string::from_static(""),
+    );
+}

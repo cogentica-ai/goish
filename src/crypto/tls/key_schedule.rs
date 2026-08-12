@@ -314,3 +314,179 @@ pub fn next_traffic_secret(
     let hash_size = hash_fn().Size() as usize;
     ExpandLabel(hash_fn, traffic_secret, "traffic upd", &[], hash_size)
 }
+
+
+// ─── crypto/tls/key_schedule.go, ported verbatim ──────────────────────
+//
+// RFC 8446 §7. Everything above this divider is goish-only code that
+// predates the port and still drives the live TLS 1.3 handshake; it is
+// slated for eviction once the handshake moves onto these.
+
+use crate::crypto::ecdh;
+use crate::crypto::internal::fips140::tls13;
+use crate::crypto::Hash as CryptoHash;
+use crate::error;
+use crate::gostring::string;
+use crate::hash::HashFunc;
+use crate::io;
+use super::cipher_suites::{aeadNonceLength, cipherSuiteTLS13};
+use super::common::{CurveID, CurveP256, CurveP384, CurveP521, X25519};
+
+// go: none — goish-only: Go writes `c.hash.New` as a method value; goish
+// needs the closure named, because `crypto::Hash::New` is an inherent
+// method rather than a field.
+fn hashNewOf(h: CryptoHash) -> HashFunc {
+    return HashFunc::New(move || h.New());
+}
+
+impl cipherSuiteTLS13 {
+    // go: sdk 1.25.5 crypto/tls/key_schedule.go:22-24 cipherSuiteTLS13.nextTrafficSecret
+    /// The next traffic secret, given the current one. RFC 8446 §7.2.
+    pub(crate) fn nextTrafficSecret(&self, trafficSecret: slice<byte>) -> slice<byte> {
+        // Go: return tls13.ExpandLabel(c.hash.New, trafficSecret,
+        //         "traffic upd", nil, c.hash.Size())
+        return tls13::ExpandLabel(
+            hashNewOf(self.hash),
+            trafficSecret,
+            "traffic upd",
+            slice::__from_vec(Vec::new()),
+            self.hash.Size(),
+        );
+    }
+
+    // go: sdk 1.25.5 crypto/tls/key_schedule.go:27-31 cipherSuiteTLS13.trafficKey
+    /// The record-protection key and IV. RFC 8446 §7.3.
+    pub(crate) fn trafficKey(&self, trafficSecret: slice<byte>) -> (slice<byte>, slice<byte>) {
+        // Go: key = tls13.ExpandLabel(c.hash.New, trafficSecret, "key", nil, c.keyLen)
+        let key = tls13::ExpandLabel(
+            hashNewOf(self.hash),
+            trafficSecret.clone(),
+            "key",
+            slice::__from_vec(Vec::new()),
+            self.keyLen,
+        );
+        // Go: iv = tls13.ExpandLabel(c.hash.New, trafficSecret, "iv", nil, aeadNonceLength)
+        let iv = tls13::ExpandLabel(
+            hashNewOf(self.hash),
+            trafficSecret,
+            "iv",
+            slice::__from_vec(Vec::new()),
+            aeadNonceLength,
+        );
+        // Go: return
+        return (key, iv);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/key_schedule.go:36-41 cipherSuiteTLS13.finishedHash
+    /// The Finished `verify_data`, or a PskBinderEntry. RFC 8446 §4.4.4;
+    /// see §4.4 and §4.2.11.2 for how `baseKey` is chosen.
+    pub(crate) fn finishedHash(
+        &self,
+        baseKey: slice<byte>,
+        transcript: &(dyn HashTrait + Send + Sync + 'static),
+    ) -> slice<byte> {
+        // Go: finishedKey := tls13.ExpandLabel(c.hash.New, baseKey,
+        //         "finished", nil, c.hash.Size())
+        let finishedKey = tls13::ExpandLabel(
+            hashNewOf(self.hash),
+            baseKey,
+            "finished",
+            slice::__from_vec(Vec::new()),
+            self.hash.Size(),
+        );
+        // Go: verifyData := hmac.New(c.hash.New, finishedKey)
+        let mut verifyData = hmac::New(hashNewOf(self.hash), finishedKey);
+        // Go: verifyData.Write(transcript.Sum(nil))
+        let _ = verifyData.Write(transcript.Sum(slice::__from_vec(Vec::new())));
+        // Go: return verifyData.Sum(nil)
+        return verifyData.Sum(slice::__from_vec(Vec::new()));
+    }
+
+    // go: sdk 1.25.5 crypto/tls/key_schedule.go:45-50 cipherSuiteTLS13.exportKeyingMaterial
+    /// The RFC 5705 exporter for TLS 1.3. RFC 8446 §7.5.
+    ///
+    /// Go returns a bare closure; goish returns the same closure behind
+    /// an `Arc`, which is what a `ConnectionState.ekm` field can hold.
+    /// The error is always nil, exactly as in Go.
+    pub(crate) fn exportKeyingMaterial(
+        &self,
+        s: &tls13::MasterSecret,
+        transcript: &(dyn HashTrait + Send + Sync + 'static),
+    ) -> alloc::sync::Arc<dyn Fn(string, slice<byte>, int) -> (slice<byte>, error) + Send + Sync>
+    {
+        // Go: expMasterSecret := s.ExporterMasterSecret(transcript)
+        let expMasterSecret = s.ExporterMasterSecret(transcript);
+        // Go: return func(label string, context []byte, length int) ([]byte, error) {
+        //         return expMasterSecret.Exporter(label, context, length), nil
+        //     }
+        return alloc::sync::Arc::new(move |label, context, length| {
+            return (
+                expMasterSecret.Exporter(label, context, length),
+                crate::errors::nil,
+            );
+        });
+    }
+}
+
+// Go: key_schedule.go:52-56
+//   type keySharePrivateKeys struct { curveID CurveID
+//                                     ecdhe *ecdh.PrivateKey
+//                                     mlkem *mlkem.DecapsulationKey768 }
+/// The private halves of a ClientHello's key shares. At most one of the
+/// two keys is set; `X25519MLKEM768` sets both.
+pub(crate) struct keySharePrivateKeys {
+    pub(crate) curveID: CurveID,
+    pub(crate) ecdhe: Option<ecdh::PrivateKey>,
+    pub(crate) mlkem: Option<crate::crypto::internal::fips140::mlkem::DecapsulationKey768>,
+}
+
+// Go: key_schedule.go:58
+//   const x25519PublicKeySize = 32
+pub(crate) const x25519PublicKeySize: int = 32;
+
+// go: sdk 1.25.5 crypto/tls/key_schedule.go:62-69 generateECDHEKey
+/// A `PrivateKey` implementing Diffie-Hellman per RFC 8446 §4.2.8.2.
+pub(crate) fn generateECDHEKey(
+    rand: &mut (dyn io::Reader + Send + Sync + 'static),
+    curveID: CurveID,
+) -> (Option<ecdh::PrivateKey>, error) {
+    // Go: curve, ok := curveForCurveID(curveID)
+    //     if !ok { return nil, errors.New("tls: internal error: unsupported curve") }
+    let (curve, ok) = curveForCurveID(curveID);
+    if !ok {
+        return (
+            None,
+            crate::errors::New("tls: internal error: unsupported curve"),
+        );
+    }
+
+    // Go: return curve.GenerateKey(rand)
+    let (key, err) = curve.unwrap().GenerateKey(rand);
+    if err != crate::errors::nil {
+        return (None, err);
+    }
+    return (Some(key), crate::errors::nil);
+}
+
+// go: sdk 1.25.5 crypto/tls/key_schedule.go:71-84 curveForCurveID
+/// The `crypto/ecdh` curve behind a TLS group ID, and whether there is
+/// one. X25519MLKEM768 is a hybrid and has no plain ECDH curve.
+pub(crate) fn curveForCurveID(
+    id: CurveID,
+) -> (Option<&'static (dyn ecdh::Curve + Send + Sync)>, bool) {
+    // Go: switch id { case X25519: return ecdh.X25519(), true; … }
+    if id == X25519 {
+        return (Some(ecdh::X25519()), true);
+    }
+    if id == CurveP256 {
+        return (Some(ecdh::P256()), true);
+    }
+    if id == CurveP384 {
+        return (Some(ecdh::P384()), true);
+    }
+    if id == CurveP521 {
+        return (Some(ecdh::P521()), true);
+    }
+    // Go: default: return nil, false
+    return (None, false);
+}

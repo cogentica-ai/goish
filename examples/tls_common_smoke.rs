@@ -61,6 +61,21 @@ fn seqBytes(n: usize, base: u8) -> slice<byte> {
     return slice::__from_vec(v);
 }
 
+/// The `constReader` Go's key_schedule tests use: byte i is base+i.
+struct constReader(u8);
+
+impl goish::io::Reader for constReader {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, goish::error) {
+        let n = p.Len();
+        let mut i: int = 0;
+        while i < n {
+            p[i as usize] = self.0.wrapping_add(i as u8);
+            i += 1;
+        }
+        return (n, goish::errors::nil);
+    }
+}
+
 static mut PASS: int = 0;
 static mut FAIL: int = 0;
 
@@ -985,6 +1000,93 @@ fn main() {
             tls::TLS_AES_256_GCM_SHA384,
         ),
     );
+
+    // ─── key_schedule.go: the TLS 1.3 key schedule, RFC 8446 §7. Every
+    //     hex string below came out of `scripts/goref.sh crypto/tls`.
+    //     0x1301 and 0x1303 share SHA-256, so their traffic secrets and
+    //     Finished hashes must agree and only the key length differ.
+    let ts32 = seqBytes(32, 0x10);
+    let ts48 = seqBytes(48, 0x10);
+    let tr = slice::__from_vec(b"transcript bytes".to_vec());
+
+    eq("nextTrafficSecret 1301",
+       hexOf(tls::key_schedule_nextTrafficSecret(tls::TLS_AES_128_GCM_SHA256, ts32.clone())),
+       "e4756ada14b821096dcb5fe83781e02f4cc43801e86e5b96060f3640a97a173c");
+    let (k1, iv1) = tls::key_schedule_trafficKey(tls::TLS_AES_128_GCM_SHA256, ts32.clone());
+    eq("trafficKey 1301 key", hexOf(k1), "e1fe01058052434bb45b521dfb4c2e1e");
+    eq("trafficKey 1301 iv", hexOf(iv1), "de35160fc967050cc3a670cb");
+    eq("finishedHash 1301",
+       hexOf(tls::key_schedule_finishedHash(tls::TLS_AES_128_GCM_SHA256, ts32.clone(), tr.clone())),
+       "735706744aa50bc380b7c25bb737ffb5d45ac0d14698b7670e0b7ead70f4eb81");
+
+    eq("nextTrafficSecret 1302",
+       hexOf(tls::key_schedule_nextTrafficSecret(tls::TLS_AES_256_GCM_SHA384, ts48.clone())),
+       "01479e4017373e6f64ccfda3059ed620eaa3944d3e4515a2bd07d397fdeaff04323403769a33d4df6e239ec97443d6bc");
+    let (k2, iv2) = tls::key_schedule_trafficKey(tls::TLS_AES_256_GCM_SHA384, ts48.clone());
+    eq("trafficKey 1302 key", hexOf(k2),
+       "8c79ea88d236da33f9352d7f563b5de77fc7c51ed2c58308985e021c289f3d1f");
+    eq("trafficKey 1302 iv", hexOf(iv2), "f805445c73e0d53a5e909fb4");
+    eq("finishedHash 1302",
+       hexOf(tls::key_schedule_finishedHash(tls::TLS_AES_256_GCM_SHA384, ts48, tr.clone())),
+       "3a6962c9090c09df1dc39ce851e24cbb4bb054017e7289a91b854996b3ac857eb82964ae227bfd79c539cca538ee0830");
+
+    eq("nextTrafficSecret 1303",
+       hexOf(tls::key_schedule_nextTrafficSecret(tls::TLS_CHACHA20_POLY1305_SHA256, ts32.clone())),
+       "e4756ada14b821096dcb5fe83781e02f4cc43801e86e5b96060f3640a97a173c");
+    let (k3, iv3) = tls::key_schedule_trafficKey(tls::TLS_CHACHA20_POLY1305_SHA256, ts32.clone());
+    eq("trafficKey 1303 key", hexOf(k3),
+       "bdcb20ed5464d52006d3bb92af2b0938180b7f98b7106007c57ad1eb8ffdab08");
+    eq("trafficKey 1303 iv", hexOf(iv3), "de35160fc967050cc3a670cb");
+    eq("finishedHash 1303",
+       hexOf(tls::key_schedule_finishedHash(tls::TLS_CHACHA20_POLY1305_SHA256, ts32, tr.clone())),
+       "735706744aa50bc380b7c25bb737ffb5d45ac0d14698b7670e0b7ead70f4eb81");
+
+    // exportKeyingMaterial — RFC 5705 over the TLS 1.3 schedule.
+    let (ekm, ekmOK) = tls::key_schedule_exportKeyingMaterial(
+        tls::TLS_AES_128_GCM_SHA256, tr.clone(),
+        string::from_static("EXPERIMENTAL label"),
+        slice::__from_vec(alloc::vec![1u8, 2, 3]), 32,
+    );
+    check("exportKeyingMaterial err is nil", ekmOK);
+    eq("exportKeyingMaterial", hexOf(ekm),
+       "5b414550cb62c2d2b236c6f9be6e1528148670c10bca755cc8816c2d3382a391");
+    let (ekm2, _) = tls::key_schedule_exportKeyingMaterial(
+        tls::TLS_AES_128_GCM_SHA256, tr,
+        string::from_static("EXPERIMENTAL label"), slice::new(), 16,
+    );
+    eq("exportKeyingMaterial nil context", hexOf(ekm2),
+       "bead27d1376dd883644ea39535f6c396");
+
+    // curveForCurveID — the hybrid group has no plain ECDH curve.
+    check("curveForCurveID X25519", tls::key_schedule_curveForCurveID(tls::X25519));
+    check("curveForCurveID CurveP256", tls::key_schedule_curveForCurveID(tls::CurveP256));
+    check("curveForCurveID CurveP384", tls::key_schedule_curveForCurveID(tls::CurveP384));
+    check("curveForCurveID CurveP521", tls::key_schedule_curveForCurveID(tls::CurveP521));
+    check("curveForCurveID X25519MLKEM768 is not a curve",
+          !tls::key_schedule_curveForCurveID(tls::X25519MLKEM768));
+
+    // generateECDHEKey, over a reader that yields 7, 8, 9, … so the keys
+    // are reproducible. P-256/384/521 reject and retry candidates, which
+    // is why their first private byte is not 0x07.
+    let (p1, q1, e1) = tls::key_schedule_generateECDHEKey(&mut constReader(7), tls::X25519);
+    eq("generateECDHEKey X25519 err", e1, "");
+    eq("generateECDHEKey X25519 priv", hexOf(p1),
+       "0708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526");
+    eq("generateECDHEKey X25519 pub", hexOf(q1),
+       "07b8c542487686a78301855fcb6d3f6a8a911cd7f1983a9b44dc9dcd22839d23");
+    let (p2, q2, _) = tls::key_schedule_generateECDHEKey(&mut constReader(7), tls::CurveP256);
+    eq("generateECDHEKey P256 priv", hexOf(p2),
+       "074a090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526");
+    eq("generateECDHEKey P256 pub", hexOf(q2),
+       "0402436461aed56f46fadbea20ec3192ec3cc88df2c4dad317659d4bade48ede2130333d845e7fe62fc09c225ff512029ec5628ba3704fdd485e7482317c0e5f2c");
+    let (p3, _, _) = tls::key_schedule_generateECDHEKey(&mut constReader(7), tls::CurveP384);
+    eq("generateECDHEKey P384 priv", hexOf(p3),
+       "074a090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f30313233343536");
+    let (p4, _, _) = tls::key_schedule_generateECDHEKey(&mut constReader(7), tls::CurveP521);
+    eq("generateECDHEKey P521 priv", hexOf(p4),
+       "014a090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748");
+    let (_, _, e5) = tls::key_schedule_generateECDHEKey(&mut constReader(7), tls::X25519MLKEM768);
+    eq("generateECDHEKey hybrid is rejected", e5, "tls: internal error: unsupported curve");
 
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
