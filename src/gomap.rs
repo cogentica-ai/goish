@@ -74,6 +74,10 @@ pub trait GoHash {
     fn go_hash(&self, seed: u64) -> u64;
 }
 
+// go: none — goish idiom: Go's runtime hashes map keys through
+// `memhash`/`strhash`, chosen per key type by the compiler and seeded
+// from `hmap.hash0`. goish has no compiler hook, so key types implement
+// `GoHash` and this is the shared byte-array mixer they call.
 /// Simple non-cryptographic byte-array hash (FNV-1a style).
 #[inline]
 pub fn hash_bytes(data: &[u8], seed: u64) -> u64 {
@@ -1005,5 +1009,37 @@ where
 {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// go: none — goish idiom: Go compares maps with `reflect.DeepEqual`
+// rather than `==` (map types are not comparable in Go at all). goish
+// needs a structural `PartialEq` for a different reason: `goany::Any`
+// requires `PartialEq + Reflect` on its payload, so without this a
+// `map<K, V>` cannot be stored in an `Any` — which rules out the
+// nested `map[string]any` shape that `testing/slogtest`'s group
+// representation is built from.
+//
+// Semantics match DeepEqual for maps: same length, and every key in
+// `self` present in `other` with an equal value.
+impl<K, V> PartialEq for map<K, V>
+where
+    K: GoHash + PartialEq + Clone,
+    V: PartialEq + Clone + Default,
+{
+    fn eq(&self, other: &Self) -> bool {
+        if self.Len() != other.Len() {
+            return false;
+        }
+        let keys = self.Keys();
+        for i in 0..keys.Len() {
+            let k = keys[i].clone();
+            let (mine, _) = self.Get(k.clone());
+            let (theirs, present) = other.Get(k);
+            if !present || mine != theirs {
+                return false;
+            }
+        }
+        return true;
     }
 }

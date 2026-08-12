@@ -48,6 +48,7 @@
 
 pub mod benchmark;
 pub mod fstest;
+pub mod slogtest;
 pub mod iotest;
 pub mod r#match;
 mod allocs;
