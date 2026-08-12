@@ -34,8 +34,8 @@ extern crate goish;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use goish::gostring::string;
 use goish::sync::Mutex;
-use goish::testing;
-use goish::{fmt, syscall};
+use goish::testing::{self, runningList};
+use goish::{fmt, strings, syscall};
 
 fn s(x: &str) -> string {
     return string::from_bytes(x.as_bytes());
@@ -65,6 +65,9 @@ static PEAK: AtomicUsize = AtomicUsize::new(0);
 
 /// Three parallel subtests. Each records when it resumed; none may
 /// resume before the parent's body has finished.
+/// Captured while three subtests are parked on the barrier.
+static PAUSED_LIST: Mutex<alloc::vec::Vec<string>> = Mutex::new(alloc::vec::Vec::new());
+
 fn parallel_tree(t: &mut testing::T) {
     for name in ["a", "b", "c"].iter() {
         let n = *name;
@@ -76,7 +79,17 @@ fn parallel_tree(t: &mut testing::T) {
             RUNNING.fetch_sub(1, Ordering::SeqCst);
         });
     }
-    // Reached while all three are still parked on the barrier.
+    // Reached while all three are still parked on the barrier. Go
+    // deletes a test from `running` before it parks, so none of them
+    // may appear here — only the parent itself.
+    {
+        let l = runningList();
+        let mut v = alloc::vec::Vec::new();
+        for i in 0..l.Len() {
+            v.push(l[i].clone());
+        }
+        *PAUSED_LIST.Lock() = v;
+    }
     note("parent-body-end");
 }
 
@@ -177,11 +190,36 @@ fn main() {
         }
     }
 
+    // 6. While the three subtests are parked, runningList names NONE
+    //    of them — Go deletes a test from `running` before it parks on
+    //    the barrier, because a paused test is not a stuck test. A
+    //    timeout report that listed them would blame the wrong tests
+    //    for every hang in a parallel tree.
+    {
+        let l = PAUSED_LIST.Lock().clone();
+        let mut named_sub = false;
+        let mut named_parent = false;
+        for e in l.iter() {
+            if strings::HasPrefix(e.clone(), "Par/") {
+                named_sub = true;
+            }
+            if strings::HasPrefix(e.clone(), "Par (") {
+                named_parent = true;
+            }
+        }
+        if !named_sub && named_parent {
+            fmt::Println!("[ 6] parked tests are unlisted PASS");
+        } else {
+            fmt::Println!("[ 6] parked tests are unlisted FAIL sub=", named_sub, " parent=", named_parent);
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 5/5");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 5");
+        fmt::Println!("FAIL", failed, "of 6");
         syscall::Exit(1);
     }
 }

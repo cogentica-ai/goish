@@ -61,7 +61,7 @@ pub use newcover::Coverage;
 pub use testing::{
     callerName, chattyFlag, chattyPrinter, fmtDuration, marker, newChattyPrinter, parseCpuList,
     pcToName, prefix, testBinary, CoverMode, Init, Short, Testing, Verbose,
-    indenter, newTestState, outputWriter, shouldFailFast, testState, testStateCounts, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_call_site, __shim_cleanup_handle, __shim_mark_done, __shim_output_buf, CleanupHandle, __shim_ran_done, __shim_match_string_only, __DepsProbe,
+    indenter, newTestState, outputWriter, runningList, shouldFailFast, testState, testStateCounts, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_call_site, __shim_cleanup_handle, __shim_mark_done, __shim_output_buf, CleanupHandle, __shim_ran_done, __shim_match_string_only, __DepsProbe,
 };
 
 extern crate alloc;
@@ -390,6 +390,7 @@ pub fn Main(tests: &[(&'static str, TestFn)]) -> int {
         // each top-level test; goish's Main stands in for that driver.
         testing::attach_chatty(&t.state);
         *t.state.start.Lock() = crate::time::Now();
+        testing::running_store(name_s.clone(), crate::time::Now());
         write_status(b"=== RUN   ", b"", &name_s);
         let state = t.state.clone();
         tRunner(t, *f);

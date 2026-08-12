@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: runningList, T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -21,7 +21,7 @@
 // registration having happened and can be tested on its own.
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
 // goishlint:ignore GOISH018 after, Attr, before, callSite, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newTestState, Output, Parallel, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
-// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
+// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
 #![allow(non_snake_case)]
@@ -115,7 +115,7 @@ impl T {
     /// completed", guarding against a stray goroutine writing to a
     /// finished test. goish records `done` but does not panic on it:
     /// the panic would land on whatever goroutine happened to be
-    /// running, and goish's per-G isolation would turn a diagnostic
+    /// and goish's per-G isolation would turn a diagnostic
     /// into a killed goroutine somewhere unrelated.
     pub fn Fail(&self) {
         // Go: if c.parent != nil { c.parent.Fail() }
@@ -385,6 +385,7 @@ impl T {
         // Go: the run's chattyPrinter is copied onto every test.
         attach_chatty(&sub.state);
         *sub.state.start.Lock() = crate::time::Now();
+        running_store(qualified.clone(), crate::time::Now());
 
         // Go: `t.chatty.Updatef(t.name, "=== RUN   %s\n", t.name)`.
         if let Some(c) = sub.state.chatty.Lock().as_ref() {
@@ -531,6 +532,9 @@ pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
     if state.failed.load(Ordering::Acquire) {
         numFailed.fetch_add(1, Ordering::AcqRel);
     }
+
+    // Go: `running.Delete(t.name)` once the test is finished.
+    running_delete(state.name.Lock().clone());
 
     // Go: `t.done = true` in tRunner's deferred func, once the test and
     // all its subtests have completed. `destination` reads this to
@@ -2113,6 +2117,9 @@ impl T {
             );
         }
         drain_chatty();
+        // Go: `running.Delete(t.name)` — a test parked on the barrier
+        // is not running, and must not show up in a timeout report.
+        running_delete(self.name.clone());
 
         // Go: `t.signal <- true` — "Release calling test." The parent
         // is blocked in tRunner waiting on exactly this.
@@ -2141,6 +2148,9 @@ impl T {
             );
         }
         drain_chatty();
+        // Go: `running.Store(t.name, highPrecisionTimeNow())` — back on
+        // the list, and the clock restarts.
+        running_store(self.name.clone(), crate::time::Now());
         *self.state.start.Lock() = crate::time::Now();
     }
 }
@@ -2581,4 +2591,63 @@ impl TState {
             ]),
         );
     }
+}
+
+// ─── the running-test registry ───────────────────────────────────────
+
+// go: sdk 1.25.5 testing/testing.go:522 running
+/// Go: `var running sync.Map // map[string]time.Time of running,
+/// unpaused tests`.
+///
+/// "unpaused" is the load-bearing word: T.Parallel DELETES its entry
+/// before parking and re-adds it on resume, so a test blocked on the
+/// barrier is not reported as running. Without that, a timeout panic
+/// would name every parallel test in the tree rather than the ones
+/// actually stuck.
+pub(crate) static running: crate::sync::Mutex<
+    Option<crate::map<string, crate::time::Time>>,
+> = crate::sync::Mutex::new(None);
+
+// go: none — goish idiom: Go's `running` is a sync.Map, usable
+// zero-valued. goish's map needs constructing, so the two accessors
+// initialise on first use.
+pub(crate) fn running_store(name: string, at: crate::time::Time) {
+    let mut g = running.Lock();
+    if g.is_none() {
+        *g = Some(crate::map::new());
+    }
+    g.as_mut().unwrap().Set(name, at);
+}
+
+// go: none — goish idiom: see running_store.
+pub(crate) fn running_delete(name: string) {
+    let mut g = running.Lock();
+    if let Some(m) = g.as_mut() {
+        m.Delete(name);
+    }
+}
+
+// go: sdk 1.25.5 testing/testing.go:2688-2696 runningList
+/// Go: "runningList returns the list of running tests." Sorted, so a
+/// timeout panic reads the same way twice — map iteration order is
+/// random in Go and unspecified here, and an unsorted list would make
+/// two timeouts of the same hang look like different bugs.
+#[allow(non_snake_case)]
+pub fn runningList() -> crate::goslice::slice<string> {
+    let mut list: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+    {
+        let g = running.Lock();
+        if let Some(m) = g.as_ref() {
+            for k in m.Keys().iter() {
+                let (v, _) = m.Get(k.clone());
+                list.push(crate::fmt::Sprintf!(
+                    "%s (%v)",
+                    k.clone(),
+                    crate::time::Since(v).Round(crate::time::Second)
+                ));
+            }
+        }
+    }
+    list.sort();
+    return crate::goslice::slice::__from_vec(list);
 }
