@@ -171,6 +171,37 @@ pub fn msg_keyUpdate_unmarshal(
 
 // go: none — goish-only: see `msg_keyUpdate_marshal`.
 #[doc(hidden)]
+pub fn msg_helloRequest_marshal() -> crate::goslice::slice<crate::types::byte> {
+    let m = handshake_messages::helloRequestMsg {};
+    let (b, _) = m.marshal();
+    return b;
+}
+
+// go: none — goish-only: round-trips addUint64 through readUint64.
+#[doc(hidden)]
+pub fn msg_uint64_roundtrip(
+    vs: crate::goslice::slice<crate::types::uint64>,
+) -> (crate::goslice::slice<crate::types::byte>, bool) {
+    let mut b = crate::crypto::cryptobyte::NewBuilder(crate::goslice::slice::__from_vec(
+        alloc::vec::Vec::new(),
+    ));
+    for (_, v) in crate::range!(vs.clone()) {
+        handshake_messages::addUint64(&mut b, *v);
+    }
+    let (out, _) = b.Bytes();
+    let mut s = crate::crypto::cryptobyte::String::New(out.clone());
+    let mut ok = true;
+    for (_, want) in crate::range!(vs) {
+        let mut got: crate::types::uint64 = 0;
+        if !handshake_messages::readUint64(&mut s, &mut got) || got != *want {
+            ok = false;
+        }
+    }
+    return (out, ok && s.Empty());
+}
+
+// go: none — goish-only: see `msg_keyUpdate_marshal`.
+#[doc(hidden)]
 pub fn msg_endOfEarlyData_marshal() -> crate::goslice::slice<crate::types::byte> {
     let m = handshake_messages::endOfEarlyDataMsg {};
     let (b, _) = m.marshal();

@@ -1,6 +1,6 @@
 // goishlint:ignore GOISH018 addBytesWithLength, addUint64, clone, marshalCertificate, marshalMsg, marshalWithoutBinders, originalBytes, readUint16LengthPrefixed, readUint24LengthPrefixed, readUint64, readUint8LengthPrefixed, transcriptMsg, unmarshalCertificate, updateBinders — handshake_messages.go is 1963 lines and 52 functions; this file is a deliberate SUBSET covering only the messages goish's own TLS 1.3 client and server exchange. The six it does port are anchored above and diffed against Go; everything listed here is genuinely absent, not renamed. See ROADMAP.md.
 // goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, marshalingFunction, newSessionTicketMsg, newSessionTicketMsgTLS13, serverHelloDoneMsg, serverKeyExchangeMsg, transcriptHash — same: the message types the subset does not handle.
-// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed
+// go: file crypto/tls/handshake_messages.go decls: clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -925,6 +925,7 @@ use crate::types::uint8;
 const typeEndOfEarlyData: uint8 = 5;
 const typeCertificateStatus: uint8 = 22;
 const typeKeyUpdate: uint8 = 24;
+const typeHelloRequest: uint8 = 0;
 
 /// `statusTypeOCSP uint8 = 1` in common[go]; see the note above.
 const statusTypeOCSP: uint8 = 1;
@@ -1106,5 +1107,55 @@ impl certificateStatusMsg {
         }
         // Go: return true
         return true;
+    }
+}
+
+
+// The uint64 helpers Go writes because cryptobyte has no AddUint64 /
+// ReadUint64 of its own — it splits into two uint32 halves.
+
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:44-47 addUint64
+/// Append `v` as two big-endian uint32 halves.
+pub(crate) fn addUint64(b: &mut cryptobyte::Builder, v: crate::types::uint64) {
+    // Go: b.AddUint32(uint32(v >> 32)); b.AddUint32(uint32(v))
+    b.AddUint32(crate::uint32(v >> 32));
+    b.AddUint32(crate::uint32(v));
+}
+
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:49-56 readUint64
+/// Read two big-endian uint32 halves into `out`.
+pub(crate) fn readUint64(s: &mut CBString, out: &mut crate::types::uint64) -> bool {
+    // Go: var hi, lo uint32
+    //     if !s.ReadUint32(&hi) || !s.ReadUint32(&lo) { return false }
+    let mut hi: crate::types::uint32 = 0;
+    let mut lo: crate::types::uint32 = 0;
+    if !s.ReadUint32(&mut hi) || !s.ReadUint32(&mut lo) {
+        return false;
+    }
+    // Go: *out = uint64(hi)<<32 | uint64(lo)
+    *out = (crate::uint64(hi) << 32) | crate::uint64(lo);
+    // Go: return true
+    return true;
+}
+
+/// Go: `type helloRequestMsg struct{}` — the TLS 1.2 renegotiation
+/// request, which this package never sends.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub(crate) struct helloRequestMsg {}
+
+impl helloRequestMsg {
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1926-1928 helloRequestMsg.marshal
+    /// Go: `return []byte{typeHelloRequest, 0, 0, 0}, nil`
+    pub(crate) fn marshal(&self) -> (slice<byte>, error) {
+        return (
+            slice::__from_vec(alloc::vec![typeHelloRequest, 0, 0, 0]),
+            crate::errors::nil,
+        );
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1930-1932 helloRequestMsg.unmarshal
+    /// Go: `return len(data) == 4`
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        return data.Len() == 4;
     }
 }

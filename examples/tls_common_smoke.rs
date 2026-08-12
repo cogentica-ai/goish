@@ -340,6 +340,26 @@ fn main() {
     ]));
     check("certStatus rejects empty OCSP response", !ok);
 
+    eq(
+        "helloRequestMsg",
+        hexOf(tls::msg_helloRequest_marshal()),
+        "00000000",
+    );
+
+    // addUint64 / readUint64 split a uint64 into two big-endian uint32
+    // halves; the round-trip and the exact bytes both come from Go.
+    let (bytes, ok) = tls::msg_uint64_roundtrip(slice::__from_vec(alloc::vec![
+        0x0123456789abcdefu64,
+        0u64,
+        u64::MAX
+    ]));
+    eq(
+        "addUint64 wire bytes",
+        hexOf(bytes),
+        "0123456789abcdef0000000000000000ffffffffffffffff",
+    );
+    check("readUint64 round-trips and consumes all input", ok);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
