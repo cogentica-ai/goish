@@ -52,7 +52,6 @@ use crate::crypto::cryptobyte::{self, asn1};
 use crate::errors::{self, error, nil};
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::hash::IntoHashFunc;
 use crate::int;
 use crate::io;
 use crate::math::big::Int;

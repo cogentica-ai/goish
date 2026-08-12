@@ -10,7 +10,14 @@
 
 #![no_std]
 #![cfg_attr(not(test), no_main)]
-#![allow(non_snake_case, non_upper_case_globals)]
+// goish keeps Go's spelling for every ported identifier — CONTRIBUTING.md
+// §5: `cipherSuite` stays `cipherSuite`, `clientHelloMsg` stays
+// `clientHelloMsg`. That is what makes a port diffable against the Go
+// source, and what the `// go: sdk` provenance anchors assert. Renaming
+// to Rust casing would break the 1:1 mapping the whole verification
+// story rests on, so the casing lints are off crate-wide rather than
+// suppressed ad hoc at ~90 individual declarations.
+#![allow(non_snake_case, non_upper_case_globals, non_camel_case_types)]
 // goish mirrors Go identifiers verbatim, and Go's crypto packages use the
 // Greek letters of the specs they implement (ML-KEM's ρ/σ/μ from FIPS 203).
 // The confusable-idents lint fires on those against ASCII names elsewhere

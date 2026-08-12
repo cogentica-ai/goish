@@ -91,7 +91,6 @@ pub fn cert_der() -> slice<byte> {
         None => {
             fmt::Printf!("pem::Decode returned nil block\n");
             goish::syscall::Exit(1);
-            unreachable!()
         }
         Some(b) => b,
     };
@@ -294,7 +293,6 @@ fn main() {
         None => {
             check(false, "PublicKey downcasts to rsa::PublicKey");
             goish::syscall::Exit(1);
-            unreachable!()
         }
         Some(k) => k.clone(),
     };

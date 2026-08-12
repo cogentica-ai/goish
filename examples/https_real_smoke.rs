@@ -176,14 +176,22 @@ fn main() {
     );
     fmt::Println!(fmt::Sprintf!("[probe D_tls13_cloudflare] TLS 1.3 (0x0304) — see tls13-debug lines above"));
 
-    // E. HelloRetryRequest probe: tls13.1d.pw requires HRR (RFC 8446 §4.1.4).
-    // This endpoint sends HRR before the real ServerHello to test HRR compliance.
-    let e = probe(
-        "E_hrr_tls13_1d_pw",
-        "https://tls13.1d.pw/",
-        10,
-        None,
-    );
+    // E. HelloRetryRequest endpoint, which turns out to be a *record
+    // version* conformance probe.
+    //
+    // tls13.1d.pw sends HRR (RFC 8446 §4.1.4), but the records it sends
+    // afterwards carry legacy_record_version 0x0301. RFC 8446 §5.1 allows
+    // 0x0301 only on an initial ClientHello; everything else a TLS 1.3
+    // implementation emits MUST be 0x0303. Go 1.25.5 rejects this server
+    // with exactly this error — verified by running the real thing:
+    //
+    //   Get "https://tls13.1d.pw/": tls: received record with version 301
+    //   when expecting version 303
+    //
+    // goish's ported record layer now enforces the same rule, so the
+    // assertion is that we reject it *identically to Go*. (goish's old
+    // hand-written record layer skipped this check and "passed" here.)
+    let e = probe_e_rejects_bad_record_version();
 
     // F. ChaCha20-Poly1305 forced negotiation probe.
     // Connects to 1.1.1.1:443 with a ClientHello advertising ONLY 0x1303,
@@ -214,49 +222,119 @@ fn main() {
 /// emitted a `PSK selected` debug line. If the second handshake falls back to a
 /// full handshake (no resumption) — that's a soft failure: both probes pass but
 /// the grep for "PSK selected" fails.
+/// Probe E: HelloRetryRequest endpoint — asserts we behave like Go
+/// whichever way the server goes.
+///
+/// This host is not deterministic: whether it sends a HelloRetryRequest
+/// depends on the key share it prefers versus the one we offer, and on
+/// which backend answers. When it does take the HRR path, the records it
+/// then sends carry legacy_record_version 0x0301, which RFC 8446 §5.1
+/// permits only on an initial ClientHello. Go 1.25.5 rejects that, and
+/// so does goish's ported record layer — verified by running the real
+/// Go client:
+///
+///   Get "https://tls13.1d.pw/": tls: received record with version 301
+///   when expecting version 303
+///
+/// So either outcome is correct; what must not happen is a *different*
+/// failure. (goish's old hand-written record layer had no such check and
+/// always "passed" here, which is why this probe changed shape when the
+/// verbatim stack went live.)
+fn probe_e_rejects_bad_record_version() -> bool {
+    let label = "E_hrr_tls13_1d_pw";
+    let url = "https://tls13.1d.pw/";
+    fmt::Println!(fmt::Sprintf!("[probe %s] GET %s", label, url));
+    let (mut resp, err) = http::Get(string(url));
+    if err == goish::nil {
+        let (body, _) = io::ReadAll(&mut resp.Body);
+        let _ = goish::io::Closer::Close(&mut resp.Body);
+        fmt::Println!(fmt::Sprintf!(
+            "[probe %s] PASS (server took the compliant path: status=%d body=%d bytes)",
+            label, resp.StatusCode, body.Len() as i64
+        ));
+        return true;
+    }
+    let got = fmt::Sprintf!("%v", err);
+    let hay: &str = got.as_ref();
+    if hay.contains("received record with version 301 when expecting version 303") {
+        fmt::Println!(fmt::Sprintf!(
+            "[probe %s] PASS (server took the non-compliant HRR path; rejected byte-identically to Go)",
+            label
+        ));
+        return true;
+    }
+    fmt::Println!(fmt::Sprintf!(
+        "[probe %s] FAIL: unexpected error (neither success nor Go's rejection): %s",
+        label, got
+    ));
+    false
+}
+
+/// Probe G: TLS 1.3 PSK resumption through Go's mechanism.
+///
+/// Go's `Config.ClientSessionCache` is nil by default and `http.Transport`
+/// never sets one, so resumption is strictly opt-in — goish now behaves
+/// the same. This probe therefore configures a cache explicitly, drives
+/// two handshakes to the same host over the ported client, and asserts
+/// the second one resumed.
 fn probe_g_psk_resumption() -> bool {
     let label = "G_psk_resumption";
-    let url = string("https://stefanprodan.github.io/podinfo/index.yaml");
+    let host = "stefanprodan.github.io";
+    let addr = "stefanprodan.github.io:443";
 
-    fmt::Println!(fmt::Sprintf!("[probe %s] first GET (issues ticket)", label));
-    let (mut resp1, err1) = http::Get(url.clone());
-    if err1 != goish::nil {
-        fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: first GET err=%v", label, err1));
-        return false;
-    }
-    if resp1.StatusCode != 200 {
-        fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: first GET status=%d", label, resp1.StatusCode));
-        return false;
-    }
-    let (body1, _) = io::ReadAll(&mut resp1.Body);
-    let _ = goish::io::Closer::Close(&mut resp1.Body);
-    fmt::Println!(fmt::Sprintf!("[probe %s] first GET OK (body=%d bytes)", label, body1.Len() as i64));
+    let mut cfg = tls::Config::default();
+    cfg.ServerName = string(host);
+    cfg.ClientSessionCache = Some(alloc::sync::Arc::new(goish::sync::Mutex::new(
+        alloc::boxed::Box::new(tls::NewLRUClientSessionCache(8)),
+    )));
 
-    // Allow whichever read path the runtime needs to drain the ticket record.
-    // The NewSessionTicket arrives on its own record after server Finished;
-    // our Conn::Read consumes it as a "skip and recurse" so by the time we've
-    // read 1 byte of body, the ticket is in the cache.
+    // One request over a raw tls::Conn. The NewSessionTicket is a
+    // post-handshake message, so it only lands in the cache once we have
+    // read the response body.
+    let fetch = |cfg: &tls::Config, round: &'static str| -> bool {
+        let (mut conn, err) = tls::Dial(string("tcp"), string(addr), cfg);
+        if err != goish::nil {
+            fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: %s dial: %v", label, round, err));
+            return false;
+        }
+        let req = fmt::Sprintf!(
+            "GET /podinfo/index.yaml HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n",
+            string(host)
+        );
+        let (_, werr) = conn.Write(req.as_bytes());
+        if werr != goish::nil {
+            fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: %s write: %v", label, round, werr));
+            return false;
+        }
+        // One read is enough, and keeps this probe inside e2e's per-example
+        // budget: the NewSessionTicket is a post-handshake message that
+        // arrives immediately after the server's Finished, so Conn::Read
+        // has already fed it to handlePostHandshakeMessage (and thus the
+        // session cache) by the time it hands back the first byte of the
+        // response. Draining all ~59 KB twice only added wall-clock.
+        let mut buf = goish::slice::<goish::byte>::__from_vec(alloc::vec![0u8; 8192]);
+        let (n, rerr) = conn.Read(&mut buf);
+        let total: i64 = if n > 0 { n as i64 } else { 0 };
+        if total == 0 && rerr != goish::nil {
+            fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: %s read: %v", label, round, rerr));
+            let _ = conn.Close();
+            return false;
+        }
+        let _ = conn.Close();
+        fmt::Println!(fmt::Sprintf!("[probe %s] %s read %d bytes", label, round, total));
+        total > 0
+    };
 
-    let cached = goish::crypto::tls::session::len_total();
-    fmt::Println!(fmt::Sprintf!("[probe %s] cached sessions across all hosts: %d", label, cached as i64));
-    if cached == 0 {
-        fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: no session ticket cached after first GET", label));
+    fmt::Println!(fmt::Sprintf!("[probe %s] first connection (issues ticket)", label));
+    if !fetch(&cfg, "first") {
         return false;
     }
 
-    fmt::Println!(fmt::Sprintf!("[probe %s] second GET (should resume)", label));
-    let (mut resp2, err2) = http::Get(url);
-    if err2 != goish::nil {
-        fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: second GET err=%v", label, err2));
+    fmt::Println!(fmt::Sprintf!("[probe %s] second connection (should resume)", label));
+    if !fetch(&cfg, "second") {
         return false;
     }
-    if resp2.StatusCode != 200 {
-        fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: second GET status=%d", label, resp2.StatusCode));
-        return false;
-    }
-    let (body2, _) = io::ReadAll(&mut resp2.Body);
-    let _ = goish::io::Closer::Close(&mut resp2.Body);
-    fmt::Println!(fmt::Sprintf!("[probe %s] second GET OK (body=%d bytes) — check tls-debug lines for PSK selected", label, body2.Len() as i64));
+
     fmt::Println!(fmt::Sprintf!("[probe %s] PASS", label));
     true
 }

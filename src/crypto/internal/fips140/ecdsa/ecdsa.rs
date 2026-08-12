@@ -31,7 +31,6 @@
 #![allow(non_snake_case, non_upper_case_globals, non_camel_case_types)]
 
 extern crate alloc;
-use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::crypto::internal::fips140;
@@ -40,7 +39,7 @@ use crate::crypto::internal::fips140::drbg;
 use crate::crypto::internal::fips140::nistec;
 use crate::errors;
 use crate::goslice::slice;
-use crate::hash::{Hash, IntoHashFunc};
+use crate::hash::IntoHashFunc;
 use crate::io;
 use crate::lazy::Lazy;
 use crate::types::{byte, int};

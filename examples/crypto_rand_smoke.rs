@@ -25,6 +25,7 @@
 
 #![no_std]
 #![no_main]
+#![allow(non_camel_case_types)]
 
 extern crate alloc;
 

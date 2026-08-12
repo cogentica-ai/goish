@@ -12,11 +12,10 @@
 
 extern crate alloc;
 
-use alloc::boxed::Box;
 
 use crate::crypto::internal::fips140::hmac as fipshmac;
 use crate::goslice::slice;
-use crate::hash::{Hash, IntoHashFunc};
+use crate::hash::IntoHashFunc;
 use crate::types::byte;
 
 pub use fipshmac::HMAC;

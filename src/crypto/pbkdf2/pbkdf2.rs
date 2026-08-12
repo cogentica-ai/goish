@@ -15,13 +15,12 @@
 #![allow(non_snake_case)]
 
 extern crate alloc;
-use alloc::boxed::Box;
 
 use crate::crypto::internal::fips140::pbkdf2 as fips;
 use crate::errors::error;
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::hash::{Hash, IntoHashFunc};
+use crate::hash::IntoHashFunc;
 use crate::types::{byte, int};
 
 // go: sdk 1.25.5 crypto/pbkdf2/pbkdf2.go:40-54 Key

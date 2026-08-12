@@ -19,7 +19,6 @@
 #![allow(non_snake_case, non_camel_case_types)]
 
 extern crate alloc;
-use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::crypto::internal::fips140;

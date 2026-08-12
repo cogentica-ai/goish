@@ -720,7 +720,7 @@ impl Type {
 /// `Default` returns `Value::Invalid` — matches Go's zero-`reflect.Value`,
 /// where `IsValid()` is false. Ports that hold a `reflect::Value` field
 /// (e.g. kylelemons' `formatter.cur`) rely on this to derive `Default`.
-#[derive(Clone, Default, PartialEq)]
+#[derive(Clone, Default)]
 pub enum Value {
     #[default]
     Invalid,
@@ -770,6 +770,56 @@ pub enum Value {
         ty: Type,
         inner: Box<Value>,
     },
+}
+
+// `PartialEq` is hand-written rather than derived: `Slice` and `Map`
+// carry their element/key/value types as `fn() -> Type` constructors, and
+// deriving would compare those *pointers*. Function-pointer addresses are
+// not guaranteed unique — the linker may merge identical functions, and
+// the same function can land at different addresses across codegen units
+// — so a derived `==` could call two identically-typed slices unequal, or
+// two differently-typed ones equal. Resolve the constructor and compare
+// the `Type`, which has the identity semantics Go's `reflect.Type` uses
+// (kind + name). Every other variant compares exactly as the derive did.
+impl PartialEq for Value {
+    // go: none — goish-only: Go's reflect.Value comparison has no direct
+    // analogue (Go compares the underlying values via Interface()); this
+    // is the structural equality goish ports rely on.
+    fn eq(&self, other: &Self) -> bool {
+        return match (self, other) {
+            (Value::Invalid, Value::Invalid) => true,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Int8(a), Value::Int8(b)) => a == b,
+            (Value::Int16(a), Value::Int16(b)) => a == b,
+            (Value::Int32(a), Value::Int32(b)) => a == b,
+            (Value::Uint(a), Value::Uint(b)) => a == b,
+            (Value::Uint8(a), Value::Uint8(b)) => a == b,
+            (Value::Uint16(a), Value::Uint16(b)) => a == b,
+            (Value::Uint32(a), Value::Uint32(b)) => a == b,
+            (Value::Float32(a), Value::Float32(b)) => a == b,
+            (Value::Float64(a), Value::Float64(b)) => a == b,
+            (Value::String(a), Value::String(b)) => a == b,
+            (
+                Value::Slice { elem_type: ea, items: ia },
+                Value::Slice { elem_type: eb, items: ib },
+            ) => ea() == eb() && ia == ib,
+            (
+                Value::Map { key_type: ka, value_type: va, entries: ea },
+                Value::Map { key_type: kb, value_type: vb, entries: eb },
+            ) => ka() == kb() && va() == vb() && ea == eb,
+            (
+                Value::Struct { ty: ta, fields: fa },
+                Value::Struct { ty: tb, fields: fb },
+            ) => ta == tb && fa == fb,
+            (Value::Pointer(a), Value::Pointer(b)) => a == b,
+            (
+                Value::Named { ty: ta, inner: ia },
+                Value::Named { ty: tb, inner: ib },
+            ) => ta == tb && ia == ib,
+            _ => false,
+        };
+    }
 }
 
 impl Value {

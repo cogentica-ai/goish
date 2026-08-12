@@ -334,7 +334,6 @@ use crate::crypto::sha256;
 use crate::error;
 use crate::goslice::slice;
 use crate::hash::{Hash, HashFunc};
-use crate::io::Writer as _;
 use crate::types::{byte, int};
 use alloc::boxed::Box;
 
@@ -940,7 +939,6 @@ use super::key_agreement::{ecdheKeyAgreement, keyAgreement, rsaKeyAgreement};
 use crate::crypto::cipher;
 use crate::crypto::des;
 use crate::crypto::rc4;
-use crate::types::uint8;
 
 // Go: cipher_suites.go:116-134
 //   const ( suiteECDHE = 1 << iota; suiteECSign; suiteTLS12; suiteSHA384 )

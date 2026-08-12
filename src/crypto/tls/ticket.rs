@@ -568,7 +568,6 @@ use crate::crypto::cipher;
 use crate::crypto::hmac;
 use crate::crypto::sha256;
 use crate::crypto::subtle;
-use crate::types::int;
 
 impl Config {
     // go: sdk 1.25.5 crypto/tls/ticket.go:316-323 Config.EncryptTicket

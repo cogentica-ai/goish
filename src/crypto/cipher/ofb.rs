@@ -33,7 +33,7 @@ use alloc::vec::Vec;
 
 use crate::crypto::cipher::{Block, Stream};
 use crate::goslice::slice;
-use crate::types::{byte, int};
+use crate::types::byte;
 
 // Note: Go's XORKeyStream calls `subtle.XORBytes(dst, src, keystream)`.
 // Goish slices copy on subslicing, so handing sub-regions to `subtle`

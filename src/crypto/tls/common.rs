@@ -1079,7 +1079,8 @@ pub struct EncryptedClientHelloKey {
 // Go: common.go:917-922
 //   type ticketKey struct { aesKey [16]byte; hmacKey [16]byte; created time.Time }
 #[derive(Clone, Default)]
-pub(crate) struct ticketKey {
+#[doc(hidden)]
+pub struct ticketKey {
     pub aesKey: [byte; 16],
     pub hmacKey: [byte; 16],
     /// Go: "created is the time at which this ticket key was created.

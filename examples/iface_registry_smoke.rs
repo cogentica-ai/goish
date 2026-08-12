@@ -78,8 +78,11 @@ fn main() {
     );
 
     unsafe {
-        fmt::Printf!("iface_registry_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
-        if FAIL > 0 {
+        // See tls_common_smoke: copy before formatting so we never take
+        // a shared reference to a `static mut`.
+        let (pass, fail) = (PASS, FAIL);
+        fmt::Printf!("iface_registry_smoke: %v checks, %v failed\n", pass + fail, fail);
+        if fail > 0 {
             goish::syscall::Exit(1);
         }
     }

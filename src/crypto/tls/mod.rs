@@ -147,6 +147,7 @@ pub fn defaults_defaultCipherSuites(
 // Re-export common.go's protocol enumerations at the package root, the
 // way Go has them in package tls.
 pub use common::{
+    NewLRUClientSessionCache,
     ClientAuthType, CurveID,
     SignatureScheme, VersionName, CurveP256, CurveP384, CurveP521, ECDSAWithP256AndSHA256,
     ECDSAWithP384AndSHA384, ECDSAWithP521AndSHA512, ECDSAWithSHA1, Ed25519, NoClientCert,
@@ -166,7 +167,6 @@ use alloc::vec::Vec;
 use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::sync::Mutex;
 use crate::types::{byte, int};
 
 pub mod legacy_p256;
@@ -338,22 +338,6 @@ pub fn msg_certificateStatus_unmarshal(
     return (ok, m.response);
 }
 mod handshake_server_tls13;
-
-/// Gate for the per-record debug prints in `Conn::Read`/`Conn::Write`.
-/// The one-shot client-handshake prints stay unconditional (once per
-/// connection); these fire on every record, which a TLS *server*
-/// cannot afford on stdout. Flip to `true` when debugging the record
-/// layer.
-const DEBUG: bool = false;
-
-macro_rules! tls_debug {
-    ($($arg:tt)*) => {
-        if DEBUG {
-            crate::fmt::Printf!($($arg)*);
-        }
-    };
-}
-
 
 pub use record::{
     KeyMaterial, DirectionKeys, AeadKeyMaterial, AeadDirectionKeys,

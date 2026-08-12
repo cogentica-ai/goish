@@ -27,7 +27,7 @@ use alloc::vec::Vec;
 
 use crate::crypto::cipher::{Block, Stream};
 use crate::goslice::slice;
-use crate::types::{byte, int};
+use crate::types::byte;
 
 // Go cfb.go:15
 //   type cfb struct {

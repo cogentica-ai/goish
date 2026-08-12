@@ -20,8 +20,8 @@ extern crate alloc;
 
 use super::cast::fipsSelfTest;
 use super::rsa::{
-    checkPublicKey, decrypt, encrypt, nil_bytes, noCheck, read_with_reader,
-    withCheck, ErrDecryption, ErrMessageTooLong, ErrVerification, PrivateKey, PublicKey,
+    checkPublicKey, decrypt, encrypt, nil_bytes,
+    withCheck, ErrMessageTooLong, ErrVerification, PrivateKey, PublicKey,
 };
 use crate::bytes;
 use crate::crypto::internal::fips140;
@@ -29,8 +29,7 @@ use crate::crypto::Hash as HashId;
 use crate::error;
 use crate::errors;
 use crate::goslice::slice;
-use crate::io;
-use crate::types::{byte, int};
+use crate::types::byte;
 use alloc::vec::Vec;
 
 // go: sdk 1.25.5 crypto/internal/fips140/rsa/pkcs1v15.go:25-40 hashPrefixes

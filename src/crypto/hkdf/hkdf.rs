@@ -19,7 +19,6 @@
 #![allow(non_snake_case)]
 
 extern crate alloc;
-use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::crypto::internal::fips140::hkdf as fips;
@@ -27,7 +26,7 @@ use crate::crypto::internal::fips140only;
 use crate::errors::{self, error, nil};
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::hash::{Hash, IntoHashFunc};
+use crate::hash::IntoHashFunc;
 use crate::types::{byte, int};
 
 // go: sdk 1.25.5 crypto/hkdf/hkdf.go:27-33 Extract

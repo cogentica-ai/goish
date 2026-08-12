@@ -26,7 +26,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use super::alert::{alert, alertBadRecordMAC, alertInternalError, alertRecordOverflow, alertUnexpectedMessage};
-use super::cipher_suites::{aead, cipherSuiteTLS13, mutAEAD};
+use super::cipher_suites::{aead, cipherSuiteTLS13};
 use super::common::{recordHeaderLen, recordType, VersionTLS11, VersionTLS12, VersionTLS13};
 use super::quic::QUICEncryptionLevel;
 use crate::crypto::cipher;
@@ -37,7 +37,7 @@ use crate::errors;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::hash::Hash;
-use crate::types::{byte, int, uint, uint16, uint8};
+use crate::types::{byte, int, uint16};
 
 // Go: conn.go — `type permanentError struct { err net.Error }`
 /// Go: "permanentError is a wrapper around net.Error that makes the
@@ -1054,7 +1054,7 @@ impl Conn {
     }
     // go: none — goish-only: see `__setIsClient`.
     #[doc(hidden)]
-    pub fn __setOutTrafficSecret(
+    pub(crate) fn __setOutTrafficSecret(
         &mut self,
         suite: &'static cipherSuiteTLS13,
         secret: slice<byte>,
@@ -1246,7 +1246,7 @@ impl Conn {
     // unexported fields. goish's callers are in sibling modules, so the
     // pair is named once here.
     #[doc(hidden)]
-    pub fn __prepareCipherSpecs(
+    pub(crate) fn __prepareCipherSpecs(
         &mut self,
         vers: uint16,
         inCipher: halfConnCipher,
@@ -1269,7 +1269,7 @@ impl Conn {
 
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
-    pub fn __ticketKeys(&self) -> slice<super::common::ticketKey> {
+    pub(crate) fn __ticketKeys(&self) -> slice<super::common::ticketKey> {
         return self.ticketKeys.clone();
     }
     // go: none — goish-only: Go assigns the seven resumed fields inline
@@ -1302,7 +1302,7 @@ impl Conn {
     pub fn __hasEkm(&self) -> bool { return self.ekm.is_some(); }
     // go: none — goish-only: see `__adoptSession`.
     #[doc(hidden)]
-    pub fn __setTicketKeys(&mut self, k: slice<super::common::ticketKey>) {
+    pub(crate) fn __setTicketKeys(&mut self, k: slice<super::common::ticketKey>) {
         self.ticketKeys = k;
     }
 

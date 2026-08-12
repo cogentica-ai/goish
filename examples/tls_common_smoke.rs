@@ -11,7 +11,7 @@
 
 #![no_std]
 #![no_main]
-#![allow(non_snake_case)]
+#![allow(non_snake_case, non_camel_case_types)]
 
 extern crate alloc;
 extern crate goish;
@@ -4550,8 +4550,12 @@ fn main() {
     check_n("the rejected record still bumped the counter", retry, 1);
 
     unsafe {
-        fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
-        if FAIL > 0 {
+        // Copy out of the mutable statics before formatting: passing
+        // them straight to Printf! takes a shared reference to a
+        // `static mut`, which Rust 2024 rejects.
+        let (pass, fail) = (PASS, FAIL);
+        fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", pass + fail, fail);
+        if fail > 0 {
             goish::syscall::Exit(1);
         }
     }

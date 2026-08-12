@@ -379,7 +379,15 @@ impl Server {
             let conn = tls::Server(alloc::boxed::Box::new(c), &cfg);
             let srv = self.clone();
             let h = handler.clone();
-            go!(stack(64 * 1024), move || {
+            // Bare `go!()` on purpose, unlike the plaintext server's
+            // `stack(64 * KB)`: this goroutine runs the TLS handshake,
+            // whose ported call chain (record layer -> key schedule ->
+            // certificate verification) is far deeper than a 64 KiB
+            // sub-page stack allows in debug builds. A bare spawn gets
+            // the 1 MiB lazily-committed reservation with a guard page,
+            // so depth is available while RSS still tracks only the
+            // pages actually touched.
+            go!(move || {
                 serve_tls_conn(srv, conn, h);
             });
         }

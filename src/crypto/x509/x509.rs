@@ -81,9 +81,7 @@ use crate::error;
 use crate::errors;
 use crate::goany::Any;
 use crate::io;
-use crate::goany::AsExt;
 use crate::goslice::slice;
-use crate::gomap::map;
 use crate::gostring::string;
 use crate::math::big;
 use crate::net;
@@ -1334,7 +1332,7 @@ pub(super) struct pkixPublicKey {
 pub(super) fn marshalPublicKey(
     pub_: &Any,
 ) -> (slice<byte>, pkix::AlgorithmIdentifier, error) {
-    let mut publicKeyBytes: slice<byte>;
+    let publicKeyBytes: slice<byte>;
     let mut publicKeyAlgorithm = pkix::AlgorithmIdentifier::default();
 
     // Go: switch pub := pub.(type) { case *rsa.PublicKey: … }

@@ -30,7 +30,7 @@
 
 #![no_std]
 #![no_main]
-#![allow(non_snake_case)]
+#![allow(non_snake_case, non_camel_case_types)]
 
 extern crate alloc;
 
@@ -40,7 +40,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use goish::crypto::ed25519;
 use goish::crypto::x509::{
     CertificateRequest, CreateCertificate, CreateCertificateRequest, CreateRevocationList,
-    MarshalPKIXPublicKey, OIDFromInts, ParseCertificate, RevocationList, RevocationListEntry, OID,
+    MarshalPKIXPublicKey, OIDFromInts, ParseCertificate, RevocationList, RevocationListEntry,
 };
 use goish::crypto::x509::pkix;
 use goish::encoding::asn1;

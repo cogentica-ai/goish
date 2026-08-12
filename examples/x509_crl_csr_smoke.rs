@@ -128,12 +128,15 @@ fn main() {
     check("ParseRevocationList rejects a truncated CRL", err != goish::nil);
 
     unsafe {
+        // See tls_common_smoke: copy before formatting so we never take
+        // a shared reference to a `static mut`.
+        let (pass, fail) = (PASS, FAIL);
         fmt::Printf!(
             "x509_crl_csr_smoke: %v checks, %v failed\n",
-            PASS + FAIL,
-            FAIL
+            pass + fail,
+            fail
         );
-        if FAIL > 0 {
+        if fail > 0 {
             goish::syscall::Exit(1);
         }
     }

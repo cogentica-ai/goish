@@ -448,6 +448,9 @@ impl PageAlloc {
 
 #[cfg(test)]
 mod tests {
+    // `alloc::vec::Vec` is not in scope in a no_std crate; the harness
+    // below builds one, so name it explicitly.
+    use alloc::vec::Vec;
     use super::super::consts::PALLOC_CHUNK_BYTES;
     use super::*;
 

@@ -36,7 +36,7 @@ use crate::crypto::ed25519;
 use crate::crypto::elliptic;
 use crate::crypto::rsa;
 use crate::error;
-use crate::goany::{Any, AsExt};
+use crate::goany::Any;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::hash::Hash as HashTrait;

@@ -27,7 +27,6 @@ use crate::crypto;
 use crate::crypto::md5;
 use crate::crypto::sha1;
 use crate::goslice::slice;
-use crate::hash::Hash as HashTrait;
 use crate::io::Writer as _;
 use crate::types::{byte, int, uint16, uint8};
 
@@ -129,7 +128,6 @@ use crate::crypto::ecdh;
 use crate::crypto::rsa;
 use crate::crypto::x509;
 use crate::error;
-use crate::goany::Any;
 use crate::gostring::string;
 
 // Go: key_agreement.go:22-36
