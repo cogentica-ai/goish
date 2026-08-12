@@ -722,7 +722,7 @@ impl MapFS {
 // goishlint:ignore GOISH019 fsTester — Go's `fsys fs.FS` field is held
 // by the driver (`testFS`), which is not ported; carrying a filesystem
 // this struct never reads would imply a walk that does not exist here.
-// goishlint:ignore GOISH020 checkOpen, checkBadPath, checkFileRead, checkDirList, checkStat — Go
+// goishlint:ignore GOISH020 checkOpen, checkBadPath, checkFileRead, checkDirList, checkStat, checkGlob — Go
 // reads `t.fsys` off the receiver; goish's fsTester does not carry a
 // filesystem (see GOISH019 above), so these take it, or the opener
 // built from it, as a parameter instead. Same inputs, one hop
@@ -1163,5 +1163,210 @@ impl fsTester {
                 finfo
             ));
         }
+    }
+}
+
+impl fsTester {
+    // go: sdk 1.25.5 testing/fstest/testfs.go:291-386 fsTester.checkGlob
+    /// Go: "checkGlob checks that various glob patterns work if the file
+    /// system implements GlobFS."
+    ///
+    /// The pattern-mangling loop is the interesting half. For each rune
+    /// of the directory name it emits one of five *equivalent* spellings
+    /// — bare, `[r]`, `[r-r]`, `[\r]`, `[\r-\r]` — cycling by
+    /// `(i+j) % 5`. Every one denotes the same single character, so a
+    /// correct glob engine returns identical results for all of them;
+    /// an engine that mishandles ranges, escapes-inside-brackets, or
+    /// single-element classes diverges on exactly one spelling. That is
+    /// far more searching than globbing the plain name would be.
+    ///
+    /// Deviation: Go opens with `if _, ok := t.fsys.(fs.GlobFS); !ok
+    /// { return }` and then type-asserts three more times. goish has no
+    /// `GlobFS` trait, so the glob function arrives as a parameter —
+    /// which also means this check actually runs here, where in Go it
+    /// silently skips any filesystem that does not implement the
+    /// interface.
+    pub fn checkGlob<G: Fn(string) -> (slice<string>, error)>(
+        &mut self,
+        dir: string,
+        list: &slice<Arc<dyn DirEntry + Send + Sync>>,
+        globfn: G,
+    ) {
+        // Go: "Make a complex glob pattern prefix that only matches dir."
+        let mut glob = string::from_static("");
+        let d: &str = dir.as_ref();
+        if d != "." {
+            let elems = crate::strings::Split(dir.clone(), string::from_static("/"));
+            let mut out: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+            for i in 0..elems.Len() {
+                let e: &str = elems[i].as_ref();
+                let mut pattern: alloc::vec::Vec<char> = alloc::vec::Vec::new();
+                for (j, r) in e.chars().enumerate() {
+                    if r == '*' || r == '?' || r == '\\' || r == '[' || r == '-' {
+                        pattern.push('\\');
+                        pattern.push(r);
+                        continue;
+                    }
+                    match (usize::try_from(i).unwrap_or(0) + j) % 5 {
+                        0 => pattern.push(r),
+                        1 => {
+                            pattern.push('[');
+                            pattern.push(r);
+                            pattern.push(']');
+                        }
+                        2 => {
+                            pattern.push('[');
+                            pattern.push(r);
+                            pattern.push('-');
+                            pattern.push(r);
+                            pattern.push(']');
+                        }
+                        3 => {
+                            pattern.push('[');
+                            pattern.push('\\');
+                            pattern.push(r);
+                            pattern.push(']');
+                        }
+                        _ => {
+                            pattern.push('[');
+                            pattern.push('\\');
+                            pattern.push(r);
+                            pattern.push('-');
+                            pattern.push('\\');
+                            pattern.push(r);
+                            pattern.push(']');
+                        }
+                    }
+                }
+                let built: alloc::string::String = pattern.into_iter().collect();
+                out.push(s_of(&built));
+            }
+            glob = crate::fmt::Sprintf!(
+                "%s/",
+                crate::strings::Join(slice::__from_vec(out), string::from_static("/"))
+            );
+        }
+
+        // Go: "Test that malformed patterns are detected. The error is
+        // likely path.ErrBadPattern but need not be."
+        let bad = crate::fmt::Sprintf!("%snonexist/[]", glob.clone());
+        let (_, berr) = globfn(bad.clone());
+        if berr == errors::nil {
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: Glob(%q): bad pattern not detected",
+                dir.clone(),
+                bad
+            ));
+        }
+
+        // Go: "Try to find a letter that appears in only some of the
+        // final names." — so the glob is genuinely selective rather
+        // than matching everything or nothing.
+        let mut c: char = 'a';
+        while c <= 'z' {
+            let (mut have, mut have_not) = (false, false);
+            for i in 0..list.Len() {
+                let n = list[i].Name();
+                let ns: &str = n.as_ref();
+                if ns.contains(c) {
+                    have = true;
+                } else {
+                    have_not = true;
+                }
+            }
+            if have && have_not {
+                break;
+            }
+            c = char::from_u32(u32::from(c) + 1).unwrap_or('z');
+        }
+        if c > 'z' {
+            c = 'a';
+        }
+        let mut cbuf = [0u8; 4];
+        glob = crate::fmt::Sprintf!("%s*%s*", glob.clone(), s_of(c.encode_utf8(&mut cbuf)));
+
+        let mut want: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+        for i in 0..list.Len() {
+            let n = list[i].Name();
+            let ns: &str = n.as_ref();
+            if ns.contains(c) {
+                want.push(crate::path::Join(slice::__from_vec(alloc::vec![
+                    dir.clone(),
+                    n
+                ])));
+            }
+        }
+
+        let (names, gerr) = globfn(glob.clone());
+        if gerr != errors::nil {
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: Glob(%q): %v",
+                dir.clone(),
+                glob.clone(),
+                gerr.Error()
+            ));
+            return;
+        }
+
+        let mut got: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+        for i in 0..names.Len() {
+            got.push(names[i].clone());
+        }
+        if got == want {
+            return;
+        }
+
+        // Go: if !slices.IsSorted(names) { errorf(unsorted); sort }
+        let mut sorted = true;
+        for i in 1..got.len() {
+            let (a, b): (&str, &str) = (got[i - 1].as_ref(), got[i].as_ref());
+            if a > b {
+                sorted = false;
+                break;
+            }
+        }
+        if !sorted {
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: Glob(%q): unsorted output:\n%s",
+                dir.clone(),
+                glob.clone(),
+                crate::strings::Join(
+                    slice::__from_vec(got.clone()),
+                    string::from_static("\n")
+                )
+            ));
+            got.sort_by(|x, y| {
+                let (a, b): (&str, &str) = (x.as_ref(), y.as_ref());
+                return a.cmp(b);
+            });
+        }
+
+        // Go's merge walk over the two sorted lists, reporting each
+        // side's surplus as missing/extra.
+        let mut problems: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+        let (mut wi, mut gi) = (0usize, 0usize);
+        while wi < want.len() || gi < got.len() {
+            if wi < want.len() && gi < got.len() && want[wi] == got[gi] {
+                wi += 1;
+                gi += 1;
+            } else if wi < want.len()
+                && (gi >= got.len() || {
+                    let (a, b): (&str, &str) = (want[wi].as_ref(), got[gi].as_ref());
+                    a < b
+                })
+            {
+                problems.push(crate::fmt::Sprintf!("missing: %s", want[wi].clone()));
+                wi += 1;
+            } else {
+                problems.push(crate::fmt::Sprintf!("extra: %s", got[gi].clone()));
+                gi += 1;
+            }
+        }
+        self.errorf(crate::fmt::Sprintf!(
+            "%s: Glob(%q): wrong output:\n%s",
+            dir.clone(),
+            glob,
+            crate::strings::Join(slice::__from_vec(problems), string::from_static("\n"))
+        ));
     }
 }
