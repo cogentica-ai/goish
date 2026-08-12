@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, chattyPrinter.prefix, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -9,13 +9,19 @@
 // anchored declarations are not in the module root, which GOISH015
 // forbids.
 //
+// goishlint:ignore GOISH020 newChattyPrinter, Updatef, Printf — Go reads
+// the package-level `chatty.json` in the constructor and is variadic
+// over `...any` in both printers. goish passes `json` explicitly (which
+// is what Go's own comment on `prefix` says it wanted: "allows tests to
+// check the json behavior without modifying the global variable") and
+// takes the already-formatted string, as elsewhere in this port.
 // goishlint:ignore GOISH020 parseCpuList — Go reads the package-level
 // `*cpuListStr` and writes the package-level `cpuList`; goish takes the
 // string and returns the list, so the helper does not depend on flag
 // registration having happened and can be tested on its own.
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
-// goishlint:ignore GOISH018 after, Attr, before, callerName, callSite, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newChattyPrinter, newTestState, Output, Parallel, pcToName, Printf, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, Updatef, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
-// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, chattyPrinter, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errMain, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, matchStringOnly, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelConflict, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testDeps, testingTesting, testlog, testlogFile, testState, timeout, traceFile — same: the driver's types and package state come with the driver.
+// goishlint:ignore GOISH018 after, Attr, before, callerName, callSite, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newTestState, Output, Parallel, pcToName, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
+// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errMain, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, InternalTest, M, match, matchList, matchStringOnly, maxStackLen, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, numFailed, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelConflict, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, running, short, shuffle, skip, T, TB, testDeps, testingTesting, testlog, testlogFile, testState, timeout, traceFile — same: the driver's types and package state come with the driver.
 // goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
 
 #![allow(non_snake_case)]
@@ -781,4 +787,92 @@ pub fn parseCpuList(cpuListStr: string) -> (crate::goslice::slice<int>, crate::e
         cpuList.push(crate::runtime::GOMAXPROCS(-1));
     }
     return (crate::goslice::slice::__from_vec(cpuList), crate::errors::nil);
+}
+
+// ─── chattyPrinter ───────────────────────────────────────────────────
+
+// goishlint:ignore GOISH019 chattyPrinter — Go carries `lastNameMu
+// sync.Mutex` beside the `lastName` string it guards; goish folds them
+// into `Mutex<string>`, since that field is the only thing the mutex
+// protects. Same protection, one field fewer.
+// go: sdk 1.25.5 testing/testing.go:572-577 chattyPrinter
+/// Go: the `-v` output writer. It tracks the last test name it printed
+/// for, so that interleaved output from different tests stays
+/// attributable.
+pub struct chattyPrinter {
+    w: alloc::sync::Arc<crate::sync::Mutex<alloc::vec::Vec<crate::types::byte>>>,
+    /// Go: `lastNameMu sync.Mutex // guards lastName` and
+    /// `lastName string // last printed test name in chatty mode`.
+    /// Folded into one Mutex, since the mutex guards only that field.
+    lastName: crate::sync::Mutex<string>,
+    /// Go: "-v=json output mode"
+    json: bool,
+}
+
+// go: sdk 1.25.5 testing/testing.go:579-581 newChattyPrinter
+/// Go: `return &chattyPrinter{w: w, json: chatty.json}`.
+///
+/// Deviation: Go writes to an `io.Writer`; goish accumulates into a
+/// shared buffer the caller owns, because `T`'s output path is
+/// `write_line` to stdout rather than a writer chain. The buffer keeps
+/// the printer testable, which is what Go's comment on `prefix` says
+/// it wanted from `p.json` too.
+pub fn newChattyPrinter(
+    w: alloc::sync::Arc<crate::sync::Mutex<alloc::vec::Vec<crate::types::byte>>>,
+    json: bool,
+) -> chattyPrinter {
+    return chattyPrinter {
+        w: w,
+        lastName: crate::sync::Mutex::new(string::from_static("")),
+        json: json,
+    };
+}
+
+impl chattyPrinter {
+    // go: sdk 1.25.5 testing/testing.go:597-607 chattyPrinter.Updatef
+    /// Go: "Updatef prints a message about the status of the named test
+    /// to w. The formatted message must include the test name itself."
+    ///
+    /// Because the message already names the test, no `=== NAME` line is
+    /// emitted — Go's comment: "Since the message already implies an
+    /// association with a specific new test, we don't need to check what
+    /// the old test name was or log an extra NAME line for it."
+    pub fn Updatef(&self, testName: string, msg: string) {
+        let mut last = self.lastName.Lock();
+        *last = testName;
+        let line = crate::fmt::Sprintf!("%s%s", self.prefix(), msg);
+        self.w.Lock().extend_from_slice(line.as_bytes());
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:611-623 chattyPrinter.Printf
+    /// Go: "Printf prints a message, generated by the named test, that
+    /// does not necessarily mention that tests's name itself."
+    ///
+    /// Since the message does *not* name the test, the printer emits a
+    /// `=== NAME` line whenever the test changed since the last write.
+    /// That is what keeps interleaved `-v` output attributable: without
+    /// it, a log line from a second test would appear under the first
+    /// test's heading.
+    pub fn Printf(&self, testName: string, msg: string) {
+        let mut last = self.lastName.Lock();
+        if last.Len() == 0 {
+            *last = testName;
+        } else if *last != testName {
+            let hdr = crate::fmt::Sprintf!(
+                "%s=== NAME  %s\n",
+                self.prefix(),
+                testName.clone()
+            );
+            self.w.Lock().extend_from_slice(hdr.as_bytes());
+            *last = testName;
+        }
+        self.w.Lock().extend_from_slice(msg.as_bytes());
+    }
+
+    // go: none — goish idiom: Go's `chattyPrinter.prefix` is a method
+    // that tolerates a nil receiver. The free `prefix(json)` above is
+    // the ported logic; this forwards so the call sites read like Go's.
+    fn prefix(&self) -> string {
+        return prefix(self.json);
+    }
 }

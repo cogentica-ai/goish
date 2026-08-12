@@ -1251,3 +1251,7 @@ path = "examples/testing_allocs_smoke.rs"
 [[example]]
 name = "testing_env_smoke"
 path = "examples/testing_env_smoke.rs"
+
+[[example]]
+name = "testing_chattyprinter_smoke"
+path = "examples/testing_chattyprinter_smoke.rs"
