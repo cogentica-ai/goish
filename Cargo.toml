@@ -1179,3 +1179,7 @@ path = "examples/fmt_precision_smoke.rs"
 [[example]]
 name = "testing_benchmark_smoke"
 path = "examples/testing_benchmark_smoke.rs"
+
+[[example]]
+name = "testing_iotest_smoke"
+path = "examples/testing_iotest_smoke.rs"
