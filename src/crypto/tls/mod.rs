@@ -6077,3 +6077,161 @@ pub fn handshake_client_saveSessionTicket(
     };
     return (text, r.n, r.key.clone(), secret, tkt, vers);
 }
+
+// go: none — goish-only: `clientHandshakeStateTLS13`'s methods are
+// unexported in Go, where the tests are in-package. Builds a valid
+// TLS 1.3 ServerHello/ClientHello pair, applies the tweak `which`
+// selects, and reports `(errText, hs.suite.id, c.cipherSuite)`. See the
+// assertions for what each `which` is.
+#[doc(hidden)]
+pub fn handshake_client_tls13_checkServerHelloOrHRR(
+    which: crate::types::int,
+) -> (crate::gostring::string, crate::types::int, crate::types::int) {
+    let mut hs = __chs13(which >= 100);
+    match which {
+        1 => hs.serverHello.supportedVersion = 0,
+        2 => hs.serverHello.supportedVersion = common::VersionTLS12,
+        3 => hs.serverHello.vers = common::VersionTLS13,
+        4 => hs.serverHello.ticketSupported = true,
+        5 => hs.serverHello.sessionId = alloc::vec![9u8, 9],
+        6 => hs.serverHello.compressionMethod = 1,
+        7 => {
+            hs.suite = cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_256_GCM_SHA384)
+        }
+        8 => hs.hello.cipherSuites = alloc::vec![cipher_suites::TLS_AES_256_GCM_SHA384],
+        _ => {}
+    }
+    let err = hs.checkServerHelloOrHRR();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    let id = match hs.suite {
+        Some(s) => crate::int(s.id),
+        None => 0,
+    };
+    return (text, id, crate::int(hs.c.__cipherSuite()));
+}
+
+// go: none — goish-only: see `handshake_client_tls13_checkServerHelloOrHRR`.
+// Reports `(first errText, second errText, wire after the first call,
+// wire after the second, hs.sentDummyCCS)`.
+#[doc(hidden)]
+pub fn handshake_client_tls13_sendDummyChangeCipherSpec() -> (
+    crate::gostring::string,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+) {
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    ));
+    let mut hs = __chs13(false);
+    hs.c.__setMemConn(sink.clone());
+    let e1 = hs.sendDummyChangeCipherSpec();
+    let first = sink.Lock().clone();
+    let e2 = hs.sendDummyChangeCipherSpec();
+    let t = |e: crate::error| {
+        if e == crate::errors::nil {
+            crate::gostring::string::from_static("")
+        } else {
+            e.Error()
+        }
+    };
+    return (t(e1), t(e2), first, sink.Lock().clone(), hs.sentDummyCCS);
+}
+
+// go: none — goish-only: see `handshake_client_tls13_checkServerHelloOrHRR`.
+// Reports `(errText, hs.usingPSK, c.didResume, len(c.ocspResponse))`.
+#[doc(hidden)]
+pub fn handshake_client_tls13_processServerHello(
+    which: crate::types::int,
+) -> (crate::gostring::string, bool, bool, crate::types::int) {
+    let mut hs = __chs13(false);
+    hs.suite = cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256);
+    match which {
+        1 => hs.serverHello.random = common::helloRetryRequestRandom.to_vec(),
+        2 => hs.serverHello.cookie = alloc::vec![1u8],
+        3 => hs.serverHello.selectedGroup = common::X25519.0,
+        4 => hs.serverHello.serverShare = handshake_messages::keyShare::default(),
+        5 => hs.serverHello.serverShare.group = common::CurveP256.0,
+        6 => {
+            hs.serverHello.selectedIdentityPresent = true;
+            hs.serverHello.selectedIdentity = 3;
+        }
+        7 => {
+            hs.serverHello.selectedIdentityPresent = true;
+            hs.hello.pskIdentities = alloc::vec![handshake_messages::pskIdentity::default()];
+            let mut ss = ticket::SessionState::default();
+            ss.__setCipherSuite(cipher_suites::TLS_AES_128_GCM_SHA256);
+            ss.__setOcspResponse(crate::goslice::slice::__from_vec(alloc::vec![7u8, 7]));
+            hs.session = Some(ss);
+        }
+        8 => {
+            hs.serverHello.selectedIdentityPresent = true;
+            hs.hello.pskIdentities = alloc::vec![handshake_messages::pskIdentity::default()];
+            let mut ss = ticket::SessionState::default();
+            ss.__setCipherSuite(cipher_suites::TLS_AES_256_GCM_SHA384);
+            hs.session = Some(ss);
+        }
+        _ => {}
+    }
+    let err = hs.processServerHello();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (
+        text,
+        hs.usingPSK,
+        hs.c.__didResume(),
+        hs.c.__ocspResponseLen(),
+    );
+}
+
+// go: none — goish-only: the valid TLS 1.3 ServerHello/ClientHello pair
+// the three shims above start from.
+#[doc(hidden)]
+fn __chs13(_unused: bool) -> handshake_client_tls13::clientHandshakeStateTLS13 {
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink);
+    c.__setHaveVers(true);
+    c.__setVers(common::VersionTLS13);
+    c.__setIsClient(true);
+
+    let mut sh = handshake_messages::serverHelloMsg::default();
+    sh.vers = common::VersionTLS12;
+    sh.supportedVersion = common::VersionTLS13;
+    sh.sessionId = alloc::vec![1u8, 2, 3];
+    sh.cipherSuite = cipher_suites::TLS_AES_128_GCM_SHA256;
+    sh.compressionMethod = common::compressionNone;
+    sh.random = alloc::vec![0u8; 32];
+    sh.serverShare = handshake_messages::keyShare {
+        group: common::X25519.0,
+        data: alloc::vec![9u8],
+    };
+
+    let mut ch = handshake_messages::clientHelloMsg::default();
+    ch.sessionId = alloc::vec![1u8, 2, 3];
+    ch.cipherSuites = alloc::vec![cipher_suites::TLS_AES_128_GCM_SHA256];
+    ch.keyShares = alloc::vec![handshake_messages::keyShare {
+        group: common::X25519.0,
+        data: alloc::vec![8u8],
+    }];
+
+    return handshake_client_tls13::clientHandshakeStateTLS13 {
+        c,
+        serverHello: sh,
+        hello: ch,
+        session: None,
+        usingPSK: false,
+        sentDummyCCS: false,
+        suite: None,
+    };
+}

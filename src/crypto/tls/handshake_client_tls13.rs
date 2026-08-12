@@ -1,3 +1,4 @@
+// goishlint:ignore GOISH018 handshake, processHelloRetryRequest, establishHandshakeKeys, readServerParameters, readServerCertificate, readServerFinished, sendClientCertificate, sendClientFinished, handleNewSessionTicket — the rest of clientHandshakeStateTLS13, which drives the whole exchange through the key schedule and the transcript; the live TLS 1.3 client below is a self-contained function, not a port of these. See ROADMAP.md.
 // crypto/tls/handshake_client_tls13.rs — TLS 1.3 client handshake.
 //
 // Port of:
@@ -1231,4 +1232,231 @@ fn do_client_handshake_tls13_inner_impl(
         resumption_master_secret,
         hash_size: suite.hash_size as u16, // goishlint:ignore GOISH005
     }, errors::nil)
+}
+
+// ── clientHandshakeStateTLS13 (handshake_client_tls13.go:26) ────────
+
+// Go: handshake_client_tls13.go:26-45
+//   type clientHandshakeStateTLS13 struct {
+//       c *Conn; ctx context.Context; serverHello *serverHelloMsg
+//       hello *clientHelloMsg; keyShareKeys *keySharePrivateKeys
+//       session *SessionState; earlySecret *tls13.EarlySecret
+//       binderKey []byte; certReq *certificateRequestMsgTLS13
+//       usingPSK, sentDummyCCS bool; suite *cipherSuiteTLS13
+//       transcript hash.Hash; masterSecret *tls13.MasterSecret
+//       trafficSecret []byte; echContext *echClientContext }
+/// The TLS 1.3 client handshake state.
+///
+/// **Partial record.** Only the fields the ported methods read are
+/// present; the key schedule, the transcript and the ECH context land
+/// with `handshake`, which drives the whole exchange.
+pub(crate) struct clientHandshakeStateTLS13 {
+    pub c: super::conn::Conn,
+    pub serverHello: super::handshake_messages::serverHelloMsg,
+    pub hello: super::handshake_messages::clientHelloMsg,
+    pub session: Option<super::ticket::SessionState>,
+    pub usingPSK: bool,
+    pub sentDummyCCS: bool,
+    pub suite: Option<&'static super::cipher_suites::cipherSuiteTLS13>,
+}
+
+impl clientHandshakeStateTLS13 {
+    // go: sdk 1.25.5 crypto/tls/handshake_client_tls13.go:165-217 clientHandshakeStateTLS13.checkServerHelloOrHRR
+    /// Go: the checks a ServerHello and a HelloRetryRequest share —
+    /// version, forbidden extensions, the echoed session ID, and the
+    /// cipher suite, which may not change across an HRR.
+    pub(crate) fn checkServerHelloOrHRR(&mut self) -> crate::error {
+        // Go: if hs.serverHello.supportedVersion == 0 {
+        //         c.sendAlert(alertMissingExtension)
+        //         return errors.New("tls: server selected TLS 1.3 using the legacy version field") }
+        if self.serverHello.supportedVersion == 0 {
+            self.c.sendAlert(super::alert::alertMissingExtension);
+            return crate::errors::New(
+                "tls: server selected TLS 1.3 using the legacy version field",
+            );
+        }
+
+        // Go: if hs.serverHello.supportedVersion != VersionTLS13 { … }
+        if self.serverHello.supportedVersion != super::common::VersionTLS13 {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New(
+                "tls: server selected an invalid version after a HelloRetryRequest",
+            );
+        }
+
+        // Go: if hs.serverHello.vers != VersionTLS12 { … }
+        if self.serverHello.vers != super::common::VersionTLS12 {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New("tls: server sent an incorrect legacy version");
+        }
+
+        // Go: if hs.serverHello.ocspStapling || … || len(hs.serverHello.scts) != 0 {
+        //         c.sendAlert(alertUnsupportedExtension)
+        //         return errors.New("tls: server sent a ServerHello extension forbidden in TLS 1.3") }
+        if self.serverHello.ocspStapling
+            || self.serverHello.ticketSupported
+            || self.serverHello.extendedMasterSecret
+            || self.serverHello.secureRenegotiationSupported
+            || self.serverHello.secureRenegotiation.len() != 0
+            || self.serverHello.alpnProtocol.len() != 0
+            || self.serverHello.scts.len() != 0
+        {
+            self.c.sendAlert(super::alert::alertUnsupportedExtension);
+            return crate::errors::New(
+                "tls: server sent a ServerHello extension forbidden in TLS 1.3",
+            );
+        }
+
+        // Go: if !bytes.Equal(hs.hello.sessionId, hs.serverHello.sessionId) { … }
+        if self.hello.sessionId != self.serverHello.sessionId {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New("tls: server did not echo the legacy session ID");
+        }
+
+        // Go: if hs.serverHello.compressionMethod != compressionNone { … }
+        if self.serverHello.compressionMethod != super::common::compressionNone {
+            self.c.sendAlert(super::alert::alertDecodeError);
+            return crate::errors::New("tls: server sent non-zero legacy TLS compression method");
+        }
+
+        // Go: selectedSuite := mutualCipherSuiteTLS13(hs.hello.cipherSuites, hs.serverHello.cipherSuite)
+        //     if hs.suite != nil && selectedSuite != hs.suite { … }
+        //     if selectedSuite == nil { … }
+        //     hs.suite = selectedSuite; c.cipherSuite = hs.suite.id; return nil
+        let selectedSuite = super::cipher_suites::mutualCipherSuiteTLS13(
+            crate::goslice::slice::__from_vec(self.hello.cipherSuites.clone()),
+            self.serverHello.cipherSuite,
+        );
+        if self.suite.is_some() && !suiteEq(selectedSuite, self.suite) {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New("tls: server changed cipher suite after a HelloRetryRequest");
+        }
+        if selectedSuite.is_none() {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New("tls: server chose an unconfigured cipher suite");
+        }
+        self.suite = selectedSuite;
+        self.c.__setCipherSuite(self.suite.unwrap().id);
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_client_tls13.go:221-231 clientHandshakeStateTLS13.sendDummyChangeCipherSpec
+    /// Go: send a ChangeCipherSpec once, for middlebox compatibility.
+    /// See RFC 8446, Appendix D.4.
+    ///
+    /// Deviation: the `hs.c.quic != nil` guard is absent — goish ships
+    /// no QUIC transport.
+    pub(crate) fn sendDummyChangeCipherSpec(&mut self) -> crate::error {
+        // Go: if hs.sentDummyCCS { return nil }
+        //     hs.sentDummyCCS = true
+        //     return hs.c.writeChangeCipherRecord()
+        if self.sentDummyCCS {
+            return crate::errors::nil;
+        }
+        self.sentDummyCCS = true;
+        return self.c.writeChangeCipherRecord();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_client_tls13.go:416-473 clientHandshakeStateTLS13.processServerHello
+    /// Go: the checks that apply to a real ServerHello only, plus
+    /// adopting the offered PSK when the server selected one.
+    pub(crate) fn processServerHello(&mut self) -> crate::error {
+        // Go: if bytes.Equal(hs.serverHello.random, helloRetryRequestRandom) {
+        //         c.sendAlert(alertUnexpectedMessage)
+        //         return errors.New("tls: server sent two HelloRetryRequest messages") }
+        if self.serverHello.random == super::common::helloRetryRequestRandom.to_vec() {
+            self.c.sendAlert(super::alert::alertUnexpectedMessage);
+            return crate::errors::New("tls: server sent two HelloRetryRequest messages");
+        }
+
+        // Go: if len(hs.serverHello.cookie) != 0 { … }
+        if self.serverHello.cookie.len() != 0 {
+            self.c.sendAlert(super::alert::alertUnsupportedExtension);
+            return crate::errors::New("tls: server sent a cookie in a normal ServerHello");
+        }
+
+        // Go: if hs.serverHello.selectedGroup != 0 { … }
+        if self.serverHello.selectedGroup != 0 {
+            self.c.sendAlert(super::alert::alertDecodeError);
+            return crate::errors::New("tls: malformed key_share extension");
+        }
+
+        // Go: if hs.serverHello.serverShare.group == 0 { … }
+        if self.serverHello.serverShare.group == 0 {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New("tls: server did not send a key share");
+        }
+        // Go: if !slices.ContainsFunc(hs.hello.keyShares, func(ks keyShare) bool {
+        //         return ks.group == hs.serverHello.serverShare.group }) { … }
+        let mut offered = false;
+        for ks in self.hello.keyShares.iter() {
+            if ks.group == self.serverHello.serverShare.group {
+                offered = true;
+            }
+        }
+        if !offered {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New("tls: server selected unsupported group");
+        }
+
+        // Go: if !hs.serverHello.selectedIdentityPresent { return nil }
+        if !self.serverHello.selectedIdentityPresent {
+            return crate::errors::nil;
+        }
+
+        // Go: if int(hs.serverHello.selectedIdentity) >= len(hs.hello.pskIdentities) { … }
+        if crate::int(self.serverHello.selectedIdentity) >= crate::int(self.hello.pskIdentities.len()) {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New("tls: server selected an invalid PSK");
+        }
+
+        // Go: if len(hs.hello.pskIdentities) != 1 || hs.session == nil {
+        //         return c.sendAlert(alertInternalError) }
+        if self.hello.pskIdentities.len() != 1 || self.session.is_none() {
+            return self.c.sendAlert(super::alert::alertInternalError);
+        }
+        let session = self.session.clone().unwrap();
+        // Go: pskSuite := cipherSuiteTLS13ByID(hs.session.cipherSuite)
+        //     if pskSuite == nil { return c.sendAlert(alertInternalError) }
+        let pskSuite = super::cipher_suites::cipherSuiteTLS13ByID(session.__cipherSuite());
+        if pskSuite.is_none() {
+            return self.c.sendAlert(super::alert::alertInternalError);
+        }
+        // Go: if pskSuite.hash != hs.suite.hash { … }
+        if pskSuite.unwrap().hash != self.suite.unwrap().hash {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New(
+                "tls: server selected an invalid PSK and cipher suite pair",
+            );
+        }
+
+        // Go: hs.usingPSK = true; c.didResume = true
+        //     c.peerCertificates = hs.session.peerCertificates
+        //     c.verifiedChains = hs.session.verifiedChains
+        //     c.ocspResponse = hs.session.ocspResponse
+        //     c.scts = hs.session.scts
+        //     return nil
+        self.usingPSK = true;
+        self.c.didResume = true;
+        self.c.peerCertificates = session.__peerCertificates();
+        self.c.verifiedChains = session.__verifiedChains();
+        self.c.ocspResponse = session.__ocspResponse();
+        self.c.scts = session.__scts();
+        return crate::errors::nil;
+    }
+}
+
+// go: none — goish-only: Go compares two `*cipherSuiteTLS13` pointers
+// with `!=`; goish holds `Option<&'static …>`, whose derived equality
+// would compare the suites field by field. Identity is what the check
+// means, so compare the addresses.
+fn suiteEq(
+    a: Option<&'static super::cipher_suites::cipherSuiteTLS13>,
+    b: Option<&'static super::cipher_suites::cipherSuiteTLS13>,
+) -> bool {
+    return match (a, b) {
+        (Some(x), Some(y)) => core::ptr::eq(x, y),
+        (None, None) => true,
+        _ => false,
+    };
 }

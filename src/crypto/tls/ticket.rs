@@ -419,6 +419,9 @@ impl SessionState {
     // go: none — goish-only: see above.
     #[doc(hidden)]
     pub fn __setCipherSuite(&mut self, v: uint16) { self.cipherSuite = v; }
+    // go: none — goish-only: `SessionState.ocspResponse` is unexported.
+    #[doc(hidden)]
+    pub fn __setOcspResponse(&mut self, v: slice<byte>) { self.ocspResponse = v; }
     // go: none — goish-only: see above.
     #[doc(hidden)]
     pub fn __setCreatedAt(&mut self, v: uint64) { self.createdAt = v; }

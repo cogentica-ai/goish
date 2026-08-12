@@ -2839,6 +2839,78 @@ fn main() {
     eq("saveSessionTicket with no cache key is not an error", sst2e, "");
     check_n("saveSessionTicket with no cache key caches nothing", sst2n, 0);
 
+
+    // ── clientHandshakeStateTLS13.checkServerHelloOrHRR ─────────────
+    //
+    // Ground truth: scripts/goref.sh crypto/tls over a valid TLS 1.3
+    // ServerHello/ClientHello pair, one tweak at a time.
+    let cshWant: [(&'static str, int, int); 9] = [
+        ("", 0x1301, 0x1301),
+        ("tls: server selected TLS 1.3 using the legacy version field", 0, 0),
+        ("tls: server selected an invalid version after a HelloRetryRequest", 0, 0),
+        ("tls: server sent an incorrect legacy version", 0, 0),
+        ("tls: server sent a ServerHello extension forbidden in TLS 1.3", 0, 0),
+        ("tls: server did not echo the legacy session ID", 0, 0),
+        ("tls: server sent non-zero legacy TLS compression method", 0, 0),
+        // The suite is left at what an earlier HelloRetryRequest chose.
+        ("tls: server changed cipher suite after a HelloRetryRequest", 0x1302, 0),
+        ("tls: server chose an unconfigured cipher suite", 0, 0),
+    ];
+    let mut cshI: int = 0;
+    while cshI < 9 {
+        let (wantErr, wantSuite, wantConnSuite) = cshWant[cshI as usize];
+        let (e, id, connID) = tls::handshake_client_tls13_checkServerHelloOrHRR(cshI);
+        eq("checkServerHelloOrHRR error", e, wantErr);
+        check_n("checkServerHelloOrHRR hs.suite", id, wantSuite);
+        check_n("checkServerHelloOrHRR c.cipherSuite", connID, wantConnSuite);
+        cshI += 1;
+    }
+
+    // ── clientHandshakeStateTLS13.sendDummyChangeCipherSpec ─────────
+    let (dc1, dc2, dcW1, dcW2, dcSent) = tls::handshake_client_tls13_sendDummyChangeCipherSpec();
+    eq("sendDummyChangeCipherSpec succeeds", dc1, "");
+    eq("sendDummyChangeCipherSpec is idempotent", dc2, "");
+    eq(
+        "sendDummyChangeCipherSpec writes one CCS record",
+        hexOf(dcW1),
+        "140303000101",
+    );
+    eq(
+        "sendDummyChangeCipherSpec writes nothing the second time",
+        hexOf(dcW2),
+        "140303000101",
+    );
+    check("sendDummyChangeCipherSpec records that it sent", dcSent);
+
+    // ── clientHandshakeStateTLS13.processServerHello ────────────────
+    let pshWant: [(&'static str, bool, bool, int); 9] = [
+        ("", false, false, 0),
+        ("tls: server sent two HelloRetryRequest messages", false, false, 0),
+        ("tls: server sent a cookie in a normal ServerHello", false, false, 0),
+        ("tls: malformed key_share extension", false, false, 0),
+        ("tls: server did not send a key share", false, false, 0),
+        ("tls: server selected unsupported group", false, false, 0),
+        ("tls: server selected an invalid PSK", false, false, 0),
+        // The accepted PSK carries the session's identity onto the Conn.
+        ("", true, true, 2),
+        (
+            "tls: server selected an invalid PSK and cipher suite pair",
+            false,
+            false,
+            0,
+        ),
+    ];
+    let mut pshI: int = 0;
+    while pshI < 9 {
+        let (wantErr, wantPSK, wantResume, wantOcsp) = pshWant[pshI as usize];
+        let (e, psk, resumed, ocsp) = tls::handshake_client_tls13_processServerHello(pshI);
+        eq("processServerHello error", e, wantErr);
+        check("processServerHello usingPSK", psk == wantPSK);
+        check("processServerHello didResume", resumed == wantResume);
+        check_n("processServerHello adopted ocspResponse", ocsp, wantOcsp);
+        pshI += 1;
+    }
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
