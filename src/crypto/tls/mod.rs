@@ -354,26 +354,6 @@ macro_rules! tls_debug {
     };
 }
 
-/// Helper: return the actual key length for TLS 1.3 based on suite ID.
-fn tls13_key_len(km: &record::KeyMaterial) -> usize {
-    match km.suite {
-        0x1302 => 32, // AES-256-GCM
-        0x1303 => 32, // ChaCha20-Poly1305
-        _ => 16,      // AES-128-GCM default
-    }
-}
-
-// ─── ConnReader adapter ───────────────────────────────────────────────
-// Wraps a `Box<dyn net::Conn>` as an `io::Reader` so we can pass it to
-// `record::read_record` which requires `&mut dyn io::Reader`.
-
-struct ConnReaderAdapter<'a>(&'a mut Box<dyn crate::net::Conn>);
-
-impl<'a> crate::io::Reader for ConnReaderAdapter<'a> {
-    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
-        self.0.Read(p)
-    }
-}
 
 pub use record::{
     KeyMaterial, DirectionKeys, AeadKeyMaterial, AeadDirectionKeys,
@@ -615,30 +595,6 @@ impl PartialEq<Config> for crate::nilval::Nil {
 
 // ─── Conn ─────────────────────────────────────────────────────────────
 
-/// Inner mutable state of a TLS connection.
-struct ConnInner {
-    /// Whether the TLS handshake has completed.
-    handshake_complete: bool,
-    /// Sequence numbers for each direction (post-handshake record layer).
-    client_seq: u64,
-    server_seq: u64,
-    /// Negotiated key material (all zeroes until handshake completes).
-    keys: KeyMaterial,
-    /// Buffer of decrypted application data not yet consumed by Read.
-    pending: Vec<byte>,
-}
-
-impl Default for ConnInner {
-    fn default() -> Self {
-        ConnInner {
-            handshake_complete: false,
-            client_seq: 0,
-            server_seq: 0,
-            keys: KeyMaterial::default(),
-            pending: Vec::new(),
-        }
-    }
-}
 
 /// `tls.Conn` — a TLS connection. Wraps an underlying `net::Conn` and
 /// provides record-layer encryption/decryption once the handshake is done.
@@ -1209,54 +1165,7 @@ where
 //     Extension extensions<0..2^16-2>;
 //   } NewSessionTicket;
 
-struct ParsedNewSessionTicket {
-    ticket_lifetime: u32,
-    ticket_age_add: u32,
-    ticket_nonce: alloc::vec::Vec<byte>,
-    ticket: alloc::vec::Vec<byte>,
-}
 
-fn parse_new_session_ticket(inner: &[byte]) -> Option<ParsedNewSessionTicket> {
-    if inner.len() < 4 || inner[0] != 4 {
-        return None;
-    }
-    // Skip the handshake header.
-    let body = &inner[4..];
-    if body.len() < 8 + 1 + 2 {
-        return None;
-    }
-    let ticket_lifetime = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
-    let ticket_age_add  = u32::from_be_bytes([body[4], body[5], body[6], body[7]]);
-    let mut p = 8usize;
-
-    // ticket_nonce<0..255>
-    let nonce_len = body[p] as usize;
-    p += 1;
-    if p + nonce_len > body.len() {
-        return None;
-    }
-    let ticket_nonce = body[p..p + nonce_len].to_vec();
-    p += nonce_len;
-
-    // ticket<1..2^16-1>
-    if p + 2 > body.len() {
-        return None;
-    }
-    let ticket_len = u16::from_be_bytes([body[p], body[p + 1]]) as usize;
-    p += 2;
-    if p + ticket_len > body.len() || ticket_len == 0 {
-        return None;
-    }
-    let ticket = body[p..p + ticket_len].to_vec();
-    // extensions follow but we don't need them for resumption itself.
-
-    Some(ParsedNewSessionTicket {
-        ticket_lifetime,
-        ticket_age_add,
-        ticket_nonce,
-        ticket,
-    })
-}
 
 // go: none — goish idiom: fill the `#[goish::interface]` downcast
 // registries for the types this package declares. See AGENTS.md §9b.
