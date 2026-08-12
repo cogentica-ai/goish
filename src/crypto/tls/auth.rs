@@ -328,7 +328,7 @@ const _: Option<Box<u8>> = None;
 // `Arc<dyn core::any::Any>`, which is what `Signer.Public` returns. This
 // re-wraps the latter as the former so the scheme table has one body
 // rather than two.
-fn anyOfPublicKey(pub_: &crypto::PublicKey) -> Any {
+pub(crate) fn anyOfPublicKey(pub_: &crypto::PublicKey) -> Any {
     if let Some(k) = pub_.downcast_ref::<ecdsa::PublicKey>() {
         return Any::new_fn(k.clone());
     }
@@ -348,7 +348,7 @@ fn anyOfPublicKey(pub_: &crypto::PublicKey) -> Any {
 // payload has to be dereferenced first, which is exactly what
 // `goany::Any::As` does internally. x509's CreateCertificate is safe
 // because it takes a `goany::Any`, not a `crypto::PrivateKey`.
-fn signerOf(key: &crypto::PrivateKey) -> Option<&(dyn crypto::Signer + Send + Sync)> {
+pub(crate) fn signerOf(key: &crypto::PrivateKey) -> Option<&(dyn crypto::Signer + Send + Sync)> {
     return <dyn crypto::Signer + Send + Sync as crate::goany::DowncastableFromAny>::from_any(
         &**key,
     );

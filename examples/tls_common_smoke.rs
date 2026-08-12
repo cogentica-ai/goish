@@ -1388,6 +1388,44 @@ fn main() {
     eq("Config.supportedCipherSuites pinned",
        hexU16(tls::common_configSupportedCipherSuites(7)), "c02f 002f");
 
+    // ─── key_agreement.go: the TLS 1.0-1.2 key agreements. The ECDHE
+    //     case runs the whole exchange — server SKX, client verify,
+    //     client CKX, server ECDH — with an Ed25519 certificate, and
+    //     ends by checking both sides derived the same premaster
+    //     secret. Structure from goref.sh.
+    let (kaErr, skxLen, sigAlg, sigLen, pmsLen, ckxLen, agreed) =
+        tls::key_agreement_ecdheRoundTrip();
+    eq("ECDHE round trip err", kaErr, "");
+    check_n("ECDHE ServerKeyExchange length", skxLen, 104);
+    eq("ECDHE signature algorithm is Ed25519", hexOf(sigAlg), "0807");
+    check_n("ECDHE signature length", sigLen, 64);
+    check_n("ECDHE premaster secret length", pmsLen, 32);
+    check_n("ECDHE ClientKeyExchange length", ckxLen, 33);
+    check("ECDHE both sides agree on X25519 and the secret", agreed);
+
+    eq("rsaKeyAgreement generateServerKeyExchange is nil, nil",
+       tls::key_agreement_errorPath(0), "");
+    eq("rsaKeyAgreement rejects a ServerKeyExchange",
+       tls::key_agreement_errorPath(1), "tls: unexpected ServerKeyExchange");
+    eq("rsa CKX empty", tls::key_agreement_errorPath(2),
+       "tls: invalid ClientKeyExchange message");
+    eq("rsa CKX one byte", tls::key_agreement_errorPath(3),
+       "tls: invalid ClientKeyExchange message");
+    eq("rsa CKX length mismatch", tls::key_agreement_errorPath(4),
+       "tls: invalid ClientKeyExchange message");
+    eq("rsa CKX without a Decrypter", tls::key_agreement_errorPath(5),
+       "tls: certificate private key does not implement crypto.Decrypter");
+    eq("ecdhe SKX with no curves offered", tls::key_agreement_errorPath(6),
+       "tls: no supported elliptic curves offered");
+    eq("ecdhe CKX before a ServerKeyExchange", tls::key_agreement_errorPath(7),
+       "tls: missing ServerKeyExchange message");
+    eq("ecdhe SKX too short", tls::key_agreement_errorPath(8),
+       "tls: invalid ServerKeyExchange message");
+    eq("ecdhe SKX with a non-named curve", tls::key_agreement_errorPath(9),
+       "tls: server selected unsupported curve");
+    eq("ecdhe SKX with an unoffered curve", tls::key_agreement_errorPath(10),
+       "tls: server selected unoffered curve");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

@@ -2585,3 +2585,155 @@ pub fn common_configSupportedCipherSuites(
 ) -> crate::goslice::slice<crate::types::uint16> {
     return common_sampleConfig(which).supportedCipherSuites();
 }
+
+// go: none — goish-only: key_agreement.go's interface and its two
+// implementations are unexported in Go, where the tests are in-package.
+// This runs the full TLS 1.2 ECDHE exchange with an Ed25519 certificate
+// — server SKX, client processing, client CKX, server processing — and
+// reports what both sides ended up with.
+#[doc(hidden)]
+pub fn key_agreement_ecdheRoundTrip() -> (
+    crate::gostring::string,
+    crate::types::int,
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::int,
+    crate::types::int,
+    crate::types::int,
+    bool,
+) {
+    use key_agreement::keyAgreement as _;
+    let cfg = Config::default();
+    let seed = crate::goslice::slice::__from_vec(alloc::vec![7u8; 32]);
+    let dk = crate::crypto::ed25519::NewKeyFromSeed(seed);
+    let pubk = dk.Public();
+    let mut cert = common::Certificate::default();
+    cert.PrivateKey = alloc::sync::Arc::new(dk);
+
+    let mut ch = handshake_messages::clientHelloMsg::default();
+    ch.vers = common::VersionTLS12;
+    ch.random = alloc::vec![0u8; 32];
+    ch.supportedCurves = alloc::vec![common::X25519.0, common::CurveP256.0];
+    ch.supportedSignatureAlgorithms = alloc::vec![common::Ed25519.0];
+    let mut sh = handshake_messages::serverHelloMsg::default();
+    sh.vers = common::VersionTLS12;
+    sh.random = alloc::vec![0u8; 32];
+
+    let mut ka = key_agreement::ecdheKeyAgreement::default();
+    ka.version = common::VersionTLS12;
+    let (skx, err) = ka.generateServerKeyExchange(&cfg, &cert, &ch, &sh);
+    if err != crate::errors::nil || skx.is_none() {
+        return (
+            err.Error(),
+            0,
+            crate::goslice::slice::new(),
+            0,
+            0,
+            0,
+            false,
+        );
+    }
+    let skx = skx.unwrap();
+    let publen = skx.key[3] as crate::types::int;
+    let sigalg = skx.key.slice(4 + publen, 4 + publen + 2);
+    let siglen = ((skx.key[(4 + publen + 2) as usize] as crate::types::int) << 8)
+        | (skx.key[(4 + publen + 3) as usize] as crate::types::int);
+
+    let mut x509cert = crate::crypto::x509::Certificate::default();
+    x509cert.PublicKey = crate::goany::Any::new_fn(
+        pubk.downcast_ref::<crate::crypto::ed25519::PublicKey>()
+            .unwrap()
+            .clone(),
+    );
+
+    let mut kc = key_agreement::ecdheKeyAgreement::default();
+    kc.version = common::VersionTLS12;
+    let perr = kc.processServerKeyExchange(&cfg, &ch, &sh, &x509cert, &skx);
+    if perr != crate::errors::nil {
+        return (perr.Error(), skx.key.Len(), sigalg, siglen, 0, 0, false);
+    }
+    let (pms, ckx, cerr) = kc.generateClientKeyExchange(&cfg, &ch, &x509cert);
+    if cerr != crate::errors::nil || ckx.is_none() {
+        return (cerr.Error(), skx.key.Len(), sigalg, siglen, 0, 0, false);
+    }
+    let ckx = ckx.unwrap();
+    let (pms2, serr) = ka.processClientKeyExchange(&cfg, &cert, &ckx, common::VersionTLS12);
+    if serr != crate::errors::nil {
+        return (serr.Error(), skx.key.Len(), sigalg, siglen, 0, 0, false);
+    }
+    return (
+        crate::gostring::string::from_static(""),
+        skx.key.Len(),
+        sigalg,
+        siglen,
+        pms.Len(),
+        ckx.ciphertext.Len(),
+        pms == pms2 && ka.curveID == common::X25519,
+    );
+}
+
+// go: none — goish-only: see `key_agreement_ecdheRoundTrip`. `which`
+// selects an error path; the return is that path's message.
+#[doc(hidden)]
+pub fn key_agreement_errorPath(which: crate::types::int) -> crate::gostring::string {
+    use key_agreement::keyAgreement as _;
+    let cfg = Config::default();
+    let cert = common::Certificate::default();
+    let ch = handshake_messages::clientHelloMsg::default();
+    let sh = handshake_messages::serverHelloMsg::default();
+    let x509cert = crate::crypto::x509::Certificate::default();
+    let mut rka = key_agreement::rsaKeyAgreement::default();
+    let mut eka = key_agreement::ecdheKeyAgreement::default();
+    eka.version = common::VersionTLS12;
+
+    let ckxOf = |v: alloc::vec::Vec<crate::types::byte>| {
+        let mut m = handshake_messages::clientKeyExchangeMsg::default();
+        m.ciphertext = crate::goslice::slice::__from_vec(v);
+        return m;
+    };
+    let skxOf = |v: alloc::vec::Vec<crate::types::byte>| {
+        let mut m = handshake_messages::serverKeyExchangeMsg::default();
+        m.key = crate::goslice::slice::__from_vec(v);
+        return m;
+    };
+    let e: crate::error = match which {
+        0 => {
+            let (skx, err) = rka.generateServerKeyExchange(&cfg, &cert, &ch, &sh);
+            if skx.is_some() {
+                return crate::gostring::string::from_static("unexpected ServerKeyExchange");
+            }
+            err
+        }
+        1 => rka.processServerKeyExchange(&cfg, &ch, &sh, &x509cert, &skxOf(alloc::vec![])),
+        2 => rka.processClientKeyExchange(&cfg, &cert, &ckxOf(alloc::vec![]), 0x0303).1,
+        3 => rka.processClientKeyExchange(&cfg, &cert, &ckxOf(alloc::vec![1u8]), 0x0303).1,
+        4 => {
+            rka.processClientKeyExchange(&cfg, &cert, &ckxOf(alloc::vec![0u8, 5, 1, 2]), 0x0303)
+                .1
+        }
+        5 => {
+            rka.processClientKeyExchange(&cfg, &cert, &ckxOf(alloc::vec![0u8, 2, 9, 9]), 0x0303)
+                .1
+        }
+        6 => eka.generateServerKeyExchange(&cfg, &cert, &ch, &sh).1,
+        7 => eka.generateClientKeyExchange(&cfg, &ch, &x509cert).2,
+        8 => eka.processServerKeyExchange(&cfg, &ch, &sh, &x509cert, &skxOf(alloc::vec![1u8, 2])),
+        9 => eka.processServerKeyExchange(
+            &cfg,
+            &ch,
+            &sh,
+            &x509cert,
+            &skxOf(alloc::vec![4u8, 0, 0x1d, 0]),
+        ),
+        _ => eka.processServerKeyExchange(
+            &cfg,
+            &ch,
+            &sh,
+            &x509cert,
+            &skxOf(alloc::vec![3u8, 0, 0x18, 0, 0, 0]),
+        ),
+    };
+    if e == crate::errors::nil {
+        return crate::gostring::string::from_static("");
+    }
+    return e.Error();
+}
