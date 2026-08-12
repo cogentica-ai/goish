@@ -1996,6 +1996,63 @@ fn main() {
     eq("buildRetryConfigList emits only the SendAsRetry keys",
        hexOf(tls::ech_buildRetryConfigList(1)), "0003030405");
 
+    // ─── conn.go: Go's Conn record and the methods that read it without
+    //     driving the handshake. Nothing here is reachable from goish's
+    //     own client yet — tls::Conn is still the hand-written wrapper —
+    //     so this is the shape it has to become. From goref.sh.
+    eq("VerifyHostname on a server connection", tls::conn_verifyHostname(0),
+       "tls: VerifyHostname called on TLS server connection");
+    eq("VerifyHostname before the handshake", tls::conn_verifyHostname(1),
+       "tls: handshake has not yet been performed");
+    eq("VerifyHostname without a verified chain", tls::conn_verifyHostname(2),
+       "tls: handshake did not verify certificate chain");
+
+    // A handshake record is never dynamically sized.
+    check_n("maxPayloadSizeForWrite for a handshake record",
+            tls::conn_maxPayloadSizeForWrite(0)[0], 16384);
+    check_n("maxPayloadSizeForWrite with dynamic sizing disabled",
+            tls::conn_maxPayloadSizeForWrite(1)[0], 16384);
+    // Application records grow in arithmetic progression from one TCP
+    // segment, so early writes fit in one packet and latency stays low.
+    let mp = tls::conn_maxPayloadSizeForWrite(2);
+    check_n("maxPayloadSizeForWrite packet 1", mp[0], 1203);
+    check_n("maxPayloadSizeForWrite packet 2", mp[1], 2406);
+    check_n("maxPayloadSizeForWrite packet 3", mp[2], 3609);
+    check_n("maxPayloadSizeForWrite packet 4", mp[3], 4812);
+    // With a TLS 1.3 AEAD the budget drops by the 16-byte tag and the
+    // one-byte encrypted ContentType: 1203 - 16 - 1 = 1186.
+    let mp13 = tls::conn_maxPayloadSizeForWrite(3);
+    check_n("maxPayloadSizeForWrite AEAD packet 1", mp13[0], 1186);
+    check_n("maxPayloadSizeForWrite AEAD packet 2", mp13[1], 2372);
+    check_n("maxPayloadSizeForWrite AEAD packet 3", mp13[2], 3558);
+    check_n("maxPayloadSizeForWrite past the boost threshold",
+            tls::conn_maxPayloadSizeForWrite(4)[0], 16384);
+
+    let (csComplete, csVers, csSuite, csSNI, csALPN, csMutual, csCurve, csUnique,
+         csEkmErr, csUnique13Empty, csRenegErr) = tls::conn_connectionState();
+    check("ConnectionState HandshakeComplete", csComplete);
+    check_n("ConnectionState Version", csVers, 0x0303);
+    check_n("ConnectionState CipherSuite", csSuite, 0xc02f);
+    eq("ConnectionState ServerName", csSNI, "example.com");
+    eq("ConnectionState NegotiatedProtocol", csALPN, "h2");
+    // Deprecated in Go and always true.
+    check("ConnectionState NegotiatedProtocolIsMutual", csMutual);
+    check_n("ConnectionState CurveID", csCurve, 29);
+    // tls-unique is the client Finished when the client went first.
+    eq("ConnectionState TLSUnique", hexOf(csUnique), "010203000000000000000000");
+    // Below TLS 1.3 without EMS the exporter refuses.
+    eq("ConnectionState exporter without EMS", csEkmErr,
+       "crypto/tls: ExportKeyingMaterial is unavailable when neither TLS 1.3 nor Extended Master Secret are negotiated; override with GODEBUG=tlsunsafeekm=1");
+    // RFC 5929 tls-unique does not exist at TLS 1.3.
+    check("ConnectionState has no TLSUnique at TLS 1.3", csUnique13Empty);
+    // Renegotiation disables the exporter outright, even at TLS 1.3.
+    eq("ConnectionState exporter with renegotiation enabled", csRenegErr,
+       "crypto/tls: ExportKeyingMaterial is unavailable when renegotiation is enabled");
+
+    let (rheMsg, rheHeader) = tls::conn_newRecordHeaderError();
+    eq("newRecordHeaderError message", rheMsg, "tls: boom");
+    eq("newRecordHeaderError captures the record header", hexOf(rheHeader), "1603010005");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

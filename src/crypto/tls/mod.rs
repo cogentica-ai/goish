@@ -443,6 +443,13 @@ pub struct Config {
     /// still the field initLegacySessionTicketKeyRLocked reads.
     /// Reference: common.go:694.
     pub SessionTicketKey: [byte; 32],
+    /// Renegotiation controls what types of renegotiation are
+    /// supported. The default, none, is correct for the vast majority
+    /// of applications. Reference: common.go:752.
+    pub Renegotiation: common::RenegotiationSupport,
+    /// DynamicRecordSizingDisabled disables adaptive sizing of TLS
+    /// records. Reference: common.go:745.
+    pub DynamicRecordSizingDisabled: bool,
     /// Explicitly configured ticket keys, newest first.
     ///
     /// Unexported in Go. Rust's struct-update syntax
@@ -4143,4 +4150,139 @@ pub fn ech_buildRetryConfigList(
     };
     let (out, _) = ech::buildRetryConfigList(keys);
     return out;
+}
+
+// go: none — goish-only: Conn's fields are unexported in Go, where the
+// tests are in-package. `which`: 0 = a server Conn, 1 = a client with no
+// handshake, 2 = a client with a handshake but no verified chain.
+#[doc(hidden)]
+pub fn conn_verifyHostname(which: crate::types::int) -> crate::gostring::string {
+    let mut c = conn::Conn::default();
+    if which >= 1 {
+        c.__setIsClient(true);
+    }
+    if which >= 2 {
+        c.__setHandshakeComplete(true);
+    }
+    return c
+        .VerifyHostname(crate::gostring::string::from_static("x"))
+        .Error();
+}
+
+// go: none — goish-only: see `conn_verifyHostname`. `which`: 0 = a
+// handshake record, 1 = dynamic sizing disabled, 2 = four successive
+// application records with no cipher, 3 = three with a TLS 1.3 AEAD,
+// 4 = past the boost threshold.
+#[doc(hidden)]
+pub fn conn_maxPayloadSizeForWrite(
+    which: crate::types::int,
+) -> crate::goslice::slice<crate::types::int> {
+    let mut c = conn::Conn::default();
+    let mut out: alloc::vec::Vec<crate::types::int> = alloc::vec::Vec::new();
+    if which == 0 {
+        out.push(c.maxPayloadSizeForWrite(common::recordTypeHandshake));
+    } else if which == 1 {
+        c.__setDynamicRecordSizingDisabled(true);
+        out.push(c.maxPayloadSizeForWrite(common::recordTypeApplicationData));
+    } else if which == 2 {
+        let mut i = 0;
+        while i < 4 {
+            out.push(c.maxPayloadSizeForWrite(common::recordTypeApplicationData));
+            i += 1;
+        }
+    } else if which == 3 {
+        c.__setVers(common::VersionTLS13);
+        let suite =
+            cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256).unwrap();
+        c.__setOutTrafficSecret(suite, crate::goslice::slice::__from_vec(alloc::vec![0u8; 32]));
+        let mut i = 0;
+        while i < 3 {
+            out.push(c.maxPayloadSizeForWrite(common::recordTypeApplicationData));
+            i += 1;
+        }
+    } else {
+        c.__setBytesSent(conn::recordSizeBoostThreshold);
+        out.push(c.maxPayloadSizeForWrite(common::recordTypeApplicationData));
+    }
+    return crate::goslice::slice::__from_vec(out);
+}
+
+// go: none — goish-only: see `conn_verifyHostname`. Reports
+// `(HandshakeComplete, Version, CipherSuite, ServerName,
+// NegotiatedProtocol, NegotiatedProtocolIsMutual, CurveID, TLSUnique,
+// the ekm error, TLSUnique is empty at TLS 1.3, the renegotiation ekm
+// error)`.
+#[doc(hidden)]
+pub fn conn_connectionState() -> (
+    bool,
+    crate::types::int,
+    crate::types::int,
+    crate::gostring::string,
+    crate::gostring::string,
+    bool,
+    crate::types::int,
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+    bool,
+    crate::gostring::string,
+) {
+    let mut k = conn::Conn::default();
+    k.__setVers(common::VersionTLS12);
+    k.__setHandshakeComplete(true);
+    k.__setStateFields(
+        cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+        crate::gostring::string::from_static("example.com"),
+        crate::gostring::string::from_static("h2"),
+        common::X25519,
+    );
+    let st = k.ConnectionState();
+    let (_, ekmErr) = st.ExportKeyingMaterial(
+        crate::gostring::string::from_static("l"),
+        crate::goslice::slice::new(),
+        8,
+    );
+
+    let mut k13 = conn::Conn::default();
+    k13.__setVers(common::VersionTLS13);
+    let st13 = k13.ConnectionState();
+
+    let mut kr = conn::Conn::default();
+    kr.__setVers(common::VersionTLS13);
+    kr.__setRenegotiation(common::RenegotiateOnceAsClient);
+    let (_, rErr) = kr.ConnectionState().ExportKeyingMaterial(
+        crate::gostring::string::from_static("l"),
+        crate::goslice::slice::new(),
+        8,
+    );
+
+    return (
+        st.HandshakeComplete,
+        st.Version as crate::types::int,
+        st.CipherSuite as crate::types::int,
+        st.ServerName.clone(),
+        st.NegotiatedProtocol.clone(),
+        st.NegotiatedProtocolIsMutual,
+        st.CurveID.0 as crate::types::int,
+        st.TLSUnique.clone(),
+        ekmErr.Error(),
+        st13.TLSUnique.Len() == 0,
+        rErr.Error(),
+    );
+}
+
+// go: none — goish-only: see `conn_verifyHostname`.
+#[doc(hidden)]
+pub fn conn_newRecordHeaderError() -> (
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let mut m = conn::Conn::default();
+    m.__setRawInput(crate::goslice::slice::__from_vec(alloc::vec![
+        0x16u8, 0x03, 0x01, 0x00, 0x05, 0xff
+    ]));
+    let e = m.newRecordHeaderError(crate::gostring::string::from_static("boom"));
+    return (
+        e.Error(),
+        crate::goslice::slice::__from_vec(e.RecordHeader.to_vec()),
+    );
 }

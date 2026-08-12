@@ -1,4 +1,4 @@
-// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt
+// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked
 //
 // crypto/tls — the record layer's cipher state.
 //
@@ -8,9 +8,9 @@
 // its `decrypt`/`encrypt`, `atLeastReader` and the free functions they
 // need — none of which touches a `Conn`.
 //
-// goishlint:ignore GOISH018 SetReadDeadline, SetWriteDeadline, NetConn, newRecordHeaderError, readRecord, readChangeCipherSpec, readRecordOrCCS, retryReadRecord, readFromUntil, sendAlertLocked, sendAlert, maxPayloadSizeForWrite, flush, writeRecordLocked, writeHandshakeRecord, writeChangeCipherRecord, readHandshakeBytes, readHandshake, unmarshalHandshakeMessage, handleRenegotiation, handlePostHandshakeMessage, handleKeyUpdate, CloseWrite, closeNotify, HandshakeContext, handshakeContext, ConnectionState, connectionStateLocked, OCSPResponse, VerifyHostname, LocalAddr, RemoteAddr, SetDeadline, write, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
-// goishlint:ignore GOISH019 Conn — same.
-// goishlint:ignore GOISH021 Conn, outBufPool, errShutdown, errEarlyCloseWrite, maxUselessBytes, tcpMSSEstimate, recordSizeBoostThreshold, tlsunsafeekm — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write.
+// goishlint:ignore GOISH018 readRecord, readChangeCipherSpec, readRecordOrCCS, retryReadRecord, readFromUntil, sendAlertLocked, sendAlert, flush, writeRecordLocked, writeHandshakeRecord, writeChangeCipherRecord, readHandshakeBytes, readHandshake, unmarshalHandshakeMessage, handleRenegotiation, handlePostHandshakeMessage, handleKeyUpdate, CloseWrite, closeNotify, HandshakeContext, handshakeContext, write, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
+// goishlint:ignore GOISH019  — same.
+// goishlint:ignore GOISH021 outBufPool, errShutdown, errEarlyCloseWrite, maxUselessBytes, tlsunsafeekm — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write.
 //
 // One deviation: `setErrorLocked` asserts `err.(net.Error)` in Go, to
 // wrap a transient network error as permanent. goish's `net` exposes no
@@ -871,3 +871,456 @@ impl halfConn {
         return (slice::__from_vec(rec), errors::nil);
     }
 }
+
+// ─── Conn ─────────────────────────────────────────────────────────────
+//
+// Go's `Conn` record and the methods that read it without driving the
+// handshake. Nothing here is reachable from goish's own TLS client yet:
+// `tls::Conn` in mod[rs] is a four-field wrapper that delegates to
+// record[rs] and handshake_client[rs], and `tls::Dial` returns that one.
+// This is the shape it has to become, ported and diffable in the
+// meantime — the same arrangement key_agreement[rs] and prf[rs] are in.
+
+// Go: conn.go:43-124
+//   type Conn struct { conn net.Conn; isClient bool; handshakeFn …; quic …
+//                      isHandshakeComplete atomic.Bool; handshakeMutex sync.Mutex
+//                      handshakeErr error; vers uint16; haveVers bool; config *Config
+//                      handshakes int; extMasterSecret bool; didResume bool; didHRR bool
+//                      cipherSuite uint16; curveID CurveID; peerSigAlg SignatureScheme
+//                      ocspResponse []byte; scts [][]byte
+//                      peerCertificates []*x509.Certificate
+//                      verifiedChains [][]*x509.Certificate; serverName string
+//                      secureRenegotiation bool; ekm …; resumptionSecret []byte
+//                      echAccepted bool; ticketKeys []ticketKey
+//                      clientFinishedIsFirst bool; closeNotifyErr error
+//                      closeNotifySent bool; clientFinished, serverFinished [12]byte
+//                      clientProtocol string; in, out halfConn; rawInput bytes.Buffer
+//                      input bytes.Reader; hand bytes.Buffer; buffering bool
+//                      sendBuf []byte; bytesSent, packetsSent int64; retryCount int
+//                      activeCall atomic.Int32; tmp [16]byte }
+/// Go: "A Conn represents a secured connection. It implements the
+/// net.Conn interface."
+///
+/// Deviations, all structural:
+///
+///   * `handshakeFn` and `quic` are absent — they arrive with the state
+///     machines and the QUIC event loop respectively.
+///   * `isHandshakeComplete` is a plain `bool` and `handshakeMutex`,
+///     `activeCall` are gone: goish methods take `&mut self`, so the
+///     borrow checker gives the exclusion the atomics and the mutex buy.
+///   * `rawInput`/`input`/`hand` are `Vec<byte>` with an explicit read
+///     offset rather than `bytes.Buffer`/`bytes.Reader`.
+pub struct Conn {
+    pub(crate) conn: Option<alloc::boxed::Box<dyn crate::net::Conn>>,
+    pub(crate) isClient: bool,
+    pub(crate) isHandshakeComplete: bool,
+    pub(crate) handshakeErr: error,
+    /// TLS version.
+    pub(crate) vers: uint16,
+    /// Version has been negotiated.
+    pub(crate) haveVers: bool,
+    /// Configuration passed to constructor.
+    pub(crate) config: super::Config,
+    pub(crate) handshakes: int,
+    pub(crate) extMasterSecret: bool,
+    /// Whether this connection was a session resumption.
+    pub(crate) didResume: bool,
+    /// Whether a HelloRetryRequest was sent/received.
+    pub(crate) didHRR: bool,
+    pub(crate) cipherSuite: uint16,
+    pub(crate) curveID: super::common::CurveID,
+    pub(crate) peerSigAlg: super::common::SignatureScheme,
+    /// Stapled OCSP response.
+    pub(crate) ocspResponse: slice<byte>,
+    /// Signed certificate timestamps from server.
+    pub(crate) scts: slice<slice<byte>>,
+    pub(crate) peerCertificates: slice<crate::crypto::x509::Certificate>,
+    pub(crate) verifiedChains: slice<slice<crate::crypto::x509::Certificate>>,
+    pub(crate) serverName: string,
+    pub(crate) secureRenegotiation: bool,
+    pub(crate) ekm:
+        Option<alloc::sync::Arc<dyn Fn(string, slice<byte>, int) -> (slice<byte>, error) + Send + Sync>>,
+    pub(crate) resumptionSecret: slice<byte>,
+    pub(crate) echAccepted: bool,
+    pub(crate) ticketKeys: slice<super::common::ticketKey>,
+    pub(crate) clientFinishedIsFirst: bool,
+    pub(crate) closeNotifyErr: error,
+    pub(crate) closeNotifySent: bool,
+    pub(crate) clientFinished: [byte; 12],
+    pub(crate) serverFinished: [byte; 12],
+    pub(crate) clientProtocol: string,
+    pub(crate) in_: halfConn,
+    pub(crate) out: halfConn,
+    /// Raw input, starting with a record header.
+    pub(crate) rawInput: Vec<byte>,
+    /// Application data waiting to be read, from rawInput.Next.
+    pub(crate) input: Vec<byte>,
+    pub(crate) inputOff: int,
+    /// Handshake data waiting to be read.
+    pub(crate) hand: Vec<byte>,
+    /// Whether records are buffered in sendBuf.
+    pub(crate) buffering: bool,
+    /// A buffer of records waiting to be sent.
+    pub(crate) sendBuf: Vec<byte>,
+    pub(crate) bytesSent: crate::types::int64,
+    pub(crate) packetsSent: crate::types::int64,
+    pub(crate) retryCount: int,
+    pub(crate) tmp: [byte; 16],
+}
+
+impl Default for Conn {
+    // go: none — goish idiom: Go's zero value. `conn` is nil until
+    // `tls.Client`/`tls.Server` sets it.
+    fn default() -> Self {
+        return Conn {
+            conn: None,
+            isClient: false,
+            isHandshakeComplete: false,
+            handshakeErr: errors::nil,
+            vers: 0,
+            haveVers: false,
+            config: super::Config::default(),
+            handshakes: 0,
+            extMasterSecret: false,
+            didResume: false,
+            didHRR: false,
+            cipherSuite: 0,
+            curveID: super::common::CurveID(0),
+            peerSigAlg: super::common::SignatureScheme(0),
+            ocspResponse: slice::new(),
+            scts: slice::new(),
+            peerCertificates: slice::new(),
+            verifiedChains: slice::new(),
+            serverName: string::from_static(""),
+            secureRenegotiation: false,
+            ekm: None,
+            resumptionSecret: slice::new(),
+            echAccepted: false,
+            ticketKeys: slice::new(),
+            clientFinishedIsFirst: false,
+            closeNotifyErr: errors::nil,
+            closeNotifySent: false,
+            clientFinished: [0u8; 12],
+            serverFinished: [0u8; 12],
+            clientProtocol: string::from_static(""),
+            in_: halfConn::default(),
+            out: halfConn::default(),
+            rawInput: Vec::new(),
+            input: Vec::new(),
+            inputOff: 0,
+            hand: Vec::new(),
+            buffering: false,
+            sendBuf: Vec::new(),
+            bytesSent: 0,
+            packetsSent: 0,
+            retryCount: 0,
+            tmp: [0u8; 16],
+        };
+    }
+}
+
+impl Conn {
+
+    // go: none — goish-only: Conn's fields are unexported in Go, where
+    // the tests are in-package. goish examples are external crates, so
+    // the fields the reference tests set need named setters. Nothing in
+    // the port uses them.
+    #[doc(hidden)]
+    pub fn __setIsClient(&mut self, v: bool) { self.isClient = v; }
+    // go: none — goish-only: see `__setIsClient`.
+    #[doc(hidden)]
+    pub fn __setHandshakeComplete(&mut self, v: bool) { self.isHandshakeComplete = v; }
+    // go: none — goish-only: see `__setIsClient`.
+    #[doc(hidden)]
+    pub fn __setVers(&mut self, v: uint16) { self.vers = v; }
+    // go: none — goish-only: see `__setIsClient`.
+    #[doc(hidden)]
+    pub fn __setBytesSent(&mut self, v: crate::types::int64) { self.bytesSent = v; }
+    // go: none — goish-only: see `__setIsClient`.
+    #[doc(hidden)]
+    pub fn __setDynamicRecordSizingDisabled(&mut self, v: bool) {
+        self.config.DynamicRecordSizingDisabled = v;
+    }
+    // go: none — goish-only: see `__setIsClient`.
+    #[doc(hidden)]
+    pub fn __setRenegotiation(&mut self, v: super::common::RenegotiationSupport) {
+        self.config.Renegotiation = v;
+    }
+    // go: none — goish-only: see `__setIsClient`.
+    #[doc(hidden)]
+    pub fn __setRawInput(&mut self, v: slice<byte>) {
+        let raw: &[byte] = &v;
+        self.rawInput = raw.to_vec();
+    }
+    // go: none — goish-only: see `__setIsClient`.
+    #[doc(hidden)]
+    pub fn __setOutTrafficSecret(
+        &mut self,
+        suite: &'static cipherSuiteTLS13,
+        secret: slice<byte>,
+    ) {
+        self.out
+            .setTrafficSecret(suite, QUICEncryptionLevel(0), secret);
+    }
+    // go: none — goish-only: see `__setIsClient`.
+    #[doc(hidden)]
+    pub fn __setStateFields(
+        &mut self,
+        cipherSuite: uint16,
+        serverName: string,
+        clientProtocol: string,
+        curveID: super::common::CurveID,
+    ) {
+        self.cipherSuite = cipherSuite;
+        self.serverName = serverName;
+        self.clientProtocol = clientProtocol;
+        self.curveID = curveID;
+        self.clientFinishedIsFirst = true;
+        self.clientFinished = [1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:99-101 Conn.LocalAddr
+    /// Go: "LocalAddr returns the local network address."
+    pub fn LocalAddr(&self) -> crate::net::TCPAddr {
+        // Go: return c.conn.LocalAddr()
+        return self.conn.as_ref().unwrap().LocalAddr();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:103-105 Conn.RemoteAddr
+    /// Go: "RemoteAddr returns the remote network address."
+    pub fn RemoteAddr(&self) -> crate::net::TCPAddr {
+        // Go: return c.conn.RemoteAddr()
+        return self.conn.as_ref().unwrap().RemoteAddr();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:107-112 Conn.SetDeadline
+    /// Go: "SetDeadline sets the read and write deadlines associated
+    /// with the connection. A zero value for t means Read and Write will
+    /// not time out. After a Write has timed out, the TLS state is
+    /// corrupt and all future writes will return the same error."
+    pub fn SetDeadline(&self, t: crate::time::Time) -> error {
+        // Go: return c.conn.SetDeadline(t)
+        return self.conn.as_ref().unwrap().SetDeadline(t);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:114-118 Conn.SetReadDeadline
+    /// Go: "SetReadDeadline sets the read deadline on the underlying
+    /// connection. A zero value for t means Read will not time out."
+    pub fn SetReadDeadline(&self, t: crate::time::Time) -> error {
+        // Go: return c.conn.SetReadDeadline(t)
+        return self.conn.as_ref().unwrap().SetReadDeadline(t);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:120-126 Conn.SetWriteDeadline
+    /// Go: "SetWriteDeadline sets the write deadline on the underlying
+    /// connection. A zero value for t means Write will not time out.
+    /// After a Write has timed out, the TLS state is corrupt and all
+    /// future writes will return the same error."
+    pub fn SetWriteDeadline(&self, t: crate::time::Time) -> error {
+        // Go: return c.conn.SetWriteDeadline(t)
+        return self.conn.as_ref().unwrap().SetWriteDeadline(t);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:128-134 Conn.NetConn
+    /// Go: "NetConn returns the underlying connection that is wrapped by
+    /// c. Note that writing to or reading from this connection directly
+    /// will corrupt the TLS session."
+    pub fn NetConn(&self) -> Option<&(dyn crate::net::Conn + 'static)> {
+        // Go: return c.conn
+        return self.conn.as_deref();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:722-727 Conn.newRecordHeaderError
+    ///
+    /// Deviation: Go's `RecordHeaderError.Conn` field holds the
+    /// `net.Conn`; goish's record does not carry it, so the parameter is
+    /// accepted and dropped rather than stored.
+    /// goishlint:ignore GOISH020 newRecordHeaderError — Go's net.Conn parameter has nowhere to go
+    pub(crate) fn newRecordHeaderError(&self, msg: string) -> RecordHeaderError {
+        // Go: err.Msg = msg; err.Conn = conn
+        //     copy(err.RecordHeader[:], c.rawInput.Bytes())
+        //     return err
+        let mut err = RecordHeaderError::default();
+        err.Msg = msg;
+        let n = core::cmp::min(err.RecordHeader.len(), self.rawInput.len());
+        err.RecordHeader[..n].copy_from_slice(&self.rawInput[..n]);
+        return err;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:890-926 Conn.maxPayloadSizeForWrite
+    /// Go: "maxPayloadSizeForWrite returns the maximum TLS payload size
+    /// to use for the write of the given record type. It defaults to
+    /// [maxPlaintext] but is reduced for the first few records to
+    /// improve latency."
+    pub(crate) fn maxPayloadSizeForWrite(&mut self, typ: recordType) -> int {
+        // Go: if c.config.DynamicRecordSizingDisabled ||
+        //        typ != recordTypeApplicationData { return maxPlaintext }
+        if self.config.DynamicRecordSizingDisabled
+            || typ != super::common::recordTypeApplicationData
+        {
+            return super::common::maxPlaintext;
+        }
+
+        // Go: if c.bytesSent >= recordSizeBoostThreshold { return maxPlaintext }
+        if self.bytesSent >= recordSizeBoostThreshold {
+            return super::common::maxPlaintext;
+        }
+
+        // Go: Subtract TLS overheads to get the maximum payload size.
+        // Go: payloadBytes := tcpMSSEstimate - recordHeaderLen - c.out.explicitNonceLen()
+        let mut payloadBytes = tcpMSSEstimate - recordHeaderLen - self.out.explicitNonceLen();
+        let macSize = match &self.out.mac {
+            Some(m) => m.Size(),
+            None => 0,
+        };
+        match &self.out.cipher {
+            halfConnCipher::None => {}
+            halfConnCipher::Stream(_) => {
+                // Go: payloadBytes -= c.out.mac.Size()
+                payloadBytes -= macSize;
+            }
+            halfConnCipher::AEAD(ciph) => {
+                // Go: payloadBytes -= ciph.Overhead()
+                payloadBytes -= ciph.Overhead();
+            }
+            halfConnCipher::CBC(ciph) => {
+                // Go: blockSize := ciph.BlockSize()
+                //     // The payload must fit in a multiple of blockSize, with
+                //     // room for at least one padding byte.
+                //     payloadBytes = (payloadBytes & ^(blockSize - 1)) - 1
+                //     // The MAC is appended before padding so affects the
+                //     // payload size directly.
+                //     payloadBytes -= c.out.mac.Size()
+                let blockSize = ciph.BlockSize();
+                payloadBytes = (payloadBytes & !(blockSize - 1)) - 1;
+                payloadBytes -= macSize;
+            }
+        }
+        // Go: if c.vers == VersionTLS13 { payloadBytes-- } // encrypted ContentType
+        if self.vers == VersionTLS13 {
+            payloadBytes -= 1;
+        }
+
+        // Go: Allow packet growth in arithmetic progression up to max.
+        // Go: pkt := c.packetsSent; c.packetsSent++
+        //     if pkt > 1000 { return maxPlaintext } // avoid overflow in multiply below
+        let pkt = self.packetsSent;
+        self.packetsSent += 1;
+        if pkt > 1000 {
+            return super::common::maxPlaintext;
+        }
+
+        // Go: n := payloadBytes * int(pkt+1)
+        //     if n > maxPlaintext { n = maxPlaintext }
+        //     return n
+        let mut n = payloadBytes * crate::int(pkt + 1);
+        if n > super::common::maxPlaintext {
+            n = super::common::maxPlaintext;
+        }
+        return n;
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1610-1615 Conn.OCSPResponse
+    /// Go: "OCSPResponse returns the stapled OCSP response from the TLS
+    /// server, if any. (Only valid for client connections.)"
+    pub fn OCSPResponse(&self) -> slice<byte> {
+        // Go: c.handshakeMutex.Lock(); defer c.handshakeMutex.Unlock()
+        //     return c.ocspResponse
+        return self.ocspResponse.clone();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1617-1634 Conn.VerifyHostname
+    /// Go: "VerifyHostname checks that the peer certificate chain is
+    /// valid for connecting to host. If so, it returns nil; if not, it
+    /// returns an error describing the problem."
+    pub fn VerifyHostname(&self, host: string) -> error {
+        // Go: if !c.isClient { return errors.New(
+        //         "tls: VerifyHostname called on TLS server connection") }
+        if !self.isClient {
+            return errors::New("tls: VerifyHostname called on TLS server connection");
+        }
+        // Go: if !c.isHandshakeComplete.Load() { return errors.New(
+        //         "tls: handshake has not yet been performed") }
+        if !self.isHandshakeComplete {
+            return errors::New("tls: handshake has not yet been performed");
+        }
+        // Go: if len(c.verifiedChains) == 0 { return errors.New(
+        //         "tls: handshake did not verify certificate chain") }
+        if self.verifiedChains.Len() == 0 {
+            return errors::New("tls: handshake did not verify certificate chain");
+        }
+        // Go: return c.peerCertificates[0].VerifyHostname(host)
+        return self.peerCertificates[0].VerifyHostname(host);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1541-1546 Conn.ConnectionState
+    /// Go: "ConnectionState returns basic TLS details about the
+    /// connection."
+    pub fn ConnectionState(&self) -> super::common::ConnectionState {
+        // Go: c.handshakeMutex.Lock(); defer c.handshakeMutex.Unlock()
+        //     return c.connectionStateLocked()
+        return self.connectionStateLocked();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/conn.go:1548-1591 Conn.connectionStateLocked
+    ///
+    /// Deviations: Go's two `testingOnly*` fields are absent from
+    /// `ConnectionState`, and the `tlsunsafeekm` GODEBUG escape hatch is
+    /// not reachable — `internal/godebug` is not ported, so an unset
+    /// variable takes `noEKMBecauseNoEMS` exactly as Go does.
+    pub(crate) fn connectionStateLocked(&self) -> super::common::ConnectionState {
+        // Go: var state ConnectionState
+        //     state.HandshakeComplete = c.isHandshakeComplete.Load()
+        //     state.Version = c.vers … state.OCSPResponse = c.ocspResponse
+        let mut state = super::common::ConnectionState::default();
+        state.HandshakeComplete = self.isHandshakeComplete;
+        state.Version = self.vers;
+        state.NegotiatedProtocol = self.clientProtocol.clone();
+        state.DidResume = self.didResume;
+        state.CurveID = self.curveID;
+        state.NegotiatedProtocolIsMutual = true;
+        state.ServerName = self.serverName.clone();
+        state.CipherSuite = self.cipherSuite;
+        state.PeerCertificates = self.peerCertificates.clone();
+        state.VerifiedChains = self.verifiedChains.clone();
+        state.SignedCertificateTimestamps = self.scts.clone();
+        state.OCSPResponse = self.ocspResponse.clone();
+        // Go: if (!c.didResume || c.extMasterSecret) && c.vers != VersionTLS13 {
+        //         if c.clientFinishedIsFirst { state.TLSUnique = c.clientFinished[:] }
+        //         else { state.TLSUnique = c.serverFinished[:] } }
+        if (!self.didResume || self.extMasterSecret) && self.vers != VersionTLS13 {
+            if self.clientFinishedIsFirst {
+                state.TLSUnique = slice::__from_vec(self.clientFinished.to_vec());
+            } else {
+                state.TLSUnique = slice::__from_vec(self.serverFinished.to_vec());
+            }
+        }
+        // Go: if c.config.Renegotiation != RenegotiateNever {
+        //         state.ekm = noEKMBecauseRenegotiation
+        //     } else if c.vers != VersionTLS13 && !c.extMasterSecret {
+        //         state.ekm = func(…) { if tlsunsafeekm.Value() == "1" { … }
+        //                               return noEKMBecauseNoEMS(…) }
+        //     } else { state.ekm = c.ekm }
+        if self.config.Renegotiation != super::common::RenegotiateNever {
+            state.__setEKM(true);
+        } else if self.vers != VersionTLS13 && !self.extMasterSecret {
+            state.__setEKM(false);
+        } else {
+            state.__setEKMHook(self.ekm.clone());
+        }
+        // Go: state.ECHAccepted = c.echAccepted
+        //     return state
+        state.ECHAccepted = self.echAccepted;
+        return state;
+    }
+}
+
+// Go: conn.go — `const ( recordSizeBoostThreshold = 128 * 1024
+//                        tcpMSSEstimate = 1208 )`
+/// Go: "recordSizeBoostThreshold is the number of bytes after which we
+/// stop boosting the record size."
+pub(crate) const recordSizeBoostThreshold: crate::types::int64 = 128 * 1024;
+/// Go: "tcpMSSEstimate is a conservative estimate of the TCP maximum
+/// segment size (MSS). A constant is used, rather than querying the
+/// kernel for the actual value, to avoid complexity."
+pub(crate) const tcpMSSEstimate: int = 1208;

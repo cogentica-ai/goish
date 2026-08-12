@@ -10,9 +10,9 @@
 // `Config` and `Certificate` currently live in mod[rs] and are not yet
 // ports — see ROADMAP.md.
 //
-// goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, InsecureCipherSuites, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
-// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, RenegotiationSupport, Config, dsaSignature, ecdsaSignature — same.
-// goishlint:ignore GOISH021 Config, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, maxSessionTicketLifetime, maxUselessBytes, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
+// goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, InsecureCipherSuites, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
+// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, Config, dsaSignature, ecdsaSignature — same.
+// goishlint:ignore GOISH021 Config, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, maxSessionTicketLifetime, maxUselessBytes, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -1784,6 +1784,17 @@ impl ConnectionState {
         }
     }
 
+
+    // go: none — goish-only: see `__setEKM`. Installs the connection's
+    // own exporter, which is what Go's `state.ekm = c.ekm` does.
+    #[doc(hidden)]
+    pub fn __setEKMHook(
+        &mut self,
+        f: Option<alloc::sync::Arc<dyn Fn(crate::gostring::string, slice<byte>, int) -> (slice<byte>, error) + Send + Sync>>,
+    ) {
+        self.ekm = f;
+    }
+
     // go: sdk 1.25.5 crypto/tls/common.go:326-328 ConnectionState.ExportKeyingMaterial
     /// Go: "ExportKeyingMaterial returns length bytes of exported key
     /// material in a new slice as defined in RFC 5705. If context is nil,
@@ -1926,3 +1937,22 @@ pub(crate) fn keyLogLine(
     );
     return slice::__from_vec(line.as_bytes().to_vec());
 }
+
+
+// Go: common.go:529-542
+//   type RenegotiationSupport int
+//   const ( RenegotiateNever RenegotiationSupport = iota
+//           RenegotiateOnceAsClient; RenegotiateFreelyAsClient )
+/// Go: "RenegotiationSupport enumerates the different levels of support
+/// for TLS renegotiation. TLS renegotiation is the act of performing
+/// subsequent handshakes on a connection after the first."
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct RenegotiationSupport(pub int);
+/// Go: "RenegotiateNever disables renegotiation."
+pub const RenegotiateNever: RenegotiationSupport = RenegotiationSupport(0);
+/// Go: "RenegotiateOnceAsClient allows a remote server to request
+/// renegotiation once per connection."
+pub const RenegotiateOnceAsClient: RenegotiationSupport = RenegotiationSupport(1);
+/// Go: "RenegotiateFreelyAsClient allows a remote server to repeatedly
+/// request renegotiation."
+pub const RenegotiateFreelyAsClient: RenegotiationSupport = RenegotiationSupport(2);
