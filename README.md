@@ -50,8 +50,13 @@ packages of the Go 1.25.5 standard library:
 | packages at 100% | 86 |
 | provenance anchors | 2358 |
 
-**Coverage and *verification* are different things, and the gap is
-lopsided.** An anchor (`// go: sdk 1.25.5 <file>:<lines> <Symbol>`) lets
+Two caveats before reading those numbers. The counter tallies **unique
+names, not declarations**, so Go methods sharing a name across types
+collapse — 16% of crypto/'s real declaration surface is invisible to it,
+and a name counts as ported when any one type implements it. And
+coverage is not verification.
+
+**The gap between the two is lopsided.** An anchor (`// go: sdk 1.25.5 <file>:<lines> <Symbol>`) lets
 goishlint open the Go file and diff signature, arity and struct fields
 against the port; without one, a name match proves only that a name
 matches.

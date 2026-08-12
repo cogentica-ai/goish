@@ -65,6 +65,33 @@ Assembly stubs are counted separately on purpose: a Go func with no body
 is not something you port by reading Go. `crypto/sha1`, `sha256` and
 `sha512` look like small gaps and are 100% assembly.
 
+## The percentages are optimistic, and by how much
+
+`port_coverage.py` counts **unique names, not declarations**. Go methods
+that share a name across types collapse into one entry — and a name
+counts as ported when **any one** type implements it.
+
+| | |
+|---|--:|
+| crypto/ Go declarations (receiver-qualified) | 1780 |
+| unique names — what the metric counts | 1493 |
+| invisible to the metric | **287 (16%)** |
+
+`crypto/tls` is the extreme case: **727 declarations behind 296 counted
+names**, because `marshal`/`unmarshal` repeat across fifteen message
+types. `handshake_messages.go` alone is 52 declarations → 17 names. So
+porting a seventh `marshal` method cannot move the number, and the
+first one made all fifteen look done.
+
+This was found by measurement, not estimate: six verbatim message ports
+landed with byte-exact vectors and the percentage did not move.
+
+The anchors do not have this problem — `anchor_by_name.py` keys methods
+by `Recv.Method`, so the 2238 anchors are receiver-qualified and
+GOISH018 diffs each one individually. **Anchor counts are the honest
+signal; percentages are an upper bound.** Fixing the counter is a small
+change to `scan_go` and would restate every figure here downward.
+
 ## What "ported" means here
 
 Three tiers, weakest to strongest. The distinction matters because every
