@@ -3893,6 +3893,47 @@ fn main() {
     check("the server accepts the ECH", rtAcc);
     eq("the server recovers the real inner server name", rtRec, "secret.example");
 
+    // ── clientHandshakeStateTLS13.establishHandshakeKeys ────────────
+    //
+    // Ground truth: goref with a fixed client X25519 ephemeral, a fixed
+    // server share, and a seeded transcript. The derived client and
+    // server handshake traffic secrets are byte-compared (with and
+    // without a PSK early secret), plus the invalid-share rejection.
+    let ehk = |which: int| -> (string, int, string, string) {
+        let (e, cid, cs, ss) = tls::handshake_client_tls13_establishHandshakeKeys(which);
+        return (e, goish::int(cid), hexOf(cs), hexOf(ss));
+    };
+
+    let (ehk0e, ehk0cid, ehk0cs, ehk0ss) = ehk(0);
+    eq("establishHandshakeKeys succeeds", ehk0e, "");
+    check_n("the curve ID is recorded from the server share", ehk0cid, 29);
+    eq(
+        "the client handshake traffic secret matches Go",
+        ehk0cs,
+        "6e994f39b8b7c34c1b65e7acddf91c70e404895bed0863b2ab8c9952a417114a",
+    );
+    eq(
+        "the server handshake traffic secret matches Go",
+        ehk0ss,
+        "7635ea9a141f00655e1080df344c388725c8b9930d4fc3e0e865c56800e77f47",
+    );
+
+    let (ehk1e, _, ehk1cs, ehk1ss) = ehk(1);
+    eq("establishHandshakeKeys with a PSK succeeds", ehk1e, "");
+    eq(
+        "the PSK early secret changes the client secret to match Go",
+        ehk1cs,
+        "5b2fc74ea13908d01edcd96d61047f8cc2f083ce2bf2c01f66dd4c4e99ebb716",
+    );
+    eq(
+        "the PSK early secret changes the server secret to match Go",
+        ehk1ss,
+        "993a3c3fa7103e8d66832b959d3bd988cfd15a3ff9591f44aace36e2792e5d28",
+    );
+
+    let (ehk2e, _, _, _) = ehk(2);
+    eq("an invalid server key share is rejected", ehk2e, "tls: invalid server key share");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

@@ -6308,6 +6308,9 @@ fn __chs13(_unused: bool) -> handshake_client_tls13::clientHandshakeStateTLS13 {
         c,
         serverHello: sh,
         hello: ch,
+        keyShareKeys: None,
+        earlySecret: None,
+        binderKey: slice::new(),
         session: None,
         usingPSK: false,
         sentDummyCCS: false,
@@ -6386,6 +6389,9 @@ pub fn handshake_client_tls13_finished(
             c,
             serverHello: handshake_messages::serverHelloMsg::default(),
             hello: ch,
+        keyShareKeys: None,
+        earlySecret: None,
+        binderKey: slice::new(),
             session: None,
             usingPSK: false,
             sentDummyCCS: false,
@@ -6570,6 +6576,9 @@ pub fn handshake_client_tls13_readServerParameters(
         c,
         serverHello: handshake_messages::serverHelloMsg::default(),
         hello,
+        keyShareKeys: None,
+        earlySecret: None,
+        binderKey: slice::new(),
         session,
         usingPSK: false,
         sentDummyCCS: false,
@@ -6841,6 +6850,9 @@ pub fn handshake_client_tls13_certificate(
         c,
         serverHello: handshake_messages::serverHelloMsg::default(),
         hello: handshake_messages::clientHelloMsg::default(),
+        keyShareKeys: None,
+        earlySecret: None,
+        binderKey: slice::new(),
         session: None,
         usingPSK: which <= 1,
         sentDummyCCS: false,
@@ -8285,6 +8297,107 @@ pub fn handshake_client_echRoundTrip() -> (
         None => crate::gostring::string::from_static(""),
     };
     return (innerSNI, outerSNI, sealErrText, openErrText, sc.__echAccepted(), recoveredSNI);
+}
+
+// go: none — goish-only: drives clientHandshakeStateTLS13.establishHandshakeKeys
+// with a fixed client X25519 ephemeral, a fixed server share, and a
+// seeded transcript, so the derived client and server handshake traffic
+// secrets are byte-comparable against Go (with and without a PSK early
+// secret), plus the invalid-share rejection.
+// which: 0 x25519, 1 x25519+psk, 2 bad share.
+#[doc(hidden)]
+pub fn handshake_client_tls13_establishHandshakeKeys(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string, // err
+    crate::types::uint16,    // curveID
+    crate::goslice::slice<crate::types::byte>, // client secret (c.out)
+    crate::goslice::slice<crate::types::byte>, // server secret (c.in)
+) {
+    use crate::goslice::slice;
+    let fill = |base: crate::types::byte, n: usize| {
+        let mut v: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        let mut i: usize = 0;
+        while i < n {
+            v.push(base.wrapping_add(i as crate::types::byte));
+            i += 1;
+        }
+        return slice::__from_vec(v);
+    };
+    let (clientEcdhe, _) = crate::crypto::ecdh::X25519().NewPrivateKey(&fill(0x40, 32));
+    let (serverPriv, _) = crate::crypto::ecdh::X25519().NewPrivateKey(&fill(0x90, 32));
+    let serverShare = serverPriv.PublicKey().Bytes();
+
+    let suite =
+        cipher_suites::cipherSuiteTLS13ByID(cipher_suites::TLS_AES_128_GCM_SHA256).unwrap();
+    let mut transcript = handshake_messages::transcriptHasher(suite.hash.New());
+    crate::io::Writer::Write(&mut transcript, slice::__from_vec(alloc::vec![0x01u8, 0x02, 0x03, 0x04]));
+
+    let usingPSK = which == 1;
+    let hash = suite.hash;
+    let es = if usingPSK {
+        Some(crate::crypto::internal::fips140::tls13::NewEarlySecret(
+            crate::hash::HashFunc::New(move || hash.New()),
+            fill(0xD0, 32),
+        ))
+    } else {
+        None
+    };
+
+    let shareData = if which == 2 {
+        alloc::vec![0x00u8, 0x01, 0x02]
+    } else {
+        serverShare.__into_vec()
+    };
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setMemConn(sink);
+    c.__setVers(common::VersionTLS13);
+    c.__setConfig(Config::default());
+
+    let mut hello = handshake_messages::clientHelloMsg::default();
+    hello.random = fill(0x01, 32).__into_vec();
+    let mut serverHello = handshake_messages::serverHelloMsg::default();
+    serverHello.serverShare = handshake_messages::keyShare {
+        group: common::X25519.0,
+        data: shareData,
+    };
+
+    let mut hs = handshake_client_tls13::clientHandshakeStateTLS13 {
+        c,
+        serverHello,
+        hello,
+        keyShareKeys: Some(key_schedule::keySharePrivateKeys {
+            curveID: common::X25519,
+            ecdhe: Some(clientEcdhe),
+            mlkem: None,
+        }),
+        session: None,
+        earlySecret: es,
+        binderKey: slice::new(),
+        usingPSK,
+        sentDummyCCS: false,
+        suite: Some(suite),
+        transcript: Some(transcript),
+        masterSecret: None,
+        trafficSecret: slice::new(),
+        echContext: None,
+        certReq: None,
+    };
+    let err = hs.establishHandshakeKeys();
+    if err != crate::errors::nil {
+        return (err.Error(), 0, slice::new(), slice::new());
+    }
+    let (inS, outS) = hs.c.__trafficSecrets();
+    return (
+        crate::gostring::string::from_static(""),
+        hs.c.__curveID().0,
+        outS,
+        inS,
+    );
 }
 
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below

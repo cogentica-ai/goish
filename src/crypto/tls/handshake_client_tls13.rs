@@ -1,4 +1,4 @@
-// goishlint:ignore GOISH018 handshake, processHelloRetryRequest, establishHandshakeKeys, handleNewSessionTicket — the rest of clientHandshakeStateTLS13, which drives the whole exchange through the key schedule and the transcript; the live TLS 1.3 client below is a self-contained function, not a port of these. See ROADMAP.md.
+// goishlint:ignore GOISH018 handshake, processHelloRetryRequest, handleNewSessionTicket — the rest of clientHandshakeStateTLS13, which drives the whole exchange through the key schedule and the transcript; the live TLS 1.3 client below is a self-contained function, not a port of these. See ROADMAP.md.
 // crypto/tls/handshake_client_tls13.rs — TLS 1.3 client handshake.
 //
 // Port of:
@@ -1254,7 +1254,10 @@ pub(crate) struct clientHandshakeStateTLS13 {
     pub c: super::conn::Conn,
     pub serverHello: super::handshake_messages::serverHelloMsg,
     pub hello: super::handshake_messages::clientHelloMsg,
+    pub keyShareKeys: Option<super::key_schedule::keySharePrivateKeys>,
     pub session: Option<super::ticket::SessionState>,
+    pub earlySecret: Option<crate::crypto::internal::fips140::tls13::EarlySecret>,
+    pub binderKey: crate::goslice::slice<crate::types::byte>,
     pub usingPSK: bool,
     pub sentDummyCCS: bool,
     pub suite: Option<&'static super::cipher_suites::cipherSuiteTLS13>,
@@ -1361,6 +1364,151 @@ impl clientHandshakeStateTLS13 {
         }
         self.sentDummyCCS = true;
         return self.c.writeChangeCipherRecord();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_client_tls13.go:475-544 clientHandshakeStateTLS13.establishHandshakeKeys
+    /// Go: complete the (hybrid) ECDH against the server's key share,
+    /// advance the key schedule to the handshake secret, and install the
+    /// client and server handshake traffic secrets on both halves.
+    ///
+    /// Deviation: the `c.quic != nil` arm is absent — goish ships no
+    /// QUIC transport.
+    pub(crate) fn establishHandshakeKeys(&mut self) -> crate::error {
+        use crate::goslice::slice;
+        let suite = self.suite.unwrap();
+
+        // Go: ecdhePeerData := hs.serverHello.serverShare.data
+        //     if hs.serverHello.serverShare.group == X25519MLKEM768 {
+        //         if len(ecdhePeerData) != mlkem.CiphertextSize768+x25519PublicKeySize {
+        //             c.sendAlert(alertIllegalParameter)
+        //             return errors.New("tls: invalid server X25519MLKEM768 key share") }
+        //         ecdhePeerData = hs.serverHello.serverShare.data[mlkem.CiphertextSize768:] }
+        let mut ecdhePeerData = slice::__from_vec(self.serverHello.serverShare.data.clone());
+        if self.serverHello.serverShare.group == super::common::X25519MLKEM768.0 {
+            if ecdhePeerData.Len()
+                != crate::crypto::internal::fips140::mlkem::CiphertextSize768 as crate::types::int
+                    + super::key_schedule::x25519PublicKeySize
+            {
+                self.c.sendAlert(super::alert::alertIllegalParameter);
+                return crate::errors::New("tls: invalid server X25519MLKEM768 key share");
+            }
+            ecdhePeerData = slice::__from_vec(
+                self.serverHello.serverShare.data
+                    [crate::crypto::internal::fips140::mlkem::CiphertextSize768..]
+                    .to_vec(),
+            );
+        }
+        // Go: peerKey, err := hs.keyShareKeys.ecdhe.Curve().NewPublicKey(ecdhePeerData)
+        //     if err != nil { c.sendAlert(alertIllegalParameter); return errors.New("tls: invalid server key share") }
+        let ecdhe = self.keyShareKeys.as_ref().unwrap().ecdhe.as_ref().unwrap();
+        let (peerKey, err) = ecdhe.Curve().NewPublicKey(&ecdhePeerData);
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New("tls: invalid server key share");
+        }
+        // Go: sharedKey, err := hs.keyShareKeys.ecdhe.ECDH(peerKey)
+        //     if err != nil { c.sendAlert(alertIllegalParameter); return errors.New("tls: invalid server key share") }
+        let (mut sharedKey, err) = ecdhe.ECDH(&peerKey);
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return crate::errors::New("tls: invalid server key share");
+        }
+        // Go: if hs.serverHello.serverShare.group == X25519MLKEM768 {
+        //         if hs.keyShareKeys.mlkem == nil { return c.sendAlert(alertInternalError) }
+        //         ciphertext := hs.serverHello.serverShare.data[:mlkem.CiphertextSize768]
+        //         mlkemShared, err := hs.keyShareKeys.mlkem.Decapsulate(ciphertext)
+        //         if err != nil { c.sendAlert(alertIllegalParameter); return errors.New("tls: invalid X25519MLKEM768 server key share") }
+        //         sharedKey = append(mlkemShared, sharedKey...) }
+        if self.serverHello.serverShare.group == super::common::X25519MLKEM768.0 {
+            let mlkemKey = self.keyShareKeys.as_ref().unwrap().mlkem.as_ref();
+            let mlkemKey = match mlkemKey {
+                None => return self.c.sendAlert(super::alert::alertInternalError),
+                Some(k) => k,
+            };
+            let ciphertext = slice::__from_vec(
+                self.serverHello.serverShare.data
+                    [..crate::crypto::internal::fips140::mlkem::CiphertextSize768]
+                    .to_vec(),
+            );
+            let (mlkemShared, err) = mlkemKey.Decapsulate(ciphertext);
+            if err != crate::errors::nil {
+                self.c.sendAlert(super::alert::alertIllegalParameter);
+                return crate::errors::New("tls: invalid X25519MLKEM768 server key share");
+            }
+            let mut newShared = mlkemShared.__into_vec();
+            newShared.extend_from_slice({
+                let raw: &[crate::types::byte] = &sharedKey;
+                raw
+            });
+            sharedKey = slice::__from_vec(newShared);
+        }
+        // Go: c.curveID = hs.serverHello.serverShare.group
+        self.c.curveID = super::common::CurveID(self.serverHello.serverShare.group);
+
+        // Go: earlySecret := hs.earlySecret
+        //     if !hs.usingPSK { earlySecret = tls13.NewEarlySecret(hs.suite.hash.New, nil) }
+        //     handshakeSecret := earlySecret.HandshakeSecret(sharedKey)
+        let hash = suite.hash;
+        let earlySecret = if self.usingPSK {
+            self.earlySecret.take().unwrap()
+        } else {
+            crate::crypto::internal::fips140::tls13::NewEarlySecret(
+                crate::hash::HashFunc::New(move || hash.New()),
+                slice::new(),
+            )
+        };
+        let handshakeSecret = earlySecret.HandshakeSecret(sharedKey);
+
+        // Go: clientSecret := handshakeSecret.ClientHandshakeTrafficSecret(hs.transcript)
+        //     c.out.setTrafficSecret(hs.suite, QUICEncryptionLevelHandshake, clientSecret)
+        //     serverSecret := handshakeSecret.ServerHandshakeTrafficSecret(hs.transcript)
+        //     c.in.setTrafficSecret(hs.suite, QUICEncryptionLevelHandshake, serverSecret)
+        let (clientSecret, serverSecret) = {
+            let transcript = self.transcript.as_ref().unwrap();
+            (
+                handshakeSecret.ClientHandshakeTrafficSecret(&*transcript.0),
+                handshakeSecret.ServerHandshakeTrafficSecret(&*transcript.0),
+            )
+        };
+        self.c.out.setTrafficSecret(
+            suite,
+            super::quic::QUICEncryptionLevelHandshake,
+            clientSecret.clone(),
+        );
+        self.c.in_.setTrafficSecret(
+            suite,
+            super::quic::QUICEncryptionLevelHandshake,
+            serverSecret.clone(),
+        );
+
+        // Go: err = c.config.writeKeyLog(keyLogLabelClientHandshake, hs.hello.random, clientSecret)
+        //     if err != nil { c.sendAlert(alertInternalError); return err }
+        let helloRandom = slice::__from_vec(self.hello.random.clone());
+        let err = self.c.config.writeKeyLog(
+            crate::gostring::string::from_static(super::common::keyLogLabelClientHandshake),
+            helloRandom.clone(),
+            clientSecret,
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertInternalError);
+            return err;
+        }
+        // Go: err = c.config.writeKeyLog(keyLogLabelServerHandshake, hs.hello.random, serverSecret)
+        //     if err != nil { c.sendAlert(alertInternalError); return err }
+        let err = self.c.config.writeKeyLog(
+            crate::gostring::string::from_static(super::common::keyLogLabelServerHandshake),
+            helloRandom,
+            serverSecret,
+        );
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertInternalError);
+            return err;
+        }
+
+        // Go: hs.masterSecret = handshakeSecret.MasterSecret()
+        //     return nil
+        self.masterSecret = Some(handshakeSecret.MasterSecret());
+        return crate::errors::nil;
     }
 
     // go: sdk 1.25.5 crypto/tls/handshake_client_tls13.go:416-473 clientHandshakeStateTLS13.processServerHello
