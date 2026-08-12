@@ -360,6 +360,42 @@ fn main() {
     );
     check("readUint64 round-trips and consumes all input", ok);
 
+    // Three simple byte-container messages. Wire bytes and every
+    // rejection below come from goref.sh.
+    let body = slice::__from_vec(alloc::vec![0xdeu8, 0xad, 0xbe, 0xef]);
+
+    let (b, ok, got) = tls::msg_simple_roundtrip(0, body.clone());
+    eq("serverKeyExchangeMsg", hexOf(b.clone()), "0c000004deadbeef");
+    check("serverKeyExchange round-trip", ok);
+    eq("serverKeyExchange body", hexOf(got), "deadbeef");
+    let raw: &[byte] = &b;
+    check(
+        "serverKeyExchange rejects <4 bytes",
+        !tls::msg_simple_unmarshal(0, slice::__from_vec(raw[..3].to_vec())),
+    );
+
+    let (b, ok, got) = tls::msg_simple_roundtrip(1, body.clone());
+    eq("clientKeyExchangeMsg", hexOf(b.clone()), "10000004deadbeef");
+    check("clientKeyExchange round-trip", ok);
+    eq("clientKeyExchange body", hexOf(got), "deadbeef");
+    // Unlike serverKeyExchange, this one validates its uint24 length.
+    let mut bad: alloc::vec::Vec<byte> = b.clone().__into_vec();
+    bad[3] = 0x09;
+    check(
+        "clientKeyExchange rejects a wrong declared length",
+        !tls::msg_simple_unmarshal(1, slice::__from_vec(bad)),
+    );
+
+    let (b, ok, got) = tls::msg_simple_roundtrip(2, body);
+    eq("newSessionTicketMsg", hexOf(b.clone()), "0400000a000000000004deadbeef");
+    check("newSessionTicket round-trip", ok);
+    eq("newSessionTicket body", hexOf(got), "deadbeef");
+    let raw: &[byte] = &b;
+    check(
+        "newSessionTicket rejects <10 bytes",
+        !tls::msg_simple_unmarshal(2, slice::__from_vec(raw[..9].to_vec())),
+    );
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

@@ -169,6 +169,54 @@ pub fn msg_keyUpdate_unmarshal(
     return (ok, m.updateRequested);
 }
 
+// go: none — goish-only: marshal-then-unmarshal for the three simple
+// byte-container messages; returns the wire bytes, the parse result and
+// the recovered body so one shim covers both directions.
+#[doc(hidden)]
+pub fn msg_simple_roundtrip(
+    which: crate::types::int,
+    body: crate::goslice::slice<crate::types::byte>,
+) -> (
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    use crate::goslice::slice as S;
+    if which == 0 {
+        let m = handshake_messages::serverKeyExchangeMsg { key: body };
+        let (b, _) = m.marshal();
+        let mut back = handshake_messages::serverKeyExchangeMsg::default();
+        let ok = back.unmarshal(b.clone());
+        return (b, ok, back.key);
+    } else if which == 1 {
+        let m = handshake_messages::clientKeyExchangeMsg { ciphertext: body };
+        let (b, _) = m.marshal();
+        let mut back = handshake_messages::clientKeyExchangeMsg::default();
+        let ok = back.unmarshal(b.clone());
+        return (b, ok, back.ciphertext);
+    }
+    let m = handshake_messages::newSessionTicketMsg { ticket: body };
+    let (b, _) = m.marshal();
+    let mut back = handshake_messages::newSessionTicketMsg::default();
+    let ok = back.unmarshal(b.clone());
+    let _ = S::__from_vec(alloc::vec::Vec::<crate::types::byte>::new());
+    return (b, ok, back.ticket);
+}
+
+// go: none — goish-only: parse a raw buffer, for the rejection cases.
+#[doc(hidden)]
+pub fn msg_simple_unmarshal(
+    which: crate::types::int,
+    data: crate::goslice::slice<crate::types::byte>,
+) -> bool {
+    if which == 0 {
+        return handshake_messages::serverKeyExchangeMsg::default().unmarshal(data);
+    } else if which == 1 {
+        return handshake_messages::clientKeyExchangeMsg::default().unmarshal(data);
+    }
+    return handshake_messages::newSessionTicketMsg::default().unmarshal(data);
+}
+
 // go: none — goish-only: see `msg_keyUpdate_marshal`.
 #[doc(hidden)]
 pub fn msg_helloRequest_marshal() -> crate::goslice::slice<crate::types::byte> {
