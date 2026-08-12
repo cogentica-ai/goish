@@ -1,4 +1,4 @@
-// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert, Conn.readFromUntil, Conn.retryReadRecord, Conn.readRecord, Conn.readChangeCipherSpec, Conn.readRecordOrCCS, Conn.closeNotify, Conn.CloseWrite, Conn.readHandshakeBytes, Conn.readHandshake, Conn.unmarshalHandshakeMessage, Conn.writeHandshakeRecord, Conn.handleKeyUpdate, Conn.Handshake, Conn.HandshakeContext, Conn.handshakeContext, Conn.handleRenegotiation
+// go: file crypto/tls/conn.go decls: permanentError.Error, permanentError.Unwrap, permanentError.Timeout, permanentError.Temporary, halfConn.setErrorLocked, halfConn.prepareCipherSpec, halfConn.changeCipherSpec, halfConn.setTrafficSecret, halfConn.incSeq, halfConn.explicitNonceLen, extractPadding, roundUp, sliceForAppend, RecordHeaderError.Error, atLeastReader.Read, halfConn.decrypt, halfConn.encrypt, Conn.LocalAddr, Conn.RemoteAddr, Conn.SetDeadline, Conn.SetReadDeadline, Conn.SetWriteDeadline, Conn.NetConn, Conn.newRecordHeaderError, Conn.maxPayloadSizeForWrite, Conn.OCSPResponse, Conn.VerifyHostname, Conn.ConnectionState, Conn.connectionStateLocked, Conn.flush, Conn.write, Conn.writeRecordLocked, Conn.writeChangeCipherRecord, Conn.sendAlertLocked, Conn.sendAlert, Conn.readFromUntil, Conn.retryReadRecord, Conn.readRecord, Conn.readChangeCipherSpec, Conn.readRecordOrCCS, Conn.closeNotify, Conn.CloseWrite, Conn.readHandshakeBytes, Conn.readHandshake, Conn.unmarshalHandshakeMessage, Conn.writeHandshakeRecord, Conn.handleKeyUpdate, Conn.Handshake, Conn.HandshakeContext, Conn.handshakeContext, Conn.handleRenegotiation, Conn.handlePostHandshakeMessage
 //
 // crypto/tls — the record layer's cipher state.
 //
@@ -8,7 +8,7 @@
 // its `decrypt`/`encrypt`, `atLeastReader` and the free functions they
 // need — none of which touches a `Conn`.
 //
-// goishlint:ignore GOISH018 handleRenegotiation, handlePostHandshakeMessage, HandshakeContext, handshakeContext, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
+// goishlint:ignore GOISH018 handleRenegotiation, HandshakeContext, handshakeContext, Write, Close, Handshake — Conn and the record read/write loop, which own a net.Conn. See ROADMAP.md.
 // goishlint:ignore GOISH019  — same.
 // goishlint:ignore GOISH021 maxUselessBytes, tlsunsafeekm, outBufPool — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write; outBufPool is a sync.Pool whose only purpose is to avoid one allocation per record, which goish does not model.
 //
@@ -2739,5 +2739,71 @@ impl Conn {
             self.handshakes += 1;
         }
         return self.handshakeErr.clone();
+    }
+}
+
+impl Conn {
+    // go: sdk 1.25.5 crypto/tls/conn.go:1306-1333 Conn.handlePostHandshakeMessage
+    /// Go: dispatch a handshake message that arrives after the
+    /// handshake — a renegotiation HelloRequest in TLS 1.2, or a
+    /// NewSessionTicket or KeyUpdate in TLS 1.3 — and bound the number
+    /// of non-advancing records.
+    ///
+    /// Deviation: the RFC 9001 QUIC note is retained as commentary only;
+    /// goish ships no QUIC transport.
+    pub(crate) fn handlePostHandshakeMessage(&mut self) -> error {
+        // Go: if c.vers != VersionTLS13 { return c.handleRenegotiation() }
+        if self.vers != super::common::VersionTLS13 {
+            return self.handleRenegotiation();
+        }
+
+        // Go: msg, err := c.readHandshake(nil)
+        //     if err != nil { return err }
+        let (msg, err) = self.readHandshake(None);
+        if err != errors::nil {
+            return err;
+        }
+        // Go: c.retryCount++
+        //     if c.retryCount > maxUselessRecords {
+        //         c.sendAlert(alertUnexpectedMessage)
+        //         return c.in.setErrorLocked(errors.New("tls: too many non-advancing records")) }
+        self.retryCount += 1;
+        if self.retryCount > super::common::maxUselessRecords {
+            self.sendAlert(super::alert::alertUnexpectedMessage);
+            let e = errors::New("tls: too many non-advancing records");
+            return self.in_.setErrorLocked(e);
+        }
+
+        let msg = match msg {
+            Some(m) => m,
+            None => return errors::New("tls: internal error: no handshake message"),
+        };
+        // Go: switch msg := msg.(type) {
+        //     case *newSessionTicketMsgTLS13: return c.handleNewSessionTicket(msg)
+        //     case *keyUpdateMsg: return c.handleKeyUpdate(msg) }
+        if let Some(nst) = msg
+            .asAny()
+            .downcast_ref::<super::handshake_messages::newSessionTicketMsgTLS13>()
+        {
+            return self.handleNewSessionTicket(nst);
+        }
+        if let Some(ku) = msg
+            .asAny()
+            .downcast_ref::<super::handshake_messages::keyUpdateMsg>()
+        {
+            let ku = ku.clone();
+            return self.handleKeyUpdate(&ku);
+        }
+
+        // Go: "The QUIC layer is supposed to treat an unexpected
+        // post-handshake CertificateRequest as a QUIC-level
+        // PROTOCOL_VIOLATION error […]"
+        //     c.sendAlert(alertUnexpectedMessage)
+        //     return fmt.Errorf("tls: received unexpected handshake message of type %T", msg)
+        self.sendAlert(super::alert::alertUnexpectedMessage);
+        return crate::fmt::Errorf!(
+            "tls: received unexpected handshake message of type %s",
+            super::handshake_messages::handshakeMessageTypeName(&*msg)
+        );
     }
 }

@@ -9652,6 +9652,68 @@ pub fn handshake_loopback(
     );
 }
 
+// go: none — goish-only: drives Conn.handlePostHandshakeMessage — the
+// TLS 1.2 version dispatch to handleRenegotiation, the TLS 1.3
+// NewSessionTicket dispatch, and the unexpected-message rejection with
+// its retryCount bump — against a scripted conn feeding one post-
+// handshake record.
+// which: 0 tls1.2 HelloRequest, 1 tls1.3 NewSessionTicket, 2 tls1.3
+// unexpected certificateRequest.
+#[doc(hidden)]
+pub fn conn_handlePostHandshakeMessage(
+    which: crate::types::int,
+) -> (
+    crate::gostring::string,                   // err
+    crate::goslice::slice<crate::types::byte>, // alert sink
+    crate::types::int,                         // retryCount after
+) {
+    use crate::goslice::slice;
+    let frame = |hs: slice<crate::types::byte>| {
+        let mut rec: alloc::vec::Vec<crate::types::byte> =
+            alloc::vec![22, 3, 3, crate::byte(hs.Len() >> 8), crate::byte(hs.Len())];
+        let raw: &[crate::types::byte] = &hs;
+        rec.extend_from_slice(raw);
+        return rec;
+    };
+
+    let (feed, vers, isClient) = match which {
+        0 => {
+            let hr = handshake_messages::helloRequestMsg::default();
+            let (b, _) = hr.marshal();
+            (frame(b), common::VersionTLS12, false)
+        }
+        1 => {
+            let mut nst = handshake_messages::newSessionTicketMsgTLS13::default();
+            nst.lifetime = 3600;
+            nst.label = slice::__from_vec(alloc::vec![1u8, 2, 3]);
+            let (b, _) = nst.marshal();
+            (frame(b), common::VersionTLS13, true)
+        }
+        _ => {
+            let cr = handshake_messages::certificateRequestMsgTLS13::default();
+            let (b, _) = cr.marshal();
+            (frame(b), common::VersionTLS13, true)
+        }
+    };
+
+    let sink = alloc::sync::Arc::new(crate::sync::Mutex::new(
+        slice::<crate::types::byte>::new(),
+    ));
+    let mut c = conn::Conn::default();
+    c.__setDuplexConn(slice::__from_vec(feed), sink.clone());
+    c.__adoptVersion(vers);
+    c.__setIsClient(isClient);
+    c.__setConfig(Config::default());
+
+    let err = c.handlePostHandshakeMessage();
+    let errText = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (errText, sink.Lock().clone(), c.__retryCount());
+}
+
 // go: none — goish-only: the self-signed RSA-2048 leaf the shims below
 // sign and verify against, the same fixture x509_parse_smoke uses.
 // Held once: it was pasted by hand into a second shim and silently

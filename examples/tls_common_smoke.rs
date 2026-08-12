@@ -4510,6 +4510,45 @@ fn main() {
         check_n("TLS 1.2 loopback negotiates 0x0303", goish::int(cv12), 0x0303);
     }
 
+    // ── Conn.handlePostHandshakeMessage ─────────────────────────────
+    //
+    // Ground truth: goref driving the dispatcher over a scripted conn.
+    // The TLS 1.2 version dispatch to handleRenegotiation, the TLS 1.3
+    // NewSessionTicket dispatch, and the unexpected-message rejection
+    // with its retryCount bump.
+    let phm = |which: int| -> (string, string, int) {
+        let (e, sink, retry) = tls::conn_handlePostHandshakeMessage(which);
+        return (e, hexOf(sink), retry);
+    };
+
+    // A TLS 1.2 HelloRequest dispatches to handleRenegotiation, which a
+    // server rejects. goish returns the bare alert text (the "local
+    // error: " prefix is net.OpError's, a documented deviation).
+    let (e, sink, retry) = phm(0);
+    eq(
+        "a post-handshake HelloRequest in TLS 1.2 dispatches to renegotiation",
+        e,
+        "tls: no renegotiation",
+    );
+    eq("the no_renegotiation alert matches Go", sink, "15030300020164");
+    check_n("renegotiation does not bump the useless-record counter", retry, 0);
+
+    // A TLS 1.3 NewSessionTicket dispatches to handleNewSessionTicket,
+    // which returns nil with no client session cache configured.
+    let (e, _, retry) = phm(1);
+    eq("a post-handshake NewSessionTicket in TLS 1.3 is accepted", e, "");
+    check_n("reading the record bumps the useless-record counter", retry, 1);
+
+    // A TLS 1.3 message with no post-handshake meaning is rejected.
+    let (e, sink, retry) = phm(2);
+    eq(
+        "an unexpected post-handshake message is rejected by type",
+        e,
+        "tls: received unexpected handshake message of type *tls.certificateRequestMsgTLS13",
+    );
+    eq("the unexpected_message alert matches Go", sink, "1503030002020a");
+    check_n("the rejected record still bumped the counter", retry, 1);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
