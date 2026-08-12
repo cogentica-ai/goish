@@ -6741,9 +6741,10 @@ pub fn handshake_client_tls13_certificate(
         slice::<crate::types::byte>::new(),
     ));
     let mut c = conn::Conn::default();
-    c.__setMemConn(sink.clone());
-    if !feed.is_empty() {
-        c.__setFeedConn(slice::__from_vec(feed));
+    if feed.is_empty() {
+        c.__setMemConn(sink.clone());
+    } else {
+        c.__setDuplexConn(slice::__from_vec(feed), sink.clone());
     }
     c.__setHaveVers(true);
     c.__setVers(common::VersionTLS13);

@@ -1107,6 +1107,25 @@ impl Conn {
         self.conn = Some(alloc::boxed::Box::new(feedConn {
             r: raw.to_vec(),
             at: 0,
+            sink: None,
+        }));
+    }
+    // go: none — goish-only: like `__setFeedConn`, but writes are
+    // recorded into `sink` rather than discarded. A read-path test needs
+    // this: `readHandshake` answers a bad message with an alert, and an
+    // error return without the alert would look identical to the caller
+    // and wrong to the peer.
+    #[doc(hidden)]
+    pub fn __setDuplexConn(
+        &mut self,
+        data: slice<byte>,
+        sink: alloc::sync::Arc<crate::sync::Mutex<slice<byte>>>,
+    ) {
+        let raw: &[byte] = &data;
+        self.conn = Some(alloc::boxed::Box::new(feedConn {
+            r: raw.to_vec(),
+            at: 0,
+            sink: Some(sink),
         }));
     }
     // go: none — goish-only: see `__setFeedConn`.
@@ -2197,6 +2216,9 @@ impl<'a> crate::io::Reader for connReader<'a> {
 struct feedConn {
     r: Vec<byte>,
     at: usize,
+    /// When set, writes are recorded here instead of discarded, so a
+    /// read-path test can also see the alert the failure sent.
+    sink: Option<alloc::sync::Arc<crate::sync::Mutex<slice<byte>>>>,
 }
 
 impl crate::net::Conn for feedConn {
@@ -2217,6 +2239,13 @@ impl crate::net::Conn for feedConn {
     }
     // go: none — goish-only: see `feedConn`.
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        if let Some(sink) = self.sink.as_ref() {
+            let raw: &[byte] = &p;
+            let mut g = sink.Lock();
+            let mut v = g.clone().__into_vec();
+            v.extend_from_slice(raw);
+            *g = slice::__from_vec(v);
+        }
         return (p.Len(), errors::nil);
     }
     // go: none — goish-only: see `feedConn`.
