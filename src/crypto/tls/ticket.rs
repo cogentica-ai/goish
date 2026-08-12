@@ -1,4 +1,4 @@
-// go: file crypto/tls/ticket.go decls: SessionState.Bytes, certificatesToBytesSlice, ParseSessionState
+// go: file crypto/tls/ticket.go decls: SessionState.Bytes, certificatesToBytesSlice, ParseSessionState, ClientSessionState.ResumptionState, NewResumptionState
 //
 // crypto/tls — the session-resumption state and its wire encoding.
 //
@@ -7,14 +7,9 @@
 // `unmarshalCertificate`. What is not here is the ticket *sealing*:
 // `Config.EncryptTicket`/`DecryptTicket` and their unexported halves
 // need `Config.ticketKeys`, which is part of the Config record still in
-// mod[rs]; `Conn.sessionState` needs a Conn; and `ClientSessionState` /
-// `NewResumptionState` would collide with the goish-only
-// `ClientSessionState` in session[rs] that the live TLS 1.3 client
-// holds, so they land when that one is evicted.
+// mod[rs]; and `Conn.sessionState` needs a Conn.
 //
-// goishlint:ignore GOISH018 sessionState, EncryptTicket, encryptTicket, DecryptTicket, decryptTicket, ResumptionState, NewResumptionState — see the banner.
-// goishlint:ignore GOISH019 ClientSessionState — same.
-// goishlint:ignore GOISH021 ClientSessionState — same.
+// goishlint:ignore GOISH018 sessionState, EncryptTicket, encryptTicket, DecryptTicket, decryptTicket — see the banner.
 //
 // One deviation: Go resolves each peer certificate through
 // `globalCertCache.newCert`, a `sync.Map` of weak pointers that memoises
@@ -461,4 +456,59 @@ impl SessionState {
     // go: none — goish-only: see above.
     #[doc(hidden)]
     pub fn __curveID(&self) -> CurveID { return self.curveID; }
+}
+
+
+// ─── ClientSessionState ───────────────────────────────────────────────
+
+// Go: ticket.go:349-351
+//   type ClientSessionState struct { session *SessionState }
+/// Go: "ClientSessionState contains the state needed by a client to
+/// resume a previous TLS session."
+#[derive(Clone, Default)]
+pub struct ClientSessionState {
+    pub(crate) session: Option<SessionState>,
+}
+
+impl ClientSessionState {
+    // go: sdk 1.25.5 crypto/tls/ticket.go:355-360 ClientSessionState.ResumptionState
+    /// Go: "ResumptionState returns the session ticket sent by the
+    /// server (also known as the session's identity) and the state
+    /// necessary to resume this session. It can be called by
+    /// [Config.UnwrapSession] to serialize a resumable session."
+    ///
+    /// Deviation: Go's nil receiver and nil `cs.session` both yield
+    /// `(nil, nil, nil)`. goish has no nil receiver; a zero
+    /// ClientSessionState has `session == None`, which is the same
+    /// state, and the second result becomes an `Option`.
+    pub fn ResumptionState(&self) -> (slice<byte>, Option<SessionState>, error) {
+        // Go: if cs == nil || cs.session == nil { return nil, nil, nil }
+        if self.session.is_none() {
+            return (slice::new(), None, crate::errors::nil);
+        }
+        // Go: return cs.session.ticket, cs.session, nil
+        let s = self.session.clone().unwrap();
+        return (s.ticket.clone(), Some(s), crate::errors::nil);
+    }
+}
+
+// go: sdk 1.25.5 crypto/tls/ticket.go:364-371 NewResumptionState
+/// Go: "NewResumptionState returns a state value that can be returned by
+/// [Config.UnwrapSession] to resume a previous session. state needs to
+/// be returned by [ParseSessionState], and the ticket and session state
+/// must have been returned by [ClientSessionState.ResumptionState]."
+pub fn NewResumptionState(
+    ticket: slice<byte>,
+    state: SessionState,
+) -> (ClientSessionState, error) {
+    // Go: state.ticket = ticket
+    //     return &ClientSessionState{session: state}, nil
+    let mut state = state;
+    state.ticket = ticket;
+    return (
+        ClientSessionState {
+            session: Some(state),
+        },
+        crate::errors::nil,
+    );
 }

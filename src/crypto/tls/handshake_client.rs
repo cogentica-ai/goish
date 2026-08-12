@@ -133,7 +133,7 @@ pub fn do_client_handshake(
     // the pre_shared_key extension as the LAST extension in ClientHello.
     // We only resume with SHA-256 suites (suite_id 0x1301 or 0x1303)
     // for simplicity — the session hash_size check ensures correctness.
-    let psk_session: Option<crate::crypto::tls::session::ClientSessionState> =
+    let psk_session: Option<crate::crypto::tls::session::cachedSession> =
         crate::crypto::tls::session::take(_server_name);
 
     // ── 2. Build & send ClientHello ────────────────────────────────

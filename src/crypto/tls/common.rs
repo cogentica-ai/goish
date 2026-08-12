@@ -1,4 +1,4 @@
-// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError, Certificate.leaf, Config.supportedVersions, Config.maxSupportedVersion, Config.mutualVersion, Config.curvePreferences, Config.supportsCurve, Config.cipherSuites, Config.supportedCipherSuites, Config.rand, Config.time, Config.ticketKeyFromBytes, Config.BuildNameToCertificate, defaultConfig, fipsAllowedChains, fipsAllowChain, emptyConfig, Config.initLegacySessionTicketKeyRLocked, Config.SetSessionTicketKeys, Config.ticketKeys, Config.Clone, ClientHelloInfo.Context, ClientHelloInfo.SupportsCertificate, CertificateRequestInfo.Context, CertificateRequestInfo.SupportsCertificate
+// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError, Certificate.leaf, Config.supportedVersions, Config.maxSupportedVersion, Config.mutualVersion, Config.curvePreferences, Config.supportsCurve, Config.cipherSuites, Config.supportedCipherSuites, Config.rand, Config.time, Config.ticketKeyFromBytes, Config.BuildNameToCertificate, defaultConfig, fipsAllowedChains, fipsAllowChain, emptyConfig, Config.initLegacySessionTicketKeyRLocked, Config.SetSessionTicketKeys, Config.ticketKeys, Config.Clone, ClientHelloInfo.Context, ClientHelloInfo.SupportsCertificate, CertificateRequestInfo.Context, CertificateRequestInfo.SupportsCertificate, NewLRUClientSessionCache, lruSessionCache.Put, lruSessionCache.Get
 //
 // crypto/tls — the protocol-level type surface: versions, curve IDs,
 // signature schemes and client-auth policy.
@@ -10,9 +10,9 @@
 // `Config` and `Certificate` currently live in mod[rs] and are not yet
 // ports — see ROADMAP.md.
 //
-// goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
-// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, ClientSessionCache, RenegotiationSupport, Config, dsaSignature, ecdsaSignature — same.
-// goishlint:ignore GOISH021 ClientSessionCache, Config, ConnectionState, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
+// goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, ExportKeyingMaterial, InsecureCipherSuites, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
+// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, RenegotiationSupport, Config, dsaSignature, ecdsaSignature — same.
+// goishlint:ignore GOISH021 Config, ConnectionState, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, maxSessionTicketLifetime, maxUselessBytes, pskIdentity, pskModeDHE, pskModePlain, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -1538,5 +1538,169 @@ impl CertificateRequestInfo {
         }
         // Go: return errors.New("chain is not signed by an acceptable CA")
         return errors::New("chain is not signed by an acceptable CA");
+    }
+}
+
+
+// ─── The client session cache ─────────────────────────────────────────
+
+// Go: common.go:594-604
+//   type ClientSessionCache interface {
+//       Get(sessionKey string) (session *ClientSessionState, ok bool)
+//       Put(sessionKey string, cs *ClientSessionState)
+//   }
+/// Go: "ClientSessionCache is a cache of ClientSessionState objects that
+/// can be used by a client to resume a TLS session with a given server.
+/// ClientSessionCache implementations should expect to be called
+/// concurrently from different goroutines."
+pub trait ClientSessionCache: Send + Sync {
+    /// Go: "Get searches for a ClientSessionState associated with the
+    /// given key. On return, ok is true if one was found."
+    fn Get(&mut self, sessionKey: crate::gostring::string)
+        -> (Option<super::ticket::ClientSessionState>, bool);
+
+    /// Go: "Put adds the ClientSessionState to the cache with the given
+    /// key. It might get called multiple times in a connection if a TLS
+    /// 1.3 server provides more than one session ticket. If called with
+    /// a nil *ClientSessionState, it should remove the cache entry."
+    fn Put(
+        &mut self,
+        sessionKey: crate::gostring::string,
+        cs: Option<super::ticket::ClientSessionState>,
+    );
+}
+
+// Go: common.go:1614-1617
+//   type lruSessionCacheEntry struct { sessionKey string; state *ClientSessionState }
+#[derive(Clone, Default)]
+pub(crate) struct lruSessionCacheEntry {
+    pub sessionKey: crate::gostring::string,
+    pub state: Option<super::ticket::ClientSessionState>,
+}
+
+// Go: common.go:1606-1612
+//   type lruSessionCache struct { sync.Mutex
+//                                 m map[string]*list.Element
+//                                 q *list.List; capacity int }
+/// Go: "lruSessionCache is a ClientSessionCache implementation that uses
+/// an LRU caching strategy."
+///
+/// Deviation: Go pairs a `map[string]*list.Element` with a
+/// `container/list` so both lookup and reordering are O(1). goish has no
+/// `container/list`, so the queue is a `Vec` ordered most-recently-used
+/// first and the lookup is a scan of it. The default capacity is 64, so
+/// the scan is bounded; the observable behaviour — which key is evicted,
+/// and when — is identical. The `sync.Mutex` is gone for the same reason
+/// `Config`'s is: the methods take `&mut self`.
+pub struct lruSessionCache {
+    pub(crate) q: Vec<lruSessionCacheEntry>,
+    pub(crate) capacity: int,
+}
+
+// go: sdk 1.25.5 crypto/tls/common.go:1622-1633 NewLRUClientSessionCache
+/// Go: "NewLRUClientSessionCache returns a [ClientSessionCache] with the
+/// given capacity that uses an LRU strategy. If capacity is < 1, a
+/// default capacity is used instead."
+pub fn NewLRUClientSessionCache(capacity: int) -> lruSessionCache {
+    // Go: const defaultSessionCacheCapacity = 64
+    //     if capacity < 1 { capacity = defaultSessionCacheCapacity }
+    const defaultSessionCacheCapacity: int = 64;
+    let mut capacity = capacity;
+    if capacity < 1 {
+        capacity = defaultSessionCacheCapacity;
+    }
+    // Go: return &lruSessionCache{m: …, q: list.New(), capacity: capacity}
+    return lruSessionCache {
+        q: Vec::new(),
+        capacity,
+    };
+}
+
+impl ClientSessionCache for lruSessionCache {
+    // go: sdk 1.25.5 crypto/tls/common.go:1637-1666 lruSessionCache.Put
+    /// Go: "Put adds the provided (sessionKey, cs) pair to the cache. If
+    /// cs is nil, the entry corresponding to sessionKey is removed from
+    /// the cache instead."
+    fn Put(
+        &mut self,
+        sessionKey: crate::gostring::string,
+        cs: Option<super::ticket::ClientSessionState>,
+    ) {
+        // Go: if elem, ok := c.m[sessionKey]; ok {
+        //         if cs == nil { c.q.Remove(elem); delete(c.m, sessionKey) }
+        //         else { entry := elem.Value.(*lruSessionCacheEntry)
+        //                entry.state = cs; c.q.MoveToFront(elem) }
+        //         return }
+        let mut at: Option<usize> = None;
+        let mut i: usize = 0;
+        while i < self.q.len() {
+            if self.q[i].sessionKey == sessionKey {
+                at = Some(i);
+                break;
+            }
+            i += 1;
+        }
+        if at.is_some() {
+            let i = at.unwrap();
+            if cs.is_none() {
+                self.q.remove(i);
+            } else {
+                let mut entry = self.q.remove(i);
+                entry.state = cs;
+                self.q.insert(0, entry);
+            }
+            return;
+        }
+
+        // Go: if c.q.Len() < c.capacity {
+        //         entry := &lruSessionCacheEntry{sessionKey, cs}
+        //         c.m[sessionKey] = c.q.PushFront(entry); return }
+        if crate::int(self.q.len()) < self.capacity {
+            self.q.insert(
+                0,
+                lruSessionCacheEntry {
+                    sessionKey,
+                    state: cs,
+                },
+            );
+            return;
+        }
+
+        // Go: elem := c.q.Back()
+        //     entry := elem.Value.(*lruSessionCacheEntry)
+        //     delete(c.m, entry.sessionKey)
+        //     entry.sessionKey = sessionKey; entry.state = cs
+        //     c.q.MoveToFront(elem); c.m[sessionKey] = elem
+        //
+        // The oldest entry is reused rather than dropped and re-made,
+        // which is why Go rewrites both of its fields in place.
+        let mut entry = self.q.pop().unwrap();
+        entry.sessionKey = sessionKey;
+        entry.state = cs;
+        self.q.insert(0, entry);
+    }
+
+    // go: sdk 1.25.5 crypto/tls/common.go:1670-1679 lruSessionCache.Get
+    /// Go: "Get returns the [ClientSessionState] value associated with a
+    /// given key. It returns (nil, false) if no value is found."
+    fn Get(
+        &mut self,
+        sessionKey: crate::gostring::string,
+    ) -> (Option<super::ticket::ClientSessionState>, bool) {
+        // Go: if elem, ok := c.m[sessionKey]; ok {
+        //         c.q.MoveToFront(elem)
+        //         return elem.Value.(*lruSessionCacheEntry).state, true }
+        //     return nil, false
+        let mut i: usize = 0;
+        while i < self.q.len() {
+            if self.q[i].sessionKey == sessionKey {
+                let entry = self.q.remove(i);
+                let state = entry.state.clone();
+                self.q.insert(0, entry);
+                return (state, true);
+            }
+            i += 1;
+        }
+        return (None, false);
     }
 }

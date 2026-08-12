@@ -17,11 +17,15 @@ use crate::lazy::Lazy;
 use crate::sync;
 use crate::types::byte;
 
-/// `ClientSessionState` — one resumable session derived from a server-issued
-/// NewSessionTicket. Mirrors Go's crypto/tls.ClientSessionState plus the
+/// `cachedSession` — one resumable session derived from a server-issued
+/// NewSessionTicket.
+///
+/// Renamed out of the way of `tls::ClientSessionState`, which is now a
+/// verbatim port of Go's type in ticket[rs]. This one is goish-only:
+/// the flattened shape the live TLS 1.3 client holds, plus the
 /// fields we need to recompute the obfuscated_ticket_age + binders.
 #[derive(Clone)]
-pub struct ClientSessionState {
+pub struct cachedSession {
     /// Opaque ticket bytes from the server (used as PskIdentity.identity).
     pub ticket: Vec<byte>,
     /// Server-chosen value XORed (well, added mod 2^32) into the obfuscated_ticket_age.
@@ -41,9 +45,9 @@ pub struct ClientSessionState {
     pub hash_size: u16,
 }
 
-impl Default for ClientSessionState {
+impl Default for cachedSession {
     fn default() -> Self {
-        ClientSessionState {
+        cachedSession {
             ticket: Vec::new(),
             ticket_age_add: 0,
             ticket_lifetime: 0,
@@ -60,34 +64,34 @@ impl Default for ClientSessionState {
 // Go's tls.Config.ClientSessionCache is per-Config; for our single-binary
 // no_std use case a process-wide cache keyed by server_name is sufficient.
 
-type CacheMap = crate::map<string, slice<ClientSessionState>>;
+type CacheMap = crate::map<string, slice<cachedSession>>;
 
 pub static CACHE: Lazy<sync::Mutex<CacheMap>> =
     Lazy::new(|| sync::Mutex::new(crate::map::new_no_zero()));
 
 /// Append a session for `server_name`. Multiple tickets per host are kept
 /// (servers commonly issue several so the client can resume in parallel).
-pub fn put<S: Into<string>>(server_name: S, state: ClientSessionState) {
+pub fn put<S: Into<string>>(server_name: S, state: cachedSession) {
     let name = server_name.into();
     if name.Len() == 0 || state.ticket.is_empty() || state.resumption_psk.is_empty() {
         return;
     }
     let mut m = CACHE.Lock();
     let (cur_opt, _) = m.GetRef(name.clone());
-    let mut list: slice<ClientSessionState> = match cur_opt {
+    let mut list: slice<cachedSession> = match cur_opt {
         Some(s) => s.clone(),
-        None => slice::<ClientSessionState>::__from_vec(Vec::new()),
+        None => slice::<cachedSession>::__from_vec(Vec::new()),
     };
     let mut v = list.__into_vec();
     v.push(state);
-    list = slice::<ClientSessionState>::__from_vec(v);
+    list = slice::<cachedSession>::__from_vec(v);
     m.Set(name, list);
 }
 
 /// Pop the most-recently-stored session for `server_name`, or `None`.
 /// Per RFC 8446 each ticket SHOULD be used only once (replay resistance),
 /// so we remove the entry on get.
-pub fn take<S: Into<string>>(server_name: S) -> Option<ClientSessionState> {
+pub fn take<S: Into<string>>(server_name: S) -> Option<cachedSession> {
     let name = server_name.into();
     if name.Len() == 0 {
         return None;
@@ -107,7 +111,7 @@ pub fn take<S: Into<string>>(server_name: S) -> Option<ClientSessionState> {
         // No tickets left — remove the entry.
         crate::delete!(m, name);
     } else {
-        m.Set(name, slice::<ClientSessionState>::__from_vec(v));
+        m.Set(name, slice::<cachedSession>::__from_vec(v));
     }
     popped
 }

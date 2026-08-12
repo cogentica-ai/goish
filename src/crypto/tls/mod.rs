@@ -754,7 +754,7 @@ impl Conn {
                                             &nst.ticket_nonce, hash_size as usize,
                                         );
                                         let server_name = self.config.ServerName.clone();
-                                        let state = session::ClientSessionState {
+                                        let state = session::cachedSession {
                                             ticket: nst.ticket,
                                             ticket_age_add: nst.ticket_age_add,
                                             ticket_lifetime: nst.ticket_lifetime,
@@ -3668,4 +3668,110 @@ pub fn handshake_server_supportsECDHE(
 pub fn common_infoContextsAreNil() -> bool {
     return common::ClientHelloInfo::default().Context().is_none()
         && common::CertificateRequestInfo::default().Context().is_none();
+}
+
+// go: none — goish-only: lruSessionCache and ClientSessionState's
+// private field are unexported in Go, where the tests are in-package.
+// Runs Go's own eviction sequence over a capacity-3 cache and reports
+// `(ticket for "a", presence of a/b/c/d after inserting "d", presence of
+// "a" after a nil Put, the replaced secret for "c")`.
+#[doc(hidden)]
+pub fn common_lruSessionCache() -> (
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+    bool,
+    bool,
+    bool,
+    bool,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    use common::ClientSessionCache as _;
+    let mk = |tag: crate::types::byte| {
+        let mut ss = ticket::SessionState::default();
+        ss.__setVersion(common::VersionTLS13);
+        ss.__setCipherSuite(cipher_suites::TLS_AES_128_GCM_SHA256);
+        ss.__setSecret(crate::goslice::slice::__from_vec(alloc::vec![tag]));
+        let (cs, _) = ticket::NewResumptionState(
+            crate::goslice::slice::__from_vec(alloc::vec![tag, tag]),
+            ss,
+        );
+        return cs;
+    };
+    let mut c = common::NewLRUClientSessionCache(3);
+    c.Put(crate::gostring::string::from_static("a"), Some(mk(1)));
+    c.Put(crate::gostring::string::from_static("b"), Some(mk(2)));
+    c.Put(crate::gostring::string::from_static("c"), Some(mk(3)));
+    let (sa, _) = c.Get(crate::gostring::string::from_static("a"));
+    let (ticketA, _, _) = sa.unwrap().ResumptionState();
+    let _ = c.Get(crate::gostring::string::from_static("b"));
+    let _ = c.Get(crate::gostring::string::from_static("c"));
+    // "c" is now most-recently-used and "a" least, so "d" evicts "a".
+    c.Put(crate::gostring::string::from_static("d"), Some(mk(4)));
+    let (_, okA) = c.Get(crate::gostring::string::from_static("a"));
+    let (_, okB) = c.Get(crate::gostring::string::from_static("b"));
+    let (_, okC) = c.Get(crate::gostring::string::from_static("c"));
+    let (_, okD) = c.Get(crate::gostring::string::from_static("d"));
+    c.Put(crate::gostring::string::from_static("a"), None);
+    let (_, okANil) = c.Get(crate::gostring::string::from_static("a"));
+    c.Put(crate::gostring::string::from_static("c"), Some(mk(9)));
+    let (sc, _) = c.Get(crate::gostring::string::from_static("c"));
+    let (_, stc, _) = sc.unwrap().ResumptionState();
+    return (
+        ticketA,
+        okA,
+        okB,
+        okC,
+        okD,
+        okANil,
+        stc.unwrap().__secret(),
+    );
+}
+
+// go: none — goish-only: see `common_lruSessionCache`. A capacity of
+// zero takes Go's default of 64; reports `(k0, k1, k64)` presence after
+// 65 puts.
+#[doc(hidden)]
+pub fn common_lruDefaultCapacity() -> (bool, bool, bool) {
+    use common::ClientSessionCache as _;
+    let mut d = common::NewLRUClientSessionCache(0);
+    let mut i: crate::types::int = 0;
+    while i < 65 {
+        let mut ss = ticket::SessionState::default();
+        ss.__setVersion(common::VersionTLS13);
+        ss.__setSecret(crate::goslice::slice::__from_vec(alloc::vec![i as crate::types::byte]));
+        let (cs, _) = ticket::NewResumptionState(crate::goslice::slice::new(), ss);
+        d.Put(
+            crate::gostring::string::from("k") + crate::strconv::Itoa(i),
+            Some(cs),
+        );
+        i += 1;
+    }
+    let (_, ok0) = d.Get(crate::gostring::string::from_static("k0"));
+    let (_, ok1) = d.Get(crate::gostring::string::from_static("k1"));
+    let (_, ok64) = d.Get(crate::gostring::string::from_static("k64"));
+    return (ok0, ok1, ok64);
+}
+
+// go: none — goish-only: see `common_lruSessionCache`. Reports
+// `(zero-value ticket is empty, zero-value state is nil, round-tripped
+// ticket, round-tripped secret)`.
+#[doc(hidden)]
+pub fn ticket_resumptionState() -> (
+    bool,
+    bool,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let zero = ticket::ClientSessionState::default();
+    let (tk, st, _) = zero.ResumptionState();
+    let mut ss = ticket::SessionState::default();
+    ss.__setVersion(common::VersionTLS13);
+    ss.__setCipherSuite(cipher_suites::TLS_AES_128_GCM_SHA256);
+    ss.__setSecret(crate::goslice::slice::__from_vec(alloc::vec![7u8]));
+    let (cs, _) = ticket::NewResumptionState(
+        crate::goslice::slice::__from_vec(alloc::vec![0xaau8, 0xbb]),
+        ss,
+    );
+    let (tk3, st3, _) = cs.ResumptionState();
+    return (tk.Len() == 0, st.is_none(), tk3, st3.unwrap().__secret());
 }

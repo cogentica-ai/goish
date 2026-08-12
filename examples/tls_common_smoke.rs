@@ -1866,6 +1866,35 @@ fn main() {
     let (e5, _) = se(alloc::vec![tls::X25519], alloc::vec![0u8, 1]);
     check("supportsECDHE with both formats", e5);
 
+    // ─── common.go's LRU client session cache and ticket.go's
+    //     ClientSessionState. From goref.sh — the eviction order in
+    //     particular, which is not what it looks like: after reading a,
+    //     b, c in that order, c is most-recently-used and a is least, so
+    //     inserting d evicts *a*.
+    let (lruTicketA, lruA, lruB, lruC, lruD, lruANil, lruReplaced) =
+        tls::common_lruSessionCache();
+    eq("lruSessionCache Get returns the stored ticket", hexOf(lruTicketA), "0101");
+    check("lruSessionCache evicts the least-recently-used key", !lruA);
+    check("lruSessionCache keeps b", lruB);
+    check("lruSessionCache keeps c", lruC);
+    check("lruSessionCache keeps the new key", lruD);
+    // Go quirk worth pinning: Put(key, nil) for a key that is NOT in the
+    // cache still consumes a slot — it reuses the oldest entry and sets
+    // its state to nil — so the key reads back as present with no state.
+    check("lruSessionCache Put(absent key, nil) still inserts the key", lruANil);
+    eq("lruSessionCache replaces an existing key in place", hexOf(lruReplaced), "09");
+
+    let (k0, k1, k64) = tls::common_lruDefaultCapacity();
+    check("lruSessionCache capacity 0 takes the default of 64", !k0);
+    check("lruSessionCache default capacity keeps k1", k1);
+    check("lruSessionCache default capacity keeps k64", k64);
+
+    let (zeroTicket, zeroState, rsTicket, rsSecret) = tls::ticket_resumptionState();
+    check("ResumptionState on a zero value returns no ticket", zeroTicket);
+    check("ResumptionState on a zero value returns no state", zeroState);
+    eq("NewResumptionState round-trips the ticket", hexOf(rsTicket), "aabb");
+    eq("NewResumptionState round-trips the state", hexOf(rsSecret), "07");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
