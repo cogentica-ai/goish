@@ -1,4 +1,4 @@
-// go: file crypto/x509/x509.go decls: ParsePKIXPublicKey, SignatureAlgorithm.isRSAPSS, SignatureAlgorithm.hashFunc, SignatureAlgorithm.String, PublicKeyAlgorithm.String, getSignatureAlgorithmFromAI, getPublicKeyAlgorithmFromOID, namedCurveFromOID, oidFromNamedCurve, oidFromECDHCurve, extKeyUsageFromOID, oidFromExtKeyUsage, InsecureAlgorithmError.Error, ConstraintViolationError.Error, Certificate.Equal, Certificate.hasSANExtension, Certificate.CheckSignatureFrom, Certificate.CheckSignature, Certificate.hasNameConstraints, Certificate.getSANExtension, signaturePublicKeyAlgoMismatchError, checkSignature, Certificate.CheckCRLSignature, UnhandledCriticalExtension.Error, oidInExtensions, isIA5String, marshalPublicKey, MarshalPKIXPublicKey, reverseBitsInAByte, asn1BitLength, marshalSANs, buildCertExtensions, marshalKeyUsage, marshalExtKeyUsage, marshalBasicConstraints, marshalCertificatePolicies, buildCSRExtensions, subjectBytes, signingParamsForKey, signTBS, CreateCertificate, Certificate.CreateCRL, CreateRevocationList, newRawAttributes, CreateCertificateRequest, ParseCRL, ParseDERCRL, parseRawAttributes, parseCSRExtensions, ParseCertificateRequest, parseCertificateRequest
+// go: file crypto/x509/x509.go decls: ParsePKIXPublicKey, SignatureAlgorithm.isRSAPSS, SignatureAlgorithm.hashFunc, SignatureAlgorithm.String, PublicKeyAlgorithm.String, getSignatureAlgorithmFromAI, getPublicKeyAlgorithmFromOID, namedCurveFromOID, oidFromNamedCurve, oidFromECDHCurve, extKeyUsageFromOID, oidFromExtKeyUsage, InsecureAlgorithmError.Error, ConstraintViolationError.Error, Certificate.Equal, Certificate.hasSANExtension, Certificate.CheckSignatureFrom, Certificate.CheckSignature, Certificate.hasNameConstraints, Certificate.getSANExtension, signaturePublicKeyAlgoMismatchError, checkSignature, Certificate.CheckCRLSignature, UnhandledCriticalExtension.Error, oidInExtensions, isIA5String, marshalPublicKey, MarshalPKIXPublicKey, reverseBitsInAByte, asn1BitLength, marshalSANs, buildCertExtensions, marshalKeyUsage, marshalExtKeyUsage, marshalBasicConstraints, marshalCertificatePolicies, buildCSRExtensions, subjectBytes, signingParamsForKey, signTBS, CreateCertificate, Certificate.CreateCRL, CreateRevocationList, newRawAttributes, CreateCertificateRequest, ParseCRL, ParseDERCRL, parseRawAttributes, parseCSRExtensions, ParseCertificateRequest, parseCertificateRequest, CertificateRequest.CheckSignature, RevocationList.CheckSignatureFrom
 //
 // The X.509 type surface: the algorithm identifiers, the OID tables and
 // the `Certificate` struct every other file in the package hangs on.
@@ -3965,4 +3965,59 @@ fn parseCertificateRequest(in_: &certificateRequest) -> (Option<CertificateReque
 
     // Go: return out, nil
     return (Some(out), errors::nil);
+}
+
+impl CertificateRequest {
+    // go: sdk 1.25.5 crypto/x509/x509.go:2260-2263 CertificateRequest.CheckSignature
+    /// Report whether the signature on `self` is valid.
+    pub fn CheckSignature(&self) -> error {
+        // Go: return checkSignature(c.SignatureAlgorithm,
+        //         c.RawTBSCertificateRequest, c.Signature, c.PublicKey, true)
+        return checkSignature(
+            self.SignatureAlgorithm,
+            self.RawTBSCertificateRequest.clone(),
+            self.Signature.clone(),
+            &self.PublicKey,
+            true,
+        );
+    }
+}
+
+impl RevocationList {
+    // go: sdk 1.25.5 crypto/x509/x509.go:2550-2565 RevocationList.CheckSignatureFrom
+    /// Verify that the signature on `self` is a valid signature from
+    /// `parent`.
+    pub fn CheckSignatureFrom(&self, parent: &Certificate) -> error {
+        // Go: if parent.Version == 3 && !parent.BasicConstraintsValid ||
+        //        parent.BasicConstraintsValid && !parent.IsCA {
+        //         return ConstraintViolationError{}
+        //     }
+        if (parent.Version == 3 && !parent.BasicConstraintsValid)
+            || (parent.BasicConstraintsValid && !parent.IsCA)
+        {
+            return errors::Wrap(ConstraintViolationError {});
+        }
+
+        // Go: if parent.KeyUsage != 0 && parent.KeyUsage&KeyUsageCRLSign == 0 {
+        //         return ConstraintViolationError{}
+        //     }
+        if parent.KeyUsage != KeyUsage(0) && (parent.KeyUsage & KeyUsageCRLSign) == KeyUsage(0) {
+            return errors::Wrap(ConstraintViolationError {});
+        }
+
+        // Go: if parent.PublicKeyAlgorithm == UnknownPublicKeyAlgorithm {
+        //         return ErrUnsupportedAlgorithm
+        //     }
+        if parent.PublicKeyAlgorithm == UnknownPublicKeyAlgorithm {
+            return ErrUnsupportedAlgorithm.into();
+        }
+
+        // Go: return parent.CheckSignature(rl.SignatureAlgorithm,
+        //         rl.RawTBSRevocationList, rl.Signature)
+        return parent.CheckSignature(
+            self.SignatureAlgorithm,
+            self.RawTBSRevocationList.clone(),
+            self.Signature.clone(),
+        );
+    }
 }

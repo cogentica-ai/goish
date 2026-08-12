@@ -86,6 +86,19 @@ first one made all fifteen look done.
 This was found by measurement, not estimate: six verbatim message ports
 landed with byte-exact vectors and the percentage did not move.
 
+`--by-decl` reports the receiver-qualified figure, on both sides:
+
+| | by name | by declaration |
+|---|--:|--:|
+| crypto/ | 1206/1452 (83.1%) | **1400/1734 (80.7%)** |
+| crypto/tls | 50/296 (16.9%) | 58/374 (15.5%) |
+
+The first thing it found was concrete: `crypto/x509` read 100% by name
+while missing `CertificateRequest.CheckSignature` and
+`RevocationList.CheckSignatureFrom` — both credited because
+`Certificate` has same-named methods. Both are now ported, and x509 is
+169/169 either way.
+
 The anchors do not have this problem — `anchor_by_name.py` keys methods
 by `Recv.Method`, so the 2238 anchors are receiver-qualified and
 GOISH018 diffs each one individually. **Anchor counts are the honest

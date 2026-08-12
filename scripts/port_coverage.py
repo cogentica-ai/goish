@@ -5,6 +5,7 @@
     scripts/port_coverage.py crypto --json     # machine-readable
     scripts/port_coverage.py crypto --pkg tls  # per-package detail (missing fns)
     scripts/port_coverage.py crypto --md       # markdown table (for tracking docs)
+    scripts/port_coverage.py crypto --by-decl  # count Recv.Method, not bare names
 
 Go source root comes from $GOROOT, else `go env GOROOT`, else --goroot.
 
@@ -44,6 +45,26 @@ SKIP_FILE = re.compile(
 SKIP_ASM = re.compile(r"_(asm|amd64)\.go$")
 
 FUNC = re.compile(r"^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*[\(\[]", re.M)
+
+# The same match, but keeping the receiver type. `FUNC` collapses every
+# method that shares a name — `marshal` on fifteen handshake-message
+# types is ONE entry, and it counts as ported the moment any one of them
+# is. Measured 2026-08-12: crypto/ has 1780 receiver-qualified
+# declarations behind 1493 counted names, so 16% of the real surface is
+# invisible, and crypto/tls is 727 behind 296.
+#
+# `--by-decl` reports the receiver-qualified figure. It is not the
+# default because every published number, and the whole lint baseline
+# workflow, is keyed to the name-level count; switching silently would
+# restate them all. Use it to see the true denominator.
+FUNC_RECV = re.compile(
+    r"^func\s+(?:\(\s*\w+\s+\*?(\w+)\s*\)\s*)?([A-Za-z_]\w*)\s*[\(\[]", re.M)
+
+
+def decl_key(recv, name):
+    """`Recv.Method` when there is a receiver, else the bare name —
+    the same keying `anchor_by_name.py` uses for anchors."""
+    return "%s.%s" % (recv, name) if recv else name
 RSFN = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s+([A-Za-z_]\w*)", re.M)
 ANCHOR = re.compile(r"^\s*//\s*go:", re.M)
 # A Go declaration that goish deliberately resolves somewhere else, so it
@@ -92,6 +113,7 @@ def norm(s):
 
 
 PUREGO = False
+BY_DECL = False
 
 
 # GOOS values. A file whose //go:build line mentions ONLY these and does
@@ -323,6 +345,8 @@ def scan_go(root):
 
 
 def pc_FUNC(src):
+    if BY_DECL:
+        return {decl_key(r, n) for r, n in FUNC_RECV.findall(src)}
     return set(FUNC.findall(src))
 
 
@@ -335,7 +359,7 @@ def _facts(paths):
     for p in paths:
         src = open(p, errors="replace").read()
         waived |= {norm(w) for w in WAIVED.findall(src)}
-        mine = set(RSFN.findall(src))
+        mine = rust_decl_idents(src) if BY_DECL else set(RSFN.findall(src))
         idents |= mine
         n = len(ANCHOR.findall(src))
         anchors += n
@@ -353,6 +377,38 @@ def _facts(paths):
     return {"idents": {norm(i) for i in idents}, "loc": loc,
             "nfiles": len(paths), "anchors": anchors, "cited": cited,
             "unanchored": unanchored, "waived": waived}
+
+
+
+# Rust-side receiver qualification, mirroring anchor_by_name.py's
+# impl-block tracking. Without this, `--by-decl` would compare Go's
+# `Recv.Method` keys against bare Rust fn names and match almost
+# nothing — a flag that understates as badly as the default overstates.
+RE_IMPL = re.compile(
+    r'^\s*impl(?:\s*<[^>]*>)?\s+(?:.+\s+for\s+)?(?P<ty>[A-Za-z_]\w*)')
+
+
+def rust_decl_idents(src):
+    """Every Rust fn, keyed `ImplType.fn` inside an impl block and by the
+    bare name outside one. Both forms are emitted for a method, because
+    Go reaches a method as `Recv.Method` while a free function that a
+    port turned into an inherent method is still legitimately matched by
+    name."""
+    out, impl_ty, impl_depth, depth = set(), None, 0, 0
+    for line in src.split("\n"):
+        m = RE_IMPL.match(line)
+        if m and impl_ty is None:
+            impl_ty, impl_depth = m.group("ty"), depth
+        fn = RSFN.match(line)
+        if fn:
+            name = fn.group(1)
+            out.add(name)
+            if impl_ty:
+                out.add("%s.%s" % (impl_ty, name))
+        depth += line.count("{") - line.count("}")
+        if impl_ty is not None and depth <= impl_depth:
+            impl_ty = None
+    return out
 
 
 def scan_rs(root):
@@ -438,8 +494,9 @@ def main():
     argv = sys.argv[1:]
     if not argv or argv[0].startswith("-"):
         sys.exit(__doc__)
-    global PUREGO
+    global PUREGO, BY_DECL
     PUREGO = "--purego" in argv
+    BY_DECL = "--by-decl" in argv
     subtree, gr = argv[0], goroot(argv)
     rows = build(subtree, gr)
 
