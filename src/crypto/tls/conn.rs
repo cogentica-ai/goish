@@ -1228,6 +1228,54 @@ impl Conn {
         self.ticketKeys = k;
     }
 
+
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __handshakes(&self) -> int { return self.handshakes; }
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __secureRenegotiation(&self) -> bool { return self.secureRenegotiation; }
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __setSecureRenegotiation(&mut self, v: bool) { self.secureRenegotiation = v; }
+    // go: none — goish-only: Go builds the 24-byte expected value inline
+    // from two unexported [12]byte fields; goish names the concatenation.
+    #[doc(hidden)]
+    pub fn __expectedSecureRenegotiation(&self) -> slice<byte> {
+        let mut v: Vec<byte> = Vec::with_capacity(24);
+        v.extend_from_slice(&self.clientFinished);
+        v.extend_from_slice(&self.serverFinished);
+        return slice::__from_vec(v);
+    }
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __setClientProtocol(&mut self, p: string) { self.clientProtocol = p; }
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __setSCTs(&mut self, v: slice<slice<byte>>) { self.scts = v; }
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __scts(&self) -> slice<slice<byte>> { return self.scts.clone(); }
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __clientProtocol(&self) -> string { return self.clientProtocol.clone(); }
+
+
+    // go: none — goish-only: `processServerHello` restores the same
+    // fields as `checkForResumption` EXCEPT didResume, which the client
+    // sets later in `clientHandshake`. Keeping the two apart matters:
+    // folding them would mark a connection resumed before the server's
+    // Finished has been verified.
+    #[doc(hidden)]
+    pub fn __restoreSession(&mut self, ss: &super::ticket::SessionState) {
+        self.extMasterSecret = ss.__extMasterSecret();
+        self.peerCertificates = ss.__peerCertificates();
+        self.verifiedChains = ss.__verifiedChains();
+        self.ocspResponse = ss.__ocspResponse();
+        self.scts = ss.__scts();
+        self.curveID = ss.__curveID();
+    }
+
     // go: sdk 1.25.5 crypto/tls/conn.go:99-101 Conn.LocalAddr
     /// Go: "LocalAddr returns the local network address."
     pub fn LocalAddr(&self) -> crate::net::TCPAddr {

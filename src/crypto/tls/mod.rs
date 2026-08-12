@@ -5171,3 +5171,89 @@ pub fn handshake_client_serverResumedSession(which: crate::types::int) -> bool {
     };
     return hs.serverResumedSession();
 }
+
+// go: none — goish-only: processServerHello reads clientHandshakeState's
+// unexported fields. `which`: 0 = a plain ServerHello, 1 = an unsupported
+// compression method, 2 = an incompatible point format, 3 = an
+// unrequested ALPN protocol, 4 = a matching ALPN protocol, 5 = a
+// non-empty renegotiation extension on the first handshake, 6 = a valid
+// resumption, 7 = a session from another version, 8 = another suite,
+// 9 = an EMS mismatch. Reports `(resumed, errText, masterSecret,
+// negotiated protocol, didResume)`.
+#[doc(hidden)]
+pub fn handshake_client_processServerHello(
+    which: crate::types::int,
+) -> (
+    bool,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::gostring::string,
+    bool,
+) {
+    let suiteID = cipher_suites::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256;
+    let mut ch = handshake_messages::clientHelloMsg::default();
+    ch.cipherSuites = alloc::vec![suiteID];
+    let mut sh = handshake_messages::serverHelloMsg::default();
+    sh.cipherSuite = suiteID;
+    let mut sess: Option<ticket::SessionState> = None;
+    match which {
+        1 => sh.compressionMethod = 1,
+        2 => sh.supportedPoints = alloc::vec![1u8],
+        3 => sh.alpnProtocol = "h2".into(),
+        4 => {
+            ch.alpnProtocols = alloc::vec!["h2".into()];
+            sh.alpnProtocol = "h2".into();
+        }
+        5 => {
+            sh.secureRenegotiationSupported = true;
+            sh.secureRenegotiation = alloc::vec![1u8];
+        }
+        6 | 7 | 8 | 9 => {
+            ch.sessionId = alloc::vec![7u8];
+            sh.sessionId = alloc::vec![7u8];
+            let mut ss = ticket::SessionState::default();
+            ss.__setVersion(if which == 7 {
+                common::VersionTLS13
+            } else {
+                common::VersionTLS12
+            });
+            ss.__setCipherSuite(if which == 8 {
+                cipher_suites::TLS_AES_128_GCM_SHA256
+            } else {
+                suiteID
+            });
+            ss.__setSecret(crate::goslice::slice::__from_vec(alloc::vec![9u8, 9]));
+            if which == 9 {
+                ss.__setExtMasterSecret(true);
+            }
+            sess = Some(ss);
+        }
+        _ => {}
+    }
+    let mut c = conn::Conn::default();
+    c.__setMemConn(alloc::sync::Arc::new(crate::sync::Mutex::new(
+        crate::goslice::slice::<crate::types::byte>::new(),
+    )));
+    c.__setVers(common::VersionTLS12);
+    let mut hs = handshake_client::clientHandshakeState {
+        c,
+        serverHello: sh,
+        hello: ch,
+        suite: None,
+        masterSecret: crate::goslice::slice::new(),
+        session: sess,
+    };
+    let (resumed, err) = hs.processServerHello();
+    let text = if err == crate::errors::nil {
+        crate::gostring::string::from_static("")
+    } else {
+        err.Error()
+    };
+    return (
+        resumed,
+        text,
+        hs.masterSecret.clone(),
+        hs.c.__clientProtocol(),
+        hs.c.__didResume(),
+    );
+}

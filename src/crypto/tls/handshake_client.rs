@@ -1,6 +1,6 @@
 // crypto/tls/handshake_client.rs — TLS 1.2 client handshake.
 //
-// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, handshake, doFullHandshake, processServerHello, readFinished, readSessionTicket, saveSessionTicket, sendFinished, verifyServerCertificate, getClientCertificate, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
+// goishlint:ignore GOISH018 makeClientHello, clientHandshake, loadSession, handshake, doFullHandshake, readFinished, readSessionTicket, saveSessionTicket, sendFinished, verifyServerCertificate, getClientCertificate, computeAndUpdatePSK — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
 // goishlint:ignore GOISH019 echClientContext — same.
 // goishlint:ignore GOISH021 echClientContext, tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
 //
@@ -2890,5 +2890,183 @@ impl clientHandshakeState {
         return self.session.is_some()
             && self.hello.sessionId.len() != 0
             && self.serverHello.sessionId == self.hello.sessionId;
+    }
+}
+
+
+impl clientHandshakeState {
+    // go: sdk 1.25.5 crypto/tls/handshake_client.go:918-1000 clientHandshakeState.processServerHello
+    /// Validate the ServerHello and, if the server chose to resume,
+    /// restore the session's secrets and peer state.
+    ///
+    /// Deviation: the renegotiation branch reads `c.handshakes`, which
+    /// no ported code increments yet — the driver that would is
+    /// `clientHandshake`. The branch is ported so it goes live with it.
+    pub(crate) fn processServerHello(&mut self) -> (bool, crate::error) {
+        // Go: if err := hs.pickCipherSuite(); err != nil { return false, err }
+        let err = self.pickCipherSuite();
+        if err != crate::errors::nil {
+            return (false, err);
+        }
+
+        // Go: if hs.serverHello.compressionMethod != compressionNone {
+        //         c.sendAlert(alertIllegalParameter)
+        //         return false, errors.New("tls: server selected unsupported compression format") }
+        if self.serverHello.compressionMethod != super::handshake_messages::compressionNone {
+            self.c.sendAlert(super::alert::alertIllegalParameter);
+            return (
+                false,
+                crate::errors::New("tls: server selected unsupported compression format"),
+            );
+        }
+
+        // Go: supportsPointFormat := false; offeredNonCompressedFormat := false
+        //     for _, format := range hs.serverHello.supportedPoints {
+        //         if format == pointFormatUncompressed { supportsPointFormat = true }
+        //         else { offeredNonCompressedFormat = true } }
+        //     if !supportsPointFormat && offeredNonCompressedFormat {
+        //         return false, errors.New("tls: server offered only incompatible point formats") }
+        let mut supportsPointFormat = false;
+        let mut offeredNonCompressedFormat = false;
+        for format in self.serverHello.supportedPoints.iter() {
+            if *format == super::common::pointFormatUncompressed {
+                supportsPointFormat = true;
+            } else {
+                offeredNonCompressedFormat = true;
+            }
+        }
+        if !supportsPointFormat && offeredNonCompressedFormat {
+            return (
+                false,
+                crate::errors::New("tls: server offered only incompatible point formats"),
+            );
+        }
+
+        // Go: if c.handshakes == 0 && hs.serverHello.secureRenegotiationSupported {
+        //         c.secureRenegotiation = true
+        //         if len(hs.serverHello.secureRenegotiation) != 0 {
+        //             c.sendAlert(alertHandshakeFailure)
+        //             return false, errors.New("tls: initial handshake had non-empty
+        //                 renegotiation extension") } }
+        if self.c.__handshakes() == 0 && self.serverHello.secureRenegotiationSupported {
+            self.c.__setSecureRenegotiation(true);
+            if self.serverHello.secureRenegotiation.len() != 0 {
+                self.c.sendAlert(super::alert::alertHandshakeFailure);
+                return (
+                    false,
+                    crate::errors::New(
+                        "tls: initial handshake had non-empty renegotiation extension",
+                    ),
+                );
+            }
+        }
+
+        // Go: if c.handshakes > 0 && c.secureRenegotiation {
+        //         var expectedSecureRenegotiation [24]byte
+        //         copy(expectedSecureRenegotiation[:], c.clientFinished[:])
+        //         copy(expectedSecureRenegotiation[12:], c.serverFinished[:])
+        //         if !bytes.Equal(hs.serverHello.secureRenegotiation,
+        //             expectedSecureRenegotiation[:]) {
+        //             c.sendAlert(alertHandshakeFailure)
+        //             return false, errors.New("tls: incorrect renegotiation extension contents") } }
+        if self.c.__handshakes() > 0 && self.c.__secureRenegotiation() {
+            let expected = self.c.__expectedSecureRenegotiation();
+            if slice::__from_vec(self.serverHello.secureRenegotiation.clone()) != expected {
+                self.c.sendAlert(super::alert::alertHandshakeFailure);
+                return (
+                    false,
+                    crate::errors::New("tls: incorrect renegotiation extension contents"),
+                );
+            }
+        }
+
+        // Go: if err := checkALPN(hs.hello.alpnProtocols,
+        //         hs.serverHello.alpnProtocol, false); err != nil {
+        //         c.sendAlert(alertUnsupportedExtension)
+        //         return false, err }
+        //     c.clientProtocol = hs.serverHello.alpnProtocol
+        //     c.scts = hs.serverHello.scts
+        let protos: alloc::vec::Vec<crate::gostring::string> = self
+            .hello
+            .alpnProtocols
+            .iter()
+            .map(|p| crate::gostring::string::from_bytes(p.as_bytes()))
+            .collect();
+        let chosen =
+            crate::gostring::string::from_bytes(self.serverHello.alpnProtocol.as_bytes());
+        let err = checkALPN(slice::__from_vec(protos), chosen.clone(), false);
+        if err != crate::errors::nil {
+            self.c.sendAlert(super::alert::alertUnsupportedExtension);
+            return (false, err);
+        }
+        self.c.__setClientProtocol(chosen);
+        self.c.__setSCTs(slice::__from_vec(
+            self.serverHello
+                .scts
+                .iter()
+                .map(|v| slice::__from_vec(v.clone()))
+                .collect(),
+        ));
+
+        // Go: if !hs.serverResumedSession() { return false, nil }
+        if !self.serverResumedSession() {
+            return (false, crate::errors::nil);
+        }
+        let session = self.session.clone().unwrap();
+
+        // Go: if hs.session.version != c.vers {
+        //         c.sendAlert(alertHandshakeFailure)
+        //         return false, errors.New("tls: server resumed a session with a
+        //             different version") }
+        if session.__version() != self.c.__vers() {
+            self.c.sendAlert(super::alert::alertHandshakeFailure);
+            return (
+                false,
+                crate::errors::New("tls: server resumed a session with a different version"),
+            );
+        }
+        // Go: if hs.session.cipherSuite != hs.suite.id { … different cipher suite }
+        if session.__cipherSuite() != self.suite.unwrap().id {
+            self.c.sendAlert(super::alert::alertHandshakeFailure);
+            return (
+                false,
+                crate::errors::New(
+                    "tls: server resumed a session with a different cipher suite",
+                ),
+            );
+        }
+        // Go: RFC 7627, Section 5.3
+        // Go: if hs.session.extMasterSecret != hs.serverHello.extendedMasterSecret {
+        //         … different EMS extension }
+        if session.__extMasterSecret() != self.serverHello.extendedMasterSecret {
+            self.c.sendAlert(super::alert::alertHandshakeFailure);
+            return (
+                false,
+                crate::errors::New("tls: server resumed a session with a different EMS extension"),
+            );
+        }
+
+        // Go: Restore master secret and certificates from previous state
+        // Go: hs.masterSecret = hs.session.secret … c.curveID = hs.session.curveID
+        self.masterSecret = session.__secret();
+        self.c.__restoreSession(&session);
+        // Go: Let the ServerHello SCTs override the session SCTs from the
+        // original connection, if any are provided.
+        // Go: if len(c.scts) == 0 && len(hs.session.scts) != 0 { c.scts = hs.session.scts }
+        //
+        // __adoptSession assigns the session's SCTs unconditionally, so
+        // the ServerHello's are put back when it had any.
+        if self.serverHello.scts.len() != 0 {
+            self.c.__setSCTs(slice::__from_vec(
+                self.serverHello
+                    .scts
+                    .iter()
+                    .map(|v| slice::__from_vec(v.clone()))
+                    .collect(),
+            ));
+        }
+
+        // Go: return true, nil
+        return (true, crate::errors::nil);
     }
 }

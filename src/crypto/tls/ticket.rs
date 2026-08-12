@@ -438,6 +438,7 @@ impl SessionState {
     // go: none — goish-only: see above.
     #[doc(hidden)]
     pub fn __version(&self) -> uint16 { return self.version; }
+
     // go: none — goish-only: see `__setVersion`.
     #[doc(hidden)]
     pub fn __peerCertificates(&self) -> slice<x509::Certificate> {

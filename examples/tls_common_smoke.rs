@@ -2501,6 +2501,47 @@ fn main() {
     check("serverResumedSession when the client sent no session id",
           !tls::handshake_client_serverResumedSession(3));
 
+    // ─── handshake_client.go: processServerHello. From goref.sh.
+    let psh = |w: int| tls::handshake_client_processServerHello(w);
+    let (p0r, p0e, _, _, _) = psh(0);
+    eq("processServerHello plain err", p0e, "");
+    check("processServerHello does not resume without a session", !p0r);
+    let (_, p1e, _, _, _) = psh(1);
+    eq("processServerHello rejects a compression method", p1e,
+       "tls: server selected unsupported compression format");
+    let (_, p2e, _, _, _) = psh(2);
+    eq("processServerHello rejects incompatible point formats", p2e,
+       "tls: server offered only incompatible point formats");
+    let (_, p3e, _, _, _) = psh(3);
+    eq("processServerHello rejects an unrequested ALPN protocol", p3e,
+       "tls: server advertised unrequested ALPN extension");
+    let (_, p4e, _, p4p, _) = psh(4);
+    eq("processServerHello accepts a matching ALPN protocol err", p4e, "");
+    eq("processServerHello records the negotiated protocol", p4p, "h2");
+    // RFC 5746: on the FIRST handshake the renegotiation extension must
+    // be empty; a non-empty one means the peer thinks it is renegotiating.
+    let (_, p5e, _, _, _) = psh(5);
+    eq("processServerHello rejects a non-empty first renegotiation", p5e,
+       "tls: initial handshake had non-empty renegotiation extension");
+
+    let (p6r, p6e, p6ms, _, p6d) = psh(6);
+    eq("processServerHello resumption err", p6e, "");
+    check("processServerHello reports a resumption", p6r);
+    eq("processServerHello restores the master secret", hexOf(p6ms), "0909");
+    // It restores the session state but does NOT mark the connection
+    // resumed — that happens later, after the server's Finished is
+    // verified. Folding the two would claim resumption unauthenticated.
+    check("processServerHello leaves didResume unset", !p6d);
+    let (_, p7e, _, _, _) = psh(7);
+    eq("processServerHello rejects a cross-version resumption", p7e,
+       "tls: server resumed a session with a different version");
+    let (_, p8e, _, _, _) = psh(8);
+    eq("processServerHello rejects a cross-suite resumption", p8e,
+       "tls: server resumed a session with a different cipher suite");
+    let (_, p9e, _, _, _) = psh(9);
+    eq("processServerHello rejects an EMS mismatch on resumption", p9e,
+       "tls: server resumed a session with a different EMS extension");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
