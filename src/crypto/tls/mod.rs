@@ -4053,3 +4053,94 @@ pub fn ticket_sealRoundTrip() -> (
         noKeysErr.Error(),
     );
 }
+
+// go: none — goish-only: ech.go's inner-hello reconstruction is
+// unexported in Go, where the tests are in-package. Builds an outer
+// hello, encodes an inner one against it, decodes it back, and reports
+// `(encoded length, reconstructed SNI, session id, first curve, first
+// version, short-input error, nonzero-padding error)`.
+#[doc(hidden)]
+pub fn ech_decodeInnerRoundTrip() -> (
+    crate::types::int,
+    crate::gostring::string,
+    crate::goslice::slice<crate::types::byte>,
+    crate::types::int,
+    crate::types::int,
+    crate::gostring::string,
+    crate::gostring::string,
+) {
+    let mk = |sni: &str, withECH: bool, sid: alloc::vec::Vec<crate::types::byte>| {
+        let mut m = handshake_messages::clientHelloMsg::default();
+        m.vers = common::VersionTLS12;
+        m.random = alloc::vec![0u8; 32];
+        m.sessionId = sid;
+        m.cipherSuites = alloc::vec![cipher_suites::TLS_AES_128_GCM_SHA256];
+        m.compressionMethods = alloc::vec![0u8];
+        m.supportedCurves = alloc::vec![common::X25519.0];
+        m.supportedVersions = alloc::vec![common::VersionTLS13];
+        m.serverName = sni.into();
+        if withECH {
+            m.encryptedClientHello = alloc::vec![1u8];
+        }
+        return m;
+    };
+    let mut outer = mk("outer.example", false, alloc::vec![9u8, 9, 9]);
+    let (oenc, _) = outer.marshal();
+    outer.original = oenc.__into_vec();
+
+    let inner = mk("inner.example", true, alloc::vec![]);
+    let (encoded, _) = ech::encodeInnerClientHello(&inner, 32);
+    let (got, err) = ech::decodeInnerClientHello(&outer, encoded.clone());
+    if err != crate::errors::nil {
+        return (
+            encoded.Len(),
+            err.Error(),
+            crate::goslice::slice::new(),
+            0,
+            0,
+            crate::gostring::string::from_static(""),
+            crate::gostring::string::from_static(""),
+        );
+    }
+    let g = got.unwrap();
+
+    let (_, e1) = ech::decodeInnerClientHello(
+        &outer,
+        crate::goslice::slice::__from_vec(alloc::vec![1u8, 2, 3]),
+    );
+    let mut padded = encoded.__into_vec();
+    let paddedLen = padded.len();
+    padded.push(1);
+    let (_, e2) =
+        ech::decodeInnerClientHello(&outer, crate::goslice::slice::__from_vec(padded));
+
+    return (
+        paddedLen as crate::types::int,
+        crate::gostring::string::from_bytes(g.serverName.as_bytes()),
+        crate::goslice::slice::__from_vec(g.sessionId.clone()),
+        g.supportedCurves[0] as crate::types::int,
+        g.supportedVersions[0] as crate::types::int,
+        e1.Error(),
+        e2.Error(),
+    );
+}
+
+// go: none — goish-only: see `ech_decodeInnerRoundTrip`. `which`:
+// 0 = no key flagged SendAsRetry, 1 = one of two flagged.
+#[doc(hidden)]
+pub fn ech_buildRetryConfigList(
+    which: crate::types::int,
+) -> crate::goslice::slice<crate::types::byte> {
+    let mut a = common::EncryptedClientHelloKey::default();
+    a.Config = crate::goslice::slice::__from_vec(alloc::vec![1u8, 2]);
+    let keys = if which == 0 {
+        crate::goslice::slice::__from_vec(alloc::vec![a])
+    } else {
+        let mut b = common::EncryptedClientHelloKey::default();
+        b.Config = crate::goslice::slice::__from_vec(alloc::vec![3u8, 4, 5]);
+        b.SendAsRetry = true;
+        crate::goslice::slice::__from_vec(alloc::vec![a, b])
+    };
+    let (out, _) = ech::buildRetryConfigList(keys);
+    return out;
+}

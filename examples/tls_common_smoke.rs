@@ -1969,6 +1969,33 @@ fn main() {
     eq("encryptTicket with no keys", tkNoKeys,
        "tls: internal error: session ticket keys unavailable");
 
+    // ─── ech.go: inner-hello reconstruction. The inner hello is sent
+    //     with its shared extensions replaced by an ech_outer_extensions
+    //     list, so decoding it means splicing the outer hello's raw
+    //     extensions back in — in order. From goref.sh.
+    let (echEncLen, echSNI, echSID, echCurve, echVers, echShortErr, echPadErr) =
+        tls::ech_decodeInnerRoundTrip();
+    check_n("encodeInnerClientHello length", echEncLen, 109);
+    eq("decodeInnerClientHello recovers the inner SNI", echSNI, "inner.example");
+    // The session id comes from the OUTER hello — the inner one sends it
+    // empty, which is what makes ECH's two hellos share a session.
+    eq("decodeInnerClientHello takes the outer session id", hexOf(echSID), "090909");
+    // supported_groups and supported_versions were compressed out of the
+    // inner hello and spliced back from the outer one.
+    check_n("decodeInnerClientHello splices supported_groups back", echCurve, 29);
+    check_n("decodeInnerClientHello splices supported_versions back", echVers, 0x0304);
+    eq("decodeInnerClientHello rejects a short input", echShortErr,
+       "tls: invalid inner client hello");
+    // draft-ietf-tls-esni: the trailing padding must be all zeros, which
+    // is unusual for TLS — trailing garbage is normally ignored.
+    eq("decodeInnerClientHello rejects nonzero padding", echPadErr,
+       "tls: invalid inner client hello");
+
+    check_n("buildRetryConfigList with no retry keys is empty",
+            tls::ech_buildRetryConfigList(0).Len(), 0);
+    eq("buildRetryConfigList emits only the SendAsRetry keys",
+       hexOf(tls::ech_buildRetryConfigList(1)), "0003030405");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {
