@@ -1,4 +1,4 @@
-// go: file crypto/tls/cipher_suites.go decls:
+// go: file crypto/tls/cipher_suites.go decls: CipherSuites, InsecureCipherSuites, CipherSuiteName
 //
 // (no functions yet — this file ports cipher_suites.go's ID constants
 // and ordering tables only; the `decls:` manifest lists ported *funcs*,
@@ -12,12 +12,17 @@
 // here is the ID surface and the ordering tables — the part `defaults.go`
 // needs, and the part that is pure data.
 //
+// goishlint:ignore GOISH018 aeadAESGCM, aeadAESGCMTLS13, aeadChaCha20Poly1305, BlockSize, cipher3DES, cipherAES, cipherRC4, cipherSuiteByID, cipherSuiteTLS13ByID, ecdheECDSAKA, ecdheRSAKA, explicitNonceLen, isAESGCMPreferred, macSHA1, macSHA256, mutualCipherSuite, mutualCipherSuiteTLS13, newConstantTimeHash, NonceSize, Open, Overhead, Reset, rsaKA, Seal, selectCipherSuite, Size, Sum, tls10MAC, Write — the cipherSuite/cipherSuiteTLS13 records and the AEAD, CBC and MAC constructors that hang off them; every one needs the record layer. See ROADMAP.md.
+// goishlint:ignore GOISH021 aead, aeadNonceLength, aesgcmCiphers, cipherSuitesTLS13, cipherSuiteTLS13, constantTimeHash, cthWrapper, noncePrefixLength, prefixNonceAEAD, suiteECDHE, suiteECSign, suiteSHA384, suiteTLS12, xorNonceAEAD — same.
+//
 // The preference order is a security-relevant table: it decides which
 // suite a handshake picks. It is transcribed in Go's exact order,
 // comments included, and pinned element-by-element against a running Go
 // in `examples/tls_common_smoke.rs`.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
+
+extern crate alloc;
 
 use crate::types::uint16;
 
@@ -196,4 +201,117 @@ pub(crate) fn isRSAKexCipher(c: uint16) -> bool {
 // go: none — goish idiom: see `isDisabledCipherSuite`.
 pub(crate) fn isTDESCipher(c: uint16) -> bool {
     return contains(tdesCiphers, c);
+}
+
+
+// ─── The public CipherSuite surface ───────────────────────────────────
+
+// Go: cipher_suites.go:44-46
+//   var ( supportedUpToTLS12 = []uint16{VersionTLS10, VersionTLS11, VersionTLS12}
+//         supportedOnlyTLS12 = []uint16{VersionTLS12}
+//         supportedOnlyTLS13 = []uint16{VersionTLS13} )
+const supportedUpToTLS12: &[uint16] = &[
+    super::common::VersionTLS10,
+    super::common::VersionTLS11,
+    super::common::VersionTLS12,
+];
+const supportedOnlyTLS12: &[uint16] = &[super::common::VersionTLS12];
+const supportedOnlyTLS13: &[uint16] = &[super::common::VersionTLS13];
+
+// Go: cipher_suites.go:19-34
+//   type CipherSuite struct { ID uint16; Name string;
+//                             SupportedVersions []uint16; Insecure bool }
+/// `tls.CipherSuite` — a TLS cipher suite, as returned by
+/// [`CipherSuites`] and [`InsecureCipherSuites`].
+#[derive(Clone, Default, PartialEq)]
+pub struct CipherSuite {
+    pub ID: uint16,
+    pub Name: crate::gostring::string,
+    /// The TLS protocol versions that can negotiate this suite.
+    pub SupportedVersions: crate::goslice::slice<uint16>,
+    /// True if the suite has known security issues due to its
+    /// primitives, design, or implementation.
+    pub Insecure: bool,
+}
+
+// go: none — goish idiom: Go writes these as composite literals inside
+// the two functions below; naming the constructor keeps each row on one
+// line, as Go's are.
+fn cs(id: uint16, name: &'static str, vers: &[uint16], insecure: bool) -> CipherSuite {
+    return CipherSuite {
+        ID: id,
+        Name: crate::gostring::string::from_static(name),
+        SupportedVersions: crate::goslice::slice::__from_vec(vers.to_vec()),
+        Insecure: insecure,
+    };
+}
+
+// go: sdk 1.25.5 crypto/tls/cipher_suites.go:56-75 CipherSuites
+/// The cipher suites currently implemented by this package, excluding
+/// those with security issues — see [`InsecureCipherSuites`].
+///
+/// The list is sorted by ID. Note that the default cipher suites
+/// selected by this package might depend on logic that cannot be
+/// captured by a static list, and might not match those returned here.
+pub fn CipherSuites() -> crate::goslice::slice<CipherSuite> {
+    return crate::goslice::slice::__from_vec(alloc::vec![
+        cs(TLS_AES_128_GCM_SHA256, "TLS_AES_128_GCM_SHA256", supportedOnlyTLS13, false),
+        cs(TLS_AES_256_GCM_SHA384, "TLS_AES_256_GCM_SHA384", supportedOnlyTLS13, false),
+        cs(TLS_CHACHA20_POLY1305_SHA256, "TLS_CHACHA20_POLY1305_SHA256", supportedOnlyTLS13, false),
+        cs(TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA", supportedUpToTLS12, false),
+        cs(TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA", supportedUpToTLS12, false),
+        cs(TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA", supportedUpToTLS12, false),
+        cs(TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA, "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA", supportedUpToTLS12, false),
+        cs(TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", supportedOnlyTLS12, false),
+        cs(TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", supportedOnlyTLS12, false),
+        cs(TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", supportedOnlyTLS12, false),
+        cs(TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384", supportedOnlyTLS12, false),
+        cs(TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256", supportedOnlyTLS12, false),
+        cs(TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256", supportedOnlyTLS12, false),
+    ]);
+}
+
+// go: sdk 1.25.5 crypto/tls/cipher_suites.go:77-98 InsecureCipherSuites
+/// The cipher suites currently implemented by this package that have
+/// security issues.
+///
+/// Most applications should not use the cipher suites in this list, and
+/// should only use those returned by [`CipherSuites`].
+pub fn InsecureCipherSuites() -> crate::goslice::slice<CipherSuite> {
+    // Go: This list includes legacy RSA kex, RC4, CBC_SHA256, and 3DES
+    // cipher suites. See cipherSuitesPreferenceOrder for details.
+    return crate::goslice::slice::__from_vec(alloc::vec![
+        cs(TLS_RSA_WITH_RC4_128_SHA, "TLS_RSA_WITH_RC4_128_SHA", supportedUpToTLS12, true),
+        cs(TLS_RSA_WITH_3DES_EDE_CBC_SHA, "TLS_RSA_WITH_3DES_EDE_CBC_SHA", supportedUpToTLS12, true),
+        cs(TLS_RSA_WITH_AES_128_CBC_SHA, "TLS_RSA_WITH_AES_128_CBC_SHA", supportedUpToTLS12, true),
+        cs(TLS_RSA_WITH_AES_256_CBC_SHA, "TLS_RSA_WITH_AES_256_CBC_SHA", supportedUpToTLS12, true),
+        cs(TLS_RSA_WITH_AES_128_CBC_SHA256, "TLS_RSA_WITH_AES_128_CBC_SHA256", supportedOnlyTLS12, true),
+        cs(TLS_RSA_WITH_AES_128_GCM_SHA256, "TLS_RSA_WITH_AES_128_GCM_SHA256", supportedOnlyTLS12, true),
+        cs(TLS_RSA_WITH_AES_256_GCM_SHA384, "TLS_RSA_WITH_AES_256_GCM_SHA384", supportedOnlyTLS12, true),
+        cs(TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, "TLS_ECDHE_ECDSA_WITH_RC4_128_SHA", supportedUpToTLS12, true),
+        cs(TLS_ECDHE_RSA_WITH_RC4_128_SHA, "TLS_ECDHE_RSA_WITH_RC4_128_SHA", supportedUpToTLS12, true),
+        cs(TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA, "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA", supportedUpToTLS12, true),
+        cs(TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256", supportedOnlyTLS12, true),
+        cs(TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256", supportedOnlyTLS12, true),
+    ]);
+}
+
+// go: sdk 1.25.5 crypto/tls/cipher_suites.go:100-114 CipherSuiteName
+/// The IANA name of the cipher suite, or a fallback of the form
+/// `"0x0042"` for an unknown ID.
+pub fn CipherSuiteName(id: uint16) -> crate::gostring::string {
+    // Go: for _, c := range CipherSuites() { if c.ID == id { return c.Name } }
+    for (_, c) in crate::range!(CipherSuites()) {
+        if c.ID == id {
+            return c.Name.clone();
+        }
+    }
+    // Go: for _, c := range InsecureCipherSuites() { … }
+    for (_, c) in crate::range!(InsecureCipherSuites()) {
+        if c.ID == id {
+            return c.Name.clone();
+        }
+    }
+    // Go: return fmt.Sprintf("0x%04X", id)
+    return crate::fmt::Sprintf!("0x%04X", id);
 }

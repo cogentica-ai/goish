@@ -396,6 +396,51 @@ fn main() {
         !tls::msg_simple_unmarshal(2, slice::__from_vec(raw[..9].to_vec())),
     );
 
+    // ─── cipher_suites.go's public surface. All from goref.sh.
+    check_n("CipherSuites length", tls::CipherSuites().Len(), 13);
+    check_n("InsecureCipherSuites length", tls::InsecureCipherSuites().Len(), 12);
+    eq(
+        "CipherSuiteName TLS1.3 AES128",
+        tls::CipherSuiteName(0x1301),
+        "TLS_AES_128_GCM_SHA256",
+    );
+    eq(
+        "CipherSuiteName ChaCha20",
+        tls::CipherSuiteName(0x1303),
+        "TLS_CHACHA20_POLY1305_SHA256",
+    );
+    eq(
+        "CipherSuiteName ECDHE-ECDSA-AES128-GCM",
+        tls::CipherSuiteName(0xc02b),
+        "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+    );
+    // Found via the INSECURE list, so this proves the second loop runs.
+    eq(
+        "CipherSuiteName RC4 (insecure list)",
+        tls::CipherSuiteName(0x0005),
+        "TLS_RSA_WITH_RC4_128_SHA",
+    );
+    eq(
+        "CipherSuiteName 3DES (insecure list)",
+        tls::CipherSuiteName(0x000a),
+        "TLS_RSA_WITH_3DES_EDE_CBC_SHA",
+    );
+    // Unknown IDs fall back to uppercase hex, not decimal.
+    eq("CipherSuiteName fallback", tls::CipherSuiteName(0x9999), "0x9999");
+
+    let first = tls::CipherSuites();
+    if first.Len() == 13 {
+        check_n("CipherSuites[0].ID", goish::int(first[0].ID), 0x1301);
+        check("CipherSuites[0] is not insecure", !first[0].Insecure);
+        check_n("CipherSuites[0] is TLS1.3-only", first[0].SupportedVersions.Len(), 1);
+    }
+    let ins = tls::InsecureCipherSuites();
+    if ins.Len() == 12 {
+        check_n("InsecureCipherSuites[0].ID", goish::int(ins[0].ID), 0x0005);
+        check("InsecureCipherSuites[0] is flagged insecure", ins[0].Insecure);
+        check_n("InsecureCipherSuites[0] spans TLS1.0-1.2", ins[0].SupportedVersions.Len(), 3);
+    }
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

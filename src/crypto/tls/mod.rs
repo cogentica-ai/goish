@@ -40,6 +40,7 @@ pub fn auth_legacyTypeAndHashFromPublicKey(
     return auth::legacyTypeAndHashFromPublicKey(pub_);
 }
 pub mod cipher_suites;
+pub use cipher_suites::{CipherSuite, CipherSuiteName, CipherSuites, InsecureCipherSuites};
 pub mod common;
 pub mod common_string;
 pub mod defaults;
