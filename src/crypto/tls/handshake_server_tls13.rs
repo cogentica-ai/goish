@@ -1,6 +1,6 @@
 // crypto/tls/handshake_server_tls13.rs — TLS 1.3 server handshake.
 //
-// goishlint:ignore GOISH018 handshake, processClientHello, checkForResumption, cloneHash, pickCertificate, doHelloRetryRequest, sendServerParameters, sendServerCertificate, sendServerFinished, sendSessionTickets, sendSessionTicket, readClientCertificate, readClientFinished — serverHandshakeStateTLS13's Conn-driven half; the live server below the divider implements the same protocol by hand. cloneHash additionally needs encoding::BinaryMarshaler to be a #[goish::interface] before Go's `in.(binaryMarshaler)` assertion can be spelled. See ROADMAP.md.
+// goishlint:ignore GOISH018 handshake, processClientHello, checkForResumption, pickCertificate, doHelloRetryRequest, sendServerParameters, sendServerCertificate, sendServerFinished, sendSessionTickets, sendSessionTicket, readClientCertificate, readClientFinished — serverHandshakeStateTLS13's Conn-driven half; the live server below the divider implements the same protocol by hand. See ROADMAP.md.
 // goishlint:ignore GOISH021 echServerContext, maxClientPSKIdentities — same.
 //
 // Port of Go 1.25.5 crypto/tls:
@@ -836,4 +836,52 @@ pub(crate) fn illegalClientHelloChange(
         || ch.scts != ch1.scts
         || ch.cookie != ch1.cookie
         || ch.pskModes != ch1.pskModes;
+}
+
+
+// go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:428-447 cloneHash
+/// Go: "cloneHash clones the hash, or returns nil if the hash cannot be
+/// cloned." Used to fork the handshake transcript for the
+/// HelloRetryRequest synthetic message hash.
+///
+/// Deviation: Go recreates the `binaryMarshaler` interface inline "to
+/// avoid importing encoding"; goish asserts against
+/// `encoding::BinaryMarshaler` and `encoding::BinaryUnmarshaler`
+/// directly, which are the same two methods and are already
+/// `#[goish::interface]`.
+pub(crate) fn cloneHash(
+    in_: &(dyn crate::hash::Hash + Send + Sync + 'static),
+    h: crate::crypto::Hash,
+) -> Option<alloc::boxed::Box<dyn crate::hash::Hash + Send + Sync>> {
+    // Go: marshaler, ok := in.(binaryMarshaler)
+    //     if !ok { return nil }
+    let marshaler =
+        crate::goany::AsExt::As::<dyn crate::encoding::BinaryMarshaler + Send + Sync>(in_);
+    if marshaler.is_none() {
+        return None;
+    }
+    // Go: state, err := marshaler.MarshalBinary()
+    //     if err != nil { return nil }
+    let (state, err) = marshaler.unwrap().MarshalBinary();
+    if err != crate::errors::nil {
+        return None;
+    }
+    // Go: out := h.New()
+    let mut out = h.New();
+    // Go: unmarshaler, ok := out.(binaryMarshaler)
+    //     if !ok { return nil }
+    //     if err := unmarshaler.UnmarshalBinary(state); err != nil { return nil }
+    //     return out
+    {
+        let unmarshaler = crate::goany::AsExtMut::AsMut::<
+            dyn crate::encoding::BinaryUnmarshaler + Send + Sync,
+        >(&mut *out);
+        if unmarshaler.is_none() {
+            return None;
+        }
+        if unmarshaler.unwrap().UnmarshalBinary(state) != crate::errors::nil {
+            return None;
+        }
+    }
+    return Some(out);
 }

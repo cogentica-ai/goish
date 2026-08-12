@@ -2298,6 +2298,20 @@ fn main() {
     // for even when ClientAuth would request one.
     check("requestClientCert is skipped when using a PSK", !rc2);
 
+    // ─── handshake_server_tls13.go: cloneHash. This is how the TLS 1.3
+    //     server forks the handshake transcript for HelloRetryRequest's
+    //     synthetic message hash — it marshals the hash's internal state
+    //     and unmarshals it into a fresh one. From goref.sh.
+    let (chOK, chOrig, chClone, chCross) = tls::handshake_server_tls13_cloneHash();
+    check("cloneHash forks a SHA-256 transcript", chOK);
+    eq("cloneHash original continues independently", hexOf(chOrig),
+       "2c3481a1dc99aea7952f8431bc1df79d5d8b26f92499a0459d8d8a614f31231a");
+    eq("cloneHash clone continues independently", hexOf(chClone),
+       "0314f19141319de98f41525b12b579fa7110bc5481850826d2260cfc4a84550a");
+    // Unmarshalling SHA-256 state into a SHA-384 hash is refused by the
+    // unmarshaller, so cloneHash returns nil rather than a wrong hash.
+    check("cloneHash refuses a cross-algorithm clone", chCross);
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

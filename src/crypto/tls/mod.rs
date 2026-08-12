@@ -4670,3 +4670,46 @@ pub fn handshake_server_tls13_stateFlags() -> (bool, bool, bool, bool, bool, boo
         mk(requested, ch(), true).requestClientCert(),
     );
 }
+
+// go: none — goish-only: cloneHash is unexported in Go, where the tests
+// are in-package. Forks a SHA-256 transcript, feeds each half a
+// different byte, and reports `(clone succeeded, original digest, clone
+// digest, a cross-hash clone was refused)`.
+#[doc(hidden)]
+pub fn handshake_server_tls13_cloneHash() -> (
+    bool,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    bool,
+) {
+    let mut h = crate::crypto::sha256::NewHash();
+    let _ = crate::io::Writer::Write(
+        &mut *h,
+        crate::goslice::slice::__from_vec(b"first half".to_vec()),
+    );
+    let c = handshake_server_tls13::cloneHash(&*h, crate::crypto::SHA256);
+    if c.is_none() {
+        return (
+            false,
+            crate::goslice::slice::new(),
+            crate::goslice::slice::new(),
+            false,
+        );
+    }
+    let mut c = c.unwrap();
+    let _ = crate::io::Writer::Write(
+        &mut *h,
+        crate::goslice::slice::__from_vec(alloc::vec![b'A']),
+    );
+    let _ = crate::io::Writer::Write(
+        &mut *c,
+        crate::goslice::slice::__from_vec(alloc::vec![b'B']),
+    );
+    let orig = h.Sum(crate::goslice::slice::new());
+    let clone = c.Sum(crate::goslice::slice::new());
+    let cross = handshake_server_tls13::cloneHash(
+        &*crate::crypto::sha256::NewHash(),
+        crate::crypto::SHA384,
+    );
+    return (true, orig, clone, cross.is_none());
+}
