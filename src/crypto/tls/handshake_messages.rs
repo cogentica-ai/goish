@@ -1,6 +1,6 @@
-// goishlint:ignore GOISH018 marshalCertificate, transcriptMsg — marshalCertificate takes common.go's Certificate, which is not ported yet (mod[rs] declares a hand-written one), and transcriptMsg dispatches over the handshakeMessage interface, which arrives with conn[go]. Everything else in handshake_messages.go is here. See ROADMAP.md.
+// goishlint:ignore GOISH018 transcriptMsg — marshalCertificate takes common.go's Certificate, which is not ported yet (mod[rs] declares a hand-written one), and transcriptMsg dispatches over the handshakeMessage interface, which arrives with conn[go]. Everything else in handshake_messages.go is here. See ROADMAP.md.
 // goishlint:ignore GOISH021 certificateMsg, certificateRequestMsg, certificateRequestMsgTLS13, certificateStatusMsg, clientKeyExchangeMsg, endOfEarlyDataMsg, helloRequestMsg, keyUpdateMsg, newSessionTicketMsg, newSessionTicketMsgTLS13, serverKeyExchangeMsg, transcriptHash — the message types the subset does not handle.
-// go: file crypto/tls/handshake_messages.go decls: marshalingFunction.Marshal, addBytesWithLength, clientHelloMsg.marshalMsg, clientHelloMsg.marshal, clientHelloMsg.marshalWithoutBinders, clientHelloMsg.updateBinders, clientHelloMsg.originalBytes, clientHelloMsg.clone, serverHelloDoneMsg.marshal, serverHelloDoneMsg.unmarshal, clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal, finishedMsg.unmarshal, certificateVerifyMsg.unmarshal, encryptedExtensionsMsg.unmarshal, unmarshalCertificate
+// go: file crypto/tls/handshake_messages.go decls: marshalingFunction.Marshal, addBytesWithLength, clientHelloMsg.marshalMsg, clientHelloMsg.marshal, clientHelloMsg.marshalWithoutBinders, clientHelloMsg.updateBinders, clientHelloMsg.originalBytes, clientHelloMsg.clone, serverHelloDoneMsg.marshal, serverHelloDoneMsg.unmarshal, clientHelloMsg.unmarshal, serverHelloMsg.marshal, encryptedExtensionsMsg.marshal, certificateMsgTLS13.marshal, certificateVerifyMsg.marshal, finishedMsg.marshal, keyUpdateMsg.marshal, keyUpdateMsg.unmarshal, endOfEarlyDataMsg.marshal, endOfEarlyDataMsg.unmarshal, certificateStatusMsg.marshal, certificateStatusMsg.unmarshal, readUint8LengthPrefixed, readUint16LengthPrefixed, readUint24LengthPrefixed, addUint64, readUint64, helloRequestMsg.marshal, helloRequestMsg.unmarshal, serverKeyExchangeMsg.marshal, serverKeyExchangeMsg.unmarshal, clientKeyExchangeMsg.marshal, clientKeyExchangeMsg.unmarshal, newSessionTicketMsg.marshal, newSessionTicketMsg.unmarshal, certificateMsg.marshal, certificateMsg.unmarshal, newSessionTicketMsgTLS13.marshal, newSessionTicketMsgTLS13.unmarshal, certificateRequestMsgTLS13.marshal, certificateRequestMsgTLS13.unmarshal, certificateRequestMsg.marshal, certificateRequestMsg.unmarshal, finishedMsg.unmarshal, certificateVerifyMsg.unmarshal, encryptedExtensionsMsg.unmarshal, unmarshalCertificate, marshalCertificate, certificateMsgTLS13.unmarshal
 // crypto/tls/handshake_messages.rs — TLS handshake message
 // marshal/unmarshal, server-side subset.
 //
@@ -855,38 +855,136 @@ impl encryptedExtensionsMsg {
 
 // ─── certificateMsgTLS13 (handshake_messages.go:1459) ───────────────
 
-/// TLS 1.3 Certificate message. Carries the DER chain directly
-/// (leaf first) rather than embedding the `tls::Certificate` struct —
-/// OCSP staples and SCTs are not supported by the Goish server, so
-/// `ocspStapling`/`scts` from Go's struct are omitted.
+// Go: handshake_messages.go:1459-1463
+//   type certificateMsgTLS13 struct { certificate Certificate
+//                                     ocspStapling bool; scts bool }
+/// The TLS 1.3 Certificate message.
 #[derive(Clone, Default)]
 pub(crate) struct certificateMsgTLS13 {
-    pub certificate: Vec<Vec<byte>>,
+    pub certificate: super::Certificate,
+    pub ocspStapling: bool,
+    pub scts: bool,
 }
 
 impl certificateMsgTLS13 {
     // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1465-1482 certificateMsgTLS13.marshal
-    /// `(*certificateMsgTLS13).marshal()` — handshake_messages.go:1465,
-    /// with `marshalCertificate` (:1484) inlined (no OCSP/SCT
-    /// extensions, so every per-cert extensions block is empty).
-    pub(crate) fn marshal(&self) -> Vec<byte> {
-        let mut b = builder::new();
+    pub(crate) fn marshal(&self) -> (slice<byte>, crate::error) {
+        // Go: var b cryptobyte.Builder
+        //     b.AddUint8(typeCertificate)
+        let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::new()));
         b.AddUint8(typeCertificate);
-        b.AddUint24LengthPrefixed(|b| {
+        // Go: certificate := m.certificate
+        //     if !m.ocspStapling { certificate.OCSPStaple = nil }
+        //     if !m.scts { certificate.SignedCertificateTimestamps = nil }
+        let mut certificate = self.certificate.clone();
+        if !self.ocspStapling {
+            certificate.OCSPStaple = slice::new();
+        }
+        if !self.scts {
+            certificate.SignedCertificateTimestamps = slice::new();
+        }
+        b.AddUint24LengthPrefixed(|b: &mut cryptobyte::Builder| {
             b.AddUint8(0); // certificate_request_context
-            b.AddUint24LengthPrefixed(|b| {
-                for cert in self.certificate.iter() {
-                    b.AddUint24LengthPrefixed(|b| {
-                        b.AddBytes(cert);
+            marshalCertificate(b, &certificate);
+        });
+        // Go: return b.Bytes()
+        return b.Bytes();
+    }
+
+    // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1520-1533 certificateMsgTLS13.unmarshal
+    pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
+        // Go: *m = certificateMsgTLS13{}
+        //     s := cryptobyte.String(data)
+        *self = certificateMsgTLS13::default();
+        let mut s = CBString::New(data);
+
+        // Go: var context cryptobyte.String
+        //     if !s.Skip(4) || !s.ReadUint8LengthPrefixed(&context) ||
+        //        !context.Empty() || !unmarshalCertificate(&s, &m.certificate) ||
+        //        !s.Empty() { return false }
+        let mut context = CBString::New(slice::__from_vec(Vec::new()));
+        if !s.Skip(4)
+            || !s.ReadUint8LengthPrefixed(&mut context)
+            || !context.Empty()
+            || !unmarshalCertificate(&mut s, &mut self.certificate)
+            || !s.Empty()
+        {
+            return false;
+        }
+
+        // Go: m.scts = m.certificate.SignedCertificateTimestamps != nil
+        //     m.ocspStapling = m.certificate.OCSPStaple != nil
+        //
+        // goish slices carry no nil/empty distinction; `len() > 0` is
+        // observably identical here, because unmarshalCertificate
+        // rejects an empty staple and an empty SCT entry outright.
+        self.scts = certificateMsgTLS13Nonempty(&self.certificate.SignedCertificateTimestamps);
+        self.ocspStapling = self.certificate.OCSPStaple.Len() > 0;
+
+        // Go: return true
+        return true;
+    }
+}
+
+// go: none — goish-only: `len(x) > 0` on a slice-of-slices, named so the
+// nil-vs-empty deviation above has one place to point at.
+fn certificateMsgTLS13Nonempty(v: &slice<slice<byte>>) -> bool {
+    return v.Len() > 0;
+}
+
+// go: sdk 1.25.5 crypto/tls/handshake_messages.go:1484-1518 marshalCertificate
+/// Encode a TLS 1.3 CertificateEntry list. OCSP staples and SCTs are
+/// emitted for the LEAF only — Go's comment: "This library only supports
+/// OCSP and SCT for leaf certificates."
+///
+/// Deviation: Go tests `certificate.OCSPStaple != nil`; goish slices
+/// carry no nil/empty distinction, so the test is on length. The two
+/// differ only for a non-nil zero-length staple, which the matching
+/// `unmarshalCertificate` rejects.
+pub(crate) fn marshalCertificate(b: &mut cryptobyte::Builder, certificate: &super::Certificate) {
+    use super::common::{extensionSCT, extensionStatusRequest};
+    let certificate = certificate.clone();
+    b.AddUint24LengthPrefixed(|b: &mut cryptobyte::Builder| {
+        // Go: for i, cert := range certificate.Certificate {
+        for (i, cert) in crate::range!(certificate.Certificate.clone()) {
+            let c = cert.clone();
+            b.AddUint24LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                b.AddBytes(&c);
+            });
+            let staple = certificate.OCSPStaple.clone();
+            let scts = certificate.SignedCertificateTimestamps.clone();
+            b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                // Go: if i > 0 { return } — only the leaf carries these.
+                if i > 0 {
+                    return;
+                }
+                // Go: if certificate.OCSPStaple != nil { … }
+                if staple.Len() > 0 {
+                    b.AddUint16(extensionStatusRequest);
+                    b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                        b.AddUint8(statusTypeOCSP);
+                        b.AddUint24LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                            b.AddBytes(&staple);
+                        });
                     });
-                    b.AddUint16LengthPrefixed(|_b| {
-                        // no per-certificate extensions
+                }
+                // Go: if certificate.SignedCertificateTimestamps != nil { … }
+                if scts.Len() > 0 {
+                    b.AddUint16(extensionSCT);
+                    b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                        b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                            for (_, sct) in crate::range!(scts.clone()) {
+                                let s2 = sct.clone();
+                                b.AddUint16LengthPrefixed(|b: &mut cryptobyte::Builder| {
+                                    b.AddBytes(&s2);
+                                });
+                            }
+                        });
                     });
                 }
             });
-        });
-        b.Bytes()
-    }
+        }
+    });
 }
 
 // ─── certificateVerifyMsg (handshake_messages.go:1848) ──────────────

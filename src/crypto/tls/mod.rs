@@ -1196,37 +1196,7 @@ impl crate::net::Conn for DeadConn {
 
 // ─── Certificate + key-pair loaders (tls.go:243) ──────────────────────
 
-/// `tls.Certificate` (common.go:1553) — a chain of one or more
-/// certificates, leaf first, plus the leaf's private key.
-#[derive(Clone)]
-pub struct Certificate {
-    /// Certificate contains a chain of one or more certificates,
-    /// leaf first, in DER form.
-    pub Certificate: slice<slice<byte>>,
-    /// `crypto.PrivateKey` — the leaf certificate's private key.
-    /// Supported concrete types: `rsa::PrivateKey`, `ed25519::PrivateKey`.
-    pub PrivateKey: crate::crypto::PrivateKey,
-    /// A DER-encoded OCSP response for the leaf, stapled by the server.
-    /// Go declares this on `tls.Certificate`; goish added it so that
-    /// `unmarshalCertificate` has somewhere to put what it reads.
-    pub OCSPStaple: crate::goslice::slice<crate::types::byte>,
-    /// SignedCertificateTimestamps for the leaf, per RFC 6962.
-    pub SignedCertificateTimestamps: crate::goslice::slice<crate::goslice::slice<crate::types::byte>>,
-}
-
-impl Default for Certificate {
-    fn default() -> Self {
-        Certificate {
-            OCSPStaple: slice::<byte>::new(),
-            SignedCertificateTimestamps: slice::<slice<byte>>::new(),
-            Certificate: slice::<slice<byte>>::new(),
-            // Unit sentinel — downcasts to no key type, so a
-            // default-constructed Certificate fails the handshake with
-            // a clean "unsupported private key type" error.
-            PrivateKey: Arc::new(()),
-        }
-    }
-}
+pub use common::Certificate;
 
 /// `tls.X509KeyPair(certPEMBlock, keyPEMBlock)` (tls.go:263) — parse a
 /// public/private key pair from PEM data. The certificate input may
@@ -2393,4 +2363,116 @@ pub fn defaults_fips140_tableSizes() -> (
         defaults_fips140::allowedSignatureAlgorithmsFIPS.len() as crate::types::int,
         defaults_fips140::allowedCipherSuitesFIPS.len() as crate::types::int,
     );
+}
+
+// go: none — goish-only: marshalCertificate and the TLS 1.3 Certificate
+// message are unexported in Go, where the tests are in-package. Returns
+// `(marshalCertificate, certificateMsgTLS13.marshal with both flags set,
+// the same with both flags clear)`.
+#[doc(hidden)]
+pub fn handshake_messages_certificateEncodings() -> (
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let c = handshake_messages_sampleCertificate();
+    let mut b = crate::crypto::cryptobyte::NewBuilder(crate::goslice::slice::new());
+    handshake_messages::marshalCertificate(&mut b, &c);
+    let (raw, _) = b.Bytes();
+    let full = handshake_messages::certificateMsgTLS13 {
+        certificate: c.clone(),
+        ocspStapling: true,
+        scts: true,
+    };
+    let (withExts, _) = full.marshal();
+    let bare = handshake_messages::certificateMsgTLS13 {
+        certificate: c,
+        ocspStapling: false,
+        scts: false,
+    };
+    let (withoutExts, _) = bare.marshal();
+    return (raw, withExts, withoutExts);
+}
+
+// go: none — goish-only: see `handshake_messages_certificateEncodings`.
+fn handshake_messages_sampleCertificate() -> common::Certificate {
+    let mut c = common::Certificate::default();
+    c.Certificate = crate::goslice::slice::__from_vec(alloc::vec![
+        crate::goslice::slice::__from_vec(alloc::vec![0xaau8, 0xbb, 0xcc]),
+        crate::goslice::slice::__from_vec(alloc::vec![0xddu8, 0xee]),
+    ]);
+    c.OCSPStaple = crate::goslice::slice::__from_vec(alloc::vec![1u8, 2, 3, 4]);
+    c.SignedCertificateTimestamps = crate::goslice::slice::__from_vec(alloc::vec![
+        crate::goslice::slice::__from_vec(alloc::vec![0x11u8, 0x22]),
+        crate::goslice::slice::__from_vec(alloc::vec![0x33u8]),
+    ]);
+    return c;
+}
+
+// go: none — goish-only: see `handshake_messages_certificateEncodings`.
+// Reports `(ok, ocspStapling, scts, chain length, staple, first SCT)`.
+#[doc(hidden)]
+pub fn handshake_messages_certificateRoundTrip() -> (
+    bool,
+    bool,
+    bool,
+    crate::types::int,
+    crate::goslice::slice<crate::types::byte>,
+    crate::goslice::slice<crate::types::byte>,
+) {
+    let (_, withExts, _) = handshake_messages_certificateEncodings();
+    let mut r = handshake_messages::certificateMsgTLS13::default();
+    let ok = r.unmarshal(withExts);
+    let sct0 = if r.certificate.SignedCertificateTimestamps.Len() > 0 {
+        r.certificate.SignedCertificateTimestamps[0].clone()
+    } else {
+        crate::goslice::slice::new()
+    };
+    return (
+        ok,
+        r.ocspStapling,
+        r.scts,
+        r.certificate.Certificate.Len(),
+        r.certificate.OCSPStaple.clone(),
+        sct0,
+    );
+}
+
+// go: none — goish-only: auth.go's two Certificate-driven functions are
+// unexported in Go. `which` picks the certificate: 0 = no private key,
+// 1 = Ed25519, 2 = Ed25519 with a custom algorithm list.
+#[doc(hidden)]
+pub fn auth_unsupportedCertificateError(which: crate::types::int) -> crate::gostring::string {
+    return auth::unsupportedCertificateError(&auth_sampleCertificate(which)).Error();
+}
+
+// go: none — goish-only: see `auth_unsupportedCertificateError`.
+fn auth_sampleCertificate(which: crate::types::int) -> common::Certificate {
+    let mut c = common::Certificate::default();
+    if which == 0 {
+        return c;
+    }
+    let seed = crate::goslice::slice::__from_vec(alloc::vec![7u8; 32]);
+    c.PrivateKey = alloc::sync::Arc::new(crate::crypto::ed25519::NewKeyFromSeed(seed));
+    if which == 2 {
+        c.SupportedSignatureAlgorithms =
+            crate::goslice::slice::__from_vec(alloc::vec![common::PSSWithSHA256]);
+    }
+    return c;
+}
+
+// go: none — goish-only: see `auth_unsupportedCertificateError`. Reports
+// `(scheme, errText)`.
+#[doc(hidden)]
+pub fn auth_selectSignatureScheme(
+    which: crate::types::int,
+    vers: crate::types::uint16,
+    peerAlgs: crate::goslice::slice<common::SignatureScheme>,
+) -> (common::SignatureScheme, crate::gostring::string) {
+    let c = auth_sampleCertificate(which);
+    let (s, err) = auth::selectSignatureScheme(vers, &c, peerAlgs);
+    if err != crate::errors::nil {
+        return (s, err.Error());
+    }
+    return (s, crate::gostring::string::from_static(""));
 }

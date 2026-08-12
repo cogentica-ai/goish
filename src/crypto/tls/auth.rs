@@ -1,4 +1,4 @@
-// go: file crypto/tls/auth.go decls: verifyHandshakeSignature, signedMessage, typeAndHashFromSignatureScheme, legacyTypeAndHashFromPublicKey, signatureSchemesForPublicKey
+// go: file crypto/tls/auth.go decls: verifyHandshakeSignature, signedMessage, typeAndHashFromSignatureScheme, legacyTypeAndHashFromPublicKey, signatureSchemesForPublicKey, selectSignatureScheme, unsupportedCertificateError
 //
 // crypto/tls — handshake signature verification and signature-scheme
 // selection.
@@ -8,7 +8,7 @@
 // a port (mod[rs] declares a hand-written one) — they land with
 // common.go's Certificate. Everything else in auth.go is here.
 //
-// goishlint:ignore GOISH018 selectSignatureScheme, unsupportedCertificateError — both take a *Certificate, which is not ported yet; see the banner.
+// goishlint:ignore GOISH018  — both take a *Certificate, which is not ported yet; see the banner.
 // goishlint:ignore GOISH021 rsaSignatureSchemes — the table only selectSignatureScheme reads.
 //
 // One further deviation: Go's error strings for a wrong key type end
@@ -318,3 +318,185 @@ pub(crate) fn signatureSchemesForPublicKey(
 // Silence the unused-import warning for `Box` in builds where no arm
 // needs it; the signature of `sigHash.New()` returns one.
 const _: Option<Box<u8>> = None;
+
+
+// ─── Certificate-driven scheme selection ──────────────────────────────
+
+// go: none — goish-only: Go's `crypto.PublicKey` is one `any`; goish has
+// two carriers for it — `goany::Any`, which is what x509 parses into and
+// what `signatureSchemesForPublicKey` takes, and `crypto::PublicKey`, an
+// `Arc<dyn core::any::Any>`, which is what `Signer.Public` returns. This
+// re-wraps the latter as the former so the scheme table has one body
+// rather than two.
+fn anyOfPublicKey(pub_: &crypto::PublicKey) -> Any {
+    if let Some(k) = pub_.downcast_ref::<ecdsa::PublicKey>() {
+        return Any::new_fn(k.clone());
+    }
+    if let Some(k) = pub_.downcast_ref::<rsa::PublicKey>() {
+        return Any::new_fn(k.clone());
+    }
+    if let Some(k) = pub_.downcast_ref::<ed25519::PublicKey>() {
+        return Any::new_fn(k.clone());
+    }
+    return Any::new_fn(());
+}
+
+// go: none — goish-only: `crypto::PrivateKey` is `Arc<dyn core::any::Any>`,
+// and `.As::<dyn Signer>()` on it resolves through the *blanket*
+// `HasDynAny for T: Sized` (goany.rs:635), which hands back the Arc's
+// own TypeId — so the registry lookup can only miss, silently. The
+// payload has to be dereferenced first, which is exactly what
+// `goany::Any::As` does internally. x509's CreateCertificate is safe
+// because it takes a `goany::Any`, not a `crypto::PrivateKey`.
+fn signerOf(key: &crypto::PrivateKey) -> Option<&(dyn crypto::Signer + Send + Sync)> {
+    return <dyn crypto::Signer + Send + Sync as crate::goany::DowncastableFromAny>::from_any(
+        &**key,
+    );
+}
+
+// go: sdk 1.25.5 crypto/tls/auth.go:208-245 selectSignatureScheme
+/// Pick the signature scheme to sign the handshake with, in the *peer's*
+/// preference order — ours is not configurable.
+pub(crate) fn selectSignatureScheme(
+    vers: uint16,
+    c: &super::Certificate,
+    peerAlgs: slice<SignatureScheme>,
+) -> (SignatureScheme, error) {
+    // Go: priv, ok := c.PrivateKey.(crypto.Signer)
+    //     if !ok { return 0, unsupportedCertificateError(c) }
+    let priv_ = signerOf(&c.PrivateKey);
+    if priv_.is_none() {
+        return (SignatureScheme(0), unsupportedCertificateError(c));
+    }
+    // Go: supportedAlgs := signatureSchemesForPublicKey(vers, priv.Public())
+    let pubAny = anyOfPublicKey(&priv_.unwrap().Public());
+    let mut supportedAlgs = signatureSchemesForPublicKey(vers, &pubAny);
+    // Go: if c.SupportedSignatureAlgorithms != nil {
+    //         supportedAlgs = slices.DeleteFunc(supportedAlgs, func(sigAlg SignatureScheme) bool {
+    //             return !isSupportedSignatureAlgorithm(sigAlg, c.SupportedSignatureAlgorithms) })
+    //     }
+    if c.SupportedSignatureAlgorithms.Len() != 0 {
+        let mut kept: Vec<SignatureScheme> = Vec::new();
+        for (_, sigAlg) in crate::range!(supportedAlgs.clone()) {
+            if super::common::isSupportedSignatureAlgorithm(
+                *sigAlg,
+                c.SupportedSignatureAlgorithms.clone(),
+            ) {
+                kept.push(*sigAlg);
+            }
+        }
+        supportedAlgs = slice::__from_vec(kept);
+    }
+    // Go: Filter out any unsupported signature algorithms, for example
+    // due to FIPS 140-3 policy, tlssha1=0, or protocol version.
+    let mut kept: Vec<SignatureScheme> = Vec::new();
+    for (_, sigAlg) in crate::range!(supportedAlgs.clone()) {
+        if !super::common::isDisabledSignatureAlgorithm(vers, *sigAlg, false) {
+            kept.push(*sigAlg);
+        }
+    }
+    supportedAlgs = slice::__from_vec(kept);
+    // Go: if len(supportedAlgs) == 0 { return 0, unsupportedCertificateError(c) }
+    if supportedAlgs.Len() == 0 {
+        return (SignatureScheme(0), unsupportedCertificateError(c));
+    }
+    // Go: if len(peerAlgs) == 0 && vers == VersionTLS12 {
+    //         // For TLS 1.2, if the client didn't send signature_algorithms then
+    //         // we can assume that it supports SHA1. See RFC 5246, Section
+    //         // 7.4.1.4.1. RFC 9155 made signature_algorithms mandatory in TLS
+    //         // 1.2, and we gated it behind the tlssha1 GODEBUG setting.
+    //         if tlssha1.Value() != "1" {
+    //             return 0, errors.New("tls: missing signature_algorithms from TLS 1.2 peer")
+    //         }
+    //         peerAlgs = []SignatureScheme{PKCS1WithSHA1, ECDSAWithSHA1}
+    //     }
+    let mut peerAlgs = peerAlgs;
+    if peerAlgs.Len() == 0 && vers == super::common::VersionTLS12 {
+        if super::common::tlssha1Value() != string::from_static("1") {
+            return (
+                SignatureScheme(0),
+                crate::errors::New("tls: missing signature_algorithms from TLS 1.2 peer"),
+            );
+        }
+        peerAlgs = slice::__from_vec(alloc::vec![PKCS1WithSHA1, ECDSAWithSHA1]);
+    }
+    // Go: Pick signature scheme in the peer's preference order, as our
+    // preference order is not configurable.
+    for (_, preferredAlg) in crate::range!(peerAlgs) {
+        if super::common::isSupportedSignatureAlgorithm(*preferredAlg, supportedAlgs.clone()) {
+            return (*preferredAlg, crate::errors::nil);
+        }
+    }
+    // Go: return 0, errors.New("tls: peer doesn't support any of the
+    //     certificate's signature algorithms")
+    return (
+        SignatureScheme(0),
+        crate::errors::New("tls: peer doesn't support any of the certificate's signature algorithms"),
+    );
+}
+
+// go: sdk 1.25.5 crypto/tls/auth.go:249-285 unsupportedCertificateError
+/// A helpful error for a certificate with an unsupported private key.
+///
+/// Two deviations, both structural:
+///
+///   * Go's first two arms catch a key stored by *value* where a pointer
+///     was meant (`rsa.PrivateKey` for `*rsa.PrivateKey`) or the reverse
+///     for Ed25519. goish has no value/pointer split on a key type, so
+///     those three messages are unreachable and are not ported.
+///   * The three `%T` renderings stop at the fixed prefix — goish's
+///     `Any` cannot produce a dynamic type name. Same deviation as the
+///     banner at the top of this file.
+pub(crate) fn unsupportedCertificateError(cert: &super::Certificate) -> error {
+    // Go: signer, ok := cert.PrivateKey.(crypto.Signer)
+    //     if !ok { return fmt.Errorf("tls: certificate private key (%T)
+    //         does not implement crypto.Signer", cert.PrivateKey) }
+    let signer = signerOf(&cert.PrivateKey);
+    if signer.is_none() {
+        return crate::errors::New("tls: certificate private key does not implement crypto.Signer");
+    }
+
+    // Go: switch pub := signer.Public().(type) {
+    let pub_ = signer.unwrap().Public();
+    // Go: case *ecdsa.PublicKey:
+    //         switch pub.Curve {
+    //         case elliptic.P256(): case elliptic.P384(): case elliptic.P521():
+    //         default: return fmt.Errorf("tls: unsupported certificate curve (%s)",
+    //                      pub.Curve.Params().Name)
+    //         }
+    if let Some(p) = pub_.downcast_ref::<ecdsa::PublicKey>() {
+        let name = p.Curve.Params().Name.clone();
+        if name != string::from_static("P-256")
+            && name != string::from_static("P-384")
+            && name != string::from_static("P-521")
+        {
+            return crate::fmt::Errorf!("tls: unsupported certificate curve (%s)", name);
+        }
+    // Go: case *rsa.PublicKey:
+    //         return fmt.Errorf("tls: certificate RSA key size too small
+    //             for supported signature algorithms")
+    } else if pub_.downcast_ref::<rsa::PublicKey>().is_some() {
+        return crate::errors::New(
+            "tls: certificate RSA key size too small for supported signature algorithms",
+        );
+    // Go: case ed25519.PublicKey:
+    } else if pub_.downcast_ref::<ed25519::PublicKey>().is_some() {
+    // Go: default:
+    //         return fmt.Errorf("tls: unsupported certificate key (%T)", pub)
+    } else {
+        return crate::errors::New("tls: unsupported certificate key");
+    }
+
+    // Go: if cert.SupportedSignatureAlgorithms != nil {
+    //         return fmt.Errorf("tls: peer doesn't support the certificate
+    //             custom signature algorithms")
+    //     }
+    if cert.SupportedSignatureAlgorithms.Len() != 0 {
+        return crate::errors::New(
+            "tls: peer doesn't support the certificate custom signature algorithms",
+        );
+    }
+
+    // Go: return fmt.Errorf("tls: internal error: unsupported key (%T)", cert.PrivateKey)
+    return crate::errors::New("tls: internal error: unsupported key");
+}

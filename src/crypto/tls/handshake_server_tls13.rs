@@ -483,8 +483,14 @@ pub(crate) fn do_server_handshake_tls13(
 
     // ── sendServerCertificate (handshake_server_tls13.go:851) ────────
     let mut cert_msg = certificateMsgTLS13::default();
-    cert_msg.certificate = cert_chain.to_vec();
-    let cert_bytes = cert_msg.marshal();
+    cert_msg.certificate.Certificate = crate::goslice::slice::__from_vec(
+        cert_chain
+            .iter()
+            .map(|c| crate::goslice::slice::__from_vec(c.clone()))
+            .collect(),
+    );
+    let (cert_bytes_s, _) = cert_msg.marshal();
+    let cert_bytes: alloc::vec::Vec<crate::types::byte> = cert_bytes_s.__into_vec();
     let (wire, eerr) = tls13_encrypt_record_suite(
         &server_hs_keys,
         server_hs_seq,

@@ -1226,6 +1226,66 @@ fn main() {
     check_n("allowedSignatureAlgorithmsFIPS", ns_, 10);
     check_n("allowedCipherSuitesFIPS", nsuite, 6);
 
+    // ─── marshalCertificate and the TLS 1.3 Certificate message. The
+    //     staple and SCTs ride on the LEAF only — the second entry's
+    //     extensions block is empty even though the chain shares one
+    //     Certificate value. From goref.sh.
+    let (mcRaw, mcFull, mcBare) = tls::handshake_messages_certificateEncodings();
+    eq("marshalCertificate", hexOf(mcRaw),
+       "000028000003aabbcc001900050008010000040102030400120009000700021122000133000002ddee0000");
+    eq("certificateMsgTLS13 marshal", hexOf(mcFull),
+       "0b00002c00000028000003aabbcc001900050008010000040102030400120009000700021122000133000002ddee0000");
+    // With ocspStapling/scts clear, Go strips both before marshalling.
+    eq("certificateMsgTLS13 flags off", hexOf(mcBare),
+       "0b0000130000000f000003aabbcc0000000002ddee0000");
+    let (ctOK, ctOcsp, ctScts, ctN, ctStaple, ctSct0) =
+        tls::handshake_messages_certificateRoundTrip();
+    check("certificateMsgTLS13 unmarshal ok", ctOK);
+    check("certificateMsgTLS13 ocspStapling round-trips", ctOcsp);
+    check("certificateMsgTLS13 scts round-trips", ctScts);
+    check_n("certificateMsgTLS13 chain length", ctN, 2);
+    eq("certificateMsgTLS13 staple", hexOf(ctStaple), "01020304");
+    eq("certificateMsgTLS13 first SCT", hexOf(ctSct0), "1122");
+
+    // ─── auth.go's Certificate-driven selection. Ed25519 only: goish's
+    //     ecdsa::PrivateKey does not implement crypto::Signer yet, and
+    //     generating an RSA key would blow the e2e timeout.
+    eq("unsupportedCertificateError no key",
+       tls::auth_unsupportedCertificateError(0),
+       "tls: certificate private key does not implement crypto.Signer");
+    eq("unsupportedCertificateError ed25519",
+       tls::auth_unsupportedCertificateError(1),
+       "tls: internal error: unsupported key");
+    eq("unsupportedCertificateError ed25519 with custom algorithms",
+       tls::auth_unsupportedCertificateError(2),
+       "tls: peer doesn't support the certificate custom signature algorithms");
+
+    let allAlgs = slice::__from_vec(alloc::vec![
+        tls::PSSWithSHA256, tls::PKCS1WithSHA256,
+        tls::ECDSAWithP256AndSHA256, tls::Ed25519
+    ]);
+    let (ss12, se12) = tls::auth_selectSignatureScheme(1, 0x0303, allAlgs.clone());
+    eq("selectSignatureScheme ed25519 at 1.2 err", se12, "");
+    eq("selectSignatureScheme ed25519 at 1.2", ss12.String(), "Ed25519");
+    let (ss13, se13) = tls::auth_selectSignatureScheme(1, 0x0304, allAlgs.clone());
+    eq("selectSignatureScheme ed25519 at 1.3 err", se13, "");
+    eq("selectSignatureScheme ed25519 at 1.3", ss13.String(), "Ed25519");
+    let (_, seNo) = tls::auth_selectSignatureScheme(
+        1, 0x0304, slice::__from_vec(alloc::vec![tls::PSSWithSHA256]));
+    eq("selectSignatureScheme no overlap", seNo,
+       "tls: peer doesn't support any of the certificate's signature algorithms");
+    // RFC 9155 made signature_algorithms mandatory in TLS 1.2, and Go
+    // gates the SHA-1 fallback behind GODEBUG=tlssha1=1.
+    let (_, seEmpty) = tls::auth_selectSignatureScheme(1, 0x0303, slice::new());
+    eq("selectSignatureScheme empty peer list at 1.2", seEmpty,
+       "tls: missing signature_algorithms from TLS 1.2 peer");
+    let (_, seCustom) = tls::auth_selectSignatureScheme(2, 0x0304, allAlgs.clone());
+    eq("selectSignatureScheme custom algorithms exclude the key", seCustom,
+       "tls: peer doesn't support the certificate custom signature algorithms");
+    let (_, seNoKey) = tls::auth_selectSignatureScheme(0, 0x0304, allAlgs);
+    eq("selectSignatureScheme without a private key", seNoKey,
+       "tls: certificate private key does not implement crypto.Signer");
+
     unsafe {
         fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", PASS + FAIL, FAIL);
         if FAIL > 0 {

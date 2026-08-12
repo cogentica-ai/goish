@@ -1,4 +1,4 @@
-// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError
+// go: file crypto/tls/common.go decls: VersionName, isTLS13OnlyKeyExchange, isPQKeyExchange, requiresClientCert, supportedVersionsFromMax, supportedSignatureAlgorithms, supportedSignatureAlgorithmsCert, isDisabledSignatureAlgorithm, isSupportedSignatureAlgorithm, CertificateVerificationError.Error, CertificateVerificationError.Unwrap, unexpectedMessageError, Certificate.leaf
 //
 // crypto/tls — the protocol-level type surface: versions, curve IDs,
 // signature schemes and client-auth policy.
@@ -10,15 +10,15 @@
 // `Config` and `Certificate` currently live in mod[rs] and are not yet
 // ports — see ROADMAP.md.
 //
-// goishlint:ignore GOISH018 supportedVersions, BuildNameToCertificate, CipherSuiteName, CipherSuites, Clone, Context, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, SetSessionTicketKeys, SupportsCertificate, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, curvePreferences, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, defaultConfig, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, fipsAllowChain, fipsAllowedChains, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, initLegacySessionTicketKeyRLocked, leaf, lruSessionCache, lruSessionCacheEntry, maxSupportedVersion, mutualVersion, needFIPS, rand, roleClient, roleServer, rsaKexCiphers, supportedCipherSuites, supportsCurve, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyFromBytes, ticketKeyLifetime, ticketKeyRotation, ticketKeys, time, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
-// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, ClientSessionCache, ClientHelloInfo, CertificateRequestInfo, RenegotiationSupport, Config, EncryptedClientHelloKey, ticketKey, Certificate, dsaSignature, ecdsaSignature — same.
-// goishlint:ignore GOISH021 Certificate, CertificateRequestInfo, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, EncryptedClientHelloKey, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultConfig, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, deprecatedSessionTicketKey, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, emptyConfig, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, fipsAllowChain, fipsAllowedChains, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, leaf, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, rand, roleClient, roleServer, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, supportedCipherSuites, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKey, ticketKeyLifetime, ticketKeyRotation, time, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
+// goishlint:ignore GOISH018 supportedVersions, BuildNameToCertificate, CipherSuiteName, CipherSuites, Clone, Context, ExportKeyingMaterial, Get, InsecureCipherSuites, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, SetSessionTicketKeys, SupportsCertificate, aeadModes, aesgcmCiphers, certTypeECDSASign, certTypeRSASign, curvePreferences, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, defaultConfig, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, fipsAllowChain, fipsAllowedChains, getCertificate, handshakeMessage, handshakeMessageWithOriginalBytes, hasAESGCMHardwareSupport, initLegacySessionTicketKeyRLocked, lruSessionCache, lruSessionCacheEntry, maxSupportedVersion, mutualVersion, needFIPS, rand, roleClient, roleServer, rsaKexCiphers, supportedCipherSuites, supportsCurve, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyFromBytes, ticketKeyLifetime, ticketKeyRotation, ticketKeys, time, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writeKeyLog, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
+// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, ConnectionState, ClientSessionCache, ClientHelloInfo, CertificateRequestInfo, RenegotiationSupport, Config, EncryptedClientHelloKey, ticketKey, dsaSignature, ecdsaSignature — same.
+// goishlint:ignore GOISH021 CertificateRequestInfo, ClientHelloInfo, ClientSessionCache, Config, ConnectionState, EncryptedClientHelloKey, Get, NewLRUClientSessionCache, Put, RenegotiateFreelyAsClient, RenegotiateNever, RenegotiateOnceAsClient, RenegotiationSupport, certTypeECDSASign, certTypeRSASign, defaultCipherSuitesFIPS, defaultConfig, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, deprecatedSessionTicketKey, directSigning, downgradeCanaryTLS11, downgradeCanaryTLS12, dsaSignature, ecdsaSignature, emptyConfig, errEarlyCloseWrite, errNoCertificates, errShutdown, extensionEncryptedClientHelloOuterExtensions, fipsAllowChain, fipsAllowedChains, handshakeMessage, handshakeMessageWithOriginalBytes, helloRetryRequestRandom, keyLogLabelClientHandshake, keyLogLabelClientTraffic, keyLogLabelEarlyTraffic, keyLogLabelServerHandshake, keyLogLabelServerTraffic, keyLogLabelTLS12, keyShare, lruSessionCache, lruSessionCacheEntry, maxSessionTicketLifetime, maxUselessBytes, pointFormatUncompressed, pskIdentity, pskModeDHE, pskModePlain, rand, roleClient, roleServer, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS, statusTypeOCSP, supportedCipherSuites, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKey, ticketKeyLifetime, ticketKeyRotation, time, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
 use crate::fmt;
 use crate::gostring::string;
-use crate::types::{int, uint16, uint8};
+use crate::types::{byte, int, uint16, uint8};
 
 // Go: common.go:32-41
 //   const ( VersionTLS10 = 0x0301; … VersionSSL30 = 0x0300 )
@@ -278,7 +278,7 @@ pub(crate) fn supportedVersionsFromMax(maxVersion: uint16) -> slice<uint16> {
 // defaults[rs]'s `godebugValue` for the same one-line hook; Go's
 // `tlssha1` is unset by default, and every branch here compares against
 // a specific string.
-fn tlssha1Value() -> crate::gostring::string {
+pub(crate) fn tlssha1Value() -> crate::gostring::string {
     return crate::gostring::string::from_static("");
 }
 
@@ -441,4 +441,69 @@ pub(crate) fn unexpectedMessageError(
         got,
         wanted
     );
+}
+
+
+// Go: common.go:1559-1579
+//   type Certificate struct { Certificate [][]byte; PrivateKey crypto.PrivateKey
+//                             SupportedSignatureAlgorithms []SignatureScheme
+//                             OCSPStaple []byte; SignedCertificateTimestamps [][]byte
+//                             Leaf *x509.Certificate }
+/// `tls.Certificate` — a chain of one or more certificates, leaf first,
+/// plus the leaf's private key.
+#[derive(Clone)]
+pub struct Certificate {
+    /// A chain of one or more certificates, leaf first, in DER form.
+    pub Certificate: slice<slice<byte>>,
+    /// Go: "PrivateKey contains the private key corresponding to the
+    /// public key in Leaf. This must implement crypto.Signer with an
+    /// RSA, ECDSA or Ed25519 PublicKey. For a server up to TLS 1.2, it
+    /// can also implement crypto.Decrypter with an RSA PublicKey."
+    pub PrivateKey: crate::crypto::PrivateKey,
+    /// Go: "an optional list restricting what signature algorithms the
+    /// PrivateKey can be used for."
+    pub SupportedSignatureAlgorithms: slice<SignatureScheme>,
+    /// Go: "an optional OCSP response which will be served to clients
+    /// that request it."
+    pub OCSPStaple: slice<byte>,
+    /// Go: "an optional list of Signed Certificate Timestamps which will
+    /// be served to clients that request it."
+    pub SignedCertificateTimestamps: slice<slice<byte>>,
+    /// Go: "the parsed form of the leaf certificate, which may be
+    /// initialized using x509.ParseCertificate to reduce per-handshake
+    /// processing. If nil, the leaf certificate will be parsed as
+    /// needed." Go's nil pointer is `None` here.
+    pub Leaf: Option<crate::crypto::x509::Certificate>,
+}
+
+impl Default for Certificate {
+    // go: none — goish idiom: Go's zero value. `PrivateKey` is an
+    // interface with no nil sentinel, so the unit type stands in — it
+    // downcasts to no key type, and a default-constructed Certificate
+    // fails the handshake with a clean "does not implement
+    // crypto.Signer" error.
+    fn default() -> Self {
+        return Certificate {
+            Certificate: slice::new(),
+            PrivateKey: alloc::sync::Arc::new(()),
+            SupportedSignatureAlgorithms: slice::new(),
+            OCSPStaple: slice::new(),
+            SignedCertificateTimestamps: slice::new(),
+            Leaf: None,
+        };
+    }
+}
+
+impl Certificate {
+    // go: sdk 1.25.5 crypto/tls/common.go:1583-1588 Certificate.leaf
+    /// The parsed leaf certificate, either from `c.Leaf` or by parsing
+    /// `c.Certificate[0]`.
+    pub(crate) fn leaf(&self) -> (crate::crypto::x509::Certificate, error) {
+        // Go: if c.Leaf != nil { return c.Leaf, nil }
+        if self.Leaf.is_some() {
+            return (self.Leaf.clone().unwrap(), errors::nil);
+        }
+        // Go: return x509.ParseCertificate(c.Certificate[0])
+        return crate::crypto::x509::ParseCertificate(self.Certificate[0].clone());
+    }
 }
