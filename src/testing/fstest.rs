@@ -722,7 +722,7 @@ impl MapFS {
 // goishlint:ignore GOISH019 fsTester — Go's `fsys fs.FS` field is held
 // by the driver (`testFS`), which is not ported; carrying a filesystem
 // this struct never reads would imply a walk that does not exist here.
-// goishlint:ignore GOISH020 checkOpen, checkBadPath, checkFileRead, checkDirList, checkStat, checkGlob, checkFile, openDir — Go
+// goishlint:ignore GOISH020 checkOpen, checkBadPath, checkFileRead, checkDirList, checkStat, checkGlob, checkFile, openDir, checkDir, testFS, TestFS — Go
 // reads `t.fsys` off the receiver; goish's fsTester does not carry a
 // filesystem (see GOISH019 above), so these take it, or the opener
 // built from it, as a parameter instead. Same inputs, one hop
@@ -1544,4 +1544,433 @@ fn read_all_file(f: &(dyn File + Send + Sync)) -> (slice<byte>, error) {
             break 'read (slice::__from_vec(out), errors::nil);
         }
     };
+}
+
+// go: none — goish-only: open a directory and hand back the live
+// handle, which `checkDir` needs because several of its checks depend
+// on ReadDir's *position* persisting across calls (read to EOF, then
+// confirm ReadDir(-1) returns nothing and ReadDir(1) returns EOF).
+// `openDir` above closes the handle and returns a snapshot, which is
+// the right shape for its own caller but loses exactly that state.
+fn open_dir_handle(
+    fsys: &(dyn fs::FS + Send + Sync + 'static),
+    dir: string,
+) -> (Option<Arc<dyn File + Send + Sync>>, error) {
+    let (f, err) = fs::FS::Open(fsys, dir);
+    if err != errors::nil {
+        return (None, err);
+    }
+    return (Some(f), errors::nil);
+}
+
+// go: none — goish-only: `ReadDir(n)` on a live handle. The downcast to
+// `mapDir` stands in for Go's `f.(fs.ReadDirFile)` type assertion,
+// which goish's io/fs cannot express yet.
+fn handle_read_dir(
+    f: &(dyn File + Send + Sync),
+    n: int,
+) -> (slice<Arc<dyn DirEntry + Send + Sync>>, error, bool) {
+    let any = match f.__goish_as_dyn_any() {
+        Some(a) => a,
+        None => return (slice::new(), errors::nil, false),
+    };
+    return match any.downcast_ref::<mapDir>() {
+        Some(d) => {
+            let (e, err) = d.read_dir(n);
+            (e, err, true)
+        }
+        None => (slice::new(), errors::nil, false),
+    };
+}
+
+impl fsTester {
+    // go: sdk 1.25.5 testing/fstest/testfs.go:125-273 fsTester.checkDir
+    /// Go: "checkDir checks the directory dir, which is expected to
+    /// exist (it is either the root or was found in a directory
+    /// listing with IsDir true)."
+    ///
+    /// The heart of TestFS, and the only recursive check: it walks the
+    /// whole tree, and for each directory reads it four different ways,
+    /// requiring all four to agree —
+    ///
+    ///   1. `Open` + `ReadDir(-1)` (the reference listing)
+    ///   2. reopen + `ReadDir(-1)`
+    ///   3. reopen + `ReadDir(1)`, `ReadDir(2)`, … in pieces
+    ///   4. the free `fs.ReadDir`
+    ///
+    /// A filesystem that caches a listing on the handle, or whose
+    /// piecewise reads lose or duplicate an entry at a chunk boundary,
+    /// fails only against the third. It also pins the EOF contract,
+    /// which is asymmetric and easy to get wrong: at EOF `ReadDir(-1)`
+    /// returns zero entries and **nil**, while `ReadDir(1)` returns
+    /// zero entries and **io.EOF**.
+    ///
+    /// Deviations: Go's `fs.ReadDirFS` block is absent (no such trait
+    /// here) — the `fs.ReadDir` block below covers the same ground, and
+    /// both sort checks are kept. Symlink children are recorded without
+    /// being followed, exactly as Go does, "to avoid potentially
+    /// unbounded recursion".
+    pub fn checkDir(
+        &mut self,
+        fsys: &(dyn fs::FS + Send + Sync + 'static),
+        dir: string,
+    ) {
+        self.__push_dir(dir.clone());
+
+        let (dh, oerr) = open_dir_handle(fsys, dir.clone());
+        let d = match dh {
+            Some(d) => d,
+            None => {
+                self.errorf(crate::fmt::Sprintf!("%s: Open: %v", dir.clone(), oerr.Error()));
+                return;
+            }
+        };
+        let (list, rerr, ok) = handle_read_dir(d.as_ref(), -1);
+        if !ok {
+            d.Close();
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: Open returned a File that is not a fs.ReadDirFile",
+                dir.clone()
+            ));
+            return;
+        }
+        if rerr != errors::nil {
+            d.Close();
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: ReadDir(-1): %v",
+                dir.clone(),
+                rerr.Error()
+            ));
+            return;
+        }
+
+        // Go: prefix is "" for ".", else dir + "/".
+        let ds: &str = dir.as_ref();
+        let prefix = if ds == "." {
+            string::from_static("")
+        } else {
+            crate::fmt::Sprintf!("%s/", dir.clone())
+        };
+
+        for i in 0..list.Len() {
+            let info = list[i].clone();
+            let name = info.Name();
+            let ns: &str = name.as_ref();
+            if ns == "." || ns == ".." || ns.is_empty() {
+                self.errorf(crate::fmt::Sprintf!(
+                    "%s: ReadDir: child has invalid name: %q",
+                    dir.clone(),
+                    name
+                ));
+                continue;
+            }
+            if ns.contains('/') {
+                self.errorf(crate::fmt::Sprintf!(
+                    "%s: ReadDir: child name contains slash: %q",
+                    dir.clone(),
+                    name
+                ));
+                continue;
+            }
+            if ns.contains('\\') {
+                self.errorf(crate::fmt::Sprintf!(
+                    "%s: ReadDir: child name contains backslash: %q",
+                    dir.clone(),
+                    name
+                ));
+                continue;
+            }
+            let path = crate::fmt::Sprintf!("%s%s", prefix.clone(), name);
+            self.checkStat(fsys, path.clone(), info.as_ref());
+            self.checkOpen(fsys, path.clone());
+            let ty = info.Type();
+            if ty.0 == fs::ModeDir.0 {
+                self.checkDir(fsys, path);
+            } else if ty.0 == fs::ModeSymlink.0 {
+                // Go: "No further processing. Avoid following symlinks
+                // to avoid potentially unbounded recursion."
+                self.__push_file(path);
+            } else {
+                self.checkFile(fsys, path);
+            }
+        }
+
+        // Go: "Check ReadDir(-1) at EOF." — zero entries and NIL.
+        let (l2, e2, _) = handle_read_dir(d.as_ref(), -1);
+        if l2.Len() > 0 || e2 != errors::nil {
+            d.Close();
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: ReadDir(-1) at EOF = %d entries, %v, wanted 0 entries, nil",
+                dir.clone(),
+                l2.Len(),
+                e2.Error()
+            ));
+            return;
+        }
+
+        // Go: "Check ReadDir(1) at EOF (different results)." — zero
+        // entries and EOF. Note the asymmetry with the case above.
+        let eof: error = crate::io::EOF.clone().into();
+        let (l3, e3, _) = handle_read_dir(d.as_ref(), 1);
+        if l3.Len() > 0 || e3 != eof {
+            d.Close();
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: ReadDir(1) at EOF = %d entries, %v, wanted 0 entries, EOF",
+                dir.clone(),
+                l3.Len(),
+                e3.Error()
+            ));
+            return;
+        }
+
+        let cerr = d.Close();
+        if cerr != errors::nil {
+            self.errorf(crate::fmt::Sprintf!("%s: Close: %v", dir.clone(), cerr.Error()));
+        }
+        // Go: "Check that closing twice doesn't crash."
+        d.Close();
+
+        // Go: "Reopen directory, read a second time, make sure contents
+        // match."
+        let (dh2, _) = open_dir_handle(fsys, dir.clone());
+        let d2 = match dh2 {
+            Some(x) => x,
+            None => return,
+        };
+        let (second, serr, _) = handle_read_dir(d2.as_ref(), -1);
+        if serr != errors::nil {
+            d2.Close();
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: second Open+ReadDir(-1): %v",
+                dir.clone(),
+                serr.Error()
+            ));
+            return;
+        }
+        d2.Close();
+        self.checkDirList(
+            dir.clone(),
+            "first Open+ReadDir(-1) vs second Open+ReadDir(-1)",
+            &list,
+            &second,
+        );
+
+        // Go: "Reopen directory, read a third time in pieces, make sure
+        // contents match." The chunk size alternates 1 then 2, so a
+        // filesystem that mishandles a boundary shows up here.
+        let (dh3, _) = open_dir_handle(fsys, dir.clone());
+        let d3 = match dh3 {
+            Some(x) => x,
+            None => return,
+        };
+        let mut third: slice<Arc<dyn DirEntry + Send + Sync>> = slice::new();
+        loop {
+            let n: int = if third.Len() > 0 { 2 } else { 1 };
+            let (frag, ferr, _) = handle_read_dir(d3.as_ref(), n);
+            if frag.Len() > n {
+                d3.Close();
+                self.errorf(crate::fmt::Sprintf!(
+                    "%s: third Open: ReadDir(%d) after %d: %d entries (too many)",
+                    dir.clone(),
+                    n,
+                    third.Len(),
+                    frag.Len()
+                ));
+                return;
+            }
+            for k in 0..frag.Len() {
+                third = crate::append!(third, frag[k].clone());
+            }
+            if ferr == eof {
+                break;
+            }
+            if ferr != errors::nil {
+                d3.Close();
+                self.errorf(crate::fmt::Sprintf!(
+                    "%s: third Open: ReadDir(%d) after %d: %v",
+                    dir.clone(),
+                    n,
+                    third.Len(),
+                    ferr.Error()
+                ));
+                return;
+            }
+            if frag.Len() == 0 {
+                d3.Close();
+                self.errorf(crate::fmt::Sprintf!(
+                    "%s: third Open: ReadDir(%d) after %d: 0 entries but nil error",
+                    dir.clone(),
+                    n,
+                    third.Len()
+                ));
+                return;
+            }
+        }
+        d3.Close();
+        self.checkDirList(
+            dir.clone(),
+            "first Open+ReadDir(-1) vs third Open+ReadDir(1,2) loop",
+            &list,
+            &third,
+        );
+
+        // Go: "Check fs.ReadDir as well."
+        let (fourth, r4err) = fs::ReadDir(fsys, dir.clone());
+        if r4err != errors::nil {
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: fs.ReadDir: %v",
+                dir.clone(),
+                r4err.Error()
+            ));
+            return;
+        }
+        self.checkDirList(
+            dir.clone(),
+            "first Open+ReadDir(-1) vs fs.ReadDir",
+            &list,
+            &fourth,
+        );
+
+        for i in 0..(fourth.Len() - 1).max(0) {
+            if fourth[i].Name() >= fourth[i + 1].Name() {
+                self.errorf(crate::fmt::Sprintf!(
+                    "%s: fs.ReadDir: list not sorted: %s before %s",
+                    dir.clone(),
+                    fourth[i].Name(),
+                    fourth[i + 1].Name()
+                ));
+            }
+        }
+
+        self.checkGlob(dir, &fourth, |pat| {
+            return fs::Glob(fsys, pat);
+        });
+    }
+}
+
+// go: sdk 1.25.5 testing/fstest/testfs.go:65-93 testFS
+/// Go: walk `fsys` from the root, run every check, and report the
+/// accumulated errors as one.
+///
+/// The `expected` list is checked both ways: everything named must be
+/// found, AND — when the list is empty — nothing may be found. That
+/// second direction is what makes `TestFS(fsys)` with no arguments a
+/// meaningful assertion that a filesystem is empty, rather than a
+/// no-op.
+///
+/// Go's 15-entry truncation of the "expected empty" list is kept, as is
+/// `errors.Join` — so the returned error unwraps to the individual
+/// failures rather than flattening to a single string.
+pub fn testFS(
+    fsys: &(dyn fs::FS + Send + Sync + 'static),
+    expected: &slice<string>,
+) -> error {
+    let mut t = fsTester::default();
+    t.checkDir(fsys, string::from_static("."));
+    t.checkOpen(fsys, string::from_static("."));
+
+    let (dirs, files) = t.Found();
+    let mut found: crate::map<string, bool> = crate::map::new();
+    for i in 0..dirs.Len() {
+        found.Set(dirs[i].clone(), true);
+    }
+    for i in 0..files.Len() {
+        found.Set(files[i].clone(), true);
+    }
+    found.Delete(string::from_static("."));
+
+    if expected.Len() == 0 && found.Len() > 0 {
+        let keys = found.Keys();
+        let mut list: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+        for i in 0..keys.Len() {
+            list.push(keys[i].clone());
+        }
+        list.sort_by(|a, b| {
+            let (x, y): (&str, &str) = (a.as_ref(), b.as_ref());
+            return x.cmp(y);
+        });
+        // Go: if len(list) > 15 { list = append(list[:10], "...") }
+        if list.len() > 15 {
+            list.truncate(10);
+            list.push(string::from_static("..."));
+        }
+        t.errorf(crate::fmt::Sprintf!(
+            "expected empty file system but found files:\n%s",
+            crate::strings::Join(slice::__from_vec(list), string::from_static("\n"))
+        ));
+    }
+
+    for i in 0..expected.Len() {
+        let name = expected[i].clone();
+        let (ok, present) = found.Get(name.clone());
+        if !present || !ok {
+            t.errorf(crate::fmt::Sprintf!("expected but not found: %s", name));
+        }
+    }
+
+    let errs = t.Errors();
+    if errs.Len() == 0 {
+        return errors::nil;
+    }
+    // Go: fmt.Errorf("TestFS found errors:\n%w", errors.Join(t.errors...))
+    return crate::fmt::Errorf!("TestFS found errors:\n%w", errors::Join(errs));
+}
+
+// go: sdk 1.25.5 testing/fstest/testfs.go:39-63 TestFS
+/// Go: "TestFS tests a file system implementation. It walks the entire
+/// tree of files in fsys, opening and checking that each file behaves
+/// correctly. It also checks that the file system contains at least the
+/// expected files. As a special case, if no expected files are listed,
+/// fsys must be empty. Otherwise, fsys must contain at least the listed
+/// files; it can also contain others. The contents of fsys must not
+/// change concurrently with TestFS.
+///
+/// If TestFS finds any misbehaviors, it returns either the first error
+/// or a list of errors."
+///
+/// After the top-level walk it picks the first expected name containing
+/// a slash, takes `fs.Sub` of that directory, and runs the whole suite
+/// again against the subtree — so a `SubFS` that rewrites paths
+/// incorrectly is caught. Go stops after one such subtest ("one
+/// sub-test is enough") and so does this.
+pub fn TestFS(
+    fsys: Arc<dyn fs::FS + Send + Sync>,
+    expected: &slice<string>,
+) -> error {
+    let err = testFS(fsys.as_ref(), expected);
+    if err != errors::nil {
+        return err;
+    }
+    for i in 0..expected.Len() {
+        let name = expected[i].clone();
+        let ns: &str = name.as_ref();
+        if let Some(idx) = ns.find('/') {
+            let dir = s_of(&ns[..idx]);
+            let dir_slash = s_of(&ns[..idx + 1]);
+            let mut sub_expected: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+            for j in 0..expected.Len() {
+                let other = expected[j].clone();
+                let os_: &str = other.as_ref();
+                let dslash: &str = dir_slash.as_ref();
+                if os_.starts_with(dslash) {
+                    sub_expected.push(s_of(&os_[dslash.len()..]));
+                }
+            }
+            let (sub, serr) = fs::Sub(fsys.clone(), dir.clone());
+            if serr != errors::nil {
+                return serr;
+            }
+            let suberr = testFS(sub.as_ref(), &slice::__from_vec(sub_expected));
+            if suberr != errors::nil {
+                return errors::New(crate::fmt::Sprintf!(
+                    "testing fs.Sub(fsys, %s): %v",
+                    dir,
+                    suberr.Error()
+                ));
+            }
+            // Go: "one sub-test is enough"
+            break;
+        }
+    }
+    return errors::nil;
 }

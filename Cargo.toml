@@ -1231,3 +1231,7 @@ path = "examples/testing_fstest_glob_smoke.rs"
 [[example]]
 name = "testing_fstest_file_smoke"
 path = "examples/testing_fstest_file_smoke.rs"
+
+[[example]]
+name = "testing_fstest_testfs_smoke"
+path = "examples/testing_fstest_testfs_smoke.rs"
