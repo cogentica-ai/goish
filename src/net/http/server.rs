@@ -1089,12 +1089,72 @@ pub struct __ServerState {
     on_shutdown: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
 }
 
-/// Go `ConnState` subset tracked per connection (server.go:3520):
-/// enough for `closeIdleConns`' quiescence test. Hooks
-/// (`Server.ConnState`) stay deferred.
-const CONN_STATE_NEW: u8 = 0;
-const CONN_STATE_ACTIVE: u8 = 1;
-const CONN_STATE_IDLE: u8 = 2;
+// go: sdk 1.25.5 net/http/server.go:3266-3266 ConnState
+//
+/// The state of a client connection to a server, as reported to the
+/// `Server.ConnState` hook. The hook itself is still deferred; the
+/// type and its states are Go's.
+pub type ConnState = int;
+
+// go: sdk 1.25.5 net/http/server.go:3268-3302 StateNew
+//
+/// Go: "StateNew represents a new connection that is expected to send
+/// a request immediately. Connections begin at this state and then
+/// transition to either StateActive or StateClosed."
+pub const StateNew: ConnState = 0;
+
+/// Go: "StateActive represents a connection that has read 1 or more
+/// bytes of a request. […] After the request is handled, the state
+/// transitions to StateClosed, StateHijacked, or StateIdle." Note
+/// Go's caveat: for HTTP/2 it fires only on the zero-to-one
+/// transition, so ConnState cannot be used for per-request work.
+pub const StateActive: ConnState = 1;
+
+/// Go: "StateIdle represents a connection that has finished handling
+/// a request and is in the keep-alive state, waiting for a new
+/// request."
+pub const StateIdle: ConnState = 2;
+
+/// Go: "StateHijacked represents a hijacked connection. This is a
+/// TERMINAL state. It does not transition to StateClosed."
+pub const StateHijacked: ConnState = 3;
+
+/// Go: "StateClosed represents a closed connection. This is a
+/// terminal state. Hijacked connections do not transition to
+/// StateClosed."
+pub const StateClosed: ConnState = 4;
+
+// go: sdk 1.25.5 net/http/server.go:3304-3310 stateName
+pub fn stateName() -> crate::gomap::map<ConnState, string> {
+    let mut m: crate::gomap::map<ConnState, string> = crate::gomap::map::new();
+    m.Set(StateNew, string("new"));
+    m.Set(StateActive, string("active"));
+    m.Set(StateIdle, string("idle"));
+    m.Set(StateHijacked, string("hijacked"));
+    m.Set(StateClosed, string("closed"));
+    return m;
+}
+
+// go: sdk 1.25.5 net/http/server.go:3312-3314 ConnState.String
+//
+/// Go indexes `stateName` directly, so a value outside the five
+/// returns the map's zero value — the EMPTY string, not a
+/// "ConnState(7)" rendering. Preserved.
+pub fn ConnStateString(c: ConnState) -> string {
+    let (n, ok) = stateName().Get(c);
+    if !ok {
+        return string("");
+    }
+    return n;
+}
+
+// goish tracks the live state in an AtomicU8, which needs the same
+// five values at that width. Written as literals rather than a cast of
+// the ConnState consts because a const initializer cannot go through
+// goish's call-cast; they are kept adjacent so a divergence is visible.
+const CONN_STATE_NEW: u8 = 0; // StateNew
+const CONN_STATE_ACTIVE: u8 = 1; // StateActive
+const CONN_STATE_IDLE: u8 = 2; // StateIdle
 
 /// Per-connection tracking record — goish's rendering of Go's
 /// `conn.curState` packed atomic (server.go:299,

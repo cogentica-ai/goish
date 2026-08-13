@@ -26,7 +26,8 @@ use alloc::vec::Vec;
 use goish::goslice::slice;
 use goish::net::http::server::{
     cleanPath, foreachHeaderElement, numLeadingCRorLF, stripHostPort,
-    tlsRecordHeaderLooksLikeHTTP, validNextProto,
+    tlsRecordHeaderLooksLikeHTTP, validNextProto, ConnStateString, StateActive, StateClosed,
+    StateHijacked, StateIdle, StateNew,
 };
 use goish::{fmt, string, syscall};
 
@@ -176,11 +177,37 @@ fn main() {
         check!("[6] tlsRecordHeaderLooksLikeHTTP, 7 cases vs Go", bad);
     }
 
+    // 7. ConnState.String — the five states, and Go's behaviour for a
+    //    value outside them. Go indexes a map directly, so an unknown
+    //    state yields the map's zero value: the EMPTY string, NOT a
+    //    "ConnState(7)" rendering. A Display impl that formatted the
+    //    number would look more helpful and diverge.
+    {
+        let cases: &[(i64, &str)] = &[
+            (StateNew, "new"),
+            (StateActive, "active"),
+            (StateIdle, "idle"),
+            (StateHijacked, "hijacked"),
+            (StateClosed, "closed"),
+            (7, ""),
+            (-1, ""),
+        ];
+        let mut bad = 0;
+        for (c, want) in cases {
+            let got = ConnStateString(*c);
+            if got != *want {
+                fmt::Println!("     ConnState(", *c, ") = ", got, " want ", *want);
+                bad += 1;
+            }
+        }
+        check!("[7] ConnState.String, 7 cases vs Go", bad);
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 6/6");
+        fmt::Println!("ok 7/7");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL ", failed, " of 6");
+        fmt::Println!("FAIL ", failed, " of 7");
         syscall::Exit(1);
     }
 }
