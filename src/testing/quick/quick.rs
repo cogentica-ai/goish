@@ -1,7 +1,7 @@
 // go: package testing/quick
 //
 // go: file testing/quick/quick.go decls: randFloat32, randFloat64, randInt64, SetupError.Error, CheckError.Error, CheckEqualError.Error, Config.getRand, Config.getMaxCount, toString
-// goishlint:ignore GOISH018 Value, sizedValue, Check, CheckEqual, arbitraryValues, functionAndType, toInterfaces, Generate — all need reflect on function and composite types; goish's reflect::Value is a data-only tree with a no-op Call.
+// goishlint:ignore GOISH018 Value, sizedValue, Check, CheckEqual, arbitraryValues, functionAndType, Generate, toInterfaces — all need reflect on function and composite types; goish's reflect::Value is a data-only tree with a no-op Call.
 // goishlint:ignore GOISH021 Generator, complexSize, defaultMaxCount, defaultCheckFuncName, defaultConfig — same: all are consumed only by Check/CheckEqual and the reflective value generators.
 
 #![allow(non_snake_case)]

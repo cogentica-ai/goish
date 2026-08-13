@@ -1,7 +1,7 @@
 // go: package testing/internal/testdeps
 //
-// go: file testing/internal/testdeps/deps.go decls: TestDeps.MatchString, TestDeps.ImportPath, testLog.Getenv, testLog.Open, testLog.Stat, testLog.Chdir, testLog.add, TestDeps.StartTestLog, TestDeps.StopTestLog
-// goishlint:ignore GOISH018 StartCPUProfile, StopCPUProfile, WriteProfileTo, SetPanicOnExit0, CoordinateFuzzing, RunFuzzWorker, ReadCorpus, CheckCorpus, ResetCoverage, SnapshotCoverage, InitRuntimeCoverage, coverTearDown — profiling needs runtime/pprof and runtime/trace, fuzzing needs internal/fuzz, coverage needs compiler instrumentation, and SetPanicOnExit0 needs internal/testlog, none of which goish has.
+// go: file testing/internal/testdeps/deps.go decls: TestDeps.InitRuntimeCoverage, TestDeps.MatchString, TestDeps.ImportPath, testLog.Getenv, testLog.Open, testLog.Stat, testLog.Chdir, testLog.add, TestDeps.StartTestLog, TestDeps.StopTestLog
+// goishlint:ignore GOISH018 StartCPUProfile, StopCPUProfile, WriteProfileTo, SetPanicOnExit0, CoordinateFuzzing, RunFuzzWorker, ReadCorpus, CheckCorpus, ResetCoverage, SnapshotCoverage, coverTearDown — profiling needs runtime/pprof and runtime/trace, fuzzing needs internal/fuzz, coverage needs compiler instrumentation, and SetPanicOnExit0 needs internal/testlog, none of which goish has.
 // goishlint:ignore GOISH021 Cover, CoverMode, Covered, CoverSelectedPackages, CoverSnapshotFunc, CoverProcessTestDirFunc, CoverMarkProfileEmittedFunc, matchPat, matchRe — package state for the same three subsystems.
 
 #![allow(non_snake_case)]
@@ -72,6 +72,25 @@ impl TestDeps {
                 let _ = bw.WriteString(string::from_static("# test log\n"));
             }
         }
+    }
+
+    // go: sdk 1.25.5 testing/internal/testdeps/deps.go:218-223 TestDeps.InitRuntimeCoverage
+    /// Go: hand `testing` the coverage mode and its teardown, or three zero
+    /// values when the binary was not built with coverage.
+    ///
+    /// goish takes the second branch permanently: `CoverMode` is set by
+    /// the compiler's generated main, which does not exist here. That
+    /// is the same answer Go gives for `go test` without `-cover`, and
+    /// it is what makes `registerCover` record nothing.
+    pub fn InitRuntimeCoverage(
+        &self,
+    ) -> (
+        string,
+        Option<crate::testing::testing::TearDownFunc>,
+        Option<crate::testing::testing::SnapCovFunc>,
+    ) {
+        // Go: `if CoverMode == "" { return }`.
+        return (string::from_static(""), None, None);
     }
 
     // go: sdk 1.25.5 testing/internal/testdeps/deps.go:126-133 TestDeps.StopTestLog

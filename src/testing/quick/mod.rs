@@ -13,7 +13,12 @@
 //
 // What is here is everything that does not need reflection: the random
 // generators, the three error types a failing check reports through,
-// and Config's defaulting. They are genuine ports, anchored, and the
+// and Config's defaulting.
+//
+// `toInterfaces` looks portable and is not: it calls `Value.Interface()`
+// to unwrap each value, and goish's returns a `core::any::Any`, whereas
+// `goany::Any` requires `PartialEq + Reflect`. There is no bridge
+// between the two representations. They are genuine ports, anchored, and the
 // coverage tool reports the rest as MISSING rather than hiding it.
 
 mod quick;
