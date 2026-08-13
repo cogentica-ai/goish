@@ -24,14 +24,14 @@ use alloc::vec::Vec;
 use crate::errors::{self, error, ErrorTrait};
 use crate::string;
 
-// ─── url.Error / url.EscapeError / url.InvalidHostError (url.go:27-99)
+// ─── url.Error / url.EscapeError / url.InvalidHostError (url.go line 27-99)
 //
 // Line-by-line port of Go's three typed error types in net/url.
 
-// Go: url.go:27
+// Go: url.go line 27
 //   type Error struct { Op, URL string; Err error }
 /// `url.Error` reports an error and the operation + URL that caused it.
-/// Mirrors `net/url.Error` (url.go:28-32).
+/// Mirrors `net/url.Error` (url.go line 28-32).
 #[derive(Clone)]
 pub struct Error {
     pub Op: string,
@@ -48,8 +48,8 @@ impl Error {
     }
 }
 
-// Go: url.go:34  func (e *Error) Unwrap() error { return e.Err }
-// Go: url.go:35  func (e *Error) Error() string { return fmt.Sprintf("%s %q: %s", e.Op, e.URL, e.Err) }
+// Go: url.go line 34  func (e *Error) Unwrap() error { return e.Err }
+// Go: url.go line 35  func (e *Error) Error() string { return fmt.Sprintf("%s %q: %s", e.Op, e.URL, e.Err) }
 impl ErrorTrait for Error {
     fn Error(&self) -> string {
         // Go: fmt.Sprintf("%s %q: %s", e.Op, e.URL, e.Err)
@@ -61,7 +61,7 @@ impl ErrorTrait for Error {
         crate::Sprintf!("%s %q: %s", self.Op.clone(), self.URL.clone(), inner)
     }
     fn Unwrap(&self) -> error {
-        // Go: url.go:34  return e.Err
+        // Go: url.go line 34  return e.Err
         self.Err.clone()
     }
 }
@@ -73,10 +73,10 @@ impl ErrorTrait for Error {
 // case where Err is a network/timeout sentinel, callers should query
 // the inner error directly via Unwrap().
 
-// Go: url.go:90
+// Go: url.go line 90
 //   type EscapeError string
 /// `url.EscapeError` — wraps the malformed escape sequence text.
-/// Mirrors `net/url.EscapeError` (url.go:90).
+/// Mirrors `net/url.EscapeError` (url.go line 90).
 #[derive(Clone)]
 pub struct EscapeError(pub string);
 
@@ -87,7 +87,7 @@ impl EscapeError {
     }
 }
 
-// Go: url.go:92
+// Go: url.go line 92
 //   func (e EscapeError) Error() string {
 //     return "invalid URL escape " + strconv.Quote(string(e))
 //   }
@@ -99,10 +99,10 @@ impl ErrorTrait for EscapeError {
     }
 }
 
-// Go: url.go:96
+// Go: url.go line 96
 //   type InvalidHostError string
 /// `url.InvalidHostError` — wraps the offending character in a host.
-/// Mirrors `net/url.InvalidHostError` (url.go:96).
+/// Mirrors `net/url.InvalidHostError` (url.go line 96).
 #[derive(Clone)]
 pub struct InvalidHostError(pub string);
 
@@ -113,7 +113,7 @@ impl InvalidHostError {
     }
 }
 
-// Go: url.go:98
+// Go: url.go line 98
 //   func (e InvalidHostError) Error() string {
 //     return "invalid character " + strconv.Quote(string(e)) + " in host name"
 //   }
@@ -159,7 +159,9 @@ impl URL {
         }
     }
 
-    /// `(u *URL).EscapedFragment()` (url.go:807) — fragment in the
+    // go: sdk 1.25.5 net/url/url.go:807-815 URL.EscapedFragment
+    //
+    /// `(u *URL).EscapedFragment()` (url.go line 807) — fragment in the
     /// form needed for URL.String(). Slim port: returns RawFragment if
     /// non-empty, else Fragment.
     pub fn EscapedFragment(&self) -> string {
@@ -170,7 +172,9 @@ impl URL {
         }
     }
 
-    /// `(u *URL).EscapedPath()` (url.go:744) — return the escaped form
+    // go: sdk 1.25.5 net/url/url.go:744-755 URL.EscapedPath
+    //
+    /// `(u *URL).EscapedPath()` (url.go line 744) — return the escaped form
     /// of u.Path. Returns RawPath if it is a valid escaping of Path;
     /// otherwise computes a fresh escape via the encodePath mode.
     /// Special-cases `*` (Issue 11202) which is left unescaped.
@@ -192,7 +196,9 @@ impl URL {
         escape(self.Path.clone(), EncodingMode::Path)
     }
 
-    /// `(u *URL).ResolveReference(ref)` (url.go:1137) — resolve a URI
+    // go: sdk 1.25.5 net/url/url.go:1137-1174 URL.ResolveReference
+    //
+    /// `(u *URL).ResolveReference(ref)` (url.go line 1137) — resolve a URI
     /// reference to an absolute URI from absolute base URI `self`, per
     /// RFC 3986 §5.2. Always returns a new URL.
     ///
@@ -237,14 +243,18 @@ impl URL {
         url
     }
 
-    /// `(u *URL).IsAbs()` (url.go:1116) — reports whether the URL is
+    // go: sdk 1.25.5 net/url/url.go:1116-1118 URL.IsAbs
+    //
+    /// `(u *URL).IsAbs()` (url.go line 1116) — reports whether the URL is
     /// absolute. Absolute URLs always have a non-empty Scheme.
     pub fn IsAbs(&self) -> bool {
         // Go: return u.Scheme != ""
         self.Scheme.Len() != 0
     }
 
-    /// Line-by-line port of `(u *URL).Parse(ref)` (url.go:1123) — parse
+    // go: sdk 1.25.5 net/url/url.go:1123-1129 URL.Parse
+    //
+    /// Line-by-line port of `(u *URL).Parse(ref)` (url.go line 1123) — parse
     /// `ref` as a URL in the context of `self` (the receiver as base).
     /// The ref may be relative or absolute. Returns parse errors from
     /// the inner Parse; otherwise returns `self.ResolveReference(refURL)`.
@@ -260,7 +270,9 @@ impl URL {
         (self.ResolveReference(&ref_url), crate::errors::nil)
     }
 
-    /// `(u *URL).RequestURI()` (url.go:1186) — return the encoded
+    // go: sdk 1.25.5 net/url/url.go:1186-1202 URL.RequestURI
+    //
+    /// `(u *URL).RequestURI()` (url.go line 1186) — return the encoded
     /// path?query string used in an HTTP request line. Slim port:
     /// goish's URL has no Opaque or ForceQuery, so the choice is just
     /// RawPath (preferred when set) ?: Path, plus an optional
@@ -286,21 +298,27 @@ impl URL {
         result
     }
 
-    /// `(u *URL).Hostname()` (url.go:1208) — return u.Host with the
+    // go: sdk 1.25.5 net/url/url.go:1208-1211 URL.Hostname
+    //
+    /// `(u *URL).Hostname()` (url.go line 1208) — return u.Host with the
     /// optional `:port` suffix removed. IPv6 brackets are stripped.
     pub fn Hostname(&self) -> string {
         let (host, _) = split_host_port(self.Host.clone());
         host
     }
 
-    /// `(u *URL).Port()` (url.go:1216) — return the numeric port from
+    // go: sdk 1.25.5 net/url/url.go:1216-1219 URL.Port
+    //
+    /// `(u *URL).Port()` (url.go line 1216) — return the numeric port from
     /// u.Host (without the leading colon), or "" if absent or invalid.
     pub fn Port(&self) -> string {
         let (_, port) = split_host_port(self.Host.clone());
         port
     }
 
-    /// `(u *URL).Query()` (url.go:1179) — parse RawQuery and return
+    // go: sdk 1.25.5 net/url/url.go:1179-1182 URL.Query
+    //
+    /// `(u *URL).Query()` (url.go line 1179) — parse RawQuery and return
     /// the resulting map. Malformed pairs are silently dropped (use
     /// `ParseQuery` directly to surface errors).
     pub fn Query(&self) -> crate::gomap::map<string, crate::goslice::slice<string>> {
@@ -308,7 +326,7 @@ impl URL {
         v
     }
 
-    /// `(u *URL).JoinPath(elem ...string) *URL` (url.go:1262) — return
+    /// `(u *URL).JoinPath(elem ...string) *URL` (url.go line 1262) — return
     /// a copy of `u` with `elem` appended to its path. Slim port:
     /// uses goish's `path::Join` for the heavy lifting, preserves a
     /// trailing slash if the last element ended with one.
@@ -359,6 +377,8 @@ impl URL {
         out
     }
 
+    // go: sdk 1.25.5 net/url/url.go:855-922 URL.String
+    //
     /// Render as the request-target string. For URLs parsed from a
     /// request-target this is the inverse of `parse_request_uri`.
     pub fn String(&self) -> string {
@@ -417,7 +437,9 @@ impl URL {
         string::from_bytes(&out)
     }
 
-    /// `(u *URL).Redacted()` (url.go:926) — like `String()` but
+    // go: sdk 1.25.5 net/url/url.go:926-936 URL.Redacted
+    //
+    /// `(u *URL).Redacted()` (url.go line 926) — like `String()` but
     /// replaces any password in the userinfo with `xxxxx`.
     ///
     /// Slim deviation: the goish URL struct has no `User` field, so
@@ -427,7 +449,7 @@ impl URL {
         self.String()
     }
 
-    /// `(u *URL).MarshalBinary()` (url.go:1242) — serialize as bytes.
+    /// `(u *URL).MarshalBinary()` (url.go line 1242) — serialize as bytes.
     pub fn MarshalBinary(&self) -> (crate::goslice::slice<crate::types::byte>, error) {
         // return u.AppendBinary(nil)
         self.AppendBinary(crate::goslice::slice::__from_vec(
@@ -435,7 +457,7 @@ impl URL {
         ))
     }
 
-    /// `(u *URL).AppendBinary(b)` (url.go:1246) — append the
+    /// `(u *URL).AppendBinary(b)` (url.go line 1246) — append the
     /// String() form to b.
     pub fn AppendBinary(
         &self,
@@ -447,7 +469,7 @@ impl URL {
         (crate::goslice::slice::__from_vec(v), crate::errors::nil)
     }
 
-    /// `(u *URL).UnmarshalBinary(text)` (url.go:1250) — parse bytes
+    /// `(u *URL).UnmarshalBinary(text)` (url.go line 1250) — parse bytes
     /// into self in place. Returns any parse error.
     pub fn UnmarshalBinary(
         &mut self,
@@ -569,8 +591,10 @@ use crate::goslice::slice;
 use crate::strings;
 use crate::types::{byte, int};
 
+// go: sdk 1.25.5 net/url/url.go:989-993 ParseQuery
+//
 /// `url.ParseQuery(query)` — parse "k1=v1&k2=v2" into Values
-/// (`map<string, slice<string>>`). Mirrors url.go:879.
+/// (`map<string, slice<string>>`). Mirrors url.go line 879.
 ///
 /// Reports an error for malformed escape sequences but still returns
 /// whatever Values it could parse (matching Go).
@@ -626,7 +650,7 @@ fn parse_query(m: &mut map<string, slice<string>>, mut query: string) -> error {
     err
 }
 
-// ─── Userinfo (slim port of url.go:411) ──────────────────────────────
+// ─── Userinfo (slim port of url.go line 411) ──────────────────────────────
 
 /// `url.Userinfo` — immutable username + optional password.
 /// `passwordSet` distinguishes "no password" from "empty password".
@@ -637,7 +661,7 @@ pub struct Userinfo {
     password_set: bool,
 }
 
-/// `url.User(username)` (url.go:391) — Userinfo with no password set.
+/// `url.User(username)` (url.go line 391) — Userinfo with no password set.
 pub fn User<U: Into<string>>(username: U) -> Userinfo {
     let username: string = username.into();
     Userinfo {
@@ -647,7 +671,7 @@ pub fn User<U: Into<string>>(username: U) -> Userinfo {
     }
 }
 
-/// `url.UserPassword(user, pass)` (url.go:403) — Userinfo with both
+/// `url.UserPassword(user, pass)` (url.go line 403) — Userinfo with both
 /// username and password.
 pub fn UserPassword<U: Into<string>, P: Into<string>>(username: U, password: P) -> Userinfo {
     let username: string = username.into();
@@ -660,17 +684,17 @@ pub fn UserPassword<U: Into<string>, P: Into<string>>(username: U, password: P) 
 }
 
 impl Userinfo {
-    /// `(*Userinfo).Username()` (url.go:418).
+    /// `(*Userinfo).Username()` (url.go line 418).
     pub fn Username(&self) -> string {
         self.username.clone()
     }
 
-    /// `(*Userinfo).Password()` (url.go:426) — `(value, isSet)`.
+    /// `(*Userinfo).Password()` (url.go line 426) — `(value, isSet)`.
     pub fn Password(&self) -> (string, bool) {
         (self.password.clone(), self.password_set)
     }
 
-    /// `(*Userinfo).String()` (url.go:435) — "user[:pass]". Slim port:
+    /// `(*Userinfo).String()` (url.go line 435) — "user[:pass]". Slim port:
     /// uses PathEscape mode rather than encodeUserPassword.
     pub fn String(&self) -> string {
         if self.password_set {
@@ -685,21 +709,25 @@ impl Userinfo {
     }
 }
 
+// go: sdk 1.25.5 net/url/url.go:189-191 QueryUnescape
+//
 /// `url.QueryUnescape(s)` — invert query-string percent-encoding.
-/// Slim port of url.go:277 (strict mode).
+/// Slim port of url.go line 277 (strict mode).
 pub fn QueryUnescape<S: Into<string>>(s: S) -> (string, error) {
     let s: string = s.into();
     unescape(s, true)
 }
 
+// go: sdk 1.25.5 net/url/url.go:200-202 PathUnescape
+//
 /// `url.PathUnescape(s)` — like QueryUnescape but does not turn `+`
-/// into space. Mirrors url.go:303.
+/// into space. Mirrors url.go line 303.
 pub fn PathUnescape<S: Into<string>>(s: S) -> (string, error) {
     let s: string = s.into();
     unescape(s, false)
 }
 
-/// `url.resolvePath(base, ref)` (url.go:1050) — RFC 3986 §5.2.4 path
+/// `url.resolvePath(base, ref)` (url.go line 1050) — RFC 3986 §5.2.4 path
 /// merging: combine a base URI's path and a reference's path,
 /// resolving `.` and `..` segments. Returns the merged absolute-path.
 ///
@@ -800,7 +828,7 @@ pub fn ResolvePath<B: Into<string>, R: Into<string>>(base: B, reference: R) -> s
     string::from_bytes(&dst)
 }
 
-/// `url.JoinPath(base, elem...)` (url.go:1338) — Parse `base`, append
+/// `url.JoinPath(base, elem...)` (url.go line 1338) — Parse `base`, append
 /// `elem` to the path via `URL.JoinPath`, and return the rendered URL.
 /// Returns `(result, error)` per goish convention.
 pub fn JoinPath<B: Into<string>>(base: B, elem: slice<string>) -> (string, error) {
@@ -814,7 +842,9 @@ pub fn JoinPath<B: Into<string>>(base: B, elem: slice<string>) -> (string, error
     (u.JoinPath(elem).String(), errors::nil)
 }
 
-/// `url.Parse(rawURL)` (url.go:479) — parse a URL in either absolute
+// go: sdk 1.25.5 net/url/url.go:479-493 Parse
+//
+/// `url.Parse(rawURL)` (url.go line 479) — parse a URL in either absolute
 /// or relative form. Slim port: handles `scheme://host/path?query#frag`,
 /// `/path?query`, and `relative/path`, but doesn't model Opaque or
 /// Userinfo as separate fields. Fragment IS captured into u.Fragment.
@@ -835,7 +865,9 @@ pub fn Parse<R: Into<string>>(raw_url: R) -> (URL, error) {
     (url, errors::nil)
 }
 
-/// `url.ParseRequestURI(rawURL)` (url.go:500) — parse a URL received
+// go: sdk 1.25.5 net/url/url.go:500-506 ParseRequestURI
+//
+/// `url.ParseRequestURI(rawURL)` (url.go line 500) — parse a URL received
 /// in an HTTP request line: must be absolute-URI or absolute-path.
 /// No fragment is permitted (browsers strip them client-side).
 pub fn ParseRequestURI<R: Into<string>>(raw_url: R) -> (URL, error) {
@@ -843,7 +875,7 @@ pub fn ParseRequestURI<R: Into<string>>(raw_url: R) -> (URL, error) {
     parse(raw_url, true)
 }
 
-/// Line-by-line slim port of `parse` (url.go:512). Honors the
+/// Line-by-line slim port of `parse` (url.go line 512). Honors the
 /// origin-form / absolute-URI distinction via `via_request` but
 /// does not implement Opaque, host validation, IPv6 zones, or
 /// %-decoding of host bytes.
@@ -952,7 +984,7 @@ fn parse(raw_url: string, via_request: bool) -> (URL, error) {
     (u, errors::nil)
 }
 
-/// Line-by-line port of `getScheme` (url.go:209). Returns
+/// Line-by-line port of `getScheme` (url.go line 209). Returns
 /// `(scheme, rest)` where `scheme` is lowercase and may be empty.
 fn get_scheme(raw_url: string) -> Result<(string, string), error> {
     // Go: for i := 0; i < len(rawURL); i++ { ... }
@@ -987,14 +1019,18 @@ fn get_scheme(raw_url: string) -> Result<(string, string), error> {
     Ok((string::new(), raw_url))
 }
 
-/// `url.QueryEscape(s)` (url.go:281) — percent-encode `s` so it is
+// go: sdk 1.25.5 net/url/url.go:281-283 QueryEscape
+//
+/// `url.QueryEscape(s)` (url.go line 281) — percent-encode `s` so it is
 /// safe inside the query component of a URL. Spaces become `+`.
 pub fn QueryEscape<S: Into<string>>(s: S) -> string {
     let s: string = s.into();
     escape(s, EncodingMode::QueryComponent)
 }
 
-/// `(v Values).Encode()` (url.go:1028) — URL-encode `v` into the
+// go: sdk 1.25.5 net/url/url.go:1028-1046 Values.Encode
+//
+/// `(v Values).Encode()` (url.go line 1028) — URL-encode `v` into the
 /// `key=val&key=val` form, with keys sorted lexicographically. Each
 /// key and value is escaped via `QueryEscape`. Multi-value keys
 /// produce multiple `k=v` pairs in the order stored.
@@ -1038,7 +1074,9 @@ pub fn ValuesEncode(v: crate::gomap::map<string, crate::goslice::slice<string>>)
     buf.String()
 }
 
-/// `url.PathEscape(s)` (url.go:287) — percent-encode `s` so it is
+// go: sdk 1.25.5 net/url/url.go:287-289 PathEscape
+//
+/// `url.PathEscape(s)` (url.go line 287) — percent-encode `s` so it is
 /// safe inside a single URL path segment (i.e. `/`, `;`, `,`, `?` are
 /// all escaped). Spaces become `%20`.
 pub fn PathEscape<S: Into<string>>(s: S) -> string {
@@ -1046,7 +1084,7 @@ pub fn PathEscape<S: Into<string>>(s: S) -> string {
     escape(s, EncodingMode::PathSegment)
 }
 
-/// Line-by-line port of `(v Values).Has(key)` (url.go:974) — report
+/// Line-by-line port of `(v Values).Has(key)` (url.go line 974) — report
 /// whether `v` contains an entry for `key`. Goish models Values as
 /// the bare `map<string, slice<string>>`, so this is a free fn.
 pub fn ValuesHas<K: Into<string>>(v: &crate::gomap::map<string, crate::goslice::slice<string>>, key: K) -> bool {
@@ -1056,7 +1094,7 @@ pub fn ValuesHas<K: Into<string>>(v: &crate::gomap::map<string, crate::goslice::
     ok
 }
 
-/// Subset of url.go's `encoding` enum (url.go:78). The full Go enum
+/// Subset of url.go's `encoding` enum (url.go line 78). The full Go enum
 /// also distinguishes encodePath / encodeHost / encodeZone /
 /// encodeUserPassword / encodeFragment; we only ship the two modes
 /// that QueryEscape + PathEscape need.
@@ -1067,7 +1105,7 @@ enum EncodingMode {
     QueryComponent,
 }
 
-/// Line-by-line port of `escape` (url.go:291).
+/// Line-by-line port of `escape` (url.go line 291).
 fn escape(s: string, mode: EncodingMode) -> string {
     // Go: spaceCount, hexCount := 0, 0
     let mut space_count: int = 0;
@@ -1129,7 +1167,7 @@ fn escape(s: string, mode: EncodingMode) -> string {
     string::from_bytes(&t)
 }
 
-/// Line-by-line port of `shouldEscape` (url.go:107). Slim mode set
+/// Line-by-line port of `shouldEscape` (url.go line 107). Slim mode set
 /// matches `EncodingMode`.
 fn should_escape(c: byte, mode: EncodingMode) -> bool {
     // Go: §2.3 Unreserved characters (alphanum)
@@ -1144,7 +1182,7 @@ fn should_escape(c: byte, mode: EncodingMode) -> bool {
     // Go: §2.2 Reserved characters
     match c {
         b'$' | b'&' | b'+' | b',' | b'/' | b':' | b';' | b'=' | b'?' | b'@' => match mode {
-            // Go: encodePath — only '?' must be escaped (url.go:137).
+            // Go: encodePath — only '?' must be escaped (url.go line 137).
             EncodingMode::Path => {
                 return c == b'?';
             }
@@ -1161,7 +1199,7 @@ fn should_escape(c: byte, mode: EncodingMode) -> bool {
     true
 }
 
-/// Line-by-line port of `validEncoded` (url.go:760).
+/// Line-by-line port of `validEncoded` (url.go line 760).
 ///
 /// Reports whether `s` is a valid encoded path, according to `mode`.
 /// Sub-delims, `[`, `]`, `%` are accepted directly; everything else is
@@ -1239,7 +1277,7 @@ fn is_hex(c: byte) -> bool {
     (c >= b'0' && c <= b'9') || (c >= b'a' && c <= b'f') || (c >= b'A' && c <= b'F')
 }
 
-/// Line-by-line port of `splitHostPort` (url.go:1224).
+/// Line-by-line port of `splitHostPort` (url.go line 1224).
 fn split_host_port(host_port: string) -> (string, string) {
     // Go: host = hostPort
     let mut host: string = host_port;
@@ -1271,7 +1309,7 @@ fn split_host_port(host_port: string) -> (string, string) {
     (host, port)
 }
 
-/// Line-by-line port of `validOptionalPort` (url.go:819). Reports
+/// Line-by-line port of `validOptionalPort` (url.go line 819). Reports
 /// whether `port` is "" or matches `:\d*`.
 fn valid_optional_port(port: string) -> bool {
     // Go: if port == "" { return true }
