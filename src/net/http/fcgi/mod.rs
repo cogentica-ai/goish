@@ -14,8 +14,10 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 
+pub mod child;
 pub mod fcgi;
 
+pub use child::{addFastCGIEnvToContext, filterOutUsedEnvVars, newRequest, request};
 pub use fcgi::{
     bufWriter, conn, newConn, newWriter, record, streamWriter, writePairs, ReadWriteCloser,
     encodeSize, readSize, readString, recType, typeAbortRequest, typeBeginRequest, typeData,
