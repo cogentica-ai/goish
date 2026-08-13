@@ -538,18 +538,28 @@ pub(crate) fn build_head(status: int, header: &Header) -> Vec<u8> {
     let st = status_text(status as u32);
     buf.extend_from_slice(st.as_bytes());
     buf.extend_from_slice(b"\r\n");
-    let inner = header.__inner();
-    for (key, values) in inner.__iter() {
-        let n = values.Len();
-        for i in 0..n {
-            buf.extend_from_slice(key.as_bytes());
-            buf.extend_from_slice(b": ");
-            buf.extend_from_slice(values[i].as_bytes());
-            buf.extend_from_slice(b"\r\n");
-        }
+    // Go's chunkWriter.writeHeader ends with
+    // `cw.header.WriteSubset(w, excludeHeader)` — the SAME writer the
+    // public Header.Write uses.
+    //
+    // This used to be a third hand-rolled `key: value\r\n` loop, and
+    // it is the one that reaches a real socket. It had neither the
+    // ValidHeaderFieldName guard nor the newline folding that
+    // writeSubset applies, so a handler setting a header value
+    // containing CRLF — a redirect target or filename echoed from user
+    // input, say — wrote a real extra header onto the wire. The
+    // response path was hardened in writeSubset earlier; THIS copy
+    // bypassed it.
+    //
+    // Routing through writeSubset also sorts the keys, which Go does
+    // here too.
+    {
+        let mut hb = crate::bytes::Buffer::new();
+        let _ = header.WriteSubset(&mut hb, &crate::gomap::map::<string, bool>::new());
+        buf.extend_from_slice(hb.Bytes().as_ref());
     }
     buf.extend_from_slice(b"\r\n");
-    buf
+    return buf;
 }
 
 /// Emit one chunk on the wire: `<hex>\r\n<data>\r\n`. Returns
