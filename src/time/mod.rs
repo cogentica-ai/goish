@@ -2320,21 +2320,19 @@ fn parse_rfc1123(s: crate::gostring::string) -> (Time, crate::error) {
 }
 
 fn parse_ansic(s: crate::gostring::string) -> (Time, crate::error) {
-    
     let bs = s.as_bytes();
-    // "Mon Jan _2 15:04:05 2006" → 24 chars
-    if bs.len() != 24
-        || bs[3] != b' '
-        || bs[7] != b' '
-        || bs[10] != b' '
-        || bs[13] != b':'
-        || bs[16] != b':'
-        || bs[19] != b' '
-    {
-        return (
+    let bad = || {
+        (
             Time::default(),
             crate::errors::New("time: malformed ANSIC"),
-        );
+        )
+    };
+    // "Mon Jan _2 15:04:05 2006". The `_2` day is space-padded, and Go
+    // accepts all three renderings of it: " 6", "6" and "06". The
+    // unpadded single digit makes the string 23 bytes instead of 24,
+    // which is why the length is not a constant.
+    if bs.len() < 23 || bs.len() > 24 || bs[3] != b' ' || bs[7] != b' ' {
+        return bad();
     }
     let mon = match month_short(&bs[4..7]) {
         Some(v) => v,
@@ -2345,18 +2343,24 @@ fn parse_ansic(s: crate::gostring::string) -> (Time, crate::error) {
             );
         }
     };
-    // _2 form: space-padded day in cols 8..10
-    let day_bytes = &bs[8..10];
+    // Day occupies cols 8..day_end; the separator space follows it.
+    let day_end = if bs.len() == 24 { 10 } else { 9 };
+    let day_bytes = &bs[8..day_end];
     let d = if day_bytes[0] == b' ' {
-        match parse_int(&day_bytes[1..2]) { Ok(v) => v, Err(e) => return (Time::default(), e) }
+        match parse_int(&day_bytes[1..]) { Ok(v) => v, Err(e) => return (Time::default(), e) }
     } else {
         match parse_int(day_bytes) { Ok(v) => v, Err(e) => return (Time::default(), e) }
     };
-    let hh = match parse_int(&bs[11..13]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let mm = match parse_int(&bs[14..16]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let ss = match parse_int(&bs[17..19]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let y = match parse_int(&bs[20..24]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    (Date(y, mon, d, hh, mm, ss, 0, UTC), crate::errors::nil)
+    // Everything after the day sits at a fixed offset from day_end.
+    let t = day_end + 1;
+    if bs[day_end] != b' ' || bs[t + 2] != b':' || bs[t + 5] != b':' || bs[t + 8] != b' ' {
+        return bad();
+    }
+    let hh = match parse_int(&bs[t..t + 2]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let mm = match parse_int(&bs[t + 3..t + 5]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let ss = match parse_int(&bs[t + 6..t + 8]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let y = match parse_int(&bs[t + 9..t + 13]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    return (Date(y, mon, d, hh, mm, ss, 0, UTC), crate::errors::nil);
 }
 
 fn parse_int(bs: &[u8]) -> Result<int, crate::error> {

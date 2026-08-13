@@ -233,35 +233,39 @@ pub fn timeFormats() -> slice<string> {
 
 // go: sdk 1.25.5 net/http/header.go:126-137 ParseTime
 //
-/// `http.ParseTime(text)` — parse an HTTP-date, trying the formats
-/// allowed by HTTP/1.1: [`TimeFormat`] (IMF-fixdate),
+/// `http.ParseTime(text)` — parse an HTTP-date, trying each of the
+/// three formats HTTP/1.1 allows: [`TimeFormat`] (IMF-fixdate),
 /// `time::RFC850` and `time::ANSIC` (asctime).
 ///
-/// Two divergences from Go 1.25.5, both verified with
-/// scripts/goref.sh and both pinned in examples/http_time_smoke.rs:
+/// goish's `time::Parse` whitelists layouts and rejects both
+/// day-name-comma forms ("time: unsupported layout"), so IMF-fixdate
+/// and RFC 850 are scanned by hand below and only asctime goes
+/// through `time::Parse`. The scanners are strict in the same places
+/// Go is — every rule below was read off Go 1.25.5 with
+/// scripts/goref.sh, not from the layout strings:
 ///
-///  * **RFC 850 is not accepted.** Go parses
-///    `Sunday, 06-Nov-94 08:49:37 GMT` — a FULL weekday name and a
-///    TWO-digit year. goish's `time::Parse` whitelists layouts and
-///    rejects both day-name-comma forms ("time: unsupported layout"),
-///    so the two are handled by the hand-rolled `parse_http_date`
-///    scanner below, which reads a three-letter day and a four-digit
-///    year. Closing this means teaching `parse_http_date` the RFC 850
-///    shape, not swapping in `time::Parse`.
-///  * **goish accepts one form Go rejects**:
-///    `Mon, 02-Jan-2006 15:04:05 MST`, RFC 850 with a four-digit
-///    year. Pre-existing, kept so conditional requests that relied on
-///    it keep working.
-///
-/// asctime is new here: it is the third format Go allows, `time::Parse`
-/// handles it, and goish previously rejected it — so an `If-Modified-Since`
-/// in asctime form was silently treated as unparseable.
+///  * The weekday must be well-formed but need NOT agree with the
+///    date: `Mon, 06 Nov 1994` parses even though that day was a
+///    Sunday. IMF-fixdate wants the three-letter abbreviation and
+///    rejects the full name; RFC 850 wants the full name and rejects
+///    the abbreviation.
+///  * Weekday and month names are ASCII case-insensitive
+///    (`sunday`, `SUN`, `nov` all parse) but the zone is NOT: `gmt`
+///    is rejected.
+///  * IMF-fixdate requires the literal zone `GMT`. `UTC`, `XYZ`,
+///    `+0000` and a missing zone are all errors.
+///  * RFC 850 accepts ANY three-letter uppercase zone abbreviation
+///    and treats it as UTC — `EST` and `XYZ` both yield the same
+///    instant as `GMT` — but a missing or two-letter zone is an error.
+///  * RFC 850 years are two digits and pivot at 69: `69` is 1969,
+///    `68` is 2068.
 pub fn ParseTime<T: Into<string>>(text: T) -> (crate::time::Time, crate::error) {
     let text: string = text.into();
-    if let Some(t) = parse_http_date(text.as_bytes(), b' ') {
+    let b = text.as_bytes();
+    if let Some(t) = parse_imf_fixdate(b) {
         return (t, crate::errors::nil);
     }
-    if let Some(t) = parse_http_date(text.as_bytes(), b'-') {
+    if let Some(t) = parse_rfc850(b) {
         return (t, crate::errors::nil);
     }
     let (t, err) = crate::time::Parse(string(crate::time::ANSIC), text);
@@ -279,51 +283,87 @@ const HTTP_MONTH_NAMES: [&[byte; 3]; 12] = [
     b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
 ];
 
-fn parse_http_date(b: &[byte], sep: byte) -> Option<crate::time::Time> {
-    if b.len() < 25 {
-        return None;
+/// Three-letter weekday abbreviations, in Go's `time` order.
+const HTTP_DAY_ABBRS: [&[byte; 3]; 7] =
+    [b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat"];
+
+/// Full weekday names, same order.
+const HTTP_DAY_FULL: [&str; 7] = [
+    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+];
+
+// go: none — goish-only scanner helper. Go reaches these
+// formats through time.Parse, whose layout engine goish does not
+// have for the day-name-comma forms; see ParseTime above.
+/// ASCII case-insensitive byte-slice compare — the weekday and month
+/// name matching Go does, without pulling in a Unicode fold.
+fn http_eq_fold(a: &[byte], b: &[byte]) -> bool {
+    if a.len() != b.len() {
+        return false;
     }
     let mut i = 0;
-    while i < b.len() && b[i] != b',' {
+    while i < a.len() {
+        if (a[i] | 0x20) != (b[i] | 0x20) {
+            return false;
+        }
         i += 1;
     }
-    if i == b.len() {
-        return None;
+    return true;
+}
+
+// go: none — goish-only scanner helper. Go reaches these
+// formats through time.Parse, whose layout engine goish does not
+// have for the day-name-comma forms; see ParseTime above.
+fn http_is_day_abbr(b: &[byte]) -> bool {
+    for d in HTTP_DAY_ABBRS.iter() {
+        if http_eq_fold(b, *d) {
+            return true;
+        }
     }
-    let after = &b[i + 1..];
-    let after = if !after.is_empty() && after[0] == b' ' {
-        &after[1..]
-    } else {
-        after
-    };
-    if after.len() < 20 {
-        return None;
+    return false;
+}
+
+// go: none — goish-only scanner helper. Go reaches these
+// formats through time.Parse, whose layout engine goish does not
+// have for the day-name-comma forms; see ParseTime above.
+fn http_is_day_full(b: &[byte]) -> bool {
+    for d in HTTP_DAY_FULL.iter() {
+        if http_eq_fold(b, d.as_bytes()) {
+            return true;
+        }
     }
-    let day = http_read_2(&after[0..2])?;
-    if after[2] != sep {
-        return None;
+    return false;
+}
+
+// go: none — goish-only scanner helper. Go reaches these
+// formats through time.Parse, whose layout engine goish does not
+// have for the day-name-comma forms; see ParseTime above.
+/// A three-letter uppercase zone abbreviation. RFC 850's `MST` slot
+/// accepts any such run and, for a name Go does not know, gives it a
+/// zero offset — so `EST` and `XYZ` both land on the same instant as
+/// `GMT`. Lowercase is rejected.
+fn http_is_zone_abbr(b: &[byte]) -> bool {
+    if b.len() != 3 {
+        return false;
     }
-    let month_idx = http_month_index(&after[3..6])?;
-    if after[6] != sep {
-        return None;
+    let mut i = 0;
+    while i < 3 {
+        if b[i] < b'A' || b[i] > b'Z' {
+            return false;
+        }
+        i += 1;
     }
-    let year = http_read_4(&after[7..11])?;
-    if after[11] != b' ' {
-        return None;
-    }
-    let hh = http_read_2(&after[12..14])?;
-    if after[14] != b':' {
-        return None;
-    }
-    let mm = http_read_2(&after[15..17])?;
-    if after[17] != b':' {
-        return None;
-    }
-    let ss = http_read_2(&after[18..20])?;
+    return true;
+}
+
+// go: none — goish-only scanner helper. Go reaches these
+// formats through time.Parse, whose layout engine goish does not
+// have for the day-name-comma forms; see ParseTime above.
+fn http_mk_time(year: u32, month_idx: u32, day: u32, hh: u32, mm: u32, ss: u32) -> Option<crate::time::Time> {
     if day == 0 || day > 31 || hh > 23 || mm > 59 || ss > 59 {
         return None;
     }
-    Some(crate::time::Date(
+    return Some(crate::time::Date(
         year as int,
         month_idx as int + 1,
         day as int,
@@ -332,7 +372,92 @@ fn parse_http_date(b: &[byte], sep: byte) -> Option<crate::time::Time> {
         ss as int,
         0,
         crate::time::UTC,
-    ))
+    ));
+}
+
+// go: none — goish-only scanner helper. Go reaches these
+// formats through time.Parse, whose layout engine goish does not
+// have for the day-name-comma forms; see ParseTime above.
+/// IMF-fixdate — `Sun, 06 Nov 1994 08:49:37 GMT`, exactly 29 bytes.
+fn parse_imf_fixdate(b: &[byte]) -> Option<crate::time::Time> {
+    if b.len() != 29 {
+        return None;
+    }
+    if !http_is_day_abbr(&b[0..3]) || b[3] != b',' || b[4] != b' ' {
+        return None;
+    }
+    let day = http_read_2(&b[5..7])?;
+    if b[7] != b' ' {
+        return None;
+    }
+    let month_idx = http_month_index(&b[8..11])?;
+    if b[11] != b' ' {
+        return None;
+    }
+    let year = http_read_4(&b[12..16])?;
+    if b[16] != b' ' {
+        return None;
+    }
+    let hh = http_read_2(&b[17..19])?;
+    if b[19] != b':' {
+        return None;
+    }
+    let mm = http_read_2(&b[20..22])?;
+    if b[22] != b':' {
+        return None;
+    }
+    let ss = http_read_2(&b[23..25])?;
+    if b[25] != b' ' || &b[26..29] != b"GMT" {
+        return None;
+    }
+    return http_mk_time(year, month_idx, day, hh, mm, ss);
+}
+
+// go: none — goish-only scanner helper. Go reaches these
+// formats through time.Parse, whose layout engine goish does not
+// have for the day-name-comma forms; see ParseTime above.
+/// RFC 850 — `Sunday, 06-Nov-94 08:49:37 GMT`. The weekday is a full
+/// name of variable length, so the tail is measured from the comma.
+fn parse_rfc850(b: &[byte]) -> Option<crate::time::Time> {
+    let mut comma = 0;
+    while comma < b.len() && b[comma] != b',' {
+        comma += 1;
+    }
+    if comma == b.len() || !http_is_day_full(&b[0..comma]) {
+        return None;
+    }
+    let r = &b[comma + 1..];
+    // " 06-Nov-94 08:49:37 GMT"
+    if r.len() != 23 || r[0] != b' ' {
+        return None;
+    }
+    let day = http_read_2(&r[1..3])?;
+    if r[3] != b'-' {
+        return None;
+    }
+    let month_idx = http_month_index(&r[4..7])?;
+    if r[7] != b'-' {
+        return None;
+    }
+    let yy = http_read_2(&r[8..10])?;
+    if r[10] != b' ' {
+        return None;
+    }
+    let hh = http_read_2(&r[11..13])?;
+    if r[13] != b':' {
+        return None;
+    }
+    let mm = http_read_2(&r[14..16])?;
+    if r[16] != b':' {
+        return None;
+    }
+    let ss = http_read_2(&r[17..19])?;
+    if r[19] != b' ' || !http_is_zone_abbr(&r[20..23]) {
+        return None;
+    }
+    // Go's two-digit-year pivot: >= 69 is 19xx, below is 20xx.
+    let year = if yy >= 69 { 1900 + yy } else { 2000 + yy };
+    return http_mk_time(year, month_idx, day, hh, mm, ss);
 }
 
 fn http_read_2(b: &[byte]) -> Option<u32> {
