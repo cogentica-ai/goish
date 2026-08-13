@@ -32,7 +32,10 @@ use super::server::{Handler, NotFound};
 use crate::delete;
 use crate::io::fs;
 use super::header::{ParseTime, TimeFormat};
-use super::status::{StatusMovedPermanently, StatusNotModified, StatusPreconditionFailed};
+use super::status::{
+    StatusForbidden, StatusInternalServerError, StatusMovedPermanently, StatusNotFound,
+    StatusNotModified, StatusPreconditionFailed,
+};
 use crate::go;
 use crate::len;
 use crate::nil;
@@ -548,6 +551,59 @@ pub fn isZeroTime(t: time::Time) -> bool {
 // go: sdk 1.25.5 net/http/fs.go:873-873 isSlashRune
 pub fn isSlashRune(r: rune) -> bool {
     return r == 47 /*'/'*/ || r == 92 /*'\\'*/;
+}
+
+// go: sdk 1.25.5 net/http/fs.go:73-73 errInvalidUnsafePath
+crate::var! {
+    pub errInvalidUnsafePath: error = "http: invalid or unsafe file path";
+}
+
+// go: sdk 1.25.5 net/http/fs.go:264-264 errSeeker
+crate::var! {
+    pub errSeeker: error = "seeker can't seek";
+}
+
+// go: sdk 1.25.5 net/http/fs.go:861-871 containsDotDot
+//
+// Go iterates strings.FieldsFuncSeq, a lazy sequence; goish's
+// strings::FieldsFunc materialises the same fields into a slice. The
+// early `strings.Contains(v, "..")` guard keeps the allocation off the
+// common path exactly as it does in Go.
+pub fn containsDotDot(v: string) -> bool {
+    if !strings::Contains(v.clone(), string("..")) {
+        return false;
+    }
+    let ents = strings::FieldsFunc(v, isSlashRune);
+    let n = len(&ents);
+    let mut i: int = 0;
+    while i < n {
+        if ents[i] == ".." {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// go: sdk 1.25.5 net/http/fs.go:766-781 toHTTPError
+//
+// Go's comment: the error is not returned to the client, only the
+// mapped message, so a filesystem layout cannot be probed through it.
+pub fn toHTTPError(err: error) -> (string, int) {
+    if errors::Is(err.clone(), fs::ErrNotExist) {
+        return (string("404 page not found"), StatusNotFound);
+    }
+    if errors::Is(err.clone(), fs::ErrPermission) {
+        return (string("403 Forbidden"), StatusForbidden);
+    }
+    if errors::Is(err.clone(), errInvalidUnsafePath) {
+        return (string("404 page not found"), StatusNotFound);
+    }
+    // Default:
+    return (
+        string("500 Internal Server Error"),
+        StatusInternalServerError,
+    );
 }
 
 // go: sdk 1.25.5 net/http/fs.go:614-614 unixEpochTime

@@ -487,6 +487,10 @@ name = "http_iofs_smoke"
 path = "examples/http_iofs_smoke.rs"
 
 [[example]]
+name = "http_fs_path_smoke"
+path = "examples/http_fs_path_smoke.rs"
+
+[[example]]
 name = "http_constants_smoke"
 path = "examples/http_constants_smoke.rs"
 
