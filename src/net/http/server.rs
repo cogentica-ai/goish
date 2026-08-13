@@ -1132,6 +1132,136 @@ impl Default for __ServerState {
     }
 }
 
+// go: sdk 1.25.5 net/http/server.go:2629-2648 cleanPath
+//
+/// Return the canonical path for `p`, eliminating `.` and `..`
+/// elements.
+///
+/// `path.Clean` strips a trailing slash except at root; cleanPath puts
+/// it back, because for a mux "/dir" and "/dir/" are different
+/// patterns and collapsing them would silently reroute a request.
+pub fn cleanPath<P: Into<string>>(p: P) -> string {
+    let mut p: string = p.into();
+    if p == "" {
+        return string("/");
+    }
+    if p[0] != b'/' {
+        p = string("/") + p;
+    }
+    let mut np = crate::path::Clean(p.clone());
+    // Go: path.Clean removes trailing slash except for root; put the
+    // trailing slash back if necessary.
+    if p[p.Len() - 1] == b'/' && np != "/" {
+        // Go: fast path for the common case of p being what we want.
+        if p.Len() == np.Len() + 1 && strings::HasPrefix(p.clone(), np.clone()) {
+            np = p;
+        } else {
+            np = np + "/";
+        }
+    }
+    return np;
+}
+
+// go: sdk 1.25.5 net/http/server.go:2651-2661 stripHostPort
+//
+/// Return `h` without any trailing ":<port>".
+pub fn stripHostPort<H: Into<string>>(h: H) -> string {
+    let h: string = h.into();
+    // Go: if no port on host, return unchanged.
+    if !strings::Contains(h.clone(), string(":")) {
+        return h;
+    }
+    let (host, _port, err) = crate::net::SplitHostPort(h.clone());
+    if !err.IsNil() {
+        return h; // Go: on error, return unchanged
+    }
+    return host;
+}
+
+// go: sdk 1.25.5 net/http/server.go:1576-1590 foreachHeaderElement
+//
+/// Split a comma-separated header value and call `fn_` with each
+/// non-empty, trimmed element. A value with no comma is passed whole
+/// without splitting.
+pub fn foreachHeaderElement<V: Into<string>, F: FnMut(string)>(v: V, mut fn_: F) {
+    let v = crate::net::textproto::TrimString(v.into());
+    if v == "" {
+        return;
+    }
+    if !strings::Contains(v.clone(), string(",")) {
+        fn_(v);
+        return;
+    }
+    let parts = strings::Split(v, string(","));
+    let n = crate::len(&parts);
+    let mut i: int = 0;
+    while i < n {
+        let f = crate::net::textproto::TrimString(parts[i].clone());
+        i += 1;
+        if f != "" {
+            fn_(f);
+        }
+    }
+}
+
+// go: sdk 1.25.5 net/http/server.go:1852-1858 validNextProto
+//
+/// Reports whether `proto` names an ALPN protocol that needs a
+/// NextProtos handler. The HTTP/1 names and the empty string are
+/// handled by the ordinary server loop, so they are NOT "next" protos.
+pub fn validNextProto<P: Into<string>>(proto: P) -> bool {
+    let proto: string = proto.into();
+    if proto == "" || proto == "http/1.1" || proto == "http/1.0" {
+        return false;
+    }
+    return true;
+}
+
+// go: sdk 1.25.5 net/http/server.go:4074-4083 numLeadingCRorLF
+pub fn numLeadingCRorLF(v: crate::goslice::slice<crate::types::byte>) -> int {
+    let mut n: int = 0;
+    let ln = crate::len(&v);
+    let mut i: int = 0;
+    while i < ln {
+        let b = v[i];
+        i += 1;
+        if b == b'\r' || b == b'\n' {
+            n += 1;
+            continue;
+        }
+        break;
+    }
+    return n;
+}
+
+// go: sdk 1.25.5 net/http/server.go:4087-4093 tlsRecordHeaderLooksLikeHTTP
+//
+/// Reports whether the first five bytes of what should be a TLS record
+/// header look like plaintext HTTP instead — the check behind the
+/// "client sent an HTTP request to an HTTPS server" diagnostic.
+pub fn tlsRecordHeaderLooksLikeHTTP(hdr: [crate::types::byte; 5]) -> bool {
+    let s = string::from_bytes(&hdr);
+    if s == "GET /" || s == "HEAD " || s == "POST " || s == "PUT /" || s == "OPTIO" {
+        return true;
+    }
+    return false;
+}
+
+// go: sdk 1.25.5 net/http/server.go:1150-1164 checkWriteHeaderCode
+//
+/// Panic on a status code that is not three digits.
+///
+/// Go's reasoning, kept because it explains the panic: "We used to send
+/// 'HTTP/1.1 000 0' on the wire in responses but there's no equivalent
+/// bogus thing we can realistically send in HTTP/2, so we'll
+/// consistently panic instead and help people find their bugs early.
+/// (We can't return an error from WriteHeader even if we wanted to.)"
+pub fn checkWriteHeaderCode(code: int) {
+    if code < 100 || code > 999 {
+        panic!("invalid WriteHeader code {}", code);
+    }
+}
+
 // go: sdk 1.25.5 net/http/server.go:928-931 DefaultMaxHeaderBytes
 //
 // DefaultMaxHeaderBytes is the maximum permitted size of the headers

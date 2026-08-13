@@ -519,6 +519,10 @@ name = "http_request_parse_smoke"
 path = "examples/http_request_parse_smoke.rs"
 
 [[example]]
+name = "http_server_pure_smoke"
+path = "examples/http_server_pure_smoke.rs"
+
+[[example]]
 name = "http_constants_smoke"
 path = "examples/http_constants_smoke.rs"
 
