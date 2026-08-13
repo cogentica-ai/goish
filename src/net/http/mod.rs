@@ -48,7 +48,7 @@ pub mod url;
 
 pub use client::{
     Client, DialContextFn, Get, Head, NewRequest, NewRequestWithContext, Post, PostForm,
-    Body, ProxyFromEnvironment, ProxyResolver, RoundTripper, Transport,
+    Body, ErrUseLastResponse, ProxyFromEnvironment, ProxyResolver, RoundTripper, Transport,
 };
 pub use cookie::{
     Cookie, ParseCookie, ParseSetCookie, SameSite, SameSiteDefaultMode, SameSiteLaxMode,

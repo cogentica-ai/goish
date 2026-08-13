@@ -972,6 +972,18 @@ pub struct Client {
     ///
     /// `None` ≡ Go's nil Jar: cookies are neither sent nor stored.
     pub Jar: Option<Arc<dyn super::CookieJar>>,
+    /// `Client.CheckRedirect` (client.go) — consulted before every
+    /// redirect. `via` holds the requests already made, oldest first.
+    ///
+    /// Returning an error stops the redirect chain and makes `Do`
+    /// return that error. Returning `ErrUseLastResponse` is the
+    /// special case: `Do` returns the most recent response with its
+    /// body UNCLOSED and no error, which is how a caller inspects a
+    /// 3xx instead of following it.
+    ///
+    /// `None` ≡ Go's nil, which uses `defaultCheckRedirect`: stop
+    /// after 10 redirects.
+    pub CheckRedirect: Option<Arc<dyn Fn(&Request, &[Request]) -> error + Send + Sync>>,
     /// Whole-request deadline. Zero ≡ no timeout.
     pub Timeout: time::Duration,
 }
@@ -981,12 +993,31 @@ impl Default for Client {
         Client {
             Transport: Arc::new(Transport::default()) as Arc<dyn RoundTripper>,
             Jar: None,
+            CheckRedirect: None,
             Timeout: time::Duration(0),
         }
     }
 }
 
 const MAX_REDIRECTS: usize = 10;
+
+// go: sdk 1.25.5 net/http/client.go:489-493 ErrUseLastResponse
+//
+// Go: "ErrUseLastResponse can be returned by Client.CheckRedirect
+// hooks to control how redirects are processed. If returned, the next
+// request is not sent and the most recent response is returned with
+// its body unclosed."
+crate::var! {
+    pub ErrUseLastResponse: error = "net/http: use last response";
+}
+
+// go: sdk 1.25.5 net/http/client.go:820-825 defaultCheckRedirect
+fn defaultCheckRedirect(_req: &Request, via: &[Request]) -> error {
+    if via.len() >= MAX_REDIRECTS {
+        return errors::New(string("stopped after 10 redirects"));
+    }
+    return errors::nil;
+}
 
 /// Calls the held `context.CancelFunc` when dropped — the goish
 /// rendering of Go's `defer cancel()`. Releases the WithTimeout
@@ -1027,6 +1058,8 @@ impl Client {
         // redirect loop causes exactly MAX_REDIRECTS requests, not
         // MAX_REDIRECTS + 1. `0..=MAX_REDIRECTS` issued eleven,
         // measured against Go's ten with a self-redirecting server.
+        // Requests already made, oldest first — Go's `via`.
+        let mut via: Vec<Request> = Vec::new();
         // The caller's own Cookie header, before any jar additions.
         let originalCookies = current.Header.Values(string("Cookie"));
         for _step in 0..MAX_REDIRECTS {
@@ -1137,6 +1170,33 @@ impl Client {
                     if resp.StatusCode == 307 || resp.StatusCode == 308 {
                         next.Body = current.Body.clone();
                         next.ContentLength = current.ContentLength;
+                    }
+                    // Go (client.go): if err := c.checkRedirect(req,
+                    //     reqs); err != nil { … }, called BEFORE the
+                    // next request is sent. ErrUseLastResponse returns
+                    // the current response with its body unclosed.
+                    {
+                        // Go accumulates `reqs` with the request it
+                        // just SENT, then calls checkRedirect(newReq,
+                        // reqs) — so `via` holds one entry on the
+                        // first redirect, not zero. Pushing after the
+                        // call would shift every length by one and
+                        // let defaultCheckRedirect run an extra hop.
+                        via.push(current.clone());
+                        let e = match self.CheckRedirect.as_ref() {
+                            Some(fn_) => fn_(&next, &via[..]),
+                            None => defaultCheckRedirect(&next, &via[..]),
+                        };
+                        if !e.IsNil() {
+                            let sentinel: error = ErrUseLastResponse.into();
+                            if errors::Is(e.clone(), sentinel) {
+                                if let Some(c) = _cancel_guard.0.take() {
+                                    resp.Body.__set_cancel(c);
+                                }
+                                return (resp, errors::nil);
+                            }
+                            return (resp, e);
+                        }
                     }
                     current = next;
                     continue;
