@@ -59,4 +59,28 @@ jobs:
         run: |
           set -o pipefail
           python3 scripts/port_coverage.py crypto --by-decl | tee /tmp/cov.txt
-          grep -q '1709/1709 funcs = 100.0%' /tmp/cov.txt
+          # Assert the PROPERTY (every declaration ported), not a frozen
+          # count. The literal `1709/1709` broke the moment port_coverage
+          # learned to parse a generic receiver — `func (h *mapping[K, V])
+          # add` had matched nothing, so 13 crypto declarations were
+          # missing from the denominator entirely. Coverage stayed 100.0%
+          # and the gate failed anyway, which is the gate reporting on
+          # its own arithmetic rather than on the tree.
+          #
+          # The floor still catches a real regression: a decl that stops
+          # being counted, or a Go file that stops being scanned, drops
+          # the total below it.
+          python3 - <<'EOF'
+          import re, sys
+          line = [l for l in open('/tmp/cov.txt') if l.startswith('TOTAL ')][-1]
+          m = re.search(r'TOTAL (\d+)/(\d+) funcs = ([\d.]+)%', line)
+          if not m:
+              sys.exit(f'provenance: cannot parse coverage TOTAL line: {line!r}')
+          have, want, pct = int(m.group(1)), int(m.group(2)), float(m.group(3))
+          if have != want or pct != 100.0:
+              sys.exit(f'provenance: crypto/ is {have}/{want} = {pct}%, not 100%')
+          if want < 1709:
+              sys.exit(f'provenance: crypto/ denominator fell to {want} (floor 1709) '
+                       '- declarations stopped being counted')
+          print(f'provenance: crypto/ {have}/{want} = {pct}% (floor 1709)')
+          EOF
