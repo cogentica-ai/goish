@@ -28,7 +28,7 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::net::http::request::{parseBasicAuth, validMethod, ParseHTTPVersion};
+use goish::net::http::request::{idnaASCII, parseBasicAuth, parseRequestLine, validMethod, ParseHTTPVersion};
 use goish::{fmt, string, syscall};
 
 #[goish::main]
@@ -117,11 +117,66 @@ fn main() {
         }
     }
 
+    // 4. parseRequestLine — two cuts, each on the FIRST space.
+    //    The consequences are worth pinning: a URI containing a space
+    //    does NOT fail here, it makes the remainder the proto
+    //    ("GET /a b HTTP/1.1" -> proto "b HTTP/1.1"), and trailing junk
+    //    rides along the same way. Both are rejected later by
+    //    ParseHTTPVersion, which is why that one is whitespace-exact.
+    //    Two spaces alone parse as three empty fields with ok=true.
+    {
+        let cases: &[(&str, &str, &str, &str, bool)] = &[
+            ("GET /path HTTP/1.1", "GET", "/path", "HTTP/1.1", true),
+            ("GET / HTTP/1.0", "GET", "/", "HTTP/1.0", true),
+            ("GET /a b HTTP/1.1", "GET", "/a", "b HTTP/1.1", true),
+            ("GET /p HTTP/1.1 extra", "GET", "/p", "HTTP/1.1 extra", true),
+            ("GET  HTTP/1.1", "GET", "", "HTTP/1.1", true),
+            ("  ", "", "", "", true),
+            ("GET /path", "", "", "", false),
+            ("GET", "", "", "", false),
+            ("", "", "", "", false),
+        ];
+        let mut bad = 0;
+        for (line, wm, wu, wp, wok) in cases {
+            let (m, u, p, ok) = parseRequestLine(string(*line));
+            if ok != *wok || m != *wm || u != *wu || p != *wp {
+                fmt::Println!("     parseRequestLine(", *line, ") wrong");
+                bad += 1;
+            }
+        }
+        if bad == 0 {
+            fmt::Println!("[4] parseRequestLine, 9 cases vs Go  PASS");
+        } else {
+            failed += 1;
+        }
+    }
+
+    // 5. idnaASCII — the ASCII fast path is exact; a non-ASCII host is
+    //    REJECTED rather than punycoded, because goish does not port
+    //    x/net/idna. Pinned so the divergence is visible, and so the
+    //    day idna lands this assertion has to be flipped deliberately.
+    {
+        let (a, ae) = idnaASCII(string("example.com"));
+        let (b, be) = idnaASCII(string("xn--exmple-cua.com"));
+        let (_c, ce) = idnaASCII(string("ex\u{00e4}mple.com"));
+        if ae == goish::nil
+            && a == "example.com"
+            && be == goish::nil
+            && b == "xn--exmple-cua.com"
+            && ce != goish::nil
+        {
+            fmt::Println!("[5] idnaASCII ASCII exact, non-ASCII rejected  PASS");
+        } else {
+            fmt::Println!("[5] idnaASCII  FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 3/3");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL ", failed, " of 3");
+        fmt::Println!("FAIL ", failed, " of 5");
         syscall::Exit(1);
     }
 }

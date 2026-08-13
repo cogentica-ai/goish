@@ -232,7 +232,7 @@ impl Request {
             // Go: if len(r.PostForm) > 0 { copyValues(r.Form, r.PostForm) }
             if s.post_form.Len() > 0 {
                 let post_form = s.post_form.clone();
-                copy_values(&mut s.form, &post_form);
+                copyValues(&mut s.form, &post_form);
             }
             // Go: newValues, e := url.ParseQuery(r.URL.RawQuery)
             let (new_values, e) = super::url::ParseQuery(self.URL.RawQuery.clone());
@@ -240,7 +240,7 @@ impl Request {
                 err = e;
             }
             // Go: copyValues(r.Form, newValues)
-            copy_values(&mut s.form, &new_values);
+            copyValues(&mut s.form, &new_values);
         }
         err
     }
@@ -468,6 +468,49 @@ impl Request {
                 string("websocket"),
             );
     }
+}
+
+// go: sdk 1.25.5 net/http/request.go:35-37 defaultMaxMemory
+pub const defaultMaxMemory: int = 32 << 20; // 32 MB
+
+// go: sdk 1.25.5 net/http/request.go:1027-1034 parseRequestLine
+//
+/// Split "GET /path HTTP/1.1" into its three fields. Both separators
+/// must be present, and each cut takes the FIRST space, so a URI
+/// containing a space makes the remainder the proto and the line is
+/// rejected downstream rather than silently mis-split.
+pub fn parseRequestLine<L: Into<string>>(line: L) -> (string, string, string, bool) {
+    let line: string = line.into();
+    let (method, rest, ok1) = crate::strings::Cut(line, string(" "));
+    let (requestURI, proto, ok2) = crate::strings::Cut(rest, string(" "));
+    if !ok1 || !ok2 {
+        return (string(""), string(""), string(""), false);
+    }
+    return (method, requestURI, proto, true);
+}
+
+// go: sdk 1.25.5 net/http/request.go:781-795 idnaASCII
+//
+/// Convert a host to its ASCII (punycode) form.
+///
+/// Go returns `v` unchanged when it is already ASCII and otherwise
+/// calls `idna.Lookup.ToASCII`. goish has no `idna`, so a non-ASCII
+/// host is an error rather than being punycoded. That is a REJECTION,
+/// not a silent pass-through: returning the UTF-8 host would put
+/// non-ASCII bytes in a Host header, which is what the conversion
+/// exists to prevent. The ASCII fast path — every host a Go program
+/// realistically dials — is exact.
+pub fn idnaASCII<V: Into<string>>(v: V) -> (string, error) {
+    let v: string = v.into();
+    if super::internal::ascii::Is(v.clone()) {
+        return (v, crate::errors::nil);
+    }
+    return (
+        string(""),
+        crate::errors::New(string(
+            "http: internationalized host requires idna, which goish does not port",
+        )),
+    );
 }
 
 // go: sdk 1.25.5 net/http/request.go:96-96 badStringError
@@ -1053,9 +1096,10 @@ fn parse_dec(b: &[u8]) -> Option<int> {
     Some(acc)
 }
 
-/// RFC 7230 §3.2.6 token chars — what's legal in a method name.
 // go: sdk 1.25.5 net/http/request.go:844-859 validMethod
 //
+/// RFC 7230 §3.2.6 token chars — what's legal in a method name.
+///
 /// Reports whether `m` is a valid HTTP method — RFC 7230 §3.1.1's
 /// `token`, i.e. one or more `tchar`. Note this ACCEPTS lowercase and
 /// arbitrary tokens: Go validates the grammar, not a method list, so
@@ -1342,9 +1386,9 @@ fn parse_post_form(r: &Request) -> (crate::gomap::map<string, slice<string>>, er
     super::url::ParseQuery(body_str)
 }
 
-/// Merge `src` into `dst` (append values). Mirrors `copyValues`
-/// (request.go:1238).
-fn copy_values(
+// go: sdk 1.25.5 net/http/request.go:1257-1261 copyValues
+/// Merge `src` into `dst`, appending values under each key.
+pub fn copyValues(
     dst: &mut crate::gomap::map<string, slice<string>>,
     src: &crate::gomap::map<string, slice<string>>,
 ) {
