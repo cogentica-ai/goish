@@ -29,8 +29,10 @@ use goish::net::http::server::{
     tlsRecordHeaderLooksLikeHTTP, validNextProto, bufferBeforeChunkingSize, copyBufPoolSize,
     debugServerConnections, errTooLarge, extraHeaderKeys, maxPostHandlerReadBytes,
     nextProtoUnencryptedHTTP2, rstAvoidanceDelay, shutdownPollIntervalMax, ConnStateString,
-    StateActive, StateClosed, StateHijacked, StateIdle, StateNew, TrailerPrefix,
+    StateActive, StateClosed, StateHijacked, StateIdle, StateNew, TrailerPrefix, badRequestError,
+    statusError,
 };
+use goish::errors::ErrorTrait;
 use goish::errors;
 use goish::time;
 use goish::{fmt, string, syscall};
@@ -237,11 +239,35 @@ fn main() {
         check!("[8] server.go constants + sentinels vs Go", bad);
     }
 
+    // 9. statusError / badRequestError. Go renders these as
+    //    "<StatusText>: <text>", and Go's own comment constrains the
+    //    text: "plain text WITHOUT user info or other embedded
+    //    errors" — it reaches the client verbatim, so echoing a parse
+    //    error into it would leak internals.
+    //
+    //    The 999 case is the one worth pinning: StatusText has no
+    //    entry, so the message begins with a bare ": ". Rendering
+    //    "Status 999" instead would look tidier and diverge.
+    {
+        let mut bad = 0;
+        if badRequestError(string("missing required Host header")).Error()
+            != "Bad Request: missing required Host header" { bad += 1; }
+        if badRequestError(string("invalid header name")).Error()
+            != "Bad Request: invalid header name" { bad += 1; }
+        let e404 = statusError { code: 404, text: string("nope") };
+        let e500 = statusError { code: 500, text: string("boom") };
+        let e999 = statusError { code: 999, text: string("x") };
+        if e404.Error() != "Not Found: nope" { bad += 1; }
+        if e500.Error() != "Internal Server Error: boom" { bad += 1; }
+        if e999.Error() != ": x" { bad += 1; }
+        check!("[9] statusError / badRequestError vs Go", bad);
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 8/8");
+        fmt::Println!("ok 9/9");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL ", failed, " of 8");
+        fmt::Println!("FAIL ", failed, " of 9");
         syscall::Exit(1);
     }
 }

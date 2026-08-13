@@ -1089,6 +1089,54 @@ pub struct __ServerState {
     on_shutdown: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
 }
 
+// go: sdk 1.25.5 net/http/server.go:1896-1900 statusError
+//
+/// Go: "an error used to respond to a request with an HTTP status.
+/// The text should be plain text WITHOUT user info or other embedded
+/// errors." That constraint is the point — the text reaches the client
+/// verbatim, so echoing a parse error into it would leak internals.
+#[derive(Clone)]
+pub struct statusError {
+    pub code: int,
+    pub text: string,
+}
+
+impl crate::errors::ErrorTrait for statusError {
+    // go: sdk 1.25.5 net/http/server.go:1903-1903 statusError.Error
+    fn Error(&self) -> string {
+        return super::status::StatusText(self.code) + ": " + self.text.clone();
+    }
+}
+
+// go: sdk 1.25.5 net/http/server.go:1894-1894 badRequestError
+pub fn badRequestError<E: Into<string>>(e: E) -> error {
+    return errors::New(
+        super::status::StatusText(super::status::StatusBadRequest) + ": " + e.into(),
+    );
+}
+
+// go: sdk 1.25.5 net/http/server.go:3972-3972 globalOptionsHandler
+//
+/// Handles a bare `OPTIONS *` request.
+#[derive(Clone, Copy, Default)]
+pub struct globalOptionsHandler;
+
+impl Handler for globalOptionsHandler {
+    // go: sdk 1.25.5 net/http/server.go:3974-3985 globalOptionsHandler.ServeHTTP
+    //
+    // Go reads up to 4 KiB of an OPTIONS body — "as mentioned in the
+    // spec as being reserved for future use" — and treats anything
+    // larger as "a waste of server resources (or an attack)", aborting
+    // via MaxBytesReader's EOF behaviour. goish's Request.Body is an
+    // already-read `slice<byte>`, so there is no stream to cap: the
+    // bytes are bounded upstream by the server's own read limits, and
+    // the drain is a no-op. The Content-Length: 0 reply is the
+    // observable part and matches.
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) {
+        w.Header().Set(string("Content-Length"), string("0"));
+    }
+}
+
 // go: sdk 1.25.5 net/http/server.go:512-525 TrailerPrefix
 //
 /// Go: "TrailerPrefix is a magic prefix for [ResponseWriter.Header]
