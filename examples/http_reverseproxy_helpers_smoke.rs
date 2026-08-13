@@ -30,9 +30,15 @@ extern crate alloc;
 extern crate goish;
 
 use goish::net::http::header::Header;
+use goish::net::http::httputil::dump::{
+    errNoBody, failureToReadBody, neverEnding, reqWriteExcludeHeaderDump,
+};
 use goish::net::http::httputil::reverseproxy::{
     copyHeader, ishex, removeHopByHopHeaders, singleJoiningSlash,
 };
+use goish::goslice::slice;
+use goish::io::{Closer, Reader};
+use goish::errors;
 use goish::{fmt, string, syscall};
 
 #[goish::main]
@@ -144,11 +150,48 @@ fn main() {
         }
     }
 
+    // 5. dump.go's read-side helpers. neverEnding fills the whole
+    //    buffer and never reports EOF; failureToReadBody refuses with
+    //    the errNoBody SENTINEL, which is how DumpRequest stops after
+    //    the headers — the writer aborts at the body and the caller
+    //    recognises that one error and turns it back into nil. Any
+    //    other error would be a real failure.
+    {
+        let mut ne = neverEnding(b'x');
+        let mut buf: slice<goish::types::byte> = slice::__from_vec(alloc::vec![0u8; 5]);
+        let (n, e) = Reader::Read(&mut ne, &mut buf);
+        let got = string::from_bytes(&buf);
+        let mut empty: slice<goish::types::byte> = slice::new();
+        let (n0, e0) = Reader::Read(&mut ne, &mut empty);
+
+        let mut f = failureToReadBody::default();
+        let mut b4: slice<goish::types::byte> = slice::__from_vec(alloc::vec![0u8; 4]);
+        let (nf, ef) = Reader::Read(&mut f, &mut b4);
+        let cf = Closer::Close(&mut f);
+
+        let m = reqWriteExcludeHeaderDump();
+        let (h, _) = m.Get(string("Host"));
+        let (ua, uaok) = m.Get(string("User-Agent"));
+
+        if n == 5 && e == goish::nil && got == "xxxxx"
+            && n0 == 0 && e0 == goish::nil
+            && nf == 0 && errors::Is(ef.clone(), errNoBody)
+            && ef.Error() == "sentinel error value"
+            && cf == goish::nil
+            && m.Len() == 3 && h && !uaok && !ua
+        {
+            fmt::Println!("[5] neverEnding / failureToReadBody / dump excludes  PASS");
+        } else {
+            fmt::Println!("[5] dump.go helpers  FAIL n=", n, " got=", got, " ef=", ef);
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 4/4");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL ", failed, " of 4");
+        fmt::Println!("FAIL ", failed, " of 5");
         syscall::Exit(1);
     }
 }

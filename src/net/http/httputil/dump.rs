@@ -205,3 +205,73 @@ pub fn DumpResponse(resp: &Response, body: bool) -> (slice<byte>, error) {
 
 // ─── ReverseProxy (slim port of reverseproxy.go) ─────────────────────
 
+
+// go: sdk 1.25.5 net/http/httputil/dump.go:53-53 neverEnding
+//
+/// A byte that reads forever. Go: `type neverEnding byte`, whose Read
+/// fills the whole buffer and never reports EOF — used to feed
+/// DumpRequestOut a body of known length without allocating one.
+#[derive(Clone, Copy)]
+pub struct neverEnding(pub byte);
+
+impl crate::io::Reader for neverEnding {
+    // go: sdk 1.25.5 net/http/httputil/dump.go:55-60 neverEnding.Read
+    fn Read(&mut self, p: &mut slice<byte>) -> (crate::types::int, error) {
+        let n = crate::len(p);
+        let mut i: crate::types::int = 0;
+        while i < n {
+            p[i] = self.0;
+            i += 1;
+        }
+        return (n, errors::nil);
+    }
+}
+
+// go: sdk 1.25.5 net/http/httputil/dump.go:288-290 errNoBody
+//
+// Go: "sentinel error value" — returned by failureToReadBody so
+// Request.Write / Response.Write abort, and recognised by name at the
+// call site so it is turned back into a nil error.
+crate::var! {
+    pub errNoBody: error = "sentinel error value";
+}
+
+// go: sdk 1.25.5 net/http/httputil/dump.go:296-296 failureToReadBody
+//
+/// A body that refuses to be read.
+///
+/// DumpRequest/DumpResponse substitute this when the caller asked for
+/// headers only: writing the message then fails at the body with
+/// errNoBody, which the caller recognises and converts back to nil.
+/// That is how the dump stops after the headers WITHOUT the writer
+/// needing a "headers only" mode.
+#[derive(Clone, Copy, Default)]
+pub struct failureToReadBody;
+
+impl crate::io::Reader for failureToReadBody {
+    // go: sdk 1.25.5 net/http/httputil/dump.go:298-298 failureToReadBody.Read
+    fn Read(&mut self, _p: &mut slice<byte>) -> (crate::types::int, error) {
+        return (0, errNoBody.into());
+    }
+}
+
+impl crate::io::Closer for failureToReadBody {
+    // go: sdk 1.25.5 net/http/httputil/dump.go:299-299 failureToReadBody.Close
+    fn Close(&mut self) -> error {
+        return errors::nil;
+    }
+}
+
+// go: sdk 1.25.5 net/http/httputil/dump.go:196-200 reqWriteExcludeHeaderDump
+//
+// The headers DumpRequest emits from the Request's own fields rather
+// than from the Header map. Note this is a SHORTER list than
+// request.go's reqWriteExcludeHeader: the dump keeps User-Agent and
+// Content-Length, because seeing them is the point of a dump.
+pub fn reqWriteExcludeHeaderDump() -> map<string, bool> {
+    let mut m: map<string, bool> = map::new();
+    m.Set(string("Host"), true); // not in Header map anyway
+    m.Set(string("Transfer-Encoding"), true);
+    m.Set(string("Trailer"), true);
+    return m;
+}
