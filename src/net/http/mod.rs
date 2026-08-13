@@ -20,6 +20,7 @@ pub mod clone;
 pub mod cookie;
 pub mod cookiejar;
 pub mod csrf;
+pub mod cgi;
 pub mod fcgi;
 pub mod fs;
 pub mod header;
