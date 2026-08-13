@@ -714,6 +714,12 @@ struct testFlags {
     shuffle: crate::flag::Flag<string>,
     outputDir: crate::flag::Flag<string>,
     list: crate::flag::Flag<string>,
+    /// Go: `matchBenchmarks = flag.String("test.bench", …)`, declared
+    /// in benchmark.go. Registered here because goish keeps one flag
+    /// struct; now honored, since the benchmark runner exists.
+    pub(crate) matchBenchmarks: crate::flag::Flag<string>,
+    /// Go: `benchmarkMemory = flag.Bool("test.benchmem", …)`.
+    pub(crate) benchmarkMemory: crate::flag::Flag<bool>,
 }
 
 static INIT_RAN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
@@ -775,6 +781,16 @@ pub fn Init() {
             "randomize the execution order of tests and benchmarks",
         ),
         outputDir: crate::flag::String("test.outputdir", "", "write profiles to `dir`"),
+        matchBenchmarks: crate::flag::String(
+            "test.bench",
+            "",
+            "run only benchmarks matching `regexp`",
+        ),
+        benchmarkMemory: crate::flag::Bool(
+            "test.benchmem",
+            false,
+            "print memory allocations for benchmarks",
+        ),
         list: crate::flag::String(
             "test.list",
             "",
@@ -841,6 +857,16 @@ pub fn __run_skip_patterns() -> (string, string) {
     return match g.as_ref() {
         None => (string::from_static(""), string::from_static("")),
         Some(f) => (f.run.Get(), f.skip.Get()),
+    };
+}
+
+// go: none — goish idiom: readers for the two benchmark flags, which
+// live behind FLAGS rather than as package-level pointers.
+pub(crate) fn __bench_flags() -> (string, bool) {
+    let g = FLAGS.Lock();
+    return match g.as_ref() {
+        None => (string::from_static(""), false),
+        Some(f) => (f.matchBenchmarks.Get(), f.benchmarkMemory.Get()),
     };
 }
 

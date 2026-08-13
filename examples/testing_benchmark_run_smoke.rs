@@ -31,7 +31,7 @@ extern crate alloc;
 extern crate goish;
 
 use core::sync::atomic::{AtomicI64, Ordering};
-use goish::testing::benchmark::{Benchmark, B};
+use goish::testing::benchmark::{runBenchmarks, Benchmark, InternalBenchmark, B};
 use goish::gostring::string;
 use goish::{fmt, syscall};
 
@@ -193,11 +193,41 @@ fn main() {
         }
     }
 
+    // 6. runBenchmarks does NOTHING without -test.bench. That early
+    //    return is why an ordinary `go test` run does not benchmark
+    //    anything, no matter how many benchmarks are registered — and
+    //    it is the difference between a test suite that takes a second
+    //    and one that takes a minute. Init has not run here, so the
+    //    pattern is empty.
+    {
+        ITERS.store(0, Ordering::SeqCst);
+        let list = [InternalBenchmark {
+            Name: s("BenchmarkThing"),
+            F: |b: &mut B| {
+                ITERS.fetch_add(1, Ordering::SeqCst);
+                let mut acc: u64 = 0;
+                for i in 0..b.N {
+                    acc = acc.wrapping_add(i as u64);
+                }
+                if acc == 9 {
+                    fmt::Println!("");
+                }
+            },
+        }];
+        let ok = runBenchmarks(&list);
+        if ok && ITERS.load(Ordering::SeqCst) == 0 {
+            fmt::Println!("[ 6] no -bench, no benchmarks  PASS");
+        } else {
+            fmt::Println!("[ 6] no -bench, no benchmarks  FAIL ran=", ITERS.load(Ordering::SeqCst));
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 5/5");
+        fmt::Println!("ok 6/6");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 5");
+        fmt::Println!("FAIL", failed, "of 6");
         syscall::Exit(1);
     }
 }

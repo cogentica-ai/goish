@@ -1,4 +1,4 @@
-// go: file testing/benchmark.go decls: B.Run, B.runN, B.launch, B.doBench, B.run, Benchmark, B.RunParallel, PB.Next, B.add, B.trimOutput, B.SetParallelism, durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
+// go: file testing/benchmark.go decls: benchState.processBench, runBenchmarks, RunBenchmarks, B.Run, B.runN, B.launch, B.doBench, B.run, Benchmark, B.RunParallel, PB.Next, B.add, B.trimOutput, B.SetParallelism, durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
 //
 // testing/benchmark.go — the result type a benchmark reports, its
 // derived per-operation metrics, and the column formatting `go test
@@ -20,7 +20,7 @@
 // Everything in this file is reachable without either: pure arithmetic
 // over a BenchmarkResult a caller filled in, plus the formatting.
 //
-// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, benchmarkName, loopSlowPath, run1, stopOrScaleBLoop, processBench, checkParallel, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
+// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, loopSlowPath, run1, stopOrScaleBLoop, checkParallel, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
 // goishlint:ignore GOISH021 benchState, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
 
 #![allow(non_snake_case)]
@@ -955,4 +955,153 @@ impl B {
         benchmarkLock.LockManual();
         return !sub.Failed();
     }
+}
+
+// ─── the -bench driver ───────────────────────────────────────────────
+
+// goishlint:ignore GOISH019 benchState — `match` is absent: goish's
+// runBenchmarks filters with regexp::MatchString directly rather than
+// threading a *matcher, since there is no generated main package to
+// supply one.
+// go: sdk 1.25.5 testing/benchmark.go:673-678 benchState
+/// Go: the state shared across one `-bench` run — the name filter and
+/// the column widths the result table is aligned to.
+#[allow(non_camel_case_types, non_snake_case)]
+pub struct benchState {
+    /// Go: "The largest recorded benchmark name."
+    pub maxLen: int,
+    /// Go: "Maximum extension length."
+    pub extLen: int,
+}
+
+#[allow(non_snake_case)]
+impl benchState {
+    // go: sdk 1.25.5 testing/benchmark.go:735-791 benchState.processBench
+    // goishlint:ignore GOISH018 processBench — the chatty branches and
+    // the `=== NAME` json line are absent (goish's benchmark path has
+    // no chattyPrinter), as is the fresh-B rebuild for repeat runs,
+    // which exists to give each -count iteration its own signal channel
+    // and output buffer; goish re-runs the same B, whose timer state
+    // runN resets anyway.
+    /// Go: run one benchmark once per -cpu entry per -count, and print
+    /// the aligned result line.
+    ///
+    /// The GOMAXPROCS check at the end is a real diagnostic, not
+    /// bookkeeping: a benchmark that changed GOMAXPROCS and did not put
+    /// it back would silently skew every benchmark after it, so the
+    /// runner reports the culprit by name.
+    pub fn processBench(&self, b: &mut B) {
+        let (_, benchmarkMemory) = crate::testing::testing::__bench_flags();
+        for (i, procs) in crate::testing::testing::cpuList().iter().enumerate() {
+            for j in 0..crate::testing::testing::countFlag() {
+                crate::runtime::GOMAXPROCS(*procs);
+                let name = b.state.name.Lock().clone();
+                let benchName = benchmarkName(&name, *procs);
+
+                let r = b.doBench();
+                if b.Failed() {
+                    // Go: "We print it all, regardless, because we don't
+                    // want to trim the reason the benchmark failed."
+                    crate::fmt::Println!("--- FAIL: ", benchName.clone());
+                    continue;
+                }
+                let mut results = r.String();
+                if benchmarkMemory || b.showAllocResult {
+                    results = crate::fmt::Sprintf!("%s\t%s", results, r.MemString());
+                }
+                crate::fmt::Println!(
+                    crate::fmt::Sprintf!("%s\t%s", benchName.clone(), results)
+                );
+
+                let p = crate::runtime::GOMAXPROCS(-1);
+                if p != *procs {
+                    crate::fmt::Println!(
+                        crate::fmt::Sprintf!(
+                            "testing: %s left GOMAXPROCS set to %d",
+                            benchName.clone(),
+                            p
+                        )
+                    );
+                }
+                let _ = (i, j);
+            }
+        }
+    }
+}
+
+// go: sdk 1.25.5 testing/benchmark.go:686-732 runBenchmarks
+// goishlint:ignore GOISH020 runBenchmarks — Go takes `importPath` and
+// the matchString func from the generated main package; goish has
+// neither, and filters with regexp::MatchString, which is what Go's
+// generated main passes.
+/// Go: collect the benchmarks matching -test.bench, then run them.
+///
+/// The empty-pattern early return is why an ordinary `go test` run does
+/// not benchmark anything: no -bench, no benchmarks, regardless of how
+/// many are registered.
+#[allow(non_snake_case)]
+pub fn runBenchmarks(benchmarks: &[InternalBenchmark]) -> bool {
+    let (pattern, _) = crate::testing::testing::__bench_flags();
+    if pattern.Len() == 0 {
+        return true;
+    }
+
+    let mut maxprocs: int = 1;
+    for procs in crate::testing::testing::cpuList().iter() {
+        if *procs > maxprocs {
+            maxprocs = *procs;
+        }
+    }
+
+    let mut st = benchState {
+        maxLen: 0,
+        extLen: benchmarkName(&crate::gostring::string::from_static(""), maxprocs).Len(),
+    };
+
+    let mut bs: Vec<&InternalBenchmark> = Vec::new();
+    for bench in benchmarks.iter() {
+        let (matched, _) = crate::regexp::MatchString(pattern.clone(), bench.Name.clone());
+        if matched {
+            bs.push(bench);
+            let benchName = benchmarkName(&bench.Name, maxprocs);
+            let l = benchName.Len() + st.extLen + 1;
+            if l > st.maxLen {
+                st.maxLen = l;
+            }
+        }
+    }
+
+    let mut failed = false;
+    for bench in bs.into_iter() {
+        let mut b = B::default();
+        *b.state.name.Lock() = bench.Name.clone();
+        b.state
+            .bench
+            .store(true, core::sync::atomic::Ordering::Release);
+        b.benchFunc = Some(alloc::sync::Arc::new({
+            let f = bench.F;
+            move |x: &mut B| f(x)
+        }));
+        b.benchTime = benchTime();
+        // Go runs everything under one "Main" B whose benchFunc calls
+        // b.Run per benchmark; goish drives each directly, since
+        // without a matcher the sub-naming Run performs is the only
+        // thing that layer adds.
+        b.runN(1);
+        st.processBench(&mut b);
+        if b.Failed() {
+            failed = true;
+        }
+    }
+    return !failed;
+}
+
+// go: sdk 1.25.5 testing/benchmark.go:682-684 RunBenchmarks
+// goishlint:ignore GOISH020 RunBenchmarks — same dropped importPath and
+// matchString parameters as runBenchmarks.
+/// Go: "An internal function but exported because it is cross-package;
+/// part of the implementation of the 'go test' command."
+#[allow(non_snake_case)]
+pub fn RunBenchmarks(benchmarks: &[InternalBenchmark]) -> bool {
+    return runBenchmarks(benchmarks);
 }
