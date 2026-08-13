@@ -98,6 +98,7 @@ impl Request {
         bytes::NewReader(self.Body.clone())
     }
 
+    // go: sdk 1.25.5 net/http/request.go:352-357 Request.Context
     /// `r.Context()` (request.go:352). Returns the request's context,
     /// or `context.Background()` if none was attached — exactly Go's
     /// `if r.ctx != nil { return r.ctx }; return context.Background()`.
@@ -108,6 +109,7 @@ impl Request {
         }
     }
 
+    // go: sdk 1.25.5 net/http/request.go:368-376 Request.WithContext
     /// `r.WithContext(ctx)` (request.go:368) — shallow copy of the
     /// request with its context replaced.
     pub fn WithContext(
@@ -120,6 +122,7 @@ impl Request {
         r2
     }
 
+    // go: sdk 1.25.5 net/http/request.go:386-413 Request.Clone
     /// `r.Clone(ctx)` (request.go:386) — deep copy with its context
     /// replaced. Goish container types (string / slice / gomap) all
     /// deep-clone via #[derive(Clone)], so the explicit per-field
@@ -134,12 +137,14 @@ impl Request {
         r2
     }
 
+    // go: sdk 1.25.5 net/http/request.go:428-430 Request.Cookies
     /// `r.Cookies()` — parse all `Cookie:` request headers. Mirrors
     /// `(*Request).Cookies()` (request.go:404).
     pub fn Cookies(&self) -> slice<super::cookie::Cookie> {
         super::cookie::readCookies(&self.Header, &string::new())
     }
 
+    // go: sdk 1.25.5 net/http/request.go:434-439 Request.CookiesNamed
     /// `r.CookiesNamed(name)` (request.go:434) — return all request
     /// cookies with the given name. Empty `name` yields an empty slice.
     pub fn CookiesNamed<S: Into<string>>(&self, name: S) -> slice<super::cookie::Cookie> {
@@ -152,6 +157,7 @@ impl Request {
         super::cookie::readCookies(&self.Header, &name)
     }
 
+    // go: sdk 1.25.5 net/http/request.go:448-456 Request.Cookie
     /// `r.Cookie(name)` — return the named cookie, or
     /// `(Cookie::default(), ErrNoCookie)` if absent. Mirrors
     /// `(*Request).Cookie(name)` (request.go:418).
@@ -163,6 +169,7 @@ impl Request {
         (super::cookie::Cookie::default(), ErrNoCookie.into())
     }
 
+    // go: sdk 1.25.5 net/http/request.go:1469-1474 Request.PathValue
     /// `r.PathValue(name)` — look up a wildcard binding from a Go 1.22
     /// pattern match (e.g. `/users/{id}` → `r.PathValue("id")`).
     /// Returns the empty string if no such binding exists. Mirrors
@@ -176,6 +183,7 @@ impl Request {
         }
     }
 
+    // go: sdk 1.25.5 net/http/request.go:1478-1487 Request.SetPathValue
     /// `r.SetPathValue(name, value)` — set a wildcard binding for
     /// testing or middleware use. Mirrors `(*Request).SetPathValue`.
     pub fn SetPathValue<K: Into<string>, V: Into<string>>(&mut self, name: K, value: V) {
@@ -335,6 +343,7 @@ impl Request {
         e
     }
 
+    // go: sdk 1.25.5 net/http/request.go:417-420 Request.ProtoAtLeast
     /// `r.ProtoAtLeast(major, minor)` (request.go:417) — reports whether
     /// the request's HTTP protocol is at least major.minor.
     pub fn ProtoAtLeast(&self, major: int, minor: int) -> bool {
@@ -343,18 +352,21 @@ impl Request {
         self.ProtoMajor > major || self.ProtoMajor == major && self.ProtoMinor >= minor
     }
 
+    // go: sdk 1.25.5 net/http/request.go:423-425 Request.UserAgent
     /// `r.UserAgent()` (request.go:423) — convenience for the
     /// `User-Agent` request header.
     pub fn UserAgent(&self) -> string {
         self.Header.Get(string("User-Agent"))
     }
 
+    // go: sdk 1.25.5 net/http/request.go:481-483 Request.Referer
     /// `r.Referer()` (request.go:481) — convenience for the
     /// `Referer` request header. Note the historical misspelling.
     pub fn Referer(&self) -> string {
         self.Header.Get(string("Referer"))
     }
 
+    // go: sdk 1.25.5 net/http/request.go:973-979 Request.BasicAuth
     /// `r.BasicAuth()` (request.go:973) — return `(user, pass, ok)`
     /// from a HTTP Basic `Authorization` header.
     pub fn BasicAuth(&self) -> (string, string, bool) {
@@ -365,6 +377,7 @@ impl Request {
         parseBasicAuth(auth)
     }
 
+    // go: sdk 1.25.5 net/http/request.go:1022-1024 Request.SetBasicAuth
     /// `r.SetBasicAuth(user, pass)` (request.go:1022) — set the
     /// `Authorization` header to "Basic " + base64(user:pass).
     pub fn SetBasicAuth<U: Into<string>, P: Into<string>>(&mut self, username: U, password: P){
@@ -383,6 +396,7 @@ impl Request {
         self.Header.Set(string("Authorization"), hv.String());
     }
 
+    // go: sdk 1.25.5 net/http/request.go:464-471 Request.AddCookie
     /// `r.AddCookie(c)` — append a cookie to the `Cookie:` request
     /// header. Mirrors `(*Request).AddCookie(c)` (request.go:434);
     /// per RFC 6265 the request only has a single `Cookie:` line, so
