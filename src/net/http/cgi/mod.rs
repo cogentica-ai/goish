@@ -22,4 +22,4 @@
 
 pub mod child;
 
-pub use child::{envMap, RequestFromMap};
+pub use child::{envMap, response, Request, RequestFromMap, Serve};

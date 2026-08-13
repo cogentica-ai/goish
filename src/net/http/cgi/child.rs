@@ -4,11 +4,13 @@
 // environment into an http.Request. net/http/fcgi's child.go calls
 // RequestFromMap, so this is the piece that unblocks it.
 //
-// NOT ported: Request(), Serve() and the `response` writer. Request()
-// wants os.Environ (present) but returns a Request whose Body is
-// populated from stdin; Serve() and `response` need an
-// http.ResponseWriter over stdout, which is the same conn/writer
-// design the fcgi record layer is waiting on.
+// Now also ported: Request(), Serve() and the `response` writer. The
+// earlier note here claimed these needed "the same conn/writer design
+// the fcgi record layer is waiting on" — that was wrong. goish's
+// ResponseWriter is a plain trait with &self receivers, so `response`
+// implements it directly, with its mutable fields behind one lock
+// instead of Go's &mut receiver. Verified byte-for-byte against Go by
+// driving the real unexported `response` over a bytes.Buffer.
 
 #![allow(non_snake_case)]
 
@@ -194,4 +196,183 @@ pub fn RequestFromMap(params: &map<string, string>) -> (Request, error) {
     );
 
     return (r, errors::nil);
+}
+
+// go: sdk 1.25.5 net/http/cgi/child.go:28-37 Request
+//
+/// Returns the HTTP request as represented in the current
+/// environment. This assumes the current program is being run by a
+/// web server in a CGI environment.
+///
+/// Go populates `r.Body` with a `LimitReader` over stdin when
+/// `ContentLength > 0`. goish's `Request.Body` is a `slice<byte>`, so
+/// the equivalent is to READ that many bytes now rather than hand back
+/// a lazy reader — the same eager-vs-streaming gap the rest of
+/// net/http carries, and it closes with the Body model change.
+pub fn Request() -> (Request, error) {
+    let (mut r, err) = RequestFromMap(&envMap(crate::os::Environ()));
+    if err != errors::nil {
+        return (r, err);
+    }
+    if r.ContentLength > 0 {
+        let mut stdin = crate::os::Stdin();
+        let mut buf: Vec<byte> = alloc::vec![0u8; r.ContentLength as usize];
+        let mut got: usize = 0;
+        // Go's io.LimitReader stops at ContentLength; a short read is
+        // not an error here, it just means a shorter body.
+        while got < buf.len() {
+            let mut tmp = slice::<byte>::__from_vec(alloc::vec![0u8; buf.len() - got]);
+            let (n, rerr) = crate::io::Reader::Read(&mut stdin, &mut tmp);
+            if n <= 0 || rerr != errors::nil {
+                break;
+            }
+            buf[got..got + (n as usize)].copy_from_slice(&(&*tmp)[..n as usize]);
+            got += n as usize;
+        }
+        buf.truncate(got);
+        r.Body = slice::<byte>::__from_vec(buf);
+    }
+    return (r, errors::nil);
+}
+
+// go: sdk 1.25.5 net/http/cgi/child.go:169-176 response
+//
+/// The `http.ResponseWriter` a CGI child hands its handler: headers
+/// and body are written to stdout in CGI's `Status:`-first format.
+///
+/// goish's `ResponseWriter` takes `&self`, so every mutable field
+/// lives behind a lock rather than in a `&mut` receiver as in Go.
+pub struct response {
+    req_url: string,
+    header: super::super::response::HeaderHandle,
+    st: crate::sync::Mutex<responseState>,
+}
+
+struct responseState {
+    code: int,
+    wroteHeader: bool,
+    wroteCGIHeader: bool,
+    bufw: crate::bufio::Writer<alloc::boxed::Box<dyn crate::io::Writer + Send + Sync>>,
+}
+
+impl response {
+    // go: none — goish-only constructor. Go builds `response` with a
+    // struct literal inside Serve; the fields are private and the
+    // bufio::Writer must be created here, so the literal becomes a fn.
+    //
+    // `w` is type-erased for the same reason Go's `bufw *bufio.Writer`
+    // is: the writer is stdout in production and a buffer under test,
+    // and Go's own tests construct this struct over a bytes.Buffer.
+    pub fn new(req: &Request, w: alloc::boxed::Box<dyn crate::io::Writer + Send + Sync>) -> response {
+        return response {
+            req_url: req.URL.String(),
+            header: super::super::response::HeaderHandle::new(Header::new()),
+            st: crate::sync::Mutex::new(responseState {
+                code: 0,
+                wroteHeader: false,
+                wroteCGIHeader: false,
+                bufw: crate::bufio::NewWriter(w),
+            }),
+        };
+    }
+
+    // go: sdk 1.25.5 net/http/cgi/child.go:210-224 response.writeCGIHeader
+    //
+    /// Finalizes the header sent to the client and writes it to the
+    /// output. `p` is not written here, but is the first chunk of the
+    /// body that will be written; it is sniffed for a Content-Type if
+    /// none is set explicitly.
+    fn writeCGIHeader(&self, g: &mut responseState, p: &slice<byte>) {
+        if g.wroteCGIHeader {
+            return;
+        }
+        g.wroteCGIHeader = true;
+        let line = crate::fmt::Sprintf!(
+            "Status: %d %s\r\n",
+            g.code,
+            super::super::StatusText(g.code)
+        );
+        let _ = g.bufw.WriteString(line);
+        if !self.header.snapshot().has(string("Content-Type")) {
+            self.header.Set(
+                string("Content-Type"),
+                super::super::DetectContentType(p.clone()),
+            );
+        }
+        let _ = self.header.snapshot().Write(&mut g.bufw);
+        let _ = g.bufw.WriteString(string("\r\n"));
+        let _ = g.bufw.Flush();
+    }
+
+    // go: sdk 1.25.5 net/http/cgi/child.go:178-180 response.Flush
+    pub fn Flush(&self) {
+        let mut g = self.st.Lock();
+        let _ = g.bufw.Flush();
+    }
+}
+
+impl super::super::response::ResponseWriter for response {
+    // go: sdk 1.25.5 net/http/cgi/child.go:182-184 response.Header
+    fn Header(&self) -> super::super::response::HeaderHandle {
+        return self.header.clone();
+    }
+
+    // go: sdk 1.25.5 net/http/cgi/child.go:186-194 response.Write
+    fn Write(&self, p: slice<byte>) -> (int, error) {
+        // Go guards this call: `if !r.wroteHeader`. Calling
+        // WriteHeader unconditionally would be wrong even though it
+        // is idempotent, because its already-wrote branch prints
+        // "CGI attempted to write header twice" to stderr — so every
+        // Write after the first would emit a spurious warning.
+        {
+            let g = self.st.Lock();
+            if !g.wroteHeader {
+                drop(g);
+                self.WriteHeader(super::super::StatusOK);
+            }
+        }
+        let mut g = self.st.Lock();
+        if !g.wroteCGIHeader {
+            self.writeCGIHeader(&mut g, &p);
+        }
+        return g.bufw.Write(p);
+    }
+
+    // go: sdk 1.25.5 net/http/cgi/child.go:196-204 response.WriteHeader
+    fn WriteHeader(&self, code: int) {
+        let mut g = self.st.Lock();
+        if g.wroteHeader {
+            // Note: explicitly using Stderr, as Stdout is our HTTP output.
+            crate::fmt::Fprintf!(
+                &mut crate::os::Stderr(),
+                "CGI attempted to write header twice on request for %s",
+                self.req_url.clone()
+            );
+            return;
+        }
+        g.wroteHeader = true;
+        g.code = code;
+    }
+}
+
+// go: sdk 1.25.5 net/http/cgi/child.go:145-167 Serve
+//
+/// Executes the provided [`Handler`] on the currently active CGI
+/// request, if any. If there's no current CGI environment an error is
+/// returned.
+///
+/// Go accepts a nil handler meaning `http.DefaultServeMux`; goish
+/// takes the handler by `Arc<dyn Handler>`, so pass the mux
+/// explicitly.
+pub fn Serve(handler: Arc<dyn super::super::Handler>) -> error {
+    let (req, err) = Request();
+    if err != errors::nil {
+        return err;
+    }
+    let rw = response::new(&req, alloc::boxed::Box::new(crate::os::Stdout()));
+    handler.ServeHTTP(&rw, &req);
+    // Make sure a response is sent.
+    let _ = super::super::response::ResponseWriter::Write(&rw, slice::<byte>::new());
+    let mut g = rw.st.Lock();
+    return g.bufw.Flush();
 }
