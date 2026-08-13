@@ -866,3 +866,34 @@ impl core::ops::DerefMut for dirEntryDirs {
         return &mut self.0;
     }
 }
+
+// go: sdk 1.25.5 net/http/fs.go:875-877 fileHandler
+#[derive(Clone)]
+pub struct fileHandler {
+    pub root: alloc::sync::Arc<dyn FileSystem + Send + Sync>,
+}
+
+// go: sdk 1.25.5 net/http/fs.go:879-881 ioFS
+#[derive(Clone)]
+pub struct ioFS {
+    pub fsys: alloc::sync::Arc<dyn fs::FS + Send + Sync>,
+}
+
+// go: sdk 1.25.5 net/http/fs.go:883-885 ioFile
+#[derive(Clone)]
+pub struct ioFile {
+    pub file: alloc::sync::Arc<dyn fs::File + Send + Sync>,
+}
+
+// go: sdk 1.25.5 net/http/fs.go:105-107 FileSystem
+#[crate::interface]
+pub trait FileSystem {
+    fn Open(&self, name: string) -> (alloc::sync::Arc<dyn File + Send + Sync>, error);
+}
+
+// go: sdk 1.25.5 net/http/fs.go:113-119 File
+#[crate::interface]
+pub trait File {
+    fn Readdir(&self, count: int) -> (slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>>, error);
+    fn Stat(&self) -> (alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>, error);
+}

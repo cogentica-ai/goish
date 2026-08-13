@@ -24,10 +24,41 @@ use goish::strconv;
 use goish::strings;
 use goish::time;
 
+// go: sdk 1.25.5 net/http/fs.go:44-44 Dir
+// go: draft goishc — machine-translated, unreviewed
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Dir(pub string);
 
+// go: none — goishc forwarding impl for the declaration above
+impl core::ops::Deref for Dir {
+    type Target = string;
+    fn deref(&self) -> &string {
+        &self.0
+    }
+}
+
+// go: none — goishc forwarding impl for the declaration above
+impl goish::Len for Dir {
+    fn __len(&self) -> goish::int {
+        goish::Len::__len(&self.0)
+    }
+}
+
 goish::derive_go_hash_newtype!(Dir);
+
+// go: none — goishc forwarding impl for the declaration above
+impl From<string> for Dir {
+    fn from(v: string) -> Dir {
+        Dir(v)
+    }
+}
+
+// go: none — goishc forwarding impl for the declaration above
+impl From<Dir> for string {
+    fn from(t: Dir) -> string {
+        t.0
+    }
+}
 
 // go: sdk 1.25.5 net/http/fs.go:49-68 mapOpenError
 // go: draft goishc — machine-translated, unreviewed
@@ -85,27 +116,11 @@ impl Dir {
     }
 }
 
-#[goish::interface]
-pub trait FileSystem {
-    fn Open(&self, name: string) -> (alloc::sync::Arc<dyn File + Send + Sync>, error);
-}
 
-#[goish::interface]
-pub trait File {
-    fn Readdir(&self, count: int) -> (slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>>, error);
-    fn Stat(&self) -> (alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>, error);
-}
 
-#[goish::interface]
-pub trait anyDirs {
-    fn len(&self) -> int;
-    fn name(&mut self, i: int) -> string;
-    fn isDir(&mut self, i: int) -> bool;
-}
 
-#[derive(Default, Clone)]
-pub struct fileInfoDirs(pub slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>>);
 
+// go: none — goishc forwarding impl for the declaration above
 impl core::ops::Deref for fileInfoDirs {
     type Target = slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>>;
     fn deref(&self) -> &slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>> {
@@ -113,18 +128,21 @@ impl core::ops::Deref for fileInfoDirs {
     }
 }
 
+// go: none — goishc forwarding impl for the declaration above
 impl core::ops::DerefMut for fileInfoDirs {
     fn deref_mut(&mut self) -> &mut slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>> {
         &mut self.0
     }
 }
 
+// go: none — goishc forwarding impl for the declaration above
 impl goish::Len for fileInfoDirs {
     fn __len(&self) -> goish::int {
         goish::Len::__len(&self.0)
     }
 }
 
+// go: none — goishc forwarding impl for the declaration above
 impl<'a> goish::range::RangeIter for &'a fileInfoDirs {
     type Item = <&'a slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>> as goish::range::RangeIter>::Item;
     type Iter = <&'a slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>> as goish::range::RangeIter>::Iter;
@@ -133,6 +151,7 @@ impl<'a> goish::range::RangeIter for &'a fileInfoDirs {
     }
 }
 
+// go: none — goishc forwarding impl for the declaration above
 impl<'a> goish::range::RangeIter for &&'a fileInfoDirs {
     type Item = <&'a slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>> as goish::range::RangeIter>::Item;
     type Iter = <&'a slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>> as goish::range::RangeIter>::Iter;
@@ -141,12 +160,14 @@ impl<'a> goish::range::RangeIter for &&'a fileInfoDirs {
     }
 }
 
+// go: none — goishc forwarding impl for the declaration above
 impl From<slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>>> for fileInfoDirs {
     fn from(s: slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>>) -> fileInfoDirs {
         fileInfoDirs(s)
     }
 }
 
+// go: none — goishc forwarding impl for the declaration above
 impl From<fileInfoDirs> for slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>> {
     fn from(t: fileInfoDirs) -> slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>> {
         t.0
@@ -162,9 +183,8 @@ impl fileInfoDirs {
 impl fileInfoDirs {
 }
 
-#[derive(Default, Clone)]
-pub struct dirEntryDirs(pub slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>>);
 
+// go: none — goishc forwarding impl for the declaration above
 impl core::ops::Deref for dirEntryDirs {
     type Target = slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>>;
     fn deref(&self) -> &slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>> {
@@ -172,18 +192,21 @@ impl core::ops::Deref for dirEntryDirs {
     }
 }
 
+// go: none — goishc forwarding impl for the declaration above
 impl core::ops::DerefMut for dirEntryDirs {
     fn deref_mut(&mut self) -> &mut slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>> {
         &mut self.0
     }
 }
 
+// go: none — goishc forwarding impl for the declaration above
 impl goish::Len for dirEntryDirs {
     fn __len(&self) -> goish::int {
         goish::Len::__len(&self.0)
     }
 }
 
+// go: none — goishc forwarding impl for the declaration above
 impl<'a> goish::range::RangeIter for &'a dirEntryDirs {
     type Item = <&'a slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>> as goish::range::RangeIter>::Item;
     type Iter = <&'a slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>> as goish::range::RangeIter>::Iter;
@@ -192,6 +215,7 @@ impl<'a> goish::range::RangeIter for &'a dirEntryDirs {
     }
 }
 
+// go: none — goishc forwarding impl for the declaration above
 impl<'a> goish::range::RangeIter for &&'a dirEntryDirs {
     type Item = <&'a slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>> as goish::range::RangeIter>::Item;
     type Iter = <&'a slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>> as goish::range::RangeIter>::Iter;
@@ -200,12 +224,14 @@ impl<'a> goish::range::RangeIter for &&'a dirEntryDirs {
     }
 }
 
+// go: none — goishc forwarding impl for the declaration above
 impl From<slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>>> for dirEntryDirs {
     fn from(s: slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>>) -> dirEntryDirs {
         dirEntryDirs(s)
     }
 }
 
+// go: none — goishc forwarding impl for the declaration above
 impl From<dirEntryDirs> for slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>> {
     fn from(t: dirEntryDirs) -> slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>> {
         t.0
@@ -249,7 +275,7 @@ pub fn dirList(w: impl ResponseWriter + 'static, r: nilable![&http::Request], f:
     fmt::Fprintf!(&mut w, string("<meta name=\"viewport\" content=\"width=device-width\">\n"));
     fmt::Fprintf!(&mut w, string("<pre>\n"));
     {
-        let (mut i, n) = (0, dirs.len());
+        let (mut i, n): (int, _) = (0, dirs.len());
         while i < n {
             let mut name = dirs.name(i);
             if dirs.isDir(i) {
@@ -263,6 +289,8 @@ pub fn dirList(w: impl ResponseWriter + 'static, r: nilable![&http::Request], f:
     fmt::Fprintf!(&mut w, string("</pre>\n"));
 }
 
+// go: sdk 1.25.5 net/http/fs.go:182-182 httpservecontentkeepheaders
+// go: draft goishc — machine-translated, unreviewed
 pub static httpservecontentkeepheaders: goish::lazy::Lazy<nilable<godebug::Setting>> = goish::lazy::Lazy::new(|| nilable::new(godebug::New(string::from("httpservecontentkeepheaders"))));
 
 
@@ -387,6 +415,21 @@ pub fn serveContent<S: Into<string>>(w: impl ResponseWriter + 'static, r: nilabl
 
 
 
+goish::derive_go_hash_newtype!(condResult);
+
+// go: none — goishc forwarding impl for the declaration above
+impl From<int> for condResult {
+    fn from(v: int) -> condResult {
+        condResult(v)
+    }
+}
+
+// go: none — goishc forwarding impl for the declaration above
+impl From<condResult> for int {
+    fn from(t: condResult) -> int {
+        t.0
+    }
+}
 
 
 
@@ -424,7 +467,7 @@ pub fn serveFile<S: Into<string>>(w: impl ResponseWriter + 'static, r: nilable![
         return;
     }
     if redirect {
-        let url = r.Must().URL.Path;
+        let url = r.Must().URL.Path.clone();
         if d.IsDir() {
             if url[len(&url).wrapping_sub(1)] != 47 /*'/'*/ {
                 localRedirect(w, r, path::Base(url) + string("/"));
@@ -442,7 +485,7 @@ pub fn serveFile<S: Into<string>>(w: impl ResponseWriter + 'static, r: nilable![
         }
     }
     if d.IsDir() {
-        let url = r.Must().URL.Path;
+        let url = r.Must().URL.Path.clone();
         if url == "" || url[len(&url).wrapping_sub(1)] != 47 /*'/'*/ {
             localRedirect(w, r, path::Base(url) + string("/"));
             return;
@@ -528,28 +571,16 @@ pub fn containsDotDot<S: Into<string>>(v: S) -> bool {
 }
 
 
-#[derive(Clone)]
-pub struct fileHandler {
-    pub root: alloc::sync::Arc<dyn FileSystem + Send + Sync>,
-}
 
 impl ::core::default::Default for fileHandler {
     #[inline] fn default() -> Self { Self { root: ::alloc::sync::Arc::new(__NilFileSystem) } }
 }
 
-#[derive(Clone)]
-pub struct ioFS {
-    pub fsys: alloc::sync::Arc<dyn fs::FS + Send + Sync>,
-}
 
 impl ::core::default::Default for ioFS {
     #[inline] fn default() -> Self { Self { fsys: ::alloc::sync::Arc::new(fs::__NilFS) } }
 }
 
-#[derive(Clone)]
-pub struct ioFile {
-    pub file: alloc::sync::Arc<dyn fs::File + Send + Sync>,
-}
 
 impl ::core::default::Default for ioFile {
     #[inline] fn default() -> Self { Self { file: ::alloc::sync::Arc::new(fs::__NilFile) } }
@@ -679,7 +710,7 @@ impl fileHandler {
     // go: sdk 1.25.5 net/http/fs.go:988-995 fileHandler.ServeHTTP
     // go: draft goishc — machine-translated, unreviewed
     pub fn ServeHTTP(&self, w: impl ResponseWriter + 'static, mut r: nilable![&mut http::Request]) {
-        let mut upath = r.Must().URL.Path;
+        let mut upath = r.Must().URL.Path.clone();
         if !strings::HasPrefix(upath.clone(), string("/")) {
             upath = string("/") + upath;
             r.Must().URL.Path = upath.clone();
@@ -688,6 +719,8 @@ impl fileHandler {
     }
 }
 
+// go: sdk 1.25.5 net/http/fs.go:998-1000 httpRange
+// go: draft goishc — machine-translated, unreviewed
 #[derive(Default, Clone)]
 pub struct httpRange {
     pub start: int,
@@ -779,16 +812,32 @@ pub fn parseRange<S: Into<string>>(s: S, size: int) -> (slice<httpRange>, error)
     return (ranges, nil.into());
 }
 
+// go: sdk 1.25.5 net/http/fs.go:1090-1090 countingWriter
+// go: draft goishc — machine-translated, unreviewed
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct countingWriter(pub int);
 
 goish::derive_go_hash_newtype!(countingWriter);
 
+// go: none — goishc forwarding impl for the declaration above
+impl From<int> for countingWriter {
+    fn from(v: int) -> countingWriter {
+        countingWriter(v)
+    }
+}
+
+// go: none — goishc forwarding impl for the declaration above
+impl From<countingWriter> for int {
+    fn from(t: countingWriter) -> int {
+        t.0
+    }
+}
+
 impl countingWriter {
     // go: sdk 1.25.5 net/http/fs.go:1092-1095 countingWriter.Write
     // go: draft goishc — machine-translated, unreviewed
     pub fn Write(&mut self, p: slice<byte>) -> (int, error) {
-        *self = (*self).wrapping_add(countingWriter(len(&p)));
+        *self += countingWriter(len(&p));
         return (len(&p), nil.into());
     }
 }
@@ -837,6 +886,50 @@ extern "C" fn __register_Handler_for_fileHandler() {
 #[used]
 static __INIT_Handler_for_fileHandler: extern "C" fn() = __register_Handler_for_fileHandler;
 
+impl anyDirs for fileInfoDirs {
+    fn len(&self) -> int {
+        fileInfoDirs::len(self)
+    }
+    fn name(&mut self, i: int) -> string {
+        fileInfoDirs::name(self, i)
+    }
+    fn isDir(&mut self, i: int) -> bool {
+        fileInfoDirs::isDir(self, i)
+    }
+    fn __goish_as_dyn_any(&self) -> ::core::option::Option<&(dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync)> {
+        Some(self)
+    }
+}
+
+extern "C" fn __register_anyDirs_for_fileInfoDirs() {
+    __goish_register_anyDirs_impl::<fileInfoDirs>();
+}
+#[link_section = ".init_array"]
+#[used]
+static __INIT_anyDirs_for_fileInfoDirs: extern "C" fn() = __register_anyDirs_for_fileInfoDirs;
+
+impl anyDirs for dirEntryDirs {
+    fn len(&self) -> int {
+        dirEntryDirs::len(self)
+    }
+    fn name(&mut self, i: int) -> string {
+        dirEntryDirs::name(self, i)
+    }
+    fn isDir(&mut self, i: int) -> bool {
+        dirEntryDirs::isDir(self, i)
+    }
+    fn __goish_as_dyn_any(&self) -> ::core::option::Option<&(dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync)> {
+        Some(self)
+    }
+}
+
+extern "C" fn __register_anyDirs_for_dirEntryDirs() {
+    __goish_register_anyDirs_impl::<dirEntryDirs>();
+}
+#[link_section = ".init_array"]
+#[used]
+static __INIT_anyDirs_for_dirEntryDirs: extern "C" fn() = __register_anyDirs_for_dirEntryDirs;
+
 impl FileSystem for Dir {
     fn Open(&self, name: string) -> (alloc::sync::Arc<dyn File + Send + Sync>, error) {
         Dir::Open(self, name)
@@ -868,50 +961,6 @@ extern "C" fn __register_FileSystem_for_ioFS() {
 #[link_section = ".init_array"]
 #[used]
 static __INIT_FileSystem_for_ioFS: extern "C" fn() = __register_FileSystem_for_ioFS;
-
-impl anyDirs for dirEntryDirs {
-    fn len(&self) -> int {
-        dirEntryDirs::len(self)
-    }
-    fn name(&mut self, i: int) -> string {
-        dirEntryDirs::name(self, i)
-    }
-    fn isDir(&mut self, i: int) -> bool {
-        dirEntryDirs::isDir(self, i)
-    }
-    fn __goish_as_dyn_any(&self) -> ::core::option::Option<&(dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync)> {
-        Some(self)
-    }
-}
-
-extern "C" fn __register_anyDirs_for_dirEntryDirs() {
-    __goish_register_anyDirs_impl::<dirEntryDirs>();
-}
-#[link_section = ".init_array"]
-#[used]
-static __INIT_anyDirs_for_dirEntryDirs: extern "C" fn() = __register_anyDirs_for_dirEntryDirs;
-
-impl anyDirs for fileInfoDirs {
-    fn len(&self) -> int {
-        fileInfoDirs::len(self)
-    }
-    fn name(&mut self, i: int) -> string {
-        fileInfoDirs::name(self, i)
-    }
-    fn isDir(&mut self, i: int) -> bool {
-        fileInfoDirs::isDir(self, i)
-    }
-    fn __goish_as_dyn_any(&self) -> ::core::option::Option<&(dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync)> {
-        Some(self)
-    }
-}
-
-extern "C" fn __register_anyDirs_for_fileInfoDirs() {
-    __goish_register_anyDirs_impl::<fileInfoDirs>();
-}
-#[link_section = ".init_array"]
-#[used]
-static __INIT_anyDirs_for_fileInfoDirs: extern "C" fn() = __register_anyDirs_for_fileInfoDirs;
 
 impl io::Reader for ioFile {
     fn Read(&mut self, b: &mut slice<byte>) -> (int, error) {
