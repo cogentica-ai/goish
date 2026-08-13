@@ -110,11 +110,66 @@ fn main() {
         }
     }
 
+    // 3. Trailing-slash redirect (matchOrRedirect + exactMatch). A
+    //    request for "/dir" reaches a handler registered as "/dir/"
+    //    via a 301, NOT by matching it directly — and the query
+    //    string is carried across. "/file/" does NOT redirect back to
+    //    "/file": the rule only adds a slash, never removes one.
+    //    Pinned from Go 1.25.5.
+    {
+        let m3 = http::NewServeMux();
+        m3.HandleFunc(
+            string("/dir/"),
+            |w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &http::Request| {
+                let _ = w.Write(convert::bytes(string("dir")));
+            },
+        );
+        m3.HandleFunc(
+            string("/file"),
+            |w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &http::Request| {
+                let _ = w.Write(convert::bytes(string("file")));
+            },
+        );
+        let cases: &[(&str, i64, &str, &str)] = &[
+            ("/dir/", 200, "", "dir"),
+            ("/dir", 301, "/dir/", "<a href=\"/dir/\">Moved Permanently</a>.\n\n"),
+            ("/dir?q=1", 301, "/dir/?q=1", "<a href=\"/dir/?q=1\">Moved Permanently</a>.\n\n"),
+            ("/file", 200, "", "file"),
+            ("/file/", 404, "", "404 page not found\n"),
+            ("/nope", 404, "", "404 page not found\n"),
+        ];
+        let mut bad = 0;
+        for (path, wantCode, wantLoc, wantBody) in cases {
+            let rec = httptest::NewRecorder();
+            let (req, _) = http::NewRequest(
+                string("GET"),
+                string("http://e.com") + string(*path),
+                goish::nil,
+            );
+            {
+                let w: &(dyn ResponseWriter + Send + Sync + 'static) = &rec;
+                http::Handler::ServeHTTP(&m3, w, &req);
+            }
+            let body = string::from_bytes(&rec.Body());
+            let loc = rec.Header().Get(string("Location"));
+            if rec.Code() != *wantCode || loc != *wantLoc || body != *wantBody {
+                fmt::Println!("     ", *path, " code=", rec.Code(), " loc=", loc, " body=", body);
+                bad += 1;
+            }
+        }
+        if bad == 0 {
+            fmt::Println!("[3] trailing-slash 301, query preserved, no reverse  PASS");
+        } else {
+            fmt::Println!("[3] trailing-slash redirect  FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 2/2");
+        fmt::Println!("ok 3/3");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL ", failed, " of 2");
+        fmt::Println!("FAIL ", failed, " of 3");
         syscall::Exit(1);
     }
 }

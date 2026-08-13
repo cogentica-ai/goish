@@ -221,6 +221,16 @@ impl ServeMux {
         let host = stripHostPort(r.Host.clone());
         let path = cleanPath(r.URL.Path.clone());
         let s = self.state.Lock();
+        // Go: if the given path is /tree and its handler is not
+        // registered, redirect for /tree/ (findHandler, server.go:2865).
+        if let Some(u) = self.matchOrRedirect(&s, &host, &r.Method, &path, Some(&r.URL)) {
+            let target = u.String();
+            return (
+                RedirectHandler(target.clone(), super::status::StatusMovedPermanently),
+                target,
+                crate::gomap::map::<string, string>::new(),
+            );
+        }
         let (n, matches) = s.tree.r#match(&host, &r.Method, &path);
         if let Some(n) = n {
             if let Some(h) = n.handler.clone() {
@@ -303,7 +313,78 @@ impl Handler for methodNotAllowedHandler {
     }
 }
 
+// go: sdk 1.25.5 net/http/server.go:2805-2827 exactMatch
+//
+/// Reports whether the node's pattern matched `path` EXACTLY — with an
+/// empty match for a trailing multi wildcard.
+///
+/// Go's comment explains why the test is structural: "We can't
+/// directly implement the definition (empty match for multi wildcard)
+/// because we don't record a match for anonymous multis." A pattern
+/// whose last segment is not a multi always matched exactly; a multi
+/// matched emptily only when the path ends in '/' AND the pattern has
+/// as many segments as the path has slashes. That last clause is what
+/// makes "/a/b/{$}" and "/a/b/{rest...}" exact for "/a/b/" while "/a/"
+/// is not.
+pub fn exactMatch(n: Option<&super::routing_tree::routingNode>, path: &string) -> bool {
+    let n = match n {
+        None => return false,
+        Some(n) => n,
+    };
+    let pat = match n.pattern.as_ref() {
+        None => return false,
+        Some(p) => p,
+    };
+    if !pat.lastSegment().multi {
+        return true;
+    }
+    if path.Len() > 0 && path[path.Len() - 1] != b'/' {
+        return false;
+    }
+    return crate::len(&pat.segments) == strings::Count(path.clone(), string("/"));
+}
+
 impl ServeMux {
+    // go: sdk 1.25.5 net/http/server.go:2757-2777 ServeMux.matchOrRedirect
+    //
+    /// Match `path`; if it does not match exactly but the same path
+    /// WITH a trailing slash does, return the URL to redirect to.
+    ///
+    /// This is why a request for "/dir" reaches a handler registered
+    /// as "/dir/" — via a 301 to "/dir/", not by matching it directly.
+    ///
+    // goishlint:ignore GOISH020 matchOrRedirect — Go takes the lock
+    // INSIDE this method (`mux.mu.RLock(); defer mux.mu.RUnlock()`);
+    // goish's only caller, find_node, already holds the guard, so it
+    // is passed in rather than re-acquired. Re-locking a non-reentrant
+    // Mutex here would deadlock. Hence six parameters where Go has
+    // five.
+    fn matchOrRedirect(
+        &self,
+        s: &MuxState,
+        host: &string,
+        method: &string,
+        path: &string,
+        u: Option<&super::url::URL>,
+    ) -> Option<super::url::URL> {
+        let (n, _matches) = s.tree.r#match(host, method, path);
+        // Go: if we have an exact match, or were asked not to try
+        // trailing-slash redirection, or the URL already ends in one,
+        // we are done.
+        if !exactMatch(n, path) && u.is_some() && !strings::HasSuffix(path.clone(), string("/")) {
+            let slashed = path.clone() + "/";
+            let (n2, _) = s.tree.r#match(host, method, &slashed);
+            if exactMatch(n2, &slashed) {
+                let uu = u.unwrap();
+                let mut redirect = super::url::URL::empty();
+                redirect.Path = cleanPath(uu.Path.clone()) + "/";
+                redirect.RawQuery = uu.RawQuery.clone();
+                return Some(redirect);
+            }
+        }
+        return None;
+    }
+
     // go: sdk 1.25.5 net/http/server.go:2683-2689 ServeMux.Handler
     //
     /// Return the handler that would dispatch `r`, along with the
