@@ -171,11 +171,45 @@ fn main() {
         }
     }
 
+    // 8. wantsClose — the Close FIELD or a "close" token in Connection.
+    //    "closely" must NOT match, which is the hasToken boundary rule
+    //    (case 1) reaching a place where getting it wrong drops a
+    //    connection the client wanted kept.
+    {
+        let cases: &[(bool, &'static str, bool)] = &[
+            (false, "", false),
+            (true, "", true),
+            (false, "close", true),
+            (false, "Close", true),
+            (false, "keep-alive", false),
+            (false, "keep-alive, close", true),
+            (false, "closely", false),
+            (true, "keep-alive", true),
+        ];
+        let mut bad = 0;
+        for (close, conn, want) in cases {
+            let mut r = req("GET", "HTTP/1.1", 1, 1, "/", &[]);
+            r.Close = *close;
+            if *conn != "" {
+                r.Header.Set(string("Connection"), string(*conn));
+            }
+            if r.wantsClose() != *want {
+                fmt::Println!("     wantsClose(Close=", *close, " Connection=", *conn, ") wrong");
+                bad += 1;
+            }
+        }
+        if bad == 0 {
+            fmt::Println!("[8] wantsClose, 8 cases vs Go  PASS");
+        } else {
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 7/7");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL ", failed, " of 7");
+        fmt::Println!("FAIL ", failed, " of 8");
         syscall::Exit(1);
     }
 }

@@ -1183,6 +1183,9 @@ impl Client {
                         current.Method.clone()
                     };
                     let mut next = Request {
+                        Close: false,
+                        Trailer: Header::new(),
+                        TLS: None,
                         Method: next_method.clone(),
                         URL: loc.clone(),
                         Proto: string("HTTP/1.1"),
@@ -1403,6 +1406,9 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
     let body_len = body.Len();
     let host = u.Host.clone();
     let req = Request {
+        Close: false,
+        Trailer: Header::new(),
+        TLS: None,
         Method: m,
         URL: u,
         Proto: string("HTTP/1.1"),
@@ -1422,6 +1428,9 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
 
 fn default_request() -> Request {
     Request {
+        Close: false,
+        Trailer: Header::new(),
+        TLS: None,
         Method: string::new(),
         URL: URL::empty(),
         Proto: string::new(),

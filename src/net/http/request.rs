@@ -75,6 +75,32 @@ pub struct Request {
     /// `WithContext` / `Clone`; middleware uses this to hand values
     /// (request IDs, auth principals) down the handler chain.
     pub(crate) ctx: Option<alloc::sync::Arc<dyn crate::context::Context>>,
+
+    /// `Request.Close` (request.go:224) — whether to close the
+    /// connection after replying to this request (servers) or after
+    /// sending it and reading its response (clients).
+    ///
+    /// Go: "For server requests, the HTTP server handles this
+    /// automatically and this field is not needed by Handlers. For
+    /// client requests, setting this field prevents re-use of TCP
+    /// connections between requests to the same hosts, as if
+    /// Transport.DisableKeepAlives were set."
+    pub Close: bool,
+
+    /// `Request.Trailer` (request.go:283) — trailer keys and values.
+    ///
+    /// Go: "For client requests, Trailer must be initialized to a map
+    /// containing the trailer keys to later send. The values may be
+    /// nil or their final values. The ContentLength must be 0 or -1,
+    /// to send a chunked request."
+    pub Trailer: Header,
+
+    /// `Request.TLS` (request.go:307) — the TLS connection state for a
+    /// request received over TLS, or `None` for plaintext.
+    ///
+    /// Go's field is a `*tls.ConnectionState` where nil means "not
+    /// TLS"; `Option` is that pointer's nil-ness spelled out.
+    pub TLS: Option<alloc::sync::Arc<crate::crypto::tls::ConnectionState>>,
 }
 
 /// Internal form-parse cell — the four fields that ParseForm
@@ -452,6 +478,22 @@ impl Request {
         return hasToken(self.Header.Get(string("Expect")), string("100-continue"));
     }
 
+    // go: sdk 1.25.5 net/http/request.go:1520-1525 Request.wantsClose
+    //
+    /// Reports whether the request wants the connection closed after
+    /// the reply — either the `Close` field is set, or the Connection
+    /// header carries the "close" token.
+    ///
+    /// Go reads the header through the unexported `get`, a raw map
+    /// lookup; "Connection" is already canonical so goish's `Get`
+    /// returns the same value.
+    pub fn wantsClose(&self) -> bool {
+        if self.Close {
+            return true;
+        }
+        return hasToken(self.Header.Get(string("Connection")), string("close"));
+    }
+
     // go: sdk 1.25.5 net/http/request.go:1513-1518 Request.wantsHttp10KeepAlive
     pub fn wantsHttp10KeepAlive(&self) -> bool {
         if self.ProtoMajor != 1 || self.ProtoMinor != 0 {
@@ -655,6 +697,9 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         DEFAULT_MAX_LINE
     };
     let mut req = Request {
+        Close: false,
+        Trailer: Header::new(),
+        TLS: None,
         Method: string::new(),
         URL: URL::empty(),
         Proto: string::new(),
