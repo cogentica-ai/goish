@@ -30,8 +30,9 @@ use goish::net::http::server::{
     debugServerConnections, errTooLarge, extraHeaderKeys, maxPostHandlerReadBytes,
     nextProtoUnencryptedHTTP2, rstAvoidanceDelay, shutdownPollIntervalMax, ConnStateString,
     StateActive, StateClosed, StateHijacked, StateIdle, StateNew, TrailerPrefix, badRequestError,
-    getCopyBuf, htmlReplacer, putCopyBuf, statusError,
+    extraHeader, getCopyBuf, htmlReplacer, putCopyBuf, statusError,
 };
+use goish::bytes;
 use goish::errors::ErrorTrait;
 use goish::errors;
 use goish::time;
@@ -309,11 +310,60 @@ fn main() {
         check!("[11] getCopyBuf/putCopyBuf round trip", bad);
     }
 
+    // 12. extraHeader.Write — the headers the response writer emits
+    //     from its own fields rather than the Header map.
+    //
+    //     Two things are pinned because they are easy to get wrong:
+    //     the ORDER (Date and Content-Length first, then Content-Type,
+    //     Connection, Transfer-Encoding — matching extraHeaderKeys),
+    //     and that an EMPTY value writes NOTHING rather than a header
+    //     with an empty value. "empty-string ct" produces no output at
+    //     all, which is why date/contentLength are byte slices in Go:
+    //     absent and empty must be distinguishable.
+    {
+        let mk = |ct: &'static str, conn: &'static str, te: &'static str, date: &'static str, cl: &'static str| -> string {
+            let h = extraHeader {
+                contentType: string(ct),
+                connection: string(conn),
+                transferEncoding: string(te),
+                date: slice::from(date.as_bytes()),
+                contentLength: slice::from(cl.as_bytes()),
+            };
+            let mut buf = bytes::Buffer::new();
+            h.Write(&mut buf);
+            return string::from_bytes(&buf.Bytes());
+        };
+        let cases: &[(string, &str)] = &[
+            (mk("", "", "", "", ""), ""),
+            (mk("text/plain", "", "", "", ""), "Content-Type: text/plain\r\n"),
+            (
+                mk("text/plain", "close", "chunked", "", ""),
+                "Content-Type: text/plain\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n",
+            ),
+            (
+                mk("", "", "", "Mon, 01 Jan 2024 00:00:00 GMT", "42"),
+                "Date: Mon, 01 Jan 2024 00:00:00 GMT\r\nContent-Length: 42\r\n",
+            ),
+            (
+                mk("text/html", "keep-alive", "identity", "D", "7"),
+                "Date: D\r\nContent-Length: 7\r\nContent-Type: text/html\r\nConnection: keep-alive\r\nTransfer-Encoding: identity\r\n",
+            ),
+        ];
+        let mut bad = 0;
+        for (got, want) in cases {
+            if got != *want {
+                fmt::Println!("     extraHeader.Write got: ", got.clone());
+                bad += 1;
+            }
+        }
+        check!("[12] extraHeader.Write, 5 cases vs Go", bad);
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 11/11");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL ", failed, " of 11");
+        fmt::Println!("FAIL ", failed, " of 12");
         syscall::Exit(1);
     }
 }

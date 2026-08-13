@@ -1093,6 +1093,88 @@ pub struct __ServerState {
     on_shutdown: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
 }
 
+// go: sdk 1.25.5 net/http/server.go:371-374 crlf
+pub fn crlf() -> crate::goslice::slice<crate::types::byte> {
+    return crate::convert::bytes(string("\r\n"));
+}
+
+/// `": "` — the header name/value separator.
+pub fn colonSpace() -> crate::goslice::slice<crate::types::byte> {
+    return crate::convert::bytes(string(": "));
+}
+
+// go: sdk 1.25.5 net/http/server.go:1255-1258 headerContentLength
+pub fn headerContentLength() -> crate::goslice::slice<crate::types::byte> {
+    return crate::convert::bytes(string("Content-Length: "));
+}
+
+/// `"Date: "` — written by extraHeader ahead of the map headers.
+pub fn headerDate() -> crate::goslice::slice<crate::types::byte> {
+    return crate::convert::bytes(string("Date: "));
+}
+
+// go: sdk 1.25.5 net/http/server.go:1240-1246 extraHeader
+//
+/// The headers the response writer emits from its own fields rather
+/// than from the Header map — see [`extraHeaderKeys`], which names the
+/// three string-valued ones in the SAME ORDER `Write` iterates them.
+///
+/// `date` and `contentLength` are byte slices because Go writes them
+/// only "if not nil": an empty slice means the header is omitted
+/// entirely, which is different from writing it with an empty value.
+#[derive(Clone, Default)]
+pub struct extraHeader {
+    pub contentType: string,
+    pub connection: string,
+    pub transferEncoding: string,
+    /// Written if non-empty.
+    pub date: crate::goslice::slice<crate::types::byte>,
+    /// Written if non-empty.
+    pub contentLength: crate::goslice::slice<crate::types::byte>,
+}
+
+impl extraHeader {
+    // go: sdk 1.25.5 net/http/server.go:1260-1284 extraHeader.Write
+    //
+    // Go's note on the value receiver is a performance point that does
+    // not carry over: "This method has a value receiver, despite the
+    // somewhat large size of h, because it prevents an allocation."
+    // goish takes `&self`; there is no escape analysis to defeat.
+    //
+    // The ORDER is load-bearing: Date and Content-Length first, then
+    // the three from extraHeaderKeys, which is why that slice and the
+    // field iteration below must stay in step.
+    pub fn Write<W: crate::io::Writer>(&self, w: &mut W) {
+        if crate::len(&self.date) != 0 {
+            let _ = w.Write(headerDate());
+            let _ = w.Write(self.date.clone());
+            let _ = w.Write(crlf());
+        }
+        if crate::len(&self.contentLength) != 0 {
+            let _ = w.Write(headerContentLength());
+            let _ = w.Write(self.contentLength.clone());
+            let _ = w.Write(crlf());
+        }
+        let keys = extraHeaderKeys();
+        let vals = [
+            self.contentType.clone(),
+            self.connection.clone(),
+            self.transferEncoding.clone(),
+        ];
+        let mut i: int = 0;
+        while i < 3 {
+            let v = vals[i as usize].clone();
+            if v != "" {
+                let _ = w.Write(keys[i].clone());
+                let _ = w.Write(colonSpace());
+                let _ = w.Write(crate::convert::bytes(v));
+                let _ = w.Write(crlf());
+            }
+            i += 1;
+        }
+    }
+}
+
 // go: sdk 1.25.5 net/http/server.go:2456-2466 htmlReplacer
 //
 /// The escaper Redirect's HTML body and dirList's link text go
