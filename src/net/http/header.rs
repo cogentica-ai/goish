@@ -106,6 +106,17 @@ impl Header {
     }
 
     /// `h.Values(key)` — all values for `key`. Empty slice if absent.
+
+    // go: sdk 1.25.5 net/http/header.go:72-75 Header.has
+    /// `h.has(key)` — key presence, distinct from `Get` returning "".
+    /// Unexported in Go; serveError needs it to tell an absent header
+    /// from one explicitly set to the empty string.
+    pub fn has<K: Into<string>>(&self, key: K) -> bool {
+        let k = canonical_key(&key.into());
+        let (_values, ok) = self.inner.Get(k);
+        return ok;
+    }
+
     pub fn Values<K: Into<string>>(&self, key: K) -> slice<string> {
         let k = canonical_key(&key.into());
         let (values, ok) = self.inner.Get(k);

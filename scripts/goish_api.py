@@ -39,6 +39,13 @@ DECL = re.compile(
 # `pub use foo::{A, B};` / `pub use foo::A;` / `pub use foo::*;`
 USE = re.compile(r"^\s*pub\s+use\s+([^;]+);", re.M)
 MACRO = re.compile(r"^\s*(?:#\[macro_export\]\s*)?macro_rules!\s+([A-Za-z_]\w*)", re.M)
+# A `crate::var! { pub ErrNotExist: error = "..."; }` member. These are
+# module-level names produced by a macro, so the `pub fn`/`pub static`
+# forms above never see them — io/fs's five sentinels read as absent and
+# `block.py deps` called four fs.go blocks blocked on errors that were
+# right there. Struct fields match this shape too; over-reporting names
+# only costs a missed warning, while under-reporting invents blockers.
+VAR_MEMBER = re.compile(r"^\s*pub\s+([A-Za-z_]\w*)\s*:\s*[A-Za-z_&]", re.M)
 
 
 def module_of(path):
@@ -71,6 +78,8 @@ def build(src=SRC):
                 if kind in ("struct", "trait", "enum", "type"):
                     e["types"].add(name)
             for name in MACRO.findall(text):
+                e["names"].add(name)
+            for name in VAR_MEMBER.findall(text):
                 e["names"].add(name)
             for spec in USE.findall(text):
                 if "*" in spec:

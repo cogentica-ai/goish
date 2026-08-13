@@ -154,27 +154,12 @@ impl From<fileInfoDirs> for slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Syn
 }
 
 impl fileInfoDirs {
-    // go: sdk 1.25.5 net/http/fs.go:129-129 fileInfoDirs.len
-    // go: draft goishc — machine-translated, unreviewed
-    pub fn len(&self) -> int {
-        return len(&self);
-    }
 }
 
 impl fileInfoDirs {
-    // go: sdk 1.25.5 net/http/fs.go:130-130 fileInfoDirs.isDir
-    // go: draft goishc — machine-translated, unreviewed
-    pub fn isDir(&mut self, i: int) -> bool {
-        return self[i].IsDir();
-    }
 }
 
 impl fileInfoDirs {
-    // go: sdk 1.25.5 net/http/fs.go:131-131 fileInfoDirs.name
-    // go: draft goishc — machine-translated, unreviewed
-    pub fn name(&mut self, i: int) -> string {
-        return self[i].Name();
-    }
 }
 
 #[derive(Default, Clone)]
@@ -228,27 +213,12 @@ impl From<dirEntryDirs> for slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Syn
 }
 
 impl dirEntryDirs {
-    // go: sdk 1.25.5 net/http/fs.go:135-135 dirEntryDirs.len
-    // go: draft goishc — machine-translated, unreviewed
-    pub fn len(&self) -> int {
-        return len(&self);
-    }
 }
 
 impl dirEntryDirs {
-    // go: sdk 1.25.5 net/http/fs.go:136-136 dirEntryDirs.isDir
-    // go: draft goishc — machine-translated, unreviewed
-    pub fn isDir(&mut self, i: int) -> bool {
-        return self[i].IsDir();
-    }
 }
 
 impl dirEntryDirs {
-    // go: sdk 1.25.5 net/http/fs.go:137-137 dirEntryDirs.name
-    // go: draft goishc — machine-translated, unreviewed
-    pub fn name(&mut self, i: int) -> string {
-        return self[i].Name();
-    }
 }
 
 // go: sdk 1.25.5 net/http/fs.go:139-178 dirList
@@ -295,27 +265,6 @@ pub fn dirList(w: impl ResponseWriter + 'static, r: nilable![&http::Request], f:
 
 pub static httpservecontentkeepheaders: goish::lazy::Lazy<nilable<godebug::Setting>> = goish::lazy::Lazy::new(|| nilable::new(godebug::New(string::from("httpservecontentkeepheaders"))));
 
-// go: sdk 1.25.5 net/http/fs.go:188-212 serveError
-// go: draft goishc — machine-translated, unreviewed
-pub fn serveError<S: Into<string>>(w: impl ResponseWriter + 'static, text: S, code: int) {
-    let text = text.into();
-    let h = w.Header();
-    let mut nonDefault = false;
-    for (_, k) in range!(slice!([]string{string::from("Cache-Control"), string::from("Content-Encoding"), string::from("Etag"), string::from("Last-Modified")})) {
-        if !h.has(k.clone()) {
-            continue;
-        }
-        if httpservecontentkeepheaders.Must().Value() == "1" {
-            nonDefault = true;
-        } else {
-            h.Del(k.clone());
-        }
-    }
-    if nonDefault {
-        httpservecontentkeepheaders.Must().IncNonDefault();
-    }
-    Error(w, text, code);
-}
 
 // go: sdk 1.25.5 net/http/fs.go:245-258 ServeContent
 // go: draft goishc — machine-translated, unreviewed
@@ -539,20 +488,6 @@ pub fn toHTTPError(err: error) -> (string, int) {
     return (string("500 Internal Server Error"), StatusInternalServerError);
 }
 
-// go: sdk 1.25.5 net/http/fs.go:785-791 localRedirect
-// go: draft goishc — machine-translated, unreviewed
-pub fn localRedirect<S: Into<string>>(w: impl ResponseWriter + 'static, r: nilable![&http::Request], mut newPath: S) {
-    #[allow(unused_mut)]
-    let mut newPath = newPath.into();
-    {
-        let q = r.Must().URL.RawQuery;
-        if q != "" {
-            newPath += string("?") + q;
-        }
-    }
-    w.Header().Set(string("Location"), newPath);
-    w.WriteHeader(StatusMovedPermanently);
-}
 
 // go: sdk 1.25.5 net/http/fs.go:814-826 ServeFile
 // go: draft goishc — machine-translated, unreviewed

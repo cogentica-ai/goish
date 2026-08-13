@@ -164,6 +164,13 @@ impl HeaderHandle {
         self.0.lock().Del(key);
     }
 
+    /// `h.has(key)` — key presence, forwarded to [`Header::has`].
+    /// Distinct from `Get` returning `""`: serveError must tell an
+    /// absent header from one explicitly set empty.
+    pub fn has<K: Into<string>>(&self, key: K) -> bool {
+        self.0.lock().has(key)
+    }
+
     /// `h.Get(key)` — the first value for `key`, or `""`.
     pub fn Get<K: Into<string>>(&self, key: K) -> string {
         self.0.lock().Get(key)

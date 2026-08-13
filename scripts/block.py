@@ -34,7 +34,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from anchor_check import (  # noqa: E402
-    ANCHOR, GOROOT, go_src, strip_literals,
+    ANCHOR, GOROOT, enclosing_impl, go_src, strip_literals,
 )
 
 DRAFT = re.compile(r"^\s*//\s*go:\s*draft\b")
@@ -290,7 +290,16 @@ def cmd_promote(path, syms):
         # standalone nor valid in place.
         body = [l.replace("goish::", "crate::")
                 for l in lines[top:b["rs_end"]] if not DRAFT.match(l)]
-        moved.append((b["sym"], "\n".join(body)))
+        text = "\n".join(body)
+        # A method's anchor sits INSIDE its `impl` block, so the span
+        # covers the fn alone. Lifted out bare it becomes a free
+        # function with a `self` parameter — six of fs.go's accessors
+        # collided that way, three pairs of same-named methods on
+        # different types landing in one namespace. Restore the wrapper.
+        ty = enclosing_impl(lines, top)
+        if ty:
+            text = f"impl {ty} {{\n{text}\n}}"
+        moved.append((b["sym"], text))
         del lines[top:b["rs_end"]]
 
     dst = open(live, errors="replace").read()

@@ -32,12 +32,13 @@ use super::server::{Handler, NotFound};
 use crate::delete;
 use crate::io::fs;
 use super::header::{ParseTime, TimeFormat};
-use super::status::{StatusNotModified, StatusPreconditionFailed};
+use super::status::{StatusMovedPermanently, StatusNotModified, StatusPreconditionFailed};
 use crate::go;
 use crate::len;
 use crate::nil;
 use crate::nilable;
 use crate::net::textproto;
+use crate::range;
 
 /// `http.Dir(root)` — bind a filesystem root directory. Mirrors Go's
 /// `type Dir string` (fs.go:44).
@@ -743,4 +744,125 @@ pub fn checkPreconditions(w: &(dyn ResponseWriter + Send + Sync + 'static), r: n
         rangeHeader = string("");
     }
     return (false, rangeHeader);
+}
+
+impl fileInfoDirs {
+    // go: sdk 1.25.5 net/http/fs.go:129-129 fileInfoDirs.len
+    pub fn len(&self) -> int {
+        return len(&self.0);
+    }
+}
+
+impl fileInfoDirs {
+    // go: sdk 1.25.5 net/http/fs.go:130-130 fileInfoDirs.isDir
+    pub fn isDir(&mut self, i: int) -> bool {
+        return self[i].IsDir();
+    }
+}
+
+impl fileInfoDirs {
+    // go: sdk 1.25.5 net/http/fs.go:131-131 fileInfoDirs.name
+    pub fn name(&mut self, i: int) -> string {
+        return self[i].Name();
+    }
+}
+
+impl dirEntryDirs {
+    // go: sdk 1.25.5 net/http/fs.go:135-135 dirEntryDirs.len
+    pub fn len(&self) -> int {
+        return len(&self.0);
+    }
+}
+
+impl dirEntryDirs {
+    // go: sdk 1.25.5 net/http/fs.go:136-136 dirEntryDirs.isDir
+    pub fn isDir(&mut self, i: int) -> bool {
+        return self[i].IsDir();
+    }
+}
+
+impl dirEntryDirs {
+    // go: sdk 1.25.5 net/http/fs.go:137-137 dirEntryDirs.name
+    pub fn name(&mut self, i: int) -> string {
+        return self[i].Name();
+    }
+}
+
+// go: sdk 1.25.5 net/http/fs.go:188-212 serveError
+pub fn serveError<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), text: S, code: int) {
+    let text = text.into();
+    let h = w.Header();
+    for k in [string("Cache-Control"), string("Content-Encoding"),
+                  string("Etag"), string("Last-Modified")] {
+        if !h.has(k.clone()) {
+            continue;
+        }
+        // goish has no internal/godebug, so the
+        // `httpservecontentkeepheaders=1` opt-out cannot be read. Go's
+        // default with the variable unset is this branch.
+        h.Del(k.clone());
+    }
+    super::server::Error(w, text, code);
+}
+
+// go: sdk 1.25.5 net/http/fs.go:785-791 localRedirect
+pub fn localRedirect<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable![&Request], mut newPath: S) {
+    #[allow(unused_mut)]
+    let mut newPath = newPath.into();
+    {
+        let q = r.Must().URL.RawQuery.clone();
+        if q != "" {
+            newPath += string("?") + q;
+        }
+    }
+    w.Header().Set(string("Location"), newPath);
+    w.WriteHeader(StatusMovedPermanently);
+}
+
+// go: sdk 1.25.5 net/http/fs.go:121-125 anyDirs
+#[goish::interface] // goishlint:ignore GOISH022 - attribute macro path; `goish::` is the spelling everywhere
+pub trait anyDirs {
+    fn len(&self) -> int;
+    fn name(&mut self, i: int) -> string;
+    fn isDir(&mut self, i: int) -> bool;
+}
+
+// go: sdk 1.25.5 net/http/fs.go:127-127 fileInfoDirs
+#[derive(Default, Clone)]
+pub struct fileInfoDirs(pub slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>>);
+
+impl core::ops::Deref for fileInfoDirs {
+    type Target = slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>>;
+    // go: none — Deref plumbing for the newtype; Go's `fileInfoDirs` IS a
+    // slice, so indexing and len need no method there.
+    fn deref(&self) -> &slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>> {
+        return &self.0;
+    }
+}
+
+impl core::ops::DerefMut for fileInfoDirs {
+    // go: none — Deref plumbing, as above.
+    fn deref_mut(&mut self) -> &mut slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>> {
+        return &mut self.0;
+    }
+}
+
+// go: sdk 1.25.5 net/http/fs.go:133-133 dirEntryDirs
+#[derive(Default, Clone)]
+pub struct dirEntryDirs(pub slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>>);
+
+impl core::ops::Deref for dirEntryDirs {
+    type Target = slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>>;
+    // go: none — Deref plumbing for the newtype; Go's `dirEntryDirs` IS a
+    // slice, so indexing and len need no method there.
+    fn deref(&self) -> &slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>> {
+        return &self.0;
+    }
+}
+
+impl core::ops::DerefMut for dirEntryDirs {
+    // go: none — Deref plumbing, as above.
+    fn deref_mut(&mut self) -> &mut slice<alloc::sync::Arc<dyn fs::DirEntry + Send + Sync>> {
+        return &mut self.0;
+    }
 }

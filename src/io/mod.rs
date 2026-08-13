@@ -74,6 +74,13 @@ pub trait ReadCloser: Reader + Closer {}
 /// automatically implements `ReadCloser`.
 impl<T: Reader + Closer> ReadCloser for T {}
 
+/// Go's `io.ReadSeeker` (io.go:139) — combines [`Reader`] and
+/// [`Seeker`]. net/http's ServeContent takes one.
+pub trait ReadSeeker: Reader + Seeker {}
+
+/// Blanket impl, as for [`ReadCloser`].
+impl<T: Reader + Seeker> ReadSeeker for T {}
+
 /// Go's `io.Seeker` (io.go:126). Reposition the read/write head.
 /// Whence is one of `SeekStart`, `SeekCurrent`, `SeekEnd`.
 #[goish::interface]
