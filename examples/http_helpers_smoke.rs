@@ -1,6 +1,9 @@
 // http_helpers_smoke — exercise the small private helpers ported
 // from net/http/http.go (hasPort, removeEmptyPort, isToken,
 // stringContainsCTLByte, hexEscapeNonASCII).
+//
+// They used to live in a goish-invented `helpers.rs`; they are in
+// `http.rs` now, one Rust file per Go file.
 
 #![no_std]
 #![no_main]
@@ -10,7 +13,7 @@ extern crate alloc;
 extern crate goish;
 
 use goish::fmt;
-use goish::net::http::helpers::{
+use goish::net::http::http::{
     hasPort, hexEscapeNonASCII, isToken, removeEmptyPort, stringContainsCTLByte,
 };
 use goish::{string, syscall};
@@ -65,7 +68,7 @@ fn main() {
         if got == "example.com" {
             fmt::Println!("[ 5] removeEmptyPort strip     PASS");
         } else {
-            fmt::Println!("[ 5] removeEmptyPort strip     FAIL got={}", got);
+            fmt::Println!("[ 5] removeEmptyPort strip     FAIL got=", got);
             failed += 1;
         }
     }
@@ -76,7 +79,7 @@ fn main() {
         if got == "example.com:80" {
             fmt::Println!("[ 6] removeEmptyPort keep      PASS");
         } else {
-            fmt::Println!("[ 6] removeEmptyPort keep      FAIL got={}", got);
+            fmt::Println!("[ 6] removeEmptyPort keep      FAIL got=", got);
             failed += 1;
         }
     }
@@ -87,7 +90,7 @@ fn main() {
         if got == "example.com" {
             fmt::Println!("[ 7] removeEmptyPort bare      PASS");
         } else {
-            fmt::Println!("[ 7] removeEmptyPort bare      FAIL got={}", got);
+            fmt::Println!("[ 7] removeEmptyPort bare      FAIL got=", got);
             failed += 1;
         }
     }
@@ -169,7 +172,7 @@ fn main() {
         if got == "/foo/bar" {
             fmt::Println!("[15] hexEscape ascii           PASS");
         } else {
-            fmt::Println!("[15] hexEscape ascii           FAIL got={}", got);
+            fmt::Println!("[15] hexEscape ascii           FAIL got=", got);
             failed += 1;
         }
     }
@@ -181,7 +184,7 @@ fn main() {
         if got == "r%c3%a9" {
             fmt::Println!("[16] hexEscape utf-8 e-acute   PASS");
         } else {
-            fmt::Println!("[16] hexEscape utf-8 e-acute   FAIL got={}", got);
+            fmt::Println!("[16] hexEscape utf-8 e-acute   FAIL got=", got);
             failed += 1;
         }
     }
@@ -193,7 +196,7 @@ fn main() {
         if got == "abc%ff" {
             fmt::Println!("[17] hexEscape trailing        PASS");
         } else {
-            fmt::Println!("[17] hexEscape trailing        FAIL got={}", got);
+            fmt::Println!("[17] hexEscape trailing        FAIL got=", got);
             failed += 1;
         }
     }
@@ -205,7 +208,7 @@ fn main() {
         if got == "%80%81" {
             fmt::Println!("[18] hexEscape only non-ascii  PASS");
         } else {
-            fmt::Println!("[18] hexEscape only non-ascii  FAIL got={}", got);
+            fmt::Println!("[18] hexEscape only non-ascii  FAIL got=", got);
             failed += 1;
         }
     }
@@ -214,7 +217,7 @@ fn main() {
         fmt::Println!("ok 18/18");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL {} of 18", failed);
+        fmt::Println!("FAIL", failed, "of 18");
         syscall::Exit(1);
     }
 }

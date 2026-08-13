@@ -118,6 +118,13 @@ def decl_hits(gofile, sym, free_only=False):
                 # assignment inside a function body.
                 re.compile(r"^\s+" + re.escape(sym) +
                            r"\s*(=|\s+[\w.\[\]*]+\s*=|\s+[\w.\[\]*]+$)"),
+                # An `iota` continuation line, which carries no `=` at
+                # all: net/http's `protoHTTP1 = 1 << iota` is followed
+                # by bare `protoHTTP2` and `protoUnencryptedHTTP2`.
+                # Without this those names resolve nowhere and can never
+                # be anchored, though they are as much declarations as
+                # the first member of the block.
+                re.compile(r"^\s+" + re.escape(sym) + r"\s*$"),
                 ] + ([] if free_only else
                      [re.compile(r"^func\s*\([^)]*\)\s*" + re.escape(sym) + r"\b")])
         bare = True

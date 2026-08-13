@@ -21,7 +21,7 @@ pub mod cookiejar;
 pub mod csrf;
 pub mod fs;
 pub mod header;
-pub mod helpers;
+pub mod http;
 pub mod httptest;
 pub mod httptrace;
 pub mod httputil;
@@ -29,7 +29,6 @@ pub mod internal;
 pub mod jar;
 pub mod method;
 pub mod pattern;
-pub mod protocols;
 pub mod request;
 pub mod response;
 pub mod server;
@@ -57,7 +56,7 @@ pub use method::{
     MethodConnect, MethodDelete, MethodGet, MethodHead, MethodOptions, MethodPatch, MethodPost,
     MethodPut, MethodTrace,
 };
-pub use protocols::{NoBody, Protocols};
+pub use http::{HTTP2Config, NoBody, Protocols, PushOptions, Pusher};
 pub use request::{
     ErrHeaderTooLong, ErrMaxBytes, ErrMissingBoundary, ErrMissingContentLength, ErrMissingFile,
     ErrNoCookie, ErrNotMultipart, ErrNotSupported, ErrShortBody, ErrUnexpectedTrailer,
@@ -65,7 +64,7 @@ pub use request::{
     ProtocolError, ReadRequest, Request,
 };
 pub use response::{
-    Flusher, HeaderHandle, Hijacker, PushOptions, Pusher, ResponseWriter,
+    Flusher, HeaderHandle, Hijacker, ResponseWriter,
 };
 pub use httputil::NewSingleHostReverseProxy;
 pub use server::{

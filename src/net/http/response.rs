@@ -111,23 +111,8 @@ pub trait Hijacker {
     fn Hijack(&self) -> (TCPConn, error);
 }
 
-/// `http.PushOptions` (server.go:170) — options for `Pusher.Push`.
-#[derive(Clone)]
-pub struct PushOptions {
-    /// HTTP method for the promised request. Empty means "GET".
-    pub Method: string,
-    /// Additional request headers for the promised request.
-    pub Header: Header,
-}
-
-/// `http.Pusher` (server.go:189) — implemented by ResponseWriters
-/// that support HTTP/2 server push. The v1 HTTP/1.x `response` does
-/// not implement this — Go's HTTP/1 `*response` doesn't either.
-#[goish::interface]
-pub trait Pusher {
-    /// `Push(target, opts)` — initiate an HTTP/2 server push.
-    fn Push(&self, target: string, opts: PushOptions) -> error;
-}
+// PushOptions and Pusher moved to http.rs — Go declares both in
+// net/http/http.go, not in a response file.
 
 // ─── HeaderHandle ───────────────────────────────────────────────────
 

@@ -1,4 +1,9 @@
 // http_protocols_smoke — exercise http.Protocols (Go 1.25) + http.NoBody.
+//
+// `Protocols::new()` is gone: Go has no such constructor, the zero
+// value IS the empty set, and `Protocols::default()` is how goish
+// spells `var p Protocols`. NoBody is likewise a value now, not a call,
+// matching Go's `var NoBody = noBody{}`.
 
 #![no_std]
 #![no_main]
@@ -19,7 +24,7 @@ fn main() {
 
     // 1. Zero value: all protocol bits cleared.
     {
-        let p = http::Protocols::new();
+        let p = http::Protocols::default();
         if !p.HTTP1() && !p.HTTP2() && !p.UnencryptedHTTP2() {
             fmt::Println!("[ 1] zero is empty             PASS");
         } else {
@@ -30,7 +35,7 @@ fn main() {
 
     // 2. SetHTTP1(true) flips only the HTTP1 bit.
     {
-        let mut p = http::Protocols::new();
+        let mut p = http::Protocols::default();
         p.SetHTTP1(true);
         if p.HTTP1() && !p.HTTP2() && !p.UnencryptedHTTP2() {
             fmt::Println!("[ 2] SetHTTP1(true) flips      PASS");
@@ -42,7 +47,7 @@ fn main() {
 
     // 3. SetHTTP1(false) clears the HTTP1 bit (idempotent on zero).
     {
-        let mut p = http::Protocols::new();
+        let mut p = http::Protocols::default();
         p.SetHTTP1(true);
         p.SetHTTP1(false);
         if !p.HTTP1() {
@@ -55,7 +60,7 @@ fn main() {
 
     // 4. HTTP2 + UnencryptedHTTP2 are independent bits.
     {
-        let mut p = http::Protocols::new();
+        let mut p = http::Protocols::default();
         p.SetHTTP2(true);
         p.SetUnencryptedHTTP2(true);
         if p.HTTP2() && p.UnencryptedHTTP2() && !p.HTTP1() {
@@ -68,18 +73,18 @@ fn main() {
 
     // 5. String format on empty set: "{}".
     {
-        let p = http::Protocols::new();
+        let p = http::Protocols::default();
         if p.String() == "{}" {
             fmt::Println!("[ 5] String() empty            PASS");
         } else {
-            fmt::Println!("[ 5] String() empty            FAIL got={}", p.String());
+            fmt::Println!("[ 5] String() empty            FAIL got=", p.String());
             failed += 1;
         }
     }
 
     // 6. String format on full set: "{HTTP1,HTTP2,UnencryptedHTTP2}".
     {
-        let mut p = http::Protocols::new();
+        let mut p = http::Protocols::default();
         p.SetHTTP1(true);
         p.SetHTTP2(true);
         p.SetUnencryptedHTTP2(true);
@@ -87,41 +92,41 @@ fn main() {
         if s == "{HTTP1,HTTP2,UnencryptedHTTP2}" {
             fmt::Println!("[ 6] String() full             PASS");
         } else {
-            fmt::Println!("[ 6] String() full             FAIL got={}", s);
+            fmt::Println!("[ 6] String() full             FAIL got=", s);
             failed += 1;
         }
     }
 
     // 7. String format on mixed: only HTTP1 + UnencryptedHTTP2 set.
     {
-        let mut p = http::Protocols::new();
+        let mut p = http::Protocols::default();
         p.SetHTTP1(true);
         p.SetUnencryptedHTTP2(true);
         let s = p.String();
         if s == "{HTTP1,UnencryptedHTTP2}" {
             fmt::Println!("[ 7] String() mixed            PASS");
         } else {
-            fmt::Println!("[ 7] String() mixed            FAIL got={}", s);
+            fmt::Println!("[ 7] String() mixed            FAIL got=", s);
             failed += 1;
         }
     }
 
     // 8. NoBody.Read returns (0, EOF).
     {
-        let mut nb = http::NoBody();
+        let mut nb = http::NoBody;
         let mut buf = make!([]goish::byte, 16);
         let (n, err) = io::Reader::Read(&mut nb, &mut buf);
         if n == 0 && errors::Is(err, io::EOF) {
             fmt::Println!("[ 8] NoBody.Read=(0,EOF)       PASS");
         } else {
-            fmt::Println!("[ 8] NoBody.Read=(0,EOF)       FAIL n={}", n);
+            fmt::Println!("[ 8] NoBody.Read=(0,EOF)       FAIL n=", n);
             failed += 1;
         }
     }
 
     // 9. NoBody.Close returns nil.
     {
-        let mut nb = http::NoBody();
+        let mut nb = http::NoBody;
         let err = io::Closer::Close(&mut nb);
         if err.IsNil() {
             fmt::Println!("[ 9] NoBody.Close=nil          PASS");
@@ -133,13 +138,13 @@ fn main() {
 
     // 10. NoBody.WriteTo returns (0, nil.into()) without touching the writer.
     {
-        let mut nb = http::NoBody();
+        let mut nb = http::NoBody;
         let mut buf = goish::bytes::NewBuffer(make!([]goish::byte, 0));
         let (n, err) = io::WriterTo::WriteTo(&mut nb, &mut buf);
         if n == 0 && err.IsNil() && buf.Len() == 0 {
             fmt::Println!("[10] NoBody.WriteTo=(0,nil)    PASS");
         } else {
-            fmt::Println!("[10] NoBody.WriteTo=(0,nil)    FAIL n={} buflen={}", n, buf.Len());
+            fmt::Println!("[10] NoBody.WriteTo=(0,nil)    FAIL n=", n, " buflen=", buf.Len());
             failed += 1;
         }
     }
@@ -151,7 +156,7 @@ fn main() {
         fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL {} of 10", failed);
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }
