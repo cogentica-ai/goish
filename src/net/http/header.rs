@@ -18,6 +18,7 @@ use crate::gomap::map;
 use crate::goslice::slice;
 use crate::string;
 use crate::types::{byte, int};
+use crate::len;
 
 /// Go's `net/http.Header` — `map<string, slice<string>>`.
 ///
@@ -459,4 +460,59 @@ fn ascii_to_lower(b: u8) -> u8 {
     } else {
         b
     }
+}
+
+// go: sdk 1.25.5 net/http/header.go:236-270 hasToken
+//
+// hasToken reports whether token appears with v, ASCII
+// case-insensitive, with space or comma boundaries.
+// token must be all lowercase.
+// v may contain mixed cased.
+pub fn hasToken<V: Into<string>, T: Into<string>>(v: V, token: T) -> bool {
+    let v: string = v.into();
+    let token: string = token.into();
+    if len(&token) > len(&v) || token == "" {
+        return false;
+    }
+    if v == token {
+        return true;
+    }
+    let mut sp: int = 0;
+    while sp <= len(&v) - len(&token) {
+        // Check that first character is good.
+        // The token is ASCII, so checking only a single byte
+        // is sufficient. We skip this potential starting
+        // position if both the first byte and its potential
+        // ASCII uppercase equivalent (b|0x20) don't match.
+        // False positives ('^' => '~') are caught by EqualFold.
+        let b = v[sp];
+        if b != token[0] && (b | 0x20) != token[0] {
+            sp += 1;
+            continue;
+        }
+        // Check that start pos is on a valid token boundary.
+        if sp > 0 && !isTokenBoundary(v[sp - 1]) {
+            sp += 1;
+            continue;
+        }
+        // Check that end pos is on a valid token boundary.
+        let endPos = sp + len(&token);
+        if endPos != len(&v) && !isTokenBoundary(v[endPos]) {
+            sp += 1;
+            continue;
+        }
+        if crate::net::http::internal::ascii::EqualFold(
+            v.slice(sp, sp + len(&token)),
+            token.clone(),
+        ) {
+            return true;
+        }
+        sp += 1;
+    }
+    return false;
+}
+
+// go: sdk 1.25.5 net/http/header.go:272-274 isTokenBoundary
+pub fn isTokenBoundary(b: byte) -> bool {
+    return b == b' ' || b == b',' || b == b'\t';
 }

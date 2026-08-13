@@ -26,10 +26,11 @@ use crate::bytes;
 use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::io::{self, Reader};
+use crate::len;
 use crate::string;
 use crate::types::{byte, int};
 
-use super::header::Header;
+use super::header::{hasToken, Header};
 use super::url::{parse_request_uri, URL};
 
 /// `net/http.Request`. Slim — only fields a handler typically reads.
@@ -420,6 +421,49 @@ impl Request {
             self.Header.Set(string("Cookie"), string::from_bytes(&buf));
         }
     }
+
+    // go: sdk 1.25.5 net/http/request.go:529-531 Request.isH2Upgrade
+    pub fn isH2Upgrade(&self) -> bool {
+        return self.Method == "PRI"
+            && self.Header.Len() == 0
+            && self.URL.Path == "*"
+            && self.Proto == "HTTP/2.0";
+    }
+
+    // go: sdk 1.25.5 net/http/request.go:1509-1511 Request.expectsContinue
+    //
+    // Go calls the unexported `Header.get`, a raw map read that skips
+    // canonicalization. "Expect" is already canonical, so goish's
+    // canonicalizing `Get` returns the same value here.
+    pub fn expectsContinue(&self) -> bool {
+        return hasToken(self.Header.Get(string("Expect")), string("100-continue"));
+    }
+
+    // go: sdk 1.25.5 net/http/request.go:1513-1518 Request.wantsHttp10KeepAlive
+    pub fn wantsHttp10KeepAlive(&self) -> bool {
+        if self.ProtoMajor != 1 || self.ProtoMinor != 0 {
+            return false;
+        }
+        return hasToken(self.Header.Get(string("Connection")), string("keep-alive"));
+    }
+
+    // go: sdk 1.25.5 net/http/request.go:1579-1582 Request.requiresHTTP1
+    pub fn requiresHTTP1(&self) -> bool {
+        return hasToken(self.Header.Get(string("Connection")), string("upgrade"))
+            && crate::net::http::internal::ascii::EqualFold(
+                self.Header.Get(string("Upgrade")),
+                string("websocket"),
+            );
+    }
+}
+
+// go: sdk 1.25.5 net/http/request.go:534-539 valueOrDefault
+pub fn valueOrDefault<V: Into<string>, D: Into<string>>(value: V, def: D) -> string {
+    let value: string = value.into();
+    if value != "" {
+        return value;
+    }
+    return def.into();
 }
 
 // ─── ReadRequest ─────────────────────────────────────────────────────
