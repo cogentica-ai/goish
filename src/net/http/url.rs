@@ -363,9 +363,23 @@ impl URL {
     /// request-target this is the inverse of `parse_request_uri`.
     pub fn String(&self) -> string {
         let mut out: Vec<u8> = Vec::with_capacity(64);
+        // Go writes the scheme and the authority INDEPENDENTLY:
+        //
+        //   if u.Scheme != "" { buf.WriteString(u.Scheme); buf.WriteByte(':') }
+        //   if u.Scheme != "" || u.Host != "" || u.User != nil { … "//" … host }
+        //
+        // goish previously emitted the authority only when a scheme
+        // was present, so a SCHEME-RELATIVE url — "//example.com/x",
+        // which Parse handles correctly — rendered back as just "/x",
+        // silently losing the host. That is reachable from
+        // Response.Location and anywhere a URL is logged or
+        // re-requested.
         if !self.Scheme.as_bytes().is_empty() {
             out.extend_from_slice(self.Scheme.as_bytes());
-            out.extend_from_slice(b"://");
+            out.push(b':');
+        }
+        if !self.Scheme.as_bytes().is_empty() || !self.Host.as_bytes().is_empty() {
+            out.extend_from_slice(b"//");
             out.extend_from_slice(self.Host.as_bytes());
         }
         // Go: path := u.EscapedPath()  — NOT u.Path. Writing the raw
