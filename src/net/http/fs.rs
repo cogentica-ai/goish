@@ -27,7 +27,7 @@ use crate::time;
 use crate::types::{byte, int, rune};
 
 use super::request::Request;
-use super::response::ResponseWriter;
+use super::responsewriter::ResponseWriter;
 use super::server::Handler;
 use crate::io::fs;
 use super::header::{ParseTime, TimeFormat};
@@ -1338,7 +1338,7 @@ pub fn serveContent<C: crate::io::Reader + crate::io::Seeker>(
         if len(&ranges) > 1 {
             let _ = w.Write(multipartBody);
         } else {
-            let mut aw = super::response::AsWriter(w);
+            let mut aw = super::responsewriter::AsWriter(w);
             let _ = crate::io::CopyN(&mut aw, content, sendSize);
         }
     }

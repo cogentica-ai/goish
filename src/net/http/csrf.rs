@@ -27,7 +27,7 @@ use crate::sync::atomic::Pointer;
 use crate::sync::Mutex;
 
 use super::request::Request;
-use super::response::ResponseWriter;
+use super::responsewriter::ResponseWriter;
 use super::server::{Handler, HandlerFunc, ServeMux};
 use super::status::StatusForbidden;
 use super::url;

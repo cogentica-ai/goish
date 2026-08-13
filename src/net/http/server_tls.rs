@@ -47,8 +47,8 @@ use crate::go;
 use crate::net;
 use crate::types::{byte, int};
 
-use super::response::{body_allowed_for_status, build_head, push_hex};
-use super::response::{Flusher, HeaderHandle, ResponseWriter};
+use super::responsewriter::{body_allowed_for_status, build_head, push_hex};
+use super::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
 use super::request::{ReadRequestWithLimit, Request};
 use super::server::request_keep_alive_pub;
 use super::header::Header;

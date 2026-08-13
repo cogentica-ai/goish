@@ -37,7 +37,7 @@ extern crate goish;
 use goish::fmt;
 use goish::gostring::string as gostring;
 use goish::net::http::httptest::NewRecorder;
-use goish::net::http::response::{Flusher, ResponseWriter};
+use goish::net::http::responsewriter::{Flusher, ResponseWriter};
 use goish::{string, syscall};
 
 #[goish::main]

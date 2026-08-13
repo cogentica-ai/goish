@@ -18,7 +18,7 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use goish::net::http;
 use goish::net::http::cgi;
-use goish::net::http::response::ResponseWriter;
+use goish::net::http::responsewriter::ResponseWriter;
 use goish::{fmt, slice, string, syscall};
 
 /// A writer that keeps what was written, so the CGI bytes can be

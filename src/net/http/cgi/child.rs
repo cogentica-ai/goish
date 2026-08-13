@@ -244,7 +244,7 @@ pub fn Request() -> (Request, error) {
 /// lives behind a lock rather than in a `&mut` receiver as in Go.
 pub struct response {
     req_url: string,
-    header: super::super::response::HeaderHandle,
+    header: super::super::responsewriter::HeaderHandle,
     st: crate::sync::Mutex<responseState>,
 }
 
@@ -266,7 +266,7 @@ impl response {
     pub fn new(req: &Request, w: alloc::boxed::Box<dyn crate::io::Writer + Send + Sync>) -> response {
         return response {
             req_url: req.URL.String(),
-            header: super::super::response::HeaderHandle::new(Header::new()),
+            header: super::super::responsewriter::HeaderHandle::new(Header::new()),
             st: crate::sync::Mutex::new(responseState {
                 code: 0,
                 wroteHeader: false,
@@ -311,9 +311,9 @@ impl response {
     }
 }
 
-impl super::super::response::ResponseWriter for response {
+impl super::super::responsewriter::ResponseWriter for response {
     // go: sdk 1.25.5 net/http/cgi/child.go:182-184 response.Header
-    fn Header(&self) -> super::super::response::HeaderHandle {
+    fn Header(&self) -> super::super::responsewriter::HeaderHandle {
         return self.header.clone();
     }
 
@@ -372,7 +372,7 @@ pub fn Serve(handler: Arc<dyn super::super::Handler>) -> error {
     let rw = response::new(&req, alloc::boxed::Box::new(crate::os::Stdout()));
     handler.ServeHTTP(&rw, &req);
     // Make sure a response is sent.
-    let _ = super::super::response::ResponseWriter::Write(&rw, slice::<byte>::new());
+    let _ = super::super::responsewriter::ResponseWriter::Write(&rw, slice::<byte>::new());
     let mut g = rw.st.Lock();
     return g.bufw.Flush();
 }

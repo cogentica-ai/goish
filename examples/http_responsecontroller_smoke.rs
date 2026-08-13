@@ -34,7 +34,7 @@ use core::sync::atomic::{AtomicI64, Ordering};
 use goish::errors;
 use goish::fmt;
 use goish::goslice::slice;
-use goish::net::http::response::{Flusher, HeaderHandle, ResponseWriter};
+use goish::net::http::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
 use goish::net::http::responsecontroller::{FlushErrorer, NewResponseController, rwUnwrapper};
 use goish::net::http::{ErrNotSupported, Header};
 use goish::types::{byte, int};
@@ -173,12 +173,12 @@ fn main() {
     // Go's type switch needs no such step; goish's downcast consults a
     // per-trait registry, and an unregistered type simply reads as "does
     // not implement", which is a silent miss rather than an error.
-    goish::net::http::response::__goish_register_ResponseWriter_impl::<bare>();
-    goish::net::http::response::__goish_register_ResponseWriter_impl::<flushOnly>();
-    goish::net::http::response::__goish_register_ResponseWriter_impl::<bothFlushes>();
-    goish::net::http::response::__goish_register_ResponseWriter_impl::<wrapper>();
-    goish::net::http::response::__goish_register_Flusher_impl::<flushOnly>();
-    goish::net::http::response::__goish_register_Flusher_impl::<bothFlushes>();
+    goish::net::http::responsewriter::__goish_register_ResponseWriter_impl::<bare>();
+    goish::net::http::responsewriter::__goish_register_ResponseWriter_impl::<flushOnly>();
+    goish::net::http::responsewriter::__goish_register_ResponseWriter_impl::<bothFlushes>();
+    goish::net::http::responsewriter::__goish_register_ResponseWriter_impl::<wrapper>();
+    goish::net::http::responsewriter::__goish_register_Flusher_impl::<flushOnly>();
+    goish::net::http::responsewriter::__goish_register_Flusher_impl::<bothFlushes>();
     goish::net::http::responsecontroller::__goish_register_FlushErrorer_impl::<bothFlushes>();
     goish::net::http::responsecontroller::__goish_register_rwUnwrapper_impl::<wrapper>();
 

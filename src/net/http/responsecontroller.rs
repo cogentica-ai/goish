@@ -37,7 +37,7 @@ use alloc::sync::Arc;
 use crate::errors::error;
 use crate::time::Time;
 
-use super::response::{Flusher, Hijacker, ResponseWriter};
+use super::responsewriter::{Flusher, Hijacker, ResponseWriter};
 use crate::net::TCPConn;
 
 /// The writer chain ResponseController walks. Every method takes it by

@@ -44,7 +44,7 @@ use goish::gomap::map;
 use goish::goslice::slice;
 use goish::gostring::string as gostring;
 use goish::net::http::pattern::parsePattern;
-use goish::net::http::response::ResponseWriter;
+use goish::net::http::responsewriter::ResponseWriter;
 use goish::net::http::routing_index::routingIndex;
 use goish::net::http::routing_tree::routingNode;
 use goish::net::http::server::Handler;

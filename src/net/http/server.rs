@@ -37,7 +37,7 @@ use crate::time;
 use crate::types::int;
 
 use super::request::Request;
-use super::response::{response, ResponseWriter};
+use super::responsewriter::{response, ResponseWriter};
 
 /// `http.Handler` — types that can serve HTTP requests. Mirrors
 /// Go's `type Handler interface { ServeHTTP(ResponseWriter, *Request) }`
@@ -699,7 +699,7 @@ impl Handler for timeoutHandler {
 /// ResponseWriter handed to the wrapped handler.
 struct timeoutWriter {
     /// tw.h — headers the handler sets while it still owns the budget.
-    header: super::response::HeaderHandle,
+    header: super::responsewriter::HeaderHandle,
     state: crate::runtime::spin::SpinLock<twState>,
 }
 
@@ -717,7 +717,7 @@ struct twState {
 impl timeoutWriter {
     fn new() -> Self {
         timeoutWriter {
-            header: super::response::HeaderHandle::new(super::header::Header::new()),
+            header: super::responsewriter::HeaderHandle::new(super::header::Header::new()),
             state: crate::runtime::spin::SpinLock::new(twState {
                 buf: Vec::new(),
                 code: 0,
@@ -755,7 +755,7 @@ impl timeoutWriter {
 }
 
 impl ResponseWriter for timeoutWriter {
-    fn Header(&self) -> super::response::HeaderHandle {
+    fn Header(&self) -> super::responsewriter::HeaderHandle {
         self.header.clone()
     }
 

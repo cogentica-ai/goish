@@ -25,7 +25,7 @@ extern crate goish;
 use alloc::sync::Arc;
 use goish::net::http;
 use goish::net::http::httptest;
-use goish::net::http::response::ResponseWriter;
+use goish::net::http::responsewriter::ResponseWriter;
 use goish::net::http::server::{serverHandler, Handler, Server};
 use goish::{convert, fmt, string, syscall};
 

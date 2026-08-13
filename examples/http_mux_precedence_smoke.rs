@@ -30,7 +30,7 @@ extern crate goish;
 
 use goish::net::http;
 use goish::net::http::httptest;
-use goish::net::http::response::ResponseWriter;
+use goish::net::http::responsewriter::ResponseWriter;
 use goish::{convert, fmt, string, syscall};
 
 #[goish::main]

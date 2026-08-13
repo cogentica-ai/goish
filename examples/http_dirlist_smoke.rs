@@ -29,7 +29,7 @@ extern crate goish;
 
 use goish::net::http::fs::{dirList, FileSystem, NewDir};
 use goish::net::http::httptest;
-use goish::net::http::response::ResponseWriter;
+use goish::net::http::responsewriter::ResponseWriter;
 use goish::os;
 use goish::{convert, fmt, string, syscall};
 

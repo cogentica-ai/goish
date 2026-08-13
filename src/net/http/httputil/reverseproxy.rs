@@ -104,7 +104,7 @@ impl super::super::server::Handler for reverseProxyHandler {
     // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:345-565 ReverseProxy.ServeHTTP
     fn ServeHTTP(
         &self,
-        w: &(dyn super::super::response::ResponseWriter + Send + Sync + 'static),
+        w: &(dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static),
         r: &super::super::request::Request,
     ) {
         // Go: outreq := req.Clone(req.Context())
@@ -171,7 +171,7 @@ impl super::super::server::Handler for reverseProxyHandler {
         // token streams) pass through the proxy live instead of
         // buffering until upstream EOF. (Go gets the same effect via
         // ReverseProxy.FlushInterval / the periodicFlusher.)
-        let (fl, has_fl) = crate::cast!(w, super::super::response::Flusher);
+        let (fl, has_fl) = crate::cast!(w, super::super::responsewriter::Flusher);
         loop {
             let mut buf = crate::make!([]byte, 32 * 1024);
             let (n, rerr) = crate::io::Reader::Read(&mut resp.Body, &mut buf);

@@ -35,7 +35,7 @@ pub mod method;
 pub(crate) mod omithttp2;
 pub mod pattern;
 pub mod request;
-pub mod response;
+pub mod responsewriter;
 pub mod routing_index;
 pub mod routing_tree;
 pub mod responsecontroller;
@@ -75,7 +75,7 @@ pub use request::{
     ProtocolError, ReadRequest, Request,
 };
 pub use responsecontroller::{NewResponseController, ResponseController};
-pub use response::{
+pub use responsewriter::{
     AsWriter,
     Flusher, HeaderHandle, Hijacker, ResponseWriter,
 };
