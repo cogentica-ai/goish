@@ -961,6 +961,17 @@ fn host_without_port(host: &string) -> string {
 /// CheckRedirect override (always uses default of 10 max), no Jar.
 pub struct Client {
     pub Transport: Arc<dyn RoundTripper>,
+    /// `Client.Jar` (client.go) — the cookie jar. When set, the jar
+    /// supplies the request's Cookie header and receives the
+    /// response's Set-Cookie headers, INCLUDING across redirects,
+    /// which is what makes a session survive a 302.
+    ///
+    /// goish's `cookiejar` package is fully ported and was
+    /// unreachable until this field existed — a whole package ported
+    /// and unwired.
+    ///
+    /// `None` ≡ Go's nil Jar: cookies are neither sent nor stored.
+    pub Jar: Option<Arc<dyn super::CookieJar>>,
     /// Whole-request deadline. Zero ≡ no timeout.
     pub Timeout: time::Duration,
 }
@@ -969,6 +980,7 @@ impl Default for Client {
     fn default() -> Self {
         Client {
             Transport: Arc::new(Transport::default()) as Arc<dyn RoundTripper>,
+            Jar: None,
             Timeout: time::Duration(0),
         }
     }
@@ -1015,10 +1027,51 @@ impl Client {
         // redirect loop causes exactly MAX_REDIRECTS requests, not
         // MAX_REDIRECTS + 1. `0..=MAX_REDIRECTS` issued eleven,
         // measured against Go's ten with a self-redirecting server.
+        // The caller's own Cookie header, before any jar additions.
+        let originalCookies = current.Header.Values(string("Cookie"));
         for _step in 0..MAX_REDIRECTS {
+            // Go (client.go, send): if c.Jar != nil { for _, cookie
+            // := range c.Jar.Cookies(req.URL) { req.AddCookie(cookie) } }
+            //
+            // Go builds each redirected request's headers from the
+            // ORIGINAL request (makeHeadersCopier closes over
+            // `ireqhdr`), so the jar's additions from hop N never
+            // carry into hop N+1 — the jar re-supplies them for the
+            // new URL. goish copies the PREVIOUS hop's header into
+            // the redirect, so without this reset the Cookie header
+            // accumulated: "sid=abc; sid=abc; hop=1" against Go's
+            // "sid=abc; hop=1".
+            //
+            // Restoring the caller's own Cookie header (captured
+            // before the first hop) and letting the jar re-add keeps
+            // both halves of Go's rule: a user-set Cookie survives
+            // every hop, and jar cookies are recomputed per URL.
+            if let Some(jar) = self.Jar.as_ref() {
+                current.Header.Del(string("Cookie"));
+                for i in 0..originalCookies.len() {
+                    current
+                        .Header
+                        .Add(string("Cookie"), originalCookies[i].clone());
+                }
+                let cs = jar.Cookies(&current.URL);
+                for i in 0..cs.len() {
+                    current.AddCookie(&cs[i]);
+                }
+            }
             let (resp, err) = self.Transport.RoundTrip(&current);
             if !err.IsNil() {
                 return (resp, err);
+            }
+            // Go (client.go, send): if c.Jar != nil { if rc :=
+            // resp.Cookies(); len(rc) > 0 { c.Jar.SetCookies(req.URL, rc) } }
+            //
+            // This runs on EVERY hop, which is what carries a session
+            // cookie set by a 302 into the redirected request below.
+            if let Some(jar) = self.Jar.as_ref() {
+                let rc = resp.Cookies();
+                if rc.len() > 0 {
+                    jar.SetCookies(&current.URL, rc);
+                }
             }
             // Decide whether to follow.
             match resp.StatusCode {
