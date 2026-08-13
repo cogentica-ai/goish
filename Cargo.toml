@@ -591,6 +591,10 @@ name = "http_reverseproxy_helpers2_smoke"
 path = "examples/http_reverseproxy_helpers2_smoke.rs"
 
 [[example]]
+name = "http_rewriteurl_smoke"
+path = "examples/http_rewriteurl_smoke.rs"
+
+[[example]]
 name = "http_server_pure_smoke"
 path = "examples/http_server_pure_smoke.rs"
 

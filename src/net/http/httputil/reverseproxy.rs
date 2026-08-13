@@ -111,25 +111,7 @@ impl super::super::server::Handler for reverseProxyHandler {
         let mut outreq = r.clone();
 
         // Go: rewriteRequestURL(req, target)
-        outreq.URL.Scheme = self.target.Scheme.clone();
-        outreq.URL.Host = self.target.Host.clone();
-        outreq.URL.Path = join_url_path(&self.target.Path, &r.URL.Path);
-        outreq.URL.RawPath = outreq.URL.Path.clone();
-        // Combine target query with request query, preferring incoming.
-        if self.target.RawQuery.Len() > 0 || r.URL.RawQuery.Len() > 0 {
-            if self.target.RawQuery.Len() == 0 || r.URL.RawQuery.Len() == 0 {
-                let mut q = strings::Builder::new();
-                let _ = q.WriteString(self.target.RawQuery.clone());
-                let _ = q.WriteString(r.URL.RawQuery.clone());
-                outreq.URL.RawQuery = q.String();
-            } else {
-                let mut q = strings::Builder::new();
-                let _ = q.WriteString(self.target.RawQuery.clone());
-                let _ = q.WriteByte(b'&');
-                let _ = q.WriteString(r.URL.RawQuery.clone());
-                outreq.URL.RawQuery = q.String();
-            }
-        }
+        rewriteRequestURL(&mut outreq, &self.target);
         // Drop the original Host so URL.Host wins on serialization.
         outreq.Host = string::new();
 
@@ -343,4 +325,65 @@ pub fn cleanQueryParams<S: Into<string>>(s: S) -> string {
         }
     }
     return s;
+}
+
+
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:234-252 joinURLPath
+//
+/// Joins the target's path with the incoming request's, returning
+/// both the decoded path and the raw (escaped) one.
+///
+/// When NEITHER url carries a RawPath this is just
+/// `singleJoiningSlash` on the decoded paths. Otherwise Go decides
+/// where the slash goes using the ESCAPED paths, while still building
+/// the decoded result from the decoded ones — the two answers can
+/// differ when a segment contains an encoded slash, and getting it
+/// from the decoded path alone would let "%2F" change which target
+/// path a request lands on.
+pub fn joinURLPath(
+    a: &super::super::url::URL,
+    b: &super::super::url::URL,
+) -> (string, string) {
+    if a.RawPath.Len() == 0 && b.RawPath.Len() == 0 {
+        return (singleJoiningSlash(a.Path.clone(), b.Path.clone()), string::new());
+    }
+    let apath = a.EscapedPath();
+    let bpath = b.EscapedPath();
+    let aslash = crate::strings::HasSuffix(apath.clone(), string("/"));
+    let bslash = crate::strings::HasPrefix(bpath.clone(), string("/"));
+    if aslash && bslash {
+        return (
+            a.Path.clone() + b.Path.slice(1, b.Path.Len()),
+            apath.clone() + bpath.slice(1, bpath.Len()),
+        );
+    }
+    if !aslash && !bslash {
+        return (
+            a.Path.clone() + string("/") + b.Path.clone(),
+            apath + string("/") + bpath,
+        );
+    }
+    return (a.Path.clone() + b.Path.clone(), apath + bpath);
+}
+
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:282-291 rewriteRequestURL
+//
+/// Points `req` at `target`: target scheme and host, the two paths
+/// joined, and the two queries concatenated with `&` only when BOTH
+/// are non-empty.
+pub fn rewriteRequestURL(
+    req: &mut super::super::request::Request,
+    target: &super::super::url::URL,
+) {
+    let targetQuery = target.RawQuery.clone();
+    req.URL.Scheme = target.Scheme.clone();
+    req.URL.Host = target.Host.clone();
+    let (p, rp) = joinURLPath(target, &req.URL);
+    req.URL.Path = p;
+    req.URL.RawPath = rp;
+    if targetQuery.Len() == 0 || req.URL.RawQuery.Len() == 0 {
+        req.URL.RawQuery = targetQuery + req.URL.RawQuery.clone();
+    } else {
+        req.URL.RawQuery = targetQuery + string("&") + req.URL.RawQuery.clone();
+    }
 }
