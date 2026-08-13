@@ -527,6 +527,10 @@ name = "http_server_handlers_smoke"
 path = "examples/http_server_handlers_smoke.rs"
 
 [[example]]
+name = "http_fcgi_smoke"
+path = "examples/http_fcgi_smoke.rs"
+
+[[example]]
 name = "http_constants_smoke"
 path = "examples/http_constants_smoke.rs"
 
