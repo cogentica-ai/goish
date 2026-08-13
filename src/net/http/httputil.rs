@@ -14,7 +14,7 @@ use crate::string;
 use crate::strings;
 use crate::types::byte;
 
-use super::chunked::{ChunkedReader, ChunkedWriter};
+use super::internal::chunked::{ChunkedReader, ChunkedWriter};
 use super::client::Response;
 use super::request::Request;
 
@@ -25,7 +25,7 @@ use super::request::Request;
 /// dechunked body and signals EOF on the terminator. Thin wrapper
 /// over the internal `chunked.NewChunkedReader`.
 pub fn NewChunkedReader<R: Reader>(r: R) -> ChunkedReader<R> {
-    super::chunked::NewChunkedReader(r)
+    super::internal::chunked::NewChunkedReader(r)
 }
 
 /// `httputil.NewChunkedWriter(w)` (httputil.go:36) — wrap `w` so
@@ -34,12 +34,12 @@ pub fn NewChunkedReader<R: Reader>(r: R) -> ChunkedReader<R> {
 /// — callers writing trailers (or a final empty trailer) must emit
 /// the closing CRLF themselves.
 pub fn NewChunkedWriter<W: Writer>(w: W) -> ChunkedWriter<W> {
-    super::chunked::NewChunkedWriter(w)
+    super::internal::chunked::NewChunkedWriter(w)
 }
 
 /// `httputil.ErrLineTooLong` (httputil.go:43) — re-export of
 /// `chunked::ErrLineTooLong`. Same Arc identity.
-pub use super::chunked::ErrLineTooLong;
+pub use super::internal::chunked::ErrLineTooLong;
 
 /// `httputil.DumpRequest(req, body) -> ([]byte, error)` — render a
 /// Request in HTTP/1.x wire format. Line-by-line port of Go 1.25

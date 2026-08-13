@@ -12,3 +12,4 @@
 #![allow(non_snake_case)]
 
 pub mod ascii;
+pub mod chunked;

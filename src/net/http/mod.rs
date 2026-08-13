@@ -14,7 +14,7 @@
 
 #![allow(non_snake_case)]
 
-pub mod chunked;
+
 pub mod client;
 pub mod cookie;
 pub mod cookiejar;

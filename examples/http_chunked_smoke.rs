@@ -38,7 +38,7 @@ fn main() {
     {
         let mut buf = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
         {
-            let mut cw = http::chunked::NewChunkedWriter(&mut buf);
+            let mut cw = http::internal::chunked::NewChunkedWriter(&mut buf);
             let _ = cw.Write(bytes("hello "));
             let _ = cw.Write(bytes("world"));
             let _ = cw.Close();
@@ -64,7 +64,7 @@ fn main() {
     {
         let wire_vec: Vec<u8> = b"6\r\nhello \r\n5\r\nworld\r\n0\r\n\r\n".to_vec();
         let buf = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(wire_vec));
-        let mut cr = http::chunked::NewChunkedReader(buf);
+        let mut cr = http::internal::chunked::NewChunkedReader(buf);
         let mut out: Vec<u8> = Vec::new();
         loop {
             let mut dst = goish::goslice::slice::<u8>::__from_vec(alloc::vec![0u8; 32]);

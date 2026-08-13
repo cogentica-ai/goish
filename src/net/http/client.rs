@@ -145,7 +145,7 @@ impl ConnSrc {
 enum FramedBody {
     Eager { data: slice<byte>, off: int },
     Cl { src: ConnSrc, remaining: int },
-    Chunked { cr: super::chunked::ChunkedReader<ConnSrc> },
+    Chunked { cr: super::internal::chunked::ChunkedReader<ConnSrc> },
     UntilEof { src: ConnSrc },
     Closed,
 }
@@ -448,7 +448,7 @@ pub fn ReadResponse<R: Reader>(
         }
         BodyKind::Chunked => {
             let body = make!([]byte, 0);
-            let mut cr = super::chunked::NewChunkedReader(BufioPassthrough { inner: br });
+            let mut cr = super::internal::chunked::NewChunkedReader(BufioPassthrough { inner: br });
             let (b, err) = drain_to_eof(&mut cr, body);
             if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
                 return (resp, err);
@@ -973,7 +973,7 @@ fn attach_stream_body(
         BodyKind::Chunked => {
             resp.Body = Body::from_parts(
                 FramedBody::Chunked {
-                    cr: super::chunked::NewChunkedReader(src),
+                    cr: super::internal::chunked::NewChunkedReader(src),
                 },
                 ctx,
                 watch,

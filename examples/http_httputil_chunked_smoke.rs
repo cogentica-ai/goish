@@ -73,18 +73,24 @@ fn main() {
         if got == "hello world" {
             fmt::Println!("[ 2] httputil reader round-tr  PASS");
         } else {
-            fmt::Println!("[ 2] httputil reader round-tr  FAIL got={}", got);
+            fmt::Println!("[ 2] httputil reader round-tr  FAIL got=", got);
             failed += 1;
         }
     }
 
-    // 3. ErrLineTooLong is non-nil and has the documented message.
+    // 3. ErrLineTooLong carries GO's message, verbatim.
+    //
+    //    goish used to prefix every chunked error with "http: ". Go does
+    //    not — internal/chunked.go:21 is
+    //    `errors.New("header line too long")`. A caller comparing the
+    //    text, which is the only thing an errors.New sentinel exposes
+    //    across a package boundary, would not have matched.
     {
         let e: goish::error = httputil::ErrLineTooLong.into();
-        if !e.IsNil() && e.Error() == "http: chunked header line too long" {
+        if !e.IsNil() && e.Error() == "header line too long" {
             fmt::Println!("[ 3] ErrLineTooLong            PASS");
         } else {
-            fmt::Println!("[ 3] ErrLineTooLong            FAIL msg={}", e.Error());
+            fmt::Println!("[ 3] ErrLineTooLong            FAIL msg=", e.Error());
             failed += 1;
         }
     }
@@ -126,7 +132,7 @@ fn main() {
         fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL {} of 5", failed);
+        fmt::Println!("FAIL", failed, "of 5");
         syscall::Exit(1);
     }
 }

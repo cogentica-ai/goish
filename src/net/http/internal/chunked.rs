@@ -1,27 +1,14 @@
-// net/http/chunked — HTTP/1.1 "chunked" Transfer-Encoding wire format.
+// go: package net/http/internal
 //
-// Faithful port of Go 1.25 src/net/http/internal/chunked.go (300 LOC).
+// go: file net/http/internal/chunked.go decls: NewChunkedReader, chunkedReader.beginChunk, chunkedReader.chunkHeaderAvailable, chunkedReader.Read, readChunkLine, trimTrailingWhitespace, isOWS, removeChunkExtension, NewChunkedWriter, chunkedWriter.Write, chunkedWriter.Close, parseHexUint
 //
-//   Wire format:                       chunk            chunk             trailer
-//     <hex-size> CRLF <data> CRLF  ...  0 CRLF  ...  CRLF
+// Go: "The wire protocol for HTTP's 'chunked' Transfer-Encoding."
 //
-// Public API:
-//   NewChunkedReader(r) -> ChunkedReader<R>   — io::Reader; EOF at "0\r\n"
-//   NewChunkedWriter(w) -> ChunkedWriter<W>   — io::Writer + Closer
+// This lived at src/net/http/chunked.rs until now, which is not where
+// Go puts it — so port_deps reported net/http/internal as a SQUATTER at
+// 0/12 while a faithful port of all twelve sat one directory up.
 //
-// Used internally by:
-//   * `request.rs::ReadRequest` to decode `Transfer-Encoding: chunked`
-//     request bodies (bodies without Content-Length).
-//   * `response.rs::ResponseWriter::Flush()` to switch the response
-//     writer into streaming mode when no Content-Length is known.
-//
-// Deviations from Go (faithful at the wire level):
-//   * No `FlushAfterChunkWriter` Bufio plumbing — goish's Conn writes
-//     are synchronous (no userspace buffering layer between the chunked
-//     writer and the TCP send), so per-chunk flush is automatic.
-//   * Errors are returned as goish `error` values rather than typed
-//     `io.ErrUnexpectedEOF` etc.; `errors::Is(err, io::EOF)` keeps
-//     working through `cached_error` Arc-pointer identity.
+// goishlint:ignore GOISH021 chunkedReader, chunkedWriter, semi, maxLineLength — chunkedReader/chunkedWriter are exposed as ChunkedReader/ChunkedWriter because Go returns them behind io.Reader/io.WriteCloser and goish's generic wrappers cannot be erased that way; `semi` is a one-byte separator inlined at its single use.
 
 #![allow(non_snake_case)]
 #![allow(dead_code)]
@@ -36,41 +23,78 @@ use crate::goslice::slice;
 use crate::io::{self, Closer, Reader, Writer};
 use crate::types::{byte, int};
 
-const MAX_LINE_LENGTH: usize = 4096;
+const maxLineLength: usize = 4096;
 
 crate::var! {
     /// `httputil.ErrLineTooLong` (httputil.go:43) — sentinel returned when
     /// a chunked-encoding line exceeds `maxLineLength` (4 KiB).
-    pub ErrLineTooLong: error = "http: chunked header line too long";
+    pub ErrLineTooLong: error = "header line too long";
 }
 
+// go: none — goish idiom: Go builds these inline with errors.New at the
+// point of failure; ErrLineTooLong as an owned error. Named here because
+// goish's `error` is an owned Arc, so an inline construction inside a
+// method that also borrows `self` does not type-check.
 fn err_line_too_long() -> error {
-    ErrLineTooLong.into()
+    return ErrLineTooLong.into();
 }
+// go: none — goish idiom: Go builds these inline with errors.New at the
+// point of failure; chunked.go:107 `errors.New("malformed chunked encoding")`. Named here because
+// goish's `error` is an owned Arc, so an inline construction inside a
+// method that also borrows `self` does not type-check.
 fn err_malformed() -> error {
-    errors::New(crate::string("http: malformed chunked encoding"))
+    return errors::New(crate::string("malformed chunked encoding"));
 }
+// go: none — goish idiom: Go builds these inline with errors.New at the
+// point of failure; chunked.go:173 `errors.New("chunked line ends with bare LF")`. Named here because
+// goish's `error` is an owned Arc, so an inline construction inside a
+// method that also borrows `self` does not type-check.
 fn err_bare_lf() -> error {
-    errors::New(crate::string("http: chunked line ends with bare LF"))
+    return errors::New(crate::string("chunked line ends with bare LF"));
 }
+// go: none — goish idiom: Go builds these inline with errors.New at the
+// point of failure; chunked.go:175 `errors.New("invalid CR in chunked line")`. Named here because
+// goish's `error` is an owned Arc, so an inline construction inside a
+// method that also borrows `self` does not type-check.
 fn err_invalid_cr() -> error {
-    errors::New(crate::string("http: invalid CR in chunked line"))
+    return errors::New(crate::string("invalid CR in chunked line"));
 }
+// go: none — goish idiom: Go builds these inline with errors.New at the
+// point of failure; chunked.go:79 `errors.New("chunked encoding contains too much non-data")`. Named here because
+// goish's `error` is an owned Arc, so an inline construction inside a
+// method that also borrows `self` does not type-check.
 fn err_too_much_overhead() -> error {
-    errors::New(crate::string("http: chunked encoding contains too much non-data"))
+    return errors::New(crate::string("chunked encoding contains too much non-data"));
 }
+// go: none — goish idiom: Go builds these inline with errors.New at the
+// point of failure; chunked.go:273 `errors.New("empty hex number for chunk length")`. Named here because
+// goish's `error` is an owned Arc, so an inline construction inside a
+// method that also borrows `self` does not type-check.
 fn err_empty_hex() -> error {
-    errors::New(crate::string("http: empty hex number for chunk length"))
+    return errors::New(crate::string("empty hex number for chunk length"));
 }
+// go: none — goish idiom: Go builds these inline with errors.New at the
+// point of failure; chunked.go:283 `errors.New("invalid byte in chunk length")`. Named here because
+// goish's `error` is an owned Arc, so an inline construction inside a
+// method that also borrows `self` does not type-check.
 fn err_bad_hex() -> error {
-    errors::New(crate::string("http: invalid byte in chunk length"))
+    return errors::New(crate::string("invalid byte in chunk length"));
 }
+// go: none — goish idiom: Go builds these inline with errors.New at the
+// point of failure; chunked.go:286 `errors.New("http chunk length too large")`. Named here because
+// goish's `error` is an owned Arc, so an inline construction inside a
+// method that also borrows `self` does not type-check.
 fn err_chunk_too_large() -> error {
-    errors::New(crate::string("http: chunk length too large"))
+    return errors::New(crate::string("http chunk length too large"));
 }
 
 // ─── ChunkedReader ───────────────────────────────────────────────────
 
+// goishlint:ignore GOISH019 chunkedReader — Go's `buf [2]byte` is a
+// scratch array for reading the CRLF that follows a chunk; goish's
+// io_read_full takes the buffer as a parameter, so the two bytes live
+// on the stack at the one call site instead of on the struct.
+// go: sdk 1.25.5 net/http/internal/chunked.go:36-43 chunkedReader
 /// Decoder for HTTP/1.1 chunked Transfer-Encoding. Wraps a buffered
 /// reader; emits `io::EOF` after consuming the terminating `"0\r\n"`.
 ///
@@ -84,37 +108,42 @@ pub struct ChunkedReader<R: Reader> {
     err: error,
     /// True between consuming a chunk's payload and consuming the
     /// trailing CRLF. Allows a partial Read to return early.
-    check_end: bool,
+    checkEnd: bool,
     /// Cumulative non-data overhead (chunk-size lines + CRLFs, minus
     /// 16 bytes per chunk + 2× data). Caps at 16 KiB to bound abuse.
     excess: i64,
 }
 
+// go: sdk 1.25.5 net/http/internal/chunked.go:29-34 NewChunkedReader
 /// `internal.NewChunkedReader(r)` — wrap `r` in a chunked decoder.
 pub fn NewChunkedReader<R: Reader>(r: R) -> ChunkedReader<R> {
-    ChunkedReader {
+    return ChunkedReader {
         r: bufio::NewReader(r),
         n: 0,
         err: errors::nil,
-        check_end: false,
+        checkEnd: false,
         excess: 0,
-    }
+    };
 }
 
 impl<R: Reader> ChunkedReader<R> {
+    // go: none — goish-only: Go's chunkedReader holds a *bufio.Reader
+    // the http.Body reaches through by type assertion. goish's is a
+    // generic field, so the accessor is written out.
     /// Crate-internal: mutable access to the internal buffered reader,
-    /// and through it (`__rd_mut`) the wrapped source. The streaming
-    /// `http::Body` closes its connection down this path.
+    /// and through it the wrapped source. The streaming `http::Body`
+    /// closes its connection down this path.
     pub(crate) fn __bufio_mut(&mut self) -> &mut bufio::Reader<R> {
-        &mut self.r
+        return &mut self.r;
     }
 
+    // go: sdk 1.25.5 net/http/internal/chunked.go:46-86 chunkedReader.beginChunk
     /// Line-by-line port of `(*chunkedReader).beginChunk`
     /// (chunked.go:46).
-    fn begin_chunk(&mut self) {
+    fn beginChunk(&mut self) {
         // Go: var line []byte
         // Go: line, cr.err = readChunkLine(cr.r)
-        let (line, err) = read_chunk_line(&mut self.r);
+        let (line, err) = readChunkLine(&mut self.r);
         if !err.IsNil() {
             self.err = err;
             return;
@@ -122,11 +151,11 @@ impl<R: Reader> ChunkedReader<R> {
         // Go: cr.excess += int64(len(line)) + 2
         self.excess = self.excess.saturating_add(line.Len() + 2);
         // Go: line = trimTrailingWhitespace(line)
-        let line = trim_trailing_ows(line);
+        let line = trimTrailingWhitespace(line);
         // Go: line, cr.err = removeChunkExtension(line)
-        let line = remove_chunk_extension(line);
+        let line = removeChunkExtension(line);
         // Go: cr.n, cr.err = parseHexUint(line)
-        match parse_hex_uint(line) {
+        match parseHexUint(line) {
             Ok(n) => self.n = n,
             Err(e) => {
                 self.err = e;
@@ -135,7 +164,7 @@ impl<R: Reader> ChunkedReader<R> {
         }
         // Reduce overhead budget by 16 + 2*data, clamp to >=0, error if
         // it grew over 16 KiB without proportional data.
-        self.excess -= 16 + 2 * (self.n as i64);
+        self.excess -= 16 + 2 * crate::int64(self.n);
         if self.excess < 0 {
             self.excess = 0;
         }
@@ -148,9 +177,10 @@ impl<R: Reader> ChunkedReader<R> {
         }
     }
 
+    // go: sdk 1.25.5 net/http/internal/chunked.go:88-95 chunkedReader.chunkHeaderAvailable
     /// Line-by-line port of `(*chunkedReader).chunkHeaderAvailable`
     /// (chunked.go:88).
-    fn chunk_header_available(&mut self) -> bool {
+    fn chunkHeaderAvailable(&mut self) -> bool {
         // Go: n := cr.r.Buffered()
         let n = self.r.Buffered();
         // Go: if n > 0 { peek, _ := cr.r.Peek(n); return bytes.IndexByte(peek, '\n') >= 0 }
@@ -159,18 +189,19 @@ impl<R: Reader> ChunkedReader<R> {
             return crate::bytes::IndexByte(peek, b'\n') >= 0;
         }
         // Go: return false
-        false
+        return false;
     }
 }
 
 impl<R: Reader> Reader for ChunkedReader<R> {
+    // go: sdk 1.25.5 net/http/internal/chunked.go:94-148 chunkedReader.Read
     fn Read(&mut self, b: &mut slice<byte>) -> (int, error) {
         let mut n: int = 0;
         loop {
             if !self.err.IsNil() {
                 break;
             }
-            if self.check_end {
+            if self.checkEnd {
                 if n > 0 && self.r.Buffered() < 2 {
                     // Have payload — return early instead of blocking
                     // on the CRLF.
@@ -190,14 +221,14 @@ impl<R: Reader> Reader for ChunkedReader<R> {
                     self.err = err_malformed();
                     break;
                 }
-                self.check_end = false;
+                self.checkEnd = false;
             }
             if self.n == 0 {
-                if n > 0 && !self.chunk_header_available() {
+                if n > 0 && !self.chunkHeaderAvailable() {
                     // Have payload — don't block reading next header.
                     break;
                 }
-                self.begin_chunk();
+                self.beginChunk();
                 continue;
             }
             // Go: if len(b) == 0 { break }
@@ -207,7 +238,7 @@ impl<R: Reader> Reader for ChunkedReader<R> {
                 break;
             }
             // Go: rbuf := b; if uint64(len(rbuf)) > cr.n { rbuf = rbuf[:cr.n] }
-            let want = core::cmp::min((b.Len() - n) as u64, self.n) as int;
+            let want = crate::int(core::cmp::min(crate::uint64(b.Len() - n), self.n));
             let mut rbuf = crate::make!([]byte, want);
             // Go: var n0 int; n0, cr.err = cr.r.Read(rbuf); n += n0; b = b[n0:]
             let (rn, rerr) = self.r.Read(&mut rbuf);
@@ -215,7 +246,7 @@ impl<R: Reader> Reader for ChunkedReader<R> {
                 b[n + i] = rbuf[i];
             }
             n += rn;
-            self.n -= rn as u64;
+            self.n -= crate::uint64(rn);
             if !rerr.IsNil() {
                 if errors::Is(rerr.clone(), io::EOF) {
                     self.err = io::ErrUnexpectedEOF.into();
@@ -225,14 +256,16 @@ impl<R: Reader> Reader for ChunkedReader<R> {
                 break;
             }
             if self.n == 0 {
-                self.check_end = true;
+                self.checkEnd = true;
             }
         }
-        (n, self.err.clone())
+        return (n, self.err.clone());
     }
 }
 
-/// Line-by-line port of `io.ReadFull` (Go's io/io.go:331).
+// go: none — goish idiom: Go calls io.ReadFull(cr.r, cr.buf[:2]).
+// goish's io::ReadFull does not accept a &mut bufio::Reader by generic
+// bound, so the two-byte fill is written out here.
 /// Reads exactly `len(buf)` bytes from `r` into `buf`, or returns the
 /// short count with the underlying error.
 fn io_read_full<R: Reader>(r: &mut R, buf: &mut slice<byte>) -> (int, error) {
@@ -253,12 +286,13 @@ fn io_read_full<R: Reader>(r: &mut R, buf: &mut slice<byte>) -> (int, error) {
             return (n, io::EOF.into());
         }
     }
-    (n, errors::nil)
+    return (n, errors::nil);
 }
 
+// go: sdk 1.25.5 net/http/internal/chunked.go:155-184 readChunkLine
 /// Line-by-line port of `readChunkLine` (chunked.go:155). Returns
 /// the line without trailing CRLF as a `slice<byte>`.
-fn read_chunk_line<R: Reader>(b: &mut bufio::Reader<R>) -> (slice<byte>, error) {
+fn readChunkLine<R: Reader>(b: &mut bufio::Reader<R>) -> (slice<byte>, error) {
     // Go: p, err := b.ReadSlice('\n')
     let (p, err) = b.ReadSlice(b'\n');
     if !err.IsNil() {
@@ -285,27 +319,46 @@ fn read_chunk_line<R: Reader>(b: &mut bufio::Reader<R>) -> (slice<byte>, error) 
     // Go: p = p[:len(p)-2]
     let p = p.slice(0, p.Len() - 2);
     // Go: if len(p) >= maxLineLength { return nil, ErrLineTooLong }
-    if p.Len() >= MAX_LINE_LENGTH as int {
+    if p.Len() >= crate::int(maxLineLength) {
         return (slice::<byte>::__from_vec(Vec::new()), err_line_too_long());
     }
-    (p, errors::nil)
+    return (p, errors::nil);
 }
 
+// go: sdk 1.25.5 net/http/internal/chunked.go:186-191 trimTrailingWhitespace
 /// Line-by-line port of `trimTrailingWhitespace` (chunked.go:186).
-fn trim_trailing_ows(b: slice<byte>) -> slice<byte> {
-    crate::bytes::TrimRight(b, crate::convert::bytes(" \t"))
+fn trimTrailingWhitespace(b: slice<byte>) -> slice<byte> {
+    // Go walks the tail one byte at a time against isOWS rather than
+    // calling bytes.TrimRight with a cutset. Kept that way: the cutset
+    // form hides isOWS, which is the decl that says WHICH bytes count
+    // as optional whitespace here (SP and HTAB only — not CR, LF or
+    // any other space character bytes.TrimRight might be handed).
+    let mut b = b;
+    while b.Len() > 0 && isOWS(b[b.Len() - 1]) {
+        b = b.slice(0, b.Len() - 1);
+    }
+    return b;
 }
 
+// go: sdk 1.25.5 net/http/internal/chunked.go:193-195 isOWS
+/// Go: optional whitespace, per RFC 9110 — space and horizontal tab,
+/// and nothing else.
+fn isOWS(b: byte) -> bool {
+    return b == b' ' || b == b'\t';
+}
+
+// go: sdk 1.25.5 net/http/internal/chunked.go:206-212 removeChunkExtension
 /// Line-by-line port of `removeChunkExtension` (chunked.go:206).
 /// Strips everything from the first `;` onward.
-fn remove_chunk_extension(p: slice<byte>) -> slice<byte> {
+fn removeChunkExtension(p: slice<byte>) -> slice<byte> {
     // Go: p, _, _ = bytes.Cut(p, semi)
     let (before, _after, _found) = crate::bytes::Cut(p, crate::convert::bytes(";"));
-    before
+    return before;
 }
 
+// go: sdk 1.25.5 net/http/internal/chunked.go:278-300 parseHexUint
 /// Line-by-line port of `parseHexUint` (chunked.go:278).
-fn parse_hex_uint(v: slice<byte>) -> Result<u64, error> {
+fn parseHexUint(v: slice<byte>) -> Result<u64, error> {
     // Go: if len(v) == 0 { return 0, errors.New("empty hex…") }
     if v.Len() == 0 {
         return Err(err_empty_hex());
@@ -327,13 +380,14 @@ fn parse_hex_uint(v: slice<byte>) -> Result<u64, error> {
         } else {
             return Err(err_bad_hex());
         };
-        n = (n << 4) | (d as u64);
+        n = (n << 4) | crate::uint64(d);
     }
-    Ok(n)
+    return Ok(n);
 }
 
 // ─── ChunkedWriter ───────────────────────────────────────────────────
 
+// go: sdk 1.25.5 net/http/internal/chunked.go:231-233 chunkedWriter
 /// Encoder for HTTP/1.1 chunked Transfer-Encoding. Each `Write` call
 /// emits one chunk; `Close` writes the terminating `"0\r\n"`. Mirrors
 /// `chunkedWriter` (chunked.go:231).
@@ -346,11 +400,13 @@ pub struct ChunkedWriter<W: Writer> {
     pub Wire: W,
 }
 
+// go: sdk 1.25.5 net/http/internal/chunked.go:225-227 NewChunkedWriter
 pub fn NewChunkedWriter<W: Writer>(w: W) -> ChunkedWriter<W> {
-    ChunkedWriter { Wire: w }
+    return ChunkedWriter { Wire: w };
 }
 
 impl<W: Writer> Writer for ChunkedWriter<W> {
+    // go: sdk 1.25.5 net/http/internal/chunked.go:238-262 chunkedWriter.Write
     /// Line-by-line port of `(*chunkedWriter).Write` (chunked.go:238).
     fn Write(&mut self, data: slice<byte>) -> (int, error) {
         // Go: if len(data) == 0 { return 0, nil }
@@ -374,15 +430,50 @@ impl<W: Writer> Writer for ChunkedWriter<W> {
         }
         // Go: if _, err = io.WriteString(cw.Wire, "\r\n"); err != nil { return }
         let (_, terr) = self.Wire.Write(crate::convert::bytes("\r\n"));
-        (n, terr)
+        return (n, terr);
     }
 }
 
 impl<W: Writer> Closer for ChunkedWriter<W> {
+    // go: sdk 1.25.5 net/http/internal/chunked.go:264-267 chunkedWriter.Close
     /// Line-by-line port of `(*chunkedWriter).Close` (chunked.go:264).
     fn Close(&mut self) -> error {
         // Go: _, err := io.WriteString(cw.Wire, "0\r\n")
         let (_, err) = self.Wire.Write(crate::convert::bytes("0\r\n"));
-        err
+        return err;
+    }
+}
+
+// goishlint:ignore GOISH019 FlushAfterChunkWriter — Go EMBEDS
+// *bufio.Writer so the wrapper forwards Write/Flush by promotion. Rust
+// has no embedding, so the writer is a named field and the two methods
+// are written out.
+// go: sdk 1.25.5 net/http/internal/chunked.go:274-276 FlushAfterChunkWriter
+/// Go: "FlushAfterChunkWriter signals from the caller of
+/// [NewChunkedWriter] that each chunk should be followed by a flush. It
+/// is used by the [net/http.Transport] code to keep the buffering
+/// behavior for headers and trailers, but flush out chunks aggressively
+/// in the middle for request bodies which may be generated slowly."
+///
+/// The type carries no behaviour of its own — it exists purely so
+/// chunkedWriter.Write can recognise it and flush. That is why Go makes
+/// it a distinct type rather than a bool field.
+pub struct FlushAfterChunkWriter<W: Writer> {
+    pub Writer: bufio::Writer<W>,
+}
+
+impl<W: Writer> FlushAfterChunkWriter<W> {
+    // go: none — goish idiom: Go promotes Flush from the embedded
+    // *bufio.Writer; Rust forwards it explicitly.
+    pub fn Flush(&mut self) -> error {
+        return self.Writer.Flush();
+    }
+}
+
+impl<W: Writer> Writer for FlushAfterChunkWriter<W> {
+    // go: none — goish idiom: Go promotes Write from the embedded
+    // *bufio.Writer.
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        return self.Writer.Write(p);
     }
 }

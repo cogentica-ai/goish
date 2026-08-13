@@ -581,7 +581,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         // `ChunkedReader<R>` wraps its own bufio::Reader, we feed it
         // a thin `BufioPassthrough` that delegates to the existing
         // `br`.
-        let mut cr = super::chunked::NewChunkedReader(BufioPassthrough { inner: br });
+        let mut cr = super::internal::chunked::NewChunkedReader(BufioPassthrough { inner: br });
         loop {
             let mut tmp = slice::<byte>::__from_vec(alloc::vec![0u8; 4096]);
             let (n_read, err) = cr.Read(&mut tmp);
