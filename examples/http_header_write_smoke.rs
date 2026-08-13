@@ -123,11 +123,45 @@ fn main() {
         }
     }
 
+    // 5. CanonicalHeaderKey returns a key with invalid bytes UNCHANGED.
+    //    Go: "If s contains a space or invalid header field bytes, it
+    //    is returned without modifications." goish used to canonicalize
+    //    regardless, turning "Bad Name" into "Bad name" — silently
+    //    rewriting the caller's key, and since Set/Get/Add/Del all
+    //    canonicalize, storing it under a name never used.
+    {
+        let cases: &[(&str, &str)] = &[
+            ("accept-encoding", "Accept-Encoding"),
+            ("ACCEPT-ENCODING", "Accept-Encoding"),
+            ("a-b-c", "A-B-C"),
+            ("Bad Name", "Bad Name"),
+            ("x", "X"),
+            ("", ""),
+            ("a--b", "A--B"),
+            ("-a", "-A"),
+            ("a_b", "A_b"),
+        ];
+        let mut bad = 0;
+        for (input, want) in cases {
+            let got = goish::net::http::header::CanonicalHeaderKey(string(*input));
+            if got != *want {
+                fmt::Println!("     CanonicalHeaderKey(", *input, ") = ", got, " want ", *want);
+                bad += 1;
+            }
+        }
+        if bad == 0 {
+            fmt::Println!("[5] CanonicalHeaderKey, 9 cases vs Go  PASS");
+        } else {
+            fmt::Println!("[5] CanonicalHeaderKey  FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 4/4");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL ", failed, " of 4");
+        fmt::Println!("FAIL ", failed, " of 5");
         syscall::Exit(1);
     }
 }

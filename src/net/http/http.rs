@@ -198,7 +198,7 @@ pub fn removeEmptyPort<H: Into<string>>(host: H) -> string {
 
 // go: none — goish-only: httpguts.isTokenTable, relocated. Diffed
 // against the upstream 256-entry table; identical, 77 bytes each side.
-fn isTokenByte(b: byte) -> bool {
+pub(crate) fn isTokenByte(b: byte) -> bool {
     return matches!(b,
         b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.' |
         b'^' | b'_' | b'`' | b'|' | b'~' |

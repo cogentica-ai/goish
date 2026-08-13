@@ -182,29 +182,45 @@ impl Header {
 
     /// `h.WriteSubset(w, exclude)` — like `Write` but skips keys
     /// where `exclude[key] == true`. Mirrors header.go:186.
+    // go: sdk 1.25.5 net/http/header.go:182-188 Header.WriteSubset
+    /// Write a header in wire format, omitting keys for which
+    /// `exclude[key]` is true. Keys are NOT canonicalized before the
+    /// exclude lookup, matching Go.
     pub fn WriteSubset<W: crate::io::Writer>(
         &self,
         w: &mut W,
         exclude: &map<string, bool>,
     ) -> crate::error {
-        // Go: kvs, _ := h.sortedKeyValues(exclude)
-        // Sorting requires reading all keys; since gomap has no Keys()
-        // surface here, we collect via __iter and sort in Vec.
-        let mut kvs: Vec<(string, slice<string>)> = Vec::new();
-        for (k, v) in self.inner.__iter() {
-            // Go: if !exclude[k] { kvs = append(kvs, keyValues{k, vv}) }
-            let (skip, _) = exclude.Get(k.clone());
-            if skip {
-                continue;
-            }
-            kvs.push((k.clone(), v.clone()));
-        }
-        // Go: slices.SortFunc(kvs, func(a, b) int { return strings.Compare(a.key, b.key) })
-        kvs.sort_by(|a, b| {
-            crate::strings::Compare(a.0.clone(), b.0.clone()).cmp(&0)
-        });
-        // Go: for _, kv := range kvs { for _, v := range kv.values { ws.WriteString(...) } }
-        for (k, vv) in kvs.iter() {
+        return self.writeSubset(w, exclude);
+    }
+
+    // go: sdk 1.25.5 net/http/header.go:190-224 Header.writeSubset
+    //
+    // Go takes a third parameter, `trace *httptrace.ClientTrace`, and
+    // calls `trace.WroteHeaderField(key, vals)` per key. goish's
+    // Transport does not thread a ClientTrace through header writing
+    // yet, so the parameter is omitted rather than accepted and
+    // ignored — a `None` that is never non-None reads as wired-up when
+    // it is not. Restoring it is a signature change here plus a call
+    // site in the transport.
+    //
+    // Go also wraps `w` in `stringWriter{w}` when it is not already an
+    // io.StringWriter; goish's io::Writer has no WriteString sibling to
+    // dispatch on, so the bytes go through `Write` directly and the
+    // wrapper has no work to do.
+    pub fn writeSubset<W: crate::io::Writer>(
+        &self,
+        w: &mut W,
+        exclude: &map<string, bool>,
+    ) -> crate::error {
+        let sorter = self.sortedKeyValues(exclude);
+        let kvs = &sorter.kvs;
+        let n = len(kvs);
+        let mut i: int = 0;
+        while i < n {
+            let k = kvs[i].key.clone();
+            let vv = kvs[i].values.clone();
+            i += 1;
             // Go: if !httpguts.ValidHeaderFieldName(kv.key) { continue }
             // — "This could be an error. In the common case of writing
             // response headers, however, we have no good way to provide
@@ -214,33 +230,114 @@ impl Header {
             // Without this a key like "Bad Name" or one holding a
             // newline is written to the wire verbatim, which is header
             // injection.
-            if !super::http::isToken(k) {
+            if !super::http::isToken(&k) {
                 continue;
             }
-            for i in 0..vv.Len() {
-                let v = vv[i].clone();
-                // Go: v = headerNewlineToSpace.Replace(v); v = textproto.TrimString(v)
-                let v = sanitize_header_value(v);
-                let (_, e1) = w.Write(crate::convert::bytes(k.clone()));
-                if !e1.IsNil() {
-                    return e1;
-                }
-                let (_, e2) = w.Write(crate::convert::bytes(": "));
-                if !e2.IsNil() {
-                    return e2;
-                }
-                let (_, e3) = w.Write(crate::convert::bytes(v));
-                if !e3.IsNil() {
-                    return e3;
-                }
-                let (_, e4) = w.Write(crate::convert::bytes("\r\n"));
-                if !e4.IsNil() {
-                    return e4;
+            let mut j: int = 0;
+            while j < len(&vv) {
+                // Go: v = headerNewlineToSpace.Replace(v)
+                //     v = textproto.TrimString(v)
+                let v = sanitize_header_value(vv[j].clone());
+                j += 1;
+                for part in [k.clone(), string(": "), v, string("\r\n")] {
+                    let (_, e) = w.Write(crate::convert::bytes(part));
+                    if !e.IsNil() {
+                        headerSorterPool().Put(sorter);
+                        return e;
+                    }
                 }
             }
         }
-        crate::errors::nil
+        headerSorterPool().Put(sorter);
+        return crate::errors::nil;
     }
+
+    // go: sdk 1.25.5 net/http/header.go:164-181 Header.sortedKeyValues
+    //
+    // Go returns `(kvs []keyValues, hs *headerSorter)` — two views of
+    // ONE backing array, so the caller can both range the slice and
+    // hand the sorter back to the pool. Rust cannot hand out an
+    // aliasing pair safely, and cloning the slice would defeat the
+    // pool, so goish returns the sorter alone and the caller reads
+    // `sorter.kvs`. Same allocation reuse, one return value.
+    pub fn sortedKeyValues(&self, exclude: &map<string, bool>) -> headerSorter {
+        let mut hs = headerSorterPool().Get();
+        let mut kvs: alloc::vec::Vec<keyValues> = alloc::vec::Vec::new();
+        for (k, vv) in self.inner.__iter() {
+            let (skip, _) = exclude.Get(k.clone());
+            if !skip {
+                kvs.push(keyValues { key: k.clone(), values: vv.clone() });
+            }
+        }
+        // Go: slices.SortFunc(hs.kvs, func(a, b) int {
+        //         return strings.Compare(a.key, b.key) })
+        // Sorted before wrapping: goish's sort::Slice is index-based
+        // like Go's sort.Slice, so its comparator would have to capture
+        // the slice that sort::Slice already borrows mutably. The
+        // ordering is identical either way — strings.Compare is a plain
+        // byte compare, and header keys are unique so the sort's
+        // stability is not observable.
+        kvs.sort_by(|a, b| {
+            crate::strings::Compare(a.key.clone(), b.key.clone()).cmp(&0)
+        });
+        hs.kvs = slice::__from_vec(kvs);
+        return hs;
+    }
+}
+
+// go: sdk 1.25.5 net/http/header.go:139-139 headerNewlineToSpace
+//
+// Go builds a `strings.Replacer`; goish's equivalent is applied by
+// `sanitize_header_value` below, which the writer already calls. This
+// exposes the same replacer so the mapping has one definition.
+pub fn headerNewlineToSpace() -> crate::strings::Replacer {
+    return crate::strings::NewReplacer(slice::__from_vec(alloc::vec![
+        string("\n"),
+        string(" "),
+        string("\r"),
+        string(" "),
+    ]));
+}
+
+// go: sdk 1.25.5 net/http/header.go:142-144 stringWriter
+//
+// Go wraps a plain io.Writer so it can be written to with WriteString.
+// goish's io::Writer has no WriteString sibling to dispatch on, so
+// this exists for parity of the declaration set and forwards.
+pub struct stringWriter<'a, W: crate::io::Writer> {
+    pub w: &'a mut W,
+}
+
+impl<'a, W: crate::io::Writer> stringWriter<'a, W> {
+    // go: sdk 1.25.5 net/http/header.go:146-148 stringWriter.WriteString
+    pub fn WriteString(&mut self, s: string) -> (int, crate::error) {
+        return self.w.Write(crate::convert::bytes(s));
+    }
+}
+
+// go: sdk 1.25.5 net/http/header.go:150-153 keyValues
+#[derive(Clone, Default)]
+pub struct keyValues {
+    pub key: string,
+    pub values: slice<string>,
+}
+
+// go: sdk 1.25.5 net/http/header.go:155-158 headerSorter
+/// Contains a slice of keyValues sorted by keyValues.key.
+#[derive(Clone, Default)]
+pub struct headerSorter {
+    pub kvs: slice<keyValues>,
+}
+
+// go: sdk 1.25.5 net/http/header.go:160-162 headerSorterPool
+//
+// A plain `static` with a const-capable initializer rather than
+// `var!`: `var!` falls back to `pub const`, which would rebuild the
+// pool on every use and make the pooling a no-op.
+pub fn headerSorterPool() -> &'static crate::sync::Pool<headerSorter> {
+    static POOL: crate::lazy::Lazy<crate::sync::Pool<headerSorter>> =
+        crate::lazy::Lazy::new(|| crate::sync::Pool::new(|| headerSorter::default()));
+    return POOL.get();
 }
 
 /// `http.TimeFormat` (header.go:42) — the canonical HTTP-date layout
@@ -593,6 +690,23 @@ fn intern_header_name(canon: &[u8]) -> Option<&'static str> {
 /// the interned common set, and only materialized on the heap for
 /// uncommon names.
 pub(crate) fn canonical_key_bytes(bytes: &[u8]) -> string {
+    // Go: textproto.CanonicalMIMEHeaderKey walks the bytes first and
+    // returns s UNCHANGED the moment it meets one that is not a valid
+    // header field byte — "If s contains a space or invalid header
+    // field bytes, it is returned without modifications."
+    //
+    // goish canonicalized regardless, so `CanonicalHeaderKey("Bad Name")`
+    // came back "Bad name" where Go gives "Bad Name". That silently
+    // rewrites a caller's key, and since Set/Get/Add/Del all route
+    // through here, an invalid key was stored under a name the caller
+    // never used.
+    let mut i = 0;
+    while i < bytes.len() {
+        if !super::http::isTokenByte(bytes[i]) {
+            return string::from_bytes(bytes);
+        }
+        i += 1;
+    }
     if bytes.len() <= 64 {
         let mut stack = [0u8; 64];
         let mut upper = true;
