@@ -1044,29 +1044,6 @@ impl ioFS {
 }
 
 impl ioFile {
-    // go: sdk 1.25.5 net/http/fs.go:902-902 ioFile.Close
-    pub fn Close(&self) -> error {
-        return self.file.Close();
-    }
-
-    // go: sdk 1.25.5 net/http/fs.go:903-903 ioFile.Read
-    pub fn Read(&self, b: &mut slice<byte>) -> (int, error) {
-        return self.file.Read(b);
-    }
-
-    // go: sdk 1.25.5 net/http/fs.go:909-915 ioFile.Seek
-    //
-    // Go asserts `f.file.(io.Seeker)`. goish's io::Seeker takes
-    // `&mut self` — a seek moves the cursor — but `f.file` is an
-    // `Arc<dyn fs::File>`, which yields no `&mut`. The assertion can
-    // therefore never succeed here, and Go's own miss branch is the
-    // faithful result: a file whose method set lacks Seek reports
-    // errMissingSeek. Wiring the success branch needs fs::File to
-    // expose seeking the way ResponseWriter/io::Writer was bridged.
-    pub fn Seek(&self, _offset: i64, _whence: int) -> (i64, error) {
-        return (0, errMissingSeek.into());
-    }
-
     // go: sdk 1.25.5 net/http/fs.go:917-923 ioFile.ReadDir
     pub fn ReadDir(&self, count: int) -> (slice<Arc<dyn fs::DirEntry + Send + Sync>>, error) {
         let (d, ok) = crate::cast!(&*self.file, fs::ReadDirFile);
@@ -1078,6 +1055,29 @@ impl ioFile {
 }
 
 impl File for ioFile {
+    // go: sdk 1.25.5 net/http/fs.go:902-902 ioFile.Close
+    fn Close(&self) -> error {
+        return self.file.Close();
+    }
+
+    // go: sdk 1.25.5 net/http/fs.go:903-903 ioFile.Read
+    fn Read(&self, b: &mut slice<byte>) -> (int, error) {
+        return self.file.Read(b);
+    }
+
+    // go: sdk 1.25.5 net/http/fs.go:909-915 ioFile.Seek
+    //
+    // Go asserts `f.file.(io.Seeker)`. goish's io::Seeker takes
+    // `&mut self` — a seek moves the cursor — but `f.file` is an
+    // `Arc<dyn fs::File>`, which yields no `&mut`. The assertion can
+    // therefore never succeed here, and Go's own miss branch is the
+    // faithful result: a file whose method set lacks Seek reports
+    // errMissingSeek. Wiring the success branch needs io/fs's File to
+    // expose seeking with a `&self` receiver, the way this trait does.
+    fn Seek(&self, _offset: crate::types::int64, _whence: int) -> (crate::types::int64, error) {
+        return (0, errMissingSeek.into());
+    }
+
     // go: sdk 1.25.5 net/http/fs.go:904-904 ioFile.Stat
     fn Stat(&self) -> (Arc<dyn fs::FileInfo + Send + Sync>, error) {
         return self.file.Stat();
@@ -1135,8 +1135,23 @@ pub trait FileSystem {
 }
 
 // go: sdk 1.25.5 net/http/fs.go:113-119 File
+//
+// Go's http.File embeds io.Closer, io.Reader and io.Seeker alongside
+// Readdir and Stat. goish's #[interface] macro does not model embedded
+// interfaces, so the three inherited methods are RE-DECLARED here, the
+// same way io/fs.rs spells out ReadDirFile. Without them `File` was a
+// two-method shell and serveContent — which needs an io.ReadSeeker —
+// had nothing to stand on.
+//
+// The receivers are `&self`, matching io/fs.rs's `File::Read(&self)`:
+// a file owns its cursor behind interior mutability, and a `&mut`
+// receiver cannot be reached through the `Arc<dyn File>` that Open
+// returns.
 #[crate::interface]
 pub trait File {
+    fn Close(&self) -> error;
+    fn Read(&self, p: &mut slice<byte>) -> (int, error);
+    fn Seek(&self, offset: crate::types::int64, whence: int) -> (crate::types::int64, error);
     fn Readdir(&self, count: int) -> (slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>>, error);
     fn Stat(&self) -> (alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>, error);
 }
