@@ -17,9 +17,9 @@ use crate::gostring::string;
 use crate::net::http::client::NewRequest as http_NewRequest;
 use crate::net::http::request::Request;
 
-/// Line-by-line port of `httptest.NewRequest(method, target, body)`
-/// (httptest.go:19). Builds an incoming-server Request suitable for
-/// passing to a Handler in tests.
+// go: sdk 1.25.5 net/http/httptest/httptest.go:19-21 NewRequest
+/// Go: "NewRequest returns a new incoming server Request, suitable for
+/// passing to an [http.Handler] for testing."
 ///
 /// Slim deviations from upstream:
 ///   - body is a `slice<byte>` (matches goish slim NewRequest), not an
@@ -29,21 +29,23 @@ use crate::net::http::request::Request;
 ///     `tls.ConnectionState`.
 ///   - Error → panic translation from httptest.go:52 dropped: callers
 ///     get a Request with empty fields plus a nil-check-able error.
-pub fn NewRequest<M: Into<string>, T: Into<string>, B: super::client::__RequestBody>(
+pub fn NewRequest<M: Into<string>, T: Into<string>, B: super::super::client::__RequestBody>(
     method: M,
     target: T,
     body: B,
 ) -> Request {
     let method: string = method.into();
     let target: string = target.into();
-    NewRequestWithContext(crate::context::Background(), method, target, body)
+    return NewRequestWithContext(crate::context::Background(), method, target, body);
 }
 
-/// `httptest.NewRequestWithContext` (httptest.go:46).
+// go: sdk 1.25.5 net/http/httptest/httptest.go:46-100 NewRequestWithContext
+/// Go: "NewRequestWithContext returns a new incoming server Request,
+/// suitable for passing to an [http.Handler] for testing."
 pub fn NewRequestWithContext<
     M: Into<string>,
     T: Into<string>,
-    B: super::client::__RequestBody,
+    B: super::super::client::__RequestBody,
 >(
     _ctx: Arc<dyn crate::context::Context>,
     method: M,
@@ -85,9 +87,11 @@ pub fn NewRequestWithContext<
         req.Host = string::from_static("example.com");
     }
 
-    // TLS branch dropped — goish v1 has no tls.ConnectionState.
+    // Go sets req.TLS for an "https://" target. goish's Request has no
+    // TLS field yet — it arrives with the server.go port, which is
+    // where ConnectionState reaches a request.
     let _ = errors::nil; // silence unused-import in some builds
     let _ = target;
 
-    req
+    return req;
 }

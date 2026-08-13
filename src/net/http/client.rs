@@ -78,6 +78,10 @@ pub struct Response {
     pub ContentLength: int,
     /// Whether the connection should be closed after reading Body.
     pub Close: bool,
+    /// Go: "Trailer maps trailer keys to values in the same format as
+    /// Header." Populated by httptest's recorder and, once transfer.go
+    /// lands, by the wire reader.
+    pub Trailer: Header,
     /// The Request that produced this Response. Populated by Client::Do.
     /// Modelled as `nilable<Request>` (Go's `*http.Request` shape) so
     /// Goish-side `resp.Request.URL` access can narrow via `.Must()`.
@@ -87,6 +91,7 @@ pub struct Response {
 impl Default for Response {
     fn default() -> Self {
         Response {
+            Trailer: Header::new(),
             Status: string::new(),
             StatusCode: 0,
             Proto: string::new(),

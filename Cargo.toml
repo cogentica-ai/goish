@@ -615,6 +615,10 @@ name = "http_routing_tree_smoke"
 path = "examples/http_routing_tree_smoke.rs"
 
 [[example]]
+name = "httptest_recorder_smoke"
+path = "examples/httptest_recorder_smoke.rs"
+
+[[example]]
 name = "http_sniff_smoke"
 path = "examples/http_sniff_smoke.rs"
 
