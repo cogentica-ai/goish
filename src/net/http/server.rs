@@ -266,6 +266,33 @@ impl ServeMux {
                 crate::gomap::map::<string, string>::new(),
             );
         }
+        // Go: if path != escapedPath { redirect to the cleaned path }
+        // (findHandler, server.go:2879-2891).
+        //
+        // This branch was MISSING. goish cleaned the path for MATCHING
+        // and then served the handler directly, so "/a/./b" and
+        // "//double" returned 200 where Go returns 301 to "/a/b" and
+        // "/double".
+        //
+        // The gap is not just a missing redirect. Because goish went
+        // straight to the handler, the handler ran with the UNCLEANED
+        // `r.URL.Path` while the mux had routed on the cleaned one —
+        // so any handler or middleware doing its own prefix check on
+        // r.URL.Path saw a different path than the routing decision
+        // was made from. That mismatch is the classic shape of a
+        // path-based access-control bypass.
+        if path != r.URL.EscapedPath() {
+            let mut u = super::url::URL::empty();
+            u.Path = path.clone();
+            u.RawPath = path.clone();
+            u.RawQuery = r.URL.RawQuery.clone();
+            let target = u.String();
+            return (
+                RedirectHandler(target.clone(), super::status::StatusMovedPermanently),
+                target,
+                crate::gomap::map::<string, string>::new(),
+            );
+        }
         let (n, matches) = s.tree.r#match(&host, &r.Method, &path);
         if let Some(n) = n {
             if let Some(h) = n.handler.clone() {
