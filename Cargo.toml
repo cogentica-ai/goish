@@ -1317,6 +1317,10 @@ name = "testing_tempdir_smoke"
 path = "examples/testing_tempdir_smoke.rs"
 
 [[example]]
+name = "testing_benchmark_run_smoke"
+path = "examples/testing_benchmark_run_smoke.rs"
+
+[[example]]
 name = "testing_runparallel_smoke"
 path = "examples/testing_runparallel_smoke.rs"
 

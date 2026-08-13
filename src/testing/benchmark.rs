@@ -1,4 +1,4 @@
-// go: file testing/benchmark.go decls: B.RunParallel, PB.Next, B.add, B.trimOutput, B.SetParallelism, durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
+// go: file testing/benchmark.go decls: B.runN, B.launch, B.doBench, B.run, Benchmark, B.RunParallel, PB.Next, B.add, B.trimOutput, B.SetParallelism, durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
 //
 // testing/benchmark.go — the result type a benchmark reports, its
 // derived per-operation metrics, and the column formatting `go test
@@ -20,8 +20,8 @@
 // Everything in this file is reachable without either: pure arithmetic
 // over a BenchmarkResult a caller filled in, plus the formatting.
 //
-// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, benchmarkName, doBench, launch, loopSlowPath, runN, run, run1, stopOrScaleBLoop, processBench, checkParallel, Write, Next, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
-// goishlint:ignore GOISH021 benchState, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchTime, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
+// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, benchmarkName, loopSlowPath, run1, stopOrScaleBLoop, processBench, checkParallel, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
+// goishlint:ignore GOISH021 benchState, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
 
 #![allow(non_snake_case)]
 
@@ -263,13 +263,19 @@ pub fn predictN(goalns: int64, prevIters: int64, prevns: int64, last: int64) -> 
 
 // ─── B — the benchmark handle ────────────────────────────────────────
 
+// goishlint:ignore GOISH019 B — Go's `B` embeds `common` and carries
+// the fields for machinery goish does not have: `loop` (B.Loop needs
+// cmd/compile), `bstate` (the `go test -bench` driver), `importPath`,
+// and the ctx/cancelCtx pair B.Loop cancels. goish's `B` holds its
+// common as `Arc<TState>` — the same shape `T` uses — and carries the
+// rest of Go's field set.
+// go: sdk 1.25.5 testing/benchmark.go:94-133 B
 // goishlint:ignore GOISH019 B — a partial port by design: the fields
 // belonging to the benchmark runner (loop/loopPoison, parallelism,
 // context, importPath, previousN, previousDuration, benchFunc,
 // missingBytes, result) and the embedded `common` are absent because
 // the runner is. Enumerated with reasons in the doc below; carrying
 // them as dead fields would imply machinery that is not there.
-// go: sdk 1.25.5 testing/benchmark.go:94-133 B
 /// Go: "B is a type passed to Benchmark functions to manage benchmark
 /// timing and control the number of iterations."
 ///
@@ -325,6 +331,10 @@ pub struct B {
     previousN: int,
     /// Go: "total duration of the previous run".
     previousDuration: crate::time::Duration,
+    /// Go: `B.benchFunc func(b *B)` — the benchmark body.
+    benchFunc: Option<alloc::sync::Arc<dyn Fn(&mut B) + Send + Sync>>,
+    /// Go: `B.benchTime durationOrCountFlag` — a copy of -benchtime.
+    benchTime: durationOrCountFlag,
 }
 
 impl Default for B {
@@ -351,6 +361,8 @@ impl Default for B {
             state: alloc::sync::Arc::new(crate::testing::TState::new()),
             previousN: 0,
             previousDuration: crate::time::Duration(0),
+            benchFunc: None,
+            benchTime: benchTime(),
         };
     }
 }
@@ -750,4 +762,152 @@ impl B {
             crate::fmt::Println!("RunParallel: body exited without pb.Next() == false");
         }
     }
+}
+
+// ─── the benchmark runner ────────────────────────────────────────────
+
+// go: sdk 1.25.5 testing/benchmark.go:69 benchmarkLock
+/// Go: "benchmarkLock ensures only one benchmark runs at a time." Two
+/// benchmarks timing each other's allocations would both be wrong.
+static benchmarkLock: crate::sync::Mutex<()> = crate::sync::Mutex::new(());
+
+// go: none — goish idiom: Go's `benchTime` is a package `var`
+// initialised to `durationOrCountFlag{d: 1 * time.Second}`. Duration
+// multiplication is not const in Rust, so it is a function returning
+// the same value rather than a static.
+/// Go: `var benchTime = durationOrCountFlag{d: 1 * time.Second}` — the
+/// default -benchtime. A function here rather than a static because
+/// Duration multiplication is not const.
+#[allow(non_snake_case)]
+fn benchTime() -> durationOrCountFlag {
+    return durationOrCountFlag {
+        d: crate::time::Duration(1_000_000_000),
+        n: 0,
+        allowZero: false,
+    };
+}
+
+#[allow(non_snake_case)]
+impl B {
+    // go: sdk 1.25.5 testing/benchmark.go:197-227 B.runN
+    // goishlint:ignore GOISH020 runN — Go's `b.loop` bookkeeping and
+    // the ctx/cancelCtx it sets are for B.Loop, which needs cmd/compile
+    // support and is not ported; there is nothing to reset and no
+    // context to cancel.
+    /// Go: run the benchmark body exactly n times, timed.
+    ///
+    /// benchmarkLock is held for the whole run: two benchmarks timing
+    /// concurrently would each measure the other's allocations. The GC
+    /// call before starting is Go "trying to get a comparable
+    /// environment for each run by clearing garbage from previous
+    /// runs"; goish has no GC, so there is nothing to clear.
+    pub(crate) fn runN(&mut self, n: crate::types::int) {
+        let _guard = benchmarkLock.Lock();
+
+        self.state.resetRaces();
+        self.N = n;
+        self.parallelism = 1;
+        self.ResetTimer();
+        self.StartTimer();
+        if let Some(f) = self.benchFunc.clone() {
+            f(self);
+        }
+        self.StopTimer();
+        self.previousN = n;
+        self.previousDuration = self.duration;
+
+        // Go: `defer func() { b.runCleanup(normalPanic); b.checkRaces() }()`
+        self.state.runCleanup();
+        self.state.checkRaces();
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:328-359 B.launch
+    /// Go: "launch launches the benchmark function. It gradually
+    /// increases the number of benchmark iterations until the benchmark
+    /// runs for the requested benchtime."
+    ///
+    /// The two arms are -benchtime=100x (a fixed count) and
+    /// -benchtime=2s (a duration, reached by prediction). The duration
+    /// arm stops on ANY of three conditions — failed, long enough, or
+    /// 1e9 iterations — and the last is what keeps a benchmark whose
+    /// body is essentially free from running forever.
+    pub(crate) fn launch(&mut self) {
+        if self.benchTime.n > 0 {
+            // Go: "We already ran a single iteration in run1. If
+            // -benchtime=1x was requested, use that result."
+            if self.benchTime.n > 1 {
+                self.runN(self.benchTime.n);
+            }
+        } else {
+            let d = self.benchTime.d;
+            let mut n: crate::types::int64 = 1;
+            while !self.Failed() && self.duration < d && n < 1_000_000_000 {
+                let last = n;
+                let goalns = d.Nanoseconds();
+                let prevIters = crate::int64(self.N);
+                n = crate::int64(predictN(
+                    goalns,
+                    prevIters,
+                    self.duration.Nanoseconds(),
+                    last,
+                ));
+                self.runN(crate::int(n));
+            }
+        }
+        self.result = BenchmarkResult {
+            N: self.N,
+            T: self.duration,
+            Bytes: self.bytes,
+            MemAllocs: self.netAllocs,
+            MemBytes: self.netBytes,
+            Extra: self.extra.clone(),
+        };
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:295-299 B.doBench
+    // goishlint:ignore GOISH018 doBench — Go runs launch on its own
+    // goroutine and waits on b.signal, so a FailNow inside the
+    // benchmark unwinds that goroutine instead of the caller's. goish's
+    // `B` is a `&mut` value that cannot cross a goroutine boundary, so
+    // launch is called directly. The observable result is the same
+    // unless the body calls FailNow, which would abort rather than
+    // stopping the benchmark.
+    pub(crate) fn doBench(&mut self) -> BenchmarkResult {
+        self.launch();
+        return self.result.clone();
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:275-293 B.run
+    // goishlint:ignore GOISH018 run — Go's version prints a goos/goarch/
+    // pkg/cpu header once via labelsOnce and branches to
+    // bstate.processBench when driven by `go test -bench`. goish has no
+    // bstate driver, so only the func Benchmark path exists.
+    pub(crate) fn run(&mut self) {
+        self.doBench();
+    }
+}
+
+// go: sdk 1.25.5 testing/benchmark.go:1003-1017 Benchmark
+// goishlint:ignore GOISH018 Benchmark — Go calls run1 first and only
+// proceeds if it returns true; run1's job is to bail out early when the
+// benchmark registered sub-benchmarks or was skipped, neither of which
+// goish's B can do yet. The single warm-up iteration run1 performs is
+// kept, since launch's -benchtime=1x arm depends on it having happened.
+/// Go: "Benchmark benchmarks a single function. It is useful for
+/// creating custom benchmarks that do not use the 'go test' command."
+#[allow(non_snake_case)]
+pub fn Benchmark<F>(f: F) -> BenchmarkResult
+where
+    F: Fn(&mut B) + Send + Sync + 'static,
+{
+    let mut b = B::default();
+    b.benchFunc = Some(alloc::sync::Arc::new(f));
+    b.benchTime = benchTime();
+    // Go: run1() runs a single warm-up iteration.
+    b.runN(1);
+    if b.Failed() {
+        return BenchmarkResult::default();
+    }
+    b.run();
+    return b.result.clone();
 }
