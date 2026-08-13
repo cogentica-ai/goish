@@ -61,6 +61,7 @@ impl Header {
         }
     }
 
+    // go: sdk 1.25.5 net/http/header.go:34-41 Header.Set
     /// `h.Set(key, value)` — replaces any existing values associated
     /// with `key`. Mirrors `Header.Set` (header.go:53).
     ///
@@ -74,6 +75,7 @@ impl Header {
         self.inner.Set(k, slice::<string>::__from_vec(v));
     }
 
+    // go: sdk 1.25.5 net/http/header.go:26-32 Header.Add
     /// `h.Add(key, value)` — appends to any existing values.
     pub fn Add<K: Into<string>, V: Into<string>>(&mut self, key: K, value: V) {
         let k = canonical_key(&key.into());
@@ -94,6 +96,7 @@ impl Header {
         self.inner.Set(k, slice::<string>::__from_vec(v));
     }
 
+    // go: sdk 1.25.5 net/http/header.go:43-51 Header.Get
     /// `h.Get(key)` — first value, or empty string if absent. Same
     /// behavior as Go's `Header.Get` (header.go:43).
     pub fn Get<K: Into<string>>(&self, key: K) -> string {
@@ -132,6 +135,7 @@ impl Header {
         return ok;
     }
 
+    // go: sdk 1.25.5 net/http/header.go:53-60 Header.Values
     pub fn Values<K: Into<string>>(&self, key: K) -> slice<string> {
         let k = canonical_key(&key.into());
         let (values, ok) = self.inner.Get(k);
@@ -142,6 +146,7 @@ impl Header {
         }
     }
 
+    // go: sdk 1.25.5 net/http/header.go:76-82 Header.Del
     /// `h.Del(key)` — remove all values for `key`.
     pub fn Del<K: Into<string>>(&mut self, key: K) {
         let k = canonical_key(&key.into());
@@ -160,6 +165,7 @@ impl Header {
         &self.inner
     }
 
+    // go: sdk 1.25.5 net/http/header.go:93-118 Header.Clone
     /// `h.Clone()` — return a deep copy. Mirrors `Header.Clone`
     /// (header.go:94). Goish gomap clones internally, but we go
     /// through Set() so each value slice is independently owned.
@@ -176,8 +182,19 @@ impl Header {
     /// `h.Write(w)` — write the header in HTTP wire format
     /// (`Key: value\r\n` per line). Mirrors `Header.Write`
     /// (header.go:85).
+    // go: sdk 1.25.5 net/http/header.go:84-87 Header.Write
+    /// Write a header in wire format.
     pub fn Write<W: crate::io::Writer>(&self, w: &mut W) -> crate::error {
-        self.WriteSubset(w, &map::<string, bool>::new())
+        return self.write(w);
+    }
+
+    // go: sdk 1.25.5 net/http/header.go:89-91 Header.write
+    //
+    // Go's `write` exists only to carry the ClientTrace down to
+    // writeSubset; goish does not thread one yet (see writeSubset), so
+    // this is the same one-line delegation minus that argument.
+    pub fn write<W: crate::io::Writer>(&self, w: &mut W) -> crate::error {
+        return self.writeSubset(w, &map::<string, bool>::new());
     }
 
     /// `h.WriteSubset(w, exclude)` — like `Write` but skips keys
@@ -628,6 +645,7 @@ fn sanitize_header_value(s: string) -> string {
     crate::strings::TrimSpace(b.String())
 }
 
+// go: sdk 1.25.5 net/http/header.go:228-234 CanonicalHeaderKey
 /// `http.CanonicalHeaderKey(s)` (header.go:234) — public canonical
 /// form. Mirrors Go's delegation to `textproto.CanonicalMIMEHeaderKey`.
 /// `content-type` → `Content-Type`, `accept-encoding` → `Accept-Encoding`.
