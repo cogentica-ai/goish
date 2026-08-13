@@ -1,4 +1,4 @@
-// go: file testing/benchmark.go decls: benchState.processBench, runBenchmarks, RunBenchmarks, B.Run, B.runN, B.launch, B.doBench, B.run, Benchmark, B.RunParallel, PB.Next, B.add, B.trimOutput, B.SetParallelism, durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
+// go: file testing/benchmark.go decls: B.run1, benchState.processBench, runBenchmarks, RunBenchmarks, B.Run, B.runN, B.launch, B.doBench, B.run, Benchmark, B.RunParallel, PB.Next, B.add, B.trimOutput, B.SetParallelism, durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
 //
 // testing/benchmark.go — the result type a benchmark reports, its
 // derived per-operation metrics, and the column formatting `go test
@@ -20,7 +20,7 @@
 // Everything in this file is reachable without either: pure arithmetic
 // over a BenchmarkResult a caller filled in, plus the formatting.
 //
-// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, loopSlowPath, run1, stopOrScaleBLoop, checkParallel, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
+// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, loopSlowPath, stopOrScaleBLoop, checkParallel, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
 // goishlint:ignore GOISH021 benchState, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
 
 #![allow(non_snake_case)]
@@ -891,12 +891,9 @@ where
     let mut b = B::default();
     b.benchFunc = Some(alloc::sync::Arc::new(f));
     b.benchTime = benchTime();
-    // Go: run1() runs a single warm-up iteration.
-    b.runN(1);
-    if b.Failed() {
-        return BenchmarkResult::default();
+    if b.run1() {
+        b.run();
     }
-    b.run();
     return b.result.clone();
 }
 
@@ -943,8 +940,7 @@ impl B {
 
         // Go: `if sub.run1() { sub.run() }`. run1's early-outs need the
         // bstate driver; the warm-up iteration it performs is kept.
-        sub.runN(1);
-        if !sub.Failed() {
+        if sub.run1() {
             sub.run();
         }
         self.add(sub.result.clone());
@@ -1087,7 +1083,7 @@ pub fn runBenchmarks(benchmarks: &[InternalBenchmark]) -> bool {
         // b.Run per benchmark; goish drives each directly, since
         // without a matcher the sub-naming Run performs is the only
         // thing that layer adds.
-        b.runN(1);
+        b.run1();
         st.processBench(&mut b);
         if b.Failed() {
             failed = true;
@@ -1104,4 +1100,37 @@ pub fn runBenchmarks(benchmarks: &[InternalBenchmark]) -> bool {
 #[allow(non_snake_case)]
 pub fn RunBenchmarks(benchmarks: &[InternalBenchmark]) -> bool {
     return runBenchmarks(benchmarks);
+}
+
+#[allow(non_snake_case)]
+impl B {
+    // go: sdk 1.25.5 testing/benchmark.go:231-269 B.run1
+    // goishlint:ignore GOISH018 run1 — three absences, each because
+    // what reads them is absent: the bstate maxLen extension (no
+    // -bench column alignment without a bstate on B), the goroutine and
+    // signal (goish's `B` is a `&mut` value that cannot cross a
+    // goroutine boundary; the same deviation doBench carries), and the
+    // chatty-gated output printing.
+    /// Go: "run1 runs the first iteration of benchFunc. It reports
+    /// whether more iterations of this benchmarks should be run."
+    ///
+    /// The return value is the point. `false` means "do not measure
+    /// this" and covers three different situations: the benchmark
+    /// FAILED, it registered sub-benchmarks (so it is a container, not
+    /// a measurement), or it finished early via Skip. Collapsing that
+    /// to a failure check alone would time container benchmarks and
+    /// report meaningless numbers for them.
+    pub(crate) fn run1(&mut self) -> bool {
+        self.runN(1);
+        if self.Failed() {
+            return false;
+        }
+        // Go: "Only print the output if we know we are not going to
+        // proceed. Otherwise it is printed in processBench."
+        let finished = self.state.finished.load(core::sync::atomic::Ordering::Acquire);
+        if self.state.hasSub.load(core::sync::atomic::Ordering::Acquire) || finished {
+            return false;
+        }
+        return true;
+    }
 }
