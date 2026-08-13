@@ -143,6 +143,114 @@ def cmd_diff(path, sym):
     return 0
 
 
+# A `::`-qualified reference, keeping the segment before the final name:
+# `crate::strings::Contains` -> module `strings`, symbol `Contains`.
+PATH = re.compile(r"((?:[A-Za-z_]\w*::)+)([A-Za-z_]\w*)")
+# Paths that name Rust or the crate spine rather than a goish module.
+NOT_A_MODULE = {"crate", "self", "Self", "super"}
+# A path rooted at one of these is Rust's, not goish's, and its
+# interior segments must not be read as goish modules:
+# `alloc::sync::Arc` is valid, and judging it on the `sync`
+# segment reported nine of fs.go's blocks as blocked on a symbol
+# that was never missing.
+RUST_ROOT = {"alloc", "core", "std"}
+
+
+def missing_deps(body, idx):
+    """goish modules the block calls into for names they do not export.
+
+    Reports ONLY when the module is known and the name is absent from
+    it. An unknown module, or one carrying a glob re-export, yields
+    nothing — the question is "does this reference definitely not
+    resolve?", and a maybe is worth less than silence here.
+    """
+    out = set()
+    for prefix, sym in PATH.findall(body):
+        segs = prefix.rstrip(":").split("::")
+        if segs[0] in RUST_ROOT:
+            continue
+        mod = segs[-1]
+        if mod in NOT_A_MODULE or mod[:1].isupper():
+            continue
+        e = idx.get(mod)
+        if not e or e["open"]:
+            continue
+        # `string::from_rune` is an associated function on the type
+        # `string`, not a lookup in a module called string. goish types
+        # are lowercase, so only the type set can tell them apart.
+        if any(mod in v["types"] for v in idx.values()):
+            continue
+        if sym not in e["names"]:
+            out.add(f"{mod}::{sym}")
+    return out
+
+
+USE_LINE = re.compile(r"^\s*use\s+(?:goish|crate)::([^;]+);", re.M)
+
+
+def add_imports(dst, body, draft_lines):
+    """Carry the `use` lines a promoted block needs into the live file.
+
+    A draft is a standalone crate with its own import header; the file
+    it is promoted into has a different one. Every symbol the block
+    names is known to exist (that is what `deps` checks) but is not
+    necessarily in scope, and the gap shows up as a wall of "cannot
+    find" errors that look like missing API and are not: promoting
+    three of fs.go's blocks produced twelve, every one of them
+    `delete`, `textproto` or `len` — all present in goish, none
+    imported here.
+
+    Only imports the block actually references are added, so the live
+    file does not accumulate the draft's whole header.
+    """
+    draft_hdr = "\n".join(draft_lines[:60])
+    want = {}
+    for spec in USE_LINE.findall(draft_hdr):
+        spec = spec.strip()
+        if spec.startswith("{"):
+            for n in re.findall(r"[A-Za-z_]\w*", spec):
+                want[n] = f"use crate::{n};"
+        else:
+            want[spec.split("::")[-1].strip()] = f"use crate::{spec};"
+    named = set(re.findall(r"[A-Za-z_]\w*", body))
+    have = set(re.findall(r"[A-Za-z_]\w*", "\n".join(
+        l for l in dst.split("\n") if l.strip().startswith("use "))))
+    add = [line for name, line in sorted(want.items())
+           if name in named and name not in have]
+    if not add:
+        return dst
+    out = dst.split("\n")
+    last = max((i for i, l in enumerate(out) if l.startswith("use ")), default=-1)
+    if last < 0:
+        return "\n".join(add) + "\n" + dst
+    out[last + 1:last + 1] = add
+    return "\n".join(out)
+
+
+def cmd_deps(path, argv):
+    """Per block, what it references that goish does not export."""
+    from goish_api import build, index_by_leaf
+    idx = index_by_leaf(build())
+    bs = blocks(path)
+    ready, blocked = [], []
+    for b in bs:
+        miss = missing_deps(b["body"], idx)
+        (blocked if miss else ready).append((b, sorted(miss)))
+    if "--ready" in argv:
+        for b, _ in ready:
+            print(b["sym"])
+        print(f"\n{len(ready)} of {len(bs)} block(s) reference nothing missing.")
+        return 0
+    for b, miss in blocked:
+        print(f"{b['sym']}")
+        for m in miss:
+            print(f"    needs  {m}")
+    print(f"\n{len(ready)} ready, {len(blocked)} blocked, {len(bs)} total.")
+    print("Promote the ready ones first: "
+          f"scripts/block.py promote {path} $(scripts/block.py deps {path} --ready | head -n -2)")
+    return 0
+
+
 def cmd_promote(path, syms):
     """Move blocks out of `<stem>.rs.draft` and into `<stem>.rs`.
 
@@ -185,7 +293,9 @@ def cmd_promote(path, syms):
         moved.append((b["sym"], "\n".join(body)))
         del lines[top:b["rs_end"]]
 
-    dst = open(live, errors="replace").read().rstrip("\n")
+    dst = open(live, errors="replace").read()
+    dst = add_imports(dst, "\n".join(b for _, b in moved), lines)
+    dst = dst.rstrip("\n")
     for sym, body in reversed(moved):
         dst += "\n\n" + body
     open(live, "w").write(dst + "\n")
@@ -214,6 +324,8 @@ def main():
         if len(argv) < 3:
             sys.exit("block.py: diff needs a symbol")
         return cmd_diff(path, argv[2])
+    if cmd == "deps":
+        return cmd_deps(path, argv[2:])
     if cmd == "promote":
         if len(argv) < 3:
             sys.exit("block.py: promote needs at least one symbol")
