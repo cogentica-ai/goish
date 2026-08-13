@@ -142,12 +142,29 @@ def decl_end(gofile, start):
         return start
     depth, seen = 0, False
     for i in range(start - 1, len(src)):
-        depth += src[i].count("{") - src[i].count("}")
+        code = strip_literals(src[i])
+        depth += code.count("{") - code.count("}")
         if "{" in src[i]:
             seen = True
         if seen and depth <= 0:
             return i + 1
     return start
+
+
+# Braces inside a string or char literal are not code. `server.rs` holds
+# `string("{")`, and counting that brace walks the enclosing-impl search
+# past the block it was looking for. port_coverage.py had the same
+# defect, where it hid 12 declarations.
+_LITERAL = re.compile(
+    r'(?s)r#*"(?:.*?)"#*'
+    r'|b?"(?:[^\"\\\\]|\\\\.)*"'
+    r"|b?'(?:[^'\\\\]|\\\\.)*'"
+)
+
+
+def strip_literals(line):
+    """Blank out string/char literal bodies so brace counting sees code."""
+    return _LITERAL.sub('""', line)
 
 
 IMPL = re.compile(r"^impl(?:\s*<[^>]*>)?\s+(?:(?P<tr>[\w:]+(?:<[^>]*>)?)\s+for\s+)?(?P<ty>[\w:]+)")
@@ -169,7 +186,8 @@ def enclosing_impl(lines, idx):
         # inside that block - the anchor is on a free function.
         if line.startswith("}") and i < idx:
             return None
-        depth += line.count("}") - line.count("{")
+        code = strip_literals(line)
+        depth += code.count("}") - code.count("{")
         m = IMPL.match(line)
         if m and depth <= 0:
             ty = m.group("ty")

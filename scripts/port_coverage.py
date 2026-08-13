@@ -461,6 +461,26 @@ RE_IMPL = re.compile(
     r'^\s*impl(?:\s*<[^>]*>)?\s+(?:.+\s+for\s+)?(?P<ty>[A-Za-z_]\w*)')
 
 
+# Braces inside a string or char literal are not code. `server.rs`
+# contains `string("{")` - a ServeMux pattern check - and counting that
+# brace left `depth` permanently one too deep, so `impl_ty` never closed
+# and EVERY method after line 152 was keyed to ServeMux. That hid 25
+# Server methods, 18 response methods, 11 connReader methods and more:
+# net/http/server.go read as 122 declarations short when most of them
+# were ported. Third distinct cause of impl_ty sticking (see the two
+# notes inside rust_decl_idents), and the most expensive.
+_LITERAL = re.compile(
+    r'(?s)r#*"(?:.*?)"#*'          # raw string, non-greedy
+    r'|b?"(?:[^\"\\\\]|\\\\.)*"'  # byte/normal string with escapes
+    r"|b?'(?:[^'\\\\]|\\\\.)*'"     # byte/char literal
+)
+
+
+def strip_literals(line):
+    """Blank out string/char literal bodies so brace counting sees code."""
+    return _LITERAL.sub('""', line)
+
+
 def rust_decl_idents(src):
     """Every Rust fn, keyed `ImplType.fn` inside an impl block and by the
     bare name outside one. Both forms are emitted for a method, because
@@ -486,7 +506,8 @@ def rust_decl_idents(src):
             out.add(name)
             if impl_ty:
                 out.add("%s.%s" % (impl_ty, name))
-        depth += line.count("{") - line.count("}")
+        code = strip_literals(line)
+        depth += code.count("{") - code.count("}")
         # Only close the impl block once its brace has actually opened.
         # A multi-line `impl<F> Trait for Ty<F>` + `where` header leaves
         # depth unchanged on the `impl` line, and closing eagerly there
