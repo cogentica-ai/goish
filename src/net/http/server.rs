@@ -393,6 +393,7 @@ impl Handler for notFoundHandler {
     }
 }
 
+// go: sdk 1.25.5 net/http/server.go:2337-2355 Error
 /// `http.Error(w, error, code)` (server.go:2337) — write a plain-text
 /// HTTP error response. Resets Content-Type to text/plain, sets
 /// X-Content-Type-Options: nosniff, deletes any prior Content-Length,
@@ -413,11 +414,13 @@ pub fn Error<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), 
     let _ = w.Write(crate::convert::bytes("\n"));
 }
 
+// go: sdk 1.25.5 net/http/server.go:2358-2358 NotFound
 /// `http.NotFound(w, r)` (server.go:2358) — convenience wrapper.
 pub fn NotFound(w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) {
     Error(w, string("404 page not found"), super::status::StatusNotFound);
 }
 
+// go: sdk 1.25.5 net/http/server.go:2362-2362 NotFoundHandler
 /// `http.NotFoundHandler()` (server.go:2362) — returns a Handler that
 /// replies to every request with a 404 not-found error. Faithfully
 /// matches Go's `return HandlerFunc(NotFound)`; goish wraps the
@@ -484,6 +487,7 @@ where
 //
 // Line-by-line ports of net/http/server.go:2370 / :2403 / :2488.
 
+// go: sdk 1.25.5 net/http/server.go:2370-2389 StripPrefix
 /// `http.StripPrefix(prefix, h)` (server.go:2370). Returns a handler
 /// that trims `prefix` from `r.URL.Path` (and `RawPath` if set)
 /// before delegating to `h`. If the request path doesn't begin with
@@ -710,6 +714,7 @@ impl ResponseWriter for timeoutWriter {
     }
 }
 
+// go: sdk 1.25.5 net/http/server.go:2403-2456 Redirect
 /// `http.Redirect(w, r, url, code)` (server.go:2403). Replies with a
 /// redirect to `url`. Slim port: relative paths are resolved against
 /// `r.URL.Path` via `path::Clean` + `path::Split`.
@@ -775,19 +780,27 @@ pub fn Redirect<U: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static
     }
     // Go: w.WriteHeader(code)
     w.WriteHeader(code);
-    // Go: if !hadCT && r.Method == "GET" { body := "<a href=\"...\">"+StatusText(code)+"</a>"; fmt.Fprintln(w, body) }
+    // Go: if !hadCT && r.Method == "GET" {
+    //         body := "<a href=\""+htmlEscape(url)+"\">"+StatusText(code)+"</a>.\n"
+    //         fmt.Fprintln(w, body) }
+    //
+    // TWO trailing newlines, not one: the literal already ends in "\n"
+    // and Fprintln appends another. goish emitted a single "\n", which
+    // is a one-byte difference in every GET redirect body.
     if !had_ct && r.Method == "GET" {
         let mut b = crate::strings::Builder::new();
         let _ = b.WriteString("<a href=\"");
-        let _ = b.WriteString(html_escape(url));
+        let _ = b.WriteString(htmlEscape(url));
         let _ = b.WriteString("\">");
         let _ = b.WriteString(super::status::StatusText(code));
         let _ = b.WriteString("</a>.\n");
+        let _ = b.WriteString("\n");
         let body = b.String();
         let _ = w.Write(crate::convert::bytes(body));
     }
 }
 
+// go: sdk 1.25.5 net/http/server.go:2488-2490 RedirectHandler
 /// `http.RedirectHandler(url, code)` (server.go:2488). Returns a
 /// handler that redirects all requests to `url` with the given status.
 pub fn RedirectHandler<U: Into<string>>(url: U, code: int) -> Arc<dyn Handler> {
@@ -808,6 +821,7 @@ impl Handler for redirectHandler {
 
 // ─── AllowQuerySemicolons ────────────────────────────────────────────
 
+// go: sdk 1.25.5 net/http/server.go:3354-3367 AllowQuerySemicolons
 /// `http.AllowQuerySemicolons(h)` (server.go:3354). Returns a handler
 /// that converts unescaped `;` characters in `r.URL.RawQuery` to `&`
 /// before delegating to `h`. Restores the pre-Go-1.17 query parsing
@@ -839,9 +853,10 @@ impl Handler for allowQuerySemicolonsHandler {
     }
 }
 
+// go: sdk 1.25.5 net/http/server.go:2468-2470 htmlEscape
 /// Line-by-line port of `htmlEscape` (server.go:2468) using a single
 /// strings::Builder pass instead of strings.NewReplacer.
-fn html_escape(s: string) -> string {
+pub fn htmlEscape(s: string) -> string {
     let mut b = crate::strings::Builder::new();
     b.Grow(s.Len());
     for i in 0..s.Len() {
