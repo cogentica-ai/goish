@@ -29,7 +29,7 @@ use alloc::vec::Vec;
 use crate::errors::{self, error, ErrorTrait};
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::types::{byte, int, rune};
+use crate::types::{byte, int, int64, rune};
 use crate::unicode::utf8;
 
 // Go: fs.go:172
@@ -364,6 +364,28 @@ pub trait FS {
 // concrete type that implements e.g. `File` + `ReadDirFile` just
 // `impl`s both traits; `goish::cast!(file, ReadDirFile)` still works
 // because each interface has its own per-trait registry.
+
+// go: none — goish-only capability interface, no Go counterpart.
+//
+// Go's `net/http.ioFile.Seek` asserts `f.file.(io.Seeker)`. goish's
+// `io::Seeker` takes `&mut self` — a seek moves a cursor — but a file
+// obtained from `FS::Open` is an `Arc<dyn File>`, which yields no
+// `&mut`, so that assertion can never succeed and every such file
+// would report "missing Seek method".
+//
+// This declares the same capability with the `&self` receiver the
+// rest of this module already uses: `File::Read` is `&self` too,
+// because a concrete file owns its cursor behind interior mutability.
+// Implement it beside `File` on any type whose bytes are seekable;
+// `goish::cast!(file, SeekableFile)` is then the analogue of Go's
+// `f.file.(io.Seeker)`.
+#[goish::interface] // goishlint:ignore GOISH022 — the macro expands to `goish::int` internally; the declaration below already uses bare `int`.
+pub trait SeekableFile {
+    /// `Seek(offset, whence)` — as `io::Seeker`, but on a shared
+    /// handle. `whence` is [`crate::io::SeekStart`],
+    /// [`crate::io::SeekCurrent`] or [`crate::io::SeekEnd`].
+    fn Seek(&self, offset: int64, whence: int) -> (int64, error);
+}
 
 /// `fs.ReadDirFile` (fs.go:119) — a directory file whose entries can
 /// be read with `ReadDir`. Embeds [`File`] in Go.

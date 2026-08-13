@@ -371,6 +371,9 @@ fn register_fstest_impls() {
     fs::__goish_register_File_impl::<openMapFile>();
     fs::__goish_register_File_impl::<mapDir>();
     fs::__goish_register_ReadDirFile_impl::<mapDir>();
+    // Without this, `goish::cast!(file, SeekableFile)` in net/http's
+    // ioFile.Seek is a SILENT miss — the impl alone is not enough.
+    fs::__goish_register_SeekableFile_impl::<openMapFile>();
 }
 
 // Go: mapfs.go:249 — type mapFileInfo struct { name string; f *MapFile }
@@ -476,6 +479,24 @@ impl File for openMapFile {
     }
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
         Some(self)
+    }
+}
+
+// go: none — goish-only. Go's openMapFile satisfies io.Seeker by
+// having a Seek method; goish's io::Seeker takes &mut self, which a
+// shared `Arc<dyn fs::File>` cannot give, so the capability is
+// declared as fs::SeekableFile and implemented here. This is what
+// makes `goish::cast!(file, SeekableFile)` succeed for a MapFS file,
+// the analogue of Go's `f.file.(io.Seeker)`.
+impl crate::io::fs::SeekableFile for openMapFile {
+    // go: none — goish-only capability interface; the body is the
+    // anchored inherent Seek below.
+    fn Seek(&self, offset: crate::types::int64, whence: int) -> (crate::types::int64, error) {
+        return openMapFile::Seek(self, offset, whence);
+    }
+    // go: none — cast! plumbing.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
     }
 }
 

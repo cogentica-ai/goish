@@ -1068,14 +1068,18 @@ impl File for ioFile {
     // go: sdk 1.25.5 net/http/fs.go:909-915 ioFile.Seek
     //
     // Go asserts `f.file.(io.Seeker)`. goish's io::Seeker takes
-    // `&mut self` — a seek moves the cursor — but `f.file` is an
-    // `Arc<dyn fs::File>`, which yields no `&mut`. The assertion can
-    // therefore never succeed here, and Go's own miss branch is the
-    // faithful result: a file whose method set lacks Seek reports
-    // errMissingSeek. Wiring the success branch needs io/fs's File to
-    // expose seeking with a `&self` receiver, the way this trait does.
-    fn Seek(&self, _offset: crate::types::int64, _whence: int) -> (crate::types::int64, error) {
-        return (0, errMissingSeek.into());
+    // `&mut self`, which the `Arc<dyn fs::File>` held here cannot
+    // give, so the assertion targets fs::SeekableFile — the same
+    // capability with the `&self` receiver this module already uses
+    // for Read. A file whose type does not implement it takes Go's
+    // miss branch and reports errMissingSeek, exactly as a Go file
+    // lacking Seek would.
+    fn Seek(&self, offset: crate::types::int64, whence: int) -> (crate::types::int64, error) {
+        let (s, ok) = crate::cast!(&*self.file, fs::SeekableFile);
+        if !ok {
+            return (0, errMissingSeek.into());
+        }
+        return s.Seek(offset, whence);
     }
 
     // go: sdk 1.25.5 net/http/fs.go:904-904 ioFile.Stat

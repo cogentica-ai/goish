@@ -17,11 +17,16 @@
 //      until there is a DirFS-backed case to hang it on.
 //   5. A nested path resolves through ioFS.
 //
-// NOT covered: ioFile.Seek and ioFile.ReadDir/Readdir. Both depend on
-// a type assertion on the inner fs.File that cannot currently succeed
-// (io::Seeker takes &mut self; ioFile holds an Arc<dyn fs::File>), so
-// they always take Go's miss branch and return errMissingSeek /
-// errMissingReadDir. Testing that would pin the gap, not the behaviour.
+//   6. ioFile.Seek reaches the underlying file. Go asserts
+//      f.file.(io.Seeker); goish's io::Seeker takes &mut self, which
+//      an Arc<dyn fs::File> cannot give, so the assertion targets
+//      fs::SeekableFile — the same capability with the &self receiver
+//      this module already uses for Read. A cast! that is not
+//      registered is a SILENT miss, so this case exists specifically
+//      to prove the success branch is reachable, not just compiled.
+//
+// NOT covered: ioFile.ReadDir/Readdir, which still take the miss
+// branch — MapFS's open file does not implement fs::ReadDirFile.
 
 #![no_std]
 #![no_main]
@@ -134,6 +139,28 @@ fn main() {
                 fmt::Println!("[5] nested path opens through ioFS  PASS");
             } else {
                 fmt::Println!("[5] nested path  FAIL size=", fi.Size());
+                failed += 1;
+            }
+        }
+    }
+
+    // 6. Seek through the adapter actually reaches the file.
+    n += 1;
+    {
+        let (f, err) = hfs.Open(string("/hello.txt"));
+        if err != goish::nil {
+            fmt::Println!("[6] Open  FAIL err=", err);
+            failed += 1;
+        } else {
+            // Seek to 7 ("world."), then read the rest.
+            let (pos, serr) = f.Seek(7, goish::io::SeekStart);
+            let mut buf: slice<goish::types::byte> = slice::__from_vec(alloc::vec![0u8; 16]);
+            let (rn, _rerr) = f.Read(&mut buf);
+            let got = goish::string::from_bytes(&buf.slice(0, rn));
+            if serr == goish::nil && pos == 7 && got == "world." {
+                fmt::Println!("[6] ioFile.Seek reaches the file  PASS");
+            } else {
+                fmt::Println!("[6] ioFile.Seek  FAIL pos=", pos, " got=", got, " err=", serr);
                 failed += 1;
             }
         }
