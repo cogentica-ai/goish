@@ -222,14 +222,40 @@ impl Header {
 /// (IMF-fixdate). Matches Go's `TimeFormat` constant.
 pub const TimeFormat: &str = "Mon, 02 Jan 2006 15:04:05 GMT";
 
-/// `http.ParseTime(text)` (header.go:129) — parse an HTTP-date.
+// go: sdk 1.25.5 net/http/header.go:120-124 timeFormats
+pub fn timeFormats() -> slice<string> {
+    return slice::__from_vec(alloc::vec![
+        string(TimeFormat),
+        string(crate::time::RFC850),
+        string(crate::time::ANSIC),
+    ]);
+}
+
+// go: sdk 1.25.5 net/http/header.go:126-137 ParseTime
+//
+/// `http.ParseTime(text)` — parse an HTTP-date, trying the formats
+/// allowed by HTTP/1.1: [`TimeFormat`] (IMF-fixdate),
+/// `time::RFC850` and `time::ANSIC` (asctime).
 ///
-/// **Slim port deviation:** Go iterates through three layouts
-/// (IMF-fixdate / RFC 850 / ANSI C asctime). Goish supports only
-/// IMF-fixdate (`Mon, 02 Jan 2006 15:04:05 GMT`) and the legacy
-/// dash-separated cookie form (`Mon, 02-Jan-2006 15:04:05 MST`).
-/// `time::Parse` is not yet ported; once it lands this function
-/// will gain the third form.
+/// Two divergences from Go 1.25.5, both verified with
+/// scripts/goref.sh and both pinned in examples/http_time_smoke.rs:
+///
+///  * **RFC 850 is not accepted.** Go parses
+///    `Sunday, 06-Nov-94 08:49:37 GMT` — a FULL weekday name and a
+///    TWO-digit year. goish's `time::Parse` whitelists layouts and
+///    rejects both day-name-comma forms ("time: unsupported layout"),
+///    so the two are handled by the hand-rolled `parse_http_date`
+///    scanner below, which reads a three-letter day and a four-digit
+///    year. Closing this means teaching `parse_http_date` the RFC 850
+///    shape, not swapping in `time::Parse`.
+///  * **goish accepts one form Go rejects**:
+///    `Mon, 02-Jan-2006 15:04:05 MST`, RFC 850 with a four-digit
+///    year. Pre-existing, kept so conditional requests that relied on
+///    it keep working.
+///
+/// asctime is new here: it is the third format Go allows, `time::Parse`
+/// handles it, and goish previously rejected it — so an `If-Modified-Since`
+/// in asctime form was silently treated as unparseable.
 pub fn ParseTime<T: Into<string>>(text: T) -> (crate::time::Time, crate::error) {
     let text: string = text.into();
     if let Some(t) = parse_http_date(text.as_bytes(), b' ') {
@@ -238,10 +264,14 @@ pub fn ParseTime<T: Into<string>>(text: T) -> (crate::time::Time, crate::error) 
     if let Some(t) = parse_http_date(text.as_bytes(), b'-') {
         return (t, crate::errors::nil);
     }
-    (
+    let (t, err) = crate::time::Parse(string(crate::time::ANSIC), text);
+    if err == crate::errors::nil {
+        return (t, crate::errors::nil);
+    }
+    return (
         crate::time::Time::default(),
         crate::errors::New(string("http: invalid date format")),
-    )
+    );
 }
 
 const HTTP_MONTH_NAMES: [&[byte; 3]; 12] = [
