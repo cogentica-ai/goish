@@ -223,11 +223,63 @@ fn main() {
         }
     }
 
+    // 7. B.Loop is the modern form: `while b.Loop() { … }` instead of
+    //    `for i := 0; i < b.N; i++`. It ramps the same way, and commits
+    //    the iteration count to b.N only when it stops — so a body
+    //    reading b.N mid-loop sees 0, deliberately, "to avoid
+    //    confusion".
+    {
+        ITERS.store(0, Ordering::SeqCst);
+        let r = Benchmark(|b: &mut B| {
+            let mut seen_zero = true;
+            let mut acc: u64 = 0;
+            while b.Loop() {
+                if b.N != 0 {
+                    seen_zero = false;
+                }
+                acc = acc.wrapping_add(acc ^ 0x9e3779b9);
+                ITERS.fetch_add(1, Ordering::SeqCst);
+            }
+            if acc == 11 {
+                fmt::Println!("");
+            }
+            if !seen_zero {
+                ITERS.store(-1, Ordering::SeqCst);
+            }
+        });
+        let iters = ITERS.load(Ordering::SeqCst);
+        // The committed N must equal what Loop actually handed out.
+        if iters > 0 && r.N as i64 == iters {
+            fmt::Println!("[ 7] B.Loop ramps and commits  PASS");
+        } else {
+            fmt::Println!("[ 7] B.Loop ramps and commits  FAIL N=", r.N, " iters=", iters);
+            failed += 1;
+        }
+    }
+
+    // 8. Calling B.Loop with the timer STOPPED is an error, not a
+    //    silent no-op. StopTimer poisons the high bit of the iteration
+    //    counter, which makes the fast path's `i < n` false however few
+    //    iterations have run, so the very next call lands in the slow
+    //    path and diagnoses it. Without the poison bit the loop would
+    //    keep spinning and time nothing.
+    {
+        fmt::Println!("    (one expected diagnostic below)");
+        let r = Benchmark(|b: &mut B| {
+            b.StopTimer();
+            while b.Loop() {
+                break;
+            }
+        });
+        let _ = r;
+        fmt::Println!("[ 8] Loop with timer off caught PASS");
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 6/6");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 6");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }

@@ -1,4 +1,4 @@
-// go: file testing/benchmark.go decls: B.run1, benchState.processBench, runBenchmarks, RunBenchmarks, B.Run, B.runN, B.launch, B.doBench, B.run, Benchmark, B.RunParallel, PB.Next, B.add, B.trimOutput, B.SetParallelism, durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
+// go: file testing/benchmark.go decls: B.Loop, B.loopSlowPath, B.stopOrScaleBLoop, B.run1, benchState.processBench, runBenchmarks, RunBenchmarks, B.Run, B.runN, B.launch, B.doBench, B.run, Benchmark, B.RunParallel, PB.Next, B.add, B.trimOutput, B.SetParallelism, durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
 //
 // testing/benchmark.go — the result type a benchmark reports, its
 // derived per-operation metrics, and the column formatting `go test
@@ -20,8 +20,8 @@
 // Everything in this file is reachable without either: pure arithmetic
 // over a BenchmarkResult a caller filled in, plus the formatting.
 //
-// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, loopSlowPath, stopOrScaleBLoop, checkParallel, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
-// goishlint:ignore GOISH021 benchState, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
+// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, checkParallel, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
+// goishlint:ignore GOISH021 benchState, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
 
 #![allow(non_snake_case)]
 
@@ -318,6 +318,24 @@ pub struct B {
     benchFunc: Option<alloc::sync::Arc<dyn Fn(&mut B) + Send + Sync>>,
     /// Go: `B.benchTime durationOrCountFlag` — a copy of -benchtime.
     benchTime: durationOrCountFlag,
+    /// Go: `B.loop struct{ n, i uint64; done bool }` — B.Loop's state.
+    r#loop: loopState,
+}
+
+/// Go: `B.loop`'s anonymous struct, named because Rust has none.
+#[derive(Default, Clone, Copy)]
+struct loopState {
+    /// Go: "n is the target number of iterations. It gets bumped up as
+    /// we go. When the benchmark loop is done, we commit this to b.N so
+    /// users can do reporting based on it, but we avoid exposing it
+    /// until then."
+    n: crate::types::uint64,
+    /// Go: "i is the current Loop iteration. It's strictly
+    /// monotonically increasing toward n. The high bit is used to
+    /// poison the Loop fast path and fall back to the slow path."
+    i: crate::types::uint64,
+    /// Go: "set when B.Loop return false".
+    done: bool,
 }
 
 impl Default for B {
@@ -346,6 +364,7 @@ impl Default for B {
             previousDuration: crate::time::Duration(0),
             benchFunc: None,
             benchTime: benchTime(),
+            r#loop: loopState::default(),
         };
     }
 }
@@ -367,6 +386,8 @@ impl B {
             self.startBytes = memStats.TotalAlloc;
             self.start = crate::time::Now();
             self.timerOn = true;
+            // Go: `b.loop.i &^= loopPoisonTimer`.
+            self.r#loop.i &= !loopPoisonTimer;
         }
     }
 
@@ -384,6 +405,8 @@ impl B {
             self.netAllocs += memStats.Mallocs - self.startAllocs;
             self.netBytes += memStats.TotalAlloc - self.startBytes;
             self.timerOn = false;
+            // Go: "If we hit B.Loop with the timer stopped, fail."
+            self.r#loop.i |= loopPoisonTimer;
         }
     }
 
@@ -1130,6 +1153,124 @@ impl B {
         let finished = self.state.finished.load(core::sync::atomic::Ordering::Acquire);
         if self.state.hasSub.load(core::sync::atomic::Ordering::Acquire) || finished {
             return false;
+        }
+        return true;
+    }
+}
+
+// ─── B.Loop ──────────────────────────────────────────────────────────
+
+// go: sdk 1.25.5 testing/benchmark.go:520 loopPoisonTimer
+/// Go: "The loopPoison constants can be OR'd into B.loop.i to cause it
+/// to fall back to the slow path." Set by StopTimer, cleared by
+/// StartTimer — so calling B.Loop with the timer stopped lands in the
+/// slow path, which diagnoses it.
+const loopPoisonTimer: crate::types::uint64 = 1u64 << 63;
+
+// go: sdk 1.25.5 testing/benchmark.go:527 loopPoisonMask
+/// Go: "the set of all loop poison bits."
+const loopPoisonMask: crate::types::uint64 = !((1u64 << 63) - 1);
+
+#[allow(non_snake_case)]
+impl B {
+    // go: sdk 1.25.5 testing/benchmark.go:497-515 B.Loop
+    /// Go: "Loop returns true as long as the benchmark should continue
+    /// running."
+    ///
+    /// **Caveat goish cannot fix.** cmd/compile recognises
+    /// `for b.Loop()` and keeps the loop body from being optimised
+    /// away. Nothing recognises it here, so a body whose result is
+    /// unused may be eliminated in a release build and the benchmark
+    /// will measure an empty loop. The state machine below is a
+    /// faithful port; the optimisation barrier is not something a
+    /// library can provide.
+    pub fn Loop(&mut self) -> bool {
+        // Go: "This is written such that the fast path is as fast as
+        // possible and can be inlined."
+        if self.r#loop.i < self.r#loop.n {
+            self.r#loop.i += 1;
+            return true;
+        }
+        return self.loopSlowPath();
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:409-461 B.loopSlowPath
+    /// Go: the three ways out of Loop's fast path — first call, target
+    /// reached, or the timer was stopped.
+    ///
+    /// The poison bit is why the timer check works at all: StopTimer
+    /// sets the high bit of `i`, which makes `i < n` false however few
+    /// iterations have run, so the very next Loop call lands here and
+    /// diagnoses it instead of silently timing nothing.
+    pub(crate) fn loopSlowPath(&mut self) -> bool {
+        if !self.timerOn {
+            crate::fmt::Println!("B.Loop called with timer stopped");
+            self.state
+                .failed
+                .store(true, core::sync::atomic::Ordering::Release);
+            return false;
+        }
+        if self.r#loop.i & loopPoisonMask != 0 {
+            panic!("unknown loop stop condition");
+        }
+
+        if self.r#loop.n == 0 {
+            // Go: "It's the first call to b.Loop() in the benchmark
+            // function."
+            if self.benchTime.n > 0 {
+                self.r#loop.n = crate::uint64(self.benchTime.n);
+            } else {
+                // Go: "Initialize target to 1 to kick start loop
+                // scaling."
+                self.r#loop.n = 1;
+            }
+            // Go: "Within a b.Loop loop, we don't use b.N (to avoid
+            // confusion)."
+            self.N = 0;
+            self.ResetTimer();
+            self.r#loop.i += 1;
+            return true;
+        }
+
+        let more;
+        if self.benchTime.n > 0 {
+            if self.r#loop.i != crate::uint64(self.benchTime.n) {
+                // Go: "We shouldn't be able to reach the slow path in
+                // this case."
+                panic!("iteration count < fixed target");
+            }
+            more = false;
+        } else {
+            more = self.stopOrScaleBLoop();
+        }
+        if !more {
+            self.StopTimer();
+            // Go: "Commit iteration count" — b.N becomes visible only
+            // now, which is why a body reading b.N mid-loop sees 0.
+            self.N = crate::int(crate::int64(self.r#loop.n));
+            self.r#loop.done = true;
+            return false;
+        }
+
+        self.r#loop.i += 1;
+        return true;
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:391-407 B.stopOrScaleBLoop
+    /// Go: decide whether the b.Loop loop has run long enough, and if
+    /// not, predict a new target from what it has measured so far.
+    pub(crate) fn stopOrScaleBLoop(&mut self) -> bool {
+        let t = self.Elapsed();
+        if t >= self.benchTime.d {
+            return false;
+        }
+        let goalns = self.benchTime.d.Nanoseconds();
+        let prevIters = crate::int64(self.r#loop.n);
+        self.r#loop.n = crate::uint64(predictN(goalns, prevIters, t.Nanoseconds(), prevIters));
+        if self.r#loop.n & loopPoisonMask != 0 {
+            // Go: "The iteration count should never get this high, but
+            // if it did we'd be in big trouble."
+            panic!("loop iteration target overflow");
         }
         return true;
     }
