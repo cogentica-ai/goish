@@ -619,6 +619,10 @@ name = "http_checkredirect_smoke"
 path = "examples/http_checkredirect_smoke.rs"
 
 [[example]]
+name = "http_url_values_smoke"
+path = "examples/http_url_values_smoke.rs"
+
+[[example]]
 name = "http_server_pure_smoke"
 path = "examples/http_server_pure_smoke.rs"
 

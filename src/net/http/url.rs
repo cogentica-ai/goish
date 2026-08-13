@@ -326,6 +326,8 @@ impl URL {
         v
     }
 
+    // go: sdk 1.25.5 net/url/url.go:1262-1281 URL.JoinPath
+    //
     /// `(u *URL).JoinPath(elem ...string) *URL` (url.go line 1262) — return
     /// a copy of `u` with `elem` appended to its path. Slim port:
     /// uses goish's `path::Join` for the heavy lifting, preserves a
@@ -449,6 +451,8 @@ impl URL {
         self.String()
     }
 
+    // go: sdk 1.25.5 net/url/url.go:1242-1244 URL.MarshalBinary
+    //
     /// `(u *URL).MarshalBinary()` (url.go line 1242) — serialize as bytes.
     pub fn MarshalBinary(&self) -> (crate::goslice::slice<crate::types::byte>, error) {
         // return u.AppendBinary(nil)
@@ -457,6 +461,8 @@ impl URL {
         ))
     }
 
+    // go: sdk 1.25.5 net/url/url.go:1246-1248 URL.AppendBinary
+    //
     /// `(u *URL).AppendBinary(b)` (url.go line 1246) — append the
     /// String() form to b.
     pub fn AppendBinary(
@@ -469,6 +475,8 @@ impl URL {
         (crate::goslice::slice::__from_vec(v), crate::errors::nil)
     }
 
+    // go: sdk 1.25.5 net/url/url.go:1250-1257 URL.UnmarshalBinary
+    //
     /// `(u *URL).UnmarshalBinary(text)` (url.go line 1250) — parse bytes
     /// into self in place. Returns any parse error.
     pub fn UnmarshalBinary(
@@ -828,6 +836,8 @@ pub fn ResolvePath<B: Into<string>, R: Into<string>>(base: B, reference: R) -> s
     string::from_bytes(&dst)
 }
 
+// go: sdk 1.25.5 net/url/url.go:1338-1345 JoinPath
+//
 /// `url.JoinPath(base, elem...)` (url.go line 1338) — Parse `base`, append
 /// `elem` to the path via `URL.JoinPath`, and return the rendered URL.
 /// Returns `(result, error)` per goish convention.
@@ -1084,14 +1094,77 @@ pub fn PathEscape<S: Into<string>>(s: S) -> string {
     escape(s, EncodingMode::PathSegment)
 }
 
-/// Line-by-line port of `(v Values).Has(key)` (url.go line 974) — report
+// go: sdk 1.25.5 net/url/url.go:974-977 Values.Has
+//
+/// Report
 /// whether `v` contains an entry for `key`. Goish models Values as
 /// the bare `map<string, slice<string>>`, so this is a free fn.
-pub fn ValuesHas<K: Into<string>>(v: &crate::gomap::map<string, crate::goslice::slice<string>>, key: K) -> bool {
+pub fn ValuesHas<K: Into<string>>(
+    v: &crate::gomap::map<string, crate::goslice::slice<string>>,
+    key: K,
+) -> bool {
     let key: string = key.into();
     // Go: _, ok := v[key]; return ok
     let (_, ok) = v.Get(key);
-    ok
+    return ok;
+}
+
+// go: sdk 1.25.5 net/url/url.go:948-954 Values.Get
+//
+/// The first value associated with `key`, or "" if there is none.
+///
+/// Go's Get "ignores any other values that may be associated with
+/// key" and cannot distinguish absent from present-but-empty — use
+/// `ValuesHas` or index the map directly for that.
+pub fn ValuesGet<K: Into<string>>(
+    v: &crate::gomap::map<string, crate::goslice::slice<string>>,
+    key: K,
+) -> string {
+    let (vs, _) = v.Get(key.into());
+    if vs.len() == 0 {
+        return string::new();
+    }
+    return vs[0].clone();
+}
+
+// go: sdk 1.25.5 net/url/url.go:958-960 Values.Set
+//
+/// Sets `key` to the single value `value`, REPLACING any existing
+/// values.
+pub fn ValuesSet<K: Into<string>, V: Into<string>>(
+    v: &mut crate::gomap::map<string, crate::goslice::slice<string>>,
+    key: K,
+    value: V,
+) {
+    v.Set(
+        key.into(),
+        crate::goslice::slice::<string>::__from_vec(alloc::vec![value.into()]),
+    );
+}
+
+// go: sdk 1.25.5 net/url/url.go:964-966 Values.Add
+//
+/// Appends `value` to the values already associated with `key`,
+/// rather than replacing them.
+pub fn ValuesAdd<K: Into<string>, V: Into<string>>(
+    v: &mut crate::gomap::map<string, crate::goslice::slice<string>>,
+    key: K,
+    value: V,
+) {
+    let key: string = key.into();
+    let (mut vs, _) = v.Get(key.clone());
+    vs = crate::append!(vs, value.into());
+    v.Set(key, vs);
+}
+
+// go: sdk 1.25.5 net/url/url.go:969-971 Values.Del
+//
+/// Deletes the values associated with `key`.
+pub fn ValuesDel<K: Into<string>>(
+    v: &mut crate::gomap::map<string, crate::goslice::slice<string>>,
+    key: K,
+) {
+    v.Delete(key.into());
 }
 
 /// Subset of url.go's `encoding` enum (url.go line 78). The full Go enum
