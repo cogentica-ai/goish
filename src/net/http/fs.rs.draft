@@ -434,47 +434,13 @@ pub fn serveContent<S: Into<string>>(w: impl ResponseWriter + 'static, r: nilabl
     }
 }
 
-// go: sdk 1.25.5 net/http/fs.go:436-459 scanETag
-// go: draft goishc — machine-translated, unreviewed
-pub fn scanETag<S: Into<string>>(mut s: S) -> (string, string) {
-    #[allow(unused_mut)]
-    let mut s = s.into();
-    s = textproto::TrimString(s);
-    let mut start = 0;
-    if strings::HasPrefix(s.clone(), string("W/")) {
-        start = 2;
-    }
-    if len(&s.slice(start, len(&s))) < 2 || s[start] != 34 /*'"'*/ {
-        return (string(""), string(""));
-    }
-    {
-        let mut i = start.wrapping_add(1);
-        while i < len(&s) {
-            let c = s[i];
-            if c == 0x21 || c >= 0x23 && c <= 0x7E || c >= 0x80 {
-            } else if c == 34 /*'"'*/ {
-                return (s.slice(0, i.wrapping_add(1)), s.slice(i.wrapping_add(1), len(&s)));
-            } else {
-                return (string(""), string(""));
-            }
-            i = i.wrapping_add(1);
-        }
-    }
-    return (string(""), string(""));
-}
 
 
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct condResult(pub int);
 
-goish::derive_go_hash_newtype!(condResult);
 
-pub const condNone: condResult = condResult(0);
 
-pub const condTrue: condResult = condResult(1);
 
-pub const condFalse: condResult = condResult(2);
 
 // go: sdk 1.25.5 net/http/fs.go:483-511 checkIfMatch
 // go: draft goishc — machine-translated, unreviewed
@@ -560,29 +526,6 @@ pub fn checkIfNoneMatch(w: impl ResponseWriter + 'static, r: nilable![&http::Req
     return condTrue;
 }
 
-// go: sdk 1.25.5 net/http/fs.go:562-581 checkIfModifiedSince
-// go: draft goishc — machine-translated, unreviewed
-pub fn checkIfModifiedSince(r: nilable![&http::Request], mut modtime: time::Time) -> condResult {
-    if r.Must().Method != "GET" && r.Must().Method != "HEAD" {
-        return condNone;
-    }
-    let ims = r.Must().Header.Get(string("If-Modified-Since"));
-    if ims == "" || isZeroTime(modtime) {
-        return condNone;
-    }
-    let (t, err) = ParseTime(ims);
-    if err != nil {
-        return condNone;
-    }
-    modtime = modtime.Truncate(time::Second);
-    {
-        let ret = modtime.Compare(t);
-        if ret <= 0 {
-            return condFalse;
-        }
-    }
-    return condTrue;
-}
 
 // go: sdk 1.25.5 net/http/fs.go:583-612 checkIfRange
 // go: draft goishc — machine-translated, unreviewed
@@ -617,26 +560,7 @@ pub fn checkIfRange(w: impl ResponseWriter + 'static, r: nilable![&http::Request
 
 
 
-// go: sdk 1.25.5 net/http/fs.go:621-625 setLastModified
-// go: draft goishc — machine-translated, unreviewed
-pub fn setLastModified(w: impl ResponseWriter + 'static, modtime: time::Time) {
-    if !isZeroTime(modtime) {
-        w.Header().Set(string("Last-Modified"), modtime.UTC().Format(TimeFormat));
-    }
-}
 
-// go: sdk 1.25.5 net/http/fs.go:627-641 writeNotModified
-// go: draft goishc — machine-translated, unreviewed
-pub fn writeNotModified(w: impl ResponseWriter + 'static) {
-    let mut h = w.Header();
-    delete!(h, string("Content-Type"));
-    delete!(h, string("Content-Length"));
-    delete!(h, string("Content-Encoding"));
-    if h.Get(string("Etag")) != "" {
-        delete!(h, string("Last-Modified"));
-    }
-    w.WriteHeader(StatusNotModified);
-}
 
 // go: sdk 1.25.5 net/http/fs.go:645-676 checkPreconditions
 // go: draft goishc — machine-translated, unreviewed

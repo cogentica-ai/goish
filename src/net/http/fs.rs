@@ -29,6 +29,15 @@ use crate::types::{byte, int, rune};
 use super::request::Request;
 use super::response::ResponseWriter;
 use super::server::{Handler, NotFound};
+use crate::delete;
+use crate::io::fs;
+use super::header::{ParseTime, TimeFormat};
+use super::status::StatusNotModified;
+use crate::go;
+use crate::len;
+use crate::nil;
+use crate::nilable;
+use crate::net::textproto;
 
 /// `http.Dir(root)` — bind a filesystem root directory. Mirrors Go's
 /// `type Dir string` (fs.go:44).
@@ -508,3 +517,86 @@ pub fn isSlashRune(r: rune) -> bool {
 
 // go: sdk 1.25.5 net/http/fs.go:614-614 unixEpochTime
 pub static unixEpochTime: crate::lazy::Lazy<time::Time> = crate::lazy::Lazy::new(|| time::Unix(0, 0));
+
+// go: sdk 1.25.5 net/http/fs.go:436-459 scanETag
+pub fn scanETag<S: Into<string>>(mut s: S) -> (string, string) {
+    #[allow(unused_mut)]
+    let mut s = s.into();
+    s = textproto::TrimString(s);
+    let mut start = 0;
+    if strings::HasPrefix(s.clone(), string("W/")) {
+        start = 2;
+    }
+    if len(&s.slice(start, len(&s))) < 2 || s[start] != 34 /*'"'*/ {
+        return (string(""), string(""));
+    }
+    {
+        let mut i = start.wrapping_add(1);
+        while i < len(&s) {
+            let c = s[i];
+            if c == 0x21 || c >= 0x23 && c <= 0x7E || c >= 0x80 {
+            } else if c == 34 /*'"'*/ {
+                return (s.slice(0, i.wrapping_add(1)), s.slice(i.wrapping_add(1), len(&s)));
+            } else {
+                return (string(""), string(""));
+            }
+            i = i.wrapping_add(1);
+        }
+    }
+    return (string(""), string(""));
+}
+
+// go: sdk 1.25.5 net/http/fs.go:562-581 checkIfModifiedSince
+pub fn checkIfModifiedSince(r: nilable![&Request], mut modtime: time::Time) -> condResult {
+    if r.Must().Method != "GET" && r.Must().Method != "HEAD" {
+        return condNone;
+    }
+    let ims = r.Must().Header.Get(string("If-Modified-Since"));
+    if ims == "" || isZeroTime(modtime) {
+        return condNone;
+    }
+    let (t, err) = ParseTime(ims);
+    if err != nil {
+        return condNone;
+    }
+    modtime = modtime.Truncate(time::Second);
+    {
+        let ret = modtime.Compare(t);
+        if ret <= 0 {
+            return condFalse;
+        }
+    }
+    return condTrue;
+}
+
+// go: sdk 1.25.5 net/http/fs.go:621-625 setLastModified
+pub fn setLastModified(w: impl ResponseWriter + 'static, modtime: time::Time) {
+    if !isZeroTime(modtime) {
+        w.Header().Set(string("Last-Modified"), modtime.UTC().Format(TimeFormat));
+    }
+}
+
+// go: sdk 1.25.5 net/http/fs.go:627-641 writeNotModified
+pub fn writeNotModified(w: impl ResponseWriter + 'static) {
+    let mut h = w.Header();
+    h.Del(string("Content-Type"));
+    h.Del(string("Content-Length"));
+    h.Del(string("Content-Encoding"));
+    if h.Get(string("Etag")) != "" {
+        h.Del(string("Last-Modified"));
+    }
+    w.WriteHeader(StatusNotModified);
+}
+
+// go: sdk 1.25.5 net/http/fs.go:475-475 condResult
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct condResult(pub int);
+
+crate::derive_go_hash_newtype!(condResult);
+
+// go: sdk 1.25.5 net/http/fs.go:477-481 condNone
+pub const condNone: condResult = condResult(0);
+// go: sdk 1.25.5 net/http/fs.go:477-481 condTrue
+pub const condTrue: condResult = condResult(1);
+// go: sdk 1.25.5 net/http/fs.go:477-481 condFalse
+pub const condFalse: condResult = condResult(2);
