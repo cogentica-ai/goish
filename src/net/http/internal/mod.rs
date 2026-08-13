@@ -13,3 +13,5 @@
 
 pub mod ascii;
 pub mod chunked;
+pub mod httpcommon;
+pub mod testcert;
