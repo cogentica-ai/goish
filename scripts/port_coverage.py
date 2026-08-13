@@ -57,8 +57,12 @@ FUNC = re.compile(r"^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*[\(\[]", re.M)
 # default because every published number, and the whole lint baseline
 # workflow, is keyed to the name-level count; switching silently would
 # restate them all. Use it to see the true denominator.
+# `(?:\[[^]]*\])?` — a GENERIC receiver. `func (h *mapping[K, V]) add`
+# did not match at all, so every method in net/http/mapping.go vanished
+# from the --by-decl denominator instead of being counted as missing,
+# and the same held for any generic type in the tree.
 FUNC_RECV = re.compile(
-    r"^func\s+(?:\(\s*\w+\s+\*?(\w+)\s*\)\s*)?([A-Za-z_]\w*)\s*[\(\[]", re.M)
+    r"^func\s+(?:\(\s*\w+\s+\*?(\w+)(?:\[[^]]*\])?\s*\)\s*)?([A-Za-z_]\w*)\s*[\(\[]", re.M)
 
 
 def decl_key(recv, name):

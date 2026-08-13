@@ -611,6 +611,10 @@ name = "http_pattern_conflict_smoke"
 path = "examples/http_pattern_conflict_smoke.rs"
 
 [[example]]
+name = "http_routing_tree_smoke"
+path = "examples/http_routing_tree_smoke.rs"
+
+[[example]]
 name = "http_sniff_smoke"
 path = "examples/http_sniff_smoke.rs"
 
