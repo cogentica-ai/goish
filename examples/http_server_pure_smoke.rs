@@ -26,9 +26,13 @@ use alloc::vec::Vec;
 use goish::goslice::slice;
 use goish::net::http::server::{
     cleanPath, foreachHeaderElement, numLeadingCRorLF, stripHostPort,
-    tlsRecordHeaderLooksLikeHTTP, validNextProto, ConnStateString, StateActive, StateClosed,
-    StateHijacked, StateIdle, StateNew,
+    tlsRecordHeaderLooksLikeHTTP, validNextProto, bufferBeforeChunkingSize, copyBufPoolSize,
+    debugServerConnections, errTooLarge, extraHeaderKeys, maxPostHandlerReadBytes,
+    nextProtoUnencryptedHTTP2, rstAvoidanceDelay, shutdownPollIntervalMax, ConnStateString,
+    StateActive, StateClosed, StateHijacked, StateIdle, StateNew, TrailerPrefix,
 };
+use goish::errors;
+use goish::time;
 use goish::{fmt, string, syscall};
 
 #[goish::main]
@@ -203,11 +207,41 @@ fn main() {
         check!("[7] ConnState.String, 7 cases vs Go", bad);
     }
 
+    // 8. server.go's constants and sentinels.
+    //
+    //    rstAvoidanceDelay is 500ms, NOT 1ns. scripts/goref.sh reports
+    //    1ns because it compiles the package's tests too, and
+    //    export_test.go:331 sets it to the minimum "to shake out
+    //    timing bugs". The source value is what ships. This is the
+    //    documented goref trap, caught here in the wild.
+    {
+        let mut bad = 0;
+        if TrailerPrefix != "Trailer:" { bad += 1; }
+        if bufferBeforeChunkingSize != 2048 { bad += 1; }
+        if debugServerConnections { bad += 1; }
+        if copyBufPoolSize != 32768 { bad += 1; }
+        if maxPostHandlerReadBytes != 262144 { bad += 1; }
+        if nextProtoUnencryptedHTTP2 != "unencrypted_http2" { bad += 1; }
+        let e: errors::error = errTooLarge.into();
+        if e.Error() != "http: request too large" { bad += 1; }
+        if rstAvoidanceDelay() != time::Duration(500_000_000) { bad += 1; }
+        if shutdownPollIntervalMax() != time::Duration(500_000_000) { bad += 1; }
+        let ks = extraHeaderKeys();
+        if ks.Len() != 3
+            || string::from_bytes(&ks[0]) != "Content-Type"
+            || string::from_bytes(&ks[1]) != "Connection"
+            || string::from_bytes(&ks[2]) != "Transfer-Encoding"
+        {
+            bad += 1;
+        }
+        check!("[8] server.go constants + sentinels vs Go", bad);
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 7/7");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL ", failed, " of 7");
+        fmt::Println!("FAIL ", failed, " of 8");
         syscall::Exit(1);
     }
 }

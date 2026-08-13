@@ -1089,6 +1089,77 @@ pub struct __ServerState {
     on_shutdown: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
 }
 
+// go: sdk 1.25.5 net/http/server.go:512-525 TrailerPrefix
+//
+/// Go: "TrailerPrefix is a magic prefix for [ResponseWriter.Header]
+/// map keys that, if present, signals that the map entry is actually
+/// for the response trailers, and not the response headers. The prefix
+/// is stripped after the ServeHTTP call finishes and the values are
+/// sent in the trailers."
+///
+/// Go: "This mechanism is intended only for trailers that are NOT
+/// known prior to the headers being written. If the set of trailers is
+/// fixed or known before the header is written, the normal Go trailers
+/// mechanism is preferred."
+pub const TrailerPrefix: &str = "Trailer:";
+
+// go: sdk 1.25.5 net/http/server.go:341-341 bufferBeforeChunkingSize
+//
+// Go: the chunkWriter buffers this much before deciding whether to
+// chunk, so a small response can still get a Content-Length.
+pub const bufferBeforeChunkingSize: int = 2048;
+
+// go: sdk 1.25.5 net/http/server.go:631-631 debugServerConnections
+pub const debugServerConnections: bool = false;
+
+// go: sdk 1.25.5 net/http/server.go:832-832 copyBufPoolSize
+pub const copyBufPoolSize: int = 32 * 1024;
+
+// go: sdk 1.25.5 net/http/server.go:1009-1009 errTooLarge
+crate::var! {
+    pub errTooLarge: error = "http: request too large";
+}
+
+// go: sdk 1.25.5 net/http/server.go:1148-1148 maxPostHandlerReadBytes
+//
+// Go: the maximum number of bytes the server reads off an unread
+// request body AFTER the handler returns, so the connection can be
+// reused. Past this it gives up and closes instead.
+pub const maxPostHandlerReadBytes: int = 256 << 10;
+
+// go: sdk 1.25.5 net/http/server.go:1249-1253 extraHeaderKeys
+//
+// The header names writeHeader emits from its own `extraHeader`
+// struct rather than the Header map, so both are not written.
+pub fn extraHeaderKeys() -> crate::goslice::slice<crate::goslice::slice<crate::types::byte>> {
+    return crate::goslice::slice::__from_vec(alloc::vec![
+        crate::convert::bytes(string("Content-Type")),
+        crate::convert::bytes(string("Connection")),
+        crate::convert::bytes(string("Transfer-Encoding")),
+    ]);
+}
+
+// go: sdk 1.25.5 net/http/server.go:1806-1806 rstAvoidanceDelay
+//
+// Go: how long to wait after a response before closing, so a client
+// still writing a request body sees the response rather than a TCP
+// RST. A `var` in Go because tests shorten it.
+pub fn rstAvoidanceDelay() -> time::Duration {
+    return time::Duration(500 * 1_000_000); // 500ms
+}
+
+// go: sdk 1.25.5 net/http/server.go:2192-2192 nextProtoUnencryptedHTTP2
+pub const nextProtoUnencryptedHTTP2: &str = "unencrypted_http2";
+
+// go: sdk 1.25.5 net/http/server.go:3157-3157 shutdownPollIntervalMax
+//
+// Go: Shutdown polls for idle connections on a backoff that starts
+// small and caps here, so a fast shutdown is not delayed by a fixed
+// long interval.
+pub fn shutdownPollIntervalMax() -> time::Duration {
+    return time::Duration(500 * 1_000_000); // 500ms
+}
+
 // go: sdk 1.25.5 net/http/server.go:3266-3266 ConnState
 //
 /// The state of a client connection to a server, as reported to the
