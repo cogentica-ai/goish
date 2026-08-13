@@ -332,60 +332,6 @@ pub(crate) enum BodyKind {
     UntilEof,
 }
 
-/// `http.ReadResponse(b, req)` — parse an HTTP/1.x response from the
-/// buffered reader. Mirrors response.go:154.
-///
-/// On success the reader has consumed up through the response body,
-/// which is returned pre-drained (an `Eager` Body) — the borrowed
-/// reader can't move into a streaming Body. The client's `RoundTrip`
-/// uses `read_response_head` + an owned reader to stream instead.
-/// The `req` argument is recorded into `Response.Request` so callers
-/// can chain `Location()` etc.
-pub fn ReadResponse<R: Reader>(
-    br: &mut bufio::Reader<R>,
-    req: Option<Request>,
-) -> (Response, error) {
-    let (mut resp, kind, err) = read_response_head(br, req);
-    if !err.IsNil() {
-        return (resp, err);
-    }
-    match kind {
-        BodyKind::Empty => {
-            resp.Body = Body::default();
-        }
-        BodyKind::Chunked => {
-            let body = make!([]byte, 0);
-            let mut cr = super::internal::chunked::NewChunkedReader(BufioPassthrough { inner: br });
-            let (b, err) = drain_to_eof(&mut cr, body);
-            if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
-                return (resp, err);
-            }
-            resp.Body = Body::from_bytes(b);
-        }
-        BodyKind::Cl(n) => {
-            let want = n;
-            let mut body = make!([]byte, want);
-            // Go: io.ReadFull(r, body)
-            let (got, ferr) = read_full_into(br, &mut body);
-            if !ferr.IsNil() && !errors::Is(ferr.clone(), io::EOF) {
-                return (resp, ferr);
-            }
-            if got < want {
-                body = body.slice(0, got);
-            }
-            resp.Body = Body::from_bytes(body);
-        }
-        BodyKind::UntilEof => {
-            let body = make!([]byte, 0);
-            let (b, err) = drain_to_eof(br, body);
-            if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
-                return (resp, err);
-            }
-            resp.Body = Body::from_bytes(b);
-        }
-    }
-    (resp, errors::nil)
-}
 
 /// Parse status line + headers + framing decision, WITHOUT touching
 /// body bytes. `resp.ContentLength` / `resp.Close` are set; the
@@ -555,7 +501,7 @@ pub(crate) fn read_response_head<R: Reader>(
 /// non-EOF error. Mirrors Go's `io.ReadAll` loop — only exits on error
 /// (including io.EOF). A (0, nil) return is treated as "keep reading",
 /// matching Go's `io.Reader` contract: "0 bytes and nil error is not EOF".
-fn drain_to_eof<R: Reader>(r: &mut R, mut body: slice<byte>) -> (slice<byte>, error) {
+pub(crate) fn drain_to_eof<R: Reader>(r: &mut R, mut body: slice<byte>) -> (slice<byte>, error) {
     let mut tmp = make!([]byte, 4096);
     loop {
         let (n, err) = r.Read(&mut tmp);
@@ -575,7 +521,7 @@ fn drain_to_eof<R: Reader>(r: &mut R, mut body: slice<byte>) -> (slice<byte>, er
 /// Read exactly `len(buf)` bytes from `r` into `buf`. Returns the
 /// short count + error on EOF mid-read. Mirrors `io.ReadFull` over a
 /// goish buffered reader.
-fn read_full_into<R: Reader>(r: &mut bufio::Reader<R>, buf: &mut slice<byte>) -> (int, error) {
+pub(crate) fn read_full_into<R: Reader>(r: &mut bufio::Reader<R>, buf: &mut slice<byte>) -> (int, error) {
     let want = buf.Len();
     let mut got: int = 0;
     while got < want {
@@ -1407,8 +1353,8 @@ fn default_request() -> Request {
 
 /// Adapter so ChunkedReader can pull from a borrowed bufio::Reader
 /// without taking ownership.
-struct BufioPassthrough<'a, R: Reader> {
-    inner: &'a mut bufio::Reader<R>,
+pub(crate) struct BufioPassthrough<'a, R: Reader> {
+    pub(crate) inner: &'a mut bufio::Reader<R>,
 }
 impl<'a, R: Reader> Reader for BufioPassthrough<'a, R> {
     fn Read(&mut self, b: &mut slice<byte>) -> (int, error) {

@@ -48,7 +48,7 @@ pub mod url;
 
 pub use client::{
     Client, DialContextFn, Get, Head, NewRequest, NewRequestWithContext, Post, PostForm,
-    Body, ProxyFromEnvironment, ProxyResolver, ReadResponse, RoundTripper, Transport,
+    Body, ProxyFromEnvironment, ProxyResolver, RoundTripper, Transport,
 };
 pub use cookie::{
     Cookie, ParseCookie, ParseSetCookie, SameSite, SameSiteDefaultMode, SameSiteLaxMode,
@@ -76,7 +76,7 @@ pub use request::{
     ProtocolError, ReadRequest, Request,
 };
 pub use responsecontroller::{NewResponseController, ResponseController};
-pub use response::{ErrNoLocation, Response};
+pub use response::{ErrNoLocation, ReadResponse, Response};
 pub use responsewriter::{
     AsWriter,
     Flusher, HeaderHandle, Hijacker, ResponseWriter,

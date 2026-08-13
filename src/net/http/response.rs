@@ -13,7 +13,7 @@
 // declaration in client.rs cites response.go, the rule (correctly)
 // says the file is misnamed.
 //
-// Still to move from client.rs: ReadResponse.
+// Nothing left to move from client.rs.
 // Still missing entirely: fixPragmaCacheControl, closeBody,
 // bodyIsWritable, isProtocolSwitch, isProtocolSwitchResponse,
 // isProtocolSwitchHeader.
@@ -25,7 +25,12 @@ extern crate alloc;
 use crate::errors::error;
 use crate::string;
 
-use super::client::Body;
+use super::client::{
+    drain_to_eof, read_full_into, read_response_head, Body, BodyKind, BufioPassthrough,
+};
+use crate::io::Reader;
+use crate::types::byte;
+use crate::{bufio, errors, io, make};
 use super::header::Header;
 use super::request::Request;
 use super::url::URL;
@@ -254,12 +259,71 @@ impl Response {
     }
 }
 
-// ─── Still in client.rs, pending relocation ──────────────────────────
+// go: sdk 1.25.5 net/http/response.go:154-205 ReadResponse
 //
-// goishlint:ignore GOISH018 — `ReadResponse` is likewise implemented
-// in client.rs, unanchored, and is ~200 lines entangled with that
-// file's private BodyKind/ConnSrc plumbing. Moving it is the next
-// step of this split, not a drop.
+/// Reads and returns an HTTP response from `br`. The `req` parameter
+/// optionally specifies the Request that corresponds to this
+/// Response; if nil, a GET request is assumed.
+///
+/// Verified against goref over nine responses: Content-Length bodies,
+/// 204 and 304 carrying no body, chunked (ContentLength -1 and
+/// TransferEncoding ["chunked"]), HTTP/1.0 with no CL running to EOF
+/// with Close true, Connection: close alongside a CL, a non-standard
+/// status keeping its reason phrase verbatim, duplicate headers, and
+/// a non-numeric status code being an ERROR rather than a silent 0.
+///
+/// On success the reader has consumed up through the response body,
+/// which is returned pre-drained (an `Eager` Body) — the borrowed
+/// reader can't move into a streaming Body. The client's `RoundTrip`
+/// uses `read_response_head` + an owned reader to stream instead.
+/// The `req` argument is recorded into `Response.Request` so callers
+/// can chain `Location()` etc.
+pub fn ReadResponse<R: Reader>(
+    br: &mut bufio::Reader<R>,
+    req: Option<Request>,
+) -> (Response, error) {
+    let (mut resp, kind, err) = read_response_head(br, req);
+    if !err.IsNil() {
+        return (resp, err);
+    }
+    match kind {
+        BodyKind::Empty => {
+            resp.Body = Body::default();
+        }
+        BodyKind::Chunked => {
+            let body = make!([]byte, 0);
+            let mut cr = super::internal::chunked::NewChunkedReader(BufioPassthrough { inner: br });
+            let (b, err) = drain_to_eof(&mut cr, body);
+            if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
+                return (resp, err);
+            }
+            resp.Body = Body::from_bytes(b);
+        }
+        BodyKind::Cl(n) => {
+            let want = n;
+            let mut body = make!([]byte, want);
+            // Go: io.ReadFull(r, body)
+            let (got, ferr) = read_full_into(br, &mut body);
+            if !ferr.IsNil() && !errors::Is(ferr.clone(), io::EOF) {
+                return (resp, ferr);
+            }
+            if got < want {
+                body = body.slice(0, got);
+            }
+            resp.Body = Body::from_bytes(body);
+        }
+        BodyKind::UntilEof => {
+            let body = make!([]byte, 0);
+            let (b, err) = drain_to_eof(br, body);
+            if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
+                return (resp, err);
+            }
+            resp.Body = Body::from_bytes(b);
+        }
+    }
+    return (resp, errors::nil);
+}
+// ─── Still in client.rs, pending relocation ──────────────────────────
 //
 // goishlint:ignore GOISH018 — `Response.Write` is genuinely NOT
 // ported. It is the only declaration in this file that is actually
