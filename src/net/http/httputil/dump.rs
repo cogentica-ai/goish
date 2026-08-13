@@ -275,3 +275,123 @@ pub fn reqWriteExcludeHeaderDump() -> map<string, bool> {
     m.Set(string("Trailer"), true);
     return m;
 }
+
+// go: sdk 1.25.5 net/http/httputil/dump.go:189-194 valueOrDefault
+//
+// Return value if nonempty, def otherwise.
+pub fn valueOrDefault(value: string, def: string) -> string {
+    if value != "" {
+        return value;
+    }
+    return def;
+}
+
+// go: sdk 1.25.5 net/http/httputil/dump.go:64-73 outgoingLength
+//
+// A copy of the unexported `(*http.Request).outgoingLength` method.
+//
+// Go distinguishes three states through a `Body io.ReadCloser`
+// interface: nil, the `http.NoBody` sentinel, and a real body.
+// goish's `Request.Body` is a `slice<byte>`, which collapses nil and
+// NoBody into "empty" — both mean "no body to send", which is what
+// Go's first branch returns 0 for, so the observable result matches.
+// It also means an EMPTY but non-nil Go body would answer 0 here and
+// `ContentLength` there; that gap closes when Body becomes a real
+// io.ReadCloser.
+pub fn outgoingLength(req: &Request) -> crate::types::int64 {
+    if crate::len(&req.Body) == 0 {
+        return 0;
+    }
+    if req.ContentLength != 0 {
+        return crate::int64(req.ContentLength);
+    }
+    return -1;
+}
+
+// go: sdk 1.25.5 net/http/httputil/dump.go:41-44 dumpConn
+//
+/// A `net.Conn` which writes to Writer and reads from Reader — the
+/// fake wire DumpRequestOut hands to a Transport so the bytes the
+/// Transport would have sent land in a buffer instead of a socket.
+///
+/// goish's `net::Conn` declares `LocalAddr`/`RemoteAddr` returning a
+/// concrete `TCPAddr`, not Go's `net.Addr` interface, so Go's
+/// `return nil` becomes a zero-value `TCPAddr`. Nothing reads these
+/// on a dump path; they exist to satisfy the trait, exactly as in Go.
+pub struct dumpConn<W, R> {
+    pub Writer: W,
+    pub Reader: R,
+}
+
+impl<W, R> crate::net::Conn for dumpConn<W, R>
+where
+    W: crate::io::Writer + Send + Sync,
+    R: crate::io::Reader + Send + Sync,
+{
+    // go: none — Go's dumpConn EMBEDS io.Reader, so the promoted
+    // method is generated rather than written. Rust has no embedding;
+    // the forward is explicit.
+    fn Read(&mut self, p: &mut slice<byte>) -> (crate::types::int, error) {
+        return self.Reader.Read(p);
+    }
+
+    // go: none — as Read above: Go promotes this from the embedded
+    // io.Writer.
+    fn Write(&mut self, p: slice<byte>) -> (crate::types::int, error) {
+        return self.Writer.Write(p);
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/dump.go:46-46 dumpConn.Close
+    fn Close(&mut self) -> error {
+        return errors::nil;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/dump.go:47-47 dumpConn.LocalAddr
+    fn LocalAddr(&self) -> crate::net::TCPAddr {
+        return crate::net::TCPAddr { IP: [0, 0, 0, 0], Port: 0 };
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/dump.go:48-48 dumpConn.RemoteAddr
+    fn RemoteAddr(&self) -> crate::net::TCPAddr {
+        return crate::net::TCPAddr { IP: [0, 0, 0, 0], Port: 0 };
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/dump.go:49-49 dumpConn.SetDeadline
+    fn SetDeadline(&self, _t: crate::time::Time) -> error {
+        return errors::nil;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/dump.go:50-50 dumpConn.SetReadDeadline
+    fn SetReadDeadline(&self, _t: crate::time::Time) -> error {
+        return errors::nil;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/dump.go:51-51 dumpConn.SetWriteDeadline
+    fn SetWriteDeadline(&self, _t: crate::time::Time) -> error {
+        return errors::nil;
+    }
+}
+
+// ─── Deliberately unported, with reasons ─────────────────────────────
+//
+// goishlint:ignore GOISH018 — drainBody reads an `io.ReadCloser` and
+// hands back TWO independent replacements (the classic "consume a
+// stream and give the caller two copies" move). goish's
+// `Request.Body` is a `slice<byte>`, already fully materialised, so
+// the function has nothing to do and no type to express: its two
+// return values would both be the same slice. Port it WITH the
+// Body -> io.ReadCloser model change, not before — writing it now
+// would bake the eager model into a signature that exists to hide it.
+//
+// goishlint:ignore GOISH018 — DumpRequestOut dumps the bytes an
+// `http.Transport` WOULD put on the wire, by running a real Transport
+// against a fake connection (dumpConn, ported above) and capturing
+// the output. It needs a Transport whose dial step can be replaced.
+// goish's Transport has no DialContext hook, so there is currently no
+// way to interpose. `dumpConn` is ported and unused pending that —
+// an orphan on purpose, unlike the four accidental ones that produced
+// real bugs earlier in this port.
+//
+// goishlint:ignore GOISH018 — delegateReader is a reader that blocks
+// on a channel until another goroutine supplies the real reader. Its
+// only caller is DumpRequestOut, so it waits on the same hook.

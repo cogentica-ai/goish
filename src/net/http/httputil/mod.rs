@@ -20,7 +20,7 @@ pub mod dump;
 pub mod httputil;
 pub mod reverseproxy;
 
-pub use dump::{DumpRequest, DumpResponse};
+pub use dump::{dumpConn, outgoingLength, valueOrDefault, DumpRequest, DumpResponse};
 pub use httputil::{ErrLineTooLong, NewChunkedReader, NewChunkedWriter};
 pub use reverseproxy::NewSingleHostReverseProxy;
 pub(crate) use reverseproxy::register_httputil_impls;

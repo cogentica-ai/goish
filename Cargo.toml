@@ -531,6 +531,10 @@ name = "http_httptest_server_smoke"
 path = "examples/http_httptest_server_smoke.rs"
 
 [[example]]
+name = "http_dump_helpers_smoke"
+path = "examples/http_dump_helpers_smoke.rs"
+
+[[example]]
 name = "http_server_pure_smoke"
 path = "examples/http_server_pure_smoke.rs"
 
