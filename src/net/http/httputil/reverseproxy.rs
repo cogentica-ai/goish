@@ -281,3 +281,66 @@ pub fn removeHopByHopHeaders(h: &mut super::super::header::Header) {
         h.Del(string(*f));
     }
 }
+
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:743-748 upgradeType
+//
+/// The protocol named in an `Upgrade:` header, but ONLY when
+/// `Connection:` actually lists the `Upgrade` token. Both conditions
+/// are required — an `Upgrade: websocket` with no matching
+/// `Connection` is not an upgrade request, and treating it as one is
+/// how a proxy gets talked into hijacking a plain HTTP connection.
+///
+/// Go calls `httpguts.HeaderValuesContainsToken(h["Connection"],
+/// "Upgrade")`, which scans EVERY value of the Connection header;
+/// goish's `hasToken` takes a single value, so this loops.
+pub fn upgradeType(h: &super::super::header::Header) -> string {
+    let conn = h.Values(string("Connection"));
+    let mut found = false;
+    for i in 0..conn.len() {
+        // Lowercase token required; see the note in response.rs's
+        // isProtocolSwitchHeader. "Upgrade" here missed
+        // `Connection: upgrade` entirely.
+        if super::super::header::hasToken(conn[i].clone(), string("upgrade")) {
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        return string::new();
+    }
+    return h.Get(string("Upgrade"));
+}
+
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:856-874 cleanQueryParams
+//
+/// Passes a raw query through untouched when it is already safe, and
+/// otherwise re-encodes it by round-tripping through ParseQuery.
+///
+/// "Unsafe" means either a semicolon — which Go stopped treating as a
+/// separator in 1.17, so forwarding it verbatim would let the proxy
+/// and the backend disagree about the parameters — or a malformed
+/// percent escape. Both are exactly the ambiguities a request-
+/// smuggling attempt relies on, which is why the fix is to normalise
+/// rather than to reject.
+pub fn cleanQueryParams<S: Into<string>>(s: S) -> string {
+    let s: string = s.into();
+    let b = s.as_bytes();
+    let reencode = |q: &string| -> string {
+        let (v, _) = super::super::url::ParseQuery(q.clone());
+        return super::super::url::ValuesEncode(v);
+    };
+    let mut i: usize = 0;
+    while i < b.len() {
+        match b[i] {
+            b';' => return reencode(&s),
+            b'%' => {
+                if i + 2 >= b.len() || !ishex(b[i + 1]) || !ishex(b[i + 2]) {
+                    return reencode(&s);
+                }
+                i += 3;
+            }
+            _ => i += 1,
+        }
+    }
+    return s;
+}

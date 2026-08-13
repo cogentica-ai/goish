@@ -192,7 +192,12 @@ pub fn isProtocolSwitchHeader(h: &super::header::Header) -> bool {
     }
     let conn = h.Values(string("Connection"));
     for i in 0..conn.len() {
-        if super::header::hasToken(conn[i].clone(), string("Upgrade")) {
+        // `hasToken` requires a LOWERCASE token — it is Go's
+        // net/http hasToken (header.go:236), whose doc says so — while
+        // the header VALUE may be mixed case. Passing "Upgrade" here
+        // silently failed to match `Connection: upgrade`, which is
+        // the spelling most clients actually send.
+        if super::header::hasToken(conn[i].clone(), string("upgrade")) {
             return true;
         }
     }

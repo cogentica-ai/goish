@@ -22,5 +22,5 @@ pub mod reverseproxy;
 
 pub use dump::{dumpConn, outgoingLength, valueOrDefault, DumpRequest, DumpResponse};
 pub use httputil::{ErrLineTooLong, NewChunkedReader, NewChunkedWriter};
-pub use reverseproxy::NewSingleHostReverseProxy;
+pub use reverseproxy::{cleanQueryParams, upgradeType, NewSingleHostReverseProxy};
 pub(crate) use reverseproxy::register_httputil_impls;
