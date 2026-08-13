@@ -549,6 +549,19 @@ pub(crate) fn read_full_into<R: Reader>(r: &mut bufio::Reader<R>, buf: &mut slic
 #[goish::interface]
 pub trait RoundTripper: Send + Sync {
     fn RoundTrip(&self, req: &Request) -> (Response, error);
+
+    // go: none — goish rendering of Go's OPTIONAL `closeIdler`
+    // interface. Go's Client.CloseIdleConnections probes the
+    // transport for an unexported
+    //
+    //     interface { CloseIdleConnections() }
+    //
+    // and does nothing when it is not implemented. Rust cannot probe
+    // a `dyn Trait` for an unrelated interface, so the method lives
+    // on RoundTripper with a DEFAULT no-op body: an implementor that
+    // holds connections overrides it, one that does not inherits the
+    // no-op. Same observable behaviour, and no downcast.
+    fn CloseIdleConnections(&self) {}
 }
 
 // `__NilRoundTripper`, `From<Nil> for Box<dyn RoundTripper>`, and
@@ -1032,6 +1045,8 @@ impl Drop for __CancelOnDrop {
 }
 
 impl Client {
+    // go: sdk 1.25.5 net/http/client.go:586-588 Client.Do
+    //
     /// `(*Client).Do(req)` — execute the request, following up to 10
     /// redirects on 301/302/303/307/308. Mirrors client.go:565.
     ///
@@ -1217,6 +1232,24 @@ impl Client {
         )
     }
 
+    // go: sdk 1.25.5 net/http/client.go:953-959 Client.CloseIdleConnections
+    //
+    /// Closes any connections on the Client's Transport which were
+    /// previously connected from a request but are now sitting idle.
+    /// It does not interrupt any connections currently in use.
+    ///
+    /// Go probes the transport for an unexported `closeIdler`
+    /// interface and does nothing if it is not implemented. goish's
+    /// `RoundTripper` trait has no such optional method, so this
+    /// downcasts to the concrete `Transport` — the only implementor
+    /// that has connections to close — and is a no-op for any other,
+    /// which is the same observable behaviour.
+    pub fn CloseIdleConnections(&self) {
+        self.Transport.CloseIdleConnections();
+    }
+
+    // go: sdk 1.25.5 net/http/client.go:479-485 Client.Get
+    //
     /// `(*Client).Get(url)` — issue a GET. Mirrors client.go:481.
     pub fn Get<U: Into<string>>(&self, url: U) -> (Response, error) {
         let (req, err) = NewRequest(string("GET"), url, ());
@@ -1226,6 +1259,8 @@ impl Client {
         self.Do(&req)
     }
 
+    // go: sdk 1.25.5 net/http/client.go:938-944 Client.Head
+    //
     /// `(*Client).Head(url)`.
     pub fn Head<U: Into<string>>(&self, url: U) -> (Response, error) {
         let (req, err) = NewRequest(string("HEAD"), url, ());
@@ -1235,11 +1270,15 @@ impl Client {
         self.Do(&req)
     }
 
+    // go: sdk 1.25.5 net/http/client.go:861-868 Client.Post
+    //
     /// `(*Client).Post(url, contentType, body)`. Like Go's `body
     /// io.Reader` slot, the body is polymorphic: `nil`, `slice<byte>`,
     /// `string`, and `&str` literals all work (same `__RequestBody`
     /// dispatch as `NewRequest`).
-    pub fn Post<U: Into<string>, C: Into<string>, B: __RequestBody>(
+    // go: sdk 1.25.5 net/http/client.go:843-845 Post
+//
+pub fn Post<U: Into<string>, C: Into<string>, B: __RequestBody>(
         &self,
         url: U,
         content_type: C,
@@ -1253,6 +1292,8 @@ impl Client {
         self.Do(&req)
     }
 
+    // go: sdk 1.25.5 net/http/client.go:904-906 Client.PostForm
+    //
     /// `(*Client).PostForm(url, vals)` — POST `application/x-www-form-urlencoded`
     /// body built from key=value pairs.
     pub fn PostForm<U: Into<string>>(&self, url: U, vals: &[(string, string)]) -> (Response, error) {
@@ -1279,11 +1320,15 @@ fn default_client() -> Arc<Client> {
     g.as_ref().unwrap().clone()
 }
 
+// go: sdk 1.25.5 net/http/client.go:452-454 Get
+//
 /// `http.Get(url)`.
 pub fn Get<U: Into<string>>(url: U) -> (Response, error) {
     default_client().Get(url)
 }
 
+// go: sdk 1.25.5 net/http/client.go:922-924 Head
+//
 /// `http.Head(url)`.
 pub fn Head<U: Into<string>>(url: U) -> (Response, error) {
     default_client().Head(url)
@@ -1299,6 +1344,8 @@ pub fn Post<U: Into<string>, C: Into<string>, B: __RequestBody>(
     default_client().Post(url, content_type, body)
 }
 
+// go: sdk 1.25.5 net/http/client.go:886-888 PostForm
+//
 /// `http.PostForm(url, vals)`.
 pub fn PostForm<U: Into<string>>(url: U, vals: &[(string, string)]) -> (Response, error) {
     default_client().PostForm(url, vals)
