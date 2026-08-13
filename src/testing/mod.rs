@@ -49,6 +49,7 @@
 pub mod benchmark;
 pub mod fstest;
 pub mod example;
+pub mod quick;
 pub mod run_example;
 pub mod fuzz;
 pub mod slogtest;
