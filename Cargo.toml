@@ -619,6 +619,10 @@ name = "httptest_recorder_smoke"
 path = "examples/httptest_recorder_smoke.rs"
 
 [[example]]
+name = "net_errors_smoke"
+path = "examples/net_errors_smoke.rs"
+
+[[example]]
 name = "http_sniff_smoke"
 path = "examples/http_sniff_smoke.rs"
 

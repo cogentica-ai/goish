@@ -55,6 +55,8 @@ pub mod dnsclient;
 pub mod lookup;
 pub mod http;
 pub mod mail;
+pub mod net;
+pub use net::{Addr, AddrError, DNSConfigError, DNSError, ErrClosed, ErrWriteToConnected, InvalidAddrError, OpError, ParseError, UnknownNetworkError};
 pub mod textproto;
 pub mod url;
 
@@ -1430,49 +1432,9 @@ pub fn JoinHostPort(host: crate::string, port: crate::string) -> crate::string {
     b.String()
 }
 
-/// `net.AddrError` (net.go:1064) — the typed error for address-shape
-/// failures. Carries the bad address and the diagnostic. Satisfies the
-/// `error` interface via its `Error()` method.
-///
-/// User code constructs it as `net::AddrError { Err: …, Addr: … }` and
-/// returns it through `errors::Wrap` (per the standard goish error-
-/// chaining pattern), e.g.:
-///
-///   return (string(""), -1, errors::Wrap(net::AddrError {
-///       Err: string("missing port in address"),
-///       Addr: addr,
-///   }));
-#[derive(Clone)]
-pub struct AddrError {
-    pub Err: crate::string,
-    pub Addr: crate::string,
-}
-
-impl crate::errors::ErrorTrait for AddrError {
-    fn Error(&self) -> crate::string {
-        // Mirror Go's `*AddrError.Error()` (net/net.go:1069). On bare
-        // `Err` (no Addr) we just return Err; otherwise prepend
-        // `address <addr>: `.
-        if self.Addr == crate::string::from_static("") {
-            return self.Err.clone();
-        }
-        let mut b = crate::strings::Builder::new();
-        let _ = b.WriteString(crate::string::from_static("address "));
-        let _ = b.WriteString(self.Addr.clone());
-        let _ = b.WriteString(crate::string::from_static(": "));
-        let _ = b.WriteString(self.Err.clone());
-        b.String()
-    }
-}
-
-impl AddrError {
-    /// Go: `func (e *AddrError) Timeout() bool { return false }`
-    /// (net/net.go:1078).
-    pub fn Timeout(&self) -> bool { false }
-    /// Go: `func (e *AddrError) Temporary() bool { return false }`
-    /// (net/net.go:1079).
-    pub fn Temporary(&self) -> bool { false }
-}
+// AddrError moved to src/net/net.rs, where net.go's error hierarchy
+// lives and where it can carry an anchor — a module root cannot
+// (GOISH015). Re-exported below so `net::AddrError` still resolves.
 
 // `AddrError → error` via `.into()` is now provided by the blanket
 // `impl<E: ErrorTrait> From<E> for error` in errors/mod.rs.
