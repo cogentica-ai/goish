@@ -28,6 +28,7 @@ pub mod httputil;
 pub mod internal;
 pub mod jar;
 pub mod method;
+pub(crate) mod omithttp2;
 pub mod pattern;
 pub mod request;
 pub mod response;

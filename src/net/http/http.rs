@@ -154,9 +154,12 @@ pub(crate) fn aLongTimeAgo() -> crate::time::Time {
 /// Go: "omitBundledHTTP2 is set by omithttp2.go when the
 /// nethttpomithttp2 build tag is set."
 ///
-/// goish never bundles HTTP/2, so nothing sets it; it is the zero value
-/// Go has without that build tag.
-pub(crate) const omitBundledHTTP2: bool = false;
+/// goish takes the `nethttpomithttp2` route, so omithttp2.go's `init`
+/// is what runs and this is TRUE — see omithttp2.rs. An earlier note
+/// here had it backwards: it read the flag as "goish never bundles
+/// HTTP/2, so nothing sets it", which is the value for the build that
+/// DOES bundle HTTP/2.
+pub(crate) const omitBundledHTTP2: bool = true;
 
 // go: sdk 1.25.5 net/http/http.go:103-105 contextKey
 /// Go: "contextKey is a value for use with context.WithValue. It's used

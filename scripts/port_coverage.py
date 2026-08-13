@@ -294,6 +294,19 @@ def other_route(gofiles, dirpath, anchored):
     Deliberately conservative: a file is dropped only when it carries a
     build constraint naming `purego`, an alternative sharing its route
     stem IS anchored, and the file itself is NOT.
+
+    A second rule covers the same situation without the name heuristic:
+    two files whose constraints are exactly `TAG` and `!TAG` are
+    mutually exclusive by construction, whatever they are called.
+    net/http is the case that forced it — `h2_bundle.go`
+    (`!nethttpomithttp2`) is 12k generated lines of bundled
+    golang.org/x/net/http2 carrying 483 declarations, and
+    `omithttp2.go` (`nethttpomithttp2`) is 80 lines of stubs that
+    panic. They share no route stem, so the purego rule cannot see
+    them, and net/http therefore reported 483 declarations of remaining
+    work for a build configuration Go itself supports and goish has
+    ported. Same evidence as before: goish picks a side by anchoring
+    it.
     """
     out = set()
     stems = {}
@@ -309,6 +322,29 @@ def other_route(gofiles, dirpath, anchored):
         for f in group:
             if f not in anchored:
                 out.add(f)
+
+    # Complementary single-tag constraints: `TAG` versus `!TAG`. Each
+    # side can hold SEVERAL files — net/http puts h2_bundle.go and
+    # h2_error.go both behind `!nethttpomithttp2` — so the sides are
+    # lists. Keying them by file instead dropped whichever one sorted
+    # last and silently left the other 483 declarations in the
+    # denominator.
+    by_tag = {}
+    for f in gofiles:
+        bl = build_line(os.path.join(dirpath, f))
+        if not bl or any(c in bl for c in "&|() "):
+            continue                      # not a bare tag or negation
+        neg = bl.startswith("!")
+        by_tag.setdefault(bl[1:] if neg else bl, {True: [], False: []})[neg].append(f)
+    for sides in by_tag.values():
+        pos, neg = sides[False], sides[True]
+        if not pos or not neg:
+            continue                      # only one side present
+        taken = [s for s in (pos, neg) if any(f in anchored for f in s)]
+        if len(taken) != 1:
+            continue                      # both sides, or neither: say nothing
+        for f in (pos if taken[0] is neg else neg):
+            out.add(f)
     return out
 
 
