@@ -535,6 +535,10 @@ name = "http_cgi_smoke"
 path = "examples/http_cgi_smoke.rs"
 
 [[example]]
+name = "http_mux_precedence_smoke"
+path = "examples/http_mux_precedence_smoke.rs"
+
+[[example]]
 name = "http_constants_smoke"
 path = "examples/http_constants_smoke.rs"
 

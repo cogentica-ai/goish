@@ -106,26 +106,33 @@ pub struct ServeMux {
 }
 
 struct MuxState {
-    /// Plain (literal) routes for exact + longest-prefix matching.
-    /// Linear scan in `match_handler` is fine for typical route
-    /// counts (<100).
-    routes: Vec<(string, Arc<dyn Handler>)>,
-    /// Wildcard routes. Stored separately because their precedence is
-    /// after literal exact/prefix.
-    pattern_routes: Vec<PatternRoute>,
+    /// Go's `ServeMux.tree routingNode` (server.go:2500) — the decision
+    /// tree that decides precedence GLOBALLY by pattern specificity.
+    ///
+    /// This replaced a pair of `Vec`s scanned in five hand-rolled
+    /// steps, whose own comment admitted "Go 1.22's mux compares
+    /// pattern specificity globally; we approximate by deferring `/`
+    /// to step 4". Under that scheme two patterns Go orders by
+    /// specificity dispatched by REGISTRATION ORDER instead.
+    tree: super::routing_tree::routingNode,
+    /// The pattern strings registered so far.
+    ///
+    /// Go keeps `ServeMux.index routingIndex` and reports a conflict
+    /// through `registerErr`; goish detects only the exact-duplicate
+    /// case here, which is what `routingNode::set` would otherwise
+    /// hit as `panic!("non-nil leaf fields")` — an unhelpful message
+    /// for a common mistake. Full overlap detection wants
+    /// routing_index's `possiblyConflictingPatterns`, already ported.
+    registered: Vec<string>,
 }
 
-struct PatternRoute {
-    pattern: super::pattern::pattern,
-    handler: Arc<dyn Handler>,
-}
 
 impl ServeMux {
     pub fn new() -> Self {
         ServeMux {
             state: Arc::new(Mutex::new(MuxState {
-                routes: Vec::new(),
-                pattern_routes: Vec::new(),
+                tree: super::routing_tree::routingNode::default(),
+                registered: Vec::new(),
             })),
         }
     }
@@ -147,28 +154,27 @@ impl ServeMux {
     /// Internal: stores an already-arced handler. Used by `Handle`,
     /// `HandleFunc`, and other internal callers that already hold an
     /// `Arc<dyn Handler>`.
+    // go: sdk 1.25.5 net/http/server.go:2909-2913 ServeMux.register
+    //
+    // Go's `register` calls `registerErr` and PANICS on its error;
+    // goish detects the exact-duplicate case and panics with the same
+    // shape of message. A pattern that fails to parse is dropped
+    // silently, as before — `Handle` has no error return, and Go
+    // panics there too, but changing that is a separate decision from
+    // this swap.
     fn handle_arc(&self, pattern: string, h: Arc<dyn Handler>) {
-        // Wildcard or method-prefixed → parse as Pattern.
-        let needs_pattern_parse = strings::Contains(pattern.clone(), string("{"))
-            || strings::ContainsAny(pattern.clone(), string(" \t"));
-        let mut s = self.state.Lock();
-        if needs_pattern_parse {
-            let (p, err) = super::pattern::parsePattern(pattern);
-            if err.IsNil() {
-                s.pattern_routes.push(PatternRoute {
-                    pattern: p,
-                    handler: h,
-                });
-            }
+        let (p, err) = super::pattern::parsePattern(pattern.clone());
+        if !err.IsNil() {
             return;
         }
-        for r in s.routes.iter_mut() {
-            if r.0 == pattern {
-                r.1 = h;
-                return;
+        let mut s = self.state.Lock();
+        for r in s.registered.iter() {
+            if *r == pattern {
+                panic!("http: multiple registrations for a pattern");
             }
         }
-        s.routes.push((pattern, h));
+        s.registered.push(pattern);
+        s.tree.addPattern(&p, h);
     }
 
     /// `mux.HandleFunc(pattern, fn)` — register a closure handler.
@@ -184,6 +190,12 @@ impl ServeMux {
     /// Internal: pick the handler for `r`. Returns the chosen handler
     /// and (for wildcard hits) any path-value bindings, or a 404
     /// stub with empty bindings.
+    // go: sdk 1.25.5 net/http/server.go:2695-2749 ServeMux.findHandler
+    //
+    // Go strips the port from the Host, cleans the path, then asks the
+    // tree. The trailing-slash redirect (`matchOrRedirect`) and the
+    // CONNECT special case are NOT yet implemented — noted rather than
+    // faked, since both change which handler runs.
     fn match_handler(
         &self,
         r: &Request,
@@ -191,102 +203,96 @@ impl ServeMux {
         Arc<dyn Handler>,
         crate::gomap::map<string, string>,
     ) {
+        let (h, _pat, binds) = self.find_node(r);
+        return (h, binds);
+    }
+
+    /// Shared body of `match_handler` and `Handler`: resolve a request
+    /// through the routing tree, returning the handler, the matched
+    /// pattern string and the wildcard bindings.
+    fn find_node(
+        &self,
+        r: &Request,
+    ) -> (
+        Arc<dyn Handler>,
+        string,
+        crate::gomap::map<string, string>,
+    ) {
+        let host = stripHostPort(r.Host.clone());
+        let path = cleanPath(r.URL.Path.clone());
         let s = self.state.Lock();
-        // 1. Exact literal match.
-        for route in s.routes.iter() {
-            if route.0 == r.URL.Path {
-                return (route.1.clone(), crate::gomap::map::<string, string>::new());
+        let (n, matches) = s.tree.r#match(&host, &r.Method, &path);
+        if let Some(n) = n {
+            if let Some(h) = n.handler.clone() {
+                let pat = n.pattern.as_ref();
+                let mut binds: crate::gomap::map<string, string> =
+                    crate::gomap::map::<string, string>::new();
+                // The tree returns POSITIONAL matches; name them by
+                // zipping against the pattern's wild segments, in
+                // order, the way Go's ServeHTTP does with
+                // r.SetPathValue.
+                if let Some(p) = pat {
+                    let mut mi: int = 0;
+                    let segs = &p.segments;
+                    let sn = crate::len(segs);
+                    let mut si: int = 0;
+                    while si < sn {
+                        let seg = &segs[si];
+                        si += 1;
+                        if !seg.wild || seg.s.Len() == 0 {
+                            continue;
+                        }
+                        if mi < crate::len(&matches) {
+                            binds.Set(seg.s.clone(), matches[mi].clone());
+                            mi += 1;
+                        }
+                    }
+                }
+                let patstr = match pat {
+                    Some(p) => p.str.clone(),
+                    None => string::new(),
+                };
+                return (h, patstr, binds);
             }
         }
-        // 2. Longest prefix-with-trailing-slash match — but skip the
-        //    bare `/` catchall here so registered wildcards still win.
-        //    Go 1.22's mux compares pattern specificity globally; we
-        //    approximate by deferring `/` to step 4. A multi-segment
-        //    literal prefix like `/api/users/` still pre-empts any
-        //    wildcard registered later, matching Go's intent that
-        //    longer literal prefixes are more specific.
-        let path_b = r.URL.Path.as_bytes();
-        let mut best_len: usize = 0;
-        let mut best: Option<Arc<dyn Handler>> = None;
-        for (pat, handler) in s.routes.iter() {
-            let pb = pat.as_bytes();
-            if pb.last() == Some(&b'/')
-                && pb.len() > 1
-                && path_b.starts_with(pb)
-                && pb.len() > best_len
-            {
-                best_len = pb.len();
-                best = Some(handler.clone());
+        // Go: no pattern matched this method, but one may match the
+        // path under a different method — reply 405 with Allow.
+        let mut methodSet: crate::gomap::map<string, bool> =
+            crate::gomap::map::<string, bool>::new();
+        s.tree.matchingMethods(&host, &path, &mut methodSet);
+        if methodSet.Len() > 0 {
+            let mut allow: Vec<string> = Vec::new();
+            for (m, _) in methodSet.__iter() {
+                allow.push(m.clone());
             }
-        }
-        if let Some(h) = best {
-            return (h, crate::gomap::map::<string, string>::new());
-        }
-        // 3. Wildcard pattern match (registration order).
-        let host = r.Host.clone();
-        for pr in s.pattern_routes.iter() {
-            if let Some(bindings) = pr.pattern.Match(&r.Method, &host, &r.URL.Path) {
-                return (pr.handler.clone(), bindings);
-            }
-        }
-        // 4. Fallback to the bare `/` catchall, if registered.
-        for (pat, handler) in s.routes.iter() {
-            if pat.as_bytes() == b"/" {
-                return (handler.clone(), crate::gomap::map::<string, string>::new());
-            }
-        }
-        // 5. Method mismatch → 405 with an Allow header. Go's mux
-        //    (routing errMethodMismatch, server.go:2746): when no
-        //    pattern matched the request but at least one
-        //    method-prefixed pattern matches the path under a
-        //    different method, reply 405 listing the allowed methods
-        //    instead of 404.
-        if let Some(allow) = allowed_methods(&s, &host, &r.URL.Path) {
+            allow.sort_by(|a, b| strings::Compare(a.clone(), b.clone()).cmp(&0));
+            let joined = strings::Join(
+                crate::goslice::slice::__from_vec(allow),
+                string(", "),
+            );
             return (
-                Arc::new(methodNotAllowedHandler { allow }) as Arc<dyn Handler>,
+                Arc::new(methodNotAllowedHandler { allow: joined }) as Arc<dyn Handler>,
+                string::new(),
                 crate::gomap::map::<string, string>::new(),
             );
         }
-        (
+        return (
             Arc::new(notFoundHandler) as Arc<dyn Handler>,
+            string::new(),
             crate::gomap::map::<string, string>::new(),
-        )
+        );
     }
 }
 
-/// Scan the wildcard-pattern table for method-prefixed patterns whose
-/// host+path would match `r` under *their own* method. Returns the
-/// deduplicated `Allow:` header value ("GET, POST"), or `None` if no
-/// pattern matches the path at all (a plain 404). Mirrors
-/// `mux.tree.matchingMethods` (Go routing_tree.go:229).
-fn allowed_methods(s: &MuxState, host: &string, path: &string) -> Option<string> {
-    let mut methods: Vec<string> = Vec::new();
-    for pr in s.pattern_routes.iter() {
-        if pr.pattern.method.Len() == 0 {
-            continue;
-        }
-        if pr.pattern.Match(&pr.pattern.method, host, path).is_some()
-            && !methods.iter().any(|m| *m == pr.pattern.method)
-        {
-            methods.push(pr.pattern.method.clone());
-        }
-    }
-    if methods.is_empty() {
-        return None;
-    }
-    // Go: strings.Join(methods, ", ")
-    Some(strings::Join(
-        crate::goslice::slice::<string>::__from_vec(methods),
-        string(", "),
-    ))
-}
-
-/// The 405 responder synthesized for method-mismatch routes
-/// (Go server.go:2749).
+// go: none — goish-only. Go builds the 405 inline in ServeMux.ServeHTTP
+// rather than through a named handler type; this wraps the same
+// response so `Handler(r)` can return it as a Handler.
 struct methodNotAllowedHandler {
     allow: string,
 }
+
 impl Handler for methodNotAllowedHandler {
+    // go: none — see above.
     fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) {
         w.Header().Set(string("Allow"), self.allow.clone());
         Error(
@@ -298,70 +304,18 @@ impl Handler for methodNotAllowedHandler {
 }
 
 impl ServeMux {
-    /// `mux.Handler(r) -> (Handler, pattern)` (server.go:2683) — return
-    /// the handler that would dispatch `r`, along with the pattern that
-    /// matched. For requests with no matching route, returns the
-    /// `NotFoundHandler` and an empty pattern.
+    // go: sdk 1.25.5 net/http/server.go:2683-2689 ServeMux.Handler
+    //
+    /// Return the handler that would dispatch `r`, along with the
+    /// pattern that matched. With no matching route, returns the
+    /// NotFoundHandler and an empty pattern.
     ///
-    /// Slim port: doesn't trigger redirects (Go's Handler synthesizes
-    /// a `RedirectHandler` for missing-trailing-slash cases); doesn't
-    /// populate path-value wildcards on `r`.
+    /// Not yet faithful: Go's Handler synthesises a RedirectHandler
+    /// for a missing trailing slash (`matchOrRedirect`); this does
+    /// not.
     pub fn Handler(&self, r: &Request) -> (Arc<dyn Handler>, string) {
-        let s = self.state.Lock();
-        // 1. Exact literal match.
-        for route in s.routes.iter() {
-            if route.0 == r.URL.Path {
-                return (route.1.clone(), route.0.clone());
-            }
-        }
-        // 2. Longest multi-segment prefix-with-trailing-slash match.
-        //    `/` deferred to step 4 so wildcards can win.
-        let path_b = r.URL.Path.as_bytes();
-        let mut best_len: usize = 0;
-        let mut best: Option<(Arc<dyn Handler>, string)> = None;
-        for (pat, handler) in s.routes.iter() {
-            let pb = pat.as_bytes();
-            if pb.last() == Some(&b'/')
-                && pb.len() > 1
-                && path_b.starts_with(pb)
-                && pb.len() > best_len
-            {
-                best_len = pb.len();
-                best = Some((handler.clone(), pat.clone()));
-            }
-        }
-        if let Some(b) = best {
-            return b;
-        }
-        // 3. Wildcard pattern match.
-        let host = r.Host.clone();
-        for pr in s.pattern_routes.iter() {
-            if pr
-                .pattern
-                .Match(&r.Method, &host, &r.URL.Path)
-                .is_some()
-            {
-                return (pr.handler.clone(), pr.pattern.str.clone());
-            }
-        }
-        // 4. Fallback to bare `/` catchall, if any.
-        for (pat, handler) in s.routes.iter() {
-            if pat.as_bytes() == b"/" {
-                return (handler.clone(), pat.clone());
-            }
-        }
-        // 5. Method mismatch → synthesized 405 handler (Go returns
-        //    it with an empty pattern string, server.go:2749).
-        if let Some(allow) = allowed_methods(&s, &r.Host, &r.URL.Path) {
-            return (
-                Arc::new(methodNotAllowedHandler { allow }) as Arc<dyn Handler>,
-                string::new(),
-            );
-        }
-        (
-            Arc::new(notFoundHandler) as Arc<dyn Handler>,
-            string::new(),
-        )
+        let (h, pat, _binds) = self.find_node(r);
+        return (h, pat);
     }
 }
 
