@@ -957,9 +957,13 @@ pub fn mapOpenError(
     return originalErr;
 }
 
-// go: sdk 1.25.5 net/http/fs.go:906-907 errMissingSeek
+// go: sdk 1.25.5 net/http/fs.go:906-906 errMissingSeek
 crate::var! {
-    pub errMissingSeek: error    = "io.File missing Seek method";
+    pub errMissingSeek: error = "io.File missing Seek method";
+}
+
+// go: sdk 1.25.5 net/http/fs.go:907-907 errMissingReadDir
+crate::var! {
     pub errMissingReadDir: error = "io.File directory missing ReadDir method";
 }
 
@@ -1023,7 +1027,7 @@ impl File for ioFile {
         return self.file.Stat();
     }
 
-    // go: sdk 1.25.5 net/http/fs.go:925-947 ioFile.Readdir
+    // go: sdk 1.25.5 net/http/fs.go:925-949 ioFile.Readdir
     fn Readdir(&self, count: int) -> (slice<Arc<dyn fs::FileInfo + Send + Sync>>, error) {
         let (d, ok) = crate::cast!(&*self.file, fs::ReadDirFile);
         if !ok {
