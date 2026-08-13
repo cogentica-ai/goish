@@ -10,7 +10,7 @@ use crate::string;
 use crate::strings;
 use crate::types::byte;
 
-use super::super::client::Response;
+use super::super::response::Response;
 use super::super::request::Request;
 
 // go: sdk 1.25.5 net/http/httputil/dump.go:218-286 DumpRequest

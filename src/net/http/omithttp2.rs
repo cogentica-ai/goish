@@ -36,7 +36,8 @@ use crate::gostring::string;
 use crate::sync::Mutex;
 use crate::types::uint32;
 
-use super::client::{Response, Transport};
+use super::client::Transport;
+use super::response::Response;
 use super::request::Request;
 
 // go: sdk 1.25.5 net/http/omithttp2.go:15-17 init

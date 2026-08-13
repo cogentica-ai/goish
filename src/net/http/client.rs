@@ -57,53 +57,9 @@ use crate::types::{byte, int};
 use crate::{append, make};
 
 use super::header::Header;
+use super::response::Response;
 use super::request::Request;
 use super::url::URL;
-
-// ─── Response ────────────────────────────────────────────────────────
-
-/// `http.Response` (response.go:35). `Body` streams from the wire
-/// (Go's `io.ReadCloser` shape) — see the `Body` type below.
-#[derive(Clone)]
-pub struct Response {
-    pub Status: string,    // "200 OK"
-    pub StatusCode: int,
-    pub Proto: string,
-    pub ProtoMajor: int,
-    pub ProtoMinor: int,
-    pub Header: Header,
-    pub Body: Body,
-    /// `-1` if unknown (chunked / no Content-Length on a non-empty body).
-    pub ContentLength: int,
-    /// Whether the connection should be closed after reading Body.
-    pub Close: bool,
-    /// Go: "Trailer maps trailer keys to values in the same format as
-    /// Header." Populated by httptest's recorder and, once transfer.go
-    /// lands, by the wire reader.
-    pub Trailer: Header,
-    /// The Request that produced this Response. Populated by Client::Do.
-    /// Modelled as `nilable<Request>` (Go's `*http.Request` shape) so
-    /// Goish-side `resp.Request.URL` access can narrow via `.Must()`.
-    pub Request: nilable<Request>,
-}
-
-impl Default for Response {
-    fn default() -> Self {
-        Response {
-            Trailer: Header::new(),
-            Status: string::new(),
-            StatusCode: 0,
-            Proto: string::new(),
-            ProtoMajor: 0,
-            ProtoMinor: 0,
-            Header: Header::new(),
-            Body: Body::default(),
-            ContentLength: 0,
-            Close: false,
-            Request: nilable::nil(),
-        }
-    }
-}
 
 // ─── Body — Go's `Response.Body io.ReadCloser`, streaming ────────────
 //

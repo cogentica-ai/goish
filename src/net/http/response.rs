@@ -13,19 +13,90 @@
 // declaration in client.rs cites response.go, the rule (correctly)
 // says the file is misnamed.
 //
-// Still to move from client.rs: Response, Response::Cookies,
-// Response::ProtoAtLeast, ReadResponse.
+// Still to move from client.rs: ReadResponse.
 // Still missing entirely: fixPragmaCacheControl, closeBody,
 // bodyIsWritable, isProtocolSwitch, isProtocolSwitchResponse,
 // isProtocolSwitchHeader.
 
 #![allow(non_snake_case)]
 
+extern crate alloc;
+
 use crate::errors::error;
 use crate::string;
 
-use super::client::Response;
+use super::client::Body;
+use super::header::Header;
+use super::request::Request;
 use super::url::URL;
+use crate::gonilable::nilable;
+use crate::types::int;
+
+// go: sdk 1.25.5 net/http/response.go:32-123 Response
+//
+/// `http.Response` — the response from an HTTP request.
+///
+/// `Body` streams from the wire
+/// (Go's `io.ReadCloser` shape) — see the `Body` type below.
+#[derive(Clone)]
+pub struct Response {
+    pub Status: string,    // "200 OK"
+    pub StatusCode: int,
+    pub Proto: string,
+    pub ProtoMajor: int,
+    pub ProtoMinor: int,
+    pub Header: Header,
+    pub Body: Body,
+    /// `-1` if unknown (chunked / no Content-Length on a non-empty body).
+    pub ContentLength: int,
+    /// Go: "TransferEncoding lists the transfer encodings from
+    /// outermost to innermost. A nil or empty value means chunked
+    /// encoding was not used." Populated by the wire reader.
+    pub TransferEncoding: crate::goslice::slice<string>,
+    /// Whether the connection should be closed after reading Body.
+    pub Close: bool,
+    /// Go: "Uncompressed reports whether the response was sent
+    /// compressed but was decompressed by the http package." goish's
+    /// Transport does no transparent gzip yet, so nothing sets this
+    /// true — the field exists so the struct matches Go and so the
+    /// flag has somewhere to land when it does.
+    pub Uncompressed: bool,
+    /// Go: "Trailer maps trailer keys to values in the same format as
+    /// Header." Populated by httptest's recorder and, once transfer.go
+    /// lands, by the wire reader.
+    pub Trailer: Header,
+    /// The Request that produced this Response. Populated by Client::Do.
+    /// Modelled as `nilable<Request>` (Go's `*http.Request` shape) so
+    /// Goish-side `resp.Request.URL` access can narrow via `.Must()`.
+    pub Request: nilable<Request>,
+    /// Go: "TLS contains information about the TLS connection on
+    /// which the response was received. It is nil for unencrypted
+    /// responses." Same shape as `Request.TLS`.
+    pub TLS: Option<alloc::sync::Arc<crate::crypto::tls::ConnectionState>>,
+}
+
+impl Default for Response {
+    // go: none — Rust's zero value for the struct. Go has no
+    // constructor; a `Response{}` literal is the equivalent.
+    fn default() -> Self {
+        return Response {
+            Trailer: Header::new(),
+            Status: string::new(),
+            StatusCode: 0,
+            Proto: string::new(),
+            ProtoMajor: 0,
+            ProtoMinor: 0,
+            Header: Header::new(),
+            Body: Body::default(),
+            ContentLength: 0,
+            TransferEncoding: crate::goslice::slice::new(),
+            Close: false,
+            Uncompressed: false,
+            Request: nilable::nil(),
+            TLS: None,
+        };
+    }
+}
 
 // go: sdk 1.25.5 net/http/response.go:129-131 ErrNoLocation
 //
@@ -179,11 +250,6 @@ impl Response {
 }
 
 // ─── Still in client.rs, pending relocation ──────────────────────────
-//
-// goishlint:ignore GOISH021 — Go's `Response` TYPE is declared in
-// client.rs (line 69), not dropped. It stays there until the Body
-// type it embeds moves too; Body is goish-only framing machinery with
-// no response.go counterpart, so untangling the two is its own step.
 //
 // goishlint:ignore GOISH018 — `ReadResponse` is likewise implemented
 // in client.rs, unanchored, and is ~200 lines entangled with that

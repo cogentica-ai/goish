@@ -39,7 +39,8 @@ use crate::types::{byte, int};
 
 use super::super::header::Header;
 use super::super::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
-use super::super::client::{Body, Response};
+use super::super::client::Body;
+use super::super::response::Response;
 
 // go: sdk 1.25.5 net/http/httptest/recorder.go:61-61 DefaultRemoteAddr
 /// Go: "DefaultRemoteAddr is the default remote address to return in
