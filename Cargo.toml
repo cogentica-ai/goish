@@ -479,6 +479,10 @@ name = "http_clone_smoke"
 path = "examples/http_clone_smoke.rs"
 
 [[example]]
+name = "http_aswriter_smoke"
+path = "examples/http_aswriter_smoke.rs"
+
+[[example]]
 name = "http_constants_smoke"
 path = "examples/http_constants_smoke.rs"
 

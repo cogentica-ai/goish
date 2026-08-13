@@ -87,6 +87,37 @@ pub trait ResponseWriter {
     fn WriteHeader(&self, statusCode: int);
 }
 
+// go: none — Go's `ResponseWriter` IS an `io.Writer`: its method set
+// contains `Write([]byte) (int, error)`, so every ResponseWriter
+// satisfies io.Writer implicitly and fs.go's serveContent, io.Copy and
+// io.CopyN take `w` directly.
+//
+// goish's ResponseWriter::Write takes `&self` — a response writer is
+// shared and interior-mutable — while io::Writer::Write takes
+// `&mut self`. The signatures therefore do not unify, and a blanket
+// `impl<T: ResponseWriter> io::Writer for T` cannot be written: it
+// would overlap the existing `Box<W>` and `Arc<Mutex<W>>` impls and
+// coherence rejects it.
+//
+// So the conversion is explicit and lives here rather than at each call
+// site. `AsWriter(w)` is what a Go call passing `w` where an io.Writer
+// is wanted lowers to.
+pub struct writerOf<'a>(pub &'a (dyn ResponseWriter + Send + Sync + 'static));
+
+impl<'a> crate::io::Writer for writerOf<'a> {
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        return self.0.Write(p);
+    }
+}
+
+/// Borrow a [`ResponseWriter`] as an [`io::Writer`](crate::io::Writer).
+/// Go needs no equivalent — there the two interfaces already unify.
+pub fn AsWriter<'a>(
+    w: &'a (dyn ResponseWriter + Send + Sync + 'static),
+) -> writerOf<'a> {
+    return writerOf(w);
+}
+
 /// `http.Flusher` (server.go:135) — implemented by ResponseWriters
 /// that allow an HTTP handler to flush buffered data to the client.
 #[goish::interface]

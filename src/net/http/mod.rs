@@ -71,6 +71,7 @@ pub use request::{
 };
 pub use responsecontroller::{NewResponseController, ResponseController};
 pub use response::{
+    AsWriter,
     Flusher, HeaderHandle, Hijacker, ResponseWriter,
 };
 pub use httputil::NewSingleHostReverseProxy;
