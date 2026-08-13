@@ -1597,9 +1597,33 @@ pub(crate) fn serialize_request_proxy(
     let _ = b.WriteString(host.clone());
     let _ = b.WriteString("\r\n");
 
-    // Go: default User-Agent if not set
-    if req.Header.Get(string("User-Agent")).Len() == 0 {
-        let _ = b.WriteString("User-Agent: goish/0.1\r\n");
+    // Go (request.go:689-697):
+    //     userAgent := defaultUserAgent
+    //     if r.Header.has("User-Agent") { userAgent = r.Header.Get("User-Agent") }
+    //     if userAgent != "" { …write, sanitized… }
+    //
+    // The test is `has`, NOT `Get(...) == ""`. Setting User-Agent to
+    // the empty string explicitly SUPPRESSES the header; only an
+    // ABSENT one gets the default. goish previously checked Get's
+    // length, so an explicit blank produced the default anyway — the
+    // one documented way to send no User-Agent did not work.
+    //
+    // The value is also sanitized before writing, the same
+    // newline-to-space + trim the header writer applies, so a
+    // caller-supplied UA cannot inject a header.
+    let mut userAgent = string(super::request::defaultUserAgent);
+    if req.Header.has(string("User-Agent")) {
+        userAgent = req.Header.Get(string("User-Agent"));
+    }
+    if userAgent != "" {
+        let ua = crate::net::textproto::TrimString(crate::strings::ReplaceAll(
+            crate::strings::ReplaceAll(userAgent, string("\n"), string(" ")),
+            string("\r"),
+            string(" "),
+        ));
+        let _ = b.WriteString("User-Agent: ");
+        let _ = b.WriteString(ua);
+        let _ = b.WriteString("\r\n");
     }
 
     // Go: fmt.Fprintf(&b, "Content-Length: %d\r\n", contentLength) — for body-bearing
@@ -1614,22 +1638,28 @@ pub(crate) fn serialize_request_proxy(
         let _ = b.WriteString("\r\n");
     }
 
-    // Go: write user-set headers via Header.WriteSubset
-    let inner = req.Header.__inner();
-    for (key, values) in inner.__iter() {
-        // Go: skip Host / Content-Length (we synthesize)
-        if strings::EqualFold(key.clone(), string("Host"))
-            || strings::EqualFold(key.clone(), string("Content-Length"))
-        {
-            continue;
-        }
-        let n = values.Len();
-        for i in 0..n {
-            let _ = b.WriteString(key.clone());
-            let _ = b.WriteString(": ");
-            let _ = b.WriteString(values[i].clone());
-            let _ = b.WriteString("\r\n");
-        }
+    // Go (request.go:707): err = r.Header.writeSubset(w,
+    //     reqWriteExcludeHeader, trace)
+    //
+    // This used to be a hand-rolled loop that skipped only Host and
+    // Content-Length. Three things were wrong with that:
+    //
+    //  * User-Agent, Transfer-Encoding and Trailer are ALSO synthesized
+    //    above, so they went out TWICE — visibly, for User-Agent.
+    //  * writeSubset drops a header name that is not a token
+    //    (httpguts.ValidHeaderFieldName). The raw loop wrote any key
+    //    verbatim, so a key holding CRLF injected a header.
+    //  * writeSubset folds newlines to spaces and trims each VALUE,
+    //    for the same reason.
+    //
+    // Routing through it puts request writing on the same hardened
+    // path as response writing.
+    {
+        let mut hb = crate::bytes::Buffer::new();
+        let _ = req
+            .Header
+            .WriteSubset(&mut hb, &super::request::reqWriteExcludeHeader());
+        let _ = b.WriteString(string::from_bytes(&hb.Bytes()));
     }
     // Go: b.WriteString("\r\n")
     let _ = b.WriteString("\r\n");
