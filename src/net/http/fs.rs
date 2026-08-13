@@ -52,6 +52,64 @@ pub fn NewDir<R: Into<string>>(root: R) -> Dir {
     Dir { root }
 }
 
+impl FileSystem for Dir {
+    // go: sdk 1.25.5 net/http/fs.go:76-96 Dir.Open
+    //
+    // Go's receiver is `d Dir` where `type Dir string`; goish's Dir is
+    // a one-field struct over the same string, so `self.root` stands
+    // in for Go's `string(d)`.
+    fn Open(&self, name: string) -> (Arc<dyn File + Send + Sync>, error) {
+        // Go: path := path.Clean("/" + name)[1:]
+        let cleaned = crate::path::Clean(string("/") + name);
+        let mut path = cleaned.slice(1, len(&cleaned));
+        // Go: if path == "" { path = "." }
+        if path == "" {
+            path = string(".");
+        }
+        // Go: path, err := filepath.Localize(path)
+        //     if err != nil { return nil, errInvalidUnsafePath }
+        let (path, lerr) = crate::path::filepath::Localize(path);
+        if lerr != nil {
+            return (crate::nil.into(), errInvalidUnsafePath.into());
+        }
+        // Go: dir := string(d); if dir == "" { dir = "." }
+        let mut dir = self.root.clone();
+        if dir == "" {
+            dir = string(".");
+        }
+        // Go: fullName := filepath.Join(dir, path)
+        let fullName = crate::path::filepath::Join(slice::__from_vec(alloc::vec![dir, path]));
+        // Go: f, err := os.Open(fullName)
+        let (f, oerr) = os::Open(fullName.clone());
+        if oerr != nil {
+            // Go: return nil, mapOpenError(err, fullName,
+            //         filepath.Separator, os.Stat)
+            let mapped = mapOpenError(
+                oerr,
+                fullName.clone(),
+                crate::rune(crate::path::filepath::Separator),
+                &|p: string| {
+                    let (fi, e) = os::Stat(p);
+                    if e != nil {
+                        return (crate::nil.into(), e);
+                    }
+                    return (Arc::new(fi) as Arc<dyn fs::FileInfo + Send + Sync>, nil.into());
+                },
+            );
+            return (crate::nil.into(), mapped);
+        }
+        // Go: return f, nil — *os.File IS an http.File; goish wraps.
+        // os::Open returns `nilable<File>`; err == nil means it is set.
+        return (
+            Arc::new(osFile {
+                f: crate::runtime::spin::SpinLock::new(f.Must().clone()),
+                name: fullName,
+            }) as Arc<dyn File + Send + Sync>,
+            nil.into(),
+        );
+    }
+}
+
 impl Dir {
     /// Resolve a request URL path to an absolute filesystem path,
     /// rejecting any attempt to escape `root` via `..` segments.
@@ -1019,6 +1077,84 @@ pub struct ioFS {
 #[derive(Clone)]
 pub struct ioFile {
     pub file: alloc::sync::Arc<dyn fs::File + Send + Sync>,
+}
+
+// go: none — goish-only adapter, no Go counterpart.
+//
+// Go's `Dir.Open` returns `*os.File`, which satisfies `http.File`
+// directly: its method set already has Close/Read/Seek/Readdir/Stat.
+// goish's `os::File` is two methods short of that shape —
+// `Close` takes `&mut self` because it owns the fd, and there is no
+// `Readdir` (only `Readdirnames`) — and `http::File` hands out
+// `&self` through an `Arc`. This carries one to the other, the same
+// way `response::AsWriter` carries a ResponseWriter to an io::Writer.
+//
+// The lock is what supplies the `&mut` for Close; every other method
+// on `os::File` already takes `&self`, so it is uncontended in the
+// serving path.
+pub struct osFile {
+    f: crate::runtime::spin::SpinLock<os::File>,
+    name: string,
+}
+
+impl File for osFile {
+    // go: none — forwards to os::File::Close, which needs the &mut the
+    // lock supplies.
+    fn Close(&self) -> error {
+        return self.f.lock().Close();
+    }
+
+    // go: none — forwards to os::File::Read.
+    fn Read(&self, p: &mut slice<byte>) -> (int, error) {
+        return self.f.lock().Read(p);
+    }
+
+    // go: none — forwards to os::File::Seek.
+    fn Seek(&self, offset: crate::types::int64, whence: int) -> (crate::types::int64, error) {
+        return self.f.lock().Seek(offset, whence);
+    }
+
+    // go: none — forwards to os::File::Stat, boxing the concrete
+    // FileInfoData into the interface http::File returns.
+    fn Stat(&self) -> (Arc<dyn fs::FileInfo + Send + Sync>, error) {
+        let (fi, err) = self.f.lock().Stat();
+        if err != nil {
+            return (crate::nil.into(), err);
+        }
+        return (Arc::new(fi) as Arc<dyn fs::FileInfo + Send + Sync>, nil.into());
+    }
+
+    // go: none — Go's os.File.Readdir reads the directory stream and
+    // honours `count` by consuming that many entries, so successive
+    // calls advance. goish's os::ReadDir reads the WHOLE directory,
+    // so this returns a prefix and does not advance: a caller that
+    // pages with count > 0 sees the same first `count` entries each
+    // time. dirList and Go's own FileServer path both call
+    // Readdir(-1), which is exact.
+    fn Readdir(&self, count: int) -> (slice<Arc<dyn fs::FileInfo + Send + Sync>>, error) {
+        let (entries, err) = os::ReadDir(self.name.clone());
+        if err != nil {
+            return (slice::new(), err);
+        }
+        let mut out: alloc::vec::Vec<Arc<dyn fs::FileInfo + Send + Sync>> =
+            alloc::vec::Vec::new();
+        let n = len(&entries);
+        let mut i: int = 0;
+        while i < n {
+            if count > 0 && crate::int(out.len()) >= count {
+                break;
+            }
+            let (info, ierr) = entries[i].Info();
+            i += 1;
+            if ierr != nil {
+                // Go's (*os.File).Readdir skips an entry whose lstat
+                // fails rather than aborting the listing.
+                continue;
+            }
+            out.push(info);
+        }
+        return (slice::__from_vec(out), nil.into());
+    }
 }
 
 // go: sdk 1.25.5 net/http/fs.go:49-67 mapOpenError
