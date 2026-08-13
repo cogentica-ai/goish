@@ -26,7 +26,6 @@ use crate::bytes;
 use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::io::{self, Reader};
-use crate::len;
 use crate::string;
 use crate::types::{byte, int};
 

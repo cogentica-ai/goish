@@ -29,19 +29,16 @@ use crate::types::{byte, int, rune};
 use super::request::Request;
 use super::response::ResponseWriter;
 use super::server::{Handler, NotFound};
-use crate::delete;
 use crate::io::fs;
 use super::header::{ParseTime, TimeFormat};
 use super::status::{
     StatusForbidden, StatusInternalServerError, StatusMovedPermanently, StatusNotFound,
     StatusNotModified, StatusPreconditionFailed,
 };
-use crate::go;
 use crate::len;
 use crate::nil;
 use crate::nilable;
 use crate::net::textproto;
-use crate::range;
 
 /// `http.Dir(root)` — bind a filesystem root directory. Mirrors Go's
 /// `type Dir string` (fs.go:44).
@@ -660,7 +657,7 @@ pub fn toHTTPError(err: error) -> (string, int) {
 pub static unixEpochTime: crate::lazy::Lazy<time::Time> = crate::lazy::Lazy::new(|| time::Unix(0, 0));
 
 // go: sdk 1.25.5 net/http/fs.go:436-459 scanETag
-pub fn scanETag<S: Into<string>>(mut s: S) -> (string, string) {
+pub fn scanETag<S: Into<string>>(s: S) -> (string, string) {
     #[allow(unused_mut)]
     let mut s = s.into();
     s = textproto::TrimString(s);
@@ -719,7 +716,7 @@ pub fn setLastModified(w: &(dyn ResponseWriter + Send + Sync + 'static), modtime
 
 // go: sdk 1.25.5 net/http/fs.go:627-641 writeNotModified
 pub fn writeNotModified(w: &(dyn ResponseWriter + Send + Sync + 'static)) {
-    let mut h = w.Header();
+    let h = w.Header();
     h.Del(string("Content-Type"));
     h.Del(string("Content-Length"));
     h.Del(string("Content-Encoding"));
@@ -856,7 +853,6 @@ pub fn checkIfRange(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable
 // go: sdk 1.25.5 net/http/fs.go:645-676 checkPreconditions
 pub fn checkPreconditions(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable![&Request], modtime: time::Time) -> (bool, string) {
     #[allow(unused_mut)]
-    let mut rangeHeader: string = Default::default();
     let mut ch = checkIfMatch(w, r);
     if ch == condNone {
         ch = checkIfUnmodifiedSince(r, modtime);
@@ -879,7 +875,7 @@ pub fn checkPreconditions(w: &(dyn ResponseWriter + Send + Sync + 'static), r: n
             return (true, string(""));
         }
     }
-    rangeHeader = r.Must().Header.Get(string("Range"));
+    let mut rangeHeader = r.Must().Header.Get(string("Range"));
     if rangeHeader != "" && checkIfRange(w, r, modtime) == condFalse {
         rangeHeader = string("");
     }
@@ -946,7 +942,7 @@ pub fn serveError<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'stat
 }
 
 // go: sdk 1.25.5 net/http/fs.go:785-791 localRedirect
-pub fn localRedirect<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable![&Request], mut newPath: S) {
+pub fn localRedirect<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable![&Request], newPath: S) {
     #[allow(unused_mut)]
     let mut newPath = newPath.into();
     {
