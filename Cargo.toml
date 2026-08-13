@@ -523,6 +523,10 @@ name = "http_request_write_ua_smoke"
 path = "examples/http_request_write_ua_smoke.rs"
 
 [[example]]
+name = "http_header_injection_smoke"
+path = "examples/http_header_injection_smoke.rs"
+
+[[example]]
 name = "http_server_pure_smoke"
 path = "examples/http_server_pure_smoke.rs"
 
