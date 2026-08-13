@@ -237,7 +237,7 @@ fn serve_regular_file(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Requ
     // Range header — single-range only for v1 (the common case).
     let range_hdr = r.Header.Get(string("Range"));
     if range_hdr.Len() > 0 {
-        let (ranges, perr) = ParseRange(range_hdr, size);
+        let (ranges, perr) = parseRange(range_hdr, size);
         if !perr.IsNil() || ranges.Len() == 0 {
             // Malformed → 416 Requested Range Not Satisfiable.
             w.Header().Set(
@@ -250,11 +250,11 @@ fn serve_regular_file(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Requ
         if ranges.Len() == 1 {
             let r0 = ranges[0];
             w.Header()
-                .Set(string("Content-Range"), r0.ContentRange(size));
+                .Set(string("Content-Range"), r0.contentRange(size));
             w.Header()
-                .Set(string("Content-Length"), crate::strconv::Itoa(r0.Length));
+                .Set(string("Content-Length"), crate::strconv::Itoa(r0.length));
             w.WriteHeader(super::status::StatusPartialContent);
-            let part = body.slice(r0.Start, r0.Start + r0.Length);
+            let part = body.slice(r0.start, r0.start + r0.length);
             let _ = w.Write(part);
             return;
         }
@@ -341,124 +341,158 @@ impl Handler for FileHandler {
     }
 }
 
-// ─── Range header parsing (fs.go:1015) ───────────────────────────────
+// ─── Range header parsing (fs.go:998-1116) ───────────────────────────
 
-/// `httpRange` (fs.go:998) — a parsed byte range. Public so callers
-/// (e.g. CDNs / partial transfer tooling) can act on the parsed list.
+// go: sdk 1.25.5 net/http/fs.go:268-268 errNoOverlap
+crate::var! {
+    pub errNoOverlap: error = "invalid range: failed to overlap";
+}
+
+// go: sdk 1.25.5 net/http/fs.go:997-1000 httpRange
 #[derive(Clone, Copy)]
-pub struct HttpRange {
-    pub Start: int,
-    pub Length: int,
+pub struct httpRange {
+    pub start: int,
+    pub length: int,
 }
 
-impl HttpRange {
-    /// `r.ContentRange(size)` (fs.go:1002) — render a "bytes A-B/SIZE"
-    /// string for the Content-Range header.
-    pub fn ContentRange(&self, size: int) -> string {
-        crate::Sprintf!(
+impl httpRange {
+    // go: sdk 1.25.5 net/http/fs.go:1002-1004 httpRange.contentRange
+    pub fn contentRange(&self, size: int) -> string {
+        return crate::Sprintf!(
             "bytes %d-%d/%d",
-            self.Start,
-            self.Start + self.Length - 1,
+            self.start,
+            self.start + self.length - 1,
             size
-        )
-    }
-}
-
-/// `parseRange(s, size)` (fs.go:1015) — parse a Range header per
-/// RFC 7233 §3.1. Returns `(ranges, ok)`; `ok=false` when the header
-/// is malformed.
-pub fn ParseRange<S: Into<string>>(s: S, size: int) -> (slice<HttpRange>, error) {
-    let s: string = s.into();
-    // Go: if s == "" { return nil, nil }
-    if s.Len() == 0 {
-        return (slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()), errors::nil);
-    }
-    // Go: const b = "bytes="; if !strings.HasPrefix(s, b) { return nil, errors.New(...) }
-    if !strings::HasPrefix(s.clone(), string("bytes=")) {
-        return (
-            slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
-            errors::New(string("invalid range")),
         );
     }
-    let body = strings::TrimPrefix(s, string("bytes="));
-    let mut ranges: alloc::vec::Vec<HttpRange> = alloc::vec::Vec::new();
-    let mut no_overlap = false;
-    let parts = strings::Split(body, string(","));
-    for i in 0..parts.Len() {
-        let ra = strings::TrimSpace(parts[i].clone());
-        // Go: if ra == "" { continue }
-        if ra.Len() == 0 {
+
+    // go: sdk 1.25.5 net/http/fs.go:1006-1013 httpRange.mimeHeader
+    pub fn mimeHeader(&self, contentType: string, size: int) -> textproto::MIMEHeader {
+        let mut h = textproto::MIMEHeader::new();
+        h.Set(
+            string("Content-Range"),
+            slice::__from_vec(alloc::vec![self.contentRange(size)]),
+        );
+        h.Set(
+            string("Content-Type"),
+            slice::__from_vec(alloc::vec![contentType]),
+        );
+        return h;
+    }
+}
+
+// go: sdk 1.25.5 net/http/fs.go:1015-1088 parseRange
+//
+// Go splits on "," with strings.SplitSeq and trims each element with
+// textproto.TrimString, which strips the four ASCII space bytes
+// (' ', '\t', '\n', '\r') and nothing else. strings.TrimSpace would
+// additionally strip Unicode whitespace such as '\v' and U+00A0, so it
+// accepts Range headers Go rejects. Confirmed against Go 1.25.5:
+// "bytes=\n0-99" parses, and so does "bytes= 0 - 99 ".
+pub fn parseRange<S: Into<string>>(s: S, size: int) -> (slice<httpRange>, error) {
+    let s: string = s.into();
+    if s == "" {
+        return (slice::new(), nil.into()); // header not present
+    }
+    let b = string("bytes=");
+    if !strings::HasPrefix(s.clone(), b.clone()) {
+        return (slice::new(), errors::New(string("invalid range")));
+    }
+    let mut ranges: alloc::vec::Vec<httpRange> = alloc::vec::Vec::new();
+    let mut noOverlap = false;
+    let parts = strings::Split(strings::TrimPrefix(s, b), string(","));
+    let pn = len(&parts);
+    let mut pi: int = 0;
+    while pi < pn {
+        let ra = textproto::TrimString(parts[pi].clone());
+        pi += 1;
+        if ra == "" {
             continue;
         }
-        // Go: start, end, ok := strings.Cut(ra, "-")
         let (start, end, ok) = strings::Cut(ra, string("-"));
         if !ok {
-            return (
-                slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
-                errors::New(string("invalid range")),
-            );
+            return (slice::new(), errors::New(string("invalid range")));
         }
-        let start = strings::TrimSpace(start);
-        let end = strings::TrimSpace(end);
-        let mut r = HttpRange { Start: 0, Length: 0 };
-        if start.Len() == 0 {
-            // Suffix form: "bytes=-N" → last N bytes.
-            if end.Len() == 0 || end[0] == b'-' {
-                return (
-                    slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
-                    errors::New(string("invalid range")),
-                );
+        let start = textproto::TrimString(start);
+        let end = textproto::TrimString(end);
+        let mut r = httpRange { start: 0, length: 0 };
+        if start == "" {
+            // If no start is specified, end specifies the range start
+            // relative to the end of the file, and we are dealing with
+            // <suffix-length> which has to be a non-negative integer as
+            // per RFC 7233 Section 2.1 "Byte-Ranges".
+            if end == "" || end[0] == b'-' {
+                return (slice::new(), errors::New(string("invalid range")));
             }
-            let (mut n, perr) = crate::strconv::Atoi(end);
-            if !perr.IsNil() || n < 0 {
-                return (
-                    slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
-                    errors::New(string("invalid range")),
-                );
+            let (mut i, err) = crate::strconv::ParseInt(end, 10, 64);
+            if i < 0 || err != nil {
+                return (slice::new(), errors::New(string("invalid range")));
             }
-            if n > size {
-                n = size;
+            if i > size {
+                i = size;
             }
-            r.Start = size - n;
-            r.Length = size - r.Start;
+            r.start = size - i;
+            r.length = size - r.start;
         } else {
-            let (i_start, perr) = crate::strconv::Atoi(start);
-            if !perr.IsNil() || i_start < 0 {
-                return (
-                    slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
-                    errors::New(string("invalid range")),
-                );
+            let (i, err) = crate::strconv::ParseInt(start, 10, 64);
+            if err != nil || i < 0 {
+                return (slice::new(), errors::New(string("invalid range")));
             }
-            if i_start >= size {
-                no_overlap = true;
+            if i >= size {
+                // If the range begins after the size of the content,
+                // then it does not overlap.
+                noOverlap = true;
                 continue;
             }
-            r.Start = i_start;
-            if end.Len() == 0 {
-                r.Length = size - r.Start;
+            r.start = i;
+            if end == "" {
+                // If no end is specified, range extends to end of the file.
+                r.length = size - r.start;
             } else {
-                let (mut i_end, perr) = crate::strconv::Atoi(end);
-                if !perr.IsNil() || r.Start > i_end {
-                    return (
-                        slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
-                        errors::New(string("invalid range")),
-                    );
+                let (mut i, err) = crate::strconv::ParseInt(end, 10, 64);
+                if err != nil || r.start > i {
+                    return (slice::new(), errors::New(string("invalid range")));
                 }
-                if i_end >= size {
-                    i_end = size - 1;
+                if i >= size {
+                    i = size - 1;
                 }
-                r.Length = i_end - r.Start + 1;
+                r.length = i - r.start + 1;
             }
         }
         ranges.push(r);
     }
-    if no_overlap && ranges.is_empty() {
-        return (
-            slice::<HttpRange>::__from_vec(alloc::vec::Vec::new()),
-            errors::New(string("requested range not satisfiable")),
-        );
+    if noOverlap && ranges.is_empty() {
+        // The specified ranges did not overlap with the content.
+        return (slice::new(), errNoOverlap.into());
     }
-    (slice::<HttpRange>::__from_vec(ranges), errors::nil)
+    return (slice::__from_vec(ranges), nil.into());
+}
+
+// go: sdk 1.25.5 net/http/fs.go:1090-1090 countingWriter
+//
+// Go writes `type countingWriter int64` and takes `*countingWriter` as
+// the io.Writer. A Rust newtype struct is the same thing with a field
+// name; `.0` stands in for Go's `*w`.
+pub struct countingWriter(pub int);
+
+impl crate::io::Writer for countingWriter {
+    // go: sdk 1.25.5 net/http/fs.go:1092-1095 countingWriter.Write
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        self.0 += len(&p);
+        return (len(&p), nil.into());
+    }
+}
+
+// go: sdk 1.25.5 net/http/fs.go:1111-1116 sumRangesSize
+pub fn sumRangesSize(ranges: &slice<httpRange>) -> int {
+    let mut size: int = 0;
+    let n = len(ranges);
+    let mut i: int = 0;
+    while i < n {
+        size += ranges[i].length;
+        i += 1;
+    }
+    return size;
 }
 
 // ─── small helpers ───────────────────────────────────────────────────

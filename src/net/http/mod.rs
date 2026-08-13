@@ -55,7 +55,7 @@ pub use csrf::{
     errCrossOriginRequest, errCrossOriginRequestFromOldBrowser, CrossOriginProtection,
     NewCrossOriginProtection,
 };
-pub use fs::{Dir, FileServer, FileSystem, File, HttpRange, NewDir, ParseRange, ServeFile, FS};
+pub use fs::{Dir, FileServer, FileSystem, File, NewDir, ServeFile, FS};
 pub use header::{CanonicalHeaderKey, Header, ParseTime, TimeFormat};
 pub use jar::CookieJar;
 pub use method::{
