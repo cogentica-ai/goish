@@ -885,6 +885,155 @@ pub struct ioFile {
     pub file: alloc::sync::Arc<dyn fs::File + Send + Sync>,
 }
 
+// go: sdk 1.25.5 net/http/fs.go:49-67 mapOpenError
+//
+// `stat` is Go's `func(string) (fs.FileInfo, error)` parameter, spelled
+// as a borrowed closure so both call sites can pass their own
+// filesystem's stat without either one owning it.
+pub fn mapOpenError(
+    originalErr: error,
+    name: string,
+    sep: rune,
+    stat: &dyn Fn(string) -> (Arc<dyn fs::FileInfo + Send + Sync>, error),
+) -> error {
+    if errors::Is(originalErr.clone(), fs::ErrNotExist)
+        || errors::Is(originalErr.clone(), fs::ErrPermission)
+    {
+        return originalErr;
+    }
+
+    let sepstr = string::from_rune(sep);
+    let parts = strings::Split(name, sepstr.clone());
+    let n = len(&parts);
+    let mut i: int = 0;
+    while i < n {
+        let idx = i;
+        i += 1;
+        if parts[idx] == "" {
+            continue;
+        }
+        let (fi, err) = stat(strings::Join(parts.slice(0, idx + 1), sepstr.clone()));
+        if err != nil {
+            return originalErr;
+        }
+        if !fi.IsDir() {
+            return fs::ErrNotExist.into();
+        }
+    }
+    return originalErr;
+}
+
+// go: sdk 1.25.5 net/http/fs.go:906-907 errMissingSeek
+crate::var! {
+    pub errMissingSeek: error    = "io.File missing Seek method";
+    pub errMissingReadDir: error = "io.File directory missing ReadDir method";
+}
+
+impl ioFS {
+    // go: sdk 1.25.5 net/http/fs.go:887-900 ioFS.Open
+    pub fn Open(&self, name: string) -> (Arc<dyn File + Send + Sync>, error) {
+        let name = if name == "/" {
+            string(".")
+        } else {
+            strings::TrimPrefix(name, "/")
+        };
+        let (file, err) = self.fsys.Open(name.clone());
+        if err != nil {
+            let fsys = self.fsys.clone();
+            let mapped = mapOpenError(err, name.clone(), crate::rune('/'), &move |path: string| {
+                return fs::Stat(&*fsys, path);
+            });
+            return (crate::nil.into(), mapped);
+        }
+        return (Arc::new(ioFile { file }) as Arc<dyn File + Send + Sync>, nil.into());
+    }
+}
+
+impl ioFile {
+    // go: sdk 1.25.5 net/http/fs.go:902-902 ioFile.Close
+    pub fn Close(&self) -> error {
+        return self.file.Close();
+    }
+
+    // go: sdk 1.25.5 net/http/fs.go:903-903 ioFile.Read
+    pub fn Read(&self, b: &mut slice<byte>) -> (int, error) {
+        return self.file.Read(b);
+    }
+
+    // go: sdk 1.25.5 net/http/fs.go:909-915 ioFile.Seek
+    //
+    // Go asserts `f.file.(io.Seeker)`. goish's io::Seeker takes
+    // `&mut self` — a seek moves the cursor — but `f.file` is an
+    // `Arc<dyn fs::File>`, which yields no `&mut`. The assertion can
+    // therefore never succeed here, and Go's own miss branch is the
+    // faithful result: a file whose method set lacks Seek reports
+    // errMissingSeek. Wiring the success branch needs fs::File to
+    // expose seeking the way ResponseWriter/io::Writer was bridged.
+    pub fn Seek(&self, _offset: i64, _whence: int) -> (i64, error) {
+        return (0, errMissingSeek.into());
+    }
+
+    // go: sdk 1.25.5 net/http/fs.go:917-923 ioFile.ReadDir
+    pub fn ReadDir(&self, count: int) -> (slice<Arc<dyn fs::DirEntry + Send + Sync>>, error) {
+        let (d, ok) = crate::cast!(&*self.file, fs::ReadDirFile);
+        if !ok {
+            return (slice::new(), errMissingReadDir.into());
+        }
+        return d.ReadDir(count);
+    }
+}
+
+impl File for ioFile {
+    // go: sdk 1.25.5 net/http/fs.go:904-904 ioFile.Stat
+    fn Stat(&self) -> (Arc<dyn fs::FileInfo + Send + Sync>, error) {
+        return self.file.Stat();
+    }
+
+    // go: sdk 1.25.5 net/http/fs.go:925-947 ioFile.Readdir
+    fn Readdir(&self, count: int) -> (slice<Arc<dyn fs::FileInfo + Send + Sync>>, error) {
+        let (d, ok) = crate::cast!(&*self.file, fs::ReadDirFile);
+        if !ok {
+            return (slice::new(), errMissingReadDir.into());
+        }
+        let mut list: slice<Arc<dyn fs::FileInfo + Send + Sync>> = slice::new();
+        loop {
+            let (dirs, err) = d.ReadDir(count - len(&list));
+            let dn = len(&dirs);
+            let mut di: int = 0;
+            while di < dn {
+                let (info, ierr) = dirs[di].Info();
+                di += 1;
+                if ierr != nil {
+                    // Pretend it doesn't exist, like (*os.File).Readdir does.
+                    continue;
+                }
+                list = crate::append!(list, info);
+            }
+            if err != nil {
+                return (list, err);
+            }
+            if count < 0 || len(&list) >= count {
+                break;
+            }
+        }
+        return (list, nil.into());
+    }
+}
+
+impl FileSystem for ioFS {
+    // go: none — the FileSystem interface method forwards to ioFS::Open,
+    // which carries the anchor; Go's ioFS has the one Open method and
+    // satisfies FileSystem structurally.
+    fn Open(&self, name: string) -> (Arc<dyn File + Send + Sync>, error) {
+        return ioFS::Open(self, name);
+    }
+}
+
+// go: sdk 1.25.5 net/http/fs.go:951-956 FS
+pub fn FS(fsys: Arc<dyn fs::FS + Send + Sync>) -> Arc<dyn FileSystem + Send + Sync> {
+    return Arc::new(ioFS { fsys }) as Arc<dyn FileSystem + Send + Sync>;
+}
+
 // go: sdk 1.25.5 net/http/fs.go:105-107 FileSystem
 #[crate::interface]
 pub trait FileSystem {

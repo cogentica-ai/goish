@@ -483,6 +483,10 @@ name = "http_aswriter_smoke"
 path = "examples/http_aswriter_smoke.rs"
 
 [[example]]
+name = "http_iofs_smoke"
+path = "examples/http_iofs_smoke.rs"
+
+[[example]]
 name = "http_constants_smoke"
 path = "examples/http_constants_smoke.rs"
 
