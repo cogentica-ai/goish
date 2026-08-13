@@ -1578,6 +1578,15 @@ pub(crate) fn serialize_request_proxy(
         let _ = b.WriteString("\r\n");
     }
 
+    // Go (request.go, write): if r.Close { _, err = io.WriteString(w,
+    //     "Connection: close\r\n") }
+    //
+    // This was missing, so a Request with Close set asked for no such
+    // thing on the wire and the peer kept the connection open.
+    if req.Close {
+        let _ = b.WriteString("Connection: close\r\n");
+    }
+
     // Go (request.go:707): err = r.Header.writeSubset(w,
     //     reqWriteExcludeHeader, trace)
     //

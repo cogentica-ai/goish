@@ -421,15 +421,15 @@ impl Request {
         } else {
             self.URL.Host.clone()
         };
-        let buf = super::client::serialize_request_proxy(self, &host, using_proxy);
-        let mut body = buf;
-        if self.Body.Len() > 0 {
-            for i in 0..self.Body.Len() {
-                body = crate::append!(body, self.Body[i]);
-            }
-        }
-        let (_, e) = w.Write(body);
-        e
+        // `serialize_request_proxy` already appends the body. This
+        // used to append it a SECOND time, so every request with a
+        // body put it on the wire twice while Content-Length still
+        // announced one copy. On a keep-alive connection the surplus
+        // bytes are read as the start of the next request — a
+        // request-smuggling desync, self-inflicted on every POST.
+        let out = super::client::serialize_request_proxy(self, &host, using_proxy);
+        let (_, e) = w.Write(out);
+        return e;
     }
 
     // go: sdk 1.25.5 net/http/request.go:417-420 Request.ProtoAtLeast
