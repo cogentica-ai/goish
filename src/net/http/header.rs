@@ -108,6 +108,20 @@ impl Header {
 
     /// `h.Values(key)` — all values for `key`. Empty slice if absent.
 
+    // go: sdk 1.25.5 net/http/header.go:62-68 Header.get
+    /// `h.get(key)` — like `Get`, but `key` must ALREADY be in
+    /// canonical form: Go's unexported `get` is a raw map lookup and
+    /// does no canonicalization, so it is case-SENSITIVE.
+    /// `h.get("content-type")` is "" where `h.Get("content-type")`
+    /// finds the value.
+    pub fn get<K: Into<string>>(&self, key: K) -> string {
+        let (v, ok) = self.inner.Get(key.into());
+        if ok && v.Len() > 0 {
+            return v[0].clone();
+        }
+        return string::new();
+    }
+
     // go: sdk 1.25.5 net/http/header.go:72-75 Header.has
     /// `h.has(key)` — key presence, distinct from `Get` returning "".
     /// Unexported in Go; serveError needs it to tell an absent header
@@ -191,6 +205,18 @@ impl Header {
         });
         // Go: for _, kv := range kvs { for _, v := range kv.values { ws.WriteString(...) } }
         for (k, vv) in kvs.iter() {
+            // Go: if !httpguts.ValidHeaderFieldName(kv.key) { continue }
+            // — "This could be an error. In the common case of writing
+            // response headers, however, we have no good way to provide
+            // the error back to the server handler, so just drop invalid
+            // headers instead." goish's `isToken` IS
+            // httpguts.ValidHeaderFieldName; http.go:218 says so.
+            // Without this a key like "Bad Name" or one holding a
+            // newline is written to the wire verbatim, which is header
+            // injection.
+            if !super::http::isToken(k) {
+                continue;
+            }
             for i in 0..vv.Len() {
                 let v = vv[i].clone();
                 // Go: v = headerNewlineToSpace.Replace(v); v = textproto.TrimString(v)
