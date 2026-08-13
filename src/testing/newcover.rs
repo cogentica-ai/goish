@@ -1,4 +1,4 @@
-// go: file testing/newcover.go decls: registerCover, Coverage
+// go: file testing/newcover.go decls: coverReport, registerCover, Coverage
 //
 // testing/newcover.go — the coverage-reporting surface.
 //
@@ -9,7 +9,7 @@
 // generated main would call through, and it correctly does nothing
 // when handed the empty mode that goish's InitRuntimeCoverage returns.
 //
-// goishlint:ignore GOISH018 coverReport, RegisterCover, InitRuntimeCoverage, ResetCoverage, SnapshotCoverage, mustBeNil — all drive counters the compiler does not emit here.
+// goishlint:ignore GOISH018 RegisterCover, InitRuntimeCoverage, ResetCoverage, SnapshotCoverage, mustBeNil — all drive counters the compiler does not emit here.
 // goishlint:ignore GOISH021 goCoverTearDown, coverReport2 — same.
 
 #![allow(non_snake_case)]
@@ -67,4 +67,38 @@ pub(crate) fn registerCover(
         tearDown,
         snapshotcov: snapcov,
     });
+}
+
+// go: sdk 1.25.5 testing/newcover.go:40-45 coverReport
+/// Go: "coverReport reports the coverage percentage and writes a
+/// coverage profile if requested."
+///
+/// Go dereferences `cover.tearDown` unconditionally, because the driver
+/// only calls coverReport when `cover.mode != ""` — which, per
+/// registerCover, is the only way tearDown is ever set. goish keeps the
+/// same precondition and treats an unset teardown as "nothing
+/// registered", the state a non-coverage build is always in.
+/// Called by `M.after` in Go, which is not ported — its body is
+/// profiling teardown. Kept live and anchored so that when a coverage
+/// story exists there is nothing to re-derive.
+#[allow(non_snake_case, dead_code)]
+pub(crate) fn coverReport() {
+    let g = cover.Lock();
+    let st = match g.as_ref() {
+        Some(st) => st,
+        None => return,
+    };
+    let tearDown = match st.tearDown.as_ref() {
+        Some(f) => f,
+        None => return,
+    };
+
+    let (coverProfile, gocoverdir) = crate::testing::testing::__cover_paths();
+    let (errmsg, err) = tearDown(coverProfile, gocoverdir);
+    if err != crate::errors::nil {
+        let msg = crate::fmt::Sprintf!("%s: %v\n", errmsg, err.Error());
+        let b = msg.as_bytes().to_vec();
+        crate::syscall::Write(crate::syscall::STDERR, b.as_ptr(), b.len());
+        crate::syscall::Exit(2);
+    }
 }

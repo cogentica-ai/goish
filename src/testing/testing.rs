@@ -844,6 +844,16 @@ pub fn __run_skip_patterns() -> (string, string) {
     };
 }
 
+// go: none — goish idiom: Go reads `*coverProfile` and `*gocoverdir`,
+// registered by Init. goish's Init deliberately does NOT register them:
+// coverage cannot work without compiler instrumentation, and a flag the
+// binary accepts but silently ignores is worse than one it rejects. So
+// both paths are empty, which is what coverReport would be handed in
+// any non-coverage build.
+pub(crate) fn __cover_paths() -> (string, string) {
+    return (string::from_static(""), string::from_static(""));
+}
+
 // go: none — goish-only: reads the -v flag without Verbose's
 // flag.Parsed() check, so example output can consult it before Init.
 pub(crate) fn __chatty_on() -> bool {
