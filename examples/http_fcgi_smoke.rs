@@ -31,7 +31,7 @@ use goish::goslice::slice;
 use goish::net::http::fcgi::fcgi::{
     beginRequest, encodeSize, header, readSize, readString, typeStdout,
 };
-use goish::{fmt, string, syscall};
+use goish::{fmt, syscall};
 
 fn buf(n: usize) -> slice<goish::types::byte> {
     return slice::__from_vec(alloc::vec![0u8; n]);

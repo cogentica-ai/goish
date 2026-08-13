@@ -1795,7 +1795,19 @@ impl Server {
     /// pre-bound Listener. Tracks the listener so `Shutdown` can
     /// break the Accept loop and close the socket.
     pub fn Serve(self: Arc<Self>, ln: net::Listener) -> error {
-        let ln = Arc::new(ln);
+        return self.__serve_arc(Arc::new(ln));
+    }
+
+    // go: none — goish-only. Go's Serve takes a `net.Listener`
+    // INTERFACE, so a caller (httptest.Server) can keep its own
+    // reference and still Close it after handing it to Serve. goish's
+    // Serve takes the listener by VALUE and consumed it, leaving such
+    // a caller with nothing to close.
+    //
+    // The body already began with `Arc::new(ln)`, so lifting that to
+    // the signature costs nothing and changes no public API: `Serve`
+    // stays exactly as Go declares it and simply wraps.
+    pub(crate) fn __serve_arc(self: Arc<Self>, ln: Arc<net::Listener>) -> error {
         // Install into tracked_listeners + initialize conn_sem (if
         // backpressure configured) under one critical section; check
         // in_shutdown atomically (Go `trackListener` returning false
@@ -2081,6 +2093,27 @@ impl Server {
     // go: sdk 1.25.5 net/http/server.go:3654-3656 Server.shuttingDown
     pub fn shuttingDown(&self) -> bool {
         return self.__state.in_shutdown.load(Ordering::Acquire);
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3662-3673 Server.SetKeepAlivesEnabled
+    //
+    // Controls whether HTTP keep-alives are enabled. By default,
+    // keep-alives are always enabled. Only very resource-constrained
+    // environments or servers in the process of shutting down should
+    // disable them.
+    //
+    // Go's `v == false` path also calls `closeIdleConns` to hang up
+    // conns already parked between requests. goish has no standalone
+    // `closeIdleConns` — the idle-conn kick lives inside `Shutdown`
+    // (see its "Drain semantics" note) — so already-parked conns here
+    // stay parked until their own idle timeout fires. Callers that
+    // need them gone should use `Shutdown`.
+    pub fn SetKeepAlivesEnabled(&self, v: bool) {
+        if v {
+            self.__state.disable_keep_alives.store(false, Ordering::Release);
+            return;
+        }
+        self.__state.disable_keep_alives.store(true, Ordering::Release);
     }
 
     // go: sdk 1.25.5 net/http/server.go:3650-3652 Server.doKeepAlives
