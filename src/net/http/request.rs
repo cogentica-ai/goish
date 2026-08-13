@@ -1247,8 +1247,8 @@ pub fn parseBasicAuth(auth: string) -> (string, string, bool) {
     (user, pass, true)
 }
 
-// ─── MaxBytesReader (line-by-line port of request.go:1186) ───────────
-
+// go: sdk 1.25.5 net/http/request.go:1203-1209 maxBytesReader
+//
 /// `http.MaxBytesReader(w, r, n)` — returns a `Reader` that stops
 /// reading from `r` after `n` bytes, returning `MaxBytesError` once
 /// the limit is exceeded. Slim port: drops Go's `requestTooLarge`
@@ -1373,6 +1373,7 @@ fn empty_multipart_reader() -> crate::mime::multipart::Reader {
 /// type MaxBytesError struct { Limit int64 }
 /// func (e *MaxBytesError) Error() string { return "http: request body too large" }
 /// ```
+// go: sdk 1.25.5 net/http/request.go:1194-1196 MaxBytesError
 #[derive(Clone)]
 pub struct MaxBytesError {
     pub Limit: int,
@@ -1405,6 +1406,11 @@ crate::var! {
     pub ErrMaxBytes: error = "http: request body too large";
 }
 
+// go: sdk 1.25.5 net/http/request.go:1186-1191 MaxBytesReader
+//
+// goish names the CONSTRUCTOR `NewMaxBytesReader` because
+// `MaxBytesReader` is taken by the struct — Go has a func and an
+// unexported `maxBytesReader` type, Rust cannot share the name.
 pub fn NewMaxBytesReader<R: io::Reader>(r: R, n: int) -> MaxBytesReader<R> {
     // Go: if n < 0 { n = 0 }
     let n = if n < 0 { 0 } else { n };
@@ -1417,6 +1423,20 @@ pub fn NewMaxBytesReader<R: io::Reader>(r: R, n: int) -> MaxBytesReader<R> {
 }
 
 impl<R: io::Reader> io::Reader for MaxBytesReader<R> {
+    // go: sdk 1.25.5 net/http/request.go:1211-1251 maxBytesReader.Read
+    //
+    /// Verified against goref across the boundary that matters. Go
+    /// shrinks the read to `remaining+1`, not `remaining`, so ONE
+    /// extra byte answers "did we go over?":
+    ///
+    ///   body exactly at the limit -> full read, then a plain EOF
+    ///   body one byte over        -> full read, then MaxBytesError
+    ///   limit 0                   -> MaxBytesError on the first read
+    ///
+    /// A port shrinking to `remaining` passes the exact case and
+    /// reports EOF for the over case — silently accepting an
+    /// oversized body. The error is also STICKY: every later Read
+    /// returns it with n=0.
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         // Go: if l.err != nil { return 0, l.err }
         if !self.err.IsNil() {
