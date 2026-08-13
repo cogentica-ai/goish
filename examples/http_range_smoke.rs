@@ -13,7 +13,7 @@ extern crate alloc;
 extern crate goish;
 
 use goish::fmt;
-use goish::net::http::fs::{countingWriter, errNoOverlap, httpRange, parseRange, sumRangesSize};
+use goish::net::http::fs::{countingWriter, errNoOverlap, httpRange, parseRange, rangesMIMESize, sumRangesSize};
 use goish::goslice::slice;
 use goish::io;
 use goish::errors;
@@ -190,11 +190,46 @@ fn main() {
         }
     }
 
+    // 15. rangesMIMESize — the multipart Content-Length estimate.
+    //     Absolute byte counts from Go 1.25.5 (goref.sh). They are
+    //     comparable because both implementations use a 30-byte random
+    //     boundary rendered as 60 hex chars, so the length is fixed
+    //     even though the value is not.
+    {
+        let cases: &[(&'static str, &'static str, i64, i64)] = &[
+            ("bytes=0-99", "text/plain", 1000, 292),
+            ("bytes=0-99,200-299", "text/plain", 1000, 521),
+            ("bytes=0-99,200-299,400-499", "application/octet-stream", 1000, 792),
+            ("bytes=-50", "text/html; charset=utf-8", 1000, 259),
+            ("bytes=0-0", "a", 1, 180),
+        ];
+        let mut bad = 0;
+        for (hdr, ct, size, want) in cases {
+            let (rs, err) = parseRange(string(*hdr), *size);
+            if err != goish::nil {
+                fmt::Println!("     parseRange failed: ", *hdr);
+                bad += 1;
+                continue;
+            }
+            let got = rangesMIMESize(&rs, string(*ct), *size);
+            if got != *want {
+                fmt::Println!("     rangesMIMESize(", *hdr, ") = ", got, " want ", *want);
+                bad += 1;
+            }
+        }
+        if bad == 0 {
+            fmt::Println!("[15] rangesMIMESize, 5 cases vs Go  PASS");
+        } else {
+            fmt::Println!("[15] rangesMIMESize  FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 14/14");
+        fmt::Println!("ok 15/15");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL ", failed, " of 14");
+        fmt::Println!("FAIL ", failed, " of 15");
         syscall::Exit(1);
     }
 }

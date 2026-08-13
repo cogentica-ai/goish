@@ -486,6 +486,56 @@ impl crate::io::Writer for countingWriter {
     }
 }
 
+// go: sdk 1.25.5 net/http/fs.go:1097-1109 rangesMIMESize
+//
+// Returns the number of bytes it takes to encode the provided ranges
+// as a multipart response.
+//
+// Go calls `mw.CreatePart(header)`, which writes the part HEADERS and
+// hands back a Writer the caller may write a body to; here no body is
+// written, and the body bytes are accounted separately by
+// `encSize += ra.length`. goish's multipart Writer does not hand out a
+// borrowed sub-Writer — it exposes `WritePart(header, body)` — so the
+// same effect is `WritePart(header, <empty>)`: headers emitted, no
+// body. The counting therefore matches.
+//
+// Go passes `textproto.MIMEHeader` straight to CreatePart because in
+// Go it and `http.Header` are the same underlying map type. goish's
+// `http::Header` is a struct, so the mimeHeader map is copied into one
+// here. Both keys mimeHeader produces are already canonical, so `Add`
+// does not rewrite them.
+pub fn rangesMIMESize(
+    ranges: &slice<httpRange>,
+    contentType: string,
+    contentSize: int,
+) -> int {
+    let mut w = countingWriter(0);
+    let mut encSize: int = 0;
+    {
+        let mut mw = crate::mime::multipart::NewWriter(&mut w);
+        let n = len(ranges);
+        let mut i: int = 0;
+        while i < n {
+            let mh = ranges[i].mimeHeader(contentType.clone(), contentSize);
+            let mut h = super::header::Header::new();
+            for (k, vs) in mh.__iter() {
+                let vn = len(vs);
+                let mut j: int = 0;
+                while j < vn {
+                    h.Add(k.clone(), vs[j].clone());
+                    j += 1;
+                }
+            }
+            let _ = mw.WritePart(h, slice::new());
+            encSize += ranges[i].length;
+            i += 1;
+        }
+        let _ = mw.Close();
+    }
+    encSize += w.0;
+    return encSize;
+}
+
 // go: sdk 1.25.5 net/http/fs.go:1111-1116 sumRangesSize
 pub fn sumRangesSize(ranges: &slice<httpRange>) -> int {
     let mut size: int = 0;
