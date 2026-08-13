@@ -208,6 +208,12 @@ pub(crate) struct TState {
     /// so far and restarts the clock — the wait for serial tests is not
     /// this test's duration.
     pub(crate) duration: Mutex<crate::time::Duration>,
+    /// Go: `common.lastRaceErrors atomic.Int64` — "Max value of
+    /// race.Errors seen during the test or its subtests."
+    pub(crate) lastRaceErrors: core::sync::atomic::AtomicI64,
+    /// Go: `common.raceErrorLogged atomic.Bool` — so the "race
+    /// detected" message is logged once per test, not once per race.
+    pub(crate) raceErrorLogged: AtomicBool,
 }
 
 /// Go: `common.tempDir`, `tempDirErr` and `tempDirSeq`.
@@ -258,6 +264,8 @@ impl TState {
             tempDirState: Mutex::new(TempDirState::default()),
             start: Mutex::new(crate::time::Now()),
             duration: Mutex::new(crate::time::Duration(0)),
+            lastRaceErrors: core::sync::atomic::AtomicI64::new(0),
+            raceErrorLogged: AtomicBool::new(false),
         };
     }
 }

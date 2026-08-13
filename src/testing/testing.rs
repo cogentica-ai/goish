@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: MainStart, M.startAlarm, M.stopAlarm, listTests, toOutputDir, runTests, RunTests, runningList, T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: common.resetRaces, common.checkRaces, MainStart, M.startAlarm, M.stopAlarm, listTests, toOutputDir, runTests, RunTests, runningList, T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -486,6 +486,10 @@ pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
     // enough. Reserved, not committed.
     crate::go!(stack(TEST_STACK), move || {
         let mut t = t;
+        // Go: `t.start = …; t.resetRaces()` immediately before fn(t),
+        // so races from before this test began are not charged to it.
+        *t.state.start.Lock() = crate::time::Now();
+        t.state.resetRaces();
         fn_(&mut t);
         // Reached only when the test returned normally — a FailNow or
         // SkipNow has already run this and Goexited.
@@ -535,6 +539,10 @@ pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
             ts.release();
         }
     }
+
+    // Go: `t.checkRaces()` first in tRunner's deferred func — any race
+    // this test caused is attributed to it before it is reported.
+    state.checkRaces();
 
     // Go: `t.duration += highPrecisionTimeSince(t.start)` in tRunner's
     // deferred func, before the report — so the reported time is the
@@ -2185,6 +2193,11 @@ impl T {
         // Go: "Add to the list of tests to be released by the parent."
         parent.sub.Lock().push(self.state.clone());
 
+        // Go: "Report any races during execution of this test up to
+        // this point" — anything after the park belongs to whoever
+        // else is running, not to this test.
+        self.state.checkRaces();
+
         // Go: `t.chatty.Updatef(t.name, "=== PAUSE %s\n", t.name)`.
         if let Some(c) = self.state.chatty.Lock().as_ref() {
             c.Updatef(
@@ -2228,6 +2241,13 @@ impl T {
         // the list, and the clock restarts.
         running_store(self.name.clone(), crate::time::Now());
         *self.state.start.Lock() = crate::time::Now();
+        // Go: "Reset the local race counter to ignore any races that
+        // happened while this goroutine was blocked". Note it does NOT
+        // call parent.checkRaces here — a race introduced by another
+        // parallel subtest should be reported by that subtest.
+        self.state
+            .lastRaceErrors
+            .store(crate::int64(race_Errors()), Ordering::Release);
     }
 }
 
@@ -3036,6 +3056,108 @@ impl M {
             if let Some(t) = self.timer.Lock().as_ref() {
                 t.Stop();
             }
+        }
+    }
+}
+
+// ─── race reporting ──────────────────────────────────────────────────
+
+// go: none — goish idiom: Go calls `race.Errors()` from internal/race.
+// goish has no race detector, which is the same situation as any Go
+// build without `-race`: internal/race/norace.go is literally
+// `func Errors() int { return 0 }`. Spelled out here rather than
+// inlined as a constant so the two call sites read like Go's.
+fn race_Errors() -> crate::types::int {
+    return 0;
+}
+
+#[allow(non_snake_case)]
+impl TState {
+    // go: sdk 1.25.5 testing/testing.go:1581-1587 common.resetRaces
+    /// Go: rebase this test's race counter, so races that happened
+    /// before it started are not attributed to it. A subtest rebases
+    /// through its PARENT's checkRaces, which is what makes the parent
+    /// report a pre-existing race first.
+    pub(crate) fn resetRaces(&self) {
+        if self.parent.is_none() {
+            self.lastRaceErrors
+                .store(crate::int64(race_Errors()), Ordering::Release);
+        } else {
+            let n = self.parent.as_ref().unwrap().checkRaces();
+            self.lastRaceErrors.store(n, Ordering::Release);
+        }
+    }
+
+    // go: sdk 1.25.5 testing/testing.go:1599-1637 common.checkRaces
+    /// Go: report any race seen since this test's last check, exactly
+    /// once, and tell every ancestor about it so they do not report it
+    /// again.
+    ///
+    /// Both loops are compare-and-swap rather than plain stores because
+    /// parallel subtests call this concurrently: two of them seeing the
+    /// same race must not both report it. The claim is the CAS on
+    /// `raceErrorLogged`, not the counter.
+    pub(crate) fn checkRaces(&self) -> crate::types::int64 {
+        let raceErrors = crate::int64(race_Errors());
+        loop {
+            let last = self.lastRaceErrors.load(Ordering::Acquire);
+            if raceErrors <= last {
+                // Go: "All races have already been reported."
+                return raceErrors;
+            }
+            if self
+                .lastRaceErrors
+                .compare_exchange(last, raceErrors, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                break;
+            }
+        }
+
+        if self
+            .raceErrorLogged
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            // Go: "This is the first race we've encountered for this
+            // test. Mark the test as failed, and log the reason why
+            // only once."
+            self.__errorf_race();
+        }
+
+        // Go: "Update the parent(s) of this test so that they don't
+        // re-report the race."
+        let mut parent = self.parent.clone();
+        while let Some(p) = parent {
+            loop {
+                let last = p.lastRaceErrors.load(Ordering::Acquire);
+                if raceErrors <= last {
+                    // Go: "This race was already reported by another
+                    // (likely parallel) subtest."
+                    return raceErrors;
+                }
+                if p.lastRaceErrors
+                    .compare_exchange(last, raceErrors, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    break;
+                }
+            }
+            parent = p.parent.clone();
+        }
+
+        return raceErrors;
+    }
+
+    // go: none — goish idiom: Go's checkRaces calls c.Errorf, a method
+    // on the embedded common. goish's Errorf lives on T, which this
+    // state cannot reach, so the failure is recorded directly.
+    fn __errorf_race(&self) {
+        self.failed.store(true, Ordering::Release);
+        let mut p = self.parent.clone();
+        while let Some(x) = p {
+            x.failed.store(true, Ordering::Release);
+            p = x.parent.clone();
         }
     }
 }
