@@ -1,4 +1,4 @@
-// go: file testing/benchmark.go decls: durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
+// go: file testing/benchmark.go decls: B.add, B.trimOutput, B.SetParallelism, durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
 //
 // testing/benchmark.go — the result type a benchmark reports, its
 // derived per-operation metrics, and the column formatting `go test
@@ -20,7 +20,7 @@
 // Everything in this file is reachable without either: pure arithmetic
 // over a BenchmarkResult a caller filled in, plus the formatting.
 //
-// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, benchmarkName, doBench, launch, loopSlowPath, runN, run, run1, add, stopOrScaleBLoop, processBench, checkParallel, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
+// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, benchmarkName, doBench, launch, loopSlowPath, runN, run, run1, stopOrScaleBLoop, processBench, checkParallel, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
 // goishlint:ignore GOISH021 PB, benchState, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchTime, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
 
 #![allow(non_snake_case)]
@@ -306,6 +306,17 @@ pub struct B {
     extra: crate::map<string, float64>,
     start: crate::time::Time,
     duration: crate::time::Duration,
+    /// Go: `B.result BenchmarkResult` — the aggregate a parent
+    /// benchmark accumulates from its sub-benchmarks.
+    result: BenchmarkResult,
+    /// Go: `B.missingBytes bool` — "one of the subbenchmarks does not
+    /// have bytes set."
+    missingBytes: bool,
+    /// Go: `B.parallelism int` — "RunParallel creates parallelism*
+    /// GOMAXPROCS goroutines".
+    parallelism: int,
+    /// Go: `B.output []byte` — what the benchmark logged.
+    output: Vec<crate::types::byte>,
 }
 
 impl B {
@@ -508,4 +519,71 @@ impl durationOrCountFlag {
 pub struct InternalBenchmark {
     pub Name: crate::gostring::string,
     pub F: fn(&mut B),
+}
+
+#[allow(non_snake_case)]
+impl B {
+    // go: sdk 1.25.5 testing/benchmark.go:872-889 B.add
+    /// Go: "add simulates running benchmarks in sequence in a single
+    /// iteration. It is used to give some meaningful results in case of
+    /// a benchmark that requires a lot of setup."
+    ///
+    /// `Bytes` is the awkward one: summing it across sub-benchmarks is
+    /// meaningless unless EVERY one set it, so the first sub-benchmark
+    /// without it poisons the total for good — the flag is never
+    /// cleared, and the running sum is discarded at that point.
+    pub fn add(&mut self, other: BenchmarkResult) {
+        // Go: "The aggregated BenchmarkResults resemble running all
+        // subbenchmarks as in sequence in a single benchmark."
+        self.result.N = 1;
+        self.result.T =
+            crate::time::Duration(self.result.T.0 + other.NsPerOp());
+        if other.Bytes == 0 {
+            self.missingBytes = true;
+            self.result.Bytes = 0;
+        }
+        if !self.missingBytes {
+            self.result.Bytes += other.Bytes;
+        }
+        self.result.MemAllocs += crate::uint64(other.AllocsPerOp());
+        self.result.MemBytes += crate::uint64(other.AllocedBytesPerOp());
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:892-906 B.trimOutput
+    /// Go: "The output is likely to appear multiple times because the
+    /// benchmark is run multiple times, but at least it will be seen."
+    ///
+    /// Truncation is at the tenth NEWLINE, not at a byte count, so a
+    /// benchmark that prints one enormous line is left intact while one
+    /// that prints a hundred short ones is cut.
+    pub fn trimOutput(&mut self) {
+        const maxNewlines: int = 10;
+        let mut nlCount: int = 0;
+        let mut j = 0usize;
+        while j < self.output.len() {
+            if self.output[j] == b'\n' {
+                nlCount += 1;
+                if nlCount >= maxNewlines {
+                    self.output.truncate(j);
+                    self.output
+                        .extend_from_slice(b"\n\t... [output truncated]\n");
+                    break;
+                }
+            }
+            j += 1;
+        }
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:989-993 B.SetParallelism
+    /// Go: "SetParallelism sets the number of goroutines used by
+    /// RunParallel to p*GOMAXPROCS. […] Call SetParallelism before
+    /// RunParallel."
+    ///
+    /// A value below 1 is IGNORED rather than clamped or rejected —
+    /// SetParallelism(0) leaves the previous setting in place.
+    pub fn SetParallelism(&mut self, p: int) {
+        if p >= 1 {
+            self.parallelism = p;
+        }
+    }
 }

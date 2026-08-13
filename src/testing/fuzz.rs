@@ -7,9 +7,9 @@
 // because testDeps names it in four method signatures, so the driver
 // cannot be ported without it.
 //
-// go: file testing/fuzz.go decls:
-// goishlint:ignore GOISH021 F, fuzzResult, fuzzCrashError, fuzzContext, fuzzState, fuzzMode, fuzzCoordinator, fuzzWorker, seedCorpusOnly, fuzzWorkerExitCode, supportedTypes — the fuzzing engine needs internal/fuzz, which goish does not have; only corpusEntry is carried across, for testDeps' signatures.
-// goishlint:ignore GOISH018 Add, Fail, Fuzz, Helper, Skipped, Skip, Skipf, SkipNow, Error, Errorf, Fatal, Fatalf, Log, Logf, Setenv, TempDir, Name, Cleanup, report, fRunner, runFuzzTests, runFuzzing, initFuzzFlags, String — same: F and the fuzzing engine are not ported.
+// go: file testing/fuzz.go decls: fuzzResult.String,
+// goishlint:ignore GOISH021 F, fuzzCrashError, fuzzContext, fuzzState, fuzzMode, fuzzCoordinator, fuzzWorker, seedCorpusOnly, fuzzWorkerExitCode, supportedTypes — the fuzzing engine needs internal/fuzz, which goish does not have; only corpusEntry is carried across, for testDeps' signatures.
+// goishlint:ignore GOISH018 Add, Fail, Fuzz, Helper, Skipped, Skip, Skipf, SkipNow, Error, Errorf, Fatal, Fatalf, Log, Logf, Setenv, TempDir, Name, Cleanup, report, fRunner, runFuzzTests, runFuzzing, initFuzzFlags — same: F and the fuzzing engine are not ported.
 
 use crate::gostring::string;
 
@@ -44,4 +44,33 @@ pub(crate) struct corpusEntry {
 pub struct InternalFuzzTarget {
     pub Name: string,
     pub Fn: fn(),
+}
+
+// go: sdk 1.25.5 testing/fuzz.go:432-436 fuzzResult
+/// Go: the outcome of a fuzzing run. Carried across for its String
+/// method, which the driver prints; the engine that would produce one
+/// is not ported.
+#[allow(non_snake_case)]
+#[derive(Default)]
+pub struct fuzzResult {
+    /// Go: "The number of iterations."
+    pub N: crate::types::int,
+    /// Go: "The total time taken."
+    pub T: crate::time::Duration,
+    /// Go: "Error is the error from the failing input".
+    pub Error: crate::errors::error,
+}
+
+#[allow(non_snake_case)]
+impl fuzzResult {
+    // go: sdk 1.25.5 testing/fuzz.go:438-443 fuzzResult.String
+    /// Go: the empty string on success — NOT "ok" or a summary. The
+    /// driver prints this unconditionally, so a successful fuzz run
+    /// must contribute nothing to the output.
+    pub fn String(&self) -> string {
+        if self.Error == crate::errors::nil {
+            return string::from_static("");
+        }
+        return self.Error.Error();
+    }
 }
