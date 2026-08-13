@@ -362,7 +362,7 @@ impl Request {
         if auth.Len() == 0 {
             return (string::new(), string::new(), false);
         }
-        parse_basic_auth(auth)
+        parseBasicAuth(auth)
     }
 
     /// `r.SetBasicAuth(user, pass)` (request.go:1022) — set the
@@ -622,7 +622,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         Err(e) => return (req, e),
     };
 
-    if !validMethod(method.as_bytes()) {
+    if !validMethod(method.clone()) {
         return (req, errors::New(string("net/http: invalid method")));
     }
     let (major, minor) = match parse_http_version(proto.as_bytes()) {
@@ -980,8 +980,8 @@ fn parse_header_line(bytes: &[u8]) -> Option<(string, string)> {
     ))
 }
 
-/// `ParseHTTPVersion` (request.go:929) — parse "HTTP/1.1" → (1, 1).
-/// `http.ParseHTTPVersion(vers)` (request.go:817) — parse an HTTP
+// go: sdk 1.25.5 net/http/request.go:817-842 ParseHTTPVersion
+/// `http.ParseHTTPVersion(vers)` — parse an HTTP
 /// version string per RFC 7230 §2.6. `"HTTP/1.0"` → `(1, 0, true)`.
 /// Note: strings without a minor version (e.g. `"HTTP/2"`) are
 /// rejected.
@@ -1040,11 +1040,18 @@ fn parse_dec(b: &[u8]) -> Option<int> {
 }
 
 /// RFC 7230 §3.2.6 token chars — what's legal in a method name.
-pub(crate) fn validMethod(m: &[u8]) -> bool {
-    if m.is_empty() {
+// go: sdk 1.25.5 net/http/request.go:844-859 validMethod
+//
+/// Reports whether `m` is a valid HTTP method — RFC 7230 §3.1.1's
+/// `token`, i.e. one or more `tchar`. Note this ACCEPTS lowercase and
+/// arbitrary tokens: Go validates the grammar, not a method list, so
+/// `validMethod("get")` and `validMethod("a!b")` are both true.
+pub fn validMethod<M: Into<string>>(m: M) -> bool {
+    let m: string = m.into();
+    if m.Len() == 0 {
         return false;
     }
-    for &b in m {
+    for &b in m.as_bytes() {
         let ok = matches!(b,
             b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' |
             b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~' |
@@ -1054,11 +1061,12 @@ pub(crate) fn validMethod(m: &[u8]) -> bool {
             return false;
         }
     }
-    true
+    return true;
 }
 
+// go: sdk 1.25.5 net/http/request.go:993-1009 parseBasicAuth
 /// Line-by-line port of `parseBasicAuth` (request.go:993).
-fn parse_basic_auth(auth: string) -> (string, string, bool) {
+pub fn parseBasicAuth(auth: string) -> (string, string, bool) {
     // Go: const prefix = "Basic "
     // Go: if len(auth) < len(prefix) || !ascii.EqualFold(auth[:len(prefix)], prefix) { return "","",false }
     if auth.Len() < 6 {

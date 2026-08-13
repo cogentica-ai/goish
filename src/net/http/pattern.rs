@@ -129,7 +129,7 @@ pub fn parsePattern<S: Into<string>>(s: S) -> (pattern, error) {
     };
 
     // Go: if method != "" && !validMethod(method) { return nil, fmt.Errorf("invalid method %q", method) }
-    if method.Len() > 0 && !super::request::validMethod(method.as_bytes()) {
+    if method.Len() > 0 && !super::request::validMethod(method.clone()) {
         return (defaultPattern(), errors::New(string("invalid method")));
     }
 
