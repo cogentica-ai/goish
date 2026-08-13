@@ -508,7 +508,20 @@ pub(crate) fn read_response_head<R: Reader>(
         return (resp, BodyKind::Empty, errors::nil);
     }
     if chunked {
-        // Go: resp.TransferEncoding = []string{"chunked"}; resp.ContentLength = -1
+        // Go (transfer.go, fixTransferEncoding):
+        //   resp.TransferEncoding = []string{"chunked"}
+        //   resp.ContentLength = -1
+        //
+        // The comment here already said so; only the ContentLength
+        // half was ever written. `Response.TransferEncoding` was added
+        // earlier today when GOISH019 reported it missing from the
+        // struct, and then nothing populated it — so a chunked
+        // response decoded correctly but reported an empty
+        // TransferEncoding, and any caller branching on it (Go's own
+        // `chunked(r.TransferEncoding)` helper, for one) saw the wrong
+        // framing.
+        resp.TransferEncoding =
+            crate::goslice::slice::<string>::__from_vec(alloc::vec![string("chunked")]);
         resp.ContentLength = -1;
         return (resp, BodyKind::Chunked, errors::nil);
     }
