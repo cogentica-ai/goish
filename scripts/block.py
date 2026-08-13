@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Review one translated block against the Go source its anchor cites.
 
-    scripts/block.py ls   src/net/http/transfer.rs [--draft-only]
-    scripts/block.py diff src/net/http/transfer.rs newTransferWriter
+    scripts/block.py ls      src/net/http/fs.rs.draft [--draft-only]
+    scripts/block.py diff    src/net/http/fs.rs.draft scanETag
+    scripts/block.py promote src/net/http/fs.rs.draft scanETag [more...]
 
 `ls` lists every anchored block in a goish file: its symbol, where it
 lives in the Rust file, the Go range it claims, whether it is still a
@@ -142,6 +143,64 @@ def cmd_diff(path, sym):
     return 0
 
 
+def cmd_promote(path, syms):
+    """Move blocks out of `<stem>.rs.draft` and into `<stem>.rs`.
+
+    This is the only step that changes what compiles. The block leaves
+    the draft, loses its `// go: draft` line, and lands in the live file
+    keeping its anchor — so the moment it builds, coverage counts it.
+
+    Nothing here tries to make it compile. That is the reviewer's job
+    and the whole point: the compiler is what proves the translation
+    integrates, and it can only speak once the code is in the build.
+    """
+    if not path.endswith(".rs.draft"):
+        sys.exit("block.py: promote takes a .rs.draft file")
+    live = path[:-len(".rs.draft")] + ".rs"
+    if not os.path.exists(live):
+        sys.exit(f"block.py: no live file to promote into: {live}")
+
+    lines = open(path, errors="replace").read().split("\n")
+    bs = blocks(path)
+    want = []
+    for s in syms:
+        hit = [b for b in bs if b["sym"] == s or b["sym"].split(".")[-1] == s]
+        if not hit:
+            sys.exit(f"block.py: no block named {s!r} in {path}")
+        want.extend(hit)
+
+    # Cut from the bottom up so earlier spans keep their indices. Each
+    # block spans its anchor comment through the item's closing brace.
+    moved, cut = [], sorted(want, key=lambda b: -b["anchor_line"])
+    for b in cut:
+        top = b["anchor_line"] - 1
+        # goishc writes a draft as a standalone crate that USES goish, so
+        # every runtime path reads `goish::`. Inside the goish crate the
+        # same path is `crate::`. Promotion is the moment the code
+        # crosses that boundary, so it is the right place to rewrite —
+        # doing it in the draft would leave a file that is neither valid
+        # standalone nor valid in place.
+        body = [l.replace("goish::", "crate::")
+                for l in lines[top:b["rs_end"]] if not DRAFT.match(l)]
+        moved.append((b["sym"], "\n".join(body)))
+        del lines[top:b["rs_end"]]
+
+    dst = open(live, errors="replace").read().rstrip("\n")
+    for sym, body in reversed(moved):
+        dst += "\n\n" + body
+    open(live, "w").write(dst + "\n")
+    open(path, "w").write("\n".join(lines))
+
+    for sym, _ in reversed(moved):
+        print(f"promoted {sym}  ->  {live}")
+    left = len(blocks(path))
+    print(f"{left} block(s) left in {path}")
+    if left == 0:
+        print(f"  draft is empty — delete it: git rm {path}")
+    print("Now make it compile: cargo check --lib")
+    return 0
+
+
 def main():
     argv = sys.argv[1:]
     if len(argv) < 2:
@@ -155,6 +214,10 @@ def main():
         if len(argv) < 3:
             sys.exit("block.py: diff needs a symbol")
         return cmd_diff(path, argv[2])
+    if cmd == "promote":
+        if len(argv) < 3:
+            sys.exit("block.py: promote needs at least one symbol")
+        return cmd_promote(path, argv[2:])
     sys.exit(__doc__)
 
 

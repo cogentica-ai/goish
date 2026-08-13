@@ -463,21 +463,7 @@ pub fn scanETag<S: Into<string>>(mut s: S) -> (string, string) {
     return (string(""), string(""));
 }
 
-// go: sdk 1.25.5 net/http/fs.go:463-465 etagStrongMatch
-// go: draft goishc — machine-translated, unreviewed
-pub fn etagStrongMatch<S: Into<string>, S2: Into<string>>(a: S, b: S2) -> bool {
-    let a = a.into();
-    let b = b.into();
-    return a == b && a != "" && a[0] == 34 /*'"'*/;
-}
 
-// go: sdk 1.25.5 net/http/fs.go:469-471 etagWeakMatch
-// go: draft goishc — machine-translated, unreviewed
-pub fn etagWeakMatch<S: Into<string>, S2: Into<string>>(a: S, b: S2) -> bool {
-    let a = a.into();
-    let b = b.into();
-    return strings::TrimPrefix(a, string("W/")) == strings::TrimPrefix(b, string("W/"));
-}
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct condResult(pub int);
@@ -629,13 +615,7 @@ pub fn checkIfRange(w: impl ResponseWriter + 'static, r: nilable![&http::Request
     return condFalse;
 }
 
-pub static unixEpochTime: goish::lazy::Lazy<time::Time> = goish::lazy::Lazy::new(|| time::Unix(0, 0));
 
-// go: sdk 1.25.5 net/http/fs.go:617-619 isZeroTime
-// go: draft goishc — machine-translated, unreviewed
-pub fn isZeroTime(t: time::Time) -> bool {
-    return t.IsZero() || t.Equal(unixEpochTime.clone());
-}
 
 // go: sdk 1.25.5 net/http/fs.go:621-625 setLastModified
 // go: draft goishc — machine-translated, unreviewed
@@ -832,11 +812,6 @@ pub fn containsDotDot<S: Into<string>>(v: S) -> bool {
     return false;
 }
 
-// go: sdk 1.25.5 net/http/fs.go:873-873 isSlashRune
-// go: draft goishc — machine-translated, unreviewed
-pub fn isSlashRune(r: rune) -> bool {
-    return r == 47 /*'/'*/ || r == 92 /*'\\'*/;
-}
 
 #[derive(Clone)]
 pub struct fileHandler {

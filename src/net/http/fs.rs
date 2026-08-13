@@ -23,7 +23,8 @@ use crate::io::Reader;
 use crate::os;
 use crate::string;
 use crate::strings;
-use crate::types::{byte, int};
+use crate::time;
+use crate::types::{byte, int, rune};
 
 use super::request::Request;
 use super::response::ResponseWriter;
@@ -480,3 +481,30 @@ fn ext_of(path: &string) -> string {
 pub(super) fn register_fs_impls() {
     super::server::__goish_register_Handler_impl::<FileHandler>();
 }
+
+// go: sdk 1.25.5 net/http/fs.go:463-465 etagStrongMatch
+pub fn etagStrongMatch<S: Into<string>, S2: Into<string>>(a: S, b: S2) -> bool {
+    let a = a.into();
+    let b = b.into();
+    return a == b && a != "" && a[0] == 34 /*'"'*/;
+}
+
+// go: sdk 1.25.5 net/http/fs.go:469-471 etagWeakMatch
+pub fn etagWeakMatch<S: Into<string>, S2: Into<string>>(a: S, b: S2) -> bool {
+    let a = a.into();
+    let b = b.into();
+    return strings::TrimPrefix(a, string("W/")) == strings::TrimPrefix(b, string("W/"));
+}
+
+// go: sdk 1.25.5 net/http/fs.go:617-619 isZeroTime
+pub fn isZeroTime(t: time::Time) -> bool {
+    return t.IsZero() || t.Equal(unixEpochTime.clone());
+}
+
+// go: sdk 1.25.5 net/http/fs.go:873-873 isSlashRune
+pub fn isSlashRune(r: rune) -> bool {
+    return r == 47 /*'/'*/ || r == 92 /*'\\'*/;
+}
+
+// go: sdk 1.25.5 net/http/fs.go:614-614 unixEpochTime
+pub static unixEpochTime: crate::lazy::Lazy<time::Time> = crate::lazy::Lazy::new(|| time::Unix(0, 0));
