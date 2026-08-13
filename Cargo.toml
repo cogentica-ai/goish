@@ -603,6 +603,10 @@ name = "http_shutdown_smoke"
 path = "examples/http_shutdown_smoke.rs"
 
 [[example]]
+name = "http_responsecontroller_smoke"
+path = "examples/http_responsecontroller_smoke.rs"
+
+[[example]]
 name = "http_sniff_smoke"
 path = "examples/http_sniff_smoke.rs"
 

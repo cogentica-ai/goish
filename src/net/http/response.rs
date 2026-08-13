@@ -468,9 +468,9 @@ impl ResponseWriter for response {
 }
 
 impl Flusher for response {
-    /// `(*response).Flush()` (server.go:1657) — promote to chunked
-    /// streaming. Any wire error is dropped to match Go's
-    /// `Flusher.Flush()` (which has no error return).
+    /// `(*response).Flush()` (server.go:1756) — promote to chunked
+    /// streaming. Go's one-line body is `w.FlushError()`; the error is
+    /// dropped either way, because `Flusher.Flush` has no error return.
     fn Flush(&self) {
         let _ = self.promote_chunked();
     }
@@ -608,3 +608,4 @@ fn push_dec_64(buf: &mut Vec<u8>, mut n: u64) {
         buf.push(tmp[i]);
     }
 }
+

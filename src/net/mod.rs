@@ -338,7 +338,10 @@ impl Dialer {
 impl TCPConn {
     /// Internal: dead-conn placeholder returned alongside an error.
     /// Caller must ignore the conn when the error is non-nil.
-    fn dead() -> Self {
+    ///
+    /// pub(crate) so net/http can return it from a failed Hijack, which
+    /// is Go returning a nil net.Conn beside the error.
+    pub(crate) fn dead() -> Self {
         TCPConn {
             fd: -1,
             local: TCPAddr::zero(),

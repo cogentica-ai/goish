@@ -32,6 +32,7 @@ pub(crate) mod omithttp2;
 pub mod pattern;
 pub mod request;
 pub mod response;
+pub mod responsecontroller;
 pub mod server;
 pub mod server_tls;
 pub mod sniff;
@@ -64,6 +65,7 @@ pub use request::{
     MaxBytesError, MaxBytesReader, NewMaxBytesError, NewMaxBytesReader, ParseHTTPVersion,
     ProtocolError, ReadRequest, Request,
 };
+pub use responsecontroller::{NewResponseController, ResponseController};
 pub use response::{
     Flusher, HeaderHandle, Hijacker, ResponseWriter,
 };

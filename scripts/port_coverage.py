@@ -65,7 +65,12 @@ def decl_key(recv, name):
     """`Recv.Method` when there is a receiver, else the bare name —
     the same keying `anchor_by_name.py` uses for anchors."""
     return "%s.%s" % (recv, name) if recv else name
-RSFN = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s+([A-Za-z_]\w*)", re.M)
+# `(?:r#)?` — a Go declaration whose name is a Rust keyword can only be
+# spelled as a raw identifier: `fn r#match` for sniff.go's five
+# sniffSig.match methods, `fn r#loop` for testing's B.Loop. Without
+# it the name captured is the bare `r`, so those declarations were
+# invisible to coverage no matter how faithfully they were ported.
+RSFN = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s+(?:r#)?([A-Za-z_]\w*)", re.M)
 ANCHOR = re.compile(r"^\s*//\s*go:", re.M)
 # A Go declaration that goish deliberately resolves somewhere else, so it
 # will never have a same-named counterpart here. The motivating case is a
