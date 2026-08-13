@@ -18,7 +18,10 @@ use crate::strings;
 ///   - No Director, ModifyResponse, ErrorHandler, or Transport hooks
 ///     (the proxy uses a default `http::Client`).
 ///   - No streaming Body — request body is `slice<byte>` already.
-///   - No X-Forwarded-For / X-Forwarded-Host injection (slim).
+///   - X-Forwarded-For IS appended (Go's Director-path
+///     behaviour); X-Forwarded-Host / -Proto are not set, since
+///     those come from SetXForwarded, which needs the ProxyRequest
+///     type goish does not have.
 ///   - No connection upgrade (websocket) handling.
 ///
 /// Sufficient for in-process reverse-proxy demos and basic load
@@ -120,6 +123,42 @@ impl super::super::server::Handler for reverseProxyHandler {
         for (k, _) in inner.__iter() {
             if isHopHeader(k) {
                 outreq.Header.Del(k.clone());
+            }
+        }
+
+        // Go: append the client IP to X-Forwarded-For
+        // (reverseproxy.go, ServeHTTP's Director path).
+        //
+        // This was MISSING, and the file's header comment called it a
+        // deliberate "slim" omission. It is not a safe omission for a
+        // proxy: the inbound header was copied to the outbound request
+        // VERBATIM, so a client could send any X-Forwarded-For it
+        // liked and the backend would see it unchanged. Go always
+        // appends the real peer address, which is what makes the LAST
+        // entry trustworthy no matter what the client claimed.
+        //
+        // Go folds multiple prior headers into one comma+space list
+        // before appending. It also honours Issue 38079 — an explicit
+        // nil entry means "do not populate" — which goish cannot
+        // express, since its Header maps a key to a value list with no
+        // nil-versus-absent distinction; a caller wanting the header
+        // suppressed must Del it after the proxy runs.
+        {
+            let (clientIP, _, sperr) = crate::net::SplitHostPort(outreq.RemoteAddr.clone());
+            if sperr.IsNil() {
+                let prior = outreq.Header.Values(string("X-Forwarded-For"));
+                let mut v = clientIP;
+                if prior.len() > 0 {
+                    let mut joined = string::new();
+                    for i in 0..prior.len() {
+                        if i > 0 {
+                            joined = joined + string(", ");
+                        }
+                        joined = joined + prior[i].clone();
+                    }
+                    v = joined + string(", ") + v;
+                }
+                outreq.Header.Set(string("X-Forwarded-For"), v);
             }
         }
 

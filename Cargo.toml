@@ -595,6 +595,10 @@ name = "http_rewriteurl_smoke"
 path = "examples/http_rewriteurl_smoke.rs"
 
 [[example]]
+name = "http_proxy_xff_smoke"
+path = "examples/http_proxy_xff_smoke.rs"
+
+[[example]]
 name = "http_server_pure_smoke"
 path = "examples/http_server_pure_smoke.rs"
 

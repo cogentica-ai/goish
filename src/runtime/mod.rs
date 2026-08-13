@@ -679,6 +679,34 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // up.
     sysmon::start_sysmon();
 
+    // Ignore SIGPIPE.
+    //
+    // Writing to a socket whose peer has closed raises SIGPIPE, whose
+    // DEFAULT ACTION IS TO TERMINATE THE PROCESS. Go's runtime
+    // ignores it (runtime/signal_unix.go, `_SigNotify|_SigIgn` for
+    // SIGPIPE) so the write returns EPIPE and the caller handles it.
+    //
+    // goish never did, which made this trivially fatal and remotely
+    // triggerable: any HTTP client that hangs up mid-response killed
+    // the whole server process. Caught 2026-08-14 by a reverse-proxy
+    // test exiting 141 on roughly one run in five, where the client
+    // closed a connection the proxy was still writing to.
+    //
+    // Go additionally re-raises SIGPIPE when the offending fd is 1 or
+    // 2, so `prog > /dev/full` still dies like a normal Unix program.
+    // That refinement needs the fd at signal time, which requires
+    // SA_SIGINFO plumbing; plain SIG_IGN is the safe subset and is
+    // what matters for sockets.
+    unsafe {
+        let sa = syscall::Sigaction {
+            sa_handler: 1, // SIG_IGN
+            sa_flags: syscall::SA_RESTORER | syscall::SA_RESTART,
+            sa_restorer: syscall::SigreturnTrampoline as *const () as usize,
+            sa_mask: 0,
+        };
+        let _ = syscall::RtSigaction(syscall::SIGPIPE, &sa, core::ptr::null_mut());
+    }
+
     // Install the SIGURG preempt handler (M18b-α phase B).
     // Decision-only: counts would-be preempts but does not modify
     // ucontext yet. Phase C wires the asyncPreempt trampoline.
