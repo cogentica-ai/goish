@@ -105,11 +105,15 @@ pub trait ResponseWriter {
 pub struct writerOf<'a>(pub &'a (dyn ResponseWriter + Send + Sync + 'static));
 
 impl<'a> crate::io::Writer for writerOf<'a> {
+    // go: none — goish-only adapter; in Go a ResponseWriter IS an
+    // io.Writer, so this conversion has no counterpart to cite.
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
         return self.0.Write(p);
     }
 }
 
+// go: none — goish-only adapter, as above.
+//
 /// Borrow a [`ResponseWriter`] as an [`io::Writer`](crate::io::Writer).
 /// Go needs no equivalent — there the two interfaces already unify.
 pub fn AsWriter<'a>(
@@ -195,11 +199,15 @@ impl HeaderHandle {
         self.0.lock().Del(key);
     }
 
+    // go: none — HeaderHandle is goish-only plumbing (Go's Header is a
+    // map, so it needs no handle type); this forwards to Header::has,
+    // which carries the header.go anchor.
+    //
     /// `h.has(key)` — key presence, forwarded to [`Header::has`].
     /// Distinct from `Get` returning `""`: serveError must tell an
     /// absent header from one explicitly set empty.
     pub fn has<K: Into<string>>(&self, key: K) -> bool {
-        self.0.lock().has(key)
+        return self.0.lock().has(key);
     }
 
     /// `h.Get(key)` — the first value for `key`, or `""`.
