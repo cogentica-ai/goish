@@ -9,12 +9,33 @@
 //
 //   * `child`, `newChild`, `serve`, `handleRecord`, `serveRequest`,
 //     `cleanUp`, `Serve`, and `response` with its methods — the
-//     connection serve loop. **No known blocker**: `io::Pipe` exists
-//     (io/pipe.rs:341), `cgi::RequestFromMap` is ported, and
-//     `response` is the same ResponseWriter shape as cgi/child.rs's.
-//     It is just the next unit of work, ~200 lines. An earlier draft
-//     of this comment claimed io.Pipe was missing; it was not, and
-//     one grep would have said so.
+//     connection serve loop.
+//
+//     Every SYMBOL it needs is present: io::Pipe (io/pipe.rs:341),
+//     PipeWriter::CloseWithError (:313), io::CopyN (io/mod.rs:686),
+//     io::DiscardWriter (:394), cgi::RequestFromMap, beginRequest::read,
+//     roleResponder / statusUnknownRole / statusRequestComplete. An
+//     earlier draft of this comment said io.Pipe was missing; it was
+//     not, and one grep would have said so.
+//
+//     **The blocker is the conn's lock discipline, and it is real.**
+//     Go's `serve()` reads the transport with `rec.read(c.conn.rwc)`
+//     WITHOUT taking `c.conn.mutex` — the mutex guards writes only
+//     (fcgi.go:151-153). Meanwhile `serveRequest` runs on its own
+//     goroutine and calls `writeRecord`, which does take it. So Go has
+//     a blocking read and a concurrent write on one transport.
+//
+//     goish's `rwc` lives INSIDE `Mutex<connState>`, so a read method
+//     would hold that lock across a blocking read, and any handler
+//     writing its response would park until the next record arrived —
+//     a deadlock in the ordinary case, where the handler replies
+//     before the peer sends anything more. Rust also cannot borrow one
+//     `Box<dyn ReadWriteCloser>` mutably twice, so the read and write
+//     halves must become separate handles: either split at
+//     construction, or take a Clone/Arc transport the way net::Conn is
+//     shared. That is a design decision about this package's
+//     concurrency, not a transcription, and it wants a session with
+//     room to test it rather than a tail-end guess.
 //   * `ProcessEnv` / `envVarsContextKey` — need a context Value keyed
 //     by a private type.
 
