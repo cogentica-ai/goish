@@ -211,6 +211,27 @@ impl Request {
     /// pattern match (e.g. `/users/{id}` → `r.PathValue("id")`).
     /// Returns the empty string if no such binding exists. Mirrors
     /// `(*Request).PathValue(name)` (request.go:472 in Go's source).
+    // NOTE — `patIndex` has no counterpart HERE by design, not by
+    // omission. Deliberately NOT suppressed with a
+    // `goishlint:ignore GOISH018`: that directive is FILE-scoped for
+    // this rule, so adding one here silently masked all 22 of
+    // request.rs's GOISH018 findings, not just this one. The other 21
+    // are real gaps and must stay visible; patIndex being listed is
+    // the acceptable cost. Go resolves a wildcard name by keeping
+    // the matched `pat *pattern` plus a positional `matches []string`
+    // and linear-scanning the pattern's segments (request.go:1491);
+    // goish stores the bindings directly in a `map<string,string>`, so
+    // the lookup below IS patIndex's job. Porting it would produce a
+    // function nothing can call — the same trap that made `exactMatch`
+    // an orphan earlier in this port.
+    //
+    // The divergence is data-structure-only: verified against goref
+    // via a real ServeMux that the observable behaviour is identical,
+    // including the cases where the two designs could plausibly differ
+    // — an unknown name and the empty name both give "", `{rest...}`
+    // yields the whole remaining path with slashes intact, and `{$}`
+    // is NOT addressable (PathValue("$") is ""). See
+    // examples/http_pathvalue_smoke.rs.
     pub fn PathValue<S: Into<string>>(&self, name: S) -> string {
         let (v, ok) = self.path_values.Get(name.into());
         if ok {

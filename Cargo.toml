@@ -571,6 +571,10 @@ name = "http_url_accessors_smoke"
 path = "examples/http_url_accessors_smoke.rs"
 
 [[example]]
+name = "http_pathvalue_smoke"
+path = "examples/http_pathvalue_smoke.rs"
+
+[[example]]
 name = "http_server_pure_smoke"
 path = "examples/http_server_pure_smoke.rs"
 
