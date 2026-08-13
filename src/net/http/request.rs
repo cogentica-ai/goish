@@ -279,7 +279,7 @@ impl Request {
             s.post_parsed = true;
             // Go: if r.Method == "POST" || "PUT" || "PATCH" { r.PostForm, err = parsePostForm(r) }
             if self.Method == "POST" || self.Method == "PUT" || self.Method == "PATCH" {
-                let (pf, e) = parse_post_form(self);
+                let (pf, e) = parsePostForm(self);
                 s.post_form = pf;
                 err = e;
             }
@@ -1496,9 +1496,11 @@ impl<R: io::Reader> io::Reader for MaxBytesReader<R> {
 
 // ─── Form helpers (line-by-line port of request.go:1245-1306) ────────
 
+// go: sdk 1.25.5 net/http/request.go:1263-1307 parsePostForm
+//
 /// `parsePostForm(r)` (request.go:1245). Reads body when content type
 /// is application/x-www-form-urlencoded; otherwise returns empty.
-fn parse_post_form(r: &Request) -> (crate::gomap::map<string, slice<string>>, error) {
+fn parsePostForm(r: &Request) -> (crate::gomap::map<string, slice<string>>, error) {
     use crate::gomap::map;
     // Go: if r.Body == nil { return … }
     if r.Body.Len() == 0 && r.ContentLength <= 0 {

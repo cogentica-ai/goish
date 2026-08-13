@@ -1564,7 +1564,9 @@ pub(crate) struct ConnTrack {
 }
 
 impl ConnTrack {
-    fn set_state(&self, st: u8) {
+    // go: sdk 1.25.5 net/http/server.go:1865-1884 conn.setState
+    //
+    fn setState(&self, st: u8) {
         self.since_ns
             .store(crate::runtime::sysmon::monotonic_ns(), Ordering::Relaxed);
         self.state.store(st, Ordering::Release);
@@ -2296,7 +2298,7 @@ impl Server {
             let _ = conn.SetReadDeadline(time::Time::default());
             // Request in flight — Go's `c.setState(StateActive)`
             // (server.go:2043): shutdown's idle-kick skips us now.
-            track.set_state(CONN_STATE_ACTIVE);
+            track.setState(CONN_STATE_ACTIVE);
             // Apply WriteTimeout for the response phase if configured.
             if write_timeout_ns > 0 {
                 let wdl = time::Now().Add(time::Duration(write_timeout_ns));
@@ -2418,7 +2420,7 @@ impl Server {
             // Response finished, conn waiting for its next request —
             // Go's `c.setState(StateIdle)` (server.go:2131): shutdown
             // may kick us from here on.
-            track.set_state(CONN_STATE_IDLE);
+            track.setState(CONN_STATE_IDLE);
         }
     }
 
