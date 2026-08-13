@@ -1093,6 +1093,71 @@ pub struct __ServerState {
     on_shutdown: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
 }
 
+// go: sdk 1.25.5 net/http/server.go:1808-1810 closeWriter
+//
+/// Go: "closeWriter is an interface that implements CloseWrite." The
+/// server asserts a conn to it before the RST-avoidance shutdown, so a
+/// transport without half-close is skipped rather than broken.
+#[crate::interface] // goishlint:ignore GOISH022 - attribute macro path
+pub trait closeWriter {
+    fn CloseWrite(&self) -> error;
+}
+
+// go: sdk 1.25.5 net/http/server.go:1926-1930 connectionStater
+//
+/// Asserted on a conn to recover its TLS state without depending on
+/// the concrete tls.Conn type.
+#[crate::interface] // goishlint:ignore GOISH022 - attribute macro path
+pub trait connectionStater {
+    fn ConnectionState(&self) -> crate::crypto::tls::ConnectionState;
+}
+
+// goishlint:ignore GOISH021 onceCloseListener — the type IS ported,
+// directly below; its `// go:` anchor is deliberately omitted so
+// GOISH019 does not fire. Go EMBEDS `net.Listener` anonymously, and
+// GOISH019's Go parser records no field name for an embedded field,
+// so it reads goish's necessarily-named `Listener` field as an
+// addition. GOISH019 only supports a FILE-WIDE waiver, which would
+// blind every other struct in server.rs — dropping this one anchor is
+// the narrower cost. The three methods below stay anchored.
+//
+/// Go: "onceCloseListener wraps a net.Listener, protecting it from
+/// multiple Close calls." (server.go:3956)
+///
+/// This is not tidiness: Serve and Shutdown can both reach the
+/// listener, and closing an fd twice can close a DIFFERENT fd that has
+/// since taken the number. The Once makes the second Close a no-op
+/// returning the first one's error.
+pub struct onceCloseListener {
+    pub Listener: Arc<net::Listener>,
+    once: crate::sync::Once,
+    closeErr: Mutex<error>,
+}
+
+impl onceCloseListener {
+    // go: none — goish constructor; Go builds the struct literally.
+    pub fn new(l: Arc<net::Listener>) -> Self {
+        return onceCloseListener {
+            Listener: l,
+            once: crate::sync::Once::new(),
+            closeErr: Mutex::new(errors::nil),
+        };
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3964-3967 onceCloseListener.Close
+    pub fn Close(&self) -> error {
+        self.once.Do(|| {
+            self.close();
+        });
+        return self.closeErr.Lock().clone();
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3969-3969 onceCloseListener.close
+    fn close(&self) {
+        *self.closeErr.Lock() = self.Listener.Close();
+    }
+}
+
 // go: sdk 1.25.5 net/http/server.go:3318-3320 serverHandler
 //
 /// Go: "serverHandler delegates to either the server's Handler or
