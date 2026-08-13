@@ -67,6 +67,7 @@ pub fn RequestFromMap(params: &map<string, string>) -> (Request, error) {
         Close: true, // Go: r.Close = true
         Trailer: Header::new(),
         TLS: None,
+        RequestURI: string::new(),
         Method: get("REQUEST_METHOD"),
         URL: URL::empty(),
         Proto: string::new(),

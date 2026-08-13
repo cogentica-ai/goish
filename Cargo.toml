@@ -523,6 +523,10 @@ name = "http_server_pure_smoke"
 path = "examples/http_server_pure_smoke.rs"
 
 [[example]]
+name = "http_server_handler_options_smoke"
+path = "examples/http_server_handler_options_smoke.rs"
+
+[[example]]
 name = "http_server_handlers_smoke"
 path = "examples/http_server_handlers_smoke.rs"
 

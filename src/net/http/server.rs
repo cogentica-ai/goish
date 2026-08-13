@@ -997,6 +997,10 @@ pub struct Server {
     pub Addr: string,
     /// Handler that dispatches requests. Use a `ServeMux` for routing.
     pub Handler: Arc<dyn Handler>,
+    /// `Server.DisableGeneralOptionsHandler` (server.go:3004) — Go: "if
+    /// true, passes 'OPTIONS *' requests to the Handler, otherwise
+    /// responds with 200 OK and Content-Length: 0."
+    pub DisableGeneralOptionsHandler: bool,
     /// Maximum duration for the entire request (header + body). Zero
     /// or negative disables. Mirrors `Server.ReadTimeout` (server.go:3015).
     pub ReadTimeout: time::Duration,
@@ -1087,6 +1091,36 @@ pub struct __ServerState {
     /// (server.go:3101); each is spawned on its own goroutine once
     /// when Shutdown/Close begins.
     on_shutdown: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
+}
+
+// go: sdk 1.25.5 net/http/server.go:3318-3320 serverHandler
+//
+/// Go: "serverHandler delegates to either the server's Handler or
+/// DefaultServeMux and also handles 'OPTIONS *' requests."
+pub struct serverHandler {
+    pub srv: Arc<Server>,
+}
+
+impl Handler for serverHandler {
+    // go: sdk 1.25.5 net/http/server.go:3331-3341 serverHandler.ServeHTTP
+    //
+    // The OPTIONS test reads req.RequestURI, NOT req.URL.Path: the
+    // request-target "*" is not a path and does not survive URL
+    // parsing, so a check against URL.Path would never fire.
+    fn ServeHTTP(&self, rw: &(dyn ResponseWriter + Send + Sync + 'static), req: &Request) {
+        // Go: handler := sh.srv.Handler; if handler == nil { handler =
+        // DefaultServeMux }. goish's Handler field is a non-optional
+        // Arc, so "nil" is not representable and the fallback lives at
+        // Server construction instead.
+        if !self.srv.DisableGeneralOptionsHandler
+            && req.RequestURI == "*"
+            && req.Method == "OPTIONS"
+        {
+            globalOptionsHandler.ServeHTTP(rw, req);
+            return;
+        }
+        self.srv.Handler.ServeHTTP(rw, req);
+    }
 }
 
 // go: sdk 1.25.5 net/http/server.go:1896-1900 statusError
@@ -1365,6 +1399,7 @@ impl __ShutdownArg for Arc<dyn crate::context::Context> {
 impl Default for Server {
     fn default() -> Self {
         Server {
+            DisableGeneralOptionsHandler: false,
             Addr: string::new(),
             Handler: Arc::new(notFoundHandler) as Arc<dyn Handler>,
             ReadTimeout: time::Duration(0),

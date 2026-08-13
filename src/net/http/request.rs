@@ -95,6 +95,17 @@ pub struct Request {
     /// to send a chunked request."
     pub Trailer: Header,
 
+    /// `Request.RequestURI` (request.go:294) — Go: "the unmodified
+    /// request-target of the Request-Line (RFC 7230, Section 3.1.1) as
+    /// sent by the client to a server. Usually the URL field should be
+    /// used instead. It is an error to set this field in an HTTP
+    /// client request."
+    ///
+    /// Kept alongside URL because the two differ: `OPTIONS *` has a
+    /// request-target of "*", which is not a path and does not survive
+    /// URL parsing — serverHandler tests RequestURI, not URL.Path.
+    pub RequestURI: string,
+
     /// `Request.TLS` (request.go:307) — the TLS connection state for a
     /// request received over TLS, or `None` for plaintext.
     ///
@@ -700,6 +711,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         Close: false,
         Trailer: Header::new(),
         TLS: None,
+        RequestURI: string::new(),
         Method: string::new(),
         URL: URL::empty(),
         Proto: string::new(),
@@ -723,6 +735,11 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         Ok(None) => return (req, errors::New(string("net/http: malformed request line"))),
         Err(e) => return (req, e),
     };
+
+    // Go: req.RequestURI = rawurl — the UNMODIFIED request-target,
+    // captured before any URL parsing, because "*" and an absolute-URI
+    // target do not survive it (readRequest, request.go:1105).
+    req.RequestURI = target.clone();
 
     if !validMethod(method.clone()) {
         return (req, errors::New(string("net/http: invalid method")));
