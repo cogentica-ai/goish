@@ -32,19 +32,33 @@ use super::server::{Handler, HandlerFunc, ServeMux};
 use super::status::StatusForbidden;
 use super::url;
 
+// go: sdk 1.25.5 net/http/csrf.go:36-41 CrossOriginProtection
 /// `CrossOriginProtection` (csrf.go:36) — rejects non-safe cross-origin
 /// browser requests using Sec-Fetch-Site / Origin header heuristics.
 ///
 /// The zero value is valid: no trusted origins, no bypass patterns.
+// goishlint:ignore GOISH019 — Go pairs a bare `trustedMu
+// sync.RWMutex` with the `trusted` map it guards; goish puts the map
+// INSIDE the lock, so the pairing cannot be forgotten at a call site.
+// The field is absent rather than renamed, which is why GOISH019 reads
+// it as dropped.
+//
+// This waiver is FILE-WIDE, not per-symbol: GOISH019 only supports
+// `file_suppresses`, and naming a symbol silently turns the line into
+// a per-symbol waiver the rule never consults. That is tolerable here
+// only because csrf.go declares exactly one struct — in a file with
+// several, this would blind the others to a real dropped field.
 pub struct CrossOriginProtection {
     // Go: bypass atomic.Pointer[ServeMux]
     bypass: Pointer<ServeMux>,
-    // Go: trustedMu sync.RWMutex; trusted map[string]bool
+    // Go: trustedMu sync.RWMutex; trusted map[string]bool — the mutex
+    // and the map it guards, fused.
     trusted: Mutex<Option<map<string, bool>>>,
     // Go: deny atomic.Pointer[Handler]
     deny: Mutex<Option<Arc<dyn Handler>>>,
 }
 
+// go: sdk 1.25.5 net/http/csrf.go:44-46 NewCrossOriginProtection
 /// `NewCrossOriginProtection` (csrf.go:44).
 pub fn NewCrossOriginProtection() -> Arc<CrossOriginProtection> {
     Arc::new(CrossOriginProtection {
@@ -55,6 +69,7 @@ pub fn NewCrossOriginProtection() -> Arc<CrossOriginProtection> {
 }
 
 impl CrossOriginProtection {
+    // go: sdk 1.25.5 net/http/csrf.go:57-78 CrossOriginProtection.AddTrustedOrigin
     /// `AddTrustedOrigin(origin)` (csrf.go:57). Origin must look like
     /// `scheme://host[:port]` — no path / query / fragment.
     pub fn AddTrustedOrigin<O: Into<string>>(&self, origin: O) -> error {
@@ -92,6 +107,7 @@ impl CrossOriginProtection {
         crate::errors::nil
     }
 
+    // go: sdk 1.25.5 net/http/csrf.go:95-111 CrossOriginProtection.AddInsecureBypassPattern
     /// `AddInsecureBypassPattern(pattern)` (csrf.go:95). Permits all
     /// requests matching `pattern` (uses ServeMux match semantics).
     pub fn AddInsecureBypassPattern<P: Into<string>>(&self, pattern: P){
@@ -109,15 +125,17 @@ impl CrossOriginProtection {
         };
 
         // Go: bypass.Handle(pattern, sentinelHandler)
-        bypass.Handle(pattern, sentinel_handler());
+        bypass.Handle(pattern, sentinelHandler());
     }
 
+    // go: sdk 1.25.5 net/http/csrf.go:120-126 CrossOriginProtection.SetDenyHandler
     /// `SetDenyHandler(h)` (csrf.go:120). Set the handler invoked when a
     /// request is rejected. Pass `None` to clear (defaults to 403).
     pub fn SetDenyHandler(&self, h: Option<Arc<dyn Handler>>) {
         *self.deny.Lock() = h;
     }
 
+    // go: sdk 1.25.5 net/http/csrf.go:130-171 CrossOriginProtection.Check
     /// `Check(req)` (csrf.go:130). Returns nil if the request passes
     /// cross-origin checks; otherwise an error describing the cause.
     pub fn Check(&self, req: &Request) -> error {
@@ -135,7 +153,7 @@ impl CrossOriginProtection {
             return crate::errors::nil;
         } else {
             // cross-site / same-site / unknown — reject unless exempt.
-            if self.is_request_exempt(req) {
+            if self.isRequestExempt(req) {
                 return crate::errors::nil;
             }
             return errCrossOriginRequest();
@@ -154,20 +172,21 @@ impl CrossOriginProtection {
             return crate::errors::nil;
         }
 
-        if self.is_request_exempt(req) {
+        if self.isRequestExempt(req) {
             return crate::errors::nil;
         }
         errCrossOriginRequestFromOldBrowser()
     }
 
+    // go: sdk 1.25.5 net/http/csrf.go:181-194 CrossOriginProtection.isRequestExempt
     /// `isRequestExempt(req)` (csrf.go:181). Bypass-pattern + trusted
     /// origin check; lazy because both paths take a lock.
-    fn is_request_exempt(&self, req: &Request) -> bool {
+    fn isRequestExempt(&self, req: &Request) -> bool {
         // Go: if bypass := c.bypass.Load(); bypass != nil { … }
         if let Some(bypass) = self.bypass.Load() {
             // Go: if h, _ := bypass.Handler(req); h == sentinelHandler { return true }
             let (h, _) = bypass.Handler(req);
-            if Arc::ptr_eq(&h, &sentinel_handler()) {
+            if Arc::ptr_eq(&h, &sentinelHandler()) {
                 return true;
             }
         }
@@ -185,6 +204,7 @@ impl CrossOriginProtection {
         }
     }
 
+    // go: sdk 1.25.5 net/http/csrf.go:202-214 CrossOriginProtection.Handler
     /// `Handler(h)` (csrf.go:202) — wraps `h` in a handler that runs
     /// `Check(r)` first. On rejection, dispatches to the deny handler
     /// (default: 403 Forbidden).
@@ -210,11 +230,13 @@ impl CrossOriginProtection {
 
 // ─── sentinel handler (csrf.go:80) ────────────────────────────────────
 
+// go: sdk 1.25.5 net/http/csrf.go:80-80 noopHandler
 /// `noopHandler` (csrf.go:80) — used as a sentinel value via pointer
 /// identity to mark bypass-mux entries.
-struct NoopHandler;
+struct noopHandler;
 
-impl Handler for NoopHandler {
+impl Handler for noopHandler {
+    // go: sdk 1.25.5 net/http/csrf.go:82-82 noopHandler.ServeHTTP
     fn ServeHTTP(&self, _w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) {}
 }
 
@@ -226,10 +248,11 @@ impl Handler for NoopHandler {
 // back every call.
 static SENTINEL_HANDLER: Mutex<Option<Arc<dyn Handler>>> = Mutex::new(None);
 
-fn sentinel_handler() -> Arc<dyn Handler> {
+// go: sdk 1.25.5 net/http/csrf.go:84-84 sentinelHandler
+fn sentinelHandler() -> Arc<dyn Handler> {
     let mut g = SENTINEL_HANDLER.Lock();
     if g.is_none() {
-        let h: Arc<dyn Handler> = Arc::new(NoopHandler);
+        let h: Arc<dyn Handler> = Arc::new(noopHandler);
         *g = Some(h);
     }
     g.as_ref().unwrap().clone()
@@ -282,8 +305,8 @@ fn string_eq(a: &string, b: &string) -> bool {
     true
 }
 
-// go: none — goish idiom: `NoopHandler` is unexported, so only this
+// go: none — goish idiom: `noopHandler` is unexported, so only this
 // module can register it. See AGENTS.md §9b.
 pub(super) fn register_csrf_impls() {
-    super::server::__goish_register_Handler_impl::<NoopHandler>();
+    super::server::__goish_register_Handler_impl::<noopHandler>();
 }
