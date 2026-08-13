@@ -1302,10 +1302,32 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
     } else {
         method
     };
-    let u = match super::url::parse_request_uri(&url) {
-        Ok(u) => u,
-        Err(msg) => return (default_request(), errors::New(msg)),
-    };
+    // Go: if !validMethod(method) {
+    //         return nil, fmt.Errorf("net/http: invalid method %q", method) }
+    //
+    // This check was MISSING. `validMethod` has been ported and
+    // anchored (request.rs:1200) the whole time and nothing called
+    // it, so any string was accepted as a method — including one
+    // containing a space or CRLF, which Request.Write then puts
+    // straight into the request line. That is a request-smuggling
+    // primitive, not a cosmetic gap.
+    if !super::request::validMethod(m.clone()) {
+        return (
+            default_request(),
+            errors::New(string("net/http: invalid method \"") + m + string("\"")),
+        );
+    }
+    // Go uses urlpkg.Parse here, NOT parse_request_uri. The latter is
+    // for server-side request-line URIs (RFC 9112 origin-form) and
+    // differs on two forms NewRequest must handle: a scheme-relative
+    // "//host/path" (Parse splits the authority; parse_request_uri
+    // treats it all as a path) and userinfo (Parse puts "user:pw" in
+    // URL.User, leaving Host clean; parse_request_uri leaves it in
+    // Host, which then leaked the credentials into the Host header).
+    let (u, perr) = super::url::Parse(url);
+    if perr != errors::nil {
+        return (default_request(), perr);
+    }
     let body_len = body.Len();
     let host = u.Host.clone();
     let req = Request {

@@ -897,7 +897,26 @@ fn parse(raw_url: string, via_request: bool) -> (URL, error) {
             -1 => after.Len(),
             n => n,
         };
-        host = string::from_bytes(&after.as_bytes()[..host_end as usize]);
+        let authority = string::from_bytes(&after.as_bytes()[..host_end as usize]);
+        // Go: parseAuthority splits userinfo off at the LAST '@' —
+        //     `if i := strings.LastIndex(authority, "@"); i >= 0 { … }`
+        // — and puts it in url.User, leaving Host clean.
+        //
+        // goish's URL has no `User` field (a documented slim
+        // deviation), and the userinfo was therefore being left IN
+        // Host. That is not merely incomplete: `NewRequest` copies
+        // URL.Host into `Request.Host`, which is written as the
+        // `Host:` header, so "http://user:pw@example.com/p" put the
+        // credentials on the wire in a header that must not carry
+        // them. Splitting at the last '@' matches Go's Host exactly;
+        // the userinfo is dropped rather than stored, which changes
+        // nothing today because no goish code ever read it.
+        let ab = authority.as_bytes();
+        let host_start = match ab.iter().rposition(|&c| c == b'@') {
+            Some(i) => i + 1,
+            None => 0,
+        };
+        host = string::from_bytes(&ab[host_start..]);
         path_rest = string::from_bytes(&after.as_bytes()[host_end as usize..]);
     }
 

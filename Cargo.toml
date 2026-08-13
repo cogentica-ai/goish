@@ -559,6 +559,10 @@ name = "http_maxbytes_smoke"
 path = "examples/http_maxbytes_smoke.rs"
 
 [[example]]
+name = "http_newrequest_smoke"
+path = "examples/http_newrequest_smoke.rs"
+
+[[example]]
 name = "http_server_pure_smoke"
 path = "examples/http_server_pure_smoke.rs"
 
