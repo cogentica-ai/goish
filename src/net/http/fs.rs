@@ -1013,6 +1013,91 @@ pub fn localRedirect<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 's
     w.WriteHeader(StatusMovedPermanently);
 }
 
+// go: sdk 1.25.5 net/http/fs.go:139-178 dirList
+//
+// Go prefers ReadDir over Readdir "because the former doesn't require
+// calling Stat on every entry of a directory on Unix", and falls back
+// when the file is not an fs.ReadDirFile. goish keeps both paths: the
+// assertion is `cast!(f, fs::ReadDirFile)`, which succeeds for a MapFS
+// directory and misses for the os-backed `osFile`, so the fallback is
+// the live path for http::Dir.
+//
+// Go logs the read error through `logf(r, …)`, which routes to the
+// serving Server's ErrorLog. goish's logf hangs off Server and dirList
+// has no handle to one here, so the error reaches the client as the
+// same 500 and is not logged. Threading it needs the Server on the
+// request, which goish does not carry yet.
+pub fn dirList(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    _r: nilable![&Request],
+    f: &(dyn File + Send + Sync + 'static),
+) {
+    // Go: if d, ok := f.(fs.ReadDirFile); ok { … } else { … }
+    let mut names: alloc::vec::Vec<(string, bool)> = alloc::vec::Vec::new();
+    let (d, ok) = crate::cast!(f, fs::ReadDirFile);
+    let err = if ok {
+        let (list, e) = d.ReadDir(-1);
+        let n = len(&list);
+        let mut i: int = 0;
+        while i < n {
+            names.push((list[i].Name(), list[i].IsDir()));
+            i += 1;
+        }
+        e
+    } else {
+        let (list, e) = f.Readdir(-1);
+        let n = len(&list);
+        let mut i: int = 0;
+        while i < n {
+            names.push((list[i].Name(), list[i].IsDir()));
+            i += 1;
+        }
+        e
+    };
+
+    if err != nil {
+        // Go: logf(r, "http: error reading directory: %v", err)
+        super::server::Error(
+            w,
+            string("Error reading directory"),
+            StatusInternalServerError,
+        );
+        return;
+    }
+
+    // Go: sort.Slice(dirs, func(i, j int) bool {
+    //         return dirs.name(i) < dirs.name(j) })
+    names.sort_by(|a, b| crate::strings::Compare(a.0.clone(), b.0.clone()).cmp(&0));
+
+    w.Header().Set(
+        string("Content-Type"),
+        string("text/html; charset=utf-8"),
+    );
+    let mut buf = strings::Builder::new();
+    let _ = buf.WriteString("<!doctype html>\n");
+    let _ = buf.WriteString("<meta name=\"viewport\" content=\"width=device-width\">\n");
+    let _ = buf.WriteString("<pre>\n");
+    for (nm, isdir) in names.iter() {
+        let mut name = nm.clone();
+        if *isdir {
+            name = name + "/";
+        }
+        // Go: name may contain '?' or '#', which must be escaped to
+        // remain part of the URL path and not start a query string or
+        // fragment — so the href goes through url.URL{Path: name},
+        // NOT through raw interpolation.
+        let mut u = super::url::URL::default();
+        u.Path = name.clone();
+        let _ = buf.WriteString("<a href=\"");
+        let _ = buf.WriteString(u.String());
+        let _ = buf.WriteString("\">");
+        let _ = buf.WriteString(html_replace(name));
+        let _ = buf.WriteString("</a>\n");
+    }
+    let _ = buf.WriteString("</pre>\n");
+    let _ = w.Write(crate::convert::bytes(buf.String()));
+}
+
 // go: sdk 1.25.5 net/http/fs.go:121-125 anyDirs
 #[goish::interface] // goishlint:ignore GOISH022 - attribute macro path; `goish::` is the spelling everywhere
 pub trait anyDirs {

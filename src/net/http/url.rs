@@ -368,7 +368,29 @@ impl URL {
             out.extend_from_slice(b"://");
             out.extend_from_slice(self.Host.as_bytes());
         }
-        out.extend_from_slice(self.Path.as_bytes());
+        // Go: path := u.EscapedPath()  — NOT u.Path. Writing the raw
+        // path emits a filename containing '?' or '#' verbatim, so the
+        // link's path stops at the first of them and the rest becomes a
+        // query string or fragment. dirList's hrefs come through here.
+        let path = self.EscapedPath();
+        // Go: if path != "" && path[0] != '/' && u.Host != "" {
+        //         buf.WriteByte('/') }
+        if path.Len() != 0 && path[0] != b'/' && self.Host.Len() != 0 {
+            out.push(b'/');
+        }
+        // Go (RFC 3986 §4.2): if buf.Len() == 0 {
+        //     if segment, _, _ := strings.Cut(path, "/");
+        //        strings.Contains(segment, ":") { buf.WriteString("./") } }
+        // A relative path whose FIRST segment holds a colon would
+        // otherwise read as a scheme — "a:b.txt" parses back as scheme
+        // "a", opaque "b.txt".
+        if out.is_empty() {
+            let (segment, _, _) = crate::strings::Cut(path.clone(), string("/"));
+            if crate::strings::Contains(segment, string(":")) {
+                out.extend_from_slice(b"./");
+            }
+        }
+        out.extend_from_slice(path.as_bytes());
         if !self.RawQuery.as_bytes().is_empty() {
             out.push(b'?');
             out.extend_from_slice(self.RawQuery.as_bytes());
