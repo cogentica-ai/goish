@@ -17,6 +17,7 @@
 pub mod fcgi;
 
 pub use fcgi::{
+    bufWriter, conn, newConn, newWriter, record, streamWriter, writePairs, ReadWriteCloser,
     encodeSize, readSize, readString, recType, typeAbortRequest, typeBeginRequest, typeData,
     typeEndRequest, typeGetValues, typeGetValuesResult, typeParams, typeStderr, typeStdin,
     typeStdout, typeUnknownType,
