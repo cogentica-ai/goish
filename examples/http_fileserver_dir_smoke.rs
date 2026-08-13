@@ -34,7 +34,7 @@ fn main() {
     let _ = os::WriteFile(string("/tmp/goish-fs-dir-smoke/a.txt"), bytes("aa"), 0o644);
     let _ = os::WriteFile(string("/tmp/goish-fs-dir-smoke/b.txt"), bytes("bb"), 0o644);
 
-    let fs_handler: Arc<dyn http::Handler> = http::FileServer(http::NewDir(dir.clone()));
+    let fs_handler: Arc<dyn http::Handler> = http::FileServer(Arc::new(http::NewDir(dir.clone())));
     let mut srv = http::Server::default();
     srv.Handler = fs_handler;
     let (ln, _e) = net::Listen(string("tcp"), string("127.0.0.1:0"));

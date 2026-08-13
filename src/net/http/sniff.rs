@@ -27,7 +27,7 @@ use crate::types::{byte, int};
 // go: sdk 1.25.5 net/http/sniff.go:13-13 sniffLen
 /// Go: "The algorithm uses at most sniffLen bytes to make its
 /// decision."
-const sniffLen: int = 512;
+pub(crate) const sniffLen: int = 512;
 
 // go: sdk 1.25.5 net/http/sniff.go:21-38 DetectContentType
 /// Go: "DetectContentType implements the algorithm described at

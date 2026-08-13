@@ -28,7 +28,7 @@ fn main() {
 
     let mux = http::ServeMux::new();
     // /etc/* → file-served from /etc.
-    let static_h = http::FileServer(http::NewDir(string("/etc")));
+    let static_h = http::FileServer(Arc::new(http::NewDir(string("/etc"))));
     mux.Handle(
         string("/static/"),
         http::StripPrefix(string("/static"), static_h),

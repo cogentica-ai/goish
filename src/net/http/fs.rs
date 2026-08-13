@@ -28,7 +28,7 @@ use crate::types::{byte, int, rune};
 
 use super::request::Request;
 use super::response::ResponseWriter;
-use super::server::{Handler, NotFound};
+use super::server::Handler;
 use crate::io::fs;
 use super::header::{ParseTime, TimeFormat};
 use super::status::{
@@ -108,107 +108,6 @@ impl FileSystem for Dir {
             nil.into(),
         );
     }
-}
-
-impl Dir {
-    /// Resolve a request URL path to an absolute filesystem path,
-    /// rejecting any attempt to escape `root` via `..` segments.
-    fn resolve(&self, name: &string) -> Option<string> {
-        // Reject if name contains `..` after path::Clean — same shape
-        // as Go's check (fs.go:88).
-        let cleaned = crate::path::Clean(name.clone());
-        if strings::Contains(cleaned.clone(), string("../")) {
-            return None;
-        }
-        let mut b = strings::Builder::new();
-        let _ = b.WriteString(self.root.clone());
-        // Ensure single slash join.
-        let r = self.root.as_bytes();
-        let need_slash =
-            !(r.len() > 0 && r[r.len() - 1] == b'/')
-                && !(cleaned.Len() > 0 && cleaned[0] == b'/');
-        if need_slash {
-            let _ = b.WriteByte(b'/');
-        }
-        let _ = b.WriteString(cleaned);
-        Some(b.String())
-    }
-}
-
-/// `http.ServeFile(w, r, name)` (fs.go:814) — serve the named file.
-pub fn ServeFile<N: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request, name: N){
-    let name: string = name.into();
-    serve_file_path(w, r, name);
-}
-
-fn serve_file_path(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request, path: string) {
-    // Stat to verify existence and reject directories (slim — Go also
-    // serves directory indexes).
-    let (fi, err) = os::Stat(path.clone());
-    if !err.IsNil() {
-        NotFound(w, r);
-        return;
-    }
-    if fi.IsDir() {
-        // Try `<dir>/index.html` (mirrors Go's localRedirect → indexPage).
-        let mut b = strings::Builder::new();
-        let _ = b.WriteString(path.clone());
-        if !strings::HasSuffix(path.clone(), string("/")) {
-            let _ = b.WriteByte(b'/');
-        }
-        let _ = b.WriteString("index.html");
-        let candidate = b.String();
-        let (ifi, ierr) = os::Stat(candidate.clone());
-        if ierr.IsNil() && !ifi.IsDir() {
-            return serve_regular_file(w, r, candidate, ifi);
-        }
-        // No index.html — emit an HTML directory listing.
-        return dir_list(w, r, path);
-    }
-    serve_regular_file(w, r, path, fi);
-}
-
-/// Line-by-line port of `dirList` (fs.go:139). Renders an HTML
-/// directory listing — entries sorted by name, directories suffixed
-/// with `/`. Missing pieces vs Go: no URL-escape on the href (slim;
-/// goish has http::PathEscape but legacy dirList uses url.URL{Path:n}).
-fn dir_list(w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request, path: string) {
-    let (entries, err) = os::ReadDir(path);
-    if !err.IsNil() {
-        super::server::Error(
-            w,
-            string("Error reading directory"),
-            super::status::StatusInternalServerError,
-        );
-        return;
-    }
-    // Go: sort.Slice — os::ReadDir already returns sorted, no extra step.
-    w.Header().Set(
-        string("Content-Type"),
-        string("text/html; charset=utf-8"),
-    );
-    let mut buf = strings::Builder::new();
-    let _ = buf.WriteString("<!doctype html>\n");
-    let _ = buf.WriteString("<meta name=\"viewport\" content=\"width=device-width\">\n");
-    let _ = buf.WriteString("<pre>\n");
-    for i in 0..entries.Len() {
-        let e = entries[i].clone();
-        let mut name = e.Name();
-        if e.IsDir() {
-            let mut nb = strings::Builder::new();
-            let _ = nb.WriteString(name.clone());
-            let _ = nb.WriteByte(b'/');
-            name = nb.String();
-        }
-        let escaped = super::url::PathEscape(name.clone());
-        let _ = buf.WriteString("<a href=\"");
-        let _ = buf.WriteString(escaped);
-        let _ = buf.WriteString("\">");
-        let _ = buf.WriteString(html_replace(name));
-        let _ = buf.WriteString("</a>\n");
-    }
-    let _ = buf.WriteString("</pre>\n");
-    let _ = w.Write(crate::convert::bytes(buf.String()));
 }
 
 /// Slim analogue of Go's `htmlReplacer` (fs.go:135).
@@ -371,33 +270,209 @@ fn imf_fixdate_into<'a>(
     &buf[..]
 }
 
-/// `http.FileServer(root)` (fs.go:971) — Handler that serves files
-/// from `root`. Combine with `http.StripPrefix` to mount under a
-/// subpath (matches Go's idiom).
-pub fn FileServer(root: Dir) -> Arc<dyn Handler> {
-    Arc::new(FileHandler { root })
+// go: sdk 1.25.5 net/http/fs.go:971-973 FileServer
+//
+/// Return a handler that serves HTTP requests with the contents of
+/// the file system rooted at `root`. Combine with [`StripPrefix`] to
+/// mount under a subpath.
+pub fn FileServer(root: Arc<dyn FileSystem + Send + Sync>) -> Arc<dyn Handler> {
+    return Arc::new(fileHandler { root }) as Arc<dyn Handler>;
 }
 
-struct FileHandler {
-    root: Dir,
+// go: sdk 1.25.5 net/http/fs.go:984-986 FileServerFS
+pub fn FileServerFS(root: Arc<dyn fs::FS + Send + Sync>) -> Arc<dyn Handler> {
+    return FileServer(FS(root));
 }
 
-impl Handler for FileHandler {
+impl Handler for fileHandler {
+    // go: sdk 1.25.5 net/http/fs.go:988-995 fileHandler.ServeHTTP
     fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
-        // Go: upath := r.URL.Path; if !strings.HasPrefix(upath, "/") { upath = "/" + upath; r.URL.Path = upath }
+        // Go: upath := r.URL.Path
+        //     if !strings.HasPrefix(upath, "/") {
+        //         upath = "/" + upath; r.URL.Path = upath }
+        //
+        // Go mutates r.URL.Path so downstream sees the fixed path;
+        // goish's ServeHTTP takes `&Request`, so the corrected path is
+        // used locally and the request is not rewritten. serveFile
+        // reads r.URL.Path again for its redirect decisions, which is
+        // the one place the difference could show — only for a request
+        // whose path did not start with '/', which ReadRequest does
+        // not produce.
         let mut upath = r.URL.Path.clone();
         if !strings::HasPrefix(upath.clone(), string("/")) {
-            let mut b = strings::Builder::new();
-            let _ = b.WriteByte(b'/');
-            let _ = b.WriteString(upath);
-            upath = b.String();
+            upath = string("/") + upath;
         }
-        match self.root.resolve(&upath) {
-            None => NotFound(w, r),
-            Some(p) => serve_file_path(w, r, p),
-        }
+        serveFile(w, crate::nilable_ref::new(r), self.root.clone(), crate::path::Clean(upath), true);
     }
 }
+
+// go: sdk 1.25.5 net/http/fs.go:814-826 ServeFile
+//
+/// Reply to the request with the contents of the named file or
+/// directory.
+///
+/// Go's warning applies here too: if `name` is built from a
+/// user-supplied path, the caller must sanitize it — `ServeFile`
+/// rejects only a request whose URL path contains "..", not a `name`
+/// that does.
+pub fn ServeFile<N: Into<string>>(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    r: &Request,
+    name: N,
+) {
+    let name: string = name.into();
+    if containsDotDot(r.URL.Path.clone()) {
+        // Go: "Too many programs use r.URL.Path to construct the
+        // argument to serveFile. Reject the request under the
+        // assumption that happened here and '..' may not be wanted."
+        serveError(
+            w,
+            string("invalid URL path"),
+            super::status::StatusBadRequest,
+        );
+        return;
+    }
+    let (dir, file) = crate::path::filepath::Split(name);
+    serveFile(
+        w,
+        crate::nilable_ref::new(r),
+        Arc::new(NewDir(dir)) as Arc<dyn FileSystem + Send + Sync>,
+        file,
+        false,
+    );
+}
+
+// go: sdk 1.25.5 net/http/fs.go:848-859 ServeFileFS
+pub fn ServeFileFS<N: Into<string>>(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    r: &Request,
+    fsys: Arc<dyn fs::FS + Send + Sync>,
+    name: N,
+) {
+    if containsDotDot(r.URL.Path.clone()) {
+        serveError(
+            w,
+            string("invalid URL path"),
+            super::status::StatusBadRequest,
+        );
+        return;
+    }
+    serveFile(w, crate::nilable_ref::new(r), FS(fsys), name.into(), false);
+}
+
+// go: sdk 1.25.5 net/http/fs.go:679-762 serveFile
+//
+// Go's `fs FileSystem` parameter shadows the `fs` package inside the
+// body; goish names it `fsys` since `crate::io::fs` is in scope here.
+pub fn serveFile(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    r: nilable![&Request],
+    fsys: Arc<dyn FileSystem + Send + Sync>,
+    name: string,
+    redirect: bool,
+) {
+    let indexPage = string("/index.html");
+
+    // Go: redirect .../index.html to .../
+    // "can't use Redirect() because that would make the path absolute,
+    // which would be a problem running under StripPrefix"
+    if !r.IsNil() && strings::HasSuffix(r.Must().URL.Path.clone(), indexPage.clone()) {
+        localRedirect(w, r, string("./"));
+        return;
+    }
+
+    let (mut f, err) = fsys.Open(name.clone());
+    if err != nil {
+        let (msg, code) = toHTTPError(err);
+        serveError(w, msg, code);
+        return;
+    }
+
+    let (mut d, serr) = f.Stat();
+    if serr != nil {
+        let (msg, code) = toHTTPError(serr);
+        let _ = f.Close();
+        serveError(w, msg, code);
+        return;
+    }
+
+    let urlpath = if r.IsNil() {
+        string("")
+    } else {
+        r.Must().URL.Path.clone()
+    };
+
+    if redirect {
+        // Go: redirect to canonical path — "/" at end of directory url.
+        // r.URL.Path always begins with "/".
+        if d.IsDir() {
+            if len(&urlpath) > 0 && urlpath[len(&urlpath) - 1] != b'/' {
+                let _ = f.Close();
+                localRedirect(w, r, crate::path::Base(urlpath) + "/");
+                return;
+            }
+        } else if len(&urlpath) > 0 && urlpath[len(&urlpath) - 1] == b'/' {
+            let base = crate::path::Base(urlpath.clone());
+            if base == "/" || base == "." {
+                // Go: "The FileSystem maps a path like '/' or '/./' to
+                // a file instead of a directory."
+                let _ = f.Close();
+                serveError(
+                    w,
+                    string("http: attempting to traverse a non-directory"),
+                    StatusInternalServerError,
+                );
+                return;
+            }
+            let _ = f.Close();
+            localRedirect(w, r, string("../") + base);
+            return;
+        }
+    }
+
+    if d.IsDir() {
+        // Go: redirect if the directory name doesn't end in a slash.
+        if urlpath == "" || urlpath[len(&urlpath) - 1] != b'/' {
+            let _ = f.Close();
+            localRedirect(w, r, crate::path::Base(urlpath) + "/");
+            return;
+        }
+
+        // Go: use contents of index.html for directory, if present.
+        let index = strings::TrimSuffix(name.clone(), string("/")) + indexPage;
+        let (ff, ierr) = fsys.Open(index);
+        if ierr == nil {
+            let (dd, derr) = ff.Stat();
+            if derr == nil {
+                let _ = f.Close();
+                d = dd;
+                f = ff;
+            } else {
+                let _ = ff.Close();
+            }
+        }
+    }
+
+    // Still a directory? (we didn't find an index.html file)
+    if d.IsDir() {
+        if checkIfModifiedSince(r, d.ModTime()) == condFalse {
+            writeNotModified(w);
+            let _ = f.Close();
+            return;
+        }
+        setLastModified(w, d.ModTime());
+        dirList(w, r, &*f);
+        let _ = f.Close();
+        return;
+    }
+
+    // serveContent will check modification time.
+    // Go: sizeFunc := func() (int64, error) { return d.Size(), nil }
+    let mut rs = fileReadSeeker { f: f.clone() };
+    serveContent(w, r, d.Name(), d.ModTime(), (d.Size(), nil.into()), &mut rs);
+    let _ = f.Close();
+}
+
 
 // ─── Range header parsing (fs.go:998-1116) ───────────────────────────
 
@@ -631,7 +706,7 @@ fn ext_of(path: &string) -> string {
 // go: none — goish idiom: `FileHandler` is unexported, so only this
 // module can register it. See AGENTS.md §9b.
 pub(super) fn register_fs_impls() {
-    super::server::__goish_register_Handler_impl::<FileHandler>();
+    super::server::__goish_register_Handler_impl::<fileHandler>();
 }
 
 // go: sdk 1.25.5 net/http/fs.go:463-465 etagStrongMatch
@@ -983,6 +1058,14 @@ impl dirEntryDirs {
 }
 
 // go: sdk 1.25.5 net/http/fs.go:188-212 serveError
+// goishlint:ignore GOISH021 httpservecontentkeepheaders — the GODEBUG
+// setting is not declared because internal/godebug is not ported (it
+// needs internal/bisect and internal/godebugs, both absent). Its only
+// effect is to let a user OPT OUT of deleting these four headers on a
+// ServeContent error; with the variable unset — Go's default, and the
+// only reachable state here — the deletion below is exactly Go's
+// behaviour. Declaring a stub whose Value() is always "" would add
+// surface that reads as wired-up and is not.
 pub fn serveError<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), text: S, code: int) {
     let text = text.into();
     let h = w.Header();
@@ -1011,6 +1094,254 @@ pub fn localRedirect<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 's
     }
     w.Header().Set(string("Location"), newPath);
     w.WriteHeader(StatusMovedPermanently);
+}
+
+// go: none — goish-only carry, no Go counterpart.
+//
+// Go's `http.File` EMBEDS io.Reader and io.Seeker, so a File simply IS
+// an io.ReadSeeker and ServeContent takes one directly. goish's
+// `File::Read`/`Seek` take `&self` — the file is shared behind an Arc
+// — while `io::Reader`/`io::Seeker` take `&mut self`, so the two do
+// not unify. This carries one to the other, the same shape as
+// `response::AsWriter`.
+pub struct fileReadSeeker {
+    pub f: Arc<dyn File + Send + Sync>,
+}
+
+impl crate::io::Reader for fileReadSeeker {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        return self.f.Read(p);
+    }
+}
+
+impl crate::io::Seeker for fileReadSeeker {
+    fn Seek(&mut self, offset: crate::types::int64, whence: int) -> (crate::types::int64, error) {
+        return self.f.Seek(offset, whence);
+    }
+}
+
+// go: sdk 1.25.5 net/http/fs.go:227-258 ServeContent
+//
+/// Reply to the request using the content in the provided ReadSeeker.
+/// The main benefit of ServeContent over io.Copy is that it handles
+/// Range requests properly, sets the MIME type, and handles
+/// If-Match, If-Unmodified-Since, If-None-Match, If-Modified-Since
+/// and If-Range requests.
+pub fn ServeContent<C: crate::io::Reader + crate::io::Seeker>(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    req: nilable![&Request],
+    name: string,
+    modtime: time::Time,
+    content: &mut C,
+) {
+    // Go: sizeFunc := func() (int64, error) { … }
+    //
+    // Go closes over `content`; a Rust closure capturing `&mut content`
+    // would conflict with serveContent's own use of it, so the size is
+    // computed here and handed down as an already-resolved value.
+    // serveContent's parameter is `Result`-shaped for the same reason
+    // Go's is a func: serveFile supplies the size from Stat without
+    // seeking.
+    let (end, e1) = content.Seek(0, crate::io::SeekEnd);
+    if e1 != nil {
+        serveContent(w, req, name, modtime, (0, errSeeker.into()), content);
+        return;
+    }
+    let (_, e2) = content.Seek(0, crate::io::SeekStart);
+    if e2 != nil {
+        serveContent(w, req, name, modtime, (0, errSeeker.into()), content);
+        return;
+    }
+    serveContent(w, req, name, modtime, (end, nil.into()), content);
+}
+
+// go: sdk 1.25.5 net/http/fs.go:274-431 serveContent
+//
+// Go's fifth parameter is `sizeFunc func() (int64, error)`, called
+// once after the Content-Type work. goish passes the already-computed
+// `(size, err)` pair instead: the closure would have to capture
+// `content` mutably while serveContent also reads and seeks it, which
+// the borrow checker rejects. Both callers evaluate it at the same
+// point in the sequence Go does, so the observable order of a seek
+// failure versus a Content-Type sniff is unchanged.
+pub fn serveContent<C: crate::io::Reader + crate::io::Seeker>(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    r: nilable![&Request],
+    name: string,
+    modtime: time::Time,
+    sizeAndErr: (crate::types::int64, error),
+    content: &mut C,
+) {
+    setLastModified(w, modtime);
+    let (done, rangeReq) = checkPreconditions(w, r, modtime);
+    if done {
+        return;
+    }
+
+    let mut code = super::status::StatusOK;
+
+    // Go: ctypes, haveType := w.Header()["Content-Type"]
+    // If Content-Type isn't set, use the file's extension to find it,
+    // but if it is set explicitly, do not sniff the type.
+    let haveType = w.Header().has(string("Content-Type"));
+    let mut ctype: string;
+    if !haveType {
+        ctype = crate::mime::TypeByExtension(crate::path::Ext(name.clone()));
+        if ctype == "" {
+            // Read a chunk to decide between utf-8 text and binary.
+            let mut buf: slice<byte> =
+                slice::__from_vec(alloc::vec![0u8; super::sniff::sniffLen as usize]);
+            let (n, _) = crate::io::ReadFull(content, &mut buf);
+            ctype = super::sniff::DetectContentType(buf.slice(0, n));
+            // Go: rewind to output whole file.
+            let (_, err) = content.Seek(0, crate::io::SeekStart);
+            if err != nil {
+                serveError(w, string("seeker can't seek"), StatusInternalServerError);
+                return;
+            }
+        }
+        w.Header().Set(string("Content-Type"), ctype.clone());
+    } else {
+        let ctypes = w.Header().Values(string("Content-Type"));
+        ctype = if len(&ctypes) > 0 { ctypes[0].clone() } else { string("") };
+    }
+
+    let (size, serr) = sizeAndErr;
+    if serr != nil {
+        serveError(w, serr.Error(), StatusInternalServerError);
+        return;
+    }
+    if size < 0 {
+        // Go: "Should never happen but just to be sure".
+        serveError(
+            w,
+            string("negative content size computed"),
+            StatusInternalServerError,
+        );
+        return;
+    }
+
+    // Handle the Content-Range header.
+    let mut sendSize = size;
+    let (mut ranges, perr) = parseRange(rangeReq, size);
+    if perr != nil {
+        if errors::Is(perr.clone(), errNoOverlap) && size == 0 {
+            // Go: "Some clients add a Range header to all requests to
+            // limit the size of the response. If the file is empty,
+            // ignore the range header and respond with a 200 rather
+            // than a 416."
+            ranges = slice::new();
+        } else {
+            if errors::Is(perr.clone(), errNoOverlap) {
+                w.Header().Set(
+                    string("Content-Range"),
+                    crate::Sprintf!("bytes */%d", size),
+                );
+            }
+            serveError(
+                w,
+                perr.Error(),
+                super::status::StatusRequestedRangeNotSatisfiable,
+            );
+            return;
+        }
+    }
+
+    if sumRangesSize(&ranges) > size {
+        // Go: "The total number of bytes in all the ranges is larger
+        // than the size of the file by itself, so this is probably an
+        // attack, or a dumb client. Ignore the range request."
+        ranges = slice::new();
+    }
+
+    // Go builds the multi-range body through an io.Pipe and a
+    // goroutine feeding multipart parts. goish's multipart Writer has
+    // no borrowed per-part Writer — it exposes WritePart(header, body)
+    // — so the parts are assembled into a buffer here instead. Same
+    // bytes on the wire; the divergence is that a multi-range response
+    // is materialised rather than streamed, so a request for many
+    // large ranges holds them in memory.
+    let mut multipartBody: slice<byte> = slice::new();
+    if len(&ranges) == 1 {
+        // RFC 7233 §4.1: a server MUST NOT generate a multipart
+        // response to a request for a single range.
+        let ra = ranges[0];
+        let (_, err) = content.Seek(ra.start, crate::io::SeekStart);
+        if err != nil {
+            serveError(
+                w,
+                err.Error(),
+                super::status::StatusRequestedRangeNotSatisfiable,
+            );
+            return;
+        }
+        sendSize = ra.length;
+        code = super::status::StatusPartialContent;
+        w.Header()
+            .Set(string("Content-Range"), ra.contentRange(size));
+    } else if len(&ranges) > 1 {
+        let mut buf = crate::bytes::Buffer::new();
+        let mut mw = crate::mime::multipart::NewWriter(&mut buf);
+        w.Header().Set(
+            string("Content-Type"),
+            string("multipart/byteranges; boundary=") + mw.Boundary(),
+        );
+        let n = len(&ranges);
+        let mut i: int = 0;
+        while i < n {
+            let ra = ranges[i];
+            i += 1;
+            let (_, serr) = content.Seek(ra.start, crate::io::SeekStart);
+            if serr != nil {
+                serveError(w, serr.Error(), StatusInternalServerError);
+                return;
+            }
+            let mut part: slice<byte> =
+                slice::__from_vec(alloc::vec![0u8; ra.length as usize]);
+            let (rn, rerr) = crate::io::ReadFull(content, &mut part);
+            if rerr != nil && rn == 0 {
+                serveError(w, rerr.Error(), StatusInternalServerError);
+                return;
+            }
+            let mh = ra.mimeHeader(ctype.clone(), size);
+            let mut h = super::header::Header::new();
+            for (k, vs) in mh.__iter() {
+                let vn = len(vs);
+                let mut j: int = 0;
+                while j < vn {
+                    h.Add(k.clone(), vs[j].clone());
+                    j += 1;
+                }
+            }
+            let _ = mw.WritePart(h, part.slice(0, rn));
+        }
+        let _ = mw.Close();
+        multipartBody = buf.Bytes();
+        sendSize = len(&multipartBody);
+        code = super::status::StatusPartialContent;
+    }
+
+    w.Header().Set(string("Accept-Ranges"), string("bytes"));
+
+    // Go: skip Content-Length if the user set Content-Encoding, because
+    // a ResponseWriter that gzips on the fly would make it wrong — but
+    // always set it for a range request, where it has to be right.
+    if len(&ranges) > 0 || w.Header().Get(string("Content-Encoding")) == "" {
+        w.Header().Set(
+            string("Content-Length"),
+            crate::strconv::FormatInt(sendSize, 10),
+        );
+    }
+    w.WriteHeader(code);
+
+    if r.IsNil() || r.Must().Method != "HEAD" {
+        if len(&ranges) > 1 {
+            let _ = w.Write(multipartBody);
+        } else {
+            let mut aw = super::response::AsWriter(w);
+            let _ = crate::io::CopyN(&mut aw, content, sendSize);
+        }
+    }
 }
 
 // go: sdk 1.25.5 net/http/fs.go:139-178 dirList
