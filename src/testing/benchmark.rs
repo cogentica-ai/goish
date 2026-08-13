@@ -1,4 +1,4 @@
-// go: file testing/benchmark.go decls: B.runN, B.launch, B.doBench, B.run, Benchmark, B.RunParallel, PB.Next, B.add, B.trimOutput, B.SetParallelism, durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
+// go: file testing/benchmark.go decls: B.Run, B.runN, B.launch, B.doBench, B.run, Benchmark, B.RunParallel, PB.Next, B.add, B.trimOutput, B.SetParallelism, durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
 //
 // testing/benchmark.go — the result type a benchmark reports, its
 // derived per-operation metrics, and the column formatting `go test
@@ -263,37 +263,20 @@ pub fn predictN(goalns: int64, prevIters: int64, prevns: int64, last: int64) -> 
 
 // ─── B — the benchmark handle ────────────────────────────────────────
 
-// goishlint:ignore GOISH019 B — Go's `B` embeds `common` and carries
-// the fields for machinery goish does not have: `loop` (B.Loop needs
-// cmd/compile), `bstate` (the `go test -bench` driver), `importPath`,
-// and the ctx/cancelCtx pair B.Loop cancels. goish's `B` holds its
-// common as `Arc<TState>` — the same shape `T` uses — and carries the
-// rest of Go's field set.
+// goishlint:ignore GOISH019 B — three fields absent, each because the
+// machinery that reads it is absent: `loop`/`loopPoison*` (B.Loop needs
+// cmd/compile to keep the loop body from being optimised away),
+// `bstate` (the `go test -bench` driver), and `importPath` +
+// `ctx`/`cancelCtx` (printed and cancelled by that driver and B.Loop).
+// Go's embedded `common` is present as `Arc<TState>` — the shape `T`
+// uses — rather than embedded.
 // go: sdk 1.25.5 testing/benchmark.go:94-133 B
-// goishlint:ignore GOISH019 B — a partial port by design: the fields
-// belonging to the benchmark runner (loop/loopPoison, parallelism,
-// context, importPath, previousN, previousDuration, benchFunc,
-// missingBytes, result) and the embedded `common` are absent because
-// the runner is. Enumerated with reasons in the doc below; carrying
-// them as dead fields would imply machinery that is not there.
 /// Go: "B is a type passed to Benchmark functions to manage benchmark
 /// timing and control the number of iterations."
 ///
-/// **Partial port.** The fields carried here are the ones the timer and
-/// reporting methods below need. Absent, with reasons:
-///
-///   * `loop` / `loopPoison*` — `B.Loop`'s fast path is recognised by
-///     cmd/compile, which keeps the loop body from being optimised
-///     away. A library cannot arrange that, so `Loop` is not ported and
-///     neither is the poison state that guards it.
-///   * `parallelism`, `context`, `importPath` — belong to the runner
-///     (`run`/`doBench`/`launch`), which is not ported.
-///   * `common` — goish's `T` owns the shared state; a benchmark here
-///     is a value the caller drives, not a subtest of a driver.
-///   * `previousN`, `previousDuration`, `benchFunc`, `missingBytes`,
-///     `result` — read only by `run1`/`launch`/`doBench`. Carried as
-///     dead fields they would imply a runner that is not there, so
-///     they arrive with it.
+/// The timer methods, the metric derivations, `RunParallel`, and the
+/// `Benchmark`/`runN`/`launch`/`doBench`/`Run` runner are all here. See
+/// the ignore above for what is not and why.
 pub struct B {
     /// Go: "The number of iterations."
     pub N: int,
@@ -802,7 +785,11 @@ impl B {
     /// environment for each run by clearing garbage from previous
     /// runs"; goish has no GC, so there is nothing to clear.
     pub(crate) fn runN(&mut self, n: crate::types::int) {
-        let _guard = benchmarkLock.Lock();
+        // Go: `benchmarkLock.Lock(); defer benchmarkLock.Unlock()`.
+        // Explicit rather than a guard because B.Run releases this lock
+        // and re-acquires it around a NESTED call — a pairing RAII
+        // cannot express.
+        benchmarkLock.LockManual();
 
         self.state.resetRaces();
         self.N = n;
@@ -819,6 +806,7 @@ impl B {
         // Go: `defer func() { b.runCleanup(normalPanic); b.checkRaces() }()`
         self.state.runCleanup();
         self.state.checkRaces();
+        benchmarkLock.Unlock();
     }
 
     // go: sdk 1.25.5 testing/benchmark.go:328-359 B.launch
@@ -910,4 +898,61 @@ where
     }
     b.run();
     return b.result.clone();
+}
+
+#[allow(non_snake_case)]
+impl B {
+    // go: sdk 1.25.5 testing/benchmark.go:803-867 B.Run
+    // goishlint:ignore GOISH018 Run — the bstate branches are absent:
+    // goish has no `go test -bench` driver, so there is no matcher to
+    // consult for the sub-benchmark's name and no partial-match case.
+    // The goos/goarch/pkg/cpu header and the chatty name line go with
+    // it. What remains is the path `func Benchmark` takes.
+    /// Go: "Run benchmarks f as a subbenchmark with the given name. It
+    /// reports whether there were any failures."
+    ///
+    /// The lock dance is the load-bearing part. A benchmark with
+    /// sub-benchmarks is not itself measured, so it must RELEASE
+    /// benchmarkLock before running them — otherwise the first
+    /// sub-benchmark deadlocks against its own parent, which is still
+    /// inside runN holding it.
+    pub fn Run<F>(&mut self, name: crate::gostring::string, f: F) -> bool
+    where
+        F: Fn(&mut B) + Send + Sync + 'static,
+    {
+        // Go: "Since b has subbenchmarks, we will no longer run it as a
+        // benchmark itself."
+        self.state
+            .hasSub
+            .store(true, core::sync::atomic::Ordering::Release);
+        benchmarkLock.Unlock();
+
+        let benchName = if self.state.name.Lock().Len() == 0 {
+            name
+        } else {
+            crate::fmt::Sprintf!("%s/%s", self.state.name.Lock().clone(), name)
+        };
+
+        let mut sub = B::default();
+        *sub.state.name.Lock() = benchName;
+        sub.state
+            .bench
+            .store(true, core::sync::atomic::Ordering::Release);
+        sub.benchFunc = Some(alloc::sync::Arc::new(f));
+        sub.benchTime = self.benchTime;
+
+        // Go: `if sub.run1() { sub.run() }`. run1's early-outs need the
+        // bstate driver; the warm-up iteration it performs is kept.
+        sub.runN(1);
+        if !sub.Failed() {
+            sub.run();
+        }
+        self.add(sub.result.clone());
+
+        // Go: `defer benchmarkLock.Lock()` — the parent is still inside
+        // runN, which will Unlock on the way out, so the pair must
+        // balance.
+        benchmarkLock.LockManual();
+        return !sub.Failed();
+    }
 }

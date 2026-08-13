@@ -32,7 +32,12 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicI64, Ordering};
 use goish::testing::benchmark::{Benchmark, B};
+use goish::gostring::string;
 use goish::{fmt, syscall};
+
+fn s(x: &str) -> string {
+    return string::from_bytes(x.as_bytes());
+}
 
 /// Counts how many times the body actually executed.
 static ITERS: AtomicI64 = AtomicI64::new(0);
@@ -146,11 +151,53 @@ fn main() {
         }
     }
 
+    // 5. Sub-benchmarks run and their results aggregate into the
+    //    parent. The lock dance is what makes this possible at all: a
+    //    parent with sub-benchmarks is not itself measured, so it must
+    //    RELEASE benchmarkLock before running them — otherwise the
+    //    first sub-benchmark deadlocks against its own parent, which is
+    //    still inside runN holding it. Reaching this line proves the
+    //    pairing balances.
+    {
+        ITERS.store(0, Ordering::SeqCst);
+        let r = Benchmark(|b: &mut B| {
+            let ok1 = b.Run(s("a"), |b: &mut B| {
+                let mut acc: u64 = 0;
+                for i in 0..b.N {
+                    acc = acc.wrapping_add(i as u64);
+                }
+                if acc == 5 {
+                    fmt::Println!("");
+                }
+            });
+            let ok2 = b.Run(s("b"), |b: &mut B| {
+                let mut acc: u64 = 0;
+                for i in 0..b.N {
+                    acc = acc.wrapping_add(i as u64);
+                }
+                if acc == 5 {
+                    fmt::Println!("");
+                }
+            });
+            if ok1 && ok2 {
+                ITERS.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        // Go's add() sets N to 1 for an aggregate — the parent is not
+        // itself measured, it is the sum of its children.
+        if ITERS.load(Ordering::SeqCst) > 0 && r.N == 1 {
+            fmt::Println!("[ 5] sub-benchmarks aggregate  PASS");
+        } else {
+            fmt::Println!("[ 5] sub-benchmarks aggregate  FAIL N=", r.N);
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 4/4");
+        fmt::Println!("ok 5/5");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 4");
+        fmt::Println!("FAIL", failed, "of 5");
         syscall::Exit(1);
     }
 }

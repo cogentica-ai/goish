@@ -214,6 +214,10 @@ pub(crate) struct TState {
     /// Go: `common.raceErrorLogged atomic.Bool` — so the "race
     /// detected" message is logged once per test, not once per race.
     pub(crate) raceErrorLogged: AtomicBool,
+    /// Go: `common.hasSub atomic.Bool` — "whether there are
+    /// sub-benchmarks". A benchmark with sub-benchmarks is not itself
+    /// measured, so this is what stops it being timed.
+    pub(crate) hasSub: AtomicBool,
 }
 
 /// Go: `common.tempDir`, `tempDirErr` and `tempDirSeq`.
@@ -266,6 +270,7 @@ impl TState {
             duration: Mutex::new(crate::time::Duration(0)),
             lastRaceErrors: core::sync::atomic::AtomicI64::new(0),
             raceErrorLogged: AtomicBool::new(false),
+            hasSub: AtomicBool::new(false),
         };
     }
 }
