@@ -116,7 +116,7 @@ struct MuxState {
 }
 
 struct PatternRoute {
-    pattern: super::pattern::Pattern,
+    pattern: super::pattern::pattern,
     handler: Arc<dyn Handler>,
 }
 
@@ -153,7 +153,7 @@ impl ServeMux {
             || strings::ContainsAny(pattern.clone(), string(" \t"));
         let mut s = self.state.Lock();
         if needs_pattern_parse {
-            let (p, err) = super::pattern::parse_pattern(pattern);
+            let (p, err) = super::pattern::parsePattern(pattern);
             if err.IsNil() {
                 s.pattern_routes.push(PatternRoute {
                     pattern: p,
@@ -262,13 +262,13 @@ impl ServeMux {
 fn allowed_methods(s: &MuxState, host: &string, path: &string) -> Option<string> {
     let mut methods: Vec<string> = Vec::new();
     for pr in s.pattern_routes.iter() {
-        if pr.pattern.Method.Len() == 0 {
+        if pr.pattern.method.Len() == 0 {
             continue;
         }
-        if pr.pattern.Match(&pr.pattern.Method, host, path).is_some()
-            && !methods.iter().any(|m| *m == pr.pattern.Method)
+        if pr.pattern.Match(&pr.pattern.method, host, path).is_some()
+            && !methods.iter().any(|m| *m == pr.pattern.method)
         {
-            methods.push(pr.pattern.Method.clone());
+            methods.push(pr.pattern.method.clone());
         }
     }
     if methods.is_empty() {
@@ -341,7 +341,7 @@ impl ServeMux {
                 .Match(&r.Method, &host, &r.URL.Path)
                 .is_some()
             {
-                return (pr.handler.clone(), pr.pattern.Str.clone());
+                return (pr.handler.clone(), pr.pattern.str.clone());
             }
         }
         // 4. Fallback to bare `/` catchall, if any.

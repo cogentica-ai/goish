@@ -497,7 +497,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         Err(e) => return (req, e),
     };
 
-    if !valid_method(method.as_bytes()) {
+    if !validMethod(method.as_bytes()) {
         return (req, errors::New(string("net/http: invalid method")));
     }
     let (major, minor) = match parse_http_version(proto.as_bytes()) {
@@ -915,7 +915,7 @@ fn parse_dec(b: &[u8]) -> Option<int> {
 }
 
 /// RFC 7230 §3.2.6 token chars — what's legal in a method name.
-fn valid_method(m: &[u8]) -> bool {
+pub(crate) fn validMethod(m: &[u8]) -> bool {
     if m.is_empty() {
         return false;
     }

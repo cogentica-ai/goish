@@ -607,6 +607,10 @@ name = "http_responsecontroller_smoke"
 path = "examples/http_responsecontroller_smoke.rs"
 
 [[example]]
+name = "http_pattern_conflict_smoke"
+path = "examples/http_pattern_conflict_smoke.rs"
+
+[[example]]
 name = "http_sniff_smoke"
 path = "examples/http_sniff_smoke.rs"
 
