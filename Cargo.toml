@@ -547,6 +547,10 @@ name = "http_fcgi_params_smoke"
 path = "examples/http_fcgi_params_smoke.rs"
 
 [[example]]
+name = "http_response_location_smoke"
+path = "examples/http_response_location_smoke.rs"
+
+[[example]]
 name = "http_server_pure_smoke"
 path = "examples/http_server_pure_smoke.rs"
 

@@ -38,6 +38,7 @@ pub mod request;
 pub mod responsewriter;
 pub mod routing_index;
 pub mod routing_tree;
+pub mod response;
 pub mod responsecontroller;
 pub mod server;
 pub mod server_tls;

@@ -56,7 +56,6 @@ use crate::time;
 use crate::types::{byte, int};
 use crate::{append, make};
 
-use super::cookie::{readSetCookies, Cookie};
 use super::header::Header;
 use super::request::Request;
 use super::url::URL;
@@ -360,59 +359,6 @@ impl Closer for Body {
 }
 
 impl Response {
-    /// `(*Response).Cookies()` — parse Set-Cookie headers.
-    /// Mirrors response.go:125.
-    pub fn Cookies(&self) -> slice<Cookie> {
-        readSetCookies(&self.Header)
-    }
-
-    /// `(*Response).ProtoAtLeast(major, minor)` (response.go:224) —
-    /// reports whether the response's HTTP protocol is at least
-    /// major.minor.
-    pub fn ProtoAtLeast(&self, major: int, minor: int) -> bool {
-        // Go: return r.ProtoMajor > major ||
-        //         r.ProtoMajor == major && r.ProtoMinor >= minor
-        self.ProtoMajor > major || self.ProtoMajor == major && self.ProtoMinor >= minor
-    }
-
-    /// `(*Response).Location()` — Resolve the `Location` header.
-    /// Returns absolute URLs as-is; relative URLs are best-effort
-    /// resolved against the request's URL.
-    pub fn Location(&self) -> (URL, error) {
-        let lv = self.Header.Get(string("Location"));
-        if lv.Len() == 0 {
-            return (URL::empty(), errors::New(string("http: no Location header in response")));
-        }
-        // Absolute URL → parse via parse_request_uri (accepts http://...).
-        match super::url::parse_request_uri(&lv) {
-            Ok(u) => {
-                if u.Scheme.Len() != 0 {
-                    return (u, errors::nil);
-                }
-                // Relative — fall through to merge with self.Request.URL below.
-            }
-            Err(_) => {}
-        }
-        // Relative resolution: replace path/query of req.URL with lv.
-        if let Some(req) = self.Request.Try() {
-            let mut merged = req.URL.clone();
-            // If Location starts with "/", replace path; else append to dirname.
-            let lvb = lv.as_bytes();
-            if !lvb.is_empty() && lvb[0] == b'/' {
-                // Split at "?".
-                let q = lvb.iter().position(|&c| c == b'?');
-                let (path_b, query_b) = match q {
-                    Some(i) => (&lvb[..i], &lvb[i + 1..]),
-                    None => (lvb, &lvb[..0]),
-                };
-                merged.Path = string::from_bytes(path_b);
-                merged.RawPath = merged.Path.clone();
-                merged.RawQuery = string::from_bytes(query_b);
-                return (merged, errors::nil);
-            }
-        }
-        (URL::empty(), errors::New(string("http: cannot resolve relative Location")))
-    }
 }
 
 // ─── ReadResponse ────────────────────────────────────────────────────
