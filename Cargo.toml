@@ -511,6 +511,10 @@ name = "http_dirlist_smoke"
 path = "examples/http_dirlist_smoke.rs"
 
 [[example]]
+name = "http_request_misc_smoke"
+path = "examples/http_request_misc_smoke.rs"
+
+[[example]]
 name = "http_constants_smoke"
 path = "examples/http_constants_smoke.rs"
 

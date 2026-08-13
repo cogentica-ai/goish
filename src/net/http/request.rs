@@ -456,6 +456,88 @@ impl Request {
     }
 }
 
+// go: sdk 1.25.5 net/http/request.go:96-96 badStringError
+pub fn badStringError<W: Into<string>, V: Into<string>>(what: W, val: V) -> error {
+    return crate::fmt::Errorf!("%s %q", what.into(), val.into());
+}
+
+// go: sdk 1.25.5 net/http/request.go:98-105 reqWriteExcludeHeader
+//
+// Headers that Request.Write emits from the Request's own fields
+// rather than from the Header map, so writing them twice would
+// duplicate them on the wire.
+pub fn reqWriteExcludeHeader() -> crate::gomap::map<string, bool> {
+    let mut m: crate::gomap::map<string, bool> = crate::gomap::map::new();
+    m.Set(string("Host"), true); // not in Header map anyway
+    m.Set(string("User-Agent"), true);
+    m.Set(string("Content-Length"), true);
+    m.Set(string("Transfer-Encoding"), true);
+    m.Set(string("Trailer"), true);
+    return m;
+}
+
+// go: sdk 1.25.5 net/http/request.go:486-491 multipartByReader
+//
+// A sentinel value. Its presence in Request.MultipartForm indicates
+// that parsing of the request body has been handed off to a
+// MultipartReader instead of ParseMultipartForm.
+//
+// Go compares it by POINTER identity (`r.MultipartForm ==
+// multipartByReader`). goish rebuilds the value per call, so identity
+// is not available and a caller must compare some other way — which is
+// why this is a function rather than a `var!`: `var!` would look like
+// a singleton and silently not be one.
+pub fn multipartByReader() -> crate::mime::multipart::Form {
+    return crate::mime::multipart::Form::default();
+}
+
+// go: sdk 1.25.5 net/http/request.go:545-545 defaultUserAgent
+pub const defaultUserAgent: &str = "Go-http-client/1.1";
+
+// go: sdk 1.25.5 net/http/request.go:577-577 errMissingHost
+crate::var! {
+    pub errMissingHost: error = "http: Request.Write on Request with no Host or URL set";
+}
+
+// go: sdk 1.25.5 net/http/request.go:794-812 removeZone
+//
+// Strip an IPv6 zone identifier from a bracketed host: `[fe80::1%en0]`
+// becomes `[fe80::1]`. A zone is meaningful only on the local machine
+// and must not appear in a Host header.
+pub fn removeZone<H: Into<string>>(host: H) -> string {
+    let host: string = host.into();
+    if !crate::strings::HasPrefix(host.clone(), string("[")) {
+        return host;
+    }
+    let i = crate::strings::LastIndex(host.clone(), string("]"));
+    if i < 0 {
+        return host;
+    }
+    let j = crate::strings::LastIndex(host.slice(0, i), string("%"));
+    if j < 0 {
+        return host;
+    }
+    return host.slice(0, j) + host.slice(i, host.Len());
+}
+
+// go: sdk 1.25.5 net/http/request.go:1566-1575 requestMethodUsuallyLacksBody
+//
+// Reports whether the given request method is one that typically has
+// no body. Used only as a heuristic.
+pub fn requestMethodUsuallyLacksBody<M: Into<string>>(method: M) -> bool {
+    let method: string = method.into();
+    if method == "GET"
+        || method == "HEAD"
+        || method == "DELETE"
+        || method == "OPTIONS"
+        || method == "PROPFIND"
+        || method == "SEARCH"
+    {
+        return true;
+    }
+    return false;
+}
+
 // go: sdk 1.25.5 net/http/request.go:534-539 valueOrDefault
 pub fn valueOrDefault<V: Into<string>, D: Into<string>>(value: V, def: D) -> string {
     let value: string = value.into();
