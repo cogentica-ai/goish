@@ -532,12 +532,10 @@ impl Flusher for response {
 /// Shared between buffered and streaming modes.
 pub(crate) fn build_head(status: int, header: &Header) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::with_capacity(256);
-    buf.extend_from_slice(b"HTTP/1.1 ");
-    push_dec(&mut buf, status as u32);
-    buf.push(b' ');
-    let st = status_text(status as u32);
-    buf.extend_from_slice(st.as_bytes());
-    buf.extend_from_slice(b"\r\n");
+    // Go's writeStatusLine (server.go:1596), ported in server.rs.
+    // `is11` is true because goish's server only speaks HTTP/1.1;
+    // Go passes `w.req.ProtoAtLeast(1, 1)`.
+    buf.extend_from_slice(super::server::writeStatusLine(true, status).as_bytes());
     // Go's chunkWriter.writeHeader ends with
     // `cw.header.WriteSubset(w, excludeHeader)` — the SAME writer the
     // public Header.Write uses.
@@ -609,32 +607,7 @@ pub(crate) fn push_hex(buf: &mut Vec<u8>, mut n: u64) {
 
 /// Reason phrase for a status code via the full IANA registry. Empty
 /// string falls back to "Status" so the wire stays well-formed.
-fn status_text(code: u32) -> string {
-    let s = super::status::StatusText(code as int);
-    if s.Len() == 0 {
-        string("Status")
-    } else {
-        s
-    }
-}
 
-fn push_dec(buf: &mut Vec<u8>, mut n: u32) {
-    if n == 0 {
-        buf.push(b'0');
-        return;
-    }
-    let mut tmp = [0u8; 10];
-    let mut i = 0;
-    while n > 0 {
-        tmp[i] = b'0' + (n % 10) as u8;
-        n /= 10;
-        i += 1;
-    }
-    while i > 0 {
-        i -= 1;
-        buf.push(tmp[i]);
-    }
-}
 
 fn int_to_string(n: i64) -> string {
     let mut buf: Vec<u8> = Vec::with_capacity(20);

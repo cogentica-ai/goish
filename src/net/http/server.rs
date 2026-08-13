@@ -2555,3 +2555,42 @@ pub fn register_http_impls() {
     super::httputil::register_httputil_impls();
     super::client::register_client_impls();
 }
+
+// go: sdk 1.25.5 net/http/server.go:1596-1611 writeStatusLine
+//
+/// Builds the response status line: `HTTP/1.x <code> <text>\r\n`.
+///
+/// The branch worth having is the ELSE: when `StatusText(code)` is
+/// empty — any non-standard code, which APIs do use — Go writes
+/// `fmt.Fprintf(bw, "%03d status code %d\r\n", code, code)`, giving
+/// `HTTP/1.1 599 status code 599`. goish previously substituted the
+/// literal word "Status", putting `HTTP/1.1 599 Status` on the wire
+/// for every vendor-specific code.
+///
+/// Two shape divergences, both to keep goish's own rules: Go writes
+/// into a `*bufio.Writer` and takes a `scratch []byte` to avoid an
+/// allocation in strconv.AppendInt. Returning the line instead keeps
+/// a Rust container out of the signature (GOISH008) and costs one
+/// small allocation per response head.
+pub(crate) fn writeStatusLine(is11: bool, code: int) -> string {
+    let mut out = if is11 {
+        string("HTTP/1.1 ")
+    } else {
+        string("HTTP/1.0 ")
+    };
+    let text = super::status::StatusText(code);
+    if text.Len() != 0 {
+        return out + crate::fmt::Sprintf!("%d %s\r\n", code, text);
+    }
+    // Go: fmt.Fprintf(bw, "%03d status code %d\r\n", code, code) —
+    // %03d zero-pads, so code 7 renders "007 status code 7". Not
+    // reachable through WriteHeader, which rejects anything below
+    // 100, but the format is Go's and is kept.
+    if code < 100 {
+        out = out + string("0");
+        if code < 10 {
+            out = out + string("0");
+        }
+    }
+    return out + crate::fmt::Sprintf!("%d status code %d\r\n", code, code);
+}
