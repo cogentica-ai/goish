@@ -16,6 +16,7 @@
 
 
 pub mod client;
+pub mod clone;
 pub mod cookie;
 pub mod cookiejar;
 pub mod csrf;
