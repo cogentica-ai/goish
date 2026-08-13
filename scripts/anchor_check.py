@@ -202,7 +202,12 @@ def qualify(roots):
     for root in roots:
         for dp, _, names in os.walk(root):
             for n in sorted(names):
-                if not n.endswith(".rs"):
+                # `.rs.draft` is a goishc translation staged beside the
+                # `.rs` it is being ported into — invisible to cargo and
+                # goishlint by extension, but its anchors are real and
+                # must resolve, or a draft rots into a false claim of
+                # provenance while nobody is checking.
+                if not (n.endswith(".rs") or n.endswith(".rs.draft")):
                     continue
                 p = os.path.join(dp, n)
                 lines = open(p, errors="replace").read().split("\n")
@@ -261,7 +266,12 @@ def main():
     for root in roots:
         for dp, _, names in os.walk(root):
             for n in sorted(names):
-                if not n.endswith(".rs"):
+                # `.rs.draft` is a goishc translation staged beside the
+                # `.rs` it is being ported into — invisible to cargo and
+                # goishlint by extension, but its anchors are real and
+                # must resolve, or a draft rots into a false claim of
+                # provenance while nobody is checking.
+                if not (n.endswith(".rs") or n.endswith(".rs.draft")):
                     continue
                 p = os.path.join(dp, n)
                 lines = open(p, errors="replace").read().split("\n")

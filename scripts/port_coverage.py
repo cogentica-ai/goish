@@ -439,25 +439,38 @@ def anchored_decl_keys(src):
     return {re.sub(r"^\(\*?(\w+)\)", r"\1", s) for s in syms}
 
 
+def draft_syms(src):
+    """Every declaration `src` marks as an unreviewed goishc draft.
+
+    --by-decl keys declarations as `Recv.Method`, so a drafted method
+    suppresses exactly itself. That is the precise mode, and the one to
+    trust for draft accounting.
+
+    Default mode collapses every declaration to a bare fn name, which is
+    too coarse to carry a method draft: staging fs.go there let
+    `ioFile.Close` suppress every `Close` in net/http and took 12
+    unrelated verified ports down with it. So a drafted METHOD is not
+    counted in default mode at all — it is neither subtracted nor
+    reported, because that mode cannot tell which `Close` is meant.
+    Drafted free functions have no such ambiguity and are counted in
+    both modes. Read `--by-decl` for the true draft count.
+    """
+    out = set()
+    for s in DRAFT_SYM.findall(src):
+        key = re.sub(r"^\(\*?(\w+)\)", r"\1", s)
+        if "." in key and not BY_DECL:
+            continue
+        out.add(norm(key))
+    return out
+
+
 def _facts(paths):
     idents, loc, anchors, cited, unanchored = set(), 0, 0, set(), set()
     waived, drafts = set(), set()
     for p in paths:
         src = open(p, errors="replace").read()
         waived |= {norm(w) for w in WAIVED.findall(src)}
-        # Both spellings of a drafted method. Default mode matches Go
-        # decls against bare Rust fn names, so a draft keyed only as
-        # `ClientTrace.compose` would leak through as ported against
-        # Go's bare `compose` — two of httptrace's four did exactly
-        # that. --by-decl compares `Recv.Method` keys, where the
-        # qualified form is the one that matches; the bare form is
-        # withheld there so a drafted method cannot suppress a
-        # genuinely verified free function of the same name.
-        for s in DRAFT_SYM.findall(src):
-            key = re.sub(r"^\(\*?(\w+)\)", r"\1", s)
-            drafts.add(norm(key))
-            if not BY_DECL and "." in key:
-                drafts.add(norm(key.split(".", 1)[1]))
+        drafts |= draft_syms(src)
         mine = rust_decl_idents(src) if BY_DECL else set(RSFN.findall(src))
         if BY_DECL:
             # Credit anchored Recv.Method keys whose method exists in this
@@ -563,7 +576,16 @@ def scan_rs(root):
     out = {}
     for dirpath, _, files in os.walk(root):
         rs = sorted(f for f in files if f.endswith(".rs"))
-        if not rs:
+        # `fs.rs.draft` — a goishc translation staged beside the `fs.rs`
+        # it is being ported into. cargo globs `*.rs`, so the extension
+        # alone keeps it out of the build with no `mod` line to forget;
+        # goishlint globs `*.rs` too, so it need not disable the quality
+        # tier to be stored. It contributes ONLY its draft symbols: no
+        # idents, no anchors, no LOC. A staged file must never move the
+        # percentage — but it must not be invisible either, or 48 blocks
+        # sit in the tree with nothing counting them.
+        drafts = sorted(f for f in files if f.endswith(".rs.draft"))
+        if not rs and not drafts:
             continue
         rel = os.path.relpath(dirpath, root)
         rel = "" if rel == "." else rel
@@ -587,6 +609,9 @@ def scan_rs(root):
                 own.extend(paths)
                 del filepkgs[stem]
         out[rel or "."] = _facts(own + [p for ps in filepkgs.values() for p in ps])
+        for f in drafts:
+            out[rel or "."]["drafts"] |= draft_syms(
+                open(os.path.join(dirpath, f), errors="replace").read())
         # Also expose each non-mod file as its own candidate package name,
         # so Go's `crypto/rsa` finds goish's `crypto/rsa.rs`.
         for stem, paths in filepkgs.items():
